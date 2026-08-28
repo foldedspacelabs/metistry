@@ -1274,9 +1274,37 @@ honoring the contract. No in-process provider-abstraction layer inside the
 engine — flexibility lives at the container boundary, so the primary path
 pays zero complexity tax.
 
-**What does not change:** invariant 4. Routing between tiers and targets is
-rule-based configuration the user authors (`rules.yaml`, agent manifests) —
-no model ever selects compute. Collectors still never call models.
+**D. Visibility and tuning (a requirement, not a nice-to-have).** Flexible
+compute is only usable if the user can see what it's doing and tweak it.
+Everything below reads through named queries (invariant 3) and shows up in
+the console; nothing here adds a new mechanism, only discipline on an
+existing one:
+
+- **Every model call, on every tier and target, logs one `runs` row** —
+  component, model, tokens in/out, `cost_usd`, duration, ok/error (schema
+  already exists) — plus routing fields: which tier ran, *why*
+  (`routed_by: rule | scorer | escalation | override`), and the scorer's
+  verdict when one was consulted.
+- **Effectiveness by proxy, honestly.** "Was the model choice good" is not
+  directly measurable; the trackable signals are: an explicit `/deep`
+  override immediately after a scored turn, a re-ask of the same request at
+  a higher tier, and escalation-after-cheap frequency. Each is logged as a
+  routing-miss event. A rising miss rate — or a rising scorer speak-rate —
+  is the early warning that the rubric has drifted.
+- **Budget visibility**: daily tier budgets and the metered Agent SDK credit
+  pool tracked against the month, surfaced on the dashboard and via the
+  `/spend` fast path (per-tier breakdown, freshness-stamped).
+- **The tuning loop is human**: the weekly review includes a routing report —
+  spend by tier/target, verdict distribution, miss events with links to the
+  offending turns — and may *propose* `rules.yaml` tweaks; it never applies
+  them (routing config is a protected path, §4.6).
+
+**What does not change:** invariant 4's purpose. Routing between tiers and
+targets is user-configured and budget-bounded (`rules.yaml`, agent
+manifests); deterministic rules take precedence; any model-judgment scorer
+(under evaluation, PoC-15) picks only within the configured tier menu and
+can never expand its own budget — enforced at the dispatch tool. Collectors
+still never call models.
 
 ## 5. Growing it
 

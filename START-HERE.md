@@ -1,5 +1,14 @@
 # Start here
 
+> **Status (2026-08-28): Phase 0 is COMPLETE.** This document is the original
+> kickoff and is kept for history. Findings are in `poc/RESULTS.md`; the build
+> plan's §2 "Outcomes" table summarizes them and the plan has been revised to
+> match. Next up is Phase 1 (Substrate). The kickoff prompt below has already
+> been run — don't re-run Phase 0.
+
+---
+
+
 ## What's in this folder
 
 | File | For |

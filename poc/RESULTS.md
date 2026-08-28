@@ -587,6 +587,57 @@ stays where the plan put it — Metis decomposes with session context.
 Five failure classes for the router to guard against regardless are
 enumerated in the agent artifacts (`score*.txt`).
 
+## PoC-15 — complexity-tier scorer (invariant 4 evaluation)
+
+| | |
+|---|---|
+| Status | SPLIT: Apple FM FAIL · Haiku PASS-with-caveats · decision deferred to a confirmatory eval |
+| Date | 2026-08-28 |
+
+Evaluates the user-proposed amendment to invariant 4: a model scoring input
+complexity to pick among user-configured tiers (cheap/standard/deep). 48
+hand-labeled fixtures, length decorrelated from tier (r = −0.05), with
+long-but-cheap and short-but-deep traps. Run by a subagent; artifacts in
+`poc/poc15-complexity/`. Distinct from PoC-14 (segmentation): one constrained
+label, graceful failure mode — and the results differ accordingly.
+
+**Apple FM: REJECT as scorer.** Its `cheap` class functionally does not exist
+(0/16 across two greedy runs; a re-prompt recovered 3/16 while doubling
+deep-misses). All 6 long-but-cheap traps failed in all four runs — including
+one verdict whose stated reason correctly identified the trap and then
+labeled it wrong anyway. Plus a deterministic guardrail refusal on "remind me
+at 5 to move the car." 100% run-to-run reproducible, 90% prompt-fragile:
+reproducibility is not correctness.
+
+**Haiku: passes the quality bar.** 91.7% accuracy, deep-miss 1/16, overspend
+0/16, and the only scorer beating surface features both ways (6/6 long-cheap,
+5/6 short-deep). Baselines for contrast: always-standard mis-serves 15/16
+high-stakes asks; a length heuristic sends 7/16 deep items to cheap —
+actively inverted on what matters.
+
+**The pre-registered cost criterion was ill-posed and is corrected here:** a
+*perfect oracle* costs +190% vs always-standard, because finding deep items
+means paying for deep. Always-standard is not a cost baseline; it is a
+quality floor. The honest framing at a realistic message mix: Haiku routing
+costs ~$3.60/1000 turns more than always-standard and rescues ~88 badly-
+served high-stakes turns — ~4¢ per rescued turn — while saving 83% vs the
+quality-matched always-deep. Scoring cost itself (~$1/1000) is noise.
+
+**Caveats that block a final verdict:** the Haiku measurement ran through
+`claude -p` (a full agent harness — one fixture's "verdict" was actually a
+tool-auth complaint; latency numbers are harness artifacts; production shape
+is a bare no-tools API call, unmeasured); fixtures and rubric shared an
+author; and 16 deep items cannot resolve a 10% miss threshold (1 miss = 6.2%,
+2 = 12.5%).
+
+**Disposition:** invariant 4 stands for now; defensible interim is
+default-standard + explicit user escalation. Amendment proceeds only if a
+confirmatory eval passes: bare Messages-API Haiku (no tools), fixtures
+authored independently of the rubric, ≥50 deep items. Either way the
+invariant's protections are preserved by construction — the scorer only
+selects among user-configured tiers under tool-enforced budgets, deterministic
+rules take precedence, and every verdict logs to `runs` (plan §4.17.D).
+
 ## Contradictions with BUILD-PLAN.md
 
 Anything a finding invalidates. Note it here; don't edit the plan.

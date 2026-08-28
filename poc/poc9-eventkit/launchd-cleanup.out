@@ -1,5 +1,5 @@
-=== ekpoc status @ 2026-08-28T03:37:08Z ===
-INFO pid 52817
+=== ekpoc cleanup @ 2026-08-28T03:37:33Z ===
+INFO pid 53283
 INFO ppid 1
 INFO binary /Users/example/Development/Metistry/.claude/worktrees/metistry-phase-0-poc-12cdbc/poc/poc9-eventkit/ekpoc
 INFO uid 501
@@ -8,6 +8,8 @@ INFO env.TERM <unset>
 INFO env.SSH_TTY <unset>
 INFO tty.stdin no
 INFO infoPlist.embedded yes keys=CFBundleExecutable,CFBundleIdentifier,CFBundleName,CFBundleShortVersionString,CFBundleVersion,NSCalendarsFullAccessUsageDescription,NSCalendarsUsageDescription,NSRemindersFullAccessUsageDescription,NSRemindersUsageDescription
-INFO auth.event fullAccess/authorized(3)
-INFO auth.reminder fullAccess/authorized(3)
+INFO removed.calendar event A6131001-47FF-46CB-8103-9A2CF66BE556 source=iCloud
+INFO removed.calendar reminder 1E3D7B2A-9AAD-43C7-9D9D-DB9A71E49480 source=iCloud
+STEP 1 cleanup OK removed=2 errors=
+STEP 2 cleanup.verify OK remainingEventCals=0 remainingReminderCals=0
 RESULT PASS

@@ -201,8 +201,8 @@ native).
 
 | | |
 |---|---|
-| Status | PARTIAL |
-| Date | 2026-08-26 |
+| Status | PASS (all three legs) |
+| Date | 2026-08-28 |
 
 Run by a subagent against the live PoC-1 bridge; scratch in
 `poc/poc4-container/`. Docker Desktop 4.88.1 (engine 29.7.2, linux/arm64 VM).
@@ -234,13 +234,11 @@ verified on the host instead: a session created by a **launchd-started**
 Transcripts are plain files under `~/.claude`, keyed by cwd — a volume mount
 persists them by the same mechanism. Residual risk low; formally unverified.
 
-**Recommendation on Docker vs native:** nothing observed argues for native.
-Networking, protocol, and state-portability legs all pass; the one open item
-is a credential-provisioning decision (above) that is required for
-containerized Metis and is a design/billing choice, not an engineering risk.
-Recommend: keep the plan's container/native split, settle the auth question
-before Phase 2, and re-run the restart-resume check once a container can
-authenticate.
+**Recommendation on Docker vs native (decision #9): DOCKER.** Every leg now
+passes — networking, protocol, auth on subscription, and state survival across
+restart. No engineering risk remains; the plan's container/native split
+stands, and containerized Metis is validated end to end. Only follow-through
+items are operational (token injection + expiry tracking in Phase 2).
 
 ---
 
@@ -430,24 +428,23 @@ should be YAML as planned (JSON here was a zero-dep constraint only).
 
 | | |
 |---|---|
-| Status | PARTIAL→mostly PASS: Calendar CRUD PASS under launchd; Reminders awaits its one consent click |
-| Date | 2026-08-27 |
+| Status | PASS — full CRUD on both stores under launchd |
+| Date | 2026-08-28 |
 
-**Update (same day):** the user had clicked the Calendars Allow before
-leaving (`auth.event fullAccess`). Full Calendar CRUD then **PASSED under
-launchd**: created a "Metistry PoC" calendar in the iCloud source, created /
-read / queried / updated / deleted an event, cleaned up. Reminders remains
-`notDetermined` — one Allow click left (re-run `grant.sh` or answer the
-pending dialog), after which `battery.sh` finishes the Reminders leg and
-leaves the iPhone sync-check artifact.
+Scratch staged in `poc/poc9-eventkit/`. Both stores authorized (Calendars and
+Reminders granted at the machine, unlocked) and full CRUD **PASSED under
+launchd**: Calendar create/read/query/update/delete against the iCloud source,
+and Reminders create/read/update/complete/delete, with cleanup. iPhone sync
+confirmed by the user (the "PoC-9 sync check" reminder appeared and was
+deleted). No stray calendars or launchd jobs left behind.
 
-Run by a subagent; everything staged in `poc/poc9-eventkit/`. CRUD untested
-only because the EventKit consent dialogs rendered behind the lock screen
-(`CGSSessionScreenIsLocked=1` for the whole session). Status stayed
-`notDetermined` — no denial recorded, nothing to reset. **To finish after
-unlocking: run `poc/poc9-eventkit/grant.sh` and click Allow twice** (it then
-auto-runs the full shell + launchd CRUD battery, cleans up, and leaves the
-iPhone sync-check reminder).
+**Status reads are themselves responsible-process-bound** — a real trap for
+`doctor`. The process that just received a grant can still read
+`notDetermined`, and a status check run in the Claude.app shell tree reads
+`notDetermined` permanently regardless of the real grant. `grant.sh`'s tail
+"still not granted" was this false-negative, not a failed grant. A TCC bridge's
+health check must run *in the granted binary's own context* or it will report a
+working grant as missing.
 
 Findings already established:
 
@@ -626,11 +623,10 @@ Anything a finding invalidates. Note it here; don't edit the plan.
    elsewhere — a stranger clones the repo and installs via configuration and
    setup scripts, never hand-config or environment assumptions.
 
-1. **Containerized Metis auth (blocks Phase 2 container work):** macOS Claude
-   Code stores OAuth in the Keychain — a container has no credential path.
-   Options: `ANTHROPIC_API_KEY` (API billing), `claude setup-token` (one
-   interactive step, long-lived token via env, stays on subscription), or a
-   host-side auth proxy. Which?
+1. **Containerized Metis auth — RESOLVED 2026-08-28.** `claude setup-token`
+   → `CLAUDE_CODE_OAUTH_TOKEN` env, stays on subscription, validated end to
+   end (see PoC-4). Container must never set `ANTHROPIC_API_KEY` (overrides
+   onto API billing). Phase 2: inject via secret, watchdog tracks ~1yr expiry.
 2. **Messages storage settings:** would you flip "keep originals / don't
    optimize" for Messages on this Mac to improve attachment availability, or
    accept the share sheet as the only reliable media path? Also worth testing

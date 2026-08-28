@@ -1,5 +1,5 @@
-=== ekpoc status @ 2026-08-28T03:37:08Z ===
-INFO pid 52817
+=== ekpoc sync-artifact @ 2026-08-28T03:37:34Z ===
+INFO pid 53306
 INFO ppid 1
 INFO binary /Users/example/Development/Metistry/.claude/worktrees/metistry-phase-0-poc-12cdbc/poc/poc9-eventkit/ekpoc
 INFO uid 501
@@ -8,6 +8,8 @@ INFO env.TERM <unset>
 INFO env.SSH_TTY <unset>
 INFO tty.stdin no
 INFO infoPlist.embedded yes keys=CFBundleExecutable,CFBundleIdentifier,CFBundleName,CFBundleShortVersionString,CFBundleVersion,NSCalendarsFullAccessUsageDescription,NSCalendarsUsageDescription,NSRemindersFullAccessUsageDescription,NSRemindersUsageDescription
-INFO auth.event fullAccess/authorized(3)
-INFO auth.reminder fullAccess/authorized(3)
+INFO calendar.created 69307501-5413-44E4-9538-F2D69E68337E source=iCloud type=2
+STEP 1 sync.artifact OK list=Metistry PoC source=iCloud id=09C367B0-136F-44CA-A117-B7F3ABD9A172 title=PoC-9 sync check — delete me
+STEP 2 sync.verify OK itemsInList=1 titles=[PoC-9 sync check — delete me]
+STEP 3 sync.noEventCalendar OK eventCalendarsNamed'Metistry PoC'=0
 RESULT PASS

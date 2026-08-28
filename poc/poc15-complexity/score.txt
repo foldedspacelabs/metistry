@@ -1,0 +1,317 @@
+==============================================================================
+PoC-15  COMPLEXITY-TIER SCORER EVALUATION   n=48 fixtures
+==============================================================================
+
+FIXTURES: Counter({'cheap': 16, 'standard': 16, 'deep': 16})  ambiguous=4
+  traps: Counter({'none': 36, 'long_cheap': 6, 'short_deep': 6})
+  pearson r(chars, tier-rank) = -0.0524   <- length does NOT predict tier
+  cheap     n=16 chars mean=  191 median=   67 min= 13 max=526
+  standard  n=16 chars mean=  128 median=   85 min= 34 max=452
+  deep      n=16 chars mean=  170 median=   76 min= 12 max=433
+
+==============================================================================
+METRIC TABLE
+==============================================================================
+scorer                        acc  deep-miss  strict-dm  overspend  longC  shortD    $/48
+-----------------------------------------------------------------------------------------
+AFM v1 (run A)              64.6% 1/16   6.2%       6.2% 1/16   6.2% 0/6    5/6     $ 1.740
+AFM v1 (run B)              64.6% 1/16   6.2%       6.2% 1/16   6.2% 0/6    5/6     $ 1.740
+AFM v2 (run C)              68.8% 2/16  12.5%      12.5% 1/16   6.2% 0/6    5/6     $ 1.576
+AFM v2 (run D)              68.8% 2/16  12.5%      12.5% 1/16   6.2% 0/6    5/6     $ 1.576
+Haiku (run H)               91.7% 1/16   6.2%       6.2% 0/16   0.0% 6/6    5/6     $ 1.448
+BASELINE always-standard    37.5% 15/16  93.8%     100.0% 0/16   0.0% 0/6    0/6     $ 0.480
+BASELINE always-deep        35.4% 0/16   0.0%       0.0% 16/16 100.0% 0/6    6/6     $ 3.840
+BASELINE length-heuristic   41.7% 14/16  87.5%      87.5% 4/16  25.0% 0/6    0/6     $ 0.920
+ORACLE (perfect)           100.0% 0/16   0.0%       6.2% 0/16   0.0% 6/6    6/6     $ 1.394
+
+  acc        = predicted tier in the accepted-label set (ambiguous items: either counts)
+  deep-miss  = true-deep items routed BELOW deep, accept-aware (THE costly error)
+  strict-dm  = same but ignoring the one ambiguous deep item's standard allowance
+  overspend  = true-cheap items routed to deep (wasted money, harmless)
+  longC      = LONG-but-cheap traps hit;  shortD = SHORT-but-deep traps hit
+
+==============================================================================
+PREDICTION DISTRIBUTION  (truth is 16/16/16)
+==============================================================================
+  AFM v1 (run A)             cheap= 0  standard=30  deep=18
+  AFM v1 (run B)             cheap= 0  standard=30  deep=18
+  AFM v2 (run C)             cheap= 3  standard=29  deep=16
+  AFM v2 (run D)             cheap= 3  standard=29  deep=16
+  Haiku (run H)              cheap=19  standard=13  deep=16
+  BASELINE always-standard   cheap= 0  standard=48  deep= 0
+  BASELINE always-deep       cheap= 0  standard= 0  deep=48
+  BASELINE length-heuristic  cheap=15  standard=25  deep= 8
+  ORACLE (perfect)           cheap=17  standard=16  deep=15
+
+==============================================================================
+CONFUSION MATRICES
+==============================================================================
+
+  AFM v1 (run A)  (acc 64.6%)
+    confusion (rows=truth, cols=predicted)
+                   cheap  standard      deep
+         cheap         0        15         1
+      standard         0        14         2
+          deep         0         1        15
+
+  AFM v1 (run B)  (acc 64.6%)
+    confusion (rows=truth, cols=predicted)
+                   cheap  standard      deep
+         cheap         0        15         1
+      standard         0        14         2
+          deep         0         1        15
+
+  AFM v2 (run C)  (acc 68.8%)
+    confusion (rows=truth, cols=predicted)
+                   cheap  standard      deep
+         cheap         3        12         1
+      standard         0        15         1
+          deep         0         2        14
+
+  AFM v2 (run D)  (acc 68.8%)
+    confusion (rows=truth, cols=predicted)
+                   cheap  standard      deep
+         cheap         3        12         1
+      standard         0        15         1
+          deep         0         2        14
+
+  Haiku (run H)  (acc 91.7%)
+    confusion (rows=truth, cols=predicted)
+                   cheap  standard      deep
+         cheap        16         0         0
+      standard         3        12         1
+          deep         0         1        15
+
+  BASELINE always-standard  (acc 37.5%)
+    confusion (rows=truth, cols=predicted)
+                   cheap  standard      deep
+         cheap         0        16         0
+      standard         0        16         0
+          deep         0        16         0
+
+  BASELINE always-deep  (acc 35.4%)
+    confusion (rows=truth, cols=predicted)
+                   cheap  standard      deep
+         cheap         0         0        16
+      standard         0         0        16
+          deep         0         0        16
+
+  BASELINE length-heuristic  (acc 41.7%)
+    confusion (rows=truth, cols=predicted)
+                   cheap  standard      deep
+         cheap         6         6         4
+      standard         2        12         2
+          deep         7         7         2
+
+  ORACLE (perfect)  (acc 100.0%)
+    confusion (rows=truth, cols=predicted)
+                   cheap  standard      deep
+         cheap        16         0         0
+      standard         1        15         0
+          deep         0         1        15
+
+==============================================================================
+LATENCY  (ms) - sits in front of a 5-10s model turn, never the 24ms fast path
+==============================================================================
+  AFM v1 (run A)             mean     706  p50     703  p95     902  min     516  max    1064
+  AFM v1 (run B)             mean     700  p50     691  p95     892  min     536  max     990
+  AFM v2 (run C)             mean     790  p50     798  p95     978  min     142  max    1056
+  AFM v2 (run D)             mean     791  p50     800  p95     954  min     149  max    1037
+  Haiku (run H)              mean    9093  p50    8305  p95   15688  min    5736  max   23941
+  BASELINE always-standard   0 (pure arithmetic, sub-millisecond)
+  BASELINE always-deep       0 (pure arithmetic, sub-millisecond)
+  BASELINE length-heuristic  0 (pure arithmetic, sub-millisecond)
+  ORACLE (perfect)           0 (pure arithmetic, sub-millisecond)
+
+==============================================================================
+DETERMINISM (greedy, two identical runs)
+==============================================================================
+  AFM v1 (run A) vs AFM v1 (run B): 48/48 = 100.0% tier agreement
+  AFM v2 (run C) vs AFM v2 (run D): 48/48 = 100.0% tier agreement
+  AFM v1 vs AFM v2 (prompt sensitivity): 43/48 = 89.6% agreement
+
+==============================================================================
+COST SIMULATION  (48 turns; cheap=$0.002 standard=$0.010 deep=$0.080)
+==============================================================================
+  scorer                      routed $  vs always-std  +scoring $     net $  net vs std
+--------------------------------------------------------------------------------------
+  AFM v1 (run A)             $   1.740        +262.5% $     0.000 $   1.740     +262.5%
+  AFM v1 (run B)             $   1.740        +262.5% $     0.000 $   1.740     +262.5%
+  AFM v2 (run C)             $   1.576        +228.3% $     0.000 $   1.576     +228.3%
+  AFM v2 (run D)             $   1.576        +228.3% $     0.000 $   1.576     +228.3%
+  Haiku (run H)              $   1.448        +201.7% $     0.048 $   1.496     +211.7%
+  BASELINE always-standard   $   0.480          +0.0% $     0.000 $   0.480       +0.0%
+  BASELINE always-deep       $   3.840        +700.0% $     0.000 $   3.840     +700.0%
+  BASELINE length-heuristic  $   0.920         +91.7% $     0.000 $   0.920      +91.7%
+  ORACLE (perfect)           $   1.394        +190.4% $     0.000 $   1.394     +190.4%
+
+  always-standard: $0.480   always-deep: $3.840   oracle: $1.394
+  NOTE: with deep at 8x standard, ANY scorer that correctly finds the 16 deep
+  items necessarily spends MORE than always-standard. The oracle itself is
+  +190% vs always-standard. always-standard is not a cost
+  baseline a router can beat -- it is a QUALITY floor that happens to be cheap.
+  The quality-matched comparison is vs always-deep.
+
+  scorer                         net $  vs always-deep
+-------------------------------------------------------
+  AFM v1 (run A)             $   1.740          -54.7%
+  AFM v1 (run B)             $   1.740          -54.7%
+  AFM v2 (run C)             $   1.576          -59.0%
+  AFM v2 (run D)             $   1.576          -59.0%
+  Haiku (run H)              $   1.496          -61.0%
+  BASELINE always-standard   $   0.480          -87.5%
+  BASELINE always-deep       $   3.840           +0.0%
+  BASELINE length-heuristic  $   0.920          -76.0%
+  ORACLE (perfect)           $   1.394          -63.7%
+
+==============================================================================
+COST UNDER A REALISTIC MESSAGE MIX
+==============================================================================
+  The 48 fixtures are deliberately balanced 16/16/16 and trap-loaded. A real
+  personal-assistant stream that has ALREADY lost commands and fast-path regex
+  hits is still cheap-heavy. Reweighting each scorer's per-true-tier routing
+  behaviour (from its confusion matrix) by two illustrative priors:
+
+  prior = cheap-heavy 60/30/10
+  scorer                        $/turn  $/1000 turns  vs always-deep  deep-miss/1000
+------------------------------------------------------------------------------------
+  AFM v1 (run A)             $  0.0218 $       21.81          -72.7%            6.2
+  AFM v1 (run B)             $  0.0218 $       21.81          -72.7%            6.2
+  AFM v2 (run C)             $  0.0192 $       19.16          -76.0%           12.5
+  AFM v2 (run D)             $  0.0192 $       19.16          -76.0%           12.5
+  Haiku (run H)              $  0.0136 $       13.62          -83.0%            6.2
+  BASELINE always-standard   $  0.0100 $       10.00          -87.5%           93.8
+  BASELINE always-deep       $  0.0800 $       80.00           +0.0%            0.0
+  BASELINE length-heuristic  $  0.0215 $       21.55          -73.1%           87.5
+  ORACLE (perfect)           $  0.0116 $       11.61          -85.5%            0.0
+
+  prior = balanced-ish 45/40/15
+  scorer                        $/turn  $/1000 turns  vs always-deep  deep-miss/1000
+------------------------------------------------------------------------------------
+  AFM v1 (run A)             $  0.0253 $       25.31          -68.4%            9.4
+  AFM v1 (run B)             $  0.0253 $       25.31          -68.4%            9.4
+  AFM v2 (run C)             $  0.0222 $       22.23          -72.2%           18.8
+  AFM v2 (run D)             $  0.0222 $       22.23          -72.2%           18.8
+  Haiku (run H)              $  0.0184 $       18.39          -77.0%            9.4
+  BASELINE always-standard   $  0.0100 $       10.00          -87.5%          140.6
+  BASELINE always-deep       $  0.0800 $       80.00           +0.0%            0.0
+  BASELINE length-heuristic  $  0.0204 $       20.41          -74.5%          131.2
+  ORACLE (perfect)           $  0.0160 $       16.04          -79.9%            0.0
+
+==============================================================================
+EVERY DEEP-MISS, VERBATIM, WITH THE SCORER'S STATED REASON
+==============================================================================
+
+  AFM v1 (run A): 1 deep-miss(es)
+    [D02] truth=deep  predicted=standard  trap=short_deep
+        INPUT : is this mole worrying
+        REASON: This is a routine health check-up question, requiring a moderate level of competence to provide a helpful response.
+
+  AFM v1 (run B): 1 deep-miss(es)
+    [D02] truth=deep  predicted=standard  trap=short_deep
+        INPUT : is this mole worrying
+        REASON: This is a routine health check-up question, requiring a moderate level of competence to provide a helpful response.
+
+  AFM v2 (run C): 2 deep-miss(es)
+    [D02] truth=deep  predicted=standard  trap=short_deep
+        INPUT : is this mole worrying
+        REASON: Requires some research and judgment on the severity of the mole
+    [D08] truth=deep  predicted=standard  trap=none
+        INPUT : restructure the drey launch plan given the vendor slipped three weeks
+        REASON: Requires updating the timeline and possibly adjusting dependencies.
+
+  AFM v2 (run D): 2 deep-miss(es)
+    [D02] truth=deep  predicted=standard  trap=short_deep
+        INPUT : is this mole worrying
+        REASON: Requires some research and judgment on the severity of the mole
+    [D08] truth=deep  predicted=standard  trap=none
+        INPUT : restructure the drey launch plan given the vendor slipped three weeks
+        REASON: Requires updating the timeline and possibly adjusting dependencies.
+
+  Haiku (run H): 1 deep-miss(es)
+    [D04] truth=deep  predicted=standard  trap=short_deep
+        INPUT : do we kill drey or not
+        REASON: Routine project decision about removing a component; needs context on stakes and tradeoffs.
+
+  BASELINE always-standard: 15 deep-miss(es)
+    [D01] truth=deep  predicted=standard  trap=short_deep
+        INPUT : should i sell the house?
+    [D02] truth=deep  predicted=standard  trap=short_deep
+        INPUT : is this mole worrying
+    [D03] truth=deep  predicted=standard  trap=short_deep
+        INPUT : do i tell her or not
+    [D04] truth=deep  predicted=standard  trap=short_deep
+        INPUT : do we kill drey or not
+    [D05] truth=deep  predicted=standard  trap=short_deep
+        INPUT : quit or stay
+    [D06] truth=deep  predicted=standard  trap=short_deep
+        INPUT : is the offer actually fair
+    [D07] truth=deep  predicted=standard  trap=none
+        INPUT : help me think through whether to take the job offer given the equity and the commute
+    [D08] truth=deep  predicted=standard  trap=none
+        INPUT : restructure the drey launch plan given the vendor slipped three weeks
+    [D09] truth=deep  predicted=standard  trap=none
+        INPUT : review this clause for risk: the contractor may substitute materials of comparable quality at its sole discretion without notice to the owner, and any dispute as to comparability shall be resolved by 
+    [D10] truth=deep  predicted=standard  trap=none
+        INPUT : two bids on the roof. one is 22k, licensed, bonded, ten year workmanship warranty, cannot start until late october which puts us into the rain. the other is 16k, has done three houses on our street an
+    [D11] truth=deep  predicted=standard  trap=none
+        INPUT : one of my reports has missed three deadlines in six weeks and the last one hurt a client. i also know from a conversation in may that her mother is very ill and she has been the one handling it. i nee
+    [D12] truth=deep  predicted=standard  trap=none
+        INPUT : the inspection came back with settlement cracking on the north foundation wall, the engineer says it is probably historic but recommends monitoring, and the seller is refusing to budge on price. walk 
+    [D13] truth=deep  predicted=standard  trap=none
+        INPUT : churn jumped from 4 to 7 percent last quarter and nobody has a convincing story for why. the obvious candidates are the pricing change in april, the onboarding rewrite that shipped in may, and the fac
+    [D14] truth=deep  predicted=standard  trap=none
+        INPUT : i have to decide by friday whether to sign the lease renewal at 14 percent higher or move. moving costs us roughly six weeks of disruption and i do not know what the market looks like in the spring. w
+    [D15] truth=deep  predicted=standard  trap=none
+        INPUT : my parents are 78 and 81 and still in the house they have been in for forty years, which has stairs and is three hours from us. dad had a fall in january that was fine and one in june that was not rea
+
+  BASELINE always-deep: NO deep-misses
+
+  BASELINE length-heuristic: 14 deep-miss(es)
+    [D01] truth=deep  predicted=cheap  trap=short_deep
+        INPUT : should i sell the house?
+    [D02] truth=deep  predicted=cheap  trap=short_deep
+        INPUT : is this mole worrying
+    [D03] truth=deep  predicted=cheap  trap=short_deep
+        INPUT : do i tell her or not
+    [D04] truth=deep  predicted=cheap  trap=short_deep
+        INPUT : do we kill drey or not
+    [D05] truth=deep  predicted=cheap  trap=short_deep
+        INPUT : quit or stay
+    [D06] truth=deep  predicted=cheap  trap=short_deep
+        INPUT : is the offer actually fair
+    [D07] truth=deep  predicted=standard  trap=none
+        INPUT : help me think through whether to take the job offer given the equity and the commute
+    [D08] truth=deep  predicted=standard  trap=none
+        INPUT : restructure the drey launch plan given the vendor slipped three weeks
+    [D09] truth=deep  predicted=standard  trap=none
+        INPUT : review this clause for risk: the contractor may substitute materials of comparable quality at its sole discretion without notice to the owner, and any dispute as to comparability shall be resolved by 
+    [D10] truth=deep  predicted=standard  trap=none
+        INPUT : two bids on the roof. one is 22k, licensed, bonded, ten year workmanship warranty, cannot start until late october which puts us into the rain. the other is 16k, has done three houses on our street an
+    [D11] truth=deep  predicted=standard  trap=none
+        INPUT : one of my reports has missed three deadlines in six weeks and the last one hurt a client. i also know from a conversation in may that her mother is very ill and she has been the one handling it. i nee
+    [D12] truth=deep  predicted=standard  trap=none
+        INPUT : the inspection came back with settlement cracking on the north foundation wall, the engineer says it is probably historic but recommends monitoring, and the seller is refusing to budge on price. walk 
+    [D14] truth=deep  predicted=standard  trap=none
+        INPUT : i have to decide by friday whether to sign the lease renewal at 14 percent higher or move. moving costs us roughly six weeks of disruption and i do not know what the market looks like in the spring. w
+    [D16] truth=deep  predicted=cheap  trap=none
+        INPUT : should i push the launch a week
+
+  ORACLE (perfect): NO deep-misses
+
+==============================================================================
+TRAP DETAIL  (per-item, all scorers)
+==============================================================================
+  id    truth     AFM v1 (run AFM v1 (run AFM v2 (run AFM v2 (run Haiku (run  BASELINE al BASELINE al BASELINE le ORACLE (per
+  C11   cheap     standard    standard    standard    standard    cheap       standard    deep        deep        cheap         | ok so today was kind of a disaster. the plumber 
+  C12   cheap     standard    standard    standard    standard    cheap       standard    deep        deep        cheap         | i was on the phone with my mom for like an hour 
+  C13   cheap     standard    standard    standard    standard    cheap       standard    deep        standard    cheap         | that meeting ran forty minutes over for absolute
+  C14   cheap     standard    standard    standard    standard    cheap       standard    deep        deep        cheap         | i have been telling myself for three weeks that 
+  C15   cheap     deep        deep        deep        deep        cheap       standard    deep        standard    cheap         | the conference thing is turning into a whole pro
+  C16   cheap     standard    standard    standard    standard    cheap       standard    deep        deep        cheap         | the neighbours put in a fence right along the pr
+  D01   deep      deep        deep        deep        deep        deep        standard    deep        cheap       deep          | should i sell the house?
+  D02   deep      standard    standard    standard    standard    deep        standard    deep        cheap       deep          | is this mole worrying
+  D03   deep      deep        deep        deep        deep        deep        standard    deep        cheap       deep          | do i tell her or not
+  D04   deep      deep        deep        deep        deep        standard    standard    deep        cheap       deep          | do we kill drey or not
+  D05   deep      deep        deep        deep        deep        deep        standard    deep        cheap       deep          | quit or stay
+  D06   deep      deep        deep        deep        deep        deep        standard    deep        cheap       deep          | is the offer actually fair

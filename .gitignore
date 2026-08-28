@@ -1,0 +1,15 @@
+# dependencies / build
+node_modules/
+dist/
+*.tsbuildinfo
+
+# environment & secrets — config comes from env, never from committed files
+.env
+.env.*
+!.env.example
+
+# OS / editor noise
+.DS_Store
+
+# logs
+*.log

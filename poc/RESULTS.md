@@ -638,6 +638,58 @@ invariant's protections are preserved by construction — the scorer only
 selects among user-configured tiers under tool-enforced budgets, deterministic
 rules take precedence, and every verdict logs to `runs` (plan §4.17.D).
 
+## PoC-16 — local models as tier scorer
+
+| | |
+|---|---|
+| Status | PASS — a local model beats the Haiku baseline on every quality axis |
+| Date | 2026-08-28 |
+
+Follow-on to PoC-15 at the user's direction: can a locally-run model (Ollama,
+OpenAI-compatible endpoint, bare API call — no harness contamination) replace
+billable Haiku as the complexity scorer? Six arms on the identical PoC-15
+fixtures, temp 0, strict json_schema. Hardware: M4 Max, 64 GB. Artifacts in
+`poc/poc16-local-scorer/` (analyzer imports PoC-15's `evaluate()` so metrics
+are identical by construction).
+
+**Winner: `gemma4:e4b-it-qat`** (7.5B MatFormer, ~4B active, 6.1 GB download,
+6.3 GB resident): **97.9% accuracy vs Haiku's 91.7%**, deep-miss 1/16 (tie),
+overspend 0/16 (tie), traps **6/6 + 6/6** (beats Haiku's 5/6 short-deep),
+100% deterministic across three runs, zero parse failures, **warm p95 667 ms**
+(4.5× inside the 3 s bar), $0/verdict. Cold load 5.7 s if evicted (mitigate
+with `keep_alive`). Also passing: `gemma4:12b` and `qwen3.6:35b-a3b` (the MoE
+— 35B knowledge at 909 ms mean; kept as the named fallback, though removed
+from disk). `qwen3.6:27b` missed only the latency bar by 5%.
+
+Findings beyond the headline:
+
+1. **The "sub-4B fails like Apple FM" hypothesis was falsified — calibration,
+   not size, is the variable.** Granite 8B (bigger than the winner) failed in
+   the mirror image of AFM: AFM's cheap class collapsed to zero, Granite's
+   over-fired (7/16 deep-misses). Both miscalibrated, opposite directions.
+2. **Reasoning hurts this task, measured:** identical weights with thinking
+   enabled cost 9× latency, *lowered* accuracy (95.8% vs 97.9%), and broke a
+   long-cheap trap by deliberating its way into "potential legal
+   implications." The scorer should run with reasoning suppressed.
+3. **A label dispute worth carrying into the confirmatory eval:** all five
+   competent local arms missed the same single deep item (D08, terse
+   operational replanning) with near-identical reasons, while every local
+   model got the item Haiku missed (D04). Non-overlapping blind spots —
+   either the D08 label is contestable or local models under-rate terse
+   multi-constraint replanning. To be resolved by independent labeling, not
+   assumed.
+4. Ollama 0.33 harness notes: `/v1` ignores native `think` but honors
+   `reasoning_effort: "none"`; strict `json_schema` worked everywhere (retry
+   logic never fired); `maxLength` inside a schema breaks generation.
+
+**Disposition unchanged from PoC-15:** the fixtures are still author-aligned
+with only 16 deep items — 97.9% here is not 97.9% in production. The
+invariant-4 amendment still waits on the independent confirmatory eval
+(fixtures authored blind, ≥50 deep items, D08-class items adjudicated), now
+with `gemma4:e4b` as the candidate scorer instead of Haiku: if it passes, the
+scorer is free, local, private, and adds ~0.7 s ahead of a 5–10 s turn.
+Cleanup done: losers removed, 186 Gi free, `nomic-embed-text` untouched.
+
 ## Contradictions with BUILD-PLAN.md
 
 Anything a finding invalidates. Note it here; don't edit the plan.

@@ -1,0 +1,24 @@
+{
+  "model": "qwen3.6:27b-q4_K_M",
+  "run": "A",
+  "think": false,
+  "mode": "schema",
+  "ram": "25 GB",
+  "processor": "100% GPU",
+  "load_ms": 11444.4,
+  "n": 48,
+  "parse_fail_first_attempt": 0,
+  "retries": 0,
+  "parse_fail_after_retry": 0,
+  "wall_s": 133.8,
+  "tok_in": 18066,
+  "tok_out": 1274,
+  "lat": {
+    "mean": 2786.5271270275116,
+    "p50": 2741.3079738616943,
+    "p90": 3086.8680477142334,
+    "p95": 3157.5491428375244,
+    "min": 2319.7178840637207,
+    "max": 3173.8808155059814
+  }
+}

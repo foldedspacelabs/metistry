@@ -1,0 +1,65 @@
+[HIT ] rank=1  embed=67ms sql=37ms
+  Q: What did I decide about the search backend for Cartograph v2?
+  expected: proj-cartograph-v2-decision-search-backend.md
+  top5: proj-cartograph-v2-decision-search-backend.md(0.1578), proj-cartograph-v1-decision-search-backend.md(0.1999), proj-cartograph-v2-status.md(0.2361), area-cartograph-overview.md(0.2926), proj-cartograph-v1-status-final.md(0.3117)
+
+[HIT ] rank=1  embed=29ms sql=30ms
+  Q: Why did we use plain keyword search instead of embeddings in the first version of Cartograph?
+  expected: proj-cartograph-v1-decision-search-backend.md
+  top5: proj-cartograph-v1-decision-search-backend.md(0.2023), proj-cartograph-v2-decision-search-backend.md(0.27), proj-cartograph-v1-retro.md(0.2773), proj-cartograph-v2-status.md(0.2948), journal-2026-02-08.md(0.308)
+
+[HIT ] rank=1  embed=25ms sql=26ms
+  Q: How much did I budget for the home office renovation and what's it broken down into?
+  expected: proj-homeoffice-constraints-budget.md
+  top5: proj-homeoffice-constraints-budget.md(0.1935), proj-kitchen-status-progress.md(0.2876), proj-homeoffice-decision-layout.md(0.2915), proj-homeoffice-status-progress.md(0.3225), journal-2026-04-12.md(0.3261)
+
+[HIT ] rank=1  embed=21ms sql=25ms
+  Q: What's my emergency fund target and which account is it sitting in?
+  expected: area-finance-emergency-fund.md
+  top5: area-finance-emergency-fund.md(0.276), area-finance-accounts.md(0.3865), area-finance-hys-comparison.md(0.4285), journal-2026-06-22.md(0.4341), area-finance-overview.md(0.4883)
+
+[HIT ] rank=1  embed=17ms sql=23ms
+  Q: Which high-yield savings account did I end up picking, and why not the one with the best rate?
+  expected: area-finance-hys-comparison.md
+  top5: area-finance-hys-comparison.md(0.2371), area-finance-emergency-fund.md(0.3833), area-finance-accounts.md(0.4005), proj-marathon-plan.md(0.4403), proj-marathon-decision-race.md(0.4555)
+
+[HIT ] rank=1  embed=21ms sql=20ms
+  Q: What did the plumber quote for replacing the water heater, and which option did I go with?
+  expected: proj-waterheater-decision-replace.md
+  top5: proj-waterheater-decision-replace.md(0.2507), proj-waterheater-status.md(0.2596), journal-2026-06-01.md(0.306), area-home-water-heater.md(0.3194), area-home-overview.md(0.3253)
+
+[HIT ] rank=1  embed=12ms sql=20ms
+  Q: Why did I end up choosing Japan over Portugal for this year's big trip?
+  expected: proj-portugal-status-booked.md
+  top5: proj-portugal-status-booked.md(0.1485), proj-portugal-decision-itinerary.md(0.2026), proj-japan-status-booked.md(0.2131), journal-2026-06-28.md(0.222), journal-2026-04-20.md(0.2426)
+
+[HIT ] rank=1  embed=13ms sql=20ms
+  Q: What's causing my tennis elbow and how did I treat it?
+  expected: area-health-injury-log.md
+  top5: area-health-injury-log.md(0.2205), person-naomi-chen.md(0.3434), person-carlos-mendoza.md(0.3909), technique-progressive-overload.md(0.4325), person-sarah-ilves.md(0.4385)
+
+[HIT ] rank=1  embed=16ms sql=19ms
+  Q: What's my current strength training program and who designed it?
+  expected: technique-progressive-overload.md
+  top5: technique-progressive-overload.md(0.2977), person-carlos-mendoza.md(0.2979), area-health-overview.md(0.3648), proj-marathon-plan.md(0.3967), technique-couch-to-5k.md(0.401)
+
+[HIT ] rank=2  embed=18ms sql=19ms
+  Q: Why did we decide against building real-time collaborative editing into Cartograph v2?
+  expected: proj-cartograph-v2-constraints.md
+  top5: person-dev-patel.md(0.276), proj-cartograph-v2-constraints.md(0.3037), area-cartograph-overview.md(0.3107), journal-2026-05-25.md(0.3174), proj-cartograph-pricing-decision.md(0.325)
+
+======================================================================
+SMOKE TEST (mechanics only, not quality-validated): top-3 hit rate = 10/10
+Warm latency p50 -- embed: 21.0ms, sql search: 23.0ms
+Embed min/max: 12.2/67.0ms
+SQL min/max: 19.1/36.9ms
+
+Misses:
+
+{
+  "hits": 10,
+  "total": 10,
+  "hit_rate": 1,
+  "embed_p50_ms": 20.99200000000002,
+  "sql_p50_ms": 22.95783399999999
+}

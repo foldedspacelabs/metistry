@@ -1,0 +1,165 @@
+=== AFM classifier ===
+pid=21946 mode=reuse host=example-mac.local
+SESSION_TYPE env: 0
+TERM: <none>
+availability: available  isAvailable: true
+items: 50
+[01] 0.69s | todo | action=YES | renew car registration before friday
+      IN : renew car registration before friday
+      transcript entries: 3
+[02] 0.49s | event | action=no  | -
+      IN : lunch w/ sarah moved to tuesday 12:30 at the thai place
+      transcript entries: 5
+[03] 0.56s | link | action=no  | -
+      IN : https://arxiv.org/abs/2401.55512 - skim this, might be relevant to the retrieval thing
+      transcript entries: 7
+[04] 0.49s | idea | action=no  | -
+      IN : the whole idea of "inbox zero" is kind of a scam when you think about it
+      transcript entries: 9
+[05] 1.11s | todo | action=YES | call the dentist about rescheduling the cleaning
+      IN : need to call the dentist about rescheduling the cleaning
+      transcript entries: 11
+[06] 0.61s | note | action=no  | -
+      IN : oat milk, coffee beans, dish soap, those crackers kate likes
+      transcript entries: 13
+[07] 0.82s | idea | action=no  | -
+      IN : what if calendars had a "tentative until confirmed" tier by default
+      transcript entries: 15
+[08] 0.96s | event | action=no  | -
+      IN : standup pushed to 10:15 for the rest of the sprint
+      transcript entries: 17
+[09] 1.28s | todo | action=YES | book flights for the portland trip
+      IN : book flights for the portland trip, prices going up
+      transcript entries: 19
+[10] 1.44s | event | action=no  | -
+      IN : dad's birthday is the 14th
+      transcript entries: 21
+[11] 1.65s | link | action=no  | -
+      IN : https://news.ycombinator.com/item?id=39201122 thread about local llm throughput
+      transcript entries: 23
+[12] 2.14s | todo | action=YES | cancel the vendor contract 30 days out
+      IN : mark said the vendor contract auto-renews unless we cancel 30 days out
+      transcript entries: 25
+[13] 2.53s | idea | action=no  | -
+      IN : been thinking about how much of my day is just context switching
+      transcript entries: 27
+[14] 2.93s | todo | action=YES | pick up the dry cleaning
+      IN : pick up the dry cleaning, ticket is in the car
+      transcript entries: 29
+[15] 2.66s | event | action=no  | -
+      IN : quarterly review is scheduled for sept 3, 2pm, conf room B
+      transcript entries: 31
+[16] 2.84s | idea | action=no  | -
+      IN : idea: a tool that watches your git history and writes the standup for you
+      transcript entries: 33
+[17] 3.11s | note | action=no  | -
+      IN : the espresso machine is making that noise again
+      transcript entries: 35
+[18] 0.18s | ERROR: exceededContextWindowSize(FoundationModels.LanguageModelSession.GenerationError.Context(debugDescription: "Content contains 4107 tokens, which exceeds the maximum allowed context size of 4096.", underlyingErrors: [Provided 4,107 tokens, but the maximum allowed is 4,096.], errorDescriptionOverride: nil))
+      IN : send jenna the revised budget spreadsheet by EOD
+      transcript entries: 35
+[19] 0.12s | ERROR: exceededContextWindowSize(FoundationModels.LanguageModelSession.GenerationError.Context(debugDescription: "Content contains 4118 tokens, which exceeds the maximum allowed context size of 4096.", underlyingErrors: [Provided 4,118 tokens, but the maximum allowed is 4,096.], errorDescriptionOverride: nil))
+      IN : https://www.notion.so/templates/second-brain - maybe worth stealing the structure
+      transcript entries: 35
+[20] 0.11s | ERROR: exceededContextWindowSize(FoundationModels.LanguageModelSession.GenerationError.Context(debugDescription: "Content contains 4106 tokens, which exceeds the maximum allowed context size of 4096.", underlyingErrors: [Provided 4,106 tokens, but the maximum allowed is 4,096.], errorDescriptionOverride: nil))
+      IN : gym membership renews automatically in october
+      transcript entries: 35
+[21] 0.12s | ERROR: exceededContextWindowSize(FoundationModels.LanguageModelSession.GenerationError.Context(debugDescription: "Content contains 4108 tokens, which exceeds the maximum allowed context size of 4096.", underlyingErrors: [Provided 4,108 tokens, but the maximum allowed is 4,096.], errorDescriptionOverride: nil))
+      IN : schedule the annual physical, been putting it off since march
+      transcript entries: 35
+[22] 0.12s | ERROR: exceededContextWindowSize(FoundationModels.LanguageModelSession.GenerationError.Context(debugDescription: "Content contains 4115 tokens, which exceeds the maximum allowed context size of 4096.", underlyingErrors: [Provided 4,115 tokens, but the maximum allowed is 4,096.], errorDescriptionOverride: nil))
+      IN : notes from the arch review: they want us off postgres by q2, unclear why
+      transcript entries: 35
+[23] 0.12s | ERROR: exceededContextWindowSize(FoundationModels.LanguageModelSession.GenerationError.Context(debugDescription: "Content contains 4103 tokens, which exceeds the maximum allowed context size of 4096.", underlyingErrors: [Provided 4,103 tokens, but the maximum allowed is 4,096.], errorDescriptionOverride: nil))
+      IN : weather looks bad for saturday
+      transcript entries: 35
+[24] 0.12s | ERROR: exceededContextWindowSize(FoundationModels.LanguageModelSession.GenerationError.Context(debugDescription: "Content contains 4106 tokens, which exceeds the maximum allowed context size of 4096.", underlyingErrors: [Provided 4,106 tokens, but the maximum allowed is 4,096.], errorDescriptionOverride: nil))
+      IN : order more printer paper and toner for the office
+      transcript entries: 35
+[25] 0.12s | ERROR: exceededContextWindowSize(FoundationModels.LanguageModelSession.GenerationError.Context(debugDescription: "Content contains 4110 tokens, which exceeds the maximum allowed context size of 4096.", underlyingErrors: [Provided 4,110 tokens, but the maximum allowed is 4,096.], errorDescriptionOverride: nil))
+      IN : the concept of "deep work" assumes you control your own calendar
+      transcript entries: 35
+[26] 0.16s | ERROR: exceededContextWindowSize(FoundationModels.LanguageModelSession.GenerationError.Context(debugDescription: "Content contains 4107 tokens, which exceeds the maximum allowed context size of 4096.", underlyingErrors: [Provided 4,107 tokens, but the maximum allowed is 4,096.], errorDescriptionOverride: nil))
+      IN : followup with legal re: the NDA redlines
+      transcript entries: 35
+[27] 0.12s | ERROR: exceededContextWindowSize(FoundationModels.LanguageModelSession.GenerationError.Context(debugDescription: "Content contains 4106 tokens, which exceeds the maximum allowed context size of 4096.", underlyingErrors: [Provided 4,106 tokens, but the maximum allowed is 4,096.], errorDescriptionOverride: nil))
+      IN : kids school open house thursday 6pm
+      transcript entries: 35
+[28] 0.12s | ERROR: exceededContextWindowSize(FoundationModels.LanguageModelSession.GenerationError.Context(debugDescription: "Content contains 4120 tokens, which exceeds the maximum allowed context size of 4096.", underlyingErrors: [Provided 4,120 tokens, but the maximum allowed is 4,096.], errorDescriptionOverride: nil))
+      IN : https://github.com/ggerganov/llama.cpp starred it, want to try the metal backend
+      transcript entries: 35
+[29] 0.12s | ERROR: exceededContextWindowSize(FoundationModels.LanguageModelSession.GenerationError.Context(debugDescription: "Content contains 4106 tokens, which exceeds the maximum allowed context size of 4096.", underlyingErrors: [Provided 4,106 tokens, but the maximum allowed is 4,096.], errorDescriptionOverride: nil))
+      IN : sometimes the best productivity system is just fewer commitments
+      transcript entries: 35
+[30] 0.17s | ERROR: exceededContextWindowSize(FoundationModels.LanguageModelSession.GenerationError.Context(debugDescription: "Content contains 4114 tokens, which exceeds the maximum allowed context size of 4096.", underlyingErrors: [Provided 4,114 tokens, but the maximum allowed is 4,096.], errorDescriptionOverride: nil))
+      IN : file the expense report for the austin trip before the 30 day window closes
+      transcript entries: 35
+[31] 0.12s | ERROR: exceededContextWindowSize(FoundationModels.LanguageModelSession.GenerationError.Context(debugDescription: "Content contains 4108 tokens, which exceeds the maximum allowed context size of 4096.", underlyingErrors: [Provided 4,108 tokens, but the maximum allowed is 4,096.], errorDescriptionOverride: nil))
+      IN : the new coffee place on 8th is actually good
+      transcript entries: 35
+[32] 0.08s | ERROR: exceededContextWindowSize(FoundationModels.LanguageModelSession.GenerationError.Context(debugDescription: "Content contains 4108 tokens, which exceeds the maximum allowed context size of 4096.", underlyingErrors: [Provided 4,108 tokens, but the maximum allowed is 4,096.], errorDescriptionOverride: nil))
+      IN : remember tom's kid is named eli not eliot
+      transcript entries: 35
+[33] 0.12s | ERROR: exceededContextWindowSize(FoundationModels.LanguageModelSession.GenerationError.Context(debugDescription: "Content contains 4105 tokens, which exceeds the maximum allowed context size of 4096.", underlyingErrors: [Provided 4,105 tokens, but the maximum allowed is 4,096.], errorDescriptionOverride: nil))
+      IN : cancel the extra streaming subscription we never use
+      transcript entries: 35
+[34] 0.12s | ERROR: exceededContextWindowSize(FoundationModels.LanguageModelSession.GenerationError.Context(debugDescription: "Content contains 4111 tokens, which exceeds the maximum allowed context size of 4096.", underlyingErrors: [Provided 4,111 tokens, but the maximum allowed is 4,096.], errorDescriptionOverride: nil))
+      IN : offsite is the week of oct 20, block the calendar
+      transcript entries: 35
+[35] 0.11s | ERROR: exceededContextWindowSize(FoundationModels.LanguageModelSession.GenerationError.Context(debugDescription: "Content contains 4105 tokens, which exceeds the maximum allowed context size of 4096.", underlyingErrors: [Provided 4,105 tokens, but the maximum allowed is 4,096.], errorDescriptionOverride: nil))
+      IN : read that book on systems thinking someone recommended
+      transcript entries: 35
+[36] 0.11s | ERROR: exceededContextWindowSize(FoundationModels.LanguageModelSession.GenerationError.Context(debugDescription: "Content contains 4116 tokens, which exceeds the maximum allowed context size of 4096.", underlyingErrors: [Provided 4,116 tokens, but the maximum allowed is 4,096.], errorDescriptionOverride: nil))
+      IN : https://stripe.com/docs/webhooks need to check idempotency handling here
+      transcript entries: 35
+[37] 0.11s | ERROR: exceededContextWindowSize(FoundationModels.LanguageModelSession.GenerationError.Context(debugDescription: "Content contains 4106 tokens, which exceeds the maximum allowed context size of 4096.", underlyingErrors: [Provided 4,106 tokens, but the maximum allowed is 4,096.], errorDescriptionOverride: nil))
+      IN : i wonder if anyone actually reads the release notes
+      transcript entries: 35
+[38] 0.11s | ERROR: exceededContextWindowSize(FoundationModels.LanguageModelSession.GenerationError.Context(debugDescription: "Content contains 4110 tokens, which exceeds the maximum allowed context size of 4096.", underlyingErrors: [Provided 4,110 tokens, but the maximum allowed is 4,096.], errorDescriptionOverride: nil))
+      IN : replace the furnace filter, it's been like 6 months
+      transcript entries: 35
+[39] 0.11s | ERROR: exceededContextWindowSize(FoundationModels.LanguageModelSession.GenerationError.Context(debugDescription: "Content contains 4109 tokens, which exceeds the maximum allowed context size of 4096.", underlyingErrors: [Provided 4,109 tokens, but the maximum allowed is 4,096.], errorDescriptionOverride: nil))
+      IN : sync w/ design moved from wed to thurs same time
+      transcript entries: 35
+[40] 0.11s | ERROR: exceededContextWindowSize(FoundationModels.LanguageModelSession.GenerationError.Context(debugDescription: "Content contains 4112 tokens, which exceeds the maximum allowed context size of 4096.", underlyingErrors: [Provided 4,112 tokens, but the maximum allowed is 4,096.], errorDescriptionOverride: nil))
+      IN : grocery: eggs, spinach, greek yogurt, whatever bread is on sale
+      transcript entries: 35
+[41] 0.11s | ERROR: exceededContextWindowSize(FoundationModels.LanguageModelSession.GenerationError.Context(debugDescription: "Content contains 4106 tokens, which exceeds the maximum allowed context size of 4096.", underlyingErrors: [Provided 4,106 tokens, but the maximum allowed is 4,096.], errorDescriptionOverride: nil))
+      IN : the phrase "circle back" should be retired
+      transcript entries: 35
+[42] 0.11s | ERROR: exceededContextWindowSize(FoundationModels.LanguageModelSession.GenerationError.Context(debugDescription: "Content contains 4108 tokens, which exceeds the maximum allowed context size of 4096.", underlyingErrors: [Provided 4,108 tokens, but the maximum allowed is 4,096.], errorDescriptionOverride: nil))
+      IN : email the landlord about the leaking faucet in the guest bath
+      transcript entries: 35
+[43] 0.11s | ERROR: exceededContextWindowSize(FoundationModels.LanguageModelSession.GenerationError.Context(debugDescription: "Content contains 4110 tokens, which exceeds the maximum allowed context size of 4096.", underlyingErrors: [Provided 4,110 tokens, but the maximum allowed is 4,096.], errorDescriptionOverride: nil))
+      IN : conference talk CFP closes sept 15 if i want to submit
+      transcript entries: 35
+[44] 0.12s | ERROR: exceededContextWindowSize(FoundationModels.LanguageModelSession.GenerationError.Context(debugDescription: "Content contains 4109 tokens, which exceeds the maximum allowed context size of 4096.", underlyingErrors: [Provided 4,109 tokens, but the maximum allowed is 4,096.], errorDescriptionOverride: nil))
+      IN : random thought: most meetings are just status updates with extra steps
+      transcript entries: 35
+[45] 0.12s | ERROR: exceededContextWindowSize(FoundationModels.LanguageModelSession.GenerationError.Context(debugDescription: "Content contains 4109 tokens, which exceeds the maximum allowed context size of 4096.", underlyingErrors: [Provided 4,109 tokens, but the maximum allowed is 4,096.], errorDescriptionOverride: nil))
+      IN : back up the photos from the trip before the phone fills up
+      transcript entries: 35
+[46] 0.12s | ERROR: exceededContextWindowSize(FoundationModels.LanguageModelSession.GenerationError.Context(debugDescription: "Content contains 4109 tokens, which exceeds the maximum allowed context size of 4096.", underlyingErrors: [Provided 4,109 tokens, but the maximum allowed is 4,096.], errorDescriptionOverride: nil))
+      IN : sarah mentioned she's leaving in november, probably confidential
+      transcript entries: 35
+[47] 0.12s | ERROR: exceededContextWindowSize(FoundationModels.LanguageModelSession.GenerationError.Context(debugDescription: "Content contains 4119 tokens, which exceeds the maximum allowed context size of 4096.", underlyingErrors: [Provided 4,119 tokens, but the maximum allowed is 4,096.], errorDescriptionOverride: nil))
+      IN : https://old.reddit.com/r/selfhosted/comments/xyz good writeup on backup strategies
+      transcript entries: 35
+[48] 0.12s | ERROR: exceededContextWindowSize(FoundationModels.LanguageModelSession.GenerationError.Context(debugDescription: "Content contains 4111 tokens, which exceeds the maximum allowed context size of 4096.", underlyingErrors: [Provided 4,111 tokens, but the maximum allowed is 4,096.], errorDescriptionOverride: nil))
+      IN : buy a new charger, the old one only works at a weird angle
+      transcript entries: 35
+[49] 0.12s | ERROR: exceededContextWindowSize(FoundationModels.LanguageModelSession.GenerationError.Context(debugDescription: "Content contains 4106 tokens, which exceeds the maximum allowed context size of 4096.", underlyingErrors: [Provided 4,106 tokens, but the maximum allowed is 4,096.], errorDescriptionOverride: nil))
+      IN : the parking garage closes at 9 now apparently
+      transcript entries: 35
+[50] 0.16s | ERROR: exceededContextWindowSize(FoundationModels.LanguageModelSession.GenerationError.Context(debugDescription: "Content contains 4115 tokens, which exceeds the maximum allowed context size of 4096.", underlyingErrors: [Provided 4,115 tokens, but the maximum allowed is 4,096.], errorDescriptionOverride: nil))
+      IN : update the beneficiary info on the 401k, been meaning to do it forever
+      transcript entries: 35
+---- SUMMARY ----
+total wall time: 30.29 s
+items: 50  errors: 33  has_action=true: 5
+items/sec: 1.651
+first call: 0.69 s
+mean: 0.61 s  median: 0.12 s  min: 0.08 s  max: 3.11 s
+mean excluding first call: 0.60 s -> 1.656 items/sec steady
+peak-ish resident memory: 12.6 MB
+DONE

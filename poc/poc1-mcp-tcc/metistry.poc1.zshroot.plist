@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>metistry.poc1.zshroot</string>
+  <key>ProgramArguments</key><array>
+    <string>/bin/zsh</string><string>-c</string>
+    <string>/opt/homebrew/bin/node /Users/example/Development/Metistry/.claude/worktrees/metistry-phase-0-poc-12cdbc/poc/poc1-mcp-tcc/reader.mjs; echo wrapper-still-resident</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><false/>
+  <key>StandardOutPath</key><string>/private/tmp/claude-501/-Users-example-Development-Metistry--claude-worktrees-metistry-phase-0-poc-12cdbc/3daa1fa7-6368-4d64-85d3-4af8b9ceffeb/scratchpad/zshroot.out</string>
+  <key>StandardErrorPath</key><string>/private/tmp/claude-501/-Users-example-Development-Metistry--claude-worktrees-metistry-phase-0-poc-12cdbc/3daa1fa7-6368-4d64-85d3-4af8b9ceffeb/scratchpad/zshroot.err</string>
+</dict></plist>

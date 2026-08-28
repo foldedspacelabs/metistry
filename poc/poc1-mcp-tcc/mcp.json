@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "messages": {
+      "command": "/opt/homebrew/bin/node",
+      "args": [
+        "/Users/example/Development/Metistry/.claude/worktrees/metistry-phase-0-poc-12cdbc/poc/poc1-mcp-tcc/server.mjs"
+      ]
+    }
+  }
+}

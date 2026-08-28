@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key><string>com.metistry.poc9.ekpoc</string>
+  <key>CFBundleName</key><string>Metistry PoC-9 EventKit</string>
+  <key>CFBundleExecutable</key><string>ekpoc</string>
+  <key>CFBundleShortVersionString</key><string>1.0</string>
+  <key>CFBundleVersion</key><string>1</string>
+  <key>NSCalendarsFullAccessUsageDescription</key><string>Metistry PoC-9 tests headless calendar create/update/delete.</string>
+  <key>NSRemindersFullAccessUsageDescription</key><string>Metistry PoC-9 tests headless reminder create/update/delete.</string>
+  <key>NSCalendarsUsageDescription</key><string>Metistry PoC-9 tests headless calendar create/update/delete.</string>
+  <key>NSRemindersUsageDescription</key><string>Metistry PoC-9 tests headless reminder create/update/delete.</string>
+</dict>
+</plist>

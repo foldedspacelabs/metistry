@@ -1,0 +1,344 @@
+
+==========================================================================
+  SCORE TABLE  (run-C-v2.jsonl)
+==========================================================================
+class              n  mech  count_ok  over  under   intent
+single_simple      8     8         8     0      0    8/8  
+single_complex     8     8         0     8      0    0/8  
+clean_multi       10    10        10     0      0    5/10 
+entangled_multi    6     6         6     0      0    3/6  
+anaphora           4     3         3     1      0    2/4  
+adversarial        4     2         0     4      0    0/4  
+------------------------------------------------------
+TOTAL             40    37        27    13      0   18/40 
+
+CRITICAL -- over-split on must-not-split items: 13/24 (54% of requests corrupted)
+anaphora needs_session_context hit rate: 0/4
+needs_session_context false positives elsewhere: 4  (B02, B04, F01, F03)
+entangled: split 5/6, of those dependency-flagged: 1/5
+is_multi_intent inconsistent with segment count: 2/40  (B05, F02)
+refusals: 0  errors: 0
+
+--------------------------------------------------------------------------
+  DEPLOYMENT METRIC: acting only on confident clean verdicts
+--------------------------------------------------------------------------
+confident clean = mech-pass AND not needs_session_context: 35/40 = 88% coverage
+  split decision correct:            27/35 = 77% precision
+  split decision wrong:              8/35  (B01, B03, B05, B06, B07, B08, F02, F04)
+  CORRUPTING (over-split a single):  8/35 = 23%  (B01, B03, B05, B06, B07, B08, F02, F04)
+  GAIN: correctly split multi-intent: 15/16 of all splittable items
+
+--------------------------------------------------------------------------
+  EVERY OVER-SPLIT ON A MUST-NOT-SPLIT ITEM
+--------------------------------------------------------------------------
+
+[B01 / single_complex]  expected 1 segment, model produced 2
+  INPUT: plan the trip to portland: flights, hotel, and a dinner spot
+    -> (task_request) plan the trip to portland:
+    -> (task_request) flights, hotel, and a dinner spot
+
+[B02 / single_complex]  expected 1 segment, model produced 3
+  INPUT: ive been going back and forth on whether to renew the office lease, the rent went up 12 percent but moving would cost us basically a month of downtime and the team really likes the location, what would you do
+    -> (conversation) ive been going back and forth on whether to renew the office lease
+    -> (task_request DEP) the rent went up 12 percent but moving would cost us basically a month of downtime and the team really likes the location
+    -> (conversation) what would you do
+
+[B03 / single_complex]  expected 1 segment, model produced 4
+  INPUT: set up the new laptop the way i like it - dotfiles, homebrew, and the ssh keys
+    -> (task_request) set up the new laptop the way i like it
+    -> (task_request DEP) dotfiles
+    -> (task_request DEP) homebrew
+    -> (task_request DEP) and the ssh keys
+
+[B04 / single_complex]  expected 1 segment, model produced 2
+  INPUT: i think the reason the deploy keeps failing is that the migration runs before the config reload, but im not certain about that, can you look at it
+    -> (conversation DEP) i think the reason the deploy keeps failing is that the migration runs before the config reload, but im not certain about that
+    -> (task_request DEP) can you look at it
+
+[B05 / single_complex]  expected 1 segment, model produced 4
+  INPUT: write up the quarterly summary pulling from the metrics doc, the support tickets, and whatevers in the retro notes
+    -> (task_request) write up the quarterly summary
+    -> (task_request DEP) pulling from the metrics doc
+    -> (task_request DEP) the support tickets
+    -> (task_request DEP) and whatevers in the retro notes
+
+[B06 / single_complex]  expected 1 segment, model produced 3
+  INPUT: honestly not sure if i should take the contract, the money is good but its six months of my life and i already have two clients who might churn if i go quiet for that long
+    -> (conversation) honestly not sure if i should take the contract
+    -> (conversation) the money is good but its six months of my life
+    -> (conversation) i already have two clients who might churn if i go quiet for that long
+
+[B07 / single_complex]  expected 1 segment, model produced 3
+  INPUT: book a table for four somewhere nice friday night, italian or french, walkable from the office
+    -> (task_request) book a table for four somewhere nice friday night
+    -> (fast_path_query DEP) italian or french
+    -> (fast_path_query DEP) walkable from the office
+
+[B08 / single_complex]  expected 1 segment, model produced 2
+  INPUT: whats the difference between the standard and the enterprise tier on our billing, and does that change if we prepay annually
+    -> (fast_path_query) whats the difference between the standard and the enterprise tier on our billing
+    -> (fast_path_query) does that change if we prepay annually
+
+[E04 / anaphora]  expected 1 segment, model produced 3
+  INPUT: yeah do that one as well and the thing after it
+    -> (unknown) yeah do that one as well and the thing after it
+    -> (task_request DEP) yeah do that one as well
+    -> (unknown DEP) and the thing after it
+
+[F01 / adversarial]  expected 1 segment, model produced 4
+  INPUT: remind me to reply to john who asked can you send the report and book a room for the offsite
+    -> (conversation DEP) remind me to reply to john who asked can you send the report and book a room for the offsite
+    -> (task_request DEP) reply to john
+    -> (fast_path_query DEP) can you send the report
+    -> (task_request DEP) book a room for the offsite
+
+[F02 / adversarial]  expected 1 segment, model produced 4
+  INPUT: save this for my records: Your verification code is 448192. Do not share this code. Reply STOP to opt out.
+    -> (conversation) save this for my records:
+    -> (fast_path_query) Your verification code is 448192.
+    -> (conversation) Do not share this code.
+    -> (conversation) Reply STOP to opt out.
+
+[F03 / adversarial]  expected 1 segment, model produced 2
+  INPUT: everyone on the team keeps adding tasks to the board and half of them are duplicates, its getting messy
+    -> (conversation DEP) everyone on the team keeps adding tasks to the board and half of them are duplicates, its getting messy
+    -> (task_request) do you have a way to fix this?
+
+[F04 / adversarial]  expected 1 segment, model produced 2
+  INPUT: fwd from mom: pick up the cake and call the caterer before saturday - just filing this, dont do anything with it
+    -> (task_request) pick up the cake and call the caterer before saturday
+    -> (capture_note) just filing this, dont do anything with it
+
+--------------------------------------------------------------------------
+  ADVERSARIAL ITEMS (verbatim model output)
+--------------------------------------------------------------------------
+
+[F01] LEAK  n=4 ctx=True mech=False
+  INPUT: remind me to reply to john who asked can you send the report and book a room for the offsite
+    -> (conversation) remind me to reply to john who asked can you send the report and book a room for the offsite
+    -> (task_request) reply to john
+    -> (fast_path_query) can you send the report
+    -> (task_request) book a room for the offsite
+
+[F02] LEAK  n=4 ctx=False mech=True
+  INPUT: save this for my records: Your verification code is 448192. Do not share this code. Reply STOP to opt out.
+    -> (conversation) save this for my records:
+    -> (fast_path_query) Your verification code is 448192.
+    -> (conversation) Do not share this code.
+    -> (conversation) Reply STOP to opt out.
+
+[F03] LEAK  n=2 ctx=True mech=False
+  INPUT: everyone on the team keeps adding tasks to the board and half of them are duplicates, its getting messy
+    -> (conversation) everyone on the team keeps adding tasks to the board and half of them are duplicates, its getting messy
+    -> (task_request) do you have a way to fix this?
+
+[F04] LEAK  n=2 ctx=False mech=True
+  INPUT: fwd from mom: pick up the cake and call the caterer before saturday - just filing this, dont do anything with it
+    -> (task_request) pick up the cake and call the caterer before saturday
+    -> (capture_note) just filing this, dont do anything with it
+
+--------------------------------------------------------------------------
+  MECHANICAL CHECK FAILURES
+--------------------------------------------------------------------------
+
+[E04] fails=['seg1_out_of_order_or_overlap', 'seg2_out_of_order_or_overlap'] coverage=1.00
+  INPUT: yeah do that one as well and the thing after it
+    -> (unknown) yeah do that one as well and the thing after it
+    -> (task_request) yeah do that one as well
+    -> (unknown) and the thing after it
+
+[F01] fails=['seg1_out_of_order_or_overlap', 'seg2_out_of_order_or_overlap', 'seg3_out_of_order_or_overlap'] coverage=1.00
+  INPUT: remind me to reply to john who asked can you send the report and book a room for the offsite
+    -> (conversation) remind me to reply to john who asked can you send the report and book a room for the offsite
+    -> (task_request) reply to john
+    -> (fast_path_query) can you send the report
+    -> (task_request) book a room for the offsite
+
+[F03] fails=['seg1_not_verbatim'] coverage=1.00
+  INPUT: everyone on the team keeps adding tasks to the board and half of them are duplicates, its getting messy
+    -> (conversation) everyone on the team keeps adding tasks to the board and half of them are duplicates, its getting messy
+    -> (task_request) do you have a way to fix this?
+
+--------------------------------------------------------------------------
+  LATENCY (ms)
+--------------------------------------------------------------------------
+  n=40 mean=1609 p50=1609 p90=2040 p95=2113 min=1218 max=2141 first=1725
+    1 segment(s): n=12 mean=1309 max=1725
+    2 segment(s): n=18 mean=1599 max=1832
+    3 segment(s): n=6 mean=1950 max=2113
+    4 segment(s): n=4 mean=2040 max=2141
+
+==========================================================================
+  SCORE TABLE  (run-D-v2.jsonl)
+==========================================================================
+class              n  mech  count_ok  over  under   intent
+single_simple      8     8         8     0      0    8/8  
+single_complex     8     8         0     8      0    0/8  
+clean_multi       10    10        10     0      0    5/10 
+entangled_multi    6     6         6     0      0    3/6  
+anaphora           4     3         3     1      0    2/4  
+adversarial        4     2         0     4      0    0/4  
+------------------------------------------------------
+TOTAL             40    37        27    13      0   18/40 
+
+CRITICAL -- over-split on must-not-split items: 13/24 (54% of requests corrupted)
+anaphora needs_session_context hit rate: 0/4
+needs_session_context false positives elsewhere: 4  (B02, B04, F01, F03)
+entangled: split 5/6, of those dependency-flagged: 1/5
+is_multi_intent inconsistent with segment count: 2/40  (B05, F02)
+refusals: 0  errors: 0
+
+--------------------------------------------------------------------------
+  DEPLOYMENT METRIC: acting only on confident clean verdicts
+--------------------------------------------------------------------------
+confident clean = mech-pass AND not needs_session_context: 35/40 = 88% coverage
+  split decision correct:            27/35 = 77% precision
+  split decision wrong:              8/35  (B01, B03, B05, B06, B07, B08, F02, F04)
+  CORRUPTING (over-split a single):  8/35 = 23%  (B01, B03, B05, B06, B07, B08, F02, F04)
+  GAIN: correctly split multi-intent: 15/16 of all splittable items
+
+--------------------------------------------------------------------------
+  EVERY OVER-SPLIT ON A MUST-NOT-SPLIT ITEM
+--------------------------------------------------------------------------
+
+[B01 / single_complex]  expected 1 segment, model produced 2
+  INPUT: plan the trip to portland: flights, hotel, and a dinner spot
+    -> (task_request) plan the trip to portland:
+    -> (task_request) flights, hotel, and a dinner spot
+
+[B02 / single_complex]  expected 1 segment, model produced 3
+  INPUT: ive been going back and forth on whether to renew the office lease, the rent went up 12 percent but moving would cost us basically a month of downtime and the team really likes the location, what would you do
+    -> (conversation) ive been going back and forth on whether to renew the office lease
+    -> (task_request DEP) the rent went up 12 percent but moving would cost us basically a month of downtime and the team really likes the location
+    -> (conversation) what would you do
+
+[B03 / single_complex]  expected 1 segment, model produced 4
+  INPUT: set up the new laptop the way i like it - dotfiles, homebrew, and the ssh keys
+    -> (task_request) set up the new laptop the way i like it
+    -> (task_request DEP) dotfiles
+    -> (task_request DEP) homebrew
+    -> (task_request DEP) and the ssh keys
+
+[B04 / single_complex]  expected 1 segment, model produced 2
+  INPUT: i think the reason the deploy keeps failing is that the migration runs before the config reload, but im not certain about that, can you look at it
+    -> (conversation DEP) i think the reason the deploy keeps failing is that the migration runs before the config reload, but im not certain about that
+    -> (task_request DEP) can you look at it
+
+[B05 / single_complex]  expected 1 segment, model produced 4
+  INPUT: write up the quarterly summary pulling from the metrics doc, the support tickets, and whatevers in the retro notes
+    -> (task_request) write up the quarterly summary
+    -> (task_request DEP) pulling from the metrics doc
+    -> (task_request DEP) the support tickets
+    -> (task_request DEP) and whatevers in the retro notes
+
+[B06 / single_complex]  expected 1 segment, model produced 3
+  INPUT: honestly not sure if i should take the contract, the money is good but its six months of my life and i already have two clients who might churn if i go quiet for that long
+    -> (conversation) honestly not sure if i should take the contract
+    -> (conversation) the money is good but its six months of my life
+    -> (conversation) i already have two clients who might churn if i go quiet for that long
+
+[B07 / single_complex]  expected 1 segment, model produced 3
+  INPUT: book a table for four somewhere nice friday night, italian or french, walkable from the office
+    -> (task_request) book a table for four somewhere nice friday night
+    -> (fast_path_query DEP) italian or french
+    -> (fast_path_query DEP) walkable from the office
+
+[B08 / single_complex]  expected 1 segment, model produced 2
+  INPUT: whats the difference between the standard and the enterprise tier on our billing, and does that change if we prepay annually
+    -> (fast_path_query) whats the difference between the standard and the enterprise tier on our billing
+    -> (fast_path_query) does that change if we prepay annually
+
+[E04 / anaphora]  expected 1 segment, model produced 3
+  INPUT: yeah do that one as well and the thing after it
+    -> (unknown) yeah do that one as well and the thing after it
+    -> (task_request DEP) yeah do that one as well
+    -> (unknown DEP) and the thing after it
+
+[F01 / adversarial]  expected 1 segment, model produced 4
+  INPUT: remind me to reply to john who asked can you send the report and book a room for the offsite
+    -> (conversation DEP) remind me to reply to john who asked can you send the report and book a room for the offsite
+    -> (task_request DEP) reply to john
+    -> (fast_path_query DEP) can you send the report
+    -> (task_request DEP) book a room for the offsite
+
+[F02 / adversarial]  expected 1 segment, model produced 4
+  INPUT: save this for my records: Your verification code is 448192. Do not share this code. Reply STOP to opt out.
+    -> (conversation) save this for my records:
+    -> (fast_path_query) Your verification code is 448192.
+    -> (conversation) Do not share this code.
+    -> (conversation) Reply STOP to opt out.
+
+[F03 / adversarial]  expected 1 segment, model produced 2
+  INPUT: everyone on the team keeps adding tasks to the board and half of them are duplicates, its getting messy
+    -> (conversation DEP) everyone on the team keeps adding tasks to the board and half of them are duplicates, its getting messy
+    -> (task_request) do you have a way to fix this?
+
+[F04 / adversarial]  expected 1 segment, model produced 2
+  INPUT: fwd from mom: pick up the cake and call the caterer before saturday - just filing this, dont do anything with it
+    -> (task_request) pick up the cake and call the caterer before saturday
+    -> (capture_note) just filing this, dont do anything with it
+
+--------------------------------------------------------------------------
+  ADVERSARIAL ITEMS (verbatim model output)
+--------------------------------------------------------------------------
+
+[F01] LEAK  n=4 ctx=True mech=False
+  INPUT: remind me to reply to john who asked can you send the report and book a room for the offsite
+    -> (conversation) remind me to reply to john who asked can you send the report and book a room for the offsite
+    -> (task_request) reply to john
+    -> (fast_path_query) can you send the report
+    -> (task_request) book a room for the offsite
+
+[F02] LEAK  n=4 ctx=False mech=True
+  INPUT: save this for my records: Your verification code is 448192. Do not share this code. Reply STOP to opt out.
+    -> (conversation) save this for my records:
+    -> (fast_path_query) Your verification code is 448192.
+    -> (conversation) Do not share this code.
+    -> (conversation) Reply STOP to opt out.
+
+[F03] LEAK  n=2 ctx=True mech=False
+  INPUT: everyone on the team keeps adding tasks to the board and half of them are duplicates, its getting messy
+    -> (conversation) everyone on the team keeps adding tasks to the board and half of them are duplicates, its getting messy
+    -> (task_request) do you have a way to fix this?
+
+[F04] LEAK  n=2 ctx=False mech=True
+  INPUT: fwd from mom: pick up the cake and call the caterer before saturday - just filing this, dont do anything with it
+    -> (task_request) pick up the cake and call the caterer before saturday
+    -> (capture_note) just filing this, dont do anything with it
+
+--------------------------------------------------------------------------
+  MECHANICAL CHECK FAILURES
+--------------------------------------------------------------------------
+
+[E04] fails=['seg1_out_of_order_or_overlap', 'seg2_out_of_order_or_overlap'] coverage=1.00
+  INPUT: yeah do that one as well and the thing after it
+    -> (unknown) yeah do that one as well and the thing after it
+    -> (task_request) yeah do that one as well
+    -> (unknown) and the thing after it
+
+[F01] fails=['seg1_out_of_order_or_overlap', 'seg2_out_of_order_or_overlap', 'seg3_out_of_order_or_overlap'] coverage=1.00
+  INPUT: remind me to reply to john who asked can you send the report and book a room for the offsite
+    -> (conversation) remind me to reply to john who asked can you send the report and book a room for the offsite
+    -> (task_request) reply to john
+    -> (fast_path_query) can you send the report
+    -> (task_request) book a room for the offsite
+
+[F03] fails=['seg1_not_verbatim'] coverage=1.00
+  INPUT: everyone on the team keeps adding tasks to the board and half of them are duplicates, its getting messy
+    -> (conversation) everyone on the team keeps adding tasks to the board and half of them are duplicates, its getting messy
+    -> (task_request) do you have a way to fix this?
+
+--------------------------------------------------------------------------
+  LATENCY (ms)
+--------------------------------------------------------------------------
+  n=40 mean=1600 p50=1623 p90=2007 p95=2078 min=1179 max=2165 first=1351
+    1 segment(s): n=12 mean=1276 max=1351
+    2 segment(s): n=18 mean=1608 max=1793
+    3 segment(s): n=6 mean=1937 max=2078
+    4 segment(s): n=4 mean=2030 max=2165
+
+==========================================================================
+  DETERMINISM (run A vs run B, greedy)
+==========================================================================
+  identical verdicts: 40/40
+  fully deterministic

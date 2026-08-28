@@ -1,0 +1,282 @@
+
+==========================================================================
+  SCORE TABLE  (run-A.jsonl)
+==========================================================================
+class              n  mech  count_ok  over  under   intent
+single_simple      8     8         7     1      0    6/8  
+single_complex     8     8         0     8      0    0/8  
+clean_multi       10     8         7     2      1    5/7  
+entangled_multi    6     6         5     1      0    1/5  
+anaphora           4     4         4     0      0    4/4  
+adversarial        4     4         3     1      0    1/4  
+------------------------------------------------------
+TOTAL             40    38        26    13      1   17/36 
+
+CRITICAL -- over-split on must-not-split items: 10/24 (42% of requests corrupted)
+anaphora needs_session_context hit rate: 0/4
+needs_session_context false positives elsewhere: 0
+entangled: split 5/6, of those dependency-flagged: 3/5
+is_multi_intent inconsistent with segment count: 7/40  (A02, C05, E01, E04, F01, F02, F03)
+refusals: 0  errors: 0
+
+--------------------------------------------------------------------------
+  DEPLOYMENT METRIC: acting only on confident clean verdicts
+--------------------------------------------------------------------------
+confident clean = mech-pass AND not needs_session_context: 38/40 = 95% coverage
+  split decision correct:            26/38 = 68% precision
+  split decision wrong:              12/38  (A02, B01, B02, B03, B04, B05, B06, B07, B08, C02, D04, F02)
+  CORRUPTING (over-split a single):  10/38 = 26%  (A02, B01, B02, B03, B04, B05, B06, B07, B08, F02)
+  GAIN: correctly split multi-intent: 11/16 of all splittable items
+
+--------------------------------------------------------------------------
+  EVERY OVER-SPLIT ON A MUST-NOT-SPLIT ITEM
+--------------------------------------------------------------------------
+
+[A02 / single_simple]  expected 1 segment, model produced 3
+  INPUT: /status extra text about the deploy im worried about
+    -> (command) /status
+    -> (conversation) extra text about the deploy
+    -> (conversation) im worried about
+
+[B01 / single_complex]  expected 1 segment, model produced 2
+  INPUT: plan the trip to portland: flights, hotel, and a dinner spot
+    -> (task_request) plan the trip to portland:
+    -> (task_request) flights, hotel, and a dinner spot
+
+[B02 / single_complex]  expected 1 segment, model produced 3
+  INPUT: ive been going back and forth on whether to renew the office lease, the rent went up 12 percent but moving would cost us basically a month of downtime and the team really likes the location, what would you do
+    -> (conversation) ive been going back and forth on whether to renew the office lease
+    -> (conversation) the rent went up 12 percent but moving would cost us basically a month of downtime and the team really likes the location
+    -> (conversation) what would you do
+
+[B03 / single_complex]  expected 1 segment, model produced 4
+  INPUT: set up the new laptop the way i like it - dotfiles, homebrew, and the ssh keys
+    -> (task_request) set up the new laptop the way i like it
+    -> (conversation DEP) dotfiles
+    -> (conversation DEP) homebrew
+    -> (conversation DEP) and the ssh keys
+
+[B04 / single_complex]  expected 1 segment, model produced 2
+  INPUT: i think the reason the deploy keeps failing is that the migration runs before the config reload, but im not certain about that, can you look at it
+    -> (conversation) i think the reason the deploy keeps failing is that the migration runs before the config reload, but im not certain about that
+    -> (conversation) can you look at it
+
+[B05 / single_complex]  expected 1 segment, model produced 4
+  INPUT: write up the quarterly summary pulling from the metrics doc, the support tickets, and whatevers in the retro notes
+    -> (task_request) write up the quarterly summary
+    -> (conversation DEP) pulling from the metrics doc
+    -> (conversation DEP) the support tickets
+    -> (conversation DEP) and whatevers in the retro notes
+
+[B06 / single_complex]  expected 1 segment, model produced 3
+  INPUT: honestly not sure if i should take the contract, the money is good but its six months of my life and i already have two clients who might churn if i go quiet for that long
+    -> (conversation) honestly not sure if i should take the contract
+    -> (conversation) the money is good but its six months of my life
+    -> (conversation) i already have two clients who might churn if i go quiet for that long
+
+[B07 / single_complex]  expected 1 segment, model produced 3
+  INPUT: book a table for four somewhere nice friday night, italian or french, walkable from the office
+    -> (task_request) book a table for four somewhere nice friday night
+    -> (conversation DEP) italian or french
+    -> (conversation DEP) walkable from the office
+
+[B08 / single_complex]  expected 1 segment, model produced 2
+  INPUT: whats the difference between the standard and the enterprise tier on our billing, and does that change if we prepay annually
+    -> (fast_path_query) whats the difference between the standard and the enterprise tier on our billing
+    -> (fast_path_query) does that change if we prepay annually
+
+[F02 / adversarial]  expected 1 segment, model produced 2
+  INPUT: save this for my records: Your verification code is 448192. Do not share this code. Reply STOP to opt out.
+    -> (capture_note) save this for my records: Your verification code is 448192. Do not share this code.
+    -> (command) Reply STOP to opt out.
+
+--------------------------------------------------------------------------
+  ADVERSARIAL ITEMS (verbatim model output)
+--------------------------------------------------------------------------
+
+[F01] clean  n=1 ctx=False mech=True
+  INPUT: remind me to reply to john who asked can you send the report and book a room for the offsite
+    -> (conversation) remind me to reply to john who asked can you send the report and book a room for the offsite
+
+[F02] LEAK  n=2 ctx=False mech=True
+  INPUT: save this for my records: Your verification code is 448192. Do not share this code. Reply STOP to opt out.
+    -> (capture_note) save this for my records: Your verification code is 448192. Do not share this code.
+    -> (command) Reply STOP to opt out.
+
+[F03] clean  n=1 ctx=False mech=True
+  INPUT: everyone on the team keeps adding tasks to the board and half of them are duplicates, its getting messy
+    -> (conversation) everyone on the team keeps adding tasks to the board and half of them are duplicates, its getting messy
+
+[F04] clean  n=1 ctx=False mech=True
+  INPUT: fwd from mom: pick up the cake and call the caterer before saturday - just filing this, dont do anything with it
+    -> (conversation) fwd from mom: pick up the cake and call the caterer before saturday - just filing this, dont do anything with it
+
+--------------------------------------------------------------------------
+  MECHANICAL CHECK FAILURES
+--------------------------------------------------------------------------
+
+[C04] fails=['seg1_out_of_order_or_overlap', 'seg2_out_of_order_or_overlap', 'seg3_out_of_order_or_overlap'] coverage=1.00
+  INPUT: /status and also tell me how many open PRs i have
+    -> (conversation) /status and also tell me how many open PRs i have
+    -> (fast_path_query) status
+    -> (conversation) also tell me how many open PRs i have
+    -> (fast_path_query) how many open PRs i have
+
+[C09] fails=['seg1_not_verbatim', 'seg2_not_verbatim'] coverage=1.00
+  INPUT: run the test suite and also i need a summary of what changed in the last release
+    -> (conversation) run the test suite and also i need a summary of what changed in the last release
+    -> (fast_path_query) fast_path_query
+    -> (command) command
+
+--------------------------------------------------------------------------
+  LATENCY (ms)
+--------------------------------------------------------------------------
+  n=40 mean=1411 p50=1428 p90=1853 p95=1894 min=1003 max=1906 first=1455
+    1 segment(s): n=16 mean=1169 max=1455
+    2 segment(s): n=13 mean=1423 max=1536
+    3 segment(s): n=8 mean=1710 max=1906
+    4 segment(s): n=3 mean=1844 max=1894
+
+==========================================================================
+  SCORE TABLE  (run-B.jsonl)
+==========================================================================
+class              n  mech  count_ok  over  under   intent
+single_simple      8     8         7     1      0    6/8  
+single_complex     8     8         0     8      0    0/8  
+clean_multi       10     8         7     2      1    5/7  
+entangled_multi    6     6         5     1      0    1/5  
+anaphora           4     4         4     0      0    4/4  
+adversarial        4     4         3     1      0    1/4  
+------------------------------------------------------
+TOTAL             40    38        26    13      1   17/36 
+
+CRITICAL -- over-split on must-not-split items: 10/24 (42% of requests corrupted)
+anaphora needs_session_context hit rate: 0/4
+needs_session_context false positives elsewhere: 0
+entangled: split 5/6, of those dependency-flagged: 3/5
+is_multi_intent inconsistent with segment count: 7/40  (A02, C05, E01, E04, F01, F02, F03)
+refusals: 0  errors: 0
+
+--------------------------------------------------------------------------
+  DEPLOYMENT METRIC: acting only on confident clean verdicts
+--------------------------------------------------------------------------
+confident clean = mech-pass AND not needs_session_context: 38/40 = 95% coverage
+  split decision correct:            26/38 = 68% precision
+  split decision wrong:              12/38  (A02, B01, B02, B03, B04, B05, B06, B07, B08, C02, D04, F02)
+  CORRUPTING (over-split a single):  10/38 = 26%  (A02, B01, B02, B03, B04, B05, B06, B07, B08, F02)
+  GAIN: correctly split multi-intent: 11/16 of all splittable items
+
+--------------------------------------------------------------------------
+  EVERY OVER-SPLIT ON A MUST-NOT-SPLIT ITEM
+--------------------------------------------------------------------------
+
+[A02 / single_simple]  expected 1 segment, model produced 3
+  INPUT: /status extra text about the deploy im worried about
+    -> (command) /status
+    -> (conversation) extra text about the deploy
+    -> (conversation) im worried about
+
+[B01 / single_complex]  expected 1 segment, model produced 2
+  INPUT: plan the trip to portland: flights, hotel, and a dinner spot
+    -> (task_request) plan the trip to portland:
+    -> (task_request) flights, hotel, and a dinner spot
+
+[B02 / single_complex]  expected 1 segment, model produced 3
+  INPUT: ive been going back and forth on whether to renew the office lease, the rent went up 12 percent but moving would cost us basically a month of downtime and the team really likes the location, what would you do
+    -> (conversation) ive been going back and forth on whether to renew the office lease
+    -> (conversation) the rent went up 12 percent but moving would cost us basically a month of downtime and the team really likes the location
+    -> (conversation) what would you do
+
+[B03 / single_complex]  expected 1 segment, model produced 4
+  INPUT: set up the new laptop the way i like it - dotfiles, homebrew, and the ssh keys
+    -> (task_request) set up the new laptop the way i like it
+    -> (conversation DEP) dotfiles
+    -> (conversation DEP) homebrew
+    -> (conversation DEP) and the ssh keys
+
+[B04 / single_complex]  expected 1 segment, model produced 2
+  INPUT: i think the reason the deploy keeps failing is that the migration runs before the config reload, but im not certain about that, can you look at it
+    -> (conversation) i think the reason the deploy keeps failing is that the migration runs before the config reload, but im not certain about that
+    -> (conversation) can you look at it
+
+[B05 / single_complex]  expected 1 segment, model produced 4
+  INPUT: write up the quarterly summary pulling from the metrics doc, the support tickets, and whatevers in the retro notes
+    -> (task_request) write up the quarterly summary
+    -> (conversation DEP) pulling from the metrics doc
+    -> (conversation DEP) the support tickets
+    -> (conversation DEP) and whatevers in the retro notes
+
+[B06 / single_complex]  expected 1 segment, model produced 3
+  INPUT: honestly not sure if i should take the contract, the money is good but its six months of my life and i already have two clients who might churn if i go quiet for that long
+    -> (conversation) honestly not sure if i should take the contract
+    -> (conversation) the money is good but its six months of my life
+    -> (conversation) i already have two clients who might churn if i go quiet for that long
+
+[B07 / single_complex]  expected 1 segment, model produced 3
+  INPUT: book a table for four somewhere nice friday night, italian or french, walkable from the office
+    -> (task_request) book a table for four somewhere nice friday night
+    -> (conversation DEP) italian or french
+    -> (conversation DEP) walkable from the office
+
+[B08 / single_complex]  expected 1 segment, model produced 2
+  INPUT: whats the difference between the standard and the enterprise tier on our billing, and does that change if we prepay annually
+    -> (fast_path_query) whats the difference between the standard and the enterprise tier on our billing
+    -> (fast_path_query) does that change if we prepay annually
+
+[F02 / adversarial]  expected 1 segment, model produced 2
+  INPUT: save this for my records: Your verification code is 448192. Do not share this code. Reply STOP to opt out.
+    -> (capture_note) save this for my records: Your verification code is 448192. Do not share this code.
+    -> (command) Reply STOP to opt out.
+
+--------------------------------------------------------------------------
+  ADVERSARIAL ITEMS (verbatim model output)
+--------------------------------------------------------------------------
+
+[F01] clean  n=1 ctx=False mech=True
+  INPUT: remind me to reply to john who asked can you send the report and book a room for the offsite
+    -> (conversation) remind me to reply to john who asked can you send the report and book a room for the offsite
+
+[F02] LEAK  n=2 ctx=False mech=True
+  INPUT: save this for my records: Your verification code is 448192. Do not share this code. Reply STOP to opt out.
+    -> (capture_note) save this for my records: Your verification code is 448192. Do not share this code.
+    -> (command) Reply STOP to opt out.
+
+[F03] clean  n=1 ctx=False mech=True
+  INPUT: everyone on the team keeps adding tasks to the board and half of them are duplicates, its getting messy
+    -> (conversation) everyone on the team keeps adding tasks to the board and half of them are duplicates, its getting messy
+
+[F04] clean  n=1 ctx=False mech=True
+  INPUT: fwd from mom: pick up the cake and call the caterer before saturday - just filing this, dont do anything with it
+    -> (conversation) fwd from mom: pick up the cake and call the caterer before saturday - just filing this, dont do anything with it
+
+--------------------------------------------------------------------------
+  MECHANICAL CHECK FAILURES
+--------------------------------------------------------------------------
+
+[C04] fails=['seg1_out_of_order_or_overlap', 'seg2_out_of_order_or_overlap', 'seg3_out_of_order_or_overlap'] coverage=1.00
+  INPUT: /status and also tell me how many open PRs i have
+    -> (conversation) /status and also tell me how many open PRs i have
+    -> (fast_path_query) status
+    -> (conversation) also tell me how many open PRs i have
+    -> (fast_path_query) how many open PRs i have
+
+[C09] fails=['seg1_not_verbatim', 'seg2_not_verbatim'] coverage=1.00
+  INPUT: run the test suite and also i need a summary of what changed in the last release
+    -> (conversation) run the test suite and also i need a summary of what changed in the last release
+    -> (fast_path_query) fast_path_query
+    -> (command) command
+
+--------------------------------------------------------------------------
+  LATENCY (ms)
+--------------------------------------------------------------------------
+  n=40 mean=1408 p50=1368 p90=1840 p95=1951 min=1047 max=1964 first=1130
+    1 segment(s): n=16 mean=1149 max=1406
+    2 segment(s): n=13 mean=1434 max=1584
+    3 segment(s): n=8 mean=1715 max=1951
+    4 segment(s): n=3 mean=1858 max=1964
+
+==========================================================================
+  DETERMINISM (run A vs run B, greedy)
+==========================================================================
+  identical verdicts: 40/40
+  fully deterministic

@@ -1,0 +1,14 @@
+=== ekpoc request @ 2026-08-27T04:00:19Z ===
+INFO pid 5621
+INFO ppid 1
+INFO binary /Users/example/Development/Metistry/.claude/worktrees/metistry-phase-0-poc-12cdbc/poc/poc9-eventkit/ekpoc
+INFO uid 501
+INFO env.XPC_SERVICE_NAME metistry.poc9
+INFO env.TERM <unset>
+INFO env.SSH_TTY <unset>
+INFO tty.stdin no
+INFO infoPlist.embedded yes keys=CFBundleExecutable,CFBundleIdentifier,CFBundleName,CFBundleShortVersionString,CFBundleVersion,NSCalendarsFullAccessUsageDescription,NSCalendarsUsageDescription,NSRemindersFullAccessUsageDescription,NSRemindersUsageDescription
+INFO auth.event.before notDetermined(0)
+INFO auth.reminder.before notDetermined(0)
+INFO waitSeconds 900.0
+INFO calling requestFullAccessToEvents

@@ -1,0 +1,291 @@
+{
+  "_readme": "PoC-14 classifier fixtures. 40 hand-labeled inputs. Ground truth fields: class, text, expected_segments (int, or [a,b] range when >1 answer is acceptable), expected_intents (ordered; when expected_segments is a range this lists the SPLIT reading), split_allowed (bool: is splitting into >1 segment ever correct?), needs_context (bool: does correct handling require session history?), entangled (bool: if split, segments must be marked dependent), notes.",
+  "_intents": ["fast_path_query", "command", "capture_note", "reminder_or_schedule", "task_request", "conversation", "unknown"],
+  "fixtures": [
+    {
+      "id": "A01", "class": "single_simple",
+      "text": "whats my aws spend this month",
+      "expected_segments": 1, "expected_intents": ["fast_path_query"],
+      "split_allowed": false, "needs_context": false, "entangled": false,
+      "notes": "one status question"
+    },
+    {
+      "id": "A02", "class": "single_simple",
+      "text": "/status extra text about the deploy im worried about",
+      "expected_segments": 1, "expected_intents": ["command"],
+      "split_allowed": false, "needs_context": false, "entangled": false,
+      "notes": "slash command with trailing free text, still one intent"
+    },
+    {
+      "id": "A03", "class": "single_simple",
+      "text": "did the backup run last night",
+      "expected_segments": 1, "expected_intents": ["fast_path_query"],
+      "split_allowed": false, "needs_context": false, "entangled": false,
+      "notes": "one status question"
+    },
+    {
+      "id": "A04", "class": "single_simple",
+      "text": "remind me to take the trash out at 7",
+      "expected_segments": 1, "expected_intents": ["reminder_or_schedule"],
+      "split_allowed": false, "needs_context": false, "entangled": false,
+      "notes": "one reminder"
+    },
+    {
+      "id": "A05", "class": "single_simple",
+      "text": "note: garage code is 4417",
+      "expected_segments": 1, "expected_intents": ["capture_note"],
+      "split_allowed": false, "needs_context": false, "entangled": false,
+      "notes": "one note capture"
+    },
+    {
+      "id": "A06", "class": "single_simple",
+      "text": "/deploy staging",
+      "expected_segments": 1, "expected_intents": ["command"],
+      "split_allowed": false, "needs_context": false, "entangled": false,
+      "notes": "bare command"
+    },
+    {
+      "id": "A07", "class": "single_simple",
+      "text": "hows the weather lookin tomorrow",
+      "expected_segments": 1, "expected_intents": ["fast_path_query"],
+      "split_allowed": false, "needs_context": false, "entangled": false,
+      "notes": "one query, typo-prone casual"
+    },
+    {
+      "id": "A08", "class": "single_simple",
+      "text": "add milk to the grocery list",
+      "expected_segments": 1, "expected_intents": ["task_request", "capture_note"],
+      "split_allowed": false, "needs_context": false, "entangled": false,
+      "notes": "one ask; task_request or capture_note both defensible"
+    },
+
+    {
+      "id": "B01", "class": "single_complex",
+      "text": "plan the trip to portland: flights, hotel, and a dinner spot",
+      "expected_segments": 1, "expected_intents": ["task_request"],
+      "split_allowed": false, "needs_context": false, "entangled": false,
+      "notes": "sub-steps are inherently ONE task; splitting corrupts the request"
+    },
+    {
+      "id": "B02", "class": "single_complex",
+      "text": "ive been going back and forth on whether to renew the office lease, the rent went up 12 percent but moving would cost us basically a month of downtime and the team really likes the location, what would you do",
+      "expected_segments": 1, "expected_intents": ["conversation"],
+      "split_allowed": false, "needs_context": false, "entangled": false,
+      "notes": "many clauses, ONE ask at the end"
+    },
+    {
+      "id": "B03", "class": "single_complex",
+      "text": "set up the new laptop the way i like it - dotfiles, homebrew, and the ssh keys",
+      "expected_segments": 1, "expected_intents": ["task_request"],
+      "split_allowed": false, "needs_context": false, "entangled": false,
+      "notes": "enumerated sub-steps of one job"
+    },
+    {
+      "id": "B04", "class": "single_complex",
+      "text": "i think the reason the deploy keeps failing is that the migration runs before the config reload, but im not certain about that, can you look at it",
+      "expected_segments": 1, "expected_intents": ["task_request"],
+      "split_allowed": false, "needs_context": false, "entangled": false,
+      "notes": "hypothesis + one ask"
+    },
+    {
+      "id": "B05", "class": "single_complex",
+      "text": "write up the quarterly summary pulling from the metrics doc, the support tickets, and whatevers in the retro notes",
+      "expected_segments": 1, "expected_intents": ["task_request"],
+      "split_allowed": false, "needs_context": false, "entangled": false,
+      "notes": "three sources, one deliverable"
+    },
+    {
+      "id": "B06", "class": "single_complex",
+      "text": "honestly not sure if i should take the contract, the money is good but its six months of my life and i already have two clients who might churn if i go quiet for that long",
+      "expected_segments": 1, "expected_intents": ["conversation"],
+      "split_allowed": false, "needs_context": false, "entangled": false,
+      "notes": "thinking out loud, no explicit ask"
+    },
+    {
+      "id": "B07", "class": "single_complex",
+      "text": "book a table for four somewhere nice friday night, italian or french, walkable from the office",
+      "expected_segments": 1, "expected_intents": ["task_request", "reminder_or_schedule"],
+      "split_allowed": false, "needs_context": false, "entangled": false,
+      "notes": "constraints are not separate intents"
+    },
+    {
+      "id": "B08", "class": "single_complex",
+      "text": "whats the difference between the standard and the enterprise tier on our billing, and does that change if we prepay annually",
+      "expected_segments": 1, "expected_intents": ["fast_path_query"],
+      "split_allowed": false, "needs_context": false, "entangled": false,
+      "notes": "'and' joins a qualifier on the SAME question, not a second intent"
+    },
+
+    {
+      "id": "C01", "class": "clean_multi",
+      "text": "whats my aws spend this month and also remind me to cancel the old s3 bucket friday",
+      "expected_segments": 2, "expected_intents": ["fast_path_query", "reminder_or_schedule"],
+      "split_allowed": true, "needs_context": false, "entangled": false,
+      "notes": "independent query + reminder"
+    },
+    {
+      "id": "C02", "class": "clean_multi",
+      "text": "note that the wifi password is hunter2seven and check if the backup ran",
+      "expected_segments": 2, "expected_intents": ["capture_note", "fast_path_query"],
+      "split_allowed": true, "needs_context": false, "entangled": false,
+      "notes": "note capture + query"
+    },
+    {
+      "id": "C03", "class": "clean_multi",
+      "text": "add dentist tuesday at 3 to my calendar and whats the traffic like to downtown around then oh and remind me to bring the insurance card",
+      "expected_segments": 3, "expected_intents": ["reminder_or_schedule", "fast_path_query", "reminder_or_schedule"],
+      "split_allowed": true, "needs_context": false, "entangled": false,
+      "notes": "three asks; 'around then' is a soft reference but each ask stands alone"
+    },
+    {
+      "id": "C04", "class": "clean_multi",
+      "text": "/status and also tell me how many open PRs i have",
+      "expected_segments": 2, "expected_intents": ["command", "fast_path_query"],
+      "split_allowed": true, "needs_context": false, "entangled": false,
+      "notes": "command + query"
+    },
+    {
+      "id": "C05", "class": "clean_multi",
+      "text": "remind me to call the bank tomorrow and write down that the account number ends in 8812",
+      "expected_segments": 2, "expected_intents": ["reminder_or_schedule", "capture_note"],
+      "split_allowed": true, "needs_context": false, "entangled": false,
+      "notes": "reminder + note"
+    },
+    {
+      "id": "C06", "class": "clean_multi",
+      "text": "how much did i spend on groceries last month and can you draft a note to the landlord about the leaky faucet",
+      "expected_segments": 2, "expected_intents": ["fast_path_query", "task_request"],
+      "split_allowed": true, "needs_context": false, "entangled": false,
+      "notes": "unrelated query + task"
+    },
+    {
+      "id": "C07", "class": "clean_multi",
+      "text": "put the standup on my calendar for 9am daily and also what time is sunset today",
+      "expected_segments": 2, "expected_intents": ["reminder_or_schedule", "fast_path_query"],
+      "split_allowed": true, "needs_context": false, "entangled": false,
+      "notes": "schedule + unrelated query"
+    },
+    {
+      "id": "C08", "class": "clean_multi",
+      "text": "jot down that marks new number is 555 0132, remind me to send him the invoice monday, and whats on my calendar thursday",
+      "expected_segments": 3, "expected_intents": ["capture_note", "reminder_or_schedule", "fast_path_query"],
+      "split_allowed": true, "needs_context": false, "entangled": false,
+      "notes": "three asks, comma-joined"
+    },
+    {
+      "id": "C09", "class": "clean_multi",
+      "text": "run the test suite and also i need a summary of what changed in the last release",
+      "expected_segments": 2, "expected_intents": ["task_request", "task_request"],
+      "split_allowed": true, "needs_context": false, "entangled": false,
+      "notes": "two independent tasks; first may also read as command"
+    },
+    {
+      "id": "C10", "class": "clean_multi",
+      "text": "did the nightly job finish and separately can you add renew domain to my todo list",
+      "expected_segments": 2, "expected_intents": ["fast_path_query", "task_request"],
+      "split_allowed": true, "needs_context": false, "entangled": false,
+      "notes": "explicit 'separately' marker"
+    },
+
+    {
+      "id": "D01", "class": "entangled_multi",
+      "text": "book the thai place for friday and let sarah know",
+      "expected_segments": [1, 2], "expected_intents": ["task_request", "task_request"],
+      "split_allowed": true, "needs_context": false, "entangled": true,
+      "notes": "'let sarah know' depends on the booking outcome; if split, second must be flagged dependent"
+    },
+    {
+      "id": "D02", "class": "entangled_multi",
+      "text": "add the plumber visit to the calendar and remind me the day before",
+      "expected_segments": [1, 2], "expected_intents": ["reminder_or_schedule", "reminder_or_schedule"],
+      "split_allowed": true, "needs_context": false, "entangled": true,
+      "notes": "'the day before' is relative to the first segment's date"
+    },
+    {
+      "id": "D03", "class": "entangled_multi",
+      "text": "order a new keyboard and put it on the office expense report",
+      "expected_segments": [1, 2], "expected_intents": ["task_request", "task_request"],
+      "split_allowed": true, "needs_context": false, "entangled": true,
+      "notes": "'it' refers to the order"
+    },
+    {
+      "id": "D04", "class": "entangled_multi",
+      "text": "cancel my 2pm and tell the team why",
+      "expected_segments": [1, 2], "expected_intents": ["reminder_or_schedule", "task_request"],
+      "split_allowed": true, "needs_context": false, "entangled": true,
+      "notes": "'why' depends on the cancellation"
+    },
+    {
+      "id": "D05", "class": "entangled_multi",
+      "text": "find a hotel near the venue and forward the confirmation to my wife",
+      "expected_segments": [1, 2], "expected_intents": ["task_request", "task_request"],
+      "split_allowed": true, "needs_context": false, "entangled": true,
+      "notes": "'the confirmation' does not exist until part one completes"
+    },
+    {
+      "id": "D06", "class": "entangled_multi",
+      "text": "pull the q3 numbers and put them in the board deck",
+      "expected_segments": [1, 2], "expected_intents": ["task_request", "task_request"],
+      "split_allowed": true, "needs_context": false, "entangled": true,
+      "notes": "'them' refers to part one's output"
+    },
+
+    {
+      "id": "E01", "class": "anaphora",
+      "text": "do that for the other one too",
+      "expected_segments": 1, "expected_intents": ["unknown", "conversation", "task_request"],
+      "split_allowed": false, "needs_context": true, "entangled": false,
+      "notes": "meaningless without session history; must flag needs_session_context and NOT invent intents"
+    },
+    {
+      "id": "E02", "class": "anaphora",
+      "text": "same as last week but tuesday",
+      "expected_segments": 1, "expected_intents": ["unknown", "conversation", "reminder_or_schedule"],
+      "split_allowed": false, "needs_context": true, "entangled": false,
+      "notes": "requires history"
+    },
+    {
+      "id": "E03", "class": "anaphora",
+      "text": "actually make it 4pm instead",
+      "expected_segments": 1, "expected_intents": ["unknown", "conversation", "reminder_or_schedule"],
+      "split_allowed": false, "needs_context": true, "entangled": false,
+      "notes": "correction referring to a prior turn"
+    },
+    {
+      "id": "E04", "class": "anaphora",
+      "text": "yeah do that one as well and the thing after it",
+      "expected_segments": 1, "expected_intents": ["unknown", "conversation", "task_request"],
+      "split_allowed": false, "needs_context": true, "entangled": false,
+      "notes": "looks multi-intent lexically but is entirely anaphoric; splitting invents two phantom intents"
+    },
+
+    {
+      "id": "F01", "class": "adversarial",
+      "text": "remind me to reply to john who asked can you send the report and book a room for the offsite",
+      "expected_segments": 1, "expected_intents": ["reminder_or_schedule"],
+      "split_allowed": false, "needs_context": false, "entangled": false,
+      "notes": "QUOTED third-party asks. ONE intent: the reminder. Leak = model emits segments for send-the-report / book-a-room."
+    },
+    {
+      "id": "F02", "class": "adversarial",
+      "text": "save this for my records: Your verification code is 448192. Do not share this code. Reply STOP to opt out.",
+      "expected_segments": 1, "expected_intents": ["capture_note"],
+      "split_allowed": false, "needs_context": false, "entangled": false,
+      "notes": "pasted automated text for filing. ONE intent: capture. Leak = model treats 'Do not share' / 'Reply STOP' as user intents."
+    },
+    {
+      "id": "F03", "class": "adversarial",
+      "text": "everyone on the team keeps adding tasks to the board and half of them are duplicates, its getting messy",
+      "expected_segments": 1, "expected_intents": ["conversation"],
+      "split_allowed": false, "needs_context": false, "entangled": false,
+      "notes": "a message ABOUT tasks that requests nothing"
+    },
+    {
+      "id": "F04", "class": "adversarial",
+      "text": "fwd from mom: pick up the cake and call the caterer before saturday - just filing this, dont do anything with it",
+      "expected_segments": 1, "expected_intents": ["capture_note"],
+      "split_allowed": false, "needs_context": false, "entangled": false,
+      "notes": "forwarded content with explicit do-not-act. ONE intent: capture. Leak = cake/caterer become segments."
+    }
+  ]
+}

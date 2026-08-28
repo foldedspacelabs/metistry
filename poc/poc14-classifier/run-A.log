@@ -1,0 +1,128 @@
+=== PoC-14 AFM input segmenter (fresh session per item, greedy) ===
+pid=3554 run=A
+availability: available
+items: 40
+[01] A01   1455ms segs=1 multi=n ctx=n | fast_path_query
+       > whats my aws spend this month
+[02] A02   1575ms segs=3 multi=n ctx=n | command | conversation | conversation
+       > /status
+       > extra text about the deploy
+       > im worried about
+[03] A03   1045ms segs=1 multi=n ctx=n | fast_path_query
+       > did the backup run last night
+[04] A04   1137ms segs=1 multi=n ctx=n | reminder_or_schedule
+       > remind me to take the trash out at 7
+[05] A05   1162ms segs=1 multi=n ctx=n | capture_note
+       > note: garage code is 4417
+[06] A06   1003ms segs=1 multi=n ctx=n | command
+       > /deploy staging
+[07] A07   1118ms segs=1 multi=n ctx=n | conversation
+       > hows the weather lookin tomorrow
+[08] A08   1018ms segs=1 multi=n ctx=n | task_request
+       > add milk to the grocery list
+[09] B01   1358ms segs=2 multi=Y ctx=n | task_request | task_request
+       > plan the trip to portland:
+       > flights, hotel, and a dinner spot
+[10] B02   1906ms segs=3 multi=Y ctx=n | conversation | conversation | conversation
+       > ive been going back and forth on whether to renew the office lease
+       > the rent went up 12 percent but moving would cost us basically a month of downtime and the team really likes the location
+       > what would you do
+[11] B03   1811ms segs=4 multi=Y ctx=n | task_request | conversation* | conversation* | conversation*
+       > set up the new laptop the way i like it
+       > dotfiles
+       > homebrew
+       > and the ssh keys
+[12] B04   1536ms segs=2 multi=Y ctx=n | conversation | conversation
+       > i think the reason the deploy keeps failing is that the migration runs before the config reload, but im not certain about that
+       > can you look at it
+[13] B05   1828ms segs=4 multi=Y ctx=n | task_request | conversation* | conversation* | conversation*
+       > write up the quarterly summary
+       > pulling from the metrics doc
+       > the support tickets
+       > and whatevers in the retro notes
+[14] B06   1866ms segs=3 multi=Y ctx=n | conversation | conversation | conversation
+       > honestly not sure if i should take the contract
+       > the money is good but its six months of my life
+       > i already have two clients who might churn if i go quiet for that long
+[15] B07   1563ms segs=3 multi=Y ctx=n | task_request | conversation* | conversation*
+       > book a table for four somewhere nice friday night
+       > italian or french
+       > walkable from the office
+[16] B08   1501ms segs=2 multi=Y ctx=n | fast_path_query | fast_path_query
+       > whats the difference between the standard and the enterprise tier on our billing
+       > does that change if we prepay annually
+[17] C01   1446ms segs=2 multi=Y ctx=n | fast_path_query | reminder_or_schedule
+       > whats my aws spend this month
+       > also remind me to cancel the old s3 bucket friday
+[18] C02   1204ms segs=1 multi=n ctx=n | conversation
+       > note that the wifi password is hunter2seven and check if the backup ran
+[19] C03   1708ms segs=3 multi=Y ctx=n | reminder_or_schedule | fast_path_query | capture_note
+       > add dentist tuesday at 3 to my calendar
+       > whats the traffic like to downtown around then
+       > oh and remind me to bring the insurance card
+[20] C04   1894ms segs=4 multi=Y ctx=n | conversation | fast_path_query* | conversation | fast_path_query*
+       > /status and also tell me how many open PRs i have
+       > status
+       > also tell me how many open PRs i have
+       > how many open PRs i have
+[21] C05   1522ms segs=2 multi=n ctx=n | reminder_or_schedule | capture_note
+       > remind me to call the bank tomorrow
+       > and write down that the account number ends in 8812
+[22] C06   1428ms segs=2 multi=Y ctx=n | fast_path_query | task_request
+       > how much did i spend on groceries last month
+       > can you draft a note to the landlord about the leaky faucet
+[23] C07   1486ms segs=2 multi=Y ctx=n | task_request | fast_path_query
+       > put the standup on my calendar for 9am daily
+       > also what time is sunset today
+[24] C08   1853ms segs=3 multi=Y ctx=n | capture_note | reminder_or_schedule* | fast_path_query*
+       > jot down that marks new number is 555 0132
+       > remind me to send him the invoice monday
+       > whats on my calendar thursday
+[25] C09   1655ms segs=3 multi=Y ctx=n | conversation | fast_path_query* | command*
+       > run the test suite and also i need a summary of what changed in the last release
+       > fast_path_query
+       > command
+[26] C10   1437ms segs=2 multi=Y ctx=n | fast_path_query | task_request*
+       > did the nightly job finish
+       > separately can you add renew domain to my todo list
+[27] D01   1303ms segs=2 multi=Y ctx=n | task_request | conversation
+       > book the thai place for friday
+       > let sarah know
+[28] D02   1394ms segs=2 multi=Y ctx=n | task_request | reminder_or_schedule*
+       > add the plumber visit to the calendar
+       > remind me the day before
+[29] D03   1303ms segs=2 multi=Y ctx=n | task_request | task_request
+       > order a new keyboard
+       > put it on the office expense report
+[30] D04   1554ms segs=3 multi=Y ctx=n | command | conversation* | conversation*
+       > cancel my 2pm
+       > and
+       > tell the team why
+[31] D05   1273ms segs=2 multi=Y ctx=n | fast_path_query | command*
+       > find a hotel near the venue
+       > forward the confirmation to my wife
+[32] D06   1163ms segs=1 multi=n ctx=n | command
+       > pull the q3 numbers and put them in the board deck
+[33] E01   1068ms segs=1 multi=Y ctx=n | conversation
+       > do that for the other one too
+[34] E02   1102ms segs=1 multi=n ctx=n | conversation
+       > same as last week but tuesday
+[35] E03   1111ms segs=1 multi=n ctx=n | conversation
+       > actually make it 4pm instead
+[36] E04   1127ms segs=1 multi=Y ctx=n | conversation
+       > yeah do that one as well and the thing after it
+[37] F01   1347ms segs=1 multi=Y ctx=n | conversation
+       > remind me to reply to john who asked can you send the report and book a room for the offsite
+[38] F02   1512ms segs=2 multi=n ctx=n | capture_note | command
+       > save this for my records: Your verification code is 448192. Do not share this code.
+       > Reply STOP to opt out.
+[39] F03   1317ms segs=1 multi=Y ctx=n | conversation
+       > everyone on the team keeps adding tasks to the board and half of them are duplicates, its getting messy
+[40] F04   1333ms segs=1 multi=n ctx=n | conversation
+       > fwd from mom: pick up the cake and call the caterer before saturday - just filing this, dont do anything with it
+---- SUMMARY (A) ----
+total wall: 56.43 s over 40 items
+refusals: 0  errors: 0
+latency ms: mean 1411  p50 1428  p90 1853  p95 1894  min 1003  max 1906  first 1455
+wrote run-A.jsonl
+DONE

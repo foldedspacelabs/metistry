@@ -1,8 +1,14 @@
 # Metistry
 
-A local-first personal assistant and knowledge graph running on a Mac Studio.
-The assistant is **Metis** (named only in `identity.yaml`). State is durable
-(markdown in git + Postgres); agents are disposable.
+A local-first personal assistant and knowledge graph. State is durable
+(markdown in git + Postgres); agents are disposable. Apache-2.0.
+
+**This is the product repo — code only.** Each install lives in its own
+private *instance repo* (vault, `identity.yaml`, config, `metistry.lock`
+release pin), created by `metistry init` and owned by whoever runs it. Code
+flows to instances as versioned releases, never as git merges; instance data
+never flows anywhere. See build plan §4.15. The assistant's name exists only
+in an instance's `identity.yaml` (seed template in `seed/`).
 
 ## Where things are
 

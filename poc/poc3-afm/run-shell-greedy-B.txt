@@ -1,0 +1,115 @@
+=== AFM classifier ===
+pid=24394 mode=fresh host=mattsmacstudio.default.internal
+SESSION_TYPE env: 0
+TERM: <none>
+availability: available  isAvailable: true
+items: 50
+[01] 0.50s | todo | action=YES | renew car registration before friday
+      IN : renew car registration before friday
+[02] 0.41s | event | action=no  | -
+      IN : lunch w/ sarah moved to tuesday 12:30 at the thai place
+[03] 0.41s | link | action=no  | -
+      IN : https://arxiv.org/abs/2401.55512 - skim this, might be relevant to the retrieval thing
+[04] 0.43s | idea | action=no  | -
+      IN : the whole idea of "inbox zero" is kind of a scam when you think about it
+[05] 0.45s | todo | action=YES | call dentist
+      IN : need to call the dentist about rescheduling the cleaning
+[06] 0.40s | note | action=no  | -
+      IN : oat milk, coffee beans, dish soap, those crackers kate likes
+[07] 0.41s | idea | action=no  | -
+      IN : what if calendars had a "tentative until confirmed" tier by default
+[08] 0.41s | event | action=no  | -
+      IN : standup pushed to 10:15 for the rest of the sprint
+[09] 0.57s | todo | action=YES | Book flights for the Portland trip, prices going up
+      IN : book flights for the portland trip, prices going up
+[10] 0.40s | event | action=no  | -
+      IN : dad's birthday is the 14th
+[11] 0.39s | link | action=no  | -
+      IN : https://news.ycombinator.com/item?id=39201122 thread about local llm throughput
+[12] 0.39s | note | action=no  | -
+      IN : mark said the vendor contract auto-renews unless we cancel 30 days out
+[13] 0.41s | idea | action=no  | -
+      IN : been thinking about how much of my day is just context switching
+[14] 0.51s | todo | action=YES | Pick up dry cleaning from the car.
+      IN : pick up the dry cleaning, ticket is in the car
+[15] 0.41s | event | action=no  | -
+      IN : quarterly review is scheduled for sept 3, 2pm, conf room B
+[16] 0.42s | idea | action=no  | -
+      IN : idea: a tool that watches your git history and writes the standup for you
+[17] 0.39s | note | action=no  | -
+      IN : the espresso machine is making that noise again
+[18] 0.51s | todo | action=YES | send jenna the revised budget spreadsheet by EOD
+      IN : send jenna the revised budget spreadsheet by EOD
+[19] 0.40s | link | action=no  | -
+      IN : https://www.notion.so/templates/second-brain - maybe worth stealing the structure
+[20] 0.41s | note | action=no  | -
+      IN : gym membership renews automatically in october
+[21] 0.50s | event | action=YES | schedule annual physical
+      IN : schedule the annual physical, been putting it off since march
+[22] 0.41s | note | action=no  | -
+      IN : notes from the arch review: they want us off postgres by q2, unclear why
+[23] 0.39s | note | action=no  | -
+      IN : weather looks bad for saturday
+[24] 0.51s | todo | action=YES | order printer paper and toner for the office
+      IN : order more printer paper and toner for the office
+[25] 0.40s | idea | action=no  | -
+      IN : the concept of "deep work" assumes you control your own calendar
+[26] 0.55s | todo | action=YES | followup with legal re: the NDA redlines
+      IN : followup with legal re: the NDA redlines
+[27] 0.41s | event | action=no  | -
+      IN : kids school open house thursday 6pm
+[28] 0.41s | link | action=no  | -
+      IN : https://github.com/ggerganov/llama.cpp starred it, want to try the metal backend
+[29] 0.38s | idea | action=no  | -
+      IN : sometimes the best productivity system is just fewer commitments
+[30] 0.60s | todo | action=YES | file the expense report for the austin trip before the 30 day window closes
+      IN : file the expense report for the austin trip before the 30 day window closes
+[31] 0.40s | note | action=no  | -
+      IN : the new coffee place on 8th is actually good
+[32] 0.40s | note | action=no  | -
+      IN : remember tom's kid is named eli not eliot
+[33] 0.50s | todo | action=YES | cancel the extra streaming subscription we never use
+      IN : cancel the extra streaming subscription we never use
+[34] 0.41s | event | action=no  | -
+      IN : offsite is the week of oct 20, block the calendar
+[35] 0.38s | idea | action=no  | -
+      IN : read that book on systems thinking someone recommended
+[36] 0.38s | link | action=no  | -
+      IN : https://stripe.com/docs/webhooks need to check idempotency handling here
+[37] 0.38s | idea | action=no  | -
+      IN : i wonder if anyone actually reads the release notes
+[38] 0.48s | todo | action=YES | Replace furnace filter
+      IN : replace the furnace filter, it's been like 6 months
+[39] 0.41s | event | action=no  | -
+      IN : sync w/ design moved from wed to thurs same time
+[40] 0.51s | todo | action=YES | Go grocery shopping.
+      IN : grocery: eggs, spinach, greek yogurt, whatever bread is on sale
+[41] 0.41s | idea | action=no  | -
+      IN : the phrase "circle back" should be retired
+[42] 0.50s | todo | action=YES | email the landlord about the leaking faucet in the guest bath
+      IN : email the landlord about the leaking faucet in the guest bath
+[43] 0.54s | todo | action=YES | Submit CFP by Sept 15
+      IN : conference talk CFP closes sept 15 if i want to submit
+[44] 0.40s | idea | action=no  | -
+      IN : random thought: most meetings are just status updates with extra steps
+[45] 0.45s | todo | action=YES | back up photos
+      IN : back up the photos from the trip before the phone fills up
+[46] 0.41s | note | action=no  | -
+      IN : sarah mentioned she's leaving in november, probably confidential
+[47] 0.39s | link | action=no  | -
+      IN : https://old.reddit.com/r/selfhosted/comments/xyz good writeup on backup strategies
+[48] 0.45s | todo | action=YES | Buy a new charger
+      IN : buy a new charger, the old one only works at a weird angle
+[49] 0.39s | note | action=no  | -
+      IN : the parking garage closes at 9 now apparently
+[50] 0.56s | todo | action=YES | update beneficiary info on 401k
+      IN : update the beneficiary info on the 401k, been meaning to do it forever
+---- SUMMARY ----
+total wall time: 21.99 s
+items: 50  errors: 0  has_action=true: 17
+items/sec: 2.274
+first call: 0.50 s
+mean: 0.44 s  median: 0.41 s  min: 0.38 s  max: 0.60 s
+mean excluding first call: 0.44 s -> 2.281 items/sec steady
+peak-ish resident memory: 11.5 MB
+DONE

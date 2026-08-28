@@ -1,0 +1,37 @@
+=== PoC-5 rebuild: 2026-08-27T04:22:32Z ===
+--- 1. Rebuilding DDL (schema.sql: drop + recreate table + HNSW index) ---
+psql:/Users/mattcolf/Development/Metistry/.claude/worktrees/metistry-phase-0-poc-12cdbc/poc/poc5-pgvector/schema.sql:6: NOTICE:  extension "vector" already exists, skipping
+CREATE EXTENSION
+DROP TABLE
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+DDL rebuild took 42ms
+--- 2. Rebuilding data (embed pipeline: corpus/*.md -> Ollama -> pgvector) ---
+Found 120 corpus files in /Users/mattcolf/Development/Metistry/.claude/worktrees/metistry-phase-0-poc-12cdbc/poc/poc5-pgvector/corpus
+Chunked into 244 chunks from 120 notes (2.03 chunks/note avg) in 4.76ms
+  embedded 16/244  embedded 32/244  embedded 48/244  embedded 64/244  embedded 80/244  embedded 96/244  embedded 112/244  embedded 128/244  embedded 144/244  embedded 160/244  embedded 176/244  embedded 192/244  embedded 208/244  embedded 224/244  embedded 240/244  embedded 244/244
+Embedded 244 chunks in 1934.57ms (126.13 chunks/sec, 244 batches of up to 16, batch time min/avg/max = 35.91/120.85/167.87ms)
+TRUNCATE TABLE
+COPY 244
+DB insert (TRUNCATE + \copy) took 240.16ms for 244 rows (1015.97 rows/sec)
+
+Total wall time: 2220.21ms
+{
+  "notes": 120,
+  "chunks": 244,
+  "chunk_time_ms": 4.760916000000002,
+  "embed_time_ms": 1934.571833,
+  "embed_chunks_per_sec": 126.1260997590468,
+  "insert_time_ms": 240.16454199999998,
+  "total_time_ms": 2220.209708
+}
+--- 3. Post-rebuild verification ---
+row_count=244 note_count=120 sorted_hash_digest=ab2b001209c8a4ca775c04fda4a782e8
+=== Rebuild complete. Summary written to .last_rebuild.json ===
+{
+  "timestamp": "2026-08-27T04:22:34Z",
+  "row_count": 244,
+  "note_count": 120,
+  "sorted_hash_digest": "ab2b001209c8a4ca775c04fda4a782e8"
+}

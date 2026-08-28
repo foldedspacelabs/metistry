@@ -1,0 +1,9 @@
+{
+  "name": "open_work",
+  "description": "List work items that are not closed, most recently updated first.",
+  "params": {
+    "limit": { "type": "int", "default": 20 }
+  },
+  "sql": "SELECT id,title,area,status,updated_at FROM work WHERE status <> 'closed' ORDER BY updated_at DESC LIMIT :limit",
+  "cache_ttl": 60
+}

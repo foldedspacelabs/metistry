@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>metistry.poc13.export</string>
+  <key>ProgramArguments</key><array>
+    <string>/opt/homebrew/bin/node</string>
+    <string>/Users/mattcolf/Development/Metistry/.claude/worktrees/metistry-phase-0-poc-12cdbc/poc/poc13-comms/export.mjs</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><false/>
+  <key>StandardOutPath</key><string>/Users/mattcolf/Development/Metistry/.claude/worktrees/metistry-phase-0-poc-12cdbc/poc/poc13-comms/export.out.txt</string>
+  <key>StandardErrorPath</key><string>/Users/mattcolf/Development/Metistry/.claude/worktrees/metistry-phase-0-poc-12cdbc/poc/poc13-comms/export.err.txt</string>
+</dict></plist>

@@ -1,0 +1,17 @@
+=== ekpoc request @ 2026-08-27T03:41:48Z ===
+INFO pid 85849
+INFO ppid 85846
+INFO binary ./ekpoc
+INFO uid 501
+INFO env.XPC_SERVICE_NAME 0
+INFO env.TERM <unset>
+INFO env.SSH_TTY <unset>
+INFO tty.stdin no
+INFO infoPlist.embedded yes keys=CFBundleExecutable,CFBundleIdentifier,CFBundleName,CFBundleShortVersionString,CFBundleVersion,NSCalendarsFullAccessUsageDescription,NSCalendarsUsageDescription,NSRemindersFullAccessUsageDescription,NSRemindersUsageDescription
+INFO auth.event.before notDetermined(0)
+INFO auth.reminder.before notDetermined(0)
+STEP 1 request.events OK granted=false err=none wait=returned
+STEP 2 request.reminders OK granted=false err=none wait=returned
+INFO auth.event.after notDetermined(0)
+INFO auth.reminder.after notDetermined(0)
+RESULT FAIL not fully granted (events=false reminders=false)

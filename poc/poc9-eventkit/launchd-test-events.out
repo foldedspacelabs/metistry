@@ -1,0 +1,23 @@
+=== ekpoc test-events @ 2026-08-28T02:58:57Z ===
+INFO pid 38480
+INFO ppid 1
+INFO binary /Users/mattcolf/Development/Metistry/.claude/worktrees/metistry-phase-0-poc-12cdbc/poc/poc9-eventkit/ekpoc
+INFO uid 501
+INFO env.XPC_SERVICE_NAME metistry.poc9
+INFO env.TERM <unset>
+INFO env.SSH_TTY <unset>
+INFO tty.stdin no
+INFO infoPlist.embedded yes keys=CFBundleExecutable,CFBundleIdentifier,CFBundleName,CFBundleShortVersionString,CFBundleVersion,NSCalendarsFullAccessUsageDescription,NSCalendarsUsageDescription,NSRemindersFullAccessUsageDescription,NSRemindersUsageDescription
+INFO auth.event fullAccess/authorized(3)
+INFO source type=4 title=Subscribed Calendars calendars(event)=1
+INFO source type=2 title=iCloud calendars(event)=12
+INFO source type=5 title=Other calendars(event)=1
+INFO calendar.created A6131001-47FF-46CB-8103-9A2CF66BE556 source=iCloud type=2
+STEP 1 events.calendar OK title=Metistry PoC id=A6131001-47FF-46CB-8103-9A2CF66BE556 source=iCloud allowsMod=true
+STEP 2 events.create OK id=D948F05A-4157-42DC-BAD3-D5F7629731E8:7B3833A7-8DE2-46FC-8064-F47AFCD2D92A start=2026-08-28 14:00:00 +0000 end=2026-08-28 14:30:00 +0000
+STEP 3 events.read OK title=PoC-9 test event start=2026-08-28 14:00:00 +0000
+STEP 4 events.query OK matches=1
+STEP 5 events.update OK newTitle=PoC-9 test event (updated)
+STEP 6 events.read2 OK title=PoC-9 test event (updated)
+STEP 7 events.delete OK byIdentifier=gone byQuery=0
+RESULT PASS

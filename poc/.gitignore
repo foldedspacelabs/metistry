@@ -1,0 +1,29 @@
+# --- personal-data exports: never commit (raw message bodies / leaky rows) ---
+poc13-comms/messages-200.jsonl
+poc13-comms/messages-200.tsv
+poc13-comms/stage2.jsonl
+poc13-comms/run-extract.txt
+poc13-comms/run-extract.err.txt
+poc13-comms/export.out.txt
+poc13-comms/export2.out.txt
+poc13-comms/_calib_*.txt
+
+# --- keys, live push subscriptions, server logs ---
+poc6-pwa/vapid.json
+poc6-pwa/subscriptions.json
+poc6-pwa/server.log
+
+# --- bulky test artifacts (regenerable) ---
+poc7-capture/inbox/
+poc7-capture/fixtures/
+poc4-container/home/
+
+# --- compiled binaries (rebuild from source) ---
+poc3-afm/afm_check
+poc3-afm/afm_classify
+poc3-afm/afm_classify_greedy
+poc9-eventkit/ekpoc
+poc9-eventkit/lockstate
+poc13-comms/afm_extract
+poc14-classifier/afm_segment
+poc14-classifier/__pycache__/

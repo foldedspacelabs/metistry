@@ -1,0 +1,50 @@
+renew car registration before friday
+lunch w/ sarah moved to tuesday 12:30 at the thai place
+https://arxiv.org/abs/2401.55512 - skim this, might be relevant to the retrieval thing
+the whole idea of "inbox zero" is kind of a scam when you think about it
+need to call the dentist about rescheduling the cleaning
+oat milk, coffee beans, dish soap, those crackers kate likes
+what if calendars had a "tentative until confirmed" tier by default
+standup pushed to 10:15 for the rest of the sprint
+book flights for the portland trip, prices going up
+dad's birthday is the 14th
+https://news.ycombinator.com/item?id=39201122 thread about local llm throughput
+mark said the vendor contract auto-renews unless we cancel 30 days out
+been thinking about how much of my day is just context switching
+pick up the dry cleaning, ticket is in the car
+quarterly review is scheduled for sept 3, 2pm, conf room B
+idea: a tool that watches your git history and writes the standup for you
+the espresso machine is making that noise again
+send jenna the revised budget spreadsheet by EOD
+https://www.notion.so/templates/second-brain - maybe worth stealing the structure
+gym membership renews automatically in october
+schedule the annual physical, been putting it off since march
+notes from the arch review: they want us off postgres by q2, unclear why
+weather looks bad for saturday
+order more printer paper and toner for the office
+the concept of "deep work" assumes you control your own calendar
+followup with legal re: the NDA redlines
+kids school open house thursday 6pm
+https://github.com/ggerganov/llama.cpp starred it, want to try the metal backend
+sometimes the best productivity system is just fewer commitments
+file the expense report for the austin trip before the 30 day window closes
+the new coffee place on 8th is actually good
+remember tom's kid is named eli not eliot
+cancel the extra streaming subscription we never use
+offsite is the week of oct 20, block the calendar
+read that book on systems thinking someone recommended
+https://stripe.com/docs/webhooks need to check idempotency handling here
+i wonder if anyone actually reads the release notes
+replace the furnace filter, it's been like 6 months
+sync w/ design moved from wed to thurs same time
+grocery: eggs, spinach, greek yogurt, whatever bread is on sale
+the phrase "circle back" should be retired
+email the landlord about the leaking faucet in the guest bath
+conference talk CFP closes sept 15 if i want to submit
+random thought: most meetings are just status updates with extra steps
+back up the photos from the trip before the phone fills up
+sarah mentioned she's leaving in november, probably confidential
+https://old.reddit.com/r/selfhosted/comments/xyz good writeup on backup strategies
+buy a new charger, the old one only works at a weird angle
+the parking garage closes at 9 now apparently
+update the beneficiary info on the 401k, been meaning to do it forever

@@ -1,0 +1,22 @@
+#!/bin/sh
+# Refuse direct pushes to main — all work lands via PR (repo governance §4.6).
+# Server-side rulesets are unavailable on this private repo's plan tier, so
+# this hook is the enforcement layer on every machine we control.
+# Escape hatch for genuine emergencies: METISTRY_ALLOW_MAIN_PUSH=1 git push …
+set -eu
+
+if [ "${METISTRY_ALLOW_MAIN_PUSH:-0}" = "1" ]; then
+  exit 0
+fi
+
+while read -r _local_ref _local_sha remote_ref _remote_sha; do
+  case "$remote_ref" in
+    refs/heads/main)
+      echo "pre-push: refusing direct push to main — open a PR instead." >&2
+      echo "pre-push: (override for emergencies: METISTRY_ALLOW_MAIN_PUSH=1)" >&2
+      exit 1
+      ;;
+  esac
+done
+
+exit 0

@@ -1,0 +1,25 @@
+# Metistry substrate. Everything configurable comes from environment (.env);
+# nothing assumes Docker Desktop or a particular host layout.
+name: metistry
+
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${METISTRY_DB_NAME:-metistry}
+      POSTGRES_USER: ${METISTRY_DB_USER:-metistry}
+      POSTGRES_PASSWORD: ${METISTRY_DB_PASSWORD:?set METISTRY_DB_PASSWORD in .env}
+    ports:
+      # loopback only — remote access rides the tailnet, never a LAN bind
+      - "127.0.0.1:${METISTRY_DB_PORT:-5432}:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${METISTRY_DB_USER:-metistry} -d ${METISTRY_DB_NAME:-metistry}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  db-data:

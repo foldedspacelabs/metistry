@@ -430,12 +430,19 @@ Sonnet has no niche between Haiku and Opus.
 ### Phase 1 — Substrate (weekend)
 
 - Monorepo skeleton: pnpm workspaces, changesets, `apps/` + `packages/`
-- `packages/core` — manifest schema, lazy-discovery helpers, redaction,
-  preview-confirm, and the `check()` interface every component implements
+- `packages/core` — manifest schema, lazy-discovery helpers, redaction
+  (inputs AND model-generated output, §4.3), preview-confirm, and the
+  `check()` interface every component implements
+- **Lazy-discovery spike before core's interface freezes** (§4.3 caveat): one
+  toy bridge, lazy vs eager, scripted Haiku tasks — does the meta-tool
+  indirection actually work at the Haiku tier, and what does the discovery
+  round-trip cost?
 - `CLAUDE.md`, `now.md`, `identity.yaml`, `.env.example`
 - `docker-compose.yml`: Postgres + pgvector
 - `db/migrations/0001` — `runs`, `inbox`, `sessions`, `work`, `metrics`,
-  `knowledge_files`, `knowledge_links`, `embeddings`
+  `knowledge_files`, `knowledge_links`, `embeddings`. The `sessions` schema is
+  designed for **re-briefing, not transcript reconstruction** (§4.16 rule 6):
+  thread identity, rolling summary, key decisions, open loops, refs.
 - `ops/scripts/backup.sh` + restore-test script
 - CI **on Linux** from day one: migrations apply cleanly, manifests validate,
   path-case check passes
@@ -586,6 +593,13 @@ three meta-tools — `tool_index`, `execute`, `batch` — instead of its full su
 A bridge with 40 tools costs 3 in the prompt; the agent discovers when it needs
 to. This is what lets the assistant carry real capability without the per-turn
 floor climbing. `eager` stays available for small, always-needed bridges.
+*Caveat: this is the largest design claim Phase 0 did NOT test.* The token
+measurement is real, but whether models (Haiku especially) drive the
+meta-tool indirection reliably — and what the extra discovery round-trip costs
+per turn — is unproven. **Phase 1 includes a cheap spike** (one toy bridge,
+lazy vs eager, scripted Haiku tasks) *before* the discovery interface is
+frozen into `core`; every bridge inherits this, so learning its failure modes
+after Phase 2 would be the expensive version.
 
 **2. Preview-then-confirm on mutations.** Any `destructive: true` tool returns a
 diff of what *would* change and requires a second confirming call. Generalizes
@@ -848,9 +862,15 @@ sufficient: the deterministic prefilter above; making `date_ref`/`entity`/
 than confabulate (a fabricated date is itself a rejection signal); past-vs-
 future tense discrimination; and dedup by action string before surfacing.
 **Recommendation:** keep §4.11 "build this last," and gate it behind a re-run
-of PoC-13 that clears a real precision bar (say ≥80% on a held-out set) before
-any comms ingest is written. Until then the reducer is a research task, not a
-build task.
+of PoC-13 that clears a two-sided bar before any comms ingest is written:
+**≥80% precision on a held-out labeled set, AND zero misses on a hand-labeled
+"must-catch" stratum** of genuinely high-stakes items — precision alone can be
+gamed by timidity (a reducer that flags two items a month is 100% precise and
+useless, and PoC-13's worst single result was a *recall* failure: it missed a
+job-offer message while flagging OTP texts). The eval protocol — corpus size,
+who labels, what's held out, how the must-catch stratum is chosen — gets
+defined when the re-run is scoped, not improvised mid-run. Until the bar is
+cleared, the reducer is a research task, not a build task.
 
 **Retention.** The aggregate is more sensitive than any item — continuous
 visibility across mail, messages, and calls builds a picture no single message
@@ -1074,7 +1094,15 @@ variants were observed in Phase 0 — Homebrew `node`'s versioned path, the
 which silently drops the grant when its identity changes (a `brew upgrade`, a
 CLI auto-update, a one-character source edit). So the Messages, EventKit, and
 Apple FM bridges ship as purpose-built binaries with a **stable signing
-identity**, not `node script.mjs` under launchd. `mcp-apple-fm` specifically is
+identity**, not `node script.mjs` under launchd. The identity is the user's
+existing **Developer ID Application certificate** (an active Apple Developer
+account already exists — no new cost): TCC grants then follow Team ID + code
+requirement and survive rebuilds and source edits, and signed + notarized
+prebuilt binaries can ship inside the npm packages, keeping the
+stranger-runs-`npx` story intact (each machine's user still clicks their own
+consent prompts, which is correct). Operational notes, not blockers:
+notarization becomes a release step, and CI signing needs certificate
+management if releases ever move off this Mac. `mcp-apple-fm` specifically is
 a thin MCP server that shells out to a compiled **Swift** helper — the
 FoundationModels framework is Swift-only (no Python/ObjC surface), and the
 helper is where the `sk`-free, model-load-amortized inference happens (4096-token
@@ -1124,10 +1152,20 @@ option open costs almost nothing if the rules below hold from the start.
 4. **The reconciler accepts two triggers** — `fswatch` locally, a git webhook in
    cloud. There is no filesystem to watch on a hosted clone.
 5. **Capture is HTTP-first.** iCloud Drive is a `local-mac` convenience only.
-6. **Session state must be reconstructable from Postgres,** not only from the
-   SDK's on-disk transcripts. The transcript is a cache; the `sessions` table is
-   the record. (PoC-4 confirmed transcripts persist across `docker restart` via
-   the mounted volume, but the `sessions` table remains the authority.)
+6. **Sessions must be re-briefable from Postgres; transcripts are a resume
+   fast-path, not the record.** Stated precisely, because the strong version
+   is not achievable: the Agent SDK resumes only from its on-disk transcript
+   JSONL, and that format is internal — bit-for-bit session reconstruction
+   from a database is not supported and we do not build on undocumented
+   internals. What the `sessions` table guarantees instead: enough state
+   (thread identity, rolling summary, key decisions, open loops, refs) that on
+   transcript loss, a **fresh session UUID re-briefs via `brain-query` and
+   continues the thread** — §4.10's "the brief is the context transfer,"
+   applied to the assistant itself. Verbatim memory of old turns is lost in
+   that case; continuity of knowledge is not. (PoC-4 confirmed transcripts
+   survive `docker restart` via the mounted volume, so re-briefing is the
+   recovery path, not the daily path.) Phase 2 adds the test: delete the
+   transcript, re-brief, verify the thread continues sensibly.
 7. **Container auth is a subscription `setup-token` (PoC-4).** Mint on the host
    with `claude setup-token`, inject as `CLAUDE_CODE_OAUTH_TOKEN` via env/secret
    (never bake into the image). Never set `ANTHROPIC_API_KEY` in-container — it
@@ -1226,11 +1264,13 @@ Worth settling before Phase 1, since each is cheap now and annoying later.
 
 **Resolved by Phase 0**
 
-8. **Embedding model → local Ollama `nomic-embed-text` (768d).** PoC-5
-   validated the mechanics: ~125 chunks/sec, deterministic rebuild script,
-   model+dim stored per row so the choice stays reversible. Retrieval *quality*
-   on real notes is still unproven (deferred until the vault has content), but
-   the model choice is settled unless quality later demands otherwise.
+8. **Embedding model → local Ollama `nomic-embed-text` (768d), as working
+   default.** PoC-5 validated the mechanics: ~125 chunks/sec, deterministic
+   rebuild script, model+dim stored per row so the choice stays reversible.
+   The choice is only truly settled once retrieval quality on the real vault
+   is judged — the deliberately deferred half of PoC-5. Until then this is the
+   default, and the per-row model/dim + 45-second full-rebuild story is what
+   makes revisiting it cheap.
 9. **Metis in Docker or native → DOCKER.** PoC-4 passed every leg: networking
    (explicit `add-host`, no Docker-Desktop magic), auth (subscription
    `setup-token` in `CLAUDE_CODE_OAUTH_TOKEN`, never `ANTHROPIC_API_KEY`), and

@@ -310,21 +310,42 @@ local) + the running `poc8-pg` pgvector container. All in `poc/poc5-pgvector/`.
 writing — remains open by design** until the new vault accumulates content.
 Consistent with Phase 6 being deliberately last.
 
-## PoC-11 — watchdog independence (partial, in progress)
+## PoC-11 — watchdog independence
 
 | | |
 |---|---|
-| Status | PARTIAL (probes PASS; send pending user run) |
-| Date | 2026-08-26 |
+| Status | PASS |
+| Date | 2026-08-28 |
 
-Three probes with zero model / zero Anthropic dependency all work from a
-script: Claude credential presence via Keychain existence check (no value
-read), Docker daemon liveness via `docker info` exit code, collector
-staleness via marker-file mtime (correctly flagged a backdated file as
-STALE). The outbound iMessage send via osascript was blocked by the session's
-permission layer (correctly — outbound message); the user is running the
-interactive and launchd send variants directly. Automation TCC grant
-observations to be recorded from that.
+Three probes with zero model / zero Anthropic dependency, plus an out-of-band
+iMessage self-send via osascript — the whole "told Metis is broken by
+something that isn't Metis" path has no model and no Anthropic call anywhere.
+
+- **Probes:** Claude credential presence via Keychain existence check (no
+  value read), Docker daemon liveness via `docker info`, collector staleness
+  via marker-file mtime. All correct (STALE fired on a backdated marker).
+- **Send, interactive (Terminal):** `SEND: ok`, message delivered, after the
+  user approved a one-time "Terminal wants to control Messages" Automation
+  prompt.
+- **Send, headless (launchd job):** `SEND: ok`, message delivered — but it
+  raised its **own** Automation prompt (attributed to the launchd job, not
+  Terminal). Same responsible-process rule as PoC-1/9 on a third TCC
+  subsystem (Apple Events): the grant is per-responsible-binary, so the
+  production watchdog binary needs its Automation grant established once. A
+  purely unattended first run can't self-raise that UI — pre-seed it.
+
+**Bonus finding (launchd minimal environment):** the headless run reported
+`docker:DOWN` while Docker was in fact up — the launchd job's PATH
+(`/usr/bin:/bin:...`) doesn't include Docker Desktop's CLI, so `docker info`
+was "command not found," not a real outage. Watchdog probes must use absolute
+binary paths (or set PATH explicitly); otherwise a launchd watchdog
+false-alarms. Exactly the class of bug a watchdog exists to avoid, caught
+here.
+
+Note: the sending code (osascript → Messages) is blocked by this session's
+own auto-mode classifier, correctly — an agent should not send messages on
+the user's behalf. The user ran both send legs; findings above are from those
+runs.
 
 ## PoC-6 — Tailscale + PWA + web push on iOS
 

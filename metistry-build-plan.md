@@ -486,7 +486,9 @@ can see your own token spend split by tier.
 ### Phase 5 — Delegation (ongoing)
 
 - Crew definitions with their own toolsets
-- `@agent` dispatch → GitHub issues
+- **Compute-target registry (§4.17)** — dispatch generalized from
+  GitHub-issues-only to manifest-defined targets (MCP-first)
+- `@agent` dispatch → GitHub issues (the first target)
 - `brain-query` MCP bridge exposing named queries to Metis
 - Weekly review routine
 
@@ -681,7 +683,7 @@ One definition, four consumers. Adding a query is a file, not a deploy.
 
 ```yaml
 name: aws-costs
-type: collector          # bridge | collector | agent | routine
+type: collector          # bridge | collector | agent | routine | target (§4.17)
 schedule: "0 */6 * * *"  # collectors and routines
 writes: [metrics]        # tables or paths
 reads: []
@@ -1220,6 +1222,62 @@ option open costs almost nothing if the rules below hold from the start.
 **Case sensitivity is the sleeper issue.** Every path bug that macOS forgives, a
 Linux container surfaces. CI runs on Linux from Phase 1 for exactly this reason.
 
+### 4.17 Flexible compute (added 2026-08-28)
+
+The user configures what compute runs where — Claude subscription, other
+providers' APIs, local models, and external systems — without the router ever
+becoming model-driven. Three mechanisms, in increasing order of cost, and the
+constraint that binds all three: **v1 validates Claude-primary plus one
+alternate path; everything else is supported-by-configuration, not promised.**
+
+**A. Model configuration inside the assistant (now).** The Agent SDK reads
+model names and endpoint from environment; a gateway (LiteLLM-style,
+Bedrock, Vertex) puts non-Anthropic models behind the same interface. So
+provider choice is instance config (`deployment.yaml` + env), not
+architecture. Stated plainly in docs: *configurable ≠ equal quality* — the
+operating prompt, escalation behavior, and skills are tuned against Claude;
+alternates run untested by upstream. Economic note: since programmatic Agent
+SDK use draws metered subscription credits at API rates (verified 2026-05),
+routing *routines* to a cheaper API backend while interactive stays on
+subscription is a legitimate arbitrage this layer enables.
+
+**B. Compute targets (Phase 5).** A **target** is a directory with a manifest
+(invariant 5): how to submit work, how results return, auth ref, cost
+profile, and a **data policy** stating what a brief bound for this target may
+contain — enforced at the dispatch tool, so "comms-derived content never
+leaves the machine" is a machine rule, not a memory. Targets include local
+subagents, headless CLI runs, GitHub Actions, cloud agent platforms, and any
+external system speaking MCP. **MCP-first is the discipline**: bespoke
+integrations are the maintenance long tail that kills one-person projects
+(see prior-art review); an external platform earns a target by exposing MCP
+or a webhook contract, not by us writing an adapter. Results land in the
+existing report queue; every dispatch logs to `runs` with cost, so per-target
+spend is queryable for free.
+
+```yaml
+name: cloud-worker
+type: target
+transport: mcp                 # mcp | http | github | local
+submit: { tool: run_task }     # how work goes in
+result: { via: report_queue }  # how it comes back
+auth: env:CLOUD_WORKER_TOKEN
+cost: { per_run_estimate_usd: 0.10 }
+data_policy: no_personal_comms # what a brief may carry — enforced at dispatch
+```
+
+**C. Swappable assistant engines (contract, not abstraction).** The assistant
+is a container with a defined contract: messages in from the router,
+`sessions` rows in Postgres, brain tools via MCP, every call logged to
+`runs`. That contract is documented; the product ships exactly **one** engine
+(Claude Agent SDK — the reference engine). Anyone can build another container
+honoring the contract. No in-process provider-abstraction layer inside the
+engine — flexibility lives at the container boundary, so the primary path
+pays zero complexity tax.
+
+**What does not change:** invariant 4. Routing between tiers and targets is
+rule-based configuration the user authors (`rules.yaml`, agent manifests) —
+no model ever selects compute. Collectors still never call models.
+
 ## 5. Growing it
 
 Each component type has one recipe. That's the whole maintainability story.
@@ -1343,8 +1401,11 @@ Worth settling before Phase 1, since each is cheap now and annoying later.
 
 ## 7. Frameworks — decisions
 
-**Claude Agent SDK** — Metis. Already chosen. It is the agent framework; it is
-explicitly a building block rather than an orchestration platform.
+**Claude Agent SDK** — Metis. Already chosen, now framed precisely: it is the
+**reference engine** behind the documented assistant contract (§4.17.C). It
+is the agent framework for the shipped engine — explicitly a building block
+rather than an orchestration platform — and model/provider variation happens
+via configuration (§4.17.A), never via an in-process abstraction layer.
 
 **Home Assistant** — recommended. Docker on the Mac. Gives HomeKit device state,
 RTSP camera handling, presence, sensor history, and automation triggers with an

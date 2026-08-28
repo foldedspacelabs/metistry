@@ -145,6 +145,54 @@ Six rules. Every later decision should be checkable against these.
 Ordered by how much of the design dies if the answer is no. Each should take
 under an hour. Do not start Phase 1 until PoC-1 through PoC-4 pass.
 
+### Outcomes (2026-08-28) — Phase 0 complete
+
+Full evidence in `poc/RESULTS.md`. Summary:
+
+| PoC | Result | What it settled |
+|---|---|---|
+| 1 MCP+TCC headless | **PASS** | The headless door works. TCC attributes access to the responsible process, so a stdio MCP server inherits the *agent's* TCC identity — an HTTP bridge as its own launchd service is the only shape that works without granting FDA to the agent binary. |
+| 2 iMessage attachments | **PASS** | Text door + *opportunistic* media door: ~89% of images older than a few days are iCloud-offloaded, but a just-received image is on disk within a minute. Copy-on-detect works; the share sheet is the canonical media path. |
+| 3 Apple FM headless | **PASS** | 2.2 items/sec under launchd, byte-identical to interactive. Swift-only (no Python SDK). 4096-token context, fresh session per item. |
+| 4 Container → host bridge | **PASS** | Networking (explicit `add-host`, no Desktop magic), subscription-token auth, and session-survives-restart all pass. **Decision #9 = Docker.** |
+| 5 pgvector | **PASS (mechanics)** | Ollama `nomic-embed-text` (768d), ~125 chunks/sec, deterministic rebuild. Retrieval *quality* deferred until the real vault has content. |
+| 6 PWA + web push | **PASS** | Delivered to iPhone over the tailnet. VAPID `sub` must be a real contact (Apple rejects `example.invalid`); tailnet needs Serve + HTTPS enabled. |
+| 7 HTTP capture | **PASS** | All surfaces incl. a 25 MB binary, byte-identical. |
+| 8 Router fast path | **PASS** | 0.6 ms cached / 24 ms uncached vs the 200 ms bar. Real console needs a persistent pg pool, not `psql` subprocesses. |
+| 9 EventKit writes | **PASS** | Calendar + Reminders CRUD under launchd; iPhone sync confirmed. |
+| 10 RTSP camera | **DEFERRED** | No RTSP hardware (HomeKit-only). |
+| 11 Watchdog independence | **PASS** | Model-free probes + out-of-band iMessage send, interactive and headless. |
+| 12 Obsidian Sync | **DEFERRED** | No Sync subscription yet; new vault built from scratch. |
+| 13 Comms reduction | **FAIL (quality)** | Plumbing works; extraction precision ~30% fails the bar as configured. See §4.11 — revised. |
+| 14 Local input classifier | **FAIL** | A user-proposed pre-router classifier; over-split 42–54% on must-not-split inputs and promoted quoted/forwarded text to intent. Invariant 4 stands; see §4.1. |
+
+**Hard requirements Phase 0 forced into the design (each is "enforce at the
+tool," and each is now load-bearing rather than stylistic):**
+
+1. **TCC-bound bridges are HTTP services of their own** — never stdio spawned
+   by the agent (the agent's TCC identity would govern). See §4.3.
+2. **The native tier is stable-identity *signed* binaries.** Three grant-rot
+   variants were observed — Homebrew `node`'s versioned Cellar path, the
+   `claude` CLI's versioned path, and an ad-hoc-signed binary's cdhash — each
+   silently drops a TCC grant when its identity changes. A purpose-built,
+   stably-signed binary per TCC bridge is required, not optional. See §4.15.
+3. **`check()`/doctor probes behavior in the bridge's own context**, never a
+   permission API. Three silent/mis-reporting failure modes were found:
+   FDA denials are invisible to Claude's permission layer, unauthorized
+   EventKit returns an empty world with no error, and TCC status reads are
+   themselves responsible-process-bound. See §4.3, §4.15.
+4. **Model output gets a deterministic redaction pass before it is trusted as
+   low-sensitivity.** A local model copied a live OTP verbatim into a
+   "body-free" structured field despite explicit prompt instructions. Prompt
+   rules are not a control. See §4.3, §4.11.
+5. **The Messages bridge must decode `attributedBody`** — `message.text` is
+   NULL on ~99% of recent messages. Mail ingest needs no IMAP: the local
+   `~/Library/Mail` `.emlx` store is present and large. See §4.11.
+6. **Container config is Linux-portable by construction** — explicit
+   `extra_hosts: host-gateway`, bridge URLs from env, subscription token via
+   `CLAUDE_CODE_OAUTH_TOKEN` (never set `ANTHROPIC_API_KEY` in-container). See
+   §4.16, §6 #9.
+
 ### PoC-1 — MCP tool call under `claude -p` with macOS permissions
 
 **Assumption:** a non-interactive session can invoke a tool that needs Full Disk
@@ -475,6 +523,20 @@ can audit whether it escalates sensibly and tune the threshold.
 **Every fast-path answer carries a freshness stamp** ("as of 14 min ago") so stale
 collectors are visible rather than silently wrong.
 
+**Rejected (PoC-14): a local-model "classifier" pre-stage** that would parse
+input, detect commands, and split multi-intent messages before the router.
+Tested at the user's request with an amendment to invariant 4 on the table. It
+failed: 42–54% over-split rate on inputs that must not be split, it promoted
+quoted and forwarded third-party text to first-person intent (including
+overriding an explicit "don't do anything with this"), and its own confidence
+flags were anti-correlated with truth. **Invariant 4 stands as written** — the
+router is deterministic; multi-intent decomposition stays with Metis, which
+has the session context a stateless classifier lacks. The only defensible
+remnant, if ever wanted, is a split *suggestion* surfaced for user
+confirmation (never acted on silently) behind a deterministic pre-filter that
+skips quotes, pastes, forward markers, and URLs. The PoC-14 fixtures are a
+ready-made eval if a stronger local model later warrants a re-test.
+
 ### 4.2 Console HTTP API
 
 Runs on the Mac, exposed over Tailscale. Three consumers: PWA, Shortcuts, Obsidian.
@@ -503,7 +565,7 @@ someone who has never heard of this project.
 ```yaml
 name: messages
 type: bridge
-transport: http          # or stdio
+transport: http          # stdio only for NON-TCC bridges — see rule below
 port: 7801
 runs_on: host            # host | container
 requires_tcc: [full_disk_access, automation]
@@ -529,17 +591,36 @@ floor climbing. `eager` stays available for small, always-needed bridges.
 diff of what *would* change and requires a second confirming call. Generalizes
 better than prompt-level caution, because the bridge enforces it.
 
-**3. Secret redaction by default.** Known secret fields — tokens, keys,
-passphrases, credentials — return `***REDACTED***` so they never enter agent
-context, transcripts, or logs. Opt out per-process only, never per-call. Passing
-the placeholder back is rejected so it can't be written as a real value.
+**3. Secret redaction by default — of inputs AND model-generated output.**
+Known secret fields — tokens, keys, passphrases, credentials — return
+`***REDACTED***` so they never enter agent context, transcripts, or logs. Opt
+out per-process only, never per-call. Passing the placeholder back is rejected
+so it can't be written as a real value. **PoC-13 forced this wider:** a bridge
+that returns model-*generated* structured data (the comms reducer, §4.11) must
+run a deterministic redaction pass over that output — digit-run scrubbing for
+OTP/PIN/card/phone, capitalized-token filtering for names — because a local
+model copied a live verification code verbatim into a field that was supposed
+to be body-free, ignoring an explicit prompt instruction not to. Prompt rules
+are not a control; the bridge must be mechanically incapable of emitting the
+forbidden shape.
+
+**Transport is not free choice for TCC bridges (PoC-1).** A stdio MCP server
+spawned by the agent inherits the *agent binary's* TCC identity and is denied
+even when the server binary itself holds the grant. Any bridge with a
+non-empty `requires_tcc` MUST be `transport: http` and `runs_on: host`,
+running as its own launchd service so it is its own responsible process.
+`stdio` is fine only for bridges that need no TCC grant.
 
 **Scoping still matters.** The assistant loads only the bridges it needs;
 specialized tools belong to agents. Lazy discovery lowers the cost of each
 bridge, it doesn't make the list free.
 
 **Every bridge exports `check()`** so `metistry doctor` is generic, and logs one
-row per call to `runs`.
+row per call to `runs`. **`check()` must probe behavior, not a permission API
+(PoC-1/9):** attempt the actual privileged read and inspect the result, because
+TCC denials are invisible to the permission layer, an unauthorized store can
+return an empty world with no error, and an authorization-status read is itself
+responsible-process-bound (it lies when run from the wrong process tree).
 
 ### 4.4 Skills
 
@@ -709,10 +790,19 @@ high-sensitivity stream into a low-volume, low-sensitivity stream of facts.
 
 **Three stages. The boundary is between 2 and 3.**
 
-1. **Ingest** — no model. Mail via IMAP or the local Mail store, messages via
-   `chat.db`, call metadata via CallHistoryDB. Lands in a local table.
+1. **Ingest** — no model. Mail via the **local Mail store** (`~/Library/Mail`
+   `.emlx` — PoC-13 confirmed it is present and large, ~72k files/3 months; no
+   IMAP credentials needed), messages via `chat.db`, call metadata via
+   CallHistoryDB. Lands in a local table. **Messages prerequisite: decode
+   `attributedBody`.** `message.text` is NULL on ~99% of recent messages; the
+   content lives in the typedstream `attributedBody` blob. A validated ~30-line
+   decoder exists in `poc/poc13-comms/export2.mjs` — the Messages bridge is
+   non-functional without it.
 2. **Reduce** — Apple FM, on-device. Per item: classify, extract action / entity /
-   date / urgency. Emits a structured row containing **no message body**.
+   date / urgency. Emits a structured row containing **no message body** — and
+   that row passes a **deterministic redaction pass** before anyone sees it
+   (§4.3 rule 3). PoC-13 proved this is mandatory, not belt-and-suspenders: the
+   model copied a live OTP into the action field despite being told not to.
 3. **Metis sees stage 2 only.** "Action item from a conversation with [person]
    yesterday, ref `msg:12345`."
 
@@ -735,14 +825,32 @@ in `CLAUDE.md` is not a control. If raw text reaches a session it's in the
 transcript on disk regardless. The bridge must be incapable of returning what
 policy forbids.
 
-**Two things that will bite:**
+**Two things that will bite — PoC-13 measured both, and they are worse than the
+plan assumed:**
 
 - *Volume.* Pre-filter deterministically — sender rules, list headers, newsletter
   patterns — before spending any inference. Don't run a model over 400 marketing
-  emails to find two todos.
+  emails to find two todos. *Measured:* dropping automated/short-code traffic
+  removes ~55 false positives at almost no cost — necessary, but not sufficient
+  (see below).
 - *Over-extraction.* Small models find todos everywhere. Emit **proposals** into a
   review queue surfaced in the morning brief, accept or reject in one tap. Never
   auto-create reminders. Rejections tell you which rules to tighten.
+
+**PoC-13 verdict: do NOT build the ingest on the current extraction step.**
+Over 200 real messages, precision was ~30% (58% flag rate), it read *posted*
+bank transactions as bills to pay, and — the failure that matters most — it
+flagged trivial automated texts while missing the single highest-stakes human
+item in the corpus (a job-offer message with an explicit ask). The bar is
+precision, and this misses it badly. The identified levers, none yet proven
+sufficient: the deterministic prefilter above; making `date_ref`/`entity`/
+`urgency` *optional* in the `@Generable` schema so the model can decline rather
+than confabulate (a fabricated date is itself a rejection signal); past-vs-
+future tense discrimination; and dedup by action string before surfacing.
+**Recommendation:** keep §4.11 "build this last," and gate it behind a re-run
+of PoC-13 that clears a real precision bar (say ≥80% on a held-out set) before
+any comms ingest is written. Until then the reducer is a research task, not a
+build task.
 
 **Retention.** The aggregate is more sensitive than any item — continuous
 visibility across mail, messages, and calls builds a picture no single message
@@ -959,6 +1067,19 @@ Not a single binary. The stack is already Node plus Docker plus native macOS
 pieces; a compiled binary would shell out to both and buy nothing. `npx` is the
 thin bootstrap on any machine with Node.
 
+**But every TCC-bound native bridge IS its own stably-signed compiled binary
+(PoC-1/3/9).** TCC grants attach to a binary's identity, and three grant-rot
+variants were observed in Phase 0 — Homebrew `node`'s versioned path, the
+`claude` CLI's versioned path, and an ad-hoc-signed binary's cdhash — each of
+which silently drops the grant when its identity changes (a `brew upgrade`, a
+CLI auto-update, a one-character source edit). So the Messages, EventKit, and
+Apple FM bridges ship as purpose-built binaries with a **stable signing
+identity**, not `node script.mjs` under launchd. `mcp-apple-fm` specifically is
+a thin MCP server that shells out to a compiled **Swift** helper — the
+FoundationModels framework is Swift-only (no Python/ObjC surface), and the
+helper is where the `sk`-free, model-load-amortized inference happens (4096-token
+context, a fresh `LanguageModelSession` per item).
+
 `metistry doctor` falls out of `core` requiring `check()` on every bridge and
 collector — iterate the registry, call check, report. **Define that interface in
 Phase 1** even though doctor ships much later; retrofitting it across twenty
@@ -995,14 +1116,23 @@ option open costs almost nothing if the rules below hold from the start.
    rather than failing a turn.
 2. **Container-first.** Only `runs_on: host` components are exempt. No component
    assumes it shares a filesystem with another.
-3. **No absolute paths.** All roots from environment; nothing hardcodes
-   `/Users/...`.
+3. **No absolute paths, and no Docker-Desktop magic (PoC-4).** All roots from
+   environment; nothing hardcodes `/Users/...`. Host reachability from a
+   container is explicit — compose declares
+   `extra_hosts: ["host.docker.internal:host-gateway"]` and every bridge URL
+   comes from env — so it works on plain Linux, not just Docker Desktop.
 4. **The reconciler accepts two triggers** — `fswatch` locally, a git webhook in
    cloud. There is no filesystem to watch on a hosted clone.
 5. **Capture is HTTP-first.** iCloud Drive is a `local-mac` convenience only.
 6. **Session state must be reconstructable from Postgres,** not only from the
    SDK's on-disk transcripts. The transcript is a cache; the `sessions` table is
-   the record.
+   the record. (PoC-4 confirmed transcripts persist across `docker restart` via
+   the mounted volume, but the `sessions` table remains the authority.)
+7. **Container auth is a subscription `setup-token` (PoC-4).** Mint on the host
+   with `claude setup-token`, inject as `CLAUDE_CODE_OAUTH_TOKEN` via env/secret
+   (never bake into the image). Never set `ANTHROPIC_API_KEY` in-container — it
+   silently overrides onto per-token API billing. The token is ~1 year with no
+   documented auto-refresh, so the watchdog tracks its expiry and warns ahead.
 
 **Case sensitivity is the sleeper issue.** Every path bug that macOS forgives, a
 Linux container surfaces. CI runs on Linux from Phase 1 for exactly this reason.
@@ -1094,13 +1224,21 @@ Worth settling before Phase 1, since each is cheap now and annoying later.
 7. **GUI:** Obsidian. **Adaptive escalation,** not `/deep`
    as the only path.
 
+**Resolved by Phase 0**
+
+8. **Embedding model → local Ollama `nomic-embed-text` (768d).** PoC-5
+   validated the mechanics: ~125 chunks/sec, deterministic rebuild script,
+   model+dim stored per row so the choice stays reversible. Retrieval *quality*
+   on real notes is still unproven (deferred until the vault has content), but
+   the model choice is settled unless quality later demands otherwise.
+9. **Metis in Docker or native → DOCKER.** PoC-4 passed every leg: networking
+   (explicit `add-host`, no Docker-Desktop magic), auth (subscription
+   `setup-token` in `CLAUDE_CODE_OAUTH_TOKEN`, never `ANTHROPIC_API_KEY`), and
+   session survival across `docker restart`. Watchdog tracks the ~1yr token
+   expiry (no auto-refresh). See §4.16.
+
 **Still open**
 
-8. **Embedding model.** Store model name and dimension per row so the choice is
-   reversible, and write the rebuild script alongside the first embed run.
-   Recommend a local model via Ollama — high volume, no frontier quality needed,
-   free, and it never leaves the machine.
-9. **Metis in Docker or native?** PoC-4 decides it.
 10. **HomeKit.** Deferred. No headless API, and Home Assistant's controller
     integration would require unpairing accessories from Apple Home. The
     Apple-native path is Shortcuts automations writing state to a file — clunky

@@ -2,7 +2,9 @@
 
 A local-first personal assistant and knowledge graph. The assistant is **Metis**
 (configurable — see `identity.yaml`). Everything runs on the Mac Studio except
-offsite backups. Tailscale for remote access. All configuration in one GitHub repo.
+offsite backups. Tailscale for remote access. Two kinds of repo: one public
+product repo (code, Apache-2.0), and one private instance repo per install
+(vault + config) — see §4.15.
 
 ---
 
@@ -898,7 +900,8 @@ was about to write.
 
 ### 4.13 Obsidian and visualization
 
-**Vault root = `brain/knowledge/`. Git root = `brain/`.** `.git` lives one level
+**Vault root = `<instance>/Knowledge/`. Git root = the instance repo root
+(§4.15).** `.git` lives one level
 above the vault, so the sync layer never sees it. This is the decision that makes
 mobile editing safe — a git working tree synced through iCloud is a known
 corruption path.
@@ -1018,27 +1021,66 @@ Built to be forked. Someone else should be able to run this, name their assistan
 whatever they like, and use any single bridge on its own. The same properties make
 the work instance a clone rather than a rebuild.
 
+**The product and each instance are separate repos** (decided 2026-08-28,
+before Phase 2 put anything real in a vault). One repo holding both code and a
+live vault breaks on every multi-install requirement at once: instance
+histories diverge from upstream forever, knowledge commits during work hours
+entangle an employer's information with the open-source project (and vice
+versa — personal or work knowledge would sit in an FSL-owned repo), and
+strangers must be able to fork code without inheriting anyone's vault.
+
+**The product repo** (`foldedspacelabs/metistry`, Apache-2.0, eventually
+public) is code only:
+
 ```
 metistry/
-  apps/                   NOT published — the running system
-    assistant/              Agent SDK host
-    console/                Node server + PWA
-    router/
+  apps/                   NOT published to npm — shipped as container images
+    assistant/              Agent SDK host       ghcr.io/foldedspacelabs/metistry-assistant
+    console/                Node server + PWA    ghcr.io/foldedspacelabs/metistry-console
+    router/                                      ghcr.io/foldedspacelabs/metistry-router
   packages/               PUBLISHED to npm
     mcp-messages/           @foldedspacelabs/mcp-messages
     mcp-eventkit/  mcp-health/  mcp-apple-fm/
     mcp-brain/              read · report · query
     core/                   manifest schema, lazy discovery, redaction,
                             preview-confirm, check() interface
-    cli/                    init | doctor | up
+    cli/                    init | doctor | up | update
   plugins/                Claude Code / Codex bundles
   skills/                 §4.4
-  seed/                   starter content for a fresh install
-  Knowledge/              the live Obsidian vault — §4.14
+  seed/                   templates a fresh instance is stamped from:
+                          identity.yaml, now.md, vault starter, rules examples
   collectors/  agents/  routines/  db/  ops/
-  identity.yaml           the ONLY place the assistant is named
-  deployment.yaml         profile: local-mac | cloud
+  LICENSE                 Apache-2.0 — the patent grant eases corporate use
 ```
+
+**An instance repo** (one per install, each separately owned and private) is
+everything the product repo must never contain — created by `metistry init`
+as its own git repo:
+
+```
+<instance>/               personal → personal GitHub; work → work-owned remote
+  Knowledge/              the live Obsidian vault — §4.14
+  inbox/
+  identity.yaml           the ONLY place the assistant is named
+  rules.yaml  sources.yaml  deployment.yaml
+  now.md
+  metistry.lock           the product release this instance runs
+```
+
+**Code flows downward as releases, never as git merges.** Product CI publishes
+versioned artifacts — npm packages for bridges/core/cli, container images for
+the apps. `metistry update` bumps `metistry.lock`, pulls the pinned artifacts,
+and runs migrations (the `schema_migrations` table makes that idempotent). An
+instance has **no git relationship with upstream at all** — which is exactly
+what makes the work install clean: consuming released open source at work is
+ordinary OSS use; contributing happens upstream, on personal time, from a
+personal machine. Improvements conceived at work are re-implemented upstream
+on personal time (§5). Data flows in no direction; code flows down.
+
+Knowledge versioning is simply each instance repo's own git history, written
+by `brain-commit` and the reconciler as designed — §4.6's split becomes
+physical: the assistant only ever commits to the *instance* repo; every change
+to the *product* repo is a human PR upstream.
 
 **Casing has exactly one boundary.** `Knowledge/` and everything inside it is
 TitleCase, because Obsidian renders those names to you. Everything else is
@@ -1079,9 +1121,12 @@ table, env var, package name, or repo name. Internally everything is
 assistant name are thematically independent: renaming one must not orphan the
 other.
 
-**Install.** `npx metistry init` — prompts for the assistant's name, writes
-`identity.yaml`, generates `.env`, brings up compose, runs migrations, seeds the
-vault, prints the TCC grants to click, verifies.
+**Install.** `npx metistry init <dir>` — creates the **instance repo**: prompts
+for the assistant's name, stamps `identity.yaml`/`now.md`/vault starter from
+`seed/`, writes `metistry.lock` pinned to the current release, generates
+`.env`, `git init`s the instance, brings up compose from pinned images, runs
+migrations, prints the TCC grants to click, verifies. `metistry update` moves
+the pin and re-runs migrations.
 
 Not a single binary. The stack is already Node plus Docker plus native macOS
 pieces; a compiled binary would shell out to both and buy nothing. `npx` is the
@@ -1226,16 +1271,24 @@ enforce at the bridge, never by prompting. A shared vector index and shared
 session transcripts are exactly where silent leakage happens, with no tool
 boundary to catch it.
 
-**What's separate:** repo, Postgres, Claude account, Apple ID, machine, door
-(Slack or Teams at work; iMessage personally).
+**What's separate:** the instance repo (work's vault on a work-owned remote),
+Postgres, Claude account, Apple ID, machine, door (Slack or Teams at work;
+iMessage personally).
 
-**What's shared:** the skeleton — `CLAUDE.md`, `agents/`, `bridges/`, `router/`,
-`db/`, `ops/`, the frontmatter schema, the PARA structure. Improvements flow
-personal → work as a template merge. Data flows neither direction.
+**What's shared:** the product — consumed as pinned releases (`metistry.lock`),
+never as a git fork. The §4.15 split is what makes the IP boundary mechanical
+rather than disciplinary: *using* released Apache-2.0 open source at work is
+ordinary OSS consumption; *contributing* happens upstream, on personal time,
+from a personal machine. An improvement conceived at work is re-implemented
+upstream on personal time — never committed from work hardware, never during
+work hours — then flows back down to the work instance as a release like any
+other. Data flows in no direction.
 
 The annoyance is smaller than it sounds: context does the switching. You're on
 work hardware during work hours. Obsidian being free for commercial use as of
-early 2026 means no licensing friction on the work side.
+early 2026 means no licensing friction on the work side. (Worth one check of
+the employer's OSS-use policy — most permit use freely; some want the license
+on a list. Apache-2.0 is usually the easiest answer.)
 
 ---
 

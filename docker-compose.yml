@@ -11,7 +11,7 @@ services:
       POSTGRES_USER: ${METISTRY_DB_USER:-metistry}
       POSTGRES_PASSWORD: ${METISTRY_DB_PASSWORD:?set METISTRY_DB_PASSWORD in .env}
     ports:
-      # loopback only — remote access rides the tailnet, never a LAN bind
+      # loopback by default — reachability beyond the machine is the user's routing layer (invariant 8)
       - "127.0.0.1:${METISTRY_DB_PORT:-5432}:5432"
     volumes:
       - db-data:/var/lib/postgresql/data

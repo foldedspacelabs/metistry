@@ -40,8 +40,8 @@ naming lore in public copy stays about the *project*.
   churn.
 - **A system one person can run for years.** Every dependency is a
   maintenance obligation; recipes over frameworks; small enough to understand.
-- **Useful from any surface** — iMessage, share sheet, web app, Shortcuts,
-  (later) iOS app — and to any agent the user runs, not just its own.
+- **Useful from any surface** — web app first, plus share sheet, Shortcuts,
+  and (later) an iOS app — and to any agent the user runs, not just its own.
 - **Predictable cost.** Deterministic routing, no-model fast paths, budgets
   enforced at the tool. (Idle cost is the #1 documented abandonment reason
   for personal AI in 2026 — Metistry's architecture is built against it.)
@@ -92,6 +92,11 @@ instructions; input filtering missed memory-poisoning 9/10 times).
   trust — every request authenticates as if internet-exposed, because the
   category leader's worst incident (40k+ exposed gateways) was exactly a
   "the network will protect us" default.
+- Hardened by pre-implementation review (2026-08-29): the engine has **no
+  shell and no raw git** — its tools are its entire reach (invariant 9);
+  host bridges authenticate every caller (loopback is not a trust
+  boundary); management endpoints take the owner credential only, never an
+  agent token, and every agent-authored field is output-encoded in the UI.
 - **Bring-your-own routing:** the project exposes configured ports and
   suggests exposure patterns per hosting model (local + tailnet, reverse
   proxy, cloud, Docker) but never depends on any — a user benefit (host it
@@ -100,9 +105,9 @@ instructions; input filtering missed memory-poisoning 9/10 times).
 ## How to use (the story, current shape)
 
 `npx metistry init` → name your assistant, get a private instance repo →
-text it, share to it, ask it things → it remembers, briefs you each morning,
-and coordinates your other AI tools. The knowledge is yours, in your git, on
-your machine.
+open its web app, share to it, ask it things → it remembers, briefs you each
+morning, and coordinates your other AI tools. The knowledge is yours, in
+your git, on your machine.
 
 ## Premium candidates (collect; decide later)
 
@@ -114,7 +119,7 @@ your machine.
 
 ## Log
 
-- 2026-08-28 — document created. Phase 0 complete (14 PoCs), Phase 1
+- 2026-08-28 — document created. Phase 0 complete (16 PoCs), Phase 1
   substrate started, plan carries: product/instance split, flexible compute,
   external-agent capture + read tiers, coordination hub, management API,
   web-app-first / iOS-later-premium.
@@ -126,3 +131,13 @@ your machine.
   templates story; user-extensible connectors via local registry entries +
   `metistry create` scaffolder (a key OSS adoption feature).
 - 2026-08-29 — naming roots recorded and evolved: counselor AND steward (distilled counsel + coordination/chaos-wrangling ethos); hint-don't-explain register for public copy.
+- 2026-08-29 — pre-implementation review (four staff-level reviews,
+  synthesized in `docs/plan-review-2026-08-29.md`) ratified and propagated:
+  **web app is the interface** (iMessage dropped entirely — too insecure,
+  not rich enough; web push for notifications, iOS later as the premium
+  candidate); keyword recall moved up to Phase 2 (time-to-value); Swift TCC
+  bridges with a wire-level contract; product/instance config overlay; one
+  unified proposals queue with a soft daily-review budget (respect the
+  user's attention: ~5 decisions/day surfaced, full detail one tap away);
+  security posture hardened (no-shell invariant, bridge caller auth,
+  owner-vs-agent credentials).

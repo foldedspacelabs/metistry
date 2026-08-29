@@ -10,7 +10,7 @@ ports, network exposure is the user's routing layer, and the Apple tier is a
 satellite, not a dependency. Local-first in ownership (your data in your git
 and your Postgres, local models where they win), not local-only in
 deployment. Two kinds of repo: one public product repo (code, Apache-2.0),
-and one private instance repo per install (vault + config) — see §4.15.
+and one private instance repo per install (vault + config) — see §4.16.
 
 ---
 
@@ -26,8 +26,8 @@ you know) and **Postgres** (what's happening). Everything else can be rebuilt.
 
 ```mermaid
 flowchart TD
-  You["You<br/>iMessage · Shortcuts · PWA"]
-  Router["Router<br/>deterministic tiering"]
+  You["You<br/>Web app (PWA) · Shortcuts"]
+  Router["Router (console module)<br/>deterministic tiering"]
   PG[("Postgres<br/>+ pgvector")]
   Metis["Metis<br/>Agent SDK"]
   Agents["Agents<br/>drey · fsl"]
@@ -53,8 +53,8 @@ pieces:
 ```mermaid
 flowchart LR
   Metis["Metis"]
-  Bridges["MCP bridges<br/>Messages · EventKit<br/>Health · Apple FM"]
-  API["Anthropic<br/>Haiku → Opus"]
+  Bridges["MCP bridges<br/>EventKit · Health<br/>Apple FM"]
+  API["Model tiers<br/>default → deep (§4.18)"]
   Console["Node console<br/>+ PWA"]
   PG[("Postgres")]
   S3["S3<br/>nightly dumps"]
@@ -83,13 +83,13 @@ flowchart LR
 | **Named query** | The only read path into state | Anything | Nothing |
 | **Knowledge** | Durable prose in git | You or the assistant | Git |
 | **State** | Operational, regenerable | Collectors | Postgres |
-| **Target** | A place work can execute (§4.17) | The router / dispatch rules | Per its manifest |
-| **Work item** | One task on the shared list, claimable with a lease (§4.18) | Anything, via the hub | `work` table |
-| **Project** | A multi-agent effort: agents + tasks + proposals + spend, one view (§4.18) | The user | View over existing tables |
-| **Proposal** | A suggested knowledge/action addition awaiting triage | Any agent or capture | Inbox; never the vault directly |
-| **Grant** | A user-issued, server-side permission (read tier, area scope) (§4.10) | The user, via the management API | Attached to a credential |
-| **Profile** | What the assistant knows about its user (§4.14) | Init interview + accepted proposals | `Knowledge/Me/` |
-| **Product / Instance** | The public code vs. one private install (§4.15) | — | Releases down; data nowhere |
+| **Target** | A place work can execute (§4.18) | The router / dispatch rules | Per its manifest |
+| **Work item** | One task on the shared list, claimable with a lease (§4.19) | Anything, via the hub | `work` table |
+| **Project** | A multi-agent effort: agents + tasks + proposals + spend, one view (§4.19) | The user | View over existing tables |
+| **Proposal** | A suggested knowledge/action addition awaiting triage | Any agent or capture | One `proposals` table (D7); never the vault directly |
+| **Grant** | A user-issued, server-side permission (read tier, area scope) (§4.11) | The user, via the management API | Attached to a credential |
+| **Profile** | What the assistant knows about its user (§4.15) | Init interview + accepted proposals | `Knowledge/Me/` |
+| **Product / Instance** | The public code vs. one private install (§4.16) | — | Releases down; data nowhere |
 
 Agents are grouped by area (`agents/<area>/<name>.md`) with hierarchy in
 frontmatter (`manages: [designer, developer, qa]`), not filesystem depth —
@@ -101,7 +101,7 @@ tags (`@<agent>`) address these **named agents from the instance's registry**
 
 **Capture → Ingest → Index → Query → Compound.**
 
-1. **Capture** — iMessage, share sheet, Obsidian mobile, comms reduction. Lands
+1. **Capture** — web app, share sheet, Shortcuts, Obsidian mobile. Lands
    in `inbox/`. Must take under five seconds or it won't happen.
 2. **Ingest** — `inbox-drain` classifies with local models, emits *proposals*,
    never auto-creates.
@@ -133,7 +133,7 @@ tags (`@<agent>`) address these **named agents from the instance's registry**
 
 ## 1. Invariants
 
-Eight rules. Every later decision should be checkable against these.
+Nine rules. Every later decision should be checkable against these.
 
 1. **Git is the record. Postgres is derived and operational.**
    Test: `docker compose down -v`, rebuild from the repo, run collectors once →
@@ -141,25 +141,30 @@ Eight rules. Every later decision should be checkable against these.
    belongs in the backup; nothing else does.
 
 2. **Shared responsibility, enforced at the tool.** Metis commits freely to
-   `knowledge/`. Anything defining how the system behaves requires a PR. Enforced
-   by the commit tool, not by convention — see §4.6.
+   `Knowledge/`. Anything defining how the system behaves requires a PR. Enforced
+   by the commit tool, not by convention — see §4.7.
 
-3. **One read path into state.** Named queries in `router/queries/`. Consumed by
-   the router, the `brain-query` MCP bridge, the console, and Obsidian. No
-   component talks to Postgres directly.
+3. **One read path into state.** Named queries: YAML definitions in the
+   instance's `queries/` (stamped from the product's `seed/queries/`
+   defaults), executed by exactly one implementation — `packages/queries`
+   (typed param validation, parameterized SQL, TTL cache). Consumed by the
+   router, the `brain-query` MCP bridge, the console, and Obsidian. No
+   component talks to Postgres directly. One named exception: the
+   **watchdog** probes liveness directly, because it must be able to report
+   the console itself dead.
 
 4. **The router is deterministic.** No model decides which model to use.
    Prefix, regex, and explicit commands only.
 
 5. **Everything is a directory with a manifest.** Bridges, collectors, agents,
-   routines. Adding capability = dropping in a directory. CI validates.
+   routines, targets. Adding capability = dropping in a directory. CI validates.
 
 6. **Native only where macOS requires it.** Apple bridges and local inference run
    under launchd. Everything else is a container.
 
 7. **Cloud-portable by construction.** Everything outside the Apple tier runs in a
    container with config from environment — no absolute paths, no assumption of a
-   local filesystem. The Apple tier is a satellite, not a dependency. See §4.16.
+   local filesystem. The Apple tier is a satellite, not a dependency. See §4.17.
 
 8. **Security survives full code visibility, and the network is not a
    boundary** (added 2026-08-28). This is an open-source project: adversaries
@@ -175,6 +180,13 @@ Eight rules. Every later decision should be checkable against these.
    provides, which docs may suggest patterns for but code never assumes.
    "We're on the tailnet" is never an auth argument.
 
+9. **The engine has no shell and no raw git** (added 2026-08-29, review
+   CRIT-1). The assistant container's tool surface excludes shell/exec and
+   direct git; `brain-commit` plus its allowlisted MCP bridges are the
+   *entire* mutating and outbound surface. Most of §4.7's governance
+   silently depended on this premise — now it is written, and it ships with
+   a misuse test like every other boundary.
+
 ---
 
 ## 2. Phase 0 — Proof of concepts
@@ -184,12 +196,18 @@ under an hour. Do not start Phase 1 until PoC-1 through PoC-4 pass.
 
 ### Outcomes (2026-08-28) — Phase 0 complete
 
-Full evidence in `docs/poc/RESULTS.md`. Summary:
+Full evidence in `docs/poc/RESULTS.md`. Summary below. **Note (2026-08-29):**
+this section is the historical record; the PoC descriptions keep their
+original framing. Decision D1 (`docs/plan-review-2026-08-29.md` §8) later
+dropped iMessage entirely — as the door and as an ingest source — so the
+iMessage-specific findings (PoC-2, hard requirement 5) no longer ship,
+while the TCC/signing/probe lessons from PoC-1/2/9/11 carry unchanged to
+the EventKit and Apple FM bridges.
 
 | PoC | Result | What it settled |
 |---|---|---|
 | 1 MCP+TCC headless | **PASS** | The headless door works. TCC attributes access to the responsible process, so a stdio MCP server inherits the *agent's* TCC identity — an HTTP bridge as its own launchd service is the only shape that works without granting FDA to the agent binary. |
-| 2 iMessage attachments | **PASS** | Text door + *opportunistic* media door: ~89% of images older than a few days are iCloud-offloaded, but a just-received image is on disk within a minute. Copy-on-detect works; the share sheet is the canonical media path. |
+| 2 iMessage attachments | **PARTIAL / PASS** | Text door + *opportunistic* media door: ~89% of images older than a few days are iCloud-offloaded, but a just-received image is on disk within a minute. Copy-on-detect works; the share sheet is the canonical media path. |
 | 3 Apple FM headless | **PASS** | 2.2 items/sec under launchd, byte-identical to interactive. Swift-only (no Python SDK). 4096-token context, fresh session per item. |
 | 4 Container → host bridge | **PASS** | Networking (explicit `add-host`, no Desktop magic), subscription-token auth, and session-survives-restart all pass. **Decision #9 = Docker.** |
 | 5 pgvector | **PASS (mechanics)** | Ollama `nomic-embed-text` (768d), ~125 chunks/sec, deterministic rebuild. Retrieval *quality* deferred until the real vault has content. |
@@ -200,7 +218,7 @@ Full evidence in `docs/poc/RESULTS.md`. Summary:
 | 10 RTSP camera | **DEFERRED** | No RTSP hardware (HomeKit-only). |
 | 11 Watchdog independence | **PASS** | Model-free probes + out-of-band iMessage send, interactive and headless. |
 | 12 Obsidian Sync | **DEFERRED** | No Sync subscription yet; new vault built from scratch. |
-| 13 Comms reduction | **FAIL (quality)** | Plumbing works; extraction precision ~30% fails the bar as configured. See §4.11 — revised. |
+| 13 Comms reduction | **FAIL (quality)** | Plumbing works; extraction precision ~30% fails the bar as configured. See §4.12 — revised. |
 | 14 Local input classifier | **FAIL** | A user-proposed pre-router classifier; over-split 42–54% on must-not-split inputs and promoted quoted/forwarded text to intent. Invariant 4 stands; see §4.1. |
 | 15 Complexity-tier scorer | **SPLIT** | Apple FM rejected (cheap class collapsed); Haiku passed quality (91.7%, 1/16 deep-miss) through a contaminated harness. Cost criterion corrected: routing is a quality purchase (~4¢/rescued turn), not a saving. |
 | 16 Local tier-scorer models | **PASS** | `gemma4:e4b` beat the Haiku baseline on every quality axis (97.9%, 6/6+6/6 traps, 667 ms, $0). Calibration, not size, is the variable. Invariant-4 amendment still gated on a blind confirmatory eval. |
@@ -214,23 +232,25 @@ tool," and each is now load-bearing rather than stylistic):**
    variants were observed — Homebrew `node`'s versioned Cellar path, the
    `claude` CLI's versioned path, and an ad-hoc-signed binary's cdhash — each
    silently drops a TCC grant when its identity changes. A purpose-built,
-   stably-signed binary per TCC bridge is required, not optional. See §4.15.
+   stably-signed binary per TCC bridge is required, not optional. See §4.16.
 3. **`check()`/doctor probes behavior in the bridge's own context**, never a
    permission API. Three silent/mis-reporting failure modes were found:
    FDA denials are invisible to Claude's permission layer, unauthorized
    EventKit returns an empty world with no error, and TCC status reads are
-   themselves responsible-process-bound. See §4.3, §4.15.
+   themselves responsible-process-bound. See §4.3, §4.16.
 4. **Model output gets a deterministic redaction pass before it is trusted as
    low-sensitivity.** A local model copied a live OTP verbatim into a
    "body-free" structured field despite explicit prompt instructions. Prompt
-   rules are not a control. See §4.3, §4.11.
-5. **The Messages bridge must decode `attributedBody`** — `message.text` is
-   NULL on ~99% of recent messages. Mail ingest needs no IMAP: the local
-   `~/Library/Mail` `.emlx` store is present and large. See §4.11.
+   rules are not a control. See §4.3, §4.12.
+5. **A Messages bridge must decode `attributedBody`** — `message.text` is
+   NULL on ~99% of recent messages. *(Superseded by D1: no Messages bridge
+   ships; preserved in case Messages work ever returns.)* Mail ingest needs
+   no IMAP: the local `~/Library/Mail` `.emlx` store is present and large.
+   See §4.12.
 6. **Container config is Linux-portable by construction** — explicit
    `extra_hosts: host-gateway`, bridge URLs from env, subscription token via
    `CLAUDE_CODE_OAUTH_TOKEN` (never set `ANTHROPIC_API_KEY` in-container). See
-   §4.16, §6 #9.
+   §4.17, §6 #9.
 
 ### PoC-1 — MCP tool call under `claude -p` with macOS permissions
 
@@ -436,7 +456,8 @@ staleness, then message you with zero dependency on Anthropic being reachable.
 **Kills:** mobile editing. Fallback is desktop-only knowledge editing, which
 undermines the capture story.
 
-Set vault root to `brain/knowledge/`, git root at `brain/`. Then:
+Set vault root to `<instance>/Knowledge/`, git root at the instance repo root
+(§4.16). Then:
 
 - Edit a note on iPhone → confirm it reaches the Mac and commits cleanly
 - Edit the same note on both, offline → confirm Obsidian produces a conflict file
@@ -495,19 +516,36 @@ Sonnet has no niche between Haiku and Opus.
 ### Phase 1 — Substrate (weekend)
 
 - Monorepo skeleton: pnpm workspaces, changesets, `apps/` + `packages/`
-- `packages/core` — manifest schema, lazy-discovery helpers, redaction
-  (inputs AND model-generated output, §4.3), preview-confirm, and the
-  `check()` interface every component implements
+- `packages/core` — **fattened per review CRIT-2**: manifest schema *and
+  runtime*, lazy-discovery helpers, redaction (inputs AND model-generated
+  output, §4.3), preview-confirm, `runs` emission, HTTP-bridge auth + the
+  uniform error envelope, the config-from-env loader, and the `check()`
+  interface every component implements — with its **return shape frozen
+  now** (status, latency, remediation, behavioral-probe assertion). The
+  bridge contract is published as a **wire-level spec** (D3), since the TCC
+  bridges are Swift.
+- `packages/queries` — the one implementation of invariant 3: YAML load,
+  typed param validation, TTL cache, `{rows, as_of}` envelope, and a
+  **parameterized pg driver** — never `psql -c`, never string interpolation
 - **Lazy-discovery spike before core's interface freezes** (§4.3 caveat): one
   toy bridge, lazy vs eager, scripted Haiku tasks — does the meta-tool
   indirection actually work at the Haiku tier, and what does the discovery
   round-trip cost?
-- `CLAUDE.md`, `now.md`, `identity.yaml`, `.env.example`
+- `CLAUDE.md`, `identity.yaml`, `.env.example` (`now.md` lives at
+  `Knowledge/now.md` — D4)
 - `docker-compose.yml`: Postgres + pgvector
 - `db/migrations/0001` — `runs`, `inbox`, `sessions`, `work`, `metrics`,
   `knowledge_files`, `knowledge_links`, `embeddings`. The `sessions` schema is
-  designed for **re-briefing, not transcript reconstruction** (§4.16 rule 6):
+  designed for **re-briefing, not transcript reconstruction** (§4.17 rule 6):
   thread identity, rolling summary, key decisions, open loops, refs.
+- `db/migrations/0002` — the review's calcify-now schema decisions: the
+  unified `proposals` table (D7: `kind`, `source_agent`, `trust`, `payload`,
+  `decision`, `feedback`, `decided_at`), two-phase `runs` columns (CRIT-8:
+  `started_at` on insert, `finished_at` on completion — a hung or crashed
+  call is visible, not absent), and the hub's claim/lease/dependency
+  columns on `work` (reserved now, used in Phase 5)
+- Manifest `type: service` registered for the reconciler, watchdog, and
+  console, so `doctor` can see the components most likely to die silently
 - `ops/scripts/backup.sh` + restore-test script
 - CI **on Linux** from day one: migrations apply cleanly, manifests validate,
   path-case check passes
@@ -518,19 +556,38 @@ else will implement.
 
 ### Phase 2 — Door (weekend)
 
-- Messages MCP bridge under launchd
-- Metis container, Agent SDK, resuming by UUID from `sessions`
-- Router with `rules.yaml`, fast path + haiku tiers only
-- `runs` logging on every turn
+The door is the **web app** (D1/D2, 2026-08-29) — and it needs zero TCC
+grants, which is what makes a fast first-run possible.
 
-**Done when:** you text yourself and get a useful answer. This is the day it feels
-real — everything after is additive.
+- `apps/console` serving the PWA: thread view (ask/answer), capture box
+  (text **and file/photo upload** — the media door, §4.2), a status page
+  fed by `/api/status`, Home Screen install, **web push** (PoC-6)
+- `POST /message` lands a **durable row before the 202**; the assistant
+  drains the queue — a message sent during a restart is never lost. The
+  drain step is also the home of the deterministic pre-check before any
+  model turn.
+- Metis container, Agent SDK, resuming by UUID from `sessions`
+- Router as a **console module** with `rules.yaml`, fast path + default tier
+- **Keyword/FTS recall over the vault as a named query** (D8) — "what did
+  we decide about X" works from week one; embeddings stay Phase 6
+- Slow-turn ack: any turn expected >~5s immediately acks, naming the tier
+- `runs` logging on every turn — two-phase rows (insert on start, update on
+  completion) so a hung or crashed call is visible, not silent
+
+**Done when:** you open the PWA on your phone, ask, and get a useful answer,
+with a push arriving when the reply is slow. This is the day it feels real —
+everything after is additive. Target: `metistry init` to a working door in
+under ten minutes, no TCC prompts; the native tier is a progressive unlock
+via the `doctor` capability checklist (which doubles as grant-rot recovery).
 
 ### Phase 3 — Capture (a few evenings)
 
-- iCloud Drive inbox folder + iOS Shortcut + macOS Quick Action
-- `inbox-drain` collector
-- Apple FM bridge + nightly triage routine
+- iOS share-sheet Shortcut + macOS Quick Action → `POST /capture`, with a
+  **local-file fallback on any HTTP failure** (iCloud Drive inbox folder,
+  already a `local-mac` path) — one silent capture drop ends the trust
+- `inbox-drain` collector (drains both paths)
+- Apple FM bridge + nightly triage routine — the first progressive TCC
+  unlock via the `doctor` checklist
 - `/note` command
 
 **Done when:** you can share a photo from any app and it lands, gets classified,
@@ -539,15 +596,16 @@ and shows up in the morning brief.
 ### Phase 4 — Visibility (a week of evenings)
 
 - Collectors: `aws-costs`, `claude-usage`, `github-state`, `drey-metrics`
-- Named queries in `router/queries/`
+- Named queries filled out in the instance's `queries/` (from `seed/` defaults)
 - Node console + static dashboard on a configured port (exposure = the
   user's routing layer, invariant 8; on this install, tailnet is the
   chosen pattern)
-- PWA manifest + service worker — **the console PWA is the web app, v1**: it
-  grows the management UI (§4.2 management surface — agent registry, grants,
-  proposal triage with push notifications) rather than a separate app being
-  built later
-- **`metistry` Claude Code plugin** (§4.10 external capture — small; rides
+- The PWA (shipped as the door in Phase 2) **grows the management UI**
+  (§4.2 management surface — agent registry, grants, proposal triage with
+  push notifications), under the CRIT-7 rules: management endpoints take
+  the owner credential only, and every agent-authored field is
+  output-encoded before rendering
+- **`metistry` Claude Code plugin** (§4.11 external capture — small; rides
   with the console since `POST /capture` is its endpoint)
 
 **Done when:** you check the dashboard instead of four separate places, and you
@@ -556,23 +614,26 @@ can see your own token spend split by tier.
 ### Phase 5 — Delegation (ongoing)
 
 - Crew definitions with their own toolsets
-- **Compute-target registry (§4.17)** — dispatch generalized from
+- **Compute-target registry (§4.18)** — dispatch generalized from
   GitHub-issues-only to manifest-defined targets (MCP-first)
 - `@agent` dispatch → GitHub issues (the first target)
 - `brain-query` MCP bridge exposing named queries to Metis; **`mcp-brain`'s
-  write-only door opened to external agents** (§4.10)
-- **Coordination hub tools + multi-agent projects (§4.18)** — claim/lease/
+  write-only door opened to external agents** (§4.11)
+- **Coordination hub tools + multi-agent projects (§4.19)** — claim/lease/
   dependency columns, agent identity, event-driven proposal triage
 - Weekly review routine
 
 ### Phase 6 — Knowledge (when Phase 5 is stable)
 
 - `knowledge-embed` collector on commit
-- `search_knowledge` named query
-- Obsidian pointed at `knowledge/`, reading state via the console HTTP API
+- `search_knowledge` named query goes semantic (the keyword/FTS version has
+  been serving recall since Phase 2 — D8)
+- Obsidian pointed at `Knowledge/`, reading state via the console HTTP API
 
-**Deliberately last.** Semantic search over a thin corpus isn't worth much; it
-earns its place once there's a year of notes.
+**Deliberately last** — for *embeddings*, not recall. Semantic search over a
+thin corpus isn't worth much; it earns its place once there's a year of
+notes. Keyword recall, the behavior that makes the system indispensable,
+ships in Phase 2.
 
 ### Later — native iOS app (post-Phase 6; premium candidate)
 
@@ -595,8 +656,9 @@ spend" works without a slash. Commands exist for people who like typing them.
 
 The genuinely fast mobile path isn't chat at all — it's **Shortcuts**. A `/status`
 Shortcut in a Home Screen widget, on the Lock Screen, or as a Watch complication
-is one tap with no typing and no typos. iMessage can't render buttons; the PWA
-can, and the eventual iOS app can do both plus a share extension.
+is one tap with no typing and no typos. The PWA renders one-tap actions
+(triage, settle/reject, elevation approvals); the eventual iOS app adds a
+share extension, real push, and widgets.
 
 | Input | Tier | Behavior |
 |---|---|---|
@@ -604,14 +666,14 @@ can, and the eventual iOS app can do both plus a share extension.
 | natural status phrasings | fast path | Matched by regex to a named query |
 | `/status` `/today` `/open` `/spend` `/queue` `/runs` | fast path | Named query, no model |
 | `/note <text>` | none | Straight to inbox, acknowledged instantly |
-| `/model <tag> <text>` | as configured | Manual tier/model override — tags from the user's `rules.yaml` tier menu (§4.17.A) |
+| `/model <tag> <text>` | as configured | Manual tier/model override — tags from the user's `rules.yaml` tier menu (§4.18.A) |
 | `/deep <text>` | deep tier | Shipped default alias for `/model deep` — zero setup, works day one |
 | `/new` | none | Roll to a fresh session UUID |
 | `@<agent> <brief>` | dispatch | Brief → the named agent's target (default: GitHub issue). Agents come from the instance registry — e.g. the author's `@drey`, `@fsl` |
 
 **Adaptive escalation.** The assistant runs the default tier and delegates
 hard sub-tasks to the deep tier — cost is bounded to the hard part, not the
-whole turn. In the multi-model world (§4.17.A) tiers are user-configured
+whole turn. In the multi-model world (§4.18.A) tiers are user-configured
 model bindings with shipped defaults (default=Haiku-class, deep=Opus-class),
 so `/model` names *your* menu, not hardcoded vendors. Guardrails: per-tier
 daily budgets in `rules.yaml`, and every escalation logged to `runs` so you
@@ -640,17 +702,28 @@ Binds a configured host/port (loopback by default); reachability beyond the
 machine is the user's routing layer (invariant 8 — tailnet, reverse proxy,
 cloud, Docker port maps; docs suggest patterns per hosting model, code
 assumes none). Four consumers: PWA, Shortcuts, Obsidian, and **external
-agents pushing captures/reports** (§4.10 — via `mcp-brain`'s write-only door
+agents pushing captures/reports** (§4.11 — via `mcp-brain`'s write-only door
 or `POST /capture` directly, per-agent bearer tokens).
 
 ```
-POST /capture              multipart or json → inbox/    (Shortcuts)
+POST /capture              multipart or json → inbox/    (web app, Shortcuts,
+                           share sheet — files and photos, not just text)
 POST /message              { thread_id, text } → 202 + message_id
 GET  /api/q/:name          named query, params via querystring
 GET  /api/state            bundled dashboard payload
+GET  /api/status           component health rollup from check() results —
+                           feeds the web app's status page; the watchdog
+                           reports through it (§4.9)
 GET  /api/stream           SSE — state changes, Metis replies
 GET  /health               liveness + collector staleness summary
 ```
+
+**`POST /capture` is the media door (with D1).** iMessage's opportunistic
+media path is gone; files, photos, and links land through this endpoint
+instead — from the web app's capture box, the iOS share-sheet Shortcut and
+macOS Quick Action today, and the iOS app's share extension later, all
+against the same endpoint. PoC-7 already proved the path (a 25 MB binary,
+byte-identical, from every surface).
 
 **Management surface (added 2026-08-28)** — the API the web app (and later
 the iOS app) drives; everything a user configures gets an endpoint, never a
@@ -658,16 +731,34 @@ hand-edited file on the server:
 
 ```
 GET/POST   /api/agents                external-agent registry + token issuance
-GET/PUT    /api/agents/:id/grants     read tiers (§4.10): none | index | areas[]
+GET/PUT    /api/agents/:id/grants     read tiers (§4.11): none | index | areas[]
 GET        /api/agents/:id/inbox      the agent's pull inbox (feedback, replies)
 GET        /api/proposals             pending knowledge proposals, with provenance
 POST       /api/proposals/:id         allow | deny | accept_with_changes
                                       { feedback } — deny/changes feedback routes
-                                      to the source agent's inbox (§4.18)
-GET        /api/projects              multi-agent projects (§4.18): agents,
+                                      to the source agent's inbox (§4.19)
+GET        /api/projects              multi-agent projects (§4.19): agents,
                                       task rollup, proposal stream, progress
-POST       /api/grants/requests/:id   approve/deny an elevation request (§4.10)
+POST       /api/grants/requests/:id   approve/deny an elevation request (§4.11)
+POST       /api/components/:name/restart   scoped ops verb, audit-logged —
+                                      the one thing fixable from a phone
 ```
+
+**`/api/proposals` serves the one unified `proposals` table (D7).** Inbox
+proposals, agent reports, draft-note settlement, and grant elevations are
+one shape (`kind`, `source_agent`, `trust`, `payload`, `decision`,
+`feedback`, `decided_at`) — one triage endpoint, one push path, one brief
+section, and one place to get "agent messages carry no user authority"
+right. A note's `draft` frontmatter is the vault-side marker of the same
+row.
+
+**Two token classes, structurally distinct (CRIT-7).** Management endpoints
+require the **owner credential** — never an agent token, whatever its
+grants; an agent bearer token works only on the agent surface (`/capture`,
+`mcp-brain` tools, its own inbox). And every agent-authored field rendered
+in the web UI is **output-encoded** — stored text from a low-privilege
+token must never execute in a page holding the owner's credential. Both
+rules ship with misuse tests.
 
 Mutations are few, explicit, audit-logged to `runs`, and carry the same auth
 as everything else — a bearer credential on every request, validated as if
@@ -679,36 +770,57 @@ authorize server-side per request (never per session-establishment), return
 uniform errors that don't leak existence, and ship misuse tests alongside
 every endpoint.
 
-`/api/q/:name` resolves against `router/queries/` only — no arbitrary SQL, ever.
+`/api/q/:name` resolves against the instance's `queries/` via
+`packages/queries` only — no arbitrary SQL, ever.
 Auth is a bearer token on every request from every client — the routing
 layer in front of the port adds reachability, never trust (invariant 8).
 
-**`POST /message` is async.** Returns 202 immediately; the reply arrives over
-`/api/stream` or via iMessage. Build the client as a messaging client from day
-one — retrofitting that is painful.
+**`POST /message` is async — and durable before it is acknowledged.** The 202
+is returned only after the message lands in a durable row; the assistant
+drains the queue, so a message sent during a restart (every `metistry
+update`) is never lost. The drain step is also where the deterministic
+pre-check runs before any model turn. The reply arrives over `/api/stream`
+or as a web push. Build the client as a messaging client from day one —
+retrofitting that is painful.
 
 ### 4.3 MCP bridge contract
 
-Each bridge is a **published npm package** (see §4.15), usable standalone by
+Each bridge is a **published npm package** (see §4.16), usable standalone by
 someone who has never heard of this project.
 
 ```yaml
-name: messages
+name: eventkit
 type: bridge
 transport: http          # stdio only for NON-TCC bridges — see rule below
 port: 7801
 runs_on: host            # host | container
-requires_tcc: [full_disk_access, automation]
+requires_tcc: [calendars, reminders]
 discovery: lazy          # lazy | eager
 degrades: absent         # absent | <fallback bridge name>
 exposes:
-  - name: list_recent
-    description: Recent messages from a handle
-  - name: send
+  - name: list_events
+    description: Events in a date range
+  - name: create_event
     destructive: true
 ```
 
-**Three defaults every bridge inherits from `@foldedspacelabs/core`:**
+**The contract is wire-level, not a base class (D3, 2026-08-29).** The TCC
+bridges are **Swift** (§4.16), so what `core` defines is a spec any language
+implements: the manifest shape, the auth header, the uniform error
+envelope, and `check()`'s JSON return shape. TypeScript bridges inherit
+`core`'s implementation of it; Swift bridges implement the spec and are
+held to it by the same conformance tests. A better contract for a forkable
+project anyway — a stranger's Rust bridge is exactly as first-class as a
+shipped one.
+
+**Bridges authenticate their callers (CRIT-9).** Loopback is **not** a trust
+boundary — it is reachable from the container, and the container holds the
+OAuth token, Postgres, and the mounted repo, so container→host is a real
+trust boundary. Every host bridge requires a **per-bridge bearer token**
+from its caller (from env, per invariant 8's boring-primitives rule) and
+ships a misuse test proving an unauthenticated call fails.
+
+**Three defaults every bridge gets from the `@foldedspacelabs/core` contract:**
 
 **1. Lazy tool discovery.** Measured: ~21k tokens of tool definitions ride on
 every turn, and `--allowedTools` does not trim them. In lazy mode a bridge exposes
@@ -733,7 +845,7 @@ Known secret fields — tokens, keys, passphrases, credentials — return
 `***REDACTED***` so they never enter agent context, transcripts, or logs. Opt
 out per-process only, never per-call. Passing the placeholder back is rejected
 so it can't be written as a real value. **PoC-13 forced this wider:** a bridge
-that returns model-*generated* structured data (the comms reducer, §4.11) must
+that returns model-*generated* structured data (the comms reducer, §4.12) must
 run a deterministic redaction pass over that output — digit-run scrubbing for
 OTP/PIN/card/phone, capitalized-token filtering for names — because a local
 model copied a live verification code verbatim into a field that was supposed
@@ -781,10 +893,10 @@ are the same tax — fix both.
 Agents bind skills in their manifest (`skills: [decision-council, brief-writer]`),
 so an agent carries only its own descriptions.
 
-### 4.4 Named query contract
+### 4.5 Named query contract
 
 ```yaml
-# router/queries/open_work.yaml
+# queries/open_work.yaml — instance repo; defaults stamped from seed/queries/
 name: open_work
 description: Work items not yet closed, newest first
 params:
@@ -797,12 +909,19 @@ cache_ttl: 60
 ```
 
 One definition, four consumers. Adding a query is a file, not a deploy.
+Execution is `packages/queries` only (invariant 3): params bind through a
+**parameterized pg driver** — never `psql -c`, never string interpolation —
+because an interpolated named query would reopen arbitrary SQL through a
+query param (review SHOULD-5; PoC-8 already showed the real console needs a
+persistent pg pool anyway).
 
-### 4.5 Manifest schema (all component types)
+### 4.6 Manifest schema (all component types)
 
 ```yaml
 name: aws-costs
-type: collector          # bridge | collector | agent | routine | target (§4.17)
+type: collector          # bridge | collector | agent | routine | target (§4.18)
+                         # | service (reconciler, watchdog, console — so
+                         # doctor sees the components that die silently)
 schedule: "0 */6 * * *"  # collectors and routines
 writes: [metrics]        # tables or paths
 reads: []
@@ -816,44 +935,63 @@ references, every `schedule` a parseable cron.
 
 ---
 
-### 4.6 Repo governance
+### 4.7 Repo governance
 
 Shared responsibility: Metis writes knowledge without ceremony; you review
-changes to how the system works.
+changes to how the system works. Since the product/instance split (§4.16),
+this is two repos with different regimes (rewritten 2026-08-29, review
+CRIT-4 — the pre-split framing had protected paths that no longer exist
+where it pointed).
 
-**Free — direct commit by Metis**
+**The product repo: human PRs only.** The assistant never commits there at
+all — every change to shipped code is a PR a person reviews and merges.
 
-`Knowledge/` — Areas, People, Decisions, Journal, `now.md`
+**The instance repo: two zones, split by the commit tool.**
 
-**Protected — PR required**
+*Free — direct commit by the assistant:*
+`Knowledge/` — Areas, People, Decisions, Journal, `Knowledge/now.md`
 
-`agents/` `bridges/` `collectors/` `router/` `db/migrations/` `ops/`
-`docker-compose.yml` `.github/` `CLAUDE.md`
+*Protected — never written by the assistant:*
+`identity.yaml` `rules.yaml` `sources.yaml` `deployment.yaml` `queries/`
+`agents/` `routines/` `extensions/` `instance-migrations/` `CLAUDE.md`
 
-Two of those matter more than the rest. `CLAUDE.md` is Metis's own operating
-instructions — an agent that can rewrite its own constraints has none. And
-`router/rules.yaml` decides what escalates and what dispatches; an agent that can
-edit its routing can grant itself Opus on everything.
+Two of those matter more than the rest. The instance `CLAUDE.md` is the
+assistant's own operating instructions — an agent that can rewrite its own
+constraints has none. And `rules.yaml` decides what escalates and what
+dispatches; an agent that can edit its routing can grant itself the deep
+tier on everything. Protected paths change only by the user's hand —
+directly, or through the management API's owner-credential endpoints
+(§4.2) — with the instance repo's history as the audit trail.
 
-**Three enforcement layers, most reliable first**
+**Enforcement layers — honest about which carry the load** (review B6)
 
 1. **Tool-level.** Metis never calls `git commit`. It calls `brain-commit`,
-   which stages only `Knowledge/` and refuses other paths. An agent can't route
-   around a tool that won't accept the argument.
-2. **Repo-level.** A GitHub ruleset with path restrictions on `main`.
-3. **CODEOWNERS.** For PRs opened by you or by Claude Code. Note it only assigns
-   review — it does not block direct pushes.
+   which stages only `Knowledge/` and refuses other paths. An agent can't
+   route around a tool that won't accept the argument.
+2. **No shell, no raw git (invariant 9).** The engine cannot reach the repo
+   except through its tools, so layer 1 is the whole write surface — this
+   is the premise that makes it a control rather than a convention.
+3. **Repo-level — stated plainly as weak.** Server-side rulesets are
+   unavailable on the current org tier, CODEOWNERS only assigns review, and
+   the client-side pre-push hook is per-machine and bypassable. Layers 1+2
+   are the control; GitHub adds audit, not enforcement. The `Brain-Source`
+   trailer is self-declared provenance for reading history — never an
+   authorization signal.
 
 **Commit hygiene** (so rollback is actually usable)
 
 - One logical change per commit — never "nightly sync" across forty files
 - `Brain-Source: cos` trailer distinguishing agent commits from yours
-- `now.md` committed once per routine, not per edit
+- `Knowledge/now.md` committed once per routine, not per edit
 
-**Review is an audit, not a gate.** The weekly routine emits a digest of what the
-Metis committed, grouped by area, with diff links. Anything wrong is a revert.
+**Review is an audit, not a gate.** The weekly routine emits a digest of what
+Metis committed, grouped by area, with diff links. Anything wrong is a
+revert. One sentence of precision the phrase was blurring (review
+SHOULD-24): "audit-not-gate" means the *agent is never blocked*; proposal
+triage means an *unsettled fact never counts as settled* until reviewed.
+Both hold; they are different mechanisms.
 
-### 4.7 Work model
+### 4.8 Work model
 
 A `work` table federating GitHub issues, calendar holds, and internal threads into
 one status view. Powers "how's development going," "what's the trip status,"
@@ -866,19 +1004,42 @@ work(id, title, area, kind, status, external_ref, owner, due, updated_at)
 `external_ref` points at a GitHub issue, a calendar event, or an inbox item.
 Collectors reconcile status from the source; Metis never invents it.
 
-### 4.8 Outbound
+### 4.9 Outbound
 
 The door is inbound-only by default. Proactive messages — briefs, reminders,
-package alerts, watchdog warnings — go out through the Messages bridge from a
-routine.
+package alerts, watchdog warnings — go out as **web push to the PWA**
+(later also the iOS app), from a routine.
 
 Guardrails, because an assistant that pings eleven times a day gets muted:
 
-- **Quiet hours** in `router/rules.yaml`
+- **Quiet hours** in `rules.yaml`
 - **Rate limit** per category per day
 - **Everything outbound logged** to `runs` so you can see what it sent and why
 
-### 4.9 Self-modification
+**The daily review carries a soft budget (ratified D10, 2026-08-29).** The
+morning brief surfaces the most impactful items — plus one or two extra
+only if also critical — and **links to full detail in knowledge rather than
+truncating**: the daily view stays actionable at the real human budget
+(~5 decisions), while the full queue remains one tap away so the user can
+optimize it. Un-acted proposals auto-expire to `draft, reviewed: never`
+(searchable, never lost). The full brief spec is a design task before
+Phase 3 builds it.
+
+**Watchdog reporting (revised 2026-08-29, with D1).** The watchdog reports
+through the system's own surfaces: it writes component health via the API
+into the web app's **status page** (§4.2 `/api/status`) and raises web push
+for anything severe — the model-free property is preserved, since none of
+that path touches Anthropic. A push subscription returning 410 (silently
+dead after a Home-Screen reinstall) is itself treated as an alertable
+failure, not a quiet degrade. Stated honestly: this cannot report the one
+failure where the whole machine (or the console) is down — iMessage used
+to cover that, and its replacement, an external **dead-man's switch** (the
+watchdog pings an uptime service; the service emails when pings stop), is
+a *suggested bring-your-own pattern* like the routing layer (invariant 8),
+never a shipped dependency. Ruled acceptable: the status page is the
+workaround the design leans on.
+
+### 4.10 Self-modification
 
 Claude Code improving Metis means the running system is also the dev target.
 
@@ -887,7 +1048,7 @@ Claude Code improving Metis means the running system is also the dev target.
 - Metis may file issues against itself ("this collector has failed six nights")
   but never merge them
 
-### 4.10 Sub-agent knowledge access
+### 4.11 Sub-agent knowledge access
 
 **The brief is the context transfer.** When Metis dispatches, it does not hand
 over the brain — it writes a brief containing the relevant knowledge. Deciding
@@ -929,7 +1090,7 @@ grants via the management API. Same tiers, same enforcement, same audit
 rows, one implementation to make bulletproof (invariant 8: one small
 interface with misuse tests beats two similar ones). Frontmatter carries the
 differentiation: every accepted addition records `source` (which agent),
-`trust` (internal-manifest vs external-grant), and provenance per §4.14 —
+`trust` (internal-manifest vs external-grant), and provenance per §4.15 —
 so downstream consumers can weight by origin without the interface caring.
 
 **External agents (added 2026-08-28): the same trust model, opened outward.**
@@ -958,7 +1119,7 @@ Two properties fall out: the instance split preserves the IP boundary (a
 work agent's config points at the work instance's endpoint and token, so
 work context can only land in the work vault), and capture-from-anywhere is
 the single most-demanded capability class in the 2026 skill ecosystem —
-this is the highest-leverage door after iMessage.
+this is the highest-leverage door after the web app itself.
 
 **External read access: tiered, default-deny, user-granted.** Writing
 proposals is safe by construction; *reading* knowledge is where the risk
@@ -967,7 +1128,7 @@ mechanics:
 
 - **Tier 0 — none.** The default for every external agent. A capture-only
   agent needs nothing more.
-- **Tier 1 — index.** Titles and one-line descriptions only — §4.10's
+- **Tier 1 — index.** Titles and one-line descriptions only — §4.11's
   "discovery without access," promoted to a grantable permission. Lets an
   agent see *that* relevant knowledge exists and request elevation for
   knowledge the user didn't anticipate needing. Granted, not default:
@@ -988,7 +1149,15 @@ grant and every read logged to `runs`. `status: draft` notes (unsettled,
 AI-authored) are excluded from external reads at every tier: external
 agents see only settled knowledge.
 
-### 4.11 Personal comms
+### 4.12 Personal comms
+
+**Scope reduced 2026-08-29 (D1): iMessage is dropped entirely** — as the
+door and as an ingest source. The Messages bridge, `chat.db` reading, and
+`attributedBody` decoding no longer ship. Mail and call metadata remain the
+candidate sources, and the whole pipeline stays gated behind the PoC-13
+re-run bar below. The design principles in this section (reduction not
+filter, the redaction boundary, reader/writer separation) are
+source-agnostic and stand.
 
 The local model is a **reduction**, not a filter. A filter implies "mostly passes
 through, blocks the bad bits" — that fails open. Reduction turns a high-volume,
@@ -998,12 +1167,10 @@ high-sensitivity stream into a low-volume, low-sensitivity stream of facts.
 
 1. **Ingest** — no model. Mail via the **local Mail store** (`~/Library/Mail`
    `.emlx` — PoC-13 confirmed it is present and large, ~72k files/3 months; no
-   IMAP credentials needed), messages via `chat.db`, call metadata via
-   CallHistoryDB. Lands in a local table. **Messages prerequisite: decode
-   `attributedBody`.** `message.text` is NULL on ~99% of recent messages; the
-   content lives in the typedstream `attributedBody` blob. A validated ~30-line
-   decoder exists in `docs/poc/poc13-comms/export2.mjs` — the Messages bridge is
-   non-functional without it.
+   IMAP credentials needed), call metadata via CallHistoryDB. Lands in a
+   local table. (Messages was a source pre-D1; the validated
+   `attributedBody` decoder survives at `docs/poc/poc13-comms/export2.mjs`
+   should that ever return.)
 2. **Reduce** — Apple FM, on-device. Per item: classify, extract action / entity /
    date / urgency. Emits a structured row containing **no message body** — and
    that row passes a **deterministic redaction pass** before anyone sees it
@@ -1017,7 +1184,6 @@ Whether that ask returns anything is policy, per source, in `sources.yaml`
 (protected path):
 
 ```yaml
-imessage:      { extract: true, body: on_request, summary: local }
 mail_work:     { extract: false }
 mail_personal: { extract: true, body: never, summary: local }
 calls:         { extract: metadata_only }
@@ -1062,7 +1228,7 @@ sufficient: the deterministic prefilter above; making `date_ref`/`entity`/
 `urgency` *optional* in the `@Generable` schema so the model can decline rather
 than confabulate (a fabricated date is itself a rejection signal); past-vs-
 future tense discrimination; and dedup by action string before surfacing.
-**Recommendation:** keep §4.11 "build this last," and gate it behind a re-run
+**Recommendation:** keep §4.12 "build this last," and gate it behind a re-run
 of PoC-13 that clears a two-sided bar before any comms ingest is written:
 **≥80% precision on a held-out labeled set, AND zero misses on a hand-labeled
 "must-catch" stratum** of genuinely high-stakes items — precision alone can be
@@ -1081,13 +1247,13 @@ table short: days, not years. The derived actions are what you need.
 **Build this last,** and build the redaction boundary and `sources.yaml` *before*
 the ingest, so there's never a window where raw content flows and policy doesn't.
 
-### 4.12 Change detection and indexing
+### 4.13 Change detection and indexing
 
 Edits are mechanical to absorb — re-embed, re-parse links, mark freshness. None
 of it needs a model, so **the watcher updates the index; it does not notify the
 Metis.**
 
-- `fswatch`/chokidar on `knowledge/`, debounced ~30s of quiet
+- `fswatch`/chokidar on `Knowledge/`, debounced ~30s of quiet
 - Marks rows dirty in `knowledge_files(path, mtime, content_hash, indexed_at)`
 - Reconciler every 5 min: **compare content hash, not mtime** — sync touches mtime
   constantly; hashing prevents pointless re-embeds
@@ -1097,10 +1263,10 @@ Metis.**
 The only edit worth interrupting Metis for is a conflict: you edited a file it
 was about to write.
 
-### 4.13 Obsidian and visualization
+### 4.14 Obsidian and visualization
 
 **Vault root = `<instance>/Knowledge/`. Git root = the instance repo root
-(§4.15).** `.git` lives one level
+(§4.16).** `.git` lives one level
 above the vault, so the sync layer never sees it. This is the decision that makes
 mobile editing safe — a git working tree synced through iCloud is a known
 corruption path.
@@ -1127,7 +1293,7 @@ find yourself wanting — by recency, by access frequency, scoped to one area.
 reconciler detects Obsidian conflict files and surfaces them in the morning brief
 rather than silently indexing both copies.
 
-### 4.14 Knowledge structure — CODE/PARA, adapted
+### 4.15 Knowledge structure — CODE/PARA, adapted
 
 Base: Tiago Forte's CODE (Capture, Organize, Distill, Express) for flow and PARA
 (Projects, Areas, Resources, Archive) for structure, in the machine-readable form
@@ -1187,13 +1353,18 @@ them from embedding is reconciler config, not a filename convention.
    model tiers, scoped `brain-read` paths, and `brain-report` write access.
 
 **Frontmatter schema** (validated in CI, since the agent depends on it;
-frozen 2026-08-28 with the three prior-art-review additions):
+frozen 2026-08-28 with the three prior-art-review additions; `id` added
+2026-08-29 — the moves/renames design below already required it, the frozen
+schema had simply omitted it):
 
 ```yaml
+id: 01J8Z3K9A2                      # immutable, assigned at creation, never
+                                    # edited — durable references prefer id
+                                    # over path (see moves/renames below)
 type: project | area | resource | technique | person | journal
 status: draft | active | archived   # draft = AI-authored, unsettled; surfaced
                                     # in the morning brief; excluded from
-                                    # external reads (§4.10)
+                                    # external reads (§4.11)
 area: "[[Drey]]"                    # MUST be a wikilink, never plain text
 people: ["[[Person]]"]              # MUST be a list of wikilinks — list-typed
                                     # fields never collapse to a scalar
@@ -1218,7 +1389,8 @@ prompt rule rather than a habit — which yields consistency no human sustains.
 **Obsidian plugins**, ranked by value to this system:
 
 - **Linter** — enforces the frontmatter contract client-side so you and CI agree
-- **Advanced URI** — Metis can text `obsidian://` deep links opening exact notes
+- **Advanced URI** — briefs and pushes can carry `obsidian://` deep links
+  opening exact notes
 - **Bases** (core) — database views over frontmatter; covers most of Dataview
 - **Templater** — templates with date logic and prompts
 - **QuickAdd** — capture flows into `inbox/`
@@ -1261,8 +1433,9 @@ into a known-good home, because that intent is already classified:
   meeting, from the template (attendees as wikilinks, `decisions` list,
   action items). People pages are *updated by reference* (backlinks), never
   duplicated per meeting.
-- **People / Projects / Areas** — updated in place (ingest-as-update, §2
-  research); a new note only when a genuinely new entity appears.
+- **People / Projects / Areas** — updated in place (ingest-as-update, per
+  the prior-art review, `docs/research/2026-08-prior-art-review.md`); a new
+  note only when a genuinely new entity appears.
 - **Todos** — never markdown lists that rot: `/note` or capture → triage →
   the `work` table or Reminders (§PoC-9), where status lives.
 - **Long-term ideas** — `Resources/` or a `Projects/` seed note via
@@ -1282,7 +1455,7 @@ survive it. Mechanics, cheapest first:
    creation, never edited). Durable references — briefs, reports, `refs` in
    sessions, external-agent citations — prefer `id` over path; `brain-read`
    resolves either.
-2. **The reconciler detects renames by content hash** (§4.12 already hashes
+2. **The reconciler detects renames by content hash** (§4.13 already hashes
    chunks): same hash at a new path re-keys `knowledge_files`, `embeddings`,
    and `knowledge_links` rows — a move costs an index update, never a
    re-embed.
@@ -1293,7 +1466,7 @@ survive it. Mechanics, cheapest first:
    which is exactly right, and the reconciler surfaces cross-area moves in
    the morning brief so the permission consequence is visible, not silent.
 
-### 4.15 Repo structure and distribution
+### 4.16 Repo structure and distribution
 
 Built to be forked. Someone else should be able to run this, name their assistant
 whatever they like, and use any single bridge on its own. The same properties make
@@ -1314,23 +1487,34 @@ public) is code only:
 metistry/
   apps/                   NOT published to npm — shipped as container images
     assistant/              Agent SDK host       ghcr.io/foldedspacelabs/metistry-assistant
-    console/                Node server + PWA    ghcr.io/foldedspacelabs/metistry-console
-    router/                                      ghcr.io/foldedspacelabs/metistry-router
+    console/                Node server + PWA + router module + routine
+                            runner                ghcr.io/foldedspacelabs/metistry-console
   packages/               PUBLISHED to npm
-    mcp-messages/           @foldedspacelabs/mcp-messages
     mcp-eventkit/  mcp-health/  mcp-apple-fm/
+                            thin npm publishers of prebuilt, notarized
+                            Swift binaries (D3)
     mcp-brain/              read · report · query — report/capture double as
-                            the inbound door for external agents (§4.10)
-    core/                   manifest schema, lazy discovery, redaction,
-                            preview-confirm, check() interface
+                            the inbound door for external agents (§4.11)
+    core/                   manifest schema + runtime, lazy discovery,
+                            redaction, preview-confirm, check() interface,
+                            runs emission, bridge auth + error envelope,
+                            config loader — and the wire-level bridge
+                            contract spec (§4.3)
+    queries/                the ONE implementation of invariant 3
     cli/                    init | doctor | up | update
   plugins/                Claude Code / Codex bundles
   skills/                 §4.4
-  seed/                   templates a fresh instance is stamped from:
-                          identity.yaml, now.md, vault starter, rules examples
-  collectors/  agents/  routines/  db/  ops/
+  seed/                   defaults a fresh instance is stamped from:
+                          identity.yaml, Knowledge/now.md, vault starter,
+                          queries/, agents/, routines/, rules examples
+  collectors/  db/  ops/
   LICENSE                 Apache-2.0 — the patent grant eases corporate use
 ```
+
+(`apps/router` was folded into the console as a module — review CRIT-3: a
+third container bought a hot-path hop, a second pg pool, and a second
+deploy for nothing the console couldn't do. `rules.yaml` is instance
+config.)
 
 **An instance repo** (one per install, each separately owned and private) is
 everything the product repo must never contain — created by `metistry init`
@@ -1338,13 +1522,31 @@ as its own git repo:
 
 ```
 <instance>/               personal → personal GitHub; work → work-owned remote
-  Knowledge/              the live Obsidian vault — §4.14
+  Knowledge/              the live Obsidian vault — §4.15 (incl. now.md,
+                          so brain-commit can write it)
   inbox/
+  queries/  agents/  routines/
+                          config-shaped things the instance owns — stamped
+                          from seed/, then the instance's to edit
+  extensions/             the user's own local bridges/collectors (§5) —
+                          user code, owned like the vault
+  instance-migrations/    schema for local extensions; ordered after
+                          product migrations
   identity.yaml           the ONLY place the assistant is named
   rules.yaml  sources.yaml  deployment.yaml
-  now.md
   metistry.lock           the product release this instance runs
 ```
+
+**The overlay rule (D4, 2026-08-29 — review CRIT-4).** Anything
+config-shaped lives in the *instance*; the product ships defaults in
+`seed/` and the loader resolves **instance-first by filename** — a
+same-named file in the instance wins over the seeded default, and new
+seeded defaults appear on `metistry update` without touching the user's
+copies. Consequences that were previously broken: `now.md` sits inside
+`Knowledge/` where `brain-commit` can actually write it; a user's local
+extension gets its schema via `instance-migrations/`, never a migration in
+the product repo; and §4.7's protected paths all exist in the repo the
+assistant actually touches.
 
 **Code flows downward as releases, never as git merges.** Product CI publishes
 versioned artifacts — npm packages for bridges/core/cli, container images for
@@ -1357,7 +1559,7 @@ personal machine. Improvements conceived at work are re-implemented upstream
 on personal time (§5). Data flows in no direction; code flows down.
 
 Knowledge versioning is simply each instance repo's own git history, written
-by `brain-commit` and the reconciler as designed — §4.6's split becomes
+by `brain-commit` and the reconciler as designed — §4.7's split becomes
 physical: the assistant only ever commits to the *instance* repo; every change
 to the *product* repo is a human PR upstream.
 
@@ -1387,10 +1589,10 @@ deployment, not a release.
 - name: unifi-network
   source: { type: uvx, package: unifi-network-mcp }
   env: [UNIFI_HOST, UNIFI_USERNAME, UNIFI_PASSWORD]
-- name: messages
-  source: { type: npm, package: "@foldedspacelabs/mcp-messages" }
+- name: eventkit
+  source: { type: npm, package: "@foldedspacelabs/mcp-eventkit" }
   runs_on: host
-  requires_tcc: [full_disk_access]
+  requires_tcc: [calendars, reminders]
 ```
 
 **Identity is config, not code.** `identity.yaml` holds the assistant's name,
@@ -1401,8 +1603,9 @@ assistant name are thematically independent: renaming one must not orphan the
 other.
 
 **Install.** `npx metistry init <dir>` — creates the **instance repo**: prompts
-for the assistant's name, stamps `identity.yaml`/`now.md`/vault starter from
-`seed/`, writes `metistry.lock` pinned to the current release, generates
+for the assistant's name, stamps `identity.yaml`, the vault starter (incl.
+`Knowledge/now.md`), and the config defaults from `seed/`, writes
+`metistry.lock` pinned to the current release, generates
 `.env`, `git init`s the instance, brings up compose from pinned images, runs
 migrations, prints the TCC grants to click, verifies. `metistry update` moves
 the pin and re-runs migrations.
@@ -1416,9 +1619,9 @@ thin bootstrap on any machine with Node.
 variants were observed in Phase 0 — Homebrew `node`'s versioned path, the
 `claude` CLI's versioned path, and an ad-hoc-signed binary's cdhash — each of
 which silently drops the grant when its identity changes (a `brew upgrade`, a
-CLI auto-update, a one-character source edit). So the Messages, EventKit, and
-Apple FM bridges ship as purpose-built binaries with a **stable signing
-identity**, not `node script.mjs` under launchd. The identity is the user's
+CLI auto-update, a one-character source edit). So the EventKit and Apple FM
+bridges — and any future TCC bridge — ship as purpose-built binaries with a
+**stable signing identity**, not `node script.mjs` under launchd. The identity is the user's
 existing **Developer ID Application certificate** (an active Apple Developer
 account already exists — no new cost): TCC grants then follow Team ID + code
 requirement and survive rebuilds and source edits, and signed + notarized
@@ -1426,18 +1629,24 @@ prebuilt binaries can ship inside the npm packages, keeping the
 stranger-runs-`npx` story intact (each machine's user still clicks their own
 consent prompts, which is correct). Operational notes, not blockers:
 notarization becomes a release step, and CI signing needs certificate
-management if releases ever move off this Mac. `mcp-apple-fm` specifically is
-a thin MCP server that shells out to a compiled **Swift** helper — the
-FoundationModels framework is Swift-only (no Python/ObjC surface), and the
-helper is where the `sk`-free, model-load-amortized inference happens (4096-token
-context, a fresh `LanguageModelSession` per item).
+management if releases ever move off this Mac.
+
+**All TCC bridges are Swift (D3, 2026-08-29 — review CRIT-11).** Apple FM
+is Swift-mandatory (FoundationModels has no Python/ObjC surface; inference
+wants the model-load-amortized, fresh-`LanguageModelSession`-per-item shape
+PoC-3 measured) and EventKit effectively is; a Node TCC bridge would need
+SEA bundling plus per-arch signing plus notarization inside an npm package
+— a build-system project sitting on the critical path. One Swift toolchain
+instead: the npm packages become thin publishers of the prebuilt notarized
+binaries, and `core`'s bridge contract is the wire-level spec those
+binaries implement (§4.3).
 
 `metistry doctor` falls out of `core` requiring `check()` on every bridge and
 collector — iterate the registry, call check, report. **Define that interface in
 Phase 1** even though doctor ships much later; retrofitting it across twenty
 components is the annoying version.
 
-### 4.16 Cloud portability
+### 4.17 Cloud portability
 
 The reference deployment is a single always-on machine (the author's: a Mac
 Studio). But the split that already exists —
@@ -1448,7 +1657,6 @@ option open costs almost nothing if the rules below hold from the start.
 
 | Component | Why | Without it |
 |---|---|---|
-| Messages door | `chat.db` + AppleScript, TCC | Telegram door |
 | EventKit | macOS framework | CalDAV / Google Calendar |
 | HealthKit ingest | iOS/macOS only | No fallback — accept the loss |
 | HomeKit | No headless API | No fallback |
@@ -1464,7 +1672,7 @@ option open costs almost nothing if the rules below hold from the start.
   invariant 8), exposing its Apple bridges. When
   the Mac is off, those bridges are absent rather than broken.
 
-**Six rules that keep the option open**
+**Seven rules that keep the option open**
 
 1. **Every Apple bridge declares a fallback** in its manifest — a substitute
    bridge, or `degrades: absent` so the router stops offering the capability
@@ -1487,7 +1695,7 @@ option open costs almost nothing if the rules below hold from the start.
    internals. What the `sessions` table guarantees instead: enough state
    (thread identity, rolling summary, key decisions, open loops, refs) that on
    transcript loss, a **fresh session UUID re-briefs via `brain-query` and
-   continues the thread** — §4.10's "the brief is the context transfer,"
+   continues the thread** — §4.11's "the brief is the context transfer,"
    applied to the assistant itself. Verbatim memory of old turns is lost in
    that case; continuity of knowledge is not. (PoC-4 confirmed transcripts
    survive `docker restart` via the mounted volume, so re-briefing is the
@@ -1502,7 +1710,7 @@ option open costs almost nothing if the rules below hold from the start.
 **Case sensitivity is the sleeper issue.** Every path bug that macOS forgives, a
 Linux container surfaces. CI runs on Linux from Phase 1 for exactly this reason.
 
-### 4.17 Flexible compute (added 2026-08-28)
+### 4.18 Flexible compute (added 2026-08-28)
 
 The user configures what compute runs where — Claude subscription, other
 providers' APIs, local models, and external systems — without the router ever
@@ -1523,7 +1731,7 @@ Agent SDK / `claude -p` / third-party usage currently draws normal
 subscription limits** (per Anthropic's help center; a reworked change may
 return "with advance notice"). So routine-lane cost arbitrage via this layer
 is a *contingency*, not a present need — but per-target cost accounting
-(§4.17.D) means if metering ever ships, responding is a config tweak, not a
+(§4.18.D) means if metering ever ships, responding is a config tweak, not a
 redesign.
 
 **B. Compute targets (Phase 5).** A **target** is a directory with a manifest
@@ -1565,9 +1773,12 @@ Everything below reads through named queries (invariant 3) and shows up in
 the console; nothing here adds a new mechanism, only discipline on an
 existing one:
 
-- **Every model call, on every tier and target, logs one `runs` row** —
-  component, model, tokens in/out, `cost_usd`, duration, ok/error (schema
-  already exists) — plus routing fields: which tier ran, *why*
+- **Every model call, on every tier and target, logs one `runs` row — in
+  two phases** (CRIT-8): insert at start (`started_at`), update at
+  completion (`finished_at`, ok/error) — so a hung, looping, or crashed
+  call is *visible in flight*, not absent from the exact monitor built to
+  catch cost runaway. Fields: component, model, tokens in/out, `cost_usd`,
+  duration — plus routing fields: which tier ran, *why*
   (`routed_by: rule | scorer | escalation | override`), and the scorer's
   verdict when one was consulted.
 - **Effectiveness by proxy, honestly.** "Was the model choice good" is not
@@ -1583,7 +1794,7 @@ existing one:
 - **The tuning loop is human**: the weekly review includes a routing report —
   spend by tier/target, verdict distribution, miss events with links to the
   offending turns — and may *propose* `rules.yaml` tweaks; it never applies
-  them (routing config is a protected path, §4.6).
+  them (routing config is a protected path, §4.7).
 
 **What does not change:** invariant 4's purpose. Routing between tiers and
 targets is user-configured and budget-bounded (`rules.yaml`, agent
@@ -1592,17 +1803,17 @@ manifests); deterministic rules take precedence; any model-judgment scorer
 can never expand its own budget — enforced at the dispatch tool. Collectors
 still never call models.
 
-### 4.18 Metis as coordination hub (added 2026-08-28)
+### 4.19 Metis as coordination hub (added 2026-08-28)
 
 Heterogeneous agents — internal crews, external Claude sessions, other
 vendors' agents — coordinate through Metis via shared knowledge, shared
 context, and a shared task list. Evidence and rejected alternatives in
 `docs/research/2026-08-agent-coordination.md`; the design is deliberately
-small: **~5 MCP tools on the existing scoped bridge plus ~3 columns on
+small: **~8 MCP tools on the existing scoped bridge plus ~3 columns on
 `work`**. The governing shape: **the hub holds state; agents pull.** Metis
 never autonomously dispatches external agents.
 
-**The tools** (exposed per-agent under §4.10's auth and read tiers):
+**The tools** (exposed per-agent under §4.11's auth and read tiers):
 `work.list_ready` (unblocked, unclaimed — requires dependency edges),
 `work.claim(id)` (**atomic** assignee+status+lease in one operation),
 `work.heartbeat(id)` (lease renewal; expired leases release the task),
@@ -1626,7 +1837,8 @@ payloads** — one canonical copy; embedded spec-copies drift within minutes),
 
 **Proposal velocity — coordination cannot wait for the weekly digest.** The
 morning brief and weekly audit remain the *batch* reviews, but when agents
-are actively coordinating, knowledge proposals and elevation requests are
+are actively coordinating, knowledge proposals and elevation requests
+(both rows in the one `proposals` table — D7, §4.2) are
 **event-driven**: a push notification (console PWA, later iOS) offers
 **allow / deny / accept-with-changes**, and deny-or-changes carries feedback
 that routes back to the **source agent's inbox** — the agent learns why and
@@ -1647,8 +1859,11 @@ column/table plus named queries), not new machinery.
 
 Each component type has one recipe. That's the whole maintainability story.
 
-**Add a collector** → `collectors/<name>/{manifest.yaml,run.py}`, a migration if
+**Add a collector** → `collectors/<name>/{manifest.yaml,run.ts}`, a migration if
 it needs a table, a routine entry. Writes to Postgres, never calls a model.
+Collectors are **TypeScript** like everything else non-Swift (review
+SHOULD-15 — the stack ruled out Python in Phase 0; one toolchain to
+maintain).
 
 **Add a bridge** → `packages/mcp-<name>/` with manifest, server, `check()`, and a
 README written for a stranger. Publish independently. Add to the relevant agent's
@@ -1676,7 +1891,7 @@ connector is a first-class citizen the moment it exists:
 
 1. **Shipped** — in the product repo, released as npm/images.
 2. **External** — a registry entry pointing at anyone's npm/uvx package (no
-   code, already first-class in §4.15).
+   code, already first-class in §4.16).
 3. **Local** — the quick one: the registry accepts
    `source: { type: local, path: ... }` pointing at a directory in the
    user's own space (their instance repo's `extensions/`, or anywhere).
@@ -1721,11 +1936,11 @@ session transcripts are exactly where silent leakage happens, with no tool
 boundary to catch it.
 
 **What's separate:** the instance repo (work's vault on a work-owned remote),
-Postgres, Claude account, Apple ID, machine, door (Slack or Teams at work;
-iMessage personally).
+Postgres, Claude account, Apple ID, machine, and door (each instance's own
+web app; a Slack or Teams bridge at work if ever wanted).
 
 **What's shared:** the product — consumed as pinned releases (`metistry.lock`),
-never as a git fork. The §4.15 split is what makes the IP boundary mechanical
+never as a git fork. The §4.16 split is what makes the IP boundary mechanical
 rather than disciplinary: *using* released Apache-2.0 open source at work is
 ordinary OSS consumption; *contributing* happens upstream, on personal time,
 from a personal machine. An improvement conceived at work is re-implemented
@@ -1759,7 +1974,7 @@ Worth settling before Phase 1, since each is cheap now and annoying later.
 5. **Quiet hours govern outbound only.** Inbound is always answered, any hour.
    Configurable working hours in `rules.yaml`, with a watchdog severity override
    that ignores them.
-6. **Knowledge structure:** §4.14. Areas nested, Projects flat, status in
+6. **Knowledge structure:** §4.15. Areas nested, Projects flat, status in
    frontmatter.
 7. **GUI:** Obsidian. **Adaptive escalation,** not `/deep`
    as the only path.
@@ -1777,31 +1992,57 @@ Worth settling before Phase 1, since each is cheap now and annoying later.
    (explicit `add-host`, no Docker-Desktop magic), auth (subscription
    `setup-token` in `CLAUDE_CODE_OAUTH_TOKEN`, never `ANTHROPIC_API_KEY`), and
    session survival across `docker restart`. Watchdog tracks the ~1yr token
-   expiry (no auto-refresh). See §4.16.
+   expiry (no auto-refresh). See §4.17.
+
+**Resolved by the 2026-08-29 pre-implementation review** (D1–D10, ratified
+— full findings and rationale in `docs/plan-review-2026-08-29.md` §8):
+iMessage dropped entirely, web app primary + web push (D1/D2); Swift TCC
+bridges + wire-level bridge contract (D3); product/instance config overlay
+(D4); unified `proposals` table (D7); keyword recall to Phase 2 (D8); Home
+Assistant cut, everything else kept (D9); soft daily-review budget (D10).
+All propagated into this document.
 
 **Still open**
 
-10. **HomeKit.** Deferred. No headless API, and Home Assistant's controller
-    integration would require unpairing accessories from Apple Home. The
-    Apple-native path is Shortcuts automations writing state to a file — clunky
-    but non-disruptive. Video analysis dropped for now.
+10. **HomeKit.** Deferred. No headless API; Home Assistant was considered
+    for this and **cut (D9)**. The Apple-native path is Shortcuts
+    automations writing state to a file — clunky but non-disruptive. Video
+    analysis dropped for now.
 11. **`Techniques/`** — own folder or fold into `Resources/`? And how granular
     should `Areas/` sub-nesting go before it's noise?
+12. **One committer or two (D5, review CRIT-6).** The plan rejects
+    Obsidian-Git for "two committers" yet currently ships two
+    (`brain-commit` + the reconciler); the reconciler has no `apps/` home
+    or manifest type; and the vault filesystem seam for the containerized
+    assistant (bind-mount vs host-bridge) is undecided. The review's
+    proposal: the reconciler is the *sole* committer and `brain-commit`
+    becomes write-file + enqueue-commit-intent. **Decide before the
+    reconciler is built** — the latency question (C3) and the invariant-7
+    seam (C4) ride on it.
+13. **Invariant 1 restated + the durable set (D6, review CRIT-5).** Four of
+    eight tables hold state a rebuild cannot regenerate (`runs`, `sessions`,
+    `inbox` triage, `work` threads), so "git is the record" needs its honest
+    scope and the nightly dump needs a named durable set, with tables
+    labeled `-- durable`/`-- derived` and the quarterly drill made a real
+    `down -v` rebuild. **Decide before backup/DR is built.**
 
 ---
 
 ## 7. Frameworks — decisions
 
 **Claude Agent SDK** — Metis. Already chosen, now framed precisely: it is the
-**reference engine** behind the documented assistant contract (§4.17.C). It
+**reference engine** behind the documented assistant contract (§4.18.C). It
 is the agent framework for the shipped engine — explicitly a building block
 rather than an orchestration platform — and model/provider variation happens
-via configuration (§4.17.A), never via an in-process abstraction layer.
+via configuration (§4.18.A), never via an in-process abstraction layer.
 
-**Home Assistant** — recommended. Docker on the Mac. Gives HomeKit device state,
-RTSP camera handling, presence, sensor history, and automation triggers with an
-MCP server on top. Replaces most of what you'd hand-build for the home tier,
-which is where hand-rolling is worst value.
+**Home Assistant** — **cut (D9, 2026-08-29).** It was recommended for
+HomeKit device state, cameras, and presence, but it is a second always-on
+system to operate and administer, and the home tier sits on no critical
+path. The solo-maintainer part count is the real risk the reviews
+converged on; this was the cheapest cut. If HomeKit ever matters, the
+Shortcuts-automation path (§6 #10) covers the basics without unpairing
+accessories; revisit HA only if that proves insufficient.
 
 **Official MCP SDK** — for all bridges. Don't hand-roll the protocol.
 
@@ -1829,7 +2070,7 @@ land outside its model.
 - *Anytype* — object model, not files. Disqualified.
 
 **OpenClaw** — no. Its value was multi-channel reach and a heartbeat; you now have
-iMessage, launchd, and a router. What remains is Signal/WhatsApp and
+the web app, launchd, and a router. What remains is Signal/WhatsApp and
 phone-as-sensor, neither worth the security surface next to a system that reads
 your mail and holds your keys. If you want Signal later, that's a bridge.
 

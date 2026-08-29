@@ -833,6 +833,34 @@ work context can only land in the work vault), and capture-from-anywhere is
 the single most-demanded capability class in the 2026 skill ecosystem —
 this is the highest-leverage door after iMessage.
 
+**External read access: tiered, default-deny, user-granted.** Writing
+proposals is safe by construction; *reading* knowledge is where the risk
+lives, so it is permissioned in tiers that reuse the internal `brain-read`
+mechanics:
+
+- **Tier 0 — none.** The default for every external agent. A capture-only
+  agent needs nothing more.
+- **Tier 1 — index.** Titles and one-line descriptions only — §4.10's
+  "discovery without access," promoted to a grantable permission. Lets an
+  agent see *that* relevant knowledge exists and request elevation for
+  knowledge the user didn't anticipate needing. Granted, not default:
+  titles themselves can be sensitive (People notes, project names).
+- **Tier 2 — scoped read.** A user-granted set of `Knowledge/` area
+  prefixes, exactly the prefix mechanics internal agents use
+  (`scope: [Knowledge/Areas/fsl]` picks up every sub-area). Granted per
+  agent, per planned work; revocable.
+
+Enforcement rules: grants attach **server-side to the agent's token** —
+never asserted by the agent, never carried in the request; a scope's
+denials return "not granted," not "not found," so absence of knowledge and
+absence of permission are distinguishable to the user but not
+information-leaking to the agent. **Elevation requests flow to the user**
+(push notification / morning brief) carrying the requesting agent, the
+areas requested, and its stated reason — one-tap grant or deny, every
+grant and every read logged to `runs`. `status: draft` notes (unsettled,
+AI-authored) are excluded from external reads at every tier: external
+agents see only settled knowledge.
+
 ### 4.11 Personal comms
 
 The local model is a **reduction**, not a filter. A filter implies "mostly passes

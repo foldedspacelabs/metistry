@@ -184,7 +184,7 @@ under an hour. Do not start Phase 1 until PoC-1 through PoC-4 pass.
 
 ### Outcomes (2026-08-28) — Phase 0 complete
 
-Full evidence in `poc/RESULTS.md`. Summary:
+Full evidence in `docs/poc/RESULTS.md`. Summary:
 
 | PoC | Result | What it settled |
 |---|---|---|
@@ -461,7 +461,7 @@ five accurate ones get used.
 **Assumption:** a small local model can split multi-intent input ahead of the
 router. **FAILED** — deterministic over-splitting on lexical cues, quoted
 third-party text promoted to user intent. Invariant 4 stands. Full evidence:
-`poc/RESULTS.md` §PoC-14; fixtures kept as a re-test eval.
+`docs/poc/RESULTS.md` §PoC-14; fixtures kept as a re-test eval.
 
 ### PoC-15 — complexity-tier scorer (invariant 4 evaluation)
 
@@ -470,7 +470,7 @@ user-configured tiers. **SPLIT** — Apple FM failed (cheap class collapsed);
 Haiku passed the quality bar through a contaminated harness on author-shared
 fixtures. Also corrected an ill-posed cost criterion: correct routing beats
 always-standard on *quality* (~4¢ per rescued high-stakes turn), never cost.
-Full evidence: `poc/RESULTS.md` §PoC-15.
+Full evidence: `docs/poc/RESULTS.md` §PoC-15.
 
 ### PoC-16 — local models as tier scorer
 
@@ -480,7 +480,7 @@ Haiku baseline on every quality axis on identical fixtures; reasoning-mode
 measurably hurt the task; calibration, not parameter count, decides. The
 invariant-4 amendment remains gated on an independent confirmatory eval
 (blind fixtures, ≥50 deep items) with `gemma4:e4b` as candidate. Full
-evidence: `poc/RESULTS.md` §PoC-16.
+evidence: `docs/poc/RESULTS.md` §PoC-16.
 
 ### Already settled
 
@@ -1002,7 +1002,7 @@ high-sensitivity stream into a low-volume, low-sensitivity stream of facts.
    CallHistoryDB. Lands in a local table. **Messages prerequisite: decode
    `attributedBody`.** `message.text` is NULL on ~99% of recent messages; the
    content lives in the typedstream `attributedBody` blob. A validated ~30-line
-   decoder exists in `poc/poc13-comms/export2.mjs` — the Messages bridge is
+   decoder exists in `docs/poc/poc13-comms/export2.mjs` — the Messages bridge is
    non-functional without it.
 2. **Reduce** — Apple FM, on-device. Per item: classify, extract action / entity /
    date / urgency. Emits a structured row containing **no message body** — and

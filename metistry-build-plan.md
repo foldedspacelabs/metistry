@@ -483,6 +483,8 @@ and shows up in the morning brief.
 - Named queries in `router/queries/`
 - Node console + static dashboard, `tailscale serve`
 - PWA manifest + service worker
+- **`metistry` Claude Code plugin** (§4.10 external capture — small; rides
+  with the console since `POST /capture` is its endpoint)
 
 **Done when:** you check the dashboard instead of four separate places, and you
 can see your own token spend split by tier.
@@ -493,7 +495,8 @@ can see your own token spend split by tier.
 - **Compute-target registry (§4.17)** — dispatch generalized from
   GitHub-issues-only to manifest-defined targets (MCP-first)
 - `@agent` dispatch → GitHub issues (the first target)
-- `brain-query` MCP bridge exposing named queries to Metis
+- `brain-query` MCP bridge exposing named queries to Metis; **`mcp-brain`'s
+  write-only door opened to external agents** (§4.10)
 - Weekly review routine
 
 ### Phase 6 — Knowledge (when Phase 5 is stable)
@@ -554,7 +557,10 @@ ready-made eval if a stronger local model later warrants a re-test.
 
 ### 4.2 Console HTTP API
 
-Runs on the Mac, exposed over Tailscale. Three consumers: PWA, Shortcuts, Obsidian.
+Runs on the Mac, exposed over Tailscale. Four consumers: PWA, Shortcuts,
+Obsidian, and **external agents pushing captures/reports** (§4.10 — via
+`mcp-brain`'s write-only door or `POST /capture` directly, per-agent bearer
+tokens).
 
 ```
 POST /capture              multipart or json → inbox/    (Shortcuts)
@@ -803,6 +809,61 @@ commit. Agents report to Metis; Metis keeps the record.
 Most "progress" needs no new mechanism: a collector reconciling GitHub issue state
 into `work` already answers "how's development going." Reserve `brain-report` for
 findings, decisions, and gotchas that issue state doesn't capture.
+
+**External agents (added 2026-08-28): the same trust model, opened outward.**
+Context created in tools the assistant never touches — standalone Claude
+sessions, other AI products, coding agents — is captured by giving foreign
+agents the *capture/report surface only*, never `brain-commit`:
+
+- **`mcp-brain`'s write-only tools (`capture`, `report`) double as the
+  universal inbound door.** Served over HTTP on the tailnet; any MCP-capable
+  tool mounts it with a per-agent bearer token. Exposure beyond localhost
+  goes through the user's gateway with real auth, never a direct bind.
+  MCP-first, no bespoke per-tool integrations — the adapter long tail is what
+  kills one-person projects.
+- **A `metistry` Claude Code plugin** covers the zero-effort case: a skill
+  that pushes decisions/findings at natural moments, plus an optional
+  session-end hook offering a summary to `POST /capture`. Ships in
+  `plugins/`.
+- **Everything lands as inbox proposals with provenance** (source agent,
+  session id, machine) and flows through the same triage gate and
+  morning-brief review as every other capture. Foreign content is untrusted
+  by definition (memory-poisoning is a one-email attack, per the prior-art
+  review) — it can propose knowledge; it can never write it.
+
+Two properties fall out: the instance split preserves the IP boundary (a
+work agent's config points at the work instance's endpoint and token, so
+work context can only land in the work vault), and capture-from-anywhere is
+the single most-demanded capability class in the 2026 skill ecosystem —
+this is the highest-leverage door after iMessage.
+
+**External read access: tiered, default-deny, user-granted.** Writing
+proposals is safe by construction; *reading* knowledge is where the risk
+lives, so it is permissioned in tiers that reuse the internal `brain-read`
+mechanics:
+
+- **Tier 0 — none.** The default for every external agent. A capture-only
+  agent needs nothing more.
+- **Tier 1 — index.** Titles and one-line descriptions only — §4.10's
+  "discovery without access," promoted to a grantable permission. Lets an
+  agent see *that* relevant knowledge exists and request elevation for
+  knowledge the user didn't anticipate needing. Granted, not default:
+  titles themselves can be sensitive (People notes, project names).
+- **Tier 2 — scoped read.** A user-granted set of `Knowledge/` area
+  prefixes, exactly the prefix mechanics internal agents use
+  (`scope: [Knowledge/Areas/fsl]` picks up every sub-area). Granted per
+  agent, per planned work; revocable.
+
+Enforcement rules: grants attach **server-side to the agent's token** —
+never asserted by the agent, never carried in the request; a scope's
+denials return "not granted," not "not found," so absence of knowledge and
+absence of permission are distinguishable to the user but not
+information-leaking to the agent. **Elevation requests flow to the user**
+(push notification / morning brief) carrying the requesting agent, the
+areas requested, and its stated reason — one-tap grant or deny, every
+grant and every read logged to `runs`. `status: draft` notes (unsettled,
+AI-authored) are excluded from external reads at every tier: external
+agents see only settled knowledge.
 
 ### 4.11 Personal comms
 
@@ -1068,7 +1129,8 @@ metistry/
   packages/               PUBLISHED to npm
     mcp-messages/           @foldedspacelabs/mcp-messages
     mcp-eventkit/  mcp-health/  mcp-apple-fm/
-    mcp-brain/              read · report · query
+    mcp-brain/              read · report · query — report/capture double as
+                            the inbound door for external agents (§4.10)
     core/                   manifest schema, lazy discovery, redaction,
                             preview-confirm, check() interface
     cli/                    init | doctor | up | update

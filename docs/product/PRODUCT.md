@@ -101,3 +101,9 @@ your machine.
   external-agent capture + read tiers, coordination hub, management API,
   web-app-first / iOS-later-premium.
 - 2026-08-28 — invariant 8 added: open-design security + network-agnosticism (bring-your-own routing layer).
+- 2026-08-29 — design refresh: hosting-agnostic framing ("local-first in
+  ownership, not local-only in deployment"); user profile centralized in
+  Knowledge/Me/ (init interview; never externally readable); one unified
+  knowledge interface for all agents; /model tier shortcuts; daily-flow
+  templates story; user-extensible connectors via local registry entries +
+  `metistry create` scaffolder (a key OSS adoption feature).

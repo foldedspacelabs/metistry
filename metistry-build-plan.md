@@ -1,11 +1,16 @@
 # Metistry — Build Plan
 
-A local-first personal assistant and knowledge graph. The assistant is **Metis**
-(configurable — see `identity.yaml`). Everything runs on the Mac Studio except
-offsite backups. Network exposure is the user's routing layer, not the
-project's concern (invariant 8). Two kinds of repo: one public
-product repo (code, Apache-2.0), and one private instance repo per install
-(vault + config) — see §4.15.
+A personal AI operating system: a persistent assistant + knowledge graph the
+user owns entirely. The assistant's name is instance config (`identity.yaml`;
+the author's is Metis). **Host it anywhere** — the reference deployment is a
+single always-on machine (the author's is a Mac Studio, which the
+Apple-native bridges require for *those* capabilities), but the system is
+hosting-agnostic by construction (invariants 7–8): services bind configured
+ports, network exposure is the user's routing layer, and the Apple tier is a
+satellite, not a dependency. Local-first in ownership (your data in your git
+and your Postgres, local models where they win), not local-only in
+deployment. Two kinds of repo: one public product repo (code, Apache-2.0),
+and one private instance repo per install (vault + config) — see §4.15.
 
 ---
 
@@ -42,7 +47,8 @@ flowchart TD
   class Metis s
 ```
 
-Everything above runs on the Mac Studio except GitHub. Supporting pieces:
+Everything above runs on the user's host machine except GitHub. Supporting
+pieces:
 
 ```mermaid
 flowchart LR
@@ -75,12 +81,21 @@ flowchart LR
 | **Skill** | Reusable instructions, lazily loaded | An agent invoking it | Nothing |
 | **Routine** | A schedule, nothing more | Cron | Nothing directly |
 | **Named query** | The only read path into state | Anything | Nothing |
-| **Knowledge** | Durable prose in git | You or Metis | Git |
+| **Knowledge** | Durable prose in git | You or the assistant | Git |
 | **State** | Operational, regenerable | Collectors | Postgres |
+| **Target** | A place work can execute (§4.17) | The router / dispatch rules | Per its manifest |
+| **Work item** | One task on the shared list, claimable with a lease (§4.18) | Anything, via the hub | `work` table |
+| **Project** | A multi-agent effort: agents + tasks + proposals + spend, one view (§4.18) | The user | View over existing tables |
+| **Proposal** | A suggested knowledge/action addition awaiting triage | Any agent or capture | Inbox; never the vault directly |
+| **Grant** | A user-issued, server-side permission (read tier, area scope) (§4.10) | The user, via the management API | Attached to a credential |
+| **Profile** | What the assistant knows about its user (§4.14) | Init interview + accepted proposals | `Knowledge/Me/` |
+| **Product / Instance** | The public code vs. one private install (§4.15) | — | Releases down; data nowhere |
 
-Agents are grouped by area (`agents/drey/manager.md`) with hierarchy in
+Agents are grouped by area (`agents/<area>/<name>.md`) with hierarchy in
 frontmatter (`manages: [designer, developer, qa]`), not filesystem depth —
-reporting relationships change, and an agent can serve two managers.
+reporting relationships change, and an agent can serve two managers. Mention
+tags (`@<agent>`) address these **named agents from the instance's registry**
+— the author's `@drey`/`@fsl` are examples of their setup, not built-ins.
 
 ### The flow
 
@@ -101,9 +116,10 @@ reporting relationships change, and an agent can serve two managers.
 
 - **Chatty is fine.** Sessions resume by UUID; cost per turn is flat. Corrections
   and redirects are the expected interaction, not an exception.
-- **Adaptive escalation.** Metis runs on Haiku and delegates hard sub-tasks to
-  an Opus subagent, so escalation cost is bounded to the hard part rather than the
-  whole turn. `/deep` remains a manual override. Daily Opus budget in
+- **Adaptive escalation.** The assistant runs the default tier and delegates
+  hard sub-tasks to the deep tier, so escalation cost is bounded to the hard
+  part rather than the whole turn. `/model <tag>` (and its shipped alias
+  `/deep`) remains the manual override. Per-tier daily budgets in
   `rules.yaml`; every escalation logged.
 - **Metis routes; agents execute.** Briefs carry context, not access.
 - **You review by audit, not by gate** (reaffirmed 2026-08-28 against the
@@ -186,6 +202,8 @@ Full evidence in `poc/RESULTS.md`. Summary:
 | 12 Obsidian Sync | **DEFERRED** | No Sync subscription yet; new vault built from scratch. |
 | 13 Comms reduction | **FAIL (quality)** | Plumbing works; extraction precision ~30% fails the bar as configured. See §4.11 — revised. |
 | 14 Local input classifier | **FAIL** | A user-proposed pre-router classifier; over-split 42–54% on must-not-split inputs and promoted quoted/forwarded text to intent. Invariant 4 stands; see §4.1. |
+| 15 Complexity-tier scorer | **SPLIT** | Apple FM rejected (cheap class collapsed); Haiku passed quality (91.7%, 1/16 deep-miss) through a contaminated harness. Cost criterion corrected: routing is a quality purchase (~4¢/rescued turn), not a saving. |
+| 16 Local tier-scorer models | **PASS** | `gemma4:e4b` beat the Haiku baseline on every quality axis (97.9%, 6/6+6/6 traps, 667 ms, $0). Calibration, not size, is the variable. Invariant-4 amendment still gated on a blind confirmatory eval. |
 
 **Hard requirements Phase 0 forced into the design (each is "enforce at the
 tool," and each is now load-bearing rather than stylistic):**
@@ -438,6 +456,32 @@ false positives, and whether the structured row is genuinely body-free. **The
 bar is precision, not recall** — a queue of forty proposals a day gets ignored;
 five accurate ones get used.
 
+### PoC-14 — local input classifier (added mid-phase, user proposal)
+
+**Assumption:** a small local model can split multi-intent input ahead of the
+router. **FAILED** — deterministic over-splitting on lexical cues, quoted
+third-party text promoted to user intent. Invariant 4 stands. Full evidence:
+`poc/RESULTS.md` §PoC-14; fixtures kept as a re-test eval.
+
+### PoC-15 — complexity-tier scorer (invariant 4 evaluation)
+
+**Assumption:** a cheap model can classify ask-complexity to route among
+user-configured tiers. **SPLIT** — Apple FM failed (cheap class collapsed);
+Haiku passed the quality bar through a contaminated harness on author-shared
+fixtures. Also corrected an ill-posed cost criterion: correct routing beats
+always-standard on *quality* (~4¢ per rescued high-stakes turn), never cost.
+Full evidence: `poc/RESULTS.md` §PoC-15.
+
+### PoC-16 — local models as tier scorer
+
+**Assumption:** a local model can match cloud scoring quality at $0.
+**PASSED** — `gemma4:e4b-it-qat` (6.3 GB resident, 667 ms warm p95) beat the
+Haiku baseline on every quality axis on identical fixtures; reasoning-mode
+measurably hurt the task; calibration, not parameter count, decides. The
+invariant-4 amendment remains gated on an independent confirmatory eval
+(blind fixtures, ≥50 deep items) with `gemma4:e4b` as candidate. Full
+evidence: `poc/RESULTS.md` §PoC-16.
+
 ### Already settled
 
 Session resumption with a caller-supplied UUID; resume failing loudly on unknown
@@ -560,13 +604,17 @@ can, and the eventual iOS app can do both plus a share extension.
 | natural status phrasings | fast path | Matched by regex to a named query |
 | `/status` `/today` `/open` `/spend` `/queue` `/runs` | fast path | Named query, no model |
 | `/note <text>` | none | Straight to inbox, acknowledged instantly |
-| `/deep <text>` | opus | Manual override when you know it's hard |
+| `/model <tag> <text>` | as configured | Manual tier/model override — tags from the user's `rules.yaml` tier menu (§4.17.A) |
+| `/deep <text>` | deep tier | Shipped default alias for `/model deep` — zero setup, works day one |
 | `/new` | none | Roll to a fresh session UUID |
-| `@drey <brief>` `@fsl <brief>` | dispatch | Brief → GitHub issue |
+| `@<agent> <brief>` | dispatch | Brief → the named agent's target (default: GitHub issue). Agents come from the instance registry — e.g. the author's `@drey`, `@fsl` |
 
-**Adaptive escalation.** Metis runs Haiku and delegates hard sub-tasks to an
-Opus subagent — cost is bounded to the hard part, not the whole turn. Guardrails:
-a daily Opus budget in `rules.yaml`, and every escalation logged to `runs` so you
+**Adaptive escalation.** The assistant runs the default tier and delegates
+hard sub-tasks to the deep tier — cost is bounded to the hard part, not the
+whole turn. In the multi-model world (§4.17.A) tiers are user-configured
+model bindings with shipped defaults (default=Haiku-class, deep=Opus-class),
+so `/model` names *your* menu, not hardcoded vendors. Guardrails: per-tier
+daily budgets in `rules.yaml`, and every escalation logged to `runs` so you
 can audit whether it escalates sensibly and tune the threshold.
 
 **Every fast-path answer carries a freshness stamp** ("as of 14 min ago") so stale
@@ -871,6 +919,19 @@ Most "progress" needs no new mechanism: a collector reconciling GitHub issue sta
 into `work` already answers "how's development going." Reserve `brain-report` for
 findings, decisions, and gotchas that issue state doesn't capture.
 
+**One knowledge interface for ALL agents (unified 2026-08-29).** Internal
+and external agents use the **same** `mcp-brain` surface — search/read under
+scoped grants, propose/report for write-backs, one acceptance flow — rather
+than parallel internal/external mechanisms. The only difference is where the
+scope comes from: internal agents get theirs from their manifest (reviewed
+in git, a protected path); external agents get theirs from user-issued
+grants via the management API. Same tiers, same enforcement, same audit
+rows, one implementation to make bulletproof (invariant 8: one small
+interface with misuse tests beats two similar ones). Frontmatter carries the
+differentiation: every accepted addition records `source` (which agent),
+`trust` (internal-manifest vs external-grant), and provenance per §4.14 —
+so downstream consumers can weight by origin without the interface caring.
+
 **External agents (added 2026-08-28): the same trust model, opened outward.**
 Context created in tools the assistant never touches — standalone Claude
 sessions, other AI products, coding agents — is captured by giving foreign
@@ -1086,8 +1147,10 @@ Knowledge/                    the live Obsidian vault
   Projects/                   FLAT — temporal, often cross-area
   Resources/
   Techniques/
-  Journal/                    Meetings, Weekly, Monthly
+  Journal/                    Daily, Meetings, Weekly, Monthly
   People/
+  Me/                         the user profile — §"What the assistant knows
+                              about its user" below
   Templates/
   Attachments/
 ```
@@ -1164,6 +1227,71 @@ prompt rule rather than a habit — which yields consistency no human sustains.
 
 **Skip Obsidian Git.** Two committers to one repo is the exact conflict scenario
 this design avoids. The reconciler owns commits.
+
+**What the assistant knows about its user lives in `Knowledge/Me/`** (added
+2026-08-29). Name, location, affiliations, career, working style,
+preferences, quiet hours — centralized for management instead of scattered
+through config and prose. Two forms in one place: `Me/profile.md` carries
+the **machine-readable core** as typed frontmatter (name, timezone,
+quiet_hours, notification preferences — keys that routines and the router
+consume via the reconciler, so `rules.yaml` *references* profile values
+rather than duplicating them), with free-text sections for everything that
+reads better as prose (working style, context, history). Additional
+`Me/` notes as needed. Two rules: **profile updates follow the normal
+proposal/acceptance flow** — the assistant proposing "I've noticed you
+prefer X" is a `draft` like any other knowledge; and **`Me/` is never
+readable by external agents at any grant tier** — it is the most sensitive
+prefix in the vault. Initial population is an **init interview**: `metistry
+init` (and `/setup` later) asks a short question set and writes the first
+profile — so day one isn't a blank brain.
+
+**The daily flow — where things land (added 2026-08-29).** The rule that
+resolves "inbox everything vs. file directly": **capture goes to the inbox;
+deliberate authoring goes direct via a template.** A random thought, a
+shared link, a photo, a todo — captured in under five seconds, into
+`inbox/`, and the assistant proposes classification and placement (the user
+never mis-files what they never filed). But when the user *sits down to
+write* — a meeting, a day's journal, a project note — they use a template
+into a known-good home, because that intent is already classified:
+
+- **Daily note** (`Journal/Daily/2026-08-29.md`) — one running note per day
+  for thoughts, worklog, short-term ideas. The evening routine harvests
+  action items and knowledge candidates from it as proposals.
+- **Meeting note** (`Journal/Meetings/2026-08-29 <topic>.md`) — one per
+  meeting, from the template (attendees as wikilinks, `decisions` list,
+  action items). People pages are *updated by reference* (backlinks), never
+  duplicated per meeting.
+- **People / Projects / Areas** — updated in place (ingest-as-update, §2
+  research); a new note only when a genuinely new entity appears.
+- **Todos** — never markdown lists that rot: `/note` or capture → triage →
+  the `work` table or Reminders (§PoC-9), where status lives.
+- **Long-term ideas** — `Resources/` or a `Projects/` seed note via
+  template, at the user's choice in the moment; if unsure, inbox it and let
+  triage decide.
+
+Templates ship in `seed/` (stamped to `Templates/`), pre-wired to Templater/
+QuickAdd so each of these is one action on any device. The test for this
+section: every "where does X go?" has exactly one obvious answer, and the
+expensive judgment (classification) defaults to the assistant, not the user.
+
+**Moves and renames don't break the system (added 2026-08-29).** Users must
+be free to reorganize as their practice evolves; agents and indexes must
+survive it. Mechanics, cheapest first:
+
+1. **Every note carries an immutable `id`** in frontmatter (assigned at
+   creation, never edited). Durable references — briefs, reports, `refs` in
+   sessions, external-agent citations — prefer `id` over path; `brain-read`
+   resolves either.
+2. **The reconciler detects renames by content hash** (§4.12 already hashes
+   chunks): same hash at a new path re-keys `knowledge_files`, `embeddings`,
+   and `knowledge_links` rows — a move costs an index update, never a
+   re-embed.
+3. **Wikilinks**: Obsidian rewrites them on rename; the nightly sweep
+   catches links broken by out-of-Obsidian moves and files a fix proposal.
+4. **Scope semantics are a feature, not a bug**: `brain-read` scopes are
+   path prefixes, so moving a note *across areas* changes who can read it —
+   which is exactly right, and the reconciler surfaces cross-area moves in
+   the morning brief so the permission consequence is visible, not silent.
 
 ### 4.15 Repo structure and distribution
 
@@ -1311,7 +1439,8 @@ components is the annoying version.
 
 ### 4.16 Cloud portability
 
-The primary deployment is the Mac Studio. But the split that already exists —
+The reference deployment is a single always-on machine (the author's: a Mac
+Studio). But the split that already exists —
 TCC-bound native tier vs. everything else — *is* the cloud seam, so keeping the
 option open costs almost nothing if the rules below hold from the start.
 
@@ -1537,6 +1666,32 @@ and `scope`.
 **Add a command** → a rule in `rules.yaml`, plus a named query if it's fast path.
 
 **Add a dashboard panel** → a named query plus a component in `apps/console`.
+
+### User extensions — quick local, contribute when general (added 2026-08-29)
+
+The shipped connectors (Messages, EventKit, Apple FM, Health, HomeKit-ish)
+are the author's initial set, not the boundary. Every component type above
+supports **three provenance levels through one registry**, so a user's own
+connector is a first-class citizen the moment it exists:
+
+1. **Shipped** — in the product repo, released as npm/images.
+2. **External** — a registry entry pointing at anyone's npm/uvx package (no
+   code, already first-class in §4.15).
+3. **Local** — the quick one: the registry accepts
+   `source: { type: local, path: ... }` pointing at a directory in the
+   user's own space (their instance repo's `extensions/`, or anywhere).
+   Same manifest, same `check()`, same CI-shape validation run by
+   `metistry doctor` — a local bridge is held to the same contract as a
+   shipped one, because the manifest is the contract.
+
+`metistry create <bridge|collector|skill|agent>` scaffolds a working local
+extension from templates (manifest, server stub with `check()`, README) so
+"I want the assistant to talk to my thing" is an evening, not a project.
+The upstreaming path is ordinary open source: a local extension that proves
+general gets a PR to the product repo — and because it was built against
+`core`'s interfaces from the scaffold, promotion is mostly moving files.
+(Note the instance-repo rule stays intact: instance repos hold no *product*
+code; `extensions/` is the user's own code, owned like their vault.)
 
 ### Maintenance cadence
 

@@ -559,8 +559,9 @@ else will implement.
 The door is the **web app** (D1/D2, 2026-08-29) — and it needs zero TCC
 grants, which is what makes a fast first-run possible.
 
-- `apps/console` serving the PWA: thread view (ask/answer), capture box,
-  Home Screen install, **web push** (PoC-6)
+- `apps/console` serving the PWA: thread view (ask/answer), capture box
+  (text **and file/photo upload** — the media door, §4.2), a status page
+  fed by `/api/status`, Home Screen install, **web push** (PoC-6)
 - `POST /message` lands a **durable row before the 202**; the assistant
   drains the queue — a message sent during a restart is never lost. The
   drain step is also the home of the deterministic pre-check before any
@@ -705,13 +706,24 @@ agents pushing captures/reports** (§4.11 — via `mcp-brain`'s write-only door
 or `POST /capture` directly, per-agent bearer tokens).
 
 ```
-POST /capture              multipart or json → inbox/    (Shortcuts)
+POST /capture              multipart or json → inbox/    (web app, Shortcuts,
+                           share sheet — files and photos, not just text)
 POST /message              { thread_id, text } → 202 + message_id
 GET  /api/q/:name          named query, params via querystring
 GET  /api/state            bundled dashboard payload
+GET  /api/status           component health rollup from check() results —
+                           feeds the web app's status page; the watchdog
+                           reports through it (§4.9)
 GET  /api/stream           SSE — state changes, Metis replies
 GET  /health               liveness + collector staleness summary
 ```
+
+**`POST /capture` is the media door (with D1).** iMessage's opportunistic
+media path is gone; files, photos, and links land through this endpoint
+instead — from the web app's capture box, the iOS share-sheet Shortcut and
+macOS Quick Action today, and the iOS app's share extension later, all
+against the same endpoint. PoC-7 already proved the path (a 25 MB binary,
+byte-identical, from every surface).
 
 **Management surface (added 2026-08-28)** — the API the web app (and later
 the iOS app) drives; everything a user configures gets an endpoint, never a
@@ -1013,14 +1025,19 @@ optimize it. Un-acted proposals auto-expire to `draft, reviewed: never`
 (searchable, never lost). The full brief spec is a design task before
 Phase 3 builds it.
 
-**The watchdog needs a channel that doesn't depend on this stack.** With
-iMessage gone (D1), the out-of-band alert is a **dead-man's switch**: the
-watchdog pings an external uptime service on schedule, and when the pings
-stop, *that service* emails the user — covering the one failure the system
-cannot self-report (the whole machine, or the watchdog itself, down). Web
-push is the primary notification path; a push subscription returning 410
-(silently dead after a Home-Screen reinstall) is itself treated as an
-alertable failure, not a quiet degrade.
+**Watchdog reporting (revised 2026-08-29, with D1).** The watchdog reports
+through the system's own surfaces: it writes component health via the API
+into the web app's **status page** (§4.2 `/api/status`) and raises web push
+for anything severe — the model-free property is preserved, since none of
+that path touches Anthropic. A push subscription returning 410 (silently
+dead after a Home-Screen reinstall) is itself treated as an alertable
+failure, not a quiet degrade. Stated honestly: this cannot report the one
+failure where the whole machine (or the console) is down — iMessage used
+to cover that, and its replacement, an external **dead-man's switch** (the
+watchdog pings an uptime service; the service emails when pings stop), is
+a *suggested bring-your-own pattern* like the routing layer (invariant 8),
+never a shipped dependency. Ruled acceptable: the status page is the
+workaround the design leans on.
 
 ### 4.10 Self-modification
 

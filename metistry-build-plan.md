@@ -482,7 +482,10 @@ and shows up in the morning brief.
 - Collectors: `aws-costs`, `claude-usage`, `github-state`, `drey-metrics`
 - Named queries in `router/queries/`
 - Node console + static dashboard, `tailscale serve`
-- PWA manifest + service worker
+- PWA manifest + service worker — **the console PWA is the web app, v1**: it
+  grows the management UI (§4.2 management surface — agent registry, grants,
+  proposal triage with push notifications) rather than a separate app being
+  built later
 - **`metistry` Claude Code plugin** (§4.10 external capture — small; rides
   with the console since `POST /capture` is its endpoint)
 
@@ -497,6 +500,8 @@ can see your own token spend split by tier.
 - `@agent` dispatch → GitHub issues (the first target)
 - `brain-query` MCP bridge exposing named queries to Metis; **`mcp-brain`'s
   write-only door opened to external agents** (§4.10)
+- **Coordination hub tools + multi-agent projects (§4.18)** — claim/lease/
+  dependency columns, agent identity, event-driven proposal triage
 - Weekly review routine
 
 ### Phase 6 — Knowledge (when Phase 5 is stable)
@@ -507,6 +512,15 @@ can see your own token spend split by tier.
 
 **Deliberately last.** Semantic search over a thin corpus isn't worth much; it
 earns its place once there's a year of notes.
+
+### Later — native iOS app (post-Phase 6; premium candidate)
+
+Same management API as the web app — no private endpoints — adding what only
+native can do: share extension, real push, offline queue, widgets/Shortcuts
+depth. Explicitly a candidate for a **paid/premium addition to the
+open-source project**; the product framing accumulates in
+`docs/product/PRODUCT.md` as features and guardrails are designed, so the
+pitch exists when it's needed rather than being reconstructed later.
 
 ---
 
@@ -570,6 +584,27 @@ GET  /api/state            bundled dashboard payload
 GET  /api/stream           SSE — state changes, Metis replies
 GET  /health               liveness + collector staleness summary
 ```
+
+**Management surface (added 2026-08-28)** — the API the web app (and later
+the iOS app) drives; everything a user configures gets an endpoint, never a
+hand-edited file on the server:
+
+```
+GET/POST   /api/agents                external-agent registry + token issuance
+GET/PUT    /api/agents/:id/grants     read tiers (§4.10): none | index | areas[]
+GET        /api/agents/:id/inbox      the agent's pull inbox (feedback, replies)
+GET        /api/proposals             pending knowledge proposals, with provenance
+POST       /api/proposals/:id         allow | deny | accept_with_changes
+                                      { feedback } — deny/changes feedback routes
+                                      to the source agent's inbox (§4.18)
+GET        /api/projects              multi-agent projects (§4.18): agents,
+                                      task rollup, proposal stream, progress
+POST       /api/grants/requests/:id   approve/deny an elevation request (§4.10)
+```
+
+Mutations are few, explicit, audit-logged to `runs`, and carry the same auth
+as everything else (tailnet + bearer). The console PWA is the first client;
+the eventual iOS app is the second — same API, no private endpoints.
 
 `/api/q/:name` resolves against `router/queries/` only — no arbitrary SQL, ever.
 Auth is the tailnet plus a bearer token for Shortcuts.
@@ -1398,6 +1433,57 @@ manifests); deterministic rules take precedence; any model-judgment scorer
 (under evaluation, PoC-15) picks only within the configured tier menu and
 can never expand its own budget — enforced at the dispatch tool. Collectors
 still never call models.
+
+### 4.18 Metis as coordination hub (added 2026-08-28)
+
+Heterogeneous agents — internal crews, external Claude sessions, other
+vendors' agents — coordinate through Metis via shared knowledge, shared
+context, and a shared task list. Evidence and rejected alternatives in
+`docs/research/2026-08-agent-coordination.md`; the design is deliberately
+small: **~5 MCP tools on the existing scoped bridge plus ~3 columns on
+`work`**. The governing shape: **the hub holds state; agents pull.** Metis
+never autonomously dispatches external agents.
+
+**The tools** (exposed per-agent under §4.10's auth and read tiers):
+`work.list_ready` (unblocked, unclaimed — requires dependency edges),
+`work.claim(id)` (**atomic** assignee+status+lease in one operation),
+`work.heartbeat(id)` (lease renewal; expired leases release the task),
+`work.update(id, status, note)`, `brief.get(id)` (**handles, never
+payloads** — one canonical copy; embedded spec-copies drift within minutes),
+`report.submit(...)` (idempotent, near-duplicate-suppressed), plus
+`knowledge.search/read` per granted tier.
+
+**Trust rules** (from documented failures, not caution):
+- **Agent identity is server-side** — stamped from the credential onto every
+  claim and report; nothing an agent says about itself is trusted
+  (audit-log impersonation via self-declared fields is a documented attack).
+- **An agent's message can never carry user authority** — cannot approve a
+  permission, relay a "the user said yes," or ratify anything. Labeled
+  agent-sourced everywhere it surfaces.
+- Contradiction persistence (two agents report conflicting findings, both
+  survive) is the known open gap — a `supersedes` relation is reserved for
+  when report volume justifies it.
+- `AGENTS.md` at the vault root (imported by the instance `CLAUDE.md`) makes
+  the vault self-describing to any of the 30+ agent tools that read it.
+
+**Proposal velocity — coordination cannot wait for the weekly digest.** The
+morning brief and weekly audit remain the *batch* reviews, but when agents
+are actively coordinating, knowledge proposals and elevation requests are
+**event-driven**: a push notification (console PWA, later iOS) offers
+**allow / deny / accept-with-changes**, and deny-or-changes carries feedback
+that routes back to the **source agent's inbox** — the agent learns why and
+can revise, instead of resubmitting blind. Every decision logs to `runs`.
+This is still audit-not-gate (ruling #1): nothing blocks on review; `draft`
+status marks the unsettled until the user acts, at whatever cadence they
+choose.
+
+**Multi-agent projects.** A `project` groups a coordination effort into one
+visible unit: the involved agents (with grants and last-seen), its slice of
+the shared task list (claims, leases, dependencies, progress rollup), its
+proposal stream and pending feedback, and per-agent spend from `runs`. One
+dashboard panel per project; `GET /api/projects` serves it (§4.2). This is a
+*view over existing tables* (agents, work, proposals, runs — a `project`
+column/table plus named queries), not new machinery.
 
 ## 5. Growing it
 

@@ -26,8 +26,8 @@ you know) and **Postgres** (what's happening). Everything else can be rebuilt.
 
 ```mermaid
 flowchart TD
-  You["You<br/>iMessage · Shortcuts · PWA"]
-  Router["Router<br/>deterministic tiering"]
+  You["You<br/>Web app (PWA) · Shortcuts"]
+  Router["Router (console module)<br/>deterministic tiering"]
   PG[("Postgres<br/>+ pgvector")]
   Metis["Metis<br/>Agent SDK"]
   Agents["Agents<br/>drey · fsl"]
@@ -53,8 +53,8 @@ pieces:
 ```mermaid
 flowchart LR
   Metis["Metis"]
-  Bridges["MCP bridges<br/>Messages · EventKit<br/>Health · Apple FM"]
-  API["Anthropic<br/>Haiku → Opus"]
+  Bridges["MCP bridges<br/>EventKit · Health<br/>Apple FM"]
+  API["Model tiers<br/>default → deep (§4.18)"]
   Console["Node console<br/>+ PWA"]
   PG[("Postgres")]
   S3["S3<br/>nightly dumps"]
@@ -101,7 +101,7 @@ tags (`@<agent>`) address these **named agents from the instance's registry**
 
 **Capture → Ingest → Index → Query → Compound.**
 
-1. **Capture** — iMessage, share sheet, Obsidian mobile, comms reduction. Lands
+1. **Capture** — web app, share sheet, Shortcuts, Obsidian mobile. Lands
    in `inbox/`. Must take under five seconds or it won't happen.
 2. **Ingest** — `inbox-drain` classifies with local models, emits *proposals*,
    never auto-creates.
@@ -184,7 +184,13 @@ under an hour. Do not start Phase 1 until PoC-1 through PoC-4 pass.
 
 ### Outcomes (2026-08-28) — Phase 0 complete
 
-Full evidence in `docs/poc/RESULTS.md`. Summary:
+Full evidence in `docs/poc/RESULTS.md`. Summary below. **Note (2026-08-29):**
+this section is the historical record; the PoC descriptions keep their
+original framing. Decision D1 (`docs/plan-review-2026-08-29.md` §8) later
+dropped iMessage entirely — as the door and as an ingest source — so the
+iMessage-specific findings (PoC-2, hard requirement 5) no longer ship,
+while the TCC/signing/probe lessons from PoC-1/2/9/11 carry unchanged to
+the EventKit and Apple FM bridges.
 
 | PoC | Result | What it settled |
 |---|---|---|
@@ -224,9 +230,11 @@ tool," and each is now load-bearing rather than stylistic):**
    low-sensitivity.** A local model copied a live OTP verbatim into a
    "body-free" structured field despite explicit prompt instructions. Prompt
    rules are not a control. See §4.3, §4.12.
-5. **The Messages bridge must decode `attributedBody`** — `message.text` is
-   NULL on ~99% of recent messages. Mail ingest needs no IMAP: the local
-   `~/Library/Mail` `.emlx` store is present and large. See §4.12.
+5. **A Messages bridge must decode `attributedBody`** — `message.text` is
+   NULL on ~99% of recent messages. *(Superseded by D1: no Messages bridge
+   ships; preserved in case Messages work ever returns.)* Mail ingest needs
+   no IMAP: the local `~/Library/Mail` `.emlx` store is present and large.
+   See §4.12.
 6. **Container config is Linux-portable by construction** — explicit
    `extra_hosts: host-gateway`, bridge URLs from env, subscription token via
    `CLAUDE_CODE_OAUTH_TOKEN` (never set `ANTHROPIC_API_KEY` in-container). See
@@ -519,19 +527,37 @@ else will implement.
 
 ### Phase 2 — Door (weekend)
 
-- Messages MCP bridge under launchd
-- Metis container, Agent SDK, resuming by UUID from `sessions`
-- Router with `rules.yaml`, fast path + haiku tiers only
-- `runs` logging on every turn
+The door is the **web app** (D1/D2, 2026-08-29) — and it needs zero TCC
+grants, which is what makes a fast first-run possible.
 
-**Done when:** you text yourself and get a useful answer. This is the day it feels
-real — everything after is additive.
+- `apps/console` serving the PWA: thread view (ask/answer), capture box,
+  Home Screen install, **web push** (PoC-6)
+- `POST /message` lands a **durable row before the 202**; the assistant
+  drains the queue — a message sent during a restart is never lost. The
+  drain step is also the home of the deterministic pre-check before any
+  model turn.
+- Metis container, Agent SDK, resuming by UUID from `sessions`
+- Router as a **console module** with `rules.yaml`, fast path + default tier
+- **Keyword/FTS recall over the vault as a named query** (D8) — "what did
+  we decide about X" works from week one; embeddings stay Phase 6
+- Slow-turn ack: any turn expected >~5s immediately acks, naming the tier
+- `runs` logging on every turn — two-phase rows (insert on start, update on
+  completion) so a hung or crashed call is visible, not silent
+
+**Done when:** you open the PWA on your phone, ask, and get a useful answer,
+with a push arriving when the reply is slow. This is the day it feels real —
+everything after is additive. Target: `metistry init` to a working door in
+under ten minutes, no TCC prompts; the native tier is a progressive unlock
+via the `doctor` capability checklist (which doubles as grant-rot recovery).
 
 ### Phase 3 — Capture (a few evenings)
 
-- iCloud Drive inbox folder + iOS Shortcut + macOS Quick Action
-- `inbox-drain` collector
-- Apple FM bridge + nightly triage routine
+- iOS share-sheet Shortcut + macOS Quick Action → `POST /capture`, with a
+  **local-file fallback on any HTTP failure** (iCloud Drive inbox folder,
+  already a `local-mac` path) — one silent capture drop ends the trust
+- `inbox-drain` collector (drains both paths)
+- Apple FM bridge + nightly triage routine — the first progressive TCC
+  unlock via the `doctor` checklist
 - `/note` command
 
 **Done when:** you can share a photo from any app and it lands, gets classified,
@@ -544,10 +570,11 @@ and shows up in the morning brief.
 - Node console + static dashboard on a configured port (exposure = the
   user's routing layer, invariant 8; on this install, tailnet is the
   chosen pattern)
-- PWA manifest + service worker — **the console PWA is the web app, v1**: it
-  grows the management UI (§4.2 management surface — agent registry, grants,
-  proposal triage with push notifications) rather than a separate app being
-  built later
+- The PWA (shipped as the door in Phase 2) **grows the management UI**
+  (§4.2 management surface — agent registry, grants, proposal triage with
+  push notifications), under the CRIT-7 rules: management endpoints take
+  the owner credential only, and every agent-authored field is
+  output-encoded before rendering
 - **`metistry` Claude Code plugin** (§4.11 external capture — small; rides
   with the console since `POST /capture` is its endpoint)
 
@@ -569,11 +596,14 @@ can see your own token spend split by tier.
 ### Phase 6 — Knowledge (when Phase 5 is stable)
 
 - `knowledge-embed` collector on commit
-- `search_knowledge` named query
+- `search_knowledge` named query goes semantic (the keyword/FTS version has
+  been serving recall since Phase 2 — D8)
 - Obsidian pointed at `Knowledge/`, reading state via the console HTTP API
 
-**Deliberately last.** Semantic search over a thin corpus isn't worth much; it
-earns its place once there's a year of notes.
+**Deliberately last** — for *embeddings*, not recall. Semantic search over a
+thin corpus isn't worth much; it earns its place once there's a year of
+notes. Keyword recall, the behavior that makes the system indispensable,
+ships in Phase 2.
 
 ### Later — native iOS app (post-Phase 6; premium candidate)
 
@@ -596,8 +626,9 @@ spend" works without a slash. Commands exist for people who like typing them.
 
 The genuinely fast mobile path isn't chat at all — it's **Shortcuts**. A `/status`
 Shortcut in a Home Screen widget, on the Lock Screen, or as a Watch complication
-is one tap with no typing and no typos. iMessage can't render buttons; the PWA
-can, and the eventual iOS app can do both plus a share extension.
+is one tap with no typing and no typos. The PWA renders one-tap actions
+(triage, settle/reject, elevation approvals); the eventual iOS app adds a
+share extension, real push, and widgets.
 
 | Input | Tier | Behavior |
 |---|---|---|
@@ -684,9 +715,13 @@ every endpoint.
 Auth is a bearer token on every request from every client — the routing
 layer in front of the port adds reachability, never trust (invariant 8).
 
-**`POST /message` is async.** Returns 202 immediately; the reply arrives over
-`/api/stream` or via iMessage. Build the client as a messaging client from day
-one — retrofitting that is painful.
+**`POST /message` is async — and durable before it is acknowledged.** The 202
+is returned only after the message lands in a durable row; the assistant
+drains the queue, so a message sent during a restart (every `metistry
+update`) is never lost. The drain step is also where the deterministic
+pre-check runs before any model turn. The reply arrives over `/api/stream`
+or as a web push. Build the client as a messaging client from day one —
+retrofitting that is painful.
 
 ### 4.3 MCP bridge contract
 
@@ -870,14 +905,32 @@ Collectors reconcile status from the source; Metis never invents it.
 ### 4.9 Outbound
 
 The door is inbound-only by default. Proactive messages — briefs, reminders,
-package alerts, watchdog warnings — go out through the Messages bridge from a
-routine.
+package alerts, watchdog warnings — go out as **web push to the PWA**
+(later also the iOS app), from a routine.
 
 Guardrails, because an assistant that pings eleven times a day gets muted:
 
-- **Quiet hours** in `router/rules.yaml`
+- **Quiet hours** in `rules.yaml`
 - **Rate limit** per category per day
 - **Everything outbound logged** to `runs` so you can see what it sent and why
+
+**The daily review carries a soft budget (ratified D10, 2026-08-29).** The
+morning brief surfaces the most impactful items — plus one or two extra
+only if also critical — and **links to full detail in knowledge rather than
+truncating**: the daily view stays actionable at the real human budget
+(~5 decisions), while the full queue remains one tap away so the user can
+optimize it. Un-acted proposals auto-expire to `draft, reviewed: never`
+(searchable, never lost). The full brief spec is a design task before
+Phase 3 builds it.
+
+**The watchdog needs a channel that doesn't depend on this stack.** With
+iMessage gone (D1), the out-of-band alert is a **dead-man's switch**: the
+watchdog pings an external uptime service on schedule, and when the pings
+stop, *that service* emails the user — covering the one failure the system
+cannot self-report (the whole machine, or the watchdog itself, down). Web
+push is the primary notification path; a push subscription returning 410
+(silently dead after a Home-Screen reinstall) is itself treated as an
+alertable failure, not a quiet degrade.
 
 ### 4.10 Self-modification
 
@@ -959,7 +1012,7 @@ Two properties fall out: the instance split preserves the IP boundary (a
 work agent's config points at the work instance's endpoint and token, so
 work context can only land in the work vault), and capture-from-anywhere is
 the single most-demanded capability class in the 2026 skill ecosystem —
-this is the highest-leverage door after iMessage.
+this is the highest-leverage door after the web app itself.
 
 **External read access: tiered, default-deny, user-granted.** Writing
 proposals is safe by construction; *reading* knowledge is where the risk
@@ -991,6 +1044,14 @@ agents see only settled knowledge.
 
 ### 4.12 Personal comms
 
+**Scope reduced 2026-08-29 (D1): iMessage is dropped entirely** — as the
+door and as an ingest source. The Messages bridge, `chat.db` reading, and
+`attributedBody` decoding no longer ship. Mail and call metadata remain the
+candidate sources, and the whole pipeline stays gated behind the PoC-13
+re-run bar below. The design principles in this section (reduction not
+filter, the redaction boundary, reader/writer separation) are
+source-agnostic and stand.
+
 The local model is a **reduction**, not a filter. A filter implies "mostly passes
 through, blocks the bad bits" — that fails open. Reduction turns a high-volume,
 high-sensitivity stream into a low-volume, low-sensitivity stream of facts.
@@ -999,12 +1060,10 @@ high-sensitivity stream into a low-volume, low-sensitivity stream of facts.
 
 1. **Ingest** — no model. Mail via the **local Mail store** (`~/Library/Mail`
    `.emlx` — PoC-13 confirmed it is present and large, ~72k files/3 months; no
-   IMAP credentials needed), messages via `chat.db`, call metadata via
-   CallHistoryDB. Lands in a local table. **Messages prerequisite: decode
-   `attributedBody`.** `message.text` is NULL on ~99% of recent messages; the
-   content lives in the typedstream `attributedBody` blob. A validated ~30-line
-   decoder exists in `docs/poc/poc13-comms/export2.mjs` — the Messages bridge is
-   non-functional without it.
+   IMAP credentials needed), call metadata via CallHistoryDB. Lands in a
+   local table. (Messages was a source pre-D1; the validated
+   `attributedBody` decoder survives at `docs/poc/poc13-comms/export2.mjs`
+   should that ever return.)
 2. **Reduce** — Apple FM, on-device. Per item: classify, extract action / entity /
    date / urgency. Emits a structured row containing **no message body** — and
    that row passes a **deterministic redaction pass** before anyone sees it
@@ -1018,7 +1077,6 @@ Whether that ask returns anything is policy, per source, in `sources.yaml`
 (protected path):
 
 ```yaml
-imessage:      { extract: true, body: on_request, summary: local }
 mail_work:     { extract: false }
 mail_personal: { extract: true, body: never, summary: local }
 calls:         { extract: metadata_only }
@@ -1224,7 +1282,8 @@ prompt rule rather than a habit — which yields consistency no human sustains.
 **Obsidian plugins**, ranked by value to this system:
 
 - **Linter** — enforces the frontmatter contract client-side so you and CI agree
-- **Advanced URI** — Metis can text `obsidian://` deep links opening exact notes
+- **Advanced URI** — briefs and pushes can carry `obsidian://` deep links
+  opening exact notes
 - **Bases** (core) — database views over frontmatter; covers most of Dataview
 - **Templater** — templates with date logic and prompts
 - **QuickAdd** — capture flows into `inbox/`
@@ -1394,10 +1453,10 @@ deployment, not a release.
 - name: unifi-network
   source: { type: uvx, package: unifi-network-mcp }
   env: [UNIFI_HOST, UNIFI_USERNAME, UNIFI_PASSWORD]
-- name: messages
-  source: { type: npm, package: "@foldedspacelabs/mcp-messages" }
+- name: eventkit
+  source: { type: npm, package: "@foldedspacelabs/mcp-eventkit" }
   runs_on: host
-  requires_tcc: [full_disk_access]
+  requires_tcc: [calendars, reminders]
 ```
 
 **Identity is config, not code.** `identity.yaml` holds the assistant's name,
@@ -1455,7 +1514,6 @@ option open costs almost nothing if the rules below hold from the start.
 
 | Component | Why | Without it |
 |---|---|---|
-| Messages door | `chat.db` + AppleScript, TCC | Telegram door |
 | EventKit | macOS framework | CalDAV / Google Calendar |
 | HealthKit ingest | iOS/macOS only | No fallback — accept the loss |
 | HomeKit | No headless API | No fallback |
@@ -1728,8 +1786,8 @@ session transcripts are exactly where silent leakage happens, with no tool
 boundary to catch it.
 
 **What's separate:** the instance repo (work's vault on a work-owned remote),
-Postgres, Claude account, Apple ID, machine, door (Slack or Teams at work;
-iMessage personally).
+Postgres, Claude account, Apple ID, machine, and door (each instance's own
+web app; a Slack or Teams bridge at work if ever wanted).
 
 **What's shared:** the product — consumed as pinned releases (`metistry.lock`),
 never as a git fork. The §4.16 split is what makes the IP boundary mechanical
@@ -1836,7 +1894,7 @@ land outside its model.
 - *Anytype* — object model, not files. Disqualified.
 
 **OpenClaw** — no. Its value was multi-channel reach and a heartbeat; you now have
-iMessage, launchd, and a router. What remains is Signal/WhatsApp and
+the web app, launchd, and a router. What remains is Signal/WhatsApp and
 phone-as-sensor, neither worth the security surface next to a system that reads
 your mail and holds your keys. If you want Signal later, that's a bridge.
 

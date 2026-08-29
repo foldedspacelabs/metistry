@@ -587,6 +587,109 @@ stays where the plan put it — Metis decomposes with session context.
 Five failure classes for the router to guard against regardless are
 enumerated in the agent artifacts (`score*.txt`).
 
+## PoC-15 — complexity-tier scorer (invariant 4 evaluation)
+
+| | |
+|---|---|
+| Status | SPLIT: Apple FM FAIL · Haiku PASS-with-caveats · decision deferred to a confirmatory eval |
+| Date | 2026-08-28 |
+
+Evaluates the user-proposed amendment to invariant 4: a model scoring input
+complexity to pick among user-configured tiers (cheap/standard/deep). 48
+hand-labeled fixtures, length decorrelated from tier (r = −0.05), with
+long-but-cheap and short-but-deep traps. Run by a subagent; artifacts in
+`poc/poc15-complexity/`. Distinct from PoC-14 (segmentation): one constrained
+label, graceful failure mode — and the results differ accordingly.
+
+**Apple FM: REJECT as scorer.** Its `cheap` class functionally does not exist
+(0/16 across two greedy runs; a re-prompt recovered 3/16 while doubling
+deep-misses). All 6 long-but-cheap traps failed in all four runs — including
+one verdict whose stated reason correctly identified the trap and then
+labeled it wrong anyway. Plus a deterministic guardrail refusal on "remind me
+at 5 to move the car." 100% run-to-run reproducible, 90% prompt-fragile:
+reproducibility is not correctness.
+
+**Haiku: passes the quality bar.** 91.7% accuracy, deep-miss 1/16, overspend
+0/16, and the only scorer beating surface features both ways (6/6 long-cheap,
+5/6 short-deep). Baselines for contrast: always-standard mis-serves 15/16
+high-stakes asks; a length heuristic sends 7/16 deep items to cheap —
+actively inverted on what matters.
+
+**The pre-registered cost criterion was ill-posed and is corrected here:** a
+*perfect oracle* costs +190% vs always-standard, because finding deep items
+means paying for deep. Always-standard is not a cost baseline; it is a
+quality floor. The honest framing at a realistic message mix: Haiku routing
+costs ~$3.60/1000 turns more than always-standard and rescues ~88 badly-
+served high-stakes turns — ~4¢ per rescued turn — while saving 83% vs the
+quality-matched always-deep. Scoring cost itself (~$1/1000) is noise.
+
+**Caveats that block a final verdict:** the Haiku measurement ran through
+`claude -p` (a full agent harness — one fixture's "verdict" was actually a
+tool-auth complaint; latency numbers are harness artifacts; production shape
+is a bare no-tools API call, unmeasured); fixtures and rubric shared an
+author; and 16 deep items cannot resolve a 10% miss threshold (1 miss = 6.2%,
+2 = 12.5%).
+
+**Disposition:** invariant 4 stands for now; defensible interim is
+default-standard + explicit user escalation. Amendment proceeds only if a
+confirmatory eval passes: bare Messages-API Haiku (no tools), fixtures
+authored independently of the rubric, ≥50 deep items. Either way the
+invariant's protections are preserved by construction — the scorer only
+selects among user-configured tiers under tool-enforced budgets, deterministic
+rules take precedence, and every verdict logs to `runs` (plan §4.17.D).
+
+## PoC-16 — local models as tier scorer
+
+| | |
+|---|---|
+| Status | PASS — a local model beats the Haiku baseline on every quality axis |
+| Date | 2026-08-28 |
+
+Follow-on to PoC-15 at the user's direction: can a locally-run model (Ollama,
+OpenAI-compatible endpoint, bare API call — no harness contamination) replace
+billable Haiku as the complexity scorer? Six arms on the identical PoC-15
+fixtures, temp 0, strict json_schema. Hardware: M4 Max, 64 GB. Artifacts in
+`poc/poc16-local-scorer/` (analyzer imports PoC-15's `evaluate()` so metrics
+are identical by construction).
+
+**Winner: `gemma4:e4b-it-qat`** (7.5B MatFormer, ~4B active, 6.1 GB download,
+6.3 GB resident): **97.9% accuracy vs Haiku's 91.7%**, deep-miss 1/16 (tie),
+overspend 0/16 (tie), traps **6/6 + 6/6** (beats Haiku's 5/6 short-deep),
+100% deterministic across three runs, zero parse failures, **warm p95 667 ms**
+(4.5× inside the 3 s bar), $0/verdict. Cold load 5.7 s if evicted (mitigate
+with `keep_alive`). Also passing: `gemma4:12b` and `qwen3.6:35b-a3b` (the MoE
+— 35B knowledge at 909 ms mean; kept as the named fallback, though removed
+from disk). `qwen3.6:27b` missed only the latency bar by 5%.
+
+Findings beyond the headline:
+
+1. **The "sub-4B fails like Apple FM" hypothesis was falsified — calibration,
+   not size, is the variable.** Granite 8B (bigger than the winner) failed in
+   the mirror image of AFM: AFM's cheap class collapsed to zero, Granite's
+   over-fired (7/16 deep-misses). Both miscalibrated, opposite directions.
+2. **Reasoning hurts this task, measured:** identical weights with thinking
+   enabled cost 9× latency, *lowered* accuracy (95.8% vs 97.9%), and broke a
+   long-cheap trap by deliberating its way into "potential legal
+   implications." The scorer should run with reasoning suppressed.
+3. **A label dispute worth carrying into the confirmatory eval:** all five
+   competent local arms missed the same single deep item (D08, terse
+   operational replanning) with near-identical reasons, while every local
+   model got the item Haiku missed (D04). Non-overlapping blind spots —
+   either the D08 label is contestable or local models under-rate terse
+   multi-constraint replanning. To be resolved by independent labeling, not
+   assumed.
+4. Ollama 0.33 harness notes: `/v1` ignores native `think` but honors
+   `reasoning_effort: "none"`; strict `json_schema` worked everywhere (retry
+   logic never fired); `maxLength` inside a schema breaks generation.
+
+**Disposition unchanged from PoC-15:** the fixtures are still author-aligned
+with only 16 deep items — 97.9% here is not 97.9% in production. The
+invariant-4 amendment still waits on the independent confirmatory eval
+(fixtures authored blind, ≥50 deep items, D08-class items adjudicated), now
+with `gemma4:e4b` as the candidate scorer instead of Haiku: if it passes, the
+scorer is free, local, private, and adds ~0.7 s ahead of a 5–10 s turn.
+Cleanup done: losers removed, 186 Gi free, `nomic-embed-text` untouched.
+
 ## Contradictions with BUILD-PLAN.md
 
 Anything a finding invalidates. Note it here; don't edit the plan.

@@ -1,0 +1,24 @@
+{
+  "model": "gemma4:e4b-it-qat",
+  "run": "C",
+  "think": false,
+  "mode": "schema",
+  "ram": "6.3 GB",
+  "processor": "100% GPU",
+  "load_ms": 1917.4,
+  "n": 48,
+  "parse_fail_first_attempt": 0,
+  "retries": 0,
+  "parse_fail_after_retry": 0,
+  "wall_s": 34.0,
+  "tok_in": 17756,
+  "tok_out": 1233,
+  "lat": {
+    "mean": 708.0990572770437,
+    "p50": 726.6213893890381,
+    "p90": 810.593843460083,
+    "p95": 837.2268676757812,
+    "min": 522.7227210998535,
+    "max": 847.9170799255371
+  }
+}

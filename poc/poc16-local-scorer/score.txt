@@ -1,0 +1,289 @@
+====================================================================================================
+PoC-16  LOCAL (Ollama) COMPLEXITY-TIER SCORER EVALUATION   n=48 fixtures
+fixtures / rubric / metrics all reused verbatim from PoC-15
+====================================================================================================
+
+====================================================================================================
+METRIC TABLE  (run A; determinism vs run B)
+====================================================================================================
+scorer                            acc  deep-miss  overspend  longC  shortD     det   pf    p95ms     RAM
+--------------------------------------------------------------------------------------------------------
+gemma4-12b                      95.8% 1/16      0/16      6/6    6/6      100.0%    0     1606  9.6 GB
+gemma4-e4b                      97.9% 1/16      0/16      6/6    6/6      100.0%    0      667  6.3 GB
+gemma4-e4b-think                95.8% 1/16      1/16      5/6    6/6      100.0%    0     8378  6.3 GB
+granite8b                       64.6% 7/16      0/16      6/6    5/6      100.0%    0      592   17 GB
+qwen36-27b                      95.8% 1/16      0/16      6/6    6/6      100.0%    0     3158   25 GB
+qwen36-35ba3b                   93.8% 1/16      0/16      6/6    6/6      100.0%    0     1115   25 GB
+--------------------------------------------------------------------------------------------------------
+Haiku (PoC-15)                  91.7% 1/16      0/16      6/6    5/6           -    -     n/a*       -
+AFM v1 (PoC-15)                 64.6% 1/16      1/16      0/6    5/6           -    -      902       -
+AFM v2 (PoC-15)                 68.8% 2/16      1/16      0/6    5/6           -    -      978       -
+BASELINE always-standard        37.5% 15/16      0/16      0/6    0/6           -    -        -       -
+BASELINE always-deep            35.4% 0/16      16/16      0/6    6/6           -    -        -       -
+BASELINE length-heuristic       41.7% 14/16      4/16      0/6    0/6           -    -        -       -
+ORACLE (perfect)               100.0% 0/16      0/16      6/6    6/6           -    -        -       -
+
+  * Haiku p95 from PoC-15 was measured through the `claude -p` agent harness
+    (process spawn + session setup per call) and is NOT a model-latency number.
+  det = tier agreement between two identical temp-0 runs; pf = parse failures after retry
+
+====================================================================================================
+PASS BAR  (pre-registered: deep-miss<=1/16, longC>=5/6, shortD>=5/6,
+           acc>=85%, p95<=3000ms warm, determinism=100%, parse-fail=0)
+====================================================================================================
+
+  gemma4-12b: PASS
+      [x] deep-miss<=1         1/16
+      [x] longC>=5/6           6/6
+      [x] shortD>=5/6          6/6
+      [x] acc>=85%             95.8%
+      [x] p95<=3000ms          1606ms
+      [x] determinism=100%     100.0%
+      [x] parse-fail=0         0
+
+  gemma4-e4b: PASS
+      [x] deep-miss<=1         1/16
+      [x] longC>=5/6           6/6
+      [x] shortD>=5/6          6/6
+      [x] acc>=85%             97.9%
+      [x] p95<=3000ms          667ms
+      [x] determinism=100%     100.0%
+      [x] parse-fail=0         0
+
+  gemma4-e4b-think: FAIL
+      [x] deep-miss<=1         1/16
+      [x] longC>=5/6           5/6
+      [x] shortD>=5/6          6/6
+      [x] acc>=85%             95.8%
+      [ ] p95<=3000ms          8378ms
+      [x] determinism=100%     100.0%
+      [x] parse-fail=0         0
+
+  granite8b: FAIL
+      [ ] deep-miss<=1         7/16
+      [x] longC>=5/6           6/6
+      [x] shortD>=5/6          5/6
+      [ ] acc>=85%             64.6%
+      [x] p95<=3000ms          592ms
+      [x] determinism=100%     100.0%
+      [x] parse-fail=0         0
+
+  qwen36-27b: FAIL
+      [x] deep-miss<=1         1/16
+      [x] longC>=5/6           6/6
+      [x] shortD>=5/6          6/6
+      [x] acc>=85%             95.8%
+      [ ] p95<=3000ms          3158ms
+      [x] determinism=100%     100.0%
+      [x] parse-fail=0         0
+
+  qwen36-35ba3b: PASS
+      [x] deep-miss<=1         1/16
+      [x] longC>=5/6           6/6
+      [x] shortD>=5/6          6/6
+      [x] acc>=85%             93.8%
+      [x] p95<=3000ms          1115ms
+      [x] determinism=100%     100.0%
+      [x] parse-fail=0         0
+
+====================================================================================================
+PREDICTION DISTRIBUTION  (truth is 16 cheap / 16 standard / 16 deep)
+====================================================================================================
+  gemma4-12b                     cheap=15  standard=17  deep=16
+  gemma4-e4b                     cheap=15  standard=18  deep=15
+  gemma4-e4b-think               cheap=15  standard=17  deep=16
+  granite8b                      cheap=28  standard=11  deep= 9
+  qwen36-27b                     cheap=17  standard=16  deep=15
+  qwen36-35ba3b                  cheap=18  standard=15  deep=15
+  Haiku (PoC-15)                 cheap=19  standard=13  deep=16
+  AFM v1 (PoC-15)                cheap= 0  standard=30  deep=18
+  AFM v2 (PoC-15)                cheap= 3  standard=29  deep=16
+  BASELINE always-standard       cheap= 0  standard=48  deep= 0
+  BASELINE always-deep           cheap= 0  standard= 0  deep=48
+  BASELINE length-heuristic      cheap=15  standard=25  deep= 8
+  ORACLE (perfect)               cheap=17  standard=16  deep=15
+
+====================================================================================================
+CONFUSION MATRICES  (local arms)
+====================================================================================================
+
+  gemma4-12b  (acc 95.8%)
+    confusion (rows=truth, cols=predicted)
+                   cheap  standard      deep
+         cheap        15         1         0
+      standard         0        15         1
+          deep         0         1        15
+
+  gemma4-e4b  (acc 97.9%)
+    confusion (rows=truth, cols=predicted)
+                   cheap  standard      deep
+         cheap        15         1         0
+      standard         0        16         0
+          deep         0         1        15
+
+  gemma4-e4b-think  (acc 95.8%)
+    confusion (rows=truth, cols=predicted)
+                   cheap  standard      deep
+         cheap        15         0         1
+      standard         0        16         0
+          deep         0         1        15
+
+  granite8b  (acc 64.6%)
+    confusion (rows=truth, cols=predicted)
+                   cheap  standard      deep
+         cheap        16         0         0
+      standard        11         5         0
+          deep         1         6         9
+
+  qwen36-27b  (acc 95.8%)
+    confusion (rows=truth, cols=predicted)
+                   cheap  standard      deep
+         cheap        16         0         0
+      standard         1        15         0
+          deep         0         1        15
+
+  qwen36-35ba3b  (acc 93.8%)
+    confusion (rows=truth, cols=predicted)
+                   cheap  standard      deep
+         cheap        16         0         0
+      standard         2        14         0
+          deep         0         1        15
+
+====================================================================================================
+LATENCY  (ms, warm; model-load first call reported separately)
+====================================================================================================
+  scorer                              load     mean      p50      p90      p95      max   wall48
+  gemma4-12b                          6286     1399     1399     1591     1606     1632    67.2s
+  gemma4-e4b                          5664      597      592      656      667      690    28.7s
+  gemma4-e4b-think                    5708     5490     6227     8217     8378     8854   263.5s
+  granite8b                           2369      457      439      584      592      723    21.9s
+  qwen36-27b                         11444     2787     2741     3087     3158     3174   133.8s
+  qwen36-35ba3b                       9331      909      951     1092     1115     1246    43.6s
+
+====================================================================================================
+DETERMINISM DETAIL (two identical temp-0 runs)
+====================================================================================================
+  gemma4-12b                      100.0%  (0 disagreement(s))
+  gemma4-e4b                      100.0%  (0 disagreement(s))
+  gemma4-e4b-think                100.0%  (0 disagreement(s))
+  granite8b                       100.0%  (0 disagreement(s))
+  qwen36-27b                      100.0%  (0 disagreement(s))
+  qwen36-35ba3b                   100.0%  (0 disagreement(s))
+
+====================================================================================================
+PARSE FAILURES / RETRIES
+====================================================================================================
+  scorer                         mode           1st-attempt fails   retries   after retry
+  gemma4-12b                     schema                         0         0             0
+  gemma4-e4b                     schema                         0         0             0
+  gemma4-e4b-think               schema                         0         0             0
+  granite8b                      schema                         0         0             0
+  qwen36-27b                     schema                         0         0             0
+  qwen36-35ba3b                  schema                         0         0             0
+
+====================================================================================================
+EVERY DEEP-MISS, VERBATIM, WITH THE MODEL'S STATED REASON
+====================================================================================================
+
+  gemma4-12b: 1 deep-miss(es)
+    [D08] truth=deep  predicted=standard  trap=none
+        INPUT : restructure the drey launch plan given the vendor slipped three weeks
+        REASON: Requires re-organizing a project timeline and adjusting tasks based on a specific constraint.
+
+  gemma4-e4b: 1 deep-miss(es)
+    [D08] truth=deep  predicted=standard  trap=none
+        INPUT : restructure the drey launch plan given the vendor slipped three weeks
+        REASON: This requires reorganizing a multi-step plan based on a significant constraint change.
+
+  gemma4-e4b-think: 1 deep-miss(es)
+    [D08] truth=deep  predicted=standard  trap=none
+        INPUT : restructure the drey launch plan given the vendor slipped three weeks
+        REASON: This requires complex project management and dependency analysis to restructure the entire launch plan.
+
+  granite8b: 7 deep-miss(es)
+    [D06] truth=deep  predicted=cheap  trap=short_deep
+        INPUT : is the offer actually fair
+        REASON: User asks whether an offer is fair without details; requires clarification or simple assessment.
+    [D07] truth=deep  predicted=standard  trap=none
+        INPUT : help me think through whether to take the job offer given the equity and the commute
+        REASON: requires evaluating financial, logistical, and personal trade-offs of a job offer with equity and commute
+    [D08] truth=deep  predicted=standard  trap=none
+        INPUT : restructure the drey launch plan given the vendor slipped three weeks
+        REASON: Requires reorganizing schedule and dependencies due to vendor delay.
+    [D09] truth=deep  predicted=standard  trap=none
+        INPUT : review this clause for risk: the contractor may substitute materials of comparable quality at its sole discretion without notice to the owner, and any dispute as to comparability shall be resolved by the contractor acting reasonably. also tell me what to ask for instead
+        REASON: Clause evaluation involves risk analysis and drafting advice, which requires competent judgment.
+    [D10] truth=deep  predicted=standard  trap=none
+        INPUT : two bids on the roof. one is 22k, licensed, bonded, ten year workmanship warranty, cannot start until late october which puts us into the rain. the other is 16k, has done three houses on our street and they all look fine, warranty is basically a handshake, could start next week. we are probably in t
+        REASON: User needs guidance on choosing between two roof bids with trade-offs in cost, warranty, timeline, and long-term housing plans.
+    [D11] truth=deep  predicted=standard  trap=none
+        INPUT : one of my reports has missed three deadlines in six weeks and the last one hurt a client. i also know from a conversation in may that her mother is very ill and she has been the one handling it. i need to address the performance without pretending the context does not exist, and i have a skip level 
+        REASON: requires balancing empathy with accountability in a high-stakes conversation
+    [D14] truth=deep  predicted=standard  trap=none
+        INPUT : i have to decide by friday whether to sign the lease renewal at 14 percent higher or move. moving costs us roughly six weeks of disruption and i do not know what the market looks like in the spring. what would you want to know before deciding, and what is your read
+        REASON: decision involves financial and logistical tradeoffs with deadline
+
+  qwen36-27b: 1 deep-miss(es)
+    [D08] truth=deep  predicted=standard  trap=none
+        INPUT : restructure the drey launch plan given the vendor slipped three weeks
+        REASON: Restructuring a project plan requires logical resequencing and constraint management.
+
+  qwen36-35ba3b: 1 deep-miss(es)
+    [D08] truth=deep  predicted=standard  trap=none
+        INPUT : restructure the drey launch plan given the vendor slipped three weeks
+        REASON: The task involves reorganizing a schedule with a specific constraint, which is routine planning work.
+
+====================================================================================================
+TRAP DETAIL (12 trap items, all local arms + Haiku)
+====================================================================================================
+  id    truth     gemma4-12b    gemma4-e4b    gemma4-e4b-th granite8b     qwen36-27b    qwen36-35ba3b Haiku (PoC-15
+  C11   cheap     cheap         cheap         cheap         cheap         cheap         cheap         cheap          | ok so today was kind of a disaster. the plum
+  C12   cheap     cheap         cheap         cheap         cheap         cheap         cheap         cheap          | i was on the phone with my mom for like an h
+  C13   cheap     cheap         cheap         cheap         cheap         cheap         cheap         cheap          | that meeting ran forty minutes over for abso
+  C14   cheap     cheap         cheap         cheap         cheap         cheap         cheap         cheap          | i have been telling myself for three weeks t
+  C15   cheap     cheap         cheap         cheap         cheap         cheap         cheap         cheap          | the conference thing is turning into a whole
+  C16   cheap     cheap         cheap         deep          cheap         cheap         cheap         cheap          | the neighbours put in a fence right along th
+  D01   deep      deep          deep          deep          deep          deep          deep          deep           | should i sell the house?
+  D02   deep      deep          deep          deep          deep          deep          deep          deep           | is this mole worrying
+  D03   deep      deep          deep          deep          deep          deep          deep          deep           | do i tell her or not
+  D04   deep      deep          deep          deep          deep          deep          deep          standard       | do we kill drey or not
+  D05   deep      deep          deep          deep          deep          deep          deep          deep           | quit or stay
+  D06   deep      deep          deep          deep          cheap         deep          deep          deep           | is the offer actually fair
+
+====================================================================================================
+COST / 1000 TURNS under PoC-15's realistic priors
+====================================================================================================
+
+  prior = cheap-heavy 60/30/10
+  scorer                          routed $/1k  scorer $/1k   net $/1k  vs always-deep
+------------------------------------------------------------------------------------
+  gemma4-12b                            13.38         0.00      13.38          -83.3%
+  gemma4-e4b                            12.06         0.00      12.06          -84.9%
+  gemma4-e4b-think                      14.69         0.00      14.69          -81.6%
+  granite8b                              7.44         0.00       7.44          -90.7%
+  qwen36-27b                            11.61         0.00      11.61          -85.5%
+  qwen36-35ba3b                         11.46         0.00      11.46          -85.7%
+  Haiku (PoC-15)                        12.62         1.00      13.62          -83.0%
+  AFM v1 (PoC-15)                       21.81         0.00      21.81          -72.7%
+  AFM v2 (PoC-15)                       19.16         0.00      19.16          -76.0%
+  BASELINE always-standard              10.00         0.00      10.00          -87.5%
+  BASELINE always-deep                  80.00         0.00      80.00           +0.0%
+  BASELINE length-heuristic             21.55         0.00      21.55          -73.1%
+  ORACLE (perfect)                      11.61         0.00      11.61          -85.5%
+
+  prior = balanced-ish 45/40/15
+  scorer                          routed $/1k  scorer $/1k   net $/1k  vs always-deep
+------------------------------------------------------------------------------------
+  gemma4-12b                            18.22         0.00      18.22          -77.2%
+  gemma4-e4b                            16.47         0.00      16.47          -79.4%
+  gemma4-e4b-think                      18.44         0.00      18.44          -77.0%
+  granite8b                             10.03         0.00      10.03          -87.5%
+  qwen36-27b                            16.04         0.00      16.04          -79.9%
+  qwen36-35ba3b                         15.84         0.00      15.84          -80.2%
+  Haiku (PoC-15)                        17.39         1.00      18.39          -77.0%
+  AFM v1 (PoC-15)                       25.31         0.00      25.31          -68.4%
+  AFM v2 (PoC-15)                       22.23         0.00      22.23          -72.2%
+  BASELINE always-standard              10.00         0.00      10.00          -87.5%
+  BASELINE always-deep                  80.00         0.00      80.00           +0.0%
+  BASELINE length-heuristic             20.41         0.00      20.41          -74.5%
+  ORACLE (perfect)                      16.04         0.00      16.04          -79.9%

@@ -1,0 +1,24 @@
+{
+  "model": "granite4.2:8b",
+  "run": "A",
+  "think": false,
+  "mode": "schema",
+  "ram": "17 GB",
+  "processor": "100% GPU",
+  "load_ms": 2368.9,
+  "n": 48,
+  "parse_fail_first_attempt": 0,
+  "retries": 0,
+  "parse_fail_after_retry": 0,
+  "wall_s": 21.9,
+  "tok_in": 18194,
+  "tok_out": 1220,
+  "lat": {
+    "mean": 456.62838717301685,
+    "p50": 438.7991428375244,
+    "p90": 583.791971206665,
+    "p95": 591.6159152984619,
+    "min": 317.2760009765625,
+    "max": 722.6028442382812
+  }
+}

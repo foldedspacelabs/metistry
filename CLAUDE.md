@@ -4,7 +4,8 @@
 instructions — those live at `Knowledge/CLAUDE.md` and are written later, once
 the interaction has been felt rather than guessed at. Don't confuse the two.
 
-Read `BUILD-PLAN.md` for the design. This file covers how to work in the repo.
+Read `metistry-build-plan.md` for the design. This file covers how to work in
+the repo.
 
 ## Naming
 
@@ -32,22 +33,37 @@ runs on Linux and checks this.
 ## Invariants
 
 These are decisions, not preferences. Raise it with me before violating one.
+Numbering matches the plan §1 (synced 2026-08-29 — they had drifted).
 
 1. **Git is the record; Postgres is derived.** `docker compose down -v`, rebuild
    from the repo, run collectors once → back in business minus historical trend
    lines. Anything that fails that test needs backing up; nothing else does.
-2. **One read path into state.** Named queries in `router/queries/`. No component
-   talks to Postgres directly.
-3. **The router is deterministic.** No model decides which model to use.
-4. **Everything is a directory with a manifest.** Bridges, collectors, agents,
-   routines. CI validates.
-5. **Native only where macOS requires it.** `runs_on: host` for TCC-bound
-   components; everything else containerises.
-6. **Cloud-portable by construction.** No absolute paths, config from
+   (An honest restatement of the durable set is open decision D6.)
+2. **Shared responsibility, enforced at the tool.** The assistant commits
+   freely to `Knowledge/`; anything defining how the system behaves is a
+   human change (product = PRs; instance protected paths = the user's hand).
+3. **One read path into state.** Named queries — YAML in the instance's
+   `queries/`, executed only by `packages/queries` (parameterized driver).
+   No component talks to Postgres directly (sole exception: the watchdog's
+   liveness probes).
+4. **The router is deterministic.** No model decides which model to use.
+5. **Everything is a directory with a manifest.** Bridges, collectors, agents,
+   routines, targets, services. CI validates.
+6. **Native only where macOS requires it.** `runs_on: host` for TCC-bound
+   components; everything else containerises. TCC bridges are **Swift**,
+   stably signed (D3).
+7. **Cloud-portable by construction.** No absolute paths, config from
    environment, nothing assumes a shared filesystem.
-7. **Enforce at the tool, never by prompting.** "Be careful with X" in a prompt
-   is not a control. If policy forbids something, the tool must be incapable of
-   it.
+8. **Security survives full code visibility, and the network is not a
+   boundary.** Kerckhoffs throughout; boring primitives; every boundary
+   testable — misuse tests ship with the interface; every request
+   authenticates as if internet-exposed.
+9. **The engine has no shell and no raw git.** `brain-commit` plus
+   allowlisted bridges are the assistant's entire mutating/outbound surface.
+
+And the principle over all of them: **enforce at the tool, never by
+prompting.** "Be careful with X" in a prompt is not a control. If policy
+forbids something, the tool must be incapable of it.
 
 ## Packages
 
@@ -58,16 +74,32 @@ Every bridge is a published npm package usable by a stranger.
 - **`npx @foldedspacelabs/mcp-<name>` must work** for someone who has never heard
   of Metistry. Config via env vars, MCP over stdio or HTTP.
 - Every bridge and collector exports `check()` so `metistry doctor` is generic.
-- Every bridge inherits from `core`: lazy tool discovery, preview-then-confirm on
-  destructive tools, secret redaction by default.
+- Every bridge conforms to `core`'s **wire-level contract** (manifest shape,
+  auth header, error envelope, `check()` JSON): TypeScript bridges inherit the
+  implementation — lazy tool discovery, preview-then-confirm on destructive
+  tools, secret redaction by default — and Swift TCC bridges implement the
+  spec, held to it by the same conformance tests.
 
 ## Stack
 
 TypeScript, pnpm workspaces, changesets. Postgres + pgvector in Docker. Node for
-the console. Claude Agent SDK for Metis.
+the console. Claude Agent SDK for Metis. Swift for TCC bridges. **Collectors
+are TypeScript** — no Python anywhere (ruled 2026-08-29; Phase 0's stack had
+already gone zero-Python).
+
+**Migrations are additive-first.** New columns and tables, not rewrites;
+destructive migrations need an explicit decision and a rollback note in the
+PR. `metistry update` must be able to run them idempotently under an
+advisory lock.
 
 Ask before adding a dependency. This is a system maintained by one person over
-years; every dependency is a future maintenance obligation.
+years; every dependency is a future maintenance obligation. **Pre-approved**
+(no per-PR debate): `@anthropic-ai/claude-agent-sdk`,
+`@modelcontextprotocol/sdk`, `pg`, `zod`, `chokidar`, `web-push`, and dev
+tooling (`typescript`, `vitest`, `changesets`). **Deliberately hand-rolled**
+(PoC-proven, do not add a framework for these): migrations (plain SQL + a
+tiny runner), the router (rules over regex), launchd plists, the watchdog.
+Anything else: ask first.
 
 ## Working style
 
@@ -75,8 +107,8 @@ years; every dependency is a future maintenance obligation.
   scaffolding something three phases out, stop.
 - **Show real output.** Actual command results over summaries, especially for
   PoCs.
-- **Report contradictions, don't route around them.** If a finding conflicts with
-  `BUILD-PLAN.md`, say so and let me decide. Don't edit the plan.
+- **Report contradictions, don't route around them.** If a finding conflicts
+  with `metistry-build-plan.md`, say so and let me decide. Don't edit the plan.
 - **Ask before committing.** And never commit to `main` directly once branch
   protection exists.
 - **Small commits with real messages.** One logical change each. This repo is

@@ -213,6 +213,15 @@ Each item: what → evidence → where it lands.
 
 ## 5. Tensions needing an explicit ruling
 
+> **RESOLVED 2026-08-28 (user rulings):** (1) audit rather than gate — the
+> proposed reconciliation adopted: free commits, distillation-produced facts
+> land `status: draft` and surface in the morning brief as an audit
+> affordance, nothing blocks; (2) MemGhost — the suggested reader/writer
+> separation adopted (untrusted-content readers hold no commit/memory-write
+> tools; report queue only); (3) schema freeze — wikilink/list-shape CI
+> validation, `decisions` structure, and `draft` status all added. Encoded in
+> the plan (§0 working style, §4.11, §4.14).
+
 1. **"Review by audit, not by gate" vs. the junk evidence.** The plan lets
    the assistant commit knowledge freely, reviewed weekly by digest. The
    strongest numbers in this survey argue durable-fact writes need *some*

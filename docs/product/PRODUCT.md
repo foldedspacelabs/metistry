@@ -68,6 +68,16 @@ instructions; input filtering missed memory-poisoning 9/10 times).
 - Contrast for positioning: the category leader's ecosystem had 40k+ exposed
   instances, 341 malicious marketplace skills, and prompt-injection RCE in
   2026. Metistry's answer is structural, not reactive.
+- **Open-design security (invariant 8):** built assuming adversaries — human
+  and AI — read the source. No security through obscurity; boring standard
+  primitives; misuse tests ship with every interface; and no implicit network
+  trust — every request authenticates as if internet-exposed, because the
+  category leader's worst incident (40k+ exposed gateways) was exactly a
+  "the network will protect us" default.
+- **Bring-your-own routing:** the project exposes configured ports and
+  suggests exposure patterns per hosting model (local + tailnet, reverse
+  proxy, cloud, Docker) but never depends on any — a user benefit (host it
+  anywhere) that is also a security benefit (no assumed-safe network).
 
 ## How to use (the story, current shape)
 
@@ -90,3 +100,4 @@ your machine.
   substrate started, plan carries: product/instance split, flexible compute,
   external-agent capture + read tiers, coordination hub, management API,
   web-app-first / iOS-later-premium.
+- 2026-08-28 — invariant 8 added: open-design security + network-agnosticism (bring-your-own routing layer).

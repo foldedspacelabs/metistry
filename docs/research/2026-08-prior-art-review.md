@@ -25,6 +25,18 @@ routine schedule during Phase 3 planning against the actual credit pool.
 Whether headless official-CLI invocation counts as "interactive" is ambiguous
 and not worth betting the architecture on.
 
+> **CORRECTION (2026-08-28, user-prompted, verified against Anthropic's help
+> center):** the account above missed a third beat. The metered-credit change
+> was **paused on June 15, 2026 — the day it was due to take effect** — and
+> never shipped: "Claude Agent SDK, `claude -p`, and third-party app usage
+> still draw from your subscription's usage limits." Anthropic says a
+> reworked plan will come "with advance notice." So today the routines are
+> NOT metered; the paragraph above describes an announced-then-paused policy.
+> Recommendation #6 stands on its cost-hygiene and behavioral merits (idle-
+> cost abandonment evidence), no longer on a metering mandate. Plan §4.17
+> carries the corrected framing: arbitrage is a contingency, and per-target
+> cost accounting makes any future metering a config response.
+
 ---
 
 ## 1. What the survey validates (no change; recorded as evidence)

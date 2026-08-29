@@ -6,7 +6,7 @@ draft from another session (`SYNTHESIS-other-session.md`). Every finding is
 tagged **Critical / Should-do / Option** and given a **predicted phase**.
 Security findings that discuss attack classes are stated here only as defensive
 requirements; their mechanism detail is quarantined in
-[§9 Security — defensive detail](#9-security--defensive-detail-flagged) for
+[§10 Security — defensive detail](#10-security--defensive-detail-flagged) for
 separate review.
 
 Priority = my judgment combining each reviewer's own severity, retrofit cost,
@@ -134,7 +134,7 @@ D1/D2.
 |---|---|---|---|---|---|
 | SHOULD-1 | **Recall ("what did we decide about X") is Phase 6**, though keyword/FTS over the vault is ~an afternoon and the research shows keyword recall@10=1.0 vs 0.77 paraphrase. It's the one behavior that makes the system indispensable. | ux | 04 | **Phase 2** | Ship ripgrep/FTS-backed recall as a named query in Phase 2; embeddings stay Phase 6. |
 | SHOULD-2 | **Time-to-first-value is hours**, and the wow ("text yourself, get an answer") sits behind the entire native tier — the max-risk Day-1 stretch is between the user and the reason to continue. | ux | 04 | Phase 2-3 | `metistry init` ends in <10 min with a working local capture + fast path, **zero TCC**; the native tier becomes a progressive unlock via a `doctor` capability checklist (which also becomes grant-rot recovery). |
-| SHOULD-3 | **Morning brief is unspecified** (10 references, 0 spec) and is the sink for ~13 features → 10–25 decisions/day vs a real budget of ~5. Top abandonment risk; "audit-not-gate becomes a gate enforced by guilt." | ux | 04 | Phase 3-4 (design Pre-3) | Spec it: **hard cap (5 decisions), consequence-ranked, auto-expiry** (un-acted items settle to `draft, reviewed:never`, searchable, never re-surfaced), **batch actions**, and **one owner** for the total. Every feature wanting a slot competes for it. |
+| SHOULD-3 | **Morning brief is unspecified** (10 references, 0 spec) and is the sink for ~13 features → 10–25 decisions/day vs a real budget of ~5. Top abandonment risk; "audit-not-gate becomes a gate enforced by guilt." | ux | 04 | Phase 3-4 (design Pre-3) | Spec it (**RATIFIED D10 — soft budget, not hard**): surface the most impactful items, +1–2 extra if also critical; **link to full detail in knowledge, don't truncate** — keep the daily view actionable but let the user open the full list to optimize. Plus consequence-ranking, auto-expiry (un-acted → `draft, reviewed:never`, searchable), batch actions, one owner. |
 | SHOULD-4 | **Five approval queues that are one** (inbox / brain-report / api proposals / draft notes / grant elevations). Five notification paths, five API shapes, five places to get "agent messages carry no user authority" right. | arch·coh | 02·6, 03·9 | Phase 3-4 (reserve schema Pre-1) | One `proposals` table (`kind`, `source_agent`, `trust`, `payload`, `decision`, `feedback`, `decided_at`), one triage endpoint, one push, one brief section; `draft` frontmatter is the vault-side marker of the same row. |
 | SHOULD-5 | Named-query params via string interpolation (`psql -c` has no binding, PoC-8) would reopen arbitrary SQL through a query param. | sec | 01·B3, 02 | Phase 1 | Parameterized pg driver in `packages/queries` (folded into CRIT-2). |
 | SHOULD-6 | **`metistry update` has no rollback**; no migration ordering (concurrent containers can double-apply); no additive-only rule; `migrate.sh` needs a repo checkout + host `psql` an instance lacks. | arch | 02·8 | Phase 4-5 (additive rule → Pre-1 into CLAUDE.md) | `update` = `pg_dump` → pull → migrate in a one-shot service holding `pg_advisory_lock` → start via `depends_on: service_completed_successfully` → `doctor` → on failure restore dump + re-pin lock. Write the additive-first rule next to the invariants. |
@@ -163,7 +163,7 @@ D1/D2.
 
 | ID | Finding | Area | Src | Phase | Note |
 |---|---|---|---|---|---|
-| OPT-1 | **Cut from pre-Phase-6 scope** (both arch + ux converge): full management API + PWA management UI, web push, coordination-hub *tools*, `mcp-health`, Home Assistant. Reserve the hub's claim/lease/dependency **columns** in a migration now (free); build tools when a 2nd agent exists. | arch·scope | 02·7 | — | **See D9.** Note the pivot (§2) argues push and a *minimal* web UI back *in* earlier — reconcile via the minimal/full split. |
+| OPT-1 | Scope cuts the reviews proposed (management API+UI, web push, hub tools, `mcp-health`, Home Assistant). | arch·scope | 02·7 | — | **RATIFIED (D9): only Home Assistant is cut.** The web management UI, web push, coordination tools, and `mcp-health` are **kept** — consistent with the web-first pivot. Fold-router still stands (CRIT-3). Reserve the hub's claim/lease/dependency columns in a migration now regardless. |
 | OPT-2 | Local meeting **transcription** (transcript into the vault, human-marked decisions, explicitly **no** auto-extraction per PoC-13). High user value, large build. | ux | 04 | Later | Architecture supports it (native bridge + on-device model); resist the auto-extract trap. |
 | OPT-3 | Near-miss logging (model turn a named query could've served) + a `/help` generated from live `rules.yaml`. | ux | 04 | Phase 4 | Feeds the §4.17.D tuning loop for free. |
 | OPT-4 | Batch proposal actions + per-source accept-rate scorecard with an offer to mute low performers; monthly spend push; instrument the §5 "on drift" heuristics (panel views, accept rates). | ux | 04 | Phase 4-5 | The user won't self-notice drift; instrument it. |
@@ -201,38 +201,54 @@ D1/D2.
 
 ---
 
-## 8. Owner decision queue
+## 8. Decisions (ratified 2026-08-29)
 
-**Decide before/at Phase 1 (they shape `core`, the schema, or the layout):**
-- **D1 · iMessage residual role** given the pivot: (a) drop entirely; (b)
-  notification-*out* only; (c) notification-out **+** lightweight capture-in.
-  Changes SEC-8/SHOULD-16/SHOULD-17 and phase priorities. *(My lean: (b)+(c) —
-  keep it as a cheap notify-and-capture channel, never the primary/rich UI.)*
-- **D2 · Web surface split** (resolves C1): build a minimal interaction/capture/
-  triage web UI early as the primary door, deferring the full management console?
-  And do notifications use web push now, or wait for iOS?
-- **D3 · Swift for all three TCC bridges** (CRIT-11) — makes `core`'s bridge
-  contract wire-level. *(My lean: yes; it reduces total machinery.)*
-- **D4 · Product/instance overlay** (CRIT-4): adopt "instance owns all
-  config-shaped things, product ships `seed/` defaults, filename-wins overlay"?
-- **D5 · One committer** (CRIT-6): reconciler commits, `brain-commit` enqueues?
-- **D6 · Restate invariant 1 + a named durable set** the nightly dump covers
-  (CRIT-5)?
-- **D7 · Unified `proposals` table** (SHOULD-4) — collapse the five queues; shapes
-  the schema, cheap now.
-- **D8 · Re-sequence keyword recall to Phase 2** (SHOULD-1)?
-- **D9 · Scope cuts** (OPT-1): confirm fold-router (yes), and defer hub-tools /
-  full-management-UI / push / `mcp-health` / Home Assistant — as reconciled with D2.
-- **D10 · Morning-brief hard budget** (SHOULD-3): adopt cap-5 / auto-expiry /
-  one-owner as a binding design constraint?
+The owner ratified the queue below. These are now design direction; full
+propagation into `metistry-build-plan.md` happens in the Pre-1 fixes pass
+(implementation stays on hold until then). D5 and D6 remain open.
 
-**Can decide later:** token lifecycle specifics (OPT-8), transcription (OPT-2),
-Reminders/`work` rule (OPT-7), Obsidian dashboard (OPT-6), rate-limit/quota
+| # | Decision | Ratified answer | Effect on findings |
+|---|---|---|---|
+| D1 | iMessage's residual role | **Drop iMessage entirely** — lean on the web app. | Removes the interactive-door security surface (SEC-8 / SHOULD-16 largely moot) and the Messages `send` allowlist concern (SHOULD-17). **The watchdog's out-of-band alert can no longer be iMessage** → the external dead-man's-switch + email (SHOULD-12) becomes the alert channel, and web push (D2) the primary notification. |
+| D2 | Web surface | **Move the web app up as the primary interface, and use it for notifications (web push).** iOS comes later, likely premium; the web app stays primary for most users regardless. | Resolves C1. A minimal interaction/capture/triage web UI is now on the early critical path; web push adopted now (not deferred). |
+| D3 | Swift for all three TCC bridges | **Yes.** | CRIT-11 adopted; `core`'s bridge contract becomes a wire-level spec. |
+| D4 | Product/instance overlay | **Yes** (instance owns config-shaped things; product ships `seed/` defaults; filename-wins overlay). | CRIT-4 adopted. |
+| D5 | One committer (reconciler) | **Open — unresolved for now.** | CRIT-6 stays flagged; revisit before the reconciler is built. |
+| D6 | Restate invariant 1 + durable set | **Open — unresolved for now.** | CRIT-5 stays flagged; revisit before backup/DR is built. |
+| D7 | Unified `proposals` table | **Yes** — collapse the five queues. | SHOULD-4 adopted; shapes the schema (cheap now). |
+| D8 | Keyword recall → Phase 2 | **Yes**, move it up. | SHOULD-1 re-sequenced to Phase 2. |
+| D9 | Scope cuts | **Drop Home Assistant only.** Keep the full management UI, web push, coordination tools, and `mcp-health`. (Fold-router still stands — CRIT-3.) | OPT-1 revised: only HA is cut; everything else stays (consistent with the web-first pivot). |
+| D10 | Daily-review budget | **Soft budget, not hard.** Surface the most impactful items (+1–2 extra if also critical); **link to full detail in knowledge rather than truncating**; keep the daily view actionable but let the user open the full list to optimize. | SHOULD-3 revised: soft cap + "see all" affordance, not a hard cap-5. |
+
+**Still open (later):** D5, D6, plus token lifecycle (OPT-8), transcription
+(OPT-2), Reminders/`work` rule (OPT-7), Obsidian dashboard (OPT-6), rate-limit
 tuning (OPT-5).
 
 ---
 
-## 9. Security — defensive detail (flagged)
+## 9. What the reviews validated (protect these)
+
+Named by multiple reviewers as genuinely strong, and worth not losing in the
+churn of fixes:
+
+- **Phase 0 discipline** — two informative FAILs preserved, an invariant defended
+  against the author's own proposed amendment (PoC-14→15→16), an ill-posed cost
+  criterion corrected mid-flight.
+- **Enforce-at-the-tool where it costs something** — deterministic redaction of
+  *model output*, server-side grants, reader/writer separation for untrusted
+  content.
+- **The product/instance split** — decided before a vault existed; makes the
+  work/personal IP boundary mechanical.
+- **The cost architecture** — deterministic router failing open to the model,
+  fast paths, per-tier budgets, model-free watchdog. The user-voice review calls
+  it the best-defended flank it has seen.
+- **Small delighters** — naming the assistant on first run, freshness stamps,
+  `degrades: absent` (capability-off, not mystery-error), leases that expire on
+  their own. The user-voice review's ask: make *everything* degrade like a lease.
+
+---
+
+## 10. Security — defensive detail (flagged)
 
 > **Read separately.** This section discusses attack *classes* solely to specify
 > the defenses for the owner's own authorized system. It contains no exploit
@@ -290,29 +306,4 @@ boundary-by-boundary defensive rationale behind them.
 
 ---
 
-## 10. What the reviews validated (protect these)
-
-Named by multiple reviewers as genuinely strong, and worth not losing in the
-churn of fixes:
-
-- **Phase 0 discipline** — two informative FAILs preserved, an invariant defended
-  against the author's own proposed amendment (PoC-14→15→16), an ill-posed cost
-  criterion corrected mid-flight.
-- **Enforce-at-the-tool where it costs something** — deterministic redaction of
-  *model output*, server-side grants, reader/writer separation for untrusted
-  content.
-- **The product/instance split** — decided before a vault existed; makes the
-  work/personal IP boundary mechanical.
-- **The cost architecture** — deterministic router failing open to the model,
-  fast paths, per-tier budgets, model-free watchdog. The user-voice review calls
-  it the best-defended flank it has seen.
-- **Small delighters** — naming the assistant on first run, freshness stamps,
-  `degrades: absent` (capability-off, not mystery-error), leases that expire on
-  their own. The user-voice review's ask: make *everything* degrade like a lease.
-
----
-
-*Sources: `docs/review/raw/01-security-boundary.md`,
-`02-architecture-simplification.md`, `03-coherence-consistency.md`,
-`04-user-voice.md`, and the partial `SYNTHESIS-other-session.md`. Reviewer
-severities preserved; priority/phase are this synthesis's judgment.*
+*Sources: the four raw reviews (security, architecture/simplification, coherence, user-voice) and a partial other-session synthesis — all consolidated here and then removed from the working tree (they remain in this PR's git history). Reviewer severities preserved; priority/phase are this synthesis's judgment.*

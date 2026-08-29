@@ -114,7 +114,7 @@ your machine.
 
 ## Log
 
-- 2026-08-28 — document created. Phase 0 complete (14 PoCs), Phase 1
+- 2026-08-28 — document created. Phase 0 complete (16 PoCs), Phase 1
   substrate started, plan carries: product/instance split, flexible compute,
   external-agent capture + read tiers, coordination hub, management API,
   web-app-first / iOS-later-premium.

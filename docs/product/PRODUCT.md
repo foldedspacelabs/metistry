@@ -40,8 +40,8 @@ naming lore in public copy stays about the *project*.
   churn.
 - **A system one person can run for years.** Every dependency is a
   maintenance obligation; recipes over frameworks; small enough to understand.
-- **Useful from any surface** — iMessage, share sheet, web app, Shortcuts,
-  (later) iOS app — and to any agent the user runs, not just its own.
+- **Useful from any surface** — web app first, plus share sheet, Shortcuts,
+  and (later) an iOS app — and to any agent the user runs, not just its own.
 - **Predictable cost.** Deterministic routing, no-model fast paths, budgets
   enforced at the tool. (Idle cost is the #1 documented abandonment reason
   for personal AI in 2026 — Metistry's architecture is built against it.)
@@ -100,9 +100,9 @@ instructions; input filtering missed memory-poisoning 9/10 times).
 ## How to use (the story, current shape)
 
 `npx metistry init` → name your assistant, get a private instance repo →
-text it, share to it, ask it things → it remembers, briefs you each morning,
-and coordinates your other AI tools. The knowledge is yours, in your git, on
-your machine.
+open its web app, share to it, ask it things → it remembers, briefs you each
+morning, and coordinates your other AI tools. The knowledge is yours, in
+your git, on your machine.
 
 ## Premium candidates (collect; decide later)
 

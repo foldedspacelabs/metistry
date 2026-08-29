@@ -8,8 +8,8 @@ outlive any session, agent, or vendor. Apache-2.0.
 - **Host it anywhere.** Services bind configured ports; network exposure is
   a routing layer *you* provide (tailnet, reverse proxy, cloud, Docker port
   maps). Local-first in ownership, not local-only in deployment. Apple-native
-  capabilities (iMessage, Calendar/Reminders, on-device models) need a Mac in
-  the picture; everything else runs wherever you put it.
+  capabilities (Calendar/Reminders, on-device models) need a Mac in the
+  picture; everything else runs wherever you put it.
 - **Predictable cost.** Deterministic routing, sub-millisecond no-model fast
   paths, per-tier budgets enforced at the tool, free local model tiers where
   they measurably win.

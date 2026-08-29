@@ -486,7 +486,9 @@ can see your own token spend split by tier.
 ### Phase 5 — Delegation (ongoing)
 
 - Crew definitions with their own toolsets
-- `@agent` dispatch → GitHub issues
+- **Compute-target registry (§4.17)** — dispatch generalized from
+  GitHub-issues-only to manifest-defined targets (MCP-first)
+- `@agent` dispatch → GitHub issues (the first target)
 - `brain-query` MCP bridge exposing named queries to Metis
 - Weekly review routine
 
@@ -681,7 +683,7 @@ One definition, four consumers. Adding a query is a file, not a deploy.
 
 ```yaml
 name: aws-costs
-type: collector          # bridge | collector | agent | routine
+type: collector          # bridge | collector | agent | routine | target (§4.17)
 schedule: "0 */6 * * *"  # collectors and routines
 writes: [metrics]        # tables or paths
 reads: []
@@ -1220,6 +1222,96 @@ option open costs almost nothing if the rules below hold from the start.
 **Case sensitivity is the sleeper issue.** Every path bug that macOS forgives, a
 Linux container surfaces. CI runs on Linux from Phase 1 for exactly this reason.
 
+### 4.17 Flexible compute (added 2026-08-28)
+
+The user configures what compute runs where — Claude subscription, other
+providers' APIs, local models, and external systems — without the router ever
+becoming model-driven. Three mechanisms, in increasing order of cost, and the
+constraint that binds all three: **v1 validates Claude-primary plus one
+alternate path; everything else is supported-by-configuration, not promised.**
+
+**A. Model configuration inside the assistant (now).** The Agent SDK reads
+model names and endpoint from environment; a gateway (LiteLLM-style,
+Bedrock, Vertex) puts non-Anthropic models behind the same interface. So
+provider choice is instance config (`deployment.yaml` + env), not
+architecture. Stated plainly in docs: *configurable ≠ equal quality* — the
+operating prompt, escalation behavior, and skills are tuned against Claude;
+alternates run untested by upstream. Economic note (corrected 2026-08-28):
+Anthropic announced metered "Agent SDK credits" for programmatic subscription
+use (April/May 2026) but **paused the change on June 15, the day it was due —
+Agent SDK / `claude -p` / third-party usage currently draws normal
+subscription limits** (per Anthropic's help center; a reworked change may
+return "with advance notice"). So routine-lane cost arbitrage via this layer
+is a *contingency*, not a present need — but per-target cost accounting
+(§4.17.D) means if metering ever ships, responding is a config tweak, not a
+redesign.
+
+**B. Compute targets (Phase 5).** A **target** is a directory with a manifest
+(invariant 5): how to submit work, how results return, auth ref, cost
+profile, and a **data policy** stating what a brief bound for this target may
+contain — enforced at the dispatch tool, so "comms-derived content never
+leaves the machine" is a machine rule, not a memory. Targets include local
+subagents, headless CLI runs, GitHub Actions, cloud agent platforms, and any
+external system speaking MCP. **MCP-first is the discipline**: bespoke
+integrations are the maintenance long tail that kills one-person projects
+(see prior-art review); an external platform earns a target by exposing MCP
+or a webhook contract, not by us writing an adapter. Results land in the
+existing report queue; every dispatch logs to `runs` with cost, so per-target
+spend is queryable for free.
+
+```yaml
+name: cloud-worker
+type: target
+transport: mcp                 # mcp | http | github | local
+submit: { tool: run_task }     # how work goes in
+result: { via: report_queue }  # how it comes back
+auth: env:CLOUD_WORKER_TOKEN
+cost: { per_run_estimate_usd: 0.10 }
+data_policy: no_personal_comms # what a brief may carry — enforced at dispatch
+```
+
+**C. Swappable assistant engines (contract, not abstraction).** The assistant
+is a container with a defined contract: messages in from the router,
+`sessions` rows in Postgres, brain tools via MCP, every call logged to
+`runs`. That contract is documented; the product ships exactly **one** engine
+(Claude Agent SDK — the reference engine). Anyone can build another container
+honoring the contract. No in-process provider-abstraction layer inside the
+engine — flexibility lives at the container boundary, so the primary path
+pays zero complexity tax.
+
+**D. Visibility and tuning (a requirement, not a nice-to-have).** Flexible
+compute is only usable if the user can see what it's doing and tweak it.
+Everything below reads through named queries (invariant 3) and shows up in
+the console; nothing here adds a new mechanism, only discipline on an
+existing one:
+
+- **Every model call, on every tier and target, logs one `runs` row** —
+  component, model, tokens in/out, `cost_usd`, duration, ok/error (schema
+  already exists) — plus routing fields: which tier ran, *why*
+  (`routed_by: rule | scorer | escalation | override`), and the scorer's
+  verdict when one was consulted.
+- **Effectiveness by proxy, honestly.** "Was the model choice good" is not
+  directly measurable; the trackable signals are: an explicit `/deep`
+  override immediately after a scored turn, a re-ask of the same request at
+  a higher tier, and escalation-after-cheap frequency. Each is logged as a
+  routing-miss event. A rising miss rate — or a rising scorer speak-rate —
+  is the early warning that the rubric has drifted.
+- **Budget visibility**: daily tier budgets tracked and surfaced on the
+  dashboard and via the `/spend` fast path (per-tier breakdown,
+  freshness-stamped). If Anthropic's paused Agent SDK metering ever ships,
+  its monthly pool becomes one more tracked budget here — no redesign.
+- **The tuning loop is human**: the weekly review includes a routing report —
+  spend by tier/target, verdict distribution, miss events with links to the
+  offending turns — and may *propose* `rules.yaml` tweaks; it never applies
+  them (routing config is a protected path, §4.6).
+
+**What does not change:** invariant 4's purpose. Routing between tiers and
+targets is user-configured and budget-bounded (`rules.yaml`, agent
+manifests); deterministic rules take precedence; any model-judgment scorer
+(under evaluation, PoC-15) picks only within the configured tier menu and
+can never expand its own budget — enforced at the dispatch tool. Collectors
+still never call models.
+
 ## 5. Growing it
 
 Each component type has one recipe. That's the whole maintainability story.
@@ -1343,8 +1435,11 @@ Worth settling before Phase 1, since each is cheap now and annoying later.
 
 ## 7. Frameworks — decisions
 
-**Claude Agent SDK** — Metis. Already chosen. It is the agent framework; it is
-explicitly a building block rather than an orchestration platform.
+**Claude Agent SDK** — Metis. Already chosen, now framed precisely: it is the
+**reference engine** behind the documented assistant contract (§4.17.C). It
+is the agent framework for the shipped engine — explicitly a building block
+rather than an orchestration platform — and model/provider variation happens
+via configuration (§4.17.A), never via an in-process abstraction layer.
 
 **Home Assistant** — recommended. Docker on the Mac. Gives HomeKit device state,
 RTSP camera handling, presence, sensor history, and automation triggers with an

@@ -15,6 +15,20 @@ disposable; state is durable — markdown in git (what you know) and Postgres
 (what's happening). Open source (Apache-2.0); each install is a private
 instance the user owns entirely.
 
+## The name — roots, for later storytelling
+
+From the naming ideation round, the distillation worth preserving:
+**actionable distilled knowledge, managed by a trusted advisor.** The root is
+the ancient word for *practical* wisdom — not knowing everything, but the
+cunning, situational judgment of the counselor archetype: close to one
+person, loyal, turning what's known into what to do. The `-try` suffix reads
+as a craft or practice (artistry, chemistry, mastery) — metistry as *the
+craft of counsel*. Public copy should **hint at this, never explain it**
+(the README models the register: "a nod, not an acronym"); the myth-literate
+get the reference, everyone else gets the ethos. Note the standing rule:
+the assistant's default name lives only in an instance's `identity.yaml` —
+naming lore in public copy stays about the *project*.
+
 ## Goals
 
 - **Your context outlives any session, agent, or vendor.** The vault and
@@ -107,3 +121,4 @@ your machine.
   knowledge interface for all agents; /model tier shortcuts; daily-flow
   templates story; user-extensible connectors via local registry entries +
   `metistry create` scaffolder (a key OSS adoption feature).
+- 2026-08-29 — naming roots recorded (distilled counsel / trusted-advisor ethos; hint-don't-explain register for public copy).

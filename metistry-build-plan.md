@@ -2,7 +2,8 @@
 
 A local-first personal assistant and knowledge graph. The assistant is **Metis**
 (configurable — see `identity.yaml`). Everything runs on the Mac Studio except
-offsite backups. Tailscale for remote access. Two kinds of repo: one public
+offsite backups. Network exposure is the user's routing layer, not the
+project's concern (invariant 8). Two kinds of repo: one public
 product repo (code, Apache-2.0), and one private instance repo per install
 (vault + config) — see §4.15.
 
@@ -116,7 +117,7 @@ reporting relationships change, and an agent can serve two managers.
 
 ## 1. Invariants
 
-Six rules. Every later decision should be checkable against these.
+Eight rules. Every later decision should be checkable against these.
 
 1. **Git is the record. Postgres is derived and operational.**
    Test: `docker compose down -v`, rebuild from the repo, run collectors once →
@@ -143,6 +144,20 @@ Six rules. Every later decision should be checkable against these.
 7. **Cloud-portable by construction.** Everything outside the Apple tier runs in a
    container with config from environment — no absolute paths, no assumption of a
    local filesystem. The Apple tier is a satellite, not a dependency. See §4.16.
+
+8. **Security survives full code visibility, and the network is not a
+   boundary** (added 2026-08-28). This is an open-source project: adversaries
+   — including AI agents — read the source, and will probe every interface
+   for workarounds to weak designs. So: Kerckhoffs's principle throughout
+   (nothing depends on secrecy of mechanism); boring, standard, verifiable
+   security primitives (bearer tokens, server-side authz, audit logs) over
+   anything clever; every boundary enforceable at the tool AND testable
+   (misuse tests ship with the interface). And the project is **network-
+   agnostic**: services bind configured host/port (loopback by default) and
+   authenticate every request as if internet-exposed — reachability (tailnet,
+   reverse proxy, cloud LB, Docker port maps) is a routing layer the *user*
+   provides, which docs may suggest patterns for but code never assumes.
+   "We're on the tailnet" is never an auth argument.
 
 ---
 
@@ -481,7 +496,9 @@ and shows up in the morning brief.
 
 - Collectors: `aws-costs`, `claude-usage`, `github-state`, `drey-metrics`
 - Named queries in `router/queries/`
-- Node console + static dashboard, `tailscale serve`
+- Node console + static dashboard on a configured port (exposure = the
+  user's routing layer, invariant 8; on this install, tailnet is the
+  chosen pattern)
 - PWA manifest + service worker — **the console PWA is the web app, v1**: it
   grows the management UI (§4.2 management surface — agent registry, grants,
   proposal triage with push notifications) rather than a separate app being
@@ -571,10 +588,12 @@ ready-made eval if a stronger local model later warrants a re-test.
 
 ### 4.2 Console HTTP API
 
-Runs on the Mac, exposed over Tailscale. Four consumers: PWA, Shortcuts,
-Obsidian, and **external agents pushing captures/reports** (§4.10 — via
-`mcp-brain`'s write-only door or `POST /capture` directly, per-agent bearer
-tokens).
+Binds a configured host/port (loopback by default); reachability beyond the
+machine is the user's routing layer (invariant 8 — tailnet, reverse proxy,
+cloud, Docker port maps; docs suggest patterns per hosting model, code
+assumes none). Four consumers: PWA, Shortcuts, Obsidian, and **external
+agents pushing captures/reports** (§4.10 — via `mcp-brain`'s write-only door
+or `POST /capture` directly, per-agent bearer tokens).
 
 ```
 POST /capture              multipart or json → inbox/    (Shortcuts)
@@ -603,11 +622,18 @@ POST       /api/grants/requests/:id   approve/deny an elevation request (§4.10)
 ```
 
 Mutations are few, explicit, audit-logged to `runs`, and carry the same auth
-as everything else (tailnet + bearer). The console PWA is the first client;
-the eventual iOS app is the second — same API, no private endpoints.
+as everything else — a bearer credential on every request, validated as if
+the port were internet-exposed (invariant 8; the network layer gets no
+trust). The console PWA is the first client; the eventual iOS app is the
+second — same API, no private endpoints. **Open-source discipline:** this
+surface will be read and probed by AI agents; keep it small and boring,
+authorize server-side per request (never per session-establishment), return
+uniform errors that don't leak existence, and ship misuse tests alongside
+every endpoint.
 
 `/api/q/:name` resolves against `router/queries/` only — no arbitrary SQL, ever.
-Auth is the tailnet plus a bearer token for Shortcuts.
+Auth is a bearer token on every request from every client — the routing
+layer in front of the port adds reachability, never trust (invariant 8).
 
 **`POST /message` is async.** Returns 202 immediately; the reply arrives over
 `/api/stream` or via iMessage. Build the client as a messaging client from day
@@ -851,7 +877,8 @@ sessions, other AI products, coding agents — is captured by giving foreign
 agents the *capture/report surface only*, never `brain-commit`:
 
 - **`mcp-brain`'s write-only tools (`capture`, `report`) double as the
-  universal inbound door.** Served over HTTP on the tailnet; any MCP-capable
+  universal inbound door.** Served over HTTP on a configured port
+  (reachability per invariant 8 — the user's routing layer); any MCP-capable
   tool mounts it with a per-agent bearer token. Exposure beyond localhost
   goes through the user's gateway with real auth, never a direct bind.
   MCP-first, no bespoke per-tool integrations — the adapter long tail is what
@@ -1297,13 +1324,15 @@ option open costs almost nothing if the rules below hold from the start.
 | HealthKit ingest | iOS/macOS only | No fallback — accept the loss |
 | HomeKit | No headless API | No fallback |
 | Apple FM | Apple silicon + OS | Local model via Ollama, or Haiku |
-| RTSP cameras | LAN presence | Reachable over tailnet from cloud |
+| RTSP cameras | LAN presence | Reachable from cloud via the user's routing layer (e.g. tailnet) |
 
 **Two profiles**, selected in `deployment.yaml`:
 
 - `local-mac` — everything on the Studio. Today's build.
 - `cloud` — Metis, Postgres, console, and non-Apple collectors hosted; the Mac
-  joins as a **satellite node** over the tailnet, exposing its Apple bridges. When
+  joins as a **satellite node** reachable through whatever routing layer the
+  user provides (a tailnet is the suggested pattern, never assumed by code —
+  invariant 8), exposing its Apple bridges. When
   the Mac is off, those bridges are absent rather than broken.
 
 **Six rules that keep the option open**

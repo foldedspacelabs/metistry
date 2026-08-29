@@ -92,6 +92,12 @@ instructions; input filtering missed memory-poisoning 9/10 times).
   trust — every request authenticates as if internet-exposed, because the
   category leader's worst incident (40k+ exposed gateways) was exactly a
   "the network will protect us" default.
+- **Passkeys only — no passwords anywhere** (2026-08-29). Sign-in is Face
+  ID / Touch ID; nothing for a server breach to spill, nothing to phish,
+  nothing to reset. Enrollment and recovery root in the machine the user
+  already owns (a one-time QR from `metistry init`); sessions are
+  revocable per device; lapsed sessions re-auth in one tap without ever
+  dropping a capture or silencing notifications.
 - Hardened by pre-implementation review (2026-08-29): the engine has **no
   shell and no raw git** — its tools are its entire reach (invariant 9);
   host bridges authenticate every caller (loopback is not a trust
@@ -141,3 +147,7 @@ your git, on your machine.
   user's attention: ~5 decisions/day surfaced, full detail one tap away);
   security posture hardened (no-shell invariant, bridge caller auth,
   owner-vs-agent credentials).
+- 2026-08-29 — owner authentication decided: **passkeys only** (WebAuthn),
+  host machine as root of trust, 30-day-idle/1-year-max device sessions
+  (user-configurable). "No passwords anywhere" is both the simplest UX and
+  a positioning line — the web door ships with modern auth by default.

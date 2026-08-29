@@ -105,8 +105,12 @@ reporting relationships change, and an agent can serve two managers.
   whole turn. `/deep` remains a manual override. Daily Opus budget in
   `rules.yaml`; every escalation logged.
 - **Metis routes; agents execute.** Briefs carry context, not access.
-- **You review by audit, not by gate.** Knowledge commits flow freely; changes to
-  how the system works need a PR.
+- **You review by audit, not by gate** (reaffirmed 2026-08-28 against the
+  prior-art junk evidence). Knowledge commits flow freely; changes to how the
+  system works need a PR. The one refinement: distillation-produced *facts*
+  land as `status: draft` and surface in the morning brief for one-tap
+  settle/reject — an audit affordance with visible trust levels, not a gate;
+  nothing blocks on it. Journal/log-type notes stay plain audit.
 
 ---
 
@@ -838,6 +842,15 @@ calls:         { extract: metadata_only }
 `summary: local` is the useful middle — a second on-device call yields two lines,
 so Metis can act without raw text crossing.
 
+**Reader/writer separation (ruled 2026-08-28, per the memory-poisoning
+evidence):** the agent that reads third-party content — messages from others,
+mail, web pages — holds **no vault-commit and no durable-memory-write tools**
+in that session. It emits structured, redacted intent into the report queue;
+knowledge writes happen only in sessions whose inputs are the user's own
+words or already-triaged proposals. One crafted email defeated input
+filtering 9 times in 10 in testing; the separation is architectural, not
+detective.
+
 **Enforce at the bridge, never by prompting.** "Be careful with sensitive content"
 in `CLAUDE.md` is not a control. If raw text reaches a session it's in the
 transcript on disk regardless. The bridge must be incapable of returning what
@@ -987,17 +1000,29 @@ them from embedding is reconciler config, not a filename convention.
 3. **Skills belong to agents.** Croft's `.github/skills/` become `agents/` definitions with
    model tiers, scoped `brain-read` paths, and `brain-report` write access.
 
-**Frontmatter schema** (validated in CI, since the agent depends on it):
+**Frontmatter schema** (validated in CI, since the agent depends on it;
+frozen 2026-08-28 with the three prior-art-review additions):
 
 ```yaml
 type: project | area | resource | technique | person | journal
-status: active | archived
-area: "[[Drey]]"
-people: ["[[Person]]"]
+status: draft | active | archived   # draft = AI-authored, unsettled; surfaced
+                                    # in the morning brief; excluded from
+                                    # external reads (§4.10)
+area: "[[Drey]]"                    # MUST be a wikilink, never plain text
+people: ["[[Person]]"]              # MUST be a list of wikilinks — list-typed
+                                    # fields never collapse to a scalar
+decisions: []                       # structured, queryable decisions on
+                                    # meeting/journal notes (list of short
+                                    # strings or wikilinks to Decision notes)
 created: 2026-08-22
 updated: 2026-08-22
 tags: []
 ```
+
+CI validates not just presence but **shape**: `area`/`people` values are
+actual wikilinks everywhere (sometimes-text is the top documented cause of
+silently broken Bases/Dataview queries), and list fields stay lists even
+with one element.
 
 **Linking rules for `CLAUDE.md`:** wikilink people, areas, and decisions on first
 mention; every note carries typed frontmatter; every note joins at least one Map

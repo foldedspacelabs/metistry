@@ -1,7 +1,7 @@
 # Start here
 
 > **Status (2026-08-28): Phase 0 is COMPLETE.** This document is the original
-> kickoff and is kept for history. Findings are in `poc/RESULTS.md`; the build
+> kickoff and is kept for history. Findings are in `docs/poc/RESULTS.md` (moved 2026-08-29); the build
 > plan's §2 "Outcomes" table summarizes them and the plan has been revised to
 > match. Next up is Phase 1 (Substrate). The kickoff prompt below has already
 > been run — don't re-run Phase 0.
@@ -15,7 +15,7 @@
 |---|---|
 | `BUILD-PLAN.md` | The full design. Claude Code reads this, you review it. |
 | `CLAUDE.md` | Dev conventions. Copy to the repo root once it exists. |
-| `poc/RESULTS.md` | Where Phase 0 findings get recorded. |
+| `docs/poc/RESULTS.md` (moved 2026-08-29) | Where Phase 0 findings get recorded. |
 
 ## How to use it
 
@@ -78,7 +78,7 @@ you'll run, before you run it.
 
 ## After Phase 0
 
-Bring `poc/RESULTS.md` back to a planning conversation before starting Phase 1.
+Bring `docs/poc/RESULTS.md` (moved 2026-08-29) back to a planning conversation before starting Phase 1.
 Two or three of these findings will likely change something structural, and it's
 cheaper to revise the plan than the code.
 

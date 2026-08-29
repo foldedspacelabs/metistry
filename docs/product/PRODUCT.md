@@ -18,15 +18,19 @@ instance the user owns entirely.
 ## The name — roots, for later storytelling
 
 From the naming ideation round, the distillation worth preserving:
-**actionable distilled knowledge, managed by a trusted advisor.** The root is
-the ancient word for *practical* wisdom — not knowing everything, but the
-cunning, situational judgment of the counselor archetype: close to one
-person, loyal, turning what's known into what to do. The `-try` suffix reads
-as a craft or practice (artistry, chemistry, mastery) — metistry as *the
-craft of counsel*. Public copy should **hint at this, never explain it**
-(the README models the register: "a nod, not an acronym"); the myth-literate
-get the reference, everyone else gets the ethos. Note the standing rule:
-the assistant's default name lives only in an instance's `identity.yaml` —
+**actionable distilled knowledge, managed by a trusted advisor** — evolved,
+as the project did, into the fuller archetype: the advisor who also **runs
+the household of your work** — coordinates the helpers (agents, any vendor),
+wrangles the chaos of capture and comms, and keeps you organized, efficient,
+and effective day to day. Counselor *and* steward; chief-of-staff energy,
+loyal to exactly one person. The root is the ancient word for *practical*
+wisdom — not knowing everything, but cunning, situational judgment: turning
+what's known into what to do. The `-try` suffix reads as a craft or practice
+(artistry, chemistry, mastery) — metistry as *the craft of counsel and
+coordination*. Public copy should **hint at this, never explain it** (the
+README models the register: "a nod, not an acronym"); the myth-literate get
+the reference, everyone else gets the ethos. Note the standing rule: the
+assistant's default name lives only in an instance's `identity.yaml` —
 naming lore in public copy stays about the *project*.
 
 ## Goals
@@ -121,4 +125,4 @@ your machine.
   knowledge interface for all agents; /model tier shortcuts; daily-flow
   templates story; user-extensible connectors via local registry entries +
   `metistry create` scaffolder (a key OSS adoption feature).
-- 2026-08-29 — naming roots recorded (distilled counsel / trusted-advisor ethos; hint-don't-explain register for public copy).
+- 2026-08-29 — naming roots recorded and evolved: counselor AND steward (distilled counsel + coordination/chaos-wrangling ethos); hint-don't-explain register for public copy.

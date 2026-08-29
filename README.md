@@ -21,12 +21,13 @@ outlive any session, agent, or vendor. Apache-2.0.
   can capture knowledge to it, read what you've granted, and share a task
   list with atomic claims. The hub holds state; agents pull.
 
-The name is a nod, not an acronym. The oldest stories reserve a particular
-seat for the counselor — the one whose gift isn't knowing everything, but
-distilling what's known into what to *do*, offered quietly at the right
-moment, loyal to one person. That practice — knowledge compounding into
-counsel, kept by something that works for you alone — is the craft this
-system is built around. Hence: metistry.
+The name is a nod, not an acronym. The oldest stories keep a particular seat
+beside a ruler for the counselor — whose gift was never knowing everything,
+but turning what's known into what to *do*: distilling noise into counsel,
+ordering the day, marshaling the helpers, keeping the whole enterprise
+pointed at what matters. That craft — knowledge compounding into counsel,
+chaos wrangled into work that moves, loyal to one person alone — is what
+this system is built around. Hence: metistry.
 
 ## Repos
 

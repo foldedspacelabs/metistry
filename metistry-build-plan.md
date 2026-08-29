@@ -542,8 +542,11 @@ Sonnet has no niche between Haiku and Opus.
   unified `proposals` table (D7: `kind`, `source_agent`, `trust`, `payload`,
   `decision`, `feedback`, `decided_at`), two-phase `runs` columns (CRIT-8:
   `started_at` on insert, `finished_at` on completion — a hung or crashed
-  call is visible, not absent), and the hub's claim/lease/dependency
-  columns on `work` (reserved now, used in Phase 5)
+  call is visible, not absent), the hub's claim/lease/dependency
+  columns on `work` (reserved now, used in Phase 5), and the owner-auth
+  tables — `passkeys` (credential public keys) and `auth_sessions`
+  (device sessions; named to avoid colliding with the assistant's
+  `sessions`) — used from Phase 2
 - Manifest `type: service` registered for the reconciler, watchdog, and
   console, so `doctor` can see the components most likely to die silently
 - `ops/scripts/backup.sh` + restore-test script
@@ -562,6 +565,10 @@ grants, which is what makes a fast first-run possible.
 - `apps/console` serving the PWA: thread view (ask/answer), capture box
   (text **and file/photo upload** — the media door, §4.2), a status page
   fed by `/api/status`, Home Screen install, **web push** (PoC-6)
+- **Owner auth, passkeys-only** (§4.2): enrollment QR from `metistry
+  init`, the re-auth sheet (30-day idle / 1-year backstop defaults),
+  device list with revoke, and the owner access token for the capture
+  Shortcut — misuse tests included
 - `POST /message` lands a **durable row before the 202**; the assistant
   drains the queue — a message sent during a restart is never lost. The
   drain step is also the home of the deterministic pre-check before any
@@ -760,6 +767,64 @@ in the web UI is **output-encoded** — stored text from a low-privilege
 token must never execute in a page holding the owner's credential. Both
 rules ship with misuse tests.
 
+**Owner authentication: passkeys (decided 2026-08-29).** This is a
+single-owner system — no registration, no multi-user, and therefore **no
+passwords anywhere**: nothing for the server to store, guess-rate-limit,
+or reset (there is no email infrastructure to reset through, and a weaker
+recovery factor than the one below would be theater). WebAuthn via a
+mature library, never hand-rolled crypto — the boring, standard,
+phishing-resistant primitive invariant 8 asks for, and one Face ID /
+Touch ID tap on the devices that matter.
+
+- **Bootstrap.** `metistry init` (and `metistry enroll` any time after)
+  mints a **one-time enrollment code** — single-use, minutes-lived — shown
+  as a QR/URL in the terminal. Open it on the device, register the
+  passkey, done.
+- **More devices.** Approved from an already-authenticated session in the
+  management UI, or via `metistry enroll` on the host.
+- **Recovery.** Shell access to the host *is* the recovery mechanism — run
+  `metistry enroll` again. Stated as the root of trust rather than
+  implied: whoever controls the host already controls Postgres, the
+  vault, and the OAuth token, so no remote factor may outrank it.
+- **Sessions.** The ceremony issues an httpOnly, secure cookie backed by a
+  server-side **`auth_sessions`** row (named to avoid colliding with the
+  assistant's `sessions` table). Lifetime: **30-day rolling idle window +
+  1-year absolute backstop** — shipped defaults, instance-configurable.
+  Active use silently refreshes; a daily-use device re-auths about once a
+  year, a drawer-bound device re-auths on pickup (exactly when re-proof is
+  worth something). The cookie is a pointer, never the authority — every
+  request validates the session row server-side, so expiry and revocation
+  are immediate regardless of client state. The management UI lists device
+  sessions with one-tap revoke; every issue/refresh/revoke logs to `runs`.
+- **Expiry UX.** One re-auth sheet, one biometric tap, and the user lands
+  where they were headed. In-flight drafts are held client-side and
+  replayed after re-auth — **expiry never discards a capture** (a re-auth
+  prompt that eats a draft is SHOULD-10's silent drop wearing a suit).
+- **Expiry vs revocation, and push.** Time-based expiry **never stops web
+  push** — silencing a lapsed phone would self-inflict the exact
+  silent-death mode §4.9 defends against; tapping a push while expired
+  lands on the re-auth sheet, then the item. **Revocation** kills the
+  session *and* its push subscription together.
+- **Non-browser callers.** Shortcuts can't perform a WebAuthn ceremony, so
+  the capture Shortcut carries a separate long-lived **owner access
+  token** provisioned at setup — session expiry never breaks capture. CLI
+  and scripts mint owner tokens the same way, from the host.
+- **Canonical origin.** Passkeys bind to the domain (RP ID), so the
+  instance declares its canonical HTTPS origin in `deployment.yaml` — not
+  a new constraint (the service worker and web push already require a
+  stable HTTPS origin, PoC-6); a second hostname means a second
+  enrollment per device.
+- **Misuse tests that ship with it:** uniform 401 when unauthenticated; an
+  agent token on a management endpoint fails without leaking existence; an
+  enrollment code refuses reuse and expiry-overrun; a replayed ceremony
+  fails its challenge nonce; a revoked session is dead server-side on the
+  next request.
+
+Rejected for this system: passwords (reset problem, guessing surface, a
+secret to manage), magic links (no email infra), an external identity
+provider (a dependency and an account the design doesn't want), mTLS
+(correct but miserable on iOS/PWA).
+
 Mutations are few, explicit, audit-logged to `runs`, and carry the same auth
 as everything else — a bearer credential on every request, validated as if
 the port were internet-exposed (invariant 8; the network layer gets no
@@ -772,8 +837,9 @@ every endpoint.
 
 `/api/q/:name` resolves against the instance's `queries/` via
 `packages/queries` only — no arbitrary SQL, ever.
-Auth is a bearer token on every request from every client — the routing
-layer in front of the port adds reachability, never trust (invariant 8).
+Every request from every client authenticates — an owner session or owner
+token (passkeys, above) or an agent bearer token — and the routing layer
+in front of the port adds reachability, never trust (invariant 8).
 
 **`POST /message` is async — and durable before it is acknowledged.** The 202
 is returned only after the message lands in a durable row; the assistant
@@ -1607,7 +1673,8 @@ for the assistant's name, stamps `identity.yaml`, the vault starter (incl.
 `Knowledge/now.md`), and the config defaults from `seed/`, writes
 `metistry.lock` pinned to the current release, generates
 `.env`, `git init`s the instance, brings up compose from pinned images, runs
-migrations, prints the TCC grants to click, verifies. `metistry update` moves
+migrations, prints a one-time **passkey enrollment QR** (§4.2) and the TCC
+grants to click, verifies. `metistry update` moves
 the pin and re-runs migrations.
 
 Not a single binary. The stack is already Node plus Docker plus native macOS

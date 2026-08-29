@@ -35,7 +35,7 @@ never flows anywhere. The assistant's name exists only in an instance's
 - **`metistry-build-plan.md`** — the full design. Decisions, not suggestions.
 - **`CLAUDE.md`** — conventions for building Metistry (not the assistant's
   own operating instructions).
-- **`poc/RESULTS.md`** — Phase 0 proof-of-concept evidence (16 PoCs).
+- **`docs/poc/RESULTS.md`** — Phase 0 proof-of-concept evidence (16 PoCs).
 - **`docs/research/`** — prior-art and landscape research behind the design.
 - **`docs/product/PRODUCT.md`** — the living product record.
 - **`docs/history/`** — superseded documents kept for the record.

@@ -92,6 +92,11 @@ instructions; input filtering missed memory-poisoning 9/10 times).
   trust — every request authenticates as if internet-exposed, because the
   category leader's worst incident (40k+ exposed gateways) was exactly a
   "the network will protect us" default.
+- Hardened by pre-implementation review (2026-08-29): the engine has **no
+  shell and no raw git** — its tools are its entire reach (invariant 9);
+  host bridges authenticate every caller (loopback is not a trust
+  boundary); management endpoints take the owner credential only, never an
+  agent token, and every agent-authored field is output-encoded in the UI.
 - **Bring-your-own routing:** the project exposes configured ports and
   suggests exposure patterns per hosting model (local + tailnet, reverse
   proxy, cloud, Docker) but never depends on any — a user benefit (host it
@@ -126,3 +131,13 @@ your git, on your machine.
   templates story; user-extensible connectors via local registry entries +
   `metistry create` scaffolder (a key OSS adoption feature).
 - 2026-08-29 — naming roots recorded and evolved: counselor AND steward (distilled counsel + coordination/chaos-wrangling ethos); hint-don't-explain register for public copy.
+- 2026-08-29 — pre-implementation review (four staff-level reviews,
+  synthesized in `docs/plan-review-2026-08-29.md`) ratified and propagated:
+  **web app is the interface** (iMessage dropped entirely — too insecure,
+  not rich enough; web push for notifications, iOS later as the premium
+  candidate); keyword recall moved up to Phase 2 (time-to-value); Swift TCC
+  bridges with a wire-level contract; product/instance config overlay; one
+  unified proposals queue with a soft daily-review budget (respect the
+  user's attention: ~5 decisions/day surfaced, full detail one tap away);
+  security posture hardened (no-shell invariant, bridge caller auth,
+  owner-vs-agent credentials).

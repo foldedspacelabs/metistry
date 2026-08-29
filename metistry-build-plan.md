@@ -1236,10 +1236,15 @@ Bedrock, Vertex) puts non-Anthropic models behind the same interface. So
 provider choice is instance config (`deployment.yaml` + env), not
 architecture. Stated plainly in docs: *configurable ≠ equal quality* — the
 operating prompt, escalation behavior, and skills are tuned against Claude;
-alternates run untested by upstream. Economic note: since programmatic Agent
-SDK use draws metered subscription credits at API rates (verified 2026-05),
-routing *routines* to a cheaper API backend while interactive stays on
-subscription is a legitimate arbitrage this layer enables.
+alternates run untested by upstream. Economic note (corrected 2026-08-28):
+Anthropic announced metered "Agent SDK credits" for programmatic subscription
+use (April/May 2026) but **paused the change on June 15, the day it was due —
+Agent SDK / `claude -p` / third-party usage currently draws normal
+subscription limits** (per Anthropic's help center; a reworked change may
+return "with advance notice"). So routine-lane cost arbitrage via this layer
+is a *contingency*, not a present need — but per-target cost accounting
+(§4.17.D) means if metering ever ships, responding is a config tweak, not a
+redesign.
 
 **B. Compute targets (Phase 5).** A **target** is a directory with a manifest
 (invariant 5): how to submit work, how results return, auth ref, cost
@@ -1291,9 +1296,10 @@ existing one:
   a higher tier, and escalation-after-cheap frequency. Each is logged as a
   routing-miss event. A rising miss rate — or a rising scorer speak-rate —
   is the early warning that the rubric has drifted.
-- **Budget visibility**: daily tier budgets and the metered Agent SDK credit
-  pool tracked against the month, surfaced on the dashboard and via the
-  `/spend` fast path (per-tier breakdown, freshness-stamped).
+- **Budget visibility**: daily tier budgets tracked and surfaced on the
+  dashboard and via the `/spend` fast path (per-tier breakdown,
+  freshness-stamped). If Anthropic's paused Agent SDK metering ever ships,
+  its monthly pool becomes one more tracked budget here — no redesign.
 - **The tuning loop is human**: the weekly review includes a routing report —
   spend by tier/target, verdict distribution, miss events with links to the
   offending turns — and may *propose* `rules.yaml` tweaks; it never applies

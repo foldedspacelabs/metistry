@@ -1,0 +1,12 @@
+# Seeded default (D4 overlay: an instance file of the same name wins).
+name: open_work
+description: Work items not yet closed, newest first
+params:
+  limit: { type: int, default: 20 }
+sql: |
+  SELECT id, title, area, kind, status, external_ref, owner, due, updated_at
+  FROM work
+  WHERE status <> 'closed'
+  ORDER BY updated_at DESC
+  LIMIT :limit
+cache_ttl: 60

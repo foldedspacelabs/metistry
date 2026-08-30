@@ -1,0 +1,5 @@
+name: console
+type: service
+description: Web door API + PWA + router module + routine runner (Phase 2+)
+runs_on: container
+port: 8080

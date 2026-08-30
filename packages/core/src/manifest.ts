@@ -36,7 +36,9 @@ export const bridgeManifest = base.extend({
   port: z.number().int().min(1).max(65535).optional(),
   runs_on: z.enum(["host", "container"]),
   requires_tcc: z.array(tccGrant).default([]),
-  discovery: z.enum(["lazy", "eager"]).default("lazy"),
+  // Default eager (PoC-17: lazy loses on small surfaces); lazy is for
+  // bridges past >20 tools / >5k definition tokens.
+  discovery: z.enum(["lazy", "eager"]).default("eager"),
   degrades: z.string().default("absent"), // "absent" | <fallback bridge name>
   exposes: z
     .array(

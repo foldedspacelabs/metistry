@@ -57,6 +57,11 @@ naming lore in public copy stays about the *project*.
 - Coordinates *other* agents (any vendor, via MCP): shared knowledge with
   scoped permissions, shared task list with atomic claims, capture from any
   AI tool the user works in.
+- **The door opened 2026-08-30** (Phase 2 done-when, measured): a status
+  question answered inline off the deterministic fast path with a
+  freshness stamp and no model call; a real model turn round-tripped
+  through the full stack (web API → durable queue → Agent SDK engine →
+  reply) in 3.6 s on the cheap tier, with per-turn token/cost audit rows.
 - Work/personal separation that is mechanical, not disciplinary: separate
   instances, separate repos, code flows down as releases, data flows nowhere.
 
@@ -114,12 +119,6 @@ instructions; input filtering missed memory-poisoning 9/10 times).
 open its web app, share to it, ask it things → it remembers, briefs you each
 morning, and coordinates your other AI tools. The knowledge is yours, in
 your git, on your machine.
-
-- **The door opened 2026-08-30** (Phase 2 done-when, measured): a status
-  question answered inline off the deterministic fast path with a
-  freshness stamp and no model call; a real model turn round-tripped
-  through the full stack (web API → durable queue → Agent SDK engine →
-  reply) in 3.6 s on the cheap tier, with per-turn token/cost audit rows.
 
 ## Premium candidates (collect; decide later)
 

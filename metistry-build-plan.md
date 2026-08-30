@@ -527,10 +527,9 @@ Sonnet has no niche between Haiku and Opus.
 - `packages/queries` — the one implementation of invariant 3: YAML load,
   typed param validation, TTL cache, `{rows, as_of}` envelope, and a
   **parameterized pg driver** — never `psql -c`, never string interpolation
-- **Lazy-discovery spike before core's interface freezes** (§4.3 caveat): one
-  toy bridge, lazy vs eager, scripted Haiku tasks — does the meta-tool
-  indirection actually work at the Haiku tier, and what does the discovery
-  round-trip cost?
+- **Lazy-discovery spike — DONE (PoC-17, 2026-08-30):** indirection works
+  at the Haiku tier (10/10); economics inverted on small bridges → the
+  default is `eager`, lazy threshold-gated (§4.3)
 - `CLAUDE.md`, `identity.yaml`, `.env.example` (`now.md` lives at
   `Knowledge/now.md` — D4)
 - `docker-compose.yml`: Postgres + pgvector
@@ -861,7 +860,8 @@ transport: http          # stdio only for NON-TCC bridges — see rule below
 port: 7801
 runs_on: host            # host | container
 requires_tcc: [calendars, reminders]
-discovery: lazy          # lazy | eager
+discovery: eager         # eager (default) | lazy — lazy only past >20
+                         # tools / >5k definition tokens (PoC-17)
 degrades: absent         # absent | <fallback bridge name>
 exposes:
   - name: list_events
@@ -888,19 +888,24 @@ ships a misuse test proving an unauthenticated call fails.
 
 **Three defaults every bridge gets from the `@foldedspacelabs/core` contract:**
 
-**1. Lazy tool discovery.** Measured: ~21k tokens of tool definitions ride on
-every turn, and `--allowedTools` does not trim them. In lazy mode a bridge exposes
-three meta-tools — `tool_index`, `execute`, `batch` — instead of its full surface.
-A bridge with 40 tools costs 3 in the prompt; the agent discovers when it needs
-to. This is what lets the assistant carry real capability without the per-turn
-floor climbing. `eager` stays available for small, always-needed bridges.
-*Caveat: this is the largest design claim Phase 0 did NOT test.* The token
-measurement is real, but whether models (Haiku especially) drive the
-meta-tool indirection reliably — and what the extra discovery round-trip costs
-per turn — is unproven. **Phase 1 includes a cheap spike** (one toy bridge,
-lazy vs eager, scripted Haiku tasks) *before* the discovery interface is
-frozen into `core`; every bridge inherits this, so learning its failure modes
-after Phase 2 would be the expensive version.
+**1. Threshold-gated tool discovery** (revised 2026-08-30 after the PoC-17
+spike + landscape research, `docs/research/2026-08-tool-discovery.md`).
+**Default is `eager`.** The spike answered the plan's largest untested
+claim both ways: Haiku drives the `tool_index` / `execute` / `batch`
+meta-tool indirection flawlessly (10/10) — but on a small bridge lazy
+*lost* every cost axis (+1 discovery turn, +34% cumulative prompt tokens,
++2.4 s wall), because the index costs as much as the definitions it
+replaces and prompt caching neutralizes the per-turn definition ride. The
+industry converged on the same answer: Anthropic's own Tool Search
+activates only past ~10k definition tokens. So: `lazy` (the three frozen
+meta-tool names above) is reserved for bridges whose surface is genuinely
+large — **>20 tools or >5k definition tokens**, both statically countable
+at manifest validation, and CI warns when an eager bridge crosses the
+line. Metistry's bridges stay small by design and agents mount only their
+manifest's `uses`, which also keeps the visible surface inside the
+~10–15-tool selection-accuracy window the cheap tier needs. Revisit
+trigger: definitions exceeding ~10% of context in a real turn — and the
+escalation path then is code-execution-over-MCP, not deeper meta-tooling.
 
 **2. Preview-then-confirm on mutations.** Any `destructive: true` tool returns a
 diff of what *would* change and requires a second confirming call. Generalizes
@@ -927,8 +932,10 @@ running as its own launchd service so it is its own responsible process.
 `stdio` is fine only for bridges that need no TCC grant.
 
 **Scoping still matters.** The assistant loads only the bridges it needs;
-specialized tools belong to agents. Lazy discovery lowers the cost of each
-bridge, it doesn't make the list free.
+specialized tools belong to agents. Scoping is also the accuracy control:
+the cheap tier's tool-selection reliability falls off past ~10–15 visible
+tools (see the discovery research), so curation does what no loading
+strategy can.
 
 **Every bridge exports `check()`** so `metistry doctor` is generic, and logs one
 row per call to `runs`. **`check()` must probe behavior, not a permission API

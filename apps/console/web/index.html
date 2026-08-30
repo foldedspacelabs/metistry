@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#101418" />
+  <title>metistry</title>
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="stylesheet" href="/style.css" />
+  <link rel="apple-touch-icon" href="/icon.svg" />
+</head>
+<body>
+  <header>
+    <h1 id="title">metistry</h1>
+    <nav id="nav" hidden>
+      <button data-view="chat">chat</button>
+      <button data-view="capture">capture</button>
+      <button data-view="status">status</button>
+      <button data-view="devices">devices</button>
+    </nav>
+  </header>
+
+  <main>
+    <section id="auth" hidden>
+      <p id="auth-msg">sign in to your instance</p>
+      <button id="login-btn">sign in with passkey</button>
+      <button id="enroll-btn" hidden>enroll this device</button>
+    </section>
+
+    <section id="chat" hidden>
+      <ul id="messages"></ul>
+      <form id="send-form">
+        <input id="send-text" type="text" placeholder="ask or tell…" autocomplete="off" />
+        <button type="submit">send</button>
+      </form>
+    </section>
+
+    <section id="capture" hidden>
+      <form id="capture-form">
+        <textarea id="capture-note" placeholder="note…"></textarea>
+        <input id="capture-file" type="file" />
+        <button type="submit">capture</button>
+      </form>
+      <p id="capture-result"></p>
+    </section>
+
+    <section id="status" hidden>
+      <ul id="checks"></ul>
+      <button id="push-enable">enable notifications</button>
+      <button id="push-test">test push</button>
+    </section>
+
+    <section id="devices" hidden>
+      <ul id="device-list"></ul>
+    </section>
+  </main>
+
+  <script src="/vendor/simplewebauthn.js"></script>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

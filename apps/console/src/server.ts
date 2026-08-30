@@ -8,6 +8,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+
 import { runCheck, startRun, finishRun, type CheckResult } from "@foldedspacelabs/metistry-core";
 import { QueryError, QueryStore } from "@foldedspacelabs/metistry-queries";
 import type { Db } from "./auth-store.js";
@@ -15,12 +16,19 @@ import * as store from "./auth-store.js";
 import type { SessionPolicy } from "./session-policy.js";
 import { parseCookies, readBody, readJson, sendError, sendJson, sessionCookie } from "./http-util.js";
 import * as wa from "./webauthn.js";
+import { serveStatic } from "./static.js";
+import { sendToSession, storeSubscription, type PushConfig } from "./push.js";
+import { createRequire } from "node:module";
+
+const require_ = createRequire(import.meta.url);
 
 export interface ConsoleConfig {
   origin: string; // canonical HTTPS origin (§4.2)
   inboxDir: string;
   policy: SessionPolicy;
   secureCookies: boolean;
+  webRoot?: string; // PWA shell dir; absent = API-only (tests)
+  push?: PushConfig; // absent = push degrades absent
 }
 
 type Auth = { kind: "session"; sessionId: number } | { kind: "owner_token" } | null;
@@ -51,6 +59,18 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
   async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = new URL(req.url ?? "/", cfg.origin);
     const key = `${req.method} ${url.pathname}`;
+
+    // ----- public: the PWA shell (login page must render unauthenticated) -----
+    if (req.method === "GET" && cfg.webRoot && !url.pathname.startsWith("/api/") && url.pathname !== "/health") {
+      if (url.pathname === "/vendor/simplewebauthn.js") {
+        // exports map hides subpaths; resolve the entry, walk to the UMD bundle
+        const entry = require_.resolve("@simplewebauthn/browser");
+        const bundleDir = join(entry, "..", "..", "dist", "bundle");
+        if (await serveStatic(res, bundleDir, "/index.umd.min.js")) return;
+      }
+      if (await serveStatic(res, cfg.webRoot, url.pathname)) return;
+      // fall through to API 404 handling for non-file paths
+    }
 
     // ----- public -----
     if (key === "GET /health") {
@@ -171,6 +191,36 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
           return sendError(res, err.code === "unknown_query" ? "not_found" : "invalid_request");
         }
         throw err;
+      }
+    }
+
+    if (key === "GET /api/messages") {
+      const limit = Math.min(Number(url.searchParams.get("limit") ?? 20), 100);
+      const { rows } = await db.query(
+        `SELECT id, ts, thread, text, status FROM inbound_messages ORDER BY ts DESC LIMIT $1`,
+        [limit],
+      );
+      return sendJson(res, 200, { messages: rows });
+    }
+
+    // ----- push: bound to the device session specifically -----
+    if (url.pathname.startsWith("/api/push/")) {
+      if (auth.kind !== "session") return sendError(res, "forbidden");
+      if (!cfg.push) return sendJson(res, 200, { push: "absent" }); // degrades: absent
+      if (key === "GET /api/push/vapid-key") return sendJson(res, 200, { key: cfg.push.publicKey });
+      if (key === "POST /api/push/subscribe") {
+        const body = (await readJson(req)) as { subscription?: unknown };
+        if (!body.subscription) return sendError(res, "invalid_request");
+        await storeSubscription(db, auth.sessionId, body.subscription);
+        return sendJson(res, 200, { ok: true });
+      }
+      if (key === "POST /api/push/test") {
+        const result = await sendToSession(db, cfg.push, auth.sessionId, {
+          title: "metistry",
+          body: "push works — this device is reachable",
+          url: "/",
+        });
+        return sendJson(res, 200, { result });
       }
     }
 

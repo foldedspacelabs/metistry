@@ -8,8 +8,8 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { runCheck, startRun, finishRun, type CheckResult } from "@foldedspacelabs/core";
-import { QueryError, QueryStore } from "@foldedspacelabs/queries";
+import { runCheck, startRun, finishRun, type CheckResult } from "@foldedspacelabs/metistry-core";
+import { QueryError, QueryStore } from "@foldedspacelabs/metistry-queries";
 import type { Db } from "./auth-store.js";
 import * as store from "./auth-store.js";
 import type { SessionPolicy } from "./session-policy.js";

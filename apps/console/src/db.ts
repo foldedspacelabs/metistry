@@ -1,5 +1,5 @@
 import pg from "pg";
-import { intEnv, optionalEnv, requireEnv } from "@foldedspacelabs/core";
+import { intEnv, optionalEnv, requireEnv } from "@foldedspacelabs/metistry-core";
 
 export function makePool(): pg.Pool {
   return new pg.Pool({

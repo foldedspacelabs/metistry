@@ -1,5 +1,5 @@
-import { intEnv, optionalEnv, requireEnv } from "@foldedspacelabs/core";
-import { QueryStore } from "@foldedspacelabs/queries";
+import { intEnv, optionalEnv, requireEnv } from "@foldedspacelabs/metistry-core";
+import { QueryStore } from "@foldedspacelabs/metistry-queries";
 import { makePool } from "./db.js";
 import { makeServer } from "./server.js";
 

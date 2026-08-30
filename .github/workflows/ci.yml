@@ -31,11 +31,15 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter '@foldedspacelabs/*' run build
       - run: pnpm typecheck
-      - run: pnpm test
       - name: migrations apply cleanly, twice (idempotence)
         env:
           METISTRY_DB_PASSWORD: ci-only
         run: |
           ops/scripts/migrate.sh
           ops/scripts/migrate.sh
+      - name: tests (unit + integration against the migrated db)
+        env:
+          METISTRY_DB_PASSWORD: ci-only
+        run: pnpm test

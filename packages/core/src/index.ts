@@ -14,3 +14,11 @@ export {
   containsRedactedPlaceholder,
 } from "./redact.js";
 export { parseBearer, tokenEquals, authorized, tokenHash, mintToken } from "./auth.js";
+export {
+  startRun,
+  finishRun,
+  withRun,
+  type RunExecutor,
+  type RunStart,
+  type RunFinish,
+} from "./runs.js";

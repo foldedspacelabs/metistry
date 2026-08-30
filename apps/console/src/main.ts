@@ -3,7 +3,9 @@ import { intEnv, optionalEnv, requireEnv } from "@foldedspacelabs/metistry-core"
 import { QueryStore } from "@foldedspacelabs/metistry-queries";
 import { makePool } from "./db.js";
 import { makeServer } from "./server.js";
-import { pushConfigFromEnv } from "./push.js";
+import { pushConfigFromEnv, startNotifier } from "./push.js";
+import { loadRules } from "./router.js";
+import { readFile } from "node:fs/promises";
 
 const pool = makePool();
 const queries = new QueryStore(pool);
@@ -12,6 +14,17 @@ const queries = new QueryStore(pool);
 for (const dir of optionalEnv("METISTRY_QUERIES_DIRS", "seed/queries").split(":")) {
   await queries.loadDir(dir);
 }
+
+// D4 overlay for rules too: last existing file wins.
+let rules;
+for (const p of optionalEnv("METISTRY_RULES_FILES", "seed/rules.yaml:rules.yaml").split(":")) {
+  try {
+    rules = loadRules(await readFile(p, "utf8"));
+  } catch (err: any) {
+    if (err?.code !== "ENOENT") throw err;
+  }
+}
+if (!rules) throw new Error("no rules.yaml found (METISTRY_RULES_FILES)");
 
 const origin = requireEnv("METISTRY_ORIGIN"); // canonical HTTPS origin (§4.2)
 const push = pushConfigFromEnv();
@@ -25,8 +38,10 @@ const server = makeServer(pool, queries, {
   },
   secureCookies: origin.startsWith("https:"),
   webRoot: fileURLToPath(new URL("../web", import.meta.url)),
+  rules,
   ...(push ? { push } : {}),
 });
+if (push) startNotifier(pool, push);
 
 const host = optionalEnv("METISTRY_CONSOLE_HOST", "127.0.0.1"); // loopback default (invariant 8)
 const port = intEnv("METISTRY_CONSOLE_PORT", 8080);

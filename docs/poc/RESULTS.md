@@ -716,6 +716,64 @@ with `gemma4:e4b` as the candidate scorer instead of Haiku: if it passes, the
 scorer is free, local, private, and adds ~0.7 s ahead of a 5–10 s turn.
 Cleanup done: losers removed, 186 Gi free, `nomic-embed-text` untouched.
 
+## PoC-17 — lazy tool discovery spike (Phase 1 gate)
+
+| | |
+|---|---|
+| Status | SPLIT — the mechanism works at the Haiku tier; the economics inverted on a small bridge |
+| Date | 2026-08-30 |
+
+The Phase 1 spike plan §4.3 requires before `core` freezes its discovery
+interface: one toy bridge (40 tools, 8 domains, minimal hand-rolled MCP
+stdio server — spike only), `eager` (all 40 exposed) vs `lazy`
+(`tool_index` / `execute` / `batch` meta-tools), 5 scripted tasks each at
+the Haiku tier via `claude -p`, correctness scored from the server's own
+call log. Artifacts in `docs/poc/poc17-lazy-discovery/`.
+
+**Result: 10/10 correct.** Haiku drives the meta-tool indirection with zero
+confusion — every lazy task called `tool_index` first, then executed
+exactly the right underlying tool(s), including the two-tool task (T5).
+The reliability question the plan flagged as its largest untested claim is
+answered: **the indirection works at the cheap tier.**
+
+**But lazy lost on every cost axis in this harness:**
+
+| avg over 5 tasks | eager | lazy | delta |
+|---|---|---|---|
+| correct | 5/5 | 5/5 | — |
+| turns | 3.2 | 4.2 | **+1 (the discovery round-trip)** |
+| cumulative prompt tokens | 108.0k | 144.6k | **+34%** |
+| output tokens | 435 | 614 | +41% |
+| wall time | 8.7 s | 11.1 s | **+2.4 s** |
+
+Why: this bridge's 40 tool definitions are *small* (~1.5k tokens total), and
+`tool_index` returns essentially the same list as content — so lazy saved
+nothing on definitions while paying a full extra turn (which re-sends the
+whole context) on every task. Prompt caching absorbed most of the per-turn
+cost in both modes (uncached input: ~30 vs ~40 tokens), which further
+shrinks what lazy can save inside a cached session.
+
+**Interpretation — when lazy pays.** The plan's ~21k-token measurement came
+from real-world bridges with verbose schemas across many mounted servers.
+Lazy wins only when (a) full definitions are large relative to the index,
+and (b) most mounted tools go unused in a typical turn. For a small or
+frequently-used bridge, lazy is strictly worse: +1 turn, +2.4 s, more
+tokens.
+
+**Recommendation for `core` (needs owner sign-off — plan §4.3 leans the
+other way):** keep the `discovery: lazy|eager` field and freeze the three
+meta-tool names as designed, but **default to `eager`** and reserve `lazy`
+for bridges whose exposed surface is genuinely large (rule of thumb: >20
+tools or >5k tokens of definitions). The per-bridge measurement is cheap
+(tokens of definitions is a static count at manifest-validation time — CI
+could even warn when an eager bridge crosses the threshold).
+
+Caveats: n=5 tasks; toy definitions are leaner than real ones; whether
+Haiku used `batch` vs sequential `execute` on T5 was not instrumented;
+single-shot tasks — a long chatty session changes the amortization (the
+definitions ride every turn in eager, but caching largely neutralizes
+that too).
+
 ## Contradictions with BUILD-PLAN.md
 
 Anything a finding invalidates. Note it here; don't edit the plan.

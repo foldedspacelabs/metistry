@@ -1,0 +1,144 @@
+[
+  {
+    "mode": "eager",
+    "task": "T1",
+    "correct": true,
+    "invoked": [
+      "messages_list_recent"
+    ],
+    "num_turns": 3,
+    "prompt_tokens": 107949,
+    "uncached_input": 30,
+    "output_tokens": 453,
+    "wall_ms": 8677,
+    "is_error": false
+  },
+  {
+    "mode": "eager",
+    "task": "T2",
+    "correct": true,
+    "invoked": [
+      "calendar_list_today"
+    ],
+    "num_turns": 3,
+    "prompt_tokens": 108072,
+    "uncached_input": 30,
+    "output_tokens": 459,
+    "wall_ms": 7797,
+    "is_error": false
+  },
+  {
+    "mode": "eager",
+    "task": "T3",
+    "correct": true,
+    "invoked": [
+      "reminders_create"
+    ],
+    "num_turns": 3,
+    "prompt_tokens": 107886,
+    "uncached_input": 30,
+    "output_tokens": 342,
+    "wall_ms": 7783,
+    "is_error": false
+  },
+  {
+    "mode": "eager",
+    "task": "T4",
+    "correct": true,
+    "invoked": [
+      "system_cpu_usage"
+    ],
+    "num_turns": 3,
+    "prompt_tokens": 107944,
+    "uncached_input": 30,
+    "output_tokens": 365,
+    "wall_ms": 8639,
+    "is_error": false
+  },
+  {
+    "mode": "eager",
+    "task": "T5",
+    "correct": true,
+    "invoked": [
+      "weather_current",
+      "calendar_list_today"
+    ],
+    "num_turns": 4,
+    "prompt_tokens": 108316,
+    "uncached_input": 30,
+    "output_tokens": 558,
+    "wall_ms": 10842,
+    "is_error": false
+  },
+  {
+    "mode": "lazy",
+    "task": "T1",
+    "correct": true,
+    "invoked": [
+      "messages_list_recent"
+    ],
+    "num_turns": 4,
+    "prompt_tokens": 144825,
+    "uncached_input": 40,
+    "output_tokens": 627,
+    "wall_ms": 11533,
+    "is_error": false
+  },
+  {
+    "mode": "lazy",
+    "task": "T2",
+    "correct": true,
+    "invoked": [
+      "calendar_list_today"
+    ],
+    "num_turns": 4,
+    "prompt_tokens": 144348,
+    "uncached_input": 40,
+    "output_tokens": 551,
+    "wall_ms": 10471,
+    "is_error": false
+  },
+  {
+    "mode": "lazy",
+    "task": "T3",
+    "correct": true,
+    "invoked": [
+      "reminders_create"
+    ],
+    "num_turns": 4,
+    "prompt_tokens": 144569,
+    "uncached_input": 40,
+    "output_tokens": 673,
+    "wall_ms": 11587,
+    "is_error": false
+  },
+  {
+    "mode": "lazy",
+    "task": "T4",
+    "correct": true,
+    "invoked": [
+      "system_cpu_usage"
+    ],
+    "num_turns": 4,
+    "prompt_tokens": 144721,
+    "uncached_input": 40,
+    "output_tokens": 558,
+    "wall_ms": 10059,
+    "is_error": false
+  },
+  {
+    "mode": "lazy",
+    "task": "T5",
+    "correct": true,
+    "invoked": [
+      "weather_current",
+      "calendar_list_today"
+    ],
+    "num_turns": 5,
+    "prompt_tokens": 144465,
+    "uncached_input": 40,
+    "output_tokens": 661,
+    "wall_ms": 11878,
+    "is_error": false
+  }
+]

@@ -1,0 +1,18 @@
+# Router rules — instance config, seeded default (D4 overlay).
+# The router is DETERMINISTIC (invariant 4): prefix, regex, and explicit
+# commands only. First match wins; no match = the default model tier.
+fast_path:
+  - match: "^/(status|open)\\b"
+    query: open_work
+  - match: "^what('| i)?s (my |the )?(status|open work|workload)\\b"
+    query: open_work
+
+tiers:
+  default:
+    model: haiku
+  deep:
+    model: opus
+
+commands:
+  # /model <tag> and /deep are handled by the router itself (§4.1)
+  deep_alias: deep

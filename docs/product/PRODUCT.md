@@ -115,6 +115,12 @@ open its web app, share to it, ask it things → it remembers, briefs you each
 morning, and coordinates your other AI tools. The knowledge is yours, in
 your git, on your machine.
 
+- **The door opened 2026-08-30** (Phase 2 done-when, measured): a status
+  question answered inline off the deterministic fast path with a
+  freshness stamp and no model call; a real model turn round-tripped
+  through the full stack (web API → durable queue → Agent SDK engine →
+  reply) in 3.6 s on the cheap tier, with per-turn token/cost audit rows.
+
 ## Premium candidates (collect; decide later)
 
 - **Native iOS app** (named by the user as the likely paid addition): share

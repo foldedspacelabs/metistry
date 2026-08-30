@@ -1,0 +1,128 @@
+// Manifest schema — invariant 5: everything is a directory with a manifest.
+// One discriminated union over `type`; CI and `metistry doctor` both
+// validate against this, so the schema is the contract.
+
+import { z } from "zod";
+
+const cron = z
+  .string()
+  .regex(
+    /^(@(hourly|daily|weekly|monthly)|(\S+\s+){4}\S+)$/,
+    "schedule must be a 5-field cron expression or @hourly/@daily/@weekly/@monthly",
+  );
+
+const name = z
+  .string()
+  .regex(/^[a-z][a-z0-9-]*$/, "names are lowercase kebab-case (casing rule: only Knowledge/ is TitleCase)");
+
+const base = z.object({
+  name,
+  description: z.string().optional(),
+});
+
+// TCC permissions a bridge may declare. Behavioral probes, not permission
+// APIs, verify these at runtime (Phase 0 hard requirement 3).
+const tccGrant = z.enum([
+  "full_disk_access",
+  "automation",
+  "calendars",
+  "reminders",
+  "contacts",
+]);
+
+export const bridgeManifest = base.extend({
+  type: z.literal("bridge"),
+  transport: z.enum(["http", "stdio"]),
+  port: z.number().int().min(1).max(65535).optional(),
+  runs_on: z.enum(["host", "container"]),
+  requires_tcc: z.array(tccGrant).default([]),
+  discovery: z.enum(["lazy", "eager"]).default("lazy"),
+  degrades: z.string().default("absent"), // "absent" | <fallback bridge name>
+  exposes: z
+    .array(
+      z.object({
+        name: z.string(),
+        description: z.string().optional(),
+        destructive: z.boolean().default(false),
+      }),
+    )
+    .min(1),
+}).superRefine((m, ctx) => {
+  // PoC-1: a stdio server spawned by the agent inherits the agent's TCC
+  // identity. Any TCC-requiring bridge MUST be its own http host service.
+  if (m.requires_tcc.length > 0 && (m.transport !== "http" || m.runs_on !== "host")) {
+    ctx.addIssue({
+      code: "custom",
+      message: "bridges with requires_tcc must be transport: http and runs_on: host (PoC-1)",
+    });
+  }
+  if (m.transport === "http" && m.port === undefined) {
+    ctx.addIssue({ code: "custom", message: "http bridges must declare a port" });
+  }
+});
+
+export const collectorManifest = base.extend({
+  type: z.literal("collector"),
+  schedule: cron,
+  writes: z.array(z.string()).min(1),
+  reads: z.array(z.string()).default([]),
+  requires: z.array(z.string()).default([]),
+});
+
+export const agentManifest = base.extend({
+  type: z.literal("agent"),
+  model: z.string(),
+  uses: z.array(z.string()).default([]),
+  skills: z.array(z.string()).default([]),
+  scope: z.array(z.string()).default([]),
+  manages: z.array(z.string()).default([]),
+});
+
+export const routineManifest = base.extend({
+  type: z.literal("routine"),
+  schedule: cron,
+  agent: z.string().optional(),
+});
+
+export const targetManifest = base.extend({
+  type: z.literal("target"),
+  transport: z.enum(["mcp", "http", "github", "local"]),
+  submit: z.record(z.string(), z.unknown()),
+  result: z.record(z.string(), z.unknown()),
+  auth: z.string().optional(),
+  cost: z.object({ per_run_estimate_usd: z.number().nonnegative() }).optional(),
+  data_policy: z.string(), // enforced at the dispatch tool (§4.18.B)
+});
+
+// Long-running processes doctor must see: reconciler, watchdog, console
+// (review SHOULD-14 — the components most likely to die silently).
+export const serviceManifest = base.extend({
+  type: z.literal("service"),
+  runs_on: z.enum(["host", "container"]),
+  port: z.number().int().min(1).max(65535).optional(),
+});
+
+export const manifestSchema = z.discriminatedUnion("type", [
+  bridgeManifest,
+  collectorManifest,
+  agentManifest,
+  routineManifest,
+  targetManifest,
+  serviceManifest,
+]);
+
+export type Manifest = z.infer<typeof manifestSchema>;
+
+export type ManifestResult =
+  | { ok: true; manifest: Manifest }
+  | { ok: false; errors: string[] };
+
+/** Validate a parsed manifest object. Never throws. */
+export function validateManifest(input: unknown): ManifestResult {
+  const parsed = manifestSchema.safeParse(input);
+  if (parsed.success) return { ok: true, manifest: parsed.data };
+  return {
+    ok: false,
+    errors: parsed.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`),
+  };
+}

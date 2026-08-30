@@ -886,7 +886,7 @@ trust boundary. Every host bridge requires a **per-bridge bearer token**
 from its caller (from env, per invariant 8's boring-primitives rule) and
 ships a misuse test proving an unauthenticated call fails.
 
-**Three defaults every bridge gets from the `@foldedspacelabs/core` contract:**
+**Three defaults every bridge gets from the `@foldedspacelabs/metistry-core` contract:**
 
 **1. Threshold-gated tool discovery** (revised 2026-08-30 after the PoC-17
 spike + landscape research, `docs/research/2026-08-tool-discovery.md`).
@@ -1653,7 +1653,7 @@ deployment, not a release.
 
 1. **The dependency arrow points one way.** `apps/` → `packages/`, never the
    reverse. No package imports project config, Postgres, or the vault.
-2. **A stranger must be able to use it.** `npx @foldedspacelabs/mcp-eventkit` works for
+2. **A stranger must be able to use it.** `npx @foldedspacelabs/metistry-mcp-eventkit` works for
    someone who's never heard of this project. Config via env vars, MCP over
    stdio or HTTP, no assumptions about the caller.
 3. **External servers are first-class.** The registry doesn't care about origin:
@@ -1663,7 +1663,7 @@ deployment, not a release.
   source: { type: uvx, package: unifi-network-mcp }
   env: [UNIFI_HOST, UNIFI_USERNAME, UNIFI_PASSWORD]
 - name: eventkit
-  source: { type: npm, package: "@foldedspacelabs/mcp-eventkit" }
+  source: { type: npm, package: "@foldedspacelabs/metistry-mcp-eventkit" }
   runs_on: host
   requires_tcc: [calendars, reminders]
 ```

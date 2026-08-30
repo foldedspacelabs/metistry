@@ -14,8 +14,8 @@
   },
   "engines": { "node": ">=22" },
   "dependencies": {
-    "@foldedspacelabs/core": "workspace:*",
-    "@foldedspacelabs/queries": "workspace:*",
+    "@foldedspacelabs/metistry-core": "workspace:*",
+    "@foldedspacelabs/metistry-queries": "workspace:*",
     "@simplewebauthn/server": "^13.2.2",
     "pg": "^8.16.0",
     "zod": "^4.3.6"

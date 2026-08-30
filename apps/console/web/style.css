@@ -1,0 +1,22 @@
+:root { color-scheme: dark light; --bg: #101418; --fg: #e6e9ec; --mut: #8a939c; --acc: #5b8def; }
+* { box-sizing: border-box; margin: 0; }
+body { background: var(--bg); color: var(--fg); font: 16px/1.5 -apple-system, system-ui, sans-serif;
+  max-width: 640px; margin: 0 auto; padding: env(safe-area-inset-top) 12px 12px; }
+header { display: flex; align-items: center; justify-content: space-between; padding: 12px 0; }
+h1 { font-size: 18px; font-weight: 600; }
+nav button { background: none; border: none; color: var(--mut); padding: 6px 8px; font-size: 14px; }
+nav button.active { color: var(--acc); }
+section { padding: 8px 0; }
+ul { list-style: none; }
+#messages li { padding: 8px 10px; margin: 6px 0; border-radius: 10px; background: #1a2027; }
+#messages li .meta { color: var(--mut); font-size: 12px; }
+form { display: flex; gap: 8px; margin-top: 8px; }
+#capture-form { flex-direction: column; }
+input[type="text"], textarea { flex: 1; background: #1a2027; color: var(--fg); border: 1px solid #2a323b;
+  border-radius: 10px; padding: 10px; font: inherit; }
+textarea { min-height: 90px; }
+button { background: var(--acc); color: white; border: none; border-radius: 10px; padding: 10px 14px; font: inherit; }
+button:active { opacity: .8; }
+#checks li, #device-list li { padding: 8px 0; border-bottom: 1px solid #1f262e; display: flex; justify-content: space-between; gap: 8px; }
+.ok { color: #5fbf77; } .failed { color: #e46e6e; } .muted { color: var(--mut); font-size: 13px; }
+#status button { margin: 10px 8px 0 0; }

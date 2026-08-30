@@ -95,7 +95,7 @@ advisory lock.
 Ask before adding a dependency. This is a system maintained by one person over
 years; every dependency is a future maintenance obligation. **Pre-approved**
 (no per-PR debate): `@anthropic-ai/claude-agent-sdk`,
-`@modelcontextprotocol/sdk`, `pg`, `zod`, `chokidar`, `web-push`,
+`@modelcontextprotocol/sdk`, `pg`, `zod`, `yaml`, `chokidar`, `web-push`,
 `@simplewebauthn/server` + `@simplewebauthn/browser` (passkeys — never
 hand-roll WebAuthn), and dev tooling (`typescript`, `vitest`,
 `changesets`). **Deliberately hand-rolled**

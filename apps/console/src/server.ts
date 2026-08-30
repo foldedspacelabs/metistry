@@ -17,6 +17,7 @@ import type { SessionPolicy } from "./session-policy.js";
 import { parseCookies, readBody, readJson, sendError, sendJson, sessionCookie } from "./http-util.js";
 import * as wa from "./webauthn.js";
 import { serveStatic } from "./static.js";
+import { route as routeMessage, type Rules } from "./router.js";
 import { sendToSession, storeSubscription, type PushConfig } from "./push.js";
 import { createRequire } from "node:module";
 
@@ -29,6 +30,7 @@ export interface ConsoleConfig {
   secureCookies: boolean;
   webRoot?: string; // PWA shell dir; absent = API-only (tests)
   push?: PushConfig; // absent = push degrades absent
+  rules?: Rules; // router rules; absent = everything routes to the model
 }
 
 type Auth = { kind: "session"; sessionId: number } | { kind: "owner_token" } | null;
@@ -172,13 +174,40 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     if (key === "POST /message") {
       const body = (await readJson(req)) as { thread_id?: string; text?: string };
       if (!body.text) return sendError(res, "invalid_request");
-      // Durable BEFORE the 202 (SHOULD-7)
+      const thread = body.thread_id ?? "default";
+      const decision = cfg.rules ? routeMessage(cfg.rules, body.text) : null;
+      // Durable BEFORE the 202 (SHOULD-7). Routing decision rides in meta.
       const { rows } = await db.query(
-        `INSERT INTO inbound_messages (thread, text) VALUES ($1, $2) RETURNING id`,
-        [body.thread_id ?? "default", body.text],
+        `INSERT INTO inbound_messages (thread, text, meta) VALUES ($1, $2, $3) RETURNING id`,
+        [thread, body.text, JSON.stringify(decision ? { route: decision } : {})],
       );
-      await audit("message", "inbound", true, { message_id: rows[0]?.id });
-      return sendJson(res, 202, { message_id: rows[0]?.id });
+      const messageId = rows[0]?.id;
+
+      // Fast path answers here — no model, no assistant (invariant 4, PoC-8).
+      if (decision?.kind === "fast_path") {
+        const runId = await startRun(db, {
+          component: "console",
+          kind: "turn",
+          tool: decision.query,
+          meta: { routed_by: decision.routed_by, tier: "fast_path", message_id: messageId },
+        });
+        try {
+          const result = await queries.run(decision.query);
+          const reply = formatFastPath(decision.query, result.rows, result.as_of);
+          await db.query(
+            `INSERT INTO outbound_messages (thread, text, in_reply_to) VALUES ($1, $2, $3)`,
+            [thread, reply, messageId],
+          );
+          await db.query(`UPDATE inbound_messages SET status = 'done' WHERE id = $1`, [messageId]);
+          await finishRun(db, runId, { ok: true });
+          return sendJson(res, 202, { message_id: messageId, reply });
+        } catch (err) {
+          await finishRun(db, runId, { ok: false, error: String(err) });
+          // fall through: leave for the assistant rather than dropping the turn
+        }
+      }
+      await audit("message", "inbound", true, { message_id: messageId });
+      return sendJson(res, 202, { message_id: messageId });
     }
 
     if (req.method === "GET" && url.pathname.startsWith("/api/q/")) {
@@ -197,7 +226,11 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     if (key === "GET /api/messages") {
       const limit = Math.min(Number(url.searchParams.get("limit") ?? 20), 100);
       const { rows } = await db.query(
-        `SELECT id, ts, thread, text, status FROM inbound_messages ORDER BY ts DESC LIMIT $1`,
+        `SELECT * FROM (
+           SELECT id, ts, thread, text, status, 'in'  AS direction FROM inbound_messages
+           UNION ALL
+           SELECT id, ts, thread, text, kind,  'out' AS direction FROM outbound_messages
+         ) m ORDER BY ts DESC LIMIT $1`,
         [limit],
       );
       return sendJson(res, 200, { messages: rows });
@@ -259,6 +292,14 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     }
 
     return sendError(res, "not_found");
+  }
+
+  function formatFastPath(query: string, rows: Record<string, unknown>[], asOf: Date): string {
+    const age = Math.round((Date.now() - asOf.getTime()) / 60000);
+    const stamp = age < 1 ? "as of now" : `as of ${age} min ago`; // freshness stamp (§4.1)
+    if (rows.length === 0) return `nothing open (${stamp})`;
+    const lines = rows.slice(0, 10).map((r) => `• ${r.title ?? JSON.stringify(r)}${r.status ? ` — ${r.status}` : ""}`);
+    return `${query.replaceAll("_", " ")} (${stamp}):\n${lines.join("\n")}`;
   }
 
   async function audit(kind: string, tool: string, ok: boolean, meta: Record<string, unknown>): Promise<void> {

@@ -5,8 +5,8 @@ import { readFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
-import { QueryStore } from "@foldedspacelabs/queries";
-import { mintToken } from "@foldedspacelabs/core";
+import { QueryStore } from "@foldedspacelabs/metistry-queries";
+import { mintToken } from "@foldedspacelabs/metistry-core";
 import { makeServer } from "../src/server.js";
 import * as store from "../src/auth-store.js";
 

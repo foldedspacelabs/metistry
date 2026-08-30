@@ -17,10 +17,10 @@ importers:
 
   apps/console:
     dependencies:
-      '@foldedspacelabs/core':
+      '@foldedspacelabs/metistry-core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@foldedspacelabs/queries':
+      '@foldedspacelabs/metistry-queries':
         specifier: workspace:*
         version: link:../../packages/queries
       '@simplewebauthn/server':

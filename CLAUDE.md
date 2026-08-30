@@ -9,7 +9,10 @@ the repo.
 
 ## Naming
 
-- **Metistry** — the project. Repo, npm scope `@foldedspacelabs/*`, CLI command.
+- **Metistry** — the project. Repo and CLI command; npm packages are
+  `@foldedspacelabs/metistry-<name>` (the org scope is shared with other
+  projects, so every package carries the `metistry-` prefix — ruled
+  2026-08-30).
 - **Metis** — the assistant. Lives **only** in `identity.yaml`.
 
 The assistant's name must never appear in a path, table name, env var, package
@@ -71,7 +74,7 @@ Every bridge is a published npm package usable by a stranger.
 
 - **The dependency arrow points one way.** `apps/` → `packages/`, never the
   reverse. No package imports project config, Postgres, or the vault.
-- **`npx @foldedspacelabs/mcp-<name>` must work** for someone who has never heard
+- **`npx @foldedspacelabs/metistry-mcp-<name>` must work** for someone who has never heard
   of Metistry. Config via env vars, MCP over stdio or HTTP.
 - Every bridge and collector exports `check()` so `metistry doctor` is generic.
 - Every bridge conforms to `core`'s **wire-level contract** (manifest shape,

@@ -2,7 +2,7 @@
 // check is server-side per request. Two structurally distinct classes:
 // owner (sessions + owner tokens) vs agent tokens (Phase 4/5 — not here).
 
-import { mintToken, tokenHash } from "@foldedspacelabs/core";
+import { mintToken, tokenHash } from "@foldedspacelabs/metistry-core";
 import { evaluateSession, shouldRefreshLastSeen, type SessionPolicy } from "./session-policy.js";
 
 export interface Db {

@@ -1,6 +1,6 @@
 // Tiny hand-rolled HTTP plumbing (recipes over frameworks — CLAUDE.md).
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { errorEnvelope, statusFor, type ErrorCode } from "@foldedspacelabs/core";
+import { errorEnvelope, statusFor, type ErrorCode } from "@foldedspacelabs/metistry-core";
 
 export function sendJson(res: ServerResponse, status: number, body: unknown): void {
   const text = JSON.stringify(body);

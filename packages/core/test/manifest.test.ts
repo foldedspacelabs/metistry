@@ -17,6 +17,12 @@ describe("manifest schema", () => {
     expect(r.ok).toBe(true);
   });
 
+  it("defaults discovery to eager (PoC-17)", () => {
+    const r = validateManifest(eventkit);
+    if (r.ok && r.manifest.type === "bridge") expect(r.manifest.discovery).toBe("eager");
+    else expect.fail("expected bridge manifest");
+  });
+
   // Misuse test — PoC-1 rule: TCC bridges may not be stdio or in-container.
   it("rejects a TCC bridge over stdio", () => {
     const r = validateManifest({ ...eventkit, transport: "stdio", port: undefined });

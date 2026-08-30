@@ -1,0 +1,41 @@
+# CI on Linux from day one (plan Phase 1): the container is where casing
+# and portability bugs surface, not the Mac.
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    services:
+      db:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_DB: metistry
+          POSTGRES_USER: metistry
+          POSTGRES_PASSWORD: ci-only
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U metistry"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+      - run: ops/scripts/check-path-case.sh
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+      - name: migrations apply cleanly, twice (idempotence)
+        env:
+          METISTRY_DB_PASSWORD: ci-only
+        run: |
+          ops/scripts/migrate.sh
+          ops/scripts/migrate.sh

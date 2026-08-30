@@ -28,6 +28,41 @@ export async function storeSubscription(db: Db, sessionId: number, subscription:
   ]);
 }
 
+/** Broadcast to every subscribed device session. */
+export async function sendToAll(
+  db: Db,
+  cfg: PushConfig,
+  payload: { title: string; body: string; url?: string },
+): Promise<void> {
+  const { rows } = await db.query(
+    `SELECT id FROM auth_sessions WHERE push_subscription IS NOT NULL AND revoked_at IS NULL`,
+    [],
+  );
+  for (const r of rows) await sendToSession(db, cfg, r.id, payload);
+}
+
+/**
+ * Notifier loop: push un-notified outbound rows (replies land as web push,
+ * §4.9). Runs in the console — the assistant only writes rows.
+ */
+export function startNotifier(db: Db, cfg: PushConfig, intervalMs = 2000): NodeJS.Timeout {
+  return setInterval(async () => {
+    try {
+      const { rows } = await db.query(
+        `UPDATE outbound_messages SET notified_at = now()
+         WHERE id IN (SELECT id FROM outbound_messages WHERE notified_at IS NULL ORDER BY ts LIMIT 10)
+         RETURNING text, kind`,
+        [],
+      );
+      for (const r of rows) {
+        await sendToAll(db, cfg, { title: "metistry", body: String(r.text).slice(0, 160), url: "/" });
+      }
+    } catch (err) {
+      console.error("notifier:", err);
+    }
+  }, intervalMs);
+}
+
 /** Send to one session's subscription. Clears + flags dead (410/404) subs. */
 export async function sendToSession(
   db: Db,

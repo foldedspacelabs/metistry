@@ -1,7 +1,9 @@
+import { fileURLToPath } from "node:url";
 import { intEnv, optionalEnv, requireEnv } from "@foldedspacelabs/metistry-core";
 import { QueryStore } from "@foldedspacelabs/metistry-queries";
 import { makePool } from "./db.js";
 import { makeServer } from "./server.js";
+import { pushConfigFromEnv } from "./push.js";
 
 const pool = makePool();
 const queries = new QueryStore(pool);
@@ -12,6 +14,8 @@ for (const dir of optionalEnv("METISTRY_QUERIES_DIRS", "seed/queries").split(":"
 }
 
 const origin = requireEnv("METISTRY_ORIGIN"); // canonical HTTPS origin (§4.2)
+const push = pushConfigFromEnv();
+if (!push) console.warn("web push absent: set METISTRY_VAPID_* to enable (degrades: absent)");
 const server = makeServer(pool, queries, {
   origin,
   inboxDir: optionalEnv("METISTRY_INBOX_DIR", "./inbox"),
@@ -20,6 +24,8 @@ const server = makeServer(pool, queries, {
     maxDays: intEnv("METISTRY_SESSION_MAX_DAYS", 365),
   },
   secureCookies: origin.startsWith("https:"),
+  webRoot: fileURLToPath(new URL("../web", import.meta.url)),
+  ...(push ? { push } : {}),
 });
 
 const host = optionalEnv("METISTRY_CONSOLE_HOST", "127.0.0.1"); // loopback default (invariant 8)

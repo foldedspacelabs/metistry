@@ -8,7 +8,10 @@ nav button { background: none; border: none; color: var(--mut); padding: 6px 8px
 nav button.active { color: var(--acc); }
 section { padding: 8px 0; }
 ul { list-style: none; }
+#messages { overflow-y: auto; max-height: calc(100dvh - 190px); -webkit-overflow-scrolling: touch; }
 #messages li { padding: 8px 10px; margin: 6px 0; border-radius: 10px; background: #1a2027; }
+#messages li.out { background: #22334a; margin-left: 24px; }
+#messages li.in { margin-right: 24px; }
 #messages li .meta { color: var(--mut); font-size: 12px; }
 form { display: flex; gap: 8px; margin-top: 8px; }
 #capture-form { flex-direction: column; }

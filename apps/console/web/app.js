@@ -101,11 +101,23 @@ async function loadStatus() {
 }
 
 $("push-enable").onclick = async () => {
-  const reg = await navigator.serviceWorker.ready;
-  const { key } = await (await api("/api/push/vapid-key")).json();
-  const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
-  await api("/api/push/subscribe", { method: "POST", body: JSON.stringify({ subscription: sub }) });
-  alert("subscribed");
+  try {
+    // iOS allows web push only from the installed Home Screen app
+    if (!window.matchMedia("(display-mode: standalone)").matches && navigator.standalone !== true) {
+      return alert("open the Home Screen app to enable notifications — iOS doesn't allow push from a Safari tab");
+    }
+    if (!("Notification" in window) || !("PushManager" in window)) return alert("push not supported here");
+    const perm = await Notification.requestPermission(); // must be in the tap gesture
+    if (perm !== "granted") return alert(`notification permission: ${perm} — check Settings > Notifications > metistry`);
+    const reg = await navigator.serviceWorker.register("/sw.js"); // explicit; don't hang on .ready
+    const { key, push } = await (await api("/api/push/vapid-key")).json();
+    if (push === "absent") return alert("server has no VAPID keys configured");
+    const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+    await api("/api/push/subscribe", { method: "POST", body: JSON.stringify({ subscription: sub }) });
+    alert("subscribed — try test push");
+  } catch (err) {
+    alert(`push setup failed: ${err?.message ?? err}`);
+  }
 };
 
 $("push-test").onclick = async () => {

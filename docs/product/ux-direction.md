@@ -45,9 +45,28 @@ but every one of them gets a discoverable, expressive surface:
 ## APNs relay privacy bar (owner emphasis, same date)
 
 The FSL push relay (see `ios-app-plan.md`) must ship with a **strong,
-provable privacy argument**: payload-free wake-and-fetch only, no user
-content or metadata beyond an opaque device token transiting FSL, open
-relay source, and a design that makes leakage structurally impossible
-rather than policy-forbidden — the same enforce-at-the-tool bar as
-everything else. This is a launch-blocking requirement for the relay, not
-a nice-to-have.
+provable privacy argument**: **end-to-end encrypted and private — even the
+relay cannot see your content.** Concretely: payload-free wake-and-fetch
+as the baseline, and where any payload ever rides a push, it is encrypted
+to a key held only by the user's devices (the relay transports ciphertext
+and an opaque device token, nothing more). Open relay source, and a design
+that makes leakage structurally impossible rather than policy-forbidden —
+the same enforce-at-the-tool bar as everything else. Launch-blocking for
+the relay, not a nice-to-have.
+
+## Hosting & monetization tiers (owner direction, same date)
+
+Three ways to run Metistry, all against the same open-source product:
+
+1. **Self-host, free** — the full open-source system, PWA interface,
+   bring-your-own routing. Nothing withheld.
+2. **Self-host + premium iOS app** — your instance, your hardware; the
+   paid native app (share extension, APNs via the E2E relay, widgets,
+   on-phone FM) is the premium purchase.
+3. **FSL-hosted instance** — we run it for you, with usage (cost) limits,
+   as a separate premium plan. Same E2E posture: hosted must never mean
+   readable.
+
+The privacy claim is the through-line of all three: the open-source core
+proves the design, the relay proves hosted infrastructure can be blind,
+and the hosted plan inherits both arguments.

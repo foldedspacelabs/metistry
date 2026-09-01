@@ -76,7 +76,7 @@ flowchart LR
 | Term | Is | Triggered by | Writes |
 |---|---|---|---|
 | **Bridge** | Capability an agent calls | An agent | Returns to caller |
-| **Collector** | Scheduled data pull, no model | The clock | Postgres |
+| **Collector** | Scheduled data pull; no *billable* model (free on-device classification permitted case-by-case — ruled 2026-09-01 for inbox-drain) | The clock | Postgres |
 | **Agent** | A worker with a job and a scope | A routine, Metis, or you | `brain-report` |
 | **Skill** | Reusable instructions, lazily loaded | An agent invoking it | Nothing |
 | **Routine** | A schedule, nothing more | Cron | Nothing directly |
@@ -1875,7 +1875,11 @@ targets is user-configured and budget-bounded (`rules.yaml`, agent
 manifests); deterministic rules take precedence; any model-judgment scorer
 (under evaluation, PoC-15) picks only within the configured tier menu and
 can never expand its own budget — enforced at the dispatch tool. Collectors
-still never call models.
+still never call *billable* models; a free on-device tier (Apple FM via its
+bridge) is permitted where the collector's manifest declares the bridge and
+the scenario warrants it (ruled 2026-09-01: inbox-drain classification
+qualifies — zero cost, on-device, output passes the deterministic
+redaction pass like any model output).
 
 ### 4.19 Metis as coordination hub (added 2026-08-28)
 

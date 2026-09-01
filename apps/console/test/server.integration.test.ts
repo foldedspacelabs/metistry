@@ -167,6 +167,24 @@ sql: SELECT id, title FROM work WHERE status <> 'closed' ORDER BY updated_at DES
     expect(box.rows[0]).toMatchObject({ note: "try the new espresso place", status: "new" });
   });
 
+  it("triage is session-only, decides once, and refuses junk decisions", async () => {
+    const { rows } = await pool.query(
+      `INSERT INTO proposals (kind, source_agent, trust, payload) VALUES ('knowledge','test','user','{}') RETURNING id`,
+    );
+    const id = rows[0].id;
+    // owner token forbidden (CRIT-7: triage is a management action)
+    expect((await fetch(`${base}/api/proposals`, { headers: { authorization: `Bearer ${ownerToken}` } })).status).toBe(403);
+    const pkId = `tri-${mintToken(6)}`;
+    await store.storePasskey(pool, { id: pkId, publicKey: new Uint8Array([1]), signCount: 0, transports: [], origin: "t", label: "tri" });
+    const cookie = `metistry_session=${await store.issueSession(pool, pkId, policy)}`;
+    expect((await fetch(`${base}/api/proposals/${id}`, { method: "POST", headers: { cookie, "content-type": "application/json" }, body: JSON.stringify({ decision: "yolo" }) })).status).toBe(400);
+    expect((await fetch(`${base}/api/proposals/${id}`, { method: "POST", headers: { cookie, "content-type": "application/json" }, body: JSON.stringify({ decision: "allow" }) })).status).toBe(200);
+    // already decided → not_found (no re-triage)
+    expect((await fetch(`${base}/api/proposals/${id}`, { method: "POST", headers: { cookie, "content-type": "application/json" }, body: JSON.stringify({ decision: "deny" }) })).status).toBe(404);
+    const after = await pool.query(`SELECT decision FROM proposals WHERE id = $1`, [id]);
+    expect(after.rows[0].decision).toBe("allow");
+  });
+
   it("enrollment codes are single-use and expiring", async () => {
     const code = await store.mintEnrollmentCode(pool);
     expect(await store.peekEnrollmentCode(pool, code)).toBe(true);

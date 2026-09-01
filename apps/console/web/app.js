@@ -5,7 +5,7 @@
 const { startRegistration, startAuthentication } = window.SimpleWebAuthnBrowser;
 
 const $ = (id) => document.getElementById(id);
-const views = ["chat", "capture", "status", "devices"];
+const views = ["chat", "capture", "triage", "status", "devices"];
 const enrollCode = new URLSearchParams(location.hash.slice(1)).get("enroll");
 
 async function api(path, opts = {}) {
@@ -18,7 +18,7 @@ function show(view) {
   $("nav").hidden = false; $("auth").hidden = true;
   for (const v of views) $(v).hidden = v !== view;
   document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("active", b.dataset.view === view));
-  ({ chat: loadMessages, status: loadStatus, devices: loadDevices }[view] ?? (() => {}))();
+  ({ chat: loadMessages, status: loadStatus, devices: loadDevices, triage: loadTriage }[view] ?? (() => {}))();
 }
 
 function showAuth() {
@@ -144,6 +144,25 @@ $("push-test").onclick = async () => {
   const { result } = await (await api("/api/push/test", { method: "POST" })).json();
   if (result !== "sent") alert(`push: ${result}`);
 };
+
+// ----- triage (D7 proposals; every field output-encoded — CRIT-7) -----
+async function loadTriage() {
+  const res = await api("/api/proposals");
+  const { proposals } = await res.json();
+  $("triage-empty").hidden = proposals.length > 0;
+  $("proposal-list").innerHTML = proposals
+    .map((p) => {
+      const c = p.payload?.classification ?? {};
+      const label = c.action || c.title || p.kind;
+      return `<li><span>${esc(label)} <span class="muted">${esc(p.kind)} · ${esc(c.kind ?? "")} · ${esc(p.source_agent)} · ${new Date(p.ts).toLocaleDateString()}</span></span>
+        <span><button data-triage="${p.id}" data-d="allow">allow</button> <button data-triage="${p.id}" data-d="deny" style="background:#7a3b3b">deny</button></span></li>`;
+    })
+    .join("");
+  document.querySelectorAll("[data-triage]").forEach((b) => (b.onclick = async () => {
+    await api(`/api/proposals/${b.dataset.triage}`, { method: "POST", body: JSON.stringify({ decision: b.dataset.d }) });
+    loadTriage();
+  }));
+}
 
 // ----- devices -----
 async function loadDevices() {

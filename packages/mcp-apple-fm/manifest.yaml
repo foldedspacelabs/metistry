@@ -1,0 +1,14 @@
+name: apple-fm
+type: bridge
+description: On-device Foundation Models classification (free tier, PoC-3)
+transport: http
+port: 7810
+runs_on: host            # FoundationModels is macOS-only; NO TCC grants needed
+requires_tcc: []
+discovery: eager         # 2 tools — far under the >20/>5k lazy threshold (PoC-17)
+degrades: absent         # router stops offering classification when absent
+exposes:
+  - name: classify
+    description: Classify inbox capture items (category, has_action, action)
+  - name: check
+    description: Behavioral health probe — runs a real classification

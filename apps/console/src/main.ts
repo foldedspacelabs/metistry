@@ -4,6 +4,8 @@ import { QueryStore } from "@foldedspacelabs/metistry-queries";
 import { makePool } from "./db.js";
 import { makeServer } from "./server.js";
 import { pushConfigFromEnv, startNotifier } from "./push.js";
+import { collectors } from "@metistry-apps/collectors";
+import { loadSchedules, startRunner } from "./runner.js";
 import { loadRules } from "./router.js";
 import { readFile } from "node:fs/promises";
 
@@ -42,6 +44,11 @@ const server = makeServer(pool, queries, {
   ...(push ? { push } : {}),
 });
 if (push) startNotifier(pool, push);
+
+// routine runner (SHOULD-8): collectors scheduled from their manifests
+const scheduled = await loadSchedules(collectors, optionalEnv("METISTRY_COLLECTORS_DIR", "collectors"));
+startRunner(pool, scheduled);
+console.log(`runner: ${scheduled.map((c) => `${c.name}/${c.intervalSec}s`).join(", ")}`);
 
 const host = optionalEnv("METISTRY_CONSOLE_HOST", "127.0.0.1"); // loopback default (invariant 8)
 const port = intEnv("METISTRY_CONSOLE_PORT", 8080);

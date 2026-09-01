@@ -1,0 +1,6 @@
+name: inbox-drain
+type: collector
+description: Classify new inbox captures deterministically and emit proposals — never auto-creates (§4.12)
+schedule: "*/5 * * * *"
+writes: [proposals, inbox]
+reads: [inbox]

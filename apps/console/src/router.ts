@@ -17,6 +17,7 @@ export type Rules = z.infer<typeof rulesSchema>;
 
 export type Route =
   | { kind: "fast_path"; query: string; routed_by: "rule" }
+  | { kind: "note"; text: string; routed_by: "rule" }
   | { kind: "model"; tier: string; model: string; text: string; routed_by: "rule" | "override" };
 
 export function loadRules(yamlText: string): Rules {
@@ -29,6 +30,10 @@ export function loadRules(yamlText: string): Rules {
 
 export function route(rules: Rules, text: string): Route {
   const trimmed = text.trim();
+
+  // /note <text> — straight to inbox, no model, acknowledged instantly (§4.1)
+  const note = /^\/note\s+([\s\S]+)$/.exec(trimmed);
+  if (note?.[1]) return { kind: "note", text: note[1], routed_by: "rule" };
 
   // explicit tier overrides: /model <tag> <text> and the shipped /deep alias
   const model = /^\/model\s+(\S+)\s+([\s\S]+)$/.exec(trimmed);

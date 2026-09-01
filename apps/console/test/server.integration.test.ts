@@ -43,11 +43,13 @@ params:
   limit: { type: int, default: 5 }
 sql: SELECT id, title FROM work WHERE status <> 'closed' ORDER BY updated_at DESC LIMIT :limit
 `);
+    const { loadRules } = await import("../src/router.js");
     server = makeServer(pool, queries, {
       origin: "http://127.0.0.1:0",
       inboxDir: `/tmp/metistry-test-inbox-${Date.now()}`,
       policy,
       secureCookies: false,
+      rules: loadRules(readFileSync(new URL("../../../seed/rules.yaml", import.meta.url), "utf8")),
     });
     await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -144,6 +146,25 @@ sql: SELECT id, title FROM work WHERE status <> 'closed' ORDER BY updated_at DES
     const rev = await fetch(`${base}/api/devices/${mine.id}/revoke`, { method: "POST", headers: { cookie: sessionCookie } });
     expect(rev.status).toBe(200);
     expect((await fetch(`${base}/api/devices`, { headers: { cookie: sessionCookie } })).status).toBe(401);
+  });
+
+  it("/note goes straight to inbox with an instant ack — no model", async () => {
+    // earlier revoke test killed the shared session; mint a fresh one
+    const pkId = `note-${mintToken(6)}`;
+    await store.storePasskey(pool, { id: pkId, publicKey: new Uint8Array([1]), signCount: 0, transports: [], origin: "t", label: "note-test" });
+    const fresh = `metistry_session=${await store.issueSession(pool, pkId, policy)}`;
+    const r = await fetch(`${base}/message`, {
+      method: "POST",
+      headers: { cookie: fresh, "content-type": "application/json" },
+      body: JSON.stringify({ text: "/note try the new espresso place" }),
+    });
+    expect(r.status).toBe(202);
+    const { reply, message_id } = await r.json();
+    expect(reply).toMatch(/noted → inbox #\d+/);
+    const inb = await pool.query(`SELECT status FROM inbound_messages WHERE id = $1`, [message_id]);
+    expect(inb.rows[0].status).toBe("done"); // assistant never sees it
+    const box = await pool.query(`SELECT note, status FROM inbox WHERE source='note' ORDER BY id DESC LIMIT 1`);
+    expect(box.rows[0]).toMatchObject({ note: "try the new espresso place", status: "new" });
   });
 
   it("enrollment codes are single-use and expiring", async () => {

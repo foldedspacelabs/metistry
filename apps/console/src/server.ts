@@ -183,6 +183,24 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       );
       const messageId = rows[0]?.id;
 
+      // /note: file + inbox row + instant ack — no model, no assistant (§4.1)
+      if (decision?.kind === "note") {
+        await mkdir(cfg.inboxDir, { recursive: true });
+        const rel = `${Date.now()}-note.md`;
+        await writeFile(join(cfg.inboxDir, rel), decision.text);
+        const ins = await db.query(
+          `INSERT INTO inbox (source, path, mime, note) VALUES ('note', $1, 'text/markdown', $2) RETURNING id`,
+          [rel, decision.text],
+        );
+        const reply = `noted → inbox #${ins.rows[0]?.id}`;
+        await db.query(`INSERT INTO outbound_messages (thread, text, in_reply_to, kind) VALUES ($1, $2, $3, 'ack')`, [
+          thread, reply, messageId,
+        ]);
+        await db.query(`UPDATE inbound_messages SET status = 'done' WHERE id = $1`, [messageId]);
+        await audit("capture", "note", true, { inbox_id: ins.rows[0]?.id, message_id: messageId });
+        return sendJson(res, 202, { message_id: messageId, reply });
+      }
+
       // Fast path answers here — no model, no assistant (invariant 4, PoC-8).
       if (decision?.kind === "fast_path") {
         const runId = await startRun(db, {

@@ -1,0 +1,4 @@
+name: morning-brief
+type: routine
+description: Daily review with the D10 soft budget — most impactful proposals surfaced, full queue one tap away, un-acted items auto-expire (searchable, never lost)
+schedule: "@daily"

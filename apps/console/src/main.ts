@@ -5,6 +5,7 @@ import { makePool } from "./db.js";
 import { makeServer } from "./server.js";
 import { pushConfigFromEnv, startNotifier } from "./push.js";
 import { collectors } from "@metistry-apps/collectors";
+import { routines } from "@metistry-apps/routines";
 import { loadSchedules, startRunner } from "./runner.js";
 import { loadRules } from "./router.js";
 import { readFile } from "node:fs/promises";
@@ -46,7 +47,10 @@ const server = makeServer(pool, queries, {
 if (push) startNotifier(pool, push);
 
 // routine runner (SHOULD-8): collectors scheduled from their manifests
-const scheduled = await loadSchedules(collectors, optionalEnv("METISTRY_COLLECTORS_DIR", "collectors"));
+const scheduled = [
+  ...(await loadSchedules(collectors, optionalEnv("METISTRY_COLLECTORS_DIR", "collectors"))),
+  ...(await loadSchedules(routines, optionalEnv("METISTRY_ROUTINES_DIR", "routines"))),
+];
 startRunner(pool, scheduled, {
   ...(process.env.METISTRY_AFM_URL ? { afmUrl: process.env.METISTRY_AFM_URL } : {}),
   ...(process.env.METISTRY_BRIDGE_TOKEN_APPLE_FM ? { afmToken: process.env.METISTRY_BRIDGE_TOKEN_APPLE_FM } : {}),

@@ -49,14 +49,32 @@ $("login-btn").onclick = async () => {
 };
 
 // ----- chat -----
+let lastRender = "";
 async function loadMessages() {
   const res = await api("/api/messages?limit=30");
   const { messages } = await res.json();
-  $("messages").innerHTML = messages
-    .reverse()
-    .map((m) => `<li><div class="meta">${new Date(m.ts).toLocaleString()} · ${m.status}</div>${esc(m.text)}</li>`)
+  const chrono = messages.reverse();
+  const fingerprint = JSON.stringify(chrono.map((m) => [m.direction, m.id, m.status]));
+  if (fingerprint === lastRender) return; // no flicker on idle polls
+  lastRender = fingerprint;
+  $("messages").innerHTML = chrono
+    .map((m) => `<li class="${m.direction}"><div class="meta">${new Date(m.ts).toLocaleString()}${m.direction === "in" ? ` · ${m.status}` : ""}</div>${esc(m.text)}</li>`)
     .join("");
+  const list = $("messages");
+  list.scrollTop = list.scrollHeight; // latest message always in view
 }
+
+// live updates: poll while the chat is visible; burst after a send
+let pollTimer = null;
+function pollChat(intervalMs = 2500) {
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(() => {
+    if (!$("chat").hidden && document.visibilityState === "visible") loadMessages().catch(() => {});
+  }, intervalMs);
+}
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && !$("chat").hidden) loadMessages().catch(() => {});
+});
 
 $("send-form").onsubmit = async (e) => {
   e.preventDefault();
@@ -68,6 +86,8 @@ $("send-form").onsubmit = async (e) => {
     localStorage.removeItem("draft");
     $("send-text").value = "";
     loadMessages();
+    pollChat(1000); // burst while the reply is in flight
+    setTimeout(() => pollChat(), 20000);
   } catch {}
 };
 
@@ -101,11 +121,23 @@ async function loadStatus() {
 }
 
 $("push-enable").onclick = async () => {
-  const reg = await navigator.serviceWorker.ready;
-  const { key } = await (await api("/api/push/vapid-key")).json();
-  const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
-  await api("/api/push/subscribe", { method: "POST", body: JSON.stringify({ subscription: sub }) });
-  alert("subscribed");
+  try {
+    // iOS allows web push only from the installed Home Screen app
+    if (!window.matchMedia("(display-mode: standalone)").matches && navigator.standalone !== true) {
+      return alert("open the Home Screen app to enable notifications — iOS doesn't allow push from a Safari tab");
+    }
+    if (!("Notification" in window) || !("PushManager" in window)) return alert("push not supported here");
+    const perm = await Notification.requestPermission(); // must be in the tap gesture
+    if (perm !== "granted") return alert(`notification permission: ${perm} — check Settings > Notifications > metistry`);
+    const reg = await navigator.serviceWorker.register("/sw.js"); // explicit; don't hang on .ready
+    const { key, push } = await (await api("/api/push/vapid-key")).json();
+    if (push === "absent") return alert("server has no VAPID keys configured");
+    const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+    await api("/api/push/subscribe", { method: "POST", body: JSON.stringify({ subscription: sub }) });
+    alert("subscribed — try test push");
+  } catch (err) {
+    alert(`push setup failed: ${err?.message ?? err}`);
+  }
 };
 
 $("push-test").onclick = async () => {
@@ -133,5 +165,5 @@ function esc(s) { const d = document.createElement("div"); d.textContent = s ?? 
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {}); // push degrades absent
 try {
   const probe = await fetch("/api/status");
-  if (probe.ok) { show("chat"); replayDraft(); } else showAuth();
+  if (probe.ok) { show("chat"); replayDraft(); pollChat(); } else showAuth();
 } catch { showAuth(); }

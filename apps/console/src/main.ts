@@ -47,7 +47,10 @@ if (push) startNotifier(pool, push);
 
 // routine runner (SHOULD-8): collectors scheduled from their manifests
 const scheduled = await loadSchedules(collectors, optionalEnv("METISTRY_COLLECTORS_DIR", "collectors"));
-startRunner(pool, scheduled);
+startRunner(pool, scheduled, {
+  ...(process.env.METISTRY_AFM_URL ? { afmUrl: process.env.METISTRY_AFM_URL } : {}),
+  ...(process.env.METISTRY_BRIDGE_TOKEN_APPLE_FM ? { afmToken: process.env.METISTRY_BRIDGE_TOKEN_APPLE_FM } : {}),
+});
 console.log(`runner: ${scheduled.map((c) => `${c.name}/${c.intervalSec}s`).join(", ")}`);
 
 const host = optionalEnv("METISTRY_CONSOLE_HOST", "127.0.0.1"); // loopback default (invariant 8)

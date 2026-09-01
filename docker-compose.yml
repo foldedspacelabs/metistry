@@ -21,5 +21,49 @@ services:
       timeout: 3s
       retries: 10
 
+  console:
+    build: { context: ., dockerfile: apps/console/Dockerfile }
+    image: metistry-console:dev
+    restart: unless-stopped
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      METISTRY_DB_HOST: db
+      METISTRY_DB_PASSWORD: ${METISTRY_DB_PASSWORD:?set METISTRY_DB_PASSWORD in .env}
+      METISTRY_CONSOLE_HOST: 0.0.0.0        # in-container bind; host exposure below is loopback
+      METISTRY_ORIGIN: ${METISTRY_ORIGIN:?set METISTRY_ORIGIN (canonical HTTPS origin, §4.2)}
+      METISTRY_INBOX_DIR: /data/inbox
+      METISTRY_VAPID_PUBLIC: ${METISTRY_VAPID_PUBLIC:-}
+      METISTRY_VAPID_PRIVATE: ${METISTRY_VAPID_PRIVATE:-}
+      METISTRY_VAPID_SUBJECT: ${METISTRY_VAPID_SUBJECT:-}
+    ports:
+      # loopback by default (invariant 8) — the user's routing layer adds reach
+      - "127.0.0.1:${METISTRY_CONSOLE_PORT:-8080}:8080"
+    volumes:
+      - inbox:/data/inbox
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8080/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))\""]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+
+  assistant:
+    build: { context: ., dockerfile: apps/assistant/Dockerfile }
+    image: metistry-assistant:dev
+    restart: unless-stopped
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      METISTRY_DB_HOST: db
+      METISTRY_DB_PASSWORD: ${METISTRY_DB_PASSWORD:?set METISTRY_DB_PASSWORD in .env}
+      # subscription token, ~1yr, no auto-refresh (watchdog tracks expiry).
+      # NEVER set ANTHROPIC_API_KEY here — the engine refuses to start with it.
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:?set CLAUDE_CODE_OAUTH_TOKEN in .env (claude setup-token)}
+      METISTRY_MODEL_DEFAULT: ${METISTRY_MODEL_DEFAULT:-haiku}
+    volumes:
+      - assistant-home:/home/node   # SDK transcripts survive restarts (PoC-4)
+
 volumes:
   db-data:
+  inbox:
+  assistant-home:

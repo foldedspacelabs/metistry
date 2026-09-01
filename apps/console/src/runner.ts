@@ -7,7 +7,7 @@
 import { readFile } from "node:fs/promises";
 import { parse as parseYaml } from "yaml";
 import { startRun, finishRun, validateManifest } from "@foldedspacelabs/metistry-core";
-import type { RegisteredCollector, Db } from "@metistry-apps/collectors";
+import type { RegisteredCollector, Db, CollectorCtx } from "@metistry-apps/collectors";
 
 export function scheduleToSeconds(schedule: string): number {
   if (schedule === "@hourly") return 3600;
@@ -37,7 +37,7 @@ export async function loadSchedules(
 }
 
 /** Run every collector that's due (last finished run older than its interval). */
-export async function tick(db: Db, scheduled: ScheduledCollector[]): Promise<void> {
+export async function tick(db: Db, scheduled: ScheduledCollector[], ctx: CollectorCtx = {}): Promise<void> {
   for (const c of scheduled) {
     const { rows } = await db.query(
       `SELECT max(ts) AS last FROM runs WHERE component = $1 AND kind = 'collector_run'`,
@@ -47,7 +47,7 @@ export async function tick(db: Db, scheduled: ScheduledCollector[]): Promise<voi
     if (Date.now() - last < c.intervalSec * 1000) continue;
     const runId = await startRun(db, { component: c.name, kind: "collector_run" });
     try {
-      const n = await c.run(db);
+      const n = await c.run(db, ctx);
       await finishRun(db, runId, { ok: true, meta: { processed: n } });
     } catch (err) {
       await finishRun(db, runId, { ok: false, error: err instanceof Error ? err.message : String(err) });
@@ -55,6 +55,6 @@ export async function tick(db: Db, scheduled: ScheduledCollector[]): Promise<voi
   }
 }
 
-export function startRunner(db: Db, scheduled: ScheduledCollector[], everyMs = 60_000): NodeJS.Timeout {
-  return setInterval(() => tick(db, scheduled).catch((e) => console.error("runner:", e)), everyMs);
+export function startRunner(db: Db, scheduled: ScheduledCollector[], ctx: CollectorCtx = {}, everyMs = 60_000): NodeJS.Timeout {
+  return setInterval(() => tick(db, scheduled, ctx).catch((e) => console.error("runner:", e)), everyMs);
 }

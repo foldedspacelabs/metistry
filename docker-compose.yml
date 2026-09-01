@@ -36,6 +36,12 @@ services:
       METISTRY_VAPID_PUBLIC: ${METISTRY_VAPID_PUBLIC:-}
       METISTRY_VAPID_PRIVATE: ${METISTRY_VAPID_PRIVATE:-}
       METISTRY_VAPID_SUBJECT: ${METISTRY_VAPID_SUBJECT:-}
+      # apple-fm host bridge (degrades absent when unset); explicit
+      # host-gateway per PoC-4 — no Docker Desktop magic
+      METISTRY_AFM_URL: ${METISTRY_AFM_URL:-}
+      METISTRY_BRIDGE_TOKEN_APPLE_FM: ${METISTRY_BRIDGE_TOKEN_APPLE_FM:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       # loopback by default (invariant 8) — the user's routing layer adds reach
       - "127.0.0.1:${METISTRY_CONSOLE_PORT:-8080}:8080"

@@ -39,21 +39,70 @@ export function classify(row: InboxRow): Classification {
   return { kind: "note", reason: "default", title };
 }
 
+// The optional on-device FM tier (ruled 2026-09-01: free on-device
+// classification permitted for this collector; billable models never).
+// Deterministic rules that positively fired stand; only default-"note"
+// fallthroughs with text are refined by the bridge. Degrades absent: no
+// config, or any bridge failure, keeps the deterministic result.
+export interface CollectorCtx {
+  afmUrl?: string; // e.g. http://host.docker.internal:7810
+  afmToken?: string; // per-bridge bearer (CRIT-9)
+  fetchFn?: typeof fetch;
+}
+
+interface FmResult {
+  category: string;
+  has_action: boolean;
+  action: string;
+}
+
+async function fmClassify(ctx: CollectorCtx, items: { id: number; text: string }[]): Promise<Map<number, FmResult>> {
+  const out = new Map<number, FmResult>();
+  if (!ctx.afmUrl || !ctx.afmToken || items.length === 0) return out;
+  try {
+    const res = await (ctx.fetchFn ?? fetch)(`${ctx.afmUrl}/classify`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${ctx.afmToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ items }),
+      signal: AbortSignal.timeout(60_000),
+    });
+    if (!res.ok) return out;
+    const body = (await res.json()) as { results: { id: number; ok: boolean; classification?: FmResult }[] };
+    for (const r of body.results) if (r.ok && r.classification) out.set(Number(r.id), r.classification);
+  } catch {
+    /* degrades: absent — deterministic tier stands */
+  }
+  return out;
+}
+
 /** One drain pass. Returns how many rows were classified. */
-export async function run(db: Db): Promise<number> {
+export async function run(db: Db, ctx: CollectorCtx = {}): Promise<number> {
   const { rows } = await db.query(
     `SELECT id, path, mime, note, source FROM inbox WHERE status = 'new' ORDER BY ts LIMIT 50`,
   );
-  for (const row of rows as InboxRow[]) {
-    const c = classify(row);
+  const items = rows as InboxRow[];
+  const deterministic = new Map(items.map((r) => [r.id, classify(r)]));
+
+  // FM refines only what the rules couldn't place (reason "default")
+  const fallthroughs = items.filter((r) => deterministic.get(r.id)!.reason === "default" && (r.note ?? "").trim());
+  // pg returns bigint ids as strings — normalize map keys to Number
+  const fm = await fmClassify(ctx, fallthroughs.map((r) => ({ id: Number(r.id), text: (r.note ?? "").trim().slice(0, 2000) })));
+
+  for (const row of items) {
+    const det = deterministic.get(row.id)!;
+    const refined = fm.get(Number(row.id));
+    const final = refined
+      ? { kind: refined.category, reason: "apple-fm", title: det.title, has_action: refined.has_action, action: refined.action }
+      : det;
+    const tier = refined ? "apple-fm" : "deterministic";
     await db.query(
       `INSERT INTO proposals (kind, source_agent, trust, payload) VALUES ('knowledge', 'inbox-drain', 'user', $1)`,
-      [JSON.stringify({ inbox_id: row.id, path: row.path, classification: c, note: row.note, tier: "deterministic" })],
+      [JSON.stringify({ inbox_id: row.id, path: row.path, classification: final, note: row.note, tier })],
     );
     await db.query(`UPDATE inbox SET status = 'classified', proposal = $2, triaged_at = NULL WHERE id = $1`, [
       row.id,
-      JSON.stringify(c),
+      JSON.stringify(final),
     ]);
   }
-  return rows.length;
+  return items.length;
 }

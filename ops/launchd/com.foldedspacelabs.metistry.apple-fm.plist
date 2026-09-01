@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- apple-fm bridge: runs_on host (FoundationModels is macOS-only; no TCC
+     grants needed). Install:
+       sed "s|__REPO__|$PWD|g; s|__NODE__|$(which node)|g" ops/launchd/com.foldedspacelabs.metistry.apple-fm.plist \
+         > ~/Library/LaunchAgents/com.foldedspacelabs.metistry.apple-fm.plist
+       launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.foldedspacelabs.metistry.apple-fm.plist -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.foldedspacelabs.metistry.apple-fm</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string>-c</string>
+    <string>set -a; . __REPO__/.env; set +a; exec __NODE__ __REPO__/packages/mcp-apple-fm/dist/main.js</string>
+  </array>
+  <key>WorkingDirectory</key><string>__REPO__</string>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/tmp/metistry-apple-fm.log</string>
+  <key>StandardErrorPath</key><string>/tmp/metistry-apple-fm.log</string>
+</dict>
+</plist>

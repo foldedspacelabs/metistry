@@ -7,8 +7,7 @@ COPY pnpm-lock.yaml pnpm-workspace.yaml package.json tsconfig.base.json ./
 COPY packages ./packages
 COPY apps/console ./apps/console
 RUN pnpm install --frozen-lockfile --filter "@metistry-apps/console..." \
- && pnpm --filter "@foldedspacelabs/*" run build \
- && pnpm --filter "@metistry-apps/console" run build \
+ && pnpm --filter "@metistry-apps/console..." run build \
  && pnpm --filter "@metistry-apps/console" deploy --prod --legacy /out
 
 FROM node:22-slim

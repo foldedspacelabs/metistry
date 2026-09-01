@@ -130,6 +130,11 @@ your git, on your machine.
 - (speculative, unvalidated — record as they arise:) hosted/cloud profile
   management, premium coordination dashboards, managed signing/notarized
   bridge binaries.
+- **Hosting tier matrix (owner direction, 2026-09-01):** (1) self-host
+  free — the whole system, nothing withheld; (2) self-host + paid iOS
+  app; (3) FSL-hosted instance with usage limits as a separate plan.
+  E2E-encrypted throughout — even FSL's relay/hosting cannot read user
+  content. "Hosted never means readable" is the positioning line.
 
 ## Log
 
@@ -163,3 +168,10 @@ your git, on your machine.
   runner) + the Apple FM bridge: free on-device classification behind the
   wire contract, verified end-to-end on the Studio. Collector/model ruling:
   free on-device tiers permitted case-by-case. iOS app planning doc added.
+- 2026-09-01 — UX direction recorded (`docs/product/ux-direction.md`):
+  expressive, discoverable interaction — buttons/menus over memorized
+  syntax, structured question-answer dialogues, actionable notifications
+  (answer from the push), visible model selection; slash commands stay as
+  the power layer; one design language across web + iOS. APNs relay
+  privacy bar raised to launch-blocking: payload-free, provably leak-proof,
+  open source.

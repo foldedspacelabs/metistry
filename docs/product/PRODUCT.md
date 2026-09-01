@@ -163,3 +163,10 @@ your git, on your machine.
   runner) + the Apple FM bridge: free on-device classification behind the
   wire contract, verified end-to-end on the Studio. Collector/model ruling:
   free on-device tiers permitted case-by-case. iOS app planning doc added.
+- 2026-09-01 — UX direction recorded (`docs/product/ux-direction.md`):
+  expressive, discoverable interaction — buttons/menus over memorized
+  syntax, structured question-answer dialogues, actionable notifications
+  (answer from the push), visible model selection; slash commands stay as
+  the power layer; one design language across web + iOS. APNs relay
+  privacy bar raised to launch-blocking: payload-free, provably leak-proof,
+  open source.

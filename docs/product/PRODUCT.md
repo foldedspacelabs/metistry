@@ -124,6 +124,9 @@ your git, on your machine.
 
 - **Native iOS app** (named by the user as the likely paid addition): share
   extension, real push, offline queue, widgets — against the same open API.
+  Planning doc: `docs/product/ios-app-plan.md` (2026-09-01) — notably, the
+  APNs relay a self-hosted instance needs is itself the first natural
+  *hosted* premium component: the premium story funds its own infra.
 - (speculative, unvalidated — record as they arise:) hosted/cloud profile
   management, premium coordination dashboards, managed signing/notarized
   bridge binaries.
@@ -156,3 +159,7 @@ your git, on your machine.
   host machine as root of trust, 30-day-idle/1-year-max device sessions
   (user-configurable). "No passwords anywhere" is both the simplest UX and
   a positioning line — the web door ships with modern auth by default.
+- 2026-09-01 — Phase 3 capture live (/note, inbox-drain proposals, routine
+  runner) + the Apple FM bridge: free on-device classification behind the
+  wire contract, verified end-to-end on the Studio. Collector/model ruling:
+  free on-device tiers permitted case-by-case. iOS app planning doc added.

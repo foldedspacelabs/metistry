@@ -23,28 +23,41 @@ describe("morning brief (D10 soft budget)", () => {
     expect(pickBudget(critical)).toHaveLength(7); // +2 critical extras, not all 10
   });
 
-  it("silence-default: empty queue emits nothing", async () => {
+  it("silence-default: nothing pending, nothing due, nothing failing emits nothing", async () => {
     const q: string[] = [];
-    const db = { async query(t: string) { q.push(t); return { rows: [] }; } };
+    const db = { async query(t: string) {
+      q.push(t);
+      if (t.includes("FROM runs")) return { rows: [{ runs_ok: 0, turns: 0, captures: 0, failures: 0, spend: 0 }] };
+      return { rows: [] };
+    } };
     expect(await run(db)).toBe(0);
-    expect(q.some((t) => t.includes("outbound_messages"))).toBe(false);
+    expect(q.some((t) => t.includes("INSERT INTO outbound_messages"))).toBe(false);
   });
 
-  it("emits one brief with budget lines, see-all footer, and expiry note", async () => {
+  it("emits an actionable sectioned brief: today, decisions (soft budget), system", async () => {
     let briefText = "";
     const pending = Array.from({ length: 8 }, (_, i) => row(i + 1, "knowledge", { classification: { title: `item ${i + 1}` } }, i));
     const db = {
       async query(t: string, v?: unknown[]) {
         if (t.includes("SET decision = 'expired'")) return { rows: [{ id: 99 }] };
         if (t.startsWith("SELECT id, kind")) return { rows: pending };
-        if (t.includes("outbound_messages")) { briefText = String(v![0]); return { rows: [] }; }
+        if (t.includes("FROM work")) return { rows: [{ title: "ship phase 3", status: "in_progress", due: null }] };
+        if (t.includes("has_action")) return { rows: [{ id: 7, payload: { classification: { action: "renew cert" } } }] };
+        if (t.includes("FROM runs")) return { rows: [{ runs_ok: 3, turns: 2, captures: 4, failures: 1, spend: 0.12 }] };
+        if (t.includes("INSERT INTO outbound_messages")) { briefText = String(v![0]); return { rows: [] }; }
         return { rows: [] };
       },
     };
     expect(await run(db)).toBe(1);
-    expect(briefText).toContain("8 pending");
-    expect((briefText.match(/^• /gm) ?? []).length).toBe(5); // soft budget, none critical
-    expect(briefText).toContain("3 more pending"); // linked, not truncated silently
-    expect(briefText).toContain("auto-expired (still searchable)");
+    expect(briefText).toContain("✅ Today:");
+    expect(briefText).toContain("ship phase 3");
+    expect(briefText).toContain("renew cert");
+    expect(briefText).toContain("🔔 Needs your decision:");
+    expect(briefText.split("🔔")[1]!.split("⚙️")[0]!.match(/^• /gm)!.length).toBe(5); // soft budget holds
+    expect(briefText).toContain("…3 more — open triage");
+    expect(briefText).toContain("auto-expired, still searchable");
+    expect(briefText).toContain("⚙️ What I've been doing:");
+    expect(briefText).toContain("1 failed run(s)");
+    expect(briefText).toContain("calendar bridge");
   });
 });

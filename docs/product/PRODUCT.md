@@ -130,6 +130,11 @@ your git, on your machine.
 - (speculative, unvalidated — record as they arise:) hosted/cloud profile
   management, premium coordination dashboards, managed signing/notarized
   bridge binaries.
+- **Hosting tier matrix (owner direction, 2026-09-01):** (1) self-host
+  free — the whole system, nothing withheld; (2) self-host + paid iOS
+  app; (3) FSL-hosted instance with usage limits as a separate plan.
+  E2E-encrypted throughout — even FSL's relay/hosting cannot read user
+  content. "Hosted never means readable" is the positioning line.
 
 ## Log
 

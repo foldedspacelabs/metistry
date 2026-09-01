@@ -14,3 +14,4 @@ dist/
 # logs
 *.log
 backups/
+packages/mcp-apple-fm/helper/afm-helper

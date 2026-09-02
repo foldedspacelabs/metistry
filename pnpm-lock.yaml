@@ -159,6 +159,22 @@ importers:
         specifier: ^4.0.18
         version: 4.1.11(@types/node@22.20.1)(vite@8.2.2(@types/node@22.20.1)(yaml@2.9.0))
 
+  packages/mcp-eventkit:
+    dependencies:
+      '@foldedspacelabs/metistry-core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      '@types/node':
+        specifier: ^22.20.1
+        version: 22.20.1
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: ^4.0.18
+        version: 4.1.11(@types/node@22.20.1)(vite@8.2.2(@types/node@22.20.1)(yaml@2.9.0))
+
   packages/queries:
     dependencies:
       pg:

@@ -47,6 +47,8 @@ export function classify(row: InboxRow): Classification {
 export interface CollectorCtx {
   afmUrl?: string; // e.g. http://host.docker.internal:7810
   afmToken?: string; // per-bridge bearer (CRIT-9)
+  ekUrl?: string; // eventkit bridge (routines use it for schedule/meeting prep)
+  ekToken?: string;
   fetchFn?: typeof fetch;
 }
 

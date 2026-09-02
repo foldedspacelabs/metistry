@@ -42,6 +42,8 @@ services:
       METISTRY_BRIDGE_TOKEN_APPLE_FM: ${METISTRY_BRIDGE_TOKEN_APPLE_FM:-}
       METISTRY_EK_URL: ${METISTRY_EK_URL:-}
       METISTRY_BRIDGE_TOKEN_EVENTKIT: ${METISTRY_BRIDGE_TOKEN_EVENTKIT:-}
+      # user's timezone for brief/schedule rendering (Me/profile.md drives this later)
+      TZ: ${METISTRY_TZ:-UTC}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:

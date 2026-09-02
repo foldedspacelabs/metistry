@@ -15,6 +15,7 @@
     <nav id="nav" hidden>
       <button data-view="chat">chat</button>
       <button data-view="capture">capture</button>
+      <button data-view="triage">triage</button>
       <button data-view="status">status</button>
       <button data-view="devices">devices</button>
     </nav>
@@ -42,6 +43,11 @@
         <button type="submit">capture</button>
       </form>
       <p id="capture-result"></p>
+    </section>
+
+    <section id="triage" hidden>
+      <ul id="proposal-list"></ul>
+      <p id="triage-empty" hidden>queue is clear 🎉</p>
     </section>
 
     <section id="status" hidden>

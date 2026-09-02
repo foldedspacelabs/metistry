@@ -289,10 +289,40 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
 
     // ----- management: passkey session ONLY (owner tokens excluded) -----
     if (auth.kind !== "session") {
-      if (key === "GET /api/devices" || /^POST \/api\/devices\/\d+\/revoke$/.test(key) || key === "POST /auth/logout") {
+      if (
+        key === "GET /api/devices" ||
+        /^POST \/api\/devices\/\d+\/revoke$/.test(key) ||
+        key === "POST /auth/logout" ||
+        key === "GET /api/proposals" ||
+        /^POST \/api\/proposals\/\d+$/.test(key)
+      ) {
         return sendError(res, "forbidden");
       }
       return sendError(res, "not_found");
+    }
+
+    // ----- proposal triage (D7 unified table; owner session only) -----
+    if (key === "GET /api/proposals") {
+      const { rows } = await db.query(
+        `SELECT id, ts, kind, source_agent, trust, payload FROM proposals
+         WHERE decision = 'pending' ORDER BY ts DESC LIMIT 200`,
+      );
+      return sendJson(res, 200, { proposals: rows });
+    }
+
+    const triage = /^POST \/api\/proposals\/(\d+)$/.exec(key);
+    if (triage) {
+      const body = (await readJson(req)) as { decision?: string; feedback?: string };
+      if (!["allow", "deny", "accept_with_changes"].includes(body.decision ?? "")) {
+        return sendError(res, "invalid_request");
+      }
+      const { rows } = await db.query(
+        `UPDATE proposals SET decision = $2, feedback = $3, decided_at = now()
+         WHERE id = $1 AND decision = 'pending' RETURNING id`,
+        [triage[1], body.decision, body.feedback ?? null],
+      );
+      await audit("triage", body.decision!, rows.length === 1, { proposal: triage[1] });
+      return rows.length === 1 ? sendJson(res, 200, { ok: true }) : sendError(res, "not_found");
     }
 
     if (key === "GET /api/devices") return sendJson(res, 200, { devices: await store.listDevices(db) });

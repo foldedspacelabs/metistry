@@ -85,7 +85,9 @@ export async function sendToSession(
     await finishRun(db, runId, { ok: true });
     return "sent";
   } catch (err: any) {
-    const dead = err?.statusCode === 410 || err?.statusCode === 404;
+    // dead = gone (410/404) OR structurally invalid (client-side validation
+    // throws with no statusCode) — retrying those forever is failure spam
+    const dead = err?.statusCode === 410 || err?.statusCode === 404 || err?.statusCode === 400 || err?.statusCode === undefined;
     if (dead) {
       await db.query(`UPDATE auth_sessions SET push_subscription = NULL WHERE id = $1`, [sessionId]);
     }

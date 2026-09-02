@@ -19,6 +19,7 @@
     "@foldedspacelabs/metistry-core": "workspace:*",
     "@foldedspacelabs/metistry-queries": "workspace:*",
     "@metistry-apps/collectors": "workspace:*",
+    "@metistry-apps/routines": "workspace:*",
     "@simplewebauthn/browser": "^13.3.0",
     "@simplewebauthn/server": "^13.2.2",
     "pg": "^8.16.0",

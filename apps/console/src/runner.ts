@@ -20,6 +20,7 @@ export function scheduleToSeconds(schedule: string): number {
 
 export interface ScheduledCollector extends RegisteredCollector {
   intervalSec: number;
+  runKind: "collector_run" | "routine_run";
 }
 
 export async function loadSchedules(
@@ -29,9 +30,11 @@ export async function loadSchedules(
   const out: ScheduledCollector[] = [];
   for (const c of registered) {
     const manifest = validateManifest(parseYaml(await readFile(`${collectorsDir}/${c.name}/manifest.yaml`, "utf8")));
-    if (!manifest.ok) throw new Error(`collector ${c.name}: invalid manifest: ${manifest.errors.join("; ")}`);
-    if (manifest.manifest.type !== "collector") throw new Error(`${c.name} is not a collector manifest`);
-    out.push({ ...c, intervalSec: scheduleToSeconds(manifest.manifest.schedule) });
+    if (!manifest.ok) throw new Error(`${c.name}: invalid manifest: ${manifest.errors.join("; ")}`);
+    const m = manifest.manifest;
+    if (m.type !== "collector" && m.type !== "routine") throw new Error(`${c.name}: not schedulable (type ${m.type})`);
+    if (m.schedule === undefined) throw new Error(`${c.name}: no schedule`);
+    out.push({ ...c, intervalSec: scheduleToSeconds(m.schedule), runKind: m.type === "routine" ? "routine_run" : "collector_run" });
   }
   return out;
 }
@@ -40,12 +43,12 @@ export async function loadSchedules(
 export async function tick(db: Db, scheduled: ScheduledCollector[], ctx: CollectorCtx = {}): Promise<void> {
   for (const c of scheduled) {
     const { rows } = await db.query(
-      `SELECT max(ts) AS last FROM runs WHERE component = $1 AND kind = 'collector_run'`,
-      [c.name],
+      `SELECT max(ts) AS last FROM runs WHERE component = $1 AND kind = $2`,
+      [c.name, c.runKind],
     );
     const last = rows[0]?.last ? new Date(rows[0].last).getTime() : 0;
     if (Date.now() - last < c.intervalSec * 1000) continue;
-    const runId = await startRun(db, { component: c.name, kind: "collector_run" });
+    const runId = await startRun(db, { component: c.name, kind: c.runKind });
     try {
       const n = await c.run(db, ctx);
       await finishRun(db, runId, { ok: true, meta: { processed: n } });

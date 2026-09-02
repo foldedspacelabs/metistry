@@ -1,0 +1,24 @@
+{
+  "name": "@metistry-apps/routines",
+  "private": true,
+  "version": "0.0.1",
+  "description": "Scheduled behaviors (invariant 5: directory + manifest each). Executed by the console's routine runner; silence-default — a routine with nothing to say emits nothing.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "engines": { "node": ">=22" },
+  "dependencies": {
+    "@foldedspacelabs/metistry-core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "typescript": "^7.0.2",
+    "vitest": "^4.0.18"
+  }
+}

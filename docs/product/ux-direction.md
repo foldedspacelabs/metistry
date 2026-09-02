@@ -29,6 +29,21 @@ but every one of them gets a discoverable, expressive surface:
   (with the instance's own tier menu from `rules.yaml`), not a memorized
   `/model` incantation — which stays for power users.
 
+## Quick links & targeted actions (owner addition, 2026-09-01)
+
+Everything the assistant surfaces should be a **door, not a dead end**:
+
+- **Deep links from the brief and notifications** — a project mention links
+  to its status panel; a knowledge reference deep-links to the note
+  (`obsidian://` or the console's knowledge view); dashboard links for
+  metrics; source/news links where an item came from outside.
+- **Quick actions on any topic** — "summarize this", "what's the latest on
+  X" as one-tap asks that dispatch a targeted request to the assistant,
+  pre-scoped to the item the user is looking at.
+- Mechanically this extends the structured-prompt payload: outbound items
+  carry `links[]` and `actions[]` alongside the text, and every surface
+  (PWA, notification, iOS) renders what it can.
+
 ## Design consequences to honor when the plan happens
 
 - **Structured prompts become an API shape**, not a UI trick: outbound

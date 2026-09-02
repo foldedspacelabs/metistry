@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key><string>com.foldedspacelabs.metistry.eventkit</string>
+  <key>CFBundleName</key><string>metistry-eventkit</string>
+  <key>CFBundleShortVersionString</key><string>0.0.1</string>
+  <key>NSCalendarsFullAccessUsageDescription</key>
+  <string>Metistry reads your calendar for the morning brief and meeting prep, and creates events you ask for.</string>
+  <key>NSRemindersFullAccessUsageDescription</key>
+  <string>Metistry reads and creates reminders — the shopping list and captured todos live there.</string>
+</dict>
+</plist>

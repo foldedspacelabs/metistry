@@ -23,6 +23,25 @@ describe("morning brief (D10 soft budget)", () => {
     expect(pickBudget(critical)).toHaveLength(7); // +2 critical extras, not all 10
   });
 
+  it("schedule section renders today's events with attendees; bridge failure degrades absent", async () => {
+    let text = "";
+    const db = { async query(t: string, v?: unknown[]) {
+      if (t.includes("FROM runs")) return { rows: [{ runs_ok: 0, turns: 0, captures: 0, failures: 0, spend: 0 }] };
+      if (t.includes("INSERT INTO outbound_messages")) { text = String(v![0]); return { rows: [] }; }
+      return { rows: [] };
+    } };
+    const events = [{ title: "Standup", start: "2026-09-02T13:30:00Z", end: "2026-09-02T13:45:00Z", all_day: false, location: "Zoom", attendees: ["Alex", "Sam"] }];
+    const okFetch = (async () => ({ ok: true, json: async () => ({ events }) })) as unknown as typeof fetch;
+    expect(await run(db, { ekUrl: "http://ek", ekToken: "t", fetchFn: okFetch })).toBe(1); // events alone justify a brief
+    expect(text).toContain("📅 Schedule:");
+    expect(text).toContain("Standup @ Zoom");
+    expect(text).toContain("with Alex, Sam");
+    expect(text).not.toContain("calendar bridge is connected");
+
+    const deadFetch = (async () => { throw new Error("down"); }) as unknown as typeof fetch;
+    expect(await run(db, { ekUrl: "http://ek", ekToken: "t", fetchFn: deadFetch })).toBe(0); // nothing else pending → silent
+  });
+
   it("silence-default: nothing pending, nothing due, nothing failing emits nothing", async () => {
     const q: string[] = [];
     const db = { async query(t: string) {

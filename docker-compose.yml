@@ -40,6 +40,8 @@ services:
       # host-gateway per PoC-4 — no Docker Desktop magic
       METISTRY_AFM_URL: ${METISTRY_AFM_URL:-}
       METISTRY_BRIDGE_TOKEN_APPLE_FM: ${METISTRY_BRIDGE_TOKEN_APPLE_FM:-}
+      METISTRY_EK_URL: ${METISTRY_EK_URL:-}
+      METISTRY_BRIDGE_TOKEN_EVENTKIT: ${METISTRY_BRIDGE_TOKEN_EVENTKIT:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:

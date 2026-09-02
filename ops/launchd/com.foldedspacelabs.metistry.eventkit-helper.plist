@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- The EventKit helper as its OWN service: the job's root binary is the
+     signed helper, so the TCC grant attaches to it (PoC-1 — anything in
+     front of it, sh/node, would become the responsible process instead).
+     Serves a Unix socket the eventkit bridge service connects to.
+     First install: the consent prompts appear when the bridge's check()
+     first hits it, or trigger them directly:
+       printf '{"id":1,"op":"request"}\n' | packages/mcp-eventkit/helper/ek-helper
+     (run from a launchd one-shot, not an app shell). Install:
+       sed "s|__REPO__|$PWD|g" ops/launchd/com.foldedspacelabs.metistry.eventkit-helper.plist \
+         > ~/Library/LaunchAgents/com.foldedspacelabs.metistry.eventkit-helper.plist
+       launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.foldedspacelabs.metistry.eventkit-helper.plist -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.foldedspacelabs.metistry.eventkit-helper</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__REPO__/packages/mcp-eventkit/helper/ek-helper</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>METISTRY_EK_SOCKET</key><string>/tmp/metistry-eventkit.sock</string>
+  </dict>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/tmp/metistry-eventkit-helper.log</string>
+  <key>StandardErrorPath</key><string>/tmp/metistry-eventkit-helper.log</string>
+</dict>
+</plist>

@@ -54,6 +54,8 @@ const scheduled = [
 startRunner(pool, scheduled, {
   ...(process.env.METISTRY_AFM_URL ? { afmUrl: process.env.METISTRY_AFM_URL } : {}),
   ...(process.env.METISTRY_BRIDGE_TOKEN_APPLE_FM ? { afmToken: process.env.METISTRY_BRIDGE_TOKEN_APPLE_FM } : {}),
+  ...(process.env.METISTRY_EK_URL ? { ekUrl: process.env.METISTRY_EK_URL } : {}),
+  ...(process.env.METISTRY_BRIDGE_TOKEN_EVENTKIT ? { ekToken: process.env.METISTRY_BRIDGE_TOKEN_EVENTKIT } : {}),
 });
 console.log(`runner: ${scheduled.map((c) => `${c.name}/${c.intervalSec}s`).join(", ")}`);
 

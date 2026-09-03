@@ -63,6 +63,7 @@ describe("morning brief (D10 soft budget)", () => {
         if (t.includes("FROM work")) return { rows: [{ title: "ship phase 3", status: "in_progress", due: null }] };
         if (t.includes("has_action")) return { rows: [{ id: 7, payload: { classification: { action: "renew cert" } } }] };
         if (t.includes("FROM runs")) return { rows: [{ runs_ok: 3, turns: 2, captures: 4, failures: 1, spend: 0.12 }] };
+        if (t.includes("GROUP BY area")) return { rows: [{ area: "metistry", open: 4, blocked: 1, closed_7d: 9, latest: ["EventKit bridge", "test isolation"] }] };
         if (t.includes("INSERT INTO outbound_messages")) { briefText = String(v![0]); return { rows: [] }; }
         return { rows: [] };
       },
@@ -75,6 +76,9 @@ describe("morning brief (D10 soft budget)", () => {
     expect(briefText.split("🔔")[1]!.split("⚙️")[0]!.match(/^• /gm)!.length).toBe(5); // soft budget holds
     expect(briefText).toContain("…3 more — open triage");
     expect(briefText).toContain("auto-expired, still searchable");
+    expect(briefText).toContain("📂 Projects:");
+    expect(briefText).toContain("metistry: 4 open, 1 blocked, 9 closed this week");
+    expect(briefText).toContain("latest: EventKit bridge · test isolation");
     expect(briefText).toContain("⚙️ What I've been doing:");
     expect(briefText).toContain("1 failed run(s)");
     expect(briefText).toContain("calendar bridge");

@@ -15,3 +15,4 @@ dist/
 *.log
 backups/
 packages/mcp-apple-fm/helper/afm-helper
+packages/mcp-eventkit/helper/ek-helper

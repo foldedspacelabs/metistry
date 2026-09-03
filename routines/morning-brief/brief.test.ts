@@ -73,7 +73,7 @@ describe("morning brief (D10 soft budget)", () => {
     expect(briefText).toContain("ship phase 3");
     expect(briefText).toContain("renew cert");
     expect(briefText).toContain("🔔 Needs your decision:");
-    expect(briefText.split("🔔")[1]!.split("⚙️")[0]!.match(/^• /gm)!.length).toBe(5); // soft budget holds
+    expect(briefText.split("🔔")[1]!.split("📂")[0]!.match(/^• /gm)!.length).toBe(5); // soft budget holds
     expect(briefText).toContain("…3 more — open triage");
     expect(briefText).toContain("auto-expired, still searchable");
     expect(briefText).toContain("📂 Projects:");

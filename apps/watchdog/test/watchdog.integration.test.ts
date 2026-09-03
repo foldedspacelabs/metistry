@@ -26,7 +26,7 @@ describe.skipIf(!hasDb)("watchdog", () => {
     pool = new pg.Pool({
       host: process.env.METISTRY_DB_HOST ?? "127.0.0.1",
       user: process.env.METISTRY_DB_USER ?? "metistry",
-      database: process.env.METISTRY_DB_NAME ?? "metistry",
+      database: process.env.METISTRY_TEST_DB_NAME ?? "metistry_test", // scratch db (ops/scripts/test-db.sh)
       password: process.env.METISTRY_DB_PASSWORD,
     });
     // park stray queue rows so drain-staleness probes see a clean world

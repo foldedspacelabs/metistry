@@ -60,10 +60,10 @@ describe("morning brief (D10 soft budget)", () => {
       async query(t: string, v?: unknown[]) {
         if (t.includes("SET decision = 'expired'")) return { rows: [{ id: 99 }] };
         if (t.startsWith("SELECT id, kind")) return { rows: pending };
+        if (t.includes("GROUP BY area")) return { rows: [{ area: "metistry", open: 4, blocked: 1, closed_7d: 9, latest: ["EventKit bridge", "test isolation"] }] };
         if (t.includes("FROM work")) return { rows: [{ title: "ship phase 3", status: "in_progress", due: null }] };
         if (t.includes("has_action")) return { rows: [{ id: 7, payload: { classification: { action: "renew cert" } } }] };
         if (t.includes("FROM runs")) return { rows: [{ runs_ok: 3, turns: 2, captures: 4, failures: 1, spend: 0.12 }] };
-        if (t.includes("GROUP BY area")) return { rows: [{ area: "metistry", open: 4, blocked: 1, closed_7d: 9, latest: ["EventKit bridge", "test isolation"] }] };
         if (t.includes("INSERT INTO outbound_messages")) { briefText = String(v![0]); return { rows: [] }; }
         return { rows: [] };
       },

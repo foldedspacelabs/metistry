@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- eventkit bridge: TCC-bound, so it MUST be its own launchd service (PoC-1:
+     a stdio child inherits the agent's TCC identity; a service is its own
+     responsible process). First run: send {"op":"request"} to the helper
+     from this job to get the consent prompts (see PoC-9). Install:
+       sed "s|__REPO__|$PWD|g; s|__NODE__|$(which node)|g" ops/launchd/com.foldedspacelabs.metistry.eventkit.plist \
+         > ~/Library/LaunchAgents/com.foldedspacelabs.metistry.eventkit.plist
+       launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.foldedspacelabs.metistry.eventkit.plist -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.foldedspacelabs.metistry.eventkit</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string>-c</string>
+    <string>set -a; . __REPO__/.env; set +a; exec __NODE__ __REPO__/packages/mcp-eventkit/dist/main.js</string>
+  </array>
+  <key>WorkingDirectory</key><string>__REPO__</string>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/tmp/metistry-eventkit.log</string>
+  <key>StandardErrorPath</key><string>/tmp/metistry-eventkit.log</string>
+</dict>
+</plist>

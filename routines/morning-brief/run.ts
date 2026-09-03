@@ -92,6 +92,46 @@ async function sectionDecisions(db: Db, expiredCount: number): Promise<string[] 
   ];
 }
 
+export interface RoutineCtx {
+  ekUrl?: string; // eventkit bridge (degrades absent)
+  ekToken?: string;
+  fetchFn?: typeof fetch;
+}
+
+interface EkEvent {
+  title: string;
+  start: string;
+  end: string;
+  all_day: boolean;
+  location: string;
+  attendees: string[];
+}
+
+// 📅 Schedule + meeting prep: today's events from the EventKit bridge.
+// Prep today = attendees + location surfaced; richer prep (People notes,
+// last-meeting decisions) arrives when the vault exists to look them up.
+async function sectionSchedule(ctx: RoutineCtx): Promise<string[] | null> {
+  if (!ctx.ekUrl || !ctx.ekToken) return null;
+  try {
+    const res = await (ctx.fetchFn ?? fetch)(`${ctx.ekUrl}/events?days=1`, {
+      headers: { authorization: `Bearer ${ctx.ekToken}` },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!res.ok) return null;
+    const { events } = (await res.json()) as { events: EkEvent[] };
+    if (events.length === 0) return ["• nothing on the calendar today"];
+    const fmt = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    return events.map((e) => {
+      const when = e.all_day ? "all day" : `${fmt(e.start)}–${fmt(e.end)}`;
+      const who = e.attendees.filter(Boolean).slice(0, 4).join(", ");
+      const where = e.location ? ` @ ${e.location.split("\n")[0]}` : "";
+      return `• ${when} ${e.title}${where}${who ? `\n    with ${who}` : ""}`;
+    });
+  } catch {
+    return null; // degrades absent — the brief still goes out
+  }
+}
+
 async function sectionSystem(db: Db): Promise<{ lines: string[]; needsHelp: boolean } | null> {
   const { rows } = await db.query(
     `SELECT
@@ -112,7 +152,7 @@ async function sectionSystem(db: Db): Promise<{ lines: string[]; needsHelp: bool
 }
 
 /** One brief pass. Returns 1 if a brief was emitted, else 0 (silence-default). */
-export async function run(db: Db): Promise<number> {
+export async function run(db: Db, ctx: RoutineCtx = {}): Promise<number> {
   // auto-expiry first: un-acted items leave the queue but stay searchable
   const expired = await db.query(
     `UPDATE proposals SET decision = 'expired', decided_at = now()
@@ -120,18 +160,22 @@ export async function run(db: Db): Promise<number> {
     [EXPIRE_DAYS],
   );
 
+  const schedule = await sectionSchedule(ctx);
   const decisions = await sectionDecisions(db, expired.rows.length);
   const today = await sectionToday(db);
   const system = await sectionSystem(db);
 
-  // silence-default: emit only when something needs the user
-  if (!decisions && !today && !system?.needsHelp) return 0;
+  // silence-default: emit only when something needs the user (a calendar
+  // with events counts — the day needs planning)
+  const hasEvents = !!schedule && !schedule[0]!.includes("nothing on the calendar");
+  if (!decisions && !today && !hasEvents && !system?.needsHelp) return 0;
 
   const parts: string[] = ["☀️ morning brief"];
+  if (schedule) parts.push("", "📅 Schedule:", ...schedule);
   if (today) parts.push("", "✅ Today:", ...today);
   if (decisions) parts.push("", "🔔 Needs your decision:", ...decisions);
   if (system) parts.push("", "⚙️ What I've been doing:", ...system.lines);
-  parts.push("", "📅 Schedule & meeting prep arrive once the calendar bridge is connected.");
+  if (!schedule) parts.push("", "📅 Schedule & meeting prep arrive once the calendar bridge is connected.");
 
   await db.query(`INSERT INTO outbound_messages (thread, text, kind) VALUES ('default', $1, 'brief')`, [
     parts.join("\n"),

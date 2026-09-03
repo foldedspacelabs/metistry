@@ -1,0 +1,20 @@
+name: eventkit
+type: bridge
+description: Calendar + Reminders read/write via EventKit (PoC-9)
+transport: http
+port: 7811
+runs_on: host            # TCC-bound: its own launchd service is its own responsible process (PoC-1)
+requires_tcc: [calendars, reminders]
+discovery: eager         # 4 tools — under the PoC-17 lazy threshold
+degrades: absent         # router stops offering calendar when the Mac is away
+exposes:
+  - name: list_events
+    description: Events from today for N days (title, times, location, attendees)
+  - name: list_reminders
+    description: Incomplete reminders across lists
+  - name: create_event
+    description: Create a calendar event — preview-then-confirm
+    destructive: true
+  - name: create_reminder
+    description: Create a reminder — preview-then-confirm
+    destructive: true

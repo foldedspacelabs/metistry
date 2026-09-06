@@ -14,6 +14,7 @@
     <h1 id="title">metistry</h1>
     <nav id="nav" hidden>
       <button data-view="chat">chat</button>
+      <button data-view="dashboard">dashboard</button>
       <button data-view="capture">capture</button>
       <button data-view="triage">triage</button>
       <button data-view="status">status</button>
@@ -93,6 +94,32 @@
         <p id="agent-grants-msg" class="muted"></p>
         <span><button type="submit">save</button> <button type="button" id="agent-grants-cancel" class="secondary">cancel</button></span>
       </form>
+    <!-- dashboard (Phase 4 visibility): one place instead of four. Every
+         panel is a named query; panels degrade independently. -->
+    <section id="dashboard" hidden>
+      <h3>last 24h <span id="dash-runs-asof" class="muted"></span></h3>
+      <ul id="dash-runs" class="tiles"></ul>
+      <p id="dash-runs-note" class="muted"></p>
+
+      <h3>reviews waiting on you <span id="dash-reviews-asof" class="muted"></span></h3>
+      <ul id="dash-reviews" class="reviews dash-list"><li class="muted">none</li></ul>
+
+      <h3>projects <span id="dash-projects-asof" class="muted"></span></h3>
+      <ul id="dash-projects" class="dash-list"></ul>
+
+      <h3>assistant spend by tier · 30d <span id="dash-spend-asof" class="muted"></span></h3>
+      <p class="muted">API-equivalent cost — on a subscription this is headroom used, not a bill.</p>
+      <p id="dash-spend-total"></p>
+      <ul id="dash-tiers" class="dash-list"></ul>
+      <details>
+        <summary class="muted">per day × tier</summary>
+        <div id="dash-spend-days" class="scroll"></div>
+      </details>
+
+      <h3>aws spend · 30d <span id="dash-aws-asof" class="muted"></span></h3>
+      <p id="dash-aws-total"></p>
+      <ul id="dash-aws" class="dash-list"></ul>
+      <ul id="dash-aws-services" class="dash-list"></ul>
     </section>
   </main>
 

@@ -5,7 +5,7 @@
 const { startRegistration, startAuthentication } = window.SimpleWebAuthnBrowser;
 
 const $ = (id) => document.getElementById(id);
-const views = ["chat", "capture", "triage", "status", "devices", "agents"];
+const views = ["chat", "dashboard", "capture", "triage", "status", "devices", "agents"];
 const enrollCode = new URLSearchParams(location.hash.slice(1)).get("enroll");
 
 async function api(path, opts = {}) {
@@ -18,7 +18,7 @@ function show(view) {
   $("nav").hidden = false; $("auth").hidden = true;
   for (const v of views) $(v).hidden = v !== view;
   document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("active", b.dataset.view === view));
-  ({ chat: loadMessages, status: loadStatus, devices: loadDevices, triage: loadTriage, agents: loadAgents }[view] ?? (() => {}))();
+  ({ chat: loadMessages, dashboard: loadDashboard, status: loadStatus, devices: loadDevices, triage: loadTriage, agents: loadAgents }[view] ?? (() => {}))();
 }
 
 function showAuth() {
@@ -120,13 +120,7 @@ async function loadStatus() {
     .join("");
   // one review list across every configured repo (github-state → prs_for_review)
   const { rows } = await (await api("/api/q/prs_for_review")).json();
-  $("reviews").innerHTML = rows.length
-    ? rows.map((r) => {
-        const url = /^https:\/\/github\.com\//.test(r.url ?? "") ? r.url : null; // agent/source text is output-encoded; only a github.com url becomes a link
-        const ref = esc(String(r.external_ref).replace(/^gh:/, ""));
-        return `<li><span>${url ? `<a href="${esc(url)}" target="_blank" rel="noopener">${ref}</a>` : ref} ${esc(r.title)}</span><span class="muted">${esc(r.author ?? "")}</span></li>`;
-      }).join("")
-    : `<li class="muted">none</li>`;
+  $("reviews").innerHTML = reviewListHtml(rows); // shared with the dashboard panel
 }
 
 $("push-enable").onclick = async () => {
@@ -278,3 +272,126 @@ $("agent-grants").onsubmit = async (e) => {
   $("agent-grants").hidden = true;
   loadAgents();
 };
+// ===== dashboard (Phase 4 visibility: one place instead of four) =====
+// Every server value is output-encoded via esc() before it touches the DOM
+// (CRIT-7); only a https://github.com/ url may become a link. pg returns
+// count()/numeric/bigint as strings, so numbers pass through asNum() first —
+// bar widths are numbers we computed, never server text.
+const asNum = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+const fmtUsd = (v) => asNum(v).toFixed(2);
+const fmtK = (v) => { const n = asNum(v); return n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(Math.round(n)); };
+const fmtDay = (v) => {
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(String(v)) ? new Date(`${v}T00:00:00`) : new Date(v); // a bare date is local, not UTC
+  return Number.isNaN(d.getTime()) ? String(v ?? "") : d.toLocaleDateString([], { month: "short", day: "numeric" });
+};
+const barPct = (v, max) => (max > 0 ? Math.max(0, Math.min(100, (asNum(v) / max) * 100)) : 0);
+const barHtml = (v, max) => `<span class="bar"><span style="width:${barPct(v, max).toFixed(1)}%"></span></span>`;
+const dashStamp = (id, as_of) => { $(`dash-${id}-asof`).textContent = as_of ? `as of ${new Date(as_of).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : ""; };
+
+// one review list across every configured repo (github-state → prs_for_review); the status page uses it too
+function reviewListHtml(rows) {
+  return rows.length
+    ? rows.map((r) => {
+        const url = /^https:\/\/github\.com\//.test(r.url ?? "") ? r.url : null; // agent/source text is output-encoded; only a github.com url becomes a link
+        const ref = esc(String(r.external_ref).replace(/^gh:/, ""));
+        return `<li><span>${url ? `<a href="${esc(url)}" target="_blank" rel="noopener">${ref}</a>` : ref} ${esc(r.title)}</span><span class="muted">${esc(r.author ?? "")}</span></li>`;
+      }).join("")
+    : `<li class="muted">none</li>`;
+}
+
+async function dashQuery(name, params) {
+  const qs = params ? `?${new URLSearchParams(params)}` : "";
+  return (await api(`/api/q/${name}${qs}`)).json();
+}
+
+function renderRuns({ rows, as_of }) {
+  const s = rows[0] ?? {};
+  const failed = asNum(s.failures);
+  const tiles = [
+    ["runs ok", asNum(s.runs_ok), "ok"],
+    ["failed", failed, failed > 0 ? "failed" : ""],
+    ["turns", asNum(s.turns), ""],
+    ["captures", asNum(s.captures), ""],
+    ["spend", `$${fmtUsd(s.spend_usd)}`, ""],
+  ];
+  $("dash-runs").innerHTML = tiles.map(([label, v, cls]) => `<li class="tile"><b class="${cls}">${esc(String(v))}</b><span class="muted">${label}</span></li>`).join("");
+  $("dash-runs-note").textContent = s.last_run_at
+    ? `${failed > 0 ? "check the status page — " : ""}last activity ${new Date(s.last_run_at).toLocaleString()}`
+    : "nothing ran in the last 24h";
+  dashStamp("runs", as_of);
+}
+
+function renderProjects({ rows, as_of }) {
+  $("dash-projects").innerHTML = rows.length
+    ? rows.map((r) => {
+        const latest = (Array.isArray(r.latest) ? r.latest : []).map((t) => esc(String(t).slice(0, 60))).join(" · ");
+        const blocked = asNum(r.blocked);
+        return `<li><div class="row"><b>${esc(r.area)}</b><span>${asNum(r.open)} open</span></div>
+          <div class="muted">${asNum(r.in_progress)} in progress · ${blocked ? `<span class="failed">${blocked} blocked</span>` : "0 blocked"} · ${asNum(r.closed_7d)} closed this week</div>
+          ${latest ? `<div class="muted latest">${latest}</div>` : ""}</li>`;
+      }).join("")
+    : `<li class="muted">no work items yet — the github-state collector fills this in</li>`;
+  dashStamp("projects", as_of);
+}
+
+function renderSpend({ rows, as_of }) {
+  // split by tier over the window — the Phase 4 "done when"
+  const tiers = new Map();
+  for (const r of rows) {
+    const t = tiers.get(r.model) ?? { cost: 0, tin: 0, tout: 0, turns: 0 };
+    t.cost += asNum(r.cost_usd); t.tin += asNum(r.tokens_in); t.tout += asNum(r.tokens_out); t.turns += asNum(r.turns);
+    tiers.set(r.model, t);
+  }
+  const sorted = [...tiers].sort((a, b) => b[1].cost - a[1].cost);
+  const max = Math.max(0, ...sorted.map(([, t]) => t.cost));
+  const total = sorted.reduce((s, [, t]) => s + t.cost, 0);
+  $("dash-spend-total").textContent = sorted.length ? `$${fmtUsd(total)} API-equivalent across ${sorted.length} tier(s)` : "";
+  $("dash-tiers").innerHTML = sorted.length
+    ? sorted.map(([model, t]) => `<li><div class="row"><span>${esc(model ?? "unknown")}</span><span>$${fmtUsd(t.cost)}</span></div>${barHtml(t.cost, max)}
+        <div class="muted">${fmtK(t.tin)} in · ${fmtK(t.tout)} out · ${t.turns} turn(s)</div></li>`).join("")
+    : `<li class="muted">no usage recorded yet — the claude-usage collector fills this in</li>`;
+  // per day × tier (rows arrive day DESC, cost DESC)
+  const days = [...new Set(rows.map((r) => String(r.day)))].slice(0, 14);
+  const recent = rows.filter((r) => days.includes(String(r.day)));
+  const dayMax = Math.max(0, ...recent.map((r) => asNum(r.cost_usd)));
+  $("dash-spend-days").innerHTML = recent.length
+    ? `<table><thead><tr><th>day</th><th>tier</th><th class="num">turns</th><th class="num">tokens</th><th class="num">usd</th></tr></thead><tbody>${recent
+        .map((r) => `<tr><td>${esc(fmtDay(r.day))}</td><td>${esc(r.model ?? "unknown")}</td><td class="num">${asNum(r.turns)}</td><td class="num">${fmtK(asNum(r.tokens_in) + asNum(r.tokens_out))}</td><td class="num">${fmtUsd(r.cost_usd)}${barHtml(r.cost_usd, dayMax)}</td></tr>`)
+        .join("")}</tbody></table>`
+    : "";
+  dashStamp("spend", as_of);
+}
+
+function renderAws(daily, recent) {
+  const rows = daily.rows;
+  if (!rows.length) {
+    $("dash-aws-total").textContent = "";
+    $("dash-aws").innerHTML = `<li class="muted">no data yet — configure the aws-costs collector (METISTRY_AWS_*)</li>`;
+    $("dash-aws-services").innerHTML = "";
+    dashStamp("aws", daily.as_of);
+    return;
+  }
+  const max = Math.max(0, ...rows.map((r) => asNum(r.usd)));
+  const total = rows.reduce((s, r) => s + asNum(r.usd), 0);
+  $("dash-aws-total").textContent = `$${fmtUsd(total)} over ${rows.length} day(s)`;
+  $("dash-aws").innerHTML = rows.slice(0, 14).map((r) => `<li><div class="row"><span>${esc(fmtDay(r.day))}</span><span>$${fmtUsd(r.usd)}</span></div>${barHtml(r.usd, max)}</li>`).join("");
+  const svc = new Map();
+  for (const r of recent.rows) svc.set(r.service ?? "unknown", (svc.get(r.service ?? "unknown") ?? 0) + asNum(r.usd));
+  const top = [...svc].sort((a, b) => b[1] - a[1]).slice(0, 6);
+  $("dash-aws-services").innerHTML = top.map(([s, v]) => `<li class="row"><span>${esc(s)}</span><span>$${fmtUsd(v)}</span></li>`).join("");
+  dashStamp("aws", daily.as_of);
+}
+
+async function loadDashboard() {
+  // panels load independently: one absent collector never blanks the page
+  const panels = {
+    runs: async () => renderRuns(await dashQuery("runs_summary", { hours: 24 })),
+    reviews: async () => { const r = await dashQuery("prs_for_review"); $("dash-reviews").innerHTML = reviewListHtml(r.rows); dashStamp("reviews", r.as_of); },
+    projects: async () => renderProjects(await dashQuery("projects_overview")),
+    spend: async () => renderSpend(await dashQuery("claude_usage_daily", { days: 30 })),
+    aws: async () => renderAws(...(await Promise.all([dashQuery("aws_costs_daily", { days: 30 }), dashQuery("aws_costs_recent", { days: 30 })]))),
+  };
+  await Promise.all(Object.entries(panels).map(async ([id, load]) => {
+    try { await load(); } catch { $(`dash-${id}-asof`).textContent = "unavailable"; }
+  }));
+}

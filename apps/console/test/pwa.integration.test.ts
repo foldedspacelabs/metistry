@@ -58,7 +58,9 @@ describe.skipIf(!hasDb)("console PWA chunk", () => {
     const r = await fetch(base + "/");
     expect(r.status).toBe(200);
     expect(r.headers.get("content-type")).toContain("text/html");
-    expect(await r.text()).toContain("sign in with passkey");
+    const html = await r.text();
+    expect(html).toContain("sign in with passkey");
+    expect(html).toContain('id="dashboard"'); // Phase 4 dashboard tab ships in the shell
     expect((await fetch(base + "/sw.js")).status).toBe(200);
     expect((await fetch(base + "/vendor/simplewebauthn.js")).status).toBe(200);
   });

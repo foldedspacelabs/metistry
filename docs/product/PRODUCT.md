@@ -246,3 +246,15 @@ your git, on your machine.
   stranger can `npm i` it, `ensureSchema()`, and run a shared task list
   with no console anywhere (additive migration 0008 inside Metistry).
   Adapters (MCP tools, console routes) come next.
+- 2026-09-06 — **Phase 4 dashboard** in the PWA: one tab instead of four
+  places — last-24h health tiles (runs ok/failed, turns, captures, spend
+  from the `runs` ledger), reviews waiting on you, a per-area projects
+  rollup (same aggregation as the brief), **assistant spend split by
+  tier** with per-day × tier detail (labelled API-equivalent: on a
+  subscription it is headroom, not a bill — the Phase 4 "done when"), and
+  AWS spend by day and service ("no data yet" until the collector is
+  configured). Every panel is a named query (two new seeds,
+  `projects_overview` + `runs_summary`), loaded independently and
+  freshness-stamped from the `{rows, as_of}` envelope; every value is
+  output-encoded (CRIT-7). Seed queries now execute against the migrated
+  schema in CI, so a column typo fails the build, not the dashboard.

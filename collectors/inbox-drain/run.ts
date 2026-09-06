@@ -49,6 +49,8 @@ export interface CollectorCtx {
   afmToken?: string; // per-bridge bearer (CRIT-9)
   ekUrl?: string; // eventkit bridge (routines use it for schedule/meeting prep)
   ekToken?: string;
+  githubToken?: string; // github-state collector (fine-grained read-only PAT)
+  githubRepos?: string[];
   fetchFn?: typeof fetch;
 }
 

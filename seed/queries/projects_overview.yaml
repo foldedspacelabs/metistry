@@ -1,0 +1,19 @@
+# Seeded default (D4 overlay: an instance file of the same name wins).
+name: projects_overview
+description: Per-area rollup of the work table for the dashboard Projects panel — open / in progress / blocked counts, closed in the last 7 days, and the latest open titles. Same aggregation as the morning brief's Projects section.
+params:
+  limit: { type: int, default: 12 }
+sql: |
+  SELECT area,
+         count(*) FILTER (WHERE status <> 'closed')       AS open,
+         count(*) FILTER (WHERE status = 'in_progress')   AS in_progress,
+         count(*) FILTER (WHERE status = 'blocked')       AS blocked,
+         count(*) FILTER (WHERE status = 'closed' AND updated_at > now() - interval '7 days') AS closed_7d,
+         (array_agg(title ORDER BY updated_at DESC) FILTER (WHERE status <> 'closed'))[1:3] AS latest,
+         max(updated_at) AS updated_at
+  FROM work
+  WHERE area IS NOT NULL
+  GROUP BY area
+  ORDER BY open DESC, area ASC
+  LIMIT :limit
+cache_ttl: 60

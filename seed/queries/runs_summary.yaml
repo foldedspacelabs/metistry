@@ -1,0 +1,17 @@
+# Seeded default (D4 overlay: an instance file of the same name wins).
+name: runs_summary
+description: What the system did over the trailing window (dashboard health tile) — collector/routine runs ok and failed, assistant turns, captures processed, failures of any kind, and spend from the runs ledger. Same aggregation as the morning brief's system section.
+params:
+  hours: { type: int, default: 24 }
+sql: |
+  SELECT
+    count(*) FILTER (WHERE kind IN ('collector_run','routine_run') AND ok)     AS runs_ok,
+    count(*) FILTER (WHERE kind IN ('collector_run','routine_run') AND NOT ok) AS runs_failed,
+    count(*) FILTER (WHERE kind = 'turn' AND ok)                                AS turns,
+    count(*) FILTER (WHERE kind = 'capture' AND ok)                             AS captures,
+    count(*) FILTER (WHERE NOT ok)                                              AS failures,
+    coalesce(sum(cost_usd), 0)                                                  AS spend_usd,
+    max(ts)                                                                     AS last_run_at
+  FROM runs
+  WHERE ts > now() - make_interval(hours => (:hours)::int)
+cache_ttl: 60

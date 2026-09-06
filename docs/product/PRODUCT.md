@@ -235,3 +235,14 @@ your git, on your machine.
   contract, so the instance split makes the work/personal boundary
   mechanical. Installable from this repo as a marketplace
   (`/plugin marketplace add foldedspacelabs/metistry`).
+- 2026-09-06 — **tasks module shipped as a standalone package** (Phase 5's
+  first piece, §4.20): `@foldedspacelabs/metistry-tasks` is one TypeScript
+  service over any pg-shaped client — atomic claim (one `UPDATE`, WHERE is
+  the policy), leases with heartbeat, dependency gating with auto-unblock,
+  idempotent create, append-only history, every mutation a `runs` row
+  stamped with server-side agent identity (§4.19 trust rule enforced by
+  the signature: the adapter must supply it; no payload field is read).
+  Proven on Postgres: five concurrent claims, exactly one winner. A
+  stranger can `npm i` it, `ensureSchema()`, and run a shared task list
+  with no console anywhere (additive migration 0008 inside Metistry).
+  Adapters (MCP tools, console routes) come next.

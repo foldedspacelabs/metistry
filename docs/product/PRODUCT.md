@@ -175,3 +175,9 @@ your git, on your machine.
   the power layer; one design language across web + iOS. APNs relay
   privacy bar raised to launch-blocking: payload-free, provably leak-proof,
   open source.
+- 2026-09-06 — `github-state` verified live (open issues/PRs reconciled
+  into `work`, Projects section in the brief) and `aws-costs` collector
+  added: daily spend per service from Cost Explorer via a ~50-line SigV4
+  signer over `fetch` (verified against AWS's published test vector) — no
+  SDK dependency tree for one signed request every six hours. Phase 4's
+  "see your own spend" now has the AWS half; `claude-usage` is the other.

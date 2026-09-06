@@ -1,0 +1,4 @@
+name: weekly-review
+type: routine
+description: Weekly review (plan §5 maintenance cadence, §4.19 batch audit) — last 7 days across projects, decisions + pending count, agents, spend, system, next week; always goes out, empty sections say so in one line; first week of a month adds last month's spend by tier
+schedule: "@weekly"

@@ -74,6 +74,7 @@ export interface UpdateInput {
 
 export type ClaimFailure =
   | "not_found"
+  | "not_claimable" // a collected row (issue/pr/event) — the source of truth owns its status
   | "closed"
   | "blocked"
   | "claimed" // held by another agent with a live lease
@@ -81,6 +82,7 @@ export type ClaimFailure =
   | "not_holder" // heartbeat/update/release by someone other than the claim holder
   | "lease_expired"; // heartbeat after expiry — the task is up for grabs again
 
+export { CLAIMABLE_KINDS };
 export type Result = { ok: true; task: Task } | { ok: false; reason: ClaimFailure; task?: Task };
 
 export class TasksError extends Error {
@@ -109,6 +111,13 @@ const DEPS_CLOSED = `NOT EXISTS (
   WHERE t.status IS DISTINCT FROM 'closed')`;
 
 const UNCLAIMED = `(w.claimed_by IS NULL OR w.lease_expires_at < now())`;
+// Only rows the task list owns are claimable (owner ruling 2026-09-06).
+// Rows collected from a source of truth (kind issue/pr/event — github-state
+// upserts them back to `open` every tick) are visible in `work` but never
+// handed to an agent here; the §4.18 target for GitHub dispatch is the
+// place where that becomes a real claim.
+const CLAIMABLE_KINDS = ["task", "review"] as const;
+const CLAIMABLE = `w.kind = ANY('{${CLAIMABLE_KINDS.join(",")}}'::text[])`;
 
 function toTask(row: Record<string, unknown>): Task {
   // pg returns int8 as string and int8[] as string[]; normalize once here.
@@ -234,7 +243,7 @@ export class TasksService {
     const project = optionalText("project", opts.project, 200);
     const { rows } = await this.db.query(
       `SELECT ${COLS} FROM work w
-       WHERE w.status = 'open' AND ${UNCLAIMED} AND ${DEPS_CLOSED}
+       WHERE w.status = 'open' AND ${CLAIMABLE} AND ${UNCLAIMED} AND ${DEPS_CLOSED}
          AND ($1::text IS NULL OR w.project = $1)
        ORDER BY w.due NULLS LAST, w.created_at ASC, w.id ASC
        LIMIT $2`,
@@ -258,7 +267,7 @@ export class TasksService {
         `UPDATE work w
          SET claimed_by = $2, lease_expires_at = now() + ($3::int * interval '1 second'),
              status = 'in_progress', updated_at = now(), history = history || $4::jsonb
-         WHERE w.id = $1 AND ${UNCLAIMED} AND w.status IN ('open', 'in_progress') AND ${DEPS_CLOSED}
+         WHERE w.id = $1 AND ${CLAIMABLE} AND ${UNCLAIMED} AND w.status IN ('open', 'in_progress') AND ${DEPS_CLOSED}
          RETURNING ${COLS}`,
         [id, agent, lease, entry(agent, "claim")],
       );
@@ -276,6 +285,7 @@ export class TasksService {
     const row = rows[0];
     if (!row) return { ok: false, reason: "not_found" };
     const task = toTask(row);
+    if (!(CLAIMABLE_KINDS as readonly string[]).includes(task.kind)) return { ok: false, reason: "not_claimable", task };
     if (task.status === "closed") return { ok: false, reason: "closed", task };
     if (task.status === "blocked") return { ok: false, reason: "blocked", task };
     if (row.deps_closed === false) return { ok: false, reason: "dependencies_open", task };

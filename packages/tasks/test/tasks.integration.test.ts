@@ -102,6 +102,18 @@ describe.skipIf(!hasDb)("tasks (real db)", () => {
     expect(await svc.update(t.id, "itest-slow", { note: "too late" })).toMatchObject({ ok: false, reason: "not_holder" });
   });
 
+  it("collected rows (issue/pr) are never listed or claimable — the source of truth owns them", async () => {
+    const { rows } = await pool.query(
+      `INSERT INTO work (title, project, kind, status, external_ref) VALUES ('an issue', $1, 'issue', 'open', 'gh:itest/repo#901') RETURNING id`,
+      [P],
+    );
+    const id = Number(rows[0].id);
+    expect((await svc.listReady({ project: P })).map((t) => t.id)).not.toContain(id);
+    expect(await svc.claim(id, "itest-alice")).toMatchObject({ ok: false, reason: "not_claimable" });
+    expect((await svc.get(id))?.claimed_by).toBeNull();
+    await pool.query(`DELETE FROM work WHERE id = $1`, [id]);
+  });
+
   it("heartbeat, update, and release by a non-holder are rejected", async () => {
     const t = await svc.create({ title: "mine", project: P }, "itest-alice");
     expect((await svc.claim(t.id, "itest-holder")).ok).toBe(true);

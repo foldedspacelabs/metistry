@@ -18,9 +18,11 @@ WORKDIR /app
 COPY --from=build /out /app
 # product defaults ship in the image; the instance overlays via volumes (D4)
 COPY seed /app/seed
-# collector/routine manifests — the runner reads schedules from them (invariant 5)
+# collector/routine/target manifests — the runner reads schedules from them,
+# the dispatch tool reads data policies from them (invariant 5)
 COPY collectors /app/collectors
 COPY routines /app/routines
+COPY targets /app/targets
 EXPOSE 8080
 # the inbox volume mounts here; pre-own it so USER node can write (D4 note:
 # a first mount copies this ownership into the named volume)

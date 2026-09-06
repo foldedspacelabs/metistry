@@ -225,3 +225,13 @@ your git, on your machine.
   `/capture` only (uniform 403 elsewhere), captures carry `source_agent`
   provenance into the proposal at external trust, and every mint / grant /
   revoke / rotate lands in `runs`. Misuse tests ship with it (CRIT-7).
+- 2026-09-06 — **`metistry` Claude Code plugin shipped** (`plugins/claude-code/`,
+  §4.11's zero-effort external-capture door): a `metistry-capture` skill
+  that POSTs decisions/findings/notes to `/capture` with provenance in the
+  note's frontmatter (`source: claude-code`, session id, host, repo, cwd),
+  and an opt-in `SessionEnd` summary hook (`METISTRY_CAPTURE_ON_STOP=1`)
+  that exits 0 on every path. Config is env-only; tokens are redacted from
+  all output; no server change — it rides the existing owner-token
+  contract, so the instance split makes the work/personal boundary
+  mechanical. Installable from this repo as a marketplace
+  (`/plugin marketplace add foldedspacelabs/metistry`).

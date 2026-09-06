@@ -34,3 +34,24 @@ button:active { opacity: .8; }
 #agent-token { margin-top: 12px; padding: 10px; border: 1px solid #5b8def55; border-radius: 10px; background: #1a2027; }
 #agent-token code { display: block; word-break: break-all; user-select: all; -webkit-user-select: all; font-size: 14px; margin-top: 6px; }
 button.secondary { background: #2a323b; }
+/* ----- dashboard (Phase 4) ----- */
+#dashboard h3 { margin-top: 18px; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 15px; }
+#dashboard h3 .muted { font-weight: 400; }
+#dashboard p { margin: 4px 0; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 8px; }
+.tiles .tile { background: #1a2027; border-radius: 10px; padding: 10px; display: flex; flex-direction: column; }
+.tiles .tile b { font-size: 22px; font-weight: 600; line-height: 1.2; }
+#dashboard ul { padding-left: 0; }
+.reviews li { display: flex; justify-content: space-between; gap: 8px; } /* status page too */
+.dash-list li { padding: 8px 0; border-bottom: 1px solid #1f262e; }
+.dash-list li.row, .dash-list .row { display: flex; justify-content: space-between; gap: 8px; }
+.dash-list .latest { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bar { display: block; height: 6px; background: #1a2027; border-radius: 3px; margin: 4px 0; overflow: hidden; }
+.bar span { display: block; height: 100%; background: var(--acc); }
+.scroll { overflow-x: auto; }
+#dashboard table { border-collapse: collapse; width: 100%; font-size: 13px; }
+#dashboard th, #dashboard td { text-align: left; padding: 4px 6px; border-bottom: 1px solid #1f262e; white-space: nowrap; vertical-align: top; }
+#dashboard th { color: var(--mut); font-weight: 400; }
+#dashboard td.num, #dashboard th.num { text-align: right; }
+#dashboard td .bar { min-width: 48px; }
+#dashboard summary { cursor: pointer; margin-top: 8px; }

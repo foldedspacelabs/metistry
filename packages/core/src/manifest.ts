@@ -86,15 +86,61 @@ export const routineManifest = base.extend({
   agent: z.string().optional(),
 });
 
-export const targetManifest = base.extend({
-  type: z.literal("target"),
-  transport: z.enum(["mcp", "http", "github", "local"]),
-  submit: z.record(z.string(), z.unknown()),
-  result: z.record(z.string(), z.unknown()),
-  auth: z.string().optional(),
-  cost: z.object({ per_run_estimate_usd: z.number().nonnegative() }).optional(),
-  data_policy: z.string(), // enforced at the dispatch tool (§4.18.B)
+// Secrets are referenced, never written into a manifest: `env:VAR`.
+const envRef = z
+  .string()
+  .regex(/^env:[A-Z][A-Z0-9_]*$/, "must be an environment reference (env:VAR) — never a literal secret");
+
+// A vault-relative path prefix the brief may reference (plan §4.15: scopes
+// are prefix matches, so `Knowledge/Areas/fsl` covers every sub-area).
+const knowledgePrefix = z
+  .string()
+  .regex(/^Knowledge(\/[A-Za-z0-9_.-]+)*$/, "allow entries are Knowledge/... path prefixes (no '..', no trailing slash)")
+  .refine((p) => !p.split("/").includes(".."), "allow entries may not contain '..'");
+
+// What a brief bound for this target may carry (§4.18.B). Every field is
+// required so the policy is a declaration, not a default nobody chose. The
+// dispatch tool enforces it — a manifest is the contract, the tool is the
+// control.
+export const dataPolicySchema = z.object({
+  /** Knowledge path prefixes a brief may reference; empty = no vault references at all. */
+  allow: z.array(knowledgePrefix),
+  /** Provenance classes that may never leave the machine via this target, e.g. `comms` (§4.12). */
+  deny_sources: z.array(z.string().regex(/^[a-z][a-z0-9_-]*$/, "source names are lowercase kebab-case")),
+  max_brief_bytes: z.number().int().positive(),
 });
+
+export type DataPolicy = z.infer<typeof dataPolicySchema>;
+
+export const targetManifest = base
+  .extend({
+    type: z.literal("target"),
+    transport: z.enum(["mcp", "http", "github", "local"]),
+    /** How work goes in — shape depends on transport (github: `repo`). */
+    submit: z.record(z.string(), z.unknown()),
+    /** How results come back. `via: report_queue` is the only return path (§4.18.B). */
+    result: z.looseObject({ via: z.string() }),
+    auth: envRef.optional(),
+    cost: z.object({ per_run_estimate_usd: z.number().nonnegative() }).optional(),
+    data_policy: dataPolicySchema,
+  })
+  .superRefine((m, ctx) => {
+    if (m.transport === "github") {
+      const repo = m.submit.repo;
+      if (typeof repo !== "string" || !/^(env:[A-Z][A-Z0-9_]*|[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)$/.test(repo)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["submit", "repo"],
+          message: "github targets must declare submit.repo as owner/repo or env:VAR",
+        });
+      }
+      if (m.auth === undefined) {
+        ctx.addIssue({ code: "custom", path: ["auth"], message: "github targets must declare auth (env:VAR — a write token)" });
+      }
+    }
+  });
+
+export type TargetManifest = z.infer<typeof targetManifest>;
 
 // Long-running processes doctor must see: reconciler, watchdog, console
 // (review SHOULD-14 — the components most likely to die silently).

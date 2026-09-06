@@ -2,18 +2,20 @@
 // credential classes, structurally distinct (CRIT-7): owner (passkey
 // sessions + host-minted owner tokens) and per-agent bearer tokens
 // (agents.ts). An agent token works on the agent surface only — /capture
-// today, mcp-brain later — and is a uniform 403 everywhere else. Management
+// and the mcp-brain mount at /mcp — and is a uniform 403 everywhere else. Management
 // endpoints require a passkey SESSION specifically: the capture Shortcut's
 // owner token cannot manage devices or agents (least privilege inside the
 // owner class).
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { runCheck, startRun, finishRun, errorEnvelope, statusFor, type CheckResult } from "@foldedspacelabs/metistry-core";
 import { QueryError, QueryStore } from "@foldedspacelabs/metistry-queries";
+import { captureToInbox, createBrainServer } from "@foldedspacelabs/metistry-mcp-brain";
+import { TasksService } from "@foldedspacelabs/metistry-tasks";
 import type { Db } from "./auth-store.js";
 import * as store from "./auth-store.js";
 import * as agents from "./agents.js";
@@ -54,6 +56,12 @@ const DISPATCH_ROUTE = /^POST \/api\/tasks\/(\d{1,12})\/dispatch$/;
 export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Server {
   const rp = wa.rpFromOrigin(cfg.origin);
   const challenges = new wa.ChallengeStore();
+  const brain = createBrainServer({
+    db,
+    authenticate: (req) => agents.authenticateAgent(db, req), // the same principal source as /capture
+    tasks: new TasksService(db),
+    inboxDir: cfg.inboxDir,
+  });
 
   async function authenticate(req: IncomingMessage): Promise<Auth> {
     const cookie = parseCookies(req)["metistry_session"];
@@ -153,6 +161,12 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       return sendJson(res, 200, { ok: true });
     }
 
+    // ----- mcp-brain: the one MCP surface for external agents (§4.11) -----
+    // Agent bearer only; the bridge does its own 401 envelope and owns the
+    // body (the MCP transport reads it), so this sits before the console's
+    // authenticate/readJson. Owner credentials are not agent principals.
+    if (url.pathname === "/mcp") return brain.handle(req, res);
+
     // ----- everything below authenticates -----
     const auth = await authenticate(req);
     if (!auth) return sendError(res, "unauthenticated");
@@ -163,7 +177,6 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       const sourceAgent = auth.kind === "agent" ? auth.agent.id : null;
       const runId = await startRun(db, { component: "console", kind: "capture", meta: sourceAgent ? { agent: sourceAgent } : {} });
       try {
-        await mkdir(cfg.inboxDir, { recursive: true });
         let filename: string;
         let bytes: Buffer;
         let note: string | null = null;
@@ -176,16 +189,10 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
           bytes = await readBody(req);
           filename = String(req.headers["x-metistry-filename"] ?? `capture-${Date.now()}.bin`);
         }
-        const safe = filename.replaceAll(/[^A-Za-z0-9._-]/g, "_").replaceAll(/\.{2,}/g, "_"); // no traversal
-        const rel = `${Date.now()}-${safe}`;
-        await writeFile(join(cfg.inboxDir, rel), bytes);
-        const sha = createHash("sha256").update(bytes).digest("hex");
-        const { rows } = await db.query(
-          `INSERT INTO inbox (source, path, mime, note, sha256, source_agent) VALUES ('http', $1, $2, $3, $4, $5) RETURNING id`,
-          [rel, req.headers["content-type"] ?? null, note, sha, sourceAgent],
-        );
-        await finishRun(db, runId, { ok: true, meta: { inbox_id: rows[0]?.id, bytes: bytes.length } });
-        return sendJson(res, 201, { id: rows[0]?.id, path: rel, sha256: sha });
+        // one write path for every capture door (the brain bridge's `capture` tool uses the same function)
+        const r = await captureToInbox(db, cfg.inboxDir, { bytes, filename, mime: req.headers["content-type"] ?? null, note, source: "http", sourceAgent });
+        await finishRun(db, runId, { ok: true, meta: { inbox_id: r.id, bytes: bytes.length } });
+        return sendJson(res, 201, r);
       } catch (err) {
         await finishRun(db, runId, { ok: false, error: String(err) });
         throw err;

@@ -17,7 +17,9 @@
   },
   "dependencies": {
     "@foldedspacelabs/metistry-core": "workspace:*",
+    "@foldedspacelabs/metistry-mcp-brain": "workspace:*",
     "@foldedspacelabs/metistry-queries": "workspace:*",
+    "@foldedspacelabs/metistry-tasks": "workspace:*",
     "@metistry-apps/collectors": "workspace:*",
     "@metistry-apps/routines": "workspace:*",
     "@simplewebauthn/browser": "^13.3.0",

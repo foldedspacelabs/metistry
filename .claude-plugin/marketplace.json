@@ -1,0 +1,13 @@
+{
+  "name": "metistry",
+  "description": "Plugins that connect Claude Code to a Metistry instance (capture door; plan §4.11).",
+  "owner": { "name": "Folded Space Labs", "url": "https://github.com/foldedspacelabs" },
+  "plugins": [
+    {
+      "name": "metistry",
+      "source": "./plugins/claude-code",
+      "description": "Capture decisions, findings and notes from Claude Code into a Metistry instance's inbox.",
+      "version": "0.1.0"
+    }
+  ]
+}

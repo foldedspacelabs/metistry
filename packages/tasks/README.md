@@ -68,7 +68,7 @@ second) and records a `runs` row (`component = agent`, `kind = 'task_op'`,
 | Method | Does | Returns |
 | --- | --- | --- |
 | `create(input, agent)` | Insert a task. `input`: `title` (required), `project?`, `area?`, `depends_on?: number[]`, `due?: 'YYYY-MM-DD'`, `idempotency_key?`, `external_ref?`. Unknown `depends_on` ids are refused. Same key → the existing row, untouched. | `Task` |
-| `listReady({project?, limit?})` | Status `open`, unclaimed or lease expired, every dependency `closed`. Due dates first, then oldest. | `Task[]` |
+| `listReady({project?, limit?})` | Status `open`, kind `task`/`review`, unclaimed or lease expired, every dependency `closed`. Due dates first, then oldest. Rows collected from a source of truth (`issue`, `pr`, `event`) are never listed or claimable — their status belongs to the source. | `Task[]` |
 | `claim(id, agent, leaseSeconds?)` | One atomic `UPDATE`: requires unclaimed-or-expired, status `open`/`in_progress`, dependencies closed. Sets holder, lease, `in_progress`. | `Result` |
 | `heartbeat(id, agent, leaseSeconds?)` | Extend the lease. Holder only, and only while the lease is live — an expired lease is never renewed. | `Result` |
 | `update(id, agent, {status?, note?})` | Holder only. `status` ∈ `in_progress \| blocked \| closed`. `closed` releases the claim and sets `closed_at`; `blocked` keeps the claim. Appends to `history`. | `Result` |

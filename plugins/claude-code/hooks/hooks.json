@@ -1,0 +1,18 @@
+{
+  "description": "Optional end-of-session summary to POST /capture. Inert unless METISTRY_CAPTURE_ON_STOP=1; never fails the session (exit 0 on every path).",
+  "hooks": {
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/session-end.mjs"],
+            "timeout": 10,
+            "statusMessage": "Capturing session summary to Metistry…"
+          }
+        ]
+      }
+    ]
+  }
+}

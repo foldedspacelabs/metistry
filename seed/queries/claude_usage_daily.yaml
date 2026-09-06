@@ -1,0 +1,15 @@
+# Seeded default (D4 overlay: an instance file of the same name wins).
+name: claude_usage_daily
+description: Assistant token use and API-equivalent cost per day and model tier (claude-usage collector). On a subscription, cost is headroom consumed, not money billed.
+params:
+  days: { type: int, default: 30 }
+sql: |
+  SELECT ts::date AS day, labels->>'model' AS model, (labels->>'turns')::int AS turns,
+         max(value) FILTER (WHERE name = 'claude.tokens_in')  AS tokens_in,
+         max(value) FILTER (WHERE name = 'claude.tokens_out') AS tokens_out,
+         max(value) FILTER (WHERE name = 'claude.cost_usd')   AS cost_usd
+  FROM metrics
+  WHERE name LIKE 'claude.%' AND ts >= current_date - (:days)::int
+  GROUP BY 1, 2, 3
+  ORDER BY day DESC, cost_usd DESC
+cache_ttl: 300

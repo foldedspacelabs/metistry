@@ -15,7 +15,7 @@ if [ -n "$dupes" ]; then
 fi
 
 # Allowed uppercase outside the vault: conventional filenames.
-allowed='^(Knowledge/|seed/Knowledge/|.*/(README|LICENSE|CLAUDE|AGENTS|SKILL|RESULTS|SYNTHESIS|Dockerfile|PRODUCT|MEMORY)[^/]*$|(README|LICENSE|CLAUDE|AGENTS)[^/]*$|metistry-build-plan\.md$|docs/)'
+allowed='^(Knowledge/|seed/Knowledge/|.*/(README|LICENSE|CLAUDE|AGENTS|SKILL|RESULTS|SYNTHESIS|Dockerfile|Info\.plist|PRODUCT|MEMORY)[^/]*$|(README|LICENSE|CLAUDE|AGENTS)[^/]*$|metistry-build-plan\.md$|docs/)'
 offenders=$(git ls-files | grep -Ev "$allowed" | grep '[A-Z]' || true)
 if [ -n "$offenders" ]; then
   echo "unexpected uppercase outside Knowledge/ (casing rule, CLAUDE.md):" >&2

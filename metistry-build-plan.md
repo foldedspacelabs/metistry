@@ -629,12 +629,12 @@ can see your own token spend split by tier.
   write-only door opened to external agents** (§4.11)
 - **Coordination hub tools + multi-agent projects (§4.19)** — claim/lease/
   dependency columns, agent identity, event-driven proposal triage —
-  **built as the `ledger` module (§4.20)**: package first, console adapter
+  **built as the `tasks` module (§4.20)**: package first, console adapter
   second
 - **Artifacts module (§4.21)** — git-backed versions, comment threads,
-  review-bundle dispatch on the ledger, delivery-evidence tiers, tool-result
-  nudges; open decision #14 (HTML isolation) settled before the PWA renders
-  one
+  review-bundle dispatch on the task list, delivery-evidence tiers, tool-result
+  nudges; per-agent autonomy boundary enforced at the dispatch tool; HTML
+  in a sandboxed iframe (decision #14)
 - Weekly review routine
 
 ### Phase 6 — Knowledge (when Phase 5 is stable)
@@ -1584,7 +1584,7 @@ metistry/
                             Swift binaries (D3)
     mcp-brain/              read · report · query — report/capture double as
                             the inbound door for external agents (§4.11)
-    ledger/  artifacts/  knowledge/
+    tasks/  artifacts/  knowledge/
                             state-holding MODULES (§4.20): one service each,
                             own migrations, adapters in console/mcp-brain/cli
     core/                   manifest schema + runtime, lazy discovery,
@@ -1963,7 +1963,7 @@ autonomously.
 
 The bridges rule — `npx @foldedspacelabs/metistry-mcp-<name>` must work for a
 stranger — already makes the *edge* composable. The state-holding pieces
-were not: the task ledger, proposal queue, knowledge index, and (new)
+were not: the shared task list, proposal queue, knowledge index, and (new)
 artifact store were console internals. The Artifact Server review
 (`docs/research/2026-09-artifact-server-review.md`) made the cost visible:
 one application layer with thin adapters is what lets a product be used
@@ -1979,7 +1979,7 @@ attribution, and audit live in the service, once. This is invariant 3
 
 | Module | Package | Owns | Standalone use |
 | --- | --- | --- | --- |
-| **ledger** | `@foldedspacelabs/metistry-ledger` | `work` + claims/leases/dependencies (§4.19), projects | A shared task list any MCP agent can claim from |
+| **tasks** | `@foldedspacelabs/metistry-tasks` | `work` + claims/leases/dependencies (§4.19), projects | A shared task list any MCP agent can claim from |
 | **artifacts** | `@foldedspacelabs/metistry-artifacts` | artifact index, versions, comment threads, review dispatch (§4.21) | Publish-and-review for agent output, git-backed |
 | **knowledge** | `@foldedspacelabs/metistry-knowledge` | `knowledge_files/links/embeddings`, FTS + semantic search, proposal settlement | Search + propose over any markdown vault |
 | **proposals** | (inside `core` until it needs to move) | the unified `proposals` table (D7), triage, budget (D10), feedback routing | — |
@@ -2000,7 +2000,7 @@ attribution, and audit live in the service, once. This is invariant 3
   ledger for cost and liveness) with `principal`, `module`, `op`,
   `target`. One audit trail, not one per module.
 - **Project scope.** `project` is the collaboration boundary for the
-  ledger, artifacts, and comments alike (§4.19); a row without a project
+  tasks, artifacts, and comments alike (§4.19); a row without a project
   belongs to the user's default project.
 - **Identity by handle.** Cross-module references are `{module, id,
   revision?}` handles, never embedded copies (§4.19's handles-not-payloads
@@ -2013,12 +2013,12 @@ attribution, and audit live in the service, once. This is invariant 3
 **What this is not.** Not a service split — modules are packages deployed
 inside the console container by default (invariant 7 keeps a split
 possible; nothing requires it). Not a plugin system with hooks. Not a
-reason to refactor working code ahead of need: the ledger and artifact
+reason to refactor working code ahead of need: the tasks and artifact
 modules are built *as* modules in Phase 5 because they're new; `knowledge`
 is extracted when Phase 6 touches it; `proposals` stays in `core` until a
 second consumer appears.
 
-**Done when** a stranger can `npm i @foldedspacelabs/metistry-ledger`,
+**Done when** a stranger can `npm i @foldedspacelabs/metistry-tasks`,
 point it at a Postgres URL, mount its MCP tools, and run a shared task
 list for their own agents with no Metistry console anywhere — and when
 the same package, inside the console, is the one the brief reads from.
@@ -2045,6 +2045,16 @@ version is a commit, a diff is `git diff`, history is `git log`. Large
 binary artifacts, if they ever matter, arrive through `POST /capture` and
 are referenced, not versioned.
 
+**Kinds.** Any file type is an artifact; the console picks the viewer by
+kind and never trusts the extension over the sniffed type: **markdown**
+(rendered like a vault note, with wiki-links resolving into `Knowledge/`),
+**text/code** (highlighted source), **JSON/CSV** (table view), **images
+and PDF** (native browser rendering), **HTML** (sandboxed, decision #14),
+and a directory of the above (a small site or report bundle). Markdown is
+the expected common case — plans, reviews, briefs — which is also why
+artifacts live in the same repo as knowledge: an accepted artifact can be
+promoted into `Knowledge/` by a proposal, keeping its history.
+
 **Links.** `artifact` (follows current), `version` (exact, immutable),
 `review` (exact version, in the PWA, comments open). Any publish returns
 all three; the agent hands the user `review` first.
@@ -2058,14 +2068,45 @@ recorded. Exposed as an `mcp-brain` tool, a console route, and a CLI verb
 
 **Comments.** Threads on an exact version, optionally on one path with an
 opaque client-owned anchor; one-level replies; `open`/`resolved`; author
-denormalized. Human comments feed the artifact's review; agent comments
-are labeled agent-sourced like every other agent text (§4.19 trust rules).
-Comment threads are *not* a fourth notification surface: a thread that
-needs the user is a `proposals` row of kind `review` under the D10 budget.
+denormalized. Agent comments are labeled agent-sourced like every other
+agent text (§4.19 trust rules). Comment threads are *not* a fourth
+notification surface: only a thread that needs *the user* becomes a
+`proposals` row of kind `review` under the D10 budget.
+
+**Agent-to-agent review needs no human in the loop (owner direction
+2026-09-06).** A team of agents that must wait for the user to forward
+every comment can't collaborate; a team nobody watches can't be trusted.
+The balance is an **autonomy boundary, declared per agent, enforced at
+the dispatch tool** — never by prompting, never by a model deciding:
+
+```yaml
+# agents/<area>/<name>.md frontmatter (instance registry; user-edited)
+autonomy:
+  projects: [drey-v2]              # may act without review inside these
+  accept_from: [agent, user]       # whose comments/bundles it may pick up
+                                   # unprompted (default: user only)
+  may_dispatch_to: [qa, designer]  # which agents it may send bundles to
+  max_open_bundles: 3              # backpressure on task-creation explosion
+```
+
+Within the boundary, a comment one agent leaves on another agent's
+artifact is **routed by rule**: the console creates the review bundle and
+queues it to the target agent's inbox directly; the target claims it,
+replies, resolves. The user sees it happen — every hop is an action
+record, the project panel rolls up open threads, bundles in flight, and
+per-agent spend, and the morning brief reports "12 review threads settled
+between drey-dev and drey-qa, 0 needed you" — but is not asked. Outside
+the boundary (a different project, a sender not in `accept_from`, an
+agent at its bundle cap, anything touching user authority or an
+elevation), the same rule *demotes* the item to a `proposals` row and
+the user decides. The boundary itself is instance config: widening it is
+the user's hand (invariant 2), so trust is extended deliberately and
+revoked in one edit. §4.19's trust rules still hold inside the boundary —
+agent identity is server-side, and no agent message can approve anything.
 
 **Review dispatch — the push half of the loop.** The user selects threads,
 picks an agent from the registry, and sends one **bundle**. A bundle is a
-`work` row (kind `review`, payload = thread handles) on the ledger, so it
+`work` row (kind `review`, payload = thread handles) on the shared task list, so it
 inherits §4.19's atomic claim, lease, heartbeat, and dependency machinery
 unchanged. Lifecycle: `queued → claimed → delivered → addressed`, with
 `failed`/`canceled` returning the threads to the user's view.
@@ -2092,9 +2133,9 @@ invariant 4 intact.
 **Rendering untrusted artifacts** — an HTML artifact authored by an agent
 is untrusted content; rendering it on the console origin is XSS against
 the passkey session. CRIT-7's output encoding covers text, not pages.
-Open decision #14 picks the boundary (isolated origin vs. opaque-origin
-sandboxed iframe) **before any HTML artifact renders in the PWA**; until
-then artifacts render as source or as an image.
+Decision #14 (resolved 2026-09-06): an opaque-origin **sandboxed iframe**
+under a strict CSP for v1; the isolated-hostname model is reserved for the
+hosted tier.
 
 **Not in v1:** linked live-disk artifacts (their ADR 0023 — a local-only
 feature with a real threat model; revisit if the vault seam (D5/C4) lands
@@ -2273,14 +2314,15 @@ All propagated into this document.
     `down -v` rebuild. **Decide before backup/DR is built.** Artifact
     *versions* are commits (derived index); artifact *comments* and review
     dispatches are fine-grained mutable state and join the durable set.
-14. **Untrusted HTML artifacts — which boundary (§4.21).** Agent-authored
-    HTML must not run on the console origin (passkey session). Options: a
-    second hostname per install for artifact content (strongest; a second
-    cert + route on every install, hard on a tailnet) or a `sandbox` iframe
-    without `allow-same-origin` under a strict CSP (opaque origin, one
-    hostname; weaker against framing/navigation tricks). Leaning iframe for
-    v1 with the origin split reserved for the hosted tier. **Decide before
-    any HTML artifact renders in the PWA.**
+14. **Untrusted HTML artifacts — which boundary (§4.21). RESOLVED
+    2026-09-06: sandboxed iframe for v1.** Agent-authored HTML must not
+    run on the console origin (passkey session). v1 renders it in a
+    `sandbox` iframe **without `allow-same-origin`** (opaque origin) under
+    a strict CSP, served from a no-cookie path with `Cache-Control:
+    no-store`; misuse tests prove the frame can't read the session, call a
+    mutation route, or navigate the top window. A second content hostname
+    (their model — stronger against framing tricks) is reserved for the
+    hosted tier, where a wildcard domain is cheap; on a tailnet it isn't.
 
 ---
 

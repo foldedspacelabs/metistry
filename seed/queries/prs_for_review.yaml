@@ -1,0 +1,14 @@
+# Seeded default (D4 overlay: an instance file of the same name wins).
+name: prs_for_review
+description: Open pull requests across every configured repo where your review was requested (github-state collector), oldest first
+params:
+  limit: { type: int, default: 50 }
+sql: |
+  SELECT external_ref, title, area, owner,
+         meta->>'author' AS author, meta->>'url' AS url,
+         (meta->'review_requested') AS review_requested, updated_at
+  FROM work
+  WHERE kind = 'pr' AND status <> 'closed' AND meta->>'needs_my_review' = 'true'
+  ORDER BY updated_at ASC
+  LIMIT :limit
+cache_ttl: 60

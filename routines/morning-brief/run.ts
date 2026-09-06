@@ -62,7 +62,8 @@ function title(row: PendingRow): string {
 async function sectionToday(db: Db): Promise<string[] | null> {
   const work = await db.query(
     `SELECT title, status, due FROM work
-     WHERE status IN ('open','in_progress','blocked') AND (due IS NULL OR due <= current_date + 1)
+     WHERE status IN ('in_progress','blocked')
+        OR (status = 'open' AND due IS NOT NULL AND due <= current_date + 1)
      ORDER BY due NULLS LAST, updated_at DESC LIMIT 8`,
   );
   const todos = await db.query(
@@ -75,6 +76,23 @@ async function sectionToday(db: Db): Promise<string[] | null> {
     ...todos.rows.map((t: any) => `• ${(t.payload?.classification?.action || t.payload?.classification?.title || "").slice(0, 70)}  (captured, untriaged #${t.id})`),
   ];
   return lines.length ? lines : null;
+}
+
+// 👀 Reviews waiting on you — one list across every repo (owner request
+// 2026-09-06). github-state marks work.meta.needs_my_review; nothing here
+// guesses.
+async function sectionReviews(db: Db): Promise<string[] | null> {
+  const { rows } = await db.query(
+    `SELECT external_ref, title, meta->>'author' AS author, updated_at FROM work
+     WHERE kind = 'pr' AND status <> 'closed' AND meta->>'needs_my_review' = 'true'
+     ORDER BY updated_at ASC LIMIT 10`,
+  );
+  if (rows.length === 0) return null;
+  const now = Date.now();
+  return rows.map((r: any) => {
+    const age = Math.floor((now - new Date(r.updated_at).getTime()) / 86_400_000);
+    return `• ${String(r.external_ref).replace(/^gh:/, "")} ${String(r.title).slice(0, 60)} — ${r.author ?? "?"}${age > 0 ? `, ${age}d` : ""}`;
+  });
 }
 
 async function sectionDecisions(db: Db, expiredCount: number): Promise<string[] | null> {
@@ -182,17 +200,19 @@ export async function run(db: Db, ctx: RoutineCtx = {}): Promise<number> {
   const schedule = await sectionSchedule(ctx);
   const decisions = await sectionDecisions(db, expired.rows.length);
   const today = await sectionToday(db);
+  const reviews = await sectionReviews(db);
   const projects = await sectionProjects(db);
   const system = await sectionSystem(db);
 
   // silence-default: emit only when something needs the user (a calendar
   // with events counts — the day needs planning)
   const hasEvents = !!schedule && !schedule[0]!.includes("nothing on the calendar");
-  if (!decisions && !today && !hasEvents && !system?.needsHelp) return 0;
+  if (!decisions && !today && !reviews && !hasEvents && !system?.needsHelp) return 0;
 
   const parts: string[] = ["☀️ morning brief"];
   if (schedule) parts.push("", "📅 Schedule:", ...schedule);
   if (today) parts.push("", "✅ Today:", ...today);
+  if (reviews) parts.push("", "👀 Reviews waiting on you:", ...reviews);
   if (decisions) parts.push("", "🔔 Needs your decision:", ...decisions);
   if (projects) parts.push("", "📂 Projects:", ...projects);
   if (system) parts.push("", "⚙️ What I've been doing:", ...system.lines);

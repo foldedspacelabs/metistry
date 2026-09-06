@@ -118,6 +118,15 @@ async function loadStatus() {
   $("checks").innerHTML = checks
     .map((c) => `<li><span>${c.name} <span class="muted">${esc(c.probe)}</span></span><span class="${c.status === "ok" ? "ok" : "failed"}">${c.status} · ${c.latency_ms}ms</span></li>`)
     .join("");
+  // one review list across every configured repo (github-state → prs_for_review)
+  const { rows } = await (await api("/api/q/prs_for_review")).json();
+  $("reviews").innerHTML = rows.length
+    ? rows.map((r) => {
+        const url = /^https:\/\/github\.com\//.test(r.url ?? "") ? r.url : null; // agent/source text is output-encoded; only a github.com url becomes a link
+        const ref = esc(String(r.external_ref).replace(/^gh:/, ""));
+        return `<li><span>${url ? `<a href="${esc(url)}" target="_blank" rel="noopener">${ref}</a>` : ref} ${esc(r.title)}</span><span class="muted">${esc(r.author ?? "")}</span></li>`;
+      }).join("")
+    : `<li class="muted">none</li>`;
 }
 
 $("push-enable").onclick = async () => {

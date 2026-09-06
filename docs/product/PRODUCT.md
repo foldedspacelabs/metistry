@@ -193,3 +193,11 @@ your git, on your machine.
   loaded real manifests). Fixed: every-N-hours cron added; a CI test now
   loads every shipped collector/routine manifest through the runner, so
   an unparseable schedule fails the PR, not the deployment.
+- 2026-09-06 — **one review list across every repo** (owner request):
+  github-state now records author, url, and review requests on each PR
+  (`work.meta`, additive migration 0006), `prs_for_review` serves the
+  cross-repo "waiting on my review" list to the status page, and the
+  brief gets a 👀 section. "Needs my review" is computed from the
+  token's own identity — asked of me, not mine, not a draft — never
+  guessed. Today section tightened to in-progress/blocked/due items so
+  open issues don't flood it.

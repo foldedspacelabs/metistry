@@ -61,6 +61,7 @@ describe("morning brief (D10 soft budget)", () => {
         if (t.includes("SET decision = 'expired'")) return { rows: [{ id: 99 }] };
         if (t.startsWith("SELECT id, kind")) return { rows: pending };
         if (t.includes("GROUP BY area")) return { rows: [{ area: "metistry", open: 4, blocked: 1, closed_7d: 9, latest: ["EventKit bridge", "test isolation"] }] };
+        if (t.includes("needs_my_review")) return { rows: [{ external_ref: "gh:foldedspacelabs/metistry#41", title: "claude-usage collector", author: "claude", updated_at: new Date(Date.now() - 2 * 86_400_000) }] };
         if (t.includes("FROM work")) return { rows: [{ title: "ship phase 3", status: "in_progress", due: null }] };
         if (t.includes("has_action")) return { rows: [{ id: 7, payload: { classification: { action: "renew cert" } } }] };
         if (t.includes("FROM runs")) return { rows: [{ runs_ok: 3, turns: 2, captures: 4, failures: 1, spend: 0.12 }] };
@@ -72,6 +73,8 @@ describe("morning brief (D10 soft budget)", () => {
     expect(briefText).toContain("✅ Today:");
     expect(briefText).toContain("ship phase 3");
     expect(briefText).toContain("renew cert");
+    expect(briefText).toContain("👀 Reviews waiting on you:");
+    expect(briefText).toContain("• foldedspacelabs/metistry#41 claude-usage collector — claude, 2d");
     expect(briefText).toContain("🔔 Needs your decision:");
     expect(briefText.split("🔔")[1]!.split("📂")[0]!.match(/^• /gm)!.length).toBe(5); // soft budget holds
     expect(briefText).toContain("…3 more — open triage");

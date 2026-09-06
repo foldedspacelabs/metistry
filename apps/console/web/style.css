@@ -23,3 +23,14 @@ button:active { opacity: .8; }
 #checks li, #device-list li { padding: 8px 0; border-bottom: 1px solid #1f262e; display: flex; justify-content: space-between; gap: 8px; }
 .ok { color: #5fbf77; } .failed { color: #e46e6e; } .muted { color: var(--mut); font-size: 13px; }
 #status button { margin: 10px 8px 0 0; }
+
+/* ----- agents tab (external-agent registry) ----- */
+#agent-list li { padding: 8px 0; border-bottom: 1px solid #1f262e; display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
+#agent-list li.revoked { opacity: .55; }
+#agents h3 { margin-top: 16px; font-size: 15px; }
+#agent-create, #agent-grants { flex-direction: column; }
+#agents select { background: #1a2027; color: var(--fg); border: 1px solid #2a323b; border-radius: 10px; padding: 10px; font: inherit; }
+#agents label { display: flex; flex-direction: column; gap: 4px; color: var(--mut); font-size: 13px; }
+#agent-token { margin-top: 12px; padding: 10px; border: 1px solid #5b8def55; border-radius: 10px; background: #1a2027; }
+#agent-token code { display: block; word-break: break-all; user-select: all; -webkit-user-select: all; font-size: 14px; margin-top: 6px; }
+button.secondary { background: #2a323b; }

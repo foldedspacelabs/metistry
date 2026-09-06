@@ -52,6 +52,7 @@ export interface CollectorCtx {
   githubToken?: string; // github-state collector (fine-grained read-only PAT)
   aws?: { accessKeyId: string; secretAccessKey: string; sessionToken?: string }; // aws-costs collector
   awsCostDays?: number;
+  claudeUsageDays?: number; // claude-usage collector (trailing window)
   githubRepos?: string[];
   fetchFn?: typeof fetch;
 }

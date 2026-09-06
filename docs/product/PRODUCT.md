@@ -181,3 +181,10 @@ your git, on your machine.
   signer over `fetch` (verified against AWS's published test vector) — no
   SDK dependency tree for one signed request every six hours. Phase 4's
   "see your own spend" now has the AWS half; `claude-usage` is the other.
+- 2026-09-06 — `claude-usage` collector: the assistant's per-turn `runs`
+  rows rolled into daily token/cost metrics by model tier (Phase 4's
+  "see your own token spend split by tier"), derived from local data only.
+  On a subscription the cost figure is headroom consumed, not money
+  billed — labeled that way in the query so the dashboard never lies.
+  Collectors now carry a real-database test alongside the fake-db unit
+  tests, after a partial-index ON CONFLICT bug slipped past the fake.

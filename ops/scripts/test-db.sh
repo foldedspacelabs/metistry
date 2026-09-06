@@ -3,6 +3,8 @@
 # live instance db (they polluted the deployed triage queue and caused a
 # push-retry storm before this existed). Drops + recreates
 # ${METISTRY_TEST_DB_NAME:-metistry_test} and applies all migrations to it.
+# The root `pnpm test` derives a per-checkout default from the directory
+# name, so parallel worktrees (subagents) never drop each other's db.
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)

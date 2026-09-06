@@ -60,7 +60,7 @@ export async function run(db: Db, ctx: GithubCtx = {}): Promise<number> {
       await db.query(
         `INSERT INTO work (title, area, kind, status, external_ref, owner, due, updated_at)
          VALUES ($1, $2, $3, 'open', $4, $5, $6, $7)
-         ON CONFLICT (external_ref) DO UPDATE SET
+         ON CONFLICT (external_ref) WHERE external_ref IS NOT NULL DO UPDATE SET
            title = EXCLUDED.title, status = 'open', owner = EXCLUDED.owner,
            due = EXCLUDED.due, updated_at = EXCLUDED.updated_at`,
         [it.title, area, it.pull_request ? "pr" : "issue", ref, it.assignee?.login ?? null,

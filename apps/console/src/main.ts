@@ -8,6 +8,7 @@ import { collectors } from "@metistry-apps/collectors";
 import { routines } from "@metistry-apps/routines";
 import { loadSchedules, startRunner } from "./runner.js";
 import { loadRules } from "./router.js";
+import { TargetRegistry } from "./dispatch.js";
 import { readFile } from "node:fs/promises";
 
 const pool = makePool();
@@ -29,6 +30,13 @@ for (const p of optionalEnv("METISTRY_RULES_FILES", "seed/rules.yaml:rules.yaml"
 }
 if (!rules) throw new Error("no rules.yaml found (METISTRY_RULES_FILES)");
 
+// D4 overlay for compute targets (§4.18): product dir first, instance dirs after.
+const targets = new TargetRegistry();
+for (const dir of optionalEnv("METISTRY_TARGETS_DIRS", "targets").split(":")) {
+  await targets.loadDir(dir);
+}
+console.log(`targets: ${targets.names().join(", ") || "(none)"}`);
+
 const origin = requireEnv("METISTRY_ORIGIN"); // canonical HTTPS origin (§4.2)
 const push = pushConfigFromEnv();
 if (!push) console.warn("web push absent: set METISTRY_VAPID_* to enable (degrades: absent)");
@@ -42,6 +50,7 @@ const server = makeServer(pool, queries, {
   secureCookies: origin.startsWith("https:"),
   webRoot: fileURLToPath(new URL("../web", import.meta.url)),
   rules,
+  targets,
   ...(push ? { push } : {}),
 });
 if (push) startNotifier(pool, push);

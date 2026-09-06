@@ -1,8 +1,11 @@
 // The console API (§4.2). Every request authenticates (invariant 8); two
-// credential classes: passkey sessions + host-minted owner tokens (owner),
-// and — Phase 4/5 — agent tokens. Management endpoints require a passkey
-// SESSION specifically: the capture Shortcut's owner token cannot manage
-// devices (least privilege inside the owner class).
+// credential classes, structurally distinct (CRIT-7): owner (passkey
+// sessions + host-minted owner tokens) and per-agent bearer tokens
+// (agents.ts). An agent token works on the agent surface only — /capture
+// today, mcp-brain later — and is a uniform 403 everywhere else. Management
+// endpoints require a passkey SESSION specifically: the capture Shortcut's
+// owner token cannot manage devices or agents (least privilege inside the
+// owner class).
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { createHash, randomUUID } from "node:crypto";
@@ -13,6 +16,7 @@ import { runCheck, startRun, finishRun, type CheckResult } from "@foldedspacelab
 import { QueryError, QueryStore } from "@foldedspacelabs/metistry-queries";
 import type { Db } from "./auth-store.js";
 import * as store from "./auth-store.js";
+import * as agents from "./agents.js";
 import type { SessionPolicy } from "./session-policy.js";
 import { parseCookies, readBody, readJson, sendError, sendJson, sessionCookie } from "./http-util.js";
 import * as wa from "./webauthn.js";
@@ -33,7 +37,15 @@ export interface ConsoleConfig {
   rules?: Rules; // router rules; absent = everything routes to the model
 }
 
-type Auth = { kind: "session"; sessionId: number } | { kind: "owner_token" } | null;
+type Auth =
+  | { kind: "session"; sessionId: number }
+  | { kind: "owner_token" }
+  | { kind: "agent"; agent: agents.AgentPrincipal }
+  | null;
+
+// One shape for every per-agent verb so the management gate and the handler
+// cannot drift apart. Ids are slugs; anything else falls through to 404.
+const AGENT_ROUTE = /^(PUT|POST) \/api\/agents\/([a-z][a-z0-9-]{0,39})\/(grants|projects|revoke|rotate)$/;
 
 export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Server {
   const rp = wa.rpFromOrigin(cfg.origin);
@@ -47,6 +59,8 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     }
     const m = /^Bearer\s+(\S+)$/.exec(req.headers.authorization ?? "");
     if (m?.[1] && (await store.checkOwnerToken(db, m[1]))) return { kind: "owner_token" };
+    const agent = await agents.authenticateAgent(db, req); // principal from the credential, never the body
+    if (agent) return { kind: "agent", agent };
     return null;
   }
 
@@ -140,7 +154,10 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     if (!auth) return sendError(res, "unauthenticated");
 
     if (key === "POST /capture") {
-      const runId = await startRun(db, { component: "console", kind: "capture" });
+      // Tier 0 (§4.11): a capture-only agent needs nothing more than this
+      // endpoint. Provenance is stamped from the credential (§4.19).
+      const sourceAgent = auth.kind === "agent" ? auth.agent.id : null;
+      const runId = await startRun(db, { component: "console", kind: "capture", meta: sourceAgent ? { agent: sourceAgent } : {} });
       try {
         await mkdir(cfg.inboxDir, { recursive: true });
         let filename: string;
@@ -160,8 +177,8 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         await writeFile(join(cfg.inboxDir, rel), bytes);
         const sha = createHash("sha256").update(bytes).digest("hex");
         const { rows } = await db.query(
-          `INSERT INTO inbox (source, path, mime, note, sha256) VALUES ('http', $1, $2, $3, $4) RETURNING id`,
-          [rel, req.headers["content-type"] ?? null, note, sha],
+          `INSERT INTO inbox (source, path, mime, note, sha256, source_agent) VALUES ('http', $1, $2, $3, $4, $5) RETURNING id`,
+          [rel, req.headers["content-type"] ?? null, note, sha, sourceAgent],
         );
         await finishRun(db, runId, { ok: true, meta: { inbox_id: rows[0]?.id, bytes: bytes.length } });
         return sendJson(res, 201, { id: rows[0]?.id, path: rel, sha256: sha });
@@ -170,6 +187,9 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         throw err;
       }
     }
+
+    // ----- agent tokens stop here: uniform 403 on everything else, never 404 -----
+    if (auth.kind === "agent") return sendError(res, "forbidden");
 
     if (key === "POST /message") {
       const body = (await readJson(req)) as { thread_id?: string; text?: string };
@@ -294,7 +314,10 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         /^POST \/api\/devices\/\d+\/revoke$/.test(key) ||
         key === "POST /auth/logout" ||
         key === "GET /api/proposals" ||
-        /^POST \/api\/proposals\/\d+$/.test(key)
+        /^POST \/api\/proposals\/\d+$/.test(key) ||
+        key === "GET /api/agents" ||
+        key === "POST /api/agents" ||
+        AGENT_ROUTE.test(key)
       ) {
         return sendError(res, "forbidden");
       }
@@ -326,6 +349,54 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     }
 
     if (key === "GET /api/devices") return sendJson(res, 200, { devices: await store.listDevices(db) });
+
+    // ----- external-agent registry (§4.2 management surface; owner session only) -----
+    if (key === "GET /api/agents") return sendJson(res, 200, { agents: await agents.listAgents(db) });
+
+    if (key === "POST /api/agents") {
+      const body = (await readJson(req)) as { id?: unknown; display_name?: unknown; kind?: unknown };
+      try {
+        const { id, token } = await agents.createAgent(db, body);
+        await audit("agent_admin", "mint", true, { agent: id, op: "mint" });
+        return sendJson(res, 201, { id, token }); // the ONE time the token crosses the wire
+      } catch (err) {
+        if (err instanceof agents.AgentError) return sendError(res, err.code);
+        throw err;
+      }
+    }
+
+    const agentOp = AGENT_ROUTE.exec(key);
+    if (agentOp) {
+      const [, method, id, op] = agentOp as unknown as [string, string, string, string];
+      const verbOk = method === "PUT" ? op === "grants" || op === "projects" : op === "revoke" || op === "rotate";
+      if (!verbOk) return sendError(res, "not_found");
+      try {
+        if (op === "grants") {
+          const grants = agents.validateGrants(await readJson(req));
+          const ok = await agents.setGrants(db, id, grants);
+          await audit("agent_admin", "grant", ok, { agent: id, op: "grant", grants });
+          return ok ? sendJson(res, 200, { ok: true, grants }) : sendError(res, "not_found");
+        }
+        if (op === "projects") {
+          const body = (await readJson(req)) as { projects?: unknown };
+          const projects = agents.validateProjects(body.projects);
+          const ok = await agents.setProjects(db, id, projects);
+          await audit("agent_admin", "projects", ok, { agent: id, op: "projects", projects });
+          return ok ? sendJson(res, 200, { ok: true, projects }) : sendError(res, "not_found");
+        }
+        if (op === "revoke") {
+          const ok = await agents.revokeAgent(db, id);
+          await audit("agent_admin", "revoke", ok, { agent: id, op: "revoke" });
+          return ok ? sendJson(res, 200, { revoked: true }) : sendError(res, "not_found");
+        }
+        const token = await agents.rotateAgent(db, id);
+        await audit("agent_admin", "rotate", token !== null, { agent: id, op: "rotate" });
+        return token ? sendJson(res, 200, { id, token }) : sendError(res, "not_found");
+      } catch (err) {
+        if (err instanceof agents.AgentError) return sendError(res, err.code);
+        throw err;
+      }
+    }
 
     const revoke = /^POST \/api\/devices\/(\d+)\/revoke$/.exec(key);
     if (revoke) {

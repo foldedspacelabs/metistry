@@ -9,6 +9,7 @@ export type ErrorCode =
   | "invalid_request" // 400
   | "conflict"        // 409
   | "rate_limited"    // 429
+  | "not_available"   // 503 — the capability is absent in this deployment (degrades: absent); not a permission
   | "internal";       // 500 — no detail crosses the wire; detail goes to runs
 
 export interface ErrorEnvelope {
@@ -22,6 +23,7 @@ const httpStatus: Record<ErrorCode, number> = {
   invalid_request: 400,
   conflict: 409,
   rate_limited: 429,
+  not_available: 503,
   internal: 500,
 };
 
@@ -33,6 +35,7 @@ const canonicalMessage: Record<ErrorCode, string> = {
   invalid_request: "invalid request",
   conflict: "conflict",
   rate_limited: "rate limited",
+  not_available: "not available",
   internal: "internal error",
 };
 

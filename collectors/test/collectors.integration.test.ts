@@ -36,7 +36,7 @@ describe.skipIf(!hasDb)("collectors (real db)", () => {
   it("github-state upserts through the partial unique index, then closes what vanished", async () => {
     const page = (items: any[]) => (async (url: string) => ({
       ok: true,
-      json: async () => (url.endsWith("/user") ? { login: "me" } : url.includes("/pulls?") ? [{ number: 2, user: { login: "other" }, requested_reviewers: [{ login: "me" }] }] : items),
+      json: async () => (url.endsWith("/user") ? { login: "me" } : url.includes("/reviews?") ? [] : url.includes("/pulls?") ? [{ number: 2, user: { login: "other" }, requested_reviewers: [{ login: "me" }] }] : items),
     })) as unknown as typeof fetch;
     const ctx = { githubToken: "t", githubRepos: ["itest/repo"] };
     const base = { state: "open", html_url: "", updated_at: "2026-09-01T00:00:00Z" };

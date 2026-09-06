@@ -1,0 +1,159 @@
+# @foldedspacelabs/metistry-mcp-brain
+
+The one MCP surface an external agent uses to work *with* a Metistry
+instance — a standalone Claude session, a coding agent, another vendor's
+agent, any MCP client. Eleven tools over Streamable HTTP:
+
+- **in:** `capture` (a note or file into the inbox), `report` (a finding,
+  decision, gotcha, or progress note into the proposal queue);
+- **shared work:** `tasks_list_ready`, `tasks_claim`, `tasks_heartbeat`,
+  `tasks_update`, `tasks_release`, `tasks_create`, `tasks_mine` — thin
+  adapters over [`@foldedspacelabs/metistry-tasks`](../tasks);
+- **out, under grants:** `knowledge_search`, `knowledge_read`.
+
+Agents **propose**; they never write knowledge. Everything they send lands
+as a row the user triages, with provenance stamped from the credential.
+
+## What the bridge enforces (not what it asks for)
+
+| Rule | Mechanism |
+| --- | --- |
+| Identity is server-side | No tool has an `agent` argument. The host's `authenticate(req)` turns the bearer into a principal; every row, history entry, and audit run carries that id. |
+| Tasks are project-scoped | `tasks_*` only see tasks whose `project` is in the principal's membership. Anything else is `not_found` — never listed, never claimable, never usable as a dependency. Creating in a project you are not in is `forbidden`. |
+| Knowledge is tiered, default-deny | `none` → every knowledge call returns `{ error: { code: "forbidden", message: "not granted" } }` — *not* "not found", so absence of permission never looks like absence of knowledge. `index` → titles + one-line descriptions. `areas` → search and full read under the granted `Knowledge/...` prefixes only. |
+| Drafts are invisible | `status: draft` notes (the `draft` column on `knowledge_files`) are excluded by a `WHERE` clause at every tier. |
+| Text boundary | Every string that came out of the database passes `sanitizeForAgent` from core before it is rendered: bidi overrides and zero-width characters stripped, no leading `/`. The stored row is untouched. |
+| Every call is audited | One two-phase `runs` row per tool call: `component = <agent id>`, `kind = 'tool'`, `tool = <name>`, with clipped arguments and, for knowledge calls, the tier and areas it was judged under. Refusals are logged too. |
+| Idempotent writes | `report` on `idempotency_key` (unique partial index, safe under concurrency) and near-duplicate suppression (same agent + same title within 24 h → the existing id). `tasks_create` on its `idempotency_key` via the tasks module. |
+| Secrets stay out | Secret-named fields in a report payload are redacted before the row is written (core's `redactSecrets`). |
+
+**Tool-result nudges.** Every result — success or error — ends with one
+terse deterministic line when something is waiting for the caller:
+
+```
+{"tasks":[]}
+nudge: 2 tasks ready in project drey — call tasks_list_ready; claim on task #14 expires in 40s — call tasks_heartbeat
+```
+
+Computed server-side from the task list on every call; no model involved.
+A pull-only agent has no other attention channel.
+
+## Tools
+
+Arguments are validated with zod; the JSON schema is what `tools/list`
+returns. Results are one `text` content block: a JSON document, then the
+optional nudge line. Errors set `isError` and carry core's uniform envelope
+`{ error: { code, message } }` with codes `invalid_request`, `forbidden`,
+`not_found`, `conflict`, `not_available`, `internal`.
+
+| Tool | Arguments | Returns |
+| --- | --- | --- |
+| `capture` | `note?`, `filename?`, `content_base64?`, `mime?` (one of `note` / `content_base64` required) | `{ id, path, sha256 }` — an `inbox` row, `source = 'mcp'`, `source_agent` = you |
+| `report` | `title`, `body`, `kind?` ∈ finding \| decision \| gotcha \| progress, `refs?: string[]`, `idempotency_key?` | `{ id, deduplicated: false \| "idempotency_key" \| "title" }` — a `proposals` row, kind `report`, trust `external` |
+| `tasks_list_ready` | `project?`, `limit?` | `{ tasks }` across your projects (or one) |
+| `tasks_claim` | `id`, `lease_seconds?` | `{ ok: true, task }` or `{ ok: false, reason, task? }` |
+| `tasks_heartbeat` | `id`, `lease_seconds?` | same |
+| `tasks_update` | `id`, `status?` ∈ in_progress \| blocked \| closed, `note?` | same |
+| `tasks_release` | `id`, `note?` | same |
+| `tasks_create` | `title`, `project`, `area?`, `depends_on?: number[]`, `due?` (YYYY-MM-DD), `idempotency_key?` | `{ task }` |
+| `tasks_mine` | — | `{ tasks }` you hold |
+| `knowledge_search` | `query`, `limit?` | `{ tier, hits: [{ path, title, description }] }` |
+| `knowledge_read` | `path` (`Knowledge/...`) | `{ path, title, content }` |
+
+Policy refusals from the task list (`claimed`, `dependencies_open`,
+`not_holder`, `lease_expired`, …) are *outcomes*, returned as data; only a
+scope miss is an error envelope.
+
+## Embed it
+
+This package needs a database and a principal source, so it is not an
+`npx` one-liner; it is a handler you mount inside your own `node:http`
+server. No `pg` import here — pass any client with pg's `query(text,
+values)` shape.
+
+```ts
+import { createServer } from "node:http";
+import pg from "pg";
+import { TasksService } from "@foldedspacelabs/metistry-tasks";
+import { createBrainServer } from "@foldedspacelabs/metistry-mcp-brain";
+
+const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+const brain = createBrainServer({
+  db: pool,
+  tasks: new TasksService(pool),
+  inboxDir: "/data/inbox",
+  // YOUR credential → principal. Return null for anything you don't trust; the bridge answers 401.
+  authenticate: async (req) => lookupAgentByBearer(req.headers.authorization), // → { id, grants: { tier, areas }, projects } | null
+  // Optional: a vault read path. Without it, knowledge_read answers `not_available`.
+  readKnowledge: async (path) => readFileOrNull(path),
+});
+
+createServer((req, res) => {
+  if (req.url === "/mcp") return void brain.handle(req, res);
+  res.writeHead(404).end();
+}).listen(8080);
+```
+
+`createBrainServer` options:
+
+| Option | Meaning |
+| --- | --- |
+| `db` | `{ query(text, values) }` — pg.Pool, pg.Client, or a fake |
+| `authenticate(req)` | `AgentPrincipal \| null`. **Grants and projects come from here, never from the request.** |
+| `tasks` | a `TasksService` over the same database |
+| `inboxDir` | where `capture` writes files (the triage row references them) |
+| `readKnowledge?` | `(path) => Promise<string \| null>` — absent → `knowledge_read` is `not_available` and `check()` reports `degraded` |
+| `leaseWarningSeconds?` | nudge threshold for a held lease (default 120) |
+| `version?` | reported to clients as the server version |
+
+The returned `BrainServer` has `handle(req, res)`, `check()` (the §4.3
+behavioral probe: selects the columns every tool depends on and runs the
+tasks module's own check), and `tools` (the eleven names, in manifest
+order).
+
+**Transport.** Stateless Streamable HTTP: a fresh MCP server per request,
+no session header, JSON responses (`enableJsonResponse`). Unauthenticated
+requests get `401` + `WWW-Authenticate: Bearer` + the uniform envelope at
+the HTTP layer, before any MCP parsing.
+
+**Schema.** Metistry's migrations own it (`0009_brain.sql` adds
+`knowledge_files.title/description/draft` and the report idempotency
+index). Standalone users need the tasks module's `ensureSchema()` plus the
+`inbox`, `proposals`, and `knowledge_files` tables from
+`db/migrations/0001` / `0002` / `0009`.
+
+## In Metistry
+
+The console mounts it at `POST /mcp` with `authenticateAgent` from the
+agent registry as the principal source — the same function that
+authenticates `POST /capture`. Register an agent, set its grants and
+projects, and point any MCP client at the instance:
+
+```sh
+# on the instance (owner session): mint, then grant
+curl -X POST https://<origin>/api/agents -d '{"id":"drey-dev","display_name":"Drey dev agent"}'   # → { id, token }  (the token crosses the wire once)
+curl -X PUT  https://<origin>/api/agents/drey-dev/grants   -d '{"tier":"areas","areas":["Knowledge/Areas/Drey"]}'
+curl -X PUT  https://<origin>/api/agents/drey-dev/projects -d '{"projects":["drey"]}'
+
+# in Claude Code
+claude mcp add --transport http metistry https://<origin>/mcp --header "Authorization: Bearer <token>"
+```
+
+A capture-only agent needs no grants at all (tier `none`, no projects):
+`capture` and `report` work for every registered agent. Revoking or
+rotating the agent kills the token on the next request.
+
+## Test
+
+`vitest run` in this package: unit tests with a fake executor (manifest ↔
+tool-list lock, nudge arithmetic, the reader-less `not_available` path)
+and, when `METISTRY_DB_PASSWORD` is set, the misuse suite against the
+scratch database through the real MCP client: 401 envelopes, cross-project
+`not_found`, tier `none` → `not granted`, draft exclusion, nudge
+appearing and disappearing, report dedupe, sanitizer on the way out, one
+`runs` row per call. From the repo root, `pnpm test` provisions the
+scratch database first.
+
+## License
+
+Apache-2.0

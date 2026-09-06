@@ -5,7 +5,7 @@
 const { startRegistration, startAuthentication } = window.SimpleWebAuthnBrowser;
 
 const $ = (id) => document.getElementById(id);
-const views = ["chat", "capture", "triage", "status", "devices"];
+const views = ["chat", "capture", "triage", "status", "devices", "agents"];
 const enrollCode = new URLSearchParams(location.hash.slice(1)).get("enroll");
 
 async function api(path, opts = {}) {
@@ -18,7 +18,7 @@ function show(view) {
   $("nav").hidden = false; $("auth").hidden = true;
   for (const v of views) $(v).hidden = v !== view;
   document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("active", b.dataset.view === view));
-  ({ chat: loadMessages, status: loadStatus, devices: loadDevices, triage: loadTriage }[view] ?? (() => {}))();
+  ({ chat: loadMessages, status: loadStatus, devices: loadDevices, triage: loadTriage, agents: loadAgents }[view] ?? (() => {}))();
 }
 
 function showAuth() {
@@ -195,3 +195,86 @@ try {
   const probe = await fetch("/api/status");
   if (probe.ok) { show("chat"); replayDraft(); pollChat(); } else showAuth();
 } catch { showAuth(); }
+
+// ----- agents (external-agent registry; every agent-authored field output-encoded — CRIT-7) -----
+// The token is shown exactly once, at mint/rotate; the list never carries it.
+let agentsCache = [];
+async function loadAgents() {
+  const res = await api("/api/agents");
+  const { agents } = await res.json();
+  agentsCache = agents;
+  $("agents-empty").hidden = agents.length > 0;
+  $("agent-list").innerHTML = agents
+    .map((a) => {
+      const g = a.grants ?? { tier: "none", areas: [] };
+      const seen = a.last_seen_at ? `seen ${new Date(a.last_seen_at).toLocaleDateString()}` : "never seen";
+      const scope = g.tier === "areas" ? g.areas.map(esc).join(", ") : esc(g.tier);
+      const projects = (a.projects ?? []).length ? ` · projects: ${a.projects.map(esc).join(", ")}` : "";
+      const actions = a.revoked
+        ? '<span class="muted">revoked</span>'
+        : `<span><button data-agent-grants="${esc(a.id)}" class="secondary">grants</button> <button data-agent-rotate="${esc(a.id)}" class="secondary">rotate</button> <button data-agent-revoke="${esc(a.id)}" style="background:#7a3b3b">revoke</button></span>`;
+      return `<li class="${a.revoked ? "revoked" : ""}"><span><b>${esc(a.display_name)}</b> <span class="muted">${esc(a.id)} · ${esc(a.kind)}</span><br>
+        <span class="muted">tier: ${scope}${projects} · ${seen}</span></span>${actions}</li>`;
+    })
+    .join("");
+  document.querySelectorAll("[data-agent-grants]").forEach((b) => (b.onclick = () => openGrants(b.dataset.agentGrants)));
+  document.querySelectorAll("[data-agent-rotate]").forEach((b) => (b.onclick = async () => {
+    const id = b.dataset.agentRotate;
+    if (!confirm(`rotate the token for ${id}? the current token stops working immediately.`)) return;
+    const r = await api(`/api/agents/${encodeURIComponent(id)}/rotate`, { method: "POST" });
+    if (r.ok) showAgentToken(await r.json()); else alert("rotate failed");
+    loadAgents();
+  }));
+  document.querySelectorAll("[data-agent-revoke]").forEach((b) => (b.onclick = async () => {
+    const id = b.dataset.agentRevoke;
+    if (!confirm(`revoke ${id}? this cannot be undone — register a new agent to re-admit it.`)) return;
+    await api(`/api/agents/${encodeURIComponent(id)}/revoke`, { method: "POST" });
+    loadAgents();
+  }));
+}
+
+function showAgentToken({ id, token }) {
+  $("agent-token-for").textContent = id; // textContent: never markup
+  $("agent-token-value").textContent = token;
+  $("agent-token").hidden = false;
+}
+
+$("agent-create").onsubmit = async (e) => {
+  e.preventDefault();
+  const body = { id: $("agent-id").value.trim(), display_name: $("agent-name").value.trim(), kind: $("agent-kind").value };
+  const r = await api("/api/agents", { method: "POST", body: JSON.stringify(body) });
+  if (r.status === 409) return alert("that id is already registered");
+  if (!r.ok) return alert("invalid — id is a slug (a-z, 0-9, -; max 40) and a display name is required");
+  showAgentToken(await r.json());
+  $("agent-id").value = ""; $("agent-name").value = "";
+  loadAgents();
+};
+
+function openGrants(id) {
+  const a = agentsCache.find((x) => x.id === id);
+  if (!a) return;
+  $("agent-token").hidden = true;
+  $("agent-grants-for").textContent = id;
+  $("agent-grants").dataset.agent = id;
+  $("agent-tier").value = a.grants?.tier ?? "none";
+  $("agent-areas").value = (a.grants?.areas ?? []).join("\n");
+  $("agent-projects").value = (a.projects ?? []).join(", ");
+  $("agent-grants-msg").textContent = "";
+  $("agent-grants").hidden = false;
+}
+
+$("agent-grants-cancel").onclick = () => { $("agent-grants").hidden = true; };
+
+$("agent-grants").onsubmit = async (e) => {
+  e.preventDefault();
+  const id = $("agent-grants").dataset.agent;
+  const tier = $("agent-tier").value;
+  const areas = tier === "areas" ? $("agent-areas").value.split("\n").map((s) => s.trim()).filter(Boolean) : [];
+  const projects = $("agent-projects").value.split(",").map((s) => s.trim()).filter(Boolean);
+  const g = await api(`/api/agents/${encodeURIComponent(id)}/grants`, { method: "PUT", body: JSON.stringify({ tier, areas }) });
+  if (!g.ok) { $("agent-grants-msg").textContent = "grants rejected — areas must be TitleCase Knowledge/… prefixes, one per line, and only for tier areas"; return; }
+  const p = await api(`/api/agents/${encodeURIComponent(id)}/projects`, { method: "PUT", body: JSON.stringify({ projects }) });
+  if (!p.ok) { $("agent-grants-msg").textContent = "projects rejected — comma-separated slugs (a-z, 0-9, -)"; return; }
+  $("agent-grants").hidden = true;
+  loadAgents();
+};

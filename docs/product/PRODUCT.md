@@ -188,3 +188,8 @@ your git, on your machine.
   billed — labeled that way in the query so the dashboard never lies.
   Collectors now carry a real-database test alongside the fake-db unit
   tests, after a partial-index ON CONFLICT bug slipped past the fake.
+- 2026-09-06 — Incident: the console crash-looped on restart because the
+  runner rejected aws-costs's `0 */6 * * *` schedule (unit tests never
+  loaded real manifests). Fixed: every-N-hours cron added; a CI test now
+  loads every shipped collector/routine manifest through the runner, so
+  an unparseable schedule fails the PR, not the deployment.

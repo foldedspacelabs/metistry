@@ -108,6 +108,15 @@ describe("weekly review", () => {
     expect(sent[0]).toContain("• old (Old): 0 reports, 0 tasks claimed, 0 closed, 0 tool calls — revoked");
   });
 
+  it("agents: the list is capped at the busiest 10 with a count for the rest, never the roster", async () => {
+    const many = Array.from({ length: 13 }, (_, i) => ({ id: `a${i}`, display_name: null, last_seen_at: null, revoked_at: null, reports: "0", proposals: "0", claimed: "0", closed: "0", calls: String(13 - i), spend: "0" }));
+    const { db, sent } = fakeDb([["AS reports", many]]);
+    await run(db, { now });
+    const section = sent[0]!.split("🤖 Agents:")[1]!.split("💸")[0]!;
+    expect(section.match(/^• a\d+/gm)).toHaveLength(10);
+    expect(section).toContain("…3 more agent(s) — see the agents page");
+  });
+
   it("spend: assistant by model tier labelled API-equivalent, AWS total with top 3 services", async () => {
     const { db, sent } = fakeDb([
       ["claude.cost_usd", [{ model: "sonnet", usd: "0.90" }, { model: "haiku", usd: "0.33" }]],

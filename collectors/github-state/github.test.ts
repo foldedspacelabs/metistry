@@ -26,6 +26,7 @@ describe("github-state collector", () => {
       ok: true,
       json: async () => {
         if (url.endsWith("/user")) return { login: "mattcolf" };
+        if (url.endsWith("/reviews?per_page=100")) return [];
         if (url.includes("/pulls?")) return [
           { number: 9, draft: false, user: { login: "claude" }, requested_reviewers: [{ login: "mattcolf" }], requested_teams: [] },
         ];
@@ -57,22 +58,28 @@ describe("github-state collector", () => {
     await expect(run(db, { githubToken: "bad", githubRepos: ["o/r"], fetchFn })).rejects.toThrow(/HTTP 401/);
   });
 
-  it("needs_my_review is false for drafts, own PRs, and when the viewer is unknown", async () => {
-    const mk = (viewerOk: boolean, pull: any) => (async (url: string) => {
+  it("needs_my_review: open non-draft PR I haven't approved → true; my approval clears it; re-request re-opens it; draft/unknown viewer → false", async () => {
+    const mk = (viewerOk: boolean, pull: any, reviews: any[]) => (async (url: string) => {
       if (url.endsWith("/user")) return { ok: viewerOk, json: async () => ({ login: "me" }) };
+      if (url.includes("/reviews?")) return { ok: true, json: async () => reviews };
       return { ok: true, json: async () => (url.includes("/pulls?") ? [pull] : [
         { number: 1, title: "t", state: "open", pull_request: {}, html_url: "", updated_at: "2026-09-01T00:00:00Z", user: pull.user },
       ]) };
     }) as unknown as typeof fetch;
-    const needs = async (viewerOk: boolean, pull: any) => {
+    const needs = async (viewerOk: boolean, pull: any, reviews: any[] = []) => {
       const db = fakeDb();
-      await run(db, { githubToken: "t", githubRepos: ["o/r"], fetchFn: mk(viewerOk, pull) });
+      await run(db, { githubToken: "t", githubRepos: ["o/r"], fetchFn: mk(viewerOk, pull, reviews) });
       return JSON.parse(String(db.q.find((x) => x.text.startsWith("INSERT"))!.values[7])).needs_my_review;
     };
-    const asked = { number: 1, user: { login: "other" }, requested_reviewers: [{ login: "me" }] };
-    expect(await needs(true, asked)).toBe(true);
-    expect(await needs(true, { ...asked, draft: true })).toBe(false);
-    expect(await needs(true, { ...asked, user: { login: "me" } })).toBe(false);
-    expect(await needs(false, asked)).toBe(false); // /user degraded → never claims a review is mine
+    const mine = { number: 1, user: { login: "me" }, requested_reviewers: [] };
+    const theirs = { number: 1, user: { login: "other" }, requested_reviewers: [] };
+    const approved = [{ user: { login: "me" }, state: "APPROVED" }];
+    expect(await needs(true, mine)).toBe(true); // agent-opened under my account, unreviewed
+    expect(await needs(true, theirs)).toBe(true);
+    expect(await needs(true, theirs, [{ user: { login: "me" }, state: "COMMENTED" }])).toBe(true); // a comment isn't an approval
+    expect(await needs(true, theirs, approved)).toBe(false);
+    expect(await needs(true, { ...theirs, requested_reviewers: [{ login: "me" }] }, approved)).toBe(true); // re-requested
+    expect(await needs(true, { ...theirs, draft: true })).toBe(false);
+    expect(await needs(false, theirs)).toBe(false); // /user degraded → never claims a review is mine
   });
 });

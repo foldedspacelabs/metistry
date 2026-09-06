@@ -2,7 +2,8 @@
 // `work` (§4.8). Status comes from GitHub, never invented. Degrades absent
 // without a token/repos. Uses the REST API with a fine-grained read-only
 // PAT (env), no SDK dependency. PRs additionally carry review-request
-// metadata (work.meta) so "what's waiting on my review" is one query.
+// metadata (work.meta) so "what's waiting on my review" is one query
+// (one extra reviews call per open non-draft PR).
 
 export interface Db {
   query(text: string, values?: unknown[]): Promise<{ rows: any[] }>;
@@ -51,6 +52,17 @@ async function fetchViewer(ctx: GithubCtx): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+/** Has `login` left an APPROVED review on this PR? One call per open non-draft PR. */
+async function approvedBy(ctx: GithubCtx, repo: string, number: number, login: string): Promise<boolean> {
+  const res = await (ctx.fetchFn ?? fetch)(`https://api.github.com/repos/${repo}/pulls/${number}/reviews?per_page=100`, {
+    headers: ghHeaders(ctx),
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!res.ok) throw new Error(`github ${repo}#${number} reviews: HTTP ${res.status}`);
+  const reviews = (await res.json()) as { user?: { login: string } | null; state: string }[];
+  return reviews.some((r) => r.user?.login === login && r.state === "APPROVED");
 }
 
 /** Open PRs with review-request detail (the issues listing omits it). */
@@ -105,9 +117,14 @@ export async function run(db: Db, ctx: GithubCtx = {}): Promise<number> {
         meta.draft = !!p?.draft;
         meta.review_requested = reviewers;
         meta.review_teams = (p?.requested_teams ?? []).map((t) => t.slug);
-        // "needs my review" = asked of me, not mine, not a draft. Teams are
-        // listed but not matched (membership isn't known here).
-        meta.needs_my_review = !!me && reviewers.includes(me) && author !== me && !p?.draft;
+        // "needs my review" (owner ruling 2026-09-06): the configured repos
+        // are the ones I review, so any open non-draft PR I haven't approved
+        // needs me — including PRs opened under my own account by an agent.
+        // A fresh review request re-opens it even after an approval. Teams
+        // are listed but not matched (membership isn't known here). Unknown
+        // viewer (/user degraded) → never claims a review is mine.
+        meta.needs_my_review =
+          !!me && !p?.draft && (reviewers.includes(me) || !(await approvedBy(ctx, repo, it.number, me)));
       }
       await db.query(
         `INSERT INTO work (title, area, kind, status, external_ref, owner, due, updated_at, meta)

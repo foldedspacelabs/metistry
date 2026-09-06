@@ -197,7 +197,8 @@ your git, on your machine.
   github-state now records author, url, and review requests on each PR
   (`work.meta`, additive migration 0006), `prs_for_review` serves the
   cross-repo "waiting on my review" list to the status page, and the
-  brief gets a 👀 section. "Needs my review" is computed from the
-  token's own identity — asked of me, not mine, not a draft — never
-  guessed. Today section tightened to in-progress/blocked/due items so
+  brief gets a 👀 section. "Needs my review" (ruled 2026-09-06): in the
+  configured repos, any open non-draft PR I haven't approved — which
+  covers PRs an agent opened under my own account — computed from the
+  token's identity, never guessed. Today section tightened to in-progress/blocked/due items so
   open issues don't flood it.

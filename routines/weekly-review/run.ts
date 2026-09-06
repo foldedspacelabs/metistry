@@ -21,6 +21,7 @@ export interface WeeklyCtx extends RoutineCtx {
 
 const WINDOW_DAYS = 7;
 const MONTHLY_GATE_DAY = 7; // run falls on day 1..7 → add "last month"
+const AGENTS_MAX = 10; // D10 spirit: the busiest agents, then a count — never the roster
 
 const num = (x: unknown): number => Number(x ?? 0);
 const usd = (x: unknown): string => `${num(x).toFixed(2)} USD`;
@@ -135,7 +136,9 @@ async function sectionAgents(db: Db, now: Date): Promise<string[]> {
     [now],
   );
   if (rows.length === 0) return ["• no agents registered and no agent activity this week"];
-  return rows.map((r: any) => {
+  const shown = rows.slice(0, AGENTS_MAX);
+  const rest = rows.length - shown.length;
+  const lines = shown.map((r: any) => {
     const stats = [
       plural(num(r.reports), "report"),
       ...(num(r.proposals) > 0 ? [plural(num(r.proposals), "proposal")] : []),
@@ -147,6 +150,8 @@ async function sectionAgents(db: Db, now: Date): Promise<string[]> {
     const seen = r.revoked_at ? "revoked" : r.last_seen_at ? `last seen ${daysBetween(r.last_seen_at, now)}d ago` : r.display_name ? "never seen" : "not registered";
     return `• ${r.id}${r.display_name ? ` (${r.display_name})` : ""}: ${stats.join(", ")} — ${seen}`;
   });
+  if (rest > 0) lines.push(`…${rest} more agent(s) — see the agents page`);
+  return lines;
 }
 
 // Spend between two local dates [from, to). Shared by the weekly section and

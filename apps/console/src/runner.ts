@@ -1,8 +1,10 @@
 // Minimal routine runner (SHOULD-8): schedules collectors from their
 // manifests, gates on the runs table (per-collector last-run — survives
 // restarts, no double-run storms), executes under a two-phase runs row.
-// Cron support is deliberately narrow: */N minutes, @hourly, @daily —
-// widen when a manifest actually needs more.
+// Cron support is deliberately narrow: */N minutes, 0 */N hours, @hourly,
+// @daily, @weekly — widen when a manifest actually needs more. Every
+// shipped manifest must parse: the console refuses to start otherwise
+// (it crash-looped once on an unparsed schedule — manifests.test.ts).
 
 import { readFile } from "node:fs/promises";
 import { parse as parseYaml } from "yaml";
@@ -15,7 +17,9 @@ export function scheduleToSeconds(schedule: string): number {
   if (schedule === "@weekly") return 604800;
   const m = /^\*\/(\d+) \* \* \* \*$/.exec(schedule);
   if (m?.[1]) return Number(m[1]) * 60;
-  throw new Error(`runner cannot schedule "${schedule}" yet — supported: */N minutes, @hourly, @daily, @weekly`);
+  const h = /^0 \*\/(\d+) \* \* \*$/.exec(schedule); // every N hours
+  if (h?.[1]) return Number(h[1]) * 3600;
+  throw new Error(`runner cannot schedule "${schedule}" yet — supported: */N minutes, 0 */N hours, @hourly, @daily, @weekly`);
 }
 
 export interface ScheduledCollector extends RegisteredCollector {

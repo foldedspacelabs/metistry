@@ -86,6 +86,8 @@ flowchart LR
 | **Target** | A place work can execute (§4.18) | The router / dispatch rules | Per its manifest |
 | **Work item** | One task on the shared list, claimable with a lease (§4.19) | Anything, via the hub | `work` table |
 | **Project** | A multi-agent effort: agents + tasks + proposals + spend, one view (§4.19) | The user | View over existing tables |
+| **Artifact** | A versioned, reviewable output of agent work — plan, report, page, mockup (§4.21) | Any agent, via the artifact module | Directory in the instance repo; Postgres index |
+| **Module** | A state-holding component usable alone or composed (§4.20) | — | npm package + named data contract |
 | **Proposal** | A suggested knowledge/action addition awaiting triage | Any agent or capture | One `proposals` table (D7); never the vault directly |
 | **Grant** | A user-issued, server-side permission (read tier, area scope) (§4.11) | The user, via the management API | Attached to a credential |
 | **Profile** | What the assistant knows about its user (§4.15) | Init interview + accepted proposals | `Knowledge/Me/` |
@@ -626,7 +628,13 @@ can see your own token spend split by tier.
 - `brain-query` MCP bridge exposing named queries to Metis; **`mcp-brain`'s
   write-only door opened to external agents** (§4.11)
 - **Coordination hub tools + multi-agent projects (§4.19)** — claim/lease/
-  dependency columns, agent identity, event-driven proposal triage
+  dependency columns, agent identity, event-driven proposal triage —
+  **built as the `tasks` module (§4.20)**: package first, console adapter
+  second
+- **Artifacts module (§4.21)** — git-backed versions, comment threads,
+  review-bundle dispatch on the task list, delivery-evidence tiers, tool-result
+  nudges; per-agent autonomy boundary enforced at the dispatch tool; HTML
+  in a sandboxed iframe (decision #14)
 - Weekly review routine
 
 ### Phase 6 — Knowledge (when Phase 5 is stable)
@@ -635,6 +643,8 @@ can see your own token spend split by tier.
 - `search_knowledge` named query goes semantic (the keyword/FTS version has
   been serving recall since Phase 2 — D8)
 - Obsidian pointed at `Knowledge/`, reading state via the console HTTP API
+- `knowledge` extracted as a module (§4.20) while its search is being
+  rewritten — same tables, one service, MCP + HTTP + CLI adapters
 
 **Deliberately last** — for *embeddings*, not recall. Semantic search over a
 thin corpus isn't worth much; it earns its place once there's a year of
@@ -745,6 +755,12 @@ POST       /api/proposals/:id         allow | deny | accept_with_changes
                                       to the source agent's inbox (§4.19)
 GET        /api/projects              multi-agent projects (§4.19): agents,
                                       task rollup, proposal stream, progress
+GET/POST   /api/artifacts             artifacts (§4.21): list, publish (CAS +
+                                      idempotency key); /:id/versions, /diff
+GET/POST   /api/artifacts/:id/comments  threads on an exact version; reply,
+                                      resolve — same rows the MCP tools write
+POST       /api/dispatches             send selected threads to a registered
+                                      agent as one bundle (§4.21); cancel
 POST       /api/grants/requests/:id   approve/deny an elevation request (§4.11)
 POST       /api/components/:name/restart   scoped ops verb, audit-logged —
                                       the one thing fixable from a phone
@@ -1568,6 +1584,9 @@ metistry/
                             Swift binaries (D3)
     mcp-brain/              read · report · query — report/capture double as
                             the inbound door for external agents (§4.11)
+    tasks/  artifacts/  knowledge/
+                            state-holding MODULES (§4.20): one service each,
+                            own migrations, adapters in console/mcp-brain/cli
     core/                   manifest schema + runtime, lazy discovery,
                             redaction, preview-confirm, check() interface,
                             runs emission, bridge auth + error envelope,
@@ -1933,6 +1952,211 @@ dashboard panel per project; `GET /api/projects` serves it (§4.2). This is a
 *view over existing tables* (agents, work, proposals, runs — a `project`
 column/table plus named queries), not new machinery.
 
+**Review loop closure (2026-09-06).** Annotating an agent's *output* and
+sending the annotations back — comment threads on artifacts, bundled
+review dispatch riding the same claim/lease rows, delivery-evidence tiers,
+and tool-result nudges for pull-only agents — is specified in §4.21. The
+hub still holds state and agents still pull; nothing here dispatches
+autonomously.
+
+### 4.20 Composable modules (added 2026-09-06)
+
+The bridges rule — `npx @foldedspacelabs/metistry-mcp-<name>` must work for a
+stranger — already makes the *edge* composable. The state-holding pieces
+were not: the shared task list, proposal queue, knowledge index, and (new)
+artifact store were console internals. The Artifact Server review
+(`docs/research/2026-09-artifact-server-review.md`) made the cost visible:
+one application layer with thin adapters is what lets a product be used
+through HTTP, MCP, and a CLI without becoming three products. Same
+discipline here, stated as a rule.
+
+**A module is a package with a data contract.** It owns a set of tables
+(its migrations), exposes its operations as one TypeScript service, and
+gets *adapters* — HTTP routes in the console, MCP tools on `mcp-brain`,
+CLI verbs — that adapt the service and add nothing. Policy, idempotency,
+attribution, and audit live in the service, once. This is invariant 3
+(one read path) extended to the mutating surface.
+
+| Module | Package | Owns | Standalone use |
+| --- | --- | --- | --- |
+| **tasks** | `@foldedspacelabs/metistry-tasks` | `work` + claims/leases/dependencies (§4.19), projects | A shared task list any MCP agent can claim from |
+| **artifacts** | `@foldedspacelabs/metistry-artifacts` | artifact index, versions, comment threads, review dispatch (§4.21) | Publish-and-review for agent output, git-backed |
+| **knowledge** | `@foldedspacelabs/metistry-knowledge` | `knowledge_files/links/embeddings`, FTS + semantic search, proposal settlement | Search + propose over any markdown vault |
+| **proposals** | (inside `core` until it needs to move) | the unified `proposals` table (D7), triage, budget (D10), feedback routing | — |
+| **capture** | (console) | `inbox`, `POST /capture`, classifiers | — |
+
+**Shared contracts — what makes composed modules one system.** All in
+`core`, all mandatory for a module:
+
+- **Principal.** Every credential (passkey session, owner token, per-agent
+  bearer) becomes one server-side `Principal { kind: user|agent|system,
+  id, grants }` before a service is called. Modules never see a token.
+  Author fields are denormalized at write time (`principal_kind`,
+  `principal_id`, `display_name`) so audit survives re-keying.
+- **Idempotency.** Every create takes a caller-supplied idempotency key;
+  every update of a versioned row takes an expected revision (compare-
+  and-swap). At-least-once delivery anywhere is then safe by construction.
+- **Action record.** Every mutation appends to `runs` (already the
+  ledger for cost and liveness) with `principal`, `module`, `op`,
+  `target`. One audit trail, not one per module.
+- **Project scope.** `project` is the collaboration boundary for the
+  tasks, artifacts, and comments alike (§4.19); a row without a project
+  belongs to the user's default project.
+- **Identity by handle.** Cross-module references are `{module, id,
+  revision?}` handles, never embedded copies (§4.19's handles-not-payloads
+  rule, now structural).
+- **Text boundary.** Anything written by an agent or pasted by a human and
+  later rendered *to* an agent passes `core`'s sanitizer (bidi/zero-width
+  stripping, no leading `/`) and anything rendered to a browser is
+  output-encoded (CRIT-7). Modules don't get to opt out.
+
+**What this is not.** Not a service split — modules are packages deployed
+inside the console container by default (invariant 7 keeps a split
+possible; nothing requires it). Not a plugin system with hooks. Not a
+reason to refactor working code ahead of need: the tasks and artifact
+modules are built *as* modules in Phase 5 because they're new; `knowledge`
+is extracted when Phase 6 touches it; `proposals` stays in `core` until a
+second consumer appears.
+
+**Done when** a stranger can `npm i @foldedspacelabs/metistry-tasks`,
+point it at a Postgres URL, mount its MCP tools, and run a shared task
+list for their own agents with no Metistry console anywhere — and when
+the same package, inside the console, is the one the brief reads from.
+
+### 4.21 Artifacts — reviewable agent output (added 2026-09-06)
+
+Agents produce plans, reports, HTML pages, mockups, and reviews that today
+land as a chat reply (unreviewable, unversioned) or a vault note
+(knowledge, which most of it isn't). An **artifact** is the versioned,
+commentable output of agent work, and the review loop on it closes the
+gap §4.19 left open: feedback went *user → proposal decision → agent inbox*;
+now the user can annotate the thing itself and send the annotations back.
+Shape borrowed from Artifact Server's contracts (review doc §"What to
+borrow"); implementation is ours and cheaper.
+
+**Storage — git is the record, again.** An artifact is a directory
+`Artifacts/<project>/<slug>/` in the instance repo; **each version is a
+commit** by the reconciler (D5's sole committer). Postgres holds the index
+(`artifacts`: id, project, slug, current_version, kind, visibility;
+`artifact_versions`: id, commit, path manifest with hashes, author
+principal, created_at) so the console can list, diff, and link without
+touching git on the hot path. No object store, no staged-upload API: a
+version is a commit, a diff is `git diff`, history is `git log`. Large
+binary artifacts, if they ever matter, arrive through `POST /capture` and
+are referenced, not versioned.
+
+**Kinds.** Any file type is an artifact; the console picks the viewer by
+kind and never trusts the extension over the sniffed type: **markdown**
+(rendered like a vault note, with wiki-links resolving into `Knowledge/`),
+**text/code** (highlighted source), **JSON/CSV** (table view), **images
+and PDF** (native browser rendering), **HTML** (sandboxed, decision #14),
+and a directory of the above (a small site or report bundle). Markdown is
+the expected common case — plans, reviews, briefs — which is also why
+artifacts live in the same repo as knowledge: an accepted artifact can be
+promoted into `Knowledge/` by a proposal, keeping its history.
+
+**Links.** `artifact` (follows current), `version` (exact, immutable),
+`review` (exact version, in the PWA, comments open). Any publish returns
+all three; the agent hands the user `review` first.
+
+**Publish contract.** `artifact.publish(project, slug, files,
+expected_current_version?, idempotency_key)` — compare-and-swap on the
+current version (a stale agent gets a conflict, never a silent overwrite),
+idempotent on the key, attributed to the calling principal, action
+recorded. Exposed as an `mcp-brain` tool, a console route, and a CLI verb
+(§4.20 — one service, three adapters).
+
+**Comments.** Threads on an exact version, optionally on one path with an
+opaque client-owned anchor; one-level replies; `open`/`resolved`; author
+denormalized. Agent comments are labeled agent-sourced like every other
+agent text (§4.19 trust rules). Comment threads are *not* a fourth
+notification surface: only a thread that needs *the user* becomes a
+`proposals` row of kind `review` under the D10 budget.
+
+**Agent-to-agent review needs no human in the loop (owner direction
+2026-09-06; boundary shape RATIFIED 2026-09-06).** A team of
+agents that must wait for the user to forward every comment can't
+collaborate; a team nobody watches can't be trusted. Neither "every
+permission opt-in" nor "full permissions" is right. The balance:
+**membership is the grant, the project is the boundary.**
+
+- **Inside a project, agents collaborate freely.** Assigning an agent to
+  a project is the user's hand (instance config, invariant 2) — that act
+  *is* the permission. Members comment on each other's artifacts, send
+  review bundles to each other, claim each other's unblocked tasks, and
+  resolve threads, with no per-action approval. The project is already
+  the scope contract for tasks, artifacts, and comments (§4.20), so
+  "freely" is bounded by construction: nothing outside the project is
+  reachable.
+- **Crossing the boundary needs a grant.** Dispatching to an agent that
+  isn't a member, touching another project's tasks or artifacts, or
+  anything carrying user authority (approvals, elevations, knowledge
+  writes — unchanged from §4.11) is *demoted by rule* to a `proposals`
+  row. Area is deliberately **not** a collaboration boundary: areas
+  scope knowledge reads (§4.11 tiers); mixing the two would let a read
+  grant imply a write relationship.
+- **Optional narrowing, never widening.** A manifest may restrict below
+  the project default — `accept_from`, `may_dispatch_to`, a per-agent
+  bundle cap — for the QA-only agent or the one that should only ever
+  answer. Absent keys mean "project members".
+
+```yaml
+# agents/<area>/<name>.md frontmatter — everything optional
+autonomy:
+  may_dispatch_to: [qa, designer]  # narrower than "all members"
+  max_open_bundles: 3
+```
+
+**What can go wrong, and the tool-level control for each** (the risk is
+real; the answer is never a prompt):
+
+| Failure | Control, enforced at the dispatch tool |
+| --- | --- |
+| Ping-pong: two agents trade comments on one thread forever | Per-thread cap on consecutive agent-only exchanges (default 10 — high enough to debug a real issue; tune from practice); at the cap the thread demotes to the user with the transcript |
+| Task/bundle explosion (the documented overnight-run failure) | Per-agent open-bundle cap + per-project open-bundle cap; over cap → queued, not created |
+| Cost runaway | Per-project daily soft budget from `runs`; exceeding it flips the project to review mode (below); watchdog's hourly-cost probe stays the backstop |
+| Scope creep | Project scope on every row; a cross-project handle in a bundle is rejected at write, not filtered at read |
+| Knowledge pollution | Unchanged: sub-agents never write knowledge; reports fold via Metis (§4.11) |
+| Silent drift | Every hop is an action record; the project panel rolls up open threads, bundles in flight, spend per agent; the brief reports "N threads settled between A and B, M needed you" |
+
+**The user's kill switch is one toggle, not a config rewrite:** each
+project has a `mode: autonomous | review`. `review` routes every
+agent-to-agent bundle through the proposal queue without changing
+membership; the budget and caps above can flip it automatically, and
+the brief says so. Trust is extended by membership and withdrawn by a
+toggle — deliberate both ways, and reversible in one edit.
+
+§4.19's trust rules still hold inside the boundary — agent identity is
+server-side, and no agent message can approve anything.
+
+**Delivery evidence is shown, not assumed.** Three tiers, surfaced on the
+status page and per-agent:
+
+| Tier | Who | What "delivered" proves |
+| --- | --- | --- |
+| native | Metis and crews in-process | the engine accepted it as a turn |
+| channel | a Claude Code / Codex session with the `metistry` plugin | the plugin admitted the message |
+| mailbox | any plain MCP client polling `inbox.claim` | the agent checked its inbox |
+
+A mailbox agent shows hollow presence and "queued for agent", never
+"working". **Tool-result nudges** close the mailbox tier's attention gap:
+`mcp-brain` appends one terse, deterministic line to every tool result
+when the caller has queued bundles or an unfinished claim
+("2 bundles queued — call `inbox.claim`"). Server-side, no model,
+invariant 4 intact.
+
+**Rendering untrusted artifacts** — an HTML artifact authored by an agent
+is untrusted content; rendering it on the console origin is XSS against
+the passkey session. CRIT-7's output encoding covers text, not pages.
+Decision #14 (resolved 2026-09-06): an opaque-origin **sandboxed iframe**
+under a strict CSP for v1; the isolated-hostname model is reserved for the
+hosted tier.
+
+**Not in v1:** linked live-disk artifacts (their ADR 0023 — a local-only
+feature with a real threat model; revisit if the vault seam (D5/C4) lands
+as a bind mount), public/anonymous sharing (the tailnet is the audience),
+per-artifact visibility beyond project scope.
+
 ## 5. Growing it
 
 Each component type has one recipe. That's the whole maintainability story.
@@ -2102,7 +2326,18 @@ All propagated into this document.
     `inbox` triage, `work` threads), so "git is the record" needs its honest
     scope and the nightly dump needs a named durable set, with tables
     labeled `-- durable`/`-- derived` and the quarterly drill made a real
-    `down -v` rebuild. **Decide before backup/DR is built.**
+    `down -v` rebuild. **Decide before backup/DR is built.** Artifact
+    *versions* are commits (derived index); artifact *comments* and review
+    dispatches are fine-grained mutable state and join the durable set.
+14. **Untrusted HTML artifacts — which boundary (§4.21). RESOLVED
+    2026-09-06: sandboxed iframe for v1.** Agent-authored HTML must not
+    run on the console origin (passkey session). v1 renders it in a
+    `sandbox` iframe **without `allow-same-origin`** (opaque origin) under
+    a strict CSP, served from a no-cookie path with `Cache-Control:
+    no-store`; misuse tests prove the frame can't read the session, call a
+    mutation route, or navigate the top window. A second content hostname
+    (their model — stronger against framing tricks) is reserved for the
+    hosted tier, where a wildcard domain is cheap; on a tailnet it isn't.
 
 ---
 

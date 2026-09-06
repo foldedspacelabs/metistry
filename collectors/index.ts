@@ -7,6 +7,7 @@ import type { CollectorCtx, Db } from "./inbox-drain/run.js";
 import { run as inboxDrain } from "./inbox-drain/run.js";
 import { run as githubState } from "./github-state/run.js";
 import { run as awsCosts } from "./aws-costs/run.js";
+import { run as claudeUsage } from "./claude-usage/run.js";
 
 export interface RegisteredCollector {
   name: string;
@@ -18,5 +19,6 @@ export const collectors: RegisteredCollector[] = [
   { name: "inbox-drain", run: inboxDrain },
   { name: "github-state", run: githubState },
   { name: "aws-costs", run: awsCosts },
+  { name: "claude-usage", run: claudeUsage },
 ];
 export type { Db, CollectorCtx };

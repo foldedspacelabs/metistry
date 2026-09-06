@@ -2074,7 +2074,7 @@ notification surface: only a thread that needs *the user* becomes a
 `proposals` row of kind `review` under the D10 budget.
 
 **Agent-to-agent review needs no human in the loop (owner direction
-2026-09-06; boundary shape PROPOSED, pending ratification).** A team of
+2026-09-06; boundary shape RATIFIED 2026-09-06).** A team of
 agents that must wait for the user to forward every comment can't
 collaborate; a team nobody watches can't be trusted. Neither "every
 permission opt-in" nor "full permissions" is right. The balance:
@@ -2112,7 +2112,7 @@ real; the answer is never a prompt):
 
 | Failure | Control, enforced at the dispatch tool |
 | --- | --- |
-| Ping-pong: two agents trade comments on one thread forever | Per-thread cap on consecutive agent-only exchanges (default 4); at the cap the thread demotes to the user with the transcript |
+| Ping-pong: two agents trade comments on one thread forever | Per-thread cap on consecutive agent-only exchanges (default 10 — high enough to debug a real issue; tune from practice); at the cap the thread demotes to the user with the transcript |
 | Task/bundle explosion (the documented overnight-run failure) | Per-agent open-bundle cap + per-project open-bundle cap; over cap → queued, not created |
 | Cost runaway | Per-project daily soft budget from `runs`; exceeding it flips the project to review mode (below); watchdog's hourly-cost probe stays the backstop |
 | Scope creep | Project scope on every row; a cross-project handle in a bundle is rejected at write, not filtered at read |

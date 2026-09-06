@@ -45,6 +45,10 @@ services:
       # github-state collector: fine-grained READ-ONLY PAT + "owner/repo,owner/repo2"
       METISTRY_GITHUB_TOKEN: ${METISTRY_GITHUB_TOKEN:-}
       METISTRY_GITHUB_REPOS: ${METISTRY_GITHUB_REPOS:-}
+      # aws-costs collector (degrades absent): read-only Cost Explorer credentials
+      METISTRY_AWS_ACCESS_KEY_ID: ${METISTRY_AWS_ACCESS_KEY_ID:-}
+      METISTRY_AWS_SECRET_ACCESS_KEY: ${METISTRY_AWS_SECRET_ACCESS_KEY:-}
+      METISTRY_AWS_SESSION_TOKEN: ${METISTRY_AWS_SESSION_TOKEN:-}
       # user's timezone for brief/schedule rendering (Me/profile.md drives this later)
       TZ: ${METISTRY_TZ:-UTC}
     extra_hosts:

@@ -2074,45 +2074,60 @@ notification surface: only a thread that needs *the user* becomes a
 `proposals` row of kind `review` under the D10 budget.
 
 **Agent-to-agent review needs no human in the loop (owner direction
-2026-09-06).** A team of agents that must wait for the user to forward
-every comment can't collaborate; a team nobody watches can't be trusted.
-The balance is an **autonomy boundary, declared per agent, enforced at
-the dispatch tool** — never by prompting, never by a model deciding:
+2026-09-06; boundary shape PROPOSED, pending ratification).** A team of
+agents that must wait for the user to forward every comment can't
+collaborate; a team nobody watches can't be trusted. Neither "every
+permission opt-in" nor "full permissions" is right. The balance:
+**membership is the grant, the project is the boundary.**
+
+- **Inside a project, agents collaborate freely.** Assigning an agent to
+  a project is the user's hand (instance config, invariant 2) — that act
+  *is* the permission. Members comment on each other's artifacts, send
+  review bundles to each other, claim each other's unblocked tasks, and
+  resolve threads, with no per-action approval. The project is already
+  the scope contract for tasks, artifacts, and comments (§4.20), so
+  "freely" is bounded by construction: nothing outside the project is
+  reachable.
+- **Crossing the boundary needs a grant.** Dispatching to an agent that
+  isn't a member, touching another project's tasks or artifacts, or
+  anything carrying user authority (approvals, elevations, knowledge
+  writes — unchanged from §4.11) is *demoted by rule* to a `proposals`
+  row. Area is deliberately **not** a collaboration boundary: areas
+  scope knowledge reads (§4.11 tiers); mixing the two would let a read
+  grant imply a write relationship.
+- **Optional narrowing, never widening.** A manifest may restrict below
+  the project default — `accept_from`, `may_dispatch_to`, a per-agent
+  bundle cap — for the QA-only agent or the one that should only ever
+  answer. Absent keys mean "project members".
 
 ```yaml
-# agents/<area>/<name>.md frontmatter (instance registry; user-edited)
+# agents/<area>/<name>.md frontmatter — everything optional
 autonomy:
-  projects: [drey-v2]              # may act without review inside these
-  accept_from: [agent, user]       # whose comments/bundles it may pick up
-                                   # unprompted (default: user only)
-  may_dispatch_to: [qa, designer]  # which agents it may send bundles to
-  max_open_bundles: 3              # backpressure on task-creation explosion
+  may_dispatch_to: [qa, designer]  # narrower than "all members"
+  max_open_bundles: 3
 ```
 
-Within the boundary, a comment one agent leaves on another agent's
-artifact is **routed by rule**: the console creates the review bundle and
-queues it to the target agent's inbox directly; the target claims it,
-replies, resolves. The user sees it happen — every hop is an action
-record, the project panel rolls up open threads, bundles in flight, and
-per-agent spend, and the morning brief reports "12 review threads settled
-between drey-dev and drey-qa, 0 needed you" — but is not asked. Outside
-the boundary (a different project, a sender not in `accept_from`, an
-agent at its bundle cap, anything touching user authority or an
-elevation), the same rule *demotes* the item to a `proposals` row and
-the user decides. The boundary itself is instance config: widening it is
-the user's hand (invariant 2), so trust is extended deliberately and
-revoked in one edit. §4.19's trust rules still hold inside the boundary —
-agent identity is server-side, and no agent message can approve anything.
+**What can go wrong, and the tool-level control for each** (the risk is
+real; the answer is never a prompt):
 
-**Review dispatch — the push half of the loop.** The user selects threads,
-picks an agent from the registry, and sends one **bundle**. A bundle is a
-`work` row (kind `review`, payload = thread handles) on the shared task list, so it
-inherits §4.19's atomic claim, lease, heartbeat, and dependency machinery
-unchanged. Lifecycle: `queued → claimed → delivered → addressed`, with
-`failed`/`canceled` returning the threads to the user's view.
-**`addressed` is inferred** — every thread in the bundle resolved — never
-reported, so an agent can't declare itself done. Bundles drain FIFO per
-agent and are never merged or split.
+| Failure | Control, enforced at the dispatch tool |
+| --- | --- |
+| Ping-pong: two agents trade comments on one thread forever | Per-thread cap on consecutive agent-only exchanges (default 4); at the cap the thread demotes to the user with the transcript |
+| Task/bundle explosion (the documented overnight-run failure) | Per-agent open-bundle cap + per-project open-bundle cap; over cap → queued, not created |
+| Cost runaway | Per-project daily soft budget from `runs`; exceeding it flips the project to review mode (below); watchdog's hourly-cost probe stays the backstop |
+| Scope creep | Project scope on every row; a cross-project handle in a bundle is rejected at write, not filtered at read |
+| Knowledge pollution | Unchanged: sub-agents never write knowledge; reports fold via Metis (§4.11) |
+| Silent drift | Every hop is an action record; the project panel rolls up open threads, bundles in flight, spend per agent; the brief reports "N threads settled between A and B, M needed you" |
+
+**The user's kill switch is one toggle, not a config rewrite:** each
+project has a `mode: autonomous | review`. `review` routes every
+agent-to-agent bundle through the proposal queue without changing
+membership; the budget and caps above can flip it automatically, and
+the brief says so. Trust is extended by membership and withdrawn by a
+toggle — deliberate both ways, and reversible in one edit.
+
+§4.19's trust rules still hold inside the boundary — agent identity is
+server-side, and no agent message can approve anything.
 
 **Delivery evidence is shown, not assumed.** Three tiers, surfaced on the
 status page and per-agent:

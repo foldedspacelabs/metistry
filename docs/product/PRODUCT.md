@@ -204,12 +204,14 @@ your git, on your machine.
   open issues don't flood it.
 - 2026-09-06 — Artifact Server (plannotator) reviewed as inspiration
   (`docs/research/2026-09-artifact-server-review.md`). Two additions to
-  the plan: **composable modules** (§4.20 — ledger, artifacts, knowledge as
+  the plan: **composable modules** (§4.20 — tasks, artifacts, knowledge as
   standalone npm packages with one shared contract set: principal,
   idempotency, action record, project scope, handles, text boundary; "use
   any piece alone, or all of it as one system" becomes a product claim)
   and **artifacts** (§4.21 — versioned, commentable agent output with
   git as the version store, review bundles dispatched back to the agent
-  that made it, honest delivery-evidence tiers). Differentiator noted:
+  that made it, honest delivery-evidence tiers; agent-to-agent review
+  flows unprompted inside a per-agent autonomy boundary the user declares
+  and the tool enforces — teams collaborate, the user monitors). Differentiator noted:
   they needed an object store and a five-installer deployment matrix to
   get immutable versions; the instance repo gives Metistry that for free.

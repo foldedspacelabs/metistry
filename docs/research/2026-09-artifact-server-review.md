@@ -125,7 +125,7 @@ Artifact Server is usable by a stranger through three adapters because
 *one* application layer owns policy and every adapter is thin. Metistry's
 packages rule (`npx @foldedspacelabs/metistry-mcp-<name>` must work cold)
 already applies this to bridges. The gap: the *state-holding* pieces —
-task ledger, knowledge store, artifact store, proposal queue — are
+shared task list, knowledge store, artifact store, proposal queue — are
 currently console internals, not modules. §4.20 fixes that by naming the
 modules, what each exposes, and the shared contracts that make them one
 system when composed. Deliberately **not** a microservice split: modules

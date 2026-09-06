@@ -215,3 +215,13 @@ your git, on your machine.
   and the tool enforces — teams collaborate, the user monitors). Differentiator noted:
   they needed an object store and a five-installer deployment matrix to
   get immutable versions; the instance repo gives Metistry that for free.
+- 2026-09-06 — **external-agent registry** (Phase 4 management surface):
+  agents are registered from the console (id, name, kind), get a per-agent
+  bearer token shown exactly once (stored as a hash), and carry read
+  grants (`none | index | areas[]`, TitleCase `Knowledge/` prefixes) and
+  project membership. Safety mechanism: **agent identity is server-side**
+  — the principal is resolved from the credential, grants attach to the
+  token and are never asserted by the agent, an agent token reaches
+  `/capture` only (uniform 403 elsewhere), captures carry `source_agent`
+  provenance into the proposal at external trust, and every mint / grant /
+  revoke / rotate lands in `runs`. Misuse tests ship with it (CRIT-7).

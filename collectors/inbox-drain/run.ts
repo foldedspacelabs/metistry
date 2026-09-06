@@ -50,6 +50,8 @@ export interface CollectorCtx {
   ekUrl?: string; // eventkit bridge (routines use it for schedule/meeting prep)
   ekToken?: string;
   githubToken?: string; // github-state collector (fine-grained read-only PAT)
+  aws?: { accessKeyId: string; secretAccessKey: string; sessionToken?: string }; // aws-costs collector
+  awsCostDays?: number;
   githubRepos?: string[];
   fetchFn?: typeof fetch;
 }

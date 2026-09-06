@@ -34,15 +34,18 @@ describe.skipIf(!hasDb)("collectors (real db)", () => {
   afterAll(async () => pool.end());
 
   it("github-state upserts through the partial unique index, then closes what vanished", async () => {
-    const page = (items: any[]) => (async () => ({ ok: true, json: async () => items })) as unknown as typeof fetch;
+    const page = (items: any[]) => (async (url: string) => ({
+      ok: true,
+      json: async () => (url.endsWith("/user") ? { login: "me" } : url.includes("/reviews?") ? [] : url.includes("/pulls?") ? [{ number: 2, user: { login: "other" }, requested_reviewers: [{ login: "me" }] }] : items),
+    })) as unknown as typeof fetch;
     const ctx = { githubToken: "t", githubRepos: ["itest/repo"] };
     const base = { state: "open", html_url: "", updated_at: "2026-09-01T00:00:00Z" };
     await githubState(pool, { ...ctx, fetchFn: page([{ number: 1, title: "one", ...base }, { number: 2, title: "two", pull_request: {}, ...base }]) });
     await githubState(pool, { ...ctx, fetchFn: page([{ number: 1, title: "one (renamed)", ...base }]) }); // rerun: upsert, not duplicate
-    const { rows } = await pool.query(`SELECT external_ref, title, status, kind FROM work WHERE external_ref LIKE 'gh:itest/%' ORDER BY external_ref`);
+    const { rows } = await pool.query(`SELECT external_ref, title, status, kind, meta->>'needs_my_review' AS nmr FROM work WHERE external_ref LIKE 'gh:itest/%' ORDER BY external_ref`);
     expect(rows).toEqual([
-      { external_ref: "gh:itest/repo#1", title: "one (renamed)", status: "open", kind: "issue" },
-      { external_ref: "gh:itest/repo#2", title: "two", status: "closed", kind: "pr" },
+      { external_ref: "gh:itest/repo#1", title: "one (renamed)", status: "open", kind: "issue", nmr: null },
+      { external_ref: "gh:itest/repo#2", title: "two", status: "closed", kind: "pr", nmr: "true" },
     ]);
   });
 

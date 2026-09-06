@@ -14,6 +14,7 @@ export interface InboxRow {
   mime: string | null;
   note: string | null;
   source: string;
+  source_agent?: string | null; // set when the capture came in on an agent token (migration 0007)
 }
 
 export interface Classification {
@@ -85,7 +86,7 @@ async function fmClassify(ctx: CollectorCtx, items: { id: number; text: string }
 /** One drain pass. Returns how many rows were classified. */
 export async function run(db: Db, ctx: CollectorCtx = {}): Promise<number> {
   const { rows } = await db.query(
-    `SELECT id, path, mime, note, source FROM inbox WHERE status = 'new' ORDER BY ts LIMIT 50`,
+    `SELECT id, path, mime, note, source, source_agent FROM inbox WHERE status = 'new' ORDER BY ts LIMIT 50`,
   );
   const items = rows as InboxRow[];
   const deterministic = new Map(items.map((r) => [r.id, classify(r)]));
@@ -102,9 +103,14 @@ export async function run(db: Db, ctx: CollectorCtx = {}): Promise<number> {
       ? { kind: refined.category, reason: "apple-fm", title: det.title, has_action: refined.has_action, action: refined.action }
       : det;
     const tier = refined ? "apple-fm" : "deterministic";
+    // Provenance rides the credential (§4.19): a capture made with an agent
+    // token proposes AS that agent, at external trust; the owner's own
+    // captures propose as this collector, at user trust.
+    const sourceAgent = row.source_agent || "inbox-drain";
+    const trust = row.source_agent ? "external" : "user";
     await db.query(
-      `INSERT INTO proposals (kind, source_agent, trust, payload) VALUES ('knowledge', 'inbox-drain', 'user', $1)`,
-      [JSON.stringify({ inbox_id: row.id, path: row.path, classification: final, note: row.note, tier })],
+      `INSERT INTO proposals (kind, source_agent, trust, payload) VALUES ('knowledge', $2, $3, $1)`,
+      [JSON.stringify({ inbox_id: row.id, path: row.path, classification: final, note: row.note, tier }), sourceAgent, trust],
     );
     await db.query(`UPDATE inbox SET status = 'classified', proposal = $2, triaged_at = NULL WHERE id = $1`, [
       row.id,

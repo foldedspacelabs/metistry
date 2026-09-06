@@ -18,6 +18,7 @@
       <button data-view="triage">triage</button>
       <button data-view="status">status</button>
       <button data-view="devices">devices</button>
+      <button data-view="agents">agents</button>
     </nav>
   </header>
 
@@ -61,6 +62,37 @@
 
     <section id="devices" hidden>
       <ul id="device-list"></ul>
+    </section>
+
+    <!-- agents: external-agent registry (§4.2 management surface) -->
+    <section id="agents" hidden>
+      <ul id="agent-list"></ul>
+      <p id="agents-empty" class="muted" hidden>no agents registered</p>
+      <h3>register an agent</h3>
+      <form id="agent-create">
+        <input id="agent-id" type="text" placeholder="id (slug, e.g. drey-dev)" autocomplete="off" autocapitalize="none" />
+        <input id="agent-name" type="text" placeholder="display name" autocomplete="off" />
+        <select id="agent-kind"><option value="external">external</option><option value="internal">internal</option></select>
+        <button type="submit">register</button>
+      </form>
+      <div id="agent-token" hidden>
+        <p class="muted">token for <b id="agent-token-for"></b> — copy it now, this will not be shown again</p>
+        <code id="agent-token-value"></code>
+      </div>
+      <form id="agent-grants" hidden>
+        <h3>grants for <span id="agent-grants-for"></span></h3>
+        <label>tier
+          <select id="agent-tier">
+            <option value="none">none — capture only</option>
+            <option value="index">index — titles and one-liners</option>
+            <option value="areas">areas — read the prefixes below</option>
+          </select>
+        </label>
+        <textarea id="agent-areas" placeholder="Knowledge/Areas/… one prefix per line (tier: areas)"></textarea>
+        <input id="agent-projects" type="text" placeholder="projects, comma-separated (slugs)" autocomplete="off" autocapitalize="none" />
+        <p id="agent-grants-msg" class="muted"></p>
+        <span><button type="submit">save</button> <button type="button" id="agent-grants-cancel" class="secondary">cancel</button></span>
+      </form>
     </section>
   </main>
 

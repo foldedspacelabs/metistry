@@ -132,6 +132,25 @@ async function sectionSchedule(ctx: RoutineCtx): Promise<string[] | null> {
   }
 }
 
+// 📂 Projects: status rollup from the work table by area (fed by the
+// github-state collector today; more collectors → richer status).
+async function sectionProjects(db: Db): Promise<string[] | null> {
+  const { rows } = await db.query(
+    `SELECT area,
+            count(*) FILTER (WHERE status <> 'closed') AS open,
+            count(*) FILTER (WHERE status = 'blocked') AS blocked,
+            count(*) FILTER (WHERE status = 'closed' AND updated_at > now() - interval '7 days') AS closed_7d,
+            (array_agg(title ORDER BY updated_at DESC) FILTER (WHERE status <> 'closed'))[1:2] AS latest
+     FROM work WHERE area IS NOT NULL AND external_ref LIKE 'gh:%'
+     GROUP BY area ORDER BY open DESC LIMIT 6`,
+  );
+  if (rows.length === 0) return null;
+  return rows.map((r: any) => {
+    const latest = (r.latest ?? []).map((t: string) => t.slice(0, 40)).join(" · ");
+    return `• ${r.area}: ${r.open} open${Number(r.blocked) ? `, ${r.blocked} blocked` : ""}, ${r.closed_7d} closed this week${latest ? `\n    latest: ${latest}` : ""}`;
+  });
+}
+
 async function sectionSystem(db: Db): Promise<{ lines: string[]; needsHelp: boolean } | null> {
   const { rows } = await db.query(
     `SELECT
@@ -163,6 +182,7 @@ export async function run(db: Db, ctx: RoutineCtx = {}): Promise<number> {
   const schedule = await sectionSchedule(ctx);
   const decisions = await sectionDecisions(db, expired.rows.length);
   const today = await sectionToday(db);
+  const projects = await sectionProjects(db);
   const system = await sectionSystem(db);
 
   // silence-default: emit only when something needs the user (a calendar
@@ -174,6 +194,7 @@ export async function run(db: Db, ctx: RoutineCtx = {}): Promise<number> {
   if (schedule) parts.push("", "📅 Schedule:", ...schedule);
   if (today) parts.push("", "✅ Today:", ...today);
   if (decisions) parts.push("", "🔔 Needs your decision:", ...decisions);
+  if (projects) parts.push("", "📂 Projects:", ...projects);
   if (system) parts.push("", "⚙️ What I've been doing:", ...system.lines);
   if (!schedule) parts.push("", "📅 Schedule & meeting prep arrive once the calendar bridge is connected.");
 

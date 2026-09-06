@@ -5,6 +5,7 @@
 
 import type { CollectorCtx, Db } from "./inbox-drain/run.js";
 import { run as inboxDrain } from "./inbox-drain/run.js";
+import { run as githubState } from "./github-state/run.js";
 
 export interface RegisteredCollector {
   name: string;
@@ -12,5 +13,8 @@ export interface RegisteredCollector {
   run(db: Db, ctx?: CollectorCtx): Promise<number>;
 }
 
-export const collectors: RegisteredCollector[] = [{ name: "inbox-drain", run: inboxDrain }];
+export const collectors: RegisteredCollector[] = [
+  { name: "inbox-drain", run: inboxDrain },
+  { name: "github-state", run: githubState },
+];
 export type { Db, CollectorCtx };

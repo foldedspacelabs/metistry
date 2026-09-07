@@ -42,6 +42,10 @@ services:
       METISTRY_BRIDGE_TOKEN_APPLE_FM: ${METISTRY_BRIDGE_TOKEN_APPLE_FM:-}
       METISTRY_EK_URL: ${METISTRY_EK_URL:-}
       METISTRY_BRIDGE_TOKEN_EVENTKIT: ${METISTRY_BRIDGE_TOKEN_EVENTKIT:-}
+      # reconciler vault bridge (D5; host service holding the instance repo):
+      # note contents for mcp-brain's knowledge_read. Degrades absent when unset.
+      METISTRY_RECONCILER_URL: ${METISTRY_RECONCILER_URL:-}
+      METISTRY_BRIDGE_TOKEN_RECONCILER: ${METISTRY_BRIDGE_TOKEN_RECONCILER:-}
       # github-state collector: fine-grained READ-ONLY PAT + "owner/repo,owner/repo2"
       METISTRY_GITHUB_TOKEN: ${METISTRY_GITHUB_TOKEN:-}
       METISTRY_GITHUB_REPOS: ${METISTRY_GITHUB_REPOS:-}

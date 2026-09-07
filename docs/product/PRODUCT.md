@@ -350,3 +350,25 @@ your git, on your machine.
   surface is. Known gap, reported: the grant validator refuses bare
   `Knowledge/`, so root-level notes (`now.md`) sit outside the widest
   valid grant. Ops: `docs/ops/assistant-tools.md`.
+- 2026-09-06 — **reconciler shipped: the instance repo's sole committer
+  and vault bridge** (D5 ratified; `apps/reconciler`, `runs_on: host`,
+  port 7812, `docs/ops/reconciler.md`). One process holds the working tree
+  and runs git; everything else — console, `mcp-brain`, the engine — goes
+  over HTTP with a bearer (read/list/search/log/diff/write/delete/rename),
+  so no container ever mounts the vault or holds a git credential and the
+  engine keeps having no shell (invariants 7 + 9 by construction). Safety,
+  enforced at the tool: every write carries a commit intent and the author
+  is stamped server-side from the principal (a request cannot name one);
+  §4.7 protected paths (`identity.yaml`, `rules.yaml`, `queries/`, …) are
+  `forbidden` for every principal but `user`; `..`, absolute paths, `.git`,
+  `instance-migrations/`, symlinks, and case-mismatched `knowledge/` are
+  refused outright; compare-and-swap on the content hash turns a lost
+  update into a `409`. A write is readable by the next request and
+  committed on the next 30 s flush — one commit per intent group, `git
+  add` scoped to the touched paths, `Brain-Source` trailer. The §4.13 loop
+  now exists: content-hash (not mtime) indexing of `knowledge_files` +
+  `knowledge_links`, renames by hash, Obsidian/Syncthing conflict copies
+  flagged once as a `proposals` report and never served, and out-of-band
+  Obsidian edits swept into `user` commits (PoC-12 closed in code).
+  `knowledge_read` in `mcp-brain` now returns note contents when the
+  bridge is configured. 45 tests, all misuse shapes included.

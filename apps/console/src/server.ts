@@ -12,7 +12,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { runCheck, startRun, finishRun, type CheckResult } from "@foldedspacelabs/metistry-core";
+import { runCheck, startRun, finishRun, errorEnvelope, statusFor, type CheckResult } from "@foldedspacelabs/metistry-core";
 import { QueryError, QueryStore } from "@foldedspacelabs/metistry-queries";
 import type { Db } from "./auth-store.js";
 import * as store from "./auth-store.js";
@@ -23,6 +23,7 @@ import * as wa from "./webauthn.js";
 import { serveStatic } from "./static.js";
 import { route as routeMessage, type Rules } from "./router.js";
 import { sendToSession, storeSubscription, type PushConfig } from "./push.js";
+import { dispatch, type TargetRegistry } from "./dispatch.js";
 import { createRequire } from "node:module";
 
 const require_ = createRequire(import.meta.url);
@@ -35,6 +36,7 @@ export interface ConsoleConfig {
   webRoot?: string; // PWA shell dir; absent = API-only (tests)
   push?: PushConfig; // absent = push degrades absent
   rules?: Rules; // router rules; absent = everything routes to the model
+  targets?: TargetRegistry; // compute targets (§4.18); absent = no dispatch surface
 }
 
 type Auth =
@@ -46,6 +48,8 @@ type Auth =
 // One shape for every per-agent verb so the management gate and the handler
 // cannot drift apart. Ids are slugs; anything else falls through to 404.
 const AGENT_ROUTE = /^(PUT|POST) \/api\/agents\/([a-z][a-z0-9-]{0,39})\/(grants|projects|revoke|rotate)$/;
+// Dispatch a work row to a compute target (§4.18). Body: { target, brief, sources? }.
+const DISPATCH_ROUTE = /^POST \/api\/tasks\/(\d{1,12})\/dispatch$/;
 
 export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Server {
   const rp = wa.rpFromOrigin(cfg.origin);
@@ -305,6 +309,28 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         }),
       ];
       return sendJson(res, 200, { checks, as_of: new Date().toISOString() });
+    }
+
+    // ----- compute targets (§4.18): passkey session ONLY — dispatch is outbound -----
+    if (key === "GET /api/targets" || DISPATCH_ROUTE.test(key)) {
+      if (auth.kind !== "session") return sendError(res, "forbidden");
+      if (key === "GET /api/targets") {
+        return sendJson(res, 200, { targets: cfg.targets ? await cfg.targets.describe() : [], as_of: new Date().toISOString() });
+      }
+      const body = (await readJson(req)) as { target?: unknown; brief?: unknown; sources?: unknown };
+      if (typeof body.target !== "string" || typeof body.brief !== "string") return sendError(res, "invalid_request");
+      const sources = Array.isArray(body.sources) ? body.sources.filter((s): s is string => typeof s === "string") : [];
+      if (!cfg.targets) return sendError(res, "not_found");
+      const taskId = Number(DISPATCH_ROUTE.exec(key)![1]);
+      // principal is the credential class, never the body (§4.19); the data
+      // policy and the runs row are dispatch()'s — nothing is decided here
+      const r = await dispatch(db, cfg.targets, taskId, body.target, body.brief, "owner", sources);
+      if (r.ok) return sendJson(res, 201, { ok: true, ref: r.ref, url: r.url, run_id: r.run_id });
+      return sendJson(res, statusFor(r.code), {
+        ...errorEnvelope(r.code, r.message),
+        ...(r.violations ? { violations: r.violations } : {}),
+        ...(r.check ? { check: r.check } : {}),
+      });
     }
 
     // ----- management: passkey session ONLY (owner tokens excluded) -----

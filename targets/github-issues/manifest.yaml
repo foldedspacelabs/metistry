@@ -1,0 +1,46 @@
+# The first compute target (plan §4.18.B, Phase 5): "@agent dispatch → GitHub
+# issues". A work row is dispatched by opening an issue in the configured
+# repo; whoever watches that repo (a coding agent, a human, CI) picks it up.
+#
+# The data policy below is ENFORCED by the console's dispatch tool
+# (apps/console/src/dispatch.ts): a brief that cites a vault path outside
+# `allow`, carries a `deny_sources` provenance marker, or exceeds
+# `max_brief_bytes` never leaves the machine. Instances overlay this file
+# (METISTRY_TARGETS_DIRS, D4) to widen `allow` to their own areas.
+name: github-issues
+type: target
+description: Open a GitHub issue for a task — the external work queue (plan §6 decision 4)
+transport: github
+submit:
+  # owner/repo, or an env reference. The repo MUST also be listed in
+  # METISTRY_GITHUB_REPOS so github-state reconciles the issue back.
+  repo: env:METISTRY_GITHUB_DISPATCH_REPO
+result:
+  via: report_queue
+  # What exists today: github-state (collectors/github-state) upserts the
+  # issue by its `gh:owner/repo#n` ref and closes the work row when the
+  # issue closes — the return of STATUS is already wired (status_via).
+  #
+  # TODO(report-queue): the return of CONTENT is not. github-state does not
+  # fetch issue comments; when it does, a closing comment should land as a
+  # `report` proposal in the queue (§4.11) with source_agent = the issue's
+  # closer. Nothing further is needed on the dispatch side.
+  status_via: github-state
+# Fine-grained PAT: Issues read/write + Metadata (read) on the target repo
+# ONLY. Separate from the read-only METISTRY_GITHUB_TOKEN — a leaked write
+# token must not also be the token that reads every configured repo.
+auth: env:METISTRY_GITHUB_WRITE_TOKEN
+cost:
+  per_run_estimate_usd: 0 # the issue is free; whatever picks it up pays its own way
+data_policy:
+  # Vault prefixes a brief may cite. Personal areas (Journal, People, Me,
+  # Areas/health ...) are absent on purpose — widen per instance, never here.
+  allow:
+    - Knowledge/Projects
+    - Knowledge/Resources
+    - Knowledge/Techniques
+  # Provenance classes that never leave the machine (§4.12: comms-derived
+  # content is the one that costs the most to leak).
+  deny_sources:
+    - comms
+  max_brief_bytes: 16384

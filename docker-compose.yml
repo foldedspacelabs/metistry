@@ -45,6 +45,11 @@ services:
       # github-state collector: fine-grained READ-ONLY PAT + "owner/repo,owner/repo2"
       METISTRY_GITHUB_TOKEN: ${METISTRY_GITHUB_TOKEN:-}
       METISTRY_GITHUB_REPOS: ${METISTRY_GITHUB_REPOS:-}
+      # github-issues dispatch target (§4.18): a SEPARATE fine-grained WRITE PAT
+      # (Issues read/write + Metadata on the dispatch repo only) + "owner/repo"
+      METISTRY_GITHUB_WRITE_TOKEN: ${METISTRY_GITHUB_WRITE_TOKEN:-}
+      METISTRY_GITHUB_DISPATCH_REPO: ${METISTRY_GITHUB_DISPATCH_REPO:-}
+      METISTRY_TARGETS_DIRS: ${METISTRY_TARGETS_DIRS:-targets}
       # aws-costs collector (degrades absent): read-only Cost Explorer credentials
       METISTRY_AWS_ACCESS_KEY_ID: ${METISTRY_AWS_ACCESS_KEY_ID:-}
       METISTRY_AWS_SECRET_ACCESS_KEY: ${METISTRY_AWS_SECRET_ACCESS_KEY:-}

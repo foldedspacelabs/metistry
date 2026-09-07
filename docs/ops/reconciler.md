@@ -34,7 +34,8 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 ```
 
 Then build and install the launchd job (macOS; the same template as the
-watchdog):
+watchdog). `metistry up` does this for every plist in `ops/launchd`
+(`docs/ops/cli.md`); by hand it is:
 
 ```sh
 pnpm -r build

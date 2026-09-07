@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 import { describe, expect, it } from "vitest";
 import { applyName, init, lockFile, mentionFor, INSTANCE_DIRS } from "../src/init.js";
+import { parseLock } from "../src/lock.js";
 import { main } from "../src/main.js";
 
 const seedDir = fileURLToPath(new URL("../../../seed/", import.meta.url));
@@ -32,7 +33,13 @@ describe("metistry init", () => {
     expect(readFileSync(join(dir, ".gitignore"), "utf8")).toBe("inbox/\n.obsidian/workspace*\n");
     expect(readFileSync(join(dir, "README.md"), "utf8")).toMatch(/^# Instance repo — private\./);
     expect(readFileSync(join(dir, "metistry.lock"), "utf8")).toBe(lockFile("1.2.3", new Date("2026-09-07T12:00:00Z")));
-    expect(parseYaml(readFileSync(join(dir, "metistry.lock"), "utf8"))).toEqual({ version: "1.2.3", created: "2026-09-07" });
+    // the documented lock shape (docs/ops/cli.md) — the same one `metistry update` moves; no db at init, so no migrations recorded
+    expect(parseYaml(readFileSync(join(dir, "metistry.lock"), "utf8"))).toEqual({
+      product: { version: "1.2.3", commit: "unknown", source: "git" },
+      updated_at: "2026-09-07T12:00:00.000Z",
+      migrations_applied: [],
+    });
+    expect(parseLock(readFileSync(join(dir, "metistry.lock"), "utf8")).product.version).toBe("1.2.3");
 
     // git: branch main, exactly one commit, the stamped author, clean tree, inbox ignored
     expect(git(dir, "rev-parse", "--abbrev-ref", "HEAD")).toBe("main");
@@ -110,7 +117,7 @@ describe("metistry init", () => {
     expect(errs[0]).toMatch(/usage/);
     expect(await main(["bogus"], { out: () => {}, err: () => {} })).toBe(2);
     expect(await main([], { out: () => {}, err: () => {} })).toBe(2);
-    expect(await main(["up"], { out: () => {} })).toBe(0);
-    expect(await main(["update"], { out: () => {} })).toBe(0);
+    // init from inside a checkout pins the checkout's HEAD into the lock
+    expect(parseLock(readFileSync(join(dir, "metistry.lock"), "utf8")).product.commit).toMatch(/^[0-9a-f]{40}$/);
   });
 });

@@ -19,4 +19,10 @@ export {
 } from "./doctor.js";
 export { parseDotEnv, loadDotEnv, resolveProductDir, resolveSeedDir, productVersion } from "./env.js";
 export { parseArgs, main } from "./main.js";
-export { type Exec, type ExecResult, realExec } from "./exec.js";
+export { type Exec, type ExecOptions, type ExecResult, realExec, formatCommand } from "./exec.js";
+export { up, productSource, composeUp, installLaunchd, type UpOptions, type UpResult } from "./up.js";
+export { update, gitHead, hashHostJobs, trackedPathFor, writeLock, publishedPackages, type UpdateOptions, type UpdateResult } from "./update.js";
+export { runMigrations, listMigrationFiles, openMigrationSession, MIGRATION_LOCK_KEY, type MigrationSession, type MigrateResult } from "./migrate.js";
+export { parseLock, serializeLock, readLock, instanceLockPath, LOCK_FILENAME, type LockFile, type LockSource } from "./lock.js";
+export { renderPlist, parsePlistTemplate, loadPlistTemplates, launchdCommands, renderSystemdUnit, type PlistTemplate } from "./launchd.js";
+export { StepRunner, StepFailed } from "./steps.js";

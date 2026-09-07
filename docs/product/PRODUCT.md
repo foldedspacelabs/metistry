@@ -512,3 +512,13 @@ your git, on your machine.
   SMAppService, passkey enrolled in-app, updates from signed releases
   through `metistry update`. The app fronts the CLI; it never
   re-implements it. Opened decision #15: a Docker-free macOS shape.
+- 2026-09-07 — **Strategy: fully open source, everything free.** The
+  premium iOS app and the FSL-hosted plan are dropped. The Mac app
+  (one SwiftUI codebase with iOS) is the primary distribution channel:
+  it installs, configures, connects, and updates the system, ships
+  through GitHub Releases as a signed, notarized DMG, and auto-updates
+  from a release-backed appcast — no FSL server anywhere. Decision #15
+  (Docker-free macOS shape) ratified. The payload-free push relay
+  becomes a small free community service with self-host support.
+  Rationale: the AI tooling landscape moves too fast for a paywall to
+  be the moat; openness is.

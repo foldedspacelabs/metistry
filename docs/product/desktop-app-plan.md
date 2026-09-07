@@ -1,6 +1,6 @@
 # Desktop client — planning document (2026-09-07)
 
-> Status: **planning only.** Extends `ios-app-plan.md`: the premium
+> Status: **planning only.** Extends `ios-app-plan.md`: the free
 > native client is one **SwiftUI multiplatform app (macOS + iOS)**, and
 > the installed PWA is the desktop client for every other OS. Research
 > and rationale in `docs/research/2026-09-codegraff-review.md`.
@@ -10,8 +10,8 @@
 1. **Installed PWA** (now): Safari "Add to Dock" on macOS 14+, Chrome/Edge
    "Install app" on Windows/Linux. The full management UI in a window,
    today, zero code. Documented in `docs/ops/` as the desktop story for
-   non-Apple machines and for anyone who doesn't want the premium app.
-2. **Native Apple app** (post-Phase 6, premium candidate — was "iOS
+   non-Apple machines and for anyone who doesn't want the app.
+2. **Native Apple app** (post-Phase 6, free, THE distribution channel — was "iOS
    app"): one codebase, macOS and iOS targets, same open management API
    and `/mcp`, **no private endpoints** (ratified). Adds what only
    native can: menu-bar status with `doctor` at a glance, global capture
@@ -56,7 +56,7 @@ The question: can the whole install, setup, and update live inside the
 app — one click, no terminal — install the tooling, lay out the local
 filesystem, pull updates from the product repo, and connect the instance
 directory to the user's GitHub repo for versioning? **Yes, and it is the
-premium app's strongest reason to exist.** The design rule that makes it
+app's strongest reason to exist.** The design rule that makes it
 safe: **the app is a front end for the CLI, never a second
 implementation.** Every step below is a `metistry` verb the app runs
 (bundled) with a progress view; the terminal path stays first-class and
@@ -112,10 +112,20 @@ its own state dir, allow network to the console only), tested by misuse
 tests like every other boundary. That mitigation is part of the
 decision, not an afterthought.
 
-**Product framing.** This is the line between the open-source install
-and the premium app: same code, same repos, same API; the app sells
-the *zero-terminal* experience — install, connect, update, and a native
-window — and the FSL-hosted tier sells not running it at all.
+**Strategy (ratified 2026-09-07).** Fully open source, everything free,
+no hosted plan. The Mac app is the *primary* way people get Metistry:
+same code, same repos, same API as the terminal path, plus the
+zero-terminal experience — install, connect, update, native window.
+**Distribution:** GitHub Releases — a signed, notarized DMG (Developer ID,
+hardened runtime) plus the runtime pack and npm packages as release
+assets; **auto-update** via Sparkle (or an equivalent EdDSA-signed
+appcast) whose feed is generated from the GitHub release itself, so the
+app updates without any FSL-run server. The iOS app goes through
+TestFlight/App Store because Apple leaves no other route. Requirements
+this creates now: a Developer ID certificate on the Studio (also fixes
+the ad-hoc-signed TCC helpers — memory), a release workflow that builds,
+signs, notarizes, staples, and publishes assets with a changelog, and a
+`metistry update` release mode that consumes exactly those assets.
 
 ## Not doing
 - An Electron/Tauri wrapper (a second runtime for what the installed PWA

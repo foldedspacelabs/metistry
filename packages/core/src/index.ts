@@ -20,6 +20,30 @@ export {
 export { checkResultSchema, runCheck, type CheckResult, type Checkable } from "./check.js";
 export { errorEnvelope, statusFor, type ErrorCode, type ErrorEnvelope } from "./errors.js";
 export { requireEnv, optionalEnv, intEnv } from "./config.js";
+export {
+  DEPLOYMENT_FILENAME,
+  DEPLOYMENT_SHAPES,
+  SHAPED_SERVICES,
+  HOST_SERVICES,
+  ALL_SERVICES,
+  DEFAULT_DEPLOYMENT,
+  CONTAINER_HOSTNAMES,
+  deploymentSchema,
+  serviceOverrideSchema,
+  parseDeployment,
+  overlayDeployment,
+  shapeOf,
+  enabled,
+  servicePlan,
+  usesCompose,
+  resolveUrl,
+  type Deployment,
+  type DeploymentShape,
+  type ServiceName,
+  type ServiceOverride,
+  type UrlContext,
+  type Vantage,
+} from "./deployment.js";
 export { scheduleToSeconds } from "./schedule.js";
 export {
   REDACTED,

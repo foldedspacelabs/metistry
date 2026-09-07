@@ -118,6 +118,21 @@ describe("metistry init", () => {
     expect(await main(["bogus"], { out: () => {}, err: () => {} })).toBe(2);
     expect(await main([], { out: () => {}, err: () => {} })).toBe(2);
     // init from inside a checkout pins the checkout's HEAD into the lock
-    expect(parseLock(readFileSync(join(dir, "metistry.lock"), "utf8")).product.commit).toMatch(/^[0-9a-f]{40}$/);
+    const lock = parseLock(readFileSync(join(dir, "metistry.lock"), "utf8"));
+    expect(lock.product.commit).toMatch(/^[0-9a-f]{40}$/);
+    expect(lock.product.source).toBe("git");
+  });
+
+  it("main: --channel writes product.source, and a typo is refused rather than guessed", async () => {
+    const product = fileURLToPath(new URL("../../../", import.meta.url));
+    const dir = join(await fresh(), "release-instance");
+    expect(await main(["init", dir, "--channel", "release", "--product-dir", product], { out: () => {} })).toBe(0);
+    expect(parseLock(readFileSync(join(dir, "metistry.lock"), "utf8")).product.source).toBe("release");
+
+    const errs: string[] = [];
+    const bad = join(await fresh(), "nope");
+    expect(await main(["init", bad, "--channel", "stable", "--product-dir", product], { out: () => {}, err: (s) => errs.push(s) })).toBe(2);
+    expect(errs[0]).toMatch(/--channel must be git or release/);
+    expect(existsSync(bad)).toBe(false);
   });
 });

@@ -1,0 +1,116 @@
+// `metistry init` into a temp dir with real git: the by-hand bootstrap's
+// structure, the single commit and its author, the identity name (the ONLY
+// place the name lives), the non-empty refusal, the lock file, and that no
+// secret is ever written into the repo.
+import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { parse as parseYaml } from "yaml";
+import { describe, expect, it } from "vitest";
+import { applyName, init, lockFile, mentionFor, INSTANCE_DIRS } from "../src/init.js";
+import { main } from "../src/main.js";
+
+const seedDir = fileURLToPath(new URL("../../../seed/", import.meta.url));
+const git = (dir: string, ...args: string[]) => execFileSync("git", args, { cwd: dir, encoding: "utf8" }).trim();
+const fresh = () => mkdtemp(join(tmpdir(), "metistry-init-"));
+const MINTED = "TEST-TOKEN-NEVER-ON-DISK";
+
+describe("metistry init", () => {
+  it("stamps the instance repo exactly like the by-hand bootstrap, in one commit authored Metistry", async () => {
+    const dir = join(await fresh(), "instance");
+    const r = await init({ dir, seedDir, version: "1.2.3", now: new Date("2026-09-07T12:00:00Z"), mint: () => MINTED });
+
+    expect(r.dir).toBe(dir);
+    expect(existsSync(join(dir, "Knowledge", "now.md"))).toBe(true);
+    expect(existsSync(join(dir, "identity.yaml"))).toBe(true);
+    expect(existsSync(join(dir, "rules.yaml"))).toBe(true);
+    expect(existsSync(join(dir, "inbox"))).toBe(true);
+    for (const d of INSTANCE_DIRS) expect(existsSync(join(dir, d, ".gitkeep")), d).toBe(true);
+    expect(readFileSync(join(dir, ".gitignore"), "utf8")).toBe("inbox/\n.obsidian/workspace*\n");
+    expect(readFileSync(join(dir, "README.md"), "utf8")).toMatch(/^# Instance repo — private\./);
+    expect(readFileSync(join(dir, "metistry.lock"), "utf8")).toBe(lockFile("1.2.3", new Date("2026-09-07T12:00:00Z")));
+    expect(parseYaml(readFileSync(join(dir, "metistry.lock"), "utf8"))).toEqual({ version: "1.2.3", created: "2026-09-07" });
+
+    // git: branch main, exactly one commit, the stamped author, clean tree, inbox ignored
+    expect(git(dir, "rev-parse", "--abbrev-ref", "HEAD")).toBe("main");
+    expect(git(dir, "rev-list", "--count", "HEAD")).toBe("1");
+    expect(git(dir, "log", "-1", "--format=%an <%ae>|%cn <%ce>|%s")).toBe("Metistry <metistry@localhost>|Metistry <metistry@localhost>|Instance created");
+    expect(git(dir, "rev-parse", "HEAD")).toBe(r.commit);
+    expect(git(dir, "status", "--porcelain")).toBe("");
+    expect(git(dir, "ls-files").split("\n").sort()).toEqual(
+      [".gitignore", "Knowledge/now.md", "README.md", "identity.yaml", "metistry.lock", "rules.yaml", ...INSTANCE_DIRS.map((d) => `${d}/.gitkeep`)].sort(),
+    );
+    await writeFile(join(dir, "inbox", "x.txt"), "capture");
+    expect(git(dir, "status", "--porcelain")).toBe("");
+
+    // the seed's default name stays when --name is not given; the .env lines are returned, not written
+    expect(r.assistantName).toBe((parseYaml(readFileSync(join(seedDir, "identity.yaml"), "utf8")) as { name: string }).name);
+    expect(r.envLines).toEqual([`METISTRY_INSTANCE_DIR=${dir}`, `METISTRY_BRIDGE_TOKEN_RECONCILER=${MINTED}`, "METISTRY_RECONCILER_URL=http://host.docker.internal:7812"]);
+    for (const f of git(dir, "ls-files").split("\n")) expect(readFileSync(join(dir, f), "utf8"), f).not.toContain(MINTED);
+  });
+
+  it("--name lands in identity.yaml (and the mention follows), keeping the seed's comments", async () => {
+    const dir = join(await fresh(), "instance");
+    const r = await init({ dir, seedDir, version: "0.0.1", name: "Athena Prime", mint: () => MINTED });
+    expect(r.assistantName).toBe("Athena Prime");
+    const text = readFileSync(join(dir, "identity.yaml"), "utf8");
+    const parsed = parseYaml(text) as { name: string; mention: string; voice: string; icon: string };
+    expect(parsed.name).toBe("Athena Prime");
+    expect(parsed.mention).toBe("@athena-prime");
+    expect(parsed.voice).toBeTruthy();
+    expect(parsed.icon).toBeTruthy();
+    expect(text).toMatch(/^# SEED TEMPLATE/);
+    // the name appears in identity.yaml and nowhere else in the repo
+    const hits = execFileSync("git", ["grep", "-l", "Athena", "HEAD"], { cwd: dir, encoding: "utf8" }).trim().split("\n");
+    expect(hits).toEqual(["HEAD:identity.yaml"]);
+  });
+
+  it("refuses a non-empty directory unless --force, and never leaves a half-stamped tree behind", async () => {
+    const dir = join(await fresh(), "instance");
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, "notes.txt"), "mine");
+    await expect(init({ dir, seedDir, version: "0.0.1", mint: () => MINTED })).rejects.toThrow(/not empty.*--force/);
+    expect(readdirSync(dir)).toEqual(["notes.txt"]);
+
+    const r = await init({ dir, seedDir, version: "0.0.1", force: true, mint: () => MINTED });
+    expect(r.commit).toMatch(/^[0-9a-f]{40}$/);
+    expect(existsSync(join(dir, "notes.txt"))).toBe(true); // --force stamps around what is there
+  });
+
+  it("refuses an empty --name and a seedDir that is not a seed", async () => {
+    const dir = join(await fresh(), "instance");
+    await expect(init({ dir, seedDir, version: "0.0.1", name: "  ", mint: () => MINTED })).rejects.toThrow(/--name/);
+    await expect(init({ dir: join(await fresh(), "x"), seedDir: tmpdir(), version: "0.0.1" })).rejects.toThrow(/not a Metistry seed/);
+  });
+
+  it("applyName rewrites only the name/mention lines; mentionFor slugs", () => {
+    const out = applyName('name: Metis\nmention: "@metis"\nicon: "x"\n', 'O"Brien 9');
+    expect(out).toBe('name: "O\\"Brien 9"\nmention: "@o-brien-9"\nicon: "x"\n');
+    expect(mentionFor("Metis")).toBe("@metis");
+    expect(() => applyName("icon: x\n", "A")).toThrow(/name:/);
+  });
+
+  it("main: init prints the .env lines and exits 0; usage errors exit 2", async () => {
+    const dir = join(await fresh(), "instance");
+    const lines: string[] = [];
+    const code = await main(["init", dir, "--name", "Ada", "--product-dir", fileURLToPath(new URL("../../../", import.meta.url))], { out: (s) => lines.push(s) });
+    expect(code).toBe(0);
+    const text = lines.join("\n");
+    expect(text).toContain(`METISTRY_INSTANCE_DIR=${dir}`);
+    expect(text).toMatch(/METISTRY_BRIDGE_TOKEN_RECONCILER=[A-Za-z0-9_-]{40,}/);
+    expect(text).toContain("METISTRY_RECONCILER_URL=http://host.docker.internal:7812");
+    expect(text).toContain('assistant named "Ada"');
+    expect(existsSync(join(dir, ".env"))).toBe(false);
+
+    const errs: string[] = [];
+    expect(await main(["init"], { out: () => {}, err: (s) => errs.push(s) })).toBe(2);
+    expect(errs[0]).toMatch(/usage/);
+    expect(await main(["bogus"], { out: () => {}, err: () => {} })).toBe(2);
+    expect(await main([], { out: () => {}, err: () => {} })).toBe(2);
+    expect(await main(["up"], { out: () => {} })).toBe(0);
+    expect(await main(["update"], { out: () => {} })).toBe(0);
+  });
+});

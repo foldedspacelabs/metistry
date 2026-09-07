@@ -372,3 +372,16 @@ your git, on your machine.
   Obsidian edits swept into `user` commits (PoC-12 closed in code).
   `knowledge_read` in `mcp-brain` now returns note contents when the
   bridge is configured. 45 tests, all misuse shapes included.
+- 2026-09-07 — **`metistry init` + `metistry doctor` shipped**
+  (`packages/cli` → `@foldedspacelabs/metistry-cli`, `docs/ops/cli.md`).
+  `npx @foldedspacelabs/metistry-cli init <dir> --name <assistant>` is now
+  the documented first step — the instance repo the 2026-09-06 bootstrap
+  made by hand, stamped from `seed/` with the name in `identity.yaml` and
+  nowhere else, the reconciler token minted and *printed* (never written
+  into a repo the user may push). `doctor` is the promise plan §4.16 made
+  in Phase 1 paid off: generic over manifests, it validated all 14
+  shipped components and probed every bridge/service/container/launchd
+  job through the one `check()` contract — 24/24 ok on the Studio on
+  first run, `failed` (exit 1) versus `degraded`/`absent` (exit 0) so a
+  missing optional bridge is a finding, not an outage. 26 tests, fakes
+  for every status plus the real-db migrations count.

@@ -8,10 +8,15 @@
 import type { CheckResult } from "@foldedspacelabs/metistry-core";
 import type { Db } from "./probes.js";
 
+/** Alertable = not ok and not absent (absent is "not configured", the documented graceful degrade — never a page). */
+export function isFailure(c: CheckResult): boolean {
+  return c.status !== "ok" && c.status !== "absent";
+}
+
 export async function alertFailures(db: Db, checks: CheckResult[], quietHours = 6): Promise<number> {
   let raised = 0;
   for (const c of checks) {
-    if (c.status === "ok") continue;
+    if (!isFailure(c)) continue;
     const text = `watchdog: ${c.name} ${c.status} — ${c.remediation ?? c.probe}`;
     const { rows } = await db.query(
       `SELECT 1 FROM outbound_messages

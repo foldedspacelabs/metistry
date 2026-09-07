@@ -3,8 +3,14 @@
 // reportable. Direct db access is the named invariant-3 exception (the
 // watchdog must be able to say the console itself is down). All probes
 // return the frozen check() shape.
+//
+// Alert texts are deduped by exact string (alert.ts), so remediation lines
+// name WHAT is wrong and the fix, never a changing number — counts and
+// ages ride in `meta` for the log.
 
 import { runCheck, type CheckResult } from "@foldedspacelabs/metistry-core";
+import { loadScheduled, type ScheduledComponent } from "./manifests.js";
+import { checkBridge, summarizeBridges, type BridgeOutcome, type BridgeTarget } from "./bridges.js";
 
 export interface Db {
   query(text: string, values?: unknown[]): Promise<{ rows: any[] }>;
@@ -16,9 +22,66 @@ export interface ProbeConfig {
   stuckProcessingMin: number;
   inflightRunMin: number; // two-phase runs older than this with no finish = hung call (CRIT-8)
   hourlyCostUsd: number; // cost-runaway line
+  collectorsDir: string; // manifests the console's runner schedules from (repo paths — the watchdog is on the host)
+  routinesDir: string;
+  silenceFactor: number; // a collector is silent after this × its manifest interval with no runs row
+  startedAt: Date; // "never ran" is measured from watchdog start, so a fresh install doesn't alert on cycle one
+  bridges: BridgeTarget[]; // configured host bridges (bridges.ts: bridgesFromEnv)
+  fmMinCaptures: number; // rule-default captures needed before "the FM tier never fires" is a claim
+  fmWindowHours: number;
 }
 
+// ---- decision logic, pure (unit-tested with fakes) -------------------------
+
+export interface SilenceInput extends ScheduledComponent {
+  lastRunAt: Date | null;
+}
+
+export interface SilentComponent {
+  name: string;
+  schedule: string;
+  limitSec: number;
+  silentSec: number;
+  neverRan: boolean;
+}
+
+/** Silent = no runs row inside factor × interval. Never-ran counts from `since` (watchdog start), not the epoch. */
+export function silentComponents(components: SilenceInput[], now: Date, since: Date, factor: number): SilentComponent[] {
+  const out: SilentComponent[] = [];
+  for (const c of components) {
+    const ref = c.lastRunAt ?? since;
+    const silentSec = Math.floor((now.getTime() - ref.getTime()) / 1000);
+    const limitSec = factor * c.intervalSec;
+    if (silentSec > limitSec) {
+      out.push({ name: c.name, schedule: c.schedule, limitSec, silentSec, neverRan: c.lastRunAt === null });
+    }
+  }
+  return out;
+}
+
+export interface FmTierCounts {
+  /** captures the rules could not place (reason "default", non-empty note) that stayed deterministic — exactly what the FM tier exists to refine */
+  ruleDefault: number;
+  /** captures the apple-fm tier actually classified */
+  fm: number;
+}
+
+/** The tier "never fires" when enough rule-default captures exist and the deterministic fallbacks outnumber apple-fm's. */
+export function fmTierNeverFires(counts: FmTierCounts, minCaptures: number): boolean {
+  return counts.ruleDefault >= minCaptures && counts.ruleDefault > counts.fm;
+}
+
+function humanSec(sec: number): string {
+  if (sec % 86400 === 0) return `${sec / 86400}d`;
+  if (sec % 3600 === 0) return `${sec / 3600}h`;
+  return `${Math.round(sec / 60)}m`;
+}
+
+// ---- the probes ------------------------------------------------------------
+
 export async function runProbes(db: Db, cfg: ProbeConfig, fetchFn = fetch): Promise<CheckResult[]> {
+  let bridgeOutcomes: BridgeOutcome[] = []; // bridge-degraded fills this; fm-tier-never-fires reads apple-fm's entry
+
   return [
     await runCheck("db", "SELECT 1 round-trip", async () => {
       await db.query("SELECT 1");
@@ -67,6 +130,70 @@ export async function runProbes(db: Db, cfg: ProbeConfig, fetchFn = fetch): Prom
       if (Number(rows[0].n) === 0) {
         return { status: "degraded", remediation: "no device can receive alerts — enable notifications in the PWA status tab" };
       }
+    }),
+
+    // PoC-11 named "collector staleness" as a watchdog duty: a runner that
+    // died, or a collector that throws before startRun, leaves the data
+    // quietly stale while every other probe stays green.
+    await runCheck("silent-collector", `every scheduled collector/routine has a runs row within ${cfg.silenceFactor}× its manifest interval`, async () => {
+      const scheduled = [...(await loadScheduled(cfg.collectorsDir)), ...(await loadScheduled(cfg.routinesDir))];
+      if (scheduled.length === 0) return { status: "absent", meta: { scheduled: 0 } };
+      const { rows } = await db.query(
+        `SELECT component, kind, max(ts) AS last FROM runs
+         WHERE kind IN ('collector_run', 'routine_run') GROUP BY component, kind`,
+      );
+      const last = new Map<string, Date>(rows.map((r) => [`${r.component}/${r.kind}`, new Date(r.last)]));
+      const silent = silentComponents(
+        scheduled.map((s) => ({ ...s, lastRunAt: last.get(`${s.name}/${s.runKind}`) ?? null })),
+        new Date(),
+        cfg.startedAt,
+        cfg.silenceFactor,
+      );
+      const meta = { scheduled: scheduled.length, silent: Object.fromEntries(silent.map((s) => [s.name, s.silentSec])) };
+      if (silent.length === 0) return { meta };
+      const who = silent
+        .map((s) => (s.neverRan ? `${s.name} (never ran since watchdog start; schedule "${s.schedule}")` : `${s.name} (no run in >${humanSec(s.limitSec)}; schedule "${s.schedule}")`))
+        .join(", ");
+      return {
+        status: "failed",
+        remediation: `${who} — the console's runner is not running it: check the console container log (docker compose logs console) and that the manifest still loads`,
+        meta,
+      };
+    }),
+
+    await runCheck("bridge-degraded", `GET /check on ${cfg.bridges.map((b) => b.name).join(", ") || "(no bridges configured)"} answers status ok`, async () => {
+      bridgeOutcomes = await Promise.all(cfg.bridges.map((b) => checkBridge(b, fetchFn)));
+      return summarizeBridges(bridgeOutcomes);
+    }),
+
+    // The FM tier degrades ABSENT on any failure (inbox-drain), which is
+    // right for a collector and invisible for an operator: a bad token in
+    // the console container and a healthy bridge look identical from the
+    // data alone. This probe is the difference between "configured" and
+    // "used".
+    await runCheck("fm-tier-never-fires", `apple-fm classified some rule-default capture in the last ${cfg.fmWindowHours}h (bridge healthy, ≥${cfg.fmMinCaptures} candidates)`, async () => {
+      const afm = bridgeOutcomes.find((o) => o.name === "apple-fm");
+      if (!afm) return { status: "absent", meta: { configured: false } };
+      if (afm.state !== "ok") return { meta: { bridge: afm.state, skipped: "bridge not healthy — bridge-degraded reports it" } };
+      const { rows } = await db.query(
+        `SELECT
+           count(*) FILTER (WHERE payload->>'tier' = 'apple-fm') AS fm,
+           count(*) FILTER (WHERE payload->>'tier' = 'deterministic'
+                              AND payload->'classification'->>'reason' = 'default'
+                              AND coalesce(trim(payload->>'note'), '') <> '') AS rule_default
+         FROM proposals
+         WHERE kind = 'knowledge' AND payload ? 'tier' AND ts > now() - make_interval(hours => $1)`,
+        [cfg.fmWindowHours],
+      );
+      const counts: FmTierCounts = { ruleDefault: Number(rows[0].rule_default), fm: Number(rows[0].fm) };
+      if (!fmTierNeverFires(counts, cfg.fmMinCaptures)) return { meta: { ...counts } };
+      return {
+        status: "degraded",
+        remediation:
+          `apple-fm answers /check but inbox-drain never reaches it: in the last ${cfg.fmWindowHours}h the deterministic fallbacks outnumber apple-fm classifications (≥${cfg.fmMinCaptures} rule-default captures seen) — ` +
+          `check METISTRY_AFM_URL and METISTRY_BRIDGE_TOKEN_APPLE_FM in the console container's env (docker compose exec console env | grep AFM) and the console log for /classify errors`,
+        meta: { ...counts },
+      };
     }),
   ];
 }

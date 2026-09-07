@@ -17,5 +17,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=build /out /app
+# product defaults ship in the image (identity.yaml, assistant-prompt.md);
+# the instance overlays via volumes / METISTRY_*_FILES (D4)
+COPY seed /app/seed
 USER node
 CMD ["node", "dist/main.js"]

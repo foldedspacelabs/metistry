@@ -309,3 +309,9 @@ your git, on your machine.
   token — a capture-only agent needs no grant at all. Note contents are
   not yet readable in the container (`knowledge_read` → `not_available`
   until the knowledge module lands); the index is.
+- 2026-09-06 — **D5 resolved: one committer.** The reconciler is the
+  only process that runs git and the only holder of the vault; everything
+  else reaches knowledge through a host-side vault bridge over HTTP with
+  write-with-intent commits. Safety mechanism: no git credentials in any
+  container, the engine still has no shell and no git, and a write is
+  visible to readers immediately while commits batch behind it.

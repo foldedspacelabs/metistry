@@ -91,11 +91,19 @@ shape of the work and the secrets it needs are on the record.
 ## Release notes
 
 `ops/release/changelog.mjs` builds the release body from the
-`CHANGELOG.md` files `changeset version` wrote: it takes each package's
-section for this version, drops the fixed-mode `Updated dependencies`
-churn and the commit-hash prefixes, deduplicates (one changeset touching
-six packages reads as one line), and appends the packages, images and
-assets. No second hand-written account to drift.
+`CHANGELOG.md` files `changeset version` wrote. The bullets come from
+`packages/cli/CHANGELOG.md`'s `## <version>` section — the CLI is the
+product-level package, and fixed mode means every package's section for
+that version is identical anyway, so there is nothing to merge in the
+normal case. If that section is missing or blank (the CLI carries no
+changeset for this release), it falls back to every package's section,
+deduplicated (one changeset touching six packages reads as one line).
+Either way the fixed-mode `Updated dependencies` churn and the
+commit-hash prefixes are dropped, and the packages, images and assets are
+appended. No second hand-written account to drift.
+
+This is also why the release PR (`pnpm release:version`) must land before
+the tag: it is what writes the `## <version>` section the notes read.
 
 ## Consuming a release: `metistry update`
 

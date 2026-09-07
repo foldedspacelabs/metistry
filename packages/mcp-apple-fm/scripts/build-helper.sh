@@ -5,7 +5,13 @@
 set -eu
 cd "$(dirname -- "$0")/.."
 swiftc -O -parse-as-library helper/afm-helper.swift -o helper/afm-helper
-IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null | grep -o '"Developer ID Application[^"]*"' | head -1 | tr -d '"') || true
+# METISTRY_SIGN_IDENTITY pins a specific identity (e.g. multiple Developer ID
+# certs installed); unset falls back to auto-detecting the first Developer ID
+# Application identity, then to ad-hoc (docs/ops/apple-signing.md §3).
+IDENTITY="${METISTRY_SIGN_IDENTITY:-}"
+if [ -z "$IDENTITY" ]; then
+  IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null | grep -o '"Developer ID Application[^"]*"' | head -1 | tr -d '"') || true
+fi
 if [ -n "${IDENTITY:-}" ]; then
   codesign --force --options runtime --sign "$IDENTITY" helper/afm-helper
   echo "signed: $IDENTITY"

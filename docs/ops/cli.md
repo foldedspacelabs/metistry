@@ -122,8 +122,21 @@ it down).
 ## Bringing an install up
 
 `metistry up [--no-compose] [--no-launchd] [--dry-run]` takes a product
-checkout with a filled-in `.env` to *running*:
+checkout with a filled-in `.env` to *running*.
 
+**What it starts is the same in every deployment shape; where depends on
+`deployment.yaml`** (`docs/ops/deployment-shapes.md`). The default is
+`compose` and the steps below describe it. Under `shape: launchd` there
+is no docker at all: `up` prepares a user-space Postgres (step 0), then
+installs `console`, `assistant` and `db` as launchd jobs alongside the
+host jobs (step 2), then creates the database, then doctor. `doctor`
+reports the shape as its first row and writes every remediation for it.
+
+0. **Postgres (launchd shape only).** Find the binaries
+   (`METISTRY_PG_BIN`, a bundled `runtime/postgres/bin`, Homebrew
+   `postgresql@17`), `initdb` into `<instance>/state/pg` once, write the
+   managed block in `postgresql.conf`. A missing toolchain prints a
+   `brew install` line and stops — `up` installs nothing itself.
 1. **Containers.** `docker compose up -d --build` in the checkout — or,
    when the instance's `metistry.lock` says `source: release`,
    `docker compose pull` then `up -d --no-build` (a release install never
@@ -136,6 +149,12 @@ checkout with a filled-in `.env` to *running*:
    job: `launchctl bootout` (tolerated when not loaded), `bootstrap`,
    `kickstart -k`. This is exactly the by-hand recipe in each plist's
    comment, so a job installed by hand is simply re-rendered in place.
+   Under the launchd shape three more plists join them: `console` and
+   `assistant` carry their whole environment in an `EnvironmentVariables`
+   dict rendered from `.env` (no shell, nothing interpolated) and are
+   written `0600` because that dict holds secrets, and the `assistant`
+   job's root process is `sandbox-exec` running
+   `ops/sandbox/assistant.sb`.
 3. **Doctor.** Its verdict is `up`'s exit code — `0` when nothing is
    `failed`. A step that fails stops the plan (nothing after it runs),
    doctor still runs for the diagnosis, and the failing command's exit
@@ -278,6 +297,9 @@ operator-facing parts of it happen:
 - **On every product change:** `metistry update` (or `update --dry-run`
   first). Pull, build, migrate, restart what changed, pin, doctor — one
   command, idempotent, safe to rerun.
+- **After changing `deployment.yaml`:** `metistry up`, having stopped
+  what the old shape was running and taken a dump — the data does not
+  move between shapes (`docs/ops/deployment-shapes.md`).
 - **After a reboot, a Docker restart, or a `brew upgrade node`:**
   `metistry up`. It re-renders the launchd jobs (the node path is the
   stable symlink, so a node upgrade usually needs nothing — but `up` is

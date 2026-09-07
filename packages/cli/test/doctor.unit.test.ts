@@ -156,6 +156,40 @@ describe("doctor: everything healthy", () => {
   });
 });
 
+describe("doctor: the launchd shape", () => {
+  it("reports the shape, probes the shaped jobs as launchd, and never consults docker", async () => {
+    const productDir = await checkout();
+    const calls: string[] = [];
+    const inner = fakeExec({ docker: { code: 127 } });
+    const exec: Exec = async (cmd, args, opts) => {
+      calls.push(cmd);
+      return inner(cmd, args, opts);
+    };
+    const report = await doctor({
+      productDir,
+      env,
+      deployment: { shape: "launchd", services: {} },
+      fetchFn: fakeFetch({}),
+      db: null,
+      exec,
+      platform: "darwin",
+      uid: 501,
+    });
+    expect(report.shape).toBe("launchd");
+    expect(report.rows[0]).toMatchObject({ kind: "deployment", name: "deployment", status: "ok" });
+    expect(report.rows[0]!.meta).toMatchObject({ shape: "launchd", services: { db: "launchd", console: "launchd", assistant: "launchd", reconciler: "launchd", watchdog: "launchd" } });
+    // no container runtime is consulted at all
+    expect(calls).not.toContain("docker");
+    expect(report.rows.some((r) => r.kind === "container" || r.kind === "compose")).toBe(false);
+
+    const r = byName(report.rows);
+    // every remediation is written for the shape the install actually has
+    expect(r.console?.remediation).toMatch(/launchctl kickstart -k gui\/\$\(id -u\)\/com\.foldedspacelabs\.metistry\.console/);
+    expect(r.console?.remediation).not.toMatch(/docker/);
+    expect(r.y?.remediation).toMatch(/default http:\/\/127\.0\.0\.1:7902/);
+  });
+});
+
 describe("doctor: degraded (runs, needs a hand) never fails the exit code", () => {
   it("bridge says degraded, migrations pending, container unhealthy", async () => {
     const productDir = await checkout();
@@ -266,7 +300,7 @@ describe("doctor: absent (not configured / not installed) is informational", () 
     expect(r.x).toMatchObject({ status: "absent", remediation: expect.stringMatching(/set METISTRY_X_URL/) });
     expect(r["launchd:com.foldedspacelabs.metistry.a"]).toMatchObject({
       status: "absent",
-      remediation: expect.stringMatching(/not bootstrapped — sed .*ops\/launchd\/com\.foldedspacelabs\.metistry\.a\.plist.*launchctl bootstrap gui\/\$\(id -u\)/),
+      remediation: expect.stringMatching(/not bootstrapped — metistry up, or by hand: sed .*ops\/launchd\/com\.foldedspacelabs\.metistry\.a\.plist.*launchctl bootstrap gui\/\$\(id -u\)/),
     });
     expect(r.compose).toMatchObject({ kind: "compose", status: "absent", remediation: expect.stringMatching(/docker not found/) });
     expect(report.rows.filter((x) => x.name.startsWith("compose:"))).toHaveLength(0);

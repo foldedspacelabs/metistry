@@ -20,6 +20,7 @@ import {
   resolveUrl,
   runCheck,
   servicePlan,
+  SHAPED_SERVICES,
   usesCompose,
   validateManifest,
   type CheckResult,
@@ -29,7 +30,7 @@ import {
 } from "@foldedspacelabs/metistry-core";
 import { loadDeployment } from "./deployment.js";
 import { realExec, type Exec } from "./exec.js";
-import { loadPlistTemplates, LABEL_PREFIX } from "./launchd.js";
+import { loadPlistTemplates, serviceOf, LABEL_PREFIX } from "./launchd.js";
 
 export interface Db {
   query(text: string, values?: unknown[]): Promise<{ rows: any[] }>;
@@ -328,6 +329,7 @@ export function parseLaunchctlPrint(text: string): { state: string; pid?: number
 
 export async function launchdRows(productDir: string, exec: Exec, uid: number, shape: DeploymentShape = "compose"): Promise<DoctorRow[]> {
   const rows: DoctorRow[] = [];
+  const shaped = new Set<string>(SHAPED_SERVICES);
   for (const { file, label } of await launchdLabels(productDir, shape)) {
     rows.push({
       kind: "launchd",
@@ -337,7 +339,11 @@ export async function launchdRows(productDir: string, exec: Exec, uid: number, s
         if (r.code !== 0) {
           return {
             status: "absent",
-            remediation: `not bootstrapped — sed "s|__REPO__|$PWD|g; s|__NODE__|$(which node)|g" ops/launchd/${file} > ~/Library/LaunchAgents/${file} && launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/${file}`,
+            // the shaped jobs carry an EnvironmentVariables dict rendered
+            // from .env, so the by-hand sed recipe cannot produce them
+            remediation: shaped.has(serviceOf(label))
+              ? `not bootstrapped — metistry up (this shape's ${file} is rendered with values only \`up\` computes; docs/ops/deployment-shapes.md)`
+              : `not bootstrapped — metistry up, or by hand: sed "s|__REPO__|$PWD|g; s|__NODE__|$(which node)|g" ops/launchd/${file} > ~/Library/LaunchAgents/${file} && launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/${file}`,
           };
         }
         const p = parseLaunchctlPrint(r.stdout);

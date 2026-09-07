@@ -21,11 +21,12 @@ export const SANDBOX_PROFILE_REL = "ops/sandbox/assistant.sb";
 
 /**
  * The Anthropic hosts the Agent SDK talks to. sandbox-exec filters outbound
- * by port, not by name, so this list is documentation and configuration
- * (METISTRY_ASSISTANT_ALLOWED_HOSTS) rather than an enforced rule — the
- * profile allows TLS and nothing else. Name-level enforcement arrives with
- * App Sandbox; docs/ops/deployment-shapes.md says so plainly rather than
- * letting the profile imply a guarantee it does not make.
+ * by port, not by name, so this list is documentation, not an enforced
+ * rule — the profile allows TLS and nothing else, and the variable name
+ * METISTRY_ASSISTANT_ALLOWED_HOSTS is reserved for when a layer exists
+ * that can enforce it. Name-level enforcement arrives with App Sandbox;
+ * docs/ops/deployment-shapes.md says so plainly rather than letting the
+ * profile imply a guarantee it does not make.
  */
 export const ANTHROPIC_HOSTS = ["api.anthropic.com", "statsig.anthropic.com", "console.anthropic.com"] as const;
 

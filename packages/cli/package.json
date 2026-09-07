@@ -1,0 +1,29 @@
+{
+  "name": "@foldedspacelabs/metistry-cli",
+  "version": "0.0.1",
+  "description": "Metistry command line: `metistry init` stamps a private instance repo from seed/, `metistry doctor` validates every manifest and probes every bridge, service, container and launchd job through the one check() contract. Usable by a stranger: npx @foldedspacelabs/metistry-cli init <dir>.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": { "metistry": "./dist/main.js" },
+  "files": ["dist", "seed", "README.md"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && rm -rf seed && cp -R ../../seed seed",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "start": "node dist/main.js"
+  },
+  "engines": { "node": ">=22" },
+  "dependencies": {
+    "@foldedspacelabs/metistry-core": "workspace:*",
+    "pg": "^8.16.0",
+    "yaml": "^2.9.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "@types/pg": "^8.16.0",
+    "typescript": "^7.0.2",
+    "vitest": "^4.0.18"
+  }
+}

@@ -1,0 +1,5 @@
+name: reconciler
+type: service
+description: Sole committer of the instance repo + the vault bridge (D5); owns §4.13 change detection. The only process that holds the working tree and the only place git runs.
+runs_on: host            # holds the instance repo's working tree; launchd on macOS, a container with a volume elsewhere
+port: 7812

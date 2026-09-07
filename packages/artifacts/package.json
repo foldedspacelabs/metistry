@@ -1,7 +1,7 @@
 {
-  "name": "@foldedspacelabs/metistry-mcp-brain",
+  "name": "@foldedspacelabs/metistry-artifacts",
   "version": "0.0.1",
-  "description": "Metistry brain bridge: the one MCP surface every external agent uses — capture/report in, scoped tasks and knowledge out. Streamable HTTP, per-agent bearer principal, tiered knowledge grants, tool-result nudges, one runs row per call. Embeds in any node:http server over any pg-shaped client.",
+  "description": "Publish-and-review for agent output, backed by a versioned vault: compare-and-swap publish (idempotent, attributed), comment threads on exact versions, and review dispatch that rides a shared task list — with the agent-to-agent autonomy boundary enforced in the service. One TypeScript service over any pg-shaped client and any vault client; adapters (HTTP, MCP, CLI) add nothing.",
   "license": "Apache-2.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -13,8 +13,7 @@
     }
   },
   "files": [
-    "dist",
-    "manifest.yaml"
+    "dist"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -25,12 +24,8 @@
     "node": ">=22"
   },
   "dependencies": {
-    "@foldedspacelabs/metistry-artifacts": "workspace:*",
     "@foldedspacelabs/metistry-core": "workspace:*",
-    "@foldedspacelabs/metistry-tasks": "workspace:*",
-    "@modelcontextprotocol/sdk": "^1.30.0",
-    "yaml": "^2.9.0",
-    "zod": "^4.3.6"
+    "@foldedspacelabs/metistry-tasks": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",

@@ -407,3 +407,26 @@ your git, on your machine.
   assistant's default, so root notes like `now.md` are readable — the
   gap reported 2026-09-06 is closed by test. Deletes and renames stay the
   user's hand.
+- 2026-09-07 — **Artifacts: reviewable agent output** (plan §4.21, built
+  as a §4.20 module — `packages/artifacts`, `0010_artifacts.sql`, console
+  routes + PWA tab, six `artifact_*` tools on `mcp-brain`). An agent's
+  plan/report/page is now a versioned artifact in the instance repo
+  (`Artifacts/<project>/<slug>/`, ONE commit per version through the
+  reconciler — asserted with the repo's history in the console's
+  integration test against a real in-process bridge), and every publish
+  hands back `artifact` / `version` / `review` links. Safety, enforced at
+  the tool: compare-and-swap on the current version (a stale agent gets
+  `409`, never a silent overwrite), idempotent publish, author stamped
+  from the credential, one `runs` row per mutation. The review loop
+  closes: threads on an exact version, one-level replies, resolve/reopen,
+  and a review bundle that is one claimable `review` task on the shared
+  list — `addressed` is inferred from thread states, nothing writes it.
+  The autonomy boundary ships as code: an agent dispatches to another
+  agent only when both are members of the artifact's project, otherwise
+  the dispatch becomes a `proposals` row for the user; a thread of
+  consecutive agent-only replies is capped (10) and demotes to the user
+  with its transcript. Untrusted HTML never renders on the console
+  origin: the PWA shows it in an opaque-origin `sandbox=""` iframe with a
+  CSP (decision #14, locked by test), and the raw-file route serves only
+  images/PDF natively under `no-store`. 53 new tests across package,
+  mcp-brain, and console.

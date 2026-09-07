@@ -20,6 +20,7 @@
       <button data-view="status">status</button>
       <button data-view="devices">devices</button>
       <button data-view="agents">agents</button>
+      <button data-view="artifacts">artifacts</button>
     </nav>
   </header>
 
@@ -120,6 +121,39 @@
       <p id="dash-aws-total"></p>
       <ul id="dash-aws" class="dash-list"></ul>
       <ul id="dash-aws-services" class="dash-list"></ul>
+    </section>
+
+    <!-- artifacts (§4.21): versioned, commentable agent output. Every server
+         value is output-encoded (CRIT-7); HTML artifacts render ONLY inside an
+         opaque-origin sandboxed iframe (decision #14). -->
+    <section id="artifacts" hidden>
+      <form id="art-filter">
+        <input id="art-project" type="text" placeholder="project (blank = all)" autocomplete="off" autocapitalize="none" />
+        <button type="submit" class="secondary">list</button>
+      </form>
+      <ul id="art-list"></ul>
+      <p id="art-empty" class="muted" hidden>no artifacts yet — an agent publishes one with artifact_publish</p>
+      <div id="art-detail" hidden>
+        <h3 id="art-title"></h3>
+        <p id="art-meta" class="muted"></p>
+        <div class="art-row">
+          <label>version <select id="art-version"></select></label>
+          <label>file <select id="art-file"></select></label>
+        </div>
+        <div id="art-viewer"></div>
+        <h3>threads <span id="art-thread-count" class="muted"></span></h3>
+        <ul id="art-threads"></ul>
+        <form id="art-comment">
+          <textarea id="art-comment-body" placeholder="comment on this version…"></textarea>
+          <span><button type="submit">comment</button></span>
+        </form>
+        <form id="art-dispatch">
+          <p class="muted">send the checked threads to an agent as one review task</p>
+          <input id="art-dispatch-to" type="text" placeholder="agent id" autocomplete="off" autocapitalize="none" />
+          <span><button type="submit" class="secondary">dispatch review</button></span>
+          <p id="art-dispatch-msg" class="muted"></p>
+        </form>
+      </div>
     </section>
   </main>
 

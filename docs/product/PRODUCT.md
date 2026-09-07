@@ -586,3 +586,21 @@ your git, on your machine.
   `.git/config` — the tests assert that negatively, scanning every line
   of output and every subprocess argument for the token, and `secrets
   list` has no code path that can read a value. `docs/ops/cli.md`.
+
+- 2026-09-07 — Benefit proven with numbers: **the vault answers questions
+  you can only phrase in your own words.** Phase 6's embeddings ship —
+  the reconciler embeds notes as it reconciles (local Ollama, nothing
+  leaves the machine), and search gained `keyword | semantic | hybrid`
+  with hybrid the default once vectors exist. Measured on the real model
+  and real pgvector: a query whose words appear nowhere in the note —
+  "how much should I ease off running in the final weeks so my legs are
+  fresh" — returns the taper note at 0.724 against the next note's 0.440
+  in 14 ms, where keyword returns nothing at all. Two properties make it
+  safe to depend on: with the embedder down every search still answers
+  (in keyword, saying so) and every note is still indexed and committed,
+  and the model choice stays reversible — model and dimension travel on
+  every row and a rebuild reproduces byte-identical chunks, so changing
+  models is 45 seconds, not a data migration. For agents the mode changes
+  the ranking and never the grant: the area filter lives inside the vector
+  query, so the closest chunk in the vault stays invisible to an agent
+  whose grant does not cover it. `docs/ops/knowledge-search.md`.

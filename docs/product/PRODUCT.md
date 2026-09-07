@@ -564,3 +564,13 @@ your git, on your machine.
   install now costs the user nothing in isolation compared with Docker,
   which is what makes "no Docker Desktop" an honest claim rather than a
   trade. `docs/ops/deployment-shapes.md`.
+- 2026-09-07 — Two review-follow-up fixes: **PR status now distinguishes
+  merged from closed-without-merge** — `github-state` fetches the
+  single-PR endpoint only for rows it is actually closing, so the weekly
+  review's Projects section says "N merged" and "N closed" instead of
+  lumping abandoned PRs in with shipped ones — and **crew `autonomy:` is a
+  validated part of the manifest contract**, not an accepted-then-dropped
+  field: the schema is strict for the agent type (an unknown key, in
+  `autonomy` or at the top level, is refused with a reason) and the
+  registry sync maps a valid block onto `agents.autonomy` through the same
+  normalizer the hand-set `PUT /api/agents/:id/autonomy` route uses.

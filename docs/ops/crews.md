@@ -35,10 +35,22 @@ projects: []                # shared-list membership (§4.19); empty = none
 manages: []                 # hierarchy lives here, not in directory depth
 max_turns: 10               # agentic turns per run
 budget_usd_per_run: 0.25    # the run stops past this
+autonomy:                   # optional (§4.21); absent = defaults apply, never widens
+  may_dispatch_to: []       # agent ids this crew may hand work to
+  accept_from: []           # agent ids and/or the literal "user"
+  max_open_bundles: 3       # integer ≥ 1
 ---
 
 You are a researcher working for {{name}}, this instance's assistant. …
 ```
+
+`autonomy` is validated **strictly** — an unknown key inside the block, or
+anywhere else at the manifest's top level, is refused with the reason
+instead of being silently stripped (a typo must not read as "validated,
+narrowed to nothing"). The registry sync maps it onto `agents.autonomy`
+through the same normalizer `PUT /api/agents/:id/autonomy` uses
+(`apps/console/src/agents.ts`'s `validateAutonomy`), so a manifest-set block
+and a hand-set one land in the row identically.
 
 The body is the operating prompt. `{{name}}` is the primary assistant's
 name from `identity.yaml` (templated by the runner — the seed never names

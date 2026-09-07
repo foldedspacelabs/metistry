@@ -65,6 +65,16 @@ async function approvedBy(ctx: GithubCtx, repo: string, number: number, login: s
   return reviews.some((r) => r.user?.login === login && r.state === "APPROVED");
 }
 
+/** merged_at from the single-PR endpoint — the open-issues listing never carries it. */
+async function fetchPullState(ctx: GithubCtx, repo: string, number: number): Promise<{ merged_at: string | null }> {
+  const res = await (ctx.fetchFn ?? fetch)(`https://api.github.com/repos/${repo}/pulls/${number}`, {
+    headers: ghHeaders(ctx),
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!res.ok) throw new Error(`github ${repo}#${number} pull state: HTTP ${res.status}`);
+  return (await res.json()) as { merged_at: string | null };
+}
+
 /** Open PRs with review-request detail (the issues listing omits it). */
 async function fetchPulls(ctx: GithubCtx, repo: string): Promise<Map<number, GhPull>> {
   const out = new Map<number, GhPull>();
@@ -141,10 +151,23 @@ export async function run(db: Db, ctx: GithubCtx = {}): Promise<number> {
     const closed = await db.query(
       `UPDATE work SET status = 'closed', updated_at = now()
        WHERE external_ref LIKE $1 AND status <> 'closed' AND NOT (external_ref = ANY($2::text[]))
-       RETURNING id`,
+       RETURNING id, external_ref, kind`,
       [`gh:${repo}#%`, refs],
     );
     touched += closed.rows.length;
+    // Merged vs. closed-without-merge only shows up on the single-PR endpoint
+    // (the /pulls list we already fetched doesn't carry it) — fetch it, but
+    // only for rows we're actually closing right now, so cost stays bounded.
+    for (const row of closed.rows as { id: number; external_ref: string; kind: string }[]) {
+      if (row.kind !== "pr") continue;
+      const m = /#(\d+)$/.exec(row.external_ref);
+      if (!m) continue;
+      const state = await fetchPullState(ctx, repo, Number(m[1]));
+      await db.query(`UPDATE work SET meta = meta || $2::jsonb WHERE id = $1`, [
+        row.id,
+        JSON.stringify({ merged: !!state.merged_at, merged_at: state.merged_at ?? null }),
+      ]);
+    }
   }
   return touched;
 }

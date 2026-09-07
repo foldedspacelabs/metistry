@@ -48,6 +48,13 @@ describe("crew manifest files", () => {
     expect(seed).not.toMatch(/Metis/); // CLAUDE.md naming rule: the seed never names the assistant
   });
 
+  it("autonomy: the §4.21 block round-trips through the same normalizer PUT /autonomy uses; absent → {}", () => {
+    const withBlock = parseCrewFile(withFrontmatter({ autonomy: { may_dispatch_to: ["scout"], accept_from: ["user"], max_open_bundles: 2 } }), "x");
+    expect(withBlock.autonomy).toEqual({ may_dispatch_to: ["scout"], accept_from: ["user"], max_open_bundles: 2 });
+    const absent = parseCrewFile(withFrontmatter({}), "x");
+    expect(absent.autonomy).toEqual({});
+  });
+
   it("area is filled from the directory when absent, and must agree when present; the name must be the filename", () => {
     const noArea = parseCrewFile(withFrontmatter({ area: undefined }), "x", { area: "ops", name: "researcher" });
     expect(noArea.manifest.area).toBe("ops");
@@ -67,6 +74,8 @@ describe("crew manifest files", () => {
     expect(() => parseCrewFile(withFrontmatter({ scope: ["Knowledge"] }), "x")).toThrow(/scope/);
     expect(() => parseCrewFile(withFrontmatter({ model: "gpt" }), "x")).toThrow(/model/);
     expect(() => parseCrewFile(withFrontmatter({}, "\n\n"), "x")).toThrow(/operating prompt and may not be empty/);
+    expect(() => parseCrewFile(withFrontmatter({ bogus_field: true }), "x")).toThrow(/invalid manifest/); // strict: an unknown top-level key is refused, not stripped
+    expect(() => parseCrewFile(withFrontmatter({ autonomy: { max_open_bundles: 0 } }), "x")).toThrow(/invalid manifest/); // ≥1
   });
 
   it("loads through the vault bridge when a dir is not on disk: agents/<area>/<name>.md only, later dirs win, bad files are refused not fatal", async () => {

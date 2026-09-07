@@ -35,6 +35,16 @@ const shortDate = (d: Date): string => d.toLocaleDateString([], { month: "short"
 // ---- sections. Each returns the lines under its heading; an empty data
 // source yields one honest line (never an omitted section — see header).
 
+// merged and closed-without-merge read differently to the user (merged is a
+// finished PR; closed-without-merge often means abandoned) — say which.
+function prOutcomes(merged: number, closedOnly: number): string {
+  if (merged === 0 && closedOnly === 0) return "0 closed";
+  const parts: string[] = [];
+  if (merged > 0) parts.push(`${merged} merged`);
+  if (closedOnly > 0) parts.push(`${closedOnly} closed`);
+  return parts.join(", ");
+}
+
 async function sectionProjects(db: Db, now: Date): Promise<string[]> {
   const { rows } = await db.query(
     `WITH s AS (
@@ -42,11 +52,12 @@ async function sectionProjects(db: Db, now: Date): Promise<string[]> {
               count(*) FILTER (WHERE kind <> 'pr' AND created_at > $1::timestamptz - interval '7 days') AS tasks_created,
               count(*) FILTER (WHERE kind <> 'pr' AND status = 'closed' AND coalesce(closed_at, updated_at) > $1::timestamptz - interval '7 days') AS tasks_closed,
               count(*) FILTER (WHERE kind = 'pr' AND external_ref LIKE 'gh:%' AND created_at > $1::timestamptz - interval '7 days') AS prs_opened,
-              count(*) FILTER (WHERE kind = 'pr' AND external_ref LIKE 'gh:%' AND status = 'closed' AND updated_at > $1::timestamptz - interval '7 days') AS prs_closed,
+              count(*) FILTER (WHERE kind = 'pr' AND external_ref LIKE 'gh:%' AND status = 'closed' AND updated_at > $1::timestamptz - interval '7 days' AND meta->>'merged' = 'true') AS prs_merged,
+              count(*) FILTER (WHERE kind = 'pr' AND external_ref LIKE 'gh:%' AND status = 'closed' AND updated_at > $1::timestamptz - interval '7 days' AND coalesce(meta->>'merged', 'false') <> 'true') AS prs_closed,
               count(*) FILTER (WHERE status = 'blocked') AS blocked
        FROM work WHERE coalesce(project, area) IS NOT NULL GROUP BY 1)
-     SELECT * FROM s WHERE tasks_created + tasks_closed + prs_opened + prs_closed + blocked > 0
-     ORDER BY tasks_created + tasks_closed + prs_opened + prs_closed DESC, name LIMIT 8`,
+     SELECT * FROM s WHERE tasks_created + tasks_closed + prs_opened + prs_merged + prs_closed + blocked > 0
+     ORDER BY tasks_created + tasks_closed + prs_opened + prs_merged + prs_closed DESC, name LIMIT 8`,
     [now],
   );
   if (rows.length === 0) return ["• no project activity this week"];
@@ -58,7 +69,7 @@ async function sectionProjects(db: Db, now: Date): Promise<string[]> {
   return rows.map((r: any) => {
     const parts = [
       `${plural(num(r.tasks_created), "task")} created, ${num(r.tasks_closed)} closed`,
-      `${plural(num(r.prs_opened), "PR")} opened, ${num(r.prs_closed)} closed`,
+      `${plural(num(r.prs_opened), "PR")} opened, ${prOutcomes(num(r.prs_merged), num(r.prs_closed))}`,
     ];
     if (num(r.blocked) > 0) parts.push(`${num(r.blocked)} blocked`);
     const stuck = blocked.rows

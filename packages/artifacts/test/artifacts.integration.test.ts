@@ -20,6 +20,7 @@ try {
 const hasDb = !!process.env.METISTRY_DB_PASSWORD;
 const P = "itest-art"; // project scope keeps this suite's rows apart
 const P2 = "itest-art-other";
+const P3 = "itest-art-caps"; // the §4.21 controls get their own project so the counts are exact
 const IDS = ["itest-art-user", "itest-art-alice", "itest-art-bob", "itest-art-carol"];
 
 const user: Principal = { kind: "user", id: "user" };
@@ -46,12 +47,16 @@ describe.skipIf(!hasDb)("artifacts (real db, memory vault)", () => {
       database: process.env.METISTRY_TEST_DB_NAME ?? "metistry_test",
       password: process.env.METISTRY_DB_PASSWORD,
     });
-    await pool.query(`DELETE FROM artifact_comments WHERE artifact_id IN (SELECT id FROM artifacts WHERE project IN ($1, $2))`, [P, P2]);
-    await pool.query(`DELETE FROM artifact_versions WHERE artifact_id IN (SELECT id FROM artifacts WHERE project IN ($1, $2))`, [P, P2]);
-    await pool.query(`DELETE FROM artifacts WHERE project IN ($1, $2)`, [P, P2]);
-    await pool.query(`DELETE FROM work WHERE project IN ($1, $2)`, [P, P2]);
+    await pool.query(`DELETE FROM artifact_comments WHERE artifact_id IN (SELECT id FROM artifacts WHERE project IN ($1, $2, $3))`, [P, P2, P3]);
+    await pool.query(`DELETE FROM artifact_versions WHERE artifact_id IN (SELECT id FROM artifacts WHERE project IN ($1, $2, $3))`, [P, P2, P3]);
+    await pool.query(`DELETE FROM artifacts WHERE project IN ($1, $2, $3)`, [P, P2, P3]);
+    await pool.query(`DELETE FROM work WHERE project IN ($1, $2, $3)`, [P, P2, P3]);
     await pool.query(`DELETE FROM proposals WHERE source_agent = ANY($1::text[])`, [IDS]);
     await pool.query(`DELETE FROM runs WHERE kind = 'artifact_op' AND component = ANY($1::text[])`, [["user", ...IDS]]);
+    await pool.query(`DELETE FROM runs WHERE kind = 'project_mode' AND meta->>'project' = $1`, [P3]);
+    await pool.query(`DELETE FROM runs WHERE meta->>'project' = $1 AND component = 'itest-art-spend'`, [P3]);
+    await pool.query(`DELETE FROM outbound_messages WHERE kind = 'alert' AND text LIKE $1`, [`project ${P3} flipped%`]);
+    await pool.query(`DELETE FROM projects WHERE id IN ($1, $2, $3)`, [P, P2, P3]);
     vault = memoryVault();
     tasks = new TasksService(pool);
     svc = new ArtifactsService(pool, vault, {
@@ -209,5 +214,143 @@ describe.skipIf(!hasDb)("artifacts (real db, memory vault)", () => {
     expect((await svc.dispatchReview({ artifact: artifactId, version: v2, thread_ids: [t1], to_agent: "nobody" }, alice))?.route).toBe("proposal");
     // a caller outside the project cannot even see the artifact
     expect(await svc.dispatchReview({ artifact: artifactId, version: v2, thread_ids: [t1], to_agent: bob.id }, carol)).toBeNull();
+  });
+
+  // ----- §4.21 controls on real rows -----
+  describe("§4.21 controls", () => {
+    const alice3: Principal = { kind: "agent", id: alice.id, projects: [P, P3] };
+    const bob3: Principal = { kind: "agent", id: bob.id, projects: [P, P3] };
+    let svc3: ArtifactsService;
+    let art3: string;
+    let ver3: string;
+    const threads: string[] = [];
+    const bundles: number[] = [];
+
+    beforeAll(async () => {
+      svc3 = new ArtifactsService(pool, vault, {
+        origin: "https://itest.example",
+        tasks,
+        agents: staticDirectory([
+          { id: alice.id, kind: "external", projects: [P, P3], revoked: false },
+          { id: bob.id, kind: "external", projects: [P, P3], revoked: false },
+          { id: carol.id, kind: "external", projects: [P2], revoked: false },
+        ]),
+      });
+    });
+
+    it("publish creates the project row lazily (ensureProject), with the defaults: autonomous, no budget, cap 20", async () => {
+      expect((await pool.query(`SELECT 1 FROM projects WHERE id = $1`, [P3])).rows).toHaveLength(0);
+      const r = await svc3.publish({ project: P3, slug: "spec", files: [{ path: "spec.md", content: "# Spec\n" }], idempotency_key: "caps-1", message: "spec" }, alice3);
+      art3 = r.artifact.id;
+      ver3 = r.version.id;
+      const row = await pool.query(`SELECT mode, daily_budget_usd, max_open_bundles FROM projects WHERE id = $1`, [P3]);
+      expect(row.rows).toEqual([{ mode: "autonomous", daily_budget_usd: null, max_open_bundles: 20 }]);
+      expect(await svc3.projectPolicy(P3)).toEqual({ id: P3, mode: "autonomous", daily_budget_usd: null, max_open_bundles: 20, exists: true });
+      expect(await svc3.projectPolicy("itest-art-nope")).toMatchObject({ mode: "autonomous", max_open_bundles: 20, exists: false });
+      for (let i = 0; i < 6; i++) threads.push((await svc3.commentCreate({ artifact: art3, version: ver3, body: `point ${i}` }, user))!.id);
+    });
+
+    it("per-agent cap (3): the fourth bundle from one agent is QUEUED — blocked, unclaimable, not ready — and addressing one releases it", async () => {
+      for (let i = 0; i < 3; i++) {
+        const r = await svc3.dispatchReview({ artifact: art3, version: ver3, thread_ids: [threads[i]!], to_agent: bob.id }, alice3);
+        expect(r).toMatchObject({ route: "work", queued: null });
+        if (r?.route === "work") bundles.push(r.work.id);
+      }
+      const fourth = await svc3.dispatchReview({ artifact: art3, version: ver3, thread_ids: [threads[3]!], to_agent: bob.id }, alice3);
+      expect(fourth).toMatchObject({ route: "work", queued: { reason: "agent_cap", cap: 3, open: 3 } });
+      if (fourth?.route !== "work") return;
+      const q = fourth.work.id;
+      expect(fourth.work).toMatchObject({ status: "blocked", claimed_by: null });
+      expect(fourth.work.history[0]).toMatchObject({ op: "create", status: "blocked", note: "over_cap: agent_cap 3/3" });
+      expect((await tasks.listReady({ project: P3 })).map((t) => t.id)).not.toContain(q);
+      expect(await tasks.claim(q, bob.id)).toMatchObject({ ok: false, reason: "blocked" });
+      expect(await svc3.bundleStatus(q, bob3)).toMatchObject({ status: "blocked", addressed: false });
+
+      // bob addresses bundle #1 (resolves its only thread) → a slot frees → the queued bundle is released inline
+      expect((await tasks.claim(bundles[0]!, bob.id)).ok).toBe(true);
+      await svc3.commentResolve(threads[0]!, bob3);
+      const released = await tasks.get(q);
+      expect(released).toMatchObject({ status: "open", claimed_by: null });
+      expect(released!.history.at(-1)).toMatchObject({ op: "update", status: "open", note: "released: under cap", agent: bob.id });
+      expect((released!.meta as { bundle: Record<string, unknown> }).bundle.queued).toBeUndefined();
+      expect((await tasks.listReady({ project: P3 })).map((t) => t.id)).toContain(q);
+      const rec = await pool.query(`SELECT meta FROM runs WHERE kind = 'artifact_op' AND component = $1 AND meta->>'op' = 'release_queued'`, [bob.id]);
+      expect(rec.rows).toEqual([{ meta: expect.objectContaining({ project: P3, work_id: q }) }]);
+      bundles.push(q);
+      // alice is back at her cap (bundles 2, 3, 4 open and unaddressed): one more queues again
+      expect(await svc3.dispatchReview({ artifact: art3, version: ver3, thread_ids: [threads[4]!], to_agent: bob.id }, alice3)).toMatchObject({ route: "work", queued: { reason: "agent_cap" } });
+    });
+
+    it("per-project cap (projects.max_open_bundles): a different sender at the project's cap is queued with reason project_cap; the user's hand is never capped", async () => {
+      await pool.query(`UPDATE projects SET max_open_bundles = 3 WHERE id = $1`, [P3]); // the user's hand (PUT /api/projects) — set directly here
+      const r = await svc3.dispatchReview({ artifact: art3, version: ver3, thread_ids: [threads[5]!], to_agent: alice.id }, bob3);
+      expect(r).toMatchObject({ route: "work", queued: { reason: "project_cap", cap: 3, open: 3 } });
+      const byUser = await svc3.dispatchReview({ artifact: art3, version: ver3, thread_ids: [threads[5]!], to_agent: alice.id }, user);
+      expect(byUser).toMatchObject({ route: "work", queued: null });
+      const counts = await pool.query(`SELECT status, count(*)::int AS n FROM work WHERE project = $1 AND kind = 'review' GROUP BY status ORDER BY status`, [P3]);
+      expect(counts.rows).toEqual([{ status: "blocked", n: 2 }, { status: "in_progress", n: 1 }, { status: "open", n: 4 }]);
+    });
+
+    it("the kill switch: mode review routes every agent-to-agent bundle to a proposal (reason review_mode) without touching membership; the user still dispatches", async () => {
+      await pool.query(`UPDATE projects SET mode = 'review' WHERE id = $1`, [P3]);
+      const r = await svc3.dispatchReview({ artifact: art3, version: ver3, thread_ids: [threads[1]!], to_agent: bob.id }, alice3);
+      expect(r).toMatchObject({ route: "proposal", reason: "review_mode" });
+      const prop = await pool.query(`SELECT payload FROM proposals WHERE id = $1`, [(r as { proposal_id: number }).proposal_id]);
+      expect(prop.rows[0]!.payload).toMatchObject({ reason: "review_mode", project: P3, to_agent: bob.id });
+      expect(await svc3.dispatchReview({ artifact: art3, version: ver3, thread_ids: [threads[1]!], to_agent: bob.id }, user)).toMatchObject({ route: "work" });
+      await pool.query(`UPDATE projects SET mode = 'autonomous', max_open_bundles = 20 WHERE id = $1`, [P3]);
+    });
+
+    it("narrowing from the directory: may_dispatch_to on the sender, accept_from on the recipient", async () => {
+      const narrowed = new ArtifactsService(pool, vault, {
+        origin: "https://itest.example",
+        tasks,
+        agents: staticDirectory([
+          { id: alice.id, kind: "external", projects: [P3], revoked: false, autonomy: { may_dispatch_to: [carol.id], max_open_bundles: 50 } },
+          { id: bob.id, kind: "external", projects: [P3], revoked: false, autonomy: { accept_from: ["user"], max_open_bundles: 50 } },
+        ]),
+      });
+      expect(await narrowed.dispatchReview({ artifact: art3, version: ver3, thread_ids: [threads[1]!], to_agent: bob.id }, alice3)).toMatchObject({ route: "proposal", reason: "may_dispatch_to" });
+      expect(await narrowed.dispatchReview({ artifact: art3, version: ver3, thread_ids: [threads[1]!], to_agent: bob.id }, { ...alice3, id: alice.id })).toMatchObject({ route: "proposal", reason: "may_dispatch_to" });
+      expect(await narrowed.dispatchReview({ artifact: art3, version: ver3, thread_ids: [threads[1]!], to_agent: alice.id }, bob3)).toMatchObject({ route: "work" }); // bob has no may_dispatch_to; alice has no accept_from
+      const narrowedBob = new ArtifactsService(pool, vault, {
+        origin: "https://itest.example",
+        tasks,
+        agents: staticDirectory([
+          { id: alice.id, kind: "external", projects: [P3], revoked: false, autonomy: { max_open_bundles: 50 } },
+          { id: bob.id, kind: "external", projects: [P3], revoked: false, autonomy: { accept_from: ["user"] } },
+        ]),
+      });
+      expect(await narrowedBob.dispatchReview({ artifact: art3, version: ver3, thread_ids: [threads[1]!], to_agent: bob.id }, alice3)).toMatchObject({ route: "proposal", reason: "accept_from" });
+    });
+
+    it("budget: spend over projects.daily_budget_usd flips the project to review ONCE — runs kind project_mode, one alert, deduped on a same-day re-flip", async () => {
+      await pool.query(`UPDATE projects SET daily_budget_usd = 0.50 WHERE id = $1`, [P3]);
+      expect(await svc3.enforceBudget(P3)).toEqual({ project: P3, mode: "autonomous", spend_usd: 0, budget_usd: 0.5, flipped: false });
+      // spend lands as runs rows stamped with the project (an agent's turn under a crew, a dispatch) — 0.30 + 0.30 today
+      for (const cost of [0.3, 0.3]) {
+        await pool.query(`INSERT INTO runs (component, kind, ok, cost_usd, meta) VALUES ('itest-art-spend', 'turn', true, $1, $2::jsonb)`, [cost, JSON.stringify({ project: P3 })]);
+      }
+      expect(await svc3.spendToday(P3)).toBeCloseTo(0.6, 6);
+      const first = await svc3.enforceBudget(P3);
+      expect(first).toMatchObject({ mode: "review", budget_usd: 0.5, flipped: true });
+      expect(first.spend_usd).toBeCloseTo(0.6, 6);
+      expect((await pool.query(`SELECT mode FROM projects WHERE id = $1`, [P3])).rows[0]!.mode).toBe("review");
+      const flips = await pool.query(`SELECT component, ok, meta FROM runs WHERE kind = 'project_mode' AND meta->>'project' = $1 ORDER BY id`, [P3]);
+      expect(flips.rows).toHaveLength(1);
+      expect(flips.rows[0]).toMatchObject({ component: "projects", ok: true, meta: expect.objectContaining({ from: "autonomous", to: "review", reason: "budget", budget_usd: 0.5 }) });
+      const alerts = () => pool.query(`SELECT text FROM outbound_messages WHERE kind = 'alert' AND text LIKE $1`, [`project ${P3} flipped%`]);
+      expect((await alerts()).rows).toHaveLength(1);
+      // a dispatch now routes to the user; the check does not flip or alert again
+      expect(await svc3.dispatchReview({ artifact: art3, version: ver3, thread_ids: [threads[2]!], to_agent: bob.id }, alice3)).toMatchObject({ route: "proposal", reason: "review_mode" });
+      expect(await svc3.enforceBudget(P3)).toMatchObject({ mode: "review", flipped: false });
+      expect((await pool.query(`SELECT count(*)::int AS n FROM runs WHERE kind = 'project_mode' AND meta->>'project' = $1`, [P3])).rows[0]!.n).toBe(1);
+      // the user switches back while still over budget: recorded again, alerted no more (24h dedupe)
+      await pool.query(`UPDATE projects SET mode = 'autonomous' WHERE id = $1`, [P3]);
+      expect(await svc3.enforceBudget(P3)).toMatchObject({ mode: "review", flipped: true });
+      expect((await pool.query(`SELECT count(*)::int AS n FROM runs WHERE kind = 'project_mode' AND meta->>'project' = $1`, [P3])).rows[0]!.n).toBe(2);
+      expect((await alerts()).rows).toHaveLength(1);
+      await pool.query(`UPDATE projects SET mode = 'autonomous', daily_budget_usd = NULL WHERE id = $1`, [P3]);
+    });
   });
 });

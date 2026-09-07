@@ -70,3 +70,83 @@ export function dispatchRoute(callerKind: "user" | "agent" | "system", callerIsM
   if (callerKind === "user") return "work";
   return callerIsMember && targetIsMember ? "work" : "proposal";
 }
+
+// --- §4.21 controls on top of the boundary --------------------------------------
+
+/**
+ * Optional narrowing below the project default, from the agent's manifest
+ * (`agents.autonomy`). Absent keys mean "project members" and the default
+ * cap; a key can only narrow, never widen — nothing here lets an agent
+ * reach past the boundary above.
+ */
+export interface Autonomy {
+  /** Agent ids this agent may send bundles to. Absent = every member. */
+  may_dispatch_to?: string[] | undefined;
+  /** Who may send this agent bundles: agent ids and/or the literal "user". Absent = every member (and the user). */
+  accept_from?: string[] | undefined;
+  /** This agent's own bundles in flight at once. Absent = DEFAULT_AGENT_BUNDLE_CAP. */
+  max_open_bundles?: number | undefined;
+}
+
+export const DEFAULT_AGENT_BUNDLE_CAP = 3;
+export const DEFAULT_PROJECT_BUNDLE_CAP = 20;
+export const MAX_BUNDLE_CAP = 1000;
+
+/** Tolerant reader for the jsonb column: unknown keys and malformed values are ignored, never widened. */
+export function parseAutonomy(raw: unknown): Autonomy {
+  const out: Autonomy = {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return out;
+  const r = raw as Record<string, unknown>;
+  const ids = (v: unknown, allowUser: boolean): string[] | undefined =>
+    Array.isArray(v) ? [...new Set(v.filter((x): x is string => typeof x === "string" && (AGENT_RE.test(x) || (allowUser && x === "user"))))] : undefined;
+  const to = ids(r.may_dispatch_to, false);
+  if (to !== undefined) out.may_dispatch_to = to;
+  const from = ids(r.accept_from, true);
+  if (from !== undefined) out.accept_from = from;
+  if (typeof r.max_open_bundles === "number" && Number.isInteger(r.max_open_bundles) && r.max_open_bundles >= 0 && r.max_open_bundles <= MAX_BUNDLE_CAP) out.max_open_bundles = r.max_open_bundles;
+  return out;
+}
+
+export type DispatchProposalReason = "outside_project" | "review_mode" | "may_dispatch_to" | "accept_from";
+export type DispatchDecision = { route: "work" } | { route: "proposal"; reason: DispatchProposalReason };
+
+/**
+ * The whole routing decision for one bundle, in order of authority:
+ * the user's hand always dispatches; the boundary (membership) first;
+ * then the project's kill switch (`review` routes EVERY agent-to-agent
+ * bundle to the user); then the two narrowing keys. Each miss is a
+ * demotion to a proposal — by rule, with its reason on the row.
+ */
+export function dispatchDecision(input: {
+  callerKind: "user" | "agent" | "system";
+  callerId: string;
+  callerIsMember: boolean;
+  targetId: string;
+  targetIsMember: boolean;
+  mode: "autonomous" | "review";
+  callerAutonomy?: Autonomy | undefined;
+  targetAutonomy?: Autonomy | undefined;
+}): DispatchDecision {
+  if (input.callerKind === "user") return { route: "work" };
+  if (dispatchRoute(input.callerKind, input.callerIsMember, input.targetIsMember) === "proposal") return { route: "proposal", reason: "outside_project" };
+  if (input.mode === "review") return { route: "proposal", reason: "review_mode" };
+  const to = input.callerAutonomy?.may_dispatch_to;
+  if (to !== undefined && !to.includes(input.targetId)) return { route: "proposal", reason: "may_dispatch_to" };
+  const from = input.targetAutonomy?.accept_from;
+  if (from !== undefined && !from.includes(input.callerId)) return { route: "proposal", reason: "accept_from" };
+  return { route: "work" };
+}
+
+export type CapReason = "agent_cap" | "project_cap";
+
+/** The bundle caps: the first one exceeded wins (`open` is bundles in flight BEFORE this one). Null = room for one more. */
+export function capExceeded(agentOpen: number, agentCap: number, projectOpen: number, projectCap: number): { reason: CapReason; cap: number; open: number } | null {
+  if (agentOpen >= agentCap) return { reason: "agent_cap", cap: agentCap, open: agentOpen };
+  if (projectOpen >= projectCap) return { reason: "project_cap", cap: projectCap, open: projectOpen };
+  return null;
+}
+
+/** The soft budget: exceeded strictly — a project AT its budget still runs. */
+export function budgetExceeded(spendUsd: number, budgetUsd: number | null): boolean {
+  return budgetUsd !== null && Number.isFinite(budgetUsd) && spendUsd > budgetUsd;
+}

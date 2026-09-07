@@ -3,7 +3,7 @@
 > Status: **direction, not design.** Recorded now so the eventual UX
 > improvement plan (to be built with a frontend UX dev + designer) starts
 > from the owner's intent instead of reconstructing it. Applies as one
-> design language across **web and iOS**.
+> design language across **web and Apple (macOS + iOS)** — the desktop client is the same SwiftUI codebase as the phone (`desktop-app-plan.md`, 2026-09-07).
 
 ## The theme
 

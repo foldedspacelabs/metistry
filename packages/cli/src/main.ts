@@ -9,6 +9,7 @@ import { doctor, renderTable, type DoctorDeps } from "./doctor.js";
 import { loadDotEnv, productVersion, resolveProductDir, resolveSeedDir } from "./env.js";
 import { realExec, type Exec } from "./exec.js";
 import { init } from "./init.js";
+import type { LockSource } from "./lock.js";
 import { up } from "./up.js";
 import { gitHead, update } from "./update.js";
 
@@ -19,7 +20,14 @@ export interface ParsedArgs {
 }
 
 /** Flags that never take a value, so `metistry init --force <dir>` keeps its dir. */
-export const BOOLEAN_FLAGS = new Set(["force", "json", "help", "dry-run", "no-launchd", "no-compose", "skip-build", "skip-migrate"]);
+export const BOOLEAN_FLAGS = new Set(["force", "json", "help", "dry-run", "no-launchd", "no-compose", "skip-build", "skip-migrate", "rollback"]);
+
+/** `--channel git|release` — anything else is a typo, not a guess (the lock parser is strict for the same reason). */
+export function parseChannel(v: string | undefined): LockSource | undefined {
+  if (v === undefined) return undefined;
+  if (v !== "git" && v !== "release") throw new Error(`--channel must be git or release, not ${JSON.stringify(v)}`);
+  return v;
+}
 
 /** `--flag`, `--flag value`, `--flag=value`; everything else positional; `--` ends flag parsing. */
 export function parseArgs(argv: string[], booleans = BOOLEAN_FLAGS): ParsedArgs {
@@ -59,10 +67,14 @@ function str(flags: ParsedArgs["flags"], name: string): string | undefined {
 
 const USAGE = `metistry — Metistry command line
 
-  metistry init <dir> [--name <assistant name>] [--force] [--product-dir <checkout>]
+  metistry init <dir> [--name <assistant name>] [--channel git|release] [--force]
+                      [--product-dir <checkout>]
       Create a private instance repo at <dir> from the product's seed/ (git init,
       Knowledge/, identity.yaml, rules.yaml, config dirs, metistry.lock, one commit).
       Prints the .env lines to add to the product checkout next — never writes them.
+      --channel writes metistry.lock's product.source: git (this install is a
+      checkout update fast-forwards; the default) or release (it consumes
+      published artifacts — docs/ops/releases.md).
 
   metistry doctor [--json] [--product-dir <checkout>]
       Validate every manifest in the checkout and probe every bridge, service,
@@ -74,11 +86,18 @@ const USAGE = `metistry — Metistry command line
       in ops/launchd rendered into ~/Library/LaunchAgents and (re)bootstrapped
       (macOS; Linux prints systemd units), then doctor — its verdict is the exit code.
 
-  metistry update [--skip-build] [--skip-migrate] [--dry-run] [--product-dir <checkout>]
-      Move an install forward: git fetch + pull --ff-only (or pull the pinned
-      release), pnpm install + build, db/migrations under a Postgres advisory
-      lock, rebuild containers and kickstart the host jobs whose code changed,
-      write metistry.lock into the instance repo (through the reconciler), doctor.
+  metistry update [--skip-build] [--skip-migrate] [--dry-run] [--product-dir <dir>]
+                  [--channel git|release] [--version <x.y.z>] [--rollback]
+      Move an install forward: git fetch + pull --ff-only, pnpm install + build,
+      db/migrations under a Postgres advisory lock, rebuild containers and
+      kickstart the host jobs whose code changed, write metistry.lock into the
+      instance repo (through the reconciler), doctor.
+      In release mode (metistry.lock says source: release, or --channel release)
+      the product step instead downloads the release's runtime pack, verifies its
+      sha256, unpacks it to <dir>/releases/<version>/ and points <dir>/current at
+      it; the pinned container images are pulled, never built. --version installs
+      a specific release instead of the latest; --rollback flips current back to
+      the previous one (migrations are additive and are not reverted).
 
   --dry-run prints every command and runs nothing.
 
@@ -104,6 +123,13 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
     return command === undefined && !flags.help ? 2 : 0;
   }
   const productDir = resolveProductDir(str(flags, "product-dir"));
+  let channel: LockSource | undefined;
+  try {
+    channel = parseChannel(str(flags, "channel"));
+  } catch (e) {
+    err(e instanceof Error ? e.message : String(e));
+    return 2;
+  }
 
   switch (command) {
     case "init": {
@@ -118,6 +144,7 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
         force: flags.force === true,
         seedDir: resolveSeedDir(productDir),
         version: productVersion(),
+        productSource: channel ?? "git",
         productCommit: productDir ? await gitHead(productDir, io.exec ?? realExec) : undefined,
         exec: io.exec,
       });
@@ -171,6 +198,9 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
         dryRun: flags["dry-run"] === true,
         skipBuild: flags["skip-build"] === true,
         skipMigrate: flags["skip-migrate"] === true,
+        channel,
+        releaseVersion: str(flags, "version"),
+        rollback: flags.rollback === true,
         doctorDeps: io.doctorDeps,
       });
       return r.code;

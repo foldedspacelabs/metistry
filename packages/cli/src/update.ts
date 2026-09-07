@@ -5,8 +5,11 @@
 // then pin the result into the INSTANCE repo's metistry.lock — through the
 // reconciler bridge, because the reconciler is the instance repo's sole
 // committer (docs/ops/reconciler.md). In release mode (the lock says
-// `source: release`) the images are pulled, never built, and the npm side
-// is printed until something is published.
+// `source: release`, or `--channel release`) there is no checkout: the
+// release's runtime pack is downloaded, sha256-verified, unpacked under
+// `releases/<version>/` and pointed at by `current` (release.ts), the
+// versioned images are pulled, never built, and everything after the
+// switch runs against `current` — so `--rollback` is a symlink flip.
 
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -18,8 +21,9 @@ import type { Exec } from "./exec.js";
 import { loadPlistTemplates, type PlistTemplate } from "./launchd.js";
 import { instanceLockPath, LOCK_FILENAME, readLock, serializeLock, type LockFile, type LockSource } from "./lock.js";
 import { listMigrationFiles, MIGRATION_LOCK_KEY, openMigrationSession, runMigrations, type MigrateResult, type MigrationSession } from "./migrate.js";
+import { currentVersion, installRelease, rollbackRelease, releaseTarget, type InstallReleaseResult } from "./release.js";
 import { StepFailed, StepRunner } from "./steps.js";
-import { closingDoctor, composeUp, COMPOSE_TIMEOUT_MS, productSource } from "./up.js";
+import { closingDoctor, composeUp, COMPOSE_TIMEOUT_MS, runDirFor } from "./up.js";
 
 export interface UpdateOptions {
   productDir: string;
@@ -33,6 +37,14 @@ export interface UpdateOptions {
   uid?: number | undefined;
   /** the release this checkout is — default: this package's version */
   version?: string | undefined;
+  /** override metistry.lock's product.source for this run (`--channel git|release`) */
+  channel?: LockSource | undefined;
+  /** release mode: install this release instead of the latest (`--version 0.2.0`) */
+  releaseVersion?: string | undefined;
+  /** release mode: flip `current` back to the previous release instead of installing a new one */
+  rollback?: boolean | undefined;
+  /** release mode: the runtime pack's os-arch (default: this host's) */
+  target?: string | undefined;
   now?: Date | undefined;
   fetchFn?: typeof fetch | undefined;
   /** test seam: a single-session db handle for the migration runner (null = no db configured) */
@@ -50,6 +62,10 @@ export interface UpdateResult {
   /** launchd labels kickstarted because their code changed */
   restarted: string[];
   migrations?: MigrateResult;
+  /** release mode only: the release now behind `current` */
+  release?: InstallReleaseResult;
+  /** the directory the rest of the update ran against (`<product-dir>/current` in release mode) */
+  runDir: string;
 }
 
 export const RECONCILER_LABEL = "com.foldedspacelabs.metistry.reconciler";
@@ -199,38 +215,55 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
 
   const lockPath = instanceLockPath(env);
   const prior = lockPath ? await readLock(lockPath) : undefined;
-  const source = await productSource(env);
-  const templates = await loadPlistTemplates(productDir);
+  const source = opts.channel ?? prior?.product.source ?? "git";
   const restarted: string[] = [];
   let migrations: MigrateResult | undefined;
   let lock: LockFile | undefined;
   let failure: StepFailed | undefined;
+  let release: InstallReleaseResult | undefined;
+  // release mode swings this to `<product-dir>/current` once the switch is done
+  let runDir = runDirFor(productDir, source);
+  let releaseVersion = version;
+  // hashed before the build/switch and again after: only jobs whose code moved are kickstarted
+  let before = await hashHostJobs(runDir, await loadPlistTemplates(runDir));
 
   try {
     r.section("product");
-    r.note(`${productDir} — ${source === "git" ? "git checkout: fast-forward to the remote" : "release: pull pinned artifacts"}${prior ? ` (lock: ${prior.product.version} @ ${prior.product.commit.slice(0, 7)}, ${prior.updated_at})` : " (no metistry.lock yet)"}`);
+    r.note(`${productDir} — ${source === "git" ? "git checkout: fast-forward to the remote" : "release: download the pinned runtime pack"}${prior ? ` (lock: ${prior.product.version} @ ${prior.product.commit.slice(0, 7)}, ${prior.updated_at})` : " (no metistry.lock yet)"}`);
     if (source === "git") {
+      if (opts.rollback) throw new StepFailed("--rollback is release mode only — a checkout rolls back with git (git -C <checkout> checkout <tag> && metistry update --skip-migrate)");
       if (existsSync(join(productDir, ".git"))) {
         await r.run("git", ["fetch", "--quiet"], { cwd: productDir, timeoutMs: 120_000 });
         await r.run("git", ["pull", "--ff-only", "--quiet"], { cwd: productDir, timeoutMs: 120_000 });
       } else r.note("not a git checkout (no .git) — nothing to pull");
+    } else if (r.dryRun) {
+      // a dry run reaches nothing, GitHub included — so the version it prints is the request, not a resolved tag
+      const want = opts.releaseVersion ?? "<latest>";
+      if (opts.rollback) r.action(`switch ${productDir}/current (now ${(await currentVersion(productDir)) ?? "unset"}) back to the previous release — no download, and migrations are not reverted`);
+      else {
+        r.action(`resolve release ${want} of ${env.METISTRY_RELEASE_REPO ?? "foldedspacelabs/metistry"} and download metistry-runtime-${want}-${opts.target ?? releaseTarget(platform)}.tar.gz`);
+        r.action(`verify its sha256 against checksums.txt, unpack to ${productDir}/releases/${want}/ and point current at it`);
+      }
     } else {
-      await r.run("docker", ["compose", "pull"], { cwd: productDir, timeoutMs: COMPOSE_TIMEOUT_MS, inherit: true, comment: "images pinned by metistry.lock" });
-      const pkgs = await publishedPackages(productDir);
-      r.action(`npm install -g ${pkgs.map((p) => `${p}@${version}`).join(" ")}   # printed, not run: nothing is published yet (docs/ops/cli.md)`);
+      release = opts.rollback ? await rollbackRelease(r, productDir) : await installRelease(r, { productDir, fetchFn, env, version: opts.releaseVersion, ...(opts.target ? { target: opts.target } : {}) });
+      releaseVersion = release.version;
+      runDir = runDirFor(productDir, source);
+      before = await hashHostJobs(runDir, await loadPlistTemplates(runDir));
     }
 
+    const templates = await loadPlistTemplates(runDir);
+
     r.section("build");
-    const before = await hashHostJobs(productDir, templates);
     if (opts.skipBuild) r.note("--skip-build: using what is in dist/ now");
     else if (source === "git") {
       await r.run("pnpm", ["install", "--frozen-lockfile"], { cwd: productDir, timeoutMs: COMPOSE_TIMEOUT_MS, inherit: true });
       await r.run("pnpm", ["-r", "build"], { cwd: productDir, timeoutMs: COMPOSE_TIMEOUT_MS, inherit: true });
-    } else r.note("release mode: packages are installed, not compiled — no build");
+    } else r.note("release mode: the runtime pack is compiled output — nothing to build");
 
     r.section("migrations");
-    const migrationsDir = join(productDir, "db", "migrations");
+    const migrationsDir = join(runDir, "db", "migrations");
     if (opts.skipMigrate) r.note("--skip-migrate: schema_migrations left as it is (doctor will say if anything is pending)");
+    else if (opts.rollback) r.note("--rollback: migrations are additive-first and are NOT reverted — the schema stays ahead of the code (docs/ops/releases.md)");
     else {
       const files = await listMigrationFiles(migrationsDir);
       if (r.action(`apply db/migrations/*.sql not yet in schema_migrations (${files.length} on disk) under pg_advisory_lock(${MIGRATION_LOCK_KEY}), one transaction each`)) {
@@ -248,9 +281,9 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
     }
 
     r.section("restart");
-    await composeUp(r, productDir, source);
+    await composeUp(r, runDir, source, source === "release" ? releaseVersion : undefined);
     if (platform === "darwin") {
-      const after = await hashHostJobs(productDir, templates);
+      const after = await hashHostJobs(runDir, templates);
       for (const t of templates) {
         const changed = before[t.label] !== after[t.label];
         if (r.dryRun) await r.run("launchctl", ["kickstart", "-k", `gui/${uid}/${t.label}`], { comment: `only if ${[...new Set(t.repoPaths.map(trackedPathFor))].join(", ")} changed` });
@@ -263,9 +296,9 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
     } else r.note(`no launchd on ${platform}: restart the host units yourself (systemctl --user restart <unit>)`);
 
     r.section("lock");
-    const head = r.dryRun ? undefined : await gitHead(productDir, r.exec);
+    const head = r.dryRun || source === "release" ? undefined : await gitHead(productDir, r.exec);
     lock = {
-      product: { version, commit: head ?? (source === "git" && r.dryRun ? "<HEAD after pull>" : (prior?.product.commit ?? "unknown")), source },
+      product: { version: releaseVersion, commit: head ?? (source === "git" && r.dryRun ? "<HEAD after pull>" : (prior?.product.commit ?? "unknown")), source },
       updated_at: now.toISOString(),
       migrations_applied: migrations?.recorded ?? prior?.migrations_applied ?? [],
     };
@@ -277,7 +310,7 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
     r.out(`metistry update: ${err.message}`);
   }
 
-  const doctorCode = await closingDoctor(r, productDir, opts.doctorDeps, opts.doctorFn ?? doctor);
+  const doctorCode = await closingDoctor(r, runDir, opts.doctorDeps, opts.doctorFn ?? doctor);
   const code = failure ? failure.code || 1 : doctorCode;
-  return { code, source, commands: r.commands, ...(lock ? { lock } : {}), restarted, ...(migrations ? { migrations } : {}) };
+  return { code, source, runDir, commands: r.commands, ...(lock ? { lock } : {}), restarted, ...(migrations ? { migrations } : {}), ...(release ? { release } : {}) };
 }

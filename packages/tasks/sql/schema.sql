@@ -43,6 +43,19 @@ CREATE UNIQUE INDEX IF NOT EXISTS work_external_ref_uidx    ON work (external_re
 CREATE UNIQUE INDEX IF NOT EXISTS work_idempotency_key_uidx ON work (idempotency_key) WHERE idempotency_key IS NOT NULL;
 CREATE INDEX        IF NOT EXISTS work_project_status_idx   ON work (project, status);
 
+-- The project row a `work.project` slug points at (0011): the §4.21
+-- controls (mode, budget, bundle cap) live here; create() ensures it.
+CREATE TABLE IF NOT EXISTS projects (
+    id               text        PRIMARY KEY CHECK (id ~ '^[a-z][a-z0-9-]{0,39}$'),
+    title            text,
+    area             text,
+    mode             text        NOT NULL DEFAULT 'autonomous' CHECK (mode IN ('autonomous', 'review')),
+    daily_budget_usd numeric(10, 2),
+    max_open_bundles integer     NOT NULL DEFAULT 20 CHECK (max_open_bundles >= 0),
+    created_at       timestamptz NOT NULL DEFAULT now(),
+    updated_at       timestamptz NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS runs (
     id          bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     ts          timestamptz NOT NULL DEFAULT now(),

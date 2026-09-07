@@ -14,7 +14,7 @@
 // (docs/research/2026-08-agent-coordination.md).
 
 import { readFile } from "node:fs/promises";
-import { finishRun, runCheck, startRun, type CheckResult } from "@foldedspacelabs/metistry-core";
+import { PROJECT_SLUG_RE, ensureProject, finishRun, runCheck, startRun, type CheckResult } from "@foldedspacelabs/metistry-core";
 
 /** Minimal executor shape — satisfied by pg.Pool / pg.Client. Injectable for tests. */
 export interface Db {
@@ -70,6 +70,14 @@ export interface CreateInput {
   owner?: string;
   /** Handles, never payloads (§4.19): a review bundle stores `{ bundle: { artifact, version, thread_ids } }` here. */
   meta?: Record<string, unknown>;
+  /**
+   * `open` (default) or `blocked`: a row born blocked is QUEUED — visible,
+   * never listed as ready, never claimable until something reopens it
+   * (§4.21: an over-cap review bundle is queued, not dropped). `note`
+   * lands in the create history entry so the reason is on the row.
+   */
+  status?: "open" | "blocked";
+  note?: string;
 }
 
 export interface UpdateInput {
@@ -218,20 +226,25 @@ export class TasksService {
       throw new TasksError("invalid_input", "meta must be an object");
     }
     const meta = JSON.stringify(input.meta ?? {});
+    const status: TaskStatus = input.status ?? "open";
+    if (status !== "open" && status !== "blocked") throw new TasksError("invalid_input", "status must be open or blocked at create");
+    const note = optionalText("note", input.note);
 
     return this.recorded(agent, "create", null, async () => {
+      // the project row exists from the first use of its slug (0011); free-text projects predate the table and get no row
+      if (project !== null && PROJECT_SLUG_RE.test(project)) await ensureProject(this.db, project);
       if (dependsOn.length > 0) {
         const { rows } = await this.db.query(`SELECT id FROM work WHERE id = ANY($1::bigint[])`, [dependsOn]);
         const found = new Set(rows.map((r) => Number(r.id)));
         const missing = dependsOn.filter((d) => !found.has(d));
         if (missing.length > 0) throw new TasksError("unknown_dependency", `depends_on references unknown task(s): ${missing.join(", ")}`);
       }
-      const values = [title, project, area, dependsOn, due, key, externalRef, agent, entry(agent, "create"), kind, owner, meta];
+      const values = [title, project, area, dependsOn, due, key, externalRef, agent, entry(agent, "create", { ...(note !== null ? { note } : {}), ...(status !== "open" ? { status } : {}) }), kind, owner, meta, status];
       let rows: Record<string, unknown>[];
       try {
         ({ rows } = await this.db.query(
           `INSERT INTO work (title, project, area, kind, status, depends_on, due, idempotency_key, external_ref, created_by, history, owner, meta)
-           VALUES ($1, $2, $3, $10, 'open', $4::bigint[], $5::date, $6, $7, $8, $9::jsonb, $11, $12::jsonb)
+           VALUES ($1, $2, $3, $10, $13, $4::bigint[], $5::date, $6, $7, $8, $9::jsonb, $11, $12::jsonb)
            ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
            RETURNING ${COLS}`,
           values,

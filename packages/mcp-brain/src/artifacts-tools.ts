@@ -157,7 +157,7 @@ export function registerArtifactTools(reg: Register, service: ArtifactsService |
 
   reg(
     "artifact_dispatch_review",
-    "Send a bundle of threads on one version to another agent as ONE review task on the shared list (kind `review`, claimable by them). Inside the project this needs no one's approval; if the target is not a member of the artifact's project the dispatch becomes a proposal for the user instead (`route: proposal`).",
+    "Send a bundle of threads on one version to another agent as ONE review task on the shared list (kind `review`, claimable by them). Inside the project this needs no one's approval; if the target is not a member of the artifact's project, the project is in review mode, or a manifest narrowing excludes the pair, the dispatch becomes a proposal for the user instead (`route: proposal`, with `reason`). Over an open-bundle cap the task is created QUEUED (`queued` set, status blocked) and released when a slot frees — never dropped.",
     {
       artifact: artId,
       version: verId,
@@ -171,7 +171,7 @@ export function registerArtifactTools(reg: Register, service: ArtifactsService |
         const r = await svc.dispatchReview({ artifact: a.artifact, version: a.version, thread_ids: a.thread_ids, to_agent: a.to_agent, message: a.message, idempotency_key: a.idempotency_key }, principal);
         if (!r) return fail("not_found");
         return r.route === "work"
-          ? done({ route: "work", work: r.work, links: r.links }, { route: "work", work_id: r.work.id })
+          ? done({ route: "work", work: r.work, links: r.links, queued: r.queued }, { route: "work", work_id: r.work.id, ...(r.queued ? { queued: r.queued.reason } : {}) })
           : done({ route: "proposal", proposal_id: r.proposal_id, reason: r.reason }, { route: "proposal", proposal_id: r.proposal_id });
       }),
   );

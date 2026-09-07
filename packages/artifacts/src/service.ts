@@ -17,25 +17,48 @@
 //   makes (a row outside its projects is `not_found`, uniform);
 // - review dispatch across the boundary, and a thread that exceeds the
 //   ping-pong cap, are demoted to `proposals` rows by rule;
+// - the §4.21 controls ride the same dispatch: the project's `mode`
+//   (review = every agent-to-agent bundle becomes a proposal), manifest
+//   narrowing (`may_dispatch_to` / `accept_from`), per-agent and
+//   per-project open-bundle caps (over cap = queued, never dropped), and
+//   the daily soft budget (over budget = the project flips to review);
 // - every mutation is a `runs` row (component = principal id, kind =
 //   artifact_op) and is idempotent or compare-and-swap.
 
-import { finishRun, runCheck, startRun, type CheckResult, type ErrorCode } from "@foldedspacelabs/metistry-core";
+import {
+  DEFAULT_MAX_OPEN_BUNDLES,
+  PROJECT_COLS,
+  ensureProject,
+  finishRun,
+  runCheck,
+  startRun,
+  toProjectRow,
+  type CheckResult,
+  type ErrorCode,
+  type ProjectMode,
+} from "@foldedspacelabs/metistry-core";
 import type { Task, TasksService } from "@foldedspacelabs/metistry-tasks";
 import { isId, newId } from "./ids.js";
 import { artifactKind, sniffKind, type FileKind } from "./kinds.js";
 import {
   AGENT_RE,
+  DEFAULT_AGENT_BUNDLE_CAP,
   DEFAULT_PING_PONG_CAP,
   PROJECT_RE,
   SLUG_RE,
   agentTailLength,
+  budgetExceeded,
+  capExceeded,
   casAllows,
-  dispatchRoute,
+  dispatchDecision,
   inferAddressed,
+  parseAutonomy,
   pingPongDemotes,
   validFilePath,
   type AuthorKind,
+  type Autonomy,
+  type CapReason,
+  type DispatchProposalReason,
 } from "./policy.js";
 import { VaultError, sha256Hex, type VaultClient } from "./vault.js";
 
@@ -63,6 +86,8 @@ export interface AgentInfo {
   kind: "internal" | "external";
   projects: string[];
   revoked: boolean;
+  /** §4.21 narrowing from the agent's manifest (`agents.autonomy`); absent = project defaults. */
+  autonomy?: Autonomy | undefined;
 }
 
 /** Who is a member of what — the target side of a dispatch needs it; the caller side usually rides the principal. */
@@ -74,10 +99,10 @@ export interface AgentDirectory {
 export function agentsTableDirectory(db: Db): AgentDirectory {
   return {
     async lookup(id) {
-      const { rows } = await db.query(`SELECT id, kind, projects, revoked_at FROM agents WHERE id = $1`, [id]);
+      const { rows } = await db.query(`SELECT id, kind, projects, revoked_at, autonomy FROM agents WHERE id = $1`, [id]);
       const r = rows[0];
       if (!r) return null;
-      return { id: String(r.id), kind: r.kind === "internal" ? "internal" : "external", projects: (r.projects as string[] | null) ?? [], revoked: r.revoked_at !== null && r.revoked_at !== undefined };
+      return { id: String(r.id), kind: r.kind === "internal" ? "internal" : "external", projects: (r.projects as string[] | null) ?? [], revoked: r.revoked_at !== null && r.revoked_at !== undefined, autonomy: parseAutonomy(r.autonomy) };
     },
   };
 }
@@ -200,7 +225,34 @@ export interface DispatchInput {
   idempotency_key?: string | undefined;
 }
 
-export type DispatchResult = { route: "work"; work: Task; links: Links } | { route: "proposal"; proposal_id: number; reason: "outside_project" };
+/** Set when a bundle was created QUEUED (status blocked) because a cap was reached; it is released when a slot frees. */
+export interface DispatchQueued {
+  reason: CapReason;
+  cap: number;
+  open: number;
+}
+
+export type DispatchResult =
+  | { route: "work"; work: Task; links: Links; queued: DispatchQueued | null }
+  | { route: "proposal"; proposal_id: number; reason: DispatchProposalReason };
+
+/** What the §4.21 controls read about a project: the row, or the defaults when the slug has none yet. */
+export interface ProjectPolicy {
+  id: string;
+  mode: ProjectMode;
+  daily_budget_usd: number | null;
+  max_open_bundles: number;
+  exists: boolean;
+}
+
+export interface BudgetResult {
+  project: string;
+  mode: ProjectMode;
+  spend_usd: number;
+  budget_usd: number | null;
+  /** True on THIS call only when the check moved the project to review mode. */
+  flipped: boolean;
+}
 
 export interface BundleStatus {
   work_id: number;
@@ -232,6 +284,8 @@ export interface ArtifactsServiceOptions {
   maxFiles?: number | undefined;
   maxBytes?: number | undefined;
   pingPongCap?: number | undefined;
+  /** Default per-agent open-bundle cap when the agent's autonomy sets none (§4.21). */
+  agentBundleCap?: number | undefined;
 }
 
 const fail = (code: ErrorCode, message?: string) => new ArtifactsError(code, message);
@@ -252,6 +306,7 @@ export class ArtifactsService {
   private readonly maxFiles: number;
   private readonly maxBytes: number;
   private readonly cap: number;
+  private readonly agentBundleCap: number;
 
   constructor(
     private readonly db: Db,
@@ -263,6 +318,7 @@ export class ArtifactsService {
     this.maxFiles = opts.maxFiles ?? 200;
     this.maxBytes = opts.maxBytes ?? 8 * 1024 * 1024;
     this.cap = opts.pingPongCap ?? DEFAULT_PING_PONG_CAP;
+    this.agentBundleCap = opts.agentBundleCap ?? DEFAULT_AGENT_BUNDLE_CAP;
   }
 
   // --- scope ------------------------------------------------------------------
@@ -347,6 +403,7 @@ export class ArtifactsService {
     const kind = artifactKind(manifest);
 
     return this.recorded(p, "publish", { project, slug, files: decoded.size, bytes: total }, async () => {
+      await ensureProject(this.db, project); // the project row exists from the first use of its slug (0011)
       // idempotent on (principal, key): a retry hands back what the first call made
       const dup = await this.db.query(`SELECT ${VER_COLS} FROM artifact_versions WHERE author_principal = $1 AND idempotency_key = $2`, [p.id, key]);
       if (dup.rows[0]) {
@@ -569,8 +626,15 @@ export class ArtifactsService {
     }, (r) => (r?.demoted ? { demoted: true, proposal_id: r.proposal_id, agent_tail: agentTailLength(thread) } : { comment: r?.comment.id }));
   }
 
+  /** Resolving may address a bundle, which frees a cap slot: the oldest queued bundle in the project that now fits is released inline. */
   async commentResolve(id: string, p: Principal): Promise<Comment | null> {
-    return this.setState(id, "resolved", p);
+    const c = await this.setState(id, "resolved", p);
+    if (c) {
+      const a = await this.db.query(`SELECT project FROM artifacts WHERE id = $1`, [c.artifact_id]);
+      const project = a.rows[0]?.project;
+      if (typeof project === "string") await this.releaseQueued(project, p).catch(() => undefined); // never fail a resolve over the queue
+    }
+    return c;
   }
 
   async commentReopen(id: string, p: Principal): Promise<Comment | null> {
@@ -668,12 +732,25 @@ export class ArtifactsService {
     if (roots.length !== threadIds.length) throw fail("invalid_request", "every thread_id must be a root thread on this version");
 
     const target = await this.agents.lookup(input.to_agent);
-    const route = dispatchRoute(p.kind, await this.callerIsMember(p, a.project), agentIsMember(target, a.project));
+    const caller = p.kind === "agent" ? await this.agents.lookup(p.id) : null;
+    // the soft budget is checked at the one place it changes anything: an agent's dispatch (a flip routes this bundle to the user)
+    if (p.kind === "agent") await this.enforceBudget(a.project);
+    const policy = await this.projectPolicy(a.project);
+    const decision = dispatchDecision({
+      callerKind: p.kind,
+      callerId: p.id,
+      callerIsMember: await this.callerIsMember(p, a.project),
+      targetId: input.to_agent,
+      targetIsMember: agentIsMember(target, a.project),
+      mode: policy.mode,
+      callerAutonomy: caller?.autonomy,
+      targetAutonomy: target?.autonomy,
+    });
     const links = this.links(a.id, v.id);
-    return this.recorded(p, "dispatch", { artifact: a.id, version: v.id, to_agent: input.to_agent, threads: threadIds.length, route }, async () => {
-      if (route === "proposal") {
+    return this.recorded(p, "dispatch", { artifact: a.id, version: v.id, to_agent: input.to_agent, threads: threadIds.length, route: decision.route, ...(decision.route === "proposal" ? { reason: decision.reason } : {}) }, async () => {
+      if (decision.route === "proposal") {
         const payload = {
-          reason: "outside_project",
+          reason: decision.reason,
           title: `review dispatch to ${input.to_agent} needs you: ${a.project}/${a.slug}`,
           artifact: a.id,
           version: v.id,
@@ -686,9 +763,11 @@ export class ArtifactsService {
         const { rows } = await this.db.query(`INSERT INTO proposals (kind, source_agent, trust, payload) VALUES ('review', $1, $2, $3::jsonb) RETURNING id`, [
           p.id, this.trustOf(p), JSON.stringify(payload),
         ]);
-        return { route: "proposal" as const, proposal_id: Number(rows[0]!.id), reason: "outside_project" as const };
+        return { route: "proposal" as const, proposal_id: Number(rows[0]!.id), reason: decision.reason };
       }
       if (!this.opts.tasks) throw fail("not_available", "no task list configured for review bundles");
+      // the caps (§4.21 "task/bundle explosion"): over cap the bundle is QUEUED — a blocked row, released when a slot frees — never dropped. The user's hand is never capped.
+      const queued = p.kind === "agent" ? await this.capFor(p.id, caller?.autonomy, a.project, policy) : null;
       // ONE work row per dispatch, kind review, claimable through the tasks module; handles, never payloads
       const work = await this.opts.tasks.create(
         {
@@ -697,12 +776,129 @@ export class ArtifactsService {
           kind: "review",
           owner: input.to_agent,
           ...(input.idempotency_key !== undefined ? { idempotency_key: `artifacts:${p.id}:${input.idempotency_key}` } : {}),
-          meta: { bundle: { module: "artifacts", artifact: a.id, version: v.id, thread_ids: threadIds, from: p.id, to_agent: input.to_agent, message, links } },
+          meta: { bundle: { module: "artifacts", artifact: a.id, version: v.id, thread_ids: threadIds, from: p.id, to_agent: input.to_agent, message, links, ...(queued ? { queued: queued.reason } : {}) } },
+          ...(queued ? { status: "blocked" as const, note: `over_cap: ${queued.reason} ${queued.open}/${queued.cap}` } : {}),
         },
         p.id,
       );
-      return { route: "work" as const, work, links };
-    }, (r) => (r?.route === "work" ? { work_id: r.work.id } : r ? { proposal_id: r.proposal_id } : {}));
+      return { route: "work" as const, work, links, queued };
+    }, (r) => (r?.route === "work" ? { work_id: r.work.id, ...(r.queued ? { queued: r.queued.reason } : {}) } : r ? { proposal_id: r.proposal_id } : {}));
+  }
+
+  // --- §4.21 controls: project policy, caps, budget -----------------------------------
+
+  /** The project's controls, or the defaults for a slug with no row yet (a read never creates one). */
+  async projectPolicy(project: string): Promise<ProjectPolicy> {
+    const { rows } = await this.db.query(`SELECT ${PROJECT_COLS} FROM projects WHERE id = $1`, [project]);
+    if (!rows[0]) return { id: project, mode: "autonomous", daily_budget_usd: null, max_open_bundles: DEFAULT_MAX_OPEN_BUNDLES, exists: false };
+    const r = toProjectRow(rows[0]);
+    return { id: r.id, mode: r.mode, daily_budget_usd: r.daily_budget_usd, max_open_bundles: r.max_open_bundles, exists: true };
+  }
+
+  /**
+   * Bundles in flight: review rows this module made that are open or
+   * claimed AND not yet addressed (a bundle whose threads are all
+   * resolved no longer counts, so addressing frees a slot; nothing has
+   * to close the task first). Queued (blocked) rows never count.
+   */
+  private async openBundles(from: string | null, project: string | null): Promise<number> {
+    const { rows } = await this.db.query(
+      `SELECT count(*)::int AS n FROM work w
+       WHERE w.kind = 'review' AND w.status IN ('open', 'in_progress')
+         AND w.meta->'bundle'->>'module' = 'artifacts'
+         AND ($1::text IS NULL OR w.meta->'bundle'->>'from' = $1)
+         AND ($2::text IS NULL OR w.project = $2)
+         AND jsonb_typeof(w.meta->'bundle'->'thread_ids') = 'array'
+         AND EXISTS (SELECT 1 FROM artifact_comments c
+                     WHERE c.id = ANY(ARRAY(SELECT jsonb_array_elements_text(w.meta->'bundle'->'thread_ids'))) AND c.state <> 'resolved')`,
+      [from, project],
+    );
+    return Number(rows[0]?.n ?? 0);
+  }
+
+  private agentCap(autonomy: Autonomy | undefined): number {
+    return autonomy?.max_open_bundles ?? this.agentBundleCap;
+  }
+
+  /** Which cap, if any, this agent's next bundle in this project would exceed. */
+  private async capFor(agent: string, autonomy: Autonomy | undefined, project: string, policy: ProjectPolicy): Promise<DispatchQueued | null> {
+    const [agentOpen, projectOpen] = await Promise.all([this.openBundles(agent, null), this.openBundles(null, project)]);
+    return capExceeded(agentOpen, this.agentCap(autonomy), projectOpen, policy.max_open_bundles);
+  }
+
+  /**
+   * Release the oldest queued bundle in the project that now fits under
+   * both caps — one per call, oldest first, so a freed slot goes to the
+   * bundle that waited longest. Returns the released work id or null.
+   */
+  async releaseQueued(project: string, by: Principal): Promise<number | null> {
+    const policy = await this.projectPolicy(project);
+    const { rows } = await this.db.query(
+      `SELECT w.id, w.meta->'bundle'->>'from' AS sender FROM work w
+       WHERE w.kind = 'review' AND w.status = 'blocked' AND w.claimed_by IS NULL AND w.project = $1
+         AND w.meta->'bundle'->>'module' = 'artifacts' AND w.meta->'bundle'->>'queued' IS NOT NULL
+       ORDER BY w.created_at ASC, w.id ASC LIMIT 20`,
+      [project],
+    );
+    if (rows.length === 0) return null;
+    const projectOpen = await this.openBundles(null, project);
+    if (projectOpen >= policy.max_open_bundles) return null;
+    const agentOpen = new Map<string, number>();
+    for (const r of rows) {
+      const sender = String(r.sender ?? "");
+      if (!sender) continue;
+      const info = await this.agents.lookup(sender);
+      const open = agentOpen.get(sender) ?? (await this.openBundles(sender, null));
+      agentOpen.set(sender, open);
+      if (open >= this.agentCap(info?.autonomy)) continue; // this sender is still at its own cap; a later bundle from someone else may fit
+      const entry = JSON.stringify([{ ts: new Date().toISOString(), agent: by.id, op: "update", status: "open", note: "released: under cap" }]);
+      const upd = await this.db.query(
+        `UPDATE work SET status = 'open', updated_at = now(), history = history || $2::jsonb, meta = meta #- '{bundle,queued}'
+         WHERE id = $1 AND status = 'blocked' AND claimed_by IS NULL RETURNING id`,
+        [Number(r.id), entry],
+      );
+      if (upd.rows[0]) {
+        const id = Number(upd.rows[0].id);
+        await this.recorded(by, "release_queued", { project, work_id: id }, async () => id);
+        return id;
+      }
+    }
+    return null;
+  }
+
+  /** Today's spend against the project: `runs.cost_usd` from its member agents or rows stamped `meta.project`. */
+  async spendToday(project: string): Promise<number> {
+    const { rows } = await this.db.query(
+      `SELECT coalesce(sum(r.cost_usd), 0)::float8 AS spend FROM runs r
+       WHERE r.ts >= date_trunc('day', now()) AND r.cost_usd IS NOT NULL
+         AND (r.meta->>'project' = $1 OR r.component IN (SELECT a.id FROM agents a WHERE $1 = ANY(a.projects)))`,
+      [project],
+    );
+    return Number(rows[0]?.spend ?? 0);
+  }
+
+  /**
+   * The daily soft budget (§4.21 "cost runaway"): over budget, the project
+   * flips to review mode — an atomic UPDATE that only fires on the
+   * autonomous→review transition, so the flip is recorded (runs kind
+   * project_mode, which the brief reads) and alerted (outbound_messages
+   * kind alert, deduped like the watchdog's) exactly once. The user flips
+   * it back by hand; the budget does not un-flip.
+   */
+  async enforceBudget(project: string): Promise<BudgetResult> {
+    const policy = await this.projectPolicy(project);
+    if (policy.daily_budget_usd === null) return { project, mode: policy.mode, spend_usd: 0, budget_usd: null, flipped: false };
+    const spend = await this.spendToday(project);
+    const out: BudgetResult = { project, mode: policy.mode, spend_usd: spend, budget_usd: policy.daily_budget_usd, flipped: false };
+    if (policy.mode !== "autonomous" || !budgetExceeded(spend, policy.daily_budget_usd)) return out;
+    const { rows } = await this.db.query(`UPDATE projects SET mode = 'review', updated_at = now() WHERE id = $1 AND mode = 'autonomous' RETURNING id`, [project]);
+    if (!rows[0]) return { ...out, mode: "review" }; // someone else flipped it first
+    const runId = await startRun(this.db, { component: "projects", kind: "project_mode", tool: "budget", meta: { project, from: "autonomous", to: "review", reason: "budget", spend_usd: spend, budget_usd: policy.daily_budget_usd } });
+    await finishRun(this.db, runId, { ok: true });
+    const text = `project ${project} flipped to review mode: daily budget ${policy.daily_budget_usd.toFixed(2)} USD exceeded — agent-to-agent review now queues for you (dashboard → projects)`;
+    const dup = await this.db.query(`SELECT 1 FROM outbound_messages WHERE kind = 'alert' AND text = $1 AND ts > now() - interval '24 hours'`, [text]);
+    if (!dup.rows[0]) await this.db.query(`INSERT INTO outbound_messages (thread, text, kind) VALUES ('default', $1, 'alert')`, [text]);
+    return { ...out, mode: "review", flipped: true };
   }
 
   /** `addressed` is inferred from thread states; nothing writes it. */
@@ -736,6 +932,7 @@ export class ArtifactsService {
       await this.db.query(`SELECT ${VER_COLS} FROM artifact_versions WHERE false`);
       await this.db.query(`SELECT ${CMT_COLS} FROM artifact_comments WHERE false`);
       await this.db.query(`SELECT id, kind, source_agent, trust, payload, decision FROM proposals WHERE false`);
+      await this.db.query(`SELECT ${PROJECT_COLS} FROM projects WHERE false`);
       await this.vault.list("Artifacts", 1);
       return { meta: { tasks: this.opts.tasks ? "available" : "not_available" } };
     });

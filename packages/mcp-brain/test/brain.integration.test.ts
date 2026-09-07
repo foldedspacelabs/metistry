@@ -431,6 +431,8 @@ describe.skipIf(!hasDb)("mcp-brain (real db, real MCP client)", () => {
     ] as const) {
       expect((await call(ar, name, args)).body.error.code, name).toBe("not_available");
     }
+    // crew_dispatch is the assistant's alone: an external agent is told not granted before any dispatcher is consulted (none is wired here) — still a recorded refusal
+    expect((await call(ar, "crew_dispatch", { crew: "researcher", brief: "b" })).body).toEqual({ error: { code: "forbidden", message: "not granted" } });
     await ar.close();
     const { rows } = await pool.query(
       `SELECT tool, ok, finished_at IS NOT NULL AS finished, meta FROM runs WHERE component = $1 AND kind = 'tool' ORDER BY id`,

@@ -38,6 +38,7 @@ import {
 import { TasksError, type Result as TaskResult, type Task, type TasksService } from "@foldedspacelabs/metistry-tasks";
 import type { ArtifactsService } from "@foldedspacelabs/metistry-artifacts";
 import { ARTIFACT_TOOL_NAMES, registerArtifactTools } from "./artifacts-tools.js";
+import { CREW_TOOL_NAMES, registerCrewTools, type CrewDispatcher } from "./crew-tools.js";
 import { captureToInbox } from "./capture.js";
 import { readKnowledge, searchKnowledge, type KnowledgeReader } from "./knowledge.js";
 import { sha256Text, writeKnowledge, type KnowledgeWriter } from "./knowledge-write.js";
@@ -60,6 +61,8 @@ export interface BrainConfig {
   writeKnowledge?: KnowledgeWriter | undefined;
   /** The artifacts module (§4.21) for artifact_*. Absent → those tools answer `not_available`. */
   artifacts?: ArtifactsService | undefined;
+  /** The host's crew dispatcher (registry + policy + durable enqueue) for crew_dispatch. Absent → `not_available`. Internal principals only either way. */
+  crews?: CrewDispatcher | undefined;
   /** Nudge when a held lease has this many seconds or fewer left (default 120). */
   leaseWarningSeconds?: number | undefined;
   /** Reported to MCP clients as the server version. */
@@ -74,7 +77,7 @@ export interface BrainServer {
   readonly tools: readonly string[];
 }
 
-/** The eager surface (§4.3 default 1): 18 tools, no meta-tool indirection. Order = manifest order. */
+/** The eager surface (§4.3 default 1): 19 tools, no meta-tool indirection. Order = manifest order. */
 export const TOOL_NAMES = [
   "capture",
   "report",
@@ -89,6 +92,7 @@ export const TOOL_NAMES = [
   "knowledge_read",
   "knowledge_write",
   ...ARTIFACT_TOOL_NAMES,
+  ...CREW_TOOL_NAMES,
 ] as const;
 export type ToolName = (typeof TOOL_NAMES)[number];
 
@@ -353,6 +357,9 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
     // artifact_* (§4.21): the one registration point for the artifacts adapter
     registerArtifactTools(reg, cfg.artifacts, principal);
 
+    // crew_dispatch (Phase 5 crews): the one registration point for the host's crew dispatcher; internal principals only
+    registerCrewTools(reg, cfg.crews, principal);
+
     return server;
   }
 
@@ -408,6 +415,7 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
           knowledge_read: cfg.readKnowledge ? "available" : "not_available",
           knowledge_write: cfg.writeKnowledge ? "available" : "not_available",
           artifacts: cfg.artifacts ? "available" : "not_available",
+          crews: cfg.crews ? cfg.crews.names() : "not_available",
         };
         const gaps = [
           ...(cfg.readKnowledge ? [] : ["knowledge_read"]),

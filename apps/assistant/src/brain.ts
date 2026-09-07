@@ -13,11 +13,13 @@ import type { McpHttpServerConfig, Options } from "@anthropic-ai/claude-agent-sd
 export const BRAIN_SERVER = "brain";
 
 /**
- * The eighteen mcp-brain tools, in manifest order. Duplicated here on purpose
+ * The nineteen mcp-brain tools, in manifest order. Duplicated here on purpose
  * — the engine's allowlist must be readable in one place — and locked to
  * packages/mcp-brain/manifest.yaml by test/brain.test.ts. `knowledge_write`
  * is the assistant's `brain-commit` (§4.7): the bridge admits it for the
  * internal principal only, and the vault refuses protected paths behind it.
+ * `crew_dispatch` is likewise internal-only: the assistant hands briefs to
+ * crews (crew.ts runs them); no crew ever holds either tool.
  */
 export const BRAIN_TOOLS = [
   "capture",
@@ -38,6 +40,7 @@ export const BRAIN_TOOLS = [
   "artifact_comment",
   "artifact_comment_resolve",
   "artifact_dispatch_review",
+  "crew_dispatch",
 ] as const;
 
 export interface BrainConfig {

@@ -33,8 +33,9 @@ interface Parsed {
 }
 
 describe("tool surface", () => {
-  it("the six artifact tools are on the eager surface, last, and the total stays under the lazy threshold", () => {
-    expect(TOOL_NAMES.slice(-ARTIFACT_TOOL_NAMES.length)).toEqual([...ARTIFACT_TOOL_NAMES]);
+  it("the six artifact tools are on the eager surface, contiguous and ahead of crew_dispatch only, and the total stays under the lazy threshold", () => {
+    expect(TOOL_NAMES.slice(-ARTIFACT_TOOL_NAMES.length - 1, -1)).toEqual([...ARTIFACT_TOOL_NAMES]);
+    expect(TOOL_NAMES.at(-1)).toBe("crew_dispatch");
     expect(TOOL_NAMES.length).toBeLessThan(20);
   });
 

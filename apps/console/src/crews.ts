@@ -1,0 +1,449 @@
+// Crews (plan §4.11 scoped escape hatch, §4.18.B local target, Phase 5
+// "crew definitions with their own toolsets"). A crew is a sub-agent the
+// instance's own assistant can hand a brief to: `agents/<area>/<name>.md`
+// in the instance repo — YAML frontmatter validated by core's `agent`
+// manifest, then the operating prompt. This file is the console's whole
+// involvement:
+//
+// - LOAD the manifests. `agents/` is a protected path (§4.7) the console has
+//   no mount for, so an entry of METISTRY_AGENTS_DIRS that is not on disk is
+//   read through the reconciler's vault bridge (`/vault/list` + `/vault/read`)
+//   when one is configured; `seed/agents` ships in the image. D4 overlay:
+//   later entries win by name.
+// - SYNC the registry. Every valid manifest is an `agents` row of
+//   `kind: 'crew'` — grants = its `scope` through the SAME validator external
+//   agents face (bare `Knowledge/` refused: a crew is not the assistant),
+//   projects from the manifest. The token hash stored at registration is of
+//   a token nobody holds: the assistant's runner mints a fresh one per run
+//   and burns it after (apps/assistant/src/crew-drain.ts), so a crew never
+//   keeps a credential. A manifest that disappears revokes its row.
+// - DISPATCH. `crew_dispatch` (mcp-brain) lands here: the brief is checked
+//   with the existing dispatch enforcement (`checkBrief`) against the crew's
+//   `scope` ∩ the `local-crew` target's `allow` list, and only then becomes a
+//   durable `work` row (kind task, owner crew:<name>) the assistant
+//   container's drain loop picks up. Refusals are `runs` rows too.
+
+import { createHash } from "node:crypto";
+import { readdir, readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { parse as parseYaml } from "yaml";
+import {
+  finishRun,
+  mintToken,
+  startRun,
+  tokenHash,
+  validateManifest,
+  type AgentManifest,
+  type DataPolicy,
+  type TargetManifest,
+} from "@foldedspacelabs/metistry-core";
+import type { VaultClient } from "@foldedspacelabs/metistry-artifacts";
+import { TasksError, type TasksService } from "@foldedspacelabs/metistry-tasks";
+import type { AgentPrincipal, CrewDispatcher, CrewDispatchInput, CrewDispatchOutcome } from "@foldedspacelabs/metistry-mcp-brain";
+import { AgentError, validateGrants, type Grants } from "./agents.js";
+import { checkBrief, type TargetRegistry } from "./dispatch.js";
+
+export interface Db {
+  query(text: string, values?: unknown[]): Promise<{ rows: any[] }>;
+}
+
+/** The name of the target every crew dispatch is checked against (targets/local-crew/manifest.yaml). */
+export const LOCAL_CREW_TARGET = "local-crew";
+/** `work.owner` for a queued crew run; the assistant's drain loop claims rows by this prefix. */
+export const CREW_OWNER_PREFIX = "crew:";
+
+// --- manifest files -----------------------------------------------------------
+
+export interface CrewDefinition {
+  manifest: AgentManifest;
+  /** The operating prompt: the file body below the frontmatter, trimmed. */
+  prompt: string;
+  /** sha256 of the whole file — stamped on every run so a prompt edit is visible in `runs`. */
+  sha256: string;
+  /** Where it was read from (`agents/example/researcher.md`, or a disk path). */
+  where: string;
+  /** The registry grant derived from `scope` (tier areas, or none when scope is empty). */
+  grants: Grants;
+}
+
+const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)([\s\S]*)$/;
+const CREW_FILE = /^(?:.*\/)?([a-z0-9-]+)\/([a-z0-9-]+)\.md$/; // <area>/<name>.md
+const MAX_PROMPT_CHARS = 32_000;
+
+/**
+ * Parse one `agents/<area>/<name>.md`. Throws with `where:` on any miss —
+ * a malformed manifest is refused whole, never partially registered.
+ * `expected` (from the path) must agree with the frontmatter: the name IS
+ * the filename, and an `area` key, when present, IS the directory.
+ */
+export function parseCrewFile(text: string, where: string, expected?: { name: string; area: string }): CrewDefinition {
+  const m = FRONTMATTER.exec(text);
+  if (!m) throw new Error(`${where}: expected YAML frontmatter (--- … ---) followed by the operating prompt`);
+  let raw: unknown;
+  try {
+    raw = parseYaml(m[1]!);
+  } catch (err) {
+    throw new Error(`${where}: frontmatter is not YAML: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) throw new Error(`${where}: frontmatter must be a mapping`);
+  const withArea = expected && (raw as { area?: unknown }).area === undefined ? { ...(raw as object), area: expected.area } : raw;
+  const r = validateManifest(withArea);
+  if (!r.ok) throw new Error(`${where}: invalid manifest: ${r.errors.join("; ")}`);
+  if (r.manifest.type !== "agent") throw new Error(`${where}: type must be agent (got ${r.manifest.type})`);
+  const manifest = r.manifest;
+  if (expected) {
+    if (manifest.name !== expected.name) throw new Error(`${where}: manifest name "${manifest.name}" must match the filename "${expected.name}"`);
+    if (manifest.area !== expected.area) throw new Error(`${where}: manifest area "${manifest.area}" must match the directory "${expected.area}"`);
+  }
+  const prompt = m[2]!.trim();
+  if (!prompt) throw new Error(`${where}: the body below the frontmatter is the crew's operating prompt and may not be empty`);
+  if (prompt.length > MAX_PROMPT_CHARS) throw new Error(`${where}: operating prompt exceeds ${MAX_PROMPT_CHARS} characters`);
+  let grants: Grants;
+  try {
+    // the external validator on purpose: TitleCase areas, never the bare vault — a crew is not the assistant
+    grants = manifest.scope.length > 0 ? validateGrants({ tier: "areas", areas: manifest.scope }, { kind: "external" }) : { tier: "none", areas: [] };
+  } catch (err) {
+    throw new Error(`${where}: scope: ${err instanceof AgentError ? err.message : String(err)}`);
+  }
+  return { manifest, prompt, sha256: createHash("sha256").update(text).digest("hex"), where, grants };
+}
+
+interface CrewFile {
+  /** `<area>/<name>.md`, relative to the source root. */
+  rel: string;
+  text: string;
+}
+
+/** Every `<dir>/<area>/<name>.md` on disk; null when the directory does not exist (an overlay entry may be vault-only). */
+export async function readCrewDir(dir: string): Promise<CrewFile[] | null> {
+  let areas: string[];
+  try {
+    areas = (await readdir(dir, { withFileTypes: true })).filter((e) => e.isDirectory()).map((e) => e.name);
+  } catch (err) {
+    if ((err as { code?: string }).code === "ENOENT") return null;
+    throw err;
+  }
+  const out: CrewFile[] = [];
+  for (const area of areas.sort()) {
+    const files = (await readdir(join(dir, area), { withFileTypes: true })).filter((e) => e.isFile() && e.name.endsWith(".md")).map((e) => e.name);
+    for (const f of files.sort()) out.push({ rel: `${area}/${f}`, text: await readFile(join(dir, area, f), "utf8") });
+  }
+  return out;
+}
+
+/** The same shape through the reconciler's bridge: `list(prefix, 2)` then `read` each `<prefix>/<area>/<name>.md`. Missing prefix → []. */
+export async function readCrewVault(vault: VaultClient, prefix: string): Promise<CrewFile[]> {
+  const entries = await vault.list(prefix, 2);
+  const out: CrewFile[] = [];
+  for (const e of entries) {
+    if (e.kind !== "file" || !e.path.startsWith(`${prefix}/`)) continue;
+    const rel = e.path.slice(prefix.length + 1);
+    if (!/^[a-z0-9-]+\/[a-z0-9-]+\.md$/.test(rel)) continue; // not <area>/<name>.md — README, a stray note, a nested dir
+    const file = await vault.read(e.path);
+    if (file) out.push({ rel, text: file.content.toString("utf8") });
+  }
+  return out.sort((a, b) => a.rel.localeCompare(b.rel));
+}
+
+export interface CrewLoad {
+  crews: Map<string, CrewDefinition>;
+  /** Files refused (with the reason); a refused manifest is treated as absent — registered nowhere, revoked if it was. */
+  errors: string[];
+  /** Where each entry of the overlay came from: `disk` | `vault` | `absent`. */
+  sources: Record<string, "disk" | "vault" | "absent">;
+}
+
+/**
+ * D4 overlay over METISTRY_AGENTS_DIRS: each entry is read from disk when
+ * the directory exists there, else through the vault bridge when one is
+ * configured (that is how the instance repo's protected `agents/` reaches
+ * the console), else skipped. Later entries override earlier ones by name.
+ */
+export async function loadCrews(dirs: string[], vault?: VaultClient): Promise<CrewLoad> {
+  const crews = new Map<string, CrewDefinition>();
+  const errors: string[] = [];
+  const sources: CrewLoad["sources"] = {};
+  for (const dir of dirs.map((d) => d.trim()).filter(Boolean)) {
+    let files = await readCrewDir(dir);
+    if (files !== null) sources[dir] = "disk";
+    else if (vault) {
+      try {
+        files = await readCrewVault(vault, dir.replace(/\/+$/, ""));
+        sources[dir] = "vault";
+      } catch (err) {
+        errors.push(`${dir}: vault bridge: ${err instanceof Error ? err.message : String(err)}`);
+        sources[dir] = "absent";
+        continue;
+      }
+    } else {
+      sources[dir] = "absent";
+      continue;
+    }
+    for (const f of files) {
+      const m = CREW_FILE.exec(f.rel);
+      if (!m) continue;
+      const where = `${dir}/${f.rel}`;
+      try {
+        const def = parseCrewFile(f.text, where, { area: m[1]!, name: m[2]! });
+        crews.set(def.manifest.name, def);
+      } catch (err) {
+        errors.push(err instanceof Error ? err.message : String(err));
+      }
+    }
+  }
+  return { crews, errors, sources };
+}
+
+// --- registry sync -------------------------------------------------------------
+
+export interface CrewSyncSummary {
+  registered: string[];
+  resynced: string[];
+  revoked: string[];
+  /** Names whose `agents` row exists with another kind (the assistant, an external agent): never overwritten, never dispatchable. */
+  conflicts: string[];
+}
+
+function displayName(def: CrewDefinition): string {
+  return `${def.manifest.name} (crew, ${def.manifest.area ?? "no area"})`;
+}
+
+/**
+ * Reconcile `agents` rows of kind `crew` with the loaded manifests.
+ * Idempotent and quiet: a row is written — and an `agent_admin` runs row
+ * logged — only when it is new, changed, or gone. Token hashes are NEVER
+ * touched here: registration stores the hash of a token that is discarded
+ * on the spot (no valid credential exists until a run mints one), and a
+ * re-sync leaves whatever hash is there alone.
+ */
+export async function syncCrews(db: Db, crews: Map<string, CrewDefinition>): Promise<CrewSyncSummary> {
+  const out: CrewSyncSummary = { registered: [], resynced: [], revoked: [], conflicts: [] };
+  const names = [...crews.keys()];
+  const { rows: existing } = await db.query(
+    `SELECT id, kind, display_name, grants, projects, revoked_at IS NOT NULL AS revoked FROM agents WHERE id = ANY($1::text[])`,
+    [names],
+  );
+  const byId = new Map<string, { kind: string; display_name: string; grants: unknown; projects: string[]; revoked: boolean }>(existing.map((r) => [String(r.id), r]));
+
+  const audit = async (agent: string, op: string, ok: boolean, meta: Record<string, unknown> = {}) => {
+    const id = await startRun(db, { component: "console", kind: "agent_admin", tool: "crew_sync", meta: { agent, op, ...meta } });
+    await finishRun(db, id, { ok });
+  };
+
+  for (const [name, def] of crews) {
+    const row = byId.get(name);
+    const grantsJson = JSON.stringify(def.grants);
+    const projects = def.manifest.projects;
+    const display = displayName(def);
+    if (row && row.kind !== "crew") {
+      out.conflicts.push(name);
+      await audit(name, "conflict", false, { existing_kind: row.kind });
+      continue;
+    }
+    if (!row) {
+      // the hash of a token nobody holds — see the file header
+      await db.query(`INSERT INTO agents (id, display_name, kind, token_hash, grants, projects) VALUES ($1, $2, 'crew', $3, $4::jsonb, $5::text[])`, [
+        name, display, tokenHash(mintToken(32)), grantsJson, projects,
+      ]);
+      out.registered.push(name);
+      await audit(name, "register", true, { grants: def.grants, projects, where: def.where });
+      continue;
+    }
+    const same = !row.revoked && row.display_name === display && JSON.stringify(row.grants) === grantsJson && JSON.stringify(row.projects ?? []) === JSON.stringify(projects);
+    if (same) continue;
+    await db.query(`UPDATE agents SET display_name = $2, grants = $3::jsonb, projects = $4::text[], revoked_at = NULL WHERE id = $1 AND kind = 'crew'`, [
+      name, display, grantsJson, projects,
+    ]);
+    out.resynced.push(name);
+    await audit(name, "resync", true, { grants: def.grants, projects, where: def.where });
+  }
+
+  const { rows: gone } = await db.query(
+    `UPDATE agents SET revoked_at = now() WHERE kind = 'crew' AND revoked_at IS NULL AND NOT (id = ANY($1::text[])) RETURNING id`,
+    [names],
+  );
+  for (const r of gone) {
+    out.revoked.push(String(r.id));
+    await audit(String(r.id), "revoke", true, { reason: "manifest absent" });
+  }
+  return out;
+}
+
+/** The loaded crews plus a refresh that re-reads the overlay and re-syncs the registry. One instance per console. */
+export class CrewRegistry {
+  private crews = new Map<string, CrewDefinition>();
+  errors: string[] = [];
+  sources: CrewLoad["sources"] = {};
+  lastSync: CrewSyncSummary | null = null;
+
+  constructor(
+    private readonly db: Db,
+    private readonly dirs: string[],
+    private readonly vault?: VaultClient | undefined,
+  ) {}
+
+  /** Load + sync. Never throws on a bad manifest (it lands in `errors`); does throw on a dead database. */
+  async refresh(): Promise<CrewSyncSummary> {
+    const load = await loadCrews(this.dirs, this.vault);
+    this.crews = load.crews;
+    this.errors = load.errors;
+    this.sources = load.sources;
+    this.lastSync = await syncCrews(this.db, this.crews);
+    // a name that belongs to another kind of row (the assistant, an external agent) is not a crew this console can run: not dispatchable
+    for (const name of this.lastSync.conflicts) {
+      this.errors.push(`${this.crews.get(name)?.where ?? name}: agents.id "${name}" already belongs to a non-crew registry row — rename the crew`);
+      this.crews.delete(name);
+    }
+    return this.lastSync;
+  }
+
+  get(name: string): CrewDefinition | undefined {
+    return this.crews.get(name);
+  }
+
+  names(): string[] {
+    return [...this.crews.keys()].sort();
+  }
+}
+
+// --- data policy: crew scope ∩ target allow ----------------------------------------
+
+function under(path: string, prefix: string): boolean {
+  return path === prefix || path.startsWith(`${prefix}/`);
+}
+
+/** Prefix intersection: for each (scope, allow) pair the narrower of the two when one contains the other; nothing otherwise. Sorted, deduplicated. */
+export function intersectAllow(scope: readonly string[], allow: readonly string[]): string[] {
+  const out = new Set<string>();
+  for (const s of scope) {
+    for (const a of allow) {
+      if (under(s, a)) out.add(s);
+      else if (under(a, s)) out.add(a);
+    }
+  }
+  return [...out].sort();
+}
+
+/** The policy a brief bound for this crew is checked against: the crew's scope narrowed by the target, the target's sources and size cap. */
+export function crewPolicy(crew: AgentManifest, target: TargetManifest): DataPolicy {
+  return {
+    allow: intersectAllow(crew.scope, target.data_policy.allow),
+    deny_sources: target.data_policy.deny_sources,
+    max_brief_bytes: target.data_policy.max_brief_bytes,
+  };
+}
+
+// --- dispatch ------------------------------------------------------------------------
+
+/** What the assistant's runner needs, frozen into the work row at dispatch (the container has no vault): the manifest fields + the prompt. */
+export interface CrewSnapshot extends Omit<AgentManifest, "type"> {
+  prompt: string;
+  /** sha256 of the manifest file this snapshot was taken from. */
+  sha256: string;
+}
+
+/** `work.meta` of a queued crew run. */
+export interface CrewQueueMeta {
+  target: string;
+  crew: CrewSnapshot;
+  brief: string;
+  brief_sha: string;
+  task_id?: number;
+  dispatch_run_id: number;
+  /** The effective allow list the brief passed. */
+  allow: string[];
+}
+
+export function snapshotOf(def: CrewDefinition): CrewSnapshot {
+  const { type: _type, ...rest } = def.manifest;
+  return { ...rest, prompt: def.prompt, sha256: def.sha256 };
+}
+
+function firstLine(text: string): string {
+  return text.split(/\r?\n/).map((l) => l.replace(/^#+\s*/, "").trim()).find((l) => l.length > 0) ?? "(no title)";
+}
+
+/**
+ * The crew dispatch: registry lookup, policy (the existing `checkBrief`),
+ * durable enqueue through the tasks module, one two-phase `runs` row
+ * (component console, kind dispatch, tool local-crew) whether refused or
+ * queued. `principal` is server-side identity (§4.19): the bridge has
+ * already refused everyone but the internal assistant; it is written to
+ * the row's history and the audit, never read from the input.
+ */
+export async function dispatchCrew(
+  db: Db,
+  tasks: TasksService,
+  registry: CrewRegistry,
+  targets: TargetRegistry | undefined,
+  input: CrewDispatchInput,
+  principal: AgentPrincipal,
+): Promise<CrewDispatchOutcome> {
+  const def = registry.get(input.crew);
+  if (!def) return { ok: false, code: "not_found", message: `unknown crew "${input.crew}" (registered: ${registry.names().join(", ") || "none"})` };
+  const target = targets?.get(LOCAL_CREW_TARGET);
+  if (!target || target.transport !== "local") {
+    return { ok: false, code: "not_available", message: `target ${LOCAL_CREW_TARGET} is not loaded (METISTRY_TARGETS_DIRS) — crews cannot be dispatched` };
+  }
+
+  const briefBytes = Buffer.byteLength(input.brief, "utf8");
+  const runId = await startRun(db, {
+    component: "console",
+    kind: "dispatch",
+    tool: target.name,
+    meta: { target: target.name, crew: def.manifest.name, principal: principal.id, brief_bytes: briefBytes, ...(input.task_id !== undefined ? { task: input.task_id } : {}) },
+  });
+
+  const policy = crewPolicy(def.manifest, target);
+  const violations = checkBrief(policy, input.brief);
+  if (violations.length > 0) {
+    await finishRun(db, runId, { ok: false, error: `data_policy: ${violations.map((v) => v.kind).join(",")}`, meta: { violations, allow: policy.allow } });
+    return { ok: false, code: "invalid_request", message: "brief violates the crew's data policy (crew scope ∩ local-crew allow)", violations };
+  }
+
+  const briefSha = createHash("sha256").update(input.brief).digest("hex");
+  const meta: CrewQueueMeta = {
+    target: target.name,
+    crew: snapshotOf(def),
+    brief: input.brief,
+    brief_sha: briefSha,
+    ...(input.task_id !== undefined ? { task_id: input.task_id } : {}),
+    dispatch_run_id: runId,
+    allow: policy.allow,
+  };
+  let work;
+  try {
+    work = await tasks.create(
+      {
+        title: `[crew:${def.manifest.name}] ${firstLine(input.brief).slice(0, 120)}`,
+        kind: "task",
+        owner: `${CREW_OWNER_PREFIX}${def.manifest.name}`,
+        ...(input.idempotency_key !== undefined ? { idempotency_key: input.idempotency_key } : {}),
+        meta: meta as unknown as Record<string, unknown>,
+      },
+      principal.id,
+    );
+  } catch (err) {
+    if (err instanceof TasksError) {
+      await finishRun(db, runId, { ok: false, error: err.message });
+      return { ok: false, code: err.code === "conflict" ? "conflict" : "invalid_request", message: err.message };
+    }
+    await finishRun(db, runId, { ok: false, error: err instanceof Error ? err.message : String(err) });
+    throw err;
+  }
+  const deduplicated = Number((work.meta as { dispatch_run_id?: unknown }).dispatch_run_id) !== runId;
+  await finishRun(db, runId, {
+    ok: true,
+    ...(target.cost ? { cost_usd: target.cost.per_run_estimate_usd } : {}),
+    meta: { work_id: work.id, crew: def.manifest.name, allow: policy.allow, deduplicated, brief_sha: briefSha },
+  });
+  return { ok: true, work_id: work.id, run_id: runId, crew: def.manifest.name, allow: policy.allow, deduplicated };
+}
+
+/** The mcp-brain adapter over the above. */
+export function crewDispatcher(db: Db, tasks: TasksService, registry: CrewRegistry, targets: TargetRegistry | undefined): CrewDispatcher {
+  return {
+    dispatch: (input, principal) => dispatchCrew(db, tasks, registry, targets, input, principal),
+    names: () => registry.names(),
+  };
+}

@@ -7,6 +7,15 @@ export {
   type ManifestResult,
   type TargetManifest,
   type DataPolicy,
+  agentManifest,
+  CREW_TOOL_GROUPS,
+  CREW_GROUP_ALIASES,
+  CREW_NEVER_TOOLS,
+  CREW_MODELS,
+  crewGroupOf,
+  crewToolsFor,
+  type AgentManifest,
+  type CrewToolGroup,
 } from "./manifest.js";
 export { checkResultSchema, runCheck, type CheckResult, type Checkable } from "./check.js";
 export { errorEnvelope, statusFor, type ErrorCode, type ErrorEnvelope } from "./errors.js";

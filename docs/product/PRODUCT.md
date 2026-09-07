@@ -471,3 +471,28 @@ your git, on your machine.
   that escapes first and whitelists (only `https://` and `#/` anchors),
   locked by a hostile-input test. Every control is enforced in the
   dispatch tool, with its reason on the row.
+- 2026-09-07 — **Crews: manifest-defined sub-agents with their own
+  toolsets, dispatched locally** (plan §4.11, §4.18.B `transport: local`,
+  Phase 5 "crew definitions with their own toolsets"). A crew is one file
+  in the instance repo — `agents/<area>/<name>.md`, frontmatter validated
+  by core's `agent` schema, body = its operating prompt — naming a model,
+  tool GROUPS, a read scope, projects, a turn cap and a per-run budget.
+  Safety, enforced at the tool, not by prompting: (1) the schema has no
+  group that contains `knowledge_write` or `crew_dispatch`, so no manifest
+  can grant a sub-agent the writer's or the dispatcher's tools (sub-agents
+  never write knowledge — one writer holds); (2) **briefs are policy-checked
+  before anything leaves the assistant** — `crew_dispatch` reuses the
+  existing dispatch enforcement against the crew's `scope` ∩ the local
+  target's `allow` list, refuses with the violations named, and writes no
+  work row on a refusal; (3) **crews get scoped, per-run credentials** —
+  the registry row's grant is the manifest's scope through the external
+  validator, and the runner mints a bearer for each run and burns it after,
+  so no crew credential exists between runs (a second run gets a new one;
+  the first no longer authenticates — locked by test). Dispatch is durable
+  (a `work` row the assistant container drains, restart-safe with leases
+  and a retry cap); results return only through the crew's own `report` /
+  `tasks_*` calls plus a `crew_run` row on the crew's id with cost, tokens
+  and tools used — the dashboard's runs-by-component view is where a crew
+  is watched. `seed/agents/example/researcher.md` ships as the template;
+  `docs/ops/crews.md` is the operator's page. No migration. 36 new tests
+  across core, console and the assistant.

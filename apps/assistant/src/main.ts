@@ -1,6 +1,7 @@
 import pg from "pg";
 import { intEnv, optionalEnv, requireEnv } from "@foldedspacelabs/metistry-core";
 import { drainOne } from "./drain.js";
+import { drainCrewOne } from "./crew-drain.js";
 import { makeSdkEngine } from "./engine.js";
 import { brainConfigFromEnv, brainToolNames } from "./brain.js";
 import { loadSystemPrompt } from "./prompt.js";
@@ -37,12 +38,26 @@ else console.warn("system prompt absent: no identity.yaml / assistant-prompt.md 
 const sdkEngine = makeSdkEngine({ brain, systemPrompt: loaded?.prompt, ...(process.env.METISTRY_MAX_TURNS ? { maxTurns: intEnv("METISTRY_MAX_TURNS", 12) } : {}) });
 console.log(`assistant draining (model=${model}, every ${interval}ms)`);
 
+// Crews (docs/ops/crews.md): the same loop drains the crew queue after the
+// inbound one. Each run gets a per-run token minted here and burned after;
+// the brain URL is the assistant's own (the token is NOT — a crew never
+// presents the assistant's credential).
+const crewCfg = {
+  brainUrl: brain?.url,
+  identity: loaded?.identity,
+  leaseSeconds: intEnv("METISTRY_CREW_LEASE_S", 1800),
+  maxAttempts: intEnv("METISTRY_CREW_MAX_ATTEMPTS", 3),
+  retryBackoffSeconds: intEnv("METISTRY_CREW_RETRY_S", 300),
+};
+if (!brain) console.warn("crews: no METISTRY_BRAIN_URL — queued crew runs will park as blocked");
+
 let busy = false;
 setInterval(async () => {
   if (busy) return;
   busy = true;
   try {
     while (await drainOne(pool, sdkEngine, model)) {} // drain the backlog
+    while (await drainCrewOne(pool, crewCfg)) {} // then the crew queue
   } catch (err) {
     console.error("drain:", err);
   } finally {

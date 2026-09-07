@@ -41,9 +41,12 @@ data_policy:                         # REQUIRED, every field
 4. Restart the console; `GET /api/targets` shows the manifest with its live
    `check()` (`absent` until configured, `ok` once the probe passes).
 
-Only `transport: github` has a dispatcher today. Other transports validate
-and list, and `dispatch()` refuses them explicitly (`invalid_request`) — a
-registered target is never a silent no-op.
+Two transports have a dispatcher today: `github` (below, via
+`POST /api/tasks/:id/dispatch`) and `local` (`targets/local-crew`, via the
+assistant's `crew_dispatch` tool — `docs/ops/crews.md`; its policy is this
+target's `data_policy` narrowed by the crew's `scope`). Other transports
+validate and list, and `dispatch()` refuses them explicitly
+(`invalid_request`) — a registered target is never a silent no-op.
 
 ## The data policy, precisely
 

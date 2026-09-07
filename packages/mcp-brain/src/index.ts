@@ -21,4 +21,5 @@ export { computeNudge, type NudgeOptions } from "./nudge.js";
 export { allProjects, memberOf } from "./scope.js";
 export type { AgentPrincipal, Db, Tier } from "./types.js";
 export { ARTIFACT_TOOL_NAMES, registerArtifactTools, toPrincipal, type ArtifactToolName } from "./artifacts-tools.js";
+export { CREW_TOOL_NAMES, registerCrewTools, type CrewDispatcher, type CrewDispatchInput, type CrewDispatchOutcome, type CrewToolName } from "./crew-tools.js";
 export { type Outcome } from "./outcome.js";

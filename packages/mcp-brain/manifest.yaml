@@ -5,7 +5,7 @@ transport: http
 port: 8080               # no bind of its own: mounted at the console's POST /mcp, so this is the console's port
 runs_on: container
 requires_tcc: []
-discovery: eager         # 18 tools — under the lazy threshold (>20 tools / >5k definition tokens)
+discovery: eager         # 19 tools — under the lazy threshold (>20 tools / >5k definition tokens)
 degrades: absent
 exposes:
   - name: capture
@@ -44,3 +44,5 @@ exposes:
     description: Resolve (or reopen) a thread root
   - name: artifact_dispatch_review
     description: Send a bundle of threads to another agent as one `review` task — inside the project freely, across the boundary as a proposal for the user
+  - name: crew_dispatch
+    description: Hand a brief to a named crew (agents/<area>/<name>.md) as a durable work row the assistant container runs locally — brief checked against the crew's scope ∩ the local target's data policy first; internal (assistant) principals only

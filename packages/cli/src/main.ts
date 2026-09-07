@@ -1,15 +1,20 @@
 #!/usr/bin/env node
-// `metistry` — init | doctor | up | update (plan §4.16). Hand-rolled
-// argument parsing: four subcommands and a handful of flags do not justify
-// a dependency this project would maintain for years (CLAUDE.md).
+// `metistry` — init | connect-repo | secrets | doctor | up | update (plan
+// §4.16; connect-repo and secrets are the install verbs the Mac app drives,
+// docs/product/desktop-app-plan.md). Hand-rolled argument parsing: a handful
+// of subcommands and flags does not justify a dependency this project would
+// maintain for years (CLAUDE.md).
 
 import { realpathSync } from "node:fs";
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { doctor, renderTable, type DoctorDeps } from "./doctor.js";
 import { loadDotEnv, productVersion, resolveProductDir, resolveSeedDir } from "./env.js";
 import { realExec, type Exec } from "./exec.js";
+import { AUTH_MODES, connectRepo, type AuthMode } from "./connect-repo.js";
 import { init } from "./init.js";
 import type { LockSource } from "./lock.js";
+import { listSecrets, mintSecret, renderSecretList, syncSecrets, type SyncDirection } from "./secrets.js";
 import { up } from "./up.js";
 import { gitHead, update } from "./update.js";
 
@@ -65,6 +70,28 @@ function str(flags: ParsedArgs["flags"], name: string): string | undefined {
   return typeof v === "string" ? v : undefined;
 }
 
+/** `--auth device|token|ssh` — a typo must not silently pick a weaker path. */
+export function parseAuth(v: string | undefined): AuthMode | undefined {
+  if (v === undefined) return undefined;
+  if (!(AUTH_MODES as string[]).includes(v)) throw new Error(`--auth must be ${AUTH_MODES.join(", ")} — not ${JSON.stringify(v)}`);
+  return v as AuthMode;
+}
+
+/** `secrets sync` direction: `--to` names it outright, `--from` names the other end. Never guessed. */
+export function syncDirection(from: string | undefined, to: string | undefined): SyncDirection {
+  const ok = (v: string | undefined, flag: string): SyncDirection | undefined => {
+    if (v === undefined) return undefined;
+    if (v !== "env" && v !== "keychain") throw new Error(`${flag} must be env or keychain, not ${JSON.stringify(v)}`);
+    return v;
+  };
+  const t = ok(to, "--to");
+  const f = ok(from, "--from");
+  if (t && f && t === f) throw new Error(`--from ${f} --to ${t} is a no-op`);
+  if (t) return t;
+  if (f) return f === "env" ? "keychain" : "env";
+  throw new Error("say which way: `metistry secrets sync --to keychain` (import .env) or `--to env` (regenerate .env)");
+}
+
 const USAGE = `metistry — Metistry command line
 
   metistry init <dir> [--name <assistant name>] [--channel git|release] [--force]
@@ -75,6 +102,26 @@ const USAGE = `metistry — Metistry command line
       --channel writes metistry.lock's product.source: git (this install is a
       checkout update fast-forwards; the default) or release (it consumes
       published artifacts — docs/ops/releases.md).
+
+  metistry connect-repo <url> [--instance <dir>] [--auth device|token|ssh] [--force]
+      Point the instance repo at a private remote and leave credentials the
+      reconciler can push with unattended: set origin (refusing to repoint one
+      without --force), configure credential.helper=osxkeychain for an https
+      remote, get a token (--auth device runs GitHub's device-authorization
+      flow against METISTRY_GITHUB_OAUTH_CLIENT_ID; --auth token reads a PAT
+      from stdin; --auth ssh trusts your key) into the login Keychain, verify
+      with git ls-remote, flush the reconciler's queue, and push once.
+      The token is never printed, never written to .env, never in .git/config.
+
+  metistry secrets sync [--from keychain|env] [--to env|keychain] [--env-file <path>]
+  metistry secrets mint <VAR> [--env-file <path>]
+  metistry secrets list [--env-file <path>]
+      The macOS login Keychain (service metistry:<VAR>) is the canonical store;
+      .env is generated from it. --to keychain imports .env's secret-shaped
+      variables (names ending _TOKEN _PASSWORD _PRIVATE _SECRET _KEY, plus
+      CLAUDE_CODE_OAUTH_TOKEN); --to env rewrites just those lines of .env in
+      place (0600; every comment and non-secret line preserved). mint makes a
+      new random token in both. list prints names only, never values.
 
   metistry doctor [--json] [--product-dir <checkout>]
       Validate every manifest in the checkout and probe every bridge, service,
@@ -155,8 +202,76 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
       for (const l of result.envLines) out(`  ${l}`);
       out("");
       out("Then: pnpm -r build && metistry up   (containers, every launchd job, doctor — docs/ops/cli.md).");
-      out("Optional: git -C " + result.dir + " remote add origin <your private remote> — the reconciler pushes on its schedule.");
+      out(`Then, to version it off this machine: metistry connect-repo <your private remote> --instance ${result.dir} (docs/ops/cli.md).`);
       return 0;
+    }
+    case "connect-repo": {
+      const url = positional[0];
+      if (!url) {
+        err("usage: metistry connect-repo <url> [--instance <dir>] [--auth device|token|ssh] [--force]");
+        return 2;
+      }
+      if (productDir) loadDotEnv(productDir);
+      const instanceDir = str(flags, "instance") ?? process.env.METISTRY_INSTANCE_DIR;
+      if (!instanceDir) {
+        err("connect-repo needs the instance repo: pass --instance <dir> or set METISTRY_INSTANCE_DIR (docs/ops/cli.md)");
+        return 2;
+      }
+      try {
+        const r = await connectRepo({
+          url,
+          instanceDir,
+          auth: parseAuth(str(flags, "auth")),
+          force: flags.force === true,
+          out,
+          ...(io.exec ? { exec: io.exec } : {}),
+        });
+        out(`connected: ${instanceDir} → ${url} (branch ${r.branch}, credential ${r.credential})`);
+        return 0;
+      } catch (e) {
+        err(`metistry connect-repo: ${e instanceof Error ? e.message : String(e)}`);
+        return 1;
+      }
+    }
+    case "secrets": {
+      const sub = positional[0];
+      if (productDir) loadDotEnv(productDir);
+      const envFile = str(flags, "env-file") ?? (productDir ? join(productDir, ".env") : undefined);
+      if (!envFile) {
+        err("secrets needs a .env to read or generate: pass --env-file or run inside a checkout (--product-dir / METISTRY_PRODUCT_DIR)");
+        return 2;
+      }
+      const secretsOpts = {
+        envFile,
+        exampleFile: productDir ? join(productDir, ".env.example") : undefined,
+        out,
+        ...(io.exec ? { exec: io.exec } : {}),
+      };
+      try {
+        switch (sub) {
+          case "sync":
+            await syncSecrets(syncDirection(str(flags, "from"), str(flags, "to")), secretsOpts);
+            return 0;
+          case "mint": {
+            const name = positional[1];
+            if (!name) {
+              err("usage: metistry secrets mint <VAR>");
+              return 2;
+            }
+            await mintSecret(name, secretsOpts);
+            return 0;
+          }
+          case "list":
+            out(renderSecretList(await listSecrets(secretsOpts)));
+            return 0;
+          default:
+            err("usage: metistry secrets sync --to env|keychain | metistry secrets mint <VAR> | metistry secrets list");
+            return 2;
+        }
+      } catch (e) {
+        err(`metistry secrets: ${e instanceof Error ? e.message : String(e)}`);
+        return 1;
+      }
     }
     case "doctor": {
       if (!productDir) {

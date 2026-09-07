@@ -505,3 +505,10 @@ your git, on your machine.
   under every reply, drag-to-dispatch with the autonomy boundary shown
   as the reason for a refusal. Not lifted: a second engine, Electron, or
   a coding workbench. Plan in `docs/product/desktop-app-plan.md`.
+- 2026-09-07 — Distribution direction: the premium app is the installer.
+  Bundled runtime, `metistry init` on a chosen folder, GitHub repo
+  connected by device-flow OAuth with the token in the Keychain,
+  secrets minted into the Keychain, services registered via
+  SMAppService, passkey enrolled in-app, updates from signed releases
+  through `metistry update`. The app fronts the CLI; it never
+  re-implements it. Opened decision #15: a Docker-free macOS shape.

@@ -5,7 +5,7 @@ transport: http
 port: 8080               # no bind of its own: mounted at the console's POST /mcp, so this is the console's port
 runs_on: container
 requires_tcc: []
-discovery: eager         # 11 tools — well under the lazy threshold (>20 tools / >5k definition tokens)
+discovery: eager         # 17 tools — under the lazy threshold (>20 tools / >5k definition tokens)
 degrades: absent
 exposes:
   - name: capture
@@ -30,3 +30,15 @@ exposes:
     description: Search the knowledge index (titles + one-line descriptions) within the caller's grant tier
   - name: knowledge_read
     description: Read one settled note under a granted Knowledge/ area prefix
+  - name: artifact_publish
+    description: Publish a version of an artifact into one of the caller's projects (compare-and-swap on the current version, idempotent on idempotency_key); returns artifact/version/review links
+  - name: artifact_get
+    description: One artifact in the caller's projects — a version with its manifest, the version list, comment threads, links, optionally one text file's content
+  - name: artifact_list
+    description: Artifacts across the caller's projects
+  - name: artifact_comment
+    description: Comment on an exact version (optionally one file + opaque anchor) or reply to a thread root; agent-only exchanges past the cap demote the thread to the user
+  - name: artifact_comment_resolve
+    description: Resolve (or reopen) a thread root
+  - name: artifact_dispatch_review
+    description: Send a bundle of threads to another agent as one `review` task — inside the project freely, across the boundary as a proposal for the user

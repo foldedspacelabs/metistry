@@ -13,7 +13,7 @@ import type { McpHttpServerConfig, Options } from "@anthropic-ai/claude-agent-sd
 export const BRAIN_SERVER = "brain";
 
 /**
- * The eleven mcp-brain tools, in manifest order. Duplicated here on purpose
+ * The seventeen mcp-brain tools, in manifest order. Duplicated here on purpose
  * — the engine's allowlist must be readable in one place — and locked to
  * packages/mcp-brain/manifest.yaml by test/brain.test.ts.
  */
@@ -29,6 +29,12 @@ export const BRAIN_TOOLS = [
   "tasks_mine",
   "knowledge_search",
   "knowledge_read",
+  "artifact_publish",
+  "artifact_get",
+  "artifact_list",
+  "artifact_comment",
+  "artifact_comment_resolve",
+  "artifact_dispatch_review",
 ] as const;
 
 export interface BrainConfig {

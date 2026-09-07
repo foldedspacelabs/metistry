@@ -33,9 +33,12 @@ import {
   type ErrorCode,
 } from "@foldedspacelabs/metistry-core";
 import { TasksError, type Result as TaskResult, type Task, type TasksService } from "@foldedspacelabs/metistry-tasks";
+import type { ArtifactsService } from "@foldedspacelabs/metistry-artifacts";
+import { ARTIFACT_TOOL_NAMES, registerArtifactTools } from "./artifacts-tools.js";
 import { captureToInbox } from "./capture.js";
 import { readKnowledge, searchKnowledge, type KnowledgeReader } from "./knowledge.js";
 import { computeNudge } from "./nudge.js";
+import { done, fail, type Outcome } from "./outcome.js";
 import { REPORT_KINDS, submitReport } from "./report.js";
 import { allProjects, memberOf } from "./scope.js";
 import type { AgentPrincipal, Db } from "./types.js";
@@ -49,6 +52,8 @@ export interface BrainConfig {
   inboxDir: string;
   /** Vault read path for `knowledge_read`. Absent → the tool answers `not_available`. */
   readKnowledge?: KnowledgeReader | undefined;
+  /** The artifacts module (§4.21) for artifact_*. Absent → those tools answer `not_available`. */
+  artifacts?: ArtifactsService | undefined;
   /** Nudge when a held lease has this many seconds or fewer left (default 120). */
   leaseWarningSeconds?: number | undefined;
   /** Reported to MCP clients as the server version. */
@@ -63,7 +68,7 @@ export interface BrainServer {
   readonly tools: readonly string[];
 }
 
-/** The eager surface (§4.3 default 1): 11 tools, no meta-tool indirection. Order = manifest order. */
+/** The eager surface (§4.3 default 1): 17 tools, no meta-tool indirection. Order = manifest order. */
 export const TOOL_NAMES = [
   "capture",
   "report",
@@ -76,16 +81,9 @@ export const TOOL_NAMES = [
   "tasks_mine",
   "knowledge_search",
   "knowledge_read",
+  ...ARTIFACT_TOOL_NAMES,
 ] as const;
 export type ToolName = (typeof TOOL_NAMES)[number];
-
-/** What a tool body returns; the wrapper turns it into a CallToolResult + runs row + nudge. */
-type Outcome =
-  | { ok: true; result: unknown; meta?: Record<string, unknown> }
-  | { ok: false; code: ErrorCode; message?: string | undefined; meta?: Record<string, unknown> };
-
-const fail = (code: ErrorCode, message?: string, meta?: Record<string, unknown>): Outcome => ({ ok: false, code, message, ...(meta ? { meta } : {}) });
-const done = (result: unknown, meta?: Record<string, unknown>): Outcome => ({ ok: true, result, ...(meta ? { meta } : {}) });
 
 // --- text boundary --------------------------------------------------------
 
@@ -322,6 +320,9 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
       },
     );
 
+    // artifact_* (§4.21): the one registration point for the artifacts adapter
+    registerArtifactTools(reg, cfg.artifacts, principal);
+
     return server;
   }
 
@@ -372,7 +373,7 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
         await db.query(`SELECT path, title, description, draft FROM knowledge_files WHERE false`);
         const t = await tasks.check();
         if (t.status !== "ok") throw new Error(`tasks: ${t.remediation ?? t.status}`);
-        const meta = { tools: [...TOOL_NAMES], knowledge_read: cfg.readKnowledge ? "available" : "not_available" };
+        const meta = { tools: [...TOOL_NAMES], knowledge_read: cfg.readKnowledge ? "available" : "not_available", artifacts: cfg.artifacts ? "available" : "not_available" };
         return cfg.readKnowledge
           ? { meta }
           : { status: "degraded" as const, meta, remediation: "knowledge_read answers not_available until a vault read path is configured (knowledge module)" };

@@ -1,5 +1,11 @@
 # Metistry substrate. Everything configurable comes from environment (.env);
 # nothing assumes Docker Desktop or a particular host layout.
+#
+# Images: a checkout builds and tags them `metistry-<app>:dev`. A release
+# install never builds — `metistry update` sets METISTRY_CONSOLE_IMAGE /
+# METISTRY_ASSISTANT_IMAGE to the versioned ghcr.io images the release
+# workflow pushed, then `docker compose pull && up -d --no-build`
+# (docs/ops/releases.md).
 name: metistry
 
 services:
@@ -23,7 +29,7 @@ services:
 
   console:
     build: { context: ., dockerfile: apps/console/Dockerfile }
-    image: metistry-console:dev
+    image: ${METISTRY_CONSOLE_IMAGE:-metistry-console:dev}
     restart: unless-stopped
     depends_on:
       db: { condition: service_healthy }
@@ -84,7 +90,7 @@ services:
 
   assistant:
     build: { context: ., dockerfile: apps/assistant/Dockerfile }
-    image: metistry-assistant:dev
+    image: ${METISTRY_ASSISTANT_IMAGE:-metistry-assistant:dev}
     restart: unless-stopped
     depends_on:
       db: { condition: service_healthy }

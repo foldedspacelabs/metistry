@@ -59,20 +59,23 @@ the instance repo on a volume: `docker build -f apps/reconciler/Dockerfile .`
 and mount the repo at `/data/instance` (the image's default
 `METISTRY_INSTANCE_DIR`).
 
-## Creating an instance repo by hand (for now)
+## Creating an instance repo
 
-`metistry init` will stamp this from `seed/` later (§4.16). Until then:
+`metistry init` stamps it from `seed/` (§4.16; `docs/ops/cli.md`):
 
 ```sh
-mkdir ~/metistry-instance && cd ~/metistry-instance
-git init -b main
-mkdir -p Knowledge inbox
-cp /path/to/metistry/seed/identity.yaml identity.yaml   # name your assistant here — nowhere else
-cp /path/to/metistry/seed/Knowledge/now.md Knowledge/now.md
-printf '.obsidian/\n.DS_Store\n' > .gitignore              # PoC-12: no .obsidian churn in git
-git add -A && git commit -m "Instance created"
-git remote add origin git@github.com:you/your-private-instance.git   # optional; push is best-effort
+npx @foldedspacelabs/metistry-cli init ~/metistry-instance --name "Athena"
+# or, inside the checkout after pnpm -r build:
+node packages/cli/dist/main.js init ~/metistry-instance --name "Athena"
 ```
+
+That is the `git init -b main` + `Knowledge/` + `identity.yaml` (the only
+place the assistant is named) + `rules.yaml` + config dirs + `.gitignore`
++ `metistry.lock` + one `Instance created` commit the 2026-09-06 bootstrap
+did by hand. It ends by printing the three `.env` lines above — the
+`METISTRY_BRIDGE_TOKEN_RECONCILER` it shows is minted once and written
+nowhere, so copy it then. Add a private remote whenever you like
+(`git -C ~/metistry-instance remote add origin …`); push is best-effort.
 
 Point Obsidian at `Knowledge/` as the vault root, git at the repo root.
 

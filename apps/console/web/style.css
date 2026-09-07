@@ -75,3 +75,23 @@ button.secondary { background: #2a323b; }
 #art-threads .reply { margin: 6px 0 0 22px; padding-left: 8px; border-left: 2px solid #2a323b; }
 #art-threads form { margin: 6px 0 0 22px; }
 #art-comment, #art-dispatch { flex-direction: column; }
+/* ----- projects panel (§4.19 rollup, §4.21 kill switch) ----- */
+.chip { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; background: #2a323b; color: var(--fg); vertical-align: middle; }
+.chip.review { background: #7a3b3b; color: white; }
+.chip.autonomous { background: #2f5d3a; color: white; }
+#dash-project-rows button { padding: 4px 10px; font-size: 13px; }
+/* ----- rendered markdown (md.js: whitelisted tags only) ----- */
+.art-md { background: #1a2027; border-radius: 10px; padding: 12px 14px; max-height: 60dvh; overflow: auto; font-size: 15px; }
+.art-md h1, .art-md h2, .art-md h3, .art-md h4 { margin: 12px 0 6px; font-size: 16px; }
+.art-md h1 { font-size: 18px; }
+.art-md p, .art-md ul, .art-md ol, .art-md blockquote, .art-md pre, .art-md table { margin: 6px 0; }
+.art-md ul, .art-md ol { padding-left: 22px; list-style: revert; }
+.art-md blockquote { border-left: 3px solid #2a323b; padding-left: 10px; color: var(--mut); }
+.art-md pre { background: #101418; border-radius: 8px; padding: 8px 10px; overflow-x: auto; font-size: 13px; }
+.art-md code { background: #101418; border-radius: 4px; padding: 0 4px; font-size: 13px; }
+.art-md pre code { background: none; padding: 0; }
+.art-md a { color: var(--acc); }
+.art-md .wikilink { color: var(--acc); border-bottom: 1px dotted var(--acc); cursor: help; }
+.art-md table { border-collapse: collapse; font-size: 13px; }
+.art-md th, .art-md td { border-bottom: 1px solid #2a323b; padding: 4px 8px; text-align: left; }
+.art-md hr { border: 0; border-top: 1px solid #2a323b; margin: 10px 0; }

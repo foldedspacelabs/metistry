@@ -74,6 +74,8 @@ export async function drainOne(db: Db, engine: Engine, defaultModel: string): Pr
       ...(result.tokens_in !== undefined ? { tokens_in: result.tokens_in } : {}),
       ...(result.tokens_out !== undefined ? { tokens_out: result.tokens_out } : {}),
       ...(result.cost_usd !== undefined ? { cost_usd: result.cost_usd } : {}),
+      // the turn's own tool calls, by name — each call is ALSO its own runs row on the agent (mcp-brain, kind=tool)
+      ...(result.tools_used ? { meta: { tools_used: result.tools_used } } : {}),
     });
   } catch (err) {
     await db.query(`UPDATE inbound_messages SET status = 'failed' WHERE id = $1`, [msg.id]);

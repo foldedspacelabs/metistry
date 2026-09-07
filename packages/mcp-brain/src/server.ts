@@ -7,7 +7,8 @@
 // Trust rules enforced here, not by prompting:
 // - identity comes from the credential (the host's `authenticate`), never
 //   from a tool argument — no tool even has an "agent" parameter;
-// - tasks_* are scoped to the principal's projects: a task outside them is
+// - tasks_* are scoped to the principal's projects (scope.ts — an internal
+//   principal with no list is in every project): a task outside them is
 //   `not_found`, never listed, never claimable, never a dependency;
 // - knowledge_* are gated by the grant tier: `none` → `forbidden` ("not
 //   granted"), drafts invisible at every tier;
@@ -36,6 +37,7 @@ import { captureToInbox } from "./capture.js";
 import { readKnowledge, searchKnowledge, type KnowledgeReader } from "./knowledge.js";
 import { computeNudge } from "./nudge.js";
 import { REPORT_KINDS, submitReport } from "./report.js";
+import { allProjects, memberOf } from "./scope.js";
 import type { AgentPrincipal, Db } from "./types.js";
 
 export interface BrainConfig {
@@ -125,7 +127,7 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
   // --- project scope --------------------------------------------------------
 
   function visible(principal: AgentPrincipal, task: Task | null): task is Task {
-    return task !== null && task.project !== null && principal.projects.includes(task.project);
+    return task !== null && memberOf(principal, task.project);
   }
 
   /** A task outside the principal's projects does not exist for it. */
@@ -210,9 +212,11 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
       async (a) => {
         const limit = a.limit ?? 50;
         if (a.project !== undefined) {
-          if (!principal.projects.includes(a.project)) return fail("not_found");
+          if (!memberOf(principal, a.project)) return fail("not_found");
           return done({ tasks: await tasks.listReady({ project: a.project, limit }) });
         }
+        // every project (the internal rule): one unfiltered read, then the same visibility filter as everywhere else
+        if (allProjects(principal)) return done({ tasks: (await tasks.listReady({ limit: 500 })).filter((t) => visible(principal, t)).slice(0, limit) });
         const all: Task[] = [];
         for (const project of principal.projects) all.push(...(await tasks.listReady({ project, limit })));
         all.sort((x, y) => (x.due ?? "￿").localeCompare(y.due ?? "￿") || x.created_at.getTime() - y.created_at.getTime() || x.id - y.id);
@@ -272,7 +276,7 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
         idempotency_key: z.string().min(1).max(200).optional(),
       },
       async (a) => {
-        if (!principal.projects.includes(a.project)) return fail("forbidden");
+        if (!memberOf(principal, a.project)) return fail("forbidden");
         for (const dep of a.depends_on ?? []) if (!(await scoped(principal, dep))) return fail("not_found", `depends_on task ${dep} not found`);
         const task = await tasks.create(
           {

@@ -16,6 +16,13 @@ export interface ExecOptions {
   timeoutMs?: number | undefined;
   /** Stream the child's stdio to ours (long builds: `docker compose up --build`, `pnpm -r build`). stdout/stderr come back empty. */
   inherit?: boolean | undefined;
+  /**
+   * Written to the child's stdin, then closed. This is how a secret reaches
+   * a subprocess: `security ... -w` prompts, and a prompt reads stdin when
+   * there is no tty — so the value never appears in argv, where every other
+   * process on the machine could read it out of `ps`.
+   */
+  stdin?: string | undefined;
 }
 
 export type Exec = (cmd: string, args: string[], opts?: ExecOptions) => Promise<ExecResult>;
@@ -41,7 +48,7 @@ export const realExec: Exec = (cmd, args, opts = {}) =>
       });
       return;
     }
-    execFile(
+    const child = execFile(
       cmd,
       args,
       { cwd: opts.cwd, env: opts.env ?? process.env, timeout: opts.timeoutMs ?? 15_000, maxBuffer: 8 * 1024 * 1024 },
@@ -52,6 +59,7 @@ export const realExec: Exec = (cmd, args, opts = {}) =>
         resolvePromise({ code, stdout: String(stdout), stderr: String(stderr) });
       },
     );
+    if (opts.stdin !== undefined) child.stdin?.end(opts.stdin);
   });
 
 /** Render a command the way a person would type it, for --dry-run and progress lines (display only — never executed). */

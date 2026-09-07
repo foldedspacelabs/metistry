@@ -1,7 +1,9 @@
-# `metistry` — init, doctor, up, update
+# `metistry` — init, connect-repo, secrets, doctor, up, update
 
 `packages/cli` (`@foldedspacelabs/metistry-cli`, plan §4.16: `init | doctor
-| up | update`) is the operator's front door. All four are real.
+| up | update`, plus the two install verbs the Mac app drives —
+`connect-repo` and `secrets`, `docs/product/desktop-app-plan.md`) is the
+operator's front door. All of them are real.
 
 ```sh
 # from anywhere, no checkout needed for init
@@ -14,6 +16,11 @@ node packages/cli/dist/main.js up --dry-run        # what it would do, runs noth
 node packages/cli/dist/main.js up                  # containers + host jobs, then doctor
 node packages/cli/dist/main.js update --dry-run
 node packages/cli/dist/main.js update              # pull, build, migrate, restart, pin
+
+# the instance repo's remote and the machine's secrets
+node packages/cli/dist/main.js connect-repo https://github.com/you/metistry-instance.git
+node packages/cli/dist/main.js secrets sync --to keychain
+node packages/cli/dist/main.js secrets list
 ```
 
 Package-level detail (flags, resolution order, probe table) lives in
@@ -50,8 +57,8 @@ METISTRY_RECONCILER_URL=http://host.docker.internal:7812
 ```
 
 Then `pnpm -r build && metistry up` — containers, every launchd job,
-doctor (below). Add a private remote to the instance repo
-whenever you like (`git -C <dir> remote add origin …`); the reconciler
+doctor (below). Add a private remote to the instance repo whenever you
+like — `metistry connect-repo <url>`, the next section; the reconciler
 pushes on `METISTRY_PUSH_SCHEDULE` and never blocks on it. Point Obsidian
 at `<dir>/Knowledge` as the vault root.
 
@@ -60,6 +67,133 @@ at `<dir>/Knowledge` as the vault root.
 directory's enclosing checkout — in that order) and otherwise uses the copy
 bundled in the npm package, so a stranger's `npx … init` works without a
 checkout.
+
+## Connecting the instance repo to a remote
+
+`metistry connect-repo <url>` points the instance repo at your private
+remote and leaves credentials the **reconciler** can push with
+unattended — which is the whole difficulty. A push that runs from
+launchd at 03:00 cannot answer a password prompt, so the token has to be
+somewhere git finds by itself, and nowhere else.
+
+```sh
+metistry connect-repo https://github.com/you/metistry-instance.git                 # --auth device (default)
+metistry connect-repo https://github.com/you/metistry-instance.git --auth token   # PAT on stdin
+metistry connect-repo git@github.com:you/metistry-instance.git --auth ssh         # your key is the credential
+metistry connect-repo <url> --instance ~/metistry-instance --force                # repoint an existing origin
+```
+
+The instance repo comes from `--instance`, else `METISTRY_INSTANCE_DIR`
+(read from the checkout's `.env` like every other variable). In order:
+
+1. **`origin`.** Refuses to repoint an existing `origin` without
+   `--force` — silently moving an instance to a different repository is
+   how a vault goes missing.
+2. **Credentials**, before the reachability check (a private repo answers
+   nothing without them). For an `https` remote on macOS:
+   `credential.helper=osxkeychain` is set **at the repo level**, and the
+   token is written into the login Keychain as an internet password for
+   the host (`security add-internet-password -r htps`) — exactly the item
+   `git-credential-osxkeychain` looks for.
+   - `--auth device` runs GitHub's **device-authorization flow**: it
+     prints a user code and `https://github.com/login/device`, then polls
+     (honouring `authorization_pending` and `slow_down`) until you
+     approve in any browser, on any machine. Needs
+     `METISTRY_GITHUB_OAUTH_CLIENT_ID` — see below.
+   - `--auth token` reads a PAT (scope `repo`) from **stdin**, so it is
+     never in argv, never in shell history:
+     `pbpaste | metistry connect-repo <url> --auth token`.
+   - `--auth ssh` writes no credential; `ls-remote` in step 3 is the
+     check that your key or agent works.
+3. **`ls-remote origin`** — reachability, proven rather than assumed.
+4. **`POST /flush`** to the reconciler when `METISTRY_RECONCILER_URL` +
+   `METISTRY_BRIDGE_TOKEN_RECONCILER` are set, so the sole committer
+   lands its queue before anyone else touches the tree (D5). A reconciler
+   that is not running is not an error.
+5. **`push -u origin <branch>`** — one push, so the remote is proven end
+   to end and the branch tracks. From here the reconciler pushes on
+   `METISTRY_PUSH_SCHEDULE` (`docs/ops/reconciler.md`).
+
+Every git and `security` call is an argument array through `execFile` —
+no shell anywhere, so no part of a URL is ever interpreted.
+
+**The token is never printed, never written to `.env`, never put in the
+remote URL or `.git/config`.** The tests assert that negatively: they
+scan every line of output and every argument of every subprocess for the
+token.
+
+### The OAuth App you must register (one-time, by the owner)
+
+`--auth device` needs a GitHub **OAuth App** — GitHub → Settings →
+Developer settings → OAuth Apps → New OAuth App, then tick **Enable
+Device Flow** in its settings. Put its **Client ID** in `.env` as
+`METISTRY_GITHUB_OAUTH_CLIENT_ID`. It is public by design: a device-flow
+app has no client secret, which is what lets an open-source CLI ship the
+flow at all. Until it exists, `--auth token` and `--auth ssh` work
+unchanged.
+
+### The Keychain trade-off, on the record
+
+The credential item is written with `security -A` (any application on
+this login may read it). The alternative — trusting one binary by path —
+is invalidated by every Xcode or Homebrew git update, which would turn
+the reconciler's 03:00 push into a silent failure behind a GUI prompt
+nobody is there to click. The item is still gated by the login keychain
+being unlocked, and anyone running as this user already holds `.env`.
+
+### Linux
+
+There is no Keychain. `connect-repo` skips it and prints the equivalent:
+point `credential.helper` at `store --file ~/.git-credentials` and put
+the token in that file, `chmod 600`. Everything else (origin,
+`ls-remote`, flush, push) is identical.
+
+## Secrets: the Keychain is the store, `.env` is generated
+
+`metistry secrets` makes the macOS login Keychain the canonical home of
+every secret this install holds, under the service name
+`metistry:<VAR>`; `.env` becomes a file generated from it rather than one
+edited by hand (`docs/product/desktop-app-plan.md`, first-run step 4).
+
+```sh
+metistry secrets sync --to keychain               # import .env's secret lines into the Keychain
+metistry secrets sync --to env                    # regenerate .env's secret lines from the Keychain
+metistry secrets mint METISTRY_ASSISTANT_TOKEN    # a new random token, into both
+metistry secrets list                             # names and where each lives — never a value
+```
+
+`--from` says the same thing from the other end (`--from env` ==
+`--to keychain`); one of them is required, because guessing the direction
+of a secret copy is how a Keychain gets overwritten with placeholders.
+
+**What counts as a secret** is the name: anything ending `_TOKEN`,
+`_PASSWORD`, `_PRIVATE`, `_SECRET` or `_KEY`; anything carrying `_TOKEN_`,
+`_PASSWORD_` or `_SECRET_` mid-name (the per-bridge variables are
+`METISTRY_BRIDGE_TOKEN_<NAME>`); plus
+`CLAUDE_CODE_OAUTH_TOKEN` by name. So `METISTRY_VAPID_PRIVATE` is one and
+`METISTRY_VAPID_PUBLIC` is not; `METISTRY_AWS_SECRET_ACCESS_KEY` is one
+and `METISTRY_AWS_ACCESS_KEY_ID` is not. The names themselves come from
+your `.env` plus `.env.example`, including the commented-out
+declarations — that is where a not-yet-set variable is documented.
+
+**`--to env` rewrites in place.** Only the lines that assign a secret
+variable change; every comment, blank line, ordering and non-secret
+assignment survives byte-for-byte (a test asserts exactly that), because
+`.env` also carries hand-written configuration this command must not own.
+A commented declaration (`# METISTRY_GITHUB_TOKEN=`) is uncommented in
+place; a secret the file never named is appended under one marker
+comment. The file is written `0600`.
+
+**Values never travel in argv.** `security ... -w` given as the last
+option prompts, and the prompt reads stdin when there is no tty, so the
+value goes down the child's stdin and never appears in `ps`. `secrets
+list` checks presence *without* `-w`, so there is no code path in it that
+can read a value, let alone print one.
+
+`--env-file <path>` targets a `.env` other than the checkout's, and
+`METISTRY_KEYCHAIN_ACCOUNT` separates two instances on one Mac (default
+account: `metistry`). On Linux `secrets` refuses and points at
+`chmod 600` on `.env` or your own secret manager.
 
 ## Reading a doctor report
 
@@ -323,6 +457,9 @@ operator-facing parts of it happen:
 
 `metistry enroll` (§4.2 passkey enrollment from the host) and `metistry
 create <bridge|collector|…>` (§5 extension scaffolds) are not started.
+`connect-repo --auth device` has been exercised only against an injected
+fetch: the live GitHub round trip waits on the OAuth App being
+registered.
 Release mode is complete end to end (`docs/ops/releases.md`) but has not
 yet consumed a real published release — the first `v*` tag is its first
 live run. The CLI ships no `manifest.yaml`: `core`'s schema has no type

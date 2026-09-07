@@ -1,7 +1,10 @@
 # @foldedspacelabs/metistry-cli
 
 The `metistry` command: `init` stamps a private **instance repo** from the
-product's `seed/`; `doctor` validates every component manifest in a
+product's `seed/`; `connect-repo` points it at a private remote with
+credentials the reconciler can push with unattended; `secrets` makes the
+macOS login Keychain the canonical store for everything `.env` would
+otherwise hold in the clear; `doctor` validates every component manifest in a
 Metistry checkout and probes every bridge, service, container and launchd
 job through the one `check()` contract they all implement; `up` brings a
 checkout + `.env` to running (compose, launchd, doctor); `update` moves it
@@ -70,6 +73,49 @@ When none of those is a checkout, `init` falls back to the copy of `seed/`
 bundled into this package at build time (`files` in `package.json`), so
 `npx … init` works on a machine with no checkout at all. `doctor` does not
 fall back — it tells you to point it at a checkout.
+
+## `metistry connect-repo <url> [--instance <dir>] [--auth device|token|ssh] [--force]`
+
+Sets `origin` on the instance repo (refusing to repoint an existing one
+without `--force`), leaves a credential git can use with no human present,
+verifies the remote with `ls-remote`, flushes the reconciler's commit
+queue if one is running, and pushes the current branch once.
+
+- `--auth device` (default for `https`) runs GitHub's
+  device-authorization flow against the **public** OAuth App client id in
+  `METISTRY_GITHUB_OAUTH_CLIENT_ID`: it prints a user code and
+  `https://github.com/login/device`, polls (handling
+  `authorization_pending` and `slow_down`), and stores the resulting
+  token in the login Keychain as an internet password for the host —
+  the item `git-credential-osxkeychain` looks for. The repo is configured
+  to use that helper.
+- `--auth token` reads a personal access token from **stdin** and stores
+  it the same way. `--auth ssh` stores nothing: your key is the credential
+  and `ls-remote` is the proof.
+- On Linux the Keychain step is skipped and the `credential.helper store`
+  equivalent is printed instead.
+
+No token is printed, logged, written to `.env`, or put in the remote URL.
+Every subprocess is an argument array — there is no shell.
+
+## `metistry secrets sync|mint|list`
+
+```sh
+metistry secrets sync --to keychain               # import .env's secret lines
+metistry secrets sync --to env                    # regenerate them from the Keychain
+metistry secrets mint METISTRY_ASSISTANT_TOKEN    # a new random token, into both
+metistry secrets list                             # names only, never values
+```
+
+Secret-shaped names are those ending `_TOKEN`, `_PASSWORD`, `_PRIVATE`,
+`_SECRET`, `_KEY`, those carrying `_TOKEN_`/`_PASSWORD_`/`_SECRET_`
+mid-name (`METISTRY_BRIDGE_TOKEN_<NAME>`), plus
+`CLAUDE_CODE_OAUTH_TOKEN`; the names come from
+`.env` and `.env.example`, including their commented-out declarations.
+`--to env` rewrites only those lines, in place, `0600`, leaving every
+comment and non-secret line byte-for-byte intact. Values reach `security`
+on stdin, never in argv. `--env-file` targets another `.env`;
+`METISTRY_KEYCHAIN_ACCOUNT` separates two instances on one Mac.
 
 ## `metistry doctor [--json] [--product-dir <checkout>]`
 

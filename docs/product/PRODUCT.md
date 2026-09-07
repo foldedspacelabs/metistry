@@ -430,3 +430,12 @@ your git, on your machine.
   CSP (decision #14, locked by test), and the raw-file route serves only
   images/PDF natively under `no-store`. 53 new tests across package,
   mcp-brain, and console.
+- 2026-09-07 — Proxy/routing-layer research (Quotio, CLIProxyAPI,
+  LiteLLM; `docs/research/2026-09-agent-proxy-routing.md`): "support any
+  agent" is already true through the one MCP door — no adapters, ever;
+  the product-facing addition is `metistry connect <client>`. Provider
+  gateways stay declarative config that can pool accounts but never pick
+  a tier (invariant 4). Third-party proxies that re-present subscription
+  OAuth sessions are explicitly not adopted — a user-protection stance
+  worth stating in launch material. A budgeted gateway is the hosted
+  tier's metering layer.

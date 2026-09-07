@@ -103,7 +103,7 @@ describe.skipIf(!hasDb)("agent registry (integration)", () => {
     expect((await json("POST", "/api/agents", { id: agentId, display_name: "dup" })).status).toBe(409);
 
     const principal = await agents.authenticateAgent(pool, { headers: { authorization: `Bearer ${agentToken}` } });
-    expect(principal).toEqual({ id: agentId, grants: { tier: "none", areas: [] }, projects: [] });
+    expect(principal).toEqual({ id: agentId, kind: "external", grants: { tier: "none", areas: [] }, projects: [] });
     expect(await agents.authenticateAgent(pool, { headers: { authorization: `Bearer ${mintToken()}` } })).toBeNull();
     expect(await agents.authenticateAgent(pool, { headers: {} })).toBeNull();
 
@@ -171,10 +171,56 @@ describe.skipIf(!hasDb)("agent registry (integration)", () => {
     expect((await json("POST", `/api/agents/${agentId}/grants`, { tier: "none" })).status).toBe(404);
 
     const principal = await agents.authenticateAgent(pool, { headers: { authorization: `Bearer ${agentToken}` } });
-    expect(principal).toEqual({ id: agentId, grants: { tier: "areas", areas: ["Knowledge/Areas/Fsl"] }, projects: ["drey"] });
+    expect(principal).toEqual({ id: agentId, kind: "external", grants: { tier: "areas", areas: ["Knowledge/Areas/Fsl"] }, projects: ["drey"] });
     // rejected payloads never reach the audit log; the accepted ones do
     const audit = await pool.query(`SELECT meta->>'op' AS op FROM runs WHERE kind='agent_admin' AND meta->>'agent'=$1 ORDER BY id`, [agentId]);
     expect(audit.rows.map((r) => r.op)).toEqual(["mint", "grant", "projects"]);
+  });
+
+  it("ensureInternalAgent: idempotent upsert from configuration — same token keeps the hash, projects re-sync, revocation clears, kind is internal", async () => {
+    const id = `itest-internal-${suffix}`;
+    const token = mintToken(32);
+    const hashOf = async () => (await pool.query(`SELECT token_hash, kind, grants, projects, revoked_at FROM agents WHERE id = $1`, [id])).rows[0];
+
+    expect(await agents.ensureInternalAgent(pool, id, { token })).toEqual({ id, created: true });
+    const first = await hashOf();
+    expect(first.kind).toBe("internal");
+    expect(first.grants).toEqual({ tier: "areas", areas: [...agents.ASSISTANT_DEFAULT_AREAS] }); // the widest valid read
+    expect(first.projects).toEqual([]); // = every project, by mcp-brain's internal rule
+
+    // the token authenticates like any agent's, and the principal carries the kind
+    const principal = await agents.authenticateAgent(pool, { headers: { authorization: `Bearer ${token}` } });
+    expect(principal).toEqual({ id, kind: "internal", grants: { tier: "areas", areas: [...agents.ASSISTANT_DEFAULT_AREAS] }, projects: [] });
+
+    // second call, same token, new projects: hash unchanged, projects replaced, not "created"
+    expect(await agents.ensureInternalAgent(pool, id, { token, projects: ["drey", "drey"] })).toEqual({ id, created: false });
+    const second = await hashOf();
+    expect(second.token_hash).toBe(first.token_hash);
+    expect(second.projects).toEqual(["drey"]);
+    expect((await agents.authenticateAgent(pool, { headers: { authorization: `Bearer ${token}` } }))?.projects).toEqual(["drey"]);
+
+    // a rotated token in the environment re-keys the row; the old token dies
+    const rotated = mintToken(32);
+    await agents.ensureInternalAgent(pool, id, { token: rotated });
+    expect(await agents.authenticateAgent(pool, { headers: { authorization: `Bearer ${token}` } })).toBeNull();
+    expect((await agents.authenticateAgent(pool, { headers: { authorization: `Bearer ${rotated}` } }))?.id).toBe(id);
+
+    // a UI revoke holds until the configuration says otherwise: ensure clears it (the env var is the switch)
+    expect(await agents.revokeAgent(pool, id)).toBe(true);
+    expect(await agents.authenticateAgent(pool, { headers: { authorization: `Bearer ${rotated}` } })).toBeNull();
+    await agents.ensureInternalAgent(pool, id, { token: rotated });
+    expect((await hashOf()).revoked_at).toBeNull();
+    expect((await agents.authenticateAgent(pool, { headers: { authorization: `Bearer ${rotated}` } }))?.kind).toBe("internal");
+
+    // configuration is validated like the management API: bad areas / projects / short tokens never land
+    await expect(agents.ensureInternalAgent(pool, id, { token: rotated, projects: ["Drey"] })).rejects.toThrow(agents.AgentError);
+    await expect(agents.ensureInternalAgent(pool, id, { token: "short" })).rejects.toThrow(agents.AgentError);
+    await expect(agents.ensureInternalAgent(pool, "Bad Id", { token: rotated })).rejects.toThrow(agents.AgentError);
+    expect(() => agents.validateGrants({ tier: "areas", areas: ["Knowledge/"] })).toThrow(agents.AgentError); // "everything" is not an area; the default list is the widest valid read
+    // the list never carries a hash for internal agents either
+    const list = await (await json("GET", "/api/agents")).json();
+    expect(list.agents.find((a: any) => a.id === id)).toMatchObject({ kind: "internal", revoked: false });
+    expect(JSON.stringify(list)).not.toContain(rotated);
   });
 
   it("rotate invalidates the old token; revoke kills the new one and is audited", async () => {

@@ -112,6 +112,29 @@ describe.skipIf(!hasDb)("POST /mcp (integration)", () => {
     expect((await fetch(`${base}/api/agents`, { headers: auth })).status).toBe(403);
   });
 
+  it("the assistant is an agent like any other: registered from configuration, kind=internal, every project, audited under its own id", async () => {
+    const token = mintToken(32);
+    await agents.ensureInternalAgent(pool, agents.INTERNAL_ASSISTANT_ID, { token, display_name: "itest assistant" });
+    const auth = { authorization: `Bearer ${token}` };
+    expect((await rpc("initialize", initParams, auth)).status).toBe(200);
+    expect(((await (await rpc("tools/list", {}, auth)).json()).result.tools as { name: string }[]).map((t) => t.name)).toEqual([...TOOL_NAMES]);
+
+    // no project list → member of every project: creating in a project nobody granted it succeeds, and it is listed back
+    const project = `itest-hub-${suffix}`;
+    const created = await rpc("tools/call", { name: "tasks_create", arguments: { title: "hub task", project, idempotency_key: `${project}-1` } }, auth);
+    const body = JSON.parse((await created.json()).result.content[0].text.split("\n")[0]);
+    expect(body.task).toMatchObject({ project, created_by: agents.INTERNAL_ASSISTANT_ID });
+    const listed = JSON.parse((await (await rpc("tools/call", { name: "tasks_list_ready", arguments: { project } }, auth)).json()).result.content[0].text.split("\n")[0]);
+    expect(listed.tasks.map((t: { id: number }) => t.id)).toEqual([body.task.id]);
+    // the external agent from above still cannot see it (its projects are [])
+    const other = JSON.parse((await (await rpc("tools/call", { name: "tasks_list_ready", arguments: { project } }, { authorization: `Bearer ${agentToken}` })).json()).result.content[0].text.split("\n")[0]);
+    expect(other).toEqual({ error: { code: "not_found", message: "not found" } });
+    // audit rows land on the agent id, kind=tool — the dashboard/runs view of "what the assistant did with its tools"
+    const runs = await pool.query(`SELECT tool FROM runs WHERE component = $1 AND kind = 'tool' AND meta->'args'->>'project' = $2 ORDER BY id`, [agents.INTERNAL_ASSISTANT_ID, project]);
+    expect(runs.rows.map((r) => r.tool)).toEqual(["tasks_create", "tasks_list_ready"]);
+    await pool.query(`DELETE FROM work WHERE project = $1`, [project]);
+  });
+
   it("a revoked token is dead on /mcp at once", async () => {
     expect(await agents.revokeAgent(pool, agentId)).toBe(true);
     const r = await rpc("tools/list", {}, { authorization: `Bearer ${agentToken}` });

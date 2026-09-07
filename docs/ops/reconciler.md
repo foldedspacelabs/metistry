@@ -75,8 +75,11 @@ place the assistant is named) + `rules.yaml` + config dirs + `.gitignore`
 + `metistry.lock` + one `Instance created` commit the 2026-09-06 bootstrap
 did by hand. It ends by printing the three `.env` lines above — the
 `METISTRY_BRIDGE_TOKEN_RECONCILER` it shows is minted once and written
-nowhere, so copy it then. Add a private remote whenever you like
-(`git -C ~/metistry-instance remote add origin …`); push is best-effort.
+nowhere, so copy it then. Add a private remote whenever you like —
+`metistry connect-repo <url>` sets `origin`, leaves a credential this
+service can push with unattended (macOS Keychain + the `osxkeychain`
+helper), flushes this queue and pushes once (`docs/ops/cli.md`); push
+from then on is best-effort on the schedule below.
 
 Point Obsidian at `Knowledge/` as the vault root, git at the repo root.
 

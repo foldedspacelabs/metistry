@@ -307,6 +307,9 @@ describe("parsers and conventions", () => {
   it("args: flags with values, =, booleans, positionals, --", () => {
     expect(parseArgs(["init", "/x", "--name", "Ada", "--force", "--product-dir=/p"])).toEqual({ command: "init", positional: ["/x"], flags: { name: "Ada", force: true, "product-dir": "/p" } });
     expect(parseArgs(["doctor", "--json"])).toEqual({ command: "doctor", positional: [], flags: { json: true } });
+    // boolean flags never swallow the next positional
+    expect(parseArgs(["init", "--force", "/x"])).toEqual({ command: "init", positional: ["/x"], flags: { force: true } });
+    expect(parseArgs(["doctor", "--json", "--product-dir", "/p"])).toEqual({ command: "doctor", positional: [], flags: { json: true, "product-dir": "/p" } });
     expect(parseArgs(["init", "--", "--weird-dir"])).toEqual({ command: "init", positional: ["--weird-dir"], flags: {} });
     expect(parseArgs([])).toEqual({ command: undefined, positional: [], flags: {} });
   });

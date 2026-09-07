@@ -31,8 +31,9 @@ export interface EngineConfig {
 }
 
 // Kept alongside `tools: []` (brain.ts) as belt and braces: these must never
-// come back through any option the SDK grows later.
-const DISALLOWED = ["Bash", "Write", "Edit", "NotebookEdit", "WebFetch", "WebSearch", "Task", "Agent"];
+// come back through any option the SDK grows later. Shared with the crew
+// runner (crew.ts) so a crew's built-in surface is exactly the assistant's: none.
+export const DISALLOWED = ["Bash", "Write", "Edit", "NotebookEdit", "WebFetch", "WebSearch", "Task", "Agent"];
 
 /** The whole SDK option object for one turn — pure, so the allowlist is testable without a live call. */
 export function buildQueryOptions(cfg: EngineConfig, model: string, resume?: string): Options {

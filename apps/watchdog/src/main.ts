@@ -1,7 +1,8 @@
 import pg from "pg";
 import { intEnv, optionalEnv, requireEnv, startRun, finishRun } from "@foldedspacelabs/metistry-core";
 import { runProbes } from "./probes.js";
-import { alertFailures } from "./alert.js";
+import { alertFailures, isFailure } from "./alert.js";
+import { bridgesFromEnv } from "./bridges.js";
 
 const pool = new pg.Pool({
   host: optionalEnv("METISTRY_DB_HOST", "127.0.0.1"),
@@ -18,16 +19,27 @@ const cfg = {
   stuckProcessingMin: intEnv("METISTRY_WATCHDOG_STUCK_PROC_MIN", 15),
   inflightRunMin: intEnv("METISTRY_WATCHDOG_INFLIGHT_MIN", 15),
   hourlyCostUsd: intEnv("METISTRY_WATCHDOG_HOURLY_USD", 5),
+  // silent-collector: manifests read from the checkout (WorkingDirectory in the launchd plist)
+  collectorsDir: optionalEnv("METISTRY_COLLECTORS_DIR", "collectors"),
+  routinesDir: optionalEnv("METISTRY_ROUTINES_DIR", "routines"),
+  silenceFactor: intEnv("METISTRY_WATCHDOG_SILENCE_FACTOR", 3),
+  startedAt: new Date(),
+  // bridge-degraded + fm-tier-never-fires: the same URL/token pairs the console gets
+  bridges: bridgesFromEnv(),
+  fmMinCaptures: intEnv("METISTRY_WATCHDOG_FM_MIN_CAPTURES", 5),
+  fmWindowHours: intEnv("METISTRY_WATCHDOG_FM_WINDOW_HOURS", 24),
 };
 const intervalSec = intEnv("METISTRY_WATCHDOG_INTERVAL_SEC", 60);
 let lastHeartbeat = 0;
 
-console.log(`watchdog probing every ${intervalSec}s (console: ${cfg.consoleUrl})`);
+console.log(
+  `watchdog probing every ${intervalSec}s (console: ${cfg.consoleUrl}; bridges: ${cfg.bridges.map((b) => `${b.name}@${b.url}`).join(", ") || "none"})`,
+);
 
 setInterval(async () => {
   try {
     const checks = await runProbes(pool, cfg);
-    const failures = checks.filter((c) => c.status !== "ok");
+    const failures = checks.filter(isFailure);
     const raised = await alertFailures(pool, checks);
     for (const f of failures) console.error(`[${f.name}] ${f.status}: ${f.remediation ?? f.probe}`);
     // one heartbeat runs row per hour, plus a row whenever something failed

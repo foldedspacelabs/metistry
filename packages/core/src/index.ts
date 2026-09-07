@@ -73,3 +73,19 @@ export {
   type ProjectMode,
   type ProjectRow,
 } from "./projects.js";
+export {
+  chunkMarkdown,
+  vectorLiteral,
+  EmbedClient,
+  EmbedUnavailableError,
+  CHUNK_TARGET_CHARS,
+  CHUNK_OVERLAP_CHARS,
+  EMBED_DEFAULT_URL,
+  EMBED_DEFAULT_MODEL,
+  EMBED_DEFAULT_DIM,
+  EMBED_DEFAULT_BATCH,
+  type Chunk,
+  type ChunkOptions,
+  type EmbedClientOptions,
+  type FetchLike,
+} from "./embed.js";

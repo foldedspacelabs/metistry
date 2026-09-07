@@ -75,7 +75,7 @@ describe.skipIf(!hasDb)("crews (integration)", () => {
     });
     vault = memoryVault();
     await vault.write(`agents/itest/${crewA}.md`, Buffer.from(crewFile(crewA)), intent);
-    await vault.write(`agents/itest/${crewB}.md`, Buffer.from(crewFile(crewB, { projects: ["itest-p"], scope: ["Knowledge/Resources"] })), intent);
+    await vault.write(`agents/itest/${crewB}.md`, Buffer.from(crewFile(crewB, { projects: ["itest-p"], scope: ["Knowledge/Resources"], autonomy: { max_open_bundles: 2, accept_from: ["user"] } })), intent);
     registry = new CrewRegistry(pool, ["agents"], vault);
     const targets = new TargetRegistry({ env: {} });
     await targets.loadDir(`${root}targets`);
@@ -95,7 +95,7 @@ describe.skipIf(!hasDb)("crews (integration)", () => {
     await pool.end();
   });
 
-  const rowsOf = async () => (await pool.query(`SELECT id, kind, display_name, grants, projects, token_hash, revoked_at FROM agents WHERE id = ANY($1::text[]) ORDER BY id`, [[crewA, crewB]])).rows;
+  const rowsOf = async () => (await pool.query(`SELECT id, kind, display_name, grants, projects, autonomy, token_hash, revoked_at FROM agents WHERE id = ANY($1::text[]) ORDER BY id`, [[crewA, crewB]])).rows;
   const adminRuns = async () => (await pool.query(`SELECT meta->>'agent' AS agent, meta->>'op' AS op, ok FROM runs WHERE kind = 'agent_admin' AND tool = 'crew_sync' AND meta->>'agent' = ANY($1::text[]) ORDER BY id`, [[crewA, crewB, externalId]])).rows;
 
   it("first sync registers each manifest as kind=crew with grants from scope (external shape) and projects; audited under agent_admin", async () => {
@@ -104,8 +104,8 @@ describe.skipIf(!hasDb)("crews (integration)", () => {
     expect(s).toMatchObject({ resynced: [], conflicts: [] });
     const rows = await rowsOf();
     expect(rows.map((r) => r.kind)).toEqual(["crew", "crew"]);
-    expect(rows[0]).toMatchObject({ id: crewA, display_name: `${crewA} (crew, itest)`, grants: { tier: "areas", areas: ["Knowledge/Projects"] }, projects: [], revoked_at: null });
-    expect(rows[1]).toMatchObject({ id: crewB, grants: { tier: "areas", areas: ["Knowledge/Resources"] }, projects: ["itest-p"] });
+    expect(rows[0]).toMatchObject({ id: crewA, display_name: `${crewA} (crew, itest)`, grants: { tier: "areas", areas: ["Knowledge/Projects"] }, projects: [], autonomy: {}, revoked_at: null });
+    expect(rows[1]).toMatchObject({ id: crewB, grants: { tier: "areas", areas: ["Knowledge/Resources"] }, projects: ["itest-p"], autonomy: { max_open_bundles: 2, accept_from: ["user"] } });
     expect(rows.every((r) => /^[0-9a-f]{64}$/.test(r.token_hash))).toBe(true); // a hash of a token nobody holds
     expect((await adminRuns()).filter((r) => r.op === "register").map((r) => r.agent).sort()).toEqual([crewA, crewB].sort());
     // the registry lists them like any agent, minus anything secret
@@ -123,13 +123,13 @@ describe.skipIf(!hasDb)("crews (integration)", () => {
 
   it("a changed manifest re-syncs grants/projects only (hash untouched); a removed one is revoked; a foreign id is a conflict, never overwritten", async () => {
     const before = await rowsOf();
-    await vault.write(`agents/itest/${crewA}.md`, Buffer.from(crewFile(crewA, { scope: ["Knowledge/Projects", "Knowledge/Techniques"], projects: ["itest-q"] })), intent);
+    await vault.write(`agents/itest/${crewA}.md`, Buffer.from(crewFile(crewA, { scope: ["Knowledge/Projects", "Knowledge/Techniques"], projects: ["itest-q"], autonomy: { may_dispatch_to: [crewB] } })), intent);
     await vault.delete(`agents/itest/${crewB}.md`, intent);
     await vault.write(`agents/itest/${externalId}.md`, Buffer.from(crewFile(externalId)), intent); // same slug as the external agent registered above
     const s = await registry.refresh();
     expect(s).toEqual({ registered: [], resynced: [crewA], revoked: [crewB], conflicts: [externalId] });
     const after = await rowsOf();
-    expect(after[0]).toMatchObject({ grants: { tier: "areas", areas: ["Knowledge/Projects", "Knowledge/Techniques"] }, projects: ["itest-q"], token_hash: before[0]!.token_hash, revoked_at: null });
+    expect(after[0]).toMatchObject({ grants: { tier: "areas", areas: ["Knowledge/Projects", "Knowledge/Techniques"] }, projects: ["itest-q"], autonomy: { may_dispatch_to: [crewB] }, token_hash: before[0]!.token_hash, revoked_at: null });
     expect(after[1]!.revoked_at).not.toBeNull();
     const ext = (await pool.query(`SELECT kind, revoked_at FROM agents WHERE id = $1`, [externalId])).rows[0];
     expect(ext).toEqual({ kind: "external", revoked_at: null }); // the external agent's row is exactly as it was

@@ -33,19 +33,31 @@ describe.skipIf(!hasDb)("collectors (real db)", () => {
   });
   afterAll(async () => pool.end());
 
-  it("github-state upserts through the partial unique index, then closes what vanished", async () => {
+  it("github-state upserts through the partial unique index, then closes what vanished (recording merged state)", async () => {
     const page = (items: any[]) => (async (url: string) => ({
       ok: true,
-      json: async () => (url.endsWith("/user") ? { login: "me" } : url.includes("/reviews?") ? [] : url.includes("/pulls?") ? [{ number: 2, user: { login: "other" }, requested_reviewers: [{ login: "me" }] }] : items),
+      json: async () =>
+        url.endsWith("/user")
+          ? { login: "me" }
+          : url.includes("/reviews?")
+            ? []
+            : url.includes("/pulls?")
+              ? [{ number: 2, user: { login: "other" }, requested_reviewers: [{ login: "me" }] }]
+              : /\/pulls\/\d+$/.test(url)
+                ? { merged_at: "2026-09-03T00:00:00Z" } // #2 vanishes on the rerun below: it was merged
+                : items,
     })) as unknown as typeof fetch;
     const ctx = { githubToken: "t", githubRepos: ["itest/repo"] };
     const base = { state: "open", html_url: "", updated_at: "2026-09-01T00:00:00Z" };
     await githubState(pool, { ...ctx, fetchFn: page([{ number: 1, title: "one", ...base }, { number: 2, title: "two", pull_request: {}, ...base }]) });
     await githubState(pool, { ...ctx, fetchFn: page([{ number: 1, title: "one (renamed)", ...base }]) }); // rerun: upsert, not duplicate
-    const { rows } = await pool.query(`SELECT external_ref, title, status, kind, meta->>'needs_my_review' AS nmr FROM work WHERE external_ref LIKE 'gh:itest/%' ORDER BY external_ref`);
+    const { rows } = await pool.query(
+      `SELECT external_ref, title, status, kind, meta->>'needs_my_review' AS nmr, meta->>'merged' AS merged, meta->>'merged_at' AS merged_at
+       FROM work WHERE external_ref LIKE 'gh:itest/%' ORDER BY external_ref`,
+    );
     expect(rows).toEqual([
-      { external_ref: "gh:itest/repo#1", title: "one (renamed)", status: "open", kind: "issue", nmr: null },
-      { external_ref: "gh:itest/repo#2", title: "two", status: "closed", kind: "pr", nmr: "true" },
+      { external_ref: "gh:itest/repo#1", title: "one (renamed)", status: "open", kind: "issue", nmr: null, merged: null, merged_at: null },
+      { external_ref: "gh:itest/repo#2", title: "two", status: "closed", kind: "pr", nmr: "true", merged: "true", merged_at: "2026-09-03T00:00:00Z" },
     ]);
   });
 

@@ -61,17 +61,29 @@ describe("weekly review", () => {
     expect(text).not.toContain("📅 Last month");
   });
 
-  it("projects: per area/project counts, PRs from gh: refs, blocked items with age", async () => {
+  it("projects: per area/project counts, PRs from gh: refs (merged vs. closed said separately), blocked items with age", async () => {
     const { db, sent } = fakeDb([
       ["AS age_days", [{ title: "EventKit signing", name: "metistry", age_days: "12" }]],
       ["AS tasks_created", [
-        { name: "metistry", tasks_created: "4", tasks_closed: "6", prs_opened: "3", prs_closed: "2", blocked: "1" },
-        { name: "home", tasks_created: "1", tasks_closed: "0", prs_opened: "0", prs_closed: "0", blocked: "0" },
+        { name: "metistry", tasks_created: "4", tasks_closed: "6", prs_opened: "3", prs_merged: "1", prs_closed: "1", blocked: "1" },
+        { name: "home", tasks_created: "1", tasks_closed: "0", prs_opened: "0", prs_merged: "0", prs_closed: "0", blocked: "0" },
       ]],
     ]);
     await run(db, { now });
-    expect(sent[0]).toContain("• metistry: 4 tasks created, 6 closed; 3 PRs opened, 2 closed; 1 blocked\n    blocked: EventKit signing (12d)");
+    expect(sent[0]).toContain("• metistry: 4 tasks created, 6 closed; 3 PRs opened, 1 merged, 1 closed; 1 blocked\n    blocked: EventKit signing (12d)");
     expect(sent[0]).toContain("• home: 1 task created, 0 closed; 0 PRs opened, 0 closed\n");
+  });
+
+  it("projects: all-merged and all-closed-without-merge each omit the other word", async () => {
+    const { db, sent } = fakeDb([
+      ["AS tasks_created", [
+        { name: "all-merged", tasks_created: "0", tasks_closed: "0", prs_opened: "2", prs_merged: "2", prs_closed: "0", blocked: "0" },
+        { name: "all-closed", tasks_created: "0", tasks_closed: "0", prs_opened: "1", prs_merged: "0", prs_closed: "1", blocked: "0" },
+      ]],
+    ]);
+    await run(db, { now });
+    expect(sent[0]).toContain("• all-merged: 0 tasks created, 0 closed; 2 PRs opened, 2 merged\n");
+    expect(sent[0]).toContain("• all-closed: 0 tasks created, 0 closed; 1 PR opened, 1 closed\n");
   });
 
   it("decisions: counts by outcome, top denied reasons from feedback; pending is a count and a link (D10), never the list", async () => {

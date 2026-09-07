@@ -71,6 +71,29 @@ describe("crew manifest schema", () => {
     expect(errorsOf({ ...researcher, budget_usd_per_run: -1 })).toMatch(/budget_usd_per_run/);
     expect(errorsOf({ ...researcher, budget_usd_per_run: 51 })).toMatch(/budget_usd_per_run/);
   });
+
+  it("autonomy: accepts the §4.21 narrowing block and fills nothing when absent", () => {
+    const withAutonomy = { ...researcher, autonomy: { may_dispatch_to: ["scout"], accept_from: ["scout", "user"], max_open_bundles: 3 } };
+    const r = validateManifest(withAutonomy);
+    expect(r.ok).toBe(true);
+    if (!r.ok || r.manifest.type !== "agent") return;
+    expect(r.manifest.autonomy).toEqual({ may_dispatch_to: ["scout"], accept_from: ["scout", "user"], max_open_bundles: 3 });
+    const bare = validateManifest(researcher);
+    expect(bare.ok && bare.manifest.type === "agent" && bare.manifest.autonomy).toBeUndefined();
+  });
+
+  it("autonomy: rejects an unknown key instead of silently dropping it (the narrowing must not become a no-op)", () => {
+    expect(errorsOf({ ...researcher, autonomy: { may_dispatc_to: ["scout"] } })).toMatch(/autonomy/);
+    expect(errorsOf({ ...researcher, autonomy: { may_dispatch_to: ["Scout"] } })).toMatch(/autonomy/); // not an agent id
+    expect(errorsOf({ ...researcher, autonomy: { accept_from: ["nobody!"] } })).toMatch(/autonomy/);
+    expect(errorsOf({ ...researcher, autonomy: { max_open_bundles: 0 } })).toMatch(/autonomy/); // ≥1: 0 would mean "narrowed to nothing", spell that by omission
+    expect(errorsOf({ ...researcher, autonomy: { max_open_bundles: 1.5 } })).toMatch(/autonomy/);
+  });
+
+  it("refuses an unknown top-level key instead of stripping it (schema is strict for the agent type)", () => {
+    expect(errorsOf({ ...researcher, autonomys: { max_open_bundles: 1 } })).toMatch(/autonomys|unrecognized/i);
+    expect(errorsOf({ ...researcher, bogus_field: true })).toMatch(/bogus_field|unrecognized/i);
+  });
 });
 
 describe("tool groups → allowlist", () => {

@@ -14,7 +14,8 @@
   "engines": { "node": ">=22" },
   "dependencies": {
     "@foldedspacelabs/metistry-core": "workspace:*",
-    "pg": "^8.16.0"
+    "pg": "^8.16.0",
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",

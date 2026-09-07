@@ -61,6 +61,27 @@ function normalize(text) {
 
 const ORDER = ["Major Changes", "Minor Changes", "Patch Changes"];
 
+/** The product-level package: fixed mode gives every package the same
+ * version section, so its CHANGELOG.md is the one a reader means by "the
+ * changelog for this release". */
+export const CLI_PACKAGE_NAME = "@foldedspacelabs/metistry-cli";
+
+/**
+ * Which entries the release body's bullets come from: the CLI package's
+ * own `## <version>` section, when `changeset version` actually wrote one
+ * for this release. Falls back to every package's section (still
+ * deduplicated by `renderReleaseNotes`) when there is no CLI entry, or its
+ * section for this version is missing or blank — e.g. a version the CLI
+ * itself carries no changeset for.
+ * @param {{name: string, changelog: string}[]} entries
+ * @param {string} version
+ */
+export function notesEntries(entries, version) {
+  const cli = entries.find((e) => e.name === CLI_PACKAGE_NAME);
+  if (cli && sectionFor(cli.changelog, version).trim()) return [cli];
+  return entries;
+}
+
 /**
  * @param {{version: string, entries: {name: string, changelog: string}[],
  *          assets?: string[], images?: string[], repo?: string}} opts
@@ -68,7 +89,7 @@ const ORDER = ["Major Changes", "Minor Changes", "Patch Changes"];
 export function renderReleaseNotes(opts) {
   const version = String(opts.version).replace(/^v/, "");
   const merged = new Map();
-  for (const e of opts.entries ?? []) {
+  for (const e of notesEntries(opts.entries ?? [], version)) {
     for (const g of groupsOf(sectionFor(e.changelog, version))) {
       const into = merged.get(g.heading) ?? [];
       for (const item of g.items) if (!into.includes(item)) into.push(item);

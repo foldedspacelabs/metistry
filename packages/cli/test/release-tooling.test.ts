@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 import { describe, expect, it } from "vitest";
-import { groupsOf, renderReleaseNotes, sectionFor } from "../../../ops/release/changelog.mjs";
+import { CLI_PACKAGE_NAME, groupsOf, notesEntries, renderReleaseNotes, sectionFor } from "../../../ops/release/changelog.mjs";
 import { renderAppcast, UNSIGNED_PLACEHOLDER } from "../../../ops/release/appcast.mjs";
 import { runtimeAssetName } from "../src/release.js";
 
@@ -94,6 +94,48 @@ describe("release notes from the changesets", () => {
   });
 });
 
+describe("notesEntries: the CLI package's own section, or a fallback", () => {
+  // Two versions in the fixture, so picking the right one is actually tested.
+  const CLI_WITH_BOTH = `# @foldedspacelabs/metistry-cli
+
+## 0.2.0
+
+### Minor Changes
+
+- this version's story
+
+## 0.1.0
+
+### Minor Changes
+
+- an older story that must not leak into 0.2.0's notes
+`;
+  const OTHER = { name: "@foldedspacelabs/metistry-other", changelog: "# other\n\n## 0.2.0\n\n### Patch Changes\n\n- unrelated package bump\n" };
+
+  it("picks the CLI package's section for the tagged version", () => {
+    const entries = [{ name: CLI_PACKAGE_NAME, changelog: CLI_WITH_BOTH }, OTHER];
+    const picked = notesEntries(entries, "0.2.0");
+    expect(picked).toEqual([entries[0]]);
+    expect(sectionFor(picked[0]!.changelog, "0.2.0")).toContain("this version's story");
+    expect(sectionFor(picked[0]!.changelog, "0.2.0")).not.toContain("older story");
+  });
+
+  it("falls back to every package's section when the CLI has no section for this version", () => {
+    const entries = [{ name: CLI_PACKAGE_NAME, changelog: CLI_WITH_BOTH }, OTHER];
+    expect(notesEntries(entries, "9.9.9")).toEqual(entries);
+  });
+
+  it("falls back when the CLI's section for this version is blank", () => {
+    const cliBlank = { name: CLI_PACKAGE_NAME, changelog: "# @foldedspacelabs/metistry-cli\n\n## 0.5.0\n\n## 0.4.0\n\n### Patch Changes\n\n- x\n" };
+    const entries = [cliBlank, OTHER];
+    expect(notesEntries(entries, "0.5.0")).toEqual(entries);
+  });
+
+  it("falls back when there is no CLI package entry at all", () => {
+    expect(notesEntries([OTHER], "0.2.0")).toEqual([OTHER]);
+  });
+});
+
 describe("Sparkle appcast", () => {
   const item = {
     version: "0.2.0",
@@ -139,7 +181,7 @@ describe("Sparkle appcast", () => {
 describe(".github/workflows/release.yml", () => {
   const wf = parseYaml(repoFile(".github/workflows/release.yml")) as {
     on: { push: { tags: string[] } };
-    jobs: Record<string, { needs?: string | string[]; if?: unknown; permissions?: Record<string, string>; strategy?: { matrix?: { app?: string[]; include?: { target: string }[] } } }>;
+    jobs: Record<string, { needs?: string | string[]; if?: unknown; permissions?: Record<string, string>; outputs?: Record<string, string>; strategy?: { matrix?: { app?: string[]; include?: { target: string }[] } } }>;
   };
 
   it("fires on a v* tag and gates everything on the verify job", () => {
@@ -164,11 +206,23 @@ describe(".github/workflows/release.yml", () => {
     const text = repoFile(".github/workflows/release.yml");
     expect(text).toContain("--provenance");
     expect(text).toContain('NPM_CONFIG_PROVENANCE: "true"');
-    expect(text).toContain("NPM_TOKEN is not set — skipping the npm publish");
+    expect(text).toContain("npm publish skipped — NPM_TOKEN is not set");
+    // a 4xx from the registry is a skip too, not a silent success — it says so and reports it
+    expect(text).toContain("::notice::npm publish skipped — the registry rejected it with a 4xx");
+    expect(text).toContain('echo "published=true"');
+    expect(wf.jobs.npm!.outputs).toMatchObject({ published: "${{ steps.publish.outputs.published }}" });
     expect(wf.jobs.images!.permissions).toMatchObject({ packages: "write" });
     expect(wf.jobs.images!.strategy!.matrix!.app).toEqual(["console", "assistant", "reconciler"]);
     // the watchdog is a launchd host job, not an image — it ships in the pack
     expect(wf.jobs.images!.strategy!.matrix!.app).not.toContain("watchdog");
+    expect(wf.jobs.images!.outputs).toMatchObject({ published: "${{ steps.login.outcome == 'success' }}" });
+  });
+
+  it("tells a reader which of npm/images actually got published, not just that the workflow succeeded", () => {
+    const text = repoFile(".github/workflows/release.yml");
+    expect(text).toContain("NPM_PUBLISHED: ${{ needs.npm.outputs.published }}");
+    expect(text).toContain("IMAGES_PUBLISHED: ${{ needs.images.outputs.published }}");
+    expect(text).toContain("**Published:**");
   });
 
   it("carries the DMG and appcast jobs as disabled, documented stubs — there is no app yet", () => {

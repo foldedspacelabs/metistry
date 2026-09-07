@@ -2,17 +2,22 @@
 
 The one MCP surface an external agent uses to work *with* a Metistry
 instance — a standalone Claude session, a coding agent, another vendor's
-agent, any MCP client. Eleven tools over Streamable HTTP:
+agent, any MCP client — and the instance's own assistant. Twelve tools
+over Streamable HTTP:
 
 - **in:** `capture` (a note or file into the inbox), `report` (a finding,
   decision, gotcha, or progress note into the proposal queue);
 - **shared work:** `tasks_list_ready`, `tasks_claim`, `tasks_heartbeat`,
   `tasks_update`, `tasks_release`, `tasks_create`, `tasks_mine` — thin
   adapters over [`@foldedspacelabs/metistry-tasks`](../tasks);
-- **out, under grants:** `knowledge_search`, `knowledge_read`.
+- **out, under grants:** `knowledge_search`, `knowledge_read`;
+- **the one writer:** `knowledge_write` — `kind: internal` principals only
+  (the owner's own assistant); everyone else is told "not granted".
 
-Agents **propose**; they never write knowledge. Everything they send lands
-as a row the user triages, with provenance stamped from the credential.
+External agents **propose**; they never write knowledge. Everything they
+send lands as a row the user triages, with provenance stamped from the
+credential. The assistant writes — through the host's vault bridge, as a
+commit in its own name, with provenance stamped into the note.
 
 ## What the bridge enforces (not what it asks for)
 
@@ -22,6 +27,7 @@ as a row the user triages, with provenance stamped from the credential.
 | Tasks are project-scoped | `tasks_*` only see tasks whose `project` is in the principal's membership. Anything else is `not_found` — never listed, never claimable, never usable as a dependency. Creating in a project you are not in is `forbidden`. **The internal rule** (`scope.ts`): a principal with `kind: "internal"` — the instance's own assistant, whose scope comes from configuration in the user's hand, not from a grant it asked for — and an *empty* `projects` list is a member of every project; a non-empty list narrows it like any other agent. External + empty is still none. Tasks with no project are invisible to everyone, internal included. |
 | Knowledge is tiered, default-deny | `none` → every knowledge call returns `{ error: { code: "forbidden", message: "not granted" } }` — *not* "not found", so absence of permission never looks like absence of knowledge. `index` → titles + one-line descriptions. `areas` → search and full read under the granted `Knowledge/...` prefixes only. |
 | Drafts are invisible | `status: draft` notes (the `draft` column on `knowledge_files`) are excluded by a `WHERE` clause at every tier. |
+| One writer | `knowledge_write` is `forbidden` for any principal that is not `kind: "internal"`, whatever the path. For the internal principal: the path must be `Knowledge/...` (no traversal, no `knowledge/`) **and** inside its own `areas` grant — writes never reach wider than reads; the host's writer (Metistry's reconciler bridge) refuses the protected paths (`identity.yaml`, `rules.yaml`, `queries/`, …) behind that. Markdown gets `source: <agent id>` (the credential, never an argument) and `updated: <today>` merged into its frontmatter, line by line, nothing else invented. Compare-and-swap on `expected_sha256` (from `knowledge_read`); a lost race is `conflict` with the current hash in the message. No delete, no rename. |
 | Text boundary | Every string that came out of the database passes `sanitizeForAgent` from core before it is rendered: bidi overrides and zero-width characters stripped, no leading `/`. The stored row is untouched. |
 | Every call is audited | One two-phase `runs` row per tool call: `component = <agent id>`, `kind = 'tool'`, `tool = <name>`, with clipped arguments and, for knowledge calls, the tier and areas it was judged under. Refusals are logged too. |
 | Idempotent writes | `report` on `idempotency_key` (unique partial index, safe under concurrency) and near-duplicate suppression (same agent + same title within 24 h → the existing id). `tasks_create` on its `idempotency_key` via the tasks module. |
@@ -58,7 +64,8 @@ optional nudge line. Errors set `isError` and carry core's uniform envelope
 | `tasks_create` | `title`, `project`, `area?`, `depends_on?: number[]`, `due?` (YYYY-MM-DD), `idempotency_key?` | `{ task }` |
 | `tasks_mine` | — | `{ tasks }` you hold |
 | `knowledge_search` | `query`, `limit?` | `{ tier, hits: [{ path, title, description }] }` |
-| `knowledge_read` | `path` (`Knowledge/...`) | `{ path, title, content }` |
+| `knowledge_read` | `path` (`Knowledge/...`) | `{ path, title, content, sha256 }` — the hash is the `expected_sha256` for a following write |
+| `knowledge_write` | `path` (`Knowledge/...`), `content` (the whole file), `message` (commit message), `expected_sha256?` (from `knowledge_read`; `""` = create only; omit = unconditional) | `{ path, sha256, bytes, created, queued: true, provenance: { source, updated } \| null }` — internal principals only |
 | `artifact_publish` | `project`, `slug`, `files: [{ path, content \| content_base64 }]`, `expected_current_version?` (id or `null` = must be new), `idempotency_key`, `message` | `{ artifact, version, links: { artifact, version, review }, deduplicated }` — `conflict` on a stale expected version |
 | `artifact_get` | `id`, `version?`, `path?` | `{ artifact, version, links, versions, threads, file? }` |
 | `artifact_list` | `project?`, `limit?` | `{ artifacts }` across your projects |
@@ -81,7 +88,7 @@ values)` shape.
 import { createServer } from "node:http";
 import pg from "pg";
 import { TasksService } from "@foldedspacelabs/metistry-tasks";
-import { createBrainServer } from "@foldedspacelabs/metistry-mcp-brain";
+import { createBrainServer, vaultBridgeWriter } from "@foldedspacelabs/metistry-mcp-brain";
 
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 const brain = createBrainServer({
@@ -92,6 +99,9 @@ const brain = createBrainServer({
   authenticate: async (req) => lookupAgentByBearer(req.headers.authorization), // → { id, kind?, grants: { tier, areas }, projects } | null
   // Optional: a vault read path. Without it, knowledge_read answers `not_available`.
   readKnowledge: async (path) => readFileOrNull(path),
+  // Optional: a vault write path for internal principals. Metistry uses `vaultBridgeWriter({ url, token })`
+  // (the reconciler's POST /vault/write with a commit intent); any `KnowledgeWriter` will do.
+  writeKnowledge: vaultBridgeWriter({ url: process.env.VAULT_BRIDGE_URL!, token: process.env.VAULT_BRIDGE_TOKEN! }),
 });
 
 createServer((req, res) => {
@@ -109,13 +119,14 @@ createServer((req, res) => {
 | `tasks` | a `TasksService` over the same database |
 | `inboxDir` | where `capture` writes files (the triage row references them) |
 | `readKnowledge?` | `(path) => Promise<string \| null>` — absent → `knowledge_read` is `not_available` and `check()` reports `degraded` |
+| `writeKnowledge?` | `KnowledgeWriter` — `({ path, content, intent, expected_sha256? }) => Promise<VaultWriteOutcome>`; absent → `knowledge_write` is `not_available` and `check()` reports `degraded`. `vaultBridgeWriter({ url, token })` speaks the reconciler's wire contract (bearer, envelope, CAS, one read on `409` for the current hash). |
 | `artifacts?` | an `ArtifactsService` (`@foldedspacelabs/metistry-artifacts`) — absent → every `artifact_*` tool is `not_available` |
 | `leaseWarningSeconds?` | nudge threshold for a held lease (default 120) |
 | `version?` | reported to clients as the server version |
 
 The returned `BrainServer` has `handle(req, res)`, `check()` (the §4.3
 behavioral probe: selects the columns every tool depends on and runs the
-tasks module's own check), and `tools` (the seventeen names, in manifest
+tasks module's own check), and `tools` (the eighteen names, in manifest
 order).
 
 **Transport.** Stateless Streamable HTTP: a fresh MCP server per request,
@@ -159,13 +170,16 @@ server — see `docs/ops/assistant-tools.md`.
 ## Test
 
 `vitest run` in this package: unit tests with a fake executor (manifest ↔
-tool-list lock, nudge arithmetic, the reader-less `not_available` path)
-and, when `METISTRY_DB_PASSWORD` is set, the misuse suite against the
-scratch database through the real MCP client: 401 envelopes, cross-project
-`not_found`, tier `none` → `not granted`, draft exclusion, nudge
-appearing and disappearing, report dedupe, sanitizer on the way out, one
-`runs` row per call. From the repo root, `pnpm test` provisions the
-scratch database first.
+tool-list lock, nudge arithmetic, the reader-less `not_available` path,
+the one-writer / path / grant rules of `knowledge_write`, provenance
+stamping byte for byte, and the bridge client against a fake that speaks
+the reconciler's contract) and, when `METISTRY_DB_PASSWORD` is set, the
+misuse suite against the scratch database through the real MCP client:
+401 envelopes, cross-project `not_found`, tier `none` → `not granted`,
+draft exclusion, nudge appearing and disappearing, report dedupe,
+sanitizer on the way out, the write round trip with CAS, one `runs` row
+per call. From the repo root, `pnpm test` provisions the scratch database
+first.
 
 ## License
 

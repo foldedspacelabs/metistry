@@ -288,3 +288,24 @@ your git, on your machine.
   `external_ref` binds it, and `github-state` already closes the task when
   the issue closes. Every dispatch logs a `runs` row with the target's cost
   profile, so per-target spend is one named query away.
+- 2026-09-06 — **`mcp-brain` shipped: the one MCP surface every external
+  agent uses** (§4.11 unified interface, §4.19 hub tools, §4.20 adapters).
+  `@foldedspacelabs/metistry-mcp-brain` mounts at the console's `POST /mcp`
+  (Streamable HTTP, stateless, per-agent bearer → principal from the
+  registry) and exposes eleven eager tools: `capture` + `report` in,
+  `tasks_*` (seven thin adapters over the tasks module) for shared work,
+  `knowledge_search` + `knowledge_read` out under the user's grant tiers.
+  Safety, enforced at the tool: identity is stamped from the credential
+  (no tool has an agent argument); tasks outside the caller's projects
+  are `not_found` — never listed, never claimable, never a dependency;
+  tier `none` is told "not granted", never "not found"; draft notes are
+  invisible at every tier; every string rendered to an agent passes a new
+  core sanitizer (bidi/zero-width stripped, no leading `/`); every call —
+  refusals included — is one `runs` row on the agent; reports are
+  idempotent and near-duplicate-suppressed; secret-named fields never
+  reach the queue. Tool-result nudges (§4.21) give pull-only agents an
+  attention channel with no model involved. Any MCP client can now work a
+  Metistry instance's task list and propose to its knowledge with one
+  token — a capture-only agent needs no grant at all. Note contents are
+  not yet readable in the container (`knowledge_read` → `not_available`
+  until the knowledge module lands); the index is.

@@ -1,0 +1,32 @@
+name: brain
+type: bridge
+description: The one MCP surface every external agent uses — capture/report in, scoped tasks + knowledge out (§4.11, §4.19, §4.20)
+transport: http
+port: 8080               # no bind of its own: mounted at the console's POST /mcp, so this is the console's port
+runs_on: container
+requires_tcc: []
+discovery: eager         # 11 tools — well under the lazy threshold (>20 tools / >5k definition tokens)
+degrades: absent
+exposes:
+  - name: capture
+    description: Drop a note or file into the inbox as a proposal (source_agent stamped from the credential)
+  - name: report
+    description: Submit a finding/decision/gotcha as a `report` proposal — idempotent on idempotency_key, same-title-within-24h suppressed
+  - name: tasks_list_ready
+    description: Unblocked, unclaimed tasks in the caller's projects
+  - name: tasks_claim
+    description: Atomically claim a task (assignee + status + lease in one operation)
+  - name: tasks_heartbeat
+    description: Renew the lease on a held task
+  - name: tasks_update
+    description: Change status or append a note on a held task
+  - name: tasks_release
+    description: Hand a held task back to the list
+  - name: tasks_create
+    description: Create a task in one of the caller's projects (idempotent on idempotency_key)
+  - name: tasks_mine
+    description: Everything the caller currently holds
+  - name: knowledge_search
+    description: Search the knowledge index (titles + one-line descriptions) within the caller's grant tier
+  - name: knowledge_read
+    description: Read one settled note under a granted Knowledge/ area prefix

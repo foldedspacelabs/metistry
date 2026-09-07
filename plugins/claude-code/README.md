@@ -35,11 +35,24 @@ token.
 | Variable | Meaning |
 | --- | --- |
 | `METISTRY_URL` | The instance origin, e.g. `https://mac-studio.example.ts.net` |
-| `METISTRY_OWNER_TOKEN` | An owner token minted on the instance (below) |
+| `METISTRY_OWNER_TOKEN` | A bearer for `/capture`: an **agent token** (recommended) or an owner token (below). The variable name predates the agent registry; either class works. |
 | `METISTRY_CAPTURE_ON_STOP` | `1` enables the session-end summary hook. Default off. |
 
-Mint a token on the instance host (it is capture-only — it cannot manage
-devices or triage, so a leaked token leaks capture ability, not control):
+**Recommended: an agent token from the registry.** Register the session
+as an agent on the instance (owner session, `POST /api/agents`) and use
+the token it returns once. Captures then carry the agent's id as
+`source_agent` and land as `external`-trust proposals — the user can see
+*which* agent said what, revoke or rotate that one credential without
+touching anything else, and grant it project membership or a knowledge
+read tier later. The same token also mounts the instance's `mcp-brain`
+surface in Claude Code (`claude mcp add --transport http metistry
+https://<origin>/mcp --header "Authorization: Bearer <token>"`), which
+adds `report`, the shared task list, and scoped knowledge search to the
+session — see `packages/mcp-brain/README.md`.
+
+The older alternative is an owner token minted on the instance host (also
+capture-only — it cannot manage devices or triage — but captures made
+with it are attributed to the owner, not to an agent):
 
 ```
 docker compose exec -e METISTRY_ORIGIN=https://<origin> console node scripts/enroll.mjs --owner-token "claude-code laptop"

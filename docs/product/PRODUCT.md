@@ -258,3 +258,18 @@ your git, on your machine.
   freshness-stamped from the `{rows, as_of}` envelope; every value is
   output-encoded (CRIT-7). Seed queries now execute against the migrated
   schema in CI, so a column typo fails the build, not the dashboard.
+- 2026-09-06 — **Weekly review routine** (Phase 5; plan §5 maintenance
+  cadence): one `@weekly` message covering the last 7 days — projects
+  (tasks and PRs opened/closed per area, blocked items with age), the
+  decisions you made (by outcome, top denied reasons from your feedback),
+  what is still pending as a count and a link (D10: never the full list),
+  agents (reports, tasks claimed/closed, tool calls, spend, last seen —
+  identity stamped server-side, never self-declared), spend (assistant
+  by model tier, labelled API-equivalent; AWS total and top services),
+  system health (collector runs, silent collectors flagged, watchdog
+  alerts, inbox backlog), and next week (due dates, calendar when the
+  EventKit bridge is connected). Unlike the daily brief it always goes
+  out — the user asked for a cadence — and an empty section says so in one
+  honest line. The first review of each month adds last month's spend by
+  tier: §5's subscription-headroom check. Model-free end to end
+  (invariant 4); proven against real Postgres in CI.

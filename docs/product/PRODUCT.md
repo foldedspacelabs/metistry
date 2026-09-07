@@ -552,3 +552,15 @@ your git, on your machine.
   half-apply. The DMG and the Sparkle appcast are disabled stubs with
   their secrets documented; the appcast generator refuses to emit an
   unsigned feed. Runbook: `docs/ops/releases.md`.
+- 2026-09-07 — Safety mechanism shipped: **the engine runs sandboxed on
+  the host.** Decision #15's Docker-free shape is built
+  (`deployment.yaml`: `compose | launchd`), and with it the mitigation
+  it owed. Under the launchd shape the assistant is not a container, so
+  a `sandbox-exec` profile takes that role — deny by default; read its
+  own code and runtime, write only its own state directory, exec only
+  node (no shell), reach only the console on loopback and TLS. Misuse
+  tests launch a real process under the real profile and prove the four
+  denials rather than asserting them in prose. The one-click Mac
+  install now costs the user nothing in isolation compared with Docker,
+  which is what makes "no Docker Desktop" an honest claim rather than a
+  trade. `docs/ops/deployment-shapes.md`.

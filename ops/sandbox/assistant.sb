@@ -100,9 +100,9 @@
 
 ;; 2. Anthropic's API over TLS. sandbox-exec filters by port, not by
 ;;    hostname, so this reads as "outbound TLS" — the host allowlist itself
-;;    is configuration (METISTRY_ASSISTANT_ALLOWED_HOSTS, documented in
-;;    docs/ops/deployment-shapes.md) and is enforced at the SDK/proxy layer,
-;;    not here. Name-level enforcement arrives with App Sandbox.
+;;    is documentation (ANTHROPIC_HOSTS in packages/cli/src/sandbox.ts,
+;;    docs/ops/deployment-shapes.md) — NOT enforced here, and not enforced
+;;    anywhere else today. Name-level enforcement arrives with App Sandbox.
 (allow network-outbound (remote tcp "*:443"))
 
 ;; DNS resolution goes through mDNSResponder, not a socket to :53.

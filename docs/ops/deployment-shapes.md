@@ -217,11 +217,12 @@ reports "docker not found" as a finding.
 Logs, under launchd: `/tmp/metistry-{db,console,assistant,reconciler,watchdog}.log`.
 Sandbox denials: `log stream --predicate 'sender == "Sandbox"'`.
 
-## Known follow-up
+## `metistry update` under either shape
 
-`metistry update` restarts the host jobs whose code changed, and it asks
-for the default (`compose`) set — so on a launchd install it will not
-kickstart `console`, `assistant` or `db` after a build. They keep
-running the old code until the next `metistry up`, which is correct but
-manual. Passing the loaded shape through `update` is a one-line change
-left to the PR that owns that file.
+`update` loads the same `deployment.yaml` and asks for **that shape's**
+plist set, so on a launchd install `console`, `assistant` and `db` are
+kickstarted along with the other host jobs when their code changes —
+they do not keep running old code until the next `metistry up`. It also
+skips `docker compose` entirely under `launchd`, the way `up` does; the
+restart section says so in the plan. Postgres itself is untouched by an
+update: the data directory and the managed conf block are `up`'s job.

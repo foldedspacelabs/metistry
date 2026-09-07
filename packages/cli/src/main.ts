@@ -7,7 +7,10 @@ import { realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { doctor, renderTable, type DoctorDeps } from "./doctor.js";
 import { loadDotEnv, productVersion, resolveProductDir, resolveSeedDir } from "./env.js";
+import { realExec, type Exec } from "./exec.js";
 import { init } from "./init.js";
+import { up } from "./up.js";
+import { gitHead, update } from "./update.js";
 
 export interface ParsedArgs {
   command: string | undefined;
@@ -16,7 +19,7 @@ export interface ParsedArgs {
 }
 
 /** Flags that never take a value, so `metistry init --force <dir>` keeps its dir. */
-export const BOOLEAN_FLAGS = new Set(["force", "json", "help"]);
+export const BOOLEAN_FLAGS = new Set(["force", "json", "help", "dry-run", "no-launchd", "no-compose", "skip-build", "skip-migrate"]);
 
 /** `--flag`, `--flag value`, `--flag=value`; everything else positional; `--` ends flag parsing. */
 export function parseArgs(argv: string[], booleans = BOOLEAN_FLAGS): ParsedArgs {
@@ -65,8 +68,19 @@ const USAGE = `metistry — Metistry command line
       Validate every manifest in the checkout and probe every bridge, service,
       container and launchd job. Exit 0 when nothing is failed.
 
-  metistry up       (stub) bring the stack up from the pinned release
-  metistry update   (stub) move metistry.lock to a newer release and migrate
+  metistry up [--no-compose] [--no-launchd] [--dry-run] [--product-dir <checkout>]
+      Bring an install to running from a checkout + .env: docker compose up (built
+      from source, or pulled when metistry.lock pins a release), every launchd job
+      in ops/launchd rendered into ~/Library/LaunchAgents and (re)bootstrapped
+      (macOS; Linux prints systemd units), then doctor — its verdict is the exit code.
+
+  metistry update [--skip-build] [--skip-migrate] [--dry-run] [--product-dir <checkout>]
+      Move an install forward: git fetch + pull --ff-only (or pull the pinned
+      release), pnpm install + build, db/migrations under a Postgres advisory
+      lock, rebuild containers and kickstart the host jobs whose code changed,
+      write metistry.lock into the instance repo (through the reconciler), doctor.
+
+  --dry-run prints every command and runs nothing.
 
 Product checkout resolution: --product-dir, METISTRY_PRODUCT_DIR, the checkout
 this package is installed in, the current directory's enclosing checkout.
@@ -77,6 +91,8 @@ export interface MainIo {
   err?: (s: string) => void;
   /** test seam: fakes for doctor's fetch/db/exec */
   doctorDeps?: Partial<DoctorDeps>;
+  /** test seam: every subprocess up/update/init run */
+  exec?: Exec;
 }
 
 export async function main(argv: string[], io: MainIo = {}): Promise<number> {
@@ -102,6 +118,8 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
         force: flags.force === true,
         seedDir: resolveSeedDir(productDir),
         version: productVersion(),
+        productCommit: productDir ? await gitHead(productDir, io.exec ?? realExec) : undefined,
+        exec: io.exec,
       });
       out(`instance created at ${result.dir} (commit ${result.commit.slice(0, 7)}; assistant named "${result.assistantName}" in identity.yaml)`);
       out("");
@@ -109,7 +127,7 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
       out("");
       for (const l of result.envLines) out(`  ${l}`);
       out("");
-      out("Then: pnpm -r build; install the reconciler launchd job (docs/ops/reconciler.md); docker compose up -d console; metistry doctor.");
+      out("Then: pnpm -r build && metistry up   (containers, every launchd job, doctor — docs/ops/cli.md).");
       out("Optional: git -C " + result.dir + " remote add origin <your private remote> — the reconciler pushes on its schedule.");
       return 0;
     }
@@ -123,12 +141,40 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
       out(flags.json === true ? JSON.stringify(report, null, 2) : renderTable(report));
       return report.ok ? 0 : 1;
     }
-    case "up":
-      out("metistry up is not built yet. It will: read metistry.lock, pull the pinned container images and npm packages, run db migrations idempotently, and start compose plus the host launchd jobs. Today: pnpm -r build && docker compose up -d && the launchd steps in docs/ops/reconciler.md.");
-      return 0;
-    case "update":
-      out("metistry update is not built yet. It will: move metistry.lock to the requested release, pull the pinned artifacts, apply db/migrations under an advisory lock, and copy new seed defaults the instance does not already override (D4). Today: git pull && pnpm -r build && pnpm db:migrate.");
-      return 0;
+    case "up": {
+      if (!productDir) {
+        err("up needs a Metistry checkout: pass --product-dir or set METISTRY_PRODUCT_DIR");
+        return 2;
+      }
+      loadDotEnv(productDir);
+      const r = await up({
+        productDir,
+        out,
+        exec: io.exec,
+        dryRun: flags["dry-run"] === true,
+        compose: flags["no-compose"] !== true,
+        launchd: flags["no-launchd"] !== true,
+        doctorDeps: io.doctorDeps,
+      });
+      return r.code;
+    }
+    case "update": {
+      if (!productDir) {
+        err("update needs a Metistry checkout: pass --product-dir or set METISTRY_PRODUCT_DIR");
+        return 2;
+      }
+      loadDotEnv(productDir);
+      const r = await update({
+        productDir,
+        out,
+        exec: io.exec,
+        dryRun: flags["dry-run"] === true,
+        skipBuild: flags["skip-build"] === true,
+        skipMigrate: flags["skip-migrate"] === true,
+        doctorDeps: io.doctorDeps,
+      });
+      return r.code;
+    }
     default:
       err(`unknown command: ${command}\n\n${USAGE}`);
       return 2;

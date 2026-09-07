@@ -3,8 +3,10 @@
 The `metistry` command: `init` stamps a private **instance repo** from the
 product's `seed/`; `doctor` validates every component manifest in a
 Metistry checkout and probes every bridge, service, container and launchd
-job through the one `check()` contract they all implement. `up` and
-`update` are documented stubs for now.
+job through the one `check()` contract they all implement; `up` brings a
+checkout + `.env` to running (compose, launchd, doctor); `update` moves it
+forward (pull, build, migrate under an advisory lock, restart what changed,
+pin `metistry.lock`, doctor).
 
 ```sh
 npx @foldedspacelabs/metistry-cli init ~/metistry-instance --name "Athena"
@@ -94,12 +96,36 @@ Output is a table — `name`, `kind`, `status` (`ok` | `degraded` | `failed` |
 informational (a bridge that is not configured degrades absent by design).
 `--json` prints `{ as_of, product_dir, ok, rows: CheckResult & { kind } }`.
 
-## `metistry up` / `metistry update`
+## `metistry up [--no-compose] [--no-launchd] [--dry-run] [--product-dir <checkout>]`
 
-Stubs that print what they will do (pull the pinned release, migrate under
-an advisory lock, start compose + launchd; move `metistry.lock`). Until they
-exist: `pnpm -r build && docker compose up -d` and the launchd steps in
-`docs/ops/reconciler.md`; `git pull && pnpm -r build && pnpm db:migrate`.
+Checkout + `.env` → running. `docker compose up -d --build` (or `pull` +
+`up -d --no-build` when the instance's `metistry.lock` says
+`source: release`); every `ops/launchd/*.plist` rendered (`__REPO__` → the
+checkout, `__NODE__` → the first `node` on PATH, symlink unresolved) into
+`~/Library/LaunchAgents/` and `bootout` / `bootstrap` / `kickstart -k`
+(macOS — on Linux the equivalent systemd user units are printed, not
+written); then `doctor`, whose verdict is the exit code. A failing step
+stops the plan, doctor still runs, the step's exit code is kept.
+`--dry-run` prints every command and file write and runs nothing.
+
+## `metistry update [--skip-build] [--skip-migrate] [--dry-run] [--product-dir <checkout>]`
+
+`git fetch` + `git pull --ff-only` (or `docker compose pull` and a printed
+npm install in release mode) → `pnpm install --frozen-lockfile` +
+`pnpm -r build` → `db/migrations/*.sql` not in `schema_migrations`, in
+order, one transaction each, under `pg_advisory_lock(1296389203)` — the
+same key `ops/scripts/migrate.sh` takes, so the two can never interleave
+→ `docker compose up -d --build` + `launchctl kickstart -k` for each host
+job whose executed code (`apps/<svc>/dist`, read from its plist) hashed
+differently after the build → `metistry.lock` written into the instance
+repo through the reconciler bridge (`POST /vault/write`, principal `user`,
+message `metistry update → <version>`), or directly only when no bridge is
+configured and no reconciler job is running → `doctor`.
+
+`metistry.lock` shape (`lock.ts`; `init` writes the same):
+`product: { version, commit, source: git | release }`, `updated_at`,
+`migrations_applied: [...]`. Runbook detail — what "changed" means, the
+lock-write rules, Linux — is in `docs/ops/cli.md`.
 
 ## No manifest for the CLI
 

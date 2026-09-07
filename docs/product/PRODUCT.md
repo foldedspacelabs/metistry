@@ -439,3 +439,17 @@ your git, on your machine.
   OAuth sessions are explicitly not adopted — a user-protection stance
   worth stating in launch material. A budgeted gateway is the hosted
   tier's metering layer.
+- 2026-09-07 — **`metistry up` and `metistry update` are real** (plan
+  §4.16 "code flows downward as releases"; `docs/ops/cli.md`). One command
+  takes a checkout + `.env` to running (compose, every launchd job rendered
+  and bootstrapped from the shipped templates, doctor as the verdict) and
+  one moves it forward (fast-forward pull, build, migrations under a
+  Postgres advisory lock shared with the zero-dependency `migrate.sh` —
+  two racing runners proven by test to apply once — restart only the host
+  jobs whose built code changed, pin `metistry.lock` in the instance repo
+  *through the reconciler as `user`* because it is the sole committer).
+  Safety, enforced at the tool: no shell anywhere (argument arrays only),
+  `--dry-run` is the same code path with execution off, a failing step
+  stops everything after it, and the lock is never written behind a
+  running reconciler. The maintenance story is now a runbook section, not
+  a memory. 55 new CLI tests.

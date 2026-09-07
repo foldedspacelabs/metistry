@@ -27,6 +27,7 @@ const REQUIRED = [
   "aws_costs_daily",
   "aws_costs_recent",
   "projects_overview",
+  "projects_rollup",
   "runs_summary",
 ];
 

@@ -657,14 +657,23 @@ thin corpus isn't worth much; it earns its place once there's a year of
 notes. Keyword recall, the behavior that makes the system indispensable,
 ships in Phase 2.
 
-### Later — native iOS app (post-Phase 6; premium candidate)
+### Later — native Apple app, macOS + iOS (post-Phase 6; THE distribution channel)
 
 Same management API as the web app — no private endpoints — adding what only
 native can do: share extension, real push, offline queue, widgets/Shortcuts
-depth. Explicitly a candidate for a **paid/premium addition to the
-open-source project**; the product framing accumulates in
-`docs/product/PRODUCT.md` as features and guardrails are designed, so the
-pitch exists when it's needed rather than being reconstructed later.
+depth, and on the desktop a menu-bar status, global capture hotkey, drag-
+to-dispatch and local notifications. **One SwiftUI multiplatform codebase
+serves both devices** (decided 2026-09-07 after the CodeGraff review —
+`docs/research/2026-09-codegraff-review.md`, `docs/product/desktop-app-plan.md`);
+the **installed PWA is the desktop client for Windows/Linux** and for anyone
+not on the app, permanently. No Electron/Tauri wrapper. **Strategy
+(ratified 2026-09-07): fully open source, no premium tier, no hosted
+plan.** The Mac app is free, is the *primary* distribution channel — it
+installs, configures, connects, and updates the whole system (open
+decision #15, resolved) — and ships through **GitHub Releases** with
+signed, notarized builds and **auto-update** from a release-backed
+appcast. The product framing still accumulates in `docs/product/PRODUCT.md`,
+now for launch material rather than a pitch.
 
 ---
 
@@ -1925,9 +1934,10 @@ LiteLLM) separated two questions that "an AI-agent proxy layer" blurs:
   adopted or documented: the engine already runs on the subscription
   token by the sanctioned path, and the terms-of-service exposure is one
   the project cannot underwrite for its users.
-- A gateway with virtual keys, budgets and cost attribution is the
-  **hosted tier's** metering layer (FSL-operated, behind the same block),
-  not something the open-source install needs.
+- A gateway with virtual keys, budgets and cost attribution would have
+  been a hosted tier's metering layer; the hosted plan was dropped
+  2026-09-07 (fully open source), so this is simply a supported
+  configuration for users who run such a gateway themselves.
 
 ### 4.19 Metis as coordination hub (added 2026-08-28)
 
@@ -2178,8 +2188,8 @@ invariant 4 intact.
 is untrusted content; rendering it on the console origin is XSS against
 the passkey session. CRIT-7's output encoding covers text, not pages.
 Decision #14 (resolved 2026-09-06): an opaque-origin **sandboxed iframe**
-under a strict CSP for v1; the isolated-hostname model is reserved for the
-hosted tier.
+under a strict CSP for v1; the isolated-hostname model is reserved for a
+multi-user deployment, should one ever exist.
 
 **Not in v1:** linked live-disk artifacts (their ADR 0023 — a local-only
 feature with a real threat model; revisit if the vault seam (D5/C4) lands
@@ -2380,7 +2390,20 @@ All propagated into this document.
     no-store`; misuse tests prove the frame can't read the session, call a
     mutation route, or navigate the top window. A second content hostname
     (their model — stronger against framing tricks) is reserved for the
-    hosted tier, where a wildcard domain is cheap; on a tailnet it isn't.
+    multi-user deployment, where a wildcard domain is cheap; on a
+    tailnet it isn't.
+15. **Docker-free macOS deployment shape. RESOLVED 2026-09-07.** One-click
+    install from the Mac app needs Postgres + pgvector, console, assistant, reconciler, and
+    watchdog to run under launchd with a bundled runtime — Docker Desktop
+    is the biggest first-run hurdle and a known stability risk. Code is
+    already portable; this is a `deployment.yaml` shape. The cost is the
+    assistant's container isolation: the engine process must be confined
+    on the host (sandbox profile: its own state dir, network to the
+    console only) with misuse tests. Docker compose stays the Linux/cloud
+    shape. Ratified with the strategy decision the same day: the Mac app
+    is the primary distribution channel, so this shape is the primary
+    macOS shape; the container isolation is replaced by a host sandbox
+    profile with misuse tests, built with the install flow.
 
 ---
 

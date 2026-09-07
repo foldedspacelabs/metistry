@@ -3,7 +3,7 @@
 > Status: **direction, not design.** Recorded now so the eventual UX
 > improvement plan (to be built with a frontend UX dev + designer) starts
 > from the owner's intent instead of reconstructing it. Applies as one
-> design language across **web and iOS**.
+> design language across **web and Apple (macOS + iOS)** — the desktop client is the same SwiftUI codebase as the phone (`desktop-app-plan.md`, 2026-09-07).
 
 ## The theme
 
@@ -69,19 +69,21 @@ that makes leakage structurally impossible rather than policy-forbidden —
 the same enforce-at-the-tool bar as everything else. Launch-blocking for
 the relay, not a nice-to-have.
 
-## Hosting & monetization tiers (owner direction, same date)
+## Hosting & monetization tiers — SUPERSEDED 2026-09-07
 
-Three ways to run Metistry, all against the same open-source product:
+The three-tier plan below was replaced by a single strategy: **fully
+open source, everything free.** The Mac app is the primary distribution
+channel (it installs, configures, connects, and updates the system —
+`desktop-app-plan.md`), shipped through GitHub Releases with auto-update;
+the iOS app is free too; there is no hosted plan. The privacy claim
+stays the through-line: the open-source core proves the design, and the
+payload-free push relay — now a small free community service with its
+code in the repo, self-hostable by anyone with an Apple developer
+account — proves infrastructure can be blind.
 
-1. **Self-host, free** — the full open-source system, PWA interface,
-   bring-your-own routing. Nothing withheld.
-2. **Self-host + premium iOS app** — your instance, your hardware; the
-   paid native app (share extension, APNs via the E2E relay, widgets,
-   on-phone FM) is the premium purchase.
-3. **FSL-hosted instance** — we run it for you, with usage (cost) limits,
-   as a separate premium plan. Same E2E posture: hosted must never mean
-   readable.
+<details><summary>Original (2026-09-01) for the record</summary>
 
-The privacy claim is the through-line of all three: the open-source core
-proves the design, the relay proves hosted infrastructure can be blind,
-and the hosted plan inherits both arguments.
+1. Self-host, free. 2. Self-host + premium iOS app. 3. FSL-hosted
+instance with usage limits as a separate premium plan.
+
+</details>

@@ -5,7 +5,7 @@
 const { startRegistration, startAuthentication } = window.SimpleWebAuthnBrowser;
 
 const $ = (id) => document.getElementById(id);
-const views = ["chat", "dashboard", "capture", "triage", "status", "devices", "agents"];
+const views = ["chat", "dashboard", "capture", "triage", "status", "devices", "agents", "artifacts"];
 const enrollCode = new URLSearchParams(location.hash.slice(1)).get("enroll");
 
 async function api(path, opts = {}) {
@@ -18,7 +18,7 @@ function show(view) {
   $("nav").hidden = false; $("auth").hidden = true;
   for (const v of views) $(v).hidden = v !== view;
   document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("active", b.dataset.view === view));
-  ({ chat: loadMessages, dashboard: loadDashboard, status: loadStatus, devices: loadDevices, triage: loadTriage, agents: loadAgents }[view] ?? (() => {}))();
+  ({ chat: loadMessages, dashboard: loadDashboard, status: loadStatus, devices: loadDevices, triage: loadTriage, agents: loadAgents, artifacts: loadArtifacts }[view] ?? (() => {}))();
 }
 
 function showAuth() {
@@ -156,7 +156,7 @@ async function loadTriage() {
   $("proposal-list").innerHTML = proposals
     .map((p) => {
       const c = p.payload?.classification ?? {};
-      const label = c.action || c.title || p.kind;
+      const label = c.action || c.title || p.payload?.title || p.kind; // review proposals (§4.21) carry a top-level title
       return `<li><span>${esc(label)} <span class="muted">${esc(p.kind)} · ${esc(c.kind ?? "")} · ${esc(p.source_agent)} · ${new Date(p.ts).toLocaleDateString()}</span></span>
         <span><button data-triage="${p.id}" data-d="allow">allow</button> <button data-triage="${p.id}" data-d="deny" style="background:#7a3b3b">deny</button></span></li>`;
     })
@@ -187,7 +187,7 @@ function esc(s) { const d = document.createElement("div"); d.textContent = s ?? 
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {}); // push degrades absent
 try {
   const probe = await fetch("/api/status");
-  if (probe.ok) { show("chat"); replayDraft(); pollChat(); } else showAuth();
+  if (probe.ok) { show(artifactRoute() ? "artifacts" : "chat"); replayDraft(); pollChat(); } else showAuth(); // a #/artifacts/… link (the review link) opens straight there
 } catch { showAuth(); }
 
 // ----- agents (external-agent registry; every agent-authored field output-encoded — CRIT-7) -----
@@ -395,3 +395,153 @@ async function loadDashboard() {
     try { await load(); } catch { $(`dash-${id}-asof`).textContent = "unavailable"; }
   }));
 }
+
+// ===== artifacts (§4.21) =====
+// Every server value is output-encoded via esc()/textContent before it
+// touches the DOM (CRIT-7). Text kinds render as escaped text in a <pre> (a
+// renderer is a later UX pass); images come from the raw route as <img>;
+// HTML renders ONLY inside an opaque-origin sandboxed iframe (sandbox="" —
+// no tokens at all, so the frame is never same-origin and never runs script;
+// decision #14) with a CSP meta in the srcdoc, so an agent-authored page can
+// neither read the session nor call a route.
+const ART_CSP = '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; img-src data: blob:; style-src \'unsafe-inline\'; font-src data:">';
+let artOpen = null; // { id, version }
+
+function artifactRoute() {
+  // hoisted (called at boot, before this block's consts exist): the regex lives inline on purpose
+  const m = /^#\/artifacts\/(art_[0-9A-HJKMNP-TV-Z]{26})(?:\/(ver_[0-9A-HJKMNP-TV-Z]{26}))?(\/review)?$/.exec(location.hash);
+  return m ? { id: m[1], version: m[2] ?? null, review: !!m[3] } : null;
+}
+
+async function loadArtifacts() {
+  const project = $("art-project").value.trim();
+  const res = await api(`/api/artifacts${project ? `?project=${encodeURIComponent(project)}` : ""}`);
+  const { artifacts } = await res.json();
+  $("art-empty").hidden = artifacts.length > 0;
+  $("art-list").innerHTML = artifacts
+    .map((a) => `<li><a href="#/artifacts/${esc(a.id)}" data-art="${esc(a.id)}"><b>${esc(a.project)}/${esc(a.slug)}</b></a>
+      <span class="muted">${esc(a.kind ?? "")} · ${esc(a.created_by ?? "")} · ${new Date(a.updated_at).toLocaleString()}</span></li>`)
+    .join("");
+  document.querySelectorAll("[data-art]").forEach((el) => (el.onclick = (e) => { e.preventDefault(); location.hash = `#/artifacts/${el.dataset.art}`; }));
+  const r = artifactRoute();
+  if (r) await openArtifact(r.id, r.version);
+  else $("art-detail").hidden = true;
+}
+
+window.addEventListener("hashchange", () => {
+  const r = artifactRoute();
+  if (r) { if ($("artifacts").hidden) show("artifacts"); else openArtifact(r.id, r.version); }
+});
+
+async function openArtifact(id, versionId) {
+  const res = await api(`/api/artifacts/${encodeURIComponent(id)}`);
+  if (!res.ok) { $("art-detail").hidden = true; return; }
+  const { artifact, current } = await res.json();
+  const { versions } = await (await api(`/api/artifacts/${encodeURIComponent(id)}/versions`)).json();
+  const version = versions.find((v) => v.id === versionId) ?? current ?? versions[0] ?? null;
+  artOpen = { id, version: version?.id ?? null };
+  $("art-detail").hidden = false;
+  $("art-title").textContent = `${artifact.project}/${artifact.slug}`;
+  $("art-meta").textContent = version
+    ? `${version.author_kind === "agent" ? "agent" : "you"}: ${version.author_principal} · ${version.message} · ${new Date(version.created_at).toLocaleString()} · ${version.commit ? `rev ${version.commit.slice(0, 10)}` : "not committed yet"}${version.id === artifact.current_version ? " · current" : ""}`
+    : "no versions";
+  const sel = $("art-version");
+  sel.innerHTML = versions.map((v) => `<option value="${esc(v.id)}">${esc(v.id.slice(-8))} · ${esc(v.author_principal)} · ${new Date(v.created_at).toLocaleDateString()}</option>`).join("");
+  if (version) sel.value = version.id;
+  sel.onchange = () => { location.hash = `#/artifacts/${id}/${sel.value}`; };
+  const files = version ? Object.keys(version.manifest).sort() : [];
+  const fsel = $("art-file");
+  fsel.innerHTML = files.map((f) => `<option value="${esc(f)}">${esc(f)} · ${esc(version.manifest[f].kind)}</option>`).join("");
+  const entry = files.find((f) => /^(index\.html|index\.md|README\.md)$/.test(f)) ?? files[0];
+  if (entry) { fsel.value = entry; await renderArtifactFile(id, version.id, entry, version.manifest[entry].kind); } else $("art-viewer").replaceChildren();
+  fsel.onchange = () => renderArtifactFile(id, version.id, fsel.value, version.manifest[fsel.value].kind);
+  if (version) await loadThreads(id, version.id);
+}
+
+async function renderArtifactFile(id, ver, path, kind) {
+  const viewer = $("art-viewer");
+  viewer.replaceChildren();
+  const fileUrl = (raw) => `/api/artifacts/${encodeURIComponent(id)}/versions/${encodeURIComponent(ver)}/file?path=${encodeURIComponent(path)}${raw ? "&raw=1" : ""}`;
+  if (kind === "image") {
+    const img = document.createElement("img");
+    img.src = fileUrl(true); // same-origin raw route: image/* only, no-store, nosniff
+    img.alt = path;
+    viewer.append(img);
+    return;
+  }
+  if (kind === "pdf" || kind === "binary") {
+    const a = document.createElement("a");
+    a.href = fileUrl(true);
+    a.target = "_blank";
+    a.rel = "noopener";
+    a.textContent = kind === "pdf" ? `open ${path}` : `download ${path}`;
+    viewer.append(a);
+    return;
+  }
+  const res = await api(fileUrl(false));
+  if (!res.ok) { viewer.textContent = res.status === 503 ? "this version's content is superseded on the working tree — pick the current version or use diff" : "unavailable"; return; }
+  const body = await res.json();
+  if (kind === "html") {
+    // opaque origin: sandbox with NO tokens (never the same-origin one), CSP inside the document, no navigation of the top window
+    const frame = document.createElement("iframe");
+    frame.setAttribute("sandbox", "");
+    frame.setAttribute("referrerpolicy", "no-referrer");
+    frame.className = "art-frame";
+    frame.srcdoc = ART_CSP + body.content;
+    viewer.append(frame);
+    return;
+  }
+  const pre = document.createElement("pre");
+  pre.className = "art-pre";
+  pre.textContent = body.content ?? ""; // textContent: never markup
+  viewer.append(pre);
+}
+
+async function loadThreads(id, ver) {
+  const { threads } = await (await api(`/api/artifacts/${encodeURIComponent(id)}/comments?version=${encodeURIComponent(ver)}`)).json();
+  const open = threads.filter((t) => t.state === "open").length;
+  $("art-thread-count").textContent = threads.length ? `${open} open · ${threads.length - open} resolved` : "none";
+  const who = (c) => `${c.author_kind === "agent" ? "🤖 " : ""}${esc(c.author_principal)}`; // agent text is labeled agent-sourced (§4.19)
+  $("art-threads").innerHTML = threads
+    .map((t) => `<li class="thread ${t.state}">
+      <div class="row"><label><input type="checkbox" data-thread="${esc(t.id)}" ${t.state === "resolved" ? "disabled" : ""}> ${who(t)} <span class="muted">${t.path ? esc(t.path) + " · " : ""}${new Date(t.created_at).toLocaleString()} · ${esc(t.state)}</span></label>
+        <button class="secondary" data-state="${esc(t.id)}" data-op="${t.state === "open" ? "resolve" : "reopen"}">${t.state === "open" ? "resolve" : "reopen"}</button></div>
+      <div class="body">${esc(t.body)}</div>
+      ${t.replies.map((r) => `<div class="reply"><span class="muted">${who(r)} · ${new Date(r.created_at).toLocaleString()}</span><div class="body">${esc(r.body)}</div></div>`).join("")}
+      <form data-reply="${esc(t.id)}"><input type="text" placeholder="reply…" autocomplete="off"><button type="submit" class="secondary">reply</button></form>
+    </li>`)
+    .join("");
+  document.querySelectorAll("[data-state]").forEach((b) => (b.onclick = async () => {
+    await api(`/api/artifacts/${encodeURIComponent(id)}/comments/${encodeURIComponent(b.dataset.state)}/${b.dataset.op}`, { method: "POST" });
+    loadThreads(id, ver);
+  }));
+  document.querySelectorAll("[data-reply]").forEach((f) => (f.onsubmit = async (e) => {
+    e.preventDefault();
+    const body = f.querySelector("input").value.trim();
+    if (!body) return;
+    await api(`/api/artifacts/${encodeURIComponent(id)}/comments`, { method: "POST", body: JSON.stringify({ parent: f.dataset.reply, body }) });
+    loadThreads(id, ver);
+  }));
+}
+
+$("art-filter").onsubmit = (e) => { e.preventDefault(); loadArtifacts(); };
+
+$("art-comment").onsubmit = async (e) => {
+  e.preventDefault();
+  const body = $("art-comment-body").value.trim();
+  if (!body || !artOpen?.version) return;
+  const r = await api(`/api/artifacts/${encodeURIComponent(artOpen.id)}/comments`, { method: "POST", body: JSON.stringify({ version: artOpen.version, body }) });
+  if (r.ok) { $("art-comment-body").value = ""; loadThreads(artOpen.id, artOpen.version); }
+};
+
+$("art-dispatch").onsubmit = async (e) => {
+  e.preventDefault();
+  const thread_ids = [...document.querySelectorAll("[data-thread]:checked")].map((c) => c.dataset.thread);
+  const to_agent = $("art-dispatch-to").value.trim();
+  if (!artOpen?.version || !thread_ids.length || !to_agent) { $("art-dispatch-msg").textContent = "check at least one open thread and name an agent"; return; }
+  const r = await api("/api/dispatches", { method: "POST", body: JSON.stringify({ artifact: artOpen.id, version: artOpen.version, thread_ids, to_agent }) });
+  const body = await r.json();
+  $("art-dispatch-msg").textContent = r.ok
+    ? body.route === "work" ? `review task #${body.work.id} created for ${to_agent}` : `queued as proposal #${body.proposal_id} (outside the project)`
+    : `dispatch failed: ${body.error?.message ?? r.status}`;
+};

@@ -16,6 +16,8 @@ import { runCheck, startRun, finishRun, errorEnvelope, statusFor, type CheckResu
 import { QueryError, QueryStore } from "@foldedspacelabs/metistry-queries";
 import { captureToInbox, createBrainServer, type KnowledgeReader } from "@foldedspacelabs/metistry-mcp-brain";
 import { TasksService } from "@foldedspacelabs/metistry-tasks";
+import { ArtifactsService, type VaultClient } from "@foldedspacelabs/metistry-artifacts";
+import { artifactRoutes, isArtifactRoute } from "./artifacts-routes.js";
 import type { Db } from "./auth-store.js";
 import * as store from "./auth-store.js";
 import * as agents from "./agents.js";
@@ -41,6 +43,8 @@ export interface ConsoleConfig {
   targets?: TargetRegistry; // compute targets (§4.18); absent = no dispatch surface
   /** Note-content reader for mcp-brain's knowledge_read (the reconciler's vault bridge, D5); absent = not_available, exactly as before. */
   readKnowledge?: KnowledgeReader;
+  /** The vault client the artifacts module (§4.21) stores content through; absent = artifacts degrade to not_available. */
+  vault?: VaultClient;
 }
 
 type Auth =
@@ -58,12 +62,16 @@ const DISPATCH_ROUTE = /^POST \/api\/tasks\/(\d{1,12})\/dispatch$/;
 export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Server {
   const rp = wa.rpFromOrigin(cfg.origin);
   const challenges = new wa.ChallengeStore();
+  const tasks = new TasksService(db);
+  // artifacts (§4.21): one service, adapted twice — the routes below for the user's session, the mcp-brain tools for agents
+  const artifacts = cfg.vault ? new ArtifactsService(db, cfg.vault, { origin: cfg.origin, tasks }) : undefined;
   const brain = createBrainServer({
     db,
     authenticate: (req) => agents.authenticateAgent(db, req), // the same principal source as /capture
-    tasks: new TasksService(db),
+    tasks,
     inboxDir: cfg.inboxDir,
     readKnowledge: cfg.readKnowledge,
+    artifacts,
   });
 
   async function authenticate(req: IncomingMessage): Promise<Auth> {
@@ -353,12 +361,16 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         /^POST \/api\/proposals\/\d+$/.test(key) ||
         key === "GET /api/agents" ||
         key === "POST /api/agents" ||
-        AGENT_ROUTE.test(key)
+        AGENT_ROUTE.test(key) ||
+        isArtifactRoute(url.pathname)
       ) {
         return sendError(res, "forbidden");
       }
       return sendError(res, "not_found");
     }
+
+    // ----- artifacts + review dispatch (§4.21; owner session only) -----
+    if (isArtifactRoute(url.pathname)) return artifactRoutes(req, res, url, artifacts);
 
     // ----- proposal triage (D7 unified table; owner session only) -----
     if (key === "GET /api/proposals") {

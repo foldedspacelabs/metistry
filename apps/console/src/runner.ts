@@ -1,26 +1,18 @@
 // Minimal routine runner (SHOULD-8): schedules collectors from their
 // manifests, gates on the runs table (per-collector last-run — survives
 // restarts, no double-run storms), executes under a two-phase runs row.
-// Cron support is deliberately narrow: */N minutes, 0 */N hours, @hourly,
-// @daily, @weekly — widen when a manifest actually needs more. Every
-// shipped manifest must parse: the console refuses to start otherwise
-// (it crash-looped once on an unparsed schedule — manifests.test.ts).
+// Schedule parsing lives in core (scheduleToSeconds — shared with the
+// watchdog's silent-collector probe, so "due" and "silent" can never
+// disagree about an interval). Every shipped manifest must parse: the
+// console refuses to start otherwise (it crash-looped once on an unparsed
+// schedule — manifests.test.ts).
 
 import { readFile } from "node:fs/promises";
 import { parse as parseYaml } from "yaml";
-import { startRun, finishRun, validateManifest } from "@foldedspacelabs/metistry-core";
+import { startRun, finishRun, validateManifest, scheduleToSeconds } from "@foldedspacelabs/metistry-core";
 import type { RegisteredCollector, Db, CollectorCtx } from "@metistry-apps/collectors";
 
-export function scheduleToSeconds(schedule: string): number {
-  if (schedule === "@hourly") return 3600;
-  if (schedule === "@daily") return 86400;
-  if (schedule === "@weekly") return 604800;
-  const m = /^\*\/(\d+) \* \* \* \*$/.exec(schedule);
-  if (m?.[1]) return Number(m[1]) * 60;
-  const h = /^0 \*\/(\d+) \* \* \*$/.exec(schedule); // every N hours
-  if (h?.[1]) return Number(h[1]) * 3600;
-  throw new Error(`runner cannot schedule "${schedule}" yet — supported: */N minutes, 0 */N hours, @hourly, @daily, @weekly`);
-}
+export { scheduleToSeconds }; // one import path for the runner's callers and tests
 
 export interface ScheduledCollector extends RegisteredCollector {
   intervalSec: number;

@@ -496,3 +496,29 @@ your git, on your machine.
   is watched. `seed/agents/example/researcher.md` ships as the template;
   `docs/ops/crews.md` is the operator's page. No migration. 36 new tests
   across core, console and the assistant.
+- 2026-09-07 — CodeGraff reviewed (`docs/research/2026-09-codegraff-review.md`)
+  for the single-pane-of-glass overlap. Desktop decision: the premium
+  native client becomes **one SwiftUI app for macOS + iOS**; the
+  installed PWA is the desktop client everywhere else, today. Lifted:
+  an activity feed as the home page, explicit agent state chips backed
+  by lease liveness and delivery-evidence tiers, collapsed tool activity
+  under every reply, drag-to-dispatch with the autonomy boundary shown
+  as the reason for a refusal. Not lifted: a second engine, Electron, or
+  a coding workbench. Plan in `docs/product/desktop-app-plan.md`.
+- 2026-09-07 — Distribution direction: the premium app is the installer.
+  Bundled runtime, `metistry init` on a chosen folder, GitHub repo
+  connected by device-flow OAuth with the token in the Keychain,
+  secrets minted into the Keychain, services registered via
+  SMAppService, passkey enrolled in-app, updates from signed releases
+  through `metistry update`. The app fronts the CLI; it never
+  re-implements it. Opened decision #15: a Docker-free macOS shape.
+- 2026-09-07 — **Strategy: fully open source, everything free.** The
+  premium iOS app and the FSL-hosted plan are dropped. The Mac app
+  (one SwiftUI codebase with iOS) is the primary distribution channel:
+  it installs, configures, connects, and updates the system, ships
+  through GitHub Releases as a signed, notarized DMG, and auto-updates
+  from a release-backed appcast — no FSL server anywhere. Decision #15
+  (Docker-free macOS shape) ratified. The payload-free push relay
+  becomes a small free community service with self-host support.
+  Rationale: the AI tooling landscape moves too fast for a paywall to
+  be the moat; openness is.

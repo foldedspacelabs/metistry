@@ -1,6 +1,7 @@
 # Native iOS app — planning document (2026-09-01)
 
-> Status: **planning only** — post-Phase-6, the named premium candidate.
+> Status: **planning only** — post-Phase-6. Free and open source (strategy
+> 2026-09-07); one SwiftUI codebase with the Mac app (`desktop-app-plan.md`).
 > This captures the thinking early so the API and product decisions made
 > now don't foreclose it. Nothing here is on the build path yet.
 
@@ -38,9 +39,13 @@ Options, roughly in order of appearance:
 
 1. **FSL-run push relay**: instance → relay (payload-free "wake + fetch"
    pings, so no content transits FSL) → APNs. This is the first naturally
-   *hosted* component in the product — i.e., **the premium story funds the
-   infrastructure the premium feature requires**. Privacy posture: token
-   registry + opaque pings only.
+   *hosted* component in the product. With the premium plan dropped
+   (2026-09-07) it becomes a **small free community service**: opaque
+   pings are near-zero cost, the relay code lives in the repo, and the
+   app accepts a custom relay URL so anyone with an Apple developer
+   account can run their own. Privacy posture: token registry + opaque
+   pings only. The Mac app on the host machine needs no relay at all
+   (local notifications).
 2. Web push stays as the fallback channel (already shipped) — the app can
    also receive nothing and poll on open.
 3. Power users with their own Apple Developer account could run their own
@@ -62,8 +67,9 @@ web push, which we already do.
 ## Open questions (decide later, deliberately)
 
 - App Store distribution vs TestFlight-first; FSL developer account setup.
-- Premium gating mechanism (license key in instance config? App Store
-  subscription? relay-account = the natural gate if option 1 is chosen).
+- ~~Premium gating mechanism~~ — none; everything is free (2026-09-07).
+  Distribution: iOS via TestFlight/App Store (Apple requires it); macOS
+  via GitHub Releases with auto-update.
 - SwiftUI codebase relationship to the Swift bridge toolchain (D3 made
   Swift a first-class language in the repo — the app extends that).
 - Whether HealthKit data lands via `/capture` or a dedicated endpoint with

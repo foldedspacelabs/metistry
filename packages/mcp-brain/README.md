@@ -19,7 +19,7 @@ as a row the user triages, with provenance stamped from the credential.
 | Rule | Mechanism |
 | --- | --- |
 | Identity is server-side | No tool has an `agent` argument. The host's `authenticate(req)` turns the bearer into a principal; every row, history entry, and audit run carries that id. |
-| Tasks are project-scoped | `tasks_*` only see tasks whose `project` is in the principal's membership. Anything else is `not_found` — never listed, never claimable, never usable as a dependency. Creating in a project you are not in is `forbidden`. |
+| Tasks are project-scoped | `tasks_*` only see tasks whose `project` is in the principal's membership. Anything else is `not_found` — never listed, never claimable, never usable as a dependency. Creating in a project you are not in is `forbidden`. **The internal rule** (`scope.ts`): a principal with `kind: "internal"` — the instance's own assistant, whose scope comes from configuration in the user's hand, not from a grant it asked for — and an *empty* `projects` list is a member of every project; a non-empty list narrows it like any other agent. External + empty is still none. Tasks with no project are invisible to everyone, internal included. |
 | Knowledge is tiered, default-deny | `none` → every knowledge call returns `{ error: { code: "forbidden", message: "not granted" } }` — *not* "not found", so absence of permission never looks like absence of knowledge. `index` → titles + one-line descriptions. `areas` → search and full read under the granted `Knowledge/...` prefixes only. |
 | Drafts are invisible | `status: draft` notes (the `draft` column on `knowledge_files`) are excluded by a `WHERE` clause at every tier. |
 | Text boundary | Every string that came out of the database passes `sanitizeForAgent` from core before it is rendered: bidi overrides and zero-width characters stripped, no leading `/`. The stored row is untouched. |
@@ -83,7 +83,7 @@ const brain = createBrainServer({
   tasks: new TasksService(pool),
   inboxDir: "/data/inbox",
   // YOUR credential → principal. Return null for anything you don't trust; the bridge answers 401.
-  authenticate: async (req) => lookupAgentByBearer(req.headers.authorization), // → { id, grants: { tier, areas }, projects } | null
+  authenticate: async (req) => lookupAgentByBearer(req.headers.authorization), // → { id, kind?, grants: { tier, areas }, projects } | null
   // Optional: a vault read path. Without it, knowledge_read answers `not_available`.
   readKnowledge: async (path) => readFileOrNull(path),
 });
@@ -99,7 +99,7 @@ createServer((req, res) => {
 | Option | Meaning |
 | --- | --- |
 | `db` | `{ query(text, values) }` — pg.Pool, pg.Client, or a fake |
-| `authenticate(req)` | `AgentPrincipal \| null`. **Grants and projects come from here, never from the request.** |
+| `authenticate(req)` | `AgentPrincipal \| null`. **Grants and projects come from here, never from the request.** `kind` (`external` when absent) only feeds the internal project rule above. |
 | `tasks` | a `TasksService` over the same database |
 | `inboxDir` | where `capture` writes files (the triage row references them) |
 | `readKnowledge?` | `(path) => Promise<string \| null>` — absent → `knowledge_read` is `not_available` and `check()` reports `degraded` |
@@ -142,6 +142,12 @@ claude mcp add --transport http metistry https://<origin>/mcp --header "Authoriz
 A capture-only agent needs no grants at all (tier `none`, no projects):
 `capture` and `report` work for every registered agent. Revoking or
 rotating the agent kills the token on the next request.
+
+The instance's own assistant is the first *internal* agent on this same
+surface (plan §4.11: one knowledge interface for all agents). The console
+registers it at startup from `METISTRY_ASSISTANT_TOKEN` (`kind: internal`,
+id `assistant`) and the assistant engine mounts `/mcp` as its only MCP
+server — see `docs/ops/assistant-tools.md`.
 
 ## Test
 

@@ -9,10 +9,31 @@ import { routines } from "@metistry-apps/routines";
 import { loadSchedules, startRunner } from "./runner.js";
 import { loadRules } from "./router.js";
 import { TargetRegistry } from "./dispatch.js";
+import { ASSISTANT_DEFAULT_AREAS, INTERNAL_ASSISTANT_ID, ensureInternalAgent, revokeAgent, validateGrants } from "./agents.js";
 import { readFile } from "node:fs/promises";
 
 const pool = makePool();
 const queries = new QueryStore(pool);
+
+// The instance's own assistant is the first INTERNAL agent on the mcp-brain
+// surface (§4.11: one knowledge interface for all agents). Its scope is
+// configuration in the user's hand — the environment is its manifest — so
+// the registry row is re-synced from it on every start: token hash, grants
+// (widest valid read unless narrowed), projects (empty = every project).
+// The env var is the switch: absent, an existing row is revoked so the old
+// token stops authenticating.
+const list = (v: string | undefined) => (v ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+if (process.env.METISTRY_ASSISTANT_TOKEN) {
+  const areas = list(process.env.METISTRY_ASSISTANT_AREAS);
+  const r = await ensureInternalAgent(pool, INTERNAL_ASSISTANT_ID, {
+    token: process.env.METISTRY_ASSISTANT_TOKEN,
+    grants: validateGrants({ tier: "areas", areas: areas.length > 0 ? areas : [...ASSISTANT_DEFAULT_AREAS] }),
+    projects: list(process.env.METISTRY_ASSISTANT_PROJECTS),
+  });
+  console.log(`internal agent '${r.id}' ${r.created ? "registered" : "re-synced"} (projects: ${list(process.env.METISTRY_ASSISTANT_PROJECTS).join(", ") || "all"})`);
+} else if (await revokeAgent(pool, INTERNAL_ASSISTANT_ID)) {
+  console.warn(`internal agent '${INTERNAL_ASSISTANT_ID}' revoked: METISTRY_ASSISTANT_TOKEN is unset (degrades: the assistant runs tool-less)`);
+}
 
 // D4 overlay: seed defaults first, instance dirs after (later loads win).
 for (const dir of optionalEnv("METISTRY_QUERIES_DIRS", "seed/queries").split(":")) {

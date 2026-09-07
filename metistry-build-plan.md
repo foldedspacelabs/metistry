@@ -657,14 +657,20 @@ thin corpus isn't worth much; it earns its place once there's a year of
 notes. Keyword recall, the behavior that makes the system indispensable,
 ships in Phase 2.
 
-### Later — native iOS app (post-Phase 6; premium candidate)
+### Later — native Apple app, macOS + iOS (post-Phase 6; premium candidate)
 
 Same management API as the web app — no private endpoints — adding what only
 native can do: share extension, real push, offline queue, widgets/Shortcuts
-depth. Explicitly a candidate for a **paid/premium addition to the
-open-source project**; the product framing accumulates in
-`docs/product/PRODUCT.md` as features and guardrails are designed, so the
-pitch exists when it's needed rather than being reconstructed later.
+depth, and on the desktop a menu-bar status, global capture hotkey, drag-
+to-dispatch and local notifications. **One SwiftUI multiplatform codebase
+serves both devices** (decided 2026-09-07 after the CodeGraff review —
+`docs/research/2026-09-codegraff-review.md`, `docs/product/desktop-app-plan.md`);
+the **installed PWA is the desktop client for Windows/Linux** and for anyone
+not on the premium app, permanently. No Electron/Tauri wrapper. Explicitly
+a candidate for a **paid/premium addition to the open-source project**;
+the product framing accumulates in `docs/product/PRODUCT.md` as features
+and guardrails are designed, so the pitch exists when it's needed rather
+than being reconstructed later.
 
 ---
 

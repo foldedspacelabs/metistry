@@ -496,3 +496,12 @@ your git, on your machine.
   is watched. `seed/agents/example/researcher.md` ships as the template;
   `docs/ops/crews.md` is the operator's page. No migration. 36 new tests
   across core, console and the assistant.
+- 2026-09-07 — CodeGraff reviewed (`docs/research/2026-09-codegraff-review.md`)
+  for the single-pane-of-glass overlap. Desktop decision: the premium
+  native client becomes **one SwiftUI app for macOS + iOS**; the
+  installed PWA is the desktop client everywhere else, today. Lifted:
+  an activity feed as the home page, explicit agent state chips backed
+  by lease liveness and delivery-evidence tiers, collapsed tool activity
+  under every reply, drag-to-dispatch with the autonomy boundary shown
+  as the reason for a refusal. Not lifted: a second engine, Electron, or
+  a coding workbench. Plan in `docs/product/desktop-app-plan.md`.

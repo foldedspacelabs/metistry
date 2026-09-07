@@ -71,15 +71,6 @@ export const collectorManifest = base.extend({
   requires: z.array(z.string()).default([]),
 });
 
-export const agentManifest = base.extend({
-  type: z.literal("agent"),
-  model: z.string(),
-  uses: z.array(z.string()).default([]),
-  skills: z.array(z.string()).default([]),
-  scope: z.array(z.string()).default([]),
-  manages: z.array(z.string()).default([]),
-});
-
 export const routineManifest = base.extend({
   type: z.literal("routine"),
   schedule: cron,
@@ -111,6 +102,89 @@ export const dataPolicySchema = z.object({
 });
 
 export type DataPolicy = z.infer<typeof dataPolicySchema>;
+
+// --- agents (crews) -----------------------------------------------------------
+//
+// A crew (plan §4.11, Phase 5 "crew definitions with their own toolsets") is
+// a sub-agent defined by `agents/<area>/<name>.md` in the instance repo: this
+// frontmatter, then its operating prompt. Its toolset is named in GROUPS of
+// mcp-brain tools, never tool by tool, so the one rule that matters —
+// sub-agents never write knowledge — is a property of the table below, not
+// of a review.
+
+/** mcp-brain tool groups a crew may name in `uses`. `brain-read` / `brain-report` are the plan's spellings (§4.11). */
+export const CREW_TOOL_GROUPS = {
+  /** Read the vault under the crew's `scope` (grant tier `areas`). */
+  knowledge: ["knowledge_search", "knowledge_read"],
+  /** Findings, decisions, gotchas, progress — into the proposal queue the assistant folds later. */
+  report: ["report"],
+  /** Notes and files into the inbox as proposals. */
+  capture: ["capture"],
+  /** The shared task list, within the crew's `projects`. */
+  tasks: ["tasks_list_ready", "tasks_claim", "tasks_heartbeat", "tasks_update", "tasks_release", "tasks_create", "tasks_mine"],
+  /** Versioned output into the crew's projects (§4.21). */
+  artifacts: ["artifact_publish", "artifact_get", "artifact_list", "artifact_comment", "artifact_comment_resolve", "artifact_dispatch_review"],
+} as const;
+export type CrewToolGroup = keyof typeof CREW_TOOL_GROUPS;
+
+/** Plan-spelled aliases → group. */
+export const CREW_GROUP_ALIASES: Readonly<Record<string, CrewToolGroup>> = { "brain-read": "knowledge", "brain-report": "report" };
+
+/**
+ * Tools NO crew may ever hold, whatever `uses` says: the assistant's own
+ * write path (one writer, §4.11) and the dispatch tool (a crew never
+ * dispatches crews — the assistant decides what leaves the brain).
+ */
+export const CREW_NEVER_TOOLS = ["knowledge_write", "crew_dispatch"] as const;
+
+/** Resolve a `uses` entry to its group; undefined when it names nothing known. */
+export function crewGroupOf(entry: string): CrewToolGroup | undefined {
+  if (Object.hasOwn(CREW_TOOL_GROUPS, entry)) return entry as CrewToolGroup;
+  return Object.hasOwn(CREW_GROUP_ALIASES, entry) ? CREW_GROUP_ALIASES[entry] : undefined;
+}
+
+/** The exact mcp-brain tool names a `uses` list grants, in group order, deduplicated. Unknown entries contribute nothing (the schema refuses them first). */
+export function crewToolsFor(uses: readonly string[]): string[] {
+  const out: string[] = [];
+  for (const group of Object.keys(CREW_TOOL_GROUPS) as CrewToolGroup[]) {
+    if (!uses.some((u) => crewGroupOf(u) === group)) continue;
+    for (const t of CREW_TOOL_GROUPS[group]) if (!out.includes(t)) out.push(t);
+  }
+  return out;
+}
+
+const crewUse = z.string().superRefine((u, ctx) => {
+  if (crewGroupOf(u)) return;
+  const never = (CREW_NEVER_TOOLS as readonly string[]).includes(u);
+  ctx.addIssue({
+    code: "custom",
+    message: never
+      ? `${u} is never available to a crew (sub-agents never write knowledge or dispatch crews)`
+      : `unknown tool group "${u}" — one of ${Object.keys(CREW_TOOL_GROUPS).join(", ")} (aliases: ${Object.keys(CREW_GROUP_ALIASES).join(", ")})`,
+  });
+});
+
+export const CREW_MODELS = ["haiku", "sonnet", "opus"] as const;
+
+export const agentManifest = base.extend({
+  type: z.literal("agent"),
+  /** Grouping only (`agents/<area>/`); hierarchy is `manages`, not depth (plan Terminology). */
+  area: name.optional(),
+  model: z.enum(CREW_MODELS),
+  uses: z.array(crewUse).default([]),
+  skills: z.array(name).default([]),
+  /** Read-tier areas (§4.11 scoped escape hatch): Knowledge/ prefixes below the root. The console's grant validator holds the exact (TitleCase) shape; here: never bare, never traversal. */
+  scope: z.array(knowledgePrefix.refine((p) => p !== "Knowledge", "scope entries must name an area below Knowledge/ — the bare vault is not a crew scope")).default([]),
+  /** Project membership (§4.19; §4.21 autonomy boundary): slugs. Empty = member of no project. */
+  projects: z.array(name).default([]),
+  manages: z.array(name).default([]),
+  /** Agentic turns per run (the SDK's maxTurns). */
+  max_turns: z.number().int().min(1).max(200).default(12),
+  /** Cost cap per run in USD; the run aborts past it (the SDK's maxBudgetUsd). */
+  budget_usd_per_run: z.number().min(0).max(50).default(0.5),
+});
+
+export type AgentManifest = z.infer<typeof agentManifest>;
 
 export const targetManifest = base
   .extend({

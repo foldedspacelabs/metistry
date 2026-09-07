@@ -61,6 +61,26 @@ console.log(`targets: ${targets.names().join(", ") || "(none)"}`);
 const origin = requireEnv("METISTRY_ORIGIN"); // canonical HTTPS origin (§4.2)
 const push = pushConfigFromEnv();
 if (!push) console.warn("web push absent: set METISTRY_VAPID_* to enable (degrades: absent)");
+
+// Note contents for mcp-brain's knowledge_read come from the reconciler's
+// vault bridge (D5) over HTTP with its own bearer — no vault mount in this
+// container. Unset → knowledge_read degrades to not_available, as before.
+const reconcilerUrl = process.env.METISTRY_RECONCILER_URL;
+const reconcilerToken = process.env.METISTRY_BRIDGE_TOKEN_RECONCILER;
+const readKnowledge =
+  reconcilerUrl && reconcilerToken
+    ? async (path: string): Promise<string | null> => {
+        const r = await fetch(`${reconcilerUrl.replace(/\/$/, "")}/vault/read?path=${encodeURIComponent(path)}`, {
+          headers: { authorization: `Bearer ${reconcilerToken}` },
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (r.status === 404) return null;
+        if (!r.ok) throw new Error(`vault bridge returned ${r.status}`);
+        const body = (await r.json()) as { content?: unknown };
+        return typeof body.content === "string" ? body.content : null;
+      }
+    : undefined;
+if (!readKnowledge) console.warn("vault bridge absent: set METISTRY_RECONCILER_URL + METISTRY_BRIDGE_TOKEN_RECONCILER for knowledge_read (degrades: absent)");
 const server = makeServer(pool, queries, {
   origin,
   inboxDir: optionalEnv("METISTRY_INBOX_DIR", "./inbox"),
@@ -73,6 +93,7 @@ const server = makeServer(pool, queries, {
   rules,
   targets,
   ...(push ? { push } : {}),
+  ...(readKnowledge ? { readKnowledge } : {}),
 });
 if (push) startNotifier(pool, push);
 

@@ -59,6 +59,12 @@ optional nudge line. Errors set `isError` and carry core's uniform envelope
 | `tasks_mine` | — | `{ tasks }` you hold |
 | `knowledge_search` | `query`, `limit?` | `{ tier, hits: [{ path, title, description }] }` |
 | `knowledge_read` | `path` (`Knowledge/...`) | `{ path, title, content }` |
+| `artifact_publish` | `project`, `slug`, `files: [{ path, content \| content_base64 }]`, `expected_current_version?` (id or `null` = must be new), `idempotency_key`, `message` | `{ artifact, version, links: { artifact, version, review }, deduplicated }` — `conflict` on a stale expected version |
+| `artifact_get` | `id`, `version?`, `path?` | `{ artifact, version, links, versions, threads, file? }` |
+| `artifact_list` | `project?`, `limit?` | `{ artifacts }` across your projects |
+| `artifact_comment` | `artifact`, `version`, `body`, `path?`, `anchor?`, `parent?` (reply to a root) | `{ comment }` or `{ demoted: true, proposal_id, cap }` past the agent-only cap |
+| `artifact_comment_resolve` | `id`, `reopen?` | `{ comment }` |
+| `artifact_dispatch_review` | `artifact`, `version`, `thread_ids`, `to_agent`, `message?`, `idempotency_key?` | `{ route: 'work', work, links }` inside the project; `{ route: 'proposal', proposal_id }` across the boundary |
 
 Policy refusals from the task list (`claimed`, `dependencies_open`,
 `not_holder`, `lease_expired`, …) are *outcomes*, returned as data; only a
@@ -103,12 +109,13 @@ createServer((req, res) => {
 | `tasks` | a `TasksService` over the same database |
 | `inboxDir` | where `capture` writes files (the triage row references them) |
 | `readKnowledge?` | `(path) => Promise<string \| null>` — absent → `knowledge_read` is `not_available` and `check()` reports `degraded` |
+| `artifacts?` | an `ArtifactsService` (`@foldedspacelabs/metistry-artifacts`) — absent → every `artifact_*` tool is `not_available` |
 | `leaseWarningSeconds?` | nudge threshold for a held lease (default 120) |
 | `version?` | reported to clients as the server version |
 
 The returned `BrainServer` has `handle(req, res)`, `check()` (the §4.3
 behavioral probe: selects the columns every tool depends on and runs the
-tasks module's own check), and `tools` (the eleven names, in manifest
+tasks module's own check), and `tools` (the seventeen names, in manifest
 order).
 
 **Transport.** Stateless Streamable HTTP: a fresh MCP server per request,

@@ -307,7 +307,11 @@ operator-facing parts of it happen:
 - **Weekly:** `metistry doctor` alongside the review routine; a `degraded`
   row is a finding even at exit 0 (a bridge lost a TCC grant, a push
   failed, migrations pending because someone ran `git pull` without
-  `update`).
+  `update`). The two deliberately use different silence thresholds: the
+  watchdog's `silent-collector` probe pages at `METISTRY_WATCHDOG_SILENCE_FACTOR`
+  (default 3×) a component's own manifest interval so it catches a stall
+  fast, while the weekly review's System section flags anything quiet for
+  a flat 7 days, matching its own weekly cadence.
 - **Quarterly:** the restore test (`ops/scripts/restore-test.sh`) —
   `metistry.lock`'s `migrations_applied` says which schema the dump was
   taken under.

@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { run } from "./run.js";
 
-function fakeDb() {
+function fakeDb(closedRows: { id: number; external_ref: string; kind: string }[] = [{ id: 1, external_ref: "", kind: "" }]) {
   const q: { text: string; values: unknown[] }[] = [];
   return {
     q,
     async query(text: string, values: unknown[] = []) {
       q.push({ text, values });
-      if (text.startsWith("UPDATE work")) return { rows: [{ id: 1 }] };
+      if (text.startsWith("UPDATE work SET status")) return { rows: closedRows };
       return { rows: [] };
     },
   };
@@ -81,5 +81,40 @@ describe("github-state collector", () => {
     expect(await needs(true, { ...theirs, requested_reviewers: [{ login: "me" }] }, approved)).toBe(true); // re-requested
     expect(await needs(true, { ...theirs, draft: true })).toBe(false);
     expect(await needs(false, theirs)).toBe(false); // /user degraded → never claims a review is mine
+  });
+
+  it("closed PRs are fetched for merged state; closed issues are not", async () => {
+    const db = fakeDb([
+      { id: 11, external_ref: "gh:o/r#5", kind: "pr" },
+      { id: 12, external_ref: "gh:o/r#6", kind: "issue" },
+    ]);
+    const calls: string[] = [];
+    const fetchFn = (async (url: string) => {
+      calls.push(url);
+      if (url.endsWith("/user")) return { ok: true, json: async () => ({ login: "me" }) };
+      if (url.includes("/reviews?")) return { ok: true, json: async () => [] };
+      if (url.includes("/pulls?")) return { ok: true, json: async () => [] }; // nothing open right now
+      if (url.endsWith("/pulls/5")) return { ok: true, json: async () => ({ merged_at: "2026-09-05T00:00:00Z" }) };
+      return { ok: true, json: async () => [] }; // open-issues listing: empty
+    }) as unknown as typeof fetch;
+    await run(db, { githubToken: "t", githubRepos: ["o/r"], fetchFn });
+    expect(calls.filter((u) => u.endsWith("/pulls/5"))).toHaveLength(1);
+    expect(calls.some((u) => u.endsWith("/pulls/6"))).toBe(false); // issue: no per-PR fetch
+    const metaUpdate = db.q.find((x) => x.text.startsWith("UPDATE work SET meta"));
+    expect(metaUpdate!.values).toEqual([11, JSON.stringify({ merged: true, merged_at: "2026-09-05T00:00:00Z" })]);
+  });
+
+  it("closed-without-merge sets meta.merged = false", async () => {
+    const db = fakeDb([{ id: 21, external_ref: "gh:o/r#8", kind: "pr" }]);
+    const fetchFn = (async (url: string) => {
+      if (url.endsWith("/user")) return { ok: true, json: async () => ({ login: "me" }) };
+      if (url.includes("/reviews?")) return { ok: true, json: async () => [] };
+      if (url.includes("/pulls?")) return { ok: true, json: async () => [] };
+      if (url.endsWith("/pulls/8")) return { ok: true, json: async () => ({ merged_at: null }) };
+      return { ok: true, json: async () => [] };
+    }) as unknown as typeof fetch;
+    await run(db, { githubToken: "t", githubRepos: ["o/r"], fetchFn });
+    const metaUpdate = db.q.find((x) => x.text.startsWith("UPDATE work SET meta"));
+    expect(metaUpdate!.values).toEqual([21, JSON.stringify({ merged: false, merged_at: null })]);
   });
 });

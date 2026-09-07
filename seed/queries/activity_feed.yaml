@@ -1,0 +1,104 @@
+# Seeded default (D4 overlay: an instance file of the same name wins).
+name: activity_feed
+description: Time-ordered "what happened" across the system (docs/product/desktop-app-plan.md "The window" — home panel) — a union of runs (tool/turn/crew_run/dispatch/task_op/agent_admin/project_mode, plus collector_run failures only), proposals (created + decided), work.history entries, and outbound_messages (brief/review/alert). Filterable by agent/project; the weekly review is this feed summarised.
+params:
+  hours:   { type: int,  default: 24 }
+  limit:   { type: int,  default: 100 }
+  agent:   { type: text, default: "" }   # blank = every actor
+  project: { type: text, default: "" }   # blank = every project
+sql: |
+  WITH feed AS (
+    SELECT
+      r.ts,
+      r.kind                                                                            AS kind,
+      r.component                                                                        AS actor,
+      CASE
+        WHEN r.kind IN ('tool', 'dispatch')  THEN r.tool
+        WHEN r.kind = 'task_op'              THEN 'work:' || (r.meta->>'id')
+        WHEN r.kind = 'agent_admin'          THEN r.meta->>'agent'
+        WHEN r.kind = 'project_mode'         THEN r.meta->>'project'
+        ELSE r.kind
+      END                                                                                 AS subject,
+      CASE
+        WHEN r.kind = 'tool'          THEN concat_ws(' ', 'called', r.tool, CASE WHEN r.ok = false THEN '(failed)' END)
+        WHEN r.kind = 'turn'          THEN concat_ws(' ', 'turn', r.model, CASE WHEN r.cost_usd IS NOT NULL THEN '$' || r.cost_usd::text END)
+        WHEN r.kind = 'crew_run'      THEN concat_ws(' ', 'crew run', r.model, CASE WHEN r.ok = false THEN 'failed: ' || coalesce(r.error, '') ELSE 'ok' END)
+        WHEN r.kind = 'dispatch'      THEN concat_ws(' ', 'dispatched to', r.tool, CASE WHEN r.ok = false THEN 'refused: ' || coalesce(r.error, '') ELSE 'ok' END)
+        WHEN r.kind = 'task_op'       THEN concat_ws(' ', r.meta->>'op', 'work #' || (r.meta->>'id'))
+        WHEN r.kind = 'agent_admin'   THEN concat_ws(' ', r.meta->>'op', r.meta->>'agent')
+        WHEN r.kind = 'project_mode'  THEN concat_ws(' ', r.meta->>'from', '->', r.meta->>'to', coalesce(r.meta->>'reason', ''))
+        WHEN r.kind = 'collector_run' THEN concat_ws(' ', 'collector failed', coalesce(r.error, ''))
+        ELSE coalesce(r.error, '')
+      END                                                                                 AS detail,
+      'runs:' || r.id                                                                     AS ref,
+      r.meta->>'project'                                                                  AS proj
+    FROM runs r
+    WHERE r.ts > now() - make_interval(hours => (:hours)::int)
+      AND (
+        r.kind IN ('tool', 'turn', 'crew_run', 'dispatch', 'task_op', 'agent_admin', 'project_mode')
+        OR (r.kind = 'collector_run' AND r.ok = false)
+      )
+
+    UNION ALL
+
+    SELECT
+      p.ts,
+      'proposal_created'                                                                 AS kind,
+      p.source_agent                                                                      AS actor,
+      p.kind                                                                               AS subject,
+      coalesce(p.payload->>'title', p.payload->>'reason', p.kind)                          AS detail,
+      'proposals:' || p.id                                                                 AS ref,
+      p.payload->>'project'                                                                AS proj
+    FROM proposals p
+    WHERE p.ts > now() - make_interval(hours => (:hours)::int)
+
+    UNION ALL
+
+    SELECT
+      p.decided_at                                                                        AS ts,
+      'proposal_decided'                                                                  AS kind,
+      p.source_agent                                                                      AS actor,
+      p.kind                                                                               AS subject,
+      concat_ws(': ', p.decision, p.feedback)                                              AS detail,
+      'proposals:' || p.id                                                                 AS ref,
+      p.payload->>'project'                                                                AS proj
+    FROM proposals p
+    WHERE p.decided_at IS NOT NULL
+      AND p.decision <> 'pending'
+      AND p.decided_at > now() - make_interval(hours => (:hours)::int)
+
+    UNION ALL
+
+    SELECT
+      (h->>'ts')::timestamptz                                                             AS ts,
+      'work_history'                                                                      AS kind,
+      h->>'agent'                                                                          AS actor,
+      w.title                                                                              AS subject,
+      concat_ws(' ', h->>'op', CASE WHEN h->>'status' IS NOT NULL THEN '-> ' || (h->>'status') END, h->>'note') AS detail,
+      'work:' || w.id                                                                      AS ref,
+      w.project                                                                            AS proj
+    FROM work w
+    CROSS JOIN LATERAL jsonb_array_elements(w.history) AS h
+    WHERE (h->>'ts')::timestamptz > now() - make_interval(hours => (:hours)::int)
+
+    UNION ALL
+
+    SELECT
+      m.ts,
+      m.kind                                                                               AS kind,
+      'assistant'                                                                          AS actor,
+      m.kind                                                                               AS subject,
+      m.text                                                                                AS detail,
+      'outbound_messages:' || m.id                                                          AS ref,
+      NULL::text                                                                            AS proj
+    FROM outbound_messages m
+    WHERE m.kind IN ('brief', 'review', 'alert')
+      AND m.ts > now() - make_interval(hours => (:hours)::int)
+  )
+  SELECT ts, kind, actor, subject, left(detail, 200) AS detail, ref
+  FROM feed
+  WHERE (:agent = '' OR actor = :agent)
+    AND (:project = '' OR proj = :project)
+  ORDER BY ts DESC
+  LIMIT :limit
+cache_ttl: 0

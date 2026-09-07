@@ -10,7 +10,7 @@ import { validateManifest } from "@foldedspacelabs/metistry-core";
 import { TasksService } from "@foldedspacelabs/metistry-tasks";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { computeNudge, createBrainServer, sanitizeDeep, TOOL_NAMES, underAreas, validKnowledgePath, type AgentPrincipal, type Db } from "../src/index.js";
+import { allProjects, computeNudge, createBrainServer, memberOf, sanitizeDeep, TOOL_NAMES, underAreas, validKnowledgePath, type AgentPrincipal, type Db } from "../src/index.js";
 
 describe("manifest", () => {
   it("validates through core and exposes exactly the registered tools, in order", () => {
@@ -61,9 +61,10 @@ function fakeDb(ready: Record<string, number>, held: { id: number; project: stri
       if (text.startsWith("INSERT INTO runs")) return { rows: [{ id: 1 }] };
       if (text.startsWith("UPDATE runs")) return { rows: [] };
       if (text.includes("FROM work w") && text.includes("w.status = 'open'")) {
-        const project = values?.[0] as string;
-        const n = ready[project] ?? 0;
-        return { rows: Array.from({ length: n }, (_, i) => ({ id: i + 1, title: `t${i}`, project, kind: "task", status: "open", depends_on: [], history: [] })) };
+        const project = values?.[0] as string | null;
+        const row = (p: string, i: number) => ({ id: i + 1, title: `t${i}`, project: p, kind: "task", status: "open", depends_on: [], history: [] });
+        if (project === null) return { rows: Object.entries(ready).flatMap(([p, n]) => Array.from({ length: n }, (_, i) => row(p, i))) }; // unfiltered read
+        return { rows: Array.from({ length: ready[project] ?? 0 }, (_, i) => row(project, i)) };
       }
       if (text.includes("w.claimed_by = $1")) {
         return { rows: held.map((h) => ({ id: h.id, title: "x", project: h.project, kind: "task", status: "in_progress", lease_expires_at: h.lease, depends_on: [], history: [] })) };
@@ -94,6 +95,36 @@ describe("nudge (server-side, deterministic)", () => {
 
   it("is absent when nothing is waiting", async () => {
     expect(await computeNudge(new TasksService(fakeDb({}, [])), alice, { leaseWarningSeconds: 120 })).toBeNull();
+  });
+
+  it("an every-project (internal, no list) principal is nudged for every project from one unfiltered read, and for every lease it holds", async () => {
+    const now = Date.parse("2026-09-06T12:00:00Z");
+    const hub: AgentPrincipal = { id: "assistant", kind: "internal", grants: { tier: "none", areas: [] }, projects: [] };
+    const db = fakeDb({ zeta: 2, alpha: 1 }, [{ id: 10, project: "other", lease: new Date(now + 1_000) }]);
+    const line = await computeNudge(new TasksService(db), hub, { leaseWarningSeconds: 120 }, now);
+    expect(line).toBe("nudge: 1 task ready in project alpha — call tasks_list_ready; 2 tasks ready in project zeta — call tasks_list_ready; claim on task #10 expires in 1s — call tasks_heartbeat");
+    expect(db.log.filter((l) => l.startsWith("SELECT id, title,")).length).toBe(2); // one ready read + one held read, not one per project
+  });
+});
+
+describe("project scope rule (scope.ts)", () => {
+  const ext = (projects: string[]): AgentPrincipal => ({ id: "x", grants: { tier: "none", areas: [] }, projects });
+  const int = (projects: string[]): AgentPrincipal => ({ id: "assistant", kind: "internal", grants: { tier: "none", areas: [] }, projects });
+
+  it("external: exactly the list; empty = none", () => {
+    expect(memberOf(ext(["p1"]), "p1")).toBe(true);
+    expect(memberOf(ext(["p1"]), "p2")).toBe(false);
+    expect(memberOf(ext([]), "p1")).toBe(false);
+    expect(allProjects(ext([]))).toBe(false);
+  });
+
+  it("internal: empty = every project, a list narrows; a null project is never a member for anyone", () => {
+    expect(allProjects(int([]))).toBe(true);
+    expect(memberOf(int([]), "anything")).toBe(true);
+    expect(allProjects(int(["p1"]))).toBe(false);
+    expect(memberOf(int(["p1"]), "p2")).toBe(false);
+    expect(memberOf(int([]), null)).toBe(false);
+    expect(memberOf(ext(["p1"]), null)).toBe(false);
   });
 });
 

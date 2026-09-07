@@ -16,7 +16,14 @@ export type Tier = "none" | "index" | "areas";
  */
 export interface AgentPrincipal {
   id: string;
+  /**
+   * `external` (the default when absent): a foreign agent under user-issued
+   * grants. `internal`: the instance's own assistant, whose scope comes from
+   * configuration in the user's hand (§4.11). The only rule that reads it is
+   * project membership (scope.ts): internal + empty `projects` = every project.
+   */
+  kind?: "external" | "internal" | undefined;
   grants: { tier: Tier; areas: string[] };
-  /** Project membership — the collaboration boundary for every tasks_* tool. */
+  /** Project membership — the collaboration boundary for every tasks_* tool (scope.ts holds the internal rule). */
   projects: string[];
 }

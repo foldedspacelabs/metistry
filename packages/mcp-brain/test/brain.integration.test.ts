@@ -10,6 +10,7 @@ import pg from "pg";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { TasksService } from "@foldedspacelabs/metistry-tasks";
+import { EmbedUnavailableError } from "@foldedspacelabs/metistry-core";
 import { createBrainServer, sha256Text, TOOL_NAMES, type AgentPrincipal, type VaultWriteRequest } from "../src/index.js";
 
 try {
@@ -26,6 +27,21 @@ const ALICE = "itest-brain-alice";
 const BOB = "itest-brain-bob";
 const HUB = "itest-brain-hub";
 const AREA = "Knowledge/Areas/Itest";
+const EMBED_MODEL = "itest-embed";
+const EMBED_DIM = 768;
+
+/** Deterministic stand-in for a real embedding: a normalized bag of words. */
+function fakeVector(text: string): number[] {
+  const v = new Array<number>(EMBED_DIM).fill(0);
+  for (const word of text.toLowerCase().match(/[a-z0-9]+/g) ?? []) {
+    let h = 2166136261;
+    for (let i = 0; i < word.length; i++) h = Math.imul(h ^ word.charCodeAt(i), 16777619);
+    v[Math.abs(h) % EMBED_DIM] += 1;
+  }
+  const norm = Math.hypot(...v) || 1;
+  return v.map((x) => x / norm);
+}
+const vectorOf = (text: string) => `[${fakeVector(text).join(",")}]`;
 
 interface Parsed {
   isError: boolean;
@@ -40,6 +56,7 @@ describe.skipIf(!hasDb)("mcp-brain (real db, real MCP client)", () => {
   // principals are keyed by token: the bridge never sees a token, only what authenticate() returns
   const principals = new Map<string, AgentPrincipal>();
   let vault: Record<string, string> | null = null; // the injected reader; null = no read path
+  let embedderDown = false; // the injected query embedder, switched off to prove the degrade
   const writes: VaultWriteRequest[] = []; // the injected writer records what would reach the vault bridge
 
   const grant = (token: string, p: AgentPrincipal) => principals.set(token, p);
@@ -89,6 +106,16 @@ describe.skipIf(!hasDb)("mcp-brain (real db, real MCP client)", () => {
       tasks: new TasksService(pool),
       inboxDir: `/tmp/metistry-test-inbox-brain-${Date.now()}`,
       readKnowledge: async (path) => (vault ? (vault[path] ?? null) : null),
+      // A deterministic stand-in for nomic-embed-text: a normalized
+      // bag-of-words vector. It only has to be stable and to put lexically
+      // related text closer, which is all an ordering assertion needs.
+      embedder: {
+        model: EMBED_MODEL,
+        embedOne: async (q: string) => {
+          if (embedderDown) throw new EmbedUnavailableError("stub embedder is down");
+          return fakeVector(q);
+        },
+      },
       writeKnowledge: async (r) => {
         writes.push(r);
         const cur = vault?.[r.path];
@@ -330,11 +357,16 @@ describe.skipIf(!hasDb)("mcp-brain (real db, real MCP client)", () => {
     const idx = await connect("tok-index");
     const s = await call(idx, "knowledge_search", { query: "ALPHA" });
     expect(s.body.tier).toBe("index");
+    expect(s.body.mode).toBe("keyword"); // nothing embedded yet: the default is keyword, not empty
     expect(s.body.hits).toEqual([
-      { path: "Knowledge/Areas/Itest/Alpha.md", title: "Alpha note", description: "about alpha" },
-      { path: "Knowledge/Areas/Other/Gamma.md", title: "Gamma alpha", description: null },
+      { path: "Knowledge/Areas/Itest/Alpha.md", title: "Alpha note", description: "about alpha", score: 1 },
+      { path: "Knowledge/Areas/Other/Gamma.md", title: "Gamma alpha", description: null, score: 0.5 },
     ]); // the draft matched "alpha" and is invisible
-    expect((await call(idx, "knowledge_search", { query: "beta" })).body.hits).toEqual([{ path: "Knowledge/Areas/Itest/Sub/Beta.md", title: "Beta", description: null }]);
+    expect((await call(idx, "knowledge_search", { query: "beta" })).body.hits).toEqual([{ path: "Knowledge/Areas/Itest/Sub/Beta.md", title: "Beta", description: null, score: 1 }]);
+    // an explicit mode with nothing embedded answers in keyword and says so, rather than failing or returning empty
+    const askedSemantic = await call(idx, "knowledge_search", { query: "ALPHA", mode: "semantic" });
+    expect(askedSemantic.isError).toBe(false);
+    expect(askedSemantic.body).toMatchObject({ mode: "keyword", degraded: expect.stringContaining("no embeddings stored") });
     expect((await call(idx, "knowledge_search", { query: "%" })).body.hits).toEqual([]); // LIKE metacharacters are literal
     expect(await call(idx, "knowledge_read", { path: "Knowledge/Areas/Itest/Alpha.md" })).toMatchObject({ isError: true, body: { error: { code: "forbidden" } } });
     await idx.close();
@@ -363,6 +395,80 @@ describe.skipIf(!hasDb)("mcp-brain (real db, real MCP client)", () => {
     expect(rows[0]).toMatchObject({ tool: "knowledge_search", ok: false, error: "forbidden", meta: { via: "mcp-brain", tier: "none" } });
     const okRead = rows.find((r) => r.tool === "knowledge_read" && r.ok === true);
     expect(okRead?.meta).toMatchObject({ tier: "areas", areas: [AREA], path: "Knowledge/Areas/Itest/Alpha.md" });
+  });
+
+  it("knowledge_search modes: semantic/hybrid rank, the grant still filters in SQL, a dead embedder degrades to keyword", async () => {
+    // The reconciler owns these rows in production; here they are seeded
+    // directly so the bridge's SQL — not the reconciler — is what is tested.
+    // Gamma is deliberately the CLOSEST note and outside the area grant.
+    const chunks: Array<[string, string]> = [
+      ["Knowledge/Areas/Other/Gamma.md", "plumber basement tank replacement"],
+      ["Knowledge/Areas/Itest/Alpha.md", "the tank down in the basement is old and the plumber quoted a replacement for it sometime next spring"],
+      ["Knowledge/Areas/Itest/Sub/Beta.md", "an unrelated note about nothing much at all"],
+      ["Knowledge/Areas/Itest/Draft.md", "plumber basement tank replacement, but unsettled"],
+    ];
+    const open: Array<{ close(): Promise<void> }> = [];
+    try {
+      for (const [path, text] of chunks) {
+        await pool.query(
+          `INSERT INTO embeddings (path, chunk_index, content, model, dim, embedding, content_hash)
+           VALUES ($1, 0, $2, $3, $4, $5::vector, $6)
+           ON CONFLICT (path, chunk_index, model) DO UPDATE SET embedding = EXCLUDED.embedding`,
+          [path, text, EMBED_MODEL, EMBED_DIM, vectorOf(text), sha256Text(text)],
+        );
+      }
+
+      grant("tok-mode-index", { id: ALICE, grants: { tier: "index", areas: [] }, projects: [] });
+      const idx = await connect("tok-mode-index");
+      open.push(idx);
+      const q = "plumber basement tank replacement";
+
+      // semantic: ranked by the vectors, drafts still absent, every hit scored
+      const sem = await call(idx, "knowledge_search", { query: q, mode: "semantic" });
+      expect(sem.isError).toBe(false);
+      expect(sem.body.mode).toBe("semantic");
+      expect(sem.body.hits.map((h: any) => h.path)).not.toContain("Knowledge/Areas/Itest/Draft.md");
+      expect(sem.body.hits[0].path).toBe("Knowledge/Areas/Other/Gamma.md"); // the closest chunk
+      expect(sem.body.hits[0].score).toBeGreaterThan(sem.body.hits[1].score);
+      // an index grant sees titles and descriptions — never the chunk text that produced the match
+      expect(Object.keys(sem.body.hits[0]).sort()).toEqual(["description", "path", "score", "title"]);
+
+      // hybrid: fuses, and asking for nothing at all now picks hybrid
+      const hyb = await call(idx, "knowledge_search", { query: q, mode: "hybrid" });
+      expect(hyb.body.mode).toBe("hybrid");
+      expect(hyb.body.hits.length).toBeGreaterThan(0);
+      expect(hyb.body.hits.every((h: any) => h.score > 0 && h.score < 1)).toBe(true); // RRF, not a similarity
+      expect((await call(idx, "knowledge_search", { query: q })).body.mode).toBe("hybrid");
+
+      // the grant filters in SQL: Gamma is the best vector match and stays invisible
+      grant("tok-mode-areas", { id: ALICE, grants: { tier: "areas", areas: [AREA] }, projects: [] });
+      const ar = await connect("tok-mode-areas");
+      open.push(ar);
+      for (const mode of ["semantic", "hybrid"] as const) {
+        const r = await call(ar, "knowledge_search", { query: q, mode });
+        expect(r.body.hits.map((h: any) => h.path).sort(), mode).toEqual(["Knowledge/Areas/Itest/Alpha.md", "Knowledge/Areas/Itest/Sub/Beta.md"]);
+      }
+
+      // a dead embedder costs the ranking, never the answer
+      embedderDown = true;
+      const dead = await call(ar, "knowledge_search", { query: "alpha", mode: "semantic" });
+      embedderDown = false;
+      expect(dead.isError).toBe(false);
+      expect(dead.body).toMatchObject({ mode: "keyword", degraded: expect.stringContaining("embedder unavailable") });
+      expect(dead.body.hits.map((h: any) => h.path)).toEqual(["Knowledge/Areas/Itest/Alpha.md"]);
+
+      // the mode that actually ran is on the audit row, next to the one asked for
+      const { rows } = await pool.query(
+        `SELECT meta FROM runs WHERE component = $1 AND tool = 'knowledge_search' AND meta ? 'mode' ORDER BY id DESC LIMIT 1`,
+        [ALICE],
+      );
+      expect(rows[0]!.meta).toMatchObject({ mode: "keyword", requested: "semantic" });
+    } finally {
+      // later suites in this file assume a keyword-only index
+      embedderDown = false;
+      await pool.query(`DELETE FROM embeddings WHERE model = $1`, [EMBED_MODEL]);
+      for (const c of open) await c.close();
+    }
   });
 
   it("knowledge_write: internal only (external → not granted, nothing reaches the vault); bare Knowledge/ grant reads root notes and searches everything; provenance + CAS round trip; audited", async () => {

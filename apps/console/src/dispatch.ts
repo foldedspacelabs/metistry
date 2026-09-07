@@ -195,6 +195,13 @@ export class TargetRegistry {
   async check(name: string): Promise<CheckResult> {
     const m = this.targets.get(name);
     if (!m) return { name, status: "absent", latency_ms: 0, probe: "registry lookup", remediation: "no such target" };
+    if (m.transport === "local") {
+      // crews (docs/ops/crews.md): dispatched by the assistant's crew_dispatch tool, run by the assistant
+      // container's drain loop. Loaded + policy-checkable here; the runner itself is not probed from the console.
+      return runCheck(name, "manifest loaded; dispatch is the assistant's crew_dispatch tool (runner in the assistant container, not probed here)", async () => ({
+        meta: { via: "crew_dispatch", submit: m.submit, result: m.result },
+      }));
+    }
     if (m.transport !== "github") {
       return runCheck(name, `dispatcher for transport ${m.transport}`, async () => ({
         status: "absent",
@@ -311,7 +318,9 @@ export async function dispatch(
 
   if (target.transport !== "github") {
     await finishRun(db, runId, { ok: false, error: `transport ${target.transport} not dispatchable` });
-    return { ok: false, code: "invalid_request", message: `transport ${target.transport} has no dispatcher in this console yet` };
+    // a local target is a crew's: it is dispatched by the assistant's crew_dispatch tool (apps/console/src/crews.ts), never by this route
+    const message = target.transport === "local" ? `transport local is dispatched by the assistant's crew_dispatch tool, not by this route (docs/ops/crews.md)` : `transport ${target.transport} has no dispatcher in this console yet`;
+    return { ok: false, code: "invalid_request", message };
   }
 
   if (!registry.available(target)) {

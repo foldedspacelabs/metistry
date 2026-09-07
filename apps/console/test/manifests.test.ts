@@ -52,6 +52,7 @@ describe("every shipped manifest validates (invariant 5)", () => {
     const reg = new TargetRegistry({ env: {} });
     const loaded = await reg.loadDir(`${root}targets`);
     expect(loaded).toContain("github-issues");
+    expect(loaded).toContain("local-crew");
     expect(reg.names()).toEqual(loaded);
   });
 });

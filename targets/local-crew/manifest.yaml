@@ -1,0 +1,44 @@
+# The local compute target (plan §4.18.B "local subagents", Phase 5 crews).
+# A crew — `agents/<area>/<name>.md` in the instance repo — runs in the
+# assistant container itself, on the same subscription, against the same
+# console `/mcp`, with a per-run credential and only the tool groups its
+# manifest names. Nothing here reaches a third party.
+#
+# Dispatch is the assistant's `crew_dispatch` tool (mcp-brain). The console
+# checks the brief with the SAME enforcement every target gets
+# (apps/console/src/dispatch.ts `checkBrief`), against a policy that is this
+# target's `data_policy` narrowed by the crew's `scope`: a brief may cite a
+# vault path only if it is under BOTH. Refused briefs never become a work row.
+name: local-crew
+type: target
+description: Run a manifest-defined crew locally in the assistant container — durable work row in, report queue + runs out
+transport: local
+submit:
+  # how work goes in: a `work` row (kind task, owner crew:<name>, meta.brief +
+  # a snapshot of the crew manifest) that the assistant's drain loop claims
+  via: work_queue
+  owner_prefix: "crew:"
+result:
+  # the ONLY return path (§4.18.B): whatever the crew says with `report` /
+  # `capture` / `tasks_*`, plus one `runs` row per run on the crew's own id
+  # (component = crew name, kind = crew_run: cost, tokens, tools used).
+  via: report_queue
+  runs_kind: crew_run
+# no auth ref: the credential is minted per run by the runner and burned after
+cost:
+  per_run_estimate_usd: 0 # the real cost lands on the crew_run row from the SDK's estimate
+data_policy:
+  # The widest a crew's scope may reach. The crew manifest narrows this
+  # (scope ∩ allow); a crew whose scope names nothing here can cite no path.
+  # Personal roots (Journal, People, Me, Decisions) are absent on purpose:
+  # widen per instance in an overlay dir (METISTRY_TARGETS_DIRS), never here.
+  allow:
+    - Knowledge/Areas
+    - Knowledge/Projects
+    - Knowledge/Resources
+    - Knowledge/Techniques
+  # comms-derived text stays out of briefs even locally: a crew's brief is a
+  # reviewable artifact (§4.11) and the assistant can read the thread itself
+  deny_sources:
+    - comms
+  max_brief_bytes: 65536

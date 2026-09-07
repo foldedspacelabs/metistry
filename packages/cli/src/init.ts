@@ -15,6 +15,7 @@ import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { mintToken } from "@foldedspacelabs/metistry-core";
 import { realExec, type Exec } from "./exec.js";
+import { LOCK_FILENAME, serializeLock, type LockFile, type LockSource } from "./lock.js";
 
 export interface InitOptions {
   dir: string;
@@ -26,6 +27,10 @@ export interface InitOptions {
   seedDir: string;
   /** Product release pinned into metistry.lock. */
   version: string;
+  /** Product commit pinned into metistry.lock ("unknown" when init runs from the bundled seed, with no checkout). */
+  productCommit?: string | undefined;
+  /** How the product got here (docs/ops/cli.md): a git checkout `update` fast-forwards, or a pinned release. */
+  productSource?: LockSource | undefined;
   exec?: Exec | undefined;
   now?: Date | undefined;
   mint?: (() => string) | undefined;
@@ -59,14 +64,10 @@ export function applyName(identityYaml: string, name: string): string {
     .replace(/^mention:.*$/m, `mention: ${JSON.stringify(mentionFor(name))}`);
 }
 
-export function lockFile(version: string, now: Date): string {
-  return [
-    "# metistry.lock — the product release this instance runs (plan §4.16).",
-    "# `metistry update` moves the pin; edit by hand only to roll back.",
-    `version: ${version}`,
-    `created: ${now.toISOString().slice(0, 10)}`,
-    "",
-  ].join("\n");
+/** The lock `init` writes: the same shape `update` moves (lock.ts). No db yet, so no migrations are recorded. */
+export function lockFile(version: string, now: Date, commit = "unknown", source: LockSource = "git"): string {
+  const lock: LockFile = { product: { version, commit, source }, updated_at: now.toISOString(), migrations_applied: [] };
+  return serializeLock(lock);
 }
 
 async function isEmptyDir(dir: string): Promise<boolean> {
@@ -115,7 +116,7 @@ export async function init(opts: InitOptions): Promise<InitResult> {
     `# Instance repo — private. Vault + config; created ${now.toISOString().slice(0, 10)} by \`metistry init\` (product docs/ops/cli.md).\n`,
   );
   await writeFile(join(dir, ".gitignore"), GITIGNORE);
-  await writeFile(join(dir, "metistry.lock"), lockFile(opts.version, now));
+  await writeFile(join(dir, LOCK_FILENAME), lockFile(opts.version, now, opts.productCommit ?? "unknown", opts.productSource ?? "git"));
 
   // its own repo: never a git relationship with the product (§4.16)
   const gitEnv = {

@@ -10,7 +10,13 @@ cd "$(dirname -- "$0")/.."
 swiftc -O -framework EventKit -framework Foundation \
   -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker helper/Info.plist \
   helper/ek-helper.swift -o helper/ek-helper
-IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null | grep -o '"Developer ID Application[^"]*"' | head -1 | tr -d '"') || true
+# METISTRY_SIGN_IDENTITY pins a specific identity (e.g. multiple Developer ID
+# certs installed); unset falls back to auto-detecting the first Developer ID
+# Application identity, then to ad-hoc (docs/ops/apple-signing.md §3).
+IDENTITY="${METISTRY_SIGN_IDENTITY:-}"
+if [ -z "$IDENTITY" ]; then
+  IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null | grep -o '"Developer ID Application[^"]*"' | head -1 | tr -d '"') || true
+fi
 if [ -n "${IDENTITY:-}" ]; then
   codesign --force --options runtime --identifier com.foldedspacelabs.metistry.eventkit --sign "$IDENTITY" helper/ek-helper
   echo "signed: $IDENTITY"

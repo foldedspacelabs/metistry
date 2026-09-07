@@ -227,6 +227,16 @@ async function sectionSystem(db: Db, now: Date): Promise<string[]> {
     const n = alerts.rows.reduce((s: number, r: any) => s + num(r.n), 0);
     lines.push(`• ${plural(n, "watchdog alert")}: ${alerts.rows.map((r: any) => `"${String(r.text).split("\n")[0]!.slice(0, 50)}" ×${num(r.n)}`).join(", ")}`);
   }
+  // §4.21 kill switch: projects the budget flipped to review mode this week (the user's own toggles are not news)
+  const flips = await db.query(
+    `SELECT meta->>'project' AS project, count(*) AS n FROM runs
+     WHERE kind = 'project_mode' AND ok AND meta->>'to' = 'review' AND ts > $1::timestamptz - interval '7 days'
+     GROUP BY 1 ORDER BY n DESC, 1 LIMIT 5`,
+    [now],
+  );
+  if (flips.rows.length > 0) {
+    lines.push(`• budget flipped to review mode: ${flips.rows.map((r: any) => `${r.project}${num(r.n) > 1 ? ` ×${num(r.n)}` : ""}`).join(", ")}`);
+  }
   const inbox = await db.query(
     `SELECT count(*) AS n, min(ts) AS oldest FROM inbox WHERE triaged_at IS NULL AND status IN ('new', 'classified')`,
   );

@@ -86,4 +86,19 @@ describe("morning brief (D10 soft budget)", () => {
     expect(briefText).toContain("1 failed run(s)");
     expect(briefText).toContain("calendar bridge");
   });
+
+  it("a budget flip to review mode (runs kind project_mode, §4.21) is enough to break the silence and is named in the system section", async () => {
+    let briefText = "";
+    const db = {
+      async query(t: string, v?: unknown[]) {
+        if (t.includes("kind = 'project_mode'")) return { rows: [{ meta: { project: "drey", from: "autonomous", to: "review", reason: "budget", spend_usd: 12.5, budget_usd: 10 } }, { meta: { project: "x", to: "autonomous" } }] };
+        if (t.includes("FROM runs")) return { rows: [{ runs_ok: 3, turns: 0, captures: 0, failures: 0, spend: 12.5 }] };
+        if (t.includes("INSERT INTO outbound_messages")) { briefText = String(v![0]); return { rows: [] }; }
+        return { rows: [] };
+      },
+    };
+    expect(await run(db)).toBe(1);
+    expect(briefText).toContain("• ⚠ project drey flipped to review mode: budget (12.50 of 10.00 USD) — agent-to-agent review is queued for you until you switch it back");
+    expect(briefText).not.toContain("project x");
+  });
 });

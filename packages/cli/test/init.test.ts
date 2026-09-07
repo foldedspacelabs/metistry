@@ -30,7 +30,7 @@ describe("metistry init", () => {
     expect(existsSync(join(dir, "rules.yaml"))).toBe(true);
     expect(existsSync(join(dir, "inbox"))).toBe(true);
     for (const d of INSTANCE_DIRS) expect(existsSync(join(dir, d, ".gitkeep")), d).toBe(true);
-    expect(readFileSync(join(dir, ".gitignore"), "utf8")).toBe("inbox/\n.obsidian/workspace*\n");
+    expect(readFileSync(join(dir, ".gitignore"), "utf8")).toBe("inbox/\nstate/\n.obsidian/workspace*\n");
     expect(readFileSync(join(dir, "README.md"), "utf8")).toMatch(/^# Instance repo — private\./);
     expect(readFileSync(join(dir, "metistry.lock"), "utf8")).toBe(lockFile("1.2.3", new Date("2026-09-07T12:00:00Z")));
     // the documented lock shape (docs/ops/cli.md) — the same one `metistry update` moves; no db at init, so no migrations recorded

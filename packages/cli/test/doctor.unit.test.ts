@@ -103,6 +103,7 @@ describe("doctor: everything healthy", () => {
     const r = byName(report.rows);
     expect(report.ok).toBe(true);
     expect(report.rows.map((x) => `${x.kind}:${x.name}=${x.status}`)).toEqual([
+      "deployment:deployment=ok",
       "collector:good=ok",
       "bridge:x=ok",
       "bridge:y=absent",
@@ -141,7 +142,7 @@ describe("doctor: everything healthy", () => {
     expect(await main(["doctor", "--product-dir", productDir], { out: (s) => out.push(s), doctorDeps: deps })).toBe(0);
     const text = out.join("\n");
     expect(text).toMatch(/^name\s+kind\s+status\s+ms\s+remediation/);
-    expect(text).toMatch(/9 checks: 7 ok, 0 degraded, 0 failed, 2 absent — healthy/);
+    expect(text).toMatch(/10 checks: 8 ok, 0 degraded, 0 failed, 2 absent — healthy \(.*, shape compose\)/);
     expect(text).not.toMatch(/launchd:/); // linux: no launchd rows
     expect(text).toMatch(/^compose\s+compose\s+absent\s+\d+\s+docker not found/m);
 
@@ -149,8 +150,43 @@ describe("doctor: everything healthy", () => {
     expect(await main(["doctor", "--product-dir", productDir, "--json"], { out: (s) => json.push(s), doctorDeps: deps })).toBe(0);
     const parsed = JSON.parse(json.join("\n"));
     expect(parsed.ok).toBe(true);
-    expect(parsed.rows).toHaveLength(9);
+    expect(parsed.rows).toHaveLength(10);
+    expect(parsed.shape).toBe("compose");
     expect(parsed.rows.every((r: DoctorRow) => typeof r.latency_ms === "number" && typeof r.probe === "string")).toBe(true);
+  });
+});
+
+describe("doctor: the launchd shape", () => {
+  it("reports the shape, probes the shaped jobs as launchd, and never consults docker", async () => {
+    const productDir = await checkout();
+    const calls: string[] = [];
+    const inner = fakeExec({ docker: { code: 127 } });
+    const exec: Exec = async (cmd, args, opts) => {
+      calls.push(cmd);
+      return inner(cmd, args, opts);
+    };
+    const report = await doctor({
+      productDir,
+      env,
+      deployment: { shape: "launchd", services: {} },
+      fetchFn: fakeFetch({}),
+      db: null,
+      exec,
+      platform: "darwin",
+      uid: 501,
+    });
+    expect(report.shape).toBe("launchd");
+    expect(report.rows[0]).toMatchObject({ kind: "deployment", name: "deployment", status: "ok" });
+    expect(report.rows[0]!.meta).toMatchObject({ shape: "launchd", services: { db: "launchd", console: "launchd", assistant: "launchd", reconciler: "launchd", watchdog: "launchd" } });
+    // no container runtime is consulted at all
+    expect(calls).not.toContain("docker");
+    expect(report.rows.some((r) => r.kind === "container" || r.kind === "compose")).toBe(false);
+
+    const r = byName(report.rows);
+    // every remediation is written for the shape the install actually has
+    expect(r.console?.remediation).toMatch(/launchctl kickstart -k gui\/\$\(id -u\)\/com\.foldedspacelabs\.metistry\.console/);
+    expect(r.console?.remediation).not.toMatch(/docker/);
+    expect(r.y?.remediation).toMatch(/default http:\/\/127\.0\.0\.1:7902/);
   });
 });
 
@@ -198,7 +234,7 @@ describe("doctor: failed", () => {
     });
     const r = byName(report.rows);
     expect(report.ok).toBe(false);
-    expect(r.x).toMatchObject({ status: "failed", remediation: expect.stringMatching(/x down at http:\/\/127\.0\.0\.1:7901 \(connect ECONNREFUSED.*\) — restart the x service/) });
+    expect(r.x).toMatchObject({ status: "failed", remediation: expect.stringMatching(/x down at http:\/\/127\.0\.0\.1:7901 \(connect ECONNREFUSED.*\) — docker compose up -d x/) });
     expect(r.console).toMatchObject({ status: "failed", remediation: expect.stringMatching(/\/health returned 500/) });
     expect(r.db).toMatchObject({ status: "failed", remediation: expect.stringMatching(/ECONNREFUSED — docker compose up -d db/) });
     expect(r.migrations).toMatchObject({ status: "absent", remediation: "not checked — db unreachable" });
@@ -264,7 +300,7 @@ describe("doctor: absent (not configured / not installed) is informational", () 
     expect(r.x).toMatchObject({ status: "absent", remediation: expect.stringMatching(/set METISTRY_X_URL/) });
     expect(r["launchd:com.foldedspacelabs.metistry.a"]).toMatchObject({
       status: "absent",
-      remediation: expect.stringMatching(/not bootstrapped — sed .*ops\/launchd\/com\.foldedspacelabs\.metistry\.a\.plist.*launchctl bootstrap gui\/\$\(id -u\)/),
+      remediation: expect.stringMatching(/not bootstrapped — metistry up, or by hand: sed .*ops\/launchd\/com\.foldedspacelabs\.metistry\.a\.plist.*launchctl bootstrap gui\/\$\(id -u\)/),
     });
     expect(r.compose).toMatchObject({ kind: "compose", status: "absent", remediation: expect.stringMatching(/docker not found/) });
     expect(report.rows.filter((x) => x.name.startsWith("compose:"))).toHaveLength(0);

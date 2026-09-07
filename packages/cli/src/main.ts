@@ -15,8 +15,11 @@ export interface ParsedArgs {
   flags: Record<string, string | true>;
 }
 
+/** Flags that never take a value, so `metistry init --force <dir>` keeps its dir. */
+export const BOOLEAN_FLAGS = new Set(["force", "json", "help"]);
+
 /** `--flag`, `--flag value`, `--flag=value`; everything else positional; `--` ends flag parsing. */
-export function parseArgs(argv: string[]): ParsedArgs {
+export function parseArgs(argv: string[], booleans = BOOLEAN_FLAGS): ParsedArgs {
   const positional: string[] = [];
   const flags: Record<string, string | true> = {};
   for (let i = 0; i < argv.length; i++) {
@@ -32,7 +35,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
         continue;
       }
       const next = argv[i + 1];
-      if (next !== undefined && !next.startsWith("--")) {
+      if (!booleans.has(a.slice(2)) && next !== undefined && !next.startsWith("--")) {
         flags[a.slice(2)] = next;
         i++;
       } else {

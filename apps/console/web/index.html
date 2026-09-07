@@ -92,6 +92,10 @@
         </label>
         <textarea id="agent-areas" placeholder="Knowledge/Areas/… one prefix per line (tier: areas)"></textarea>
         <input id="agent-projects" type="text" placeholder="projects, comma-separated (slugs)" autocomplete="off" autocapitalize="none" />
+        <p class="muted">autonomy — optional narrowing below "project members" (§4.21); blank = no narrowing</p>
+        <input id="agent-may-dispatch-to" type="text" placeholder="may dispatch to: agent ids, comma-separated" autocomplete="off" autocapitalize="none" />
+        <input id="agent-accept-from" type="text" placeholder="accept bundles from: agent ids and/or user, comma-separated" autocomplete="off" autocapitalize="none" />
+        <input id="agent-max-bundles" type="number" min="0" max="1000" placeholder="max open bundles (default 3)" autocomplete="off" />
         <p id="agent-grants-msg" class="muted"></p>
         <span><button type="submit">save</button> <button type="button" id="agent-grants-cancel" class="secondary">cancel</button></span>
       </form>
@@ -106,6 +110,9 @@
       <ul id="dash-reviews" class="reviews dash-list"><li class="muted">none</li></ul>
 
       <h3>projects <span id="dash-projects-asof" class="muted"></span></h3>
+      <!-- §4.19 project rollup + §4.21 kill switch: one row per project, a mode chip, one toggle -->
+      <ul id="dash-project-rows" class="dash-list"></ul>
+      <p id="dash-projects-msg" class="muted"></p>
       <ul id="dash-projects" class="dash-list"></ul>
 
       <h3>assistant spend by tier · 30d <span id="dash-spend-asof" class="muted"></span></h3>

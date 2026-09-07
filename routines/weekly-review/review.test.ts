@@ -135,11 +135,13 @@ describe("weekly review", () => {
         { component: "inbox-drain", ok: "0", failed: "0", last_ts: daysAgo(9) },
       ]],
       ["kind = 'alert'", [{ text: "console probe failed\nsecond line", n: "2" }, { text: "db down", n: "1" }]],
+      ["kind = 'project_mode'", [{ project: "drey", n: "2" }, { project: "home", n: "1" }]],
       ["FROM inbox", [{ n: "4", oldest: daysAgo(9) }]],
     ]);
     await run(db, { now });
     expect(sent[0]).toContain("• runs: aws-costs 27 ok ⚠ 1 failed, github-state 168 ok, inbox-drain ⚠ silent 9d");
     expect(sent[0]).toContain('• 3 watchdog alerts: "console probe failed" ×2, "db down" ×1');
+    expect(sent[0]).toContain("• budget flipped to review mode: drey ×2, home");
     expect(sent[0]).toContain("• inbox: 4 untriaged, oldest 9d");
   });
 

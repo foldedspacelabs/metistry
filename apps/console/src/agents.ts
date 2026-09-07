@@ -8,7 +8,7 @@
 // (db, Authorization header). The future mcp-brain bridge calls the same
 // thing, so there is one place to get "who is this agent" right.
 
-import { mintToken, parseBearer, tokenHash } from "@foldedspacelabs/metistry-core";
+import { ensureProject, mintToken, parseBearer, tokenHash } from "@foldedspacelabs/metistry-core";
 import type { Db } from "./auth-store.js";
 
 export const AGENT_ID_RE = /^[a-z][a-z0-9-]{0,39}$/;
@@ -50,12 +50,25 @@ export const INTERNAL_ASSISTANT_ID = "assistant";
 export const VAULT_ROOT_AREA = "Knowledge/";
 export const ASSISTANT_DEFAULT_AREAS = [VAULT_ROOT_AREA] as const;
 
+/**
+ * §4.21 optional narrowing below the project default — never widening.
+ * Absent keys mean "project members" / the default cap. Set by the user's
+ * hand; the artifacts module enforces it at dispatch.
+ */
+export interface Autonomy {
+  may_dispatch_to?: string[];
+  /** agent ids and/or the literal "user" */
+  accept_from?: string[];
+  max_open_bundles?: number;
+}
+
 export interface AgentRow {
   id: string;
   display_name: string;
   kind: string;
   grants: Grants;
   projects: string[];
+  autonomy: Autonomy;
   created_at: string;
   last_seen_at: string | null;
   revoked: boolean;
@@ -118,6 +131,43 @@ export function validateProjects(input: unknown): string[] {
   return out;
 }
 
+const MAX_BUNDLE_CAP = 1000;
+
+/** Validate + normalize an autonomy payload. Unknown keys are refused (a typo must not silently mean "no narrowing"). */
+export function validateAutonomy(input: unknown): Autonomy {
+  if (input === null || typeof input !== "object" || Array.isArray(input)) throw new AgentError("invalid_request", "autonomy must be an object");
+  const a = input as Record<string, unknown>;
+  for (const k of Object.keys(a)) {
+    if (!["may_dispatch_to", "accept_from", "max_open_bundles"].includes(k)) throw new AgentError("invalid_request", `unknown autonomy key ${k}`);
+  }
+  const out: Autonomy = {};
+  const ids = (name: string, v: unknown, allowUser: boolean): string[] => {
+    if (!Array.isArray(v) || v.length > MAX_AREAS) throw new AgentError("invalid_request", `${name} must be a list of agent ids`);
+    const list: string[] = [];
+    for (const x of v) {
+      if (typeof x !== "string" || !(AGENT_ID_RE.test(x) || (allowUser && x === "user"))) throw new AgentError("invalid_request", `${name}: ${allowUser ? "agent id or user" : "agent id"} expected`);
+      if (!list.includes(x)) list.push(x);
+    }
+    return list;
+  };
+  if (a.may_dispatch_to !== undefined && a.may_dispatch_to !== null) out.may_dispatch_to = ids("may_dispatch_to", a.may_dispatch_to, false);
+  if (a.accept_from !== undefined && a.accept_from !== null) out.accept_from = ids("accept_from", a.accept_from, true);
+  if (a.max_open_bundles !== undefined && a.max_open_bundles !== null) {
+    const n = a.max_open_bundles;
+    if (typeof n !== "number" || !Number.isInteger(n) || n < 0 || n > MAX_BUNDLE_CAP) throw new AgentError("invalid_request", `max_open_bundles must be an integer 0..${MAX_BUNDLE_CAP}`);
+    out.max_open_bundles = n;
+  }
+  return out;
+}
+
+function coerceAutonomy(raw: unknown): Autonomy {
+  try {
+    return validateAutonomy(raw ?? {});
+  } catch {
+    return {}; // a malformed stored value narrows nothing — it is never widened either, the defaults apply
+  }
+}
+
 function coerceGrants(raw: unknown): Grants {
   const g = (raw ?? {}) as Partial<Grants>;
   return { tier: TIERS.includes(g.tier as Tier) ? (g.tier as Tier) : "none", areas: Array.isArray(g.areas) ? g.areas : [] };
@@ -172,6 +222,7 @@ export async function ensureInternalAgent(db: Db, id: string, cfg: InternalAgent
   if (typeof cfg.token !== "string" || cfg.token.length < 16) throw new AgentError("invalid_request", "internal agent token must be at least 16 characters");
   const grants = cfg.grants ?? validateGrants({ tier: "areas", areas: [...ASSISTANT_DEFAULT_AREAS] }, { kind: "internal" });
   const projects = validateProjects(cfg.projects ?? []);
+  for (const p of projects) await ensureProject(db, p); // the project row exists from the first use of its slug (0011)
   const displayName = (cfg.display_name ?? "").trim().slice(0, 120) || `${id} (internal)`;
   const { rows } = await db.query(
     `INSERT INTO agents (id, display_name, kind, token_hash, grants, projects)
@@ -192,10 +243,10 @@ export async function ensureInternalAgent(db: Db, id: string, cfg: InternalAgent
 /** The registry, minus anything secret: token hashes never leave the db. */
 export async function listAgents(db: Db): Promise<AgentRow[]> {
   const { rows } = await db.query(
-    `SELECT id, display_name, kind, grants, projects, created_at, last_seen_at, revoked_at IS NOT NULL AS revoked
+    `SELECT id, display_name, kind, grants, projects, autonomy, created_at, last_seen_at, revoked_at IS NOT NULL AS revoked
      FROM agents ORDER BY revoked, created_at`,
   );
-  return rows.map((r) => ({ ...r, grants: coerceGrants(r.grants) }));
+  return rows.map((r) => ({ ...r, grants: coerceGrants(r.grants), autonomy: coerceAutonomy(r.autonomy) }));
 }
 
 /** Register an agent and mint its token. The token is returned ONCE. */
@@ -231,9 +282,19 @@ export async function setGrants(db: Db, id: string, grants: Grants): Promise<boo
 }
 
 export async function setProjects(db: Db, id: string, projects: string[]): Promise<boolean> {
+  for (const p of projects) await ensureProject(db, p); // membership is the grant (§4.21) — and the first use of a slug makes its row (0011)
   const { rows } = await db.query(
     `UPDATE agents SET projects = $2 WHERE id = $1 AND revoked_at IS NULL RETURNING id`,
     [id, projects],
+  );
+  return rows.length === 1;
+}
+
+/** Replace an active agent's §4.21 narrowing (validated). False if unknown or revoked. */
+export async function setAutonomy(db: Db, id: string, autonomy: Autonomy): Promise<boolean> {
+  const { rows } = await db.query(
+    `UPDATE agents SET autonomy = $2 WHERE id = $1 AND revoked_at IS NULL RETURNING id`,
+    [id, JSON.stringify(autonomy)],
   );
   return rows.length === 1;
 }

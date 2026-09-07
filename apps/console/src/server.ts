@@ -28,6 +28,7 @@ import { serveStatic } from "./static.js";
 import { route as routeMessage, type Rules } from "./router.js";
 import { sendToSession, storeSubscription, type PushConfig } from "./push.js";
 import { dispatch, type TargetRegistry } from "./dispatch.js";
+import { listProjects, updateProject, validateProjectPatch } from "./projects.js";
 import { createRequire } from "node:module";
 
 const require_ = createRequire(import.meta.url);
@@ -57,7 +58,9 @@ type Auth =
 
 // One shape for every per-agent verb so the management gate and the handler
 // cannot drift apart. Ids are slugs; anything else falls through to 404.
-const AGENT_ROUTE = /^(PUT|POST) \/api\/agents\/([a-z][a-z0-9-]{0,39})\/(grants|projects|revoke|rotate)$/;
+const AGENT_ROUTE = /^(PUT|POST) \/api\/agents\/([a-z][a-z0-9-]{0,39})\/(grants|projects|autonomy|revoke|rotate)$/;
+// Projects (§4.19 rollup, §4.21 controls): the kill switch, budget, caps. Session only — this is the user's hand.
+const PROJECT_ROUTE = /^PUT \/api\/projects\/([a-z][a-z0-9-]{0,39})$/;
 // Dispatch a work row to a compute target (§4.18). Body: { target, brief, sources? }.
 const DISPATCH_ROUTE = /^POST \/api\/tasks\/(\d{1,12})\/dispatch$/;
 
@@ -365,11 +368,31 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         key === "GET /api/agents" ||
         key === "POST /api/agents" ||
         AGENT_ROUTE.test(key) ||
+        key === "GET /api/projects" ||
+        PROJECT_ROUTE.test(key) ||
         isArtifactRoute(url.pathname)
       ) {
         return sendError(res, "forbidden");
       }
       return sendError(res, "not_found");
+    }
+
+    // ----- projects (§4.19 panel, §4.21 controls; owner session only) -----
+    if (key === "GET /api/projects") {
+      const { projects, as_of } = await listProjects(db, queries);
+      return sendJson(res, 200, { projects, as_of });
+    }
+    const projectOp = PROJECT_ROUTE.exec(key);
+    if (projectOp) {
+      try {
+        const patch = validateProjectPatch(await readJson(req));
+        const project = await updateProject(db, projectOp[1]!, patch, "user"); // records runs kind project_admin itself
+        return sendJson(res, 200, { ok: true, project });
+      } catch (err) {
+        if (err instanceof agents.AgentError) return sendError(res, err.code);
+        if (err instanceof SyntaxError) return sendError(res, "invalid_request");
+        throw err;
+      }
     }
 
     // ----- artifacts + review dispatch (§4.21; owner session only) -----
@@ -419,7 +442,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     const agentOp = AGENT_ROUTE.exec(key);
     if (agentOp) {
       const [, method, id, op] = agentOp as unknown as [string, string, string, string];
-      const verbOk = method === "PUT" ? op === "grants" || op === "projects" : op === "revoke" || op === "rotate";
+      const verbOk = method === "PUT" ? op === "grants" || op === "projects" || op === "autonomy" : op === "revoke" || op === "rotate";
       if (!verbOk) return sendError(res, "not_found");
       try {
         if (op === "grants") {
@@ -436,6 +459,13 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
           const ok = await agents.setProjects(db, id, projects);
           await audit("agent_admin", "projects", ok, { agent: id, op: "projects", projects });
           return ok ? sendJson(res, 200, { ok: true, projects }) : sendError(res, "not_found");
+        }
+        if (op === "autonomy") {
+          // §4.21 narrowing, never widening: the keys can only restrict below "project members"
+          const autonomy = agents.validateAutonomy(await readJson(req));
+          const ok = await agents.setAutonomy(db, id, autonomy);
+          await audit("agent_admin", "autonomy", ok, { agent: id, op: "autonomy", autonomy });
+          return ok ? sendJson(res, 200, { ok: true, autonomy }) : sendError(res, "not_found");
         }
         if (op === "revoke") {
           const ok = await agents.revokeAgent(db, id);

@@ -2,6 +2,8 @@
 // passkeys; API calls carry the session cookie. Drafts survive re-auth:
 // the composer stashes to localStorage and replays after sign-in.
 
+import { renderMarkdown } from "./md.js";
+
 const { startRegistration, startAuthentication } = window.SimpleWebAuthnBrowser;
 
 const $ = (id) => document.getElementById(id);
@@ -204,11 +206,17 @@ async function loadAgents() {
       const seen = a.last_seen_at ? `seen ${new Date(a.last_seen_at).toLocaleDateString()}` : "never seen";
       const scope = g.tier === "areas" ? g.areas.map(esc).join(", ") : esc(g.tier);
       const projects = (a.projects ?? []).length ? ` · projects: ${a.projects.map(esc).join(", ")}` : "";
+      const au = a.autonomy ?? {};
+      const narrowing = [
+        au.may_dispatch_to ? `dispatches to ${au.may_dispatch_to.map(esc).join(", ") || "nobody"}` : "",
+        au.accept_from ? `accepts from ${au.accept_from.map(esc).join(", ") || "nobody"}` : "",
+        au.max_open_bundles !== undefined ? `max ${Number(au.max_open_bundles) || 0} bundles` : "",
+      ].filter(Boolean).join(" · ");
       const actions = a.revoked
         ? '<span class="muted">revoked</span>'
         : `<span><button data-agent-grants="${esc(a.id)}" class="secondary">grants</button> <button data-agent-rotate="${esc(a.id)}" class="secondary">rotate</button> <button data-agent-revoke="${esc(a.id)}" style="background:#7a3b3b">revoke</button></span>`;
       return `<li class="${a.revoked ? "revoked" : ""}"><span><b>${esc(a.display_name)}</b> <span class="muted">${esc(a.id)} · ${esc(a.kind)}</span><br>
-        <span class="muted">tier: ${scope}${projects} · ${seen}</span></span>${actions}</li>`;
+        <span class="muted">tier: ${scope}${projects} · ${seen}</span>${narrowing ? `<br><span class="muted">autonomy: ${narrowing}</span>` : ""}</span>${actions}</li>`;
     })
     .join("");
   document.querySelectorAll("[data-agent-grants]").forEach((b) => (b.onclick = () => openGrants(b.dataset.agentGrants)));
@@ -253,8 +261,22 @@ function openGrants(id) {
   $("agent-tier").value = a.grants?.tier ?? "none";
   $("agent-areas").value = (a.grants?.areas ?? []).join("\n");
   $("agent-projects").value = (a.projects ?? []).join(", ");
+  const au = a.autonomy ?? {};
+  $("agent-may-dispatch-to").value = (au.may_dispatch_to ?? []).join(", ");
+  $("agent-accept-from").value = (au.accept_from ?? []).join(", ");
+  $("agent-max-bundles").value = au.max_open_bundles ?? "";
   $("agent-grants-msg").textContent = "";
   $("agent-grants").hidden = false;
+}
+
+// Blank = the key is absent = "project members" (never widening: a key can only narrow).
+function autonomyFromForm() {
+  const list = (id) => $(id).value.split(",").map((s) => s.trim()).filter(Boolean);
+  const out = {};
+  if ($("agent-may-dispatch-to").value.trim()) out.may_dispatch_to = list("agent-may-dispatch-to");
+  if ($("agent-accept-from").value.trim()) out.accept_from = list("agent-accept-from");
+  if ($("agent-max-bundles").value.trim()) out.max_open_bundles = Number($("agent-max-bundles").value);
+  return out;
 }
 
 $("agent-grants-cancel").onclick = () => { $("agent-grants").hidden = true; };
@@ -269,6 +291,8 @@ $("agent-grants").onsubmit = async (e) => {
   if (!g.ok) { $("agent-grants-msg").textContent = "grants rejected — areas must be TitleCase Knowledge/… prefixes, one per line, and only for tier areas (bare Knowledge/ is for the internal assistant only)"; return; }
   const p = await api(`/api/agents/${encodeURIComponent(id)}/projects`, { method: "PUT", body: JSON.stringify({ projects }) });
   if (!p.ok) { $("agent-grants-msg").textContent = "projects rejected — comma-separated slugs (a-z, 0-9, -)"; return; }
+  const au = await api(`/api/agents/${encodeURIComponent(id)}/autonomy`, { method: "PUT", body: JSON.stringify(autonomyFromForm()) });
+  if (!au.ok) { $("agent-grants-msg").textContent = "autonomy rejected — agent ids (and `user` for accept-from), comma-separated; max open bundles 0..1000"; return; }
   $("agent-grants").hidden = true;
   loadAgents();
 };
@@ -319,6 +343,37 @@ function renderRuns({ rows, as_of }) {
     ? `${failed > 0 ? "check the status page — " : ""}last activity ${new Date(s.last_run_at).toLocaleString()}`
     : "nothing ran in the last 24h";
   dashStamp("runs", as_of);
+}
+
+// §4.19 one row per project + §4.21 the kill switch: a mode chip and ONE
+// toggle (confirm first — flipping to autonomous re-extends trust to every
+// member). Every server value is output-encoded; counts pass through asNum().
+function renderProjectRows({ projects, as_of }) {
+  $("dash-project-rows").innerHTML = projects.length
+    ? projects.map((p) => {
+        const flip = p.mode === "review" ? "autonomous" : "review";
+        const why = p.last_mode_change ? ` · ${esc(p.last_mode_change.to)} since ${new Date(p.last_mode_change.ts).toLocaleDateString()} (${esc(p.last_mode_change.reason || p.last_mode_change.by)})` : "";
+        const budget = p.daily_budget_usd === null || p.daily_budget_usd === undefined ? "no budget" : `budget $${fmtUsd(p.daily_budget_usd)}/day`;
+        const queued = asNum(p.bundles_queued);
+        return `<li><div class="row"><span><b>${esc(p.id)}</b> <span class="chip ${esc(p.mode)}">${esc(p.mode)}</span></span>
+            <button class="secondary" data-project-mode="${esc(p.id)}" data-to="${flip}">→ ${flip}</button></div>
+          <div class="muted">${p.members.length ? p.members.map(esc).join(", ") : "no members"}${why}</div>
+          <div class="muted">${asNum(p.open_tasks)} open task(s) · ${asNum(p.bundles_in_flight)} bundle(s) in flight${queued ? ` · <span class="failed">${queued} queued</span>` : ""} · ${asNum(p.open_threads)} open thread(s)${asNum(p.pending_reviews) ? ` · ${asNum(p.pending_reviews)} awaiting you` : ""}</div>
+          <div class="muted">spent $${fmtUsd(p.spend_today_usd)} today · ${budget} · cap ${asNum(p.max_open_bundles)} bundles${p.last_activity ? ` · active ${new Date(p.last_activity).toLocaleDateString()}` : ""}</div></li>`;
+      }).join("")
+    : `<li class="muted">no projects yet — one appears the first time an agent, task, or artifact uses a project slug</li>`;
+  document.querySelectorAll("[data-project-mode]").forEach((b) => (b.onclick = async () => {
+    const id = b.dataset.projectMode;
+    const to = b.dataset.to;
+    const warn = to === "review"
+      ? `switch ${id} to review mode? every agent-to-agent review bundle will queue for you until you switch it back.`
+      : `switch ${id} back to autonomous? members will dispatch review bundles to each other without you again.`;
+    if (!confirm(warn)) return;
+    const r = await api(`/api/projects/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify({ mode: to }) });
+    $("dash-projects-msg").textContent = r.ok ? `${id} is now ${to}` : `could not switch ${id} (${r.status})`;
+    loadDashboard();
+  }));
+  dashStamp("projects", as_of);
 }
 
 function renderProjects({ rows, as_of }) {
@@ -387,7 +442,7 @@ async function loadDashboard() {
   const panels = {
     runs: async () => renderRuns(await dashQuery("runs_summary", { hours: 24 })),
     reviews: async () => { const r = await dashQuery("prs_for_review"); $("dash-reviews").innerHTML = reviewListHtml(r.rows); dashStamp("reviews", r.as_of); },
-    projects: async () => renderProjects(await dashQuery("projects_overview")),
+    projects: async () => { renderProjectRows(await (await api("/api/projects")).json()); renderProjects(await dashQuery("projects_overview")); },
     spend: async () => renderSpend(await dashQuery("claude_usage_daily", { days: 30 })),
     aws: async () => renderAws(...(await Promise.all([dashQuery("aws_costs_daily", { days: 30 }), dashQuery("aws_costs_recent", { days: 30 })]))),
   };
@@ -398,8 +453,9 @@ async function loadDashboard() {
 
 // ===== artifacts (§4.21) =====
 // Every server value is output-encoded via esc()/textContent before it
-// touches the DOM (CRIT-7). Text kinds render as escaped text in a <pre> (a
-// renderer is a later UX pass); images come from the raw route as <img>;
+// touches the DOM (CRIT-7). Markdown renders through md.js (escape first,
+// whitelisted tags only, https:// and #/ anchors only); other text kinds
+// render as escaped text in a <pre>; images come from the raw route as <img>;
 // HTML renders ONLY inside an opaque-origin sandboxed iframe (sandbox="" —
 // no tokens at all, so the frame is never same-origin and never runs script;
 // decision #14) with a CSP meta in the srcdoc, so an agent-authored page can
@@ -491,6 +547,13 @@ async function renderArtifactFile(id, ver, path, kind) {
     viewer.append(frame);
     return;
   }
+  if (kind === "markdown") {
+    const div = document.createElement("div");
+    div.className = "art-md";
+    div.innerHTML = renderMarkdown(body.content ?? ""); // md.js escapes FIRST; only its own whitelisted tags can come out
+    viewer.append(div);
+    return;
+  }
   const pre = document.createElement("pre");
   pre.className = "art-pre";
   pre.textContent = body.content ?? ""; // textContent: never markup
@@ -542,6 +605,8 @@ $("art-dispatch").onsubmit = async (e) => {
   const r = await api("/api/dispatches", { method: "POST", body: JSON.stringify({ artifact: artOpen.id, version: artOpen.version, thread_ids, to_agent }) });
   const body = await r.json();
   $("art-dispatch-msg").textContent = r.ok
-    ? body.route === "work" ? `review task #${body.work.id} created for ${to_agent}` : `queued as proposal #${body.proposal_id} (outside the project)`
+    ? body.route === "work"
+      ? `review task #${body.work.id} ${body.queued ? `queued for ${to_agent} (${body.queued.reason} ${body.queued.open}/${body.queued.cap})` : `created for ${to_agent}`}`
+      : `queued as proposal #${body.proposal_id} (${body.reason ?? "outside the project"})`
     : `dispatch failed: ${body.error?.message ?? r.status}`;
 };

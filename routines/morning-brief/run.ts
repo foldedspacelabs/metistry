@@ -185,7 +185,19 @@ async function sectionSystem(db: Db): Promise<{ lines: string[]; needsHelp: bool
     `• last 24h: ${s.captures} capture(s) processed, ${s.turns} turn(s), ${Number(s.spend).toFixed(2)} USD spend`,
   ];
   if (failed > 0) lines.push(`• ⚠ ${failed} failed run(s) — check the status page; I may need your help`);
-  return { lines, needsHelp: failed > 0 };
+  // §4.21: a project the budget flipped to review mode needs the user — the brief says so, once per flip
+  const flips = await db.query(
+    `SELECT meta FROM runs WHERE kind = 'project_mode' AND ok AND ts > now() - interval '24 hours' ORDER BY ts DESC LIMIT 5`,
+  );
+  let flipped = 0;
+  for (const r of flips.rows) {
+    const m = r.meta ?? {};
+    if (typeof m.project !== "string" || m.to !== "review") continue;
+    flipped++;
+    const budget = m.budget_usd !== undefined ? ` (${Number(m.spend_usd ?? 0).toFixed(2)} of ${Number(m.budget_usd).toFixed(2)} USD)` : "";
+    lines.push(`• ⚠ project ${m.project} flipped to review mode: ${m.reason ?? "budget"}${budget} — agent-to-agent review is queued for you until you switch it back`);
+  }
+  return { lines, needsHelp: failed > 0 || flipped > 0 };
 }
 
 /** One brief pass. Returns 1 if a brief was emitted, else 0 (silence-default). */

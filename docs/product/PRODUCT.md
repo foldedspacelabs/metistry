@@ -453,3 +453,21 @@ your git, on your machine.
   stops everything after it, and the lock is never written behind a
   running reconciler. The maintenance story is now a runbook section, not
   a memory. 55 new CLI tests.
+- 2026-09-07 — **§4.21 controls shipped — agent-to-agent review needs no
+  human in the loop, and the user keeps one switch** (`0011_projects.sql`,
+  `packages/artifacts` policy + service, console routes + panel,
+  `docs/ops/projects.md`). A project is now a row with the user's three
+  decisions on it, created lazily the first time its slug is used. The
+  kill switch is one toggle: `mode: review` routes every agent-to-agent
+  bundle to the proposal queue without touching membership. Per-agent
+  (3) and per-project (20) open-bundle caps make the overnight
+  task-explosion failure impossible by construction — over cap a bundle
+  is queued as a blocked task, never dropped, and released when one is
+  addressed. A daily soft budget over `runs.cost_usd` flips the project
+  to review exactly once per transition, with one deduped alert and a
+  `runs` row the morning brief and weekly review read. Manifest narrowing
+  (`may_dispatch_to` / `accept_from`) can only restrict below "project
+  members". Markdown artifacts render through a hand-rolled renderer
+  that escapes first and whitelists (only `https://` and `#/` anchors),
+  locked by a hostile-input test. Every control is enforced in the
+  dispatch tool, with its reason on the row.

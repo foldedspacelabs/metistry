@@ -116,6 +116,8 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    outputs:
+      published: ${{ steps.publish.outputs.published }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -127,15 +129,29 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter '@foldedspacelabs/*' run build
       - name: publish @foldedspacelabs/metistry-*
+        id: publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: "true"
         run: |
           if [ -z "$NODE_AUTH_TOKEN" ]; then
-            echo "::notice::NPM_TOKEN is not set — skipping the npm publish (the release's other assets are unaffected)"
+            echo "::notice::npm publish skipped — NPM_TOKEN is not set (the release's other assets are unaffected)"
+            echo "published=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          pnpm publish --filter '@foldedspacelabs/*' --access public --no-git-checks --provenance
+          set +e
+          pnpm publish --filter '@foldedspacelabs/*' --access public --no-git-checks --provenance 2>&1 | tee /tmp/npm-publish.log
+          status="${PIPESTATUS[0]}"
+          set -e
+          if [ "$status" -ne 0 ]; then
+            if grep -qE 'code E40[0-9]|HTTP 4[0-9]{2}' /tmp/npm-publish.log; then
+              echo "::notice::npm publish skipped — the registry rejected it with a 4xx (see the log above for which package/status; the release's other assets are unaffected)"
+              echo "published=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            exit "$status"
+          fi
+          echo "published=true" >> "$GITHUB_OUTPUT"
 
   # Container images for the apps that ship as images. The watchdog is a
   # host job under launchd (runs_on: host) and has no Dockerfile — it ships
@@ -150,6 +166,10 @@ jobs:
       fail-fast: false
       matrix:
         app: [console, assistant, reconciler]
+    # every matrix instance logs in with the same credentials, so they agree
+    # on this value; whichever instance finishes last is the one GitHub keeps.
+    outputs:
+      published: ${{ steps.login.outcome == 'success' }}
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -200,6 +220,22 @@ jobs:
           assets="$(cd assets && ls | paste -sd, -)"
           images="$(for a in console assistant reconciler; do echo "${IMAGE_PREFIX}-$a:${VERSION}"; done | paste -sd, -)"
           node ops/release/changelog.mjs "$VERSION" --assets "$assets" --images "$images" | tee RELEASE_NOTES.md
+      - name: record which of npm/images this run actually published
+        env:
+          NPM_PUBLISHED: ${{ needs.npm.outputs.published }}
+          IMAGES_PUBLISHED: ${{ needs.images.outputs.published }}
+        run: |
+          parts=""
+          [ "$NPM_PUBLISHED" = "true" ] && parts="${parts:+$parts, }npm"
+          [ "$IMAGES_PUBLISHED" = "true" ] && parts="${parts:+$parts, }images"
+          {
+            echo ""
+            if [ -n "$parts" ]; then
+              echo "**Published:** $parts"
+            else
+              echo "**Published:** neither npm nor images this run — see the run's \`::notice::\`s for why"
+            fi
+          } >> RELEASE_NOTES.md
       - name: create or update the release
         env:
           GH_TOKEN: ${{ github.token }}

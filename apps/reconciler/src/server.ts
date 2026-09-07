@@ -107,7 +107,13 @@ export function makeBridge(deps: BridgeDeps, cfg: BridgeConfig): Server {
         return send(res, result.status === "failed" ? 503 : 200, result);
       }
 
-      if (key === "GET /vault/read") return reply(res, await vault.read(q.get("path")));
+      if (key === "GET /vault/read") {
+        // `encoding=base64` hands back the bytes untouched (binary artifacts); default stays utf8 `content`.
+        if (q.get("encoding") === "base64") {
+          return reply(res, await vault.readBytes(q.get("path")), 200, (v) => ({ path: v.path, content_base64: v.content.toString("base64"), sha256: v.sha256, bytes: v.bytes }));
+        }
+        return reply(res, await vault.read(q.get("path")));
+      }
 
       if (key === "GET /vault/list") {
         const depth = clampInt(q.get("depth"), 1, 1, 20);

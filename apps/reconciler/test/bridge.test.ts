@@ -61,6 +61,17 @@ describe("vault bridge", () => {
     expect((await get("/vault/read?path=Knowledge/Nope.md")).status).toBe(404);
   });
 
+  it("encoding=base64 returns the bytes untouched (binary artifacts must survive the round trip)", async () => {
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0xff, 0xfe, 0x00]);
+    const w = await post("/vault/write", { path: "Artifacts/p/s/pixel.png", content_base64: png.toString("base64"), intent: intent("user", "binary") });
+    expect(w.status).toBe(201);
+    const b = await (await get("/vault/read?path=Artifacts/p/s/pixel.png&encoding=base64")).json();
+    expect(b.content).toBeUndefined();
+    expect(Buffer.from(b.content_base64, "base64").equals(png)).toBe(true);
+    expect(b.bytes).toBe(png.length);
+    expect(b.sha256).toBe(sha256(png));
+  });
+
   it("lists under a prefix with depth", async () => {
     const shallow = await (await get("/vault/list?prefix=Knowledge&depth=1")).json();
     expect(shallow.entries.map((e: any) => e.path)).toEqual(["Knowledge/Areas", "Knowledge/now.md"]);

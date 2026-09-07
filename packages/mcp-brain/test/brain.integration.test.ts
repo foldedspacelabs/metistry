@@ -416,6 +416,22 @@ describe.skipIf(!hasDb)("mcp-brain (real db, real MCP client)", () => {
   });
 
   it("every tool call is a two-phase runs row on the agent (kind=tool), with args summarized and bodies clipped", async () => {
+    // the artifacts module is not wired in this suite (its own suite covers it): each artifact_* call is a recorded not_available
+    const ar = await connect("tok-alice");
+    const artId = "art_01J00000000000000000000000";
+    const verId = "ver_01J00000000000000000000000";
+    const cmtId = "cmt_01J00000000000000000000000";
+    for (const [name, args] of [
+      ["artifact_publish", { project: PA, slug: "x", files: [{ path: "a.md", content: "a" }], idempotency_key: "k", message: "m" }],
+      ["artifact_get", { id: artId }],
+      ["artifact_list", {}],
+      ["artifact_comment", { artifact: artId, version: verId, body: "b" }],
+      ["artifact_comment_resolve", { id: cmtId }],
+      ["artifact_dispatch_review", { artifact: artId, version: verId, thread_ids: [cmtId], to_agent: BOB }],
+    ] as const) {
+      expect((await call(ar, name, args)).body.error.code, name).toBe("not_available");
+    }
+    await ar.close();
     const { rows } = await pool.query(
       `SELECT tool, ok, finished_at IS NOT NULL AS finished, meta FROM runs WHERE component = $1 AND kind = 'tool' ORDER BY id`,
       [ALICE],

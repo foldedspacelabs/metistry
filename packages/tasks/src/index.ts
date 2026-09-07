@@ -64,6 +64,12 @@ export interface CreateInput {
   /** Caller-supplied; a retried create with the same key returns the existing row. */
   idempotency_key?: string;
   external_ref?: string;
+  /** `task` (default) or `review` — the two kinds the list owns (§4.21 review bundles ride these rows). */
+  kind?: (typeof CLAIMABLE_KINDS)[number];
+  /** Who the row is addressed to (a review bundle's target agent); informational — claims are still first-come. */
+  owner?: string;
+  /** Handles, never payloads (§4.19): a review bundle stores `{ bundle: { artifact, version, thread_ids } }` here. */
+  meta?: Record<string, unknown>;
 }
 
 export interface UpdateInput {
@@ -205,6 +211,13 @@ export class TasksService {
     const due = optionalText("due", input.due, 10);
     if (due !== null && !/^\d{4}-\d{2}-\d{2}$/.test(due)) throw new TasksError("invalid_input", "due must be YYYY-MM-DD");
     const dependsOn = [...new Set((input.depends_on ?? []).map(requireId))];
+    const kind = input.kind ?? "task";
+    if (!(CLAIMABLE_KINDS as readonly string[]).includes(kind)) throw new TasksError("invalid_input", `kind must be one of ${CLAIMABLE_KINDS.join(", ")}`);
+    const owner = optionalText("owner", input.owner, 200);
+    if (input.meta !== undefined && (input.meta === null || typeof input.meta !== "object" || Array.isArray(input.meta))) {
+      throw new TasksError("invalid_input", "meta must be an object");
+    }
+    const meta = JSON.stringify(input.meta ?? {});
 
     return this.recorded(agent, "create", null, async () => {
       if (dependsOn.length > 0) {
@@ -213,12 +226,12 @@ export class TasksService {
         const missing = dependsOn.filter((d) => !found.has(d));
         if (missing.length > 0) throw new TasksError("unknown_dependency", `depends_on references unknown task(s): ${missing.join(", ")}`);
       }
-      const values = [title, project, area, dependsOn, due, key, externalRef, agent, entry(agent, "create")];
+      const values = [title, project, area, dependsOn, due, key, externalRef, agent, entry(agent, "create"), kind, owner, meta];
       let rows: Record<string, unknown>[];
       try {
         ({ rows } = await this.db.query(
-          `INSERT INTO work (title, project, area, kind, status, depends_on, due, idempotency_key, external_ref, created_by, history)
-           VALUES ($1, $2, $3, 'task', 'open', $4::bigint[], $5::date, $6, $7, $8, $9::jsonb)
+          `INSERT INTO work (title, project, area, kind, status, depends_on, due, idempotency_key, external_ref, created_by, history, owner, meta)
+           VALUES ($1, $2, $3, $10, 'open', $4::bigint[], $5::date, $6, $7, $8, $9::jsonb, $11, $12::jsonb)
            ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
            RETURNING ${COLS}`,
           values,

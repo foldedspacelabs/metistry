@@ -90,7 +90,7 @@ Every route requires `Authorization: Bearer $METISTRY_BRIDGE_TOKEN_RECONCILER`
 | Route | What it does |
 | --- | --- |
 | `GET /check` | behavioural probe (frozen `check()` shape) |
-| `GET /vault/read?path=` | `{path, content, sha256, bytes}` from the working tree |
+| `GET /vault/read?path=` | `{path, content, sha256, bytes}` from the working tree; `&encoding=base64` returns `content_base64` instead (binary artifacts) |
 | `GET /vault/list?prefix=&depth=` | files + dirs under a prefix (`.git`, `.obsidian` never listed) |
 | `GET /vault/search?q=&limit=` | keyword search over **settled** notes — `status: draft` and conflict copies are excluded before matching |
 | `GET /vault/log?path=&limit=` | `git log --follow` for a path (or the repo) |
@@ -98,7 +98,7 @@ Every route requires `Authorization: Bearer $METISTRY_BRIDGE_TOKEN_RECONCILER`
 | `POST /vault/write` | `{path, content \| content_base64, intent, expected_sha256?}` — compare-and-swap on the content hash |
 | `POST /vault/delete` | `{path, intent, expected_sha256?}` |
 | `POST /vault/rename` | `{from, to, intent}` — git-mv semantics; never clobbers |
-| `POST /flush` | commit the queue now (the interval does this every `METISTRY_COMMIT_INTERVAL_SEC`) |
+| `POST /flush` | commit the queue now (the interval does this every `METISTRY_COMMIT_INTERVAL_SEC`; the artifacts module calls it after every publish so one version is one commit) |
 | `POST /reconcile` | run the index cycle now (the interval does this every `METISTRY_RECONCILE_INTERVAL_SEC`) |
 
 **Intents.** Every mutation carries

@@ -1,6 +1,6 @@
 // The option builder is the control (invariant 9): with the brain env, the
 // SDK gets exactly one HTTP MCP server carrying the bearer and an allowlist
-// of exactly the twelve brain tools; without, no servers and no allowlist.
+// of exactly the eighteen brain tools; without, no servers and no allowlist.
 // Built-in tools are off either way, and the list is locked to mcp-brain's
 // manifest so the two cannot drift. No live SDK call — pure functions.
 import { readFileSync } from "node:fs";
@@ -15,7 +15,7 @@ describe("brain allowlist", () => {
   it("is exactly mcp-brain's manifest, in order, fully qualified as mcp__brain__<tool>", () => {
     expect([...BRAIN_TOOLS]).toEqual(manifest.exposes.map((t) => t.name));
     expect(brainToolNames()).toEqual(manifest.exposes.map((t) => `mcp__${BRAIN_SERVER}__${t.name}`));
-    expect(brainToolNames()).toHaveLength(12);
+    expect(brainToolNames()).toHaveLength(18);
     expect(brainToolNames()).toContain("mcp__brain__knowledge_write"); // the assistant's brain-commit rides the same allowlist; the bridge admits it for the internal principal only
   });
 

@@ -8,7 +8,7 @@ grant or narrow it, and where to see what it did.
 ## What the assistant can do
 
 With tools mounted, every turn the engine runs can call exactly these
-twelve tools on the console's `POST /mcp` (`packages/mcp-brain`), and
+eighteen tools on the console's `POST /mcp` (`packages/mcp-brain`), and
 nothing else — no shell, no filesystem, no git, no web (invariant 9,
 enforced in `apps/assistant/src/brain.ts`, locked to the bridge's
 manifest by test):
@@ -19,6 +19,7 @@ manifest by test):
 | shared work | `tasks_list_ready`, `tasks_claim`, `tasks_heartbeat`, `tasks_update`, `tasks_release`, `tasks_create`, `tasks_mine` | Works the same shared list as every other agent — claims, leases, notes. |
 | out | `knowledge_search`, `knowledge_read` | Reads the vault index and note contents (via the reconciler's vault bridge), within its grant. `knowledge_read` returns the note's `sha256`. |
 | write | `knowledge_write` | **This is `brain-commit`** (plan §4.7, D5): one note under `Knowledge/` → the reconciler's `POST /vault/write` with a commit intent in the assistant's name. Internal principals only; every external agent is told "not granted". No delete, no rename — those stay your hand. |
+| artifacts | `artifact_publish`, `artifact_get`, `artifact_list`, `artifact_comment`, `artifact_comment_resolve`, `artifact_dispatch_review` | Publishes versioned output into `Artifacts/<project>/<slug>/` (one commit per version via the reconciler), comments on exact versions, and sends review bundles to other agents in the same project — a dispatch across the project boundary becomes a proposal for you (§4.21). |
 
 The SDK sees them as `mcp__brain__<tool>`; that fully-qualified list is
 the engine's `allowedTools`, built-in tools are disabled (`tools: []`),

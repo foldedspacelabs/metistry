@@ -7,7 +7,7 @@ import { renderMarkdown } from "./md.js";
 const { startRegistration, startAuthentication } = window.SimpleWebAuthnBrowser;
 
 const $ = (id) => document.getElementById(id);
-const views = ["chat", "dashboard", "capture", "triage", "status", "devices", "agents", "artifacts"];
+const views = ["feed", "chat", "dashboard", "capture", "triage", "status", "devices", "agents", "artifacts"];
 const enrollCode = new URLSearchParams(location.hash.slice(1)).get("enroll");
 
 async function api(path, opts = {}) {
@@ -20,7 +20,7 @@ function show(view) {
   $("nav").hidden = false; $("auth").hidden = true;
   for (const v of views) $(v).hidden = v !== view;
   document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("active", b.dataset.view === view));
-  ({ chat: loadMessages, dashboard: loadDashboard, status: loadStatus, devices: loadDevices, triage: loadTriage, agents: loadAgents, artifacts: loadArtifacts }[view] ?? (() => {}))();
+  ({ feed: loadFeedView, chat: loadMessages, dashboard: loadDashboard, status: loadStatus, devices: loadDevices, triage: loadTriage, agents: loadAgents, artifacts: loadArtifacts }[view] ?? (() => {}))();
 }
 
 function showAuth() {
@@ -189,7 +189,7 @@ function esc(s) { const d = document.createElement("div"); d.textContent = s ?? 
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {}); // push degrades absent
 try {
   const probe = await fetch("/api/status");
-  if (probe.ok) { show(artifactRoute() ? "artifacts" : "chat"); replayDraft(); pollChat(); } else showAuth(); // a #/artifacts/… link (the review link) opens straight there
+  if (probe.ok) { show(artifactRoute() ? "artifacts" : "feed"); replayDraft(); pollChat(); } else showAuth(); // a #/artifacts/… link (the review link) opens straight there; feed is the home tab
 } catch { showAuth(); }
 
 // ----- agents (external-agent registry; every agent-authored field output-encoded — CRIT-7) -----
@@ -216,10 +216,12 @@ async function loadAgents() {
         ? '<span class="muted">revoked</span>'
         : `<span><button data-agent-grants="${esc(a.id)}" class="secondary">grants</button> <button data-agent-rotate="${esc(a.id)}" class="secondary">rotate</button> <button data-agent-revoke="${esc(a.id)}" style="background:#7a3b3b">revoke</button></span>`;
       return `<li class="${a.revoked ? "revoked" : ""}"><span><b>${esc(a.display_name)}</b> <span class="muted">${esc(a.id)} · ${esc(a.kind)}</span><br>
-        <span class="muted">tier: ${scope}${projects} · ${seen}</span>${narrowing ? `<br><span class="muted">autonomy: ${narrowing}</span>` : ""}</span>${actions}</li>`;
+        <span class="muted">tier: ${scope}${projects} · ${seen}</span>${narrowing ? `<br><span class="muted">autonomy: ${narrowing}</span>` : ""}<br>
+        <span id="presence-${esc(a.id)}" class="presence"></span></span>${actions}</li>`;
     })
     .join("");
   document.querySelectorAll("[data-agent-grants]").forEach((b) => (b.onclick = () => openGrants(b.dataset.agentGrants)));
+  loadPresence().catch(() => {}); // fills the placeholder spans above from agent_presence (revoked agents get none — the query excludes them)
   document.querySelectorAll("[data-agent-rotate]").forEach((b) => (b.onclick = async () => {
     const id = b.dataset.agentRotate;
     if (!confirm(`rotate the token for ${id}? the current token stops working immediately.`)) return;
@@ -610,3 +612,97 @@ $("art-dispatch").onsubmit = async (e) => {
       : `queued as proposal #${body.proposal_id} (${body.reason ?? "outside the project"})`
     : `dispatch failed: ${body.error?.message ?? r.status}`;
 };
+
+// ===== feed (home) + agent presence =====
+// docs/product/desktop-app-plan.md "The window": the activity_feed and
+// agent_presence seed queries, surfaced as the PWA's first tab and as
+// presence chips on the existing agents list. Every server value is
+// output-encoded via esc() before it touches the DOM (CRIT-7).
+const FEED_ICONS = {
+  tool: "🔧", turn: "💬", crew_run: "🧑‍🤝‍🧑", dispatch: "📨", task_op: "🗂️",
+  agent_admin: "🛡️", project_mode: "🎛️", collector_run: "⚠️",
+  proposal_created: "📝", proposal_decided: "✅", work_history: "🧾",
+  brief: "📰", review: "🔍", alert: "🚨",
+};
+const feedIcon = (kind) => FEED_ICONS[kind] ?? "•";
+
+function relTime(ts) {
+  const s = Math.max(0, (Date.now() - new Date(ts).getTime()) / 1000);
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.round(s / 60)}m ago`;
+  if (s < 86400) return `${Math.round(s / 3600)}h ago`;
+  return `${Math.round(s / 86400)}d ago`;
+}
+
+function feedRowHtml(r) {
+  return `<li class="feed-row"><span class="feed-icon" title="${esc(r.kind)}">${feedIcon(r.kind)}</span>
+    <span class="feed-body">
+      <span class="chip feed-actor">${esc(r.actor ?? "system")}</span>
+      <span class="feed-subject">${esc(r.subject ?? "")}</span>
+      ${r.detail ? `<span class="muted feed-detail">${esc(r.detail)}</span>` : ""}
+    </span>
+    <span class="muted feed-time" title="${esc(new Date(r.ts).toLocaleString())}">${esc(relTime(r.ts))}</span></li>`;
+}
+
+// Agent options come from the feed's own rows (no extra call); project
+// options come from the existing /api/projects list (already fetched by
+// the dashboard) so an empty feed still offers every known project.
+function populateFeedAgents(rows) {
+  const sel = $("feed-agent");
+  const current = sel.value;
+  const actors = [...new Set(rows.map((r) => r.actor).filter(Boolean))].sort();
+  sel.innerHTML = [`<option value="">all agents</option>`, ...actors.map((a) => `<option value="${esc(a)}">${esc(a)}</option>`)].join("");
+  sel.value = actors.includes(current) ? current : "";
+}
+
+async function populateFeedProjects() {
+  try {
+    const { projects } = await (await api("/api/projects")).json();
+    const sel = $("feed-project");
+    const current = sel.value;
+    sel.innerHTML = [`<option value="">all projects</option>`, ...projects.map((p) => `<option value="${esc(p.id)}">${esc(p.id)}</option>`)].join("");
+    sel.value = current;
+  } catch {}
+}
+
+async function loadFeed() {
+  const agent = $("feed-agent").value;
+  const project = $("feed-project").value;
+  const { rows } = await dashQuery("activity_feed", { hours: 24, limit: 100, agent, project });
+  populateFeedAgents(rows);
+  $("feed-empty").hidden = rows.length > 0;
+  $("feed-list").innerHTML = rows.map(feedRowHtml).join("");
+}
+
+async function loadFeedView() {
+  await populateFeedProjects();
+  await loadFeed();
+  pollFeed();
+}
+
+// auto-refresh every 10s while the tab is visible, like chat's poll
+let feedTimer = null;
+function pollFeed(intervalMs = 10000) {
+  if (feedTimer) clearInterval(feedTimer);
+  feedTimer = setInterval(() => {
+    if (!$("feed").hidden && document.visibilityState === "visible") loadFeed().catch(() => {});
+  }, intervalMs);
+}
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && !$("feed").hidden) loadFeed().catch(() => {});
+});
+
+$("feed-agent").onchange = () => loadFeed().catch(() => {});
+$("feed-project").onchange = () => loadFeed().catch(() => {});
+
+// presence chips on the existing agents tab list (§ agents section above
+// leaves a <span id="presence-{id}"> placeholder per row for this to fill).
+async function loadPresence() {
+  const { rows } = await dashQuery("agent_presence", { limit: 500 });
+  for (const p of rows) {
+    const el = document.getElementById(`presence-${p.id}`);
+    if (!el) continue; // the agent list may have re-rendered since this fetch started
+    const seen = p.last_seen_at ? `seen ${new Date(p.last_seen_at).toLocaleString()}` : "never seen";
+    el.innerHTML = `<span class="chip state-${esc(p.state)}">${esc(p.state)}</span> <span class="muted">${esc(seen)} · $${fmtUsd(p.spend_today_usd)} today</span>`;
+  }
+}

@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Assistant under the LAUNCHD shape only (deployment.yaml; open decision 15).
+
+     The engine is the one service that LOSES something by leaving the
+     container: the container was defence in depth behind invariant 9's
+     allowlist. So the job's root process is not node — it is
+     /usr/bin/sandbox-exec running ops/sandbox/assistant.sb, and every
+     child inherits the confinement: read of its own dist + runtime,
+     write only to STATE_DIR and the temp dir, outbound only to the
+     console on loopback and TLS. `metistry up` computes every -D
+     parameter (packages/cli/src/sandbox.ts) and the misuse tests in
+     packages/cli/test/sandbox.test.ts prove the four denials.
+
+     STATE_DIR is also HOME (see the env dict `up` renders): the Agent
+     SDK's session transcripts live there and must survive a restart —
+     the launchd equivalent of the assistant-home volume in
+     docker-compose.yml. The env dict carries CLAUDE_CODE_OAUTH_TOKEN,
+     so `up` writes the rendered plist mode 600. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.foldedspacelabs.metistry.assistant</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/sandbox-exec</string>
+    <string>-f</string>
+    <string>__REPO__/ops/sandbox/assistant.sb</string>
+    <string>-D</string><string>NODE_BIN=__NODE__</string>
+    <string>-D</string><string>NODE_PREFIX=__NODE_PREFIX__</string>
+    <string>-D</string><string>PRODUCT_DIR=__PRODUCT_DIR__</string>
+    <string>-D</string><string>STATE_DIR=__STATE_DIR__</string>
+    <string>-D</string><string>TMP_DIR=__TMP_DIR__</string>
+    <string>-D</string><string>CONSOLE_TCP=__CONSOLE_TCP__</string>
+    <string>__NODE__</string>
+    <string>__REPO__/apps/assistant/dist/main.js</string>
+  </array>
+  <key>WorkingDirectory</key><string>__REPO__</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+__ENV__
+  </dict>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/tmp/metistry-assistant.log</string>
+  <key>StandardErrorPath</key><string>/tmp/metistry-assistant.log</string>
+</dict>
+</plist>

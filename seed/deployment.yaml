@@ -1,0 +1,36 @@
+# deployment.yaml — WHERE this install's services run (plan §4.17, open
+# decision 15). Instance config: this is the product default; copy it to
+# your instance directory and edit there, and the instance's copy wins
+# whole (the D4 overlay, by filename).
+#
+#   shape: compose   Postgres, console and assistant as containers;
+#                    reconciler and watchdog as launchd jobs. The Linux and
+#                    cloud shape, and the default everywhere until you flip
+#                    it — nothing about your install changes by upgrading.
+#
+#   shape: launchd   every service a launchd job on the host, Postgres from
+#                    a user-space install (METISTRY_PG_BIN, a bundled
+#                    runtime/postgres/, or Homebrew postgresql@17 +
+#                    pgvector). No Docker at all. This is what the Mac app
+#                    installs; the assistant runs under the sandbox profile
+#                    in ops/sandbox/assistant.sb, which replaces the
+#                    container boundary it gives up.
+#
+# Switching: edit this line, then `metistry up`. Both directions are
+# supported and the data does not move with you — see
+# docs/ops/deployment-shapes.md, which covers the dump/restore step.
+shape: compose
+
+# Per-service overrides. Both keys are optional; a service not listed here
+# takes the install-wide shape above.
+#
+#   services:
+#     db:
+#       shape: compose     # keep Postgres in a container under a launchd install
+#     assistant:
+#       enabled: false     # `up` does not start it, `doctor` does not fail on it
+#
+# reconciler and watchdog are host jobs in either shape (invariant 6): the
+# reconciler holds the instance repo's working tree, and the watchdog must
+# outlive whatever it is watching.
+services: {}

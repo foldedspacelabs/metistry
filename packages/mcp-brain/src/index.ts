@@ -2,6 +2,21 @@ export { createBrainServer, sanitizeDeep, TOOL_NAMES, type BrainConfig, type Bra
 export { captureToInbox, type CaptureInput, type CaptureResult } from "./capture.js";
 export { submitReport, REPORT_KINDS, type ReportInput, type ReportKind, type ReportResult } from "./report.js";
 export { searchKnowledge, readKnowledge, underAreas, validKnowledgePath, type KnowledgeHit, type KnowledgeReader, type ReadOutcome } from "./knowledge.js";
+export {
+  vaultBridgeWriter,
+  stampProvenance,
+  writeKnowledge,
+  sha256Text,
+  MAX_WRITE_BYTES,
+  type KnowledgeWriter,
+  type KnowledgeWriteArgs,
+  type KnowledgeWriteOutcome,
+  type StampOutcome,
+  type VaultBridgeOptions,
+  type VaultWriteIntent,
+  type VaultWriteRequest,
+  type VaultWriteOutcome,
+} from "./knowledge-write.js";
 export { computeNudge, type NudgeOptions } from "./nudge.js";
 export { allProjects, memberOf } from "./scope.js";
 export type { AgentPrincipal, Db, Tier } from "./types.js";

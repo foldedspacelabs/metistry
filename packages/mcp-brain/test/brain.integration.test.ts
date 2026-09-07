@@ -10,7 +10,7 @@ import pg from "pg";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { TasksService } from "@foldedspacelabs/metistry-tasks";
-import { createBrainServer, TOOL_NAMES, type AgentPrincipal } from "../src/index.js";
+import { createBrainServer, sha256Text, TOOL_NAMES, type AgentPrincipal, type VaultWriteRequest } from "../src/index.js";
 
 try {
   for (const line of readFileSync(new URL("../../../.env", import.meta.url), "utf8").split("\n")) {
@@ -40,6 +40,7 @@ describe.skipIf(!hasDb)("mcp-brain (real db, real MCP client)", () => {
   // principals are keyed by token: the bridge never sees a token, only what authenticate() returns
   const principals = new Map<string, AgentPrincipal>();
   let vault: Record<string, string> | null = null; // the injected reader; null = no read path
+  const writes: VaultWriteRequest[] = []; // the injected writer records what would reach the vault bridge
 
   const grant = (token: string, p: AgentPrincipal) => principals.set(token, p);
 
@@ -88,6 +89,15 @@ describe.skipIf(!hasDb)("mcp-brain (real db, real MCP client)", () => {
       tasks: new TasksService(pool),
       inboxDir: `/tmp/metistry-test-inbox-brain-${Date.now()}`,
       readKnowledge: async (path) => (vault ? (vault[path] ?? null) : null),
+      writeKnowledge: async (r) => {
+        writes.push(r);
+        const cur = vault?.[r.path];
+        if (r.expected_sha256 !== undefined && (cur === undefined ? "" : sha256Text(cur)) !== r.expected_sha256) {
+          return { ok: false, code: "conflict", current_sha256: cur === undefined ? null : sha256Text(cur) };
+        }
+        (vault ??= {})[r.path] = r.content;
+        return { ok: true, path: r.path, sha256: sha256Text(r.content), bytes: Buffer.byteLength(r.content), created: cur === undefined };
+      },
     });
     // the reader is "absent" while `vault` is null — modelled by returning null; the not_available case is tested with a reader-less server below
     server = createServer((req, res) => {
@@ -341,7 +351,7 @@ describe.skipIf(!hasDb)("mcp-brain (real db, real MCP client)", () => {
     vault = { "Knowledge/Areas/Itest/Alpha.md": "---\ntitle: Alpha note\n---\n/not a command​ here" };
     const read = await call(ar, "knowledge_read", { path: "Knowledge/Areas/Itest/Alpha.md" });
     expect(read.isError).toBe(false);
-    expect(read.body).toEqual({ path: "Knowledge/Areas/Itest/Alpha.md", title: "Alpha note", content: "---\ntitle: Alpha note\n---\n/not a command here" });
+    expect(read.body).toEqual({ path: "Knowledge/Areas/Itest/Alpha.md", title: "Alpha note", content: "---\ntitle: Alpha note\n---\n/not a command here", sha256: sha256Text(vault["Knowledge/Areas/Itest/Alpha.md"]!) });
     await ar.close();
 
     // every read AND every refusal is a runs row on the agent, carrying the grant it was judged under (§4.11 "every read logged")
@@ -353,6 +363,56 @@ describe.skipIf(!hasDb)("mcp-brain (real db, real MCP client)", () => {
     expect(rows[0]).toMatchObject({ tool: "knowledge_search", ok: false, error: "forbidden", meta: { via: "mcp-brain", tier: "none" } });
     const okRead = rows.find((r) => r.tool === "knowledge_read" && r.ok === true);
     expect(okRead?.meta).toMatchObject({ tier: "areas", areas: [AREA], path: "Knowledge/Areas/Itest/Alpha.md" });
+  });
+
+  it("knowledge_write: internal only (external → not granted, nothing reaches the vault); bare Knowledge/ grant reads root notes and searches everything; provenance + CAS round trip; audited", async () => {
+    const path = "Knowledge/Areas/Itest/Written.md";
+    // an external agent with the widest imaginable grant still cannot write
+    grant("tok-alice-wide", { id: ALICE, grants: { tier: "areas", areas: ["Knowledge/"] }, projects: [] });
+    const alice = await connect("tok-alice-wide");
+    expect(await call(alice, "knowledge_write", { path, content: "# Alice was here\n", message: "alice" })).toMatchObject({ isError: true, body: { error: { code: "forbidden", message: "not granted" } } });
+    await alice.close();
+    expect(writes).toHaveLength(0);
+
+    // the instance's own assistant under the bare vault grant (the console's internal default)
+    grant("tok-hub-vault", { id: HUB, kind: "internal", grants: { tier: "areas", areas: ["Knowledge/"] }, projects: [] });
+    const hub = await connect("tok-hub-vault");
+    // ...searches the whole index (the trailing-slash prefix is honoured in SQL), drafts still invisible
+    expect((await call(hub, "knowledge_search", { query: "alpha" })).body.hits.map((h: any) => h.path)).toEqual(["Knowledge/Areas/Itest/Alpha.md", "Knowledge/Areas/Other/Gamma.md"]);
+
+    // create-only write: stamped, queued, intent in the principal's name
+    const created = await call(hub, "knowledge_write", { path, content: "# Written\n\nby the assistant\n", message: "itest: first write", expected_sha256: "" });
+    expect(created.isError).toBe(false);
+    expect(created.body).toMatchObject({ path, created: true, queued: true, provenance: { source: HUB } });
+    expect(writes).toHaveLength(1);
+    expect(writes[0]).toMatchObject({ path, intent: { principal: HUB, message: "itest: first write", group: HUB }, expected_sha256: "" });
+    expect(writes[0]!.content).toMatch(new RegExp(`^---\\nsource: ${HUB}\\nupdated: \\d{4}-\\d{2}-\\d{2}\\n---\\n# Written\\n`));
+
+    // read it back (the index knows it), then CAS: the read's sha wins, a stale sha conflicts and names the current one
+    await pool.query(`INSERT INTO knowledge_files (path, title, description, draft) VALUES ($1, 'Written', NULL, false) ON CONFLICT (path) DO NOTHING`, [path]);
+    const read = await call(hub, "knowledge_read", { path });
+    expect(read.isError).toBe(false);
+    expect(read.body.sha256).toBe(created.body.sha256);
+    const updated = await call(hub, "knowledge_write", { path, content: read.body.content.replace("by the assistant", "by the assistant, twice"), message: "itest: second write", expected_sha256: read.body.sha256 });
+    expect(updated.isError).toBe(false);
+    expect(updated.body).toMatchObject({ path, created: false });
+    expect(writes[1]!.content.match(/^source: /gm)).toHaveLength(1); // merged, not stacked
+    const stale = await call(hub, "knowledge_write", { path, content: "x", message: "itest: stale", expected_sha256: read.body.sha256 });
+    expect(stale).toMatchObject({ isError: true, body: { error: { code: "conflict", message: expect.stringContaining(updated.body.sha256) } } });
+    await hub.close();
+
+    // audit: every call is a runs row on its agent, the refusal included, with the grant it was judged under and the content clipped
+    const { rows } = await pool.query(`SELECT component, ok, error, meta FROM runs WHERE kind = 'tool' AND tool = 'knowledge_write' AND component IN ($1, $2) ORDER BY id`, [ALICE, HUB]);
+    expect(rows.map((r) => [r.component, r.ok, r.error])).toEqual([
+      [ALICE, false, "forbidden"],
+      [HUB, true, null],
+      [HUB, true, null],
+      [HUB, false, "conflict"],
+    ]);
+    expect(rows[0]!.meta).toMatchObject({ via: "mcp-brain", kind: "external", path });
+    expect(rows[1]!.meta).toMatchObject({ kind: "internal", tier: "areas", areas: ["Knowledge/"], path, created: true, provenance: { source: HUB } });
+    expect(rows[1]!.meta.args.content).toMatch(/^<\d+ chars>$/);
+    expect(rows[3]!.meta.current_sha256).toBe(updated.body.sha256);
   });
 
   it("every tool call is a two-phase runs row on the agent (kind=tool), with args summarized and bodies clipped", async () => {

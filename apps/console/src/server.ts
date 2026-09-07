@@ -14,7 +14,7 @@ import { join } from "node:path";
 
 import { runCheck, startRun, finishRun, errorEnvelope, statusFor, type CheckResult } from "@foldedspacelabs/metistry-core";
 import { QueryError, QueryStore } from "@foldedspacelabs/metistry-queries";
-import { captureToInbox, createBrainServer, type KnowledgeReader } from "@foldedspacelabs/metistry-mcp-brain";
+import { captureToInbox, createBrainServer, type KnowledgeReader, type KnowledgeWriter } from "@foldedspacelabs/metistry-mcp-brain";
 import { TasksService } from "@foldedspacelabs/metistry-tasks";
 import { ArtifactsService, type VaultClient } from "@foldedspacelabs/metistry-artifacts";
 import { artifactRoutes, isArtifactRoute } from "./artifacts-routes.js";
@@ -43,6 +43,8 @@ export interface ConsoleConfig {
   targets?: TargetRegistry; // compute targets (§4.18); absent = no dispatch surface
   /** Note-content reader for mcp-brain's knowledge_read (the reconciler's vault bridge, D5); absent = not_available, exactly as before. */
   readKnowledge?: KnowledgeReader;
+  /** Note writer for mcp-brain's knowledge_write — the assistant's brain-commit over the same bridge; absent = not_available. */
+  writeKnowledge?: KnowledgeWriter;
   /** The vault client the artifacts module (§4.21) stores content through; absent = artifacts degrade to not_available. */
   vault?: VaultClient;
 }
@@ -71,6 +73,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     tasks,
     inboxDir: cfg.inboxDir,
     readKnowledge: cfg.readKnowledge,
+    writeKnowledge: cfg.writeKnowledge,
     artifacts,
   });
 
@@ -420,7 +423,9 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       if (!verbOk) return sendError(res, "not_found");
       try {
         if (op === "grants") {
-          const grants = agents.validateGrants(await readJson(req));
+          // the bare vault (`Knowledge/`) is admitted for internal rows only: the rule keys on the ROW's kind, never on the request
+          const row = (await agents.listAgents(db)).find((a) => a.id === id && !a.revoked);
+          const grants = agents.validateGrants(await readJson(req), { kind: row?.kind === "internal" ? "internal" : "external" });
           const ok = await agents.setGrants(db, id, grants);
           await audit("agent_admin", "grant", ok, { agent: id, op: "grant", grants });
           return ok ? sendJson(res, 200, { ok: true, grants }) : sendError(res, "not_found");

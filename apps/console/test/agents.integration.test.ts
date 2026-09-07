@@ -33,11 +33,26 @@ describe("agent grants validation (pure)", () => {
   it("rejects lowercase knowledge/, non-Knowledge paths, traversal, and bare Knowledge", () => {
     for (const bad of ["knowledge/Areas/Fsl", "Knowledge/areas/fsl", "inbox/", "/Knowledge/Areas", "Knowledge", "Knowledge/", "Knowledge/../secrets", "Knowledge/Areas/Fsl/", "../Knowledge/Areas"]) {
       expect(() => agents.validateGrants({ tier: "areas", areas: [bad] }), bad).toThrow(agents.AgentError);
+      expect(() => agents.validateGrants({ tier: "areas", areas: [bad] }, { kind: "external" }), bad).toThrow(agents.AgentError);
     }
     expect(() => agents.validateGrants({ tier: "admin" })).toThrow(agents.AgentError);
     expect(() => agents.validateGrants({ tier: "none", areas: ["Knowledge/Areas/Fsl"] })).toThrow(agents.AgentError); // areas only with tier=areas
     expect(() => agents.validateGrants({ tier: "areas", areas: [] })).toThrow(agents.AgentError);
     expect(() => agents.validateGrants({ tier: "areas", areas: "Knowledge/Areas/Fsl" })).toThrow(agents.AgentError);
+  });
+
+  it("the bare vault (`Knowledge/`) is admitted for kind=internal only, normalized, and still refused everything else", () => {
+    // internal: `Knowledge` and `Knowledge/` both mean the whole vault, spelled `Knowledge/`
+    expect(agents.validateGrants({ tier: "areas", areas: ["Knowledge"] }, { kind: "internal" })).toEqual({ tier: "areas", areas: ["Knowledge/"] });
+    expect(agents.validateGrants({ tier: "areas", areas: [" Knowledge/ ", "Knowledge", "Knowledge/Areas/Fsl"] }, { kind: "internal" })).toEqual({ tier: "areas", areas: ["Knowledge/", "Knowledge/Areas/Fsl"] });
+    expect(agents.ASSISTANT_DEFAULT_AREAS).toEqual(["Knowledge/"]);
+    // internal is not a blank cheque: the other rules hold
+    for (const bad of ["knowledge/", "knowledge", "Knowledge//", "/Knowledge/", "Knowledge/areas", "Knowledge/../x", "inbox/"]) {
+      expect(() => agents.validateGrants({ tier: "areas", areas: [bad] }, { kind: "internal" }), bad).toThrow(agents.AgentError);
+    }
+    // external (explicit or default): never
+    expect(() => agents.validateGrants({ tier: "areas", areas: ["Knowledge/"] }, { kind: "external" })).toThrow(/TitleCase Knowledge/);
+    expect(() => agents.validateGrants({ tier: "areas", areas: ["Knowledge/"] })).toThrow(agents.AgentError);
   });
 
   it("projects are slugs", () => {
@@ -216,11 +231,16 @@ describe.skipIf(!hasDb)("agent registry (integration)", () => {
     await expect(agents.ensureInternalAgent(pool, id, { token: rotated, projects: ["Drey"] })).rejects.toThrow(agents.AgentError);
     await expect(agents.ensureInternalAgent(pool, id, { token: "short" })).rejects.toThrow(agents.AgentError);
     await expect(agents.ensureInternalAgent(pool, "Bad Id", { token: rotated })).rejects.toThrow(agents.AgentError);
-    expect(() => agents.validateGrants({ tier: "areas", areas: ["Knowledge/"] })).toThrow(agents.AgentError); // "everything" is not an area; the default list is the widest valid read
+    expect(() => agents.validateGrants({ tier: "areas", areas: ["Knowledge/"] })).toThrow(agents.AgentError); // "everything" is not an area for an external agent; the internal default is exactly that
     // the list never carries a hash for internal agents either
     const list = await (await json("GET", "/api/agents")).json();
     expect(list.agents.find((a: any) => a.id === id)).toMatchObject({ kind: "internal", revoked: false });
     expect(JSON.stringify(list)).not.toContain(rotated);
+    // the management API keys the bare-vault rule on the ROW's kind, never on the request: accepted for this internal row, refused for the external agent
+    expect((await json("PUT", `/api/agents/${id}/grants`, { tier: "areas", areas: ["Knowledge"] })).status).toBe(200);
+    expect((await agents.authenticateAgent(pool, { headers: { authorization: `Bearer ${rotated}` } }))?.grants).toEqual({ tier: "areas", areas: ["Knowledge/"] });
+    expect((await json("PUT", `/api/agents/${agentId}/grants`, { tier: "areas", areas: ["Knowledge/"] })).status).toBe(400);
+    expect((await json("PUT", `/api/agents/${id}/grants`, { tier: "areas", areas: ["knowledge/"] })).status).toBe(400);
   });
 
   it("rotate invalidates the old token; revoke kills the new one and is audited", async () => {

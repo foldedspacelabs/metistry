@@ -385,6 +385,28 @@ your git, on your machine.
   first run, `failed` (exit 1) versus `degraded`/`absent` (exit 0) so a
   missing optional bridge is a finding, not an outage. 26 tests, fakes
   for every status plus the real-db migrations count.
+- 2026-09-07 — **The assistant can write knowledge: `knowledge_write` is
+  `brain-commit`** (§4.7 layer 1, D5's "thin call to write-with-intent",
+  §4.11 one writer). One more tool on the same `mcp-brain` surface, and
+  the engine still has no shell and no git. Safety mechanism, three
+  refusals deep and none of them a prompt: only the `kind: internal`
+  principal (the owner's own assistant) can call it — every sub-agent and
+  external agent gets the uniform "not granted" and keeps `report`; the
+  path must be `Knowledge/...` inside the assistant's own read grant, and
+  the reconciler refuses the §4.7 protected set (`identity.yaml`,
+  `rules.yaml`, `queries/`, `agents/`, …) behind that, so the assistant
+  cannot edit its own constraints or its routing; and every markdown
+  write is stamped with provenance from the credential (`source:
+  assistant`, `updated: <today>`) merged into the frontmatter without
+  touching another byte. Compare-and-swap (`knowledge_read` now returns
+  the hash) turns a race with an Obsidian edit into a `conflict` the
+  assistant re-reads through instead of clobbering; every call is a
+  `runs` row and every landed write a commit in its name. Grant rule
+  (owner decision, implemented as the recommended default): a `kind:
+  internal` row may hold the bare vault grant `Knowledge/`, now the
+  assistant's default, so root notes like `now.md` are readable — the
+  gap reported 2026-09-06 is closed by test. Deletes and renames stay the
+  user's hand.
 - 2026-09-07 — **Artifacts: reviewable agent output** (plan §4.21, built
   as a §4.20 module — `packages/artifacts`, `0010_artifacts.sql`, console
   routes + PWA tab, six `artifact_*` tools on `mcp-brain`). An agent's

@@ -9,6 +9,7 @@ import { routines } from "@metistry-apps/routines";
 import { loadSchedules, startRunner } from "./runner.js";
 import { loadRules } from "./router.js";
 import { TargetRegistry } from "./dispatch.js";
+import { vaultBridgeWriter } from "@foldedspacelabs/metistry-mcp-brain";
 import { ASSISTANT_DEFAULT_AREAS, INTERNAL_ASSISTANT_ID, ensureInternalAgent, revokeAgent, validateGrants } from "./agents.js";
 import { httpVaultClient } from "./vault-client.js";
 import { readFile } from "node:fs/promises";
@@ -28,7 +29,7 @@ if (process.env.METISTRY_ASSISTANT_TOKEN) {
   const areas = list(process.env.METISTRY_ASSISTANT_AREAS);
   const r = await ensureInternalAgent(pool, INTERNAL_ASSISTANT_ID, {
     token: process.env.METISTRY_ASSISTANT_TOKEN,
-    grants: validateGrants({ tier: "areas", areas: areas.length > 0 ? areas : [...ASSISTANT_DEFAULT_AREAS] }),
+    grants: validateGrants({ tier: "areas", areas: areas.length > 0 ? areas : [...ASSISTANT_DEFAULT_AREAS] }, { kind: "internal" }),
     projects: list(process.env.METISTRY_ASSISTANT_PROJECTS),
   });
   console.log(`internal agent '${r.id}' ${r.created ? "registered" : "re-synced"} (projects: ${list(process.env.METISTRY_ASSISTANT_PROJECTS).join(", ") || "all"})`);
@@ -70,8 +71,9 @@ if (!push) console.warn("web push absent: set METISTRY_VAPID_* to enable (degrad
 const reconcilerUrl = process.env.METISTRY_RECONCILER_URL;
 const reconcilerToken = process.env.METISTRY_BRIDGE_TOKEN_RECONCILER;
 const vault = reconcilerUrl && reconcilerToken ? httpVaultClient({ url: reconcilerUrl, token: reconcilerToken }) : undefined;
+const writeKnowledge = reconcilerUrl && reconcilerToken ? vaultBridgeWriter({ url: reconcilerUrl, token: reconcilerToken }) : undefined; // knowledge_write = brain-commit over the same bridge
 const readKnowledge = vault ? async (path: string): Promise<string | null> => (await vault.read(path))?.content.toString("utf8") ?? null : undefined;
-if (!vault) console.warn("vault bridge absent: set METISTRY_RECONCILER_URL + METISTRY_BRIDGE_TOKEN_RECONCILER for knowledge_read and artifacts (degrades: absent)");
+if (!vault) console.warn("vault bridge absent: set METISTRY_RECONCILER_URL + METISTRY_BRIDGE_TOKEN_RECONCILER for knowledge_read, knowledge_write and artifacts (degrades: absent)");
 const server = makeServer(pool, queries, {
   origin,
   inboxDir: optionalEnv("METISTRY_INBOX_DIR", "./inbox"),
@@ -85,6 +87,7 @@ const server = makeServer(pool, queries, {
   targets,
   ...(push ? { push } : {}),
   ...(readKnowledge ? { readKnowledge } : {}),
+  ...(writeKnowledge ? { writeKnowledge } : {}),
   ...(vault ? { vault } : {}),
 });
 if (push) startNotifier(pool, push);

@@ -40,23 +40,15 @@ export interface AgentPrincipal {
 export const INTERNAL_ASSISTANT_ID = "assistant";
 
 /**
- * The widest grant the validator admits, for the primary assistant: every
- * note-bearing top-level vault folder of plan §4.15. The validator refuses
- * bare `Knowledge` on purpose (an area grant is a prefix, and "everything"
- * is not an area), so the widest valid read is the union of the top-level
- * areas. Root-level notes (`Knowledge/now.md`) sit under none of them and
- * are therefore NOT readable through this grant — a known gap, reported,
- * not routed around. Override per instance with METISTRY_ASSISTANT_AREAS.
+ * The bare vault grant: the whole of `Knowledge/`, root notes included
+ * (`Knowledge/now.md`). Admitted by the validator for `kind: internal`
+ * rows ONLY — the owner's own assistant, whose scope is configuration in
+ * the user's hand (§4.11) — and the internal default. External agents can
+ * never hold it: for them an area grant is a prefix, and "everything" is
+ * not an area. Narrow per instance with METISTRY_ASSISTANT_AREAS.
  */
-export const ASSISTANT_DEFAULT_AREAS = [
-  "Knowledge/Areas",
-  "Knowledge/Projects",
-  "Knowledge/Resources",
-  "Knowledge/Techniques",
-  "Knowledge/Journal",
-  "Knowledge/People",
-  "Knowledge/Me",
-] as const;
+export const VAULT_ROOT_AREA = "Knowledge/";
+export const ASSISTANT_DEFAULT_AREAS = [VAULT_ROOT_AREA] as const;
 
 export interface AgentRow {
   id: string;
@@ -79,24 +71,34 @@ export class AgentError extends Error {
 // A vault area prefix: `Knowledge/` plus one or more TitleCase segments
 // (CLAUDE.md casing rule — Obsidian renders these; Linux containers do not
 // forgive `knowledge/`). No traversal, no trailing slash, no bare
-// `Knowledge` (that would be "everything", which is not an area grant).
+// `Knowledge` (that would be "everything", which is not an area grant —
+// except for an internal row, where the bare vault is spelled `Knowledge/`
+// and normalized to VAULT_ROOT_AREA).
 const AREA_RE = /^Knowledge(\/[A-Z][A-Za-z0-9 _.'-]*)+$/;
+const BARE_VAULT_RE = /^Knowledge\/?$/;
 const MAX_AREAS = 64;
 const MAX_AREA_LEN = 200;
 
+export interface GrantsOptions {
+  /** The row's kind. `internal` admits the bare vault (`Knowledge/`); anything else (the default) refuses it. */
+  kind?: AgentKind | undefined;
+}
+
 /** Validate + normalize a grants payload. Throws AgentError on any miss. */
-export function validateGrants(input: unknown): Grants {
+export function validateGrants(input: unknown, opts: GrantsOptions = {}): Grants {
   const g = (input ?? {}) as { tier?: unknown; areas?: unknown };
   if (!TIERS.includes(g.tier as Tier)) throw new AgentError("invalid_request", "tier must be none | index | areas");
   const tier = g.tier as Tier;
   const rawAreas = g.areas === undefined ? [] : g.areas;
   if (!Array.isArray(rawAreas) || rawAreas.length > MAX_AREAS) throw new AgentError("invalid_request", "areas must be a list");
+  const bareAllowed = opts.kind === "internal";
   const areas: string[] = [];
   for (const a of rawAreas) {
     if (typeof a !== "string") throw new AgentError("invalid_request", "area must be a string");
-    const s = a.trim();
-    if (s.length > MAX_AREA_LEN || !AREA_RE.test(s) || s.includes("..")) {
-      throw new AgentError("invalid_request", "area must be a TitleCase Knowledge/... prefix");
+    let s = a.trim();
+    if (bareAllowed && BARE_VAULT_RE.test(s)) s = VAULT_ROOT_AREA;
+    else if (s.length > MAX_AREA_LEN || !AREA_RE.test(s) || s.includes("..")) {
+      throw new AgentError("invalid_request", bareAllowed ? "area must be a TitleCase Knowledge/... prefix, or Knowledge/ for the whole vault" : "area must be a TitleCase Knowledge/... prefix");
     }
     if (!areas.includes(s)) areas.push(s);
   }
@@ -148,7 +150,7 @@ export interface InternalAgentConfig {
   /** The bearer the internal agent presents; only its hash is stored. From the user's .env, never minted here. */
   token: string;
   display_name?: string | undefined;
-  /** Validated grants; default = the widest valid read (ASSISTANT_DEFAULT_AREAS). */
+  /** Validated grants (validateGrants with kind internal); default = the whole vault (ASSISTANT_DEFAULT_AREAS). */
   grants?: Grants | undefined;
   /** Validated project slugs; empty = every project, by mcp-brain's internal rule. */
   projects?: string[] | undefined;
@@ -168,7 +170,7 @@ export interface InternalAgentConfig {
 export async function ensureInternalAgent(db: Db, id: string, cfg: InternalAgentConfig): Promise<{ id: string; created: boolean }> {
   if (!AGENT_ID_RE.test(id)) throw new AgentError("invalid_request", "id must be a slug ^[a-z][a-z0-9-]{0,39}$");
   if (typeof cfg.token !== "string" || cfg.token.length < 16) throw new AgentError("invalid_request", "internal agent token must be at least 16 characters");
-  const grants = cfg.grants ?? validateGrants({ tier: "areas", areas: [...ASSISTANT_DEFAULT_AREAS] });
+  const grants = cfg.grants ?? validateGrants({ tier: "areas", areas: [...ASSISTANT_DEFAULT_AREAS] }, { kind: "internal" });
   const projects = validateProjects(cfg.projects ?? []);
   const displayName = (cfg.display_name ?? "").trim().slice(0, 120) || `${id} (internal)`;
   const { rows } = await db.query(

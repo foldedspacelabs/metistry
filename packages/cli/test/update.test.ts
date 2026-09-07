@@ -230,16 +230,19 @@ describe("metistry update", () => {
     expect(lines.join("\n")).toContain("no METISTRY_INSTANCE_DIR — metistry.lock not written");
   });
 
-  it("release mode: pull the pinned images, print the npm install, never build; the prior lock's commit is kept", async () => {
+  it("release mode --dry-run: the download plan, the pinned pull, never a build; the prior lock's commit is kept", async () => {
     const P = await checkout({ git: true });
     const inst = await mkdtemp(join(tmpdir(), "metistry-inst-"));
     const prior: LockFile = { product: { version: "0.0.8", commit: "rel-commit", source: "release" }, updated_at: "2026-09-01T00:00:00.000Z", migrations_applied: ["0001_a.sql"] };
     await writeFile(join(inst, "metistry.lock"), serializeLock(prior));
     const r = await update({ ...base(P, { METISTRY_INSTANCE_DIR: inst, ...BRIDGE }), exec: fakeExec(), dryRun: true, fetchFn: fakeFetch().fn });
     expect(r.source).toBe("release");
-    expect(r.commands.slice(0, 2)).toEqual([`(cd ${P} && docker compose pull)`, "npm install -g @foldedspacelabs/metistry-cli@0.0.9 @foldedspacelabs/metistry-core@0.0.9   # printed, not run: nothing is published yet (docs/ops/cli.md)"]);
+    expect(r.commands[0]).toContain("resolve release <latest> of foldedspacelabs/metistry");
+    expect(r.commands[1]).toContain(`unpack to ${P}/releases/<latest>/ and point current at it`);
     expect(r.commands.join("\n")).not.toContain("pnpm");
     expect(r.commands.join("\n")).not.toContain("git ");
+    // no `current` yet in this checkout-shaped dir, so the plan still names the product dir
+    expect(r.commands).toContain(`(cd ${P} && docker compose pull)`);
     expect(r.commands).toContain(`(cd ${P} && docker compose up -d --no-build)`);
     expect(r.lock).toEqual({ product: { version: "0.0.9", commit: "rel-commit", source: "release" }, updated_at: NOW.toISOString(), migrations_applied: ["0001_a.sql"] });
     expect(await publishedPackages(P)).toEqual(["@foldedspacelabs/metistry-cli", "@foldedspacelabs/metistry-core"]);

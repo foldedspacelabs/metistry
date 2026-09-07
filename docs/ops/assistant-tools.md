@@ -8,7 +8,7 @@ grant or narrow it, and where to see what it did.
 ## What the assistant can do
 
 With tools mounted, every turn the engine runs can call exactly these
-eighteen tools on the console's `POST /mcp` (`packages/mcp-brain`), and
+nineteen tools on the console's `POST /mcp` (`packages/mcp-brain`), and
 nothing else — no shell, no filesystem, no git, no web (invariant 9,
 enforced in `apps/assistant/src/brain.ts`, locked to the bridge's
 manifest by test):
@@ -20,6 +20,7 @@ manifest by test):
 | out | `knowledge_search`, `knowledge_read` | Reads the vault index and note contents (via the reconciler's vault bridge), within its grant. `knowledge_read` returns the note's `sha256`. |
 | write | `knowledge_write` | **This is `brain-commit`** (plan §4.7, D5): one note under `Knowledge/` → the reconciler's `POST /vault/write` with a commit intent in the assistant's name. Internal principals only; every external agent is told "not granted". No delete, no rename — those stay your hand. |
 | artifacts | `artifact_publish`, `artifact_get`, `artifact_list`, `artifact_comment`, `artifact_comment_resolve`, `artifact_dispatch_review` | Publishes versioned output into `Artifacts/<project>/<slug>/` (one commit per version via the reconciler), comments on exact versions, and sends review bundles to other agents in the same project — a dispatch across the project boundary becomes a proposal for you (§4.21). |
+| crews | `crew_dispatch` | Hands a brief to a crew you defined in `agents/<area>/<name>.md` (`docs/ops/crews.md`). Internal principals only; the brief is policy-checked against the crew's scope before a durable work row is written; results come back as the crew's own `report` proposals. |
 
 The SDK sees them as `mcp__brain__<tool>`; that fully-qualified list is
 the engine's `allowedTools`, built-in tools are disabled (`tools: []`),

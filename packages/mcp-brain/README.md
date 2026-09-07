@@ -72,6 +72,7 @@ optional nudge line. Errors set `isError` and carry core's uniform envelope
 | `artifact_comment` | `artifact`, `version`, `body`, `path?`, `anchor?`, `parent?` (reply to a root) | `{ comment }` or `{ demoted: true, proposal_id, cap }` past the agent-only cap |
 | `artifact_comment_resolve` | `id`, `reopen?` | `{ comment }` |
 | `artifact_dispatch_review` | `artifact`, `version`, `thread_ids`, `to_agent`, `message?`, `idempotency_key?` | `{ route: 'work', work, links }` inside the project; `{ route: 'proposal', proposal_id }` across the boundary |
+| `crew_dispatch` | `crew`, `brief`, `task_id?`, `idempotency_key?` | `{ queued: true, work_id, crew, allow, deduplicated }` — internal principals only; `invalid_request` with the violations in the message when the brief cites a path outside the crew's scope ∩ the local target's `allow`, or a denied source |
 
 Policy refusals from the task list (`claimed`, `dependencies_open`,
 `not_holder`, `lease_expired`, …) are *outcomes*, returned as data; only a
@@ -126,7 +127,7 @@ createServer((req, res) => {
 
 The returned `BrainServer` has `handle(req, res)`, `check()` (the §4.3
 behavioral probe: selects the columns every tool depends on and runs the
-tasks module's own check), and `tools` (the eighteen names, in manifest
+tasks module's own check), and `tools` (the nineteen names, in manifest
 order).
 
 **Transport.** Stateless Streamable HTTP: a fresh MCP server per request,

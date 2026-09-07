@@ -1,0 +1,91 @@
+// crew_dispatch (plan §4.11 "the brief is the context transfer", §4.18.B
+// local target, Phase 5 crews) — the ONE tool through which the instance's
+// own assistant hands work to a crew. The bridge owns two rules here and
+// nothing else:
+//
+// - internal principals only: a crew never dispatches crews, an external
+//   agent never dispatches anything (uniform with knowledge_write — anyone
+//   else is told "not granted");
+// - the outcome is the host's: the crew registry, the data policy (crew
+//   scope ∩ the local target's allow list), and the durable work row live in
+//   the host's dispatcher (Metistry's console, apps/console/src/crews.ts),
+//   which is where the existing dispatch enforcement is reused rather than
+//   duplicated. This adapter adds nothing to it.
+//
+// The result of a crew run never comes back through this tool: the crew
+// reports through its own `report` / `tasks_*` calls and the run lands as a
+// `runs` row on the crew's id (component = crew name, kind = crew_run).
+
+import { z } from "zod";
+import type { ErrorCode } from "@foldedspacelabs/metistry-core";
+import { done, fail, type Outcome } from "./outcome.js";
+import type { AgentPrincipal } from "./types.js";
+
+export const CREW_TOOL_NAMES = ["crew_dispatch"] as const;
+export type CrewToolName = (typeof CREW_TOOL_NAMES)[number];
+
+/** The server's registration function, narrowed to these names. */
+export type Register = <S extends z.ZodRawShape>(name: CrewToolName, description: string, inputSchema: S, body: (args: z.infer<z.ZodObject<S>>) => Promise<Outcome>) => void;
+
+export interface CrewDispatchInput {
+  crew: string;
+  brief: string;
+  /** An existing task the work relates to — carried as a handle, never a payload (§4.19). */
+  task_id?: number | undefined;
+  /** Caller-supplied; a retried dispatch with the same key returns the existing work row. */
+  idempotency_key?: string | undefined;
+}
+
+export type CrewDispatchOutcome =
+  | {
+      ok: true;
+      /** The queued work row the assistant's drain loop runs (kind task, owner crew:<name>). */
+      work_id: number;
+      /** The dispatch audit row (component console, kind dispatch, tool local-crew). */
+      run_id: number;
+      crew: string;
+      /** The effective allow list the brief was checked against: crew scope ∩ target allow. */
+      allow: string[];
+      /** true when idempotency_key matched an earlier dispatch. */
+      deduplicated: boolean;
+    }
+  | { ok: false; code: ErrorCode; message?: string | undefined; violations?: unknown[] | undefined };
+
+/** The host's side of dispatch: registry lookup, policy, durable enqueue. Injected; the bridge never sees a manifest. */
+export interface CrewDispatcher {
+  dispatch(input: CrewDispatchInput, principal: AgentPrincipal): Promise<CrewDispatchOutcome>;
+  /** Registered crew names, for the tool description and `not_found` hints. */
+  names(): string[];
+}
+
+const NOT_AVAILABLE = "crews are not configured in this deployment (the console loads agents/<area>/<name>.md manifests — docs/ops/crews.md)";
+
+export function registerCrewTools(reg: Register, dispatcher: CrewDispatcher | undefined, principal: AgentPrincipal): void {
+  reg(
+    "crew_dispatch",
+    "Hand a brief to a named crew (a sub-agent defined in agents/<area>/<name>.md, with its own model, tool groups and read scope). " +
+      "The brief IS the context transfer: write in everything the crew needs, cite vault paths only under the crew's scope — a path outside it, or over the local target's data policy, is refused with the violations and nothing is queued. " +
+      "Dispatch is durable: the crew runs from the work queue (kind task, owner crew:<name>) and its results come back ONLY as its own report / tasks_* calls plus a crew_run row on its id. " +
+      "Instance's own assistant only; every other principal is told not granted.",
+    {
+      crew: z.string().regex(/^[a-z][a-z0-9-]{0,39}$/).describe("The crew's name (agents/<area>/<name>.md)."),
+      brief: z.string().min(1).max(200_000).describe("Everything the crew needs, in prose. Handles and paths, not pasted secrets."),
+      task_id: z.number().int().positive().optional().describe("A related task id, passed to the crew as a handle."),
+      idempotency_key: z.string().min(1).max(200).optional(),
+    },
+    async (a) => {
+      if (principal.kind !== "internal") return fail("forbidden", "not granted");
+      if (!dispatcher) return fail("not_available", NOT_AVAILABLE);
+      const r = await dispatcher.dispatch(
+        { crew: a.crew, brief: a.brief, ...(a.task_id !== undefined ? { task_id: a.task_id } : {}), ...(a.idempotency_key !== undefined ? { idempotency_key: a.idempotency_key } : {}) },
+        principal,
+      );
+      // violations ride in the message (the assistant must see WHICH path or source to remove) and in the audit row's meta
+      if (!r.ok) return fail(r.code, r.violations ? `${r.message ?? "refused"}: ${JSON.stringify(r.violations)}` : r.message, r.violations ? { violations: r.violations } : undefined);
+      return done(
+        { queued: true, work_id: r.work_id, crew: r.crew, allow: r.allow, deduplicated: r.deduplicated, returns_via: "report queue + runs (component = crew name, kind = crew_run)" },
+        { crew: r.crew, work_id: r.work_id, dispatch_run_id: r.run_id, deduplicated: r.deduplicated },
+      );
+    },
+  );
+}

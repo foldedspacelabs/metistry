@@ -28,6 +28,7 @@
     "@foldedspacelabs/metistry-core": "workspace:*",
     "@foldedspacelabs/metistry-tasks": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.30.0",
+    "yaml": "^2.9.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
@@ -35,7 +36,6 @@
     "@types/pg": "^8.23.1",
     "pg": "^8.23.0",
     "typescript": "^7.0.2",
-    "vitest": "^4.0.18",
-    "yaml": "^2.9.0"
+    "vitest": "^4.0.18"
   }
 }

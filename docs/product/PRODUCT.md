@@ -522,3 +522,8 @@ your git, on your machine.
   becomes a small free community service with self-host support.
   Rationale: the AI tooling landscape moves too fast for a paywall to
   be the moat; openness is.
+- 2026-09-07 — Release signing runbook (`docs/ops/apple-signing.md`):
+  Developer ID Application cert, TCC re-grant after a helper's signing
+  identity changes, notarization credential setup, and Sparkle EdDSA
+  key generation — the prerequisites the signed/notarized DMG and
+  auto-update pipeline (`docs/product/desktop-app-plan.md`) build on.

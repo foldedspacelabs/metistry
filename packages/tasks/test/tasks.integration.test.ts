@@ -34,7 +34,30 @@ describe.skipIf(!hasDb)("tasks (real db)", () => {
     });
     await pool.query(`DELETE FROM work WHERE project = $1`, [P]);
     await pool.query(`DELETE FROM runs WHERE kind = 'task_op' AND component LIKE 'itest-%'`);
+    await pool.query(`DELETE FROM projects WHERE id = $1`, [P]);
     svc = new TasksService(pool);
+  });
+
+  it("the first create with a project slug makes its `projects` row (ensureProject, 0011) — idempotently, with the defaults", async () => {
+    expect((await pool.query(`SELECT 1 FROM projects WHERE id = $1`, [P])).rows).toHaveLength(0);
+    await svc.create({ title: "first in project", project: P }, "itest-alice");
+    await svc.create({ title: "second in project", project: P }, "itest-alice");
+    const { rows } = await pool.query(`SELECT id, mode, daily_budget_usd, max_open_bundles FROM projects WHERE id = $1`, [P]);
+    expect(rows).toEqual([{ id: P, mode: "autonomous", daily_budget_usd: null, max_open_bundles: 20 }]);
+    // free-text projects predate the table and get no row (the CHECK would refuse them); the task still lands
+    const legacy = await svc.create({ title: "legacy", project: "Not A Slug" }, "itest-alice");
+    expect(legacy.project).toBe("Not A Slug");
+    expect((await pool.query(`SELECT 1 FROM projects WHERE id = 'Not A Slug'`)).rows).toHaveLength(0);
+    await pool.query(`DELETE FROM work WHERE id = $1`, [legacy.id]);
+  });
+
+  it("a row born blocked (a queued review bundle, §4.21) is visible but never ready or claimable until reopened", async () => {
+    const q = await svc.create({ title: "queued bundle", project: P, kind: "review", status: "blocked", note: "over_cap: agent_cap 3/3" }, "itest-alice");
+    expect(q).toMatchObject({ status: "blocked", claimed_by: null });
+    expect(q.history).toEqual([expect.objectContaining({ op: "create", status: "blocked", note: "over_cap: agent_cap 3/3", agent: "itest-alice" })]);
+    expect((await svc.listReady({ project: P })).map((t) => t.id)).not.toContain(q.id);
+    expect(await svc.claim(q.id, "itest-bob")).toMatchObject({ ok: false, reason: "blocked" });
+    await expect(svc.create({ title: "x", project: P, status: "closed" as never }, "itest-alice")).rejects.toMatchObject({ code: "invalid_input" });
   });
   afterAll(async () => pool.end());
 

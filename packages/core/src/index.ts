@@ -28,3 +28,15 @@ export {
   type RunStart,
   type RunFinish,
 } from "./runs.js";
+export {
+  ensureProject,
+  getProject,
+  toProjectRow,
+  PROJECT_SLUG_RE,
+  PROJECT_MODES,
+  PROJECT_COLS,
+  DEFAULT_MAX_OPEN_BUNDLES,
+  type ProjectExecutor,
+  type ProjectMode,
+  type ProjectRow,
+} from "./projects.js";

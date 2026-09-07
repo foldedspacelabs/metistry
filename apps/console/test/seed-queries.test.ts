@@ -29,6 +29,8 @@ const REQUIRED = [
   "projects_overview",
   "projects_rollup",
   "runs_summary",
+  "activity_feed",
+  "agent_presence",
 ];
 
 describe("seed queries", () => {
@@ -113,5 +115,84 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
     expect(Number(s.turns)).toBeGreaterThanOrEqual(1);
     expect(Number(s.captures)).toBeGreaterThanOrEqual(1);
     expect(Number(s.spend_usd)).toBeGreaterThanOrEqual(0.25);
+  });
+
+  // docs/product/desktop-app-plan.md "The window" — Activity feed: a fixture
+  // row from every unioned source must come back through one filtered call.
+  it("activity_feed unions a fixture row from every source (runs, proposals, work.history, outbound_messages)", async () => {
+    const tag = `actfeed-${Date.now()}`;
+
+    await pool.query(`INSERT INTO runs (component, kind, ok, tool) VALUES ($1, 'tool', true, 'test-tool')`, [tag]);
+    await pool.query(`INSERT INTO runs (component, kind, ok) VALUES ($1, 'collector_run', false)`, [tag]); // failure-only kind
+    await pool.query(`INSERT INTO runs (component, kind, ok) VALUES ($1, 'collector_run', true)`, [tag]); // must NOT appear (ok)
+
+    const { rows: propRows } = await pool.query(
+      `INSERT INTO proposals (kind, source_agent, trust, payload) VALUES ('knowledge', $1, 'internal', $2::jsonb) RETURNING id`,
+      [tag, JSON.stringify({ title: `${tag} proposal` })],
+    );
+    await pool.query(`UPDATE proposals SET decision = 'allow', decided_at = now() WHERE id = $1`, [propRows[0]!.id]);
+
+    const historyEntry = JSON.stringify([{ ts: new Date().toISOString(), agent: tag, op: "create", note: `${tag} note` }]);
+    await pool.query(`INSERT INTO work (title, kind, status, history) VALUES ($1, 'task', 'open', $2::jsonb)`, [`${tag} title`, historyEntry]);
+
+    const alertText = `${tag} alert text`;
+    await pool.query(`INSERT INTO outbound_messages (thread, text, kind) VALUES ('default', $1, 'alert')`, [alertText]);
+
+    const { rows } = await store.run("activity_feed", { hours: 1, limit: 500, agent: tag });
+    const kinds = new Set(rows.map((r) => r.kind));
+    expect(kinds.has("tool")).toBe(true);
+    expect(kinds.has("collector_run")).toBe(true);
+    expect(kinds.has("proposal_created")).toBe(true);
+    expect(kinds.has("proposal_decided")).toBe(true);
+    expect(kinds.has("work_history")).toBe(true);
+    expect(rows.filter((r) => r.kind === "collector_run")).toHaveLength(1); // the ok=true row is excluded
+    for (const r of rows) expect(String(r.detail).length).toBeLessThanOrEqual(200);
+
+    // outbound_messages carry no agent identity (actor = 'assistant'), so check them unfiltered.
+    const unfiltered = (await store.run("activity_feed", { hours: 1, limit: 500 })).rows;
+    expect(unfiltered.some((r) => r.kind === "alert" && r.detail === alertText)).toBe(true);
+  });
+
+  // docs/product/desktop-app-plan.md "The window" — Agents panel: the state
+  // machine on fixtures covering each branch once.
+  it("agent_presence computes working/queued/interrupted/over-cap/idle from fixtures", async () => {
+    const suf = Date.now();
+    const ids = {
+      working: `sqw-${suf}`,
+      queued: `sqq-${suf}`,
+      interrupted: `sqi-${suf}`,
+      overCap: `sqo-${suf}`,
+      idle: `sqd-${suf}`,
+    };
+    for (const id of Object.values(ids)) {
+      await pool.query(`INSERT INTO agents (id, display_name, kind, token_hash) VALUES ($1, $1, 'external', $2)`, [id, `${id}-token`]);
+    }
+
+    await pool.query(
+      `INSERT INTO work (title, kind, status, claimed_by, lease_expires_at) VALUES ($1, 'task', 'in_progress', $2, now() + interval '5 minutes')`,
+      [`${ids.working} claim`, ids.working],
+    );
+    await pool.query(`INSERT INTO work (title, kind, status, owner) VALUES ($1, 'review', 'open', $2)`, [`${ids.queued} bundle`, ids.queued]);
+    await pool.query(
+      `INSERT INTO work (title, kind, status, claimed_by, lease_expires_at) VALUES ($1, 'task', 'in_progress', $2, now() - interval '5 minutes')`,
+      [`${ids.interrupted} claim`, ids.interrupted],
+    );
+    const overCapHistory = JSON.stringify([{ ts: new Date().toISOString(), agent: ids.overCap, op: "create", note: "over_cap: agent_cap 3/3" }]);
+    await pool.query(`INSERT INTO work (title, kind, status, meta, history) VALUES ($1, 'review', 'blocked', $2::jsonb, $3::jsonb)`, [
+      `${ids.overCap} bundle`,
+      JSON.stringify({ bundle: { from: ids.overCap } }),
+      overCapHistory,
+    ]);
+
+    const { rows } = await store.run("agent_presence", { limit: 100000 });
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    expect(byId.get(ids.working)?.state).toBe("working");
+    expect(byId.get(ids.queued)?.state).toBe("queued");
+    expect(byId.get(ids.interrupted)?.state).toBe("interrupted");
+    expect(byId.get(ids.overCap)?.state).toBe("over-cap");
+    expect(byId.get(ids.idle)?.state).toBe("idle");
+    expect(byId.get(ids.working)?.current_claims).toHaveLength(1);
+    expect(byId.get(ids.interrupted)?.interrupted_claims).toHaveLength(1);
+    expect(byId.get(ids.overCap)?.blocked_bundles).toHaveLength(1);
   });
 });

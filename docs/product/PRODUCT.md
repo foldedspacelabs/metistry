@@ -273,3 +273,18 @@ your git, on your machine.
   honest line. The first review of each month adds last month's spend by
   tier: §5's subscription-headroom check. Model-free end to end
   (invariant 4); proven against real Postgres in CI.
+- 2026-09-06 — **Compute-target registry + first target (Phase 5, §4.18),
+  and a safety mechanism shipped: the data policy is enforced at the
+  dispatch tool.** A target is a directory with a manifest whose
+  `data_policy` block (`allow` vault prefixes, `deny_sources`,
+  `max_brief_bytes`) is a required, structured declaration — CI validates
+  every manifest in the repo. The console's `dispatch()` is the one path a
+  brief takes off the machine, and it refuses — with a machine-readable
+  reason, and a `runs` row so the refusal is visible — any brief that cites
+  a vault path outside `allow`, carries a denied provenance marker (comms),
+  or exceeds the byte cap. "Comms-derived content never leaves the machine"
+  is now code, not a prompt. First target: GitHub issues (§6 decision 4) —
+  a separate write-only PAT, issue body = brief + return footer, the task's
+  `external_ref` binds it, and `github-state` already closes the task when
+  the issue closes. Every dispatch logs a `runs` row with the target's cost
+  profile, so per-target spend is one named query away.

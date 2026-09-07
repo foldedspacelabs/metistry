@@ -1,8 +1,12 @@
 export {
   manifestSchema,
   validateManifest,
+  targetManifest,
+  dataPolicySchema,
   type Manifest,
   type ManifestResult,
+  type TargetManifest,
+  type DataPolicy,
 } from "./manifest.js";
 export { checkResultSchema, runCheck, type CheckResult, type Checkable } from "./check.js";
 export { errorEnvelope, statusFor, type ErrorCode, type ErrorEnvelope } from "./errors.js";

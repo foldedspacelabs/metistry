@@ -14,7 +14,7 @@ import { join } from "node:path";
 
 import { runCheck, startRun, finishRun, errorEnvelope, statusFor, type CheckResult } from "@foldedspacelabs/metistry-core";
 import { QueryError, QueryStore } from "@foldedspacelabs/metistry-queries";
-import { captureToInbox, createBrainServer } from "@foldedspacelabs/metistry-mcp-brain";
+import { captureToInbox, createBrainServer, type KnowledgeReader } from "@foldedspacelabs/metistry-mcp-brain";
 import { TasksService } from "@foldedspacelabs/metistry-tasks";
 import type { Db } from "./auth-store.js";
 import * as store from "./auth-store.js";
@@ -39,6 +39,8 @@ export interface ConsoleConfig {
   push?: PushConfig; // absent = push degrades absent
   rules?: Rules; // router rules; absent = everything routes to the model
   targets?: TargetRegistry; // compute targets (§4.18); absent = no dispatch surface
+  /** Note-content reader for mcp-brain's knowledge_read (the reconciler's vault bridge, D5); absent = not_available, exactly as before. */
+  readKnowledge?: KnowledgeReader;
 }
 
 type Auth =
@@ -61,6 +63,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     authenticate: (req) => agents.authenticateAgent(db, req), // the same principal source as /capture
     tasks: new TasksService(db),
     inboxDir: cfg.inboxDir,
+    readKnowledge: cfg.readKnowledge,
   });
 
   async function authenticate(req: IncomingMessage): Promise<Auth> {

@@ -56,6 +56,11 @@ services:
       METISTRY_AWS_SESSION_TOKEN: ${METISTRY_AWS_SESSION_TOKEN:-}
       # user's timezone for brief/schedule rendering (Me/profile.md drives this later)
       TZ: ${METISTRY_TZ:-UTC}
+      # the assistant as the first INTERNAL agent on /mcp (docs/ops/assistant-tools.md):
+      # the console registers id 'assistant' from this token at startup; unset = revoked
+      METISTRY_ASSISTANT_TOKEN: ${METISTRY_ASSISTANT_TOKEN:-}
+      METISTRY_ASSISTANT_PROJECTS: ${METISTRY_ASSISTANT_PROJECTS:-}
+      METISTRY_ASSISTANT_AREAS: ${METISTRY_ASSISTANT_AREAS:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
@@ -82,6 +87,11 @@ services:
       # NEVER set ANTHROPIC_API_KEY here — the engine refuses to start with it.
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:?set CLAUDE_CODE_OAUTH_TOKEN in .env (claude setup-token)}
       METISTRY_MODEL_DEFAULT: ${METISTRY_MODEL_DEFAULT:-haiku}
+      # tools: the console's mcp-brain over the compose network, authenticated
+      # with the SAME token the console registers (degrades: tool-less when unset)
+      METISTRY_BRAIN_URL: ${METISTRY_BRAIN_URL:-http://console:8080/mcp}
+      METISTRY_ASSISTANT_TOKEN: ${METISTRY_ASSISTANT_TOKEN:-}
+      # identity + seed prompt ship in the image; an instance overlays via METISTRY_IDENTITY_FILES / METISTRY_PROMPT_FILES
     volumes:
       - assistant-home:/home/node   # SDK transcripts survive restarts (PoC-4)
 

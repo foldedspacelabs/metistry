@@ -69,11 +69,18 @@ export class Vault {
   }
 
   async read(path: unknown): Promise<Outcome<{ path: string; content: string; sha256: string; bytes: number }>> {
+    const r = await this.readBytes(path);
+    if (!r.ok) return r;
+    return { ok: true, value: { path: r.value.path, content: r.value.content.toString("utf8"), sha256: r.value.sha256, bytes: r.value.bytes } };
+  }
+
+  /** The raw bytes (artifacts can be images/PDFs — utf8 would mangle them). */
+  async readBytes(path: unknown): Promise<Outcome<{ path: string; content: Buffer; sha256: string; bytes: number }>> {
     const c = await this.confined(path);
     if (!c.ok) return c;
     const cur = await this.current(c.value.abs);
     if (!cur) return fail("not_found");
-    return { ok: true, value: { path: c.value.rel, content: cur.bytes.toString("utf8"), sha256: cur.sha256, bytes: cur.bytes.length } };
+    return { ok: true, value: { path: c.value.rel, content: cur.bytes, sha256: cur.sha256, bytes: cur.bytes.length } };
   }
 
   /** Files (and directories) under a prefix, breadth-limited by depth. Prefix "" = repo root. */

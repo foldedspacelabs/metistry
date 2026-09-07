@@ -24,6 +24,7 @@ const PA = "itest-brain-a";
 const PB = "itest-brain-b";
 const ALICE = "itest-brain-alice";
 const BOB = "itest-brain-bob";
+const HUB = "itest-brain-hub";
 const AREA = "Knowledge/Areas/Itest";
 
 interface Parsed {
@@ -66,9 +67,9 @@ describe.skipIf(!hasDb)("mcp-brain (real db, real MCP client)", () => {
       password: process.env.METISTRY_DB_PASSWORD,
     });
     await pool.query(`DELETE FROM work WHERE project IN ($1, $2)`, [PA, PB]);
-    await pool.query(`DELETE FROM proposals WHERE source_agent IN ($1, $2)`, [ALICE, BOB]);
-    await pool.query(`DELETE FROM runs WHERE component IN ($1, $2)`, [ALICE, BOB]);
-    await pool.query(`DELETE FROM inbox WHERE source_agent IN ($1, $2)`, [ALICE, BOB]);
+    await pool.query(`DELETE FROM proposals WHERE source_agent IN ($1, $2, $3)`, [ALICE, BOB, HUB]);
+    await pool.query(`DELETE FROM runs WHERE component IN ($1, $2, $3)`, [ALICE, BOB, HUB]);
+    await pool.query(`DELETE FROM inbox WHERE source_agent IN ($1, $2, $3)`, [ALICE, BOB, HUB]);
     await pool.query(`DELETE FROM knowledge_files WHERE path LIKE 'Knowledge/Areas/Itest%' OR path LIKE 'Knowledge/Areas/Other/Gamma%'`);
     await pool.query(
       `INSERT INTO knowledge_files (path, title, description, draft) VALUES
@@ -98,6 +99,9 @@ describe.skipIf(!hasDb)("mcp-brain (real db, real MCP client)", () => {
 
     grant("tok-alice", { id: ALICE, grants: { tier: "none", areas: [] }, projects: [PA] });
     grant("tok-bob", { id: BOB, grants: { tier: "none", areas: [] }, projects: [PB] });
+    // the instance's own assistant: internal, no list = every project (scope.ts); a list narrows it like anyone else
+    grant("tok-hub", { id: HUB, kind: "internal", grants: { tier: "none", areas: [] }, projects: [] });
+    grant("tok-hub-narrow", { id: HUB, kind: "internal", grants: { tier: "none", areas: [] }, projects: [PA] });
   });
 
   afterAll(async () => {
@@ -171,6 +175,49 @@ describe.skipIf(!hasDb)("mcp-brain (real db, real MCP client)", () => {
 
     await alice.close();
     await bob.close();
+  });
+
+  it("an internal principal with no project list is in every project; a list narrows it; external + empty stays none", async () => {
+    grant("tok-nobody", { id: BOB, grants: { tier: "none", areas: [] }, projects: [] });
+    const hub = await connect("tok-hub");
+    const narrow = await connect("tok-hub-narrow");
+    const nobody = await connect("tok-nobody");
+    const aId = Number((await pool.query(`SELECT id FROM work WHERE project = $1 AND title = 'A1'`, [PA])).rows[0].id);
+    const bId = Number((await pool.query(`SELECT id FROM work WHERE project = $1 AND title = 'B1'`, [PB])).rows[0].id);
+    // the scratch db is shared with other suites' leftovers, so assert on THIS suite's projects, not on the whole list
+    const ours = (tasks: any[]) => tasks.filter((t) => [PA, PB].includes(t.project)).map((t) => t.id);
+    try {
+      // every project: both tasks listed (due first, then oldest), both projects nudged, per-project listing works, create anywhere
+      const all = await call(hub, "tasks_list_ready");
+      expect(ours(all.body.tasks)).toEqual([aId, bId]);
+      expect(all.body.tasks.every((t: any) => t.project !== null)).toBe(true);
+      expect(all.nudge).toContain(`1 task ready in project ${PA} — call tasks_list_ready`);
+      expect(all.nudge).toContain(`1 task ready in project ${PB} — call tasks_list_ready`);
+      expect((await call(hub, "tasks_list_ready", { project: PB })).body.tasks.map((t: any) => t.id)).toEqual([bId]);
+      const created = await call(hub, "tasks_create", { title: "H1", project: PB, idempotency_key: `${PB}-h1` });
+      expect(created.isError).toBe(false);
+      expect(created.body.task).toMatchObject({ project: PB, created_by: HUB });
+      await pool.query(`DELETE FROM work WHERE id = $1`, [created.body.task.id]); // keep the later nudge arithmetic exact
+
+      // a task with NO project is invisible even to the every-project principal (a project is the unit of coordination)
+      const orphan = Number((await pool.query(`INSERT INTO work (title, kind, status) VALUES ('orphan', 'task', 'open') RETURNING id`)).rows[0].id);
+      expect((await call(hub, "tasks_list_ready")).body.tasks.map((t: any) => t.id)).not.toContain(orphan);
+      expect((await call(hub, "tasks_claim", { id: orphan })).body.error.code).toBe("not_found");
+      await pool.query(`DELETE FROM work WHERE id = $1`, [orphan]);
+
+      // narrowed internal: PA only — PB is not_found / forbidden exactly as for alice
+      expect((await call(narrow, "tasks_list_ready")).body.tasks.map((t: any) => t.id)).toEqual([aId]);
+      expect((await call(narrow, "tasks_claim", { id: bId })).body.error.code).toBe("not_found");
+      expect((await call(narrow, "tasks_create", { title: "sneak", project: PB })).body.error.code).toBe("forbidden");
+
+      // the rule is kind-gated: an external principal with an empty list still sees nothing
+      expect((await call(nobody, "tasks_list_ready")).body).toEqual({ tasks: [] });
+      expect((await call(nobody, "tasks_claim", { id: aId })).body.error.code).toBe("not_found");
+    } finally {
+      await hub.close();
+      await narrow.close();
+      await nobody.close();
+    }
   });
 
   it("nudge: ready tasks appear on every result and disappear when claimed; a short lease warns; identity is stamped server-side", async () => {

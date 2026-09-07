@@ -13,6 +13,7 @@
   <header>
     <h1 id="title">metistry</h1>
     <nav id="nav" hidden>
+      <button data-view="feed">feed</button>
       <button data-view="chat">chat</button>
       <button data-view="dashboard">dashboard</button>
       <button data-view="capture">capture</button>
@@ -29,6 +30,18 @@
       <p id="auth-msg">sign in to your instance</p>
       <button id="login-btn">sign in with passkey</button>
       <button id="enroll-btn" hidden>enroll this device</button>
+    </section>
+
+    <!-- feed (home): docs/product/desktop-app-plan.md "The window" — activity_feed
+         seed query, time-ordered across runs/proposals/work.history/outbound_messages.
+         Every server value is output-encoded via esc() (CRIT-7). -->
+    <section id="feed" hidden>
+      <form id="feed-filter">
+        <select id="feed-agent"><option value="">all agents</option></select>
+        <select id="feed-project"><option value="">all projects</option></select>
+      </form>
+      <ul id="feed-list"></ul>
+      <p id="feed-empty" class="muted" hidden>nothing in the last 24h</p>
     </section>
 
     <section id="chat" hidden>

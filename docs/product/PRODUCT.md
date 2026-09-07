@@ -527,3 +527,12 @@ your git, on your machine.
   identity changes, notarization credential setup, and Sparkle EdDSA
   key generation — the prerequisites the signed/notarized DMG and
   auto-update pipeline (`docs/product/desktop-app-plan.md`) build on.
+- 2026-09-07 — Desktop window, step 1 shipped: the `activity_feed` and
+  `agent_presence` seed queries, and the PWA's new `feed` tab as the
+  home page (kind icon, actor, subject, relative time, agent/project
+  filters, 10s auto-refresh) plus presence chips (working / queued /
+  interrupted / over-cap / idle, last seen, today's spend) on the
+  agents tab. No migration — both queries read `runs`, `proposals`,
+  `work`, and `outbound_messages` as they stand. The desktop app's data,
+  landed in the web client first, per `docs/product/desktop-app-plan.md`
+  "Sequencing" step 1.

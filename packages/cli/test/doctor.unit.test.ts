@@ -1,0 +1,313 @@
+// `metistry doctor` against fakes: a synthetic checkout in a temp dir,
+// injected fetch (bridges + console), injected db, injected exec
+// (launchctl + docker). Every status — ok, degraded, failed, absent — and
+// the exit code. No network, no db, no subprocess.
+import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import { doctor, hostLocal, parseComposePs, parseLaunchctlPrint, probeTargetFor, renderTable, walkManifests, type Db, type DoctorRow } from "../src/doctor.js";
+import { parseDotEnv } from "../src/env.js";
+import { main, parseArgs } from "../src/main.js";
+import type { Exec } from "../src/exec.js";
+
+const PLIST = (label: string) => `<?xml version="1.0"?><plist version="1.0"><dict><key>Label</key><string>${label}</string></dict></plist>`;
+
+/** A minimal product checkout: two collectors, two bridges, two services, a target, migrations, plists, compose. */
+async function checkout(opts: { brokenManifests?: boolean } = {}): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), "metistry-doctor-"));
+  const put = async (rel: string, text: string) => {
+    await mkdir(join(root, rel, ".."), { recursive: true });
+    await writeFile(join(root, rel), text);
+  };
+  await put("package.json", JSON.stringify({ name: "metistry" }));
+  await put("seed/identity.yaml", "name: Seed\n");
+  await put("collectors/good/manifest.yaml", "name: good\ntype: collector\nschedule: '@hourly'\nwrites: [t]\n");
+  await put("packages/mcp-x/manifest.yaml", "name: x\ntype: bridge\ntransport: http\nport: 7901\nruns_on: host\nexposes: [{name: a}]\n");
+  await put("packages/mcp-y/manifest.yaml", "name: y\ntype: bridge\ntransport: http\nport: 7902\nruns_on: host\nexposes: [{name: a}]\n");
+  await put("apps/console/manifest.yaml", "name: console\ntype: service\nruns_on: container\nport: 8080\n");
+  await put("apps/watchdog/manifest.yaml", "name: watchdog\ntype: service\nruns_on: host\n");
+  await put("targets/tgt/manifest.yaml", "name: tgt\ntype: target\ntransport: local\nsubmit: {}\nresult: {via: report_queue}\ndata_policy: {allow: [], deny_sources: [], max_brief_bytes: 10}\n");
+  await put("db/migrations/0001_a.sql", "select 1;");
+  await put("db/migrations/0002_b.sql", "select 1;");
+  await put("ops/launchd/com.foldedspacelabs.metistry.a.plist", PLIST("com.foldedspacelabs.metistry.a"));
+  await put("ops/launchd/com.foldedspacelabs.metistry.b.plist", PLIST("com.foldedspacelabs.metistry.b"));
+  await put("docker-compose.yml", "services:\n  db: {}\n  console: {}\n  assistant: {}\n");
+  if (opts.brokenManifests) {
+    await put("collectors/bad/manifest.yaml", "name: bad\ntype: collector\nwrites: [t]\n"); // no schedule
+    await put("collectors/notyaml/manifest.yaml", "name: [\n");
+    await put("targets/mismatch/manifest.yaml", "name: other\ntype: target\ntransport: local\nsubmit: {}\nresult: {via: report_queue}\ndata_policy: {allow: [], deny_sources: [], max_brief_bytes: 10}\n");
+  }
+  return root;
+}
+
+type Res = { status: number; ok: boolean; json?: () => Promise<unknown> };
+const res = (status: number, body?: unknown): Res => ({ status, ok: status >= 200 && status < 300, json: async () => body });
+const checkBody = (status: "ok" | "degraded" | "failed", remediation?: string) => ({ name: "x", status, latency_ms: 1, probe: "canned", ...(remediation ? { remediation } : {}) });
+
+/** fetch keyed by URL suffix; a value that is an Error is thrown (connection refused). */
+const fakeFetch = (routes: Record<string, Res | Error>, seen: { url: string; auth?: string }[] = []) =>
+  (async (url: string, init?: { headers?: Record<string, string> }) => {
+    seen.push({ url, ...(init?.headers?.authorization ? { auth: init.headers.authorization } : {}) });
+    const hit = Object.entries(routes).find(([suffix]) => url.endsWith(suffix))?.[1];
+    if (!hit) throw new Error(`unrouted ${url}`);
+    if (hit instanceof Error) throw hit;
+    return hit;
+  }) as unknown as typeof fetch;
+
+const fakeDb = (applied: string[] | "no-table" | Error): Db => ({
+  query: async (text: string) => {
+    if (applied instanceof Error) throw applied;
+    if (text.startsWith("SELECT 1")) return { rows: [{ "?column?": 1 }] };
+    if (text.includes("to_regclass")) return { rows: [{ t: applied === "no-table" ? null : "schema_migrations" }] };
+    if (text.includes("FROM schema_migrations")) return { rows: (applied as string[]).map((filename) => ({ filename })) };
+    throw new Error(`unexpected query ${text}`);
+  },
+});
+
+const LAUNCHCTL_RUNNING = "gui/501/x = {\n\tactive count = 1\n\tstate = running\n\n\tpid = 4242\n}\n";
+const LAUNCHCTL_WAITING = "gui/501/x = {\n\tstate = waiting\n\tlast exit code = 78\n}\n";
+const compose = (entries: { Service: string; State: string; Health?: string; Status?: string }[]) => entries.map((e) => JSON.stringify({ Health: "", Status: "Up", ...e })).join("\n") + "\n";
+
+/** exec keyed by "cmd first-arg"; launchctl answers per label. */
+const fakeExec = (opts: { launchctl?: Record<string, { code: number; stdout?: string }>; docker?: { code: number; stdout?: string; stderr?: string } }): Exec =>
+  async (cmd, args) => {
+    if (cmd === "launchctl") {
+      const label = args[1]!.split("/").pop()!;
+      const r = opts.launchctl?.[label] ?? { code: 113, stdout: "" };
+      return { code: r.code, stdout: r.stdout ?? "", stderr: r.code ? `Could not find service "${label}"` : "" };
+    }
+    if (cmd === "docker") return { code: opts.docker?.code ?? 0, stdout: opts.docker?.stdout ?? "", stderr: opts.docker?.stderr ?? "" };
+    throw new Error(`unexpected exec ${cmd} ${args.join(" ")}`);
+  };
+
+const env = { METISTRY_X_URL: "http://host.docker.internal:7901", METISTRY_BRIDGE_TOKEN_X: "tok-x", METISTRY_CONSOLE_URL: "http://127.0.0.1:8080" };
+const byName = (rows: DoctorRow[]) => Object.fromEntries(rows.map((r) => [r.name, r]));
+
+describe("doctor: everything healthy", () => {
+  it("validates manifests, probes /check with the bearer, console /health + /api/status (401 is fine), db, migrations, launchd, compose", async () => {
+    const productDir = await checkout();
+    const seen: { url: string; auth?: string }[] = [];
+    const report = await doctor({
+      productDir,
+      env,
+      fetchFn: fakeFetch({ "7901/check": res(200, checkBody("ok")), "/health": res(200, { ok: true }), "/api/status": res(401) }, seen),
+      db: fakeDb(["0001_a.sql", "0002_b.sql"]),
+      exec: fakeExec({
+        launchctl: { "com.foldedspacelabs.metistry.a": { code: 0, stdout: LAUNCHCTL_RUNNING }, "com.foldedspacelabs.metistry.b": { code: 0, stdout: LAUNCHCTL_RUNNING } },
+        docker: { code: 0, stdout: compose([{ Service: "db", State: "running", Health: "healthy" }, { Service: "console", State: "running", Health: "healthy" }, { Service: "assistant", State: "running" }]) },
+      }),
+      platform: "darwin",
+      uid: 501,
+    });
+    const r = byName(report.rows);
+    expect(report.ok).toBe(true);
+    expect(report.rows.map((x) => `${x.kind}:${x.name}=${x.status}`)).toEqual([
+      "collector:good=ok",
+      "bridge:x=ok",
+      "bridge:y=absent",
+      "service:console=ok",
+      "service:watchdog=ok",
+      "target:tgt=ok",
+      "db:db=ok",
+      "db:migrations=ok",
+      "launchd:launchd:com.foldedspacelabs.metistry.a=ok",
+      "launchd:launchd:com.foldedspacelabs.metistry.b=ok",
+      "container:compose:assistant=ok",
+      "container:compose:console=ok",
+      "container:compose:db=ok",
+    ]);
+    // host.docker.internal rewritten to loopback, the bearer presented, the bridge's probe text kept
+    expect(seen.find((s) => s.url.includes("7901"))).toEqual({ url: "http://127.0.0.1:7901/check", auth: "Bearer tok-x" });
+    expect(r.x?.meta).toMatchObject({ probe: "canned" });
+    expect(r.y?.remediation).toMatch(/set METISTRY_Y_URL \(default http:\/\/host\.docker\.internal:7902\) and METISTRY_BRIDGE_TOKEN_Y/);
+    expect(r.console?.meta).toMatchObject({ api_status: 401 });
+    expect(r.watchdog?.probe).toContain("launchd:com.foldedspacelabs.metistry.watchdog");
+    expect(r.migrations?.meta).toMatchObject({ applied: 2, files: 2, pending: [], unknown: [] });
+    expect(r["launchd:com.foldedspacelabs.metistry.a"]?.meta).toEqual({ pid: 4242 });
+    expect(r["compose:db"]?.meta).toMatchObject({ state: "running", health: "healthy" });
+  });
+
+  it("main: exit 0, the table has one row per check and a summary; --json is the report", async () => {
+    const productDir = await checkout();
+    const deps = {
+      env,
+      fetchFn: fakeFetch({ "7901/check": res(200, checkBody("ok")), "/health": res(200), "/api/status": res(200) }),
+      db: fakeDb(["0001_a.sql", "0002_b.sql"]),
+      exec: fakeExec({ docker: { code: 127 } }),
+      platform: "linux" as const,
+    };
+    const out: string[] = [];
+    expect(await main(["doctor", "--product-dir", productDir], { out: (s) => out.push(s), doctorDeps: deps })).toBe(0);
+    const text = out.join("\n");
+    expect(text).toMatch(/^name\s+kind\s+status\s+ms\s+remediation/);
+    expect(text).toMatch(/9 checks: 7 ok, 0 degraded, 0 failed, 2 absent — healthy/);
+    expect(text).not.toMatch(/launchd:/); // linux: no launchd rows
+    expect(text).toMatch(/^compose\s+compose\s+absent\s+\d+\s+docker not found/m);
+
+    const json: string[] = [];
+    expect(await main(["doctor", "--product-dir", productDir, "--json"], { out: (s) => json.push(s), doctorDeps: deps })).toBe(0);
+    const parsed = JSON.parse(json.join("\n"));
+    expect(parsed.ok).toBe(true);
+    expect(parsed.rows).toHaveLength(9);
+    expect(parsed.rows.every((r: DoctorRow) => typeof r.latency_ms === "number" && typeof r.probe === "string")).toBe(true);
+  });
+});
+
+describe("doctor: degraded (runs, needs a hand) never fails the exit code", () => {
+  it("bridge says degraded, migrations pending, container unhealthy", async () => {
+    const productDir = await checkout();
+    const report = await doctor({
+      productDir,
+      env,
+      fetchFn: fakeFetch({ "7901/check": res(503, checkBody("degraded", "helper lost its TCC grant")), "/health": res(200), "/api/status": res(401) }),
+      db: fakeDb(["0001_a.sql"]),
+      exec: fakeExec({ docker: { code: 0, stdout: compose([{ Service: "db", State: "running", Health: "healthy" }, { Service: "console", State: "running", Health: "starting" }, { Service: "assistant", State: "running" }]) } }),
+      platform: "linux",
+    });
+    const r = byName(report.rows);
+    expect(report.ok).toBe(true);
+    expect(r.x).toMatchObject({ status: "degraded", remediation: "helper lost its TCC grant" });
+    expect(r.migrations).toMatchObject({ status: "degraded", remediation: expect.stringMatching(/1 migration\(s\) not applied \(0002_b\.sql\) — run pnpm db:migrate/) });
+    expect(r["compose:console"]).toMatchObject({ status: "degraded", remediation: expect.stringMatching(/starting/) });
+    expect(renderTable(report)).toMatch(/0 failed/);
+  });
+
+  it("a db with migrations the checkout lacks is degraded too; no schema_migrations table at all is degraded with the pending count", async () => {
+    const productDir = await checkout();
+    const base = { productDir, env, fetchFn: fakeFetch({ "7901/check": res(200, checkBody("ok")), "/health": res(200), "/api/status": res(200) }), exec: fakeExec({ docker: { code: 127 } }), platform: "linux" as const };
+    expect(byName((await doctor({ ...base, db: fakeDb(["0001_a.sql", "0002_b.sql", "0003_future.sql"]) })).rows).migrations).toMatchObject({ status: "degraded", remediation: expect.stringMatching(/0003_future\.sql/) });
+    expect(byName((await doctor({ ...base, db: fakeDb("no-table") })).rows).migrations).toMatchObject({ status: "degraded", remediation: expect.stringMatching(/no schema_migrations table.*2 migrations pending/) });
+  });
+});
+
+describe("doctor: failed", () => {
+  it("bridge down, console 500, launchd job not running, container exited, db unreachable — exit 1", async () => {
+    const productDir = await checkout();
+    const report = await doctor({
+      productDir,
+      env,
+      fetchFn: fakeFetch({ "7901/check": new Error("connect ECONNREFUSED 127.0.0.1:7901"), "/health": res(500) }),
+      db: fakeDb(new Error("ECONNREFUSED")),
+      exec: fakeExec({
+        launchctl: { "com.foldedspacelabs.metistry.a": { code: 0, stdout: LAUNCHCTL_WAITING }, "com.foldedspacelabs.metistry.b": { code: 0, stdout: LAUNCHCTL_RUNNING } },
+        docker: { code: 0, stdout: compose([{ Service: "db", State: "exited", Status: "Exited (1) 2 minutes ago" }, { Service: "console", State: "running", Health: "healthy" }]) },
+      }),
+      platform: "darwin",
+      uid: 501,
+    });
+    const r = byName(report.rows);
+    expect(report.ok).toBe(false);
+    expect(r.x).toMatchObject({ status: "failed", remediation: expect.stringMatching(/x down at http:\/\/127\.0\.0\.1:7901 \(connect ECONNREFUSED.*\) — restart the x service/) });
+    expect(r.console).toMatchObject({ status: "failed", remediation: expect.stringMatching(/\/health returned 500/) });
+    expect(r.db).toMatchObject({ status: "failed", remediation: expect.stringMatching(/ECONNREFUSED — docker compose up -d db/) });
+    expect(r.migrations).toMatchObject({ status: "absent", remediation: "not checked — db unreachable" });
+    expect(r["launchd:com.foldedspacelabs.metistry.a"]).toMatchObject({ status: "failed", remediation: expect.stringMatching(/state = waiting, last exit code 78 — launchctl kickstart -k gui\/\$\(id -u\)\/com\.foldedspacelabs\.metistry\.a/) });
+    expect(r["launchd:com.foldedspacelabs.metistry.b"]?.status).toBe("ok");
+    expect(r["compose:db"]).toMatchObject({ status: "failed", remediation: expect.stringMatching(/container exited \(Exited \(1\).*\) — docker compose up -d db/) });
+    expect(r["compose:assistant"]).toMatchObject({ status: "absent", remediation: "no container — docker compose up -d assistant" });
+
+    const out: string[] = [];
+    expect(await main(["doctor", "--product-dir", productDir], { out: (s) => out.push(s), doctorDeps: { env, fetchFn: fakeFetch({ "7901/check": res(200, checkBody("ok")), "/health": res(200), "/api/status": res(401) }), db: fakeDb(new Error("down")), exec: fakeExec({ docker: { code: 127 } }), platform: "linux" } })).toBe(1);
+    expect(out.join("\n")).toMatch(/1 failed, .* — FAILED/);
+  });
+
+  it("a rejected bearer, a non-contract body, and a bridge reporting failed are all failed with distinct remediations", async () => {
+    const productDir = await checkout();
+    const base = { productDir, env, db: null, exec: fakeExec({ docker: { code: 127 } }), platform: "linux" as const };
+    const okRest = { "/health": res(200), "/api/status": res(401) };
+    expect(byName((await doctor({ ...base, fetchFn: fakeFetch({ "7901/check": res(401), ...okRest }) })).rows).x).toMatchObject({ status: "failed", remediation: expect.stringMatching(/rejected the token \(HTTP 401\)/) });
+    expect(byName((await doctor({ ...base, fetchFn: fakeFetch({ "7901/check": res(200, { hello: "world" }), ...okRest }) })).rows).x).toMatchObject({ status: "failed", remediation: expect.stringMatching(/without a check\(\) body/) });
+    expect(byName((await doctor({ ...base, fetchFn: fakeFetch({ "7901/check": res(503, checkBody("failed", "helper crashed")), ...okRest }) })).rows).x).toMatchObject({ status: "failed", remediation: "helper crashed" });
+  });
+
+  it("an invalid manifest, a non-YAML manifest, and a target whose directory name differs are failed rows; the good ones still validate", async () => {
+    const productDir = await checkout({ brokenManifests: true });
+    const found = await walkManifests(productDir);
+    expect(found.map((f) => `${f.dir}=${f.result.ok}`)).toEqual([
+      "collectors/bad=false",
+      "collectors/good=true",
+      "collectors/notyaml=false",
+      "packages/mcp-x=true",
+      "packages/mcp-y=true",
+      "apps/console=true",
+      "apps/watchdog=true",
+      "targets/mismatch=false",
+      "targets/tgt=true",
+    ]);
+    const report = await doctor({ productDir, env: {}, fetchFn: fakeFetch({ "/health": res(200), "/api/status": res(401) }), db: null, exec: fakeExec({ docker: { code: 127 } }), platform: "linux" });
+    const r = byName(report.rows);
+    expect(report.ok).toBe(false);
+    expect(r.bad).toMatchObject({ kind: "collector", status: "failed", remediation: expect.stringMatching(/schedule/) });
+    expect(r.notyaml).toMatchObject({ status: "failed", remediation: expect.stringMatching(/not YAML/) });
+    expect(r.other).toMatchObject({ kind: "target", status: "failed", remediation: expect.stringMatching(/directory mismatch must equal manifest name other/) });
+    expect(r.good?.status).toBe("ok");
+  });
+});
+
+describe("doctor: absent (not configured / not installed) is informational", () => {
+  it("no db password, launchd jobs not bootstrapped, docker missing", async () => {
+    const productDir = await checkout();
+    const report = await doctor({
+      productDir,
+      env: { METISTRY_CONSOLE_URL: "http://127.0.0.1:8080" },
+      fetchFn: fakeFetch({ "/health": res(200), "/api/status": res(401) }),
+      db: null,
+      exec: fakeExec({ docker: { code: 127 } }),
+      platform: "darwin",
+      uid: 501,
+    });
+    const r = byName(report.rows);
+    expect(report.ok).toBe(true);
+    expect(r.db).toMatchObject({ status: "absent", remediation: expect.stringMatching(/METISTRY_DB_PASSWORD is unset/) });
+    expect(r.migrations).toMatchObject({ status: "absent", remediation: "not checked — no db configured" });
+    expect(r.x).toMatchObject({ status: "absent", remediation: expect.stringMatching(/set METISTRY_X_URL/) });
+    expect(r["launchd:com.foldedspacelabs.metistry.a"]).toMatchObject({
+      status: "absent",
+      remediation: expect.stringMatching(/not bootstrapped — sed .*ops\/launchd\/com\.foldedspacelabs\.metistry\.a\.plist.*launchctl bootstrap gui\/\$\(id -u\)/),
+    });
+    expect(r.compose).toMatchObject({ kind: "compose", status: "absent", remediation: expect.stringMatching(/docker not found/) });
+    expect(report.rows.filter((x) => x.name.startsWith("compose:"))).toHaveLength(0);
+  });
+
+  it("a docker daemon that is not running is failed (the containers are down), not absent", async () => {
+    const productDir = await checkout();
+    const report = await doctor({ productDir, env: {}, fetchFn: fakeFetch({ "/health": res(200), "/api/status": res(401) }), db: null, exec: fakeExec({ docker: { code: 1, stderr: "Cannot connect to the Docker daemon at unix:///var/run/docker.sock" } }), platform: "linux" });
+    expect(byName(report.rows).compose).toMatchObject({ status: "failed", remediation: expect.stringMatching(/Cannot connect to the Docker daemon.*is the Docker daemon running\?/) });
+    expect(report.ok).toBe(false);
+  });
+});
+
+describe("parsers and conventions", () => {
+  it("compose ps: array (older compose) and NDJSON (newer) both parse", () => {
+    expect(parseComposePs('[{"Service":"db","State":"running"}]')).toEqual([{ Service: "db", State: "running" }]);
+    expect(parseComposePs('{"Service":"db","State":"running"}\n{"Service":"console","State":"exited"}\n')).toHaveLength(2);
+    expect(parseComposePs("")).toEqual([]);
+  });
+
+  it("launchctl print: state, pid, last exit code", () => {
+    expect(parseLaunchctlPrint(LAUNCHCTL_RUNNING)).toEqual({ state: "running", pid: 4242 });
+    expect(parseLaunchctlPrint(LAUNCHCTL_WAITING)).toEqual({ state: "waiting", lastExit: 78 });
+    expect(parseLaunchctlPrint("garbage")).toEqual({ state: "unknown" });
+  });
+
+  it("env conventions: the three shipped bridges keep their variables; anything else follows METISTRY_<NAME>_URL", () => {
+    expect(probeTargetFor("apple-fm")).toMatchObject({ urlVar: "METISTRY_AFM_URL", tokenVar: "METISTRY_BRIDGE_TOKEN_APPLE_FM", launchdLabel: "com.foldedspacelabs.metistry.apple-fm" });
+    expect(probeTargetFor("eventkit")).toMatchObject({ urlVar: "METISTRY_EK_URL", tokenVar: "METISTRY_BRIDGE_TOKEN_EVENTKIT" });
+    expect(probeTargetFor("reconciler")).toMatchObject({ urlVar: "METISTRY_RECONCILER_URL", tokenVar: "METISTRY_BRIDGE_TOKEN_RECONCILER" });
+    expect(probeTargetFor("my-thing")).toEqual({ urlVar: "METISTRY_MY_THING_URL", tokenVar: "METISTRY_BRIDGE_TOKEN_MY_THING" });
+    expect(hostLocal("http://host.docker.internal:7812/")).toBe("http://127.0.0.1:7812");
+    expect(hostLocal("http://10.0.0.5:7812")).toBe("http://10.0.0.5:7812");
+  });
+
+  it("dotenv: comments, export, quotes; unset-only load semantics live in loadDotEnv", () => {
+    expect(parseDotEnv('# c\nA=1\nexport B="two words"\nC=\'x\'\nD=\n bad line\nE=a=b\n')).toEqual({ A: "1", B: "two words", C: "x", D: "", E: "a=b" });
+  });
+
+  it("args: flags with values, =, booleans, positionals, --", () => {
+    expect(parseArgs(["init", "/x", "--name", "Ada", "--force", "--product-dir=/p"])).toEqual({ command: "init", positional: ["/x"], flags: { name: "Ada", force: true, "product-dir": "/p" } });
+    expect(parseArgs(["doctor", "--json"])).toEqual({ command: "doctor", positional: [], flags: { json: true } });
+    expect(parseArgs(["init", "--", "--weird-dir"])).toEqual({ command: "init", positional: ["--weird-dir"], flags: {} });
+    expect(parseArgs([])).toEqual({ command: undefined, positional: [], flags: {} });
+  });
+});

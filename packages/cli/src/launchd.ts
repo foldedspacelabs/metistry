@@ -10,13 +10,24 @@
 import { readdir, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
+import { SHAPED_SERVICES, type DeploymentShape } from "@foldedspacelabs/metistry-core";
 
 export const PLACEHOLDERS = ["__REPO__", "__NODE__"] as const;
+
+/** Every job's label is the reverse-DNS prefix plus the service name. */
+export const LABEL_PREFIX = "com.foldedspacelabs.metistry.";
+
+/** `com.foldedspacelabs.metistry.console` → `console`. */
+export function serviceOf(label: string): string {
+  return label.startsWith(LABEL_PREFIX) ? label.slice(LABEL_PREFIX.length) : label;
+}
 
 export interface PlistTemplate {
   /** file name, e.g. com.foldedspacelabs.metistry.watchdog.plist */
   file: string;
   label: string;
+  /** the service this job runs, from the label: `console`, `watchdog`, `eventkit-helper` */
+  service: string;
   /** the raw template text (placeholders intact) */
   template: string;
   /** ProgramArguments as written in the template */
@@ -43,25 +54,71 @@ export function parsePlistTemplate(file: string, template: string): PlistTemplat
   const envBlock = /<key>EnvironmentVariables<\/key>\s*<dict>([\s\S]*?)<\/dict>/.exec(template)?.[1] ?? "";
   for (const m of envBlock.matchAll(/<key>([^<]+)<\/key>\s*<string>([^<]*)<\/string>/g)) environment[m[1]!] = unescape(m[2] ?? "");
   const repoPaths = [...new Set(programArguments.flatMap((a) => [...a.matchAll(/__REPO__\/([^\s;'"]+)/g)].map((m) => m[1]!)))].filter((p) => !p.startsWith(".env"));
-  return { file, label, template, programArguments, ...(workingDirectory !== undefined ? { workingDirectory } : {}), environment, repoPaths };
+  return { file, label, service: serviceOf(label), template, programArguments, ...(workingDirectory !== undefined ? { workingDirectory } : {}), environment, repoPaths };
 }
 
-export async function loadPlistTemplates(productDir: string): Promise<PlistTemplate[]> {
+/**
+ * Every plist template a shape installs.
+ *
+ * `db`, `console` and `assistant` ship a plist each, but they are only host
+ * jobs under the `launchd` shape — under `compose` they are containers and
+ * their templates must not be rendered, bootstrapped or probed. The default
+ * is `compose`, so a caller that does not know the shape gets exactly the
+ * set that existed before deployment.yaml did.
+ */
+export async function loadPlistTemplates(productDir: string, shape: DeploymentShape = "compose"): Promise<PlistTemplate[]> {
   const dir = join(productDir, "ops", "launchd");
   if (!existsSync(dir)) return [];
+  const shaped = new Set<string>(SHAPED_SERVICES);
   const out: PlistTemplate[] = [];
-  for (const f of (await readdir(dir)).filter((f) => f.endsWith(".plist")).sort()) out.push(parsePlistTemplate(f, await readFile(join(dir, f), "utf8")));
+  for (const f of (await readdir(dir)).filter((f) => f.endsWith(".plist")).sort()) {
+    const t = parsePlistTemplate(f, await readFile(join(dir, f), "utf8"));
+    if (shape !== "launchd" && shaped.has(t.service)) continue;
+    out.push(t);
+  }
   return out;
 }
 
-/** `sed "s|__REPO__|$PWD|g; s|__NODE__|$(which node)|g"`, exactly. Throws if a placeholder would be left behind. */
-export function renderPlist(template: string, values: { repo: string; node: string }): string {
-  for (const [k, v] of Object.entries(values)) {
+/** XML text content — env values are arbitrary strings (a password with an `&` in it must not corrupt the plist). */
+export function xmlEscape(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/** The `<key>K</key><string>V</string>` lines that fill a plist's EnvironmentVariables dict, sorted so a rendered plist is stable. */
+export function renderEnvDict(env: Record<string, string>, indent = "    "): string {
+  return Object.entries(env)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([k, v]) => `${indent}<key>${xmlEscape(k)}</key><string>${xmlEscape(v)}</string>`)
+    .join("\n");
+}
+
+export interface PlistValues {
+  repo: string;
+  node: string;
+  /** further `__NAME__` placeholders — the sandbox parameters, the Postgres paths */
+  extra?: Record<string, string> | undefined;
+  /** replaces `__ENV__` with an EnvironmentVariables dict body; the shape services carry their whole environment this way */
+  env?: Record<string, string> | undefined;
+}
+
+/**
+ * `sed "s|__REPO__|$PWD|g; s|__NODE__|$(which node)|g"` plus the same
+ * treatment for every extra placeholder, and `__ENV__` replaced by a
+ * rendered dict body. Throws if a placeholder would be left behind — a
+ * plist with `__PG_DATA__` still in it is a job that fails at 2am, not a
+ * cosmetic problem.
+ */
+export function renderPlist(template: string, values: PlistValues): string {
+  const subs: Record<string, string> = { __REPO__: values.repo, __NODE__: values.node };
+  for (const [k, v] of Object.entries(values.extra ?? {})) subs[`__${k}__`] = v;
+  for (const [k, v] of Object.entries(subs)) {
     if (v.includes("__")) throw new Error(`refusing to render a plist with "${v}" for ${k}: it contains "__"`);
     if (v.trim() === "") throw new Error(`refusing to render a plist with an empty ${k}`);
   }
-  const rendered = template.replace(/__REPO__/g, values.repo).replace(/__NODE__/g, values.node);
-  const left = /__[A-Z]+__/.exec(rendered);
+  let rendered = template;
+  for (const [k, v] of Object.entries(subs)) rendered = rendered.split(k).join(v);
+  if (values.env) rendered = rendered.replace(/^[ \t]*__ENV__[ \t]*$/m, renderEnvDict(values.env));
+  const left = /__[A-Z][A-Z0-9_]*__/.exec(rendered);
   if (left) throw new Error(`unrendered placeholder ${left[0]} in plist template`);
   return rendered;
 }

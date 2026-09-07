@@ -41,7 +41,7 @@ describe("launchd templates", () => {
   });
 
   it("refuses values that would leave or introduce placeholders, and templates with unknown ones", () => {
-    expect(() => renderPlist("<string>__REPO__</string>", { repo: "", node: "/n" })).toThrow(/empty repo/);
+    expect(() => renderPlist("<string>__REPO__</string>", { repo: "", node: "/n" })).toThrow(/empty __REPO__/);
     expect(() => renderPlist("<string>__REPO__</string>", { repo: "/x/__y__", node: "/n" })).toThrow(/contains "__"/);
     expect(() => renderPlist("<string>__REPO__/__HOME__</string>", { repo: "/x", node: "/n" })).toThrow(/unrendered placeholder __HOME__/);
   });

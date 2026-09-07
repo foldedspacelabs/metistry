@@ -536,3 +536,19 @@ your git, on your machine.
   `work`, and `outbound_messages` as they stand. The desktop app's data,
   landed in the web client first, per `docs/product/desktop-app-plan.md`
   "Sequencing" step 1.
+- 2026-09-07 — **The release pipeline is real, so "no FSL server" is now
+  a shipped property rather than a plan.** A `v*` tag builds versioned
+  artifacts on GitHub Releases: a runtime pack per os-arch (the built
+  product, production dependencies included, runnable with no checkout,
+  no `pnpm install` and no compile step — the thing the Mac app will
+  bundle as a resource), npm packages with provenance, ghcr container
+  images, and `checksums.txt`. `metistry update` consumes exactly those:
+  it verifies the sha256 before unpacking, keeps the previous release,
+  and `--rollback` is a symlink flip. One version numbers the whole
+  product (changesets in fixed mode), so `metistry.lock` names one
+  coordinate. Safety line for the record: a tampered or truncated
+  download aborts the update with both digests and leaves the running
+  release, the containers and the lock untouched — the update cannot
+  half-apply. The DMG and the Sparkle appcast are disabled stubs with
+  their secrets documented; the appcast generator refuses to emit an
+  unsigned feed. Runbook: `docs/ops/releases.md`.

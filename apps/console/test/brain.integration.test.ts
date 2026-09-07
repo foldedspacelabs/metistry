@@ -55,7 +55,10 @@ describe.skipIf(!hasDb)("POST /mcp (integration)", () => {
       inboxDir: `/tmp/metistry-test-inbox-mcp-${Date.now()}`,
       policy,
       secureCookies: false,
+      // stands in for the reconciler's vault bridge: one root note, so the grant rule (not the read path) is what this suite proves
+      readKnowledge: async (path) => (path === "Knowledge/now.md" ? "# Now\n\nroot note\n" : null),
     });
+    await pool.query(`INSERT INTO knowledge_files (path, title, description, draft) VALUES ('Knowledge/now.md', 'now', NULL, false) ON CONFLICT (path) DO UPDATE SET draft = false`);
     await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     const pkId = `mcp-${mintToken(8)}`;
@@ -67,6 +70,7 @@ describe.skipIf(!hasDb)("POST /mcp (integration)", () => {
 
   afterAll(async () => {
     await new Promise<void>((r) => server.close(() => r()));
+    await pool.query(`DELETE FROM knowledge_files WHERE path = 'Knowledge/now.md'`);
     await pool.end();
   });
 
@@ -133,6 +137,18 @@ describe.skipIf(!hasDb)("POST /mcp (integration)", () => {
     const runs = await pool.query(`SELECT tool FROM runs WHERE component = $1 AND kind = 'tool' AND meta->'args'->>'project' = $2 ORDER BY id`, [agents.INTERNAL_ASSISTANT_ID, project]);
     expect(runs.rows.map((r) => r.tool)).toEqual(["tasks_create", "tasks_list_ready"]);
     await pool.query(`DELETE FROM work WHERE project = $1`, [project]);
+
+    // the live-verified gap, closed: under the internal default grant (bare Knowledge/) the assistant reads a ROOT note
+    const now = JSON.parse((await (await rpc("tools/call", { name: "knowledge_read", arguments: { path: "Knowledge/now.md" } }, auth)).json()).result.content[0].text.split("\n")[0]);
+    expect(now).toMatchObject({ path: "Knowledge/now.md", title: "now", content: "# Now\n\nroot note\n", sha256: expect.stringMatching(/^[0-9a-f]{64}$/) });
+    // ...and the same path is still "not granted" to the external agent (tier none), never "not found"
+    const denied = JSON.parse((await (await rpc("tools/call", { name: "knowledge_read", arguments: { path: "Knowledge/now.md" } }, { authorization: `Bearer ${agentToken}` })).json()).result.content[0].text.split("\n")[0]);
+    expect(denied).toEqual({ error: { code: "forbidden", message: "not granted" } });
+    // knowledge_write is listed for both but is the assistant's alone; here the bridge is absent, so the assistant is told not_available (a capability gap, not a permission)
+    const extWrite = JSON.parse((await (await rpc("tools/call", { name: "knowledge_write", arguments: { path: "Knowledge/now.md", content: "x", message: "m" } }, { authorization: `Bearer ${agentToken}` })).json()).result.content[0].text.split("\n")[0]);
+    expect(extWrite).toEqual({ error: { code: "forbidden", message: "not granted" } });
+    const intWrite = JSON.parse((await (await rpc("tools/call", { name: "knowledge_write", arguments: { path: "Knowledge/now.md", content: "x", message: "m" } }, auth)).json()).result.content[0].text.split("\n")[0]);
+    expect(intWrite.error.code).toBe("not_available");
   });
 
   it("a revoked token is dead on /mcp at once", async () => {

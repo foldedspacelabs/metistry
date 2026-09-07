@@ -12,6 +12,9 @@
 //   `not_found`, never listed, never claimable, never a dependency;
 // - knowledge_* are gated by the grant tier: `none` → `forbidden` ("not
 //   granted"), drafts invisible at every tier;
+// - knowledge_write (the assistant's `brain-commit`, knowledge-write.ts) is
+//   for `kind: internal` principals only — one writer (§4.11); everyone
+//   else is `forbidden`, and the vault bridge's protected paths hold behind;
 // - every string that came out of the database passes the §4.20 sanitizer
 //   before it is rendered to an agent, and every call is one `runs` row.
 
@@ -35,6 +38,7 @@ import {
 import { TasksError, type Result as TaskResult, type Task, type TasksService } from "@foldedspacelabs/metistry-tasks";
 import { captureToInbox } from "./capture.js";
 import { readKnowledge, searchKnowledge, type KnowledgeReader } from "./knowledge.js";
+import { sha256Text, writeKnowledge, type KnowledgeWriter } from "./knowledge-write.js";
 import { computeNudge } from "./nudge.js";
 import { REPORT_KINDS, submitReport } from "./report.js";
 import { allProjects, memberOf } from "./scope.js";
@@ -49,6 +53,8 @@ export interface BrainConfig {
   inboxDir: string;
   /** Vault read path for `knowledge_read`. Absent → the tool answers `not_available`. */
   readKnowledge?: KnowledgeReader | undefined;
+  /** Vault write path for `knowledge_write` (the reconciler's bridge; `vaultBridgeWriter`). Absent → the tool answers `not_available`. */
+  writeKnowledge?: KnowledgeWriter | undefined;
   /** Nudge when a held lease has this many seconds or fewer left (default 120). */
   leaseWarningSeconds?: number | undefined;
   /** Reported to MCP clients as the server version. */
@@ -63,7 +69,7 @@ export interface BrainServer {
   readonly tools: readonly string[];
 }
 
-/** The eager surface (§4.3 default 1): 11 tools, no meta-tool indirection. Order = manifest order. */
+/** The eager surface (§4.3 default 1): 12 tools, no meta-tool indirection. Order = manifest order. */
 export const TOOL_NAMES = [
   "capture",
   "report",
@@ -76,6 +82,7 @@ export const TOOL_NAMES = [
   "tasks_mine",
   "knowledge_search",
   "knowledge_read",
+  "knowledge_write",
 ] as const;
 export type ToolName = (typeof TOOL_NAMES)[number];
 
@@ -107,7 +114,7 @@ function summarizeArgs(args: unknown): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   if (args === null || typeof args !== "object") return out;
   for (const [k, v] of Object.entries(args as Record<string, unknown>)) {
-    if (k === "content_base64" || k === "body") {
+    if (k === "content_base64" || k === "body" || k === "content") {
       if (typeof v === "string") out[k] = `<${v.length} chars>`;
     } else if (typeof v === "string") out[k] = v.length > 120 ? `${v.slice(0, 120)}…` : v;
     else if (typeof v === "number" || typeof v === "boolean" || v === null) out[k] = v;
@@ -312,13 +319,36 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
 
     reg(
       "knowledge_read",
-      "Read one settled note by vault path (Knowledge/...). Requires an `areas` grant covering the path.",
+      "Read one settled note by vault path (Knowledge/...). Requires an `areas` grant covering the path. The returned sha256 is the value to pass as expected_sha256 to knowledge_write.",
       { path: z.string().min(1).max(500) },
       async (a) => {
         const { tier, areas } = principal.grants;
         const r = await readKnowledge(db, principal, a.path, cfg.readKnowledge);
         if (!r.ok) return fail(r.code, r.message, { tier, areas, path: a.path });
-        return done({ path: r.path, title: r.title, content: r.content }, { tier, areas, path: a.path, bytes: r.content.length });
+        return done({ path: r.path, title: r.title, content: r.content, sha256: sha256Text(r.content) }, { tier, areas, path: a.path, bytes: r.content.length });
+      },
+    );
+
+    // The assistant's write path (knowledge-write.ts): internal principals only.
+    reg(
+      "knowledge_write",
+      "Write one note under Knowledge/ as a commit in your name (the instance's own assistant only; every other agent gets `not granted` — use report). " +
+        "Whole-file replace: pass the full content. Markdown gets `source` (your id) and `updated` (today) stamped into its frontmatter. " +
+        'Pass expected_sha256 from knowledge_read so a concurrent edit is never clobbered ("" = create only); a `conflict` carries the current hash — re-read and retry. ' +
+        "Protected paths (identity.yaml, rules.yaml, queries/, agents/, …) are refused at the vault. Deletes and renames are not available: they stay the user's hand.",
+      {
+        path: z.string().min(1).max(500).describe("Vault path, Knowledge/... with TitleCase folders, e.g. Knowledge/Areas/Fsl/Drey.md or Knowledge/now.md."),
+        content: z.string().max(2_000_000).describe("The full new content of the file (UTF-8)."),
+        message: z.string().min(1).max(2000).describe("Commit message: what changed and why; first line is the subject (≤ 200 chars)."),
+        expected_sha256: z
+          .string()
+          .regex(/^(?:[0-9a-f]{64})?$/)
+          .optional()
+          .describe('sha256 the note must currently have (from knowledge_read); "" = the note must not exist yet; omit = unconditional.'),
+      },
+      async (a) => {
+        const r = await writeKnowledge(principal, a, cfg.writeKnowledge);
+        return r.ok ? done(r.result, r.meta) : fail(r.code, r.message, r.meta);
       },
     );
 
@@ -372,10 +402,15 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
         await db.query(`SELECT path, title, description, draft FROM knowledge_files WHERE false`);
         const t = await tasks.check();
         if (t.status !== "ok") throw new Error(`tasks: ${t.remediation ?? t.status}`);
-        const meta = { tools: [...TOOL_NAMES], knowledge_read: cfg.readKnowledge ? "available" : "not_available" };
-        return cfg.readKnowledge
+        const meta = {
+          tools: [...TOOL_NAMES],
+          knowledge_read: cfg.readKnowledge ? "available" : "not_available",
+          knowledge_write: cfg.writeKnowledge ? "available" : "not_available",
+        };
+        const gaps = [...(cfg.readKnowledge ? [] : ["knowledge_read"]), ...(cfg.writeKnowledge ? [] : ["knowledge_write"])];
+        return gaps.length === 0
           ? { meta }
-          : { status: "degraded" as const, meta, remediation: "knowledge_read answers not_available until a vault read path is configured (knowledge module)" };
+          : { status: "degraded" as const, meta, remediation: `${gaps.join(" + ")} answer not_available until the vault bridge is configured (METISTRY_RECONCILER_URL + METISTRY_BRIDGE_TOKEN_RECONCILER)` };
       });
     },
   };

@@ -40,7 +40,7 @@ import {
 import type { VaultClient } from "@foldedspacelabs/metistry-artifacts";
 import { TasksError, type TasksService } from "@foldedspacelabs/metistry-tasks";
 import type { AgentPrincipal, CrewDispatcher, CrewDispatchInput, CrewDispatchOutcome } from "@foldedspacelabs/metistry-mcp-brain";
-import { AgentError, validateGrants, type Grants } from "./agents.js";
+import { AgentError, validateAutonomy, validateGrants, type Autonomy, type Grants } from "./agents.js";
 import { checkBrief, type TargetRegistry } from "./dispatch.js";
 
 export interface Db {
@@ -64,6 +64,8 @@ export interface CrewDefinition {
   where: string;
   /** The registry grant derived from `scope` (tier areas, or none when scope is empty). */
   grants: Grants;
+  /** The registry autonomy block derived from `manifest.autonomy` (normalized by the same validator external PUT /autonomy uses; absent → `{}`, narrows nothing). */
+  autonomy: Autonomy;
 }
 
 const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)([\s\S]*)$/;
@@ -105,7 +107,16 @@ export function parseCrewFile(text: string, where: string, expected?: { name: st
   } catch (err) {
     throw new Error(`${where}: scope: ${err instanceof AgentError ? err.message : String(err)}`);
   }
-  return { manifest, prompt, sha256: createHash("sha256").update(text).digest("hex"), where, grants };
+  let autonomy: Autonomy;
+  try {
+    // the schema already refused an unknown key or a bad shape; this is the
+    // same normalizer PUT /api/agents/:id/autonomy uses, so a manifest block
+    // and a hand-set one land in the registry identically.
+    autonomy = validateAutonomy(manifest.autonomy ?? {});
+  } catch (err) {
+    throw new Error(`${where}: autonomy: ${err instanceof AgentError ? err.message : String(err)}`);
+  }
+  return { manifest, prompt, sha256: createHash("sha256").update(text).digest("hex"), where, grants, autonomy };
 }
 
 interface CrewFile {
@@ -220,10 +231,10 @@ export async function syncCrews(db: Db, crews: Map<string, CrewDefinition>): Pro
   const out: CrewSyncSummary = { registered: [], resynced: [], revoked: [], conflicts: [] };
   const names = [...crews.keys()];
   const { rows: existing } = await db.query(
-    `SELECT id, kind, display_name, grants, projects, revoked_at IS NOT NULL AS revoked FROM agents WHERE id = ANY($1::text[])`,
+    `SELECT id, kind, display_name, grants, projects, autonomy, revoked_at IS NOT NULL AS revoked FROM agents WHERE id = ANY($1::text[])`,
     [names],
   );
-  const byId = new Map<string, { kind: string; display_name: string; grants: unknown; projects: string[]; revoked: boolean }>(existing.map((r) => [String(r.id), r]));
+  const byId = new Map<string, { kind: string; display_name: string; grants: unknown; projects: string[]; autonomy: unknown; revoked: boolean }>(existing.map((r) => [String(r.id), r]));
 
   const audit = async (agent: string, op: string, ok: boolean, meta: Record<string, unknown> = {}) => {
     const id = await startRun(db, { component: "console", kind: "agent_admin", tool: "crew_sync", meta: { agent, op, ...meta } });
@@ -233,6 +244,7 @@ export async function syncCrews(db: Db, crews: Map<string, CrewDefinition>): Pro
   for (const [name, def] of crews) {
     const row = byId.get(name);
     const grantsJson = JSON.stringify(def.grants);
+    const autonomyJson = JSON.stringify(def.autonomy);
     const projects = def.manifest.projects;
     const display = displayName(def);
     if (row && row.kind !== "crew") {
@@ -242,20 +254,21 @@ export async function syncCrews(db: Db, crews: Map<string, CrewDefinition>): Pro
     }
     if (!row) {
       // the hash of a token nobody holds — see the file header
-      await db.query(`INSERT INTO agents (id, display_name, kind, token_hash, grants, projects) VALUES ($1, $2, 'crew', $3, $4::jsonb, $5::text[])`, [
-        name, display, tokenHash(mintToken(32)), grantsJson, projects,
+      await db.query(`INSERT INTO agents (id, display_name, kind, token_hash, grants, projects, autonomy) VALUES ($1, $2, 'crew', $3, $4::jsonb, $5::text[], $6::jsonb)`, [
+        name, display, tokenHash(mintToken(32)), grantsJson, projects, autonomyJson,
       ]);
       out.registered.push(name);
-      await audit(name, "register", true, { grants: def.grants, projects, where: def.where });
+      await audit(name, "register", true, { grants: def.grants, projects, autonomy: def.autonomy, where: def.where });
       continue;
     }
-    const same = !row.revoked && row.display_name === display && JSON.stringify(row.grants) === grantsJson && JSON.stringify(row.projects ?? []) === JSON.stringify(projects);
+    const same = !row.revoked && row.display_name === display && JSON.stringify(row.grants) === grantsJson
+      && JSON.stringify(row.projects ?? []) === JSON.stringify(projects) && JSON.stringify(row.autonomy ?? {}) === autonomyJson;
     if (same) continue;
-    await db.query(`UPDATE agents SET display_name = $2, grants = $3::jsonb, projects = $4::text[], revoked_at = NULL WHERE id = $1 AND kind = 'crew'`, [
-      name, display, grantsJson, projects,
+    await db.query(`UPDATE agents SET display_name = $2, grants = $3::jsonb, projects = $4::text[], autonomy = $5::jsonb, revoked_at = NULL WHERE id = $1 AND kind = 'crew'`, [
+      name, display, grantsJson, projects, autonomyJson,
     ]);
     out.resynced.push(name);
-    await audit(name, "resync", true, { grants: def.grants, projects, where: def.where });
+    await audit(name, "resync", true, { grants: def.grants, projects, autonomy: def.autonomy, where: def.where });
   }
 
   const { rows: gone } = await db.query(

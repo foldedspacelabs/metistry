@@ -166,23 +166,55 @@ const crewUse = z.string().superRefine((u, ctx) => {
 
 export const CREW_MODELS = ["haiku", "sonnet", "opus"] as const;
 
-export const agentManifest = base.extend({
-  type: z.literal("agent"),
-  /** Grouping only (`agents/<area>/`); hierarchy is `manages`, not depth (plan Terminology). */
-  area: name.optional(),
-  model: z.enum(CREW_MODELS),
-  uses: z.array(crewUse).default([]),
-  skills: z.array(name).default([]),
-  /** Read-tier areas (§4.11 scoped escape hatch): Knowledge/ prefixes below the root. The console's grant validator holds the exact (TitleCase) shape; here: never bare, never traversal. */
-  scope: z.array(knowledgePrefix.refine((p) => p !== "Knowledge", "scope entries must name an area below Knowledge/ — the bare vault is not a crew scope")).default([]),
-  /** Project membership (§4.19; §4.21 autonomy boundary): slugs. Empty = member of no project. */
-  projects: z.array(name).default([]),
-  manages: z.array(name).default([]),
-  /** Agentic turns per run (the SDK's maxTurns). */
-  max_turns: z.number().int().min(1).max(200).default(12),
-  /** Cost cap per run in USD; the run aborts past it (the SDK's maxBudgetUsd). */
-  budget_usd_per_run: z.number().min(0).max(50).default(0.5),
+// An agent id, agent-manifest-side: same shape the console's registry uses
+// for `agents.id` (AGENT_ID_RE) — a crew name, or another agent this one may
+// name in `autonomy`.
+const autonomyAgentRef = z
+  .string()
+  .regex(/^[a-z][a-z0-9-]{0,39}$/, "must be an agent id (lowercase kebab-case, at most 40 characters)");
+
+/**
+ * §4.21 optional narrowing below the project default — never widening.
+ * Absent keys mean "project members" / the default cap. This is the
+ * manifest-side shape of `apps/console/src/agents.ts`'s `Autonomy` (the
+ * registry's own validator, `validateAutonomy`, re-normalizes it at sync —
+ * two callers, one shape, checked identically here at the schema boundary).
+ * `strictObject`: a typo'd key must fail loudly, never silently mean "no
+ * narrowing" — the whole point of the block.
+ */
+export const autonomySchema = z.strictObject({
+  may_dispatch_to: z.array(autonomyAgentRef).optional(),
+  /** agent ids and/or the literal "user" */
+  accept_from: z.array(z.union([autonomyAgentRef, z.literal("user")])).optional(),
+  max_open_bundles: z.number().int().min(1).optional(),
 });
+
+export type AgentAutonomy = z.infer<typeof autonomySchema>;
+
+export const agentManifest = base
+  .extend({
+    type: z.literal("agent"),
+    /** Grouping only (`agents/<area>/`); hierarchy is `manages`, not depth (plan Terminology). */
+    area: name.optional(),
+    model: z.enum(CREW_MODELS),
+    uses: z.array(crewUse).default([]),
+    skills: z.array(name).default([]),
+    /** Read-tier areas (§4.11 scoped escape hatch): Knowledge/ prefixes below the root. The console's grant validator holds the exact (TitleCase) shape; here: never bare, never traversal. */
+    scope: z.array(knowledgePrefix.refine((p) => p !== "Knowledge", "scope entries must name an area below Knowledge/ — the bare vault is not a crew scope")).default([]),
+    /** Project membership (§4.19; §4.21 autonomy boundary): slugs. Empty = member of no project. */
+    projects: z.array(name).default([]),
+    manages: z.array(name).default([]),
+    /** Agentic turns per run (the SDK's maxTurns). */
+    max_turns: z.number().int().min(1).max(200).default(12),
+    /** Cost cap per run in USD; the run aborts past it (the SDK's maxBudgetUsd). */
+    budget_usd_per_run: z.number().min(0).max(50).default(0.5),
+    /** §4.21 dispatch/accept/bundle narrowing (registry sync maps this onto `agents.autonomy`). Absent = the defaults apply. */
+    autonomy: autonomySchema.optional(),
+  })
+  // unknown top-level keys are a manifest bug, not a silent no-op — refuse
+  // whole, like every other miss `parseCrewFile` reports (a typo'd field
+  // must not read as "validated, ignored").
+  .strict();
 
 export type AgentManifest = z.infer<typeof agentManifest>;
 

@@ -73,11 +73,14 @@ identical, so open-source users and the app share one tested path
    app (or paste an existing private repo URL); the token goes to the
    Keychain and reaches git through the standard `osxkeychain`
    credential helper, so the reconciler pushes without a plaintext
-   secret anywhere (`metistry connect-repo`, new verb).
+   secret anywhere (`metistry connect-repo` — **built 2026-09-07**, with
+   `--auth device|token|ssh`; the app calls the same verb the terminal
+   does. `docs/ops/cli.md`).
 4. *Secrets.* Bridge tokens, the assistant token, VAPID keys: minted by
    the app into the Keychain; `.env` is written by the app from the
-   Keychain at service start (`metistry secrets sync`, new verb) and is
-   never edited by hand.
+   Keychain at service start (`metistry secrets sync` — **built
+   2026-09-07**, with `mint` and a values-free `list`; the Keychain is the
+   canonical store under `metistry:<VAR>`) and is never edited by hand.
 5. *Services.* `metistry up` — but registered through **`SMAppService`**
    (macOS 13+), the sanctioned way an app installs its launchd agents;
    the user approves once in System Settings, and there is no plist to

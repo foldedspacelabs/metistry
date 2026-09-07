@@ -574,3 +574,15 @@ your git, on your machine.
   `autonomy` or at the top level, is refused with a reason) and the
   registry sync maps a valid block onto `agents.autonomy` through the same
   normalizer the hand-set `PUT /api/agents/:id/autonomy` route uses.
+- 2026-09-07 — Safety mechanism shipped: **secrets live in the Keychain
+  and are never printed.** The two install verbs the Mac app will drive
+  are built and terminal-first: `metistry connect-repo` points the
+  instance repo at a private remote and leaves a credential the
+  reconciler can push with unattended (login Keychain + the
+  `osxkeychain` helper, obtained by GitHub's device-authorization flow,
+  a PAT on stdin, or an ssh key), and `metistry secrets` makes the
+  Keychain the canonical store (`metistry:<VAR>`) with `.env` generated
+  from it. No secret ever reaches argv, a log line, a remote URL or
+  `.git/config` — the tests assert that negatively, scanning every line
+  of output and every subprocess argument for the token, and `secrets
+  list` has no code path that can read a value. `docs/ops/cli.md`.

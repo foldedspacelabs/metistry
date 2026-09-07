@@ -1,0 +1,195 @@
+// Crews against the real (scratch) database and a live server: registry
+// sync is idempotent (a second sync writes nothing and never touches the
+// token hash), a changed manifest re-syncs, a removed one revokes, a
+// foreign id is never hijacked; crew_dispatch over /mcp is the internal
+// assistant's alone, refuses a brief outside scope with NO work row, and
+// queues a clean one as the durable row the assistant container drains.
+// Skipped without a db.
+import { readFileSync } from "node:fs";
+import type { AddressInfo } from "node:net";
+import { fileURLToPath } from "node:url";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import pg from "pg";
+import { QueryStore } from "@foldedspacelabs/metistry-queries";
+import { mintToken } from "@foldedspacelabs/metistry-core";
+import { memoryVault, type MemoryVault } from "@foldedspacelabs/metistry-artifacts";
+import { makeServer } from "../src/server.js";
+import { TargetRegistry } from "../src/dispatch.js";
+import * as agents from "../src/agents.js";
+import { CrewRegistry, syncCrews, parseCrewFile } from "../src/crews.js";
+
+try {
+  for (const line of readFileSync(new URL("../../../.env", import.meta.url), "utf8").split("\n")) {
+    const m = /^([A-Z_]+)=(.*)$/.exec(line.trim());
+    if (m && m[1] && process.env[m[1]] === undefined) process.env[m[1]] = m[2];
+  }
+} catch {}
+
+const hasDb = !!process.env.METISTRY_DB_PASSWORD;
+const policy = { idleDays: 30, maxDays: 365 };
+const root = fileURLToPath(new URL("../../../", import.meta.url));
+const suffix = mintToken(4).toLowerCase().replaceAll(/[^a-z0-9]/g, "").slice(0, 6) || "x";
+const crewA = `itest-crew-a-${suffix}`;
+const crewB = `itest-crew-b-${suffix}`;
+const intent = { principal: "user", message: "t" };
+
+function crewFile(name: string, patch: Record<string, unknown> = {}): string {
+  const fm = { name, type: "agent", area: "itest", model: "haiku", uses: ["brain-read", "brain-report"], scope: ["Knowledge/Projects"], projects: [], ...patch };
+  return `---\n${Object.entries(fm).map(([k, v]) => `${k}: ${JSON.stringify(v)}`).join("\n")}\n---\nYou work for {{name}}. Report what you find.\n`;
+}
+
+describe.skipIf(!hasDb)("crews (integration)", () => {
+  let pool: pg.Pool;
+  let base: string;
+  let server: ReturnType<typeof makeServer>;
+  let vault: MemoryVault;
+  let registry: CrewRegistry;
+  let externalToken: string;
+  let assistantToken: string;
+  let nextId = 1;
+  const externalId = `itest-ext-${suffix}`;
+  // this suite's own internal principal: crew_dispatch gates on kind=internal, not on the id, and the
+  // shared INTERNAL_ASSISTANT_ID row is upserted by other suites running in parallel (a token race)
+  const assistantId = `itest-asst-${suffix}`;
+
+  const rpc = (method: string, params: unknown, token: string) =>
+    fetch(`${base}/mcp`, {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json, text/event-stream", authorization: `Bearer ${token}` },
+      body: JSON.stringify({ jsonrpc: "2.0", id: nextId++, method, params }),
+    });
+  const call = async (name: string, args: unknown, token: string) => {
+    const r = await rpc("tools/call", { name, arguments: args }, token);
+    expect(r.status).toBe(200);
+    const result = (await r.json()).result;
+    return { isError: result.isError === true, body: JSON.parse(result.content[0].text.split("\n")[0]) };
+  };
+
+  beforeAll(async () => {
+    pool = new pg.Pool({
+      host: process.env.METISTRY_DB_HOST ?? "127.0.0.1",
+      port: Number(process.env.METISTRY_DB_PORT ?? 5432),
+      user: process.env.METISTRY_DB_USER ?? "metistry",
+      database: process.env.METISTRY_TEST_DB_NAME ?? "metistry_test",
+      password: process.env.METISTRY_DB_PASSWORD,
+    });
+    vault = memoryVault();
+    await vault.write(`agents/itest/${crewA}.md`, Buffer.from(crewFile(crewA)), intent);
+    await vault.write(`agents/itest/${crewB}.md`, Buffer.from(crewFile(crewB, { projects: ["itest-p"], scope: ["Knowledge/Resources"] })), intent);
+    registry = new CrewRegistry(pool, ["agents"], vault);
+    const targets = new TargetRegistry({ env: {} });
+    await targets.loadDir(`${root}targets`);
+    server = makeServer(pool, new QueryStore(pool), { origin: "http://127.0.0.1:0", inboxDir: `/tmp/metistry-test-inbox-crews-${Date.now()}`, policy, secureCookies: false, targets, crews: registry });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    ({ token: externalToken } = await agents.createAgent(pool, { id: externalId, display_name: "ext" }));
+    assistantToken = mintToken(32);
+    await agents.ensureInternalAgent(pool, assistantId, { token: assistantToken, display_name: "itest assistant" });
+  });
+
+  afterAll(async () => {
+    await new Promise<void>((r) => server.close(() => r()));
+    await pool.query(`DELETE FROM work WHERE owner = ANY($1::text[])`, [[`crew:${crewA}`, `crew:${crewB}`]]);
+    await pool.query(`DELETE FROM runs WHERE (kind = 'agent_admin' AND meta->>'agent' = ANY($1::text[])) OR (kind = 'dispatch' AND meta->>'crew' = ANY($1::text[])) OR component = ANY($2::text[])`, [[crewA, crewB, externalId], [assistantId, externalId]]);
+    await pool.query(`DELETE FROM agents WHERE id = ANY($1::text[])`, [[crewA, crewB, externalId, assistantId]]);
+    await pool.end();
+  });
+
+  const rowsOf = async () => (await pool.query(`SELECT id, kind, display_name, grants, projects, token_hash, revoked_at FROM agents WHERE id = ANY($1::text[]) ORDER BY id`, [[crewA, crewB]])).rows;
+  const adminRuns = async () => (await pool.query(`SELECT meta->>'agent' AS agent, meta->>'op' AS op, ok FROM runs WHERE kind = 'agent_admin' AND tool = 'crew_sync' AND meta->>'agent' = ANY($1::text[]) ORDER BY id`, [[crewA, crewB, externalId]])).rows;
+
+  it("first sync registers each manifest as kind=crew with grants from scope (external shape) and projects; audited under agent_admin", async () => {
+    const s = await registry.refresh();
+    expect(s.registered.sort()).toEqual([crewA, crewB].sort());
+    expect(s).toMatchObject({ resynced: [], conflicts: [] });
+    const rows = await rowsOf();
+    expect(rows.map((r) => r.kind)).toEqual(["crew", "crew"]);
+    expect(rows[0]).toMatchObject({ id: crewA, display_name: `${crewA} (crew, itest)`, grants: { tier: "areas", areas: ["Knowledge/Projects"] }, projects: [], revoked_at: null });
+    expect(rows[1]).toMatchObject({ id: crewB, grants: { tier: "areas", areas: ["Knowledge/Resources"] }, projects: ["itest-p"] });
+    expect(rows.every((r) => /^[0-9a-f]{64}$/.test(r.token_hash))).toBe(true); // a hash of a token nobody holds
+    expect((await adminRuns()).filter((r) => r.op === "register").map((r) => r.agent).sort()).toEqual([crewA, crewB].sort());
+    // the registry lists them like any agent, minus anything secret
+    expect((await agents.listAgents(pool)).filter((a) => a.id === crewA).map((a) => ({ kind: a.kind, grants: a.grants }))).toEqual([{ kind: "crew", grants: { tier: "areas", areas: ["Knowledge/Projects"] } }]);
+  });
+
+  it("second sync is a no-op: same rows, same token hashes, no new audit rows", async () => {
+    const before = await rowsOf();
+    const runsBefore = (await adminRuns()).length;
+    const s = await registry.refresh();
+    expect(s).toEqual({ registered: [], resynced: [], revoked: [], conflicts: [] });
+    expect(await rowsOf()).toEqual(before);
+    expect((await adminRuns()).length).toBe(runsBefore);
+  });
+
+  it("a changed manifest re-syncs grants/projects only (hash untouched); a removed one is revoked; a foreign id is a conflict, never overwritten", async () => {
+    const before = await rowsOf();
+    await vault.write(`agents/itest/${crewA}.md`, Buffer.from(crewFile(crewA, { scope: ["Knowledge/Projects", "Knowledge/Techniques"], projects: ["itest-q"] })), intent);
+    await vault.delete(`agents/itest/${crewB}.md`, intent);
+    await vault.write(`agents/itest/${externalId}.md`, Buffer.from(crewFile(externalId)), intent); // same slug as the external agent registered above
+    const s = await registry.refresh();
+    expect(s).toEqual({ registered: [], resynced: [crewA], revoked: [crewB], conflicts: [externalId] });
+    const after = await rowsOf();
+    expect(after[0]).toMatchObject({ grants: { tier: "areas", areas: ["Knowledge/Projects", "Knowledge/Techniques"] }, projects: ["itest-q"], token_hash: before[0]!.token_hash, revoked_at: null });
+    expect(after[1]!.revoked_at).not.toBeNull();
+    const ext = (await pool.query(`SELECT kind, revoked_at FROM agents WHERE id = $1`, [externalId])).rows[0];
+    expect(ext).toEqual({ kind: "external", revoked_at: null }); // the external agent's row is exactly as it was
+    expect(registry.names()).not.toContain(externalId); // a valid manifest, but not a crew this console can run: dropped, with the reason
+    expect(registry.errors.join()).toMatch(new RegExp(`"${externalId}" already belongs to a non-crew registry row`));
+    const ops = (await adminRuns()).map((r) => `${r.agent}:${r.op}:${r.ok}`);
+    expect(ops).toContain(`${crewA}:resync:true`);
+    expect(ops).toContain(`${crewB}:revoke:true`);
+    expect(ops).toContain(`${externalId}:conflict:false`);
+    // restore B for the dispatch tests
+    await vault.delete(`agents/itest/${externalId}.md`, intent);
+    await vault.write(`agents/itest/${crewB}.md`, Buffer.from(crewFile(crewB, { projects: ["itest-p"], scope: ["Knowledge/Resources"] })), intent);
+    const back = await registry.refresh();
+    expect(back.resynced).toEqual([crewB]); // revocation cleared, same hash
+    expect((await rowsOf())[1]).toMatchObject({ revoked_at: null, token_hash: before[1]!.token_hash });
+  });
+
+  it("crew_dispatch: an external agent is told not granted; the assistant's brief outside scope is refused with violations and NO work row", async () => {
+    const ext = await call("crew_dispatch", { crew: crewA, brief: "read Knowledge/Projects/X.md" }, externalToken);
+    expect(ext).toEqual({ isError: true, body: { error: { code: "forbidden", message: "not granted" } } });
+
+    const bad = await call("crew_dispatch", { crew: crewA, brief: "Compare Knowledge/Projects/X.md with Knowledge/Me/profile.md" }, assistantToken);
+    expect(bad.isError).toBe(true);
+    expect(bad.body.error.code).toBe("invalid_request");
+    expect(bad.body.error.message).toContain("Knowledge/Me/profile.md"); // the assistant sees WHICH path to remove
+    expect(bad.body.error.message).toContain("path_outside_allow");
+    expect((await pool.query(`SELECT count(*)::int AS n FROM work WHERE owner = $1`, [`crew:${crewA}`])).rows[0].n).toBe(0);
+    const refusal = (await pool.query(`SELECT ok, error, meta FROM runs WHERE kind = 'dispatch' AND tool = 'local-crew' AND meta->>'crew' = $1 ORDER BY id DESC LIMIT 1`, [crewA])).rows[0];
+    expect(refusal).toMatchObject({ ok: false, error: "data_policy: path_outside_allow" });
+    expect(refusal.meta.violations[0]).toMatchObject({ kind: "path_outside_allow", paths: ["Knowledge/Me/profile.md"] });
+    // the tool call itself is audited on the assistant, like every tool call
+    const toolRun = (await pool.query(`SELECT ok, error FROM runs WHERE component = $1 AND kind = 'tool' AND tool = 'crew_dispatch' ORDER BY id DESC LIMIT 1`, [assistantId])).rows[0];
+    expect(toolRun).toEqual({ ok: false, error: "invalid_request" });
+  });
+
+  it("crew_dispatch: a clean brief becomes ONE durable work row (kind task, owner crew:<name>, project NULL, brief + snapshot in meta); idempotent on the key", async () => {
+    const brief = "# Summarize the X plan\n\nRead Knowledge/Projects/X.md and report the open questions.";
+    const r = await call("crew_dispatch", { crew: crewA, brief, task_id: 1, idempotency_key: `itest-${suffix}` }, assistantToken);
+    expect(r.isError).toBe(false);
+    expect(r.body).toMatchObject({ queued: true, crew: crewA, allow: ["Knowledge/Projects", "Knowledge/Techniques"], deduplicated: false });
+    const row = (await pool.query(`SELECT id, kind, status, owner, project, claimed_by, created_by, meta, title FROM work WHERE id = $1`, [r.body.work_id])).rows[0];
+    expect(row).toMatchObject({ kind: "task", status: "open", owner: `crew:${crewA}`, project: null, claimed_by: null, created_by: assistantId, title: `[crew:${crewA}] Summarize the X plan` });
+    expect(row.meta).toMatchObject({ target: "local-crew", brief, task_id: 1, allow: ["Knowledge/Projects", "Knowledge/Techniques"] });
+    expect(row.meta.crew).toMatchObject({ name: crewA, model: "haiku", uses: ["brain-read", "brain-report"], max_turns: 12, budget_usd_per_run: 0.5 });
+    expect(row.meta.crew.prompt).toBe("You work for {{name}}. Report what you find.");
+    expect(row.meta.brief_sha).toMatch(/^[0-9a-f]{64}$/);
+    // the queued row is invisible to the crew's own tasks_* view (project NULL) — it is the runner's, not shared work
+    const again = await call("crew_dispatch", { crew: crewA, brief, idempotency_key: `itest-${suffix}` }, assistantToken);
+    expect(again.body).toMatchObject({ queued: true, work_id: r.body.work_id, deduplicated: true });
+    expect((await pool.query(`SELECT count(*)::int AS n FROM work WHERE owner = $1`, [`crew:${crewA}`])).rows[0].n).toBe(1);
+    const sent = (await pool.query(`SELECT ok, cost_usd::float8 AS cost_usd, meta FROM runs WHERE kind = 'dispatch' AND tool = 'local-crew' AND (meta->>'work_id')::bigint = $1`, [r.body.work_id])).rows;
+    expect(sent[0]).toMatchObject({ ok: true, cost_usd: 0 });
+    expect(sent[0].meta).toMatchObject({ crew: crewA, principal: assistantId });
+  });
+
+  it("unknown crew is not_found for the assistant (naming the registered ones); the parse helper agrees with what was synced", async () => {
+    const r = await call("crew_dispatch", { crew: "nobody", brief: "x" }, assistantToken);
+    expect(r.isError).toBe(true);
+    expect(r.body.error).toMatchObject({ code: "not_found", message: expect.stringContaining(crewA) });
+    const def = parseCrewFile(crewFile(crewA), "x", { area: "itest", name: crewA });
+    expect(def.grants).toEqual({ tier: "areas", areas: ["Knowledge/Projects"] });
+  });
+});

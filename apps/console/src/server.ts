@@ -29,6 +29,7 @@ import { route as routeMessage, type Rules } from "./router.js";
 import { sendToSession, storeSubscription, type PushConfig } from "./push.js";
 import { dispatch, type TargetRegistry } from "./dispatch.js";
 import { listProjects, updateProject, validateProjectPatch } from "./projects.js";
+import { crewDispatcher, type CrewRegistry } from "./crews.js";
 import { createRequire } from "node:module";
 
 const require_ = createRequire(import.meta.url);
@@ -48,6 +49,8 @@ export interface ConsoleConfig {
   writeKnowledge?: KnowledgeWriter;
   /** The vault client the artifacts module (§4.21) stores content through; absent = artifacts degrade to not_available. */
   vault?: VaultClient;
+  /** Loaded crew manifests (crews.ts); absent = crew_dispatch answers not_available. */
+  crews?: CrewRegistry;
 }
 
 type Auth =
@@ -78,6 +81,8 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     readKnowledge: cfg.readKnowledge,
     writeKnowledge: cfg.writeKnowledge,
     artifacts,
+    // crews (Phase 5): the dispatcher reuses dispatch.ts's policy check and lands rows through the same tasks service
+    crews: cfg.crews ? crewDispatcher(db, tasks, cfg.crews, cfg.targets) : undefined,
   });
 
   async function authenticate(req: IncomingMessage): Promise<Auth> {

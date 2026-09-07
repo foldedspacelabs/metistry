@@ -19,3 +19,9 @@ packages/mcp-eventkit/helper/ek-helper
 
 # release build output (ops/release/pack-runtime.sh); assets live on GitHub Releases
 dist-release/
+
+# launchd shape (deployment.yaml): derived state and the bundled runtime.
+# Postgres data and the assistant's SDK transcripts live under state/ —
+# invariant 1: git is the record, this is regenerable.
+state/
+runtime/

@@ -47,7 +47,10 @@ export interface InitResult {
 
 /** Tracked config dirs the instance owns (§4.16); `inbox/` is created too but is gitignored, so it carries no placeholder. */
 export const INSTANCE_DIRS = ["queries", "agents", "routines", "extensions", "instance-migrations"] as const;
-export const GITIGNORE = "inbox/\n.obsidian/workspace*\n";
+// `state/` holds the launchd shape's derived state — the Postgres data
+// directory and the assistant's SDK transcripts. Invariant 1: git is the
+// record, Postgres is derived, so none of it belongs in the instance repo.
+export const GITIGNORE = "inbox/\nstate/\n.obsidian/workspace*\n";
 export const COMMIT_AUTHOR = { name: "Metistry", email: "metistry@localhost" } as const;
 
 /** The mention trigger follows the name: "Metis" → "@metis". */

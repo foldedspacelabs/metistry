@@ -73,5 +73,5 @@ export function fakeExec(handlers: Record<string, Handler> = {}): Exec & { calls
 
 export const shown = (c: Call) => [c.cmd, ...c.args].join(" ");
 
-export const okDoctor = async (d: DoctorDeps): Promise<DoctorReport> => ({ as_of: "now", product_dir: d.productDir, ok: true, rows: [] });
-export const failDoctor = async (d: DoctorDeps): Promise<DoctorReport> => ({ as_of: "now", product_dir: d.productDir, ok: false, rows: [] });
+export const okDoctor = async (d: DoctorDeps): Promise<DoctorReport> => ({ as_of: "now", product_dir: d.productDir, shape: "compose", ok: true, rows: [] });
+export const failDoctor = async (d: DoctorDeps): Promise<DoctorReport> => ({ as_of: "now", product_dir: d.productDir, shape: "compose", ok: false, rows: [] });

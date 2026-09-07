@@ -330,3 +330,23 @@ your git, on your machine.
   holds; `absent` (not configured) never pages. Still model-free; still
   no Anthropic anywhere in the path. `scheduleToSeconds` moved to core so
   "due" and "silent" can never disagree about an interval.
+- 2026-09-06 — **The assistant gets its tools through `mcp-brain`, as the
+  first internal agent** (§4.11 "one knowledge interface for ALL agents",
+  now literally true). The engine mounts exactly one MCP server — the
+  console's `/mcp` over the compose network, bearer from
+  `METISTRY_ASSISTANT_TOKEN` — and its `allowedTools` is the eleven brain
+  tools and nothing else: built-in tools disabled, foreign MCP config
+  ignored, the list locked to the bridge's manifest by test (invariant 9
+  as code). The console registers `agents.id = 'assistant'` (`kind =
+  internal`) from the same token at startup — idempotent re-sync of hash,
+  grants and projects from the environment, revoked when the token is
+  absent — so the assistant authenticates, is scoped, and is audited
+  exactly like a foreign agent, with one documented difference: an
+  internal principal with no project list is a member of every project
+  (the hub's voice sees the whole shared list). Every turn's `runs` row
+  now carries `meta.tools_used`; every tool call is already its own row.
+  A seed system prompt (`seed/assistant-prompt.md`, templated from
+  `identity.yaml`) tells it what each tool is for. Not a control — the
+  surface is. Known gap, reported: the grant validator refuses bare
+  `Knowledge/`, so root-level notes (`now.md`) sit outside the widest
+  valid grant. Ops: `docs/ops/assistant-tools.md`.

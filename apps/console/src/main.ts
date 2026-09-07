@@ -12,6 +12,7 @@ import { TargetRegistry } from "./dispatch.js";
 import { vaultBridgeWriter } from "@foldedspacelabs/metistry-mcp-brain";
 import { ASSISTANT_DEFAULT_AREAS, INTERNAL_ASSISTANT_ID, ensureInternalAgent, revokeAgent, validateGrants } from "./agents.js";
 import { httpVaultClient } from "./vault-client.js";
+import { CrewRegistry } from "./crews.js";
 import { readFile } from "node:fs/promises";
 
 const pool = makePool();
@@ -74,6 +75,20 @@ const vault = reconcilerUrl && reconcilerToken ? httpVaultClient({ url: reconcil
 const writeKnowledge = reconcilerUrl && reconcilerToken ? vaultBridgeWriter({ url: reconcilerUrl, token: reconcilerToken }) : undefined; // knowledge_write = brain-commit over the same bridge
 const readKnowledge = vault ? async (path: string): Promise<string | null> => (await vault.read(path))?.content.toString("utf8") ?? null : undefined;
 if (!vault) console.warn("vault bridge absent: set METISTRY_RECONCILER_URL + METISTRY_BRIDGE_TOKEN_RECONCILER for knowledge_read, knowledge_write and artifacts (degrades: absent)");
+
+// Crews (Phase 5; docs/ops/crews.md): agents/<area>/<name>.md manifests,
+// D4 overlay — an entry not on disk is read through the vault bridge (that
+// is how the instance repo's protected `agents/` reaches this container).
+// Loaded now and re-synced on an interval; the registry rows are kind=crew.
+const crews = new CrewRegistry(pool, optionalEnv("METISTRY_AGENTS_DIRS", "seed/agents:agents").split(":"), vault);
+const logCrewSync = (s: Awaited<ReturnType<CrewRegistry["refresh"]>>) => {
+  const changes = [`registered ${s.registered.length}`, `resynced ${s.resynced.length}`, `revoked ${s.revoked.length}`, ...(s.conflicts.length ? [`CONFLICTS ${s.conflicts.join(",")}`] : [])];
+  console.log(`crews: ${crews.names().join(", ") || "(none)"} [${changes.join(", ")}] sources ${JSON.stringify(crews.sources)}`);
+  for (const e of crews.errors) console.warn(`crews: refused ${e}`);
+};
+logCrewSync(await crews.refresh());
+setInterval(() => crews.refresh().then(logCrewSync, (err) => console.error("crews: refresh failed:", err)), intEnv("METISTRY_CREWS_SYNC_S", 300) * 1000).unref();
+
 const server = makeServer(pool, queries, {
   origin,
   inboxDir: optionalEnv("METISTRY_INBOX_DIR", "./inbox"),
@@ -89,6 +104,7 @@ const server = makeServer(pool, queries, {
   ...(readKnowledge ? { readKnowledge } : {}),
   ...(writeKnowledge ? { writeKnowledge } : {}),
   ...(vault ? { vault } : {}),
+  crews,
 });
 if (push) startNotifier(pool, push);
 

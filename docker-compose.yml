@@ -54,6 +54,10 @@ services:
       METISTRY_GITHUB_WRITE_TOKEN: ${METISTRY_GITHUB_WRITE_TOKEN:-}
       METISTRY_GITHUB_DISPATCH_REPO: ${METISTRY_GITHUB_DISPATCH_REPO:-}
       METISTRY_TARGETS_DIRS: ${METISTRY_TARGETS_DIRS:-targets}
+      # crews (docs/ops/crews.md): seed/agents ships in the image; `agents` is
+      # the instance repo's protected dir, reached through the vault bridge
+      METISTRY_AGENTS_DIRS: ${METISTRY_AGENTS_DIRS:-seed/agents:agents}
+      METISTRY_CREWS_SYNC_S: ${METISTRY_CREWS_SYNC_S:-300}
       # aws-costs collector (degrades absent): read-only Cost Explorer credentials
       METISTRY_AWS_ACCESS_KEY_ID: ${METISTRY_AWS_ACCESS_KEY_ID:-}
       METISTRY_AWS_SECRET_ACCESS_KEY: ${METISTRY_AWS_SECRET_ACCESS_KEY:-}

@@ -2387,6 +2387,17 @@ All propagated into this document.
     mutation route, or navigate the top window. A second content hostname
     (their model — stronger against framing tricks) is reserved for the
     hosted tier, where a wildcard domain is cheap; on a tailnet it isn't.
+15. **Docker-free macOS deployment shape (opened 2026-09-07 by the
+    desktop-app distribution plan).** One-click install from the premium
+    app needs Postgres + pgvector, console, assistant, reconciler, and
+    watchdog to run under launchd with a bundled runtime — Docker Desktop
+    is the biggest first-run hurdle and a known stability risk. Code is
+    already portable; this is a `deployment.yaml` shape. The cost is the
+    assistant's container isolation: the engine process must be confined
+    on the host (sandbox profile: its own state dir, network to the
+    console only) with misuse tests. Docker compose stays the Linux/cloud
+    shape. **Decide before the native app's install flow is built;**
+    nothing else waits on it.
 
 ---
 

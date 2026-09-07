@@ -50,6 +50,73 @@
 3. Post-Phase 6: the SwiftUI multiplatform app, macOS target first if
    the work install lands before the phone matters, iOS first otherwise.
 
+## Distribution: the app as the installer (owner direction 2026-09-07)
+
+The question: can the whole install, setup, and update live inside the
+app — one click, no terminal — install the tooling, lay out the local
+filesystem, pull updates from the product repo, and connect the instance
+directory to the user's GitHub repo for versioning? **Yes, and it is the
+premium app's strongest reason to exist.** The design rule that makes it
+safe: **the app is a front end for the CLI, never a second
+implementation.** Every step below is a `metistry` verb the app runs
+(bundled) with a progress view; the terminal path stays first-class and
+identical, so open-source users and the app share one tested path
+(§4.20: adapters adapt one service).
+
+**First run, in the app:**
+1. *Runtime.* The app bundles a Node runtime and the built product
+   release as resources (`Metistry.app/Contents/Resources/metistry/`),
+   signed and notarized together — no Homebrew, no `pnpm install`.
+2. *Instance.* Pick a folder → `metistry init` (vault, identity, name
+   the assistant on-screen — the only place the name lives).
+3. *Versioning.* "Connect a GitHub repository": device-flow OAuth in the
+   app (or paste an existing private repo URL); the token goes to the
+   Keychain and reaches git through the standard `osxkeychain`
+   credential helper, so the reconciler pushes without a plaintext
+   secret anywhere (`metistry connect-repo`, new verb).
+4. *Secrets.* Bridge tokens, the assistant token, VAPID keys: minted by
+   the app into the Keychain; `.env` is written by the app from the
+   Keychain at service start (`metistry secrets sync`, new verb) and is
+   never edited by hand.
+5. *Services.* `metistry up` — but registered through **`SMAppService`**
+   (macOS 13+), the sanctioned way an app installs its launchd agents;
+   the user approves once in System Settings, and there is no plist to
+   edit. `doctor` becomes the app's status view and menu-bar item.
+6. *Door.* Passkey enrollment in-app via `ASAuthorization` against the
+   local origin; the phone enrolls from the existing QR/code flow.
+7. *Claude.* `claude setup-token` guided in-app; the token to the
+   Keychain.
+
+**Updates.** Two channels, both signed: the app updates itself
+(Sparkle-style appcast, or the App Store if that route is ever taken);
+the product runtime updates through `metistry update` — release mode
+(§4.16: pinned artifacts, never git merges), migrations under the
+advisory lock, `metistry.lock` written into the instance repo through
+the reconciler. The app shows the changelog and a "restart services"
+button; nothing else changes.
+
+**The one architectural decision this forces — open decision #15,
+Docker-free macOS shape.** Today Postgres, the console, and the assistant
+run in Docker; Docker Desktop is the largest first-run hurdle (and the
+source of the lock-ups diagnosed 2026-08-31). A one-click install needs a
+deployment shape where the app runs **everything under launchd**: a
+bundled Postgres + pgvector server (as Postgres.app and DBngin do), and
+the console, assistant, reconciler, watchdog as Node services. The code
+is already portable (invariant 7; nothing assumes a shared filesystem or
+Docker), so this is a `deployment.yaml` shape, not a rewrite; Docker
+compose remains the shape for Linux and cloud. What it costs: the
+assistant container was defense in depth behind invariant 9's allowlist.
+On the host the engine process must be confined another way — an App
+Sandbox-style profile for the assistant process (deny filesystem outside
+its own state dir, allow network to the console only), tested by misuse
+tests like every other boundary. That mitigation is part of the
+decision, not an afterthought.
+
+**Product framing.** This is the line between the open-source install
+and the premium app: same code, same repos, same API; the app sells
+the *zero-terminal* experience — install, connect, update, and a native
+window — and the FSL-hosted tier sells not running it at all.
+
 ## Not doing
 - An Electron/Tauri wrapper (a second runtime for what the installed PWA
   plus Swift helpers already give).

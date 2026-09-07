@@ -315,3 +315,18 @@ your git, on your machine.
   write-with-intent commits. Safety mechanism: no git credentials in any
   container, the engine still has no shell and no git, and a write is
   visible to readers immediately while commits batch behind it.
+- 2026-09-06 — **Watchdog closes the quiet-failure gap** (§4.9, PoC-11's
+  "collector staleness" duty; three follow-ups noted during Phase 3–4).
+  `silent-collector` reads every collector/routine manifest and alerts
+  when the last `runs` row is older than 3× its schedule (never-ran counts
+  from watchdog start, so a fresh install stays quiet); `bridge-degraded`
+  calls every configured bridge's `/check` with its own token and reports
+  *down* (nothing speaks the contract) distinctly from *degraded* (the
+  bridge's own behavioral probe says no, in its own words); and
+  `fm-tier-never-fires` catches the failure that looks like success — the
+  apple-fm bridge is healthy but inbox-drain's proposals show only the
+  deterministic tier, i.e. the console container can't reach it. Alert
+  texts carry the fix and never a changing number, so the existing dedupe
+  holds; `absent` (not configured) never pages. Still model-free; still
+  no Anthropic anywhere in the path. `scheduleToSeconds` moved to core so
+  "due" and "silent" can never disagree about an interval.

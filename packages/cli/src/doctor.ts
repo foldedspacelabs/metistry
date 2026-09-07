@@ -15,8 +15,21 @@ import { readdir, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { checkResultSchema, runCheck, validateManifest, type CheckResult, type Manifest } from "@foldedspacelabs/metistry-core";
+import {
+  checkResultSchema,
+  resolveUrl,
+  runCheck,
+  servicePlan,
+  usesCompose,
+  validateManifest,
+  type CheckResult,
+  type Deployment,
+  type DeploymentShape,
+  type Manifest,
+} from "@foldedspacelabs/metistry-core";
+import { loadDeployment } from "./deployment.js";
 import { realExec, type Exec } from "./exec.js";
+import { loadPlistTemplates, LABEL_PREFIX } from "./launchd.js";
 
 export interface Db {
   query(text: string, values?: unknown[]): Promise<{ rows: any[] }>;
@@ -30,6 +43,8 @@ export interface DoctorRow extends CheckResult {
 export interface DoctorReport {
   as_of: string;
   product_dir: string;
+  /** where this install's services run (deployment.yaml) — the shape every remediation below is written for */
+  shape: DeploymentShape;
   ok: boolean;
   rows: DoctorRow[];
 }
@@ -41,6 +56,8 @@ export interface DoctorDeps {
   /** undefined = open a pg pool from METISTRY_DB_*; null = no db configured. */
   db?: Db | null;
   exec?: Exec;
+  /** normally read from deployment.yaml (seed + instance overlay); injected by tests and by `up` */
+  deployment?: Deployment;
   platform?: NodeJS.Platform;
   uid?: number;
   timeoutMs?: number;
@@ -108,11 +125,24 @@ export function probeTargetFor(name: string): ProbeTarget {
   return KNOWN_TARGETS[name] ?? { urlVar: `METISTRY_${upper}_URL`, tokenVar: `METISTRY_BRIDGE_TOKEN_${upper}` };
 }
 
-/** The env is written for the console CONTAINER (host.docker.internal); doctor runs on the host (watchdog bridges.ts). */
-export function hostLocal(url: string): string {
-  const u = new URL(url);
-  if (u.hostname === "host.docker.internal") u.hostname = "127.0.0.1";
-  return u.toString().replace(/\/$/, "");
+/**
+ * The env is written for whichever process will use it — the console
+ * container under the compose shape, a host job under launchd. Doctor
+ * always probes from the host, so it asks core's one resolver rather than
+ * knowing the rewrite itself (every shape resolves URLs from one function).
+ */
+export function hostLocal(url: string, shape: DeploymentShape = "compose"): string {
+  return resolveUrl(url, { shape, vantage: "host" });
+}
+
+/** How an operator restarts a service, in the shape it actually runs in. */
+export function restartHint(service: string, shape: DeploymentShape): string {
+  return shape === "launchd" ? `launchctl kickstart -k gui/$(id -u)/${LABEL_PREFIX}${service}` : `docker compose up -d ${service}`;
+}
+
+/** Where its log is, in the shape it actually runs in. */
+export function logHint(service: string, shape: DeploymentShape): string {
+  return shape === "launchd" ? `/tmp/metistry-${service}.log` : `docker compose logs ${service}`;
 }
 
 type Outcome = Pick<CheckResult, "status" | "remediation" | "meta">;
@@ -144,7 +174,7 @@ async function probeCheck(name: string, url: string, token: string | undefined, 
 }
 
 /** One component row: manifest validity first; then the network probe for anything that declares an http surface. */
-async function componentRow(m: FoundManifest, deps: Required<Pick<DoctorDeps, "env" | "fetchFn" | "timeoutMs">>): Promise<DoctorRow> {
+async function componentRow(m: FoundManifest, deps: Required<Pick<DoctorDeps, "env" | "fetchFn" | "timeoutMs">> & { shape: DeploymentShape }): Promise<DoctorRow> {
   const kind = m.result.ok ? m.result.manifest.type : m.type;
   if (!m.result.ok) {
     return {
@@ -157,16 +187,16 @@ async function componentRow(m: FoundManifest, deps: Required<Pick<DoctorDeps, "e
   const man: Manifest = m.result.manifest;
 
   if (man.type === "service" && man.name === "console") {
-    const url = hostLocal(deps.env.METISTRY_CONSOLE_URL || `http://127.0.0.1:${man.port ?? 8080}`);
+    const url = hostLocal(deps.env.METISTRY_CONSOLE_URL || `http://127.0.0.1:${man.port ?? 8080}`, deps.shape);
     return {
       kind,
       ...(await runCheck(man.name, `GET ${url}/health ok; /api/status answers (401 = a passkey session is required)`, async () => {
         const health = await deps.fetchFn(`${url}/health`, { signal: AbortSignal.timeout(deps.timeoutMs) }).catch((err) => {
-          throw new Error(`console down at ${url} (${err instanceof Error ? err.message : String(err)}) — docker compose up -d console`);
+          throw new Error(`console down at ${url} (${err instanceof Error ? err.message : String(err)}) — ${restartHint("console", deps.shape)}`);
         });
-        if (!health.ok) throw new Error(`console /health returned ${health.status} — docker compose logs console`);
+        if (!health.ok) throw new Error(`console /health returned ${health.status} — ${logHint("console", deps.shape)}`);
         const status = await deps.fetchFn(`${url}/api/status`, { signal: AbortSignal.timeout(deps.timeoutMs) });
-        if (status.status !== 200 && status.status !== 401) throw new Error(`console /api/status returned ${status.status} — docker compose logs console`);
+        if (status.status !== 200 && status.status !== 401) throw new Error(`console /api/status returned ${status.status} — ${logHint("console", deps.shape)}`);
         return { meta: { url, api_status: status.status } };
       })),
     };
@@ -174,14 +204,14 @@ async function componentRow(m: FoundManifest, deps: Required<Pick<DoctorDeps, "e
 
   if (man.type === "bridge" && man.name === "brain") {
     // mounted at the console's POST /mcp (packages/mcp-brain/manifest.yaml) — no port of its own
-    const url = hostLocal(deps.env.METISTRY_CONSOLE_URL || "http://127.0.0.1:8080");
+    const url = hostLocal(deps.env.METISTRY_CONSOLE_URL || "http://127.0.0.1:8080", deps.shape);
     return {
       kind,
       ...(await runCheck(man.name, `${url}/mcp answers (401 = agent bearer required; served by the console)`, async () => {
         const r = await deps.fetchFn(`${url}/mcp`, { signal: AbortSignal.timeout(deps.timeoutMs) }).catch((err) => {
-          throw new Error(`console down at ${url} (${err instanceof Error ? err.message : String(err)}) — docker compose up -d console`);
+          throw new Error(`console down at ${url} (${err instanceof Error ? err.message : String(err)}) — ${restartHint("console", deps.shape)}`);
         });
-        if (r.status !== 401 && r.status !== 200) throw new Error(`/mcp returned ${r.status} — docker compose logs console`);
+        if (r.status !== 401 && r.status !== 200) throw new Error(`/mcp returned ${r.status} — ${logHint("console", deps.shape)}`);
       })),
     };
   }
@@ -196,12 +226,12 @@ async function componentRow(m: FoundManifest, deps: Required<Pick<DoctorDeps, "e
         kind,
         ...(await runCheck(man.name, `${t.urlVar} set → GET /check`, async () => ({
           status: "absent",
-          remediation: `not configured: set ${t.urlVar}${port ? ` (default http://host.docker.internal:${port})` : ""} and ${t.tokenVar} in .env — degrades ${"degrades" in man ? man.degrades : "absent"} meanwhile`,
+          remediation: `not configured: set ${t.urlVar}${port ? ` (default ${deps.shape === "launchd" ? `http://127.0.0.1:${port}` : `http://host.docker.internal:${port}`})` : ""} and ${t.tokenVar} in .env — degrades ${"degrades" in man ? man.degrades : "absent"} meanwhile`,
         }))),
       };
     }
-    const url = hostLocal(configured);
-    const restart = t.launchdLabel ? `launchctl kickstart -k gui/$(id -u)/${t.launchdLabel}` : `restart the ${man.name} service`;
+    const url = hostLocal(configured, deps.shape);
+    const restart = t.launchdLabel ? `launchctl kickstart -k gui/$(id -u)/${t.launchdLabel}` : restartHint(man.name, deps.shape);
     return {
       kind,
       ...(await runCheck(man.name, `GET ${url}/check answers status ok`, () => probeCheck(man.name, url, deps.env[t.tokenVar], restart, deps.fetchFn, deps.timeoutMs))),
@@ -210,8 +240,8 @@ async function componentRow(m: FoundManifest, deps: Required<Pick<DoctorDeps, "e
 
   const via =
     man.type === "service"
-      ? man.runs_on === "host"
-        ? `process state: launchd:com.foldedspacelabs.metistry.${man.name}`
+      ? man.runs_on === "host" || deps.shape === "launchd"
+        ? `process state: launchd:${LABEL_PREFIX}${man.name}`
         : `process state: compose:${man.name}`
       : undefined;
   return { kind, ...(await runCheck(man.name, `${m.dir}/manifest.yaml validates${via ? `; ${via}` : ""}`, async () => {})) };
@@ -234,7 +264,7 @@ export async function openDbFromEnv(env: NodeJS.ProcessEnv): Promise<Db | null> 
   return { query: (t, v) => pool.query(t, v as any[]), end: () => pool.end() };
 }
 
-export async function dbRows(db: Db | null, productDir: string): Promise<DoctorRow[]> {
+export async function dbRows(db: Db | null, productDir: string, shape: DeploymentShape = "compose"): Promise<DoctorRow[]> {
   const migrationsDir = join(productDir, "db", "migrations");
   const files = existsSync(migrationsDir) ? (await readdir(migrationsDir)).filter((f) => f.endsWith(".sql")).sort() : [];
 
@@ -253,7 +283,7 @@ export async function dbRows(db: Db | null, productDir: string): Promise<DoctorR
         await db.query("SELECT 1");
       } catch (err) {
         reachable = false;
-        throw new Error(`${err instanceof Error ? err.message : String(err)} — docker compose up -d db; check METISTRY_DB_* in .env`);
+        throw new Error(`${err instanceof Error ? err.message : String(err)} — ${restartHint("db", shape)}; check METISTRY_DB_* in .env${shape === "launchd" ? " (log: /tmp/metistry-db.log)" : ""}`);
       }
     })),
   };
@@ -279,16 +309,13 @@ export async function dbRows(db: Db | null, productDir: string): Promise<DoctorR
 
 // ---- launchd (macOS) ----------------------------------------------------------
 
-export async function launchdLabels(productDir: string): Promise<{ file: string; label: string }[]> {
-  const dir = join(productDir, "ops", "launchd");
-  if (!existsSync(dir)) return [];
-  const out: { file: string; label: string }[] = [];
-  for (const f of (await readdir(dir)).filter((f) => f.endsWith(".plist")).sort()) {
-    const text = await readFile(join(dir, f), "utf8");
-    const m = /<key>Label<\/key>\s*<string>([^<]+)<\/string>/.exec(text);
-    out.push({ file: f, label: m?.[1] ?? basename(f, ".plist") });
-  }
-  return out;
+/**
+ * The jobs THIS shape installs. Under `compose` the db, console and
+ * assistant plists exist in the checkout but are not host jobs, so probing
+ * them would report every install as broken.
+ */
+export async function launchdLabels(productDir: string, shape: DeploymentShape = "compose"): Promise<{ file: string; label: string }[]> {
+  return (await loadPlistTemplates(productDir, shape)).map((t) => ({ file: t.file, label: t.label }));
 }
 
 /** `launchctl print gui/<uid>/<label>` → running | waiting (with last exit code) | not bootstrapped. */
@@ -299,9 +326,9 @@ export function parseLaunchctlPrint(text: string): { state: string; pid?: number
   return { state, ...(pid ? { pid: Number(pid) } : {}), ...(lastExit ? { lastExit: Number(lastExit) } : {}) };
 }
 
-export async function launchdRows(productDir: string, exec: Exec, uid: number): Promise<DoctorRow[]> {
+export async function launchdRows(productDir: string, exec: Exec, uid: number, shape: DeploymentShape = "compose"): Promise<DoctorRow[]> {
   const rows: DoctorRow[] = [];
-  for (const { file, label } of await launchdLabels(productDir)) {
+  for (const { file, label } of await launchdLabels(productDir, shape)) {
     rows.push({
       kind: "launchd",
       ...(await runCheck(`launchd:${label}`, `launchctl print gui/${uid}/${label} reports state = running`, async () => {
@@ -400,21 +427,32 @@ export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
   const platform = deps.platform ?? process.platform;
   const uid = deps.uid ?? (typeof process.getuid === "function" ? process.getuid() : 0);
   const timeoutMs = deps.timeoutMs ?? 5000;
+  const loaded = deps.deployment ? { deployment: deps.deployment, from: "caller" } : await loadDeployment(deps.productDir, env);
+  const shape = loaded.deployment.shape;
 
-  const rows: DoctorRow[] = [];
-  for (const m of await walkManifests(deps.productDir)) rows.push(await componentRow(m, { env, fetchFn, timeoutMs }));
+  const rows: DoctorRow[] = [
+    {
+      kind: "deployment",
+      ...(await runCheck("deployment", `deployment.yaml shape (${loaded.from})`, async () => ({
+        meta: { shape, from: loaded.from, services: Object.fromEntries(servicePlan(loaded.deployment).map((x) => [x.name, x.enabled ? x.shape : "disabled"])) },
+      }))),
+    },
+  ];
+  for (const m of await walkManifests(deps.productDir)) rows.push(await componentRow(m, { env, fetchFn, timeoutMs, shape }));
 
   const db = deps.db === undefined ? await openDbFromEnv(env) : deps.db;
   try {
-    rows.push(...(await dbRows(db, deps.productDir)));
+    rows.push(...(await dbRows(db, deps.productDir, shape)));
   } finally {
     if (deps.db === undefined && db?.end) await db.end().catch(() => {});
   }
 
-  if (platform === "darwin") rows.push(...(await launchdRows(deps.productDir, exec, uid)));
-  rows.push(...(await composeRows(deps.productDir, exec)));
+  if (platform === "darwin") rows.push(...(await launchdRows(deps.productDir, exec, uid, shape)));
+  // no container runtime is consulted when no service runs in one: a
+  // launchd install must not report "docker not found" as a finding
+  if (usesCompose(loaded.deployment)) rows.push(...(await composeRows(deps.productDir, exec)));
 
-  return { as_of: new Date().toISOString(), product_dir: deps.productDir, ok: !rows.some((r) => r.status === "failed"), rows };
+  return { as_of: new Date().toISOString(), product_dir: deps.productDir, shape, ok: !rows.some((r) => r.status === "failed"), rows };
 }
 
 // ---- rendering ------------------------------------------------------------------
@@ -431,6 +469,6 @@ export function renderTable(report: DoctorReport): string {
     line(widths.map((w) => "-".repeat(w))),
     ...body.map(line),
     "",
-    `${report.rows.length} checks: ${counts.ok} ok, ${counts.degraded} degraded, ${counts.failed} failed, ${counts.absent} absent — ${report.ok ? "healthy" : "FAILED"} (${report.product_dir})`,
+    `${report.rows.length} checks: ${counts.ok} ok, ${counts.degraded} degraded, ${counts.failed} failed, ${counts.absent} absent — ${report.ok ? "healthy" : "FAILED"} (${report.product_dir}, shape ${report.shape})`,
   ].join("\n");
 }

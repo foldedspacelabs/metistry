@@ -103,6 +103,7 @@ describe("doctor: everything healthy", () => {
     const r = byName(report.rows);
     expect(report.ok).toBe(true);
     expect(report.rows.map((x) => `${x.kind}:${x.name}=${x.status}`)).toEqual([
+      "deployment:deployment=ok",
       "collector:good=ok",
       "bridge:x=ok",
       "bridge:y=absent",
@@ -141,7 +142,7 @@ describe("doctor: everything healthy", () => {
     expect(await main(["doctor", "--product-dir", productDir], { out: (s) => out.push(s), doctorDeps: deps })).toBe(0);
     const text = out.join("\n");
     expect(text).toMatch(/^name\s+kind\s+status\s+ms\s+remediation/);
-    expect(text).toMatch(/9 checks: 7 ok, 0 degraded, 0 failed, 2 absent — healthy/);
+    expect(text).toMatch(/10 checks: 8 ok, 0 degraded, 0 failed, 2 absent — healthy \(.*, shape compose\)/);
     expect(text).not.toMatch(/launchd:/); // linux: no launchd rows
     expect(text).toMatch(/^compose\s+compose\s+absent\s+\d+\s+docker not found/m);
 
@@ -149,7 +150,8 @@ describe("doctor: everything healthy", () => {
     expect(await main(["doctor", "--product-dir", productDir, "--json"], { out: (s) => json.push(s), doctorDeps: deps })).toBe(0);
     const parsed = JSON.parse(json.join("\n"));
     expect(parsed.ok).toBe(true);
-    expect(parsed.rows).toHaveLength(9);
+    expect(parsed.rows).toHaveLength(10);
+    expect(parsed.shape).toBe("compose");
     expect(parsed.rows.every((r: DoctorRow) => typeof r.latency_ms === "number" && typeof r.probe === "string")).toBe(true);
   });
 });
@@ -198,7 +200,7 @@ describe("doctor: failed", () => {
     });
     const r = byName(report.rows);
     expect(report.ok).toBe(false);
-    expect(r.x).toMatchObject({ status: "failed", remediation: expect.stringMatching(/x down at http:\/\/127\.0\.0\.1:7901 \(connect ECONNREFUSED.*\) — restart the x service/) });
+    expect(r.x).toMatchObject({ status: "failed", remediation: expect.stringMatching(/x down at http:\/\/127\.0\.0\.1:7901 \(connect ECONNREFUSED.*\) — docker compose up -d x/) });
     expect(r.console).toMatchObject({ status: "failed", remediation: expect.stringMatching(/\/health returned 500/) });
     expect(r.db).toMatchObject({ status: "failed", remediation: expect.stringMatching(/ECONNREFUSED — docker compose up -d db/) });
     expect(r.migrations).toMatchObject({ status: "absent", remediation: "not checked — db unreachable" });

@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Postgres 17 + pgvector under the LAUNCHD shape only (deployment.yaml;
+     open decision 15) — the pattern Postgres.app and DBngin use: the
+     server binary IS the job, KeepAlive restarts it, launchd owns its
+     lifetime. No pg_ctl wrapper and no shell.
+
+     `metistry up` finds the binaries (METISTRY_PG_BIN, a bundled
+     runtime/postgres/, then Homebrew postgresql@17), initdbs
+     <instance>/state/pg if it is not there yet, writes the managed block
+     in postgresql.conf (loopback listen + a unix socket), and renders
+     __PG_BIN__ / __PG_DATA__ here. Migrations run exactly as they do
+     against the container: ops/scripts/migrate.sh, or `metistry update`.
+
+     The data directory lives OUTSIDE the vault and is gitignored: invariant
+     1 still holds — Postgres is derived, git is the record. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.foldedspacelabs.metistry.db</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__PG_BIN__/postgres</string>
+    <string>-D</string>
+    <string>__PG_DATA__</string>
+  </array>
+  <key>WorkingDirectory</key><string>__PG_DATA__</string>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/tmp/metistry-db.log</string>
+  <key>StandardErrorPath</key><string>/tmp/metistry-db.log</string>
+</dict>
+</plist>

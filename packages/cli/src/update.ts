@@ -15,6 +15,8 @@ import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join, relative } from "node:path";
+import { usesCompose } from "@foldedspacelabs/metistry-core";
+import { loadDeployment } from "./deployment.js";
 import { doctor, hostLocal, type DoctorDeps, type DoctorReport } from "./doctor.js";
 import { productVersion } from "./env.js";
 import type { Exec } from "./exec.js";
@@ -224,12 +226,17 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
   // release mode swings this to `<product-dir>/current` once the switch is done
   let runDir = runDirFor(productDir, source);
   let releaseVersion = version;
+  // the shape decides both halves of "restart": whether there are containers at
+  // all, and which plists exist (under launchd, console/assistant/db are jobs)
+  const loaded = await loadDeployment(runDir, env);
+  const deployment = loaded.deployment;
   // hashed before the build/switch and again after: only jobs whose code moved are kickstarted
-  let before = await hashHostJobs(runDir, await loadPlistTemplates(runDir));
+  let before = await hashHostJobs(runDir, await loadPlistTemplates(runDir, deployment.shape));
 
   try {
     r.section("product");
     r.note(`${productDir} — ${source === "git" ? "git checkout: fast-forward to the remote" : "release: download the pinned runtime pack"}${prior ? ` (lock: ${prior.product.version} @ ${prior.product.commit.slice(0, 7)}, ${prior.updated_at})` : " (no metistry.lock yet)"}`);
+    r.note(`shape: ${deployment.shape} — from ${loaded.from}`);
     if (source === "git") {
       if (opts.rollback) throw new StepFailed("--rollback is release mode only — a checkout rolls back with git (git -C <checkout> checkout <tag> && metistry update --skip-migrate)");
       if (existsSync(join(productDir, ".git"))) {
@@ -248,10 +255,10 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
       release = opts.rollback ? await rollbackRelease(r, productDir) : await installRelease(r, { productDir, fetchFn, env, version: opts.releaseVersion, ...(opts.target ? { target: opts.target } : {}) });
       releaseVersion = release.version;
       runDir = runDirFor(productDir, source);
-      before = await hashHostJobs(runDir, await loadPlistTemplates(runDir));
+      before = await hashHostJobs(runDir, await loadPlistTemplates(runDir, deployment.shape));
     }
 
-    const templates = await loadPlistTemplates(runDir);
+    const templates = await loadPlistTemplates(runDir, deployment.shape);
 
     r.section("build");
     if (opts.skipBuild) r.note("--skip-build: using what is in dist/ now");
@@ -281,12 +288,18 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
     }
 
     r.section("restart");
-    await composeUp(r, runDir, source, source === "release" ? releaseVersion : undefined);
+    if (usesCompose(deployment)) await composeUp(r, runDir, source, source === "release" ? releaseVersion : undefined);
+    else r.note("shape launchd: no containers, so docker is never called — console, assistant and db are kickstarted below with the other host jobs");
     if (platform === "darwin") {
       const after = await hashHostJobs(runDir, templates);
       for (const t of templates) {
         const changed = before[t.label] !== after[t.label];
-        if (r.dryRun) await r.run("launchctl", ["kickstart", "-k", `gui/${uid}/${t.label}`], { comment: `only if ${[...new Set(t.repoPaths.map(trackedPathFor))].join(", ")} changed` });
+        if (r.dryRun) {
+          // the db job execs the Postgres toolchain, not this repo's code, so it
+          // tracks nothing here — an update never bounces the database
+          const tracked = [...new Set(t.repoPaths.map(trackedPathFor))];
+          await r.run("launchctl", ["kickstart", "-k", `gui/${uid}/${t.label}`], { comment: tracked.length ? `only if ${tracked.join(", ")} changed` : "no product code of its own — never kickstarted by update" });
+        }
         else if (changed) {
           await r.run("launchctl", ["kickstart", "-k", `gui/${uid}/${t.label}`], { tolerateFailure: true, comment: "code changed" });
           restarted.push(t.label);

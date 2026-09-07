@@ -1,0 +1,125 @@
+;; Metistry assistant — host confinement profile (open decision 15, the cost
+;; it named). Under the `compose` shape the engine's isolation is the
+;; container. Under the `launchd` shape it runs on the host, so the container
+;; boundary is replaced by this one: deny by default, then allow exactly the
+;; reads, the one writable directory, the one executable, and the two
+;; network destinations the Agent SDK actually needs.
+;;
+;; Invoked by ops/launchd/com.foldedspacelabs.metistry.assistant.plist as
+;;   /usr/bin/sandbox-exec -f <this file> -D KEY=VALUE … <node> <main.js>
+;; so the sandbox is the job's root process and every child inherits it.
+;;
+;; Parameters (all absolute, all supplied by `metistry up`; see
+;; packages/cli/src/sandbox.ts, which is the one place they are computed):
+;;   NODE_PREFIX     the node installation root (read + exec)
+;;   NODE_BIN        the node binary itself (read + exec)
+;;   PRODUCT_DIR     the product checkout: dist/, node_modules/, seed/ (read only)
+;;   STATE_DIR       the assistant's own state — HOME for the SDK's transcripts
+;;                   (the ONLY writable location besides TMP_DIR)
+;;   TMP_DIR         the per-user temporary directory
+;;   CONSOLE_TCP     the console's loopback endpoint, e.g. localhost:8080
+;;
+;; sandbox-exec(1) is deprecated by Apple and still functional (verified on
+;; macOS 26.4; the same profile shape has worked since 14). It is a
+;; deliberate stopgap: when the Mac app hosts this process (docs/product/
+;; desktop-app-plan.md) the confinement becomes App Sandbox entitlements on
+;; the bundled helper — same deny-default posture, supported API, and the
+;; outbound host allowlist below becomes enforceable by name rather than by
+;; port. Recorded in docs/ops/deployment-shapes.md.
+
+(version 1)
+(deny default)
+
+;; Denials are reported to the system log either way — a violation we did
+;; not predict is findable with
+;;   log stream --predicate 'sender == "Sandbox"'
+;; (SBPL rejects `(with report)` on a deny action, so this is a comment
+;; rather than a rule.)
+
+;; The base rules every macOS process needs to exist at all: dyld, the
+;; shared cache, mach bootstrap, signals to itself, /dev/null and
+;; /dev/urandom. Importing the system profile is what keeps this file about
+;; Metistry's policy rather than about Darwin's plumbing.
+(import "system.sb")
+
+(allow process-fork)
+
+;; ---- exec ---------------------------------------------------------------
+;; The engine has no shell (invariant 9). The only executable it may run is
+;; the node runtime — the Agent SDK spawns its own CLI as `node <cli.js>`.
+(allow process-exec*
+  (literal (param "NODE_BIN"))
+  (subpath (param "NODE_PREFIX")))
+
+;; ---- reads --------------------------------------------------------------
+;; Metadata (lstat) on any path: node resolves its entry point by lstat-ing
+;; every ancestor directory, so denying this denies startup itself. Metadata
+;; is existence and size, never content — the file-read* allowlist below is
+;; what actually governs what can be opened.
+(allow file-read-metadata)
+
+;; System frameworks, the certificate store, timezone and resolver config.
+(allow file-read*
+  (subpath "/usr/lib")
+  (subpath "/usr/share")
+  (subpath "/System")
+  (subpath "/Library/Preferences/Logging")
+  (subpath "/private/var/db/timezone")
+  (subpath "/private/etc/ssl")
+  (literal "/private/etc/hosts")
+  (literal "/private/etc/resolv.conf")
+  (literal "/private/etc/localtime")
+  (literal "/private/etc/protocols")
+  (literal "/private/etc/services"))
+
+;; Its own code and runtime, read-only: the built dist/, node_modules/, and
+;; the product's seed/ defaults. NOT the vault, NOT the instance repo, NOT
+;; ~/Documents — the engine reaches knowledge through the brain bridge over
+;; HTTP, never through the filesystem (D5).
+(allow file-read*
+  (literal (param "NODE_BIN"))
+  (subpath (param "NODE_PREFIX"))
+  (subpath (param "PRODUCT_DIR"))
+  (subpath (param "STATE_DIR"))
+  (subpath (param "TMP_DIR")))
+
+;; ---- writes -------------------------------------------------------------
+;; Exactly two: the assistant's state directory (HOME — the SDK's session
+;; transcripts live here) and the temporary directory.
+(allow file-write*
+  (subpath (param "STATE_DIR"))
+  (subpath (param "TMP_DIR")))
+
+;; ---- network ------------------------------------------------------------
+;; Two destinations, and no third.
+;;
+;; 1. The console, on loopback. That is the whole tool surface: mcp-brain is
+;;    mounted at the console's /mcp, so brain-commit and every allowlisted
+;;    bridge call goes through this one endpoint.
+(allow network-outbound (remote tcp (param "CONSOLE_TCP")))
+
+;; 2. Anthropic's API over TLS. sandbox-exec filters by port, not by
+;;    hostname, so this reads as "outbound TLS" — the host allowlist itself
+;;    is documentation (ANTHROPIC_HOSTS in packages/cli/src/sandbox.ts,
+;;    docs/ops/deployment-shapes.md) — NOT enforced here, and not enforced
+;;    anywhere else today. Name-level enforcement arrives with App Sandbox.
+(allow network-outbound (remote tcp "*:443"))
+
+;; DNS resolution goes through mDNSResponder, not a socket to :53.
+(allow network-outbound (remote unix-socket (path-literal "/private/var/run/mDNSResponder")))
+(allow mach-lookup
+  (global-name "com.apple.dnssd.service")
+  (global-name "com.apple.system.opendirectoryd.libinfo")
+  (global-name "com.apple.SystemConfiguration.configd")
+  (global-name "com.apple.SystemConfiguration.DNSConfiguration")
+  (global-name "com.apple.SystemConfiguration.PPPController")
+  (global-name "com.apple.SystemConfiguration.NetworkInformation")
+  (global-name "com.apple.nehelper")
+  (global-name "com.apple.networkd")
+  (global-name "com.apple.usymptomsd"))
+
+;; Reading the machine's own network/system state (node's os module, the
+;; SDK's proxy detection).
+(allow sysctl-read)
+(allow system-socket)
+(allow network-bind (local ip "localhost:*"))

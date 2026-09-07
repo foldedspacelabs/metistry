@@ -631,6 +631,9 @@ can see your own token spend split by tier.
   dependency columns, agent identity, event-driven proposal triage —
   **built as the `tasks` module (§4.20)**: package first, console adapter
   second
+- **Reconciler + vault bridge (D5, resolved)** — `apps/reconciler`: sole
+  committer, write-with-intent queue, read/list/search/log/diff over the
+  wire contract; unblocks `knowledge_read` in `mcp-brain` and artifacts
 - **Artifacts module (§4.21)** — git-backed versions, comment threads,
   review-bundle dispatch on the task list, delivery-evidence tiers, tool-result
   nudges; per-agent autonomy boundary enforced at the dispatch tool; HTML
@@ -1578,6 +1581,9 @@ metistry/
     assistant/              Agent SDK host       ghcr.io/foldedspacelabs/metistry-assistant
     console/                Node server + PWA + router module + routine
                             runner                ghcr.io/foldedspacelabs/metistry-console
+    reconciler/             the instance repo's sole committer + vault
+                            bridge (D5) — runs_on: host; the one place git
+                            runs; container image for non-macOS installs
   packages/               PUBLISHED to npm
     mcp-eventkit/  mcp-health/  mcp-apple-fm/
                             thin npm publishers of prebuilt, notarized
@@ -2312,15 +2318,29 @@ All propagated into this document.
     analysis dropped for now.
 11. **`Techniques/`** — own folder or fold into `Resources/`? And how granular
     should `Areas/` sub-nesting go before it's noise?
-12. **One committer or two (D5, review CRIT-6).** The plan rejects
-    Obsidian-Git for "two committers" yet currently ships two
-    (`brain-commit` + the reconciler); the reconciler has no `apps/` home
-    or manifest type; and the vault filesystem seam for the containerized
-    assistant (bind-mount vs host-bridge) is undecided. The review's
-    proposal: the reconciler is the *sole* committer and `brain-commit`
-    becomes write-file + enqueue-commit-intent. **Decide before the
-    reconciler is built** — the latency question (C3) and the invariant-7
-    seam (C4) ride on it.
+12. **One committer or two (D5, review CRIT-6). RESOLVED 2026-09-06: the
+    reconciler is the sole committer and the vault's only mount holder;
+    the seam is a host bridge.** `apps/reconciler` — TypeScript,
+    `type: service`, `runs_on: host` (launchd on macOS; a container with
+    a volume anywhere else) — is the only process holding the instance
+    repo's working tree and the only process that runs git. It exposes
+    a **vault bridge** under the §4.3 wire contract (bearer per caller,
+    error envelope, `check()`): `read`, `list`, `search`, `log`, `diff`,
+    and `write` — every write carries a *commit intent* (author
+    principal, message, group key) and lands in a queue the reconciler
+    flushes as batched commits (~30 s) and pushes on a schedule. Console,
+    `mcp-brain`, and the artifacts module call it over HTTP, exactly like
+    the EventKit bridge; nothing shares a filesystem with it (invariant
+    7 holds, C4 closed). Reads come from the working tree, so a write is
+    visible immediately and commit latency is irrelevant to readers (C3
+    closed). `brain-commit` in the engine becomes a thin call to `write`
+    with intent — the engine still has no shell and no git (invariant
+    9). No git credentials ever enter a container. Deviation from the
+    review's proposal: `mcp-brain` stays inside the console (built
+    2026-09-06); the reconciler takes the mount-holder role instead —
+    one host service, same property. The reconciler also owns §4.13
+    (hashing, links, renames, Obsidian conflict files) and, in Phase 6,
+    embeddings.
 13. **Invariant 1 restated + the durable set (D6, review CRIT-5).** Four of
     eight tables hold state a rebuild cannot regenerate (`runs`, `sessions`,
     `inbox` triage, `work` threads), so "git is the record" needs its honest

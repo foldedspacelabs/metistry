@@ -1,0 +1,283 @@
+// `metistry update` — move an install forward (plan §4.16: "bumps
+// metistry.lock, pulls the pinned artifacts, runs migrations"). In today's
+// mode the product is a git checkout: fetch + fast-forward, install +
+// build, migrate under the advisory lock, rebuild/restart what changed,
+// then pin the result into the INSTANCE repo's metistry.lock — through the
+// reconciler bridge, because the reconciler is the instance repo's sole
+// committer (docs/ops/reconciler.md). In release mode (the lock says
+// `source: release`) the images are pulled, never built, and the npm side
+// is printed until something is published.
+
+import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
+import { readdir, readFile, stat } from "node:fs/promises";
+import { join, relative } from "node:path";
+import { doctor, hostLocal, type DoctorDeps, type DoctorReport } from "./doctor.js";
+import { productVersion } from "./env.js";
+import type { Exec } from "./exec.js";
+import { loadPlistTemplates, type PlistTemplate } from "./launchd.js";
+import { instanceLockPath, LOCK_FILENAME, readLock, serializeLock, type LockFile, type LockSource } from "./lock.js";
+import { listMigrationFiles, MIGRATION_LOCK_KEY, openMigrationSession, runMigrations, type MigrateResult, type MigrationSession } from "./migrate.js";
+import { StepFailed, StepRunner } from "./steps.js";
+import { closingDoctor, composeUp, COMPOSE_TIMEOUT_MS, productSource } from "./up.js";
+
+export interface UpdateOptions {
+  productDir: string;
+  env?: NodeJS.ProcessEnv | undefined;
+  exec?: Exec | undefined;
+  out?: ((line: string) => void) | undefined;
+  dryRun?: boolean | undefined;
+  skipBuild?: boolean | undefined;
+  skipMigrate?: boolean | undefined;
+  platform?: NodeJS.Platform | undefined;
+  uid?: number | undefined;
+  /** the release this checkout is — default: this package's version */
+  version?: string | undefined;
+  now?: Date | undefined;
+  fetchFn?: typeof fetch | undefined;
+  /** test seam: a single-session db handle for the migration runner (null = no db configured) */
+  openSession?: ((env: NodeJS.ProcessEnv) => Promise<(MigrationSession & { end(): Promise<void> }) | null>) | undefined;
+  doctorFn?: ((deps: DoctorDeps) => Promise<DoctorReport>) | undefined;
+  doctorDeps?: Partial<DoctorDeps> | undefined;
+}
+
+export interface UpdateResult {
+  code: number;
+  source: LockSource;
+  commands: string[];
+  /** the lock as written (or as it would be, in a dry run) */
+  lock?: LockFile;
+  /** launchd labels kickstarted because their code changed */
+  restarted: string[];
+  migrations?: MigrateResult;
+}
+
+export const RECONCILER_LABEL = "com.foldedspacelabs.metistry.reconciler";
+
+/** `git rev-parse HEAD` in a checkout; undefined when it is not one (or git is missing). */
+export async function gitHead(dir: string, exec: Exec): Promise<string | undefined> {
+  if (!existsSync(join(dir, ".git"))) return undefined;
+  const r = await exec("git", ["rev-parse", "HEAD"], { cwd: dir });
+  return r.code === 0 ? r.stdout.trim() : undefined;
+}
+
+/** Workspace packages that publish to npm — what a release install would `npm install` (plan §4.16). */
+export async function publishedPackages(productDir: string): Promise<string[]> {
+  const dir = join(productDir, "packages");
+  if (!existsSync(dir)) return [];
+  const names: string[] = [];
+  for (const entry of (await readdir(dir, { withFileTypes: true })).filter((e) => e.isDirectory()).sort((a, b) => a.name.localeCompare(b.name))) {
+    const file = join(dir, entry.name, "package.json");
+    if (!existsSync(file)) continue;
+    try {
+      const pkg = JSON.parse(await readFile(file, "utf8")) as { name?: string; private?: boolean };
+      if (pkg.name && !pkg.private) names.push(pkg.name);
+    } catch {
+      /* not a package */
+    }
+  }
+  return names;
+}
+
+// ---- "what changed": a content hash of each host job's code ---------------------
+
+/** For `apps/watchdog/dist/main.js` the tracked tree is `apps/watchdog/dist`; a bare binary (the eventkit helper) is tracked as itself. */
+export function trackedPathFor(repoPath: string): string {
+  const i = repoPath.indexOf("/dist/");
+  return i === -1 ? repoPath : repoPath.slice(0, i + "/dist".length);
+}
+
+async function hashInto(h: ReturnType<typeof createHash>, root: string, abs: string): Promise<void> {
+  const s = await stat(abs);
+  if (s.isDirectory()) {
+    for (const name of (await readdir(abs)).sort()) await hashInto(h, root, join(abs, name));
+    return;
+  }
+  h.update(relative(root, abs));
+  h.update("\0");
+  h.update(await readFile(abs));
+  h.update("\0");
+}
+
+/** One hex digest per host job over the code it executes (sorted paths + bytes); "missing" when nothing is built yet. */
+export async function hashHostJobs(productDir: string, templates: PlistTemplate[]): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  for (const t of templates) {
+    const h = createHash("sha256");
+    let any = false;
+    for (const rel of [...new Set(t.repoPaths.map(trackedPathFor))].sort()) {
+      const abs = join(productDir, rel);
+      if (!existsSync(abs)) continue;
+      any = true;
+      await hashInto(h, productDir, abs);
+    }
+    out[t.label] = any ? h.digest("hex") : "missing";
+  }
+  return out;
+}
+
+// ---- the lock write ----------------------------------------------------------------
+
+export interface LockDelivery {
+  how: "bridge" | "direct" | "none";
+  detail: string;
+}
+
+/**
+ * Where the new lock goes. The reconciler is the instance repo's sole
+ * committer, so when a bridge is configured the write goes through it as
+ * the `user` principal (metistry.lock is a §4.7 protected path — only
+ * `user` may). Without a bridge, a LOCAL instance dir is written directly
+ * only when no reconciler job is running: a running reconciler would sweep
+ * the edit as an out-of-band change, which is fine, but a running one with
+ * no URL configured is a misconfiguration the operator should fix, not
+ * something to write around.
+ */
+export async function writeLock(r: StepRunner, lock: LockFile, opts: { env: NodeJS.ProcessEnv; platform: NodeJS.Platform; uid: number; fetchFn: typeof fetch }): Promise<LockDelivery> {
+  const content = serializeLock(lock);
+  const message = `metistry update → ${lock.product.version}`;
+  const url = opts.env.METISTRY_RECONCILER_URL;
+  const path = instanceLockPath(opts.env);
+
+  if (url) {
+    const base = hostLocal(url);
+    const token = opts.env.METISTRY_BRIDGE_TOKEN_RECONCILER;
+    if (!token) throw new StepFailed("METISTRY_RECONCILER_URL is set but METISTRY_BRIDGE_TOKEN_RECONCILER is not — the lock cannot be written through the bridge");
+    const shown = `POST ${base}/vault/write ${LOCK_FILENAME} (principal user, "${message}")`;
+    if (!r.action(shown)) return { how: "bridge", detail: "the reconciler commits it on its next flush (it is the instance repo's sole committer)" };
+    let res: Response;
+    try {
+      res = await opts.fetchFn(`${base}/vault/write`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ path: LOCK_FILENAME, content, intent: { principal: "user", message } }),
+        signal: AbortSignal.timeout(10_000),
+      });
+    } catch (err) {
+      throw new StepFailed(`reconciler bridge at ${base} did not answer (${err instanceof Error ? err.message : String(err)}) — start it (launchctl kickstart -k gui/${opts.uid}/${RECONCILER_LABEL}) and rerun; the lock was NOT written`);
+    }
+    if (!res.ok) {
+      let why = `HTTP ${res.status}`;
+      try {
+        const body = (await res.json()) as { error?: { code?: string; message?: string } };
+        if (body?.error) why = `${body.error.code ?? res.status}: ${body.error.message ?? ""}`.trim();
+      } catch {
+        /* no envelope */
+      }
+      throw new StepFailed(`reconciler refused the lock write (${why}) — the lock was NOT written`);
+    }
+    return { how: "bridge", detail: `${LOCK_FILENAME} written through the reconciler as user — committed on its next flush` };
+  }
+
+  if (path && existsSync(path.slice(0, -LOCK_FILENAME.length - 1))) {
+    if (opts.platform === "darwin" && !r.dryRun) {
+      const probe = await r.exec("launchctl", ["print", `gui/${opts.uid}/${RECONCILER_LABEL}`]);
+      if (probe.code === 0 && /^\s*state = running/m.test(probe.stdout)) {
+        throw new StepFailed(`a reconciler job is running but METISTRY_RECONCILER_URL is unset — add it (and METISTRY_BRIDGE_TOKEN_RECONCILER) to .env so update writes the lock through the bridge; refusing to write ${path} behind the sole committer`);
+      }
+    }
+    await r.write(path, content, "metistry update; no reconciler bridge configured, so written directly — a reconciler, once installed, sweeps it into a user commit");
+    return { how: "direct", detail: `${path} written directly (no reconciler configured)` };
+  }
+
+  r.note(`no METISTRY_INSTANCE_DIR — ${LOCK_FILENAME} not written (metistry init creates the instance repo)`);
+  return { how: "none", detail: "no instance dir" };
+}
+
+// ---- the command --------------------------------------------------------------------
+
+export async function update(opts: UpdateOptions): Promise<UpdateResult> {
+  const env = opts.env ?? process.env;
+  const r = new StepRunner({ dryRun: opts.dryRun === true, out: opts.out ?? ((s) => process.stdout.write(s + "\n")), exec: opts.exec, env });
+  const platform = opts.platform ?? process.platform;
+  const uid = opts.uid ?? (typeof process.getuid === "function" ? process.getuid() : 0);
+  const version = opts.version ?? productVersion();
+  const now = opts.now ?? new Date();
+  const fetchFn = opts.fetchFn ?? fetch;
+  const openSession = opts.openSession ?? openMigrationSession;
+  const productDir = opts.productDir;
+
+  const lockPath = instanceLockPath(env);
+  const prior = lockPath ? await readLock(lockPath) : undefined;
+  const source = await productSource(env);
+  const templates = await loadPlistTemplates(productDir);
+  const restarted: string[] = [];
+  let migrations: MigrateResult | undefined;
+  let lock: LockFile | undefined;
+  let failure: StepFailed | undefined;
+
+  try {
+    r.section("product");
+    r.note(`${productDir} — ${source === "git" ? "git checkout: fast-forward to the remote" : "release: pull pinned artifacts"}${prior ? ` (lock: ${prior.product.version} @ ${prior.product.commit.slice(0, 7)}, ${prior.updated_at})` : " (no metistry.lock yet)"}`);
+    if (source === "git") {
+      if (existsSync(join(productDir, ".git"))) {
+        await r.run("git", ["fetch", "--quiet"], { cwd: productDir, timeoutMs: 120_000 });
+        await r.run("git", ["pull", "--ff-only", "--quiet"], { cwd: productDir, timeoutMs: 120_000 });
+      } else r.note("not a git checkout (no .git) — nothing to pull");
+    } else {
+      await r.run("docker", ["compose", "pull"], { cwd: productDir, timeoutMs: COMPOSE_TIMEOUT_MS, inherit: true, comment: "images pinned by metistry.lock" });
+      const pkgs = await publishedPackages(productDir);
+      r.action(`npm install -g ${pkgs.map((p) => `${p}@${version}`).join(" ")}   # printed, not run: nothing is published yet (docs/ops/cli.md)`);
+    }
+
+    r.section("build");
+    const before = await hashHostJobs(productDir, templates);
+    if (opts.skipBuild) r.note("--skip-build: using what is in dist/ now");
+    else if (source === "git") {
+      await r.run("pnpm", ["install", "--frozen-lockfile"], { cwd: productDir, timeoutMs: COMPOSE_TIMEOUT_MS, inherit: true });
+      await r.run("pnpm", ["-r", "build"], { cwd: productDir, timeoutMs: COMPOSE_TIMEOUT_MS, inherit: true });
+    } else r.note("release mode: packages are installed, not compiled — no build");
+
+    r.section("migrations");
+    const migrationsDir = join(productDir, "db", "migrations");
+    if (opts.skipMigrate) r.note("--skip-migrate: schema_migrations left as it is (doctor will say if anything is pending)");
+    else {
+      const files = await listMigrationFiles(migrationsDir);
+      if (r.action(`apply db/migrations/*.sql not yet in schema_migrations (${files.length} on disk) under pg_advisory_lock(${MIGRATION_LOCK_KEY}), one transaction each`)) {
+        const session = await openSession(env);
+        if (!session) throw new StepFailed("METISTRY_DB_PASSWORD is unset — cannot migrate; set METISTRY_DB_* in .env (or --skip-migrate)");
+        try {
+          migrations = await runMigrations(session, migrationsDir, (l) => r.note(l));
+        } catch (err) {
+          throw new StepFailed(err instanceof Error ? err.message : String(err));
+        } finally {
+          await session.end().catch(() => {});
+        }
+        r.note(`migrations: ${migrations.applied.length} applied, ${migrations.files.length} total`);
+      }
+    }
+
+    r.section("restart");
+    await composeUp(r, productDir, source);
+    if (platform === "darwin") {
+      const after = await hashHostJobs(productDir, templates);
+      for (const t of templates) {
+        const changed = before[t.label] !== after[t.label];
+        if (r.dryRun) await r.run("launchctl", ["kickstart", "-k", `gui/${uid}/${t.label}`], { comment: `only if ${[...new Set(t.repoPaths.map(trackedPathFor))].join(", ")} changed` });
+        else if (changed) {
+          await r.run("launchctl", ["kickstart", "-k", `gui/${uid}/${t.label}`], { tolerateFailure: true, comment: "code changed" });
+          restarted.push(t.label);
+        }
+      }
+      if (!r.dryRun && restarted.length === 0) r.note("no host job's code changed — nothing kickstarted");
+    } else r.note(`no launchd on ${platform}: restart the host units yourself (systemctl --user restart <unit>)`);
+
+    r.section("lock");
+    const head = r.dryRun ? undefined : await gitHead(productDir, r.exec);
+    lock = {
+      product: { version, commit: head ?? (source === "git" && r.dryRun ? "<HEAD after pull>" : (prior?.product.commit ?? "unknown")), source },
+      updated_at: now.toISOString(),
+      migrations_applied: migrations?.recorded ?? prior?.migrations_applied ?? [],
+    };
+    const delivery = await writeLock(r, lock, { env, platform, uid, fetchFn });
+    r.note(delivery.detail);
+  } catch (err) {
+    if (!(err instanceof StepFailed)) throw err;
+    failure = err;
+    r.out(`metistry update: ${err.message}`);
+  }
+
+  const doctorCode = await closingDoctor(r, productDir, opts.doctorDeps, opts.doctorFn ?? doctor);
+  const code = failure ? failure.code || 1 : doctorCode;
+  return { code, source, commands: r.commands, ...(lock ? { lock } : {}), restarted, ...(migrations ? { migrations } : {}) };
+}

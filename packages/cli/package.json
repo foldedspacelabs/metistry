@@ -1,7 +1,7 @@
 {
   "name": "@foldedspacelabs/metistry-cli",
   "version": "0.0.1",
-  "description": "Metistry command line: `metistry init` stamps a private instance repo from seed/, `metistry doctor` validates every manifest and probes every bridge, service, container and launchd job through the one check() contract. Usable by a stranger: npx @foldedspacelabs/metistry-cli init <dir>.",
+  "description": "Metistry command line: `metistry init` stamps a private instance repo from seed/, `metistry doctor` validates every manifest and probes every bridge, service, container and launchd job through the one check() contract, `metistry up` brings a checkout to running (compose + launchd + doctor), `metistry update` pulls, builds, migrates under an advisory lock, restarts what changed and pins metistry.lock. Usable by a stranger: npx @foldedspacelabs/metistry-cli init <dir>.",
   "license": "Apache-2.0",
   "type": "module",
   "main": "./dist/index.js",

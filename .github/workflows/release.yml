@@ -1,0 +1,261 @@
+# Cutting a release: tag `vX.Y.Z` on main after `pnpm release:version`.
+# Code flows downward as releases, never as git merges (plan §4.16), so
+# this workflow produces every artifact an install can consume:
+#
+#   metistry-runtime-<version>-<os>-<arch>.tar.gz   the built product; what
+#                                                   `metistry update` downloads
+#   checksums.txt                                   sha256 of every asset
+#   npm  @foldedspacelabs/metistry-*                with provenance
+#   ghcr.io/foldedspacelabs/metistry-<app>:<version> console, assistant, reconciler
+#
+# Runbook, secrets and the exact tarball contents: docs/ops/releases.md.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to build (no leading v). Assets are built and uploaded to the matching release if it exists."
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/metistry
+
+jobs:
+  # The same gate CI runs, against the tagged tree: a release is never
+  # published from something that has not passed the Linux checks.
+  verify:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    services:
+      db:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_DB: metistry
+          POSTGRES_USER: metistry
+          POSTGRES_PASSWORD: ci-only
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U metistry"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        name: the version is the tag, and every package.json must already carry it
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then version="${{ inputs.version }}"; else version="${GITHUB_REF_NAME#v}"; fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          root="$(node -p 'require("./package.json").version')"
+          cli="$(node -p 'require("./packages/cli/package.json").version')"
+          if [ "$root" != "$version" ] || [ "$cli" != "$version" ]; then
+            echo "tag $version but package.json is $root and packages/cli is $cli — run: pnpm release:version" >&2
+            exit 1
+          fi
+      - run: ops/scripts/check-path-case.sh
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter '@foldedspacelabs/*' run build
+      - run: pnpm typecheck
+      - run: node ops/scripts/sync-root-version.mjs --check
+      - name: migrations apply cleanly, twice (idempotence)
+        env:
+          METISTRY_DB_PASSWORD: ci-only
+        run: |
+          ops/scripts/migrate.sh
+          ops/scripts/migrate.sh
+      - name: tests (unit + integration against the migrated db)
+        env:
+          METISTRY_DB_PASSWORD: ci-only
+        run: pnpm test
+
+  # The runtime pack, one per os-arch: it carries production node_modules
+  # (and, on darwin, the signed TCC helper binaries), so it is not portable.
+  runtime:
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: linux-x64 }
+          - { os: macos-14, target: darwin-arm64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -r build
+      - name: pack the runtime
+        run: ops/release/pack-runtime.sh "${{ needs.verify.outputs.version }}" "${{ matrix.target }}" "$GITHUB_WORKSPACE/dist-release"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: runtime-${{ matrix.target }}
+          path: dist-release/metistry-runtime-${{ needs.verify.outputs.version }}-${{ matrix.target }}.tar.gz
+          if-no-files-found: error
+
+  # npm, with provenance. Skipped (not failed) without NPM_TOKEN: a fork
+  # cuts releases without publishing to a scope it does not own.
+  npm:
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter '@foldedspacelabs/*' run build
+      - name: publish @foldedspacelabs/metistry-*
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: "true"
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "::notice::NPM_TOKEN is not set — skipping the npm publish (the release's other assets are unaffected)"
+            exit 0
+          fi
+          pnpm publish --filter '@foldedspacelabs/*' --access public --no-git-checks --provenance
+
+  # Container images for the apps that ship as images. The watchdog is a
+  # host job under launchd (runs_on: host) and has no Dockerfile — it ships
+  # inside the runtime pack, not as an image.
+  images:
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [console, assistant, reconciler]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - id: login
+        name: log in to ghcr (skipped without packages:write)
+        continue-on-error: true
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - if: steps.login.outcome != 'success'
+        run: echo "::notice::could not log in to ghcr.io — skipping the ${{ matrix.app }} image (a fork without packages:write still gets a complete release)"
+      - if: steps.login.outcome == 'success'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/${{ matrix.app }}/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_PREFIX }}-${{ matrix.app }}:${{ needs.verify.outputs.version }}
+            ${{ env.IMAGE_PREFIX }}-${{ matrix.app }}:latest
+          provenance: true
+
+  # checksums.txt, the generated changelog, and the release itself.
+  publish:
+    needs: [verify, runtime, npm, images]
+    if: always() && needs.verify.result == 'success' && needs.runtime.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          pattern: runtime-*
+          merge-multiple: true
+      - name: checksums.txt (sha256 of every asset)
+        working-directory: assets
+        run: sha256sum * | tee checksums.txt
+      - name: release notes from the changesets
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          assets="$(cd assets && ls | paste -sd, -)"
+          images="$(for a in console assistant reconciler; do echo "${IMAGE_PREFIX}-$a:${VERSION}"; done | paste -sd, -)"
+          node ops/release/changelog.mjs "$VERSION" --assets "$assets" --images "$images" | tee RELEASE_NOTES.md
+      - name: create or update the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          tag="v${VERSION}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release edit "$tag" --notes-file RELEASE_NOTES.md
+          else
+            gh release create "$tag" --title "Metistry ${VERSION}" --notes-file RELEASE_NOTES.md
+          fi
+          gh release upload "$tag" assets/* --clobber
+
+  # ---- stubs: enabled when the macOS app exists -------------------------------
+  #
+  # There is no app to build yet (docs/product/desktop-app-plan.md). These
+  # two jobs are deliberately disabled rather than absent, so the shape of
+  # the work — and the secrets it needs — is on the record.
+  macos-app:
+    name: macOS app DMG (STUB — no app yet)
+    needs: [verify, publish]
+    if: false
+    runs-on: macos-14
+    permissions:
+      contents: write
+    steps:
+      # 1. import the Developer ID cert from secrets.APPLE_CERTIFICATE_P12 +
+      #    APPLE_CERTIFICATE_PASSWORD into a temporary keychain
+      # 2. xcodebuild archive with the hardened runtime, embedding the
+      #    runtime pack from `publish` as Contents/Resources/metistry/
+      # 3. create the DMG, codesign it (Developer ID Application)
+      # 4. notarize: xcrun notarytool submit --wait with
+      #    APPLE_ID / APPLE_TEAM_ID / APPLE_APP_SPECIFIC_PASSWORD
+      # 5. xcrun stapler staple, then gh release upload Metistry-<version>.dmg
+      - run: 'echo "stub: see docs/ops/releases.md, ''The macOS app (not built yet)''"'
+
+  appcast:
+    name: Sparkle appcast (STUB — needs the DMG)
+    needs: [verify, macos-app]
+    if: false
+    runs-on: macos-14
+    permissions:
+      contents: write
+    steps:
+      # The EdDSA private key lives ONLY in secrets.SPARKLE_PRIVATE_KEY —
+      # never in the repo, never in an artifact, never in a log:
+      #
+      #   sig=$(echo "$SPARKLE_PRIVATE_KEY" | sign_update -f - Metistry-<v>.dmg)
+      #   node ops/release/appcast.mjs "$VERSION" \
+      #     --url  "https://github.com/${{ github.repository }}/releases/download/v$VERSION/Metistry-$VERSION.dmg" \
+      #     --length "$(stat -f%z Metistry-$VERSION.dmg)" \
+      #     --signature "$sig" --min-system 13.0 \
+      #     --notes "https://github.com/${{ github.repository }}/releases/tag/v$VERSION" > appcast.xml
+      #   gh release upload "v$VERSION" appcast.xml --clobber
+      #
+      # ops/release/appcast.mjs is real and tested today; without a
+      # signature it refuses to emit a feed, so a misconfigured secret
+      # fails this job instead of shipping a feed the app rejects.
+      - run: 'echo "stub: see docs/ops/releases.md, ''Auto-update (not wired yet)''"'

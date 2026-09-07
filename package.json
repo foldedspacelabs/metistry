@@ -1,7 +1,7 @@
 {
   "name": "metistry",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "A local-first personal assistant and knowledge graph. The assistant is named in identity.yaml — nowhere else.",
   "license": "Apache-2.0",
   "engines": {
@@ -13,6 +13,8 @@
     "db:migrate": "ops/scripts/migrate.sh",
     "hooks:install": "ops/scripts/install-git-hooks.sh",
     "typecheck": "pnpm -r --if-present run typecheck",
+    "release:version": "changeset version && node ops/scripts/sync-root-version.mjs",
+    "release:pack": "ops/release/pack-runtime.sh",
     "test": "METISTRY_TEST_DB_NAME=${METISTRY_TEST_DB_NAME:-metistry_test_$(basename \"$PWD\" | tr A-Z a-z | tr -c 'a-z0-9\\n' _ | cut -c1-40)} sh -c 'ops/scripts/test-db.sh && pnpm -r --workspace-concurrency=1 --if-present run test'",
     "test:unit": "pnpm -r --if-present run test"
   },

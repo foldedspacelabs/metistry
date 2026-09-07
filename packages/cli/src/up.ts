@@ -5,11 +5,13 @@
 // metistry.lock: `git` builds the images from the checkout, `release`
 // pulls the pinned ones and never builds (plan §4.16).
 
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { doctor, renderTable, type DoctorDeps, type DoctorReport } from "./doctor.js";
 import type { Exec } from "./exec.js";
 import { launchAgentsDir, launchdCommands, loadPlistTemplates, nodeOnPath, renderPlist, renderSystemdUnit } from "./launchd.js";
-import { instanceLockPath, readLock, type LockSource } from "./lock.js";
+import { instanceLockPath, readLock, type LockFile, type LockSource } from "./lock.js";
+import { currentLink, imageEnv, imageRef, IMAGE_SERVICES } from "./release.js";
 import { StepFailed, StepRunner } from "./steps.js";
 
 export interface UpOptions {
@@ -39,21 +41,38 @@ export interface UpResult {
   commands: string[];
 }
 
+/** The instance's metistry.lock, when there is an instance dir holding one. */
+export async function instanceLock(env: NodeJS.ProcessEnv): Promise<LockFile | undefined> {
+  const p = instanceLockPath(env);
+  return p ? await readLock(p) : undefined;
+}
+
 /** git unless the instance's lock says release; no lock (or no instance dir) is today's mode — a checkout. */
 export async function productSource(env: NodeJS.ProcessEnv): Promise<LockSource> {
-  const p = instanceLockPath(env);
-  if (!p) return "git";
-  const lock = await readLock(p);
-  return lock?.product.source ?? "git";
+  return (await instanceLock(env))?.product.source ?? "git";
+}
+
+/**
+ * Where the product's files actually are. In release mode that is the
+ * `current` symlink (`<product-dir>/current` -> `releases/<version>`) once
+ * one exists; everywhere else it is the product dir itself — so a checkout,
+ * and a release install that predates the symlink, are unchanged.
+ */
+export function runDirFor(productDir: string, source: LockSource): string {
+  return source === "release" && existsSync(currentLink(productDir)) ? currentLink(productDir) : productDir;
 }
 
 /** Compose timeouts are generous on purpose: a cold `--build` compiles two images. */
 export const COMPOSE_TIMEOUT_MS = 30 * 60 * 1000;
 
-export async function composeUp(r: StepRunner, productDir: string, source: LockSource): Promise<void> {
+export async function composeUp(r: StepRunner, productDir: string, source: LockSource, version?: string | undefined): Promise<void> {
   if (source === "release") {
-    await r.run("docker", ["compose", "pull"], { cwd: productDir, timeoutMs: COMPOSE_TIMEOUT_MS, inherit: true, comment: "metistry.lock pins released images" });
-    await r.run("docker", ["compose", "up", "-d", "--no-build"], { cwd: productDir, timeoutMs: COMPOSE_TIMEOUT_MS, inherit: true });
+    // the released, versioned images — docker-compose.yml reads
+    // METISTRY_<SERVICE>_IMAGE and falls back to the dev tags a checkout builds
+    const env = version ? { ...r.env, ...imageEnv(version, r.env) } : r.env;
+    if (version) r.note(`images: ${IMAGE_SERVICES.map((s) => imageRef(s, version, r.env)).join(", ")}`);
+    await r.run("docker", ["compose", "pull"], { cwd: productDir, env, timeoutMs: COMPOSE_TIMEOUT_MS, inherit: true, comment: version ? `pinned to ${version}` : "metistry.lock pins released images" });
+    await r.run("docker", ["compose", "up", "-d", "--no-build"], { cwd: productDir, env, timeoutMs: COMPOSE_TIMEOUT_MS, inherit: true });
   } else {
     await r.run("docker", ["compose", "up", "-d", "--build"], { cwd: productDir, timeoutMs: COMPOSE_TIMEOUT_MS, inherit: true });
   }
@@ -105,26 +124,29 @@ export async function closingDoctor(r: StepRunner, productDir: string, deps: Par
 export async function up(opts: UpOptions): Promise<UpResult> {
   const env = opts.env ?? process.env;
   const r = new StepRunner({ dryRun: opts.dryRun === true, out: opts.out ?? ((s) => process.stdout.write(s + "\n")), exec: opts.exec, env });
-  const source = await productSource(env);
+  const lock = await instanceLock(env);
+  const source = lock?.product.source ?? "git";
+  // release mode: everything below runs against `current`, so a rollback is a symlink flip
+  const runDir = runDirFor(opts.productDir, source);
   const le: LaunchdEnv = {
     platform: opts.platform ?? process.platform,
     uid: opts.uid ?? (typeof process.getuid === "function" ? process.getuid() : 0),
     home: opts.home ?? env.HOME ?? "",
     node: opts.node ?? nodeOnPath(env),
   };
-  r.note(`product: ${opts.productDir} (${source === "release" ? "pinned release — images pulled, not built" : "git checkout — images built from source"})`);
+  r.note(`product: ${runDir} (${source === "release" ? `pinned release${lock ? ` ${lock.product.version}` : ""} — images pulled, not built` : "git checkout — images built from source"})`);
   let failure: StepFailed | undefined;
 
   try {
     if (opts.compose !== false) {
       r.section("compose");
-      await composeUp(r, opts.productDir, source);
+      await composeUp(r, runDir, source, lock?.product.version);
     } else r.note("--no-compose: containers left as they are");
 
     if (opts.launchd !== false) {
       r.section("launchd");
       if (le.platform === "darwin" && !le.home) throw new StepFailed("HOME is unset — cannot find ~/Library/LaunchAgents");
-      await installLaunchd(r, opts.productDir, le);
+      await installLaunchd(r, runDir, le);
     } else r.note("--no-launchd: host jobs left as they are");
   } catch (err) {
     if (!(err instanceof StepFailed)) throw err;
@@ -133,6 +155,6 @@ export async function up(opts: UpOptions): Promise<UpResult> {
   }
 
   // doctor runs even after a failed step — its table is the diagnosis; the failure keeps the exit code
-  const doctorCode = await closingDoctor(r, opts.productDir, opts.doctorDeps, opts.doctorFn ?? doctor);
+  const doctorCode = await closingDoctor(r, runDir, opts.doctorDeps, opts.doctorFn ?? doctor);
   return { code: failure ? failure.code || 1 : doctorCode, source, commands: r.commands };
 }

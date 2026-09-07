@@ -178,14 +178,23 @@ units to restart rather than restarting them.
 `metistry update [--skip-build] [--skip-migrate] [--dry-run]` moves an
 install forward, in this order:
 
-| step | git mode (today: the product is a checkout) | release mode (`metistry.lock`: `source: release`) |
+| step | git mode (the product is a checkout) | release mode (`metistry.lock`: `source: release`, or `--channel release`) |
 | --- | --- | --- |
-| product | `git fetch` + `git pull --ff-only` — a diverged checkout stops the update (exit code git's) | `docker compose pull`; the npm packages a release would install are **printed**, not installed — nothing is published yet |
-| build | `pnpm install --frozen-lockfile` + `pnpm -r build` (`--skip-build` to reuse `dist/`) | no build — packages are installed, not compiled |
-| migrations | `db/migrations/*.sql` not yet in `schema_migrations`, in filename order, one transaction each, under `pg_advisory_lock` (below); `--skip-migrate` leaves them to doctor to report | same |
-| restart | `docker compose up -d --build`; `launchctl kickstart -k` for each host job whose code changed | `docker compose up -d --no-build`; same kickstart rule |
-| lock | write `metistry.lock` into the instance repo | same |
-| doctor | the verdict, as for `up` | same |
+| product | `git fetch` + `git pull --ff-only` — a diverged checkout stops the update (exit code git's) | resolve the release, download its runtime pack + `checksums.txt`, **verify the sha256**, unpack to `releases/<version>/`, point `current` at it (`docs/ops/releases.md`) |
+| build | `pnpm install --frozen-lockfile` + `pnpm -r build` (`--skip-build` to reuse `dist/`) | no build — the pack is compiled output |
+| migrations | `db/migrations/*.sql` not yet in `schema_migrations`, in filename order, one transaction each, under `pg_advisory_lock` (below); `--skip-migrate` leaves them to doctor to report | same, read from `current` |
+| restart | `docker compose up -d --build`; `launchctl kickstart -k` for each host job whose code changed | `docker compose pull` + `up -d --no-build` in `current`, with the versioned ghcr images; same kickstart rule |
+| lock | write `metistry.lock` into the instance repo | same, pinned to the release actually installed |
+| doctor | the verdict, as for `up` | same, against `current` |
+
+Release-mode flags: `--version 0.2.0` installs a specific release instead
+of the latest; `--rollback` flips `current` back to the previous release
+without downloading anything (migrations are additive-first and are **not**
+reverted); `--channel git|release` overrides the lock's `product.source`
+for one run. `metistry init --channel release` writes `source: release` in
+the first place. A checksum mismatch aborts before anything restarts and
+leaves `current` and the lock untouched. Full runbook, layout and secrets:
+**`docs/ops/releases.md`**.
 
 **What "changed" means.** Before the build, `update` hashes the code each
 launchd job executes — read from the plist itself (`__REPO__/<path>` in
@@ -288,7 +297,7 @@ operator-facing parts of it happen:
 
 `metistry enroll` (§4.2 passkey enrollment from the host) and `metistry
 create <bridge|collector|…>` (§5 extension scaffolds) are not started.
-Release mode is half-built by design: the lock, the mode switch, and the
-image pull exist; the npm install is printed until packages are published.
-The CLI ships no `manifest.yaml`: `core`'s schema has no type for a
-command-line tool and inventing one is worse than the gap.
+Release mode is complete end to end (`docs/ops/releases.md`) but has not
+yet consumed a real published release — the first `v*` tag is its first
+live run. The CLI ships no `manifest.yaml`: `core`'s schema has no type
+for a command-line tool and inventing one is worse than the gap.

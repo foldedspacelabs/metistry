@@ -16,3 +16,6 @@ dist/
 backups/
 packages/mcp-apple-fm/helper/afm-helper
 packages/mcp-eventkit/helper/ek-helper
+
+# release build output (ops/release/pack-runtime.sh); assets live on GitHub Releases
+dist-release/

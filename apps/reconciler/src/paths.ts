@@ -2,7 +2,7 @@
 // policy, enforced here so no caller (assistant, console, a stranger's
 // agent) can route around it. Every rule is a test in test/paths.test.ts.
 
-import { lstat, realpath } from "node:fs/promises";
+import { lstat, readdir, realpath } from "node:fs/promises";
 import { join, sep } from "node:path";
 
 export type PathRefusal =
@@ -91,7 +91,13 @@ export async function confine(repoRoot: string, input: unknown): Promise<{ ok: t
     try {
       st = await lstat(next);
     } catch {
-      break; // the rest does not exist yet — fine for a write, the caller decides
+      // The rest does not exist yet — fine for a write, the caller decides.
+      // But a sibling that differs only by case would fork the tree on a
+      // case-sensitive fs (Linux container) and silently merge on a
+      // case-insensitive one (macOS): refuse on both, by rule not by fs.
+      const siblings = await readdir(cur).catch(() => [] as string[]);
+      if (siblings.some((e) => e !== seg && e.toLowerCase() === seg.toLowerCase())) return { ok: false, code: "invalid_request" };
+      break;
     }
     if (st.isSymbolicLink()) return { ok: false, code: "forbidden" };
     cur = next;

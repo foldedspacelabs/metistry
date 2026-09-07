@@ -55,3 +55,23 @@ button.secondary { background: #2a323b; }
 #dashboard td.num, #dashboard th.num { text-align: right; }
 #dashboard td .bar { min-width: 48px; }
 #dashboard summary { cursor: pointer; margin-top: 8px; }
+/* ----- artifacts (§4.21) ----- */
+#art-filter { flex-direction: row; }
+#art-list li { padding: 8px 0; border-bottom: 1px solid #1f262e; display: flex; flex-direction: column; }
+#art-list a { color: var(--fg); text-decoration: none; }
+#artifacts h3 { margin-top: 16px; font-size: 15px; }
+#artifacts select { background: #1a2027; color: var(--fg); border: 1px solid #2a323b; border-radius: 10px; padding: 8px; font: inherit; max-width: 100%; }
+#artifacts label { display: flex; flex-direction: column; gap: 4px; color: var(--mut); font-size: 13px; }
+.art-row { display: flex; gap: 8px; margin: 8px 0; flex-wrap: wrap; }
+#art-viewer { margin: 8px 0; }
+#art-viewer img { max-width: 100%; border-radius: 10px; }
+.art-pre { background: #1a2027; border-radius: 10px; padding: 10px; white-space: pre-wrap; word-break: break-word; font-size: 13px; max-height: 60dvh; overflow: auto; }
+.art-frame { width: 100%; height: 60dvh; border: 1px solid #2a323b; border-radius: 10px; background: white; }
+#art-threads li.thread { padding: 8px 0; border-bottom: 1px solid #1f262e; }
+#art-threads li.resolved { opacity: .6; }
+#art-threads .row { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+#art-threads .row label { flex-direction: row; align-items: center; color: var(--fg); font-size: 14px; }
+#art-threads .body { white-space: pre-wrap; word-break: break-word; margin: 4px 0 0 22px; }
+#art-threads .reply { margin: 6px 0 0 22px; padding-left: 8px; border-left: 2px solid #2a323b; }
+#art-threads form { margin: 6px 0 0 22px; }
+#art-comment, #art-dispatch { flex-direction: column; }

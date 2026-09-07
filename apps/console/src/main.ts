@@ -10,6 +10,7 @@ import { loadSchedules, startRunner } from "./runner.js";
 import { loadRules } from "./router.js";
 import { TargetRegistry } from "./dispatch.js";
 import { ASSISTANT_DEFAULT_AREAS, INTERNAL_ASSISTANT_ID, ensureInternalAgent, revokeAgent, validateGrants } from "./agents.js";
+import { httpVaultClient } from "./vault-client.js";
 import { readFile } from "node:fs/promises";
 
 const pool = makePool();
@@ -62,25 +63,15 @@ const origin = requireEnv("METISTRY_ORIGIN"); // canonical HTTPS origin (§4.2)
 const push = pushConfigFromEnv();
 if (!push) console.warn("web push absent: set METISTRY_VAPID_* to enable (degrades: absent)");
 
-// Note contents for mcp-brain's knowledge_read come from the reconciler's
-// vault bridge (D5) over HTTP with its own bearer — no vault mount in this
-// container. Unset → knowledge_read degrades to not_available, as before.
+// The vault is reached over the reconciler's bridge (D5) with its own
+// bearer — no vault mount in this container. It serves two things: note
+// contents for mcp-brain's knowledge_read, and the artifacts module's
+// storage (§4.21). Unset → both degrade to not_available.
 const reconcilerUrl = process.env.METISTRY_RECONCILER_URL;
 const reconcilerToken = process.env.METISTRY_BRIDGE_TOKEN_RECONCILER;
-const readKnowledge =
-  reconcilerUrl && reconcilerToken
-    ? async (path: string): Promise<string | null> => {
-        const r = await fetch(`${reconcilerUrl.replace(/\/$/, "")}/vault/read?path=${encodeURIComponent(path)}`, {
-          headers: { authorization: `Bearer ${reconcilerToken}` },
-          signal: AbortSignal.timeout(10_000),
-        });
-        if (r.status === 404) return null;
-        if (!r.ok) throw new Error(`vault bridge returned ${r.status}`);
-        const body = (await r.json()) as { content?: unknown };
-        return typeof body.content === "string" ? body.content : null;
-      }
-    : undefined;
-if (!readKnowledge) console.warn("vault bridge absent: set METISTRY_RECONCILER_URL + METISTRY_BRIDGE_TOKEN_RECONCILER for knowledge_read (degrades: absent)");
+const vault = reconcilerUrl && reconcilerToken ? httpVaultClient({ url: reconcilerUrl, token: reconcilerToken }) : undefined;
+const readKnowledge = vault ? async (path: string): Promise<string | null> => (await vault.read(path))?.content.toString("utf8") ?? null : undefined;
+if (!vault) console.warn("vault bridge absent: set METISTRY_RECONCILER_URL + METISTRY_BRIDGE_TOKEN_RECONCILER for knowledge_read and artifacts (degrades: absent)");
 const server = makeServer(pool, queries, {
   origin,
   inboxDir: optionalEnv("METISTRY_INBOX_DIR", "./inbox"),
@@ -94,6 +85,7 @@ const server = makeServer(pool, queries, {
   targets,
   ...(push ? { push } : {}),
   ...(readKnowledge ? { readKnowledge } : {}),
+  ...(vault ? { vault } : {}),
 });
 if (push) startNotifier(pool, push);
 

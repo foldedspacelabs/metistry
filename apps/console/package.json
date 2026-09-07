@@ -16,6 +16,7 @@
     "node": ">=22"
   },
   "dependencies": {
+    "@foldedspacelabs/metistry-artifacts": "workspace:*",
     "@foldedspacelabs/metistry-core": "workspace:*",
     "@foldedspacelabs/metistry-mcp-brain": "workspace:*",
     "@foldedspacelabs/metistry-queries": "workspace:*",

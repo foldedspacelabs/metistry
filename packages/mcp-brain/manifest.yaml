@@ -1,11 +1,11 @@
 name: brain
 type: bridge
-description: The one MCP surface every external agent uses — capture/report in, scoped tasks + knowledge out (§4.11, §4.19, §4.20)
+description: The one MCP surface every agent uses — capture/report in, scoped tasks + knowledge out, and the assistant's own write path (§4.11, §4.19, §4.20)
 transport: http
 port: 8080               # no bind of its own: mounted at the console's POST /mcp, so this is the console's port
 runs_on: container
 requires_tcc: []
-discovery: eager         # 11 tools — well under the lazy threshold (>20 tools / >5k definition tokens)
+discovery: eager         # 12 tools — well under the lazy threshold (>20 tools / >5k definition tokens)
 degrades: absent
 exposes:
   - name: capture
@@ -29,4 +29,6 @@ exposes:
   - name: knowledge_search
     description: Search the knowledge index (titles + one-line descriptions) within the caller's grant tier
   - name: knowledge_read
-    description: Read one settled note under a granted Knowledge/ area prefix
+    description: Read one settled note under a granted Knowledge/ area prefix (returns its sha256 for compare-and-swap)
+  - name: knowledge_write
+    description: Write one note under Knowledge/ as a commit in the caller's name via the vault bridge — internal (assistant) principals only; provenance stamped; CAS on expected_sha256; protected paths refused at the vault; no delete/rename

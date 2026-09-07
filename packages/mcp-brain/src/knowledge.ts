@@ -32,9 +32,16 @@ export function validKnowledgePath(path: string): boolean {
   return path.length <= 500 && PATH_RE.test(path) && !path.split("/").some((seg) => seg === "." || seg === "..");
 }
 
-/** Prefix semantics of a grant: the area itself or anything below it. */
+/**
+ * Prefix semantics of a grant: the area itself or anything below it. A
+ * trailing slash names a directory as a whole — `Knowledge/` is the bare
+ * vault grant the console admits for internal principals only.
+ */
 export function underAreas(path: string, areas: readonly string[]): boolean {
-  return areas.some((a) => path === a || path.startsWith(`${a}/`));
+  return areas.some((raw) => {
+    const a = raw.endsWith("/") ? raw.slice(0, -1) : raw;
+    return path === a || path.startsWith(`${a}/`);
+  });
 }
 
 function escapeLike(s: string): string {
@@ -55,8 +62,8 @@ export async function searchKnowledge(db: Db, principal: AgentPrincipal, query: 
      WHERE NOT draft
        AND (path ILIKE $1 ESCAPE '\\' OR title ILIKE $1 ESCAPE '\\' OR description ILIKE $1 ESCAPE '\\')
        AND ($2::text[] IS NULL OR EXISTS (
-             SELECT 1 FROM unnest($2::text[]) AS a(prefix)
-             WHERE path = a.prefix OR left(path, length(a.prefix) + 1) = a.prefix || '/'))
+             SELECT 1 FROM unnest($2::text[]) AS a(raw), LATERAL (SELECT rtrim(a.raw, '/') AS prefix) p
+             WHERE path = p.prefix OR left(path, length(p.prefix) + 1) = p.prefix || '/'))
      ORDER BY path
      LIMIT $3`,
     [`%${escapeLike(query)}%`, areas, limit],

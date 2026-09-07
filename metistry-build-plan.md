@@ -615,6 +615,9 @@ and shows up in the morning brief.
   output-encoded before rendering
 - **`metistry` Claude Code plugin** (§4.11 external capture — small; rides
   with the console since `POST /capture` is its endpoint)
+- **`metistry connect <client>`** (§4.18 E) — writes the `/mcp` entry into
+  Claude Code / Codex / Cursor / OpenCode config; the whole "many agents"
+  story is MCP plus this one verb
 
 **Done when:** you check the dashboard instead of four separate places, and you
 can see your own token spend split by tier.
@@ -1599,7 +1602,7 @@ metistry/
                             config loader — and the wire-level bridge
                             contract spec (§4.3)
     queries/                the ONE implementation of invariant 3
-    cli/                    init | doctor | up | update
+    cli/                    init | doctor | up | update | connect <client>
   plugins/                Claude Code / Codex bundles
   skills/                 §4.4
   seed/                   defaults a fresh instance is stamped from:
@@ -1905,6 +1908,26 @@ bridge) is permitted where the collector's manifest declares the bridge and
 the scenario warrants it (ruled 2026-09-01: inbox-drain classification
 qualifies — zero cost, on-device, output passes the deterministic
 redaction pass like any model output).
+
+**E. The gateway seam and the agent seam (added 2026-09-07).** Research
+in `docs/research/2026-09-agent-proxy-routing.md` (Quotio, CLIProxyAPI,
+LiteLLM) separated two questions that "an AI-agent proxy layer" blurs:
+- *Agents reaching Metistry* is solved by MCP alone (§4.11's one door).
+  No per-agent adapter is ever written; the only addition is onboarding
+  sugar, **`metistry connect <client>`** — mint an agent token, write the
+  MCP entry into the client's config under a compare-and-swap journal,
+  verify with a real `tools/list`.
+- *Metistry reaching providers* stays §4.18 A: an optional, declarative
+  `gateway:` block in `deployment.yaml` (base URL, key ref, model alias
+  per tier). A gateway is transport; it may pool accounts of one model
+  (round-robin) but never choose a tier — invariant 4 holds. Proxies
+  that re-present pooled subscription OAuth sessions as an API are not
+  adopted or documented: the engine already runs on the subscription
+  token by the sanctioned path, and the terms-of-service exposure is one
+  the project cannot underwrite for its users.
+- A gateway with virtual keys, budgets and cost attribution is the
+  **hosted tier's** metering layer (FSL-operated, behind the same block),
+  not something the open-source install needs.
 
 ### 4.19 Metis as coordination hub (added 2026-08-28)
 

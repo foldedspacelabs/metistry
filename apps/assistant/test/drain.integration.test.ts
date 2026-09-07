@@ -26,6 +26,8 @@ describe.skipIf(!hasDb)("assistant drain", () => {
     session_id: sdkSession,
     tokens_in: 10,
     tokens_out: 5,
+    cost_usd: 0.001,
+    tools_used: { mcp__brain__capture: 1 },
   });
 
   beforeAll(async () => {
@@ -58,11 +60,12 @@ describe.skipIf(!hasDb)("assistant drain", () => {
     const sess = await pool.query(`SELECT thread FROM sessions WHERE id = $1`, [sdkSession]);
     expect(sess.rows[0].thread).toBe(thread);
     const run = await pool.query(
-      `SELECT ok, tokens_in, finished_at IS NOT NULL AS finished FROM runs
-       WHERE component='assistant' AND (meta->>'message_id')::bigint = $1`,
+      `SELECT ok, tokens_in, tokens_out, cost_usd::float8 AS cost_usd, meta->'tools_used' AS tools_used, meta->>'thread' AS thread, finished_at IS NOT NULL AS finished FROM runs
+       WHERE component='assistant' AND kind='turn' AND (meta->>'message_id')::bigint = $1`,
       [id],
     );
-    expect(run.rows[0]).toMatchObject({ ok: true, tokens_in: 10, finished: true });
+    // the turn row keeps tokens/cost AND names the tools it called (each call is also its own runs row via mcp-brain)
+    expect(run.rows[0]).toMatchObject({ ok: true, tokens_in: 10, tokens_out: 5, cost_usd: 0.001, tools_used: { mcp__brain__capture: 1 }, thread, finished: true });
   });
 
   it("second turn on the thread resumes the session", async () => {

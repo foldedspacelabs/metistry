@@ -1,7 +1,7 @@
 {
   "name": "@metistry-apps/watchdog",
   "private": true,
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Model-free watchdog: probes db/console/assistant/push/cost with zero Anthropic dependency; alerts through the status page and web push. runs_on: host so it outlives the container runtime.",
   "license": "Apache-2.0",
   "type": "module",

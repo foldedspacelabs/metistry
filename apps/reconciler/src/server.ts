@@ -8,7 +8,10 @@ import { authorized, errorEnvelope, runCheck, statusFor, type ErrorCode } from "
 import type { Vault, Outcome } from "./vault.js";
 import { parseIntent } from "./vault.js";
 import type { Committer } from "./committer.js";
-import type { Indexer } from "./indexer.js";
+import type { Db, Indexer } from "./indexer.js";
+import type { Embeddings } from "./embeddings.js";
+import { parseMode, searchVault } from "./search.js";
+import type { EmbedClient } from "@foldedspacelabs/metistry-core";
 
 export interface BridgeConfig {
   token: string;
@@ -20,6 +23,10 @@ export interface BridgeDeps {
   committer: Committer;
   /** Absent in tests that have no db: `POST /reconcile` answers not_available. */
   indexer?: Indexer | undefined;
+  /** Phase 6. Absent → search is keyword-only and `POST /embeddings/rebuild` answers not_available. */
+  embeddings?: Embeddings | undefined;
+  embedClient?: EmbedClient | undefined;
+  db?: Db | undefined;
 }
 
 function send(res: ServerResponse, status: number, body: unknown): void {
@@ -90,17 +97,37 @@ export function makeBridge(deps: BridgeDeps, cfg: BridgeConfig): Server {
           if (!(await vault.git.isRepo())) throw new Error(`no git repository at ${vault.root} — set METISTRY_INSTANCE_DIR to the instance repo (docs/ops/reconciler.md)`);
           const head = await vault.git.head();
           const listed = await vault.list("Knowledge", 1);
+          const embeddings = deps.embeddings ? await deps.embeddings.status().catch(() => null) : null;
           const meta = {
             head,
             queue_depth: committer.depth,
             last_flush: committer.lastFlush ? { at: new Date(committer.lastFlush.at).toISOString(), ...committer.lastFlush.result } : null,
             last_push: committer.lastPush ? { at: new Date(committer.lastPush.at).toISOString(), ...committer.lastPush.result } : null,
             last_reconcile: deps.indexer?.last ?? null,
+            embeddings,
           };
           if (!listed.ok) return { status: "degraded" as const, remediation: "Knowledge/ is missing from the instance repo — create it (docs/ops/reconciler.md)", meta };
           if (head === null) return { status: "degraded" as const, remediation: "repository has no commits yet — the first flushed write creates one", meta };
           if (committer.lastPush && !committer.lastPush.result.ok) {
             return { status: "degraded" as const, remediation: `last push failed: ${committer.lastPush.result.error ?? "unknown"} — check the remote/credentials; commits are safe locally`, meta };
+          }
+          // Embedding never fails the bridge — the index and every keyword
+          // path keep working — but a stalled embedder is a `degraded` the
+          // user can act on (§6 decision 8).
+          if (embeddings?.degraded) {
+            return {
+              status: "degraded" as const,
+              remediation: `embedding is not running (${embeddings.degraded}) — start the embedder with \`ollama serve\` and \`ollama pull ${embeddings.model}\`; search stays keyword until it is back`,
+              meta,
+            };
+          }
+          if (embeddings?.rebuild_required) {
+            const other = embeddings.stored.filter((s) => s.model !== embeddings.model || s.dim !== embeddings.dim).map((s) => `${s.model}/${s.dim}d`);
+            return {
+              status: "degraded" as const,
+              remediation: `stored vectors are ${other.join(", ")} but the configured model is ${embeddings.model}/${embeddings.dim}d — rebuild is required: POST /embeddings/rebuild`,
+              meta,
+            };
           }
           return { meta };
         });
@@ -124,7 +151,9 @@ export function makeBridge(deps: BridgeDeps, cfg: BridgeConfig): Server {
         const term = (q.get("q") ?? "").trim();
         if (!term || term.length > 200) return fail(res, "invalid_request", "q required (≤200 chars)");
         const limit = clampInt(q.get("limit"), 20, 1, 100);
-        return send(res, 200, { q: term, hits: await vault.search(term, limit) });
+        const mode = parseMode(q.get("mode"));
+        if (mode === undefined) return fail(res, "invalid_request", "mode must be keyword, semantic, or hybrid");
+        return send(res, 200, await searchVault({ vault, db: deps.db, embeddings: deps.embeddings, client: deps.embedClient }, term, limit, mode));
       }
 
       if (key === "GET /vault/log") {
@@ -162,6 +191,21 @@ export function makeBridge(deps: BridgeDeps, cfg: BridgeConfig): Server {
       if (key === "POST /reconcile") {
         if (!deps.indexer) return fail(res, "not_available");
         return send(res, 200, await deps.indexer.reconcile("on_demand"));
+      }
+
+      // Decision 8's deterministic rebuild: every vector, from the working
+      // tree, under the currently configured model. The way a model change
+      // is applied — and the way `rebuild_required` is cleared.
+      if (key === "POST /embeddings/rebuild") {
+        if (!deps.embeddings) return fail(res, "not_available", "no embedder configured (METISTRY_EMBED_ENABLED=false, or no db)");
+        const started = Date.now();
+        const summary = await deps.embeddings.rebuild();
+        return send(res, 200, { ...summary, model: deps.embeddings.model, duration_ms: Date.now() - started });
+      }
+
+      if (key === "GET /embeddings/status") {
+        if (!deps.embeddings) return fail(res, "not_available", "no embedder configured");
+        return send(res, 200, await deps.embeddings.status());
       }
 
       return fail(res, "not_found");

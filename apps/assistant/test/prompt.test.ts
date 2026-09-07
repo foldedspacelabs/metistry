@@ -18,9 +18,12 @@ describe("identity + prompt", () => {
     const out = renderPrompt(seedPrompt, id);
     expect(out.startsWith(`You are ${id.name},`)).toBe(true);
     expect(out).not.toContain("{{");
-    // the tools section names every brain tool family and the two rules the prompt is FOR: propose-not-write, reads are logged
-    for (const t of ["capture", "report", "tasks_list_ready", "tasks_claim", "tasks_heartbeat", "knowledge_search", "knowledge_read", "nudge:"]) expect(out).toContain(t);
-    expect(out).toMatch(/never write knowledge directly/);
+    // the tools section names every brain tool family and the rules the prompt is FOR: one writer, settled-vs-proposed, CAS before overwrite, reads are logged
+    for (const t of ["capture", "report", "tasks_list_ready", "tasks_claim", "tasks_heartbeat", "knowledge_search", "knowledge_read", "knowledge_write", "nudge:"]) expect(out).toContain(t);
+    expect(out).toMatch(/You are the one writer/);
+    expect(out).toMatch(/settled/);
+    expect(out).toMatch(/expected_sha256/);
+    expect(out).toMatch(/cannot delete or rename/);
     expect(out).toMatch(/Every read is logged/);
     // the seed prompt file itself carries no name: a renamed instance is a clone, not a rewrite
     expect(seedPrompt).not.toContain(id.name);

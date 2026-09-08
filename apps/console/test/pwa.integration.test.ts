@@ -64,6 +64,26 @@ describe.skipIf(!hasDb)("console PWA chunk", () => {
     expect(html).toContain('id="feed"'); // activity feed (home) tab ships in the shell
     expect((await fetch(base + "/sw.js")).status).toBe(200);
     expect((await fetch(base + "/vendor/simplewebauthn.js")).status).toBe(200);
+    // design tokens load before the stylesheet (generated from
+    // docs/product/design/tokens.json); style.css uses nothing else
+    expect(html).toContain('href="/tokens.css"');
+    const tokens = await fetch(base + "/tokens.css");
+    expect(tokens.status).toBe(200);
+    expect(await tokens.text()).toContain("--mt-color-bg");
+    // installed-app chrome follows the appearance
+    expect(html).toContain('media="(prefers-color-scheme: dark)"');
+  });
+
+  // Regression: every view is a sibling <section> under <main>. An unclosed
+  // one nests the following views inside it, so show() unhides a section
+  // whose ancestor is still hidden and the tab renders blank (this is exactly
+  // what happened to dashboard and artifacts inside agents).
+  it("every view section is closed, so no view nests inside another", async () => {
+    const html = await (await fetch(base + "/")).text();
+    const opens = html.match(/<section\b/g)?.length ?? 0;
+    const closes = html.match(/<\/section>/g)?.length ?? 0;
+    expect(opens).toBe(closes);
+    expect(opens).toBeGreaterThanOrEqual(10);
   });
 
   it("static serving refuses traversal and unknown files (falls to auth wall)", async () => {

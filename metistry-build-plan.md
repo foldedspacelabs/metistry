@@ -628,7 +628,11 @@ can see your own token spend split by tier.
 - **Compute-target registry (§4.18)** — dispatch generalized from
   GitHub-issues-only to manifest-defined targets (MCP-first)
 - `@agent` dispatch → GitHub issues (the first target)
-- `brain-query` MCP bridge exposing named queries to Metis; **`mcp-brain`'s
+- `brain-query` — now specified as two `mcp-brain` tools, `queries_list` /
+  `queries_run(name, params)` over the queries package (invariant 3; never
+  free-form SQL), plus an optional `turn_id` join key on every tool so a
+  turn's tool calls group in the feed (AgentSwarms review, 2026-09-08);
+  **`mcp-brain`'s
   write-only door opened to external agents** (§4.11)
 - **Coordination hub tools + multi-agent projects (§4.19)** — claim/lease/
   dependency columns, agent identity, event-driven proposal triage —
@@ -2379,7 +2383,10 @@ All propagated into this document.
     `inbox` triage, `work` threads), so "git is the record" needs its honest
     scope and the nightly dump needs a named durable set, with tables
     labeled `-- durable`/`-- derived` and the quarterly drill made a real
-    `down -v` rebuild. **Decide before backup/DR is built.** Artifact
+    `down -v` rebuild. **Decide before backup/DR is built.** Addendum
+    (2026-09-08, AgentSwarms review): hash-chain `runs` (`prev_hash`,
+    `hash`) so the action record is tamper-evident and `doctor` can verify
+    it — `runs` is derived for trend lines but durable as evidence. Artifact
     *versions* are commits (derived index); artifact *comments* and review
     dispatches are fine-grained mutable state and join the durable set.
 14. **Untrusted HTML artifacts — which boundary (§4.21). RESOLVED

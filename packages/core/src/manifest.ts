@@ -132,10 +132,13 @@ export const CREW_GROUP_ALIASES: Readonly<Record<string, CrewToolGroup>> = { "br
 
 /**
  * Tools NO crew may ever hold, whatever `uses` says: the assistant's own
- * write path (one writer, §4.11) and the dispatch tool (a crew never
- * dispatches crews — the assistant decides what leaves the brain).
+ * write path (one writer, §4.11), the dispatch tool (a crew never dispatches
+ * crews — the assistant decides what leaves the brain), and the named-query
+ * tools (queries_list, queries_run) — a named query is not filtered by a
+ * crew's scope/projects the way every other group here is, so handing it to
+ * a crew would leak past the boundary `uses` is meant to hold.
  */
-export const CREW_NEVER_TOOLS = ["knowledge_write", "crew_dispatch"] as const;
+export const CREW_NEVER_TOOLS = ["knowledge_write", "crew_dispatch", "queries_list", "queries_run"] as const;
 
 /** Resolve a `uses` entry to its group; undefined when it names nothing known. */
 export function crewGroupOf(entry: string): CrewToolGroup | undefined {

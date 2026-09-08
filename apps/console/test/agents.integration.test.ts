@@ -30,6 +30,14 @@ describe("agent grants validation (pure)", () => {
       .toEqual({ tier: "areas", areas: ["Knowledge/Areas/Fsl", "Knowledge/Projects/Drey Dev"] });
   });
 
+  it("accepts an optional `queries` boolean (mcp-brain's queries_list/queries_run grant, a separate axis from tier), default omitted (false)", () => {
+    expect(agents.validateGrants({ tier: "none" })).toEqual({ tier: "none", areas: [] }); // default: no `queries` key at all
+    expect(agents.validateGrants({ tier: "none", queries: false })).toEqual({ tier: "none", areas: [] });
+    expect(agents.validateGrants({ tier: "none", queries: true })).toEqual({ tier: "none", areas: [], queries: true });
+    expect(agents.validateGrants({ tier: "areas", areas: ["Knowledge/Areas/Fsl"], queries: true })).toEqual({ tier: "areas", areas: ["Knowledge/Areas/Fsl"], queries: true });
+    expect(() => agents.validateGrants({ tier: "none", queries: "yes" })).toThrow(agents.AgentError);
+  });
+
   it("rejects lowercase knowledge/, non-Knowledge paths, traversal, and bare Knowledge", () => {
     for (const bad of ["knowledge/Areas/Fsl", "Knowledge/areas/fsl", "inbox/", "/Knowledge/Areas", "Knowledge", "Knowledge/", "Knowledge/../secrets", "Knowledge/Areas/Fsl/", "../Knowledge/Areas"]) {
       expect(() => agents.validateGrants({ tier: "areas", areas: [bad] }), bad).toThrow(agents.AgentError);
@@ -190,6 +198,18 @@ describe.skipIf(!hasDb)("agent registry (integration)", () => {
     // rejected payloads never reach the audit log; the accepted ones do
     const audit = await pool.query(`SELECT meta->>'op' AS op FROM runs WHERE kind='agent_admin' AND meta->>'agent'=$1 ORDER BY id`, [agentId]);
     expect(audit.rows.map((r) => r.op)).toEqual(["mint", "grant", "projects"]);
+  });
+
+  it("grants: `queries` (mcp-brain's queries_list/queries_run access) round-trips through the same route, rejects non-booleans", async () => {
+    expect((await json("PUT", `/api/agents/${agentId}/grants`, { tier: "none", queries: "yes" })).status).toBe(400);
+    const ok = await json("PUT", `/api/agents/${agentId}/grants`, { tier: "areas", areas: ["Knowledge/Areas/Fsl"], queries: true });
+    expect(ok.status).toBe(200);
+    expect((await ok.json()).grants).toEqual({ tier: "areas", areas: ["Knowledge/Areas/Fsl"], queries: true });
+    const principal = await agents.authenticateAgent(pool, { headers: { authorization: `Bearer ${agentToken}` } });
+    expect(principal?.grants).toEqual({ tier: "areas", areas: ["Knowledge/Areas/Fsl"], queries: true });
+    // turning it back off drops the key entirely (default shape, byte for byte with a never-granted agent)
+    const off = await json("PUT", `/api/agents/${agentId}/grants`, { tier: "areas", areas: ["Knowledge/Areas/Fsl"] });
+    expect((await off.json()).grants).toEqual({ tier: "areas", areas: ["Knowledge/Areas/Fsl"] });
   });
 
   it("ensureInternalAgent: idempotent upsert from configuration — same token keeps the hash, projects re-sync, revocation clears, kind is internal", async () => {

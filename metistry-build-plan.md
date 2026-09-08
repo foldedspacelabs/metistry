@@ -118,7 +118,24 @@ tags (`@<agent>`) address these **named agents from the instance's registry**
 
 - **Chatty is fine.** Sessions resume by UUID; cost per turn is flat. Corrections
   and redirects are the expected interaction, not an exception.
-- **Adaptive escalation.** The assistant runs the default tier and delegates
+- **The composer completes as you type.** `@d…` suggests `@drey`; `/` lists
+the commands and narrows them keystroke by keystroke. This is the
+discoverable half of the power-user layer (`ux-direction.md`): the syntax
+above stays exactly as it is, and nobody has to have memorised it. **The
+list is generated, never hand-maintained** — agents come from the
+instance's agent registry, commands from the instance's own `rules.yaml`
+(the same source as OPT-3's generated `/help`), so an instance that adds
+a tier or an agent gets it in the composer with no front-end change, and
+a command the instance has not configured is listed disabled *with the
+reason* rather than hidden. **Ranking is deterministic** — prefix match,
+then substring, then recency, ties broken by id — for the same reason
+invariant 4 holds for the router: no model decides, and the same
+keystrokes give the same list on every surface. Selecting a suggestion
+*inserts text at the caret*; it never sends, so a tapped command and a
+typed one produce the identical string. Rendering is `design-system.md`
+§3.6 (inline list on touch, the ⌘K palette where there is a keyboard).
+
+**Adaptive escalation.** The assistant runs the default tier and delegates
   hard sub-tasks to the deep tier, so escalation cost is bounded to the hard
   part rather than the whole turn. `/model <tag>` (and its shipped alias
   `/deep`) remains the manual override. Per-tier daily budgets in
@@ -628,7 +645,11 @@ can see your own token spend split by tier.
 - **Compute-target registry (§4.18)** — dispatch generalized from
   GitHub-issues-only to manifest-defined targets (MCP-first)
 - `@agent` dispatch → GitHub issues (the first target)
-- `brain-query` MCP bridge exposing named queries to Metis; **`mcp-brain`'s
+- `brain-query` — now specified as two `mcp-brain` tools, `queries_list` /
+  `queries_run(name, params)` over the queries package (invariant 3; never
+  free-form SQL), plus an optional `turn_id` join key on every tool so a
+  turn's tool calls group in the feed (AgentSwarms review, 2026-09-08);
+  **`mcp-brain`'s
   write-only door opened to external agents** (§4.11)
 - **Coordination hub tools + multi-agent projects (§4.19)** — claim/lease/
   dependency columns, agent identity, event-driven proposal triage —
@@ -2379,7 +2400,10 @@ All propagated into this document.
     `inbox` triage, `work` threads), so "git is the record" needs its honest
     scope and the nightly dump needs a named durable set, with tables
     labeled `-- durable`/`-- derived` and the quarterly drill made a real
-    `down -v` rebuild. **Decide before backup/DR is built.** Artifact
+    `down -v` rebuild. **Decide before backup/DR is built.** Addendum
+    (2026-09-08, AgentSwarms review): hash-chain `runs` (`prev_hash`,
+    `hash`) so the action record is tamper-evident and `doctor` can verify
+    it — `runs` is derived for trend lines but durable as evidence. Artifact
     *versions* are commits (derived index); artifact *comments* and review
     dispatches are fine-grained mutable state and join the durable set.
 14. **Untrusted HTML artifacts — which boundary (§4.21). RESOLVED

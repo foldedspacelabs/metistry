@@ -129,5 +129,5 @@
   <text x="510" y="728" class="lg">md.js whitelist · the sandboxed artifact</text>
   <text x="510" y="748" class="lg">iframe · all fetch and auth behaviour.</text>
   <text x="510" y="768" class="lg t3">The PWA restyle is CSS plus a media query.</text>
-  <text x="24" y="888" class="t3">docs/product/design-system.md §3.1 navigation · §3.2 activity feed row · §5 accessibility</text>
+  <text x="24" y="888" class="t3">docs/product/design-system.md §3.1 navigation · §3.2 activity feed row · §6 accessibility</text>
 </svg>

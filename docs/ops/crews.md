@@ -74,12 +74,15 @@ manifest by test so the two cannot drift:
 | `tasks` | `tasks_list_ready`, `tasks_claim`, `tasks_heartbeat`, `tasks_update`, `tasks_release`, `tasks_create`, `tasks_mine` — within `projects` | |
 | `artifacts` | `artifact_publish`, `artifact_get`, `artifact_list`, `artifact_comment`, `artifact_comment_resolve`, `artifact_dispatch_review` — within `projects` | |
 
-`knowledge_write` and `crew_dispatch` are **not groups**. Naming either in
-`uses` is refused by the schema with the reason ("never available to a
-crew"): sub-agents never write knowledge (§4.11 — one writer), and a crew
-never dispatches crews. The runner's `allowedTools` is built from the same
-table (`apps/assistant/src/crew.ts`), built-in tools are off, and foreign
-MCP config is ignored — invariant 9 holds for a crew exactly as for the
+`knowledge_write`, `crew_dispatch`, `queries_list` and `queries_run` are
+**not groups**. Naming any of them in `uses` is refused by the schema with
+the reason ("never available to a crew"): sub-agents never write knowledge
+(§4.11 — one writer), a crew never dispatches crews, and a named query is
+not filtered by a crew's `scope`/`projects` the way every other tool group
+here is — handing it out would leak past the boundary `uses` exists to
+hold. The runner's `allowedTools` is built from the same table
+(`apps/assistant/src/crew.ts`), built-in tools are off, and foreign MCP
+config is ignored — invariant 9 holds for a crew exactly as for the
 assistant.
 
 ## What a crew can and cannot do

@@ -16,6 +16,13 @@ describe("morning brief (D10 soft budget)", () => {
     expect(score(row(4, "knowledge", {}, 30), now) - score(row(4, "knowledge", {}), now)).toBe(14); // cap
   });
 
+  it("a blocking question scores with elevations — a waiting assistant is a blocked assistant", () => {
+    const decision = score(row(5, "decision", { title: "Which repo?", options: ["a", "b"] }), now);
+    expect(decision).toBe(score(row(6, "grant_elevation"), now));
+    expect(decision).toBeGreaterThanOrEqual(80); // CRITICAL_SCORE: rides above the soft budget when queued behind others
+    expect(decision).toBeGreaterThan(score(row(7, "report"), now));
+  });
+
   it("soft budget: 5 base, +2 only when also critical — never a hard cut", () => {
     const many = Array.from({ length: 10 }, (_, i) => ({ row: row(i, "knowledge"), s: 50 - i }));
     expect(pickBudget(many)).toHaveLength(5); // nothing critical beyond 5

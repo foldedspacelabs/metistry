@@ -53,6 +53,7 @@ export {
 } from "./redact.js";
 export { parseBearer, tokenEquals, authorized, tokenHash, mintToken } from "./auth.js";
 export { sanitizeForAgent } from "./sanitize.js";
+export { parseDecisionBlock, type DecisionBlock } from "./decision-block.js";
 export {
   startRun,
   finishRun,

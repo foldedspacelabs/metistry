@@ -24,6 +24,7 @@ interface PendingRow {
 // Consequence ranking: what it costs the user to ignore this. Deterministic
 // weights, auditable like the classifier's reasons.
 const KIND_WEIGHT: Record<string, number> = {
+  decision: 100, // the assistant asked and cannot continue — a waiting assistant is blocked
   grant_elevation: 100, // a waiting agent is blocked; also security-relevant
   action: 70,
   report: 45,

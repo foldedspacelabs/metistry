@@ -610,3 +610,15 @@ label { display: flex; flex-direction: column; gap: var(--mt-space-1);
     scroll-behavior: auto !important;
   }
 }
+
+/* reply tapbacks (docs/ops/reply-feedback.md) — 👍/👎 under each reply, the
+   lightweight feedback affordance from P8. Restyled onto tokens; the .fb / .on
+   hooks app.js writes and reads are unchanged. */
+#messages .fb { display: flex; align-items: center; gap: 2px; margin-top: var(--mt-space-1); }
+#messages .fb button {
+  background: none; border: 0; padding: 0 var(--mt-space-1);
+  min-height: 0; font-size: var(--mt-text-callout-size);
+  line-height: var(--mt-text-callout-line); opacity: .45;
+}
+#messages .fb button.on { opacity: 1; }
+#messages .fb button:hover { background: none; opacity: .8; }

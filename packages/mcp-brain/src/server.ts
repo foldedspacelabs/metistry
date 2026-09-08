@@ -37,8 +37,10 @@ import {
 } from "@foldedspacelabs/metistry-core";
 import { TasksError, type Result as TaskResult, type Task, type TasksService } from "@foldedspacelabs/metistry-tasks";
 import type { ArtifactsService } from "@foldedspacelabs/metistry-artifacts";
+import type { QueryStore } from "@foldedspacelabs/metistry-queries";
 import { ARTIFACT_TOOL_NAMES, registerArtifactTools } from "./artifacts-tools.js";
 import { CREW_TOOL_NAMES, registerCrewTools, type CrewDispatcher } from "./crew-tools.js";
+import { QUERIES_TOOL_NAMES, registerQueriesTools } from "./queries-tools.js";
 import { captureToInbox } from "./capture.js";
 import { KNOWLEDGE_MODES, readKnowledge, searchKnowledge, type KnowledgeReader, type QueryEmbedder } from "./knowledge.js";
 import { sha256Text, writeKnowledge, type KnowledgeWriter } from "./knowledge-write.js";
@@ -65,6 +67,8 @@ export interface BrainConfig {
   artifacts?: ArtifactsService | undefined;
   /** The host's crew dispatcher (registry + policy + durable enqueue) for crew_dispatch. Absent → `not_available`. Internal principals only either way. */
   crews?: CrewDispatcher | undefined;
+  /** The one read path into state (invariant 3) for queries_list/queries_run. Absent → `not_available`. Internal principals always; external agents need grants.queries = true. */
+  queries?: QueryStore | undefined;
   /** Nudge when a held lease has this many seconds or fewer left (default 120). */
   leaseWarningSeconds?: number | undefined;
   /** Reported to MCP clients as the server version. */
@@ -79,7 +83,13 @@ export interface BrainServer {
   readonly tools: readonly string[];
 }
 
-/** The eager surface (§4.3 default 1): 19 tools, no meta-tool indirection. Order = manifest order. */
+/**
+ * The eager surface (§4.3 default 1): 21 tools, no meta-tool indirection.
+ * Order = manifest order. This sits one tool over PoC-17's documented
+ * >20-tools guidance for switching to `discovery: lazy` — noted, not acted
+ * on, in this PR (queries_list/queries_run are two small, cheap-to-describe
+ * schemas; revisit if the surface keeps growing).
+ */
 export const TOOL_NAMES = [
   "capture",
   "report",
@@ -95,6 +105,7 @@ export const TOOL_NAMES = [
   "knowledge_write",
   ...ARTIFACT_TOOL_NAMES,
   ...CREW_TOOL_NAMES,
+  ...QUERIES_TOOL_NAMES,
 ] as const;
 export type ToolName = (typeof TOOL_NAMES)[number];
 
@@ -130,6 +141,21 @@ function summarizeArgs(args: unknown): Record<string, unknown> {
 const id = z.number().int().positive();
 const lease = z.number().int().min(1).max(86_400).optional();
 
+/**
+ * Every tool takes this, merged into its schema by `reg` below — a caller
+ * (the assistant, a crew, an external agent) that generates one id per
+ * reply and passes it on every call in that reply gets its `runs` rows
+ * grouped for free (`meta.turn_id`; surfaced in the `activity_feed` query).
+ * Not identity, not auth — a caller-supplied correlation handle, so it is
+ * validated (shape only) and stored, never trusted for anything else.
+ */
+const turnId = z
+  .string()
+  .max(64)
+  .regex(/^[A-Za-z0-9_-]+$/)
+  .optional()
+  .describe("Optional: reuse the same value on every brain tool call within one reply so they group in the activity feed.");
+
 export function createBrainServer(cfg: BrainConfig): BrainServer {
   const { db, tasks } = cfg;
   const leaseWarningSeconds = cfg.leaseWarningSeconds ?? 120;
@@ -161,7 +187,11 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
     /** Every tool call: one two-phase runs row (component = agent id), sanitizer, nudge. */
     function wrap<A>(name: ToolName, body: (args: A) => Promise<Outcome>): (args: A) => Promise<CallToolResult> {
       return async (args: A) => {
-        const runId = await startRun(db, { component: principal.id, kind: "tool", tool: name, meta: { via: "mcp-brain", args: summarizeArgs(args) } });
+        // turn_id (merged into every schema by `reg`) travels in meta.turn_id, not
+        // inside args' own summary — one place to find it, joinable by activity_feed.
+        const { turn_id, ...rest } = (args ?? {}) as unknown as Record<string, unknown>;
+        const runMeta = { via: "mcp-brain", args: summarizeArgs(rest), ...(typeof turn_id === "string" ? { turn_id } : {}) };
+        const runId = await startRun(db, { component: principal.id, kind: "tool", tool: name, meta: runMeta });
         let outcome: Outcome;
         try {
           outcome = await body(args);
@@ -178,8 +208,10 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
       };
     }
 
+    // turn_id is merged into every tool's schema here — one place, so no
+    // individual tool file has to remember it (§ the join key, not a control).
     const reg = <S extends z.ZodRawShape>(name: ToolName, description: string, inputSchema: S, body: (args: z.infer<z.ZodObject<S>>) => Promise<Outcome>) =>
-      server.registerTool(name, { description, inputSchema }, wrap(name, body) as never);
+      server.registerTool(name, { description, inputSchema: { ...inputSchema, turn_id: turnId } }, wrap(name, body) as never);
 
     reg(
       "capture",
@@ -371,6 +403,9 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
     // crew_dispatch (Phase 5 crews): the one registration point for the host's crew dispatcher; internal principals only
     registerCrewTools(reg, cfg.crews, principal);
 
+    // queries_list / queries_run (invariant 3's one read path, out to agents): internal always, external with grants.queries = true
+    registerQueriesTools(reg, cfg.queries, principal);
+
     return server;
   }
 
@@ -427,6 +462,7 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
           knowledge_write: cfg.writeKnowledge ? "available" : "not_available",
           artifacts: cfg.artifacts ? "available" : "not_available",
           crews: cfg.crews ? cfg.crews.names() : "not_available",
+          queries: cfg.queries ? "available" : "not_available",
           // Phase 6: semantic ranking is additive — without an embedder every mode still answers, in keyword.
           knowledge_search_modes: cfg.embedder ? ["keyword", "semantic", "hybrid"] : ["keyword"],
         };

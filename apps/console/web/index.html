@@ -24,7 +24,7 @@
       <button data-view="chat">Chat</button>
       <button data-view="dashboard">Dashboard</button>
       <button data-view="capture">Capture</button>
-      <button data-view="triage">Triage</button>
+      <button data-view="triage">Needs You</button>
       <button data-view="status">Status</button>
       <button data-view="devices">Devices</button>
       <button data-view="agents">Agents</button>
@@ -102,7 +102,7 @@
 
     <section id="triage" hidden>
       <ul id="proposal-list"></ul>
-      <p id="triage-empty" hidden>queue is clear 🎉</p>
+      <p id="triage-empty" hidden>nothing needs you 🎉</p>
     </section>
 
     <section id="status" hidden>
@@ -143,6 +143,7 @@
           </select>
         </label>
         <textarea id="agent-areas" placeholder="Knowledge/Areas/… one prefix per line (tier: areas)"></textarea>
+        <label><input id="agent-queries" type="checkbox" /> queries — may call queries_list / queries_run (named queries, invariant 3)</label>
         <input id="agent-projects" type="text" placeholder="projects, comma-separated (slugs)" autocomplete="off" autocapitalize="none" />
         <p class="muted">autonomy — optional narrowing below "project members" (§4.21); blank = no narrowing</p>
         <input id="agent-may-dispatch-to" type="text" placeholder="may dispatch to: agent ids, comma-separated" autocomplete="off" autocapitalize="none" />

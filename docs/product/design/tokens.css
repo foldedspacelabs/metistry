@@ -1,5 +1,5 @@
 /* GENERATED — do not edit.
- * Source: docs/product/design/tokens.json (v1.0.0, 2026-09-08)
+ * Source: docs/product/design/tokens.json (v1.1.0, 2026-09-08)
  * Rebuild: node ops/scripts/build-design-tokens.mjs
  *
  * Light is the base. Dark is applied twice on purpose: once behind
@@ -65,6 +65,24 @@
   --mt-text-mono-weight: 400;
   --mt-text-mono-line: 1.5;
   --mt-text-mono-tracking: 0;
+  --mt-reply-size: clamp(0.9375rem, 0.9rem + 0.19vw, 1rem);
+  --mt-reply-weight: 400;
+  --mt-reply-line: 1.45;
+  --mt-reply-tracking: 0;
+  --mt-reply-meta-size: 0.8125rem;
+  --mt-reply-meta-gap: 4px;
+  --mt-reply-para-gap: 12px;
+  --mt-reply-turn-gap: 16px;
+  --mt-reply-bubble-pad-y: 12px;
+  --mt-reply-bubble-pad-x: 16px;
+  --mt-reply-bubble-gap: 8px;
+  --mt-reply-heading-gap: 16px;
+  --mt-reply-list-gap: 4px;
+  --mt-reply-list-indent: 20px;
+  --mt-reply-code-size: 0.8125rem;
+  --mt-reply-code-line: 1.45;
+  --mt-reply-code-pad: 12px;
+  --mt-reply-measure: 38em;
   --mt-space-0: 0;
   --mt-space-1: 4px;
   --mt-space-2: 8px;

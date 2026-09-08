@@ -15,6 +15,17 @@ but every one of them gets a discoverable, expressive surface:
   exposes commands (`/note`, `/status`, `/deep`, `@agent …`) as tappable
   choices; typing `/` or `@` opens the same menu inline for the halfway
   power user.
+- **Autocomplete, and everything in the menu is clickable** (owner
+  addition, 2026-09-08). Typing `@d…` suggests `@drey`; typing `/`
+  lists the commands and filters them as you type, most relevant first.
+  Every item in the menu — quick actions, commands, agent name tags —
+  **inserts itself into the reply at the caret** rather than requiring
+  the user to type it, and never sends on its own. The list comes from
+  the agent registry and `rules.yaml`, never a hand-maintained array,
+  and the ordering is deterministic (prefix, then substring, then
+  recency) so it is predictable rather than clever. ⌘K stays as the
+  rich version of the same list wherever there is a desktop keyboard.
+  Spec: `design-system.md` §3.6; plan: §4.1.
 - **Rich request–response dialogues.** When the assistant needs input, it
   asks with a structured prompt — options, defaults, a free-text escape —
   in the style of Claude's question-answer flows, rather than expecting
@@ -28,6 +39,31 @@ but every one of them gets a discoverable, expressive surface:
 - **Easy model selection.** Tier choice as a visible, tappable control
   (with the instance's own tier menu from `rules.yaml`), not a memorized
   `/model` incantation — which stays for power users.
+
+## "Needs You" is the single list (shipped 2026-09-08)
+
+The queue formerly labeled *triage* is named **Needs You**, and it is the
+answer to "is there one place for every decision and manual action I owe the
+system?" — yes, and by construction rather than by convention: knowledge
+proposals, agent reports, drafts to settle, elevation grants, project-mode
+flips, system improvements, and the assistant's own blocking questions are all
+rows in `proposals`, so there is one triage endpoint, one push path, one brief
+section, and one badge. Items are grouped by kind, oldest first.
+
+A **question-answer prompt card** is what makes the assistant's own asks fit:
+a reply ending in a fenced `decision` block (title + options) becomes a
+`decision` row when the reply is stored, answerable three ways that are all
+the same server-side decision — typing an answer in chat, tapping an option in
+Needs You, or (once wired) a notification action. It scores with elevation
+grants in the morning brief: a waiting assistant is a blocked assistant. This
+is the first concrete instance of the structured-prompt API shape described
+below.
+
+**Tapbacks are the quality signal.** 👍/👎 under every reply, with an optional
+one-line note on 👎 — the cheapest possible input, and the only one asked for.
+It feeds a weekly model-free pass that proposes (never applies) a change to
+the assistant's prompt; the user's allow is what makes it real. See
+`docs/ops/reply-feedback.md`.
 
 ## Quick links & targeted actions (owner addition, 2026-09-01)
 
@@ -52,7 +88,14 @@ Everything the assistant surfaces should be a **door, not a dead end**:
   surfaces. This slots into the existing `outbound_messages.kind` design.
 - **Discoverability is generated, not hand-maintained**: the command menu
   should render from live `rules.yaml` + the agent registry (OPT-3's
-  generated `/help`, promoted to UI).
+  generated `/help`, promoted to UI). Agents are served today
+  (`GET /api/agents`); a `rules.yaml` commands endpoint does **not**
+  exist yet, so any static command list in a client is a placeholder to
+  be deleted, marked as such at its definition site.
+- **Replies are optimised for density on a small screen**: the
+  assistant's text is the longest thing in the product and the thing
+  most often read on a phone. It gets its own type scale, not the
+  control scale — `design-system.md` §4.
 - **Answers carry no more authority than a typed reply** — a quick-action
   tap on a grant prompt goes through the same server-side authz as the
   management API (CRIT-7 rules apply to notification actions too).

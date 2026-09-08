@@ -23,7 +23,7 @@ export interface AgentPrincipal {
    * project membership (scope.ts): internal + empty `projects` = every project.
    */
   kind?: "external" | "internal" | undefined;
-  grants: { tier: Tier; areas: string[] };
+  grants: { tier: Tier; areas: string[]; queries?: boolean };
   /** Project membership — the collaboration boundary for every tasks_* tool (scope.ts holds the internal rule). */
   projects: string[];
 }

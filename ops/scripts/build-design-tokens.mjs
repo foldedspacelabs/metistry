@@ -13,6 +13,8 @@ import { fileURLToPath } from "node:url";
 const root = new URL("../../", import.meta.url);
 const jsonPath = new URL("docs/product/design/tokens.json", root);
 const cssPath = new URL("docs/product/design/tokens.css", root);
+// The PWA serves its own copy so the shell needs no build step and no CDN.
+const webCssPath = new URL("apps/console/web/tokens.css", root);
 const T = JSON.parse(readFileSync(jsonPath, "utf8"));
 
 // ----- WCAG 2.1 relative luminance and contrast -----
@@ -161,6 +163,10 @@ if (check) {
     console.error("tokens.css is stale — run: node ops/scripts/build-design-tokens.mjs");
     process.exit(1);
   }
+  if (readFileSync(webCssPath, "utf8") !== css) {
+    console.error("apps/console/web/tokens.css is stale — run: node ops/scripts/build-design-tokens.mjs");
+    process.exit(1);
+  }
   const html = readFileSync(previewPath, "utf8");
   if (html !== inlinePreview(html)) {
     console.error("preview.html's inlined tokens are stale — run: node ops/scripts/build-design-tokens.mjs");
@@ -174,8 +180,11 @@ if (check) {
   console.log(`design tokens: ok (${rows.length} pairs checked)`);
 } else {
   writeFileSync(cssPath, css);
+  writeFileSync(webCssPath, css);
   writeFileSync(previewPath, inlinePreview(readFileSync(previewPath, "utf8")));
-  console.log(`wrote ${fileURLToPath(cssPath)} and inlined them into preview.html`);
+  console.log(`wrote ${fileURLToPath(cssPath)}`);
+  console.log(`wrote ${fileURLToPath(webCssPath)}`);
+  console.log("inlined the same tokens into preview.html");
   console.log(table);
   if (failures.length) {
     console.error(`\n${failures.length} pair(s) below the minimum — fix tokens.json before committing.`);

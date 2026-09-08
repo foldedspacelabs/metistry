@@ -10,11 +10,12 @@ import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { finishRun, startRun, type RunExecutor } from "@foldedspacelabs/metistry-core";
 import type { Committer } from "./committer.js";
+import { EMPTY_SUMMARY, type Embeddings, type EmbedSummary } from "./embeddings.js";
 import type { Vault } from "./vault.js";
 import { basenameTitle, extractLinks, isConflictFile, isMarkdown, parseFrontmatter, resolveLink, sha256, type NoteLink, type NoteMeta } from "./notes.js";
 
 export interface Db extends RunExecutor {
-  query(text: string, values?: unknown[]): Promise<{ rows: Record<string, unknown>[] }>;
+  query(text: string, values?: unknown[]): Promise<{ rows: Record<string, unknown>[]; rowCount?: number | null }>;
 }
 
 export interface IndexerConfig {
@@ -33,6 +34,8 @@ export interface ReconcileSummary {
   conflicts_new: number; // newly proposed this cycle
   links: number;
   external_edits: number; // paths swept into a `user` commit intent
+  /** Phase 6: vectors brought up to date this cycle. Absent when no embedder is configured. */
+  embeddings?: EmbedSummary;
   duration_ms: number;
 }
 
@@ -54,6 +57,8 @@ export class Indexer {
     private readonly vault: Vault,
     private readonly committer: Committer,
     private readonly cfg: IndexerConfig,
+    /** Absent → the index is built, no vectors are (Phase 6 is optional at run time). */
+    private readonly embeddings?: Embeddings | undefined,
   ) {}
 
   /** Coalesce: a reconcile requested while one runs joins it. */
@@ -115,6 +120,8 @@ export class Indexer {
       consumed.add(old);
       await this.db.query(`UPDATE knowledge_files SET path = $2, mtime = $3, indexed_at = now() WHERE path = $1`, [old, p, scanned.get(p)!.mtime]);
       await this.db.query(`UPDATE knowledge_links SET from_path = $2 WHERE from_path = $1`, [old, p]);
+      // same bytes under a new name: re-key the vectors, never re-embed them
+      await this.embeddings?.rekey(old, p);
       existing.set(p, existing.get(old) ?? null);
       existing.delete(old);
       renamed++;
@@ -210,6 +217,18 @@ export class Indexer {
       }
     }
 
+    // Vectors last: they read the index this cycle just settled, and nothing
+    // about them may cost us the index (§6 decision 8 — embedding degrades).
+    let embeddings: EmbedSummary | undefined;
+    if (this.embeddings) {
+      try {
+        embeddings = await this.embeddings.sync();
+      } catch (err) {
+        embeddings = { ...EMPTY_SUMMARY, degraded: err instanceof Error ? err.message : String(err) };
+        console.error("reconciler: embedding failed (index is still current):", embeddings.degraded);
+      }
+    }
+
     return {
       run_id: runId,
       files: scanned.size,
@@ -221,6 +240,7 @@ export class Indexer {
       conflicts_new: conflictsNew,
       links,
       external_edits: externalEdits,
+      ...(embeddings ? { embeddings } : {}),
       duration_ms: Date.now() - started,
     };
   }

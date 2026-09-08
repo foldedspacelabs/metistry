@@ -82,6 +82,9 @@ const stat = () => {
     out.push(`  --mt-text-${name}-line: ${s.line};`);
     out.push(`  --mt-text-${name}-tracking: ${s.tracking};`);
   }
+  // Reply prose (design-system.md §4) is its own group: the one place tuned for
+  // density rather than scanning, so it must not inherit a `type` step.
+  for (const [k, v] of Object.entries(T.reply)) if (k !== "$meta") out.push(`  --mt-reply-${k}: ${v};`);
   for (const [k, v] of Object.entries(T.space)) if (k !== "$meta") out.push(`  --mt-space-${k}: ${v};`);
   for (const [k, v] of Object.entries(T.size)) if (k !== "$meta") out.push(`  --mt-size-${k}: ${v};`);
   for (const [k, v] of Object.entries(T.radius)) out.push(`  --mt-radius-${k}: ${v};`);

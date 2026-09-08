@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 940" width="940" height="940" role="img" aria-labelledby="ttl desc">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 1080" width="940" height="1080" role="img" aria-labelledby="ttl desc">
   <title id="ttl">iPhone — activity feed with the tab bar</title>
-  <desc id="desc">Annotated wireframe at 390 by 844 points: a large-title feed screen with filter chips, activity rows carrying a kind glyph, an agent-tinted actor chip, subject, detail and relative time, and a five-item bottom tab bar plus a More tab, anchored above the home indicator inside the safe area.</desc>
+  <desc id="desc">Annotated wireframe at 390 by 844 points: a large-title feed screen with filter chips, activity rows carrying a kind glyph, an agent-tinted actor chip, subject in Title Case where the console composed it, detail and relative time, and a five-item bottom tab bar plus a More tab, anchored above the home indicator inside the safe area.</desc>
   <style>
     text { font-family: -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", Roboto, sans-serif; fill: #12171c; font-size: 15px; }
     .t2 { fill: #4d565f; font-size: 13px } .t3 { fill: #646d77; font-size: 12px }
@@ -15,7 +15,7 @@
     .lg { font-size: 13px }
   </style>
 
-  <rect width="940" height="940" fill="#ffffff"/>
+  <rect width="940" height="1080" fill="#ffffff"/>
   <text x="24" y="30" class="h2">iPhone — Feed</text>
   <text x="24" y="50" class="t2">390 × 844 pt · tab bar anchored above the home indicator · large title collapses on scroll</text>
 
@@ -52,28 +52,28 @@
 
     <text x="84" y="436">📝</text>
     <rect x="110" y="422" width="56" height="18" rx="9" fill="#eef0f3"/><text x="118" y="435" class="t3 mono">system</text>
-    <text x="84" y="462" class="hd">proposal #97 awaiting you</text>
+    <text x="84" y="462" class="hd">Proposal #97 Awaiting You</text>
     <text x="426" y="436" class="t3" text-anchor="end">1h</text>
     <text x="84" y="482" class="t2">write Knowledge/Areas/Health/Taper.md</text>
     <path class="ln" d="M84 498 H426"/>
 
     <text x="84" y="530">⚠️</text>
     <rect x="110" y="516" width="92" height="18" rx="9" fill="#eef0f3"/><text x="118" y="529" class="t3 mono">github-state</text>
-    <text x="84" y="556" class="hd">collector run failed</text>
+    <text x="84" y="556" class="hd">Collector Run Failed</text>
     <text x="426" y="530" class="t3" text-anchor="end">3h</text>
     <text x="84" y="576" class="bad" font-size="13">✕ rate limited — retries at 14:20</text>
     <path class="ln" d="M84 592 H426"/>
 
     <text x="84" y="624">📰</text>
     <rect x="110" y="610" width="66" height="18" rx="9" fill="#eef0f3"/><text x="118" y="623" class="t3 mono">routine</text>
-    <text x="84" y="650" class="hd">morning brief delivered</text>
+    <text x="84" y="650" class="hd">Morning Brief Delivered</text>
     <text x="426" y="624" class="t3" text-anchor="end">7h</text>
     <text x="84" y="670" class="t2">4 items · 2 links · 1 question</text>
     <path class="ln" d="M84 686 H426"/>
 
     <text x="84" y="718">✅</text>
     <rect x="110" y="704" width="42" height="18" rx="9" fill="#eef0f3"/><text x="118" y="717" class="t3 mono">you</text>
-    <text x="84" y="744" class="hd">allowed proposal #94</text>
+    <text x="84" y="744" class="hd">Allowed Proposal #94</text>
     <text x="426" y="718" class="t3" text-anchor="end">8h</text>
     <text x="84" y="764" class="ok" font-size="13">✓ committed 4a1c93e</text>
   </g>
@@ -97,6 +97,8 @@
   <circle class="cw" cx="470" cy="264" r="10"/><text class="cn" x="470" y="268">3</text>
   <circle class="cw" cx="470" cy="838" r="10"/><text class="cn" x="470" y="842">4</text>
   <circle class="cw" cx="470" cy="890" r="10"/><text class="cn" x="470" y="894">5</text>
+  <circle class="cw" cx="470" cy="556" r="10"/><text class="cn" x="470" y="560">6</text>
+  <circle class="cw" cx="470" cy="368" r="10"/><text class="cn" x="470" y="372">7</text>
 
   <!-- legend -->
   <text x="510" y="110" class="h2">Callouts</text>
@@ -126,12 +128,26 @@
   <text x="524" y="606" class="lg">indicator; the PWA does the same with</text>
   <text x="524" y="626" class="lg">env(safe-area-inset-bottom).</text>
 
-  <text x="510" y="676" class="h2">Colour budget</text>
-  <text x="510" y="708" class="lg">One accent · four states · six presence</text>
-  <text x="510" y="728" class="lg">values. Nothing is coloured for being new.</text>
+  <text x="510" y="666" class="lg">⑥ Subject in <tspan font-style="italic">Title Case</tspan> — but applied at</text>
+  <text x="524" y="686" class="lg">render, in the view layer, and only for</text>
+  <text x="524" y="706" class="lg">kinds the console itself composes:</text>
+  <text x="524" y="726" class="lg"><tspan class="mono">collector_run</tspan>, <tspan class="mono">proposal_*</tspan>, <tspan class="mono">brief</tspan>,</text>
+  <text x="524" y="746" class="lg"><tspan class="mono">project_mode</tspan>, <tspan class="mono">alert</tspan> and the rest of a</text>
+  <text x="524" y="766" class="lg">closed allow-list (§3.2). Never written</text>
+  <text x="524" y="786" class="lg">back to the database. Identifiers inside a</text>
+  <text x="524" y="806" class="lg">subject are skipped, joining words stay</text>
+  <text x="524" y="826" class="lg">lowercase, detail lines stay sentence</text>
+  <text x="524" y="846" class="lg">case — they are prose (P10).</text>
 
-  <text x="510" y="778" class="h2">VoiceOver</text>
-  <text x="510" y="810" class="lg t3">"from agent drey-dev: dispatch queued for</text>
-  <text x="510" y="830" class="lg t3">ops-bot, 14 minutes ago, queued"</text>
-  <text x="24" y="928" class="t3">docs/product/design-system.md §3.1 navigation · §3.2 activity feed row</text>
+  <text x="510" y="886" class="lg">⑦ These two are <tspan class="mono">tool</tspan> and <tspan class="mono">dispatch</tspan>, whose</text>
+  <text x="524" y="906" class="lg">subjects can carry agent-authored text.</text>
+  <text x="524" y="926" class="lg">They render exactly as stored. Agent text</text>
+  <text x="524" y="946" class="lg">is data, and data is not case-corrected</text>
+  <text x="524" y="966" class="lg">(P1) — that is why the rule is a list of</text>
+  <text x="524" y="986" class="lg">kinds and not a guess about the string.</text>
+
+  <text x="510" y="1022" class="h2">Colour budget · VoiceOver</text>
+  <text x="510" y="1044" class="lg">One accent · four states · six presence values.</text>
+  <text x="510" y="1062" class="lg t3">"from agent drey-dev: dispatch queued for ops-bot, 14 minutes ago, queued"</text>
+  <text x="24" y="1012" class="t3">docs/product/design-system.md §3.1 navigation · §3.2 activity feed row (Title Case at render) · P10</text>
 </svg>

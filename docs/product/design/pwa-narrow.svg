@@ -30,12 +30,12 @@
   <!-- sticky header -->
   <rect x="62" y="128" width="386" height="52" fill="#ffffff" opacity="0.96"/>
   <path class="ln" d="M62 180 H448"/>
-  <text x="84" y="162" class="lt">metistry</text>
+  <text x="84" y="162" class="lt">Metistry</text>
   <text x="426" y="160" class="acc" text-anchor="end" font-size="17">⌘</text>
 
   <!-- filters -->
-  <rect x="84" y="196" width="88" height="30" rx="15" fill="#e6edfc" stroke="#c6d6f7"/><text x="98" y="216" class="acc" font-size="13">all agents ⌄</text>
-  <rect x="180" y="196" width="96" height="30" rx="15" class="sf"/><text x="194" y="216" class="t2" font-size="13">all projects ⌄</text>
+  <rect x="84" y="196" width="88" height="30" rx="15" fill="#e6edfc" stroke="#c6d6f7"/><text x="98" y="216" class="acc" font-size="13">All Agents ⌄</text>
+  <rect x="180" y="196" width="96" height="30" rx="15" class="sf"/><text x="194" y="216" class="t2" font-size="13">All Projects ⌄</text>
 
   <!-- feed rows -->
   <g>
@@ -78,12 +78,12 @@
   <path class="ln" d="M62 750 H448"/>
   <rect x="62" y="750" width="386" height="66" fill="#ffffff" opacity="0.96"/>
   <g text-anchor="middle">
-    <text x="116" y="780" class="acc" font-size="17">◈</text><text x="116" y="798" class="acc" font-size="10">feed</text>
-    <text x="180" y="780" font-size="17">💬</text><text x="180" y="798" class="t3" font-size="10">chat</text>
-    <text x="244" y="780" font-size="17">📥</text><text x="244" y="798" class="t3" font-size="10">capture</text>
-    <text x="308" y="780" font-size="17">📝</text><text x="308" y="798" class="t3" font-size="10">triage</text>
+    <text x="116" y="780" class="acc" font-size="17">◈</text><text x="116" y="798" class="acc" font-size="10">Feed</text>
+    <text x="180" y="780" font-size="17">💬</text><text x="180" y="798" class="t3" font-size="10">Chat</text>
+    <text x="244" y="780" font-size="17">📥</text><text x="244" y="798" class="t3" font-size="10">Capture</text>
+    <text x="308" y="780" font-size="17">📝</text><text x="308" y="798" class="t3" font-size="10">Triage</text>
     <circle cx="322" cy="770" r="8" fill="#2b5fd0"/><text x="322" y="774" fill="#fff" font-size="9">3</text>
-    <text x="376" y="780" font-size="17">•••</text><text x="376" y="798" class="t3" font-size="10">more</text>
+    <text x="376" y="780" font-size="17">•••</text><text x="376" y="798" class="t3" font-size="10">More</text>
   </g>
   <rect class="sa" x="62" y="816" width="386" height="30" opacity="0.7"/>
   <text x="255" y="836" text-anchor="middle" class="acc" font-size="10">env(safe-area-inset-bottom)</text>

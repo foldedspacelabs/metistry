@@ -26,7 +26,7 @@
 
 ## 1. Principles
 
-Seven, each one a rule this system already has. A design decision that
+Ten, each one a rule this system already has. A design decision that
 cannot be traced to one of these is a preference, and preferences lose.
 
 ### P1 — Agent text is data, never chrome
@@ -113,6 +113,60 @@ webfont is ever loaded; no framework is added to draw a chip.
 Increase Contrast, Reduce Motion all arrive with the standard control),
 and invariant 7's "no dependency without a reason" applies to the front
 end as much as the back.
+
+### P8 — The chat is modelled on iMessage, deliberately
+
+The conversation with the assistant borrows the interaction people
+already know from Messages, and the borrowing is written down so later
+decisions have somewhere to appeal: **bubbles**, each aligned to its
+sender (yours trailing on `accent-quiet`, the assistant's leading on
+`surface`); **timestamps on demand** — a day separator and a tap, not a
+stamp on every line; **a single-line composer that grows** with the
+text; **one `+` button** that opens the actions menu (§3.6); and
+**tapbacks** as the lightweight feedback affordance on a turn, rather
+than a row of buttons under every reply.
+
+What is *not* borrowed: read receipts, typing indicators (P2 — the
+working state is a word, §3.4), and anything that animates on arrival.
+
+*Why:* the fastest interface to learn is one already learned. Chat is
+the surface the owner touches most; novelty spent there buys nothing.
+Described, never copied — no Apple asset, string or name is taken.
+
+### P9 — The transcript never moves under you
+
+The message list scrolls **only when the reader is already at the
+bottom**. If they have scrolled up — normally to re-read what the agent
+said while composing the reply — an arriving message must not move the
+viewport, must not re-render the rows already on screen, and must not
+take focus from the composer. A **"↓ New Reply" pill** appears at the
+bottom edge instead; tapping it scrolls, and nothing else does. Focusing
+or typing in the composer never scrolls the list.
+
+The rule holds for every polled list — feed, artifact threads, triage:
+**a poll is a repaint, not a navigation.**
+
+*Why:* a client that scrolls on every poll destroys the thing the reader
+was reading. This is the one case where being helpful by default is
+hostile, and it is a rule rather than a preference because otherwise
+every new polled list rediscovers it.
+
+### P10 — Title Case names things; sentence case says things
+
+A copy rule, about rendered strings only — the repo's path- and
+identifier-casing rules (`CLAUDE.md`) are untouched by it.
+
+| Case | Applies to |
+| --- | --- |
+| **Title Case** | screen titles, section headers, navigation and tab-bar labels, table column headers, card titles, menu-group headings, the names of the ten destinations |
+| **sentence case** | body copy, helper text, placeholders, empty-state prose, receipts, error messages, and buttons — verb-first per the HIG ("Send", "Allow", "Request Changes" are control labels and take Title Case; "queued — will send when the instance is reachable" is prose and does not) |
+| **as-is, always** | identifiers — agent ids, slugs, tool names, file paths, query names, `mode:` values, tier names. Rendered in `mono`, never case-corrected, because `drey-dev` is a key, not a word |
+
+*Why:* this console sets machine identifiers beside human labels on
+every row. When both are lowercase the reader cannot tell which strings
+they could have typed differently and which ones they could not — and
+P1's "agent text is data" is easier to see when the chrome around it is
+visibly *not* data.
 
 ---
 
@@ -477,6 +531,19 @@ opens something for you, because a failure needs a person).
 **Turn state.** Explicit, next to the attribution: `working` · `finished`
 · `interrupted`. Never inferred from whether text has arrived.
 
+**Arrival without motion (P9).** A reply that lands while the reader is
+scrolled up is appended silently; the only signal is a **"↓ New Reply"**
+pill at the bottom edge of the list — `caption-2` on `accent`,
+`radius-pill`, 44pt tall, tappable to scroll, and gone the moment the
+list reaches the bottom on its own. It is the one element in the system
+that exists because something arrived, and it exists *precisely so that
+nothing else has to move*.
+
+**Tapbacks (P8).** Feedback on a turn is a long-press (touch) or
+right-click (pointer) menu of reactions attached to the bubble, not a
+control row rendered under every reply. Nothing about a tapback changes
+what the turn said.
+
 ### 3.5 Question–answer prompt card
 
 The structured dialogue from ux-direction, rendered from the outbound
@@ -506,26 +573,63 @@ reply — the same server-side authz runs either way. The card never
 implies otherwise, and a grant option is styled as destructive-adjacent
 (§3.17), not as a primary button.
 
-### 3.6 Command palette / slash-command menu
+### 3.6 Composer actions menu (and the ⌘K palette)
 
-**Anatomy.** A single search field over a grouped result list:
-**Commands** (from live `rules.yaml`), **Agents** (`@…` from the
-registry), **Destinations** (the ten), **Recent**. Each row: glyph,
-name, one-line description, keyboard shortcut on the trailing edge.
-Generated, never hand-maintained.
+Two renderings of one generated list. On touch it is a `+` button inside
+the composer; with a fine pointer the same list is also a ⌘K palette.
+Neither is hand-maintained: the contents come from live `rules.yaml`,
+the agent registry, and the ten destinations.
 
-**States.** closed · open-empty (shows the four groups' top items, which
-is the discovery affordance) · filtering · no-match · executing.
+**Why it is not a pinned toolbar.** Nothing but the composer may occupy
+the space above the keyboard. A strip of commands pinned there costs two
+or three lines of transcript exactly when the reader needs them most —
+while typing a reply about what the agent just said (P8, P9). So the
+actions collapse into one control, and the collapsed state is the
+default the composer returns to after every send.
 
-**Trigger.** `⌘K` on macOS and the PWA with a fine pointer; a `⌘`-glyph
-button in the composer toolbar everywhere; typing `/` or `@` at the start
-of the composer opens the same list inline, anchored above the field.
+**Anatomy — the composer.** One row: `[+] [text field] [↑]`. The field
+is a single line that grows with the text to a maximum of five, then
+scrolls. `+` is a 44×44pt toggle; nothing else is pinned above the
+keyboard, and the tab bar hides while editing.
 
-**Platform notes.** SwiftUI: a `.sheet` on iOS (the HIG's sheet is for a
-scoped task closely related to the current context) and a floating
-`.popover`/window on macOS; commands also register as real menu-bar items
-and `⌘K` is a `.keyboardShortcut`. PWA: `<dialog>` with `showModal()` —
-focus trapping, `Esc` to close and inert background come for free.
+**Anatomy — the actions menu.** `+` opens a list *above* the field,
+grouped, in this order:
+
+| Group | Contents | Source |
+| --- | --- | --- |
+| Quick Actions | Summarize This · What's the Latest · New Note | ux-direction |
+| Commands | `/note`, `/status`, `/deep`, … with one-line descriptions | live `rules.yaml` |
+| Agents | `@drey-dev`, `@ops-bot`, … with presence (§3.3) | agent registry |
+| Attach | Photo · File · Scan | platform pickers |
+| Model & Effort | the §3.7 picker, inline | `rules.yaml` tiers |
+
+**States.** collapsed (default) · expanded · filtering (typing `/` or
+`@` at the start of the field expands the same list, already filtered) ·
+executing · unavailable-item (a command whose tier the instance has not
+configured is listed and disabled *with the reason* — P4, never hidden).
+
+**Anatomy — the ⌘K palette (Mac and PWA-wide, the equivalent).** The
+same four groups, search-first: field on top, grouped results, each row
+glyph · name · one-line description · shortcut on the trailing edge.
+Opened by ⌘K, by the `+` button, or by typing `/` in the composer.
+
+**Platform notes.**
+
+- **iOS** — `+` presents a `.sheet` at a small detent
+  (`.presentationDetents([.height(320)])`); the HIG's sheet is exactly
+  this, a scoped task related to the current context. Attach items are
+  the system pickers.
+- **macOS** — `+` opens a `.popover`; the same commands also register as
+  real menu-bar items, and ⌘K is a `.keyboardShortcut`.
+- **PWA** — a `<details>` wrapping the composer: the `<summary>` *is*
+  the `+` button and the content is the actions list. It opens with no
+  JavaScript, is keyboard-operable, carries `aria-expanded` for free and
+  closes on `Esc`. The wide layout adds `<dialog>.showModal()` for ⌘K,
+  which brings focus trapping and an inert background with it.
+
+**Never.** The menu never survives a send. It never covers the last
+message while collapsed, and it is never rendered as a permanent row of
+buttons above the keyboard.
 
 ### 3.7 Model & effort picker
 
@@ -802,7 +906,7 @@ in circles are callouts; the legend is in each file.
 | `design/mac-agents.svg` | macOS — agents panel with presence and drag-to-dispatch |
 | `design/mac-project.svg` | macOS — project header, mode toggle, rollup |
 | `design/iphone-feed.svg` | iPhone — feed with tab bar |
-| `design/iphone-chat.svg` | iPhone — chat, prompt card, composer command menu |
+| `design/iphone-chat.svg` | iPhone — chat: iMessage-style bubbles, the collapsed `+` composer, its expanded actions menu, and the new-reply pill |
 | `design/iphone-triage.svg` | iPhone — triage cards and the actionable notification |
 | `design/iphone-capture.svg` | iPhone — capture sheet at a medium detent |
 | `design/pwa-narrow.svg` | PWA — narrow (bottom tabs, installed, safe areas) |
@@ -845,7 +949,9 @@ text carries an announced prefix — "from agent `drey-dev`:" — so P1
 survives with the screen off. On the web: `aria-live="polite"` on the
 feed list and the chat thread (never `assertive`; P2), `aria-current` on
 navigation, `aria-expanded` from the native `<details>`, and no
-`aria-label` that duplicates visible text.
+`aria-label` that duplicates visible text. The "↓ New Reply" pill is the
+visible half of that polite announcement: a reply that arrives while the
+reader is scrolled up is *spoken*, never *scrolled to* (P9).
 
 **Keyboard (macOS and PWA).** Full keyboard reachability with a visible
 2px `focus-ring` at 2px offset — `:focus-visible` on the web, never
@@ -874,7 +980,8 @@ phone it will be read on.
 `docs/product/design/preview.html` renders every component in §3 side by
 side in light and dark with realistic Metistry content — feed rows from
 the real `activity_feed` kinds, all six presence chips, a chat turn with
-collapsed tool activity, a prompt card, a triage card, a doctor table,
+collapsed tool activity, a prompt card, the composer in both its collapsed and expanded
+states with the new-reply pill, a triage card, a doctor table,
 the dispatch refusals, the empty states and the error envelopes.
 
 It is self-contained: `tokens.css` is inlined, there are no external

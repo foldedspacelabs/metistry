@@ -608,7 +608,7 @@ your git, on your machine.
 - 2026-09-08 — Goal sharpened: **one design language across the PWA, Mac
   and iPhone, written down before the native app exists.**
   `docs/product/design-system.md` turns the UX direction into something
-  buildable: seven principles each tied to a rule the system already has
+  buildable: ten principles each tied to a rule the system already has
   (agent text is data ⇒ never styled as UI chrome; silence-default ⇒
   calm surfaces; enforce-at-the-tool ⇒ every destructive action confirms
   with the reason shown), 27 semantic colour roles in light and dark
@@ -623,6 +623,24 @@ your git, on your machine.
   the SwiftUI app copies a settled interaction instead of inventing one,
   which is what makes the Mac app a distribution channel rather than a
   second product.
+
+- 2026-09-08 — Goal sharpened, from owner review of the design system:
+  **the chat is modelled on iMessage on purpose, and the transcript never
+  moves under the reader.** Three principles were added rather than left
+  implicit. P8 names the reference (bubbles aligned to their sender,
+  timestamps on demand, one `+` for every action, tapbacks as the feedback
+  affordance) so the native app inherits an interaction people already
+  know instead of one we invented. P9 makes scroll stability a rule: a
+  poll is a repaint, not a navigation — an arriving reply raises a
+  "↓ New Reply" pill instead of dragging the viewport away from the
+  paragraph the owner was re-reading while typing. P10 fixes
+  capitalization (Title Case names things, sentence case says things,
+  identifiers stay as-is) so a reader can tell at a glance which strings
+  on a row are machine keys and which are human labels. Component §3.6
+  became the **composer actions menu** — a collapsed `+` on every
+  platform, with ⌘K as the Mac and wide-web equivalent — because on a
+  phone a pinned command strip costs two or three lines of transcript at
+  exactly the moment the reader needs them.
 
 - 2026-09-08 — Benefit shipped: **the console now looks like a product,
   and two of its tabs work again.** The PWA is restyled onto the design

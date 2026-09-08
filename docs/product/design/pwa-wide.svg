@@ -29,24 +29,24 @@
   <!-- sidebar -->
   <rect x="25" y="101" width="180" height="524" fill="#eef0f3"/>
   <path class="ln" d="M205 101 V625"/>
-  <text x="42" y="126" class="hd">metistry</text>
+  <text x="42" y="126" class="hd">Metistry</text>
   <rect x="34" y="140" width="162" height="26" rx="7" fill="#e6edfc"/>
-  <text x="46" y="158" class="acc">◈</text><text x="68" y="158" class="hd">feed</text>
-  <text x="46" y="186">💬</text><text x="68" y="186">chat</text>
-  <text x="46" y="212">🤖</text><text x="68" y="212">agents</text>
-  <text x="46" y="238">📊</text><text x="68" y="238">dashboard</text>
-  <text x="46" y="264">📄</text><text x="68" y="264">artifacts</text>
-  <text x="46" y="290">📥</text><text x="68" y="290">capture</text>
-  <text x="46" y="316">📝</text><text x="68" y="316">triage</text>
+  <text x="46" y="158" class="acc">◈</text><text x="68" y="158" class="hd">Feed</text>
+  <text x="46" y="186">💬</text><text x="68" y="186">Chat</text>
+  <text x="46" y="212">🤖</text><text x="68" y="212">Agents</text>
+  <text x="46" y="238">📊</text><text x="68" y="238">Dashboard</text>
+  <text x="46" y="264">📄</text><text x="68" y="264">Artifacts</text>
+  <text x="46" y="290">📥</text><text x="68" y="290">Capture</text>
+  <text x="46" y="316">📝</text><text x="68" y="316">Triage</text>
   <rect x="152" y="304" width="30" height="16" rx="8" fill="#2b5fd0"/><text x="167" y="316" fill="#fff" font-size="10" text-anchor="middle">3</text>
-  <text x="46" y="342">🩺</text><text x="68" y="342">status</text>
+  <text x="46" y="342">🩺</text><text x="68" y="342">Status</text>
   <circle cx="170" cy="338" r="4" class="deg"/>
-  <text x="46" y="368">🔑</text><text x="68" y="368">devices</text>
+  <text x="46" y="368">🔑</text><text x="68" y="368">Devices</text>
   <path class="ln" d="M34 596 H196"/>
-  <text x="46" y="614" class="t3">⌘K  commands</text>
+  <text x="46" y="614" class="t3">⌘K  Commands</text>
 
   <!-- main: dashboard -->
-  <text x="228" y="130" class="hd">last 24h</text>
+  <text x="228" y="130" class="hd">Last 24h</text>
   <text x="720" y="130" class="t3" text-anchor="end">as of 09:41</text>
   <g>
     <rect class="sf" x="228" y="142" width="92" height="62" rx="12"/><text x="240" y="174" font-size="20" font-weight="600" class="ok">128</text><text x="240" y="192" class="t3">runs ok</text>
@@ -57,7 +57,7 @@
   </g>
 
   <!-- doctor rows -->
-  <text x="228" y="242" class="hd">components</text>
+  <text x="228" y="242" class="hd">Components</text>
   <text x="720" y="242" class="t3" text-anchor="end">9 ok · 1 degraded · 2 not configured</text>
   <g>
     <text x="228" y="270" class="ok">●</text><text x="248" y="270">postgres</text><text x="360" y="270" class="t3 mono">select 1</text>

@@ -3,9 +3,16 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#101418" />
+  <!-- installed-app chrome follows the appearance, matching the bg token in
+       each (docs/product/design/tokens.json) -->
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f6f7f9" />
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0e1216" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <title>metistry</title>
   <link rel="manifest" href="/manifest.webmanifest" />
+  <!-- generated from docs/product/design/tokens.json; style.css uses nothing else -->
+  <link rel="stylesheet" href="/tokens.css" />
   <link rel="stylesheet" href="/style.css" />
   <link rel="apple-touch-icon" href="/icon.svg" />
 </head>
@@ -112,6 +119,8 @@
         <p id="agent-grants-msg" class="muted"></p>
         <span><button type="submit">save</button> <button type="button" id="agent-grants-cancel" class="secondary">cancel</button></span>
       </form>
+    </section>
+
     <!-- dashboard (Phase 4 visibility): one place instead of four. Every
          panel is a named query; panels degrade independently. -->
     <section id="dashboard" hidden>

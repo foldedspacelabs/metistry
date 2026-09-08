@@ -1,5 +1,5 @@
 import { fileURLToPath } from "node:url";
-import { intEnv, optionalEnv, requireEnv } from "@foldedspacelabs/metistry-core";
+import { EMBED_DEFAULT_DIM, EMBED_DEFAULT_MODEL, EMBED_DEFAULT_URL, EmbedClient, intEnv, optionalEnv, requireEnv } from "@foldedspacelabs/metistry-core";
 import { QueryStore } from "@foldedspacelabs/metistry-queries";
 import { makePool } from "./db.js";
 import { makeServer } from "./server.js";
@@ -76,6 +76,19 @@ const writeKnowledge = reconcilerUrl && reconcilerToken ? vaultBridgeWriter({ ur
 const readKnowledge = vault ? async (path: string): Promise<string | null> => (await vault.read(path))?.content.toString("utf8") ?? null : undefined;
 if (!vault) console.warn("vault bridge absent: set METISTRY_RECONCILER_URL + METISTRY_BRIDGE_TOKEN_RECONCILER for knowledge_read, knowledge_write and artifacts (degrades: absent)");
 
+// Phase 6: knowledge_search mode=semantic|hybrid needs to embed the QUERY
+// with the same model the reconciler embedded the notes with. The vectors
+// are already in Postgres; this is one call to the same local Ollama.
+// Absent or unreachable → every mode answers, in keyword (degrades).
+const embedder =
+  optionalEnv("METISTRY_EMBED_ENABLED", "true") === "false"
+    ? undefined
+    : new EmbedClient({
+        url: optionalEnv("METISTRY_OLLAMA_URL", EMBED_DEFAULT_URL),
+        model: optionalEnv("METISTRY_EMBED_MODEL", EMBED_DEFAULT_MODEL),
+        dim: intEnv("METISTRY_EMBED_DIM", EMBED_DEFAULT_DIM),
+      });
+
 // Crews (Phase 5; docs/ops/crews.md): agents/<area>/<name>.md manifests,
 // D4 overlay — an entry not on disk is read through the vault bridge (that
 // is how the instance repo's protected `agents/` reaches this container).
@@ -102,6 +115,7 @@ const server = makeServer(pool, queries, {
   targets,
   ...(push ? { push } : {}),
   ...(readKnowledge ? { readKnowledge } : {}),
+  ...(embedder ? { embedder } : {}),
   ...(writeKnowledge ? { writeKnowledge } : {}),
   ...(vault ? { vault } : {}),
   crews,

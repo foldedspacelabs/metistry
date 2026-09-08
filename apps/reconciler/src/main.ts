@@ -3,10 +3,11 @@
 // only process that holds it.
 
 import pg from "pg";
-import { intEnv, optionalEnv, requireEnv } from "@foldedspacelabs/metistry-core";
+import { EMBED_DEFAULT_BATCH, EMBED_DEFAULT_DIM, EMBED_DEFAULT_MODEL, EMBED_DEFAULT_URL, EmbedClient, intEnv, optionalEnv, requireEnv } from "@foldedspacelabs/metistry-core";
 import { Git } from "./git.js";
 import { Committer } from "./committer.js";
 import { Vault } from "./vault.js";
+import { Embeddings } from "./embeddings.js";
 import { Indexer } from "./indexer.js";
 import { makeBridge } from "./server.js";
 
@@ -37,11 +38,36 @@ const committer = new Committer(git, {
   sourceTrailer: "Brain-Source", // §4.7 commit hygiene: self-declared provenance, never authorization
 });
 const vault = new Vault(instanceDir, git, committer, { maxBytes: intEnv("METISTRY_VAULT_MAX_BYTES", 2 * 1024 * 1024) });
-const indexer = new Indexer(pool, vault, committer, {
-  commitExternalEdits: optionalEnv("METISTRY_COMMIT_EXTERNAL_EDITS", "true") !== "false",
-});
 
-const server = makeBridge({ vault, committer, indexer }, { token, maxBodyBytes: intEnv("METISTRY_VAULT_MAX_BYTES", 2 * 1024 * 1024) + 64 * 1024 });
+// Phase 6: embeddings are on by default and cost nothing when the embedder
+// is absent — the cycle degrades, the index does not (§6 decision 8).
+const embedClient = new EmbedClient({
+  url: optionalEnv("METISTRY_OLLAMA_URL", EMBED_DEFAULT_URL),
+  model: optionalEnv("METISTRY_EMBED_MODEL", EMBED_DEFAULT_MODEL),
+  dim: intEnv("METISTRY_EMBED_DIM", EMBED_DEFAULT_DIM),
+  batch: intEnv("METISTRY_EMBED_BATCH", EMBED_DEFAULT_BATCH),
+});
+const readNote = async (p: string): Promise<string | null> => {
+  const r = await vault.read(p);
+  return r.ok ? r.value.content : null;
+};
+const embeddings =
+  optionalEnv("METISTRY_EMBED_ENABLED", "true") === "false"
+    ? undefined
+    : new Embeddings(pool, embedClient, readNote, { maxFilesPerCycle: intEnv("METISTRY_EMBED_MAX_FILES_PER_CYCLE", 200) });
+
+const indexer = new Indexer(
+  pool,
+  vault,
+  committer,
+  { commitExternalEdits: optionalEnv("METISTRY_COMMIT_EXTERNAL_EDITS", "true") !== "false" },
+  embeddings,
+);
+
+const server = makeBridge(
+  { vault, committer, indexer, embeddings, embedClient, db: pool },
+  { token, maxBodyBytes: intEnv("METISTRY_VAULT_MAX_BYTES", 2 * 1024 * 1024) + 64 * 1024 },
+);
 server.listen(port, host, () => {
   console.log(`reconciler listening on ${host}:${port} (repo: ${instanceDir}; commit every ${commitIntervalSec}s; reconcile every ${reconcileIntervalSec}s; push ${pushEverySec ? `every ${pushEverySec}s` : "never"})`);
 });

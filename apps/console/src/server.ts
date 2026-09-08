@@ -14,7 +14,7 @@ import { join } from "node:path";
 
 import { runCheck, startRun, finishRun, errorEnvelope, statusFor, type CheckResult } from "@foldedspacelabs/metistry-core";
 import { QueryError, QueryStore } from "@foldedspacelabs/metistry-queries";
-import { captureToInbox, createBrainServer, type KnowledgeReader, type KnowledgeWriter } from "@foldedspacelabs/metistry-mcp-brain";
+import { captureToInbox, createBrainServer, type KnowledgeReader, type KnowledgeWriter, type QueryEmbedder } from "@foldedspacelabs/metistry-mcp-brain";
 import { TasksService } from "@foldedspacelabs/metistry-tasks";
 import { ArtifactsService, type VaultClient } from "@foldedspacelabs/metistry-artifacts";
 import { artifactRoutes, isArtifactRoute } from "./artifacts-routes.js";
@@ -45,6 +45,8 @@ export interface ConsoleConfig {
   targets?: TargetRegistry; // compute targets (§4.18); absent = no dispatch surface
   /** Note-content reader for mcp-brain's knowledge_read (the reconciler's vault bridge, D5); absent = not_available, exactly as before. */
   readKnowledge?: KnowledgeReader;
+  /** Query embedder for mcp-brain's knowledge_search mode=semantic|hybrid (Phase 6); absent = every mode serves keyword. */
+  embedder?: QueryEmbedder;
   /** Note writer for mcp-brain's knowledge_write — the assistant's brain-commit over the same bridge; absent = not_available. */
   writeKnowledge?: KnowledgeWriter;
   /** The vault client the artifacts module (§4.21) stores content through; absent = artifacts degrade to not_available. */
@@ -79,6 +81,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     tasks,
     inboxDir: cfg.inboxDir,
     readKnowledge: cfg.readKnowledge,
+    embedder: cfg.embedder,
     writeKnowledge: cfg.writeKnowledge,
     artifacts,
     // crews (Phase 5): the dispatcher reuses dispatch.ts's policy check and lands rows through the same tasks service

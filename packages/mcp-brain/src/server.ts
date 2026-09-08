@@ -40,7 +40,7 @@ import type { ArtifactsService } from "@foldedspacelabs/metistry-artifacts";
 import { ARTIFACT_TOOL_NAMES, registerArtifactTools } from "./artifacts-tools.js";
 import { CREW_TOOL_NAMES, registerCrewTools, type CrewDispatcher } from "./crew-tools.js";
 import { captureToInbox } from "./capture.js";
-import { readKnowledge, searchKnowledge, type KnowledgeReader } from "./knowledge.js";
+import { KNOWLEDGE_MODES, readKnowledge, searchKnowledge, type KnowledgeReader, type QueryEmbedder } from "./knowledge.js";
 import { sha256Text, writeKnowledge, type KnowledgeWriter } from "./knowledge-write.js";
 import { computeNudge } from "./nudge.js";
 import { done, fail, type Outcome } from "./outcome.js";
@@ -57,6 +57,8 @@ export interface BrainConfig {
   inboxDir: string;
   /** Vault read path for `knowledge_read`. Absent → the tool answers `not_available`. */
   readKnowledge?: KnowledgeReader | undefined;
+  /** Query embedder for `knowledge_search` mode=semantic|hybrid (core's EmbedClient). Absent → every mode serves keyword. */
+  embedder?: QueryEmbedder | undefined;
   /** Vault write path for `knowledge_write` (the reconciler's bridge; `vaultBridgeWriter`). Absent → the tool answers `not_available`. */
   writeKnowledge?: KnowledgeWriter | undefined;
   /** The artifacts module (§4.21) for artifact_*. Absent → those tools answer `not_available`. */
@@ -309,13 +311,22 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
 
     reg(
       "knowledge_search",
-      "Search the knowledge index — titles and one-line descriptions — within your grant. Tier `index` sees every settled title; tier `areas` only its granted Knowledge/ prefixes. Draft notes never appear.",
-      { query: z.string().min(1).max(200), limit: z.number().int().min(1).max(100).optional() },
+      "Search the knowledge index — titles and one-line descriptions — within your grant. Tier `index` sees every settled title; tier `areas` only its granted Knowledge/ prefixes. Draft notes never appear. " +
+        "`mode` picks the ranking: `keyword` (substring), `semantic` (meaning, over the note embeddings), or `hybrid` (both, rank-fused — the default when embeddings exist). " +
+        "The mode changes the ORDER of results, never which notes your grant lets you see; the response says which mode actually ran.",
+      {
+        query: z.string().min(1).max(200),
+        limit: z.number().int().min(1).max(100).optional(),
+        mode: z.enum(KNOWLEDGE_MODES).optional().describe("keyword | semantic | hybrid. Omit to let the bridge choose (hybrid when embeddings exist, else keyword)."),
+      },
       async (a) => {
         const { tier, areas } = principal.grants;
         if (tier === "none") return fail("forbidden", undefined, { tier });
-        const hits = await searchKnowledge(db, principal, a.query, a.limit ?? 20);
-        return done({ tier, hits }, { tier, areas, hits: hits.length });
+        const r = await searchKnowledge(db, principal, a.query, a.limit ?? 20, { mode: a.mode ?? null, embedder: cfg.embedder });
+        return done(
+          { tier, mode: r.mode, hits: r.hits, ...(r.degraded ? { degraded: r.degraded } : {}) },
+          { tier, areas, mode: r.mode, requested: a.mode ?? null, hits: r.hits.length },
+        );
       },
     );
 
@@ -416,6 +427,8 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
           knowledge_write: cfg.writeKnowledge ? "available" : "not_available",
           artifacts: cfg.artifacts ? "available" : "not_available",
           crews: cfg.crews ? cfg.crews.names() : "not_available",
+          // Phase 6: semantic ranking is additive — without an embedder every mode still answers, in keyword.
+          knowledge_search_modes: cfg.embedder ? ["keyword", "semantic", "hybrid"] : ["keyword"],
         };
         const gaps = [
           ...(cfg.readKnowledge ? [] : ["knowledge_read"]),

@@ -96,7 +96,7 @@ Every route requires `Authorization: Bearer $METISTRY_BRIDGE_TOKEN_RECONCILER`
 | `GET /check` | behavioural probe (frozen `check()` shape) |
 | `GET /vault/read?path=` | `{path, content, sha256, bytes}` from the working tree; `&encoding=base64` returns `content_base64` instead (binary artifacts) |
 | `GET /vault/list?prefix=&depth=` | files + dirs under a prefix (`.git`, `.obsidian` never listed) |
-| `GET /vault/search?q=&limit=` | keyword search over **settled** notes — `status: draft` and conflict copies are excluded before matching |
+| `GET /vault/search?q=&limit=&mode=` | search over **settled** notes — `status: draft` and conflict copies are excluded before matching. `mode` is `keyword`, `semantic` or `hybrid`; omitted, it is `hybrid` once embeddings exist and `keyword` before that (docs/ops/knowledge-search.md) |
 | `GET /vault/log?path=&limit=` | `git log --follow` for a path (or the repo) |
 | `GET /vault/diff?path=&from=&to=` | unified diff between revisions; `to` absent = the working tree |
 | `POST /vault/write` | `{path, content \| content_base64, intent, expected_sha256?}` — compare-and-swap on the content hash |
@@ -104,6 +104,8 @@ Every route requires `Authorization: Bearer $METISTRY_BRIDGE_TOKEN_RECONCILER`
 | `POST /vault/rename` | `{from, to, intent}` — git-mv semantics; never clobbers |
 | `POST /flush` | commit the queue now (the interval does this every `METISTRY_COMMIT_INTERVAL_SEC`; the artifacts module calls it after every publish so one version is one commit) |
 | `POST /reconcile` | run the index cycle now (the interval does this every `METISTRY_RECONCILE_INTERVAL_SEC`) |
+| `POST /embeddings/rebuild` | forget every vector and re-embed the vault under the configured model (§6 decision 8's deterministic rebuild) |
+| `GET /embeddings/status` | what is stored: model, dim, row count, how many notes are behind, whether a rebuild is required |
 
 **Intents.** Every mutation carries
 `intent: { principal, message, group? }`. `principal` is a lowercase slug
@@ -152,6 +154,37 @@ them (PoC-12: "edit on iPhone → commits cleanly"). Paths with a pending
 bridge intent belong to that intent; conflict copies are flagged, not
 committed. Turn the sweep off with `METISTRY_COMMIT_EXTERNAL_EDITS=false`.
 
+
+## Embeddings (Phase 6)
+
+Every reconcile cycle also brings the vault's **vectors** up to date, in
+the same process that owns the index — one component reads the working
+tree, so the chunk text and the content hash cannot disagree.
+
+A note is *behind* when `knowledge_files.embedded_hash` is not its current
+`content_hash`, or `embedded_model` is not the configured model. The cycle
+embeds behind notes (up to `METISTRY_EMBED_MAX_FILES_PER_CYCLE`), and sets
+the marker only after every chunk of that note is stored — so an
+interrupted cycle retries exactly that note next time instead of leaving a
+note half-indexed.
+
+- drafts (`status: draft`) and sync-conflict copies are never embedded, and
+  lose any vectors they had;
+- a **rename** re-keys the rows (same bytes, no embedder call at all);
+- a delete removes them.
+
+**It degrades, always.** Ollama being down is not an outage: the cycle
+finishes, the index is correct and complete, `GET /check` reports
+`degraded` with `ollama serve` / `ollama pull`, search falls back to
+keyword, and the notes catch up on a later cycle. Nothing fails.
+
+`POST /reconcile` returns the counts (`embeddings: {files, chunks, reused,
+deleted, pending, degraded}`), and each cycle is one `runs` row carrying
+the same numbers.
+
+Setup, modes, and what "deterministic rebuild" means:
+**docs/ops/knowledge-search.md**.
+
 ## Environment
 
 | Variable | Default | Meaning |
@@ -167,7 +200,13 @@ committed. Turn the sweep off with `METISTRY_COMMIT_EXTERNAL_EDITS=false`.
 | `METISTRY_GIT_AUTHOR_EMAIL` | `metistry@localhost` | |
 | `METISTRY_VAULT_MAX_BYTES` | `2097152` | per-write size cap |
 | `METISTRY_COMMIT_EXTERNAL_EDITS` | `true` | sweep out-of-band edits into `user` commits |
-| `METISTRY_DB_*` | as elsewhere | the index tables (`knowledge_files`, `knowledge_links`, `proposals`, `runs`) |
+| `METISTRY_EMBED_ENABLED` | `true` | `false` turns embedding off entirely; search stays keyword |
+| `METISTRY_OLLAMA_URL` | `http://127.0.0.1:11434` | the local embedder |
+| `METISTRY_EMBED_MODEL` | `nomic-embed-text` | changing it requires a rebuild |
+| `METISTRY_EMBED_DIM` | `768` | must match the model AND the `vector(768)` column |
+| `METISTRY_EMBED_BATCH` | `16` | chunks per `/api/embed` request |
+| `METISTRY_EMBED_MAX_FILES_PER_CYCLE` | `200` | the rest wait for the next cycle |
+| `METISTRY_DB_*` | as elsewhere | the index tables (`knowledge_files`, `knowledge_links`, `embeddings`, `proposals`, `runs`) |
 
 `METISTRY_RECONCILER_URL` is a *console* setting: how the container reaches
 the bridge (`http://host.docker.internal:7812`, explicit host-gateway per

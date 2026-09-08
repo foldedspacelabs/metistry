@@ -679,6 +679,35 @@ your git, on your machine.
   platform, with ⌘K as the Mac and wide-web equivalent — because on a
   phone a pinned command strip costs two or three lines of transcript at
   exactly the moment the reader needs them.
+
+- 2026-09-08 — Benefit shipped: **the console now looks like a product,
+  and two of its tabs work again.** The PWA is restyled onto the design
+  system's tokens — one media query turns the same `<nav>` into a bottom
+  tab bar on a phone and a sidebar on a desktop, so the installed app is
+  a real desktop client on Windows and Linux and not a narrow column;
+  light appearance works for the first time (it was dark-only); buttons
+  have roles (primary / quiet / outlined-destructive) instead of one
+  accent fill on everything; focus is visible, touch targets are 44pt,
+  and reduced motion is honoured. The restyle also surfaced a markup bug
+  worth recording: `<section id="agents">` was never closed, so the
+  dashboard and artifacts tabs parsed as its children and rendered blank
+  whenever they were selected. One tag, two tabs back, and a test that
+  now counts section opens against closes so it cannot recur.
+
+- 2026-09-08 — Benefit shipped, from the same review: **the console's chat
+  stops fighting the reader.** `loadMessages` used to force
+  `scrollTop = scrollHeight` on every 2.5s poll, so re-reading an earlier
+  answer while typing the reply was impossible — the next tick threw you
+  back to the end. It now measures whether the reader is at the bottom,
+  restores `scrollTop` across the re-render when they are not, and raises
+  a "↓ New Reply" pill instead; focus moves with `preventScroll`. The
+  commands that were pinned above the keyboard collapse into one `+`
+  button — a native `<details>`, so it works before JavaScript and `Esc`
+  closes it — holding Quick Actions, the slash commands, the agents read
+  live from the registry, and attach. Two tests hold both: the pill and
+  the collapsed menu must ship in the served markup, and the nav labels
+  and section headers must be Title Case.
+
 - 2026-09-08 — **The composer completes as you type, and the menu is
   clickable** (owner review of the design system). Typing `@d` suggests
   `@drey`, typing `/` lists the commands and narrows them keystroke by
@@ -724,3 +753,21 @@ your git, on your machine.
   one. The general principle is the reusable part: *"is this string
   ours?" cannot be answered by looking at the string, only by looking at
   where it came from* — so the safe default is to leave text alone.
+- 2026-09-08 — **The console composer now completes as you type, and the
+  reply is dense enough to read on a phone.** The design-system decisions
+  above, shipped in the PWA rather than described. Typing `@d` opens a
+  ranked list of the instance's own agents (live from `/api/agents`);
+  typing `/` filters the commands. Every row of the actions menu inserts
+  itself **at the caret** — a half-written reply survives the tap, and a
+  tapped command produces the same string a typed one does. Nothing in
+  either surface sends. The reply body moved onto the `--mt-reply-*`
+  tokens, and a blank line in a reply is now a 12px margin instead of an
+  empty line box — a ~200-word answer that needed a scroll on an iPhone
+  now fits on one screen with the previous turn still visible. Feed
+  subjects are Title Cased at render for the eleven `activity_feed` kinds
+  the console composes, and left exactly as stored for `turn`, `tool` and
+  `dispatch`, whose subjects can carry agent-authored text. Two guards
+  ship with it: the paragraph splitter has a misuse test (hostile input
+  in, only its own `<p>` out), and the token generator now writes *both*
+  copies of `tokens.css` — the docs one and the console's — so the PWA
+  cannot silently drift from the source of truth.

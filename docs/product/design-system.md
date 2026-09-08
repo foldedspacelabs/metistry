@@ -387,11 +387,15 @@ data is absent stays enabled and shows its empty state — P5) · focused
   `TabView` adopts the sidebar.
 - **PWA** — one `<nav id="nav">` element, two presentations. Below
   `wide-breakpoint` (900px) it is a bottom tab bar: `position: fixed`,
-  `padding-bottom: env(safe-area-inset-bottom)`, five primary
-  destinations plus a "more" disclosure. At or above it, the same `<nav>`
-  becomes a left sidebar in a CSS grid — *no markup change, no JS*, so
-  the existing ids and test hooks survive. Buttons keep
-  `aria-current="page"` on the active view.
+  `padding-bottom: env(safe-area-inset-bottom)`. At or above it, the same
+  `<nav>` becomes a left sidebar in a CSS grid — *no markup change, no
+  JS*, so the existing ids and test hooks survive. Glyphs come from
+  `::before` per `[data-view]` for the same reason.
+  **Where the PWA differs from iOS, deliberately:** the web bar carries
+  all ten destinations in a horizontally scrolling strip rather than five
+  plus a More tab. A "more" disclosure needs either markup grouping or
+  script; the strip needs neither, and unlike a native tab bar it has a
+  real scroll affordance. Revisit if the destination list grows again.
 
 ### 3.2 Activity feed row
 

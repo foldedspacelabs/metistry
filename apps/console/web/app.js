@@ -160,7 +160,7 @@ async function loadTriage() {
       const c = p.payload?.classification ?? {};
       const label = c.action || c.title || p.payload?.title || p.kind; // review proposals (§4.21) carry a top-level title
       return `<li><span>${esc(label)} <span class="muted">${esc(p.kind)} · ${esc(c.kind ?? "")} · ${esc(p.source_agent)} · ${new Date(p.ts).toLocaleDateString()}</span></span>
-        <span><button data-triage="${p.id}" data-d="allow">allow</button> <button data-triage="${p.id}" data-d="deny" style="background:#7a3b3b">deny</button></span></li>`;
+        <span><button data-triage="${p.id}" data-d="allow">allow</button> <button data-triage="${p.id}" data-d="deny">deny</button></span></li>`;
     })
     .join("");
   document.querySelectorAll("[data-triage]").forEach((b) => (b.onclick = async () => {
@@ -214,7 +214,7 @@ async function loadAgents() {
       ].filter(Boolean).join(" · ");
       const actions = a.revoked
         ? '<span class="muted">revoked</span>'
-        : `<span><button data-agent-grants="${esc(a.id)}" class="secondary">grants</button> <button data-agent-rotate="${esc(a.id)}" class="secondary">rotate</button> <button data-agent-revoke="${esc(a.id)}" style="background:#7a3b3b">revoke</button></span>`;
+        : `<span><button data-agent-grants="${esc(a.id)}" class="secondary">grants</button> <button data-agent-rotate="${esc(a.id)}" class="secondary">rotate</button> <button data-agent-revoke="${esc(a.id)}">revoke</button></span>`;
       return `<li class="${a.revoked ? "revoked" : ""}"><span><b>${esc(a.display_name)}</b> <span class="muted">${esc(a.id)} · ${esc(a.kind)}</span><br>
         <span class="muted">tier: ${scope}${projects} · ${seen}</span>${narrowing ? `<br><span class="muted">autonomy: ${narrowing}</span>` : ""}<br>
         <span id="presence-${esc(a.id)}" class="presence"></span></span>${actions}</li>`;

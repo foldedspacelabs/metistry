@@ -123,6 +123,17 @@ export class QueryStore {
     return [...this.specs.keys()];
   }
 
+  /** One entry per loaded query: name, description, and its params' declared type + default (no `required`/sql — callers don't need those to pick a query). */
+  list(): { name: string; description: string; params: Record<string, { type: "int" | "text" | "boolean"; default?: ParamValue }> }[] {
+    return [...this.specs.values()].map(({ spec }) => ({
+      name: spec.name,
+      description: spec.description,
+      params: Object.fromEntries(
+        Object.entries(spec.params).map(([k, p]) => [k, p.default === undefined ? { type: p.type } : { type: p.type, default: p.default }]),
+      ),
+    }));
+  }
+
   async run(name: string, rawParams: Record<string, unknown> = {}): Promise<QueryResult> {
     const entry = this.specs.get(name);
     if (!entry) throw new QueryError("unknown_query", `no such query: ${name}`);

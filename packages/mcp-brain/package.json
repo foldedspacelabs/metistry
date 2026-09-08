@@ -27,6 +27,7 @@
   "dependencies": {
     "@foldedspacelabs/metistry-artifacts": "workspace:*",
     "@foldedspacelabs/metistry-core": "workspace:*",
+    "@foldedspacelabs/metistry-queries": "workspace:*",
     "@foldedspacelabs/metistry-tasks": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "yaml": "^2.9.0",

@@ -18,7 +18,7 @@ if [ -z "$IDENTITY" ]; then
   IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null | grep -o '"Developer ID Application[^"]*"' | head -1 | tr -d '"') || true
 fi
 if [ -n "${IDENTITY:-}" ]; then
-  codesign --force --options runtime --identifier com.foldedspacelabs.metistry.eventkit --sign "$IDENTITY" helper/ek-helper
+  codesign --force --options runtime --timestamp --identifier com.foldedspacelabs.metistry.eventkit --sign "$IDENTITY" helper/ek-helper
   echo "signed: $IDENTITY"
 else
   codesign --force --identifier com.foldedspacelabs.metistry.eventkit --sign - helper/ek-helper

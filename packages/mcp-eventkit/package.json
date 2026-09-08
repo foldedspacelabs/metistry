@@ -1,6 +1,6 @@
 {
   "name": "@foldedspacelabs/metistry-mcp-eventkit",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Metistry EventKit bridge: Calendar + Reminders over the §4.3 wire contract (HTTP + bearer auth + check() + preview-confirm). Ships a compiled, signed Swift helper; TCC-bound — runs as its own launchd service. Usable standalone.",
   "license": "Apache-2.0",
   "type": "module",

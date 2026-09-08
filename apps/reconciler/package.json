@@ -1,7 +1,7 @@
 {
   "name": "@metistry-apps/reconciler",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Metistry reconciler: the instance repo's sole committer and its vault bridge (D5). Holds the only working tree, runs the only git, serves read/list/search/log/diff/write over the §4.3 wire contract, and owns §4.13 change detection (content hash, links, renames, Obsidian conflict files). runs_on: host.",
   "license": "Apache-2.0",
   "type": "module",

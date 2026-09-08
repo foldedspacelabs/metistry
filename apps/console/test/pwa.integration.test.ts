@@ -103,7 +103,9 @@ describe.skipIf(!hasDb)("console PWA chunk", () => {
   // P10: Title Case names things — nav labels, screen titles, section headers.
   it("navigation labels and section headers are Title Case", async () => {
     const html = await (await fetch(base + "/")).text();
-    for (const label of ["Feed", "Chat", "Dashboard", "Capture", "Triage", "Status", "Devices", "Agents", "Artifacts"]) {
+    // "Needs You" is the triage tab's label since the reply-quality loop
+    // (docs/ops/reply-feedback.md) made it the single list — Title Case too.
+    for (const label of ["Feed", "Chat", "Dashboard", "Capture", "Needs You", "Status", "Devices", "Agents", "Artifacts"]) {
       expect(html).toContain(`>${label}</button>`);
     }
     expect(html).toContain("<h3>Components</h3>");

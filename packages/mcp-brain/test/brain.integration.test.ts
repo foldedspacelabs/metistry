@@ -11,6 +11,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { TasksService } from "@foldedspacelabs/metistry-tasks";
 import { EmbedUnavailableError } from "@foldedspacelabs/metistry-core";
+import { QueryStore } from "@foldedspacelabs/metistry-queries";
 import { createBrainServer, sha256Text, TOOL_NAMES, type AgentPrincipal, type VaultWriteRequest } from "../src/index.js";
 
 try {
@@ -97,8 +98,19 @@ describe.skipIf(!hasDb)("mcp-brain (real db, real MCP client)", () => {
         ('Knowledge/Areas/Other/Gamma.md', 'Gamma alpha', NULL, false)`,
     );
 
+    const queries = new QueryStore(pool);
+    queries.load(`
+name: itest_numbers
+description: fixture query for queries_list/queries_run tests
+params:
+  n: { type: int, default: 3 }
+sql: SELECT generate_series(1, :n) AS n
+cache_ttl: 0
+`);
+
     const brain = createBrainServer({
       db: pool,
+      queries,
       authenticate: async (req) => {
         const m = /^Bearer\s+(\S+)$/.exec(req.headers.authorization ?? "");
         return (m?.[1] && principals.get(m[1])) || null;
@@ -519,6 +531,47 @@ describe.skipIf(!hasDb)("mcp-brain (real db, real MCP client)", () => {
     expect(rows[1]!.meta).toMatchObject({ kind: "internal", tier: "areas", areas: ["Knowledge/"], path, created: true, provenance: { source: HUB } });
     expect(rows[1]!.meta.args.content).toMatch(/^<\d+ chars>$/);
     expect(rows[3]!.meta.current_sha256).toBe(updated.body.sha256);
+  });
+
+  it("queries_list/queries_run: internal always ok, external needs a `queries` grant, unknown is not_found, rows cap at 200", async () => {
+    const hub = await connect("tok-hub");
+    const list = await call(hub, "queries_list");
+    expect(list.isError).toBe(false);
+    expect(list.body.queries).toContainEqual({ name: "itest_numbers", description: "fixture query for queries_list/queries_run tests", params: { n: { type: "int", default: 3 } } });
+
+    const ran = await call(hub, "queries_run", { name: "itest_numbers", params: { n: 3 } });
+    expect(ran.isError).toBe(false);
+    expect(ran.body).toMatchObject({ name: "itest_numbers", params: { n: 3 }, rows: [{ n: 1 }, { n: 2 }, { n: 3 }], row_count: 3 });
+    expect(ran.body.as_of).toEqual(expect.any(String));
+    expect(ran.body.truncated).toBeUndefined();
+
+    const unknown = await call(hub, "queries_run", { name: "not-a-real-query" });
+    expect(unknown).toMatchObject({ isError: true, body: { error: { code: "not_found" } } });
+
+    // turn_id (every brain tool takes it): lands in runs.meta.turn_id, the join key activity_feed exposes
+    await call(hub, "queries_list", { turn_id: "itest-turn-1" });
+    await hub.close();
+    const { rows: turnRows } = await pool.query(
+      `SELECT meta->>'turn_id' AS turn_id FROM runs WHERE component = $1 AND tool = 'queries_list' ORDER BY id DESC LIMIT 1`,
+      [HUB],
+    );
+    expect(turnRows[0]!.turn_id).toBe("itest-turn-1");
+
+    // external, no grant: forbidden — uniform whether or not a store is even wired (queries-tools.ts checks the grant first)
+    const alice1 = await connect("tok-alice");
+    expect((await call(alice1, "queries_list")).body).toEqual({ error: { code: "forbidden", message: "not granted" } });
+    expect((await call(alice1, "queries_run", { name: "itest_numbers" })).body).toEqual({ error: { code: "forbidden", message: "not granted" } });
+    await alice1.close();
+
+    // grant queries: true — the SAME token, principal upgraded server-side, never asserted by the caller
+    grant("tok-alice", { id: ALICE, grants: { tier: "none", areas: [], queries: true }, projects: [PA] });
+    const alice2 = await connect("tok-alice");
+    const capped = await call(alice2, "queries_run", { name: "itest_numbers", params: { n: 250 } });
+    expect(capped.isError).toBe(false);
+    expect(capped.body).toMatchObject({ row_count: 200, truncated: true });
+    expect(capped.body.rows).toHaveLength(200);
+    await alice2.close();
+    grant("tok-alice", { id: ALICE, grants: { tier: "none", areas: [] }, projects: [PA] }); // restore alice's plain grant for the rest of the suite
   });
 
   it("every tool call is a two-phase runs row on the agent (kind=tool), with args summarized and bodies clipped", async () => {

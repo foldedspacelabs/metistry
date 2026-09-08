@@ -612,3 +612,14 @@ your git, on your machine.
   it made, and named queries exposed to the assistant as checkable
   answers. Leaving: the lakehouse, BI, ML, graph canvas, and the Elastic
   License.
+
+- 2026-09-08 — **Any agent can now ask the same questions the dashboard
+  answers.** `queries_list`/`queries_run` put invariant 3's one read path
+  — named, parameterized queries, never free-form SQL — on the mcp-brain
+  surface: an agent lists what's available (name, description, param
+  types/defaults) and runs one, capped at 200 rows. The instance's own
+  assistant always has it; an external agent needs an explicit `queries:
+  true` grant, a separate axis from the knowledge tier. Every mcp-brain
+  tool also now takes an optional `turn_id`, so one reply's tool calls
+  group together in the `activity_feed` — the first step toward a
+  per-reply audit trail a user can actually read. `packages/mcp-brain/README.md`.

@@ -86,6 +86,8 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     artifacts,
     // crews (Phase 5): the dispatcher reuses dispatch.ts's policy check and lands rows through the same tasks service
     crews: cfg.crews ? crewDispatcher(db, tasks, cfg.crews, cfg.targets) : undefined,
+    // queries_list/queries_run: the SAME QueryStore the dashboard reads through (invariant 3, one read path)
+    queries,
   });
 
   async function authenticate(req: IncomingMessage): Promise<Auth> {

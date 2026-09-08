@@ -1,5 +1,26 @@
 # @foldedspacelabs/metistry-cli
 
+## 0.2.0
+
+### Minor Changes
+
+- fe1f062: Two install verbs, terminal-first (the Mac app will drive the same ones):
+  `metistry connect-repo <url>` sets the instance repo's origin, obtains a
+  git credential the reconciler can push with unattended (GitHub device
+  flow, a PAT on stdin, or an ssh key) into the macOS login Keychain,
+  verifies with `ls-remote`, flushes the reconciler's queue and pushes; and
+  `metistry secrets sync|mint|list` makes the login Keychain the canonical
+  store (`metistry:<VAR>`) with `.env` generated from it. No secret reaches
+  argv, output, or `.git/config`.
+- Phase 5 complete and the desktop direction: crews (manifest-defined sub-agents with per-run scoped tokens and a local target), projects with the `mode: autonomous | review` kill switch, bundle caps, daily budgets and narrowing, the activity feed and agent presence in the PWA, the design system (tokens, components, wireframes) and the PWA restyle (iMessage-style composer with a collapsed actions menu, autocomplete for `@agents` and `/commands`, scroll preservation, reply-text density), reply tapbacks with a daily reply-review that proposes prompt improvements, Needs You as the single actionable list including the assistant's blocking questions, `queries_list`/`queries_run` over named queries with a `turn_id` join key, Phase 6 embeddings and hybrid search, `metistry connect-repo` and `secrets`, the launchd deployment shape with a sandboxed assistant, release notes from the CHANGELOG, and Developer ID signing of the Swift helpers.
+
+### Patch Changes
+
+- Updated dependencies [66d5c08]
+- Updated dependencies [4774e08]
+- Updated dependencies [fc0b525]
+  - @foldedspacelabs/metistry-core@0.2.0
+
 ## 0.1.0
 
 ### Minor Changes

@@ -1,5 +1,20 @@
 # @foldedspacelabs/metistry-artifacts
 
+## 0.2.0
+
+### Minor Changes
+
+- Phase 5 complete and the desktop direction: crews (manifest-defined sub-agents with per-run scoped tokens and a local target), projects with the `mode: autonomous | review` kill switch, bundle caps, daily budgets and narrowing, the activity feed and agent presence in the PWA, the design system (tokens, components, wireframes) and the PWA restyle (iMessage-style composer with a collapsed actions menu, autocomplete for `@agents` and `/commands`, scroll preservation, reply-text density), reply tapbacks with a daily reply-review that proposes prompt improvements, Needs You as the single actionable list including the assistant's blocking questions, `queries_list`/`queries_run` over named queries with a `turn_id` join key, Phase 6 embeddings and hybrid search, `metistry connect-repo` and `secrets`, the launchd deployment shape with a sandboxed assistant, release notes from the CHANGELOG, and Developer ID signing of the Swift helpers.
+
+### Patch Changes
+
+- Updated dependencies [66d5c08]
+- Updated dependencies [4774e08]
+- Updated dependencies
+- Updated dependencies [fc0b525]
+  - @foldedspacelabs/metistry-core@0.2.0
+  - @foldedspacelabs/metistry-tasks@0.2.0
+
 ## 0.1.0
 
 ### Minor Changes

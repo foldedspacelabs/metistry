@@ -248,12 +248,33 @@ async function sectionSystem(db: Db, now: Date): Promise<string[]> {
   if (flips.rows.length > 0) {
     lines.push(`• budget flipped to review mode: ${flips.rows.map((r: any) => `${r.project}${num(r.n) > 1 ? ` ×${num(r.n)}` : ""}`).join(", ")}`);
   }
+  lines.push(await replyQuality(db, now));
   const inbox = await db.query(
     `SELECT count(*) AS n, min(ts) AS oldest FROM inbox WHERE triaged_at IS NULL AND status IN ('new', 'classified')`,
   );
   const untriaged = num(inbox.rows[0]?.n);
   lines.push(untriaged === 0 ? "• inbox clear" : `• inbox: ${untriaged} untriaged, oldest ${daysBetween(inbox.rows[0].oldest, now)}d`);
   return lines;
+}
+
+// Reply quality (docs/ops/reply-feedback.md): the week's tapbacks, and whether
+// the self-heal pass left an improvement proposal waiting. The proposal is
+// never applied by anything here — the user allows it in triage or it sits.
+async function replyQuality(db: Db, now: Date): Promise<string> {
+  const { rows } = await db.query(
+    `SELECT count(*) AS rated, count(*) FILTER (WHERE rating = -1) AS negative
+     FROM reply_feedback WHERE ts > $1::timestamptz - interval '7 days'`,
+    [now],
+  );
+  const rated = num(rows[0]?.rated);
+  const negative = num(rows[0]?.negative);
+  const waiting = await db.query(
+    `SELECT count(*) AS n FROM proposals
+     WHERE kind = 'improvement' AND source_agent = 'reply-review' AND decision = 'pending'`,
+  );
+  const n = num(waiting.rows[0]?.n);
+  if (rated === 0 && n === 0) return "• reply quality: nothing rated this week";
+  return `• reply quality: ${rated} rated, ${negative} 👎${n > 0 ? ` — ${plural(n, "improvement proposal")} awaiting you` : ""}`;
 }
 
 interface EkEvent {

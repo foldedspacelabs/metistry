@@ -28,6 +28,7 @@ const BAD_CHARS = /[\x00-\x1f\x7f\\]/;
 /** §4.7 protected paths — the user's hand only. Prefix match on `instance-migrations/`. */
 export const PROTECTED_FILES = new Set([
   "identity.yaml",
+  "assistant-prompt.md", // the D4 system-prompt overlay: how the assistant behaves = the user's hand (invariant 2)
   "rules.yaml",
   "sources.yaml",
   "deployment.yaml",

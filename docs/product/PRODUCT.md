@@ -623,3 +623,22 @@ your git, on your machine.
   tool also now takes an optional `turn_id`, so one reply's tool calls
   group together in the `activity_feed` — the first step toward a
   per-reply audit trail a user can actually read. `packages/mcp-brain/README.md`.
+
+- 2026-09-08 — Safety mechanism shipped, and a goal sharpened: **the system
+  learns from a thumbs-down without ever teaching itself.** A 👍/👎 sits
+  under every reply; daily, whenever there is new 👎 since its last pass, a
+  model-free routine turns the 👎 —
+  with the prompt, the reply, the user's note and that turn's tool calls —
+  into **one** proposal carrying a *suggested* edit to the assistant's own
+  prompt. It is never applied: the user allows it in triage, and only then
+  does the console write the overlay through the vault as principal `user`,
+  as a reviewable commit in the user's name, picked up on the next restart.
+  The prompt overlay is a protected path, so the assistant cannot reach it
+  even through a bug elsewhere. The same PR made the second half true:
+  **one list, "Needs You"** — knowledge, agent reports, elevation grants,
+  improvements, and now the assistant's own blocking questions (a reply
+  ending in a `decision` block becomes a queue item, answerable in chat,
+  from triage, or from a notification) are all rows in one table with one
+  triage endpoint, one push path, one brief section. The answer to "can
+  every decision I owe the system live in one place" is yes, and the
+  interface says so. `docs/ops/reply-feedback.md`.

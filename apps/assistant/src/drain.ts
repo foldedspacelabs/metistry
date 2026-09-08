@@ -6,7 +6,7 @@
 // Phase 3+ when brain-query exists — for now continuity is the SDK
 // transcript, per §4.17 rule 6's fast-path).
 
-import { finishRun, startRun } from "@foldedspacelabs/metistry-core";
+import { finishRun, parseDecisionBlock, startRun } from "@foldedspacelabs/metistry-core";
 import type { Engine } from "./engine.js";
 
 export interface Db {
@@ -60,11 +60,22 @@ export async function drainOne(db: Db, engine: Engine, defaultModel: string): Pr
        ON CONFLICT (id) DO UPDATE SET last_active_at = now(), turns = sessions.turns + 1`,
       [result.session_id, msg.thread],
     );
-    await db.query(`INSERT INTO outbound_messages (thread, text, in_reply_to) VALUES ($1, $2, $3)`, [
-      msg.thread,
-      result.text,
-      msg.id,
-    ]);
+    const out = await db.query(
+      `INSERT INTO outbound_messages (thread, text, in_reply_to) VALUES ($1, $2, $3) RETURNING id`,
+      [msg.thread, result.text, msg.id],
+    );
+    // A reply that ends with a ```decision block is a blocking question: it
+    // becomes a `decision` row in the one queue (D7), answerable from chat,
+    // triage or a notification. Parsed at the point the reply is stored —
+    // the convention is in the seed prompt, the enforcement is here, and a
+    // malformed block simply yields no queue item.
+    const ask = parseDecisionBlock(result.text);
+    if (ask) {
+      await db.query(
+        `INSERT INTO proposals (kind, source_agent, trust, payload) VALUES ('decision', 'assistant', 'internal', $1)`,
+        [JSON.stringify({ title: ask.title, options: ask.options, message_id: Number(out.rows[0]?.id), thread: msg.thread, in_reply_to: Number(msg.id) })],
+      );
+    }
     await db.query(`UPDATE inbound_messages SET status = 'done', session_id = $2 WHERE id = $1`, [
       msg.id,
       result.session_id,

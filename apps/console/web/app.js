@@ -56,14 +56,39 @@ async function loadMessages() {
   const res = await api("/api/messages?limit=30");
   const { messages } = await res.json();
   const chrono = messages.reverse();
-  const fingerprint = JSON.stringify(chrono.map((m) => [m.direction, m.id, m.status]));
+  const fingerprint = JSON.stringify(chrono.map((m) => [m.direction, m.id, m.status, m.feedback?.rating ?? 0]));
   if (fingerprint === lastRender) return; // no flicker on idle polls
   lastRender = fingerprint;
   $("messages").innerHTML = chrono
-    .map((m) => `<li class="${m.direction}"><div class="meta">${new Date(m.ts).toLocaleString()}${m.direction === "in" ? ` · ${m.status}` : ""}</div>${esc(m.text)}</li>`)
+    .map((m) => `<li class="${m.direction}"><div class="meta">${new Date(m.ts).toLocaleString()}${m.direction === "in" ? ` · ${m.status}` : ""}</div>${esc(m.text)}${m.direction === "out" ? tapbacks(m) : ""}</li>`)
     .join("");
+  wireTapbacks();
   const list = $("messages");
   list.scrollTop = list.scrollHeight; // latest message always in view
+}
+
+// ----- reply quality: a tapback on any reply (docs/ops/reply-feedback.md).
+// Two buttons and an optional one-line note; tapping the lit one clears it.
+function tapbacks(m) {
+  const r = m.feedback?.rating;
+  return `<div class="meta fb">
+    <button data-fb="${m.id}" data-r="1" class="${r === 1 ? "on" : ""}" aria-label="good reply">👍</button>
+    <button data-fb="${m.id}" data-r="-1" class="${r === -1 ? "on" : ""}" aria-label="bad reply">👎</button>
+    ${m.feedback?.note ? `<span>${esc(m.feedback.note)}</span>` : ""}</div>`;
+}
+
+function wireTapbacks() {
+  document.querySelectorAll("[data-fb]").forEach((b) => (b.onclick = async () => {
+    const path = `/api/messages/${b.dataset.fb}/feedback`;
+    if (b.classList.contains("on")) await api(path, { method: "DELETE" });
+    else {
+      const rating = Number(b.dataset.r);
+      const note = rating === -1 ? (prompt("what was wrong with it? (optional)") ?? "") : "";
+      await api(path, { method: "POST", body: JSON.stringify({ rating, note }) });
+    }
+    lastRender = "";
+    loadMessages();
+  }));
 }
 
 // live updates: poll while the chat is visible; burst after a send
@@ -150,23 +175,51 @@ $("push-test").onclick = async () => {
   if (result !== "sent") alert(`push: ${result}`);
 };
 
-// ----- triage (D7 proposals; every field output-encoded — CRIT-7) -----
+// ----- Needs You (D7: ONE queue for everything that needs the user —
+// knowledge, reports, elevations, improvements, and the assistant's own
+// blocking questions). Grouped by kind, oldest first; every field
+// output-encoded, attribute values quote-safe too (CRIT-7). -----
+const KIND_LABEL = {
+  decision: "the assistant is waiting on you",
+  grant_elevation: "access requests",
+  improvement: "system improvements",
+  knowledge: "knowledge to keep",
+  report: "agent reports",
+  draft_settle: "drafts to settle",
+  action: "suggested actions",
+};
+const attr = (s) => esc(s).replaceAll('"', "&quot;");
+
 async function loadTriage() {
   const res = await api("/api/proposals");
   const { proposals } = await res.json();
   $("triage-empty").hidden = proposals.length > 0;
-  $("proposal-list").innerHTML = proposals
-    .map((p) => {
-      const c = p.payload?.classification ?? {};
-      const label = c.action || c.title || p.payload?.title || p.kind; // review proposals (§4.21) carry a top-level title
-      return `<li><span>${esc(label)} <span class="muted">${esc(p.kind)} · ${esc(c.kind ?? "")} · ${esc(p.source_agent)} · ${new Date(p.ts).toLocaleDateString()}</span></span>
-        <span><button data-triage="${p.id}" data-d="allow">allow</button> <button data-triage="${p.id}" data-d="deny" style="background:#7a3b3b">deny</button></span></li>`;
-    })
+  const tab = document.querySelector('nav button[data-view="triage"]');
+  if (tab) tab.textContent = proposals.length ? `Needs You (${proposals.length})` : "Needs You";
+  const groups = new Map();
+  for (const p of [...proposals].sort((a, b) => new Date(a.ts) - new Date(b.ts))) {
+    if (!groups.has(p.kind)) groups.set(p.kind, []);
+    groups.get(p.kind).push(p);
+  }
+  $("proposal-list").innerHTML = [...groups]
+    .map(([kind, rows]) => `<li class="muted">${esc(KIND_LABEL[kind] ?? kind)} · ${rows.length}</li>` + rows.map(proposalRow).join(""))
     .join("");
   document.querySelectorAll("[data-triage]").forEach((b) => (b.onclick = async () => {
     await api(`/api/proposals/${b.dataset.triage}`, { method: "POST", body: JSON.stringify({ decision: b.dataset.d }) });
     loadTriage();
   }));
+}
+
+function proposalRow(p) {
+  const c = p.payload?.classification ?? {};
+  const label = c.action || c.title || p.payload?.title || p.kind; // review proposals (§4.21) carry a top-level title
+  // a `decision` proposal is answered with its OWN options (the server checks them again)
+  const opts = p.kind === "decision" && Array.isArray(p.payload?.options) ? p.payload.options.slice(0, 8) : null;
+  const buttons = opts
+    ? opts.map((o) => `<button data-triage="${p.id}" data-d="${attr(o)}">${esc(o)}</button>`).join(" ")
+    : `<button data-triage="${p.id}" data-d="allow">allow</button> <button data-triage="${p.id}" data-d="deny" style="background:#7a3b3b">deny</button>`;
+  return `<li><span>${esc(label)} <span class="muted">${esc(p.kind)} · ${esc(c.kind ?? "")} · ${esc(p.source_agent)} · ${new Date(p.ts).toLocaleDateString()}</span></span>
+        <span>${buttons}</span></li>`;
 }
 
 // ----- devices -----

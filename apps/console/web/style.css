@@ -111,3 +111,8 @@ button.secondary { background: #2a323b; }
 .chip.state-interrupted { background: #7a3b3b; color: white; }
 .chip.state-over-cap { background: #7a3b3b; color: white; }
 .chip.state-idle { background: #2a323b; color: var(--mut); }
+
+/* reply tapbacks (docs/ops/reply-feedback.md) — 👍/👎 under each reply */
+#messages .fb { display: flex; align-items: center; gap: 2px; margin-top: 4px; }
+#messages .fb button { background: none; border: 0; padding: 0 4px; font-size: 15px; line-height: 1.4; opacity: .45; }
+#messages .fb button.on { opacity: 1; }

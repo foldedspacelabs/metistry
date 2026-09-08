@@ -30,7 +30,7 @@ describe("parseVaultPath (syntactic)", () => {
 
 describe("protected paths (§4.7)", () => {
   it("names the set and restricts it to the user principal", () => {
-    for (const p of ["identity.yaml", "rules.yaml", "sources.yaml", "deployment.yaml", "metistry.lock", "CLAUDE.md", "queries/x.yaml", "agents/a/manifest.yaml", "routines/r/manifest.yaml", "extensions/e/x.ts"]) {
+    for (const p of ["identity.yaml", "assistant-prompt.md", "rules.yaml", "sources.yaml", "deployment.yaml", "metistry.lock", "CLAUDE.md", "queries/x.yaml", "agents/a/manifest.yaml", "routines/r/manifest.yaml", "extensions/e/x.ts"]) {
       expect(isProtected(p), p).toBe(true);
       expect(writeAllowed(p, "assistant"), p).toBe(false);
       expect(writeAllowed(p, "user"), p).toBe(true);

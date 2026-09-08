@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 800" width="1000" height="800" role="img" aria-labelledby="ttl desc">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 940" width="1000" height="940" role="img" aria-labelledby="ttl desc">
   <title id="ttl">macOS — chat with collapsed tool activity and the model picker</title>
-  <desc id="desc">Annotated wireframe: a chat thread where each assistant turn carries an explicit turn state, a collapsed tool-activity disclosure summarising count, duration and cost, and a structured question-answer prompt card; the toolbar holds the model and effort picker.</desc>
+  <desc id="desc">Annotated wireframe: a chat thread where each assistant turn carries an explicit turn state, a collapsed tool-activity disclosure summarising count, duration and cost, and a structured question-answer prompt card; the toolbar holds the model and effort picker. The composer shows an inline suggestion listbox: the user has typed an at sign and a d, and three agents are offered, ranked prefix first.</desc>
   <style>
     text { font-family: -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", Roboto, sans-serif; fill: #12171c; font-size: 13px; }
     .t2 { fill: #4d565f; font-size: 12px } .t3 { fill: #646d77; font-size: 11px }
@@ -18,11 +18,11 @@
     .lg { font-size: 12px }
   </style>
 
-  <rect width="1000" height="800" fill="#ffffff"/>
+  <rect width="1000" height="940" fill="#ffffff"/>
   <text x="24" y="30" class="h2">macOS — Chat</text>
   <text x="24" y="50" class="t2">Collapsed tool activity · explicit turn state · per-turn model and effort picker in the toolbar</text>
 
-  <rect class="win" x="24" y="66" width="720" height="640" rx="12"/>
+  <rect class="win" x="24" y="66" width="720" height="770" rx="12"/>
   <path class="ln" d="M24 104 H744"/>
   <circle cx="46" cy="86" r="6" fill="#ff5f57"/><circle cx="66" cy="86" r="6" fill="#febc2e"/><circle cx="86" cy="86" r="6" fill="#28c840"/>
   <text x="112" y="90" class="hd">Chat</text>
@@ -68,19 +68,29 @@
   <text x="62" y="588" class="t3">default in 6h: Show me first</text>
 
   <!-- composer -->
-  <path class="ln" d="M25 618 H743"/>
-  <circle class="sf" cx="62" cy="652" r="18"/><text x="62" y="659" class="acc" text-anchor="middle" font-size="18">+</text>
-  <rect class="sf" x="88" y="632" width="536" height="40" rx="10"/>
-  <text x="102" y="657" fill="#646d77">ask or tell…</text>
-  <text x="586" y="657" class="t2">/ @ ⌘K</text>
-  <rect x="636" y="632" width="76" height="40" rx="10" fill="#2b5fd0"/><text x="674" y="657" fill="#fff" text-anchor="middle" font-size="13">Send</text>
+  <!-- inline suggestion listbox (§3.6): anchored to the field, above it, six rows max -->
+  <text x="44" y="638" class="t3">typing <tspan class="mono">@d</tspan> — the same generated list, filtered; the field keeps focus and the caret</text>
+  <rect class="el" x="88" y="650" width="320" height="86" rx="12" fill="#ffffff" stroke="#b6bec8"/>
+  <rect x="94" y="656" width="308" height="24" rx="6" fill="#e6edfc"/>
+  <text x="102" y="673" class="mono ag">@drey</text><text x="168" y="673" class="t3">areas · dev</text><circle cx="330" cy="668" r="4" fill="#1c7a45"/><text x="340" y="673" class="t3">working</text>
+  <text x="102" y="698" class="mono ag">@drey-dev</text><text x="180" y="698" class="t3">metistry · dev</text><circle cx="330" cy="693" r="4" fill="#646d77"/><text x="340" y="698" class="t3">idle</text>
+  <text x="102" y="723" class="mono ag">@doc-bot</text><text x="180" y="723" class="t3">docs</text><circle cx="330" cy="718" r="4" fill="#6a4bbd"/><text x="340" y="723" class="t3">blocked</text>
+  <text x="416" y="673" class="t3">prefix → substring → recency</text>
+  <text x="416" y="698" class="t3">↑↓ move · Enter inserts · Esc closes</text>
+
+  <path class="ln" d="M25 748 H743"/>
+  <circle class="sf" cx="62" cy="782" r="18"/><text x="62" y="789" class="acc" text-anchor="middle" font-size="18">+</text>
+  <rect class="sf" x="88" y="762" width="536" height="40" rx="10" stroke="#2b5fd0" stroke-width="2"/>
+  <text x="102" y="787">look at the flaky lease test — <tspan class="mono ag" font-size="13">@d</tspan><tspan opacity="0.4">|</tspan></text>
+  <text x="586" y="787" class="t2">/ @ ⌘K</text>
+  <rect x="636" y="762" width="76" height="40" rx="10" fill="#2b5fd0"/><text x="674" y="787" fill="#fff" text-anchor="middle" font-size="13">Send</text>
 
   <!-- callouts -->
   <circle class="cw" cx="592" cy="87" r="10"/><text class="cn" x="592" y="91">1</text>
   <circle class="cw" cx="34" cy="200" r="10"/><text class="cn" x="34" y="204">2</text>
   <circle class="cw" cx="34" cy="330" r="10"/><text class="cn" x="34" y="334">3</text>
   <circle class="cw" cx="34" cy="510" r="10"/><text class="cn" x="34" y="514">4</text>
-  <circle class="cw" cx="34" cy="652" r="10"/><text class="cn" x="34" y="656">5</text>
+  <circle class="cw" cx="34" cy="782" r="10"/><text class="cn" x="34" y="786">5</text>
   <circle class="cw" cx="516" cy="292" r="10"/><text class="cn" x="516" y="296">6</text>
 
   <!-- legend -->
@@ -109,20 +119,31 @@
   <text x="782" y="452" class="lg">than a typed reply.</text>
 
   <text x="770" y="484" class="lg">⑤ Composer: ＋, "/" and "@" open the same</text>
-  <text x="782" y="500" class="lg">generated menu as ⌘K, inline and</text>
-  <text x="782" y="516" class="lg">anchored above the field (§3.6).</text>
+  <text x="782" y="500" class="lg">generated list (§3.6). Typing <tspan class="mono">@d</tspan> suggests</text>
+  <text x="782" y="516" class="lg"><tspan class="mono">@drey</tspan> in an inline listbox under the field;</text>
+  <text x="782" y="532" class="lg">↑↓ move, Enter inserts, Esc closes. Every</text>
+  <text x="782" y="548" class="lg">row — here and in the menu — inserts itself</text>
+  <text x="782" y="564" class="lg">at the caret and never sends.</text>
 
-  <text x="770" y="548" class="lg">⑥ Quick links and targeted actions —</text>
-  <text x="782" y="564" class="lg">a door, not a dead end (ux-direction).</text>
+  <text x="770" y="596" class="lg">⑥ Quick links and targeted actions —</text>
+  <text x="782" y="612" class="lg">a door, not a dead end (ux-direction).</text>
 
-  <text x="770" y="600" class="hd">Reduced Motion</text>
-  <text x="770" y="624" class="lg">Disclosure opens instantly; the working</text>
-  <text x="770" y="640" class="lg">state is a word, never a pulsing dot.</text>
+  <text x="770" y="648" class="hd">⌘K Is the Rich Reply Surface Here</text>
+  <text x="770" y="672" class="lg">It stays, and it is the affordance the Mac</text>
+  <text x="770" y="688" class="lg">earns by having a keyboard. The inline list</text>
+  <text x="770" y="704" class="lg">is capped at six rows and one token; the</text>
+  <text x="770" y="720" class="lg">palette searches <tspan font-style="italic">all four groups at once</tspan>,</text>
+  <text x="770" y="736" class="lg">shows full descriptions and shortcuts,</text>
+  <text x="770" y="752" class="lg">previews an agent's presence before you</text>
+  <text x="770" y="768" class="lg">address it, and stays open across several</text>
+  <text x="770" y="784" class="lg">insertions — a command, an agent and a</text>
+  <text x="770" y="800" class="lg">model pin without reopening anything.</text>
+  <text x="770" y="816" class="lg">Same deterministic ranking as the inline</text>
+  <text x="770" y="832" class="lg">list; results insert at the caret; Esc closes</text>
+  <text x="770" y="848" class="lg">it having changed nothing. Shown only</text>
+  <text x="770" y="864" class="lg">where <tspan class="mono">(pointer: fine)</tspan> matches.</text>
 
-  <text x="770" y="672" class="hd">The Transcript Never Moves</text>
-  <text x="770" y="696" class="lg">A poll is a repaint, not a navigation. The</text>
-  <text x="770" y="712" class="lg">list scrolls only when the reader is</text>
-  <text x="770" y="728" class="lg">already at the bottom; otherwise the</text>
-  <text x="770" y="744" class="lg">reply raises a "↓ New Reply" pill (P9).</text>
-  <text x="24" y="782" class="t3">docs/product/design-system.md §3.4 chat message · §3.5 prompt card · §3.6 composer actions menu · §3.7 model picker</text>
+  <text x="770" y="900" class="hd">Reduced Motion · P9</text>
+  <text x="770" y="920" class="lg">Disclosure opens instantly; a poll is a repaint, not a navigation.</text>
+  <text x="24" y="880" class="t3">docs/product/design-system.md §3.4 chat message · §3.5 prompt card · §3.6 composer actions menu, autocomplete and the ⌘K palette · §3.7 model picker · §4 reply text</text>
 </svg>

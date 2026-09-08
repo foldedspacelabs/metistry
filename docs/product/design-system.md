@@ -162,6 +162,14 @@ identifier-casing rules (`CLAUDE.md`) are untouched by it.
 | **sentence case** | body copy, helper text, placeholders, empty-state prose, receipts, error messages, and buttons — verb-first per the HIG ("Send", "Allow", "Request Changes" are control labels and take Title Case; "queued — will send when the instance is reachable" is prose and does not) |
 | **as-is, always** | identifiers — agent ids, slugs, tool names, file paths, query names, `mode:` values, tier names. Rendered in `mono`, never case-corrected, because `drey-dev` is a key, not a word |
 
+**Where it is applied matters as much as the rule.** Title Case is a
+*rendering*, applied in the view layer and never written to the
+database, and it is applied only to strings the system itself composed.
+An agent-authored subject or body is data (P1) and is never
+case-corrected — the two principles meet at §3.2's allow-list of feed
+kinds, which is the only place in the system where a stored subject is
+re-cased.
+
 *Why:* this console sets machine identifiers beside human labels on
 every row. When both are lowercase the reader cannot tell which strings
 they could have typed differently and which ones they could not — and
@@ -242,7 +250,7 @@ text and get no exemption. Non-text roles (the focus ring) are held to
 **3:1**. Apple's accessibility guidance sets the same bars: 4.5:1 for
 text, 3:1 for non-text.
 
-All 58 declared pairs pass:
+All 74 declared pairs pass:
 
 | foreground | on | mode | ratio | minimum | AA |
 | --- | --- | --- | ---: | ---: | --- |
@@ -252,12 +260,24 @@ All 58 declared pairs pass:
 | `text-primary` | `surface` | dark | 14.56:1 | 4.5:1 | pass |
 | `text-primary` | `elevated` | light | 18.03:1 | 4.5:1 | pass |
 | `text-primary` | `elevated` | dark | 12.64:1 | 4.5:1 | pass |
+| `text-primary` | `sunken` | light | 15.79:1 | 4.5:1 | pass |
+| `text-primary` | `sunken` | dark | 16.44:1 | 4.5:1 | pass |
+| `text-primary` | `agent-quiet` | light | 15.57:1 | 4.5:1 | pass |
+| `text-primary` | `agent-quiet` | dark | 14.40:1 | 4.5:1 | pass |
+| `text-primary` | `accent-quiet` | light | 15.35:1 | 4.5:1 | pass |
+| `text-primary` | `accent-quiet` | dark | 12.79:1 | 4.5:1 | pass |
 | `text-secondary` | `bg` | light | 6.97:1 | 4.5:1 | pass |
 | `text-secondary` | `bg` | dark | 8.65:1 | 4.5:1 | pass |
 | `text-secondary` | `surface` | light | 7.47:1 | 4.5:1 | pass |
 | `text-secondary` | `surface` | dark | 7.88:1 | 4.5:1 | pass |
 | `text-secondary` | `elevated` | light | 7.47:1 | 4.5:1 | pass |
 | `text-secondary` | `elevated` | dark | 6.84:1 | 4.5:1 | pass |
+| `text-secondary` | `sunken` | light | 6.54:1 | 4.5:1 | pass |
+| `text-secondary` | `sunken` | dark | 8.90:1 | 4.5:1 | pass |
+| `text-secondary` | `agent-quiet` | light | 6.45:1 | 4.5:1 | pass |
+| `text-secondary` | `agent-quiet` | dark | 7.79:1 | 4.5:1 | pass |
+| `text-secondary` | `accent-quiet` | light | 6.36:1 | 4.5:1 | pass |
+| `text-secondary` | `accent-quiet` | dark | 6.92:1 | 4.5:1 | pass |
 | `text-tertiary` | `bg` | light | 4.90:1 | 4.5:1 | pass |
 | `text-tertiary` | `bg` | dark | 6.25:1 | 4.5:1 | pass |
 | `text-tertiary` | `surface` | light | 5.26:1 | 4.5:1 | pass |
@@ -266,12 +286,16 @@ All 58 declared pairs pass:
 | `accent` | `bg` | dark | 8.06:1 | 4.5:1 | pass |
 | `accent` | `surface` | light | 5.75:1 | 4.5:1 | pass |
 | `accent` | `surface` | dark | 7.35:1 | 4.5:1 | pass |
+| `accent` | `accent-quiet` | light | 4.90:1 | 4.5:1 | pass |
+| `accent` | `accent-quiet` | dark | 6.45:1 | 4.5:1 | pass |
 | `on-accent` | `accent` | light | 5.75:1 | 4.5:1 | pass |
 | `on-accent` | `accent` | dark | 8.03:1 | 4.5:1 | pass |
 | `agent` | `bg` | light | 5.84:1 | 4.5:1 | pass |
 | `agent` | `bg` | dark | 8.55:1 | 4.5:1 | pass |
 | `agent` | `surface` | light | 6.26:1 | 4.5:1 | pass |
 | `agent` | `surface` | dark | 7.79:1 | 4.5:1 | pass |
+| `agent` | `agent-quiet` | light | 5.41:1 | 4.5:1 | pass |
+| `agent` | `agent-quiet` | dark | 7.71:1 | 4.5:1 | pass |
 | `ok` | `bg` | light | 5.00:1 | 4.5:1 | pass |
 | `ok` | `bg` | dark | 10.13:1 | 4.5:1 | pass |
 | `ok` | `surface` | light | 5.36:1 | 4.5:1 | pass |
@@ -305,12 +329,18 @@ All 58 declared pairs pass:
 | `focus-ring` | `surface` | light | 5.75:1 | 3:1 | pass |
 | `focus-ring` | `surface` | dark | 7.35:1 | 3:1 | pass |
 
-Not in the table, and deliberately: `accent-quiet` and `agent-quiet` are
-*background* fills that always carry `text-primary` or their matching
-strong role on top — they are covered by the `text-primary on surface`
-rows because their luminance sits between `surface` and `bg` in each
-mode. `border` is decorative, not a control boundary; `border-strong` is
-what a focusable input uses.
+The three quiet fills — `sunken`, `agent-quiet`, `accent-quiet` — are
+declared grounds now rather than assumed ones (added with §4). They are
+exactly the backgrounds a long reply sits on: your own turn on
+`accent-quiet`, quoted tool output on `agent-quiet`, a code block on
+`sunken`. Reply prose is set at 15pt, below the large-text exemption, so
+"it's close enough to `surface`" was not an argument worth keeping —
+each pair is computed. `agent on agent-quiet` (5.41:1 light, 7.71:1
+dark) matters most: it is the tool-disclosure summary, agent ink on the
+agent wash, and it was previously unchecked.
+
+`border` is decorative, not a control boundary; `border-strong` is what
+a focusable input uses; `scrim` is an alpha layer, not a text pair.
 
 ### 2.3 Type scale
 
@@ -346,7 +376,9 @@ works offline and on your own machine.
 **Usage.** `headline` for a row's subject; `subhead` for its detail;
 `footnote` for metadata (timestamps, ids, "seen 2h ago"); `caption-2`
 for chip text. Nothing below `caption-2`, and `caption-2` never carries
-information that is not repeated elsewhere.
+information that is not repeated elsewhere. **Assistant and agent reply
+prose does not use this scale at all** — it has its own group, tuned for
+density rather than scanning (§4).
 
 ### 2.4 Spacing, size, radius
 
@@ -441,15 +473,11 @@ data is absent stays enabled and shows its empty state — P5) · focused
   `TabView` adopts the sidebar.
 - **PWA** — one `<nav id="nav">` element, two presentations. Below
   `wide-breakpoint` (900px) it is a bottom tab bar: `position: fixed`,
-  `padding-bottom: env(safe-area-inset-bottom)`. At or above it, the same
-  `<nav>` becomes a left sidebar in a CSS grid — *no markup change, no
-  JS*, so the existing ids and test hooks survive. Glyphs come from
-  `::before` per `[data-view]` for the same reason.
-  **Where the PWA differs from iOS, deliberately:** the web bar carries
-  all ten destinations in a horizontally scrolling strip rather than five
-  plus a More tab. A "more" disclosure needs either markup grouping or
-  script; the strip needs neither, and unlike a native tab bar it has a
-  real scroll affordance. Revisit if the destination list grows again.
+  `padding-bottom: env(safe-area-inset-bottom)`, five primary
+  destinations plus a "more" disclosure. At or above it, the same `<nav>`
+  becomes a left sidebar in a CSS grid — *no markup change, no JS*, so
+  the existing ids and test hooks survive. Buttons keep
+  `aria-current="page"` on the active view.
 
 ### 3.2 Activity feed row
 
@@ -466,6 +494,38 @@ owner (P1). Kinds come from the `activity_feed` query: `tool`, `turn`,
 **States.** default · hover (surface lifts to `elevated`, no colour) ·
 pressed · focused · failure (the glyph, not the row, takes `failed`) ·
 filtered-empty (the empty state, §3.15).
+
+**Titles are Title Cased at render, and only for known kinds (P10 + P1).**
+A feed subject is a *card title*, so P10 says Title Case: "Collector Run
+Failed", not "collector run failed". But a subject is sometimes a string
+an agent wrote, and P1 says agent text is data — data is not
+case-corrected. The two are reconciled by *where* the rule is applied:
+
+- **Title-case at render time only**, in the view layer, from a
+  **closed allow-list of `activity_feed` kinds** whose subject the
+  console itself composes — `collector_run`, `proposal_created`,
+  `proposal_decided`, `project_mode`, `agent_admin`, `brief`, `review`,
+  `alert`, `task_op`, `crew_run`, `work_history`. Their subjects are
+  system phrasings, so casing them is formatting our own copy.
+- **Never** for a kind whose subject can carry agent- or user-authored
+  text — `turn`, `tool`, `dispatch` — and never for a detail line, which
+  is prose (sentence case) or a quotation. Those render exactly as
+  stored.
+- **Never in the database.** The stored row is untouched; two clients
+  reading the same row must be able to disagree about presentation and
+  agree about content.
+- **Identifiers inside a subject stay as-is** — `github-state`,
+  `knowledge_search`, `mode: hybrid`, a path. The transform lowercases
+  nothing, skips any token containing `/`, `_`, `-`, `.`, `:` or a
+  digit, skips tokens that are already mixed-case, and leaves the short
+  joining words (`a`, `an`, `and`, `at`, `by`, `for`, `in`, `of`, `on`,
+  `or`, `the`, `to`, `via`) lowercase unless they lead.
+
+*Why a list and not a heuristic:* "is this string ours?" cannot be
+answered by looking at the string. It can be answered by looking at its
+kind, and the kind is a closed set the query already returns. A new kind
+is not title-cased until someone adds it deliberately — the safe default
+is to leave text alone.
 
 **Platform notes.** SwiftUI: a `List` row with `.listRowSeparator`, SF
 Symbols per kind (`wrench.and.screwdriver`, `bubble.left.and.bubble.right`,
@@ -603,15 +663,71 @@ grouped, in this order:
 | Attach | Photo · File · Scan | platform pickers |
 | Model & Effort | the §3.7 picker, inline | `rules.yaml` tiers |
 
-**States.** collapsed (default) · expanded · filtering (typing `/` or
-`@` at the start of the field expands the same list, already filtered) ·
+**States.** collapsed (default) · expanded · **suggesting** (see below) ·
 executing · unavailable-item (a command whose tier the instance has not
 configured is listed and disabled *with the reason* — P4, never hidden).
+
+**Composer autocomplete.** Typing `@d` suggests `@drey`; typing `/` lists
+commands and narrows them as the token grows. It is the same generated
+list as the menu, filtered — a **third rendering, not a third source**.
+
+- **Trigger.** `@` or `/` typed at the start of the field or after
+  whitespace, and only there: `foo@bar` and a path like `docs/product`
+  never open it. The token ends at the next space, which closes it.
+- **Ranking, deterministic** (P5 — no model, and no "smart" reordering
+  between keystrokes): **prefix match first, then substring, then
+  recency**, each group in a stable order, ties broken by the id.
+  Recency is last-used-in-this-instance, so the list is predictable
+  before the user has any history and merely convenient after.
+- **Anatomy.** An inline list *directly under* the field, at most six
+  rows, each `glyph · name · one-line description`, plus a footer count
+  when more matched. Presence (§3.3) rides the agent rows, so a
+  suggestion says whether the agent can act. It is a listbox, not a
+  menu: the field keeps focus and keeps its caret throughout.
+- **Keyboard.** `↓`/`↑` move the selection, `Enter` (or `Tab`) inserts
+  the selected item, `Esc` closes the list without changing the text —
+  and only then does a second `Esc` blur the field. Typing a character
+  that matches nothing closes it rather than showing an empty box; the
+  user is mid-sentence, not mid-search.
+- **Touch.** Every row is a 44pt tap target that inserts on tap.
+- **Never.** It does not send, does not scroll the transcript (P9), does
+  not steal `Enter` when nothing is selected, and never rewrites text the
+  user typed beyond completing the token it is completing.
+
+**Everything in the menu inserts itself (P7's "buttons over memorised
+syntax", made literal).** A quick action, a command row, an agent tag —
+tapping any of them **writes its text into the reply at the caret** and
+returns focus to the field with the caret after the inserted token and a
+trailing space. Nothing in the menu sends on tap: the user still reads
+what they are about to say and still presses send. The one exception is
+Attach, which opens a platform picker because a file is not text.
+
+*Why insert rather than execute:* a command tapped in a menu and a
+command typed by hand must produce the identical string, or the two paths
+diverge and only one gets tested. Insertion also keeps the composed
+message editable — `@drey-dev` plus a brief in the user's own words is
+the common case, and an execute-on-tap menu makes that two steps.
 
 **Anatomy — the ⌘K palette (Mac and PWA-wide, the equivalent).** The
 same four groups, search-first: field on top, grouped results, each row
 glyph · name · one-line description · shortcut on the trailing edge.
 Opened by ⌘K, by the `+` button, or by typing `/` in the composer.
+
+**⌘K is the rich reply surface wherever a desktop keyboard is present**,
+and it stays. The inline autocomplete above is the *narrow* affordance —
+right for a thumb and a small screen, deliberately capped at six rows and
+one token. The palette is the wide one, and it can do what an inline list
+should not: search **across all four groups at once** with the same
+deterministic ranking, show the full description and the keyboard
+shortcut for each row, preview an agent's presence and current claim
+before you address it, and stay open across several insertions so a turn
+can be composed out of a command, an agent and a model pin without
+reopening anything. It is present on macOS and on the PWA at or above
+`wide-breakpoint` whenever `(pointer: fine)` matches — never on touch,
+where it would be a keyboard shortcut with no keyboard. Its results
+insert at the caret exactly as the menu's do; the palette closes on
+insert, the composer keeps focus, and `Esc` closes it having changed
+nothing.
 
 **Platform notes.**
 
@@ -625,7 +741,20 @@ Opened by ⌘K, by the `+` button, or by typing `/` in the composer.
   the `+` button and the content is the actions list. It opens with no
   JavaScript, is keyboard-operable, carries `aria-expanded` for free and
   closes on `Esc`. The wide layout adds `<dialog>.showModal()` for ⌘K,
-  which brings focus trapping and an inert background with it.
+  which brings focus trapping and an inert background with it. The
+  suggestion list is a `<ul role="listbox">` the field owns through
+  `aria-controls` / `aria-activedescendant`, so the caret never leaves
+  the textarea.
+
+**Sources, and the one that does not exist yet.** Agents come from
+`GET /api/agents` — live today. Commands **must** come from a real
+endpoint over the instance's own `rules.yaml`; that endpoint is not built
+(§4.2 has no route for it), so the PWA ships a short static list with the
+gap marked in code at its single definition site. It is a placeholder
+with an expiry, not a design: a hand-maintained command list is exactly
+what ux-direction ruled out, and the first instance whose `rules.yaml`
+differs from the shipped defaults will be lied to. Nothing else in the
+menu is allowed a fallback of this kind.
 
 **Never.** The menu never survives a send. It never covers the last
 message while collapsed, and it is never rendered as a permanent row of
@@ -735,7 +864,7 @@ custom `Transferable`; the refusal renders as an inline row, never an
 alert. PWA: HTML5 drag-and-drop with `dragover`/`drop`, plus a
 **keyboard equivalent** — every task card has a "Dispatch to…" menu item
 that opens the same agent list, because a gesture that only works with a
-pointer is not a control (§5).
+pointer is not a control (§6).
 
 ### 3.11 Artifact viewer
 
@@ -894,7 +1023,87 @@ and an irreversible act, the tool is wrong, not the copy.
 
 ---
 
-## 4. Screens
+## 4. Reply Text
+
+The longest text in the product, read on the smallest screen it has.
+Everything else in this system is tuned for *scanning* — a feed row, a
+chip, a status line, all of them glanced at. A reply is **read**, at
+length, once. It gets its own token group and its own rules, because
+inheriting the control scale (`body`, 17pt / 1.5) costs about a third of
+the words on a phone.
+
+The bar is the one the Claude app hits: **dense enough that the previous
+turn is still on screen while you read the current one, and comfortable
+enough to read 300 words without leaning in.** Density that costs
+legibility is not density, it is small text.
+
+### 4.1 The decisions, and why
+
+| Decision | Value | Why |
+| --- | --- | --- |
+| **Family** | the system stack — SF on Apple (`.font(.body)`), `system-ui` on the web | P7. SF switches to SF Text below 20pt on its own: looser spacing, taller x-height, open apertures — optical sizing we get for free and could not buy from a webfont. And no webfont is loaded, ever (§2.3). |
+| **Size** | **15pt** phone · **16pt** Mac / wide PWA — one `clamp()`, `--mt-reply-size` | 17pt at a 390pt width runs about six words a line inside a bubble. 15pt is Apple's `.subheadline`, still a Dynamic Type style, and buys roughly two more words per line and 15% more lines per screen. It is the **floor**, not a starting point — nothing in a reply goes below it. |
+| **Weight** | **400** | 400 at 15pt is where SF Text is drawn to sit. 300 loses stem contrast on the dark canvas at exactly the size where it matters; a heavier body weight makes a reply look like a heading and defeats P1. |
+| **Line height** | **1.45** | Below the `body` scale's 1.5 without going near the 1.4 floor where ascenders and descenders of adjacent lines start meeting at this size. Over a 200-word reply that is one extra line of content per screen. |
+| **Paragraph spacing** | **12px**, not a blank line | A blank line at 15/1.45 is ~22px — a third of a paragraph's worth of space, spent on nothing. 12px is 0.55 of the line box: unmistakably a break, half the cost. Set as a margin, so a user who sets 2× spacing (WCAG 1.4.12) gets it without the layout breaking. |
+| **Bubble padding** | **12px** vertical, **16px** horizontal | 16px is the minimum that clears `radius-lg`'s 14px corner — below it the first character sits inside the arc. The density win comes from type and spacing; padding is already at its floor, and cutting it further just crowds the text against the bubble edge. |
+| **Turn gap / meta gap** | **16px** between turns · **4px** attribution to body | The gap between turns must be visibly larger than the gap between paragraphs *inside* one, or two replies read as one. 16 : 12 is the smallest ratio that reads correctly; the attribution is part of its turn, so it sits tight against it. |
+| **Lists** | **4px** between items, **20px** indent | List items are one thought each, so they need less separation than paragraphs — using the paragraph gap makes a five-item list taller than the prose around it. 20px puts the marker in the gutter with the text aligned. |
+| **Code** | **13px** mono, line **1.45**, **12px** pad, on `sunken` | The `mono` step. Monospace at the same nominal size as the prose *looks* bigger, so it steps down one; 1.45 matches the prose line box so a code block does not visibly change the page rhythm. **Inline** code takes a background and 2px of horizontal padding and nothing else — no size change, because changing the font size mid-line changes the line box and the paragraph re-flows around it. |
+| **Measure** | **38em** (~66 characters), wide layouts only | On a phone the bubble is the measure. On a Mac the window is not: an unbounded reply at 16px in a maximised window runs 130 characters and the eye loses the line return. |
+
+### 4.2 Tokens
+
+All of it is `--mt-reply-*` in `tokens.json` → `tokens.css`, applied in
+`preview.html`'s chat section and in the PWA's chat CSS. A reply
+stylesheet that reaches for `--mt-text-body-*` is a bug: those are
+control tokens.
+
+| Token | Value |
+| --- | --- |
+| `--mt-reply-size` | `clamp(0.9375rem, 0.9rem + 0.19vw, 1rem)` |
+| `--mt-reply-weight` · `--mt-reply-line` · `--mt-reply-tracking` | `400` · `1.45` · `0` |
+| `--mt-reply-meta-size` · `--mt-reply-meta-gap` | `0.8125rem` · `4px` |
+| `--mt-reply-para-gap` · `--mt-reply-turn-gap` | `12px` · `16px` |
+| `--mt-reply-bubble-pad-y` · `--mt-reply-bubble-pad-x` · `--mt-reply-bubble-gap` | `12px` · `16px` · `8px` |
+| `--mt-reply-heading-gap` · `--mt-reply-list-gap` · `--mt-reply-list-indent` | `16px` · `4px` · `20px` |
+| `--mt-reply-code-size` · `--mt-reply-code-line` · `--mt-reply-code-pad` | `0.8125rem` · `1.45` · `12px` |
+| `--mt-reply-measure` | `38em` |
+
+**One fluid set, not three platform forks.** The `clamp()` already lands
+on 15pt at phone width and 16pt at desktop width; three hand-maintained
+sets would be three things to keep in sync and two of them would rot.
+
+### 4.3 Contrast
+
+Reply body is `text-primary`, reply metadata `text-secondary`, and §2.2
+now checks both against **every ground a reply can sit on** rather than
+assuming `surface`: `surface` (the assistant's turn), `accent-quiet`
+(yours), `agent-quiet` (quoted tool output), `sunken` (code). Worst case
+across all of them is **12.79:1** for body and **6.36:1** for metadata,
+both modes. Reply prose is set below the 18.66px large-text threshold,
+so it takes the full 4.5:1 bar with no exemption — which is the reason
+those four pairs are computed now instead of argued about.
+
+### 4.4 Platform notes
+
+- **iPhone / PWA-narrow.** 15pt, the bubble is the measure, 12/16
+  padding. Dynamic Type still scales everything: the tokens are `rem`
+  and `clamp()`, so a user at `accessibilityExtraExtraExtraLarge` gets a
+  legible reply and a bubble that grows to hold it.
+- **Mac / PWA-wide.** 16pt, measure capped at `--mt-reply-measure`. The
+  extra width goes to the sidebar and the detail pane, not to longer
+  lines.
+- **SwiftUI.** `Text` with `.font(.subheadline)` on iOS and `.callout` on
+  macOS, `.lineSpacing` derived from the same ratio, paragraph gaps as
+  `VStack(spacing:)`. The point sizes come from Dynamic Type; the ratios
+  come from this table.
+- **Reduced transparency / Increase Contrast.** Nothing here depends on
+  a translucent ground, so both settings are already satisfied.
+
+---
+
+## 5. Screens
 
 Annotated wireframes, one architecture, three renderings (P6). Numbers
 in circles are callouts; the legend is in each file.
@@ -921,7 +1130,7 @@ refusal appears.
 
 ---
 
-## 5. Accessibility
+## 6. Accessibility
 
 Not a section at the end of the work — three of the seven principles are
 accessibility rules wearing product clothes. The bars:
@@ -971,18 +1180,20 @@ triage actions, chip buttons and the capture button all meet it; the
 preview page is laid out at 390pt so this can be checked by eye on the
 phone it will be read on.
 
-**Contrast table.** §2.2 — 58 pairs, all pass.
+**Contrast table.** §2.2 — 74 pairs, all pass.
 
 ---
 
-## 6. The preview page
+## 7. The preview page
 
 `docs/product/design/preview.html` renders every component in §3 side by
 side in light and dark with realistic Metistry content — feed rows from
-the real `activity_feed` kinds, all six presence chips, a chat turn with
-collapsed tool activity, a prompt card, the composer in both its collapsed and expanded
-states with the new-reply pill, a triage card, a doctor table,
-the dispatch refusals, the empty states and the error envelopes.
+the real `activity_feed` kinds (Title Cased at render, §3.2), all six
+presence chips, a chat turn with collapsed tool activity, a prompt card,
+the composer in its collapsed, expanded and **suggesting** states with
+the new-reply pill, a **~180-word reply set in the §4 reply tokens** so
+the density can be judged rather than described, a triage card, a doctor
+table, the dispatch refusals, the empty states and the error envelopes.
 
 It is self-contained: `tokens.css` is inlined, there are no external
 resources and no JavaScript beyond the theme toggle. Open it on a phone —
@@ -990,7 +1201,7 @@ that is what it is for.
 
 ---
 
-## 7. Sources
+## 8. Sources
 
 Apple Human Interface Guidelines, retrieved 2026-09-08:
 

@@ -604,6 +604,44 @@ your git, on your machine.
   the ranking and never the grant: the area filter lives inside the vector
   query, so the closest chunk in the vault stays invisible to an agent
   whose grant does not cover it. `docs/ops/knowledge-search.md`.
+- 2026-09-08 — AgentSwarms reviewed (`docs/research/2026-09-agentswarms-review.md`).
+  Convergence worth quoting at launch: a data-platform team and a
+  personal-assistant team both landed on "governance in the tool,
+  answers with receipts, data you own". Taking: a hash-chained action
+  record (D6 addendum), a turn id that joins a reply to the tool calls
+  it made, and named queries exposed to the assistant as checkable
+  answers. Leaving: the lakehouse, BI, ML, graph canvas, and the Elastic
+  License.
+
+- 2026-09-08 — **Any agent can now ask the same questions the dashboard
+  answers.** `queries_list`/`queries_run` put invariant 3's one read path
+  — named, parameterized queries, never free-form SQL — on the mcp-brain
+  surface: an agent lists what's available (name, description, param
+  types/defaults) and runs one, capped at 200 rows. The instance's own
+  assistant always has it; an external agent needs an explicit `queries:
+  true` grant, a separate axis from the knowledge tier. Every mcp-brain
+  tool also now takes an optional `turn_id`, so one reply's tool calls
+  group together in the `activity_feed` — the first step toward a
+  per-reply audit trail a user can actually read. `packages/mcp-brain/README.md`.
+
+- 2026-09-08 — Safety mechanism shipped, and a goal sharpened: **the system
+  learns from a thumbs-down without ever teaching itself.** A 👍/👎 sits
+  under every reply; daily, whenever there is new 👎 since its last pass, a
+  model-free routine turns the 👎 —
+  with the prompt, the reply, the user's note and that turn's tool calls —
+  into **one** proposal carrying a *suggested* edit to the assistant's own
+  prompt. It is never applied: the user allows it in triage, and only then
+  does the console write the overlay through the vault as principal `user`,
+  as a reviewable commit in the user's name, picked up on the next restart.
+  The prompt overlay is a protected path, so the assistant cannot reach it
+  even through a bug elsewhere. The same PR made the second half true:
+  **one list, "Needs You"** — knowledge, agent reports, elevation grants,
+  improvements, and now the assistant's own blocking questions (a reply
+  ending in a `decision` block becomes a queue item, answerable in chat,
+  from triage, or from a notification) are all rows in one table with one
+  triage endpoint, one push path, one brief section. The answer to "can
+  every decision I owe the system live in one place" is yes, and the
+  interface says so. `docs/ops/reply-feedback.md`.
 
 - 2026-09-08 — Goal sharpened: **one design language across the PWA, Mac
   and iPhone, written down before the native app exists.**
@@ -670,3 +708,48 @@ your git, on your machine.
   the collapsed menu must ship in the served markup, and the nav labels
   and section headers must be Title Case.
 
+- 2026-09-08 — **The composer completes as you type, and the menu is
+  clickable** (owner review of the design system). Typing `@d` suggests
+  `@drey`, typing `/` lists the commands and narrows them keystroke by
+  keystroke — and every row of the actions menu, quick actions and agent
+  tags included, *inserts itself at the caret* rather than being typed.
+  Two properties make it a product claim rather than a nicety. It is
+  **generated, never hand-maintained**: agents come from the instance's
+  registry and commands from its own `rules.yaml`, so an instance that
+  adds a tier or an agent gets it in the composer with no front-end
+  change, and a command the instance has not configured is listed
+  *disabled with the reason* rather than hidden. And the ranking is
+  **deterministic** — prefix, then substring, then recency — the same
+  discipline invariant 4 applies to the router, so the same keystrokes
+  give the same list every time on every surface. A tapped command and a
+  typed one produce the identical string, which is what keeps the
+  power-user layer and the discoverable layer from drifting apart.
+  ⌘K stays as the rich version wherever there is a desktop keyboard.
+  (Known gap, flagged in code and in `ux-direction.md`: there is no
+  `rules.yaml` commands endpoint yet, so the PWA ships a short static
+  list marked for deletion.)
+- 2026-09-08 — **Reply text is optimised for density on a phone**
+  (design-system §4). The assistant's reply is the longest text in the
+  product and the thing most often read on the smallest screen, so it
+  gets its own token group (`--mt-reply-*`) rather than the control type
+  scale: 15pt on a phone and 16pt on a Mac instead of 17, line height
+  1.45 instead of 1.5, and a 12px paragraph margin instead of a blank
+  line. That is roughly a third more of the reply on screen at once,
+  which is the difference between reading an answer and scrolling
+  through one — and it is why the previous turn is still visible while
+  you read the current one. Nothing was traded for it: 15pt is Apple's
+  `.subheadline`, still a Dynamic Type style, so the whole thing still
+  scales with the user's accessibility setting, and the four grounds a
+  reply can sit on (`surface`, `accent-quiet`, `agent-quiet`, `sunken`)
+  are now contrast-checked rather than assumed — worst case 12.79:1 for
+  body text, 6.36:1 for metadata. The contrast table went from 58 pairs
+  to 74, all passing.
+- 2026-09-08 — **Feed titles are Title Cased at render, and only ours
+  are.** P10 says a card title takes Title Case; P1 says agent text is
+  data and data is not case-corrected. The two are reconciled by a
+  closed allow-list of `activity_feed` kinds whose subject the console
+  itself composes — never in the database, never for a kind whose
+  subject can carry agent-authored text, never for identifiers inside
+  one. The general principle is the reusable part: *"is this string
+  ours?" cannot be answered by looking at the string, only by looking at
+  where it came from* — so the safe default is to leave text alone.

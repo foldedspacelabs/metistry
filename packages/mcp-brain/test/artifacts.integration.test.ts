@@ -11,7 +11,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { TasksService } from "@foldedspacelabs/metistry-tasks";
 import { ArtifactsService, memoryVault, staticDirectory } from "@foldedspacelabs/metistry-artifacts";
-import { ARTIFACT_TOOL_NAMES, createBrainServer, TOOL_NAMES, type AgentPrincipal, type Db } from "../src/index.js";
+import { ARTIFACT_TOOL_NAMES, QUERIES_TOOL_NAMES, createBrainServer, TOOL_NAMES, type AgentPrincipal, type Db } from "../src/index.js";
 
 try {
   for (const line of readFileSync(new URL("../../../.env", import.meta.url), "utf8").split("\n")) {
@@ -33,10 +33,12 @@ interface Parsed {
 }
 
 describe("tool surface", () => {
-  it("the six artifact tools are on the eager surface, contiguous and ahead of crew_dispatch only, and the total stays under the lazy threshold", () => {
-    expect(TOOL_NAMES.slice(-ARTIFACT_TOOL_NAMES.length - 1, -1)).toEqual([...ARTIFACT_TOOL_NAMES]);
-    expect(TOOL_NAMES.at(-1)).toBe("crew_dispatch");
-    expect(TOOL_NAMES.length).toBeLessThan(20);
+  it("the six artifact tools are on the eager surface, contiguous and ahead of crew_dispatch then queries_*, and the total stays near the lazy threshold", () => {
+    const tail = ARTIFACT_TOOL_NAMES.length + 1 + QUERIES_TOOL_NAMES.length; // artifacts + crew_dispatch + queries_*
+    expect(TOOL_NAMES.slice(-tail, -1 - QUERIES_TOOL_NAMES.length)).toEqual([...ARTIFACT_TOOL_NAMES]);
+    expect(TOOL_NAMES.at(-1 - QUERIES_TOOL_NAMES.length)).toBe("crew_dispatch");
+    expect(TOOL_NAMES.slice(-QUERIES_TOOL_NAMES.length)).toEqual([...QUERIES_TOOL_NAMES]);
+    expect(TOOL_NAMES.length).toBeLessThan(22); // one over the PoC-17 lazy-load guidance (>20) — flagged in manifest.yaml, not acted on here
   });
 
   it("without the module, artifact_* answers not_available (a capability gap, recorded)", async () => {

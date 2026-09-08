@@ -16,7 +16,7 @@ import { runCheck, startRun, finishRun, errorEnvelope, statusFor, type CheckResu
 import { QueryError, QueryStore } from "@foldedspacelabs/metistry-queries";
 import { captureToInbox, createBrainServer, type KnowledgeReader, type KnowledgeWriter, type QueryEmbedder } from "@foldedspacelabs/metistry-mcp-brain";
 import { TasksService } from "@foldedspacelabs/metistry-tasks";
-import { ArtifactsService, type VaultClient } from "@foldedspacelabs/metistry-artifacts";
+import { ArtifactsService, VaultError, type VaultClient } from "@foldedspacelabs/metistry-artifacts";
 import { artifactRoutes, isArtifactRoute } from "./artifacts-routes.js";
 import type { Db } from "./auth-store.js";
 import * as store from "./auth-store.js";
@@ -29,6 +29,7 @@ import { route as routeMessage, type Rules } from "./router.js";
 import { sendToSession, storeSubscription, type PushConfig } from "./push.js";
 import { dispatch, type TargetRegistry } from "./dispatch.js";
 import { listProjects, updateProject, validateProjectPatch } from "./projects.js";
+import { applyImprovement } from "./prompt-overlay.js";
 import { crewDispatcher, type CrewRegistry } from "./crews.js";
 import { createRequire } from "node:module";
 
@@ -68,6 +69,9 @@ const AGENT_ROUTE = /^(PUT|POST) \/api\/agents\/([a-z][a-z0-9-]{0,39})\/(grants|
 const PROJECT_ROUTE = /^PUT \/api\/projects\/([a-z][a-z0-9-]{0,39})$/;
 // Dispatch a work row to a compute target (§4.18). Body: { target, brief, sources? }.
 const DISPATCH_ROUTE = /^POST \/api\/tasks\/(\d{1,12})\/dispatch$/;
+// A thumbs up/down on one reply (docs/ops/reply-feedback.md). Session only —
+// this is the user's own judgement, not something a script speaks for.
+const FEEDBACK_ROUTE = /^(POST|DELETE) \/api\/messages\/(\d{1,12})\/feedback$/;
 
 export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Server {
   const rp = wa.rpFromOrigin(cfg.origin);
@@ -241,6 +245,19 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       );
       const messageId = rows[0]?.id;
 
+      // A question the assistant is blocked on is a `decision` proposal (one
+      // queue, D7): answering it in chat settles it, exactly as answering from
+      // triage or a notification does. The answer text routes back to the
+      // source agent as feedback (§4.19).
+      const answered = await db.query(
+        `UPDATE proposals SET decision = 'answered', feedback = $2, decided_at = now()
+         WHERE kind = 'decision' AND decision = 'pending' AND payload->>'thread' = $1 RETURNING id`,
+        [thread, body.text.slice(0, 500)],
+      );
+      if (answered.rows.length > 0) {
+        await audit("triage", "answered", true, { proposals: answered.rows.map((r: { id: number }) => r.id), thread, message_id: messageId });
+      }
+
       // /note: file + inbox row + instant ack — no model, no assistant (§4.1)
       if (decision?.kind === "note") {
         await mkdir(cfg.inboxDir, { recursive: true });
@@ -303,9 +320,12 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       const limit = Math.min(Number(url.searchParams.get("limit") ?? 20), 100);
       const { rows } = await db.query(
         `SELECT * FROM (
-           SELECT id, ts, thread, text, status, 'in'  AS direction FROM inbound_messages
+           SELECT id, ts, thread, text, status, 'in'  AS direction, NULL::jsonb AS feedback FROM inbound_messages
            UNION ALL
-           SELECT id, ts, thread, text, kind,  'out' AS direction FROM outbound_messages
+           SELECT o.id, o.ts, o.thread, o.text, o.kind, 'out' AS direction,
+                  CASE WHEN f.id IS NULL THEN NULL
+                       ELSE jsonb_build_object('rating', f.rating, 'note', f.note, 'ts', f.ts) END
+           FROM outbound_messages o LEFT JOIN reply_feedback f ON f.outbound_message_id = o.id
          ) m ORDER BY ts DESC LIMIT $1`,
         [limit],
       );
@@ -375,6 +395,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         key === "POST /auth/logout" ||
         key === "GET /api/proposals" ||
         /^POST \/api\/proposals\/\d+$/.test(key) ||
+        FEEDBACK_ROUTE.test(key) ||
         key === "GET /api/agents" ||
         key === "POST /api/agents" ||
         AGENT_ROUTE.test(key) ||
@@ -420,16 +441,71 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     const triage = /^POST \/api\/proposals\/(\d+)$/.exec(key);
     if (triage) {
       const body = (await readJson(req)) as { decision?: string; feedback?: string };
-      if (!["allow", "deny", "accept_with_changes"].includes(body.decision ?? "")) {
-        return sendError(res, "invalid_request");
+      const row = (await db.query(`SELECT id, kind, payload FROM proposals WHERE id = $1 AND decision = 'pending'`, [triage[1]])).rows[0];
+      if (!row) return sendError(res, "not_found"); // unknown or already decided — no re-triage
+      // A `decision` proposal (the assistant asked a blocking question) is
+      // answered with one of ITS OWN options; everything else takes the three
+      // triage verbs. Either way the option set comes from the stored row,
+      // never from the request body.
+      const options: string[] =
+        row.kind === "decision" && Array.isArray(row.payload?.options)
+          ? [...(row.payload.options as unknown[]).filter((o): o is string => typeof o === "string"), "deny"]
+          : ["allow", "deny", "accept_with_changes"];
+      if (!options.includes(body.decision ?? "")) return sendError(res, "invalid_request");
+
+      // Allowing an `improvement` is the one self-modification path (§4.10):
+      // the console writes the prompt overlay through the vault bridge as
+      // principal `user` — a human change, in the user's name. It happens
+      // BEFORE the row is decided, so a refused write leaves the proposal
+      // pending instead of silently dropping the change.
+      let applied: { path: string; created: boolean } | undefined;
+      if (row.kind === "improvement" && body.decision === "allow") {
+        if (!cfg.vault) return sendError(res, "not_available");
+        try {
+          const r = await applyImprovement(cfg.vault, row.payload, row.id);
+          applied = { path: r.path, created: r.created };
+        } catch (err) {
+          if (err instanceof VaultError) {
+            await audit("triage", "improvement", false, { proposal: row.id, error: err.code });
+            return sendJson(res, statusFor(err.code), errorEnvelope(err.code, err.message));
+          }
+          throw err;
+        }
       }
+
       const { rows } = await db.query(
         `UPDATE proposals SET decision = $2, feedback = $3, decided_at = now()
          WHERE id = $1 AND decision = 'pending' RETURNING id`,
         [triage[1], body.decision, body.feedback ?? null],
       );
-      await audit("triage", body.decision!, rows.length === 1, { proposal: triage[1] });
-      return rows.length === 1 ? sendJson(res, 200, { ok: true }) : sendError(res, "not_found");
+      await audit("triage", body.decision!, rows.length === 1, { proposal: triage[1], kind: row.kind, ...(applied ? { overlay: applied.path } : {}) });
+      return rows.length === 1 ? sendJson(res, 200, { ok: true, ...(applied ? { applied } : {}) }) : sendError(res, "not_found");
+    }
+
+    // ----- reply quality: 👍/👎 on one outbound message (docs/ops/reply-feedback.md) -----
+    const fb = FEEDBACK_ROUTE.exec(key);
+    if (fb) {
+      const id = Number(fb[2]);
+      const exists = await db.query(`SELECT id FROM outbound_messages WHERE id = $1`, [id]);
+      if (exists.rows.length === 0) return sendError(res, "not_found");
+      if (fb[1] === "DELETE") {
+        await db.query(`DELETE FROM reply_feedback WHERE outbound_message_id = $1`, [id]);
+        await audit("feedback", "clear", true, { message_id: id });
+        return sendJson(res, 200, { ok: true, feedback: null });
+      }
+      const body = (await readJson(req)) as { rating?: unknown; note?: unknown };
+      if (body.rating !== 1 && body.rating !== -1) return sendError(res, "invalid_request");
+      if (body.note !== undefined && body.note !== null && typeof body.note !== "string") return sendError(res, "invalid_request");
+      const note = typeof body.note === "string" && body.note.trim() !== "" ? body.note.trim().slice(0, 500) : null;
+      // upsert: the message row stays immutable, the judgement is revisable
+      const { rows } = await db.query(
+        `INSERT INTO reply_feedback (outbound_message_id, rating, note) VALUES ($1, $2, $3)
+         ON CONFLICT (outbound_message_id) DO UPDATE SET rating = EXCLUDED.rating, note = EXCLUDED.note, ts = now()
+         RETURNING rating, note, ts`,
+        [id, body.rating, note],
+      );
+      await audit("feedback", body.rating === 1 ? "up" : "down", true, { message_id: id, rating: body.rating, has_note: note !== null });
+      return sendJson(res, 200, { ok: true, feedback: rows[0] });
     }
 
     if (key === "GET /api/devices") return sendJson(res, 200, { devices: await store.listDevices(db) });

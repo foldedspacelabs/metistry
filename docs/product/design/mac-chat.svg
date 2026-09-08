@@ -69,8 +69,9 @@
 
   <!-- composer -->
   <path class="ln" d="M25 618 H743"/>
-  <rect class="sf" x="44" y="632" width="580" height="40" rx="10"/>
-  <text x="58" y="657" fill="#646d77">ask or tell…</text>
+  <circle class="sf" cx="62" cy="652" r="18"/><text x="62" y="659" class="acc" text-anchor="middle" font-size="18">+</text>
+  <rect class="sf" x="88" y="632" width="536" height="40" rx="10"/>
+  <text x="102" y="657" fill="#646d77">ask or tell…</text>
   <text x="586" y="657" class="t2">/ @ ⌘K</text>
   <rect x="636" y="632" width="76" height="40" rx="10" fill="#2b5fd0"/><text x="674" y="657" fill="#fff" text-anchor="middle" font-size="13">Send</text>
 
@@ -107,15 +108,21 @@
   <text x="782" y="436" class="lg">renders. A tap carries no more authority</text>
   <text x="782" y="452" class="lg">than a typed reply.</text>
 
-  <text x="770" y="484" class="lg">⑤ Composer: "/" and "@" open the same</text>
+  <text x="770" y="484" class="lg">⑤ Composer: ＋, "/" and "@" open the same</text>
   <text x="782" y="500" class="lg">generated menu as ⌘K, inline and</text>
   <text x="782" y="516" class="lg">anchored above the field (§3.6).</text>
 
   <text x="770" y="548" class="lg">⑥ Quick links and targeted actions —</text>
   <text x="782" y="564" class="lg">a door, not a dead end (ux-direction).</text>
 
-  <text x="770" y="600" class="hd">Reduced motion</text>
+  <text x="770" y="600" class="hd">Reduced Motion</text>
   <text x="770" y="624" class="lg">Disclosure opens instantly; the working</text>
   <text x="770" y="640" class="lg">state is a word, never a pulsing dot.</text>
-  <text x="24" y="740" class="t3">docs/product/design-system.md §3.4 chat message · §3.5 prompt card · §3.6 palette · §3.7 model picker</text>
+
+  <text x="770" y="672" class="hd">The Transcript Never Moves</text>
+  <text x="770" y="696" class="lg">A poll is a repaint, not a navigation. The</text>
+  <text x="770" y="712" class="lg">list scrolls only when the reader is</text>
+  <text x="770" y="728" class="lg">already at the bottom; otherwise the</text>
+  <text x="770" y="744" class="lg">reply raises a "↓ New Reply" pill (P9).</text>
+  <text x="24" y="782" class="t3">docs/product/design-system.md §3.4 chat message · §3.5 prompt card · §3.6 composer actions menu · §3.7 model picker</text>
 </svg>

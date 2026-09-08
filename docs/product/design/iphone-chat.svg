@@ -1,0 +1,122 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 940" width="940" height="940" role="img" aria-labelledby="ttl desc">
+  <title id="ttl">iPhone — chat with a prompt card and the composer command menu</title>
+  <desc id="desc">Annotated wireframe at 390 by 844 points: a chat thread with an outbound bubble, an assistant turn carrying an explicit finished state and a collapsed tool-activity disclosure, a question-answer prompt card whose options stack vertically, and the slash-command menu opening inline above the composer.</desc>
+  <style>
+    text { font-family: -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", Roboto, sans-serif; fill: #12171c; font-size: 15px; }
+    .t2 { fill: #4d565f; font-size: 13px } .t3 { fill: #646d77; font-size: 12px }
+    .hd { font-size: 16px; font-weight: 600 } .h2 { font-size: 20px; font-weight: 700 }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px }
+    .ln { stroke: #d9dee4; stroke-width: 1; fill: none }
+    .sf { fill: #ffffff; stroke: #d9dee4 }
+    .agq { fill: #f1ecfc; stroke: #e2d9f7 }
+    .accq { fill: #e6edfc; stroke: #c6d6f7 }
+    .el { fill: #ffffff; stroke: #b6bec8 }
+    .acc { fill: #2b5fd0 } .ag { fill: #6a4bbd } .ok { fill: #1c7a45 } .deg { fill: #8a5a00 } .bad { fill: #b3261e }
+    .cw { fill: #ffffff; stroke: #b3261e; stroke-width: 1.5 }
+    .cn { fill: #b3261e; font-size: 11px; font-weight: 700; text-anchor: middle }
+    .lg { font-size: 13px }
+  </style>
+
+  <rect width="940" height="940" fill="#ffffff"/>
+  <text x="24" y="30" class="h2">iPhone — Chat</text>
+  <text x="24" y="50" class="t2">Collapsed tool activity · prompt card stacks its options · "/" opens the generated command menu inline</text>
+
+  <rect x="60" y="70" width="390" height="844" rx="46" fill="#f6f7f9" stroke="#b6bec8" stroke-width="2"/>
+  <rect x="165" y="78" width="180" height="28" rx="14" fill="#12171c"/>
+  <text x="88" y="102" class="t3">9:41</text>
+
+  <!-- nav bar -->
+  <path class="ln" d="M62 128 H448"/>
+  <text x="84" y="120" class="acc" font-size="15">‹ Feed</text>
+  <text x="255" y="120" text-anchor="middle" class="hd">Chat</text>
+  <text x="426" y="120" text-anchor="end" class="t2" font-size="13">◇ deep · high ⌄</text>
+
+  <!-- outbound -->
+  <rect class="accq" x="150" y="144" width="276" height="58" rx="16"/>
+  <text x="164" y="164" class="t3">you · 09:14</text>
+  <text x="164" y="188" font-size="14">how much should I ease off running?</text>
+
+  <!-- assistant -->
+  <text x="84" y="228" class="t3">assistant · 09:14 · <tspan class="ok">finished</tspan></text>
+  <rect class="sf" x="84" y="238" width="290" height="106" rx="16"/>
+  <text x="98" y="262" font-size="14">Cut volume ~40% over the final</text>
+  <text x="98" y="282" font-size="14">three weeks, keep intensity. Your</text>
+  <text x="98" y="302" font-size="14">note <tspan class="acc">Areas/Running/Taper</tspan> puts</text>
+  <text x="98" y="322" font-size="14">the last hard session 10 days out.</text>
+  <text x="84" y="366" class="acc" font-size="13">↗ open note   ⌁ summarize   ⌁ latest</text>
+
+  <!-- collapsed tools -->
+  <rect class="agq" x="84" y="382" width="290" height="30" rx="10"/>
+  <text x="98" y="402" class="ag" font-size="13">▸ 4 tools · 6.2s · $0.031</text>
+
+  <!-- prompt card -->
+  <rect class="sf" x="84" y="428" width="342" height="196" rx="16"/>
+  <rect x="84" y="428" width="4" height="196" fill="#2b5fd0"/>
+  <text x="102" y="454" class="hd">Write the taper plan to your vault?</text>
+  <text x="102" y="476" class="t2">Areas/Running/Taper.md · new section</text>
+  <rect x="102" y="490" width="306" height="34" rx="10" fill="#2b5fd0"/><text x="255" y="512" fill="#fff" text-anchor="middle" font-size="14">Write it</text>
+  <rect class="sf" x="102" y="530" width="306" height="34" rx="10" stroke="#b6bec8"/><text x="255" y="552" text-anchor="middle" font-size="14">Show me the diff first</text>
+  <rect class="sf" x="102" y="570" width="148" height="30" rx="10"/><text x="176" y="590" text-anchor="middle" font-size="13">Not now</text>
+  <text x="262" y="590" class="acc" font-size="13">Something else…</text>
+  <text x="102" y="616" class="t3">default in 6h: Show me the diff first</text>
+
+  <!-- command menu over the composer -->
+  <rect class="el" x="76" y="642" width="358" height="150" rx="18"/>
+  <text x="94" y="666" class="t3">COMMANDS · from rules.yaml</text>
+  <text x="94" y="690" font-size="14">/note  <tspan class="t3">capture without a turn</tspan></text>
+  <text x="94" y="714" font-size="14">/status  <tspan class="t3">doctor at a glance</tspan></text>
+  <text x="94" y="738" font-size="14">/deep  <tspan class="t3">pin the deep tier for this turn</tspan></text>
+  <text x="94" y="762" class="t3">AGENTS</text>
+  <text x="240" y="762" class="ag mono">@drey-dev  @ops-bot  @reviewer</text>
+
+  <!-- composer -->
+  <rect class="sf" x="84" y="806" width="272" height="42" rx="12" stroke="#2b5fd0" stroke-width="2"/>
+  <text x="100" y="832" class="mono acc">/</text>
+  <text x="116" y="832" class="t3" font-size="14">type a command…</text>
+  <circle cx="392" cy="827" r="21" fill="#2b5fd0"/><text x="392" y="833" fill="#fff" text-anchor="middle" font-size="16">↑</text>
+  <rect x="195" y="890" width="120" height="5" rx="2.5" fill="#12171c"/>
+
+  <!-- callouts -->
+  <circle class="cw" cx="470" cy="118" r="10"/><text class="cn" x="470" y="122">1</text>
+  <circle class="cw" cx="470" cy="228" r="10"/><text class="cn" x="470" y="232">2</text>
+  <circle class="cw" cx="470" cy="398" r="10"/><text class="cn" x="470" y="402">3</text>
+  <circle class="cw" cx="470" cy="500" r="10"/><text class="cn" x="470" y="504">4</text>
+  <circle class="cw" cx="470" cy="700" r="10"/><text class="cn" x="470" y="704">5</text>
+
+  <!-- legend -->
+  <text x="510" y="110" class="h2">Callouts</text>
+  <text x="510" y="146" class="lg">① The model &amp; effort picker lives in the</text>
+  <text x="524" y="166" class="lg">navigation bar on iOS and the toolbar on</text>
+  <text x="524" y="186" class="lg">the Mac. Tapping it opens a sheet listing</text>
+  <text x="524" y="206" class="lg">the instance's own tiers from rules.yaml,</text>
+  <text x="524" y="226" class="lg">with "the router picked fast" as the header</text>
+  <text x="524" y="246" class="lg">and a reset item. Invariant 4 intact.</text>
+
+  <text x="510" y="286" class="lg">② Turn state as a word next to the</text>
+  <text x="524" y="306" class="lg">attribution: <tspan class="ok">finished</tspan> / working /</text>
+  <text x="524" y="326" class="lg"><tspan class="bad">interrupted</tspan>.</text>
+
+  <text x="510" y="366" class="lg">③ Collapsed tool activity. Tap to expand</text>
+  <text x="524" y="386" class="lg">into one row per tool call; tap a row for</text>
+  <text x="524" y="406" class="lg">the call and result, rendered in mono on</text>
+  <text x="524" y="426" class="lg">the agent-quiet wash — visibly quoted,</text>
+  <text x="524" y="446" class="lg">never styled as a control (P1).</text>
+
+  <text x="510" y="486" class="lg">④ On a phone the prompt card's options</text>
+  <text x="524" y="506" class="lg">stack full-width; each is ≥44pt. Same</text>
+  <text x="524" y="526" class="lg">payload drives the notification actions, so</text>
+  <text x="524" y="546" class="lg">the choices are identical from the push.</text>
+
+  <text x="510" y="586" class="lg">⑤ Typing "/" or "@" opens the generated</text>
+  <text x="524" y="606" class="lg">menu inline above the field — the same</text>
+  <text x="524" y="626" class="lg">list ⌘K shows, built from live rules.yaml</text>
+  <text x="524" y="646" class="lg">and the agent registry. The syntax stays</text>
+  <text x="524" y="666" class="lg">for power users; nobody has to remember</text>
+  <text x="524" y="686" class="lg">it (ux-direction).</text>
+
+  <text x="510" y="736" class="h2">Keyboard-avoidance</text>
+  <text x="510" y="768" class="lg">The thread scrolls, the composer pins to</text>
+  <text x="510" y="788" class="lg">the keyboard, the tab bar hides while</text>
+  <text x="510" y="808" class="lg">editing — standard iOS behaviour.</text>
+  <text x="24" y="928" class="t3">docs/product/design-system.md §3.4 chat message · §3.5 prompt card · §3.6 slash-command menu · §3.7 model picker</text>
+</svg>

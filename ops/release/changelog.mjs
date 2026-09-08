@@ -161,7 +161,20 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     const i = process.argv.indexOf(`--${name}`);
     return i === -1 ? [] : String(process.argv[i + 1] ?? "").split(",").map((s) => s.trim()).filter(Boolean);
   };
-  const positional = process.argv.slice(3).find((a) => !a.startsWith("--"));
+  // Find the optional positional <root> arg, skipping recognized flags and
+  // the value token that follows each one (e.g. `--assets "a,b"` is two
+  // argv entries, neither of which is the root).
+  const FLAGS = ["assets", "images"];
+  let positional;
+  for (let i = 3; i < process.argv.length; i++) {
+    const arg = process.argv[i];
+    if (arg.startsWith("--")) {
+      if (FLAGS.includes(arg.slice(2))) i++; // skip its value
+      continue;
+    }
+    positional = arg;
+    break;
+  }
   const root = positional ?? new URL("../..", import.meta.url).pathname;
   process.stdout.write(renderReleaseNotes({ version, entries: collectEntries(root), assets: flag("assets"), images: flag("images") }));
 }

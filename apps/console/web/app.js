@@ -51,19 +51,55 @@ $("login-btn").onclick = async () => {
 };
 
 // ----- chat -----
+// P9 (docs/product/design-system.md): the transcript never moves under the
+// reader. A poll is a repaint, not a navigation — so the list scrolls ONLY
+// when the reader was already at the bottom. Scrolled up (re-reading the
+// agent's last answer while typing the reply) means: keep scrollTop exactly
+// where it was, and raise the "New Reply" pill instead. Focusing the composer
+// scrolls nothing — there is no scrollIntoView anywhere in this file.
+const BOTTOM_SLACK_PX = 48; // within this of the end still counts as "at the bottom"
 let lastRender = "";
+let lastCount = 0;
+let atBottom = true;
+
+const nearBottom = (el) => el.scrollHeight - el.scrollTop - el.clientHeight <= BOTTOM_SLACK_PX;
+const showPill = (on) => { $("new-reply-row").hidden = !on; };
+
+function scrollToLatest() {
+  const list = $("messages");
+  list.scrollTop = list.scrollHeight;
+  atBottom = true;
+  showPill(false);
+}
+
+$("messages").addEventListener("scroll", () => {
+  atBottom = nearBottom($("messages"));
+  if (atBottom) showPill(false); // caught up by hand — the pill has nothing left to say
+}, { passive: true });
+$("new-reply").onclick = scrollToLatest;
+
 async function loadMessages() {
   const res = await api("/api/messages?limit=30");
   const { messages } = await res.json();
   const chrono = messages.reverse();
   const fingerprint = JSON.stringify(chrono.map((m) => [m.direction, m.id, m.status]));
   if (fingerprint === lastRender) return; // no flicker on idle polls
+  const firstPaint = lastRender === "";
+  const arrived = !firstPaint && chrono.length > lastCount;
   lastRender = fingerprint;
-  $("messages").innerHTML = chrono
+  lastCount = chrono.length;
+  const list = $("messages");
+  const wasAtBottom = firstPaint || atBottom;
+  const keepScrollTop = list.scrollTop; // measured before the re-render, restored after
+  list.innerHTML = chrono
     .map((m) => `<li class="${m.direction}"><div class="meta">${new Date(m.ts).toLocaleString()}${m.direction === "in" ? ` · ${m.status}` : ""}</div>${esc(m.text)}</li>`)
     .join("");
-  const list = $("messages");
-  list.scrollTop = list.scrollHeight; // latest message always in view
+  if (wasAtBottom) {
+    scrollToLatest();
+  } else {
+    list.scrollTop = keepScrollTop; // the viewport does not move
+    if (arrived) showPill(true);
+  }
 }
 
 // live updates: poll while the chat is visible; burst after a send
@@ -87,11 +123,44 @@ $("send-form").onsubmit = async (e) => {
     await api("/message", { method: "POST", body: JSON.stringify({ text }) });
     localStorage.removeItem("draft");
     $("send-text").value = "";
+    atBottom = true; // sending is an explicit intent to be at the end of the thread
+    $("composer-actions").open = false; // 3.6: the menu never survives a send
     loadMessages();
     pollChat(1000); // burst while the reply is in flight
     setTimeout(() => pollChat(), 20000);
   } catch {}
 };
+
+// The actions menu opens with no JS (it is a <details>); these handlers only
+// fill the field, jump to a view, or keep the agent list fresh (3.6).
+$("composer-sheet").addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  if (b.dataset.insert !== undefined) {
+    const field = $("send-text");
+    const head = field.value.trimEnd();
+    field.value = b.dataset.insert.startsWith("/") || !head ? b.dataset.insert : `${head} ${b.dataset.insert}`;
+    $("composer-actions").open = false;
+    field.focus({ preventScroll: true }); // P9: focus never moves the transcript
+  } else if (b.dataset.goto) {
+    $("composer-actions").open = false;
+    show(b.dataset.goto);
+  }
+});
+
+// Agents come from the registry, not from a list kept by hand (3.6). Commands
+// are still hand-listed in index.html: the console has no rules.yaml endpoint
+// yet, and 3.6 wants them generated too.
+$("composer-actions").addEventListener("toggle", async () => {
+  if (!$("composer-actions").open) return;
+  try {
+    const { agents } = await (await api("/api/agents")).json();
+    const live = agents.filter((a) => !a.revoked);
+    $("composer-agents").innerHTML = live.length
+      ? live.map((a) => `<button type="button" data-insert="@${esc(a.id)} ">@${esc(a.id)}</button>`).join("")
+      : '<span class="muted">no agents registered</span>';
+  } catch {} // P5: a panel that cannot answer says nothing rather than guessing
+});
 
 function replayDraft() {
   try { const d = localStorage.getItem("draft"); if (d) $("send-text").value = d; } catch {}

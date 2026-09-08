@@ -655,3 +655,18 @@ your git, on your machine.
   dashboard and artifacts tabs parsed as its children and rendered blank
   whenever they were selected. One tag, two tabs back, and a test that
   now counts section opens against closes so it cannot recur.
+
+- 2026-09-08 — Benefit shipped, from the same review: **the console's chat
+  stops fighting the reader.** `loadMessages` used to force
+  `scrollTop = scrollHeight` on every 2.5s poll, so re-reading an earlier
+  answer while typing the reply was impossible — the next tick threw you
+  back to the end. It now measures whether the reader is at the bottom,
+  restores `scrollTop` across the re-render when they are not, and raises
+  a "↓ New Reply" pill instead; focus moves with `preventScroll`. The
+  commands that were pinned above the keyboard collapse into one `+`
+  button — a native `<details>`, so it works before JavaScript and `Esc`
+  closes it — holding Quick Actions, the slash commands, the agents read
+  live from the registry, and attach. Two tests hold both: the pill and
+  the collapsed menu must ship in the served markup, and the nav labels
+  and section headers must be Title Case.
+

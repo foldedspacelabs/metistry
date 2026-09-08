@@ -3,11 +3,17 @@
 <!-- The EventKit helper as its OWN service: the job's root binary is the
      signed helper, so the TCC grant attaches to it (PoC-1 — anything in
      front of it, sh/node, would become the responsible process instead).
+     ProgramArguments points INSIDE an app bundle: the helper ships as
+     ek-helper.app so TCC keys its grant on CFBundleIdentifier + the stored
+     csreq rather than on an absolute path, and the grant survives a rebuild
+     (docs/ops/apple-signing.md §3). Build it first — the bundle is build
+     output and is not tracked:
+       packages/mcp-eventkit/scripts/build-helper.sh
      Serves a Unix socket the eventkit bridge service connects to.
      First install: the consent prompts appear when the bridge's check()
-     first hits it, or trigger them directly:
-       printf '{"id":1,"op":"request"}\n' | packages/mcp-eventkit/helper/ek-helper
-     (run from a launchd one-shot, not an app shell). Install:
+     first hits it, or trigger them directly against the running job:
+       printf '{"id":1,"op":"request"}\n' | nc -U /tmp/metistry-eventkit.sock
+     Install:
        sed "s|__REPO__|$PWD|g" ops/launchd/com.foldedspacelabs.metistry.eventkit-helper.plist \
          > ~/Library/LaunchAgents/com.foldedspacelabs.metistry.eventkit-helper.plist
        launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.foldedspacelabs.metistry.eventkit-helper.plist -->
@@ -16,7 +22,7 @@
   <key>Label</key><string>com.foldedspacelabs.metistry.eventkit-helper</string>
   <key>ProgramArguments</key>
   <array>
-    <string>__REPO__/packages/mcp-eventkit/helper/ek-helper</string>
+    <string>__REPO__/packages/mcp-eventkit/helper/ek-helper.app/Contents/MacOS/ek-helper</string>
   </array>
   <key>EnvironmentVariables</key>
   <dict>

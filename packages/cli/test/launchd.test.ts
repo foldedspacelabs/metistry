@@ -24,7 +24,7 @@ describe("launchd templates", () => {
     const byLabel = Object.fromEntries(templates.map((t) => [t.label, t]));
     expect(byLabel["com.foldedspacelabs.metistry.watchdog"]!.repoPaths).toEqual(["apps/watchdog/dist/main.js"]);
     expect(byLabel["com.foldedspacelabs.metistry.reconciler"]!.repoPaths).toEqual(["apps/reconciler/dist/main.js"]);
-    expect(byLabel["com.foldedspacelabs.metistry.eventkit-helper"]!.repoPaths).toEqual(["packages/mcp-eventkit/helper/ek-helper"]);
+    expect(byLabel["com.foldedspacelabs.metistry.eventkit-helper"]!.repoPaths).toEqual(["packages/mcp-eventkit/helper/ek-helper.app/Contents/MacOS/ek-helper"]);
     expect(byLabel["com.foldedspacelabs.metistry.eventkit-helper"]!.environment).toEqual({ METISTRY_EK_SOCKET: "/tmp/metistry-eventkit.sock" });
     expect(byLabel["com.foldedspacelabs.metistry.watchdog"]!.workingDirectory).toBe("__REPO__");
   });
@@ -77,7 +77,7 @@ describe("launchd templates", () => {
     expect(unit).not.toContain("__");
     const helper = templates.find((t) => t.label.endsWith(".eventkit-helper"))!;
     const hu = renderSystemdUnit(helper, { repo: "/srv/metistry", node: "/usr/bin/node" });
-    expect(hu).toContain("ExecStart=/srv/metistry/packages/mcp-eventkit/helper/ek-helper");
+    expect(hu).toContain("ExecStart=/srv/metistry/packages/mcp-eventkit/helper/ek-helper.app/Contents/MacOS/ek-helper");
     expect(hu).toContain("Environment=METISTRY_EK_SOCKET=/tmp/metistry-eventkit.sock");
     expect(hu).not.toContain("EnvironmentFile");
   });

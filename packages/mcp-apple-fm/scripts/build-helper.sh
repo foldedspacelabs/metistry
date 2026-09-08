@@ -13,7 +13,7 @@ if [ -z "$IDENTITY" ]; then
   IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null | grep -o '"Developer ID Application[^"]*"' | head -1 | tr -d '"') || true
 fi
 if [ -n "${IDENTITY:-}" ]; then
-  codesign --force --options runtime --sign "$IDENTITY" helper/afm-helper
+  codesign --force --options runtime --timestamp --identifier com.foldedspacelabs.metistry.apple-fm --sign "$IDENTITY" helper/afm-helper
   echo "signed: $IDENTITY"
 else
   codesign --force --sign - helper/afm-helper

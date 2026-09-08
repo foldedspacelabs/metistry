@@ -1,0 +1,146 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 800" width="1000" height="800" role="img" aria-labelledby="ttl desc">
+  <title id="ttl">macOS — activity feed (home), sidebar + toolbar</title>
+  <desc id="desc">Annotated wireframe: NavigationSplitView with a source-list sidebar of ten destinations, a toolbar of filters, and a time-ordered activity feed of rows made of a kind glyph, an actor chip, a subject, a detail line and a relative time.</desc>
+  <style>
+    text { font-family: -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", Roboto, sans-serif; fill: #12171c; font-size: 13px; }
+    .t2 { fill: #4d565f; font-size: 12px } .t3 { fill: #646d77; font-size: 11px }
+    .hd { font-size: 15px; font-weight: 600 } .h2 { font-size: 20px; font-weight: 700 }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px }
+    .ln { stroke: #d9dee4; stroke-width: 1; fill: none }
+    .win { fill: #f6f7f9; stroke: #b6bec8 }
+    .sf { fill: #ffffff; stroke: #d9dee4 }
+    .sel { fill: #e6edfc }
+    .agq { fill: #f1ecfc }
+    .acc { fill: #2b5fd0 } .ag { fill: #6a4bbd } .ok { fill: #1c7a45 } .deg { fill: #8a5a00 } .bad { fill: #b3261e }
+    .cw { fill: #ffffff; stroke: #b3261e; stroke-width: 1.5 }
+    .cn { fill: #b3261e; font-size: 11px; font-weight: 700; text-anchor: middle }
+    .lg { font-size: 12px; fill: #12171c }
+  </style>
+
+  <rect width="1000" height="800" fill="#ffffff"/>
+  <text x="24" y="30" class="h2">macOS — Feed (home)</text>
+  <text x="24" y="50" class="t2">NavigationSplitView · sidebar 248pt · light appearance shown; dark swaps token values only</text>
+
+  <!-- window -->
+  <rect class="win" x="24" y="66" width="720" height="560" rx="12"/>
+  <!-- title bar -->
+  <path class="ln" d="M24 104 H744"/>
+  <circle cx="46" cy="86" r="6" fill="#ff5f57"/><circle cx="66" cy="86" r="6" fill="#febc2e"/><circle cx="86" cy="86" r="6" fill="#28c840"/>
+  <text x="112" y="90" class="hd">Feed</text>
+  <!-- toolbar controls (right) -->
+  <rect class="sf" x="470" y="76" width="120" height="22" rx="6"/><text x="480" y="91" class="t2">All Agents ⌄</text>
+  <rect class="sf" x="598" y="76" width="120" height="22" rx="6"/><text x="608" y="91" class="t2">All Projects ⌄</text>
+
+  <!-- sidebar -->
+  <rect x="25" y="105" width="186" height="520" fill="#eef0f3"/>
+  <path class="ln" d="M211 105 V625"/>
+  <text x="40" y="126" class="t3">METISTRY</text>
+  <g>
+    <rect class="sel" x="33" y="134" width="170" height="26" rx="7"/>
+    <text x="45" y="152" class="acc">◈</text><text x="66" y="152" class="hd" fill="#12171c">Feed</text>
+    <text x="45" y="180">💬</text><text x="66" y="180">Chat</text>
+    <text x="45" y="206">🤖</text><text x="66" y="206">Agents</text>
+    <text x="45" y="232">🎛️</text><text x="66" y="232">Projects</text>
+    <text x="45" y="258">📄</text><text x="66" y="258">Artifacts</text>
+    <text x="45" y="284">📥</text><text x="66" y="284">Capture</text>
+    <text x="45" y="310">📝</text><text x="66" y="310">Triage</text>
+    <rect x="160" y="298" width="30" height="16" rx="8" fill="#2b5fd0"/><text x="175" y="310" fill="#fff" font-size="10" text-anchor="middle">3</text>
+    <text x="45" y="336">📊</text><text x="66" y="336">Dashboard</text>
+    <text x="45" y="362">🩺</text><text x="66" y="362">Status</text>
+    <circle cx="176" cy="358" r="4" class="deg"/>
+    <text x="45" y="388">🔑</text><text x="66" y="388">Devices</text>
+  </g>
+  <path class="ln" d="M33 596 H203"/>
+  <text x="45" y="614" class="t3">⌘K  Commands and Agents</text>
+
+  <!-- feed list -->
+  <g>
+    <!-- row 1 -->
+    <text x="228" y="136">🔧</text>
+    <rect class="agq" x="252" y="123" width="74" height="17" rx="8"/><text x="260" y="136" class="ag mono">drey-dev</text>
+    <text x="334" y="136" class="hd">knowledge_search · 3 hits</text>
+    <text x="690" y="136" class="t3" text-anchor="end">2m ago</text>
+    <text x="252" y="153" class="t2">mode: hybrid · Knowledge/Areas/Running · 14 ms</text>
+    <path class="ln" d="M228 166 H720"/>
+    <!-- row 2 -->
+    <text x="228" y="192">📨</text>
+    <rect class="agq" x="252" y="179" width="74" height="17" rx="8"/><text x="260" y="192" class="ag mono">drey-dev</text>
+    <text x="334" y="192" class="hd">dispatch queued for <tspan class="mono">ops-bot</tspan></text>
+    <text x="690" y="192" class="t3" text-anchor="end">14m ago</text>
+    <text x="252" y="209" class="deg" font-size="12">⏳ 3/3 open bundles — cap on metistry</text>
+    <path class="ln" d="M228 222 H720"/>
+    <!-- row 3 -->
+    <text x="228" y="248">📝</text>
+    <rect x="252" y="235" width="52" height="17" rx="8" fill="#eef0f3"/><text x="260" y="248" class="t2 mono">system</text>
+    <text x="312" y="248" class="hd">proposal #97 — write Knowledge/Areas/Health/Taper.md</text>
+    <text x="690" y="248" class="t3" text-anchor="end">1h ago</text>
+    <text x="252" y="265" class="t2">awaiting you · from inbox #418</text>
+    <path class="ln" d="M228 278 H720"/>
+    <!-- row 4 -->
+    <text x="228" y="304">⚠️</text>
+    <rect x="252" y="291" width="86" height="17" rx="8" fill="#eef0f3"/><text x="260" y="304" class="t2 mono">github-state</text>
+    <text x="346" y="304" class="hd">collector run failed</text>
+    <text x="690" y="304" class="t3" text-anchor="end">3h ago</text>
+    <text x="252" y="321" class="bad" font-size="12">✕ rate limited — retries at 14:20</text>
+    <path class="ln" d="M228 334 H720"/>
+    <!-- row 5 -->
+    <text x="228" y="360">📰</text>
+    <rect x="252" y="347" width="66" height="17" rx="8" fill="#eef0f3"/><text x="260" y="360" class="t2 mono">routine</text>
+    <text x="326" y="360" class="hd">morning brief delivered</text>
+    <text x="690" y="360" class="t3" text-anchor="end">7h ago</text>
+    <text x="252" y="377" class="t2">4 items · 2 links · 1 question</text>
+    <path class="ln" d="M228 390 H720"/>
+    <!-- row 6 -->
+    <text x="228" y="416">✅</text>
+    <rect x="252" y="403" width="36" height="17" rx="8" fill="#eef0f3"/><text x="260" y="416" class="t2 mono">you</text>
+    <text x="296" y="416" class="hd">allowed proposal #94</text>
+    <text x="690" y="416" class="t3" text-anchor="end">8h ago</text>
+    <text x="252" y="433" class="ok" font-size="12">✓ committed 4a1c93e</text>
+    <path class="ln" d="M228 446 H720"/>
+    <!-- row 7 -->
+    <text x="228" y="472">🛡️</text>
+    <rect x="252" y="459" width="36" height="17" rx="8" fill="#eef0f3"/><text x="260" y="472" class="t2 mono">you</text>
+    <text x="296" y="472" class="hd">rotated token for <tspan class="mono">ops-bot</tspan></text>
+    <text x="690" y="472" class="t3" text-anchor="end">yesterday</text>
+    <path class="ln" d="M228 490 H720"/>
+    <text x="228" y="514" class="t3">nothing older than 24h — change the range in the toolbar</text>
+  </g>
+
+  <!-- callouts -->
+  <g>
+    <circle class="cw" cx="216" cy="147" r="10"/><text class="cn" x="216" y="151">1</text>
+    <circle class="cw" cx="216" cy="304" r="10"/><text class="cn" x="216" y="308">2</text>
+    <circle class="cw" cx="700" cy="87" r="10"/><text class="cn" x="700" y="91">3</text>
+    <circle class="cw" cx="196" cy="310" r="10"/><text class="cn" x="196" y="314">4</text>
+    <circle class="cw" cx="216" cy="204" r="10"/><text class="cn" x="216" y="208">5</text>
+  </g>
+
+  <!-- legend -->
+  <g>
+    <text x="770" y="90" class="hd">Callouts</text>
+    <text x="770" y="116" class="lg">① Sidebar = the ten destinations, in the</text>
+    <text x="782" y="132" class="lg">same order on every platform (P6).</text>
+    <text x="782" y="148" class="lg">Selected row: accent-quiet fill.</text>
+    <text x="770" y="176" class="lg">② Feed row anatomy: kind glyph · actor</text>
+    <text x="782" y="192" class="lg">chip · subject · detail · relative time.</text>
+    <text x="782" y="208" class="lg">A failing run tints the <tspan class="bad">glyph line</tspan>, never</text>
+    <text x="782" y="224" class="lg">the whole row (P2).</text>
+    <text x="770" y="252" class="lg">③ Toolbar carries the view's own filters.</text>
+    <text x="782" y="268" class="lg">Never navigation — that is the sidebar.</text>
+    <text x="770" y="296" class="lg">④ A badge only when the count is</text>
+    <text x="782" y="312" class="lg">actionable: proposals awaiting you,</text>
+    <text x="782" y="328" class="lg">failing checks. Never "new activity".</text>
+    <text x="770" y="356" class="lg">⑤ Agent-authored strings carry the</text>
+    <text x="782" y="372" class="lg"><tspan class="ag">agent tint</tspan> on the actor chip and are</text>
+    <text x="782" y="388" class="lg">output-encoded — data, not chrome (P1).</text>
+    <text x="770" y="424" class="hd">States on this screen</text>
+    <text x="770" y="448" class="lg"><tspan class="ok">ok</tspan> · <tspan class="deg">degraded/queued</tspan> · <tspan class="bad">failed</tspan> · absent</text>
+    <text x="770" y="470" class="lg">Row hover lifts to `elevated`; no colour.</text>
+    <text x="770" y="492" class="lg">Right-click = quick actions ("summarize</text>
+    <text x="770" y="508" class="lg">this", "what's the latest on X").</text>
+    <text x="770" y="544" class="hd">Keyboard</text>
+    <text x="770" y="568" class="lg">⌘K palette · ⌘1–⌘9 destinations ·</text>
+    <text x="770" y="584" class="lg">↑↓ rows · ⏎ opens · Esc closes.</text>
+  </g>
+  <text x="24" y="660" class="t3">docs/product/design-system.md §3.1 navigation · §3.2 activity feed row · §3.3 presence chip</text>
+</svg>

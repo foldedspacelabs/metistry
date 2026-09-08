@@ -15,6 +15,17 @@ but every one of them gets a discoverable, expressive surface:
   exposes commands (`/note`, `/status`, `/deep`, `@agent …`) as tappable
   choices; typing `/` or `@` opens the same menu inline for the halfway
   power user.
+- **Autocomplete, and everything in the menu is clickable** (owner
+  addition, 2026-09-08). Typing `@d…` suggests `@drey`; typing `/`
+  lists the commands and filters them as you type, most relevant first.
+  Every item in the menu — quick actions, commands, agent name tags —
+  **inserts itself into the reply at the caret** rather than requiring
+  the user to type it, and never sends on its own. The list comes from
+  the agent registry and `rules.yaml`, never a hand-maintained array,
+  and the ordering is deterministic (prefix, then substring, then
+  recency) so it is predictable rather than clever. ⌘K stays as the
+  rich version of the same list wherever there is a desktop keyboard.
+  Spec: `design-system.md` §3.6; plan: §4.1.
 - **Rich request–response dialogues.** When the assistant needs input, it
   asks with a structured prompt — options, defaults, a free-text escape —
   in the style of Claude's question-answer flows, rather than expecting
@@ -77,7 +88,14 @@ Everything the assistant surfaces should be a **door, not a dead end**:
   surfaces. This slots into the existing `outbound_messages.kind` design.
 - **Discoverability is generated, not hand-maintained**: the command menu
   should render from live `rules.yaml` + the agent registry (OPT-3's
-  generated `/help`, promoted to UI).
+  generated `/help`, promoted to UI). Agents are served today
+  (`GET /api/agents`); a `rules.yaml` commands endpoint does **not**
+  exist yet, so any static command list in a client is a placeholder to
+  be deleted, marked as such at its definition site.
+- **Replies are optimised for density on a small screen**: the
+  assistant's text is the longest thing in the product and the thing
+  most often read on a phone. It gets its own type scale, not the
+  control scale — `design-system.md` §4.
 - **Answers carry no more authority than a typed reply** — a quick-action
   tap on a grant prompt goes through the same server-side authz as the
   management API (CRIT-7 rules apply to notification actions too).

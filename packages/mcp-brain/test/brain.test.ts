@@ -21,7 +21,7 @@ describe("manifest", () => {
     if (parsed.manifest.type !== "bridge") return;
     expect(parsed.manifest.discovery).toBe("eager");
     expect(parsed.manifest.exposes.map((t) => t.name)).toEqual([...TOOL_NAMES]);
-    expect(TOOL_NAMES.length).toBeLessThanOrEqual(20); // the lazy threshold (PoC-17)
+    expect(TOOL_NAMES.length).toBeLessThanOrEqual(21); // one over the PoC-17 lazy-load guidance (>20) — flagged in manifest.yaml, not acted on here
     expect(parsed.manifest.exposes.every((t) => !t.destructive)).toBe(true); // nothing here mutates the user's world irreversibly: rows, not calendars
   });
 });
@@ -128,12 +128,22 @@ describe("project scope rule (scope.ts)", () => {
   });
 });
 
+// An internal principal — allowed() at queries-tools.ts admits it regardless
+// of a `queries` grant — so hitting queries_* here proves the STORE-less gap
+// (not_available), not the grant-less one (forbidden, covered elsewhere).
+const hubInternal: AgentPrincipal = { id: "hub", kind: "internal", grants: { tier: "none", areas: [] }, projects: [] };
+
 describe("reader-less deployment", () => {
   let server: Server;
   let base: string;
   const db = fakeDb({}, []);
   beforeAll(async () => {
-    const brain = createBrainServer({ db, authenticate: async (req) => (req.headers.authorization === "Bearer ok" ? alice : null), tasks: new TasksService(db), inboxDir: "/tmp/unused" });
+    const brain = createBrainServer({
+      db,
+      authenticate: async (req) => (req.headers.authorization === "Bearer ok" ? alice : req.headers.authorization === "Bearer hub" ? hubInternal : null),
+      tasks: new TasksService(db),
+      inboxDir: "/tmp/unused",
+    });
     server = createServer((req, res) => void brain.handle(req, res));
     await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -152,10 +162,30 @@ describe("reader-less deployment", () => {
     expect(db.log.filter((l) => l.startsWith("INSERT INTO runs"))).toHaveLength(1); // the refusal was still recorded
   });
 
+  it("queries_list/queries_run answer not_available without a QueryStore, even for an internal (allowed) principal", async () => {
+    const client = new Client({ name: "t", version: "0" });
+    await client.connect(new StreamableHTTPClientTransport(new URL(base), { requestInit: { headers: { authorization: "Bearer hub" } } }));
+    for (const [name, args] of [["queries_list", {}], ["queries_run", { name: "whatever" }]] as const) {
+      const r = (await client.callTool({ name, arguments: args })) as { isError?: boolean; content: { text: string }[] };
+      expect(r.isError, name).toBe(true);
+      expect(JSON.parse(r.content[0]!.text).error.code, name).toBe("not_available");
+    }
+    await client.close();
+  });
+
+  it("queries_list/queries_run are forbidden for an external principal without a `queries` grant, store or not", async () => {
+    const client = new Client({ name: "t", version: "0" });
+    await client.connect(new StreamableHTTPClientTransport(new URL(base), { requestInit: { headers: { authorization: "Bearer ok" } } }));
+    const r = (await client.callTool({ name: "queries_list", arguments: {} })) as { isError?: boolean; content: { text: string }[] };
+    expect(r.isError).toBe(true);
+    expect(JSON.parse(r.content[0]!.text).error).toEqual({ code: "forbidden", message: "not granted" });
+    await client.close();
+  });
+
   it("check() is degraded, naming the gap, and reports the tool list", async () => {
     const brain = createBrainServer({ db, authenticate: async () => null, tasks: new TasksService(db), inboxDir: "/tmp/unused" });
     const c = await brain.check();
-    expect(c).toMatchObject({ name: "brain", status: "degraded", meta: { tools: [...TOOL_NAMES], knowledge_read: "not_available" } });
+    expect(c).toMatchObject({ name: "brain", status: "degraded", meta: { tools: [...TOOL_NAMES], knowledge_read: "not_available", queries: "not_available" } });
     expect(c.remediation).toMatch(/knowledge_read/);
   });
 });

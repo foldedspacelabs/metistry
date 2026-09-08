@@ -5,7 +5,7 @@ transport: http
 port: 8080               # no bind of its own: mounted at the console's POST /mcp, so this is the console's port
 runs_on: container
 requires_tcc: []
-discovery: eager         # 19 tools — under the lazy threshold (>20 tools / >5k definition tokens)
+discovery: eager         # 21 tools — one over the PoC-17 lazy-load guidance (>20 tools / >5k definition tokens); noted, not acted on, in this PR
 degrades: absent
 exposes:
   - name: capture
@@ -46,3 +46,7 @@ exposes:
     description: Send a bundle of threads to another agent as one `review` task — inside the project freely, across the boundary as a proposal for the user
   - name: crew_dispatch
     description: Hand a brief to a named crew (agents/<area>/<name>.md) as a durable work row the assistant container runs locally — brief checked against the crew's scope ∩ the local target's data policy first; internal (assistant) principals only
+  - name: queries_list
+    description: List the named queries available on this instance (invariant 3's one read path) — name, description, and each param's type + default
+  - name: queries_run
+    description: Run one named query by name with optional params, rows capped at 200; internal principals always, external agents only with a `queries` grant

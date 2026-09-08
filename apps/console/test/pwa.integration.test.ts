@@ -100,6 +100,18 @@ describe.skipIf(!hasDb)("console PWA chunk", () => {
     expect(html).toContain('<div id="composer">');
   });
 
+  // design-system.md 3.6: the composer completes as you type. The listbox
+  // ships hidden and the field owns it — a listbox and not a menu, so the
+  // caret never leaves #send-text and the reply stays in the user's hands.
+  it("ships the composer suggestion listbox, owned by the field", async () => {
+    const html = await (await fetch(base + "/")).text();
+    expect(html).toMatch(/<ul id="suggest" role="listbox"[^>]*hidden>/);
+    expect(html).toContain('aria-controls="suggest"');
+    expect(html).toContain('role="combobox"');
+    expect(html).toContain('aria-expanded="false"'); // closed until a trigger is typed
+    expect(html).toContain('aria-autocomplete="list"');
+  });
+
   // P10: Title Case names things — nav labels, screen titles, section headers.
   it("navigation labels and section headers are Title Case", async () => {
     const html = await (await fetch(base + "/")).text();

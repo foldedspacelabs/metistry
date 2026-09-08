@@ -1,7 +1,7 @@
 // reply-review against a fake db: the rendering, the template, and the two
-// properties that make it safe to schedule — exactly one proposal per window,
-// and no model anywhere in it (the "suggested edit" is a listing of what was
-// flagged, not generated prose).
+// properties that make it safe to schedule daily — exactly one proposal per
+// pass, and no model anywhere in it (the "suggested edit" is a listing of
+// what was flagged, not generated prose).
 import { describe, expect, it } from "vitest";
 import { patterns, run, suggestedSection, type FlaggedCase } from "../reply-review/run.js";
 import { run as weeklyReview } from "../weekly-review/run.js";
@@ -13,15 +13,15 @@ interface Call {
   values: unknown[];
 }
 
-/** A db that answers the flagged-rows query with `flagged`, the dup check with nothing, and records the insert. */
-function fakeDb(flagged: any[], dup: any[] = []) {
+/** A db that answers the flagged-rows query with `flagged`, the last-proposal-ts lookup with `lastProposal`, and records the insert. */
+function fakeDb(flagged: any[], lastProposal: any[] = []) {
   const calls: Call[] = [];
   return {
     calls,
     async query(text: string, values: unknown[] = []) {
       calls.push({ text, values });
+      if (text.includes("SELECT ts FROM proposals")) return { rows: lastProposal };
       if (text.includes("FROM reply_feedback f")) return { rows: flagged };
-      if (text.includes("kind = 'improvement'") && text.includes("SELECT id")) return { rows: dup };
       return { rows: [] };
     },
   };
@@ -56,7 +56,7 @@ describe("reply-review", () => {
     expect(ins.text).toContain("'internal'");
     expect(ins.values[0]).toBe("reply-review");
     const payload = JSON.parse(String(ins.values[1]));
-    expect(payload.title).toBe("Reply quality: 2 replies flagged 👎 this week");
+    expect(payload.title).toBe("Reply quality: 2 replies flagged 👎");
     expect(payload.window_start).toBe("2026-09-01");
     expect(payload.window_end).toBe("2026-09-08");
     expect(payload.flagged).toHaveLength(2);
@@ -68,8 +68,27 @@ describe("reply-review", () => {
     expect(payload.suggested_edit.content).toContain("no model wrote it");
   });
 
-  it("adds nothing on a second run over the same window (one pending proposal per window)", async () => {
-    const db = fakeDb([row()], [{ id: 5 }]);
+  it("looks back only to the last proposal it emitted, not always 7 days", async () => {
+    const lastTs = "2026-09-05T09:00:00Z";
+    const db = fakeDb([row()], [{ ts: lastTs }]);
+    expect(await run(db, { now })).toBe(1);
+    const flaggedCall = db.calls.find((c) => c.text.includes("FROM reply_feedback f"))!;
+    expect(new Date(flaggedCall.values[0] as string).toISOString()).toBe(new Date(lastTs).toISOString());
+    const payload = JSON.parse(String(insert(db)!.values[1]));
+    expect(payload.window_start).toBe("2026-09-05");
+  });
+
+  it("falls back to the last 7 days when it has never emitted a proposal", async () => {
+    const db = fakeDb([row()], []);
+    await run(db, { now });
+    const flaggedCall = db.calls.find((c) => c.text.includes("FROM reply_feedback f"))!;
+    expect(new Date(flaggedCall.values[0] as string).toISOString()).toBe(
+      new Date(now.getTime() - 7 * 86_400_000).toISOString(),
+    );
+  });
+
+  it("says nothing when there is no new 👎 since the last proposal (silence-default)", async () => {
+    const db = fakeDb([], [{ ts: "2026-09-05T09:00:00Z" }]);
     expect(await run(db, { now })).toBe(0);
     expect(insert(db)).toBeUndefined();
   });
@@ -112,7 +131,7 @@ describe("patterns + template (deterministic, invariant 4)", () => {
   it("renders the same section for the same input (no randomness, no clock)", () => {
     const a = suggestedSection([base], "2026-09-08");
     expect(suggestedSection([base], "2026-09-08")).toBe(a);
-    expect(a).toContain("## Reply quality — flagged week ending 2026-09-08");
+    expect(a).toContain("## Reply quality — flagged as of 2026-09-08");
     expect(a).toContain("tools used: none");
     expect(a).toContain("it is a placeholder, not advice");
   });

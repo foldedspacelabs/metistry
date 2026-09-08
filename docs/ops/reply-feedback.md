@@ -1,6 +1,6 @@
 # Reply quality, and the loop that acts on it
 
-A 👍/👎 on any reply, and a weekly pass that turns the 👎 into **one proposal
+A 👍/👎 on any reply, and a daily pass that turns new 👎 into **one proposal
 you decide on**. Nothing in this loop changes how the assistant behaves on its
 own: the routine suggests, you allow, and only then is anything written —
 in your name (invariant 2, plan §4.10).
@@ -9,8 +9,8 @@ in your name (invariant 2, plan §4.10).
 
 - Two tapbacks under every reply in chat. 👎 asks for an optional one-line
   note ("guessed instead of looking it up"). Tapping the lit one clears it.
-- Once a week, if anything was flagged: one item in **Needs You** titled
-  *"Reply quality: N replies flagged 👎 this week"*.
+- Daily, if anything was flagged since the last pass: one item in **Needs
+  You** titled *"Reply quality: N replies flagged 👎"*.
 - One line in the weekly review: `• reply quality: 9 rated, 2 👎 — 1
   improvement proposal awaiting you`.
 
@@ -39,10 +39,12 @@ so the prompt, the reply and the tool calls are visible together.
 
 ## The loop
 
-`routines/reply-review` runs `@weekly`:
+`routines/reply-review` runs `@daily` — frequent enough that a busy week
+doesn't sit on a backlog of 👎 until the weekend:
 
-1. Collects the week's 👎 with the note, the prompt, the reply, the model and
-   that turn's tool calls.
+1. Collects the 👎 since the last `improvement` proposal it emitted (or the
+   last 7 days, if it has never emitted one), with the note, the prompt, the
+   reply, the model and that turn's tool calls.
 2. Counts patterns — how many answered with no tool call, how many ran long,
    how many came from one thread, which tool recurs. **Counts, not
    interpretation.**
@@ -57,8 +59,11 @@ so the prompt, the reply and the tool calls are visible together.
 If you want better wording, ask the assistant for it from triage — that is a
 separate, visible step.
 
-The routine is silent when nothing was flagged, and idempotent: a second run
-in the same window finds its own pending proposal and adds nothing.
+The routine is silent when there is no new 👎 since its last proposal. It
+needs no separate dedup check to stay honest: each pass's window starts where
+the last emitted proposal's timestamp left off, so a pass that finds nothing
+new writes nothing, and a case already reported never appears in a later
+proposal.
 
 ## What happens when you allow it
 
@@ -90,6 +95,6 @@ own prompt even through a bug elsewhere (its `knowledge_write` is confined to
 | automatic | needs you |
 | --- | --- |
 | storing the rating | rating a reply at all |
-| the weekly collection and its counts | allowing or denying the improvement |
+| the daily collection and its counts | allowing or denying the improvement |
 | writing the proposal | the wording that ends up in the prompt |
 | the overlay write, *after* you allow | restarting the assistant to pick it up |

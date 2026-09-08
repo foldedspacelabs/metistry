@@ -16,6 +16,12 @@ Kept current as PRs land (2026-09-08). Each item names what it unblocks.
       publishing to npm), later `SPARKLE_PRIVATE_KEY`, `APPLE_CERTIFICATE_P12`,
       `APPLE_CERTIFICATE_PASSWORD`, `APPLE_ID`, `APPLE_TEAM_ID`,
       `APPLE_APP_SPECIFIC_PASSWORD` (`docs/ops/releases.md`).
+- [ ] **Extend `METISTRY_GITHUB_TOKEN` with `Contents: read`** (or just rely
+      on `gh`, already installed and logged in on the Studio):
+      `metistry update --channel release` against the private repo 403s on
+      the current fine-grained PAT (Issues/Pull requests/Metadata only) —
+      `gh` is used as a fallback automatically, but the PAT should carry the
+      scope for the direct API path too (`docs/ops/releases.md`).
 
 ## Local install
 - [ ] `brew install postgresql@17 pgvector` on the Studio. Unblocks the live

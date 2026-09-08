@@ -154,6 +154,34 @@ describe("resolveRelease", () => {
     expect(seen[0]!.url).toBe("https://api.github.com/repos/someone/fork/releases/latest");
     expect(seen[0]!.auth).toBe("Bearer ghp_x");
   });
+
+  // A fine-grained PAT scoped to Issues/PRs/Metadata (no Contents: read) gets
+  // a 403 from the Releases API on a private repo, same as an exhausted rate
+  // limit does — GitHub uses 403 for both. The fix must tell them apart.
+  const forbidden = (headers: Record<string, string> = {}) => (async () => new Response("{}", { status: 403, headers })) as unknown as typeof fetch;
+
+  it("a 403 with x-ratelimit-remaining: 0 is reported as rate limiting, not a token/permission problem", async () => {
+    const noGh = fakeExec({ gh: async () => ({ code: 127, stdout: "", stderr: "command not found" }) });
+    await expect(resolveRelease({ fetchFn: forbidden({ "x-ratelimit-remaining": "0" }), env: { METISTRY_GITHUB_TOKEN: "ghp_x" }, exec: noGh })).rejects.toThrow(/rate limited/i);
+  });
+
+  it("a 403 that is not an exhausted rate limit names the exact PAT permission that's missing, when gh is unavailable", async () => {
+    const noGh = fakeExec({ gh: async () => ({ code: 127, stdout: "", stderr: "command not found" }) });
+    await expect(resolveRelease({ fetchFn: forbidden(), env: { METISTRY_GITHUB_TOKEN: "ghp_x" }, exec: noGh })).rejects.toThrow(/Contents: read/);
+  });
+
+  it("falls back to gh when the direct call is unauthorized and gh is on PATH, and says so", async () => {
+    const ghExec = fakeExec({
+      gh: async (args) => {
+        if (args[0] === "--version") return { code: 0, stdout: "gh version 2.0.0", stderr: "" };
+        if (args[0] === "api") return { code: 0, stdout: JSON.stringify({ tag_name: "v0.2.0", assets: [{ name: "checksums.txt", browser_download_url: "https://x/checksums.txt" }] }), stderr: "" };
+        return { code: 1, stdout: "", stderr: "unexpected" };
+      },
+    });
+    const rel = await resolveRelease({ fetchFn: forbidden(), env: { METISTRY_GITHUB_TOKEN: "ghp_x", METISTRY_RELEASE_REPO: "foldedspacelabs/metistry" }, exec: ghExec });
+    expect(rel).toMatchObject({ version: "0.2.0", tag: "v0.2.0", via: "gh" });
+    expect(ghExec.calls.map((c) => [c.cmd, ...c.args].join(" "))).toContainEqual("gh api repos/foldedspacelabs/metistry/releases/latest");
+  });
 });
 
 describe("installRelease", () => {
@@ -187,6 +215,39 @@ describe("installRelease", () => {
     expect(await currentVersion(P)).toBe("0.1.0");
     expect(existsSync(join(P, "releases", "0.2.0"))).toBe(false);
     expect(existsSync(join(P, "releases", ".download"))).toBe(false);
+  });
+
+  it("falls back to `gh release download` for the assets too, when the direct API call was unauthorized", async () => {
+    const P = await mkdtemp(join(tmpdir(), "metistry-rel-"));
+    const src = await checkout();
+    const asset = runtimeAssetName("0.2.0", TARGET);
+    const bytes = Buffer.from("runtime pack for 0.2.0\n".repeat(4));
+    const { r, exec } = runner(
+      fakeExec({
+        gh: async (args) => {
+          if (args[0] === "--version") return { code: 0, stdout: "gh version 2.0.0" };
+          if (args[0] === "api") return { code: 0, stdout: JSON.stringify({ tag_name: "v0.2.0", assets: [{ name: asset, browser_download_url: "https://x/asset" }, { name: CHECKSUMS_ASSET, browser_download_url: "https://x/sums" }] }) };
+          if (args[0] === "release" && args[1] === "download") {
+            const dir = args[args.indexOf("--dir") + 1]!;
+            const pattern = args[args.indexOf("--pattern") + 1]!;
+            const content = pattern === CHECKSUMS_ASSET ? `${sha256(bytes)}  ${asset}\n` : bytes;
+            await writeFile(join(dir, pattern), content);
+            return { code: 0, stdout: "" };
+          }
+          return { code: 1, stdout: "", stderr: `unexpected gh ${args.join(" ")}` };
+        },
+        tar: async (args) => {
+          const dest = args[args.indexOf("-C") + 1]!;
+          await cp(src, dest, { recursive: true });
+        },
+      }),
+    );
+    const forbidden = (async () => new Response("{}", { status: 403 })) as unknown as typeof fetch;
+
+    const res = await installRelease(r, { productDir: P, fetchFn: forbidden, env: { METISTRY_GITHUB_TOKEN: "ghp_x" }, target: TARGET });
+    expect(res).toMatchObject({ version: "0.2.0", installed: true });
+    expect(await currentVersion(P)).toBe("0.2.0");
+    expect(exec.calls.some((c) => c.cmd === "gh" && c.args[0] === "release" && c.args[1] === "download")).toBe(true);
   });
 
   it("refuses a release with no checksums.txt, and one with no pack for this platform", async () => {

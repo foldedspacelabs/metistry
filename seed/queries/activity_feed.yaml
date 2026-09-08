@@ -1,6 +1,6 @@
 # Seeded default (D4 overlay: an instance file of the same name wins).
 name: activity_feed
-description: Time-ordered "what happened" across the system (docs/product/desktop-app-plan.md "The window" — home panel) — a union of runs (tool/turn/crew_run/dispatch/task_op/agent_admin/project_mode, plus collector_run failures only), proposals (created + decided), work.history entries, and outbound_messages (brief/review/alert). Filterable by agent/project; the weekly review is this feed summarised.
+description: Time-ordered "what happened" across the system (docs/product/desktop-app-plan.md "The window" — home panel) — a union of runs (tool/turn/crew_run/dispatch/task_op/agent_admin/project_mode, plus collector_run failures only), proposals (created + decided), work.history entries, and outbound_messages (brief/review/alert). Filterable by agent/project; the weekly review is this feed summarised. `turn_id` (mcp-brain tool calls only; null elsewhere) groups the calls one reply made.
 params:
   hours:   { type: int,  default: 24 }
   limit:   { type: int,  default: 100 }
@@ -31,7 +31,8 @@ sql: |
         ELSE coalesce(r.error, '')
       END                                                                                 AS detail,
       'runs:' || r.id                                                                     AS ref,
-      r.meta->>'project'                                                                  AS proj
+      r.meta->>'project'                                                                  AS proj,
+      r.meta->>'turn_id'                                                                  AS turn_id
     FROM runs r
     WHERE r.ts > now() - make_interval(hours => (:hours)::int)
       AND (
@@ -48,7 +49,8 @@ sql: |
       p.kind                                                                               AS subject,
       coalesce(p.payload->>'title', p.payload->>'reason', p.kind)                          AS detail,
       'proposals:' || p.id                                                                 AS ref,
-      p.payload->>'project'                                                                AS proj
+      p.payload->>'project'                                                                AS proj,
+      NULL::text                                                                            AS turn_id
     FROM proposals p
     WHERE p.ts > now() - make_interval(hours => (:hours)::int)
 
@@ -61,7 +63,8 @@ sql: |
       p.kind                                                                               AS subject,
       concat_ws(': ', p.decision, p.feedback)                                              AS detail,
       'proposals:' || p.id                                                                 AS ref,
-      p.payload->>'project'                                                                AS proj
+      p.payload->>'project'                                                                AS proj,
+      NULL::text                                                                            AS turn_id
     FROM proposals p
     WHERE p.decided_at IS NOT NULL
       AND p.decision <> 'pending'
@@ -76,7 +79,8 @@ sql: |
       w.title                                                                              AS subject,
       concat_ws(' ', h->>'op', CASE WHEN h->>'status' IS NOT NULL THEN '-> ' || (h->>'status') END, h->>'note') AS detail,
       'work:' || w.id                                                                      AS ref,
-      w.project                                                                            AS proj
+      w.project                                                                            AS proj,
+      NULL::text                                                                            AS turn_id
     FROM work w
     CROSS JOIN LATERAL jsonb_array_elements(w.history) AS h
     WHERE (h->>'ts')::timestamptz > now() - make_interval(hours => (:hours)::int)
@@ -90,12 +94,13 @@ sql: |
       m.kind                                                                               AS subject,
       m.text                                                                                AS detail,
       'outbound_messages:' || m.id                                                          AS ref,
-      NULL::text                                                                            AS proj
+      NULL::text                                                                            AS proj,
+      NULL::text                                                                            AS turn_id
     FROM outbound_messages m
     WHERE m.kind IN ('brief', 'review', 'alert')
       AND m.ts > now() - make_interval(hours => (:hours)::int)
   )
-  SELECT ts, kind, actor, subject, left(detail, 200) AS detail, ref
+  SELECT ts, kind, actor, subject, left(detail, 200) AS detail, ref, turn_id
   FROM feed
   WHERE (:agent = '' OR actor = :agent)
     AND (:project = '' OR proj = :project)

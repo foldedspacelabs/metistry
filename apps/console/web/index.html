@@ -9,7 +9,7 @@
   <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0e1216" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-  <title>metistry</title>
+  <title>Metistry</title>
   <link rel="manifest" href="/manifest.webmanifest" />
   <!-- generated from docs/product/design/tokens.json; style.css uses nothing else -->
   <link rel="stylesheet" href="/tokens.css" />
@@ -18,25 +18,25 @@
 </head>
 <body>
   <header>
-    <h1 id="title">metistry</h1>
+    <h1 id="title">Metistry</h1>
     <nav id="nav" hidden>
-      <button data-view="feed">feed</button>
-      <button data-view="chat">chat</button>
-      <button data-view="dashboard">dashboard</button>
-      <button data-view="capture">capture</button>
-      <button data-view="triage">triage</button>
-      <button data-view="status">status</button>
-      <button data-view="devices">devices</button>
-      <button data-view="agents">agents</button>
-      <button data-view="artifacts">artifacts</button>
+      <button data-view="feed">Feed</button>
+      <button data-view="chat">Chat</button>
+      <button data-view="dashboard">Dashboard</button>
+      <button data-view="capture">Capture</button>
+      <button data-view="triage">Triage</button>
+      <button data-view="status">Status</button>
+      <button data-view="devices">Devices</button>
+      <button data-view="agents">Agents</button>
+      <button data-view="artifacts">Artifacts</button>
     </nav>
   </header>
 
   <main>
     <section id="auth" hidden>
       <p id="auth-msg">sign in to your instance</p>
-      <button id="login-btn">sign in with passkey</button>
-      <button id="enroll-btn" hidden>enroll this device</button>
+      <button id="login-btn">Sign In with Passkey</button>
+      <button id="enroll-btn" hidden>Enroll This Device</button>
     </section>
 
     <!-- feed (home): docs/product/desktop-app-plan.md "The window" — activity_feed
@@ -44,26 +44,58 @@
          Every server value is output-encoded via esc() (CRIT-7). -->
     <section id="feed" hidden>
       <form id="feed-filter">
-        <select id="feed-agent"><option value="">all agents</option></select>
-        <select id="feed-project"><option value="">all projects</option></select>
+        <select id="feed-agent"><option value="">All Agents</option></select>
+        <select id="feed-project"><option value="">All Projects</option></select>
       </form>
       <ul id="feed-list"></ul>
       <p id="feed-empty" class="muted" hidden>nothing in the last 24h</p>
     </section>
 
     <section id="chat" hidden>
-      <ul id="messages"></ul>
-      <form id="send-form">
-        <input id="send-text" type="text" placeholder="ask or tell…" autocomplete="off" />
-        <button type="submit">send</button>
-      </form>
+      <!-- polite, never assertive (P2): a reply is announced, never scrolled to -->
+      <ul id="messages" aria-live="polite"></ul>
+      <div id="composer">
+        <!-- P9: the transcript never moves under the reader. A reply that lands
+             while they are scrolled up raises this pill; only a tap on it (or
+             already being at the bottom) scrolls the list. -->
+        <p id="new-reply-row" hidden><button id="new-reply" type="button">↓ New Reply</button></p>
+        <!-- §3.6 composer actions menu — a native <details>, collapsed by
+             default, so nothing but the composer sits above the keyboard.
+             It opens with no JS; the buttons inside need JS only to fill the
+             field. Commands are hand-listed until the console exposes
+             rules.yaml; §3.6 wants them generated. -->
+        <details id="composer-actions">
+          <summary id="composer-toggle" title="Actions" aria-label="Actions"><span aria-hidden="true">＋</span></summary>
+          <div id="composer-sheet">
+            <p class="grp">Quick Actions</p>
+            <p class="acts">
+              <button type="button" data-insert="summarize this thread">Summarize This</button>
+              <button type="button" data-insert="what's the latest">What's the Latest</button>
+              <button type="button" data-goto="capture">New Note</button>
+            </p>
+            <p class="grp">Commands</p>
+            <p class="acts" id="composer-commands">
+              <button type="button" data-insert="/status ">/status</button>
+              <button type="button" data-insert="/note ">/note</button>
+            </p>
+            <p class="grp">Agents</p>
+            <p class="acts" id="composer-agents"><span class="muted">no agents registered</span></p>
+            <p class="grp">Attach</p>
+            <p class="acts"><button type="button" data-goto="capture">Attach a File…</button></p>
+          </div>
+        </details>
+        <form id="send-form">
+          <input id="send-text" type="text" placeholder="ask or tell…" autocomplete="off" />
+          <button type="submit">Send</button>
+        </form>
+      </div>
     </section>
 
     <section id="capture" hidden>
       <form id="capture-form">
         <textarea id="capture-note" placeholder="note…"></textarea>
         <input id="capture-file" type="file" />
-        <button type="submit">capture</button>
+        <button type="submit">Capture</button>
       </form>
       <p id="capture-result"></p>
     </section>
@@ -74,12 +106,12 @@
     </section>
 
     <section id="status" hidden>
-      <h3>reviews waiting on you</h3>
+      <h3>Reviews Waiting on You</h3>
       <ul id="reviews" class="reviews"><li class="muted">none</li></ul>
-      <h3>components</h3>
+      <h3>Components</h3>
       <ul id="checks"></ul>
-      <button id="push-enable">enable notifications</button>
-      <button id="push-test">test push</button>
+      <button id="push-enable">Enable Notifications</button>
+      <button id="push-test">Test Push</button>
     </section>
 
     <section id="devices" hidden>
@@ -90,20 +122,20 @@
     <section id="agents" hidden>
       <ul id="agent-list"></ul>
       <p id="agents-empty" class="muted" hidden>no agents registered</p>
-      <h3>register an agent</h3>
+      <h3>Register an Agent</h3>
       <form id="agent-create">
         <input id="agent-id" type="text" placeholder="id (slug, e.g. drey-dev)" autocomplete="off" autocapitalize="none" />
         <input id="agent-name" type="text" placeholder="display name" autocomplete="off" />
         <select id="agent-kind"><option value="external">external</option><option value="internal">internal</option></select>
-        <button type="submit">register</button>
+        <button type="submit">Register</button>
       </form>
       <div id="agent-token" hidden>
         <p class="muted">token for <b id="agent-token-for"></b> — copy it now, this will not be shown again</p>
         <code id="agent-token-value"></code>
       </div>
       <form id="agent-grants" hidden>
-        <h3>grants for <span id="agent-grants-for"></span></h3>
-        <label>tier
+        <h3>Grants for <span id="agent-grants-for"></span></h3>
+        <label>Tier
           <select id="agent-tier">
             <option value="none">none — capture only</option>
             <option value="index">index — titles and one-liners</option>
@@ -117,36 +149,36 @@
         <input id="agent-accept-from" type="text" placeholder="accept bundles from: agent ids and/or user, comma-separated" autocomplete="off" autocapitalize="none" />
         <input id="agent-max-bundles" type="number" min="0" max="1000" placeholder="max open bundles (default 3)" autocomplete="off" />
         <p id="agent-grants-msg" class="muted"></p>
-        <span><button type="submit">save</button> <button type="button" id="agent-grants-cancel" class="secondary">cancel</button></span>
+        <span><button type="submit">Save</button> <button type="button" id="agent-grants-cancel" class="secondary">Cancel</button></span>
       </form>
     </section>
 
     <!-- dashboard (Phase 4 visibility): one place instead of four. Every
          panel is a named query; panels degrade independently. -->
     <section id="dashboard" hidden>
-      <h3>last 24h <span id="dash-runs-asof" class="muted"></span></h3>
+      <h3>Last 24h <span id="dash-runs-asof" class="muted"></span></h3>
       <ul id="dash-runs" class="tiles"></ul>
       <p id="dash-runs-note" class="muted"></p>
 
-      <h3>reviews waiting on you <span id="dash-reviews-asof" class="muted"></span></h3>
+      <h3>Reviews Waiting on You <span id="dash-reviews-asof" class="muted"></span></h3>
       <ul id="dash-reviews" class="reviews dash-list"><li class="muted">none</li></ul>
 
-      <h3>projects <span id="dash-projects-asof" class="muted"></span></h3>
+      <h3>Projects <span id="dash-projects-asof" class="muted"></span></h3>
       <!-- §4.19 project rollup + §4.21 kill switch: one row per project, a mode chip, one toggle -->
       <ul id="dash-project-rows" class="dash-list"></ul>
       <p id="dash-projects-msg" class="muted"></p>
       <ul id="dash-projects" class="dash-list"></ul>
 
-      <h3>assistant spend by tier · 30d <span id="dash-spend-asof" class="muted"></span></h3>
+      <h3>Assistant Spend by Tier · 30d <span id="dash-spend-asof" class="muted"></span></h3>
       <p class="muted">API-equivalent cost — on a subscription this is headroom used, not a bill.</p>
       <p id="dash-spend-total"></p>
       <ul id="dash-tiers" class="dash-list"></ul>
       <details>
-        <summary class="muted">per day × tier</summary>
+        <summary class="muted">Per Day × Tier</summary>
         <div id="dash-spend-days" class="scroll"></div>
       </details>
 
-      <h3>aws spend · 30d <span id="dash-aws-asof" class="muted"></span></h3>
+      <h3>AWS Spend · 30d <span id="dash-aws-asof" class="muted"></span></h3>
       <p id="dash-aws-total"></p>
       <ul id="dash-aws" class="dash-list"></ul>
       <ul id="dash-aws-services" class="dash-list"></ul>
@@ -158,7 +190,7 @@
     <section id="artifacts" hidden>
       <form id="art-filter">
         <input id="art-project" type="text" placeholder="project (blank = all)" autocomplete="off" autocapitalize="none" />
-        <button type="submit" class="secondary">list</button>
+        <button type="submit" class="secondary">List</button>
       </form>
       <ul id="art-list"></ul>
       <p id="art-empty" class="muted" hidden>no artifacts yet — an agent publishes one with artifact_publish</p>
@@ -166,20 +198,20 @@
         <h3 id="art-title"></h3>
         <p id="art-meta" class="muted"></p>
         <div class="art-row">
-          <label>version <select id="art-version"></select></label>
-          <label>file <select id="art-file"></select></label>
+          <label>Version <select id="art-version"></select></label>
+          <label>File <select id="art-file"></select></label>
         </div>
         <div id="art-viewer"></div>
-        <h3>threads <span id="art-thread-count" class="muted"></span></h3>
+        <h3>Threads <span id="art-thread-count" class="muted"></span></h3>
         <ul id="art-threads"></ul>
         <form id="art-comment">
           <textarea id="art-comment-body" placeholder="comment on this version…"></textarea>
-          <span><button type="submit">comment</button></span>
+          <span><button type="submit">Comment</button></span>
         </form>
         <form id="art-dispatch">
           <p class="muted">send the checked threads to an agent as one review task</p>
           <input id="art-dispatch-to" type="text" placeholder="agent id" autocomplete="off" autocapitalize="none" />
-          <span><button type="submit" class="secondary">dispatch review</button></span>
+          <span><button type="submit" class="secondary">Dispatch Review</button></span>
           <p id="art-dispatch-msg" class="muted"></p>
         </form>
       </div>

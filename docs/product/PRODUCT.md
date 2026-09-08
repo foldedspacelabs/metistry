@@ -604,3 +604,22 @@ your git, on your machine.
   the ranking and never the grant: the area filter lives inside the vector
   query, so the closest chunk in the vault stays invisible to an agent
   whose grant does not cover it. `docs/ops/knowledge-search.md`.
+
+- 2026-09-08 — Goal sharpened: **one design language across the PWA, Mac
+  and iPhone, written down before the native app exists.**
+  `docs/product/design-system.md` turns the UX direction into something
+  buildable: seven principles each tied to a rule the system already has
+  (agent text is data ⇒ never styled as UI chrome; silence-default ⇒
+  calm surfaces; enforce-at-the-tool ⇒ every destructive action confirms
+  with the reason shown), 27 semantic colour roles in light and dark
+  whose 58 declared text pairs are checked against WCAG AA by a
+  generator rather than by eye, a type scale mapped one-to-one onto
+  Apple's Dynamic Type styles with no webfont anywhere, and 17
+  components specified with anatomy, states and both renderings
+  (SwiftUI/HIG and PWA element). `docs/product/design/tokens.json` is
+  the single source; `tokens.css` and the inlined tokens in
+  `preview.html` are generated from it, so the palette cannot drift
+  between the spec, the page and the app. The product bet it protects:
+  the SwiftUI app copies a settled interaction instead of inventing one,
+  which is what makes the Mac app a distribution channel rather than a
+  second product.

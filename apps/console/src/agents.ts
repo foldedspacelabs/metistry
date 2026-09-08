@@ -17,10 +17,11 @@ export type AgentKind = (typeof AGENT_KINDS)[number];
 export const TIERS = ["none", "index", "areas"] as const;
 export type Tier = (typeof TIERS)[number];
 
-/** A grant is a read tier plus, for `areas`, the Knowledge/ prefixes it covers. */
+/** A grant is a read tier plus, for `areas`, the Knowledge/ prefixes it covers. `queries` is a separate axis — mcp-brain's queries_list/queries_run (invariant 3's read path) — default false; internal principals get it regardless (mcp-brain's own rule, not this one). */
 export interface Grants {
   tier: Tier;
   areas: string[];
+  queries?: boolean;
 }
 
 /**
@@ -99,7 +100,7 @@ export interface GrantsOptions {
 
 /** Validate + normalize a grants payload. Throws AgentError on any miss. */
 export function validateGrants(input: unknown, opts: GrantsOptions = {}): Grants {
-  const g = (input ?? {}) as { tier?: unknown; areas?: unknown };
+  const g = (input ?? {}) as { tier?: unknown; areas?: unknown; queries?: unknown };
   if (!TIERS.includes(g.tier as Tier)) throw new AgentError("invalid_request", "tier must be none | index | areas");
   const tier = g.tier as Tier;
   const rawAreas = g.areas === undefined ? [] : g.areas;
@@ -117,7 +118,9 @@ export function validateGrants(input: unknown, opts: GrantsOptions = {}): Grants
   }
   if (tier !== "areas" && areas.length > 0) throw new AgentError("invalid_request", "areas only apply to tier=areas");
   if (tier === "areas" && areas.length === 0) throw new AgentError("invalid_request", "tier=areas needs at least one area");
-  return { tier, areas };
+  if (g.queries !== undefined && typeof g.queries !== "boolean") throw new AgentError("invalid_request", "queries must be a boolean");
+  const queries = g.queries === true;
+  return { tier, areas, ...(queries ? { queries } : {}) };
 }
 
 /** Project ids share the agent slug shape (§4.19 projects are a view, keyed by slug). */
@@ -170,7 +173,7 @@ function coerceAutonomy(raw: unknown): Autonomy {
 
 function coerceGrants(raw: unknown): Grants {
   const g = (raw ?? {}) as Partial<Grants>;
-  return { tier: TIERS.includes(g.tier as Tier) ? (g.tier as Tier) : "none", areas: Array.isArray(g.areas) ? g.areas : [] };
+  return { tier: TIERS.includes(g.tier as Tier) ? (g.tier as Tier) : "none", areas: Array.isArray(g.areas) ? g.areas : [], ...(g.queries === true ? { queries: true } : {}) };
 }
 
 /**

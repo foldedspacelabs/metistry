@@ -263,6 +263,9 @@ importers:
       '@foldedspacelabs/metistry-core':
         specifier: workspace:*
         version: link:../core
+      '@foldedspacelabs/metistry-queries':
+        specifier: workspace:*
+        version: link:../queries
       '@foldedspacelabs/metistry-tasks':
         specifier: workspace:*
         version: link:../tasks

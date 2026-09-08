@@ -7,7 +7,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": { "metistry-mcp-apple-fm": "./dist/main.js" },
-  "files": ["dist", "helper/afm-helper", "manifest.yaml"],
+  "files": ["dist", "helper/afm-helper.app", "manifest.yaml"],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "build:helper": "./scripts/build-helper.sh",

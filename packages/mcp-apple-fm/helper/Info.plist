@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Becomes afm-helper.app/Contents/Info.plist. apple-fm needs no TCC grant
+     (manifest.yaml: requires_tcc: []), but both Swift helpers use the same
+     bundle build shape so there is one thing to reason about at signing and
+     notarization time (the eventkit helper needs it: TCC keys a bundled
+     client on CFBundleIdentifier + csreq, a bare one on absolute path).
+     LSUIElement: never in the Dock — it is spawned as a child process by the
+     bridge and only ever speaks JSON on stdio. -->
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key><string>com.foldedspacelabs.metistry.apple-fm</string>
+  <key>CFBundleName</key><string>metistry-apple-fm</string>
+  <key>CFBundleDisplayName</key><string>Metistry Apple FM Helper</string>
+  <key>CFBundleExecutable</key><string>afm-helper</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+  <key>CFBundleShortVersionString</key><string>0.0.1</string>
+  <key>CFBundleVersion</key><string>1</string>
+  <key>LSMinimumSystemVersion</key><string>26.0</string>
+  <key>LSUIElement</key><true/>
+</dict>
+</plist>

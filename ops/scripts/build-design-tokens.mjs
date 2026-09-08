@@ -12,7 +12,14 @@ import { fileURLToPath } from "node:url";
 
 const root = new URL("../../", import.meta.url);
 const jsonPath = new URL("docs/product/design/tokens.json", root);
-const cssPath = new URL("docs/product/design/tokens.css", root);
+// Two copies, one generator. The console serves its web root as static files
+// and cannot reach outside it, so the PWA needs its own tokens.css — which is
+// a drift risk the moment a human has to remember to copy it. The generator
+// owns both and --check fails on either being stale.
+const cssPaths = [
+  new URL("docs/product/design/tokens.css", root),
+  new URL("apps/console/web/tokens.css", root),
+];
 const T = JSON.parse(readFileSync(jsonPath, "utf8"));
 
 // ----- WCAG 2.1 relative luminance and contrast -----
@@ -159,10 +166,18 @@ const check = process.argv.includes("--check");
 const failures = rows.filter((r) => !r.pass);
 
 if (check) {
-  const current = readFileSync(cssPath, "utf8");
-  if (current !== css) {
-    console.error("tokens.css is stale — run: node ops/scripts/build-design-tokens.mjs");
-    process.exit(1);
+  for (const p of cssPaths) {
+    let current = "";
+    try {
+      current = readFileSync(p, "utf8");
+    } catch {
+      console.error(`${fileURLToPath(p)} is missing — run: node ops/scripts/build-design-tokens.mjs`);
+      process.exit(1);
+    }
+    if (current !== css) {
+      console.error(`${fileURLToPath(p)} is stale — run: node ops/scripts/build-design-tokens.mjs`);
+      process.exit(1);
+    }
   }
   const html = readFileSync(previewPath, "utf8");
   if (html !== inlinePreview(html)) {
@@ -176,9 +191,9 @@ if (check) {
   }
   console.log(`design tokens: ok (${rows.length} pairs checked)`);
 } else {
-  writeFileSync(cssPath, css);
+  for (const p of cssPaths) writeFileSync(p, css);
   writeFileSync(previewPath, inlinePreview(readFileSync(previewPath, "utf8")));
-  console.log(`wrote ${fileURLToPath(cssPath)} and inlined them into preview.html`);
+  console.log(`wrote ${cssPaths.map((p) => fileURLToPath(p)).join(", ")} and inlined them into preview.html`);
   console.log(table);
   if (failures.length) {
     console.error(`\n${failures.length} pair(s) below the minimum — fix tokens.json before committing.`);

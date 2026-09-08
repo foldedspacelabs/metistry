@@ -1,0 +1,1136 @@
+<!doctype html>
+<html lang="en" data-page-theme="auto">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>metistry — design system preview</title>
+<style>
+/* === BEGIN TOKENS — generated from tokens.json by ops/scripts/build-design-tokens.mjs === */
+/* GENERATED — do not edit.
+ * Source: docs/product/design/tokens.json (v1.0.0, 2026-09-08)
+ * Rebuild: node ops/scripts/build-design-tokens.mjs
+ *
+ * Light is the base. Dark is applied twice on purpose: once behind
+ * prefers-color-scheme (guarded so an explicit light choice wins) and once
+ * behind [data-theme="dark"] (so an explicit dark choice wins on a light OS).
+ *
+ * The [data-theme] selectors carry no :root prefix on purpose: custom
+ * properties inherit, so putting data-theme on any element themes that
+ * subtree. That is what lets the preview page show light and dark side by
+ * side without a second copy of the palette.
+ */
+
+:root {
+  color-scheme: light dark;
+
+  --mt-font-sans: -apple-system, BlinkMacSystemFont, system-ui, 'Segoe UI Variable Text', 'Segoe UI', Roboto, Cantarell, 'Helvetica Neue', sans-serif;
+  --mt-font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+  --mt-text-large-title-size: clamp(1.625rem, 1.35rem + 1.4vw, 2.125rem);
+  --mt-text-large-title-weight: 700;
+  --mt-text-large-title-line: 1.15;
+  --mt-text-large-title-tracking: -0.02em;
+  --mt-text-title-1-size: clamp(1.5rem, 1.32rem + 0.9vw, 1.75rem);
+  --mt-text-title-1-weight: 700;
+  --mt-text-title-1-line: 1.2;
+  --mt-text-title-1-tracking: -0.015em;
+  --mt-text-title-2-size: clamp(1.25rem, 1.16rem + 0.45vw, 1.375rem);
+  --mt-text-title-2-weight: 600;
+  --mt-text-title-2-line: 1.25;
+  --mt-text-title-2-tracking: -0.01em;
+  --mt-text-title-3-size: clamp(1.125rem, 1.08rem + 0.22vw, 1.25rem);
+  --mt-text-title-3-weight: 600;
+  --mt-text-title-3-line: 1.3;
+  --mt-text-title-3-tracking: -0.005em;
+  --mt-text-headline-size: clamp(1rem, 0.98rem + 0.1vw, 1.0625rem);
+  --mt-text-headline-weight: 600;
+  --mt-text-headline-line: 1.35;
+  --mt-text-headline-tracking: 0;
+  --mt-text-body-size: clamp(1rem, 0.98rem + 0.1vw, 1.0625rem);
+  --mt-text-body-weight: 400;
+  --mt-text-body-line: 1.5;
+  --mt-text-body-tracking: 0;
+  --mt-text-callout-size: clamp(0.9375rem, 0.92rem + 0.1vw, 1rem);
+  --mt-text-callout-weight: 400;
+  --mt-text-callout-line: 1.45;
+  --mt-text-callout-tracking: 0;
+  --mt-text-subhead-size: clamp(0.875rem, 0.86rem + 0.1vw, 0.9375rem);
+  --mt-text-subhead-weight: 400;
+  --mt-text-subhead-line: 1.4;
+  --mt-text-subhead-tracking: 0;
+  --mt-text-footnote-size: clamp(0.8125rem, 0.8rem + 0.06vw, 0.8125rem);
+  --mt-text-footnote-weight: 400;
+  --mt-text-footnote-line: 1.4;
+  --mt-text-footnote-tracking: 0.005em;
+  --mt-text-caption-1-size: 0.75rem;
+  --mt-text-caption-1-weight: 400;
+  --mt-text-caption-1-line: 1.35;
+  --mt-text-caption-1-tracking: 0.01em;
+  --mt-text-caption-2-size: 0.6875rem;
+  --mt-text-caption-2-weight: 500;
+  --mt-text-caption-2-line: 1.3;
+  --mt-text-caption-2-tracking: 0.02em;
+  --mt-text-mono-size: 0.8125rem;
+  --mt-text-mono-weight: 400;
+  --mt-text-mono-line: 1.5;
+  --mt-text-mono-tracking: 0;
+  --mt-space-0: 0;
+  --mt-space-1: 4px;
+  --mt-space-2: 8px;
+  --mt-space-3: 12px;
+  --mt-space-4: 16px;
+  --mt-space-5: 20px;
+  --mt-space-6: 24px;
+  --mt-space-8: 32px;
+  --mt-space-10: 40px;
+  --mt-space-12: 48px;
+  --mt-space-16: 64px;
+  --mt-size-touch-target: 44px;
+  --mt-size-pointer-target: 28px;
+  --mt-size-icon-sm: 16px;
+  --mt-size-icon-md: 20px;
+  --mt-size-icon-lg: 24px;
+  --mt-size-sidebar: 248px;
+  --mt-size-reading-measure: 68ch;
+  --mt-size-content-max: 760px;
+  --mt-size-wide-breakpoint: 900px;
+  --mt-radius-xs: 6px;
+  --mt-radius-sm: 8px;
+  --mt-radius-md: 10px;
+  --mt-radius-lg: 14px;
+  --mt-radius-xl: 20px;
+  --mt-radius-pill: 999px;
+  --mt-motion-duration-instant: 1ms;
+  --mt-motion-duration-fast: 120ms;
+  --mt-motion-duration-base: 180ms;
+  --mt-motion-duration-slow: 280ms;
+  --mt-motion-duration-sheet: 320ms;
+  --mt-motion-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --mt-motion-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --mt-motion-ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --mt-z-base: 0;
+  --mt-z-sticky: 10;
+  --mt-z-nav: 20;
+  --mt-z-popover: 30;
+  --mt-z-sheet: 40;
+  --mt-z-toast: 50;
+
+  --mt-color-bg: #f6f7f9;
+  --mt-color-surface: #ffffff;
+  --mt-color-elevated: #ffffff;
+  --mt-color-sunken: #eef0f3;
+  --mt-color-border: #d9dee4;
+  --mt-color-border-strong: #b6bec8;
+  --mt-color-text-primary: #12171c;
+  --mt-color-text-secondary: #4d565f;
+  --mt-color-text-tertiary: #646d77;
+  --mt-color-accent: #2b5fd0;
+  --mt-color-accent-hover: #234ea9;
+  --mt-color-accent-quiet: #e6edfc;
+  --mt-color-on-accent: #ffffff;
+  --mt-color-agent: #6a4bbd;
+  --mt-color-agent-quiet: #f1ecfc;
+  --mt-color-ok: #1c7a45;
+  --mt-color-degraded: #8a5a00;
+  --mt-color-failed: #b3261e;
+  --mt-color-absent: #646d77;
+  --mt-color-presence-working: #1c7a45;
+  --mt-color-presence-queued: #8a5a00;
+  --mt-color-presence-idle: #646d77;
+  --mt-color-presence-interrupted: #b3261e;
+  --mt-color-presence-over-cap: #a24a00;
+  --mt-color-presence-blocked: #6a4bbd;
+  --mt-color-focus-ring: #2b5fd0;
+  --mt-color-scrim: rgba(18, 23, 28, 0.32);
+  --mt-elevation-0: none;
+  --mt-elevation-1: 0 1px 2px rgba(18,23,28,0.06), 0 0 0 1px rgba(18,23,28,0.05);
+  --mt-elevation-2: 0 4px 14px rgba(18,23,28,0.10), 0 0 0 1px rgba(18,23,28,0.06);
+  --mt-elevation-3: 0 18px 48px rgba(18,23,28,0.18);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+  --mt-color-bg: #0e1216;
+  --mt-color-surface: #171c22;
+  --mt-color-elevated: #212831;
+  --mt-color-sunken: #0b0e12;
+  --mt-color-border: #2b333d;
+  --mt-color-border-strong: #3d4854;
+  --mt-color-text-primary: #e9edf1;
+  --mt-color-text-secondary: #a7b1bc;
+  --mt-color-text-tertiary: #8b96a1;
+  --mt-color-accent: #7ea9ff;
+  --mt-color-accent-hover: #9dbeff;
+  --mt-color-accent-quiet: #1b2739;
+  --mt-color-on-accent: #0b1220;
+  --mt-color-agent: #b9a2f5;
+  --mt-color-agent-quiet: #1e1a2c;
+  --mt-color-ok: #68d391;
+  --mt-color-degraded: #e8b84b;
+  --mt-color-failed: #f4837c;
+  --mt-color-absent: #8b96a1;
+  --mt-color-presence-working: #68d391;
+  --mt-color-presence-queued: #e8b84b;
+  --mt-color-presence-idle: #8b96a1;
+  --mt-color-presence-interrupted: #f4837c;
+  --mt-color-presence-over-cap: #f0a35e;
+  --mt-color-presence-blocked: #b9a2f5;
+  --mt-color-focus-ring: #7ea9ff;
+  --mt-color-scrim: rgba(0, 0, 0, 0.55);
+  --mt-elevation-0: none;
+  --mt-elevation-1: 0 0 0 1px rgba(255,255,255,0.05);
+  --mt-elevation-2: 0 4px 14px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.07);
+  --mt-elevation-3: 0 18px 48px rgba(0,0,0,0.65), 0 0 0 1px rgba(255,255,255,0.08);
+  }
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+  --mt-color-bg: #f6f7f9;
+  --mt-color-surface: #ffffff;
+  --mt-color-elevated: #ffffff;
+  --mt-color-sunken: #eef0f3;
+  --mt-color-border: #d9dee4;
+  --mt-color-border-strong: #b6bec8;
+  --mt-color-text-primary: #12171c;
+  --mt-color-text-secondary: #4d565f;
+  --mt-color-text-tertiary: #646d77;
+  --mt-color-accent: #2b5fd0;
+  --mt-color-accent-hover: #234ea9;
+  --mt-color-accent-quiet: #e6edfc;
+  --mt-color-on-accent: #ffffff;
+  --mt-color-agent: #6a4bbd;
+  --mt-color-agent-quiet: #f1ecfc;
+  --mt-color-ok: #1c7a45;
+  --mt-color-degraded: #8a5a00;
+  --mt-color-failed: #b3261e;
+  --mt-color-absent: #646d77;
+  --mt-color-presence-working: #1c7a45;
+  --mt-color-presence-queued: #8a5a00;
+  --mt-color-presence-idle: #646d77;
+  --mt-color-presence-interrupted: #b3261e;
+  --mt-color-presence-over-cap: #a24a00;
+  --mt-color-presence-blocked: #6a4bbd;
+  --mt-color-focus-ring: #2b5fd0;
+  --mt-color-scrim: rgba(18, 23, 28, 0.32);
+  --mt-elevation-0: none;
+  --mt-elevation-1: 0 1px 2px rgba(18,23,28,0.06), 0 0 0 1px rgba(18,23,28,0.05);
+  --mt-elevation-2: 0 4px 14px rgba(18,23,28,0.10), 0 0 0 1px rgba(18,23,28,0.06);
+  --mt-elevation-3: 0 18px 48px rgba(18,23,28,0.18);
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+  --mt-color-bg: #0e1216;
+  --mt-color-surface: #171c22;
+  --mt-color-elevated: #212831;
+  --mt-color-sunken: #0b0e12;
+  --mt-color-border: #2b333d;
+  --mt-color-border-strong: #3d4854;
+  --mt-color-text-primary: #e9edf1;
+  --mt-color-text-secondary: #a7b1bc;
+  --mt-color-text-tertiary: #8b96a1;
+  --mt-color-accent: #7ea9ff;
+  --mt-color-accent-hover: #9dbeff;
+  --mt-color-accent-quiet: #1b2739;
+  --mt-color-on-accent: #0b1220;
+  --mt-color-agent: #b9a2f5;
+  --mt-color-agent-quiet: #1e1a2c;
+  --mt-color-ok: #68d391;
+  --mt-color-degraded: #e8b84b;
+  --mt-color-failed: #f4837c;
+  --mt-color-absent: #8b96a1;
+  --mt-color-presence-working: #68d391;
+  --mt-color-presence-queued: #e8b84b;
+  --mt-color-presence-idle: #8b96a1;
+  --mt-color-presence-interrupted: #f4837c;
+  --mt-color-presence-over-cap: #f0a35e;
+  --mt-color-presence-blocked: #b9a2f5;
+  --mt-color-focus-ring: #7ea9ff;
+  --mt-color-scrim: rgba(0, 0, 0, 0.55);
+  --mt-elevation-0: none;
+  --mt-elevation-1: 0 0 0 1px rgba(255,255,255,0.05);
+  --mt-elevation-2: 0 4px 14px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.07);
+  --mt-elevation-3: 0 18px 48px rgba(0,0,0,0.65), 0 0 0 1px rgba(255,255,255,0.08);
+}
+
+/* Reduced motion: durations collapse, transforms become cross-fades. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --mt-motion-duration-fast: var(--mt-motion-duration-instant);
+    --mt-motion-duration-base: var(--mt-motion-duration-instant);
+    --mt-motion-duration-slow: var(--mt-motion-duration-instant);
+    --mt-motion-duration-sheet: var(--mt-motion-duration-instant);
+  }
+}
+
+/* === END TOKENS === */
+
+/* ---------- page chrome ---------- */
+*, *::before, *::after { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--mt-color-bg);
+  color: var(--mt-color-text-primary);
+  font-family: var(--mt-font-sans);
+  font-size: var(--mt-text-body-size);
+  line-height: var(--mt-text-body-line);
+  -webkit-text-size-adjust: 100%;
+  padding: max(var(--mt-space-4), env(safe-area-inset-top)) var(--mt-space-4)
+           max(var(--mt-space-10), env(safe-area-inset-bottom));
+}
+.page { max-width: 1180px; margin: 0 auto; }
+h1 { font-size: var(--mt-text-large-title-size); font-weight: var(--mt-text-large-title-weight);
+     letter-spacing: var(--mt-text-large-title-tracking); line-height: var(--mt-text-large-title-line); margin: 0; }
+h2 { font-size: var(--mt-text-title-2-size); font-weight: var(--mt-text-title-2-weight);
+     letter-spacing: var(--mt-text-title-2-tracking); margin: var(--mt-space-12) 0 var(--mt-space-1); }
+h2 .num { color: var(--mt-color-text-tertiary); font-weight: 400; }
+h3 { font-size: var(--mt-text-title-3-size); font-weight: var(--mt-text-title-3-weight); margin: var(--mt-space-6) 0 var(--mt-space-2); }
+p  { margin: var(--mt-space-2) 0; }
+.lede { color: var(--mt-color-text-secondary); font-size: var(--mt-text-subhead-size); max-width: 68ch; }
+code, .mono { font-family: var(--mt-font-mono); font-size: var(--mt-text-mono-size); }
+hr { border: 0; border-top: 1px solid var(--mt-color-border); margin: var(--mt-space-8) 0; }
+
+.topbar { display: flex; flex-wrap: wrap; gap: var(--mt-space-3); align-items: flex-end;
+  justify-content: space-between; padding-bottom: var(--mt-space-4); border-bottom: 1px solid var(--mt-color-border); }
+.themeswitch { display: inline-flex; background: var(--mt-color-sunken); border: 1px solid var(--mt-color-border);
+  border-radius: var(--mt-radius-pill); padding: 2px; gap: 2px; }
+.themeswitch button { border: 0; background: none; color: var(--mt-color-text-secondary);
+  font: inherit; font-size: var(--mt-text-footnote-size); padding: var(--mt-space-1) var(--mt-space-3);
+  border-radius: var(--mt-radius-pill); min-height: 32px; cursor: pointer; }
+.themeswitch button[aria-pressed="true"] { background: var(--mt-color-surface); color: var(--mt-color-text-primary);
+  box-shadow: var(--mt-elevation-1); }
+
+/* ---------- side-by-side panes ---------- */
+.duo { display: grid; grid-template-columns: 1fr; gap: var(--mt-space-4); margin-top: var(--mt-space-3); }
+@media (min-width: 900px) { .duo { grid-template-columns: 1fr 1fr; } }
+.pane { background: var(--mt-color-bg); color: var(--mt-color-text-primary);
+  border: 1px solid var(--mt-color-border); border-radius: var(--mt-radius-xl);
+  padding: var(--mt-space-4); overflow: hidden; }
+.pane > .panelabel { display: block; font-size: var(--mt-text-caption-2-size); font-weight: var(--mt-text-caption-2-weight);
+  letter-spacing: var(--mt-text-caption-2-tracking); text-transform: uppercase;
+  color: var(--mt-color-text-tertiary); margin-bottom: var(--mt-space-3); }
+
+/* ---------- primitives ---------- */
+.card { background: var(--mt-color-surface); border-radius: var(--mt-radius-lg);
+  box-shadow: var(--mt-elevation-1); padding: var(--mt-space-4); }
+.card + .card { margin-top: var(--mt-space-3); }
+.elev { background: var(--mt-color-elevated); border-radius: var(--mt-radius-xl); box-shadow: var(--mt-elevation-2); padding: var(--mt-space-3); }
+.well { background: var(--mt-color-sunken); border-radius: var(--mt-radius-md); padding: var(--mt-space-3);
+  font-family: var(--mt-font-mono); font-size: var(--mt-text-mono-size); overflow-x: auto; }
+.muted { color: var(--mt-color-text-secondary); font-size: var(--mt-text-footnote-size); }
+.tiny  { color: var(--mt-color-text-tertiary); font-size: var(--mt-text-caption-1-size); }
+.row { display: flex; align-items: center; gap: var(--mt-space-2); flex-wrap: wrap; }
+.spread { display: flex; align-items: baseline; justify-content: space-between; gap: var(--mt-space-3); }
+
+button, .btn { font: inherit; font-size: var(--mt-text-subhead-size); border-radius: var(--mt-radius-md);
+  border: 1px solid var(--mt-color-border-strong); background: var(--mt-color-surface);
+  color: var(--mt-color-text-primary); padding: var(--mt-space-2) var(--mt-space-4);
+  min-height: var(--mt-size-touch-target); cursor: pointer;
+  transition: background var(--mt-motion-duration-fast) var(--mt-motion-ease-standard); }
+@media (pointer: fine) { button, .btn { min-height: var(--mt-size-pointer-target); } }
+button:hover { background: var(--mt-color-sunken); }
+button.primary { background: var(--mt-color-accent); border-color: transparent; color: var(--mt-color-on-accent); }
+button.primary:hover { background: var(--mt-color-accent-hover); }
+button.danger { color: var(--mt-color-failed); border-color: var(--mt-color-failed); background: var(--mt-color-surface); }
+button.danger.solid { background: var(--mt-color-failed); color: #fff; border-color: transparent; }
+:focus-visible { outline: 2px solid var(--mt-color-focus-ring); outline-offset: 2px; border-radius: var(--mt-radius-xs); }
+
+.chip { display: inline-flex; align-items: center; gap: var(--mt-space-1);
+  font-size: var(--mt-text-caption-2-size); font-weight: var(--mt-text-caption-2-weight);
+  letter-spacing: var(--mt-text-caption-2-tracking);
+  padding: 3px var(--mt-space-2); border-radius: var(--mt-radius-pill);
+  background: var(--mt-color-sunken); color: var(--mt-color-text-secondary); white-space: nowrap; }
+.chip.agent { background: var(--mt-color-agent-quiet); color: var(--mt-color-agent); font-family: var(--mt-font-mono); }
+.chip.accent { background: var(--mt-color-accent-quiet); color: var(--mt-color-accent); }
+.state-working     { background: color-mix(in srgb, var(--mt-color-presence-working) 14%, transparent);     color: var(--mt-color-presence-working); }
+.state-queued      { background: color-mix(in srgb, var(--mt-color-presence-queued) 14%, transparent);      color: var(--mt-color-presence-queued); }
+.state-idle        { background: color-mix(in srgb, var(--mt-color-presence-idle) 14%, transparent);        color: var(--mt-color-presence-idle); }
+.state-interrupted { background: color-mix(in srgb, var(--mt-color-presence-interrupted) 14%, transparent); color: var(--mt-color-presence-interrupted); }
+.state-over-cap    { background: color-mix(in srgb, var(--mt-color-presence-over-cap) 14%, transparent);    color: var(--mt-color-presence-over-cap); }
+.state-blocked     { background: color-mix(in srgb, var(--mt-color-presence-blocked) 14%, transparent);     color: var(--mt-color-presence-blocked); }
+.ok { color: var(--mt-color-ok); } .degraded { color: var(--mt-color-degraded); }
+.failed { color: var(--mt-color-failed); font-weight: 500; } .absent { color: var(--mt-color-absent); }
+.agentink { color: var(--mt-color-agent); }
+.link { color: var(--mt-color-accent); text-decoration: none; }
+
+/* ---------- swatches ---------- */
+.swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: var(--mt-space-2); }
+.sw { background: var(--mt-color-surface); border-radius: var(--mt-radius-md); padding: var(--mt-space-2); box-shadow: var(--mt-elevation-1); }
+.sw i { display: block; height: 34px; border-radius: var(--mt-radius-sm); border: 1px solid var(--mt-color-border); }
+.sw b { display: block; font-size: var(--mt-text-caption-1-size); font-weight: 600; margin-top: var(--mt-space-1); }
+.sw span { display: block; font-size: var(--mt-text-caption-2-size); color: var(--mt-color-text-tertiary); font-family: var(--mt-font-mono); }
+
+/* ---------- navigation ---------- */
+.nav-side { background: var(--mt-color-sunken); border-radius: var(--mt-radius-lg); padding: var(--mt-space-2); max-width: 260px; }
+.nav-side a { display: flex; gap: var(--mt-space-2); align-items: center; padding: var(--mt-space-2) var(--mt-space-3);
+  border-radius: var(--mt-radius-sm); color: var(--mt-color-text-primary); text-decoration: none; font-size: var(--mt-text-subhead-size); }
+.nav-side a[aria-current] { background: var(--mt-color-accent-quiet); color: var(--mt-color-accent); font-weight: 600; }
+.nav-side .badge { margin-left: auto; background: var(--mt-color-accent); color: var(--mt-color-on-accent);
+  border-radius: var(--mt-radius-pill); font-size: var(--mt-text-caption-2-size); padding: 1px var(--mt-space-2); }
+.nav-tabs { display: flex; background: var(--mt-color-surface); border-top: 1px solid var(--mt-color-border);
+  border-radius: var(--mt-radius-lg); box-shadow: var(--mt-elevation-1); }
+.nav-tabs a { flex: 1; text-align: center; padding: var(--mt-space-2) 0; text-decoration: none;
+  color: var(--mt-color-text-tertiary); font-size: var(--mt-text-caption-2-size); min-height: var(--mt-size-touch-target); }
+.nav-tabs a b { display: block; font-size: var(--mt-text-callout-size); font-weight: 400; }
+.nav-tabs a[aria-current] { color: var(--mt-color-accent); }
+
+/* ---------- feed ---------- */
+.feed { list-style: none; margin: 0; padding: 0; }
+.feed li { display: flex; gap: var(--mt-space-3); align-items: flex-start;
+  padding: var(--mt-space-3) var(--mt-space-1); border-bottom: 1px solid var(--mt-color-border); }
+.feed li:last-child { border-bottom: 0; }
+.feed .glyph { flex: 0 0 auto; line-height: 1.4; }
+.feed .body { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.feed .subject { font-size: var(--mt-text-headline-size); font-weight: var(--mt-text-headline-weight); }
+.feed .detail { display: block; color: var(--mt-color-text-secondary); font-size: var(--mt-text-subhead-size); margin-top: 2px; }
+.feed .when { flex: 0 0 auto; color: var(--mt-color-text-tertiary); font-size: var(--mt-text-footnote-size); white-space: nowrap; }
+
+/* ---------- chat ---------- */
+.turnmeta { color: var(--mt-color-text-tertiary); font-size: var(--mt-text-footnote-size); margin-bottom: var(--mt-space-1); }
+.bubble { border-radius: var(--mt-radius-lg); padding: var(--mt-space-3) var(--mt-space-4); }
+.bubble.out { background: var(--mt-color-accent-quiet); margin-left: var(--mt-space-8); }
+.bubble.in  { background: var(--mt-color-surface); box-shadow: var(--mt-elevation-1); }
+details.tools { margin-top: var(--mt-space-2); background: var(--mt-color-agent-quiet); border-radius: var(--mt-radius-md); }
+details.tools > summary { cursor: pointer; list-style: none; padding: var(--mt-space-2) var(--mt-space-3);
+  color: var(--mt-color-agent); font-size: var(--mt-text-footnote-size); min-height: 32px; }
+details.tools > summary::-webkit-details-marker { display: none; }
+details.tools > summary::before { content: "▸ "; }
+details.tools[open] > summary::before { content: "▾ "; }
+details.tools .list { padding: 0 var(--mt-space-3) var(--mt-space-3); }
+details.tools .list div { font-family: var(--mt-font-mono); font-size: var(--mt-text-mono-size);
+  color: var(--mt-color-text-secondary); padding: 3px 0; border-top: 1px solid var(--mt-color-border); }
+.promptcard { background: var(--mt-color-surface); border-radius: var(--mt-radius-lg); box-shadow: var(--mt-elevation-1);
+  border-left: 4px solid var(--mt-color-accent); padding: var(--mt-space-4); }
+.promptcard h4 { margin: 0 0 var(--mt-space-1); font-size: var(--mt-text-headline-size); font-weight: var(--mt-text-headline-weight); }
+.promptcard .opts { display: flex; flex-wrap: wrap; gap: var(--mt-space-2); margin-top: var(--mt-space-3); }
+
+/* ---------- palette / menu ---------- */
+.palette { max-width: 420px; }
+.palette input { width: 100%; font: inherit; font-size: var(--mt-text-body-size); padding: var(--mt-space-2) var(--mt-space-3);
+  border-radius: var(--mt-radius-md); border: 1px solid var(--mt-color-border-strong);
+  background: var(--mt-color-surface); color: var(--mt-color-text-primary); }
+.palette .grp { color: var(--mt-color-text-tertiary); font-size: var(--mt-text-caption-2-size);
+  letter-spacing: var(--mt-text-caption-2-tracking); text-transform: uppercase; margin: var(--mt-space-3) 0 var(--mt-space-1); }
+.palette .item { display: flex; gap: var(--mt-space-2); align-items: baseline; padding: var(--mt-space-2);
+  border-radius: var(--mt-radius-sm); font-size: var(--mt-text-subhead-size); }
+.palette .item[aria-selected="true"] { background: var(--mt-color-accent-quiet); }
+.palette .item .kbd { margin-left: auto; color: var(--mt-color-text-tertiary); font-family: var(--mt-font-mono); font-size: var(--mt-text-caption-1-size); }
+
+/* ---------- forms ---------- */
+textarea, input[type="text"], select { font: inherit; font-size: var(--mt-text-body-size); width: 100%;
+  padding: var(--mt-space-3); border-radius: var(--mt-radius-md); border: 1px solid var(--mt-color-border-strong);
+  background: var(--mt-color-surface); color: var(--mt-color-text-primary); }
+textarea { min-height: 84px; resize: vertical; }
+.full { width: 100%; justify-content: center; }
+
+/* ---------- tables ---------- */
+table { border-collapse: collapse; width: 100%; font-size: var(--mt-text-footnote-size); }
+th, td { text-align: left; padding: var(--mt-space-2); border-bottom: 1px solid var(--mt-color-border); white-space: nowrap; }
+th { color: var(--mt-color-text-tertiary); font-weight: 400; }
+td.num, th.num { text-align: right; }
+.scroll { overflow-x: auto; }
+
+/* ---------- misc components ---------- */
+.dropzone { border: 2px solid var(--mt-color-accent); background: var(--mt-color-accent-quiet);
+  border-radius: var(--mt-radius-lg); padding: var(--mt-space-3); }
+.dropzone.invalid { border: 2px solid var(--mt-color-border-strong); background: var(--mt-color-surface); }
+.artband { background: var(--mt-color-agent-quiet); color: var(--mt-color-agent);
+  border-radius: var(--mt-radius-md) var(--mt-radius-md) 0 0; padding: var(--mt-space-2) var(--mt-space-3);
+  font-size: var(--mt-text-footnote-size); }
+.artframe { border: 1px solid var(--mt-color-border); border-top: 0; border-radius: 0 0 var(--mt-radius-md) var(--mt-radius-md);
+  background: #fff; color: #111; padding: var(--mt-space-3); font-size: var(--mt-text-subhead-size); }
+.notif { background: var(--mt-color-elevated); border-radius: var(--mt-radius-xl); box-shadow: var(--mt-elevation-2); overflow: hidden; }
+.notif .b { padding: var(--mt-space-3) var(--mt-space-4); }
+.notif .acts { display: flex; border-top: 1px solid var(--mt-color-border); }
+.notif .acts button { flex: 1; border: 0; border-radius: 0; background: none; color: var(--mt-color-accent); }
+.notif .acts button + button { border-left: 1px solid var(--mt-color-border); }
+.empty { text-align: center; color: var(--mt-color-text-secondary); padding: var(--mt-space-8) var(--mt-space-4);
+  border: 1px dashed var(--mt-color-border-strong); border-radius: var(--mt-radius-lg); }
+.empty .g { font-size: 24px; color: var(--mt-color-text-tertiary); display: block; margin-bottom: var(--mt-space-2); }
+.envelope { background: var(--mt-color-surface); border: 1px solid var(--mt-color-failed);
+  border-radius: var(--mt-radius-lg); padding: var(--mt-space-3) var(--mt-space-4); }
+.dialog { background: var(--mt-color-elevated); border-radius: var(--mt-radius-xl); box-shadow: var(--mt-elevation-3);
+  padding: var(--mt-space-5); max-width: 420px; margin: 0 auto; }
+.typerow { display: flex; align-items: baseline; gap: var(--mt-space-3); padding: var(--mt-space-2) 0;
+  border-bottom: 1px solid var(--mt-color-border); }
+.typerow .name { flex: 0 0 128px; color: var(--mt-color-text-tertiary); font-family: var(--mt-font-mono); font-size: var(--mt-text-caption-1-size); }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="topbar">
+    <div>
+      <h1>metistry design system</h1>
+      <p class="lede">Every component from <code>docs/product/design-system.md</code> §3, rendered light and dark
+        with real content. Self-contained: tokens inlined, no external resources, no script but the theme toggle.</p>
+    </div>
+    <div class="themeswitch" role="group" aria-label="page appearance">
+      <button type="button" data-set="auto" aria-pressed="true">auto</button>
+      <button type="button" data-set="light" aria-pressed="false">light</button>
+      <button type="button" data-set="dark" aria-pressed="false">dark</button>
+    </div>
+  </div>
+
+  <!-- ===================== TOKENS ===================== -->
+  <h2><span class="num">2.1</span> Colour roles</h2>
+  <p class="lede">Roles, not hues. Every text pair is checked against WCAG AA (4.5:1) by
+    <code>ops/scripts/build-design-tokens.mjs</code>; all 58 declared pairs pass. Colour is never the only signal.</p>
+  <div class="duo">
+    <section class="pane" data-theme="light"><span class="panelabel">light</span>
+      <div class="swatches">
+        <div class="sw"><i style="background:var(--mt-color-bg)"></i><b>bg</b><span>#f6f7f9</span></div>
+        <div class="sw"><i style="background:var(--mt-color-surface)"></i><b>surface</b><span>#ffffff</span></div>
+        <div class="sw"><i style="background:var(--mt-color-elevated)"></i><b>elevated</b><span>#ffffff</span></div>
+        <div class="sw"><i style="background:var(--mt-color-sunken)"></i><b>sunken</b><span>#eef0f3</span></div>
+        <div class="sw"><i style="background:var(--mt-color-accent)"></i><b>accent</b><span>#2b5fd0</span></div>
+        <div class="sw"><i style="background:var(--mt-color-agent)"></i><b>agent</b><span>#6a4bbd</span></div>
+        <div class="sw"><i style="background:var(--mt-color-ok)"></i><b>ok</b><span>#1c7a45</span></div>
+        <div class="sw"><i style="background:var(--mt-color-degraded)"></i><b>degraded</b><span>#8a5a00</span></div>
+        <div class="sw"><i style="background:var(--mt-color-failed)"></i><b>failed</b><span>#b3261e</span></div>
+        <div class="sw"><i style="background:var(--mt-color-absent)"></i><b>absent</b><span>#646d77</span></div>
+        <div class="sw"><i style="background:var(--mt-color-presence-over-cap)"></i><b>over-cap</b><span>#a24a00</span></div>
+        <div class="sw"><i style="background:var(--mt-color-presence-blocked)"></i><b>blocked</b><span>#6a4bbd</span></div>
+      </div>
+    </section>
+    <section class="pane" data-theme="dark"><span class="panelabel">dark</span>
+      <div class="swatches">
+        <div class="sw"><i style="background:var(--mt-color-bg)"></i><b>bg</b><span>#0e1216</span></div>
+        <div class="sw"><i style="background:var(--mt-color-surface)"></i><b>surface</b><span>#171c22</span></div>
+        <div class="sw"><i style="background:var(--mt-color-elevated)"></i><b>elevated</b><span>#212831</span></div>
+        <div class="sw"><i style="background:var(--mt-color-sunken)"></i><b>sunken</b><span>#0b0e12</span></div>
+        <div class="sw"><i style="background:var(--mt-color-accent)"></i><b>accent</b><span>#7ea9ff</span></div>
+        <div class="sw"><i style="background:var(--mt-color-agent)"></i><b>agent</b><span>#b9a2f5</span></div>
+        <div class="sw"><i style="background:var(--mt-color-ok)"></i><b>ok</b><span>#68d391</span></div>
+        <div class="sw"><i style="background:var(--mt-color-degraded)"></i><b>degraded</b><span>#e8b84b</span></div>
+        <div class="sw"><i style="background:var(--mt-color-failed)"></i><b>failed</b><span>#f4837c</span></div>
+        <div class="sw"><i style="background:var(--mt-color-absent)"></i><b>absent</b><span>#8b96a1</span></div>
+        <div class="sw"><i style="background:var(--mt-color-presence-over-cap)"></i><b>over-cap</b><span>#f0a35e</span></div>
+        <div class="sw"><i style="background:var(--mt-color-presence-blocked)"></i><b>blocked</b><span>#b9a2f5</span></div>
+      </div>
+    </section>
+  </div>
+
+  <h2><span class="num">2.3</span> Type scale</h2>
+  <p class="lede">Mapped to Apple's Dynamic Type styles; on the web the same rhythm from a <code>clamp()</code> in
+    <code>rem</code>, so the browser's own font-size setting still applies. No webfont is loaded.</p>
+  <div class="duo">
+    <section class="pane" data-theme="light"><span class="panelabel">light</span>
+      <div class="typerow"><span class="name">large-title</span><span style="font-size:var(--mt-text-large-title-size);font-weight:700">Feed</span></div>
+      <div class="typerow"><span class="name">title-2</span><span style="font-size:var(--mt-text-title-2-size);font-weight:600">metistry</span></div>
+      <div class="typerow"><span class="name">headline</span><span style="font-size:var(--mt-text-headline-size);font-weight:600">dispatch queued for ops-bot</span></div>
+      <div class="typerow"><span class="name">body</span><span style="font-size:var(--mt-text-body-size)">Cut volume ~40% over the final three weeks.</span></div>
+      <div class="typerow"><span class="name">subhead</span><span style="font-size:var(--mt-text-subhead-size)">mode: hybrid · Areas/Running · 14 ms</span></div>
+      <div class="typerow"><span class="name">footnote</span><span class="muted">seen 2 minutes ago · $1.42 today</span></div>
+      <div class="typerow"><span class="name">caption-2</span><span class="chip">working</span></div>
+      <div class="typerow"><span class="name">mono</span><span class="mono">wrk_01H8ZK4Q…221</span></div>
+    </section>
+    <section class="pane" data-theme="dark"><span class="panelabel">dark</span>
+      <div class="typerow"><span class="name">large-title</span><span style="font-size:var(--mt-text-large-title-size);font-weight:700">Feed</span></div>
+      <div class="typerow"><span class="name">title-2</span><span style="font-size:var(--mt-text-title-2-size);font-weight:600">metistry</span></div>
+      <div class="typerow"><span class="name">headline</span><span style="font-size:var(--mt-text-headline-size);font-weight:600">dispatch queued for ops-bot</span></div>
+      <div class="typerow"><span class="name">body</span><span style="font-size:var(--mt-text-body-size)">Cut volume ~40% over the final three weeks.</span></div>
+      <div class="typerow"><span class="name">subhead</span><span style="font-size:var(--mt-text-subhead-size)">mode: hybrid · Areas/Running · 14 ms</span></div>
+      <div class="typerow"><span class="name">footnote</span><span class="muted">seen 2 minutes ago · $1.42 today</span></div>
+      <div class="typerow"><span class="name">caption-2</span><span class="chip">working</span></div>
+      <div class="typerow"><span class="name">mono</span><span class="mono">wrk_01H8ZK4Q…221</span></div>
+    </section>
+  </div>
+
+  <hr />
+
+  <!-- ===================== 3.1 NAVIGATION ===================== -->
+  <h2><span class="num">3.1</span> Navigation</h2>
+  <p class="lede">Ten destinations, same order everywhere. macOS sidebar · iOS tab bar · the PWA does both from one
+    <code>&lt;nav&gt;</code>. A badge appears only when the count is actionable.</p>
+  <div class="duo">
+    <section class="pane" data-theme="light"><span class="panelabel">light</span>
+      <nav class="nav-side">
+        <a href="#" aria-current="page">◈ feed</a>
+        <a href="#">💬 chat</a>
+        <a href="#">🤖 agents</a>
+        <a href="#">🎛️ projects</a>
+        <a href="#">📝 triage <span class="badge">3</span></a>
+        <a href="#">🩺 status <span class="chip state-queued" style="margin-left:auto">1 degraded</span></a>
+      </nav>
+      <div style="height:var(--mt-space-4)"></div>
+      <nav class="nav-tabs">
+        <a href="#" aria-current="page"><b>◈</b>feed</a><a href="#"><b>💬</b>chat</a>
+        <a href="#"><b>📥</b>capture</a><a href="#"><b>📝</b>triage</a><a href="#"><b>•••</b>more</a>
+      </nav>
+    </section>
+    <section class="pane" data-theme="dark"><span class="panelabel">dark</span>
+      <nav class="nav-side">
+        <a href="#" aria-current="page">◈ feed</a>
+        <a href="#">💬 chat</a>
+        <a href="#">🤖 agents</a>
+        <a href="#">🎛️ projects</a>
+        <a href="#">📝 triage <span class="badge">3</span></a>
+        <a href="#">🩺 status <span class="chip state-queued" style="margin-left:auto">1 degraded</span></a>
+      </nav>
+      <div style="height:var(--mt-space-4)"></div>
+      <nav class="nav-tabs">
+        <a href="#" aria-current="page"><b>◈</b>feed</a><a href="#"><b>💬</b>chat</a>
+        <a href="#"><b>📥</b>capture</a><a href="#"><b>📝</b>triage</a><a href="#"><b>•••</b>more</a>
+      </nav>
+    </section>
+  </div>
+
+  <!-- ===================== 3.2 FEED ROWS ===================== -->
+  <h2><span class="num">3.2</span> Activity feed rows</h2>
+  <p class="lede">Real kinds from the <code>activity_feed</code> query. Agent actors carry the agent tint; a failure
+    tints the detail line, never the whole row.</p>
+  <div class="duo">
+    <section class="pane" data-theme="light"><span class="panelabel">light</span>
+      <div class="card" style="padding:var(--mt-space-2) var(--mt-space-3)">
+      <ul class="feed">
+        <li><span class="glyph">🔧</span><span class="body"><span class="chip agent">drey-dev</span>
+          <span class="subject"> knowledge_search · 3 hits</span>
+          <span class="detail">mode: hybrid · Knowledge/Areas/Running · 14 ms</span></span><span class="when">2m ago</span></li>
+        <li><span class="glyph">📨</span><span class="body"><span class="chip agent">drey-dev</span>
+          <span class="subject"> dispatch queued for ops-bot</span>
+          <span class="detail degraded">⏳ 3/3 open bundles — cap on metistry</span></span><span class="when">14m ago</span></li>
+        <li><span class="glyph">📝</span><span class="body"><span class="chip">system</span>
+          <span class="subject"> proposal #97 awaiting you</span>
+          <span class="detail">write Knowledge/Areas/Health/Taper.md</span></span><span class="when">1h ago</span></li>
+        <li><span class="glyph">⚠️</span><span class="body"><span class="chip">github-state</span>
+          <span class="subject"> collector run failed</span>
+          <span class="detail failed">✕ rate limited — retries at 14:20</span></span><span class="when">3h ago</span></li>
+        <li><span class="glyph">📰</span><span class="body"><span class="chip">routine</span>
+          <span class="subject"> morning brief delivered</span>
+          <span class="detail">4 items · 2 links · 1 question</span></span><span class="when">7h ago</span></li>
+        <li><span class="glyph">✅</span><span class="body"><span class="chip">you</span>
+          <span class="subject"> allowed proposal #94</span>
+          <span class="detail ok">✓ committed 4a1c93e</span></span><span class="when">8h ago</span></li>
+      </ul>
+      </div>
+    </section>
+    <section class="pane" data-theme="dark"><span class="panelabel">dark</span>
+      <div class="card" style="padding:var(--mt-space-2) var(--mt-space-3)">
+      <ul class="feed">
+        <li><span class="glyph">🔧</span><span class="body"><span class="chip agent">drey-dev</span>
+          <span class="subject"> knowledge_search · 3 hits</span>
+          <span class="detail">mode: hybrid · Knowledge/Areas/Running · 14 ms</span></span><span class="when">2m ago</span></li>
+        <li><span class="glyph">📨</span><span class="body"><span class="chip agent">drey-dev</span>
+          <span class="subject"> dispatch queued for ops-bot</span>
+          <span class="detail degraded">⏳ 3/3 open bundles — cap on metistry</span></span><span class="when">14m ago</span></li>
+        <li><span class="glyph">📝</span><span class="body"><span class="chip">system</span>
+          <span class="subject"> proposal #97 awaiting you</span>
+          <span class="detail">write Knowledge/Areas/Health/Taper.md</span></span><span class="when">1h ago</span></li>
+        <li><span class="glyph">⚠️</span><span class="body"><span class="chip">github-state</span>
+          <span class="subject"> collector run failed</span>
+          <span class="detail failed">✕ rate limited — retries at 14:20</span></span><span class="when">3h ago</span></li>
+        <li><span class="glyph">📰</span><span class="body"><span class="chip">routine</span>
+          <span class="subject"> morning brief delivered</span>
+          <span class="detail">4 items · 2 links · 1 question</span></span><span class="when">7h ago</span></li>
+        <li><span class="glyph">✅</span><span class="body"><span class="chip">you</span>
+          <span class="subject"> allowed proposal #94</span>
+          <span class="detail ok">✓ committed 4a1c93e</span></span><span class="when">8h ago</span></li>
+      </ul>
+      </div>
+    </section>
+  </div>
+
+  <!-- ===================== 3.3 PRESENCE ===================== -->
+  <h2><span class="num">3.3</span> Agent presence chips — all six states</h2>
+  <p class="lede">Reported from lease liveness and delivery evidence, never inferred. Each carries a glyph and a word,
+    so the colour is redundant by design.</p>
+  <div class="duo">
+    <section class="pane" data-theme="light"><span class="panelabel">light</span>
+      <div class="row">
+        <span class="chip state-working">● working</span>
+        <span class="chip state-queued">⏳ queued</span>
+        <span class="chip state-idle">○ idle</span>
+        <span class="chip state-interrupted">! interrupted</span>
+        <span class="chip state-over-cap">⚑ over-cap</span>
+        <span class="chip state-blocked">✋ blocked</span>
+      </div>
+      <div class="card" style="margin-top:var(--mt-space-3)">
+        <div class="spread"><b>Drey (dev)</b><span class="muted mono">drey-dev · external</span></div>
+        <div class="row" style="margin-top:var(--mt-space-2)"><span class="chip state-working">● working</span>
+          <span class="muted">tier: areas (3) · $1.42 today · lease 4m left</span></div>
+      </div>
+      <div class="card">
+        <div class="spread"><b>Nightly</b><span class="muted mono">nightly · internal</span></div>
+        <div class="row" style="margin-top:var(--mt-space-2)"><span class="chip state-interrupted">! interrupted</span>
+          <span class="muted">lease expired 12m into a claim</span></div>
+      </div>
+    </section>
+    <section class="pane" data-theme="dark"><span class="panelabel">dark</span>
+      <div class="row">
+        <span class="chip state-working">● working</span>
+        <span class="chip state-queued">⏳ queued</span>
+        <span class="chip state-idle">○ idle</span>
+        <span class="chip state-interrupted">! interrupted</span>
+        <span class="chip state-over-cap">⚑ over-cap</span>
+        <span class="chip state-blocked">✋ blocked</span>
+      </div>
+      <div class="card" style="margin-top:var(--mt-space-3)">
+        <div class="spread"><b>Drey (dev)</b><span class="muted mono">drey-dev · external</span></div>
+        <div class="row" style="margin-top:var(--mt-space-2)"><span class="chip state-working">● working</span>
+          <span class="muted">tier: areas (3) · $1.42 today · lease 4m left</span></div>
+      </div>
+      <div class="card">
+        <div class="spread"><b>Nightly</b><span class="muted mono">nightly · internal</span></div>
+        <div class="row" style="margin-top:var(--mt-space-2)"><span class="chip state-interrupted">! interrupted</span>
+          <span class="muted">lease expired 12m into a claim</span></div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ===================== 3.4 / 3.5 CHAT ===================== -->
+  <h2><span class="num">3.4 · 3.5</span> Chat turn, collapsed tool activity, prompt card</h2>
+  <p class="lede">Tap the disclosure — it is a native <code>&lt;details&gt;</code>, keyboard-operable, no script.
+    Everything inside the agent wash is agent-sourced data.</p>
+  <div class="duo">
+    <section class="pane" data-theme="light"><span class="panelabel">light</span>
+      <div class="bubble out"><div class="turnmeta">you · 09:14</div>how much should I ease off running in the final weeks?</div>
+      <div style="height:var(--mt-space-3)"></div>
+      <div class="turnmeta">assistant · 09:14 · <span class="ok">finished</span></div>
+      <div class="bubble in">
+        Cut volume ~40% over the final three weeks while keeping intensity. Your note
+        <a class="link" href="#">Knowledge/Areas/Running/Taper</a> puts the last hard session 10 days out.
+        <div class="row" style="margin-top:var(--mt-space-2)">
+          <a class="link muted" href="#">↗ open note</a><a class="link muted" href="#">⌁ summarize this</a><a class="link muted" href="#">⌁ what's the latest</a>
+        </div>
+      </div>
+      <details class="tools"><summary>4 tools · 6.2s · $0.031</summary>
+        <div class="list">
+          <div>🔧 knowledge_search · 1.1s · <span class="ok">ok</span></div>
+          <div>🔧 vault_read · 0.4s · <span class="ok">ok</span></div>
+          <div>🔧 calendar_list · 3.9s · <span class="degraded">degraded — retried once</span></div>
+          <div>🔧 brain_commit · 0.8s · <span class="ok">ok</span></div>
+        </div>
+      </details>
+      <div style="height:var(--mt-space-3)"></div>
+      <div class="promptcard">
+        <h4>Write the taper plan to your vault?</h4>
+        <div class="muted">Knowledge/Areas/Running/Taper.md · new section, 180 words</div>
+        <div class="opts">
+          <button class="primary" type="button">Write it</button>
+          <button type="button">Show me the diff first</button>
+          <button type="button">Not now</button>
+          <button type="button" style="border-color:transparent;color:var(--mt-color-accent)">Something else…</button>
+        </div>
+        <div class="tiny" style="margin-top:var(--mt-space-2)">default in 6h: Show me the diff first</div>
+      </div>
+    </section>
+    <section class="pane" data-theme="dark"><span class="panelabel">dark</span>
+      <div class="bubble out"><div class="turnmeta">you · 09:14</div>how much should I ease off running in the final weeks?</div>
+      <div style="height:var(--mt-space-3)"></div>
+      <div class="turnmeta">assistant · 09:14 · <span class="ok">finished</span></div>
+      <div class="bubble in">
+        Cut volume ~40% over the final three weeks while keeping intensity. Your note
+        <a class="link" href="#">Knowledge/Areas/Running/Taper</a> puts the last hard session 10 days out.
+        <div class="row" style="margin-top:var(--mt-space-2)">
+          <a class="link muted" href="#">↗ open note</a><a class="link muted" href="#">⌁ summarize this</a><a class="link muted" href="#">⌁ what's the latest</a>
+        </div>
+      </div>
+      <details class="tools" open><summary>4 tools · 6.2s · $0.031</summary>
+        <div class="list">
+          <div>🔧 knowledge_search · 1.1s · <span class="ok">ok</span></div>
+          <div>🔧 vault_read · 0.4s · <span class="ok">ok</span></div>
+          <div>🔧 calendar_list · 3.9s · <span class="degraded">degraded — retried once</span></div>
+          <div>🔧 brain_commit · 0.8s · <span class="ok">ok</span></div>
+        </div>
+      </details>
+      <div style="height:var(--mt-space-3)"></div>
+      <div class="promptcard">
+        <h4>Write the taper plan to your vault?</h4>
+        <div class="muted">Knowledge/Areas/Running/Taper.md · new section, 180 words</div>
+        <div class="opts">
+          <button class="primary" type="button">Write it</button>
+          <button type="button">Show me the diff first</button>
+          <button type="button">Not now</button>
+          <button type="button" style="border-color:transparent;color:var(--mt-color-accent)">Something else…</button>
+        </div>
+        <div class="tiny" style="margin-top:var(--mt-space-2)">default in 6h: Show me the diff first</div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ===================== 3.6 / 3.7 PALETTE + MODEL PICKER ===================== -->
+  <h2><span class="num">3.6 · 3.7</span> Command palette and the model &amp; effort picker</h2>
+  <p class="lede">The list is generated from live <code>rules.yaml</code> and the agent registry — discoverability is
+    never hand-maintained. The picker is a human override of a deterministic router, and says so.</p>
+  <div class="duo">
+    <section class="pane" data-theme="light"><span class="panelabel">light</span>
+      <div class="elev palette">
+        <input type="text" value="ta" aria-label="search commands" />
+        <div class="grp">commands</div>
+        <div class="item" aria-selected="true"><b>/note</b><span class="muted">capture without a turn</span><span class="kbd">⌘N</span></div>
+        <div class="item"><b>/status</b><span class="muted">doctor at a glance</span><span class="kbd">⌘0</span></div>
+        <div class="grp">agents</div>
+        <div class="item"><span class="chip agent">@drey-dev</span><span class="muted">areas · working</span></div>
+        <div class="grp">destinations</div>
+        <div class="item"><b>Triage</b><span class="muted">3 awaiting you</span><span class="kbd">⌘7</span></div>
+      </div>
+      <div style="height:var(--mt-space-4)"></div>
+      <div class="elev" style="max-width:340px">
+        <div class="tiny">the router picked <b>fast</b> for this turn</div>
+        <div class="item" style="display:flex;gap:var(--mt-space-2);padding:var(--mt-space-2) 0"><b>fast</b><span class="muted">short answers, cheap</span></div>
+        <div class="item" style="display:flex;gap:var(--mt-space-2);padding:var(--mt-space-2) 0"><b class="agentink">deep</b><span class="muted">multi-step, vault-heavy</span><span class="chip accent" style="margin-left:auto">pinned</span></div>
+        <div class="item" style="display:flex;gap:var(--mt-space-2);padding:var(--mt-space-2) 0;opacity:.55"><b>local</b><span class="muted">not configured on this instance</span></div>
+        <div class="row" style="margin-top:var(--mt-space-2)">
+          <span class="chip">effort</span><span class="chip accent">high</span><span class="chip">medium</span><span class="chip">low</span>
+        </div>
+        <div class="tiny" style="margin-top:var(--mt-space-2)"><a class="link" href="#">Reset to the router's choice</a></div>
+      </div>
+    </section>
+    <section class="pane" data-theme="dark"><span class="panelabel">dark</span>
+      <div class="elev palette">
+        <input type="text" value="ta" aria-label="search commands" />
+        <div class="grp">commands</div>
+        <div class="item" aria-selected="true"><b>/note</b><span class="muted">capture without a turn</span><span class="kbd">⌘N</span></div>
+        <div class="item"><b>/status</b><span class="muted">doctor at a glance</span><span class="kbd">⌘0</span></div>
+        <div class="grp">agents</div>
+        <div class="item"><span class="chip agent">@drey-dev</span><span class="muted">areas · working</span></div>
+        <div class="grp">destinations</div>
+        <div class="item"><b>Triage</b><span class="muted">3 awaiting you</span><span class="kbd">⌘7</span></div>
+      </div>
+      <div style="height:var(--mt-space-4)"></div>
+      <div class="elev" style="max-width:340px">
+        <div class="tiny">the router picked <b>fast</b> for this turn</div>
+        <div class="item" style="display:flex;gap:var(--mt-space-2);padding:var(--mt-space-2) 0"><b>fast</b><span class="muted">short answers, cheap</span></div>
+        <div class="item" style="display:flex;gap:var(--mt-space-2);padding:var(--mt-space-2) 0"><b class="agentink">deep</b><span class="muted">multi-step, vault-heavy</span><span class="chip accent" style="margin-left:auto">pinned</span></div>
+        <div class="item" style="display:flex;gap:var(--mt-space-2);padding:var(--mt-space-2) 0;opacity:.55"><b>local</b><span class="muted">not configured on this instance</span></div>
+        <div class="row" style="margin-top:var(--mt-space-2)">
+          <span class="chip">effort</span><span class="chip accent">high</span><span class="chip">medium</span><span class="chip">low</span>
+        </div>
+        <div class="tiny" style="margin-top:var(--mt-space-2)"><a class="link" href="#">Reset to the router's choice</a></div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ===================== 3.8 CAPTURE ===================== -->
+  <h2><span class="num">3.8</span> Capture composer</h2>
+  <p class="lede">One primary action, a receipt, and an explicit offline state. Capture never blocks and never drops.</p>
+  <div class="duo">
+    <section class="pane" data-theme="light"><span class="panelabel">light</span>
+      <div class="card">
+        <textarea aria-label="note">Ask the physio about the calf before the taper starts — book something for the week of the 21st.</textarea>
+        <div class="row" style="margin-top:var(--mt-space-3)">
+          <span class="chip">📎 scan-2026-09-08.pdf ✕</span><button type="button">＋ Attach…</button>
+        </div>
+        <button class="primary full" type="button" style="margin-top:var(--mt-space-3)">Capture</button>
+        <div class="muted" style="margin-top:var(--mt-space-3)"><span class="ok">✓</span> captured → inbox #418 · classified <code>note</code> on-device</div>
+        <div class="row" style="margin-top:var(--mt-space-2)"><span class="chip state-queued">⏳ queued — 2 waiting to send</span></div>
+      </div>
+    </section>
+    <section class="pane" data-theme="dark"><span class="panelabel">dark</span>
+      <div class="card">
+        <textarea aria-label="note">Ask the physio about the calf before the taper starts — book something for the week of the 21st.</textarea>
+        <div class="row" style="margin-top:var(--mt-space-3)">
+          <span class="chip">📎 scan-2026-09-08.pdf ✕</span><button type="button">＋ Attach…</button>
+        </div>
+        <button class="primary full" type="button" style="margin-top:var(--mt-space-3)">Capture</button>
+        <div class="muted" style="margin-top:var(--mt-space-3)"><span class="ok">✓</span> captured → inbox #418 · classified <code>note</code> on-device</div>
+        <div class="row" style="margin-top:var(--mt-space-2)"><span class="chip state-queued">⏳ queued — 2 waiting to send</span></div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ===================== 3.9 TRIAGE ===================== -->
+  <h2><span class="num">3.9</span> Triage card</h2>
+  <p class="lede">The card previews exactly what will happen. Allow · Request changes · Deny, always in that order.</p>
+  <div class="duo">
+    <section class="pane" data-theme="light"><span class="panelabel">light</span>
+      <div class="card">
+        <div class="row">📝 <span class="chip agent">drey-dev</span></div>
+        <div class="subject" style="font-size:var(--mt-text-headline-size);font-weight:600;margin-top:var(--mt-space-2)">Write a taper section to Health</div>
+        <div class="muted">note · classification: knowledge · #97 · today</div>
+        <div class="well" style="margin-top:var(--mt-space-2)">+ Knowledge/Areas/Health/Taper.md<br />&nbsp;&nbsp;## Taper (+18 lines, 180 words)<br /><span class="agentink">&nbsp;&nbsp;agent-authored — shown as data</span></div>
+        <div class="row" style="margin-top:var(--mt-space-3)">
+          <button class="primary" type="button">Allow</button>
+          <button type="button">Request changes</button>
+          <button class="danger" type="button">Deny</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="row"><span class="ok">✓</span> <span class="muted">Allowed #94 · committed 4a1c93e · 8h ago</span>
+          <a class="link muted" href="#" style="margin-left:auto">Undo</a></div>
+      </div>
+      <div class="empty" style="margin-top:var(--mt-space-3)"><span class="g">✓</span>Queue is clear.
+        <div class="tiny">Proposals appear here when an agent asks for something outside its grant.</div></div>
+    </section>
+    <section class="pane" data-theme="dark"><span class="panelabel">dark</span>
+      <div class="card">
+        <div class="row">📝 <span class="chip agent">drey-dev</span></div>
+        <div class="subject" style="font-size:var(--mt-text-headline-size);font-weight:600;margin-top:var(--mt-space-2)">Write a taper section to Health</div>
+        <div class="muted">note · classification: knowledge · #97 · today</div>
+        <div class="well" style="margin-top:var(--mt-space-2)">+ Knowledge/Areas/Health/Taper.md<br />&nbsp;&nbsp;## Taper (+18 lines, 180 words)<br /><span class="agentink">&nbsp;&nbsp;agent-authored — shown as data</span></div>
+        <div class="row" style="margin-top:var(--mt-space-3)">
+          <button class="primary" type="button">Allow</button>
+          <button type="button">Request changes</button>
+          <button class="danger" type="button">Deny</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="row"><span class="ok">✓</span> <span class="muted">Allowed #94 · committed 4a1c93e · 8h ago</span>
+          <a class="link muted" href="#" style="margin-left:auto">Undo</a></div>
+      </div>
+      <div class="empty" style="margin-top:var(--mt-space-3)"><span class="g">✓</span>Queue is clear.
+        <div class="tiny">Proposals appear here when an agent asks for something outside its grant.</div></div>
+    </section>
+  </div>
+
+  <!-- ===================== 3.10 TASK + DISPATCH ===================== -->
+  <h2><span class="num">3.10</span> Task card and drag-to-dispatch — the three outcomes</h2>
+  <p class="lede">A refusal names the boundary that caused it, inline at the target. That is the point of the gesture,
+    not a consolation prize.</p>
+  <div class="duo">
+    <section class="pane" data-theme="light"><span class="panelabel">light</span>
+      <div class="card"><div class="spread"><span class="mono tiny">wrk_01H8…221</span><span class="chip">ready</span></div>
+        <div style="margin-top:var(--mt-space-1)">review artifact <b>taper-plan</b></div>
+        <div class="row" style="margin-top:var(--mt-space-2)"><span class="chip">metistry</span><span class="chip agent">drey-dev</span>
+          <button type="button" style="margin-left:auto">Dispatch to…</button></div></div>
+      <div class="dropzone" style="margin-top:var(--mt-space-3)"><b>reviewer</b> <span class="chip state-over-cap">⚑ over-cap</span>
+        <div class="degraded" style="margin-top:var(--mt-space-1);font-size:var(--mt-text-subhead-size)">⏳ queued for reviewer — 3/3 open bundles (cap on metistry)</div></div>
+      <div class="card"><b>drey-dev</b> <span class="chip state-working">● working</span>
+        <div class="ok" style="margin-top:var(--mt-space-1);font-size:var(--mt-text-subhead-size)">✓ review task #221 created for drey-dev</div></div>
+      <div class="card"><b>research</b> <span class="chip state-blocked">✋ blocked</span>
+        <div class="agentink" style="margin-top:var(--mt-space-1);font-size:var(--mt-text-subhead-size)">✋ queued as proposal #97 — metistry is in <code>mode: review</code></div></div>
+      <div class="dropzone invalid" style="margin-top:var(--mt-space-3)"><b>ops-bot</b>
+        <div class="muted" style="margin-top:var(--mt-space-1)">not a member of metistry — drop refused</div></div>
+    </section>
+    <section class="pane" data-theme="dark"><span class="panelabel">dark</span>
+      <div class="card"><div class="spread"><span class="mono tiny">wrk_01H8…221</span><span class="chip">ready</span></div>
+        <div style="margin-top:var(--mt-space-1)">review artifact <b>taper-plan</b></div>
+        <div class="row" style="margin-top:var(--mt-space-2)"><span class="chip">metistry</span><span class="chip agent">drey-dev</span>
+          <button type="button" style="margin-left:auto">Dispatch to…</button></div></div>
+      <div class="dropzone" style="margin-top:var(--mt-space-3)"><b>reviewer</b> <span class="chip state-over-cap">⚑ over-cap</span>
+        <div class="degraded" style="margin-top:var(--mt-space-1);font-size:var(--mt-text-subhead-size)">⏳ queued for reviewer — 3/3 open bundles (cap on metistry)</div></div>
+      <div class="card"><b>drey-dev</b> <span class="chip state-working">● working</span>
+        <div class="ok" style="margin-top:var(--mt-space-1);font-size:var(--mt-text-subhead-size)">✓ review task #221 created for drey-dev</div></div>
+      <div class="card"><b>research</b> <span class="chip state-blocked">✋ blocked</span>
+        <div class="agentink" style="margin-top:var(--mt-space-1);font-size:var(--mt-text-subhead-size)">✋ queued as proposal #97 — metistry is in <code>mode: review</code></div></div>
+      <div class="dropzone invalid" style="margin-top:var(--mt-space-3)"><b>ops-bot</b>
+        <div class="muted" style="margin-top:var(--mt-space-1)">not a member of metistry — drop refused</div></div>
+    </section>
+  </div>
+
+  <!-- ===================== 3.11 ARTIFACT ===================== -->
+  <h2><span class="num">3.11</span> Artifact viewer</h2>
+  <p class="lede">Markdown through the <code>md.js</code> whitelist; HTML only inside an opaque-origin sandboxed frame,
+    always wearing a visible band that says so.</p>
+  <div class="duo">
+    <section class="pane" data-theme="light"><span class="panelabel">light</span>
+      <div class="card">
+        <div class="spread"><b>metistry/taper-plan</b><span class="chip">v4 · current</span></div>
+        <div class="muted">agent: drey-dev · "add the three-week table" · rev 4a1c93e0f2 · today 09:14</div>
+        <div class="well" style="margin-top:var(--mt-space-2);font-family:var(--mt-font-sans);font-size:var(--mt-text-subhead-size)">
+          <b style="font-size:var(--mt-text-title-3-size)">Taper</b><br />
+          Cut weekly volume ~40% across three weeks. Keep one quality session.
+          See <span style="color:var(--mt-color-accent);border-bottom:1px dotted">[[Areas/Running/Base]]</span>.
+        </div>
+        <div class="artband" style="margin-top:var(--mt-space-3)">⧉ rendered in a sandbox — this page cannot reach your session</div>
+        <div class="artframe">index.html — agent-authored page, opaque origin, CSP <code>default-src 'none'</code></div>
+        <div class="spread" style="margin-top:var(--mt-space-3)"><b>threads</b><span class="muted">1 open · 2 resolved</span></div>
+        <div style="border-left:2px solid var(--mt-color-accent);padding-left:var(--mt-space-3);margin-top:var(--mt-space-2)">
+          <div class="muted"><span class="agentink">🤖 reviewer</span> · today 09:31 · open</div>
+          <div style="font-size:var(--mt-text-subhead-size)">The 40% figure needs a source in the note.</div>
+        </div>
+      </div>
+    </section>
+    <section class="pane" data-theme="dark"><span class="panelabel">dark</span>
+      <div class="card">
+        <div class="spread"><b>metistry/taper-plan</b><span class="chip">v4 · current</span></div>
+        <div class="muted">agent: drey-dev · "add the three-week table" · rev 4a1c93e0f2 · today 09:14</div>
+        <div class="well" style="margin-top:var(--mt-space-2);font-family:var(--mt-font-sans);font-size:var(--mt-text-subhead-size)">
+          <b style="font-size:var(--mt-text-title-3-size)">Taper</b><br />
+          Cut weekly volume ~40% across three weeks. Keep one quality session.
+          See <span style="color:var(--mt-color-accent);border-bottom:1px dotted">[[Areas/Running/Base]]</span>.
+        </div>
+        <div class="artband" style="margin-top:var(--mt-space-3)">⧉ rendered in a sandbox — this page cannot reach your session</div>
+        <div class="artframe">index.html — agent-authored page, opaque origin, CSP <code>default-src 'none'</code></div>
+        <div class="spread" style="margin-top:var(--mt-space-3)"><b>threads</b><span class="muted">1 open · 2 resolved</span></div>
+        <div style="border-left:2px solid var(--mt-color-accent);padding-left:var(--mt-space-3);margin-top:var(--mt-space-2)">
+          <div class="muted"><span class="agentink">🤖 reviewer</span> · today 09:31 · open</div>
+          <div style="font-size:var(--mt-text-subhead-size)">The 40% figure needs a source in the note.</div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ===================== 3.12 PROJECT ===================== -->
+  <h2><span class="num">3.12</span> Project header and the mode toggle</h2>
+  <div class="duo">
+    <section class="pane" data-theme="light"><span class="panelabel">light</span>
+      <div class="card">
+        <div class="row"><b style="font-size:var(--mt-text-title-2-size)">metistry</b><span class="chip state-blocked">✋ review</span>
+          <button type="button" style="margin-left:auto">→ switch to autonomous</button></div>
+        <div class="muted">budget $8.00/day · cap 3 open bundles · $2.41 spent today</div>
+        <div class="tiny">review since 2026-09-03 (owner: budget)</div>
+        <div class="row" style="margin-top:var(--mt-space-3)">
+          <span class="chip agent">drey-dev</span><span class="chip agent">ops-bot</span><span class="chip agent">reviewer</span></div>
+        <div class="row" style="margin-top:var(--mt-space-3)">
+          <span class="chip">7 open tasks</span><span class="chip">2 in flight</span>
+          <span class="chip state-queued">3 queued</span><span class="chip">4 open threads</span></div>
+      </div>
+      <div style="height:var(--mt-space-3)"></div>
+      <div class="dialog">
+        <b style="font-size:var(--mt-text-headline-size)">Switch metistry back to autonomous?</b>
+        <p class="muted">Members will dispatch review bundles to each other without you again.
+          3 queued bundles will be released immediately.</p>
+        <div class="row" style="margin-top:var(--mt-space-3)">
+          <button type="button" style="border-color:var(--mt-color-accent);border-width:2px">Cancel</button>
+          <button class="danger solid" type="button">Switch to autonomous</button></div>
+      </div>
+    </section>
+    <section class="pane" data-theme="dark"><span class="panelabel">dark</span>
+      <div class="card">
+        <div class="row"><b style="font-size:var(--mt-text-title-2-size)">metistry</b><span class="chip state-blocked">✋ review</span>
+          <button type="button" style="margin-left:auto">→ switch to autonomous</button></div>
+        <div class="muted">budget $8.00/day · cap 3 open bundles · $2.41 spent today</div>
+        <div class="tiny">review since 2026-09-03 (owner: budget)</div>
+        <div class="row" style="margin-top:var(--mt-space-3)">
+          <span class="chip agent">drey-dev</span><span class="chip agent">ops-bot</span><span class="chip agent">reviewer</span></div>
+        <div class="row" style="margin-top:var(--mt-space-3)">
+          <span class="chip">7 open tasks</span><span class="chip">2 in flight</span>
+          <span class="chip state-queued">3 queued</span><span class="chip">4 open threads</span></div>
+      </div>
+      <div style="height:var(--mt-space-3)"></div>
+      <div class="dialog">
+        <b style="font-size:var(--mt-text-headline-size)">Switch metistry back to autonomous?</b>
+        <p class="muted">Members will dispatch review bundles to each other without you again.
+          3 queued bundles will be released immediately.</p>
+        <div class="row" style="margin-top:var(--mt-space-3)">
+          <button type="button" style="border-color:var(--mt-color-accent);border-width:2px">Cancel</button>
+          <button class="danger solid" type="button">Switch to autonomous</button></div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ===================== 3.13 DOCTOR ===================== -->
+  <h2><span class="num">3.13</span> Status / doctor rows</h2>
+  <p class="lede"><b>absent ≠ failed.</b> "not configured" names the env var that would configure it and never counts
+    toward the failure badge.</p>
+  <div class="duo">
+    <section class="pane" data-theme="light"><span class="panelabel">light</span>
+      <div class="card">
+        <div class="spread"><b>components</b><span class="muted">9 ok · 1 degraded · 1 failed · 2 not configured</span></div>
+        <div class="scroll"><table>
+          <tr><td><span class="ok">●</span></td><td>postgres</td><td class="tiny mono">select 1</td><td class="num ok">ok · 3 ms</td></tr>
+          <tr><td><span class="ok">●</span></td><td>assistant</td><td class="tiny mono">GET /healthz</td><td class="num ok">ok · 11 ms</td></tr>
+          <tr><td><span class="degraded">◐</span></td><td>github-state</td><td class="tiny mono">last run</td><td class="num degraded">degraded · 3h stale</td></tr>
+          <tr><td><span class="failed">✕</span></td><td>apple-fm</td><td class="tiny mono">bridge check()</td><td class="num failed">failed · timeout</td></tr>
+          <tr><td><span class="absent">○</span></td><td class="absent">aws-costs</td><td class="tiny mono">METISTRY_AWS_*</td><td class="num absent">not configured</td></tr>
+          <tr><td><span class="absent">○</span></td><td class="absent">web push</td><td class="tiny mono">VAPID keys</td><td class="num absent">not configured</td></tr>
+        </table></div>
+      </div>
+    </section>
+    <section class="pane" data-theme="dark"><span class="panelabel">dark</span>
+      <div class="card">
+        <div class="spread"><b>components</b><span class="muted">9 ok · 1 degraded · 1 failed · 2 not configured</span></div>
+        <div class="scroll"><table>
+          <tr><td><span class="ok">●</span></td><td>postgres</td><td class="tiny mono">select 1</td><td class="num ok">ok · 3 ms</td></tr>
+          <tr><td><span class="ok">●</span></td><td>assistant</td><td class="tiny mono">GET /healthz</td><td class="num ok">ok · 11 ms</td></tr>
+          <tr><td><span class="degraded">◐</span></td><td>github-state</td><td class="tiny mono">last run</td><td class="num degraded">degraded · 3h stale</td></tr>
+          <tr><td><span class="failed">✕</span></td><td>apple-fm</td><td class="tiny mono">bridge check()</td><td class="num failed">failed · timeout</td></tr>
+          <tr><td><span class="absent">○</span></td><td class="absent">aws-costs</td><td class="tiny mono">METISTRY_AWS_*</td><td class="num absent">not configured</td></tr>
+          <tr><td><span class="absent">○</span></td><td class="absent">web push</td><td class="tiny mono">VAPID keys</td><td class="num absent">not configured</td></tr>
+        </table></div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ===================== 3.14–3.16 ===================== -->
+  <h2><span class="num">3.14 · 3.15 · 3.16</span> Notification, empty states, error envelopes</h2>
+  <div class="duo">
+    <section class="pane" data-theme="light"><span class="panelabel">light</span>
+      <div class="notif">
+        <div class="b"><div class="tiny">METISTRY · now</div>
+          <b>Proposal #97 needs a decision</b>
+          <div class="muted">drey-dev wants to write a taper section to Knowledge/Areas/Health/Taper.md</div></div>
+        <div class="acts"><button type="button">Allow</button><button type="button">Show diff</button>
+          <button type="button" style="color:var(--mt-color-failed)">Deny</button></div>
+      </div>
+      <div class="empty" style="margin-top:var(--mt-space-4)"><span class="g">◈</span>Nothing in the last 24h.
+        <div class="tiny">Runs, proposals and briefs land here as they happen.</div></div>
+      <div class="empty" style="margin-top:var(--mt-space-3)"><span class="g">○</span>Not configured.
+        <div class="tiny">Set <code>METISTRY_AWS_*</code> to fill this in — this is a fact, not a fault.</div></div>
+      <div class="envelope" style="margin-top:var(--mt-space-4)">
+        <div class="row"><span class="failed">✕</span><b>Could not load aws spend</b>
+          <span class="tiny mono" style="margin-left:auto">req 01H8…9c</span></div>
+        <div class="muted"><code>collector_absent</code> — set <code>METISTRY_AWS_*</code> and run <code>metistry doctor</code>.</div>
+      </div>
+      <div class="envelope" style="margin-top:var(--mt-space-3);border-color:var(--mt-color-degraded)">
+        <div class="row"><span class="degraded">◐</span><b>Dispatch not sent</b></div>
+        <div class="muted"><code>over_cap</code> — reviewer has 3/3 open bundles. <a class="link" href="#">Retry</a></div>
+      </div>
+    </section>
+    <section class="pane" data-theme="dark"><span class="panelabel">dark</span>
+      <div class="notif">
+        <div class="b"><div class="tiny">METISTRY · now</div>
+          <b>Proposal #97 needs a decision</b>
+          <div class="muted">drey-dev wants to write a taper section to Knowledge/Areas/Health/Taper.md</div></div>
+        <div class="acts"><button type="button">Allow</button><button type="button">Show diff</button>
+          <button type="button" style="color:var(--mt-color-failed)">Deny</button></div>
+      </div>
+      <div class="empty" style="margin-top:var(--mt-space-4)"><span class="g">◈</span>Nothing in the last 24h.
+        <div class="tiny">Runs, proposals and briefs land here as they happen.</div></div>
+      <div class="empty" style="margin-top:var(--mt-space-3)"><span class="g">○</span>Not configured.
+        <div class="tiny">Set <code>METISTRY_AWS_*</code> to fill this in — this is a fact, not a fault.</div></div>
+      <div class="envelope" style="margin-top:var(--mt-space-4)">
+        <div class="row"><span class="failed">✕</span><b>Could not load aws spend</b>
+          <span class="tiny mono" style="margin-left:auto">req 01H8…9c</span></div>
+        <div class="muted"><code>collector_absent</code> — set <code>METISTRY_AWS_*</code> and run <code>metistry doctor</code>.</div>
+      </div>
+      <div class="envelope" style="margin-top:var(--mt-space-3);border-color:var(--mt-color-degraded)">
+        <div class="row"><span class="degraded">◐</span><b>Dispatch not sent</b></div>
+        <div class="muted"><code>over_cap</code> — reviewer has 3/3 open bundles. <a class="link" href="#">Retry</a></div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ===================== 3.17 ===================== -->
+  <h2><span class="num">3.17</span> Destructive confirmation</h2>
+  <p class="lede">The dialog is never the control — the server refuses regardless. It exists so the click is not
+    cheaper than the act, and it always names the consequence.</p>
+  <div class="duo">
+    <section class="pane" data-theme="light"><span class="panelabel">light</span>
+      <div class="dialog">
+        <b style="font-size:var(--mt-text-headline-size)">Rotate the token for ops-bot?</b>
+        <p class="muted">The current token stops working immediately. Anything still using it will start failing
+          authentication until you paste the new one. The new token is shown once and never again.</p>
+        <div class="row" style="margin-top:var(--mt-space-3)">
+          <button type="button" style="border-color:var(--mt-color-accent);border-width:2px">Cancel</button>
+          <button class="danger solid" type="button">Rotate token</button></div>
+      </div>
+    </section>
+    <section class="pane" data-theme="dark"><span class="panelabel">dark</span>
+      <div class="dialog">
+        <b style="font-size:var(--mt-text-headline-size)">Rotate the token for ops-bot?</b>
+        <p class="muted">The current token stops working immediately. Anything still using it will start failing
+          authentication until you paste the new one. The new token is shown once and never again.</p>
+        <div class="row" style="margin-top:var(--mt-space-3)">
+          <button type="button" style="border-color:var(--mt-color-accent);border-width:2px">Cancel</button>
+          <button class="danger solid" type="button">Rotate token</button></div>
+      </div>
+    </section>
+  </div>
+
+  <hr />
+  <p class="muted">Source of truth: <code>docs/product/design/tokens.json</code> ·
+    spec: <code>docs/product/design-system.md</code> ·
+    wireframes: <code>docs/product/design/*.svg</code>.
+    Regenerate the tokens and re-inline them here with
+    <code>node ops/scripts/build-design-tokens.mjs</code>.</p>
+</div>
+
+<script>
+  // The only script on this page: remember the appearance choice for the page chrome.
+  // The side-by-side panes are always light and dark regardless.
+  var root = document.documentElement;
+  var buttons = document.querySelectorAll(".themeswitch button");
+  function apply(v) {
+    if (v === "auto") root.removeAttribute("data-theme"); else root.setAttribute("data-theme", v);
+    root.setAttribute("data-page-theme", v);
+    buttons.forEach(function (b) { b.setAttribute("aria-pressed", String(b.dataset.set === v)); });
+    try { localStorage.setItem("mt-preview-theme", v); } catch (e) {}
+  }
+  buttons.forEach(function (b) { b.addEventListener("click", function () { apply(b.dataset.set); }); });
+  try { var saved = localStorage.getItem("mt-preview-theme"); if (saved) apply(saved); } catch (e) {}
+</script>
+</body>
+</html>

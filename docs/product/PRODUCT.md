@@ -623,3 +623,17 @@ your git, on your machine.
   the SwiftUI app copies a settled interaction instead of inventing one,
   which is what makes the Mac app a distribution channel rather than a
   second product.
+
+- 2026-09-08 — Benefit shipped: **the console now looks like a product,
+  and two of its tabs work again.** The PWA is restyled onto the design
+  system's tokens — one media query turns the same `<nav>` into a bottom
+  tab bar on a phone and a sidebar on a desktop, so the installed app is
+  a real desktop client on Windows and Linux and not a narrow column;
+  light appearance works for the first time (it was dark-only); buttons
+  have roles (primary / quiet / outlined-destructive) instead of one
+  accent fill on everything; focus is visible, touch targets are 44pt,
+  and reduced motion is honoured. The restyle also surfaced a markup bug
+  worth recording: `<section id="agents">` was never closed, so the
+  dashboard and artifacts tabs parsed as its children and rendered blank
+  whenever they were selected. One tag, two tabs back, and a test that
+  now counts section opens against closes so it cannot recur.

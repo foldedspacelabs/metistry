@@ -54,7 +54,7 @@ docker compose up -d --build   # both services read .env
 | `METISTRY_MAX_TURNS` | assistant | Agentic turns per message (default 12 with tools, 4 without). |
 
 Startup logs to look for: console `internal agent 'assistant' registered`
-(or `re-synced`); assistant `tools: 12 via http://console:8080/mcp (...)`
+(or `re-synced`); assistant `tools: 21 via http://console:8080/mcp (...)` (the count tracks `packages/mcp-brain/manifest.yaml`)
 and `identity: <name>`.
 
 **Rotate** by changing the value in `.env` and restarting both containers:

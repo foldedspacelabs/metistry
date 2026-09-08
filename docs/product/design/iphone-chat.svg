@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1360 960" width="1360" height="960" role="img" aria-labelledby="ttl desc">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1820 1060" width="1820" height="1060" role="img" aria-labelledby="ttl desc">
   <title id="ttl">iPhone — Chat: the iMessage-style thread, the collapsed composer, and its actions menu</title>
-  <desc id="desc">Annotated wireframe, two states at 390 by 844 points. Left: an iMessage-style thread — bubbles aligned to their sender, an assistant turn with an explicit finished state and collapsed tool activity, a question-answer prompt card whose options stack, a one-row composer of plus button, growing field and send, and a "New Reply" pill at the bottom edge because a reply arrived while the reader was scrolled up. Right: the same screen with the plus button expanded into the actions menu — Quick Actions, Commands from rules.yaml, Agents, Attach, and the model and effort picker — presented above the field rather than pinned there.</desc>
+  <desc id="desc">Annotated wireframe, three states at 390 by 844 points. Left: an iMessage-style thread — bubbles aligned to their sender, an assistant turn with an explicit finished state and collapsed tool activity, a question-answer prompt card whose options stack, a one-row composer of plus button, growing field and send, and a "New Reply" pill at the bottom edge because a reply arrived while the reader was scrolled up. Right: the same screen with the plus button expanded into the actions menu — Quick Actions, Commands from rules.yaml, Agents, Attach, and the model and effort picker — presented above the field rather than pinned there, every row of it clickable and inserting itself at the caret. Right-most: the same composer mid-token — the user has typed an at sign and a d, and an inline suggestion listbox under the field offers three agents ranked prefix first, then substring, then recency.</desc>
   <style>
     text { font-family: -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", Roboto, sans-serif; fill: #12171c; font-size: 15px; }
     .t2 { fill: #4d565f; font-size: 13px } .t3 { fill: #646d77; font-size: 12px }
@@ -18,9 +18,9 @@
     .grp { fill: #646d77; font-size: 11px; font-weight: 600; letter-spacing: 0.04em }
   </style>
 
-  <rect width="1360" height="960" fill="#ffffff"/>
+  <rect width="1820" height="1060" fill="#ffffff"/>
   <text x="24" y="30" class="h2">iPhone — Chat</text>
-  <text x="24" y="50" class="t2">Bubbles aligned to their sender · one-row composer, nothing else pinned above the keyboard · "+" expands the actions menu · a reply that lands while you are scrolled up raises a pill, it does not scroll you</text>
+  <text x="24" y="50" class="t2">Bubbles aligned to their sender · one-row composer, nothing else pinned above the keyboard · "+" expands the actions menu, and every row of it inserts itself at the caret · typing @ or / opens the same list inline · a reply that lands while you are scrolled up raises a pill, it does not scroll you</text>
 
   <!-- ===================== PHONE A — composer collapsed ===================== -->
   <rect x="60" y="70" width="390" height="844" rx="46" fill="#f6f7f9" stroke="#b6bec8" stroke-width="2"/>
@@ -118,6 +118,46 @@
   <circle cx="822" cy="848" r="21" fill="#2b5fd0"/><text x="822" y="855" fill="#fff" text-anchor="middle" font-size="16">↑</text>
   <rect x="625" y="890" width="120" height="5" rx="2.5" fill="#12171c"/>
 
+
+  <!-- ===================== PHONE C — autocomplete while typing ===================== -->
+  <rect x="920" y="70" width="390" height="844" rx="46" fill="#f6f7f9" stroke="#b6bec8" stroke-width="2"/>
+  <rect x="1025" y="78" width="180" height="28" rx="14" fill="#12171c"/>
+  <text x="948" y="102" class="t3">9:41</text>
+  <path class="ln" d="M922 128 H1308"/>
+  <text x="944" y="120" class="acc" font-size="15">&#8249; Feed</text>
+  <text x="1115" y="120" text-anchor="middle" class="hd">Chat</text>
+  <text x="1286" y="120" text-anchor="end" class="t2" font-size="13">&#9671; deep &#183; high &#8964;</text>
+
+  <text x="944" y="164" class="t3">assistant &#183; <tspan class="ok">finished</tspan></text>
+  <rect class="sf" x="944" y="174" width="290" height="66" rx="18"/>
+  <text x="958" y="198" font-size="14">The suite is green except one</text>
+  <text x="958" y="218" font-size="14">flaky lease test on CI.</text>
+
+  <rect class="agq" x="944" y="256" width="290" height="30" rx="10"/>
+  <text x="958" y="276" class="ag" font-size="13">&#9656; 3 tools &#183; 4.1s &#183; $0.018</text>
+
+  <!-- the inline suggestion listbox, under the field, six rows max -->
+  <rect class="el" x="1010" y="614" width="284" height="152" rx="14"/>
+  <rect x="1018" y="622" width="268" height="36" rx="8" fill="#e6edfc"/>
+  <rect x="1028" y="632" width="70" height="18" rx="9" fill="#f1ecfc"/><text x="1036" y="645" class="ag mono">@drey</text>
+  <text x="1108" y="645" class="t3" font-size="12">areas &#183; dev</text>
+  <circle cx="1218" cy="640" r="4" fill="#1c7a45"/><text x="1278" y="645" class="t3" font-size="11" text-anchor="end">working</text>
+  <rect x="1028" y="672" width="94" height="18" rx="9" fill="#f1ecfc"/><text x="1036" y="685" class="ag mono">@drey-dev</text>
+  <text x="1132" y="685" class="t3" font-size="12">metistry &#183; dev</text>
+  <rect x="1028" y="706" width="80" height="18" rx="9" fill="#f1ecfc"/><text x="1036" y="719" class="ag mono">@doc-bot</text>
+  <text x="1118" y="719" class="t3" font-size="12">docs</text>
+  <text x="1152" y="752" class="t3" font-size="11" text-anchor="middle">prefix &#8594; substring &#8594; recency</text>
+
+  <!-- composer, mid-token -->
+  <circle class="el" cx="964" cy="848" r="21"/><text x="964" y="855" class="acc" text-anchor="middle" font-size="20">+</text>
+  <rect class="sf" x="992" y="827" width="204" height="42" rx="21" stroke="#2b5fd0" stroke-width="2"/>
+  <text x="1008" y="853" font-size="13">look at the flaky test <tspan class="mono ag" font-size="13">@d</tspan><tspan opacity="0.4">|</tspan></text>
+  <circle cx="1252" cy="848" r="21" fill="#2b5fd0"/><text x="1252" y="855" fill="#fff" text-anchor="middle" font-size="16">&#8593;</text>
+  <rect x="1055" y="890" width="120" height="5" rx="2.5" fill="#12171c"/>
+
+  <circle class="cw" cx="900" cy="690" r="10"/><text class="cn" x="900" y="694">8</text>
+  <circle class="cw" cx="900" cy="848" r="10"/><text class="cn" x="900" y="852">9</text>
+
   <!-- callouts -->
   <circle class="cw" cx="36" cy="848" r="10"/><text class="cn" x="36" y="852">1</text>
   <circle class="cw" cx="36" cy="789" r="10"/><text class="cn" x="36" y="793">2</text>
@@ -128,43 +168,53 @@
   <circle class="cw" cx="470" cy="762" r="10"/><text class="cn" x="470" y="766">7</text>
 
   <!-- legend -->
-  <text x="920" y="106" class="h2">Callouts</text>
-  <text x="920" y="140" class="lg">① The composer is one row: <tspan class="mono" font-size="13">+</tspan>, a field that grows</text>
-  <text x="934" y="160" class="lg">to five lines, and send. Nothing else is pinned</text>
-  <text x="934" y="180" class="lg">above the keyboard, so a reply is never hidden</text>
-  <text x="934" y="200" class="lg">behind a command strip (§3.6).</text>
+  <text x="1380" y="100" class="h2">Callouts</text>
+  <text x="1380" y="128" class="lg">&#9312; The composer is one row: <tspan class="mono" font-size="13">+</tspan>, a field that grows to five</text>
+  <text x="1394" y="145" class="lg">lines, and send. Nothing else is pinned above the</text>
+  <text x="1394" y="162" class="lg">keyboard, so a reply is never hidden behind a</text>
+  <text x="1394" y="179" class="lg">command strip (&#167;3.6).</text>
+  <text x="1380" y="205" class="lg">&#9313; "&#8595; New Reply". The list scrolls only when the reader</text>
+  <text x="1394" y="222" class="lg">is already at the bottom. A reply that lands while they</text>
+  <text x="1394" y="239" class="lg">are scrolled up is appended silently and raises this pill;</text>
+  <text x="1394" y="256" class="lg">focusing or typing in the composer never scrolls (P9).</text>
+  <text x="1380" y="282" class="lg">&#9314; Collapsed tool activity &#8212; tap to expand into one row</text>
+  <text x="1394" y="299" class="lg">per call, mono on the agent wash: visibly quoted, never a</text>
+  <text x="1394" y="316" class="lg">control (P1).</text>
+  <text x="1380" y="342" class="lg">&#9315; Prompt-card options stack full-width at &#8805;44pt; the same</text>
+  <text x="1394" y="359" class="lg">payload drives the push actions.</text>
+  <text x="1380" y="385" class="lg">&#9316; <tspan class="mono" font-size="13">+</tspan> expands the actions menu above the field &#8212; a</text>
+  <text x="1394" y="402" class="lg"><tspan class="mono" font-size="13">&lt;details&gt;</tspan> on the web, a small-detent sheet on iOS.</text>
+  <text x="1394" y="419" class="lg">Collapsed by default; it never survives a send. <tspan font-style="italic">Every row</tspan></text>
+  <text x="1394" y="436" class="lg"><tspan font-style="italic">in it is clickable</tspan>: a quick action, a command or an agent</text>
+  <text x="1394" y="453" class="lg">tag inserts its own text at the caret and returns focus to</text>
+  <text x="1394" y="470" class="lg">the field. Nothing in the menu sends.</text>
+  <text x="1380" y="496" class="lg">&#9317; A tier the instance has not configured is listed and</text>
+  <text x="1394" y="513" class="lg">disabled <tspan font-style="italic">with the reason</tspan>, never hidden (P4).</text>
+  <text x="1380" y="539" class="lg">&#9318; Model &amp; effort inline (&#167;3.7) &#8212; the header still says</text>
+  <text x="1394" y="556" class="lg">which tier the deterministic router chose.</text>
+  <text x="1380" y="582" class="lg">&#9319; Autocomplete. <tspan class="mono" font-size="13">@d</tspan> suggests <tspan class="mono" font-size="13">@drey</tspan>; <tspan class="mono" font-size="13">/</tspan> lists the commands</text>
+  <text x="1394" y="599" class="lg">and narrows them as you type. Same generated list as the</text>
+  <text x="1394" y="616" class="lg">menu, filtered &#8212; agents from the registry, commands from</text>
+  <text x="1394" y="633" class="lg"><tspan class="mono" font-size="13">rules.yaml</tspan>, never hand-maintained. Ranking is</text>
+  <text x="1394" y="650" class="lg">deterministic: <tspan font-style="italic">prefix, then substring, then recency</tspan>.</text>
+  <text x="1394" y="667" class="lg">Six rows maximum; the footer says what the order is.</text>
+  <text x="1380" y="693" class="lg">&#9320; The field keeps focus and the caret throughout &#8212; it is a</text>
+  <text x="1394" y="710" class="lg">listbox, not a menu. &#8593;&#8595; move, Enter or Tab inserts, Esc</text>
+  <text x="1394" y="727" class="lg">closes without changing the text. Tap inserts too, at 44pt.</text>
+  <text x="1394" y="744" class="lg">It never sends and never scrolls the transcript (P9).</text>
+  <text x="1380" y="770" class="h2">&#8984;K Stays (Mac and Wide PWA)</text>
+  <text x="1380" y="794" class="lg">The palette is the <tspan font-style="italic">rich</tspan> version of the same list wherever</text>
+  <text x="1394" y="811" class="lg">there is a desktop keyboard: all four groups searched at</text>
+  <text x="1394" y="828" class="lg">once, full descriptions and shortcuts, presence before you</text>
+  <text x="1394" y="845" class="lg">address an agent, and it stays open across several</text>
+  <text x="1394" y="862" class="lg">insertions. The inline list is the narrow affordance; the</text>
+  <text x="1394" y="879" class="lg">palette is the wide one. Never on touch.</text>
+  <text x="1380" y="909" class="h2">iMessage, Deliberately (P8)</text>
+  <text x="1380" y="933" class="lg">Bubbles aligned to their sender, timestamps on demand</text>
+  <text x="1394" y="950" class="lg">behind a day separator, one <tspan class="mono" font-size="13">+</tspan> for every action,</text>
+  <text x="1394" y="967" class="lg">tapbacks (long-press) for feedback. Not borrowed: read</text>
+  <text x="1394" y="984" class="lg">receipts, typing indicators, anything that animates on</text>
+  <text x="1394" y="1001" class="lg">arrival (P2).</text>
 
-  <text x="920" y="234" class="lg">② "↓ New Reply". The list scrolls only when the</text>
-  <text x="934" y="254" class="lg">reader is already at the bottom. A reply that</text>
-  <text x="934" y="274" class="lg">lands while they are scrolled up is appended</text>
-  <text x="934" y="294" class="lg">silently and raises this pill; focusing or typing</text>
-  <text x="934" y="314" class="lg">in the composer never scrolls (P9).</text>
-
-  <text x="920" y="348" class="lg">③ Collapsed tool activity — tap to expand into</text>
-  <text x="934" y="368" class="lg">one row per call, mono on the agent wash:</text>
-  <text x="934" y="388" class="lg">visibly quoted, never a control (P1).</text>
-
-  <text x="920" y="422" class="lg">④ Prompt-card options stack full-width at ≥44pt;</text>
-  <text x="934" y="442" class="lg">the same payload drives the push actions.</text>
-
-  <text x="920" y="476" class="lg">⑤ <tspan class="mono" font-size="13">+</tspan> expands the actions menu above the field —</text>
-  <text x="934" y="496" class="lg">a <tspan class="mono" font-size="13">&lt;details&gt;</tspan> on the web, a small-detent sheet on</text>
-  <text x="934" y="516" class="lg">iOS. Collapsed by default; it never survives a</text>
-  <text x="934" y="536" class="lg">send. ⌘K shows the same generated list on the</text>
-  <text x="934" y="556" class="lg">Mac and the wide PWA.</text>
-
-  <text x="920" y="590" class="lg">⑥ A tier the instance has not configured is listed</text>
-  <text x="934" y="610" class="lg">and disabled <tspan font-style="italic">with the reason</tspan>, never hidden (P4).</text>
-
-  <text x="920" y="644" class="lg">⑦ Model &amp; effort inline (§3.7) — the header still</text>
-  <text x="934" y="664" class="lg">says which tier the deterministic router chose.</text>
-
-  <text x="920" y="716" class="h2">iMessage, Deliberately (P8)</text>
-  <text x="920" y="748" class="lg">Bubbles aligned to their sender, timestamps on</text>
-  <text x="920" y="768" class="lg">demand behind a day separator, one <tspan class="mono" font-size="13">+</tspan> for every</text>
-  <text x="920" y="788" class="lg">action, tapbacks (long-press) for feedback.</text>
-  <text x="920" y="812" class="lg">Not borrowed: read receipts, typing indicators,</text>
-  <text x="920" y="832" class="lg">anything that animates on arrival (P2).</text>
-
-  <text x="24" y="944" class="t3">docs/product/design-system.md §3.4 chat message · §3.5 prompt card · §3.6 composer actions menu · §3.7 model picker · P8 iMessage · P9 scroll · P10 Title Case</text>
+  <text x="24" y="1040" class="t3">docs/product/design-system.md §3.4 chat message · §3.5 prompt card · §3.6 composer actions menu + autocomplete · §3.7 model picker · §4 reply text · P8 iMessage · P9 scroll · P10 Title Case</text>
 </svg>

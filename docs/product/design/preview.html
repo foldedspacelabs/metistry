@@ -7,7 +7,7 @@
 <style>
 /* === BEGIN TOKENS — generated from tokens.json by ops/scripts/build-design-tokens.mjs === */
 /* GENERATED — do not edit.
- * Source: docs/product/design/tokens.json (v1.0.0, 2026-09-08)
+ * Source: docs/product/design/tokens.json (v1.1.0, 2026-09-08)
  * Rebuild: node ops/scripts/build-design-tokens.mjs
  *
  * Light is the base. Dark is applied twice on purpose: once behind
@@ -73,6 +73,24 @@
   --mt-text-mono-weight: 400;
   --mt-text-mono-line: 1.5;
   --mt-text-mono-tracking: 0;
+  --mt-reply-size: clamp(0.9375rem, 0.9rem + 0.19vw, 1rem);
+  --mt-reply-weight: 400;
+  --mt-reply-line: 1.45;
+  --mt-reply-tracking: 0;
+  --mt-reply-meta-size: 0.8125rem;
+  --mt-reply-meta-gap: 4px;
+  --mt-reply-para-gap: 12px;
+  --mt-reply-turn-gap: 16px;
+  --mt-reply-bubble-pad-y: 12px;
+  --mt-reply-bubble-pad-x: 16px;
+  --mt-reply-bubble-gap: 8px;
+  --mt-reply-heading-gap: 16px;
+  --mt-reply-list-gap: 4px;
+  --mt-reply-list-indent: 20px;
+  --mt-reply-code-size: 0.8125rem;
+  --mt-reply-code-line: 1.45;
+  --mt-reply-code-pad: 12px;
+  --mt-reply-measure: 38em;
   --mt-space-0: 0;
   --mt-space-1: 4px;
   --mt-space-2: 8px;
@@ -404,6 +422,43 @@ details.tools .list div { font-family: var(--mt-font-mono); font-size: var(--mt-
 .promptcard h4 { margin: 0 0 var(--mt-space-1); font-size: var(--mt-text-headline-size); font-weight: var(--mt-text-headline-weight); }
 .promptcard .opts { display: flex; flex-wrap: wrap; gap: var(--mt-space-2); margin-top: var(--mt-space-3); }
 
+/* ---------- §4 reply text — the one group tuned for density, not scanning ---------- */
+.reply { font-size: var(--mt-reply-size); font-weight: var(--mt-reply-weight);
+  line-height: var(--mt-reply-line); letter-spacing: var(--mt-reply-tracking);
+  max-width: var(--mt-reply-measure); }
+.reply > * { margin: 0; }
+.reply > * + * { margin-top: var(--mt-reply-para-gap); }
+.reply h4 { font-size: var(--mt-text-headline-size); font-weight: var(--mt-text-headline-weight); }
+.reply > * + h4 { margin-top: var(--mt-reply-heading-gap); }
+.reply ul, .reply ol { padding-left: var(--mt-reply-list-indent); }
+.reply li + li { margin-top: var(--mt-reply-list-gap); }
+.reply code { background: var(--mt-color-sunken); border-radius: var(--mt-radius-xs);
+  padding: 0 2px; font-size: 1em; font-family: var(--mt-font-mono); }
+.reply pre { background: var(--mt-color-sunken); border-radius: var(--mt-radius-md);
+  padding: var(--mt-reply-code-pad); overflow-x: auto;
+  font-family: var(--mt-font-mono); font-size: var(--mt-reply-code-size);
+  line-height: var(--mt-reply-code-line); }
+.reply pre code { background: none; padding: 0; }
+.bubble.reply, .bubble .reply { }
+.turn + .turn { margin-top: var(--mt-reply-turn-gap); }
+.turn .turnmeta { margin-bottom: var(--mt-reply-meta-gap); font-size: var(--mt-reply-meta-size); }
+.turn .bubble { padding: var(--mt-reply-bubble-pad-y) var(--mt-reply-bubble-pad-x); }
+.turn > .bubble + details.tools { margin-top: var(--mt-reply-bubble-gap); }
+
+/* ---------- §3.6 composer autocomplete — a listbox the field owns ---------- */
+.suggest { list-style: none; margin: var(--mt-space-2) 0 0; padding: var(--mt-space-1);
+  background: var(--mt-color-elevated); border-radius: var(--mt-radius-lg);
+  box-shadow: var(--mt-elevation-2); }
+.suggest li { display: flex; gap: var(--mt-space-2); align-items: center;
+  padding: var(--mt-space-2) var(--mt-space-3); border-radius: var(--mt-radius-sm);
+  font-size: var(--mt-text-subhead-size); min-height: var(--mt-size-touch-target); cursor: pointer; }
+@media (pointer: fine) { .suggest li { min-height: var(--mt-size-pointer-target); } }
+.suggest li[aria-selected="true"] { background: var(--mt-color-accent-quiet); }
+.suggest li b { font-family: var(--mt-font-mono); }
+.suggest li .d { color: var(--mt-color-text-secondary); font-size: var(--mt-text-footnote-size); }
+.suggest .more { color: var(--mt-color-text-tertiary); font-size: var(--mt-text-caption-1-size);
+  min-height: 0; justify-content: center; cursor: default; }
+
 /* ---------- palette / menu ---------- */
 .palette { max-width: 420px; }
 .palette input { width: 100%; font: inherit; font-size: var(--mt-text-body-size); padding: var(--mt-space-2) var(--mt-space-3);
@@ -507,7 +562,7 @@ td.num, th.num { text-align: right; }
   <!-- ===================== TOKENS ===================== -->
   <h2><span class="num">2.1</span> Colour Roles</h2>
   <p class="lede">Roles, not hues. Every text pair is checked against WCAG AA (4.5:1) by
-    <code>ops/scripts/build-design-tokens.mjs</code>; all 58 declared pairs pass. Colour is never the only signal.</p>
+    <code>ops/scripts/build-design-tokens.mjs</code>; all 74 declared pairs pass. Colour is never the only signal.</p>
   <div class="duo">
     <section class="pane" data-theme="light"><span class="panelabel">Light</span>
       <div class="swatches">
@@ -611,7 +666,10 @@ td.num, th.num { text-align: right; }
   <!-- ===================== 3.2 FEED ROWS ===================== -->
   <h2><span class="num">3.2</span> Activity Feed Rows</h2>
   <p class="lede">Real kinds from the <code>activity_feed</code> query. Agent actors carry the agent tint; a failure
-    tints the detail line, never the whole row.</p>
+    tints the detail line, never the whole row. <b>Subjects are Title Cased at render (§3.2)</b> — but only for kinds the
+    console itself composes. The first two rows are <code>tool</code> and <code>dispatch</code>, whose subjects can carry
+    agent-authored text: they render exactly as stored, identifiers and all, because agent text is data and data is not
+    case-corrected (P1). Detail lines stay sentence case throughout — they are prose (P10).</p>
   <div class="duo">
     <section class="pane" data-theme="light"><span class="panelabel">Light</span>
       <div class="card" style="padding:var(--mt-space-2) var(--mt-space-3)">
@@ -623,16 +681,16 @@ td.num, th.num { text-align: right; }
           <span class="subject"> dispatch queued for ops-bot</span>
           <span class="detail degraded">⏳ 3/3 open bundles — cap on metistry</span></span><span class="when">14m ago</span></li>
         <li><span class="glyph">📝</span><span class="body"><span class="chip">system</span>
-          <span class="subject"> proposal #97 awaiting you</span>
+          <span class="subject"> Proposal #97 Awaiting You</span>
           <span class="detail">write Knowledge/Areas/Health/Taper.md</span></span><span class="when">1h ago</span></li>
         <li><span class="glyph">⚠️</span><span class="body"><span class="chip">github-state</span>
-          <span class="subject"> collector run failed</span>
+          <span class="subject"> Collector Run Failed</span>
           <span class="detail failed">✕ rate limited — retries at 14:20</span></span><span class="when">3h ago</span></li>
         <li><span class="glyph">📰</span><span class="body"><span class="chip">routine</span>
-          <span class="subject"> morning brief delivered</span>
+          <span class="subject"> Morning Brief Delivered</span>
           <span class="detail">4 items · 2 links · 1 question</span></span><span class="when">7h ago</span></li>
         <li><span class="glyph">✅</span><span class="body"><span class="chip">you</span>
-          <span class="subject"> allowed proposal #94</span>
+          <span class="subject"> Allowed Proposal #94</span>
           <span class="detail ok">✓ committed 4a1c93e</span></span><span class="when">8h ago</span></li>
       </ul>
       </div>
@@ -647,16 +705,16 @@ td.num, th.num { text-align: right; }
           <span class="subject"> dispatch queued for ops-bot</span>
           <span class="detail degraded">⏳ 3/3 open bundles — cap on metistry</span></span><span class="when">14m ago</span></li>
         <li><span class="glyph">📝</span><span class="body"><span class="chip">system</span>
-          <span class="subject"> proposal #97 awaiting you</span>
+          <span class="subject"> Proposal #97 Awaiting You</span>
           <span class="detail">write Knowledge/Areas/Health/Taper.md</span></span><span class="when">1h ago</span></li>
         <li><span class="glyph">⚠️</span><span class="body"><span class="chip">github-state</span>
-          <span class="subject"> collector run failed</span>
+          <span class="subject"> Collector Run Failed</span>
           <span class="detail failed">✕ rate limited — retries at 14:20</span></span><span class="when">3h ago</span></li>
         <li><span class="glyph">📰</span><span class="body"><span class="chip">routine</span>
-          <span class="subject"> morning brief delivered</span>
+          <span class="subject"> Morning Brief Delivered</span>
           <span class="detail">4 items · 2 links · 1 question</span></span><span class="when">7h ago</span></li>
         <li><span class="glyph">✅</span><span class="body"><span class="chip">you</span>
-          <span class="subject"> allowed proposal #94</span>
+          <span class="subject"> Allowed Proposal #94</span>
           <span class="detail ok">✓ committed 4a1c93e</span></span><span class="when">8h ago</span></li>
       </ul>
       </div>
@@ -711,77 +769,122 @@ td.num, th.num { text-align: right; }
   </div>
 
   <!-- ===================== 3.4 / 3.5 CHAT ===================== -->
-  <h2><span class="num">3.4 · 3.5</span> Chat Turn, Collapsed Tool Activity, Prompt Card</h2>
-  <p class="lede">Tap the disclosure — it is a native <code>&lt;details&gt;</code>, keyboard-operable, no script.
-    Everything inside the agent wash is agent-sourced data.</p>
+  <h2><span class="num">3.4 · 3.5 · 4</span> Chat Turn, Reply Text, Collapsed Tool Activity, Prompt Card</h2>
+  <p class="lede">The reply below is <b>~180 words in the §4 reply tokens</b> — 15pt on a phone, 16pt on a Mac, line 1.45,
+    12px between paragraphs instead of a blank line, 4px between list items. Read it on the phone: dense enough that the
+    turn above is still on screen, comfortable enough to read to the end. Nothing here uses <code>--mt-text-body-*</code>;
+    those are control tokens. The disclosure is a native <code>&lt;details&gt;</code>, and everything inside the agent wash
+    is agent-sourced data.</p>
   <div class="duo">
     <section class="pane" data-theme="light"><span class="panelabel">Light</span>
-      <div class="bubble out"><div class="turnmeta">you · 09:14</div>how much should I ease off running in the final weeks?</div>
-      <div style="height:var(--mt-space-3)"></div>
-      <div class="turnmeta">assistant · 09:14 · <span class="ok">finished</span></div>
-      <div class="bubble in">
-        Cut volume ~40% over the final three weeks while keeping intensity. Your note
-        <a class="link" href="#">Knowledge/Areas/Running/Taper</a> puts the last hard session 10 days out.
-        <div class="row" style="margin-top:var(--mt-space-2)">
-          <a class="link muted" href="#">↗ open note</a><a class="link muted" href="#">⌁ summarize this</a><a class="link muted" href="#">⌁ what's the latest</a>
+      <div class="turn">
+        <div class="turnmeta">you · 09:14</div>
+        <div class="bubble out reply">how much should I ease off running in the final weeks?</div>
+      </div>
+      <div class="turn">
+        <div class="turnmeta">assistant · 09:14 · <span class="ok">finished</span> · deep · 6.2s</div>
+        <div class="bubble in reply">
+          <p>Cut total weekly volume by about 40% across the final three weeks and hold intensity
+            where it is. A taper sheds fatigue, not fitness — dropping the hard sessions is the
+            mistake that actually costs you the race, and it is the one nearly everybody makes.</p>
+          <ul>
+            <li>Three weeks out — keep the long run, cap it at 90 minutes; one interval session at
+              race pace, half the usual volume.</li>
+            <li>Two weeks out — about 60% of peak mileage. The last genuinely hard session lands
+              here, ten days from the start.</li>
+            <li>Race week — 30 to 40% of peak. Two easy runs, four strides on the Thursday, and
+              nothing at all on the Saturday.</li>
+          </ul>
+          <p>Your note <a class="link" href="#">Areas/Running/Taper</a> already puts the last hard
+            session ten days out, so this only sharpens what is there. Weekly totals, kilometres:</p>
+          <pre><code>peak 68 · w-3 41 · w-2 27 · race wk 24</code></pre>
+          <p>One caveat, and it comes from the health collector rather than the training log: your
+            average sleep is down 44 minutes on the same block last year, and fatigue you have not
+            recovered from does not care what week the plan says it is. Err toward the low end of
+            every number above.</p>
+          <div class="row" style="margin-top:var(--mt-reply-para-gap)">
+            <a class="link muted" href="#">↗ open note</a><a class="link muted" href="#">⌁ summarize this</a><a class="link muted" href="#">⌁ what's the latest</a>
+          </div>
+        </div>
+        <details class="tools"><summary>4 tools · 6.2s · $0.031</summary>
+          <div class="list">
+            <div>🔧 knowledge_search · 1.1s · <span class="ok">ok</span></div>
+            <div>🔧 vault_read · 0.4s · <span class="ok">ok</span></div>
+            <div>🔧 health_summary · 3.9s · <span class="degraded">degraded — retried once</span></div>
+            <div>🔧 brain_commit · 0.8s · <span class="ok">ok</span></div>
+          </div>
+        </details>
+      </div>
+      <div class="turn">
+        <div class="promptcard">
+          <h4>Write the Taper Plan to Your Vault?</h4>
+          <div class="muted">Knowledge/Areas/Running/Taper.md · new section, 180 words</div>
+          <div class="opts">
+            <button class="primary" type="button">Write It</button>
+            <button type="button">Show Me the Diff First</button>
+            <button type="button">Not Now</button>
+            <button type="button" style="border-color:transparent;color:var(--mt-color-accent)">Something Else…</button>
+          </div>
+          <div class="tiny" style="margin-top:var(--mt-space-2)">default in 6h: Show Me the Diff First</div>
         </div>
       </div>
-      <details class="tools"><summary>4 tools · 6.2s · $0.031</summary>
-        <div class="list">
-          <div>🔧 knowledge_search · 1.1s · <span class="ok">ok</span></div>
-          <div>🔧 vault_read · 0.4s · <span class="ok">ok</span></div>
-          <div>🔧 calendar_list · 3.9s · <span class="degraded">degraded — retried once</span></div>
-          <div>🔧 brain_commit · 0.8s · <span class="ok">ok</span></div>
-        </div>
-      </details>
-      <div style="height:var(--mt-space-3)"></div>
-      <div class="promptcard">
-        <h4>Write the Taper Plan to Your Vault?</h4>
-        <div class="muted">Knowledge/Areas/Running/Taper.md · new section, 180 words</div>
-        <div class="opts">
-          <button class="primary" type="button">Write It</button>
-          <button type="button">Show Me the Diff First</button>
-          <button type="button">Not Now</button>
-          <button type="button" style="border-color:transparent;color:var(--mt-color-accent)">Something Else…</button>
-        </div>
-        <div class="tiny" style="margin-top:var(--mt-space-2)">default in 6h: Show Me the Diff First</div>
-      </div>
-        <div class="pillrow"><button class="newpill" type="button">↓ New Reply</button></div>
-        <div class="tiny" style="text-align:center">a reply landed while you were scrolled up — the list did not move (P9)</div>
+      <div class="pillrow"><button class="newpill" type="button">↓ New Reply</button></div>
+      <div class="tiny" style="text-align:center">a reply landed while you were scrolled up — the list did not move (P9)</div>
     </section>
     <section class="pane" data-theme="dark"><span class="panelabel">Dark</span>
-      <div class="bubble out"><div class="turnmeta">you · 09:14</div>how much should I ease off running in the final weeks?</div>
-      <div style="height:var(--mt-space-3)"></div>
-      <div class="turnmeta">assistant · 09:14 · <span class="ok">finished</span></div>
-      <div class="bubble in">
-        Cut volume ~40% over the final three weeks while keeping intensity. Your note
-        <a class="link" href="#">Knowledge/Areas/Running/Taper</a> puts the last hard session 10 days out.
-        <div class="row" style="margin-top:var(--mt-space-2)">
-          <a class="link muted" href="#">↗ open note</a><a class="link muted" href="#">⌁ summarize this</a><a class="link muted" href="#">⌁ what's the latest</a>
+      <div class="turn">
+        <div class="turnmeta">you · 09:14</div>
+        <div class="bubble out reply">how much should I ease off running in the final weeks?</div>
+      </div>
+      <div class="turn">
+        <div class="turnmeta">assistant · 09:14 · <span class="ok">finished</span> · deep · 6.2s</div>
+        <div class="bubble in reply">
+          <p>Cut total weekly volume by about 40% across the final three weeks and hold intensity
+            where it is. A taper sheds fatigue, not fitness — dropping the hard sessions is the
+            mistake that actually costs you the race, and it is the one nearly everybody makes.</p>
+          <ul>
+            <li>Three weeks out — keep the long run, cap it at 90 minutes; one interval session at
+              race pace, half the usual volume.</li>
+            <li>Two weeks out — about 60% of peak mileage. The last genuinely hard session lands
+              here, ten days from the start.</li>
+            <li>Race week — 30 to 40% of peak. Two easy runs, four strides on the Thursday, and
+              nothing at all on the Saturday.</li>
+          </ul>
+          <p>Your note <a class="link" href="#">Areas/Running/Taper</a> already puts the last hard
+            session ten days out, so this only sharpens what is there. Weekly totals, kilometres:</p>
+          <pre><code>peak 68 · w-3 41 · w-2 27 · race wk 24</code></pre>
+          <p>One caveat, and it comes from the health collector rather than the training log: your
+            average sleep is down 44 minutes on the same block last year, and fatigue you have not
+            recovered from does not care what week the plan says it is. Err toward the low end of
+            every number above.</p>
+          <div class="row" style="margin-top:var(--mt-reply-para-gap)">
+            <a class="link muted" href="#">↗ open note</a><a class="link muted" href="#">⌁ summarize this</a><a class="link muted" href="#">⌁ what's the latest</a>
+          </div>
+        </div>
+        <details class="tools" open><summary>4 tools · 6.2s · $0.031</summary>
+          <div class="list">
+            <div>🔧 knowledge_search · 1.1s · <span class="ok">ok</span></div>
+            <div>🔧 vault_read · 0.4s · <span class="ok">ok</span></div>
+            <div>🔧 health_summary · 3.9s · <span class="degraded">degraded — retried once</span></div>
+            <div>🔧 brain_commit · 0.8s · <span class="ok">ok</span></div>
+          </div>
+        </details>
+      </div>
+      <div class="turn">
+        <div class="promptcard">
+          <h4>Write the Taper Plan to Your Vault?</h4>
+          <div class="muted">Knowledge/Areas/Running/Taper.md · new section, 180 words</div>
+          <div class="opts">
+            <button class="primary" type="button">Write It</button>
+            <button type="button">Show Me the Diff First</button>
+            <button type="button">Not Now</button>
+            <button type="button" style="border-color:transparent;color:var(--mt-color-accent)">Something Else…</button>
+          </div>
+          <div class="tiny" style="margin-top:var(--mt-space-2)">default in 6h: Show Me the Diff First</div>
         </div>
       </div>
-      <details class="tools" open><summary>4 tools · 6.2s · $0.031</summary>
-        <div class="list">
-          <div>🔧 knowledge_search · 1.1s · <span class="ok">ok</span></div>
-          <div>🔧 vault_read · 0.4s · <span class="ok">ok</span></div>
-          <div>🔧 calendar_list · 3.9s · <span class="degraded">degraded — retried once</span></div>
-          <div>🔧 brain_commit · 0.8s · <span class="ok">ok</span></div>
-        </div>
-      </details>
-      <div style="height:var(--mt-space-3)"></div>
-      <div class="promptcard">
-        <h4>Write the Taper Plan to Your Vault?</h4>
-        <div class="muted">Knowledge/Areas/Running/Taper.md · new section, 180 words</div>
-        <div class="opts">
-          <button class="primary" type="button">Write It</button>
-          <button type="button">Show Me the Diff First</button>
-          <button type="button">Not Now</button>
-          <button type="button" style="border-color:transparent;color:var(--mt-color-accent)">Something Else…</button>
-        </div>
-        <div class="tiny" style="margin-top:var(--mt-space-2)">default in 6h: Show Me the Diff First</div>
-      </div>
-        <div class="pillrow"><button class="newpill" type="button">↓ New Reply</button></div>
-        <div class="tiny" style="text-align:center">a reply landed while you were scrolled up — the list did not move (P9)</div>
+      <div class="pillrow"><button class="newpill" type="button">↓ New Reply</button></div>
+      <div class="tiny" style="text-align:center">a reply landed while you were scrolled up — the list did not move (P9)</div>
     </section>
   </div>
 
@@ -790,7 +893,10 @@ td.num, th.num { text-align: right; }
   <p class="lede">Nothing but the composer occupies the space above the keyboard — a pinned command strip costs two or three
     lines of transcript exactly while you are typing about what the agent just said (P8, P9). One <code>＋</code> holds the lot,
     and the list under it is generated from live <code>rules.yaml</code> and the agent registry, never hand-maintained. On the
-    web it is a native <code>&lt;details&gt;</code>: it opens with no script, is keyboard-operable, and <kbd>Esc</kbd> closes it.</p>
+    web it is a native <code>&lt;details&gt;</code>: it opens with no script, is keyboard-operable, and <kbd>Esc</kbd> closes it.
+    <b>Every item in the menu is clickable and inserts itself at the caret</b> — it never sends, so a tapped command and a typed
+    one produce the identical string. The third state below is <b>suggesting</b>: typing <code>@d</code> or <code>/</code> opens
+    the same generated list as an inline listbox under the field, ranked prefix → substring → recency, driven by ↑↓ / Enter / Esc.</p>
   <div class="duo">
     <section class="pane" data-theme="light"><span class="panelabel">Light</span>
       <div class="tiny">collapsed — the default, and the state it returns to after every send</div>
@@ -810,16 +916,16 @@ td.num, th.num { text-align: right; }
           </div>
         </summary>
         <div class="sheet">
-          <div class="grp">Quick Actions</div>
+          <div class="grp">Quick Actions · tap inserts at the caret</div>
           <div class="row">
             <button type="button">Summarize This</button><button type="button">What's the Latest</button><button type="button">New Note</button>
           </div>
-          <div class="grp">Commands · from rules.yaml</div>
-          <div class="cmd"><b class="mono">/note</b><span class="muted">capture without a turn</span><span class="kbd" style="margin-left:auto">⌘N</span></div>
+          <div class="grp">Commands · from rules.yaml <span style="text-transform:none">(endpoint not built — static list, flagged in code)</span></div>
+          <div class="cmd"><b class="mono">/note</b><span class="muted">capture without a turn</span><span class="kbd" style="margin-left:auto">inserts ⌘N</span></div>
           <div class="cmd"><b class="mono">/status</b><span class="muted">doctor at a glance</span><span class="kbd" style="margin-left:auto">⌘0</span></div>
           <div class="cmd"><b class="mono">/deep</b><span class="muted">pin the deep tier for this turn</span></div>
           <div class="cmd off"><b class="mono">/local</b><span class="muted">not configured on this instance</span></div>
-          <div class="grp">Agents · from the registry</div>
+          <div class="grp">Agents · tap inserts <span class="mono">@id</span> at the caret</div>
           <div class="row">
             <span class="chip agent">@drey-dev</span><span class="chip state-working">working</span>
             <span class="chip agent">@ops-bot</span><span class="chip state-queued">queued</span>
@@ -830,6 +936,35 @@ td.num, th.num { text-align: right; }
           <div class="row"><span class="chip accent">◇ deep · high</span><span class="tiny">the router picked <b>fast</b> · <a class="link" href="#">Reset</a></span></div>
         </div>
       </details>
+
+      <div class="tiny" style="margin-top:var(--mt-space-5)">suggesting — typing <code>@d</code>; the field keeps focus and the caret, ↑↓ move, Enter inserts, Esc closes</div>
+      <div style="margin-top:var(--mt-space-2)">
+        <div class="composer">
+          <button class="round" type="button" title="Actions">＋</button>
+          <div class="field" style="color:var(--mt-color-text-primary);border-color:var(--mt-color-border-strong)">can you look at the flaky test — <b class="mono">@d</b><span style="opacity:.4">|</span></div>
+          <button class="round primary" type="button" title="Send">↑</button>
+        </div>
+        <ul class="suggest" role="listbox" aria-label="Agent suggestions" style="margin-left:var(--mt-space-12)">
+          <li role="option" aria-selected="true"><span class="chip agent">@drey</span><span class="d">areas · dev</span><span class="chip state-working" style="margin-left:auto">working</span></li>
+          <li role="option" aria-selected="false"><span class="chip agent">@drey-dev</span><span class="d">metistry · dev</span><span class="chip state-idle" style="margin-left:auto">idle</span></li>
+          <li role="option" aria-selected="false"><span class="chip agent">@doc-bot</span><span class="d">docs</span><span class="chip state-blocked" style="margin-left:auto">blocked</span></li>
+          <li class="more">prefix matches first, then substring, then recency</li>
+        </ul>
+      </div>
+
+      <div class="tiny" style="margin-top:var(--mt-space-5)">suggesting — typing <code>/</code>, the command list filtered as you type</div>
+      <div style="margin-top:var(--mt-space-2)">
+        <div class="composer">
+          <button class="round" type="button" title="Actions">＋</button>
+          <div class="field" style="color:var(--mt-color-text-primary);border-color:var(--mt-color-border-strong)"><b class="mono">/st</b><span style="opacity:.4">|</span></div>
+          <button class="round primary" type="button" title="Send">↑</button>
+        </div>
+        <ul class="suggest" role="listbox" aria-label="Command suggestions" style="margin-left:var(--mt-space-12)">
+          <li role="option" aria-selected="true"><b>/status</b><span class="d">doctor at a glance</span><span class="kbd" style="margin-left:auto;color:var(--mt-color-text-tertiary);font-family:var(--mt-font-mono);font-size:var(--mt-text-caption-1-size)">⌘0</span></li>
+          <li role="option" aria-selected="false"><b>/settle</b><span class="d">settle the open proposal</span></li>
+          <li role="option" aria-selected="false" style="opacity:.55"><b>/stream</b><span class="d">not configured on this instance</span></li>
+        </ul>
+      </div>
     </section>
     <section class="pane" data-theme="dark"><span class="panelabel">Dark</span>
       <div class="tiny">collapsed — the default, and the state it returns to after every send</div>
@@ -849,16 +984,16 @@ td.num, th.num { text-align: right; }
           </div>
         </summary>
         <div class="sheet">
-          <div class="grp">Quick Actions</div>
+          <div class="grp">Quick Actions · tap inserts at the caret</div>
           <div class="row">
             <button type="button">Summarize This</button><button type="button">What's the Latest</button><button type="button">New Note</button>
           </div>
-          <div class="grp">Commands · from rules.yaml</div>
-          <div class="cmd"><b class="mono">/note</b><span class="muted">capture without a turn</span><span class="kbd" style="margin-left:auto">⌘N</span></div>
+          <div class="grp">Commands · from rules.yaml <span style="text-transform:none">(endpoint not built — static list, flagged in code)</span></div>
+          <div class="cmd"><b class="mono">/note</b><span class="muted">capture without a turn</span><span class="kbd" style="margin-left:auto">inserts ⌘N</span></div>
           <div class="cmd"><b class="mono">/status</b><span class="muted">doctor at a glance</span><span class="kbd" style="margin-left:auto">⌘0</span></div>
           <div class="cmd"><b class="mono">/deep</b><span class="muted">pin the deep tier for this turn</span></div>
           <div class="cmd off"><b class="mono">/local</b><span class="muted">not configured on this instance</span></div>
-          <div class="grp">Agents · from the registry</div>
+          <div class="grp">Agents · tap inserts <span class="mono">@id</span> at the caret</div>
           <div class="row">
             <span class="chip agent">@drey-dev</span><span class="chip state-working">working</span>
             <span class="chip agent">@ops-bot</span><span class="chip state-queued">queued</span>
@@ -869,13 +1004,47 @@ td.num, th.num { text-align: right; }
           <div class="row"><span class="chip accent">◇ deep · high</span><span class="tiny">the router picked <b>fast</b> · <a class="link" href="#">Reset</a></span></div>
         </div>
       </details>
+
+      <div class="tiny" style="margin-top:var(--mt-space-5)">suggesting — typing <code>@d</code>; the field keeps focus and the caret, ↑↓ move, Enter inserts, Esc closes</div>
+      <div style="margin-top:var(--mt-space-2)">
+        <div class="composer">
+          <button class="round" type="button" title="Actions">＋</button>
+          <div class="field" style="color:var(--mt-color-text-primary);border-color:var(--mt-color-border-strong)">can you look at the flaky test — <b class="mono">@d</b><span style="opacity:.4">|</span></div>
+          <button class="round primary" type="button" title="Send">↑</button>
+        </div>
+        <ul class="suggest" role="listbox" aria-label="Agent suggestions" style="margin-left:var(--mt-space-12)">
+          <li role="option" aria-selected="true"><span class="chip agent">@drey</span><span class="d">areas · dev</span><span class="chip state-working" style="margin-left:auto">working</span></li>
+          <li role="option" aria-selected="false"><span class="chip agent">@drey-dev</span><span class="d">metistry · dev</span><span class="chip state-idle" style="margin-left:auto">idle</span></li>
+          <li role="option" aria-selected="false"><span class="chip agent">@doc-bot</span><span class="d">docs</span><span class="chip state-blocked" style="margin-left:auto">blocked</span></li>
+          <li class="more">prefix matches first, then substring, then recency</li>
+        </ul>
+      </div>
+
+      <div class="tiny" style="margin-top:var(--mt-space-5)">suggesting — typing <code>/</code>, the command list filtered as you type</div>
+      <div style="margin-top:var(--mt-space-2)">
+        <div class="composer">
+          <button class="round" type="button" title="Actions">＋</button>
+          <div class="field" style="color:var(--mt-color-text-primary);border-color:var(--mt-color-border-strong)"><b class="mono">/st</b><span style="opacity:.4">|</span></div>
+          <button class="round primary" type="button" title="Send">↑</button>
+        </div>
+        <ul class="suggest" role="listbox" aria-label="Command suggestions" style="margin-left:var(--mt-space-12)">
+          <li role="option" aria-selected="true"><b>/status</b><span class="d">doctor at a glance</span><span class="kbd" style="margin-left:auto;color:var(--mt-color-text-tertiary);font-family:var(--mt-font-mono);font-size:var(--mt-text-caption-1-size)">⌘0</span></li>
+          <li role="option" aria-selected="false"><b>/settle</b><span class="d">settle the open proposal</span></li>
+          <li role="option" aria-selected="false" style="opacity:.55"><b>/stream</b><span class="d">not configured on this instance</span></li>
+        </ul>
+      </div>
     </section>
   </div>
 
   <!-- ===================== 3.6 / 3.7 PALETTE + MODEL PICKER ===================== -->
   <h2><span class="num">3.6 · 3.7</span> The ⌘K Palette and the Model &amp; Effort Picker</h2>
-  <p class="lede">With a fine pointer the same four groups are also a ⌘K palette — the Mac and wide-PWA equivalent of the
-    ＋ menu. The picker is a human override of a deterministic router (invariant 4), and its header says so.</p>
+  <p class="lede"><b>⌘K stays, and it is the rich reply surface wherever a desktop keyboard is present.</b> The inline
+    suggestion list above is the narrow affordance — six rows, one token, right for a thumb. The palette is the wide one:
+    it searches all four groups at once with the same deterministic ranking, shows the full description and the shortcut,
+    previews an agent's presence before you address it, and stays open across several insertions so a turn can be composed
+    from a command, an agent and a model pin without reopening anything. Results insert at the caret exactly as the menu's
+    do. Shown only where <code>(pointer: fine)</code> matches — never on touch, where it would be a shortcut with no keyboard.
+    The picker is a human override of a deterministic router (invariant 4), and its header says so.</p>
   <div class="duo">
     <section class="pane" data-theme="light"><span class="panelabel">Light</span>
       <div class="elev palette">

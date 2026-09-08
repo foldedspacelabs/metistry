@@ -679,3 +679,48 @@ your git, on your machine.
   platform, with ⌘K as the Mac and wide-web equivalent — because on a
   phone a pinned command strip costs two or three lines of transcript at
   exactly the moment the reader needs them.
+- 2026-09-08 — **The composer completes as you type, and the menu is
+  clickable** (owner review of the design system). Typing `@d` suggests
+  `@drey`, typing `/` lists the commands and narrows them keystroke by
+  keystroke — and every row of the actions menu, quick actions and agent
+  tags included, *inserts itself at the caret* rather than being typed.
+  Two properties make it a product claim rather than a nicety. It is
+  **generated, never hand-maintained**: agents come from the instance's
+  registry and commands from its own `rules.yaml`, so an instance that
+  adds a tier or an agent gets it in the composer with no front-end
+  change, and a command the instance has not configured is listed
+  *disabled with the reason* rather than hidden. And the ranking is
+  **deterministic** — prefix, then substring, then recency — the same
+  discipline invariant 4 applies to the router, so the same keystrokes
+  give the same list every time on every surface. A tapped command and a
+  typed one produce the identical string, which is what keeps the
+  power-user layer and the discoverable layer from drifting apart.
+  ⌘K stays as the rich version wherever there is a desktop keyboard.
+  (Known gap, flagged in code and in `ux-direction.md`: there is no
+  `rules.yaml` commands endpoint yet, so the PWA ships a short static
+  list marked for deletion.)
+- 2026-09-08 — **Reply text is optimised for density on a phone**
+  (design-system §4). The assistant's reply is the longest text in the
+  product and the thing most often read on the smallest screen, so it
+  gets its own token group (`--mt-reply-*`) rather than the control type
+  scale: 15pt on a phone and 16pt on a Mac instead of 17, line height
+  1.45 instead of 1.5, and a 12px paragraph margin instead of a blank
+  line. That is roughly a third more of the reply on screen at once,
+  which is the difference between reading an answer and scrolling
+  through one — and it is why the previous turn is still visible while
+  you read the current one. Nothing was traded for it: 15pt is Apple's
+  `.subheadline`, still a Dynamic Type style, so the whole thing still
+  scales with the user's accessibility setting, and the four grounds a
+  reply can sit on (`surface`, `accent-quiet`, `agent-quiet`, `sunken`)
+  are now contrast-checked rather than assumed — worst case 12.79:1 for
+  body text, 6.36:1 for metadata. The contrast table went from 58 pairs
+  to 74, all passing.
+- 2026-09-08 — **Feed titles are Title Cased at render, and only ours
+  are.** P10 says a card title takes Title Case; P1 says agent text is
+  data and data is not case-corrected. The two are reconciled by a
+  closed allow-list of `activity_feed` kinds whose subject the console
+  itself composes — never in the database, never for a kind whose
+  subject can carry agent-authored text, never for identifiers inside
+  one. The general principle is the reusable part: *"is this string
+  ours?" cannot be answered by looking at the string, only by looking at
+  where it came from* — so the safe default is to leave text alone.

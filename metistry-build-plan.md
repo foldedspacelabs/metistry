@@ -118,7 +118,24 @@ tags (`@<agent>`) address these **named agents from the instance's registry**
 
 - **Chatty is fine.** Sessions resume by UUID; cost per turn is flat. Corrections
   and redirects are the expected interaction, not an exception.
-- **Adaptive escalation.** The assistant runs the default tier and delegates
+- **The composer completes as you type.** `@d…` suggests `@drey`; `/` lists
+the commands and narrows them keystroke by keystroke. This is the
+discoverable half of the power-user layer (`ux-direction.md`): the syntax
+above stays exactly as it is, and nobody has to have memorised it. **The
+list is generated, never hand-maintained** — agents come from the
+instance's agent registry, commands from the instance's own `rules.yaml`
+(the same source as OPT-3's generated `/help`), so an instance that adds
+a tier or an agent gets it in the composer with no front-end change, and
+a command the instance has not configured is listed disabled *with the
+reason* rather than hidden. **Ranking is deterministic** — prefix match,
+then substring, then recency, ties broken by id — for the same reason
+invariant 4 holds for the router: no model decides, and the same
+keystrokes give the same list on every surface. Selecting a suggestion
+*inserts text at the caret*; it never sends, so a tapped command and a
+typed one produce the identical string. Rendering is `design-system.md`
+§3.6 (inline list on touch, the ⌘K palette where there is a keyboard).
+
+**Adaptive escalation.** The assistant runs the default tier and delegates
   hard sub-tasks to the deep tier, so escalation cost is bounded to the hard
   part rather than the whole turn. `/model <tag>` (and its shipped alias
   `/deep`) remains the manual override. Per-tier daily budgets in

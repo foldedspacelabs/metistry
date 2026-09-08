@@ -1,9 +1,11 @@
 // reply-review — the loop that closes on a thumbs-down (docs/ops/reply-feedback.md).
 //
-// Once a week: gather every reply the user marked 👎, with their note, the
-// prompt that provoked it, the reply itself and that turn's tool calls, and
-// emit exactly ONE proposal of kind `improvement` describing the patterns and
-// a suggested edit to the assistant's prompt overlay.
+// Daily: gather every reply the user marked 👎 since the last `improvement`
+// proposal this routine emitted (or the last 7 days, if it has never emitted
+// one), with their note, the prompt that provoked it, the reply itself and
+// that turn's tool calls, and emit exactly ONE proposal of kind `improvement`
+// describing the patterns and a suggested edit to the assistant's prompt
+// overlay.
 //
 // Three rules hold this honest:
 //
@@ -16,9 +18,11 @@
 //    prompt overlay changes only when the user allows that proposal, and the
 //    write then goes through the vault bridge as principal `user`
 //    (apps/console/src/prompt-overlay.ts) — a human change, invariant 2.
-// 3. **Silence-default and idempotent.** Nothing flagged → no proposal. A
-//    second run over the same window finds its own pending proposal and adds
-//    nothing.
+// 3. **Silence-default and self-bounding.** No new 👎 since the last proposal
+//    → no proposal. Because the window for the next run starts where the
+//    last emitted proposal's timestamp left off, a run right after another
+//    (with no new feedback in between) naturally finds nothing new — no
+//    separate dedup check needed.
 
 import type { Db, RoutineCtx } from "../morning-brief/run.js";
 
@@ -26,7 +30,7 @@ export interface ReplyReviewCtx extends RoutineCtx {
   now?: Date;
 }
 
-const WINDOW_DAYS = 7;
+const FALLBACK_DAYS = 7; // window to look back when the routine has never emitted a proposal
 const MAX_CASES = 20; // the proposal is for reading; beyond this it is a query, not a prompt card
 const PROMPT_CHARS = 300;
 const REPLY_CHARS = 400;
@@ -80,9 +84,9 @@ export function patterns(cases: FlaggedCase[]): string[] {
  */
 export function suggestedSection(cases: FlaggedCase[], windowEnd: string): string {
   const lines = [
-    `## Reply quality — flagged week ending ${windowEnd}`,
+    `## Reply quality — flagged as of ${windowEnd}`,
     "",
-    `The user marked ${plural(cases.length, "reply", "replies")} 👎 in the week ending ${windowEnd}.`,
+    `The user marked ${plural(cases.length, "reply", "replies")} 👎 since the last pass.`,
     "This section was generated from those flags by the reply-review routine (no model wrote it);",
     "edit it into the guidance you actually want before allowing it, or deny the proposal.",
     "",
@@ -107,8 +111,17 @@ export function suggestedSection(cases: FlaggedCase[], windowEnd: string): strin
   return lines.join("\n");
 }
 
-/** The 👎 replies in the window, with their turn's tool calls. */
-async function flagged(db: Db, now: Date): Promise<FlaggedCase[]> {
+/** The ts of the last `improvement` proposal this routine emitted, or null if it never has. */
+async function lastEmittedAt(db: Db): Promise<Date | null> {
+  const { rows } = await db.query(
+    `SELECT ts FROM proposals WHERE kind = 'improvement' AND source_agent = $1 ORDER BY ts DESC LIMIT 1`,
+    [SOURCE_AGENT],
+  );
+  return rows.length > 0 ? new Date(rows[0].ts) : null;
+}
+
+/** The 👎 replies since `since`, with their turn's tool calls. */
+async function flagged(db: Db, since: Date): Promise<FlaggedCase[]> {
   const { rows } = await db.query(
     `SELECT o.id AS message_id, f.ts, o.thread, f.note,
             coalesce(i.text, '') AS prompt, o.text AS reply, r.model, r.meta->'tools_used' AS tools_used
@@ -121,9 +134,9 @@ async function flagged(db: Db, now: Date): Promise<FlaggedCase[]> {
          AND (meta->>'turn_id' = o.id::text OR meta->>'message_id' = o.in_reply_to::text)
        ORDER BY ts DESC LIMIT 1
      ) r ON true
-     WHERE f.rating = -1 AND f.ts > $1::timestamptz - make_interval(days => $2::int)
-     ORDER BY f.ts LIMIT $3`,
-    [now, WINDOW_DAYS, MAX_CASES],
+     WHERE f.rating = -1 AND f.ts > $1::timestamptz
+     ORDER BY f.ts LIMIT $2`,
+    [since, MAX_CASES],
   );
   return rows.map((r: any) => ({
     message_id: Number(r.message_id),
@@ -137,26 +150,20 @@ async function flagged(db: Db, now: Date): Promise<FlaggedCase[]> {
   }));
 }
 
-/** One weekly pass. Returns the number of proposals emitted: 0 or 1. */
+/** One daily pass. Returns the number of proposals emitted: 0 or 1. */
 export async function run(db: Db, ctx: ReplyReviewCtx = {}): Promise<number> {
   const now = ctx.now ?? new Date();
   const windowEnd = isoDay(now);
 
-  const cases = await flagged(db, now);
-  if (cases.length === 0) return 0; // silence-default: nothing was flagged, nothing to say
+  const lastTs = await lastEmittedAt(db);
+  const since = lastTs ?? new Date(now.getTime() - FALLBACK_DAYS * 86_400_000);
 
-  // idempotent: one pending proposal per window, however often the routine runs
-  const dup = await db.query(
-    `SELECT id FROM proposals
-     WHERE kind = 'improvement' AND source_agent = $1 AND decision = 'pending' AND payload->>'window_end' = $2
-     LIMIT 1`,
-    [SOURCE_AGENT, windowEnd],
-  );
-  if (dup.rows.length > 0) return 0;
+  const cases = await flagged(db, since);
+  if (cases.length === 0) return 0; // silence-default: no new 👎 since the last proposal, nothing to say
 
   const payload = {
-    title: `Reply quality: ${plural(cases.length, "reply", "replies")} flagged 👎 this week`,
-    window_start: isoDay(new Date(now.getTime() - WINDOW_DAYS * 86_400_000)),
+    title: `Reply quality: ${plural(cases.length, "reply", "replies")} flagged 👎`,
+    window_start: isoDay(since),
     window_end: windowEnd,
     flagged: cases,
     patterns: patterns(cases),

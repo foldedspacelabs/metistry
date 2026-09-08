@@ -626,7 +626,8 @@ your git, on your machine.
 
 - 2026-09-08 — Safety mechanism shipped, and a goal sharpened: **the system
   learns from a thumbs-down without ever teaching itself.** A 👍/👎 sits
-  under every reply; once a week a model-free routine turns the 👎 —
+  under every reply; daily, whenever there is new 👎 since its last pass, a
+  model-free routine turns the 👎 —
   with the prompt, the reply, the user's note and that turn's tool calls —
   into **one** proposal carrying a *suggested* edit to the assistant's own
   prompt. It is never applied: the user allows it in triage, and only then

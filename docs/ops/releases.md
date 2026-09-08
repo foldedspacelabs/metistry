@@ -157,7 +157,12 @@ see both to switch between them.
 Set `METISTRY_RELEASE_REPO` to consume a fork's releases, and
 `METISTRY_IMAGE_PREFIX` to pull its images. `METISTRY_GITHUB_TOKEN` (the
 read-only PAT the github-state collector already uses) lifts GitHub's
-anonymous rate limit.
+anonymous rate limit — and on a **private** repo it is the only way to see
+releases at all, but only if the fine-grained PAT carries **Contents:
+read**; Issues/Pull requests/Metadata is not enough and gets a 403 the CLI
+reports separately from an exhausted rate limit. Missing that scope,
+`metistry update` falls back to the `gh` CLI (resolve and download both)
+when it is on PATH and logged in.
 
 `--dry-run` in release mode reaches nothing — no GitHub call, no
 download — so the version it prints is `<latest>`, the request rather

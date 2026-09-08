@@ -73,6 +73,12 @@ optional nudge line. Errors set `isError` and carry core's uniform envelope
 | `artifact_comment_resolve` | `id`, `reopen?` | `{ comment }` |
 | `artifact_dispatch_review` | `artifact`, `version`, `thread_ids`, `to_agent`, `message?`, `idempotency_key?` | `{ route: 'work', work, links }` inside the project; `{ route: 'proposal', proposal_id }` across the boundary |
 | `crew_dispatch` | `crew`, `brief`, `task_id?`, `idempotency_key?` | `{ queued: true, work_id, crew, allow, deduplicated }` — internal principals only; `invalid_request` with the violations in the message when the brief cites a path outside the crew's scope ∩ the local target's `allow`, or a denied source |
+| `queries_list` | — | `{ queries: [{ name, description, params: { <param>: { type, default? } } }] }` — every named query loaded into the injected `QueryStore` (invariant 3) |
+| `queries_run` | `name`, `params?: Record<string, string \| number \| boolean>` | `{ name, params, rows, as_of, row_count, truncated? }` — rows capped at 200 (`truncated: true` past the cap); `not_found` for an unknown query, `invalid_request` for a bad/unknown param. Internal principals always; external agents need a `queries: true` grant. |
+
+Every tool above also takes an optional `turn_id` (`≤ 64 chars`, `[A-Za-z0-9_-]`):
+pass the same value on every call within one reply and they group under it in
+`runs.meta.turn_id` (and the `activity_feed` query's `turn_id` column).
 
 Policy refusals from the task list (`claimed`, `dependencies_open`,
 `not_holder`, `lease_expired`, …) are *outcomes*, returned as data; only a
@@ -122,12 +128,13 @@ createServer((req, res) => {
 | `readKnowledge?` | `(path) => Promise<string \| null>` — absent → `knowledge_read` is `not_available` and `check()` reports `degraded` |
 | `writeKnowledge?` | `KnowledgeWriter` — `({ path, content, intent, expected_sha256? }) => Promise<VaultWriteOutcome>`; absent → `knowledge_write` is `not_available` and `check()` reports `degraded`. `vaultBridgeWriter({ url, token })` speaks the reconciler's wire contract (bearer, envelope, CAS, one read on `409` for the current hash). |
 | `artifacts?` | an `ArtifactsService` (`@foldedspacelabs/metistry-artifacts`) — absent → every `artifact_*` tool is `not_available` |
+| `queries?` | a `QueryStore` (`@foldedspacelabs/metistry-queries`, invariant 3's one read path) — absent → `queries_list`/`queries_run` are `not_available`. Internal principals always have these tools; external agents need `grants.queries = true`. |
 | `leaseWarningSeconds?` | nudge threshold for a held lease (default 120) |
 | `version?` | reported to clients as the server version |
 
 The returned `BrainServer` has `handle(req, res)`, `check()` (the §4.3
 behavioral probe: selects the columns every tool depends on and runs the
-tasks module's own check), and `tools` (the nineteen names, in manifest
+tasks module's own check), and `tools` (the full name list, in manifest
 order).
 
 **Transport.** Stateless Streamable HTTP: a fresh MCP server per request,

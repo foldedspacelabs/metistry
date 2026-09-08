@@ -8,7 +8,7 @@ grant or narrow it, and where to see what it did.
 ## What the assistant can do
 
 With tools mounted, every turn the engine runs can call exactly these
-nineteen tools on the console's `POST /mcp` (`packages/mcp-brain`), and
+mcp-brain tools on the console's `POST /mcp` (`packages/mcp-brain`), and
 nothing else — no shell, no filesystem, no git, no web (invariant 9,
 enforced in `apps/assistant/src/brain.ts`, locked to the bridge's
 manifest by test):
@@ -21,6 +21,12 @@ manifest by test):
 | write | `knowledge_write` | **This is `brain-commit`** (plan §4.7, D5): one note under `Knowledge/` → the reconciler's `POST /vault/write` with a commit intent in the assistant's name. Internal principals only; every external agent is told "not granted". No delete, no rename — those stay your hand. |
 | artifacts | `artifact_publish`, `artifact_get`, `artifact_list`, `artifact_comment`, `artifact_comment_resolve`, `artifact_dispatch_review` | Publishes versioned output into `Artifacts/<project>/<slug>/` (one commit per version via the reconciler), comments on exact versions, and sends review bundles to other agents in the same project — a dispatch across the project boundary becomes a proposal for you (§4.21). |
 | crews | `crew_dispatch` | Hands a brief to a crew you defined in `agents/<area>/<name>.md` (`docs/ops/crews.md`). Internal principals only; the brief is policy-checked against the crew's scope before a durable work row is written; results come back as the crew's own `report` proposals. |
+| queries | `queries_list`, `queries_run` | Runs a named query from `seed/queries/` or the instance's `queries/` (invariant 3 — the one read path) for anything you'd otherwise have to guess at or ask the user to look up. Internal principals always have this; an external agent needs an explicit `queries: true` grant. Rows cap at 200. |
+
+Every call also takes an optional `turn_id` (`seed/assistant-prompt.md`
+tells the assistant to make one up per reply and reuse it on every call
+within that reply); it lands in the `runs` row's `meta.turn_id`, and the
+`activity_feed` query surfaces it so one reply's calls group together.
 
 The SDK sees them as `mcp__brain__<tool>`; that fully-qualified list is
 the engine's `allowedTools`, built-in tools are disabled (`tools: []`),

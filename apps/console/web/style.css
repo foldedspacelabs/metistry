@@ -322,26 +322,74 @@ label { display: flex; flex-direction: column; gap: var(--mt-space-1);
   font-size: var(--mt-text-footnote-size); }
 
 /* ------------------------------------------------------------------ chat -- */
+/* Reply text (design-system.md §4). A reply is the longest text in the product
+   and the thing most often read on a phone, so it uses the --mt-reply-* group
+   rather than the control type scale: 15pt on a phone and 16pt on a Mac
+   instead of 17, line 1.45 instead of 1.5, and a 12px paragraph margin instead
+   of a blank line. Roughly a third more of the reply on screen at once, which
+   is what keeps the previous turn visible while you read this one. Reaching
+   for --mt-text-body-* below this comment is a bug — those are control tokens. */
 #messages {
   overflow-y: auto;
   max-height: calc(100dvh - 260px);
   -webkit-overflow-scrolling: touch;
   display: flex;
   flex-direction: column;
-  gap: var(--mt-space-2);
+  gap: var(--mt-reply-turn-gap);
 }
 #messages li {
-  padding: var(--mt-space-3) var(--mt-space-4);
+  padding: var(--mt-reply-bubble-pad-y) var(--mt-reply-bubble-pad-x);
   border-radius: var(--mt-radius-lg);
   background: var(--mt-color-surface);
   box-shadow: var(--mt-elevation-1);
   overflow-wrap: anywhere;
-  white-space: pre-wrap;
+  font-size: var(--mt-reply-size);
+  font-weight: var(--mt-reply-weight);
+  line-height: var(--mt-reply-line);
+  letter-spacing: var(--mt-reply-tracking);
+  max-width: var(--mt-reply-measure);
 }
-#messages li.out { background: var(--mt-color-accent-quiet); box-shadow: none; margin-left: var(--mt-space-8); }
-#messages li.in { margin-right: var(--mt-space-8); }
-#messages li .meta { color: var(--mt-color-text-tertiary); font-size: var(--mt-text-footnote-size);
-  margin-bottom: var(--mt-space-1); white-space: normal; }
+/* On a wide window the extra room goes to the layout, not to 120-character
+   lines: the measure caps the bubble and the alignment keeps each turn on its
+   own side (P8). */
+#messages li.out {
+  background: var(--mt-color-accent-quiet); box-shadow: none;
+  margin-left: auto; margin-right: 0;
+}
+#messages li.in { margin-right: auto; margin-left: 0; }
+#messages li .meta {
+  color: var(--mt-color-text-tertiary);
+  font-size: var(--mt-reply-meta-size);
+  margin-bottom: var(--mt-reply-meta-gap);
+  white-space: normal;
+}
+/* app.js splits a reply on blank lines into <p>; single newlines inside one
+   keep their break. So a paragraph gap is a 12px margin, never an empty line
+   box — the §4 decision, and worth ~22px per break at this size. */
+#messages li p { white-space: pre-wrap; }
+#messages li p + p { margin-top: var(--mt-reply-para-gap); }
+#messages li ul, #messages li ol {
+  padding-left: var(--mt-reply-list-indent); margin-top: var(--mt-reply-para-gap); list-style: revert;
+}
+#messages li li + li { margin-top: var(--mt-reply-list-gap); }
+#messages li h1, #messages li h2, #messages li h3, #messages li h4 {
+  margin-top: var(--mt-reply-heading-gap);
+  font-size: var(--mt-text-headline-size); font-weight: var(--mt-text-headline-weight);
+}
+/* Inline code takes a ground and 2px, never a size change: changing the font
+   size mid-line changes the line box and the paragraph reflows around it. */
+#messages li code {
+  background: var(--mt-color-sunken); border-radius: var(--mt-radius-xs);
+  padding: 0 2px; font-size: 1em; font-family: var(--mt-font-mono);
+}
+#messages li pre {
+  background: var(--mt-color-sunken); border-radius: var(--mt-radius-md);
+  padding: var(--mt-reply-code-pad); margin-top: var(--mt-reply-para-gap);
+  overflow-x: auto; white-space: pre;
+  font-family: var(--mt-font-mono);
+  font-size: var(--mt-reply-code-size); line-height: var(--mt-reply-code-line);
+}
+#messages li pre code { background: none; padding: 0; }
 
 /* Composer (design-system.md 3.6): [+] [field] [send] in one row, and nothing
    else pinned above the keyboard. The actions menu is a native <details>; its
@@ -391,6 +439,44 @@ label { display: flex; flex-direction: column; gap: var(--mt-space-1);
   background: var(--mt-color-surface); color: var(--mt-color-text-primary);
   border: 1px solid var(--mt-color-border-strong); font-weight: 400;
 }
+/* A command the instance has not configured is listed and disabled WITH the
+   reason, never hidden (P4). */
+#composer-sheet button[disabled] { opacity: .55; cursor: not-allowed; }
+#composer-sheet .why { color: var(--mt-color-text-tertiary); font-size: var(--mt-text-caption-1-size); }
+
+/* Composer autocomplete (design-system.md §3.6). A listbox the field owns, not
+   a menu: it sits over the transcript like the sheet does, so nothing moves
+   (P9), and the caret never leaves #send-text. Six rows maximum. */
+#suggest {
+  position: absolute; bottom: calc(100% + var(--mt-space-2)); left: 0; right: 0; z-index: 3;
+  margin: 0; padding: var(--mt-space-1);
+  background: var(--mt-color-elevated);
+  border: 1px solid var(--mt-color-border);
+  border-radius: var(--mt-radius-lg);
+  box-shadow: var(--mt-elevation-2);
+  max-height: 50dvh; overflow-y: auto;
+}
+#suggest li {
+  display: flex; align-items: center; gap: var(--mt-space-2);
+  padding: var(--mt-space-2) var(--mt-space-3);
+  border-radius: var(--mt-radius-sm);
+  font-size: var(--mt-text-subhead-size);
+  min-height: var(--mt-size-touch-target);
+  cursor: pointer;
+}
+@media (pointer: fine) { #suggest li { min-height: var(--mt-size-pointer-target); } }
+#suggest li[aria-selected="true"] { background: var(--mt-color-accent-quiet); }
+#suggest li b { font-family: var(--mt-font-mono); font-weight: 400; }
+#suggest li .d { color: var(--mt-color-text-secondary); font-size: var(--mt-text-footnote-size); }
+#suggest li .p { margin-left: auto; }
+#suggest li.off { opacity: .55; }
+#suggest .rank {
+  min-height: 0; cursor: default; justify-content: center;
+  color: var(--mt-color-text-tertiary); font-size: var(--mt-text-caption-1-size);
+}
+/* While the suggestion list is up it owns the space above the field: the
+   actions sheet and the pill must not stack on top of it. */
+#composer:has(#suggest:not([hidden])) #new-reply-row { display: none; }
 
 /* P9: the one element that exists because something arrived — so that nothing
    else has to move. Hidden while the actions menu occupies the same space. */

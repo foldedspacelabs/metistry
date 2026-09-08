@@ -78,6 +78,20 @@ $("messages").addEventListener("scroll", () => {
 }, { passive: true });
 $("new-reply").onclick = scrollToLatest;
 
+// A blank line in the wire text becomes a 12px margin, not an empty line box
+// (design-system.md §4). At 15pt/1.45 an empty line is ~22px — a third of a
+// paragraph's worth of space spent on nothing, twice per reply. Single
+// newlines inside a paragraph keep their break: each <p> is still pre-wrap.
+//
+// esc() runs on the TEXT, before any markup exists (CRIT-7, P1): the only
+// tags that can come out of here are the <p> this function writes.
+function replyParagraphs(text) {
+  return String(text ?? "")
+    .split(/\n{2,}/)
+    .map((p) => `<p>${esc(p)}</p>`)
+    .join("");
+}
+
 async function loadMessages() {
   const res = await api("/api/messages?limit=30");
   const { messages } = await res.json();
@@ -92,7 +106,7 @@ async function loadMessages() {
   const wasAtBottom = firstPaint || atBottom;
   const keepScrollTop = list.scrollTop; // measured before the re-render, restored after
   list.innerHTML = chrono
-    .map((m) => `<li class="${m.direction}"><div class="meta">${new Date(m.ts).toLocaleString()}${m.direction === "in" ? ` · ${m.status}` : ""}</div>${esc(m.text)}${m.direction === "out" ? tapbacks(m) : ""}</li>`)
+    .map((m) => `<li class="${m.direction}"><div class="meta">${new Date(m.ts).toLocaleString()}${m.direction === "in" ? ` · ${m.status}` : ""}</div>${replyParagraphs(m.text)}${m.direction === "out" ? tapbacks(m) : ""}</li>`)
     .join("");
   wireTapbacks();
   if (wasAtBottom) {
@@ -150,41 +164,235 @@ $("send-form").onsubmit = async (e) => {
     $("send-text").value = "";
     atBottom = true; // sending is an explicit intent to be at the end of the thread
     $("composer-actions").open = false; // 3.6: the menu never survives a send
+    closeSuggest(); // nor does the suggestion list
     loadMessages();
     pollChat(1000); // burst while the reply is in flight
     setTimeout(() => pollChat(), 20000);
   } catch {}
 };
 
+// ----- §3.6 composer: insertion at the caret, and autocomplete -----
+//
+// Two renderings of ONE generated list. The menu is the browsable one, the
+// suggestion listbox is the same list filtered by what you are typing. Both
+// INSERT and neither SENDS: a command tapped in the menu and a command typed
+// by hand must produce the identical string, or the two paths diverge and only
+// one of them ever gets tested.
+
+// TODO(rules.yaml endpoint): PLACEHOLDER — the single definition site for the
+// command list, and the only thing to delete when the console grows a route
+// over the instance's own rules.yaml (build plan §4.2 has none). §3.6 and
+// ux-direction.md both require this list to be generated; a hand-maintained
+// one is what they rule out, and the first instance whose rules.yaml differs
+// from these defaults is misinformed by it. Agents below are already live from
+// /api/agents — this is the one source still faked. Do not grow it.
+const COMMANDS = [
+  { id: "/status", desc: "doctor at a glance" },
+  { id: "/today", desc: "what is on today" },
+  { id: "/open", desc: "open work across projects" },
+  { id: "/spend", desc: "spend so far" },
+  { id: "/queue", desc: "the dispatch queue" },
+  { id: "/runs", desc: "recent runs" },
+  { id: "/note", desc: "capture without a turn" },
+  { id: "/deep", desc: "pin the deep tier for this turn" },
+  { id: "/new", desc: "roll to a fresh session" },
+];
+
+// Agents come from the registry, never from a list kept by hand (§3.6).
+let composerAgents = [];
+let composerAgentsAt = 0;
+async function refreshComposerAgents() {
+  if (Date.now() - composerAgentsAt < 30000 && composerAgents.length) return composerAgents;
+  try {
+    const { agents } = await (await api("/api/agents")).json();
+    composerAgents = agents
+      .filter((a) => !a.revoked)
+      .map((a) => ({ id: `@${a.id}`, desc: a.display_name ?? a.kind ?? "" }));
+    composerAgentsAt = Date.now();
+  } catch {} // P5: a source that cannot answer says nothing rather than guessing
+  return composerAgents;
+}
+
+// Deterministic ranking (§3.6, and the same discipline invariant 4 applies to
+// the router): prefix match, then substring, then recency, ties broken by id.
+// No model, and no reordering between keystrokes that the user did not cause.
+let recentInserts = [];
+try { recentInserts = JSON.parse(localStorage.getItem("composer-recent") ?? "[]"); } catch {}
+const noteRecent = (id) => {
+  recentInserts = [id, ...recentInserts.filter((x) => x !== id)].slice(0, 20);
+  try { localStorage.setItem("composer-recent", JSON.stringify(recentInserts)); } catch {}
+};
+function rank(items, token) {
+  const q = token.slice(1).toLowerCase(); // drop the leading @ or /
+  const scored = [];
+  for (const it of items) {
+    const name = it.id.slice(1).toLowerCase();
+    let tier;
+    if (!q) tier = 2; // bare trigger: everything, ordered by recency then id
+    else if (name.startsWith(q)) tier = 0;
+    else if (name.includes(q)) tier = 1;
+    else continue;
+    const r = recentInserts.indexOf(it.id);
+    scored.push({ ...it, tier, recent: r === -1 ? Number.MAX_SAFE_INTEGER : r });
+  }
+  scored.sort((a, b) => a.tier - b.tier || a.recent - b.recent || a.id.localeCompare(b.id));
+  return scored;
+}
+
+// Insert `text` at the caret, leave the caret after it and a single space, and
+// give focus back to the field. Never sends, never scrolls (P9).
+function insertAtCaret(field, text) {
+  const v = field.value;
+  const start = field.selectionStart ?? v.length;
+  const end = field.selectionEnd ?? start;
+  const before = v.slice(0, start);
+  const after = v.slice(end);
+  const lead = before && !/\s$/.test(before) ? " " : "";
+  const body = `${lead}${text}`;
+  const trail = /^\s/.test(after) ? "" : " ";
+  field.value = `${before}${body}${trail}${after}`;
+  const caret = before.length + body.length + trail.length;
+  field.focus({ preventScroll: true }); // P9: focus never moves the transcript
+  field.setSelectionRange(caret, caret);
+}
+
+// Replace the token the caret sits in (the `@d` you were typing) with the
+// chosen id. Only that token — never text the user typed around it.
+function replaceToken(field, tok, text) {
+  const v = field.value;
+  const after = v.slice(tok.end);
+  const trail = /^\s/.test(after) ? "" : " ";
+  field.value = `${v.slice(0, tok.start)}${text}${trail}${after}`;
+  const caret = tok.start + text.length + trail.length;
+  field.focus({ preventScroll: true });
+  field.setSelectionRange(caret, caret);
+}
+
+// The token under the caret, if it is a trigger. `@` or `/` counts only at the
+// start of the field or after whitespace — so `foo@bar` and a path like
+// `docs/product` never open the list — and the token ends at the next space.
+function triggerToken(field) {
+  const caret = field.selectionStart ?? field.value.length;
+  const head = field.value.slice(0, caret);
+  const m = /(^|\s)([@/][^\s]*)$/.exec(head);
+  if (!m) return null;
+  return { text: m[2], start: caret - m[2].length, end: caret };
+}
+
+let suggestItems = [];
+let suggestIndex = -1;
+
+function closeSuggest() {
+  suggestItems = [];
+  suggestIndex = -1;
+  $("suggest").hidden = true;
+  $("suggest").innerHTML = "";
+  $("send-text").setAttribute("aria-expanded", "false");
+  $("send-text").removeAttribute("aria-activedescendant");
+}
+
+const SUGGEST_MAX = 6; // §3.6: six rows, so it never becomes a second transcript
+
+function paintSuggest() {
+  const ul = $("suggest");
+  ul.innerHTML =
+    suggestItems
+      .map(
+        (it, i) =>
+          `<li id="sug-${i}" role="option" aria-selected="${i === suggestIndex}" data-i="${i}">` +
+          `<b>${esc(it.id)}</b>${it.desc ? `<span class="d">${esc(it.desc)}</span>` : ""}</li>`,
+      )
+      .join("") + `<li class="rank" aria-hidden="true">prefix → substring → recency</li>`;
+  ul.hidden = false;
+  $("send-text").setAttribute("aria-expanded", "true");
+  if (suggestIndex >= 0) $("send-text").setAttribute("aria-activedescendant", `sug-${suggestIndex}`);
+  else $("send-text").removeAttribute("aria-activedescendant");
+}
+
+async function updateSuggest() {
+  const field = $("send-text");
+  const tok = triggerToken(field);
+  if (!tok) return closeSuggest();
+  const source = tok.text.startsWith("@") ? await refreshComposerAgents() : COMMANDS;
+  const hits = rank(source, tok.text);
+  // Typing something that matches nothing closes the list rather than showing
+  // an empty box: the user is mid-sentence, not mid-search.
+  if (!hits.length) return closeSuggest();
+  suggestItems = hits.slice(0, SUGGEST_MAX);
+  suggestIndex = 0;
+  paintSuggest();
+}
+
+function acceptSuggest() {
+  const field = $("send-text");
+  const it = suggestItems[suggestIndex];
+  const tok = triggerToken(field);
+  if (!it || !tok) return false;
+  noteRecent(it.id);
+  replaceToken(field, tok, it.id);
+  closeSuggest();
+  return true;
+}
+
+$("send-text").addEventListener("input", () => { updateSuggest().catch(() => {}); });
+$("send-text").addEventListener("click", () => { updateSuggest().catch(() => {}); });
+$("send-text").addEventListener("blur", () => { setTimeout(closeSuggest, 120); }); // after a tap lands
+$("send-text").addEventListener("keydown", (e) => {
+  if ($("suggest").hidden) {
+    // Esc with no list up: let the field keep the text and just blur.
+    if (e.key === "Escape") $("send-text").blur();
+    return;
+  }
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    const d = e.key === "ArrowDown" ? 1 : -1;
+    suggestIndex = (suggestIndex + d + suggestItems.length) % suggestItems.length;
+    paintSuggest();
+  } else if (e.key === "Enter" || e.key === "Tab") {
+    // Enter inserts the selection instead of sending — the one keystroke the
+    // list borrows, and only while it is open with something selected.
+    if (acceptSuggest()) e.preventDefault();
+  } else if (e.key === "Escape") {
+    e.preventDefault();
+    closeSuggest(); // closes without changing the text; a second Esc blurs
+  }
+});
+$("suggest").addEventListener("mousedown", (e) => {
+  const li = e.target.closest("li[data-i]");
+  if (!li) return;
+  e.preventDefault(); // keep focus on the field so the caret survives the tap
+  suggestIndex = Number(li.dataset.i);
+  acceptSuggest();
+});
+
 // The actions menu opens with no JS (it is a <details>); these handlers only
-// fill the field, jump to a view, or keep the agent list fresh (3.6).
+// insert at the caret, jump to a view, or keep the generated lists fresh.
 $("composer-sheet").addEventListener("click", (e) => {
   const b = e.target.closest("button");
   if (!b) return;
   if (b.dataset.insert !== undefined) {
-    const field = $("send-text");
-    const head = field.value.trimEnd();
-    field.value = b.dataset.insert.startsWith("/") || !head ? b.dataset.insert : `${head} ${b.dataset.insert}`;
+    // §3.6: menu items insert themselves AT THE CARET. They do not replace the
+    // field and they do not send — a half-written reply survives the tap.
+    closeSuggest();
+    noteRecent(b.dataset.insert.trim());
+    insertAtCaret($("send-text"), b.dataset.insert.trim());
     $("composer-actions").open = false;
-    field.focus({ preventScroll: true }); // P9: focus never moves the transcript
   } else if (b.dataset.goto) {
     $("composer-actions").open = false;
     show(b.dataset.goto);
   }
 });
 
-// Agents come from the registry, not from a list kept by hand (3.6). Commands
-// are still hand-listed in index.html: the console has no rules.yaml endpoint
-// yet, and 3.6 wants them generated too.
 $("composer-actions").addEventListener("toggle", async () => {
   if (!$("composer-actions").open) return;
-  try {
-    const { agents } = await (await api("/api/agents")).json();
-    const live = agents.filter((a) => !a.revoked);
-    $("composer-agents").innerHTML = live.length
-      ? live.map((a) => `<button type="button" data-insert="@${esc(a.id)} ">@${esc(a.id)}</button>`).join("")
-      : '<span class="muted">no agents registered</span>';
-  } catch {} // P5: a panel that cannot answer says nothing rather than guessing
+  closeSuggest(); // the two never share the space above the field
+  $("composer-commands").innerHTML = COMMANDS.map(
+    (c) => `<button type="button" data-insert="${esc(c.id)} " title="${esc(c.desc)}">${esc(c.id)}</button>`,
+  ).join("");
+  const agents = await refreshComposerAgents();
+  $("composer-agents").innerHTML = agents.length
+    ? agents.map((a) => `<button type="button" data-insert="${esc(a.id)} ">${esc(a.id)}</button>`).join("")
+    : '<span class="muted">no agents registered</span>';
 });
 
 function replayDraft() {
@@ -758,11 +966,49 @@ function relTime(ts) {
   return `${Math.round(s / 86400)}d ago`;
 }
 
+// ----- Title Case at render (design-system.md §3.2 + P10) -----
+//
+// A feed subject is a card title, so P10 says Title Case. But a subject is
+// sometimes a string an AGENT wrote, and P1 says agent text is data — data is
+// not case-corrected. The two are reconciled by *where* the rule is applied:
+// here, in the view layer, never in the database, and only for kinds whose
+// subject the console itself composes.
+//
+// A closed allow-list, not a heuristic. "Is this string ours?" cannot be
+// answered by looking at the string — it can be answered by looking at its
+// kind, and the kind is a closed set the activity_feed query already returns.
+// A new kind is NOT title-cased until someone adds it here deliberately: the
+// safe default is to leave text alone. `turn`, `tool` and `dispatch` are
+// absent on purpose — their subjects can carry agent- or user-authored text.
+const TITLE_CASE_KINDS = new Set([
+  "collector_run", "proposal_created", "proposal_decided", "project_mode",
+  "agent_admin", "brief", "review", "alert", "task_op", "crew_run", "work_history",
+]);
+// Short joining words stay lowercase unless they lead (P10).
+const MINOR = new Set(["a", "an", "and", "at", "by", "for", "in", "of", "on", "or", "the", "to", "via"]);
+// An identifier is left exactly as it is: anything holding a separator or a
+// digit (github-state, knowledge_search, mode:, a path, #97, v2) and anything
+// already mixed-case (someone chose that capitalisation).
+const isIdentifier = (w) => /[/_\-.:\d]/.test(w) || (/[a-z]/.test(w) && /[A-Z]/.test(w));
+
+function titleCaseSubject(kind, subject) {
+  if (!subject || !TITLE_CASE_KINDS.has(kind)) return subject ?? "";
+  return subject
+    .split(/(\s+)/) // keep the whitespace so the string is rebuilt, not rewritten
+    .map((w, i) => {
+      if (!w.trim() || isIdentifier(w)) return w;
+      const lower = w.toLowerCase();
+      if (i > 0 && MINOR.has(lower)) return lower;
+      return lower.charAt(0).toUpperCase() + lower.slice(1);
+    })
+    .join("");
+}
+
 function feedRowHtml(r) {
   return `<li class="feed-row"><span class="feed-icon" title="${esc(r.kind)}">${feedIcon(r.kind)}</span>
     <span class="feed-body">
       <span class="chip feed-actor">${esc(r.actor ?? "system")}</span>
-      <span class="feed-subject">${esc(r.subject ?? "")}</span>
+      <span class="feed-subject">${esc(titleCaseSubject(r.kind, r.subject))}</span>
       ${r.detail ? `<span class="muted feed-detail">${esc(r.detail)}</span>` : ""}
     </span>
     <span class="muted feed-time" title="${esc(new Date(r.ts).toLocaleString())}">${esc(relTime(r.ts))}</span></li>`;

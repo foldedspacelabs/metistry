@@ -753,3 +753,21 @@ your git, on your machine.
   one. The general principle is the reusable part: *"is this string
   ours?" cannot be answered by looking at the string, only by looking at
   where it came from* — so the safe default is to leave text alone.
+- 2026-09-08 — **The console composer now completes as you type, and the
+  reply is dense enough to read on a phone.** The design-system decisions
+  above, shipped in the PWA rather than described. Typing `@d` opens a
+  ranked list of the instance's own agents (live from `/api/agents`);
+  typing `/` filters the commands. Every row of the actions menu inserts
+  itself **at the caret** — a half-written reply survives the tap, and a
+  tapped command produces the same string a typed one does. Nothing in
+  either surface sends. The reply body moved onto the `--mt-reply-*`
+  tokens, and a blank line in a reply is now a 12px margin instead of an
+  empty line box — a ~200-word answer that needed a scroll on an iPhone
+  now fits on one screen with the previous turn still visible. Feed
+  subjects are Title Cased at render for the eleven `activity_feed` kinds
+  the console composes, and left exactly as stored for `turn`, `tool` and
+  `dispatch`, whose subjects can carry agent-authored text. Two guards
+  ship with it: the paragraph splitter has a misuse test (hostile input
+  in, only its own `<p>` out), and the token generator now writes *both*
+  copies of `tokens.css` — the docs one and the console's — so the PWA
+  cannot silently drift from the source of truth.

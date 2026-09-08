@@ -59,11 +59,18 @@
              while they are scrolled up raises this pill; only a tap on it (or
              already being at the bottom) scrolls the list. -->
         <p id="new-reply-row" hidden><button id="new-reply" type="button">↓ New Reply</button></p>
+        <!-- §3.6 composer autocomplete. Typing @ or / at the start of the
+             field (or after a space) fills this listbox from the same
+             generated source as the menu below, filtered. It is a listbox and
+             not a menu on purpose: the field keeps focus and the caret, so
+             ↑↓ Enter Esc work without the reply ever leaving the user's hands.
+             Rows are written by app.js, every value through esc(). -->
+        <ul id="suggest" role="listbox" aria-label="Suggestions" hidden></ul>
         <!-- §3.6 composer actions menu — a native <details>, collapsed by
              default, so nothing but the composer sits above the keyboard.
-             It opens with no JS; the buttons inside need JS only to fill the
-             field. Commands are hand-listed until the console exposes
-             rules.yaml; §3.6 wants them generated. -->
+             It opens with no JS; the buttons inside need JS only to insert
+             their own text at the caret. Every row here is clickable and
+             inserts — none of them send. -->
         <details id="composer-actions">
           <summary id="composer-toggle" title="Actions" aria-label="Actions"><span aria-hidden="true">＋</span></summary>
           <div id="composer-sheet">
@@ -73,11 +80,17 @@
               <button type="button" data-insert="what's the latest">What's the Latest</button>
               <button type="button" data-goto="capture">New Note</button>
             </p>
-            <p class="grp">Commands</p>
-            <p class="acts" id="composer-commands">
-              <button type="button" data-insert="/status ">/status</button>
-              <button type="button" data-insert="/note ">/note</button>
-            </p>
+            <!-- TODO(rules.yaml endpoint): this list is a PLACEHOLDER, not a
+                 design. §3.6 and ux-direction.md both require the command list
+                 to be generated from the instance's own rules.yaml — a
+                 hand-maintained list is exactly what they rule out, and the
+                 first instance whose rules.yaml differs from the shipped
+                 defaults will be lied to by it. The console has no route for
+                 it yet (build plan §4.2). When one exists, delete COMMANDS in
+                 app.js and this markup, and fetch it the way agents are
+                 fetched. Do not add commands here in the meantime. -->
+            <p class="grp">Commands <span class="why">shipped defaults — not yet read from this instance's rules.yaml</span></p>
+            <p class="acts" id="composer-commands"></p>
             <p class="grp">Agents</p>
             <p class="acts" id="composer-agents"><span class="muted">no agents registered</span></p>
             <p class="grp">Attach</p>
@@ -85,7 +98,8 @@
           </div>
         </details>
         <form id="send-form">
-          <input id="send-text" type="text" placeholder="ask or tell…" autocomplete="off" />
+          <input id="send-text" type="text" placeholder="ask or tell…" autocomplete="off"
+                 role="combobox" aria-expanded="false" aria-controls="suggest" aria-autocomplete="list" />
           <button type="submit">Send</button>
         </form>
       </div>

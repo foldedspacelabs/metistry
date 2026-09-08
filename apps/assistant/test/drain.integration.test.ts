@@ -91,4 +91,35 @@ describe.skipIf(!hasDb)("assistant drain", () => {
     while (await drainOne(pool, fakeEngine, "haiku")) {} // clear other tests' rows
     expect(await drainOne(pool, fakeEngine, "haiku")).toBe(false);
   });
+
+  // §4.21 prompt cards: a reply that ENDS with a ```decision block is a
+  // blocking question, and lands in the one queue as a `decision` proposal.
+  it("turns a trailing decision block into a proposals row, and leaves an ordinary reply alone", async () => {
+    const asking: Engine = async () => ({
+      text: "either repo works. which one?\n\n```decision\ntitle: Which repo?\noptions:\n- metistry\n- metistry-instance\n```",
+      session_id: sdkSession,
+    });
+    const id = await enqueue("where should this land?");
+    expect(await drainOne(pool, asking, "haiku")).toBe(true);
+    const out = await pool.query(`SELECT id FROM outbound_messages WHERE in_reply_to = $1`, [id]);
+    const { rows } = await pool.query(
+      `SELECT kind, source_agent, trust, decision, payload FROM proposals WHERE payload->>'thread' = $1`,
+      [thread],
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ kind: "decision", source_agent: "assistant", trust: "internal", decision: "pending" });
+    expect(rows[0].payload).toMatchObject({
+      title: "Which repo?",
+      options: ["metistry", "metistry-instance"],
+      message_id: Number(out.rows[0].id),
+      in_reply_to: Number(id),
+    });
+
+    // an ordinary reply adds nothing to the queue
+    await enqueue("thanks");
+    expect(await drainOne(pool, fakeEngine, "haiku")).toBe(true);
+    const after = await pool.query(`SELECT count(*)::int AS n FROM proposals WHERE payload->>'thread' = $1`, [thread]);
+    expect(after.rows[0].n).toBe(1);
+    await pool.query(`DELETE FROM proposals WHERE payload->>'thread' = $1`, [thread]);
+  });
 });

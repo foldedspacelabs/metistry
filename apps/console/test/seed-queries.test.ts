@@ -31,6 +31,7 @@ const REQUIRED = [
   "runs_summary",
   "activity_feed",
   "agent_presence",
+  "reply_feedback_summary",
 ];
 
 describe("seed queries", () => {

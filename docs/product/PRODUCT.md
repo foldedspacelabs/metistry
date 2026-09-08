@@ -604,3 +604,11 @@ your git, on your machine.
   the ranking and never the grant: the area filter lives inside the vector
   query, so the closest chunk in the vault stays invisible to an agent
   whose grant does not cover it. `docs/ops/knowledge-search.md`.
+- 2026-09-08 — AgentSwarms reviewed (`docs/research/2026-09-agentswarms-review.md`).
+  Convergence worth quoting at launch: a data-platform team and a
+  personal-assistant team both landed on "governance in the tool,
+  answers with receipts, data you own". Taking: a hash-chained action
+  record (D6 addendum), a turn id that joins a reply to the tool calls
+  it made, and named queries exposed to the assistant as checkable
+  answers. Leaving: the lakehouse, BI, ML, graph canvas, and the Elastic
+  License.

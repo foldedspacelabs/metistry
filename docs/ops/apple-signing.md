@@ -72,6 +72,25 @@ Steps, from Apple's certificate guide
 
 ## 3. Signing the Swift helpers
 
+> **What the identity string is (learned 2026-09-08).** Use exactly what
+> `security find-identity -v -p codesigning` prints for the *Developer ID
+> Application* line — the organisation's legal name and Team ID, e.g.
+> `Developer ID Application: Folded Space Labs LLC (QWWHT4S27V)`, never a
+> personal name or a different team. If two Developer ID Application
+> identities share that name (two certificates were issued), `codesign`
+> refuses the name as ambiguous: pass the **SHA-1 hash** from that listing
+> instead (`--sign A7FBCE6D…`). The *Developer ID Installer* certificate is
+> not a code-signing identity and does not appear under `-p codesigning`;
+> that is expected. Put the hash in `.env` as `METISTRY_SIGN_IDENTITY` so
+> every rebuild picks the same certificate.
+>
+> **Run the first signing from an interactive Terminal.** codesign asks
+> the keychain for the private key; the dialog must be answered *Always
+> Allow* once. From a non-interactive shell (an agent, launchd) the request
+> fails with `errSecInternalComponent` and the helper silently stays
+> ad-hoc — check with `codesign -dv` (`Signature=adhoc` means it failed).
+
+
 Both helpers already know how to prefer a Developer ID identity —
 `packages/mcp-eventkit/scripts/build-helper.sh` and
 `packages/mcp-apple-fm/scripts/build-helper.sh` run:
@@ -79,7 +98,7 @@ Both helpers already know how to prefer a Developer ID identity —
 ```sh
 codesign --force --options runtime \
   --identifier com.foldedspacelabs.metistry.eventkit \
-  --sign "Developer ID Application: Matt Colf (TEAMID1234)" \
+  --sign "Developer ID Application: Folded Space Labs LLC (QWWHT4S27V)" \
   helper/ek-helper
 ```
 
@@ -106,7 +125,7 @@ can pin a specific identity when more than one Developer ID cert is
 installed, or force ad-hoc for a quick local iteration:
 
 ```sh
-METISTRY_SIGN_IDENTITY="Developer ID Application: Matt Colf (TEAMID1234)" \
+METISTRY_SIGN_IDENTITY="Developer ID Application: Folded Space Labs LLC (QWWHT4S27V)" \
   packages/mcp-eventkit/scripts/build-helper.sh
 ```
 
@@ -122,7 +141,7 @@ packages/mcp-apple-fm/scripts/build-helper.sh
 codesign -dv --verbose=2 packages/mcp-apple-fm/helper/afm-helper 2>&1 | grep -E "Authority|Identifier"
 ```
 
-Done looks like `Authority=Developer ID Application: Matt Colf (TEAMID1234)`
+Done looks like `Authority=Developer ID Application: Folded Space Labs LLC (QWWHT4S27V)`
 on both, not `Authority=(unavailable)` (ad-hoc, no `Authority` line).
 
 **One-time TCC re-grant after the identity changes.** Changing `ek-helper`'s
@@ -175,7 +194,7 @@ entirely.
      --issuer xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
    ```
    (or the Apple ID + app-specific-password form:
-   `--apple-id you@example.com --team-id TEAMID1234 --password <app-specific>`).
+   `--apple-id you@example.com --team-id QWWHT4S27V --password <app-specific>`).
    This writes into the Studio's login keychain under the profile name, not
    to a file. ([developer.apple.com/documentation/security/notarizing-macos-software-before-distribution](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution))
 3. **Dry-run against a signed helper**, to prove the credentials work before

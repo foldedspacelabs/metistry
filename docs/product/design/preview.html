@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>metistry — design system preview</title>
+<title>Metistry Design System — Component Preview</title>
 <style>
 /* === BEGIN TOKENS — generated from tokens.json by ops/scripts/build-design-tokens.mjs === */
 /* GENERATED — do not edit.
@@ -451,6 +451,38 @@ td.num, th.num { text-align: right; }
   border-radius: var(--mt-radius-lg); padding: var(--mt-space-3) var(--mt-space-4); }
 .dialog { background: var(--mt-color-elevated); border-radius: var(--mt-radius-xl); box-shadow: var(--mt-elevation-3);
   padding: var(--mt-space-5); max-width: 420px; margin: 0 auto; }
+/* §3.4 new-reply pill (P9) — the only thing that appears because something arrived */
+.pillrow { display: flex; justify-content: center; margin: var(--mt-space-3) 0 var(--mt-space-1); }
+.newpill { display: inline-flex; align-items: center; gap: var(--mt-space-1);
+  background: var(--mt-color-accent); color: var(--mt-color-on-accent); border: 0;
+  border-radius: var(--mt-radius-pill); box-shadow: var(--mt-elevation-2);
+  font: inherit; font-size: var(--mt-text-caption-2-size); font-weight: 600;
+  letter-spacing: var(--mt-text-caption-2-tracking);
+  min-height: var(--mt-size-touch-target); padding: 0 var(--mt-space-4); cursor: pointer; }
+/* §3.6 composer — one row: [+] [field] [send]. Nothing else is pinned. */
+.composer { display: flex; align-items: flex-end; gap: var(--mt-space-2); }
+.composer .field { flex: 1 1 auto; background: var(--mt-color-surface);
+  border: 1px solid var(--mt-color-border); border-radius: var(--mt-radius-pill);
+  padding: var(--mt-space-3) var(--mt-space-4); color: var(--mt-color-text-tertiary);
+  min-height: var(--mt-size-touch-target); }
+.composer .round { flex: 0 0 auto; width: var(--mt-size-touch-target); height: var(--mt-size-touch-target);
+  min-height: var(--mt-size-touch-target); padding: 0; border-radius: var(--mt-radius-pill);
+  display: inline-flex; align-items: center; justify-content: center; font-size: var(--mt-text-title-3-size); }
+.composer .round.primary { background: var(--mt-color-accent); color: var(--mt-color-on-accent); border-color: transparent; }
+/* the actions menu is a native <details>: opens with no script, Esc closes it.
+   column-reverse puts the sheet ABOVE the field without reordering the DOM,
+   so the summary is still the first thing a screen reader and Tab reach. */
+.actions { display: flex; flex-direction: column-reverse; }
+.actions > summary { list-style: none; }
+.actions > summary::-webkit-details-marker { display: none; }
+.actions .sheet { background: var(--mt-color-elevated); border-radius: var(--mt-radius-xl);
+  box-shadow: var(--mt-elevation-2); padding: var(--mt-space-3) var(--mt-space-4); margin-bottom: var(--mt-space-3); }
+.actions .grp { color: var(--mt-color-text-tertiary); font-size: var(--mt-text-caption-2-size);
+  font-weight: var(--mt-text-caption-2-weight); letter-spacing: var(--mt-text-caption-2-tracking);
+  margin: var(--mt-space-4) 0 var(--mt-space-2); }
+.actions .sheet > .grp:first-child { margin-top: 0; }
+.actions .cmd { display: flex; gap: var(--mt-space-2); align-items: baseline; padding: var(--mt-space-2) 0; }
+.actions .cmd.off { opacity: .55; }
 .typerow { display: flex; align-items: baseline; gap: var(--mt-space-3); padding: var(--mt-space-2) 0;
   border-bottom: 1px solid var(--mt-color-border); }
 .typerow .name { flex: 0 0 128px; color: var(--mt-color-text-tertiary); font-family: var(--mt-font-mono); font-size: var(--mt-text-caption-1-size); }
@@ -461,23 +493,23 @@ td.num, th.num { text-align: right; }
 
   <div class="topbar">
     <div>
-      <h1>metistry design system</h1>
+      <h1>Metistry Design System</h1>
       <p class="lede">Every component from <code>docs/product/design-system.md</code> §3, rendered light and dark
         with real content. Self-contained: tokens inlined, no external resources, no script but the theme toggle.</p>
     </div>
-    <div class="themeswitch" role="group" aria-label="page appearance">
-      <button type="button" data-set="auto" aria-pressed="true">auto</button>
-      <button type="button" data-set="light" aria-pressed="false">light</button>
-      <button type="button" data-set="dark" aria-pressed="false">dark</button>
+    <div class="themeswitch" role="group" aria-label="Page appearance">
+      <button type="button" data-set="auto" aria-pressed="true">Auto</button>
+      <button type="button" data-set="light" aria-pressed="false">Light</button>
+      <button type="button" data-set="dark" aria-pressed="false">Dark</button>
     </div>
   </div>
 
   <!-- ===================== TOKENS ===================== -->
-  <h2><span class="num">2.1</span> Colour roles</h2>
+  <h2><span class="num">2.1</span> Colour Roles</h2>
   <p class="lede">Roles, not hues. Every text pair is checked against WCAG AA (4.5:1) by
     <code>ops/scripts/build-design-tokens.mjs</code>; all 58 declared pairs pass. Colour is never the only signal.</p>
   <div class="duo">
-    <section class="pane" data-theme="light"><span class="panelabel">light</span>
+    <section class="pane" data-theme="light"><span class="panelabel">Light</span>
       <div class="swatches">
         <div class="sw"><i style="background:var(--mt-color-bg)"></i><b>bg</b><span>#f6f7f9</span></div>
         <div class="sw"><i style="background:var(--mt-color-surface)"></i><b>surface</b><span>#ffffff</span></div>
@@ -493,7 +525,7 @@ td.num, th.num { text-align: right; }
         <div class="sw"><i style="background:var(--mt-color-presence-blocked)"></i><b>blocked</b><span>#6a4bbd</span></div>
       </div>
     </section>
-    <section class="pane" data-theme="dark"><span class="panelabel">dark</span>
+    <section class="pane" data-theme="dark"><span class="panelabel">Dark</span>
       <div class="swatches">
         <div class="sw"><i style="background:var(--mt-color-bg)"></i><b>bg</b><span>#0e1216</span></div>
         <div class="sw"><i style="background:var(--mt-color-surface)"></i><b>surface</b><span>#171c22</span></div>
@@ -511,11 +543,11 @@ td.num, th.num { text-align: right; }
     </section>
   </div>
 
-  <h2><span class="num">2.3</span> Type scale</h2>
+  <h2><span class="num">2.3</span> Type Scale</h2>
   <p class="lede">Mapped to Apple's Dynamic Type styles; on the web the same rhythm from a <code>clamp()</code> in
     <code>rem</code>, so the browser's own font-size setting still applies. No webfont is loaded.</p>
   <div class="duo">
-    <section class="pane" data-theme="light"><span class="panelabel">light</span>
+    <section class="pane" data-theme="light"><span class="panelabel">Light</span>
       <div class="typerow"><span class="name">large-title</span><span style="font-size:var(--mt-text-large-title-size);font-weight:700">Feed</span></div>
       <div class="typerow"><span class="name">title-2</span><span style="font-size:var(--mt-text-title-2-size);font-weight:600">metistry</span></div>
       <div class="typerow"><span class="name">headline</span><span style="font-size:var(--mt-text-headline-size);font-weight:600">dispatch queued for ops-bot</span></div>
@@ -525,7 +557,7 @@ td.num, th.num { text-align: right; }
       <div class="typerow"><span class="name">caption-2</span><span class="chip">working</span></div>
       <div class="typerow"><span class="name">mono</span><span class="mono">wrk_01H8ZK4Q…221</span></div>
     </section>
-    <section class="pane" data-theme="dark"><span class="panelabel">dark</span>
+    <section class="pane" data-theme="dark"><span class="panelabel">Dark</span>
       <div class="typerow"><span class="name">large-title</span><span style="font-size:var(--mt-text-large-title-size);font-weight:700">Feed</span></div>
       <div class="typerow"><span class="name">title-2</span><span style="font-size:var(--mt-text-title-2-size);font-weight:600">metistry</span></div>
       <div class="typerow"><span class="name">headline</span><span style="font-size:var(--mt-text-headline-size);font-weight:600">dispatch queued for ops-bot</span></div>
@@ -544,44 +576,44 @@ td.num, th.num { text-align: right; }
   <p class="lede">Ten destinations, same order everywhere. macOS sidebar · iOS tab bar · the PWA does both from one
     <code>&lt;nav&gt;</code>. A badge appears only when the count is actionable.</p>
   <div class="duo">
-    <section class="pane" data-theme="light"><span class="panelabel">light</span>
+    <section class="pane" data-theme="light"><span class="panelabel">Light</span>
       <nav class="nav-side">
-        <a href="#" aria-current="page">◈ feed</a>
-        <a href="#">💬 chat</a>
-        <a href="#">🤖 agents</a>
-        <a href="#">🎛️ projects</a>
-        <a href="#">📝 triage <span class="badge">3</span></a>
-        <a href="#">🩺 status <span class="chip state-queued" style="margin-left:auto">1 degraded</span></a>
+        <a href="#" aria-current="page">◈ Feed</a>
+        <a href="#">💬 Chat</a>
+        <a href="#">🤖 Agents</a>
+        <a href="#">🎛️ Projects</a>
+        <a href="#">📝 Triage <span class="badge">3</span></a>
+        <a href="#">🩺 Status <span class="chip state-queued" style="margin-left:auto">1 degraded</span></a>
       </nav>
       <div style="height:var(--mt-space-4)"></div>
       <nav class="nav-tabs">
-        <a href="#" aria-current="page"><b>◈</b>feed</a><a href="#"><b>💬</b>chat</a>
-        <a href="#"><b>📥</b>capture</a><a href="#"><b>📝</b>triage</a><a href="#"><b>•••</b>more</a>
+        <a href="#" aria-current="page"><b>◈</b>Feed</a><a href="#"><b>💬</b>Chat</a>
+        <a href="#"><b>📥</b>Capture</a><a href="#"><b>📝</b>Triage</a><a href="#"><b>•••</b>More</a>
       </nav>
     </section>
-    <section class="pane" data-theme="dark"><span class="panelabel">dark</span>
+    <section class="pane" data-theme="dark"><span class="panelabel">Dark</span>
       <nav class="nav-side">
-        <a href="#" aria-current="page">◈ feed</a>
-        <a href="#">💬 chat</a>
-        <a href="#">🤖 agents</a>
-        <a href="#">🎛️ projects</a>
-        <a href="#">📝 triage <span class="badge">3</span></a>
-        <a href="#">🩺 status <span class="chip state-queued" style="margin-left:auto">1 degraded</span></a>
+        <a href="#" aria-current="page">◈ Feed</a>
+        <a href="#">💬 Chat</a>
+        <a href="#">🤖 Agents</a>
+        <a href="#">🎛️ Projects</a>
+        <a href="#">📝 Triage <span class="badge">3</span></a>
+        <a href="#">🩺 Status <span class="chip state-queued" style="margin-left:auto">1 degraded</span></a>
       </nav>
       <div style="height:var(--mt-space-4)"></div>
       <nav class="nav-tabs">
-        <a href="#" aria-current="page"><b>◈</b>feed</a><a href="#"><b>💬</b>chat</a>
-        <a href="#"><b>📥</b>capture</a><a href="#"><b>📝</b>triage</a><a href="#"><b>•••</b>more</a>
+        <a href="#" aria-current="page"><b>◈</b>Feed</a><a href="#"><b>💬</b>Chat</a>
+        <a href="#"><b>📥</b>Capture</a><a href="#"><b>📝</b>Triage</a><a href="#"><b>•••</b>More</a>
       </nav>
     </section>
   </div>
 
   <!-- ===================== 3.2 FEED ROWS ===================== -->
-  <h2><span class="num">3.2</span> Activity feed rows</h2>
+  <h2><span class="num">3.2</span> Activity Feed Rows</h2>
   <p class="lede">Real kinds from the <code>activity_feed</code> query. Agent actors carry the agent tint; a failure
     tints the detail line, never the whole row.</p>
   <div class="duo">
-    <section class="pane" data-theme="light"><span class="panelabel">light</span>
+    <section class="pane" data-theme="light"><span class="panelabel">Light</span>
       <div class="card" style="padding:var(--mt-space-2) var(--mt-space-3)">
       <ul class="feed">
         <li><span class="glyph">🔧</span><span class="body"><span class="chip agent">drey-dev</span>
@@ -605,7 +637,7 @@ td.num, th.num { text-align: right; }
       </ul>
       </div>
     </section>
-    <section class="pane" data-theme="dark"><span class="panelabel">dark</span>
+    <section class="pane" data-theme="dark"><span class="panelabel">Dark</span>
       <div class="card" style="padding:var(--mt-space-2) var(--mt-space-3)">
       <ul class="feed">
         <li><span class="glyph">🔧</span><span class="body"><span class="chip agent">drey-dev</span>
@@ -632,11 +664,11 @@ td.num, th.num { text-align: right; }
   </div>
 
   <!-- ===================== 3.3 PRESENCE ===================== -->
-  <h2><span class="num">3.3</span> Agent presence chips — all six states</h2>
+  <h2><span class="num">3.3</span> Agent Presence Chips — All Six States</h2>
   <p class="lede">Reported from lease liveness and delivery evidence, never inferred. Each carries a glyph and a word,
     so the colour is redundant by design.</p>
   <div class="duo">
-    <section class="pane" data-theme="light"><span class="panelabel">light</span>
+    <section class="pane" data-theme="light"><span class="panelabel">Light</span>
       <div class="row">
         <span class="chip state-working">● working</span>
         <span class="chip state-queued">⏳ queued</span>
@@ -656,7 +688,7 @@ td.num, th.num { text-align: right; }
           <span class="muted">lease expired 12m into a claim</span></div>
       </div>
     </section>
-    <section class="pane" data-theme="dark"><span class="panelabel">dark</span>
+    <section class="pane" data-theme="dark"><span class="panelabel">Dark</span>
       <div class="row">
         <span class="chip state-working">● working</span>
         <span class="chip state-queued">⏳ queued</span>
@@ -679,11 +711,11 @@ td.num, th.num { text-align: right; }
   </div>
 
   <!-- ===================== 3.4 / 3.5 CHAT ===================== -->
-  <h2><span class="num">3.4 · 3.5</span> Chat turn, collapsed tool activity, prompt card</h2>
+  <h2><span class="num">3.4 · 3.5</span> Chat Turn, Collapsed Tool Activity, Prompt Card</h2>
   <p class="lede">Tap the disclosure — it is a native <code>&lt;details&gt;</code>, keyboard-operable, no script.
     Everything inside the agent wash is agent-sourced data.</p>
   <div class="duo">
-    <section class="pane" data-theme="light"><span class="panelabel">light</span>
+    <section class="pane" data-theme="light"><span class="panelabel">Light</span>
       <div class="bubble out"><div class="turnmeta">you · 09:14</div>how much should I ease off running in the final weeks?</div>
       <div style="height:var(--mt-space-3)"></div>
       <div class="turnmeta">assistant · 09:14 · <span class="ok">finished</span></div>
@@ -704,18 +736,20 @@ td.num, th.num { text-align: right; }
       </details>
       <div style="height:var(--mt-space-3)"></div>
       <div class="promptcard">
-        <h4>Write the taper plan to your vault?</h4>
+        <h4>Write the Taper Plan to Your Vault?</h4>
         <div class="muted">Knowledge/Areas/Running/Taper.md · new section, 180 words</div>
         <div class="opts">
-          <button class="primary" type="button">Write it</button>
-          <button type="button">Show me the diff first</button>
-          <button type="button">Not now</button>
-          <button type="button" style="border-color:transparent;color:var(--mt-color-accent)">Something else…</button>
+          <button class="primary" type="button">Write It</button>
+          <button type="button">Show Me the Diff First</button>
+          <button type="button">Not Now</button>
+          <button type="button" style="border-color:transparent;color:var(--mt-color-accent)">Something Else…</button>
         </div>
-        <div class="tiny" style="margin-top:var(--mt-space-2)">default in 6h: Show me the diff first</div>
+        <div class="tiny" style="margin-top:var(--mt-space-2)">default in 6h: Show Me the Diff First</div>
       </div>
+        <div class="pillrow"><button class="newpill" type="button">↓ New Reply</button></div>
+        <div class="tiny" style="text-align:center">a reply landed while you were scrolled up — the list did not move (P9)</div>
     </section>
-    <section class="pane" data-theme="dark"><span class="panelabel">dark</span>
+    <section class="pane" data-theme="dark"><span class="panelabel">Dark</span>
       <div class="bubble out"><div class="turnmeta">you · 09:14</div>how much should I ease off running in the final weeks?</div>
       <div style="height:var(--mt-space-3)"></div>
       <div class="turnmeta">assistant · 09:14 · <span class="ok">finished</span></div>
@@ -736,33 +770,122 @@ td.num, th.num { text-align: right; }
       </details>
       <div style="height:var(--mt-space-3)"></div>
       <div class="promptcard">
-        <h4>Write the taper plan to your vault?</h4>
+        <h4>Write the Taper Plan to Your Vault?</h4>
         <div class="muted">Knowledge/Areas/Running/Taper.md · new section, 180 words</div>
         <div class="opts">
-          <button class="primary" type="button">Write it</button>
-          <button type="button">Show me the diff first</button>
-          <button type="button">Not now</button>
-          <button type="button" style="border-color:transparent;color:var(--mt-color-accent)">Something else…</button>
+          <button class="primary" type="button">Write It</button>
+          <button type="button">Show Me the Diff First</button>
+          <button type="button">Not Now</button>
+          <button type="button" style="border-color:transparent;color:var(--mt-color-accent)">Something Else…</button>
         </div>
-        <div class="tiny" style="margin-top:var(--mt-space-2)">default in 6h: Show me the diff first</div>
+        <div class="tiny" style="margin-top:var(--mt-space-2)">default in 6h: Show Me the Diff First</div>
       </div>
+        <div class="pillrow"><button class="newpill" type="button">↓ New Reply</button></div>
+        <div class="tiny" style="text-align:center">a reply landed while you were scrolled up — the list did not move (P9)</div>
+    </section>
+  </div>
+
+  <!-- ===================== 3.6 COMPOSER ACTIONS MENU ===================== -->
+  <h2><span class="num">3.6</span> Composer Actions Menu</h2>
+  <p class="lede">Nothing but the composer occupies the space above the keyboard — a pinned command strip costs two or three
+    lines of transcript exactly while you are typing about what the agent just said (P8, P9). One <code>＋</code> holds the lot,
+    and the list under it is generated from live <code>rules.yaml</code> and the agent registry, never hand-maintained. On the
+    web it is a native <code>&lt;details&gt;</code>: it opens with no script, is keyboard-operable, and <kbd>Esc</kbd> closes it.</p>
+  <div class="duo">
+    <section class="pane" data-theme="light"><span class="panelabel">Light</span>
+      <div class="tiny">collapsed — the default, and the state it returns to after every send</div>
+      <div class="composer" style="margin-top:var(--mt-space-2)">
+        <button class="round" type="button" aria-expanded="false" aria-controls="acts-1" title="Actions">＋</button>
+        <div class="field">ask or tell…</div>
+        <button class="round primary" type="button" title="Send">↑</button>
+      </div>
+
+      <div class="tiny" style="margin-top:var(--mt-space-5)">expanded — one tap on ＋, a native <code>&lt;details&gt;</code>, no script</div>
+      <details class="actions" id="acts-1" open style="margin-top:var(--mt-space-2)">
+        <summary>
+          <div class="composer">
+            <button class="round primary" type="button" title="Close actions">✕</button>
+            <div class="field">ask or tell…</div>
+            <button class="round primary" type="button" title="Send">↑</button>
+          </div>
+        </summary>
+        <div class="sheet">
+          <div class="grp">Quick Actions</div>
+          <div class="row">
+            <button type="button">Summarize This</button><button type="button">What's the Latest</button><button type="button">New Note</button>
+          </div>
+          <div class="grp">Commands · from rules.yaml</div>
+          <div class="cmd"><b class="mono">/note</b><span class="muted">capture without a turn</span><span class="kbd" style="margin-left:auto">⌘N</span></div>
+          <div class="cmd"><b class="mono">/status</b><span class="muted">doctor at a glance</span><span class="kbd" style="margin-left:auto">⌘0</span></div>
+          <div class="cmd"><b class="mono">/deep</b><span class="muted">pin the deep tier for this turn</span></div>
+          <div class="cmd off"><b class="mono">/local</b><span class="muted">not configured on this instance</span></div>
+          <div class="grp">Agents · from the registry</div>
+          <div class="row">
+            <span class="chip agent">@drey-dev</span><span class="chip state-working">working</span>
+            <span class="chip agent">@ops-bot</span><span class="chip state-queued">queued</span>
+          </div>
+          <div class="grp">Attach</div>
+          <div class="row"><button type="button">📷 Photo</button><button type="button">📎 File</button><button type="button">▤ Scan</button></div>
+          <div class="grp">Model &amp; Effort</div>
+          <div class="row"><span class="chip accent">◇ deep · high</span><span class="tiny">the router picked <b>fast</b> · <a class="link" href="#">Reset</a></span></div>
+        </div>
+      </details>
+    </section>
+    <section class="pane" data-theme="dark"><span class="panelabel">Dark</span>
+      <div class="tiny">collapsed — the default, and the state it returns to after every send</div>
+      <div class="composer" style="margin-top:var(--mt-space-2)">
+        <button class="round" type="button" aria-expanded="false" aria-controls="acts-2" title="Actions">＋</button>
+        <div class="field">ask or tell…</div>
+        <button class="round primary" type="button" title="Send">↑</button>
+      </div>
+
+      <div class="tiny" style="margin-top:var(--mt-space-5)">expanded — one tap on ＋, a native <code>&lt;details&gt;</code>, no script</div>
+      <details class="actions" id="acts-2" open style="margin-top:var(--mt-space-2)">
+        <summary>
+          <div class="composer">
+            <button class="round primary" type="button" title="Close actions">✕</button>
+            <div class="field">ask or tell…</div>
+            <button class="round primary" type="button" title="Send">↑</button>
+          </div>
+        </summary>
+        <div class="sheet">
+          <div class="grp">Quick Actions</div>
+          <div class="row">
+            <button type="button">Summarize This</button><button type="button">What's the Latest</button><button type="button">New Note</button>
+          </div>
+          <div class="grp">Commands · from rules.yaml</div>
+          <div class="cmd"><b class="mono">/note</b><span class="muted">capture without a turn</span><span class="kbd" style="margin-left:auto">⌘N</span></div>
+          <div class="cmd"><b class="mono">/status</b><span class="muted">doctor at a glance</span><span class="kbd" style="margin-left:auto">⌘0</span></div>
+          <div class="cmd"><b class="mono">/deep</b><span class="muted">pin the deep tier for this turn</span></div>
+          <div class="cmd off"><b class="mono">/local</b><span class="muted">not configured on this instance</span></div>
+          <div class="grp">Agents · from the registry</div>
+          <div class="row">
+            <span class="chip agent">@drey-dev</span><span class="chip state-working">working</span>
+            <span class="chip agent">@ops-bot</span><span class="chip state-queued">queued</span>
+          </div>
+          <div class="grp">Attach</div>
+          <div class="row"><button type="button">📷 Photo</button><button type="button">📎 File</button><button type="button">▤ Scan</button></div>
+          <div class="grp">Model &amp; Effort</div>
+          <div class="row"><span class="chip accent">◇ deep · high</span><span class="tiny">the router picked <b>fast</b> · <a class="link" href="#">Reset</a></span></div>
+        </div>
+      </details>
     </section>
   </div>
 
   <!-- ===================== 3.6 / 3.7 PALETTE + MODEL PICKER ===================== -->
-  <h2><span class="num">3.6 · 3.7</span> Command palette and the model &amp; effort picker</h2>
-  <p class="lede">The list is generated from live <code>rules.yaml</code> and the agent registry — discoverability is
-    never hand-maintained. The picker is a human override of a deterministic router, and says so.</p>
+  <h2><span class="num">3.6 · 3.7</span> The ⌘K Palette and the Model &amp; Effort Picker</h2>
+  <p class="lede">With a fine pointer the same four groups are also a ⌘K palette — the Mac and wide-PWA equivalent of the
+    ＋ menu. The picker is a human override of a deterministic router (invariant 4), and its header says so.</p>
   <div class="duo">
-    <section class="pane" data-theme="light"><span class="panelabel">light</span>
+    <section class="pane" data-theme="light"><span class="panelabel">Light</span>
       <div class="elev palette">
-        <input type="text" value="ta" aria-label="search commands" />
-        <div class="grp">commands</div>
+        <input type="text" value="ta" aria-label="Search commands" />
+        <div class="grp">Commands</div>
         <div class="item" aria-selected="true"><b>/note</b><span class="muted">capture without a turn</span><span class="kbd">⌘N</span></div>
         <div class="item"><b>/status</b><span class="muted">doctor at a glance</span><span class="kbd">⌘0</span></div>
-        <div class="grp">agents</div>
+        <div class="grp">Agents</div>
         <div class="item"><span class="chip agent">@drey-dev</span><span class="muted">areas · working</span></div>
-        <div class="grp">destinations</div>
+        <div class="grp">Destinations</div>
         <div class="item"><b>Triage</b><span class="muted">3 awaiting you</span><span class="kbd">⌘7</span></div>
       </div>
       <div style="height:var(--mt-space-4)"></div>
@@ -774,18 +897,18 @@ td.num, th.num { text-align: right; }
         <div class="row" style="margin-top:var(--mt-space-2)">
           <span class="chip">effort</span><span class="chip accent">high</span><span class="chip">medium</span><span class="chip">low</span>
         </div>
-        <div class="tiny" style="margin-top:var(--mt-space-2)"><a class="link" href="#">Reset to the router's choice</a></div>
+        <div class="tiny" style="margin-top:var(--mt-space-2)"><a class="link" href="#">Reset to the Router's Choice</a></div>
       </div>
     </section>
-    <section class="pane" data-theme="dark"><span class="panelabel">dark</span>
+    <section class="pane" data-theme="dark"><span class="panelabel">Dark</span>
       <div class="elev palette">
-        <input type="text" value="ta" aria-label="search commands" />
-        <div class="grp">commands</div>
+        <input type="text" value="ta" aria-label="Search commands" />
+        <div class="grp">Commands</div>
         <div class="item" aria-selected="true"><b>/note</b><span class="muted">capture without a turn</span><span class="kbd">⌘N</span></div>
         <div class="item"><b>/status</b><span class="muted">doctor at a glance</span><span class="kbd">⌘0</span></div>
-        <div class="grp">agents</div>
+        <div class="grp">Agents</div>
         <div class="item"><span class="chip agent">@drey-dev</span><span class="muted">areas · working</span></div>
-        <div class="grp">destinations</div>
+        <div class="grp">Destinations</div>
         <div class="item"><b>Triage</b><span class="muted">3 awaiting you</span><span class="kbd">⌘7</span></div>
       </div>
       <div style="height:var(--mt-space-4)"></div>
@@ -797,16 +920,16 @@ td.num, th.num { text-align: right; }
         <div class="row" style="margin-top:var(--mt-space-2)">
           <span class="chip">effort</span><span class="chip accent">high</span><span class="chip">medium</span><span class="chip">low</span>
         </div>
-        <div class="tiny" style="margin-top:var(--mt-space-2)"><a class="link" href="#">Reset to the router's choice</a></div>
+        <div class="tiny" style="margin-top:var(--mt-space-2)"><a class="link" href="#">Reset to the Router's Choice</a></div>
       </div>
     </section>
   </div>
 
   <!-- ===================== 3.8 CAPTURE ===================== -->
-  <h2><span class="num">3.8</span> Capture composer</h2>
+  <h2><span class="num">3.8</span> Capture Composer</h2>
   <p class="lede">One primary action, a receipt, and an explicit offline state. Capture never blocks and never drops.</p>
   <div class="duo">
-    <section class="pane" data-theme="light"><span class="panelabel">light</span>
+    <section class="pane" data-theme="light"><span class="panelabel">Light</span>
       <div class="card">
         <textarea aria-label="note">Ask the physio about the calf before the taper starts — book something for the week of the 21st.</textarea>
         <div class="row" style="margin-top:var(--mt-space-3)">
@@ -817,7 +940,7 @@ td.num, th.num { text-align: right; }
         <div class="row" style="margin-top:var(--mt-space-2)"><span class="chip state-queued">⏳ queued — 2 waiting to send</span></div>
       </div>
     </section>
-    <section class="pane" data-theme="dark"><span class="panelabel">dark</span>
+    <section class="pane" data-theme="dark"><span class="panelabel">Dark</span>
       <div class="card">
         <textarea aria-label="note">Ask the physio about the calf before the taper starts — book something for the week of the 21st.</textarea>
         <div class="row" style="margin-top:var(--mt-space-3)">
@@ -831,10 +954,10 @@ td.num, th.num { text-align: right; }
   </div>
 
   <!-- ===================== 3.9 TRIAGE ===================== -->
-  <h2><span class="num">3.9</span> Triage card</h2>
+  <h2><span class="num">3.9</span> Triage Card</h2>
   <p class="lede">The card previews exactly what will happen. Allow · Request changes · Deny, always in that order.</p>
   <div class="duo">
-    <section class="pane" data-theme="light"><span class="panelabel">light</span>
+    <section class="pane" data-theme="light"><span class="panelabel">Light</span>
       <div class="card">
         <div class="row">📝 <span class="chip agent">drey-dev</span></div>
         <div class="subject" style="font-size:var(--mt-text-headline-size);font-weight:600;margin-top:var(--mt-space-2)">Write a taper section to Health</div>
@@ -853,7 +976,7 @@ td.num, th.num { text-align: right; }
       <div class="empty" style="margin-top:var(--mt-space-3)"><span class="g">✓</span>Queue is clear.
         <div class="tiny">Proposals appear here when an agent asks for something outside its grant.</div></div>
     </section>
-    <section class="pane" data-theme="dark"><span class="panelabel">dark</span>
+    <section class="pane" data-theme="dark"><span class="panelabel">Dark</span>
       <div class="card">
         <div class="row">📝 <span class="chip agent">drey-dev</span></div>
         <div class="subject" style="font-size:var(--mt-text-headline-size);font-weight:600;margin-top:var(--mt-space-2)">Write a taper section to Health</div>
@@ -875,11 +998,11 @@ td.num, th.num { text-align: right; }
   </div>
 
   <!-- ===================== 3.10 TASK + DISPATCH ===================== -->
-  <h2><span class="num">3.10</span> Task card and drag-to-dispatch — the three outcomes</h2>
+  <h2><span class="num">3.10</span> Task Card and Drag-to-Dispatch — the Three Outcomes</h2>
   <p class="lede">A refusal names the boundary that caused it, inline at the target. That is the point of the gesture,
     not a consolation prize.</p>
   <div class="duo">
-    <section class="pane" data-theme="light"><span class="panelabel">light</span>
+    <section class="pane" data-theme="light"><span class="panelabel">Light</span>
       <div class="card"><div class="spread"><span class="mono tiny">wrk_01H8…221</span><span class="chip">ready</span></div>
         <div style="margin-top:var(--mt-space-1)">review artifact <b>taper-plan</b></div>
         <div class="row" style="margin-top:var(--mt-space-2)"><span class="chip">metistry</span><span class="chip agent">drey-dev</span>
@@ -893,7 +1016,7 @@ td.num, th.num { text-align: right; }
       <div class="dropzone invalid" style="margin-top:var(--mt-space-3)"><b>ops-bot</b>
         <div class="muted" style="margin-top:var(--mt-space-1)">not a member of metistry — drop refused</div></div>
     </section>
-    <section class="pane" data-theme="dark"><span class="panelabel">dark</span>
+    <section class="pane" data-theme="dark"><span class="panelabel">Dark</span>
       <div class="card"><div class="spread"><span class="mono tiny">wrk_01H8…221</span><span class="chip">ready</span></div>
         <div style="margin-top:var(--mt-space-1)">review artifact <b>taper-plan</b></div>
         <div class="row" style="margin-top:var(--mt-space-2)"><span class="chip">metistry</span><span class="chip agent">drey-dev</span>
@@ -910,11 +1033,11 @@ td.num, th.num { text-align: right; }
   </div>
 
   <!-- ===================== 3.11 ARTIFACT ===================== -->
-  <h2><span class="num">3.11</span> Artifact viewer</h2>
+  <h2><span class="num">3.11</span> Artifact Viewer</h2>
   <p class="lede">Markdown through the <code>md.js</code> whitelist; HTML only inside an opaque-origin sandboxed frame,
     always wearing a visible band that says so.</p>
   <div class="duo">
-    <section class="pane" data-theme="light"><span class="panelabel">light</span>
+    <section class="pane" data-theme="light"><span class="panelabel">Light</span>
       <div class="card">
         <div class="spread"><b>metistry/taper-plan</b><span class="chip">v4 · current</span></div>
         <div class="muted">agent: drey-dev · "add the three-week table" · rev 4a1c93e0f2 · today 09:14</div>
@@ -932,7 +1055,7 @@ td.num, th.num { text-align: right; }
         </div>
       </div>
     </section>
-    <section class="pane" data-theme="dark"><span class="panelabel">dark</span>
+    <section class="pane" data-theme="dark"><span class="panelabel">Dark</span>
       <div class="card">
         <div class="spread"><b>metistry/taper-plan</b><span class="chip">v4 · current</span></div>
         <div class="muted">agent: drey-dev · "add the three-week table" · rev 4a1c93e0f2 · today 09:14</div>
@@ -953,9 +1076,9 @@ td.num, th.num { text-align: right; }
   </div>
 
   <!-- ===================== 3.12 PROJECT ===================== -->
-  <h2><span class="num">3.12</span> Project header and the mode toggle</h2>
+  <h2><span class="num">3.12</span> Project Header and the Mode Toggle</h2>
   <div class="duo">
-    <section class="pane" data-theme="light"><span class="panelabel">light</span>
+    <section class="pane" data-theme="light"><span class="panelabel">Light</span>
       <div class="card">
         <div class="row"><b style="font-size:var(--mt-text-title-2-size)">metistry</b><span class="chip state-blocked">✋ review</span>
           <button type="button" style="margin-left:auto">→ switch to autonomous</button></div>
@@ -977,7 +1100,7 @@ td.num, th.num { text-align: right; }
           <button class="danger solid" type="button">Switch to autonomous</button></div>
       </div>
     </section>
-    <section class="pane" data-theme="dark"><span class="panelabel">dark</span>
+    <section class="pane" data-theme="dark"><span class="panelabel">Dark</span>
       <div class="card">
         <div class="row"><b style="font-size:var(--mt-text-title-2-size)">metistry</b><span class="chip state-blocked">✋ review</span>
           <button type="button" style="margin-left:auto">→ switch to autonomous</button></div>
@@ -1002,11 +1125,11 @@ td.num, th.num { text-align: right; }
   </div>
 
   <!-- ===================== 3.13 DOCTOR ===================== -->
-  <h2><span class="num">3.13</span> Status / doctor rows</h2>
+  <h2><span class="num">3.13</span> Status / Doctor Rows</h2>
   <p class="lede"><b>absent ≠ failed.</b> "not configured" names the env var that would configure it and never counts
     toward the failure badge.</p>
   <div class="duo">
-    <section class="pane" data-theme="light"><span class="panelabel">light</span>
+    <section class="pane" data-theme="light"><span class="panelabel">Light</span>
       <div class="card">
         <div class="spread"><b>components</b><span class="muted">9 ok · 1 degraded · 1 failed · 2 not configured</span></div>
         <div class="scroll"><table>
@@ -1019,7 +1142,7 @@ td.num, th.num { text-align: right; }
         </table></div>
       </div>
     </section>
-    <section class="pane" data-theme="dark"><span class="panelabel">dark</span>
+    <section class="pane" data-theme="dark"><span class="panelabel">Dark</span>
       <div class="card">
         <div class="spread"><b>components</b><span class="muted">9 ok · 1 degraded · 1 failed · 2 not configured</span></div>
         <div class="scroll"><table>
@@ -1035,9 +1158,9 @@ td.num, th.num { text-align: right; }
   </div>
 
   <!-- ===================== 3.14–3.16 ===================== -->
-  <h2><span class="num">3.14 · 3.15 · 3.16</span> Notification, empty states, error envelopes</h2>
+  <h2><span class="num">3.14 · 3.15 · 3.16</span> Notification, Empty States, Error Envelopes</h2>
   <div class="duo">
-    <section class="pane" data-theme="light"><span class="panelabel">light</span>
+    <section class="pane" data-theme="light"><span class="panelabel">Light</span>
       <div class="notif">
         <div class="b"><div class="tiny">METISTRY · now</div>
           <b>Proposal #97 needs a decision</b>
@@ -1059,7 +1182,7 @@ td.num, th.num { text-align: right; }
         <div class="muted"><code>over_cap</code> — reviewer has 3/3 open bundles. <a class="link" href="#">Retry</a></div>
       </div>
     </section>
-    <section class="pane" data-theme="dark"><span class="panelabel">dark</span>
+    <section class="pane" data-theme="dark"><span class="panelabel">Dark</span>
       <div class="notif">
         <div class="b"><div class="tiny">METISTRY · now</div>
           <b>Proposal #97 needs a decision</b>
@@ -1084,11 +1207,11 @@ td.num, th.num { text-align: right; }
   </div>
 
   <!-- ===================== 3.17 ===================== -->
-  <h2><span class="num">3.17</span> Destructive confirmation</h2>
+  <h2><span class="num">3.17</span> Destructive Confirmation</h2>
   <p class="lede">The dialog is never the control — the server refuses regardless. It exists so the click is not
     cheaper than the act, and it always names the consequence.</p>
   <div class="duo">
-    <section class="pane" data-theme="light"><span class="panelabel">light</span>
+    <section class="pane" data-theme="light"><span class="panelabel">Light</span>
       <div class="dialog">
         <b style="font-size:var(--mt-text-headline-size)">Rotate the token for ops-bot?</b>
         <p class="muted">The current token stops working immediately. Anything still using it will start failing
@@ -1098,7 +1221,7 @@ td.num, th.num { text-align: right; }
           <button class="danger solid" type="button">Rotate token</button></div>
       </div>
     </section>
-    <section class="pane" data-theme="dark"><span class="panelabel">dark</span>
+    <section class="pane" data-theme="dark"><span class="panelabel">Dark</span>
       <div class="dialog">
         <b style="font-size:var(--mt-text-headline-size)">Rotate the token for ops-bot?</b>
         <p class="muted">The current token stops working immediately. Anything still using it will start failing

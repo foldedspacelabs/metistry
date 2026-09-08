@@ -153,6 +153,13 @@ launchctl kickstart -k gui/$(id -u)/com.foldedspacelabs.metistry.apple-fm
 curl -s -H "Authorization: Bearer $METISTRY_BRIDGE_TOKEN_APPLE_FM" http://127.0.0.1:7810/check
 ```
 
+> **Secure timestamp (learned 2026-09-08).** Notarization rejects a
+> signature without a trusted timestamp ("does not include a secure
+> timestamp"). Both helper build scripts now pass `--timestamp` when
+> signing with a real identity; it needs network access to Apple's
+> timestamp server at sign time. Re-run the two build scripts after
+> pulling this change, then resubmit.
+
 ## 4. Notarization (credentials only — the DMG pipeline is a separate PR)
 
 Notarization needs its own App Store Connect API key, kept out of the repo

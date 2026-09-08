@@ -1,0 +1,4 @@
+name: reply-review
+type: routine
+description: Weekly self-heal pass over reply quality (docs/ops/reply-feedback.md) — collects the week's 👎 replies with the user's note, the prompt, the reply and that turn's tool calls, and emits ONE `improvement` proposal with a deterministic suggested edit to the assistant prompt overlay. Model-free (invariant 4); nothing is applied until the user allows it in triage, and only then does the console write the overlay as principal `user`. Silent when nothing was flagged.
+schedule: "@weekly"

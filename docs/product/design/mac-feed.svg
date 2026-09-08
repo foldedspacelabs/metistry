@@ -28,8 +28,8 @@
   <circle cx="46" cy="86" r="6" fill="#ff5f57"/><circle cx="66" cy="86" r="6" fill="#febc2e"/><circle cx="86" cy="86" r="6" fill="#28c840"/>
   <text x="112" y="90" class="hd">Feed</text>
   <!-- toolbar controls (right) -->
-  <rect class="sf" x="470" y="76" width="120" height="22" rx="6"/><text x="480" y="91" class="t2">all agents ⌄</text>
-  <rect class="sf" x="598" y="76" width="120" height="22" rx="6"/><text x="608" y="91" class="t2">all projects ⌄</text>
+  <rect class="sf" x="470" y="76" width="120" height="22" rx="6"/><text x="480" y="91" class="t2">All Agents ⌄</text>
+  <rect class="sf" x="598" y="76" width="120" height="22" rx="6"/><text x="608" y="91" class="t2">All Projects ⌄</text>
 
   <!-- sidebar -->
   <rect x="25" y="105" width="186" height="520" fill="#eef0f3"/>
@@ -51,7 +51,7 @@
     <text x="45" y="388">🔑</text><text x="66" y="388">Devices</text>
   </g>
   <path class="ln" d="M33 596 H203"/>
-  <text x="45" y="614" class="t3">⌘K  commands and agents</text>
+  <text x="45" y="614" class="t3">⌘K  Commands and Agents</text>
 
   <!-- feed list -->
   <g>

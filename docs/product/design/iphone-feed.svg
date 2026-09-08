@@ -30,8 +30,8 @@
   <text x="84" y="164" class="lt">Feed</text>
   <text x="426" y="158" class="acc" text-anchor="end" font-size="17">⌘</text>
   <!-- filter chips -->
-  <rect x="84" y="182" width="88" height="28" rx="14" fill="#e6edfc" stroke="#c6d6f7"/><text x="98" y="201" class="acc" font-size="13">all agents ⌄</text>
-  <rect x="180" y="182" width="96" height="28" rx="14" class="sf"/><text x="194" y="201" class="t2" font-size="13">all projects ⌄</text>
+  <rect x="84" y="182" width="88" height="28" rx="14" fill="#e6edfc" stroke="#c6d6f7"/><text x="98" y="201" class="acc" font-size="13">All Agents ⌄</text>
+  <rect x="180" y="182" width="96" height="28" rx="14" class="sf"/><text x="194" y="201" class="t2" font-size="13">All Projects ⌄</text>
   <rect x="284" y="182" width="64" height="28" rx="14" class="sf"/><text x="298" y="201" class="t2" font-size="13">24h ⌄</text>
 
   <!-- rows -->
@@ -103,7 +103,7 @@
   <text x="510" y="146" class="lg">① Large title (largeTitle, 34pt) collapses to</text>
   <text x="524" y="166" class="lg">an inline title on scroll — the standard</text>
   <text x="524" y="186" class="lg">iOS navigation bar behaviour, not a custom</text>
-  <text x="524" y="206" class="lg">header. ⌘ opens the command palette as a</text>
+  <text x="524" y="206" class="lg">header. ⌘ opens the ⌘K palette as a</text>
   <text x="524" y="226" class="lg">sheet.</text>
 
   <text x="510" y="266" class="lg">② Filters are chips, not a hidden menu:</text>

@@ -14,6 +14,17 @@ is "Swift TCC bridges, stably signed": a **Developer ID Application**
 certificate gives `ek-helper` and `afm-helper` an identity that survives
 rebuilds and source edits.
 
+A Developer ID certificate turned out to be necessary but **not sufficient**.
+Two more things had to be true, both in §3:
+
+1. **The helper must be an app bundle.** TCC only keys a grant on a bundle
+   identifier when the client *is* a bundle; a bare executable is keyed on
+   its absolute path. Both helpers now build as minimal `.app` bundles.
+2. **Hardened runtime needs the resource-access entitlement.** With
+   `--options runtime` and no
+   `com.apple.security.personal-information.calendars`, tccd never prompts —
+   it denies in silence.
+
 ## 1. Apple Developer Program membership
 
 Individual ($99/yr) vs. organization, for Folded Space Labs:
@@ -77,27 +88,103 @@ Both helpers already know how to prefer a Developer ID identity —
 `packages/mcp-apple-fm/scripts/build-helper.sh` run:
 
 ```sh
-codesign --force --options runtime \
+codesign --force --options runtime --timestamp \
   --identifier com.foldedspacelabs.metistry.eventkit \
   --sign "Developer ID Application: Matt Colf (TEAMID1234)" \
-  helper/ek-helper
+  helper/ek-helper.app
 ```
 
-(`afm-helper` is the same shape, without `--identifier` — its bundle ID
-comes from the binary's own `CFBundleIdentifier` via `-parse-as-library`, no
-`requires_tcc`, so ad-hoc was previously "functionally fine"; sign it too now
-that a real identity exists, both because a future DMG will want every
-shipped binary under one identity for notarization, and because a
-consistent identity is one less thing to reason about later.)
+(`afm-helper` is the same shape, no `requires_tcc`, so ad-hoc was previously
+"functionally fine"; sign it too now that a real identity exists, both
+because a future DMG will want every shipped binary under one identity for
+notarization, and because a consistent identity is one less thing to reason
+about later.)
 
-**Entitlements:** neither helper needs an entitlements file. Hardened
-runtime (`--options runtime`) is on, but EventKit/Reminders access is
-governed by TCC via the usage-description strings embedded in
-`helper/Info.plist` (`NSCalendarsFullAccessUsageDescription`,
-`NSRemindersFullAccessUsageDescription`) as an `__info_plist` linker
-section — not by an entitlement, and neither helper is sandboxed (no
-`com.apple.security.app-sandbox`). Don't add one; App Sandbox would block
-the EventKit helper's non-sandboxed launchd-service shape for no benefit.
+### Each helper is an app bundle, not a bare binary (2026-09-08)
+
+Both build scripts produce a **minimal app bundle**, and this is load-bearing
+for the EventKit helper:
+
+```
+packages/mcp-eventkit/helper/ek-helper.app/Contents/Info.plist
+packages/mcp-eventkit/helper/ek-helper.app/Contents/MacOS/ek-helper
+```
+
+**What TCC actually keys a grant on.** The `access` table in `TCC.db` stores
+`client`, `client_type` and `csreq`:
+
+- **Bundled client** (`client_type` 0): `client` is the **CFBundleIdentifier**,
+  and `csreq` is the signature's **designated requirement**. For a Developer
+  ID identity the implicit DR is `identifier "…" and anchor apple generic and
+  certificate leaf[subject.OU] = TEAMID` — identifier plus certificate chain,
+  **no cdhash**. Quinn (Apple DTS) on the purpose of a DR: it "allows the
+  system to know that version N+1 of the program is the 'same code' as version
+  N" ([forums.developer.apple.com/forums/thread/710086](https://developer.apple.com/forums/thread/710086)).
+  So a rebuild changes the cdhash and the grant still holds.
+- **Non-bundle executable** (`client_type` 1): `client` is the **absolute
+  path**. An embedded `__info_plist`'s `CFBundleIdentifier` is *not* used as
+  the TCC client key — `codesign` only uses it to derive a default signing
+  identifier, i.e. it shapes the `csreq`, never the `client`. A path-keyed
+  client also never appears in the Privacy pane, cannot be reset with
+  `tccutil` (which takes bundle IDs), and loses its grant if the checkout
+  moves. ([forums.developer.apple.com/forums/thread/697278](https://developer.apple.com/forums/thread/697278),
+  [TN3127](https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements))
+
+`LSUIElement` / `LSBackgroundOnly` are **Launch Services** keys, read from a
+bundle's `Contents/Info.plist`; Launch Services never processes a bare
+executable, so they are inert in an embedded `__info_plist`
+([Launch Services Keys](https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/LaunchServicesKeys.html)).
+The bundle gives us `LSUIElement` for real — no Dock icon.
+
+**Sign the bundle, not the inner binary.** `codesign` seals
+`Contents/Info.plist` into the signature, which is what ties the bundle ID to
+the identity. No `--deep` — there is nothing nested. The launchd plist's
+`ProgramArguments` points at `…/ek-helper.app/Contents/MacOS/ek-helper`;
+launchd runs bundle executables fine, and the job's root binary is still the
+signed helper (PoC-1). The socket protocol and the Node client are unchanged.
+
+**The bundles are build output and are never tracked** — `.gitignore` has
+`packages/mcp-*/helper/*-helper.app/`. (The bare binary used to be committed
+by accident; it is not any more.) Run the build script on any fresh checkout
+before bootstrapping the launchd job.
+
+### Entitlements — the EventKit helper needs one (correction, 2026-09-08)
+
+This doc used to say "neither helper needs an entitlements file." That was
+wrong, and it cost us a debugging session. Under hardened runtime
+(`--options runtime`, which we want), tccd refuses to even *prompt* for
+Calendars without the matching **resource-access entitlement**. Straight from
+`log show --predicate 'process == "tccd"'` while the helper asked:
+
+```
+Prompting policy for hardened runtime; service: kTCCServiceCalendar requires
+entitlement com.apple.security.personal-information.calendars but it is
+missing for accessing={… ek-helper.app/Contents/MacOS/ek-helper}
+```
+
+There is no dialog and no error — EventKit's completion handler just hands
+back `false`. So `packages/mcp-eventkit/helper/ek-helper.entitlements` carries:
+
+```xml
+<key>com.apple.security.personal-information.calendars</key><true/>
+```
+
+Reminders rides on the same entitlement; there is no separate
+hardened-runtime entitlement for `kTCCServiceReminders`. `afm-helper` needs
+none — it touches no TCC-protected resource.
+
+`codesign` passes the entitlements file to AMFI, whose XML parser **rejects
+comments**, so the build script runs it through `plutil -convert xml1` into a
+temp file before signing. That keeps the *why* in the checked-in file instead
+of leaving a bare four-line plist nobody can explain a year from now.
+
+This is a hardened-runtime entitlement, **not the App Sandbox**.
+`com.apple.security.app-sandbox` stays absent — it would block the EventKit
+helper's non-sandboxed launchd-service shape for no benefit. The usage
+strings in `helper/Info.plist` (`NSCalendarsFullAccessUsageDescription`,
+`NSRemindersFullAccessUsageDescription`) are still required too: the
+entitlement decides whether macOS *may* prompt, the usage string is what the
+prompt *says*. You need both.
 
 **The scripts already auto-detect a Developer ID identity** (`security
 find-identity -v -p codesigning | grep "Developer ID Application"`) and fall
@@ -117,28 +204,33 @@ patch is in this PR (`scripts/build-helper.sh` in both packages).
 
 ```sh
 packages/mcp-eventkit/scripts/build-helper.sh
-codesign -dv --verbose=2 packages/mcp-eventkit/helper/ek-helper 2>&1 | grep -E "Authority|Identifier"
+codesign -dv --verbose=2 packages/mcp-eventkit/helper/ek-helper.app 2>&1 | grep -E "Authority|Identifier|Format"
 packages/mcp-apple-fm/scripts/build-helper.sh
-codesign -dv --verbose=2 packages/mcp-apple-fm/helper/afm-helper 2>&1 | grep -E "Authority|Identifier"
+codesign -dv --verbose=2 packages/mcp-apple-fm/helper/afm-helper.app 2>&1 | grep -E "Authority|Identifier|Format"
 ```
 
 Done looks like `Authority=Developer ID Application: Matt Colf (TEAMID1234)`
-on both, not `Authority=(unavailable)` (ad-hoc, no `Authority` line).
+and `Format=app bundle with Mach-O thin (arm64)` on both — not
+`Authority=(unavailable)` (ad-hoc, no `Authority` line) and not
+`Format=Mach-O thin` (a bare binary — path-keyed in TCC, see above).
 
-**One-time TCC re-grant after the identity changes.** Changing `ek-helper`'s
-signing identity is a new binary identity as far as TCC is concerned, so the
-old Calendars/Reminders grant does not carry over — it must be re-requested
-once, the same path documented in `docs/ops/reconciler.md`-adjacent
-`ops/launchd/com.foldedspacelabs.metistry.eventkit-helper.plist`:
+**One-time TCC re-grant when the CLIENT IDENTITY changes.** The client
+identity is the bundle ID plus the signing identity; changing either (moving
+off ad-hoc, changing the certificate, or — as here — moving from a bare
+binary to a bundle) means TCC sees a new client and the old
+Calendars/Reminders grant does not carry over. It must be re-requested once:
 
 ```sh
 launchctl bootout gui/$(id -u)/com.foldedspacelabs.metistry.eventkit-helper 2>/dev/null || true
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.foldedspacelabs.metistry.eventkit-helper.plist
-printf '{"id":1,"op":"request"}\n' | packages/mcp-eventkit/helper/ek-helper
+launchctl kickstart -k gui/$(id -u)/com.foldedspacelabs.metistry.eventkit-helper
+printf '{"id":1,"op":"request"}\n' | nc -U /tmp/metistry-eventkit.sock
 ```
 
-Done looks like the macOS Calendars and Reminders consent dialogs appearing
-(click Allow on both), then:
+(Ask the *running job* over its socket — don't run the binary by hand from a
+terminal, or the terminal becomes the responsible process and the grant lands
+on the wrong client.) Done looks like the macOS Calendars and Reminders
+consent dialogs appearing (click Allow on both), then:
 
 ```sh
 curl -s -H "Authorization: Bearer $METISTRY_BRIDGE_TOKEN_EVENTKIT" http://127.0.0.1:7811/check
@@ -188,12 +280,12 @@ entirely.
 3. **Dry-run against a signed helper**, to prove the credentials work before
    any release workflow exists:
    ```sh
-   ditto -c -k --keepParent packages/mcp-eventkit/helper/ek-helper /tmp/ek-helper.zip
+   ditto -c -k --keepParent packages/mcp-eventkit/helper/ek-helper.app /tmp/ek-helper.zip
    xcrun notarytool submit /tmp/ek-helper.zip --keychain-profile "metistry-notary" --wait
    ```
-   A bare helper binary isn't the shipped artifact (that's the future DMG),
-   so `stapler staple` on the zip itself will report it can't staple a
-   non-bundle/non-disk-image — that's expected here; done looks like the
+   The helper bundle is not the shipped artifact (that is the future DMG),
+   so `stapler staple` on the zip itself will report it cannot staple a
+   zip — that is expected here; done looks like the
    submit step printing `status: Accepted`, which proves the credentials
    and the binary's signature are both valid. The real `stapler staple
    MyApp.app` / `stapler staple Metistry.dmg` step belongs to the DMG

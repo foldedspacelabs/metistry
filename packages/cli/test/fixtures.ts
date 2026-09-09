@@ -34,13 +34,13 @@ export async function checkout(opts: { git?: boolean } = {}): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "metistry-up-"));
   await put(root, "package.json", JSON.stringify({ name: "metistry" }));
   await put(root, "seed/identity.yaml", "name: Seed\n");
-  await put(root, `ops/launchd/${HELPER}.plist`, binJob(HELPER, "packages/mcp-eventkit/helper/ek-helper"));
+  await put(root, `ops/launchd/${HELPER}.plist`, binJob(HELPER, "packages/mcp-eventkit/helper/ek-helper.app/Contents/MacOS/ek-helper"));
   await put(root, `ops/launchd/${RECONCILER}.plist`, nodeJob(RECONCILER, "apps/reconciler/dist/main.js"));
   await put(root, `ops/launchd/${WATCHDOG}.plist`, nodeJob(WATCHDOG, "apps/watchdog/dist/main.js"));
   await put(root, "apps/watchdog/dist/main.js", "v1");
   await put(root, "apps/watchdog/dist/lib/util.js", "v1");
   await put(root, "apps/reconciler/dist/main.js", "v1");
-  await put(root, "packages/mcp-eventkit/helper/ek-helper", "bin");
+  await put(root, "packages/mcp-eventkit/helper/ek-helper.app/Contents/MacOS/ek-helper", "bin");
   await put(root, "db/migrations/0001_a.sql", "select 1;");
   await put(root, "db/migrations/0002_b.sql", "select 2;");
   await put(root, "docker-compose.yml", "services:\n  db: {}\n  console: {}\n");

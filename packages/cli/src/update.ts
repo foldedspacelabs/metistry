@@ -102,8 +102,15 @@ export async function publishedPackages(productDir: string): Promise<string[]> {
 
 // ---- "what changed": a content hash of each host job's code ---------------------
 
-/** For `apps/watchdog/dist/main.js` the tracked tree is `apps/watchdog/dist`; a bare binary (the eventkit helper) is tracked as itself. */
+/**
+ * For `apps/watchdog/dist/main.js` the tracked tree is `apps/watchdog/dist`;
+ * for `…/helper/ek-helper.app/Contents/MacOS/ek-helper` it is the whole
+ * `…/helper/ek-helper.app` bundle, so a changed Info.plist or signature
+ * counts as changed code and not just the Mach-O. Anything else is itself.
+ */
 export function trackedPathFor(repoPath: string): string {
+  const app = repoPath.indexOf(".app/");
+  if (app !== -1) return repoPath.slice(0, app + ".app".length);
   const i = repoPath.indexOf("/dist/");
   return i === -1 ? repoPath : repoPath.slice(0, i + "/dist".length);
 }

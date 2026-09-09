@@ -862,3 +862,9 @@ your git, on your machine.
   Batch routing for deferred turns on API billing, a prompt lint, and
   cache hit rate on the dashboard. For subscription users this is
   headroom; for API users it is the bill — the same design serves both.
+- 2026-09-09 — TCC grants now survive rebuilds: the Swift helpers ship as
+  minimal signed app bundles (TCC keys bundled code by bundle identifier
+  and designated requirement, not by code hash) with the hardened-runtime
+  entitlement Calendars access silently requires. Proven on the Studio:
+  one approval, then two unattended rebuild-and-restart cycles kept full
+  access. The last manual permission step is now a one-time step.

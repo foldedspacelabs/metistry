@@ -248,12 +248,12 @@ describe("metistry update", () => {
     expect(await publishedPackages(P)).toEqual(["@foldedspacelabs/metistry-cli", "@foldedspacelabs/metistry-core"]);
   });
 
-  it("hashHostJobs tracks each job's dist tree (or bare binary) and only that", async () => {
+  it("hashHostJobs tracks each job's dist tree (or helper .app bundle) and only that", async () => {
     const P = await checkout();
     const templates = await loadPlistTemplates(P);
-    expect(templates.map((t) => t.repoPaths)).toEqual([["packages/mcp-eventkit/helper/ek-helper"], ["apps/reconciler/dist/main.js"], ["apps/watchdog/dist/main.js"]]);
+    expect(templates.map((t) => t.repoPaths)).toEqual([["packages/mcp-eventkit/helper/ek-helper.app/Contents/MacOS/ek-helper"], ["apps/reconciler/dist/main.js"], ["apps/watchdog/dist/main.js"]]);
     expect(trackedPathFor("apps/watchdog/dist/main.js")).toBe("apps/watchdog/dist");
-    expect(trackedPathFor("packages/mcp-eventkit/helper/ek-helper")).toBe("packages/mcp-eventkit/helper/ek-helper");
+    expect(trackedPathFor("packages/mcp-eventkit/helper/ek-helper.app/Contents/MacOS/ek-helper")).toBe("packages/mcp-eventkit/helper/ek-helper.app");
     const a = await hashHostJobs(P, templates);
     expect(Object.keys(a).sort()).toEqual([HELPER, RECONCILER, WATCHDOG].sort());
     await put(P, "apps/watchdog/dist/new.js", "added");
@@ -263,7 +263,7 @@ describe("metistry update", () => {
     expect(b[HELPER]).toBe(a[HELPER]);
     await put(P, "apps/watchdog/src/main.ts", "source, not dist");
     expect((await hashHostJobs(P, templates))[WATCHDOG]).toBe(b[WATCHDOG]);
-    await put(P, "packages/mcp-eventkit/helper/ek-helper", "rebuilt binary");
+    await put(P, "packages/mcp-eventkit/helper/ek-helper.app/Contents/MacOS/ek-helper", "rebuilt binary");
     expect((await hashHostJobs(P, templates))[HELPER]).not.toBe(b[HELPER]);
     expect((await hashHostJobs(P, [{ ...templates[0]!, repoPaths: ["apps/nothing/dist/main.js"] }]))[HELPER]).toBe("missing");
   });

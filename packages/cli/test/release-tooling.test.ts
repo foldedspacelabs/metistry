@@ -225,15 +225,20 @@ describe(".github/workflows/release.yml", () => {
     expect(text).toContain("gh release upload");
   });
 
-  it("publishes npm with provenance and container images for the three app images", () => {
-    expect(wf.jobs.npm!.permissions).toMatchObject({ "id-token": "write" });
+  it("publishes npm via Trusted Publishing (OIDC, no token) and container images for the three app images", () => {
+    // Trusted Publishing needs both permissions, and no long-lived token anywhere.
+    expect(wf.jobs.npm!.permissions).toMatchObject({ "id-token": "write", contents: "read" });
     const text = repoFile(".github/workflows/release.yml");
+    expect(text).not.toContain("NPM_TOKEN");
+    expect(text).not.toContain("NODE_AUTH_TOKEN");
     expect(text).toContain("--provenance");
-    expect(text).toContain('NPM_CONFIG_PROVENANCE: "true"');
-    expect(text).toContain("npm publish skipped — NPM_TOKEN is not set");
-    // a 4xx from the registry is a skip too, not a silent success — it says so and reports it
-    expect(text).toContain("::notice::npm publish skipped — the registry rejected it with a 4xx");
-    expect(text).toContain('echo "published=true"');
+    // provenance is unsupported for a private repo even for a public package — gated on repository.private
+    expect(text).toContain("github.event.repository.private");
+    expect(text).toContain("npm install -g npm@latest");
+    // a 4xx from the registry (not configured for Trusted Publishing yet) is a skip, not a failure
+    expect(text).toContain("::notice::npm publish skipped for $name");
+    expect(text).toContain('published_any=true');
+    expect(text).toContain('echo "published=$published_any"');
     expect(wf.jobs.npm!.outputs).toMatchObject({ published: "${{ steps.publish.outputs.published }}" });
     expect(wf.jobs.images!.permissions).toMatchObject({ packages: "write" });
     expect(wf.jobs.images!.strategy!.matrix!.app).toEqual(["console", "assistant", "reconciler"]);

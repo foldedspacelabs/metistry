@@ -9,7 +9,7 @@
 #                                                   Postgres 17 + pgvector, git
 #                                                   (docs/ops/bundled-runtime.md)
 #   checksums.txt                                   sha256 of every asset
-#   npm  @foldedspacelabs/metistry-*                with provenance
+#   npm  @foldedspacelabs/metistry-*                Trusted Publishing (OIDC)
 #   ghcr.io/foldedspacelabs/metistry-<app>:<version> console, assistant, reconciler
 #
 # Runbook, secrets and the exact tarball contents: docs/ops/releases.md.
@@ -153,8 +153,13 @@ jobs:
           path: dist-release/metistry-runtime-deps-*
           if-no-files-found: error
 
-  # npm, with provenance. Skipped (not failed) without NPM_TOKEN: a fork
-  # cuts releases without publishing to a scope it does not own.
+  # npm, via Trusted Publishing (OIDC) — no token anywhere, repo or run log.
+  # Each package is configured once on npmjs.com (Settings -> Trusted
+  # Publishing: org/user foldedspacelabs, repo metistry, workflow
+  # release.yml — docs/ops/owner-actions.md has the one-time bootstrap a
+  # package needs before that page will let you). Skipped (not failed) for
+  # a package that isn't configured yet, or on a fork: the registry 404s/403s
+  # the publish and this job says so rather than failing the release.
   npm:
     needs: verify
     runs-on: ubuntu-latest
@@ -168,35 +173,51 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          # Trusted Publishing needs Node >= 22.14 and npm CLI >= 11.5.1
+          # (the latter installed explicitly below — the npm bundled with
+          # setup-node's Node is older).
+          node-version: ">=22.14.0"
           cache: pnpm
           registry-url: https://registry.npmjs.org
+      - run: npm install -g npm@latest
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter '@foldedspacelabs/*' run build
       - name: publish @foldedspacelabs/metistry-*
         id: publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NPM_CONFIG_PROVENANCE: "true"
         run: |
-          if [ -z "$NODE_AUTH_TOKEN" ]; then
-            echo "::notice::npm publish skipped — NPM_TOKEN is not set (the release's other assets are unaffected)"
-            echo "published=false" >> "$GITHUB_OUTPUT"
-            exit 0
+          # Provenance needs a *public* repo — npm refuses it from a private
+          # one even for a publicly-scoped package. This flips on by itself
+          # the day the repo goes public; until then it's silently omitted.
+          provenance_flag=""
+          if [ "${{ github.event.repository.private }}" = "false" ]; then
+            provenance_flag="--provenance"
           fi
-          set +e
-          pnpm publish --filter '@foldedspacelabs/*' --access public --no-git-checks --provenance 2>&1 | tee /tmp/npm-publish.log
-          status="${PIPESTATUS[0]}"
-          set -e
-          if [ "$status" -ne 0 ]; then
-            if grep -qE 'code E40[0-9]|HTTP 4[0-9]{2}' /tmp/npm-publish.log; then
-              echo "::notice::npm publish skipped — the registry rejected it with a 4xx (see the log above for which package/status; the release's other assets are unaffected)"
-              echo "published=false" >> "$GITHUB_OUTPUT"
-              exit 0
+          pack_dir="$RUNNER_TEMP/npm-pack"
+          mkdir -p "$pack_dir"
+          published_any=false
+          for dir in packages/*/; do
+            name="$(node -p "(()=>{try{const p=require('./${dir}package.json');return (!p.private && p.name && p.name.startsWith('@foldedspacelabs/metistry-')) ? p.name : '';}catch{return '';}})()")"
+            [ -z "$name" ] && continue
+            echo "== $name =="
+            # `pnpm pack` rewrites workspace:* deps to real versions in the
+            # packed manifest; `npm publish` then does the actual registry
+            # call so it is npm's own OIDC exchange that authenticates it,
+            # not pnpm's.
+            tarball="$(cd "$dir" && pnpm pack --json --pack-destination "$pack_dir" | node -e 'let d="";process.stdin.on("data",c=>d+=c);process.stdin.on("end",()=>console.log(JSON.parse(d).filename))')"
+            set +e
+            npm publish "$tarball" --access public $provenance_flag 2>&1 | tee /tmp/npm-publish.log
+            status="${PIPESTATUS[0]}"
+            set -e
+            if [ "$status" -ne 0 ]; then
+              if grep -qE 'code E40[0-9]|HTTP 4[0-9]{2}' /tmp/npm-publish.log; then
+                echo "::notice::npm publish skipped for $name — trusted publishing isn't configured for it yet, or the registry otherwise rejected it with a 4xx (see the log above; docs/ops/owner-actions.md has the setup). The release's other assets are unaffected."
+                continue
+              fi
+              exit "$status"
             fi
-            exit "$status"
-          fi
-          echo "published=true" >> "$GITHUB_OUTPUT"
+            published_any=true
+          done
+          echo "published=$published_any" >> "$GITHUB_OUTPUT"
 
   # Container images for the apps that ship as images. The watchdog is a
   # host job under launchd (runs_on: host) and has no Dockerfile — it ships

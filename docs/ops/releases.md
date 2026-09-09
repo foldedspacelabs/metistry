@@ -59,7 +59,7 @@ The workflow refuses a tag whose number does not match `package.json` and
 | `metistry-runtime-<version>-linux-x64.tar.gz` | the same, for a Linux host |
 | `metistry-runtime-deps-<version>-darwin-arm64.tar.gz` | the **bundled runtime**: Node, Postgres 17 + pgvector, git — `docs/ops/bundled-runtime.md` |
 | `checksums.txt` | `sha256sum` of every asset; `metistry update` verifies against it |
-| npm `@foldedspacelabs/metistry-*@<version>` | published with provenance |
+| npm `@foldedspacelabs/metistry-*@<version>` | published via Trusted Publishing (provenance once the repo is public — see below) |
 | `ghcr.io/foldedspacelabs/metistry-{console,assistant,reconciler}:<version>` | the app images compose pulls |
 
 The **runtime pack** (`ops/release/pack-runtime.sh`) is the product as an
@@ -191,7 +191,6 @@ are in the repo, and none reach a build log.
 
 | secret | used by | needed for |
 | --- | --- | --- |
-| `NPM_TOKEN` | `npm` job | publishing `@foldedspacelabs/metistry-*`. **Absent → the job says so and exits 0**; the rest of the release still happens (a fork does not own the scope) |
 | `GITHUB_TOKEN` (automatic) | `images`, `publish` | pushing to ghcr.io and creating the release. Nothing to set; a fork whose `packages: write` is unavailable logs a notice and skips the image, rather than failing the release |
 | `SPARKLE_PRIVATE_KEY` | `appcast` (stub) | the EdDSA key Sparkle's `sign_update` signs the DMG with. **Never** in the repo or an artifact. `ops/release/appcast.mjs` refuses to emit an unsigned feed |
 | `SPARKLE_PUBLIC_ED_KEY` | `appcast` (stub) | the matching public key, for the SwiftUI app's `Info.plist` (`SUPublicEDKey`) once that target exists. Not sensitive — fine committed too — kept as a secret so CI never has to read it out of the Xcode project |
@@ -210,6 +209,65 @@ for something else), it shadows your `gh auth login` keyring session and
 `gh secret set` 404s instead of asking you to log in — run
 `env -u GH_TOKEN gh secret set …` for this and any other `gh` admin
 operation.
+## Publishing to npm: Trusted Publishing, no token
+
+The `npm` job authenticates with npm's **Trusted Publishing** (OIDC): GitHub
+issues the job a short-lived identity token (`permissions: id-token: write`),
+npm exchanges it for a publish token scoped to that one run, and nothing
+long-lived is ever stored as a secret. This needs npm CLI ≥ 11.5.1 and
+Node ≥ 22.14 — the job pins Node with a `>=22.14.0` range and installs the
+latest npm explicitly, since the npm bundled with Node itself is older.
+
+**Bootstrap, once per package.** Trusted Publishing can only be *configured*
+for a package that already exists on npm, so the first version of each new
+`@foldedspacelabs/metistry-*` package has to be published by hand before any
+of this applies to it:
+
+```sh
+# from the built package's directory (or: pnpm -r publish --access public --no-git-checks)
+npm login                       # short-lived, granular token — see below
+npm publish --access public
+```
+
+Then, on npmjs.com, for that package: **Settings → Trusted publishing → Add
+a trusted publisher → GitHub Actions**, with:
+
+- Organization or user: `foldedspacelabs`
+- Repository: `metistry`
+- Workflow filename: `release.yml`
+- Environment: (leave blank unless a `npm` job environment is added later)
+
+Once every package in the list below is configured this way, `release.yml`
+publishes all of them with no further owner action. Do this once for the
+org, too: **npmjs.com → org settings → Publishing access → "Require two-factor
+authentication and disallow tokens"** — the point of Trusted Publishing is
+that long-lived tokens stop being a way in at all. Then revoke the bootstrap
+token from Account → Access Tokens; it was only ever needed to get each
+package's first version onto the registry.
+
+**Packages to bootstrap** (every `packages/*/package.json` with a public
+name — none in this repo are private):
+
+- `@foldedspacelabs/metistry-artifacts`
+- `@foldedspacelabs/metistry-cli`
+- `@foldedspacelabs/metistry-core`
+- `@foldedspacelabs/metistry-mcp-apple-fm`
+- `@foldedspacelabs/metistry-mcp-brain`
+- `@foldedspacelabs/metistry-mcp-eventkit`
+- `@foldedspacelabs/metistry-queries`
+- `@foldedspacelabs/metistry-tasks`
+
+**Provenance and the private repo.** npm provenance attests that a package
+was built by a specific public CI run; npm does not generate it for a
+private repository, even for a package published as `public`. `release.yml`
+only passes `--provenance` when `github.event.repository.private == false`,
+so today it's silently omitted — the moment this repo goes public, the next
+release starts attaching it with no workflow change needed.
+
+Until a package is configured, or on a fork that doesn't own the
+`foldedspacelabs` scope, npm answers the publish with a 404/403; the job
+logs an `::notice::` naming the package and continues rather than failing
+the release.
 
 ## The macOS app (not built yet)
 

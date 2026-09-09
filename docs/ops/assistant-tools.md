@@ -17,7 +17,7 @@ manifest by test):
 | --- | --- | --- |
 | in | `capture`, `report` | Propose to the inbox / proposal queue for anything unsettled; you triage. |
 | shared work | `tasks_list_ready`, `tasks_claim`, `tasks_heartbeat`, `tasks_update`, `tasks_release`, `tasks_create`, `tasks_mine` | Works the same shared list as every other agent — claims, leases, notes. |
-| out | `knowledge_search`, `knowledge_read` | Reads the vault index and note contents (via the reconciler's vault bridge), within its grant. `knowledge_read` returns the note's `sha256`. |
+| out | `knowledge_search`, `knowledge_read`, `knowledge_list`, `knowledge_grep` | Reads the vault index, note contents, a directory listing, and a content regex (all via the reconciler's vault bridge), within its grant — `knowledge_list`/`knowledge_grep` are filesystem semantics over the same tiers `knowledge_search`/`knowledge_read` already enforce (docs/research/2026-09-stash-review.md item 3). `knowledge_read` returns the note's `sha256`. |
 | write | `knowledge_write` | **This is `brain-commit`** (plan §4.7, D5): one note under `Knowledge/` → the reconciler's `POST /vault/write` with a commit intent in the assistant's name. Internal principals only; every external agent is told "not granted". No delete, no rename — those stay your hand. |
 | artifacts | `artifact_publish`, `artifact_get`, `artifact_list`, `artifact_comment`, `artifact_comment_resolve`, `artifact_dispatch_review` | Publishes versioned output into `Artifacts/<project>/<slug>/` (one commit per version via the reconciler), comments on exact versions, and sends review bundles to other agents in the same project — a dispatch across the project boundary becomes a proposal for you (§4.21). |
 | crews | `crew_dispatch` | Hands a brief to a crew you defined in `agents/<area>/<name>.md` (`docs/ops/crews.md`). Internal principals only; the brief is policy-checked against the crew's scope before a durable work row is written; results come back as the crew's own `report` proposals. |
@@ -49,12 +49,12 @@ docker compose up -d --build   # both services read .env
 | `METISTRY_BRAIN_URL` | assistant | Where `/mcp` is; compose defaults to `http://console:8080/mcp` over the compose network. |
 | `METISTRY_ASSISTANT_PROJECTS` | console | Comma-separated project slugs. **Empty = every project** (mcp-brain's internal rule, `packages/mcp-brain/src/scope.ts`); a list narrows it like any external agent. |
 | `METISTRY_ASSISTANT_AREAS` | console | Comma-separated `Knowledge/` prefixes for the grant. Default `Knowledge/` — the whole vault, root notes included (below). |
-| `METISTRY_RECONCILER_URL`, `METISTRY_BRIDGE_TOKEN_RECONCILER` | console | The reconciler's vault bridge (`docs/ops/reconciler.md`). Both `knowledge_read` and `knowledge_write` go through it; unset → both answer `not_available` and the brain's `check()` is `degraded`. |
+| `METISTRY_RECONCILER_URL`, `METISTRY_BRIDGE_TOKEN_RECONCILER` | console | The reconciler's vault bridge (`docs/ops/reconciler.md`). `knowledge_read`, `knowledge_write`, `knowledge_list`, and `knowledge_grep` all go through it; unset → all answer `not_available` and the brain's `check()` is `degraded`. |
 | `METISTRY_IDENTITY_FILES`, `METISTRY_PROMPT_FILES` | assistant | D4 overlays for `identity.yaml` and the seed system prompt (`seed/assistant-prompt.md`); last existing file wins. |
 | `METISTRY_MAX_TURNS` | assistant | Agentic turns per message (default 12 with tools, 4 without). |
 
 Startup logs to look for: console `internal agent 'assistant' registered`
-(or `re-synced`); assistant `tools: 21 via http://console:8080/mcp (...)` (the count tracks `packages/mcp-brain/manifest.yaml`)
+(or `re-synced`); assistant `tools: 23 via http://console:8080/mcp (...)` (the count tracks `packages/mcp-brain/manifest.yaml`)
 and `identity: <name>`.
 
 **Rotate** by changing the value in `.env` and restarting both containers:

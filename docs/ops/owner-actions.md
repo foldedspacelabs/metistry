@@ -7,18 +7,17 @@ Kept current as PRs land (2026-09-08). Each item names what it unblocks.
       `metistry-reconciler` — org → Packages → package settings → Change
       visibility). Unblocks `metistry update --channel release` on the Studio
       (`docker compose pull` currently gets 401).
-- [ ] **Apple signing runbook** (`docs/ops/apple-signing.md`): Developer ID
-      certificate into the login keychain; re-sign the two helpers with
-      `METISTRY_SIGN_IDENTITY` set and re-grant TCC once; `notarytool
-      store-credentials`; Sparkle EdDSA key pair (`bash
-      ops/release/fetch-sparkle-tools.sh` then `generate_keys` — no
-      Homebrew, the cask is disabled). Unblocks the DMG/appcast jobs and
-      stops helper grants rotting on rebuild.
+- [x] **Apple signing runbook** — done 2026-09-08/09: Developer ID certificate
+      installed; helpers signed as bundles and TCC proven to survive rebuilds
+      (#84); `notarytool` credentials stored (profile `metistry-notary`);
+      Sparkle key pair generated (public key in
+      `ops/release/runtime-versions.env`, private key in the Keychain and the
+      `SPARKLE_PRIVATE_KEY` repo secret).
 - [ ] **GitHub repo secrets** still missing for the DMG job: `NPM_TOKEN` (only if
       publishing to npm), `APPLE_CERTIFICATE_P12`,
       `APPLE_CERTIFICATE_PASSWORD`, `APPLE_ID`, `APPLE_TEAM_ID`,
       `APPLE_APP_SPECIFIC_PASSWORD` (`docs/ops/releases.md`).
-- [ ] **Extend `METISTRY_GITHUB_TOKEN` with `Contents: read`** (or just rely
+- [x] **Extend `METISTRY_GITHUB_TOKEN` with `Contents: read`** (done 2026-09-08; or just rely
       on `gh`, already installed and logged in on the Studio):
       `metistry update --channel release` against the private repo 403s on
       the current fine-grained PAT (Issues/Pull requests/Metadata only) —

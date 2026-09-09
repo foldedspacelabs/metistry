@@ -61,27 +61,31 @@ describe.skipIf(!hasDb)("collectors (real db)", () => {
     ]);
   });
 
-  it("claude-usage rolls assistant turns into per-model daily metrics, idempotently", async () => {
-    const turn = (model: string, tin: number, tout: number, cost: number, ts: string) =>
+  it("claude-usage rolls assistant turns into per-model daily metrics, idempotently, including cache read/write", async () => {
+    const turn = (model: string, tin: number, tout: number, cost: number, ts: string, cacheRead: number, cacheWrite: number) =>
       pool.query(
         `INSERT INTO runs (ts, component, kind, model, tokens_in, tokens_out, cost_usd, ok, meta, started_at, finished_at)
-         VALUES ($1, 'assistant', 'turn', $2, $3, $4, $5, true, '{"itest":"1"}', $1, $1)`,
-        [ts, model, tin, tout, cost],
+         VALUES ($1, 'assistant', 'turn', $2, $3, $4, $5, true, $6::jsonb, $1, $1)`,
+        [ts, model, tin, tout, cost, JSON.stringify({ itest: "1", cache_read: cacheRead, cache_write: cacheWrite })],
       );
-    await turn("haiku", 100, 400, 0.01, "2026-09-05T10:00:00Z");
-    await turn("haiku", 50, 100, 0.005, "2026-09-05T22:00:00Z");
-    await turn("sonnet", 2000, 300, 0.09, "2026-09-05T23:30:00Z");
+    await turn("haiku", 100, 400, 0.01, "2026-09-05T10:00:00Z", 200, 50);
+    await turn("haiku", 50, 100, 0.005, "2026-09-05T22:00:00Z", 0, 0);
+    await turn("sonnet", 2000, 300, 0.09, "2026-09-05T23:30:00Z", 4000, 0);
     const ctx = { now: new Date("2026-09-06T12:00:00Z") };
-    expect(await claudeUsage(pool, ctx)).toBe(6);
-    expect(await claudeUsage(pool, ctx)).toBe(6); // rerun replaces, never accumulates
+    expect(await claudeUsage(pool, ctx)).toBe(10);
+    expect(await claudeUsage(pool, ctx)).toBe(10); // rerun replaces, never accumulates
     const { rows } = await pool.query(
       `SELECT ts::date::text AS day, labels->>'model' AS model, name, value::float AS value
        FROM metrics WHERE name LIKE 'claude.%' ORDER BY model, name`,
     );
     expect(rows).toEqual([
+      { day: "2026-09-05", model: "haiku", name: "claude.cache_read", value: 200 },
+      { day: "2026-09-05", model: "haiku", name: "claude.cache_write", value: 50 },
       { day: "2026-09-05", model: "haiku", name: "claude.cost_usd", value: 0.015 },
       { day: "2026-09-05", model: "haiku", name: "claude.tokens_in", value: 150 },
       { day: "2026-09-05", model: "haiku", name: "claude.tokens_out", value: 500 },
+      { day: "2026-09-05", model: "sonnet", name: "claude.cache_read", value: 4000 },
+      { day: "2026-09-05", model: "sonnet", name: "claude.cache_write", value: 0 },
       { day: "2026-09-05", model: "sonnet", name: "claude.cost_usd", value: 0.09 },
       { day: "2026-09-05", model: "sonnet", name: "claude.tokens_in", value: 2000 },
       { day: "2026-09-05", model: "sonnet", name: "claude.tokens_out", value: 300 },

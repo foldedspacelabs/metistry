@@ -672,6 +672,15 @@ can see your own token spend split by tier.
 - Obsidian pointed at `Knowledge/`, reading state via the console HTTP API
 - `knowledge` extracted as a module (§4.20) while its search is being
   rewritten — same tables, one service, MCP + HTTP + CLI adapters
+- **`knowledge-fold`** (Stash review, 2026-09-09): the §4.11 evening fold
+  built as a routine that enqueues one assistant turn over everything new
+  since its last run, writing only inside reserved paths with
+  `source: knowledge-fold`, never reading its own output; `Me/` and
+  protected paths still go through proposals
+- `metistry import-sessions` (host-side, deterministic summaries of local
+  Claude Code transcripts → `/capture` kind `session`); `mcp-brain`
+  `knowledge_list`/`knowledge_grep` + vault notes as MCP resources;
+  webhook ingress for collectors (`ingress: webhook | schedule | both`)
 
 **Deliberately last** — for *embeddings*, not recall. Semantic search over a
 thin corpus isn't worth much; it earns its place once there's a year of

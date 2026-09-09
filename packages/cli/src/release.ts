@@ -75,8 +75,10 @@ export interface ResolvedRelease {
   /** without the leading v */
   version: string;
   tag: string;
-  /** asset name → download url (browser_download_url; unusable by the direct fetch path when `via` is "gh") */
+  /** asset name → download url (browser_download_url; on a private repo this 404s for anything but a browser session — use `assetIds` + the authenticated API instead when a token is configured) */
   assets: Record<string, string>;
+  /** asset name → GitHub's numeric id, for `GET /releases/assets/<id>` (the one path that reads a private repo's asset bytes with a token) */
+  assetIds: Record<string, number>;
   /** which path answered: the direct GitHub API call, or the `gh` CLI fallback */
   via: "api" | "gh";
 }
@@ -84,7 +86,17 @@ export interface ResolvedRelease {
 interface GhRelease {
   tag_name?: string;
   draft?: boolean;
-  assets?: { name?: string; browser_download_url?: string }[];
+  assets?: { name?: string; id?: number; browser_download_url?: string }[];
+}
+
+function assetMaps(assets: GhRelease["assets"]): { assets: Record<string, string>; assetIds: Record<string, number> } {
+  const urls: Record<string, string> = {};
+  const ids: Record<string, number> = {};
+  for (const a of assets ?? []) {
+    if (a.name && a.browser_download_url) urls[a.name] = a.browser_download_url;
+    if (a.name && typeof a.id === "number") ids[a.name] = a.id;
+  }
+  return { assets: urls, assetIds: ids };
 }
 
 /** `gh --version` exits 0, so this also doubles as "gh is on PATH". */
@@ -112,9 +124,7 @@ async function resolveViaGh(exec: Exec, repo: string, want: string | undefined):
   }
   const tag = body.tag_name;
   if (typeof tag !== "string" || tag === "") throw new StepFailed(`gh api ${path} returned a release with no tag_name`);
-  const assets: Record<string, string> = {};
-  for (const a of body.assets ?? []) if (a.name && a.browser_download_url) assets[a.name] = a.browser_download_url;
-  return { version: tag.replace(/^v/, ""), tag, assets, via: "gh" };
+  return { version: tag.replace(/^v/, ""), tag, ...assetMaps(body.assets), via: "gh" };
 }
 
 /**
@@ -166,9 +176,7 @@ export async function resolveRelease(opts: { fetchFn: typeof fetch; repo?: strin
   const body = (await res.json()) as GhRelease;
   const tag = body.tag_name;
   if (typeof tag !== "string" || tag === "") throw new StepFailed(`${url} returned a release with no tag_name`);
-  const assets: Record<string, string> = {};
-  for (const a of body.assets ?? []) if (a.name && a.browser_download_url) assets[a.name] = a.browser_download_url;
-  return { version: tag.replace(/^v/, ""), tag, assets, via: "api" };
+  return { version: tag.replace(/^v/, ""), tag, ...assetMaps(body.assets), via: "api" };
 }
 
 /** `<sha256>  <filename>` lines (sha256sum/shasum output) → filename → digest. */
@@ -179,13 +187,6 @@ export function parseChecksums(text: string): Record<string, string> {
     if (m?.[1] && m[2]) out[m[2].replace(/^\.\//, "")] = m[1].toLowerCase();
   }
   return out;
-}
-
-/** GET a small text asset (checksums.txt) through the injected fetch — shared with runtime-deps.ts. */
-export async function fetchText(fetchFn: typeof fetch, url: string, what: string): Promise<string> {
-  const res = await fetchFn(url, { headers: { "user-agent": "metistry-cli" }, signal: AbortSignal.timeout(60_000) });
-  if (!res.ok) throw new StepFailed(`${what}: HTTP ${res.status} from ${url}`);
-  return await res.text();
 }
 
 /** Download to `dest` and return its sha256. Nothing is trusted until the caller compares it. */
@@ -216,6 +217,78 @@ export async function downloadViaGh(r: StepRunner, repo: string, tag: string, as
   const dest = join(dir, asset);
   const buf = await readFile(dest);
   return { bytes: buf.byteLength, sha256: createHash("sha256").update(buf).digest("hex") };
+}
+
+/**
+ * `GET /repos/<repo>/releases/assets/<id>` with `Accept: application/octet-stream`
+ * and the bearer token — the one path that reads a PRIVATE repo's asset
+ * bytes with a token; `browser_download_url` needs a browser session there
+ * and 404s for a token (GitHub's docs). GitHub answers with a 302 to a
+ * signed, time-limited S3 URL: the redirect is followed manually and the
+ * Authorization header is deliberately NOT resent on it — S3 doesn't
+ * recognise a GitHub token, and forwarding one to a third-party host is a
+ * needless credential leak.
+ */
+async function downloadAssetViaApi(fetchFn: typeof fetch, env: NodeJS.ProcessEnv, repo: string, id: number, dest: string): Promise<{ bytes: number; sha256: string }> {
+  const api = env.METISTRY_GITHUB_API ?? "https://api.github.com";
+  const url = `${api}/repos/${repo}/releases/assets/${id}`;
+  const headers: Record<string, string> = { accept: "application/octet-stream", "user-agent": "metistry-cli", authorization: `Bearer ${env.METISTRY_GITHUB_TOKEN}` };
+  let res: Response;
+  try {
+    res = await fetchFn(url, { headers, redirect: "manual", signal: AbortSignal.timeout(30_000) });
+  } catch (err) {
+    throw new StepFailed(`download failed for ${url} (${err instanceof Error ? err.message : String(err)})`);
+  }
+  if (res.status >= 300 && res.status < 400) {
+    const loc = res.headers.get("location");
+    if (!loc) throw new StepFailed(`download failed for ${url}: HTTP ${res.status} redirect with no Location header`);
+    return await downloadTo(fetchFn, loc, dest); // unauthenticated — the signed URL carries its own credential
+  }
+  if (!res.ok) throw new StepFailed(`download failed for ${url}: HTTP ${res.status}`);
+  const buf = Buffer.from(await res.arrayBuffer());
+  await mkdir(join(dest, ".."), { recursive: true });
+  await writeFile(dest, buf);
+  return { bytes: buf.byteLength, sha256: createHash("sha256").update(buf).digest("hex") };
+}
+
+/**
+ * Download one asset of a resolved release (the runtime pack, the deps
+ * pack, or `checksums.txt`) to `<dir>/<name>` — the single path
+ * `installRelease` and `installRuntimeDeps` both go through, so a private
+ * repo works the same for either pack:
+ *
+ *  - `via: "gh"` (the resolve itself needed `gh`): `gh release download`,
+ *    unchanged.
+ *  - a token is configured: the authenticated asset API, by id — the only
+ *    path that can read a private repo's asset bytes with a token.
+ *  - no token: the plain `browser_download_url` (the public-repo case).
+ *
+ * Either of the last two falls back to `gh release download` on a 404, the
+ * same way an unauthorised RESOLVE already did — so a repo whose token has
+ * a scope gap still gets its bytes as long as `gh` is logged in.
+ */
+export async function downloadAsset(r: StepRunner, opts: { fetchFn: typeof fetch; repo: string; rel: ResolvedRelease; name: string; dir: string; env: NodeJS.ProcessEnv }): Promise<{ bytes: number; sha256: string }> {
+  const { rel, name, dir, env, repo, fetchFn } = opts;
+  if (rel.via === "gh") return downloadViaGh(r, repo, rel.tag, name, dir);
+
+  const dest = join(dir, name);
+  const token = env.METISTRY_GITHUB_TOKEN;
+  try {
+    if (token) {
+      const id = rel.assetIds[name];
+      if (id === undefined) throw new StepFailed(`${rel.tag} has no asset id for ${name} — cannot download it through the authenticated API`);
+      return await downloadAssetViaApi(fetchFn, env, repo, id, dest);
+    }
+    const url = rel.assets[name];
+    if (!url) throw new StepFailed(`release ${rel.tag} has no ${name}`);
+    return await downloadTo(fetchFn, url, dest);
+  } catch (err) {
+    if (err instanceof StepFailed && /HTTP 404/.test(err.message) && (await ghAvailable(r.exec))) {
+      r.note(`${name}: download 404'd — falling back to \`gh release download\``);
+      return await downloadViaGh(r, repo, rel.tag, name, dir);
+    }
+    throw err;
+  }
 }
 
 /** The version `current` points at, or undefined when nothing is installed yet. */
@@ -320,18 +393,12 @@ export async function installRelease(r: StepRunner, opts: InstallReleaseOptions)
   const staging = join(releasesDir(productDir), ".download");
   const tarball = join(staging, asset);
   r.action(`download ${asset} from ${rel.tag} and verify its sha256 against ${CHECKSUMS_ASSET}`);
-  let sumsText: string;
-  if (rel.via === "gh") {
-    await downloadViaGh(r, repo, rel.tag, CHECKSUMS_ASSET, staging);
-    sumsText = await readFile(join(staging, CHECKSUMS_ASSET), "utf8");
-  } else {
-    sumsText = await fetchText(fetchFn, sumsUrl, CHECKSUMS_ASSET);
-  }
-  const sums = parseChecksums(sumsText);
+  await downloadAsset(r, { fetchFn, repo, rel, name: CHECKSUMS_ASSET, dir: staging, env });
+  const sums = parseChecksums(await readFile(join(staging, CHECKSUMS_ASSET), "utf8"));
   const want = sums[asset];
   if (!want) throw new StepFailed(`${CHECKSUMS_ASSET} of ${rel.tag} has no line for ${asset} — refusing to install an unverifiable runtime pack`);
 
-  const got = rel.via === "gh" ? await downloadViaGh(r, repo, rel.tag, asset, staging) : await downloadTo(fetchFn, url, tarball);
+  const got = await downloadAsset(r, { fetchFn, repo, rel, name: asset, dir: staging, env });
   if (got.sha256 !== want) {
     await rm(staging, { recursive: true, force: true });
     throw new StepFailed(`${asset} failed its checksum (expected ${want}, got ${got.sha256}) — the download was discarded and ${CURRENT_LINK} is unchanged`);

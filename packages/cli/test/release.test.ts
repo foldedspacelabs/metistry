@@ -250,6 +250,106 @@ describe("installRelease", () => {
     expect(exec.calls.some((c) => c.cmd === "gh" && c.args[0] === "release" && c.args[1] === "download")).toBe(true);
   });
 
+  it("downloads a private repo's assets through the authenticated asset API when a token is configured, and never resends the token on the redirect", async () => {
+    const P = await mkdtemp(join(tmpdir(), "metistry-rel-"));
+    const src = await checkout();
+    const asset = runtimeAssetName("0.2.0", TARGET);
+    const bytes = Buffer.from("runtime pack for 0.2.0\n".repeat(4));
+    const sums = Buffer.from(`${sha256(bytes)}  ${asset}\n`);
+    const fn = (async (u: string | URL, init?: RequestInit) => {
+      const url = String(u);
+      const auth = (init?.headers as Record<string, string> | undefined)?.authorization;
+      if (url.endsWith("/releases/latest")) {
+        return new Response(
+          JSON.stringify({
+            tag_name: "v0.2.0",
+            assets: [
+              // browser_download_url deliberately 404s here — a private repo needs
+              // a browser session for it, not a token, so the fix must not use it
+              { name: asset, id: 111, browser_download_url: "https://example.test/browser-only/asset" },
+              { name: CHECKSUMS_ASSET, id: 222, browser_download_url: "https://example.test/browser-only/sums" },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      if (url === `https://api.github.com/repos/${REPO}/releases/assets/222`) {
+        expect(auth).toBe("Bearer ghp_x");
+        expect(init?.redirect).toBe("manual");
+        return new Response(null, { status: 302, headers: { location: "https://s3.example.test/sums" } });
+      }
+      if (url === `https://api.github.com/repos/${REPO}/releases/assets/111`) {
+        expect(auth).toBe("Bearer ghp_x");
+        expect(init?.redirect).toBe("manual");
+        return new Response(null, { status: 302, headers: { location: "https://s3.example.test/asset" } });
+      }
+      if (url === "https://s3.example.test/sums") {
+        expect(auth).toBeUndefined(); // the signed URL carries its own credential
+        return new Response(new Uint8Array(sums));
+      }
+      if (url === "https://s3.example.test/asset") {
+        expect(auth).toBeUndefined();
+        return new Response(new Uint8Array(bytes));
+      }
+      return new Response("browser_download_url must not be fetched when a token is configured", { status: 404 });
+    }) as unknown as typeof fetch;
+
+    const { r } = runner(await tarInto(src));
+    const res = await installRelease(r, { productDir: P, fetchFn: fn, env: { METISTRY_GITHUB_TOKEN: "ghp_x" }, target: TARGET });
+    expect(res).toMatchObject({ version: "0.2.0", installed: true });
+    expect(await currentVersion(P)).toBe("0.2.0");
+  });
+
+  it("falls back to `gh release download` when the authenticated asset API 404s, even though resolve already succeeded", async () => {
+    const P = await mkdtemp(join(tmpdir(), "metistry-rel-"));
+    const src = await checkout();
+    const asset = runtimeAssetName("0.2.0", TARGET);
+    const bytes = Buffer.from("runtime pack for 0.2.0\n".repeat(4));
+    const fn = (async (u: string | URL) => {
+      const url = String(u);
+      if (url.endsWith("/releases/latest")) {
+        return new Response(
+          JSON.stringify({
+            tag_name: "v0.2.0",
+            assets: [
+              { name: asset, id: 1, browser_download_url: "https://example.test/asset" },
+              { name: CHECKSUMS_ASSET, id: 2, browser_download_url: "https://example.test/sums" },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      // the resolve worked, but the asset itself 404s (the bug this fixes) — and
+      // the fix must fall back to gh instead of giving up
+      return new Response("not found", { status: 404 });
+    }) as unknown as typeof fetch;
+
+    const { r, exec } = runner(
+      fakeExec({
+        gh: async (args) => {
+          if (args[0] === "--version") return { code: 0, stdout: "gh version 2.0.0" };
+          if (args[0] === "release" && args[1] === "download") {
+            const dir = args[args.indexOf("--dir") + 1]!;
+            const pattern = args[args.indexOf("--pattern") + 1]!;
+            const content = pattern === CHECKSUMS_ASSET ? `${sha256(bytes)}  ${asset}\n` : bytes;
+            await writeFile(join(dir, pattern), content);
+            return { code: 0, stdout: "" };
+          }
+          return { code: 1, stdout: "", stderr: `unexpected gh ${args.join(" ")}` };
+        },
+        tar: async (args) => {
+          const dest = args[args.indexOf("-C") + 1]!;
+          await cp(src, dest, { recursive: true });
+        },
+      }),
+    );
+
+    const res = await installRelease(r, { productDir: P, fetchFn: fn, env: { METISTRY_GITHUB_TOKEN: "ghp_x" }, target: TARGET });
+    expect(res).toMatchObject({ version: "0.2.0", installed: true });
+    expect(await currentVersion(P)).toBe("0.2.0");
+    expect(exec.calls.filter((c) => c.cmd === "gh" && c.args[0] === "release" && c.args[1] === "download")).toHaveLength(2); // checksums.txt and the pack, same function
+  });
+
   it("refuses a release with no checksums.txt, and one with no pack for this platform", async () => {
     const P = await mkdtemp(join(tmpdir(), "metistry-rel-"));
     const { r } = runner();

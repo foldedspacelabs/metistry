@@ -42,6 +42,26 @@ export async function sendToAll(
 }
 
 /**
+ * What a notification calls itself, per outbound kind. One vocabulary with
+ * the rest of the surface (docs/product/glossary.md): the words here are the
+ * words the same thing has in the feed and in the briefs — the stored `kind`
+ * values are untouched. Title Case, because a notification title names a
+ * thing (design-system.md P10).
+ */
+export const NOTIFICATION_TITLE: Readonly<Record<string, string>> = {
+  reply: "Reply",
+  ack: "Captured",
+  brief: "Morning Brief",
+  review: "Weekly Review",
+  alert: "Needs You",
+};
+
+/** The default keeps the product name for a kind nothing has taught us to label yet. */
+export function notificationTitle(kind: unknown): string {
+  return (typeof kind === "string" ? NOTIFICATION_TITLE[kind] : undefined) ?? "Metistry";
+}
+
+/**
  * Notifier loop: push un-notified outbound rows (replies land as web push,
  * §4.9). Runs in the console — the assistant only writes rows.
  */
@@ -55,7 +75,7 @@ export function startNotifier(db: Db, cfg: PushConfig, intervalMs = 2000): NodeJ
         [],
       );
       for (const r of rows) {
-        await sendToAll(db, cfg, { title: "metistry", body: String(r.text).slice(0, 160), url: "/" });
+        await sendToAll(db, cfg, { title: notificationTitle(r.kind), body: String(r.text).slice(0, 160), url: "/" });
       }
     } catch (err) {
       console.error("notifier:", err);

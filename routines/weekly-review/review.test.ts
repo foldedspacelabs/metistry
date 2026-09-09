@@ -44,7 +44,7 @@ describe("weekly review", () => {
     expect(String(inserts[0]![0])).toContain("'review'");
     const text = String(inserts[0]![1]);
     expect(text).toContain("📋 weekly review — Sep 12 to Sep 19");
-    for (const h of ["📂 Projects:", "✅ Decisions you made:", "🔔 Still pending:", "🤖 Agents:", "💸 Spend (7 days):", "⚙️ System:", "🔭 Next week:"]) {
+    for (const h of ["📂 Projects:", "✅ What you decided:", "🔔 Still waiting on you:", "🤖 Agents:", "💸 Spend (7 days):", "⚙️ System:", "🔭 Next week:"]) {
       expect(text).toContain(h);
     }
     expect(text).toContain("• no project activity this week");
@@ -86,24 +86,24 @@ describe("weekly review", () => {
     expect(sent[0]).toContain("• all-closed: 0 tasks created, 0 closed; 1 PR opened, 1 closed\n");
   });
 
-  it("decisions: counts by outcome, top denied reasons from feedback; pending is a count and a link (D10), never the list", async () => {
+  it("decisions: counts by outcome, top decline/revise reasons from feedback; waiting is a count and a link (D10), never the list", async () => {
     const { db, sent } = fakeDb([
       ["feedback IS NOT NULL", [{ feedback: "duplicate of an existing note", n: "2" }, { feedback: "wrong area", n: "1" }]],
       ["decision = 'pending'", [{ n: "4", oldest: daysAgo(9) }]],
       ["GROUP BY decision", [{ decision: "allow", n: "7" }, { decision: "deny", n: "3" }, { decision: "accept_with_changes", n: "1" }, { decision: "expired", n: "2" }]],
     ]);
     await run(db, { now });
-    expect(sent[0]).toContain("• 13 decided: 7 allowed, 3 denied, 1 accepted with changes; 2 auto-expired (still searchable)");
-    expect(sent[0]).toContain('• top denied reasons: "duplicate of an existing note" (2), "wrong area" (1)');
-    expect(sent[0]).toContain("• 4 waiting, oldest 9d — open triage to see everything");
+    expect(sent[0]).toContain("• 13 decided: 7 approved, 3 declined, 1 sent back for revision; 2 auto-expired (still searchable)");
+    expect(sent[0]).toContain('• top reasons you declined or revised: "duplicate of an existing note" (2), "wrong area" (1)');
+    expect(sent[0]).toContain("• 4 waiting, oldest 9d — open Needs You to see everything");
     expect(sent[0]).not.toMatch(/^• #\d+/m); // no per-item pending lines
   });
 
-  it("decisions: denied reasons line is omitted when no feedback was left", async () => {
+  it("decisions: the reasons line is omitted when no feedback was left", async () => {
     const { db, sent } = fakeDb([["GROUP BY decision", [{ decision: "allow", n: "2" }]]]);
     await run(db, { now });
-    expect(sent[0]).toContain("• 2 decided: 2 allowed\n");
-    expect(sent[0]).not.toContain("top denied reasons");
+    expect(sent[0]).toContain("• 2 decided: 2 approved\n");
+    expect(sent[0]).not.toContain("top reasons you declined");
   });
 
   it("agents: per source_agent stats, spend only if any, last_seen from the agents table", async () => {
@@ -115,7 +115,7 @@ describe("weekly review", () => {
       ]],
     ]);
     await run(db, { now });
-    expect(sent[0]).toContain("• claude-desk (Claude Desktop): 2 reports, 1 proposal, 3 tasks claimed, 1 closed, 41 tool calls, 0.32 USD — last seen 2d ago");
+    expect(sent[0]).toContain("• claude-desk (Claude Desktop): 2 reports, 1 request, 3 tasks claimed, 1 closed, 41 tool calls, 0.32 USD — last seen 2d ago");
     expect(sent[0]).toContain("• ghost: 0 reports, 1 task claimed, 0 closed, 1 tool call — not registered");
     expect(sent[0]).toContain("• old (Old): 0 reports, 0 tasks claimed, 0 closed, 0 tool calls — revoked");
   });

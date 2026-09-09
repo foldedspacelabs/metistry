@@ -4,7 +4,7 @@
 # console `/mcp`, with a per-run credential and only the tool groups its
 # manifest names. Nothing here reaches a third party.
 #
-# Dispatch is the assistant's `crew_dispatch` tool (mcp-brain). The console
+# Dispatch is the assistant's `agents_delegate` tool (mcp-brain). The console
 # checks the brief with the SAME enforcement every target gets
 # (apps/console/src/dispatch.ts `checkBrief`), against a policy that is this
 # target's `data_policy` narrowed by the crew's `scope`: a brief may cite a

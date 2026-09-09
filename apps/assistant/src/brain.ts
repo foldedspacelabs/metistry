@@ -18,7 +18,7 @@ export const BRAIN_SERVER = "brain";
  * packages/mcp-brain/manifest.yaml by test/brain.test.ts. `knowledge_write`
  * is the assistant's `brain-commit` (§4.7): the bridge admits it for the
  * internal principal only, and the vault refuses protected paths behind it.
- * `crew_dispatch` is likewise internal-only: the assistant hands briefs to
+ * `agents_delegate` is likewise internal-only: the assistant hands briefs to
  * crews (crew.ts runs them); no crew ever holds either tool. `queries_list`
  * / `queries_run` (invariant 3's one read path) are open to every principal
  * in mcp-brain, but internal ones — the assistant included — always have
@@ -28,26 +28,25 @@ export const BRAIN_SERVER = "brain";
  */
 export const BRAIN_TOOLS = [
   "capture",
-  "report",
-  "tasks_list_ready",
+  "requests_create",
+  "tasks_list",
   "tasks_claim",
-  "tasks_heartbeat",
+  "tasks_renew",
   "tasks_update",
   "tasks_release",
   "tasks_create",
-  "tasks_mine",
   "knowledge_search",
   "knowledge_read",
   "knowledge_list",
   "knowledge_grep",
   "knowledge_write",
-  "artifact_publish",
-  "artifact_get",
-  "artifact_list",
-  "artifact_comment",
-  "artifact_comment_resolve",
-  "artifact_dispatch_review",
-  "crew_dispatch",
+  "artifacts_publish",
+  "artifacts_get",
+  "artifacts_list",
+  "artifacts_comment",
+  "artifacts_resolve",
+  "artifacts_review",
+  "agents_delegate",
   "queries_list",
   "queries_run",
 ] as const;

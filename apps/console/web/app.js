@@ -452,19 +452,41 @@ $("push-test").onclick = async () => {
   if (result !== "sent") alert(`push: ${result}`);
 };
 
-// ----- Needs You (D7: ONE queue for everything that needs the user —
-// knowledge, reports, elevations, improvements, and the assistant's own
-// blocking questions). Grouped by kind, oldest first; every field
-// output-encoded, attribute values quote-safe too (CRIT-7). -----
-const KIND_LABEL = {
-  decision: "the assistant is waiting on you",
-  grant_elevation: "access requests",
-  improvement: "system improvements",
-  knowledge: "knowledge to keep",
-  report: "agent reports",
-  draft_settle: "drafts to settle",
-  action: "suggested actions",
+// ----- Needs You (D7: ONE queue for everything that needs the user). Every
+// row is a REQUEST, and a request has one of six types (glossary.md):
+// note · report · review · question · access · improvement. The stored
+// `proposals.kind` values are unchanged — this is the view layer mapping the
+// eight-or-so internal kinds onto the six words the user reads, so the queue
+// has one vocabulary instead of the union of everything that fills it.
+// Grouped by type, oldest first; every field output-encoded, attribute values
+// quote-safe too (CRIT-7). -----
+const REQUEST_TYPE = {
+  decision: "question",
+  grant_elevation: "access",
+  improvement: "improvement",
+  knowledge: "note",
+  draft_settle: "note",
+  action: "note",
+  report: "report",
+  review: "review",
 };
+// group headings, so Title Case (P10)
+const TYPE_LABEL = {
+  note: "Notes",
+  report: "Reports",
+  review: "Reviews",
+  question: "Questions",
+  access: "Access",
+  improvement: "Improvements",
+};
+const requestType = (kind) => REQUEST_TYPE[kind] ?? kind;
+// Approve / Revise / Decline are the three answers to every request. The wire
+// (and `proposals.decision`) keeps allow / accept_with_changes / deny.
+const DECISIONS = [
+  { d: "allow", label: "Approve" },
+  { d: "accept_with_changes", label: "Revise" },
+  { d: "deny", label: "Decline", style: ' style="background:#7a3b3b"' },
+];
 const attr = (s) => esc(s).replaceAll('"', "&quot;");
 
 async function loadTriage() {
@@ -475,14 +497,23 @@ async function loadTriage() {
   if (tab) tab.textContent = proposals.length ? `Needs You (${proposals.length})` : "Needs You";
   const groups = new Map();
   for (const p of [...proposals].sort((a, b) => new Date(a.ts) - new Date(b.ts))) {
-    if (!groups.has(p.kind)) groups.set(p.kind, []);
-    groups.get(p.kind).push(p);
+    const type = requestType(p.kind);
+    if (!groups.has(type)) groups.set(type, []);
+    groups.get(type).push(p);
   }
   $("proposal-list").innerHTML = [...groups]
-    .map(([kind, rows]) => `<li class="muted">${esc(KIND_LABEL[kind] ?? kind)} · ${rows.length}</li>` + rows.map(proposalRow).join(""))
+    .map(([type, rows]) => `<li class="muted">${esc(TYPE_LABEL[type] ?? type)} · ${rows.length}</li>` + rows.map(proposalRow).join(""))
     .join("");
   document.querySelectorAll("[data-triage]").forEach((b) => (b.onclick = async () => {
-    await api(`/api/proposals/${b.dataset.triage}`, { method: "POST", body: JSON.stringify({ decision: b.dataset.d }) });
+    const body = { decision: b.dataset.d };
+    // Revise is the answer that carries a reason: without one the assistant
+    // has nothing to change, so an empty note cancels rather than sends.
+    if (b.dataset.d === "accept_with_changes") {
+      const feedback = (prompt("what should change?") ?? "").trim();
+      if (!feedback) return;
+      body.feedback = feedback;
+    }
+    await api(`/api/proposals/${b.dataset.triage}`, { method: "POST", body: JSON.stringify(body) });
     loadTriage();
   }));
 }
@@ -494,8 +525,8 @@ function proposalRow(p) {
   const opts = p.kind === "decision" && Array.isArray(p.payload?.options) ? p.payload.options.slice(0, 8) : null;
   const buttons = opts
     ? opts.map((o) => `<button data-triage="${p.id}" data-d="${attr(o)}">${esc(o)}</button>`).join(" ")
-    : `<button data-triage="${p.id}" data-d="allow">allow</button> <button data-triage="${p.id}" data-d="deny" style="background:#7a3b3b">deny</button>`;
-  return `<li><span>${esc(label)} <span class="muted">${esc(p.kind)} · ${esc(c.kind ?? "")} · ${esc(p.source_agent)} · ${new Date(p.ts).toLocaleDateString()}</span></span>
+    : DECISIONS.map((x) => `<button data-triage="${p.id}" data-d="${x.d}"${x.style ?? ""}>${x.label}</button>`).join(" ");
+  return `<li><span>${esc(label)} <span class="muted">${esc(requestType(p.kind))} · ${esc(c.kind ?? "")} · ${esc(p.source_agent)} · ${new Date(p.ts).toLocaleDateString()}</span></span>
         <span>${buttons}</span></li>`;
 }
 
@@ -524,6 +555,14 @@ try {
 
 // ----- agents (external-agent registry; every agent-authored field output-encoded — CRIT-7) -----
 // The token is shown exactly once, at mint/rotate; the list never carries it.
+// One noun per thing (glossary.md): every agent shows a ROLE — assistant (this
+// instance's own), helper (one the user defined under agents/), external —
+// and an ACCESS tier read as none / titles / folders. Both are labels over
+// the stored values (kind internal|external, tier none|index|areas), which do
+// not change.
+const ROLE_LABEL = { internal: "assistant", external: "external", crew: "helper" };
+const ACCESS_LABEL = { none: "none", index: "titles", areas: "folders" };
+const accessLabel = (t) => ACCESS_LABEL[t] ?? t;
 let agentsCache = [];
 async function loadAgents() {
   const res = await api("/api/agents");
@@ -534,19 +573,19 @@ async function loadAgents() {
     .map((a) => {
       const g = a.grants ?? { tier: "none", areas: [] };
       const seen = a.last_seen_at ? `seen ${new Date(a.last_seen_at).toLocaleDateString()}` : "never seen";
-      const scope = g.tier === "areas" ? g.areas.map(esc).join(", ") : esc(g.tier);
+      const scope = g.tier === "areas" ? `folders: ${g.areas.map(esc).join(", ")}` : esc(accessLabel(g.tier));
       const projects = (a.projects ?? []).length ? ` · projects: ${a.projects.map(esc).join(", ")}` : "";
       const au = a.autonomy ?? {};
       const narrowing = [
-        au.may_dispatch_to ? `dispatches to ${au.may_dispatch_to.map(esc).join(", ") || "nobody"}` : "",
+        au.may_dispatch_to ? `delegates to ${au.may_dispatch_to.map(esc).join(", ") || "nobody"}` : "",
         au.accept_from ? `accepts from ${au.accept_from.map(esc).join(", ") || "nobody"}` : "",
         au.max_open_bundles !== undefined ? `max ${Number(au.max_open_bundles) || 0} bundles` : "",
       ].filter(Boolean).join(" · ");
       const actions = a.revoked
         ? '<span class="muted">revoked</span>'
         : `<span><button data-agent-grants="${esc(a.id)}" class="secondary">grants</button> <button data-agent-rotate="${esc(a.id)}" class="secondary">rotate</button> <button data-agent-revoke="${esc(a.id)}">revoke</button></span>`;
-      return `<li class="${a.revoked ? "revoked" : ""}"><span><b>${esc(a.display_name)}</b> <span class="muted">${esc(a.id)} · ${esc(a.kind)}</span><br>
-        <span class="muted">tier: ${scope}${projects} · ${seen}</span>${narrowing ? `<br><span class="muted">autonomy: ${narrowing}</span>` : ""}<br>
+      return `<li class="${a.revoked ? "revoked" : ""}"><span><b>${esc(a.display_name)}</b> <span class="muted">${esc(a.id)}</span> <span class="chip">${esc(ROLE_LABEL[a.kind] ?? a.kind)}</span><br>
+        <span class="muted">access: ${scope}${projects} · ${seen}</span>${narrowing ? `<br><span class="muted">autonomy: ${narrowing}</span>` : ""}<br>
         <span id="presence-${esc(a.id)}" class="presence"></span></span>${actions}</li>`;
     })
     .join("");
@@ -680,17 +719,21 @@ function renderRuns({ rows, as_of }) {
 }
 
 // §4.19 one row per project + §4.21 the kill switch: a mode chip and ONE
-// toggle (confirm first — flipping to autonomous re-extends trust to every
-// member). Every server value is output-encoded; counts pass through asNum().
+// toggle (confirm first — flipping back to Auto re-extends trust to every
+// member). The user reads Auto / Supervised (glossary.md); the stored values
+// stay autonomous / review, and the chip keeps the stored value as its CSS
+// class. Every server value is output-encoded; counts pass through asNum().
+const MODE_LABEL = { review: "Supervised", autonomous: "Auto" };
+const modeLabel = (m) => MODE_LABEL[m] ?? m;
 function renderProjectRows({ projects, as_of }) {
   $("dash-project-rows").innerHTML = projects.length
     ? projects.map((p) => {
         const flip = p.mode === "review" ? "autonomous" : "review";
-        const why = p.last_mode_change ? ` · ${esc(p.last_mode_change.to)} since ${new Date(p.last_mode_change.ts).toLocaleDateString()} (${esc(p.last_mode_change.reason || p.last_mode_change.by)})` : "";
+        const why = p.last_mode_change ? ` · ${esc(modeLabel(p.last_mode_change.to))} since ${new Date(p.last_mode_change.ts).toLocaleDateString()} (${esc(p.last_mode_change.reason || p.last_mode_change.by)})` : "";
         const budget = p.daily_budget_usd === null || p.daily_budget_usd === undefined ? "no budget" : `budget $${fmtUsd(p.daily_budget_usd)}/day`;
         const queued = asNum(p.bundles_queued);
-        return `<li><div class="row"><span><b>${esc(p.id)}</b> <span class="chip ${esc(p.mode)}">${esc(p.mode)}</span></span>
-            <button class="secondary" data-project-mode="${esc(p.id)}" data-to="${flip}">→ ${flip}</button></div>
+        return `<li><div class="row"><span><b>${esc(p.id)}</b> <span class="chip ${esc(p.mode)}">${esc(modeLabel(p.mode))}</span></span>
+            <button class="secondary" data-project-mode="${esc(p.id)}" data-to="${flip}">→ ${esc(modeLabel(flip))}</button></div>
           <div class="muted">${p.members.length ? p.members.map(esc).join(", ") : "no members"}${why}</div>
           <div class="muted">${asNum(p.open_tasks)} open task(s) · ${asNum(p.bundles_in_flight)} bundle(s) in flight${queued ? ` · <span class="failed">${queued} queued</span>` : ""} · ${asNum(p.open_threads)} open thread(s)${asNum(p.pending_reviews) ? ` · ${asNum(p.pending_reviews)} awaiting you` : ""}</div>
           <div class="muted">spent $${fmtUsd(p.spend_today_usd)} today · ${budget} · cap ${asNum(p.max_open_bundles)} bundles${p.last_activity ? ` · active ${new Date(p.last_activity).toLocaleDateString()}` : ""}</div></li>`;
@@ -700,11 +743,11 @@ function renderProjectRows({ projects, as_of }) {
     const id = b.dataset.projectMode;
     const to = b.dataset.to;
     const warn = to === "review"
-      ? `switch ${id} to review mode? every agent-to-agent review bundle will queue for you until you switch it back.`
-      : `switch ${id} back to autonomous? members will dispatch review bundles to each other without you again.`;
+      ? `set ${id} to supervised? every agent-to-agent review request will queue for you until you set it back.`
+      : `set ${id} back to auto? members will send review requests to each other without you again.`;
     if (!confirm(warn)) return;
     const r = await api(`/api/projects/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify({ mode: to }) });
-    $("dash-projects-msg").textContent = r.ok ? `${id} is now ${to}` : `could not switch ${id} (${r.status})`;
+    $("dash-projects-msg").textContent = r.ok ? `${id} is now ${modeLabel(to).toLowerCase()}` : `could not switch ${id} (${r.status})`;
     loadDashboard();
   }));
   dashStamp("projects", as_of);

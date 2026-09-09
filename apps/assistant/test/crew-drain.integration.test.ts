@@ -97,7 +97,7 @@ describe.skipIf(!hasDb)("crew drain (integration)", () => {
       model: "sonnet",
       maxTurns: 5,
       maxBudgetUsd: 0.1,
-      allowedTools: ["mcp__brain__knowledge_search", "mcp__brain__knowledge_read", "mcp__brain__knowledge_list", "mcp__brain__knowledge_grep", "mcp__brain__report"],
+      allowedTools: ["mcp__brain__knowledge_search", "mcp__brain__knowledge_read", "mcp__brain__knowledge_list", "mcp__brain__knowledge_grep", "mcp__brain__requests_create"],
     });
     expect((o.mcpServers as any).brain.headers.Authorization).toBe(`Bearer ${s.brain.token}`);
     expect(o.systemPrompt).toMatch(/^You work for Tester\./);

@@ -30,7 +30,7 @@ const researcher: CrewSnapshot = {
 };
 
 describe("allowlist from tool groups", () => {
-  it("is exhaustive against mcp-brain's manifest: every tool is in exactly one group, or is a never-tool (knowledge_write, crew_dispatch)", () => {
+  it("is exhaustive against mcp-brain's manifest: every tool is in exactly one group, or is a never-tool (knowledge_write, agents_delegate)", () => {
     const all = manifest.exposes.map((t) => t.name);
     const grouped = Object.values(CREW_TOOL_GROUPS).flat() as string[];
     expect(new Set(grouped).size).toBe(grouped.length); // no tool in two groups
@@ -45,13 +45,13 @@ describe("allowlist from tool groups", () => {
       "mcp__brain__knowledge_read",
       "mcp__brain__knowledge_list",
       "mcp__brain__knowledge_grep",
-      "mcp__brain__report",
+      "mcp__brain__requests_create",
     ]);
     expect(crewToolNames(["tasks", "capture"])).toEqual(["mcp__brain__capture", ...CREW_TOOL_GROUPS.tasks.map((t) => `mcp__brain__${t}`)]);
     expect(crewToolNames([])).toEqual([]);
     const everything = crewToolNames(Object.keys(CREW_TOOL_GROUPS));
     expect(everything).not.toContain("mcp__brain__knowledge_write");
-    expect(everything).not.toContain("mcp__brain__crew_dispatch");
+    expect(everything).not.toContain("mcp__brain__agents_delegate");
     expect(everything).toHaveLength(BRAIN_TOOLS.length - CREW_NEVER_TOOLS.length);
   });
 });
@@ -66,7 +66,7 @@ describe("crew options", () => {
       tools: [],
       strictMcpConfig: true,
       mcpServers: { brain: { type: "http", url: "http://console:8080/mcp", headers: { Authorization: "Bearer run-token-xyz" } } },
-      allowedTools: ["mcp__brain__knowledge_search", "mcp__brain__knowledge_read", "mcp__brain__knowledge_list", "mcp__brain__knowledge_grep", "mcp__brain__report"],
+      allowedTools: ["mcp__brain__knowledge_search", "mcp__brain__knowledge_read", "mcp__brain__knowledge_list", "mcp__brain__knowledge_grep", "mcp__brain__requests_create"],
       permissionMode: "default",
       maxTurns: 7,
       maxBudgetUsd: 0.2,
@@ -92,7 +92,7 @@ describe("crew options", () => {
     const fm = parseYaml(/^---\n([\s\S]*?)\n---/.exec(seedFile)![1]!) as Record<string, unknown>;
     const { type: _t, ...rest } = fm;
     const snap = parseCrewSnapshot({ ...rest, prompt: "p", sha256: "b".repeat(64) });
-    expect(snap).toMatchObject({ name: "researcher", model: "haiku", uses: ["brain-read", "brain-report"], max_turns: 10, budget_usd_per_run: 0.25, prompt: "p" });
+    expect(snap).toMatchObject({ name: "researcher", model: "haiku", uses: ["knowledge", "requests"], max_turns: 10, budget_usd_per_run: 0.25, prompt: "p" });
     expect(() => parseCrewSnapshot({ ...researcher, uses: ["knowledge_write"] })).toThrow(/never available to a crew/);
     expect(() => parseCrewSnapshot({ ...researcher, prompt: "  " })).toThrow(/no operating prompt/);
     expect(() => parseCrewSnapshot({ ...researcher, model: "gpt" })).toThrow(/model/);
@@ -107,7 +107,7 @@ function fakeStream(messages: unknown[]) {
   };
 }
 const init = { type: "system", subtype: "init", session_id: "sess-9" };
-const toolTurn = { type: "assistant", message: { content: [{ type: "tool_use", name: "mcp__brain__knowledge_read", id: "1", input: {} }, { type: "tool_use", name: "mcp__brain__report", id: "2", input: {} }] } };
+const toolTurn = { type: "assistant", message: { content: [{ type: "tool_use", name: "mcp__brain__knowledge_read", id: "1", input: {} }, { type: "tool_use", name: "mcp__brain__requests_create", id: "2", input: {} }] } };
 
 describe("runCrew (fake SDK)", () => {
   const input = { crew: researcher, brief: "do X", brain: { url: "http://c/mcp", token: "t" } };
@@ -119,7 +119,7 @@ describe("runCrew (fake SDK)", () => {
       return fakeStream([init, toolTurn, { type: "result", subtype: "success", is_error: false, result: "the answer", num_turns: 3, total_cost_usd: 0.0123, usage: { input_tokens: 100, output_tokens: 40 }, session_id: "sess-9" }])();
     };
     const r = await runCrew(input, sdk as never);
-    expect(r).toEqual({ outcome: "ok", session_id: "sess-9", num_turns: 3, tokens_in: 100, tokens_out: 40, cost_usd: 0.0123, tools_used: { mcp__brain__knowledge_read: 1, mcp__brain__report: 1 }, text_chars: 10 });
+    expect(r).toEqual({ outcome: "ok", session_id: "sess-9", num_turns: 3, tokens_in: 100, tokens_out: 40, cost_usd: 0.0123, tools_used: { mcp__brain__knowledge_read: 1, mcp__brain__requests_create: 1 }, text_chars: 10 });
     expect(seen!.prompt).toBe("do X");
     expect(seen!.options).toMatchObject({ model: "haiku", maxTurns: 7, maxBudgetUsd: 0.2, allowedTools: crewToolNames(researcher.uses) });
   });

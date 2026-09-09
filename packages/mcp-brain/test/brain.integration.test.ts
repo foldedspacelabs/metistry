@@ -230,14 +230,14 @@ cache_ttl: 0
     const bId = b1.body.task.id as number;
 
     // listing: each sees only its own projects
-    expect((await call(alice, "tasks_list_ready")).body.tasks.map((t: any) => t.id)).toEqual([aId]);
-    expect((await call(bob, "tasks_list_ready")).body.tasks.map((t: any) => t.id)).toEqual([bId]);
-    expect(await call(alice, "tasks_list_ready", { project: PB })).toMatchObject({ isError: true, body: { error: { code: "not_found" } } });
+    expect((await call(alice, "tasks_list")).body.tasks.map((t: any) => t.id)).toEqual([aId]);
+    expect((await call(bob, "tasks_list")).body.tasks.map((t: any) => t.id)).toEqual([bId]);
+    expect(await call(alice, "tasks_list", { project: PB })).toMatchObject({ isError: true, body: { error: { code: "not_found" } } });
 
     // every holder verb on a task outside the boundary is uniformly not_found
     for (const [tool, args] of [
       ["tasks_claim", { id: bId }],
-      ["tasks_heartbeat", { id: bId }],
+      ["tasks_renew", { id: bId }],
       ["tasks_update", { id: bId, note: "x" }],
       ["tasks_release", { id: bId }],
       ["tasks_claim", { id: 999_999_999 }],
@@ -264,12 +264,12 @@ cache_ttl: 0
     const ours = (tasks: any[]) => tasks.filter((t) => [PA, PB].includes(t.project)).map((t) => t.id);
     try {
       // every project: both tasks listed (due first, then oldest), both projects nudged, per-project listing works, create anywhere
-      const all = await call(hub, "tasks_list_ready");
+      const all = await call(hub, "tasks_list");
       expect(ours(all.body.tasks)).toEqual([aId, bId]);
       expect(all.body.tasks.every((t: any) => t.project !== null)).toBe(true);
-      expect(all.nudge).toContain(`1 task ready in project ${PA} — call tasks_list_ready`);
-      expect(all.nudge).toContain(`1 task ready in project ${PB} — call tasks_list_ready`);
-      expect((await call(hub, "tasks_list_ready", { project: PB })).body.tasks.map((t: any) => t.id)).toEqual([bId]);
+      expect(all.nudge).toContain(`1 task ready in project ${PA} — call tasks_list`);
+      expect(all.nudge).toContain(`1 task ready in project ${PB} — call tasks_list`);
+      expect((await call(hub, "tasks_list", { project: PB })).body.tasks.map((t: any) => t.id)).toEqual([bId]);
       const created = await call(hub, "tasks_create", { title: "H1", project: PB, idempotency_key: `${PB}-h1` });
       expect(created.isError).toBe(false);
       expect(created.body.task).toMatchObject({ project: PB, created_by: HUB });
@@ -277,17 +277,17 @@ cache_ttl: 0
 
       // a task with NO project is invisible even to the every-project principal (a project is the unit of coordination)
       const orphan = Number((await pool.query(`INSERT INTO work (title, kind, status) VALUES ('orphan', 'task', 'open') RETURNING id`)).rows[0].id);
-      expect((await call(hub, "tasks_list_ready")).body.tasks.map((t: any) => t.id)).not.toContain(orphan);
+      expect((await call(hub, "tasks_list")).body.tasks.map((t: any) => t.id)).not.toContain(orphan);
       expect((await call(hub, "tasks_claim", { id: orphan })).body.error.code).toBe("not_found");
       await pool.query(`DELETE FROM work WHERE id = $1`, [orphan]);
 
       // narrowed internal: PA only — PB is not_found / forbidden exactly as for alice
-      expect((await call(narrow, "tasks_list_ready")).body.tasks.map((t: any) => t.id)).toEqual([aId]);
+      expect((await call(narrow, "tasks_list")).body.tasks.map((t: any) => t.id)).toEqual([aId]);
       expect((await call(narrow, "tasks_claim", { id: bId })).body.error.code).toBe("not_found");
       expect((await call(narrow, "tasks_create", { title: "sneak", project: PB })).body.error.code).toBe("forbidden");
 
       // the rule is kind-gated: an external principal with an empty list still sees nothing
-      expect((await call(nobody, "tasks_list_ready")).body).toEqual({ tasks: [] });
+      expect((await call(nobody, "tasks_list")).body).toEqual({ filter: "ready", tasks: [] });
       expect((await call(nobody, "tasks_claim", { id: aId })).body.error.code).toBe("not_found");
     } finally {
       await hub.close();
@@ -302,17 +302,17 @@ cache_ttl: 0
     const aId = (await pool.query(`SELECT id FROM work WHERE project = $1 AND title = 'A1'`, [PA])).rows[0].id as number;
 
     // an unrelated tool carries the nudge for alice's project, and bob never sees alice's project
-    const mine = await call(alice, "tasks_mine");
-    expect(mine.body).toEqual({ tasks: [] });
-    expect(mine.nudge).toBe(`nudge: 1 task ready in project ${PA} — call tasks_list_ready`);
-    expect((await call(bob, "tasks_mine")).nudge).toBe(`nudge: 1 task ready in project ${PB} — call tasks_list_ready`);
+    const mine = await call(alice, "tasks_list", { filter: "mine" });
+    expect(mine.body).toEqual({ filter: "mine", tasks: [] });
+    expect(mine.nudge).toBe(`nudge: 1 task ready in project ${PA} — call tasks_list`);
+    expect((await call(bob, "tasks_list", { filter: "mine" })).nudge).toBe(`nudge: 1 task ready in project ${PB} — call tasks_list`);
 
     const claim = await call(alice, "tasks_claim", { id: Number(aId), lease_seconds: 60 });
     expect(claim.body).toMatchObject({ ok: true, task: { id: Number(aId), claimed_by: ALICE, status: "in_progress" } });
     // the ready nudge is gone; the lease (60s < the 120s warning line) is flagged instead
-    expect(claim.nudge).toMatch(new RegExp(`^nudge: claim on task #${aId} expires in \\d+s — call tasks_heartbeat$`));
+    expect(claim.nudge).toMatch(new RegExp(`^nudge: claim on task #${aId} expires in \\d+s — call tasks_renew$`));
 
-    const hb = await call(alice, "tasks_heartbeat", { id: Number(aId), lease_seconds: 900 });
+    const hb = await call(alice, "tasks_renew", { id: Number(aId), lease_seconds: 900 });
     expect(hb.body.ok).toBe(true);
     expect(hb.nudge).toBeNull(); // nothing waiting: no line at all
 
@@ -335,7 +335,7 @@ cache_ttl: 0
     expect(created.body.task.title).toBe("clear evil title");
     const stored = await pool.query(`SELECT title FROM work WHERE id = $1`, [created.body.task.id]);
     expect(stored.rows[0].title).toBe(raw); // the boundary is on the way OUT to an agent, not a rewrite of the record
-    const listed = await call(alice, "tasks_list_ready", { project: PA });
+    const listed = await call(alice, "tasks_list", { project: PA });
     expect(listed.body.tasks.map((t: any) => t.title)).toEqual(["clear evil title"]);
     // tidy so later nudge assertions stay exact
     await call(alice, "tasks_claim", { id: created.body.task.id });
@@ -343,9 +343,9 @@ cache_ttl: 0
     await alice.close();
   });
 
-  it("report: proposals row with server-side provenance; idempotent on key; same title within 24h suppressed", async () => {
+  it("requests_create: a `report` request row with server-side provenance; idempotent on key; same title within 24h suppressed", async () => {
     const alice = await connect("tok-alice");
-    const first = await call(alice, "report", { title: "Found a thing", body: "details", kind: "finding", refs: ["gh:x/y#1"], idempotency_key: "rep-1" });
+    const first = await call(alice, "requests_create", { title: "Found a thing", body: "details", kind: "finding", refs: ["gh:x/y#1"], idempotency_key: "rep-1" });
     expect(first.isError).toBe(false);
     expect(first.body.deduplicated).toBe(false);
     const id = first.body.id as number;
@@ -353,15 +353,15 @@ cache_ttl: 0
     expect(row).toMatchObject({ kind: "report", source_agent: ALICE, trust: "external", decision: "pending" });
     expect(row.payload).toMatchObject({ title: "Found a thing", body: "details", kind: "finding", refs: ["gh:x/y#1"], idempotency_key: "rep-1", provenance: { agent: ALICE, via: "mcp-brain" } });
 
-    expect(await call(alice, "report", { title: "different title", body: "retry", idempotency_key: "rep-1" })).toMatchObject({ body: { id, deduplicated: "idempotency_key" } });
-    expect(await call(alice, "report", { title: "Found a thing", body: "again", idempotency_key: "rep-2" })).toMatchObject({ body: { id, deduplicated: "title" } });
+    expect(await call(alice, "requests_create", { title: "different title", body: "retry", idempotency_key: "rep-1" })).toMatchObject({ body: { id, deduplicated: "idempotency_key" } });
+    expect(await call(alice, "requests_create", { title: "Found a thing", body: "again", idempotency_key: "rep-2" })).toMatchObject({ body: { id, deduplicated: "title" } });
     // another agent's identical title is NOT a duplicate — dedupe is per agent
     const bob = await connect("tok-bob");
-    const bobs = await call(bob, "report", { title: "Found a thing", body: "bob's" });
+    const bobs = await call(bob, "requests_create", { title: "Found a thing", body: "bob's" });
     expect(bobs.body.deduplicated).toBe(false);
     expect(bobs.body.id).not.toBe(id);
     // secret-named fields never reach the queue
-    const leaky = await call(alice, "report", { title: "creds", body: "x", refs: ["api_key=abc"], idempotency_key: "rep-3" });
+    const leaky = await call(alice, "requests_create", { title: "creds", body: "x", refs: ["api_key=abc"], idempotency_key: "rep-3" });
     expect((await pool.query(`SELECT payload FROM proposals WHERE id = $1`, [leaky.body.id])).rows[0].payload.refs).toEqual(["api_key=abc"]); // a ref string is not a secret FIELD
     expect((await pool.query(`SELECT count(*)::int AS n FROM proposals WHERE source_agent = $1 AND kind = 'report'`, [ALICE])).rows[0].n).toBe(2);
     await alice.close();
@@ -792,17 +792,17 @@ cache_ttl: 0
     const verId = "ver_01J00000000000000000000000";
     const cmtId = "cmt_01J00000000000000000000000";
     for (const [name, args] of [
-      ["artifact_publish", { project: PA, slug: "x", files: [{ path: "a.md", content: "a" }], idempotency_key: "k", message: "m" }],
-      ["artifact_get", { id: artId }],
-      ["artifact_list", {}],
-      ["artifact_comment", { artifact: artId, version: verId, body: "b" }],
-      ["artifact_comment_resolve", { id: cmtId }],
-      ["artifact_dispatch_review", { artifact: artId, version: verId, thread_ids: [cmtId], to_agent: BOB }],
+      ["artifacts_publish", { project: PA, slug: "x", files: [{ path: "a.md", content: "a" }], idempotency_key: "k", message: "m" }],
+      ["artifacts_get", { id: artId }],
+      ["artifacts_list", {}],
+      ["artifacts_comment", { artifact: artId, version: verId, body: "b" }],
+      ["artifacts_resolve", { id: cmtId }],
+      ["artifacts_review", { artifact: artId, version: verId, thread_ids: [cmtId], to_agent: BOB }],
     ] as const) {
       expect((await call(ar, name, args)).body.error.code, name).toBe("not_available");
     }
-    // crew_dispatch is the assistant's alone: an external agent is told not granted before any dispatcher is consulted (none is wired here) — still a recorded refusal
-    expect((await call(ar, "crew_dispatch", { crew: "researcher", brief: "b" })).body).toEqual({ error: { code: "forbidden", message: "not granted" } });
+    // agents_delegate is the assistant's alone: an external agent is told not granted before any dispatcher is consulted (none is wired here) — still a recorded refusal
+    expect((await call(ar, "agents_delegate", { crew: "researcher", brief: "b" })).body).toEqual({ error: { code: "forbidden", message: "not granted" } });
     await ar.close();
     const { rows } = await pool.query(
       `SELECT tool, ok, finished_at IS NOT NULL AS finished, meta FROM runs WHERE component = $1 AND kind = 'tool' ORDER BY id`,
@@ -811,7 +811,7 @@ cache_ttl: 0
     const tools = new Set(rows.map((r) => r.tool));
     for (const t of TOOL_NAMES) expect(tools.has(t), t).toBe(true);
     expect(rows.every((r) => r.finished && r.ok !== null)).toBe(true);
-    const rep = rows.find((r) => r.tool === "report" && r.ok);
+    const rep = rows.find((r) => r.tool === "requests_create" && r.ok);
     expect(rep.meta.args.body).toBe("<7 chars>");
     expect(rep.meta).toMatchObject({ proposal_id: expect.any(Number), deduplicated: false });
     const cap = rows.find((r) => r.tool === "capture" && r.meta.args.content_base64);

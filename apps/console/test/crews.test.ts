@@ -40,7 +40,7 @@ describe("crew manifest files", () => {
 
   it("parses the seed researcher: frontmatter → manifest, body → prompt, scope → an external-shaped grant, sha over the file", () => {
     const def = parseCrewFile(seed, "seed/agents/example/researcher.md", { area: "example", name: "researcher" });
-    expect(def.manifest).toMatchObject({ name: "researcher", area: "example", model: "haiku", uses: ["brain-read", "brain-report"], scope: ["Knowledge/Projects", "Knowledge/Resources"], max_turns: 10, budget_usd_per_run: 0.25 });
+    expect(def.manifest).toMatchObject({ name: "researcher", area: "example", model: "haiku", uses: ["knowledge", "requests"], scope: ["Knowledge/Projects", "Knowledge/Resources"], max_turns: 10, budget_usd_per_run: 0.25 });
     expect(def.grants).toEqual({ tier: "areas", areas: ["Knowledge/Projects", "Knowledge/Resources"] });
     expect(def.prompt.startsWith("You are a researcher working for {{name}}")).toBe(true); // templated later, in the runner, from identity.yaml
     expect(def.prompt).not.toContain("---");
@@ -68,7 +68,7 @@ describe("crew manifest files", () => {
     expect(() => parseCrewFile("---\n- a\n---\nbody", "x")).toThrow(/mapping/);
     expect(() => parseCrewFile(withFrontmatter({ type: "collector", schedule: "@daily", writes: ["x"] }), "x")).toThrow(/type must be agent/);
     expect(() => parseCrewFile(withFrontmatter({ uses: ["knowledge_write"] }), "x")).toThrow(/never available to a crew/);
-    expect(() => parseCrewFile(withFrontmatter({ uses: ["crew_dispatch"] }), "x")).toThrow(/never available to a crew/);
+    expect(() => parseCrewFile(withFrontmatter({ uses: ["agents_delegate"] }), "x")).toThrow(/never available to a crew/);
     expect(() => parseCrewFile(withFrontmatter({ uses: ["knowledge_read"] }), "x")).toThrow(/unknown tool group/);
     expect(() => parseCrewFile(withFrontmatter({ scope: ["Knowledge/projects"] }), "x")).toThrow(/scope: area must be a TitleCase/); // the registry's validator, external shape
     expect(() => parseCrewFile(withFrontmatter({ scope: ["Knowledge"] }), "x")).toThrow(/scope/);

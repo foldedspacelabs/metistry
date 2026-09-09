@@ -62,7 +62,7 @@ describe("morning brief (D10 soft budget)", () => {
     expect(q.some((t) => t.includes("INSERT INTO outbound_messages"))).toBe(false);
   });
 
-  it("emits an actionable sectioned brief: today, decisions (soft budget), system", async () => {
+  it("emits an actionable sectioned brief: today, requests (soft budget), system", async () => {
     let briefText = "";
     const pending = Array.from({ length: 8 }, (_, i) => row(i + 1, "knowledge", { classification: { title: `item ${i + 1}` } }, i));
     const db = {
@@ -85,9 +85,9 @@ describe("morning brief (D10 soft budget)", () => {
     expect(briefText).toContain("renew cert");
     expect(briefText).toContain("👀 Reviews waiting on you:");
     expect(briefText).toContain("• foldedspacelabs/metistry#41 claude-usage collector — claude, 2d");
-    expect(briefText).toContain("🔔 Needs your decision:");
+    expect(briefText).toContain("🔔 Needs you:");
     expect(briefText.split("🔔")[1]!.split("📂")[0]!.match(/^• /gm)!.length).toBe(5); // soft budget holds
-    expect(briefText).toContain("…3 more — open triage");
+    expect(briefText).toContain("…3 more — open Needs You");
     expect(briefText).toContain("auto-expired, still searchable");
     expect(briefText).toContain("📂 Projects:");
     expect(briefText).toContain("metistry: 4 open, 1 blocked, 9 closed this week");

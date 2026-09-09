@@ -1,4 +1,4 @@
-// crew_dispatch (plan §4.11 "the brief is the context transfer", §4.18.B
+// agents_delegate (plan §4.11 "the brief is the context transfer", §4.18.B
 // local target, Phase 5 crews) — the ONE tool through which the instance's
 // own assistant hands work to a crew. The bridge owns two rules here and
 // nothing else:
@@ -13,7 +13,7 @@
 //   duplicated. This adapter adds nothing to it.
 //
 // The result of a crew run never comes back through this tool: the crew
-// reports through its own `report` / `tasks_*` calls and the run lands as a
+// reports through its own `requests_create` / `tasks_*` calls and the run lands as a
 // `runs` row on the crew's id (component = crew name, kind = crew_run).
 
 import { z } from "zod";
@@ -21,7 +21,7 @@ import type { ErrorCode } from "@foldedspacelabs/metistry-core";
 import { done, fail, type Outcome } from "./outcome.js";
 import type { AgentPrincipal } from "./types.js";
 
-export const CREW_TOOL_NAMES = ["crew_dispatch"] as const;
+export const CREW_TOOL_NAMES = ["agents_delegate"] as const;
 export type CrewToolName = (typeof CREW_TOOL_NAMES)[number];
 
 /** The server's registration function, narrowed to these names. */
@@ -62,12 +62,12 @@ const NOT_AVAILABLE = "crews are not configured in this deployment (the console 
 
 export function registerCrewTools(reg: Register, dispatcher: CrewDispatcher | undefined, principal: AgentPrincipal): void {
   reg(
-    "crew_dispatch",
-    "Hand a brief to a named crew (a sub-agent with its own model, tools, and read scope); the brief is the full context transfer. " +
-      "A path outside the crew's scope or data policy is refused with violations, nothing queued. Results return only via the crew's own report/tasks_* calls. Instance assistant only; others get not granted.",
+    "agents_delegate",
+    "Delegate a brief to a named helper agent (agents/<area>/<name>.md — its own model, tool groups, and read scope); the brief is the full context transfer. " +
+      "A path outside the agent's scope or the local target's data policy is refused with violations, nothing queued. Results return only via the helper's own requests_create/tasks_* calls. Instance assistant only; others get not granted.",
     {
-      crew: z.string().regex(/^[a-z][a-z0-9-]{0,39}$/).describe("The crew's name (agents/<area>/<name>.md)."),
-      brief: z.string().min(1).max(200_000).describe("Everything the crew needs, in prose. Handles and paths, not pasted secrets."),
+      crew: z.string().regex(/^[a-z][a-z0-9-]{0,39}$/).describe("The helper agent's name (agents/<area>/<name>.md)."),
+      brief: z.string().min(1).max(200_000).describe("Everything the helper needs, in prose. Handles and paths, not pasted secrets."),
       task_id: z.number().int().positive().optional().describe("A related task id, passed to the crew as a handle."),
       idempotency_key: z.string().min(1).max(200).optional(),
     },

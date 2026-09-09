@@ -94,9 +94,13 @@ captured_at: "2026-09-06T…Z"
 
 `hooks/hooks.json` registers a `SessionEnd` hook that runs
 `scripts/session-end.mjs`. It does nothing unless
-`METISTRY_CAPTURE_ON_STOP=1`; when enabled it posts one
-`session-summary` capture (turn count, first prompt, last response,
-clipped) built from the session transcript. It **exits 0 on every path**
+`METISTRY_CAPTURE_ON_STOP=1`; when enabled it posts one `kind: session`
+capture built deterministically from the session transcript — turn counts,
+duration, tools with call counts, files touched, first prompt and last
+response (both clipped), models. No model is called and the transcript
+itself is never posted. The frontmatter, `idempotency_key` included, is the
+same shape `metistry import-sessions` sends, so the two doors dedupe
+against each other (`docs/ops/cli.md`). It **exits 0 on every path**
 and writes at most one line to stderr — a capture door must never fail
 the session it captures from. Claude Code gives `SessionEnd` hooks a
 short budget; the hook's own network timeout is 8 s.

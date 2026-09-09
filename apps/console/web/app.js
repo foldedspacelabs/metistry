@@ -92,11 +92,20 @@ function replyParagraphs(text) {
     .join("");
 }
 
+// The tier this message ran at — the name from the instance's `tiers:` block
+// (a model + an effort). Shown, not chosen: there is no picker in the composer
+// yet, so this is the record of what the router decided. `esc()` because a
+// tier name comes from the instance's own rules.yaml, and nothing that reaches
+// markup here goes un-escaped.
+function tierChip(m) {
+  return m.tier ? ` <span class="chip" title="tier (model + effort)">${esc(m.tier)}</span>` : "";
+}
+
 async function loadMessages() {
   const res = await api("/api/messages?limit=30");
   const { messages } = await res.json();
   const chrono = messages.reverse();
-  const fingerprint = JSON.stringify(chrono.map((m) => [m.direction, m.id, m.status, m.feedback?.rating ?? 0]));
+  const fingerprint = JSON.stringify(chrono.map((m) => [m.direction, m.id, m.status, m.tier ?? "", m.feedback?.rating ?? 0]));
   if (fingerprint === lastRender) return; // no flicker on idle polls
   const firstPaint = lastRender === "";
   const arrived = !firstPaint && chrono.length > lastCount;
@@ -106,7 +115,7 @@ async function loadMessages() {
   const wasAtBottom = firstPaint || atBottom;
   const keepScrollTop = list.scrollTop; // measured before the re-render, restored after
   list.innerHTML = chrono
-    .map((m) => `<li class="${m.direction}"><div class="meta">${new Date(m.ts).toLocaleString()}${m.direction === "in" ? ` · ${m.status}` : ""}</div>${replyParagraphs(m.text)}${m.direction === "out" ? tapbacks(m) : ""}</li>`)
+    .map((m) => `<li class="${m.direction}"><div class="meta">${new Date(m.ts).toLocaleString()}${m.direction === "in" ? ` · ${m.status}` : ""}${tierChip(m)}</div>${replyParagraphs(m.text)}${m.direction === "out" ? tapbacks(m) : ""}</li>`)
     .join("");
   wireTapbacks();
   if (wasAtBottom) {

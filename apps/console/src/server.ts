@@ -12,7 +12,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { runCheck, startRun, finishRun, errorEnvelope, statusFor, type CheckResult } from "@foldedspacelabs/metistry-core";
+import { runCheck, startRun, finishRun, errorEnvelope, rollSession, statusFor, type CheckResult } from "@foldedspacelabs/metistry-core";
 import { QueryError, QueryStore } from "@foldedspacelabs/metistry-queries";
 import { captureToInbox, createBrainServer, type KnowledgeLister, type KnowledgeReader, type KnowledgeVaultSearcher, type KnowledgeWriter, type QueryEmbedder } from "@foldedspacelabs/metistry-mcp-brain";
 import { TasksService } from "@foldedspacelabs/metistry-tasks";
@@ -240,10 +240,15 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     if (auth.kind === "agent") return sendError(res, "forbidden");
 
     if (key === "POST /message") {
-      const body = (await readJson(req)) as { thread_id?: string; text?: string };
+      // `tier` is the composer's picker (a tier name from the instance's
+      // `tiers:` block): an explicit choice for this message only. It applies
+      // where the message would otherwise take the default tier — a command or
+      // a fast path still wins, so picking "deep" never turns `/note` into a
+      // model turn. An unknown name is ignored, not invented.
+      const body = (await readJson(req)) as { thread_id?: string; text?: string; tier?: string };
       if (!body.text) return sendError(res, "invalid_request");
       const thread = body.thread_id ?? "default";
-      const decision = cfg.rules ? routeMessage(cfg.rules, body.text) : null;
+      const decision = cfg.rules ? routeMessage(cfg.rules, body.text, body.tier) : null;
       // Durable BEFORE the 202 (SHOULD-7). Routing decision rides in meta.
       const { rows } = await db.query(
         `INSERT INTO inbound_messages (thread, text, meta) VALUES ($1, $2, $3) RETURNING id`,
@@ -261,7 +266,18 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         [thread, body.text.slice(0, 500)],
       );
       if (answered.rows.length > 0) {
-        await audit("triage", "answered", true, { proposals: answered.rows.map((r: { id: number }) => r.id), thread, message_id: messageId });
+        // A settled decision is a task boundary (cost research decision 3):
+        // roll the thread's session so THIS answer starts a fresh SDK session
+        // rather than carrying the blocked task's context forward. The roll
+        // lands before the assistant claims the row below, so the ordering is
+        // the boundary, not a race.
+        const roll = await rollSession(db, thread, "decision_answered");
+        await audit("triage", "answered", true, {
+          proposals: answered.rows.map((r: { id: number }) => r.id),
+          thread,
+          message_id: messageId,
+          ...(roll.rolled.length > 0 ? { rolled_sessions: roll.rolled, session_turns: roll.turns } : {}),
+        });
       }
 
       // /note: file + inbox row + instant ack — no model, no assistant (§4.1)
@@ -325,12 +341,18 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     if (key === "GET /api/messages") {
       const limit = Math.min(Number(url.searchParams.get("limit") ?? 20), 100);
       const { rows } = await db.query(
+        // `tier` is the name the router (or a routine) put on the row — what
+        // the composer chips show, so a turn's tier is visible in the thread
+        // rather than only in `runs`.
         `SELECT * FROM (
-           SELECT id, ts, thread, text, status, 'in'  AS direction, NULL::jsonb AS feedback FROM inbound_messages
+           SELECT id, ts, thread, text, status, 'in'  AS direction, NULL::jsonb AS feedback,
+                  coalesce(meta->'route'->>'tier', meta->>'tier') AS tier
+           FROM inbound_messages
            UNION ALL
            SELECT o.id, o.ts, o.thread, o.text, o.kind, 'out' AS direction,
                   CASE WHEN f.id IS NULL THEN NULL
-                       ELSE jsonb_build_object('rating', f.rating, 'note', f.note, 'ts', f.ts) END
+                       ELSE jsonb_build_object('rating', f.rating, 'note', f.note, 'ts', f.ts) END,
+                  NULL::text
            FROM outbound_messages o LEFT JOIN reply_feedback f ON f.outbound_message_id = o.id
          ) m ORDER BY ts DESC LIMIT $1`,
         [limit],

@@ -363,6 +363,9 @@ label { display: flex; flex-direction: column; gap: var(--mt-space-1);
   margin-bottom: var(--mt-reply-meta-gap);
   white-space: normal;
 }
+/* The tier chip on a sent message: the meta line is already small, so the
+   chip sits at its size rather than the chip scale's. */
+#messages li .meta .chip { padding: 1px var(--mt-space-2); font-size: inherit; }
 /* app.js splits a reply on blank lines into <p>; single newlines inside one
    keep their break. So a paragraph gap is a 12px margin, never an empty line
    box — the §4 decision, and worth ~22px per break at this size. */

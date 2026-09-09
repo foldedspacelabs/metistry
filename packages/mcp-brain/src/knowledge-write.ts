@@ -11,6 +11,9 @@
 //   principal's read grant — writes never reach wider than reads;
 // - the bridge's own rules stay in force behind this one (protected paths
 //   are the user's hand; traversal, `.git`, symlinks, casing slips refused);
+// - an existing markdown note whose frontmatter `source` is another
+//   principal's is refused (`forbidden`, "owned by <source>; propose
+//   instead") — one writer, but not one owner; new notes are free;
 // - a markdown write is stamped with provenance (§4.15): `source` is the
 //   credential's id — never an argument — and `updated` is today;
 // - compare-and-swap passes through: a 409 comes back as `conflict`
@@ -21,7 +24,7 @@
 import { createHash } from "node:crypto";
 import { parse as parseYaml } from "yaml";
 import type { ErrorCode } from "@foldedspacelabs/metistry-core";
-import { underAreas, validKnowledgePath } from "./knowledge.js";
+import { underAreas, validKnowledgePath, type KnowledgeReader } from "./knowledge.js";
 import type { AgentPrincipal } from "./types.js";
 
 /** The reconciler's commit intent (apps/reconciler `parseIntent`). */
@@ -178,6 +181,41 @@ export function stampProvenance(content: string, agentId: string, now: Date = ne
   return { ok: true, content: `---\n${merged}\n---\n${body}`, ...stamp };
 }
 
+// --- ownership -------------------------------------------------------------
+
+/** The evening fold's own source name (routines/knowledge-fold) — a note it owns is writable by the assistant. */
+export const FOLD_SOURCE = "knowledge-fold";
+
+/** The `source` in a note's frontmatter, or null when there is none (or it is not a scalar string). */
+export function frontmatterSource(content: string): string | null {
+  const m = FRONTMATTER_RE.exec(content);
+  if (!m) return null;
+  let parsed: unknown;
+  try {
+    parsed = parseYaml(m[1]!);
+  } catch {
+    return null;
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  const src = (parsed as Record<string, unknown>).source;
+  return typeof src === "string" && src.trim() ? src.trim() : null;
+}
+
+/**
+ * One writer, but not one owner (§4.11 + the fold's three rules): the
+ * assistant may update a note it wrote (`source` = its own credential id) or
+ * one the fold owns, and NEW notes are always fine — but a note whose
+ * `source` is someone else's (the user's, another agent's) is theirs, and the
+ * assistant must `report` a change rather than make it. Enforced here rather
+ * than in the prompt: "don't edit the user's notes" in a prompt is not a
+ * control (CLAUDE.md).
+ */
+export function ownershipRefusal(existing: string, callerId: string): string | null {
+  const owner = frontmatterSource(existing);
+  if (!owner || owner === callerId || owner === FOLD_SOURCE) return null;
+  return `owned by ${owner}; propose instead`;
+}
+
 // --- the tool body ---------------------------------------------------------
 
 export interface KnowledgeWriteArgs {
@@ -208,6 +246,8 @@ export async function writeKnowledge(
   args: KnowledgeWriteArgs,
   writer: KnowledgeWriter | undefined,
   now: Date = new Date(),
+  /** Vault read path (`cfg.readKnowledge`). Present → the ownership rule is enforced; a read that FAILS refuses the write (never waved through). Absent (no read path in this deployment) → only the vault's own protected-path rules apply. */
+  reader?: KnowledgeReader | undefined,
 ): Promise<KnowledgeWriteOutcome> {
   const { tier, areas } = principal.grants;
   const meta: Record<string, unknown> = { kind: principal.kind ?? "external", tier, areas, path: args.path };
@@ -216,6 +256,19 @@ export async function writeKnowledge(
   if (tier !== "areas" || !underAreas(args.path, areas)) return { ok: false, code: "forbidden", meta }; // writes never exceed reads
   if (!writer) {
     return { ok: false, code: "not_available", message: "knowledge writes are not configured in this deployment (the vault bridge is absent)", meta };
+  }
+
+  // Ownership (see ownershipRefusal): new notes are free; an existing note
+  // belongs to whoever's `source` it carries.
+  if (reader && /\.md$/i.test(args.path)) {
+    let existing: string | null;
+    try {
+      existing = await reader(args.path);
+    } catch {
+      return { ok: false, code: "not_available", message: "could not read the note to check who owns it — try again", meta };
+    }
+    const refusal = existing === null ? null : ownershipRefusal(existing, principal.id);
+    if (refusal) return { ok: false, code: "forbidden", message: refusal, meta: { ...meta, owned_by: frontmatterSource(existing!) } };
   }
 
   let content = args.content;

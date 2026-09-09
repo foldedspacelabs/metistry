@@ -14,8 +14,8 @@ Kept current as PRs land (2026-09-08). Each item names what it unblocks.
       ops/release/fetch-sparkle-tools.sh` then `generate_keys` — no
       Homebrew, the cask is disabled). Unblocks the DMG/appcast jobs and
       stops helper grants rotting on rebuild.
-- [ ] **GitHub repo secrets** for the release workflow: `NPM_TOKEN` (only if
-      publishing to npm), later `SPARKLE_PRIVATE_KEY`, `APPLE_CERTIFICATE_P12`,
+- [ ] **GitHub repo secrets** still missing for the DMG job: `NPM_TOKEN` (only if
+      publishing to npm), `APPLE_CERTIFICATE_P12`,
       `APPLE_CERTIFICATE_PASSWORD`, `APPLE_ID`, `APPLE_TEAM_ID`,
       `APPLE_APP_SPECIFIC_PASSWORD` (`docs/ops/releases.md`).
 - [ ] **Extend `METISTRY_GITHUB_TOKEN` with `Contents: read`** (or just rely

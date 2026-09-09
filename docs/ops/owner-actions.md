@@ -30,7 +30,7 @@ Kept current as PRs land (2026-09-08). Each item names what it unblocks.
 - [ ] `brew install postgresql@17 pgvector` on the Studio. Unblocks the live
       launchd-shape trial (`METISTRY_DEPLOYMENT_SHAPE=launchd metistry up`,
       side by side with compose; `docs/ops/deployment-shapes.md`).
-- [ ] **GitHub OAuth App** (Developer settings → OAuth Apps, "Enable Device
+- [x] **GitHub OAuth App** (done 2026-09-09; shipped as the product default) (Developer settings → OAuth Apps, "Enable Device
       Flow" ticked) → `METISTRY_GITHUB_OAUTH_CLIENT_ID=` in `.env`. Unblocks
       `metistry connect-repo --auth device` (the instance repo is already
       connected by hand, so this is for the app's onboarding flow).

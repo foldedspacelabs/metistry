@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { connectRepo, deviceFlow, parseRemote, DEVICE_CODE_URL, DEVICE_TOKEN_URL, DEVICE_GRANT_TYPE } from "../src/connect-repo.js";
+import { DEFAULT_GITHUB_OAUTH_CLIENT_ID } from "../src/connect-repo.js";
 import type { Exec, ExecOptions } from "../src/exec.js";
 
 const git = (dir: string, ...args: string[]) => execFileSync("git", args, { cwd: dir, encoding: "utf8" }).trim();
@@ -216,11 +217,14 @@ describe("device flow", () => {
     ).rejects.toThrow(/no token on stdin/);
   });
 
-  it("says what to register when the client id is missing, and prints the Linux remediation instead of a Keychain", async () => {
+  it("uses the product's OAuth App when no client id is configured, and prints the Linux remediation instead of a Keychain", async () => {
     const { exec } = fakeExec();
+    let seen = "";
+    const fetchFn = (async (_url: string, init?: { body?: string }) => { seen = String(init?.body ?? ""); throw new Error("stop-here"); }) as unknown as typeof fetch;
     await expect(
-      connectRepo({ url: "https://github.com/octocat/x.git", instanceDir: "/tmp/instance", auth: "device", out: () => {}, exec, env: {}, platform: "darwin" }),
-    ).rejects.toThrow(/METISTRY_GITHUB_OAUTH_CLIENT_ID is unset/);
+      connectRepo({ url: "https://github.com/octocat/x.git", instanceDir: "/tmp/instance", auth: "device", out: () => {}, exec, env: {}, platform: "darwin", fetchFn }),
+    ).rejects.toThrow(/stop-here/);
+    expect(seen).toContain(DEFAULT_GITHUB_OAUTH_CLIENT_ID);
 
     const lines: string[] = [];
     const linux = fakeExec();

@@ -1,5 +1,40 @@
 # @foldedspacelabs/metistry-cli
 
+## 0.3.0
+
+### Minor Changes
+
+- 1e4eaae: The runtime ships with the product. A release now carries
+  `metistry-runtime-deps-<version>-darwin-arm64.tar.gz` — Node, a relocatable
+  Postgres 17 + pgvector built from source, and a minimal git — built by
+  `ops/release/build-runtime-deps.sh` with every version and source sha256
+  pinned in one file, and verified from a *moved* copy of the tree before it is
+  packed. `metistry update --channel release` installs it alongside the runtime
+  pack, and `metistry up` on the launchd shape fetches it when no Postgres
+  exists anywhere; both go through the same checksums.txt verification as the
+  product pack, and `METISTRY_RUNTIME_DEPS=0` keeps them off the network.
+  `METISTRY_PG_BIN` resolution finds `runtime/postgres/bin` as before, and the
+  reconciler's launchd job gets `runtime/git/bin` on the front of its PATH — so
+  a clean Mac needs neither Homebrew nor Xcode Command Line Tools.
+- 92dd868: Session summaries as a capture source (stash review item 2). `core` gains a
+  deterministic Claude Code transcript summariser — turns, duration, files
+  touched, tools with counts, models, first prompt and last response, both
+  clipped — plus the `kind: session` note it renders and a content-derived
+  `idempotency_key`. `cli` gains `metistry import-sessions [--since] [--project]
+  [--limit] [--dry-run]`, which posts those summaries to `/capture` from the
+  host, skipping anything a ledger at `~/.metistry/imported-sessions.json`
+  already sent. No model is called on either side, and a transcript is never
+  posted — only its summary.
+- Knowledge fold (the evening turn that turns accepted items into Journal and entity pages), `import-sessions` and `kind: session` captures, `knowledge_list`/`knowledge_grep` and vault notes as MCP resources under one scope helper, the simplified vocabulary (22 primary tools with call-time aliases; Approve / Revise / Decline; Auto / Supervised), cost discipline ((model, effort) tiers, session roll at task boundaries, cache read/write metrics and a prompt lint), the bundled runtime build (Node, Postgres 17 + pgvector, git — signed), TCC helpers as signed app bundles whose grants survive rebuilds, Sparkle tooling pinned, npm Trusted Publishing, and the GitHub OAuth App shipped as the default for `connect-repo`.
+
+### Patch Changes
+
+- Updated dependencies [ea541bc]
+- Updated dependencies [92dd868]
+- Updated dependencies
+- Updated dependencies [ad185f2]
+  - @foldedspacelabs/metistry-core@0.3.0
+
 ## 0.2.0
 
 ### Minor Changes

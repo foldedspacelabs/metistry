@@ -13,10 +13,12 @@ Kept current as PRs land (2026-09-08). Each item names what it unblocks.
       Sparkle key pair generated (public key in
       `ops/release/runtime-versions.env`, private key in the Keychain and the
       `SPARKLE_PRIVATE_KEY` repo secret).
-- [ ] **GitHub repo secrets** still missing for the DMG job: `NPM_TOKEN` (only if
-      publishing to npm), `APPLE_CERTIFICATE_P12`,
-      `APPLE_CERTIFICATE_PASSWORD`, `APPLE_ID`, `APPLE_TEAM_ID`,
-      `APPLE_APP_SPECIFIC_PASSWORD` (`docs/ops/releases.md`).
+- [x] **GitHub repo secrets** for the DMG job — done 2026-09-09:
+      `APPLE_CERTIFICATE_P12`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_TEAM_ID`,
+      `APPLE_API_KEY_ID`, `APPLE_API_ISSUER_ID`, `APPLE_API_KEY_P8`,
+      `SPARKLE_PRIVATE_KEY`, `SPARKLE_PUBLIC_ED_KEY` all set
+      (`docs/ops/releases.md`). Only `NPM_TOKEN` (publishing to npm) remains
+      optional.
 - [x] **Extend `METISTRY_GITHUB_TOKEN` with `Contents: read`** (done 2026-09-08; or just rely
       on `gh`, already installed and logged in on the Studio):
       `metistry update --channel release` against the private repo 403s on

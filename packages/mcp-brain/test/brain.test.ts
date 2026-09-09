@@ -10,7 +10,7 @@ import { validateManifest } from "@foldedspacelabs/metistry-core";
 import { TasksService } from "@foldedspacelabs/metistry-tasks";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { allProjects, computeNudge, createBrainServer, memberOf, sanitizeDeep, TOOL_NAMES, underAreas, validKnowledgePath, type AgentPrincipal, type Db } from "../src/index.js";
+import { allProjects, computeNudge, createBrainServer, memberOf, resolveAliasCall, sanitizeDeep, TOOL_ALIASES, TOOL_NAMES, underAreas, validKnowledgePath, type AgentPrincipal, type Db } from "../src/index.js";
 
 describe("manifest", () => {
   it("validates through core and exposes exactly the registered tools, in order", () => {
@@ -21,7 +21,8 @@ describe("manifest", () => {
     if (parsed.manifest.type !== "bridge") return;
     expect(parsed.manifest.discovery).toBe("eager");
     expect(parsed.manifest.exposes.map((t) => t.name)).toEqual([...TOOL_NAMES]);
-    expect(TOOL_NAMES.length).toBeLessThanOrEqual(23); // over the PoC-17 tool-COUNT guidance (>20) since knowledge_list/knowledge_grep — the definition-token axis is what actually gates lazy; see "definition size" below
+    expect(TOOL_NAMES.length).toBeLessThanOrEqual(22); // over the PoC-17 tool-COUNT guidance (>20) since knowledge_list/knowledge_grep — the definition-token axis is what actually gates lazy; see "definition size" below
+    expect(parsed.manifest.exposes.map((t) => t.name).filter((n) => Object.hasOwn(TOOL_ALIASES, n))).toEqual([]); // deprecated spellings never reach the listed surface
     expect(parsed.manifest.exposes.every((t) => !t.destructive)).toBe(true); // nothing here mutates the user's world irreversibly: rows, not calendars
   });
 });
@@ -46,6 +47,37 @@ describe("definition size (docs/research/2026-08-tool-discovery.md's other axis)
     } finally {
       await new Promise<void>((r) => server.close(() => r()));
     }
+  });
+});
+
+describe("deprecated tool names (one release; aliases.ts)", () => {
+  it("every alias resolves to a primary name and none of them is itself listed", () => {
+    for (const [old, hit] of Object.entries(TOOL_ALIASES)) {
+      expect(TOOL_NAMES, old).toContain(hit.to);
+      expect(TOOL_NAMES as readonly string[], old).not.toContain(old);
+    }
+  });
+
+  it("resolveAliasCall rewrites a tools/call in place, forces the implied argument, and leaves everything else alone", () => {
+    const mine = { jsonrpc: "2.0", id: 7, method: "tools/call", params: { name: "tasks_mine", arguments: { limit: 5 } } };
+    expect(resolveAliasCall(mine)).toEqual({ alias: "tasks_mine", to: "tasks_list", id: 7 });
+    expect(mine.params).toEqual({ name: "tasks_list", arguments: { limit: 5, filter: "mine" } });
+
+    const ready = { jsonrpc: "2.0", id: "a", method: "tools/call", params: { name: "tasks_list_ready", arguments: { filter: "all" } } };
+    expect(resolveAliasCall(ready)?.to).toBe("tasks_list");
+    expect(ready.params.arguments).toEqual({ filter: "ready" }); // the old name's meaning wins
+
+    const rep = { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "report", arguments: { title: "t", body: "b" } } };
+    expect(resolveAliasCall(rep)?.to).toBe("requests_create");
+    expect(rep.params.arguments).toEqual({ title: "t", body: "b" }); // no argument invented
+
+    // not an alias, not a call, not an object: untouched
+    const primary = { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "tasks_list", arguments: {} } };
+    expect(resolveAliasCall(primary)).toBeNull();
+    expect(primary.params.name).toBe("tasks_list");
+    expect(resolveAliasCall({ jsonrpc: "2.0", id: 3, method: "tools/list", params: { name: "report" } })).toBeNull();
+    expect(resolveAliasCall(null)).toBeNull();
+    expect(resolveAliasCall("report")).toBeNull();
   });
 });
 
@@ -111,8 +143,8 @@ describe("nudge (server-side, deterministic)", () => {
     ]);
     const line = await computeNudge(new TasksService(db), alice, { leaseWarningSeconds: 120 }, now);
     expect(line).toBe(
-      "nudge: 1 task ready in project p1 — call tasks_list_ready; 3 tasks ready in project p2 — call tasks_list_ready; " +
-        "claim on task #7 expires in 45s — call tasks_heartbeat; lease on task #8 expired — call tasks_claim to retake it or tasks_release to hand it back",
+      "nudge: 1 task ready in project p1 — call tasks_list; 3 tasks ready in project p2 — call tasks_list; " +
+        "claim on task #7 expires in 45s — call tasks_renew; lease on task #8 expired — call tasks_claim to retake it or tasks_release to hand it back",
     );
   });
 
@@ -125,7 +157,7 @@ describe("nudge (server-side, deterministic)", () => {
     const hub: AgentPrincipal = { id: "assistant", kind: "internal", grants: { tier: "none", areas: [] }, projects: [] };
     const db = fakeDb({ zeta: 2, alpha: 1 }, [{ id: 10, project: "other", lease: new Date(now + 1_000) }]);
     const line = await computeNudge(new TasksService(db), hub, { leaseWarningSeconds: 120 }, now);
-    expect(line).toBe("nudge: 1 task ready in project alpha — call tasks_list_ready; 2 tasks ready in project zeta — call tasks_list_ready; claim on task #10 expires in 1s — call tasks_heartbeat");
+    expect(line).toBe("nudge: 1 task ready in project alpha — call tasks_list; 2 tasks ready in project zeta — call tasks_list; claim on task #10 expires in 1s — call tasks_renew");
     expect(db.log.filter((l) => l.startsWith("SELECT id, title,")).length).toBe(2); // one ready read + one held read, not one per project
   });
 });

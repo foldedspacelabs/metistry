@@ -112,23 +112,23 @@ export type DataPolicy = z.infer<typeof dataPolicySchema>;
 // sub-agents never write knowledge — is a property of the table below, not
 // of a review.
 
-/** mcp-brain tool groups a crew may name in `uses`. `brain-read` / `brain-report` are the plan's spellings (§4.11). */
+/** mcp-brain tool groups a crew may name in `uses`. `brain-read` / `brain-report` / `report` are older spellings, still accepted (§4.11). */
 export const CREW_TOOL_GROUPS = {
   /** Read the vault under the crew's `scope` (grant tier `areas`): the title index, one note's content, a directory listing, or a content regex — all the same grant. */
   knowledge: ["knowledge_search", "knowledge_read", "knowledge_list", "knowledge_grep"],
-  /** Findings, decisions, gotchas, progress — into the proposal queue the assistant folds later. */
-  report: ["report"],
+  /** Findings, decisions, gotchas, progress — as requests in the Needs You queue the assistant folds later. */
+  requests: ["requests_create"],
   /** Notes and files into the inbox as proposals. */
   capture: ["capture"],
   /** The shared task list, within the crew's `projects`. */
-  tasks: ["tasks_list_ready", "tasks_claim", "tasks_heartbeat", "tasks_update", "tasks_release", "tasks_create", "tasks_mine"],
+  tasks: ["tasks_list", "tasks_claim", "tasks_renew", "tasks_update", "tasks_release", "tasks_create"],
   /** Versioned output into the crew's projects (§4.21). */
-  artifacts: ["artifact_publish", "artifact_get", "artifact_list", "artifact_comment", "artifact_comment_resolve", "artifact_dispatch_review"],
+  artifacts: ["artifacts_publish", "artifacts_get", "artifacts_list", "artifacts_comment", "artifacts_resolve", "artifacts_review"],
 } as const;
 export type CrewToolGroup = keyof typeof CREW_TOOL_GROUPS;
 
-/** Plan-spelled aliases → group. */
-export const CREW_GROUP_ALIASES: Readonly<Record<string, CrewToolGroup>> = { "brain-read": "knowledge", "brain-report": "report" };
+/** Plan-spelled and pre-2026-09-09 aliases → group. */
+export const CREW_GROUP_ALIASES: Readonly<Record<string, CrewToolGroup>> = { "brain-read": "knowledge", "brain-report": "requests", report: "requests" };
 
 /**
  * Tools NO crew may ever hold, whatever `uses` says: the assistant's own
@@ -138,7 +138,7 @@ export const CREW_GROUP_ALIASES: Readonly<Record<string, CrewToolGroup>> = { "br
  * crew's scope/projects the way every other group here is, so handing it to
  * a crew would leak past the boundary `uses` is meant to hold.
  */
-export const CREW_NEVER_TOOLS = ["knowledge_write", "crew_dispatch", "queries_list", "queries_run"] as const;
+export const CREW_NEVER_TOOLS = ["knowledge_write", "agents_delegate", "queries_list", "queries_run"] as const;
 
 /** Resolve a `uses` entry to its group; undefined when it names nothing known. */
 export function crewGroupOf(entry: string): CrewToolGroup | undefined {

@@ -1,4 +1,5 @@
-export { createBrainServer, sanitizeDeep, TOOL_NAMES, type BrainConfig, type BrainServer, type ToolName } from "./server.js";
+export { createBrainServer, sanitizeDeep, TASK_FILTERS, TOOL_NAMES, type BrainConfig, type BrainServer, type TaskFilter, type ToolName } from "./server.js";
+export { ALIAS_NAMES, TOOL_ALIASES, resolveAliasCall } from "./aliases.js";
 export { captureToInbox, type CaptureInput, type CaptureResult } from "./capture.js";
 export { submitReport, REPORT_KINDS, type ReportInput, type ReportKind, type ReportResult } from "./report.js";
 export {
@@ -52,7 +53,7 @@ export {
 export { computeNudge, type NudgeOptions } from "./nudge.js";
 export { allProjects, memberOf } from "./scope.js";
 export type { AgentPrincipal, Db, Tier } from "./types.js";
-export { ARTIFACT_TOOL_NAMES, registerArtifactTools, toPrincipal, type ArtifactToolName } from "./artifacts-tools.js";
+export { ARTIFACTS_TOOL_NAMES, registerArtifactTools, toPrincipal, type ArtifactsToolName } from "./artifacts-tools.js";
 export { CREW_TOOL_NAMES, registerCrewTools, type CrewDispatcher, type CrewDispatchInput, type CrewDispatchOutcome, type CrewToolName } from "./crew-tools.js";
 export { QUERIES_TOOL_NAMES, registerQueriesTools, MAX_ROWS as QUERIES_MAX_ROWS, type QueriesToolName } from "./queries-tools.js";
 export { type Outcome } from "./outcome.js";

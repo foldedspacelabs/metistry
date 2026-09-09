@@ -1,22 +1,22 @@
 name: brain
 type: bridge
-description: The one MCP surface every agent uses — capture/report in, scoped tasks + knowledge out, and the assistant's own write path (§4.11, §4.19, §4.20)
+description: The one MCP surface every agent uses — capture/requests in, scoped tasks + knowledge out, and the assistant's own write path (§4.11, §4.19, §4.20)
 transport: http
 port: 8080               # no bind of its own: mounted at the console's POST /mcp, so this is the console's port
 runs_on: container
 requires_tcc: []
-discovery: eager         # 23 tools — over the PoC-17 tool-COUNT guidance (>20), but the other axis (>5k definition tokens) is what the threshold is actually about; measured by test/brain.test.ts, still well under it
+discovery: eager         # 22 tools — over the PoC-17 tool-COUNT guidance (>20), but the other axis (>5k definition tokens) is what the threshold is actually about; measured by test/brain.test.ts, still well under it. Deprecated spellings (src/aliases.ts) resolve at call time and are deliberately not exposed here: a second copy of these schemas would break the budget on its own.
 degrades: absent
 exposes:
   - name: capture
     description: Drop a note or file into the inbox as a proposal (source_agent stamped from the credential)
-  - name: report
-    description: Submit a finding/decision/gotcha as a `report` proposal — idempotent on idempotency_key, same-title-within-24h suppressed
-  - name: tasks_list_ready
-    description: Unblocked, unclaimed tasks in the caller's projects
+  - name: requests_create
+    description: Raise a request of type `report` (finding/decision/gotcha/progress) for the user's Needs You queue — idempotent on idempotency_key, same-title-within-24h suppressed
+  - name: tasks_list
+    description: Tasks in the caller's projects — filter ready (claimable, default) | mine (held) | all
   - name: tasks_claim
     description: Atomically claim a task (assignee + status + lease in one operation)
-  - name: tasks_heartbeat
+  - name: tasks_renew
     description: Renew the lease on a held task
   - name: tasks_update
     description: Change status or append a note on a held task
@@ -24,8 +24,6 @@ exposes:
     description: Hand a held task back to the list
   - name: tasks_create
     description: Create a task in one of the caller's projects (idempotent on idempotency_key)
-  - name: tasks_mine
-    description: Everything the caller currently holds
   - name: knowledge_search
     description: Search the knowledge index (titles + one-line descriptions) within the caller's grant tier
   - name: knowledge_read
@@ -36,20 +34,20 @@ exposes:
     description: Regex search over settled note content under a granted Knowledge/ prefix, pre-filtered and capped at 50 files / 200 hits; an overly expensive pattern is refused
   - name: knowledge_write
     description: Write one note under Knowledge/ as a commit in the caller's name — internal (assistant) principals only; CAS on expected_sha256; protected paths refused; no delete/rename
-  - name: artifact_publish
+  - name: artifacts_publish
     description: Publish a version of an artifact into one of the caller's projects (compare-and-swap on the current version, idempotent on idempotency_key); returns artifact/version/review links
-  - name: artifact_get
+  - name: artifacts_get
     description: One artifact in the caller's projects — a version with its manifest, the version list, comment threads, links, optionally one text file's content
-  - name: artifact_list
+  - name: artifacts_list
     description: Artifacts across the caller's projects
-  - name: artifact_comment
+  - name: artifacts_comment
     description: Comment on an exact version (optionally one file + opaque anchor) or reply to a thread root; agent-only exchanges past the cap demote the thread to the user
-  - name: artifact_comment_resolve
+  - name: artifacts_resolve
     description: Resolve (or reopen) a thread root
-  - name: artifact_dispatch_review
+  - name: artifacts_review
     description: Send threads to another agent as one claimable review task — inside the project freely, across the boundary as a proposal for the user
-  - name: crew_dispatch
-    description: Hand a brief to a named crew as a durable work row, checked against the crew's scope and the local target's data policy first; internal (assistant) principals only
+  - name: agents_delegate
+    description: Delegate a brief to a named helper agent as a durable work row, checked against the agent's scope and the local target's data policy first; internal (assistant) principals only
   - name: queries_list
     description: List the named queries available on this instance (invariant 3's one read path) — name, description, and each param's type + default
   - name: queries_run

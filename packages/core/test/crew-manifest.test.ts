@@ -37,7 +37,7 @@ describe("crew manifest schema", () => {
   });
 
   it("uses may name groups or their plan aliases, never a write tool or an unknown name", () => {
-    for (const ok of [["knowledge"], ["report"], ["capture"], ["tasks"], ["artifacts"], ["brain-read", "brain-report"], []]) {
+    for (const ok of [["knowledge"], ["requests"], ["capture"], ["tasks"], ["artifacts"], ["brain-read", "brain-report", "report"], []]) {
       expect(errorsOf({ ...researcher, uses: ok }), ok.join()).toBe("");
     }
     for (const never of CREW_NEVER_TOOLS) {
@@ -99,11 +99,12 @@ describe("crew manifest schema", () => {
 describe("tool groups → allowlist", () => {
   it("resolves aliases and keeps group order, deduplicated", () => {
     expect(crewGroupOf("brain-read")).toBe("knowledge");
-    expect(crewGroupOf("brain-report")).toBe("report");
+    expect(crewGroupOf("brain-report")).toBe("requests");
+    expect(crewGroupOf("report")).toBe("requests"); // the pre-2026-09-09 spelling still resolves
     expect(crewGroupOf("tasks")).toBe("tasks");
     expect(crewGroupOf("knowledge_write")).toBeUndefined();
     expect(crewGroupOf("toString")).toBeUndefined(); // prototype names are not groups
-    expect(crewToolsFor(["brain-report", "brain-read", "report"])).toEqual(["knowledge_search", "knowledge_read", "knowledge_list", "knowledge_grep", "report"]);
+    expect(crewToolsFor(["brain-report", "brain-read", "report"])).toEqual(["knowledge_search", "knowledge_read", "knowledge_list", "knowledge_grep", "requests_create"]);
     expect(crewToolsFor([])).toEqual([]);
   });
 

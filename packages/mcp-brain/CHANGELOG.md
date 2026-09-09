@@ -1,5 +1,41 @@
 # @foldedspacelabs/metistry-mcp-brain
 
+## 0.3.0
+
+### Minor Changes
+
+- c07a12c: `knowledge_write` now enforces ownership as well as authorship: an update to
+  an existing markdown note whose frontmatter `source` is neither the caller's
+  own id nor `knowledge-fold` is refused (`forbidden: owned by <source>; propose
+  instead`). New notes are unaffected, and `source` is still stamped from the
+  credential rather than the argument, so "notes I wrote" stays a fact rather
+  than a claim. Hosts pass their vault reader as the new optional fifth argument
+  to `writeKnowledge` (the brain server wires `cfg.readKnowledge` through
+  automatically); when a read fails the write is refused rather than waved
+  through. `ownershipRefusal` and `frontmatterSource` are exported.
+- Knowledge fold (the evening turn that turns accepted items into Journal and entity pages), `import-sessions` and `kind: session` captures, `knowledge_list`/`knowledge_grep` and vault notes as MCP resources under one scope helper, the simplified vocabulary (22 primary tools with call-time aliases; Approve / Revise / Decline; Auto / Supervised), cost discipline ((model, effort) tiers, session roll at task boundaries, cache read/write metrics and a prompt lint), the bundled runtime build (Node, Postgres 17 + pgvector, git — signed), TCC helpers as signed app bundles whose grants survive rebuilds, Sparkle tooling pinned, npm Trusted Publishing, and the GitHub OAuth App shipped as the default for `connect-repo`.
+- ad185f2: One vocabulary everywhere. Eight nouns (knowledge, capture, request, task,
+  artifact, project, agent, activity) and one verb set per object, in the UI, the
+  notifications, the briefs and the tool names. Eleven brain tools were renamed —
+  `report` → `requests_create`, `tasks_list_ready` + `tasks_mine` → `tasks_list
+  {filter}`, `tasks_heartbeat` → `tasks_renew`, `artifact_*` → `artifacts_*`,
+  `crew_dispatch` → `agents_delegate` — and the old spellings keep working for one
+  release (resolved at call time, recorded in `runs.meta.alias`, not listed by
+  `tools/list`). In the console, Needs You now reads Approve / Revise / Decline
+  and project mode reads Auto / Supervised. `docs/product/glossary.md` is the one
+  page that holds the vocabulary.
+
+### Patch Changes
+
+- Updated dependencies [ea541bc]
+- Updated dependencies [92dd868]
+- Updated dependencies
+- Updated dependencies [ad185f2]
+  - @foldedspacelabs/metistry-core@0.3.0
+  - @foldedspacelabs/metistry-artifacts@0.3.0
+  - @foldedspacelabs/metistry-tasks@0.3.0
+  - @foldedspacelabs/metistry-queries@0.3.0
+
 ## 0.2.0
 
 ### Minor Changes

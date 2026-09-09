@@ -771,3 +771,10 @@ your git, on your machine.
   in, only its own `<p>` out), and the token generator now writes *both*
   copies of `tokens.css` — the docs one and the console's — so the PWA
   cannot silently drift from the source of truth.
+- 2026-09-09 — Stash reviewed (`docs/research/2026-09-stash-review.md`).
+  Taking its memory curator's three rules for our evening fold (read only
+  what is new, write only in reserved paths, never read your own
+  output), session summaries as an opt-in capture source, filesystem
+  semantics for agents over the vault, webhook ingress for collectors,
+  and a candidate list of work-instance sources. Leaving full-transcript
+  recording by default and chat over Slack/Telegram.

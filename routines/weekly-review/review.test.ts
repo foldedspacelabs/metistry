@@ -139,6 +139,16 @@ describe("weekly review", () => {
     expect(sent[0]).toContain("• AWS: 35.10 USD — EC2 20.10, S3 11.00, Route53 3.00\n");
   });
 
+  it("spend: cache hit rate appended when cache metrics exist for the window, omitted when they don't", async () => {
+    const { db, sent } = fakeDb([
+      ["claude.cost_usd", [{ model: "sonnet", usd: "1.00" }]],
+      ["claude.cache_read", [{ name: "claude.cache_read", v: "300" }, { name: "claude.cache_write", v: "100" }, { name: "claude.tokens_in", v: "100" }]],
+    ]);
+    await run(db, { now });
+    // 300 / (300 + 100 + 100) = 60%
+    expect(sent[0]).toContain("• assistant (API-equivalent): 1.00 USD — sonnet 1.00 — cache hit rate 60%");
+  });
+
   it("system: runs by component with failures and silent collectors flagged, watchdog alerts, inbox backlog", async () => {
     const { db, sent } = fakeDb([
       ["'collector_run', 'routine_run'", [

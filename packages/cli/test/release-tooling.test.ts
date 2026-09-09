@@ -257,6 +257,13 @@ describe(".github/workflows/release.yml", () => {
     const text = repoFile(".github/workflows/release.yml");
     expect(text).toContain("SPARKLE_PRIVATE_KEY");
     expect(text).toContain("notarytool submit");
+    // exact secret names actually set on foldedspacelabs/metistry — an
+    // Apple ID + app-specific password is not how notarization works here
+    for (const secret of ["APPLE_CERTIFICATE_P12", "APPLE_CERTIFICATE_PASSWORD", "APPLE_TEAM_ID", "APPLE_API_KEY_ID", "APPLE_API_ISSUER_ID", "APPLE_API_KEY_P8"]) {
+      expect(text, `expected secrets.${secret} in release.yml`).toContain(`secrets.${secret}`);
+    }
+    expect(text).not.toContain("APPLE_ID");
+    expect(text).not.toContain("APPLE_APP_SPECIFIC_PASSWORD");
   });
 });
 

@@ -778,3 +778,18 @@ your git, on your machine.
   semantics for agents over the vault, webhook ingress for collectors,
   and a candidate list of work-instance sources. Leaving full-transcript
   recording by default and chat over Slack/Telegram.
+- 2026-09-09 — **The vault now writes itself in the evening, under three
+  rules that are enforced rather than promised.** `routines/knowledge-fold`
+  reads only what is new since its last successful fold (accepted
+  proposals, closed work, published artifacts, captured sessions), turns it
+  into one ≤4 KB brief of handles, and enqueues exactly **one** assistant
+  turn on thread `fold`; the assistant — the one writer — composes
+  `Knowledge/Journal/<date>.md` and the entity pages it owns. The routine
+  calls no model (invariant 4) and never opens the vault, so it cannot read
+  its own output; the ownership rule is a refusal in `knowledge_write`
+  (`forbidden: owned by user; propose instead`) rather than a line in a
+  prompt, so a note the user owns can only ever change through a proposal.
+  This is the step that turns captures into a vault: everything before it
+  produced rows, and this produces linked pages the user can read in
+  Obsidian. The morning brief says what happened overnight in one line
+  ("folded 6 item(s) into the vault last night (3 note(s) written)").

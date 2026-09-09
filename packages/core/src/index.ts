@@ -90,3 +90,19 @@ export {
   type EmbedClientOptions,
   type FetchLike,
 } from "./embed.js";
+export {
+  summarizeTranscript,
+  renderSessionNote,
+  renderSessionBody,
+  sessionTitle,
+  idempotencyKey,
+  formatDuration,
+  repoNameFromPath,
+  decodeProjectDir,
+  textOf,
+  clip,
+  MAX_FILES,
+  FIRST_PROMPT_CHARS,
+  LAST_MESSAGE_CHARS,
+  type SessionSummary,
+} from "./session-summary.js";

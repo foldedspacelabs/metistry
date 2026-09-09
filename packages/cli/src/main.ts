@@ -12,6 +12,7 @@ import { doctor, renderTable, type DoctorDeps } from "./doctor.js";
 import { loadDotEnv, productVersion, resolveProductDir, resolveSeedDir } from "./env.js";
 import { realExec, type Exec } from "./exec.js";
 import { AUTH_MODES, connectRepo, type AuthMode } from "./connect-repo.js";
+import { importSessions } from "./import-sessions.js";
 import { init } from "./init.js";
 import type { LockSource } from "./lock.js";
 import { listSecrets, mintSecret, renderSecretList, syncSecrets, type SyncDirection } from "./secrets.js";
@@ -122,6 +123,18 @@ const USAGE = `metistry — Metistry command line
       CLAUDE_CODE_OAUTH_TOKEN); --to env rewrites just those lines of .env in
       place (0600; every comment and non-secret line preserved). mint makes a
       new random token in both. list prints names only, never values.
+
+  metistry import-sessions [--since <date>] [--project <path>] [--limit N] [--dry-run]
+      Summarise this machine's Claude Code sessions (~/.claude/projects/*/*.jsonl)
+      and POST each one to /capture as kind "session". Host only — the console
+      container has no home directory — and deterministic: no model is called,
+      and what is sent is a summary (turns, files touched, tools, models, first
+      prompt, last response), never a transcript. A ledger at
+      ~/.metistry/imported-sessions.json keyed by session id + transcript mtime
+      makes a re-run a no-op; the note also carries an idempotency_key so the
+      server can dedupe across this verb and the Claude Code plugin's hook.
+      METISTRY_URL and METISTRY_OWNER_TOKEN come from the environment (.env in
+      the checkout) or the login Keychain; neither is ever printed.
 
   metistry doctor [--json] [--product-dir <checkout>]
       Validate every manifest in the checkout and probe every bridge, service,
@@ -270,6 +283,30 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
         }
       } catch (e) {
         err(`metistry secrets: ${e instanceof Error ? e.message : String(e)}`);
+        return 1;
+      }
+    }
+    case "import-sessions": {
+      if (productDir) loadDotEnv(productDir);
+      const limitRaw = str(flags, "limit");
+      const limit = limitRaw === undefined ? undefined : Number(limitRaw);
+      if (limit !== undefined && (!Number.isInteger(limit) || limit <= 0)) {
+        err(`--limit must be a positive integer, not ${JSON.stringify(limitRaw)}`);
+        return 2;
+      }
+      try {
+        const r = await importSessions({
+          out,
+          err,
+          since: str(flags, "since"),
+          project: str(flags, "project"),
+          limit,
+          dryRun: flags["dry-run"] === true,
+          ...(io.exec ? { exec: io.exec } : {}),
+        });
+        return r.code;
+      } catch (e) {
+        err(`metistry import-sessions: ${e instanceof Error ? e.message : String(e)}`);
         return 1;
       }
     }

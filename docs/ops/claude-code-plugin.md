@@ -58,6 +58,25 @@ frontmatter (`source: "claude-code"`, `session_id`, `host`, `repo`,
 `cwd`, `captured_at`, `kind`), so triage and the morning brief can weight
 by origin. Filenames are `claude-code-<kind>-<UTC stamp>.md`.
 
+### The session summary is the same shape `metistry import-sessions` sends
+
+Since 2026-09-09 the `SessionEnd` hook emits frontmatter `kind: "session"`
+with an `idempotency_key`, exactly like the CLI's back-fill verb
+(`docs/ops/cli.md`, "Importing Claude Code sessions") — the two doors
+compute the same key for the same session state, so the server can dedupe
+across them, and `inbox-drain` classifies both as `session`. Its body is the
+same deterministic summary (turns, duration, tools with counts, files
+touched, first prompt, last response); no model is called, and a transcript
+is never posted. Filenames are
+`claude-code-session-<UTC stamp>-<session id prefix>.md`.
+
+The summariser exists twice on purpose: the plugin ships as dependency-free
+`.mjs` a stranger runs out of `~/.claude/plugins`, so it cannot import
+`@foldedspacelabs/metistry-core`, which is what the CLI uses.
+`plugins/claude-code/test/session-parity.test.ts` reads the same fixture
+through both and fails the build the moment they disagree — so edit
+`scripts/lib.mjs` and `packages/core/src/session-summary.ts` together.
+
 ## 5. Failure modes
 
 - Missing env / unreachable instance: the **skill** exits 1 with a

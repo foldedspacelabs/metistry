@@ -793,3 +793,16 @@ your git, on your machine.
   produced rows, and this produces linked pages the user can read in
   Obsidian. The morning brief says what happened overnight in one line
   ("folded 6 item(s) into the vault last night (3 note(s) written)").
+
+- 2026-09-09 — **Coding sessions are now a capture source: opt-in,
+  summarised, never full transcripts.** `metistry import-sessions`
+  back-fills this machine's Claude Code sessions and the plugin's
+  `SessionEnd` hook posts the same shape live: a deterministic summary —
+  turns, duration, files touched, tools with counts, models, first prompt
+  and last response, both clipped — as `kind: session`, classified by
+  `inbox-drain` and listed in Needs You for the coming `knowledge-fold`
+  to give prose. No model touches it, nothing runs unless the owner runs
+  it, and the transcript itself never leaves the machine. Two dedupe
+  layers ship with it (a local ledger keyed by session + mtime, and an
+  `idempotency_key` in the frontmatter that both doors compute alike), so
+  a re-run is a no-op rather than a duplicated inbox.

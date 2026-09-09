@@ -13,6 +13,9 @@ export interface TurnResult {
   session_id: string;
   tokens_in?: number;
   tokens_out?: number;
+  /** Cache tokens from the SDK result's `usage` (Anthropic API's `cache_read_input_tokens` / `cache_creation_input_tokens`). `tokens_in` above stays the uncached input count — these are additional. */
+  cache_read?: number;
+  cache_write?: number;
   cost_usd?: number;
   /** Tool calls the turn made, by name (`mcp__brain__capture`), with counts. Absent when none. */
   tools_used?: Record<string, number>;
@@ -84,6 +87,9 @@ export function makeSdkEngine(cfg: EngineConfig): Engine {
       session_id: sessionId,
       tokens_in: usage.input_tokens,
       tokens_out: usage.output_tokens,
+      // cache_read_input_tokens / cache_creation_input_tokens (BetaUsage, via NonNullableUsage on the result message) — the main-loop total, same scope as tokens_in/out above.
+      cache_read: usage.cache_read_input_tokens,
+      cache_write: usage.cache_creation_input_tokens,
       ...(cost !== undefined ? { cost_usd: cost } : {}),
       ...(Object.keys(tools).length > 0 ? { tools_used: tools } : {}),
     };

@@ -80,13 +80,20 @@ export async function drainOne(db: Db, engine: Engine, defaultModel: string): Pr
       msg.id,
       result.session_id,
     ]);
+    // the turn's own tool calls, by name (each call is ALSO its own runs row
+    // on the agent — mcp-brain, kind=tool) plus cache read/write tokens from
+    // the SDK's usage (cost-optimisation §"Measure": cache_hit_rate is
+    // computed from these downstream by the claude-usage collector).
+    const meta: Record<string, unknown> = {};
+    if (result.tools_used) meta.tools_used = result.tools_used;
+    if (result.cache_read !== undefined) meta.cache_read = result.cache_read;
+    if (result.cache_write !== undefined) meta.cache_write = result.cache_write;
     await finishRun(db, runId, {
       ok: true,
       ...(result.tokens_in !== undefined ? { tokens_in: result.tokens_in } : {}),
       ...(result.tokens_out !== undefined ? { tokens_out: result.tokens_out } : {}),
       ...(result.cost_usd !== undefined ? { cost_usd: result.cost_usd } : {}),
-      // the turn's own tool calls, by name — each call is ALSO its own runs row on the agent (mcp-brain, kind=tool)
-      ...(result.tools_used ? { meta: { tools_used: result.tools_used } } : {}),
+      ...(Object.keys(meta).length > 0 ? { meta } : {}),
     });
   } catch (err) {
     await db.query(`UPDATE inbound_messages SET status = 'failed' WHERE id = $1`, [msg.id]);

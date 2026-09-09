@@ -856,3 +856,9 @@ your git, on your machine.
   update --channel release` fetch and sha256-verify it through the same path
   as the product pack, so the last two things a first-run user had to
   install themselves are now downloads.
+- 2026-09-09 — Cost discipline from Anthropic's own guidance
+  (`docs/research/2026-09-cost-optimization.md`): byte-stable prompts
+  for caching, (model, effort) tiers, fresh sessions at task boundaries,
+  Batch routing for deferred turns on API billing, a prompt lint, and
+  cache hit rate on the dashboard. For subscription users this is
+  headroom; for API users it is the bill — the same design serves both.

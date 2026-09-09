@@ -15,6 +15,21 @@ export {
   type ReadOutcome,
 } from "./knowledge.js";
 export {
+  KNOWLEDGE_FS_TOOL_NAMES,
+  registerKnowledgeFsTools,
+  vaultBridgeLister,
+  vaultBridgeSearcher,
+  literalSeed,
+  grepWithTimeout,
+  type KnowledgeFsDeps,
+  type KnowledgeFsToolName,
+  type KnowledgeLister,
+  type KnowledgeVaultSearcher,
+  type VaultListEntry,
+  type VaultKeywordHit,
+} from "./knowledge-fs.js";
+export { registerKnowledgeResources, resourceUriFor, pathFromResourceUri } from "./knowledge-resources.js";
+export {
   vaultBridgeWriter,
   stampProvenance,
   writeKnowledge,

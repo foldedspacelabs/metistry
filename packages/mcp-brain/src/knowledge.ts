@@ -70,13 +70,15 @@ function escapeLike(s: string): string {
 // The grant filter, once, as a SQL fragment — keyword and semantic both
 // interpolate it against their own alias so the two paths cannot drift.
 // `$n` is the areas array; NULL means "no prefix restriction" (tier index).
-const areaFilter = (col: string, n: number) =>
+// Exported for knowledge-fs.ts's knowledge_list/knowledge_grep, which need
+// the identical filter over `knowledge_files` for their own queries.
+export const areaFilter = (col: string, n: number) =>
   `($${n}::text[] IS NULL OR EXISTS (
       SELECT 1 FROM unnest($${n}::text[]) AS a(raw), LATERAL (SELECT rtrim(a.raw, '/') AS prefix) p
       WHERE ${col} = p.prefix OR left(${col}, length(p.prefix) + 1) = p.prefix || '/'))`;
 
-/** Frontmatter title, else the basename. `t` is the table alias (empty for none). */
-const titleSql = (t = "") => `COALESCE(${t}title, regexp_replace(${t}path, '^.*/|\\.md$', '', 'g'))`;
+/** Frontmatter title, else the basename. `t` is the table alias (empty for none). Exported for knowledge-fs.ts. */
+export const titleSql = (t = "") => `COALESCE(${t}title, regexp_replace(${t}path, '^.*/|\\.md$', '', 'g'))`;
 
 /** RRF's smoothing constant (the standard 60) and the pool each list contributes. */
 const RRF_K = 60;

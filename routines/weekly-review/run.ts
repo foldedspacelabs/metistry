@@ -178,6 +178,13 @@ async function spendBetween(db: Db, from: string, to: string): Promise<string[]>
      GROUP BY 1 ORDER BY 2 DESC`,
     [from, to],
   );
+  // cache_hit_rate over the window (cost-optimisation §"Measure"): cache_read / (cache_read + tokens_in + cache_write)
+  const cache = await db.query(
+    `SELECT name, sum(value) AS v FROM metrics
+     WHERE name IN ('claude.cache_read', 'claude.cache_write', 'claude.tokens_in') AND ts >= $1::date AND ts < $2::date
+     GROUP BY 1`,
+    [from, to],
+  );
   const aws = await db.query(
     `SELECT labels->>'service' AS service, sum(value) AS usd FROM metrics
      WHERE name = 'aws.cost_usd' AND ts >= $1::date AND ts < $2::date
@@ -188,7 +195,11 @@ async function spendBetween(db: Db, from: string, to: string): Promise<string[]>
   if (claude.rows.length === 0) lines.push("• assistant: no usage metrics yet (claude-usage collector)");
   else {
     const total = claude.rows.reduce((s: number, r: any) => s + num(r.usd), 0);
-    lines.push(`• assistant (API-equivalent): ${usd(total)} — ${claude.rows.map((r: any) => `${r.model ?? "?"} ${num(r.usd).toFixed(2)}`).join(", ")}`);
+    const by = (name: string) => num(cache.rows.find((r: any) => r.name === name)?.v);
+    const cacheRead = by("claude.cache_read");
+    const denom = cacheRead + by("claude.cache_write") + by("claude.tokens_in");
+    const rate = denom > 0 ? ` — cache hit rate ${Math.round((cacheRead / denom) * 100)}%` : "";
+    lines.push(`• assistant (API-equivalent): ${usd(total)} — ${claude.rows.map((r: any) => `${r.model ?? "?"} ${num(r.usd).toFixed(2)}`).join(", ")}${rate}`);
   }
   if (aws.rows.length === 0) lines.push("• AWS: no cost data (aws-costs collector not configured)");
   else {

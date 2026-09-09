@@ -868,3 +868,12 @@ your git, on your machine.
   entitlement Calendars access silently requires. Proven on the Studio:
   one approval, then two unattended rebuild-and-restart cycles kept full
   access. The last manual permission step is now a one-time step.
+- 2026-09-09 — Cost-optimisation instrumentation shipped (the "measure
+  first" half of docs/research/2026-09-cost-optimization.md): every turn's
+  `runs` row now carries cache read/write tokens from the SDK's usage,
+  `claude_usage_daily` reports `cache_hit_rate` per model-day, and it shows
+  on the dashboard's spend panel and the weekly review's Spend line. A new
+  `ops/scripts/prompt-lint.mjs`, in CI alongside `check-path-case.sh`, makes
+  "nothing volatile in the system prompt" and "no known prompt anti-patterns"
+  enforced rather than just written down — the seed prompt already passed
+  clean.

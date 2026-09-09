@@ -770,14 +770,21 @@ function renderSpend({ rows, as_of }) {
   // split by tier over the window — the Phase 4 "done when"
   const tiers = new Map();
   for (const r of rows) {
-    const t = tiers.get(r.model) ?? { cost: 0, tin: 0, tout: 0, turns: 0 };
+    const t = tiers.get(r.model) ?? { cost: 0, tin: 0, tout: 0, turns: 0, cread: 0, cwrite: 0 };
     t.cost += asNum(r.cost_usd); t.tin += asNum(r.tokens_in); t.tout += asNum(r.tokens_out); t.turns += asNum(r.turns);
+    t.cread += asNum(r.cache_read); t.cwrite += asNum(r.cache_write);
     tiers.set(r.model, t);
   }
   const sorted = [...tiers].sort((a, b) => b[1].cost - a[1].cost);
   const max = Math.max(0, ...sorted.map(([, t]) => t.cost));
   const total = sorted.reduce((s, [, t]) => s + t.cost, 0);
   $("dash-spend-total").textContent = sorted.length ? `$${fmtUsd(total)} API-equivalent across ${sorted.length} tier(s)` : "";
+  // cache_hit_rate (cost-optimisation §"Measure"): cache_read / (cache_read + tokens_in + cache_write), across the whole window
+  const cread = sorted.reduce((s, [, t]) => s + t.cread, 0);
+  const cwrite = sorted.reduce((s, [, t]) => s + t.cwrite, 0);
+  const tin = sorted.reduce((s, [, t]) => s + t.tin, 0);
+  const denom = cread + cwrite + tin;
+  $("dash-cache-rate").textContent = denom > 0 ? `cache hit rate: ${((cread / denom) * 100).toFixed(0)}%` : "";
   $("dash-tiers").innerHTML = sorted.length
     ? sorted.map(([model, t]) => `<li><div class="row"><span>${esc(model ?? "unknown")}</span><span>$${fmtUsd(t.cost)}</span></div>${barHtml(t.cost, max)}
         <div class="muted">${fmtK(t.tin)} in · ${fmtK(t.tout)} out · ${t.turns} turn(s)</div></li>`).join("")

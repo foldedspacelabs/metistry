@@ -160,14 +160,50 @@ shared list (claim, heartbeat, release), knowledge reads are logged, the
 is enforced in code — it is a seed so the first turns are sensible.
 Operating instructions proper still land in `Knowledge/CLAUDE.md` later.
 
+## Prompt hygiene (docs/research/2026-09-cost-optimization.md)
+
+Anthropic's prompt cache pays off only when the prefix — system prompt,
+tools, prior turns — is byte-identical across a session's turns; anything
+volatile ahead of it (today's date, a note's contents, a count, presence
+info) forces a full re-cache at 1.25x the read price every single turn.
+Two rules, enforced rather than just documented:
+
+- **Nothing volatile in the system prompt, ever.** `loadSystemPrompt`
+  (`apps/assistant/src/prompt.ts`) reads only `identity.yaml` and the seed
+  prompt file at process startup — no clock, no `now.md`, no query result
+  — so the same prompt string serves every turn of every session for the
+  life of the process. `apps/assistant/test/prompt.test.ts` builds it
+  under two different fake dates and asserts the output is byte-for-byte
+  identical; a future change that slips a volatile value in breaks that
+  test before it breaks a cache. Anything that genuinely needs to vary
+  per turn (today's date, what changed since the last message) belongs in
+  the first user message, never the system prompt.
+- **`ops/scripts/prompt-lint.mjs`** (no dependencies, wired into CI
+  alongside `check-path-case.sh`) scans `seed/assistant-prompt.md`,
+  `seed/agents/**/*.md`, `skills/**/SKILL.md` and `plugins/**/SKILL.md`
+  for the doc's known anti-patterns — "verify twice", "double-check", "be
+  maximally thorough", "think step by step", "use a scratchpad", "never
+  forget", `ALWAYS` shouted more than twice in one file, and
+  `{{date}}`/`{{now}}`-style placeholders — and exits 1 with `file:line`
+  on a hit. These cost 14–36% per task for no accuracy gain and, per
+  CLAUDE.md's own rule, a sentence telling the model to be careful is not
+  a control anyway.
+
 ## See what it did
 
 Two kinds of `runs` rows, joined by time and thread:
 
 - **The turn** — `component = 'assistant', kind = 'turn'`: tokens, cost,
-  and `meta.tools_used` (`{"mcp__brain__capture": 1, ...}`) from the SDK
-  result. The dashboard's runs tile counts these as turns; spend rolls
-  into `runs_summary`.
+  `meta.tools_used` (`{"mcp__brain__capture": 1, ...}`), and
+  `meta.cache_read` / `meta.cache_write` (the SDK usage's
+  `cache_read_input_tokens` / `cache_creation_input_tokens`; `tokens_in`
+  stays the uncached count) from the SDK result. The dashboard's runs tile
+  counts these as turns; spend rolls into `runs_summary`; the
+  `claude-usage` collector rolls the cache fields into
+  `claude.cache_read` / `claude.cache_write` metrics, and
+  `claude_usage_daily` computes `cache_hit_rate = cache_read /
+  (cache_read + tokens_in + cache_write)` per model-day — shown on the
+  dashboard's spend panel and in the weekly review's Spend line.
 - **Each tool call** — `component = 'assistant', kind = 'tool',
   tool = <name>`, written by mcp-brain with clipped arguments (note
   content is recorded as `<N chars>`, never the text), and for knowledge

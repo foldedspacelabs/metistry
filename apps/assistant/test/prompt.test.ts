@@ -5,7 +5,7 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { loadSystemPrompt, parseIdentity, readOverlay, renderPrompt } from "../src/prompt.js";
 
 const seedIdentity = readFileSync(new URL("../../../seed/identity.yaml", import.meta.url), "utf8");
@@ -47,5 +47,27 @@ describe("identity + prompt", () => {
     expect(one).toEqual({ prompt: "Override for Ada.", identity: { name: "Ada", voice: "Terse.", mention: undefined, icon: undefined } });
     expect(await loadSystemPrompt({ METISTRY_IDENTITY_FILES: `${dir}/nope.yaml`, METISTRY_PROMPT_FILES: `${dir}/prompt.md` })).toBeUndefined();
     expect(await loadSystemPrompt({ METISTRY_IDENTITY_FILES: `${dir}/identity.yaml`, METISTRY_PROMPT_FILES: `${dir}/nope.md` })).toBeUndefined();
+  });
+
+  // Prompt hygiene (cost-optimisation §"stable prefix"): a date, or anything
+  // else volatile, entering the system prompt breaks the cache on every
+  // turn — the SDK re-caches the whole prefix at 1.25x the read cost. Nothing
+  // here reads the clock, so the prompt built on two different days must be
+  // byte-for-byte identical; a future change that slips a volatile value in
+  // (`now.md`, a count, a timestamp) breaks this test before it breaks a cache.
+  describe("system prompt is byte-stable across turns regardless of the date", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("the seed prompt built on two different fake dates is byte-identical", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+      const first = await loadSystemPrompt();
+      vi.setSystemTime(new Date("2027-06-15T23:59:59Z"));
+      const second = await loadSystemPrompt();
+      expect(second).toEqual(first);
+      expect(second?.prompt).toBe(first?.prompt);
+    });
   });
 });

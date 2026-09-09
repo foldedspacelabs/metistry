@@ -1,5 +1,15 @@
 # @metistry-apps/collectors
 
+## 0.3.0
+
+### Patch Changes
+
+- Updated dependencies [ea541bc]
+- Updated dependencies [92dd868]
+- Updated dependencies
+- Updated dependencies [ad185f2]
+  - @foldedspacelabs/metistry-core@0.3.0
+
 ## 0.2.0
 
 ### Patch Changes

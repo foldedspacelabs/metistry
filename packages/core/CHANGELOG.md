@@ -1,5 +1,40 @@
 # @foldedspacelabs/metistry-core
 
+## 0.3.0
+
+### Minor Changes
+
+- ea541bc: Tiers are (model, effort) pairs, and sessions end at task boundaries. `core`
+  gains `tiers.ts` — the schema for a `tiers:` block, the `default`/`routine`
+  names, and the one resolver that turns a tier NAME into a pair (an unknown
+  name lands on `default`, never on an invented model) — and `session-roll.ts`,
+  which marks a thread's active sessions `rolled` so the next turn starts a
+  fresh SDK session and logs one `runs` row with the reason and the turn count.
+  The `agent` manifest gains an optional `effort` (`low | medium | high`,
+  default `low`), so a crew declares the other half of its tier; a manifest
+  without it keeps working, cheaply. Rationale and figures:
+  `docs/research/2026-09-cost-optimization.md`, decisions 2 and 3.
+- 92dd868: Session summaries as a capture source (stash review item 2). `core` gains a
+  deterministic Claude Code transcript summariser — turns, duration, files
+  touched, tools with counts, models, first prompt and last response, both
+  clipped — plus the `kind: session` note it renders and a content-derived
+  `idempotency_key`. `cli` gains `metistry import-sessions [--since] [--project]
+  [--limit] [--dry-run]`, which posts those summaries to `/capture` from the
+  host, skipping anything a ledger at `~/.metistry/imported-sessions.json`
+  already sent. No model is called on either side, and a transcript is never
+  posted — only its summary.
+- Knowledge fold (the evening turn that turns accepted items into Journal and entity pages), `import-sessions` and `kind: session` captures, `knowledge_list`/`knowledge_grep` and vault notes as MCP resources under one scope helper, the simplified vocabulary (22 primary tools with call-time aliases; Approve / Revise / Decline; Auto / Supervised), cost discipline ((model, effort) tiers, session roll at task boundaries, cache read/write metrics and a prompt lint), the bundled runtime build (Node, Postgres 17 + pgvector, git — signed), TCC helpers as signed app bundles whose grants survive rebuilds, Sparkle tooling pinned, npm Trusted Publishing, and the GitHub OAuth App shipped as the default for `connect-repo`.
+- ad185f2: One vocabulary everywhere. Eight nouns (knowledge, capture, request, task,
+  artifact, project, agent, activity) and one verb set per object, in the UI, the
+  notifications, the briefs and the tool names. Eleven brain tools were renamed —
+  `report` → `requests_create`, `tasks_list_ready` + `tasks_mine` → `tasks_list
+  {filter}`, `tasks_heartbeat` → `tasks_renew`, `artifact_*` → `artifacts_*`,
+  `crew_dispatch` → `agents_delegate` — and the old spellings keep working for one
+  release (resolved at call time, recorded in `runs.meta.alias`, not listed by
+  `tools/list`). In the console, Needs You now reads Approve / Revise / Decline
+  and project mode reads Auto / Supervised. `docs/product/glossary.md` is the one
+  page that holds the vocabulary.
+
 ## 0.2.0
 
 ### Minor Changes

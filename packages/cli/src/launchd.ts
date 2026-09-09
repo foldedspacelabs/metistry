@@ -138,6 +138,39 @@ export function nodeOnPath(env: NodeJS.ProcessEnv = process.env, execPath = proc
   return execPath;
 }
 
+/**
+ * Host jobs that spawn `git`. A launchd job's PATH is `/usr/bin:/bin:…` and
+ * nothing else — no login shell, no Homebrew — and a clean Mac has no git at
+ * all until Xcode Command Line Tools are installed. So when this install
+ * carries a bundled `runtime/git/bin`, it goes on the FRONT of these jobs'
+ * PATH (docs/ops/bundled-runtime.md). The reconciler is the only place git
+ * runs (D5).
+ */
+export const GIT_SPAWNING_SERVICES = new Set(["reconciler"]);
+
+/**
+ * Merge entries into a rendered plist's `EnvironmentVariables` dict, adding
+ * the dict when the template has none. Applied AFTER `renderPlist`, so the
+ * template keeps its two documented placeholders and the by-hand `sed` recipe
+ * in each plist's comment still produces a working job.
+ */
+export function withEnvironmentVariables(plist: string, extra: Record<string, string>): string {
+  const entries = Object.entries(extra);
+  if (entries.length === 0) return plist;
+  const body = renderEnvDict(Object.fromEntries(entries), "    ");
+  const existing = /(<key>EnvironmentVariables<\/key>\s*<dict>)([\s\S]*?)(<\/dict>)/.exec(plist);
+  if (existing) {
+    // keys the template already sets win: the caller is adding, not overriding
+    const already = new Set([...existing[2]!.matchAll(/<key>([^<]+)<\/key>/g)].map((m) => m[1]!));
+    const add = entries.filter(([k]) => !already.has(k));
+    if (add.length === 0) return plist;
+    return plist.replace(existing[0], `${existing[1]}${existing[2]}${renderEnvDict(Object.fromEntries(add), "    ")}\n  ${existing[3]}`);
+  }
+  const at = plist.lastIndexOf("</dict>");
+  if (at === -1) return plist;
+  return `${plist.slice(0, at)}  <key>EnvironmentVariables</key>\n  <dict>\n${body}\n  </dict>\n${plist.slice(at)}`;
+}
+
 /** Where the rendered plists go — the per-user agents directory launchd watches. */
 export function launchAgentsDir(home: string): string {
   return join(home, "Library", "LaunchAgents");

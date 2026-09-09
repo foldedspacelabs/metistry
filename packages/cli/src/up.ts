@@ -20,9 +20,10 @@ import { usesCompose, type Deployment } from "@foldedspacelabs/metistry-core";
 import { assistantEnv, consoleEnv, consolePort, dbPort, loadDeployment, type ShapeContext } from "./deployment.js";
 import { doctor, renderTable, type DoctorDeps, type DoctorReport } from "./doctor.js";
 import type { Exec } from "./exec.js";
-import { launchAgentsDir, launchdCommands, loadPlistTemplates, nodeOnPath, renderPlist, renderSystemdUnit, type PlistTemplate, type PlistValues } from "./launchd.js";
+import { GIT_SPAWNING_SERVICES, launchAgentsDir, launchdCommands, loadPlistTemplates, nodeOnPath, renderPlist, renderSystemdUnit, withEnvironmentVariables, type PlistTemplate, type PlistValues } from "./launchd.js";
 import { instanceLockPath, readLock, type LockFile, type LockSource } from "./lock.js";
 import { currentLink, imageEnv, imageRef, IMAGE_SERVICES } from "./release.js";
+import { installRuntimeDeps, pathWithRuntimeGit, runtimeDepsEnabled, RUNTIME_DIRNAME } from "./runtime-deps.js";
 import {
   applyManagedBlock,
   findPgToolchain,
@@ -63,6 +64,10 @@ export interface UpOptions {
   exists?: ((p: string) => boolean) | undefined;
   /** test seam: the password generated for a fresh Postgres */
   mintPassword?: (() => string) | undefined;
+  /** test seam: the fetch the bundled-runtime download uses */
+  fetchFn?: typeof fetch | undefined;
+  /** the deps pack's os-arch (default: this host's) */
+  target?: string | undefined;
   /** test seam for the closing doctor run */
   doctorFn?: ((deps: DoctorDeps) => Promise<DoctorReport>) | undefined;
   doctorDeps?: Partial<DoctorDeps> | undefined;
@@ -132,6 +137,8 @@ export interface ShapeValues extends ShapeContext {
   pgBin?: string | undefined;
   /** the data directory `up` prepared; defaults to the one under `stateRoot(productDir)` */
   pgData?: string | undefined;
+  /** `<install>/runtime/git/bin:/usr/bin:…` when a bundled git is installed; undefined otherwise */
+  gitPath?: string | undefined;
   home: string;
 }
 
@@ -182,8 +189,12 @@ export async function installLaunchd(r: StepRunner, productDir: string, le: Laun
   for (const t of templates) {
     const target = join(dir, t.file);
     const v = plistValuesFor(t, values);
-    const from = `ops/launchd/${t.file}, __REPO__=${productDir}, __NODE__=${le.node}${v.env ? `, ${Object.keys(v.env).length} EnvironmentVariables from .env` : ""}`;
-    await r.write(target, renderPlist(t.template, v), from);
+    // a launchd job's PATH is /usr/bin:/bin and nothing else, so a bundled git
+    // has to be put there explicitly for the job that spawns one
+    const gitPath = values.gitPath && GIT_SPAWNING_SERVICES.has(t.service) ? { PATH: values.gitPath } : undefined;
+    const from = `ops/launchd/${t.file}, __REPO__=${productDir}, __NODE__=${le.node}${v.env ? `, ${Object.keys(v.env).length} EnvironmentVariables from .env` : ""}${gitPath ? `, PATH=${values.gitPath}` : ""}`;
+    const rendered = renderPlist(t.template, v);
+    await r.write(target, gitPath ? withEnvironmentVariables(rendered, gitPath) : rendered, from);
     // the console's and the assistant's dicts carry db passwords, bridge
     // tokens and CLAUDE_CODE_OAUTH_TOKEN; ~/Library/LaunchAgents is 0755, so
     // the file itself has to be the boundary
@@ -198,6 +209,14 @@ export async function installLaunchd(r: StepRunner, productDir: string, le: Laun
 
 /** How long `up` waits for the freshly bootstrapped server to answer before letting doctor report it. */
 export const PG_READY_TRIES = 15;
+
+/** What `preparePostgres` needs to fetch a bundled runtime; absent = never reach the network. */
+export interface RuntimeDepsFetch {
+  fetchFn: typeof fetch;
+  /** the release to take the deps pack from (default: the latest) */
+  version?: string | undefined;
+  target?: string | undefined;
+}
 
 export interface PgSection {
   plan: PgPlanInput;
@@ -226,10 +245,22 @@ async function runPgStep(r: StepRunner, s: PgStep): Promise<void> {
  * printed remediation and a failed step, never an install this tool runs on
  * the operator's behalf.
  */
-export async function preparePostgres(r: StepRunner, productDir: string, opts: { exists?: ((p: string) => boolean) | undefined; mintPassword: () => string }): Promise<PgSection> {
+export async function preparePostgres(
+  r: StepRunner,
+  productDir: string,
+  opts: { exists?: ((p: string) => boolean) | undefined; mintPassword: () => string; runtimeDeps?: RuntimeDepsFetch | undefined },
+): Promise<PgSection> {
   const env = r.env;
   const exists = opts.exists ?? existsSync;
-  const toolchain = findPgToolchain(pgCandidates(env, productDir), exists);
+  let toolchain = findPgToolchain(pgCandidates(env, productDir), exists);
+  // nothing installed anywhere: in release mode the release itself carries a
+  // Postgres — download the deps pack rather than printing `brew install`
+  if (!toolchain && opts.runtimeDeps) {
+    r.note(`no Postgres found — fetching the bundled runtime into ${RUNTIME_DIRNAME}/ (METISTRY_RUNTIME_DEPS=0 to never do this)`);
+    const res = await installRuntimeDeps(r, { productDir, fetchFn: opts.runtimeDeps.fetchFn, env, version: opts.runtimeDeps.version, ...(opts.runtimeDeps.target ? { target: opts.runtimeDeps.target } : {}) });
+    if (!res.installed) r.note(`bundled runtime not installed: ${res.reason}`);
+    toolchain = findPgToolchain(pgCandidates(env, productDir), exists);
+  }
   if (!toolchain) throw new StepFailed(PG_MISSING_REMEDIATION);
   r.note(`postgres: ${toolchain.bin} (${toolchain.why})`);
   if (!toolchain.pgvector) r.note(PGVECTOR_MISSING_REMEDIATION);
@@ -343,13 +374,23 @@ export async function up(opts: UpOptions): Promise<UpResult> {
       let pg: PgSection | undefined;
       if (deployment.shape === "launchd" && le.platform === "darwin") {
         r.section("postgres");
+        // a release install may fetch its own Postgres (the bundled runtime);
+        // a checkout never does — that operator has Homebrew and a plan
+        const runtimeDeps: RuntimeDepsFetch | undefined =
+          source === "release" && runtimeDepsEnabled(env) && !r.dryRun
+            ? { fetchFn: opts.fetchFn ?? fetch, ...(lock?.product.version ? { version: lock.product.version } : {}), ...(opts.target ? { target: opts.target } : {}) }
+            : undefined;
         // the install root, not the release: `.env`, `state/pg` and any
         // bundled runtime/postgres live where the install does
-        pg = await preparePostgres(r, opts.productDir, { exists: opts.exists, mintPassword: opts.mintPassword ?? mintPassword });
+        pg = await preparePostgres(r, opts.productDir, { exists: opts.exists, mintPassword: opts.mintPassword ?? mintPassword, runtimeDeps });
         values.pgBin = pg.plan.toolchain.bin;
         values.pgData = pg.plan.dataDir;
         await r.run("mkdir", ["-p", values.stateDir], { comment: "the assistant's state dir — HOME, and the only path its sandbox may write" });
       }
+      // the bundled git, if this install has one, goes on the front of the
+      // reconciler's PATH — a clean Mac has no git until Xcode CLT is installed
+      values.gitPath = pathWithRuntimeGit(opts.productDir, opts.exists ?? existsSync);
+      if (values.gitPath) r.note(`git: ${values.gitPath.split(":")[0]} (bundled) — prefixed onto the reconciler's PATH`);
       r.section("launchd");
       await installLaunchd(r, runDir, le, deployment, values);
       if (pg) {

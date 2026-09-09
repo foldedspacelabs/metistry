@@ -25,3 +25,7 @@ dist-release/
 # invariant 1: git is the record, this is regenerable.
 state/
 runtime/
+
+# bundled-runtime build tree (ops/release/build-runtime-deps.sh): source
+# tarballs and the per-version compile cache. `runtime/` above is its output.
+.runtime-build/

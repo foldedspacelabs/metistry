@@ -40,7 +40,13 @@ describe("allowlist from tool groups", () => {
   });
 
   it("maps uses → fully-qualified names, aliases included, never the write or dispatch tools", () => {
-    expect(crewToolNames(["brain-read", "brain-report"])).toEqual(["mcp__brain__knowledge_search", "mcp__brain__knowledge_read", "mcp__brain__report"]);
+    expect(crewToolNames(["brain-read", "brain-report"])).toEqual([
+      "mcp__brain__knowledge_search",
+      "mcp__brain__knowledge_read",
+      "mcp__brain__knowledge_list",
+      "mcp__brain__knowledge_grep",
+      "mcp__brain__report",
+    ]);
     expect(crewToolNames(["tasks", "capture"])).toEqual(["mcp__brain__capture", ...CREW_TOOL_GROUPS.tasks.map((t) => `mcp__brain__${t}`)]);
     expect(crewToolNames([])).toEqual([]);
     const everything = crewToolNames(Object.keys(CREW_TOOL_GROUPS));
@@ -60,7 +66,7 @@ describe("crew options", () => {
       tools: [],
       strictMcpConfig: true,
       mcpServers: { brain: { type: "http", url: "http://console:8080/mcp", headers: { Authorization: "Bearer run-token-xyz" } } },
-      allowedTools: ["mcp__brain__knowledge_search", "mcp__brain__knowledge_read", "mcp__brain__report"],
+      allowedTools: ["mcp__brain__knowledge_search", "mcp__brain__knowledge_read", "mcp__brain__knowledge_list", "mcp__brain__knowledge_grep", "mcp__brain__report"],
       permissionMode: "default",
       maxTurns: 7,
       maxBudgetUsd: 0.2,

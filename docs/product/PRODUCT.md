@@ -806,3 +806,15 @@ your git, on your machine.
   layers ship with it (a local ledger keyed by session + mtime, and an
   `idempotency_key` in the frontmatter that both doors compute alike), so
   a re-run is a no-op rather than a duplicated inbox.
+- 2026-09-09 — **Agents can now navigate the vault like a filesystem, not
+  just search its index.** `knowledge_list` (breadth-limited directory
+  listing) and `knowledge_grep` (regex over settled note content, with a
+  keyword pre-filter and a worker-thread timeout guard against
+  catastrophic patterns) join `knowledge_search`/`knowledge_read` on the
+  same grant tiers, and every settled note is also reachable as an MCP
+  resource (`metistry://Knowledge/<path>`) for clients that browse
+  resources instead of calling tools. The two new tools push
+  `tools/list`'s definition size from ~4.9k to ~5.3k tokens — just over
+  the >5k line docs/research/2026-08-tool-discovery.md set for switching
+  to lazy discovery; flagged, not acted on, in the PR (measured by a new
+  test rather than assumed).

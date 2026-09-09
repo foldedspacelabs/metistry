@@ -63,10 +63,8 @@ const NOT_AVAILABLE = "crews are not configured in this deployment (the console 
 export function registerCrewTools(reg: Register, dispatcher: CrewDispatcher | undefined, principal: AgentPrincipal): void {
   reg(
     "crew_dispatch",
-    "Hand a brief to a named crew (a sub-agent defined in agents/<area>/<name>.md, with its own model, tool groups and read scope). " +
-      "The brief IS the context transfer: write in everything the crew needs, cite vault paths only under the crew's scope — a path outside it, or over the local target's data policy, is refused with the violations and nothing is queued. " +
-      "Dispatch is durable: the crew runs from the work queue (kind task, owner crew:<name>) and its results come back ONLY as its own report / tasks_* calls plus a crew_run row on its id. " +
-      "Instance's own assistant only; every other principal is told not granted.",
+    "Hand a brief to a named crew (a sub-agent with its own model, tools, and read scope); the brief is the full context transfer. " +
+      "A path outside the crew's scope or data policy is refused with violations, nothing queued. Results return only via the crew's own report/tasks_* calls. Instance assistant only; others get not granted.",
     {
       crew: z.string().regex(/^[a-z][a-z0-9-]{0,39}$/).describe("The crew's name (agents/<area>/<name>.md)."),
       brief: z.string().min(1).max(200_000).describe("Everything the crew needs, in prose. Handles and paths, not pasted secrets."),

@@ -2,17 +2,25 @@
 
 The one MCP surface an external agent uses to work *with* a Metistry
 instance — a standalone Claude session, a coding agent, another vendor's
-agent, any MCP client — and the instance's own assistant. Twelve tools
-over Streamable HTTP:
+agent, any MCP client — and the instance's own assistant. Fourteen tools
+over Streamable HTTP, plus vault notes as MCP resources:
 
 - **in:** `capture` (a note or file into the inbox), `report` (a finding,
   decision, gotcha, or progress note into the proposal queue);
 - **shared work:** `tasks_list_ready`, `tasks_claim`, `tasks_heartbeat`,
   `tasks_update`, `tasks_release`, `tasks_create`, `tasks_mine` — thin
   adapters over [`@foldedspacelabs/metistry-tasks`](../tasks);
-- **out, under grants:** `knowledge_search`, `knowledge_read`;
+- **out, under grants:** `knowledge_search`, `knowledge_read`,
+  `knowledge_list`, `knowledge_grep` — the title index, one note's content,
+  a directory listing, and a content regex, all the same grant tiers;
 - **the one writer:** `knowledge_write` — `kind: internal` principals only
   (the owner's own assistant); everyone else is told "not granted".
+
+**Resources.** Every settled note an `areas` grant can read is also exposed
+as an MCP resource, `metistry://Knowledge/<path>` — `resources/list`
+(paginated) and `resources/read` for any client that browses resources
+instead of calling tools. Same tier rule as `knowledge_read` throughout;
+there is no separate resource grant.
 
 External agents **propose**; they never write knowledge. Everything they
 send lands as a row the user triages, with provenance stamped from the
@@ -65,6 +73,8 @@ optional nudge line. Errors set `isError` and carry core's uniform envelope
 | `tasks_mine` | — | `{ tasks }` you hold |
 | `knowledge_search` | `query`, `limit?` | `{ tier, hits: [{ path, title, description }] }` |
 | `knowledge_read` | `path` (`Knowledge/...`) | `{ path, title, content, sha256 }` — the hash is the `expected_sha256` for a following write |
+| `knowledge_list` | `prefix?`, `depth?` | `{ entries: [{ path, kind: file \| dir, title?, updated? }] }` — a vault directory listing, tier `index` global, tier `areas` scoped to your prefixes; drafts excluded |
+| `knowledge_grep` | `pattern` (regex, ≤200 chars), `prefix?`, `limit?` | `{ hits: [{ path, line, text }] }` — regex over settled note content, `areas` grant only; candidates from a keyword pre-filter, capped at 50 files / 200 hits; an overly expensive pattern is refused rather than left to hang |
 | `knowledge_write` | `path` (`Knowledge/...`), `content` (the whole file), `message` (commit message), `expected_sha256?` (from `knowledge_read`; `""` = create only; omit = unconditional) | `{ path, sha256, bytes, created, queued: true, provenance: { source, updated } \| null }` — internal principals only |
 | `artifact_publish` | `project`, `slug`, `files: [{ path, content \| content_base64 }]`, `expected_current_version?` (id or `null` = must be new), `idempotency_key`, `message` | `{ artifact, version, links: { artifact, version, review }, deduplicated }` — `conflict` on a stale expected version |
 | `artifact_get` | `id`, `version?`, `path?` | `{ artifact, version, links, versions, threads, file? }` |
@@ -127,6 +137,8 @@ createServer((req, res) => {
 | `inboxDir` | where `capture` writes files (the triage row references them) |
 | `readKnowledge?` | `(path) => Promise<string \| null>` — absent → `knowledge_read` is `not_available` and `check()` reports `degraded` |
 | `writeKnowledge?` | `KnowledgeWriter` — `({ path, content, intent, expected_sha256? }) => Promise<VaultWriteOutcome>`; absent → `knowledge_write` is `not_available` and `check()` reports `degraded`. `vaultBridgeWriter({ url, token })` speaks the reconciler's wire contract (bearer, envelope, CAS, one read on `409` for the current hash). |
+| `listKnowledge?` | `(prefix, depth) => Promise<Array<{ path, kind }>>` — absent → `knowledge_list` is `not_available`; also `knowledge_grep`'s candidate source when no keyword searcher is configured (or a pattern has no literal substring to seed one). `vaultBridgeLister({ url, token })` speaks the reconciler's `GET /vault/list`. |
+| `searchVaultKeyword?` | `(query, limit) => Promise<Array<{ path }>>` — `knowledge_grep`'s keyword pre-filter; absent → it falls back to `listKnowledge`. `vaultBridgeSearcher({ url, token })` speaks the reconciler's `GET /vault/search?mode=keyword`. |
 | `artifacts?` | an `ArtifactsService` (`@foldedspacelabs/metistry-artifacts`) — absent → every `artifact_*` tool is `not_available` |
 | `queries?` | a `QueryStore` (`@foldedspacelabs/metistry-queries`, invariant 3's one read path) — absent → `queries_list`/`queries_run` are `not_available`. Internal principals always have these tools; external agents need `grants.queries = true`. |
 | `leaseWarningSeconds?` | nudge threshold for a held lease (default 120) |
@@ -180,14 +192,18 @@ server — see `docs/ops/assistant-tools.md`.
 `vitest run` in this package: unit tests with a fake executor (manifest ↔
 tool-list lock, nudge arithmetic, the reader-less `not_available` path,
 the one-writer / path / grant rules of `knowledge_write`, provenance
-stamping byte for byte, and the bridge client against a fake that speaks
-the reconciler's contract) and, when `METISTRY_DB_PASSWORD` is set, the
-misuse suite against the scratch database through the real MCP client:
-401 envelopes, cross-project `not_found`, tier `none` → `not granted`,
-draft exclusion, nudge appearing and disappearing, report dedupe,
-sanitizer on the way out, the write round trip with CAS, one `runs` row
-per call. From the repo root, `pnpm test` provisions the scratch database
-first.
+stamping byte for byte, the bridge client against a fake that speaks
+the reconciler's contract, and the full `tools/list` definition-token
+measurement against the PoC-17 lazy-load line) and, when
+`METISTRY_DB_PASSWORD` is set, the misuse suite against the scratch
+database through the real MCP client: 401 envelopes, cross-project
+`not_found`, tier `none` → `not granted`, draft exclusion, nudge appearing
+and disappearing, report dedupe, sanitizer on the way out, the write round
+trip with CAS, `knowledge_list`/`knowledge_grep` tier gating and drafts
+exclusion (a catastrophic pattern proven to hit the worker timeout, not
+hang the request), `resources/list`+`resources/read` mirroring
+`knowledge_read`'s tier rule, one `runs` row per tool call. From the repo
+root, `pnpm test` provisions the scratch database first.
 
 ## License
 

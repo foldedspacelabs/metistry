@@ -9,7 +9,7 @@ import { routines } from "@metistry-apps/routines";
 import { loadSchedules, startRunner } from "./runner.js";
 import { loadRules } from "./router.js";
 import { TargetRegistry } from "./dispatch.js";
-import { vaultBridgeWriter } from "@foldedspacelabs/metistry-mcp-brain";
+import { vaultBridgeLister, vaultBridgeSearcher, vaultBridgeWriter } from "@foldedspacelabs/metistry-mcp-brain";
 import { ASSISTANT_DEFAULT_AREAS, INTERNAL_ASSISTANT_ID, ensureInternalAgent, revokeAgent, validateGrants } from "./agents.js";
 import { httpVaultClient } from "./vault-client.js";
 import { CrewRegistry } from "./crews.js";
@@ -74,7 +74,10 @@ const reconcilerToken = process.env.METISTRY_BRIDGE_TOKEN_RECONCILER;
 const vault = reconcilerUrl && reconcilerToken ? httpVaultClient({ url: reconcilerUrl, token: reconcilerToken }) : undefined;
 const writeKnowledge = reconcilerUrl && reconcilerToken ? vaultBridgeWriter({ url: reconcilerUrl, token: reconcilerToken }) : undefined; // knowledge_write = brain-commit over the same bridge
 const readKnowledge = vault ? async (path: string): Promise<string | null> => (await vault.read(path))?.content.toString("utf8") ?? null : undefined;
-if (!vault) console.warn("vault bridge absent: set METISTRY_RECONCILER_URL + METISTRY_BRIDGE_TOKEN_RECONCILER for knowledge_read, knowledge_write and artifacts (degrades: absent)");
+// knowledge_list / knowledge_grep (docs/research/2026-09-stash-review.md item 3): the same bridge, its list and keyword-search endpoints.
+const listKnowledge = reconcilerUrl && reconcilerToken ? vaultBridgeLister({ url: reconcilerUrl, token: reconcilerToken }) : undefined;
+const searchVaultKeyword = reconcilerUrl && reconcilerToken ? vaultBridgeSearcher({ url: reconcilerUrl, token: reconcilerToken }) : undefined;
+if (!vault) console.warn("vault bridge absent: set METISTRY_RECONCILER_URL + METISTRY_BRIDGE_TOKEN_RECONCILER for knowledge_read, knowledge_write, knowledge_list, knowledge_grep and artifacts (degrades: absent)");
 
 // Phase 6: knowledge_search mode=semantic|hybrid needs to embed the QUERY
 // with the same model the reconciler embedded the notes with. The vectors
@@ -117,6 +120,8 @@ const server = makeServer(pool, queries, {
   ...(readKnowledge ? { readKnowledge } : {}),
   ...(embedder ? { embedder } : {}),
   ...(writeKnowledge ? { writeKnowledge } : {}),
+  ...(listKnowledge ? { listKnowledge } : {}),
+  ...(searchVaultKeyword ? { searchVaultKeyword } : {}),
   ...(vault ? { vault } : {}),
   crews,
 });

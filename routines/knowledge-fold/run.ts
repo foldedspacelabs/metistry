@@ -32,6 +32,7 @@
 // EVENING_HOUR — the container's TZ is METISTRY_TZ) and a once-per-local-day
 // guard off the same anchor. One fold a night, retried hourly until it lands.
 
+import { ROUTINE_TIER } from "@foldedspacelabs/metistry-core";
 import type { Db, RoutineCtx } from "../morning-brief/run.js";
 
 export interface FoldCtx extends RoutineCtx {
@@ -263,7 +264,22 @@ export async function run(db: Db, ctx: FoldCtx = {}): Promise<FoldResult> {
 
   const inbound = await db.query(
     `INSERT INTO inbound_messages (thread, text, meta) VALUES ($1, $2, $3) RETURNING id`,
-    [THREAD, brief.text, JSON.stringify({ kind: "fold", source: COMPONENT, window_start: since.toISOString(), window_end: now.toISOString() })],
+    // `tier: routine` — a machine-assembled turn, cheap by default (the
+    // instance's `routine` tier; cost research decision 2). `fresh_session` —
+    // the fold is its own task and never continues the chat's context
+    // (decision 3); the drain honours both.
+    [
+      THREAD,
+      brief.text,
+      JSON.stringify({
+        kind: "fold",
+        tier: ROUTINE_TIER,
+        fresh_session: true,
+        source: COMPONENT,
+        window_start: since.toISOString(),
+        window_end: now.toISOString(),
+      }),
+    ],
   );
 
   // The routine's own runs row: the anchor for the next pass AND the counts

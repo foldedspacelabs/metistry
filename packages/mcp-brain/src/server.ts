@@ -38,7 +38,8 @@ import {
 import { TasksError, type Result as TaskResult, type Task, type TasksService } from "@foldedspacelabs/metistry-tasks";
 import type { ArtifactsService } from "@foldedspacelabs/metistry-artifacts";
 import type { QueryStore } from "@foldedspacelabs/metistry-queries";
-import { ARTIFACT_TOOL_NAMES, registerArtifactTools } from "./artifacts-tools.js";
+import { ALIAS_NAMES, resolveAliasCall } from "./aliases.js";
+import { ARTIFACTS_TOOL_NAMES, registerArtifactTools } from "./artifacts-tools.js";
 import { CREW_TOOL_NAMES, registerCrewTools, type CrewDispatcher } from "./crew-tools.js";
 import { QUERIES_TOOL_NAMES, registerQueriesTools } from "./queries-tools.js";
 import { KNOWLEDGE_FS_TOOL_NAMES, registerKnowledgeFsTools, type KnowledgeLister, type KnowledgeVaultSearcher } from "./knowledge-fs.js";
@@ -71,7 +72,7 @@ export interface BrainConfig {
   searchVaultKeyword?: KnowledgeVaultSearcher | undefined;
   /** The artifacts module (§4.21) for artifact_*. Absent → those tools answer `not_available`. */
   artifacts?: ArtifactsService | undefined;
-  /** The host's crew dispatcher (registry + policy + durable enqueue) for crew_dispatch. Absent → `not_available`. Internal principals only either way. */
+  /** The host's crew dispatcher (registry + policy + durable enqueue) for agents_delegate. Absent → `not_available`. Internal principals only either way. */
   crews?: CrewDispatcher | undefined;
   /** The one read path into state (invariant 3) for queries_list/queries_run. Absent → `not_available`. Internal principals always; external agents need grants.queries = true. */
   queries?: QueryStore | undefined;
@@ -90,30 +91,32 @@ export interface BrainServer {
 }
 
 /**
- * The eager surface (§4.3 default 1): 23 tools, no meta-tool indirection.
- * Order = manifest order. This sits over PoC-17's documented >20-tools
- * guidance for switching to `discovery: lazy` on tool COUNT — noted, not
- * acted on, in the PR that added queries_list/queries_run, and again here
- * for knowledge_list/knowledge_grep, because the guidance's other axis
- * (definition tokens, measured by test/brain.test.ts's "definition size"
- * test) stays well under the >5k-token line that would make lazy worth its
- * own +1-turn cost (docs/research/2026-08-tool-discovery.md).
+ * The eager surface (§4.3 default 1): 22 tools, no meta-tool indirection.
+ * Order = manifest order. One noun per thing, one verb set per object
+ * (docs/product/glossary.md): folding tasks_list_ready + tasks_mine into
+ * `tasks_list {filter}` paid for knowledge_list/knowledge_grep. This still
+ * sits over PoC-17's documented >20-tools guidance for switching to
+ * `discovery: lazy` on tool COUNT — noted, not acted on, because the
+ * guidance's other axis (definition tokens, measured by test/brain.test.ts's
+ * "definition size" test) stays well under the >5k-token line that would make
+ * lazy worth its own +1-turn cost (docs/research/2026-08-tool-discovery.md).
+ * Deprecated spellings live in aliases.ts and resolve at call time — they are
+ * NOT listed here, so neither the count nor the token budget grows for them.
  */
 export const TOOL_NAMES = [
   "capture",
-  "report",
-  "tasks_list_ready",
+  "requests_create",
+  "tasks_list",
   "tasks_claim",
-  "tasks_heartbeat",
+  "tasks_renew",
   "tasks_update",
   "tasks_release",
   "tasks_create",
-  "tasks_mine",
   "knowledge_search",
   "knowledge_read",
   ...KNOWLEDGE_FS_TOOL_NAMES,
   "knowledge_write",
-  ...ARTIFACT_TOOL_NAMES,
+  ...ARTIFACTS_TOOL_NAMES,
   ...CREW_TOOL_NAMES,
   ...QUERIES_TOOL_NAMES,
 ] as const;
@@ -151,6 +154,10 @@ function summarizeArgs(args: unknown): Record<string, unknown> {
 const id = z.number().int().positive();
 const lease = z.number().int().min(1).max(86_400).optional();
 
+/** tasks_list's one axis: claimable, held by you, or both. */
+export const TASK_FILTERS = ["ready", "mine", "all"] as const;
+export type TaskFilter = (typeof TASK_FILTERS)[number];
+
 /**
  * Every tool takes this, merged into its schema by `reg` below — a caller
  * (the assistant, a crew, an external agent) that generates one id per
@@ -183,6 +190,20 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
     return visible(principal, task) ? task : null;
   }
 
+  /** The claimable set, project-scoped. null = the named project is outside the principal's scope (not_found, uniform). */
+  async function readyFor(principal: AgentPrincipal, project: string | undefined, limit: number): Promise<Task[] | null> {
+    if (project !== undefined) {
+      if (!memberOf(principal, project)) return null;
+      return tasks.listReady({ project, limit });
+    }
+    // every project (the internal rule): one unfiltered read, then the same visibility filter as everywhere else
+    if (allProjects(principal)) return (await tasks.listReady({ limit: 500 })).filter((t) => visible(principal, t)).slice(0, limit);
+    const all: Task[] = [];
+    for (const p of principal.projects) all.push(...(await tasks.listReady({ project: p, limit })));
+    all.sort((x, y) => (x.due ?? "￿").localeCompare(y.due ?? "￿") || x.created_at.getTime() - y.created_at.getTime() || x.id - y.id);
+    return all.slice(0, limit);
+  }
+
   /** Map a TasksService Result to an outcome: not_found is uniform with the scope miss; other refusals are data. */
   function fromResult(r: TaskResult): Outcome {
     if (!r.ok && r.reason === "not_found") return fail("not_found");
@@ -191,16 +212,20 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
 
   // --- per-request server ---------------------------------------------------
 
-  function buildServer(principal: AgentPrincipal): McpServer {
+  /** aliasByRequestId: filled by handle()'s alias rewriter, read by `wrap` so the runs row names the deprecated spelling that was used. */
+  function buildServer(principal: AgentPrincipal, aliasByRequestId: Map<string, string>): McpServer {
     const server = new McpServer({ name: "metistry-brain", version }, { capabilities: { tools: {} } });
 
     /** Every tool call: one two-phase runs row (component = agent id), sanitizer, nudge. */
-    function wrap<A>(name: ToolName, body: (args: A) => Promise<Outcome>): (args: A) => Promise<CallToolResult> {
-      return async (args: A) => {
+    function wrap<A>(name: ToolName, body: (args: A) => Promise<Outcome>): (args: A, extra?: { requestId?: string | number }) => Promise<CallToolResult> {
+      return async (args: A, extra?: { requestId?: string | number }) => {
         // turn_id (merged into every schema by `reg`) travels in meta.turn_id, not
         // inside args' own summary — one place to find it, joinable by activity_feed.
         const { turn_id, ...rest } = (args ?? {}) as unknown as Record<string, unknown>;
-        const runMeta = { via: "mcp-brain", args: summarizeArgs(rest), ...(typeof turn_id === "string" ? { turn_id } : {}) };
+        // a call that came in under a deprecated name is recorded under the primary
+        // one, with the old spelling in meta.alias — so the stragglers are countable.
+        const alias = extra?.requestId !== undefined ? aliasByRequestId.get(String(extra.requestId)) : undefined;
+        const runMeta = { via: "mcp-brain", args: summarizeArgs(rest), ...(typeof turn_id === "string" ? { turn_id } : {}), ...(alias ? { alias } : {}) };
         const runId = await startRun(db, { component: principal.id, kind: "tool", tool: name, meta: runMeta });
         let outcome: Outcome;
         try {
@@ -243,8 +268,8 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
     );
 
     reg(
-      "report",
-      "Submit a finding, decision, gotcha, or progress note as a report proposal; same idempotency_key or title within 24h returns the existing id.",
+      "requests_create",
+      "Raise a request — a finding, decision, gotcha, or progress note — for the user's Needs You queue; they fold what they approve into knowledge, you never write it directly. Same idempotency_key, or the same title within 24h, returns the existing id.",
       {
         title: z.string().min(1).max(200),
         body: z.string().min(1).max(50_000),
@@ -259,21 +284,24 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
     );
 
     reg(
-      "tasks_list_ready",
-      "Unblocked, unclaimed tasks across your projects (or one), due date then oldest first.",
-      { project: z.string().max(200).optional(), limit: z.number().int().min(1).max(200).optional() },
+      "tasks_list",
+      "Tasks across your projects (or one). `ready` (the default) is unblocked, unclaimed work, due date then oldest first; `mine` is what you hold, soonest lease first; `all` is both.",
+      {
+        filter: z.enum(TASK_FILTERS).optional().describe("ready (claimable — the default) | mine (held by you) | all (both)"),
+        project: z.string().max(200).optional(),
+        limit: z.number().int().min(1).max(200).optional(),
+      },
       async (a) => {
         const limit = a.limit ?? 50;
-        if (a.project !== undefined) {
-          if (!memberOf(principal, a.project)) return fail("not_found");
-          return done({ tasks: await tasks.listReady({ project: a.project, limit }) });
-        }
-        // every project (the internal rule): one unfiltered read, then the same visibility filter as everywhere else
-        if (allProjects(principal)) return done({ tasks: (await tasks.listReady({ limit: 500 })).filter((t) => visible(principal, t)).slice(0, limit) });
-        const all: Task[] = [];
-        for (const project of principal.projects) all.push(...(await tasks.listReady({ project, limit })));
-        all.sort((x, y) => (x.due ?? "￿").localeCompare(y.due ?? "￿") || x.created_at.getTime() - y.created_at.getTime() || x.id - y.id);
-        return done({ tasks: all.slice(0, limit) });
+        const filter = a.filter ?? "ready";
+        const mine = filter === "ready" ? [] : (await tasks.listForAgent(principal.id)).filter((t) => visible(principal, t)).filter((t) => a.project === undefined || t.project === a.project);
+        if (filter === "mine") return done({ filter, tasks: mine.slice(0, limit) });
+        const ready = await readyFor(principal, a.project, limit);
+        if (ready === null) return fail("not_found");
+        if (filter === "ready") return done({ filter, tasks: ready });
+        // all = ready ∪ held by you, held first (a lease is the more urgent fact), deduplicated by id
+        const seen = new Set(mine.map((t) => t.id));
+        return done({ filter, tasks: [...mine, ...ready.filter((t) => !seen.has(t.id))].slice(0, limit) });
       },
     );
 
@@ -288,7 +316,7 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
     );
 
     reg(
-      "tasks_heartbeat",
+      "tasks_renew",
       "Renew the lease on a task you hold; refused once lapsed — claim it again instead.",
       { id, lease_seconds: lease },
       async (a) => {
@@ -346,11 +374,6 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
       },
     );
 
-    reg("tasks_mine", "Every task you currently hold, soonest lease first.", {}, async () => {
-      const held = (await tasks.listForAgent(principal.id)).filter((t) => visible(principal, t));
-      return done({ tasks: held });
-    });
-
     reg(
       "knowledge_search",
       "Search the knowledge index (titles + one-line descriptions) within your grant; drafts never appear. `mode` (keyword/semantic/hybrid) only reorders results, never what you can see.",
@@ -390,7 +413,7 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
     // The assistant's write path (knowledge-write.ts): internal principals only.
     reg(
       "knowledge_write",
-      "Write one note under Knowledge/ as a commit in your name (internal assistant only; others get `not granted`). Whole-file replace; frontmatter gets `source`/`updated` stamped. " +
+      "Write one note under Knowledge/ as a commit in your name (internal assistant only; others get `not granted` — use requests_create). Whole-file replace; frontmatter gets `source`/`updated` stamped. " +
         'Pass expected_sha256 from knowledge_read to avoid clobbering a concurrent edit ("" = create only; a conflict returns the current hash). ' +
         "A note whose `source` is someone else's is refused — report instead; notes you or the fold wrote are yours. Protected paths are refused; deletes/renames are not available.",
       {
@@ -412,7 +435,7 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
     // artifact_* (§4.21): the one registration point for the artifacts adapter
     registerArtifactTools(reg, cfg.artifacts, principal);
 
-    // crew_dispatch (Phase 5 crews): the one registration point for the host's crew dispatcher; internal principals only
+    // agents_delegate (Phase 5 crews): the one registration point for the host's crew dispatcher; internal principals only
     registerCrewTools(reg, cfg.crews, principal);
 
     // queries_list / queries_run (invariant 3's one read path, out to agents): internal always, external with grants.queries = true
@@ -453,7 +476,8 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
     async handle(req, res) {
       const principal = await cfg.authenticate(req); // the credential decides; nothing in the body is identity
       if (!principal) return sendEnvelope(res, "unauthenticated");
-      const server = buildServer(principal);
+      const aliasByRequestId = new Map<string, string>();
+      const server = buildServer(principal, aliasByRequestId);
       // No sessionIdGenerator = stateless: no session header, no server-side state between requests.
       const transport = new StreamableHTTPServerTransport({ enableJsonResponse: true });
       res.on("close", () => {
@@ -462,6 +486,17 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
       });
       // The SDK's class types its optional handlers as `| undefined`, which exactOptionalPropertyTypes rejects; same object at runtime.
       await server.connect(transport as unknown as Transport);
+      // Deprecated names (aliases.ts) are rewritten on the way in, after connect
+      // installed the real handler: one release of compatibility with no second
+      // copy of any schema on the listed surface.
+      const deliver = transport.onmessage;
+      if (deliver) {
+        transport.onmessage = (message, extra) => {
+          const hit = resolveAliasCall(message);
+          if (hit?.id !== undefined) aliasByRequestId.set(String(hit.id), hit.alias);
+          deliver(message, extra);
+        };
+      }
       await transport.handleRequest(req, res);
     },
 
@@ -474,6 +509,7 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
         if (t.status !== "ok") throw new Error(`tasks: ${t.remediation ?? t.status}`);
         const meta = {
           tools: [...TOOL_NAMES],
+          deprecated_aliases: ALIAS_NAMES,
           knowledge_read: cfg.readKnowledge ? "available" : "not_available",
           knowledge_write: cfg.writeKnowledge ? "available" : "not_available",
           knowledge_list: cfg.listKnowledge ? "available" : "not_available",

@@ -17,7 +17,7 @@
 //   a token nobody holds: the assistant's runner mints a fresh one per run
 //   and burns it after (apps/assistant/src/crew-drain.ts), so a crew never
 //   keeps a credential. A manifest that disappears revokes its row.
-// - DISPATCH. `crew_dispatch` (mcp-brain) lands here: the brief is checked
+// - DISPATCH. `agents_delegate` (mcp-brain) lands here: the brief is checked
 //   with the existing dispatch enforcement (`checkBrief`) against the crew's
 //   `scope` ∩ the `local-crew` target's `allow` list, and only then becomes a
 //   durable `work` row (kind task, owner crew:<name>) the assistant

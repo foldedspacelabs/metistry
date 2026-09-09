@@ -31,17 +31,17 @@ export async function computeNudge(tasks: TasksService, principal: AgentPrincipa
       for (const t of await tasks.listReady({ project, limit: 500 })) count(t);
     }
   }
-  if (bundles > 0) parts.push(`${bundles} review bundle${bundles === 1 ? "" : "s"} queued for you — call tasks_list_ready`);
+  if (bundles > 0) parts.push(`${bundles} review bundle${bundles === 1 ? "" : "s"} queued for you — call tasks_list`);
   for (const project of [...ready.keys()].sort()) {
     const n = ready.get(project) ?? 0;
-    if (n > 0) parts.push(`${n} task${n === 1 ? "" : "s"} ready in project ${project} — call tasks_list_ready`);
+    if (n > 0) parts.push(`${n} task${n === 1 ? "" : "s"} ready in project ${project} — call tasks_list`);
   }
   const held = await tasks.listForAgent(principal.id);
   for (const t of held) {
     if (!memberOf(principal, t.project) || !t.lease_expires_at) continue;
     const left = Math.round((new Date(t.lease_expires_at).getTime() - now) / 1000);
     if (left <= 0) parts.push(`lease on task #${t.id} expired — call tasks_claim to retake it or tasks_release to hand it back`);
-    else if (left <= opts.leaseWarningSeconds) parts.push(`claim on task #${t.id} expires in ${left}s — call tasks_heartbeat`);
+    else if (left <= opts.leaseWarningSeconds) parts.push(`claim on task #${t.id} expires in ${left}s — call tasks_renew`);
   }
   return parts.length > 0 ? `nudge: ${parts.join("; ")}` : null;
 }

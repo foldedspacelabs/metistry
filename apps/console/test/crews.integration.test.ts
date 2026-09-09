@@ -1,7 +1,7 @@
 // Crews against the real (scratch) database and a live server: registry
 // sync is idempotent (a second sync writes nothing and never touches the
 // token hash), a changed manifest re-syncs, a removed one revokes, a
-// foreign id is never hijacked; crew_dispatch over /mcp is the internal
+// foreign id is never hijacked; agents_delegate over /mcp is the internal
 // assistant's alone, refuses a brief outside scope with NO work row, and
 // queues a clean one as the durable row the assistant container drains.
 // Skipped without a db.
@@ -48,7 +48,7 @@ describe.skipIf(!hasDb)("crews (integration)", () => {
   let assistantToken: string;
   let nextId = 1;
   const externalId = `itest-ext-${suffix}`;
-  // this suite's own internal principal: crew_dispatch gates on kind=internal, not on the id, and the
+  // this suite's own internal principal: agents_delegate gates on kind=internal, not on the id, and the
   // shared INTERNAL_ASSISTANT_ID row is upserted by other suites running in parallel (a token race)
   const assistantId = `itest-asst-${suffix}`;
 
@@ -147,11 +147,11 @@ describe.skipIf(!hasDb)("crews (integration)", () => {
     expect((await rowsOf())[1]).toMatchObject({ revoked_at: null, token_hash: before[1]!.token_hash });
   });
 
-  it("crew_dispatch: an external agent is told not granted; the assistant's brief outside scope is refused with violations and NO work row", async () => {
-    const ext = await call("crew_dispatch", { crew: crewA, brief: "read Knowledge/Projects/X.md" }, externalToken);
+  it("agents_delegate: an external agent is told not granted; the assistant's brief outside scope is refused with violations and NO work row", async () => {
+    const ext = await call("agents_delegate", { crew: crewA, brief: "read Knowledge/Projects/X.md" }, externalToken);
     expect(ext).toEqual({ isError: true, body: { error: { code: "forbidden", message: "not granted" } } });
 
-    const bad = await call("crew_dispatch", { crew: crewA, brief: "Compare Knowledge/Projects/X.md with Knowledge/Me/profile.md" }, assistantToken);
+    const bad = await call("agents_delegate", { crew: crewA, brief: "Compare Knowledge/Projects/X.md with Knowledge/Me/profile.md" }, assistantToken);
     expect(bad.isError).toBe(true);
     expect(bad.body.error.code).toBe("invalid_request");
     expect(bad.body.error.message).toContain("Knowledge/Me/profile.md"); // the assistant sees WHICH path to remove
@@ -161,13 +161,13 @@ describe.skipIf(!hasDb)("crews (integration)", () => {
     expect(refusal).toMatchObject({ ok: false, error: "data_policy: path_outside_allow" });
     expect(refusal.meta.violations[0]).toMatchObject({ kind: "path_outside_allow", paths: ["Knowledge/Me/profile.md"] });
     // the tool call itself is audited on the assistant, like every tool call
-    const toolRun = (await pool.query(`SELECT ok, error FROM runs WHERE component = $1 AND kind = 'tool' AND tool = 'crew_dispatch' ORDER BY id DESC LIMIT 1`, [assistantId])).rows[0];
+    const toolRun = (await pool.query(`SELECT ok, error FROM runs WHERE component = $1 AND kind = 'tool' AND tool = 'agents_delegate' ORDER BY id DESC LIMIT 1`, [assistantId])).rows[0];
     expect(toolRun).toEqual({ ok: false, error: "invalid_request" });
   });
 
-  it("crew_dispatch: a clean brief becomes ONE durable work row (kind task, owner crew:<name>, project NULL, brief + snapshot in meta); idempotent on the key", async () => {
+  it("agents_delegate: a clean brief becomes ONE durable work row (kind task, owner crew:<name>, project NULL, brief + snapshot in meta); idempotent on the key", async () => {
     const brief = "# Summarize the X plan\n\nRead Knowledge/Projects/X.md and report the open questions.";
-    const r = await call("crew_dispatch", { crew: crewA, brief, task_id: 1, idempotency_key: `itest-${suffix}` }, assistantToken);
+    const r = await call("agents_delegate", { crew: crewA, brief, task_id: 1, idempotency_key: `itest-${suffix}` }, assistantToken);
     expect(r.isError).toBe(false);
     expect(r.body).toMatchObject({ queued: true, crew: crewA, allow: ["Knowledge/Projects", "Knowledge/Techniques"], deduplicated: false });
     const row = (await pool.query(`SELECT id, kind, status, owner, project, claimed_by, created_by, meta, title FROM work WHERE id = $1`, [r.body.work_id])).rows[0];
@@ -177,7 +177,7 @@ describe.skipIf(!hasDb)("crews (integration)", () => {
     expect(row.meta.crew.prompt).toBe("You work for {{name}}. Report what you find.");
     expect(row.meta.brief_sha).toMatch(/^[0-9a-f]{64}$/);
     // the queued row is invisible to the crew's own tasks_* view (project NULL) — it is the runner's, not shared work
-    const again = await call("crew_dispatch", { crew: crewA, brief, idempotency_key: `itest-${suffix}` }, assistantToken);
+    const again = await call("agents_delegate", { crew: crewA, brief, idempotency_key: `itest-${suffix}` }, assistantToken);
     expect(again.body).toMatchObject({ queued: true, work_id: r.body.work_id, deduplicated: true });
     expect((await pool.query(`SELECT count(*)::int AS n FROM work WHERE owner = $1`, [`crew:${crewA}`])).rows[0].n).toBe(1);
     const sent = (await pool.query(`SELECT ok, cost_usd::float8 AS cost_usd, meta FROM runs WHERE kind = 'dispatch' AND tool = 'local-crew' AND (meta->>'work_id')::bigint = $1`, [r.body.work_id])).rows;
@@ -186,7 +186,7 @@ describe.skipIf(!hasDb)("crews (integration)", () => {
   });
 
   it("unknown crew is not_found for the assistant (naming the registered ones); the parse helper agrees with what was synced", async () => {
-    const r = await call("crew_dispatch", { crew: "nobody", brief: "x" }, assistantToken);
+    const r = await call("agents_delegate", { crew: "nobody", brief: "x" }, assistantToken);
     expect(r.isError).toBe(true);
     expect(r.body.error).toMatchObject({ code: "not_found", message: expect.stringContaining(crewA) });
     const def = parseCrewFile(crewFile(crewA), "x", { area: "itest", name: crewA });

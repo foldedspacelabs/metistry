@@ -30,7 +30,7 @@ const researcher: CrewSnapshot = {
 };
 
 describe("allowlist from tool groups", () => {
-  it("is exhaustive against mcp-brain's manifest: every tool is in exactly one group, or is a never-tool (knowledge_write, crew_dispatch)", () => {
+  it("is exhaustive against mcp-brain's manifest: every tool is in exactly one group, or is a never-tool (knowledge_write, agents_delegate)", () => {
     const all = manifest.exposes.map((t) => t.name);
     const grouped = Object.values(CREW_TOOL_GROUPS).flat() as string[];
     expect(new Set(grouped).size).toBe(grouped.length); // no tool in two groups

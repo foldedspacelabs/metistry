@@ -1,5 +1,5 @@
 // The crew queue (Phase 5 crews): `work` rows of kind `task` whose owner is
-// `crew:<name>`, written by the console's crew_dispatch after the brief
+// `crew:<name>`, written by the console's agents_delegate after the brief
 // passed policy. Durable and restart-safe by construction — the same
 // claim/lease shape the tasks module uses, so a run that dies with the
 // container is re-picked when its lease lapses, and a run that keeps

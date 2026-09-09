@@ -56,7 +56,7 @@ export interface ConsoleConfig {
   searchVaultKeyword?: KnowledgeVaultSearcher;
   /** The vault client the artifacts module (§4.21) stores content through; absent = artifacts degrade to not_available. */
   vault?: VaultClient;
-  /** Loaded crew manifests (crews.ts); absent = crew_dispatch answers not_available. */
+  /** Loaded crew manifests (crews.ts); absent = agents_delegate answers not_available. */
   crews?: CrewRegistry;
 }
 

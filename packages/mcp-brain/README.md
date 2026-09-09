@@ -2,13 +2,15 @@
 
 The one MCP surface an external agent uses to work *with* a Metistry
 instance — a standalone Claude session, a coding agent, another vendor's
-agent, any MCP client — and the instance's own assistant. Fourteen tools
-over Streamable HTTP, plus vault notes as MCP resources:
+agent, any MCP client — and the instance's own assistant. Twenty-two tools
+over Streamable HTTP, named from one small vocabulary — an object noun plus
+one of `list` / `get` / `search` / `create` / `update`
+(`docs/product/glossary.md`) — plus vault notes as MCP resources:
 
-- **in:** `capture` (a note or file into the inbox), `report` (a finding,
-  decision, gotcha, or progress note into the proposal queue);
-- **shared work:** `tasks_list_ready`, `tasks_claim`, `tasks_heartbeat`,
-  `tasks_update`, `tasks_release`, `tasks_create`, `tasks_mine` — thin
+- **in:** `capture` (a note or file into the inbox), `requests_create` (a
+  finding, decision, gotcha, or progress note as a request for the user);
+- **shared work:** `tasks_list`, `tasks_claim`, `tasks_renew`,
+  `tasks_update`, `tasks_release`, `tasks_create` — thin
   adapters over [`@foldedspacelabs/metistry-tasks`](../tasks);
 - **out, under grants:** `knowledge_search`, `knowledge_read`,
   `knowledge_list`, `knowledge_grep` — the title index, one note's content,
@@ -38,7 +40,7 @@ commit in its own name, with provenance stamped into the note.
 | One writer | `knowledge_write` is `forbidden` for any principal that is not `kind: "internal"`, whatever the path. For the internal principal: the path must be `Knowledge/...` (no traversal, no `knowledge/`) **and** inside its own `areas` grant — writes never reach wider than reads; the host's writer (Metistry's reconciler bridge) refuses the protected paths (`identity.yaml`, `rules.yaml`, `queries/`, …) behind that. Markdown gets `source: <agent id>` (the credential, never an argument) and `updated: <today>` merged into its frontmatter, line by line, nothing else invented. Compare-and-swap on `expected_sha256` (from `knowledge_read`); a lost race is `conflict` with the current hash in the message. No delete, no rename. |
 | Text boundary | Every string that came out of the database passes `sanitizeForAgent` from core before it is rendered: bidi overrides and zero-width characters stripped, no leading `/`. The stored row is untouched. |
 | Every call is audited | One two-phase `runs` row per tool call: `component = <agent id>`, `kind = 'tool'`, `tool = <name>`, with clipped arguments and, for knowledge calls, the tier and areas it was judged under. Refusals are logged too. |
-| Idempotent writes | `report` on `idempotency_key` (unique partial index, safe under concurrency) and near-duplicate suppression (same agent + same title within 24 h → the existing id). `tasks_create` on its `idempotency_key` via the tasks module. |
+| Idempotent writes | `requests_create` on `idempotency_key` (unique partial index, safe under concurrency) and near-duplicate suppression (same agent + same title within 24 h → the existing id). `tasks_create` on its `idempotency_key` via the tasks module. |
 | Secrets stay out | Secret-named fields in a report payload are redacted before the row is written (core's `redactSecrets`). |
 
 **Tool-result nudges.** Every result — success or error — ends with one
@@ -46,7 +48,7 @@ terse deterministic line when something is waiting for the caller:
 
 ```
 {"tasks":[]}
-nudge: 2 tasks ready in project drey — call tasks_list_ready; claim on task #14 expires in 40s — call tasks_heartbeat
+nudge: 2 tasks ready in project drey — call tasks_list; claim on task #14 expires in 40s — call tasks_renew
 ```
 
 Computed server-side from the task list on every call; no model involved.
@@ -63,26 +65,25 @@ optional nudge line. Errors set `isError` and carry core's uniform envelope
 | Tool | Arguments | Returns |
 | --- | --- | --- |
 | `capture` | `note?`, `filename?`, `content_base64?`, `mime?` (one of `note` / `content_base64` required) | `{ id, path, sha256 }` — an `inbox` row, `source = 'mcp'`, `source_agent` = you |
-| `report` | `title`, `body`, `kind?` ∈ finding \| decision \| gotcha \| progress, `refs?: string[]`, `idempotency_key?` | `{ id, deduplicated: false \| "idempotency_key" \| "title" }` — a `proposals` row, kind `report`, trust `external` |
-| `tasks_list_ready` | `project?`, `limit?` | `{ tasks }` across your projects (or one) |
+| `requests_create` | `title`, `body`, `kind?` ∈ finding \| decision \| gotcha \| progress, `refs?: string[]`, `idempotency_key?` | `{ id, deduplicated: false \| "idempotency_key" \| "title" }` — a request of type `report` in the user's Needs You queue (a `proposals` row, kind `report`, trust `external`) |
+| `tasks_list` | `filter?` ∈ ready \| mine \| all (default `ready`), `project?`, `limit?` | `{ filter, tasks }` — `ready` = claimable, `mine` = held by you, `all` = both |
 | `tasks_claim` | `id`, `lease_seconds?` | `{ ok: true, task }` or `{ ok: false, reason, task? }` |
-| `tasks_heartbeat` | `id`, `lease_seconds?` | same |
+| `tasks_renew` | `id`, `lease_seconds?` | same |
 | `tasks_update` | `id`, `status?` ∈ in_progress \| blocked \| closed, `note?` | same |
 | `tasks_release` | `id`, `note?` | same |
 | `tasks_create` | `title`, `project`, `area?`, `depends_on?: number[]`, `due?` (YYYY-MM-DD), `idempotency_key?` | `{ task }` |
-| `tasks_mine` | — | `{ tasks }` you hold |
 | `knowledge_search` | `query`, `limit?` | `{ tier, hits: [{ path, title, description }] }` |
 | `knowledge_read` | `path` (`Knowledge/...`) | `{ path, title, content, sha256 }` — the hash is the `expected_sha256` for a following write |
 | `knowledge_list` | `prefix?`, `depth?` | `{ entries: [{ path, kind: file \| dir, title?, updated? }] }` — a vault directory listing, tier `index` global, tier `areas` scoped to your prefixes; drafts excluded |
 | `knowledge_grep` | `pattern` (regex, ≤200 chars), `prefix?`, `limit?` | `{ hits: [{ path, line, text }] }` — regex over settled note content, `areas` grant only; candidates from a keyword pre-filter, capped at 50 files / 200 hits; an overly expensive pattern is refused rather than left to hang |
 | `knowledge_write` | `path` (`Knowledge/...`), `content` (the whole file), `message` (commit message), `expected_sha256?` (from `knowledge_read`; `""` = create only; omit = unconditional) | `{ path, sha256, bytes, created, queued: true, provenance: { source, updated } \| null }` — internal principals only |
-| `artifact_publish` | `project`, `slug`, `files: [{ path, content \| content_base64 }]`, `expected_current_version?` (id or `null` = must be new), `idempotency_key`, `message` | `{ artifact, version, links: { artifact, version, review }, deduplicated }` — `conflict` on a stale expected version |
-| `artifact_get` | `id`, `version?`, `path?` | `{ artifact, version, links, versions, threads, file? }` |
-| `artifact_list` | `project?`, `limit?` | `{ artifacts }` across your projects |
-| `artifact_comment` | `artifact`, `version`, `body`, `path?`, `anchor?`, `parent?` (reply to a root) | `{ comment }` or `{ demoted: true, proposal_id, cap }` past the agent-only cap |
-| `artifact_comment_resolve` | `id`, `reopen?` | `{ comment }` |
-| `artifact_dispatch_review` | `artifact`, `version`, `thread_ids`, `to_agent`, `message?`, `idempotency_key?` | `{ route: 'work', work, links }` inside the project; `{ route: 'proposal', proposal_id }` across the boundary |
-| `crew_dispatch` | `crew`, `brief`, `task_id?`, `idempotency_key?` | `{ queued: true, work_id, crew, allow, deduplicated }` — internal principals only; `invalid_request` with the violations in the message when the brief cites a path outside the crew's scope ∩ the local target's `allow`, or a denied source |
+| `artifacts_publish` | `project`, `slug`, `files: [{ path, content \| content_base64 }]`, `expected_current_version?` (id or `null` = must be new), `idempotency_key`, `message` | `{ artifact, version, links: { artifact, version, review }, deduplicated }` — `conflict` on a stale expected version |
+| `artifacts_get` | `id`, `version?`, `path?` | `{ artifact, version, links, versions, threads, file? }` |
+| `artifacts_list` | `project?`, `limit?` | `{ artifacts }` across your projects |
+| `artifacts_comment` | `artifact`, `version`, `body`, `path?`, `anchor?`, `parent?` (reply to a root) | `{ comment }` or `{ demoted: true, proposal_id, cap }` past the agent-only cap |
+| `artifacts_resolve` | `id`, `reopen?` | `{ comment }` |
+| `artifacts_review` | `artifact`, `version`, `thread_ids`, `to_agent`, `message?`, `idempotency_key?` | `{ route: 'work', work, links }` inside the project; `{ route: 'proposal', proposal_id }` across the boundary |
+| `agents_delegate` | `crew`, `brief`, `task_id?`, `idempotency_key?` | `{ queued: true, work_id, crew, allow, deduplicated }` — internal principals only; `invalid_request` with the violations in the message when the brief cites a path outside the helper agent's scope ∩ the local target's `allow`, or a denied source |
 | `queries_list` | — | `{ queries: [{ name, description, params: { <param>: { type, default? } } }] }` — every named query loaded into the injected `QueryStore` (invariant 3) |
 | `queries_run` | `name`, `params?: Record<string, string \| number \| boolean>` | `{ name, params, rows, as_of, row_count, truncated? }` — rows capped at 200 (`truncated: true` past the cap); `not_found` for an unknown query, `invalid_request` for a bad/unknown param. Internal principals always; external agents need a `queries: true` grant. |
 
@@ -139,7 +140,7 @@ createServer((req, res) => {
 | `writeKnowledge?` | `KnowledgeWriter` — `({ path, content, intent, expected_sha256? }) => Promise<VaultWriteOutcome>`; absent → `knowledge_write` is `not_available` and `check()` reports `degraded`. `vaultBridgeWriter({ url, token })` speaks the reconciler's wire contract (bearer, envelope, CAS, one read on `409` for the current hash). |
 | `listKnowledge?` | `(prefix, depth) => Promise<Array<{ path, kind }>>` — absent → `knowledge_list` is `not_available`; also `knowledge_grep`'s candidate source when no keyword searcher is configured (or a pattern has no literal substring to seed one). `vaultBridgeLister({ url, token })` speaks the reconciler's `GET /vault/list`. |
 | `searchVaultKeyword?` | `(query, limit) => Promise<Array<{ path }>>` — `knowledge_grep`'s keyword pre-filter; absent → it falls back to `listKnowledge`. `vaultBridgeSearcher({ url, token })` speaks the reconciler's `GET /vault/search?mode=keyword`. |
-| `artifacts?` | an `ArtifactsService` (`@foldedspacelabs/metistry-artifacts`) — absent → every `artifact_*` tool is `not_available` |
+| `artifacts?` | an `ArtifactsService` (`@foldedspacelabs/metistry-artifacts`) — absent → every `artifacts_*` tool is `not_available` |
 | `queries?` | a `QueryStore` (`@foldedspacelabs/metistry-queries`, invariant 3's one read path) — absent → `queries_list`/`queries_run` are `not_available`. Internal principals always have these tools; external agents need `grants.queries = true`. |
 | `leaseWarningSeconds?` | nudge threshold for a held lease (default 120) |
 | `version?` | reported to clients as the server version |
@@ -148,6 +149,32 @@ The returned `BrainServer` has `handle(req, res)`, `check()` (the §4.3
 behavioral probe: selects the columns every tool depends on and runs the
 tasks module's own check), and `tools` (the full name list, in manifest
 order).
+
+**Deprecated names, one release.** The 2026-09-09 vocabulary
+simplification renamed eleven tools. The old spellings still *work* —
+`src/aliases.ts` maps them at call time — but they are **not listed** by
+`tools/list`, so the eager surface stays exactly the twenty primary names
+and its definition budget stays where it was: 19,370 chars of JSON schema,
+≈ 4.8k tokens at chars/4, against PoC-17's 5k line (a test asserts it).
+Registering the aliases with schemas of their own would have doubled that.
+Every alias call is recorded in its `runs` row as `meta.alias`, and
+`check()` reports the list as `deprecated_aliases`; they come out one
+release after this one.
+
+| Deprecated | Now |
+| --- | --- |
+| `report` | `requests_create` |
+| `tasks_list_ready` | `tasks_list` (`filter: "ready"`) |
+| `tasks_mine` | `tasks_list` (`filter: "mine"`) |
+| `tasks_heartbeat` | `tasks_renew` |
+| `artifact_publish` / `artifact_get` / `artifact_list` / `artifact_comment` | `artifacts_publish` / `artifacts_get` / `artifacts_list` / `artifacts_comment` |
+| `artifact_comment_resolve` | `artifacts_resolve` |
+| `artifact_dispatch_review` | `artifacts_review` |
+| `crew_dispatch` | `agents_delegate` |
+
+Argument names did not change: `agents_delegate` still takes `crew`, and a
+crew's `uses` groups (`CREW_TOOL_GROUPS` in core) carry the new names
+only — a helper agent's allowlist is built from the primary set.
 
 **Transport.** Stateless Streamable HTTP: a fresh MCP server per request,
 no session header, JSON responses (`enableJsonResponse`). Unauthenticated
@@ -178,7 +205,7 @@ claude mcp add --transport http metistry https://<origin>/mcp --header "Authoriz
 ```
 
 A capture-only agent needs no grants at all (tier `none`, no projects):
-`capture` and `report` work for every registered agent. Revoking or
+`capture` and `requests_create` work for every registered agent. Revoking or
 rotating the agent kills the token on the next request.
 
 The instance's own assistant is the first *internal* agent on this same
@@ -198,12 +225,13 @@ measurement against the PoC-17 lazy-load line) and, when
 `METISTRY_DB_PASSWORD` is set, the misuse suite against the scratch
 database through the real MCP client: 401 envelopes, cross-project
 `not_found`, tier `none` → `not granted`, draft exclusion, nudge appearing
-and disappearing, report dedupe, sanitizer on the way out, the write round
+and disappearing, request dedupe, sanitizer on the way out, the write round
 trip with CAS, `knowledge_list`/`knowledge_grep` tier gating and drafts
 exclusion (a catastrophic pattern proven to hit the worker timeout, not
 hang the request), `resources/list`+`resources/read` mirroring
-`knowledge_read`'s tier rule, one `runs` row per tool call. From the repo
-root, `pnpm test` provisions the scratch database first.
+`knowledge_read`'s tier rule, deprecated names resolving to their primaries
+at call time, one `runs` row per tool call. From the repo root, `pnpm test`
+provisions the scratch database first.
 
 ## License
 

@@ -128,14 +128,14 @@ describe.skipIf(!hasDb)("POST /mcp (integration)", () => {
     const created = await rpc("tools/call", { name: "tasks_create", arguments: { title: "hub task", project, idempotency_key: `${project}-1` } }, auth);
     const body = JSON.parse((await created.json()).result.content[0].text.split("\n")[0]);
     expect(body.task).toMatchObject({ project, created_by: agents.INTERNAL_ASSISTANT_ID });
-    const listed = JSON.parse((await (await rpc("tools/call", { name: "tasks_list_ready", arguments: { project } }, auth)).json()).result.content[0].text.split("\n")[0]);
+    const listed = JSON.parse((await (await rpc("tools/call", { name: "tasks_list", arguments: { project } }, auth)).json()).result.content[0].text.split("\n")[0]);
     expect(listed.tasks.map((t: { id: number }) => t.id)).toEqual([body.task.id]);
     // the external agent from above still cannot see it (its projects are [])
-    const other = JSON.parse((await (await rpc("tools/call", { name: "tasks_list_ready", arguments: { project } }, { authorization: `Bearer ${agentToken}` })).json()).result.content[0].text.split("\n")[0]);
+    const other = JSON.parse((await (await rpc("tools/call", { name: "tasks_list", arguments: { project } }, { authorization: `Bearer ${agentToken}` })).json()).result.content[0].text.split("\n")[0]);
     expect(other).toEqual({ error: { code: "not_found", message: "not found" } });
     // audit rows land on the agent id, kind=tool — the dashboard/runs view of "what the assistant did with its tools"
     const runs = await pool.query(`SELECT tool FROM runs WHERE component = $1 AND kind = 'tool' AND meta->'args'->>'project' = $2 ORDER BY id`, [agents.INTERNAL_ASSISTANT_ID, project]);
-    expect(runs.rows.map((r) => r.tool)).toEqual(["tasks_create", "tasks_list_ready"]);
+    expect(runs.rows.map((r) => r.tool)).toEqual(["tasks_create", "tasks_list"]);
     await pool.query(`DELETE FROM work WHERE project = $1`, [project]);
 
     // the live-verified gap, closed: under the internal default grant (bare Knowledge/) the assistant reads a ROOT note

@@ -208,12 +208,12 @@ describe("target registry", () => {
     expect(await reg.loadDir(`${root}targets`)).toEqual(["github-issues", "local-crew"]); // the shipped targets; local-crew is the crews' (docs/ops/crews.md)
     const [d, local] = await reg.describe();
     expect(d).toMatchObject({ name: "github-issues", transport: "github", auth: "env:METISTRY_GITHUB_WRITE_TOKEN", check: { status: "absent" } });
-    // the local target needs no auth and has a dispatcher (the assistant's crew_dispatch) — never reported as "no dispatcher"
-    expect(local).toMatchObject({ name: "local-crew", transport: "local", check: { status: "ok", meta: { via: "crew_dispatch" } } });
+    // the local target needs no auth and has a dispatcher (the assistant's agents_delegate) — never reported as "no dispatcher"
+    expect(local).toMatchObject({ name: "local-crew", transport: "local", check: { status: "ok", meta: { via: "agents_delegate" } } });
     expect(local!.auth).toBeUndefined();
     // …but the task-dispatch route is not that dispatcher: it refuses a local target by name, pointing at the tool
     const r = await dispatch(fakeDb(task), reg, 7, "local-crew", "fine", "owner");
-    expect(r).toMatchObject({ ok: false, code: "invalid_request", message: expect.stringContaining("crew_dispatch") });
+    expect(r).toMatchObject({ ok: false, code: "invalid_request", message: expect.stringContaining("agents_delegate") });
     expect(d!.data_policy.deny_sources).toContain("comms");
     expect(resolveRef("env:X", { X: "v" })).toBe("v");
     expect(resolveRef("env:X", {})).toBeUndefined();

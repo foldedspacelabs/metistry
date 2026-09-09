@@ -15,6 +15,13 @@ if [ -n "$dupes" ]; then
 fi
 
 # Allowed uppercase outside the vault: conventional filenames.
+# Note: the Swift helpers' `.app` bundles contain Apple-mandated uppercase
+# paths (`Contents/MacOS/…`) that would trip rule 2 — but they never reach
+# this check, because a bundle is build output and `git ls-files` does not
+# list it (.gitignore). Only the source `helper/Info.plist` is tracked, and
+# `Info.plist` is in the allowlist below. If a bundle ever does need to be
+# tracked, add `Contents/(MacOS|Resources|_CodeSignature)` here — those names
+# are Apple's, not ours, and cannot be lowercased.
 allowed='^(Knowledge/|seed/Knowledge/|.*/(README|LICENSE|CLAUDE|AGENTS|SKILL|RESULTS|SYNTHESIS|Dockerfile|Info\.plist|PRODUCT|MEMORY|CHANGELOG)[^/]*$|(README|LICENSE|CLAUDE|AGENTS)[^/]*$|metistry-build-plan\.md$|docs/)'
 offenders=$(git ls-files | grep -Ev "$allowed" | grep '[A-Z]' || true)
 if [ -n "$offenders" ]; then

@@ -1,10 +1,34 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Becomes ek-helper.app/Contents/Info.plist (and is also linked into the
+     executable as __TEXT,__info_plist so the usage strings are present even
+     if the binary is run outside the bundle).
+
+     Shipping the helper as a BUNDLE is what makes the TCC grant durable.
+     TCC's access table records a bundled client by its CFBundleIdentifier
+     (client_type 0) and validates the caller against the stored csreq — the
+     signature's designated requirement, which for a Developer ID identity is
+     identifier + certificate chain and contains no cdhash. A bare Mach-O has
+     no bundle for TCC to key on and is recorded by absolute path
+     (client_type 1) instead, so it is invisible to the Privacy pane and to
+     `tccutil reset`, and any move of the checkout drops the grant.
+     See docs/ops/apple-signing.md §3 for the citations.
+
+     LSUIElement keeps it out of the Dock. Deliberately NOT LSBackgroundOnly:
+     it must be allowed to front the Calendars/Reminders consent dialogs the
+     first time it asks. -->
 <plist version="1.0">
 <dict>
   <key>CFBundleIdentifier</key><string>com.foldedspacelabs.metistry.eventkit</string>
   <key>CFBundleName</key><string>metistry-eventkit</string>
+  <key>CFBundleDisplayName</key><string>Metistry Calendar Helper</string>
+  <key>CFBundleExecutable</key><string>ek-helper</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
   <key>CFBundleShortVersionString</key><string>0.0.1</string>
+  <key>CFBundleVersion</key><string>1</string>
+  <key>LSMinimumSystemVersion</key><string>14.0</string>
+  <key>LSUIElement</key><true/>
   <key>NSCalendarsFullAccessUsageDescription</key>
   <string>Metistry reads your calendar for the morning brief and meeting prep, and creates events you ask for.</string>
   <key>NSRemindersFullAccessUsageDescription</key>

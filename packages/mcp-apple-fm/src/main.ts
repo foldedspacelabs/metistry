@@ -4,7 +4,7 @@ import { Helper, defaultSpawner } from "./helper.js";
 import { makeBridge } from "./index.js";
 
 // standalone-usable by a stranger (§4.16): config from env only
-const binary = optionalEnv("METISTRY_AFM_HELPER", fileURLToPath(new URL("../helper/afm-helper", import.meta.url)));
+const binary = optionalEnv("METISTRY_AFM_HELPER", fileURLToPath(new URL("../helper/afm-helper.app/Contents/MacOS/afm-helper", import.meta.url)));
 const helper = new Helper(defaultSpawner(binary));
 const server = makeBridge(helper, { token: requireEnv("METISTRY_BRIDGE_TOKEN_APPLE_FM") });
 

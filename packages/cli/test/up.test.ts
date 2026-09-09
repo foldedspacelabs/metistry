@@ -57,7 +57,7 @@ describe("metistry up", () => {
       expect(text).toContain(`<string>${label}</string>`);
     }
     expect(readFileSync(join(home, "Library", "LaunchAgents", `${WATCHDOG}.plist`), "utf8")).toContain(`set -a; . ${P}/.env; set +a; exec ${NODE} ${P}/apps/watchdog/dist/main.js`);
-    expect(readFileSync(join(home, "Library", "LaunchAgents", `${HELPER}.plist`), "utf8")).toContain(`<string>${P}/packages/mcp-eventkit/helper/ek-helper</string>`);
+    expect(readFileSync(join(home, "Library", "LaunchAgents", `${HELPER}.plist`), "utf8")).toContain(`<string>${P}/packages/mcp-eventkit/helper/ek-helper.app/Contents/MacOS/ek-helper</string>`);
 
     // the closing doctor is the verdict
     const r2 = await up({ ...base(P), exec: fakeExec(), out: () => {}, home, doctorFn: failDoctor });
@@ -122,7 +122,7 @@ describe("metistry up", () => {
     expect(text).toContain(`ExecStart=${NODE} ${P}/apps/watchdog/dist/main.js`);
     expect(text).toContain(`ExecStart=${NODE} ${P}/apps/reconciler/dist/main.js`);
     expect(text).toContain("Environment=METISTRY_EK_SOCKET=/tmp/x.sock");
-    expect(text).toContain(`ExecStart=${P}/packages/mcp-eventkit/helper/ek-helper`);
+    expect(text).toContain(`ExecStart=${P}/packages/mcp-eventkit/helper/ek-helper.app/Contents/MacOS/ek-helper`);
     expect(text).not.toMatch(/__[A-Z]+__/);
     expect(text).toContain(`Description=Metistry reconciler`);
     expect(r.commands).toEqual(["metistry doctor"]);

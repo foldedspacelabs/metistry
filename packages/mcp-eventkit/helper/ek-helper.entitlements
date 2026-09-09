@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Hardened-runtime RESOURCE ACCESS entitlement, not App Sandbox.
+     Learned 2026-09-08 from `log stream --predicate 'subsystem ==
+     "com.apple.TCC"'` while the helper asked for access:
+
+       Prompting policy for hardened runtime; service: kTCCServiceCalendar
+       requires entitlement com.apple.security.personal-information.calendars
+       but it is missing
+
+     With --options runtime and no such entitlement, tccd does not prompt —
+     it denies, silently, and EventKit's completion handler just returns
+     false. This is the second half of the grant-rot fix (the first is
+     shipping the helper as an .app so TCC keys the grant on the bundle ID).
+     Reminders rides on the same entitlement; there is no separate
+     hardened-runtime entitlement for kTCCServiceReminders.
+     NOT the App Sandbox: com.apple.security.app-sandbox stays absent —
+     it would break the helper's launchd-service shape for no benefit. -->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.personal-information.calendars</key><true/>
+</dict>
+</plist>

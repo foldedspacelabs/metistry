@@ -4,6 +4,10 @@
 #
 #   metistry-runtime-<version>-<os>-<arch>.tar.gz   the built product; what
 #                                                   `metistry update` downloads
+#   metistry-runtime-deps-<version>-darwin-arm64.tar.gz
+#                                                   the bundled runtime: Node,
+#                                                   Postgres 17 + pgvector, git
+#                                                   (docs/ops/bundled-runtime.md)
 #   checksums.txt                                   sha256 of every asset
 #   npm  @foldedspacelabs/metistry-*                with provenance
 #   ghcr.io/foldedspacelabs/metistry-<app>:<version> console, assistant, reconciler
@@ -108,6 +112,47 @@ jobs:
           path: dist-release/metistry-runtime-${{ needs.verify.outputs.version }}-${{ matrix.target }}.tar.gz
           if-no-files-found: error
 
+  # The BUNDLED RUNTIME: Node, Postgres 17 + pgvector and git, built as a
+  # relocatable tree and shipped as its own asset (docs/ops/bundled-runtime.md).
+  # macOS arm64 only — it is what the Mac app embeds, and Linux hosts run the
+  # compose shape. The Postgres and git source builds are cached by version, so
+  # only a versions bump pays for them again; assembling, signing and the
+  # moved-copy verification always run.
+  runtime-deps:
+    name: runtime-deps (darwin-arm64)
+    needs: verify
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: cache the Postgres and git source builds, keyed on the pinned versions
+        uses: actions/cache@v4
+        with:
+          path: .runtime-build/cache
+          key: runtime-deps-darwin-arm64-${{ hashFiles('ops/release/runtime-versions.env') }}
+      - name: build runtime/ (verified from a MOVED copy before it is packed)
+        env:
+          # unset until the Developer ID cert reaches CI (docs/ops/apple-signing.md);
+          # the script skips signing rather than failing when it is empty
+          METISTRY_SIGN_IDENTITY: ${{ secrets.APPLE_SIGN_IDENTITY }}
+        run: ops/release/build-runtime-deps.sh
+      - name: pack metistry-runtime-deps-<version>-darwin-arm64.tar.gz (+ .sha256)
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          asset="metistry-runtime-deps-${VERSION}-darwin-arm64.tar.gz"
+          mkdir -p dist-release
+          # a single top-level `runtime/`: `metistry update` unpacks it with
+          # `tar -C <product-dir>`, so it lands as <product-dir>/runtime/
+          tar -czf "dist-release/$asset" -C "$GITHUB_WORKSPACE" runtime
+          ( cd dist-release && shasum -a 256 "$asset" > "$asset.sha256" && cat "$asset.sha256" )
+          ls -lh dist-release
+          cat runtime/manifest.json | head -20
+      - uses: actions/upload-artifact@v4
+        with:
+          name: runtime-deps-darwin-arm64
+          path: dist-release/metistry-runtime-deps-*
+          if-no-files-found: error
+
   # npm, with provenance. Skipped (not failed) without NPM_TOKEN: a fork
   # cuts releases without publishing to a scope it does not own.
   npm:
@@ -196,8 +241,8 @@ jobs:
 
   # checksums.txt, the generated changelog, and the release itself.
   publish:
-    needs: [verify, runtime, npm, images]
-    if: always() && needs.verify.result == 'success' && needs.runtime.result == 'success'
+    needs: [verify, runtime, runtime-deps, npm, images]
+    if: always() && needs.verify.result == 'success' && needs.runtime.result == 'success' && needs['runtime-deps'].result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: write

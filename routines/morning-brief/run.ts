@@ -185,6 +185,23 @@ async function sectionSystem(db: Db): Promise<{ lines: string[]; needsHelp: bool
   const lines = [
     `• last 24h: ${s.captures} capture(s) processed, ${s.turns} turn(s), ${Number(s.spend).toFixed(2)} USD spend`,
   ];
+  // last night's fold (routines/knowledge-fold): its own runs row carries the
+  // counts; the notes written are the knowledge_write calls that followed it.
+  const fold = await db.query(
+    `SELECT ts, meta FROM runs
+     WHERE component = 'knowledge-fold' AND kind = 'routine_run' AND ok AND meta->>'folded' = 'true'
+       AND ts > now() - interval '24 hours'
+     ORDER BY ts DESC LIMIT 1`,
+  );
+  if (fold.rows[0]) {
+    const items = Number(fold.rows[0].meta?.items ?? 0);
+    const wrote = await db.query(
+      `SELECT count(*) AS n FROM runs WHERE kind = 'tool' AND tool = 'knowledge_write' AND ok AND ts > $1::timestamptz`,
+      [fold.rows[0].ts],
+    );
+    const n = Number(wrote.rows[0]?.n ?? 0);
+    lines.push(`• folded ${items} item(s) into the vault last night (${n} note(s) written)`);
+  }
   if (failed > 0) lines.push(`• ⚠ ${failed} failed run(s) — check the status page; I may need your help`);
   // §4.21: a project the budget flipped to review mode needs the user — the brief says so, once per flip
   const flips = await db.query(

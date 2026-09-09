@@ -82,20 +82,31 @@ switch a live install without a dump.
 `metistry up` looks for a usable Postgres 17 in this order:
 
 1. **`METISTRY_PG_BIN`** — a `bin/` directory. Always wins.
-2. **`<product>/runtime/postgres/bin`** — the bundled runtime. The
-   expected layout, which is what the Mac app ships inside
+2. **`<product>/runtime/postgres/bin`** — the bundled runtime
+   (`docs/ops/bundled-runtime.md`), which is what the Mac app ships inside
    `Metistry.app/Contents/Resources/metistry/`:
 
    ```
    runtime/postgres/
-     bin/        postgres, initdb, psql, createdb, pg_isready
-     lib/        libpq and friends, linked with @loader_path rpaths
+     bin/        postgres, initdb, psql, createdb, pg_isready,
+                 pg_ctl, pg_dump, pg_restore, pg_config
+     lib/        libpq and friends, install names rewritten to @rpath
      share/
        extension/    vector.control + vector--*.sql  (pgvector)
    ```
 
-   `runtime/` is gitignored. All five binaries must be present for the
-   directory to count.
+   `runtime/` is gitignored and built by
+   `ops/release/build-runtime-deps.sh` — Postgres 17 + pgvector from
+   source, relocatable, verified from a moved copy. All five of the
+   binaries `up` and `doctor` call must be present for the directory to
+   count.
+
+   An install does not have to build it: in **release mode** on the
+   launchd shape, `metistry up` downloads the release's
+   `metistry-runtime-deps-<version>-darwin-arm64.tar.gz`, verifies its
+   sha256 against `checksums.txt` and unpacks it here — but **only** when
+   step 1 and step 3 have both come up empty. A git checkout never
+   downloads one. `METISTRY_RUNTIME_DEPS=0` disables it entirely.
 3. **Homebrew** — `/opt/homebrew/opt/postgresql@17/bin`, then
    `/usr/local/…`. pgvector installs its `vector.control` alongside.
 
@@ -192,7 +203,13 @@ secrets in `~/Library/LaunchAgents`, which is `0755`, so `up` writes
 those two plists `0600`. The other jobs (reconciler, watchdog, the TCC
 bridges) still source `.env` themselves and are unchanged.
 
-The two dicts are built differently on purpose:
+The **reconciler's** dict is a third case, and carries no secret: when this
+install has a bundled `runtime/git/bin`, `up` puts it on the front of that
+job's `PATH` (`/usr/bin:/bin:/usr/sbin:/sbin` is all a launchd job gets, and
+a clean Mac has no git until Xcode Command Line Tools are installed). It is
+the only job that spawns git (D5), so it is the only one that gets the entry.
+
+The two secret-bearing dicts are built differently on purpose:
 
 - **console** — a passthrough of every `METISTRY_*` in `.env`, with the
   container-only values replaced (db on loopback, a real inbox directory

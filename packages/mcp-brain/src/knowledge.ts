@@ -10,7 +10,7 @@
 // injects a reader — no vault mount is invented here.
 
 import { EmbedUnavailableError, vectorLiteral, type ErrorCode } from "@foldedspacelabs/metistry-core";
-import type { AgentPrincipal, Db } from "./types.js";
+import type { AgentPrincipal, Db, Tier } from "./types.js";
 
 export interface KnowledgeHit {
   path: string;
@@ -63,6 +63,36 @@ export function underAreas(path: string, areas: readonly string[]): boolean {
   });
 }
 
+/**
+ * The one filtering decision every knowledge_* surface (search, read, list,
+ * grep, resources) derives from, so tier logic can never drift between
+ * them. `prefixes` is what a caller passes into `areaFilter`/a vault-bridge
+ * call (null = tier `index`'s unrestricted browse); `canRead` is the single
+ * "may this principal see this path's CONTENT" test — the same one that
+ * gates knowledge_read/knowledge_grep/resources, and doubles as the check
+ * for a caller-supplied prefix argument (a prefix is just a path).
+ */
+export interface KnowledgeScope {
+  readonly tier: Tier;
+  readonly prefixes: readonly string[] | null;
+  /** Tier `index`: paths/titles only, never content. */
+  readonly visibleTitlesOnly: boolean;
+  /** Always true — drafts are invisible at every tier; named so a misuse test can assert it is never bypassed. */
+  readonly excludeDrafts: true;
+  canRead(path: string): boolean;
+}
+
+export function knowledgeScope(principal: AgentPrincipal): KnowledgeScope {
+  const { tier, areas } = principal.grants;
+  return {
+    tier,
+    prefixes: tier === "areas" ? areas : null,
+    visibleTitlesOnly: tier === "index",
+    excludeDrafts: true,
+    canRead: (path) => tier === "areas" && underAreas(path, areas),
+  };
+}
+
 function escapeLike(s: string): string {
   return s.replace(/[\\%_]/g, "\\$&");
 }
@@ -103,7 +133,7 @@ export async function searchKnowledge(
   limit: number,
   opts: { mode?: KnowledgeMode | null | undefined; embedder?: QueryEmbedder | undefined } = {},
 ): Promise<KnowledgeSearchResult> {
-  const areas = principal.grants.tier === "areas" ? principal.grants.areas : null;
+  const areas = knowledgeScope(principal).prefixes;
   const embedder = opts.embedder;
   const requested = opts.mode ?? null;
 
@@ -184,9 +214,10 @@ function round(n: number): number {
 
 /** Full read of one settled note under a granted prefix. */
 export async function readKnowledge(db: Db, principal: AgentPrincipal, path: string, reader: KnowledgeReader | undefined): Promise<ReadOutcome> {
-  if (principal.grants.tier !== "areas") return { ok: false, code: "forbidden" };
+  const scope = knowledgeScope(principal);
+  if (scope.tier !== "areas") return { ok: false, code: "forbidden" };
   if (!validKnowledgePath(path)) return { ok: false, code: "invalid_request", message: "path must be Knowledge/... with no traversal" };
-  if (!underAreas(path, principal.grants.areas)) return { ok: false, code: "forbidden" };
+  if (!scope.canRead(path)) return { ok: false, code: "forbidden" };
   const { rows } = await db.query(`SELECT path, title, draft FROM knowledge_files WHERE path = $1`, [path]);
   const row = rows[0];
   if (!row || row.draft === true) return { ok: false, code: "not_found" }; // drafts are unsettled: invisible at every tier

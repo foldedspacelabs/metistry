@@ -17,7 +17,7 @@
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ErrorCode, ListResourcesRequestSchema, McpError, ReadResourceRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import { areaFilter, readKnowledge, titleSql, type KnowledgeReader } from "./knowledge.js";
+import { areaFilter, knowledgeScope, readKnowledge, titleSql, type KnowledgeReader } from "./knowledge.js";
 import type { AgentPrincipal, Db } from "./types.js";
 
 const SCHEME = "metistry";
@@ -51,7 +51,8 @@ export function registerKnowledgeResources(server: McpServer, principal: AgentPr
   server.server.setRequestHandler(ListResourcesRequestSchema, async (request) => {
     // Only tier `areas` has "granted prefixes" at all — `none`/`index` see
     // no resources, the same visibility knowledge_read already enforces.
-    if (principal.grants.tier !== "areas") return { resources: [] };
+    const scope = knowledgeScope(principal);
+    if (scope.tier !== "areas") return { resources: [] };
     const cursor = request.params?.cursor ?? null;
     const { rows } = await db.query(
       `SELECT path, ${titleSql()} AS title, description
@@ -61,7 +62,7 @@ export function registerKnowledgeResources(server: McpServer, principal: AgentPr
           AND ($3::text IS NULL OR path > $3)
         ORDER BY path
         LIMIT $1`,
-      [PAGE_SIZE + 1, principal.grants.areas, cursor],
+      [PAGE_SIZE + 1, scope.prefixes, cursor],
     );
     const hasMore = rows.length > PAGE_SIZE;
     const page = hasMore ? rows.slice(0, PAGE_SIZE) : rows;

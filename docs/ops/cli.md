@@ -349,6 +349,17 @@ the first place. A checksum mismatch aborts before anything restarts and
 leaves `current` and the lock untouched. Full runbook, layout and secrets:
 **`docs/ops/releases.md`**.
 
+Resolving a release needs to read GitHub's Releases API; on a **private**
+repo, `METISTRY_GITHUB_TOKEN` must be a fine-grained PAT with **Contents:
+read** on that repo — Issues/Pull requests/Metadata (what the github-state
+collector needs) is not enough, and a token missing it gets a 403 that
+looks like rate limiting but isn't (the error message says which one it
+is, using `x-ratelimit-remaining`). Without that scope, `metistry update`
+falls back to the `gh` CLI automatically when it is on PATH and logged in
+(`gh auth login`) — `gh`'s own credential is independent of
+`METISTRY_GITHUB_TOKEN`, so it can resolve and download the release even
+when the PAT cannot.
+
 **What "changed" means.** Before the build, `update` hashes the code each
 launchd job executes — read from the plist itself (`__REPO__/<path>` in
 `ProgramArguments`): `apps/watchdog/dist` for the watchdog,

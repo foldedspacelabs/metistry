@@ -40,7 +40,7 @@ describe("crew manifest files", () => {
 
   it("parses the seed researcher: frontmatter → manifest, body → prompt, scope → an external-shaped grant, sha over the file", () => {
     const def = parseCrewFile(seed, "seed/agents/example/researcher.md", { area: "example", name: "researcher" });
-    expect(def.manifest).toMatchObject({ name: "researcher", area: "example", model: "haiku", uses: ["brain-read", "brain-report"], scope: ["Knowledge/Projects", "Knowledge/Resources"], max_turns: 10, budget_usd_per_run: 0.25 });
+    expect(def.manifest).toMatchObject({ name: "researcher", area: "example", model: "haiku", uses: ["knowledge", "requests"], scope: ["Knowledge/Projects", "Knowledge/Resources"], max_turns: 10, budget_usd_per_run: 0.25 });
     expect(def.grants).toEqual({ tier: "areas", areas: ["Knowledge/Projects", "Knowledge/Resources"] });
     expect(def.prompt.startsWith("You are a researcher working for {{name}}")).toBe(true); // templated later, in the runner, from identity.yaml
     expect(def.prompt).not.toContain("---");

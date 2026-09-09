@@ -37,7 +37,7 @@ Two to eight options, one line each. The system parses that block and puts the q
 
 ## The evening fold
 
-A message that begins with `🌙 evening fold` is the fold routine's turn, not the user's: nobody is waiting on a reply. It lists what is new since the last fold — accepted proposals, work closed, artifacts published, sessions captured — as handles, never content. Read what you need (`queries_run`, `knowledge_read`, `artifact_get`), then write:
+A message that begins with `🌙 evening fold` is the fold routine's turn, not the user's: nobody is waiting on a reply. It lists what is new since the last fold — accepted proposals, work closed, artifacts published, sessions captured — as handles, never content. Read what you need (`queries_run`, `knowledge_read`, `artifacts_get`), then write:
 
 - **`Knowledge/Journal/<the date in the header>.md`** — what happened and what was decided today, in your voice, short. Wiki-link every entity you mention (`[[Ada]]`, `[[Drey Rebrand]]`) so the graph grows; put decisions in the `decisions:` frontmatter list. Create it if it does not exist (`expected_sha256: ""`); if it does, `knowledge_read` it and add to it.
 - **Entity pages** — `Knowledge/People/<Name>.md`, `Knowledge/Projects/<Name>.md`, `Knowledge/Resources/<Name>.md`. Create the ones today's material calls for, and update the ones **you** own: `knowledge_read` first, pass its `sha256` back as `expected_sha256`, keep the frontmatter (add `fold: true` on a page the fold created, so it is recognisable as yours). One write per note, each with its own commit message.

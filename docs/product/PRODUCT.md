@@ -831,6 +831,9 @@ your git, on your machine.
   make it cheap rather than disruptive: no stored value changed (the same
   rows, decisions and modes, read in one voice), and the eleven old tool
   names keep working for one release, resolved at call time so the discovered
-  surface stayed 20 tools and ~4.8k definition tokens instead of doubling.
-  Folding `tasks_list_ready` and `tasks_mine` into one `filter` axis took the
-  bridge back under the >20-tool line that would have forced lazy discovery.
+  surface did not double: 22 tools, 17,611 chars ≈ **4.4k definition tokens**,
+  measured by test. Folding `tasks_list_ready` and `tasks_mine` into one
+  `filter` axis paid for `knowledge_list`/`knowledge_grep`, and the shorter
+  names and descriptions took the definition budget back under the >5k-token
+  line those two tools had crossed — the axis that actually gates lazy
+  discovery.

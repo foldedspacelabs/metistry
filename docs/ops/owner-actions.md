@@ -49,6 +49,6 @@ Kept current as PRs land (2026-09-08). Each item names what it unblocks.
 - [ ] **External-agent end to end**: mint an agent token in the Agents tab,
       then from a Claude Code session `claude mcp add --transport http metistry
       https://mac-studio.example.ts.net/mcp --header "Authorization: Bearer
-      <token>"` and call `tasks_list_ready`. The one path no agent could verify.
+      <token>"` and call `tasks_list`. The one path no agent could verify.
 - [ ] Try `/note` and a 👎 with a note in chat once #78 is deployed, so the
       first `reply-review` run has something to fold.

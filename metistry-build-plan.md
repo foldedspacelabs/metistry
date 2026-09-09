@@ -2489,7 +2489,11 @@ All propagated into this document.
     shape. Ratified with the strategy decision the same day: the Mac app
     is the primary distribution channel, so this shape is the primary
     macOS shape; the container isolation is replaced by a host sandbox
-    profile with misuse tests, built with the install flow.
+    profile with misuse tests, built with the install flow. Bundled
+    runtime ratified 2026-09-09 (`docs/product/desktop-app-plan.md`):
+    Node, Postgres 17 + pgvector, git, the CLI and the signed helpers
+    ship inside the app; Ollama and Tailscale are optional; only the
+    user's accounts and permissions remain theirs.
 
 ---
 

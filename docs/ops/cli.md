@@ -195,6 +195,85 @@ can read a value, let alone print one.
 account: `metistry`). On Linux `secrets` refuses and points at
 `chmod 600` on `.env` or your own secret manager.
 
+## Importing Claude Code sessions
+
+```
+metistry import-sessions [--since <date>] [--project <path>] [--limit N] [--dry-run]
+```
+
+Summarises this machine's Claude Code sessions and posts each one to
+`POST /capture` as `kind: session`, where `inbox-drain` classifies it and
+Needs You lists it (stash review 2026-09-09, item 2). Opt-in — nothing
+runs it for you — and **summaries only, never transcripts**: full-transcript
+capture is the thing that review declined.
+
+**Host only.** It reads `~/.claude/projects/`, which the console container
+has no access to; there is no containerised path for this verb.
+
+**Deterministic.** No model is called. The summary is measured from the
+transcript: session id, project path and repo, branch, start/end and
+duration, user- and assistant-turn counts, first prompt (clipped to 300
+chars), last assistant message (500), files touched (paths out of
+`Read`/`Edit`/`Write`/notebook tool inputs, deduped, capped at 40), tool
+names with call counts, models, token totals, and cost *if* the transcript
+carries one. Thinking blocks and tool output never travel.
+
+**The layout it relies on** (confirmed on this Mac against Claude Code
+2.1.251, 2026-09-09):
+
+```
+~/.claude/projects/<cwd with every "/" and "." replaced by "-">/<session uuid>.jsonl
+```
+
+one JSON object per line, appended live. Fields read — all optional, all
+guarded: `type` (`user` / `assistant`; everything else ignored),
+`timestamp`, `cwd`, `gitBranch`, `version`, `sessionId`, `isSidechain`
+(subagent turns are not the owner's turns), `isMeta`, and `message` with
+`role` / `model` / `usage` / `content` blocks (`text`, `tool_use`). A
+half-written last line is skipped, not fatal. These files carry **no cost
+field** on this machine, so `cost` is usually absent. The directory name is
+a lossy encoding (`-` for both `/` and `.`), so the cwd comes from the
+records and the decoded name is only a fallback.
+
+**Idempotency, twice over.** A ledger at
+`~/.metistry/imported-sessions.json` (0600) keyed by session id + transcript
+mtime makes a second run a no-op; a session that has since grown is
+re-imported as a new summary. Every note also carries an
+`idempotency_key` in its frontmatter — derived from the transcript's state,
+not the clock — so the server can dedupe across this verb and the Claude
+Code plugin's `SessionEnd` hook, which computes the same key for the same
+session (`docs/ops/claude-code-plugin.md`).
+
+**The frontmatter both doors emit:**
+
+```yaml
+kind: "session"
+source: "claude-code"
+title: "Claude Code session — <repo> — <YYYY-MM-DD>"
+session_id: "…"
+project: "/Users/…/demo"
+repo: "demo"
+branch: "claude/…"
+started: "2026-09-08T10:00:00.000Z"
+ended: "2026-09-08T10:37:00.000Z"
+turns: 2
+host: "studio"
+captured_at: "2026-09-09T00:00:00.000Z"
+idempotency_key: "claude-code:<session id>:<16 hex>"
+```
+
+**Credentials.** `METISTRY_URL` and `METISTRY_OWNER_TOKEN` come from the
+environment (the checkout's `.env` is loaded first), else from the login
+Keychain (`metistry:METISTRY_URL`, `metistry:METISTRY_OWNER_TOKEN`).
+Neither is printed, and every error line is redacted before it is written.
+`--dry-run` needs no credentials at all and reaches no network: it prints
+each note it would post, then a count.
+
+Posts run two at a time. The command exits non-zero only on a hard
+failure — nothing got through when something should have, or the ledger
+could not be written — so a single unreachable capture among many does not
+fail the run.
+
 ## Reading a doctor report
 
 ```

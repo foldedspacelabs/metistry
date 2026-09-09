@@ -27,7 +27,7 @@
 
 import { Worker } from "node:worker_threads";
 import { z } from "zod";
-import { areaFilter, titleSql, underAreas, type KnowledgeReader } from "./knowledge.js";
+import { knowledgeScope, titleSql, underAreas, type KnowledgeReader } from "./knowledge.js";
 import { done, fail, type Outcome } from "./outcome.js";
 import type { AgentPrincipal, Db } from "./types.js";
 import type { VaultBridgeOptions } from "./knowledge-write.js";
@@ -134,25 +134,27 @@ async function loadFileMeta(db: Db, paths: string[]): Promise<Map<string, FileMe
 function registerKnowledgeList(reg: Register, deps: KnowledgeFsDeps, principal: AgentPrincipal): void {
   reg(
     "knowledge_list",
-    "List files and directories under a Knowledge/ prefix, breadth-limited by depth. Tier `index` browses the whole tree; tier `areas` is restricted to your granted prefixes (omitted = every granted area). Drafts excluded.",
+    "List files/directories under a Knowledge/ prefix, depth-limited. Tier `index` browses everything; tier `areas` is restricted to your granted prefixes. Drafts excluded.",
     { prefix: z.string().max(500).optional(), depth: z.number().int().min(1).max(5).optional() },
     async (a) => {
-      const { tier, areas } = principal.grants;
-      if (tier === "none") return fail("forbidden", "not granted");
+      const scope = knowledgeScope(principal);
+      if (scope.tier === "none") return fail("forbidden", "not granted");
       if (!deps.list) return fail("not_available", NOT_AVAILABLE_LIST);
       const depth = a.depth ?? 1;
 
       let raw: VaultListEntry[];
-      if (tier === "areas") {
+      if (scope.prefixes) {
+        // tier areas: an explicit prefix must fall under a granted one; an omitted prefix aggregates across all of them
         if (a.prefix !== undefined && a.prefix !== "") {
-          if (!underAreas(a.prefix, areas)) return fail("forbidden", "not granted");
+          if (!scope.canRead(a.prefix)) return fail("forbidden", "not granted");
           raw = await deps.list(a.prefix, depth);
         } else {
           const seen = new Map<string, VaultListEntry>();
-          for (const area of areas) for (const e of await deps.list(area, depth)) seen.set(e.path, e);
+          for (const area of scope.prefixes) for (const e of await deps.list(area, depth)) seen.set(e.path, e);
           raw = [...seen.values()].sort((x, y) => x.path.localeCompare(y.path));
         }
       } else {
+        // tier index: same info class as knowledge_search at index tier — global, titles only, unrestricted by any prefix
         raw = await deps.list(a.prefix ?? "", depth);
       }
 
@@ -164,7 +166,7 @@ function registerKnowledgeList(reg: Register, deps: KnowledgeFsDeps, principal: 
           const m = meta.get(e.path);
           return { path: e.path, kind: e.kind, ...(m?.title ? { title: m.title } : {}), ...(m?.updated ? { updated: m.updated } : {}) };
         });
-      return done({ entries }, { tier, prefix: a.prefix ?? null, depth, count: entries.length });
+      return done({ entries }, { tier: scope.tier, prefix: a.prefix ?? null, depth, count: entries.length });
     },
   );
 }
@@ -270,12 +272,12 @@ export function grepWithTimeout(pattern: string, files: Array<[string, string]>,
 function registerKnowledgeGrep(reg: Register, deps: KnowledgeFsDeps, principal: AgentPrincipal): void {
   reg(
     "knowledge_grep",
-    `Regex search over settled note content under your granted prefixes (drafts excluded; requires an \`areas\` grant, like knowledge_read). Candidates come from a keyword pre-filter on your pattern's literal substring (or a prefix listing), capped at ${MAX_GREP_FILES} files; hits capped at ${MAX_GREP_HITS}. An overly expensive pattern is refused, not left to hang.`,
+    `Regex search over settled note content under your granted prefixes (requires \`areas\`, like knowledge_read; drafts excluded). Candidates are pre-filtered, capped at ${MAX_GREP_FILES} files / ${MAX_GREP_HITS} hits; an overly expensive pattern is refused, not left to hang.`,
     { pattern: z.string().min(1).max(200), prefix: z.string().max(500).optional(), limit: z.number().int().min(1).max(MAX_GREP_HITS).optional() },
     async (a) => {
-      const { tier, areas } = principal.grants;
-      if (tier !== "areas") return fail("forbidden", "not granted");
-      if (a.prefix !== undefined && a.prefix !== "" && !underAreas(a.prefix, areas)) return fail("forbidden", "not granted");
+      const scope = knowledgeScope(principal);
+      if (scope.tier !== "areas") return fail("forbidden", "not granted");
+      if (a.prefix !== undefined && a.prefix !== "" && !scope.canRead(a.prefix)) return fail("forbidden", "not granted");
       if (!deps.read) return fail("not_available", NOT_AVAILABLE_READ);
 
       try {
@@ -285,7 +287,7 @@ function registerKnowledgeGrep(reg: Register, deps: KnowledgeFsDeps, principal: 
         return fail("invalid_request", "pattern is not a valid regular expression");
       }
 
-      const scopes = a.prefix ? [a.prefix] : areas;
+      const scopes = a.prefix ? [a.prefix] : (scope.prefixes ?? []);
       const candidates = await candidateFiles(deps, scopes, a.pattern, MAX_GREP_FILES);
       const meta = await loadFileMeta(deps.db, candidates);
       const settled = candidates.filter((p) => meta.get(p) !== undefined && meta.get(p)!.draft !== true);
@@ -303,7 +305,7 @@ function registerKnowledgeGrep(reg: Register, deps: KnowledgeFsDeps, principal: 
       } catch (err) {
         return fail("invalid_request", err instanceof Error ? err.message : "pattern could not be evaluated");
       }
-      return done({ hits }, { tier, prefix: a.prefix ?? null, files: contents.length, hits: hits.length });
+      return done({ hits }, { tier: scope.tier, prefix: a.prefix ?? null, files: contents.length, hits: hits.length });
     },
   );
 }

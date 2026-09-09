@@ -44,7 +44,7 @@ import { QUERIES_TOOL_NAMES, registerQueriesTools } from "./queries-tools.js";
 import { KNOWLEDGE_FS_TOOL_NAMES, registerKnowledgeFsTools, type KnowledgeLister, type KnowledgeVaultSearcher } from "./knowledge-fs.js";
 import { registerKnowledgeResources } from "./knowledge-resources.js";
 import { captureToInbox } from "./capture.js";
-import { KNOWLEDGE_MODES, readKnowledge, searchKnowledge, type KnowledgeReader, type QueryEmbedder } from "./knowledge.js";
+import { KNOWLEDGE_MODES, knowledgeScope, readKnowledge, searchKnowledge, type KnowledgeReader, type QueryEmbedder } from "./knowledge.js";
 import { sha256Text, writeKnowledge, type KnowledgeWriter } from "./knowledge-write.js";
 import { computeNudge } from "./nudge.js";
 import { done, fail, type Outcome } from "./outcome.js";
@@ -164,7 +164,7 @@ const turnId = z
   .max(64)
   .regex(/^[A-Za-z0-9_-]+$/)
   .optional()
-  .describe("Optional: reuse the same value on every brain tool call within one reply so they group in the activity feed.");
+  .describe("Optional: reuse per reply to group calls in the activity feed.");
 
 export function createBrainServer(cfg: BrainConfig): BrainServer {
   const { db, tasks } = cfg;
@@ -225,11 +225,11 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
 
     reg(
       "capture",
-      "Drop a note or a file into the inbox. It lands as a proposal for the user to triage — nothing is written to knowledge. Provenance is stamped from your credential.",
+      "Drop a note or file into the inbox as a triage proposal; nothing is written to knowledge directly.",
       {
-        note: z.string().max(200_000).optional().describe("Markdown text. Becomes the file when content_base64 is absent."),
+        note: z.string().max(200_000).optional().describe("Markdown text; becomes the file if content_base64 is absent."),
         filename: z.string().max(200).optional().describe("Suggested filename (sanitized server-side)."),
-        content_base64: z.string().max(40_000_000).optional().describe("Binary content, base64. `note` then travels as the triage note."),
+        content_base64: z.string().max(40_000_000).optional().describe("Binary content, base64; note then travels as the triage note."),
         mime: z.string().max(100).optional(),
       },
       async (a) => {
@@ -244,7 +244,7 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
 
     reg(
       "report",
-      "Submit a finding, decision, gotcha, or progress note as a report proposal. The user folds accepted reports into knowledge later; you never write knowledge directly. Retrying with the same idempotency_key, or re-reporting the same title within 24h, returns the existing id.",
+      "Submit a finding, decision, gotcha, or progress note as a report proposal; same idempotency_key or title within 24h returns the existing id.",
       {
         title: z.string().min(1).max(200),
         body: z.string().min(1).max(50_000),
@@ -260,7 +260,7 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
 
     reg(
       "tasks_list_ready",
-      "Unblocked, unclaimed tasks you could claim, across your projects (or one of them). Due dates first, then oldest.",
+      "Unblocked, unclaimed tasks across your projects (or one), due date then oldest first.",
       { project: z.string().max(200).optional(), limit: z.number().int().min(1).max(200).optional() },
       async (a) => {
         const limit = a.limit ?? 50;
@@ -279,7 +279,7 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
 
     reg(
       "tasks_claim",
-      "Claim a task atomically (assignee + status + lease in one operation). Two agents racing get exactly one winner. Heartbeat before the lease lapses.",
+      "Claim a task atomically — assignee, status, and lease in one step; heartbeat before the lease lapses.",
       { id, lease_seconds: lease },
       async (a) => {
         if (!(await scoped(principal, a.id))) return fail("not_found");
@@ -289,7 +289,7 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
 
     reg(
       "tasks_heartbeat",
-      "Renew the lease on a task you hold. Refused once the lease has lapsed — claim it again instead.",
+      "Renew the lease on a task you hold; refused once lapsed — claim it again instead.",
       { id, lease_seconds: lease },
       async (a) => {
         if (!(await scoped(principal, a.id))) return fail("not_found");
@@ -299,7 +299,7 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
 
     reg(
       "tasks_update",
-      "Change status (in_progress | blocked | closed) and/or append a note on a task you hold. `closed` releases the claim.",
+      "Change status and/or append a note on a task you hold; `closed` releases the claim.",
       { id, status: z.enum(["in_progress", "blocked", "closed"]).optional(), note: z.string().max(4000).optional() },
       async (a) => {
         if (!(await scoped(principal, a.id))) return fail("not_found");
@@ -309,7 +309,7 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
 
     reg(
       "tasks_release",
-      "Hand a task you hold back to the list (status → open, claim cleared).",
+      "Return a task you hold to the list — status open, claim cleared.",
       { id, note: z.string().max(4000).optional() },
       async (a) => {
         if (!(await scoped(principal, a.id))) return fail("not_found");
@@ -319,7 +319,7 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
 
     reg(
       "tasks_create",
-      "Create a task in one of your projects. Retrying with the same idempotency_key returns the existing task. depends_on ids must be tasks in your projects.",
+      "Create a task in one of your projects; same idempotency_key returns the existing task.",
       {
         title: z.string().min(1).max(500),
         project: z.string().max(200),
@@ -353,34 +353,32 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
 
     reg(
       "knowledge_search",
-      "Search the knowledge index — titles and one-line descriptions — within your grant. Tier `index` sees every settled title; tier `areas` only its granted Knowledge/ prefixes. Draft notes never appear. " +
-        "`mode` picks the ranking: `keyword` (substring), `semantic` (meaning, over the note embeddings), or `hybrid` (both, rank-fused — the default when embeddings exist). " +
-        "The mode changes the ORDER of results, never which notes your grant lets you see; the response says which mode actually ran.",
+      "Search the knowledge index (titles + one-line descriptions) within your grant; drafts never appear. `mode` (keyword/semantic/hybrid) only reorders results, never what you can see.",
       {
         query: z.string().min(1).max(200),
         limit: z.number().int().min(1).max(100).optional(),
-        mode: z.enum(KNOWLEDGE_MODES).optional().describe("keyword | semantic | hybrid. Omit to let the bridge choose (hybrid when embeddings exist, else keyword)."),
+        mode: z.enum(KNOWLEDGE_MODES).optional().describe("keyword | semantic | hybrid; omit for hybrid when available, else keyword."),
       },
       async (a) => {
-        const { tier, areas } = principal.grants;
-        if (tier === "none") return fail("forbidden", undefined, { tier });
+        const scope = knowledgeScope(principal);
+        if (scope.tier === "none") return fail("forbidden", undefined, { tier: scope.tier });
         const r = await searchKnowledge(db, principal, a.query, a.limit ?? 20, { mode: a.mode ?? null, embedder: cfg.embedder });
         return done(
-          { tier, mode: r.mode, hits: r.hits, ...(r.degraded ? { degraded: r.degraded } : {}) },
-          { tier, areas, mode: r.mode, requested: a.mode ?? null, hits: r.hits.length },
+          { tier: scope.tier, mode: r.mode, hits: r.hits, ...(r.degraded ? { degraded: r.degraded } : {}) },
+          { tier: scope.tier, areas: scope.prefixes ?? [], mode: r.mode, requested: a.mode ?? null, hits: r.hits.length },
         );
       },
     );
 
     reg(
       "knowledge_read",
-      "Read one settled note by vault path (Knowledge/...). Requires an `areas` grant covering the path. The returned sha256 is the value to pass as expected_sha256 to knowledge_write.",
+      "Read one settled note by vault path; requires an `areas` grant covering it. Returned sha256 feeds knowledge_write's expected_sha256.",
       { path: z.string().min(1).max(500) },
       async (a) => {
-        const { tier, areas } = principal.grants;
+        const scope = knowledgeScope(principal);
         const r = await readKnowledge(db, principal, a.path, cfg.readKnowledge);
-        if (!r.ok) return fail(r.code, r.message, { tier, areas, path: a.path });
-        return done({ path: r.path, title: r.title, content: r.content, sha256: sha256Text(r.content) }, { tier, areas, path: a.path, bytes: r.content.length });
+        if (!r.ok) return fail(r.code, r.message, { tier: scope.tier, areas: scope.prefixes ?? [], path: a.path });
+        return done({ path: r.path, title: r.title, content: r.content, sha256: sha256Text(r.content) }, { tier: scope.tier, areas: scope.prefixes ?? [], path: a.path, bytes: r.content.length });
       },
     );
 
@@ -392,20 +390,18 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
     // The assistant's write path (knowledge-write.ts): internal principals only.
     reg(
       "knowledge_write",
-      "Write one note under Knowledge/ as a commit in your name (the instance's own assistant only; every other agent gets `not granted` — use report). " +
-        "Whole-file replace: pass the full content. Markdown gets `source` (your id) and `updated` (today) stamped into its frontmatter. " +
-        'Pass expected_sha256 from knowledge_read so a concurrent edit is never clobbered ("" = create only); a `conflict` carries the current hash — re-read and retry. ' +
-        "An existing note whose frontmatter `source` is someone else's (the user's, another agent's) is refused — report the change instead; new notes, and notes you or the fold wrote, are yours to update. " +
-        "Protected paths (identity.yaml, rules.yaml, queries/, agents/, …) are refused at the vault. Deletes and renames are not available: they stay the user's hand.",
+      "Write one note under Knowledge/ as a commit in your name (internal assistant only; others get `not granted`). Whole-file replace; frontmatter gets `source`/`updated` stamped. " +
+        'Pass expected_sha256 from knowledge_read to avoid clobbering a concurrent edit ("" = create only; a conflict returns the current hash). ' +
+        "A note whose `source` is someone else's is refused — report instead; notes you or the fold wrote are yours. Protected paths are refused; deletes/renames are not available.",
       {
-        path: z.string().min(1).max(500).describe("Vault path, Knowledge/... with TitleCase folders, e.g. Knowledge/Areas/Fsl/Drey.md or Knowledge/now.md."),
+        path: z.string().min(1).max(500).describe("Vault path, Knowledge/... with TitleCase folders, e.g. Knowledge/Areas/Fsl/Drey.md."),
         content: z.string().max(2_000_000).describe("The full new content of the file (UTF-8)."),
-        message: z.string().min(1).max(2000).describe("Commit message: what changed and why; first line is the subject (≤ 200 chars)."),
+        message: z.string().min(1).max(2000).describe("Commit message; first line is the subject (≤ 200 chars)."),
         expected_sha256: z
           .string()
           .regex(/^(?:[0-9a-f]{64})?$/)
           .optional()
-          .describe('sha256 the note must currently have (from knowledge_read); "" = the note must not exist yet; omit = unconditional.'),
+          .describe('Current sha256 from knowledge_read; "" = must not exist; omit = unconditional.'),
       },
       async (a) => {
         const r = await writeKnowledge(principal, a, cfg.writeKnowledge, new Date(), cfg.readKnowledge);

@@ -60,7 +60,7 @@ The workflow refuses a tag whose number does not match `package.json` and
 | `metistry-runtime-deps-<version>-darwin-arm64.tar.gz` | the **bundled runtime**: Node, Postgres 17 + pgvector, git — `docs/ops/bundled-runtime.md` |
 | `checksums.txt` | `sha256sum` of every asset; `metistry update` verifies against it |
 | npm `@foldedspacelabs/metistry-*@<version>` | published via Trusted Publishing (provenance once the repo is public — see below) |
-| `ghcr.io/foldedspacelabs/metistry-{console,assistant,reconciler}:<version>` | the app images compose pulls |
+| `ghcr.io/foldedspacelabs/metistry-{console,assistant,reconciler}:<version>` | the app images compose pulls — multi-arch (`linux/amd64` + `linux/arm64`, so Docker Desktop on Apple silicon pulls the native image) |
 
 The **runtime pack** (`ops/release/pack-runtime.sh`) is the product as an
 install runs it — no checkout, no `pnpm install`, no compile step. It

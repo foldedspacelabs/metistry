@@ -114,8 +114,8 @@ export type DataPolicy = z.infer<typeof dataPolicySchema>;
 
 /** mcp-brain tool groups a crew may name in `uses`. `brain-read` / `brain-report` are the plan's spellings (§4.11). */
 export const CREW_TOOL_GROUPS = {
-  /** Read the vault under the crew's `scope` (grant tier `areas`). */
-  knowledge: ["knowledge_search", "knowledge_read"],
+  /** Read the vault under the crew's `scope` (grant tier `areas`): the title index, one note's content, a directory listing, or a content regex — all the same grant. */
+  knowledge: ["knowledge_search", "knowledge_read", "knowledge_list", "knowledge_grep"],
   /** Findings, decisions, gotchas, progress — into the proposal queue the assistant folds later. */
   report: ["report"],
   /** Notes and files into the inbox as proposals. */

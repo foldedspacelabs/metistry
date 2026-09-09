@@ -103,7 +103,7 @@ describe("tool groups → allowlist", () => {
     expect(crewGroupOf("tasks")).toBe("tasks");
     expect(crewGroupOf("knowledge_write")).toBeUndefined();
     expect(crewGroupOf("toString")).toBeUndefined(); // prototype names are not groups
-    expect(crewToolsFor(["brain-report", "brain-read", "report"])).toEqual(["knowledge_search", "knowledge_read", "report"]);
+    expect(crewToolsFor(["brain-report", "brain-read", "report"])).toEqual(["knowledge_search", "knowledge_read", "knowledge_list", "knowledge_grep", "report"]);
     expect(crewToolsFor([])).toEqual([]);
   });
 

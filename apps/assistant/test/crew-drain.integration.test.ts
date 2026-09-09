@@ -93,7 +93,12 @@ describe.skipIf(!hasDb)("crew drain (integration)", () => {
     expect(s.brain.url).toBe("http://console:8080/mcp");
     expect(s.identity).toEqual({ name: "Tester" });
     const o = buildCrewOptions(s);
-    expect(o).toMatchObject({ model: "sonnet", maxTurns: 5, maxBudgetUsd: 0.1, allowedTools: ["mcp__brain__knowledge_search", "mcp__brain__knowledge_read", "mcp__brain__report"] });
+    expect(o).toMatchObject({
+      model: "sonnet",
+      maxTurns: 5,
+      maxBudgetUsd: 0.1,
+      allowedTools: ["mcp__brain__knowledge_search", "mcp__brain__knowledge_read", "mcp__brain__knowledge_list", "mcp__brain__knowledge_grep", "mcp__brain__report"],
+    });
     expect((o.mcpServers as any).brain.headers.Authorization).toBe(`Bearer ${s.brain.token}`);
     expect(o.systemPrompt).toMatch(/^You work for Tester\./);
 

@@ -38,7 +38,7 @@ function fromQueryError(err: QueryError): Outcome {
 export function registerQueriesTools(reg: Register, store: QueryStore | undefined, principal: AgentPrincipal): void {
   reg(
     "queries_list",
-    "List the named queries available on this instance (invariant 3 — the one read path into state). Each entry names its params with their declared type and default; pass any of them to queries_run.",
+    "List named queries available on this instance; each entry names its params (type + default) for queries_run.",
     {},
     async () => {
       if (!allowed(principal)) return fail("forbidden");
@@ -50,7 +50,7 @@ export function registerQueriesTools(reg: Register, store: QueryStore | undefine
 
   reg(
     "queries_run",
-    `Run one named query by name, with optional params (unknown params or a wrong type are refused, not silently ignored). Rows are capped at ${MAX_ROWS}; a larger result comes back truncated: true, row_count reflecting only the rows returned. \`as_of\` is when the data was actually fetched — a cached query keeps its original as_of, so staleness is visible.`,
+    `Run one named query with optional params (unknown/wrong-type params refused). Capped at ${MAX_ROWS} rows (truncated: true if more); as_of is the real fetch time, even when cached.`,
     {
       name: z.string().min(1).max(100),
       params: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),

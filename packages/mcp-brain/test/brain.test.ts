@@ -21,8 +21,31 @@ describe("manifest", () => {
     if (parsed.manifest.type !== "bridge") return;
     expect(parsed.manifest.discovery).toBe("eager");
     expect(parsed.manifest.exposes.map((t) => t.name)).toEqual([...TOOL_NAMES]);
-    expect(TOOL_NAMES.length).toBeLessThanOrEqual(21); // one over the PoC-17 lazy-load guidance (>20) — flagged in manifest.yaml, not acted on here
+    expect(TOOL_NAMES.length).toBeLessThanOrEqual(23); // over the PoC-17 tool-COUNT guidance (>20) since knowledge_list/knowledge_grep — the definition-token axis is what actually gates lazy; see "definition size" below
     expect(parsed.manifest.exposes.every((t) => !t.destructive)).toBe(true); // nothing here mutates the user's world irreversibly: rows, not calendars
+  });
+});
+
+describe("definition size (docs/research/2026-08-tool-discovery.md's other axis)", () => {
+  it("the full tools/list definition stays well under the >5k-token line that would make discovery: lazy worth its +1-turn cost", async () => {
+    const db = fakeDb({}, []);
+    const brain = createBrainServer({ db, authenticate: async () => alice, tasks: new TasksService(db), inboxDir: "/tmp/unused" });
+    const server = createServer((req, res) => void brain.handle(req, res));
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const client = new Client({ name: "t", version: "0" });
+      await client.connect(new StreamableHTTPClientTransport(new URL(base), { requestInit: { headers: { authorization: "Bearer x" } } }));
+      const { tools } = await client.listTools();
+      await client.close();
+      const chars = JSON.stringify(tools).length;
+      const approxTokens = Math.ceil(chars / 4); // the industry's own rule of thumb (docs/research/2026-08-tool-discovery.md §1)
+      // eslint-disable-next-line no-console
+      console.log(`mcp-brain tools/list: ${tools.length} tools, ${chars} chars, ~${approxTokens} tokens (PoC-17 lazy-load line: 5000)`);
+      expect(approxTokens).toBeLessThan(5000);
+    } finally {
+      await new Promise<void>((r) => server.close(() => r()));
+    }
   });
 });
 
@@ -160,6 +183,33 @@ describe("reader-less deployment", () => {
     expect(body.error.message).toMatch(/not readable from this deployment/);
     await client.close();
     expect(db.log.filter((l) => l.startsWith("INSERT INTO runs"))).toHaveLength(1); // the refusal was still recorded
+  });
+
+  it("knowledge_list answers not_available without a vault lister; knowledge_grep answers not_available without a reader — both distinct from not granted", async () => {
+    const client = new Client({ name: "t", version: "0" });
+    await client.connect(new StreamableHTTPClientTransport(new URL(base), { requestInit: { headers: { authorization: "Bearer ok" } } }));
+    const list = (await client.callTool({ name: "knowledge_list", arguments: {} })) as { isError?: boolean; content: { text: string }[] };
+    expect(list.isError).toBe(true);
+    expect(JSON.parse(list.content[0]!.text).error).toMatchObject({ code: "not_available" });
+    const grep = (await client.callTool({ name: "knowledge_grep", arguments: { pattern: "x" } })) as { isError?: boolean; content: { text: string }[] };
+    expect(grep.isError).toBe(true);
+    expect(JSON.parse(grep.content[0]!.text).error).toMatchObject({ code: "not_available" });
+    await client.close();
+  });
+
+  it("knowledge_list is forbidden at tier none; knowledge_grep is forbidden at tier none AND tier index (it needs content, like knowledge_read)", async () => {
+    const client = new Client({ name: "t", version: "0" });
+    // hubInternal here carries tier: "none" — reused only for its shape; the check is purely on grants.tier
+    await client.connect(new StreamableHTTPClientTransport(new URL(base), { requestInit: { headers: { authorization: "Bearer hub" } } }));
+    for (const [name, args] of [
+      ["knowledge_list", {}],
+      ["knowledge_grep", { pattern: "x" }],
+    ] as const) {
+      const r = (await client.callTool({ name, arguments: args })) as { isError?: boolean; content: { text: string }[] };
+      expect(r.isError, name).toBe(true);
+      expect(JSON.parse(r.content[0]!.text).error, name).toEqual({ code: "forbidden", message: "not granted" });
+    }
+    await client.close();
   });
 
   it("queries_list/queries_run answer not_available without a QueryStore, even for an internal (allowed) principal", async () => {

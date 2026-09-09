@@ -5,7 +5,7 @@ transport: http
 port: 8080               # no bind of its own: mounted at the console's POST /mcp, so this is the console's port
 runs_on: container
 requires_tcc: []
-discovery: eager         # 21 tools — one over the PoC-17 lazy-load guidance (>20 tools / >5k definition tokens); noted, not acted on, in this PR
+discovery: eager         # 23 tools — over the PoC-17 tool-COUNT guidance (>20), but the other axis (>5k definition tokens) is what the threshold is actually about; measured by test/brain.test.ts, still well under it
 degrades: absent
 exposes:
   - name: capture
@@ -30,8 +30,12 @@ exposes:
     description: Search the knowledge index (titles + one-line descriptions) within the caller's grant tier
   - name: knowledge_read
     description: Read one settled note under a granted Knowledge/ area prefix (returns its sha256 for compare-and-swap)
+  - name: knowledge_list
+    description: List files/directories under a Knowledge/ prefix, depth-limited — tier index browses everything, tier areas only its granted prefixes; drafts excluded
+  - name: knowledge_grep
+    description: Regex search over settled note content under a granted Knowledge/ prefix, pre-filtered and capped at 50 files / 200 hits; an overly expensive pattern is refused
   - name: knowledge_write
-    description: Write one note under Knowledge/ as a commit in the caller's name via the vault bridge — internal (assistant) principals only; provenance stamped; CAS on expected_sha256; protected paths refused at the vault; no delete/rename
+    description: Write one note under Knowledge/ as a commit in the caller's name — internal (assistant) principals only; CAS on expected_sha256; protected paths refused; no delete/rename
   - name: artifact_publish
     description: Publish a version of an artifact into one of the caller's projects (compare-and-swap on the current version, idempotent on idempotency_key); returns artifact/version/review links
   - name: artifact_get
@@ -43,9 +47,9 @@ exposes:
   - name: artifact_comment_resolve
     description: Resolve (or reopen) a thread root
   - name: artifact_dispatch_review
-    description: Send a bundle of threads to another agent as one `review` task — inside the project freely, across the boundary as a proposal for the user
+    description: Send threads to another agent as one claimable review task — inside the project freely, across the boundary as a proposal for the user
   - name: crew_dispatch
-    description: Hand a brief to a named crew (agents/<area>/<name>.md) as a durable work row the assistant container runs locally — brief checked against the crew's scope ∩ the local target's data policy first; internal (assistant) principals only
+    description: Hand a brief to a named crew as a durable work row, checked against the crew's scope and the local target's data policy first; internal (assistant) principals only
   - name: queries_list
     description: List the named queries available on this instance (invariant 3's one read path) — name, description, and each param's type + default
   - name: queries_run

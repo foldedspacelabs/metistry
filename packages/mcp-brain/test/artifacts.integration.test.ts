@@ -38,7 +38,7 @@ describe("tool surface", () => {
     expect(TOOL_NAMES.slice(-tail, -1 - QUERIES_TOOL_NAMES.length)).toEqual([...ARTIFACT_TOOL_NAMES]);
     expect(TOOL_NAMES.at(-1 - QUERIES_TOOL_NAMES.length)).toBe("crew_dispatch");
     expect(TOOL_NAMES.slice(-QUERIES_TOOL_NAMES.length)).toEqual([...QUERIES_TOOL_NAMES]);
-    expect(TOOL_NAMES.length).toBeLessThan(22); // one over the PoC-17 lazy-load guidance (>20) — flagged in manifest.yaml, not acted on here
+    expect(TOOL_NAMES.length).toBeLessThan(24); // over the PoC-17 tool-COUNT guidance (>20) since knowledge_list/knowledge_grep — flagged in manifest.yaml; the definition-token axis (test/brain.test.ts) is what actually gates lazy
   });
 
   it("without the module, artifact_* answers not_available (a capability gap, recorded)", async () => {

@@ -48,7 +48,7 @@ export function registerArtifactTools(reg: Register, service: ArtifactsService |
 
   reg(
     "artifact_publish",
-    "Publish a new version of an artifact (a plan, report, page, mockup — any files) into one of your projects. Compare-and-swap: pass expected_current_version (the version you read; null for a brand-new artifact) and a stale publish gets `conflict`, never a silent overwrite. Retrying with the same idempotency_key returns the same version. Returns three links — hand the user `review` first.",
+    "Publish a new version of an artifact into one of your projects. Compare-and-swap via expected_current_version (null = new); a stale publish gets `conflict`. Same idempotency_key returns the same version.",
     {
       project: z.string().max(200),
       slug: z.string().min(1).max(80).describe("Directory name under Artifacts/<project>/ — lowercase, digits, . _ -"),
@@ -56,10 +56,10 @@ export function registerArtifactTools(reg: Register, service: ArtifactsService |
         .array(z.object({ path: z.string().min(1).max(300), content: z.string().max(2_000_000).optional(), content_base64: z.string().max(11_000_000).optional() }))
         .min(1)
         .max(200)
-        .describe("Relative paths inside the artifact; exactly one of content (utf8) or content_base64 per file."),
-      expected_current_version: verId.nullable().optional().describe("The current version id you read, or null for 'must not exist yet'. Omit to publish over whatever is current."),
+        .describe("Relative paths; exactly one of content or content_base64 per file."),
+      expected_current_version: verId.nullable().optional().describe("Version id you read, or null for 'must not exist yet'; omit for latest."),
       idempotency_key: z.string().min(1).max(200),
-      message: z.string().min(1).max(2000).describe("The commit message (first line is the subject)."),
+      message: z.string().min(1).max(2000).describe("Commit message (first line is the subject)."),
     },
     (a) =>
       guard(async (svc) => {
@@ -83,7 +83,7 @@ export function registerArtifactTools(reg: Register, service: ArtifactsService |
 
   reg(
     "artifact_get",
-    "One artifact in your projects: the current (or a given) version with its file manifest, the version list, its comment threads, and links. Pass `path` to also read one text file's content.",
+    "One artifact in your projects: current/given version, manifest, version list, comment threads, links. `path` also reads one file's content.",
     { id: artId, version: verId.optional(), path: z.string().max(300).optional() },
     (a) =>
       guard(async (svc) => {
@@ -121,14 +121,14 @@ export function registerArtifactTools(reg: Register, service: ArtifactsService |
 
   reg(
     "artifact_comment",
-    "Comment on an exact version of an artifact (optionally on one file, with an opaque anchor), or reply to a thread root with `parent`. Replies are one level deep. Agent-only exchanges on a thread are capped; past the cap your reply is not stored and the thread goes to the user as a proposal (`demoted: true`).",
+    "Comment on an artifact version (optionally one file + anchor), or reply to a thread with `parent` (one level deep). Past the agent-only cap, the thread demotes to a user proposal.",
     {
       artifact: artId,
       version: verId,
       body: z.string().min(1).max(20_000),
       path: z.string().max(300).optional(),
-      anchor: z.record(z.string(), z.unknown()).optional().describe("Opaque, client-owned: e.g. { line: 12 } or { from: 3, to: 9 }."),
-      parent: cmtId.optional().describe("A thread root to reply to (then path/anchor are inherited)."),
+      anchor: z.record(z.string(), z.unknown()).optional().describe("Opaque, client-owned, e.g. { line: 12 }."),
+      parent: cmtId.optional().describe("Thread root to reply to; inherits its path/anchor."),
     },
     (a) =>
       guard(async (svc) => {
@@ -145,7 +145,7 @@ export function registerArtifactTools(reg: Register, service: ArtifactsService |
 
   reg(
     "artifact_comment_resolve",
-    "Resolve a thread root (or reopen it with reopen: true). A review bundle counts as addressed once every thread in it is resolved.",
+    "Resolve a thread root, or reopen with reopen: true. A review bundle is addressed once every thread resolves.",
     { id: cmtId, reopen: z.boolean().optional() },
     (a) =>
       guard(async (svc) => {
@@ -157,7 +157,7 @@ export function registerArtifactTools(reg: Register, service: ArtifactsService |
 
   reg(
     "artifact_dispatch_review",
-    "Send a bundle of threads on one version to another agent as ONE review task on the shared list (kind `review`, claimable by them). Inside the project this needs no one's approval; if the target is not a member of the artifact's project, the project is in review mode, or a manifest narrowing excludes the pair, the dispatch becomes a proposal for the user instead (`route: proposal`, with `reason`). Over an open-bundle cap the task is created QUEUED (`queued` set, status blocked) and released when a slot frees — never dropped.",
+    "Send threads on one version to another agent as one claimable review task. Outside the project boundary or a manifest narrowing, it becomes a user proposal (`route: proposal`) instead. Over the open-bundle cap, the task queues rather than dropping.",
     {
       artifact: artId,
       version: verId,

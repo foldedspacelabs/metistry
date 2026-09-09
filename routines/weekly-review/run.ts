@@ -80,10 +80,13 @@ async function sectionProjects(db: Db, now: Date): Promise<string[]> {
   });
 }
 
+// The three answers to a request, as the console spells them (Approve /
+// Revise / Decline — docs/product/glossary.md). The stored `decision` values
+// are untouched; this is the reading of them.
 const DECISION_LABEL: Record<string, string> = {
-  allow: "allowed",
-  deny: "denied",
-  accept_with_changes: "accepted with changes",
+  allow: "approved",
+  deny: "declined",
+  accept_with_changes: "sent back for revision",
   expired: "auto-expired",
 };
 
@@ -109,7 +112,7 @@ async function sectionDecisions(db: Db, now: Date): Promise<string[]> {
     [now],
   );
   if (reasons.rows.length > 0) {
-    lines.push(`• top denied reasons: ${reasons.rows.map((r: any) => `"${String(r.feedback).slice(0, 40)}" (${num(r.n)})`).join(", ")}`);
+    lines.push(`• top reasons you declined or revised: ${reasons.rows.map((r: any) => `"${String(r.feedback).slice(0, 40)}" (${num(r.n)})`).join(", ")}`);
   }
   return lines;
 }
@@ -120,7 +123,7 @@ async function sectionPending(db: Db, now: Date): Promise<string[]> {
   const { rows } = await db.query(`SELECT count(*) AS n, min(ts) AS oldest FROM proposals WHERE decision = 'pending'`);
   const n = num(rows[0]?.n);
   if (n === 0) return ["• nothing pending"];
-  return [`• ${n} waiting, oldest ${daysBetween(rows[0].oldest, now)}d — open triage to see everything`];
+  return [`• ${n} waiting, oldest ${daysBetween(rows[0].oldest, now)}d — open Needs You to see everything`];
 }
 
 // Per agent: reports and proposals from `proposals` (trust = external, i.e.
@@ -152,7 +155,7 @@ async function sectionAgents(db: Db, now: Date): Promise<string[]> {
   const lines = shown.map((r: any) => {
     const stats = [
       plural(num(r.reports), "report"),
-      ...(num(r.proposals) > 0 ? [plural(num(r.proposals), "proposal")] : []),
+      ...(num(r.proposals) > 0 ? [plural(num(r.proposals), "request")] : []),
       `${plural(num(r.claimed), "task")} claimed`,
       `${num(r.closed)} closed`,
       plural(num(r.calls), "tool call"),
@@ -259,7 +262,7 @@ async function sectionSystem(db: Db, now: Date): Promise<string[]> {
 
 // Reply quality (docs/ops/reply-feedback.md): the week's tapbacks, and whether
 // the self-heal pass left an improvement proposal waiting. The proposal is
-// never applied by anything here — the user allows it in triage or it sits.
+// never applied by anything here — the user approves it in Needs You or it sits.
 async function replyQuality(db: Db, now: Date): Promise<string> {
   const { rows } = await db.query(
     `SELECT count(*) AS rated, count(*) FILTER (WHERE rating = -1) AS negative
@@ -274,7 +277,7 @@ async function replyQuality(db: Db, now: Date): Promise<string> {
   );
   const n = num(waiting.rows[0]?.n);
   if (rated === 0 && n === 0) return "• reply quality: nothing rated this week";
-  return `• reply quality: ${rated} rated, ${negative} 👎${n > 0 ? ` — ${plural(n, "improvement proposal")} awaiting you` : ""}`;
+  return `• reply quality: ${rated} rated, ${negative} 👎${n > 0 ? ` — ${plural(n, "improvement request")} awaiting you` : ""}`;
 }
 
 interface EkEvent {
@@ -344,10 +347,10 @@ export async function run(db: Db, ctx: WeeklyCtx = {}): Promise<number> {
     "📂 Projects:",
     ...projects,
     "",
-    "✅ Decisions you made:",
+    "✅ What you decided:",
     ...decisions,
     "",
-    "🔔 Still pending:",
+    "🔔 Still waiting on you:",
     ...pending,
     "",
     "🤖 Agents:",

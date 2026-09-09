@@ -351,7 +351,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       }
       if (key === "POST /api/push/test") {
         const result = await sendToSession(db, cfg.push, auth.sessionId, {
-          title: "metistry",
+          title: "Metistry",
           body: "push works — this device is reachable",
           url: "/",
         });

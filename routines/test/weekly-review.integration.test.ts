@@ -95,11 +95,11 @@ describe.skipIf(!hasDb)("weekly review (real db)", () => {
     expect(text).toContain("📋 weekly review — Aug 30 to Sep 6");
     expect(text).toContain("• itest-weekly: 2 tasks created, 1 closed; 1 PR opened, 0 closed; 1 blocked\n    blocked: itest-weekly stuck (12d)");
     // other suites may leave decided rows in the window, so assert per outcome rather than exact totals
-    expect(text).toMatch(/• \d+ decided: .*\b\d+ allowed/);
-    expect(text).toMatch(/• \d+ decided: .*\b\d+ denied/);
+    expect(text).toMatch(/• \d+ decided: .*\b\d+ approved/);
+    expect(text).toMatch(/• \d+ decided: .*\b\d+ declined/);
     expect(text).toContain('"itest duplicate" (1)');
-    expect(text).toMatch(/• \d+ waiting, oldest \d+d — open triage/);
-    expect(text).toContain("• itest-agent (Integration Agent): 1 report, 1 proposal, 1 task claimed, 1 closed, 1 tool call, 0.25 USD — last seen 1d ago");
+    expect(text).toMatch(/• \d+ waiting, oldest \d+d — open Needs You/);
+    expect(text).toContain("• itest-agent (Integration Agent): 1 report, 1 request, 1 task claimed, 1 closed, 1 tool call, 0.25 USD — last seen 1d ago");
     expect(text).toMatch(/• assistant \(API-equivalent\): .*itest-sonnet 0\.40/);
     expect(text).toMatch(/• AWS: .*itest-ec2 5\.00/);
     expect(text).toContain("itest-collector 1 ok ⚠ 1 failed");

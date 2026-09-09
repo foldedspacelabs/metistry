@@ -1,7 +1,7 @@
 // Service worker: push display + notification tap. No offline caching yet —
 // the shell is served no-cache while the UI iterates.
 self.addEventListener("push", (event) => {
-  const data = event.data ? event.data.json() : { title: "metistry", body: "" };
+  const data = event.data ? event.data.json() : { title: "Metistry", body: "" };
   event.waitUntil(self.registration.showNotification(data.title, { body: data.body, data: { url: data.url ?? "/" } }));
 });
 

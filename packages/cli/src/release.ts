@@ -181,7 +181,8 @@ export function parseChecksums(text: string): Record<string, string> {
   return out;
 }
 
-async function getText(fetchFn: typeof fetch, url: string, what: string): Promise<string> {
+/** GET a small text asset (checksums.txt) through the injected fetch — shared with runtime-deps.ts. */
+export async function fetchText(fetchFn: typeof fetch, url: string, what: string): Promise<string> {
   const res = await fetchFn(url, { headers: { "user-agent": "metistry-cli" }, signal: AbortSignal.timeout(60_000) });
   if (!res.ok) throw new StepFailed(`${what}: HTTP ${res.status} from ${url}`);
   return await res.text();
@@ -324,7 +325,7 @@ export async function installRelease(r: StepRunner, opts: InstallReleaseOptions)
     await downloadViaGh(r, repo, rel.tag, CHECKSUMS_ASSET, staging);
     sumsText = await readFile(join(staging, CHECKSUMS_ASSET), "utf8");
   } else {
-    sumsText = await getText(fetchFn, sumsUrl, CHECKSUMS_ASSET);
+    sumsText = await fetchText(fetchFn, sumsUrl, CHECKSUMS_ASSET);
   }
   const sums = parseChecksums(sumsText);
   const want = sums[asset];

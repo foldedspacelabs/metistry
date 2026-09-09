@@ -55,7 +55,7 @@ Every capture is a `POST /capture` JSON body `{ note, filename }`:
 file in the inbox dir, row in `inbox` (`source = 'http'`), a `runs` row
 (`component: console, kind: capture`). Provenance is in the note's
 frontmatter (`source: "claude-code"`, `session_id`, `host`, `repo`,
-`cwd`, `captured_at`, `kind`), so triage and the morning brief can weight
+`cwd`, `captured_at`, `kind`), so Needs You and the morning brief can weight
 by origin. Filenames are `claude-code-<kind>-<UTC stamp>.md`.
 
 ### The session summary is the same shape `metistry import-sessions` sends

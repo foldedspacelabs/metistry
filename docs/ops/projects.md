@@ -16,7 +16,7 @@ narrows that — nothing widens it.
 
 | Control | Where it lives | Default | What it does at `dispatchReview` |
 | --- | --- | --- | --- |
-| **mode** `autonomous \| review` | `projects.mode` | `autonomous` | `review` routes **every** agent-to-agent bundle to a `proposals` row (reason `review_mode`) without touching membership. The user's own dispatches are never routed. |
+| **mode** `autonomous \| review` (**Auto / Supervised** in the UI) | `projects.mode` | `autonomous` | `review` routes **every** agent-to-agent bundle to a `proposals` row (reason `review_mode`) without touching membership. The user's own dispatches are never routed. |
 | **daily budget** | `projects.daily_budget_usd` | `NULL` (none) | Sum of today's `runs.cost_usd` from member agents (or rows stamped `meta.project`) strictly over the budget flips the project to `review` — once per transition. |
 | **project bundle cap** | `projects.max_open_bundles` | `20` | Over the cap, the next bundle is created **queued**, never dropped. |
 | **agent bundle cap** | `agents.autonomy.max_open_bundles` | `3` | Same, per sender. Checked before the project cap. |
@@ -60,10 +60,12 @@ the rest of the management surface.
 
 ## Dashboard
 
-The projects panel shows one row per project: a mode chip, one **→ review /
-→ autonomous** toggle (confirm first — flipping back re-extends trust to
-every member), members, counts, spend against budget, and why it is in
-review (`budget` vs `toggle`, with the date). Agent narrowing is edited in
+The projects panel shows one row per project: a mode chip reading **Auto** or
+**Supervised**, one **→ Supervised / → Auto** toggle (confirm first — setting
+it back to Auto re-extends trust to every member), members, counts, spend
+against budget, and why it is Supervised (`budget` vs `toggle`, with the
+date). The stored values stay `autonomous` / `review`; the labels are the
+vocabulary (`docs/product/glossary.md`). Agent narrowing is edited in
 the agent's grants form and shown on its registry row.
 
 ## Verifying it

@@ -15,13 +15,28 @@ manifest by test):
 
 | Family | Tools | What it means for the assistant |
 | --- | --- | --- |
-| in | `capture`, `report` | Propose to the inbox / proposal queue for anything unsettled; you triage. |
-| shared work | `tasks_list_ready`, `tasks_claim`, `tasks_heartbeat`, `tasks_update`, `tasks_release`, `tasks_create`, `tasks_mine` | Works the same shared list as every other agent — claims, leases, notes. |
-| out | `knowledge_search`, `knowledge_read`, `knowledge_list`, `knowledge_grep` | Reads the vault index, note contents, a directory listing, and a content regex (all via the reconciler's vault bridge), within its grant — `knowledge_list`/`knowledge_grep` are filesystem semantics over the same tiers `knowledge_search`/`knowledge_read` already enforce (docs/research/2026-09-stash-review.md item 3). `knowledge_read` returns the note's `sha256`. |
-| write | `knowledge_write` | **This is `brain-commit`** (plan §4.7, D5): one note under `Knowledge/` → the reconciler's `POST /vault/write` with a commit intent in the assistant's name. Internal principals only; every external agent is told "not granted". No delete, no rename — those stay your hand. |
-| artifacts | `artifact_publish`, `artifact_get`, `artifact_list`, `artifact_comment`, `artifact_comment_resolve`, `artifact_dispatch_review` | Publishes versioned output into `Artifacts/<project>/<slug>/` (one commit per version via the reconciler), comments on exact versions, and sends review bundles to other agents in the same project — a dispatch across the project boundary becomes a proposal for you (§4.21). |
-| crews | `crew_dispatch` | Hands a brief to a crew you defined in `agents/<area>/<name>.md` (`docs/ops/crews.md`). Internal principals only; the brief is policy-checked against the crew's scope before a durable work row is written; results come back as the crew's own `report` proposals. |
+| in | `capture`, `requests_create` | Raise anything unsettled into the inbox / your Needs You queue; you approve, revise, or decline. |
+| shared work | `tasks_list` (`filter: ready \| mine \| all`), `tasks_claim`, `tasks_renew`, `tasks_update`, `tasks_release`, `tasks_create` | Works the same shared list as every other agent — claims, leases, notes. |
+| out | `knowledge_search`, `knowledge_read`, `knowledge_list`, `knowledge_grep` | Reads the knowledge index, page contents, a directory listing, and a content regex (all via the reconciler's vault bridge), within its grant — `knowledge_list`/`knowledge_grep` are filesystem semantics over the same tiers `knowledge_search`/`knowledge_read` already enforce (docs/research/2026-09-stash-review.md item 3). `knowledge_read` returns the page's `sha256`. |
+| write | `knowledge_write` | **This is `brain-commit`** (plan §4.7, D5): one page under `Knowledge/` → the reconciler's `POST /vault/write` with a commit intent in the assistant's name. Internal principals only; every external agent is told "not granted". No delete, no rename — those stay your hand. |
+| artifacts | `artifacts_publish`, `artifacts_get`, `artifacts_list`, `artifacts_comment`, `artifacts_resolve`, `artifacts_review` | Publishes versioned output into `Artifacts/<project>/<slug>/` (one commit per version via the reconciler), comments on exact versions, and sends review bundles to other agents in the same project — a review sent across the project boundary becomes a request for you (§4.21). |
+| helper agents | `agents_delegate` | Hands a brief to a helper agent you defined in `agents/<area>/<name>.md` (`docs/ops/crews.md`). Internal principals only; the brief is policy-checked against the helper's scope before a durable work row is written; results come back as the helper's own `requests_create` requests. |
 | queries | `queries_list`, `queries_run` | Runs a named query from `seed/queries/` or the instance's `queries/` (invariant 3 — the one read path) for anything you'd otherwise have to guess at or ask the user to look up. Internal principals always have this; an external agent needs an explicit `queries: true` grant. Rows cap at 200. |
+
+**Deprecated spellings, one release.** The 2026-09-09 vocabulary
+simplification renamed eleven of these (`docs/product/glossary.md`). The old
+names still work — `report`, `tasks_list_ready`, `tasks_mine`,
+`tasks_heartbeat`, `artifact_*`, `crew_dispatch` — but they are resolved at
+call time and are **not** in `tools/list`, so the surface an agent discovers is
+the twenty above. An alias call is audited under the primary name with the old
+spelling in `runs.meta.alias`:
+
+```sh
+psql -c "SELECT meta->>'alias' AS old, tool AS now, count(*) FROM runs
+         WHERE meta ? 'alias' GROUP BY 1, 2 ORDER BY 3 DESC"
+```
+
+An empty result is the signal that the aliases can come out.
 
 Every call also takes an optional `turn_id` (`seed/assistant-prompt.md`
 tells the assistant to make one up per reply and reuse it on every call
@@ -105,7 +120,7 @@ and is committed on its next flush (~30 s), author `Metistry assistant`,
 Layers, honest about which carry the load:
 
 1. **Who.** Only a `kind: internal` principal reaches the write at all;
-   `report`/`capture` remain the door for everyone else (§4.11 one writer).
+   `requests_create`/`capture` remain the door for everyone else (§4.11 one writer).
 2. **Where.** The bridge accepts `Knowledge/...` only, inside the grant;
    behind it the reconciler refuses the §4.7 protected set
    (`identity.yaml`, `rules.yaml`, `sources.yaml`, `deployment.yaml`,
@@ -128,7 +143,7 @@ Layers, honest about which carry the load:
 5. **Audit.** Every call — refusals included — is a `runs` row (below),
    and every landed write is a commit in the instance repo's history.
 
-TODO: folding *accepted proposals* into notes is the evening routine's
+TODO: folding *approved requests* into pages is the evening routine's
 job and is not built yet; until then the assistant folds them by hand
 when you ask (the prompt says when).
 
@@ -136,9 +151,9 @@ when you ask (the prompt says when).
 
 `seed/assistant-prompt.md` is templated with the name and voice from
 `identity.yaml` (the only place the assistant is named — CLAUDE.md) and
-tells the assistant what each tool is *for*: `capture`/`report` for
+tells the assistant what each tool is *for*: `capture`/`requests_create` for
 anything unsettled, `knowledge_write` for settled facts (`now.md`
-updates, folding an accepted proposal, correcting a note you corrected)
+updates, folding an approved request, correcting a page you corrected)
 with read-then-CAS and one logical change per write, `tasks_*` is the
 shared list (claim, heartbeat, release), knowledge reads are logged, the
 `nudge:` line is system-computed. None of that is a control — the surface
@@ -186,9 +201,9 @@ history; a wrong write is a revert.
 
 What lands where: `capture` → an `inbox` row (`source = 'mcp',
 source_agent = 'assistant'`) and, after `inbox-drain`, a proposal at
-`external` trust; `report` → a `proposals` row, kind `report`; `tasks_*`
+`external` trust; `requests_create` → a `proposals` row, kind `report`; `tasks_*`
 → the `work` table with the assistant as `claimed_by` / `created_by` and
 history entries naming it; `knowledge_write` → the file on the
 reconciler's working tree, then a commit. Proposals flow through the same
-triage gate as every other agent's writes; a knowledge write is audited,
+Needs You gate as every other agent's writes; a knowledge write is audited,
 not gated (§4.7 "review is an audit, not a gate").

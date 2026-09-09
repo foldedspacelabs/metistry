@@ -40,6 +40,8 @@ never flows anywhere. The assistant's name exists only in an instance's
 
 ## Where things are
 
+- **`docs/product/glossary.md`** — the vocabulary: eight nouns, one verb set.
+  Read this one first; everything else assumes it.
 - **`metistry-build-plan.md`** — the full design. Decisions, not suggestions.
 - **`CLAUDE.md`** — conventions for building Metistry (not the assistant's
   own operating instructions).

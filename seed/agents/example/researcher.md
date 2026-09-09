@@ -9,10 +9,10 @@ type: agent
 model: haiku                  # haiku | sonnet | opus
 description: Reads the granted project and resource notes and reports what it finds
 # Tool GROUPS on the brain (never single tools): knowledge (search + read
-# under `scope`), report, capture, tasks, artifacts. `brain-read` and
-# `brain-report` are the plan's spellings for the first two. knowledge_write
-# is not a group: sub-agents never write knowledge.
-uses: [brain-read, brain-report]
+# under `scope`), requests, capture, tasks, artifacts. `brain-read`,
+# `brain-report` and `report` are older spellings of the first two, still
+# accepted. knowledge_write is not a group: sub-agents never write knowledge.
+uses: [knowledge, requests]
 skills: []                    # recorded; skills bind here once skills/ exists (§4.4)
 # Read tier (§4.11): TitleCase Knowledge/ prefixes. Every dispatch is checked
 # against scope ∩ the local-crew target's allow list; a brief citing a path

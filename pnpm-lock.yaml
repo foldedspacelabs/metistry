@@ -357,6 +357,9 @@ importers:
 
   plugins/claude-code:
     devDependencies:
+      '@foldedspacelabs/metistry-core':
+        specifier: workspace:*
+        version: link:../../packages/core
       '@types/node':
         specifier: ^22.20.1
         version: 22.20.1

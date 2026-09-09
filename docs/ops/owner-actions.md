@@ -17,12 +17,8 @@ Kept current as PRs land (2026-09-08). Each item names what it unblocks.
       `APPLE_CERTIFICATE_P12`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_TEAM_ID`,
       `APPLE_API_KEY_ID`, `APPLE_API_ISSUER_ID`, `APPLE_API_KEY_P8`,
       `SPARKLE_PRIVATE_KEY`, `SPARKLE_PUBLIC_ED_KEY` all set
-      (`docs/ops/releases.md`). Only `NPM_TOKEN` (publishing to npm) remains
-      optional.
-- [ ] **GitHub repo secrets** still missing for the DMG job: `APPLE_CERTIFICATE_P12`,
-      `APPLE_CERTIFICATE_PASSWORD`, `APPLE_ID`, `APPLE_TEAM_ID`,
-      `APPLE_APP_SPECIFIC_PASSWORD` (`docs/ops/releases.md`). npm publishing
-      no longer needs a secret — see Trusted Publishing below.
+      (`docs/ops/releases.md`). npm publishing needs no secret — see
+      Trusted Publishing below.
 - [ ] **npm Trusted Publishing, per package** — bootstrap each
       `@foldedspacelabs/metistry-*` package (npm login + `npm publish
       --access public` once from the Studio with a short-lived granular

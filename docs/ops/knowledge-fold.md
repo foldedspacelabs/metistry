@@ -49,10 +49,16 @@ day drops from the largest group and says `…and N more`.
 ## What it enqueues
 
 One row in `inbound_messages`, thread `fold`, `meta = {"kind": "fold",
-"source": "knowledge-fold", …}`, whose text begins `🌙 evening fold — <date>`.
-The assistant's drain picks it up like any other message; the "Fold" section of
-`seed/assistant-prompt.md` tells it what to do with it. Exactly one turn per
-fold — never one per item.
+"tier": "routine", "fresh_session": true, "source": "knowledge-fold", …}`,
+whose text begins `🌙 evening fold — <date>`. The assistant's drain picks it up
+like any other message; the "Fold" section of `seed/assistant-prompt.md` tells
+it what to do with it. Exactly one turn per fold — never one per item.
+
+Two of those keys are cost controls (`docs/ops/assistant-tools.md`): `tier:
+routine` runs the fold on the instance's cheap (model, effort) pair rather than
+the chat default, and `fresh_session` means the fold never resumes the chat
+thread's SDK session — a fold is its own task, and a task boundary is where
+context is cheapest to drop.
 
 ## Schedule (and why it is hourly)
 

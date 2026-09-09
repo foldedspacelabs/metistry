@@ -877,3 +877,19 @@ your git, on your machine.
   "nothing volatile in the system prompt" and "no known prompt anti-patterns"
   enforced rather than just written down — the seed prompt already passed
   clean.
+- 2026-09-09 — **Tiers became (model, effort) pairs, and sessions now end at
+  task boundaries.** Following Anthropic's cost guidance
+  (`docs/research/2026-09-cost-optimization.md`, decisions 2 and 3), a tier in
+  `rules.yaml` names both halves of the choice — the shipped menu is
+  `fast` haiku/low, `default` haiku/medium, `deep` opus/high, `routine`
+  haiku/low — and crews declare their own `effort`, defaulting to **low**
+  because the crew shape that pays is "read a lot on a cheap model, report one
+  page". Effort changes only at turn boundaries *by construction* (one SDK
+  query per turn, options built once and never mutated), which is what keeps
+  the cached prompt prefix intact: a break costs up to 50x the cache-read
+  price per token. Sessions now roll on an event rather than a cadence — a
+  blocking decision answered, or a task the assistant held closing — logged as
+  a `session_roll` run with the turn count the session reached, and fold turns
+  and crew runs never resume one at all. The user-visible promise: **the same
+  answers for less of your usage allowance, and you can see per turn which
+  tier paid for it.**

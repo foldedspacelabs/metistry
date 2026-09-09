@@ -325,10 +325,15 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+      # Real today (not a stub): pins + verifies Sparkle's CLI tools
+      # (docs/ops/apple-signing.md §5) so sign_update is on disk the moment
+      # this job's `if: false` is flipped — one line, already run.
+      - run: ops/release/fetch-sparkle-tools.sh
       # The EdDSA private key lives ONLY in secrets.SPARKLE_PRIVATE_KEY —
       # never in the repo, never in an artifact, never in a log:
       #
-      #   sig=$(echo "$SPARKLE_PRIVATE_KEY" | sign_update -f - Metistry-<v>.dmg)
+      #   sig=$(echo "$SPARKLE_PRIVATE_KEY" | ops/release/.tools/sparkle/bin/sign_update -f - Metistry-<v>.dmg)
       #   node ops/release/appcast.mjs "$VERSION" \
       #     --url  "https://github.com/${{ github.repository }}/releases/download/v$VERSION/Metistry-$VERSION.dmg" \
       #     --length "$(stat -f%z Metistry-$VERSION.dmg)" \

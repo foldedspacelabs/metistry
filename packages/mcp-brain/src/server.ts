@@ -41,6 +41,8 @@ import type { QueryStore } from "@foldedspacelabs/metistry-queries";
 import { ARTIFACT_TOOL_NAMES, registerArtifactTools } from "./artifacts-tools.js";
 import { CREW_TOOL_NAMES, registerCrewTools, type CrewDispatcher } from "./crew-tools.js";
 import { QUERIES_TOOL_NAMES, registerQueriesTools } from "./queries-tools.js";
+import { KNOWLEDGE_FS_TOOL_NAMES, registerKnowledgeFsTools, type KnowledgeLister, type KnowledgeVaultSearcher } from "./knowledge-fs.js";
+import { registerKnowledgeResources } from "./knowledge-resources.js";
 import { captureToInbox } from "./capture.js";
 import { KNOWLEDGE_MODES, readKnowledge, searchKnowledge, type KnowledgeReader, type QueryEmbedder } from "./knowledge.js";
 import { sha256Text, writeKnowledge, type KnowledgeWriter } from "./knowledge-write.js";
@@ -63,6 +65,10 @@ export interface BrainConfig {
   embedder?: QueryEmbedder | undefined;
   /** Vault write path for `knowledge_write` (the reconciler's bridge; `vaultBridgeWriter`). Absent → the tool answers `not_available`. */
   writeKnowledge?: KnowledgeWriter | undefined;
+  /** Vault listing for `knowledge_list` (the reconciler's `GET /vault/list`; `vaultBridgeLister`). Absent → the tool answers `not_available`. Also `knowledge_grep`'s fallback candidate source when no literal seed or searcher is available. */
+  listKnowledge?: KnowledgeLister | undefined;
+  /** Keyword-mode content search for `knowledge_grep`'s candidate pre-filter (the reconciler's `GET /vault/search?mode=keyword`; `vaultBridgeSearcher`). Absent → grep falls back to `listKnowledge` for candidates. */
+  searchVaultKeyword?: KnowledgeVaultSearcher | undefined;
   /** The artifacts module (§4.21) for artifact_*. Absent → those tools answer `not_available`. */
   artifacts?: ArtifactsService | undefined;
   /** The host's crew dispatcher (registry + policy + durable enqueue) for crew_dispatch. Absent → `not_available`. Internal principals only either way. */
@@ -84,11 +90,14 @@ export interface BrainServer {
 }
 
 /**
- * The eager surface (§4.3 default 1): 21 tools, no meta-tool indirection.
- * Order = manifest order. This sits one tool over PoC-17's documented
- * >20-tools guidance for switching to `discovery: lazy` — noted, not acted
- * on, in this PR (queries_list/queries_run are two small, cheap-to-describe
- * schemas; revisit if the surface keeps growing).
+ * The eager surface (§4.3 default 1): 23 tools, no meta-tool indirection.
+ * Order = manifest order. This sits over PoC-17's documented >20-tools
+ * guidance for switching to `discovery: lazy` on tool COUNT — noted, not
+ * acted on, in the PR that added queries_list/queries_run, and again here
+ * for knowledge_list/knowledge_grep, because the guidance's other axis
+ * (definition tokens, measured by test/brain.test.ts's "definition size"
+ * test) stays well under the >5k-token line that would make lazy worth its
+ * own +1-turn cost (docs/research/2026-08-tool-discovery.md).
  */
 export const TOOL_NAMES = [
   "capture",
@@ -102,6 +111,7 @@ export const TOOL_NAMES = [
   "tasks_mine",
   "knowledge_search",
   "knowledge_read",
+  ...KNOWLEDGE_FS_TOOL_NAMES,
   "knowledge_write",
   ...ARTIFACT_TOOL_NAMES,
   ...CREW_TOOL_NAMES,
@@ -374,6 +384,11 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
       },
     );
 
+    // knowledge_list / knowledge_grep (docs/research/2026-09-stash-review.md
+    // item 3): filesystem semantics over the same grant tiers, one
+    // registration point like every other adapter here.
+    registerKnowledgeFsTools(reg, { db, list: cfg.listKnowledge, search: cfg.searchVaultKeyword, read: cfg.readKnowledge }, principal);
+
     // The assistant's write path (knowledge-write.ts): internal principals only.
     reg(
       "knowledge_write",
@@ -406,6 +421,10 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
 
     // queries_list / queries_run (invariant 3's one read path, out to agents): internal always, external with grants.queries = true
     registerQueriesTools(reg, cfg.queries, principal);
+
+    // Vault notes as MCP resources (metistry://Knowledge/<path>), same tier
+    // rule as knowledge_read throughout — not a tool, so no runs row.
+    registerKnowledgeResources(server, principal, db, cfg.readKnowledge);
 
     return server;
   }
@@ -461,6 +480,7 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
           tools: [...TOOL_NAMES],
           knowledge_read: cfg.readKnowledge ? "available" : "not_available",
           knowledge_write: cfg.writeKnowledge ? "available" : "not_available",
+          knowledge_list: cfg.listKnowledge ? "available" : "not_available",
           artifacts: cfg.artifacts ? "available" : "not_available",
           crews: cfg.crews ? cfg.crews.names() : "not_available",
           queries: cfg.queries ? "available" : "not_available",
@@ -470,6 +490,7 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
         const gaps = [
           ...(cfg.readKnowledge ? [] : ["knowledge_read"]),
           ...(cfg.writeKnowledge ? [] : ["knowledge_write"]),
+          ...(cfg.listKnowledge ? [] : ["knowledge_list"]),
           ...(cfg.artifacts ? [] : ["artifact_*"]),
         ];
         return gaps.length === 0

@@ -5,7 +5,7 @@ transport: http
 port: 8080               # no bind of its own: mounted at the console's POST /mcp, so this is the console's port
 runs_on: container
 requires_tcc: []
-discovery: eager         # 21 tools — one over the PoC-17 lazy-load guidance (>20 tools / >5k definition tokens); noted, not acted on, in this PR
+discovery: eager         # 23 tools — over the PoC-17 tool-COUNT guidance (>20), but the other axis (>5k definition tokens) is what the threshold is actually about; measured by test/brain.test.ts, still well under it
 degrades: absent
 exposes:
   - name: capture
@@ -30,6 +30,10 @@ exposes:
     description: Search the knowledge index (titles + one-line descriptions) within the caller's grant tier
   - name: knowledge_read
     description: Read one settled note under a granted Knowledge/ area prefix (returns its sha256 for compare-and-swap)
+  - name: knowledge_list
+    description: List files and directories under a Knowledge/ prefix via the vault bridge, breadth-limited by depth — tier index browses the whole tree, tier areas only its granted prefixes; drafts excluded
+  - name: knowledge_grep
+    description: Regex search over settled note content under a granted Knowledge/ prefix — candidates from a keyword pre-filter, capped at 50 files and 200 hits; a pattern too expensive to evaluate is refused
   - name: knowledge_write
     description: Write one note under Knowledge/ as a commit in the caller's name via the vault bridge — internal (assistant) principals only; provenance stamped; CAS on expected_sha256; protected paths refused at the vault; no delete/rename
   - name: artifact_publish

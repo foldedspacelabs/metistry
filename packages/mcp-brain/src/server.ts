@@ -380,6 +380,7 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
       "Write one note under Knowledge/ as a commit in your name (the instance's own assistant only; every other agent gets `not granted` — use report). " +
         "Whole-file replace: pass the full content. Markdown gets `source` (your id) and `updated` (today) stamped into its frontmatter. " +
         'Pass expected_sha256 from knowledge_read so a concurrent edit is never clobbered ("" = create only); a `conflict` carries the current hash — re-read and retry. ' +
+        "An existing note whose frontmatter `source` is someone else's (the user's, another agent's) is refused — report the change instead; new notes, and notes you or the fold wrote, are yours to update. " +
         "Protected paths (identity.yaml, rules.yaml, queries/, agents/, …) are refused at the vault. Deletes and renames are not available: they stay the user's hand.",
       {
         path: z.string().min(1).max(500).describe("Vault path, Knowledge/... with TitleCase folders, e.g. Knowledge/Areas/Fsl/Drey.md or Knowledge/now.md."),
@@ -392,7 +393,7 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
           .describe('sha256 the note must currently have (from knowledge_read); "" = the note must not exist yet; omit = unconditional.'),
       },
       async (a) => {
-        const r = await writeKnowledge(principal, a, cfg.writeKnowledge);
+        const r = await writeKnowledge(principal, a, cfg.writeKnowledge, new Date(), cfg.readKnowledge);
         return r.ok ? done(r.result, r.meta) : fail(r.code, r.message, r.meta);
       },
     );

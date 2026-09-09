@@ -10,7 +10,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { TasksService } from "@foldedspacelabs/metistry-tasks";
-import { createBrainServer, sha256Text, stampProvenance, vaultBridgeWriter, writeKnowledge, type AgentPrincipal, type Db, type KnowledgeWriter, type VaultWriteRequest } from "../src/index.js";
+import { createBrainServer, frontmatterSource, ownershipRefusal, sha256Text, stampProvenance, vaultBridgeWriter, writeKnowledge, type AgentPrincipal, type Db, type KnowledgeWriter, type VaultWriteRequest } from "../src/index.js";
 
 const NOW = new Date("2026-09-07T15:04:05Z");
 const assistant: AgentPrincipal = { id: "assistant", kind: "internal", grants: { tier: "areas", areas: ["Knowledge/"] }, projects: [] };
@@ -264,6 +264,62 @@ describe("the tool over MCP (fake db)", () => {
     const bad = await call("int", { path: "Knowledge/now.md", content: "x", message: "m", expected_sha256: "nope" });
     expect(bad.isError).toBe(true);
     expect(String(bad.body)).toMatch(/expected_sha256|invalid/i);
+    expect(calls).toHaveLength(1);
+  });
+});
+
+// One writer, but not one owner: the evening fold may keep its own pages
+// current and create new ones, and must not edit the user's. Enforced HERE,
+// not in the prompt (CLAUDE.md: "enforce at the tool, never by prompting").
+describe("writeKnowledge ownership (the fold's rule 2)", () => {
+  const note = (source: string | null) => (source === null ? "# Ada\n" : `---\nid: 01J8\nsource: ${source}\nupdated: 2026-09-01\n---\n# Ada\n`);
+  const PATH = "Knowledge/People/Ada.md";
+  const reader = (content: string | null) => async () => content;
+
+  it("reads the `source` out of frontmatter, and only a scalar one", () => {
+    expect(frontmatterSource(note("user"))).toBe("user");
+    expect(frontmatterSource(note(null))).toBe(null);
+    expect(frontmatterSource("---\nsource:\n  - a\n---\nx")).toBe(null);
+    expect(ownershipRefusal(note("user"), "assistant")).toBe("owned by user; propose instead");
+    expect(ownershipRefusal(note("assistant"), "assistant")).toBe(null);
+    expect(ownershipRefusal(note("knowledge-fold"), "assistant")).toBe(null);
+    expect(ownershipRefusal(note(null), "assistant")).toBe(null);
+  });
+
+  it("a note the user owns is refused, and the writer is never called — report instead", async () => {
+    const { writer, calls } = recorder(okReply);
+    const r = await writeKnowledge(assistant, { path: PATH, content: "# Ada\n", message: "m" }, writer, NOW, reader(note("user")));
+    expect(r).toMatchObject({ ok: false, code: "forbidden", message: "owned by user; propose instead", meta: { owned_by: "user" } });
+    expect(calls).toHaveLength(0);
+    // another agent's note is just as much not the assistant's
+    expect(await writeKnowledge(assistant, { path: PATH, content: "x", message: "m" }, writer, NOW, reader(note("drey-dev")))).toMatchObject({
+      ok: false,
+      code: "forbidden",
+      message: "owned by drey-dev; propose instead",
+    });
+    expect(calls).toHaveLength(0);
+  });
+
+  it("its own notes, the fold's notes, unsourced notes and NEW notes all go through", async () => {
+    const { writer, calls } = recorder(okReply);
+    for (const existing of [note("assistant"), note("knowledge-fold"), note(null), null]) {
+      expect((await writeKnowledge(assistant, { path: PATH, content: "# Ada\n", message: "m" }, writer, NOW, reader(existing))).ok, String(existing).slice(0, 40)).toBe(true);
+    }
+    expect(calls).toHaveLength(4);
+  });
+
+  it("a read that fails refuses the write rather than waving it through", async () => {
+    const { writer, calls } = recorder(okReply);
+    const dead = async () => {
+      throw new Error("bridge down");
+    };
+    expect(await writeKnowledge(assistant, { path: PATH, content: "x", message: "m" }, writer, NOW, dead)).toMatchObject({ ok: false, code: "not_available", message: /who owns it/ });
+    expect(calls).toHaveLength(0);
+  });
+
+  it("non-markdown paths carry no frontmatter, so there is nothing to own", async () => {
+    const { writer, calls } = recorder(okReply);
+    expect((await writeKnowledge(assistant, { path: "Knowledge/Attachments/data.csv", content: "a,b\n", message: "m" }, writer, NOW, reader(note("user")))).ok).toBe(true);
     expect(calls).toHaveLength(1);
   });
 });

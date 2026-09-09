@@ -194,12 +194,22 @@ are in the repo, and none reach a build log.
 | `NPM_TOKEN` | `npm` job | publishing `@foldedspacelabs/metistry-*`. **Absent → the job says so and exits 0**; the rest of the release still happens (a fork does not own the scope) |
 | `GITHUB_TOKEN` (automatic) | `images`, `publish` | pushing to ghcr.io and creating the release. Nothing to set; a fork whose `packages: write` is unavailable logs a notice and skips the image, rather than failing the release |
 | `SPARKLE_PRIVATE_KEY` | `appcast` (stub) | the EdDSA key Sparkle's `sign_update` signs the DMG with. **Never** in the repo or an artifact. `ops/release/appcast.mjs` refuses to emit an unsigned feed |
-| `APPLE_CERTIFICATE_P12`, `APPLE_CERTIFICATE_PASSWORD` | `macos-app` (stub) | the Developer ID Application certificate, imported into a temporary keychain |
-| `APPLE_ID`, `APPLE_TEAM_ID`, `APPLE_APP_SPECIFIC_PASSWORD` | `macos-app` (stub) | `xcrun notarytool submit --wait`, then `stapler staple` |
+| `SPARKLE_PUBLIC_ED_KEY` | `appcast` (stub) | the matching public key, for the SwiftUI app's `Info.plist` (`SUPublicEDKey`) once that target exists. Not sensitive — fine committed too — kept as a secret so CI never has to read it out of the Xcode project |
+| `APPLE_CERTIFICATE_P12`, `APPLE_CERTIFICATE_PASSWORD` | `macos-app` (stub) | the Developer ID Application certificate, imported into a temporary keychain; `METISTRY_SIGN_IDENTITY` is then derived from it, not stored separately |
+| `APPLE_TEAM_ID`, `APPLE_API_KEY_ID`, `APPLE_API_ISSUER_ID`, `APPLE_API_KEY_P8` | `macos-app` (stub) | notarization via the App Store Connect API key (`xcrun notarytool submit --key --key-id --issuer --wait`, then `stapler staple`) — **not** an Apple ID + app-specific password |
 
 The Developer ID certificate is also what fixes the ad-hoc-signed TCC
 helpers (D3: TCC bridges must be *stably* signed, or every rebuild
 re-prompts for permission).
+
+Setting these with `gh secret set`: delete the `.p12` and `AuthKey_*.p8`
+from disk right after upload — never let the export outlive the
+`gh secret set` call (`docs/ops/apple-signing.md` §4 has the exact
+commands). And if a `GH_TOKEN` is set in your shell (a fine-grained PAT
+for something else), it shadows your `gh auth login` keyring session and
+`gh secret set` 404s instead of asking you to log in — run
+`env -u GH_TOKEN gh secret set …` for this and any other `gh` admin
+operation.
 
 ## The macOS app (not built yet)
 

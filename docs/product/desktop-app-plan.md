@@ -130,6 +130,41 @@ the ad-hoc-signed TCC helpers — memory), a release workflow that builds,
 signs, notarizes, staples, and publishes assets with a changelog, and a
 `metistry update` release mode that consumes exactly those assets.
 
+## Bundled runtime (ratified 2026-09-09)
+
+Everything the app needs ships inside the bundle except the user's own
+accounts and permissions. Download, open, sign in to Claude, name the
+assistant, approve two permissions; nothing else is the user's job.
+
+| Shipped inside `Metistry.app/Contents/Resources/metistry/` | Notes |
+| --- | --- |
+| **Node** | console, assistant, reconciler, watchdog, bridge Node halves |
+| **Postgres 17 + pgvector** | relocatable build, every Mach-O signed (hardened runtime), data under the instance's `state/`, loopback + Unix socket, our launchd job starts it — the Postgres.app model. The launchd shape already resolves `runtime/postgres/` before Homebrew; the release workflow produces it. Permissive licences. ~50 MB |
+| **git** | a clean Mac has none until Xcode Command Line Tools are installed; the reconciler spawns it. A minimal build, ~30 MB |
+| **Claude Code CLI** | arrives with the Agent SDK package; nothing separate |
+| **Swift helpers** | EventKit, Apple FM — prebuilt, Developer ID signed, bundled (#84) |
+| **The product runtime pack** | the release asset, pinned by `metistry.lock` |
+
+Not required, ever: Docker, Homebrew, pnpm, Xcode, build tools.
+
+**Optional, offered in-app, degrades absent:** **Ollama** for embeddings
+(search is keyword-only without it; one-click install from the app;
+Apple's on-device `NLEmbedding` behind a Swift bridge is the candidate
+no-install default, lower quality than nomic — evaluate before adopting);
+**Tailscale** for phone access away from the local network.
+
+**The user's own, unavoidable:** the Claude subscription login (browser),
+a GitHub account only if they want the instance repo backed up (local git
+works without a remote), Calendars/Reminders and notification
+permissions, the passkey.
+
+**Updates** carry new Node, Postgres, or git versions inside the runtime
+pack when they change; `metistry update` in release mode swaps the
+`current` symlink, runs migrations under the lock, and restarts what
+changed. A Postgres major upgrade is the one update that needs a data
+migration step; plan it as its own `metistry update --pg-upgrade` when
+it first happens, never silently.
+
 ## Not doing
 - An Electron/Tauri wrapper (a second runtime for what the installed PWA
   plus Swift helpers already give).

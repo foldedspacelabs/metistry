@@ -61,7 +61,7 @@ export interface Handle {
 const GROUP_HEADINGS: Record<Group, string> = {
   proposals: "accepted proposals (queries_run for the payload):",
   work: "work closed:",
-  artifacts: "artifacts published (artifact_get):",
+  artifacts: "artifacts published (artifacts_get):",
   sessions: "sessions captured (inbox):",
 };
 const GROUP_ORDER: Group[] = ["proposals", "work", "artifacts", "sessions"];

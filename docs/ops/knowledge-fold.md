@@ -43,7 +43,7 @@ Since the anchor:
 
 Each becomes a **handle** — an id, a title, a one-line summary, sometimes a
 path. Never content: the assistant fetches what it needs with `queries_run`,
-`knowledge_read` and `artifact_get`. The whole brief is capped at 4 KB; a busy
+`knowledge_read` and `artifacts_get`. The whole brief is capped at 4 KB; a busy
 day drops from the largest group and says `…and N more`.
 
 ## What it enqueues

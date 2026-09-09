@@ -837,3 +837,8 @@ your git, on your machine.
   names and descriptions took the definition budget back under the >5k-token
   line those two tools had crossed — the axis that actually gates lazy
   discovery.
+- 2026-09-09 — Bundled runtime ratified: the Mac app ships Node,
+  Postgres 17 + pgvector, git, the Claude Code CLI and the signed helpers
+  inside the bundle; Ollama and Tailscale are optional; no Docker,
+  Homebrew, or build tools ever. Install = download, open, sign in,
+  name the assistant, approve two permissions.

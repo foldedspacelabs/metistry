@@ -5,6 +5,7 @@
 // and the asset names cannot drift from what `metistry update` downloads.
 // (Reaching out of the package into ops/ follows lock-key.test.ts: the
 // facts two files must agree on are asserted where the code lives.)
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
@@ -91,6 +92,29 @@ describe("release notes from the changesets", () => {
 
   it("says so rather than inventing changes when a version has no changesets", () => {
     expect(renderReleaseNotes({ version: "0.3.0", entries: [{ name: "x", changelog: CLI_CHANGELOG }] })).toContain("_No changesets in this release._");
+  });
+});
+
+describe("changelog.mjs CLI entrypoint", () => {
+  // Regression test: `release.yml` invokes the generator with --assets and
+  // --images flags (exactly like this), and a naive "first argv token not
+  // starting with --" scan for the optional positional <root> arg picks up
+  // a flag's *value* instead, sends collectEntries() to a nonexistent path,
+  // and silently renders "_No changesets in this release._" even though
+  // packages/cli/CHANGELOG.md has a real 0.2.0 section.
+  it("still finds real changeset entries when --assets and --images are passed", () => {
+    const scriptPath = fileURLToPath(new URL("../../../ops/release/changelog.mjs", import.meta.url));
+    const out = execFileSync(
+      process.execPath,
+      [scriptPath, "0.2.0", "--assets", "checksums.txt,a.tar.gz", "--images", "ghcr.io/x/metistry-console:0.2.0"],
+      { encoding: "utf8" },
+    );
+    expect(out).not.toContain("_No changesets in this release._");
+    expect(out).toContain("Two install verbs, terminal-first");
+    expect(out).toContain("### Container images");
+    expect(out).toContain("- `ghcr.io/x/metistry-console:0.2.0`");
+    expect(out).toContain("### Assets");
+    expect(out).toContain("- `checksums.txt`");
   });
 });
 

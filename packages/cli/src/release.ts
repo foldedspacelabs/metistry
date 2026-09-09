@@ -20,6 +20,7 @@ import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readdir, readFile, readlink, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { realExec, type Exec } from "./exec.js";
 import { StepFailed, type StepRunner } from "./steps.js";
 
 /** The product's GitHub repo — `METISTRY_RELEASE_REPO` retargets a fork without touching code (invariant 7). */
@@ -57,6 +58,10 @@ export function runtimeAssetName(version: string, target: string): string {
   return `metistry-runtime-${version.replace(/^v/, "")}-${target}.tar.gz`;
 }
 
+export function releaseRepo(env: NodeJS.ProcessEnv, override?: string | undefined): string {
+  return override ?? env.METISTRY_RELEASE_REPO ?? DEFAULT_RELEASE_REPO;
+}
+
 export function imageRef(service: string, version: string, env: NodeJS.ProcessEnv = process.env): string {
   return `${env.METISTRY_IMAGE_PREFIX ?? DEFAULT_IMAGE_PREFIX}-${service}:${version}`;
 }
@@ -70,8 +75,10 @@ export interface ResolvedRelease {
   /** without the leading v */
   version: string;
   tag: string;
-  /** asset name → download url */
+  /** asset name → download url (browser_download_url; unusable by the direct fetch path when `via` is "gh") */
   assets: Record<string, string>;
+  /** which path answered: the direct GitHub API call, or the `gh` CLI fallback */
+  via: "api" | "gh";
 }
 
 interface GhRelease {
@@ -80,20 +87,59 @@ interface GhRelease {
   assets?: { name?: string; browser_download_url?: string }[];
 }
 
+/** `gh --version` exits 0, so this also doubles as "gh is on PATH". */
+async function ghAvailable(exec: Exec): Promise<boolean> {
+  try {
+    return (await exec("gh", ["--version"])).code === 0;
+  } catch {
+    return false;
+  }
+}
+
+/** `gh api repos/<repo>/releases/(tags/<tag>|latest)` — same shape as the direct API response, so callers don't care which path answered. */
+async function resolveViaGh(exec: Exec, repo: string, want: string | undefined): Promise<ResolvedRelease> {
+  const path = want ? `repos/${repo}/releases/tags/${want}` : `repos/${repo}/releases/latest`;
+  const r = await exec("gh", ["api", path]);
+  if (r.code !== 0) {
+    const detail = (r.stderr || r.stdout).trim().split("\n").slice(-3).join("; ");
+    throw new StepFailed(`gh api ${path} failed${detail ? ` (${detail})` : ""} — check \`gh auth status\` and that ${repo} is the right repo`);
+  }
+  let body: GhRelease;
+  try {
+    body = JSON.parse(r.stdout) as GhRelease;
+  } catch {
+    throw new StepFailed(`gh api ${path} did not return JSON`);
+  }
+  const tag = body.tag_name;
+  if (typeof tag !== "string" || tag === "") throw new StepFailed(`gh api ${path} returned a release with no tag_name`);
+  const assets: Record<string, string> = {};
+  for (const a of body.assets ?? []) if (a.name && a.browser_download_url) assets[a.name] = a.browser_download_url;
+  return { version: tag.replace(/^v/, ""), tag, assets, via: "gh" };
+}
+
 /**
  * The latest release, or the one tagged `v<version>`. Read-only and
  * unauthenticated by default; `METISTRY_GITHUB_TOKEN` (the read-only PAT
  * the github-state collector already uses) lifts the anonymous rate limit
- * and is the only way to see a private repo's releases.
+ * and is the only way to see a private repo's releases — a fine-grained
+ * PAT needs `Contents: read` on the repo for that, not just Issues/PRs.
+ *
+ * A 403 that is not an exhausted rate limit (checked via
+ * `x-ratelimit-remaining`, since GitHub answers both cases with 403) means
+ * the token cannot see this repo's releases. Rather than fail outright,
+ * fall back to the `gh` CLI when it is on PATH and already logged in —
+ * `gh`'s own credential is independent of `METISTRY_GITHUB_TOKEN`.
  */
-export async function resolveRelease(opts: { fetchFn: typeof fetch; repo?: string | undefined; version?: string | undefined; env?: NodeJS.ProcessEnv | undefined }): Promise<ResolvedRelease> {
+export async function resolveRelease(opts: { fetchFn: typeof fetch; repo?: string | undefined; version?: string | undefined; env?: NodeJS.ProcessEnv | undefined; exec?: Exec | undefined }): Promise<ResolvedRelease> {
   const env = opts.env ?? {};
-  const repo = opts.repo ?? env.METISTRY_RELEASE_REPO ?? DEFAULT_RELEASE_REPO;
+  const repo = releaseRepo(env, opts.repo);
   const api = env.METISTRY_GITHUB_API ?? "https://api.github.com";
   const want = opts.version ? `v${opts.version.replace(/^v/, "")}` : undefined;
   const url = want ? `${api}/repos/${repo}/releases/tags/${want}` : `${api}/repos/${repo}/releases/latest`;
   const headers: Record<string, string> = { accept: "application/vnd.github+json", "user-agent": "metistry-cli" };
-  if (env.METISTRY_GITHUB_TOKEN) headers.authorization = `Bearer ${env.METISTRY_GITHUB_TOKEN}`;
+  const hasToken = Boolean(env.METISTRY_GITHUB_TOKEN);
+  if (hasToken) headers.authorization = `Bearer ${env.METISTRY_GITHUB_TOKEN}`;
+  const exec = opts.exec ?? realExec;
 
   let res: Response;
   try {
@@ -101,15 +147,28 @@ export async function resolveRelease(opts: { fetchFn: typeof fetch; repo?: strin
   } catch (err) {
     throw new StepFailed(`could not reach ${url} (${err instanceof Error ? err.message : String(err)}) — check the network, or pass --channel git if this install is a checkout`);
   }
+
+  if (res.status === 401 || res.status === 403) {
+    const remaining = res.headers.get("x-ratelimit-remaining");
+    if (res.status === 403 && remaining === "0") {
+      throw new StepFailed(`GitHub answered HTTP 403 for ${url} — rate limited (x-ratelimit-remaining: 0)${hasToken ? "; wait for the window to reset" : "; set METISTRY_GITHUB_TOKEN to raise the limit"}`);
+    }
+    if (await ghAvailable(exec)) return await resolveViaGh(exec, repo, want);
+    throw new StepFailed(
+      `GitHub answered HTTP ${res.status} for ${url} — ${
+        hasToken ? `METISTRY_GITHUB_TOKEN lacks "Contents: read" on ${repo} (a fine-grained PAT needs it granted explicitly — Issues/PRs/Metadata is not enough)` : `no METISTRY_GITHUB_TOKEN is set and ${repo} may be private`
+      }, or ${repo} is the wrong repo. Add "Contents: read" to the PAT, or install the gh CLI and run \`gh auth login\` so metistry falls back to it automatically.`,
+    );
+  }
   if (res.status === 404) throw new StepFailed(want ? `${repo} has no release tagged ${want}` : `${repo} has no releases yet — nothing to update to (the product is still git-mode: --channel git)`);
-  if (!res.ok) throw new StepFailed(`GitHub answered HTTP ${res.status} for ${url}${res.status === 403 ? " — rate limited; set METISTRY_GITHUB_TOKEN" : ""}`);
+  if (!res.ok) throw new StepFailed(`GitHub answered HTTP ${res.status} for ${url}`);
 
   const body = (await res.json()) as GhRelease;
   const tag = body.tag_name;
   if (typeof tag !== "string" || tag === "") throw new StepFailed(`${url} returned a release with no tag_name`);
   const assets: Record<string, string> = {};
   for (const a of body.assets ?? []) if (a.name && a.browser_download_url) assets[a.name] = a.browser_download_url;
-  return { version: tag.replace(/^v/, ""), tag, assets };
+  return { version: tag.replace(/^v/, ""), tag, assets, via: "api" };
 }
 
 /** `<sha256>  <filename>` lines (sha256sum/shasum output) → filename → digest. */
@@ -140,6 +199,21 @@ export async function downloadTo(fetchFn: typeof fetch, url: string, dest: strin
   const buf = Buffer.from(await res.arrayBuffer());
   await mkdir(join(dest, ".."), { recursive: true });
   await writeFile(dest, buf);
+  return { bytes: buf.byteLength, sha256: createHash("sha256").update(buf).digest("hex") };
+}
+
+/**
+ * `gh release download <tag> --pattern <asset> --dir <dir>` — the fallback
+ * asset fetch for when `METISTRY_GITHUB_TOKEN` cannot even see the repo's
+ * releases (so its `browser_download_url`s would 403 too): `gh`'s own
+ * login, not the token, does the authenticating. Returns the file's sha256
+ * the same way `downloadTo` does, so callers don't care which path ran.
+ */
+export async function downloadViaGh(r: StepRunner, repo: string, tag: string, asset: string, dir: string): Promise<{ bytes: number; sha256: string }> {
+  await mkdir(dir, { recursive: true });
+  await r.run("gh", ["release", "download", tag, "--repo", repo, "--pattern", asset, "--dir", dir, "--clobber"], { timeoutMs: 30 * 60_000 });
+  const dest = join(dir, asset);
+  const buf = await readFile(dest);
   return { bytes: buf.byteLength, sha256: createHash("sha256").update(buf).digest("hex") };
 }
 
@@ -223,7 +297,9 @@ export interface InstallReleaseResult {
 export async function installRelease(r: StepRunner, opts: InstallReleaseOptions): Promise<InstallReleaseResult> {
   const { productDir, fetchFn, env } = opts;
   const target = opts.target ?? releaseTarget();
-  const rel = await resolveRelease({ fetchFn, version: opts.version, env });
+  const repo = releaseRepo(env);
+  const rel = await resolveRelease({ fetchFn, version: opts.version, env, exec: r.exec });
+  if (rel.via === "gh") r.note(`${repo}: METISTRY_GITHUB_TOKEN was unauthorized for the Releases API — resolved and downloading via \`gh\` instead`);
   const asset = runtimeAssetName(rel.version, target);
   const before = await currentVersion(productDir);
 
@@ -243,11 +319,18 @@ export async function installRelease(r: StepRunner, opts: InstallReleaseOptions)
   const staging = join(releasesDir(productDir), ".download");
   const tarball = join(staging, asset);
   r.action(`download ${asset} from ${rel.tag} and verify its sha256 against ${CHECKSUMS_ASSET}`);
-  const sums = parseChecksums(await getText(fetchFn, sumsUrl, CHECKSUMS_ASSET));
+  let sumsText: string;
+  if (rel.via === "gh") {
+    await downloadViaGh(r, repo, rel.tag, CHECKSUMS_ASSET, staging);
+    sumsText = await readFile(join(staging, CHECKSUMS_ASSET), "utf8");
+  } else {
+    sumsText = await getText(fetchFn, sumsUrl, CHECKSUMS_ASSET);
+  }
+  const sums = parseChecksums(sumsText);
   const want = sums[asset];
   if (!want) throw new StepFailed(`${CHECKSUMS_ASSET} of ${rel.tag} has no line for ${asset} — refusing to install an unverifiable runtime pack`);
 
-  const got = await downloadTo(fetchFn, url, tarball);
+  const got = rel.via === "gh" ? await downloadViaGh(r, repo, rel.tag, asset, staging) : await downloadTo(fetchFn, url, tarball);
   if (got.sha256 !== want) {
     await rm(staging, { recursive: true, force: true });
     throw new StepFailed(`${asset} failed its checksum (expected ${want}, got ${got.sha256}) — the download was discarded and ${CURRENT_LINK} is unchanged`);

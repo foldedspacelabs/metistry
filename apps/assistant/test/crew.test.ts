@@ -51,7 +51,7 @@ describe("allowlist from tool groups", () => {
     expect(crewToolNames([])).toEqual([]);
     const everything = crewToolNames(Object.keys(CREW_TOOL_GROUPS));
     expect(everything).not.toContain("mcp__brain__knowledge_write");
-    expect(everything).not.toContain("mcp__brain__crew_dispatch");
+    expect(everything).not.toContain("mcp__brain__agents_delegate");
     expect(everything).toHaveLength(BRAIN_TOOLS.length - CREW_NEVER_TOOLS.length);
   });
 });

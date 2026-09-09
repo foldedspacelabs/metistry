@@ -23,6 +23,9 @@
 import { realExec, type Exec, type ExecResult } from "./exec.js";
 import { Keychain } from "./keychain.js";
 
+/** Folded Space Labs' GitHub OAuth App (device flow enabled). Public by design. */
+export const DEFAULT_GITHUB_OAUTH_CLIENT_ID = "Ov23lid9DItZlts5e5GV";
+
 export type AuthMode = "device" | "token" | "ssh";
 export const AUTH_MODES: AuthMode[] = ["device", "token", "ssh"];
 
@@ -235,12 +238,11 @@ export async function connectRepo(opts: ConnectRepoOptions): Promise<ConnectRepo
     }
     let token: string | undefined;
     if (auth === "device") {
-      const clientId = env.METISTRY_GITHUB_OAUTH_CLIENT_ID;
-      if (!clientId) {
-        throw new Error(
-          "METISTRY_GITHUB_OAUTH_CLIENT_ID is unset — register a GitHub OAuth App (Settings → Developer settings → OAuth Apps), tick 'Enable Device Flow', and put its Client ID in .env. It is public: a device-flow app has no secret. Or use --auth token / --auth ssh.",
-        );
-      }
+      // The product ships Folded Space Labs' OAuth App as the default: a
+      // device-flow client id is public (no secret exists), and it grants the
+      // app nothing — each user approves the `repo` scope on their own
+      // account. An instance may override it with its own app in .env.
+      const clientId = env.METISTRY_GITHUB_OAUTH_CLIENT_ID || DEFAULT_GITHUB_OAUTH_CLIENT_ID;
       token = await deviceFlow({ clientId, fetchFn, out, ...(opts.sleep ? { sleep: opts.sleep } : {}) });
       credential = "device";
     } else if (auth === "token") {

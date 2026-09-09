@@ -14,7 +14,7 @@ import { join } from "node:path";
 
 import { runCheck, startRun, finishRun, errorEnvelope, statusFor, type CheckResult } from "@foldedspacelabs/metistry-core";
 import { QueryError, QueryStore } from "@foldedspacelabs/metistry-queries";
-import { captureToInbox, createBrainServer, type KnowledgeReader, type KnowledgeWriter, type QueryEmbedder } from "@foldedspacelabs/metistry-mcp-brain";
+import { captureToInbox, createBrainServer, type KnowledgeLister, type KnowledgeReader, type KnowledgeVaultSearcher, type KnowledgeWriter, type QueryEmbedder } from "@foldedspacelabs/metistry-mcp-brain";
 import { TasksService } from "@foldedspacelabs/metistry-tasks";
 import { ArtifactsService, VaultError, type VaultClient } from "@foldedspacelabs/metistry-artifacts";
 import { artifactRoutes, isArtifactRoute } from "./artifacts-routes.js";
@@ -50,6 +50,10 @@ export interface ConsoleConfig {
   embedder?: QueryEmbedder;
   /** Note writer for mcp-brain's knowledge_write — the assistant's brain-commit over the same bridge; absent = not_available. */
   writeKnowledge?: KnowledgeWriter;
+  /** Vault listing for mcp-brain's knowledge_list (the reconciler's GET /vault/list); absent = not_available. */
+  listKnowledge?: KnowledgeLister;
+  /** Keyword-mode content search for mcp-brain's knowledge_grep candidate pre-filter (the reconciler's GET /vault/search?mode=keyword); absent = knowledge_grep falls back to listKnowledge for candidates. */
+  searchVaultKeyword?: KnowledgeVaultSearcher;
   /** The vault client the artifacts module (§4.21) stores content through; absent = artifacts degrade to not_available. */
   vault?: VaultClient;
   /** Loaded crew manifests (crews.ts); absent = crew_dispatch answers not_available. */
@@ -87,6 +91,8 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     readKnowledge: cfg.readKnowledge,
     embedder: cfg.embedder,
     writeKnowledge: cfg.writeKnowledge,
+    listKnowledge: cfg.listKnowledge,
+    searchVaultKeyword: cfg.searchVaultKeyword,
     artifacts,
     // crews (Phase 5): the dispatcher reuses dispatch.ts's policy check and lands rows through the same tasks service
     crews: cfg.crews ? crewDispatcher(db, tasks, cfg.crews, cfg.targets) : undefined,

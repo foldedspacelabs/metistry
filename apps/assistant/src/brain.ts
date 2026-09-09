@@ -22,7 +22,9 @@ export const BRAIN_SERVER = "brain";
  * crews (crew.ts runs them); no crew ever holds either tool. `queries_list`
  * / `queries_run` (invariant 3's one read path) are open to every principal
  * in mcp-brain, but internal ones — the assistant included — always have
- * them regardless of a `queries` grant.
+ * them regardless of a `queries` grant. `knowledge_list` / `knowledge_grep`
+ * are filesystem semantics over the same `areas` grant knowledge_read uses
+ * (docs/research/2026-09-stash-review.md item 3) — no separate scope.
  */
 export const BRAIN_TOOLS = [
   "capture",
@@ -36,6 +38,8 @@ export const BRAIN_TOOLS = [
   "tasks_mine",
   "knowledge_search",
   "knowledge_read",
+  "knowledge_list",
+  "knowledge_grep",
   "knowledge_write",
   "artifact_publish",
   "artifact_get",

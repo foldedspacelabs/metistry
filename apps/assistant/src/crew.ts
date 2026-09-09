@@ -7,7 +7,7 @@
 // - exactly ONE MCP server — the console's mcp-brain — carrying a PER-RUN
 //   bearer the drain loop minted for this run and burns after it;
 // - `allowedTools` = exactly the tool groups the manifest's `uses` names
-//   (core's CREW_TOOL_GROUPS): `knowledge_write` and `crew_dispatch` are not
+//   (core's CREW_TOOL_GROUPS): `knowledge_write` and `agents_delegate` are not
 //   groups, so no `uses` list can reach them; built-ins are off, foreign
 //   MCP config ignored — invariant 9 holds for crews exactly as for the
 //   assistant (engine.ts);

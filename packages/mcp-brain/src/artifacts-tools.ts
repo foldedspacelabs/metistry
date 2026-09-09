@@ -13,11 +13,11 @@ import { done, fail, type Outcome } from "./outcome.js";
 import { allProjects } from "./scope.js";
 import type { AgentPrincipal } from "./types.js";
 
-export const ARTIFACT_TOOL_NAMES = ["artifact_publish", "artifact_get", "artifact_list", "artifact_comment", "artifact_comment_resolve", "artifact_dispatch_review"] as const;
-export type ArtifactToolName = (typeof ARTIFACT_TOOL_NAMES)[number];
+export const ARTIFACTS_TOOL_NAMES = ["artifacts_publish", "artifacts_get", "artifacts_list", "artifacts_comment", "artifacts_resolve", "artifacts_review"] as const;
+export type ArtifactsToolName = (typeof ARTIFACTS_TOOL_NAMES)[number];
 
 /** The server's registration function, narrowed to these names. */
-export type Register = <S extends z.ZodRawShape>(name: ArtifactToolName, description: string, inputSchema: S, body: (args: z.infer<z.ZodObject<S>>) => Promise<Outcome>) => void;
+export type Register = <S extends z.ZodRawShape>(name: ArtifactsToolName, description: string, inputSchema: S, body: (args: z.infer<z.ZodObject<S>>) => Promise<Outcome>) => void;
 
 /** The module's principal, from the bridge's: membership is what the credential said (server-side), never a tool argument. */
 export function toPrincipal(p: AgentPrincipal): Principal {
@@ -47,7 +47,7 @@ export function registerArtifactTools(reg: Register, service: ArtifactsService |
   };
 
   reg(
-    "artifact_publish",
+    "artifacts_publish",
     "Publish a new version of an artifact into one of your projects. Compare-and-swap via expected_current_version (null = new); a stale publish gets `conflict`. Same idempotency_key returns the same version.",
     {
       project: z.string().max(200),
@@ -82,7 +82,7 @@ export function registerArtifactTools(reg: Register, service: ArtifactsService |
   );
 
   reg(
-    "artifact_get",
+    "artifacts_get",
     "One artifact in your projects: current/given version, manifest, version list, comment threads, links. `path` also reads one file's content.",
     { id: artId, version: verId.optional(), path: z.string().max(300).optional() },
     (a) =>
@@ -113,14 +113,14 @@ export function registerArtifactTools(reg: Register, service: ArtifactsService |
   );
 
   reg(
-    "artifact_list",
+    "artifacts_list",
     "Artifacts across your projects (or one of them), most recently updated first.",
     { project: z.string().max(200).optional(), limit: z.number().int().min(1).max(200).optional() },
     (a) => guard(async (svc) => done({ artifacts: await svc.list({ project: a.project, limit: a.limit }, principal) })),
   );
 
   reg(
-    "artifact_comment",
+    "artifacts_comment",
     "Comment on an artifact version (optionally one file + anchor), or reply to a thread with `parent` (one level deep). Past the agent-only cap, the thread demotes to a user proposal.",
     {
       artifact: artId,
@@ -144,7 +144,7 @@ export function registerArtifactTools(reg: Register, service: ArtifactsService |
   );
 
   reg(
-    "artifact_comment_resolve",
+    "artifacts_resolve",
     "Resolve a thread root, or reopen with reopen: true. A review bundle is addressed once every thread resolves.",
     { id: cmtId, reopen: z.boolean().optional() },
     (a) =>
@@ -156,7 +156,7 @@ export function registerArtifactTools(reg: Register, service: ArtifactsService |
   );
 
   reg(
-    "artifact_dispatch_review",
+    "artifacts_review",
     "Send threads on one version to another agent as one claimable review task. Outside the project boundary or a manifest narrowing, it becomes a user proposal (`route: proposal`) instead. Over the open-bundle cap, the task queues rather than dropping.",
     {
       artifact: artId,

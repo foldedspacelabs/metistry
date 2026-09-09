@@ -50,6 +50,11 @@ flips, system improvements, and the assistant's own blocking questions are all
 rows in `proposals`, so there is one triage endpoint, one push path, one brief
 section, and one badge. Items are grouped by kind, oldest first.
 
+Each of those rows is a **request** in the shipped vocabulary
+(`glossary.md`, ratified 2026-09-09): the list is grouped by request *type* —
+note · report · review · question · access · improvement — and every one of
+them answers to the same three buttons, **Approve / Revise / Decline**.
+
 A **question-answer prompt card** is what makes the assistant's own asks fit:
 a reply ending in a fenced `decision` block (title + options) becomes a
 `decision` row when the reply is stored, answerable three ways that are all

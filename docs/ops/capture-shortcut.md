@@ -11,7 +11,7 @@ docker compose exec -e METISTRY_ORIGIN=https://<your-origin> console node script
 ```
 
 Store it once in the Shortcut (step 3). It is an **owner token**: capture
-and messages only — it cannot manage devices or triage (CRIT-7), so a
+and messages only — it cannot manage devices or answer requests (CRIT-7), so a
 lost phone leaks capture ability, not control. Revoke from the Studio:
 `UPDATE owner_tokens SET revoked_at = now() WHERE label = 'iphone-shortcut'`.
 (An **agent token** — minted in the console's *agents* tab — also works on

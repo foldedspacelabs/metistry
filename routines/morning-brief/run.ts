@@ -49,9 +49,26 @@ export function pickBudget(scored: { row: PendingRow; s: number }[]): { row: Pen
   return [...base, ...extra];
 }
 
+/**
+ * The six request types the user reads (docs/product/glossary.md), over the
+ * stored `proposals.kind` values, which do not change. The brief and the
+ * console's Needs You queue must call the same thing the same word.
+ */
+const REQUEST_TYPE: Record<string, string> = {
+  decision: "question",
+  grant_elevation: "access",
+  improvement: "improvement",
+  knowledge: "note",
+  draft_settle: "note",
+  action: "note",
+  report: "report",
+  review: "review",
+};
+export const requestType = (kind: string): string => REQUEST_TYPE[kind] ?? kind;
+
 function title(row: PendingRow): string {
   const c = row.payload?.classification;
-  return (c?.action || c?.title || row.payload?.title || `${row.kind} proposal`).slice(0, 70);
+  return (c?.action || c?.title || row.payload?.title || `${requestType(row.kind)} request`).slice(0, 70);
 }
 
 // ---- sections (owner feedback 2026-09-01: actionable, question-shaped).
@@ -74,7 +91,7 @@ async function sectionToday(db: Db): Promise<string[] | null> {
   );
   const lines = [
     ...work.rows.map((w: any) => `• ${w.title}${w.due ? ` (due ${w.due.toISOString?.().slice(0, 10) ?? w.due})` : ""}${w.status === "blocked" ? " — blocked" : ""}`),
-    ...todos.rows.map((t: any) => `• ${(t.payload?.classification?.action || t.payload?.classification?.title || "").slice(0, 70)}  (captured, untriaged #${t.id})`),
+    ...todos.rows.map((t: any) => `• ${(t.payload?.classification?.action || t.payload?.classification?.title || "").slice(0, 70)}  (captured, still a request #${t.id})`),
   ];
   return lines.length ? lines : null;
 }
@@ -96,7 +113,7 @@ async function sectionReviews(db: Db): Promise<string[] | null> {
   });
 }
 
-async function sectionDecisions(db: Db, expiredCount: number): Promise<string[] | null> {
+async function sectionRequests(db: Db, expiredCount: number): Promise<string[] | null> {
   const { rows } = await db.query(
     `SELECT id, kind, ts, payload FROM proposals WHERE decision = 'pending' ORDER BY ts`,
   );
@@ -105,8 +122,8 @@ async function sectionDecisions(db: Db, expiredCount: number): Promise<string[] 
   const picked = pickBudget((rows as PendingRow[]).map((row) => ({ row, s: score(row, now) })));
   const rest = rows.length - picked.length;
   return [
-    ...picked.map(({ row, s }) => `• #${row.id} ${title(row)}  (${row.kind}${s >= CRITICAL_SCORE ? " ⚠" : ""})`),
-    ...(rest > 0 ? [`…${rest} more — open triage to see everything`] : []),
+    ...picked.map(({ row, s }) => `• #${row.id} ${title(row)}  (${requestType(row.kind)}${s >= CRITICAL_SCORE ? " ⚠" : ""})`),
+    ...(rest > 0 ? [`…${rest} more — open Needs You to see everything`] : []),
     ...(expiredCount > 0 ? [`${expiredCount} stale item(s) auto-expired, still searchable`] : []),
   ];
 }
@@ -228,7 +245,7 @@ export async function run(db: Db, ctx: RoutineCtx = {}): Promise<number> {
   );
 
   const schedule = await sectionSchedule(ctx);
-  const decisions = await sectionDecisions(db, expired.rows.length);
+  const requests = await sectionRequests(db, expired.rows.length);
   const today = await sectionToday(db);
   const reviews = await sectionReviews(db);
   const projects = await sectionProjects(db);
@@ -237,13 +254,13 @@ export async function run(db: Db, ctx: RoutineCtx = {}): Promise<number> {
   // silence-default: emit only when something needs the user (a calendar
   // with events counts — the day needs planning)
   const hasEvents = !!schedule && !schedule[0]!.includes("nothing on the calendar");
-  if (!decisions && !today && !reviews && !hasEvents && !system?.needsHelp) return 0;
+  if (!requests && !today && !reviews && !hasEvents && !system?.needsHelp) return 0;
 
   const parts: string[] = ["☀️ morning brief"];
   if (schedule) parts.push("", "📅 Schedule:", ...schedule);
   if (today) parts.push("", "✅ Today:", ...today);
   if (reviews) parts.push("", "👀 Reviews waiting on you:", ...reviews);
-  if (decisions) parts.push("", "🔔 Needs your decision:", ...decisions);
+  if (requests) parts.push("", "🔔 Needs you:", ...requests);
   if (projects) parts.push("", "📂 Projects:", ...projects);
   if (system) parts.push("", "⚙️ What I've been doing:", ...system.lines);
   if (!schedule) parts.push("", "📅 Schedule & meeting prep arrive once the calendar bridge is connected.");

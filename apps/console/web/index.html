@@ -140,7 +140,7 @@
       <form id="agent-create">
         <input id="agent-id" type="text" placeholder="id (slug, e.g. drey-dev)" autocomplete="off" autocapitalize="none" />
         <input id="agent-name" type="text" placeholder="display name" autocomplete="off" />
-        <select id="agent-kind"><option value="external">external</option><option value="internal">internal</option></select>
+        <select id="agent-kind"><option value="external">external</option><option value="internal">assistant</option></select>
         <button type="submit">Register</button>
       </form>
       <div id="agent-token" hidden>
@@ -149,14 +149,14 @@
       </div>
       <form id="agent-grants" hidden>
         <h3>Grants for <span id="agent-grants-for"></span></h3>
-        <label>Tier
+        <label>Access
           <select id="agent-tier">
             <option value="none">none — capture only</option>
-            <option value="index">index — titles and one-liners</option>
-            <option value="areas">areas — read the prefixes below</option>
+            <option value="index">titles — titles and one-line descriptions</option>
+            <option value="areas">folders — read the folders below</option>
           </select>
         </label>
-        <textarea id="agent-areas" placeholder="Knowledge/Areas/… one prefix per line (tier: areas)"></textarea>
+        <textarea id="agent-areas" placeholder="Knowledge/Areas/… one folder per line (access: folders)"></textarea>
         <label><input id="agent-queries" type="checkbox" /> queries — may call queries_list / queries_run (named queries, invariant 3)</label>
         <input id="agent-projects" type="text" placeholder="projects, comma-separated (slugs)" autocomplete="off" autocapitalize="none" />
         <p class="muted">autonomy — optional narrowing below "project members" (§4.21); blank = no narrowing</p>
@@ -208,7 +208,7 @@
         <button type="submit" class="secondary">List</button>
       </form>
       <ul id="art-list"></ul>
-      <p id="art-empty" class="muted" hidden>no artifacts yet — an agent publishes one with artifact_publish</p>
+      <p id="art-empty" class="muted" hidden>no artifacts yet — an agent publishes one with artifacts_publish</p>
       <div id="art-detail" hidden>
         <h3 id="art-title"></h3>
         <p id="art-meta" class="muted"></p>
@@ -226,7 +226,7 @@
         <form id="art-dispatch">
           <p class="muted">send the checked threads to an agent as one review task</p>
           <input id="art-dispatch-to" type="text" placeholder="agent id" autocomplete="off" autocapitalize="none" />
-          <span><button type="submit" class="secondary">Dispatch Review</button></span>
+          <span><button type="submit" class="secondary">Send for Review</button></span>
           <p id="art-dispatch-msg" class="muted"></p>
         </form>
       </div>

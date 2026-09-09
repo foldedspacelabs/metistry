@@ -8,7 +8,7 @@ operating prompt — and nothing else: no code, no container, no credential
 in your `.env`. The assistant dispatches it with one tool, the console
 checks the brief before anything runs, the assistant container runs it
 locally with a scoped, single-run credential, and whatever the crew wants
-kept comes back through the same proposal queue every agent uses.
+kept comes back through the same Needs You queue every agent uses.
 
 **The brief is the context transfer** (§4.11). A crew has no memory between
 runs and no access beyond its `scope`; what the assistant writes in the
@@ -28,7 +28,7 @@ type: agent
 area: example               # = the directory (optional; filled from the path)
 model: haiku                # haiku | sonnet | opus
 description: Reads the granted notes and reports what it finds
-uses: [brain-read, brain-report]   # tool GROUPS, see below
+uses: [knowledge, requests]        # tool GROUPS, see below
 skills: []                  # recorded now; binds once skills/ exists (§4.4)
 scope: [Knowledge/Projects, Knowledge/Resources]   # read tier: TitleCase Knowledge/ prefixes
 projects: []                # shared-list membership (§4.19); empty = none
@@ -69,12 +69,12 @@ manifest by test so the two cannot drift:
 | group | tools | plan spelling |
 | --- | --- | --- |
 | `knowledge` | `knowledge_search`, `knowledge_read` — under `scope` | `brain-read` |
-| `report` | `report` — the proposal queue the assistant folds later | `brain-report` |
-| `capture` | `capture` — notes/files into the inbox as proposals | |
-| `tasks` | `tasks_list_ready`, `tasks_claim`, `tasks_heartbeat`, `tasks_update`, `tasks_release`, `tasks_create`, `tasks_mine` — within `projects` | |
-| `artifacts` | `artifact_publish`, `artifact_get`, `artifact_list`, `artifact_comment`, `artifact_comment_resolve`, `artifact_dispatch_review` — within `projects` | |
+| `requests` | `requests_create` — a request in the Needs You queue the assistant folds later | `brain-report`, `report` |
+| `capture` | `capture` — notes/files into the inbox as captures | |
+| `tasks` | `tasks_list`, `tasks_claim`, `tasks_renew`, `tasks_update`, `tasks_release`, `tasks_create` — within `projects` | |
+| `artifacts` | `artifacts_publish`, `artifacts_get`, `artifacts_list`, `artifacts_comment`, `artifacts_resolve`, `artifacts_review` — within `projects` | |
 
-`knowledge_write`, `crew_dispatch`, `queries_list` and `queries_run` are
+`knowledge_write`, `agents_delegate`, `queries_list` and `queries_run` are
 **not groups**. Naming any of them in `uses` is refused by the schema with
 the reason ("never available to a crew"): sub-agents never write knowledge
 (§4.11 — one writer), a crew never dispatches crews, and a named query is
@@ -104,12 +104,12 @@ through the **same validator external agents face** (`validateGrants`,
 external shape: TitleCase areas, bare `Knowledge/` refused — a crew is not
 the assistant). Its `projects` are the manifest's. At the bridge a crew
 authenticates like any external principal: `knowledge_write` and
-`crew_dispatch` are "not granted", project membership is exactly its list.
+`agents_delegate` are "not granted", project membership is exactly its list.
 
 ## How dispatch works
 
 ```
-assistant ──crew_dispatch{crew, brief, task_id?}──▶ console (mcp-brain)
+assistant ──agents_delegate{crew, brief, task_id?}──▶ console (mcp-brain)
    │  internal principal only                      │ registry lookup
    │                                                │ checkBrief(scope ∩ local-crew.allow)   ← refused? no row, runs row ok=false
    │                                                ▼
@@ -120,12 +120,12 @@ assistant container drain loop ◀── claim (SKIP LOCKED, lease) ──┘
    │ mint a token for THIS run → agents.token_hash
    │ SDK query: crew model, prompt + trailer, brief, ONE mcp server (/mcp + run token),
    │            allowedTools = groups, maxTurns, maxBudgetUsd
-   │ crew calls report / tasks_* / capture …  → proposals, work, inbox (its own runs rows)
+   │ crew calls requests_create / tasks_* / capture → requests, work, inbox (its own runs rows)
    │ runs row: component = <crew>, kind = crew_run (cost, tokens, tools_used, brief_sha)
    │ burn the token; close the work row (or park it: blocked / retry)
 ```
 
-1. **The tool.** `crew_dispatch` is the nineteenth mcp-brain tool and is for
+1. **The tool.** `agents_delegate` is the nineteenth mcp-brain tool and is for
    `kind: internal` principals only — every other agent is told "not
    granted". The assistant's seed prompt says when to use it; the bridge
    decides whether it may.
@@ -155,9 +155,9 @@ assistant container drain loop ◀── claim (SKIP LOCKED, lease) ──┘
    hash is replaced; the plaintext goes into the SDK's MCP server header
    and nowhere else), run, record, **burn the token** (hash replaced again
    with one nobody holds — in `finally`, so a crash burns it too).
-5. **Results.** Only through the crew's own tools — `report` lands as
+5. **Results.** Only through the crew's own tools — `requests_create` lands as
    `proposals` rows (kind `report`, `source_agent` = the crew) for you to
-   triage and the assistant to fold; `tasks_update` notes, `capture`,
+   approve, revise or decline and the assistant to fold; `tasks_update` notes, `capture`,
    artifacts likewise. The runner writes one `runs` row per run on the
    **crew's id**: `kind = crew_run`, `model`, `tokens_in/out`, `cost_usd`
    (the SDK's estimate), `meta = {work_id, brief_sha, task_id, attempt,
@@ -172,7 +172,7 @@ assistant container drain loop ◀── claim (SKIP LOCKED, lease) ──┘
 | the SDK itself failed | `ok = false`, the error | claim kept, lease = `METISTRY_CREW_RETRY_S`; re-picked when it lapses, up to `METISTRY_CREW_MAX_ATTEMPTS`, then `blocked` |
 | the row cannot be honoured (no snapshot, a write tool in it, crew revoked, no brain URL) | none | `blocked` with the reason in history; no token minted |
 
-A crew whose run produced zero `report` calls is visible as `reports: 0` on
+A crew whose run produced zero `requests_create` calls is visible as `reports: 0` on
 the run row — the brief probably did not say what to report.
 
 ## The registry sync
@@ -227,7 +227,7 @@ FROM work WHERE owner LIKE 'crew:%' AND status <> 'closed';
 ```
 
 On the dashboard the 24 h "runs" tile counts crew runs among the failures
-and the spend; the proposals view shows what they reported. A per-component
+and the spend; Needs You shows what they reported. A per-component
 panel is a named query away (`seed/queries/`), not new machinery (§4.18.D).
 
 ## Configuration
@@ -268,7 +268,7 @@ read the thread itself; the brief is the reviewable record of what crossed.
   row (fakes).
 - `apps/console/test/crews.integration.test.ts` — registry sync idempotent
   (second sync writes nothing, hash untouched), resync/revoke/conflict;
-  `crew_dispatch` over the live `/mcp`: external → not granted, refused
+  `agents_delegate` over the live `/mcp`: external → not granted, refused
   brief → no work row + audited, clean brief → one durable row, idempotent.
 - `apps/assistant/test/crew.test.ts` — allowlist exhaustive against
   mcp-brain's manifest; option builder (model, bearer, tools, turns,

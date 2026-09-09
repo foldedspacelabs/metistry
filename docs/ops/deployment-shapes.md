@@ -74,7 +74,7 @@ versus `<instance>/state/pg` — so switching is a fresh database plus a
 restore, not a move. Invariant 1 is what makes that acceptable: git is
 the record, Postgres is derived, and a rebuild costs trend lines rather
 than knowledge. Decide about the durable set (`runs`, `sessions`, inbox
-triage, `work` threads, artifact comments — open decision 13) before you
+Needs You, `work` threads, artifact comments — open decision 13) before you
 switch a live install without a dump.
 
 ## Postgres, without Docker

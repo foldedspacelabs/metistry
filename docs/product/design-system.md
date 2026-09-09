@@ -57,7 +57,7 @@ ignore it, and then the one row that mattered is ignored too.
 
 ### P3 — Destructive actions confirm, and the confirmation states the reason
 
-Revoke, rotate, delete, flip a project to autonomous, force a dispatch: a
+Revoke, rotate, delete, set a project back to Auto, force a dispatch: a
 confirmation that names the consequence in the same words the tool would
 use, with the destructive verb as the affirmative button and Cancel as
 the default. Never a bare "Are you sure?".
@@ -90,7 +90,7 @@ the codegraff lesson "never dress a mailbox agent as working".
 
 ### P6 — One information architecture, three renderings
 
-Feed, Chat, Agents, Projects, Artifacts, Capture, Triage, Dashboard,
+Feed, Chat, Agents, Projects, Artifacts, Capture, Needs You, Dashboard,
 Status, Devices — the same ten destinations, the same order, the same
 names on macOS, iOS and the web. Only the navigation *chrome* changes:
 sidebar, tab bar, or responsive both. Nothing exists on one platform
@@ -143,7 +143,7 @@ take focus from the composer. A **"↓ New Reply" pill** appears at the
 bottom edge instead; tapping it scrolls, and nothing else does. Focusing
 or typing in the composer never scrolls the list.
 
-The rule holds for every polled list — feed, artifact threads, triage:
+The rule holds for every polled list — feed, artifact threads, Needs You:
 **a poll is a repaint, not a navigation.**
 
 *Why:* a client that scrolls on every poll destroys the thing the reader
@@ -156,10 +156,19 @@ every new polled list rediscovers it.
 A copy rule, about rendered strings only — the repo's path- and
 identifier-casing rules (`CLAUDE.md`) are untouched by it.
 
+**Which word, before which case.** The vocabulary comes first and is not
+this document's to choose: `docs/product/glossary.md` holds the eight nouns
+(knowledge/page · capture · request · task · artifact · project · agent ·
+activity) and the verb set every object shares, and the plan's §0 carries the
+same table with the old→new map. P10 decides only how a chosen word is *cased*.
+A builder word — collector, routine, bridge, module, target, reconciler, fold,
+principal, grant, run, crew — reaching a label is a bug before it is a casing
+question.
+
 | Case | Applies to |
 | --- | --- |
 | **Title Case** | screen titles, section headers, navigation and tab-bar labels, table column headers, card titles, menu-group headings, the names of the ten destinations |
-| **sentence case** | body copy, helper text, placeholders, empty-state prose, receipts, error messages, and buttons — verb-first per the HIG ("Send", "Allow", "Request Changes" are control labels and take Title Case; "queued — will send when the instance is reachable" is prose and does not) |
+| **sentence case** | body copy, helper text, placeholders, empty-state prose, receipts, error messages, and buttons — verb-first per the HIG ("Send", "Approve", "Revise", "Decline" are control labels and take Title Case; "queued — will send when the instance is reachable" is prose and does not) |
 | **as-is, always** | identifiers — agent ids, slugs, tool names, file paths, query names, `mode:` values, tier names. Rendered in `mono`, never case-corrected, because `drey-dev` is a key, not a word |
 
 **Where it is applied matters as much as the rule.** Title Case is a
@@ -449,9 +458,9 @@ with realistic content in `design/preview.html`.
 ### 3.1 Navigation
 
 **Anatomy.** Ten destinations in one fixed order: Feed · Chat · Agents ·
-Projects · Artifacts · Capture · Triage · Dashboard · Status · Devices.
+Projects · Artifacts · Capture · Needs You · Dashboard · Status · Devices.
 Each has a glyph, a label, and an optional count badge — shown only when
-the count is *actionable* (Triage: proposals awaiting you; Status:
+the count is *actionable* (Needs You: requests awaiting you; Status:
 failing checks). Never a badge for "new activity".
 
 **States.** selected · hover · pressed · disabled (a destination whose
@@ -467,7 +476,7 @@ data is absent stays enabled and shows its empty state — P5) · focused
   `accent` glyph. Toolbar carries the view's own controls (filters, the
   model picker in Chat) and never navigation.
 - **iOS** — `TabView` with a bottom tab bar for the top five (Feed, Chat,
-  Capture, Triage, Status) and a **More** tab holding the rest, because a
+  Capture, Needs You, Status) and a **More** tab holding the rest, because a
   tab bar is a global control that stays anchored to the bottom through
   push transitions and does not survive being crowded. On iPad the same
   `TabView` adopts the sidebar.
@@ -617,7 +626,7 @@ attribution) · options as buttons in a row (wrapping to a column below
 ("Something else…") that focuses a single-line field · deadline as
 `footnote` when present.
 
-**States.** open · answered (collapses to one line: "You chose *Allow* ·
+**States.** open · answered (collapses to one line: "You chose *Approve* ·
 2h ago", options gone) · expired (deadline passed; options disabled, the
 line says what happened by default) · sending · failed-to-send (retry
 inline, answer preserved).
@@ -804,35 +813,40 @@ panel and a drop target on the window. PWA: today's `<form
 id="capture-form">`, restyled; the file input becomes a labelled button
 plus a chip so it stops looking like a raw control.
 
-**Never.** Capture never opens a triage decision, never asks a question,
+**Never.** Capture never opens a request card, never asks a question,
 never waits on the model. It writes to the inbox and returns.
 
-### 3.9 Triage card
+### 3.9 Request card
 
-**Anatomy.** Card at elevation 1: kind glyph · title (`headline`, from
-the proposal payload — agent-sourced, so `agent`-attributed) · metadata
-line (`footnote`: kind · classification · source agent · date) · a
-**preview of exactly what will happen** (the file path a note would be
-written to, the diff summary, the grant that would be extended) · action
+The card in **Needs You**. One card shape for all six request types (note ·
+report · review · question · access · improvement — `glossary.md`), because
+the three answers are the same whatever the type.
+
+**Anatomy.** Card at elevation 1: type glyph · title (`headline`, from
+the request payload — agent-sourced, so `agent`-attributed) · metadata
+line (`footnote`: type · classification · source agent · date) · a
+**preview of exactly what will happen** (the page path a note would be
+written to, the diff summary, the access that would be extended) · action
 row.
 
-**Actions.** **Allow** (primary) · **Request changes** (secondary — sends
-the proposal back with a comment, using the §3.5 free-text escape) ·
-**Deny** (destructive tint, and per P3 it confirms with the reason when
-the proposal is not reversible).
+**Actions.** **Approve** (primary) · **Revise** (secondary — sends the
+request back with what to change, using the §3.5 free-text escape; an empty
+reason cancels rather than sends, because a revision without one changes
+nothing) · **Decline** (destructive tint, and per P3 it confirms with the
+reason when the request is not reversible).
 
 **States.** pending · previewing (the diff expanded) · deciding
-(buttons disabled, spinner-free) · allowed / denied / changes-requested
+(buttons disabled, spinner-free) · approved / declined / revised
 (collapses to a one-line receipt with an undo affordance where the
 underlying operation is reversible, and none where it is not) · stale
-(the proposal was decided elsewhere — the card says so and refreshes).
+(the request was answered elsewhere — the card says so and refreshes).
 
-**Platform notes.** iOS adds swipe actions (leading = Allow, trailing =
-Deny) mirroring the notification actions, and the same three actions ship
-as a `UNNotificationCategory` so a proposal can be triaged from the push
+**Platform notes.** iOS adds swipe actions (leading = Approve, trailing =
+Decline) mirroring the notification actions, and the same three actions ship
+as a `UNNotificationCategory` so a request can be answered from the push
 (ux-direction: answered from the push itself). SwiftUI: `.swipeActions`
 + `.confirmationDialog`. PWA: `<li>` with a `<button>` row; the existing
-`data-triage` hooks are kept.
+`data-triage` hooks are kept (the id is the wire, not the word).
 
 ### 3.10 Task card + drag-to-dispatch
 
@@ -852,8 +866,8 @@ own words:
 - **dispatched** — "review task #221 created for `drey-dev`" (`ok`).
 - **queued** — "queued for `drey-dev` — 3/3 open bundles" (`degraded`,
   with the cap named).
-- **proposal** — "queued as proposal #97 — `metistry` is in `mode:
-  review`" (`presence-blocked` tint, with a link to Triage).
+- **request** — "queued as request #97 — `metistry` is Supervised"
+  (`presence-blocked` tint, with a link to Needs You).
 
 **States.** idle · dragging (source at 60% opacity) · valid target ·
 invalid target (with a tooltip naming the boundary: "not a member of
@@ -965,10 +979,10 @@ or an agent's raw text as its own voice.
 what would put something here · one action when there is a sensible one.
 Never an illustration, never an apology.
 
-Real copy, per surface: Feed — "nothing in the last 24h." · Triage —
+Real copy, per surface: Feed — "nothing in the last 24h." · Needs You —
 "queue is clear." · Agents — "no agents registered — register one to give
 an outside tool a scoped door." · Artifacts — "no artifacts yet — an
-agent publishes one with `artifact_publish`." · Projects — "no projects
+agent publishes one with `artifacts_publish`." · Projects — "no projects
 yet — one appears the first time an agent, task or artifact uses a
 project slug." · Dashboard/AWS — "not configured — set `METISTRY_AWS_*`
 to fill this in."
@@ -1006,12 +1020,13 @@ The rendering of P3, and the reason it is a component rather than a habit.
 
 **Anatomy.** Title = the question in the tool's words · body = the
 consequence, naming what changes and what cannot be undone · affirmative
-button carrying the **verb** (`Revoke`, `Rotate`, `Deny`) in the
+button carrying the **verb** (`Revoke`, `Rotate`, `Decline`) in the
 destructive role · `Cancel` as the default focus.
 
 **Cases in the system today.** revoke an agent · rotate an agent token ·
-revoke a device session · flip a project mode · deny a proposal that
-cannot be re-raised · dispatch that would widen a grant.
+revoke a device session · set a project to Supervised (or back to Auto) ·
+decline a request that cannot be re-raised · a delegation that would widen
+an agent's access.
 
 **Platform notes.** SwiftUI `.confirmationDialog` (iOS action-sheet
 presentation, macOS alert) with `role: .destructive`. PWA: `<dialog>`
@@ -1116,7 +1131,7 @@ in circles are callouts; the legend is in each file.
 | `design/mac-project.svg` | macOS — project header, mode toggle, rollup |
 | `design/iphone-feed.svg` | iPhone — feed with tab bar |
 | `design/iphone-chat.svg` | iPhone — chat: iMessage-style bubbles, the collapsed `+` composer, its expanded actions menu, and the new-reply pill |
-| `design/iphone-triage.svg` | iPhone — triage cards and the actionable notification |
+| `design/iphone-triage.svg` | iPhone — request cards in Needs You and the actionable notification |
 | `design/iphone-capture.svg` | iPhone — capture sheet at a medium detent |
 | `design/pwa-narrow.svg` | PWA — narrow (bottom tabs, installed, safe areas) |
 | `design/pwa-wide.svg` | PWA — wide (the same `<nav>` as a sidebar) |
@@ -1176,7 +1191,7 @@ No parallax, no auto-play, no pulsing "thinking" indicator — the working
 state is a word.
 
 **Touch targets.** 44×44pt minimum on touch, per the HIG. Tab bar items,
-triage actions, chip buttons and the capture button all meet it; the
+request actions, chip buttons and the capture button all meet it; the
 preview page is laid out at 390pt so this can be checked by eye on the
 phone it will be read on.
 
@@ -1192,7 +1207,7 @@ the real `activity_feed` kinds (Title Cased at render, §3.2), all six
 presence chips, a chat turn with collapsed tool activity, a prompt card,
 the composer in its collapsed, expanded and **suggesting** states with
 the new-reply pill, a **~180-word reply set in the §4 reply tokens** so
-the density can be judged rather than described, a triage card, a doctor
+the density can be judged rather than described, a request card, a doctor
 table, the dispatch refusals, the empty states and the error envelopes.
 
 It is self-contained: `tokens.css` is inlined, there are no external

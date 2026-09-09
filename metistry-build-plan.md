@@ -73,24 +73,77 @@ flowchart LR
 
 ### Terminology
 
+**One noun per thing, one verb set per object, and builder words never reach
+the UI.** Everything the user sees is named from the eight nouns below; every
+object takes the same five verbs plus whatever is genuinely its own; and the
+words in the builder glossary — the ones that describe how the system is
+assembled rather than what the user has — stay in the code and the docs.
+Ratified 2026-09-09; `docs/product/glossary.md` is the one page a new user
+reads, and `design-system.md` P10 governs the casing of every label below.
+
+**The eight nouns.**
+
+| Noun | Is | One of them is | Notes |
+|---|---|---|---|
+| **Knowledge** | The durable prose in git — what the assistant and the user both write to | a **page** | Areas are **folders**. Never "the vault" or "notes" in the UI. |
+| **Capture** | Something dropped in unsorted, and the verb for dropping it | an **inbox item** | Under five seconds or it won't happen (§0 The flow). |
+| **Request** | Anything that needs the user | a **request**, of type note · report · review · question · access · improvement | The tab is titled **Needs You**; it lists requests. Answered **approve / revise / decline**. |
+| **Task** | Work on the shared, claimable list (§4.19) | a **task** | Its origin shows as a chip: task · review · issue · PR. |
+| **Artifact** | A versioned, reviewable output of agent work (§4.21) | an **artifact**, with **versions** and **comments** | plan, report, page, mockup — any files. |
+| **Project** | Agents + tasks + artifacts + spend, one view (§4.19) | a **project** | Mode reads **Auto / Supervised**. |
+| **Agent** | A worker with a job and a scope | an **agent**, with role **assistant / helper / external** | A "helper agent" is what the user calls what the code calls a crew. |
+| **Activity** | What has happened — the feed and the runs behind it | an **activity** row / a **run** | The feed is Activity; a row's `kind` is an identifier, shown as-is. |
+
+**The verbs.** The same five on every object — `list`, `get`, `search`,
+`create`, `update` — plus the ones that are genuinely the object's own:
+
+| Object | Its own verbs |
+|---|---|
+| knowledge | `write` |
+| tasks | `claim`, `renew`, `release`, `close` |
+| artifacts | `publish`, `comment`, `resolve`, `review` |
+| agents | `delegate` |
+| requests | **approve / revise / decline** (the user's three answers) |
+
+**Old → new.** Renamed 2026-09-09; the tool spellings keep working for one
+release (`packages/mcp-brain/src/aliases.ts`), the stored values do not change
+at all.
+
+| Old | New | What kind of change |
+|---|---|---|
+| `report` (tool) | `requests_create` | tool name; the row is still `proposals.kind = 'report'` |
+| `tasks_list_ready`, `tasks_mine` | `tasks_list {filter: ready\|mine\|all}` | two tools into one axis |
+| `tasks_heartbeat` | `tasks_renew` | tool name |
+| `artifact_*` | `artifacts_*` (`artifact_comment_resolve` → `artifacts_resolve`, `artifact_dispatch_review` → `artifacts_review`) | tool names |
+| `crew_dispatch` | `agents_delegate` | tool name |
+| proposal (in the UI) | **request** | word only; the table stays `proposals` |
+| triage (in the UI) | **Needs You** | word only |
+| allow / accept-with-changes / deny | **approve / revise / decline** | labels; `decision` values unchanged |
+| autonomous / review (mode, in the UI) | **Auto / Supervised** | labels; `projects.mode` unchanged |
+| crew (in the UI) | **helper agent** | word only; `type: crew` stays the manifest type |
+| index / areas (tier, in the UI) | **titles / folders** | labels; grant values unchanged |
+| note (a knowledge file, in the UI) | **page** | word only |
+
+**Builder glossary — docs and code only, never the UI.** These describe the
+machine, and a user who never learns them loses nothing:
+
 | Term | Is | Triggered by | Writes |
 |---|---|---|---|
 | **Bridge** | Capability an agent calls | An agent | Returns to caller |
 | **Collector** | Scheduled data pull; no *billable* model (free on-device classification permitted case-by-case — ruled 2026-09-01 for inbox-drain) | The clock | Postgres |
-| **Agent** | A worker with a job and a scope | A routine, Metis, or you | `brain-report` |
 | **Skill** | Reusable instructions, lazily loaded | An agent invoking it | Nothing |
 | **Routine** | A schedule, nothing more | Cron | Nothing directly |
+| **Crew** | The manifest type behind a *helper agent* (`type: crew`) | The assistant, via `agents_delegate` | Its own requests / tasks |
 | **Named query** | The only read path into state | Anything | Nothing |
-| **Knowledge** | Durable prose in git | You or the assistant | Git |
 | **State** | Operational, regenerable | Collectors | Postgres |
 | **Target** | A place work can execute (§4.18) | The router / dispatch rules | Per its manifest |
-| **Work item** | One task on the shared list, claimable with a lease (§4.19) | Anything, via the hub | `work` table |
-| **Project** | A multi-agent effort: agents + tasks + proposals + spend, one view (§4.19) | The user | View over existing tables |
-| **Artifact** | A versioned, reviewable output of agent work — plan, report, page, mockup (§4.21) | Any agent, via the artifact module | Directory in the instance repo; Postgres index |
 | **Module** | A state-holding component usable alone or composed (§4.20) | — | npm package + named data contract |
-| **Proposal** | A suggested knowledge/action addition awaiting triage | Any agent or capture | One `proposals` table (D7); never the vault directly |
-| **Grant** | A user-issued, server-side permission (read tier, area scope) (§4.11) | The user, via the management API | Attached to a credential |
-| **Profile** | What the assistant knows about its user (§4.15) | Init interview + accepted proposals | `Knowledge/Me/` |
+| **Reconciler** | Re-embeds changed chunks, parses links, updates freshness | The filesystem | Postgres + the vault working tree |
+| **Fold** | Turning an approved request into knowledge | The assistant | Git |
+| **Principal** | Who a request authenticates as | A credential | Nothing |
+| **Grant** | A user-issued, server-side permission (access tier, folder scope) (§4.11) | The user, via the management API | Attached to a credential |
+| **Run** | One audited unit of work: a tool call, a turn, a collector pass | Everything | `runs` |
+| **Profile** | What the assistant knows about its user (§4.15) | Init interview + approved requests | `Knowledge/Me/` |
 | **Product / Instance** | The public code vs. one private install (§4.16) | — | Releases down; data nowhere |
 
 Agents are grouped by area (`agents/<area>/<name>.md`) with hierarchy in
@@ -105,7 +158,7 @@ tags (`@<agent>`) address these **named agents from the instance's registry**
 
 1. **Capture** — web app, share sheet, Shortcuts, Obsidian mobile. Lands
    in `inbox/`. Must take under five seconds or it won't happen.
-2. **Ingest** — `inbox-drain` classifies with local models, emits *proposals*,
+2. **Ingest** — `inbox-drain` classifies with local models, emits *requests*,
    never auto-creates.
 3. **Index** — reconciler re-embeds changed chunks, parses links, updates
    freshness. Batched, hash-compared, never notifies Metis.

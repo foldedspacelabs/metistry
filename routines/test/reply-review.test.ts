@@ -158,7 +158,7 @@ describe("weekly review: reply quality line", () => {
   it("names what was rated and what is waiting on the user", async () => {
     const db = weeklyDb(9, 2, 1);
     await weeklyReview(db, { now });
-    expect(review(db)).toContain("• reply quality: 9 rated, 2 👎 — 1 improvement proposal awaiting you");
+    expect(review(db)).toContain("• reply quality: 9 rated, 2 👎 — 1 improvement request awaiting you");
   });
 
   it("says so honestly when nothing was rated", async () => {

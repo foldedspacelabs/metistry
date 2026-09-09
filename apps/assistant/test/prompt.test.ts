@@ -19,7 +19,7 @@ describe("identity + prompt", () => {
     expect(out.startsWith(`You are ${id.name},`)).toBe(true);
     expect(out).not.toContain("{{");
     // the tools section names every brain tool family and the rules the prompt is FOR: one writer, settled-vs-proposed, CAS before overwrite, reads are logged
-    for (const t of ["capture", "report", "tasks_list_ready", "tasks_claim", "tasks_heartbeat", "knowledge_search", "knowledge_read", "knowledge_write", "nudge:"]) expect(out).toContain(t);
+    for (const t of ["capture", "requests_create", "tasks_list", "tasks_claim", "tasks_renew", "knowledge_search", "knowledge_read", "knowledge_write", "nudge:"]) expect(out).toContain(t);
     expect(out).toMatch(/You are the one writer/);
     expect(out).toMatch(/settled/);
     expect(out).toMatch(/expected_sha256/);

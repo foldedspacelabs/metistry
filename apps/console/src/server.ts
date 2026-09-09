@@ -56,7 +56,7 @@ export interface ConsoleConfig {
   searchVaultKeyword?: KnowledgeVaultSearcher;
   /** The vault client the artifacts module (§4.21) stores content through; absent = artifacts degrade to not_available. */
   vault?: VaultClient;
-  /** Loaded crew manifests (crews.ts); absent = crew_dispatch answers not_available. */
+  /** Loaded crew manifests (crews.ts); absent = agents_delegate answers not_available. */
   crews?: CrewRegistry;
 }
 
@@ -351,7 +351,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       }
       if (key === "POST /api/push/test") {
         const result = await sendToSession(db, cfg.push, auth.sessionId, {
-          title: "metistry",
+          title: "Metistry",
           body: "push works — this device is reachable",
           url: "/",
         });

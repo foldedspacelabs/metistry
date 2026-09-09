@@ -478,10 +478,10 @@ your git, on your machine.
   by core's `agent` schema, body = its operating prompt — naming a model,
   tool GROUPS, a read scope, projects, a turn cap and a per-run budget.
   Safety, enforced at the tool, not by prompting: (1) the schema has no
-  group that contains `knowledge_write` or `crew_dispatch`, so no manifest
+  group that contains `knowledge_write` or `agents_delegate`, so no manifest
   can grant a sub-agent the writer's or the dispatcher's tools (sub-agents
   never write knowledge — one writer holds); (2) **briefs are policy-checked
-  before anything leaves the assistant** — `crew_dispatch` reuses the
+  before anything leaves the assistant** — `agents_delegate` reuses the
   existing dispatch enforcement against the crew's `scope` ∩ the local
   target's `allow` list, refuses with the violations named, and writes no
   work row on a refusal; (3) **crews get scoped, per-run credentials** —
@@ -818,3 +818,22 @@ your git, on your machine.
   the >5k line docs/research/2026-08-tool-discovery.md set for switching
   to lazy discovery; flagged, not acted on, in the PR (measured by a new
   test rather than assumed).
+
+- 2026-09-09 — **One vocabulary, end to end.** Eight nouns (knowledge/page ·
+  capture · request · task · artifact · project · agent · activity) and one
+  verb set per object, now identical on the screen, in the notification, in
+  the brief and in the tool an agent calls: Needs You lists **requests** of
+  six types answered **Approve / Revise / Decline**, a project is **Auto** or
+  **Supervised**, an agent is **assistant / helper / external** with access
+  **none / titles / folders**, and the brain's tools read `requests_create`,
+  `tasks_list {filter}`, `tasks_renew`, `artifacts_*`, `agents_delegate`.
+  `docs/product/glossary.md` is the one page a new user reads. Two things
+  make it cheap rather than disruptive: no stored value changed (the same
+  rows, decisions and modes, read in one voice), and the eleven old tool
+  names keep working for one release, resolved at call time so the discovered
+  surface did not double: 22 tools, 17,611 chars ≈ **4.4k definition tokens**,
+  measured by test. Folding `tasks_list_ready` and `tasks_mine` into one
+  `filter` axis paid for `knowledge_list`/`knowledge_grep`, and the shorter
+  names and descriptions took the definition budget back under the >5k-token
+  line those two tools had crossed — the axis that actually gates lazy
+  discovery.

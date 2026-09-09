@@ -56,7 +56,7 @@ doesn't sit on a backlog of 👎 until the weekend:
 
 **No model runs in the routine** (invariant 4 — routines never call one). The
 "suggested edit" is a deterministic template, and it says so in its own text.
-If you want better wording, ask the assistant for it from triage — that is a
+If you want better wording, ask the assistant for it from Needs You — that is a
 separate, visible step.
 
 The routine is silent when there is no new 👎 since its last proposal. It

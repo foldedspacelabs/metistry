@@ -24,6 +24,7 @@ import { loadPlistTemplates, type PlistTemplate } from "./launchd.js";
 import { instanceLockPath, LOCK_FILENAME, readLock, serializeLock, type LockFile, type LockSource } from "./lock.js";
 import { listMigrationFiles, MIGRATION_LOCK_KEY, openMigrationSession, runMigrations, type MigrateResult, type MigrationSession } from "./migrate.js";
 import { currentVersion, installRelease, rollbackRelease, releaseTarget, type InstallReleaseResult } from "./release.js";
+import { installRuntimeDeps, runtimeDepsEnabled, RUNTIME_DIRNAME, type InstallRuntimeDepsResult } from "./runtime-deps.js";
 import { StepFailed, StepRunner } from "./steps.js";
 import { closingDoctor, composeUp, COMPOSE_TIMEOUT_MS, runDirFor } from "./up.js";
 
@@ -66,6 +67,8 @@ export interface UpdateResult {
   migrations?: MigrateResult;
   /** release mode only: the release now behind `current` */
   release?: InstallReleaseResult;
+  /** release mode only: what happened to `<product>/runtime/` (Node, Postgres + pgvector, git) */
+  runtimeDeps?: InstallRuntimeDepsResult;
   /** the directory the rest of the update ran against (`<product-dir>/current` in release mode) */
   runDir: string;
 }
@@ -223,6 +226,7 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
   let lock: LockFile | undefined;
   let failure: StepFailed | undefined;
   let release: InstallReleaseResult | undefined;
+  let runtimeDeps: InstallRuntimeDepsResult | undefined;
   // release mode swings this to `<product-dir>/current` once the switch is done
   let runDir = runDirFor(productDir, source);
   let releaseVersion = version;
@@ -250,12 +254,20 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
       else {
         r.action(`resolve release ${want} of ${env.METISTRY_RELEASE_REPO ?? "foldedspacelabs/metistry"} and download metistry-runtime-${want}-${opts.target ?? releaseTarget(platform)}.tar.gz`);
         r.action(`verify its sha256 against checksums.txt, unpack to ${productDir}/releases/${want}/ and point current at it`);
+        r.action(`download metistry-runtime-deps-${want}-${opts.target ?? releaseTarget(platform)}.tar.gz the same way and unpack it to ${productDir}/${RUNTIME_DIRNAME}/ (Node, Postgres + pgvector, git)`);
       }
     } else {
       release = opts.rollback ? await rollbackRelease(r, productDir) : await installRelease(r, { productDir, fetchFn, env, version: opts.releaseVersion, ...(opts.target ? { target: opts.target } : {}) });
       releaseVersion = release.version;
       runDir = runDirFor(productDir, source);
       before = await hashHostJobs(runDir, await loadPlistTemplates(runDir, deployment.shape));
+      // the bundled runtime moves with the release — a new Node, Postgres or
+      // git arrives inside its deps pack (docs/ops/bundled-runtime.md). A
+      // rollback keeps the runtime it has: it is a superset, not a downgrade.
+      if (!opts.rollback && runtimeDepsEnabled(env)) {
+        runtimeDeps = await installRuntimeDeps(r, { productDir, fetchFn, env, version: releaseVersion, ...(opts.target ? { target: opts.target } : {}) });
+        if (!runtimeDeps.installed) r.note(`${RUNTIME_DIRNAME}/: unchanged — ${runtimeDeps.reason}`);
+      }
     }
 
     const templates = await loadPlistTemplates(runDir, deployment.shape);
@@ -325,5 +337,5 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
 
   const doctorCode = await closingDoctor(r, runDir, opts.doctorDeps, opts.doctorFn ?? doctor);
   const code = failure ? failure.code || 1 : doctorCode;
-  return { code, source, runDir, commands: r.commands, ...(lock ? { lock } : {}), restarted, ...(migrations ? { migrations } : {}), ...(release ? { release } : {}) };
+  return { code, source, runDir, commands: r.commands, ...(lock ? { lock } : {}), restarted, ...(migrations ? { migrations } : {}), ...(release ? { release } : {}), ...(runtimeDeps ? { runtimeDeps } : {}) };
 }

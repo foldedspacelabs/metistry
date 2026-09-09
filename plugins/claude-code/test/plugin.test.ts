@@ -176,12 +176,15 @@ describe("session-end hook", () => {
     expect(seen).toHaveLength(1);
     expect(seen[0]!.headers.authorization).toBe(`Bearer ${TOKEN}`);
     const body = JSON.parse(seen[0]!.body) as { note: string; filename: string };
-    expect(body.filename).toMatch(/^claude-code-session-summary-/);
+    expect(body.filename).toMatch(/^claude-code-session-\d{8}T\d{6}Z-sess-9\.md$/);
     const fm = frontmatter(body.note);
-    expect(fm.kind).toBe("session-summary");
+    // The shape `metistry import-sessions` also sends (docs/ops/cli.md).
+    expect(fm.kind).toBe("session");
     expect(fm.session_id).toBe("sess-9");
     expect(fm.source).toBe("claude-code");
-    expect(body.note).toContain("Turns: 1 · ended: other");
+    expect(fm.idempotency_key).toMatch(/^claude-code:sess-9:[0-9a-f]{16}$/);
+    expect(body.note).toContain("- Turns: 1 user, 2 assistant");
+    expect(body.note).toContain("- Bash × 1");
     expect(body.note).toContain("fix the flaky test");
     expect(body.note).toContain("Done: the test awaited nothing.");
     expect(body.note).not.toContain("meta noise");

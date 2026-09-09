@@ -1,77 +1,67 @@
 #!/usr/bin/env node
 // SessionEnd hook (hooks/hooks.json). Default OFF: does nothing unless
-// METISTRY_CAPTURE_ON_STOP=1. Posts a short session summary to /capture.
+// METISTRY_CAPTURE_ON_STOP=1. Posts a deterministic session summary to
+// /capture with frontmatter `kind: session` — the SAME shape
+// `metistry import-sessions` sends, including `idempotency_key`, so the two
+// doors dedupe against each other server-side (docs/ops/cli.md).
+//
+// No model is called: the summary is measured from the transcript, never
+// interpreted. Only prompts and assistant text the owner already saw are
+// carried, clipped; thinking blocks and tool output never are.
 //
 // Failure is silent by contract: this hook exits 0 on every path and writes
 // at most one redacted line to stderr — a capture door must never fail the
 // session it is capturing from. Also tolerates a Stop event (uses
 // last_assistant_message) in case a user rebinds it.
 import { readFileSync } from "node:fs";
-import { basename } from "node:path";
-import { capture, config, redact, repoName } from "./lib.mjs";
+import { captureSession, config, redact, repoNameFromPath, summarizeTranscript } from "./lib.mjs";
 
-const MAX_BODY = 2000;
-const clip = (s, n) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
-
-function textOf(content) {
-  if (typeof content === "string") return content;
-  if (Array.isArray(content)) {
-    return content
-      .filter((c) => c && c.type === "text" && typeof c.text === "string")
-      .map((c) => c.text)
-      .join("\n");
-  }
-  return "";
-}
-
-/** Tolerant JSONL read: first user prompt, last assistant text, turn count. */
-function summarizeTranscript(path) {
-  let first = "";
-  let last = "";
-  let turns = 0;
-  let raw;
+/** The transcript, or null when there is nothing readable to summarise. */
+function readTranscript(path) {
   try {
-    raw = readFileSync(path, "utf8");
+    return readFileSync(path, "utf8");
   } catch {
     return null;
   }
-  for (const line of raw.split("\n")) {
-    if (!line.trim()) continue;
-    let rec;
-    try {
-      rec = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    if (rec?.isMeta) continue;
-    const text = textOf(rec?.message?.content).trim();
-    if (!text) continue;
-    if (rec.type === "user") {
-      turns++;
-      if (!first) first = text;
-    } else if (rec.type === "assistant") {
-      last = text;
-    }
-  }
-  if (!first && !last) return null;
-  return { first, last, turns };
 }
 
-function buildSummary(input) {
+export function buildSummary(input, read = readTranscript) {
   const cwd = input.cwd ?? process.cwd();
-  const repo = repoName(cwd) ?? basename(cwd);
-  const parts = [];
-  if (input.hook_event_name === "Stop" && input.last_assistant_message) {
-    parts.push(clip(String(input.last_assistant_message), MAX_BODY));
-  } else {
-    const t = input.transcript_path ? summarizeTranscript(input.transcript_path) : null;
-    if (!t) return null; // nothing to say — no empty proposals in the inbox
-    parts.push(`Turns: ${t.turns}${input.reason ? ` · ended: ${input.reason}` : ""}`, "");
-    if (t.first) parts.push("## First prompt", "", clip(t.first, 600), "");
-    if (t.last) parts.push("## Last response", "", clip(t.last, MAX_BODY));
+  const raw = input.transcript_path ? read(input.transcript_path) : null;
+  const summary = raw === null ? null : summarizeTranscript(raw, { sessionId: input.session_id ?? null, project: cwd });
+  if (summary) {
+    // The hook knows the session id and cwd first-hand; prefer them.
+    if (input.session_id) summary.sessionId = input.session_id;
+    if (!summary.project) summary.project = cwd;
+    summary.repo = repoNameFromPath(summary.project);
+    return summary;
   }
-  const day = new Date().toISOString().slice(0, 10);
-  return { cwd, title: `Claude Code session — ${repo} — ${day}`, body: parts.join("\n") };
+  // A rebound Stop event, or a transcript we could not read: the event's own
+  // last message is all there is. Still a session-kind summary, not nothing.
+  const text = String(input.last_assistant_message ?? "").trim();
+  if (!text) return null; // nothing to say — no empty proposals in the inbox
+  const now = new Date().toISOString();
+  return {
+    sessionId: input.session_id ?? null,
+    project: cwd,
+    repo: repoNameFromPath(cwd),
+    branch: null,
+    started: now,
+    ended: now,
+    durationMs: null,
+    turns: 0,
+    assistantMessages: 1,
+    firstPrompt: "",
+    lastAssistant: text.slice(0, 500),
+    files: [],
+    filesTruncated: false,
+    tools: [],
+    models: [],
+    costUsd: null,
+    inputTokens: 0,
+    outputTokens: 0,
+    version: null,
+  };
 }
 
 async function main() {
@@ -84,14 +74,7 @@ async function main() {
   }
   const summary = buildSummary(input);
   if (!summary) return;
-  const r = await capture({
-    kind: "session-summary",
-    title: summary.title,
-    body: summary.body,
-    sessionId: input.session_id,
-    cwd: summary.cwd,
-    timeoutMs: 8_000,
-  });
+  const r = await captureSession({ summary, timeoutMs: 8_000 });
   console.log(`metistry: session captured → inbox #${r.id}`);
 }
 

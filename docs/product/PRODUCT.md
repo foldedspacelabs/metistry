@@ -842,3 +842,17 @@ your git, on your machine.
   inside the bundle; Ollama and Tailscale are optional; no Docker,
   Homebrew, or build tools ever. Install = download, open, sign in,
   name the assistant, approve two permissions.
+- 2026-09-09 — **The runtime ships with the product: a clean Mac needs no
+  Homebrew, no Docker, no Xcode.** `ops/release/build-runtime-deps.sh`
+  builds `runtime/` — Node 22.23.2, a relocatable Postgres 17.11 +
+  pgvector 0.8.6 compiled from source, and a minimal git 2.54.0 — as its
+  own release asset (177 MB; 46 s for Postgres and 9 s for git on an M-series
+  Mac, and both are cached in CI on the one file that pins every version and
+  source sha256). Relocatability is proved, not asserted: the build copies
+  the tree somewhere else and runs `initdb`, `pg_ctl start`, `CREATE
+  EXTENSION vector`, `pg_dump` and a `git commit` from the copy before it
+  will pack it, and the test suite repeats that through the same code
+  `metistry up` uses. `metistry up` on the launchd shape and `metistry
+  update --channel release` fetch and sha256-verify it through the same path
+  as the product pack, so the last two things a first-run user had to
+  install themselves are now downloads.

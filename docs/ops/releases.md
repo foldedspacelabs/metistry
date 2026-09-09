@@ -57,6 +57,7 @@ The workflow refuses a tag whose number does not match `package.json` and
 | --- | --- |
 | `metistry-runtime-<version>-darwin-arm64.tar.gz` | the built product, for an Apple-silicon Mac |
 | `metistry-runtime-<version>-linux-x64.tar.gz` | the same, for a Linux host |
+| `metistry-runtime-deps-<version>-darwin-arm64.tar.gz` | the **bundled runtime**: Node, Postgres 17 + pgvector, git — `docs/ops/bundled-runtime.md` |
 | `checksums.txt` | `sha256sum` of every asset; `metistry update` verifies against it |
 | npm `@foldedspacelabs/metistry-*@<version>` | published with provenance |
 | `ghcr.io/foldedspacelabs/metistry-{console,assistant,reconciler}:<version>` | the app images compose pulls |
@@ -83,6 +84,17 @@ unpacks to a single `metistry-<version>/` directory holding:
 Left out on purpose: `src/`, tests, tsconfigs, Dockerfiles, `.git`. A
 release is compiled output. `metistry update` never builds in release
 mode, and `docker compose` only ever pulls.
+
+The **bundled runtime** (`ops/release/build-runtime-deps.sh`, the
+`runtime-deps (darwin-arm64)` job) is the other half of "no build tools on
+the user's machine": Node, a relocatable Postgres 17 + pgvector built from
+source, and a minimal git, every version and source digest pinned in
+`ops/release/runtime-versions.env`. The job verifies the tree from a *moved*
+copy before packing it, signs every Mach-O when `APPLE_SIGN_IDENTITY` is
+set, and caches the Postgres/git compiles on that versions file so a later
+run is a few minutes rather than fifteen. Its tarball holds a single
+top-level `runtime/`, which is why `metistry update` unpacks it with
+`tar -C <product-dir>`. Full account: `docs/ops/bundled-runtime.md`.
 
 The macOS app DMG is **not** built here — there is no app yet. The
 `macos-app` and `appcast` jobs exist as disabled, documented stubs so the
@@ -129,7 +141,11 @@ run with `--channel release`.
 3. unpacks to `releases/<version>/` and points `current` at it
    (a relative symlink swapped through `rename`, so there is no window
    where `current` is missing); older releases beyond the previous one are
-   pruned,
+   pruned, and the release's **bundled runtime** is verified and unpacked
+   the same way into `<product-dir>/runtime/` — beside `releases/`, not
+   inside one, so a version flip never orphans the Postgres the plists
+   point at (`METISTRY_RUNTIME_DEPS=0` skips it; `--rollback` leaves it
+   alone),
 4. runs `db/migrations` from `current` under the advisory lock,
 5. `docker compose pull && up -d --no-build` in `current`, with
    `METISTRY_CONSOLE_IMAGE` / `METISTRY_ASSISTANT_IMAGE` set to the

@@ -24,7 +24,7 @@
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { CHECKSUMS_ASSET, downloadTo, downloadViaGh, fetchText, parseChecksums, releaseRepo, releaseTarget, resolveRelease } from "./release.js";
+import { CHECKSUMS_ASSET, downloadAsset, parseChecksums, releaseRepo, releaseTarget, resolveRelease } from "./release.js";
 import { StepFailed, type StepRunner } from "./steps.js";
 
 export const RUNTIME_DIRNAME = "runtime";
@@ -159,19 +159,12 @@ export async function installRuntimeDeps(r: StepRunner, opts: InstallRuntimeDeps
   if (!sumsUrl && rel.via !== "gh") throw new StepFailed(`release ${rel.tag} has no ${CHECKSUMS_ASSET} — refusing to unpack an unverifiable runtime`);
 
   const staging = join(productDir, ".runtime-download");
-  const tarball = join(staging, asset);
   r.action(`download ${asset} from ${rel.tag} and verify its sha256 against ${CHECKSUMS_ASSET}`);
-  let sumsText: string;
-  if (rel.via === "gh") {
-    await downloadViaGh(r, repo, rel.tag, CHECKSUMS_ASSET, staging);
-    sumsText = await readFile(join(staging, CHECKSUMS_ASSET), "utf8");
-  } else {
-    sumsText = await fetchText(fetchFn, sumsUrl!, CHECKSUMS_ASSET);
-  }
-  const want = parseChecksums(sumsText)[asset];
+  await downloadAsset(r, { fetchFn, repo, rel, name: CHECKSUMS_ASSET, dir: staging, env });
+  const want = parseChecksums(await readFile(join(staging, CHECKSUMS_ASSET), "utf8"))[asset];
   if (!want) throw new StepFailed(`${CHECKSUMS_ASSET} of ${rel.tag} has no line for ${asset} — refusing to unpack an unverifiable runtime`);
 
-  const got = rel.via === "gh" ? await downloadViaGh(r, repo, rel.tag, asset, staging) : await downloadTo(fetchFn, url, tarball);
+  const got = await downloadAsset(r, { fetchFn, repo, rel, name: asset, dir: staging, env });
   if (got.sha256 !== want) {
     await rm(staging, { recursive: true, force: true });
     throw new StepFailed(`${asset} failed its checksum (expected ${want}, got ${got.sha256}) — the download was discarded and ${RUNTIME_DIRNAME}/ is unchanged`);
@@ -182,7 +175,7 @@ export async function installRuntimeDeps(r: StepRunner, opts: InstallRuntimeDeps
   // `runtime/` lands as <product>/runtime/
   await rm(dir, { recursive: true, force: true });
   await mkdir(productDir, { recursive: true });
-  await r.run("tar", ["-xzf", tarball, "-C", productDir], { timeoutMs: 10 * 60_000 });
+  await r.run("tar", ["-xzf", join(staging, asset), "-C", productDir], { timeoutMs: 10 * 60_000 });
   await rm(staging, { recursive: true, force: true });
   if (!existsSync(runtimeManifestPath(productDir))) throw new StepFailed(`${asset} unpacked without a ${RUNTIME_DIRNAME}/${RUNTIME_MANIFEST_FILE} — it is not a runtime deps pack`);
   await writeFile(join(dir, RUNTIME_RELEASE_FILE), `${rel.version}\n`);

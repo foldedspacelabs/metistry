@@ -1928,6 +1928,20 @@ is a *contingency*, not a present need — but per-target cost accounting
 (§4.18.D) means if metering ever ships, responding is a config tweak, not a
 redesign.
 
+**A′. Cost discipline (added 2026-09-09; `docs/research/2026-09-cost-optimization.md`).**
+Prompt caching is the largest lever Anthropic measures (2.7–5.3× on agent
+loops), and it only works on a byte-stable prefix. So: nothing volatile in
+the system prompt (dates, `now.md`, the brief go in the first user
+message); the tool list changes only with releases; model and effort
+change only at turn boundaries, never mid-turn; **tiers are (model,
+effort) pairs**, crews declare `effort`; fold and crew turns get fresh
+sessions and chat sessions roll at task boundaries; on API billing,
+deferred turns route through the Batch API (50% off, stacks with
+caching). A deterministic prompt lint in CI catches the documented
+anti-patterns ("verify twice", mandatory scratchpads). `runs` records
+cache read/write tokens so the dashboard and weekly review show the hit
+rate — measure first, tune second.
+
 **B. Compute targets (Phase 5).** A **target** is a directory with a manifest
 (invariant 5): how to submit work, how results return, auth ref, cost
 profile, and a **data policy** stating what a brief bound for this target may
@@ -2389,9 +2403,11 @@ Worth settling before Phase 1, since each is cheap now and annoying later.
 1. **Inbox: files.** Lets you add from Obsidian, Metis, or the share sheet with
    no special path. Triage record is a Postgres row referencing the file.
 2. **Downsampling:** full resolution 90 days → hourly to 1 year → daily beyond.
-3. **Session roll:** no fixed cadence. Cost is flat, so this is about coherence.
-   Instrument context size per turn, and put a self-check in `CLAUDE.md` — Metis
-   flags when it's losing track of earlier context. Hard ceiling as a backstop.
+3. **Session roll:** at task boundaries, not on a cadence (sharpened
+   2026-09-09): fold and crew turns always start fresh; the chat session
+   rolls when a task closes or the brief is delivered, with the cache hit
+   rate recorded per session so the rule can be judged. Instrument context
+   size per turn; hard ceiling as a backstop.
 4. **Dispatch target:** GitHub issues as the queue. A `work` row's `external_ref`
    can also hold a live session UUID, so Metis can *resume* a running session to
    check in rather than only reading issue state.

@@ -118,6 +118,37 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
     expect(Number(s.spend_usd)).toBeGreaterThanOrEqual(0.25);
   });
 
+  it("claude_usage_daily computes cache_hit_rate = cache_read / (cache_read + tokens_in + cache_write) per model-day, null with no cache metrics", async () => {
+    const tag = `cud-${Date.now()}`;
+    const day = "2020-01-15"; // outside any real window; days param below is huge so it's still included
+    const labels = (extra: Record<string, unknown>) => JSON.stringify({ model: tag, turns: 1, ...extra });
+    await pool.query(
+      `INSERT INTO metrics (ts, name, value, labels) VALUES
+         ($1::date, 'claude.tokens_in', 100, $2::jsonb),
+         ($1::date, 'claude.tokens_out', 20, $2::jsonb),
+         ($1::date, 'claude.cost_usd', 0.01, $2::jsonb),
+         ($1::date, 'claude.cache_read', 300, $2::jsonb),
+         ($1::date, 'claude.cache_write', 100, $2::jsonb)`,
+      [day, labels({})],
+    );
+    const noCacheTag = `${tag}-nocache`;
+    await pool.query(
+      `INSERT INTO metrics (ts, name, value, labels) VALUES
+         ($1::date, 'claude.tokens_in', 50, $2::jsonb),
+         ($1::date, 'claude.cost_usd', 0.002, $2::jsonb)`,
+      [day, JSON.stringify({ model: noCacheTag, turns: 1 })],
+    );
+    const { rows } = await store.run("claude_usage_daily", { days: 100000 });
+    const row = rows.find((r) => r.model === tag)!;
+    expect(row).toBeDefined();
+    expect(Number(row.cache_read)).toBe(300);
+    expect(Number(row.cache_write)).toBe(100);
+    expect(Number(row.cache_hit_rate)).toBeCloseTo(300 / (300 + 100 + 100)); // 0.6
+    const noCacheRow = rows.find((r) => r.model === noCacheTag)!;
+    expect(noCacheRow).toBeDefined();
+    expect(noCacheRow.cache_hit_rate).toBeNull();
+  });
+
   // docs/product/desktop-app-plan.md "The window" — Activity feed: a fixture
   // row from every unioned source must come back through one filtered call.
   it("activity_feed unions a fixture row from every source (runs, proposals, work.history, outbound_messages)", async () => {

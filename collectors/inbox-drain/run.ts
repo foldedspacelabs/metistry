@@ -18,7 +18,7 @@ export interface InboxRow {
 }
 
 export interface Classification {
-  kind: "todo" | "url" | "image" | "document" | "note";
+  kind: "todo" | "url" | "image" | "document" | "note" | "session";
   reason: string; // which rule fired — auditable, not vibes
   title: string;
 }
@@ -26,10 +26,43 @@ export interface Classification {
 const URL_RE = /^https?:\/\/\S+$/i;
 const TODO_RE = /^(todo|remind me|remember to|don't forget|buy|call|email|schedule)\b/i;
 
+/**
+ * Leading YAML frontmatter, as scalars — enough to read `kind:` and `title:`
+ * without a YAML dependency in a collector. Values may be double-quoted (both
+ * capture doors write JSON string literals, which are valid YAML scalars).
+ * Frontmatter is written by our own doors (`metistry import-sessions`, the
+ * Claude Code plugin), so it is trusted for classification only; the body is
+ * still foreign content and nothing here interprets it.
+ */
+export function frontmatter(note: string): Record<string, string> {
+  const m = /^---\r?\n([\s\S]*?)\r?\n---(\r?\n|$)/.exec(note);
+  if (!m) return {};
+  const out: Record<string, string> = {};
+  for (const line of (m[1] ?? "").split(/\r?\n/)) {
+    const kv = /^([A-Za-z_][A-Za-z0-9_]*):\s*(.*)$/.exec(line);
+    if (!kv?.[1]) continue;
+    let v = (kv[2] ?? "").trim();
+    if (v.length >= 2 && ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'")))) {
+      try {
+        v = v.startsWith('"') ? (JSON.parse(v) as string) : v.slice(1, -1);
+      } catch {
+        v = v.slice(1, -1);
+      }
+    }
+    out[kv[1]] = v;
+  }
+  return out;
+}
+
 export function classify(row: InboxRow): Classification {
   const note = (row.note ?? "").trim();
   const mime = row.mime ?? "";
-  const title = note ? note.slice(0, 80) : row.path.replace(/^\d+-/, "").slice(0, 80);
+  const fm = frontmatter(note);
+  const title = fm.title || (note ? note.slice(0, 80) : row.path.replace(/^\d+-/, "").slice(0, 80));
+
+  // A session summary declares itself (stash review item 2): the frontmatter is
+  // authoritative, so no FM tier is consulted and Needs You can label it.
+  if (fm.kind === "session") return { kind: "session", reason: "frontmatter kind: session", title };
 
   if (note && URL_RE.test(note)) return { kind: "url", reason: "note is a bare url", title };
   if (note && TODO_RE.test(note)) return { kind: "todo", reason: "leading action verb", title };

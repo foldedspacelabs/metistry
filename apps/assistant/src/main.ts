@@ -5,6 +5,7 @@ import { drainCrewOne } from "./crew-drain.js";
 import { makeSdkEngine } from "./engine.js";
 import { brainConfigFromEnv, brainToolNames } from "./brain.js";
 import { loadSystemPrompt } from "./prompt.js";
+import { loadTiers, RULES_FILES_DEFAULT } from "./tiers.js";
 
 // PoC-4 rules: subscription token, never ANTHROPIC_API_KEY in-container.
 if (process.env.ANTHROPIC_API_KEY) {
@@ -23,6 +24,12 @@ const pool = new pg.Pool({
 const model = optionalEnv("METISTRY_MODEL_DEFAULT", "haiku");
 const interval = intEnv("METISTRY_DRAIN_INTERVAL_MS", 1500);
 
+// Tiers are (model, effort) pairs, read from the same rules.yaml the console's
+// router reads (D4 overlay). The drain resolves a tier NAME per turn.
+const { tiers, path: tiersPath } = await loadTiers(optionalEnv("METISTRY_RULES_FILES", RULES_FILES_DEFAULT), model);
+if (tiersPath) console.log(`tiers from ${tiersPath}: ${Object.entries(tiers).map(([k, t]) => `${k}=${t.model}/${t.effort}`).join(" ")}`);
+else console.warn(`no rules.yaml found (METISTRY_RULES_FILES) — one tier only: default=${model}/medium`);
+
 // Tools: the console's mcp-brain, as the first internal agent (§4.11). Both
 // env vars or nothing — a URL without a token cannot authenticate, a token
 // without a URL has nowhere to go (degrades: absent, tool-less as before).
@@ -36,7 +43,7 @@ if (loaded) console.log(`identity: ${loaded.identity.name} (system prompt ${load
 else console.warn("system prompt absent: no identity.yaml / assistant-prompt.md found (METISTRY_IDENTITY_FILES, METISTRY_PROMPT_FILES)");
 
 const sdkEngine = makeSdkEngine({ brain, systemPrompt: loaded?.prompt, ...(process.env.METISTRY_MAX_TURNS ? { maxTurns: intEnv("METISTRY_MAX_TURNS", 12) } : {}) });
-console.log(`assistant draining (model=${model}, every ${interval}ms)`);
+console.log(`assistant draining (default tier=${tiers.default!.model}/${tiers.default!.effort}, every ${interval}ms)`);
 
 // Crews (docs/ops/crews.md): the same loop drains the crew queue after the
 // inbound one. Each run gets a per-run token minted here and burned after;
@@ -56,7 +63,7 @@ setInterval(async () => {
   if (busy) return;
   busy = true;
   try {
-    while (await drainOne(pool, sdkEngine, model)) {} // drain the backlog
+    while (await drainOne(pool, sdkEngine, tiers)) {} // drain the backlog
     while (await drainCrewOne(pool, crewCfg)) {} // then the crew queue
   } catch (err) {
     console.error("drain:", err);

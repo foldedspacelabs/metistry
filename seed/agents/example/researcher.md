@@ -7,6 +7,10 @@
 name: researcher
 type: agent
 model: haiku                  # haiku | sonnet | opus
+# The other half of the tier pair: low | medium | high (default low). An
+# extraction crew — read a lot, report one page — wants haiku + low; the
+# assistant does the thinking. Raise it deliberately and watch the cost.
+effort: low
 description: Reads the granted project and resource notes and reports what it finds
 # Tool GROUPS on the brain (never single tools): knowledge (search + read
 # under `scope`), requests, capture, tasks, artifacts. `brain-read`,

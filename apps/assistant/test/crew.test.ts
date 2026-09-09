@@ -18,6 +18,7 @@ const researcher: CrewSnapshot = {
   name: "researcher",
   area: "example",
   model: "haiku",
+  effort: "low",
   uses: ["brain-read", "brain-report"],
   skills: [],
   scope: ["Knowledge/Projects"],
@@ -59,10 +60,11 @@ describe("allowlist from tool groups", () => {
 describe("crew options", () => {
   const brain = { url: "http://console:8080/mcp", token: "run-token-xyz" };
 
-  it("model, per-run bearer on the ONE server, allowlist = exactly the groups, built-ins off, foreign MCP ignored, turns + budget from the manifest", () => {
+  it("model + effort, per-run bearer on the ONE server, allowlist = exactly the groups, built-ins off, foreign MCP ignored, turns + budget from the manifest", () => {
     const o = buildCrewOptions({ crew: researcher, brief: "b", brain, identity: { name: "Tester" } });
     expect(o).toMatchObject({
       model: "haiku",
+      effort: "low",
       tools: [],
       strictMcpConfig: true,
       mcpServers: { brain: { type: "http", url: "http://console:8080/mcp", headers: { Authorization: "Bearer run-token-xyz" } } },
@@ -92,7 +94,11 @@ describe("crew options", () => {
     const fm = parseYaml(/^---\n([\s\S]*?)\n---/.exec(seedFile)![1]!) as Record<string, unknown>;
     const { type: _t, ...rest } = fm;
     const snap = parseCrewSnapshot({ ...rest, prompt: "p", sha256: "b".repeat(64) });
-    expect(snap).toMatchObject({ name: "researcher", model: "haiku", uses: ["knowledge", "requests"], max_turns: 10, budget_usd_per_run: 0.25, prompt: "p" });
+    expect(snap).toMatchObject({ name: "researcher", model: "haiku", effort: "low", uses: ["knowledge", "requests"], max_turns: 10, budget_usd_per_run: 0.25, prompt: "p" });
+    // effort is optional in the manifest and defaults to low — an older crew file keeps working, cheaply
+    const { effort: _e, ...noEffort } = rest;
+    expect(parseCrewSnapshot({ ...noEffort, prompt: "p", sha256: "b".repeat(64) }).effort).toBe("low");
+    expect(() => parseCrewSnapshot({ ...researcher, effort: "extreme" })).toThrow(/effort/);
     expect(() => parseCrewSnapshot({ ...researcher, uses: ["knowledge_write"] })).toThrow(/never available to a crew/);
     expect(() => parseCrewSnapshot({ ...researcher, prompt: "  " })).toThrow(/no operating prompt/);
     expect(() => parseCrewSnapshot({ ...researcher, model: "gpt" })).toThrow(/model/);
@@ -121,7 +127,8 @@ describe("runCrew (fake SDK)", () => {
     const r = await runCrew(input, sdk as never);
     expect(r).toEqual({ outcome: "ok", session_id: "sess-9", num_turns: 3, tokens_in: 100, tokens_out: 40, cost_usd: 0.0123, tools_used: { mcp__brain__knowledge_read: 1, mcp__brain__requests_create: 1 }, text_chars: 10 });
     expect(seen!.prompt).toBe("do X");
-    expect(seen!.options).toMatchObject({ model: "haiku", maxTurns: 7, maxBudgetUsd: 0.2, allowedTools: crewToolNames(researcher.uses) });
+    expect(seen!.options).toMatchObject({ model: "haiku", effort: "low", maxTurns: 7, maxBudgetUsd: 0.2, allowedTools: crewToolNames(researcher.uses) });
+    expect("resume" in seen!.options).toBe(false); // decision 3: a crew run never resumes a prior session
   });
 
   it("error_max_budget_usd → max_budget; error_max_turns → max_turns; an is_error success → error with the text as the error; no result → throws", async () => {

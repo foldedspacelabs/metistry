@@ -6,8 +6,11 @@
 // Phase 3+ when brain-query exists — for now continuity is the SDK
 // transcript, per §4.17 rule 6's fast-path).
 
-import { finishRun, parseDecisionBlock, startRun } from "@foldedspacelabs/metistry-core";
+import { finishRun, parseDecisionBlock, resolveTier, rollSession, startRun, type TierMap } from "@foldedspacelabs/metistry-core";
 import type { Engine } from "./engine.js";
+
+/** The assistant's own agent id — the `claimed_by` on any task it holds. Never the assistant's NAME (CLAUDE.md: the name lives in identity.yaml alone). */
+export const ASSISTANT_AGENT = "assistant";
 
 export interface Db {
   query(text: string, values?: unknown[]): Promise<{ rows: any[] }>;
@@ -20,7 +23,24 @@ interface Claimed {
   meta: any;
 }
 
-export async function drainOne(db: Db, engine: Engine, defaultModel: string): Promise<boolean> {
+/**
+ * Did this turn close a task the assistant was holding? The evidence is the
+ * work row's own history — deterministic, and never a reading of the reply.
+ * `closed_at` bounds it to this turn; the containment check picks out the
+ * assistant's own `closed` entry.
+ */
+async function closedOwnTask(db: Db, since: Date): Promise<number | null> {
+  const { rows } = await db.query(
+    `SELECT id FROM work
+     WHERE kind = 'task' AND status = 'closed' AND closed_at >= $1
+       AND history @> $2::jsonb
+     ORDER BY closed_at DESC LIMIT 1`,
+    [since, JSON.stringify([{ agent: ASSISTANT_AGENT, status: "closed" }])],
+  );
+  return rows[0] ? Number(rows[0].id) : null;
+}
+
+export async function drainOne(db: Db, engine: Engine, tiers: TierMap): Promise<boolean> {
   const { rows } = await db.query(
     `UPDATE inbound_messages SET status = 'processing'
      WHERE id = (SELECT id FROM inbound_messages WHERE status = 'new'
@@ -31,35 +51,58 @@ export async function drainOne(db: Db, engine: Engine, defaultModel: string): Pr
   if (!msg) return false;
 
   const routeMeta = msg.meta?.route ?? {};
-  const model = routeMeta.kind === "model" ? (routeMeta.model ?? defaultModel) : defaultModel;
   const prompt = routeMeta.kind === "model" ? routeMeta.text : msg.text;
 
-  // resume the thread's session if one exists
-  const sess = await db.query(
-    `SELECT id FROM sessions WHERE thread = $1 AND status = 'active' ORDER BY last_active_at DESC LIMIT 1`,
-    [msg.thread],
-  );
+  // The tier is a NAME on the row: the router's for a chat message, `meta.tier`
+  // for a machine-enqueued turn (the fold carries `routine`). It resolves HERE,
+  // at the point of the call, through the same `tiers:` block the router read —
+  // so there is exactly one place a tier becomes a (model, effort) pair, and an
+  // unknown name lands on `default` rather than on an invented model.
+  const { tier, model, effort } = resolveTier(tiers, routeMeta.kind === "model" ? routeMeta.tier : msg.meta?.tier);
+
+  // Fresh session at a task boundary (cost research decision 3). A fold turn
+  // is its own task and never continues the chat; anything else can ask for a
+  // fresh session with `meta.fresh_session`. Otherwise resume the thread's
+  // active session — a roll (core's `rollSession`) is what ends one, so there
+  // is simply nothing active to find after a boundary.
+  const fresh = msg.meta?.fresh_session === true || msg.meta?.kind === "fold";
+  const sess = fresh
+    ? { rows: [] as any[] }
+    : await db.query(
+        `SELECT id FROM sessions WHERE thread = $1 AND status = 'active' ORDER BY last_active_at DESC LIMIT 1`,
+        [msg.thread],
+      );
   const resume: string | undefined = sess.rows[0]?.id;
 
+  const startedAt = new Date();
   const runId = await startRun(db, {
     component: "assistant",
     kind: "turn",
     model,
-    meta: { message_id: msg.id, thread: msg.thread, routed_by: routeMeta.routed_by ?? "rule", tier: routeMeta.tier ?? "default" },
+    meta: {
+      message_id: msg.id,
+      thread: msg.thread,
+      routed_by: routeMeta.routed_by ?? "rule",
+      tier,
+      effort,
+      ...(fresh ? { fresh_session: true } : {}),
+    },
   });
   try {
     let result;
     try {
-      result = await engine(prompt, model, resume);
+      result = await engine(prompt, { model, effort, resume });
     } catch (err) {
       if (!resume) throw err;
-      result = await engine(prompt, model); // stale session: fresh start
+      result = await engine(prompt, { model, effort }); // stale session: fresh start
     }
-    await db.query(
+    const upsert = await db.query(
       `INSERT INTO sessions (id, thread, turns) VALUES ($1, $2, 1)
-       ON CONFLICT (id) DO UPDATE SET last_active_at = now(), turns = sessions.turns + 1`,
+       ON CONFLICT (id) DO UPDATE SET last_active_at = now(), turns = sessions.turns + 1
+       RETURNING turns`,
       [result.session_id, msg.thread],
     );
+    const sessionTurns = Number(upsert.rows[0]?.turns ?? 1);
     const out = await db.query(
       `INSERT INTO outbound_messages (thread, text, in_reply_to) VALUES ($1, $2, $3) RETURNING id`,
       [msg.thread, result.text, msg.id],
@@ -80,20 +123,30 @@ export async function drainOne(db: Db, engine: Engine, defaultModel: string): Pr
       msg.id,
       result.session_id,
     ]);
-    // the turn's own tool calls, by name (each call is ALSO its own runs row
-    // on the agent — mcp-brain, kind=tool) plus cache read/write tokens from
-    // the SDK's usage (cost-optimisation §"Measure": cache_hit_rate is
-    // computed from these downstream by the claude-usage collector).
-    const meta: Record<string, unknown> = {};
+    // A task the assistant held closing is a task boundary: roll the thread so
+    // the NEXT turn starts fresh rather than carrying a finished task's context
+    // forward (cost research decision 3). Only worth a query when the turn
+    // actually touched the task list.
+    let rolled: string[] = [];
+    if (result.tools_used?.["mcp__brain__tasks_update"]) {
+      const taskId = await closedOwnTask(db, startedAt);
+      if (taskId !== null) rolled = (await rollSession(db, msg.thread, `task_closed:#${taskId}`)).rolled;
+    }
+    // runs.meta: the turn's own tool calls (each call is ALSO its own runs row on
+    // the agent — mcp-brain, kind=tool), cache read/write tokens from the SDK's
+    // usage (claude-usage derives cache_hit_rate downstream), the session's turn
+    // count, and any sessions this turn rolled.
+    const meta: Record<string, unknown> = { session_turns: sessionTurns };
     if (result.tools_used) meta.tools_used = result.tools_used;
     if (result.cache_read !== undefined) meta.cache_read = result.cache_read;
     if (result.cache_write !== undefined) meta.cache_write = result.cache_write;
+    if (rolled.length > 0) meta.rolled_sessions = rolled;
     await finishRun(db, runId, {
       ok: true,
       ...(result.tokens_in !== undefined ? { tokens_in: result.tokens_in } : {}),
       ...(result.tokens_out !== undefined ? { tokens_out: result.tokens_out } : {}),
       ...(result.cost_usd !== undefined ? { cost_usd: result.cost_usd } : {}),
-      ...(Object.keys(meta).length > 0 ? { meta } : {}),
+      meta,
     });
   } catch (err) {
     await db.query(`UPDATE inbound_messages SET status = 'failed' WHERE id = $1`, [msg.id]);

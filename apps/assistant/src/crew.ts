@@ -1,7 +1,9 @@
 // The crew runner (plan §4.11 "the brief is the context transfer", §4.18.B
 // local target, Phase 5 crews). One crew run = one Agent SDK query with:
 //
-// - the crew's model, the crew's operating prompt as the system prompt
+// - the crew's model AND effort (the manifest's tier pair; effort defaults to
+//   low — a crew absorbs context and reports, the assistant does the thinking),
+//   the crew's operating prompt as the system prompt
 //   (identity-templated: `{{name}}` is the primary assistant's name, never
 //   a hardcoded one), the brief as the user turn;
 // - exactly ONE MCP server — the console's mcp-brain — carrying a PER-RUN
@@ -90,6 +92,11 @@ export function buildCrewOptions(input: CrewRunInput): Options {
   const server: McpHttpServerConfig = { type: "http", url: input.brain.url, headers: { Authorization: `Bearer ${input.brain.token}` } };
   return {
     model: input.crew.model,
+    // The other half of the crew's tier (core's `tiers.ts`): declared in the
+    // manifest, default low. A crew run is one query, so effort is fixed for
+    // the whole run by construction — there is no mid-run boundary to change
+    // it at, and nothing here can.
+    effort: input.crew.effort,
     systemPrompt: crewSystemPrompt(input.crew, input.identity),
     tools: [],
     strictMcpConfig: true,

@@ -2,6 +2,7 @@
 // on an ephemeral port. Skipped when no db is configured (CI provides one;
 // locally `.env` does).
 import { readFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
@@ -113,6 +114,61 @@ sql: SELECT id, title FROM work WHERE status <> 'closed' ORDER BY updated_at DES
     const { message_id } = await r.json();
     const { rows } = await pool.query(`SELECT text, status FROM inbound_messages WHERE id = $1`, [message_id]);
     expect(rows[0]).toEqual({ text: "hello metis", status: "new" });
+  });
+
+  // Tiers are (model, effort) pairs; `tier` on the body is the composer's
+  // picker. The row carries the resolved pair, and /api/messages surfaces the
+  // NAME so the thread can chip it.
+  it("POST /message takes a `tier`, records the resolved (model, effort) on the row, and /api/messages returns the tier name", async () => {
+    const post = (body: unknown) =>
+      fetch(`${base}/message`, { method: "POST", headers: { cookie: sessionCookie, "content-type": "application/json" }, body: JSON.stringify(body) });
+
+    const deep = await (await post({ text: "think about the roadmap", tier: "deep" })).json();
+    const chosen = await pool.query(`SELECT meta->'route' AS route FROM inbound_messages WHERE id = $1`, [deep.message_id]);
+    expect(chosen.rows[0].route).toMatchObject({ kind: "model", tier: "deep", model: "opus", effort: "high", routed_by: "override" });
+
+    // an unknown tier is ignored, never invented
+    const bogus = await (await post({ text: "and this", tier: "gpt99" })).json();
+    const fell = await pool.query(`SELECT meta->'route' AS route FROM inbound_messages WHERE id = $1`, [bogus.message_id]);
+    expect(fell.rows[0].route).toMatchObject({ tier: "default", model: "haiku", effort: "medium", routed_by: "rule" });
+
+    const list = await (await fetch(`${base}/api/messages?limit=50`, { headers: { cookie: sessionCookie } })).json();
+    expect(list.messages.find((m: any) => m.direction === "in" && Number(m.id) === Number(deep.message_id)).tier).toBe("deep");
+  });
+
+  // Cost research decision 3: answering a blocking decision is a task
+  // boundary, so the thread's session rolls and the answering turn starts fresh.
+  it("answering a `decision` rolls the thread's session and logs a session_roll run", async () => {
+    const thread = `roll-${mintToken(6)}`;
+    const session = randomUUID();
+    await pool.query(`INSERT INTO sessions (id, thread, turns) VALUES ($1, $2, 9)`, [session, thread]);
+    await pool.query(
+      `INSERT INTO proposals (kind, source_agent, trust, payload) VALUES ('decision', 'assistant', 'internal', $1)`,
+      [JSON.stringify({ title: "Which repo?", options: ["a", "b"], thread })],
+    );
+
+    const r = await fetch(`${base}/message`, {
+      method: "POST",
+      headers: { cookie: sessionCookie, "content-type": "application/json" },
+      body: JSON.stringify({ thread_id: thread, text: "b, please" }),
+    });
+    expect(r.status).toBe(202);
+
+    expect((await pool.query(`SELECT status FROM sessions WHERE id = $1`, [session])).rows[0].status).toBe("rolled");
+    const roll = await pool.query(
+      `SELECT session_id, meta->>'reason' AS reason, (meta->>'turns')::int AS turns FROM runs WHERE kind = 'session_roll' AND meta->>'thread' = $1`,
+      [thread],
+    );
+    expect(roll.rows).toHaveLength(1);
+    expect(roll.rows[0]).toMatchObject({ session_id: session, reason: "decision_answered", turns: 9 });
+
+    // idempotent: nothing active left, so a second answer rolls nothing more
+    await fetch(`${base}/message`, {
+      method: "POST",
+      headers: { cookie: sessionCookie, "content-type": "application/json" },
+      body: JSON.stringify({ thread_id: thread, text: "still b" }),
+    });
+    expect((await pool.query(`SELECT count(*)::int AS n FROM runs WHERE kind = 'session_roll' AND meta->>'thread' = $1`, [thread])).rows[0].n).toBe(1);
   });
 
   it("capture stores file + inbox row + sha", async () => {

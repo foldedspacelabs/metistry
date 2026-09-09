@@ -11,6 +11,12 @@
 // keeps a bearer, and two runs never share one. The same SQL the console's
 // rotateAgent uses; the plaintext never touches a log or a row.
 //
+// Sessions: a crew run NEVER resumes one (cost research decision 3 — a fresh
+// session per crew run). Nothing here reads or writes the `sessions` table and
+// `buildCrewOptions` has no `resume` to set, so this is a property of the code
+// rather than a rule anyone has to remember; the run row says `fresh_session`
+// so the fact is visible where cost is read.
+//
 // Every run is a two-phase `runs` row on the CREW's id (component = crew
 // name, kind = crew_run) — the dashboard's "runs by component" is where a
 // crew is watched — carrying cost, tokens, tools used, the brief's sha and
@@ -140,7 +146,7 @@ export async function drainCrewOne(db: Db, cfg: CrewDrainConfig, run: (input: Cr
     component: crewId,
     kind: "crew_run",
     model: crew.model,
-    meta: { work_id: row.id, brief_sha: briefSha, ...(taskId !== undefined ? { task_id: taskId } : {}), attempt: row.attempts, crew_sha: crew.sha256, dispatch_run_id: row.meta?.dispatch_run_id ?? null, uses: crew.uses },
+    meta: { work_id: row.id, brief_sha: briefSha, ...(taskId !== undefined ? { task_id: taskId } : {}), attempt: row.attempts, effort: crew.effort, fresh_session: true, crew_sha: crew.sha256, dispatch_run_id: row.meta?.dispatch_run_id ?? null, uses: crew.uses },
   });
   try {
     const r = await run({ crew, brief, task_id: taskId, brain: { url: cfg.brainUrl, token }, identity: cfg.identity }, cfg.sdk);

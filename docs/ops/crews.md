@@ -27,6 +27,7 @@ name: researcher            # = the filename, lowercase kebab-case
 type: agent
 area: example               # = the directory (optional; filled from the path)
 model: haiku                # haiku | sonnet | opus
+effort: low                 # low | medium | high (default low) — the other half of the tier
 description: Reads the granted notes and reports what it finds
 uses: [knowledge, requests]        # tool GROUPS, see below
 skills: []                  # recorded now; binds once skills/ exists (§4.4)
@@ -43,6 +44,23 @@ autonomy:                   # optional (§4.21); absent = defaults apply, never 
 
 You are a researcher working for {{name}}, this instance's assistant. …
 ```
+
+`model` and `effort` together are the crew's **tier** — the same (model,
+effort) pair the router picks for a chat turn (`docs/ops/assistant-tools.md`).
+`effort` is optional and defaults to **low**, because the crew shape that pays
+is extraction: absorb a lot of context on a cheap model and return one report,
+while the assistant does the thinking. Raise it deliberately, per crew, and
+expect the cost to follow — low to max is roughly 3.5x on the research's
+figures (`docs/research/2026-09-cost-optimization.md`, decision 2). An older
+manifest with no `effort` keeps working, cheaply; an invalid value is refused
+whole like any other schema miss.
+
+A crew run is **one query**, so its effort is fixed for the whole run by
+construction — there is no mid-run boundary to change it at, and nothing in
+the runner can. For the same reason a crew run **never resumes an SDK
+session** (decision 3: fresh session per crew run): `buildCrewOptions` has no
+`resume` to set and the runner touches no `sessions` row. The `crew_run` row
+records `fresh_session: true` so the fact is visible where cost is read.
 
 `autonomy` is validated **strictly** — an unknown key inside the block, or
 anywhere else at the manifest's top level, is refused with the reason
@@ -118,7 +136,7 @@ assistant ──agents_delegate{crew, brief, task_id?}──▶ console (mcp-bra
    ▼                                                │
 assistant container drain loop ◀── claim (SKIP LOCKED, lease) ──┘
    │ mint a token for THIS run → agents.token_hash
-   │ SDK query: crew model, prompt + trailer, brief, ONE mcp server (/mcp + run token),
+   │ SDK query: crew model + effort, prompt + trailer, brief, ONE mcp server (/mcp + run token),
    │            allowedTools = groups, maxTurns, maxBudgetUsd
    │ crew calls requests_create / tasks_* / capture → requests, work, inbox (its own runs rows)
    │ runs row: component = <crew>, kind = crew_run (cost, tokens, tools_used, brief_sha)
@@ -161,7 +179,8 @@ assistant container drain loop ◀── claim (SKIP LOCKED, lease) ──┘
    artifacts likewise. The runner writes one `runs` row per run on the
    **crew's id**: `kind = crew_run`, `model`, `tokens_in/out`, `cost_usd`
    (the SDK's estimate), `meta = {work_id, brief_sha, task_id, attempt,
-   crew_sha, outcome, num_turns, tools_used, reports}`.
+   effort, fresh_session, crew_sha, outcome, num_turns, tools_used,
+   reports}`.
 
 ### Outcomes and retries
 
@@ -271,8 +290,9 @@ read the thread itself; the brief is the reviewable record of what crossed.
   `agents_delegate` over the live `/mcp`: external → not granted, refused
   brief → no work row + audited, clean brief → one durable row, idempotent.
 - `apps/assistant/test/crew.test.ts` — allowlist exhaustive against
-  mcp-brain's manifest; option builder (model, bearer, tools, turns,
-  budget); runner outcomes with a fake SDK.
+  mcp-brain's manifest; option builder (model, **effort**, bearer, tools,
+  turns, budget, and no `resume`); `effort` defaulting to low and refusing a
+  bad value; runner outcomes with a fake SDK.
 - `apps/assistant/test/crew-drain.integration.test.ts` — claim/run/close
   with a fake runner; the token authenticates only during the run and a
   second run gets a different one; retry → blocked; budget → blocked;

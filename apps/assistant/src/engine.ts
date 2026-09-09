@@ -6,6 +6,7 @@
 // other MCP source. Absent the brain config, the engine runs tool-less.
 
 import { query, type Options } from "@anthropic-ai/claude-agent-sdk";
+import type { Effort } from "@foldedspacelabs/metistry-core";
 import { brainOptions, type BrainConfig } from "./brain.js";
 
 export interface TurnResult {
@@ -21,8 +22,19 @@ export interface TurnResult {
   tools_used?: Record<string, number>;
 }
 
-/** One turn. `resume` continues an existing SDK session (PoC-4). */
-export type Engine = (prompt: string, model: string, resume?: string) => Promise<TurnResult>;
+/**
+ * What one turn runs as: the resolved tier (core's `tiers.ts` — a tier is a
+ * (model, effort) pair) plus the session to continue, if any.
+ */
+export interface TurnSpec {
+  model: string;
+  effort: Effort;
+  /** Continue an existing SDK session (PoC-4). Absent = a fresh session. */
+  resume?: string | undefined;
+}
+
+/** One turn. */
+export type Engine = (prompt: string, spec: TurnSpec) => Promise<TurnResult>;
 
 export interface EngineConfig {
   /** The console's mcp-brain; undefined = tool-less. */
@@ -38,11 +50,24 @@ export interface EngineConfig {
 // runner (crew.ts) so a crew's built-in surface is exactly the assistant's: none.
 export const DISALLOWED = ["Bash", "Write", "Edit", "NotebookEdit", "WebFetch", "WebSearch", "Task", "Agent"];
 
-/** The whole SDK option object for one turn — pure, so the allowlist is testable without a live call. */
-export function buildQueryOptions(cfg: EngineConfig, model: string, resume?: string): Options {
+/**
+ * The whole SDK option object for one turn — pure, so the allowlist is
+ * testable without a live call.
+ *
+ * This function is also where "effort changes only at turn boundaries" is
+ * enforced by construction rather than by prompting: the options are built
+ * ONCE per turn from that turn's resolved tier and handed to a single
+ * `query()`; nothing mutates them while the stream runs. Consecutive turns on
+ * the same session with the same tier therefore produce byte-identical
+ * options, which is what keeps the cached prompt prefix intact (a break costs
+ * up to 50x the cache-read price per token on Fable/Mythos 5.1). Tested in
+ * `test/brain.test.ts`.
+ */
+export function buildQueryOptions(cfg: EngineConfig, spec: TurnSpec): Options {
   return {
-    model,
-    ...(resume ? { resume } : {}),
+    model: spec.model,
+    effort: spec.effort,
+    ...(spec.resume ? { resume: spec.resume } : {}),
     ...(cfg.systemPrompt ? { systemPrompt: cfg.systemPrompt } : {}),
     ...brainOptions(cfg.brain),
     disallowedTools: DISALLOWED,
@@ -63,11 +88,11 @@ export function tallyToolUse(content: unknown, into: Record<string, number>): vo
 }
 
 export function makeSdkEngine(cfg: EngineConfig): Engine {
-  return async (prompt, model, resume) => {
-    const stream = query({ prompt, options: buildQueryOptions(cfg, model, resume) });
+  return async (prompt, spec) => {
+    const stream = query({ prompt, options: buildQueryOptions(cfg, spec) });
 
     let text = "";
-    let sessionId = resume ?? "";
+    let sessionId = spec.resume ?? "";
     let usage: any = {};
     let cost: number | undefined;
     const tools: Record<string, number> = {};

@@ -306,27 +306,54 @@ security export -k login.keychain-db -t identities -f pkcs12 -P "<export-passwor
 ## 5. Sparkle update-signing keys (EdDSA)
 
 Future auto-update appcast signing (`docs/product/desktop-app-plan.md`
-"Updates"). Sparkle's own tool generates the pair:
+"Updates"). The Homebrew cask `sparkle` is **disabled** (fails Gatekeeper,
+2026-09-01), so get the CLI tools with the pinned-download-plus-checksum
+script instead — the same pattern `ops/release/build-runtime-deps.sh` uses
+for Node/Postgres/git:
 
-1. Download or build Sparkle's `generate_keys` tool (ships in the [Sparkle
-   release](https://github.com/sparkle-project/Sparkle/releases)'s
-   `bin/` directory), then:
+```sh
+bash ops/release/fetch-sparkle-tools.sh
+```
+
+This downloads the `Sparkle-<version>.tar.xz` release archive
+([github.com/sparkle-project/Sparkle/releases](https://github.com/sparkle-project/Sparkle/releases)),
+refuses it if the sha256 doesn't match the pin in
+`ops/release/runtime-versions.env` (`SPARKLE_VERSION` / `SPARKLE_SHA256`),
+and extracts `bin/generate_keys`, `bin/sign_update`, `bin/generate_appcast`
+to `ops/release/.tools/sparkle/bin/` (gitignored, not Homebrew, no sudo).
+Idempotent — re-running with the same pin is a no-op. To bump the version:
+change those two lines in `runtime-versions.env` (get the sha256 by
+downloading the new archive once and `shasum -a 256`, same as every other
+pin in that file), then re-run the script. CI runs the same script in the
+`appcast` job (`.github/workflows/release.yml`) so it is one line to
+un-stub once the DMG job exists.
+
+1. Generate the key pair:
    ```sh
-   ./bin/generate_keys
+   ops/release/.tools/sparkle/bin/generate_keys
    ```
    The **private key is written straight into the Studio's login
    Keychain** — Sparkle's docs are explicit that you don't need to touch it
    again, just keep the Mac (or the Keychain export below) safe.
    ([sparkle-project.org/documentation/#3-generate-keys-for-signing-updates](https://sparkle-project.org/documentation/#3-generate-keys-for-signing-updates))
-2. The same command prints the **public key**, base64-encoded — that's what
-   later goes into the SwiftUI app's `Info.plist` as `SUPublicEDKey`. Not a
-   secret; it's fine committed once the app target exists.
+2. The same command prints the **public key**, base64-encoded. That goes
+   into the SwiftUI app's `Info.plist` as `SUPublicEDKey` once the app
+   target exists. Not a secret; it's fine committed.
 3. **Export the private key for CI** only when the release workflow needs
-   to sign appcasts outside this Mac (`generate_keys -x
-   /tmp/sparkle-private-key.txt`, then `gh secret set
-   METISTRY_SPARKLE_PRIVATE_KEY < /tmp/sparkle-private-key.txt` and `rm
-   /tmp/sparkle-private-key.txt`) — skip this while signing happens on the
-   Studio by hand.
+   to sign appcasts outside this Mac:
+   ```sh
+   ops/release/.tools/sparkle/bin/generate_keys -x /tmp/sparkle-private-key.txt
+   gh secret set METISTRY_SPARKLE_PRIVATE_KEY < /tmp/sparkle-private-key.txt
+   rm /tmp/sparkle-private-key.txt
+   ```
+   Skip this while signing happens on the Studio by hand — and delete the
+   exported file the moment the secret is set; the Keychain copy is the
+   one that should persist.
+
+The Sparkle **framework** itself (linked into the SwiftUI app, not this
+CLI) is added later via Swift Package Manager —
+`https://github.com/sparkle-project/Sparkle`, pinned to a major version —
+when the Xcode project exists. Not Homebrew either.
 
 ## Checklist
 

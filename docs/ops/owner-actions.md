@@ -10,8 +10,10 @@ Kept current as PRs land (2026-09-08). Each item names what it unblocks.
 - [ ] **Apple signing runbook** (`docs/ops/apple-signing.md`): Developer ID
       certificate into the login keychain; re-sign the two helpers with
       `METISTRY_SIGN_IDENTITY` set and re-grant TCC once; `notarytool
-      store-credentials`; Sparkle EdDSA key pair. Unblocks the DMG/appcast
-      jobs and stops helper grants rotting on rebuild.
+      store-credentials`; Sparkle EdDSA key pair (`bash
+      ops/release/fetch-sparkle-tools.sh` then `generate_keys` — no
+      Homebrew, the cask is disabled). Unblocks the DMG/appcast jobs and
+      stops helper grants rotting on rebuild.
 - [ ] **GitHub repo secrets** for the release workflow: `NPM_TOKEN` (only if
       publishing to npm), later `SPARKLE_PRIVATE_KEY`, `APPLE_CERTIFICATE_P12`,
       `APPLE_CERTIFICATE_PASSWORD`, `APPLE_ID`, `APPLE_TEAM_ID`,

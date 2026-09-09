@@ -6,6 +6,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { parse as parseYaml } from "yaml";
+import { EFFORTS } from "@foldedspacelabs/metistry-core";
 import { BRAIN_SERVER, BRAIN_TOOLS, brainConfigFromEnv, brainOptions, brainToolNames } from "../src/brain.js";
 import { buildQueryOptions, tallyToolUse } from "../src/engine.js";
 
@@ -48,22 +49,45 @@ describe("query options", () => {
   const brain = { url: "http://console:8080/mcp", token: "t" };
 
   it("with a brain: the allowlist is the ONLY allowed set, nothing outside mcp__brain__ ever appears, and the shell/file tools stay disallowed", () => {
-    const o = buildQueryOptions({ brain, systemPrompt: "You are X." }, "haiku", "sess-1");
+    const o = buildQueryOptions({ brain, systemPrompt: "You are X." }, { model: "haiku", effort: "medium", resume: "sess-1" });
     expect(o.allowedTools).toEqual(brainToolNames());
     expect(o.allowedTools?.every((t) => t.startsWith("mcp__brain__"))).toBe(true);
     expect(o.tools).toEqual([]);
     expect(o.disallowedTools).toEqual(expect.arrayContaining(["Bash", "Write", "Edit", "WebFetch", "Task", "Agent"]));
-    expect(o).toMatchObject({ model: "haiku", resume: "sess-1", systemPrompt: "You are X.", permissionMode: "default", strictMcpConfig: true });
+    expect(o).toMatchObject({ model: "haiku", effort: "medium", resume: "sess-1", systemPrompt: "You are X.", permissionMode: "default", strictMcpConfig: true });
     expect(o.maxTurns).toBeGreaterThan(1); // tool use needs more than one agentic turn
   });
 
   it("without a brain: tool-less as before (no mcpServers, no allowedTools, maxTurns 4, no systemPrompt key)", () => {
-    const o = buildQueryOptions({}, "haiku");
-    expect(o).toEqual({ model: "haiku", tools: [], strictMcpConfig: true, disallowedTools: expect.any(Array), permissionMode: "default", maxTurns: 4 });
+    const o = buildQueryOptions({}, { model: "haiku", effort: "low" });
+    expect(o).toEqual({ model: "haiku", effort: "low", tools: [], strictMcpConfig: true, disallowedTools: expect.any(Array), permissionMode: "default", maxTurns: 4 });
     expect("mcpServers" in o).toBe(false);
     expect("allowedTools" in o).toBe(false);
     expect("resume" in o).toBe(false);
-    expect(buildQueryOptions({ maxTurns: 2 }, "haiku").maxTurns).toBe(2);
+    expect(buildQueryOptions({ maxTurns: 2 }, { model: "haiku", effort: "low" }).maxTurns).toBe(2);
+  });
+
+  // Cost research decision 2: a tier is a (model, effort) pair, and effort
+  // changes only at TURN BOUNDARIES. The guarantee is structural — one query
+  // per turn, options built once — so what it reduces to is this: two
+  // consecutive turns on the same session at the same tier must produce
+  // byte-identical options, or the cached prompt prefix breaks (up to 50x the
+  // read price per token on Fable/Mythos 5.1).
+  it("consecutive turns on one session at the same tier build IDENTICAL options; a different tier is a different prefix", () => {
+    const cfg = { brain, systemPrompt: "You are X." };
+    const turn1 = buildQueryOptions(cfg, { model: "haiku", effort: "medium", resume: "sess-1" });
+    const turn2 = buildQueryOptions(cfg, { model: "haiku", effort: "medium", resume: "sess-1" });
+    expect(JSON.stringify(turn2)).toEqual(JSON.stringify(turn1));
+
+    const deeper = buildQueryOptions(cfg, { model: "haiku", effort: "high", resume: "sess-1" });
+    expect(deeper.effort).toBe("high");
+    expect(JSON.stringify(deeper)).not.toEqual(JSON.stringify(turn1));
+  });
+
+  it("the tier's effort reaches the SDK unchanged, and every level is passed through", () => {
+    for (const effort of EFFORTS) {
+      expect(buildQueryOptions({}, { model: "haiku", effort }).effort).toBe(effort);
+    }
   });
 });
 

@@ -26,16 +26,19 @@ interface Claimed {
 /**
  * Did this turn close a task the assistant was holding? The evidence is the
  * work row's own history — deterministic, and never a reading of the reply.
- * `closed_at` bounds it to this turn; the containment check picks out the
+ * The turn's own `runs.started_at` bounds it, so BOTH sides of the comparison
+ * come from the database's clock (an app-side `new Date()` against Postgres
+ * `now()` is a race on any skew); the containment check picks out the
  * assistant's own `closed` entry.
  */
-async function closedOwnTask(db: Db, since: Date): Promise<number | null> {
+async function closedOwnTask(db: Db, runId: number): Promise<number | null> {
   const { rows } = await db.query(
     `SELECT id FROM work
-     WHERE kind = 'task' AND status = 'closed' AND closed_at >= $1
+     WHERE kind = 'task' AND status = 'closed'
+       AND closed_at >= (SELECT started_at FROM runs WHERE id = $1)
        AND history @> $2::jsonb
      ORDER BY closed_at DESC LIMIT 1`,
-    [since, JSON.stringify([{ agent: ASSISTANT_AGENT, status: "closed" }])],
+    [runId, JSON.stringify([{ agent: ASSISTANT_AGENT, status: "closed" }])],
   );
   return rows[0] ? Number(rows[0].id) : null;
 }
@@ -74,7 +77,6 @@ export async function drainOne(db: Db, engine: Engine, tiers: TierMap): Promise<
       );
   const resume: string | undefined = sess.rows[0]?.id;
 
-  const startedAt = new Date();
   const runId = await startRun(db, {
     component: "assistant",
     kind: "turn",
@@ -129,7 +131,7 @@ export async function drainOne(db: Db, engine: Engine, tiers: TierMap): Promise<
     // actually touched the task list.
     let rolled: string[] = [];
     if (result.tools_used?.["mcp__brain__tasks_update"]) {
-      const taskId = await closedOwnTask(db, startedAt);
+      const taskId = await closedOwnTask(db, runId);
       if (taskId !== null) rolled = (await rollSession(db, msg.thread, `task_closed:#${taskId}`)).rolled;
     }
     // runs.meta: the turn's own tool calls (each call is ALSO its own runs row on

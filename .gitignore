@@ -30,3 +30,7 @@ runtime/
 # bundled-runtime build tree (ops/release/build-runtime-deps.sh): source
 # tarballs and the per-version compile cache. `runtime/` above is its output.
 .runtime-build/
+
+# Sparkle CLI tools (ops/release/fetch-sparkle-tools.sh): the downloaded
+# archive and the extracted bin/ — fetched on demand, never tracked.
+ops/release/.tools/

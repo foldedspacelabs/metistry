@@ -124,13 +124,15 @@ token.
 
 ### The OAuth App you must register (one-time, by the owner)
 
-`--auth device` needs a GitHub **OAuth App** — GitHub → Settings →
-Developer settings → OAuth Apps → New OAuth App, then tick **Enable
-Device Flow** in its settings. Put its **Client ID** in `.env` as
-`METISTRY_GITHUB_OAUTH_CLIENT_ID`. It is public by design: a device-flow
-app has no client secret, which is what lets an open-source CLI ship the
-flow at all. Until it exists, `--auth token` and `--auth ssh` work
-unchanged.
+`--auth device` uses a GitHub **OAuth App** with device flow enabled. The
+product ships Folded Space Labs' app as the default (client id
+`Ov23lid9DItZlts5e5GV`), so nothing needs registering: the id is public by
+design — a device-flow app has no client secret — and it grants the app
+nothing; you approve the `repo` scope on your own account, and the token
+lands only in your Keychain. To use your own app instead, register one
+(GitHub → Settings → Developer settings → OAuth Apps, tick **Enable Device
+Flow**) and set `METISTRY_GITHUB_OAUTH_CLIENT_ID` in `.env`. `--auth token`
+and `--auth ssh` work unchanged.
 
 ### The Keychain trade-off, on the record
 

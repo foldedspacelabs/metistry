@@ -46,6 +46,20 @@ export {
 } from "./deployment.js";
 export { scheduleToSeconds } from "./schedule.js";
 export {
+  EFFORTS,
+  DEFAULT_TIER,
+  ROUTINE_TIER,
+  tierSchema,
+  tiersSchema,
+  resolveTier,
+  parseTiers,
+  type Effort,
+  type Tier,
+  type TierMap,
+  type ResolvedTier,
+} from "./tiers.js";
+export { rollSession, type RollResult } from "./session-roll.js";
+export {
   REDACTED,
   redactSecrets,
   scrubModelOutput,

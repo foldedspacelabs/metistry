@@ -66,6 +66,7 @@ docker compose up -d --build   # both services read .env
 | `METISTRY_ASSISTANT_AREAS` | console | Comma-separated `Knowledge/` prefixes for the grant. Default `Knowledge/` — the whole vault, root notes included (below). |
 | `METISTRY_RECONCILER_URL`, `METISTRY_BRIDGE_TOKEN_RECONCILER` | console | The reconciler's vault bridge (`docs/ops/reconciler.md`). `knowledge_read`, `knowledge_write`, `knowledge_list`, and `knowledge_grep` all go through it; unset → all answer `not_available` and the brain's `check()` is `degraded`. |
 | `METISTRY_IDENTITY_FILES`, `METISTRY_PROMPT_FILES` | assistant | D4 overlays for `identity.yaml` and the seed system prompt (`seed/assistant-prompt.md`); last existing file wins. |
+| `METISTRY_RULES_FILES` | console + assistant | D4 overlay for `rules.yaml` (default `seed/rules.yaml:rules.yaml`). The console reads the fast paths and the tier menu; the assistant reads the **same `tiers:` block** to resolve a tier name to (model, effort). Unreadable by the assistant → one tier, `METISTRY_MODEL_DEFAULT` at medium effort. |
 | `METISTRY_MAX_TURNS` | assistant | Agentic turns per message (default 12 with tools, 4 without). |
 
 Startup logs to look for: console `internal agent 'assistant' registered`
@@ -76,6 +77,83 @@ and `identity: <name>`.
 the console re-keys the row, the old token dies at once. The console's
 `/api/agents` list shows the row (`assistant · internal`) with no hash,
 ever.
+
+## Tiers: (model, effort) pairs
+
+A **tier** is a model *and* an effort level, chosen together — a stronger
+model at low effort is often cheaper than a weaker one working hard
+(`docs/research/2026-09-cost-optimization.md`, decision 2). Tiers live in
+`rules.yaml`, so an instance overlay (D4) moves them:
+
+```yaml
+tiers:
+  fast:    { model: haiku, effort: low }
+  default: { model: haiku, effort: medium }   # bare text lands here; `default` must exist
+  deep:    { model: opus,  effort: high }     # /deep, and the composer's picker
+  routine: { model: haiku, effort: low }      # machine-enqueued turns (the evening fold)
+```
+
+`effort` is `low | medium | high` and defaults to `medium`, so a tier written
+the old way (model only) keeps working. Tier names are lowercase kebab-case;
+an unknown name resolves to `default` — the resolver never invents a model.
+
+**The router names a tier; the drain resolves it.** Both read the same file
+(`METISTRY_RULES_FILES`, default `seed/rules.yaml:rules.yaml`, last existing
+file wins), so there is one definition and one place a name becomes a pair
+(`packages/core/src/tiers.ts`). Three ways a turn gets its tier:
+
+| source | how |
+| --- | --- |
+| the router | `/deep`, `/model <tag>`, or the default for bare text (invariant 4: deterministic — no model decides) |
+| the composer | `tier` on `POST /message`. Applies only where the default would have: `/note`, a typed command and the fast path all still win, and an unknown name is ignored |
+| a routine | `meta.tier` on the `inbound_messages` row. The evening fold writes `routine` |
+
+**Effort changes only at turn boundaries — by construction, not by
+instruction.** One SDK query per turn, its options built once from that turn's
+tier and never mutated mid-stream (`buildQueryOptions`). Two consecutive turns
+on one session at one tier produce byte-identical options, which is the point:
+changing model, effort, tools or system prompt mid-session invalidates the
+cached prompt prefix, and a break costs up to 50x the cache-read price per
+token. There is a test for exactly that (`apps/assistant/test/brain.test.ts`).
+
+Startup log: `tiers from seed/rules.yaml: fast=haiku/low default=haiku/medium
+deep=opus/high routine=haiku/low`. No rules file at all → one tier, the
+`METISTRY_MODEL_DEFAULT` model at medium, and a warning.
+
+## Session rolls: fresh context at task boundaries
+
+Pruning context at a **task boundary** beats editing it mid-task (decision 3,
+which closes the open half of plan §6 decision 3 — "no fixed cadence" — with
+an event instead of a cadence). Two events roll the chat thread's session, and
+two kinds of turn never resume one at all:
+
+| what | effect |
+| --- | --- |
+| a blocking `decision` is answered in the thread | the thread's active session is marked `rolled` **before** the answering turn is drained, so the answer starts fresh |
+| a task the assistant held closes during a turn | the thread rolls after that turn; the next turn starts fresh |
+| a fold turn (`meta.kind: fold`, or any row with `meta.fresh_session: true`) | never resumes — the fold is its own task |
+| a crew run | never resumes — there is no `resume` for the runner to set (`docs/ops/crews.md`) |
+
+A roll is deliberately dumb: mark the active sessions `rolled` so the next
+turn finds none to resume. Nothing is deleted — the rows stay for the
+re-brief path (§4.16 rule 6). Each roll writes one `runs` row,
+`kind = session_roll`, carrying the thread, the reason
+(`decision_answered` | `task_closed:#<id>`) and the **turn count the session
+reached**; every turn row also carries `meta.session_turns`, which is the
+denominator for per-session cost and cache measures. Rolling a thread with
+nothing active writes no row, so a repeated boundary event is not a repeated
+roll.
+
+```sql
+-- when sessions rolled, why, and how far they got
+SELECT ts, meta->>'thread' AS thread, meta->>'reason' AS reason, (meta->>'turns')::int AS turns
+FROM runs WHERE kind = 'session_roll' ORDER BY ts DESC;
+
+-- spend by tier over the last week
+SELECT meta->>'tier' AS tier, meta->>'effort' AS effort, count(*), sum(cost_usd)
+FROM runs WHERE component = 'assistant' AND kind = 'turn' AND ts > now() - interval '7 days'
+GROUP BY 1, 2 ORDER BY 4 DESC NULLS LAST;
+```
 
 ## Why the assistant's scope is configuration, not a grant
 
@@ -204,6 +282,14 @@ Two kinds of `runs` rows, joined by time and thread:
   `claude_usage_daily` computes `cache_hit_rate = cache_read /
   (cache_read + tokens_in + cache_write)` per model-day — shown on the
   dashboard's spend panel and in the weekly review's Spend line.
+  the `model` it ran on, `meta.tier` / `meta.effort` (the pair that model
+  came from) and `meta.routed_by`, `meta.session_turns` (turns this SDK
+  session has now taken), `meta.fresh_session` when the turn deliberately
+  started a new one, and `meta.tools_used`
+  (`{"mcp__brain__capture": 1, ...}`) from the SDK result. The dashboard's
+  runs tile counts these as turns; spend rolls into `runs_summary`.
+- **A session roll** — `component = 'assistant', kind = 'session_roll'`: see
+  "Session rolls" above.
 - **Each tool call** — `component = 'assistant', kind = 'tool',
   tool = <name>`, written by mcp-brain with clipped arguments (note
   content is recorded as `<N chars>`, never the text), and for knowledge

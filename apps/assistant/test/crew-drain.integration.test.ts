@@ -26,6 +26,7 @@ const snapshot: CrewSnapshot = {
   name: crewId,
   area: "itest",
   model: "sonnet",
+  effort: "medium",
   uses: ["brain-read", "brain-report"],
   skills: [],
   scope: ["Knowledge/Projects"],
@@ -95,6 +96,7 @@ describe.skipIf(!hasDb)("crew drain (integration)", () => {
     const o = buildCrewOptions(s);
     expect(o).toMatchObject({
       model: "sonnet",
+      effort: "medium", // the manifest's half of the tier pair, reaching the SDK
       maxTurns: 5,
       maxBudgetUsd: 0.1,
       allowedTools: ["mcp__brain__knowledge_search", "mcp__brain__knowledge_read", "mcp__brain__knowledge_list", "mcp__brain__knowledge_grep", "mcp__brain__requests_create"],
@@ -115,7 +117,7 @@ describe.skipIf(!hasDb)("crew drain (integration)", () => {
 
     const run_ = (await pool.query(`SELECT component, kind, model, ok, tokens_in, tokens_out, cost_usd::float8 AS cost_usd, meta, finished_at IS NOT NULL AS finished FROM runs WHERE component = $1 AND kind = 'crew_run' AND (meta->>'work_id')::bigint = $2`, [crewId, id])).rows[0];
     expect(run_).toMatchObject({ component: crewId, kind: "crew_run", model: "sonnet", ok: true, tokens_in: 900, tokens_out: 120, cost_usd: 0.031, finished: true });
-    expect(run_.meta).toMatchObject({ work_id: id, brief_sha: "d".repeat(64), task_id: 77, attempt: 1, crew_sha: "c".repeat(64), outcome: "ok", num_turns: 4, reports: 1, tools_used: ok.tools_used, uses: ["brain-read", "brain-report"] });
+    expect(run_.meta).toMatchObject({ work_id: id, brief_sha: "d".repeat(64), task_id: 77, attempt: 1, effort: "medium", fresh_session: true, crew_sha: "c".repeat(64), outcome: "ok", num_turns: 4, reports: 1, tools_used: ok.tools_used, uses: ["brain-read", "brain-report"] });
   });
 
   it("a second run gets a different token, and the first one's hash is nowhere", async () => {

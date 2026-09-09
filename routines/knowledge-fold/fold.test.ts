@@ -85,7 +85,9 @@ describe("knowledge-fold anchor and enqueue", () => {
     expect(text).toContain("work #12 — EventKit bridge");
     expect(text).toContain("art_1 ver_2 — v3: tighten the positioning");
     expect(text).toContain("inbox #88 — 3h in metistry: the fold routine");
-    expect(JSON.parse(String(inbound!.values[2]))).toMatchObject({ kind: "fold", source: COMPONENT });
+    // the enqueued turn declares its tier (a machine-assembled turn runs cheap)
+    // and that it must not resume the chat's session — cost research decisions 2 and 3
+    expect(JSON.parse(String(inbound!.values[2]))).toMatchObject({ kind: "fold", source: COMPONENT, tier: "routine", fresh_session: true });
 
     const [runsRow] = db.runsRows();
     expect(runsRow!.values[0]).toBe(COMPONENT);

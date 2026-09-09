@@ -3,6 +3,7 @@
 // validate against this, so the schema is the contract.
 
 import { z } from "zod";
+import { EFFORTS } from "./tiers.js";
 
 const cron = z
   .string()
@@ -200,6 +201,15 @@ export const agentManifest = base
     /** Grouping only (`agents/<area>/`); hierarchy is `manages`, not depth (plan Terminology). */
     area: name.optional(),
     model: z.enum(CREW_MODELS),
+    /**
+     * Reasoning effort per run (the SDK's `effort`), the other half of the
+     * tier pair (core's `tiers.ts`). Default **low**: the crew shape that
+     * pays — absorb bulk context on a cheap model, return one report — is
+     * extraction, not deliberation; the assistant does the thinking. Raise it
+     * deliberately, per crew, and expect the cost to follow (low→max is ~3.5x
+     * on the research's figures).
+     */
+    effort: z.enum(EFFORTS).default("low"),
     uses: z.array(crewUse).default([]),
     skills: z.array(name).default([]),
     /** Read-tier areas (§4.11 scoped escape hatch): Knowledge/ prefixes below the root. The console's grant validator holds the exact (TitleCase) shape; here: never bare, never traversal. */

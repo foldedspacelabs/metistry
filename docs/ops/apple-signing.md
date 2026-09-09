@@ -257,14 +257,15 @@ curl -s -H "Authorization: Bearer $METISTRY_BRIDGE_TOKEN_APPLE_FM" http://127.0.
 Notarization needs its own App Store Connect API key, kept out of the repo
 entirely.
 
+Notarization here always means the App Store Connect API key
+(`xcrun notarytool --key --key-id --issuer`) — never an Apple ID +
+app-specific password. The API key doesn't expire on a password reset,
+which matters once it's a CI credential rather than a by-hand one.
+
 1. **Create the key**: [appstoreconnect.apple.com](https://appstoreconnect.apple.com)
    → Users and Access → Integrations → **Keys** → **+**, role
    **Developer**, download the `.p8` once (Apple won't re-serve it) and note
    the Key ID and Issuer ID shown next to it.
-   - App-specific-password alternative (no App Store Connect access
-     needed): [appleid.apple.com](https://appleid.apple.com) → Sign-In and
-     Security → App-Specific Passwords → Generate. The API key is preferred
-     for a CI workflow since it doesn't expire on a password reset.
 2. **Store credentials in a local keychain profile** (never in `.env` or
    the repo):
    ```sh
@@ -273,8 +274,6 @@ entirely.
      --key-id XXXXXXXXXX \
      --issuer xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
    ```
-   (or the Apple ID + app-specific-password form:
-   `--apple-id you@example.com --team-id TEAMID1234 --password <app-specific>`).
    This writes into the Studio's login keychain under the profile name, not
    to a file. ([developer.apple.com/documentation/security/notarizing-macos-software-before-distribution](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution))
 3. **Dry-run against a signed helper**, to prove the credentials work before
@@ -292,16 +291,31 @@ entirely.
    release workflow.
 
 **Secrets the future release workflow needs** (as GitHub Actions secrets,
-never committed): the Developer ID Application certificate exported as a
-`.p12` (base64-encoded) plus its export password, and either the three
-notarytool API-key values (`.p8` contents base64-encoded, Key ID, Issuer ID)
-or the Apple ID + app-specific password + Team ID triple. Export the `.p12`
-from Keychain Access (select the cert → right-click → Export) directly into
+never committed): the Developer ID Application certificate exported as
+`APPLE_CERTIFICATE_P12` (base64-encoded) plus `APPLE_CERTIFICATE_PASSWORD`
+(its export password), `APPLE_TEAM_ID`, and the three notarytool API-key
+values — `APPLE_API_KEY_P8` (the `.p8` contents, base64-encoded),
+`APPLE_API_KEY_ID`, `APPLE_API_ISSUER_ID`. Export the `.p12` from Keychain
+Access (select the cert → right-click → Export) directly into
 `gh secret set` — pipe it, don't save it to disk first:
 ```sh
 security export -k login.keychain-db -t identities -f pkcs12 -P "<export-password>" -o /dev/stdout \
-  | base64 | gh secret set METISTRY_DEVELOPER_ID_P12 --repo foldedspacelabs/metistry
+  | base64 | gh secret set APPLE_CERTIFICATE_P12 --repo foldedspacelabs/metistry
 ```
+The `.p8` has to touch disk once (Apple only serves it at creation time),
+so set its secret straight from that file and then delete it — it should
+never persist anywhere but Keychain Access's own record and the GitHub
+secret:
+```sh
+base64 < AuthKey_XXXXXXXXXX.p8 | gh secret set APPLE_API_KEY_P8 --repo foldedspacelabs/metistry
+rm -f AuthKey_XXXXXXXXXX.p8
+```
+Same rule for any `.p12` that does land on disk (a re-export, a backup
+copy) — delete it once the secret is set. And if a `GH_TOKEN` is set in
+your shell (e.g. a fine-grained PAT used for something else), it shadows
+`gh`'s own keyring login and `gh secret set` 404s instead of prompting you
+to log in — run `env -u GH_TOKEN gh secret set …` for these and any other
+`gh` admin command.
 
 ## 5. Sparkle update-signing keys (EdDSA)
 
@@ -338,12 +352,17 @@ un-stub once the DMG job exists.
    ([sparkle-project.org/documentation/#3-generate-keys-for-signing-updates](https://sparkle-project.org/documentation/#3-generate-keys-for-signing-updates))
 2. The same command prints the **public key**, base64-encoded. That goes
    into the SwiftUI app's `Info.plist` as `SUPublicEDKey` once the app
-   target exists. Not a secret; it's fine committed.
+   target exists — not a secret, fine committed there. It is also recorded
+   as the `SPARKLE_PUBLIC_ED_KEY` repo secret so CI never has to read it
+   back out of the Xcode project:
+   ```sh
+   gh secret set SPARKLE_PUBLIC_ED_KEY --repo foldedspacelabs/metistry <<< "<public key from generate_keys>"
+   ```
 3. **Export the private key for CI** only when the release workflow needs
    to sign appcasts outside this Mac:
    ```sh
    ops/release/.tools/sparkle/bin/generate_keys -x /tmp/sparkle-private-key.txt
-   gh secret set METISTRY_SPARKLE_PRIVATE_KEY < /tmp/sparkle-private-key.txt
+   gh secret set SPARKLE_PRIVATE_KEY --repo foldedspacelabs/metistry < /tmp/sparkle-private-key.txt
    rm /tmp/sparkle-private-key.txt
    ```
    Skip this while signing happens on the Studio by hand — and delete the
@@ -371,10 +390,9 @@ when the Xcode project exists. Not Homebrew either.
 - [ ] Sparkle `generate_keys` run once; public key noted for the future
       `Info.plist`.
 - [ ] Release secrets recorded in the `foldedspacelabs/metistry` GitHub repo
-      (names only, values never in the repo):
-      `METISTRY_DEVELOPER_ID_P12`, `METISTRY_DEVELOPER_ID_P12_PASSWORD`,
-      notary credentials (`METISTRY_NOTARY_KEY_P8` +
-      `METISTRY_NOTARY_KEY_ID` + `METISTRY_NOTARY_ISSUER_ID`, or
-      `METISTRY_APPLE_ID` + `METISTRY_APPLE_ID_PASSWORD` +
-      `METISTRY_TEAM_ID`), `METISTRY_SPARKLE_PRIVATE_KEY` (only if signing
-      moves off this Mac).
+      (names only, values never in the repo): `APPLE_CERTIFICATE_P12` +
+      `APPLE_CERTIFICATE_PASSWORD`, `APPLE_TEAM_ID`, the notary API key
+      (`APPLE_API_KEY_P8` + `APPLE_API_KEY_ID` + `APPLE_API_ISSUER_ID`),
+      `SPARKLE_PRIVATE_KEY` and `SPARKLE_PUBLIC_ED_KEY` (only if signing
+      moves off this Mac). Every `.p12`/`.p8` export used to set one of
+      these is deleted from disk right after `gh secret set` — see §4.

@@ -58,7 +58,9 @@ The workflow refuses a tag whose number does not match `package.json` and
 | `metistry-runtime-<version>-darwin-arm64.tar.gz` | the built product, for an Apple-silicon Mac |
 | `metistry-runtime-<version>-linux-x64.tar.gz` | the same, for a Linux host |
 | `metistry-runtime-deps-<version>-darwin-arm64.tar.gz` | the **bundled runtime**: Node, Postgres 17 + pgvector, git — `docs/ops/bundled-runtime.md` |
-| `checksums.txt` | `sha256sum` of every asset; `metistry update` verifies against it |
+| `Metistry-<version>.dmg` | the **Mac app**: the SwiftUI front end for the CLI, with both packs above embedded as `Contents/Resources/metistry/`, Developer ID signed with the hardened runtime, notarized and stapled — `docs/ops/mac-app.md` |
+| `appcast.xml` | the EdDSA-signed **Sparkle feed** an installed app polls. `latest/download/appcast.xml` is the URL in the app's `Info.plist`, so it always resolves to the newest release |
+| `checksums.txt` | `sha256sum` of every asset, the DMG and the appcast included; `metistry update` verifies the runtime packs against it |
 | npm `@foldedspacelabs/metistry-*@<version>` | published via Trusted Publishing (provenance once the repo is public — see below) |
 | `ghcr.io/foldedspacelabs/metistry-{console,assistant,reconciler}:<version>` | the app images compose pulls — multi-arch (`linux/amd64` + `linux/arm64`, so Docker Desktop on Apple silicon pulls the native image) |
 
@@ -100,9 +102,14 @@ run is a few minutes rather than fifteen. Its tarball holds a single
 top-level `runtime/`, which is why `metistry update` unpacks it with
 `tar -C <product-dir>`. Full account: `docs/ops/bundled-runtime.md`.
 
-The macOS app DMG is **not** built here — there is no app yet. The
-`macos-app` and `appcast` jobs exist as disabled, documented stubs so the
-shape of the work and the secrets it needs are on the record.
+The **DMG** (`ops/release/build-app.sh`, the `macos-app` job) is the Mac
+app with both packs above unpacked inside it as
+`Contents/Resources/metistry/{releases/<version>,current,runtime}` — the
+same layout `metistry update` produces in release mode, so the app's
+runtime locator and the CLI agree about where everything is. The job
+imports the Developer ID certificate into a temporary keychain, signs,
+notarizes with the App Store Connect API key and staples. Full account:
+`docs/ops/mac-app.md`.
 
 ## Release notes
 
@@ -196,10 +203,11 @@ are in the repo, and none reach a build log.
 | secret | used by | needed for |
 | --- | --- | --- |
 | `GITHUB_TOKEN` (automatic) | `images`, `publish` | pushing to ghcr.io and creating the release. Nothing to set; a fork whose `packages: write` is unavailable logs a notice and skips the image, rather than failing the release |
-| `SPARKLE_PRIVATE_KEY` | `appcast` (stub) | the EdDSA key Sparkle's `sign_update` signs the DMG with. **Never** in the repo or an artifact. `ops/release/appcast.mjs` refuses to emit an unsigned feed |
-| `SPARKLE_PUBLIC_ED_KEY` | `appcast` (stub) | the matching public key, for the SwiftUI app's `Info.plist` (`SUPublicEDKey`) once that target exists. Not sensitive — fine committed too — kept as a secret so CI never has to read it out of the Xcode project |
-| `APPLE_CERTIFICATE_P12`, `APPLE_CERTIFICATE_PASSWORD` | `macos-app` (stub) | the Developer ID Application certificate, imported into a temporary keychain; `METISTRY_SIGN_IDENTITY` is then derived from it, not stored separately |
-| `APPLE_TEAM_ID`, `APPLE_API_KEY_ID`, `APPLE_API_ISSUER_ID`, `APPLE_API_KEY_P8` | `macos-app` (stub) | notarization via the App Store Connect API key (`xcrun notarytool submit --key --key-id --issuer --wait`, then `stapler staple`) — **not** an Apple ID + app-specific password |
+| `SPARKLE_PRIVATE_KEY` | `appcast` | the EdDSA key Sparkle's `sign_update` signs the DMG with. **Never** in the repo or an artifact; it reaches `sign_update` on stdin so it never touches disk. `ops/release/appcast.mjs` refuses to emit an unsigned feed. Absent → the job skips with a notice and no appcast is published |
+| `SPARKLE_PUBLIC_ED_KEY` | — | the matching public key. Not sensitive, and it **is** committed: `SUPublicEDKey` in `apps/macos/resources/Info.plist` and `SPARKLE_PUBLIC_ED_KEY` in `ops/release/runtime-versions.env`, which a test asserts are the same string. The secret is redundant now; harmless to leave set |
+| `APPLE_CERTIFICATE_P12`, `APPLE_CERTIFICATE_PASSWORD` | `macos-app` | the Developer ID Application certificate, imported into a temporary keychain; `METISTRY_SIGN_IDENTITY` is then derived from it as the identity's **SHA-1 hash**, not its display name (two valid certs for one team have identical names and `codesign -s` fails with "ambiguous"). Absent → the job skips with a notice |
+| `APPLE_API_KEY_ID`, `APPLE_API_ISSUER_ID`, `APPLE_API_KEY_P8` | `macos-app` | notarization via the App Store Connect API key (`xcrun notarytool submit --key --key-id --issuer --wait`, then `stapler staple`) — **not** an Apple ID + app-specific password. Absent → the DMG is signed but not notarized, and the run says so |
+| `APPLE_TEAM_ID` | — | unused. It was for the `xcodebuild archive` in the old stub; there is no Xcode project |
 
 The Developer ID certificate is also what fixes the ad-hoc-signed TCC
 helpers (D3: TCC bridges must be *stably* signed, or every rebuild
@@ -273,21 +281,40 @@ Until a package is configured, or on a fork that doesn't own the
 logs an `::notice::` naming the package and continues rather than failing
 the release.
 
-## The macOS app (not built yet)
+## The macOS app
 
-`macos-app` is a stub with the sequence written down: import the cert →
-`xcodebuild archive` with the hardened runtime, embedding the runtime pack
-as `Metistry.app/Contents/Resources/metistry/` → DMG → codesign →
-notarize → staple → upload. It is `if: false` until there is an app to
-build.
+`macos-app` (macos-14) runs `ops/release/build-app.sh` against the runtime
+pack and runtime-deps pack this same run produced — the app never rebuilds
+the product, so the DMG and `metistry update` ship the same bytes. There is
+**no Xcode project**: SwiftPM compiles, and the bundle is assembled by
+hand, the way the Swift TCC helpers are.
 
-## Auto-update (not wired yet)
+Then `ops/release/notarize.sh` submits, waits, staples and validates. Both
+scripts run identically on the Studio, which is what makes a release
+reproducible by hand — `docs/ops/mac-app.md`.
 
-`appcast` is the other stub. `ops/release/appcast.mjs` is real and tested
-today: given the DMG's url, size and an EdDSA signature it renders the
-Sparkle feed. Called without a signature it emits a loud placeholder and
-exits non-zero, so a misconfigured secret fails the job instead of
-publishing a feed the app would reject.
+`APPLE_TEAM_ID` is **not** used by this path. It belonged to the
+`xcodebuild archive` the old stub imagined (`DEVELOPMENT_TEAM=`); with no
+Xcode project, the signing identity carries the team and `notarytool`
+authenticates with the API key. The secret can stay set — nothing reads it.
+
+## Auto-update
+
+`appcast` signs the DMG with Sparkle's `sign_update` (from the pinned,
+checksum-verified tools `ops/release/fetch-sparkle-tools.sh` fetches) and
+renders the feed through `ops/release/appcast.mjs`. Called without a
+signature that script emits a loud placeholder and exits non-zero, so a
+misconfigured secret fails the job instead of publishing a feed every
+installed app would reject.
+
+One item per feed, not `generate_appcast`: that tool walks a directory of
+past updates, and these updates live on GitHub Releases as one DMG per tag.
+The app polls `releases/latest/download/appcast.xml`, which GitHub always
+resolves to the newest release, so a single-item feed is the whole story.
+
+**Both jobs skip cleanly** when their secrets are absent — a `::notice::`
+and a release that still carries every other asset, exactly as the `images`
+job behaves on a fork without `packages:write`.
 
 ## Verifying a release by hand
 
@@ -295,4 +322,13 @@ publishing a feed the app would reject.
 gh release download v0.2.0 -p 'metistry-runtime-*' -p checksums.txt
 shasum -a 256 -c checksums.txt --ignore-missing
 tar -tzf metistry-runtime-0.2.0-darwin-arm64.tar.gz | head
+```
+
+And the app, which Gatekeeper will answer for once it is stapled:
+
+```sh
+gh release download v0.2.0 -p 'Metistry-*.dmg' -p appcast.xml -p checksums.txt
+shasum -a 256 -c checksums.txt --ignore-missing
+xcrun stapler validate Metistry-0.2.0.dmg
+spctl --assess --type open --context context:primary-signature -v Metistry-0.2.0.dmg
 ```

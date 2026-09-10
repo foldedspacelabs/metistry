@@ -128,6 +128,10 @@ identical, so open-source users and the app share one tested path
    Keychain at service start (`metistry secrets sync` — **built
    2026-09-07**, with `mint` and a values-free `list`; the Keychain is the
    canonical store under `metistry:<VAR>`) and is never edited by hand.
+   Since 2026-09-09 the app passes `--instance <dir>`: that `.env` is
+   written to `<instance>/state/.env` and instance-scoped items are filed
+   under the instance's `instance_id` ("Instance directories are
+   self-contained" below).
 5. *Services.* `metistry up` — but registered through **`SMAppService`**
    (macOS 13+), the sanctioned way an app installs its launchd agents;
    the user approves once in System Settings, and there is no plist to
@@ -176,6 +180,71 @@ this creates now: a Developer ID certificate on the Studio (also fixes
 the ad-hoc-signed TCC helpers — memory), a release workflow that builds,
 signs, notarizes, staples, and publishes assets with a changelog, and a
 `metistry update` release mode that consumes exactly those assets.
+
+## Instance directories are self-contained (ratified 2026-09-09)
+
+**The decision: an instance directory is self-contained. Nothing about an
+instance may persist outside its directory except per-user secrets.** The
+app will be pointed at different instance directories — several test
+instances in different states on one machine — so anything an instance
+leaves elsewhere is a leak that makes the next instance behave oddly for
+reasons nobody can see.
+
+### What lives where
+
+| | Where | Why |
+| --- | --- | --- |
+| Vault, `identity.yaml`, `rules.yaml`, `queries/`, `agents/`, `routines/`, `extensions/`, `instance-migrations/`, `metistry.lock` | the instance repo, tracked | the record (invariant 1); `metistry init` stamps them |
+| `inbox/` | the instance dir, gitignored | captures in flight |
+| `state/pg` | the instance dir, gitignored | the launchd shape's Postgres data — derived |
+| `state/assistant` | the instance dir, gitignored | the engine's `HOME`, its SDK transcripts |
+| **`state/.env`** | the instance dir, gitignored, `0600` | **the install's whole environment.** It used to live in the product checkout, which tied one checkout to one instance |
+| **`instance_id`** in `identity.yaml` | the instance repo, tracked | a v4 UUID minted by `metistry init` — this directory's stable identity, and the Keychain account its own secrets are filed under |
+| Instance-scoped secrets | the login Keychain, account = `instance_id` | see below |
+| User-scoped secrets | the login Keychain, account = `metistry` | deliberately shared by every instance on the Mac |
+| The product runtime, `releases/`, `runtime/`, `current` | the install/product dir | code, not instance data — one copy serves every instance |
+
+The product checkout's `.env` is still **read** as a deprecated fallback,
+so no running install breaks; `metistry secrets sync --to env` carries
+every line of it into `<instance>/state/.env` and leaves the old file
+alone. `--instance <dir>` (the app passes it on first-run steps 4 and 5)
+and `--env-file <path>` are the explicit overrides.
+
+### The two Keychain scopes
+
+A secret is either the instance's or the person's, and one table in
+`packages/cli/src/secrets.ts` (`SECRET_SCOPES`) decides which, so
+`sync`, `mint`, `list`, `purge` and the app cannot disagree.
+
+- **instance** — account = `instance_id`: `METISTRY_DB_PASSWORD`, every
+  `METISTRY_BRIDGE_TOKEN_*`, `METISTRY_ASSISTANT_TOKEN`,
+  `METISTRY_VAPID_*`, `METISTRY_GITHUB_*` (a PAT is scoped to the repos
+  *this* instance watches). **Unlisted secret-shaped names default here:**
+  self-containment is the rule, user-scope the enumerated exception.
+- **user** — account = `metistry` (or `METISTRY_KEYCHAIN_ACCOUNT`):
+  `CLAUDE_CODE_OAUTH_TOKEN` (one Claude login per Mac) and
+  `METISTRY_AWS_SECRET_ACCESS_KEY` / `_SESSION_TOKEN` (the person's own
+  AWS account, for the aws-costs collector).
+
+`METISTRY_SIGN_IDENTITY` and `METISTRY_GITHUB_OAUTH_CLIENT_ID` are not
+secrets and stay plain config. Migration is automatic and additive:
+`sync --to env` resolves the instance account first, falls back to the
+user account, and **copies** what it finds there into the instance's,
+never deleting the original. `metistry secrets purge --instance <dir>`
+deletes one instance's items — preview-then-confirm, `--yes` to act — and
+is structurally incapable of touching the user account.
+
+### The limit that remains
+
+**One active instance at a time.** launchd labels
+(`com.foldedspacelabs.metistry.*`) and ports (console 8080, reconciler
+7812, the bridges) are fixed, so bringing a second instance up would fight
+the first for both. Several instance directories can exist and be switched
+between; only one runs. Running them concurrently is a **follow-up** that
+needs label and port namespacing per instance (and a `doctor` that reports
+per instance) — not attempted here, because guessing the namespacing
+before the app's instance-switching UI exists would be building ahead of
+the plan.
 
 ## Bundled runtime (ratified 2026-09-09)
 

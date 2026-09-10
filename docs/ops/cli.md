@@ -26,6 +26,51 @@ node packages/cli/dist/main.js secrets list
 Package-level detail (flags, resolution order, probe table) lives in
 `packages/cli/README.md`; this page is the operator's runbook.
 
+## Instance directories are self-contained
+
+**An instance directory holds everything about that instance** (ratified
+2026-09-09, `docs/product/desktop-app-plan.md`). Nothing about it persists
+outside its directory except per-user secrets in the login Keychain. So:
+
+- **`.env` lives at `<instance>/state/.env`**, not in the product
+  checkout. It is gitignored by the seed and written `0600`.
+- **`identity.yaml` carries an `instance_id`** (a v4 UUID from `metistry
+  init`). Instance-scoped Keychain items are filed under it as the account.
+- `state/` also holds the launchd shape's Postgres data (`state/pg`) and
+  the assistant's transcripts (`state/assistant`).
+
+Every verb takes **`--instance <dir>`** (the Mac app passes it), and
+`--env-file <path>` overrides the dotenv file outright. Resolution order
+for the environment:
+
+1. `<instance>/state/.env` — the instance named by `--instance`, else
+   `METISTRY_INSTANCE_DIR`.
+2. the product checkout's `.env` — **deprecated**, still read, and the
+   place a terminal install may keep declaring `METISTRY_INSTANCE_DIR`
+   (it is parsed for that pointer *before* either file is applied, so the
+   instance's own values always win).
+
+Nothing already set in the environment is overwritten by either file.
+A deprecation line goes to **stderr** whenever the checkout's `.env` is
+read, so `doctor --json` stays machine-readable.
+
+**Migrating an existing install: one command.**
+
+```sh
+metistry secrets sync --to env      # or: … --instance <dir>
+```
+
+It carries every line of the checkout's `.env` into
+`<instance>/state/.env` and **leaves the old file in place** — a running
+install keeps working. Delete the old one yourself once nothing reports a
+variable missing. Then `metistry up` renders the launchd plists to source
+the new path and points `docker compose` at it with `--env-file`.
+
+**Only one instance runs at a time.** launchd labels and ports are fixed,
+so several instance directories can exist and be switched between, but
+bringing up a second while the first runs makes them fight. Concurrent
+instances need label/port namespacing — a recorded follow-up.
+
 ## Creating an instance repo
 
 `metistry init <dir>` replaces the by-hand bootstrap of 2026-09-06 and
@@ -37,18 +82,21 @@ created` authored `Metistry <metistry@localhost>`:
   Knowledge/now.md          from seed/Knowledge — the vault; brain-commit writes here
   identity.yaml             the ONLY place the assistant is named (--name)
   rules.yaml                router rules, seeded default
+  identity.yaml             …and its instance_id: a v4 UUID minted once, the
+                            Keychain account this instance's secrets file under
   inbox/                    gitignored
+  state/                    gitignored — .env, Postgres data, assistant state
   queries/ agents/ routines/ extensions/ instance-migrations/
                             tracked, empty (.gitkeep) — the D4 overlay reads
                             seed defaults until a same-named file lands here
   metistry.lock             product { version, commit, source } + updated_at +
                             migrations_applied; `metistry update` moves it
-  README.md  .gitignore     (inbox/, .obsidian/workspace*)
+  README.md  .gitignore     (inbox/, state/, .obsidian/workspace*)
 ```
 
 It refuses a non-empty directory unless `--force`, never prompts, and
 **never writes a secret**. What it prints at the end is the next step —
-three lines for the *product* checkout's `.env`:
+three lines for `<dir>/state/.env`, this instance's own environment:
 
 ```
 METISTRY_INSTANCE_DIR=<dir>
@@ -161,7 +209,8 @@ edited by hand (`docs/product/desktop-app-plan.md`, first-run step 4).
 metistry secrets sync --to keychain               # import .env's secret lines into the Keychain
 metistry secrets sync --to env                    # regenerate .env's secret lines from the Keychain
 metistry secrets mint METISTRY_ASSISTANT_TOKEN    # a new random token, into both
-metistry secrets list                             # names and where each lives — never a value
+metistry secrets list                             # names, scopes and where each lives — never a value
+metistry secrets purge --instance <dir> [--yes]   # delete one instance's Keychain items
 ```
 
 `--from` says the same thing from the other end (`--from env` ==
@@ -192,10 +241,52 @@ value goes down the child's stdin and never appears in `ps`. `secrets
 list` checks presence *without* `-w`, so there is no code path in it that
 can read a value, let alone print one.
 
-`--env-file <path>` targets a `.env` other than the checkout's, and
-`METISTRY_KEYCHAIN_ACCOUNT` separates two instances on one Mac (default
-account: `metistry`). On Linux `secrets` refuses and points at
-`chmod 600` on `.env` or your own secret manager.
+`--env-file <path>` targets a `.env` other than the resolved one, and
+`--instance <dir>` says which instance this is. On Linux `secrets` refuses
+and points at `chmod 600` on `.env` or your own secret manager.
+
+### Two scopes: the instance's, and yours
+
+An item is `metistry:<VAR>` plus an **account**, and the account is what
+keeps several instance directories on one Mac apart. One table —
+`SECRET_SCOPES` in `packages/cli/src/secrets.ts` — decides which account a
+name belongs under, so `sync`, `mint`, `list`, `purge` and the Mac app
+cannot disagree:
+
+| scope | account | which variables |
+| --- | --- | --- |
+| **instance** | the instance's `instance_id` | `METISTRY_DB_PASSWORD`, every `METISTRY_BRIDGE_TOKEN_*`, `METISTRY_ASSISTANT_TOKEN`, `METISTRY_VAPID_*`, `METISTRY_GITHUB_*` — **and anything not listed**, because self-containment is the rule |
+| **user** | `metistry` (override: `METISTRY_KEYCHAIN_ACCOUNT`) | `CLAUDE_CODE_OAUTH_TOKEN` (one Claude login per Mac), `METISTRY_AWS_SECRET_ACCESS_KEY`, `METISTRY_AWS_SESSION_TOKEN` (your AWS account, not this instance's) |
+
+`METISTRY_SIGN_IDENTITY` and `METISTRY_GITHUB_OAUTH_CLIENT_ID` are not
+secrets; they stay plain `.env`/config values.
+
+**`sync --to env` migrates as it goes.** It looks in the instance's
+account first, then the user account as a fallback — and an instance-scoped
+value found only under the user account is **copied** to the instance's,
+with a line saying which. The old item is never deleted, so rolling back to
+an older CLI still finds it. `secrets list` shows `scope` (where a name
+belongs) beside `keychain` (the account an item was actually found under),
+so `instance / user` reads "not migrated yet".
+
+With no `instance_id` available — no instance directory configured, or one
+created before 2026-09-09 that has not run `sync`/`up` yet — every secret
+stays under the user account exactly as before.
+
+### `secrets purge --instance <dir>`
+
+Deleting a test instance directory used to orphan its Keychain items.
+`purge` deletes them, preview-then-confirm:
+
+```
+metistry secrets purge --instance ~/instances/test-two          # preview; deletes nothing
+metistry secrets purge --instance ~/instances/test-two --yes    # deletes
+```
+
+It only ever touches that instance's own account, and refuses outright
+when the directory has no `instance_id` or when its account somehow *is*
+the per-user account. User-scoped names are listed as kept. It does not
+remove the directory itself.
 
 ## Importing Claude Code sessions
 
@@ -329,15 +420,20 @@ Add a component by adding a directory with a manifest; doctor covers it.
 A new http bridge named `foo` on port 7820 is probed the moment
 `METISTRY_FOO_URL` (and `METISTRY_BRIDGE_TOKEN_FOO`) exist in `.env`.
 
-`.env` is read from the checkout for variables that are unset — the
-`ops/scripts` convention — so `METISTRY_EK_URL=… metistry doctor` overrides
-a line in the file for one run (handy for checking a token before writing
-it down).
+`.env` is read for variables that are unset — the `ops/scripts` convention
+— from `<instance>/state/.env` and then the checkout's deprecated one
+("Instance directories are self-contained" above), so
+`METISTRY_EK_URL=… metistry doctor` overrides a line in the file for one
+run (handy for checking a token before writing it down).
 
 ## Bringing an install up
 
-`metistry up [--no-compose] [--no-launchd] [--dry-run]` takes a product
-checkout with a filled-in `.env` to *running*.
+`metistry up [--no-compose] [--no-launchd] [--dry-run] [--instance <dir>]`
+takes a product checkout plus an instance with a filled-in
+`state/.env` to *running*. It prints which dotenv file that is, renders it
+into the plists as `__ENV_FILE__`, and hands it to `docker compose` as
+`--env-file` (compose interpolates from its own `./.env` otherwise, which
+is no longer the install's environment).
 
 **What it starts is the same in every deployment shape; where depends on
 `deployment.yaml`** (`docs/ops/deployment-shapes.md`). The default is
@@ -382,10 +478,11 @@ included; it is the same code path with execution turned off, so what it
 prints is what a real run does.
 
 ```
+   env: /Users/you/instance/state/.env
 [dry-run] == compose
-[dry-run] (cd /srv/metistry && docker compose up -d --build)
+[dry-run] (cd /srv/metistry && docker compose --env-file /Users/you/instance/state/.env up -d --build)
 [dry-run] == launchd
-[dry-run] write ~/Library/LaunchAgents/com.foldedspacelabs.metistry.watchdog.plist  (from ops/launchd/…, __REPO__=/srv/metistry, __NODE__=/opt/homebrew/bin/node)
+[dry-run] write ~/Library/LaunchAgents/com.foldedspacelabs.metistry.watchdog.plist  (from ops/launchd/…, __REPO__=/srv/metistry, __NODE__=/opt/homebrew/bin/node, __ENV_FILE__=/Users/you/instance/state/.env)
 [dry-run] launchctl bootout gui/501/com.foldedspacelabs.metistry.watchdog   # ok if not loaded
 [dry-run] launchctl bootstrap gui/501 ~/Library/LaunchAgents/com.foldedspacelabs.metistry.watchdog.plist
 [dry-run] launchctl kickstart -k gui/501/com.foldedspacelabs.metistry.watchdog
@@ -398,7 +495,7 @@ prints is what a real run does.
 
 There is no launchd, and this has not been run on a Linux host yet, so
 `up` **prints** the equivalent systemd user units — one per plist,
-`EnvironmentFile=<checkout>/.env`, `ExecStart=<node> <checkout>/…/dist/main.js`,
+`EnvironmentFile=<instance>/state/.env`, `ExecStart=<node> <checkout>/…/dist/main.js`,
 `Restart=always` — and writes nothing. Save each to
 `~/.config/systemd/user/`, then `systemctl --user daemon-reload &&
 systemctl --user enable --now <unit>`. Turning that into an installed

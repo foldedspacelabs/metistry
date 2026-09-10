@@ -1,6 +1,7 @@
 # Deployment shapes — `compose` and `launchd`
 
-Where an install's services run. Same code, same `.env`, same
+Where an install's services run. Same code, same `.env`
+(`<instance>/state/.env` — `docs/ops/cli.md`), same
 migrations, same `metistry` verbs; only the supervisor and the isolation
 boundary differ. Set in `deployment.yaml` (plan §4.17, open decision 15
 — resolved 2026-09-07).
@@ -140,7 +141,10 @@ left alone, and re-running `up` rewrites only the block. An initialised
 data directory is never re-initdb'd.
 
 If `METISTRY_DB_PASSWORD` is unset, `up` generates one and appends it to
-the checkout's `.env` (gitignored, never printed, never committed).
+this install's `.env` — `<instance>/state/.env` (gitignored, `0600`, never
+printed, never committed), or the product checkout's while an install
+predates that move (`docs/ops/cli.md`, "Instance directories are
+self-contained").
 
 **Socket path length.** A unix socket path over 103 bytes is silently
 unusable, so a deeply nested instance directory fails here rather than
@@ -201,7 +205,9 @@ plists' `EnvironmentVariables` dict rather than sourced from `.env`
 through `sh -c` — no shell, and nothing interpolated. That puts real
 secrets in `~/Library/LaunchAgents`, which is `0755`, so `up` writes
 those two plists `0600`. The other jobs (reconciler, watchdog, the TCC
-bridges) still source `.env` themselves and are unchanged.
+bridges) still source a dotenv file themselves, through the plists'
+`__ENV_FILE__` placeholder — `<instance>/state/.env`, because an instance
+directory is self-contained.
 
 The **reconciler's** dict is a third case, and carries no secret: when this
 install has a bundled `runtime/git/bin`, `up` puts it on the front of that

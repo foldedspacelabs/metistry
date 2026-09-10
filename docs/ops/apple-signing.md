@@ -186,16 +186,43 @@ strings in `helper/Info.plist` (`NSCalendarsFullAccessUsageDescription`,
 entitlement decides whether macOS *may* prompt, the usage string is what the
 prompt *says*. You need both.
 
-**The scripts already auto-detect a Developer ID identity** (`security
-find-identity -v -p codesigning | grep "Developer ID Application"`) and fall
-back to ad-hoc if none is found. This patch adds an explicit override so you
-can pin a specific identity when more than one Developer ID cert is
-installed, or force ad-hoc for a quick local iteration:
+**The scripts auto-detect a Developer ID identity by its SHA-1 hash** —
+the first column of `security find-identity -v -p codesigning`, not the
+quoted display name — and fall back to ad-hoc if none is found. The hash
+matters (learned 2026-09-09): after a renewal or a second import the
+keychain holds two valid Developer ID Application certs with byte-identical
+names, and `codesign -s "<name>"` refuses with
+`ambiguous (matches "…" and "…" in login.keychain-db)`. A hash is unique by
+construction, so `codesign -s <hash>` always picks exactly one; the scripts
+print both the hash and the name they chose (`signed: A7FB… (Developer ID
+Application: …)`). `ops/release/build-app.sh` selects the same way.
+
+Two rules inside that auto-detection, because this Studio builds for two
+Apple teams (FSL, and a personal team that still owns another app):
+
+- duplicates of **one** name (the same team, imported twice or renewed) are
+  fine — the first hash wins; same team means the same certificate chain
+  and so the same TCC designated requirement;
+- certs for **different** teams are never guessed at — the script stops,
+  lists them, and asks for `METISTRY_SIGN_IDENTITY`. Today the personal
+  team holds only Apple Development / Apple Distribution certs here (not
+  Developer ID Application), so the filter already excludes it; the rule is
+  for the day a personal Developer ID cert lands in the same keychain.
+
+There is an explicit override so you can pin a specific identity — a name
+or a hash, `codesign -s` takes either — or force ad-hoc for a quick local
+iteration:
 
 ```sh
-METISTRY_SIGN_IDENTITY="Developer ID Application: Matt Colf (TEAMID1234)" \
+METISTRY_SIGN_IDENTITY=A7FBCE6DFD83EA75E3F72BC7E3C4895713779BED \
   packages/mcp-eventkit/scripts/build-helper.sh
 ```
+
+(The Studio's `.env` pins the hash for exactly this reason. Re-signing a
+helper under the same identity and bundle id keeps its TCC grant — the
+Developer ID designated requirement is identifier + certificate chain, with
+no cdhash — so a rebuild after this change needed no re-grant; verified with
+`launchctl kickstart -k` and the bridge's `/check` reporting full access.)
 
 Unset (the default), behavior is unchanged: auto-detect, then ad-hoc. The
 patch is in this PR (`scripts/build-helper.sh` in both packages).

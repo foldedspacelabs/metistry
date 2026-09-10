@@ -122,7 +122,7 @@ export const CREW_TOOL_GROUPS = {
   /** Notes and files into the inbox as proposals. */
   capture: ["capture"],
   /** The shared task list, within the crew's `projects`. */
-  tasks: ["tasks_list", "tasks_claim", "tasks_renew", "tasks_update", "tasks_release", "tasks_create"],
+  tasks: ["tasks_list", "tasks_claim", "tasks_renew", "tasks_update", "tasks_release", "tasks_close", "tasks_create"],
   /** Versioned output into the crew's projects (§4.21). */
   artifacts: ["artifacts_publish", "artifacts_get", "artifacts_list", "artifacts_comment", "artifacts_resolve", "artifacts_review"],
 } as const;

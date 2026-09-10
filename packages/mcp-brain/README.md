@@ -2,7 +2,7 @@
 
 The one MCP surface an external agent uses to work *with* a Metistry
 instance — a standalone Claude session, a coding agent, another vendor's
-agent, any MCP client — and the instance's own assistant. Twenty-two tools
+agent, any MCP client — and the instance's own assistant. Twenty-three tools
 over Streamable HTTP, named from one small vocabulary — an object noun plus
 one of `list` / `get` / `search` / `create` / `update`
 (`docs/product/glossary.md`) — plus vault notes as MCP resources:
@@ -10,7 +10,7 @@ one of `list` / `get` / `search` / `create` / `update`
 - **in:** `capture` (a note or file into the inbox), `requests_create` (a
   finding, decision, gotcha, or progress note as a request for the user);
 - **shared work:** `tasks_list`, `tasks_claim`, `tasks_renew`,
-  `tasks_update`, `tasks_release`, `tasks_create` — thin
+  `tasks_update`, `tasks_release`, `tasks_close`, `tasks_create` — thin
   adapters over [`@foldedspacelabs/metistry-tasks`](../tasks);
 - **out, under grants:** `knowledge_search`, `knowledge_read`,
   `knowledge_list`, `knowledge_grep` — the title index, one note's content,
@@ -69,8 +69,9 @@ optional nudge line. Errors set `isError` and carry core's uniform envelope
 | `tasks_list` | `filter?` ∈ ready \| mine \| all (default `ready`), `project?`, `limit?` | `{ filter, tasks }` — `ready` = claimable, `mine` = held by you, `all` = both |
 | `tasks_claim` | `id`, `lease_seconds?` | `{ ok: true, task }` or `{ ok: false, reason, task? }` |
 | `tasks_renew` | `id`, `lease_seconds?` | same |
-| `tasks_update` | `id`, `status?` ∈ in_progress \| blocked \| closed, `note?` | same |
+| `tasks_update` | `id`, `status?` ∈ in_progress \| blocked \| closed, `note?` | same — prefer `tasks_close` to finish a task |
 | `tasks_release` | `id`, `note?` | same |
+| `tasks_close` | `id`, `note?` | same — `status: closed` in one call, the `tasks_update` path underneath |
 | `tasks_create` | `title`, `project`, `area?`, `depends_on?: number[]`, `due?` (YYYY-MM-DD), `idempotency_key?` | `{ task }` |
 | `knowledge_search` | `query`, `limit?` | `{ tier, hits: [{ path, title, description }] }` |
 | `knowledge_read` | `path` (`Knowledge/...`) | `{ path, title, content, sha256 }` — the hash is the `expected_sha256` for a following write |
@@ -153,10 +154,12 @@ order).
 **Deprecated names, one release.** The 2026-09-09 vocabulary
 simplification renamed eleven tools. The old spellings still *work* —
 `src/aliases.ts` maps them at call time — but they are **not listed** by
-`tools/list`, so the eager surface stays exactly the twenty primary names
-and its definition budget stays where it was: 19,370 chars of JSON schema,
-≈ 4.8k tokens at chars/4, against PoC-17's 5k line (a test asserts it).
-Registering the aliases with schemas of their own would have doubled that.
+`tools/list`, so the eager surface stays exactly the primary names (now
+twenty-three, `tasks_close` added after the rename) and its definition
+budget stays where it was: 18,369 chars of JSON schema, ≈ 4.6k tokens at
+chars/4, against PoC-17's 5k line (`test/brain.test.ts` asserts it and
+prints the measured size on every run). Registering the aliases with
+schemas of their own would have doubled that.
 Every alias call is recorded in its `runs` row as `meta.alias`, and
 `check()` reports the list as `deprecated_aliases`; they come out one
 release after this one.

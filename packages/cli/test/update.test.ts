@@ -191,7 +191,7 @@ describe("metistry update", () => {
     const lines: string[] = [];
     const r = await update({ ...base(P, BRIDGE), out: (l) => lines.push(l), exec: fakeExec(), skipBuild: true, skipMigrate: true, fetchFn: refused.fn, doctorFn: okDoctor });
     expect(r.code).toBe(1);
-    expect(lines.join("\n")).toContain("reconciler refused the lock write (forbidden: principal may not write metistry.lock)");
+    expect(lines.join("\n")).toContain("reconciler refused the metistry.lock write (forbidden: principal may not write metistry.lock)");
 
     const down = { fn: (async () => { throw new TypeError("fetch failed"); }) as unknown as typeof fetch };
     const r2 = await update({ ...base(P, BRIDGE), out: (l) => lines.push(l), exec: fakeExec(), skipBuild: true, skipMigrate: true, fetchFn: down.fn, doctorFn: okDoctor });

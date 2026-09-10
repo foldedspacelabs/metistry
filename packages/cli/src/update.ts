@@ -23,7 +23,7 @@ import type { Exec } from "./exec.js";
 import { loadPlistTemplates, type PlistTemplate } from "./launchd.js";
 import { instanceLockPath, LOCK_FILENAME, readLock, serializeLock, type LockFile, type LockSource } from "./lock.js";
 import { listMigrationFiles, MIGRATION_LOCK_KEY, openMigrationSession, runMigrations, type MigrateResult, type MigrationSession } from "./migrate.js";
-import { currentVersion, installRelease, rollbackRelease, releaseTarget, type InstallReleaseResult } from "./release.js";
+import { currentVersion, installRelease, rollbackRelease, releaseTarget, runtimePackCommit, type InstallReleaseResult } from "./release.js";
 import { installRuntimeDeps, runtimeDepsEnabled, RUNTIME_DIRNAME, type InstallRuntimeDepsResult } from "./runtime-deps.js";
 import { StepFailed, StepRunner } from "./steps.js";
 import { closingDoctor, composeUp, COMPOSE_TIMEOUT_MS, runDirFor } from "./up.js";
@@ -329,8 +329,12 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
 
     r.section("lock");
     const head = r.dryRun || source === "release" ? undefined : await gitHead(productDir, r.exec);
+    // release mode never git-pulls, so there is no HEAD to read — the pack's own
+    // manifest (written by pack-runtime.sh) is the only honest source for the commit
+    // it was built from; a pack from before that field shipped falls through below.
+    const packCommit = !r.dryRun && release ? await runtimePackCommit(release.dir) : undefined;
     lock = {
-      product: { version: releaseVersion, commit: head ?? (source === "git" && r.dryRun ? "<HEAD after pull>" : (prior?.product.commit ?? "unknown")), source },
+      product: { version: releaseVersion, commit: head ?? packCommit ?? (source === "git" && r.dryRun ? "<HEAD after pull>" : (prior?.product.commit ?? "unknown")), source },
       updated_at: now.toISOString(),
       migrations_applied: migrations?.recorded ?? prior?.migrations_applied ?? [],
     };

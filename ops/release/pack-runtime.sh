@@ -76,11 +76,13 @@ copy collectors routines
 find "$stage" \( -name node_modules -o -name test -o -name '*.tsbuildinfo' \) -prune -exec rm -rf {} + 2>/dev/null || true
 
 built_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+commit="${GITHUB_SHA:-$(git rev-parse HEAD 2>/dev/null || echo unknown)}"
 cat > "$stage/metistry-runtime.json" <<JSON
 {
   "version": "$version",
   "target": "$target",
   "built_at": "$built_at",
+  "commit": "$commit",
   "contents": "built product: apps/*/dist, packages/*/dist, seed/, collectors/, routines/, targets/, db/migrations, ops/, docker-compose.yml, package manifests, pnpm-lock.yaml",
   "docs": "docs/ops/releases.md"
 }

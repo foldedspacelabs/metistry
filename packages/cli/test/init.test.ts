@@ -56,7 +56,12 @@ describe("metistry init", () => {
 
     // the seed's default name stays when --name is not given; the .env lines are returned, not written
     expect(r.assistantName).toBe((parseYaml(readFileSync(join(seedDir, "identity.yaml"), "utf8")) as { name: string }).name);
-    expect(r.envLines).toEqual([`METISTRY_INSTANCE_DIR=${dir}`, `METISTRY_BRIDGE_TOKEN_RECONCILER=${MINTED}`, "METISTRY_RECONCILER_URL=http://host.docker.internal:7812"]);
+    expect(r.envLines).toEqual([
+      `METISTRY_INSTANCE_DIR=${dir}`,
+      `METISTRY_BRIDGE_TOKEN_RECONCILER=${MINTED}`,
+      "METISTRY_RECONCILER_URL=http://host.docker.internal:7812",
+      `METISTRY_OWNER_TOKEN=${MINTED}`, // the console's local owner door (docs/ops/auth.md)
+    ]);
     for (const f of git(dir, "ls-files").split("\n")) expect(readFileSync(join(dir, f), "utf8"), f).not.toContain(MINTED);
 
     // an instance directory is self-contained: it is minted with its own id,

@@ -5,9 +5,9 @@
 // initial commit. Interactive-free: the assistant's name comes from
 // `--name` and lands in identity.yaml — the ONLY place it lives (CLAUDE.md).
 //
-// Secrets: the reconciler token is minted and PRINTED, never written. The
-// instance repo is a git repo the user may push anywhere; nothing secret
-// may ever be stamped into it.
+// Secrets: the reconciler bearer and the console's local owner token are
+// minted and PRINTED, never written. The instance repo is a git repo the
+// user may push anywhere; nothing secret may ever be stamped into it.
 
 import { cp, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
@@ -160,6 +160,9 @@ export async function init(opts: InitOptions): Promise<InitResult> {
       `METISTRY_INSTANCE_DIR=${dir}`,
       `METISTRY_BRIDGE_TOKEN_RECONCILER=${mint()}`,
       "METISTRY_RECONCILER_URL=http://host.docker.internal:7812",
+      // the console's local owner door (docs/ops/auth.md): the Mac app and
+      // the CLI present this over loopback instead of a passkey ceremony
+      `METISTRY_OWNER_TOKEN=${mint()}`,
     ],
   };
 }

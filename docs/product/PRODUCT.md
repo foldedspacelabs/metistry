@@ -893,3 +893,23 @@ your git, on your machine.
   and crew runs never resume one at all. The user-visible promise: **the same
   answers for less of your usage allowance, and you can see per turn which
   tier paid for it.**
+- 2026-09-09 — **The Mac app exists, and it is the installer.** `apps/macos`
+  is a SwiftUI app (SwiftPM, no Xcode project) built into a Developer ID
+  signed, notarized, stapled DMG by the release workflow, with an
+  EdDSA-signed Sparkle appcast published beside it — the distribution
+  channel ratified 2026-09-07, with no FSL-run server anywhere in the path.
+  The scaffold ships the two things that make it worth downloading: a
+  **Status** panel that is `metistry doctor` at a glance plus a menu-bar
+  glyph showing the worst fault, and a **first-run flow** that walks the
+  plan's install steps — locate the runtime, `init`, connect a GitHub repo
+  by device flow, sync secrets to the Keychain, bring the services up —
+  each one a real `metistry` verb with its exact argument array shown
+  before it runs and its own output streamed. The design rule that makes
+  this safe is enforced by the code's shape, not by a comment: the app
+  opens no database connection and runs no git, so the terminal path and
+  the app are one tested path (invariant 3, plan §4.20). The user-visible
+  promise: **download, open, and never touch a terminal — and see exactly
+  what was done to your machine while it happens.** Steps 6 and 7 (passkey,
+  Claude token) are on screen as "not yet" with what they are waiting on,
+  because a screen that pretends to enrol a passkey is worse than one that
+  says it cannot.

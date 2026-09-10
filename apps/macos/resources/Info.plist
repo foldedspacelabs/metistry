@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The template ops/release/build-app.sh copies to Metistry.app/Contents/Info.plist,
+  substituting __VERSION__ with the product version (one version for the whole
+  product — docs/ops/releases.md, changesets in fixed mode).
+
+  SUFeedURL and SUPublicEDKey are Sparkle's, and they are here rather than in
+  Swift so the app and the release workflow that signs the feed cannot drift:
+  the same public key is ops/release/runtime-versions.env's
+  SPARKLE_PUBLIC_ED_KEY, and the feed is the appcast.xml the `appcast` job
+  uploads to every release. Neither is a secret; the private key never leaves
+  the owner's Keychain and the SPARKLE_PRIVATE_KEY repo secret.
+-->
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleExecutable</key>
+	<string>Metistry</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.foldedspacelabs.metistry</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>Metistry</string>
+	<key>CFBundleDisplayName</key>
+	<string>Metistry</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>__VERSION__</string>
+	<key>CFBundleVersion</key>
+	<string>__VERSION__</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.productivity</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSHumanReadableCopyright</key>
+	<string>Folded Space Labs. Apache-2.0.</string>
+	<key>SUFeedURL</key>
+	<string>https://github.com/foldedspacelabs/metistry/releases/latest/download/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>fWZAJ5y36RlH1xMgHFVyqh67igpS1BIp3w9UgLVCtQk=</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUScheduledCheckInterval</key>
+	<integer>86400</integer>
+</dict>
+</plist>

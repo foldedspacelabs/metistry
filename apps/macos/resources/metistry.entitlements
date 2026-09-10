@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The app's hardened-runtime entitlements — deliberately EMPTY, and that is the
+  finding, not an oversight.
+
+  Under `codesign --options runtime` an entitlement is an EXCEPTION to a
+  restriction, requested only where the app would otherwise be denied.
+  packages/mcp-eventkit's helper needs
+  com.apple.security.personal-information.calendars because without it tccd
+  refuses to even prompt (docs/ops/apple-signing.md §3). This app needs none of
+  that:
+
+  - It touches no TCC-protected resource itself. Calendars and Reminders reach
+    the system through the EventKit helper, which is its own signed bundle with
+    its own grant (PoC-1: a stdio child inherits the parent's TCC identity, so
+    TCC work never happens in the parent).
+  - Spawning `metistry` is not restricted by the hardened runtime; only loading
+    code into THIS process is, and the one framework it loads —
+    Sparkle.framework — is signed with the same identity, so library validation
+    is satisfied and com.apple.security.cs.disable-library-validation is not
+    needed.
+  - com.apple.security.app-sandbox stays absent. The app drives an installer:
+    it writes launchd plists into ~/Library/LaunchAgents through `metistry up`
+    and creates an instance repo wherever the user points it. (The sandbox
+    profile the plan does call for is for the ASSISTANT process, not this one —
+    docs/product/desktop-app-plan.md, decision #15.)
+
+  Keep this file even while it is empty: the next person to reach for an
+  entitlement should find the reasoning, not a blank. `codesign` hands this to
+  AMFI, whose XML parser rejects comments, so build-app.sh runs it through
+  `plutil -convert xml1` into a temp file before signing — the same trick the
+  helper build scripts use to keep the *why* in the checked-in file.
+-->
+<plist version="1.0">
+<dict/>
+</plist>

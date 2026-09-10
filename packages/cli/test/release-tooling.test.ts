@@ -254,21 +254,103 @@ describe(".github/workflows/release.yml", () => {
     expect(text).toContain("**Published:**");
   });
 
-  it("carries the DMG and appcast jobs as disabled, documented stubs — there is no app yet", () => {
+  it("builds the DMG and the appcast for real — on macos-14, from the packs this run already built", () => {
     for (const job of ["macos-app", "appcast"]) {
       expect(wf.jobs[job], `${job} is missing`).toBeDefined();
-      expect(wf.jobs[job]!.if, `${job} must stay disabled`).toBe(false);
+      // These were `if: false` stubs until the app existed (apps/macos, 2026-09-09).
+      expect(wf.jobs[job]!.if, `${job} must not be disabled`).not.toBe(false);
+      expect(String(wf.jobs[job]!["runs-on"]), `${job} must run on macOS`).toMatch(/^macos-/);
     }
+    // Swift 6 tools version: the macos-14 image's Xcode is 15.4 / Swift 5.10 and
+    // refuses the package outright, so the job that COMPILES has to be newer.
+    // `appcast` only runs sign_update and node, so it can stay on macos-14.
+    expect(wf.jobs["macos-app"]!["runs-on"]).toBe("macos-15");
+    expect(repoFile("apps/macos/Package.swift")).toContain("swift-tools-version: 6.0");
+    expect(parseYaml(repoFile(".github/workflows/ci.yml")).jobs["macos-app"]["runs-on"]).toBe("macos-15");
     const text = repoFile(".github/workflows/release.yml");
-    expect(text).toContain("SPARKLE_PRIVATE_KEY");
-    expect(text).toContain("notarytool submit");
+    expect(text).toContain("ops/release/build-app.sh");
+    expect(text).toContain("ops/release/notarize.sh");
+    expect(text).toContain("ops/release/fetch-sparkle-tools.sh");
+    expect(text).toContain("ops/release/appcast.mjs");
+    expect(text).toContain("sparkle/bin/sign_update");
+    // The app embeds the packs this run produced rather than rebuilding the
+    // product a second time, so the DMG and `metistry update` ship the same bytes.
+    expect(text).toContain("name: runtime-darwin-arm64");
+    expect(text).toContain("name: runtime-deps-darwin-arm64");
     // exact secret names actually set on foldedspacelabs/metistry — an
     // Apple ID + app-specific password is not how notarization works here
-    for (const secret of ["APPLE_CERTIFICATE_P12", "APPLE_CERTIFICATE_PASSWORD", "APPLE_TEAM_ID", "APPLE_API_KEY_ID", "APPLE_API_ISSUER_ID", "APPLE_API_KEY_P8"]) {
+    for (const secret of ["APPLE_CERTIFICATE_P12", "APPLE_CERTIFICATE_PASSWORD", "APPLE_API_KEY_ID", "APPLE_API_ISSUER_ID", "APPLE_API_KEY_P8", "SPARKLE_PRIVATE_KEY"]) {
       expect(text, `expected secrets.${secret} in release.yml`).toContain(`secrets.${secret}`);
     }
     expect(text).not.toContain("APPLE_ID");
     expect(text).not.toContain("APPLE_APP_SPECIFIC_PASSWORD");
+    // APPLE_TEAM_ID belonged to the `xcodebuild archive` the stub imagined
+    // (DEVELOPMENT_TEAM=). There is no Xcode project: the signing identity
+    // carries the team, and notarytool authenticates with the API key.
+    expect(text).not.toContain("APPLE_TEAM_ID");
+  });
+
+  it("a release without the Apple or Sparkle secrets is still a complete release", () => {
+    const text = repoFile(".github/workflows/release.yml");
+    // `secrets` is not available in a job-level `if`, so each job gates itself
+    // in its first step and says so — the same courtesy `images` extends a fork
+    // without packages:write, rather than failing the whole release.
+    expect(text).toContain("::notice::APPLE_CERTIFICATE_P12/APPLE_CERTIFICATE_PASSWORD are not set");
+    expect(text).toContain("::notice::SPARKLE_PRIVATE_KEY is not set");
+    expect(text).toContain("::notice::APPLE_API_KEY_P8 is not set");
+    expect(wf.jobs["macos-app"]!.outputs).toMatchObject({ built: "${{ steps.gate.outputs.ok }}" });
+    // publish waits for both but tolerates either being absent: its gate names
+    // only verify/runtime/runtime-deps.
+    expect(wf.jobs.publish!.needs).toEqual(["verify", "runtime", "runtime-deps", "npm", "images", "macos-app", "appcast"]);
+    expect(String(wf.jobs.publish!.if)).not.toContain("macos-app");
+  });
+
+  it("checksums.txt covers the DMG and the appcast, not just the runtime packs", () => {
+    const text = repoFile(".github/workflows/release.yml");
+    // Every asset lands in the same `assets/` directory before `sha256sum *`.
+    for (const pattern of ["pattern: runtime-*", "pattern: macos-app", "pattern: appcast"]) {
+      expect(text, `expected download ${pattern}`).toContain(pattern);
+    }
+    expect(text).toContain("sha256sum * | tee checksums.txt");
+  });
+
+  it("the app's Info.plist and the pinned Sparkle tooling agree", () => {
+    const plist = repoFile("apps/macos/resources/Info.plist");
+    const versions = repoFile("ops/release/runtime-versions.env");
+    const publicKey = /SPARKLE_PUBLIC_ED_KEY=(\S+)/.exec(versions)?.[1];
+    expect(publicKey, "SPARKLE_PUBLIC_ED_KEY missing from runtime-versions.env").toBeTruthy();
+    // The app verifies the feed with this key; the workflow signs it with the
+    // matching private key. If they drift, every update is rejected silently.
+    expect(plist).toContain(`<string>${publicKey}</string>`);
+    expect(plist).toContain("<key>SUPublicEDKey</key>");
+    // The framework linked into the app and the sign_update that signs its feed
+    // must be the same Sparkle release.
+    const sparkleVersion = /SPARKLE_VERSION=(\S+)/.exec(versions)?.[1];
+    expect(repoFile("apps/macos/Package.swift")).toContain(`exact: "${sparkleVersion}"`);
+    expect(JSON.parse(repoFile("apps/macos/Package.resolved")).pins[0].state.version).toBe(sparkleVersion);
+    // The feed the app polls is the one the release publishes.
+    expect(plist).toContain("releases/latest/download/appcast.xml");
+  });
+
+  it("the app declares the bundle id everything else already assumes", () => {
+    // The TCC helpers are com.foldedspacelabs.metistry.<bridge>; the app is the
+    // root of that namespace (docs/ops/apple-signing.md §3).
+    expect(repoFile("apps/macos/resources/Info.plist")).toContain("<string>com.foldedspacelabs.metistry</string>");
+    expect(repoFile("ops/release/build-app.sh")).toContain("--identifier com.foldedspacelabs.metistry");
+  });
+
+  it("no assistant name is baked into the app (CLAUDE.md: it lives only in identity.yaml)", () => {
+    // The one place a name can enter is the first-run text field, which sends
+    // it to `metistry init --name`.
+    for (const file of [
+      "apps/macos/sources/kit/first-run-model.swift",
+      "apps/macos/sources/kit/first-run-view.swift",
+      "apps/macos/sources/app/metistry-app.swift",
+      "apps/macos/resources/Info.plist",
+    ]) {
+      expect(repoFile(file).toLowerCase(), `${file} must not name the assistant`).not.toContain("metis ");
+    }
+    expect(repoFile("apps/macos/sources/kit/first-run-model.swift")).toContain('"--name"');
   });
 });
 

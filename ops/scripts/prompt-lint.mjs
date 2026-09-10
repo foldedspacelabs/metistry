@@ -5,7 +5,8 @@
 // recursion + regex, matching this repo's other ops/scripts/*.sh checks.
 //
 // Scans seed/assistant-prompt.md, seed/agents/**/*.md, skills/**/SKILL.md,
-// and plugins/**/SKILL.md for:
+// plugins/**/SKILL.md, and the Claude Code assets in .claude/skills/**/SKILL.md
+// (plus their references/) and .claude/agents/*.md for:
 //   - known anti-pattern phrases (case-insensitive): padding a prompt with
 //     "verify twice", "double-check", "be maximally thorough",
 //     "think step by step", "use a scratchpad", "never forget" costs 14-36%
@@ -69,6 +70,12 @@ function targets() {
   for (const root of ["skills", "plugins"]) {
     for (const f of walk(root)) if (f.endsWith("/SKILL.md") || f === `${root}/SKILL.md`) files.add(f);
   }
+  // .claude/ holds this repo's own Claude Code skills and subagent definitions
+  // (docs/ops/claude-assets.md). They are prompts like any other: a skill's
+  // SKILL.md, the reference files it tells the model to read, and each agent's
+  // system prompt.
+  for (const f of walk(".claude/skills")) if (f.endsWith(".md")) files.add(f);
+  for (const f of walk(".claude/agents")) if (f.endsWith(".md")) files.add(f);
   return [...files].sort();
 }
 

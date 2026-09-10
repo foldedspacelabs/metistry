@@ -97,6 +97,36 @@ metistry migrate-shape launchd
 That is the whole cutover. Everything below is what to watch and what to
 do if it does not go that way.
 
+### The `.stale` data directory — a second forward run after a rollback
+
+`up` skips `initdb` whenever `<instance>/state/pg/PG_VERSION` already
+exists — the normal case is a restart, where that is exactly right. After a
+`metistry migrate-shape compose` rollback it is not: `state/pg` still holds
+the restored copy from the cutover plus whatever launchd wrote afterwards,
+and `pg_restore --exit-on-error` into a database that already has every
+table fails immediately.
+
+So a second `metistry migrate-shape launchd` run checks for that leftover
+data directory itself, before calling `up`, and **moves it aside** —
+`state/pg.<timestamp>.stale` — rather than deleting it or reusing it. `up`
+then `initdb`s a fresh one and the restore lands in an empty schema, same
+as the first cutover. You will see:
+
+```
+state/pg is already initialised — a previous migration's data, left over from a rollback. Moving it aside so `up` initdbs fresh …
+kept at state/pg.20260910T160403Z.stale — never deleted by this verb
+```
+
+**Nothing prunes `.stale` directories.** They are exactly as much a copy of
+the database as the dump in `state/migrate/` is, just less convenient to
+restore from (no `pg_dump`/`pg_restore`, a directory copy over the socket
+is not how you get data out of it while another Postgres is using the same
+data directory name pattern). Once the *dump* for that same cutover
+(`state/migrate/<ts>.dump`) has been kept for the usual week and the
+launchd shape has proven itself, the corresponding `.stale` directory is
+safe to `rm -rf` by hand — it is redundant with the dump by then, just
+bulkier.
+
 ### What to watch
 
 - **`counts: … — every count identical`** near the end. That line is the
@@ -144,10 +174,20 @@ the printed plan.
 metistry migrate-shape compose
 ```
 
-Boots out the launchd `db`/`console`/`assistant` jobs, writes the shape
-back through the reconciler, and `docker compose up -d`. The compose
-volume was never touched, so the database comes back **exactly as it was
-at the cutover**.
+Boots out the launchd `db`/`console`/`assistant` jobs — **waiting for each
+one to actually be gone**, and for the bundled Postgres to stop answering
+on its port, before touching compose at all — writes the shape back
+through the reconciler, and `docker compose up -d`. The compose volume was
+never touched, so the database comes back **exactly as it was at the
+cutover**.
+
+The waits exist because of a real outage (2026-09-10): `launchctl bootout`
+returns before launchd has finished tearing the job down, and the bundled
+Postgres can still be holding `127.0.0.1:5432` for a moment after its job's
+label is gone. `docker compose up` binding the same port a heartbeat too
+soon failed immediately with `ports are not available … address already in
+use` — see the next section for what that looked like and how it was fixed
+by hand that day, and how it now fixes itself.
 
 **Anything written under launchd since the cutover is NOT copied back.**
 It stays in `<instance>/state/pg`. If you want it, dump it first — the
@@ -164,6 +204,45 @@ The rollback ends with doctor too. Under the compose shape doctor may
 report the console `degraded` with a 401 on the owner token — that is the
 container-NAT wrinkle `METISTRY_TRUSTED_LOOPBACK_PROXY` exists for
 (`docs/ops/auth.md`), not something the migration did.
+
+## What a failed rollback looks like, and how to recover
+
+**Do not treat the rollback as a smoke test.** It is for real trouble —
+the launchd shape is broken and you need the install back the way it was.
+Running it "just to check the rollback still works" throws away everything
+written under launchd since the cutover (see above): the console and
+assistant's activity, any rows the reconciler committed, all of it. Prove
+the rollback once, in the PR-#117 rehearsal or a scratch instance — not
+against production for a spot check.
+
+That said, both directions of this verb now protect themselves: if
+`docker compose up` fails after the launchd jobs are booted out, the
+rollback bootstraps and kickstarts the three plists it just tore down (they
+are still on disk — nothing about them was rewritten) and sets
+`deployment.yaml` back to `launchd`, then exits non-zero. Same the other
+way: if `up (launchd)` or the restore fails after `docker compose stop db`,
+the forward migration brings the compose stack straight back
+(`docker compose up -d`) and sets the shape back to `compose`. **Either
+direction failing should now leave the install exactly as it was before
+you ran the command that failed** — never with nothing running. This is
+the fix for the 2026-09-10 outage: a rollback run as a rehearsal hit the
+port race described above, `docker compose up` failed, and the migration
+exited 1 with launchd down and compose refusing to start — production was
+down until brought up by hand.
+
+If you ever do see both shapes down anyway (an older build, or a failure
+this compensation itself could not recover from — read whatever message
+`migrate-shape` printed first), the manual recovery is one command, run
+against the instance's own environment file:
+
+```sh
+cd current && docker compose --env-file <instance>/state/.env up -d --no-build
+```
+
+`--no-build` matters: the images from the last cutover are still there,
+and rebuilding is both unnecessary and slower than the outage needs to
+last. Confirm with `docker compose ps` and `metistry doctor` once it is
+up, and only then work out what broke the automatic recovery.
 
 ## Cleanup — not before a week
 

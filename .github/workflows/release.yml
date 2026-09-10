@@ -135,11 +135,10 @@ jobs:
         with:
           path: .runtime-build/cache
           key: runtime-deps-darwin-arm64-${{ hashFiles('ops/release/runtime-versions.env') }}
+      # Unsigned on purpose: this runner has no certificate. The DMG job, which
+      # does, re-signs every Mach-O it embeds from this pack under the Developer
+      # ID (ops/release/build-app.sh) — the one place notarization looks.
       - name: build runtime/ (verified from a MOVED copy before it is packed)
-        env:
-          # unset until the Developer ID cert reaches CI (docs/ops/apple-signing.md);
-          # the script skips signing rather than failing when it is empty
-          METISTRY_SIGN_IDENTITY: ${{ secrets.APPLE_SIGN_IDENTITY }}
         run: ops/release/build-runtime-deps.sh
       - name: pack metistry-runtime-deps-<version>-darwin-arm64.tar.gz (+ .sha256)
         env:

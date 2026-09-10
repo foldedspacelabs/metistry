@@ -1,5 +1,18 @@
 # @foldedspacelabs/metistry-mcp-eventkit
 
+## 0.4.0
+
+### Patch Changes
+
+- c6eb8ff: The helper build scripts pick a Developer ID identity by its SHA-1 hash
+  instead of its display name, so a keychain holding two certs with the same
+  name (a renewal, a second import) no longer fails `codesign` with
+  "ambiguous". Duplicates of one team are tolerated; certs for different teams
+  stop the build and ask for `METISTRY_SIGN_IDENTITY`. The chosen hash and
+  name are printed.
+- Updated dependencies [c32b27d]
+  - @foldedspacelabs/metistry-core@0.4.0
+
 ## 0.3.1
 
 ### Patch Changes

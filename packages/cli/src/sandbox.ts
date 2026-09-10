@@ -81,6 +81,13 @@ export interface SandboxInputs {
   nodeBin: string;
   stateDir: string;
   consolePort: number;
+  /**
+   * The Postgres port. Under `compose` the engine reached the db through the
+   * container network; under `launchd` it is a loopback port like any other,
+   * and the profile denies by default — so without this the engine dies at
+   * startup with `EPERM connect 127.0.0.1:<port>` (2026-09-10 trial).
+   */
+  dbPort: number;
   tmpDir: string;
   realpath?: ((p: string) => string) | undefined;
 }
@@ -93,6 +100,7 @@ export interface SandboxParams {
   STATE_DIR: string;
   TMP_DIR: string;
   CONSOLE_TCP: string;
+  DB_TCP: string;
 }
 
 export function sandboxParams(inputs: SandboxInputs): SandboxParams {
@@ -104,6 +112,7 @@ export function sandboxParams(inputs: SandboxInputs): SandboxParams {
     STATE_DIR: real(inputs.stateDir),
     TMP_DIR: real(inputs.tmpDir.replace(/\/$/, "")),
     CONSOLE_TCP: `localhost:${inputs.consolePort}`,
+    DB_TCP: `localhost:${inputs.dbPort}`,
   };
 }
 

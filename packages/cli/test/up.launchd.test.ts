@@ -9,7 +9,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { realPathish } from "../src/sandbox.js";
-import { up } from "../src/up.js";
+import { nodeFor, up } from "../src/up.js";
 import { checkout, fakeExec, okDoctor, shown } from "./fixtures.js";
 
 const REPO = resolve(fileURLToPath(import.meta.url), "..", "..", "..", "..");
@@ -205,7 +205,7 @@ describe("the rendered plists", () => {
 
     // the host jobs that exist in BOTH shapes still source a dotenv file with
     // sh -c — but the INSTANCE's, not the checkout's (self-contained instances)
-    expect(await read("watchdog")).toContain(`set -a; . ${I}/state/.env; set +a; exec ${NODE} ${P}/apps/watchdog/dist/main.js`);
+    expect(await read("watchdog")).toContain(`set -a; . '${I}/state/.env'; set +a; exec '${NODE}' '${P}/apps/watchdog/dist/main.js'`);
   });
 
   it("under the compose shape the shaped plists are not installed at all", async () => {
@@ -230,5 +230,51 @@ describe("the rendered plists", () => {
     expect(labels.some((l) => l.includes(".db.plist"))).toBe(false);
     expect(labels.some((l) => l.includes(".watchdog.plist"))).toBe(true);
     expect(exec.calls.map(shown)[0]).toBe("docker compose up -d --build");
+  });
+});
+
+describe("the node every launchd job execs", () => {
+  it("prefers the bundled runtime's node over whatever is on PATH", async () => {
+    const P = await launchdCheckout();
+    const bundled = join(P, "runtime", "node", "bin", "node");
+    // a clean Mac has NO node until Xcode CLT is installed, and a launchd job
+    // gets /usr/bin:/bin with no login shell — so a bundled install whose
+    // plists exec $(which node) is one Homebrew uninstall away from dead
+    expect(nodeFor(P, { PATH: "/opt/homebrew/bin" }, (p) => p === bundled)).toEqual({ node: bundled, why: "bundled runtime/node/bin/node" });
+  });
+
+  it("falls back to $(which node) when there is no bundled runtime — a checkout is unchanged", async () => {
+    const P = await launchdCheckout();
+    expect(nodeFor(P, { PATH: "/opt/homebrew/bin" }, (p) => p === "/opt/homebrew/bin/node")).toEqual({ node: "/opt/homebrew/bin/node", why: "$(which node)" });
+  });
+
+  it("`up` renders that node into every plist, and the sandbox grants exec on ITS prefix, not Homebrew's", async () => {
+    const P = await launchdCheckout();
+    const I = await mkdtemp(join(tmpdir(), "metistry-inst-"));
+    const home = await mkdtemp(join(tmpdir(), "metistry-home-"));
+    const bundled = join(P, "runtime", "node", "bin", "node");
+    await mkdir(join(P, "runtime", "node", "bin"), { recursive: true });
+    await writeFile(bundled, "#!/bin/sh\n");
+    const lines: string[] = [];
+    const r = await up({
+      productDir: P,
+      env: env(I),
+      exec: fakeExec(),
+      out: (l) => lines.push(l),
+      platform: "darwin",
+      uid: 501,
+      home,
+      deployment: launchd,
+      exists: pgInstalled([bundled]),
+      doctorFn: okDoctor,
+    });
+    expect(r.code).toBe(0);
+    expect(lines.some((l) => l.includes(`node: ${bundled} (bundled runtime/node/bin/node)`))).toBe(true);
+    const assistant = await readFile(join(home, "Library", "LaunchAgents", "com.foldedspacelabs.metistry.assistant.plist"), "utf8");
+    expect(assistant).toContain(`<string>${bundled}</string>`);
+    // the sandbox may exec node — THIS node. A Homebrew prefix in the profile
+    // would grant /opt/homebrew and deny the runtime the jobs actually use.
+    expect(assistant).toContain(`<string>NODE_PREFIX=${realPathish(join(P, "runtime", "node"))}</string>`);
+    expect(assistant).not.toContain("/opt/homebrew");
   });
 });

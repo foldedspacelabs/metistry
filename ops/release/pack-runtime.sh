@@ -55,8 +55,15 @@ copy() {
 #    directory by seed/identity.yaml + a package.json named "metistry"
 copy package.json pnpm-workspace.yaml pnpm-lock.yaml docker-compose.yml README.md LICENSE
 
-# 2. config-shaped defaults, the schema, the ops surface
-copy seed db/migrations ops/launchd ops/scripts ops/release targets
+# 2. config-shaped defaults, the schema, the ops surface.
+#    ops/sandbox is NOT optional on darwin: under the launchd shape the
+#    assistant's launchd job execs /usr/bin/sandbox-exec -f
+#    __REPO__/ops/sandbox/assistant.sb, so a pack without it produces a job
+#    that cannot start — the engine's only host confinement, missing exactly
+#    where the container boundary was given up (open decision 15). Found by
+#    the 2026-09-10 launchd trial; v0.4.0 and earlier packs lack it.
+copy seed db/migrations ops/launchd ops/sandbox ops/scripts ops/release targets
+[ -f "$stage/ops/sandbox/assistant.sb" ] || { echo "pack-runtime: ops/sandbox/assistant.sb did not make it into the pack — the launchd shape's assistant could not start" >&2; exit 1; }
 
 # 3. every workspace package: its manifest, its package.json, its build output.
 #    src/, tests and tsconfigs are deliberately left out — a release is

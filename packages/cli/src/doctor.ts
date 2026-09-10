@@ -30,7 +30,8 @@ import {
 } from "@foldedspacelabs/metistry-core";
 import { loadDeployment } from "./deployment.js";
 import { realExec, type Exec } from "./exec.js";
-import { loadPlistTemplates, serviceOf, LABEL_PREFIX } from "./launchd.js";
+import { labelFor, loadPlistTemplates, logPathFor, serviceOf } from "./launchd.js";
+import { applyPorts, loadNamespace, type Namespace } from "./namespace.js";
 
 export interface Db {
   query(text: string, values?: unknown[]): Promise<{ rows: any[] }>;
@@ -59,6 +60,8 @@ export interface DoctorDeps {
   exec?: Exec;
   /** normally read from deployment.yaml (seed + instance overlay); injected by tests and by `up` */
   deployment?: Deployment;
+  /** this instance's label suffix + port block (`<instance>/state/ports.yaml`); read from METISTRY_INSTANCE_DIR unless given. null = "there is none", so a test never touches the filesystem */
+  namespace?: Namespace | null;
   platform?: NodeJS.Platform;
   uid?: number;
   timeoutMs?: number;
@@ -111,13 +114,14 @@ export async function walkManifests(productDir: string): Promise<FoundManifest[]
 interface ProbeTarget {
   urlVar: string;
   tokenVar: string;
-  launchdLabel?: string;
+  /** the service whose launchd job serves this. The LABEL is derived from it, so a namespaced install's remediation names the job that actually exists. */
+  launchdService?: string;
 }
 
 const KNOWN_TARGETS: Record<string, ProbeTarget> = {
-  "apple-fm": { urlVar: "METISTRY_AFM_URL", tokenVar: "METISTRY_BRIDGE_TOKEN_APPLE_FM", launchdLabel: "com.foldedspacelabs.metistry.apple-fm" },
-  eventkit: { urlVar: "METISTRY_EK_URL", tokenVar: "METISTRY_BRIDGE_TOKEN_EVENTKIT", launchdLabel: "com.foldedspacelabs.metistry.eventkit" },
-  reconciler: { urlVar: "METISTRY_RECONCILER_URL", tokenVar: "METISTRY_BRIDGE_TOKEN_RECONCILER", launchdLabel: "com.foldedspacelabs.metistry.reconciler" },
+  "apple-fm": { urlVar: "METISTRY_AFM_URL", tokenVar: "METISTRY_BRIDGE_TOKEN_APPLE_FM", launchdService: "apple-fm" },
+  eventkit: { urlVar: "METISTRY_EK_URL", tokenVar: "METISTRY_BRIDGE_TOKEN_EVENTKIT", launchdService: "eventkit" },
+  reconciler: { urlVar: "METISTRY_RECONCILER_URL", tokenVar: "METISTRY_BRIDGE_TOKEN_RECONCILER", launchdService: "reconciler" },
 };
 
 /** A component with no dedicated variable pair follows the convention: METISTRY_<NAME>_URL / METISTRY_BRIDGE_TOKEN_<NAME>. */
@@ -136,14 +140,14 @@ export function hostLocal(url: string, shape: DeploymentShape = "compose"): stri
   return resolveUrl(url, { shape, vantage: "host" });
 }
 
-/** How an operator restarts a service, in the shape it actually runs in. */
-export function restartHint(service: string, shape: DeploymentShape): string {
-  return shape === "launchd" ? `launchctl kickstart -k gui/$(id -u)/${LABEL_PREFIX}${service}` : `docker compose up -d ${service}`;
+/** How an operator restarts a service, in the shape it actually runs in — under the label this instance's jobs actually carry. */
+export function restartHint(service: string, shape: DeploymentShape, labelSuffix?: string | undefined): string {
+  return shape === "launchd" ? `launchctl kickstart -k gui/$(id -u)/${labelFor(service, labelSuffix)}` : `docker compose up -d ${service}`;
 }
 
 /** Where its log is, in the shape it actually runs in. */
-export function logHint(service: string, shape: DeploymentShape): string {
-  return shape === "launchd" ? `/tmp/metistry-${service}.log` : `docker compose logs ${service}`;
+export function logHint(service: string, shape: DeploymentShape, labelSuffix?: string | undefined): string {
+  return shape === "launchd" ? logPathFor(service, labelSuffix) : `docker compose logs ${service}`;
 }
 
 type Outcome = Pick<CheckResult, "status" | "remediation" | "meta">;
@@ -175,7 +179,7 @@ async function probeCheck(name: string, url: string, token: string | undefined, 
 }
 
 /** One component row: manifest validity first; then the network probe for anything that declares an http surface. */
-async function componentRow(m: FoundManifest, deps: Required<Pick<DoctorDeps, "env" | "fetchFn" | "timeoutMs">> & { shape: DeploymentShape }): Promise<DoctorRow> {
+async function componentRow(m: FoundManifest, deps: Required<Pick<DoctorDeps, "env" | "fetchFn" | "timeoutMs">> & { shape: DeploymentShape; labelSuffix?: string | undefined }): Promise<DoctorRow> {
   const kind = m.result.ok ? m.result.manifest.type : m.type;
   if (!m.result.ok) {
     return {
@@ -193,11 +197,11 @@ async function componentRow(m: FoundManifest, deps: Required<Pick<DoctorDeps, "e
       kind,
       ...(await runCheck(man.name, `GET ${url}/health ok; /api/status answers (401 = a passkey session is required)`, async () => {
         const health = await deps.fetchFn(`${url}/health`, { signal: AbortSignal.timeout(deps.timeoutMs) }).catch((err) => {
-          throw new Error(`console down at ${url} (${err instanceof Error ? err.message : String(err)}) — ${restartHint("console", deps.shape)}`);
+          throw new Error(`console down at ${url} (${err instanceof Error ? err.message : String(err)}) — ${restartHint("console", deps.shape, deps.labelSuffix)}`);
         });
-        if (!health.ok) throw new Error(`console /health returned ${health.status} — ${logHint("console", deps.shape)}`);
+        if (!health.ok) throw new Error(`console /health returned ${health.status} — ${logHint("console", deps.shape, deps.labelSuffix)}`);
         const status = await deps.fetchFn(`${url}/api/status`, { signal: AbortSignal.timeout(deps.timeoutMs) });
-        if (status.status !== 200 && status.status !== 401) throw new Error(`console /api/status returned ${status.status} — ${logHint("console", deps.shape)}`);
+        if (status.status !== 200 && status.status !== 401) throw new Error(`console /api/status returned ${status.status} — ${logHint("console", deps.shape, deps.labelSuffix)}`);
         return { meta: { url, api_status: status.status } };
       })),
     };
@@ -210,9 +214,9 @@ async function componentRow(m: FoundManifest, deps: Required<Pick<DoctorDeps, "e
       kind,
       ...(await runCheck(man.name, `${url}/mcp answers (401 = agent bearer required; served by the console)`, async () => {
         const r = await deps.fetchFn(`${url}/mcp`, { signal: AbortSignal.timeout(deps.timeoutMs) }).catch((err) => {
-          throw new Error(`console down at ${url} (${err instanceof Error ? err.message : String(err)}) — ${restartHint("console", deps.shape)}`);
+          throw new Error(`console down at ${url} (${err instanceof Error ? err.message : String(err)}) — ${restartHint("console", deps.shape, deps.labelSuffix)}`);
         });
-        if (r.status !== 401 && r.status !== 200) throw new Error(`/mcp returned ${r.status} — ${logHint("console", deps.shape)}`);
+        if (r.status !== 401 && r.status !== 200) throw new Error(`/mcp returned ${r.status} — ${logHint("console", deps.shape, deps.labelSuffix)}`);
       })),
     };
   }
@@ -232,7 +236,7 @@ async function componentRow(m: FoundManifest, deps: Required<Pick<DoctorDeps, "e
       };
     }
     const url = hostLocal(configured, deps.shape);
-    const restart = t.launchdLabel ? `launchctl kickstart -k gui/$(id -u)/${t.launchdLabel}` : restartHint(man.name, deps.shape);
+    const restart = restartHint(t.launchdService ?? man.name, t.launchdService ? "launchd" : deps.shape, deps.labelSuffix);
     return {
       kind,
       ...(await runCheck(man.name, `GET ${url}/check answers status ok`, () => probeCheck(man.name, url, deps.env[t.tokenVar], restart, deps.fetchFn, deps.timeoutMs))),
@@ -242,7 +246,7 @@ async function componentRow(m: FoundManifest, deps: Required<Pick<DoctorDeps, "e
   const via =
     man.type === "service"
       ? man.runs_on === "host" || deps.shape === "launchd"
-        ? `process state: launchd:${LABEL_PREFIX}${man.name}`
+        ? `process state: launchd:${labelFor(man.name, deps.labelSuffix)}`
         : `process state: compose:${man.name}`
       : undefined;
   return { kind, ...(await runCheck(man.name, `${m.dir}/manifest.yaml validates${via ? `; ${via}` : ""}`, async () => {})) };
@@ -265,7 +269,7 @@ export async function openDbFromEnv(env: NodeJS.ProcessEnv): Promise<Db | null> 
   return { query: (t, v) => pool.query(t, v as any[]), end: () => pool.end() };
 }
 
-export async function dbRows(db: Db | null, productDir: string, shape: DeploymentShape = "compose"): Promise<DoctorRow[]> {
+export async function dbRows(db: Db | null, productDir: string, shape: DeploymentShape = "compose", labelSuffix?: string | undefined): Promise<DoctorRow[]> {
   const migrationsDir = join(productDir, "db", "migrations");
   const files = existsSync(migrationsDir) ? (await readdir(migrationsDir)).filter((f) => f.endsWith(".sql")).sort() : [];
 
@@ -284,7 +288,7 @@ export async function dbRows(db: Db | null, productDir: string, shape: Deploymen
         await db.query("SELECT 1");
       } catch (err) {
         reachable = false;
-        throw new Error(`${err instanceof Error ? err.message : String(err)} — ${restartHint("db", shape)}; check METISTRY_DB_* in .env${shape === "launchd" ? " (log: /tmp/metistry-db.log)" : ""}`);
+        throw new Error(`${err instanceof Error ? err.message : String(err)} — ${restartHint("db", shape, labelSuffix)}; check METISTRY_DB_* in .env${shape === "launchd" ? ` (log: ${logPathFor("db", labelSuffix)})` : ""}`);
       }
     })),
   };
@@ -315,8 +319,8 @@ export async function dbRows(db: Db | null, productDir: string, shape: Deploymen
  * assistant plists exist in the checkout but are not host jobs, so probing
  * them would report every install as broken.
  */
-export async function launchdLabels(productDir: string, shape: DeploymentShape = "compose"): Promise<{ file: string; label: string }[]> {
-  return (await loadPlistTemplates(productDir, shape)).map((t) => ({ file: t.file, label: t.label }));
+export async function launchdLabels(productDir: string, shape: DeploymentShape = "compose", labelSuffix?: string | undefined): Promise<{ file: string; label: string }[]> {
+  return (await loadPlistTemplates(productDir, shape, labelSuffix)).map((t) => ({ file: t.file, label: t.label }));
 }
 
 /** `launchctl print gui/<uid>/<label>` → running | waiting (with last exit code) | not bootstrapped. */
@@ -327,10 +331,10 @@ export function parseLaunchctlPrint(text: string): { state: string; pid?: number
   return { state, ...(pid ? { pid: Number(pid) } : {}), ...(lastExit ? { lastExit: Number(lastExit) } : {}) };
 }
 
-export async function launchdRows(productDir: string, exec: Exec, uid: number, shape: DeploymentShape = "compose"): Promise<DoctorRow[]> {
+export async function launchdRows(productDir: string, exec: Exec, uid: number, shape: DeploymentShape = "compose", labelSuffix?: string | undefined): Promise<DoctorRow[]> {
   const rows: DoctorRow[] = [];
   const shaped = new Set<string>(SHAPED_SERVICES);
-  for (const { file, label } of await launchdLabels(productDir, shape)) {
+  for (const { file, label } of await launchdLabels(productDir, shape, labelSuffix)) {
     rows.push({
       kind: "launchd",
       ...(await runCheck(`launchd:${label}`, `launchctl print gui/${uid}/${label} reports state = running`, async () => {
@@ -350,7 +354,7 @@ export async function launchdRows(productDir: string, exec: Exec, uid: number, s
         if (p.state === "running") return { meta: { pid: p.pid } };
         return {
           status: "failed",
-          remediation: `state = ${p.state}${p.lastExit !== undefined ? `, last exit code ${p.lastExit}` : ""} — launchctl kickstart -k gui/$(id -u)/${label}; log: /tmp/metistry-*.log`,
+          remediation: `state = ${p.state}${p.lastExit !== undefined ? `, last exit code ${p.lastExit}` : ""} — launchctl kickstart -k gui/$(id -u)/${label}; log: ${logPathFor(serviceOf(label), labelSuffix)}`,
           meta: { state: p.state, last_exit: p.lastExit },
         };
       })),
@@ -433,7 +437,9 @@ export async function composeRows(productDir: string, exec: Exec): Promise<Docto
 // ---- the whole report -------------------------------------------------------------
 
 export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
-  const env = deps.env ?? process.env;
+  // a COPY: doctor is read-only, and applying this instance's port block to
+  // the real process environment would leak into whatever ran it
+  const env: NodeJS.ProcessEnv = { ...(deps.env ?? process.env) };
   const fetchFn = deps.fetchFn ?? fetch;
   const exec = deps.exec ?? realExec;
   const platform = deps.platform ?? process.platform;
@@ -441,25 +447,36 @@ export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
   const timeoutMs = deps.timeoutMs ?? 5000;
   const loaded = deps.deployment ? { deployment: deps.deployment, from: "caller" } : await loadDeployment(deps.productDir, env);
   const shape = loaded.deployment.shape;
+  // this instance's own labels and ports, when it has been given a namespace
+  // (`metistry up --namespace`) — every probe and every remediation below is
+  // written for the jobs and ports that actually exist
+  const ns = deps.namespace === undefined ? await loadNamespace(env.METISTRY_INSTANCE_DIR) : (deps.namespace ?? undefined);
+  const labelSuffix = ns?.labelSuffix;
+  if (ns) applyPorts(env, ns);
 
   const rows: DoctorRow[] = [
     {
       kind: "deployment",
-      ...(await runCheck("deployment", `deployment.yaml shape (${loaded.from})`, async () => ({
-        meta: { shape, from: loaded.from, services: Object.fromEntries(servicePlan(loaded.deployment).map((x) => [x.name, x.enabled ? x.shape : "disabled"])) },
+      ...(await runCheck("deployment", `deployment.yaml shape (${loaded.from})${ns ? `; namespace ${ns.labelSuffix}, ports ${ns.base}+ (${ns.from})` : ""}`, async () => ({
+        meta: {
+          shape,
+          from: loaded.from,
+          services: Object.fromEntries(servicePlan(loaded.deployment).map((x) => [x.name, x.enabled ? x.shape : "disabled"])),
+          ...(ns ? { namespace: { label_suffix: ns.labelSuffix, base: ns.base, ports: ns.ports } } : {}),
+        },
       }))),
     },
   ];
-  for (const m of await walkManifests(deps.productDir)) rows.push(await componentRow(m, { env, fetchFn, timeoutMs, shape }));
+  for (const m of await walkManifests(deps.productDir)) rows.push(await componentRow(m, { env, fetchFn, timeoutMs, shape, labelSuffix }));
 
   const db = deps.db === undefined ? await openDbFromEnv(env) : deps.db;
   try {
-    rows.push(...(await dbRows(db, deps.productDir, shape)));
+    rows.push(...(await dbRows(db, deps.productDir, shape, labelSuffix)));
   } finally {
     if (deps.db === undefined && db?.end) await db.end().catch(() => {});
   }
 
-  if (platform === "darwin") rows.push(...(await launchdRows(deps.productDir, exec, uid, shape)));
+  if (platform === "darwin") rows.push(...(await launchdRows(deps.productDir, exec, uid, shape, labelSuffix)));
   // no container runtime is consulted when no service runs in one: a
   // launchd install must not report "docker not found" as a finding
   if (usesCompose(loaded.deployment)) rows.push(...(await composeRows(deps.productDir, exec)));

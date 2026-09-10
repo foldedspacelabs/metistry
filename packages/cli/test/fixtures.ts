@@ -13,17 +13,44 @@ const plist = (label: string, args: string, extra = "") =>
 
 /** The shape ops/launchd uses for node services: `set -a; . <instance>/state/.env; set +a; exec node <dist>`. */
 export const nodeJob = (label: string, rel: string) =>
-  plist(label, `<string>/bin/sh</string><string>-c</string><string>set -a; . __ENV_FILE__; set +a; exec __NODE__ __REPO__/${rel}</string>`, `  <key>WorkingDirectory</key><string>__REPO__</string>\n`);
+  plist(
+    label,
+    `<string>/bin/sh</string><string>-c</string><string>set -a; . __ENV_FILE__; set +a; exec __NODE__ __REPO__/${rel}</string>`,
+    `  <key>WorkingDirectory</key><string>__REPO__</string>\n  <key>StandardOutPath</key><string>/tmp/metistry-${label.split(".").pop()}.log</string>\n`,
+  );
 
 /** The eventkit-helper shape: the signed binary is the job's root process; env via EnvironmentVariables. */
 export const binJob = (label: string, rel: string) =>
   plist(label, `<string>__REPO__/${rel}</string>`, `  <key>EnvironmentVariables</key>\n  <dict>\n    <key>METISTRY_EK_SOCKET</key><string>/tmp/x.sock</string>\n  </dict>\n`);
 
-export const HELPER = "com.foldedspacelabs.metistry.eventkit-helper";
+/** The EventKit helper's agent, renamed from `eventkit-helper` with the supervisor. */
+export const HELPER = "com.foldedspacelabs.metistry.calendar";
 export const RECONCILER = "com.foldedspacelabs.metistry.reconciler";
 export const WATCHDOG = "com.foldedspacelabs.metistry.watchdog";
-/** in ops/launchd file-name order */
+/** The one agent the launchd shape installs for the core; its label is the prefix itself. */
+export const SUPERVISOR = "com.foldedspacelabs.metistry";
+/** The agents the COMPOSE shape installs, in ops/launchd file-name order (no supervisor: that is the launchd shape's). */
 export const JOBS = [HELPER, RECONCILER, WATCHDOG] as const;
+
+/**
+ * What `up` does before installing anything: boot out the agents this shape
+ * no longer has. Under compose that is only the EventKit helper's old label
+ * (`eventkit-helper` → `calendar`); under launchd it is the whole
+ * pre-supervisor set.
+ */
+export const retired = (home: string, shape: "compose" | "launchd" = "compose") =>
+  (shape === "launchd" ? ["db", "console", "assistant", "reconciler", "watchdog", "eventkit", "apple-fm", "eventkit-helper"] : ["eventkit-helper"]).flatMap((s) => {
+    const label = `com.foldedspacelabs.metistry.${s}`;
+    return [`launchctl bootout gui/501/${label}`, `rm -f ${home}/Library/LaunchAgents/${label}.plist`];
+  });
+
+/** The supervisor's shape: the `Metistry` symlink, the watchdog's entry point, and the config `up` writes. */
+export const supervisorJob = () =>
+  plist(
+    SUPERVISOR,
+    `<string>__SUPERVISOR_BIN__</string><string>__REPO__/apps/watchdog/dist/main.js</string><string>--config</string><string>__SUPERVISOR_CONFIG__</string>`,
+    `  <key>WorkingDirectory</key><string>__REPO__</string>\n  <key>EnvironmentVariables</key>\n  <dict>\n__ENV__\n  </dict>\n  <key>StandardOutPath</key><string>/tmp/metistry-supervisor.log</string>\n`,
+  );
 
 export async function put(root: string, rel: string, text: string): Promise<void> {
   await mkdir(join(root, rel, ".."), { recursive: true });
@@ -34,6 +61,7 @@ export async function checkout(opts: { git?: boolean } = {}): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "metistry-up-"));
   await put(root, "package.json", JSON.stringify({ name: "metistry" }));
   await put(root, "seed/identity.yaml", "name: Seed\n");
+  await put(root, `ops/launchd/${SUPERVISOR}.plist`, supervisorJob());
   await put(root, `ops/launchd/${HELPER}.plist`, binJob(HELPER, "packages/mcp-eventkit/helper/ek-helper.app/Contents/MacOS/ek-helper"));
   await put(root, `ops/launchd/${RECONCILER}.plist`, nodeJob(RECONCILER, "apps/reconciler/dist/main.js"));
   await put(root, `ops/launchd/${WATCHDOG}.plist`, nodeJob(WATCHDOG, "apps/watchdog/dist/main.js"));

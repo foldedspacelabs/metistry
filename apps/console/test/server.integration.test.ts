@@ -4,6 +4,7 @@
 import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import type { AddressInfo } from "node:net";
+import { networkInterfaces } from "node:os";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
 import { QueryStore } from "@foldedspacelabs/metistry-queries";
@@ -26,8 +27,12 @@ describe.skipIf(!hasDb)("console server (integration)", () => {
   let pool: pg.Pool;
   let base: string;
   let server: ReturnType<typeof makeServer>;
+  let queries: QueryStore;
   let sessionCookie: string;
   let ownerToken: string;
+  // METISTRY_OWNER_TOKEN: an env value, not a database row — minted here the
+  // way `metistry init` mints it, and never registered in `owner_tokens`.
+  const localOwnerToken = mintToken();
 
   beforeAll(async () => {
     pool = new pg.Pool({
@@ -36,7 +41,7 @@ describe.skipIf(!hasDb)("console server (integration)", () => {
       database: process.env.METISTRY_TEST_DB_NAME ?? "metistry_test", // scratch db (ops/scripts/test-db.sh)
       password: process.env.METISTRY_DB_PASSWORD,
     });
-    const queries = new QueryStore(pool);
+    queries = new QueryStore(pool);
     queries.load(`
 name: open_work
 description: test
@@ -51,6 +56,7 @@ sql: SELECT id, title FROM work WHERE status <> 'closed' ORDER BY updated_at DES
       policy,
       secureCookies: false,
       rules: loadRules(readFileSync(new URL("../../../seed/rules.yaml", import.meta.url), "utf8")),
+      localOwner: { token: localOwnerToken, trusted: [] }, // loopback only, as on the launchd shape
     });
     await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -96,6 +102,103 @@ sql: SELECT id, title FROM work WHERE status <> 'closed' ORDER BY updated_at DES
     const mgmt = await fetch(`${base}/api/devices`, { headers: auth });
     expect(mgmt.status).toBe(403);
     expect((await mgmt.json()).error.message).toBe("not granted"); // no existence leak
+  });
+
+  // ----- the local owner token (docs/ops/auth.md) -----
+  // The unit-level misuse matrix lives in test/local-owner.test.ts, where a
+  // peer address can be fabricated. These are the same rules over real
+  // sockets, plus what the token is actually GRANTED.
+  it("METISTRY_OWNER_TOKEN over loopback is the `user` principal — the same one a passkey session yields", async () => {
+    const auth = { authorization: `Bearer ${localOwnerToken}` };
+
+    const who = await fetch(`${base}/api/whoami`, { headers: auth });
+    expect(who.status).toBe(200);
+    expect(await who.json()).toMatchObject({ principal: "user", via: "local_owner_token", management: true });
+
+    // management: what a capture owner token is forbidden on, this may do
+    const devices = await fetch(`${base}/api/devices`, { headers: auth });
+    expect(devices.status).toBe(200);
+    expect(Array.isArray((await devices.json()).devices)).toBe(true);
+    expect((await fetch(`${base}/api/agents`, { headers: auth })).status).toBe(200);
+    expect((await fetch(`${base}/api/proposals`, { headers: auth })).status).toBe(200);
+    expect((await fetch(`${base}/api/targets`, { headers: auth })).status).toBe(200);
+
+    // …and the agent/capture surface still works, so nothing regressed
+    const cap = await fetch(`${base}/capture`, {
+      method: "POST",
+      headers: { ...auth, "content-type": "application/json" },
+      body: JSON.stringify({ note: "from the mac app" }),
+    });
+    expect(cap.status).toBe(201);
+  });
+
+  it("a passkey session and the local owner token answer whoami as the same principal, by different means", async () => {
+    const viaSession = await (await fetch(`${base}/api/whoami`, { headers: { cookie: sessionCookie } })).json();
+    expect(viaSession).toMatchObject({ principal: "user", via: "passkey_session", management: true });
+    // a host-minted capture token is in the owner CLASS but is not that principal
+    const viaShortcut = await (await fetch(`${base}/api/whoami`, { headers: { authorization: `Bearer ${ownerToken}` } })).json();
+    expect(viaShortcut).toMatchObject({ principal: "owner_token", via: "owner_token", management: false });
+  });
+
+  it("has no session to log out of, and cannot subscribe a device to push", async () => {
+    const auth = { authorization: `Bearer ${localOwnerToken}` };
+    expect((await fetch(`${base}/auth/logout`, { method: "POST", headers: auth })).status).toBe(403);
+    expect((await fetch(`${base}/api/push/vapid-key`, { headers: auth })).status).toBe(403);
+  });
+
+  it("is refused from a non-loopback address, indistinguishably from an unknown token", async () => {
+    // A second server on 0.0.0.0, reached over one of this host's real
+    // interfaces: the peer address is genuinely not loopback.
+    const external = Object.values(networkInterfaces())
+      .flatMap((a) => a ?? [])
+      .find((a) => a.family === "IPv4" && !a.internal)?.address;
+    if (!external) return; // no non-loopback interface here (some CI sandboxes)
+
+    const exposed = makeServer(pool, queries, {
+      origin: "http://127.0.0.1:0",
+      inboxDir: `/tmp/metistry-test-inbox-${Date.now()}`,
+      policy,
+      secureCookies: false,
+      localOwner: { token: localOwnerToken, trusted: [] },
+    });
+    await new Promise<void>((r) => exposed.listen(0, "0.0.0.0", r));
+    const remote = `http://${external}:${(exposed.address() as AddressInfo).port}`;
+    try {
+      const unknown = await fetch(`${remote}/api/status`, { headers: { authorization: `Bearer ${mintToken()}` } });
+      const stolen = await fetch(`${remote}/api/status`, { headers: { authorization: `Bearer ${localOwnerToken}` } });
+      // X-Forwarded-For is the caller's to write, and buys nothing
+      const spoofed = await fetch(`${remote}/api/status`, {
+        headers: { authorization: `Bearer ${localOwnerToken}`, "x-forwarded-for": "127.0.0.1", "x-real-ip": "127.0.0.1" },
+      });
+      for (const r of [unknown, stolen, spoofed]) expect(r.status).toBe(401);
+      const bodies = await Promise.all([unknown.json(), stolen.json(), spoofed.json()]);
+      expect(bodies[1]).toEqual(bodies[0]); // byte-identical to an unknown token
+      expect(bodies[2]).toEqual(bodies[0]);
+
+      // the refusal IS recorded, even though the caller is told nothing
+      const { rows } = await pool.query(
+        `SELECT meta FROM runs WHERE component = 'console' AND kind = 'auth' AND tool = 'owner_token_remote' ORDER BY id DESC LIMIT 2`,
+      );
+      expect(rows.length).toBe(2);
+      expect(String(rows[0].meta.remote)).not.toMatch(/^(127\.0\.0\.1|::1)$/);
+
+      // …and the same server still opens for loopback, so the rule is the
+      // address and not the server
+      const local = await fetch(`http://127.0.0.1:${(exposed.address() as AddressInfo).port}/api/whoami`, {
+        headers: { authorization: `Bearer ${localOwnerToken}` },
+      });
+      expect(local.status).toBe(200);
+    } finally {
+      await new Promise<void>((r) => exposed.close(() => r()));
+    }
+  });
+
+  it("a wrong token from loopback is the same 401 as no token at all", async () => {
+    const wrong = await fetch(`${base}/api/status`, { headers: { authorization: `Bearer ${mintToken()}` } });
+    const none = await fetch(`${base}/api/status`);
+    expect(wrong.status).toBe(401);
+    expect(none.status).toBe(401);
+    expect(await wrong.json()).toEqual(await none.json());
   });
 
   it("rejects a bogus bearer and a bogus cookie", async () => {

@@ -14,6 +14,9 @@ import { ASSISTANT_DEFAULT_AREAS, INTERNAL_ASSISTANT_ID, ensureInternalAgent, re
 import { httpVaultClient } from "./vault-client.js";
 import { CrewRegistry } from "./crews.js";
 import { readFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
+import { defaultGatewayFrom, parseTrustedProxies } from "./local-owner.js";
+import { canonicalOrigin } from "./webauthn.js";
 
 const pool = makePool();
 const queries = new QueryStore(pool);
@@ -61,7 +64,37 @@ for (const dir of optionalEnv("METISTRY_TARGETS_DIRS", "targets").split(":")) {
 }
 console.log(`targets: ${targets.names().join(", ") || "(none)"}`);
 
-const origin = requireEnv("METISTRY_ORIGIN"); // canonical HTTPS origin (§4.2)
+// METISTRY_ORIGIN may be a comma-separated list; the FIRST entry is
+// canonical (rpID, enrolled passkeys, the base for relative URLs) and the
+// whole list is what the ceremonies accept (webauthn.ts).
+const origins = requireEnv("METISTRY_ORIGIN"); // canonical HTTPS origin(s) (§4.2)
+const origin = canonicalOrigin(origins);
+
+// The local owner door (docs/ops/auth.md): METISTRY_OWNER_TOKEN over a
+// connection from this machine authenticates as the `user` principal — the
+// Mac app and the CLI, which run as the logged-in user and can already read
+// the Keychain this token lives in. Unset = no local door; there is no
+// default token and no fallback.
+//
+// METISTRY_TRUSTED_LOOPBACK_PROXY is how the compose shape says "a
+// host-loopback connection reaches me NATed": docker-compose.yml sets the
+// sentinel `docker-gateway`, resolved here, once, from this container's own
+// default route. Unset (launchd, and any console nothing configured) =
+// plain loopback.
+const ownerToken = process.env.METISTRY_OWNER_TOKEN ?? "";
+const trustedProxies = parseTrustedProxies(process.env.METISTRY_TRUSTED_LOOPBACK_PROXY, () => {
+  try {
+    return defaultGatewayFrom(readFileSync("/proc/net/route", "utf8"));
+  } catch {
+    return null; // not Linux, or no route table: nothing extra is trusted
+  }
+});
+const localOwner = ownerToken ? { token: ownerToken, trusted: trustedProxies } : undefined;
+console.log(
+  localOwner
+    ? `local owner token: enabled (peer must be loopback${trustedProxies.length ? ` or ${trustedProxies.join(", ")}` : ""})`
+    : "local owner token absent: set METISTRY_OWNER_TOKEN for `metistry console whoami` and the Mac app (degrades: passkeys only)",
+);
 const push = pushConfigFromEnv();
 if (!push) console.warn("web push absent: set METISTRY_VAPID_* to enable (degrades: absent)");
 
@@ -107,6 +140,8 @@ setInterval(() => crews.refresh().then(logCrewSync, (err) => console.error("crew
 
 const server = makeServer(pool, queries, {
   origin,
+  origins,
+  ...(localOwner ? { localOwner } : {}),
   inboxDir: optionalEnv("METISTRY_INBOX_DIR", "./inbox"),
   policy: {
     idleDays: intEnv("METISTRY_SESSION_IDLE_DAYS", 30),

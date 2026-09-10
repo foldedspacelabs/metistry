@@ -162,7 +162,7 @@ export interface LaunchdEnv {
 export function nodeFor(productDir: string, env: NodeJS.ProcessEnv, exists: (p: string) => boolean = existsSync): { node: string; why: string } {
   const bundled = runtimeNodeBin(productDir);
   if (exists(bundled)) return { node: bundled, why: `bundled ${RUNTIME_DIRNAME}/node/bin/node` };
-  return { node: nodeOnPath(env), why: "$(which node)" };
+  return { node: nodeOnPath(env, process.execPath, exists), why: "$(which node)" };
 }
 
 /** The root the instance's derived state hangs off: the instance repo when there is one, else the checkout. */

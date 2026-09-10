@@ -14,6 +14,7 @@ import { realExec, type Exec } from "./exec.js";
 import { AUTH_MODES, connectRepo, type AuthMode } from "./connect-repo.js";
 import { importSessions } from "./import-sessions.js";
 import { init } from "./init.js";
+import { readInstanceId } from "./instance.js";
 import type { LockSource } from "./lock.js";
 import { listSecrets, mintSecret, renderSecretList, syncSecrets, type SyncDirection } from "./secrets.js";
 import { up } from "./up.js";
@@ -258,15 +259,21 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
     }
     case "secrets": {
       const sub = positional[0];
-      loadEnv();
-      const envFile = str(flags, "env-file") ?? (productDir ? join(productDir, ".env") : undefined);
-      if (!envFile) {
-        err("secrets needs a .env to read or generate: pass --env-file or run inside a checkout (--product-dir / METISTRY_PRODUCT_DIR)");
+      const loaded = loadEnv();
+      const paths = loaded.paths;
+      if (!paths) {
+        err("secrets needs a .env to read or generate: pass --env-file, --instance <dir>, or run inside a checkout (--product-dir / METISTRY_PRODUCT_DIR)");
         return 2;
       }
+      // read the highest-precedence file that exists (the product checkout's
+      // while an install predates the move); write where it now belongs
+      const envFile = paths.read[0] ?? paths.write;
+      const instanceId = loaded.instanceDir ? await readInstanceId(loaded.instanceDir) : undefined;
       const secretsOpts = {
         envFile,
+        envTarget: paths.write,
         exampleFile: productDir ? join(productDir, ".env.example") : undefined,
+        instanceId,
         out,
         ...(io.exec ? { exec: io.exec } : {}),
       };

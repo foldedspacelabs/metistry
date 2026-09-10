@@ -37,19 +37,35 @@ cleanup() { [ -n "${keyfile:-}" ] && rm -f "$keyfile"; }
 trap cleanup EXIT
 keyfile=""
 
+# `notarytool submit --wait` exits 0 whether Apple said Accepted or Invalid
+# (learned from v0.4.0: the job went on to staple and died with "Error 65").
+# So the status is read from the output, and on anything but Accepted the
+# submission's log — the list of files Apple objected to and why — is fetched
+# and printed before failing. That log is the only useful error there is.
+creds=()
 if [ -n "${APPLE_API_KEY_P8:-}" ]; then
   [ -n "${APPLE_API_KEY_ID:-}" ] || die "APPLE_API_KEY_P8 is set but APPLE_API_KEY_ID is not"
   [ -n "${APPLE_API_ISSUER_ID:-}" ] || die "APPLE_API_KEY_P8 is set but APPLE_API_ISSUER_ID is not"
   keyfile="$(mktemp -t metistry-notary-key)"
   chmod 600 "$keyfile"
   printf '%s' "$APPLE_API_KEY_P8" | base64 --decode > "$keyfile"
+  creds=(--key "$keyfile" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER_ID")
   say "notarytool submit --wait  (App Store Connect API key $APPLE_API_KEY_ID)"
-  xcrun notarytool submit "$artifact" \
-    --key "$keyfile" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER_ID" \
-    --wait
 else
+  creds=(--keychain-profile "$profile")
   say "notarytool submit --wait  (keychain profile \"$profile\")"
-  xcrun notarytool submit "$artifact" --keychain-profile "$profile" --wait
+fi
+
+submit_out="$(xcrun notarytool submit "$artifact" "${creds[@]}" --wait 2>&1 | tee /dev/stderr)" || true
+submission_id="$(printf '%s\n' "$submit_out" | grep -oE '^\s*id: [0-9a-f-]{36}' | head -1 | awk '{print $2}')"
+status="$(printf '%s\n' "$submit_out" | grep -oE '^\s*status: .*' | tail -1 | awk '{print $2}')"
+if [ "$status" != "Accepted" ]; then
+  say "notarization status: ${status:-unknown} (submission ${submission_id:-unknown})"
+  if [ -n "$submission_id" ]; then
+    say "notarytool log $submission_id"
+    xcrun notarytool log "$submission_id" "${creds[@]}" 2>&1 | sed 's/^/   /' >&2 || true
+  fi
+  die "Apple did not accept $artifact — see the issues above"
 fi
 
 # Stapling attaches the ticket to the artifact so Gatekeeper accepts it with no

@@ -248,9 +248,9 @@ binary to a bundle) means TCC sees a new client and the old
 Calendars/Reminders grant does not carry over. It must be re-requested once:
 
 ```sh
-launchctl bootout gui/$(id -u)/com.foldedspacelabs.metistry.eventkit-helper 2>/dev/null || true
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.foldedspacelabs.metistry.eventkit-helper.plist
-launchctl kickstart -k gui/$(id -u)/com.foldedspacelabs.metistry.eventkit-helper
+launchctl bootout gui/$(id -u)/com.foldedspacelabs.metistry.calendar 2>/dev/null || true
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.foldedspacelabs.metistry.calendar.plist
+launchctl kickstart -k gui/$(id -u)/com.foldedspacelabs.metistry.calendar
 printf '{"id":1,"op":"request"}\n' | nc -U /tmp/metistry-eventkit.sock
 ```
 

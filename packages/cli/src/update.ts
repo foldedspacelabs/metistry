@@ -15,14 +15,15 @@ import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join, relative } from "node:path";
-import { usesCompose } from "@foldedspacelabs/metistry-core";
+import { usesCompose, type Deployment } from "@foldedspacelabs/metistry-core";
 import { loadDeployment } from "./deployment.js";
 import { doctor, type DoctorDeps, type DoctorReport } from "./doctor.js";
 import { productVersion } from "./env.js";
 import { envPaths } from "./instance.js";
 import { applyPorts, loadNamespace } from "./namespace.js";
 import type { Exec } from "./exec.js";
-import { loadPlistTemplates, type PlistTemplate } from "./launchd.js";
+import { loadPlistTemplates, loadSupervisedTemplates, type PlistTemplate } from "./launchd.js";
+import { SUPERVISOR_SERVICE } from "./supervisor.js";
 import { instanceLockPath, LOCK_FILENAME, readLock, serializeLock, type LockFile, type LockSource } from "./lock.js";
 import { writeProtected, type ProtectedWrite } from "./protected-write.js";
 import { listMigrationFiles, MIGRATION_LOCK_KEY, openMigrationSession, runMigrations, type MigrateResult, type MigrationSession } from "./migrate.js";
@@ -149,6 +150,26 @@ export async function hashHostJobs(productDir: string, templates: PlistTemplate[
   return out;
 }
 
+/**
+ * The jobs `update` may kickstart, with the launchd shape's children folded
+ * in.
+ *
+ * Under that shape there is ONE agent for the core, and the console, the
+ * assistant, the reconciler and the bridges are its children — launchd
+ * cannot kickstart them. So the supervisor's entry tracks its children's
+ * code as well as its own: when a console build changes, the supervisor is
+ * kickstarted and every child comes back on the new code. Blunter than
+ * restarting the one child that moved, and it is what "they do not keep
+ * running old code until the next `metistry up`" actually requires.
+ */
+export async function templatesForRestart(runDir: string, shape: Deployment["shape"], labelSuffix: string | undefined, env: NodeJS.ProcessEnv): Promise<PlistTemplate[]> {
+  const agents = await loadPlistTemplates(runDir, shape, labelSuffix, env);
+  if (shape !== "launchd") return agents;
+  const children = await loadSupervisedTemplates(runDir, labelSuffix, env);
+  const childPaths = [...new Set(children.flatMap((c) => c.repoPaths))];
+  return agents.map((t) => (t.service === SUPERVISOR_SERVICE ? { ...t, repoPaths: [...new Set([...t.repoPaths, ...childPaths])] } : t));
+}
+
 // ---- the lock write ----------------------------------------------------------------
 
 export type LockDelivery = ProtectedWrite;
@@ -211,7 +232,7 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
   const labelSuffix = ns?.labelSuffix;
   if (ns) applyPorts(env, ns);
   // hashed before the build/switch and again after: only jobs whose code moved are kickstarted
-  let before = await hashHostJobs(runDir, await loadPlistTemplates(runDir, deployment.shape, labelSuffix));
+  let before = await hashHostJobs(runDir, await templatesForRestart(runDir, deployment.shape, labelSuffix, env));
 
   try {
     r.section("product");
@@ -236,7 +257,7 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
       release = opts.rollback ? await rollbackRelease(r, productDir) : await installRelease(r, { productDir, fetchFn, env, version: opts.releaseVersion, ...(opts.target ? { target: opts.target } : {}) });
       releaseVersion = release.version;
       runDir = runDirFor(productDir, source);
-      before = await hashHostJobs(runDir, await loadPlistTemplates(runDir, deployment.shape, labelSuffix));
+      before = await hashHostJobs(runDir, await templatesForRestart(runDir, deployment.shape, labelSuffix, env));
       // the bundled runtime moves with the release — a new Node, Postgres or
       // git arrives inside its deps pack (docs/ops/bundled-runtime.md). A
       // rollback keeps the runtime it has: it is a superset, not a downgrade.
@@ -246,7 +267,7 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
       }
     }
 
-    const templates = await loadPlistTemplates(runDir, deployment.shape, labelSuffix);
+    const templates = await templatesForRestart(runDir, deployment.shape, labelSuffix, env);
 
     r.section("build");
     if (opts.skipBuild) r.note("--skip-build: using what is in dist/ now");

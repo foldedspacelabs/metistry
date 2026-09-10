@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Metistry — the ONE launchd agent the core installs under the launchd
+     shape (deployment.yaml; docs/ops/deployment-shapes.md).
+
+     macOS shows one "background item" per launchd agent, named after the
+     program it runs, so the five-agent shape produced System Settings
+     entries called "postgres", "node", "node", "node" and "sandbox-exec".
+     This job replaces all five: Postgres, the console, the reconciler, the
+     assistant (still rooted at /usr/bin/sandbox-exec, with the same profile
+     and the same parameters) and any enabled bridge run as its CHILDREN,
+     with per-child restart policy, per-child log files and ordered start.
+     The only other agents are the TCC helpers, which must be their own
+     binaries for the grant to attach to them (invariant 6).
+
+     __SUPERVISOR_BIN__ is a symlink named `Metistry`, pointing at this
+     install's node — that name is what System Settings shows, and it is the
+     entire reason the program is not `…/node` directly.
+
+     __SUPERVISOR_CONFIG__ is <instance>/state/supervisor.json, written by
+     `metistry up` (0600): the child list, each child's argv, environment and
+     log path, and the control socket's token. `metistry restart|stop|start
+     <service>` talks to that socket rather than to launchctl, because
+     launchd does not know the children exist.
+
+     The environment dict carries this install's secrets (the watchdog's db
+     credentials among them), so `up` writes the rendered plist mode 600.
+
+     ProcessType Background keeps the supervisor and its children out of the
+     interactive scheduling band — this is infrastructure, not an app. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.foldedspacelabs.metistry</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__SUPERVISOR_BIN__</string>
+    <string>__REPO__/apps/watchdog/dist/main.js</string>
+    <string>--config</string>
+    <string>__SUPERVISOR_CONFIG__</string>
+  </array>
+  <key>WorkingDirectory</key><string>__REPO__</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+__ENV__
+  </dict>
+  <key>KeepAlive</key><true/>
+  <key>ProcessType</key><string>Background</string>
+  <key>StandardOutPath</key><string>/tmp/metistry-supervisor.log</string>
+  <key>StandardErrorPath</key><string>/tmp/metistry-supervisor.log</string>
+</dict>
+</plist>

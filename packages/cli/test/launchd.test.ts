@@ -6,32 +6,45 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { launchdCommands, loadPlistTemplates, nodeOnPath, parsePlistTemplate, renderPlist, renderSystemdUnit } from "../src/launchd.js";
+import { launchdCommands, loadPlistTemplates, nodeOnPath, parsePlistTemplate, readPlistTemplates, renderPlist, renderSystemdUnit } from "../src/launchd.js";
 
 const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
 
+/** The supervisor plist's own two placeholders — `up` computes them (packages/cli/src/supervisor.ts). */
+const SUPERVISOR_EXTRA = { SUPERVISOR_BIN: "/i/state/bin/Metistry", SUPERVISOR_CONFIG: "/i/state/supervisor.json" };
+
 describe("launchd templates", () => {
   it("every shipped plist parses: a label, ProgramArguments, and the checkout-relative code it runs", async () => {
-    const templates = await loadPlistTemplates(repoRoot);
+    const templates = await readPlistTemplates(repoRoot);
     expect(templates.length).toBeGreaterThanOrEqual(5);
     for (const t of templates) {
-      expect(t.label, t.file).toMatch(/^com\.foldedspacelabs\.metistry\.[a-z-]+$/);
+      // the supervisor's label IS the prefix — it is the install, not one of its services
+      expect(t.label, t.file).toMatch(/^com\.foldedspacelabs\.metistry(\.[a-z-]+)?$/);
       expect(t.file).toBe(`${t.label}.plist`);
       expect(t.programArguments.length).toBeGreaterThan(0);
-      expect(t.repoPaths.length, t.file).toBeGreaterThan(0);
+      // the db job execs the Postgres toolchain, not this repo's code
+      if (t.service !== "db") expect(t.repoPaths.length, t.file).toBeGreaterThan(0);
       for (const p of t.repoPaths) expect(p, t.file).not.toMatch(/^\.env/);
     }
     const byLabel = Object.fromEntries(templates.map((t) => [t.label, t]));
     expect(byLabel["com.foldedspacelabs.metistry.watchdog"]!.repoPaths).toEqual(["apps/watchdog/dist/main.js"]);
     expect(byLabel["com.foldedspacelabs.metistry.reconciler"]!.repoPaths).toEqual(["apps/reconciler/dist/main.js"]);
-    expect(byLabel["com.foldedspacelabs.metistry.eventkit-helper"]!.repoPaths).toEqual(["packages/mcp-eventkit/helper/ek-helper.app/Contents/MacOS/ek-helper"]);
-    expect(byLabel["com.foldedspacelabs.metistry.eventkit-helper"]!.environment).toEqual({ METISTRY_EK_SOCKET: "/tmp/metistry-eventkit.sock" });
+    // the EventKit helper's agent is `calendar` now — the label is what
+    // System Settings shows, and it is not part of a TCC requirement
+    expect(byLabel["com.foldedspacelabs.metistry.calendar"]!.repoPaths).toEqual(["packages/mcp-eventkit/helper/ek-helper.app/Contents/MacOS/ek-helper"]);
+    expect(byLabel["com.foldedspacelabs.metistry.calendar"]!.environment).toEqual({ METISTRY_EK_SOCKET: "/tmp/metistry-eventkit.sock" });
     expect(byLabel["com.foldedspacelabs.metistry.watchdog"]!.workingDirectory).toBe("__REPO__");
+    // the supervisor: one agent, named for the install, running the watchdog's
+    // entry point against a config `up` writes
+    const sup = byLabel["com.foldedspacelabs.metistry"]!;
+    expect(sup.service).toBe("supervisor");
+    expect(sup.repoPaths).toEqual(["apps/watchdog/dist/main.js"]);
+    expect(sup.standardOutPath).toBe("/tmp/metistry-supervisor.log");
   });
 
   it("renders every shipped template with __REPO__, __NODE__ and __ENV_FILE__ replaced and nothing left behind", async () => {
     for (const t of await loadPlistTemplates(repoRoot)) {
-      const out = renderPlist(t.template, { repo: "/srv/metistry", node: "/usr/local/bin/node", envFile: "/i/state/.env" });
+      const out = renderPlist(t.template, { repo: "/srv/metistry", node: "/usr/local/bin/node", envFile: "/i/state/.env", extra: SUPERVISOR_EXTRA });
       expect(out, t.file).not.toContain("__");
       expect(out).toContain("/srv/metistry");
       // the environment comes from the INSTANCE, never from the checkout —
@@ -54,8 +67,8 @@ describe("launchd templates", () => {
     const repo = "/Users/x/Library/Application Support/Metistry/product/current";
     const envFile = "/Users/x/Library/Application Support/Metistry/inst/state/.env";
     const node = "/Users/x/Library/Application Support/Metistry/product/runtime/node/bin/node";
-    for (const t of await loadPlistTemplates(repoRoot, "launchd")) {
-      const out = renderPlist(t.template, { repo, node, envFile, env: { A: "b" }, extra: { PG_BIN: "/pg/bin", PG_DATA: "/d", NODE_PREFIX: "/n", PRODUCT_DIR: repo, STATE_DIR: "/s", TMP_DIR: "/tmp", CONSOLE_TCP: "localhost:8460", DB_TCP: "localhost:8461" } });
+    for (const t of await readPlistTemplates(repoRoot)) {
+      const out = renderPlist(t.template, { repo, node, envFile, env: { A: "b" }, extra: { PG_BIN: "/pg/bin", PG_DATA: "/d", NODE_PREFIX: "/n", PRODUCT_DIR: repo, STATE_DIR: "/s", TMP_DIR: "/tmp", CONSOLE_TCP: "localhost:8460", DB_TCP: "localhost:8461", ...SUPERVISOR_EXTRA } });
       const shell = /<string>set -a;[^<]*<\/string>/.exec(out)?.[0];
       if (!shell) continue;
       // every path the shell sees is a single quoted word
@@ -110,7 +123,7 @@ describe("launchd templates", () => {
     expect(unit).toContain("WantedBy=default.target");
     expect(unit).not.toContain("/bin/sh");
     expect(unit).not.toContain("__");
-    const helper = templates.find((t) => t.label.endsWith(".eventkit-helper"))!;
+    const helper = templates.find((t) => t.label.endsWith(".calendar"))!;
     const hu = renderSystemdUnit(helper, { repo: "/srv/metistry", node: "/usr/bin/node", envFile: "/i/state/.env" });
     expect(hu).toContain("ExecStart=/srv/metistry/packages/mcp-eventkit/helper/ek-helper.app/Contents/MacOS/ek-helper");
     expect(hu).toContain("Environment=METISTRY_EK_SOCKET=/tmp/metistry-eventkit.sock");

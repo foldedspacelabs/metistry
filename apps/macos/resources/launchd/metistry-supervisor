@@ -1,0 +1,34 @@
+#!/bin/sh
+# The bundled supervisor launcher — `BundleProgram` for
+# Contents/Library/LaunchAgents/com.foldedspacelabs.metistry.plist.
+#
+# A plist inside a signed bundle is immutable and the same on every Mac, and
+# `BundleProgram` is the only bundle-relative key it has: arguments are
+# literal. So this script exists to turn "the app's agent" into "this Mac's
+# install" — it reads the three paths `metistry up --register-via app` wrote
+# and execs them.
+#
+# It must NOT exec the copy of the product inside the bundle: the bundle is a
+# seed, and the install that runs is the writable one under
+# ~/Library/Application Support/Metistry/product, which `metistry update`
+# moves forward (docs/ops/mac-app.md). Pointing at the bundle would pin the
+# running services to whatever shipped in the .app.
+set -eu
+
+conf="$HOME/Library/Application Support/Metistry/supervisor.env"
+if [ ! -r "$conf" ]; then
+  echo "MetistrySupervisor: no $conf — run 'metistry up --register-via app' first" >&2
+  # 78 is EX_CONFIG: launchd will not respawn-loop us into the ground over a
+  # missing file, and the log line says exactly what is missing
+  exit 78
+fi
+
+# Written by `metistry up`, values quoted, nothing else in it.
+# shellcheck source=/dev/null
+. "$conf"
+
+: "${METISTRY_SUPERVISOR_BIN:?MetistrySupervisor: METISTRY_SUPERVISOR_BIN unset in $conf}"
+: "${METISTRY_SUPERVISOR_MAIN:?MetistrySupervisor: METISTRY_SUPERVISOR_MAIN unset in $conf}"
+: "${METISTRY_SUPERVISOR_CONFIG:?MetistrySupervisor: METISTRY_SUPERVISOR_CONFIG unset in $conf}"
+
+exec "$METISTRY_SUPERVISOR_BIN" "$METISTRY_SUPERVISOR_MAIN" --config "$METISTRY_SUPERVISOR_CONFIG"

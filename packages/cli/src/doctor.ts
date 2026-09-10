@@ -26,11 +26,13 @@ import {
   type CheckResult,
   type Deployment,
   type DeploymentShape,
+  type ChildStatus,
   type Manifest,
 } from "@foldedspacelabs/metistry-core";
 import { loadDeployment } from "./deployment.js";
 import { realExec, type Exec } from "./exec.js";
-import { labelFor, loadPlistTemplates, logPathFor, serviceOf } from "./launchd.js";
+import { labelFor, loadPlistTemplates, logPathFor, SUPERVISED_SERVICES } from "./launchd.js";
+import { readSupervisorConfig, supervisorConfigPath, controlRequest, SUPERVISOR_SERVICE } from "./supervisor.js";
 import { applyPorts, loadNamespace, type Namespace } from "./namespace.js";
 
 export interface Db {
@@ -142,7 +144,12 @@ export function hostLocal(url: string, shape: DeploymentShape = "compose"): stri
 
 /** How an operator restarts a service, in the shape it actually runs in — under the label this instance's jobs actually carry. */
 export function restartHint(service: string, shape: DeploymentShape, labelSuffix?: string | undefined): string {
-  return shape === "launchd" ? `launchctl kickstart -k gui/$(id -u)/${labelFor(service, labelSuffix)}` : `docker compose up -d ${service}`;
+  if (shape !== "launchd") return `docker compose up -d ${service}`;
+  // under the launchd shape most services are the supervisor's children, and
+  // launchd does not know they exist — `metistry restart` asks the supervisor
+  return (SUPERVISED_SERVICES as readonly string[]).includes(service)
+    ? `metistry restart ${service}`
+    : `launchctl kickstart -k gui/$(id -u)/${labelFor(service, labelSuffix)}`;
 }
 
 /** Where its log is, in the shape it actually runs in. */
@@ -340,8 +347,13 @@ export async function dbRows(db: Db | null, productDir: string, shape: Deploymen
  * assistant plists exist in the checkout but are not host jobs, so probing
  * them would report every install as broken.
  */
-export async function launchdLabels(productDir: string, shape: DeploymentShape = "compose", labelSuffix?: string | undefined): Promise<{ file: string; label: string }[]> {
-  return (await loadPlistTemplates(productDir, shape, labelSuffix)).map((t) => ({ file: t.file, label: t.label }));
+export async function launchdLabels(
+  productDir: string,
+  shape: DeploymentShape = "compose",
+  labelSuffix?: string | undefined,
+  env: NodeJS.ProcessEnv = {},
+): Promise<{ file: string; label: string; service: string }[]> {
+  return (await loadPlistTemplates(productDir, shape, labelSuffix, env)).map((t) => ({ file: t.file, label: t.label, service: t.service }));
 }
 
 /** `launchctl print gui/<uid>/<label>` → running | waiting (with last exit code) | not bootstrapped. */
@@ -352,10 +364,17 @@ export function parseLaunchctlPrint(text: string): { state: string; pid?: number
   return { state, ...(pid ? { pid: Number(pid) } : {}), ...(lastExit ? { lastExit: Number(lastExit) } : {}) };
 }
 
-export async function launchdRows(productDir: string, exec: Exec, uid: number, shape: DeploymentShape = "compose", labelSuffix?: string | undefined): Promise<DoctorRow[]> {
+export async function launchdRows(
+  productDir: string,
+  exec: Exec,
+  uid: number,
+  shape: DeploymentShape = "compose",
+  labelSuffix?: string | undefined,
+  env: NodeJS.ProcessEnv = {},
+): Promise<DoctorRow[]> {
   const rows: DoctorRow[] = [];
-  const shaped = new Set<string>(SHAPED_SERVICES);
-  for (const { file, label } of await launchdLabels(productDir, shape, labelSuffix)) {
+  const shaped = new Set<string>([...SHAPED_SERVICES, SUPERVISOR_SERVICE]);
+  for (const { file, label, service } of await launchdLabels(productDir, shape, labelSuffix, env)) {
     rows.push({
       kind: "launchd",
       ...(await runCheck(`launchd:${label}`, `launchctl print gui/${uid}/${label} reports state = running`, async () => {
@@ -366,7 +385,7 @@ export async function launchdRows(productDir: string, exec: Exec, uid: number, s
             status: "absent",
             // the shaped jobs carry an EnvironmentVariables dict rendered
             // from .env, so the by-hand sed recipe cannot produce them
-            remediation: shaped.has(serviceOf(label))
+            remediation: shaped.has(service)
               ? `not bootstrapped — metistry up (this shape's ${file} is rendered with values only \`up\` computes; docs/ops/deployment-shapes.md)`
               : `not bootstrapped — metistry up, or by hand: sed "s|__REPO__|$PWD|g; s|__NODE__|$(which node)|g" ops/launchd/${file} > ~/Library/LaunchAgents/${file} && launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/${file}`,
           };
@@ -375,7 +394,7 @@ export async function launchdRows(productDir: string, exec: Exec, uid: number, s
         if (p.state === "running") return { meta: { pid: p.pid } };
         return {
           status: "failed",
-          remediation: `state = ${p.state}${p.lastExit !== undefined ? `, last exit code ${p.lastExit}` : ""} — launchctl kickstart -k gui/$(id -u)/${label}; log: ${logPathFor(serviceOf(label), labelSuffix)}`,
+          remediation: `state = ${p.state}${p.lastExit !== undefined ? `, last exit code ${p.lastExit}` : ""} — launchctl kickstart -k gui/$(id -u)/${label}; log: ${logPathFor(service, labelSuffix)}`,
           meta: { state: p.state, last_exit: p.lastExit },
         };
       })),
@@ -455,6 +474,60 @@ export async function composeRows(productDir: string, exec: Exec): Promise<Docto
   return rows;
 }
 
+/**
+ * The supervisor's children, asked of the supervisor itself.
+ *
+ * launchd knows one job under this shape; the console, the assistant, the
+ * reconciler and the bridges are processes it has never heard of, so
+ * `launchctl print` cannot report them and doctor would go blind on
+ * everything that matters. One `status` call over the control socket
+ * restores the rows — each child's state, pid, restart count and log path —
+ * and a supervisor that does not answer is itself the finding.
+ */
+export async function supervisorRows(stateRoot: string): Promise<DoctorRow[]> {
+  const configPath = supervisorConfigPath(stateRoot);
+  const config = await readSupervisorConfig(configPath).catch(() => undefined);
+  if (!config) {
+    return [
+      {
+        kind: "supervisor",
+        ...(await runCheck("supervisor", `${configPath} lists the supervisor's children`, async () => ({
+          status: "absent",
+          remediation: `no ${configPath} — this install has not been brought up under the supervisor yet: metistry up`,
+        }))),
+      },
+    ];
+  }
+  let children: ChildStatus[] | undefined;
+  const rows: DoctorRow[] = [
+    {
+      kind: "supervisor",
+      ...(await runCheck(`supervisor:${config.label}`, `${config.socket} answers status with ${config.children.length} child(ren)`, async () => {
+        const res = await controlRequest(config.socket, { op: "status", token: config.token }, 5_000);
+        if (!res.ok) throw new Error(res.error ?? "the supervisor refused a status request");
+        children = res.children;
+        return { meta: { socket: config.socket, children: (res.children ?? []).length } };
+      })),
+    },
+  ];
+  for (const spec of config.children) {
+    const st = children?.find((c) => c.name === spec.name);
+    rows.push({
+      kind: "child",
+      ...(await runCheck(`child:${spec.name}`, `the supervisor reports ${spec.name} running`, async () => {
+        if (!st) return { status: "absent", remediation: `the supervisor did not report ${spec.name} — metistry logs supervisor` };
+        if (st.state === "running") return { meta: { pid: st.pid, uptime_ms: st.uptimeMs, restarts: st.restarts } };
+        return {
+          status: st.state === "stopped" ? "degraded" : "failed",
+          remediation: `state = ${st.state}${st.lastExit ? ` (last exit code ${st.lastExit.code ?? "null"}${st.lastExit.signal ? `, signal ${st.lastExit.signal}` : ""} at ${st.lastExit.at})` : ""} — metistry restart ${spec.name}; log: ${st.log}`,
+          meta: { state: st.state, restarts: st.restarts, last_exit: st.lastExit },
+        };
+      })),
+    });
+  }
+  return rows;
+}
+
 // ---- the whole report -------------------------------------------------------------
 
 export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
@@ -497,7 +570,9 @@ export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
     if (deps.db === undefined && db?.end) await db.end().catch(() => {});
   }
 
-  if (platform === "darwin") rows.push(...(await launchdRows(deps.productDir, exec, uid, shape, labelSuffix)));
+  if (platform === "darwin") rows.push(...(await launchdRows(deps.productDir, exec, uid, shape, labelSuffix, env)));
+  // the launchd shape's core is ONE agent with children launchd cannot see
+  if (platform === "darwin" && shape === "launchd") rows.push(...(await supervisorRows(env.METISTRY_INSTANCE_DIR?.replace(/\/+$/, "") || deps.productDir)));
   // no container runtime is consulted when no service runs in one: a
   // launchd install must not report "docker not found" as a finding
   if (usesCompose(loaded.deployment)) rows.push(...(await composeRows(deps.productDir, exec)));

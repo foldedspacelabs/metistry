@@ -24,7 +24,7 @@ All of them are real.
 | `restart [<service>…]` | `launchctl kickstart -k`, or `docker compose restart`, per service |
 | `stop [<service>…]` | `launchctl bootout`, or `docker compose stop`, per service |
 | `start [<service>…]` | `launchctl bootstrap` + `kickstart -k`, or `docker compose start`, per service |
-| `logs <service>` | tail the launchd job's log file, or `docker compose logs` |
+| `logs <service>` | tail the job's (or supervisor child's) log file, or `docker compose logs` |
 | `import-sessions` | summarise and post this machine's Claude Code sessions |
 
 ```sh
@@ -619,13 +619,21 @@ split into host jobs vs. containers using the same functions `up` and
 `doctor` already call (`loadPlistTemplates`, `composeServiceNames`) rather
 than a second table that could drift from theirs:
 
-- **launchd shape / host jobs** — `restart`: `launchctl kickstart -k
-  gui/<uid>/com.foldedspacelabs.metistry.<name>`. `stop`: `launchctl bootout`
+- **launchd agents** (the supervisor, the TCC helpers) — `restart`:
+  `launchctl kickstart -k gui/<uid>/<label>`. `stop`: `launchctl bootout`
   of that label (tolerated if it was already not loaded — the desired end
   state is reached either way). `start`: `launchctl bootstrap` of the plist
   `up` already installed (tolerated if it is already bootstrapped) followed
   by `kickstart -k`, so it ends up running regardless of the job's prior
   state.
+- **the supervisor's children** (`db`, `console`, `reconciler`,
+  `assistant`, a configured bridge) — one line on the supervisor's control
+  socket, `<instance>/state/run/supervisor.sock`. launchd has never heard of
+  these processes, so launchctl cannot address them; the answer carries the
+  state the request produced (`console restart → running (pid 80650)`).
+  With **no service named**, only the agents are acted on and the children
+  follow them: booting out the supervisor takes its children down with it,
+  and bootstrapping it starts them in order.
 - **compose shape / containers** — `docker compose restart|stop|start
   <name>`.
 
@@ -643,8 +651,11 @@ uses (`StepRunner`).
 to change it, `--follow` to stream): under the launchd shape, the log file
 the plist's `StandardOutPath`/`StandardErrorPath` already point at (parsed
 from the template the way `workingDirectory` is — no separate
-`/tmp/metistry-<service>.log` convention to keep in sync by hand); under
-compose, `docker compose logs <name>`.
+`/tmp/metistry-<service>.log` convention to keep in sync by hand), for an
+agent and for a supervisor child alike, because a child's log path IS the
+one its plist named; under compose, `docker compose logs <name>`.
+`metistry logs supervisor` is the one to read when a child will not start:
+it carries every start, exit, backoff and crash-loop line.
 
 On a platform with no launchd (anything but macOS) a host job's name is
 simply not a known service — the command refuses rather than pretending
@@ -687,9 +698,18 @@ is no longer the install's environment).
 `deployment.yaml`** (`docs/ops/deployment-shapes.md`). The default is
 `compose` and the steps below describe it. Under `shape: launchd` there
 is no docker at all: `up` prepares a user-space Postgres (step 0), then
-installs `console`, `assistant` and `db` as launchd jobs alongside the
-host jobs (step 2), then creates the database, then doctor. `doctor`
-reports the shape as its first row and writes every remediation for it.
+installs **one launchd agent** — `com.foldedspacelabs.metistry`, the
+supervisor — which runs Postgres, the console, the reconciler, the assistant
+and any configured bridge as its children (step 2), then creates the
+database, then doctor. macOS shows one background item per agent, named
+after its program, so one agent is one item called **Metistry**. The TCC
+helpers keep an agent each, because a grant attaches to the binary that
+asks. `doctor` reports the shape as its first row, a row per child, and
+writes every remediation for the shape.
+
+An install that predates the supervisor is migrated in passing: `up` boots
+out the old per-service agents once and deletes their plists before
+installing the supervisor, so nothing runs twice.
 
 **`--namespace`** allocates this instance its own launchd label suffix
 (from `instance_id`) and an 8-port block, recorded **once** in
@@ -722,12 +742,23 @@ return the instance to the fixed labels and ports.
    job: `launchctl bootout` (tolerated when not loaded), `bootstrap`,
    `kickstart -k`. This is exactly the by-hand recipe in each plist's
    comment, so a job installed by hand is simply re-rendered in place.
-   Under the launchd shape three more plists join them: `console` and
-   `assistant` carry their whole environment in an `EnvironmentVariables`
-   dict rendered from `.env` (no shell, nothing interpolated) and are
-   written `0600` because that dict holds secrets, and the `assistant`
-   job's root process is `sandbox-exec` running
-   `ops/sandbox/assistant.sb`.
+   Under the launchd shape the same templates are rendered the same way,
+   but only the supervisor's and the TCC helpers' become agents: the rest
+   become **children** in `<instance>/state/supervisor.json` (0600), each
+   with the argv, working directory, environment and log path its plist
+   named. `console` and `assistant` carry their whole environment in a dict
+   rendered from `.env` (no shell, nothing interpolated), and the
+   `assistant`'s root process is still `sandbox-exec` running
+   `ops/sandbox/assistant.sb`. A bridge becomes a child only when this
+   install has opted into it — its `METISTRY_*_URL` is set — so an install
+   with no calendar bridge starts no job that could only fail.
+
+   **`--register-via app`** does everything above except install the
+   supervisor's own agent: the Mac app registers the copy inside its bundle
+   through `SMAppService.agent(plistName:)`, which is what nests it under
+   the app in Login Items. `up` writes the three paths that agent needs to
+   `~/Library/Application Support/Metistry/supervisor.env`
+   (`docs/ops/mac-app.md`).
 3. **Doctor.** Its verdict is `up`'s exit code — `0` when nothing is
    `failed`. A step that fails stops the plan (nothing after it runs),
    doctor still runs for the diagnosis, and the failing command's exit

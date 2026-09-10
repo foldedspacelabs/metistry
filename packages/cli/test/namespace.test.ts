@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { labelFor, loadPlistTemplates, logPathFor, renderPlist, serviceOf, withNamespace } from "../src/launchd.js";
+import { labelFor, loadPlistTemplates, logPathFor, readPlistTemplates, renderPlist, serviceOf, withNamespace } from "../src/launchd.js";
 import {
   allocateBase,
   applyPorts,
@@ -58,16 +58,17 @@ describe("labels", () => {
 
 describe("namespaced plist templates", () => {
   it("rewrites the label, the file name and both log paths — and nothing else", async () => {
-    const [t] = await loadPlistTemplates(repoRoot, "launchd", "3f2a1b0c");
-    const all = await loadPlistTemplates(repoRoot, "launchd", "3f2a1b0c");
-    expect(t).toBeDefined();
+    const all = await readPlistTemplates(repoRoot, "3f2a1b0c");
+    expect(all.length).toBeGreaterThan(0);
     for (const x of all) {
-      expect(x.label, x.file).toBe(`com.foldedspacelabs.metistry.3f2a1b0c.${x.service}`);
+      // the supervisor IS the install: its label takes the suffix INSTEAD of a
+      // service component, so a namespaced core is still one agent
+      expect(x.label, x.file).toBe(x.service === "supervisor" ? "com.foldedspacelabs.metistry.3f2a1b0c" : `com.foldedspacelabs.metistry.3f2a1b0c.${x.service}`);
       expect(x.file).toBe(`${x.label}.plist`);
       expect(x.template).toContain(`<string>${x.label}</string>`);
       // the default label must be gone: a leftover would bootstrap over the
       // OTHER instance's job
-      expect(x.template).not.toContain(`<string>com.foldedspacelabs.metistry.${x.service}</string>`);
+      if (x.service !== "supervisor") expect(x.template).not.toContain(`<string>com.foldedspacelabs.metistry.${x.service}</string>`);
       if (x.standardOutPath !== undefined) {
         expect(x.standardOutPath).toBe(`/tmp/metistry-3f2a1b0c-${x.service}.log`);
         expect(x.template).not.toContain(`/tmp/metistry-${x.service}.log`);

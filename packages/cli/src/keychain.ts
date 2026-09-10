@@ -18,13 +18,20 @@ import type { Exec, ExecResult } from "./exec.js";
 
 /** Service prefix for the generic-password items `metistry secrets` owns. */
 export const SERVICE_PREFIX = "metistry:";
-/** Keychain account for those items; `METISTRY_KEYCHAIN_ACCOUNT` separates two instances on one Mac. */
+/** The USER-scoped account: what belongs to the person rather than to any one instance. */
 export const DEFAULT_ACCOUNT = "metistry";
 
 export function serviceFor(name: string): string {
   return `${SERVICE_PREFIX}${name}`;
 }
 
+/**
+ * The user-scoped account. `METISTRY_KEYCHAIN_ACCOUNT` overrides it (two
+ * people on one login, or a test fixture). What keeps several instances on
+ * one Mac apart is no longer this variable but the per-instance account —
+ * every instance-scoped secret is filed under the instance's `instance_id`
+ * (secrets.ts `SECRET_SCOPES`).
+ */
 export function keychainAccount(env: NodeJS.ProcessEnv = process.env): string {
   return env.METISTRY_KEYCHAIN_ACCOUNT || DEFAULT_ACCOUNT;
 }
@@ -42,7 +49,8 @@ export function promptStdin(value: string): string {
 export class Keychain {
   constructor(
     private readonly exec: Exec,
-    private readonly account = DEFAULT_ACCOUNT,
+    /** Which account's items this handle reads and writes: the user's, or one instance's id. */
+    readonly account: string = DEFAULT_ACCOUNT,
   ) {}
 
   private run(args: string[], stdin?: string): Promise<ExecResult> {
@@ -65,6 +73,17 @@ export class Keychain {
   /** Presence only — never asks for the value, so nothing sensitive can leak into a listing. */
   async hasSecret(name: string): Promise<boolean> {
     const r = await this.run(["find-generic-password", "-a", this.account, "-s", serviceFor(name)]);
+    return r.code === 0;
+  }
+
+  /**
+   * Delete this account's `metistry:<name>`. True when an item went away,
+   * false when there was none. Only ever called for one instance's own
+   * account (`metistry secrets purge`) — the user-scoped items outlive any
+   * instance, and nothing here can reach them.
+   */
+  async deleteSecret(name: string): Promise<boolean> {
+    const r = await this.run(["delete-generic-password", "-a", this.account, "-s", serviceFor(name)]);
     return r.code === 0;
   }
 

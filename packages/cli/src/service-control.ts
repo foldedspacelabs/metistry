@@ -19,7 +19,7 @@ import type { Exec } from "./exec.js";
 import { composeServiceNames } from "./doctor.js";
 import { launchAgentsDir, loadPlistTemplates } from "./launchd.js";
 import { StepFailed, StepRunner } from "./steps.js";
-import { instanceLock, runDirFor } from "./up.js";
+import { composeEnvArgs, instanceLock, runDirFor } from "./up.js";
 
 export type ServiceAction = "restart" | "stop" | "start";
 
@@ -150,9 +150,9 @@ async function actOnLaunchd(r: StepRunner, t: ServiceTarget, uid: number, action
   }
 }
 
-async function actOnCompose(r: StepRunner, t: ServiceTarget, productDir: string, action: ServiceAction): Promise<ServiceResult> {
+async function actOnCompose(r: StepRunner, t: ServiceTarget, productDir: string, envFile: string | undefined, action: ServiceAction): Promise<ServiceResult> {
   try {
-    await r.run("docker", ["compose", action, t.name], { cwd: productDir });
+    await r.run("docker", ["compose", ...composeEnvArgs(productDir, envFile), action, t.name], { cwd: productDir });
     return { service: t.name, action, ok: true, detail: `docker compose ${action} ${t.name}` };
   } catch (e) {
     if (e instanceof StepFailed) return { service: t.name, action, ok: false, detail: e.message };
@@ -160,13 +160,15 @@ async function actOnCompose(r: StepRunner, t: ServiceTarget, productDir: string,
   }
 }
 
-async function actOn(r: StepRunner, t: ServiceTarget, ctx: ServiceTargetContext, action: ServiceAction): Promise<ServiceResult> {
-  return t.kind === "launchd" ? actOnLaunchd(r, t, ctx.uid, action) : actOnCompose(r, t, ctx.productDir, action);
+async function actOn(r: StepRunner, t: ServiceTarget, ctx: ServiceTargetContext, envFile: string | undefined, action: ServiceAction): Promise<ServiceResult> {
+  return t.kind === "launchd" ? actOnLaunchd(r, t, ctx.uid, action) : actOnCompose(r, t, ctx.productDir, envFile, action);
 }
 
 export interface ServiceControlOptions {
   productDir: string;
   env?: NodeJS.ProcessEnv | undefined;
+  /** the dotenv file compose interpolates from (`<instance>/state/.env`); undefined while an install still runs from the checkout's */
+  envFile?: string | undefined;
   exec?: Exec | undefined;
   out?: ((line: string) => void) | undefined;
   dryRun?: boolean | undefined;
@@ -197,7 +199,7 @@ export async function controlServices(opts: ServiceControlOptions & { action: Se
   if (unknown.length > 0) throw new UnknownServiceError(unknown, ctx.targets.map((t) => t.name));
   r.section(opts.action);
   const results: ServiceResult[] = [];
-  for (const t of resolved) results.push(await actOn(r, t, ctx, opts.action));
+  for (const t of resolved) results.push(await actOn(r, t, ctx, opts.envFile, opts.action));
   return { ok: results.every((x) => x.ok), shape: ctx.shape, results, commands: r.commands };
 }
 
@@ -231,7 +233,7 @@ export async function serviceLogs(opts: LogsOptions): Promise<ServiceResult> {
       const args = opts.follow ? ["-n", String(opts.lines), "-f", t.logPath] : ["-n", String(opts.lines), t.logPath];
       await r.run("tail", args, { inherit: true });
     } else {
-      const args = ["compose", "logs", t.name, "--tail", String(opts.lines), ...(opts.follow ? ["-f"] : [])];
+      const args = ["compose", ...composeEnvArgs(ctx.productDir, opts.envFile), "logs", t.name, "--tail", String(opts.lines), ...(opts.follow ? ["-f"] : [])];
       await r.run("docker", args, { cwd: ctx.productDir, inherit: true });
     }
     return { service: t.name, action: "logs", ok: true, detail: "" };

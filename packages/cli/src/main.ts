@@ -9,14 +9,16 @@ import { realpathSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { doctor, renderTable, type DoctorDeps } from "./doctor.js";
-import { loadDotEnv, productVersion, resolveProductDir, resolveSeedDir } from "./env.js";
+import { loadInstallEnv, productVersion, resolveProductDir, resolveSeedDir, type LoadedEnv } from "./env.js";
 import { realExec, type Exec } from "./exec.js";
 import { AUTH_MODES, connectRepo, type AuthMode } from "./connect-repo.js";
 import { importSessions } from "./import-sessions.js";
 import { init } from "./init.js";
+import { ensureInstanceId, instanceEnvFile, readInstanceId } from "./instance.js";
 import type { LockSource } from "./lock.js";
-import { listSecrets, mintSecret, renderSecretList, syncSecrets, type SyncDirection } from "./secrets.js";
+import { listSecrets, mintSecret, purgeSecrets, renderSecretList, syncSecrets, type SyncDirection } from "./secrets.js";
 import { controlServices, renderServiceResults, serviceLogs, UnknownServiceError, type ServiceAction } from "./service-control.js";
+import { StepRunner } from "./steps.js";
 import { up } from "./up.js";
 import { gitHead, update } from "./update.js";
 
@@ -27,7 +29,7 @@ export interface ParsedArgs {
 }
 
 /** Flags that never take a value, so `metistry init --force <dir>` keeps its dir. */
-export const BOOLEAN_FLAGS = new Set(["force", "json", "help", "dry-run", "no-launchd", "no-compose", "skip-build", "skip-migrate", "rollback", "follow"]);
+export const BOOLEAN_FLAGS = new Set(["force", "json", "help", "dry-run", "no-launchd", "no-compose", "skip-build", "skip-migrate", "rollback", "yes", "follow"]);
 
 /** `--channel git|release` — anything else is a typo, not a guess (the lock parser is strict for the same reason). */
 export function parseChannel(v: string | undefined): LockSource | undefined {
@@ -99,8 +101,9 @@ const USAGE = `metistry — Metistry command line
   metistry init <dir> [--name <assistant name>] [--channel git|release] [--force]
                       [--product-dir <checkout>]
       Create a private instance repo at <dir> from the product's seed/ (git init,
-      Knowledge/, identity.yaml, rules.yaml, config dirs, metistry.lock, one commit).
-      Prints the .env lines to add to the product checkout next — never writes them.
+      Knowledge/, identity.yaml with a minted instance_id, rules.yaml, config dirs,
+      metistry.lock, one commit).
+      Prints the .env lines to put in <dir>/state/.env next — never writes them.
       --channel writes metistry.lock's product.source: git (this install is a
       checkout update fast-forwards; the default) or release (it consumes
       published artifacts — docs/ops/releases.md).
@@ -115,15 +118,23 @@ const USAGE = `metistry — Metistry command line
       with git ls-remote, flush the reconciler's queue, and push once.
       The token is never printed, never written to .env, never in .git/config.
 
-  metistry secrets sync [--from keychain|env] [--to env|keychain] [--env-file <path>]
-  metistry secrets mint <VAR> [--env-file <path>]
-  metistry secrets list [--env-file <path>]
+  metistry secrets sync [--from keychain|env] [--to env|keychain]
+                        [--instance <dir>] [--env-file <path>]
+  metistry secrets mint <VAR> [--instance <dir>] [--env-file <path>]
+  metistry secrets list [--instance <dir>] [--env-file <path>]
+  metistry secrets purge --instance <dir> [--yes]
       The macOS login Keychain (service metistry:<VAR>) is the canonical store;
-      .env is generated from it. --to keychain imports .env's secret-shaped
-      variables (names ending _TOKEN _PASSWORD _PRIVATE _SECRET _KEY, plus
-      CLAUDE_CODE_OAUTH_TOKEN); --to env rewrites just those lines of .env in
-      place (0600; every comment and non-secret line preserved). mint makes a
-      new random token in both. list prints names only, never values.
+      .env is generated from it, at <instance>/state/.env. --to keychain imports
+      .env's secret-shaped variables (names ending _TOKEN _PASSWORD _PRIVATE
+      _SECRET _KEY, plus CLAUDE_CODE_OAUTH_TOKEN); --to env rewrites just those
+      lines in place (0600; every comment and non-secret line preserved) and
+      moves a product-checkout .env into the instance the first time. mint makes
+      a new random token in both. list prints names and scopes, never values.
+      Items are scoped by account: instance-scoped ones under the instance's
+      instance_id, user-scoped ones (CLAUDE_CODE_OAUTH_TOKEN, your AWS keys)
+      under the shared per-user account — secrets.ts SECRET_SCOPES is the table.
+      purge deletes one instance's items and nothing else; without --yes it only
+      previews.
 
   metistry import-sessions [--since <date>] [--project <path>] [--limit N] [--dry-run]
       Summarise this machine's Claude Code sessions (~/.claude/projects/*/*.jsonl)
@@ -142,6 +153,7 @@ const USAGE = `metistry — Metistry command line
       container and launchd job. Exit 0 when nothing is failed.
 
   metistry up [--no-compose] [--no-launchd] [--dry-run] [--product-dir <checkout>]
+              [--instance <dir>] [--env-file <path>]
       Bring an install to running from a checkout + .env: docker compose up (built
       from source, or pulled when metistry.lock pins a release), every launchd job
       in ops/launchd rendered into ~/Library/LaunchAgents and (re)bootstrapped
@@ -182,6 +194,12 @@ const USAGE = `metistry — Metistry command line
 
 Product checkout resolution: --product-dir, METISTRY_PRODUCT_DIR, the checkout
 this package is installed in, the current directory's enclosing checkout.
+
+Environment resolution: <instance>/state/.env first (--instance, else
+METISTRY_INSTANCE_DIR), then the product checkout's .env — deprecated, still
+read, and where a terminal install may keep declaring METISTRY_INSTANCE_DIR.
+An instance directory is self-contained (docs/ops/cli.md); --env-file overrides
+both. Nothing already set in the environment is overwritten by either file.
 `;
 
 export interface MainIo {
@@ -206,6 +224,16 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
     return command === undefined && !flags.help ? 2 : 0;
   }
   const productDir = resolveProductDir(str(flags, "product-dir"));
+  /**
+   * This install's environment, from the instance's own `state/.env` and
+   * then the product checkout's deprecated one. Deprecation notices go to
+   * STDERR so `doctor --json` stays machine-readable.
+   */
+  const loadEnv = (): LoadedEnv => {
+    const loaded = loadInstallEnv({ productDir, instanceDir: str(flags, "instance"), envFile: str(flags, "env-file") });
+    for (const n of loaded.notices) err(n);
+    return loaded;
+  };
   let channel: LockSource | undefined;
   try {
     channel = parseChannel(str(flags, "channel"));
@@ -231,11 +259,13 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
         productCommit: productDir ? await gitHead(productDir, io.exec ?? realExec) : undefined,
         exec: io.exec,
       });
-      out(`instance created at ${result.dir} (commit ${result.commit.slice(0, 7)}; assistant named "${result.assistantName}" in identity.yaml)`);
+      out(`instance created at ${result.dir} (commit ${result.commit.slice(0, 7)}; assistant named "${result.assistantName}" in identity.yaml; instance_id ${result.instanceId})`);
       out("");
-      out("Next — add these to the PRODUCT checkout's .env (the token below is minted once and shown only here):");
+      out(`Next — put these in this instance's environment, ${instanceEnvFile(result.dir)} (the token below is minted once and shown only here):`);
       out("");
       for (const l of result.envLines) out(`  ${l}`);
+      out("");
+      out("That file is the install's environment: gitignored, 0600, and never in the product checkout (an instance directory is self-contained — docs/ops/cli.md).");
       out("");
       out("Then: pnpm -r build && metistry up   (containers, every launchd job, doctor — docs/ops/cli.md).");
       out(`Then, to version it off this machine: metistry connect-repo <your private remote> --instance ${result.dir} (docs/ops/cli.md).`);
@@ -247,7 +277,7 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
         err("usage: metistry connect-repo <url> [--instance <dir>] [--auth device|token|ssh] [--force]");
         return 2;
       }
-      if (productDir) loadDotEnv(productDir);
+      loadEnv();
       const instanceDir = str(flags, "instance") ?? process.env.METISTRY_INSTANCE_DIR;
       if (!instanceDir) {
         err("connect-repo needs the instance repo: pass --instance <dir> or set METISTRY_INSTANCE_DIR (docs/ops/cli.md)");
@@ -271,15 +301,36 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
     }
     case "secrets": {
       const sub = positional[0];
-      if (productDir) loadDotEnv(productDir);
-      const envFile = str(flags, "env-file") ?? (productDir ? join(productDir, ".env") : undefined);
-      if (!envFile) {
-        err("secrets needs a .env to read or generate: pass --env-file or run inside a checkout (--product-dir / METISTRY_PRODUCT_DIR)");
+      const loaded = loadEnv();
+      const paths = loaded.paths;
+      if (!paths) {
+        err("secrets needs a .env to read or generate: pass --env-file, --instance <dir>, or run inside a checkout (--product-dir / METISTRY_PRODUCT_DIR)");
         return 2;
+      }
+      // read the highest-precedence file that exists (the product checkout's
+      // while an install predates the move); write where it now belongs
+      const envFile = paths.read[0] ?? paths.write;
+      let instanceId = loaded.instanceDir ? await readInstanceId(loaded.instanceDir) : undefined;
+      // `sync` is where an instance created before instance_id existed gets
+      // one — it has to, because that id is the account it files under. A
+      // read-only verb (`list`) and a destructive one (`purge`) never mint.
+      if (!instanceId && loaded.instanceDir && positional[0] === "sync") {
+        const runner = new StepRunner({ dryRun: false, out, ...(io.exec ? { exec: io.exec } : {}) });
+        const minted = await ensureInstanceId(runner, {
+          instanceDir: loaded.instanceDir,
+          env: process.env,
+          platform: process.platform,
+          uid: typeof process.getuid === "function" ? process.getuid() : 0,
+          fetchFn: fetch,
+        });
+        out(minted.detail);
+        if (minted.id) instanceId = minted.id;
       }
       const secretsOpts = {
         envFile,
+        envTarget: paths.write,
         exampleFile: productDir ? join(productDir, ".env.example") : undefined,
+        instanceId,
         out,
         ...(io.exec ? { exec: io.exec } : {}),
       };
@@ -300,8 +351,17 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
           case "list":
             out(renderSecretList(await listSecrets(secretsOpts)));
             return 0;
+          case "purge": {
+            const dir = str(flags, "instance") ?? loaded.instanceDir;
+            if (!dir) {
+              err("usage: metistry secrets purge --instance <dir> [--yes]   (which instance's Keychain items to delete)");
+              return 2;
+            }
+            const r = await purgeSecrets({ ...secretsOpts, instanceDir: dir, yes: flags.yes === true });
+            return r.found.length > 0 && r.deleted.length !== r.found.length && flags.yes === true ? 1 : 0;
+          }
           default:
-            err("usage: metistry secrets sync --to env|keychain | metistry secrets mint <VAR> | metistry secrets list");
+            err("usage: metistry secrets sync --to env|keychain | metistry secrets mint <VAR> | metistry secrets list | metistry secrets purge --instance <dir> [--yes]");
             return 2;
         }
       } catch (e) {
@@ -310,7 +370,7 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
       }
     }
     case "import-sessions": {
-      if (productDir) loadDotEnv(productDir);
+      loadEnv();
       const limitRaw = str(flags, "limit");
       const limit = limitRaw === undefined ? undefined : Number(limitRaw);
       if (limit !== undefined && (!Number.isInteger(limit) || limit <= 0)) {
@@ -338,7 +398,7 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
         err("doctor needs a Metistry checkout to walk: pass --product-dir or set METISTRY_PRODUCT_DIR");
         return 2;
       }
-      loadDotEnv(productDir);
+      loadEnv();
       const report = await doctor({ productDir, ...io.doctorDeps });
       out(flags.json === true ? JSON.stringify(report, null, 2) : renderTable(report));
       return report.ok ? 0 : 1;
@@ -348,11 +408,12 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
         err("up needs a Metistry checkout: pass --product-dir or set METISTRY_PRODUCT_DIR");
         return 2;
       }
-      loadDotEnv(productDir);
+      loadEnv();
       const r = await up({
         productDir,
         out,
         exec: io.exec,
+        envFile: str(flags, "env-file"),
         dryRun: flags["dry-run"] === true,
         compose: flags["no-compose"] !== true,
         launchd: flags["no-launchd"] !== true,
@@ -365,11 +426,12 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
         err("update needs a Metistry checkout: pass --product-dir or set METISTRY_PRODUCT_DIR");
         return 2;
       }
-      loadDotEnv(productDir);
+      loadEnv();
       const r = await update({
         productDir,
         out,
         exec: io.exec,
+        envFile: str(flags, "env-file"),
         dryRun: flags["dry-run"] === true,
         skipBuild: flags["skip-build"] === true,
         skipMigrate: flags["skip-migrate"] === true,
@@ -387,11 +449,12 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
         err(`${command} needs a Metistry checkout: pass --product-dir or set METISTRY_PRODUCT_DIR`);
         return 2;
       }
-      loadDotEnv(productDir);
+      const loadedSc = loadEnv();
       const asJson = flags.json === true;
       try {
         const r = await controlServices({
           productDir,
+          envFile: loadedSc.paths ? (loadedSc.paths.read[0] ?? loadedSc.paths.write) : undefined,
           action: command as ServiceAction,
           names: positional,
           // --json is a wire contract for the Mac app (docs/ops/cli.md): only
@@ -424,7 +487,7 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
         err("usage: metistry logs <service> [--lines N] [--follow]");
         return 2;
       }
-      loadDotEnv(productDir);
+      const loadedLogs = loadEnv();
       const linesRaw = str(flags, "lines");
       const lines = linesRaw === undefined ? 200 : Number(linesRaw);
       if (!Number.isInteger(lines) || lines <= 0) {
@@ -434,6 +497,7 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
       try {
         const r = await serviceLogs({
           productDir,
+          envFile: loadedLogs.paths ? (loadedLogs.paths.read[0] ?? loadedLogs.paths.write) : undefined,
           service,
           lines,
           follow: flags.follow === true,

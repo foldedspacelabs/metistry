@@ -15,6 +15,7 @@ import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { mintToken } from "@foldedspacelabs/metistry-core";
 import { realExec, type Exec } from "./exec.js";
+import { mintInstanceId, withInstanceId } from "./instance.js";
 import { LOCK_FILENAME, serializeLock, type LockFile, type LockSource } from "./lock.js";
 
 export interface InitOptions {
@@ -34,12 +35,16 @@ export interface InitOptions {
   exec?: Exec | undefined;
   now?: Date | undefined;
   mint?: (() => string) | undefined;
+  /** test seam: the instance_id minted into identity.yaml */
+  mintInstanceId?: (() => string) | undefined;
 }
 
 export interface InitResult {
   dir: string;
   /** The assistant's name as it now stands in identity.yaml. */
   assistantName: string;
+  /** This instance directory's stable identity — the Keychain account its own secrets are filed under. */
+  instanceId: string;
   commit: string;
   /** `.env` lines the user adds to the PRODUCT checkout next — printed, never written. */
   envLines: string[];
@@ -47,9 +52,11 @@ export interface InitResult {
 
 /** Tracked config dirs the instance owns (§4.16); `inbox/` is created too but is gitignored, so it carries no placeholder. */
 export const INSTANCE_DIRS = ["queries", "agents", "routines", "extensions", "instance-migrations"] as const;
-// `state/` holds the launchd shape's derived state — the Postgres data
-// directory and the assistant's SDK transcripts. Invariant 1: git is the
-// record, Postgres is derived, so none of it belongs in the instance repo.
+// `state/` holds this instance's derived state — the Postgres data
+// directory, the assistant's SDK transcripts, and the generated `.env`.
+// Invariant 1: git is the record, Postgres is derived, so none of it
+// belongs in the instance repo — and `.env` holds secrets, which must
+// never be committable at all.
 export const GITIGNORE = "inbox/\nstate/\n.obsidian/workspace*\n";
 export const COMMIT_AUTHOR = { name: "Metistry", email: "metistry@localhost" } as const;
 
@@ -102,6 +109,11 @@ export async function init(opts: InitOptions): Promise<InitResult> {
     if (opts.name.trim() === "") throw new Error("--name must not be empty");
     identity = applyName(identity, opts.name.trim());
   }
+  // this directory's stable identity, minted once and never reused: the
+  // Keychain account its own secrets are filed under, and how the Mac app
+  // tells several instance directories apart
+  const instanceId = (opts.mintInstanceId ?? mintInstanceId)();
+  identity = withInstanceId(identity, instanceId);
   await writeFile(join(dir, "identity.yaml"), identity);
   await cp(join(opts.seedDir, "rules.yaml"), join(dir, "rules.yaml"));
   const assistantName = String((parseYaml(identity) as { name?: unknown })?.name ?? "");
@@ -142,6 +154,7 @@ export async function init(opts: InitOptions): Promise<InitResult> {
   return {
     dir,
     assistantName,
+    instanceId,
     commit,
     envLines: [
       `METISTRY_INSTANCE_DIR=${dir}`,

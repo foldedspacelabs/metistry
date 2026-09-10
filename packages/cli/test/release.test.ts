@@ -439,8 +439,10 @@ describe("metistry update --channel release", () => {
     expect(r.release).toMatchObject({ version: "0.2.0", installed: true });
     expect(r.commands.join("\n")).not.toContain("pnpm");
     expect(r.commands.join("\n")).not.toContain("git ");
-    expect(r.commands).toContain(`(cd ${join(P, "current")} && docker compose pull)`);
-    expect(r.commands).toContain(`(cd ${join(P, "current")} && docker compose up -d --no-build)`);
+    // compose is told where the instance's .env is (a self-contained instance dir)
+    const ef = `--env-file ${join(inst, "state", ".env")}`;
+    expect(r.commands).toContain(`(cd ${join(P, "current")} && docker compose ${ef} pull)`);
+    expect(r.commands).toContain(`(cd ${join(P, "current")} && docker compose ${ef} up -d --no-build)`);
     // the pull carries the pinned image refs — that is what "pull the release" means
     const pull = exec.calls.find((c) => c.cmd === "docker" && c.args.includes("pull"))!;
     expect(pull.cwd).toBe(join(P, "current"));

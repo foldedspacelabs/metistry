@@ -364,8 +364,8 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
         const minted = await ensureInstanceId(runner, {
           instanceDir: loaded.instanceDir,
           env: process.env,
-          platform: process.platform,
-          uid: typeof process.getuid === "function" ? process.getuid() : 0,
+          platform: io.platform ?? process.platform,
+          uid: io.uid ?? (typeof process.getuid === "function" ? process.getuid() : 0),
           fetchFn: fetch,
         });
         out(minted.detail);
@@ -378,6 +378,8 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
         instanceId,
         out,
         ...(io.exec ? { exec: io.exec } : {}),
+        // the Keychain exists only on darwin; CI runs this suite on Linux, so tests pin the platform
+        ...(io.platform ? { platform: io.platform } : {}),
       };
       try {
         switch (sub) {

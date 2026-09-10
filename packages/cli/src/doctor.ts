@@ -193,16 +193,37 @@ async function componentRow(m: FoundManifest, deps: Required<Pick<DoctorDeps, "e
 
   if (man.type === "service" && man.name === "console") {
     const url = hostLocal(deps.env.METISTRY_CONSOLE_URL || `http://127.0.0.1:${man.port ?? 8080}`, deps.shape);
+    // With the local owner token in this environment, /api/status is a real
+    // AUTHENTICATED read — the same door the Mac app comes through, so this
+    // row now proves it works instead of settling for "the 401 shape looks
+    // right" (docs/ops/auth.md). Without it, unchanged: 401 is a pass.
+    const token = (deps.env.METISTRY_OWNER_TOKEN ?? "").trim();
+    const headers = token ? { authorization: `Bearer ${token}` } : {};
+    const probe = token
+      ? `GET ${url}/health ok; /api/status authenticates with METISTRY_OWNER_TOKEN`
+      : `GET ${url}/health ok; /api/status answers (401 = a passkey session is required)`;
     return {
       kind,
-      ...(await runCheck(man.name, `GET ${url}/health ok; /api/status answers (401 = a passkey session is required)`, async () => {
+      ...(await runCheck(man.name, probe, async () => {
         const health = await deps.fetchFn(`${url}/health`, { signal: AbortSignal.timeout(deps.timeoutMs) }).catch((err) => {
           throw new Error(`console down at ${url} (${err instanceof Error ? err.message : String(err)}) — ${restartHint("console", deps.shape, deps.labelSuffix)}`);
         });
         if (!health.ok) throw new Error(`console /health returned ${health.status} — ${logHint("console", deps.shape, deps.labelSuffix)}`);
-        const status = await deps.fetchFn(`${url}/api/status`, { signal: AbortSignal.timeout(deps.timeoutMs) });
+        const status = await deps.fetchFn(`${url}/api/status`, { headers, signal: AbortSignal.timeout(deps.timeoutMs) });
         if (status.status !== 200 && status.status !== 401) throw new Error(`console /api/status returned ${status.status} — ${logHint("console", deps.shape, deps.labelSuffix)}`);
-        return { meta: { url, api_status: status.status } };
+        const meta = { url, api_status: status.status, authenticated: status.status === 200 };
+        // A token that is refused is a real finding — a console started
+        // before the variable existed, a stale .env, or (under compose)
+        // METISTRY_TRUSTED_LOOPBACK_PROXY missing — but the console itself
+        // is up and serving, so this degrades rather than fails.
+        if (token && status.status === 401) {
+          return {
+            status: "degraded" as const,
+            remediation: `${url} refused METISTRY_OWNER_TOKEN (401): the console was started with a different value (\`metistry secrets sync --to env\` then ${restartHint("console", deps.shape, deps.labelSuffix)}), or the request did not reach it from this machine — under compose it needs METISTRY_TRUSTED_LOOPBACK_PROXY (docs/ops/auth.md)`,
+            meta,
+          };
+        }
+        return { meta };
       })),
     };
   }

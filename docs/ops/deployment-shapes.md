@@ -130,9 +130,15 @@ migration rehearsal added.
    gitignored build output no release runner builds — so a release carries
    the Swift sources and nothing executable, and a release install's
    eventkit/apple-fm jobs have no helper to exec unless a git checkout on
-   the same Mac built one. `migrate-shape` pins those two jobs at the
-   already-granted bundles as a stopgap; the fix is to build and sign them
-   in the `macos-app` job, which holds the certificate
+   the same Mac built one. The pin (`packages/cli/src/tcc-pin.ts`) that
+   points those two jobs at the already-granted bundles as a stopgap is
+   applied by `up` on EVERY run, not only by `migrate-shape` — `up`
+   re-renders the calendar plist and rewrites `supervisor.json` from
+   scratch each time it installs the launchd shape (a plain `metistry up`,
+   `update`, and the eight-agents-to-one-supervisor conversion all go
+   through it), so if only `migrate-shape` pinned, the next `up` silently
+   un-pinned both bridges. The real fix is still to build and sign the
+   helpers in the `macos-app` job, which holds the certificate
    (`docs/ops/migrate-compose-to-launchd.md`, "The TCC helper bundles").
 10. **`--namespace` does not namespace the docker compose project.**
     `docker-compose.yml` carries `name: metistry`, so under the compose

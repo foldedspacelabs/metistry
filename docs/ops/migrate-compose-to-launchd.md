@@ -323,6 +323,25 @@ certificate and already re-signs every Mach-O it embeds
 release install's TCC bridges depend on a git checkout on the same Mac
 having built them.
 
+**`up` re-pins on every run, not just `migrate-shape` — settled 2026-09-10.**
+The pin moved to its own module, `packages/cli/src/tcc-pin.ts` (it was
+`migrate-shape.ts` local code originally; `migrate-shape.ts` imports
+`up.ts`, so `up.ts` cannot import it back). The reason: `metistry up`
+re-renders the calendar plist and rewrites `supervisor.json` from scratch
+on EVERY run — a plain `up`, the release-channel `update`, and the
+eight-agents-to-one-supervisor conversion all go through it — and a
+version that only `migrate-shape` pinned meant the very next `up` silently
+un-pinned both bridges again, pointing them back at the release's missing
+bundles. `up` now calls `pinTccHelpers` itself, right after it writes the
+calendar plist and `supervisor.json` and before it bootstraps or
+kickstarts either one, so the values launchd actually loads are already
+correct and no extra kickstart is needed. `migrate-shape` still calls it
+too, after its own restore — a no-op when `up (launchd)` already applied
+it moments before, and the thing that makes the correction take when
+called on its own (`bootstrapPinned`, the pin's own flag, defaults to
+`true` there and is passed `false` by `up`, whose own bootstrap loop is
+about to load the pinned jobs a few lines later anyway).
+
 ## What the rehearsal proved (2026-09-10)
 
 Run on the Studio against a locally built release pack with the same

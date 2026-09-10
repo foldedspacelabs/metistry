@@ -29,20 +29,20 @@
 // compared before it is called done.
 
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Deployment, DeploymentShape } from "@foldedspacelabs/metistry-core";
 import { consolePort, dbPort, loadDeployment } from "./deployment.js";
 import { setDeploymentShape } from "./deployment-report.js";
 import { doctor, renderTable, type DoctorDeps, type DoctorReport } from "./doctor.js";
 import type { Exec } from "./exec.js";
-import { labelFor, launchdCommands, loadPlistTemplates, launchAgentsDir, renderPlist, withEnvironmentVariables, SUPERVISOR_PLIST_FILE, type PlistTemplate } from "./launchd.js";
-import { readSupervisorConfig, serializeSupervisorConfig, supervisorConfigPath, SUPERVISOR_SERVICE } from "./supervisor.js";
+import { awaitBootout, labelFor, loadPlistTemplates, launchAgentsDir, SUPERVISOR_PLIST_FILE, type PlistTemplate } from "./launchd.js";
+import { SUPERVISOR_SERVICE } from "./supervisor.js";
 import { loadNamespace } from "./namespace.js";
 import { findPgToolchain, pgCandidates, pgDataDir, pgIsReady, pgSocketDir, type PgToolchain } from "./postgres.js";
 import { runtimeDir, runtimeNodeBin, RUNTIME_DIRNAME } from "./runtime-deps.js";
+import { pinTccHelpers } from "./tcc-pin.js";
 import { StepFailed, StepRunner } from "./steps.js";
-import { awaitBootout, composeEnvArgs, COMPOSE_TIMEOUT_MS, instanceLock, runDirFor, stateRoot, up, type UpOptions, type UpResult } from "./up.js";
+import { composeEnvArgs, COMPOSE_TIMEOUT_MS, instanceLock, runDirFor, stateRoot, up, type UpOptions, type UpResult } from "./up.js";
 
 /** The services that actually change supervisor. `reconciler` and `watchdog` are host jobs in either shape (invariant 6). */
 export const SHAPE_SERVICES = ["db", "console", "assistant"] as const;
@@ -128,63 +128,13 @@ export function tableCountsSql(tables: string[]): string {
  */
 export const DRY_RUN_COUNTS = "psql: one count(*) per table from the list above";
 
-/**
- * The Developer-ID-signed Swift helper bundles (D3), which the runtime pack
- * does NOT carry — `pack-runtime.sh` copies each `mcp-<name>/helper`, but the
- * `.app` bundles inside it are gitignored build output that no release
- * runner builds, so a release ships the sources and the Info.plist and
- * nothing executable (verified against the installed v0.5.0 pack).
- *
- * Under the compose shape this never showed, because the two host bridge
- * jobs were rendered with `__REPO__` = the git checkout, which is where the
- * hand-built bundles live. Re-rendering them against `current/` would point
- * both at a path that does not exist.
- *
- * So for THIS cutover the two jobs keep pointing at the bundles that
- * already hold the TCC grant — same bundle id, same certificate chain,
- * therefore the same TCC designated requirement, therefore no re-grant
- * (docs/ops/apple-signing.md §3). Shipping prebuilt signed helpers in the
- * pack is the real fix and is recorded as a follow-up.
- *
- * Two different mechanisms, because the two bridges find their helper two
- * different ways:
- *
- *   calendar         the EventKit helper IS the launchd job — the path is in
- *                    the plist's ProgramArguments, so that plist is patched
- *                    with the bundle's directory.
- *   apple-fm         the node bridge spawns its helper from a path relative
- *                    to its own dist/ (`packages/mcp-apple-fm/src/main.ts`),
- *                    overridable by METISTRY_AFM_HELPER — so the override
- *                    goes into that job's environment. Under the supervisor
- *                    that job is a CHILD, so the entry goes into its child
- *                    spec in `<instance>/state/supervisor.json` and the
- *                    supervisor is kickstarted; there is no plist of its own
- *                    to patch any more.
- */
-export interface TccHelper {
-  /** the plist service whose job needs the pin */
-  service: string;
-  /** the bundle, relative to a product tree */
-  bundle: string;
-  /** the executable inside the bundle */
-  exe: string;
-  /** set this variable in the job's environment instead of re-rendering __REPO__ */
-  envVar?: string;
-}
-
-export const TCC_HELPERS: TccHelper[] = [
-  {
-    service: "calendar",
-    bundle: join("packages", "mcp-eventkit", "helper", "ek-helper.app"),
-    exe: join("Contents", "MacOS", "ek-helper"),
-  },
-  {
-    service: "apple-fm",
-    bundle: join("packages", "mcp-apple-fm", "helper", "afm-helper.app"),
-    exe: join("Contents", "MacOS", "afm-helper"),
-    envVar: "METISTRY_AFM_HELPER",
-  },
-];
+// The TCC helper pin (TCC_HELPERS, pinTccHelpers, pinSupervisorChild) lives
+// in tcc-pin.ts now — `up` has to apply the exact same pin on every run (it
+// re-renders the calendar plist and rewrites supervisor.json each time it
+// installs the launchd shape), and `up.ts` cannot import this file (this
+// file already imports `up.ts` for the shared `up()` step). This verb keeps
+// calling it below, after its own restore, which is a no-op the pin already
+// applied via `up (launchd)` just above.
 
 export interface MigrateShapeOptions {
   productDir: string;
@@ -446,128 +396,6 @@ export async function dumpCompose(ctx: Ctx, toolchain: PgToolchain, ts: string):
     ctx.r.note(`dump verified: ${path}, ${entries} TOC entries`);
   }
   return { path, before, countsSql };
-}
-
-// ---- the TCC helper bundles ----------------------------------------------------
-
-/**
- * Pin the two bridge jobs at the signed helper bundles that already hold
- * the TCC grant (see TCC_HELPERS). Runs AFTER `up` has written every plist,
- * because it is a correction to two of them, and re-bootstraps only those.
- *
- * A bundle that is not there is a NOTE, not a failure: an install with no
- * calendar bridge is a healthy install (doctor reports `absent`), and
- * failing a database migration over a missing Swift binary would be absurd.
- */
-/** The child spec `up` wrote for this service, when there is one. */
-async function supervisorChild(ctx: Ctx, service: string): Promise<{ name: string } | undefined> {
-  const config = await readSupervisorConfig(supervisorConfigPath(supervisorStateRoot(ctx))).catch(() => undefined);
-  return config?.children.find((c) => c.name === service);
-}
-
-function supervisorStateRoot(ctx: Ctx): string {
-  return ctx.env.METISTRY_INSTANCE_DIR?.replace(/\/+$/, "") || ctx.productDir;
-}
-
-/**
- * Put one variable into a child's environment in `supervisor.json` and
- * kickstart the supervisor so it takes.
- *
- * The same reasoning as patching the plist `up` wrote rather than
- * re-rendering it: the config already carries this instance's namespaced
- * ports and everything else `up` computed, and rebuilding it here could only
- * forget something.
- */
-export async function pinSupervisorChild(ctx: Ctx, service: string, envVar: string, value: string): Promise<void> {
-  const path = supervisorConfigPath(supervisorStateRoot(ctx));
-  const config = await readSupervisorConfig(path);
-  if (!config) {
-    ctx.r.note(`${service}: no ${path} — nothing to pin (metistry up writes it)`);
-    return;
-  }
-  const next = {
-    ...config,
-    children: config.children.map((c) => (c.name === service ? { ...c, env: { ...c.env, [envVar]: value } } : c)),
-  };
-  await ctx.r.write(path, serializeSupervisorConfig(next), `the config up wrote, plus ${service}'s ${envVar}=${value} (the signed bundle holding the TCC grant; this release carries none)`);
-  await ctx.r.run("launchctl", ["kickstart", "-k", `gui/${ctx.uid}/${labelFor(SUPERVISOR_SERVICE, ctx.labelSuffix)}`], { comment: `${service} restarts with the pinned helper` });
-}
-
-export async function pinTccHelpers(ctx: Ctx, templates: PlistTemplate[], exists: (p: string) => boolean): Promise<string[]> {
-  const pinned: string[] = [];
-  for (const h of TCC_HELPERS) {
-    const t = templates.find((x) => x.service === h.service);
-    // under the supervisor a bridge is a child, not an agent: it has no plist
-    // in ~/Library/LaunchAgents to patch, and its environment lives in the
-    // supervisor's config
-    const child = t ? undefined : await supervisorChild(ctx, h.service);
-    if (!t && !child) continue;
-    const inRelease = join(ctx.runDir, h.bundle, h.exe);
-    if (exists(inRelease)) {
-      ctx.r.note(`${h.service}: ${inRelease} is in this release — no pin needed`);
-      continue;
-    }
-    const onHost = join(ctx.productDir, h.bundle, h.exe);
-    if (!exists(onHost)) {
-      ctx.r.note(
-        `${h.service}: no signed helper at ${onHost} and none in the release — this bridge will not start. ` +
-          `Build it (packages/${h.service === "apple-fm" ? "mcp-apple-fm" : "mcp-eventkit"}/scripts/build-helper.sh) and re-run \`metistry up\`; ` +
-          `doctor reports the bridge absent until then.`,
-      );
-      continue;
-    }
-    if (!t) {
-      // a child: one entry in its spec, then the supervisor restarts it
-      if (!h.envVar) {
-        ctx.r.note(`${h.service}: it is a supervisor child with no environment override — nothing to pin`);
-        continue;
-      }
-      await pinSupervisorChild(ctx, h.service, h.envVar, onHost);
-      pinned.push(`${h.service} → ${onHost}`);
-      continue;
-    }
-    // PATCH the plist `up` just wrote — never re-render it from the template.
-    //
-    // `up` puts more into these files than the three placeholders: this
-    // instance's namespaced ports for the jobs that source `.env`, and the
-    // bundled git on the reconciler's PATH. A re-render here dropped the
-    // ports, and the rehearsal's scratch apple-fm bridge went looking for
-    // the DEFAULT 7810 — which is the production install's, and it only
-    // failed to take it because production had it (`EADDRINUSE`). Patching
-    // what `up` wrote cannot forget something `up` knows.
-    const target = join(launchAgentsDir(ctx.home), t.file);
-    const written = existsSync(target) && !ctx.r.dryRun ? await readFile(target, "utf8") : renderPlist(t.template, { repo: ctx.runDir, node: runtimeNodeBin(ctx.productDir), envFile: ctx.envFile });
-    if (h.envVar) {
-      // the bridge is a node service that resolves its helper relative to its
-      // own dist/; the override is one added environment entry
-      await ctx.r.write(target, withEnvironmentVariables(written, { [h.envVar]: onHost }), `the plist up wrote, plus ${h.envVar}=${onHost} (the signed bundle holding the TCC grant; this release carries none)`);
-    } else {
-      // the helper IS the job's root process — that is what the TCC grant
-      // attaches to — so its path is in ProgramArguments, and only there
-      const from = join(ctx.runDir, h.bundle);
-      const to = join(ctx.productDir, h.bundle);
-      if (!written.includes(from)) {
-        ctx.r.note(`${h.service}: ${target} does not name ${from} — leaving it alone rather than guessing`);
-        continue;
-      }
-      await ctx.r.write(target, written.split(from).join(to), `the plist up wrote, with ${from} → ${to} (the signed bundle holding the TCC grant; this release carries none)`);
-    }
-    // the SAME sequence `up` installs a job with, wait included: `bootout` is
-    // asynchronous, and bootstrapping the label straight after races launchd
-    // and fails `Bootstrap failed: 5: Input/output error` (#117's fourth
-    // defect — and this section reproduced it exactly once by hand-rolling
-    // the three commands)
-    const label = labelFor(h.service, ctx.labelSuffix);
-    for (const c of launchdCommands(label, target, ctx.uid)) {
-      if (c.awaitGone) {
-        await awaitBootout(ctx.r, label, ctx.uid);
-        continue;
-      }
-      await ctx.r.run(c.cmd, c.args, { tolerateFailure: c.tolerateFailure, comment: c.tolerateFailure ? "ok if not loaded" : undefined });
-    }
-    pinned.push(`${h.service} → ${onHost}`);
-  }
-  return pinned;
 }
 
 // ---- the plan ------------------------------------------------------------------

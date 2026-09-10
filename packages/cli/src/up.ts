@@ -21,6 +21,7 @@ import { assistantEnv, consoleEnv, consolePort, dbPort, loadDeployment, type Sha
 import { doctor, renderTable, type DoctorDeps, type DoctorReport } from "./doctor.js";
 import type { Exec } from "./exec.js";
 import {
+  awaitBootout,
   GIT_SPAWNING_SERVICES,
   LABEL_PREFIX,
   labelFor,
@@ -37,6 +38,7 @@ import {
   type PlistTemplate,
   type PlistValues,
 } from "./launchd.js";
+import { pinTccHelpers } from "./tcc-pin.js";
 import {
   childFromRenderedPlist,
   launchdBaseEnv,
@@ -211,6 +213,14 @@ export function stateRoot(productDir: string, env: NodeJS.ProcessEnv): string {
 
 export interface ShapeValues extends ShapeContext {
   node: string;
+  /**
+   * The true install root — `opts.productDir`, never `current`. `productDir`
+   * on this object (from `ShapeContext`) is actually the RUN dir (`current`
+   * in release mode), because it is what the plists render `__REPO__` from;
+   * the TCC pin needs both, the same way `migrate-shape`'s `Ctx` keeps
+   * `productDir` and `runDir` distinct.
+   */
+  installRoot: string;
   /** `__ENV_FILE__`: `<instance>/state/.env`, or the product checkout's while an install still runs from there */
   envFile: string;
   /** rendered into the db plist; undefined when no toolchain was found (the db section reports that) */
@@ -292,39 +302,27 @@ export async function ensureNamespace(
   return ns;
 }
 
-/** How long `up` waits for `launchctl bootout` to finish before bootstrapping the same label again (25 × 200ms = 5s). */
-export const BOOTOUT_TRIES = 25;
-export const BOOTOUT_INTERVAL_MS = 200;
-
-/**
- * Wait until `launchctl print gui/<uid>/<label>` stops finding the job.
- *
- * `bootout` is asynchronous: it returns while launchd is still tearing the
- * job down, and a `bootstrap` of the same label in that window fails with
- * `Bootstrap failed: 5: Input/output error`. Polling `print` is the only
- * thing launchctl offers that answers "is it gone yet". A timeout is NOT
- * an error here — the bootstrap that follows will report the real problem
- * with launchd's own words rather than ours.
- */
-export async function awaitBootout(r: StepRunner, label: string, uid: number, sleep: (ms: number) => Promise<void> = (ms) => new Promise((res) => setTimeout(res, ms))): Promise<boolean> {
-  if (r.dryRun) {
-    r.note(`wait for gui/${uid}/${label} to be gone before bootstrapping it (bootout is asynchronous)`);
-    return true;
-  }
-  for (let i = 0; i < BOOTOUT_TRIES; i++) {
-    const p = await r.exec("launchctl", ["print", `gui/${uid}/${label}`], { env: r.env });
-    if (p.code !== 0) return true;
-    await sleep(BOOTOUT_INTERVAL_MS);
-  }
-  r.note(`gui/${uid}/${label} is still loaded ${(BOOTOUT_TRIES * BOOTOUT_INTERVAL_MS) / 1000}s after bootout — bootstrapping anyway`);
-  return false;
-}
+// BOOTOUT_TRIES / BOOTOUT_INTERVAL_MS / awaitBootout moved to launchd.ts —
+// tcc-pin.ts needs them too, and up.ts already imports tcc-pin.ts.
 
 /** The plists whose EnvironmentVariables dict holds this install's secrets, so they are written 0600. */
 export const SECRET_BEARING_SERVICES = new Set(["console", "assistant"]);
 
-/** Render every template into ~/Library/LaunchAgents and (re)bootstrap it; on anything but macOS, print the systemd units instead. */
-export async function installLaunchd(r: StepRunner, productDir: string, le: LaunchdEnv, deployment: Deployment, values: ShapeValues): Promise<void> {
+/**
+ * Render every template into ~/Library/LaunchAgents and (re)bootstrap it; on
+ * anything but macOS, print the systemd units instead.
+ *
+ * Every plist (and `supervisor.json`) is WRITTEN before any of them is
+ * bootstrapped, and the TCC pin (tcc-pin.ts) runs in between — not
+ * interleaved per-job the way it used to be. `up` runs on every `update`
+ * and re-renders the calendar plist and `supervisor.json` from scratch each
+ * time; if it bootstrapped a job right after writing it, a release install
+ * with no bundled helper would load the un-pinned plist for one kickstart
+ * and then need a SECOND one from `pinTccHelpers` to fix it — a fixable
+ * ordering bug, not a fundamental one, and this is the fix: write
+ * everything, correct the two TCC jobs, THEN bootstrap everything once.
+ */
+export async function installLaunchd(r: StepRunner, productDir: string, le: LaunchdEnv, deployment: Deployment, values: ShapeValues, exists: (p: string) => boolean = existsSync): Promise<void> {
   const templates = await loadPlistTemplates(productDir, deployment.shape, values.namespace?.labelSuffix, values.env);
   if (templates.length === 0) {
     r.note("no ops/launchd/*.plist in this checkout — nothing to install");
@@ -345,16 +343,18 @@ export async function installLaunchd(r: StepRunner, productDir: string, le: Laun
   // the launchd shape's core is the supervisor's child list, not a plist each
   if (deployment.shape === "launchd") await installSupervisorPlan(r, productDir, le, values);
   const dir = launchAgentsDir(le.home);
-  for (const t of templates) {
-    if (t.service === SUPERVISOR_SERVICE && values.registerVia === "app") {
-      // the app's copy is inside its signed bundle and registered with
-      // SMAppService; a second, identical agent in ~/Library/LaunchAgents
-      // would be the same install running twice
-      r.note(
-        `--register-via app: ${t.label} is NOT installed here — the Mac app registers ${SUPERVISOR_PLIST_FILE} from Metistry.app/Contents/Library/LaunchAgents through SMAppService.agent(plistName:), and Login Items shows one item nested under the app (docs/ops/mac-app.md)`,
-      );
-      continue;
-    }
+  // the app's copy is inside its signed bundle and registered with
+  // SMAppService; a second, identical agent in ~/Library/LaunchAgents
+  // would be the same install running twice
+  const installable = templates.filter((t) => !(t.service === SUPERVISOR_SERVICE && values.registerVia === "app"));
+  if (installable.length < templates.length) {
+    const sup = templates.find((t) => t.service === SUPERVISOR_SERVICE)!;
+    r.note(
+      `--register-via app: ${sup.label} is NOT installed here — the Mac app registers ${SUPERVISOR_PLIST_FILE} from Metistry.app/Contents/Library/LaunchAgents through SMAppService.agent(plistName:), and Login Items shows one item nested under the app (docs/ops/mac-app.md)`,
+    );
+  }
+
+  for (const t of installable) {
     const target = join(dir, t.file);
     const { rendered, from, secret } = renderJob(t, productDir, le, values);
     await r.write(target, rendered, from);
@@ -362,6 +362,26 @@ export async function installLaunchd(r: StepRunner, productDir: string, le: Laun
     // tokens and CLAUDE_CODE_OAUTH_TOKEN; ~/Library/LaunchAgents is 0755, so
     // the file itself has to be the boundary
     if (secret) await r.run("chmod", ["600", target], { comment: "the env dict holds secrets" });
+  }
+
+  // pin the two TCC bridges at the signed bundles that already hold the
+  // grant — see tcc-pin.ts. Every run: the calendar plist and
+  // supervisor.json were both just (re)written above, and this must apply
+  // BEFORE either is bootstrapped, or the jobs below start un-pinned.
+  // `kickstartSupervisor: false` — the bootstrap loop right below is about
+  // to kickstart it anyway; no need for the pin to do it a second time.
+  const pinned = await pinTccHelpers(
+    { r, env: values.env, productDir: values.installRoot, runDir: productDir, home: le.home, uid: le.uid, labelSuffix: values.namespace?.labelSuffix, envFile: values.envFile },
+    templates,
+    exists,
+    false,
+  );
+  if (pinned.length > 0) {
+    r.note(`pinned at the signed bundles that hold the TCC grant (same bundle id + certificate chain = same designated requirement, so no re-grant): ${pinned.join(", ")}`);
+  }
+
+  for (const t of installable) {
+    const target = join(dir, t.file);
     for (const c of launchdCommands(t.label, target, le.uid)) {
       if (c.awaitGone) {
         await awaitBootout(r, t.label, le.uid);
@@ -628,6 +648,10 @@ export async function up(opts: UpOptions): Promise<UpResult> {
     // the product's files: `current` in release mode, so the plists exec the
     // running release and a rollback stays a symlink flip
     productDir: runDir,
+    // the true install root — where a sibling checkout's hand-built TCC
+    // helper bundles live, and where a namespaced install's own bundles
+    // would (see tcc-pin.ts)
+    installRoot: opts.productDir,
     ...instanceDir,
     env,
     shape: deployment.shape,
@@ -714,7 +738,7 @@ export async function up(opts: UpOptions): Promise<UpResult> {
       values.gitPath = pathWithRuntimeGit(opts.productDir, opts.exists ?? existsSync);
       if (values.gitPath) r.note(`git: ${values.gitPath.split(":")[0]} (bundled) — prefixed onto the reconciler's PATH`);
       r.section("launchd");
-      await installLaunchd(r, runDir, le, deployment, values);
+      await installLaunchd(r, runDir, le, deployment, values, opts.exists ?? existsSync);
       if (pg) {
         r.section("database");
         await finishPostgres(r, pg);

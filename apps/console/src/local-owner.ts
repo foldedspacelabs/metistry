@@ -2,7 +2,7 @@
 // anything else running as the logged-in user authenticates to a console on
 // this machine without a passkey ceremony.
 //
-// Possession of `METISTRY_OWNER_TOKEN` means "I can read this user's login
+// Possession of `METISTRY_LOCAL_OWNER_TOKEN` means "I can read this user's login
 // Keychain (or the 0600 .env generated from it)", which is exactly what a
 // passkey on this Mac means: the person who is logged in. What it must NOT
 // mean is "I hold a bearer that works from anywhere", so the token is
@@ -39,7 +39,7 @@ export const LOOPBACK_ADDRESSES = ["127.0.0.1", "::1", "::ffff:127.0.0.1"] as co
 export const DOCKER_GATEWAY = "docker-gateway";
 
 export interface LocalOwnerConfig {
-  /** METISTRY_OWNER_TOKEN — the instance-scoped secret `metistry init` mints. */
+  /** METISTRY_LOCAL_OWNER_TOKEN — the instance-scoped secret `metistry init` mints. */
   token: string;
   /** Peer addresses that count as local BESIDES loopback: the compose gateway, resolved. Empty on the launchd shape. */
   trusted: readonly string[];

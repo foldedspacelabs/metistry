@@ -66,7 +66,7 @@ export const SECRET_SCOPES: readonly ScopeRule[] = [
   { scope: "user", match: "CLAUDE_CODE_OAUTH_TOKEN", why: "the person's Claude subscription login — one per Mac, shared by every instance" },
   { scope: "user", match: /^METISTRY_AWS_(SECRET_ACCESS_KEY|SESSION_TOKEN)$/, why: "the person's own AWS credentials (aws-costs), not this instance's" },
   { scope: "instance", match: /^METISTRY_DB_PASSWORD$/, why: "this instance's Postgres, in its own state/pg" },
-  { scope: "instance", match: /^METISTRY_OWNER_TOKEN$/, why: "the local owner door into THIS instance's console (docs/ops/auth.md) — a second instance must not open the first's" },
+  { scope: "instance", match: /^METISTRY_LOCAL_OWNER_TOKEN$/, why: "the local owner door into THIS instance's console (docs/ops/auth.md) — a second instance must not open the first's" },
   { scope: "instance", match: /^METISTRY_BRIDGE_TOKEN_/, why: "a bearer this instance's bridges were started with" },
   { scope: "instance", match: /^METISTRY_ASSISTANT_TOKEN$/, why: "the internal agent's bearer, registered in this instance's console" },
   { scope: "instance", match: /^METISTRY_VAPID_/, why: "push keys bound to this instance's origin and subscriptions" },
@@ -88,7 +88,7 @@ export const DEFAULT_SCOPE: SecretScope = "instance";
  * already started with) stays "not in the Keychain, left as it is".
  */
 export const GENERATED_SECRETS: Readonly<Record<string, string>> = {
-  METISTRY_OWNER_TOKEN: "the console's local owner door — an install that predates it gets one here (docs/ops/auth.md)",
+  METISTRY_LOCAL_OWNER_TOKEN: "the console's local owner door — an install that predates it gets one here (docs/ops/auth.md)",
 };
 
 function ruleFor(name: string): ScopeRule | undefined {

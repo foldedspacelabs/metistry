@@ -17,11 +17,13 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { usesCompose } from "@foldedspacelabs/metistry-core";
 import { loadDeployment } from "./deployment.js";
-import { doctor, hostLocal, type DoctorDeps, type DoctorReport } from "./doctor.js";
+import { doctor, type DoctorDeps, type DoctorReport } from "./doctor.js";
 import { productVersion } from "./env.js";
+import { envPaths } from "./instance.js";
 import type { Exec } from "./exec.js";
 import { loadPlistTemplates, type PlistTemplate } from "./launchd.js";
 import { instanceLockPath, LOCK_FILENAME, readLock, serializeLock, type LockFile, type LockSource } from "./lock.js";
+import { writeProtected, type ProtectedWrite } from "./protected-write.js";
 import { listMigrationFiles, MIGRATION_LOCK_KEY, openMigrationSession, runMigrations, type MigrateResult, type MigrationSession } from "./migrate.js";
 import { currentVersion, installRelease, rollbackRelease, releaseTarget, runtimePackCommit, type InstallReleaseResult } from "./release.js";
 import { installRuntimeDeps, runtimeDepsEnabled, RUNTIME_DIRNAME, type InstallRuntimeDepsResult } from "./runtime-deps.js";
@@ -48,6 +50,8 @@ export interface UpdateOptions {
   rollback?: boolean | undefined;
   /** release mode: the runtime pack's os-arch (default: this host's) */
   target?: string | undefined;
+  /** `--env-file`: the dotenv file this install runs from (default: `<instance>/state/.env`, falling back to the checkout's) */
+  envFile?: string | undefined;
   now?: Date | undefined;
   fetchFn?: typeof fetch | undefined;
   /** test seam: a single-session db handle for the migration runner (null = no db configured) */
@@ -73,7 +77,7 @@ export interface UpdateResult {
   runDir: string;
 }
 
-export const RECONCILER_LABEL = "com.foldedspacelabs.metistry.reconciler";
+export { RECONCILER_LABEL } from "./protected-write.js";
 
 /** `git rev-parse HEAD` in a checkout; undefined when it is not one (or git is missing). */
 export async function gitHead(dir: string, exec: Exec): Promise<string | undefined> {
@@ -146,70 +150,18 @@ export async function hashHostJobs(productDir: string, templates: PlistTemplate[
 
 // ---- the lock write ----------------------------------------------------------------
 
-export interface LockDelivery {
-  how: "bridge" | "direct" | "none";
-  detail: string;
-}
+export type LockDelivery = ProtectedWrite;
 
 /**
- * Where the new lock goes. The reconciler is the instance repo's sole
- * committer, so when a bridge is configured the write goes through it as
- * the `user` principal (metistry.lock is a §4.7 protected path — only
- * `user` may). Without a bridge, a LOCAL instance dir is written directly
- * only when no reconciler job is running: a running reconciler would sweep
- * the edit as an out-of-band change, which is fine, but a running one with
- * no URL configured is a misconfiguration the operator should fix, not
- * something to write around.
+ * Where the new lock goes: through the reconciler when one is configured
+ * (metistry.lock is a §4.7 protected path — only the `user` principal may
+ * write it), else directly into a local instance dir. protected-write.ts
+ * holds the policy, which `identity.yaml`'s `instance_id` shares.
  */
 export async function writeLock(r: StepRunner, lock: LockFile, opts: { env: NodeJS.ProcessEnv; platform: NodeJS.Platform; uid: number; fetchFn: typeof fetch }): Promise<LockDelivery> {
-  const content = serializeLock(lock);
-  const message = `metistry update → ${lock.product.version}`;
-  const url = opts.env.METISTRY_RECONCILER_URL;
-  const path = instanceLockPath(opts.env);
-
-  if (url) {
-    const base = hostLocal(url);
-    const token = opts.env.METISTRY_BRIDGE_TOKEN_RECONCILER;
-    if (!token) throw new StepFailed("METISTRY_RECONCILER_URL is set but METISTRY_BRIDGE_TOKEN_RECONCILER is not — the lock cannot be written through the bridge");
-    const shown = `POST ${base}/vault/write ${LOCK_FILENAME} (principal user, "${message}")`;
-    if (!r.action(shown)) return { how: "bridge", detail: "the reconciler commits it on its next flush (it is the instance repo's sole committer)" };
-    let res: Response;
-    try {
-      res = await opts.fetchFn(`${base}/vault/write`, {
-        method: "POST",
-        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-        body: JSON.stringify({ path: LOCK_FILENAME, content, intent: { principal: "user", message } }),
-        signal: AbortSignal.timeout(10_000),
-      });
-    } catch (err) {
-      throw new StepFailed(`reconciler bridge at ${base} did not answer (${err instanceof Error ? err.message : String(err)}) — start it (launchctl kickstart -k gui/${opts.uid}/${RECONCILER_LABEL}) and rerun; the lock was NOT written`);
-    }
-    if (!res.ok) {
-      let why = `HTTP ${res.status}`;
-      try {
-        const body = (await res.json()) as { error?: { code?: string; message?: string } };
-        if (body?.error) why = `${body.error.code ?? res.status}: ${body.error.message ?? ""}`.trim();
-      } catch {
-        /* no envelope */
-      }
-      throw new StepFailed(`reconciler refused the lock write (${why}) — the lock was NOT written`);
-    }
-    return { how: "bridge", detail: `${LOCK_FILENAME} written through the reconciler as user — committed on its next flush` };
-  }
-
-  if (path && existsSync(path.slice(0, -LOCK_FILENAME.length - 1))) {
-    if (opts.platform === "darwin" && !r.dryRun) {
-      const probe = await r.exec("launchctl", ["print", `gui/${opts.uid}/${RECONCILER_LABEL}`]);
-      if (probe.code === 0 && /^\s*state = running/m.test(probe.stdout)) {
-        throw new StepFailed(`a reconciler job is running but METISTRY_RECONCILER_URL is unset — add it (and METISTRY_BRIDGE_TOKEN_RECONCILER) to .env so update writes the lock through the bridge; refusing to write ${path} behind the sole committer`);
-      }
-    }
-    await r.write(path, content, "metistry update; no reconciler bridge configured, so written directly — a reconciler, once installed, sweeps it into a user commit");
-    return { how: "direct", detail: `${path} written directly (no reconciler configured)` };
-  }
-
-  r.note(`no METISTRY_INSTANCE_DIR — ${LOCK_FILENAME} not written (metistry init creates the instance repo)`);
-  return { how: "none", detail: "no instance dir" };
+  const delivery = await writeProtected(r, LOCK_FILENAME, serializeLock(lock), `metistry update → ${lock.product.version}`, opts);
+  if (delivery.how === "none") r.note(`no METISTRY_INSTANCE_DIR — ${LOCK_FILENAME} not written (metistry init creates the instance repo)`);
+  return delivery;
 }
 
 // ---- the command --------------------------------------------------------------------
@@ -224,6 +176,12 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
   const fetchFn = opts.fetchFn ?? fetch;
   const openSession = opts.openSession ?? openMigrationSession;
   const productDir = opts.productDir;
+
+  // compose interpolates from `./.env` unless told otherwise, and this
+  // install's environment now lives in the instance (`state/.env`)
+  const instanceDir = env.METISTRY_INSTANCE_DIR ? { instanceDir: env.METISTRY_INSTANCE_DIR.replace(/\/+$/, "") } : {};
+  const envPathsFound = envPaths({ ...instanceDir, productDir, ...(opts.envFile ? { explicit: opts.envFile } : {}) });
+  const envFile = envPathsFound?.read[0] ?? envPathsFound?.write;
 
   const lockPath = instanceLockPath(env);
   const prior = lockPath ? await readLock(lockPath) : undefined;
@@ -307,7 +265,7 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
     }
 
     r.section("restart");
-    if (usesCompose(deployment)) await composeUp(r, runDir, source, source === "release" ? releaseVersion : undefined);
+    if (usesCompose(deployment)) await composeUp(r, runDir, source, source === "release" ? releaseVersion : undefined, envFile);
     else r.note("shape launchd: no containers, so docker is never called — console, assistant and db are kickstarted below with the other host jobs");
     if (platform === "darwin") {
       const after = await hashHostJobs(runDir, templates);

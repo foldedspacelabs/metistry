@@ -6,6 +6,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { envNotices, envPaths, productEnvFile, resolveInstanceDir, type EnvPaths } from "./instance.js";
 
 /** Parse a dotenv-shaped file: KEY=value lines, `#` comments, optional `export `, matching outer quotes stripped. */
 export function parseDotEnv(text: string): Record<string, string> {
@@ -22,9 +23,8 @@ export function parseDotEnv(text: string): Record<string, string> {
   return out;
 }
 
-/** Load `<dir>/.env` into `env` for variables that are unset. Returns the number applied; 0 when the file is absent. */
-export function loadDotEnv(dir: string, env: NodeJS.ProcessEnv = process.env): number {
-  const file = join(dir, ".env");
+/** Load one dotenv-shaped file into `env` for variables that are unset. Returns the number applied; 0 when the file is absent. */
+export function loadEnvFile(file: string, env: NodeJS.ProcessEnv = process.env): number {
   if (!existsSync(file)) return 0;
   let n = 0;
   for (const [k, v] of Object.entries(parseDotEnv(readFileSync(file, "utf8")))) {
@@ -34,6 +34,55 @@ export function loadDotEnv(dir: string, env: NodeJS.ProcessEnv = process.env): n
     }
   }
   return n;
+}
+
+/** Load `<dir>/.env`. Kept for callers that mean a specific directory's file. */
+export function loadDotEnv(dir: string, env: NodeJS.ProcessEnv = process.env): number {
+  return loadEnvFile(join(dir, ".env"), env);
+}
+
+export interface LoadedEnv {
+  /** files actually read, in the order they were applied (earlier wins — nothing already set is overwritten) */
+  files: string[];
+  applied: number;
+  /** the instance this install serves, once known */
+  instanceDir?: string;
+  /** where `.env` now belongs, and what is still being read from the old place */
+  paths?: EnvPaths;
+  /** deprecation lines worth printing once, at the top of a command's output */
+  notices: string[];
+}
+
+/**
+ * An install's environment, wherever it lives. `<instance>/state/.env`
+ * first, the product checkout's `.env` after it — the checkout's file is
+ * still where a terminal install may declare `METISTRY_INSTANCE_DIR`, so
+ * it is PARSED for that pointer before either file is applied, which keeps
+ * the instance's own values winning even when the pointer only exists in
+ * the deprecated file.
+ */
+export function loadInstallEnv(opts: { productDir?: string | undefined; env?: NodeJS.ProcessEnv | undefined; instanceDir?: string | undefined; envFile?: string | undefined } = {}): LoadedEnv {
+  const env = opts.env ?? process.env;
+  let instanceDir = resolveInstanceDir(env, opts.instanceDir);
+  if (!instanceDir && opts.productDir) {
+    const product = productEnvFile(opts.productDir);
+    if (existsSync(product)) {
+      const pointer = parseDotEnv(readFileSync(product, "utf8")).METISTRY_INSTANCE_DIR;
+      if (pointer) instanceDir = resolveInstanceDir({}, pointer);
+    }
+  }
+  // downstream (`up`, the lock path, `stateRoot`) reads the variable, not our
+  // local: an `--instance` that disagreed with the environment would split them
+  if (instanceDir) env.METISTRY_INSTANCE_DIR = instanceDir;
+  const paths = envPaths({ ...(instanceDir ? { instanceDir } : {}), ...(opts.productDir ? { productDir: opts.productDir } : {}), ...(opts.envFile ? { explicit: opts.envFile } : {}) });
+  const files: string[] = [];
+  let applied = 0;
+  for (const f of paths?.read ?? []) {
+    const n = loadEnvFile(f, env);
+    files.push(f);
+    applied += n;
+  }
+  return { files, applied, ...(instanceDir ? { instanceDir } : {}), ...(paths ? { paths } : {}), notices: paths ? envNotices(paths) : [] };
 }
 
 /** A product checkout is the directory holding both `seed/identity.yaml` and the workspace `package.json` named "metistry". */

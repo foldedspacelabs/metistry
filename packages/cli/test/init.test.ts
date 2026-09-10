@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 import { describe, expect, it } from "vitest";
 import { applyName, init, lockFile, mentionFor, INSTANCE_DIRS } from "../src/init.js";
+import { readInstanceId, INSTANCE_ID_RE } from "../src/instance.js";
 import { parseLock } from "../src/lock.js";
 import { main } from "../src/main.js";
 
@@ -57,6 +58,18 @@ describe("metistry init", () => {
     expect(r.assistantName).toBe((parseYaml(readFileSync(join(seedDir, "identity.yaml"), "utf8")) as { name: string }).name);
     expect(r.envLines).toEqual([`METISTRY_INSTANCE_DIR=${dir}`, `METISTRY_BRIDGE_TOKEN_RECONCILER=${MINTED}`, "METISTRY_RECONCILER_URL=http://host.docker.internal:7812"]);
     for (const f of git(dir, "ls-files").split("\n")) expect(readFileSync(join(dir, f), "utf8"), f).not.toContain(MINTED);
+
+    // an instance directory is self-contained: it is minted with its own id,
+    // which is the Keychain account its secrets are filed under, and `state/`
+    // (Postgres data, the assistant's transcripts, the generated .env) is
+    // gitignored so none of it can ever be committed
+    expect(r.instanceId).toMatch(INSTANCE_ID_RE);
+    expect(await readInstanceId(dir)).toBe(r.instanceId);
+    expect(readFileSync(join(dir, "identity.yaml"), "utf8")).toContain(`instance_id: "${r.instanceId}"`);
+    await writeFile(join(dir, "state.txt"), "not the dir"); // only `state/` is ignored
+    await mkdir(join(dir, "state"), { recursive: true });
+    await writeFile(join(dir, "state", ".env"), "METISTRY_DB_PASSWORD=secret");
+    expect(git(dir, "status", "--porcelain")).toBe("?? state.txt");
   });
 
   it("--name lands in identity.yaml (and the mention follows), keeping the seed's comments", async () => {

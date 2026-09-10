@@ -19,9 +19,15 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 cd "$ROOT"
 
-# Load .env for any unset vars (export everything it defines).
+# Load .env for any unset vars (export everything it defines). An instance
+# directory is self-contained, so its own `state/.env` is the install's
+# environment and is sourced LAST (it wins); the checkout's may hold nothing
+# but the METISTRY_INSTANCE_DIR pointer.
 if [ -f .env ]; then
   set -a; . ./.env; set +a
+fi
+if [ -n "${METISTRY_INSTANCE_DIR:-}" ] && [ -f "$METISTRY_INSTANCE_DIR/state/.env" ]; then
+  set -a; . "$METISTRY_INSTANCE_DIR/state/.env"; set +a
 fi
 
 : "${METISTRY_DB_HOST:=127.0.0.1}"

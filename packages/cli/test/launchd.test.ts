@@ -29,11 +29,13 @@ describe("launchd templates", () => {
     expect(byLabel["com.foldedspacelabs.metistry.watchdog"]!.workingDirectory).toBe("__REPO__");
   });
 
-  it("renders every shipped template with __REPO__ and __NODE__ replaced and nothing left behind", async () => {
+  it("renders every shipped template with __REPO__, __NODE__ and __ENV_FILE__ replaced and nothing left behind", async () => {
     for (const t of await loadPlistTemplates(repoRoot)) {
-      const out = renderPlist(t.template, { repo: "/srv/metistry", node: "/usr/local/bin/node" });
+      const out = renderPlist(t.template, { repo: "/srv/metistry", node: "/usr/local/bin/node", envFile: "/i/state/.env" });
       expect(out, t.file).not.toContain("__");
       expect(out).toContain("/srv/metistry");
+      // the environment comes from the INSTANCE, never from the checkout
+      if (t.template.includes("__ENV_FILE__")) expect(out, t.file).toContain("set -a; . /i/state/.env; set +a;");
       if (t.template.includes("__NODE__")) expect(out).toContain("exec /usr/local/bin/node /srv/metistry/");
       expect(out).toContain(`<string>${t.label}</string>`);
       expect(out.split("\n").length).toBe(t.template.split("\n").length); // a substitution, nothing else
@@ -41,9 +43,10 @@ describe("launchd templates", () => {
   });
 
   it("refuses values that would leave or introduce placeholders, and templates with unknown ones", () => {
-    expect(() => renderPlist("<string>__REPO__</string>", { repo: "", node: "/n" })).toThrow(/empty __REPO__/);
-    expect(() => renderPlist("<string>__REPO__</string>", { repo: "/x/__y__", node: "/n" })).toThrow(/contains "__"/);
-    expect(() => renderPlist("<string>__REPO__/__HOME__</string>", { repo: "/x", node: "/n" })).toThrow(/unrendered placeholder __HOME__/);
+    expect(() => renderPlist("<string>__REPO__</string>", { repo: "", node: "/n", envFile: "/e" })).toThrow(/empty __REPO__/);
+    expect(() => renderPlist("<string>__REPO__</string>", { repo: "/x/__y__", node: "/n", envFile: "/e" })).toThrow(/contains "__"/);
+    expect(() => renderPlist("<string>__ENV_FILE__</string>", { repo: "/x", node: "/n", envFile: "" })).toThrow(/empty __ENV_FILE__/);
+    expect(() => renderPlist("<string>__REPO__/__HOME__</string>", { repo: "/x", node: "/n", envFile: "/e" })).toThrow(/unrendered placeholder __HOME__/);
   });
 
   it("parsePlistTemplate unescapes XML entities and tolerates a plist with no ProgramArguments", () => {
@@ -66,9 +69,9 @@ describe("launchd templates", () => {
   it("renderSystemdUnit says the same thing as the plist without a shell", async () => {
     const templates = await loadPlistTemplates(repoRoot);
     const wd = templates.find((t) => t.label.endsWith(".watchdog"))!;
-    const unit = renderSystemdUnit(wd, { repo: "/srv/metistry", node: "/usr/bin/node" });
+    const unit = renderSystemdUnit(wd, { repo: "/srv/metistry", node: "/usr/bin/node", envFile: "/i/state/.env" });
     expect(unit).toContain("[Service]");
-    expect(unit).toContain("EnvironmentFile=/srv/metistry/.env");
+    expect(unit).toContain("EnvironmentFile=/i/state/.env");
     expect(unit).toContain("WorkingDirectory=/srv/metistry");
     expect(unit).toContain("ExecStart=/usr/bin/node /srv/metistry/apps/watchdog/dist/main.js");
     expect(unit).toContain("Restart=always");
@@ -76,7 +79,7 @@ describe("launchd templates", () => {
     expect(unit).not.toContain("/bin/sh");
     expect(unit).not.toContain("__");
     const helper = templates.find((t) => t.label.endsWith(".eventkit-helper"))!;
-    const hu = renderSystemdUnit(helper, { repo: "/srv/metistry", node: "/usr/bin/node" });
+    const hu = renderSystemdUnit(helper, { repo: "/srv/metistry", node: "/usr/bin/node", envFile: "/i/state/.env" });
     expect(hu).toContain("ExecStart=/srv/metistry/packages/mcp-eventkit/helper/ek-helper.app/Contents/MacOS/ek-helper");
     expect(hu).toContain("Environment=METISTRY_EK_SOCKET=/tmp/metistry-eventkit.sock");
     expect(hu).not.toContain("EnvironmentFile");

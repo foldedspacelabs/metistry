@@ -913,6 +913,24 @@ your git, on your machine.
   Claude token) are on screen as "not yet" with what they are waiting on,
   because a screen that pretends to enrol a passkey is worse than one that
   says it cannot.
+- 2026-09-09 — **An instance directory is self-contained.** Everything about
+  one install now lives in its own directory: the vault and config as before,
+  plus the derived `.env` at `<instance>/state/.env` (it used to sit in the
+  product checkout, which quietly tied one checkout to one install), the
+  Postgres data and the assistant's transcripts already under `state/`, and a
+  minted `instance_id` in `identity.yaml`. The login Keychain follows the same
+  line: one table in code decides whether a secret belongs to the **instance**
+  (filed under its `instance_id` — the database password, every bridge token,
+  the push keys, the repo PATs) or to the **person** (the Claude login, your
+  own AWS keys, shared by every instance on the Mac), and `metistry secrets
+  purge --instance <dir>` removes exactly one instance's items with a preview
+  first. Migration is one command and destroys nothing: `secrets sync --to env`
+  carries the old file over and copies — never moves — Keychain items into
+  their new account. The user-visible promise: **the Mac app can hold several
+  instances on one machine — a real one and two test ones — and deleting a
+  test instance's folder leaves nothing of it behind.** One at a time still,
+  because launchd labels and ports are fixed; running them concurrently is a
+  recorded follow-up.
 - 2026-09-09 — **The app configures itself where a Mac user looks, and the
   menu bar can fix things.** Three additions to `apps/macos`, all of them the
   same rule made visible: **every setting is a front for a file the CLI owns,

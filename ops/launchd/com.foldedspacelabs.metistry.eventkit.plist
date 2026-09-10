@@ -4,7 +4,7 @@
      a stdio child inherits the agent's TCC identity; a service is its own
      responsible process). First run: send {"op":"request"} to the helper
      from this job to get the consent prompts (see PoC-9). Install:
-       sed "s|__REPO__|$PWD|g; s|__NODE__|$(which node)|g" ops/launchd/com.foldedspacelabs.metistry.eventkit.plist \
+       sed "s|__REPO__|$PWD|g; s|__NODE__|$(which node)|g; s|__ENV_FILE__|$METISTRY_INSTANCE_DIR/state/.env|g" ops/launchd/com.foldedspacelabs.metistry.eventkit.plist \
          > ~/Library/LaunchAgents/com.foldedspacelabs.metistry.eventkit.plist
        launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.foldedspacelabs.metistry.eventkit.plist -->
 <plist version="1.0">
@@ -14,7 +14,7 @@
   <array>
     <string>/bin/sh</string>
     <string>-c</string>
-    <string>set -a; . __REPO__/.env; set +a; exec __NODE__ __REPO__/packages/mcp-eventkit/dist/main.js</string>
+    <string>set -a; . __ENV_FILE__; set +a; exec __NODE__ __REPO__/packages/mcp-eventkit/dist/main.js</string>
   </array>
   <key>WorkingDirectory</key><string>__REPO__</string>
   <key>KeepAlive</key><true/>

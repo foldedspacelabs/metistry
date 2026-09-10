@@ -47,8 +47,12 @@ is interactive-free by design so it works under any automation.
 A non-empty directory is refused unless `--force` (which stamps around what
 is there, overwriting files whose names collide).
 
+It also mints an **`instance_id`** (a v4 UUID) into `identity.yaml`: this
+directory's stable identity, and the login-Keychain account its own
+secrets are filed under.
+
 **Secrets are printed, never written.** On success the command prints the
-lines to add to the *product* checkout's `.env`:
+lines to put in `<dir>/state/.env`, this instance's own environment:
 
 ```
 METISTRY_INSTANCE_DIR=/Users/you/metistry-instance
@@ -98,13 +102,14 @@ queue if one is running, and pushes the current branch once.
 No token is printed, logged, written to `.env`, or put in the remote URL.
 Every subprocess is an argument array — there is no shell.
 
-## `metistry secrets sync|mint|list`
+## `metistry secrets sync|mint|list|purge`
 
 ```sh
 metistry secrets sync --to keychain               # import .env's secret lines
 metistry secrets sync --to env                    # regenerate them from the Keychain
 metistry secrets mint METISTRY_ASSISTANT_TOKEN    # a new random token, into both
-metistry secrets list                             # names only, never values
+metistry secrets list                             # names and scopes, never values
+metistry secrets purge --instance <dir> [--yes]   # delete one instance's items
 ```
 
 Secret-shaped names are those ending `_TOKEN`, `_PASSWORD`, `_PRIVATE`,
@@ -114,8 +119,22 @@ mid-name (`METISTRY_BRIDGE_TOKEN_<NAME>`), plus
 `.env` and `.env.example`, including their commented-out declarations.
 `--to env` rewrites only those lines, in place, `0600`, leaving every
 comment and non-secret line byte-for-byte intact. Values reach `security`
-on stdin, never in argv. `--env-file` targets another `.env`;
-`METISTRY_KEYCHAIN_ACCOUNT` separates two instances on one Mac.
+on stdin, never in argv.
+
+An item is `metistry:<VAR>` plus an **account**, and `SECRET_SCOPES` in
+`src/secrets.ts` is the one table that says which: instance-scoped names
+(`METISTRY_DB_PASSWORD`, `METISTRY_BRIDGE_TOKEN_*`,
+`METISTRY_ASSISTANT_TOKEN`, `METISTRY_VAPID_*`, `METISTRY_GITHUB_*`, and
+anything unlisted) go under the instance's `instance_id`; user-scoped ones
+(`CLAUDE_CODE_OAUTH_TOKEN`, `METISTRY_AWS_SECRET_ACCESS_KEY`,
+`METISTRY_AWS_SESSION_TOKEN`) go under the per-user account
+(`METISTRY_KEYCHAIN_ACCOUNT`, default `metistry`). `sync --to env`
+resolves the instance account first, falls back to the user account and
+**copies** what it finds there into the instance's, never deleting it.
+`purge` deletes one instance's items only, preview-then-confirm.
+
+`--instance <dir>` says which instance; `--env-file` targets a `.env`
+other than `<instance>/state/.env`.
 
 ## `metistry doctor [--json] [--product-dir <checkout>]`
 
@@ -133,8 +152,12 @@ checkout, validates each against `core`'s `validateManifest`, and:
 | `launchd:<label>` (macOS only) | `launchctl print gui/<uid>/<label>` for every plist in `ops/launchd`: `running` → ok; any other state → failed with the kickstart command; not bootstrapped → absent with the bootstrap command. |
 | `compose:<service>` | `docker compose ps --all --format json` against the services in `docker-compose.yml`: running (+healthy) → ok; running but unhealthy/starting → degraded; exited → failed; no container → absent. No `docker` on PATH → one `absent` row; a daemon that will not answer → `failed`. |
 
-`.env` is loaded from the checkout the way `ops/scripts/*.sh` do it: exported
-for variables that are **unset**; anything already in the environment wins.
+`.env` is loaded the way `ops/scripts/*.sh` do it: exported for variables
+that are **unset**; anything already in the environment wins. It is read
+from `<instance>/state/.env` first (`--instance`, else
+`METISTRY_INSTANCE_DIR`) and then the product checkout's — deprecated but
+still read, and still the place a terminal install may declare
+`METISTRY_INSTANCE_DIR`, which is parsed out before either file is applied.
 
 Output is a table — `name`, `kind`, `status` (`ok` | `degraded` | `failed` |
 `absent`), latency in ms, remediation (blank when ok) — and a summary line.

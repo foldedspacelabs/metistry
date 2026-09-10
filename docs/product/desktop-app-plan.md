@@ -50,6 +50,53 @@
 3. Post-Phase 6: the SwiftUI multiplatform app, macOS target first if
    the work install lands before the phone matters, iOS first otherwise.
 
+### What shipped (2026-09-09) — `apps/macos`, the first buildable scaffold
+
+The macOS target exists: a SwiftPM package (no Xcode project), assembled
+into a signed `Metistry.app` by `ops/release/build-app.sh` and shipped as a
+notarized DMG plus an EdDSA-signed `appcast.xml` by `release.yml`. Full
+account: `docs/ops/mac-app.md`.
+
+**Real:** the menu-bar item and one window; the **Status** panel rendering
+`metistry doctor --json` to the design system's §3.13 (tokens generated
+from `tokens.json` into Swift by the same script that emits `tokens.css`);
+**first-run steps 1–5** as real screens, each showing the exact argument
+array before it runs the verb and streaming the CLI's own output — runtime
+location, `init`, `connect-repo --auth device` (device code parsed out of
+the stream and shown as a card), `secrets sync`, `up`; Sparkle 2.9.6
+against the release feed. `MetistryKit`, which holds every model and view,
+is free of AppKit and of `Process`, so an iOS target shares it unchanged.
+
+**Explicit follow-ups**, each labelled "not yet" in the app itself rather
+than faked:
+
+- **`SMAppService`.** Step 5 registers launchd jobs the way the terminal
+  does — `metistry up` writing `~/Library/LaunchAgents`. Moving to
+  `SMAppService` (macOS 13+) is the sanctioned shape: one approval in
+  System Settings, no plist to edit. It needs a `metistry up` that can
+  hand the app its job set rather than installing it, so it is a CLI
+  change first.
+- **Step 6, passkey.** Needs `ASAuthorization` against the console's local
+  origin *and* a `metistry` verb to register the credential.
+- **Step 7, Claude token.** `claude setup-token` is interactive; driving it
+  from the app needs a pty, and the token needs its own `metistry secrets`
+  path.
+- **The other eight destinations** (Feed, Chat, Agents, Projects,
+  Artifacts, Capture, Needs You, Devices — P6). The PWA is the answer until
+  the UX pass settles them, per sequencing step 2.
+- **The iOS target.** Not in `Package.swift` yet; the kit is ready for it.
+
+**One decision this scaffold surfaced and did not settle: where a bundled
+install's *writable* product dir lives.** The app bundles the runtime under
+`Contents/Resources/metistry/`, and a signed bundle's `Resources` cannot be
+written to — but `metistry update` in release mode must write
+`releases/<version>/`, flip `current`, and unpack a new `runtime/`. Either
+the app copies the embedded tree to a writable location on first run (the
+bundle is a seed), or the bundled runtime is only ever replaced by a
+Sparkle update of the whole app (and `metistry update` is a no-op for app
+installs). "Two channels, both signed" below reads as the first; nothing
+has ratified it.
+
 ## Distribution: the app as the installer (owner direction 2026-09-07)
 
 The question: can the whole install, setup, and update live inside the

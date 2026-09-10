@@ -200,10 +200,10 @@ export function renderPlist(template: string, values: PlistValues): string {
  * brew upgrade and takes every host job down with it (the Phase 0
  * versioned-path lesson). Falls back to execPath when PATH has no node.
  */
-export function nodeOnPath(env: NodeJS.ProcessEnv = process.env, execPath = process.execPath): string {
+export function nodeOnPath(env: NodeJS.ProcessEnv = process.env, execPath = process.execPath, exists: (p: string) => boolean = existsSync): string {
   for (const dir of (env.PATH ?? "").split(":").filter(Boolean)) {
     const candidate = join(dir, "node");
-    if (existsSync(candidate)) return candidate;
+    if (exists(candidate)) return candidate;
   }
   return execPath;
 }

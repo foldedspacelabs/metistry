@@ -93,6 +93,21 @@ rm -rf "$app"
 mkdir -p "$contents/MacOS" "$contents/Resources" "$contents/Frameworks"
 
 cp "$bin_dir/Metistry" "$contents/MacOS/Metistry"
+
+# The ONE launchd agent the install needs, where SMAppService.agent(plistName:)
+# can find it: Contents/Library/LaunchAgents. Registering it from inside the
+# bundle is what makes Login Items show a single row — "Metistry", with the
+# agent nested under the app — instead of a background item per service
+# (docs/ops/mac-app.md, docs/ops/deployment-shapes.md). The plist is immutable
+# and identical on every Mac; MetistrySupervisor is the bundle-relative
+# BundleProgram that reads this install's paths from
+# ~/Library/Application Support/Metistry/supervisor.env.
+mkdir -p "$contents/Library/LaunchAgents"
+cp "$app_src/resources/launchd/com.foldedspacelabs.metistry.plist" "$contents/Library/LaunchAgents/com.foldedspacelabs.metistry.plist"
+plutil -lint "$contents/Library/LaunchAgents/com.foldedspacelabs.metistry.plist" >/dev/null || die "the bundled LaunchAgent plist did not lint"
+cp "$app_src/resources/launchd/MetistrySupervisor" "$contents/MacOS/MetistrySupervisor"
+chmod 755 "$contents/MacOS/MetistrySupervisor"
+say "embedded Contents/Library/LaunchAgents/com.foldedspacelabs.metistry.plist"
 sed "s/__VERSION__/$version/g" "$app_src/resources/Info.plist" > "$contents/Info.plist"
 # Sealed into the signature, so it must be written before codesign runs.
 plutil -lint "$contents/Info.plist" >/dev/null || die "Info.plist did not lint after substitution"

@@ -8,11 +8,12 @@ boundary differ. Set in `deployment.yaml` (plan §4.17, open decision 15
 
 |  | `compose` | `launchd` |
 |---|---|---|
-| db | `pgvector/pgvector:pg17` container | a user-space Postgres 17, `postgres -D` as the launchd job |
-| console | container, published on `127.0.0.1:8080` | launchd job, binds `127.0.0.1:8080` |
-| assistant | container | launchd job **under `ops/sandbox/assistant.sb`** |
-| reconciler | launchd job | launchd job |
-| watchdog | launchd job | launchd job |
+| db | `pgvector/pgvector:pg17` container | a user-space Postgres 17, `postgres -D`, a **child of the supervisor** |
+| console | container, published on `127.0.0.1:8080` | a child of the supervisor, binds `127.0.0.1:8080` |
+| assistant | container | a child of the supervisor, **under `ops/sandbox/assistant.sb`** |
+| reconciler | launchd job | a child of the supervisor |
+| watchdog | launchd job | **it IS the supervisor** |
+| launchd agents | reconciler, watchdog, the bridges | **one**: `com.foldedspacelabs.metistry`, plus a TCC helper each |
 | needs | Docker Desktop / a container runtime | a Postgres install, nothing else |
 | engine isolation | the container | the sandbox profile |
 | where it is the answer | Linux, cloud, any multi-tenant host | macOS, and what the Mac app installs |
@@ -38,6 +39,7 @@ point.
 | node | the bundled `runtime/node/bin/node` 22.23.2 — every plist execs it |
 | git | the bundled `runtime/git/bin` on the reconciler's PATH |
 | doctor | **23 ok, 0 degraded, 0 failed, 2 absent — healthy** (the two absent are the TCC bridges, deliberately not enabled) |
+| agents | five, at the time — one supervisor plus the TCC helpers since ("One background item, called Metistry" above) |
 | console | `GET /health` → `200 {"ok":true}` on 8460, while production answered on 8080 |
 | update | `metistry update --channel release --version 0.4.0` — a clean no-op round trip (`already running 0.4.0`, `runtime/ is already the 0.4.0 pack`, `0 applied, 13 total`), lock committed by the reconciler |
 | sandbox | live probe with the plist's own parameters: vault read **denied**, write outside the state dir **denied**, write inside **allowed**, own console + db **allowed**, the production install's console and reconciler **denied** |
@@ -92,15 +94,15 @@ of the same kind as the five above.
 Ranked, worst first. Numbers 5 and 6 are fixed; 9-12 are what the
 migration rehearsal added.
 
-1. **The TCC bridges cannot be namespaced.** `eventkit-helper`'s socket is
+1. **The TCC bridges cannot be namespaced.** the calendar helper's socket is
    a hardcoded `/tmp/metistry-eventkit.sock` in its plist, and TCC consent
    is per signed binary — so two instances share one helper and fight over
    one socket. The trial had to remove those three plists from its product
    dir to run safely beside a live install.
-2. **`deployment.yaml` cannot disable a bridge job.** `services:` covers
-   `db`, `console`, `assistant`, `reconciler`, `watchdog`; `up` installs
-   every plist in `ops/launchd/` regardless. There is no supported way to
-   say "this install has no calendar bridge".
+2. ~~**`deployment.yaml` cannot disable a bridge job.**~~ Fixed for the
+   launchd shape (2026-09-10): a bridge is installed only when its
+   `METISTRY_*_URL` is set. `services: {enabled: false}` is still not read by
+   `up` for the other services.
 3. **`doctor` reports one instance, not the Mac.** It reads
    `METISTRY_INSTANCE_DIR` and probes that install. The app's
    instance-switching UI will want per-instance rows.
@@ -153,6 +155,136 @@ migration rehearsal added.
 13. **`metistry console whoami` ignores the namespace.** With no
     `METISTRY_URL` set it talks to 127.0.0.1:8080 — which on a Mac with two
     installs is the other one's console.
+
+## One background item, called Metistry (2026-09-10)
+
+macOS shows one **background item** per launchd agent, and names it after the
+agent's program. The five-agent launchd shape therefore introduced itself to
+the user as five strangers — `sfltool dumpbtm` on the Studio's install said
+`Executable Path: /bin/sh` for four of them, and System Settings said "sh",
+"node", "postgres". That is not a product.
+
+**Everything Metistry installs carries the Metistry name, and the core is ONE
+background item.**
+
+| label | what it is | what System Settings shows |
+|---|---|---|
+| `com.foldedspacelabs.metistry` | the supervisor: Postgres, the console, the reconciler, the assistant and any configured bridge as its children | **Metistry** |
+| `com.foldedspacelabs.metistry.calendar` | the EventKit helper — TCC needs its own signed binary (invariant 6) | **Metistry Calendar Access** |
+
+The Apple Intelligence helper is spawned by its bridge over stdio and is not a
+launchd job at all; its bundle is named **Metistry Apple Intelligence** for the
+Privacy pane. The helper bundles' **identifiers** are unchanged
+(`com.foldedspacelabs.metistry.eventkit` / `.apple-fm`) — TCC keys a grant on
+bundle id + certificate chain, so renaming one would cost every install its
+consent. A launchd label is in neither, which is why `eventkit-helper` could
+become `calendar`.
+
+A namespaced install suffixes the **supervisor**, not each child:
+`com.foldedspacelabs.metistry.e5dbfa9c`. One instance is one agent either way.
+
+### What the supervisor does
+
+- **Ordered start.** Each child may declare a readiness probe; the next one
+  waits for it. Postgres answers → console → reconciler → assistant. A probe
+  that times out is a log line, not an abort: the rest still starts.
+- **Per-child restart policy.** Exponential backoff from 1s to 60s, reset once
+  a child has been up a minute. Five restarts inside two minutes and the child
+  is reported `crash-looping` — retried at the ceiling rather than hammered,
+  and named in `doctor` instead of scrolling past in a log.
+- **Per-child logs**, at the same `/tmp/metistry-<service>.log` paths
+  `metistry logs <service>` has always tailed.
+- **Graceful stop.** SIGTERM, the child's grace period, then SIGKILL —
+  children stopped in reverse start order.
+- **The watchdog, unchanged.** The probes and the presence feed run in this
+  same process; invariant 3's sole exception did not move.
+
+### `<instance>/state/supervisor.json`
+
+Written by `metistry up`, mode 0600, and readable by a person:
+
+```json
+{
+  "schema": 1,
+  "label": "com.foldedspacelabs.metistry",
+  "socket": "<instance>/state/run/supervisor.sock",
+  "token": "…",
+  "env": { "METISTRY_DB_PASSWORD": "…", "…": "…" },
+  "children": [
+    { "name": "db", "argv": ["…/bin/postgres", "-D", "…"], "log": "/tmp/metistry-db.log",
+      "ready": { "kind": "tcp", "port": 5432 } },
+    { "name": "console", "argv": ["…/node", "…/apps/console/dist/main.js"], "env": { "…": "…" },
+      "log": "/tmp/metistry-console.log", "ready": { "kind": "tcp", "port": 8080 } },
+    { "name": "reconciler", "…": "…" },
+    { "name": "assistant", "argv": ["/usr/bin/sandbox-exec", "-f", "…/assistant.sb", "…"], "…": "…" }
+  ]
+}
+```
+
+Each child's argv still comes from `ops/launchd/*.plist` — those templates are
+still the record of how a service is started, and `up` renders them through the
+same `renderPlist` as before, then turns the rendered plist into a child spec.
+Everything the 2026-09-10 trial and the migration rehearsal fixed there (the
+single-quoting, the refusal to leave a placeholder behind) is still in the
+path, and a child runs byte-for-byte the command its agent used to.
+
+**A child's environment is the spec's, whole.** The supervisor's own is never
+inherited — which is what keeps the assistant's allowlist an allowlist: a
+stray `ANTHROPIC_API_KEY` in the operator's shell reaches the engine through
+neither the plist dict before nor this now (PoC-4). What a plist with no dict
+used to get implicitly (`PATH=/usr/bin:/bin:/usr/sbin:/sbin`, `HOME`,
+`TMPDIR`) is written into the spec explicitly.
+
+### The control socket
+
+`<instance>/state/run/supervisor.sock`, mode 0600, one JSON object per line:
+
+```
+{"op":"status","token":"…"}                     → {"ok":true,"children":[…]}
+{"op":"restart","token":"…","service":"console"}
+{"op":"stop","token":"…","service":"assistant"}
+{"op":"start","token":"…","service":"assistant"}
+```
+
+`metistry restart|stop|start <service>` uses it for the supervisor's children,
+because launchctl cannot address a process launchd has never heard of;
+launchctl stays for the supervisor itself and for the TCC helpers. With no
+service named, the agents are acted on and the children follow them — booting
+out the supervisor takes its children down with it, and bootstrapping it
+starts them in order.
+
+The socket is in the instance's own state directory and is 0600, and the
+request is **still authenticated** with the token from `supervisor.json`
+(constant-time; a refusal says only `unauthorized`). Invariant 8: a boundary
+is tested, and "it cannot be reached" is not an authentication story. There is
+deliberately no "stop everything" op — that is `launchctl bootout` of one
+label, which launchd already does properly.
+
+`doctor` asks the supervisor for `status` and prints a row per child
+(`child:console`, with its state, pid, restart count and log path), because
+`launchctl print` cannot see them.
+
+### Migrating an install that predates it
+
+`metistry up` boots out the pre-supervisor agents once — `db`, `console`,
+`assistant`, `reconciler`, `watchdog`, `eventkit`, `apple-fm`,
+`eventkit-helper` — and deletes their plists before installing the supervisor,
+so nothing is left running twice. It is unconditional and tolerant: booting
+out a label that is not loaded is the cheapest possible no-op, and an `up`
+that only cleaned up when it noticed would leave a job running on the one Mac
+where the notice failed. Under the compose shape only `eventkit-helper` is
+retired (it was renamed `calendar`); nothing else about that shape changes.
+
+`metistry migrate-shape launchd` produces the new set directly.
+
+### Bridges are installed only when configured
+
+A bridge's `METISTRY_*_URL` is how an operator opts in, and doctor already
+reads it that way ("not configured — degrades …"). Now `up` reads it too: with
+no `METISTRY_EK_URL` this install has no calendar bridge, so neither the
+bridge child nor the `calendar` agent is installed at all, rather than a job
+that can only crash-loop. That closes "What is still missing" #2 for the
+launchd shape.
 
 ## `deployment.yaml`
 
@@ -351,9 +483,12 @@ either shape.
 ## The assistant's sandbox
 
 The container was defence in depth behind invariant 9's allowlist. On
-the host, `ops/sandbox/assistant.sb` is. The launchd job's root process
-is `/usr/bin/sandbox-exec`, so every child — including the Agent SDK's
-own CLI subprocess — inherits the confinement.
+the host, `ops/sandbox/assistant.sb` is. The engine's root process is
+`/usr/bin/sandbox-exec`, so every child — including the Agent SDK's
+own CLI subprocess — inherits the confinement. That is unchanged by the
+supervisor: the supervisor spawns exactly the argv the plist used to name,
+`sandbox-exec` first and every `-D` parameter identical, and the misuse tests
+confine a probe with those same values.
 
 | | |
 |---|---|
@@ -432,22 +567,32 @@ The two secret-bearing dicts are built differently on purpose:
 ## Doctor
 
 `doctor`'s first row is the shape and where it was read from, and every
-remediation below it is written for that shape — `launchctl kickstart
--k gui/$(id -u)/com.foldedspacelabs.metistry.console` rather than
+remediation below it is written for that shape — `metistry restart console`
+(the supervisor's child) or `launchctl kickstart -k
+gui/$(id -u)/com.foldedspacelabs.metistry` (its one agent) rather than
 `docker compose up -d console`. The container runtime is consulted only
 when some service actually runs in one, so a launchd install never
 reports "docker not found" as a finding.
 
-Logs, under launchd: `/tmp/metistry-{db,console,assistant,reconciler,watchdog}.log`,
+Under the launchd shape doctor adds a `supervisor:<label>` row — the answer
+to one `status` call on the control socket — and a `child:<name>` row for each
+child, with its state, pid, restart count and log path. `launchctl print`
+cannot see those processes, so without this doctor would be blind to
+everything except the agent itself.
+
+Logs, under launchd: `/tmp/metistry-{supervisor,db,console,assistant,reconciler}.log`,
 or `/tmp/metistry-<suffix>-<service>.log` on a namespaced instance.
 Sandbox denials: `log stream --predicate 'sender == "Sandbox"'`.
 
 ## `metistry update` under either shape
 
 `update` loads the same `deployment.yaml` and asks for **that shape's**
-plist set, so on a launchd install `console`, `assistant` and `db` are
-kickstarted along with the other host jobs when their code changes —
-they do not keep running old code until the next `metistry up`. It also
+plist set. On a launchd install that is the supervisor, and its entry tracks
+its CHILDREN's code as well as its own: when a console build changes, the
+supervisor is kickstarted and every child comes back on the new code. Blunter
+than restarting the one child that moved, and it is what "they do not keep
+running old code until the next `metistry up`" actually requires — launchd
+cannot kickstart a child. It also
 skips `docker compose` entirely under `launchd`, the way `up` does; the
 restart section says so in the plan. Postgres itself is untouched by an
 update: the data directory and the managed conf block are `up`'s job.

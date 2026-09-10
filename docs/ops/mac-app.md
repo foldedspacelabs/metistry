@@ -83,7 +83,7 @@ path.
 | `connect-repo --auth token` | it reads the PAT from **stdin**, and the app gives every child an empty stdin on purpose so no verb can hang a progress view waiting for a paste | the wizard shows the option, disabled, with that reason; run it in a terminal |
 | **Minting an enrolment code** | there is no HTTP route that mints one, deliberately — whoever can run the host command already controls Postgres and the vault, so shell access is the root of trust for a first passkey (plan §4.2) — and `metistry enroll` is on the CLI's own "not yet" list | step 6 shows the exact `scripts/enroll.mjs` command and takes the code you paste back |
 | **A QR code** for the phone | nothing in this product renders one yet; `apps/console/scripts/enroll.mjs` says the same about itself ("QR rendering arrives with `packages/cli`"), and an encoder is a dependency nobody has asked for | step 6 shows the enrolment URL, selectable, to type or hand over |
-| **Registering the launchd agents through `SMAppService`** | **"Start at login" is real now** — but it registers *this app*, `SMAppService.mainApp`, which is a different thing from the install's jobs. See "Start at login" below for what moving those would take and why it is not this PR | nothing; `metistry up` owns those jobs and they already start at login |
+| **Registering the launchd agents through `SMAppService`** | **"Start at login" is real now** — it registers *this app*, `SMAppService.mainApp`. The install's own agent (there is exactly one) is embedded in the bundle and `metistry up --register-via app` stands ready for it; the `SMAppService.agent(plistName:)` call itself is the app's next change. See "Start at login" below | nothing; `metistry up` owns that job and it already starts at login |
 | **The other eight destinations** | Feed, Chat, Agents, Projects, Artifacts, Capture, Needs You, Devices (design-system P6) | the PWA — "Add to Dock" in Safari |
 | **An iOS target** | `MetistryKit` is already free of AppKit and of `Process` so it can be shared; there is no iOS target in `Package.swift` | — |
 
@@ -252,25 +252,43 @@ naming:
 has nothing to register and answers `notFound`. The pane says exactly that and
 points at `ops/release/build-app.sh`.
 
-**What moving the launchd agents under `SMAppService` would take**, recorded
-because it is the obvious next thought and it is a bigger change than it looks.
-`SMAppService.agent(plistName:)` registers a plist that lives **inside the app
-bundle**, at `Metistry.app/Contents/Library/LaunchAgents/`. That means:
+### The install's agent, nested under the app (2026-09-10)
 
-- the plists are signed with the app and therefore **unwritable**, so every path
-  in them has to be bundle-relative or resolved at run time — today `metistry up`
-  renders absolute paths for the node binary, the product dir, the instance dir
-  and the log files;
-- the jobs become **the app's**, not the install's. One app would register one
-  job set, so the "several instance directories, switch between them" shape the
-  plan already commits to would need the label and port namespacing that is
-  already a recorded follow-up;
-- `metistry up` from a terminal and the app would install *different* jobs,
-  which is precisely the second implementation the whole design forbids.
+The objection to `SMAppService.agent(plistName:)` used to be that it would mean
+registering a *job set* — several plists, signed and unwritable, in place of
+the ones `metistry up` renders. There is one job now (`docs/ops/deployment-shapes.md`,
+"One background item, called Metistry"): the supervisor. That makes the move
+small enough to be worth it, because it is what turns two rows in System
+Settings — the app, and a background item beside it — into one row with the
+agent nested underneath.
 
-So it stays a CLI change first: a `metistry up` that can hand over its job set
-rather than installing it. `metistry up` owns those jobs today and they already
-start at login on their own.
+The CLI half is done:
+
+| | |
+|---|---|
+| `apps/macos/resources/launchd/com.foldedspacelabs.metistry.plist` | the agent as the app registers it; `build-app.sh` copies it to `Contents/Library/LaunchAgents/`, where `SMAppService.agent(plistName:)` looks |
+| `apps/macos/resources/launchd/MetistrySupervisor` | its `BundleProgram`, copied to `Contents/MacOS/`. A plist inside a signed bundle is immutable and identical on every Mac, and `BundleProgram` is its only bundle-relative key — so this small script is what turns "the app's agent" into "this Mac's install" |
+| `~/Library/Application Support/Metistry/supervisor.env` | the three paths it reads: this install's node (as `Metistry`), the supervisor's entry point, and `<instance>/state/supervisor.json`. Written by `metistry up --register-via app`, shell-quoted (the app's own default location has a space in it) |
+| `metistry up --register-via app` | does everything a normal `up` does **except** install the supervisor's agent into `~/Library/LaunchAgents` — the app registers its bundled copy instead, so the install never has two |
+
+The launcher deliberately does **not** exec the product inside the bundle: the
+bundle is a seed, and the install that runs is the writable one under
+`~/Library/Application Support/Metistry/product` that `metistry update` moves
+forward. Pointing at the bundle would pin the running services to whatever
+shipped in the `.app`.
+
+**What is left is the Swift call**, and it is a real change rather than a line:
+`LoginItemService` today is `SMAppService.mainApp` — one status, one register,
+one unregister. The agent is a second registration with its own status,
+its own approval, and its own failure mode ("the app moved, macOS lost the
+registration"), which means a second seam in `MetistryKit`, a second row in the
+Services pane with its own prose, and the fakes and tests that go with them.
+It is specified in `docs/product/desktop-app-plan.md` and is the next thing the
+app should pick up. Until then the app path is `metistry up` as it always was —
+the terminal install — and Login Items shows Metistry as its own background
+item rather than nested.
+
+A terminal install keeps `~/Library/LaunchAgents` and needs none of this.
 
 ## Step 7: the Claude token, and what the app never touches
 

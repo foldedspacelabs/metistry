@@ -154,7 +154,7 @@ describe("ports.yaml", () => {
 
 describe("applying a block to the environment", () => {
   it("fills only what is UNSET — an explicit .env line still wins everywhere", () => {
-    const env: NodeJS.ProcessEnv = { METISTRY_CONSOLE_PORT: "9999", METISTRY_EK_URL: "" };
+    const env: NodeJS.ProcessEnv = { METISTRY_CONSOLE_PORT: "9999" };
     const applied = applyPorts(env, ns());
     expect(env.METISTRY_CONSOLE_PORT).toBe("9999");
     expect(env.METISTRY_DB_PORT).toBe("8401");
@@ -164,8 +164,12 @@ describe("applying a block to the environment", () => {
     // the URL half matters as much as the port: doctor probes the URL, and
     // the console binds the port
     expect(env.METISTRY_CONSOLE_URL).toBe("http://127.0.0.1:8400");
-    expect(env.METISTRY_EK_URL).toBe("http://127.0.0.1:8403");
     expect(env.METISTRY_RECONCILER_URL).toBe("http://127.0.0.1:8402");
+    // a bridge's URL is how an operator opts INTO it: unset means doctor says
+    // "absent — not configured", which is a healthy install without a calendar
+    // bridge. Filling it here would turn every such install red.
+    expect(env.METISTRY_EK_URL).toBeUndefined();
+    expect(env.METISTRY_AFM_URL).toBeUndefined();
     expect(applied).not.toContain("METISTRY_CONSOLE_PORT=8400");
     // db has no URL variable — it is reached by host+port
     expect(Object.keys(env)).not.toContain("METISTRY_DB_URL");

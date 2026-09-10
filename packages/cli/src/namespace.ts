@@ -59,12 +59,21 @@ export const PORT_VARS: Record<PortedService, string> = {
   "apple-fm": "METISTRY_AFM_PORT",
 };
 
-/** The loopback URL each ported service is reached at, when nothing in `.env` says otherwise. */
+/**
+ * The loopback URL a ported service is reached at, when nothing in `.env`
+ * says otherwise — for the services an install ALWAYS runs.
+ *
+ * The TCC bridges are deliberately absent. A bridge's `METISTRY_*_URL` is
+ * how an operator opts INTO it: unset, doctor reports `absent` ("not
+ * configured — degrades …"), which is a healthy install that simply has no
+ * calendar bridge. Filling it from the namespace would turn every such
+ * install's doctor red with "eventkit down" for a job it never asked for.
+ * Their PORT variables are still namespaced, so the bridge binds this
+ * instance's port the moment it is enabled.
+ */
 export const URL_VARS: Partial<Record<PortedService, string>> = {
   console: "METISTRY_CONSOLE_URL",
   reconciler: "METISTRY_RECONCILER_URL",
-  eventkit: "METISTRY_EK_URL",
-  "apple-fm": "METISTRY_AFM_URL",
 };
 
 /**
@@ -196,6 +205,27 @@ export async function loadNamespace(instanceDir: string | undefined): Promise<Na
  * an environment for and the ones that source their own — agrees on which
  * port a service is on.
  */
+/**
+ * The block as plain environment entries.
+ *
+ * The four jobs that load their environment with `sh -c "set -a; . <file>"`
+ * see ONLY that file — the namespace lives in `state/ports.yaml`, which they
+ * never read — so without this the reconciler binds 7812 and the bridges
+ * bind 78xx: the DEFAULT install's ports, from a namespaced instance
+ * (2026-09-10 trial: the trial reconciler died with EADDRINUSE against the
+ * production one). `up` merges these into those jobs' plists, where a real
+ * `.env` line still overrides them, because `. <file>` runs after the dict.
+ */
+export function portEnv(ns: Namespace): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const s of PORTED_SERVICES) {
+    out[PORT_VARS[s]] = String(ns.ports[s]);
+    const uv = URL_VARS[s];
+    if (uv) out[uv] = `http://127.0.0.1:${ns.ports[s]}`;
+  }
+  return out;
+}
+
 export function applyPorts(env: NodeJS.ProcessEnv, ns: Namespace): string[] {
   const applied: string[] = [];
   for (const s of PORTED_SERVICES) {

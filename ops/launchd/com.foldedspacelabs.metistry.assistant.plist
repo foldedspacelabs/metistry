@@ -31,6 +31,7 @@
     <string>-D</string><string>STATE_DIR=__STATE_DIR__</string>
     <string>-D</string><string>TMP_DIR=__TMP_DIR__</string>
     <string>-D</string><string>CONSOLE_TCP=__CONSOLE_TCP__</string>
+    <string>-D</string><string>DB_TCP=__DB_TCP__</string>
     <string>__NODE__</string>
     <string>__REPO__/apps/assistant/dist/main.js</string>
   </array>

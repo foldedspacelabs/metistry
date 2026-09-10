@@ -66,21 +66,34 @@ public struct DoctorRow: Codable, Sendable, Identifiable, Equatable {
     public let probe: String
     /// Human-actionable fix, present when the status is not `ok`.
     public let remediation: String?
+    /// Whatever else the check reported. A different shape per row kind, so it
+    /// is held as JSON and read through the typed accessors below rather than
+    /// modelled per kind (json-value.swift explains why).
+    public let meta: JSONValue?
 
     public var id: String { "\(kind)/\(name)" }
 
     enum CodingKeys: String, CodingKey {
-        case name, kind, status, probe, remediation
+        case name, kind, status, probe, remediation, meta
         case latencyMs = "latency_ms"
     }
 
-    public init(name: String, kind: String, status: CheckStatus, latencyMs: Double, probe: String, remediation: String? = nil) {
+    public init(
+        name: String,
+        kind: String,
+        status: CheckStatus,
+        latencyMs: Double,
+        probe: String,
+        remediation: String? = nil,
+        meta: JSONValue? = nil
+    ) {
         self.name = name
         self.kind = kind
         self.status = status
         self.latencyMs = latencyMs
         self.probe = probe
         self.remediation = remediation
+        self.meta = meta
     }
 }
 
@@ -150,4 +163,83 @@ public extension DoctorReport {
         }
         return order.map { (kind: $0, rows: byKind[$0] ?? []) }
     }
+}
+
+// MARK: - The two meta shapes the app has an opinion about
+
+/// The `deployment` row's meta: this install's shape, which file it came from,
+/// and every service with the shape it runs in (or `disabled`). This is how the
+/// Services settings pane gets its list without the app parsing
+/// `deployment.yaml` itself — `packages/cli/src/deployment.ts` resolves the D4
+/// overlay (product `seed/` then the instance's own file), and the app reads its
+/// answer.
+public struct DeploymentFacts: Sendable, Equatable {
+    public let shape: String
+    /// e.g. `seed/deployment.yaml`, `<instance>/deployment.yaml`, or
+    /// `METISTRY_DEPLOYMENT_SHAPE (overriding …)`.
+    public let from: String
+    /// service name → the shape it runs in, or `disabled`.
+    public let services: [String: String]
+
+    public init(shape: String, from: String, services: [String: String]) {
+        self.shape = shape
+        self.from = from
+        self.services = services
+    }
+
+    public init?(row: DoctorRow) {
+        guard let meta = row.meta, let shape = meta["shape"]?.stringValue else { return nil }
+        self.shape = shape
+        self.from = meta["from"]?.stringValue ?? "unknown"
+        var services: [String: String] = [:]
+        if case .object(let o)? = meta["services"] {
+            for (name, value) in o { services[name] = value.stringValue }
+        }
+        self.services = services
+    }
+
+    /// Name and shape, ordered the way a person reads an install: the data
+    /// store, then the things that talk to it.
+    public var ordered: [(name: String, shape: String)] {
+        services.keys.sorted().map { (name: $0, shape: services[$0] ?? "unknown") }
+    }
+}
+
+/// The reconciler row's `bridge_meta`. It is the CLI's own read path for "is
+/// this instance backed up?" — the reconciler is the sole committer, so its
+/// last push is the answer, and the app never runs git to find out (invariant 9
+/// applied to the client).
+public struct ReconcilerFacts: Sendable, Equatable {
+    public let head: String?
+    public let queueDepth: Int?
+    public let pushAttempted: Bool
+    public let pushOK: Bool?
+    public let remote: String?
+    public let pushedAt: String?
+
+    public init?(row: DoctorRow) {
+        guard let bridge = row.meta?["bridge_meta"] else { return nil }
+        head = bridge["head"]?.stringValue
+        queueDepth = bridge["queue_depth"]?.intValue
+        let push = bridge["last_push"]
+        pushAttempted = push?["attempted"]?.boolValue ?? false
+        pushOK = push?["ok"]?.boolValue
+        remote = push?["remote"]?.stringValue
+        pushedAt = push?["at"]?.stringValue
+    }
+}
+
+public extension DoctorReport {
+    var deployment: DeploymentFacts? {
+        rows.first { $0.kind == "deployment" }.flatMap { DeploymentFacts(row: $0) }
+    }
+
+    var reconciler: ReconcilerFacts? {
+        rows.first { $0.kind == "service" && $0.name == "reconciler" }.flatMap { ReconcilerFacts(row: $0) }
+    }
+
+    /// Every bridge doctor knows about, in doctor's order. The Connections pane
+    /// lists these; an `absent` one is not configured, which is a fact
+    /// (§3.13) and the wizard's bridge step is where it gets configured.
+    var bridges: [DoctorRow] { rows.filter { $0.kind == "bridge" } }
 }

@@ -1,5 +1,24 @@
 # @foldedspacelabs/metistry-cli
 
+## 0.3.1
+
+### Patch Changes
+
+- 588e69a: Release images are built for `linux/amd64` and `linux/arm64`. v0.3.0's
+  `ghcr.io/foldedspacelabs/metistry-*` images were amd64-only, so `metistry
+  update --channel release` on an Apple-silicon Mac failed at `docker compose
+  pull` with "no matching manifest for linux/arm64/v8". The Dockerfiles' build
+  stage now runs natively on the CI host (`--platform=$BUILDPLATFORM`; the
+  compiled output is pure JS) and only the runtime stage is per-architecture.
+- 9a2a90f: `metistry update --channel release` downloads release assets (the runtime
+  pack, the runtime-deps pack, `checksums.txt`) through GitHub's authenticated
+  asset API when `METISTRY_GITHUB_TOKEN` is set — the one path that reads a
+  private repo's assets with a token; `browser_download_url` 404s there. The
+  302 to the signed S3 URL is followed without resending the token. A 404 on
+  download falls back to `gh release download`, as an unauthorised resolve
+  already did.
+- @foldedspacelabs/metistry-core@0.3.1
+
 ## 0.3.0
 
 ### Minor Changes

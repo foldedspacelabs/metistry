@@ -5,8 +5,9 @@
 // persist):
 //
 //   Instance     the active instance directory + recents (PERSISTED, pointers);
-//                the assistant's name from identity.yaml (READ-THROUGH,
-//                read-only — a §4.7 protected path)
+//                the instance id and the assistant's name from
+//                `metistry identity --json` (READ-THROUGH, read-only — the file
+//                behind it is a §4.7 protected path)
 //   Services     the shape and the service plan from doctor's `deployment` row,
 //                which resolved deployment.yaml's D4 overlay (READ-THROUGH)
 //   Connections  the instance repo's push state from doctor's `reconciler` row;
@@ -15,12 +16,21 @@
 //                never a value, and there is no code path here that could hold
 //                one)
 //   Updates      Sparkle's own preferences, read and written by Sparkle
-//   Advanced     the resolved runtime, versions, `metistry doctor`, logs
+//   Advanced     the resolved runtime, `metistry version --json`,
+//                `metistry doctor`, logs
 //
 // Nothing here caches to disk. Every read is re-done when the pane opens, so a
 // value the user changed in a file or a terminal shows up without a relaunch —
 // and a value the app cannot read says "unavailable" in its own row and leaves
 // the rest of the pane alone (design-system P5).
+//
+// EVERY READ IS A VERB NOW. The scaffold read `identity.yaml`, `metistry.lock`
+// and a `package.json` off disk because the CLI reported none of it. It does
+// now (cli-facts.swift), so this model runs `identity --json`,
+// `version --json`, `secrets list --json` and `deployment --json` and holds no
+// parser at all. That is why the reads became async: a subprocess is not a
+// 2 KB file read, and a spinner on a pane row is honest where one on a file read
+// was theatre.
 
 import Foundation
 import Observation
@@ -81,9 +91,11 @@ public final class SettingsModel {
 
     // MARK: read-through, never persisted
     public private(set) var identity: InstanceIdentity?
-    public private(set) var identityError: String?
-    public private(set) var pin: InstancePin?
-    public private(set) var pinError: String?
+    public private(set) var identityPhase: ReadPhase = .idle
+    public private(set) var identityCommand: String?
+    public private(set) var versions: VersionFacts?
+    public private(set) var versionsPhase: ReadPhase = .idle
+    public private(set) var versionsCommand: String?
     public private(set) var secrets: [SecretListing] = []
     public private(set) var secretsPhase: ReadPhase = .idle
     public private(set) var secretsCommand: String?
@@ -92,83 +104,106 @@ public final class SettingsModel {
         self.status = status
         self.cli = cli
         self.instanceDir = instanceDir
-        readInstanceFiles()
     }
 
+    /// Re-point at another install. Everything read-through is dropped rather
+    /// than left showing the previous instance's values while the new reads run —
+    /// a stale name beside a new path is the one thing this pane must never do.
     public func adopt(cli: MetistryCLI?, instanceDir: URL?) {
         self.cli = cli
         self.instanceDir = instanceDir
+        identity = nil
+        identityPhase = .idle
+        identityCommand = nil
+        versions = nil
+        versionsPhase = .idle
+        versionsCommand = nil
         secrets = []
         secretsPhase = .idle
         secretsCommand = nil
-        readInstanceFiles()
     }
 
     // MARK: - Instance
 
-    /// `identity.yaml` and `metistry.lock`, straight off disk. Synchronous
-    /// because they are two small local files and an async spinner for a 2 KB
-    /// read is theatre.
-    public func readInstanceFiles() {
-        identity = nil
-        identityError = nil
-        pin = nil
-        pinError = nil
-        guard let dir = instanceDir else { return }
-        switch InstanceFiles.identity(in: dir) {
-        case .success(let value): identity = value
-        case .failure(let error): identityError = error.localizedDescription
+    /// `metistry identity --json`.
+    public func refreshIdentity() async {
+        guard let cli else {
+            identityPhase = .unavailable(CLIReadError.noRuntime.localizedDescription ?? "no runtime")
+            return
         }
-        switch InstanceFiles.pin(in: dir) {
-        case .success(let value): pin = value
-        case .failure(let error): pinError = error.localizedDescription
+        identityCommand = cli.plannedArguments(for: ["identity", "--json"]).joined(separator: " ")
+        identityPhase = .reading
+        switch await cli.identity() {
+        case .success(let value):
+            identity = value
+            identityPhase = .read
+        case .failure(let error):
+            identity = nil
+            identityPhase = .unavailable(error.localizedDescription ?? "unavailable")
         }
     }
 
+    /// `metistry version --json` — the product, the runtime pack, and the
+    /// instance's pin, in one read.
+    public func refreshVersions() async {
+        guard let cli else {
+            versionsPhase = .unavailable(CLIReadError.noRuntime.localizedDescription ?? "no runtime")
+            return
+        }
+        versionsCommand = cli.plannedArguments(for: ["version", "--json"]).joined(separator: " ")
+        versionsPhase = .reading
+        switch await cli.versions() {
+        case .success(let value):
+            versions = value
+            versionsPhase = .read
+        case .failure(let error):
+            versions = nil
+            versionsPhase = .unavailable(error.localizedDescription ?? "unavailable")
+        }
+    }
+
+    /// The instance's pin, from the same read. `metistry.lock` is not opened by
+    /// this app any more.
+    public var pin: InstancePin? { versions?.lock }
+
     /// What the Instance pane prints for the assistant's name. `identity.yaml`
-    /// is the only place it lives, so an unreadable file says so rather than
-    /// falling back to a default that would be a second definition.
+    /// is the only place it lives and `metistry identity` is the only route to
+    /// it, so a read that failed says so rather than falling back to a default
+    /// that would be a second definition of the name.
     public var assistantNameDisplay: String {
         identity?.assistantName ?? "unknown"
     }
 
-    /// There is no instance ID anywhere in the product — not in `identity.yaml`
-    /// (name · mention · voice · icon), not in `metistry.lock`, not in doctor.
-    /// The owner direction asked for one; rather than invent an identifier the
-    /// rest of the system does not know, the pane shows what actually identifies
-    /// an install and this property says so out loud.
+    /// The instance id, and what it is for. `metistry init` mints a v4 UUID into
+    /// `identity.yaml`; it is the Keychain account this instance's own secrets
+    /// are filed under, which is what makes several instances on one Mac
+    /// self-contained (docs/product/desktop-app-plan.md).
     public static let instanceIdNote =
-        "identity.yaml carries name, mention, voice and icon — there is no instance id in the schema. "
-        + "What identifies this install is the folder path above and the product pin in metistry.lock."
+        "The instance id is the v4 UUID `metistry init` minted into identity.yaml. It is this directory's stable identity "
+        + "and the login-Keychain account its instance-scoped secrets are filed under, which is what keeps several "
+        + "instances on one Mac from reading each other's."
 
     // MARK: - Secrets
 
-    /// `metistry secrets list` — names and scope. Values are not requested, not
-    /// returned by the verb, and could not be rendered if they were.
+    /// `metistry secrets list --json` — names and scope. Values are not
+    /// requested, not returned by the verb, and could not be rendered if they
+    /// were.
     public func refreshSecrets() async {
         guard let cli else {
-            secretsPhase = .unavailable("no metistry runtime located — choose an instance first")
+            secretsPhase = .unavailable(CLIReadError.noRuntime.localizedDescription ?? "no runtime")
             return
         }
-        let verb = ["secrets", "list"]
-        secretsCommand = ([cli.runtime.executable.path] + cli.arguments(for: verb)).joined(separator: " ")
+        secretsCommand = cli.plannedArguments(for: ["secrets", "list", "--json"]).joined(separator: " ")
         secretsPhase = .reading
-        do {
-            let result = try await cli.run(verb)
-            let parsed = SecretListing.parse(result.stdout)
-            if parsed.isEmpty {
-                let why = result.ok
-                    ? "`metistry secrets list` named nothing — this install has no .env yet, or no secret-shaped variables in it"
-                    : (result.stderr.split(separator: "\n").last.map(String.init) ?? "exit \(result.exitCode)")
-                secrets = []
-                secretsPhase = .unavailable(why)
-            } else {
-                secrets = parsed
-                secretsPhase = .read
-            }
-        } catch {
+        switch await cli.secretsList() {
+        case .success(let rows):
+            secrets = rows
+            secretsPhase = rows.isEmpty
+                ? .unavailable("`metistry secrets list --json` named nothing — this install has no .env yet, or no secret-shaped variables in it")
+                : .read
+        case .failure(let error):
             secrets = []
-            secretsPhase = .unavailable(error.localizedDescription)
+            secretsPhase = .unavailable(error.localizedDescription ?? "unavailable")
         }
     }
 

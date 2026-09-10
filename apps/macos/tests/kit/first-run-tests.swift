@@ -74,18 +74,23 @@ private func model() -> FirstRunModel {
     #expect(!m.canRun(.versioning)) // no remote url
     m.remoteURL = "https://github.com/you/instance.git"
     #expect(m.canRun(.versioning))
-    // 6 and 7 are labelled "not yet" and are never runnable.
+    // 6 and 7 own their own screens: neither is a `metistry` verb, so neither
+    // goes through the run row.
     #expect(!m.canRun(.door))
     #expect(!m.canRun(.claude))
 }
 
 @MainActor
-@Test func notYetStepsSayWhatTheyAreWaitingOn() {
-    for step in FirstRunStep.allCases where !step.isImplemented {
-        #expect(step.notYetReason?.isEmpty == false, "\(step.title) must explain itself")
-    }
-    for step in FirstRunStep.allCases where step.isImplemented {
-        #expect(step.notYetReason == nil)
+@Test func theTwoStepsThatAreNotVerbsAreTheTwoThatOwnTheirOwnScreens() {
+    let withOwnScreens = FirstRunStep.allCases.filter(\.hasOwnScreen)
+    #expect(withOwnScreens == [.door, .claude])
+    // A step with its own screen shows no argument array, because there is none
+    // to show: one is an ASAuthorization ceremony, the other an interactive
+    // terminal login.
+    let m = model()
+    for step in withOwnScreens {
+        #expect(m.plannedArguments(step) == nil, "\(step.title) must not claim to run a verb")
+        #expect(step.verb == nil)
     }
 }
 

@@ -49,14 +49,16 @@
    so the native app copies a settled interaction rather than inventing.
 3. Post-Phase 6: the SwiftUI multiplatform app, macOS target first if
    the work install lands before the phone matters, iOS first otherwise.
-4. **Next for the macOS target, in this order** (2026-09-09): the CLI
-   changes the app is now waiting on rather than more app surface —
-   `metistry restart|stop|start|logs` (the menu bar codes against them and
-   degrades honestly until they land), then the small read verbs that
-   delete the app's two file readers (`identity --json`, `--version`,
+4. **Next for the macOS target** — the 2026-09-09 list is done. It read:
+   `metistry restart|stop|start|logs`, then the read verbs that delete the
+   app's file readers (`identity --json`, `--version`,
    `secrets list --json`), then the pty that unblocks step 7 and
-   `--auth token`, then `SMAppService`. The other eight destinations stay
-   behind the UX pass at step 2.
+   `--auth token`, then `SMAppService`. All of it landed except the pty,
+   which turned out to unblock only `--auth token` — step 7 is real without
+   one (2026-09-10 below). What is left, in this order: a `metistry enroll`
+   so the app stops printing a `scripts/enroll.mjs` command; the pty for
+   `--auth token`; then the other eight destinations, still behind the UX
+   pass at step 2.
 
 ### What shipped (2026-09-09) — `apps/macos`, the first buildable scaffold
 
@@ -104,32 +106,79 @@ and a menu bar worth opening.**
 **Explicit follow-ups**, each labelled "not yet" in the app itself rather
 than faked:
 
-- **`SMAppService`.** Step 5 registers launchd jobs the way the terminal
-  does — `metistry up` writing `~/Library/LaunchAgents`. Moving to
-  `SMAppService` (macOS 13+) is the sanctioned shape: one approval in
-  System Settings, no plist to edit. It needs a `metistry up` that can
-  hand the app its job set rather than installing it, so it is a CLI
-  change first. Settings → Services carries the disabled "Start at login"
-  toggle and that reason.
-- **Step 6, passkey.** Needs `ASAuthorization` against the console's local
-  origin *and* a `metistry` verb to register the credential.
-- **Step 7, Claude token.** `claude setup-token` is interactive; driving it
-  from the app needs a pty, and the token needs its own `metistry secrets`
-  path.
 - **`connect-repo --auth token` from the app.** It reads the PAT from
   stdin, and the app hands every child an empty stdin on purpose so no
   verb can hang a progress view waiting for a paste. The wizard shows the
-  option disabled with that reason; a pty would lift both this and step 7.
-- **Two small CLI gaps the app worked around and would rather not have.**
-  Nothing reports the assistant's name, so the app reads `identity.yaml`
-  with a ~60-line scalar reader (a `metistry identity --json` deletes it);
-  nothing reports the product version, so it reads the checkout's
-  `package.json` (a `metistry --version` deletes that); and `secrets list`
-  has no `--json`, so its table is parsed.
+  option disabled with that reason; a pty would lift it.
 - **The other eight destinations** (Feed, Chat, Agents, Projects,
   Artifacts, Capture, Needs You, Devices — P6). The PWA is the answer until
   the UX pass settles them, per sequencing step 2.
 - **The iOS target.** Not in `Package.swift` yet; the kit is ready for it.
+
+### Then (2026-09-10, third pass): all seven steps act
+
+Full account: `docs/ops/mac-app.md`. What changed, and the two decisions it
+forced.
+
+- **The app holds no parser for a file the CLI owns.** `identity --json`,
+  `version --json` and `secrets list --json` replaced the YAML scalar
+  reader, the `metistry.lock` reader, the `package.json` read and the
+  `secrets list` table parser — the last of which had already gone stale
+  when `secrets list` grew a `scope` column. The Instance pane shows the
+  **instance id** it previously had to report did not exist.
+- **Step 5 sets the shape.** `metistry deployment set-shape --yes`, after
+  the preview, with the confirm button disabled until the preview has been
+  on screen. The invariant moved to where it belongs — the tool — and the
+  app still writes no file.
+- **Step 7 is real without a pty.** `claude setup-token` opens in a
+  `.command` file the user's own terminal handles (AppleScript would mean
+  an Apple Events TCC prompt this app otherwise needs none of), and the app
+  then polls `secrets list --json` for the token's *name*. It never handles
+  the value. The pty is still what `--auth token` needs; step 7 no longer
+  waits on it.
+- **`SMAppService` shipped, for the app only.** `SMAppService.mainApp` is
+  one call and one approval, with `requiresApproval` reported as
+  registered-and-waiting rather than off. The old follow-up had conflated
+  that with the install's launchd agents. **Moving those** would put their
+  plists inside `Contents/Library/LaunchAgents` — signed, unwritable, so
+  every path in them bundle-relative — and would make the jobs the *app's*
+  rather than the install's, so one app could not serve several instance
+  directories, and a terminal `metistry up` and the app would install
+  different job sets. It stays a CLI change first.
+
+**Decision 1 — where a bundled install's writable product dir lives:
+`~/Library/Application Support/Metistry/product`.** The bundle is a **seed**
+(the first of the two options above, which "Two channels, both signed" below
+already read as); the copy is `metistry runtime install --from <bundle> --to
+<dir>`, a CLI verb the wizard's step 1 runs. Application Support rather than
+the instance directory because the product is *code* and one copy serves every
+instance — "what lives where" above already puts `releases/`, `runtime/` and
+`current` in the install dir. An app that laid out a release install itself
+would be a second implementation of `metistry update`.
+
+**Decision 2 — native passkeys need a provisioned build, not a better
+origin.** Measured, not assumed: an `ASAuthorization` registration request from
+a Developer ID build signed with this project's own identity is refused
+identically for `127.0.0.1`, `localhost` and a tailnet name —
+`AuthorizationError 1004: the calling process does not have an application
+identifier` — and hand-signing the entitlement gets the process killed at
+launch. An application identifier comes from an embedded provisioning profile.
+**Correction (owner review, 2026-09-10): a Developer ID DMG *can* carry one.**
+Apple issues *Developer ID* provisioning profiles for exactly this — an App ID
+with the Associated Domains capability, embedded as
+`Contents/embedded.provisionprofile` and signed with the application-identifier
+and associated-domains entitlements; it is how Developer ID apps get iCloud,
+push and associated domains outside the App Store. So the profile is a build
+step, not a channel limit. Even with a provisioned build the origin would still have to be a plain
+`https://<domain>` on 443 whose AASA Apple's CDN can fetch, because
+`ASAuthorization` synthesizes the ceremony origin as `https://<rpID>` with no
+port and the console compares it to `METISTRY_ORIGIN` verbatim. So the ios-app
+plan's "**zero server change**" line does not hold for a ported or loopback
+origin — flagged rather than routed around. **Step 6 therefore falls back to
+the console's own enrolment code**, opened here or typed on the phone, with the
+reason on screen and an "Ask macOS" button that runs the request against a
+local challenge so the claim is checkable. The native path is written, not
+stubbed, and runs the moment an install qualifies.
 
 ### The bundle is a seed (ratified 2026-09-10)
 
@@ -193,7 +242,10 @@ identical, so open-source users and the app share one tested path
 **First run, in the app:**
 1. *Runtime.* The app bundles a Node runtime and the built product
    release as resources (`Metistry.app/Contents/Resources/metistry/`),
-   signed and notarized together — no Homebrew, no `pnpm install`.
+   signed and notarized together — no Homebrew, no `pnpm install`. That
+   bundle is a **seed**: `metistry runtime install` copies it once to
+   `~/Library/Application Support/Metistry/product`, which is where
+   `metistry update` can write (ratified 2026-09-10, below).
 2. *Instance.* Pick a folder → `metistry init` (vault, identity, name
    the assistant on-screen — the only place the name lives).
 3. *Versioning.* "Connect a GitHub repository": device-flow OAuth in the
@@ -212,14 +264,19 @@ identical, so open-source users and the app share one tested path
    written to `<instance>/state/.env` and instance-scoped items are filed
    under the instance's `instance_id` ("Instance directories are
    self-contained" below).
-5. *Services.* `metistry up` — but registered through **`SMAppService`**
-   (macOS 13+), the sanctioned way an app installs its launchd agents;
-   the user approves once in System Settings, and there is no plist to
-   edit. `doctor` becomes the app's status view and menu-bar item.
+5. *Services.* `metistry up`, preceded by `metistry deployment set-shape`
+   after a preview of what the other shape would do. `doctor` becomes the
+   app's status view and menu-bar item. **`SMAppService` registers the APP**
+   as a login item (built 2026-09-10); the install's launchd agents stay
+   `metistry up`'s, and moving them is a CLI change first — see below.
 6. *Door.* Passkey enrollment in-app via `ASAuthorization` against the
-   local origin; the phone enrolls from the existing QR/code flow.
-7. *Claude.* `claude setup-token` guided in-app; the token to the
-   Keychain.
+   local origin — **which is not possible from a Developer ID build at all**
+   (measured 2026-09-10, below). The app says so with the system's own
+   words and falls back to the console's existing code flow, here or on the
+   phone.
+7. *Claude.* `claude setup-token` guided in-app — opened in a real terminal
+   because it is interactive — and the app watches `secrets list --json`
+   for the token's name. It never handles the value.
 
 **Updates.** Two channels, both signed: the app updates itself
 (Sparkle-style appcast, or the App Store if that route is ever taken);

@@ -117,89 +117,146 @@ private func suite(_ name: String) -> (UserDefaults, () -> Void) {
     #expect(pointed.baseEnvironment == ["METISTRY_INSTANCE_DIR": "/Users/you/instance"])
 }
 
-// MARK: - Read-through: the two files Settings shows
 
-@Test func identityYamlIsReadWithoutAYamlDependency() {
-    // Verbatim shape of seed/identity.yaml, block scalar and all.
-    let text = """
-    # SEED TEMPLATE — the ONLY place the assistant is named.
-    name: Ada
-    mention: "@ada"
-    voice: >
-      Direct, warm, concise. Says what it knows, flags what it doesn't.
-      Never pads. Reports contradictions instead of routing around them.
-    icon: "🦉"
-    """
-    let identity = InstanceIdentity(yaml: YAMLScalars.parse(text))
+// MARK: - Read-through: four verbs, and no parser at all
+
+// The scaffold read `identity.yaml`, `metistry.lock` and a `package.json` off
+// disk, and these tests exercised its YAML scalar reader. There is no reader any
+// more: `metistry identity --json`, `metistry version --json` and
+// `metistry secrets list --json` report all of it, so what is tested here is the
+// decoding of a verb's reply and — the part that matters — what the pane says
+// when this install's CLI is older than this app.
+
+@Test func theIdentityVerbCarriesTheInstanceIdAndTheAssistantsName() {
+    let json = try! JSONValue.parse(Data("""
+    { "instance_id": "6f2b0c1e-8a4d-4a9b-bd3f-0e6d5a2c9f11", "name": "Ada", "mention": "@ada", "icon": "🦉" }
+    """.utf8))
+    let identity = InstanceIdentity(json: json)
+    #expect(identity.instanceID == "6f2b0c1e-8a4d-4a9b-bd3f-0e6d5a2c9f11")
     #expect(identity.assistantName == "Ada")
     #expect(identity.mention == "@ada")
     #expect(identity.icon == "🦉")
+    #expect(!identity.isEmpty)
+
+    // A reply naming neither the instance nor the assistant is not an identity,
+    // whatever else it holds: better to report that than render a pane of blanks.
+    #expect(InstanceIdentity(json: try! JSONValue.parse(Data(#"{"icon":"🦉"}"#.utf8))).isEmpty)
 }
 
-@Test func metistryLockIsReadIncludingItsNestedProductBlock() {
-    let text = """
-    # metistry.lock — the product release this instance runs.
-    product:
-      version: "0.4.0"
-      commit: "91ca417c849364fe209e68f9cae11a4237e734c4"
-      source: release
-    updated_at: "2026-09-10T03:20:13.882Z"
-    migrations_applied:
-      - "0001_init.sql"
-      - "0002_review_decisions.sql"
-      - "0003_auth_enrollment.sql"
-    """
-    let pin = InstancePin(yaml: YAMLScalars.parse(text))
-    #expect(pin.version == "0.4.0")
-    #expect(pin.source == "release")
-    #expect(pin.commit == "91ca417c849364fe209e68f9cae11a4237e734c4")
-    #expect(pin.updatedAt == "2026-09-10T03:20:13.882Z")
-    #expect(pin.migrationsApplied == 3)
+@Test func theVersionVerbCarriesProductRuntimeAndTheInstancesPin() {
+    let json = try! JSONValue.parse(Data("""
+    {
+      "product": "0.4.0",
+      "runtime": "22.11.0",
+      "lock": {
+        "version": "0.4.0",
+        "commit": "91ca417c849364fe209e68f9cae11a4237e734c4",
+        "source": "release",
+        "updated_at": "2026-09-10T03:20:13.882Z",
+        "migrations_applied": ["0001_init.sql", "0002_review_decisions.sql", "0003_auth_enrollment.sql"]
+      }
+    }
+    """.utf8))
+    let versions = VersionFacts(json: json)
+    #expect(versions.product == "0.4.0")
+    #expect(versions.runtime == "22.11.0")
+    #expect(versions.lock?.source == "release")
+    #expect(versions.lock?.commit == "91ca417c849364fe209e68f9cae11a4237e734c4")
+    #expect(versions.lock?.updatedAt == "2026-09-10T03:20:13.882Z")
+    // Counted from the list, or taken from a count if the verb reports one.
+    #expect(versions.lock?.migrationsApplied == 3)
 }
 
-@Test func aBlockScalarsBodyIsNotMistakenForKeys() {
-    let text = """
-    voice: >
-      one: not a key
-      two: also not a key
-    name: Ada
-    """
-    let yaml = YAMLScalars.parse(text)
-    #expect(yaml["name"] == "Ada")
-    #expect(yaml["one"] == nil)
-    #expect(yaml["two"] == nil)
+@Test func aNestedVersionShapeReadsTheSameAsAFlatOne() {
+    // The verb is somebody else's and its exact shape is not settled here, so
+    // both the obvious spellings are read rather than one being guessed and a
+    // pane going blank over a convention.
+    let nested = VersionFacts(json: try! JSONValue.parse(Data("""
+    { "product": { "version": "0.4.0" }, "runtime": { "version": "22.11.0" } }
+    """.utf8)))
+    #expect(nested.product == "0.4.0")
+    #expect(nested.runtime == "22.11.0")
 }
 
 @MainActor
-@Test func anUnreadableIdentityFileIsReportedRatherThanDefaulted() {
-    let status = StatusModel(cli: nil)
-    let model = SettingsModel(status: status, cli: nil, instanceDir: URL(fileURLWithPath: "/nope/not/an/instance"))
+@Test func aCliWithoutTheReadVerbsSaysSoRatherThanShowingBlanks() async {
+    // Exactly what packages/cli/src/main.ts's default branch answers.
+    let stale = CommandResult(exitCode: 2, stdout: "", stderr: "unknown command: identity\n\nmetistry — Metistry command line\n")
+    let cli = MetistryCLI(
+        runtime: MetistryRuntime(source: .path, executable: URL(fileURLWithPath: "/usr/local/bin/metistry")),
+        runner: FixedRunner(result: stale)
+    )
+    let model = SettingsModel(status: StatusModel(cli: cli), cli: cli, instanceDir: nil)
+
+    await model.refreshIdentity()
     #expect(model.identity == nil)
-    #expect(model.identityError != nil)
-    // The assistant is named in identity.yaml or nowhere. No fallback name.
+    #expect(model.identityPhase == .unavailable("this CLI has no `identity` verb yet — update it (metistry update, or Check for Updates…)"))
+    // The assistant is named by the CLI or nowhere. No fallback name.
     #expect(model.assistantNameDisplay == "unknown")
+
+    await model.refreshVersions()
+    #expect(model.versionsPhase == .unavailable("this CLI has no `version` verb yet — update it (metistry update, or Check for Updates…)"))
+    #expect(model.pin == nil)
+
+    await model.refreshSecrets()
+    #expect(model.secrets.isEmpty)
+    #expect(model.secretsPhase == .unavailable("this CLI has no `secrets list` verb yet — update it (metistry update, or Check for Updates…)"))
 }
 
-@Test func theSecretListIsParsedByNameAndScopeOnly() {
-    // Verbatim from packages/cli/src/secrets.ts renderSecretList.
-    let text = """
-    name                            keychain  .env
-    ------------------------------------------------
-    METISTRY_DB_PASSWORD            yes       set
-    METISTRY_BRIDGE_TOKEN_EVENTKIT  yes       -
-    CLAUDE_CODE_OAUTH_TOKEN         -         set
-    METISTRY_VAPID_PRIVATE          -         -
-
-    Values are never printed.
+@MainActor
+@Test func theSecretListCarriesNamesAndScopeAndNothingThatCouldBeAValue() async throws {
+    // `packages/cli/src/secrets.ts`'s SecretListing, as `--json` reports it.
+    let json = """
+    [
+      { "name": "METISTRY_DB_PASSWORD", "scope": "instance", "inKeychain": true, "foundUnder": "instance", "inEnv": true },
+      { "name": "METISTRY_BRIDGE_TOKEN_EVENTKIT", "scope": "instance", "inKeychain": true, "foundUnder": "user", "inEnv": false },
+      { "name": "CLAUDE_CODE_OAUTH_TOKEN", "scope": "user", "inKeychain": false, "inEnv": true },
+      { "name": "METISTRY_VAPID_PRIVATE", "scope": "instance", "inKeychain": false, "inEnv": false }
+    ]
     """
-    let rows = SecretListing.parse(text)
-    #expect(rows.count == 4)
-    #expect(rows[0] == SecretListing(name: "METISTRY_DB_PASSWORD", inKeychain: true, inEnv: true))
-    #expect(rows[1] == SecretListing(name: "METISTRY_BRIDGE_TOKEN_EVENTKIT", inKeychain: true, inEnv: false))
-    #expect(rows[2] == SecretListing(name: "CLAUDE_CODE_OAUTH_TOKEN", inKeychain: false, inEnv: true))
-    #expect(rows[3].isSet == false)
-    // The header, the rule and the closing sentence are not rows.
-    #expect(rows.contains { $0.name == "name" } == false)
+    let cli = MetistryCLI(
+        runtime: MetistryRuntime(source: .path, executable: URL(fileURLWithPath: "/usr/local/bin/metistry")),
+        runner: CannedRunner(stdout: json)
+    )
+    let model = SettingsModel(status: StatusModel(cli: cli), cli: cli, instanceDir: nil)
+    await model.refreshSecrets()
+
+    #expect(model.secretsPhase == .read)
+    #expect(model.secrets.count == 4)
+    #expect(model.secrets[0] == SecretListing(name: "METISTRY_DB_PASSWORD", scope: "instance", foundUnder: "instance", inKeychain: true, inEnv: true))
+    #expect(model.secrets[3].isSet == false)
+    // scope says where it BELONGS; foundUnder says where it actually is, and the
+    // gap between them is a migration the next `sync --to env` finishes.
+    #expect(model.secrets[1].scopeLabel.contains("still under the user account"))
+    #expect(model.secrets[2].scopeLabel.contains("one per Mac"))
+    // The Claude token is set or not set. There is no third thing this can say.
+    #expect(model.claudeTokenListing?.isSet == true)
+
+    // Nothing in the listing can hold a value: the type has four fields and the
+    // verb has no code path that prints one.
+    for listing in model.secrets {
+        #expect(!listing.scopeLabel.contains("METISTRY_DB_PASSWORD=") )
+    }
+}
+
+@Test func bothKeySpellingsOfTheSecretListingAreRead() {
+    let camel = try! JSONValue.parse(Data(#"[{"name":"A","inKeychain":true,"inEnv":false}]"#.utf8))
+    let snake = try! JSONValue.parse(Data(#"[{"name":"A","in_keychain":true,"in_env":false}]"#.utf8))
+    let wrapped = try! JSONValue.parse(Data(#"{"secrets":[{"name":"A","inKeychain":true,"inEnv":false}]}"#.utf8))
+    #expect(SecretListing.decode(camel)?.first?.inKeychain == true)
+    #expect(SecretListing.decode(snake)?.first?.inKeychain == true)
+    #expect(SecretListing.decode(wrapped)?.first?.name == "A")
+}
+
+private struct FixedRunner: CommandRunner {
+    let result: CommandResult
+
+    func run(
+        executable: URL, arguments: [String], environment: [String: String],
+        currentDirectory: URL?, onOutput: @escaping @Sendable (OutputLine) -> Void
+    ) async throws -> CommandResult {
+        result
+    }
 }
 
 @MainActor

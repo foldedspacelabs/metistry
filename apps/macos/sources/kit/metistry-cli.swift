@@ -79,6 +79,77 @@ public struct MetistryCLI: Sendable {
         }
     }
 
+    // MARK: - The read verbs
+
+    /// One JSON-printing read verb, run and decoded, with the CLI's own answer
+    /// for "I do not have that verb" turned into the app's one sentence about it
+    /// (cli-facts.swift). Every read below is this function plus a decoder, so
+    /// there is one place that decides what a stale CLI looks like on screen.
+    private func read<T: Sendable>(
+        _ verb: [String],
+        naming name: String,
+        decode: @Sendable (JSONValue) -> T?
+    ) async -> Result<T, CLIReadError> {
+        let result: CommandResult
+        do {
+            result = try await run(verb)
+        } catch {
+            return .failure(.failed(verb: name, detail: error.localizedDescription))
+        }
+        if CLIDegradation.isUnknownVerb(result) { return .failure(.noSuchVerb(name)) }
+        guard let data = result.stdout.data(using: .utf8), !data.isEmpty else {
+            let detail = result.stderr.split(separator: "\n").last.map(String.init) ?? "exit \(result.exitCode), no output"
+            return .failure(result.ok ? .undecodable(verb: name, detail: "it printed nothing") : .failed(verb: name, detail: detail))
+        }
+        guard let json = try? JSONValue.parse(data) else {
+            return .failure(.undecodable(verb: name, detail: "not JSON: \(String(result.stdout.prefix(200)))"))
+        }
+        guard let value = decode(json) else {
+            let detail = result.ok
+                ? "the JSON did not carry the fields this pane needs"
+                : (result.stderr.split(separator: "\n").last.map(String.init) ?? "exit \(result.exitCode)")
+            return .failure(result.ok ? .undecodable(verb: name, detail: detail) : .failed(verb: name, detail: detail))
+        }
+        return .success(value)
+    }
+
+    /// `metistry identity --json` — the instance's id and the assistant's name.
+    /// Replaces the scaffold's YAML scalar reader over `identity.yaml`.
+    public func identity() async -> Result<InstanceIdentity, CLIReadError> {
+        await read(["identity", "--json"], naming: "identity") { json in
+            let identity = InstanceIdentity(json: json)
+            return identity.isEmpty ? nil : identity
+        }
+    }
+
+    /// `metistry version --json` — product, runtime and the instance's pin.
+    /// Replaces the scaffold's `package.json` read and its `metistry.lock`
+    /// reader in one go.
+    public func versions() async -> Result<VersionFacts, CLIReadError> {
+        await read(["version", "--json"], naming: "version") { json in
+            let facts = VersionFacts(json: json)
+            return facts.isEmpty ? nil : facts
+        }
+    }
+
+    /// `metistry secrets list --json` — names and scope. Values are not
+    /// requested, not returned by the verb, and could not be rendered if they
+    /// were.
+    public func secretsList() async -> Result<[SecretListing], CLIReadError> {
+        await read(["secrets", "list", "--json"], naming: "secrets list") { SecretListing.decode($0) }
+    }
+
+    /// `metistry deployment --json` — the resolved shape and the file it came
+    /// from, without doctor's full sweep.
+    public func deployment() async -> Result<DeploymentShapeFacts, CLIReadError> {
+        await read(["deployment", "--json"], naming: "deployment") { DeploymentShapeFacts(json: $0) }
+    }
+
+    /// The argument array a read verb runs, for the screen that shows it.
+    public func plannedArguments(for verb: [String]) -> [String] {
+        [runtime.executable.path] + arguments(for: verb)
+    }
+
     public enum DoctorError: LocalizedError {
         case noOutput(exitCode: Int32, stderr: String)
         case undecodable(underlying: any Error, exitCode: Int32, stdout: String, stderr: String)

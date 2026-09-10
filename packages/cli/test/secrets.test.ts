@@ -299,6 +299,7 @@ describe("instance-scoped secrets", () => {
     const code = await main(["secrets", "list", "--json", "--env-file", file, "--product-dir", await mkdtemp(join(tmpdir(), "metistry-no-example-"))], {
       out: (l) => out.push(l),
       exec: kc.exec,
+      platform: "darwin",
     });
     expect(code).toBe(0);
     const printed = out.join("\n");

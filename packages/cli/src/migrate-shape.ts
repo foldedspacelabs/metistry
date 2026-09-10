@@ -188,6 +188,8 @@ export interface MigrateShapeOptions {
   /** passed through to `up` — a namespaced instance keeps its own labels and ports */
   namespace?: boolean | undefined;
   fetchFn?: typeof fetch | undefined;
+  /** test seam for awaitReady's back-off; the default really sleeps */
+  sleep?: ((ms: number) => Promise<void>) | undefined;
   /** test seam: filesystem probes */
   exists?: ((p: string) => boolean) | undefined;
   /** test seam: the timestamp the dump file is named after */
@@ -718,7 +720,7 @@ async function toLaunchd(ctx: Ctx, opts: MigrateShapeOptions, exists: (p: string
     await r.run("launchctl", ["kickstart", "-k", `gui/${ctx.uid}/${labelFor(s, ctx.labelSuffix)}`], { comment: "it started against an empty database" });
   }
 
-  await awaitReady(ctx, opts.fetchFn ?? fetch);
+  await awaitReady(ctx, opts.fetchFn ?? fetch, opts.sleep);
 
   r.note(`dump kept at ${dumpPath} — it is the only copy of the compose database outside the Docker volume, which stays until you run \`docker compose down -v\``);
   return dumpPath;
@@ -818,6 +820,6 @@ async function toCompose(ctx: Ctx, opts: MigrateShapeOptions, current: Deploymen
   for (const c of upResult.commands) r.commands.push(c);
   if (upResult.code !== 0) throw new StepFailed(`\`metistry up\` failed under the compose shape (exit ${upResult.code})`, upResult.code);
 
-  await awaitReady(ctx, opts.fetchFn ?? fetch);
+  await awaitReady(ctx, opts.fetchFn ?? fetch, opts.sleep);
   return undefined;
 }

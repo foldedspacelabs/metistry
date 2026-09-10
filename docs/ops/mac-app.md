@@ -30,13 +30,30 @@ path.
   no instance is selected and re-enterable from **Settings → Instance → Set up
   again…**. Back/Continue/Skip; each choice carries what it gets you and what it
   costs; every step shows the exact argument array *before* running the verb and
-  streams the CLI's own output. Steps 1–5 are real — locate the runtime;
-  `metistry init` (or adopt a folder that already holds an `identity.yaml`, which
-  runs nothing); `metistry connect-repo --auth device|ssh` (the GitHub device
-  code is parsed out of the CLI's stream and shown as a card with a link, while
-  connect-repo keeps polling); `metistry secrets sync`, plus a
-  `metistry secrets mint METISTRY_BRIDGE_TOKEN_<NAME>` per bridge you enable;
-  `metistry up`.
+  streams the CLI's own output. **All seven act:**
+  1. `metistry runtime install --from <bundle> --to <product dir>` when this
+     build is running out of its own read-only bundle (below).
+  2. `metistry init`, or adopt a folder that already holds an `identity.yaml`,
+     which runs nothing.
+  3. `metistry connect-repo --auth device|ssh` — the GitHub device code is
+     parsed out of the CLI's stream and shown as a card with a link, while
+     connect-repo keeps polling.
+  4. `metistry secrets sync`, plus a
+     `metistry secrets mint METISTRY_BRIDGE_TOKEN_<NAME>` per bridge you enable.
+  5. `metistry up`, preceded by the shape: preview the other one
+     (`up --dry-run` with `METISTRY_DEPLOYMENT_SHAPE`), then
+     `metistry deployment set-shape <shape> --yes`. **"Set the Shape" stays
+     disabled until the preview has been on screen** — preview-then-confirm is
+     the rule the CLI holds destructive verbs to, and a `--yes` reachable
+     without the preview would be the app confirming on the user's behalf.
+  6. The door — an `ASAuthorization` passkey, or the console's own enrolment
+     code with the reason on screen (below, and it is worth reading).
+  7. `claude setup-token` in a terminal the app opens, then a watch on
+     `metistry secrets list --json` for `CLAUDE_CODE_OAUTH_TOKEN`.
+
+  Steps 6 and 7 are the two that are **not** a `metistry` verb, so they own
+  their own screens rather than being forced through the generic run row
+  (`FirstRunStep.hasOwnScreen`, pinned by a test).
 - **The menu-bar item.** Its glyph is the worst *fault* across components.
   `absent` never drives it — a bridge that was never configured is not a fault,
   which is the same rule that keeps `absent` out of doctor's exit code. The menu
@@ -57,18 +74,166 @@ path.
 
 | | why | what to do today |
 | --- | --- | --- |
-| Wizard step 6, **passkey** | needs `ASAuthorization` against the console's local origin *and* a `metistry` verb to register the credential; neither exists | enrol from the console in a browser |
-| Wizard step 7, **Claude token** | `claude setup-token` is an interactive terminal flow; driving it needs a pty, and the token needs its own `metistry secrets` path | `claude setup-token`, then `metistry secrets mint CLAUDE_CODE_OAUTH_TOKEN` |
+| **A native passkey** (wizard step 6) | measured, not assumed — see "What ASAuthorization actually says" below. `ASAuthorization` refuses *every* relying party from a Developer ID build, because an application identifier comes from an embedded provisioning profile and a DMG from GitHub Releases has none | the step falls back to the console's own enrolment code — open the link here, or type it on the phone. Same `passkeys` row either way |
 | `connect-repo --auth token` | it reads the PAT from **stdin**, and the app gives every child an empty stdin on purpose so no verb can hang a progress view waiting for a paste | the wizard shows the option, disabled, with that reason; run it in a terminal |
-| **Writing `deployment.yaml`** | the shape is `deployment.yaml`'s to state, and that is a §4.7 protected path — the user's own hand, invariant 2 — and no `metistry` verb writes it either | the wizard explains both shapes and previews the other one (`up --dry-run` with `METISTRY_DEPLOYMENT_SHAPE`); the one-line edit stays yours |
-| **Start at login** (`SMAppService`) | step 5 registers launchd jobs the way the terminal does — `metistry up` writing `~/Library/LaunchAgents`. `SMAppService` (macOS 13+) is the sanctioned way an app installs its own agents, with one approval in System Settings and no plist to edit; it needs a `metistry up` that hands the app its job set rather than installing it, so it is a CLI change first | nothing; the current shape works. The Services pane shows the toggle disabled, with that reason |
-| **An instance id** | there is none in the product: `identity.yaml` carries name · mention · voice · icon, and neither `metistry.lock` nor `doctor` reports one | the Instance pane shows the folder path and the product pin, and says so |
+| **Minting an enrolment code** | there is no HTTP route that mints one, deliberately — whoever can run the host command already controls Postgres and the vault, so shell access is the root of trust for a first passkey (plan §4.2) — and `metistry enroll` is on the CLI's own "not yet" list | step 6 shows the exact `scripts/enroll.mjs` command and takes the code you paste back |
+| **A QR code** for the phone | nothing in this product renders one yet; `apps/console/scripts/enroll.mjs` says the same about itself ("QR rendering arrives with `packages/cli`"), and an encoder is a dependency nobody has asked for | step 6 shows the enrolment URL, selectable, to type or hand over |
+| **Registering the launchd agents through `SMAppService`** | **"Start at login" is real now** — but it registers *this app*, `SMAppService.mainApp`, which is a different thing from the install's jobs. See "Start at login" below for what moving those would take and why it is not this PR | nothing; `metistry up` owns those jobs and they already start at login |
 | **The other eight destinations** | Feed, Chat, Agents, Projects, Artifacts, Capture, Needs You, Devices (design-system P6) | the PWA — "Add to Dock" in Safari |
 | **An iOS target** | `MetistryKit` is already free of AppKit and of `Process` so it can be shared; there is no iOS target in `Package.swift` | — |
+
+**Four things left this table on 2026-09-10**, and it is worth saying what
+replaced them rather than letting them vanish: wizard step 7 (a terminal the app
+opens plus a watch on the secret's *name*); writing `deployment.yaml` (the CLI
+grew `deployment set-shape`, so the invariant is enforced at the tool where it
+belongs and the app still writes no file); "Start at login" (`SMAppService.mainApp`,
+which needed no CLI change at all — the old entry had conflated it with the
+launchd agents); and "an instance id" (`metistry init` mints one into
+`identity.yaml`, and `metistry identity --json` reports it).
 
 An empty destination is not listed as a greyed-out placeholder. §3.15's
 distinction holds throughout: *empty* (nothing has happened) and *absent* (never
 configured) are different states, and neither is a failure.
+
+## What `ASAuthorization` actually says about a local origin
+
+Measured on 2026-09-10, because "passkeys don't work locally" is not an answer
+anybody can act on. A probe making the same
+`ASAuthorizationPlatformPublicKeyCredentialProvider` registration request the app
+makes, in a bundle carrying this project's own identifier and signed with its
+Developer ID identity, was pointed at three relying parties in turn:
+
+```
+RP 127.0.0.1:    com.apple.AuthenticationServices.AuthorizationError 1004: The operation
+                 couldn’t be completed. The calling process does not have an application
+                 identifier. Make sure it is properly configured.
+RP localhost:    …identical…
+RP studio.ts.net: …identical…
+```
+
+**The refusal is not about the relying party.** It is about the app.
+`ASAuthorization` wants `com.apple.application-identifier`, which comes from an
+embedded provisioning profile; a Developer ID build has none. Signing the
+entitlement in by hand (`application-identifier` + `associated-domains`, same
+identity) does not get further either — AMFI kills the process at launch,
+SIGKILL, before `main` runs, because those are restricted entitlements that need
+a matching profile.
+
+So native passkeys are blocked by the **distribution channel**, not by the local
+origin. The ratified channel is a Developer ID DMG from GitHub Releases
+(`docs/product/desktop-app-plan.md`), which cannot carry a profile. It would take
+an App Store build, or a Developer ID build provisioned through a profile.
+
+**And even with a provisioned build, the origin would still have to change.**
+Four separate reasons, each checked separately in
+`sources/kit/passkey-enrolment.swift` and each named on screen, because they have
+different fixes:
+
+| | why | fixable by |
+| --- | --- | --- |
+| an IP-literal relying party | the console's RP ID is `new URL(METISTRY_ORIGIN).hostname` (`apps/console/src/webauthn.ts`), so `http://127.0.0.1:8080` gives `127.0.0.1` — and a WebAuthn relying party must be a domain | setting `METISTRY_ORIGIN` to a name |
+| an `http:` origin | `ASAuthorization` presents the ceremony's origin as `https://<rpID>`, and the console compares it to `METISTRY_ORIGIN` with a plain `!==` | https |
+| a port in the origin | that synthesized origin carries **no port** — it is exactly `https://<host>` — and the comparison is on the whole string, so `https://host:8443` can never match | serving on 443, or an `expectedOrigin` array server-side |
+| no associated domain | macOS gates the RP ID on `webcredentials:<domain>`, which Apple verifies by fetching `https://<domain>/.well-known/apple-app-site-association` **through its own CDN** — unreachable for a loopback, a `.local` or a tailnet name | a publicly resolvable HTTPS domain |
+
+`localhost` is a valid relying party in a *browser*, which is exactly why the
+console's own enrolment page works and is the fallback. A browser's loopback
+secure-context exemption is not an associated-domain exemption.
+
+**The native path is written, not stubbed.** `sources/kit/console-client.swift`
+speaks the real `POST /auth/enroll/start` and `POST /auth/enroll/finish` — the
+same request and response shapes `apps/console/web/app.js` posts, field for
+field, base64url and all — and `sources/app/passkey-registrar.swift` is the real
+`ASAuthorization` call. `PasskeyRouting.decide` returns `.native` the moment an
+install's origin and this app's entitlements allow it, and that code runs. Today
+none do, and the screen says which reason applies.
+
+The step also carries an **"Ask macOS"** button that runs the registration
+request with a locally generated challenge and posts nothing anywhere. It exists
+so the reason on screen is *evidence* rather than an assertion: press it and the
+system says, in its own words, what it thinks of this relying party. It cannot
+enrol anything — there is no console challenge in it.
+
+**One thing to raise server-side.** `apps/console/src/webauthn.ts` compares
+`clientDataJSON.origin !== cfg.origin` and lets `verifyRegistrationResponse`
+throw, which the top-level handler turns into **HTTP 500**, not 401. So an origin
+mismatch from any native client looks like an internal error with no useful body.
+`@simplewebauthn/server` v13 accepts an array for `expectedOrigin`; accepting one
+would make a native ceremony possible against a ported origin and would turn that
+500 into a real answer. Not done here — it is a console change, and this PR is
+the app.
+
+## Start at login
+
+**`SMAppService.mainApp`, and only that.** One call, one approval in System
+Settings › General › Login Items, nothing written, no CLI change — the old
+"not yet" entry had conflated it with something else entirely.
+
+The status mapping lives in `sources/kit/login-item.swift` so it is testable
+without a signed bundle to register (`SMAppService.Status` is `Int`-backed;
+0 notRegistered, 1 enabled, 2 requiresApproval, 3 notFound, and anything else is
+reported as `unknown(n)` rather than rounded to "off"). Two behaviours are worth
+naming:
+
+- **`requiresApproval` reads as ON.** It is registered — macOS is holding it,
+  waiting for the person — so the toggle stays on and the row explains what is
+  outstanding, with a button that opens the right pane. A toggle that flicked
+  back off there would look broken when nothing is wrong.
+- **The status is always re-read from macOS after a write**, never assumed from
+  `register()` returning. `register()` succeeding *and* the status being
+  `requiresApproval` is the normal first-time path.
+
+`swift build` alone produces an executable, not a bundle, so `SMAppService.mainApp`
+has nothing to register and answers `notFound`. The pane says exactly that and
+points at `ops/release/build-app.sh`.
+
+**What moving the launchd agents under `SMAppService` would take**, recorded
+because it is the obvious next thought and it is a bigger change than it looks.
+`SMAppService.agent(plistName:)` registers a plist that lives **inside the app
+bundle**, at `Metistry.app/Contents/Library/LaunchAgents/`. That means:
+
+- the plists are signed with the app and therefore **unwritable**, so every path
+  in them has to be bundle-relative or resolved at run time — today `metistry up`
+  renders absolute paths for the node binary, the product dir, the instance dir
+  and the log files;
+- the jobs become **the app's**, not the install's. One app would register one
+  job set, so the "several instance directories, switch between them" shape the
+  plan already commits to would need the label and port namespacing that is
+  already a recorded follow-up;
+- `metistry up` from a terminal and the app would install *different* jobs,
+  which is precisely the second implementation the whole design forbids.
+
+So it stays a CLI change first: a `metistry up` that can hand over its job set
+rather than installing it. `metistry up` owns those jobs today and they already
+start at login on their own.
+
+## Step 7: the Claude token, and what the app never touches
+
+`claude setup-token` opens a browser and waits. The app hands every child an
+**empty stdin** on purpose (`sources/app/process-command-runner.swift`) so no
+verb can hang a progress view waiting for input — which means the app
+structurally cannot drive this one. Rather than fake a progress bar over
+something it is not driving, it opens the command where the person can answer it.
+
+**A `.command` file, not AppleScript.** Telling Terminal to `do script` is
+automation, which means an Apple Events TCC prompt and a permission this app
+otherwise needs none of (the entitlements file's whole argument is that it
+touches no TCC-protected resource itself). A `.command` file is just a document
+macOS opens with whichever terminal the person has set as the handler — no
+entitlement, no prompt, their choice honoured. It is written `0700` into the
+app's own caches directory and contains one command line the app already shows on
+screen.
+
+Then the app polls `metistry secrets list --json` for
+`CLAUDE_CODE_OAUTH_TOKEN` — every 4 seconds, 60 times, and it **says so when it
+gives up** rather than quietly stopping. `metistry secrets sync --to keychain` is
+shown as the exact command that carries the token from where Claude Code left it
+into the login Keychain, which is user-scoped: one Claude login per Mac, shared
+by every instance (`packages/cli/src/secrets.ts`'s `SECRET_SCOPES`).
+
+**The app never handles the value.** Not in a field, not in a variable, not in a
+log line. Everything it knows about that secret is a boolean, and the verb it
+asks has no code path that can print one.
 
 ## Settings: persisted vs read-through
 
@@ -90,31 +255,51 @@ fourth one fails CI rather than appearing quietly.
 | Pane | Value | Read through |
 | --- | --- | --- |
 | Instance | active directory, recents, Open in Finder | the persisted pointers above |
-| Instance | assistant name, mention, icon | `<instance>/identity.yaml`, **read only** — a §4.7 protected path, so there is no field to edit it |
+| Instance | instance id, assistant name, mention, icon | `metistry identity --json`, **read only** — the file behind it is a §4.7 protected path, so there is no field to edit any of it |
 | Instance | Set up again… | re-enters the wizard |
 | Services | shape, and which file it came from | `doctor --json` → the `deployment` row's `meta` (the CLI resolved the D4 overlay) |
 | Services | the service list with status | the same `meta`'s service plan, matched against doctor's `service` rows |
-| Services | Start at login | disabled, labelled "not yet" (above) |
+| Services | Start at login | `SMAppService.mainApp` — macOS keeps the registration; the app writes nothing (above) |
 | Connections | instance repo status, HEAD, queue depth | `doctor --json` → the `reconciler` row's `meta`. The reconciler is the sole committer, so the app runs no git of its own |
-| Connections | Claude token set / not set | `metistry secrets list` — never a value |
+| Connections | Claude token set / not set | `metistry secrets list --json` — never a value |
 | Connections | bridges | `doctor --json` → the `bridge` rows |
-| Secrets | names and scope | `metistry secrets list` — names only; the verb has no code path that can print a value, and neither has the pane |
+| Secrets | names, scope, and the account each was found under | `metistry secrets list --json` — names only; the verb has no code path that can print a value, and neither has the pane |
 | Updates | version, channel, feed, automatic checks, Check Now | Sparkle, which owns those preferences itself |
-| Updates | instance pin | `<instance>/metistry.lock` |
+| Updates | instance pin | `metistry version --json` → its `lock` block |
 | Advanced | resolved runtime, product directory | the runtime locator (below) |
-| Advanced | product runtime version | the located checkout's `package.json` — the same value `productVersion()` reads. There is no `metistry --version` to ask |
+| Advanced | product and bundled-runtime versions | `metistry version --json` |
 | Advanced | developer runtime override | the persisted pointer |
 | Advanced | Run doctor | `metistry doctor --json` |
 | Advanced | log folder | the launchd plists' `StandardOutPath` convention (`/tmp/metistry-<name>.log`), labelled as a convention. The menu's **View Log** uses `metistry logs <name> --lines 200` instead, because a container's or a systemd unit's log is not a file here |
 
-**Two file reads, and why they are not a second implementation.**
-`identity.yaml` and `metistry.lock` are read directly, by a ~60-line scalar
-reader in `sources/kit/instance-files.swift` — not a YAML parser: top-level and
-one-level-nested scalars, block scalars skipped, sequences counted. Nothing in
-the CLI reports the assistant's name (no verb, and not `doctor --json`), so the
-alternative is a Swift YAML dependency for two files with a fixed,
-seed-generated shape. **A `metistry identity --json` would delete that reader**,
-and is the right fix when the CLI next has a reason to grow one.
+**There are no file reads left.** The scaffold read `identity.yaml` and
+`metistry.lock` with a ~60-line YAML scalar reader, read the checkout's
+`package.json` for a version, and parsed `metistry secrets list`'s table — all
+four because the CLI reported none of it. This doc named the first as the thing
+`metistry identity --json` would delete. It did, along with the rest:
+`identity --json`, `version --json` and `secrets list --json` replaced every one,
+and `sources/kit/instance-files.swift` is now a single file-existence test (is
+there an `identity.yaml` here?), which is not a parse.
+
+The table parser was worth deleting on its own: `secrets list` grew a `scope`
+column when instance directories became self-contained, and the app's
+three-column regex had matched nothing since. A parser of somebody else's table
+is a bug with a delay on it.
+
+**What a CLI older than this app looks like.** `packages/cli/src/main.ts`'s
+default branch answers `unknown command: <verb>` with exit 2, and every read
+turns that into one sentence — *"this CLI has no `identity` verb yet — update it
+(metistry update, or Check for Updates…)"* — rather than a blank pane or a wrong
+"not set". One place decides it (`CLIDegradation` in `sources/kit/cli-facts.swift`),
+so the menu bar's lifecycle verbs, the log window and the four read verbs all say
+it identically.
+
+**On key spellings.** The CLI's JSON is not internally consistent — `doctor
+--json` is snake_case (`as_of`, `latency_ms`), `restart --json` is single words,
+and `SecretListing` in `packages/cli/src/secrets.ts` is camelCase (`inKeychain`,
+`foundUnder`). The readers accept both spellings of a two-word key rather than
+guessing one and blanking a pane over a convention. That is a reader-side
+tolerance, not a wire contract: the shape is the CLI's.
 
 ## The menu bar
 
@@ -148,17 +333,32 @@ apps/macos/
   Package.swift        SwiftPM manifest — no Xcode project
   Package.resolved     the Sparkle pin; tracked, and CI builds with
                        --disable-automatic-resolution so a stale one fails
+  package.json         name and version only, private. It ships no JavaScript:
+                       it exists so changesets versions the app with the product
+                       and gives it a CHANGELOG line (docs/ops/releases.md)
   sources/kit/         MetistryKit: the models and the views — Settings, the
                        wizard, the menu bar, the Status panel, the log window.
-                       No AppKit, no Process — an iOS target shares it as is.
+                       No AppKit, no Process, no platform frameworks — an iOS
+                       target shares it as is.
   sources/app/         the Metistry executable: @main and the four scenes
                        (window, Settings, log window, MenuBarExtra), Sparkle,
-                       the Process-backed CommandRunner, and the only three
-                       AppKit calls in the app (reveal in Finder, quit,
-                       Sparkle's own UI)
+                       the Process-backed CommandRunner, and the four platform
+                       seams the kit declares and does not have: SMAppService,
+                       ASAuthorization, a terminal opener, and the AppKit calls
+                       (reveal in Finder, quit, Sparkle's own UI)
   tests/kit/           swift-testing unit tests over the kit
   resources/           Info.plist template + the entitlements file
 ```
+
+**Every platform framework is behind a protocol the kit declares.**
+`CommandRunner` (a subprocess), `LoginItemService` (`SMAppService`),
+`PasskeyRegistrar` (`ASAuthorization`, which needs an `NSWindow` as its
+presentation anchor) and `TerminalOpener` (`NSWorkspace`). That is what keeps
+`MetistryKit` free of AppKit and of `Process` — an iOS target supplies its own
+four — and it is also what makes the models testable: every one of those seams
+has a fake in `tests/kit/`, so the SMAppService status machine, the passkey route
+decision and the token watch are exercised without a signed bundle, a Touch ID
+prompt or a terminal window.
 
 Paths are lowercase, so every target names its own `path:` rather than taking
 SwiftPM's default `Sources/<TargetName>/`. `Package.swift` and
@@ -280,18 +480,51 @@ gaps only), which is what makes the app's instance choice mean something.
 **How the runtime resolves, in order.** Each rejection is shown on the screen
 with its reason, so "not found" is never a shrug:
 
-1. **bundled** — `Metistry.app/Contents/Resources/metistry/`, needing both
-   `runtime/node/bin/node` and `…/packages/cli/dist/main.js`. It prefers the
-   `current` symlink when there is one, because that is exactly how
-   `metistry update` lays out a release install.
-2. **checkout** — the folder chosen in the app, or `METISTRY_PRODUCT_DIR`. Uses
+1. **checkout** — the folder chosen in the app, or `METISTRY_PRODUCT_DIR`. Uses
    the checkout's own `runtime/node/bin/node` when it has one (the node
    `metistry up` renders into the launchd plists), else a `node` from
    `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`.
-3. **path** — a `metistry` in those same directories.
+2. **installed** — `~/Library/Application Support/Metistry/product/`, what
+   `metistry runtime install` wrote out of the bundle. **The writable one**, and
+   therefore the one `metistry update` can lay a new `releases/<version>/` into.
+3. **bundled** — `Metistry.app/Contents/Resources/metistry/`, needing both
+   `runtime/node/bin/node` and `…/packages/cli/dist/main.js`. Signed and
+   read-only, so it is a **seed**, not the install.
+4. **path** — a `metistry` in those same directories.
+
+Both 2 and 3 prefer the `current` symlink when there is one, because that is
+exactly how `metistry update` lays out a release install — `releases/<version>/`
+with `current` pointing at one and `runtime/` **beside** them, never inside one,
+so a version flip never orphans Node.
+
+**Why the checkout moved to the front.** It was third. The new second stage is
+something the *app* put there; a developer override is the only pointer in this
+app a person sets **by hand**, and an explicit choice has to beat one the app
+made for itself — otherwise a stale Application Support copy silently shadows the
+checkout somebody is actively working on, which is exactly what happened the
+first time this was ordered the other way round. Nothing changes for a shipped
+app: it has neither set, so it falls straight through to its own runtime.
 
 Every verb is invoked with an explicit `--product-dir`: a GUI process has no
 meaningful working directory to fall back on.
+
+**Where a bundled install's writable product dir lives — settled.** This was the
+scaffold's open question: `Contents/Resources/metistry/` is inside a signed
+bundle and cannot be written to, but `metistry update` in release mode has to
+write `releases/<version>/`, flip `current`, and unpack a new `runtime/`. The
+answer is the first of the two options the plan set out — **the bundle is a seed,
+copied once to `~/Library/Application Support/Metistry/product`** — which is also
+what the plan's own "Two channels, both signed" paragraph already read as.
+Application Support rather than the instance directory because the product is
+*code*: one copy serves every instance, and the plan's "what lives where" table
+already puts `releases/`, `runtime/` and `current` in the install dir.
+
+**The copy is a CLI verb, not something the app does.** Wizard step 1 runs
+`metistry runtime install --from <bundle> --to <dir>` and re-resolves when it
+succeeds. An app that laid out a release install itself would be a second
+implementation of `metistry update`'s release mode, which is the one thing this
+design forbids. Until the copy exists the app runs happily out of the seed and
+step 1 says what is left to do and why — a read-only runtime is not a fault.
 
 ## Signing locally
 
@@ -387,6 +620,26 @@ blob nobody remembers is the kind of placeholder that ships forever. Replacing
 it means saving a real 1024pt master and pointing `build-app.sh` at it instead.
 
 ## Open, and worth settling before launch
+
+**Whether native passkeys are worth a provisioned build.** Measured above: they
+are unreachable from a Developer ID DMG whatever the origin is, because
+`ASAuthorization` wants an application identifier and that needs an embedded
+provisioning profile. Getting one is a build step, not a channel change: Apple
+issues Developer ID provisioning profiles (App ID + Associated Domains,
+embedded as `Contents/embedded.provisionprofile`, signed with the
+application-identifier and associated-domains entitlements) — and it would
+*still* need a publicly resolvable HTTPS origin on 443 serving an AASA, which a
+loopback install does not have and a tailnet install has only through a
+gateway. The console's
+enrolment-code flow works today on every install, on this Mac and on the phone.
+Worth deciding deliberately rather than drifting into.
+
+**Whether the console should accept an array of expected origins.** One line in
+`apps/console/src/webauthn.ts` (`@simplewebauthn/server` v13 supports it) would
+let a native ceremony match a ported origin, and would turn today's opaque
+HTTP 500 on a mismatch into a real answer. It is a console change, so it is not
+in this PR — but it is half of what a provisioned build would need, and the
+error-shape half is worth doing on its own.
 
 **~~Where a bundled install's writable product dir lives.~~ Settled
 2026-09-10: the bundle is a seed.** The app runs `metistry runtime install

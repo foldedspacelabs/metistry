@@ -154,7 +154,7 @@ public struct WizardView: View {
         case .secrets: secretsStep(p)
         case .services: servicesStep(p)
         case .door:
-            PasskeyStepView(model: steps.passkey)
+            PasskeyStepView(steps: steps)
                 .task(id: consoleURL) { steps.passkey.adopt(consoleURL: consoleURL) }
         case .claude:
             ClaudeStepView(model: steps.claude)
@@ -493,24 +493,17 @@ public struct WizardView: View {
 
     /// A `WizardOption` list. Not a `Picker`: every option shows a pro and a con,
     /// and an unavailable one shows why — none of which fits in a picker row.
+    ///
+    /// The rendering itself is `WizardOptionList` (cli-cards.swift), because the
+    /// door step's own screen needs the same rows and two copies of a choice row
+    /// is how two screens start disagreeing about what a choice looks like.
     private func options<Value: Hashable & Sendable>(
         _ options: [WizardOption<Value>],
         selection: Value,
         _ p: Palette,
         choose: @escaping (Value) -> Void
     ) -> some View {
-        VStack(alignment: .leading, spacing: MetistrySpace.s2) {
-            ForEach(options) { option in
-                choiceRow(
-                    title: option.title,
-                    detail: option.unavailable ?? "\(option.pro)\n\(option.con)",
-                    selected: option.value == selection,
-                    enabled: option.isAvailable,
-                    p: p
-                ) { choose(option.value) }
-            }
-        }
-        .metistryCard(p)
+        WizardOptionList(options, selection: selection, choose: choose)
     }
 
     private func choiceRow(
@@ -521,24 +514,7 @@ public struct WizardView: View {
         p: Palette,
         choose: @escaping () -> Void
     ) -> some View {
-        Button(action: choose) {
-            HStack(alignment: .top, spacing: MetistrySpace.s3) {
-                Image(systemName: selected ? "largecircle.fill.circle" : "circle")
-                    .foregroundStyle(p[enabled ? (selected ? .accent : .textTertiary) : .absent])
-                VStack(alignment: .leading, spacing: MetistrySpace.s1) {
-                    Text(title).metistryText(.callout, p, enabled ? .textPrimary : .absent)
-                    Text(detail)
-                        .metistryText(.caption1, p, enabled ? .textSecondary : .absent)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(.vertical, MetistrySpace.s1)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(!enabled)
-        .accessibilityAddTraits(selected ? [.isSelected] : [])
+        ChoiceRow(title: title, detail: detail, selected: selected, enabled: enabled, choose: choose)
     }
 
     private func folderRow(

@@ -13,6 +13,7 @@ import SwiftUI
 public struct MenuBarContent: View {
     private let model: MenuBarModel
     private let updates: UpdateStatus
+    private let signIn: ConsoleSignInModel
     private let openWindow: () -> Void
     private let openLog: (String) -> Void
     private let onQuit: () -> Void
@@ -20,16 +21,24 @@ public struct MenuBarContent: View {
     public init(
         model: MenuBarModel,
         updates: UpdateStatus,
+        signIn: ConsoleSignInModel,
         openWindow: @escaping () -> Void,
         openLog: @escaping (String) -> Void,
         onQuit: @escaping () -> Void
     ) {
         self.model = model
         self.updates = updates
+        self.signIn = signIn
         self.openWindow = openWindow
         self.openLog = openLog
         self.onQuit = onQuit
     }
+
+    /// The component whose row carries the sign-in dot. The console is the only
+    /// thing in the install this app authenticates TO, so it is the only row
+    /// where "and it takes me as the owner" is a second, separate fact worth a
+    /// second, separate dot.
+    public static let signInComponent = "console"
 
     public var body: some View {
         // The summary answers before the menu is read — and it carries the
@@ -97,10 +106,18 @@ public struct MenuBarContent: View {
     @ViewBuilder
     private func componentMenu(_ component: ComponentControl) -> some View {
         let row = component.row
-        Menu("\(dotPrefix(row.status)) \(row.name)") {
+        let isConsole = component.name == Self.signInComponent
+        Menu("\(dotPrefix(row.status)) \(row.name)\(isConsole ? signInSuffix : "")") {
             // The probe or the remediation, as a disabled item: the reason the
             // row is the colour it is, without leaving the menu.
             Text(row.remediation ?? row.probe)
+            // And, on the console row only, the second fact: whether it takes
+            // this Mac as the owner. A service that is up and a service that
+            // knows who you are are different questions, so they are different
+            // dots rather than one blended verdict.
+            if isConsole {
+                Text(signIn.headline)
+            }
             if component.canControl {
                 Divider()
                 ForEach(MenuBarModel.Lifecycle.allCases, id: \.rawValue) { lifecycle in
@@ -116,6 +133,14 @@ public struct MenuBarContent: View {
                 Text("nothing to start or stop — this row is a check, not a process")
             }
         }
+    }
+
+    /// The sign-in dot, appended to the console row's label. Empty while the
+    /// answer is not known — a menu that has not asked yet must not show a tick
+    /// it has not earned (design-system P5).
+    private var signInSuffix: String {
+        guard let status = signIn.status else { return "" }
+        return "  \(dotPrefix(status))"
     }
 
     /// A text dot, because a `MenuBarExtra` menu renders `Text` and `Button`

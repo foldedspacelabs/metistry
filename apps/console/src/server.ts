@@ -1,11 +1,18 @@
 // The console API (§4.2). Every request authenticates (invariant 8); two
 // credential classes, structurally distinct (CRIT-7): owner (passkey
-// sessions + host-minted owner tokens) and per-agent bearer tokens
-// (agents.ts). An agent token works on the agent surface only — /capture
-// and the mcp-brain mount at /mcp — and is a uniform 403 everywhere else. Management
-// endpoints require a passkey SESSION specifically: the capture Shortcut's
-// owner token cannot manage devices or agents (least privilege inside the
-// owner class).
+// sessions, the LOCAL owner token, host-minted owner tokens) and per-agent
+// bearer tokens (agents.ts). An agent token works on the agent surface
+// only — /capture and the mcp-brain mount at /mcp — and is a uniform 403
+// everywhere else.
+//
+// Inside the owner class there is one principal, `user`, and two ways to
+// prove you are it: a passkey session (any client, anywhere) and
+// METISTRY_OWNER_TOKEN presented over a connection from THIS machine — the
+// Mac app and the CLI, which are the same package on the same filesystem
+// (docs/ops/auth.md, local-owner.ts). `isUser()` below is the single
+// predicate both take, so the two cannot drift apart. A host-minted owner
+// token from the `owner_tokens` table (the capture Shortcut) is NOT that
+// principal: it stays capture-only, from any address, exactly as before.
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
@@ -24,6 +31,7 @@ import * as agents from "./agents.js";
 import type { SessionPolicy } from "./session-policy.js";
 import { parseCookies, readBody, readJson, sendError, sendJson, sessionCookie } from "./http-util.js";
 import * as wa from "./webauthn.js";
+import { checkLocalOwner, type LocalOwnerConfig } from "./local-owner.js";
 import { serveStatic } from "./static.js";
 import { route as routeMessage, type Rules } from "./router.js";
 import { sendToSession, storeSubscription, type PushConfig } from "./push.js";
@@ -37,6 +45,10 @@ const require_ = createRequire(import.meta.url);
 
 export interface ConsoleConfig {
   origin: string; // canonical HTTPS origin (§4.2)
+  /** Every origin the passkey ceremonies accept, raw (METISTRY_ORIGIN, comma-separated). Absent = `origin` alone. */
+  origins?: string | undefined;
+  /** METISTRY_OWNER_TOKEN + the peer addresses that count as this machine (local-owner.ts). Absent = no local owner door at all. */
+  localOwner?: LocalOwnerConfig | undefined;
   inboxDir: string;
   policy: SessionPolicy;
   secureCookies: boolean;
@@ -62,9 +74,22 @@ export interface ConsoleConfig {
 
 type Auth =
   | { kind: "session"; sessionId: number }
-  | { kind: "owner_token" }
+  | { kind: "local_owner" } // METISTRY_OWNER_TOKEN over a connection from this machine
+  | { kind: "owner_token" } // an `owner_tokens` row (the capture Shortcut): capture-only, any address
   | { kind: "agent"; agent: agents.AgentPrincipal }
   | null;
+
+/**
+ * The `user` principal: the person, however they proved it. Everything a
+ * passkey session may do, the local owner token may do — that is the whole
+ * point of it — so this predicate, never a `kind === "session"` comparison,
+ * is what gates the owner surface. The two exceptions are the endpoints
+ * that act on a device SESSION ROW (push, logout): those need a session id,
+ * and say so where they stand.
+ */
+function isUser(auth: Auth): boolean {
+  return auth?.kind === "session" || auth?.kind === "local_owner";
+}
 
 // One shape for every per-agent verb so the management gate and the handler
 // cannot drift apart. Ids are slugs; anything else falls through to 404.
@@ -78,7 +103,7 @@ const DISPATCH_ROUTE = /^POST \/api\/tasks\/(\d{1,12})\/dispatch$/;
 const FEEDBACK_ROUTE = /^(POST|DELETE) \/api\/messages\/(\d{1,12})\/feedback$/;
 
 export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Server {
-  const rp = wa.rpFromOrigin(cfg.origin);
+  const rp = wa.rpFromOrigin(cfg.origins ?? cfg.origin);
   const challenges = new wa.ChallengeStore();
   const tasks = new TasksService(db);
   // artifacts (§4.21): one service, adapted twice — the routes below for the user's session, the mcp-brain tools for agents
@@ -105,6 +130,15 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     if (cookie) {
       const s = await store.checkSession(db, cookie, cfg.policy);
       if (s) return { kind: "session", sessionId: s.id };
+    }
+    // The local owner token, before the database: it is a value in this
+    // process's environment, so it costs no query, and its refusal from a
+    // non-local address must be recorded even though the caller is told
+    // nothing (the response below is the same 401 an unknown token gets).
+    const local = checkLocalOwner(req, cfg.localOwner);
+    if (local.verdict === "ok") return { kind: "local_owner" };
+    if (local.verdict === "remote") {
+      await audit("auth", "owner_token_remote", false, { remote: local.peer, reason: "the local owner token is loopback-only" });
     }
     const m = /^Bearer\s+(\S+)$/.exec(req.headers.authorization ?? "");
     if (m?.[1] && (await store.checkOwnerToken(db, m[1]))) return { kind: "owner_token" };
@@ -159,7 +193,17 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       const body = (await readJson(req)) as { code?: string; label?: string; response?: unknown };
       const challenge = body.code ? challenges.take(`enroll:${body.code}`) : null;
       if (!body.code || !challenge) return sendError(res, "unauthenticated");
-      const cred = await wa.verifyRegistration(rp, body.response, challenge);
+      let cred: Awaited<ReturnType<typeof wa.verifyRegistration>>;
+      try {
+        cred = await wa.verifyRegistration(rp, body.response, challenge);
+      } catch (err) {
+        // An origin mismatch is a misconfigured install, not a broken
+        // console: 401 with the reason, never the 500 the library's throw
+        // used to become.
+        if (!(err instanceof wa.WebAuthnError)) throw err;
+        await audit("auth", "enroll", false, { refused: err.reason });
+        return sendJson(res, 401, errorEnvelope("unauthenticated", err.reason));
+      }
       if (!cred || !(await store.consumeEnrollmentCode(db, body.code))) return sendError(res, "unauthenticated");
       await store.storePasskey(db, {
         id: cred.id,
@@ -189,7 +233,14 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       if (!challenge || !credId) return sendError(res, "unauthenticated");
       const passkey = await store.getPasskey(db, credId);
       if (!passkey) return sendError(res, "unauthenticated"); // uniform: no existence leak
-      const v = await wa.verifyAuthentication(rp, body.response, challenge, passkey);
+      let v: Awaited<ReturnType<typeof wa.verifyAuthentication>>;
+      try {
+        v = await wa.verifyAuthentication(rp, body.response, challenge, passkey);
+      } catch (err) {
+        if (!(err instanceof wa.WebAuthnError)) throw err;
+        await audit("auth", "login", false, { refused: err.reason });
+        return sendJson(res, 401, errorEnvelope("unauthenticated", err.reason));
+      }
       if (!v) return sendError(res, "unauthenticated");
       await store.touchPasskey(db, credId, v.newCounter);
       const token = await store.issueSession(db, credId, cfg.policy);
@@ -238,6 +289,22 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
 
     // ----- agent tokens stop here: uniform 403 on everything else, never 404 -----
     if (auth.kind === "agent") return sendError(res, "forbidden");
+
+    // Who the console thinks you are. The Mac app calls this to render
+    // "signed in as owner" without a passkey ceremony; it is also what
+    // `metistry console whoami` and `metistry doctor` read. It says nothing
+    // an authenticated caller does not already know about itself.
+    if (key === "GET /api/whoami") {
+      const via = auth.kind === "session" ? "passkey_session" : auth.kind === "local_owner" ? "local_owner_token" : "owner_token";
+      return sendJson(res, 200, {
+        principal: isUser(auth) ? "user" : "owner_token",
+        via,
+        management: isUser(auth),
+        ...(auth.kind === "session" ? { session_id: auth.sessionId } : {}),
+        origin: cfg.origin,
+        as_of: new Date().toISOString(),
+      });
+    }
 
     if (key === "POST /message") {
       // `tier` is the composer's picker (a tier name from the instance's
@@ -393,9 +460,9 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       return sendJson(res, 200, { checks, as_of: new Date().toISOString() });
     }
 
-    // ----- compute targets (§4.18): passkey session ONLY — dispatch is outbound -----
+    // ----- compute targets (§4.18): the `user` principal ONLY — dispatch is outbound -----
     if (key === "GET /api/targets" || DISPATCH_ROUTE.test(key)) {
-      if (auth.kind !== "session") return sendError(res, "forbidden");
+      if (!isUser(auth)) return sendError(res, "forbidden");
       if (key === "GET /api/targets") {
         return sendJson(res, 200, { targets: cfg.targets ? await cfg.targets.describe() : [], as_of: new Date().toISOString() });
       }
@@ -415,8 +482,8 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       });
     }
 
-    // ----- management: passkey session ONLY (owner tokens excluded) -----
-    if (auth.kind !== "session") {
+    // ----- management: the `user` principal ONLY (capture owner tokens excluded) -----
+    if (!isUser(auth)) {
       if (
         key === "GET /api/devices" ||
         /^POST \/api\/devices\/\d+\/revoke$/.test(key) ||
@@ -603,6 +670,9 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     }
 
     if (key === "POST /auth/logout") {
+      // Acts on the caller's own session ROW, so it needs one. The local
+      // owner token has no session to end — its lifetime is the secret's.
+      if (auth.kind !== "session") return sendError(res, "forbidden");
       await store.revokeSession(db, auth.sessionId);
       return sendJson(res, 200, { ok: true });
     }

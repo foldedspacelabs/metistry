@@ -29,13 +29,12 @@ describe("metistry up", () => {
     expect(r.code).toBe(0);
     expect(r.source).toBe("git");
     const LA = "/h/Library/LaunchAgents";
-    const job = (label: string) => [
-      `write ${LA}/${label}.plist  (from ops/launchd/${label}.plist, __REPO__=${P}, __NODE__=${NODE}, __ENV_FILE__=${join(P, ".env")})`,
-      `launchctl bootout gui/501/${label}`,
-      `launchctl bootstrap gui/501 ${LA}/${label}.plist`,
-      `launchctl kickstart -k gui/501/${label}`,
-    ];
-    expect(r.commands).toEqual([`(cd ${P} && docker compose up -d --build)`, ...retired("/h"), ...JOBS.flatMap(job), "metistry doctor"]);
+    // every plist is written before any of them is bootstrapped — the TCC
+    // pin (tcc-pin.ts) runs in between, on whatever `up` just wrote, and
+    // before any of it is loaded by launchd
+    const write = (label: string) => `write ${LA}/${label}.plist  (from ops/launchd/${label}.plist, __REPO__=${P}, __NODE__=${NODE}, __ENV_FILE__=${join(P, ".env")})`;
+    const bootstrap = (label: string) => [`launchctl bootout gui/501/${label}`, `launchctl bootstrap gui/501 ${LA}/${label}.plist`, `launchctl kickstart -k gui/501/${label}`];
+    expect(r.commands).toEqual([`(cd ${P} && docker compose up -d --build)`, ...retired("/h"), ...JOBS.map(write), ...JOBS.flatMap(bootstrap), "metistry doctor"]);
     expect(lines.filter((l) => !l.startsWith("[dry-run]") && !l.startsWith("   "))).toEqual([]);
     expect(existsSync(`${LA}`)).toBe(false);
   });
@@ -105,7 +104,12 @@ describe("metistry up", () => {
   it("--no-compose and --no-launchd skip their phases", async () => {
     const P = await checkout();
     const a = await up({ ...base(P), exec: fakeExec(), out: () => {}, dryRun: true, home: "/h", compose: false });
-    expect(a.commands).toEqual([...retired("/h"), ...JOBS.flatMap((l) => [expect.stringContaining(`write /h/Library/LaunchAgents/${l}.plist`), `launchctl bootout gui/501/${l}`, `launchctl bootstrap gui/501 /h/Library/LaunchAgents/${l}.plist`, `launchctl kickstart -k gui/501/${l}`]), "metistry doctor"]);
+    expect(a.commands).toEqual([
+      ...retired("/h"),
+      ...JOBS.map((l) => expect.stringContaining(`write /h/Library/LaunchAgents/${l}.plist`)),
+      ...JOBS.flatMap((l) => [`launchctl bootout gui/501/${l}`, `launchctl bootstrap gui/501 /h/Library/LaunchAgents/${l}.plist`, `launchctl kickstart -k gui/501/${l}`]),
+      "metistry doctor",
+    ]);
     const b = await up({ ...base(P), exec: fakeExec(), out: () => {}, dryRun: true, home: "/h", launchd: false });
     expect(b.commands).toEqual([`(cd ${P} && docker compose up -d --build)`, "metistry doctor"]);
   });

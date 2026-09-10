@@ -24,7 +24,6 @@ import {
   stamp,
   TABLE_LIST_SQL,
   tableCountsSql,
-  TCC_HELPERS,
   tocEntryCount,
   type MigrateShapeOptions,
 } from "../src/migrate-shape.js";
@@ -473,80 +472,6 @@ describe("the restore is checked, not assumed", () => {
     // stopped, so `docker compose start console assistant` puts it all back
     expect(r.commands.some((c) => c.endsWith("stop db)"))).toBe(false);
     expect(r.commands.some((c) => c.includes("set-shape"))).toBe(false);
-  });
-});
-
-describe("the TCC helper bundles — a release install carries none", () => {
-  it("pins both bridge jobs at the signed bundles on the host, two different ways", async () => {
-    const { P } = await releaseTree();
-    const I = await instance({ release: true });
-    const bundles = TCC_HELPERS.map((h) => join(P, h.bundle, h.exe));
-    const lines: string[] = [];
-    const r = await run({ productDir: P, env: env(I), exec: liveCompose(), dryRun: true, exists: ready(P, bundles), out: (l) => lines.push(l) });
-    expect(r.code).toBe(0);
-    const text = r.commands.join("\n");
-    // the eventkit helper IS the job's root process (that is what the TCC
-    // grant attaches to), so its plist is re-rendered against the tree that
-    // actually holds the bundle
-    expect(text).toContain(
-      `write /h/Library/LaunchAgents/com.foldedspacelabs.metistry.calendar.plist  (from the plist up wrote, with ` +
-        `${join(P, "current", "packages", "mcp-eventkit", "helper", "ek-helper.app")} \u2192 ${join(P, "packages", "mcp-eventkit", "helper", "ek-helper.app")}`,
-    );
-    // apple-fm's node bridge spawns its helper from a path relative to its
-    // own dist/, so it gets the documented override variable instead — and
-    // under the supervisor it is a child, so the entry goes into the config
-    expect(text).toContain(`plus apple-fm's METISTRY_AFM_HELPER=${join(P, "packages", "mcp-apple-fm", "helper", "afm-helper.app", "Contents", "MacOS", "afm-helper")}`);
-    expect(text).toContain("launchctl kickstart -k gui/501/com.foldedspacelabs.metistry.calendar");
-    expect(text).toContain("launchctl kickstart -k gui/501/com.foldedspacelabs.metistry");
-    expect(lines.join("\n")).toMatch(/same bundle id \+ certificate chain = same designated requirement, so no re-grant/);
-  });
-
-  it("waits for the boots-out to finish before bootstrapping the pinned jobs", async () => {
-    // `bootout` is asynchronous: bootstrapping the same label straight after
-    // races launchd and fails `Bootstrap failed: 5: Input/output error`
-    // (#117's fourth defect — reproduced here once, by hand-rolling the three
-    // commands instead of reusing `up`'s sequence)
-    const { P } = await releaseTree();
-    const I = await instance({ release: true });
-    const bundles = TCC_HELPERS.map((h) => join(P, h.bundle, h.exe));
-    const exec = liveCompose();
-    const home = await mkdtemp(join(tmpdir(), "metistry-home-"));
-    const r = await run({ productDir: P, env: { ...env(I), HOME: home }, exec, home, exists: ready(P, bundles) });
-    expect(r.code).toBe(0);
-    // only the EventKit helper is an agent now; apple-fm is a supervisor child
-    for (const s of ["calendar"]) {
-      const label = `com.foldedspacelabs.metistry.${s}`;
-      const seq = exec.calls.filter((c) => c.cmd === "launchctl" && c.args.some((a) => a.endsWith(label) || a.endsWith(`${label}.plist`))).map(shown);
-      expect(seq).toEqual([
-        `launchctl bootout gui/501/${label}`,
-        `launchctl print gui/501/${label}`, // the wait — not a plan step, but it must happen
-        `launchctl bootstrap gui/501 ${home}/Library/LaunchAgents/${label}.plist`,
-        `launchctl kickstart -k gui/501/${label}`,
-      ]);
-    }
-  });
-
-  it("a missing helper is a note, not a failed migration — an install with no calendar bridge is healthy", async () => {
-    const { P } = await releaseTree();
-    const I = await instance({ release: true });
-    const lines: string[] = [];
-    // nothing built anywhere: neither the release nor the install root has one
-    const noBundles = (p: string) => (p.includes("-helper.app") ? false : ready(P)(p));
-    const r = await run({ productDir: P, env: env(I), exec: liveCompose(), dryRun: true, exists: noBundles, out: (l) => lines.push(l) });
-    expect(r.code).toBe(0);
-    expect(lines.join("\n")).toMatch(/no signed helper at .*ek-helper\.app/);
-    expect(lines.join("\n")).toMatch(/doctor reports the bridge absent until then/);
-    expect(r.commands.some((c) => c.includes("calendar.plist"))).toBe(false);
-  });
-
-  it("a checkout install, whose product tree DOES hold the bundles, is not pinned at all", async () => {
-    const P = await productTree();
-    const I = await instance();
-    const lines: string[] = [];
-    const r = await run({ productDir: P, env: env(I), exec: liveCompose(), dryRun: true, exists: ready(P), out: (l) => lines.push(l) });
-    expect(r.code).toBe(0);
-    expect(lines.join("\n")).toMatch(/ek-helper.*is in this release — no pin needed/);
-    expect(r.commands.some((c) => c.includes("calendar.plist"))).toBe(false);
   });
 });
 

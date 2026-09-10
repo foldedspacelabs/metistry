@@ -1108,7 +1108,14 @@ an orchestrator only beats a single model when the work genuinely exceeds one
 context window — on one dependent chain the coordinator's model alone at lower
 effort wins every time — so the skill's third step is a gate that can conclude
 "do it yourself at lower effort," and it is instructed to say so out loud. A
-fan-out skill that always fans out is a cost centre, not a router. The
+fan-out skill that always fans out is a cost centre, not a router. It also
+calls the context boundary — the end of a phase is the cheapest moment to shed
+a transcript and the most expensive to keep it — and recommends *which* of
+compact, clear, or a fresh session, rather than reaching for compaction by
+reflex: where the conclusions fit on a page, writing a handoff file and
+clearing beats compacting on fidelity and on tokens both, and a transcript
+whose bulk is failed attempts should never be compacted at all, because the
+summary carries the failures forward faithfully and at length. The
 definitions are prompts like any other, so CI's `prompt-lint` now scans
 `.claude/` too, and `ops/scripts/install-claude-assets.sh` symlinks them into
 `~/.claude` so every session on the machine gets them, not just this repo's.

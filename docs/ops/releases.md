@@ -16,7 +16,10 @@ GitHub Releases is the distribution channel.
 Changesets in **fixed mode**: every publishable
 `@foldedspacelabs/metistry-*` package and every private `@metistry-apps/*`
 app carries the same number, and the root `package.json` version is the
-product's `VERSION`. That is what makes `metistry.lock`'s single
+product's `VERSION`. **`@metistry-apps/macos` is in that set** — its
+`package.json` holds a name and a version and no JavaScript at all, and exists
+so the Mac app is versioned with the product and gets its own `CHANGELOG.md`
+line rather than being invisible to `changeset version`. That is what makes `metistry.lock`'s single
 `product.version` a real coordinate — `0.2.0` names one runtime pack, one
 set of images and one set of npm packages.
 

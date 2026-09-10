@@ -957,3 +957,35 @@ your git, on your machine.
   from the menu bar, and everything you can configure is one place you already
   know how to find.** What the app still cannot do it says on screen, and each
   one now names the CLI change it is waiting on rather than being a shrug.
+- 2026-09-10 — **The Mac app's first run is finished, and the one thing it
+  still cannot do is a distribution problem, not a bug.** All seven steps act:
+  step 1 copies the bundle's read-only runtime into a writable product
+  directory (`metistry runtime install`), which settles the open question about
+  where a bundled install's `metistry update` writes — the bundle is a seed,
+  `~/Library/Application Support/Metistry/product` is the install; step 5
+  previews a deployment shape and then *sets* it (`metistry deployment
+  set-shape --yes`), with the confirm button dark until the preview has been on
+  screen; step 7 opens `claude setup-token` in a real terminal — it is
+  interactive and the app gives every child an empty stdin on purpose — and
+  then watches `metistry secrets list --json` for the token's *name* to become
+  set, so the app never handles the value. Settings gains a working **Start at
+  login** (`SMAppService.mainApp`: one call, one approval, no plist), and every
+  value it shows is now a verb rather than a file — `identity --json`,
+  `version --json`, `secrets list --json` replace a hand-rolled YAML reader, a
+  `metistry.lock` reader, a `package.json` read and a parser of `secrets
+  list`'s table that had already gone stale. The Instance pane can finally show
+  the **instance id** it previously had to report did not exist.
+  **Step 6, measured rather than assumed.** A native passkey enrolment
+  (`ASAuthorization`) was tested against `127.0.0.1`, `localhost` and a tailnet
+  name from a Developer ID build signed with this project's own identity. All
+  three give the same answer — `AuthorizationError 1004: the calling process
+  does not have an application identifier` — and hand-signing the entitlement
+  in gets the process killed at launch. So native passkeys are blocked by the
+  *distribution channel*, not by the local origin: an application identifier
+  comes from an embedded provisioning profile, and a Developer ID DMG from
+  GitHub Releases has none. The app says so on screen with the system's own
+  words, offers an "Ask macOS" button so the claim is checkable rather than
+  asserted, and falls back to the console's own enrolment code — open it here
+  or type it on the phone. The user-visible promise: **the app tells you what
+  it cannot do and why, in the words of whatever refused it, and always leaves
+  you a route that works.**

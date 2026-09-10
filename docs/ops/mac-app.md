@@ -267,7 +267,7 @@ The CLI half is done:
 | | |
 |---|---|
 | `apps/macos/resources/launchd/com.foldedspacelabs.metistry.plist` | the agent as the app registers it; `build-app.sh` copies it to `Contents/Library/LaunchAgents/`, where `SMAppService.agent(plistName:)` looks |
-| `apps/macos/resources/launchd/MetistrySupervisor` | its `BundleProgram`, copied to `Contents/MacOS/`. A plist inside a signed bundle is immutable and identical on every Mac, and `BundleProgram` is its only bundle-relative key — so this small script is what turns "the app's agent" into "this Mac's install" |
+| `apps/macos/resources/launchd/MetistrySupervisor` | its `BundleProgram`, copied to `Contents/Resources/` (not `MacOS/`, where codesign would demand a nested signature a script cannot carry). A plist inside a signed bundle is immutable and identical on every Mac, and `BundleProgram` is its only bundle-relative key — so this small script is what turns "the app's agent" into "this Mac's install" |
 | `~/Library/Application Support/Metistry/supervisor.env` | the three paths it reads: this install's node (as `Metistry`), the supervisor's entry point, and `<instance>/state/supervisor.json`. Written by `metistry up --register-via app`, shell-quoted (the app's own default location has a space in it) |
 | `metistry up --register-via app` | does everything a normal `up` does **except** install the supervisor's agent into `~/Library/LaunchAgents` — the app registers its bundled copy instead, so the install never has two |
 

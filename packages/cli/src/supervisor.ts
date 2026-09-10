@@ -90,7 +90,7 @@ export function serializeLauncherEnv(values: { bin: string; main: string; config
   };
   return [
     "# metistry up --register-via app wrote this. It is SOURCED by",
-    "# Metistry.app/Contents/MacOS/MetistrySupervisor — paths only, no secrets.",
+    "# Metistry.app/Contents/Resources/MetistrySupervisor — paths only, no secrets.",
     line("METISTRY_SUPERVISOR_BIN", values.bin),
     line("METISTRY_SUPERVISOR_MAIN", values.main),
     line("METISTRY_SUPERVISOR_CONFIG", values.config),

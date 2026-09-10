@@ -189,24 +189,54 @@ if [ -n "$identity" ]; then
   ents="$icon_tmp/metistry.entitlements"
   plutil -convert xml1 -o "$ents" "$app_src/resources/metistry.entitlements"
 
-  sign() { codesign --force --options runtime --timestamp --sign "$identity" "$@"; }
+  # Apple's timestamp server refuses a request now and then ("A timestamp was
+  # expected but was not found"); one flake must not cost a release build.
+  sign() {
+    local attempt
+    for attempt in 1 2 3; do
+      codesign --force --options runtime --timestamp --sign "$identity" "$@" && return 0
+      say "  codesign failed (attempt $attempt/3) — retrying in 5s"
+      sleep 5
+    done
+    return 1
+  }
 
-  # Anything Mach-O that came in with the runtime packs and is NOT already
-  # signed. build-runtime-deps.sh signs every Mach-O it produces, and the TCC
-  # helpers are signed by their own build scripts — those are left exactly as
-  # they are, because re-signing a helper without its --identifier would change
-  # the bundle ID TCC keys its grant on. This catches the leftovers
-  # (a prebuilt .node in node_modules, say) that notarization would reject.
+  # The team behind the identity, for the audit below: notarization wants
+  # every executable in the bundle under a Developer ID, with the hardened
+  # runtime, with a secure timestamp — and it refuses get-task-allow.
+  team=$(security find-identity -v -p codesigning 2>/dev/null | grep -F "$identity" | grep -oE '\([A-Z0-9]{10}\)' | head -1 | tr -d '()') || true
+  [ -n "$team" ] || die "could not read the team id behind identity $identity"
+
+  # Every Mach-O that came in with the runtime packs is re-signed under THIS
+  # identity. They arrive ad-hoc (Postgres, git, anything the runtime-deps job
+  # compiled — that job has no certificate, so the pack is signed here, at the
+  # one point that has one) or under someone else's Developer ID (Node, whose
+  # official signature also carries get-task-allow, which notarization
+  # rejects). Existing entitlements are carried over minus get-task-allow, so
+  # Node keeps its JIT and library-validation exceptions. Learned from the
+  # v0.4.0 rejection: the earlier rule only signed what had NO signature, and
+  # an ad-hoc signature counts as one.
   if [ -d "$resources_metistry" ]; then
+    nested_ents="$icon_tmp/nested.entitlements"
+    resigned=0; kept=0
     while IFS= read -r f; do
       case "$(file -b "$f")" in
         Mach-O*) ;;
         *) continue ;;
       esac
-      if codesign -v --strict "$f" >/dev/null 2>&1; then continue; fi
-      say "  signing unsigned nested binary: ${f#"$app/"}"
-      sign "$f"
-    done < <(find "$resources_metistry" -type f -perm -u+x)
+      info=$(codesign -dvv "$f" 2>&1 || true)
+      if printf '%s' "$info" | grep -q "^TeamIdentifier=$team\$" && printf '%s' "$info" | grep -q 'flags=.*runtime' && printf '%s' "$info" | grep -q '^Timestamp='; then
+        kept=$((kept + 1)); continue
+      fi
+      ent_args=()
+      if codesign -d --entitlements :- "$f" 2>/dev/null > "$nested_ents" && [ -s "$nested_ents" ] && plutil -lint -s "$nested_ents" >/dev/null 2>&1; then
+        plutil -remove 'com\.apple\.security\.get-task-allow' "$nested_ents" >/dev/null 2>&1 || true
+        if [ "$(plutil -p "$nested_ents" | grep -c '=>')" -gt 0 ]; then ent_args=(--entitlements "$nested_ents"); fi
+      fi
+      sign --preserve-metadata=identifier ${ent_args[@]+"${ent_args[@]}"} "$f"
+      resigned=$((resigned + 1))
+    done < <(find "$resources_metistry" -type f)
+    say "  runtime packs: re-signed $resigned Mach-O file(s), $kept already under team $team"
   fi
 
   # Sparkle, inside out. Its XPC services, updater app and Autoupdate helper are
@@ -223,7 +253,23 @@ if [ -n "$identity" ]; then
   # The app last: codesign seals Contents/Info.plist and everything nested.
   sign --entitlements "$ents" --identifier com.foldedspacelabs.metistry "$app"
   codesign --verify --strict --deep "$app"
-  say "signed and verified"
+
+  # The audit notarization would otherwise do for us, several minutes later:
+  # every Mach-O in the bundle under this team, hardened, timestamped, and
+  # without get-task-allow. A miss here is a build failure, not a mystery
+  # "status: Invalid".
+  bad=0
+  while IFS= read -r f; do
+    case "$(file -b "$f")" in Mach-O*) ;; *) continue ;; esac
+    info=$(codesign -dvv "$f" 2>&1 || true)
+    if ! printf '%s' "$info" | grep -q "^TeamIdentifier=$team\$" || ! printf '%s' "$info" | grep -q 'flags=.*runtime' || ! printf '%s' "$info" | grep -q '^Timestamp='; then
+      say "  NOT notarizable: ${f#"$app/"}"; bad=$((bad + 1))
+    elif codesign -d --entitlements :- "$f" 2>/dev/null | grep -q 'get-task-allow'; then
+      say "  NOT notarizable (get-task-allow): ${f#"$app/"}"; bad=$((bad + 1))
+    fi
+  done < <(find "$app" -type f)
+  [ "$bad" -eq 0 ] || die "$bad Mach-O file(s) would fail notarization (listed above)"
+  say "signed and verified: every Mach-O under team $team, hardened runtime, timestamped"
 else
   say "NO Developer ID identity — leaving the app unsigned."
   say "  Fine locally; notarization and distribution need one (docs/ops/apple-signing.md §2)."
@@ -250,7 +296,11 @@ if [ -n "$identity" ]; then
   # No --options runtime here: the hardened runtime is a property of an
   # executable, and a disk image has none. What matters is that the DMG carries
   # a timestamped Developer ID signature so notarization can staple to it.
-  codesign --force --timestamp --sign "$identity" "$dmg"
+  for attempt in 1 2 3; do
+    codesign --force --timestamp --sign "$identity" "$dmg" && break
+    [ "$attempt" -lt 3 ] || die "codesign failed for $dmg three times (Apple's timestamp server?)"
+    say "  codesign failed for the DMG (attempt $attempt/3) — retrying in 5s"; sleep 5
+  done
   codesign --verify --strict "$dmg"
 fi
 

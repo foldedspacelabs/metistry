@@ -121,9 +121,22 @@ codesign --force --options runtime --timestamp \
 
 Stripping happens **before** signing, because stripping invalidates a
 signature. Unset, signing is skipped with a notice and the build still
-succeeds — CI has no Developer ID yet, and the DMG job will
-(`docs/ops/apple-signing.md`). A `codesign` that actually fails is a build
-failure; a missing identity never is.
+succeeds. A `codesign` that actually fails is a build failure; a missing
+identity never is.
+
+**In CI the pack is deliberately unsigned.** The `runtime-deps` runner holds
+no certificate, so the pack on GitHub Releases carries Postgres and git
+ad-hoc and Node under the Node.js Foundation's Developer ID. The one place
+with a certificate is the `macos-app` job, and `ops/release/build-app.sh`
+re-signs **every** Mach-O it embeds under the FSL identity — hardened
+runtime, secure timestamp, existing entitlements carried over minus
+`get-task-allow` (Node's official signature has it; notarization refuses
+it) — then audits the whole bundle before producing the DMG. That is the
+lesson of v0.4.0's `status: Invalid`: the earlier rule only signed what had
+*no* signature, and ad-hoc counts as one. A pack consumed directly by
+`metistry up` (the launchd shape, no app) is unpacked by `tar`, which sets
+no quarantine attribute, so Gatekeeper never assesses it; signing it there
+is a nicety, not a requirement.
 
 ## Building it
 

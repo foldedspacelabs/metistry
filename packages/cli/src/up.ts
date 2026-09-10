@@ -472,7 +472,7 @@ export async function installSupervisorPlan(r: StepRunner, productDir: string, l
     if (!le.home) throw new StepFailed("--register-via app needs HOME — that is where the app's launcher looks for supervisor.env");
     const launcherEnv = supervisorLauncherEnvPath(le.home);
     await r.run("mkdir", ["-p", join(launcherEnv, "..")]);
-    await r.write(launcherEnv, serializeLauncherEnv({ bin, main: join(productDir, "apps", "watchdog", "dist", "main.js"), config: configPath }), "read by Metistry.app/Contents/MacOS/MetistrySupervisor");
+    await r.write(launcherEnv, serializeLauncherEnv({ bin, main: join(productDir, "apps", "watchdog", "dist", "main.js"), config: configPath }), "read by Metistry.app/Contents/Resources/MetistrySupervisor");
   }
 }
 

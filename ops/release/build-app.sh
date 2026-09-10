@@ -105,8 +105,13 @@ cp "$bin_dir/Metistry" "$contents/MacOS/Metistry"
 mkdir -p "$contents/Library/LaunchAgents"
 cp "$app_src/resources/launchd/com.foldedspacelabs.metistry.plist" "$contents/Library/LaunchAgents/com.foldedspacelabs.metistry.plist"
 plutil -lint "$contents/Library/LaunchAgents/com.foldedspacelabs.metistry.plist" >/dev/null || die "the bundled LaunchAgent plist did not lint"
-cp "$app_src/resources/launchd/metistry-supervisor" "$contents/MacOS/MetistrySupervisor"
-chmod 755 "$contents/MacOS/MetistrySupervisor"
+# Under Resources/, not MacOS/: codesign treats every file in Contents/MacOS as
+# nested code that must carry its own signature, and a shell script cannot
+# (v0.7.0's DMG job: "code object is not signed at all … In subcomponent:
+# Contents/MacOS/MetistrySupervisor"). A resource is sealed by hash instead,
+# and BundleProgram accepts any bundle-relative path.
+cp "$app_src/resources/launchd/metistry-supervisor" "$contents/Resources/MetistrySupervisor"
+chmod 755 "$contents/Resources/MetistrySupervisor"
 say "embedded Contents/Library/LaunchAgents/com.foldedspacelabs.metistry.plist"
 sed "s/__VERSION__/$version/g" "$app_src/resources/Info.plist" > "$contents/Info.plist"
 # Sealed into the signature, so it must be written before codesign runs.

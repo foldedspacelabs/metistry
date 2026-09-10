@@ -163,7 +163,7 @@ identifiers untouched so no install re-consents.
 
 **The remaining app change, precisely.** The bundle now carries
 `Contents/Library/LaunchAgents/com.foldedspacelabs.metistry.plist` and its
-`BundleProgram`, `Contents/MacOS/MetistrySupervisor`; `metistry up
+`BundleProgram`, `Contents/Resources/MetistrySupervisor`; `metistry up
 --register-via app` installs everything except that agent and writes
 `~/Library/Application Support/Metistry/supervisor.env` for it. What is left
 is in `apps/macos`:

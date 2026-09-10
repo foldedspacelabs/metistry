@@ -80,7 +80,7 @@ describe("the app's launcher file", () => {
     for (const v of ["METISTRY_SUPERVISOR_BIN", "METISTRY_SUPERVISOR_MAIN", "METISTRY_SUPERVISOR_CONFIG"]) expect(script).toContain(v);
     // and the plist the app registers names that script, bundle-relative
     const plist = await readFile(join(REPO, "apps", "macos", "resources", "launchd", "com.foldedspacelabs.metistry.plist"), "utf8");
-    expect(plist).toContain("<key>BundleProgram</key><string>Contents/MacOS/MetistrySupervisor</string>");
+    expect(plist).toContain("<key>BundleProgram</key><string>Contents/Resources/MetistrySupervisor</string>");
     expect(plist).toContain("<key>Label</key><string>com.foldedspacelabs.metistry</string>");
   });
 });

@@ -242,7 +242,9 @@ describe("doctor: the launchd shape", () => {
 
     const r = byName(report.rows);
     // every remediation is written for the shape the install actually has
-    expect(r.console?.remediation).toMatch(/launchctl kickstart -k gui\/\$\(id -u\)\/com\.foldedspacelabs\.metistry\.console/);
+    // the console is a CHILD of the supervisor under this shape — launchctl
+    // cannot address it, so the remediation is the verb that can
+    expect(r.console?.remediation).toMatch(/metistry restart console/);
     expect(r.console?.remediation).not.toMatch(/docker/);
     expect(r.y?.remediation).toMatch(/default http:\/\/127\.0\.0\.1:7902/);
   });

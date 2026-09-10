@@ -292,13 +292,14 @@ describe("metistry up, launchd shape, release mode", () => {
     // initdb came from the bundled tree, not from Homebrew
     expect(res.commands.some((c) => c.startsWith(join(P, RUNTIME_DIRNAME, "postgres", "bin", "initdb")))).toBe(true);
 
-    const db = await readFile(join(HOME, "Library", "LaunchAgents", "com.foldedspacelabs.metistry.db.plist"), "utf8");
-    expect(db).toContain(`<string>${join(P, RUNTIME_DIRNAME, "postgres", "bin")}/postgres</string>`);
-    const rec = await readFile(join(HOME, "Library", "LaunchAgents", "com.foldedspacelabs.metistry.reconciler.plist"), "utf8");
-    expect(rec).toContain(`<key>PATH</key><string>${join(P, RUNTIME_DIRNAME, "git", "bin")}:${LAUNCHD_BASE_PATH}</string>`);
-    // only the job that spawns git gets it
-    const watchdog = await readFile(join(HOME, "Library", "LaunchAgents", "com.foldedspacelabs.metistry.watchdog.plist"), "utf8");
-    expect(watchdog).not.toContain("<key>PATH</key>");
+    // db and the reconciler are the supervisor's children now: what they run
+    // is in its config, not in a plist each
+    const config = JSON.parse(await readFile(join(inst, "state", "supervisor.json"), "utf8"));
+    const child = (name: string) => config.children.find((c: { name: string }) => c.name === name);
+    expect(child("db").argv[0]).toBe(`${join(P, RUNTIME_DIRNAME, "postgres", "bin")}/postgres`);
+    expect(child("reconciler").env.PATH).toBe(`${join(P, RUNTIME_DIRNAME, "git", "bin")}:${LAUNCHD_BASE_PATH}`);
+    // only the job that spawns git gets it — the console keeps launchd's own
+    expect(child("console").env.PATH).toBe(LAUNCHD_BASE_PATH);
   });
 
   it("a checkout never downloads a runtime — `brew install` stays the remediation", async () => {

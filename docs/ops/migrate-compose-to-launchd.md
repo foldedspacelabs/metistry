@@ -303,13 +303,13 @@ helper two different ways:
 
 | | how the helper is found | what the migration does |
 |---|---|---|
-| `eventkit-helper` | the signed helper IS the job's root process (that is what the grant attaches to — PoC-1), so the path is in `ProgramArguments` | substitutes that one path back to the install root's bundle |
-| `apple-fm` | a node bridge that spawns its helper from a path relative to its own `dist/`, overridable by `METISTRY_AFM_HELPER` | adds that variable to the job's `EnvironmentVariables` |
+| `calendar` (the EventKit helper) | the signed helper IS the agent's root process (that is what the grant attaches to — PoC-1), so the path is in `ProgramArguments` | substitutes that one path back to the install root's bundle |
+| `apple-fm` | a node bridge that spawns its helper from a path relative to its own `dist/`, overridable by `METISTRY_AFM_HELPER` | adds that variable to its **child spec** in `<instance>/state/supervisor.json` and kickstarts the supervisor — under the supervisor that bridge has no plist of its own |
 
-Both **patch the plist `up` just wrote** rather than re-rendering it from
-the template — a re-render dropped this instance's namespaced ports during
-the rehearsal, and the scratch apple-fm bridge went looking for the
-default 7810, which is the production install's.
+Both **patch what `up` just wrote** — the plist, or the config — rather than
+re-rendering it from the template: a re-render dropped this instance's
+namespaced ports during the rehearsal, and the scratch apple-fm bridge went
+looking for the default 7810, which is the production install's.
 
 A bundle that is not there is a note, not a failure: an install with no
 calendar bridge is a healthy install, and doctor reports it `absent`.

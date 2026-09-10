@@ -72,6 +72,7 @@ describe("metistry up --dry-run, launchd shape", () => {
     expect(lines.some((l) => l.includes("shape: launchd"))).toBe(true);
 
     const LA = "/h/Library/LaunchAgents";
+    const SUP = "com.foldedspacelabs.metistry";
     expect(r.commands).toEqual([
       `mkdir -p ${I}/state/run`,
       `write ${I}/state/pg.pwfile  (from generated superuser password (deleted in the next step))`,
@@ -79,27 +80,30 @@ describe("metistry up --dry-run, launchd shape", () => {
       `/bin/rm -f ${I}/state/pg.pwfile`,
       `write ${I}/state/pg/postgresql.conf  (from metistry managed block: loopback listen + unix socket)`,
       `mkdir -p ${I}/state/assistant`,
-      // ops/launchd file-name order ("-" sorts before "." — eventkit-helper before eventkit)
-      ...[
-        "com.foldedspacelabs.metistry.apple-fm",
-        "com.foldedspacelabs.metistry.assistant",
-        "com.foldedspacelabs.metistry.console",
-        "com.foldedspacelabs.metistry.db",
-        "com.foldedspacelabs.metistry.eventkit-helper",
-        "com.foldedspacelabs.metistry.eventkit",
-        "com.foldedspacelabs.metistry.reconciler",
-        "com.foldedspacelabs.metistry.watchdog",
-      ]
-        .flatMap((label) => {
-          const secret = label.endsWith(".console") || label.endsWith(".assistant");
-          return [
-            expect.stringContaining(`write ${LA}/${label}.plist`),
-            ...(secret ? [`chmod 600 ${LA}/${label}.plist`] : []),
-            `launchctl bootout gui/501/${label}`,
-            `launchctl bootstrap gui/501 ${LA}/${label}.plist`,
-            `launchctl kickstart -k gui/501/${label}`,
-          ];
-        }),
+      // 1. the pre-supervisor agents go, once: every one of them is a child now
+      ...["db", "console", "assistant", "reconciler", "watchdog", "eventkit", "apple-fm", "eventkit-helper"].flatMap((s) => [
+        `launchctl bootout gui/501/${SUP}.${s}`,
+        `rm -f ${LA}/${SUP}.${s}.plist`,
+      ]),
+      // 2. the supervisor's plan: the `Metistry` symlink System Settings names
+      // the background item after, and the child list
+      `mkdir -p ${I}/state/bin`,
+      `ln -sfn ${NODE} ${I}/state/bin/Metistry`,
+      `mkdir -p ${I}/state/run`,
+      // apple-fm is absent on purpose: METISTRY_AFM_URL is unset, so this
+      // install has no Apple Intelligence bridge and nothing starts one
+      `write ${I}/state/supervisor.json  (from 5 child(ren): db, console, reconciler, assistant, eventkit)`,
+      `chmod 600 ${I}/state/supervisor.json`,
+      // 3. ONE agent for the core…
+      expect.stringContaining(`write ${LA}/${SUP}.plist`),
+      `launchctl bootout gui/501/${SUP}`,
+      `launchctl bootstrap gui/501 ${LA}/${SUP}.plist`,
+      `launchctl kickstart -k gui/501/${SUP}`,
+      // 4. …plus the TCC helper, which must be its own binary for the grant
+      expect.stringContaining(`write ${LA}/${SUP}.calendar.plist`),
+      `launchctl bootout gui/501/${SUP}.calendar`,
+      `launchctl bootstrap gui/501 ${LA}/${SUP}.calendar.plist`,
+      `launchctl kickstart -k gui/501/${SUP}.calendar`,
       `${PG}/pg_isready -h ${I}/state/run -p 5432 -U metistry -d metistry`,
       `${PG}/createdb -h ${I}/state/run -p 5432 -U metistry metistry`,
       "metistry doctor",
@@ -173,39 +177,65 @@ describe("the rendered plists", () => {
       doctorFn: okDoctor,
     });
     expect(r.code).toBe(0);
-    const read = (label: string) => readFile(join(home, "Library", "LaunchAgents", `com.foldedspacelabs.metistry.${label}.plist`), "utf8");
+    const read = (label: string) => readFile(join(home, "Library", "LaunchAgents", `com.foldedspacelabs.metistry${label ? `.${label}` : ""}.plist`), "utf8");
 
-    const console_ = await read("console");
+    // the core is ONE agent now: console/assistant/db have no plist of their
+    // own, and what they run lives in the supervisor's config
+    const config = JSON.parse(await readFile(join(I, "state", "supervisor.json"), "utf8"));
+    expect(config.label).toBe("com.foldedspacelabs.metistry");
+    expect(config.socket).toBe(join(I, "state", "run", "supervisor.sock"));
+    expect(config.token).toMatch(/^[0-9a-f]{64}$/);
+    expect(config.children.map((c: { name: string }) => c.name)).toEqual(["db", "console", "reconciler", "assistant", "eventkit"]);
+    const child = (name: string) => config.children.find((c: { name: string }) => c.name === name);
+
+    // ordered start: Postgres answers before the console starts, the console
+    // before everything after it
+    expect(child("db").ready).toEqual({ kind: "tcp", port: 5432 });
+    expect(child("console").ready).toEqual({ kind: "tcp", port: 8080 });
+    expect(child("reconciler").ready).toBeUndefined();
+
+    const console_ = JSON.stringify(child("console"));
     expect(console_).not.toMatch(/__[A-Z][A-Z0-9_]*__/);
-    expect(console_).toContain(`<string>${NODE}</string>`);
-    expect(console_).toContain(`<string>${P}/apps/console/dist/main.js</string>`);
+    expect(child("console").argv).toEqual([NODE, `${P}/apps/console/dist/main.js`]);
     // env by dict, never `sh -c` with an interpolated .env
-    expect(console_).not.toContain("/bin/sh");
-    expect(console_).toContain("<key>METISTRY_CONSOLE_HOST</key><string>127.0.0.1</string>");
-    expect(console_).toContain("<key>METISTRY_DB_HOST</key><string>127.0.0.1</string>");
-    expect(console_).toContain("<key>METISTRY_EK_URL</key><string>http://127.0.0.1:7811</string>");
-    expect(console_).toContain(`<key>METISTRY_INBOX_DIR</key><string>${I}/inbox</string>`);
+    expect(child("console").argv[0]).not.toBe("/bin/sh");
+    expect(child("console").env).toMatchObject({
+      METISTRY_CONSOLE_HOST: "127.0.0.1",
+      METISTRY_DB_HOST: "127.0.0.1",
+      METISTRY_EK_URL: "http://127.0.0.1:7811",
+      METISTRY_INBOX_DIR: `${I}/inbox`,
+    });
 
-    const assistant = await read("assistant");
-    expect(assistant).not.toMatch(/__[A-Z][A-Z0-9_]*__/);
-    expect(assistant).toContain("<string>/usr/bin/sandbox-exec</string>");
-    expect(assistant).toContain(`<string>${P}/ops/sandbox/assistant.sb</string>`);
-    expect(assistant).toContain("<string>CONSOLE_TCP=localhost:8080</string>");
+    const assistant = child("assistant");
+    expect(JSON.stringify(assistant)).not.toMatch(/__[A-Z][A-Z0-9_]*__/);
+    expect(assistant.argv[0]).toBe("/usr/bin/sandbox-exec");
+    expect(assistant.argv).toContain(`${P}/ops/sandbox/assistant.sb`);
+    expect(assistant.argv).toContain("CONSOLE_TCP=localhost:8080");
     // the sandbox's path parameters are REAL paths (/var/folders → /private/var/folders)
-    expect(assistant).toContain(`<string>STATE_DIR=${realPathish(join(I, "state", "assistant"))}</string>`);
-    expect(assistant).toContain(`<string>PRODUCT_DIR=${realPathish(P)}</string>`);
-    expect(assistant).toContain(`<key>HOME</key><string>${I}/state/assistant</string>`);
-    expect(assistant).toContain("<key>CLAUDE_CODE_OAUTH_TOKEN</key><string>oauth</string>");
-    // the console's outbound credentials are not in the engine's environment
-    expect(assistant).not.toContain("METISTRY_ORIGIN");
+    expect(assistant.argv).toContain(`STATE_DIR=${realPathish(join(I, "state", "assistant"))}`);
+    expect(assistant.argv).toContain(`PRODUCT_DIR=${realPathish(P)}`);
+    expect(assistant.env.HOME).toBe(`${I}/state/assistant`);
+    expect(assistant.env.CLAUDE_CODE_OAUTH_TOKEN).toBe("oauth");
+    // the engine's environment is still an ALLOWLIST, and a child's
+    // environment is the spec's whole: the supervisor's own never leaks in
+    expect(assistant.env.METISTRY_ORIGIN).toBeUndefined();
+    expect(Object.keys(assistant.env).sort()).toEqual(
+      ["CLAUDE_CODE_OAUTH_TOKEN", "HOME", "METISTRY_ASSISTANT_TOKEN", "METISTRY_BRAIN_URL", "METISTRY_DB_HOST", "METISTRY_DB_PASSWORD", "METISTRY_DB_PORT", "PATH", "TMPDIR"].sort(),
+    );
 
-    const db = await read("db");
-    expect(db).toContain(`<string>${PG}/postgres</string>`);
-    expect(db).toContain(`<string>${I}/state/pg</string>`);
+    expect(child("db").argv).toEqual([`${PG}/postgres`, "-D", `${I}/state/pg`]);
 
-    // the host jobs that exist in BOTH shapes still source a dotenv file with
+    // the jobs that exist in BOTH shapes still source a dotenv file with
     // sh -c — but the INSTANCE's, not the checkout's (self-contained instances)
-    expect(await read("watchdog")).toContain(`set -a; . '${I}/state/.env'; set +a; exec '${NODE}' '${P}/apps/watchdog/dist/main.js'`);
+    expect(child("reconciler").argv.join(" ")).toContain(`set -a; . '${I}/state/.env'; set +a; exec '${NODE}' '${P}/apps/reconciler/dist/main.js'`);
+    expect(child("reconciler").log).toBe("/tmp/metistry-reconciler.log");
+
+    // the supervisor's own plist: 0600, because its dict carries the db password
+    const sup = await read("");
+    expect(sup).not.toMatch(/__[A-Z][A-Z0-9_]*__/);
+    expect(sup).toContain(`<string>${I}/state/bin/Metistry</string>`);
+    expect(sup).toContain(`<string>${P}/apps/watchdog/dist/main.js</string>`);
+    expect(sup).toContain(`<string>${I}/state/supervisor.json</string>`);
   });
 
   it("under the compose shape the shaped plists are not installed at all", async () => {
@@ -270,11 +300,14 @@ describe("the node every launchd job execs", () => {
     });
     expect(r.code).toBe(0);
     expect(lines.some((l) => l.includes(`node: ${bundled} (bundled runtime/node/bin/node)`))).toBe(true);
-    const assistant = await readFile(join(home, "Library", "LaunchAgents", "com.foldedspacelabs.metistry.assistant.plist"), "utf8");
-    expect(assistant).toContain(`<string>${bundled}</string>`);
+    const config = JSON.parse(await readFile(join(I, "state", "supervisor.json"), "utf8"));
+    const assistant = config.children.find((c: { name: string }) => c.name === "assistant");
+    expect(assistant.argv).toContain(bundled);
     // the sandbox may exec node — THIS node. A Homebrew prefix in the profile
     // would grant /opt/homebrew and deny the runtime the jobs actually use.
-    expect(assistant).toContain(`<string>NODE_PREFIX=${realPathish(join(P, "runtime", "node"))}</string>`);
-    expect(assistant).not.toContain("/opt/homebrew");
+    expect(assistant.argv).toContain(`NODE_PREFIX=${realPathish(join(P, "runtime", "node"))}`);
+    expect(JSON.stringify(assistant)).not.toContain("/opt/homebrew");
+    // and the supervisor's own program is a symlink to it, named `Metistry`
+    expect(await readFile(join(home, "Library", "LaunchAgents", "com.foldedspacelabs.metistry.plist"), "utf8")).toContain(`<string>${I}/state/bin/Metistry</string>`);
   });
 });

@@ -64,6 +64,27 @@ async function instance(opts: { release?: boolean } = {}): Promise<string> {
   const I = await mkdtemp(join(tmpdir(), "metistry-inst-"));
   await mkdir(join(I, "state"), { recursive: true });
   await writeFile(join(I, "state", ".env"), "METISTRY_ORIGIN=https://studio.ts.net\n");
+  // what `up` leaves behind under the launchd shape: the supervisor's child
+  // list. The apple-fm bridge is a CHILD now, so its TCC-helper override goes
+  // here rather than into a plist of its own.
+  await writeFile(
+    join(I, "state", "supervisor.json"),
+    JSON.stringify(
+      {
+        schema: 1,
+        label: "com.foldedspacelabs.metistry",
+        socket: join(I, "state", "run", "supervisor.sock"),
+        token: "0".repeat(64),
+        env: {},
+        children: [
+          { name: "console", argv: ["/n", "/c.js"], log: "/tmp/metistry-console.log" },
+          { name: "apple-fm", argv: ["/n", "/a.js"], log: "/tmp/metistry-apple-fm.log" },
+        ],
+      },
+      null,
+      2,
+    ),
+  );
   if (opts.release) {
     await writeFile(
       join(I, "metistry.lock"),
@@ -77,6 +98,10 @@ const env = (I: string): NodeJS.ProcessEnv => ({
   METISTRY_INSTANCE_DIR: I,
   METISTRY_DB_PASSWORD: "pw",
   METISTRY_ORIGIN: "https://studio.ts.net",
+  // both bridges configured: without a URL an install HAS no calendar bridge
+  // and neither its helper agent nor its child is installed at all
+  METISTRY_EK_URL: "http://127.0.0.1:7811",
+  METISTRY_AFM_URL: "http://127.0.0.1:7810",
   HOME: "/h",
   TMPDIR: "/tmp",
 });
@@ -109,7 +134,10 @@ const COUNTS_SQL = tableCountsSql(["runs", "work", "schema_migrations"]);
 const COUNTS_FRAGMENT = 'count(*) FROM "runs"';
 
 /** The three SHAPE_SERVICES labels, in the fixed order the migration always uses. */
-const LABELS = ["db", "console", "assistant"].map((s) => `com.foldedspacelabs.metistry.${s}`);
+// under the supervisor the launchd shape is ONE label — db, console and
+// assistant are its children (a product tree from before the supervisor
+// still stops three; see shapeServices())
+const LABELS = ["com.foldedspacelabs.metistry"];
 
 function run(overrides: Partial<MigrateShapeOptions> & { productDir: string; env: NodeJS.ProcessEnv }): Promise<ReturnType<typeof migrateShape>> {
   return migrateShape({
@@ -207,8 +235,9 @@ describe("metistry migrate-shape launchd --dry-run", () => {
       "up(launchd)",
       formatCommand(`${PG}/pg_restore`, [...conn, "--no-owner", "--no-privileges", "--exit-on-error", dump]),
       `${DRY_RUN_COUNTS}, against the restored database — compared with the counts taken beside the dump, and a table that lost rows fails the migration`,
-      "launchctl kickstart -k gui/501/com.foldedspacelabs.metistry.console",
-      "launchctl kickstart -k gui/501/com.foldedspacelabs.metistry.assistant",
+      // the console and the assistant are the supervisor's children: one
+      // kickstart brings both back on the restored database
+      "launchctl kickstart -k gui/501/com.foldedspacelabs.metistry",
       // doctor's verdict must not race a job kickstarted a moment ago
       "wait for console to answer — doctor's verdict must not be a race with a job kickstarted a moment ago",
       "metistry doctor",
@@ -372,7 +401,8 @@ describe("refusals — every one of them while the old shape is still up", () =>
     expect(docker.length).toBeGreaterThan(0);
     for (const c of docker) expect(c).toContain("docker compose -p metistry-rehearsal");
     // and the launchd side stays in the instance's own namespace
-    expect(r.commands).toContain("launchctl kickstart -k gui/501/com.foldedspacelabs.metistry.e5dbfa9c.console");
+    // the supervisor takes the suffix instead of a service component
+    expect(r.commands).toContain("launchctl kickstart -k gui/501/com.foldedspacelabs.metistry.e5dbfa9c");
   });
 
   it("refuses when there is no running db container to dump from", async () => {
@@ -459,14 +489,15 @@ describe("the TCC helper bundles — a release install carries none", () => {
     // grant attaches to), so its plist is re-rendered against the tree that
     // actually holds the bundle
     expect(text).toContain(
-      `write /h/Library/LaunchAgents/com.foldedspacelabs.metistry.eventkit-helper.plist  (from the plist up wrote, with ` +
+      `write /h/Library/LaunchAgents/com.foldedspacelabs.metistry.calendar.plist  (from the plist up wrote, with ` +
         `${join(P, "current", "packages", "mcp-eventkit", "helper", "ek-helper.app")} \u2192 ${join(P, "packages", "mcp-eventkit", "helper", "ek-helper.app")}`,
     );
     // apple-fm's node bridge spawns its helper from a path relative to its
-    // own dist/, so it gets the documented override variable instead
-    expect(text).toContain(`plus METISTRY_AFM_HELPER=${join(P, "packages", "mcp-apple-fm", "helper", "afm-helper.app", "Contents", "MacOS", "afm-helper")}`);
-    expect(text).toContain("launchctl kickstart -k gui/501/com.foldedspacelabs.metistry.eventkit-helper");
-    expect(text).toContain("launchctl kickstart -k gui/501/com.foldedspacelabs.metistry.apple-fm");
+    // own dist/, so it gets the documented override variable instead — and
+    // under the supervisor it is a child, so the entry goes into the config
+    expect(text).toContain(`plus apple-fm's METISTRY_AFM_HELPER=${join(P, "packages", "mcp-apple-fm", "helper", "afm-helper.app", "Contents", "MacOS", "afm-helper")}`);
+    expect(text).toContain("launchctl kickstart -k gui/501/com.foldedspacelabs.metistry.calendar");
+    expect(text).toContain("launchctl kickstart -k gui/501/com.foldedspacelabs.metistry");
     expect(lines.join("\n")).toMatch(/same bundle id \+ certificate chain = same designated requirement, so no re-grant/);
   });
 
@@ -482,7 +513,8 @@ describe("the TCC helper bundles — a release install carries none", () => {
     const home = await mkdtemp(join(tmpdir(), "metistry-home-"));
     const r = await run({ productDir: P, env: { ...env(I), HOME: home }, exec, home, exists: ready(P, bundles) });
     expect(r.code).toBe(0);
-    for (const s of ["eventkit-helper", "apple-fm"]) {
+    // only the EventKit helper is an agent now; apple-fm is a supervisor child
+    for (const s of ["calendar"]) {
       const label = `com.foldedspacelabs.metistry.${s}`;
       const seq = exec.calls.filter((c) => c.cmd === "launchctl" && c.args.some((a) => a.endsWith(label) || a.endsWith(`${label}.plist`))).map(shown);
       expect(seq).toEqual([
@@ -504,7 +536,7 @@ describe("the TCC helper bundles — a release install carries none", () => {
     expect(r.code).toBe(0);
     expect(lines.join("\n")).toMatch(/no signed helper at .*ek-helper\.app/);
     expect(lines.join("\n")).toMatch(/doctor reports the bridge absent until then/);
-    expect(r.commands.some((c) => c.includes("eventkit-helper.plist"))).toBe(false);
+    expect(r.commands.some((c) => c.includes("calendar.plist"))).toBe(false);
   });
 
   it("a checkout install, whose product tree DOES hold the bundles, is not pinned at all", async () => {
@@ -514,12 +546,12 @@ describe("the TCC helper bundles — a release install carries none", () => {
     const r = await run({ productDir: P, env: env(I), exec: liveCompose(), dryRun: true, exists: ready(P), out: (l) => lines.push(l) });
     expect(r.code).toBe(0);
     expect(lines.join("\n")).toMatch(/ek-helper.*is in this release — no pin needed/);
-    expect(r.commands.some((c) => c.includes("eventkit-helper.plist"))).toBe(false);
+    expect(r.commands.some((c) => c.includes("calendar.plist"))).toBe(false);
   });
 });
 
 describe("metistry migrate-shape compose — the rollback", () => {
-  it("boots out the three launchd jobs, flips the shape and brings the containers back", async () => {
+  it("boots out the one supervisor job, flips the shape and brings the containers back", async () => {
     const P = await productTree();
     const I = await instance();
     await writeFile(join(P, "seed", "deployment.yaml"), "shape: launchd\nservices: {}\n");
@@ -527,9 +559,7 @@ describe("metistry migrate-shape compose — the rollback", () => {
     const r = await run({ productDir: P, env: env(I), target: "compose", exec: liveCompose(), dryRun: true, exists: ready(P), out: (l) => lines.push(l) });
     expect(r.code).toBe(0);
     expect(r.commands).toEqual([
-      "launchctl bootout gui/501/com.foldedspacelabs.metistry.db",
-      "launchctl bootout gui/501/com.foldedspacelabs.metistry.console",
-      "launchctl bootout gui/501/com.foldedspacelabs.metistry.assistant",
+      "launchctl bootout gui/501/com.foldedspacelabs.metistry",
       "deployment set-shape compose (deployment.yaml written through the reconciler as user → compose)",
       "up(compose)",
       "wait for console to answer — doctor's verdict must not be a race with a job kickstarted a moment ago",
@@ -610,16 +640,10 @@ describe("both directions compensate a failed `up` so the install is never left 
     expect(r.code).toBe(1);
     expect(r.commands).toEqual([
       `launchctl bootout gui/501/${LABELS[0]}`,
-      `launchctl bootout gui/501/${LABELS[1]}`,
-      `launchctl bootout gui/501/${LABELS[2]}`,
       "deployment set-shape compose (deployment.yaml written through the reconciler as user → compose)",
       "up(compose) FAILED",
       `launchctl bootstrap gui/501 /h/Library/LaunchAgents/${LABELS[0]}.plist`,
       `launchctl kickstart -k gui/501/${LABELS[0]}`,
-      `launchctl bootstrap gui/501 /h/Library/LaunchAgents/${LABELS[1]}.plist`,
-      `launchctl kickstart -k gui/501/${LABELS[1]}`,
-      `launchctl bootstrap gui/501 /h/Library/LaunchAgents/${LABELS[2]}.plist`,
-      `launchctl kickstart -k gui/501/${LABELS[2]}`,
       "deployment set-shape launchd (deployment.yaml written through the reconciler as user → launchd)",
     ]);
     expect(lines.join("\n")).toMatch(/launchd jobs have been restored and deployment\.yaml is set back to launchd — nothing is down/);

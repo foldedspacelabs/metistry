@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- The supervisor's agent AS THE APP REGISTERS IT.
+
+     ops/release/build-app.sh copies this to
+     Metistry.app/Contents/Library/LaunchAgents/com.foldedspacelabs.metistry.plist,
+     where `SMAppService.agent(plistName: "com.foldedspacelabs.metistry.plist")`
+     can register it. Registering it that way — rather than writing a plist
+     into ~/Library/LaunchAgents — is what makes System Settings › General ›
+     Login Items show ONE row, "Metistry", with the agent nested under the
+     app rather than listed beside it as a separate background item.
+
+     WHY IT LOOKS SO EMPTY. This file is inside the signed bundle, so it is
+     immutable and identical on every Mac: it can carry no install's paths,
+     no instance directory and no environment. Everything install-specific
+     lives in `<instance>/state/supervisor.json`, which `metistry up` writes
+     (0600) — the child list, each child's argv and environment, and the
+     control socket. `BundleProgram` is bundle-relative by definition, and
+     the small launcher it names reads
+     `~/Library/Application Support/Metistry/supervisor.env` to find this
+     Mac's node, the installed product's supervisor entry point and that
+     config. `metistry up --register-via app` writes that file.
+
+     The terminal path is unchanged and uses ops/launchd/com.foldedspacelabs.metistry.plist
+     instead — same label, same job, rendered per install. Only one of the
+     two is ever registered: `up --register-via app` deliberately does not
+     install the rendered one. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.foldedspacelabs.metistry</string>
+  <key>BundleProgram</key><string>Contents/MacOS/MetistrySupervisor</string>
+  <key>KeepAlive</key><true/>
+  <key>ProcessType</key><string>Background</string>
+  <key>StandardOutPath</key><string>/tmp/metistry-supervisor.log</string>
+  <key>StandardErrorPath</key><string>/tmp/metistry-supervisor.log</string>
+</dict>
+</plist>

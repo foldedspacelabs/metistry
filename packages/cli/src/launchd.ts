@@ -13,12 +13,62 @@
 import { readdir, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
-import { SHAPED_SERVICES, type DeploymentShape } from "@foldedspacelabs/metistry-core";
+import { SHAPED_SERVICES, SUPERVISOR_LABEL, SUPERVISOR_SERVICE, type DeploymentShape } from "@foldedspacelabs/metistry-core";
 
 export const PLACEHOLDERS = ["__REPO__", "__NODE__", "__ENV_FILE__"] as const;
 
 /** Every job's label is the reverse-DNS prefix plus the service name. */
 export const LABEL_PREFIX = "com.foldedspacelabs.metistry.";
+
+/** The supervisor's template — the one agent the launchd shape installs for the core. */
+export const SUPERVISOR_PLIST_FILE = `${SUPERVISOR_LABEL}.plist`;
+
+/**
+ * The services the supervisor runs as CHILDREN under the launchd shape, in
+ * start order: Postgres, then the console, then the reconciler, then the
+ * assistant, then whichever bridges this install has configured. Each still
+ * has its plist template in ops/launchd — `up` renders it and turns it into
+ * a child spec rather than installing an agent for it.
+ */
+export const SUPERVISED_SERVICES = ["db", "console", "reconciler", "assistant", "eventkit", "apple-fm"] as const;
+
+/**
+ * The TCC helper agents. `calendar` is the EventKit helper (renamed from
+ * `eventkit-helper`: the label is what System Settings shows, and a label is
+ * not part of a TCC requirement — the bundle id and the signing identifier
+ * are untouched, so no install has to consent again).
+ */
+export const HELPER_SERVICES = ["calendar"] as const;
+
+/**
+ * A bridge is installed only when this install has opted into it, which is
+ * the signal doctor already reads: its URL variable is set. Without one the
+ * bridge is `absent` ("not configured — degrades …"), which is a healthy
+ * install without a calendar bridge — and a child that could only
+ * crash-loop is not started at all (docs/ops/deployment-shapes.md, "What is
+ * still missing" #2).
+ */
+export const BRIDGE_URL_VARS: Record<string, string> = { eventkit: "METISTRY_EK_URL", "apple-fm": "METISTRY_AFM_URL", calendar: "METISTRY_EK_URL" };
+
+/**
+ * Labels an install may still be running from BEFORE the supervisor, which
+ * `up` boots out once so nothing is left running twice.
+ *
+ * Under the launchd shape that is the whole old five-agent core plus the two
+ * bridge agents — every one of them is a supervisor child now. Under compose
+ * it is only `eventkit-helper`, which was renamed to `calendar`; the compose
+ * shape's own agents are untouched.
+ */
+export function retiredServicesFor(shape: DeploymentShape): string[] {
+  return shape === "launchd"
+    ? ["db", "console", "assistant", "reconciler", "watchdog", "eventkit", "apple-fm", "eventkit-helper"]
+    : ["eventkit-helper"];
+}
+
+export function bridgeEnabled(service: string, env: NodeJS.ProcessEnv): boolean {
+  const v = BRIDGE_URL_VARS[service];
+  return v === undefined || (env[v] ?? "") !== "";
+}
 
 /**
  * `com.foldedspacelabs.metistry.console` → `console`, and
@@ -29,6 +79,10 @@ export const LABEL_PREFIX = "com.foldedspacelabs.metistry.";
  * `eventkit-helper`), so the last component is always the service.
  */
 export function serviceOf(label: string): string {
+  // the supervisor's label IS the prefix (`com.foldedspacelabs.metistry`), so
+  // it has no service component of its own and cannot be read the way the
+  // others are
+  if (label === SUPERVISOR_LABEL) return SUPERVISOR_SERVICE;
   const rest = label.startsWith(LABEL_PREFIX) ? label.slice(LABEL_PREFIX.length) : label;
   const dot = rest.indexOf(".");
   return dot === -1 ? rest : rest.slice(dot + 1);
@@ -36,6 +90,9 @@ export function serviceOf(label: string): string {
 
 /** The label a service's job carries, in this install's namespace. `undefined` suffix = today's fixed label. */
 export function labelFor(service: string, suffix?: string | undefined): string {
+  // the supervisor takes the suffix INSTEAD of a service component: one
+  // instance's core is one agent, namespaced or not
+  if (service === SUPERVISOR_SERVICE) return suffix ? `${SUPERVISOR_LABEL}.${suffix}` : SUPERVISOR_LABEL;
   return `${LABEL_PREFIX}${suffix ? `${suffix}.` : ""}${service}`;
 }
 
@@ -122,17 +179,49 @@ export function parsePlistTemplate(file: string, template: string): PlistTemplat
  * is `compose`, so a caller that does not know the shape gets exactly the
  * set that existed before deployment.yaml did.
  */
-export async function loadPlistTemplates(productDir: string, shape: DeploymentShape = "compose", labelSuffix?: string | undefined): Promise<PlistTemplate[]> {
+export async function loadPlistTemplates(
+  productDir: string,
+  shape: DeploymentShape = "compose",
+  labelSuffix?: string | undefined,
+  env: NodeJS.ProcessEnv = {},
+): Promise<PlistTemplate[]> {
+  const all = await readPlistTemplates(productDir, labelSuffix);
+  if (shape === "launchd") {
+    // ONE agent for the core, plus the TCC helpers that must be their own
+    // binaries. Everything else is a child of the supervisor.
+    const helpers = new Set<string>(HELPER_SERVICES);
+    // the supervisor first: it is the install, and every other agent here is
+    // a helper beside it
+    return all
+      .filter((t) => t.service === SUPERVISOR_SERVICE || (helpers.has(t.service) && bridgeEnabled(t.service, env)))
+      .sort((a, b) => (a.service === SUPERVISOR_SERVICE ? -1 : b.service === SUPERVISOR_SERVICE ? 1 : 0));
+  }
+  // compose: unchanged — db/console/assistant are containers, and there is no
+  // supervisor (its whole reason is the launchd shape's agent count)
+  const shaped = new Set<string>(SHAPED_SERVICES);
+  return all.filter((t) => t.service !== SUPERVISOR_SERVICE && !shaped.has(t.service));
+}
+
+/** Every template in `ops/launchd`, parsed and namespaced, before any shape decides which of them apply. */
+export async function readPlistTemplates(productDir: string, labelSuffix?: string | undefined): Promise<PlistTemplate[]> {
   const dir = join(productDir, "ops", "launchd");
   if (!existsSync(dir)) return [];
-  const shaped = new Set<string>(SHAPED_SERVICES);
   const out: PlistTemplate[] = [];
   for (const f of (await readdir(dir)).filter((f) => f.endsWith(".plist")).sort()) {
-    const t = parsePlistTemplate(f, await readFile(join(dir, f), "utf8"));
-    if (shape !== "launchd" && shaped.has(t.service)) continue;
-    out.push(withNamespace(t, labelSuffix));
+    out.push(withNamespace(parsePlistTemplate(f, await readFile(join(dir, f), "utf8")), labelSuffix));
   }
   return out;
+}
+
+/**
+ * The supervisor's children under the launchd shape, in start order. Same
+ * templates, same rendering — `up` turns each into a child spec instead of
+ * an agent (packages/cli/src/supervisor.ts).
+ */
+export async function loadSupervisedTemplates(productDir: string, labelSuffix?: string | undefined, env: NodeJS.ProcessEnv = {}): Promise<PlistTemplate[]> {
+  const all = await readPlistTemplates(productDir, labelSuffix);
+  const byName = new Map(all.map((t) => [t.service, t]));
+  return SUPERVISED_SERVICES.map((s) => byName.get(s)).filter((t): t is PlistTemplate => t !== undefined && bridgeEnabled(t.service, env));
 }
 
 /** XML text content — env values are arbitrary strings (a password with an `&` in it must not corrupt the plist). */

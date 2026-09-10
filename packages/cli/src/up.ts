@@ -21,7 +21,7 @@ import { assistantEnv, consoleEnv, consolePort, dbPort, loadDeployment, type Sha
 import { doctor, renderTable, type DoctorDeps, type DoctorReport } from "./doctor.js";
 import type { Exec } from "./exec.js";
 import { GIT_SPAWNING_SERVICES, launchAgentsDir, launchdCommands, loadPlistTemplates, nodeOnPath, renderPlist, renderSystemdUnit, withEnvironmentVariables, type PlistTemplate, type PlistValues } from "./launchd.js";
-import { envNotices, envPaths } from "./instance.js";
+import { ensureInstanceId, envNotices, envPaths } from "./instance.js";
 import { instanceLockPath, readLock, type LockFile, type LockSource } from "./lock.js";
 import { currentLink, imageEnv, imageRef, IMAGE_SERVICES } from "./release.js";
 import { installRuntimeDeps, pathWithRuntimeGit, runtimeDepsEnabled, RUNTIME_DIRNAME } from "./runtime-deps.js";
@@ -386,6 +386,12 @@ export async function up(opts: UpOptions): Promise<UpResult> {
   r.note(`shape: ${deployment.shape} — from ${loaded.from}`);
   r.note(`env: ${envFile}${paths?.pendingMove ? " (the product checkout's — `metistry secrets sync --to env` moves it into the instance)" : ""}`);
   for (const n of paths ? envNotices(paths) : []) r.note(n);
+  // an instance created before instance_id existed gets one here, so the
+  // Mac app and `secrets` can tell this instance from any other on the Mac
+  if (instanceDir.instanceDir) {
+    const id = await ensureInstanceId(r, { instanceDir: instanceDir.instanceDir, env, platform: le.platform, uid: le.uid, fetchFn: opts.fetchFn ?? fetch });
+    r.note(id.detail);
+  }
   let failure: StepFailed | undefined;
 
   try {

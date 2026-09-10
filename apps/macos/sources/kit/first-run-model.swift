@@ -222,7 +222,13 @@ public final class FirstRunModel {
             guard !url.isEmpty else { return nil }
             return ["connect-repo", url, "--instance", dir.path, "--auth", "device"]
         case .secrets:
-            return ["secrets", "sync", "--to", secretsDirection.rawValue]
+            // `--instance` names which instance directory this is: an instance
+            // directory is self-contained, so its `.env` is written to
+            // <instance>/state/.env and its secrets are filed under its own
+            // instance_id (docs/product/desktop-app-plan.md).
+            var verb = ["secrets", "sync", "--to", secretsDirection.rawValue]
+            if let dir = instanceDirectory { verb += ["--instance", dir.path] }
+            return verb
         case .services:
             // Plain launchd for now. SMAppService (macOS 13+) is the sanctioned
             // way an app installs its own launchd agents — the user approves
@@ -230,8 +236,11 @@ public final class FirstRunModel {
             // the recorded follow-up (docs/product/desktop-app-plan.md, step 5).
             // `metistry up` writing ~/Library/LaunchAgents by hand is what the
             // terminal path does today, so the app does the same and no second
-            // implementation appears.
-            return ["up"]
+            // implementation appears. `--instance` says which instance's
+            // environment, state and Postgres data directory to bring up.
+            var verb = ["up"]
+            if let dir = instanceDirectory { verb += ["--instance", dir.path] }
+            return verb
         }
     }
 

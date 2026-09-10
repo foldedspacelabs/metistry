@@ -14,9 +14,10 @@ import { realExec, type Exec } from "./exec.js";
 import { AUTH_MODES, connectRepo, type AuthMode } from "./connect-repo.js";
 import { importSessions } from "./import-sessions.js";
 import { init } from "./init.js";
-import { readInstanceId } from "./instance.js";
+import { ensureInstanceId, instanceEnvFile, readInstanceId } from "./instance.js";
 import type { LockSource } from "./lock.js";
 import { listSecrets, mintSecret, purgeSecrets, renderSecretList, syncSecrets, type SyncDirection } from "./secrets.js";
+import { StepRunner } from "./steps.js";
 import { up } from "./up.js";
 import { gitHead, update } from "./update.js";
 
@@ -219,11 +220,13 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
         productCommit: productDir ? await gitHead(productDir, io.exec ?? realExec) : undefined,
         exec: io.exec,
       });
-      out(`instance created at ${result.dir} (commit ${result.commit.slice(0, 7)}; assistant named "${result.assistantName}" in identity.yaml)`);
+      out(`instance created at ${result.dir} (commit ${result.commit.slice(0, 7)}; assistant named "${result.assistantName}" in identity.yaml; instance_id ${result.instanceId})`);
       out("");
-      out("Next — add these to the PRODUCT checkout's .env (the token below is minted once and shown only here):");
+      out(`Next — put these in this instance's environment, ${instanceEnvFile(result.dir)} (the token below is minted once and shown only here):`);
       out("");
       for (const l of result.envLines) out(`  ${l}`);
+      out("");
+      out("That file is the install's environment: gitignored, 0600, and never in the product checkout (an instance directory is self-contained — docs/ops/cli.md).");
       out("");
       out("Then: pnpm -r build && metistry up   (containers, every launchd job, doctor — docs/ops/cli.md).");
       out(`Then, to version it off this machine: metistry connect-repo <your private remote> --instance ${result.dir} (docs/ops/cli.md).`);
@@ -268,7 +271,22 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
       // read the highest-precedence file that exists (the product checkout's
       // while an install predates the move); write where it now belongs
       const envFile = paths.read[0] ?? paths.write;
-      const instanceId = loaded.instanceDir ? await readInstanceId(loaded.instanceDir) : undefined;
+      let instanceId = loaded.instanceDir ? await readInstanceId(loaded.instanceDir) : undefined;
+      // `sync` is where an instance created before instance_id existed gets
+      // one — it has to, because that id is the account it files under. A
+      // read-only verb (`list`) and a destructive one (`purge`) never mint.
+      if (!instanceId && loaded.instanceDir && positional[0] === "sync") {
+        const runner = new StepRunner({ dryRun: false, out, ...(io.exec ? { exec: io.exec } : {}) });
+        const minted = await ensureInstanceId(runner, {
+          instanceDir: loaded.instanceDir,
+          env: process.env,
+          platform: process.platform,
+          uid: typeof process.getuid === "function" ? process.getuid() : 0,
+          fetchFn: fetch,
+        });
+        out(minted.detail);
+        if (minted.id) instanceId = minted.id;
+      }
       const secretsOpts = {
         envFile,
         envTarget: paths.write,

@@ -441,6 +441,19 @@ falls back to the `gh` CLI automatically when it is on PATH and logged in
 `METISTRY_GITHUB_TOKEN`, so it can resolve and download the release even
 when the PAT cannot.
 
+Downloading an asset is a separate call from resolving the release, and on
+a private repo it needs a separate fix: a release's `browser_download_url`
+only works with a browser session, so it 404s for a token even when
+resolving the release worked fine. With `METISTRY_GITHUB_TOKEN` configured,
+`metistry update` downloads every asset (the runtime pack, the runtime-deps
+pack, and their shared `checksums.txt`) through the authenticated API
+instead — `GET /repos/<repo>/releases/assets/<id>` with
+`Accept: application/octet-stream` — following the redirect to GitHub's
+signed, short-lived S3 URL without resending the token. With no token
+configured (a public repo), `browser_download_url` is used directly. Either
+path falls back to `gh release download` on a 404, the same way an
+unauthorised *resolve* already does.
+
 **What "changed" means.** Before the build, `update` hashes the code each
 launchd job executes — read from the plist itself (`__REPO__/<path>` in
 `ProgramArguments`): `apps/watchdog/dist` for the watchdog,

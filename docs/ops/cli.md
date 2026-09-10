@@ -569,3 +569,17 @@ Release mode is complete end to end (`docs/ops/releases.md`) but has not
 yet consumed a real published release — the first `v*` tag is its first
 live run. The CLI ships no `manifest.yaml`: `core`'s schema has no type
 for a command-line tool and inventing one is worse than the gap.
+
+**These verbs have a second caller now.** The Mac app (`apps/macos`,
+`docs/ops/mac-app.md`) drives `init`, `connect-repo --auth device`,
+`secrets sync`, `up` and `doctor --json` as its first-run flow and its
+Status panel — the same commands, with `--product-dir` always passed
+explicitly because a GUI process has no useful working directory. It is a
+front end, never a second implementation: a behaviour the app needs is a
+CLI change first. Two things that matter when editing them: `doctor --json`
+is a wire contract the app decodes (a renamed field breaks a panel, and
+`apps/macos/tests/kit/doctor-report-tests.swift` is the misuse test that
+says so), and `connect-repo --auth device` prints its device code as
+`Open <uri> and enter this code:   <code>` — the app parses that line to
+show the code as a card, and falls back to the raw log if the wording
+changes.

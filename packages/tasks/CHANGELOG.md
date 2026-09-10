@@ -1,5 +1,11 @@
 # @foldedspacelabs/metistry-tasks
 
+## 0.6.0
+
+### Patch Changes
+
+- @foldedspacelabs/metistry-core@0.6.0
+
 ## 0.5.0
 
 ### Patch Changes

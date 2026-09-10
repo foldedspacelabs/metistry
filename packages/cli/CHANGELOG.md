@@ -1,5 +1,100 @@
 # @foldedspacelabs/metistry-cli
 
+## 0.6.0
+
+### Minor Changes
+
+- 4afd5eb: Four small verbs so the Mac app can stop parsing files itself and front the
+  CLI instead (docs/ops/cli.md, docs/product/desktop-app-plan.md):
+  
+  - `metistry identity [--json]` — identity.yaml as the CLI understands it
+    (name, mention, voice, icon, instance_id), resolving `--instance`/
+    `METISTRY_INSTANCE_DIR` like every other instance verb. Read-only.
+  - `metistry --version` / `metistry version [--json]` — this binary's own
+    package version (always); the resolved product dir's own package.json
+    version; the instance's `metistry.lock` pin + channel; and, for a release
+    install, `metistry-runtime.json`'s version, commit and build time. Each
+    field is reported only as far as it resolves.
+  - `metistry secrets list --json` — the same rows the table shows (name,
+    scope, keychain account found under, set/unset), values never.
+  - `metistry deployment [--json]` — the effective shape (deployment.yaml's D4
+    overlay) and the services it implies, each tagged with its running state
+    via the same cheap `launchctl print`/`docker compose ps` checks `doctor`
+    itself uses (never the full `doctor`, which also probes bridges over
+    HTTP).
+  - `metistry deployment set-shape <compose|launchd> [--yes] [--force]` —
+    writes the instance's deployment.yaml through the reconciler as the `user`
+    principal, exactly like `metistry.lock`/`identity.yaml` (a §4.7 protected
+    path). Preview-then-confirm: without `--yes` nothing is written; refuses
+    while `db`/`console`/`assistant` are still running under the current
+    shape unless `--force` (the data does not move between shapes on its
+    own) — `reconciler`/`watchdog` running is never a reason to refuse, since
+    they are host jobs under either shape.
+- 410dcce: The console's **local owner token** (`docs/ops/auth.md`), so the Mac app and
+  the CLI authenticate to a console on this machine without a passkey
+  ceremony — they are the same package, on the same filesystem, running as the
+  same person.
+  
+  - `Authorization: Bearer $METISTRY_LOCAL_OWNER_TOKEN` yields the `user` principal,
+    the same one a passkey session yields, through the same `isUser()`
+    predicate — but **only** when the connection's peer address is loopback.
+    The decision comes from the socket; `X-Forwarded-For`, `Forwarded`,
+    `X-Real-IP` and `Host` are never read. From anywhere else it is a 401
+    byte-identical to an unknown token's, plus a `runs` audit line naming the
+    address. Constant-time comparison; misuse tests ship with it.
+  - Compose NATs a host-loopback connection to the bridge gateway, so
+    `METISTRY_TRUSTED_LOOPBACK_PROXY` is how the console is told: the compose
+    file sets the sentinel `docker-gateway`, resolved at startup from the
+    container's own default route. The gateway address only — a sibling
+    container is still remote. Unset (launchd) = plain loopback.
+  - `GET /api/whoami` → `{principal, via, management, origin, as_of}`.
+  - `POST /auth/logout` and `/api/push/*` stay passkey-session-only: they act
+    on a device session row. A host-minted `owner_tokens` row (the capture
+    Shortcut) is unchanged — capture-only, any address.
+  - `METISTRY_ORIGIN` may be a comma-separated list (`expectedOrigin` takes an
+    array in @simplewebauthn v13); the first entry stays canonical. An origin
+    mismatch, which used to escape as HTTP 500, is a 401 naming expected vs
+    presented.
+  
+  CLI: `METISTRY_LOCAL_OWNER_TOKEN` joins `SECRET_SCOPES` as instance-scoped;
+  `metistry init` mints it into the `.env` lines it prints; `secrets sync --to
+  env` mints one for an install that predates it (`GENERATED_SECRETS`, the
+  same "generated, so minting cannot be the wrong guess" rule as `up`'s DB
+  password); `metistry console whoami [--json]` prints the principal — what
+  the app calls to show "signed in as owner"; and `metistry doctor`'s console
+  row now presents the token, so `api_status` is a real authenticated read
+  (a refused token degrades rather than fails).
+- 0281c41: Prove the Docker-free macOS shape (decision 15), and settle where a bundled
+  install's writable product dir lives.
+  
+  - **`metistry runtime install --from <Metistry.app> [--to <dir>]`** — a signed
+    bundle's `Contents/Resources/metistry/` is a SEED; the product dir is a
+    writable copy of it at `~/Library/Application Support/Metistry/product/`, so
+    `metistry update --channel release` works on an app install exactly as it
+    does on a checkout. Idempotent, verified against the pack's own
+    `metistry-runtime.json` and `runtime/manifest.json`, whose sha256s land in
+    `.metistry-install.json`.
+  - **`metistry up --namespace`** — a second instance can run on one Mac. One
+    file, `<instance>/state/ports.yaml`, allocated once, carries this instance's
+    launchd label suffix and an 8-port block; `up`, `doctor`,
+    `restart|stop|start`, `logs` and `update` all read it.
+  - **The launchd jobs exec the bundled Node** when the install has one, rather
+    than whatever `$(which node)` found.
+  - **Five fixes the live trial found**: a space in the install path broke every
+    `sh -c` job (the app's default location has one); `up` now refuses a
+    `state/.env` whose values `sh` would misread; the assistant's sandbox gained
+    a rule for Postgres, without which the engine could never start under this
+    shape; `up` waits out `launchctl bootout`'s asynchronous teardown instead of
+    racing it; and a namespaced instance's ports now reach the dotenv-sourcing
+    jobs and `metistry update`'s migration runner — which would otherwise have
+    migrated the default install's database.
+  - The release runtime pack now ships `ops/sandbox/`, without which the launchd
+    shape's assistant job cannot start at all.
+
+### Patch Changes
+
+- @foldedspacelabs/metistry-core@0.6.0
+
 ## 0.5.0
 
 ### Minor Changes

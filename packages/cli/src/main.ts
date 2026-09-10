@@ -16,7 +16,7 @@ import { importSessions } from "./import-sessions.js";
 import { init } from "./init.js";
 import { readInstanceId } from "./instance.js";
 import type { LockSource } from "./lock.js";
-import { listSecrets, mintSecret, renderSecretList, syncSecrets, type SyncDirection } from "./secrets.js";
+import { listSecrets, mintSecret, purgeSecrets, renderSecretList, syncSecrets, type SyncDirection } from "./secrets.js";
 import { up } from "./up.js";
 import { gitHead, update } from "./update.js";
 
@@ -27,7 +27,7 @@ export interface ParsedArgs {
 }
 
 /** Flags that never take a value, so `metistry init --force <dir>` keeps its dir. */
-export const BOOLEAN_FLAGS = new Set(["force", "json", "help", "dry-run", "no-launchd", "no-compose", "skip-build", "skip-migrate", "rollback"]);
+export const BOOLEAN_FLAGS = new Set(["force", "json", "help", "dry-run", "no-launchd", "no-compose", "skip-build", "skip-migrate", "rollback", "yes"]);
 
 /** `--channel git|release` — anything else is a typo, not a guess (the lock parser is strict for the same reason). */
 export function parseChannel(v: string | undefined): LockSource | undefined {
@@ -294,8 +294,17 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
           case "list":
             out(renderSecretList(await listSecrets(secretsOpts)));
             return 0;
+          case "purge": {
+            const dir = str(flags, "instance") ?? loaded.instanceDir;
+            if (!dir) {
+              err("usage: metistry secrets purge --instance <dir> [--yes]   (which instance's Keychain items to delete)");
+              return 2;
+            }
+            const r = await purgeSecrets({ ...secretsOpts, instanceDir: dir, yes: flags.yes === true });
+            return r.found.length > 0 && r.deleted.length !== r.found.length && flags.yes === true ? 1 : 0;
+          }
           default:
-            err("usage: metistry secrets sync --to env|keychain | metistry secrets mint <VAR> | metistry secrets list");
+            err("usage: metistry secrets sync --to env|keychain | metistry secrets mint <VAR> | metistry secrets list | metistry secrets purge --instance <dir> [--yes]");
             return 2;
         }
       } catch (e) {

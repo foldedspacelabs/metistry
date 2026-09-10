@@ -133,6 +133,12 @@ const COUNTS_SQL = tableCountsSql(["runs", "work", "schema_migrations"]);
 /** A slice of the generated query that survives shell quoting in a printed command. */
 const COUNTS_FRAGMENT = 'count(*) FROM "runs"';
 
+/** The three SHAPE_SERVICES labels, in the fixed order the migration always uses. */
+// under the supervisor the launchd shape is ONE label — db, console and
+// assistant are its children (a product tree from before the supervisor
+// still stops three; see shapeServices())
+const LABELS = ["com.foldedspacelabs.metistry"];
+
 function run(overrides: Partial<MigrateShapeOptions> & { productDir: string; env: NodeJS.ProcessEnv }): Promise<ReturnType<typeof migrateShape>> {
   return migrateShape({
     target: "launchd",
@@ -432,7 +438,9 @@ describe("the restore is checked, not assumed", () => {
     });
     expect(r.code).toBe(1);
     expect(lines.join("\n")).toMatch(/missing rows the dump had — runs: 6730 → 6729/);
-    expect(lines.join("\n")).toMatch(/roll back with `metistry migrate-shape compose`/);
+    // a failure here happens AFTER `docker compose stop db` — compose is
+    // brought back automatically rather than left down beside a broken restore
+    expect(lines.join("\n")).toMatch(/compose stack has been brought back up and deployment\.yaml is set back to compose/);
   });
 
   it("a table that GREW since the restore is normal — the console records its own startup", async () => {
@@ -543,7 +551,7 @@ describe("the TCC helper bundles — a release install carries none", () => {
 });
 
 describe("metistry migrate-shape compose — the rollback", () => {
-  it("boots out the three launchd jobs, flips the shape and brings the containers back", async () => {
+  it("boots out the one supervisor job, flips the shape and brings the containers back", async () => {
     const P = await productTree();
     const I = await instance();
     await writeFile(join(P, "seed", "deployment.yaml"), "shape: launchd\nservices: {}\n");
@@ -551,9 +559,7 @@ describe("metistry migrate-shape compose — the rollback", () => {
     const r = await run({ productDir: P, env: env(I), target: "compose", exec: liveCompose(), dryRun: true, exists: ready(P), out: (l) => lines.push(l) });
     expect(r.code).toBe(0);
     expect(r.commands).toEqual([
-      "launchctl bootout gui/501/com.foldedspacelabs.metistry.db",
-      "launchctl bootout gui/501/com.foldedspacelabs.metistry.console",
-      "launchctl bootout gui/501/com.foldedspacelabs.metistry.assistant",
+      "launchctl bootout gui/501/com.foldedspacelabs.metistry",
       "deployment set-shape compose (deployment.yaml written through the reconciler as user → compose)",
       "up(compose)",
       "wait for console to answer — doctor's verdict must not be a race with a job kickstarted a moment ago",
@@ -570,5 +576,132 @@ describe("metistry migrate-shape compose — the rollback", () => {
     expect(r.code).toBe(0);
     expect(lines.join("\n")).toMatch(/THE DATA DOES NOT COME BACK WITH YOU/);
     expect(lines.join("\n")).toMatch(/pg_dump .* -Fc -f <somewhere>/);
+  });
+
+  it("waits for each launchd bootout to finish, and for the bundled Postgres to release its port, before calling `up`", async () => {
+    const P = await productTree();
+    const I = await instance();
+    await writeFile(join(P, "seed", "deployment.yaml"), "shape: launchd\nservices: {}\n");
+    const printsSeen: Record<string, number> = {};
+    let pgTries = 0;
+    const exec = fakeExec({
+      launchctl: (args) => {
+        if (args[0] !== "print") return undefined;
+        const label = args[1]!;
+        printsSeen[label] = (printsSeen[label] ?? 0) + 1;
+        // still loaded for the first two polls of EVERY label, then gone
+        return printsSeen[label]! <= 2 ? { code: 0 } : { code: 1 };
+      },
+      [`${PG}/pg_isready`]: () => {
+        pgTries++;
+        // still accepting connections for the first two polls, then down
+        return pgTries <= 2 ? { code: 0 } : { code: 1 };
+      },
+    });
+    // `up` is injected and never touches this fake exec on its own — the
+    // marker call stands in for the real `docker compose up -d` `up` would
+    // issue, so its position relative to the polls above is what is asserted
+    const upFn = async (o: UpOptions): Promise<UpResult> => {
+      await exec("docker", ["compose", "up", "-d"], {});
+      return { code: 0, source: "release", commands: [`up(${o.deployment?.shape})`] };
+    };
+    const r = await run({ productDir: P, env: env(I), target: "compose", exec, exists: ready(P), upFn });
+    expect(r.code).toBe(0);
+    const upIdx = exec.calls.findIndex((c) => c.cmd === "docker" && c.args.join(" ") === "compose up -d");
+    expect(upIdx).toBeGreaterThan(-1);
+    const printIdxs = exec.calls.map((c, i) => (c.cmd === "launchctl" && c.args[0] === "print" ? i : -1)).filter((i) => i >= 0);
+    const isreadyIdxs = exec.calls.map((c, i) => (c.cmd === `${PG}/pg_isready` ? i : -1)).filter((i) => i >= 0);
+    expect(printIdxs.length).toBeGreaterThan(0);
+    expect(isreadyIdxs).toHaveLength(3); // 2 "still accepting" + the one that reports it gone
+    expect(Math.max(...printIdxs)).toBeLessThan(upIdx);
+    expect(Math.max(...isreadyIdxs)).toBeLessThan(upIdx);
+    // every label really was polled more than once — the wait happened, not a no-op
+    expect(LABELS.every((l) => printsSeen[`gui/501/${l}`] === 3)).toBe(true);
+  });
+});
+
+describe("both directions compensate a failed `up` so the install is never left with nothing running", () => {
+  it("rollback: a failed `up (compose)` restores the launchd jobs from disk and flips the shape back", async () => {
+    const P = await productTree();
+    const I = await instance();
+    await writeFile(join(P, "seed", "deployment.yaml"), "shape: launchd\nservices: {}\n");
+    const lines: string[] = [];
+    const failingUp = async (o: UpOptions): Promise<UpResult> => ({ code: 1, source: "release", commands: [`up(${o.deployment?.shape}) FAILED`] });
+    const r = await run({
+      productDir: P,
+      env: env(I),
+      target: "compose",
+      exec: liveCompose(),
+      exists: ready(P),
+      home: "/h",
+      upFn: failingUp,
+      out: (l) => lines.push(l),
+    });
+    expect(r.code).toBe(1);
+    expect(r.commands).toEqual([
+      `launchctl bootout gui/501/${LABELS[0]}`,
+      "deployment set-shape compose (deployment.yaml written through the reconciler as user → compose)",
+      "up(compose) FAILED",
+      `launchctl bootstrap gui/501 /h/Library/LaunchAgents/${LABELS[0]}.plist`,
+      `launchctl kickstart -k gui/501/${LABELS[0]}`,
+      "deployment set-shape launchd (deployment.yaml written through the reconciler as user → launchd)",
+    ]);
+    expect(lines.join("\n")).toMatch(/launchd jobs have been restored and deployment\.yaml is set back to launchd — nothing is down/);
+  });
+
+  it("forward: a failed `up (launchd)` after `docker compose stop db` brings the compose stack back and flips the shape back", async () => {
+    const P = await productTree();
+    const I = await instance();
+    const lines: string[] = [];
+    const failingUp = async (o: UpOptions): Promise<UpResult> => ({ code: 1, source: "release", commands: [`up(${o.deployment?.shape}) FAILED`] });
+    const r = await run({ productDir: P, env: env(I), exec: liveCompose(), exists: ready(P), upFn: failingUp, out: (l) => lines.push(l) });
+    expect(r.code).toBe(1);
+    const dc = (args: string[]) => formatCommand("docker", ["compose", "--env-file", `${I}/state/.env`, ...args], P);
+    const dump = `${I}/state/migrate/${TS}.dump`;
+    expect(r.commands).toEqual([
+      dc(["ps", "-q", "db"]),
+      dc(["stop", "console", "assistant"]),
+      dc(["exec", "-T", "db", "psql", "-U", "metistry", "-d", "metistry", "-tA", "--no-psqlrc", "-c", TABLE_LIST_SQL]),
+      dc(["exec", "-T", "db", "psql", "-U", "metistry", "-d", "metistry", "-tA", "--no-psqlrc", "-c", COUNTS_SQL]),
+      dc(["exec", "-T", "db", "pg_dump", "-U", "metistry", "-d", "metistry", "--format=custom", "--compress=6", "--file", `/tmp/metistry-migrate-${TS}.dump`]),
+      `mkdir -p ${I}/state/migrate`,
+      dc(["cp", `db:/tmp/metistry-migrate-${TS}.dump`, dump]),
+      dc(["exec", "-T", "db", "rm", "-f", `/tmp/metistry-migrate-${TS}.dump`]),
+      `${PG}/pg_restore --list ${dump}`,
+      dc(["stop", "db"]),
+      "deployment set-shape launchd (deployment.yaml written through the reconciler as user → launchd)",
+      "up(launchd) FAILED",
+      dc(["up", "-d"]),
+      "deployment set-shape compose (deployment.yaml written through the reconciler as user → compose)",
+    ]);
+    expect(lines.join("\n")).toMatch(/compose stack has been brought back up and deployment\.yaml is set back to compose — nothing is down/);
+  });
+});
+
+describe("a second forward run — a leftover launchd data directory from a rollback", () => {
+  it("moves state/pg aside, never deleting it, before `up` initdbs a fresh one", async () => {
+    const P = await productTree();
+    const I = await instance();
+    const pgDir = join(I, "state", "pg");
+    const r = await run({
+      productDir: P,
+      env: env(I),
+      exec: liveCompose(),
+      dryRun: true,
+      exists: (p) => p === join(pgDir, "PG_VERSION") || ready(P)(p),
+    });
+    expect(r.code).toBe(0);
+    const mv = `mv ${pgDir} ${pgDir}.${TS}.stale`;
+    expect(r.commands).toContain(mv);
+    // it happens before `up`, so the fresh initdb lands in a directory that no longer exists
+    expect(r.commands.indexOf(mv)).toBeLessThan(r.commands.indexOf("up(launchd)"));
+  });
+
+  it("a fresh install with no state/pg yet is unaffected — nothing is moved", async () => {
+    const P = await productTree();
+    const I = await instance();
+    const r = await run({ productDir: P, env: env(I), exec: liveCompose(), dryRun: true, exists: ready(P) });
+    expect(r.code).toBe(0);
+    expect(r.commands.some((c) => c.startsWith("mv "))).toBe(false);
   });
 });

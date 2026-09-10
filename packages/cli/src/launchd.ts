@@ -36,6 +36,8 @@ export interface PlistTemplate {
   /** ProgramArguments as written in the template */
   programArguments: string[];
   workingDirectory?: string;
+  /** StandardOutPath — every shipped plist points this and StandardErrorPath at the same file (`metistry logs`, docs/ops/cli.md) */
+  standardOutPath?: string;
   environment: Record<string, string>;
   /** checkout-relative paths the job executes from (`__REPO__/<rel>` in ProgramArguments), e.g. apps/watchdog/dist/main.js */
   repoPaths: string[];
@@ -53,11 +55,22 @@ export function parsePlistTemplate(file: string, template: string): PlistTemplat
   const argsBlock = /<key>ProgramArguments<\/key>\s*<array>([\s\S]*?)<\/array>/.exec(template)?.[1] ?? "";
   const programArguments = stringsIn(argsBlock);
   const workingDirectory = /<key>WorkingDirectory<\/key>\s*<string>([^<]*)<\/string>/.exec(template)?.[1];
+  const standardOutPath = /<key>StandardOutPath<\/key>\s*<string>([^<]*)<\/string>/.exec(template)?.[1];
   const environment: Record<string, string> = {};
   const envBlock = /<key>EnvironmentVariables<\/key>\s*<dict>([\s\S]*?)<\/dict>/.exec(template)?.[1] ?? "";
   for (const m of envBlock.matchAll(/<key>([^<]+)<\/key>\s*<string>([^<]*)<\/string>/g)) environment[m[1]!] = unescape(m[2] ?? "");
   const repoPaths = [...new Set(programArguments.flatMap((a) => [...a.matchAll(/__REPO__\/([^\s;'"]+)/g)].map((m) => m[1]!)))].filter((p) => !p.startsWith(".env"));
-  return { file, label, service: serviceOf(label), template, programArguments, ...(workingDirectory !== undefined ? { workingDirectory } : {}), environment, repoPaths };
+  return {
+    file,
+    label,
+    service: serviceOf(label),
+    template,
+    programArguments,
+    ...(workingDirectory !== undefined ? { workingDirectory } : {}),
+    ...(standardOutPath !== undefined ? { standardOutPath } : {}),
+    environment,
+    repoPaths,
+  };
 }
 
 /**

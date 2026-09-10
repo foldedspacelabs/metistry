@@ -56,6 +56,19 @@ import Testing
     let reason = try! #require(route.reason)
     #expect(reason.contains("webcredentials:studio.ts.net"))
     #expect(reason.contains("associated-domains"))
+    // And the obstacle behind it, which no origin change fixes.
+    #expect(reason.contains("an application identifier"))
+}
+
+@Test func theMeasuredDistributionObstacleIsSaidOutLoud() {
+    // Measured, not assumed: a Developer ID build signed with this project's
+    // identity gets AuthorizationError 1004 for 127.0.0.1, localhost AND
+    // studio.ts.net alike, and hand-signing the entitlement gets it SIGKILLed at
+    // launch. That is a distribution problem, not an origin problem, and the
+    // step must not let someone spend a day fixing METISTRY_ORIGIN over it.
+    #expect(PasskeyRouting.distributionNote.contains("1004"))
+    #expect(PasskeyRouting.distributionNote.contains("provisioning profile"))
+    #expect(PasskeyRouting.distributionNote.contains("Developer ID"))
 }
 
 @Test func theNativeRouteOpensOnlyForAnHttpsDomainOnFourFourThreeThisAppIsEntitledFor() {

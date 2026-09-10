@@ -6,8 +6,15 @@
 //   SUFeedURL     https://github.com/foldedspacelabs/metistry/releases/latest/download/appcast.xml
 //   SUPublicEDKey the key generated 2026-09-09, also in
 //                 ops/release/runtime-versions.env as SPARKLE_PUBLIC_ED_KEY
-// Sparkle reads both itself. Keeping them in one place means the app cannot
-// disagree with the workflow that signs the feed.
+// Sparkle reads both itself, and it owns its own preferences
+// (`SUEnableAutomaticChecks`, `SULastCheckTime`) — the app keeps no copy, which
+// is why they are not in `AppPreference`. Keeping them in one place means the app
+// cannot disagree with the workflow that signs the feed.
+//
+// This controller's second job is filling in MetistryKit's `UpdateStatus`, a
+// plain observable box: the Updates settings pane and the menu bar's "Update
+// Available: x.y.z" read the box, so no view imports Sparkle and an iOS target
+// can fill the same box from the App Store.
 //
 // The other half of the story is the product runtime, which does NOT update
 // through Sparkle: that is `metistry update` in release mode (pinned artifacts,
@@ -15,30 +22,78 @@
 
 #if os(macOS)
 import Foundation
+import MetistryKit
 import Sparkle
 import SwiftUI
 
 @MainActor
-final class UpdaterController {
+final class UpdaterController: NSObject {
     let controller: SPUStandardUpdaterController
+    private let status: UpdateStatus
 
-    init() {
+    init(status: UpdateStatus) {
+        self.status = status
         // startingUpdater: true — Sparkle schedules its own background checks
-        // from the plist's SUScheduledCheckInterval. No delegate yet: the
-        // default behaviour (ask on first launch, then check daily) is what the
-        // plan describes, and a delegate that adds nothing is a delegate to
-        // maintain for years.
-        controller = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
+        // from the plist's SUScheduledCheckInterval.
+        let delegate = UpdaterDelegate(status: status)
+        self.delegate = delegate
+        controller = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: delegate, userDriverDelegate: nil)
+        super.init()
+
+        status.feedURL = Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") as? String
+        // One signed appcast today, so one channel. Sparkle 2 supports named
+        // channels in the feed; when there is a second one this reads it rather
+        // than saying "stable" from memory.
+        status.channel = Bundle.main.object(forInfoDictionaryKey: "SUChannel") as? String ?? "stable"
+        status.canCheck = controller.updater.canCheckForUpdates
+        status.automaticChecksEnabled = controller.updater.automaticallyChecksForUpdates
+        status.lastCheckedAt = controller.updater.lastUpdateCheckDate
+        status.checkNow = { [weak self] in self?.checkForUpdates() }
+        status.setAutomaticChecks = { [weak self] enabled in
+            self?.controller.updater.automaticallyChecksForUpdates = enabled
+            self?.status.automaticChecksEnabled = enabled
+        }
     }
 
-    var feedURL: String {
-        Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") as? String ?? "(no SUFeedURL in Info.plist)"
-    }
+    /// Held because `SPUStandardUpdaterController` does not retain its delegate.
+    private let delegate: UpdaterDelegate
 
     var canCheck: Bool { controller.updater.canCheckForUpdates }
 
     func checkForUpdates() {
         controller.updater.checkForUpdates()
+        status.lastCheckedAt = controller.updater.lastUpdateCheckDate
+    }
+}
+
+/// Sparkle's delegate. Its one job is telling the app whether there is an update,
+/// so the menu bar can offer it — a menu that says "Update Available: 0.5.0" only
+/// when there is one is P5 in miniature: reported, never inferred.
+///
+/// Sparkle's protocol is Objective-C and carries no actor annotation, so the
+/// witnesses are `nonisolated` and hop explicitly. Sparkle calls them on the main
+/// thread (it drives its own UI from them), which is what `assumeIsolated`
+/// asserts rather than assumes silently.
+private final class UpdaterDelegate: NSObject, SPUUpdaterDelegate {
+    private let status: UpdateStatus
+
+    init(status: UpdateStatus) {
+        self.status = status
+        super.init()
+    }
+
+    nonisolated func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
+        MainActor.assumeIsolated {
+            status.availableVersion = item.displayVersionString
+            status.lastCheckedAt = updater.lastUpdateCheckDate
+        }
+    }
+
+    nonisolated func updaterDidNotFindUpdate(_ updater: SPUUpdater) {
+        MainActor.assumeIsolated {
+            status.availableVersion = nil
+            status.lastCheckedAt = updater.lastUpdateCheckDate
+        }
     }
 }
 

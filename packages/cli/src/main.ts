@@ -17,6 +17,7 @@ import { AUTH_MODES, connectRepo, type AuthMode } from "./connect-repo.js";
 import { renderWhoami, whoami } from "./console-client.js";
 import { importSessions } from "./import-sessions.js";
 import { init } from "./init.js";
+import { migrateShape } from "./migrate-shape.js";
 import { ensureInstanceId, instanceEnvFile, readInstanceId } from "./instance.js";
 import { readIdentity, renderIdentity } from "./identity.js";
 import type { LockSource } from "./lock.js";
@@ -254,6 +255,30 @@ const USAGE = `metistry — Metistry command line
       like metistry.lock/identity.yaml — preview without --yes, applied with
       it. Refuses while services still run under the current shape (the data
       does not move between shapes on its own); --force writes anyway.
+
+  metistry migrate-shape <launchd|compose> [--dry-run] [--namespace]
+                         [--product-dir <checkout>] [--instance <dir>] [--env-file <path>]
+      Move a LIVE install between the two deployment shapes, with its data.
+      One verb, reversible, and every step printed before it runs.
+        launchd  refuse unless this product carries a bundled runtime/ and a
+                 release with ops/sandbox/ (PR #117 — without it the assistant
+                 job cannot start); pg_dump the compose database through the
+                 running db container to <instance>/state/migrate/<ts>.dump and
+                 verify it with pg_restore --list; docker compose stop db console
+                 assistant (containers and the named volume are LEFT IN PLACE);
+                 write deployment.yaml through the reconciler as the user
+                 principal; metistry up (initdb under <instance>/state/pg, every
+                 host plist re-rendered against current/, the bundled node and
+                 <instance>/state/.env); pg_restore BEFORE any migration runs —
+                 the dump carries schema_migrations, so the next metistry update
+                 applies none; compare every table's row count with the compose
+                 database and fail if one differs; then doctor.
+        compose  the documented rollback: bootout the launchd db/console/
+                 assistant jobs, set the shape back, docker compose up -d. The
+                 compose volume still holds the database as it was at the
+                 cutover — anything written under launchd since is NOT copied
+                 back, so dump it first if you want it.
+      docs/ops/migrate-compose-to-launchd.md is the production runbook.
 
   --dry-run prints every command and runs nothing.
 
@@ -579,6 +604,37 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
         doctorDeps: io.doctorDeps,
       });
       return r.code;
+    }
+    case "migrate-shape": {
+      if (!productDir) {
+        err("migrate-shape needs a Metistry checkout: pass --product-dir or set METISTRY_PRODUCT_DIR");
+        return 2;
+      }
+      const target = parseDeploymentShape(positional[0]);
+      if (!target) {
+        err("usage: metistry migrate-shape <launchd|compose> [--dry-run] [--namespace] [--instance <dir>]");
+        return 2;
+      }
+      loadEnv();
+      try {
+        const r = await migrateShape({
+          productDir,
+          target,
+          out,
+          exec: io.exec,
+          envFile: str(flags, "env-file"),
+          dryRun: flags["dry-run"] === true,
+          namespace: flags.namespace === true,
+          platform: io.platform ?? undefined,
+          uid: io.uid,
+          home: io.home,
+          doctorDeps: io.doctorDeps,
+        });
+        return r.code;
+      } catch (e) {
+        err(`metistry migrate-shape: ${e instanceof Error ? e.message : String(e)}`);
+        return 1;
+      }
     }
     case "restart":
     case "stop":

@@ -20,11 +20,13 @@ import { usesCompose, type Deployment } from "@foldedspacelabs/metistry-core";
 import { assistantEnv, consoleEnv, consolePort, dbPort, loadDeployment, type ShapeContext } from "./deployment.js";
 import { doctor, renderTable, type DoctorDeps, type DoctorReport } from "./doctor.js";
 import type { Exec } from "./exec.js";
-import { GIT_SPAWNING_SERVICES, launchAgentsDir, launchdCommands, loadPlistTemplates, nodeOnPath, renderPlist, renderSystemdUnit, withEnvironmentVariables, type PlistTemplate, type PlistValues } from "./launchd.js";
+import { GIT_SPAWNING_SERVICES, LABEL_PREFIX, launchAgentsDir, launchdCommands, loadPlistTemplates, nodeOnPath, renderPlist, renderSystemdUnit, withEnvironmentVariables, type PlistTemplate, type PlistValues } from "./launchd.js";
+import { shellUnsafeEnvLines } from "./env.js";
 import { ensureInstanceId, envPaths } from "./instance.js";
+import { allocateBase, applyPorts, loadNamespace, portEnv, PORTED_SERVICES, portsFile, portsOf, serializeNamespace, suffixFor, type Namespace } from "./namespace.js";
 import { instanceLockPath, readLock, type LockFile, type LockSource } from "./lock.js";
 import { currentLink, imageEnv, imageRef, IMAGE_SERVICES } from "./release.js";
-import { installRuntimeDeps, pathWithRuntimeGit, runtimeDepsEnabled, RUNTIME_DIRNAME } from "./runtime-deps.js";
+import { installRuntimeDeps, pathWithRuntimeGit, runtimeDepsEnabled, runtimeNodeBin, RUNTIME_DIRNAME } from "./runtime-deps.js";
 import {
   applyManagedBlock,
   findPgToolchain,
@@ -63,6 +65,10 @@ export interface UpOptions {
   envFile?: string | undefined;
   /** test seam: the deployment shape, normally read from deployment.yaml */
   deployment?: Deployment | undefined;
+  /** `--namespace`: allocate this instance its own launchd label suffix and port block (writes `<instance>/state/ports.yaml` once) */
+  namespace?: boolean | undefined;
+  /** test seam: the port probe `--namespace` allocates with */
+  portFree?: ((port: number) => Promise<boolean>) | undefined;
   /** test seam: filesystem probes (the Postgres toolchain, an initialised data dir) */
   exists?: ((p: string) => boolean) | undefined;
   /** test seam: the password generated for a fresh Postgres */
@@ -142,6 +148,23 @@ export interface LaunchdEnv {
 
 // ---- the launchd shape's per-service values ---------------------------------
 
+/**
+ * The node binary every launchd job execs (`__NODE__`).
+ *
+ * A bundled runtime's own node WINS. That is the whole point of the
+ * bundled runtime (docs/ops/bundled-runtime.md): a clean Mac has no node
+ * at all, a launchd job's PATH is `/usr/bin:/bin:…` with no login shell,
+ * and pointing the jobs at whatever `node` happened to be on the
+ * operator's PATH ties a bundled install to a Homebrew that may not exist
+ * and will not exist forever. Falls back to `$(which node)` — a checkout
+ * install is unchanged.
+ */
+export function nodeFor(productDir: string, env: NodeJS.ProcessEnv, exists: (p: string) => boolean = existsSync): { node: string; why: string } {
+  const bundled = runtimeNodeBin(productDir);
+  if (exists(bundled)) return { node: bundled, why: `bundled ${RUNTIME_DIRNAME}/node/bin/node` };
+  return { node: nodeOnPath(env, process.execPath, exists), why: "$(which node)" };
+}
+
 /** The root the instance's derived state hangs off: the instance repo when there is one, else the checkout. */
 export function stateRoot(productDir: string, env: NodeJS.ProcessEnv): string {
   return env.METISTRY_INSTANCE_DIR?.replace(/\/+$/, "") || productDir;
@@ -157,6 +180,8 @@ export interface ShapeValues extends ShapeContext {
   pgData?: string | undefined;
   /** `<install>/runtime/git/bin:/usr/bin:…` when a bundled git is installed; undefined otherwise */
   gitPath?: string | undefined;
+  /** this instance's namespace (namespace.ts); undefined = the fixed default labels and ports */
+  namespace?: Namespace | undefined;
   home: string;
 }
 
@@ -172,10 +197,10 @@ export function plistValuesFor(t: PlistTemplate, v: ShapeValues): PlistValues {
     case "console":
       return { ...base, env: consoleEnv(v) };
     case "assistant": {
-      const p = sandboxParams({ productDir: v.productDir, nodeBin: v.node, stateDir: v.stateDir, consolePort: consolePort(v.env), tmpDir: tmpDirOf(v.env) });
+      const p = sandboxParams({ productDir: v.productDir, nodeBin: v.node, stateDir: v.stateDir, consolePort: consolePort(v.env), dbPort: dbPort(v.env), tmpDir: tmpDirOf(v.env) });
       // every path parameter is the REAL path: the kernel matches the
       // profile's subpaths after resolving symlinks (/tmp → /private/tmp)
-      return { ...base, env: assistantEnv(v), extra: { NODE_PREFIX: p.NODE_PREFIX, PRODUCT_DIR: p.PRODUCT_DIR, STATE_DIR: p.STATE_DIR, TMP_DIR: p.TMP_DIR, CONSOLE_TCP: p.CONSOLE_TCP } };
+      return { ...base, env: assistantEnv(v), extra: { NODE_PREFIX: p.NODE_PREFIX, PRODUCT_DIR: p.PRODUCT_DIR, STATE_DIR: p.STATE_DIR, TMP_DIR: p.TMP_DIR, CONSOLE_TCP: p.CONSOLE_TCP, DB_TCP: p.DB_TCP } };
     }
     case "db":
       return { ...base, extra: { PG_BIN: v.pgBin ?? "", PG_DATA: v.pgData ?? pgDataDir(stateRoot(v.productDir, v.env)) } };
@@ -184,12 +209,69 @@ export function plistValuesFor(t: PlistTemplate, v: ShapeValues): PlistValues {
   }
 }
 
+/**
+ * This instance's namespace, allocating one on `--namespace` when it has
+ * none yet. Allocation is a probe (is this block free right now?) followed
+ * by a write, and it happens EXACTLY ONCE per instance: after that
+ * `state/ports.yaml` is the record, so a re-run of `up` on a running
+ * instance never sees its own ports as taken and never moves them.
+ */
+export async function ensureNamespace(
+  r: StepRunner,
+  opts: { instanceDir?: string | undefined; instanceId?: string | undefined; want: boolean; portFree?: ((port: number) => Promise<boolean>) | undefined },
+): Promise<Namespace | undefined> {
+  const existing = await loadNamespace(opts.instanceDir);
+  if (existing) {
+    if (opts.want) r.note(`--namespace: ${portsFile(opts.instanceDir!)} already allocates this instance's block — it is never reallocated`);
+    return existing;
+  }
+  if (!opts.want) return undefined;
+  if (!opts.instanceDir) throw new StepFailed("--namespace needs an instance directory: pass --instance <dir> or set METISTRY_INSTANCE_DIR");
+  if (!opts.instanceId) throw new StepFailed(`--namespace needs this instance's instance_id, and ${opts.instanceDir}/identity.yaml has none — run \`metistry init\` (or \`metistry secrets sync\`) first`);
+  const file = portsFile(opts.instanceDir);
+  // the probe runs even in a dry run — it binds nothing and frees what it
+  // binds, and a plan that showed the DEFAULT labels while the real run used
+  // namespaced ones would be a plan of a different install
+  const base = await allocateBase(opts.instanceId, opts.portFree);
+  const ns: Namespace = { labelSuffix: suffixFor(opts.instanceId), base, ports: portsOf(base), from: file };
+  await r.write(file, serializeNamespace(ns, opts.instanceId), `allocated once: labels ${LABEL_PREFIX}${ns.labelSuffix}.<service>, ports ${base}-${base + PORTED_SERVICES.length - 1}`);
+  return ns;
+}
+
+/** How long `up` waits for `launchctl bootout` to finish before bootstrapping the same label again (25 × 200ms = 5s). */
+export const BOOTOUT_TRIES = 25;
+export const BOOTOUT_INTERVAL_MS = 200;
+
+/**
+ * Wait until `launchctl print gui/<uid>/<label>` stops finding the job.
+ *
+ * `bootout` is asynchronous: it returns while launchd is still tearing the
+ * job down, and a `bootstrap` of the same label in that window fails with
+ * `Bootstrap failed: 5: Input/output error`. Polling `print` is the only
+ * thing launchctl offers that answers "is it gone yet". A timeout is NOT
+ * an error here — the bootstrap that follows will report the real problem
+ * with launchd's own words rather than ours.
+ */
+export async function awaitBootout(r: StepRunner, label: string, uid: number, sleep: (ms: number) => Promise<void> = (ms) => new Promise((res) => setTimeout(res, ms))): Promise<boolean> {
+  if (r.dryRun) {
+    r.note(`wait for gui/${uid}/${label} to be gone before bootstrapping it (bootout is asynchronous)`);
+    return true;
+  }
+  for (let i = 0; i < BOOTOUT_TRIES; i++) {
+    const p = await r.exec("launchctl", ["print", `gui/${uid}/${label}`], { env: r.env });
+    if (p.code !== 0) return true;
+    await sleep(BOOTOUT_INTERVAL_MS);
+  }
+  r.note(`gui/${uid}/${label} is still loaded ${(BOOTOUT_TRIES * BOOTOUT_INTERVAL_MS) / 1000}s after bootout — bootstrapping anyway`);
+  return false;
+}
+
 /** The plists whose EnvironmentVariables dict holds this install's secrets, so they are written 0600. */
 export const SECRET_BEARING_SERVICES = new Set(["console", "assistant"]);
 
 /** Render every template into ~/Library/LaunchAgents and (re)bootstrap it; on anything but macOS, print the systemd units instead. */
 export async function installLaunchd(r: StepRunner, productDir: string, le: LaunchdEnv, deployment: Deployment, values: ShapeValues): Promise<void> {
-  const templates = await loadPlistTemplates(productDir, deployment.shape);
+  const templates = await loadPlistTemplates(productDir, deployment.shape, values.namespace?.labelSuffix);
   if (templates.length === 0) {
     r.note("no ops/launchd/*.plist in this checkout — nothing to install");
     return;
@@ -210,14 +292,25 @@ export async function installLaunchd(r: StepRunner, productDir: string, le: Laun
     // a launchd job's PATH is /usr/bin:/bin and nothing else, so a bundled git
     // has to be put there explicitly for the job that spawns one
     const gitPath = values.gitPath && GIT_SPAWNING_SERVICES.has(t.service) ? { PATH: values.gitPath } : undefined;
-    const from = `ops/launchd/${t.file}, __REPO__=${productDir}, __NODE__=${le.node}, __ENV_FILE__=${values.envFile}${v.env ? `, ${Object.keys(v.env).length} EnvironmentVariables from ${values.envFile}` : ""}${gitPath ? `, PATH=${values.gitPath}` : ""}`;
+    // the jobs `up` renders a whole environment for (console, assistant) already
+    // have the namespace's ports — it was applied to `env` before this. The
+    // ones that source `<instance>/state/.env` themselves see only that file,
+    // which knows nothing about this instance's block, so they get it here or
+    // they bind the DEFAULT install's ports.
+    const nsPorts = values.namespace && !v.env ? portEnv(values.namespace) : undefined;
+    const extraEnv = { ...(gitPath ?? {}), ...(nsPorts ?? {}) };
+    const from = `ops/launchd/${t.file}, __REPO__=${productDir}, __NODE__=${le.node}, __ENV_FILE__=${values.envFile}${v.env ? `, ${Object.keys(v.env).length} EnvironmentVariables from ${values.envFile}` : ""}${gitPath ? `, PATH=${values.gitPath}` : ""}${nsPorts ? `, ${Object.keys(nsPorts).length} namespaced ports` : ""}`;
     const rendered = renderPlist(t.template, v);
-    await r.write(target, gitPath ? withEnvironmentVariables(rendered, gitPath) : rendered, from);
+    await r.write(target, Object.keys(extraEnv).length > 0 ? withEnvironmentVariables(rendered, extraEnv) : rendered, from);
     // the console's and the assistant's dicts carry db passwords, bridge
     // tokens and CLAUDE_CODE_OAUTH_TOKEN; ~/Library/LaunchAgents is 0755, so
     // the file itself has to be the boundary
     if (SECRET_BEARING_SERVICES.has(t.service)) await r.run("chmod", ["600", target], { comment: "the env dict holds secrets" });
     for (const c of launchdCommands(t.label, target, le.uid)) {
+      if (c.awaitGone) {
+        await awaitBootout(r, t.label, le.uid);
+        continue;
+      }
       await r.run(c.cmd, c.args, { tolerateFailure: c.tolerateFailure, comment: c.tolerateFailure ? "ok if not loaded" : undefined });
     }
   }
@@ -356,11 +449,14 @@ export async function up(opts: UpOptions): Promise<UpResult> {
   // instance's deployment.yaml still wins over the seed (D4)
   const loaded = opts.deployment ? { deployment: opts.deployment, from: "caller" } : await loadDeployment(runDir, env);
   const deployment = loaded.deployment;
+  // the install root, not the release: `runtime/` sits BESIDE releases/, so a
+  // version flip never orphans the node the plists exec
+  const chosenNode = opts.node ? { node: opts.node, why: "--node" } : nodeFor(opts.productDir, env, opts.exists ?? existsSync);
   const le: LaunchdEnv = {
     platform: opts.platform ?? process.platform,
     uid: opts.uid ?? (typeof process.getuid === "function" ? process.getuid() : 0),
     home: opts.home ?? env.HOME ?? "",
-    node: opts.node ?? nodeOnPath(env),
+    node: chosenNode.node,
   };
   const instanceDir = env.METISTRY_INSTANCE_DIR ? { instanceDir: env.METISTRY_INSTANCE_DIR.replace(/\/+$/, "") } : {};
   // `.env` belongs to the INSTANCE (`state/.env`); a product-checkout one is
@@ -384,15 +480,28 @@ export async function up(opts: UpOptions): Promise<UpResult> {
   };
   r.note(`product: ${runDir} (${source === "release" ? `pinned release${lock ? ` ${lock.product.version}` : ""} — images pulled, not built` : "git checkout — images built from source"})`);
   r.note(`shape: ${deployment.shape} — from ${loaded.from}`);
+  r.note(`node: ${le.node} (${chosenNode.why}) — every launchd job execs this`);
   // the notice itself is main.ts's job (it prints to stderr, once per run);
   // here it is one line of the plan, so the operator sees which file the
   // rendered plists and compose will actually read
   r.note(`env: ${envFile}${paths?.pendingMove ? " — the product checkout's; `metistry secrets sync --to env` moves it to " + paths.write : paths?.legacy ? ` (${paths.legacy} still read as a deprecated fallback)` : ""}`);
   // an instance created before instance_id existed gets one here, so the
   // Mac app and `secrets` can tell this instance from any other on the Mac
+  let instanceId: string | undefined;
   if (instanceDir.instanceDir) {
     const id = await ensureInstanceId(r, { instanceDir: instanceDir.instanceDir, env, platform: le.platform, uid: le.uid, fetchFn: opts.fetchFn ?? fetch });
     r.note(id.detail);
+    if (id.id) instanceId = id.id;
+  }
+  // the namespace: one file, allocated once, then read. It is what lets a
+  // SECOND instance run beside the first — without it an install keeps the
+  // fixed labels and ports it has always had
+  const ns = await ensureNamespace(r, { instanceDir: instanceDir.instanceDir, instanceId, want: opts.namespace === true, portFree: opts.portFree });
+  if (ns) {
+    values.namespace = ns;
+    const applied = applyPorts(env, ns);
+    r.note(`namespace: labels ${LABEL_PREFIX}${ns.labelSuffix}.<service>, ports ${ns.base}-${ns.base + PORTED_SERVICES.length - 1} — from ${ns.from}`);
+    r.note(applied.length ? `namespace → environment: ${applied.join(" ")}` : "namespace → environment: nothing to fill; .env already sets every port and URL");
   }
   let failure: StepFailed | undefined;
 
@@ -410,6 +519,19 @@ export async function up(opts: UpOptions): Promise<UpResult> {
       r.note("--no-launchd: host jobs left as they are");
     } else {
       if (le.platform === "darwin" && !le.home) throw new StepFailed("HOME is unset — cannot find ~/Library/LaunchAgents");
+      // the jobs that source this file do it with `sh`, which RUNS it — a
+      // value with a space in it must be quoted or four jobs respawn forever
+      // with a one-line shell error as their only symptom
+      if (le.platform === "darwin" && existsSync(envFile)) {
+        const unsafe = shellUnsafeEnvLines(await readFile(envFile, "utf8"));
+        if (unsafe.length > 0) {
+          throw new StepFailed(
+            `${envFile} has ${unsafe.length} value(s) that \`sh\` would not read the way metistry does: ${unsafe.map((u) => `${u.key} (line ${u.line})`).join(", ")}. ` +
+              `The reconciler, watchdog and TCC bridge jobs load this file with \`set -a; . <file>\`, so a value containing a space or a shell metacharacter must be quoted — ` +
+              `write KEY="the value" and re-run. Nothing was installed.`,
+          );
+        }
+      }
       let pg: PgSection | undefined;
       if (deployment.shape === "launchd" && le.platform === "darwin") {
         r.section("postgres");

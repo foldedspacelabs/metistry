@@ -23,6 +23,38 @@ export function parseDotEnv(text: string): Record<string, string> {
   return out;
 }
 
+/**
+ * Lines in a dotenv file that THIS parser reads one way and `/bin/sh` reads
+ * another.
+ *
+ * Four launchd jobs (reconciler, watchdog, and the two TCC bridges) load
+ * their environment with `sh -c "set -a; . <file>; set +a; exec …"`, which
+ * does not parse the file — it RUNS it. `KEY=/Users/x/Library/Application
+ * Support/…` is then the command `Support/…` with `KEY` in its
+ * environment, the job exits 1, and the only clue is
+ * `/bin/sh: /Users/x/Library/Application: No such file or directory` in a
+ * log (2026-09-10 launchd trial — and `~/Library/Application Support` is
+ * exactly where the Mac app puts an instance).
+ *
+ * A value is safe when it is quoted, or when it contains no whitespace and
+ * no shell metacharacter. Anything else is reported by name so `up` can
+ * refuse with a remediation instead of leaving four jobs respawning.
+ */
+export function shellUnsafeEnvLines(text: string): { key: string; line: number }[] {
+  const out: { key: string; line: number }[] = [];
+  text.split("\n").forEach((raw, i) => {
+    const line = raw.trim();
+    if (line === "" || line.startsWith("#")) return;
+    const m = /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(line);
+    if (!m?.[1]) return;
+    const v = (m[2] ?? "").trim();
+    if (v === "") return;
+    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) return;
+    if (/[\s"'`$&|;<>()*?\\!#~]/.test(v)) out.push({ key: m[1], line: i + 1 });
+  });
+  return out;
+}
+
 /** Load one dotenv-shaped file into `env` for variables that are unset. Returns the number applied; 0 when the file is absent. */
 export function loadEnvFile(file: string, env: NodeJS.ProcessEnv = process.env): number {
   if (!existsSync(file)) return 0;

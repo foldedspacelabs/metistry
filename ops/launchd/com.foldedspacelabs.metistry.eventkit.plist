@@ -14,7 +14,7 @@
   <array>
     <string>/bin/sh</string>
     <string>-c</string>
-    <string>set -a; . __ENV_FILE__; set +a; exec __NODE__ __REPO__/packages/mcp-eventkit/dist/main.js</string>
+    <string>set -a; . '__ENV_FILE__'; set +a; exec '__NODE__' '__REPO__/packages/mcp-eventkit/dist/main.js'</string>
   </array>
   <key>WorkingDirectory</key><string>__REPO__</string>
   <key>KeepAlive</key><true/>

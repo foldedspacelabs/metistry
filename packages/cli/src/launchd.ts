@@ -20,9 +20,49 @@ export const PLACEHOLDERS = ["__REPO__", "__NODE__", "__ENV_FILE__"] as const;
 /** Every job's label is the reverse-DNS prefix plus the service name. */
 export const LABEL_PREFIX = "com.foldedspacelabs.metistry.";
 
-/** `com.foldedspacelabs.metistry.console` → `console`. */
+/**
+ * `com.foldedspacelabs.metistry.console` → `console`, and
+ * `com.foldedspacelabs.metistry.a1b2c3d4.console` → `console` too: a
+ * NAMESPACED install (namespace.ts) puts the instance's suffix between the
+ * prefix and the service, so a second instance's jobs cannot collide with
+ * the first's. Service names carry no dots (`apple-fm`,
+ * `eventkit-helper`), so the last component is always the service.
+ */
 export function serviceOf(label: string): string {
-  return label.startsWith(LABEL_PREFIX) ? label.slice(LABEL_PREFIX.length) : label;
+  const rest = label.startsWith(LABEL_PREFIX) ? label.slice(LABEL_PREFIX.length) : label;
+  const dot = rest.indexOf(".");
+  return dot === -1 ? rest : rest.slice(dot + 1);
+}
+
+/** The label a service's job carries, in this install's namespace. `undefined` suffix = today's fixed label. */
+export function labelFor(service: string, suffix?: string | undefined): string {
+  return `${LABEL_PREFIX}${suffix ? `${suffix}.` : ""}${service}`;
+}
+
+/** `/tmp/metistry-console.log`, or `/tmp/metistry-a1b2c3d4-console.log` when namespaced — two instances must not write one log. */
+export function logPathFor(service: string, suffix?: string | undefined): string {
+  return `/tmp/metistry-${suffix ? `${suffix}-` : ""}${service}.log`;
+}
+
+/**
+ * Rewrite a template into an instance's namespace: the Label, the plist's
+ * own file name, and the StandardOut/StandardError paths. Done to the
+ * TEMPLATE TEXT rather than after rendering, so every later consumer
+ * (`parsePlistTemplate`'s fields, the `__ENV__` dict, the by-hand `sed`
+ * recipe in each plist's comment) sees one consistent job.
+ */
+export function withNamespace(t: PlistTemplate, suffix: string | undefined): PlistTemplate {
+  if (!suffix) return t;
+  const label = labelFor(t.service, suffix);
+  const log = logPathFor(t.service, suffix);
+  const template = t.template.split(t.label).join(label).split(logPathFor(t.service)).join(log);
+  return {
+    ...t,
+    file: `${label}.plist`,
+    label,
+    template,
+    ...(t.standardOutPath !== undefined ? { standardOutPath: log } : {}),
+  };
 }
 
 export interface PlistTemplate {
@@ -82,7 +122,7 @@ export function parsePlistTemplate(file: string, template: string): PlistTemplat
  * is `compose`, so a caller that does not know the shape gets exactly the
  * set that existed before deployment.yaml did.
  */
-export async function loadPlistTemplates(productDir: string, shape: DeploymentShape = "compose"): Promise<PlistTemplate[]> {
+export async function loadPlistTemplates(productDir: string, shape: DeploymentShape = "compose", labelSuffix?: string | undefined): Promise<PlistTemplate[]> {
   const dir = join(productDir, "ops", "launchd");
   if (!existsSync(dir)) return [];
   const shaped = new Set<string>(SHAPED_SERVICES);
@@ -90,7 +130,7 @@ export async function loadPlistTemplates(productDir: string, shape: DeploymentSh
   for (const f of (await readdir(dir)).filter((f) => f.endsWith(".plist")).sort()) {
     const t = parsePlistTemplate(f, await readFile(join(dir, f), "utf8"));
     if (shape !== "launchd" && shaped.has(t.service)) continue;
-    out.push(t);
+    out.push(withNamespace(t, labelSuffix));
   }
   return out;
 }
@@ -125,12 +165,24 @@ export interface PlistValues {
  * rendered dict body. Throws if a placeholder would be left behind — a
  * plist with `__PG_DATA__` still in it is a job that fails at 2am, not a
  * cosmetic problem.
+ *
+ * A single quote in a substituted value is refused for the same class of
+ * reason. Four plists build a `/bin/sh -c` string, and the placeholders
+ * inside it are wrapped in single quotes so a path with a SPACE works —
+ * `~/Library/Application Support/Metistry/…` is the Mac app's default
+ * product and instance location, and unquoted it produced
+ * `/bin/sh: /Users/…/Library/Application: No such file or directory`
+ * (found by the 2026-09-10 launchd trial). A value carrying a quote of its
+ * own would escape that wrapping, so it is rejected rather than escaped:
+ * nobody needs an apostrophe in an install path, and a refusal is a
+ * message where a mis-escape is a shell injection.
  */
 export function renderPlist(template: string, values: PlistValues): string {
   const subs: Record<string, string> = { __REPO__: values.repo, __NODE__: values.node, __ENV_FILE__: values.envFile };
   for (const [k, v] of Object.entries(values.extra ?? {})) subs[`__${k}__`] = v;
   for (const [k, v] of Object.entries(subs)) {
     if (v.includes("__")) throw new Error(`refusing to render a plist with "${v}" for ${k}: it contains "__"`);
+    if (v.includes("'")) throw new Error(`refusing to render a plist with "${v}" for ${k}: a single quote would escape the shell quoting in the sh -c jobs — move the install somewhere without one`);
     if (v.trim() === "") throw new Error(`refusing to render a plist with an empty ${k}`);
   }
   let rendered = template;
@@ -148,10 +200,10 @@ export function renderPlist(template: string, values: PlistValues): string {
  * brew upgrade and takes every host job down with it (the Phase 0
  * versioned-path lesson). Falls back to execPath when PATH has no node.
  */
-export function nodeOnPath(env: NodeJS.ProcessEnv = process.env, execPath = process.execPath): string {
+export function nodeOnPath(env: NodeJS.ProcessEnv = process.env, execPath = process.execPath, exists: (p: string) => boolean = existsSync): string {
   for (const dir of (env.PATH ?? "").split(":").filter(Boolean)) {
     const candidate = join(dir, "node");
-    if (existsSync(candidate)) return candidate;
+    if (exists(candidate)) return candidate;
   }
   return execPath;
 }
@@ -196,12 +248,22 @@ export function launchAgentsDir(home: string): string {
 
 /**
  * The launchd steps for one job, in order: bootout (tolerated when not
- * loaded), bootstrap the freshly written plist, kickstart -k so a job that
- * was already running restarts on the new code. Argument arrays only.
+ * loaded), WAIT for it to actually be gone, bootstrap the freshly written
+ * plist, kickstart -k so a job that was already running restarts on the new
+ * code. Argument arrays only.
+ *
+ * The wait is not belt-and-braces. `launchctl bootout` returns before
+ * launchd has finished tearing the job down, so an immediate `bootstrap`
+ * of the same label races it and fails with `Bootstrap failed: 5:
+ * Input/output error` — which aborts `up` partway, leaving the jobs after
+ * it in the alphabet uninstalled. Found by the 2026-09-10 launchd trial,
+ * where a second `metistry up` on a running install failed roughly every
+ * time.
  */
-export function launchdCommands(label: string, plistPath: string, uid: number): { cmd: string; args: string[]; tolerateFailure?: boolean }[] {
+export function launchdCommands(label: string, plistPath: string, uid: number): { cmd: string; args: string[]; tolerateFailure?: boolean; awaitGone?: boolean }[] {
   return [
     { cmd: "launchctl", args: ["bootout", `gui/${uid}/${label}`], tolerateFailure: true },
+    { cmd: "launchctl", args: ["print", `gui/${uid}/${label}`], awaitGone: true },
     { cmd: "launchctl", args: ["bootstrap", `gui/${uid}`, plistPath] },
     { cmd: "launchctl", args: ["kickstart", "-k", `gui/${uid}/${label}`] },
   ];
@@ -209,14 +271,20 @@ export function launchdCommands(label: string, plistPath: string, uid: number): 
 
 /**
  * The systemd user unit that says the same thing as a plist (Linux follow-up;
- * printed by `up`, never written). `set -a; . .env; set +a; exec node …` in
+ * printed by `up`, never written). `set -a; . '.env'; set +a; exec node …` in
  * the plist becomes EnvironmentFile= + ExecStart= so no shell is involved.
+ *
+ * The plist's shell string single-quotes its paths (a space in
+ * `~/Library/Application Support/…` otherwise splits the command). ExecStart
+ * keeps that quoting — systemd parses quoted arguments the same way — but
+ * `EnvironmentFile=` does not: systemd takes the rest of that line
+ * literally, quotes included, so the path goes in bare.
  */
 export function renderSystemdUnit(t: PlistTemplate, values: { repo: string; node: string; envFile: string }): string {
   const sub = (s: string) => s.replace(/__REPO__/g, values.repo).replace(/__NODE__/g, values.node).replace(/__ENV_FILE__/g, values.envFile);
   const shell = t.programArguments[0] === "/bin/sh" && t.programArguments[1] === "-c" ? t.programArguments[2] : undefined;
   const execLine = shell ? (/exec\s+(.+)$/.exec(shell)?.[1] ?? shell) : t.programArguments.join(" ");
-  const envFile = shell && /\.\s+__ENV_FILE__/.test(shell) ? `EnvironmentFile=${values.envFile}\n` : "";
+  const envFile = shell && /\.\s+'?__ENV_FILE__/.test(shell) ? `EnvironmentFile=${values.envFile}\n` : "";
   const envLines = Object.entries(t.environment)
     .map(([k, v]) => `Environment=${k}=${sub(v)}\n`)
     .join("");

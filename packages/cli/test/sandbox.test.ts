@@ -10,7 +10,8 @@
 //   1. reading a ~/Documents-style path outside the allowed subpaths fails
 //   2. writing outside the state dir fails
 //   3. writing inside the state dir succeeds
-//   4. connecting to the console's port succeeds; any other port does not
+//   4. connecting to the console's port and to Postgres' succeeds; any
+//      other loopback port does not
 //
 // Darwin only: sandbox-exec is a macOS binary, and CI runs on Linux.
 
@@ -47,8 +48,9 @@ describe("sandbox parameters", () => {
   });
 
   it("renders sandbox-exec as an argument array — never a shell string", () => {
-    const params = sandboxParams({ productDir: "/p", nodeBin: "/n/bin/node", stateDir: "/s", consolePort: 8080, tmpDir: "/tmp", realpath: (p) => p });
+    const params = sandboxParams({ productDir: "/p", nodeBin: "/n/bin/node", stateDir: "/s", consolePort: 8080, dbPort: 5432, tmpDir: "/tmp", realpath: (p) => p });
     expect(params.CONSOLE_TCP).toBe("localhost:8080");
+    expect(params.DB_TCP).toBe("localhost:5432");
     expect(sandboxArgv("/p/ops/sandbox/assistant.sb", params, ["/n/bin/node", "/p/main.js"])).toEqual([
       SANDBOX_EXEC,
       "-f",
@@ -65,6 +67,8 @@ describe("sandbox parameters", () => {
       "TMP_DIR=/tmp",
       "-D",
       "CONSOLE_TCP=localhost:8080",
+      "-D",
+      "DB_TCP=localhost:5432",
       "/n/bin/node",
       "/p/main.js",
     ]);
@@ -76,6 +80,7 @@ describe.skipIf(process.platform !== "darwin" || !existsSync(SANDBOX_EXEC))("ops
   let root = "";
   let servers: net.Server[] = [];
   let consolePort = 0;
+  let dbPort = 0;
   let otherPort = 0;
 
   const listen = () =>
@@ -100,7 +105,7 @@ describe.skipIf(process.platform !== "darwin" || !existsSync(SANDBOX_EXEC))("ops
       join(root, "app", "probe.mjs"),
       `import { readFileSync, writeFileSync } from "node:fs";
 import net from "node:net";
-const [, , stateDir, outsideRead, outsideWrite, okPort, badPort] = process.argv;
+const [, , stateDir, outsideRead, outsideWrite, okPort, dbPort, badPort] = process.argv;
 const attempt = (fn) => { try { fn(); return "allowed"; } catch (e) { return "denied:" + (e.code ?? e.message); } };
 const connect = (port) => new Promise((res) => {
   const s = net.connect({ host: "127.0.0.1", port: Number(port) });
@@ -115,25 +120,28 @@ console.log(JSON.stringify({
   write_state: attempt(() => writeFileSync(stateDir + "/probe.txt", "x")),
   read_own_code: attempt(() => readFileSync(process.argv[1], "utf8")),
   connect_console: await connect(okPort),
+  connect_db: await connect(dbPort),
   connect_other: await connect(badPort),
 }));
 `,
     );
-    servers = [await listen(), await listen()];
+    servers = [await listen(), await listen(), await listen()];
     consolePort = (servers[0]!.address() as net.AddressInfo).port;
-    otherPort = (servers[1]!.address() as net.AddressInfo).port;
+    dbPort = (servers[1]!.address() as net.AddressInfo).port;
+    otherPort = (servers[2]!.address() as net.AddressInfo).port;
   }, 30_000);
 
   afterAll(() => {
     for (const s of servers) s.close();
   });
 
-  it("denies the vault, denies every write but its state dir, and reaches the console and nothing else", async () => {
+  it("denies the vault, denies every write but its state dir, and reaches the console and the db and nothing else", async () => {
     const params = sandboxParams({
       productDir: join(root, "app"),
       nodeBin: process.execPath,
       stateDir: join(root, "state"),
       consolePort,
+      dbPort,
       tmpDir: join(root, "tmp"),
     });
     const argv = sandboxArgv(sandboxProfilePath(REPO), params, [
@@ -143,6 +151,7 @@ console.log(JSON.stringify({
       join(root, "documents", "private.md"),
       join(root, "documents", "written.txt"),
       String(consolePort),
+      String(dbPort),
       String(otherPort),
     ]);
     const { stdout } = await run(argv[0]!, argv.slice(1), { timeout: 60_000 });
@@ -152,6 +161,11 @@ console.log(JSON.stringify({
       write_state: "allowed",
       read_own_code: "allowed",
       connect_console: "allowed",
+      // the engine holds its own pg pool, and under launchd the db is a
+      // loopback port like any other — without this rule it dies at startup
+      connect_db: "allowed",
+      // and a THIRD loopback port is still denied: this is two named
+      // endpoints, not "loopback is fine"
       connect_other: "denied:EPERM",
     });
   }, 90_000);

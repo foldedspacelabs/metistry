@@ -38,14 +38,18 @@ private func model() -> FirstRunModel {
         "--instance", "/Users/you/instance", "--auth", "device",
         "--product-dir", "/src",
     ])
+    // both carry --instance: an instance directory is self-contained, so the
+    // app has to say which one it opened
     #expect(m.plannedArguments(.secrets) == [
         "/usr/bin/node", "/src/packages/cli/dist/main.js",
         "secrets", "sync", "--to", "keychain",
+        "--instance", "/Users/you/instance",
         "--product-dir", "/src",
     ])
     #expect(m.plannedArguments(.services) == [
         "/usr/bin/node", "/src/packages/cli/dist/main.js",
-        "up", "--product-dir", "/src",
+        "up", "--instance", "/Users/you/instance",
+        "--product-dir", "/src",
     ])
     // Steps that run nothing say so rather than inventing a command.
     #expect(m.plannedArguments(.runtime) == nil)

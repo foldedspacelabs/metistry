@@ -1070,3 +1070,23 @@ into the gap between the dump and the stop, a bridge re-render that sent a
 second install looking for the *first* install's port, and a final health
 verdict that raced the jobs it had just started — a false failure being
 precisely the thing that makes someone roll back a cutover that worked.
+
+**2026-09-10 — the app cashes that in: "Signed in as owner" on screen, and no
+token in the app at all.** The Mac app now shows who the console takes this Mac
+to be — in the Status header, in Settings → Connections and beside the console
+row in the menu bar — and it gets there without ever touching the secret: it
+runs `metistry console whoami --json` and renders the answer, because the CLI
+is the one place that knows where the token lives. A test walks the app's own
+source and asserts it, rather than trusting a comment: one file uses
+`URLSession`, no file sets an `Authorization` header, no file names a Keychain
+API, and no file opens a file at all. When it *cannot* say "signed in" it says
+which of five things is true and, for the two that have one, the exact command
+— including telling a 401 apart by deployment shape, so a compose install is
+pointed at the Docker-gateway rule and a launchd install at a console that
+needs restarting with the token it was given. **The user-visible promise: the
+first-run wizard stopped asking your Mac to enrol a passkey.** Step 6 is
+optional now and says so — "your Mac is signed in automatically; enrol a
+passkey only for browsers and your phone" — with the enrolment code kept intact
+for exactly those, and the `ASAuthorization` probe moved to Settings → Advanced
+where a diagnostic belongs. One less ceremony in the install, and one less
+credential that had no reason to exist.

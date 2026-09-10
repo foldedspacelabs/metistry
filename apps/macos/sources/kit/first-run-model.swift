@@ -4,11 +4,21 @@
 // All seven do something now. Step 1 installs the bundle's read-only runtime to
 // a writable product dir (`metistry runtime install`); step 5 SETS the
 // deployment shape after previewing it (`metistry deployment set-shape --yes`)
-// rather than explaining that it cannot; step 6 enrols a passkey, or says
-// precisely why the local origin refuses one and falls back to the console's own
-// enrolment (passkey-enrolment.swift); step 7 guides `claude setup-token` and
+// rather than explaining that it cannot; step 7 guides `claude setup-token` and
 // watches for the token appearing, without ever handling its value
 // (claude-token.swift).
+//
+// STEP 6 CHANGED SHAPE on 2026-09-10 (owner decision). It used to be "enrol a
+// passkey, or explain at length why this origin cannot host one". It is now
+// "your Mac is already signed in; enrol a passkey only for the devices that are
+// not this Mac". The app and the CLI are the same package on the same machine,
+// so the console takes the local owner token as the `user` principal over
+// loopback and there is nothing for a ceremony to add (docs/ops/auth.md). The
+// step therefore LEADS with `consoleSignIn` — the same state the Status header
+// and Settings → Connections show — and offers the console's enrolment code for
+// browsers and the phone. The `ASAuthorization` probe is still real measured
+// behaviour and is still reachable, under Settings → Advanced, where a
+// diagnostic belongs.
 //
 // What this file must never grow: a second implementation of a step. If the app
 // needs a behaviour the CLI does not have, the CLI gets it first and the app
@@ -58,7 +68,7 @@ public enum FirstRunStep: Int, CaseIterable, Identifiable, Sendable {
         case .services:
             return "Bring the install to running: containers or launchd jobs, then doctor."
         case .door:
-            return "Enrol a passkey against the local origin so the console has a door."
+            return "Your Mac is signed in automatically. Enrol a passkey only for browsers and your phone."
         case .claude:
             return "Sign in to Claude and put the token in the Keychain."
         }
@@ -149,6 +159,20 @@ public enum RepoPlan: String, CaseIterable, Sendable, Identifiable {
     public var id: String { rawValue }
 }
 
+/// Step 6's two shapes, since the owner decision of 2026-09-10.
+///
+/// This Mac needs nothing: the app is the same package as the CLI on the same
+/// machine, so the console takes its local owner token as the `user` principal
+/// over loopback and no ceremony happens at all (docs/ops/auth.md). A passkey
+/// is what a BROWSER or a PHONE needs — including Safari on this same Mac,
+/// which presents a different credential than the CLI does.
+public enum DoorPlan: String, CaseIterable, Sendable, Identifiable {
+    case thisMacOnly
+    case otherDevices
+
+    public var id: String { rawValue }
+}
+
 /// `metistry connect-repo --auth device|token|ssh`.
 public enum RepoAuth: String, CaseIterable, Sendable, Identifiable {
     case device
@@ -182,6 +206,11 @@ public final class FirstRunModel {
     /// Neither is a `metistry` verb, so neither fits the generic run row.
     public let passkey: PasskeyEnrolmentModel
     public let claude: ClaudeTokenModel
+    /// Step 6 now LEADS with this: whether the console already takes this Mac as
+    /// the owner. It is the same instance the Status header and Settings →
+    /// Connections show, so the wizard cannot disagree with the rest of the app
+    /// about who is signed in.
+    public let consoleSignIn: ConsoleSignInModel
 
     /// Called after `metistry runtime install` succeeds, so the app re-resolves
     /// and starts using the writable copy it just wrote. The model does not
@@ -198,6 +227,9 @@ public final class FirstRunModel {
     public var instanceMode: InstanceMode = .create
     public var repoPlan: RepoPlan = .now
     public var repoAuth: RepoAuth = .device
+    /// Step 6's choice. `thisMacOnly` is the default because it is what is
+    /// already true: nothing has to happen for this Mac to be signed in.
+    public var doorPlan: DoorPlan = .thisMacOnly
     /// Bridge names (doctor's own — `apple-fm`, `eventkit`) the user asked to
     /// enable. Enabling one means minting its token; see `plannedFollowUps`.
     public var bridgeSelection: Set<String> = []
@@ -206,12 +238,14 @@ public final class FirstRunModel {
         cli: MetistryCLI?,
         resolution: RuntimeResolution,
         passkey: PasskeyEnrolmentModel = PasskeyEnrolmentModel(),
-        claude: ClaudeTokenModel? = nil
+        claude: ClaudeTokenModel? = nil,
+        consoleSignIn: ConsoleSignInModel? = nil
     ) {
         self.cli = cli
         self.resolution = resolution
         self.passkey = passkey
         self.claude = claude ?? ClaudeTokenModel(cli: cli)
+        self.consoleSignIn = consoleSignIn ?? ConsoleSignInModel(cli: cli)
         reset()
     }
 

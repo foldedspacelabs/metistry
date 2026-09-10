@@ -205,6 +205,143 @@ public struct SettingsSection<Content: View>: View {
     }
 }
 
+/// The console sign-in state, rendered the same way everywhere it appears —
+/// the Status header, Settings → Connections and the wizard's door step all
+/// show one of `ConsoleSignIn`'s five answers, so they show it identically.
+///
+/// The token's value is not a thing this view could render: `ConsoleWhoami` has
+/// no field for one (console-sign-in.swift).
+public struct ConsoleSignInCard: View {
+    @Environment(\.colorScheme) private var scheme
+    private let model: ConsoleSignInModel
+    private let title: String
+
+    public init(model: ConsoleSignInModel, title: String = "This Mac") {
+        self.model = model
+        self.title = title
+    }
+
+    public var body: some View {
+        let p = Palette(scheme)
+        VStack(alignment: .leading, spacing: MetistrySpace.s3) {
+            Text(title).metistryText(.headline, p)
+            HStack(alignment: .top, spacing: MetistrySpace.s2) {
+                if model.isChecking {
+                    ProgressView().controlSize(.small)
+                } else if let status = model.status {
+                    StatusDot(status)
+                }
+                VStack(alignment: .leading, spacing: MetistrySpace.s1) {
+                    Text(model.headline)
+                        .metistryText(.callout, p, model.status?.colorRole ?? .textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let detail = model.signIn?.detail {
+                        Text(detail)
+                            .metistryText(.footnote, p, .textSecondary)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            if let remedy = model.signIn?.remedy {
+                CommandCard(title: "To fix it", arguments: remedy)
+            }
+            HStack(spacing: MetistrySpace.s3) {
+                Button("Check Again") { Task { await model.refresh() } }
+                    .disabled(model.isChecking)
+                Spacer(minLength: 0)
+            }
+            if let command = model.lastCommand {
+                Text(command)
+                    .metistryText(.caption1, p, .textTertiary)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .metistryCard(p)
+        .accessibilityElement(children: .contain)
+    }
+}
+
+/// A `WizardOption` list: every option with a pro, a con, and — when it cannot
+/// be taken from the app — the reason it is closed. Not a `Picker`, because
+/// none of that fits in a picker row.
+public struct WizardOptionList<Value: Hashable & Sendable>: View {
+    @Environment(\.colorScheme) private var scheme
+    private let options: [WizardOption<Value>]
+    private let selection: Value
+    private let choose: (Value) -> Void
+
+    public init(_ options: [WizardOption<Value>], selection: Value, choose: @escaping (Value) -> Void) {
+        self.options = options
+        self.selection = selection
+        self.choose = choose
+    }
+
+    public var body: some View {
+        let p = Palette(scheme)
+        VStack(alignment: .leading, spacing: MetistrySpace.s2) {
+            ForEach(options) { option in
+                ChoiceRow(
+                    title: option.title,
+                    detail: option.unavailable ?? "\(option.pro)\n\(option.con)",
+                    selected: option.value == selection,
+                    enabled: option.isAvailable
+                ) { choose(option.value) }
+            }
+        }
+        .metistryCard(p)
+    }
+}
+
+/// One radio-shaped row: a title, both sides of the choice under it.
+public struct ChoiceRow: View {
+    @Environment(\.colorScheme) private var scheme
+    private let title: String
+    private let detail: String
+    private let selected: Bool
+    private let enabled: Bool
+    private let choose: () -> Void
+
+    public init(
+        title: String,
+        detail: String,
+        selected: Bool,
+        enabled: Bool = true,
+        choose: @escaping () -> Void
+    ) {
+        self.title = title
+        self.detail = detail
+        self.selected = selected
+        self.enabled = enabled
+        self.choose = choose
+    }
+
+    public var body: some View {
+        let p = Palette(scheme)
+        Button(action: choose) {
+            HStack(alignment: .top, spacing: MetistrySpace.s3) {
+                Image(systemName: selected ? "largecircle.fill.circle" : "circle")
+                    .foregroundStyle(p[enabled ? (selected ? .accent : .textTertiary) : .absent])
+                VStack(alignment: .leading, spacing: MetistrySpace.s1) {
+                    Text(title).metistryText(.callout, p, enabled ? .textPrimary : .absent)
+                    Text(detail)
+                        .metistryText(.caption1, p, enabled ? .textSecondary : .absent)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.vertical, MetistrySpace.s1)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .accessibilityAddTraits(selected ? [.isSelected] : [])
+    }
+}
+
 /// A status dot plus its label, the §3.13 pair, at row scale.
 public struct StatusDot: View {
     @Environment(\.colorScheme) private var scheme

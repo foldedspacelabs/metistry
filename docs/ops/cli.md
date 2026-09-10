@@ -143,7 +143,7 @@ written under `launchd` since is NOT copied back — the verb prints the
 what to watch, rollback, and when it is safe to `docker compose down -v`.
 
 `metistry console whoami [--json]` asks the running console who it thinks
-you are, presenting this install's `METISTRY_OWNER_TOKEN`
+you are, presenting this install's `METISTRY_LOCAL_OWNER_TOKEN`
 (`docs/ops/auth.md`): the principal, how it was proved, and whether that
 credential reaches the management surface. This is what the app calls to
 render "signed in as owner" without a passkey ceremony, and what an
@@ -245,10 +245,10 @@ four lines for `<dir>/state/.env`, this instance's own environment:
 METISTRY_INSTANCE_DIR=<dir>
 METISTRY_BRIDGE_TOKEN_RECONCILER=<minted once; shown only here>
 METISTRY_RECONCILER_URL=http://host.docker.internal:7812
-METISTRY_OWNER_TOKEN=<minted once; shown only here>
+METISTRY_LOCAL_OWNER_TOKEN=<minted once; shown only here>
 ```
 
-`METISTRY_OWNER_TOKEN` is the console's local owner door
+`METISTRY_LOCAL_OWNER_TOKEN` is the console's local owner door
 (`docs/ops/auth.md`): presented from this machine it authenticates as the
 `user` principal, which is how the Mac app and `metistry console whoami`
 reach the console without a passkey ceremony.
@@ -404,7 +404,7 @@ cannot disagree:
 
 | scope | account | which variables |
 | --- | --- | --- |
-| **instance** | the instance's `instance_id` | `METISTRY_DB_PASSWORD`, `METISTRY_OWNER_TOKEN`, every `METISTRY_BRIDGE_TOKEN_*`, `METISTRY_ASSISTANT_TOKEN`, `METISTRY_VAPID_*`, `METISTRY_GITHUB_*` — **and anything not listed**, because self-containment is the rule |
+| **instance** | the instance's `instance_id` | `METISTRY_DB_PASSWORD`, `METISTRY_LOCAL_OWNER_TOKEN`, every `METISTRY_BRIDGE_TOKEN_*`, `METISTRY_ASSISTANT_TOKEN`, `METISTRY_VAPID_*`, `METISTRY_GITHUB_*` — **and anything not listed**, because self-containment is the rule |
 | **user** | `metistry` (override: `METISTRY_KEYCHAIN_ACCOUNT`) | `CLAUDE_CODE_OAUTH_TOKEN` (one Claude login per Mac), `METISTRY_AWS_SECRET_ACCESS_KEY`, `METISTRY_AWS_SESSION_TOKEN` (your AWS account, not this instance's) |
 
 `METISTRY_SIGN_IDENTITY` and `METISTRY_GITHUB_OAUTH_CLIENT_ID` are not
@@ -428,14 +428,14 @@ left as they are") — inventing a GitHub PAT would be nonsense. The
 exception is `GENERATED_SECRETS` (`packages/cli/src/secrets.ts`): a secret
 whose value means nothing outside this install, so minting one can never be
 the wrong guess and nobody has to paste it anywhere. `metistry up`'s
-generated `METISTRY_DB_PASSWORD` is the precedent; `METISTRY_OWNER_TOKEN`
+generated `METISTRY_DB_PASSWORD` is the precedent; `METISTRY_LOCAL_OWNER_TOKEN`
 (`docs/ops/auth.md`) is the current list. An install that predates the
 variable gains one on the next sync — restart the console for it to take
 effect:
 
 ```
 $ metistry secrets sync --to env
-minted METISTRY_OWNER_TOKEN — it was in neither the Keychain nor …/state/.env:
+minted METISTRY_LOCAL_OWNER_TOKEN — it was in neither the Keychain nor …/state/.env:
   the console's local owner door — an install that predates it gets one here
 restart the console for a freshly minted secret to take effect (`metistry restart console`).
 ```
@@ -577,7 +577,7 @@ doctor runs on the host). The bridge's own `check()` — a *behavioral* probe
 (apple-fm classifies a sentence; eventkit reads a calendar; the reconciler
 reads `HEAD` and lists `Knowledge/`) — is what decides `ok` vs `degraded`,
 and its remediation string is what you see. The console's `/health` and
-`/api/status` are hit directly, and with `METISTRY_OWNER_TOKEN` in the
+`/api/status` are hit directly, and with `METISTRY_LOCAL_OWNER_TOKEN` in the
 environment `/api/status` is a real **authenticated** read through the same
 door the Mac app uses (`docs/ops/auth.md`) — `meta.authenticated` says which
 it was. A refused token *degrades* that row (the console is up and serving)

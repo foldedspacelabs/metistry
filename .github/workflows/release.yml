@@ -8,6 +8,12 @@
 #                                                   the bundled runtime: Node,
 #                                                   Postgres 17 + pgvector, git
 #                                                   (docs/ops/bundled-runtime.md)
+#   Metistry-<version>.dmg                          the Mac app: SwiftUI front end
+#                                                   for the CLI, with both packs
+#                                                   embedded, Developer ID signed,
+#                                                   notarized and stapled
+#   appcast.xml                                     the EdDSA-signed Sparkle feed
+#                                                   the installed app reads
 #   checksums.txt                                   sha256 of every asset
 #   npm  @foldedspacelabs/metistry-*                Trusted Publishing (OIDC)
 #   ghcr.io/foldedspacelabs/metistry-<app>:<version> console, assistant, reconciler
@@ -268,9 +274,181 @@ jobs:
             ${{ env.IMAGE_PREFIX }}-${{ matrix.app }}:latest
           provenance: true
 
+  # The macOS app: Metistry.app assembled by ops/release/build-app.sh, with the
+  # runtime pack and the bundled runtime embedded as Contents/Resources/metistry/,
+  # signed with the Developer ID cert, notarized and stapled, shipped as a DMG.
+  #
+  # Skipped, not failed, without the signing secrets — the same courtesy the
+  # `images` job extends a fork without packages:write. `secrets` is not
+  # available in a job-level `if`, so the gate is the first step and everything
+  # after it is conditional on its output.
+  macos-app:
+    name: macOS app DMG
+    needs: [verify, runtime, runtime-deps]
+    runs-on: macos-14
+    outputs:
+      built: ${{ steps.gate.outputs.ok }}
+    env:
+      VERSION: ${{ needs.verify.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: gate
+        name: do we have a Developer ID certificate?
+        env:
+          APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          if [ -n "$APPLE_CERTIFICATE_P12" ] && [ -n "$APPLE_CERTIFICATE_PASSWORD" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::APPLE_CERTIFICATE_P12/APPLE_CERTIFICATE_PASSWORD are not set — skipping the macOS app. The release's other assets are unaffected. (docs/ops/apple-signing.md §4)"
+          fi
+
+      - if: steps.gate.outputs.ok == 'true'
+        name: import the Developer ID cert into a temporary keychain
+        env:
+          APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          keychain="$RUNNER_TEMP/build.keychain-db"
+          security create-keychain -p "$RUNNER_TEMP" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$RUNNER_TEMP" "$keychain"
+          # codesign searches the keychain SEARCH LIST, not just the default —
+          # so the temp keychain has to be on it, with login kept for anything
+          # else the runner needs.
+          security list-keychains -d user -s "$keychain" login.keychain-db
+          security default-keychain -s "$keychain"
+          echo "$APPLE_CERTIFICATE_P12" | base64 --decode -o "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          rm -f "$RUNNER_TEMP/cert.p12"
+          # Without this, codesign prompts for keychain access and hangs the job.
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$RUNNER_TEMP" "$keychain"
+          echo "METISTRY_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+
+      - if: steps.gate.outputs.ok == 'true'
+        name: pin METISTRY_SIGN_IDENTITY to the imported cert's hash
+        run: |
+          # The HASH, not the display name: a keychain holding two valid certs
+          # for one team (a renewal) has two byte-identical names and
+          # `codesign -s "<name>"` fails with "ambiguous". The hash is unique.
+          identity="$(security find-identity -v -p codesigning "$METISTRY_KEYCHAIN" | grep 'Developer ID Application' | head -1 | awk '{print $2}')"
+          [ -n "$identity" ] || { echo "the imported .p12 has no Developer ID Application identity" >&2; exit 1; }
+          echo "METISTRY_SIGN_IDENTITY=$identity" >> "$GITHUB_ENV"
+          echo "signing identity: $identity"
+
+      # The packs this run already built — the app embeds them rather than
+      # rebuilding the product a second time.
+      - if: steps.gate.outputs.ok == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: runtime-darwin-arm64
+          path: packs
+      - if: steps.gate.outputs.ok == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: runtime-deps-darwin-arm64
+          path: packs
+
+      - if: steps.gate.outputs.ok == 'true'
+        name: build, sign and package Metistry-${{ needs.verify.outputs.version }}.dmg
+        run: |
+          ops/release/build-app.sh \
+            --version "$VERSION" \
+            --runtime "packs/metistry-runtime-$VERSION-darwin-arm64.tar.gz" \
+            --runtime-deps "packs/metistry-runtime-deps-$VERSION-darwin-arm64.tar.gz" \
+            --out dist-app
+          ls -lh dist-app
+          codesign -dv --verbose=2 "dist-app/Metistry.app" 2>&1 | grep -E "Identifier|Authority|Format|TeamIdentifier|Runtime"
+
+      - if: steps.gate.outputs.ok == 'true'
+        name: notarize and staple (App Store Connect API key — not an Apple ID)
+        env:
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: |
+          if [ -z "$APPLE_API_KEY_P8" ]; then
+            echo "::notice::APPLE_API_KEY_P8 is not set — the DMG is signed but NOT notarized. Gatekeeper will refuse it on a machine that has not seen it before (docs/ops/apple-signing.md §4)."
+            exit 0
+          fi
+          ops/release/notarize.sh "dist-app/Metistry-$VERSION.dmg"
+
+      - if: steps.gate.outputs.ok == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-app
+          path: dist-app/Metistry-*.dmg
+          if-no-files-found: error
+
+  # The Sparkle feed the app reads. ops/release/appcast.mjs refuses to emit an
+  # unsigned feed, so a missing or wrong SPARKLE_PRIVATE_KEY fails this job
+  # rather than publishing something every installed app would reject.
+  #
+  # One item, not `generate_appcast`: that tool walks a directory of past
+  # updates, and this project's updates live on GitHub Releases, one DMG per
+  # tag. `sign_update` over the DMG plus appcast.mjs is the same signature with
+  # nothing to keep in sync.
+  appcast:
+    name: Sparkle appcast
+    needs: [verify, macos-app]
+    if: needs['macos-app'].outputs.built == 'true'
+    runs-on: macos-14
+    env:
+      VERSION: ${{ needs.verify.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: gate
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          if [ -n "$SPARKLE_PRIVATE_KEY" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::SPARKLE_PRIVATE_KEY is not set — no appcast.xml this run, so installed apps will not see this version as an update. The DMG is still published (docs/ops/apple-signing.md §5)."
+          fi
+      - if: steps.gate.outputs.ok == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-app
+          path: dist-app
+      # Pins + verifies Sparkle's CLI tools against ops/release/runtime-versions.env
+      # (the Homebrew cask is disabled — fails Gatekeeper, 2026-09-01).
+      - if: steps.gate.outputs.ok == 'true'
+        run: ops/release/fetch-sparkle-tools.sh
+      - if: steps.gate.outputs.ok == 'true'
+        name: sign the DMG and render appcast.xml
+        env:
+          # The EdDSA private key lives ONLY here — never in the repo, never in
+          # an artifact, never in a log. `sign_update -f -` reads it from stdin
+          # so it never touches disk either. The matching public key is
+          # committed as SUPublicEDKey in apps/macos/resources/Info.plist and as
+          # SPARKLE_PUBLIC_ED_KEY in ops/release/runtime-versions.env.
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          dmg="dist-app/Metistry-$VERSION.dmg"
+          sig="$(printf '%s' "$SPARKLE_PRIVATE_KEY" | ops/release/.tools/sparkle/bin/sign_update -f - "$dmg" | sed -n 's/.*sparkle:edSignature="\([^"]*\)".*/\1/p')"
+          [ -n "$sig" ] || { echo "sign_update produced no signature" >&2; exit 1; }
+          node ops/release/appcast.mjs "$VERSION" \
+            --url "https://github.com/${{ github.repository }}/releases/download/v$VERSION/Metistry-$VERSION.dmg" \
+            --length "$(stat -f%z "$dmg")" \
+            --signature "$sig" \
+            --min-system 14.0 \
+            --feed-url "https://github.com/${{ github.repository }}/releases/latest/download/appcast.xml" \
+            --notes "https://github.com/${{ github.repository }}/releases/tag/v$VERSION" > appcast.xml
+          cat appcast.xml
+      - if: steps.gate.outputs.ok == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: appcast
+          path: appcast.xml
+          if-no-files-found: error
+
   # checksums.txt, the generated changelog, and the release itself.
   publish:
-    needs: [verify, runtime, runtime-deps, npm, images]
+    needs: [verify, runtime, runtime-deps, npm, images, macos-app, appcast]
     if: always() && needs.verify.result == 'success' && needs.runtime.result == 'success' && needs['runtime-deps'].result == 'success'
     runs-on: ubuntu-latest
     permissions:
@@ -284,6 +462,24 @@ jobs:
           path: assets
           pattern: runtime-*
           merge-multiple: true
+      # The DMG and the appcast, when this run produced them. Both jobs skip
+      # cleanly without their secrets, so a missing artifact is a normal
+      # outcome, not a failure — `continue-on-error` is what says that.
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          path: assets
+          pattern: macos-app
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          path: assets
+          pattern: appcast
+          merge-multiple: true
+      # sha256 of EVERY asset, the DMG and appcast.xml included: `metistry
+      # update` verifies the runtime packs against this file, and a reader
+      # verifying a DMG by hand should not have to guess.
       - name: checksums.txt (sha256 of every asset)
         working-directory: assets
         run: sha256sum * | tee checksums.txt
@@ -322,100 +518,3 @@ jobs:
             gh release create "$tag" --title "Metistry ${VERSION}" --notes-file RELEASE_NOTES.md
           fi
           gh release upload "$tag" assets/* --clobber
-
-  # ---- stubs: enabled when the macOS app exists -------------------------------
-  #
-  # There is no app to build yet (docs/product/desktop-app-plan.md). These
-  # two jobs are deliberately disabled rather than absent, so the shape of
-  # the work — and the secrets it needs — is on the record.
-  macos-app:
-    name: macOS app DMG (STUB — no app yet)
-    needs: [verify, publish]
-    if: false
-    runs-on: macos-14
-    permissions:
-      contents: write
-    env:
-      VERSION: ${{ needs.verify.outputs.version }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: import the Developer ID cert into a temporary keychain
-        env:
-          APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-        run: |
-          security create-keychain -p "$RUNNER_TEMP" build.keychain
-          security default-keychain -s build.keychain
-          security unlock-keychain -p "$RUNNER_TEMP" build.keychain
-          echo "$APPLE_CERTIFICATE_P12" | base64 --decode -o "$RUNNER_TEMP/cert.p12"
-          security import "$RUNNER_TEMP/cert.p12" -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$RUNNER_TEMP" build.keychain
-          rm -f "$RUNNER_TEMP/cert.p12"
-      - name: derive METISTRY_SIGN_IDENTITY from the imported cert
-        run: |
-          identity="$(security find-identity -v -p codesigning build.keychain | grep 'Developer ID Application' | head -1 | sed -E 's/.*"(.*)"/\1/')"
-          echo "METISTRY_SIGN_IDENTITY=$identity" >> "$GITHUB_ENV"
-      - name: xcodebuild archive (hardened runtime), embedding the runtime pack as Contents/Resources/metistry/
-        run: |
-          echo "TODO: xcodebuild archive -project Metistry.xcodeproj -scheme Metistry -archivePath Metistry.xcarchive DEVELOPMENT_TEAM=\"$APPLE_TEAM_ID\" CODE_SIGN_IDENTITY=\"$METISTRY_SIGN_IDENTITY\", once the Xcode project exists"
-      - name: create the DMG and codesign it with METISTRY_SIGN_IDENTITY
-        run: |
-          echo "TODO: codesign --force --options runtime --timestamp --sign \"$METISTRY_SIGN_IDENTITY\" Metistry-$VERSION.dmg"
-      - name: notarize (App Store Connect API key — not an Apple ID)
-        env:
-          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
-          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
-          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
-        run: |
-          echo "$APPLE_API_KEY_P8" | base64 --decode -o "$RUNNER_TEMP/AuthKey.p8"
-          xcrun notarytool submit "Metistry-$VERSION.dmg" \
-            --key "$RUNNER_TEMP/AuthKey.p8" --key-id "$APPLE_API_KEY_ID" \
-            --issuer "$APPLE_API_ISSUER_ID" --wait
-          rm -f "$RUNNER_TEMP/AuthKey.p8"
-      - name: staple and upload
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          xcrun stapler staple "Metistry-$VERSION.dmg"
-          gh release upload "v$VERSION" "Metistry-$VERSION.dmg" --clobber
-
-  appcast:
-    name: Sparkle appcast (STUB — needs the DMG)
-    needs: [verify, macos-app]
-    if: false
-    runs-on: macos-14
-    permissions:
-      contents: write
-    env:
-      VERSION: ${{ needs.verify.outputs.version }}
-    steps:
-      - uses: actions/checkout@v4
-      # Real today (not a stub): pins + verifies Sparkle's CLI tools
-      # (docs/ops/apple-signing.md §5) so sign_update is on disk the moment
-      # this job's `if: false` is flipped — one line, already run.
-      - run: ops/release/fetch-sparkle-tools.sh
-      # The EdDSA private key lives ONLY in secrets.SPARKLE_PRIVATE_KEY —
-      # never in the repo, never in an artifact, never in a log. The
-      # matching public key is secrets.SPARKLE_PUBLIC_ED_KEY (also committed,
-      # unsigned, to the SwiftUI app's Info.plist as SUPublicEDKey once that
-      # target exists — it is not sensitive, but keeping it in secrets too
-      # means CI never has to read it out of a checked-out Xcode project).
-      #
-      # ops/release/appcast.mjs is real and tested today; without a
-      # signature it refuses to emit a feed, so a misconfigured secret fails
-      # this job instead of shipping a feed the app rejects.
-      - name: sign the DMG and generate the appcast
-        env:
-          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
-        run: |
-          sig=$(echo "$SPARKLE_PRIVATE_KEY" | ops/release/.tools/sparkle/bin/sign_update -f - "Metistry-$VERSION.dmg")
-          node ops/release/appcast.mjs "$VERSION" \
-            --url "https://github.com/${{ github.repository }}/releases/download/v$VERSION/Metistry-$VERSION.dmg" \
-            --length "$(stat -f%z "Metistry-$VERSION.dmg")" \
-            --signature "$sig" --min-system 13.0 \
-            --notes "https://github.com/${{ github.repository }}/releases/tag/v$VERSION" > appcast.xml
-      - name: upload the appcast
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release upload "v$VERSION" appcast.xml --clobber

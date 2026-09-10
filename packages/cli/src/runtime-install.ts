@@ -267,7 +267,14 @@ export async function installRuntime(r: StepRunner, opts: RuntimeInstallOptions)
   // destination is dereferenced and made writable — `update` has to be able
   // to delete this tree to install the next release over it
   await rm(dest, { recursive: true, force: true });
-  await cp(seed.releaseDir, dest, { recursive: true, dereference: true });
+  // verbatimSymlinks, NOT dereference: the pack's node_modules is pnpm's, a
+  // tree of RELATIVE symlinks into `.pnpm/`. Dereferencing turns
+  // `apps/console/node_modules/<dep>` into a real directory and severs it
+  // from `.pnpm/<dep>@v/node_modules/`, where that dep's own dependencies
+  // live — the install then dies at the first `require` with
+  // ERR_MODULE_NOT_FOUND. `metistry update` unpacks a tarball, which
+  // preserves links; this copy has to do the same thing.
+  await cp(seed.releaseDir, dest, { recursive: true, verbatimSymlinks: true });
   r.note(`${dest}: made writable (${await makeWritable(dest)} paths) — a signed bundle's Resources are read-only and the product dir must not be`);
 
   if (seed.runtime) {

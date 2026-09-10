@@ -1,6 +1,18 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- The EventKit helper as its OWN service: the job's root binary is the
+<!-- The EventKit helper as its OWN service — one of only two launchd agents
+     the launchd shape installs beside the supervisor, because a TCC grant
+     attaches to the binary that asks and nothing may stand in front of it.
+
+     The LABEL is `…metistry.calendar` (renamed from `…eventkit-helper` in
+     the supervisor change): it is what System Settings shows beside the
+     supervisor's own item, and a label is not part of a TCC requirement.
+     The BUNDLE IDENTIFIER is untouched — `com.foldedspacelabs.metistry.eventkit`,
+     the same signing identifier — because TCC keys the grant on bundle id +
+     certificate chain, and renaming that would force every existing install
+     to consent again.
+
+     The EventKit helper as its OWN service: the job's root binary is the
      signed helper, so the TCC grant attaches to it (PoC-1 — anything in
      front of it, sh/node, would become the responsible process instead).
      ProgramArguments points INSIDE an app bundle: the helper ships as
@@ -14,12 +26,12 @@
      first hits it, or trigger them directly against the running job:
        printf '{"id":1,"op":"request"}\n' | nc -U /tmp/metistry-eventkit.sock
      Install:
-       sed "s|__REPO__|$PWD|g" ops/launchd/com.foldedspacelabs.metistry.eventkit-helper.plist \
-         > ~/Library/LaunchAgents/com.foldedspacelabs.metistry.eventkit-helper.plist
-       launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.foldedspacelabs.metistry.eventkit-helper.plist -->
+       sed "s|__REPO__|$PWD|g" ops/launchd/com.foldedspacelabs.metistry.calendar.plist \
+         > ~/Library/LaunchAgents/com.foldedspacelabs.metistry.calendar.plist
+       launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.foldedspacelabs.metistry.calendar.plist -->
 <plist version="1.0">
 <dict>
-  <key>Label</key><string>com.foldedspacelabs.metistry.eventkit-helper</string>
+  <key>Label</key><string>com.foldedspacelabs.metistry.calendar</string>
   <key>ProgramArguments</key>
   <array>
     <string>__REPO__/packages/mcp-eventkit/helper/ek-helper.app/Contents/MacOS/ek-helper</string>
@@ -29,7 +41,7 @@
     <key>METISTRY_EK_SOCKET</key><string>/tmp/metistry-eventkit.sock</string>
   </dict>
   <key>KeepAlive</key><true/>
-  <key>StandardOutPath</key><string>/tmp/metistry-eventkit-helper.log</string>
-  <key>StandardErrorPath</key><string>/tmp/metistry-eventkit-helper.log</string>
+  <key>StandardOutPath</key><string>/tmp/metistry-calendar.log</string>
+  <key>StandardErrorPath</key><string>/tmp/metistry-calendar.log</string>
 </dict>
 </plist>

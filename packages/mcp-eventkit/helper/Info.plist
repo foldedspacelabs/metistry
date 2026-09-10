@@ -14,14 +14,21 @@
      `tccutil reset`, and any move of the checkout drops the grant.
      See docs/ops/apple-signing.md §3 for the citations.
 
+     The NAMES (CFBundleName/CFBundleDisplayName) are what a person sees in
+     System Settings › Privacy & Security › Calendars, so they read
+     "Metistry Calendar Access" rather than "metistry-eventkit". The
+     IDENTIFIER is deliberately untouched: TCC keys the grant on
+     CFBundleIdentifier + the stored csreq, so renaming it would make every
+     existing install consent again. The names are in neither.
+
      LSUIElement keeps it out of the Dock. Deliberately NOT LSBackgroundOnly:
      it must be allowed to front the Calendars/Reminders consent dialogs the
      first time it asks. -->
 <plist version="1.0">
 <dict>
   <key>CFBundleIdentifier</key><string>com.foldedspacelabs.metistry.eventkit</string>
-  <key>CFBundleName</key><string>metistry-eventkit</string>
-  <key>CFBundleDisplayName</key><string>Metistry Calendar Helper</string>
+  <key>CFBundleName</key><string>Metistry Calendar Access</string>
+  <key>CFBundleDisplayName</key><string>Metistry Calendar Access</string>
   <key>CFBundleExecutable</key><string>ek-helper</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>

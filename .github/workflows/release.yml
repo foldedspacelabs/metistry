@@ -238,6 +238,13 @@ jobs:
       published: ${{ steps.login.outcome == 'success' }}
     steps:
       - uses: actions/checkout@v4
+      # linux/arm64 is the Mac (Apple silicon) host under Docker Desktop and
+      # the arm64 cloud shapes; amd64 is everything else. Without QEMU the
+      # build is host-arch only and `docker compose pull` on a Mac fails with
+      # "no matching manifest for linux/arm64/v8".
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
       - uses: docker/setup-buildx-action@v3
       - id: login
         name: log in to ghcr (skipped without packages:write)
@@ -254,6 +261,7 @@ jobs:
         with:
           context: .
           file: apps/${{ matrix.app }}/Dockerfile
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: |
             ${{ env.IMAGE_PREFIX }}-${{ matrix.app }}:${{ needs.verify.outputs.version }}

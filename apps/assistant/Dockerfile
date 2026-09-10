@@ -1,7 +1,9 @@
 # Assistant image — ghcr.io/foldedspacelabs/metistry-assistant
 # Build from the repo root: docker build -f apps/assistant/Dockerfile .
 # Auth: CLAUDE_CODE_OAUTH_TOKEN via env (PoC-4). NEVER ANTHROPIC_API_KEY.
-FROM node:22-slim AS build
+# build natively on the CI host; the compiled output is pure JS, so only the
+# runtime stage below is per-architecture (release.yml builds amd64 + arm64)
+FROM --platform=$BUILDPLATFORM node:22-slim AS build
 RUN corepack enable
 WORKDIR /src
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json tsconfig.base.json ./

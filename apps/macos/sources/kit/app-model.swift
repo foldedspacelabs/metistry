@@ -38,19 +38,33 @@ public final class AppModel {
     public var logs: LogViewerModel
     /// Filled in by the platform (Sparkle on macOS); a plain box here.
     public let updates: UpdateStatus
+    /// Start at login. `nil` service on a platform with no `SMAppService`.
+    public let loginItem: LoginItemModel
 
     public init(
         bundleResourceURL: URL?,
         runner: any CommandRunner,
         defaults: UserDefaults = .standard,
-        appVersion: String = UpdateStatus.devBuildVersion
+        appVersion: String = UpdateStatus.devBuildVersion,
+        loginItemService: (any LoginItemService)? = nil,
+        passkeyRegistrar: (any PasskeyRegistrar)? = nil,
+        terminalOpener: (any TerminalOpener)? = nil
     ) {
         let instances = InstanceBookmarks(defaults: defaults)
         let developerProductDir = Self.loadDeveloperProductDir(defaults)
         let resolution = RuntimeLocator.locate(bundleResourceURL: bundleResourceURL, userProductDir: developerProductDir)
         let cli = resolution.runtime.map { MetistryCLI(runtime: $0, runner: runner, instanceDir: instances.active) }
         let status = StatusModel(cli: cli)
-        let firstRun = FirstRunModel(cli: cli, resolution: resolution)
+        let firstRun = FirstRunModel(
+            cli: cli,
+            resolution: resolution,
+            passkey: PasskeyEnrolmentModel(registrar: passkeyRegistrar),
+            claude: ClaudeTokenModel(
+                cli: cli,
+                terminal: terminalOpener,
+                claudeBinary: ClaudeCodeLocator.locate(productDir: resolution.runtime?.productDir)
+            )
+        )
 
         self.bundleResourceURL = bundleResourceURL
         self.runner = runner
@@ -58,6 +72,7 @@ public final class AppModel {
         self.instances = instances
         self.developerProductDir = developerProductDir
         self.updates = UpdateStatus(appVersion: appVersion)
+        self.loginItem = LoginItemModel(service: loginItemService)
         self.resolution = resolution
         self.status = status
         self.firstRun = firstRun
@@ -69,6 +84,9 @@ public final class AppModel {
         // The wizard's step 2 hands the folder back the moment it is known, so
         // every later verb runs against it.
         wizard.onInstanceChosen = { [weak self] url in self?.activateInstance(url) }
+        // Step 1's `runtime install` writes the copy the app should be using;
+        // re-resolving is what makes it start using it.
+        firstRun.onRuntimeInstalled = { [weak self] in self?.relocate() }
         // An install with no instance chosen has one useful screen, and it is the
         // wizard. This is the only thing that presents it automatically.
         if instances.active == nil {
@@ -131,7 +149,11 @@ public final class AppModel {
         status.cli = cli
         menu.cli = cli
         logs.cli = cli
-        firstRun.adopt(cli: cli, resolution: resolution)
+        firstRun.adopt(
+            cli: cli,
+            resolution: resolution,
+            claudeBinary: ClaudeCodeLocator.locate(productDir: resolution.runtime?.productDir)
+        )
         settings.adopt(cli: cli, instanceDir: instances.active)
     }
 }

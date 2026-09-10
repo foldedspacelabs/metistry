@@ -1,14 +1,21 @@
 // First run: the seven steps from docs/product/desktop-app-plan.md, each one a
 // `metistry` verb the app runs with a progress view.
 //
-// Steps 1–5 are real here. 6 (passkey) and 7 (Claude token) are labelled "not
-// yet" on screen and do nothing — the plan's sequencing is what they are
-// waiting on, and a screen that pretends to enrol a passkey is worse than one
-// that says it cannot.
+// All seven do something now. Step 1 installs the bundle's read-only runtime to
+// a writable product dir (`metistry runtime install`); step 5 SETS the
+// deployment shape after previewing it (`metistry deployment set-shape --yes`)
+// rather than explaining that it cannot; step 6 enrols a passkey, or says
+// precisely why the local origin refuses one and falls back to the console's own
+// enrolment (passkey-enrolment.swift); step 7 guides `claude setup-token` and
+// watches for the token appearing, without ever handling its value
+// (claude-token.swift).
 //
 // What this file must never grow: a second implementation of a step. If the app
 // needs a behaviour the CLI does not have, the CLI gets it first and the app
-// calls it (plan §4.20 — adapters adapt one service).
+// calls it (plan §4.20 — adapters adapt one service). Every one of those new
+// verbs is somebody else's; this file only knows their names, and degrades to
+// "this CLI has no `X` verb yet — update it" against an install that predates
+// them (cli-facts.swift).
 
 import Foundation
 import Observation
@@ -61,33 +68,22 @@ public enum FirstRunStep: Int, CaseIterable, Identifiable, Sendable {
     /// `nil` for a step that runs nothing.
     public var verb: String? {
         switch self {
-        case .runtime: return nil
+        case .runtime: return "metistry runtime install --from <bundle> --to <product dir>"
         case .instance: return "metistry init <folder> --name <assistant name>"
         case .versioning: return "metistry connect-repo <url> --instance <folder> --auth device"
         case .secrets: return "metistry secrets sync"
         case .services: return "metistry up"
-        case .door, .claude: return nil
+        case .door: return nil
+        case .claude: return nil
         }
     }
 
-    public var isImplemented: Bool {
-        switch self {
-        case .runtime, .instance, .versioning, .secrets, .services: return true
-        case .door, .claude: return false
-        }
-    }
-
-    /// Why a "not yet" step is not yet, and what it is waiting on. Shown on the
-    /// screen itself so the app is never mysterious about its own gaps.
-    public var notYetReason: String? {
-        switch self {
-        case .door:
-            return "Passkey enrolment needs ASAuthorization against the console's local origin, and a `metistry` verb to register the credential — neither exists yet. Today: enrol from the console in a browser (docs/ops/passkeys.md)."
-        case .claude:
-            return "`claude setup-token` is an interactive terminal flow; driving it from the app needs a pty, and the token needs a `metistry secrets` path of its own. Today: run `claude setup-token` in a terminal, then `metistry secrets mint CLAUDE_CODE_OAUTH_TOKEN`."
-        default:
-            return nil
-        }
+    /// Steps 6 and 7 do real work, but not by running a `metistry` verb: one
+    /// talks to `AuthenticationServices` and the console, the other opens a
+    /// terminal for an interactive login and then watches `secrets list --json`.
+    /// They own their own models, so the generic run row does not apply to them.
+    public var hasOwnScreen: Bool {
+        self == .door || self == .claude
     }
 }
 
@@ -181,6 +177,18 @@ public final class FirstRunModel {
     public private(set) var deviceCode: DeviceCode?
     public var selected: FirstRunStep = .runtime
 
+    /// Steps 6 and 7 own their own models: one talks to `AuthenticationServices`
+    /// and the console, the other opens a terminal and watches a secret's NAME.
+    /// Neither is a `metistry` verb, so neither fits the generic run row.
+    public let passkey: PasskeyEnrolmentModel
+    public let claude: ClaudeTokenModel
+
+    /// Called after `metistry runtime install` succeeds, so the app re-resolves
+    /// and starts using the writable copy it just wrote. The model does not
+    /// relocate itself: which directories are searched is `RuntimeLocator`'s and
+    /// `AppModel`'s business, not a step's.
+    public var onRuntimeInstalled: () -> Void = {}
+
     // Inputs the steps need. Empty by default: nothing is guessed on the
     // user's behalf, least of all where their vault goes.
     public var instanceDirectory: URL?
@@ -194,26 +202,42 @@ public final class FirstRunModel {
     /// enable. Enabling one means minting its token; see `plannedFollowUps`.
     public var bridgeSelection: Set<String> = []
 
-    public init(cli: MetistryCLI?, resolution: RuntimeResolution) {
+    public init(
+        cli: MetistryCLI?,
+        resolution: RuntimeResolution,
+        passkey: PasskeyEnrolmentModel = PasskeyEnrolmentModel(),
+        claude: ClaudeTokenModel? = nil
+    ) {
         self.cli = cli
         self.resolution = resolution
+        self.passkey = passkey
+        self.claude = claude ?? ClaudeTokenModel(cli: cli)
         reset()
     }
 
-    public func adopt(cli: MetistryCLI?, resolution: RuntimeResolution) {
+    public func adopt(cli: MetistryCLI?, resolution: RuntimeResolution, claudeBinary: URL? = nil) {
         self.cli = cli
         self.resolution = resolution
+        claude.adopt(cli: cli, claudeBinary: claudeBinary ?? claude.claudeBinary)
         // Step 1's verdict changes with the runtime; the rest keep whatever
         // they achieved — re-pointing the app at another checkout does not
         // un-create an instance repo.
-        states[FirstRunStep.runtime.rawValue] = cli == nil ? .pending : .succeeded(runtimeSummary)
+        states[FirstRunStep.runtime.rawValue] = runtimeStepState
     }
 
     public func reset() {
         for step in FirstRunStep.allCases {
-            states[step.rawValue] = step.isImplemented ? .pending : .notYet
+            states[step.rawValue] = .pending
         }
-        states[FirstRunStep.runtime.rawValue] = cli == nil ? .pending : .succeeded(runtimeSummary)
+        states[FirstRunStep.runtime.rawValue] = runtimeStepState
+    }
+
+    /// Step 1 is done when there is a runtime AND it is the writable one. A
+    /// bundled seed runs every verb perfectly well, so this is not `failed` — it
+    /// is "there is one more thing to do here", and the step says what and why.
+    private var runtimeStepState: StepState {
+        guard cli != nil else { return .pending }
+        return resolution.needsRuntimeInstall ? .pending : .succeeded(runtimeSummary)
     }
 
     public func state(_ step: FirstRunStep) -> StepState {
@@ -232,9 +256,9 @@ public final class FirstRunModel {
     /// Whether the step has everything it needs to run. The button is disabled
     /// rather than the command failing with a usage error.
     public func canRun(_ step: FirstRunStep) -> Bool {
-        guard step.isImplemented, cli != nil, state(step) != .running else { return false }
+        guard !step.hasOwnScreen, cli != nil, state(step) != .running else { return false }
         switch step {
-        case .runtime: return true
+        case .runtime: return resolution.needsRuntimeInstall
         case .instance: return instanceDirectory != nil && instanceMode == .create
         case .versioning:
             guard repoPlan == .now, repoAuth.runnableFromTheApp else { return false }
@@ -280,8 +304,22 @@ public final class FirstRunModel {
 
     private func verb(for step: FirstRunStep) -> [String]? {
         switch step {
-        case .runtime, .door, .claude:
+        case .door, .claude:
             return nil
+        case .runtime:
+            // `metistry runtime install --from <bundle> --to <writable dir>`.
+            //
+            // The bundle's `Resources/metistry/` is signed and therefore
+            // read-only, and `metistry update` in release mode has to write
+            // `releases/<version>/` and flip `current`. So the bundle is a SEED
+            // and the writable product dir is
+            // ~/Library/Application Support/Metistry/product — the first of the
+            // two options docs/product/desktop-app-plan.md set out, which is
+            // also what its own "Two channels, both signed" paragraph already
+            // reads as. The COPY is the CLI's: an app that laid out a release
+            // install itself would be a second implementation of `update`.
+            guard let seed = resolution.bundledSeed, resolution.needsRuntimeInstall else { return nil }
+            return ["runtime", "install", "--from", seed.path, "--to", resolution.installTarget.path]
         case .instance:
             guard instanceMode == .create, let dir = instanceDirectory else { return nil }
             var verb = ["init", dir.path]
@@ -317,11 +355,6 @@ public final class FirstRunModel {
     }
 
     public func run(_ step: FirstRunStep) async {
-        if step == .runtime {
-            // Step 1 runs no command: it re-resolves. The view calls the app
-            // model's relocate(), which calls adopt() above.
-            return
-        }
         guard let cli, let verb = verb(for: step) else { return }
         states[step.rawValue] = .running
         output[step.rawValue] = []
@@ -345,25 +378,75 @@ public final class FirstRunModel {
                 }
             }
             let tail = lines(step).last(where: { !$0.text.trimmingCharacters(in: .whitespaces).isEmpty })?.text
+            if CLIDegradation.isUnknownVerb(result) {
+                states[step.rawValue] = .failed(CLIDegradation.message(verb: verb.prefix(2).joined(separator: " ")))
+                return
+            }
             states[step.rawValue] = result.ok
                 ? .succeeded(tail ?? "exit 0")
                 : .failed(tail ?? "exit \(result.exitCode)")
+            // The writable copy exists now, so the app should be using it rather
+            // than the read-only seed it just copied.
+            if result.ok, step == .runtime { onRuntimeInstalled() }
         } catch {
             output[step.rawValue] = sink.drain()
             states[step.rawValue] = .failed(error.localizedDescription)
         }
     }
 
+    /// `metistry deployment set-shape <shape> --yes`.
+    ///
+    /// The scaffold could only EXPLAIN the shape: `deployment.yaml` is a §4.7
+    /// protected path, and no verb wrote it, so the app previewed the other
+    /// shape and left the one-line edit to the person. There is a verb now, and
+    /// it keeps the invariant where it belongs — at the tool: `set-shape` is
+    /// preview-then-confirm, and `--yes` is the confirmation this screen already
+    /// collected by showing the preview first. The app still writes no file.
+    public func setShape(_ shape: String) async {
+        guard let cli else { return }
+        let step = FirstRunStep.services
+        states[step.rawValue] = .running
+        let sink = OutputSink()
+        for line in lines(step) { sink.append(line) }
+        sink.append(OutputLine(stream: .standardOutput, text: ""))
+        do {
+            let result = try await cli.run(setShapeVerb(shape)) { line in sink.append(line) }
+            output[step.rawValue] = sink.drain()
+            let tail = lines(step).last(where: { !$0.text.trimmingCharacters(in: .whitespaces).isEmpty })?.text
+            if CLIDegradation.isUnknownVerb(result) {
+                states[step.rawValue] = .failed(CLIDegradation.message(verb: "deployment set-shape"))
+            } else {
+                // A shape that was set is not an install that is up: the step is
+                // done when `metistry up` has run, so success here returns it to
+                // pending rather than claiming the step.
+                states[step.rawValue] = result.ok ? .pending : .failed(tail ?? "exit \(result.exitCode)")
+            }
+        } catch {
+            output[step.rawValue] = sink.drain()
+            states[step.rawValue] = .failed(error.localizedDescription)
+        }
+    }
+
+    private func setShapeVerb(_ shape: String) -> [String] {
+        var verb = ["deployment", "set-shape", shape, "--yes"]
+        if let dir = instanceDirectory { verb += ["--instance", dir.path] }
+        return verb
+    }
+
+    public func plannedSetShapeArguments(shape: String) -> [String]? {
+        guard let cli else { return nil }
+        return [cli.runtime.executable.path] + cli.arguments(for: setShapeVerb(shape))
+    }
+
     /// `metistry up --dry-run` with `METISTRY_DEPLOYMENT_SHAPE` set — every
     /// command printed, nothing run.
     ///
-    /// This is the honest answer to "launchd or compose?". The shape is
-    /// `deployment.yaml`'s to state, and `deployment.yaml` is a §4.7 protected
-    /// path: only the user's own hand writes it (invariant 2 — anything defining
-    /// how the system behaves is a human change), and no `metistry` verb writes
-    /// it either. So the wizard explains both shapes, shows what the other one
-    /// WOULD do, and leaves the one-line edit to the person. The variable exists
-    /// for exactly this preview (`packages/cli/src/deployment.ts`).
+    /// This is still the FIRST half of "launchd or compose?", and it stays first
+    /// now that `deployment set-shape` exists: the preview is what makes the
+    /// confirmation `--yes` carries mean something. Choosing a shape changes
+    /// where Postgres's data lives and whether Docker is in the picture at all —
+    /// a decision worth seeing spelled out as commands before it is taken. The
+    /// override variable exists for exactly this (`packages/cli/src/deployment.ts`).
     public func previewShape(_ shape: String) async {
         guard let cli else { return }
         let step = FirstRunStep.services

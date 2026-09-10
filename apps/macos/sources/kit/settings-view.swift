@@ -109,8 +109,10 @@ public struct SettingsView: View {
         }
 
         SettingsSection("Assistant") {
-            if let error = settings.identityError {
-                UnavailableCard(what: "Could not read identity.yaml", reason: error)
+            if case .unavailable(let why) = settings.identityPhase {
+                UnavailableCard(what: "Could not read the identity", reason: why, command: settings.identityCommand)
+            } else if settings.identityPhase == .reading {
+                Text("reading `metistry identity --json`…").metistryText(.footnote, p, .textSecondary)
             } else {
                 FactRow("Name", settings.assistantNameDisplay, mono: true)
                 if let mention = settings.identity?.mention {
@@ -119,14 +121,19 @@ public struct SettingsView: View {
                 if let icon = settings.identity?.icon {
                     FactRow("Icon", icon)
                 }
+                FactRow(
+                    "Instance id",
+                    settings.identity?.instanceID ?? "not reported",
+                    help: SettingsModel.instanceIdNote,
+                    mono: true,
+                    role: settings.identity?.instanceID == nil ? .absent : .textPrimary
+                )
             }
-            Text("Read from the instance's identity.yaml, which is where the assistant is named and the only place it is. It is a protected path — only your own hand writes it — so this pane shows it and offers no field to change it. `metistry init --name` sets it on a new instance.")
-                .metistryText(.caption1, p, .textTertiary)
-                .fixedSize(horizontal: false, vertical: true)
-            Text(SettingsModel.instanceIdNote)
+            Text("From `metistry identity --json`. The assistant is named in the instance's identity.yaml and nowhere else; it is a protected path — only your own hand writes it — so this pane shows the name and offers no field to change it. `metistry init --name` sets it on a new instance.")
                 .metistryText(.caption1, p, .textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
         }
+        .task(id: model.instances.active) { await settings.refreshIdentity() }
 
         SettingsSection("Set Up Again") {
             Text("Runs the first-launch steps over: create or adopt an instance, connect a repository, sync secrets, bring the services up. Nothing happens until you press Run on a step.")
@@ -158,11 +165,44 @@ public struct SettingsView: View {
         }
 
         SettingsSection("Start at Login") {
-            Toggle("Start Metistry at login", isOn: .constant(false))
-                .disabled(true)
-            Text(SettingsModel.startAtLoginNote)
+            Toggle("Start Metistry at login", isOn: Binding(
+                get: { model.loginItem.isOn },
+                set: { model.loginItem.set($0) }
+            ))
+            .disabled(!model.loginItem.isSupported)
+            HStack(spacing: MetistrySpace.s2) {
+                StatusDot(loginDot)
+                Text(model.loginItem.status.label)
+                    .metistryText(.footnote, p, model.loginItem.status.colorRole)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            // `requiresApproval` is the normal first-time answer: macOS holds
+            // the registration until the person allows it, and there is exactly
+            // one place to do that.
+            if model.loginItem.status.needsApproval {
+                Button("Open Login Items…") { model.loginItem.openSystemSettings() }
+            }
+            if model.loginItem.status == .notFound {
+                Text(LoginItemModel.notAnAppBundleNote)
+                    .metistryText(.caption1, p, .textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let error = model.loginItem.lastError {
+                UnavailableCard(what: "SMAppService refused", reason: error)
+            }
+            Text(LoginItemModel.note)
                 .metistryText(.caption1, p, .textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+        .task { model.loginItem.refresh() }
+    }
+
+    private var loginDot: CheckStatus {
+        switch model.loginItem.status {
+        case .enabled: return .ok
+        case .requiresApproval: return .degraded
+        case .notRegistered: return .absent
+        case .notFound, .unknown: return .failed
         }
     }
 
@@ -216,7 +256,7 @@ public struct SettingsView: View {
                 Text(settings.secretsPhase == .reading ? "reading `metistry secrets list`…" : "not read yet — open the Secrets pane, or press Read below.")
                     .metistryText(.footnote, p, .textSecondary)
             }
-            Text("Set or not set, from `metistry secrets list`. The value is never requested and never displayed. Minting it is still a terminal step: `claude setup-token`, then `metistry secrets mint CLAUDE_CODE_OAUTH_TOKEN`.")
+            Text("Set or not set, from `metistry secrets list --json`. The value is never requested and never displayed. The wizard's step 7 guides `claude setup-token` in a terminal and watches for this name to appear; `\(ClaudeTokenModel.importCommand)` is what carries it into the login Keychain.")
                 .metistryText(.caption1, p, .textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
             Button("Read Secret List") { Task { await settings.refreshSecrets() } }
@@ -279,7 +319,7 @@ public struct SettingsView: View {
                 }
                 .accessibilityElement(children: .combine)
             }
-            Text("Names and scope only. `metistry secrets list` has no code path that can print a value, and neither has this pane. The login Keychain (service metistry:<VAR>) is the canonical store; .env is generated from it by `metistry secrets sync`.")
+            Text("Names and scope only. `metistry secrets list --json` has no code path that can print a value, and neither has this pane. The login Keychain is the canonical store — instance-scoped items under this instance's instance_id, user-scoped ones under the per-Mac account — and .env is generated from it by `metistry secrets sync`.")
                 .metistryText(.caption1, p, .textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
             if let command = settings.secretsCommand {
@@ -324,10 +364,11 @@ public struct SettingsView: View {
                 .fixedSize(horizontal: false, vertical: true)
             if let pin = settings.pin {
                 FactRow("Instance pin", pin.version ?? "unknown", help: "metistry.lock, source \(pin.source ?? "unknown"). Updated \(pin.updatedAt ?? "unknown").", mono: true)
-            } else if let error = settings.pinError {
-                Text(error).metistryText(.caption1, p, .textTertiary).fixedSize(horizontal: false, vertical: true)
+            } else if case .unavailable(let why) = settings.versionsPhase {
+                Text(why).metistryText(.caption1, p, .textTertiary).fixedSize(horizontal: false, vertical: true)
             }
         }
+        .task(id: model.instances.active) { await settings.refreshVersions() }
     }
 
     // MARK: - Advanced
@@ -352,13 +393,22 @@ public struct SettingsView: View {
 
         SettingsSection("Versions") {
             FactRow("App", model.updates.appVersion, mono: true)
-            if let dir = model.runtime?.productDir, let version = InstanceFiles.productVersion(inProductDir: dir) {
-                FactRow("Product runtime", version, help: "The located checkout or unpacked release's own package.json — the same value `metistry` reports for itself internally. There is no `metistry --version` to ask.", mono: true)
+            if case .unavailable(let why) = settings.versionsPhase {
+                UnavailableCard(what: "Could not read the versions", reason: why, command: settings.versionsCommand)
+            }
+            if let product = settings.versions?.product {
+                FactRow("Product runtime", product, help: "What `metistry version --json` reports for the runtime this app is driving.", mono: true)
+            }
+            if let runtime = settings.versions?.runtime {
+                FactRow("Bundled runtime", runtime, help: "The Node/Postgres/git pack beside it, when there is one.", mono: true)
             }
             if let pin = settings.pin {
                 FactRow("Instance pin", "\(pin.version ?? "unknown") (\(pin.source ?? "unknown"))", help: "metistry.lock, \(pin.migrationsApplied) migrations applied.", mono: true)
             }
+            Button("Read Versions") { Task { await settings.refreshVersions() } }
+                .disabled(settings.versionsPhase == .reading)
         }
+        .task(id: model.instances.active) { await settings.refreshVersions() }
 
         SettingsSection("Developer Runtime Override") {
             HStack(spacing: MetistrySpace.s2) {

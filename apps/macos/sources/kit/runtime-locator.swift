@@ -1,38 +1,51 @@
 // First-run step 1: WHERE IS THE CLI.
 //
-// Three shapes, in this order (docs/product/desktop-app-plan.md, "Bundled
+// Four shapes, in this order (docs/product/desktop-app-plan.md, "Bundled
 // runtime"):
 //
-//   1. bundled  — `Metistry.app/Contents/Resources/metistry/`, the runtime pack
+//   1. installed — `~/Library/Application Support/Metistry/product/`, which
+//                 `metistry runtime install --from <bundle> --to <dir>` wrote
+//                 out of the bundle. THE WRITABLE ONE, and therefore the one
+//                 `metistry update` can lay a new `releases/<version>/` into.
+//   2. bundled  — `Metistry.app/Contents/Resources/metistry/`, the runtime pack
 //                 plus the runtime-deps pack (Node, Postgres, git) that
 //                 ops/release/build-app.sh embedded and notarized with the app.
-//                 Nothing on the user's machine is required.
-//   2. checkout — a product checkout the user pointed the app at, or
+//                 Nothing on the user's machine is required — but a signed
+//                 bundle's `Resources` cannot be written to, so this is a SEED.
+//   3. checkout — a product checkout the user pointed the app at, or
 //                 METISTRY_PRODUCT_DIR: run `node packages/cli/dist/main.js`.
 //                 This is the developer's shape and the terminal user's shape.
-//   3. path     — a `metistry` on PATH (`npx @foldedspacelabs/metistry-cli`
+//   4. path     — a `metistry` on PATH (`npx @foldedspacelabs/metistry-cli`
 //                 installed it, or a global install).
 //
 // A GUI app inherits no shell environment, so "on PATH" cannot mean
 // `/usr/bin/env metistry`: the candidate directories are listed explicitly and
 // PATH is only consulted when launchd happened to pass one.
 //
-// This type answers *where*, and records what it tried. It does not copy the
-// bundled runtime anywhere — see the open question in
-// docs/product/desktop-app-plan.md about the writable product dir a
-// `metistry update` needs (a signed bundle's Resources cannot be written to).
+// THE DECISION THIS ENCODES. The scaffold left an open question: a bundled
+// install's `Resources/metistry/` is read-only, so where does the writable
+// product dir a `metistry update` needs live? It is
+// `~/Library/Application Support/Metistry/product`, and the bundle is a seed
+// copied there once by `metistry runtime install` — the first of the two options
+// docs/product/desktop-app-plan.md set out, which is also the one its own "Two
+// channels, both signed" paragraph already reads as. The COPY is a CLI verb, not
+// something this app does: an app that laid out `releases/<version>/` and flipped
+// `current` itself would be a second implementation of `metistry update`'s
+// release mode. This type only answers *where*, and records what it tried.
 
 import Foundation
 
 public struct MetistryRuntime: Sendable, Equatable {
     public enum Source: String, Sendable {
+        case installed
         case bundled
         case checkout
         case path
 
         public var label: String {
             switch self {
-            case .bundled: return "bundled in the app"
+            case .installed: return "installed by the app"
+            case .bundled: return "bundled in the app (read-only)"
             case .checkout: return "product checkout"
             case .path: return "metistry on PATH"
             }
@@ -69,10 +82,31 @@ public struct RuntimeResolution: Sendable {
     /// Every candidate considered and why it was rejected — this is what the
     /// "no runtime" screen shows instead of "something went wrong".
     public let attempts: [String]
+    /// The bundle's read-only copy, when this build has one:
+    /// `Metistry.app/Contents/Resources/metistry`. It is what
+    /// `metistry runtime install --from` is pointed at.
+    public let bundledSeed: URL?
+    /// Where that copy is installed to: the writable product dir.
+    public let installTarget: URL
 
-    public init(runtime: MetistryRuntime?, attempts: [String]) {
+    public init(
+        runtime: MetistryRuntime?,
+        attempts: [String],
+        bundledSeed: URL? = nil,
+        installTarget: URL = RuntimeLocator.installedProductDirectory
+    ) {
         self.runtime = runtime
         self.attempts = attempts
+        self.bundledSeed = bundledSeed
+        self.installTarget = installTarget
+    }
+
+    /// True when the app is running out of the bundle's read-only seed and the
+    /// writable copy has not been made yet. That is not a fault — the seed runs
+    /// every verb perfectly well — but `metistry update` cannot write to it, so
+    /// the wizard offers the one-command install and says why.
+    public var needsRuntimeInstall: Bool {
+        bundledSeed != nil && runtime?.source == .bundled
     }
 }
 
@@ -92,40 +126,45 @@ public enum RuntimeLocator {
         "/usr/bin",
     ]
 
+    /// `~/Library/Application Support/Metistry/product` — the writable product
+    /// dir a bundled install's `metistry update` writes into.
+    ///
+    /// Application Support rather than the bundle, because a signed bundle's
+    /// `Resources` cannot be written to; and rather than the instance directory,
+    /// because the product is CODE and one copy serves every instance
+    /// (docs/product/desktop-app-plan.md, "What lives where": "the product
+    /// runtime, releases/, runtime/, current — the install/product dir").
+    public static let installedProductDirectory: URL = {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support", isDirectory: true)
+        return base.appendingPathComponent("Metistry/product", isDirectory: true)
+    }()
+
     public static func locate(
         bundleResourceURL: URL?,
         environment: [String: String] = ProcessInfo.processInfo.environment,
         userProductDir: URL? = nil,
+        installedDir: URL = RuntimeLocator.installedProductDirectory,
         fileManager: FileManager = .default
     ) -> RuntimeResolution {
         var attempts: [String] = []
+        let bundledSeed = bundleResourceURL?.appendingPathComponent("metistry", isDirectory: true)
 
-        // ---- 1. bundled ----
-        if let resources = bundleResourceURL {
-            let bundled = resources.appendingPathComponent("metistry", isDirectory: true)
+        // ---- 1. the writable install ----
+        if let runtime = packShape(at: installedDir, source: .installed, fileManager: fileManager) {
+            return RuntimeResolution(runtime: runtime, attempts: attempts, bundledSeed: bundledSeed, installTarget: installedDir)
+        }
+        attempts.append(fileManager.fileExists(atPath: installedDir.path)
+            ? "installed runtime at \(installedDir.path): incomplete (needs runtime/node/bin/node and packages/cli/dist/main.js) — `metistry runtime install` lays it out"
+            : "no installed runtime at \(installedDir.path) yet — first run copies the bundled one there")
+
+        // ---- 2. the bundle's read-only seed ----
+        if let bundled = bundledSeed {
             if fileManager.fileExists(atPath: bundled.path) {
-                // `metistry update` release mode lays a product dir out as
-                // releases/<version>/ with `current` pointing at one
-                // (docs/ops/releases.md); build-app.sh embeds the pack the same
-                // way, so prefer `current` and fall back to the directory itself.
-                let current = bundled.appendingPathComponent("current", isDirectory: true)
-                let productDir = fileManager.fileExists(atPath: current.path) ? current : bundled
-                let cliMain = productDir.appendingPathComponent("packages/cli/dist/main.js")
-                // The runtime-deps pack unpacks beside releases/, never inside
-                // one, so a version flip never orphans it (docs/ops/releases.md).
-                let bundledNode = bundled.appendingPathComponent("runtime/node/bin/node")
-                if fileManager.isExecutableFile(atPath: bundledNode.path), fileManager.fileExists(atPath: cliMain.path) {
-                    return RuntimeResolution(
-                        runtime: MetistryRuntime(
-                            source: .bundled,
-                            executable: bundledNode,
-                            leadingArguments: [cliMain.path],
-                            productDir: productDir
-                        ),
-                        attempts: attempts
-                    )
+                if let runtime = packShape(at: bundled, source: .bundled, fileManager: fileManager) {
+                    return RuntimeResolution(runtime: runtime, attempts: attempts, bundledSeed: bundled, installTarget: installedDir)
                 }
-                attempts.append("bundled runtime at \(bundled.path): incomplete (needs runtime/node/bin/node and \(cliMain.lastPathComponent))")
+                attempts.append("bundled runtime at \(bundled.path): incomplete (needs runtime/node/bin/node and packages/cli/dist/main.js)")
             } else {
                 attempts.append("no bundled runtime at \(bundled.path) — this build did not embed one")
             }
@@ -133,7 +172,7 @@ public enum RuntimeLocator {
             attempts.append("no app bundle resources to search (running the raw executable from .build/)")
         }
 
-        // ---- 2. a product checkout ----
+        // ---- 3. a product checkout ----
         let checkoutCandidates: [(URL, String)] = [
             userProductDir.map { ($0, "chosen in the app") },
             environment["METISTRY_PRODUCT_DIR"].map { (URL(fileURLWithPath: $0), "METISTRY_PRODUCT_DIR") },
@@ -151,23 +190,43 @@ public enum RuntimeLocator {
             }
             return RuntimeResolution(
                 runtime: MetistryRuntime(source: .checkout, executable: node, leadingArguments: [cliMain.path], productDir: dir),
-                attempts: attempts
+                attempts: attempts,
+                bundledSeed: bundledSeed,
+                installTarget: installedDir
             )
         }
         if checkoutCandidates.isEmpty {
             attempts.append("no product checkout chosen, and METISTRY_PRODUCT_DIR is unset")
         }
 
-        // ---- 3. a `metistry` on PATH ----
+        // ---- 4. a `metistry` on PATH ----
         if let bin = findExecutable(named: "metistry", environment: environment, extraDirectories: binaryCandidateDirectories, fileManager: fileManager) {
             return RuntimeResolution(
                 runtime: MetistryRuntime(source: .path, executable: bin, productDir: userProductDir),
-                attempts: attempts
+                attempts: attempts,
+                bundledSeed: bundledSeed,
+                installTarget: installedDir
             )
         }
         attempts.append("no `metistry` in \(searchDirectories(environment: environment, extra: binaryCandidateDirectories).joined(separator: ", "))")
 
-        return RuntimeResolution(runtime: nil, attempts: attempts)
+        return RuntimeResolution(runtime: nil, attempts: attempts, bundledSeed: bundledSeed, installTarget: installedDir)
+    }
+
+    /// A release install's layout, wherever it sits: `releases/<version>/` with a
+    /// `current` symlink and `runtime/` BESIDE it, never inside one, so a version
+    /// flip never orphans Node (docs/ops/releases.md). `build-app.sh` embeds the
+    /// bundle's copy in exactly that shape and `metistry runtime install` writes
+    /// the same one, which is what lets the app and the CLI agree about a
+    /// product directory without either describing it to the other.
+    static func packShape(at root: URL, source: MetistryRuntime.Source, fileManager: FileManager) -> MetistryRuntime? {
+        guard fileManager.fileExists(atPath: root.path) else { return nil }
+        let current = root.appendingPathComponent("current", isDirectory: true)
+        let productDir = fileManager.fileExists(atPath: current.path) ? current : root
+        let cliMain = productDir.appendingPathComponent("packages/cli/dist/main.js")
+        let node = root.appendingPathComponent("runtime/node/bin/node")
+        guard fileManager.isExecutableFile(atPath: node.path), fileManager.fileExists(atPath: cliMain.path) else { return nil }
+        return MetistryRuntime(source: source, executable: node, leadingArguments: [cliMain.path], productDir: productDir)
     }
 
     /// A checkout's own bundled `runtime/node/bin/node` first — that is the one

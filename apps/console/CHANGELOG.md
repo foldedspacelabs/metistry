@@ -1,5 +1,17 @@
 # @metistry-apps/console
 
+## 0.5.0
+
+### Patch Changes
+
+- @metistry-apps/collectors@0.5.0
+  - @foldedspacelabs/metistry-artifacts@0.5.0
+  - @foldedspacelabs/metistry-core@0.5.0
+  - @foldedspacelabs/metistry-mcp-brain@0.5.0
+  - @foldedspacelabs/metistry-queries@0.5.0
+  - @foldedspacelabs/metistry-tasks@0.5.0
+  - @metistry-apps/routines@0.5.0
+
 ## 0.4.0
 
 ### Patch Changes

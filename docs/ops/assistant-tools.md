@@ -16,7 +16,7 @@ manifest by test):
 | Family | Tools | What it means for the assistant |
 | --- | --- | --- |
 | in | `capture`, `requests_create` | Raise anything unsettled into the inbox / your Needs You queue; you approve, revise, or decline. |
-| shared work | `tasks_list` (`filter: ready \| mine \| all`), `tasks_claim`, `tasks_renew`, `tasks_update`, `tasks_release`, `tasks_create` | Works the same shared list as every other agent — claims, leases, notes. |
+| shared work | `tasks_list` (`filter: ready \| mine \| all`), `tasks_claim`, `tasks_renew`, `tasks_update`, `tasks_release`, `tasks_close`, `tasks_create` | Works the same shared list as every other agent — claims, leases, notes, and `tasks_close` to finish one in a single call. |
 | out | `knowledge_search`, `knowledge_read`, `knowledge_list`, `knowledge_grep` | Reads the knowledge index, page contents, a directory listing, and a content regex (all via the reconciler's vault bridge), within its grant — `knowledge_list`/`knowledge_grep` are filesystem semantics over the same tiers `knowledge_search`/`knowledge_read` already enforce (docs/research/2026-09-stash-review.md item 3). `knowledge_read` returns the page's `sha256`. |
 | write | `knowledge_write` | **This is `brain-commit`** (plan §4.7, D5): one page under `Knowledge/` → the reconciler's `POST /vault/write` with a commit intent in the assistant's name. Internal principals only; every external agent is told "not granted". No delete, no rename — those stay your hand. |
 | artifacts | `artifacts_publish`, `artifacts_get`, `artifacts_list`, `artifacts_comment`, `artifacts_resolve`, `artifacts_review` | Publishes versioned output into `Artifacts/<project>/<slug>/` (one commit per version via the reconciler), comments on exact versions, and sends review bundles to other agents in the same project — a review sent across the project boundary becomes a request for you (§4.21). |
@@ -28,7 +28,7 @@ simplification renamed eleven of these (`docs/product/glossary.md`). The old
 names still work — `report`, `tasks_list_ready`, `tasks_mine`,
 `tasks_heartbeat`, `artifact_*`, `crew_dispatch` — but they are resolved at
 call time and are **not** in `tools/list`, so the surface an agent discovers is
-the twenty above. An alias call is audited under the primary name with the old
+the twenty-three above. An alias call is audited under the primary name with the old
 spelling in `runs.meta.alias`:
 
 ```sh

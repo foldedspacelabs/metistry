@@ -56,7 +56,7 @@ describe("tool surface", () => {
     expect(TOOL_NAMES.slice(-tail, -1 - QUERIES_TOOL_NAMES.length)).toEqual([...ARTIFACTS_TOOL_NAMES]);
     expect(TOOL_NAMES.at(-1 - QUERIES_TOOL_NAMES.length)).toBe("agents_delegate");
     expect(TOOL_NAMES.slice(-QUERIES_TOOL_NAMES.length)).toEqual([...QUERIES_TOOL_NAMES]);
-    expect(TOOL_NAMES.length).toBeLessThan(23); // over the PoC-17 tool-COUNT guidance (>20) since knowledge_list/knowledge_grep — flagged in manifest.yaml; the definition-token axis (test/brain.test.ts) is what actually gates lazy
+    expect(TOOL_NAMES.length).toBeLessThan(24); // over the PoC-17 tool-COUNT guidance (>20) since knowledge_list/knowledge_grep and tasks_close — flagged in manifest.yaml; the definition-token axis (test/brain.test.ts) is what actually gates lazy
   });
 
   it("the whole eager surface stays inside the PoC-17 definition budget, and deprecated names cost it nothing", async () => {

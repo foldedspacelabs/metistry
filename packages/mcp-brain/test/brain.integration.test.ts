@@ -240,6 +240,7 @@ cache_ttl: 0
       ["tasks_renew", { id: bId }],
       ["tasks_update", { id: bId, note: "x" }],
       ["tasks_release", { id: bId }],
+      ["tasks_close", { id: bId }],
       ["tasks_claim", { id: 999_999_999 }],
     ] as const) {
       expect(await call(alice, tool, args), tool).toMatchObject({ isError: true, body: { error: { code: "not_found", message: "not found" } } });
@@ -323,6 +324,28 @@ cache_ttl: 0
     const closed = await call(alice, "tasks_update", { id: Number(aId), status: "closed" });
     expect(closed.body.task.status).toBe("closed");
     expect(closed.nudge).toBeNull();
+
+    await alice.close();
+    await bob.close();
+  });
+
+  it("tasks_close: closes a held task in one call — same effect as tasks_update status closed, holder-only, refused once already closed", async () => {
+    const alice = await connect("tok-alice");
+    const bob = await connect("tok-bob");
+    const created = await call(alice, "tasks_create", { title: "close me", project: PA, idempotency_key: `${PA}-close-1` });
+    const id = created.body.task.id as number;
+    await call(alice, "tasks_claim", { id });
+
+    // out of scope (bob is not in PA): not_found, same as tasks_update
+    expect((await call(bob, "tasks_close", { id })).body.error.code).toBe("not_found");
+
+    const closed = await call(alice, "tasks_close", { id, note: "shipped" });
+    expect(closed.body).toMatchObject({ ok: true, task: { id, status: "closed", claimed_by: null, lease_expires_at: null } });
+    expect(closed.body.task.history.at(-1)).toMatchObject({ agent: ALICE, op: "update", status: "closed", note: "shipped" });
+
+    // already closed: a data outcome (not an error envelope), same shape tasks_update would give
+    const again = await call(alice, "tasks_close", { id });
+    expect(again).toMatchObject({ isError: false, body: { ok: false, reason: "closed" } });
 
     await alice.close();
     await bob.close();

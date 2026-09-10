@@ -48,7 +48,14 @@ describe("metistry up", () => {
     expect(r.code).toBe(0);
     expect(exec.calls.map(shown)).toEqual([
       "docker compose up -d --build",
-      ...JOBS.flatMap((label) => [`launchctl bootout gui/501/${label}`, `launchctl bootstrap gui/501 ${home}/Library/LaunchAgents/${label}.plist`, `launchctl kickstart -k gui/501/${label}`]),
+      ...JOBS.flatMap((label) => [
+        `launchctl bootout gui/501/${label}`,
+        // bootout is asynchronous; bootstrapping before launchd is done gives
+        // `Bootstrap failed: 5: Input/output error`
+        `launchctl print gui/501/${label}`,
+        `launchctl bootstrap gui/501 ${home}/Library/LaunchAgents/${label}.plist`,
+        `launchctl kickstart -k gui/501/${label}`,
+      ]),
     ]);
     expect(exec.calls[0]!.cwd).toBe(P);
     for (const label of JOBS) {
@@ -84,7 +91,13 @@ describe("metistry up", () => {
     const broken = fakeExec({ launchctl: (args) => (args[0] === "bootstrap" ? { code: 5, stderr: "Bootstrap failed: 5: Input/output error" } : undefined) });
     const r = await up({ ...base(P), exec: broken, out: () => {}, home, doctorFn: okDoctor });
     expect(r.code).toBe(5);
-    expect(broken.calls.map(shown)).toEqual(["docker compose up -d --build", `launchctl bootout gui/501/${HELPER}`, `launchctl bootstrap gui/501 ${home}/Library/LaunchAgents/${HELPER}.plist`]);
+    expect(broken.calls.map(shown)).toEqual([
+      "docker compose up -d --build",
+      `launchctl bootout gui/501/${HELPER}`,
+      // the poll that waits out launchd's asynchronous teardown
+      `launchctl print gui/501/${HELPER}`,
+      `launchctl bootstrap gui/501 ${home}/Library/LaunchAgents/${HELPER}.plist`,
+    ]);
   });
 
   it("--no-compose and --no-launchd skip their phases", async () => {

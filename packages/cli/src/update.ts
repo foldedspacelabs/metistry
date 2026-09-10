@@ -20,7 +20,7 @@ import { loadDeployment } from "./deployment.js";
 import { doctor, type DoctorDeps, type DoctorReport } from "./doctor.js";
 import { productVersion } from "./env.js";
 import { envPaths } from "./instance.js";
-import { loadNamespace } from "./namespace.js";
+import { applyPorts, loadNamespace } from "./namespace.js";
 import type { Exec } from "./exec.js";
 import { loadPlistTemplates, type PlistTemplate } from "./launchd.js";
 import { instanceLockPath, LOCK_FILENAME, readLock, serializeLock, type LockFile, type LockSource } from "./lock.js";
@@ -200,9 +200,16 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
   // all, and which plists exist (under launchd, console/assistant/db are jobs)
   const loaded = await loadDeployment(runDir, env);
   const deployment = loaded.deployment;
-  // a namespaced instance's jobs carry its label suffix — `update` kickstarts
-  // the labels THIS instance installed, never the default install's
-  const labelSuffix = (await loadNamespace(env.METISTRY_INSTANCE_DIR))?.labelSuffix;
+  // A namespaced instance's jobs carry its label suffix, and its Postgres is
+  // on its own port. BOTH halves matter here: `update` kickstarts the labels
+  // THIS instance installed, and — the dangerous one — its migration runner
+  // must connect to THIS instance's database. Without the port block applied,
+  // METISTRY_DB_PORT falls back to 5432 and `update` would run this
+  // instance's migrations against the DEFAULT install's Postgres (2026-09-10
+  // trial: caught only because the two passwords differed).
+  const ns = await loadNamespace(env.METISTRY_INSTANCE_DIR);
+  const labelSuffix = ns?.labelSuffix;
+  if (ns) applyPorts(env, ns);
   // hashed before the build/switch and again after: only jobs whose code moved are kickstarted
   let before = await hashHostJobs(runDir, await loadPlistTemplates(runDir, deployment.shape, labelSuffix));
 

@@ -59,12 +59,19 @@ export interface Call {
 
 type Handler = (args: string[], opts?: ExecOptions) => Partial<ExecResult> | undefined | void | Promise<Partial<ExecResult> | undefined | void>;
 
-/** Every call succeeds with empty output unless a handler for that binary says otherwise. */
+/**
+ * Every call succeeds with empty output unless a handler for that binary
+ * says otherwise — except `launchctl print`, which defaults to exit 1
+ * ("no such service"). `up` polls that between `bootout` and `bootstrap`
+ * (bootout is asynchronous), and a fake that answered 0 would be claiming
+ * the job is still loaded after we just booted it out.
+ */
 export function fakeExec(handlers: Record<string, Handler> = {}): Exec & { calls: Call[] } {
   const calls: Call[] = [];
   const exec = (async (cmd: string, args: string[], opts?: ExecOptions) => {
     calls.push({ cmd, args, cwd: opts?.cwd });
     const r = await handlers[cmd]?.(args, opts);
+    if (r === undefined && cmd === "launchctl" && args[0] === "print") return { code: 1, stdout: "", stderr: "Could not find service" };
     return { code: 0, stdout: "", stderr: "", ...(r ?? {}) };
   }) as Exec & { calls: Call[] };
   exec.calls = calls;

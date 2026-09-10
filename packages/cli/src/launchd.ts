@@ -165,12 +165,24 @@ export interface PlistValues {
  * rendered dict body. Throws if a placeholder would be left behind — a
  * plist with `__PG_DATA__` still in it is a job that fails at 2am, not a
  * cosmetic problem.
+ *
+ * A single quote in a substituted value is refused for the same class of
+ * reason. Four plists build a `/bin/sh -c` string, and the placeholders
+ * inside it are wrapped in single quotes so a path with a SPACE works —
+ * `~/Library/Application Support/Metistry/…` is the Mac app's default
+ * product and instance location, and unquoted it produced
+ * `/bin/sh: /Users/…/Library/Application: No such file or directory`
+ * (found by the 2026-09-10 launchd trial). A value carrying a quote of its
+ * own would escape that wrapping, so it is rejected rather than escaped:
+ * nobody needs an apostrophe in an install path, and a refusal is a
+ * message where a mis-escape is a shell injection.
  */
 export function renderPlist(template: string, values: PlistValues): string {
   const subs: Record<string, string> = { __REPO__: values.repo, __NODE__: values.node, __ENV_FILE__: values.envFile };
   for (const [k, v] of Object.entries(values.extra ?? {})) subs[`__${k}__`] = v;
   for (const [k, v] of Object.entries(subs)) {
     if (v.includes("__")) throw new Error(`refusing to render a plist with "${v}" for ${k}: it contains "__"`);
+    if (v.includes("'")) throw new Error(`refusing to render a plist with "${v}" for ${k}: a single quote would escape the shell quoting in the sh -c jobs — move the install somewhere without one`);
     if (v.trim() === "") throw new Error(`refusing to render a plist with an empty ${k}`);
   }
   let rendered = template;
@@ -236,12 +248,22 @@ export function launchAgentsDir(home: string): string {
 
 /**
  * The launchd steps for one job, in order: bootout (tolerated when not
- * loaded), bootstrap the freshly written plist, kickstart -k so a job that
- * was already running restarts on the new code. Argument arrays only.
+ * loaded), WAIT for it to actually be gone, bootstrap the freshly written
+ * plist, kickstart -k so a job that was already running restarts on the new
+ * code. Argument arrays only.
+ *
+ * The wait is not belt-and-braces. `launchctl bootout` returns before
+ * launchd has finished tearing the job down, so an immediate `bootstrap`
+ * of the same label races it and fails with `Bootstrap failed: 5:
+ * Input/output error` — which aborts `up` partway, leaving the jobs after
+ * it in the alphabet uninstalled. Found by the 2026-09-10 launchd trial,
+ * where a second `metistry up` on a running install failed roughly every
+ * time.
  */
-export function launchdCommands(label: string, plistPath: string, uid: number): { cmd: string; args: string[]; tolerateFailure?: boolean }[] {
+export function launchdCommands(label: string, plistPath: string, uid: number): { cmd: string; args: string[]; tolerateFailure?: boolean; awaitGone?: boolean }[] {
   return [
     { cmd: "launchctl", args: ["bootout", `gui/${uid}/${label}`], tolerateFailure: true },
+    { cmd: "launchctl", args: ["print", `gui/${uid}/${label}`], awaitGone: true },
     { cmd: "launchctl", args: ["bootstrap", `gui/${uid}`, plistPath] },
     { cmd: "launchctl", args: ["kickstart", "-k", `gui/${uid}/${label}`] },
   ];
@@ -249,14 +271,20 @@ export function launchdCommands(label: string, plistPath: string, uid: number): 
 
 /**
  * The systemd user unit that says the same thing as a plist (Linux follow-up;
- * printed by `up`, never written). `set -a; . .env; set +a; exec node …` in
+ * printed by `up`, never written). `set -a; . '.env'; set +a; exec node …` in
  * the plist becomes EnvironmentFile= + ExecStart= so no shell is involved.
+ *
+ * The plist's shell string single-quotes its paths (a space in
+ * `~/Library/Application Support/…` otherwise splits the command). ExecStart
+ * keeps that quoting — systemd parses quoted arguments the same way — but
+ * `EnvironmentFile=` does not: systemd takes the rest of that line
+ * literally, quotes included, so the path goes in bare.
  */
 export function renderSystemdUnit(t: PlistTemplate, values: { repo: string; node: string; envFile: string }): string {
   const sub = (s: string) => s.replace(/__REPO__/g, values.repo).replace(/__NODE__/g, values.node).replace(/__ENV_FILE__/g, values.envFile);
   const shell = t.programArguments[0] === "/bin/sh" && t.programArguments[1] === "-c" ? t.programArguments[2] : undefined;
   const execLine = shell ? (/exec\s+(.+)$/.exec(shell)?.[1] ?? shell) : t.programArguments.join(" ");
-  const envFile = shell && /\.\s+__ENV_FILE__/.test(shell) ? `EnvironmentFile=${values.envFile}\n` : "";
+  const envFile = shell && /\.\s+'?__ENV_FILE__/.test(shell) ? `EnvironmentFile=${values.envFile}\n` : "";
   const envLines = Object.entries(t.environment)
     .map(([k, v]) => `Environment=${k}=${sub(v)}\n`)
     .join("");

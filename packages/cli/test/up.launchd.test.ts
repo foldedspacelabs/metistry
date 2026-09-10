@@ -205,7 +205,7 @@ describe("the rendered plists", () => {
 
     // the host jobs that exist in BOTH shapes still source a dotenv file with
     // sh -c — but the INSTANCE's, not the checkout's (self-contained instances)
-    expect(await read("watchdog")).toContain(`set -a; . ${I}/state/.env; set +a; exec ${NODE} ${P}/apps/watchdog/dist/main.js`);
+    expect(await read("watchdog")).toContain(`set -a; . '${I}/state/.env'; set +a; exec '${NODE}' '${P}/apps/watchdog/dist/main.js'`);
   });
 
   it("under the compose shape the shaped plists are not installed at all", async () => {

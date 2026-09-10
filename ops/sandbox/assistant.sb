@@ -18,6 +18,10 @@
 ;;                   (the ONLY writable location besides TMP_DIR)
 ;;   TMP_DIR         the per-user temporary directory
 ;;   CONSOLE_TCP     the console's loopback endpoint, e.g. localhost:8080
+;;   DB_TCP          Postgres' loopback endpoint, e.g. localhost:5432 — under
+;;                   the compose shape the engine reached the db through the
+;;                   container network, so this rule had no launchd twin and
+;;                   the engine died at startup with EPERM (2026-09-10 trial)
 ;;
 ;; sandbox-exec(1) is deprecated by Apple and still functional (verified on
 ;; macOS 26.4; the same profile shape has worked since 14). It is a
@@ -91,14 +95,21 @@
   (subpath (param "TMP_DIR")))
 
 ;; ---- network ------------------------------------------------------------
-;; Two destinations, and no third.
+;; Three destinations, and no fourth.
 ;;
 ;; 1. The console, on loopback. That is the whole tool surface: mcp-brain is
 ;;    mounted at the console's /mcp, so brain-commit and every allowlisted
 ;;    bridge call goes through this one endpoint.
 (allow network-outbound (remote tcp (param "CONSOLE_TCP")))
 
-;; 2. Anthropic's API over TLS. sandbox-exec filters by port, not by
+;; 2. Postgres, on loopback. The engine holds its own pool (the invariant-3
+;;    exception it shares with the watchdog), and the launchd shape's db is a
+;;    user-space server on 127.0.0.1 rather than a container the process
+;;    reached over the compose network. Exactly the one port `metistry up`
+;;    put in the managed conf block — not a range, and not "loopback".
+(allow network-outbound (remote tcp (param "DB_TCP")))
+
+;; 3. Anthropic's API over TLS. sandbox-exec filters by port, not by
 ;;    hostname, so this reads as "outbound TLS" — the host allowlist itself
 ;;    is documentation (ANTHROPIC_HOSTS in packages/cli/src/sandbox.ts,
 ;;    docs/ops/deployment-shapes.md) — NOT enforced here, and not enforced

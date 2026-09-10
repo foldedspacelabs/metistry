@@ -17,7 +17,8 @@ import { usesCompose, type DeploymentShape } from "@foldedspacelabs/metistry-cor
 import { loadDeployment } from "./deployment.js";
 import type { Exec } from "./exec.js";
 import { composeServiceNames } from "./doctor.js";
-import { launchAgentsDir, loadPlistTemplates } from "./launchd.js";
+import { launchAgentsDir, loadPlistTemplates, loadSupervisedTemplates } from "./launchd.js";
+import { readSupervisorConfig, supervisorConfigPath, controlRequest, SUPERVISOR_SERVICE } from "./supervisor.js";
 import { loadNamespace } from "./namespace.js";
 import { StepFailed, StepRunner } from "./steps.js";
 import { composeEnvArgs, instanceLock, runDirFor } from "./up.js";
@@ -27,13 +28,21 @@ export type ServiceAction = "restart" | "stop" | "start";
 export interface ServiceTarget {
   /** the CLI-facing name: the plist's service (`console`, `apple-fm`, …) or the compose service name */
   name: string;
-  kind: "launchd" | "compose";
+  /**
+   * How to act on it. `launchd` is an agent launchd owns (the supervisor
+   * itself, the TCC helpers); `child` is a process of the supervisor's,
+   * which launchctl cannot address at all — those go over the control
+   * socket; `compose` is a container.
+   */
+  kind: "launchd" | "child" | "compose";
   /** launchd only: the job's full label, e.g. com.foldedspacelabs.metistry.console */
   label?: string;
   /** launchd only: where `up` installs this job's plist (~/Library/LaunchAgents/<file>) */
   plistPath?: string;
-  /** launchd only: StandardOutPath/StandardErrorPath from the plist template — `metistry logs` reads this file */
+  /** launchd and child: StandardOutPath/StandardErrorPath from the plist template — `metistry logs` reads this file */
   logPath?: string;
+  /** child only: the supervisor's control socket and token, from `<instance>/state/supervisor.json` */
+  control?: { socket: string; token: string };
 }
 
 export interface ServiceTargetContext {
@@ -104,7 +113,7 @@ export async function buildServiceTargets(opts: {
   const targets: ServiceTarget[] = [];
   if (platform === "darwin") {
     const dir = launchAgentsDir(home);
-    for (const t of await loadPlistTemplates(runDir, deployment.shape, ns?.labelSuffix)) {
+    for (const t of await loadPlistTemplates(runDir, deployment.shape, ns?.labelSuffix, env)) {
       targets.push({
         name: t.service,
         kind: "launchd",
@@ -112,6 +121,23 @@ export async function buildServiceTargets(opts: {
         plistPath: join(dir, t.file),
         ...(t.standardOutPath !== undefined ? { logPath: t.standardOutPath } : {}),
       });
+    }
+    // the supervisor's children. The log paths come from the plist templates
+    // (the same files `up` renders them from), and the socket from the config
+    // `up` wrote — so `metistry logs console` works whether or not the
+    // supervisor is answering, while restart/stop/start need it.
+    if (deployment.shape === "launchd") {
+      const stateRoot = env.METISTRY_INSTANCE_DIR?.replace(/\/+$/, "") || runDir;
+      const config = await readSupervisorConfig(supervisorConfigPath(stateRoot)).catch(() => undefined);
+      const control = config ? { socket: config.socket, token: config.token } : undefined;
+      for (const t of await loadSupervisedTemplates(runDir, ns?.labelSuffix, env)) {
+        targets.push({
+          name: t.service,
+          kind: "child",
+          ...(t.standardOutPath !== undefined ? { logPath: t.standardOutPath } : {}),
+          ...(control ? { control } : {}),
+        });
+      }
     }
   }
   if (usesCompose(deployment)) {
@@ -167,7 +193,29 @@ async function actOnCompose(r: StepRunner, t: ServiceTarget, productDir: string,
   }
 }
 
+/**
+ * A child of the supervisor: one line on the control socket. There is no
+ * launchctl equivalent — launchd does not know this process exists — so a
+ * dry run prints the request rather than pretending a command.
+ */
+async function actOnChild(r: StepRunner, t: ServiceTarget, action: ServiceAction): Promise<ServiceResult> {
+  const detail = `supervisor ${action} ${t.name}`;
+  if (!t.control) {
+    return { service: t.name, action, ok: false, detail: `no supervisor config for this install — metistry up first (${SUPERVISOR_SERVICE} owns ${t.name})` };
+  }
+  if (!r.action(`${detail} (over ${t.control.socket})`)) return { service: t.name, action, ok: true, detail };
+  try {
+    const res = await controlRequest(t.control.socket, { op: action, token: t.control.token, service: t.name });
+    if (!res.ok) return { service: t.name, action, ok: false, detail: res.error ?? "the supervisor refused" };
+    const st = res.children?.find((c) => c.name === t.name);
+    return { service: t.name, action, ok: true, detail: `${detail} → ${st?.state ?? "ok"}${st?.pid ? ` (pid ${st.pid})` : ""}` };
+  } catch (e) {
+    return { service: t.name, action, ok: false, detail: e instanceof Error ? e.message : String(e) };
+  }
+}
+
 async function actOn(r: StepRunner, t: ServiceTarget, ctx: ServiceTargetContext, envFile: string | undefined, action: ServiceAction): Promise<ServiceResult> {
+  if (t.kind === "child") return actOnChild(r, t, action);
   return t.kind === "launchd" ? actOnLaunchd(r, t, ctx.uid, action) : actOnCompose(r, t, ctx.productDir, envFile, action);
 }
 
@@ -205,8 +253,14 @@ export async function controlServices(opts: ServiceControlOptions & { action: Se
   const { resolved, unknown } = resolveServices(ctx.targets, opts.names);
   if (unknown.length > 0) throw new UnknownServiceError(unknown, ctx.targets.map((t) => t.name));
   r.section(opts.action);
+  // "every service" means the agents: booting out the supervisor takes its
+  // children with it, and bootstrapping it starts them in order. Acting on
+  // both would fight itself — stop the children, then stop the supervisor
+  // that has already stopped them.
+  const acting = opts.names && opts.names.length > 0 ? resolved : resolved.filter((t) => t.kind !== "child");
+  if (acting.length !== resolved.length) r.note(`the supervisor's children (${resolved.filter((t) => t.kind === "child").map((t) => t.name).join(", ")}) follow it — name one to act on it alone`);
   const results: ServiceResult[] = [];
-  for (const t of resolved) results.push(await actOn(r, t, ctx, opts.envFile, opts.action));
+  for (const t of acting) results.push(await actOn(r, t, ctx, opts.envFile, opts.action));
   return { ok: results.every((x) => x.ok), shape: ctx.shape, results, commands: r.commands };
 }
 
@@ -235,7 +289,7 @@ export async function serviceLogs(opts: LogsOptions): Promise<ServiceResult> {
   if (unknown.length > 0) throw new UnknownServiceError(unknown, ctx.targets.map((t) => t.name));
   const t = resolved[0]!;
   try {
-    if (t.kind === "launchd") {
+    if (t.kind === "launchd" || t.kind === "child") {
       if (!t.logPath) throw new StepFailed(`no log path known for ${t.name} (its plist has no StandardOutPath)`);
       const args = opts.follow ? ["-n", String(opts.lines), "-f", t.logPath] : ["-n", String(opts.lines), t.logPath];
       await r.run("tail", args, { inherit: true });

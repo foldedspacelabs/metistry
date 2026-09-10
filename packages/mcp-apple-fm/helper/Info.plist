@@ -10,8 +10,8 @@
 <plist version="1.0">
 <dict>
   <key>CFBundleIdentifier</key><string>com.foldedspacelabs.metistry.apple-fm</string>
-  <key>CFBundleName</key><string>metistry-apple-fm</string>
-  <key>CFBundleDisplayName</key><string>Metistry Apple FM Helper</string>
+  <key>CFBundleName</key><string>Metistry Apple Intelligence</string>
+  <key>CFBundleDisplayName</key><string>Metistry Apple Intelligence</string>
   <key>CFBundleExecutable</key><string>afm-helper</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>

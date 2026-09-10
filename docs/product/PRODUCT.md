@@ -1119,3 +1119,18 @@ summary carries the failures forward faithfully and at length. The
 definitions are prompts like any other, so CI's `prompt-lint` now scans
 `.claude/` too, and `ops/scripts/install-claude-assets.sh` symlinks them into
 `~/.claude` so every session on the machine gets them, not just this repo's.
+
+**2026-09-10 — one background item, and it is called Metistry.** macOS lists a
+"background item" for every launchd agent an app installs, and names it after
+the program it runs — so the Mac-native shape was about to introduce itself to
+new users as four strangers called "postgres", "node", "node" and "sh", each
+with its own alert the first time it appeared. It now installs **one**, named
+**Metistry**, which runs the database, the console, the reconciler and the
+assistant as its own children; the two macOS permission helpers are named
+"Metistry Calendar Access" and "Metistry Apple Intelligence" where the Privacy
+pane shows them. **The user-visible promise: everything Metistry installs
+carries the Metistry name, and there is one thing to say yes to.** It buys more
+than a name — one supervisor means the database is up before the console tries
+to use it, a service that keeps dying is *reported as crash-looping* instead of
+respawning silently forever, and `metistry restart console` works on a process
+launchd cannot even see.

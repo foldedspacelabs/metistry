@@ -26,6 +26,10 @@ jobs:
       - uses: actions/checkout@v4
       - run: ops/scripts/check-path-case.sh
       - run: node ops/scripts/prompt-lint.mjs
+      # tokens.css, preview.html and the Mac app's design-tokens.swift are all
+      # generated from tokens.json. This is what stops one of them drifting —
+      # and it re-checks every declared colour pair against WCAG AA.
+      - run: node ops/scripts/build-design-tokens.mjs --check
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -44,3 +48,25 @@ jobs:
         env:
           METISTRY_DB_PASSWORD: ci-only
         run: pnpm test
+
+  # The Mac app cannot rot silently between releases: it compiles and its unit
+  # tests run on every PR. Deliberately small — no signing, no bundle assembly,
+  # no DMG (that is the release workflow's `macos-app` job, which needs the
+  # Developer ID cert and a runner minute budget this does not). SwiftPM's build
+  # tree is cached on Package.resolved, so Sparkle's binary artifact is fetched
+  # once per pin rather than once per run.
+  macos-app:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: apps/macos/.build
+          key: swiftpm-macos-14-${{ hashFiles('apps/macos/Package.resolved') }}-${{ hashFiles('apps/macos/sources/**', 'apps/macos/tests/**') }}
+          restore-keys: |
+            swiftpm-macos-14-${{ hashFiles('apps/macos/Package.resolved') }}-
+      - run: swift --version
+      # --disable-automatic-resolution: Package.resolved is the pin, and CI must
+      # fail on a stale one rather than quietly resolving something else.
+      - run: swift build --package-path apps/macos --disable-automatic-resolution
+      - run: swift test --package-path apps/macos --disable-automatic-resolution

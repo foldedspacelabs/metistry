@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { Exec, ExecOptions } from "../src/exec.js";
 import { promptStdin } from "../src/keychain.js";
+import { main } from "../src/main.js";
 import { accountFor, DEFAULT_SCOPE, isSecretVar, listSecrets, mintSecret, purgeSecrets, renderSecretList, rewriteEnv, scopeFor, scopeReason, SECRET_SCOPES, syncSecrets } from "../src/secrets.js";
 
 /** One instance's id — the account its own secrets are filed under. */
@@ -288,6 +289,24 @@ describe("instance-scoped secrets", () => {
     expect(table).toContain("METISTRY_DB_PASSWORD");
     for (const v of ["not-yet-migrated", "scoped"]) expect(table).not.toContain(v);
     for (const c of kc.calls) expect(c.args).not.toContain("-w");
+  });
+
+  it("--json prints the same rows the table shows — names, scope, keychain account found under, set/unset — and no value", async () => {
+    const file = await envFile("METISTRY_DB_PASSWORD=set-in-env\n");
+    const kc = fakeSecurity({ [key(USER, "METISTRY_DB_PASSWORD")]: "not-yet-migrated" });
+    const out: string[] = [];
+    // no --product-dir: knownSecretNames() falls back to .env's own names only (no .env.example to widen the list)
+    const code = await main(["secrets", "list", "--json", "--env-file", file, "--product-dir", await mkdtemp(join(tmpdir(), "metistry-no-example-"))], {
+      out: (l) => out.push(l),
+      exec: kc.exec,
+    });
+    expect(code).toBe(0);
+    const printed = out.join("\n");
+    const rows = JSON.parse(printed) as unknown[];
+    expect(rows).toEqual(await listSecrets({ envFile: file, exec: kc.exec, out: () => {}, platform: "darwin", env: {} }));
+    expect(rows).toEqual([{ name: "METISTRY_DB_PASSWORD", scope: "instance", inKeychain: true, foundUnder: "user", inEnv: true }]);
+    expect(printed).not.toContain("not-yet-migrated");
+    expect(printed).not.toContain("set-in-env");
   });
 });
 

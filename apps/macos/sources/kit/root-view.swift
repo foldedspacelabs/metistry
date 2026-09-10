@@ -51,7 +51,7 @@ public struct RootView: View {
         } detail: {
             switch destination {
             case .status:
-                StatusPanel(model: model.status, runtime: model.runtime)
+                StatusPanel(model: model.status, signIn: model.consoleSignIn, runtime: model.runtime)
                     .navigationTitle("Status")
             }
         }

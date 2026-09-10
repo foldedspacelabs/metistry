@@ -8,7 +8,7 @@ and inside the owner class one *principal*.
 | Credential | Presented as | Principal | Reaches |
 | --- | --- | --- | --- |
 | Passkey session | `Cookie: metistry_session=…` | `user` | everything |
-| **Local owner token** | `Authorization: Bearer $METISTRY_OWNER_TOKEN`, from this machine | `user` | everything except the two session-bound endpoints below |
+| **Local owner token** | `Authorization: Bearer $METISTRY_LOCAL_OWNER_TOKEN`, from this machine | `user` | everything except the two session-bound endpoints below |
 | Host-minted owner token | `Authorization: Bearer …` (an `owner_tokens` row) | `owner_token` | `/capture`, `/message`, `/api/status`, named queries — never management |
 | Agent token | `Authorization: Bearer …` (an `agents` row) | that agent | `/capture` and the mcp-brain mount at `/mcp`; a uniform 403 everywhere else |
 
@@ -18,9 +18,9 @@ predicate the owner surface is gated on, so the two cannot drift apart.
 
 ## The local owner token
 
-`METISTRY_OWNER_TOKEN` is an instance-scoped secret. `metistry init` mints
+`METISTRY_LOCAL_OWNER_TOKEN` is an instance-scoped secret. `metistry init` mints
 it; `metistry secrets sync --to env` mints one for an install that predates
-it; the login Keychain is its home (`metistry:METISTRY_OWNER_TOKEN`, under
+it; the login Keychain is its home (`metistry:METISTRY_LOCAL_OWNER_TOKEN`, under
 the instance's `instance_id`), and `<instance>/state/.env` — 0600, generated
 from the Keychain — is how it reaches the console's environment.
 
@@ -105,7 +105,7 @@ origin     https://your-hostname.example
 ```
 
 `--json` gives the same fields for the app. A 401 here is one of exactly
-two things, and the error says so: the `METISTRY_OWNER_TOKEN` in this
+two things, and the error says so: the `METISTRY_LOCAL_OWNER_TOKEN` in this
 environment is not the one the console was *started* with (`metistry
 secrets sync --to env`, then `metistry restart console`), or the request did
 not reach it from this machine (the compose caveat above).
@@ -119,7 +119,7 @@ than failing it.
 
 ```
 GET /api/whoami
-Authorization: Bearer <METISTRY_OWNER_TOKEN>
+Authorization: Bearer <METISTRY_LOCAL_OWNER_TOKEN>
 
 200 {"principal":"user","via":"local_owner_token","management":true,
      "origin":"https://…","as_of":"2026-09-10T15:42:22.406Z"}
@@ -157,7 +157,7 @@ misconfigured install stops looking like a broken one.
 
 ## Rotating and revoking
 
-- **The local owner token:** `metistry secrets mint METISTRY_OWNER_TOKEN`
+- **The local owner token:** `metistry secrets mint METISTRY_LOCAL_OWNER_TOKEN`
   (Keychain + `.env`), then `metistry restart console`. The old value stops
   working the moment the console restarts — there is no revocation list
   because there is no row: the environment *is* the record.

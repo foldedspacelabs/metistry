@@ -32,6 +32,9 @@ public struct SettingsView: View {
     }
 
     private var settings: SettingsModel { model.settings }
+    /// Where doctor probed the console, for the passkey diagnostic under
+    /// Advanced. The same source the wizard's step 6 uses.
+    private var consoleURL: String? { PasskeyRouting.consoleURL(in: model.status.report) }
 
     public var body: some View {
         TabView(selection: Binding(get: { settings.section }, set: { settings.section = $0 })) {
@@ -231,6 +234,14 @@ public struct SettingsView: View {
 
     @ViewBuilder
     private func connectionsPane(_ p: Palette) -> some View {
+        SettingsSection("Console Sign-In") {
+            ConsoleSignInCard(model: settings.consoleSignIn, title: "This Mac")
+            Text(SettingsModel.consoleSignInNote)
+                .metistryText(.caption1, p, .textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .task(id: model.instances.active) { await settings.consoleSignIn.refreshIfNeeded() }
+
         SettingsSection("Instance Repository") {
             FactRow("Status", settings.repositoryStatus)
             if let facts = settings.reconciler {
@@ -444,6 +455,11 @@ public struct SettingsView: View {
                 Text(command).metistryText(.caption1, p, .textTertiary).textSelection(.enabled)
             }
         }
+
+        SettingsSection("Passkey Diagnostic") {
+            PasskeyDiagnosticView(model: model.firstRun.passkey)
+        }
+        .task(id: consoleURL) { model.firstRun.passkey.adopt(consoleURL: consoleURL) }
 
         SettingsSection("Logs") {
             FactRow("Log folder", MetistryLogs.conventionalDirectory, mono: true)

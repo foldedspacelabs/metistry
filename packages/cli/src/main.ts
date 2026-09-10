@@ -151,7 +151,7 @@ const USAGE = `metistry — Metistry command line
 
   metistry console whoami [--json] [--instance <dir>] [--env-file <path>]
       Ask the console who it thinks you are, using this install's
-      METISTRY_OWNER_TOKEN (docs/ops/auth.md): principal, how it was proved,
+      METISTRY_LOCAL_OWNER_TOKEN (docs/ops/auth.md): principal, how it was proved,
       and whether that credential reaches the management surface. The local
       owner token authenticates as the "user" principal — the same principal
       a passkey session yields — but only over a connection from THIS

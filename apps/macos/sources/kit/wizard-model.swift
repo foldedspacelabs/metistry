@@ -112,6 +112,35 @@ public enum WizardOptions {
         ),
     ]
 
+    /// Step 6, since the owner decision of 2026-09-10. The framing is the
+    /// change: this is no longer "get a door", it is "this Mac already has one —
+    /// do the other devices need theirs yet?".
+    public static let door: [WizardOption<DoorPlan>] = [
+        .init(
+            value: .thisMacOnly,
+            title: "This Mac Only, for Now",
+            pro: "Nothing to do: this app and the `metistry` command are the same package on the same machine, so the console already takes them as the owner over loopback — by a token only the logged-in user can read (docs/ops/auth.md). No ceremony, no credential to lose.",
+            con: "It is the only thing signed in. A browser — Safari on this same Mac included — and the phone each present a different credential, and get a 401 until one of them enrols a passkey."
+        ),
+        .init(
+            value: .otherDevices,
+            title: "Enrol a Browser or a Phone",
+            pro: "A passkey is the door for everything that is not this Mac, and it is the only door the console offers them. The phone flow and the browser flow are the same one.",
+            con: "It needs an enrolment code minted on the host — single-use, ten minutes — because nothing mints one over HTTP on purpose (plan §4.2)."
+        ),
+    ]
+
+    /// Where the `ASAuthorization` probe went, said in the step that used to
+    /// carry it so nobody has to guess whether it was removed or moved.
+    public static let doorDiagnosticLocation = "Settings → Advanced"
+
+    public static let doorNote =
+        "Passkeys did not change: enrolling one is exactly the flow it was, and it is still what a browser and a phone need. "
+        + "What changed is that this Mac is no longer asked to perform one against a loopback origin — it authenticates as the "
+        + "same `user` principal by the local owner token instead, which is not weaker: possession of that token means being "
+        + "able to read this login Keychain, the same claim a platform passkey makes. The `ASAuthorization` probe that measures "
+        + "what macOS says about a relying party is under \(doorDiagnosticLocation)."
+
     /// What "enable this bridge" actually does, said once rather than per bridge.
     public static let bridgeNote =
         "Enabling a bridge mints its token (`metistry secrets mint METISTRY_BRIDGE_TOKEN_<NAME>`) into the login Keychain and .env. "
@@ -168,13 +197,18 @@ public final class WizardModel {
 
     /// Has this step got what it came for? Steps 6 and 7 answer from their own
     /// models rather than from a `metistry` verb's exit code, because neither is
-    /// one: the door is enrolled or it is not, and the token's name is set or it
-    /// is not. Both are optional either way, so neither can wall the wizard —
-    /// the passkey in particular may be unreachable natively for reasons the
-    /// step explains and nobody can fix from here.
+    /// one: the door is open or it is not, and the token's name is set or it is
+    /// not. Both are optional either way, so neither can wall the wizard.
+    ///
+    /// Step 6's answer changed with the owner decision of 2026-09-10. The
+    /// console has a door the moment it takes this Mac as the owner — which it
+    /// does by default, with no ceremony — so a successful `console whoami` is
+    /// what satisfies the step. An enrolled passkey satisfies it too: that is
+    /// the same door, opened for a browser or a phone.
     public func isSatisfied(_ step: FirstRunStep) -> Bool {
         switch step {
         case .door:
+            if steps.consoleSignIn.signIn?.isSignedIn == true { return true }
             if case .enrolled = steps.passkey.phase { return true }
             return false
         case .claude:

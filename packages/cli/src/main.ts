@@ -16,6 +16,7 @@ import { importSessions } from "./import-sessions.js";
 import { init } from "./init.js";
 import type { LockSource } from "./lock.js";
 import { listSecrets, mintSecret, renderSecretList, syncSecrets, type SyncDirection } from "./secrets.js";
+import { controlServices, renderServiceResults, serviceLogs, UnknownServiceError, type ServiceAction } from "./service-control.js";
 import { up } from "./up.js";
 import { gitHead, update } from "./update.js";
 
@@ -26,7 +27,7 @@ export interface ParsedArgs {
 }
 
 /** Flags that never take a value, so `metistry init --force <dir>` keeps its dir. */
-export const BOOLEAN_FLAGS = new Set(["force", "json", "help", "dry-run", "no-launchd", "no-compose", "skip-build", "skip-migrate", "rollback"]);
+export const BOOLEAN_FLAGS = new Set(["force", "json", "help", "dry-run", "no-launchd", "no-compose", "skip-build", "skip-migrate", "rollback", "follow"]);
 
 /** `--channel git|release` — anything else is a typo, not a guess (the lock parser is strict for the same reason). */
 export function parseChannel(v: string | undefined): LockSource | undefined {
@@ -159,6 +160,24 @@ const USAGE = `metistry — Metistry command line
       a specific release instead of the latest; --rollback flips current back to
       the previous one (migrations are additive and are not reverted).
 
+  metistry restart [<service>…] [--json] [--dry-run] [--product-dir <checkout>]
+  metistry stop    [<service>…] [--json] [--dry-run] [--product-dir <checkout>]
+  metistry start   [<service>…] [--json] [--dry-run] [--product-dir <checkout>]
+      Act on one, several, or (no args) every service the current shape runs —
+      the same shape read from deployment.yaml, and the same host-job/container
+      split up and doctor use. Host jobs: launchctl kickstart -k (restart),
+      bootout (stop), bootstrap + kickstart -k (start), against the plist up
+      already installed. Containers: docker compose restart|stop|start.
+      Every named service is acted on even if an earlier one fails; --json
+      prints [{service, action, ok, detail}, …] for the Mac app's menu bar,
+      which calls exactly these three verbs and never launchctl/docker itself.
+      An unknown service name fails (exit 2) with the list of known ones.
+
+  metistry logs <service> [--lines N] [--follow] [--dry-run] [--product-dir <checkout>]
+      Tail one service's log: the launchd job's StandardOutPath (default
+      /tmp/metistry-<service>.log) or, under compose, docker compose logs.
+      Default is the last 200 lines; --follow streams.
+
   --dry-run prints every command and runs nothing.
 
 Product checkout resolution: --product-dir, METISTRY_PRODUCT_DIR, the checkout
@@ -172,6 +191,10 @@ export interface MainIo {
   doctorDeps?: Partial<DoctorDeps>;
   /** test seam: every subprocess up/update/init run */
   exec?: Exec;
+  /** test seams for restart/stop/start/logs: the host platform decides whether launchd jobs exist at all (CI runs the suite on Linux) */
+  platform?: NodeJS.Platform;
+  uid?: number;
+  home?: string;
 }
 
 export async function main(argv: string[], io: MainIo = {}): Promise<number> {
@@ -356,6 +379,81 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
         doctorDeps: io.doctorDeps,
       });
       return r.code;
+    }
+    case "restart":
+    case "stop":
+    case "start": {
+      if (!productDir) {
+        err(`${command} needs a Metistry checkout: pass --product-dir or set METISTRY_PRODUCT_DIR`);
+        return 2;
+      }
+      loadDotEnv(productDir);
+      const asJson = flags.json === true;
+      try {
+        const r = await controlServices({
+          productDir,
+          action: command as ServiceAction,
+          names: positional,
+          // --json is a wire contract for the Mac app (docs/ops/cli.md): only
+          // the final array goes to stdout, none of the plan's progress lines
+          out: asJson ? () => {} : out,
+          exec: io.exec,
+          platform: io.platform ?? undefined,
+          uid: io.uid,
+          home: io.home,
+          dryRun: flags["dry-run"] === true,
+        });
+        out(asJson ? JSON.stringify(r.results, null, 2) : renderServiceResults(r.results));
+        return r.ok ? 0 : 1;
+      } catch (e) {
+        if (e instanceof UnknownServiceError) {
+          err(`metistry ${command}: ${e.message}`);
+          return 2;
+        }
+        err(`metistry ${command}: ${e instanceof Error ? e.message : String(e)}`);
+        return 1;
+      }
+    }
+    case "logs": {
+      if (!productDir) {
+        err("logs needs a Metistry checkout: pass --product-dir or set METISTRY_PRODUCT_DIR");
+        return 2;
+      }
+      const service = positional[0];
+      if (!service) {
+        err("usage: metistry logs <service> [--lines N] [--follow]");
+        return 2;
+      }
+      loadDotEnv(productDir);
+      const linesRaw = str(flags, "lines");
+      const lines = linesRaw === undefined ? 200 : Number(linesRaw);
+      if (!Number.isInteger(lines) || lines <= 0) {
+        err(`--lines must be a positive integer, not ${JSON.stringify(linesRaw)}`);
+        return 2;
+      }
+      try {
+        const r = await serviceLogs({
+          productDir,
+          service,
+          lines,
+          follow: flags.follow === true,
+          out,
+          exec: io.exec,
+          platform: io.platform ?? undefined,
+          uid: io.uid,
+          home: io.home,
+          dryRun: flags["dry-run"] === true,
+        });
+        if (!r.ok) err(`metistry logs: ${r.detail}`);
+        return r.ok ? 0 : 1;
+      } catch (e) {
+        if (e instanceof UnknownServiceError) {
+          err(`metistry logs: ${e.message}`);
+          return 2;
+        }
+        err(`metistry logs: ${e instanceof Error ? e.message : String(e)}`);
+        return 1;
+      }
     }
     default:
       err(`unknown command: ${command}\n\n${USAGE}`);

@@ -66,6 +66,7 @@ export const SECRET_SCOPES: readonly ScopeRule[] = [
   { scope: "user", match: "CLAUDE_CODE_OAUTH_TOKEN", why: "the person's Claude subscription login — one per Mac, shared by every instance" },
   { scope: "user", match: /^METISTRY_AWS_(SECRET_ACCESS_KEY|SESSION_TOKEN)$/, why: "the person's own AWS credentials (aws-costs), not this instance's" },
   { scope: "instance", match: /^METISTRY_DB_PASSWORD$/, why: "this instance's Postgres, in its own state/pg" },
+  { scope: "instance", match: /^METISTRY_OWNER_TOKEN$/, why: "the local owner door into THIS instance's console (docs/ops/auth.md) — a second instance must not open the first's" },
   { scope: "instance", match: /^METISTRY_BRIDGE_TOKEN_/, why: "a bearer this instance's bridges were started with" },
   { scope: "instance", match: /^METISTRY_ASSISTANT_TOKEN$/, why: "the internal agent's bearer, registered in this instance's console" },
   { scope: "instance", match: /^METISTRY_VAPID_/, why: "push keys bound to this instance's origin and subscriptions" },
@@ -74,6 +75,21 @@ export const SECRET_SCOPES: readonly ScopeRule[] = [
 
 /** What an unlisted secret gets: self-containment is the rule. */
 export const DEFAULT_SCOPE: SecretScope = "instance";
+
+/**
+ * Secrets this command may CREATE on sight rather than report missing.
+ *
+ * The bar is deliberately high: a generated secret is one whose value is
+ * meaningless outside this install, so minting one can never be the wrong
+ * guess (nobody has to paste it anywhere, and nothing else already knows
+ * it). `METISTRY_DB_PASSWORD` is the precedent — `metistry up` generates it
+ * into `.env` when Postgres is first prepared. Everything else
+ * (CLAUDE_CODE_OAUTH_TOKEN, the GitHub PATs, the bridge tokens a service was
+ * already started with) stays "not in the Keychain, left as it is".
+ */
+export const GENERATED_SECRETS: Readonly<Record<string, string>> = {
+  METISTRY_OWNER_TOKEN: "the console's local owner door — an install that predates it gets one here (docs/ops/auth.md)",
+};
 
 function ruleFor(name: string): ScopeRule | undefined {
   return SECRET_SCOPES.find((r) => (typeof r.match === "string" ? r.match === name : r.match.test(name)));
@@ -173,6 +189,8 @@ export interface SyncResult {
   skipped: string[];
   /** instance-scoped names that were found only under the user account and have now been COPIED to the instance's (never deleted) */
   migrated: string[];
+  /** `--to env`: GENERATED_SECRETS names that existed nowhere and were created by this run */
+  minted?: string[];
   /** `--to env`: the file that was written, which may not be the one that was read (the move) */
   wrote?: string;
 }
@@ -260,6 +278,7 @@ export async function syncSecrets(direction: SyncDirection, opts: SecretsOptions
   // is COPIED to the instance's account (never deleted, so a rollback to an
   // older CLI still finds it).
   const values = new Map<string, string>();
+  const minted: string[] = [];
   for (const name of names) {
     const own = forName(name);
     let v = await own.getSecret(name);
@@ -269,6 +288,14 @@ export async function syncSecrets(direction: SyncDirection, opts: SecretsOptions
         await own.setSecret(name, v);
         migrated.push(name);
       }
+    }
+    // Nowhere yet, and one of the few whose value only ever means "this
+    // install": mint it into the Keychain now, so an instance that predates
+    // the variable gains it on the next sync rather than needing a verb.
+    if (v === undefined && GENERATED_SECRETS[name]) {
+      v = (opts.mint ?? mintToken)();
+      await own.setSecret(name, v);
+      minted.push(name);
     }
     if (v === undefined) skipped.push(name);
     else values.set(name, v);
@@ -286,9 +313,11 @@ export async function syncSecrets(direction: SyncDirection, opts: SecretsOptions
   changed.push(...values.keys());
   opts.out(`wrote ${changed.length} secret line(s) into ${target} from the Keychain (0600; every other line preserved): ${changed.join(", ") || "(none)"}`);
   if (migrated.length) opts.out(`copied from the user account to this instance's (${accounts.instance}), the old items left alone: ${migrated.join(", ")}`);
+  for (const n of minted) opts.out(`minted ${n} — it was in neither the Keychain nor ${opts.envFile}: ${GENERATED_SECRETS[n]}`);
+  if (minted.length) opts.out(`restart the console for a freshly minted secret to take effect (\`metistry restart console\`).`);
   if (missing.length) opts.out(`appended (no line existed): ${missing.join(", ")}`);
   if (skipped.length) opts.out(`not in the Keychain, left as they are: ${skipped.join(", ")}`);
-  return { direction, changed, skipped, migrated, wrote: target };
+  return { direction, changed, skipped, migrated, minted, wrote: target };
 }
 
 /** Mint a fresh random token into the Keychain and into `.env` — the only place a new secret is created. */

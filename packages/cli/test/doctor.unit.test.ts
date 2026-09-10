@@ -156,6 +156,64 @@ describe("doctor: everything healthy", () => {
   });
 });
 
+// The console row used to settle for "a 401 has the right shape". With
+// METISTRY_OWNER_TOKEN in the environment it is a real authenticated read
+// through the same door the Mac app comes in by (docs/ops/auth.md).
+describe("doctor: the console row with the local owner token", () => {
+  const withToken = { ...env, METISTRY_OWNER_TOKEN: "owner-token" };
+
+  it("presents the token and records that the read authenticated", async () => {
+    const productDir = await checkout();
+    const seen: { url: string; auth?: string }[] = [];
+    const report = await doctor({
+      productDir,
+      env: withToken,
+      fetchFn: fakeFetch({ "7901/check": res(200, checkBody("ok")), "/health": res(200, { ok: true }), "/api/status": res(200, { checks: [] }) }, seen),
+      db: fakeDb(["0001_a.sql", "0002_b.sql"]),
+      exec: fakeExec({ docker: { code: 127 } }),
+      platform: "linux",
+    });
+    const r = byName(report.rows);
+    expect(r.console).toMatchObject({ status: "ok", meta: { api_status: 200, authenticated: true } });
+    expect(r.console?.probe).toContain("authenticates with METISTRY_OWNER_TOKEN");
+    expect(seen.find((s) => s.url.endsWith("/api/status"))?.auth).toBe("Bearer owner-token");
+  });
+
+  it("degrades (never fails: the console is up) when the token is refused, and names both causes", async () => {
+    const productDir = await checkout();
+    const report = await doctor({
+      productDir,
+      env: withToken,
+      fetchFn: fakeFetch({ "7901/check": res(200, checkBody("ok")), "/health": res(200, { ok: true }), "/api/status": res(401) }),
+      db: fakeDb(["0001_a.sql", "0002_b.sql"]),
+      exec: fakeExec({ docker: { code: 127 } }),
+      platform: "linux",
+    });
+    const r = byName(report.rows);
+    expect(r.console?.status).toBe("degraded");
+    expect(r.console?.meta).toMatchObject({ api_status: 401, authenticated: false });
+    expect(r.console?.remediation).toMatch(/secrets sync --to env/);
+    expect(r.console?.remediation).toMatch(/METISTRY_TRUSTED_LOOPBACK_PROXY/);
+    expect(r.console?.remediation).not.toContain("owner-token"); // the value never reaches a report
+  });
+
+  it("without the token, a 401 is still a pass — unchanged", async () => {
+    const productDir = await checkout();
+    const seen: { url: string; auth?: string }[] = [];
+    const report = await doctor({
+      productDir,
+      env,
+      fetchFn: fakeFetch({ "7901/check": res(200, checkBody("ok")), "/health": res(200, { ok: true }), "/api/status": res(401) }, seen),
+      db: fakeDb(["0001_a.sql", "0002_b.sql"]),
+      exec: fakeExec({ docker: { code: 127 } }),
+      platform: "linux",
+    });
+    const r = byName(report.rows);
+    expect(r.console).toMatchObject({ status: "ok", meta: { api_status: 401, authenticated: false } });
+    expect(seen.find((s) => s.url.endsWith("/api/status"))?.auth).toBeUndefined();
+  });
+});
+
 describe("doctor: the launchd shape", () => {
   it("reports the shape, probes the shaped jobs as launchd, and never consults docker", async () => {
     const productDir = await checkout();

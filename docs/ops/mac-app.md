@@ -192,14 +192,27 @@ profile; the decoded `.p8` goes to a `0600` temp file and is deleted on exit.
 
 ## In CI
 
-- **`ci.yml` → `macos-app`** (macos-14): `swift build` and `swift test` on every
+- **`ci.yml` → `macos-app`** (macos-15): `swift build` and `swift test` on every
   PR, cached on `Package.resolved`. No signing, no bundle, no DMG — this exists
   so the app cannot rot silently, and it is kept small on purpose.
-- **`release.yml` → `macos-app`** (macos-14): imports the Developer ID cert into
+- **`release.yml` → `macos-app`** (macos-15): imports the Developer ID cert into
   a temporary keychain, embeds the runtime pack and the bundled runtime this
   same run built, signs, notarizes, staples, and uploads the DMG.
-- **`release.yml` → `appcast`**: signs that DMG with Sparkle's `sign_update` and
-  renders `appcast.xml` through `ops/release/appcast.mjs`.
+- **`release.yml` → `appcast`** (macos-14 — it compiles nothing): signs that DMG
+  with Sparkle's `sign_update` and renders `appcast.xml` through
+  `ops/release/appcast.mjs`.
+
+**Why macos-15 for the two jobs that compile.** The macos-14 image's default
+Xcode is 15.4, whose Swift is 5.10, and it refuses the package before doing
+anything:
+
+```
+error: 'macos': package 'macos' is using Swift tools version 6.0.0 but the installed version is 5.10.0
+```
+
+The app still *targets* macOS 14 — `Package.swift`'s `platforms:` puts `minos
+14.0` in the binary, which `otool -l` confirms. The runner image is the
+toolchain that builds it, not the floor it runs on.
 
 Both release jobs **skip cleanly** when their secrets are absent, the same way
 the `images` job does for a fork without `packages:write`: the run logs a

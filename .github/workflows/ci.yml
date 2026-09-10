@@ -55,16 +55,23 @@ jobs:
   # Developer ID cert and a runner minute budget this does not). SwiftPM's build
   # tree is cached on Package.resolved, so Sparkle's binary artifact is fetched
   # once per pin rather than once per run.
+  #
+  # macos-15, not macos-14: the macos-14 image's default Xcode is 15.4, whose
+  # Swift is 5.10, and it refuses the package outright —
+  #   error: package 'macos' is using Swift tools version 6.0.0 but the
+  #   installed version is 5.10.0
+  # The app itself still targets macOS 14 (Package.swift's `platforms:` sets
+  # minos 14.0); this is the toolchain that builds it, not the floor it runs on.
   macos-app:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/cache@v4
         with:
           path: apps/macos/.build
-          key: swiftpm-macos-14-${{ hashFiles('apps/macos/Package.resolved') }}-${{ hashFiles('apps/macos/sources/**', 'apps/macos/tests/**') }}
+          key: swiftpm-macos-15-${{ hashFiles('apps/macos/Package.resolved') }}-${{ hashFiles('apps/macos/sources/**', 'apps/macos/tests/**') }}
           restore-keys: |
-            swiftpm-macos-14-${{ hashFiles('apps/macos/Package.resolved') }}-
+            swiftpm-macos-15-${{ hashFiles('apps/macos/Package.resolved') }}-
       - run: swift --version
       # --disable-automatic-resolution: Package.resolved is the pin, and CI must
       # fail on a stale one rather than quietly resolving something else.

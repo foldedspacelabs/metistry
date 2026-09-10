@@ -282,10 +282,14 @@ jobs:
   # `images` job extends a fork without packages:write. `secrets` is not
   # available in a job-level `if`, so the gate is the first step and everything
   # after it is conditional on its output.
+  # macos-15, not macos-14: macos-14's default Xcode is 15.4 / Swift 5.10, which
+  # refuses `swift-tools-version: 6.0` outright. The app still targets macOS 14 —
+  # Package.swift's `platforms:` sets minos 14.0 — so this is the toolchain that
+  # builds it, not the floor it runs on. (ci.yml's macos-app job says the same.)
   macos-app:
     name: macOS app DMG
     needs: [verify, runtime, runtime-deps]
-    runs-on: macos-14
+    runs-on: macos-15
     outputs:
       built: ${{ steps.gate.outputs.ok }}
     env:

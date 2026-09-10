@@ -57,5 +57,36 @@ export { up, productSource, composeUp, installLaunchd, type UpOptions, type UpRe
 export { update, gitHead, hashHostJobs, trackedPathFor, writeLock, publishedPackages, type UpdateOptions, type UpdateResult } from "./update.js";
 export { runMigrations, listMigrationFiles, openMigrationSession, MIGRATION_LOCK_KEY, type MigrationSession, type MigrateResult } from "./migrate.js";
 export { parseLock, serializeLock, readLock, instanceLockPath, LOCK_FILENAME, type LockFile, type LockSource } from "./lock.js";
-export { renderPlist, parsePlistTemplate, loadPlistTemplates, launchdCommands, renderSystemdUnit, type PlistTemplate } from "./launchd.js";
+export { renderPlist, parsePlistTemplate, loadPlistTemplates, launchdCommands, renderSystemdUnit, labelFor, logPathFor, serviceOf, withNamespace, LABEL_PREFIX, type PlistTemplate } from "./launchd.js";
+export {
+  allocateBase,
+  applyPorts,
+  loadNamespace,
+  parseNamespace,
+  portsFile,
+  portsOf,
+  preferredBase,
+  serializeNamespace,
+  suffixFor,
+  BLOCK_SIZE,
+  DEFAULT_PORTS,
+  PORTED_SERVICES,
+  PORT_VARS,
+  type Namespace,
+} from "./namespace.js";
+export {
+  installRuntime,
+  describeSeed,
+  defaultProductDir,
+  readReceipt,
+  receiptPath,
+  seedDirOf,
+  upToDate,
+  BUNDLE_SEED_REL,
+  INSTALL_RECEIPT,
+  type InstallReceipt,
+  type RuntimeInstallOptions,
+  type RuntimeInstallResult,
+  type SeedDescription,
+} from "./runtime-install.js";
 export { StepRunner, StepFailed } from "./steps.js";

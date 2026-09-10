@@ -1,16 +1,21 @@
 # `metistry` — init, connect-repo, secrets, doctor, up, update, service control
 
 `packages/cli` (`@foldedspacelabs/metistry-cli`, plan §4.16: `init | doctor
-| up | update`, plus the two install verbs the Mac app drives —
-`connect-repo` and `secrets`, `docs/product/desktop-app-plan.md` — and the
-per-service verbs its menu bar drives: `restart | stop | start | logs`,
-below) is the operator's front door. All of them are real.
+| up | update`, plus the install verbs the Mac app drives — `connect-repo`,
+`secrets`, `identity`, `version` and `deployment`,
+`docs/product/desktop-app-plan.md` — and the per-service verbs its menu bar
+drives: `restart | stop | start | logs`, below) is the operator's front door.
+All of them are real.
 
 | verb | what it does |
 | --- | --- |
 | `init <dir>` | create a private instance repo |
 | `connect-repo <url>` | point the instance repo at a remote, mint credentials the reconciler can push with |
-| `secrets sync\|mint\|list` | move secrets between the Keychain and `.env` |
+| `secrets sync\|mint\|list [--json]` | move secrets between the Keychain and `.env` |
+| `identity [--json]` | the instance's identity.yaml (name, mention, voice, icon, instance_id) |
+| `--version` / `version [--json]` | this CLI's version, the resolved product dir's, the lock's pin, and a release's runtime pack |
+| `deployment [--json]` | the effective shape (D4 overlay) and the services it implies, with cheap running state |
+| `deployment set-shape <compose\|launchd>` | write the instance's deployment.yaml through the reconciler, preview-then-confirm |
 | `doctor` | validate every manifest and probe every bridge, service, container, launchd job |
 | `up` | bring an install to running: containers/host jobs, then doctor |
 | `update` | move an install forward: pull/build, migrate, restart what changed, pin, doctor |
@@ -41,7 +46,60 @@ node packages/cli/dist/main.js logs apple-fm --lines 5
 node packages/cli/dist/main.js connect-repo https://github.com/you/metistry-instance.git
 node packages/cli/dist/main.js secrets sync --to keychain
 node packages/cli/dist/main.js secrets list
+node packages/cli/dist/main.js secrets list --json
+
+# what the app's Settings/Advanced panes and its first-run wizard read instead of parsing files themselves
+node packages/cli/dist/main.js identity --json
+node packages/cli/dist/main.js --version
+node packages/cli/dist/main.js deployment --json
+node packages/cli/dist/main.js deployment set-shape launchd            # preview only
+node packages/cli/dist/main.js deployment set-shape launchd --yes      # writes it
 ```
+
+## `identity`, `version`, `deployment`: what the app reads instead of the files
+
+Four small, read-mostly verbs exist so the Mac app stops parsing
+`identity.yaml`, `package.json` and the `secrets list` table itself
+(`apps/macos/sources/kit/instance-files.swift`,
+`apps/macos/sources/kit/secret-listing.swift`) — the same "a behaviour the
+app needs is a CLI change first" rule as `doctor --json` and the
+`restart|stop|start|logs` verbs above.
+
+`metistry identity [--json] [--instance <dir>]` prints identity.yaml as the
+CLI already understands it — `name`, `mention`, `voice`, `icon`,
+`instance_id` — resolving `--instance`/`METISTRY_INSTANCE_DIR` like every
+other instance verb. Read-only: identity.yaml is a §4.7 protected path, so
+there is no field here to change it.
+
+`metistry --version` / `metistry version [--json]` prints every version
+number an install can be asked about, each only as far as it resolves:
+this binary's own package version (always); when a product dir resolves,
+that directory's OWN `package.json` version (the checkout root, or a
+release's unpacked `current/` — which can differ from the running CLI's own
+version); the instance's `metistry.lock` pin and channel; and, for a release
+install, `metistry-runtime.json`'s version, commit and build time.
+
+`metistry deployment [--json]` prints the effective shape (`deployment.yaml`'s
+D4 overlay, same as `doctor`'s `deployment` row) and the services it
+implies, each tagged with whether it is running — `launchctl print` /
+`docker compose ps`, the same cheap, no-network probes `doctor` itself uses
+for those rows, reused rather than reimplemented. It never runs the full
+`doctor` (which also probes every bridge over HTTP).
+
+`metistry deployment set-shape <compose|launchd> [--yes] [--force]` writes
+the instance's `deployment.yaml`. It is a §4.7 protected path (invariant 2:
+how the system behaves is a human change), so the write goes through the
+reconciler as the `user` principal — exactly like `metistry.lock` and
+`identity.yaml` (`protected-write.ts`) — with no reconciler configured
+falling back to a direct write the same way those do. Preview-then-confirm:
+without `--yes` nothing is written or POSTed, only planned; with it, applied.
+It refuses when `db`/`console`/`assistant` (the services whose shape
+actually depends on this file) are still running under the current shape,
+because the data does not move between shapes on its own
+(`docs/ops/deployment-shapes.md`) — the refusal says what `metistry stop`,
+the shape change, then `metistry up` would do. `--force` writes anyway.
+`reconciler`/`watchdog` being up is never a reason to refuse: they are host
+jobs under either shape (invariant 6).
 
 Package-level detail (flags, resolution order, probe table) lives in
 `packages/cli/README.md`; this page is the operator's runbook.
@@ -498,9 +556,33 @@ On a platform with no launchd (anything but macOS) a host job's name is
 simply not a known service — the command refuses rather than pretending
 `launchctl` exists there (`docs/ops/deployment-shapes.md`, "Linux hosts").
 
+## Seeding a product directory from an app bundle
+
+```sh
+metistry runtime install --from /Applications/Metistry.app [--to <dir>] [--force] [--dry-run]
+```
+
+A signed `Metistry.app`'s `Contents/Resources/metistry/` is a **seed**, not
+a product directory: the bundle cannot be written to, and `metistry update
+--channel release` must write `releases/<version>/`, flip `current` and
+unpack a new `runtime/`. This copies the seed to
+`~/Library/Application Support/Metistry/product/` (or `--to`), and every
+plist `metistry up` writes points there — so an app install and a checkout
+install update through exactly the same code
+(`docs/product/desktop-app-plan.md`, `docs/ops/mac-app.md`).
+
+`--from` takes the `.app` or the `Resources/metistry` inside it.
+Idempotent: the seed's own `releases/<v>/metistry-runtime.json` and
+`runtime/manifest.json` are read and cross-checked against its `current`
+symlink **before anything is copied**, their sha256s go into
+`.metistry-install.json` beside `current`, and a second run with the same
+seed does nothing. A bundle whose manifest disagrees with `current`, or
+that carries no `packages/cli/dist/main.js`, is refused rather than
+half-installed.
+
 ## Bringing an install up
 
-`metistry up [--no-compose] [--no-launchd] [--dry-run] [--instance <dir>]`
+`metistry up [--no-compose] [--no-launchd] [--namespace] [--dry-run] [--instance <dir>]`
 takes a product checkout plus an instance with a filled-in
 `state/.env` to *running*. It prints which dotenv file that is, renders it
 into the plists as `__ENV_FILE__`, and hands it to `docker compose` as
@@ -514,6 +596,20 @@ is no docker at all: `up` prepares a user-space Postgres (step 0), then
 installs `console`, `assistant` and `db` as launchd jobs alongside the
 host jobs (step 2), then creates the database, then doctor. `doctor`
 reports the shape as its first row and writes every remediation for it.
+
+**`--namespace`** allocates this instance its own launchd label suffix
+(from `instance_id`) and an 8-port block, recorded **once** in
+`<instance>/state/ports.yaml`, so a second instance can run beside the
+first. Everything afterwards — `up`, `doctor`, `restart|stop|start`,
+`logs`, `update` — reads that file; delete it (after `metistry stop`) to
+return the instance to the fixed labels and ports.
+`docs/ops/deployment-shapes.md` has the layout and the rules.
+
+> **Quote `state/.env` values that contain a space.** The reconciler,
+> watchdog and TCC bridge jobs load that file with `set -a; . <file>`,
+> which *runs* it, so `KEY=/Users/…/Application Support/…` is a command,
+> not an assignment. `up` refuses with the offending variables and line
+> numbers rather than installing jobs that respawn forever.
 
 0. **Postgres (launchd shape only).** Find the binaries
    (`METISTRY_PG_BIN`, a bundled `runtime/postgres/bin`, Homebrew
@@ -742,7 +838,13 @@ for a command-line tool and inventing one is worse than the gap.
 **These verbs have a second caller now.** The Mac app (`apps/macos`,
 `docs/ops/mac-app.md`) drives `init`, `connect-repo --auth device`,
 `secrets sync`, `up` and `doctor --json` as its first-run flow and its
-Status panel — the same commands, with `--product-dir` always passed
+Status panel, and is expected to move onto `secrets list --json`,
+`identity --json`, `version --json`, `deployment --json` and
+`deployment set-shape` for the Settings pane and wizard code that today
+parses `identity.yaml`/`package.json`/the `secrets list` table itself
+(`apps/macos/sources/kit/instance-files.swift`,
+`apps/macos/sources/kit/secret-listing.swift`) — the same commands, with
+`--product-dir` always passed
 explicitly because a GUI process has no useful working directory. It is a
 front end, never a second implementation: a behaviour the app needs is a
 CLI change first. Two things that matter when editing them: `doctor --json`

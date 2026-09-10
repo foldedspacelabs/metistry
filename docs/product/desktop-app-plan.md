@@ -162,9 +162,14 @@ a Developer ID build signed with this project's own identity is refused
 identically for `127.0.0.1`, `localhost` and a tailnet name —
 `AuthorizationError 1004: the calling process does not have an application
 identifier` — and hand-signing the entitlement gets the process killed at
-launch. An application identifier comes from an embedded provisioning profile,
-and the ratified channel (a Developer ID DMG from GitHub Releases) cannot carry
-one. Even with a provisioned build the origin would still have to be a plain
+launch. An application identifier comes from an embedded provisioning profile.
+**Correction (owner review, 2026-09-10): a Developer ID DMG *can* carry one.**
+Apple issues *Developer ID* provisioning profiles for exactly this — an App ID
+with the Associated Domains capability, embedded as
+`Contents/embedded.provisionprofile` and signed with the application-identifier
+and associated-domains entitlements; it is how Developer ID apps get iCloud,
+push and associated domains outside the App Store. So the profile is a build
+step, not a channel limit. Even with a provisioned build the origin would still have to be a plain
 `https://<domain>` on 443 whose AASA Apple's CDN can fetch, because
 `ASAuthorization` synthesizes the ceremony origin as `https://<rpID>` with no
 port and the console compares it to `METISTRY_ORIGIN` verbatim. So the ios-app
@@ -174,6 +179,52 @@ the console's own enrolment code**, opened here or typed on the phone, with the
 reason on screen and an "Ask macOS" button that runs the request against a
 local challenge so the claim is checkable. The native path is written, not
 stubbed, and runs the moment an install qualifies.
+
+### The bundle is a seed (ratified 2026-09-10)
+
+**The decision: a signed bundle's `Contents/Resources/metistry/` is the
+SEED. The writable product dir is
+`~/Library/Application Support/Metistry/product/`, and everything —
+plists, `metistry update`, `--rollback` — points there.**
+
+A signed bundle's `Resources` cannot be written to, and `metistry update`
+in release mode must write `releases/<version>/`, flip `current`, and
+unpack a new `runtime/`. So on first run the seed is copied out:
+
+```
+~/Library/Application Support/Metistry/product/
+  releases/<version>/      the runtime pack, exactly as `update` unpacks it
+  current -> releases/<version>
+  runtime/                 Node, Postgres + pgvector, git — BESIDE releases/
+  .metistry-install.json   what was copied, from where, and its digests
+```
+
+The copy is a **CLI verb**, not app code, for the same reason every other
+first-run step is (§4.20: the app is a front end for the CLI, never a
+second implementation):
+
+```sh
+metistry runtime install --from /Applications/Metistry.app [--to <dir>] [--force]
+```
+
+Idempotent and verified. The seed's own `releases/<v>/metistry-runtime.json`
+(from `pack-runtime.sh`) and `runtime/manifest.json` (from
+`build-runtime-deps.sh`) are read and cross-checked against the `current`
+symlink **before a byte is copied** — a hand-assembled bundle is refused
+rather than half-installed — and their sha256s go into
+`.metistry-install.json`, so running it again with the same seed does
+nothing. A Sparkle update of the app ships a NEWER seed, and the next
+launch copies it forward; the previous `releases/<v>` stays on disk, so
+`--rollback` still works. `docs/ops/mac-app.md` has the layout.
+
+**Rejected: Sparkle-only updates, with `metistry update` a no-op for app
+installs.** Three counts. The product could then only move when the whole
+app did, so a migration fix would need a notarized build. The terminal and
+app paths would stop being one tested path. And `releases/`, `current` and
+`--rollback` would exist for checkout installs only — two update stories
+for one product.
+
+Trialled end to end on 2026-09-10 (below).
 
 ## Distribution: the app as the installer (owner direction 2026-09-07)
 
@@ -252,6 +303,38 @@ its own state dir, allow network to the console only), tested by misuse
 tests like every other boundary. That mitigation is part of the
 decision, not an afterthought.
 
+**#15 is proven (2026-09-10).** Trialled end to end on the Studio: the
+v0.4.0 release packs seeded into
+`~/Library/Application Support/Metistry/product/` by `metistry runtime
+install`, a scratch instance at
+`~/Library/Application Support/Metistry/trial-instance`, `shape: launchd`,
+and the production compose install left running beside it on its own labels
+and ports. Bundled Postgres 17.11 + pgvector 0.8.6 initdb'd under
+`<instance>/state/pg`, 13 migrations applied under the advisory lock,
+console/assistant/reconciler/watchdog as launchd agents on the bundled
+Node, `doctor` **23 ok / 0 failed / 2 absent — healthy**, the console
+answering `/health` on its own port while production answered on 8080, a
+`metistry update --channel release --version 0.4.0` no-op round trip whose
+lock the reconciler committed, and the sandbox verified live: the vault
+denied, a write outside the state dir denied, the state dir writable, the
+instance's own console and db reachable and *the production install's
+ports not*. **No Docker was involved at any point.** Five real defects
+came out of it, all fixed in the same PR — a space in
+`~/Library/Application Support` broke every `sh -c` job, the sandbox had
+no rule for Postgres, `launchctl bootout` races the following
+`bootstrap`, and a namespaced instance's ports reached neither the
+dotenv-sourcing jobs nor `metistry update`'s migration runner (which
+would have migrated the wrong database). `docs/ops/deployment-shapes.md`
+carries the status and what remains.
+
+**Running a second instance is no longer a follow-up.** `metistry up
+--namespace` allocates an instance its own launchd label suffix (from
+`instance_id`) and an 8-port block, recorded once in
+`<instance>/state/ports.yaml`; that file's presence is what namespaces an
+install, and `up`, `doctor`, `restart|stop|start` and `logs` all read it.
+That is what made the trial safe to run beside a live install, and it is
+how the app will hold several test instances at once.
+
 **Strategy (ratified 2026-09-07).** Fully open source, everything free,
 no hosted plan. The Mac app is the *primary* way people get Metistry:
 same code, same repos, same API as the terminal path, plus the
@@ -320,17 +403,41 @@ never deleting the original. `metistry secrets purge --instance <dir>`
 deletes one instance's items — preview-then-confirm, `--yes` to act — and
 is structurally incapable of touching the user account.
 
-### The limit that remains
+### The limit that remains — lifted 2026-09-10
 
-**One active instance at a time.** launchd labels
+It used to read: *one active instance at a time*, because launchd labels
 (`com.foldedspacelabs.metistry.*`) and ports (console 8080, reconciler
-7812, the bridges) are fixed, so bringing a second instance up would fight
-the first for both. Several instance directories can exist and be switched
-between; only one runs. Running them concurrently is a **follow-up** that
-needs label and port namespacing per instance (and a `doctor` that reports
-per instance) — not attempted here, because guessing the namespacing
-before the app's instance-switching UI exists would be building ahead of
-the plan.
+7812, the bridges) are fixed. `metistry up --namespace` lifts it, and the
+2026-09-10 launchd trial is what forced the issue: proving #15 on this Mac
+meant running a second install beside a live one.
+
+**One file is the whole namespace** — `<instance>/state/ports.yaml`,
+allocated once and then read by `up`, `doctor`, `restart|stop|start` and
+`logs`. Its presence is what namespaces an install; absent, everything
+behaves exactly as it did. The label suffix and the port block live
+together in it because they must not be able to disagree.
+
+- Labels become `com.foldedspacelabs.metistry.<suffix>.<service>` — the
+  suffix goes BETWEEN the prefix and the service, so "the service is the
+  last component" stays true and no caller had to learn a new rule. Logs
+  become `/tmp/metistry-<suffix>-<service>.log`.
+- Ports are one contiguous 8-wide block in 8300-8999: above the console's
+  8080, below the ephemeral range, nowhere near 5432 — so a namespaced
+  instance cannot collide with an un-namespaced one. The base is derived
+  from `instance_id` and stepped past a block that is genuinely in use
+  once, at allocation.
+- The block fills only environment variables that are UNSET. That is what
+  keeps the jobs whose environment `up` renders and the jobs that source
+  `<instance>/state/.env` themselves agreeing on which port a service is
+  on; an explicit `.env` line still wins.
+
+**What is still missing** for the app's instance-switching UI: `doctor`
+reports one instance at a time (whichever `METISTRY_INSTANCE_DIR` names)
+rather than every instance on the Mac, and the TCC bridges cannot be
+namespaced at all — `eventkit-helper`'s socket path is a hardcoded
+`/tmp/metistry-eventkit.sock`, and TCC consent is per signed binary, so
+two instances would share one helper. Both are listed in
+`docs/ops/deployment-shapes.md`.
 
 ## Bundled runtime (ratified 2026-09-09)
 

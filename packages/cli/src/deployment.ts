@@ -69,6 +69,30 @@ export async function loadDeployment(productDir: string, env: NodeJS.ProcessEnv 
   return { deployment: merged, from };
 }
 
+/**
+ * `metistry deployment set-shape` rewrites just the `shape:` line, the way
+ * `secrets.ts`'s `rewriteEnv` and `instance.ts`'s `withInstanceId` rewrite
+ * one field of a file a person may also hand-edit: every comment, the
+ * `services:` overrides, and their ordering survive untouched. No instance
+ * file yet gets the seed's own commented shape, freshly written rather than
+ * copied, so a first `set-shape` doesn't have to explain the seed's prose.
+ */
+export function applyShapeToYaml(existing: string | undefined, shape: DeploymentShape): string {
+  if (existing === undefined) {
+    return [
+      "# deployment.yaml — this instance's deployment shape (docs/ops/deployment-shapes.md).",
+      "# `metistry deployment set-shape` wrote this line; edit shape/services by hand otherwise.",
+      `shape: ${shape}`,
+      "",
+      "services: {}",
+      "",
+    ].join("\n");
+  }
+  if (/^shape:.*$/m.test(existing)) return existing.replace(/^shape:.*$/m, `shape: ${shape}`);
+  const sep = existing === "" || existing.endsWith("\n") ? "" : "\n";
+  return `shape: ${shape}\n${sep}${existing}`;
+}
+
 // ---- the environment each host job runs with -------------------------------
 
 export interface ShapeContext {

@@ -34,11 +34,34 @@ describe("launchd templates", () => {
       const out = renderPlist(t.template, { repo: "/srv/metistry", node: "/usr/local/bin/node", envFile: "/i/state/.env" });
       expect(out, t.file).not.toContain("__");
       expect(out).toContain("/srv/metistry");
-      // the environment comes from the INSTANCE, never from the checkout
-      if (t.template.includes("__ENV_FILE__")) expect(out, t.file).toContain("set -a; . /i/state/.env; set +a;");
-      if (t.template.includes("__NODE__")) expect(out).toContain("exec /usr/local/bin/node /srv/metistry/");
+      // the environment comes from the INSTANCE, never from the checkout —
+      // and every interpolated path is single-quoted, because the default
+      // product and instance locations are under `~/Library/Application
+      // Support/…` and an unquoted space splits the sh -c command
+      if (t.template.includes("__ENV_FILE__")) expect(out, t.file).toContain("set -a; . '/i/state/.env'; set +a;");
+      if (t.template.includes("__NODE__")) expect(out).toContain("exec '/usr/local/bin/node' '/srv/metistry/");
       expect(out).toContain(`<string>${t.label}</string>`);
       expect(out.split("\n").length).toBe(t.template.split("\n").length); // a substitution, nothing else
+    }
+  });
+
+  it("survives a space in the install path — which the Mac app's default location has", async () => {
+    // ~/Library/Application Support/Metistry/{product,trial-instance}: the
+    // default product dir and a default instance dir BOTH sit under a
+    // directory with a space in its name. Unquoted, the sh -c jobs died with
+    // `/bin/sh: /Users/…/Library/Application: No such file or directory`
+    // (2026-09-10 launchd trial).
+    const repo = "/Users/x/Library/Application Support/Metistry/product/current";
+    const envFile = "/Users/x/Library/Application Support/Metistry/inst/state/.env";
+    const node = "/Users/x/Library/Application Support/Metistry/product/runtime/node/bin/node";
+    for (const t of await loadPlistTemplates(repoRoot, "launchd")) {
+      const out = renderPlist(t.template, { repo, node, envFile, env: { A: "b" }, extra: { PG_BIN: "/pg/bin", PG_DATA: "/d", NODE_PREFIX: "/n", PRODUCT_DIR: repo, STATE_DIR: "/s", TMP_DIR: "/tmp", CONSOLE_TCP: "localhost:8460", DB_TCP: "localhost:8461" } });
+      const shell = /<string>set -a;[^<]*<\/string>/.exec(out)?.[0];
+      if (!shell) continue;
+      // every path the shell sees is a single quoted word
+      expect(shell, t.file).toContain(`. '${envFile}'`);
+      expect(shell, t.file).toContain(`exec '${node}' '${repo}/`);
+      expect(shell, t.file).not.toMatch(/(?<!')\/Users\/x\/Library\/Application Support/);
     }
   });
 
@@ -47,6 +70,9 @@ describe("launchd templates", () => {
     expect(() => renderPlist("<string>__REPO__</string>", { repo: "/x/__y__", node: "/n", envFile: "/e" })).toThrow(/contains "__"/);
     expect(() => renderPlist("<string>__ENV_FILE__</string>", { repo: "/x", node: "/n", envFile: "" })).toThrow(/empty __ENV_FILE__/);
     expect(() => renderPlist("<string>__REPO__/__HOME__</string>", { repo: "/x", node: "/n", envFile: "/e" })).toThrow(/unrendered placeholder __HOME__/);
+    // a value carrying a quote would escape the sh -c wrapping the four
+    // dotenv-sourcing jobs rely on: refused, never escaped
+    expect(() => renderPlist("<string>__REPO__</string>", { repo: "/Users/o'brien/m", node: "/n", envFile: "/e" })).toThrow(/single quote/);
   });
 
   it("parsePlistTemplate unescapes XML entities and tolerates a plist with no ProgramArguments", () => {
@@ -58,9 +84,13 @@ describe("launchd templates", () => {
     expect(bare.programArguments).toEqual([]);
   });
 
-  it("launchdCommands: bootout (tolerated), bootstrap, kickstart -k — argument arrays, in that order", () => {
+  it("launchdCommands: bootout (tolerated), WAIT for it to be gone, bootstrap, kickstart -k — argument arrays, in that order", () => {
+    // the wait is load-bearing: bootout returns before launchd has finished,
+    // and bootstrapping the same label in that window fails with
+    // `Bootstrap failed: 5: Input/output error`
     expect(launchdCommands("com.x.y", "/h/Library/LaunchAgents/com.x.y.plist", 501)).toEqual([
       { cmd: "launchctl", args: ["bootout", "gui/501/com.x.y"], tolerateFailure: true },
+      { cmd: "launchctl", args: ["print", "gui/501/com.x.y"], awaitGone: true },
       { cmd: "launchctl", args: ["bootstrap", "gui/501", "/h/Library/LaunchAgents/com.x.y.plist"] },
       { cmd: "launchctl", args: ["kickstart", "-k", "gui/501/com.x.y"] },
     ]);
@@ -73,7 +103,9 @@ describe("launchd templates", () => {
     expect(unit).toContain("[Service]");
     expect(unit).toContain("EnvironmentFile=/i/state/.env");
     expect(unit).toContain("WorkingDirectory=/srv/metistry");
-    expect(unit).toContain("ExecStart=/usr/bin/node /srv/metistry/apps/watchdog/dist/main.js");
+    // systemd parses quoted arguments; EnvironmentFile= does not, so that one
+    // line carries the path bare (renderSystemdUnit)
+    expect(unit).toContain("ExecStart='/usr/bin/node' '/srv/metistry/apps/watchdog/dist/main.js'");
     expect(unit).toContain("Restart=always");
     expect(unit).toContain("WantedBy=default.target");
     expect(unit).not.toContain("/bin/sh");

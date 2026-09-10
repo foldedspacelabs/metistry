@@ -396,6 +396,62 @@ Add the DMG by dropping `--no-dmg`. Other flags:
 | `--out <dir>` | default `dist-app/` |
 | `--skip-build` | reuse `.build/release/Metistry` for fast iteration |
 
+### The install layout: the bundle is a seed
+
+A signed bundle's `Contents/Resources/metistry/` cannot be written to, and
+`metistry update --channel release` must write `releases/<version>/`, flip
+`current` and unpack a new `runtime/`. So the bundle **seeds** a writable
+product directory, once, and the CLI owns it from then on — identically to
+a checkout install (decision ratified 2026-09-10,
+`docs/product/desktop-app-plan.md`).
+
+```sh
+metistry runtime install --from /Applications/Metistry.app
+```
+
+```
+/Applications/Metistry.app/Contents/Resources/metistry/   the SEED (read-only, signed)
+  releases/<version>/ · current -> releases/<version> · runtime/
+
+~/Library/Application Support/Metistry/product/           the PRODUCT DIR (writable)
+  releases/<version>/      the runtime pack — what every plist's __REPO__ resolves through
+  current -> releases/<version>
+  runtime/                 Node, Postgres + pgvector, git — BESIDE releases/, so a
+                           version flip never orphans the Postgres the db job points at
+  .metistry-install.json   {version, release.manifest_sha256, runtime.manifest_sha256, from}
+```
+
+`--to <dir>` overrides the destination. It is **idempotent**: the seed's own
+`releases/<v>/metistry-runtime.json` and `runtime/manifest.json` are read
+and cross-checked against the `current` symlink before a byte is copied,
+and their sha256s land in `.metistry-install.json`, so the same seed twice
+does nothing (`--force` copies anyway). A bundle whose manifest and
+`current` disagree, or that carries no `packages/cli/dist/main.js`, is
+refused rather than half-installed. The receipt is written **last**, so an
+interrupted run is re-done rather than mistaken for a finished one.
+
+When Sparkle updates the app it ships a newer seed; the next
+`metistry runtime install` copies it forward and leaves the previous
+`releases/<v>` in place, so `metistry update --rollback` still works.
+
+Two details that are not cosmetic. The copied tree is made **writable**
+(`cp` preserves the bundle's `0555` directories, and `update` could not
+then delete a release to install the next one over it). And `runtime/` is
+copied with its symlinks intact, not through them — `postgres/lib` is
+libpq's versioned-name symlink farm, and the pack's `node_modules` is
+pnpm's relative-symlink tree, which dereferencing severs.
+
+Instances go elsewhere and are self-contained:
+`~/Library/Application Support/Metistry/<name>/` holds the vault,
+`identity.yaml`, `state/.env`, `state/pg`, `state/assistant` and — when the
+install is namespaced — `state/ports.yaml`.
+
+> **`state/.env` values must be shell-quoted** when they contain a space.
+> The reconciler, watchdog and TCC bridge jobs load that file with
+> `set -a; . <file>`, which *runs* it. `metistry up` refuses rather than
+> installing jobs that respawn forever, but the app should write
+> `METISTRY_INSTANCE_DIR="…/Application Support/…"` with the quotes.
+
 ### Pointing a local build at an install
 
 Two pointers, and they are different things. The **instance** is the install the
@@ -568,10 +624,13 @@ it means saving a real 1024pt master and pointing `build-app.sh` at it instead.
 **Whether native passkeys are worth a provisioned build.** Measured above: they
 are unreachable from a Developer ID DMG whatever the origin is, because
 `ASAuthorization` wants an application identifier and that needs an embedded
-provisioning profile. Getting one means either the App Store (which the strategy
-ruled out for the Mac app) or provisioning a Developer ID build through a
-profile — and it would *still* need a publicly resolvable HTTPS origin on 443
-serving an AASA, which a loopback or tailnet install does not have. The console's
+provisioning profile. Getting one is a build step, not a channel change: Apple
+issues Developer ID provisioning profiles (App ID + Associated Domains,
+embedded as `Contents/embedded.provisionprofile`, signed with the
+application-identifier and associated-domains entitlements) — and it would
+*still* need a publicly resolvable HTTPS origin on 443 serving an AASA, which a
+loopback install does not have and a tailnet install has only through a
+gateway. The console's
 enrolment-code flow works today on every install, on this Mac and on the phone.
 Worth deciding deliberately rather than drifting into.
 
@@ -581,6 +640,23 @@ let a native ceremony match a ported origin, and would turn today's opaque
 HTTP 500 on a mismatch into a real answer. It is a console change, so it is not
 in this PR — but it is half of what a provisioned build would need, and the
 error-shape half is worth doing on its own.
+
+**~~Where a bundled install's writable product dir lives.~~ Settled
+2026-09-10: the bundle is a seed.** The app runs `metistry runtime install
+--from <its own bundle>` on first launch, which copies the embedded tree to
+`~/Library/Application Support/Metistry/product/`; every plist points there
+and `metistry update --channel release` works exactly as it does on a
+checkout install. The alternative — Sparkle-only updates, with `update` a
+no-op for app installs — was rejected: the product could then only move when
+the whole app did, the terminal and app paths would stop being one tested
+path, and `releases/`/`current`/`--rollback` would exist for checkout
+installs only. "The install layout" above has the shape; the rationale is in
+`docs/product/desktop-app-plan.md`.
+
+**What the app still has to do about it.** Run the verb on launch (it is a
+no-op when the seed is unchanged, so it is safe every time), and show its
+output on a progress screen the way the other first-run steps do. Until then
+a developer build points at a checkout instead.
 
 **Whether the app gets a `manifest.yaml`.** Invariant 5 enumerates bridges,
 collectors, agents, routines, targets and services — a client app is none of

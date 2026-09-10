@@ -989,3 +989,31 @@ your git, on your machine.
   or type it on the phone. The user-visible promise: **the app tells you what
   it cannot do and why, in the words of whatever refused it, and always leaves
   you a route that works.**
+
+
+**2026-09-10 — the Mac app can install itself, and a Mac can hold more than
+one Metistry.** Two things landed together because proving the first needed
+the second. **The Docker-free macOS shape is no longer a design; it ran.**
+On a real Mac, from the v0.4.0 release artifacts and nothing else — no
+Docker, no Homebrew, no pnpm, no Xcode — a fresh install came up with a
+bundled Postgres 17.11 + pgvector under its own state directory, 13
+migrations applied, and console, assistant, reconciler and watchdog as
+launchd agents running the bundled Node, with `doctor` reporting 23 checks
+healthy and the console answering on its own port. The assistant ran under
+its sandbox profile the whole time, and a live probe confirmed what the
+profile claims: it cannot read the vault, cannot write outside its own
+state directory, and cannot reach anything on the network but its own
+console and its own database. **The user-visible promise: download the app,
+open it, and everything it needs is already inside it — and the largest
+first-run hurdle, installing Docker Desktop, is gone.** The decision that
+makes updates work was settled at the same time: the app bundle is a *seed*
+that is copied once to a writable product directory, so an app install and
+a terminal install update through exactly the same tested path rather than
+two. Five defects came out of running it that no amount of reading would
+have found — including a space in `~/Library/Application Support` silently
+killing four background jobs, and an update that would have migrated the
+wrong database — all fixed with tests. And because the trial had to run
+beside a live install without disturbing it, **several instances can now
+run on one Mac at once**, each with its own jobs, ports and logs: the
+groundwork for the app holding a real install and a test install side by
+side.

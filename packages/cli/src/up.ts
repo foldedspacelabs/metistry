@@ -25,7 +25,7 @@ import { ensureInstanceId, envPaths } from "./instance.js";
 import { allocateBase, applyPorts, loadNamespace, PORTED_SERVICES, portsFile, portsOf, serializeNamespace, suffixFor, type Namespace } from "./namespace.js";
 import { instanceLockPath, readLock, type LockFile, type LockSource } from "./lock.js";
 import { currentLink, imageEnv, imageRef, IMAGE_SERVICES } from "./release.js";
-import { installRuntimeDeps, pathWithRuntimeGit, runtimeDepsEnabled, RUNTIME_DIRNAME } from "./runtime-deps.js";
+import { installRuntimeDeps, pathWithRuntimeGit, runtimeDepsEnabled, runtimeNodeBin, RUNTIME_DIRNAME } from "./runtime-deps.js";
 import {
   applyManagedBlock,
   findPgToolchain,
@@ -146,6 +146,23 @@ export interface LaunchdEnv {
 }
 
 // ---- the launchd shape's per-service values ---------------------------------
+
+/**
+ * The node binary every launchd job execs (`__NODE__`).
+ *
+ * A bundled runtime's own node WINS. That is the whole point of the
+ * bundled runtime (docs/ops/bundled-runtime.md): a clean Mac has no node
+ * at all, a launchd job's PATH is `/usr/bin:/bin:…` with no login shell,
+ * and pointing the jobs at whatever `node` happened to be on the
+ * operator's PATH ties a bundled install to a Homebrew that may not exist
+ * and will not exist forever. Falls back to `$(which node)` — a checkout
+ * install is unchanged.
+ */
+export function nodeFor(productDir: string, env: NodeJS.ProcessEnv, exists: (p: string) => boolean = existsSync): { node: string; why: string } {
+  const bundled = runtimeNodeBin(productDir);
+  if (exists(bundled)) return { node: bundled, why: `bundled ${RUNTIME_DIRNAME}/node/bin/node` };
+  return { node: nodeOnPath(env), why: "$(which node)" };
+}
 
 /** The root the instance's derived state hangs off: the instance repo when there is one, else the checkout. */
 export function stateRoot(productDir: string, env: NodeJS.ProcessEnv): string {
@@ -394,11 +411,14 @@ export async function up(opts: UpOptions): Promise<UpResult> {
   // instance's deployment.yaml still wins over the seed (D4)
   const loaded = opts.deployment ? { deployment: opts.deployment, from: "caller" } : await loadDeployment(runDir, env);
   const deployment = loaded.deployment;
+  // the install root, not the release: `runtime/` sits BESIDE releases/, so a
+  // version flip never orphans the node the plists exec
+  const chosenNode = opts.node ? { node: opts.node, why: "--node" } : nodeFor(opts.productDir, env, opts.exists ?? existsSync);
   const le: LaunchdEnv = {
     platform: opts.platform ?? process.platform,
     uid: opts.uid ?? (typeof process.getuid === "function" ? process.getuid() : 0),
     home: opts.home ?? env.HOME ?? "",
-    node: opts.node ?? nodeOnPath(env),
+    node: chosenNode.node,
   };
   const instanceDir = env.METISTRY_INSTANCE_DIR ? { instanceDir: env.METISTRY_INSTANCE_DIR.replace(/\/+$/, "") } : {};
   // `.env` belongs to the INSTANCE (`state/.env`); a product-checkout one is
@@ -422,6 +442,7 @@ export async function up(opts: UpOptions): Promise<UpResult> {
   };
   r.note(`product: ${runDir} (${source === "release" ? `pinned release${lock ? ` ${lock.product.version}` : ""} — images pulled, not built` : "git checkout — images built from source"})`);
   r.note(`shape: ${deployment.shape} — from ${loaded.from}`);
+  r.note(`node: ${le.node} (${chosenNode.why}) — every launchd job execs this`);
   // the notice itself is main.ts's job (it prints to stderr, once per run);
   // here it is one line of the plan, so the operator sees which file the
   // rendered plists and compose will actually read

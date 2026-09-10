@@ -1,0 +1,26 @@
+{
+  "name": "@metistry-apps/watchdog",
+  "private": true,
+  "version": "0.3.1",
+  "description": "Model-free watchdog: probes db/console/assistant/push/cost with zero Anthropic dependency; alerts through the status page and web push. runs_on: host so it outlives the container runtime.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "start": "node dist/main.js"
+  },
+  "engines": { "node": ">=22" },
+  "dependencies": {
+    "@foldedspacelabs/metistry-core": "workspace:*",
+    "pg": "^8.16.0",
+    "yaml": "^2.9.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "@types/pg": "^8.16.0",
+    "typescript": "^7.0.2",
+    "vitest": "^4.0.18"
+  }
+}

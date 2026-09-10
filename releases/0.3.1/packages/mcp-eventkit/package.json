@@ -1,0 +1,28 @@
+{
+  "name": "@foldedspacelabs/metistry-mcp-eventkit",
+  "version": "0.3.1",
+  "description": "Metistry EventKit bridge: Calendar + Reminders over the §4.3 wire contract (HTTP + bearer auth + check() + preview-confirm). Ships a compiled, signed Swift helper; TCC-bound — runs as its own launchd service. Usable standalone.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": { "metistry-mcp-eventkit": "./dist/main.js" },
+  "files": ["dist", "helper/ek-helper.app", "manifest.yaml"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "build:helper": "./scripts/build-helper.sh",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "start": "node dist/main.js"
+  },
+  "engines": { "node": ">=22" },
+  "os": ["darwin"],
+  "dependencies": {
+    "@foldedspacelabs/metistry-core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "typescript": "^7.0.2",
+    "vitest": "^4.0.18"
+  }
+}

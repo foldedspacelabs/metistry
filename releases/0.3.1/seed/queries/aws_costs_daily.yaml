@@ -1,0 +1,11 @@
+# Seeded default (D4 overlay: an instance file of the same name wins).
+name: aws_costs_daily
+description: Total AWS spend per day over the trailing window (dashboard series)
+params:
+  days: { type: int, default: 30 }
+sql: |
+  SELECT ts::date AS day, sum(value) AS usd
+  FROM metrics
+  WHERE name = 'aws.cost_usd' AND ts >= current_date - (:days)::int
+  GROUP BY 1 ORDER BY 1 DESC
+cache_ttl: 300

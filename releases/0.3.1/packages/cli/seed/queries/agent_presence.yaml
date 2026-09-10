@@ -1,0 +1,48 @@
+# Seeded default (D4 overlay: an instance file of the same name wins).
+name: agent_presence
+description: Per-agent presence for the agents tab (docs/product/desktop-app-plan.md "The window" — Agents panel) — kind, last seen, project membership, current/interrupted claims, blocked review bundles, today's spend, and a computed state (working/queued/interrupted/over-cap/idle). Revoked agents are excluded.
+params:
+  limit: { type: int, default: 100 }
+sql: |
+  SELECT
+    a.id, a.display_name, a.kind, a.last_seen_at, a.projects,
+
+    (SELECT coalesce(jsonb_agg(jsonb_build_object('id', w.id, 'title', w.title, 'lease_expires_at', w.lease_expires_at) ORDER BY w.lease_expires_at ASC), '[]'::jsonb)
+       FROM work w
+       WHERE w.claimed_by = a.id AND w.status <> 'closed' AND w.lease_expires_at > now())                          AS current_claims,
+
+    (SELECT coalesce(jsonb_agg(jsonb_build_object('id', w.id, 'title', w.title, 'lease_expires_at', w.lease_expires_at) ORDER BY w.lease_expires_at ASC), '[]'::jsonb)
+       FROM work w
+       WHERE w.claimed_by = a.id AND w.status <> 'closed' AND w.lease_expires_at IS NOT NULL AND w.lease_expires_at <= now()) AS interrupted_claims,
+
+    (SELECT coalesce(jsonb_agg(jsonb_build_object('id', w.id, 'title', w.title) ORDER BY w.created_at ASC), '[]'::jsonb)
+       FROM work w
+       WHERE w.kind = 'review' AND w.status = 'blocked' AND w.claimed_by IS NULL AND w.meta->'bundle'->>'from' = a.id) AS blocked_bundles,
+
+    (SELECT coalesce(sum(r.cost_usd), 0)::float8 FROM runs r
+       WHERE r.component = a.id AND r.ts >= date_trunc('day', now()) AND r.cost_usd IS NOT NULL)                    AS spend_today_usd,
+
+    CASE
+      -- working: a live claim, or activity in the last 2 minutes
+      WHEN EXISTS (SELECT 1 FROM work w WHERE w.claimed_by = a.id AND w.status <> 'closed' AND w.lease_expires_at > now())
+        OR EXISTS (SELECT 1 FROM runs r WHERE r.component = a.id AND r.ts > now() - interval '2 minutes')
+        THEN 'working'
+      -- queued: open review bundles owned by it, none claimed
+      WHEN EXISTS (SELECT 1 FROM work w WHERE w.kind = 'review' AND w.status = 'open' AND w.claimed_by IS NULL AND w.owner = a.id)
+        THEN 'queued'
+      -- interrupted: an expired lease still holding claimed_by
+      WHEN EXISTS (SELECT 1 FROM work w WHERE w.claimed_by = a.id AND w.status <> 'closed' AND w.lease_expires_at IS NOT NULL AND w.lease_expires_at <= now())
+        THEN 'interrupted'
+      -- over-cap: a blocked bundle of its own, queued for exceeding a cap (§4.21)
+      WHEN EXISTS (
+        SELECT 1 FROM work w, jsonb_array_elements(w.history) h
+        WHERE w.kind = 'review' AND w.status = 'blocked' AND w.claimed_by IS NULL
+          AND w.meta->'bundle'->>'from' = a.id AND h->>'note' LIKE 'over_cap%')
+        THEN 'over-cap'
+      ELSE 'idle'
+    END                                                                                                              AS state
+  FROM agents a
+  WHERE a.revoked_at IS NULL
+  ORDER BY a.id
+  LIMIT :limit
+cache_ttl: 0

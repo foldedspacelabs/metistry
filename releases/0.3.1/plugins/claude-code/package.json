@@ -1,0 +1,21 @@
+{
+  "name": "@metistry-apps/plugin-claude-code",
+  "private": true,
+  "version": "0.3.1",
+  "description": "The `metistry` Claude Code plugin (plan §4.11 external capture): a capture skill + optional session-end hook that POST to a Metistry instance's /capture. Dependency-free .mjs; this package exists only to test it.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "@foldedspacelabs/metistry-core": "workspace:*",
+    "@types/node": "^22.20.1",
+    "typescript": "^7.0.2",
+    "vitest": "^4.0.18"
+  }
+}

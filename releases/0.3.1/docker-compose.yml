@@ -1,0 +1,115 @@
+# Metistry substrate. Everything configurable comes from environment (.env);
+# nothing assumes Docker Desktop or a particular host layout.
+#
+# Images: a checkout builds and tags them `metistry-<app>:dev`. A release
+# install never builds — `metistry update` sets METISTRY_CONSOLE_IMAGE /
+# METISTRY_ASSISTANT_IMAGE to the versioned ghcr.io images the release
+# workflow pushed, then `docker compose pull && up -d --no-build`
+# (docs/ops/releases.md).
+name: metistry
+
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${METISTRY_DB_NAME:-metistry}
+      POSTGRES_USER: ${METISTRY_DB_USER:-metistry}
+      POSTGRES_PASSWORD: ${METISTRY_DB_PASSWORD:?set METISTRY_DB_PASSWORD in .env}
+    ports:
+      # loopback by default — reachability beyond the machine is the user's routing layer (invariant 8)
+      - "127.0.0.1:${METISTRY_DB_PORT:-5432}:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${METISTRY_DB_USER:-metistry} -d ${METISTRY_DB_NAME:-metistry}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  console:
+    build: { context: ., dockerfile: apps/console/Dockerfile }
+    image: ${METISTRY_CONSOLE_IMAGE:-metistry-console:dev}
+    restart: unless-stopped
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      METISTRY_DB_HOST: db
+      METISTRY_DB_PASSWORD: ${METISTRY_DB_PASSWORD:?set METISTRY_DB_PASSWORD in .env}
+      METISTRY_CONSOLE_HOST: 0.0.0.0        # in-container bind; host exposure below is loopback
+      METISTRY_ORIGIN: ${METISTRY_ORIGIN:?set METISTRY_ORIGIN (canonical HTTPS origin, §4.2)}
+      METISTRY_INBOX_DIR: /data/inbox
+      METISTRY_VAPID_PUBLIC: ${METISTRY_VAPID_PUBLIC:-}
+      METISTRY_VAPID_PRIVATE: ${METISTRY_VAPID_PRIVATE:-}
+      METISTRY_VAPID_SUBJECT: ${METISTRY_VAPID_SUBJECT:-}
+      # apple-fm host bridge (degrades absent when unset); explicit
+      # host-gateway per PoC-4 — no Docker Desktop magic
+      METISTRY_AFM_URL: ${METISTRY_AFM_URL:-}
+      METISTRY_BRIDGE_TOKEN_APPLE_FM: ${METISTRY_BRIDGE_TOKEN_APPLE_FM:-}
+      METISTRY_EK_URL: ${METISTRY_EK_URL:-}
+      METISTRY_BRIDGE_TOKEN_EVENTKIT: ${METISTRY_BRIDGE_TOKEN_EVENTKIT:-}
+      # reconciler vault bridge (D5; host service holding the instance repo):
+      # note contents for mcp-brain's knowledge_read. Degrades absent when unset.
+      METISTRY_RECONCILER_URL: ${METISTRY_RECONCILER_URL:-}
+      METISTRY_BRIDGE_TOKEN_RECONCILER: ${METISTRY_BRIDGE_TOKEN_RECONCILER:-}
+      # github-state collector: fine-grained READ-ONLY PAT + "owner/repo,owner/repo2"
+      METISTRY_GITHUB_TOKEN: ${METISTRY_GITHUB_TOKEN:-}
+      METISTRY_GITHUB_REPOS: ${METISTRY_GITHUB_REPOS:-}
+      # github-issues dispatch target (§4.18): a SEPARATE fine-grained WRITE PAT
+      # (Issues read/write + Metadata on the dispatch repo only) + "owner/repo"
+      METISTRY_GITHUB_WRITE_TOKEN: ${METISTRY_GITHUB_WRITE_TOKEN:-}
+      METISTRY_GITHUB_DISPATCH_REPO: ${METISTRY_GITHUB_DISPATCH_REPO:-}
+      METISTRY_TARGETS_DIRS: ${METISTRY_TARGETS_DIRS:-targets}
+      # crews (docs/ops/crews.md): seed/agents ships in the image; `agents` is
+      # the instance repo's protected dir, reached through the vault bridge
+      METISTRY_AGENTS_DIRS: ${METISTRY_AGENTS_DIRS:-seed/agents:agents}
+      METISTRY_CREWS_SYNC_S: ${METISTRY_CREWS_SYNC_S:-300}
+      # aws-costs collector (degrades absent): read-only Cost Explorer credentials
+      METISTRY_AWS_ACCESS_KEY_ID: ${METISTRY_AWS_ACCESS_KEY_ID:-}
+      METISTRY_AWS_SECRET_ACCESS_KEY: ${METISTRY_AWS_SECRET_ACCESS_KEY:-}
+      METISTRY_AWS_SESSION_TOKEN: ${METISTRY_AWS_SESSION_TOKEN:-}
+      # user's timezone for brief/schedule rendering (Me/profile.md drives this later)
+      TZ: ${METISTRY_TZ:-UTC}
+      # the assistant as the first INTERNAL agent on /mcp (docs/ops/assistant-tools.md):
+      # the console registers id 'assistant' from this token at startup; unset = revoked
+      METISTRY_ASSISTANT_TOKEN: ${METISTRY_ASSISTANT_TOKEN:-}
+      METISTRY_ASSISTANT_PROJECTS: ${METISTRY_ASSISTANT_PROJECTS:-}
+      METISTRY_ASSISTANT_AREAS: ${METISTRY_ASSISTANT_AREAS:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      # loopback by default (invariant 8) — the user's routing layer adds reach
+      - "127.0.0.1:${METISTRY_CONSOLE_PORT:-8080}:8080"
+    volumes:
+      - inbox:/data/inbox
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8080/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))\""]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+
+  assistant:
+    build: { context: ., dockerfile: apps/assistant/Dockerfile }
+    image: ${METISTRY_ASSISTANT_IMAGE:-metistry-assistant:dev}
+    restart: unless-stopped
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      METISTRY_DB_HOST: db
+      METISTRY_DB_PASSWORD: ${METISTRY_DB_PASSWORD:?set METISTRY_DB_PASSWORD in .env}
+      # subscription token, ~1yr, no auto-refresh (watchdog tracks expiry).
+      # NEVER set ANTHROPIC_API_KEY here — the engine refuses to start with it.
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:?set CLAUDE_CODE_OAUTH_TOKEN in .env (claude setup-token)}
+      METISTRY_MODEL_DEFAULT: ${METISTRY_MODEL_DEFAULT:-haiku}
+      # tools: the console's mcp-brain over the compose network, authenticated
+      # with the SAME token the console registers (degrades: tool-less when unset)
+      METISTRY_BRAIN_URL: ${METISTRY_BRAIN_URL:-http://console:8080/mcp}
+      METISTRY_ASSISTANT_TOKEN: ${METISTRY_ASSISTANT_TOKEN:-}
+      # identity + seed prompt ship in the image; an instance overlays via METISTRY_IDENTITY_FILES / METISTRY_PROMPT_FILES
+    volumes:
+      - assistant-home:/home/node   # SDK transcripts survive restarts (PoC-4)
+
+volumes:
+  db-data:
+  inbox:
+  assistant-home:

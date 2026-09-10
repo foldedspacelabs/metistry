@@ -1,5 +1,18 @@
 # @metistry-apps/console
 
+## 0.4.0
+
+### Patch Changes
+
+- Updated dependencies [c32b27d]
+  - @foldedspacelabs/metistry-mcp-brain@0.4.0
+  - @foldedspacelabs/metistry-core@0.4.0
+  - @metistry-apps/collectors@0.4.0
+  - @foldedspacelabs/metistry-artifacts@0.4.0
+  - @foldedspacelabs/metistry-tasks@0.4.0
+  - @metistry-apps/routines@0.4.0
+  - @foldedspacelabs/metistry-queries@0.4.0
+
 ## 0.3.1
 
 ### Patch Changes

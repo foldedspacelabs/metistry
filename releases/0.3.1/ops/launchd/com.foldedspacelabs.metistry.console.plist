@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Console under the LAUNCHD shape only (deployment.yaml; open decision 15).
+     Under the compose shape this file is not installed and the console is a
+     container — `metistry up` decides from the shape, and `doctor` reports
+     the same way.
+
+     Unlike the reconciler and watchdog plists, the environment is a real
+     EnvironmentVariables dict rendered from .env by `metistry up`, not
+     `sh -c "set -a; . .env"`: no shell, nothing interpolated, and the
+     console's bind stays loopback (METISTRY_CONSOLE_HOST=127.0.0.1 —
+     reachability beyond the machine is the user's routing layer,
+     invariant 8). The dict therefore carries this install's secrets, so
+     `up` writes the rendered plist mode 600. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.foldedspacelabs.metistry.console</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__NODE__</string>
+    <string>__REPO__/apps/console/dist/main.js</string>
+  </array>
+  <key>WorkingDirectory</key><string>__REPO__</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+__ENV__
+  </dict>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/tmp/metistry-console.log</string>
+  <key>StandardErrorPath</key><string>/tmp/metistry-console.log</string>
+</dict>
+</plist>

@@ -1,5 +1,12 @@
 # @metistry-apps/routines
 
+## 0.4.0
+
+### Patch Changes
+
+- Updated dependencies [c32b27d]
+  - @foldedspacelabs/metistry-core@0.4.0
+
 ## 0.3.1
 
 ### Patch Changes

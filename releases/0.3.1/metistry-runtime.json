@@ -1,0 +1,7 @@
+{
+  "version": "0.3.1",
+  "target": "darwin-arm64",
+  "built_at": "2026-09-10T00:53:25Z",
+  "contents": "built product: apps/*/dist, packages/*/dist, seed/, collectors/, routines/, targets/, db/migrations, ops/, docker-compose.yml, package manifests, pnpm-lock.yaml",
+  "docs": "docs/ops/releases.md"
+}

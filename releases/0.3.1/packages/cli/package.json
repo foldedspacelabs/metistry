@@ -1,0 +1,29 @@
+{
+  "name": "@foldedspacelabs/metistry-cli",
+  "version": "0.3.1",
+  "description": "Metistry command line: `metistry init` stamps a private instance repo from seed/, `metistry connect-repo` points it at a private remote with credentials the reconciler can push with unattended (GitHub device flow / PAT / ssh, stored in the macOS Keychain), `metistry secrets` makes the login Keychain the canonical secret store with .env generated from it, `metistry doctor` validates every manifest and probes every bridge, service, container and launchd job through the one check() contract, `metistry up` brings a checkout to running (compose + launchd + doctor), `metistry update` pulls, builds, migrates under an advisory lock, restarts what changed and pins metistry.lock. Usable by a stranger: npx @foldedspacelabs/metistry-cli init <dir>.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": { "metistry": "./dist/main.js" },
+  "files": ["dist", "seed", "README.md"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && rm -rf seed && cp -R ../../seed seed",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "start": "node dist/main.js"
+  },
+  "engines": { "node": ">=22" },
+  "dependencies": {
+    "@foldedspacelabs/metistry-core": "workspace:*",
+    "pg": "^8.16.0",
+    "yaml": "^2.9.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "@types/pg": "^8.16.0",
+    "typescript": "^7.0.2",
+    "vitest": "^4.0.18"
+  }
+}

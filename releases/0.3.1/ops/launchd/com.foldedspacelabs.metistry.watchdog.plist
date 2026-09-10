@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Watchdog runs on the HOST (not in Docker) so it outlives the container
+     runtime. Install (adjust __REPO__ to your checkout):
+       sed "s|__REPO__|$PWD|g; s|__NODE__|$(which node)|g" ops/launchd/com.foldedspacelabs.metistry.watchdog.plist \
+         > ~/Library/LaunchAgents/com.foldedspacelabs.metistry.watchdog.plist
+       launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.foldedspacelabs.metistry.watchdog.plist
+     Proper KeepAlive plist, never `launchctl submit` (Phase 0 respawn-loop lesson). -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.foldedspacelabs.metistry.watchdog</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string>-c</string>
+    <string>set -a; . __REPO__/.env; set +a; exec __NODE__ __REPO__/apps/watchdog/dist/main.js</string>
+  </array>
+  <key>WorkingDirectory</key><string>__REPO__</string>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/tmp/metistry-watchdog.log</string>
+  <key>StandardErrorPath</key><string>/tmp/metistry-watchdog.log</string>
+</dict>
+</plist>

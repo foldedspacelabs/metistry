@@ -1,0 +1,35 @@
+# Router rules — instance config, seeded default (D4 overlay).
+# The router is DETERMINISTIC (invariant 4): prefix, regex, and explicit
+# commands only. First match wins; no match = the default model tier.
+fast_path:
+  - match: "^/(status|open)\\b"
+    query: open_work
+  - match: "^what('| i)?s (my |the )?(status|open work|workload)\\b"
+    query: open_work
+
+# A tier is a (model, effort) PAIR — cost research 2026-09-09, decision 2:
+# a stronger model at low effort is often cheaper than a weaker one working
+# hard, so the two are one choice. `effort` is low | medium | high (absent =
+# medium). Name your own tiers here; `/model <tag>` and the composer's picker
+# name THIS menu, and `default` must exist. Both the router and the assistant
+# read this block, so an instance overlay (D4) moves both at once.
+#
+# Effort changes only at turn boundaries — one query per turn — because
+# changing it mid-session breaks the cached prompt prefix.
+tiers:
+  fast:                 # short, mechanical asks you want answered now
+    model: haiku
+    effort: low
+  default:              # bare text lands here
+    model: haiku
+    effort: medium
+  deep:                 # /deep, and anything you want thought about
+    model: opus
+    effort: high
+  routine:              # machine-enqueued turns (the evening fold): cheap by default
+    model: haiku
+    effort: low
+
+commands:
+  # /model <tag> and /deep are handled by the router itself (§4.1)
+  deep_alias: deep

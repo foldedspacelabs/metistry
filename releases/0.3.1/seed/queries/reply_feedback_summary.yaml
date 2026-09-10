@@ -1,0 +1,48 @@
+# Seeded default (D4 overlay: an instance file of the same name wins).
+name: reply_feedback_summary
+description: Reply quality over the trailing window (docs/ops/reply-feedback.md) — one 'day' row per day with rated/positive/negative counts, plus one 'flagged' row per 👎 carrying the user's note, the prompt that provoked the reply, the reply itself and that turn's tool calls (runs.meta.turn_id, else runs.meta.message_id). What the weekly reply-review routine reads; also the dashboard's quality tile.
+params:
+  days:  { type: int, default: 14 }
+  limit: { type: int, default: 50 }   # cap on the flagged rows, newest first
+sql: |
+  WITH win AS (SELECT now() - make_interval(days => (:days)::int) AS since),
+  daily AS (
+    SELECT date_trunc('day', f.ts)::date        AS day,
+           count(*)                             AS rated,
+           count(*) FILTER (WHERE f.rating = 1) AS positive,
+           count(*) FILTER (WHERE f.rating = -1) AS negative
+    FROM reply_feedback f WHERE f.ts > (SELECT since FROM win) GROUP BY 1
+  ),
+  flagged AS (
+    SELECT f.ts,
+           o.id                                  AS outbound_id,
+           o.thread,
+           f.note,
+           left(coalesce(i.text, ''), 500)       AS prompt,
+           left(o.text, 1000)                    AS reply,
+           r.model,
+           r.meta->'tools_used'                  AS tools_used
+    FROM reply_feedback f
+    JOIN outbound_messages o ON o.id = f.outbound_message_id
+    LEFT JOIN inbound_messages i ON i.id = o.in_reply_to
+    -- the turn that produced this reply: the assistant stamps message_id, a
+    -- future emitter may stamp turn_id — either joins, neither is required
+    LEFT JOIN LATERAL (
+      SELECT model, meta FROM runs
+      WHERE kind = 'turn'
+        AND (meta->>'turn_id' = o.id::text OR meta->>'message_id' = o.in_reply_to::text)
+      ORDER BY ts DESC LIMIT 1
+    ) r ON true
+    WHERE f.rating = -1 AND f.ts > (SELECT since FROM win)
+    ORDER BY f.ts DESC LIMIT (:limit)::int
+  )
+  SELECT 'day' AS row_kind, day::text AS day, rated, positive, negative,
+         NULL::bigint AS outbound_id, NULL::text AS thread, NULL::text AS note,
+         NULL::text AS prompt, NULL::text AS reply, NULL::text AS model, NULL::jsonb AS tools_used
+  FROM daily
+  UNION ALL
+  SELECT 'flagged', to_char(ts, 'YYYY-MM-DD'), NULL, NULL, NULL,
+         outbound_id, thread, note, prompt, reply, model, tools_used
+  FROM flagged
+  ORDER BY day DESC, row_kind, outbound_id
+cache_ttl: 60

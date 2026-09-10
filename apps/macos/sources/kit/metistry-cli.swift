@@ -10,11 +10,28 @@ import Foundation
 
 public struct MetistryCLI: Sendable {
     public let runtime: MetistryRuntime
+    /// The instance the app is pointed at, or nil before one is chosen.
+    ///
+    /// It reaches every verb as `METISTRY_INSTANCE_DIR` rather than as a flag,
+    /// because only `connect-repo` takes `--instance`; `deployment.ts`,
+    /// `up` and the reconciler all read the variable. The CLI's `.env` loader
+    /// fills gaps only (`packages/cli/src/env.ts`: `if (env[k] === undefined)`),
+    /// so an inherited value WINS over the product checkout's `.env` — which is
+    /// exactly what "the active instance directory" has to mean, and why
+    /// Settings → Instance prints the variable it is setting.
+    public let instanceDir: URL?
     private let runner: any CommandRunner
 
-    public init(runtime: MetistryRuntime, runner: any CommandRunner) {
+    public init(runtime: MetistryRuntime, runner: any CommandRunner, instanceDir: URL? = nil) {
         self.runtime = runtime
         self.runner = runner
+        self.instanceDir = instanceDir
+    }
+
+    /// The environment every invocation starts from.
+    public var baseEnvironment: [String: String] {
+        guard let instanceDir else { return [:] }
+        return ["METISTRY_INSTANCE_DIR": instanceDir.path]
     }
 
     /// The arguments an invocation actually gets: the CLI entry point (when the
@@ -38,7 +55,7 @@ public struct MetistryCLI: Sendable {
         try await runner.run(
             executable: runtime.executable,
             arguments: arguments(for: verb, includeProductDir: includeProductDir),
-            environment: environment,
+            environment: baseEnvironment.merging(environment) { _, override in override },
             currentDirectory: runtime.productDir,
             onOutput: onOutput
         )

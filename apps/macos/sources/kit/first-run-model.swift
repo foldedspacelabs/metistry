@@ -133,6 +133,43 @@ public enum SecretsDirection: String, CaseIterable, Sendable, Identifiable {
     }
 }
 
+/// Step 2's two shapes. `metistry init` creates an instance repo; adopting an
+/// existing folder runs nothing at all — the app just points at it, which is
+/// what a second Mac, a restored backup and a cloned instance repo all look
+/// like.
+public enum InstanceMode: String, CaseIterable, Sendable, Identifiable {
+    case create
+    case adopt
+
+    public var id: String { rawValue }
+}
+
+/// Step 3 is the one step it is genuinely reasonable to defer: local git works
+/// with no remote, and the reconciler simply never pushes.
+public enum RepoPlan: String, CaseIterable, Sendable, Identifiable {
+    case now
+    case later
+
+    public var id: String { rawValue }
+}
+
+/// `metistry connect-repo --auth device|token|ssh`.
+public enum RepoAuth: String, CaseIterable, Sendable, Identifiable {
+    case device
+    case token
+    case ssh
+
+    public var id: String { rawValue }
+
+    /// `--auth token` reads the PAT from stdin, and the app hands every child an
+    /// EMPTY stdin on purpose (process-command-runner.swift) so no verb can hang
+    /// a progress view waiting for a paste. Driving it would need a pty, which is
+    /// the same thing step 7 is waiting on — so the app offers the two modes that
+    /// work and says why the third does not, rather than shipping a button that
+    /// hangs.
+    public var runnableFromTheApp: Bool { self != .token }
+}
+
 @MainActor
 @Observable
 public final class FirstRunModel {
@@ -150,6 +187,12 @@ public final class FirstRunModel {
     public var assistantName: String = ""
     public var remoteURL: String = ""
     public var secretsDirection: SecretsDirection = .toKeychain
+    public var instanceMode: InstanceMode = .create
+    public var repoPlan: RepoPlan = .now
+    public var repoAuth: RepoAuth = .device
+    /// Bridge names (doctor's own — `apple-fm`, `eventkit`) the user asked to
+    /// enable. Enabling one means minting its token; see `plannedFollowUps`.
+    public var bridgeSelection: Set<String> = []
 
     public init(cli: MetistryCLI?, resolution: RuntimeResolution) {
         self.cli = cli
@@ -192,11 +235,22 @@ public final class FirstRunModel {
         guard step.isImplemented, cli != nil, state(step) != .running else { return false }
         switch step {
         case .runtime: return true
-        case .instance: return instanceDirectory != nil
-        case .versioning: return instanceDirectory != nil && !remoteURL.trimmingCharacters(in: .whitespaces).isEmpty
+        case .instance: return instanceDirectory != nil && instanceMode == .create
+        case .versioning:
+            guard repoPlan == .now, repoAuth.runnableFromTheApp else { return false }
+            return instanceDirectory != nil && !remoteURL.trimmingCharacters(in: .whitespaces).isEmpty
         case .secrets, .services: return true
         case .door, .claude: return false
         }
+    }
+
+    /// Adopting an existing instance folder runs no command: the app points at
+    /// it. Recording that as a *result* rather than leaving the step "not
+    /// started" is what lets the wizard move on honestly — nothing was done to
+    /// the machine, and the row says which folder was adopted.
+    public func markAdopted() {
+        guard instanceMode == .adopt, let dir = instanceDirectory else { return }
+        states[FirstRunStep.instance.rawValue] = .succeeded("using the existing folder \(dir.path)")
     }
 
     /// The exact argument array a step will run — shown on screen before the
@@ -206,21 +260,39 @@ public final class FirstRunModel {
         return [cli.runtime.executable.path] + cli.arguments(for: verb)
     }
 
+    /// Commands a step runs AFTER its primary verb, each shown on screen before
+    /// it runs like everything else. Today there is one case: enabling a bridge
+    /// is minting its token, and the token variable follows the convention
+    /// `METISTRY_BRIDGE_TOKEN_<NAME>` that `packages/cli/src/doctor.ts` probes
+    /// for. The bridge's `METISTRY_<NAME>_URL` and its launchd job come from
+    /// `metistry up`, not from here — the step says so.
+    public func plannedFollowUps(_ step: FirstRunStep) -> [[String]] {
+        guard let cli, step == .secrets else { return [] }
+        return bridgeSelection.sorted().map { name in
+            [cli.runtime.executable.path] + cli.arguments(for: ["secrets", "mint", Self.bridgeTokenVariable(name)])
+        }
+    }
+
+    /// `apple-fm` → `METISTRY_BRIDGE_TOKEN_APPLE_FM`.
+    public nonisolated static func bridgeTokenVariable(_ bridgeName: String) -> String {
+        "METISTRY_BRIDGE_TOKEN_" + bridgeName.uppercased().replacingOccurrences(of: "-", with: "_")
+    }
+
     private func verb(for step: FirstRunStep) -> [String]? {
         switch step {
         case .runtime, .door, .claude:
             return nil
         case .instance:
-            guard let dir = instanceDirectory else { return nil }
+            guard instanceMode == .create, let dir = instanceDirectory else { return nil }
             var verb = ["init", dir.path]
             let name = assistantName.trimmingCharacters(in: .whitespacesAndNewlines)
             if !name.isEmpty { verb += ["--name", name] }
             return verb
         case .versioning:
-            guard let dir = instanceDirectory else { return nil }
+            guard repoPlan == .now, let dir = instanceDirectory else { return nil }
             let url = remoteURL.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !url.isEmpty else { return nil }
-            return ["connect-repo", url, "--instance", dir.path, "--auth", "device"]
+            return ["connect-repo", url, "--instance", dir.path, "--auth", repoAuth.rawValue]
         case .secrets:
             // `--instance` names which instance directory this is: an instance
             // directory is self-contained, so its `.env` is written to
@@ -257,9 +329,21 @@ public final class FirstRunModel {
 
         let sink = OutputSink()
         do {
-            let result = try await cli.run(verb) { line in sink.append(line) }
+            var result = try await cli.run(verb) { line in sink.append(line) }
             output[step.rawValue] = sink.drain()
             if step == .versioning { deviceCode = Self.parseDeviceCode(from: lines(step)) }
+            // Follow-ups only run when the primary verb succeeded: minting a
+            // bridge token into a .env that `secrets sync` could not write is a
+            // half-done step pretending to be a done one.
+            if result.ok, step == .secrets {
+                for name in bridgeSelection.sorted() {
+                    sink.append(OutputLine(stream: .standardOutput, text: ""))
+                    let mint = ["secrets", "mint", Self.bridgeTokenVariable(name)]
+                    result = try await cli.run(mint) { line in sink.append(line) }
+                    output[step.rawValue] = sink.drain()
+                    if !result.ok { break }
+                }
+            }
             let tail = lines(step).last(where: { !$0.text.trimmingCharacters(in: .whitespaces).isEmpty })?.text
             states[step.rawValue] = result.ok
                 ? .succeeded(tail ?? "exit 0")
@@ -268,6 +352,42 @@ public final class FirstRunModel {
             output[step.rawValue] = sink.drain()
             states[step.rawValue] = .failed(error.localizedDescription)
         }
+    }
+
+    /// `metistry up --dry-run` with `METISTRY_DEPLOYMENT_SHAPE` set — every
+    /// command printed, nothing run.
+    ///
+    /// This is the honest answer to "launchd or compose?". The shape is
+    /// `deployment.yaml`'s to state, and `deployment.yaml` is a §4.7 protected
+    /// path: only the user's own hand writes it (invariant 2 — anything defining
+    /// how the system behaves is a human change), and no `metistry` verb writes
+    /// it either. So the wizard explains both shapes, shows what the other one
+    /// WOULD do, and leaves the one-line edit to the person. The variable exists
+    /// for exactly this preview (`packages/cli/src/deployment.ts`).
+    public func previewShape(_ shape: String) async {
+        guard let cli else { return }
+        let step = FirstRunStep.services
+        states[step.rawValue] = .running
+        output[step.rawValue] = []
+        let sink = OutputSink()
+        do {
+            let result = try await cli.run(["up", "--dry-run"], environment: ["METISTRY_DEPLOYMENT_SHAPE": shape]) { line in
+                sink.append(line)
+            }
+            output[step.rawValue] = sink.drain()
+            states[step.rawValue] = result.ok
+                ? .pending  // a preview changed nothing, so the step is still not done
+                : .failed("preview of shape \(shape) failed")
+        } catch {
+            output[step.rawValue] = sink.drain()
+            states[step.rawValue] = .failed(error.localizedDescription)
+        }
+    }
+
+    public func plannedPreviewArguments(shape: String) -> [String]? {
+        guard let cli else { return nil }
+        return ["METISTRY_DEPLOYMENT_SHAPE=\(shape)", cli.runtime.executable.path]
+            + cli.arguments(for: ["up", "--dry-run"])
     }
 
     /// `metistry connect-repo --auth device` prints

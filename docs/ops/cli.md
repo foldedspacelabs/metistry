@@ -1,9 +1,24 @@
-# `metistry` — init, connect-repo, secrets, doctor, up, update
+# `metistry` — init, connect-repo, secrets, doctor, up, update, service control
 
 `packages/cli` (`@foldedspacelabs/metistry-cli`, plan §4.16: `init | doctor
 | up | update`, plus the two install verbs the Mac app drives —
-`connect-repo` and `secrets`, `docs/product/desktop-app-plan.md`) is the
-operator's front door. All of them are real.
+`connect-repo` and `secrets`, `docs/product/desktop-app-plan.md` — and the
+per-service verbs its menu bar drives: `restart | stop | start | logs`,
+below) is the operator's front door. All of them are real.
+
+| verb | what it does |
+| --- | --- |
+| `init <dir>` | create a private instance repo |
+| `connect-repo <url>` | point the instance repo at a remote, mint credentials the reconciler can push with |
+| `secrets sync\|mint\|list` | move secrets between the Keychain and `.env` |
+| `doctor` | validate every manifest and probe every bridge, service, container, launchd job |
+| `up` | bring an install to running: containers/host jobs, then doctor |
+| `update` | move an install forward: pull/build, migrate, restart what changed, pin, doctor |
+| `restart [<service>…]` | `launchctl kickstart -k`, or `docker compose restart`, per service |
+| `stop [<service>…]` | `launchctl bootout`, or `docker compose stop`, per service |
+| `start [<service>…]` | `launchctl bootstrap` + `kickstart -k`, or `docker compose start`, per service |
+| `logs <service>` | tail the launchd job's log file, or `docker compose logs` |
+| `import-sessions` | summarise and post this machine's Claude Code sessions |
 
 ```sh
 # from anywhere, no checkout needed for init
@@ -16,6 +31,11 @@ node packages/cli/dist/main.js up --dry-run        # what it would do, runs noth
 node packages/cli/dist/main.js up                  # containers + host jobs, then doctor
 node packages/cli/dist/main.js update --dry-run
 node packages/cli/dist/main.js update              # pull, build, migrate, restart, pin
+
+# individual services — docs/ops/cli.md#service-control below
+node packages/cli/dist/main.js restart apple-fm
+node packages/cli/dist/main.js restart             # every service the current shape runs
+node packages/cli/dist/main.js logs apple-fm --lines 5
 
 # the instance repo's remote and the machine's secrets
 node packages/cli/dist/main.js connect-repo https://github.com/you/metistry-instance.git
@@ -425,6 +445,58 @@ A new http bridge named `foo` on port 7820 is probed the moment
 ("Instance directories are self-contained" above), so
 `METISTRY_EK_URL=… metistry doctor` overrides a line in the file for one
 run (handy for checking a token before writing it down).
+
+## Service control
+
+```sh
+metistry restart [<service>…] [--json] [--dry-run]
+metistry stop    [<service>…] [--json] [--dry-run]
+metistry start   [<service>…] [--json] [--dry-run]
+metistry logs <service> [--lines N] [--follow] [--dry-run]
+```
+
+**This is what the Mac app's menu bar calls.** Restart/stop/start/show-logs
+for one service — the app is a front end for the CLI, never a second
+implementation of "how do I restart the reconciler": a behaviour the menu
+bar needs is a CLI change first (the same rule `docs/ops/mac-app.md`
+states for `doctor --json`).
+
+No args = every service the current shape runs — read from `deployment.yaml`
+exactly the way `up` reads it (`runDirFor`, the instance's D4 overlay), and
+split into host jobs vs. containers using the same functions `up` and
+`doctor` already call (`loadPlistTemplates`, `composeServiceNames`) rather
+than a second table that could drift from theirs:
+
+- **launchd shape / host jobs** — `restart`: `launchctl kickstart -k
+  gui/<uid>/com.foldedspacelabs.metistry.<name>`. `stop`: `launchctl bootout`
+  of that label (tolerated if it was already not loaded — the desired end
+  state is reached either way). `start`: `launchctl bootstrap` of the plist
+  `up` already installed (tolerated if it is already bootstrapped) followed
+  by `kickstart -k`, so it ends up running regardless of the job's prior
+  state.
+- **compose shape / containers** — `docker compose restart|stop|start
+  <name>`.
+
+Every named service is acted on even when an earlier one fails — this is a
+"try everything, report what happened" command, unlike `up`'s
+stop-at-first-failure plan. `--json` prints one object per service,
+`{service, action, ok, detail}`, for the app to render; without it the
+output is a table like `doctor`'s. A name that isn't a service this shape
+runs fails the whole command (exit 2) with the list of known ones — it
+never guesses which subprocess a name might mean. `--dry-run` prints the
+exact command per service and runs nothing, the same seam `up --dry-run`
+uses (`StepRunner`).
+
+`metistry logs <service>` tails the last 200 lines by default (`--lines N`
+to change it, `--follow` to stream): under the launchd shape, the log file
+the plist's `StandardOutPath`/`StandardErrorPath` already point at (parsed
+from the template the way `workingDirectory` is — no separate
+`/tmp/metistry-<service>.log` convention to keep in sync by hand); under
+compose, `docker compose logs <name>`.
+
+On a platform with no launchd (anything but macOS) a host job's name is
+simply not a known service — the command refuses rather than pretending
+`launchctl` exists there (`docs/ops/deployment-shapes.md`, "Linux hosts").
 
 ## Bringing an install up
 

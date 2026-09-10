@@ -1,0 +1,244 @@
+// `metistry restart|stop|start|logs` — the Mac app's menu bar is a front end
+// for the CLI, never a second implementation (docs/product/desktop-app-plan.md),
+// so this is the ONE place that turns "act on service X" into the right
+// subprocess for the shape it actually runs in. It reuses exactly what `up`
+// already knows: `runDirFor`/`instanceLock` for release mode, `loadDeployment`
+// for the shape, `loadPlistTemplates` for which services are host jobs under
+// that shape (the launchd shape's db/console/assistant included, excluded
+// under compose), and `composeServiceNames` for the container names doctor
+// already probes. No second table of "which services are containers".
+//
+// Every subprocess goes through the shared StepRunner (steps.ts): dry-run is
+// the same code path with execution turned off, and the fake `exec` the
+// tests inject is the same seam `up`/`update` use.
+
+import { join } from "node:path";
+import { usesCompose, type DeploymentShape } from "@foldedspacelabs/metistry-core";
+import { loadDeployment } from "./deployment.js";
+import type { Exec } from "./exec.js";
+import { composeServiceNames } from "./doctor.js";
+import { launchAgentsDir, loadPlistTemplates } from "./launchd.js";
+import { StepFailed, StepRunner } from "./steps.js";
+import { composeEnvArgs, instanceLock, runDirFor } from "./up.js";
+
+export type ServiceAction = "restart" | "stop" | "start";
+
+export interface ServiceTarget {
+  /** the CLI-facing name: the plist's service (`console`, `apple-fm`, …) or the compose service name */
+  name: string;
+  kind: "launchd" | "compose";
+  /** launchd only: the job's full label, e.g. com.foldedspacelabs.metistry.console */
+  label?: string;
+  /** launchd only: where `up` installs this job's plist (~/Library/LaunchAgents/<file>) */
+  plistPath?: string;
+  /** launchd only: StandardOutPath/StandardErrorPath from the plist template — `metistry logs` reads this file */
+  logPath?: string;
+}
+
+export interface ServiceTargetContext {
+  /** the run dir `up` would use — `current` in release mode, the checkout otherwise */
+  productDir: string;
+  shape: DeploymentShape;
+  /** where the shape came from (deployment.yaml, its instance overlay, or the env override) — echoed the way `up`/`doctor` do */
+  from: string;
+  uid: number;
+  home: string;
+  targets: ServiceTarget[];
+}
+
+export interface ServiceResult {
+  service: string;
+  action: ServiceAction | "logs";
+  ok: boolean;
+  detail: string;
+}
+
+/** Thrown when a named service isn't one this shape knows how to act on — the command refuses rather than guessing which subprocess to run. */
+export class UnknownServiceError extends Error {
+  constructor(
+    public readonly unknown: string[],
+    public readonly known: string[],
+  ) {
+    super(
+      `unknown service${unknown.length > 1 ? "s" : ""}: ${unknown.join(", ")} — known service${known.length === 1 ? "" : "s"} for this shape: ${
+        known.length > 0 ? [...known].sort().join(", ") : "(none)"
+      }`,
+    );
+  }
+}
+
+/**
+ * Every service the current shape actually runs, tagged with how to act on
+ * it. Host jobs (reconciler, watchdog, the TCC bridges, and — under the
+ * launchd shape only — db/console/assistant) come from the same
+ * `loadPlistTemplates` call `up` renders from; containers come from the
+ * same `docker-compose.yml` parse `doctor` probes. Launchd targets are only
+ * listed on macOS — there is no launchd anywhere else, so a Linux operator
+ * naming a host job gets "unknown service" rather than a command that
+ * pretends to work (docs/ops/deployment-shapes.md, "Linux hosts").
+ */
+export async function buildServiceTargets(opts: {
+  productDir: string;
+  env: NodeJS.ProcessEnv;
+  platform?: NodeJS.Platform | undefined;
+  uid?: number | undefined;
+  home?: string | undefined;
+}): Promise<ServiceTargetContext> {
+  const env = opts.env;
+  const lock = await instanceLock(env);
+  const source = lock?.product.source ?? "git";
+  const runDir = runDirFor(opts.productDir, source);
+  const loaded = await loadDeployment(runDir, env);
+  const deployment = loaded.deployment;
+  const platform = opts.platform ?? process.platform;
+  const uid = opts.uid ?? (typeof process.getuid === "function" ? process.getuid() : 0);
+  const home = opts.home ?? env.HOME ?? "";
+
+  const targets: ServiceTarget[] = [];
+  if (platform === "darwin") {
+    const dir = launchAgentsDir(home);
+    for (const t of await loadPlistTemplates(runDir, deployment.shape)) {
+      targets.push({
+        name: t.service,
+        kind: "launchd",
+        label: t.label,
+        plistPath: join(dir, t.file),
+        ...(t.standardOutPath !== undefined ? { logPath: t.standardOutPath } : {}),
+      });
+    }
+  }
+  if (usesCompose(deployment)) {
+    for (const name of await composeServiceNames(runDir)) targets.push({ name, kind: "compose" });
+  }
+  return { productDir: runDir, shape: deployment.shape, from: loaded.from, uid, home, targets };
+}
+
+/** `names` empty/undefined = every service the shape runs (the CLI's "no args" default). */
+export function resolveServices(targets: ServiceTarget[], names: string[] | undefined): { resolved: ServiceTarget[]; unknown: string[] } {
+  if (!names || names.length === 0) return { resolved: targets, unknown: [] };
+  const byName = new Map(targets.map((t) => [t.name, t]));
+  const resolved: ServiceTarget[] = [];
+  const unknown: string[] = [];
+  for (const n of names) {
+    const t = byName.get(n);
+    if (t) resolved.push(t);
+    else unknown.push(n);
+  }
+  return { resolved, unknown };
+}
+
+async function actOnLaunchd(r: StepRunner, t: ServiceTarget, uid: number, action: ServiceAction): Promise<ServiceResult> {
+  const gui = `gui/${uid}/${t.label}`;
+  try {
+    if (action === "restart") {
+      await r.run("launchctl", ["kickstart", "-k", gui]);
+      return { service: t.name, action, ok: true, detail: `launchctl kickstart -k ${gui}` };
+    }
+    if (action === "stop") {
+      await r.run("launchctl", ["bootout", gui], { tolerateFailure: true, comment: "ok if not loaded" });
+      return { service: t.name, action, ok: true, detail: `launchctl bootout ${gui}` };
+    }
+    // start: bootstrap the plist `up` already installed (tolerated — it may
+    // already be bootstrapped), then kickstart -k so it is running either way
+    if (!t.plistPath) throw new StepFailed(`no installed plist path known for ${t.name}`);
+    await r.run("launchctl", ["bootstrap", `gui/${uid}`, t.plistPath], { tolerateFailure: true, comment: "ok if already bootstrapped" });
+    await r.run("launchctl", ["kickstart", "-k", gui]);
+    return { service: t.name, action, ok: true, detail: `launchctl bootstrap gui/${uid} ${t.plistPath}; launchctl kickstart -k ${gui}` };
+  } catch (e) {
+    if (e instanceof StepFailed) return { service: t.name, action, ok: false, detail: e.message };
+    throw e;
+  }
+}
+
+async function actOnCompose(r: StepRunner, t: ServiceTarget, productDir: string, envFile: string | undefined, action: ServiceAction): Promise<ServiceResult> {
+  try {
+    await r.run("docker", ["compose", ...composeEnvArgs(productDir, envFile), action, t.name], { cwd: productDir });
+    return { service: t.name, action, ok: true, detail: `docker compose ${action} ${t.name}` };
+  } catch (e) {
+    if (e instanceof StepFailed) return { service: t.name, action, ok: false, detail: e.message };
+    throw e;
+  }
+}
+
+async function actOn(r: StepRunner, t: ServiceTarget, ctx: ServiceTargetContext, envFile: string | undefined, action: ServiceAction): Promise<ServiceResult> {
+  return t.kind === "launchd" ? actOnLaunchd(r, t, ctx.uid, action) : actOnCompose(r, t, ctx.productDir, envFile, action);
+}
+
+export interface ServiceControlOptions {
+  productDir: string;
+  env?: NodeJS.ProcessEnv | undefined;
+  /** the dotenv file compose interpolates from (`<instance>/state/.env`); undefined while an install still runs from the checkout's */
+  envFile?: string | undefined;
+  exec?: Exec | undefined;
+  out?: ((line: string) => void) | undefined;
+  dryRun?: boolean | undefined;
+  platform?: NodeJS.Platform | undefined;
+  uid?: number | undefined;
+  home?: string | undefined;
+}
+
+export interface ServiceControlResult {
+  ok: boolean;
+  shape: DeploymentShape;
+  results: ServiceResult[];
+  /** every command run/planned, in order — the dry-run seam every other verb uses */
+  commands: string[];
+}
+
+/**
+ * `metistry restart|stop|start [<service>…]`. Every named service is acted
+ * on even when an earlier one fails — the result list is the per-service
+ * report, not an abort-on-first-failure plan like `up`'s.
+ */
+export async function controlServices(opts: ServiceControlOptions & { action: ServiceAction; names?: string[] | undefined }): Promise<ServiceControlResult> {
+  const env = opts.env ?? process.env;
+  const r = new StepRunner({ dryRun: opts.dryRun === true, out: opts.out ?? ((s) => process.stdout.write(s + "\n")), exec: opts.exec, env });
+  const ctx = await buildServiceTargets({ productDir: opts.productDir, env, platform: opts.platform, uid: opts.uid, home: opts.home });
+  r.note(`shape: ${ctx.shape} — from ${ctx.from}`);
+  const { resolved, unknown } = resolveServices(ctx.targets, opts.names);
+  if (unknown.length > 0) throw new UnknownServiceError(unknown, ctx.targets.map((t) => t.name));
+  r.section(opts.action);
+  const results: ServiceResult[] = [];
+  for (const t of resolved) results.push(await actOn(r, t, ctx, opts.envFile, opts.action));
+  return { ok: results.every((x) => x.ok), shape: ctx.shape, results, commands: r.commands };
+}
+
+/** `service  action  ok  detail` — the same table shape doctor's renderTable uses. */
+export function renderServiceResults(results: ServiceResult[]): string {
+  const head = ["service", "action", "ok", "detail"];
+  const body = results.map((x) => [x.service, x.action, x.ok ? "ok" : "FAILED", x.detail]);
+  const widths = head.map((h, i) => Math.max(h.length, ...body.map((row) => (i < 3 ? (row[i] ?? "").length : 0))));
+  const line = (cells: string[]) => cells.map((c, i) => (i < 3 ? c.padEnd(widths[i] ?? 0) : c)).join("  ").trimEnd();
+  const ok = results.filter((x) => x.ok).length;
+  return [line(head), line(widths.map((w) => "-".repeat(w))), ...body.map(line), "", `${results.length} service(s): ${ok} ok, ${results.length - ok} failed`].join("\n");
+}
+
+export interface LogsOptions extends ServiceControlOptions {
+  service: string;
+  lines: number;
+  follow: boolean;
+}
+
+/** `metistry logs <service> [--lines N] [--follow]`: tail the launchd job's log file, or `docker compose logs`. Streams via `inherit`. */
+export async function serviceLogs(opts: LogsOptions): Promise<ServiceResult> {
+  const env = opts.env ?? process.env;
+  const r = new StepRunner({ dryRun: opts.dryRun === true, out: opts.out ?? ((s) => process.stdout.write(s + "\n")), exec: opts.exec, env });
+  const ctx = await buildServiceTargets({ productDir: opts.productDir, env, platform: opts.platform, uid: opts.uid, home: opts.home });
+  const { resolved, unknown } = resolveServices(ctx.targets, [opts.service]);
+  if (unknown.length > 0) throw new UnknownServiceError(unknown, ctx.targets.map((t) => t.name));
+  const t = resolved[0]!;
+  try {
+    if (t.kind === "launchd") {
+      if (!t.logPath) throw new StepFailed(`no log path known for ${t.name} (its plist has no StandardOutPath)`);
+      const args = opts.follow ? ["-n", String(opts.lines), "-f", t.logPath] : ["-n", String(opts.lines), t.logPath];
+      await r.run("tail", args, { inherit: true });
+    } else {
+      const args = ["compose", ...composeEnvArgs(ctx.productDir, opts.envFile), "logs", t.name, "--tail", String(opts.lines), ...(opts.follow ? ["-f"] : [])];
+      await r.run("docker", args, { cwd: ctx.productDir, inherit: true });
+    }
+    return { service: t.name, action: "logs", ok: true, detail: "" };
+  } catch (e) {
+    if (e instanceof StepFailed) return { service: t.name, action: "logs", ok: false, detail: e.message };
+    throw e;
+  }
+}

@@ -49,6 +49,14 @@
    so the native app copies a settled interaction rather than inventing.
 3. Post-Phase 6: the SwiftUI multiplatform app, macOS target first if
    the work install lands before the phone matters, iOS first otherwise.
+4. **Next for the macOS target, in this order** (2026-09-09): the CLI
+   changes the app is now waiting on rather than more app surface —
+   `metistry restart|stop|start|logs` (the menu bar codes against them and
+   degrades honestly until they land), then the small read verbs that
+   delete the app's two file readers (`identity --json`, `--version`,
+   `secrets list --json`), then the pty that unblocks step 7 and
+   `--auth token`, then `SMAppService`. The other eight destinations stay
+   behind the UX pass at step 2.
 
 ### What shipped (2026-09-09) — `apps/macos`, the first buildable scaffold
 
@@ -67,6 +75,32 @@ the stream and shown as a card), `secrets sync`, `up`; Sparkle 2.9.6
 against the release feed. `MetistryKit`, which holds every model and view,
 is free of AppKit and of `Process`, so an iOS target shares it unchanged.
 
+**Then (2026-09-09, second pass — owner direction): Settings, a wizard,
+and a menu bar worth opening.**
+
+- **Settings in the usual spot** — the `Settings` scene, ⌘, and the app
+  menu. Six panes (Instance · Services · Connections · Secrets · Updates ·
+  Advanced), and the rule that shapes all of them: **every setting is a
+  front for a file the CLI owns, never app-private state.** The app
+  persists three POINTERS — active instance, recents, and a developer
+  runtime override — and nothing else; a unit test asserts the whole
+  defaults domain so a fourth key cannot appear quietly. The scaffold's
+  *product-directory preference is removed*: a shipped app's product is
+  the runtime inside its own bundle, so there is nothing to ask, and the
+  override that a developer build still needs moved to Advanced.
+- **A first-launch wizard** replacing the "First run" tab group: a sheet
+  over the same seven steps, Back/Continue/Skip, shown when no instance is
+  selected and re-enterable from Settings → Instance. Each choice carries
+  what it gets you and what it costs — new instance vs. an existing
+  folder, connect a repository now vs. later, device flow vs. SSH vs. a
+  pasted token, compose vs. launchd, which bridges to enable.
+- **A menu bar that is actually useful**: every component grouped by
+  doctor's own `kind` with a status dot and a submenu (Restart · Stop ·
+  Start · View Log), plus Restart All, Stop All and "Update Available:
+  x.y.z". Doctor is re-run on open and every 30s while the menu is open;
+  the watchdog feed is the intended faster source once the app has a read
+  path to it.
+
 **Explicit follow-ups**, each labelled "not yet" in the app itself rather
 than faked:
 
@@ -75,12 +109,23 @@ than faked:
   `SMAppService` (macOS 13+) is the sanctioned shape: one approval in
   System Settings, no plist to edit. It needs a `metistry up` that can
   hand the app its job set rather than installing it, so it is a CLI
-  change first.
+  change first. Settings → Services carries the disabled "Start at login"
+  toggle and that reason.
 - **Step 6, passkey.** Needs `ASAuthorization` against the console's local
   origin *and* a `metistry` verb to register the credential.
 - **Step 7, Claude token.** `claude setup-token` is interactive; driving it
   from the app needs a pty, and the token needs its own `metistry secrets`
   path.
+- **`connect-repo --auth token` from the app.** It reads the PAT from
+  stdin, and the app hands every child an empty stdin on purpose so no
+  verb can hang a progress view waiting for a paste. The wizard shows the
+  option disabled with that reason; a pty would lift both this and step 7.
+- **Two small CLI gaps the app worked around and would rather not have.**
+  Nothing reports the assistant's name, so the app reads `identity.yaml`
+  with a ~60-line scalar reader (a `metistry identity --json` deletes it);
+  nothing reports the product version, so it reads the checkout's
+  `package.json` (a `metistry --version` deletes that); and `secrets list`
+  has no `--json`, so its table is parsed.
 - **The other eight destinations** (Feed, Chat, Agents, Projects,
   Artifacts, Capture, Needs You, Devices — P6). The PWA is the answer until
   the UX pass settles them, per sequencing step 2.

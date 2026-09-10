@@ -96,11 +96,14 @@ describe("metistry up --dry-run, launchd shape", () => {
       `chmod 600 ${I}/state/supervisor.json`,
       // 3. ONE agent for the core…
       expect.stringContaining(`write ${LA}/${SUP}.plist`),
+      // 4. …plus the TCC helper, which must be its own binary for the grant —
+      // both written before either is bootstrapped, so the TCC pin
+      // (tcc-pin.ts) runs against what is actually on disk before launchd
+      // loads any of it
+      expect.stringContaining(`write ${LA}/${SUP}.calendar.plist`),
       `launchctl bootout gui/501/${SUP}`,
       `launchctl bootstrap gui/501 ${LA}/${SUP}.plist`,
       `launchctl kickstart -k gui/501/${SUP}`,
-      // 4. …plus the TCC helper, which must be its own binary for the grant
-      expect.stringContaining(`write ${LA}/${SUP}.calendar.plist`),
       `launchctl bootout gui/501/${SUP}.calendar`,
       `launchctl bootstrap gui/501 ${LA}/${SUP}.calendar.plist`,
       `launchctl kickstart -k gui/501/${SUP}.calendar`,

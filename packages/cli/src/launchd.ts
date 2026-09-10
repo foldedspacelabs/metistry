@@ -14,6 +14,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
 import { SHAPED_SERVICES, SUPERVISOR_LABEL, SUPERVISOR_SERVICE, type DeploymentShape } from "@foldedspacelabs/metistry-core";
+import type { StepRunner } from "./steps.js";
 
 export const PLACEHOLDERS = ["__REPO__", "__NODE__", "__ENV_FILE__"] as const;
 
@@ -356,6 +357,39 @@ export function launchdCommands(label: string, plistPath: string, uid: number): 
     { cmd: "launchctl", args: ["bootstrap", `gui/${uid}`, plistPath] },
     { cmd: "launchctl", args: ["kickstart", "-k", `gui/${uid}/${label}`] },
   ];
+}
+
+/** How long a caller waits for `launchctl bootout` to finish before bootstrapping the same label again (25 × 200ms = 5s). */
+export const BOOTOUT_TRIES = 25;
+export const BOOTOUT_INTERVAL_MS = 200;
+
+/**
+ * Wait until `launchctl print gui/<uid>/<label>` stops finding the job.
+ *
+ * `bootout` is asynchronous: it returns while launchd is still tearing the
+ * job down, and a `bootstrap` of the same label in that window fails with
+ * `Bootstrap failed: 5: Input/output error`. Polling `print` is the only
+ * thing launchctl offers that answers "is it gone yet". A timeout is NOT
+ * an error here — the bootstrap that follows will report the real problem
+ * with launchd's own words rather than ours.
+ *
+ * Lives here rather than in `up.ts` (where it was written) so `tcc-pin.ts`
+ * can call it too without `up.ts` importing `tcc-pin.ts` — `migrate-shape.ts`
+ * imports `up.ts`, so the arrow can only point one way (§ up.ts vs
+ * migrate-shape.ts).
+ */
+export async function awaitBootout(r: StepRunner, label: string, uid: number, sleep: (ms: number) => Promise<void> = (ms) => new Promise((res) => setTimeout(res, ms))): Promise<boolean> {
+  if (r.dryRun) {
+    r.note(`wait for gui/${uid}/${label} to be gone before bootstrapping it (bootout is asynchronous)`);
+    return true;
+  }
+  for (let i = 0; i < BOOTOUT_TRIES; i++) {
+    const p = await r.exec("launchctl", ["print", `gui/${uid}/${label}`], { env: r.env });
+    if (p.code !== 0) return true;
+    await sleep(BOOTOUT_INTERVAL_MS);
+  }
+  r.note(`gui/${uid}/${label} is still loaded ${(BOOTOUT_TRIES * BOOTOUT_INTERVAL_MS) / 1000}s after bootout — bootstrapping anyway`);
+  return false;
 }
 
 /**

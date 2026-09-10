@@ -20,6 +20,7 @@ import { loadDeployment } from "./deployment.js";
 import { doctor, type DoctorDeps, type DoctorReport } from "./doctor.js";
 import { productVersion } from "./env.js";
 import { envPaths } from "./instance.js";
+import { loadNamespace } from "./namespace.js";
 import type { Exec } from "./exec.js";
 import { loadPlistTemplates, type PlistTemplate } from "./launchd.js";
 import { instanceLockPath, LOCK_FILENAME, readLock, serializeLock, type LockFile, type LockSource } from "./lock.js";
@@ -199,8 +200,11 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
   // all, and which plists exist (under launchd, console/assistant/db are jobs)
   const loaded = await loadDeployment(runDir, env);
   const deployment = loaded.deployment;
+  // a namespaced instance's jobs carry its label suffix — `update` kickstarts
+  // the labels THIS instance installed, never the default install's
+  const labelSuffix = (await loadNamespace(env.METISTRY_INSTANCE_DIR))?.labelSuffix;
   // hashed before the build/switch and again after: only jobs whose code moved are kickstarted
-  let before = await hashHostJobs(runDir, await loadPlistTemplates(runDir, deployment.shape));
+  let before = await hashHostJobs(runDir, await loadPlistTemplates(runDir, deployment.shape, labelSuffix));
 
   try {
     r.section("product");
@@ -225,7 +229,7 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
       release = opts.rollback ? await rollbackRelease(r, productDir) : await installRelease(r, { productDir, fetchFn, env, version: opts.releaseVersion, ...(opts.target ? { target: opts.target } : {}) });
       releaseVersion = release.version;
       runDir = runDirFor(productDir, source);
-      before = await hashHostJobs(runDir, await loadPlistTemplates(runDir, deployment.shape));
+      before = await hashHostJobs(runDir, await loadPlistTemplates(runDir, deployment.shape, labelSuffix));
       // the bundled runtime moves with the release — a new Node, Postgres or
       // git arrives inside its deps pack (docs/ops/bundled-runtime.md). A
       // rollback keeps the runtime it has: it is a superset, not a downgrade.
@@ -235,7 +239,7 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
       }
     }
 
-    const templates = await loadPlistTemplates(runDir, deployment.shape);
+    const templates = await loadPlistTemplates(runDir, deployment.shape, labelSuffix);
 
     r.section("build");
     if (opts.skipBuild) r.note("--skip-build: using what is in dist/ now");

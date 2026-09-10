@@ -34,6 +34,7 @@ export const BRAIN_TOOLS = [
   "tasks_renew",
   "tasks_update",
   "tasks_release",
+  "tasks_close",
   "tasks_create",
   "knowledge_search",
   "knowledge_read",

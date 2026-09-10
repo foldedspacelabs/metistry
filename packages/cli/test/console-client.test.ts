@@ -39,32 +39,32 @@ function fakeConsole(expected: string, body: unknown = { principal: "user", via:
 describe("consoleTarget", () => {
   it("takes the URL from METISTRY_CONSOLE_URL, then METISTRY_URL, then loopback", async () => {
     const base = { platform: "linux" as const };
-    expect((await consoleTarget({ ...base, env: { METISTRY_OWNER_TOKEN: TOKEN } })).url).toBe(DEFAULT_CONSOLE_URL);
-    expect((await consoleTarget({ ...base, env: { METISTRY_OWNER_TOKEN: TOKEN, METISTRY_URL: "http://127.0.0.1:9090/" } })).url).toBe("http://127.0.0.1:9090");
+    expect((await consoleTarget({ ...base, env: { METISTRY_LOCAL_OWNER_TOKEN: TOKEN } })).url).toBe(DEFAULT_CONSOLE_URL);
+    expect((await consoleTarget({ ...base, env: { METISTRY_LOCAL_OWNER_TOKEN: TOKEN, METISTRY_URL: "http://127.0.0.1:9090/" } })).url).toBe("http://127.0.0.1:9090");
     expect(
-      (await consoleTarget({ ...base, env: { METISTRY_OWNER_TOKEN: TOKEN, METISTRY_URL: "http://127.0.0.1:9090", METISTRY_CONSOLE_URL: "http://127.0.0.1:8080" } })).url,
+      (await consoleTarget({ ...base, env: { METISTRY_LOCAL_OWNER_TOKEN: TOKEN, METISTRY_URL: "http://127.0.0.1:9090", METISTRY_CONSOLE_URL: "http://127.0.0.1:8080" } })).url,
     ).toBe("http://127.0.0.1:8080");
   });
 
   it("falls back to the login Keychain under THIS instance's account, then the per-user one", async () => {
-    const exec = fakeSecurity({ [`${INSTANCE_ID}/metistry:METISTRY_OWNER_TOKEN`]: TOKEN });
+    const exec = fakeSecurity({ [`${INSTANCE_ID}/metistry:METISTRY_LOCAL_OWNER_TOKEN`]: TOKEN });
     const r = await consoleTarget({ env: {}, platform: "darwin", exec, instanceId: INSTANCE_ID });
     expect(r).toMatchObject({ token: TOKEN, tokenFrom: "keychain" });
 
     // an item that has not been migrated to the instance's account yet
-    const legacy = fakeSecurity({ "metistry/metistry:METISTRY_OWNER_TOKEN": TOKEN });
+    const legacy = fakeSecurity({ "metistry/metistry:METISTRY_LOCAL_OWNER_TOKEN": TOKEN });
     expect((await consoleTarget({ env: {}, platform: "darwin", exec: legacy, instanceId: INSTANCE_ID })).token).toBe(TOKEN);
   });
 
   it("says how to get one rather than inventing a token", async () => {
-    await expect(consoleTarget({ env: {}, platform: "linux" })).rejects.toThrow(/METISTRY_OWNER_TOKEN is not set.*secrets sync --to env/s);
+    await expect(consoleTarget({ env: {}, platform: "linux" })).rejects.toThrow(/METISTRY_LOCAL_OWNER_TOKEN is not set.*secrets sync --to env/s);
   });
 });
 
 describe("whoami", () => {
   it("sends the token as a bearer and nothing else, and reports the principal", async () => {
     const c = fakeConsole(TOKEN);
-    const r = await whoami({ env: { METISTRY_OWNER_TOKEN: TOKEN }, platform: "linux", fetchFn: c.fetchFn });
+    const r = await whoami({ env: { METISTRY_LOCAL_OWNER_TOKEN: TOKEN }, platform: "linux", fetchFn: c.fetchFn });
     expect(r).toMatchObject({ principal: "user", via: "local_owner_token", management: true, url: DEFAULT_CONSOLE_URL });
     expect(c.seen[0]!.url).toBe(`${DEFAULT_CONSOLE_URL}/api/whoami`);
     expect(c.seen[0]!.authorization).toBe(`Bearer ${TOKEN}`);
@@ -74,7 +74,7 @@ describe("whoami", () => {
 
   it("turns a 401 into the two things it can actually be", async () => {
     const c = fakeConsole("a-different-token");
-    await expect(whoami({ env: { METISTRY_OWNER_TOKEN: TOKEN }, platform: "linux", fetchFn: c.fetchFn })).rejects.toThrow(
+    await expect(whoami({ env: { METISTRY_LOCAL_OWNER_TOKEN: TOKEN }, platform: "linux", fetchFn: c.fetchFn })).rejects.toThrow(
       /refused the owner token.*METISTRY_TRUSTED_LOOPBACK_PROXY/s,
     );
   });
@@ -83,8 +83,8 @@ describe("whoami", () => {
     const fetchFn = (async () => {
       throw new Error(`connect ECONNREFUSED (tried Bearer ${TOKEN})`);
     }) as unknown as typeof fetch;
-    await expect(whoami({ env: { METISTRY_OWNER_TOKEN: TOKEN }, platform: "linux", fetchFn })).rejects.toThrow(/\[redacted\]/);
-    await expect(whoami({ env: { METISTRY_OWNER_TOKEN: TOKEN }, platform: "linux", fetchFn })).rejects.not.toThrow(new RegExp(TOKEN));
+    await expect(whoami({ env: { METISTRY_LOCAL_OWNER_TOKEN: TOKEN }, platform: "linux", fetchFn })).rejects.toThrow(/\[redacted\]/);
+    await expect(whoami({ env: { METISTRY_LOCAL_OWNER_TOKEN: TOKEN }, platform: "linux", fetchFn })).rejects.not.toThrow(new RegExp(TOKEN));
   });
 });
 

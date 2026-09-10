@@ -162,7 +162,7 @@ export async function init(opts: InitOptions): Promise<InitResult> {
       "METISTRY_RECONCILER_URL=http://host.docker.internal:7812",
       // the console's local owner door (docs/ops/auth.md): the Mac app and
       // the CLI present this over loopback instead of a passkey ceremony
-      `METISTRY_OWNER_TOKEN=${mint()}`,
+      `METISTRY_LOCAL_OWNER_TOKEN=${mint()}`,
     ],
   };
 }

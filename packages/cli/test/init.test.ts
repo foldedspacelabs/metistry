@@ -60,7 +60,7 @@ describe("metistry init", () => {
       `METISTRY_INSTANCE_DIR=${dir}`,
       `METISTRY_BRIDGE_TOKEN_RECONCILER=${MINTED}`,
       "METISTRY_RECONCILER_URL=http://host.docker.internal:7812",
-      `METISTRY_OWNER_TOKEN=${MINTED}`, // the console's local owner door (docs/ops/auth.md)
+      `METISTRY_LOCAL_OWNER_TOKEN=${MINTED}`, // the console's local owner door (docs/ops/auth.md)
     ]);
     for (const f of git(dir, "ls-files").split("\n")) expect(readFileSync(join(dir, f), "utf8"), f).not.toContain(MINTED);
 

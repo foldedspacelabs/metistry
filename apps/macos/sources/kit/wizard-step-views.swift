@@ -4,14 +4,26 @@
 // These two are not, so they get their own screens rather than being forced
 // through a run row that would describe them wrongly:
 //
-//   6. Door    — an `ASAuthorization` ceremony against the console, or, when
-//                this install's origin cannot host one, the console's own
-//                enrolment code with the reason on screen.
+//   6. Door    — this Mac's sign-in state first (it needs no ceremony at all),
+//                then, for the devices that DO need one, the console's own
+//                enrolment code.
 //   7. Claude  — an interactive terminal login the app cannot drive, and a watch
 //                on whether the token's NAME became set.
 //
 // Both keep the app's promise in their own currency: the exact thing that will
 // happen, before it happens, and the system's own words when it refuses.
+//
+// STEP 6'S REFRAMING (owner, 2026-09-10). The step used to open with an origin
+// card and a long refusal: `ASAuthorization` cannot run a ceremony against a
+// loopback origin, for four independent reasons, and a fifth that outranks them
+// all (passkey-enrolment.swift's header has the measurements). All of that is
+// still TRUE and still worth being able to check — but it was never the first
+// thing this screen had to say, because this Mac does not need a passkey. It is
+// the same package as the CLI on the same machine and the console takes its
+// local owner token as the `user` principal over loopback. So the step leads
+// with that, offers the enrolment code for the browser and the phone, and the
+// "ask macOS" probe moved to Settings → Advanced where a diagnostic belongs
+// (`PasskeyDiagnosticView`, below — the same view, one place).
 
 import SwiftUI
 
@@ -21,28 +33,37 @@ public struct PasskeyStepView: View {
     @Environment(\.colorScheme) private var scheme
     @Environment(\.openURL) private var openURL
 
-    private let model: PasskeyEnrolmentModel
+    private let steps: FirstRunModel
 
-    public init(model: PasskeyEnrolmentModel) {
-        self.model = model
+    public init(steps: FirstRunModel) {
+        self.steps = steps
     }
+
+    private var model: PasskeyEnrolmentModel { steps.passkey }
 
     public var body: some View {
         let p = Palette(scheme)
         VStack(alignment: .leading, spacing: MetistrySpace.s4) {
-            originCard(p)
-            switch model.route {
-            case .native(let rpID):
-                nativeCard(rpID: rpID, p)
-            case .consoleCode(let reason):
-                NotYetCard(title: "Not natively, on this install", reason: reason)
-                fallbackCard(p)
-            case nil:
-                Text("Waiting for doctor to report the console.")
-                    .metistryText(.footnote, p, .textSecondary)
+            ConsoleSignInCard(model: steps.consoleSignIn, title: "This Mac")
+                .task { await steps.consoleSignIn.refreshIfNeeded() }
+            Text(WizardOptions.doorNote)
+                .metistryText(.caption1, p, .textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+            WizardOptionList(WizardOptions.door, selection: steps.doorPlan) { steps.doorPlan = $0 }
+            if steps.doorPlan == .otherDevices {
+                originCard(p)
+                switch model.route {
+                case .native(let rpID):
+                    nativeCard(rpID: rpID, p)
+                case .consoleCode(let reason):
+                    NotYetCard(title: "Not natively, on this install", reason: reason)
+                    fallbackCard(p)
+                case nil:
+                    Text("Waiting for doctor to report the console.")
+                        .metistryText(.footnote, p, .textSecondary)
+                }
+                phaseRow(p)
             }
-            diagnosticCard(p)
-            phaseRow(p)
         }
     }
 
@@ -140,31 +161,6 @@ public struct PasskeyStepView: View {
         }
     }
 
-    /// The evidence, not the claim. Pressing this asks macOS to register a
-    /// passkey for the relying party with a LOCAL challenge and posts nothing —
-    /// so what comes back is the system's own words about the relying party.
-    private func diagnosticCard(_ p: Palette) -> some View {
-        VStack(alignment: .leading, spacing: MetistrySpace.s2) {
-            Text("What macOS Says").metistryText(.headline, p)
-            Text("Asks ASAuthorization to register against this relying party with a challenge generated here. Nothing is sent to the console and nothing can be enrolled by it — it exists so the reason above is something you can check rather than something this app asserts.")
-                .metistryText(.caption1, p, .textTertiary)
-                .fixedSize(horizontal: false, vertical: true)
-            Button("Ask macOS") { Task { await model.runDiagnostic() } }
-                .disabled(model.phase == .enrolling)
-            if let diagnostic = model.diagnostic {
-                Text(diagnostic)
-                    .metistryText(.mono, p, .textSecondary)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(MetistrySpace.s3)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(p[.sunken], in: RoundedRectangle(cornerRadius: MetistryRadius.sm, style: .continuous))
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .metistryCard(p)
-    }
-
     @ViewBuilder
     private func phaseRow(_ p: Palette) -> some View {
         let p = Palette(scheme)
@@ -189,6 +185,61 @@ public struct PasskeyStepView: View {
         case .idle:
             EmptyView()
         }
+    }
+}
+
+// MARK: - The ASAuthorization diagnostic (Settings → Advanced)
+
+/// What macOS actually says about a relying party — the evidence behind
+/// `PasskeyRouting.decide`'s reason, rather than an assertion of it.
+///
+/// It was in the wizard's step 6 until 2026-09-10. It is out of the main flow
+/// now, because this Mac does not need a passkey and a person setting up an
+/// install should not be asked to run a probe about one. It is not DELETED,
+/// because it is real measured behaviour and the finding it produces
+/// (`AuthorizationError 1004` for every relying party, from any build
+/// distributed as a Developer ID DMG) is the thing that would otherwise cost
+/// someone a day of editing `METISTRY_ORIGIN`. So it lives here: one button,
+/// under Advanced, where a diagnostic belongs.
+///
+/// It sends nothing. The challenge is 32 bytes generated locally, no enrolment
+/// code is used, and nothing is posted back — so it cannot register a credential
+/// anywhere, and the console pays nothing for it.
+public struct PasskeyDiagnosticView: View {
+    @Environment(\.colorScheme) private var scheme
+    private let model: PasskeyEnrolmentModel
+
+    public init(model: PasskeyEnrolmentModel) {
+        self.model = model
+    }
+
+    public var body: some View {
+        let p = Palette(scheme)
+        VStack(alignment: .leading, spacing: MetistrySpace.s2) {
+            if let endpoint = model.endpoint {
+                FactRow("Relying party", model.reportedRPID ?? endpoint.host ?? endpoint.origin, mono: true)
+            }
+            if let reason = model.route?.reason {
+                Text(reason)
+                    .metistryText(.caption1, p, .textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Text("Asks ASAuthorization to register against that relying party with a challenge generated here. Nothing is sent to the console and nothing can be enrolled by it — it exists so the reason above is something you can check rather than something this app asserts.")
+                .metistryText(.caption1, p, .textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+            Button("Ask macOS") { Task { await model.runDiagnostic() } }
+                .disabled(model.phase == .enrolling)
+            if let diagnostic = model.diagnostic {
+                Text(diagnostic)
+                    .metistryText(.mono, p, .textSecondary)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(MetistrySpace.s3)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(p[.sunken], in: RoundedRectangle(cornerRadius: MetistryRadius.sm, style: .continuous))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

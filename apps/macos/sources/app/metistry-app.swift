@@ -99,6 +99,7 @@ struct MetistryApp: App {
             MenuBarContent(
                 model: model.menu,
                 updates: model.updates,
+                signIn: model.consoleSignIn,
                 openWindow: { openWindow(id: Self.mainWindowID) },
                 openLog: { component in
                     Task { await model.logs.load(component: component) }

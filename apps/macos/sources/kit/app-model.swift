@@ -40,6 +40,10 @@ public final class AppModel {
     public let updates: UpdateStatus
     /// Start at login. `nil` service on a platform with no `SMAppService`.
     public let loginItem: LoginItemModel
+    /// Who the console takes this Mac to be — asked on launch and on every
+    /// instance switch, by `metistry console whoami --json` and nothing else
+    /// (console-sign-in.swift).
+    public let consoleSignIn: ConsoleSignInModel
 
     public init(
         bundleResourceURL: URL?,
@@ -55,6 +59,12 @@ public final class AppModel {
         let resolution = RuntimeLocator.locate(bundleResourceURL: bundleResourceURL, userProductDir: developerProductDir)
         let cli = resolution.runtime.map { MetistryCLI(runtime: $0, runner: runner, instanceDir: instances.active) }
         let status = StatusModel(cli: cli)
+        // ONE sign-in model for the whole app. The Status header, Settings →
+        // Connections, the menu bar's console row and the wizard's step 6 all
+        // render it, so they cannot disagree about who this Mac is — and the
+        // question is asked once per launch and per instance switch rather than
+        // four times.
+        let consoleSignIn = ConsoleSignInModel(cli: cli)
         let firstRun = FirstRunModel(
             cli: cli,
             resolution: resolution,
@@ -63,7 +73,8 @@ public final class AppModel {
                 cli: cli,
                 terminal: terminalOpener,
                 claudeBinary: ClaudeCodeLocator.locate(productDir: resolution.runtime?.productDir)
-            )
+            ),
+            consoleSignIn: consoleSignIn
         )
 
         self.bundleResourceURL = bundleResourceURL
@@ -75,8 +86,9 @@ public final class AppModel {
         self.loginItem = LoginItemModel(service: loginItemService)
         self.resolution = resolution
         self.status = status
+        self.consoleSignIn = consoleSignIn
         self.firstRun = firstRun
-        self.settings = SettingsModel(status: status, cli: cli, instanceDir: instances.active)
+        self.settings = SettingsModel(status: status, cli: cli, instanceDir: instances.active, consoleSignIn: consoleSignIn)
         self.wizard = WizardModel(steps: firstRun)
         self.menu = MenuBarModel(status: status, cli: cli)
         self.logs = LogViewerModel(cli: cli)
@@ -155,5 +167,10 @@ public final class AppModel {
             claudeBinary: ClaudeCodeLocator.locate(productDir: resolution.runtime?.productDir)
         )
         settings.adopt(cli: cli, instanceDir: instances.active)
+        // The previous instance's answer is dropped, not carried over: a "signed
+        // in" belongs to the install it was asked about. Then it is asked again,
+        // because "on instance switch" is exactly when the answer changes.
+        consoleSignIn.adopt(cli: cli, shape: status.report?.shape)
+        Task { await consoleSignIn.refresh() }
     }
 }

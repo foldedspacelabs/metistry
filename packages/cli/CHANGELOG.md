@@ -1,5 +1,118 @@
 # @foldedspacelabs/metistry-cli
 
+## 0.7.0
+
+### Minor Changes
+
+- cf3aa96: Move a LIVE install between the two deployment shapes, with its data, in one
+  reversible verb — `docs/ops/migrate-compose-to-launchd.md` is the runbook.
+  
+  - **`metistry migrate-shape launchd`** quiesces the console and the assistant,
+    `pg_dump`s the live database through the running `db` container to
+    `<instance>/state/migrate/<ts>.dump` and **verifies it with `pg_restore
+    --list` before stopping anything**, `docker compose stop`s (never `down -v`
+    — the containers and the volume are the rollback), writes `deployment.yaml`
+    through the reconciler as the `user` principal, runs `up`, `pg_restore`s
+    **before any migration runs** (the dump carries `schema_migrations`, so the
+    next `metistry update` applies none), compares every table's exact row count
+    and fails by name if one lost rows, and ends with `doctor` — after waiting
+    for the console and the reconciler to answer, so the verdict is not a race.
+    `--dry-run` prints the whole plan and runs nothing.
+  - **`metistry migrate-shape compose`** is the documented rollback. The compose
+    volume still holds the database as it was at the cutover; anything written
+    under `launchd` since is not copied back, and the verb prints the `pg_dump`
+    command for it.
+  - **Four refusals, all while the old shape is still running and nothing has
+    changed**: no bundled `runtime/`; no `ops/sandbox/assistant.sb` in the
+    product tree (any pack before v0.6.0 — the assistant's launchd job could not
+    start at all); no `pg_dump`/`pg_restore`/pgvector; and a namespaced instance
+    whose docker compose project is not namespaced, which would have stopped
+    ANOTHER install's containers.
+  - **The TCC bridges keep their grant.** A runtime pack ships no built
+    `ek-helper.app`/`afm-helper.app`, so the migration pins those two jobs at the
+    Developer-ID-signed bundles that already hold the Calendars/Reminders grant —
+    same bundle id and certificate chain, so the same TCC designated requirement
+    and no re-grant. Shipping prebuilt signed helpers in the pack is the recorded
+    follow-up.
+  - **Five defects the rehearsal found**, each of which passed a green test suite
+    first: a row-count query using `query_to_xml`, which the bundled Postgres
+    (built without libxml) cannot execute; rows written into the gap between the
+    dump and the stop; a bridge plist re-render that dropped a namespaced
+    instance's ports and sent it looking for the default install's; a hand-rolled
+    `bootout`/`bootstrap` that hit the same asynchronous-teardown race PR #117
+    fixed for `up`; and a closing `doctor` that raced the jobs it had just
+    kickstarted.
+- f6c0eee: **One background item, and it is called Metistry.** macOS shows one background
+  item per launchd agent, named after its program, so the launchd shape used to
+  introduce itself in System Settings as "postgres", "node", "node", "node" —
+  `sfltool dumpbtm` said `Executable Path: /bin/sh` four times over. Under that
+  shape the core is now a single agent, `com.foldedspacelabs.metistry`, whose
+  program is a symlink named `Metistry`.
+  
+  - **The watchdog grew into the supervisor.** It runs Postgres, the console, the
+    reconciler, the assistant (still rooted at `sandbox-exec`, same profile, same
+    parameters — proved live: a vault read denied, a write outside the state dir
+    denied, a write inside allowed, its own console and db allowed, another
+    install's console and reconciler denied) and any configured bridge as its
+    children, with ordered start behind a readiness probe (Postgres answers →
+    console → the rest), per-child exponential backoff, crash-loop detection that
+    is *reported* rather than hammered, per-child logs at the same
+    `/tmp/metistry-<service>.log` paths, and SIGTERM-then-SIGKILL in reverse
+    order. Its probes and presence feed are unchanged and in the same process —
+    invariant 3's sole exception did not move.
+  - **`metistry restart|stop|start <service>`** reaches those children over a
+    0600 unix socket in the instance's state dir, because launchctl cannot
+    address a process launchd has never heard of; launchctl stays for the
+    supervisor and the TCC helpers. Requests are authenticated with a token
+    anyway (invariant 8), and the misuse tests ship with the interface. `doctor`
+    asks the supervisor for a row per child.
+  - **Everything macOS shows carries the Metistry name.** The EventKit helper's
+    agent is `com.foldedspacelabs.metistry.calendar` and its bundle is displayed
+    as "Metistry Calendar Access"; the Apple FM helper's is "Metistry Apple
+    Intelligence". Their **bundle identifiers and signing identifiers are
+    untouched** — TCC keys a grant on bundle id plus certificate chain, so no
+    install has to consent again.
+  - **A running install migrates in place.** `metistry up` boots out the
+    pre-supervisor agents once and deletes their plists before installing the
+    supervisor, so nothing runs twice; `migrate-shape launchd` produces the new
+    set directly. The compose shape is untouched apart from that one rename.
+  - **A bridge is installed only when it is configured** (its `METISTRY_*_URL` is
+    set) — the signal `doctor` already read, and the end of "`up` installs every
+    plist in `ops/launchd` regardless".
+  - **`metistry up --register-via app`** leaves the one agent to the Mac app,
+    which registers the copy embedded in its bundle through
+    `SMAppService.agent(plistName:)` — what nests it under the app in Login Items
+    instead of listing it beside.
+
+### Patch Changes
+
+- fc55edc: Fix a `migrate-shape` defect that took production down on 2026-09-10: the
+  rollback (`metistry migrate-shape compose`) did not wait for the `launchctl
+  bootout` of `db`/`console`/`assistant` to actually finish, nor for the
+  bundled Postgres to let go of its port, before calling `docker compose up` —
+  which lost that race with `ports are not available … address already in
+  use` and exited 1 with the install completely down (no launchd jobs, no
+  compose containers).
+  
+  - Both directions now wait properly: the rollback reuses `up`'s
+    wait-for-label-gone helper after each `bootout`, then polls `pg_isready`
+    until the bundled Postgres stops answering, before touching compose.
+  - Both directions now compensate a failed `up`: the rollback restores the
+    launchd jobs it just booted out (bootstrap + kickstart the plists still on
+    disk) and flips `deployment.yaml` back to `launchd`; the forward migration
+    brings the compose stack back up and flips `deployment.yaml` back to
+    `compose`. Either failing now leaves the install exactly as it was, never
+    with nothing running.
+  - A second forward run after a rollback now works: a leftover
+    `<instance>/state/pg` (from the earlier restore) is moved aside to
+    `state/pg.<ts>.stale` — never deleted — before `up`, so `initdb` runs fresh
+    and `pg_restore --exit-on-error` lands in an empty schema.
+  - `docs/ops/migrate-compose-to-launchd.md` documents the `.stale` directory
+    and adds a "what a failed rollback looks like and how to recover" section
+    with the exact by-hand recovery command.
+- Updated dependencies [f6c0eee]
+  - @foldedspacelabs/metistry-core@0.7.0
+
 ## 0.6.0
 
 ### Minor Changes

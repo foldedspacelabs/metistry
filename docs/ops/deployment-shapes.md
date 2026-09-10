@@ -20,6 +20,98 @@ boundary differ. Set in `deployment.yaml` (plan §4.17, open decision 15
 `compose` is the default and stays the default until an instance flips
 it. Nothing about an existing install changes by upgrading past this.
 
+## Status: `launchd` is trialled end to end (2026-09-10)
+
+Run on the Studio against the **v0.4.0 release packs and the bundled
+runtime**, on a scratch instance, with the production compose install left
+running beside it the whole time (its own labels, its own ports, never
+stopped). Open decision 15 is **proven**; no Docker was involved at any
+point.
+
+| | |
+|---|---|
+| product dir | `~/Library/Application Support/Metistry/product` — seeded from a bundle by `metistry runtime install` (`docs/ops/mac-app.md`) |
+| instance | `~/Library/Application Support/Metistry/trial-instance`, `metistry init --channel release`, `shape: launchd` |
+| namespace | `metistry up --namespace` → labels `com.foldedspacelabs.metistry.e5dbfa9c.*`, ports 8460-8464 |
+| db | bundled Postgres 17.11 + pgvector 0.8.6, initdb'd under `<instance>/state/pg`, socket in `<instance>/state/run` |
+| migrations | 13 applied under `pg_advisory_lock(1296389203)` by `metistry update` |
+| node | the bundled `runtime/node/bin/node` 22.23.2 — every plist execs it |
+| git | the bundled `runtime/git/bin` on the reconciler's PATH |
+| doctor | **23 ok, 0 degraded, 0 failed, 2 absent — healthy** (the two absent are the TCC bridges, deliberately not enabled) |
+| console | `GET /health` → `200 {"ok":true}` on 8460, while production answered on 8080 |
+| update | `metistry update --channel release --version 0.4.0` — a clean no-op round trip (`already running 0.4.0`, `runtime/ is already the 0.4.0 pack`, `0 applied, 13 total`), lock committed by the reconciler |
+| sandbox | live probe with the plist's own parameters: vault read **denied**, write outside the state dir **denied**, write inside **allowed**, own console + db **allowed**, the production install's console and reconciler **denied** |
+
+### What the trial fixed
+
+Five defects, each of which could only have shown up by running it. All
+five are fixed in the same PR, with tests:
+
+1. **A space in the install path killed four jobs.** The reconciler,
+   watchdog and TCC bridge plists build a `/bin/sh -c` string, and
+   `~/Library/Application Support/…` — the app's default location for BOTH
+   the product and an instance — split it: `/bin/sh:
+   /Users/…/Library/Application: No such file or directory`. Those
+   placeholders are single-quoted now, and `renderPlist` refuses a value
+   containing a quote of its own.
+2. **`.env` is RUN, not parsed, by those jobs.** `set -a; . <file>` means
+   an unquoted value with a space in it is a command. `up` now refuses,
+   naming the variables and line numbers, rather than installing four jobs
+   that respawn forever. **Quote values in `<instance>/state/.env`.**
+3. **The assistant's sandbox had no rule for Postgres.** Under compose the
+   engine reached the db over the container network; under launchd it is a
+   loopback port and the profile denies by default, so the engine died at
+   startup with `EPERM connect`. `DB_TCP` is a profile parameter now.
+4. **`launchctl bootout` is asynchronous.** Bootstrapping the same label
+   immediately after races launchd and fails `Bootstrap failed: 5:
+   Input/output error`, which aborted `up` partway. It polls
+   `launchctl print` until the job is gone.
+5. **A namespaced instance's ports reached neither the dotenv-sourcing
+   jobs nor `metistry update`.** The trial reconciler tried to bind 7812
+   and died with EADDRINUSE against the production one; worse, `update`'s
+   migration runner connected to 127.0.0.1:5432 and would have migrated
+   the DEFAULT install's database.
+
+And in the release pack itself: **`ops/sandbox/` was not shipped**, so
+every pack up to v0.4.0 produces a launchd shape whose assistant job cannot
+start at all. `pack-runtime.sh` carries it now and fails without it.
+
+### What is still missing
+
+Ranked, worst first:
+
+1. **The TCC bridges cannot be namespaced.** `eventkit-helper`'s socket is
+   a hardcoded `/tmp/metistry-eventkit.sock` in its plist, and TCC consent
+   is per signed binary — so two instances share one helper and fight over
+   one socket. The trial had to remove those three plists from its product
+   dir to run safely beside a live install.
+2. **`deployment.yaml` cannot disable a bridge job.** `services:` covers
+   `db`, `console`, `assistant`, `reconciler`, `watchdog`; `up` installs
+   every plist in `ops/launchd/` regardless. There is no supported way to
+   say "this install has no calendar bridge".
+3. **`doctor` reports one instance, not the Mac.** It reads
+   `METISTRY_INSTANCE_DIR` and probes that install. The app's
+   instance-switching UI will want per-instance rows.
+4. **`metistry init` does not emit everything the console needs.** It
+   prints three lines; the console then refuses to start without
+   `METISTRY_ORIGIN`, and the assistant needs
+   `METISTRY_ASSISTANT_TOKEN`. It also prints a compose-shaped
+   `METISTRY_RECONCILER_URL=http://host.docker.internal:7812`, which on a
+   namespaced launchd install is both the wrong shape and the wrong port
+   (an explicit `.env` line wins over the block, by design).
+5. **A release install with no `METISTRY_GITHUB_TOKEN` cannot resolve a
+   release from a private repo.** `resolveRelease` falls back to the `gh`
+   CLI on 401/403 but not on 404, and GitHub answers 404 for a private
+   repo it will not admit exists. Moot once the repo is public; not moot
+   today.
+6. **The runtime pack carries no `.env.example`**, so `metistry secrets
+   sync`'s example file is missing on a release install.
+7. **A bridge's "not configured" remediation prints the manifest's default
+   port** (`http://127.0.0.1:7811`) rather than this instance's namespaced
+   one.
+8. **`sandbox-exec` still filters outbound by port, not host name** — the
+   pre-existing honest limit below, unchanged.
+
 ## `deployment.yaml`
 
 Instance config with the D4 overlay: the product ships the default in
@@ -47,6 +139,65 @@ Parsing is strict. `shape: lauchd` is an error, not a silent compose.
 `METISTRY_DEPLOYMENT_SHAPE=launchd metistry up --dry-run` previews a
 shape without editing anything; `up` and `doctor` both print which of
 the two they read.
+
+## A second instance on one Mac — `state/ports.yaml`
+
+launchd labels and ports used to be fixed, so only one instance could run
+(`docs/product/desktop-app-plan.md`, "The limit that remains"). One file
+lifts that:
+
+```sh
+metistry up --namespace --instance ~/some/other/instance
+```
+
+writes `<instance>/state/ports.yaml` **once**:
+
+```yaml
+schema: 1
+instance_id: "e5dbfa9c-…"
+label_suffix: "e5dbfa9c"
+base: 8460
+ports:
+  console: 8460
+  db: 8461
+  reconciler: 8462
+  eventkit: 8463
+  apple-fm: 8464
+```
+
+From then on the file is the record and nothing probes again — a running
+instance must never see its own ports as taken. Its presence is what
+namespaces an install; delete it (after `metistry stop`) to go back to the
+fixed labels and ports.
+
+| | default install | namespaced |
+|---|---|---|
+| label | `com.foldedspacelabs.metistry.console` | `com.foldedspacelabs.metistry.e5dbfa9c.console` |
+| plist | `~/Library/LaunchAgents/<label>.plist` | same, under the new label |
+| log | `/tmp/metistry-console.log` | `/tmp/metistry-e5dbfa9c-console.log` |
+| ports | 8080 / 5432 / 7812 / 7811 / 7810 | one 8-wide block in **8300-8999** |
+
+The suffix is the first 8 hex of `instance_id` and goes BETWEEN the prefix
+and the service, so the service is still the label's last component. The
+base is derived from `instance_id` (deterministic) and stepped past a block
+that is actually in use, once, at allocation. None of the default ports is
+inside 8300-8999, so a namespaced instance cannot collide with an
+un-namespaced one.
+
+**The block fills only variables that are UNSET.** An explicit
+`METISTRY_CONSOLE_PORT` in `<instance>/state/.env` still wins everywhere —
+that is the one rule under which the jobs whose environment `up` renders
+into a plist and the jobs that source `.env` themselves cannot disagree.
+`up` renders the block into the sourcing jobs' plists for the same reason:
+they never read `ports.yaml`, and without it the reconciler binds 7812.
+
+A bridge's `METISTRY_*_URL` is deliberately **not** filled from the block:
+that variable is how an operator opts into a bridge, and unset means
+doctor reports `absent` ("not configured — degrades …"), which is a
+healthy install without a calendar bridge.
+
+`doctor`'s first row names the namespace, and every remediation below it
+uses the label and log path this instance's jobs actually carry.
 
 ## Switching
 
@@ -166,15 +317,22 @@ own CLI subprocess — inherits the confinement.
 | filesystem read | its own `dist/` + `node_modules/`, the node runtime, the state dir, tmp, system frameworks. **Not** the vault, not `~/Documents`, not the instance repo. |
 | filesystem write | the state dir and tmp. Nothing else. |
 | exec | the node binary. No shell (invariant 9). |
-| network out | the console on loopback, and TLS. Nothing else. |
+| network out | the console and Postgres, on loopback, on **this instance's** ports, and TLS. Nothing else — a namespaced engine cannot reach another install's console. |
 | state dir | `<instance>/state/assistant`, which is also `HOME` — the SDK's session transcripts live there and survive restarts (the launchd twin of the `assistant-home` volume) |
 
 The parameters are computed in one place (`packages/cli/src/sandbox.ts`)
 and the misuse tests in `packages/cli/test/sandbox.test.ts` confine a
-throwaway node script with exactly those values, proving four things:
+throwaway node script with exactly those values, proving five things:
 a `~/Documents`-style read fails, a write outside the state dir fails, a
-write inside it succeeds, and the console's port connects while any
-other port does not. Darwin-only; skipped on Linux CI.
+write inside it succeeds, and the console's port and Postgres' port both
+connect while a third loopback port does not. Darwin-only; skipped on
+Linux CI.
+
+`DB_TCP` is there because the launchd shape's Postgres is a loopback port
+rather than a container the engine reached over the compose network: the
+profile denies by default, so without it the engine dies at startup with
+`EPERM connect 127.0.0.1:<port>`. It is the one port `up` put in the
+managed conf block — not a range, and not "loopback".
 
 **Two honest limits.**
 
@@ -237,7 +395,8 @@ remediation below it is written for that shape — `launchctl kickstart
 when some service actually runs in one, so a launchd install never
 reports "docker not found" as a finding.
 
-Logs, under launchd: `/tmp/metistry-{db,console,assistant,reconciler,watchdog}.log`.
+Logs, under launchd: `/tmp/metistry-{db,console,assistant,reconciler,watchdog}.log`,
+or `/tmp/metistry-<suffix>-<service>.log` on a namespaced instance.
 Sandbox denials: `log stream --predicate 'sender == "Sandbox"'`.
 
 ## `metistry update` under either shape

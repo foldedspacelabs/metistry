@@ -119,6 +119,11 @@ function run(overrides: Partial<MigrateShapeOptions> & { productDir: string; env
     upFn: okUp,
     setShapeFn: okSetShape,
     doctorFn: okDoctor,
+    // never touch the network or the clock: on this Mac the production console
+    // answers :8080 instantly, in CI nothing does and the readiness poll runs
+    // its full 10 s — past vitest's 5 s limit
+    fetchFn: (async () => new Response("ok")) as typeof fetch,
+    sleep: async () => {},
     ...overrides,
   }) as Promise<ReturnType<typeof migrateShape>>;
 }

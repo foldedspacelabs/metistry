@@ -1,6 +1,9 @@
-// The host-side supervisor: ops/launchd/*.plist are templates with two
-// placeholders — `__REPO__` (the product checkout) and `__NODE__` (the node
-// binary) — that the by-hand install rendered with sed. `up` renders them
+// The host-side supervisor: ops/launchd/*.plist are templates with three
+// placeholders — `__REPO__` (the product checkout), `__NODE__` (the node
+// binary) and `__ENV_FILE__` (the install's `.env`, which lives in the
+// INSTANCE directory: `<instance>/state/.env`, because an instance
+// directory is self-contained) — that the by-hand install rendered with
+// sed. `up` renders them
 // the same way into ~/Library/LaunchAgents and (re)bootstraps each job;
 // `update` restarts the ones whose code changed. On Linux there is no
 // launchd: the equivalent systemd user units are printed, not written
@@ -12,7 +15,7 @@ import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
 import { SHAPED_SERVICES, type DeploymentShape } from "@foldedspacelabs/metistry-core";
 
-export const PLACEHOLDERS = ["__REPO__", "__NODE__"] as const;
+export const PLACEHOLDERS = ["__REPO__", "__NODE__", "__ENV_FILE__"] as const;
 
 /** Every job's label is the reverse-DNS prefix plus the service name. */
 export const LABEL_PREFIX = "com.foldedspacelabs.metistry.";
@@ -95,6 +98,8 @@ export function renderEnvDict(env: Record<string, string>, indent = "    "): str
 export interface PlistValues {
   repo: string;
   node: string;
+  /** `__ENV_FILE__` — the dotenv file the `sh -c "set -a; . …"` jobs source */
+  envFile: string;
   /** further `__NAME__` placeholders — the sandbox parameters, the Postgres paths */
   extra?: Record<string, string> | undefined;
   /** replaces `__ENV__` with an EnvironmentVariables dict body; the shape services carry their whole environment this way */
@@ -109,7 +114,7 @@ export interface PlistValues {
  * cosmetic problem.
  */
 export function renderPlist(template: string, values: PlistValues): string {
-  const subs: Record<string, string> = { __REPO__: values.repo, __NODE__: values.node };
+  const subs: Record<string, string> = { __REPO__: values.repo, __NODE__: values.node, __ENV_FILE__: values.envFile };
   for (const [k, v] of Object.entries(values.extra ?? {})) subs[`__${k}__`] = v;
   for (const [k, v] of Object.entries(subs)) {
     if (v.includes("__")) throw new Error(`refusing to render a plist with "${v}" for ${k}: it contains "__"`);
@@ -194,11 +199,11 @@ export function launchdCommands(label: string, plistPath: string, uid: number): 
  * printed by `up`, never written). `set -a; . .env; set +a; exec node …` in
  * the plist becomes EnvironmentFile= + ExecStart= so no shell is involved.
  */
-export function renderSystemdUnit(t: PlistTemplate, values: { repo: string; node: string }): string {
-  const sub = (s: string) => s.replace(/__REPO__/g, values.repo).replace(/__NODE__/g, values.node);
+export function renderSystemdUnit(t: PlistTemplate, values: { repo: string; node: string; envFile: string }): string {
+  const sub = (s: string) => s.replace(/__REPO__/g, values.repo).replace(/__NODE__/g, values.node).replace(/__ENV_FILE__/g, values.envFile);
   const shell = t.programArguments[0] === "/bin/sh" && t.programArguments[1] === "-c" ? t.programArguments[2] : undefined;
   const execLine = shell ? (/exec\s+(.+)$/.exec(shell)?.[1] ?? shell) : t.programArguments.join(" ");
-  const envFile = shell && /\.\s+__REPO__\/\.env/.test(shell) ? `EnvironmentFile=${values.repo}/.env\n` : "";
+  const envFile = shell && /\.\s+__ENV_FILE__/.test(shell) ? `EnvironmentFile=${values.envFile}\n` : "";
   const envLines = Object.entries(t.environment)
     .map(([k, v]) => `Environment=${k}=${sub(v)}\n`)
     .join("");

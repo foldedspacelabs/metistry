@@ -21,6 +21,7 @@ import { assistantEnv, consoleEnv, consolePort, dbPort, loadDeployment, type Sha
 import { doctor, renderTable, type DoctorDeps, type DoctorReport } from "./doctor.js";
 import type { Exec } from "./exec.js";
 import { GIT_SPAWNING_SERVICES, launchAgentsDir, launchdCommands, loadPlistTemplates, nodeOnPath, renderPlist, renderSystemdUnit, withEnvironmentVariables, type PlistTemplate, type PlistValues } from "./launchd.js";
+import { envNotices, envPaths } from "./instance.js";
 import { instanceLockPath, readLock, type LockFile, type LockSource } from "./lock.js";
 import { currentLink, imageEnv, imageRef, IMAGE_SERVICES } from "./release.js";
 import { installRuntimeDeps, pathWithRuntimeGit, runtimeDepsEnabled, RUNTIME_DIRNAME } from "./runtime-deps.js";
@@ -58,6 +59,8 @@ export interface UpOptions {
   home?: string | undefined;
   /** the node binary the plists exec — `__NODE__` (default: the one running this) */
   node?: string | undefined;
+  /** `--env-file`: the dotenv file this install runs from (default: `<instance>/state/.env`, falling back to the checkout's) */
+  envFile?: string | undefined;
   /** test seam: the deployment shape, normally read from deployment.yaml */
   deployment?: Deployment | undefined;
   /** test seam: filesystem probes (the Postgres toolchain, an initialised data dir) */
@@ -104,16 +107,29 @@ export function runDirFor(productDir: string, source: LockSource): string {
 /** Compose timeouts are generous on purpose: a cold `--build` compiles two images. */
 export const COMPOSE_TIMEOUT_MS = 30 * 60 * 1000;
 
-export async function composeUp(r: StepRunner, productDir: string, source: LockSource, version?: string | undefined): Promise<void> {
+/**
+ * `docker compose` reads `./.env` from its project directory for variable
+ * interpolation. Once the environment lives in the instance
+ * (`<instance>/state/.env`), compose has to be told — otherwise it
+ * interpolates from a file the install no longer owns. `--env-file` goes
+ * BEFORE the subcommand; passing the product checkout's own `.env`
+ * explicitly is a no-op, so this is omitted then.
+ */
+export function composeEnvArgs(productDir: string, envFile: string | undefined): string[] {
+  return envFile && envFile !== join(productDir, ".env") ? ["--env-file", envFile] : [];
+}
+
+export async function composeUp(r: StepRunner, productDir: string, source: LockSource, version?: string | undefined, envFile?: string | undefined): Promise<void> {
+  const base = ["compose", ...composeEnvArgs(productDir, envFile)];
   if (source === "release") {
     // the released, versioned images — docker-compose.yml reads
     // METISTRY_<SERVICE>_IMAGE and falls back to the dev tags a checkout builds
     const env = version ? { ...r.env, ...imageEnv(version, r.env) } : r.env;
     if (version) r.note(`images: ${IMAGE_SERVICES.map((s) => imageRef(s, version, r.env)).join(", ")}`);
-    await r.run("docker", ["compose", "pull"], { cwd: productDir, env, timeoutMs: COMPOSE_TIMEOUT_MS, inherit: true, comment: version ? `pinned to ${version}` : "metistry.lock pins released images" });
-    await r.run("docker", ["compose", "up", "-d", "--no-build"], { cwd: productDir, env, timeoutMs: COMPOSE_TIMEOUT_MS, inherit: true });
+    await r.run("docker", [...base, "pull"], { cwd: productDir, env, timeoutMs: COMPOSE_TIMEOUT_MS, inherit: true, comment: version ? `pinned to ${version}` : "metistry.lock pins released images" });
+    await r.run("docker", [...base, "up", "-d", "--no-build"], { cwd: productDir, env, timeoutMs: COMPOSE_TIMEOUT_MS, inherit: true });
   } else {
-    await r.run("docker", ["compose", "up", "-d", "--build"], { cwd: productDir, timeoutMs: COMPOSE_TIMEOUT_MS, inherit: true });
+    await r.run("docker", [...base, "up", "-d", "--build"], { cwd: productDir, timeoutMs: COMPOSE_TIMEOUT_MS, inherit: true });
   }
 }
 
@@ -133,6 +149,8 @@ export function stateRoot(productDir: string, env: NodeJS.ProcessEnv): string {
 
 export interface ShapeValues extends ShapeContext {
   node: string;
+  /** `__ENV_FILE__`: `<instance>/state/.env`, or the product checkout's while an install still runs from there */
+  envFile: string;
   /** rendered into the db plist; undefined when no toolchain was found (the db section reports that) */
   pgBin?: string | undefined;
   /** the data directory `up` prepared; defaults to the one under `stateRoot(productDir)` */
@@ -149,7 +167,7 @@ export interface ShapeValues extends ShapeContext {
  * themselves, exactly as they did before.
  */
 export function plistValuesFor(t: PlistTemplate, v: ShapeValues): PlistValues {
-  const base = { repo: v.productDir, node: v.node };
+  const base = { repo: v.productDir, node: v.node, envFile: v.envFile };
   switch (t.service) {
     case "console":
       return { ...base, env: consoleEnv(v) };
@@ -181,7 +199,7 @@ export async function installLaunchd(r: StepRunner, productDir: string, le: Laun
     r.note("install them by hand: save each to ~/.config/systemd/user/, then systemctl --user daemon-reload && systemctl --user enable --now <unit>");
     for (const t of templates) {
       r.out("");
-      r.out(renderSystemdUnit(t, { repo: productDir, node: le.node }));
+      r.out(renderSystemdUnit(t, { repo: productDir, node: le.node, envFile: values.envFile }));
     }
     return;
   }
@@ -192,7 +210,7 @@ export async function installLaunchd(r: StepRunner, productDir: string, le: Laun
     // a launchd job's PATH is /usr/bin:/bin and nothing else, so a bundled git
     // has to be put there explicitly for the job that spawns one
     const gitPath = values.gitPath && GIT_SPAWNING_SERVICES.has(t.service) ? { PATH: values.gitPath } : undefined;
-    const from = `ops/launchd/${t.file}, __REPO__=${productDir}, __NODE__=${le.node}${v.env ? `, ${Object.keys(v.env).length} EnvironmentVariables from .env` : ""}${gitPath ? `, PATH=${values.gitPath}` : ""}`;
+    const from = `ops/launchd/${t.file}, __REPO__=${productDir}, __NODE__=${le.node}, __ENV_FILE__=${values.envFile}${v.env ? `, ${Object.keys(v.env).length} EnvironmentVariables from ${values.envFile}` : ""}${gitPath ? `, PATH=${values.gitPath}` : ""}`;
     const rendered = renderPlist(t.template, v);
     await r.write(target, gitPath ? withEnvironmentVariables(rendered, gitPath) : rendered, from);
     // the console's and the assistant's dicts carry db passwords, bridge
@@ -248,7 +266,7 @@ async function runPgStep(r: StepRunner, s: PgStep): Promise<void> {
 export async function preparePostgres(
   r: StepRunner,
   productDir: string,
-  opts: { exists?: ((p: string) => boolean) | undefined; mintPassword: () => string; runtimeDeps?: RuntimeDepsFetch | undefined },
+  opts: { exists?: ((p: string) => boolean) | undefined; mintPassword: () => string; runtimeDeps?: RuntimeDepsFetch | undefined; envFile?: string | undefined },
 ): Promise<PgSection> {
   const env = r.env;
   const exists = opts.exists ?? existsSync;
@@ -274,14 +292,19 @@ export async function preparePostgres(
   }
 
   // the password: whatever .env already has, else one generated once and
-  // appended there (never printed, never committed — .env is gitignored)
+  // appended there (never printed, never committed — the instance seed
+  // gitignores state/, and a product checkout gitignores .env)
   let password = env.METISTRY_DB_PASSWORD ?? "";
   if (password === "") {
     password = opts.mintPassword();
-    const envFile = join(productDir, ".env");
+    const envFile = opts.envFile ?? join(productDir, ".env");
     const current = existsSync(envFile) ? await readFile(envFile, "utf8") : "";
     const next = withEnvLine(current, "METISTRY_DB_PASSWORD", password);
-    if (next) await r.write(envFile, next, "generated METISTRY_DB_PASSWORD (not shown; .env is gitignored)");
+    if (next) {
+      await r.write(envFile, next, "generated METISTRY_DB_PASSWORD (not shown; the file is gitignored)");
+      // a freshly created `<instance>/state/.env` would otherwise be 0644
+      await r.run("chmod", ["600", envFile], { comment: "it holds this install's secrets" });
+    }
     env.METISTRY_DB_PASSWORD = password;
   }
 
@@ -340,6 +363,11 @@ export async function up(opts: UpOptions): Promise<UpResult> {
     node: opts.node ?? nodeOnPath(env),
   };
   const instanceDir = env.METISTRY_INSTANCE_DIR ? { instanceDir: env.METISTRY_INSTANCE_DIR.replace(/\/+$/, "") } : {};
+  // `.env` belongs to the INSTANCE (`state/.env`); a product-checkout one is
+  // still honoured while an install predates the move. `--env-file` is the
+  // Mac app's override — it knows which instance it opened.
+  const paths = envPaths({ ...instanceDir, productDir: opts.productDir, ...(opts.envFile ? { explicit: opts.envFile } : {}), ...(opts.exists ? { exists: opts.exists } : {}) });
+  const envFile = paths?.read[0] ?? paths?.write ?? join(opts.productDir, ".env");
   const values: ShapeValues = {
     // the product's files: `current` in release mode, so the plists exec the
     // running release and a rollback stays a symlink flip
@@ -351,10 +379,13 @@ export async function up(opts: UpOptions): Promise<UpResult> {
     // flip must not orphan the assistant's state or the Postgres data dir
     stateDir: assistantStateDir({ ...instanceDir, productDir: opts.productDir }),
     node: le.node,
+    envFile,
     home: le.home,
   };
   r.note(`product: ${runDir} (${source === "release" ? `pinned release${lock ? ` ${lock.product.version}` : ""} — images pulled, not built` : "git checkout — images built from source"})`);
   r.note(`shape: ${deployment.shape} — from ${loaded.from}`);
+  r.note(`env: ${envFile}${paths?.pendingMove ? " (the product checkout's — `metistry secrets sync --to env` moves it into the instance)" : ""}`);
+  for (const n of paths ? envNotices(paths) : []) r.note(n);
   let failure: StepFailed | undefined;
 
   try {
@@ -362,7 +393,7 @@ export async function up(opts: UpOptions): Promise<UpResult> {
       r.note("--no-compose: containers left as they are");
     } else if (usesCompose(deployment)) {
       r.section("compose");
-      await composeUp(r, runDir, source, lock?.product.version);
+      await composeUp(r, runDir, source, lock?.product.version, envFile);
     } else {
       r.note("shape launchd: no containers, so docker is never called");
     }
@@ -382,7 +413,7 @@ export async function up(opts: UpOptions): Promise<UpResult> {
             : undefined;
         // the install root, not the release: `.env`, `state/pg` and any
         // bundled runtime/postgres live where the install does
-        pg = await preparePostgres(r, opts.productDir, { exists: opts.exists, mintPassword: opts.mintPassword ?? mintPassword, runtimeDeps });
+        pg = await preparePostgres(r, opts.productDir, { exists: opts.exists, mintPassword: opts.mintPassword ?? mintPassword, runtimeDeps, envFile });
         values.pgBin = pg.plan.toolchain.bin;
         values.pgData = pg.plan.dataDir;
         await r.run("mkdir", ["-p", values.stateDir], { comment: "the assistant's state dir — HOME, and the only path its sandbox may write" });

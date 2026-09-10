@@ -8,6 +8,8 @@
 import { realpathSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import type { DeploymentShape } from "@foldedspacelabs/metistry-core";
+import { buildDeploymentReport, renderDeploymentReport, setDeploymentShape } from "./deployment-report.js";
 import { doctor, renderTable, type DoctorDeps } from "./doctor.js";
 import { loadInstallEnv, productVersion, resolveProductDir, resolveSeedDir, type LoadedEnv } from "./env.js";
 import { realExec, type Exec } from "./exec.js";
@@ -15,6 +17,7 @@ import { AUTH_MODES, connectRepo, type AuthMode } from "./connect-repo.js";
 import { importSessions } from "./import-sessions.js";
 import { init } from "./init.js";
 import { ensureInstanceId, instanceEnvFile, readInstanceId } from "./instance.js";
+import { readIdentity, renderIdentity } from "./identity.js";
 import type { LockSource } from "./lock.js";
 import { installRuntime } from "./runtime-install.js";
 import { listSecrets, mintSecret, purgeSecrets, renderSecretList, syncSecrets, type SyncDirection } from "./secrets.js";
@@ -22,6 +25,7 @@ import { controlServices, renderServiceResults, serviceLogs, UnknownServiceError
 import { StepRunner } from "./steps.js";
 import { up } from "./up.js";
 import { gitHead, update } from "./update.js";
+import { collectVersionInfo, renderVersionInfo } from "./version.js";
 
 export interface ParsedArgs {
   command: string | undefined;
@@ -30,7 +34,7 @@ export interface ParsedArgs {
 }
 
 /** Flags that never take a value, so `metistry init --force <dir>` keeps its dir. */
-export const BOOLEAN_FLAGS = new Set(["force", "json", "help", "dry-run", "no-launchd", "no-compose", "skip-build", "skip-migrate", "rollback", "yes", "follow", "namespace"]);
+export const BOOLEAN_FLAGS = new Set(["force", "json", "help", "version", "dry-run", "no-launchd", "no-compose", "skip-build", "skip-migrate", "rollback", "yes", "follow", "namespace"]);
 
 /** `--channel git|release` — anything else is a typo, not a guess (the lock parser is strict for the same reason). */
 export function parseChannel(v: string | undefined): LockSource | undefined {
@@ -82,6 +86,11 @@ export function parseAuth(v: string | undefined): AuthMode | undefined {
   return v as AuthMode;
 }
 
+/** `deployment set-shape <compose|launchd>` — undefined (never a guess) on anything else, including a missing argument. */
+export function parseDeploymentShape(v: string | undefined): DeploymentShape | undefined {
+  return v === "compose" || v === "launchd" ? v : undefined;
+}
+
 /** `secrets sync` direction: `--to` names it outright, `--from` names the other end. Never guessed. */
 export function syncDirection(from: string | undefined, to: string | undefined): SyncDirection {
   const ok = (v: string | undefined, flag: string): SyncDirection | undefined => {
@@ -122,7 +131,7 @@ const USAGE = `metistry — Metistry command line
   metistry secrets sync [--from keychain|env] [--to env|keychain]
                         [--instance <dir>] [--env-file <path>]
   metistry secrets mint <VAR> [--instance <dir>] [--env-file <path>]
-  metistry secrets list [--instance <dir>] [--env-file <path>]
+  metistry secrets list [--json] [--instance <dir>] [--env-file <path>]
   metistry secrets purge --instance <dir> [--yes]
       The macOS login Keychain (service metistry:<VAR>) is the canonical store;
       .env is generated from it, at <instance>/state/.env. --to keychain imports
@@ -130,12 +139,27 @@ const USAGE = `metistry — Metistry command line
       _SECRET _KEY, plus CLAUDE_CODE_OAUTH_TOKEN); --to env rewrites just those
       lines in place (0600; every comment and non-secret line preserved) and
       moves a product-checkout .env into the instance the first time. mint makes
-      a new random token in both. list prints names and scopes, never values.
+      a new random token in both. list prints names and scopes, never values
+      (--json: the same rows as an array).
       Items are scoped by account: instance-scoped ones under the instance's
       instance_id, user-scoped ones (CLAUDE_CODE_OAUTH_TOKEN, your AWS keys)
       under the shared per-user account — secrets.ts SECRET_SCOPES is the table.
       purge deletes one instance's items and nothing else; without --yes it only
       previews.
+
+  metistry identity [--json] [--instance <dir>]
+      The instance's identity.yaml (name, mention, voice, icon, instance_id) —
+      the only place the assistant is named (CLAUDE.md). Read-only: identity.yaml
+      is a §4.7 protected path, so this verb has no field to change it.
+
+  metistry --version
+  metistry version [--json] [--product-dir <checkout>] [--instance <dir>]
+      Every version number an install can be asked about: this CLI's own
+      package version (always known); when a product dir resolves, its own
+      package.json version (the checkout, or a release's unpacked current/);
+      metistry.lock's pinned version + channel, from the instance; and a
+      release install's metistry-runtime.json (version, commit, built_at).
+      Each is reported only as far as it resolves — never guessed.
 
   metistry import-sessions [--since <date>] [--project <path>] [--limit N] [--dry-run]
       Summarise this machine's Claude Code sessions (~/.claude/projects/*/*.jsonl)
@@ -207,6 +231,19 @@ const USAGE = `metistry — Metistry command line
       /tmp/metistry-<service>.log) or, under compose, docker compose logs.
       Default is the last 200 lines; --follow streams.
 
+  metistry deployment [--json] [--product-dir <checkout>]
+      The effective shape (deployment.yaml's D4 overlay) and the services it
+      implies, each with launchctl/docker's cheap running state where that is
+      knowable without a network probe (never the full doctor).
+
+  metistry deployment set-shape <compose|launchd> [--yes] [--force]
+                                [--product-dir <checkout>] [--instance <dir>]
+      Write the instance's deployment.yaml. A §4.7 protected path (invariant
+      2), so this goes through the reconciler as the user principal, exactly
+      like metistry.lock/identity.yaml — preview without --yes, applied with
+      it. Refuses while services still run under the current shape (the data
+      does not move between shapes on its own); --force writes anyway.
+
   --dry-run prints every command and runs nothing.
 
 Product checkout resolution: --product-dir, METISTRY_PRODUCT_DIR, the checkout
@@ -236,10 +273,6 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
   const out = io.out ?? ((s: string) => process.stdout.write(s + "\n"));
   const err = io.err ?? ((s: string) => process.stderr.write(s + "\n"));
   const { command, positional, flags } = parseArgs(argv);
-  if (command === undefined || command === "help" || flags.help) {
-    out(USAGE);
-    return command === undefined && !flags.help ? 2 : 0;
-  }
   const productDir = resolveProductDir(str(flags, "product-dir"));
   /**
    * This install's environment, from the instance's own `state/.env` and
@@ -251,6 +284,18 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
     for (const n of loaded.notices) err(n);
     return loaded;
   };
+  // `metistry --version` (no subcommand): the bare flag every CLI answers,
+  // ahead of the "no command" usage/exit-2 case below. `metistry version` is
+  // the same thing as a real subcommand, further down.
+  if (command === undefined && flags.version === true) {
+    const info = await collectVersionInfo({ productDir, instanceDir: loadEnv().instanceDir });
+    out(flags.json === true ? JSON.stringify(info, null, 2) : renderVersionInfo(info));
+    return 0;
+  }
+  if (command === undefined || command === "help" || flags.help) {
+    out(USAGE);
+    return command === undefined && !flags.help ? 2 : 0;
+  }
   let channel: LockSource | undefined;
   try {
     channel = parseChannel(str(flags, "channel"));
@@ -336,8 +381,8 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
         const minted = await ensureInstanceId(runner, {
           instanceDir: loaded.instanceDir,
           env: process.env,
-          platform: process.platform,
-          uid: typeof process.getuid === "function" ? process.getuid() : 0,
+          platform: io.platform ?? process.platform,
+          uid: io.uid ?? (typeof process.getuid === "function" ? process.getuid() : 0),
           fetchFn: fetch,
         });
         out(minted.detail);
@@ -350,6 +395,8 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
         instanceId,
         out,
         ...(io.exec ? { exec: io.exec } : {}),
+        // the Keychain exists only on darwin; CI runs this suite on Linux, so tests pin the platform
+        ...(io.platform ? { platform: io.platform } : {}),
       };
       try {
         switch (sub) {
@@ -365,9 +412,11 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
             await mintSecret(name, secretsOpts);
             return 0;
           }
-          case "list":
-            out(renderSecretList(await listSecrets(secretsOpts)));
+          case "list": {
+            const rows = await listSecrets(secretsOpts);
+            out(flags.json === true ? JSON.stringify(rows, null, 2) : renderSecretList(rows));
             return 0;
+          }
           case "purge": {
             const dir = str(flags, "instance") ?? loaded.instanceDir;
             if (!dir) {
@@ -385,6 +434,27 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
         err(`metistry secrets: ${e instanceof Error ? e.message : String(e)}`);
         return 1;
       }
+    }
+    case "identity": {
+      loadEnv();
+      const instanceDir = str(flags, "instance") ?? process.env.METISTRY_INSTANCE_DIR;
+      if (!instanceDir) {
+        err("identity needs the instance repo: pass --instance <dir> or set METISTRY_INSTANCE_DIR (docs/ops/cli.md)");
+        return 2;
+      }
+      const identity = await readIdentity(instanceDir);
+      if (!identity) {
+        err(`${instanceDir} has no identity.yaml — is this an instance directory? (\`metistry init\` creates one)`);
+        return 1;
+      }
+      out(flags.json === true ? JSON.stringify(identity, null, 2) : renderIdentity(identity));
+      return 0;
+    }
+    case "version": {
+      const loaded = loadEnv();
+      const info = await collectVersionInfo({ productDir, instanceDir: loaded.instanceDir });
+      out(flags.json === true ? JSON.stringify(info, null, 2) : renderVersionInfo(info));
+      return 0;
     }
     case "import-sessions": {
       loadEnv();
@@ -556,6 +626,50 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
         err(`metistry logs: ${e instanceof Error ? e.message : String(e)}`);
         return 1;
       }
+    }
+    case "deployment": {
+      if (!productDir) {
+        err("deployment needs a Metistry checkout: pass --product-dir or set METISTRY_PRODUCT_DIR");
+        return 2;
+      }
+      if (positional[0] === "set-shape") {
+        const targetShape = parseDeploymentShape(positional[1]);
+        if (!targetShape) {
+          err("usage: metistry deployment set-shape <compose|launchd> [--yes] [--force] [--instance <dir>]");
+          return 2;
+        }
+        const loadedDep = loadEnv();
+        const instanceDir = str(flags, "instance") ?? loadedDep.instanceDir;
+        if (!instanceDir) {
+          err("deployment set-shape needs the instance repo: pass --instance <dir> or set METISTRY_INSTANCE_DIR (docs/ops/cli.md) — deployment.yaml lives there");
+          return 2;
+        }
+        try {
+          const r = await setDeploymentShape({
+            productDir,
+            instanceDir,
+            targetShape,
+            yes: flags.yes === true,
+            force: flags.force === true,
+            env: process.env,
+            platform: io.platform ?? process.platform,
+            uid: io.uid ?? (typeof process.getuid === "function" ? process.getuid() : 0),
+            fetchFn: fetch,
+            exec: io.exec,
+            out,
+          });
+          if (r.refused) return 1;
+          if (flags.yes !== true) out("preview only — pass --yes to write this.");
+          return 0;
+        } catch (e) {
+          err(`metistry deployment set-shape: ${e instanceof Error ? e.message : String(e)}`);
+          return 1;
+        }
+      }
+      loadEnv();
+      const report = await buildDeploymentReport({ productDir, env: process.env, exec: io.exec, platform: io.platform, uid: io.uid });
+      out(flags.json === true ? JSON.stringify(report, null, 2) : renderDeploymentReport(report));
+      return 0;
     }
     default:
       err(`unknown command: ${command}\n\n${USAGE}`);

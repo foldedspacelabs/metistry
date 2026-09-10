@@ -1,5 +1,64 @@
 # @foldedspacelabs/metistry-cli
 
+## 0.5.0
+
+### Minor Changes
+
+- 1ca8337: An instance directory is self-contained: `.env` moves to
+  `<instance>/state/.env`, `identity.yaml` carries a minted `instance_id`, and
+  Keychain items are scoped per instance.
+  
+  - `--instance <dir>` and `--env-file <path>` on every verb. The environment is
+    read from `<instance>/state/.env` first, then the product checkout's `.env` —
+    deprecated, still read (with a notice on stderr), and still where a terminal
+    install may declare `METISTRY_INSTANCE_DIR`.
+  - `metistry secrets sync --to env` performs the move: every line of the old
+    file is carried over and the old file is left in place.
+  - `SECRET_SCOPES` (secrets.ts) is the one table saying whether a secret is
+    filed under the instance's `instance_id` or the per-user account.
+    Instance-scoped values found only under the user account are copied across,
+    never deleted. `secrets list` gains a scope column.
+  - New `metistry secrets purge --instance <dir> [--yes]`: preview-then-confirm
+    deletion of one instance's Keychain items, incapable of touching user-scoped
+    ones.
+  - The `sh -c` launchd plists gain an `__ENV_FILE__` placeholder and
+    `docker compose` is invoked with `--env-file`, so both read the instance's
+    file rather than the checkout's.
+- 99473d3: `metistry restart|stop|start [<service>…]` and `metistry logs <service>
+  [--lines N] [--follow]` — the CLI can now act on individual services in
+  either deployment shape (launchctl kickstart/bootout/bootstrap on the
+  launchd shape, `docker compose restart|stop|start|logs` on the compose
+  shape), reusing `up`'s own knowledge of which services are host jobs vs.
+  containers rather than a second table. No args = every service the current
+  shape runs; `--json` on `restart`/`stop`/`start` prints
+  `[{service, action, ok, detail}, …]` for the Mac app's menu bar, which now
+  calls these verbs instead of shelling out to launchctl/docker itself. An
+  unknown service name fails with the list of known ones.
+
+### Patch Changes
+
+- e23df1b: The Mac app gets Settings, a first-launch wizard, and a menu bar worth
+  opening. Settings lives in the `Settings` scene (⌘, and the app menu) with
+  six panes, and every value on them is a front for a file the CLI owns — the
+  app persists three pointers (active instance, recents, a developer runtime
+  override) and no configuration, asserted by a test over its whole defaults
+  domain. The product-directory preference is gone: a shipped app's product is
+  the runtime inside its own bundle. The wizard replaces the "First run" tab
+  group with a sheet over the same seven steps, Back/Continue/Skip, every
+  choice stating what it gets you and what it costs. The menu bar groups
+  components by doctor's own `kind` with Restart/Stop/Start/View Log per
+  component and Restart All/Stop All above them, refreshing on open and every
+  30s while open. The lifecycle verbs (`restart`, `stop`, `start`, `logs`) land
+  separately; until they do the app says "this CLI has no `restart` verb yet —
+  update it" rather than reporting a failed restart.
+- a6b82f1: The Mac app DMG notarizes: `build-app.sh` re-signs every Mach-O it embeds
+  from the runtime packs under the Developer ID (hardened runtime, timestamp,
+  `get-task-allow` stripped from Node's entitlements) and audits the bundle
+  before packaging; `notarize.sh` reads Apple's status instead of trusting
+  `notarytool`'s exit code, and prints the submission log when it is not
+  Accepted. Signing retries through Apple's timestamp-server flakes.
+- @foldedspacelabs/metistry-core@0.5.0
+
 ## 0.4.0
 
 ### Patch Changes

@@ -17,16 +17,19 @@ import type { SetShapeOptions, SetShapeResult } from "../src/deployment-report.j
 import { formatCommand } from "../src/exec.js";
 import {
   countDiff,
+  countLosses,
+  DRY_RUN_COUNTS,
   migrateShape,
   parseCounts,
   stamp,
-  TABLE_COUNTS_SQL,
+  TABLE_LIST_SQL,
+  tableCountsSql,
   TCC_HELPERS,
   tocEntryCount,
   type MigrateShapeOptions,
 } from "../src/migrate-shape.js";
 import type { UpOptions, UpResult } from "../src/up.js";
-import { checkout, fakeExec, okDoctor } from "./fixtures.js";
+import { checkout, fakeExec, okDoctor, shown } from "./fixtures.js";
 
 const REPO = resolve(fileURLToPath(import.meta.url), "..", "..", "..", "..");
 const NOW = () => new Date("2026-09-10T16:04:03.123Z");
@@ -98,8 +101,12 @@ const okSetShape = async (o: SetShapeOptions): Promise<SetShapeResult> => ({
   detail: `deployment.yaml written through the reconciler as user → ${o.targetShape}`,
 });
 
-/** The counts psql/`docker compose exec` hand back — the same both times unless a test says otherwise. */
-const COUNTS = "runs=6730\nwork=66\nschema_migrations=13\n";
+/** What the source database reports: three tables, and their counts. */
+const TABLES = "runs\nwork\nschema_migrations\n";
+const COUNTS = "runs=6730\nschema_migrations=13\nwork=66\n";
+const COUNTS_SQL = tableCountsSql(["runs", "work", "schema_migrations"]);
+/** A slice of the generated query that survives shell quoting in a printed command. */
+const COUNTS_FRAGMENT = 'count(*) FROM "runs"';
 
 function run(overrides: Partial<MigrateShapeOptions> & { productDir: string; env: NodeJS.ProcessEnv }): Promise<ReturnType<typeof migrateShape>> {
   return migrateShape({
@@ -116,16 +123,17 @@ function run(overrides: Partial<MigrateShapeOptions> & { productDir: string; env
   }) as Promise<ReturnType<typeof migrateShape>>;
 }
 
-/** A fake that answers the two stdout-reading probes: `compose ps -q db` and the row counts. */
-const liveCompose = (counts = COUNTS) =>
+/** A fake that answers the stdout-reading probes: `compose ps -q db`, the table list, and the two count queries. */
+const liveCompose = (after = COUNTS) =>
   fakeExec({
     docker: (args) => {
       if (args.includes("ps")) return { stdout: "abc123\n" };
-      if (args.includes("psql")) return { stdout: counts };
+      if (args.includes(TABLE_LIST_SQL)) return { stdout: TABLES };
+      if (args.includes(COUNTS_SQL)) return { stdout: COUNTS };
       return {};
     },
     [`${PG}/pg_restore`]: (args) => (args[0] === "--list" ? { stdout: ";\n; Archive created\n;\n245; 1259 31365 TABLE public runs metistry\n246; 1259 31366 TABLE public work metistry\n" } : {}),
-    [`${PG}/psql`]: () => ({ stdout: counts }),
+    [`${PG}/psql`]: () => ({ stdout: after }),
   });
 
 describe("helpers", () => {
@@ -145,14 +153,24 @@ describe("helpers", () => {
     expect(countDiff(before, parseCounts("runs=6730\n"))).toEqual(["work: 66 → (absent)"]);
   });
 
-  it("counts rows exactly — an estimate would not prove a restore", () => {
-    expect(TABLE_COUNTS_SQL).toContain("count(*)");
-    expect(TABLE_COUNTS_SQL).not.toContain("n_live_tup");
+  it("treats a LOST row as a failure and a gained one as normal", () => {
+    const before = parseCounts("runs=6730\nwork=66\n");
+    expect(countLosses(before, parseCounts("runs=6732\nwork=66\n"))).toEqual([]); // the console recorded its own startup
+    expect(countLosses(before, parseCounts("runs=6729\nwork=66\n"))).toEqual(["runs: 6730 → 6729"]);
+    expect(countLosses(before, parseCounts("runs=6730\n"))).toEqual(["work: 66 → the table is not there"]);
+  });
+
+  it("counts rows with plain SQL — the bundled Postgres has no libxml and an estimate would prove nothing", () => {
+    const sql = tableCountsSql(["runs", "work"]);
+    expect(sql).toBe(`SELECT 'runs=' || count(*) FROM "runs" UNION ALL SELECT 'work=' || count(*) FROM "work" ORDER BY 1`);
+    expect(sql).not.toMatch(/xpath|query_to_xml|n_live_tup/);
+    // an identifier is quoted, and a quote inside one is doubled rather than escaped
+    expect(tableCountsSql(['we"ird'])).toBe(`SELECT 'we"ird=' || count(*) FROM "we""ird" ORDER BY 1`);
   });
 });
 
 describe("metistry migrate-shape launchd --dry-run", () => {
-  it("plans dump → verify → stop → shape → up → restore → compare → tcc → restart → doctor, in that order", async () => {
+  it("plans quiesce → dump → verify → stop db → shape → up → restore → compare → tcc → restart → doctor, in that order", async () => {
     const P = await productTree();
     const I = await instance();
     const exec = liveCompose();
@@ -165,31 +183,54 @@ describe("metistry migrate-shape launchd --dry-run", () => {
     const conn = ["-h", `${I}/state/run`, "-p", "5432", "-U", "metistry", "-d", "metistry"];
     expect(r.commands).toEqual([
       dc(["ps", "-q", "db"]),
-      dc(["exec", "-T", "db", "psql", "-U", "metistry", "-d", "metistry", "-tA", "--no-psqlrc", "-c", TABLE_COUNTS_SQL]),
+      // the writers stop BEFORE the dump, so nothing is written into the gap
+      dc(["stop", "console", "assistant"]),
+      dc(["exec", "-T", "db", "psql", "-U", "metistry", "-d", "metistry", "-tA", "--no-psqlrc", "-c", TABLE_LIST_SQL]),
+      // a dry run never asks for the table list, so the count query cannot be
+      // generated — the step is still in the plan, described
+      `${DRY_RUN_COUNTS}, through the db container — the counts the restore is checked against`,
       dc(["exec", "-T", "db", "pg_dump", "-U", "metistry", "-d", "metistry", "--format=custom", "--compress=6", "--file", `/tmp/metistry-migrate-${TS}.dump`]),
       `mkdir -p ${I}/state/migrate`,
       dc(["cp", `db:/tmp/metistry-migrate-${TS}.dump`, dump]),
       dc(["exec", "-T", "db", "rm", "-f", `/tmp/metistry-migrate-${TS}.dump`]),
       `${PG}/pg_restore --list ${dump}`,
-      dc(["stop", "db", "console", "assistant"]),
+      dc(["stop", "db"]),
       "deployment set-shape launchd (deployment.yaml written through the reconciler as user → launchd)",
       "up(launchd)",
       formatCommand(`${PG}/pg_restore`, [...conn, "--no-owner", "--no-privileges", "--exit-on-error", dump]),
-      formatCommand(`${PG}/psql`, [...conn, "-tA", "--no-psqlrc", "-c", TABLE_COUNTS_SQL]),
+      `${DRY_RUN_COUNTS}, against the restored database — compared with the counts taken beside the dump, and a table that lost rows fails the migration`,
       "launchctl kickstart -k gui/501/com.foldedspacelabs.metistry.console",
       "launchctl kickstart -k gui/501/com.foldedspacelabs.metistry.assistant",
+      // doctor's verdict must not race a job kickstarted a moment ago
+      "wait for console to answer — doctor's verdict must not be a race with a job kickstarted a moment ago",
       "metistry doctor",
     ]);
   });
 
-  it("the dump is verified BEFORE the compose services are stopped", async () => {
+  it("the dump is verified BEFORE the database is stopped", async () => {
     const P = await productTree();
     const I = await instance();
     const r = await run({ productDir: P, env: env(I), exec: liveCompose(), dryRun: true, exists: ready(P) });
     const verify = r.commands.findIndex((c) => c.includes("pg_restore --list"));
-    const stop = r.commands.findIndex((c) => c.includes("compose --env-file") && c.includes(" stop "));
+    const stopDb = r.commands.findIndex((c) => c.endsWith("stop db)"));
     expect(verify).toBeGreaterThan(-1);
-    expect(stop).toBeGreaterThan(verify);
+    expect(stopDb).toBeGreaterThan(verify);
+  });
+
+  it("the writers are stopped before the counts and the dump are taken", async () => {
+    const P = await productTree();
+    const I = await instance();
+    // a real run, so the generated count query is actually in the plan
+    const r = await run({ productDir: P, env: env(I), exec: liveCompose(), exists: ready(P) });
+    expect(r.code).toBe(0);
+    const quiesce = r.commands.findIndex((c) => c.endsWith("stop console assistant)"));
+    const counts = r.commands.findIndex((c) => c.includes(COUNTS_FRAGMENT));
+    const dump = r.commands.findIndex((c) => c.includes("pg_dump"));
+    expect(quiesce).toBeGreaterThan(-1);
+    expect(counts).toBeGreaterThan(quiesce);
+    expect(dump).toBeGreaterThan(counts);
+    // and the same generated query runs again against the restored database
+    expect(r.commands.filter((c) => c.includes(COUNTS_FRAGMENT))).toHaveLength(2);
   });
 
   it("the restore happens after `up` and before anything could migrate", async () => {
@@ -206,9 +247,13 @@ describe("metistry migrate-shape launchd --dry-run", () => {
     const P = await productTree();
     const I = await instance();
     const r = await run({ productDir: P, env: env(I), exec: liveCompose(), dryRun: true, exists: ready(P) });
-    expect(r.commands.some((c) => c.includes("down"))).toBe(false);
-    expect(r.commands.some((c) => c.includes("-v"))).toBe(false);
-    expect(r.commands.some((c) => c.includes("docker volume"))).toBe(false);
+    const docker = r.commands.filter((c) => c.includes("docker "));
+    expect(docker.length).toBeGreaterThan(0);
+    for (const c of docker) {
+      expect(c).not.toMatch(/\bdown\b/);
+      expect(c).not.toMatch(/\s-v(\s|$)/);
+      expect(c).not.toMatch(/\bvolume\b|\brm\b\s+-f?s?v?\s*$/);
+    }
   });
 
   it("never puts a password in an argv", async () => {
@@ -342,28 +387,35 @@ describe("refusals — every one of them while the old shape is still up", () =>
 });
 
 describe("the restore is checked, not assumed", () => {
-  it("fails — and says which table — when a row count does not survive the move", async () => {
+  it("fails — and says which table — when a row does not survive the move", async () => {
     const P = await productTree();
     const I = await instance();
     const lines: string[] = [];
-    let call = 0;
-    const exec = fakeExec({
-      docker: (args) => {
-        if (args.includes("ps")) return { stdout: "abc123\n" };
-        if (args.includes("psql")) return { stdout: COUNTS };
-        return {};
-      },
-      [`${PG}/pg_restore`]: (args) => (args[0] === "--list" ? { stdout: "245; 1259 31365 TABLE public runs metistry\n" } : {}),
-      [`${PG}/psql`]: () => {
-        call++;
-        return { stdout: "runs=6729\nwork=66\nschema_migrations=13\n" };
-      },
+    const r = await run({
+      productDir: P,
+      env: env(I),
+      exec: liveCompose("runs=6729\nschema_migrations=13\nwork=66\n"),
+      exists: ready(P),
+      out: (l) => lines.push(l),
     });
-    const r = await run({ productDir: P, env: env(I), exec, exists: ready(P), out: (l) => lines.push(l) });
-    expect(call).toBe(1);
     expect(r.code).toBe(1);
-    expect(lines.join("\n")).toMatch(/runs: 6730 → 6729/);
+    expect(lines.join("\n")).toMatch(/missing rows the dump had — runs: 6730 → 6729/);
     expect(lines.join("\n")).toMatch(/roll back with `metistry migrate-shape compose`/);
+  });
+
+  it("a table that GREW since the restore is normal — the console records its own startup", async () => {
+    const P = await productTree();
+    const I = await instance();
+    const lines: string[] = [];
+    const r = await run({
+      productDir: P,
+      env: env(I),
+      exec: liveCompose("runs=6732\nschema_migrations=13\nwork=66\n"),
+      exists: ready(P),
+      out: (l) => lines.push(l),
+    });
+    expect(r.code).toBe(0);
+    expect(lines.join("\n")).toMatch(/came across with at least the rows the dump had \(written since the restore: runs: 6730 → 6732\)/);
   });
 
   it("refuses to stop a healthy install behind a dump pg_restore cannot read", async () => {
@@ -377,7 +429,10 @@ describe("the restore is checked, not assumed", () => {
     const r = await run({ productDir: P, env: env(I), exec, exists: ready(P), out: (l) => lines.push(l) });
     expect(r.code).toBe(1);
     expect(lines.join("\n")).toMatch(/no restorable entries/);
-    expect(r.commands.some((c) => c.includes(" stop "))).toBe(false);
+    // the writers are already quiesced by then — but the DATABASE is not
+    // stopped, so `docker compose start console assistant` puts it all back
+    expect(r.commands.some((c) => c.endsWith("stop db)"))).toBe(false);
+    expect(r.commands.some((c) => c.includes("set-shape"))).toBe(false);
   });
 });
 
@@ -393,13 +448,40 @@ describe("the TCC helper bundles — a release install carries none", () => {
     // the eventkit helper IS the job's root process (that is what the TCC
     // grant attaches to), so its plist is re-rendered against the tree that
     // actually holds the bundle
-    expect(text).toContain(`write /h/Library/LaunchAgents/com.foldedspacelabs.metistry.eventkit-helper.plist  (from ops/launchd/com.foldedspacelabs.metistry.eventkit-helper.plist, __REPO__=${P}`);
+    expect(text).toContain(
+      `write /h/Library/LaunchAgents/com.foldedspacelabs.metistry.eventkit-helper.plist  (from the plist up wrote, with ` +
+        `${join(P, "current", "packages", "mcp-eventkit", "helper", "ek-helper.app")} \u2192 ${join(P, "packages", "mcp-eventkit", "helper", "ek-helper.app")}`,
+    );
     // apple-fm's node bridge spawns its helper from a path relative to its
     // own dist/, so it gets the documented override variable instead
-    expect(text).toContain(`METISTRY_AFM_HELPER=${join(P, "packages", "mcp-apple-fm", "helper", "afm-helper.app", "Contents", "MacOS", "afm-helper")}`);
+    expect(text).toContain(`plus METISTRY_AFM_HELPER=${join(P, "packages", "mcp-apple-fm", "helper", "afm-helper.app", "Contents", "MacOS", "afm-helper")}`);
     expect(text).toContain("launchctl kickstart -k gui/501/com.foldedspacelabs.metistry.eventkit-helper");
     expect(text).toContain("launchctl kickstart -k gui/501/com.foldedspacelabs.metistry.apple-fm");
     expect(lines.join("\n")).toMatch(/same bundle id \+ certificate chain = same designated requirement, so no re-grant/);
+  });
+
+  it("waits for the boots-out to finish before bootstrapping the pinned jobs", async () => {
+    // `bootout` is asynchronous: bootstrapping the same label straight after
+    // races launchd and fails `Bootstrap failed: 5: Input/output error`
+    // (#117's fourth defect — reproduced here once, by hand-rolling the three
+    // commands instead of reusing `up`'s sequence)
+    const { P } = await releaseTree();
+    const I = await instance({ release: true });
+    const bundles = TCC_HELPERS.map((h) => join(P, h.bundle, h.exe));
+    const exec = liveCompose();
+    const home = await mkdtemp(join(tmpdir(), "metistry-home-"));
+    const r = await run({ productDir: P, env: { ...env(I), HOME: home }, exec, home, exists: ready(P, bundles) });
+    expect(r.code).toBe(0);
+    for (const s of ["eventkit-helper", "apple-fm"]) {
+      const label = `com.foldedspacelabs.metistry.${s}`;
+      const seq = exec.calls.filter((c) => c.cmd === "launchctl" && c.args.some((a) => a.endsWith(label) || a.endsWith(`${label}.plist`))).map(shown);
+      expect(seq).toEqual([
+        `launchctl bootout gui/501/${label}`,
+        `launchctl print gui/501/${label}`, // the wait — not a plan step, but it must happen
+        `launchctl bootstrap gui/501 ${home}/Library/LaunchAgents/${label}.plist`,
+        `launchctl kickstart -k gui/501/${label}`,
+      ]);
+    }
   });
 
   it("a missing helper is a note, not a failed migration — an install with no calendar bridge is healthy", async () => {
@@ -440,6 +522,7 @@ describe("metistry migrate-shape compose — the rollback", () => {
       "launchctl bootout gui/501/com.foldedspacelabs.metistry.assistant",
       "deployment set-shape compose (deployment.yaml written through the reconciler as user → compose)",
       "up(compose)",
+      "wait for console to answer — doctor's verdict must not be a race with a job kickstarted a moment ago",
       "metistry doctor",
     ]);
   });

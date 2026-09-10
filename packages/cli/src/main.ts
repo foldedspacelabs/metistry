@@ -191,6 +191,10 @@ export interface MainIo {
   doctorDeps?: Partial<DoctorDeps>;
   /** test seam: every subprocess up/update/init run */
   exec?: Exec;
+  /** test seams for restart/stop/start/logs: the host platform decides whether launchd jobs exist at all (CI runs the suite on Linux) */
+  platform?: NodeJS.Platform;
+  uid?: number;
+  home?: string;
 }
 
 export async function main(argv: string[], io: MainIo = {}): Promise<number> {
@@ -394,6 +398,9 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
           // the final array goes to stdout, none of the plan's progress lines
           out: asJson ? () => {} : out,
           exec: io.exec,
+          platform: io.platform ?? undefined,
+          uid: io.uid,
+          home: io.home,
           dryRun: flags["dry-run"] === true,
         });
         out(asJson ? JSON.stringify(r.results, null, 2) : renderServiceResults(r.results));
@@ -432,6 +439,9 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
           follow: flags.follow === true,
           out,
           exec: io.exec,
+          platform: io.platform ?? undefined,
+          uid: io.uid,
+          home: io.home,
           dryRun: flags["dry-run"] === true,
         });
         if (!r.ok) err(`metistry logs: ${r.detail}`);

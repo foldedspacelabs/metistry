@@ -159,7 +159,7 @@ describe("metistry restart|stop|start via main()", () => {
     const P = await checkout();
     const exec = fakeExec();
     const lines: string[] = [];
-    const code = await main(["restart", "watchdog", "--json", "--product-dir", P], { out: (l) => lines.push(l), err: () => {}, exec });
+    const code = await main(["restart", "watchdog", "--json", "--product-dir", P], { platform: "darwin", uid: 501, home: "/h", out: (l) => lines.push(l), err: () => {}, exec });
     expect(code).toBe(0);
     expect(lines).toHaveLength(1);
     expect(JSON.parse(lines[0]!)).toEqual([{ service: "watchdog", action: "restart", ok: true, detail: `launchctl kickstart -k gui/501/${WATCHDOG}` }]);
@@ -169,14 +169,14 @@ describe("metistry restart|stop|start via main()", () => {
     const P = await checkout();
     const exec = fakeExec({ docker: () => ({ code: 17, stderr: "boom" }) });
     const errs: string[] = [];
-    const code = await main(["restart", "watchdog", "db", "--json", "--product-dir", P], { out: () => {}, err: (l) => errs.push(l), exec });
+    const code = await main(["restart", "watchdog", "db", "--json", "--product-dir", P], { platform: "darwin", uid: 501, home: "/h", out: () => {}, err: (l) => errs.push(l), exec });
     expect(code).toBe(1);
   });
 
   it("an unknown service exits 2 and names the known services on stderr", async () => {
     const P = await checkout();
     const errs: string[] = [];
-    const code = await main(["stop", "bogus", "--product-dir", P], { out: () => {}, err: (l) => errs.push(l), exec: fakeExec() });
+    const code = await main(["stop", "bogus", "--product-dir", P], { platform: "darwin", uid: 501, home: "/h", out: () => {}, err: (l) => errs.push(l), exec: fakeExec() });
     expect(code).toBe(2);
     expect(errs.join("\n")).toMatch(/unknown service: bogus/);
     expect(errs.join("\n")).toMatch(/watchdog/);
@@ -185,7 +185,7 @@ describe("metistry restart|stop|start via main()", () => {
   it("plain output is a table with a summary line", async () => {
     const P = await checkout();
     const lines: string[] = [];
-    const code = await main(["restart", "watchdog", "--product-dir", P], { out: (l) => lines.push(l), err: () => {}, exec: fakeExec() });
+    const code = await main(["restart", "watchdog", "--product-dir", P], { platform: "darwin", uid: 501, home: "/h", out: (l) => lines.push(l), err: () => {}, exec: fakeExec() });
     expect(code).toBe(0);
     const text = lines.join("\n");
     expect(text).toMatch(/service\s+action\s+ok\s+detail/);
@@ -241,7 +241,7 @@ describe("metistry logs", () => {
     const P = await logsCheckout();
     const exec = fakeExec();
     const lines: string[] = [];
-    const code = await main(["logs", "apple-fm", "--dry-run", "--product-dir", P], { out: (l) => lines.push(l), err: () => {}, exec });
+    const code = await main(["logs", "apple-fm", "--dry-run", "--product-dir", P], { platform: "darwin", uid: 501, home: "/h", out: (l) => lines.push(l), err: () => {}, exec });
     expect(code).toBe(0);
     expect(exec.calls).toEqual([]);
     expect(lines.join("\n")).toContain("tail -n 200 /tmp/metistry-apple-fm.log");
@@ -250,7 +250,7 @@ describe("metistry logs", () => {
   it("via main(): a missing service name is a usage error", async () => {
     const P = await logsCheckout();
     const errs: string[] = [];
-    const code = await main(["logs", "--product-dir", P], { out: () => {}, err: (l) => errs.push(l), exec: fakeExec() });
+    const code = await main(["logs", "--product-dir", P], { platform: "darwin", uid: 501, home: "/h", out: () => {}, err: (l) => errs.push(l), exec: fakeExec() });
     expect(code).toBe(2);
     expect(errs.join("\n")).toMatch(/usage: metistry logs/);
   });

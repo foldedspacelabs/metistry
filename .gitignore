@@ -21,6 +21,11 @@ packages/mcp-eventkit/helper/ek-helper.app/
 # release build output (ops/release/pack-runtime.sh); assets live on GitHub Releases
 dist-release/
 
+# macOS app build output: SwiftPM's tree, and the assembled Metistry.app / DMG
+# (ops/release/build-app.sh). Package.resolved IS tracked — it is the pin.
+apps/macos/.build/
+dist-app/
+
 # launchd shape (deployment.yaml): derived state and the bundled runtime.
 # Postgres data and the assistant's SDK transcripts live under state/ —
 # invariant 1: git is the record, this is regenerable.

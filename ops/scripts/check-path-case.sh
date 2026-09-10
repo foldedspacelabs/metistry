@@ -22,7 +22,12 @@ fi
 # `Info.plist` is in the allowlist below. If a bundle ever does need to be
 # tracked, add `Contents/(MacOS|Resources|_CodeSignature)` here — those names
 # are Apple's, not ours, and cannot be lowercased.
-allowed='^(Knowledge/|seed/Knowledge/|.*/(README|LICENSE|CLAUDE|AGENTS|SKILL|RESULTS|SYNTHESIS|Dockerfile|Info\.plist|PRODUCT|MEMORY|CHANGELOG)[^/]*$|(README|LICENSE|CLAUDE|AGENTS)[^/]*$|metistry-build-plan\.md$|docs/)'
+#
+# `Package.swift` / `Package.resolved` (apps/macos) are the same kind of
+# exception: SwiftPM looks for those exact names and there is no way to rename
+# them. Everything else under apps/macos IS lowercase — the Swift targets name
+# their own `path:` rather than taking SPM's default `Sources/<Target>/`.
+allowed='^(Knowledge/|seed/Knowledge/|.*/(README|LICENSE|CLAUDE|AGENTS|SKILL|RESULTS|SYNTHESIS|Dockerfile|Info\.plist|PRODUCT|MEMORY|CHANGELOG)[^/]*$|(README|LICENSE|CLAUDE|AGENTS)[^/]*$|apps/macos/Package\.(swift|resolved)$|metistry-build-plan\.md$|docs/)'
 offenders=$(git ls-files | grep -Ev "$allowed" | grep '[A-Z]' || true)
 if [ -n "$offenders" ]; then
   echo "unexpected uppercase outside Knowledge/ (casing rule, CLAUDE.md):" >&2

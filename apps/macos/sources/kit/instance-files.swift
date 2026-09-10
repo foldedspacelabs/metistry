@@ -84,7 +84,7 @@ public struct YAMLScalars: Sendable, Equatable {
     }
 
     /// A trailing `# …` on an UNQUOTED value. A quoted value keeps everything,
-    /// because `mention: "@metis # 1"` is a string, not a comment.
+    /// because `mention: "@ada # 1"` is a string, not a comment.
     static func stripComment(_ value: String) -> String {
         guard !(value.hasPrefix("\"") || value.hasPrefix("'")) else { return value }
         guard let hash = value.range(of: " #") else { return value }

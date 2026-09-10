@@ -4,8 +4,14 @@
 // The first test is the important one. "Every setting is a front for a
 // CLI-owned file, never app-private state" is a rule that decays silently — one
 // `defaults.set` in a view and the app has its own copy of something. So the
-// test asserts the app's whole defaults domain, not a list of properties: if a
-// fourth key appears, this fails and somebody has to say why.
+// test asserts a whole defaults domain rather than a list of properties: drive
+// the models through a fresh suite, then check what reached disk. If a fourth
+// key appears, this fails and somebody has to say why.
+//
+// A running app's real domain also holds keys its FRAMEWORKS wrote —
+// Sparkle's `SUEnableAutomaticChecks`/`SULastCheckTime`, AppKit's window
+// frames. Those are theirs, which is the point: the app keeps no copy of them
+// either.
 
 import Foundation
 import Testing

@@ -913,3 +913,29 @@ your git, on your machine.
   Claude token) are on screen as "not yet" with what they are waiting on,
   because a screen that pretends to enrol a passkey is worse than one that
   says it cannot.
+- 2026-09-09 — **The app configures itself where a Mac user looks, and the
+  menu bar can fix things.** Three additions to `apps/macos`, all of them the
+  same rule made visible: **every setting is a front for a file the CLI owns,
+  never app-private state.** *Settings* is the `Settings` scene (⌘, and the app
+  menu) with six panes — Instance, Services, Connections, Secrets, Updates,
+  Advanced — and the app persists exactly three pointers behind them (which
+  install it is looking at, the recents, and a developer runtime override),
+  which a unit test enforces over the whole preferences domain rather than by
+  convention. The assistant's name is read from `identity.yaml` and shown with
+  no field to edit it, because that is a protected path; secrets are listed by
+  name and scope through `metistry secrets list`, which has no code path that
+  can print a value. The old product-directory preference is *removed*: a
+  downloaded app's product is the runtime inside its own bundle, so there is
+  nothing to ask. A *first-launch wizard* replaces the tab group with one step
+  at a time and, for every choice, both sides of it — a new instance or a
+  folder you already have, a repository now or later, device flow or SSH,
+  Docker or launchd, which bridges to turn on — with "you can change all of
+  this later in Settings" on screen throughout, and a test that fails if a
+  choice is ever offered without its cost stated. The *menu bar* stops being a
+  list and becomes a control panel: components grouped the way doctor groups
+  them, each with a status dot and Restart · Stop · Start · View Log, plus
+  Restart All, Stop All and an update offer when there is one. The
+  user-visible promise: **when something is wrong you can see it and restart it
+  from the menu bar, and everything you can configure is one place you already
+  know how to find.** What the app still cannot do it says on screen, and each
+  one now names the CLI change it is waiting on rather than being a shrug.

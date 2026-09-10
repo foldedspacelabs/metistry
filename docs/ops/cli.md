@@ -556,9 +556,33 @@ On a platform with no launchd (anything but macOS) a host job's name is
 simply not a known service — the command refuses rather than pretending
 `launchctl` exists there (`docs/ops/deployment-shapes.md`, "Linux hosts").
 
+## Seeding a product directory from an app bundle
+
+```sh
+metistry runtime install --from /Applications/Metistry.app [--to <dir>] [--force] [--dry-run]
+```
+
+A signed `Metistry.app`'s `Contents/Resources/metistry/` is a **seed**, not
+a product directory: the bundle cannot be written to, and `metistry update
+--channel release` must write `releases/<version>/`, flip `current` and
+unpack a new `runtime/`. This copies the seed to
+`~/Library/Application Support/Metistry/product/` (or `--to`), and every
+plist `metistry up` writes points there — so an app install and a checkout
+install update through exactly the same code
+(`docs/product/desktop-app-plan.md`, `docs/ops/mac-app.md`).
+
+`--from` takes the `.app` or the `Resources/metistry` inside it.
+Idempotent: the seed's own `releases/<v>/metistry-runtime.json` and
+`runtime/manifest.json` are read and cross-checked against its `current`
+symlink **before anything is copied**, their sha256s go into
+`.metistry-install.json` beside `current`, and a second run with the same
+seed does nothing. A bundle whose manifest disagrees with `current`, or
+that carries no `packages/cli/dist/main.js`, is refused rather than
+half-installed.
+
 ## Bringing an install up
 
-`metistry up [--no-compose] [--no-launchd] [--dry-run] [--instance <dir>]`
+`metistry up [--no-compose] [--no-launchd] [--namespace] [--dry-run] [--instance <dir>]`
 takes a product checkout plus an instance with a filled-in
 `state/.env` to *running*. It prints which dotenv file that is, renders it
 into the plists as `__ENV_FILE__`, and hands it to `docker compose` as
@@ -572,6 +596,20 @@ is no docker at all: `up` prepares a user-space Postgres (step 0), then
 installs `console`, `assistant` and `db` as launchd jobs alongside the
 host jobs (step 2), then creates the database, then doctor. `doctor`
 reports the shape as its first row and writes every remediation for it.
+
+**`--namespace`** allocates this instance its own launchd label suffix
+(from `instance_id`) and an 8-port block, recorded **once** in
+`<instance>/state/ports.yaml`, so a second instance can run beside the
+first. Everything afterwards — `up`, `doctor`, `restart|stop|start`,
+`logs`, `update` — reads that file; delete it (after `metistry stop`) to
+return the instance to the fixed labels and ports.
+`docs/ops/deployment-shapes.md` has the layout and the rules.
+
+> **Quote `state/.env` values that contain a space.** The reconciler,
+> watchdog and TCC bridge jobs load that file with `set -a; . <file>`,
+> which *runs* it, so `KEY=/Users/…/Application Support/…` is a command,
+> not an assignment. `up` refuses with the offending variables and line
+> numbers rather than installing jobs that respawn forever.
 
 0. **Postgres (launchd shape only).** Find the binaries
    (`METISTRY_PG_BIN`, a bundled `runtime/postgres/bin`, Homebrew

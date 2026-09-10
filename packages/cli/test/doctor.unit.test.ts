@@ -328,7 +328,10 @@ describe("parsers and conventions", () => {
   });
 
   it("env conventions: the three shipped bridges keep their variables; anything else follows METISTRY_<NAME>_URL", () => {
-    expect(probeTargetFor("apple-fm")).toMatchObject({ urlVar: "METISTRY_AFM_URL", tokenVar: "METISTRY_BRIDGE_TOKEN_APPLE_FM", launchdLabel: "com.foldedspacelabs.metistry.apple-fm" });
+    // launchdService, not a hardcoded label: a namespaced instance's job is
+    // com.foldedspacelabs.metistry.<suffix>.apple-fm, and the remediation has
+    // to name the job that exists (packages/cli/src/namespace.ts)
+    expect(probeTargetFor("apple-fm")).toMatchObject({ urlVar: "METISTRY_AFM_URL", tokenVar: "METISTRY_BRIDGE_TOKEN_APPLE_FM", launchdService: "apple-fm" });
     expect(probeTargetFor("eventkit")).toMatchObject({ urlVar: "METISTRY_EK_URL", tokenVar: "METISTRY_BRIDGE_TOKEN_EVENTKIT" });
     expect(probeTargetFor("reconciler")).toMatchObject({ urlVar: "METISTRY_RECONCILER_URL", tokenVar: "METISTRY_BRIDGE_TOKEN_RECONCILER" });
     expect(probeTargetFor("my-thing")).toEqual({ urlVar: "METISTRY_MY_THING_URL", tokenVar: "METISTRY_BRIDGE_TOKEN_MY_THING" });

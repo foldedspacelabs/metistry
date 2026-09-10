@@ -18,6 +18,7 @@ import { loadDeployment } from "./deployment.js";
 import type { Exec } from "./exec.js";
 import { composeServiceNames } from "./doctor.js";
 import { launchAgentsDir, loadPlistTemplates } from "./launchd.js";
+import { loadNamespace } from "./namespace.js";
 import { StepFailed, StepRunner } from "./steps.js";
 import { composeEnvArgs, instanceLock, runDirFor } from "./up.js";
 
@@ -44,6 +45,8 @@ export interface ServiceTargetContext {
   uid: number;
   home: string;
   targets: ServiceTarget[];
+  /** this instance's launchd label suffix (`<instance>/state/ports.yaml`); undefined = the fixed default labels */
+  labelSuffix?: string;
 }
 
 export interface ServiceResult {
@@ -94,10 +97,14 @@ export async function buildServiceTargets(opts: {
   const uid = opts.uid ?? (typeof process.getuid === "function" ? process.getuid() : 0);
   const home = opts.home ?? env.HOME ?? "";
 
+  // a namespaced instance's jobs carry its label suffix, so `restart console`
+  // must act on that instance's console and not the default one's
+  const ns = await loadNamespace(env.METISTRY_INSTANCE_DIR);
+
   const targets: ServiceTarget[] = [];
   if (platform === "darwin") {
     const dir = launchAgentsDir(home);
-    for (const t of await loadPlistTemplates(runDir, deployment.shape)) {
+    for (const t of await loadPlistTemplates(runDir, deployment.shape, ns?.labelSuffix)) {
       targets.push({
         name: t.service,
         kind: "launchd",
@@ -110,7 +117,7 @@ export async function buildServiceTargets(opts: {
   if (usesCompose(deployment)) {
     for (const name of await composeServiceNames(runDir)) targets.push({ name, kind: "compose" });
   }
-  return { productDir: runDir, shape: deployment.shape, from: loaded.from, uid, home, targets };
+  return { productDir: runDir, shape: deployment.shape, from: loaded.from, uid, home, targets, ...(ns ? { labelSuffix: ns.labelSuffix } : {}) };
 }
 
 /** `names` empty/undefined = every service the shape runs (the CLI's "no args" default). */

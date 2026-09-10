@@ -21,16 +21,31 @@ cp helper/Info.plist "$APP/Contents/Info.plist"   # bundle layout, not ours.
 
 swiftc -O -parse-as-library helper/afm-helper.swift -o "$APP/Contents/MacOS/afm-helper"
 
-# METISTRY_SIGN_IDENTITY pins a specific identity (e.g. multiple Developer ID
-# certs installed); unset falls back to auto-detecting the first Developer ID
-# Application identity, then to ad-hoc (docs/ops/apple-signing.md §3).
+# METISTRY_SIGN_IDENTITY pins an identity verbatim (a name or a SHA-1 hash —
+# codesign -s takes either); unset falls back to auto-detecting the first
+# Developer ID Application identity, then to ad-hoc (docs/ops/apple-signing.md
+# §3). Auto-detection takes the HASH, not the display name: after a renewal
+# or a second import the keychain holds two valid certs with byte-identical
+# names and `codesign -s "<name>"` fails with "ambiguous (matches … and …)".
+# The hash is unique by construction. Duplicates of ONE name are fine (first
+# hash wins — same team, same chain, same TCC designated requirement); certs
+# for DIFFERENT teams are not guessed at: pin one, or the helper gets signed
+# under whichever team happened to sort first.
 IDENTITY="${METISTRY_SIGN_IDENTITY:-}"
 if [ -z "$IDENTITY" ]; then
-  IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null | grep -o '"Developer ID Application[^"]*"' | head -1 | tr -d '"') || true
+  FOUND=$(security find-identity -v -p codesigning 2>/dev/null | grep 'Developer ID Application') || true
+  NAMES=$(printf '%s\n' "$FOUND" | grep -o '"[^"]*"' | sort -u)
+  if [ "$(printf '%s\n' "$NAMES" | grep -c .)" -gt 1 ]; then
+    echo "more than one Developer ID team is installed — set METISTRY_SIGN_IDENTITY to the hash of the one to use:" >&2
+    printf '%s\n' "$FOUND" >&2
+    exit 1
+  fi
+  IDENTITY=$(printf '%s\n' "$FOUND" | head -1 | awk '{print $2}')
+  [ -n "$IDENTITY" ] && echo "auto-detected identity: $IDENTITY ($(printf '%s\n' "$NAMES" | tr -d '"'))"
 fi
 if [ -n "${IDENTITY:-}" ]; then
   codesign --force --options runtime --timestamp --identifier com.foldedspacelabs.metistry.apple-fm --sign "$IDENTITY" "$APP"
-  echo "signed: $IDENTITY"
+  echo "signed: $IDENTITY ($(security find-identity -v -p codesigning 2>/dev/null | grep -F "$IDENTITY" | grep -o '"[^"]*"' | head -1 | tr -d '"'))"
 else
   codesign --force --identifier com.foldedspacelabs.metistry.apple-fm --sign - "$APP"
   echo "signed: ad-hoc (no Developer ID found)"

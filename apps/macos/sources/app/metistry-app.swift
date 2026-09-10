@@ -87,10 +87,9 @@ struct MetistryApp: App {
         .defaultSize(width: 760, height: 520)
 
         MenuBarExtra {
-            // The hook is a zero-size view whose only job is telling the model
-            // the menu opened, so doctor is re-run now and every 30s while it
+            // MenuBarContent's own summary item carries the open/close hook, so
+            // doctor is re-run when the menu appears and every 30s while it
             // stays open (menu-model.swift explains why not continuously).
-            MenuBarRefreshHook(model: model.menu)
             MenuBarContent(
                 model: model.menu,
                 updates: model.updates,

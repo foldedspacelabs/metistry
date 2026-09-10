@@ -17,6 +17,7 @@ All of them are real.
 | `--version` / `version [--json]` | this CLI's version, the resolved product dir's, the lock's pin, and a release's runtime pack |
 | `deployment [--json]` | the effective shape (D4 overlay) and the services it implies, with cheap running state |
 | `deployment set-shape <compose\|launchd>` | write the instance's deployment.yaml through the reconciler, preview-then-confirm |
+| `migrate-shape <launchd\|compose>` | move a LIVE install between the shapes, with its data: dump, stop, flip, up, restore, verify, doctor |
 | `doctor` | validate every manifest and probe every bridge, service, container, launchd job |
 | `up` | bring an install to running: containers/host jobs, then doctor |
 | `update` | move an install forward: pull/build, migrate, restart what changed, pin, doctor |
@@ -103,6 +104,43 @@ because the data does not move between shapes on its own
 the shape change, then `metistry up` would do. `--force` writes anyway.
 `reconciler`/`watchdog` being up is never a reason to refuse: they are host
 jobs under either shape (invariant 6).
+
+`metistry migrate-shape <launchd|compose> [--dry-run] [--namespace]` is the
+verb for a LIVE install, and it is deliberately not a flag on `set-shape`.
+`set-shape` writes one line of a config file and refuses while anything is
+still running — that refusal is what stops someone flipping the shape out
+from under a running Postgres, and a migration is exactly the operation
+that has to run inside it. So `migrate-shape` owns the ordering and calls
+`setDeploymentShape` for the file write, rather than reimplementing the
+protected-write path.
+
+Going to `launchd` it quiesces the writers, `pg_dump`s the live database
+through the running `db` container to `<instance>/state/migrate/<ts>.dump`
+and verifies it with `pg_restore --list` **before stopping anything**,
+`docker compose stop`s (never `down -v` — the volume is the rollback),
+writes the shape through the reconciler, runs `up` (initdb under
+`<instance>/state/pg`, every host plist re-rendered against `current/`,
+the bundled node and `<instance>/state/.env`), `pg_restore`s **before any
+migration runs** — the dump carries `schema_migrations`, so the next
+`metistry update` applies none — compares every table's exact row count
+and fails by name if one lost rows, pins the two TCC bridge jobs at the
+signed helper bundles a release does not ship, waits for the console and
+the reconciler to answer, and ends with `doctor`.
+
+It refuses, with the old shape still up and nothing changed, when the
+product tree has no bundled `runtime/`, no `ops/sandbox/assistant.sb` (a
+pack older than v0.6.0 — the assistant's launchd job could not start), no
+`pg_dump`/`pg_restore`/pgvector, no running `db` container, or when the
+instance is namespaced while its docker compose project is not.
+
+`metistry migrate-shape compose` is the rollback: bootout the three
+launchd jobs, write the shape back, `docker compose up -d`. The compose
+volume still holds the database as it was at the cutover, and anything
+written under `launchd` since is NOT copied back — the verb prints the
+`pg_dump` command for it.
+
+**The runbook is `docs/ops/migrate-compose-to-launchd.md`**: prerequisites,
+what to watch, rollback, and when it is safe to `docker compose down -v`.
 
 `metistry console whoami [--json]` asks the running console who it thinks
 you are, presenting this install's `METISTRY_OWNER_TOKEN`

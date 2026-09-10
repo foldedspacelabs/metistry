@@ -76,9 +76,21 @@ And in the release pack itself: **`ops/sandbox/` was not shipped**, so
 every pack up to v0.4.0 produces a launchd shape whose assistant job cannot
 start at all. `pack-runtime.sh` carries it now and fails without it.
 
+### And a live install can now move (2026-09-10)
+
+`metistry migrate-shape launchd` moves an install that is already running
+in one shape into the other, with its data — rehearsed on a scratch copy
+of the Studio's production install, production's own database restored
+into it, running beside the live one throughout. **exit 0; doctor 23 ok, 0
+failed; every table's row count identical; `0 applied, 13 total`
+migrations afterwards.** The runbook is
+`docs/ops/migrate-compose-to-launchd.md`, and it found five more defects
+of the same kind as the five above.
+
 ### What is still missing
 
-Ranked, worst first:
+Ranked, worst first. Numbers 5 and 6 are fixed; 9-12 are what the
+migration rehearsal added.
 
 1. **The TCC bridges cannot be namespaced.** `eventkit-helper`'s socket is
    a hardcoded `/tmp/metistry-eventkit.sock` in its plist, and TCC consent
@@ -111,6 +123,36 @@ Ranked, worst first:
    one.
 8. **`sandbox-exec` still filters outbound by port, not host name** — the
    pre-existing honest limit below, unchanged.
+9. **The runtime pack ships no built TCC helpers.** `pack-runtime.sh`
+   copies each `mcp-<name>/helper`, but the `.app` bundles inside them are
+   gitignored build output no release runner builds — so a release carries
+   the Swift sources and nothing executable, and a release install's
+   eventkit/apple-fm jobs have no helper to exec unless a git checkout on
+   the same Mac built one. `migrate-shape` pins those two jobs at the
+   already-granted bundles as a stopgap; the fix is to build and sign them
+   in the `macos-app` job, which holds the certificate
+   (`docs/ops/migrate-compose-to-launchd.md`, "The TCC helper bundles").
+10. **`--namespace` does not namespace the docker compose project.**
+    `docker-compose.yml` carries `name: metistry`, so under the compose
+    shape a second install's `docker compose stop|up` acts on the first
+    install's containers unless `COMPOSE_PROJECT_NAME` is set in its
+    `.env`. `migrate-shape` refuses that combination; `up` does not.
+11. **`applyPorts` and `portEnv` disagree about an explicit port.** The
+    namespace block "fills only variables that are UNSET" for the process
+    environment (`applyPorts`), but `portEnv` — rendered into the plists of
+    the jobs that source `.env` — sets every port unconditionally. An
+    explicit `METISTRY_DB_PORT` in `.env` and `--namespace` therefore mean
+    two different things depending on which job is asking. Related:
+    `docker compose` reads `.env` and knows nothing about `ports.yaml`, so
+    a namespaced install under the compose shape must ALSO declare its
+    ports in `.env` or it publishes the defaults.
+12. **`protected-write.ts` probes the un-namespaced reconciler label.**
+    `RECONCILER_LABEL` is the fixed `com.foldedspacelabs.metistry.reconciler`,
+    so on a namespaced instance with no `METISTRY_RECONCILER_URL` the
+    "is a reconciler running?" guard inspects a DIFFERENT install's job.
+13. **`metistry console whoami` ignores the namespace.** With no
+    `METISTRY_URL` set it talks to 127.0.0.1:8080 — which on a Mac with two
+    installs is the other one's console.
 
 ## `deployment.yaml`
 
@@ -202,32 +244,33 @@ uses the label and log path this instance's jobs actually carry.
 ## Switching
 
 ```sh
-# 1. take a dump — the data does NOT move with you
-pg_dump ... > before.sql              # or ops/scripts/backup.sh
-
-# 2. stop what is running in the old shape
-docker compose down                   # compose → launchd
-# or: launchctl bootout gui/$(id -u)/com.foldedspacelabs.metistry.{db,console,assistant}
-
-# 3. flip the file
-$EDITOR "$METISTRY_INSTANCE_DIR/deployment.yaml"
-
-# 4. bring it up in the new one
-metistry up --dry-run                 # read the plan first
-metistry up
-pnpm db:migrate                        # or metistry update
-
-# 5. restore, if there was anything you wanted to keep
-psql ... < before.sql
+metistry migrate-shape launchd --dry-run   # read the plan; runs nothing
+metistry migrate-shape launchd             # one verb, with the data
 ```
+
+**`docs/ops/migrate-compose-to-launchd.md` is the runbook** — the
+prerequisites, what to watch, the rollback, and when it is safe to
+`docker compose down -v`. In short, `migrate-shape launchd` quiesces the
+writers, dumps the live database through the running container and
+verifies the dump before stopping anything, `docker compose stop`s (never
+`down -v` — the volume is the rollback), writes `deployment.yaml` through
+the reconciler as `user`, runs `up`, restores **before any migration**
+(the dump carries `schema_migrations`, so the next `metistry update`
+applies none), compares every table's row count, and ends with doctor.
+`metistry migrate-shape compose` is the documented rollback.
 
 The two shapes keep their data in different places — a Docker volume
 versus `<instance>/state/pg` — so switching is a fresh database plus a
-restore, not a move. Invariant 1 is what makes that acceptable: git is
-the record, Postgres is derived, and a rebuild costs trend lines rather
-than knowledge. Decide about the durable set (`runs`, `sessions`, inbox
-Needs You, `work` threads, artifact comments — open decision 13) before you
+restore, not a move; that is why there is a verb rather than an edit.
+Invariant 1 is what makes even a bad outcome survivable: git is the
+record, Postgres is derived, and a rebuild costs trend lines rather than
+knowledge. Decide about the durable set (`runs`, `sessions`, inbox Needs
+You, `work` threads, artifact comments — open decision 13) before you
 switch a live install without a dump.
+
+By hand, if you ever need to: stop the old shape, edit
+`$METISTRY_INSTANCE_DIR/deployment.yaml`, `metistry up`, restore. That is
+what the verb does, in the order that turns out to matter.
 
 ## Postgres, without Docker
 

@@ -100,8 +100,9 @@ const USAGE = `metistry — Metistry command line
   metistry init <dir> [--name <assistant name>] [--channel git|release] [--force]
                       [--product-dir <checkout>]
       Create a private instance repo at <dir> from the product's seed/ (git init,
-      Knowledge/, identity.yaml, rules.yaml, config dirs, metistry.lock, one commit).
-      Prints the .env lines to add to the product checkout next — never writes them.
+      Knowledge/, identity.yaml with a minted instance_id, rules.yaml, config dirs,
+      metistry.lock, one commit).
+      Prints the .env lines to put in <dir>/state/.env next — never writes them.
       --channel writes metistry.lock's product.source: git (this install is a
       checkout update fast-forwards; the default) or release (it consumes
       published artifacts — docs/ops/releases.md).
@@ -116,15 +117,23 @@ const USAGE = `metistry — Metistry command line
       with git ls-remote, flush the reconciler's queue, and push once.
       The token is never printed, never written to .env, never in .git/config.
 
-  metistry secrets sync [--from keychain|env] [--to env|keychain] [--env-file <path>]
-  metistry secrets mint <VAR> [--env-file <path>]
-  metistry secrets list [--env-file <path>]
+  metistry secrets sync [--from keychain|env] [--to env|keychain]
+                        [--instance <dir>] [--env-file <path>]
+  metistry secrets mint <VAR> [--instance <dir>] [--env-file <path>]
+  metistry secrets list [--instance <dir>] [--env-file <path>]
+  metistry secrets purge --instance <dir> [--yes]
       The macOS login Keychain (service metistry:<VAR>) is the canonical store;
-      .env is generated from it. --to keychain imports .env's secret-shaped
-      variables (names ending _TOKEN _PASSWORD _PRIVATE _SECRET _KEY, plus
-      CLAUDE_CODE_OAUTH_TOKEN); --to env rewrites just those lines of .env in
-      place (0600; every comment and non-secret line preserved). mint makes a
-      new random token in both. list prints names only, never values.
+      .env is generated from it, at <instance>/state/.env. --to keychain imports
+      .env's secret-shaped variables (names ending _TOKEN _PASSWORD _PRIVATE
+      _SECRET _KEY, plus CLAUDE_CODE_OAUTH_TOKEN); --to env rewrites just those
+      lines in place (0600; every comment and non-secret line preserved) and
+      moves a product-checkout .env into the instance the first time. mint makes
+      a new random token in both. list prints names and scopes, never values.
+      Items are scoped by account: instance-scoped ones under the instance's
+      instance_id, user-scoped ones (CLAUDE_CODE_OAUTH_TOKEN, your AWS keys)
+      under the shared per-user account — secrets.ts SECRET_SCOPES is the table.
+      purge deletes one instance's items and nothing else; without --yes it only
+      previews.
 
   metistry import-sessions [--since <date>] [--project <path>] [--limit N] [--dry-run]
       Summarise this machine's Claude Code sessions (~/.claude/projects/*/*.jsonl)
@@ -143,6 +152,7 @@ const USAGE = `metistry — Metistry command line
       container and launchd job. Exit 0 when nothing is failed.
 
   metistry up [--no-compose] [--no-launchd] [--dry-run] [--product-dir <checkout>]
+              [--instance <dir>] [--env-file <path>]
       Bring an install to running from a checkout + .env: docker compose up (built
       from source, or pulled when metistry.lock pins a release), every launchd job
       in ops/launchd rendered into ~/Library/LaunchAgents and (re)bootstrapped
@@ -165,6 +175,12 @@ const USAGE = `metistry — Metistry command line
 
 Product checkout resolution: --product-dir, METISTRY_PRODUCT_DIR, the checkout
 this package is installed in, the current directory's enclosing checkout.
+
+Environment resolution: <instance>/state/.env first (--instance, else
+METISTRY_INSTANCE_DIR), then the product checkout's .env — deprecated, still
+read, and where a terminal install may keep declaring METISTRY_INSTANCE_DIR.
+An instance directory is self-contained (docs/ops/cli.md); --env-file overrides
+both. Nothing already set in the environment is overwritten by either file.
 `;
 
 export interface MainIo {

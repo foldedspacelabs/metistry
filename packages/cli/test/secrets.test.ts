@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { Exec, ExecOptions } from "../src/exec.js";
 import { promptStdin } from "../src/keychain.js";
-import { accountFor, DEFAULT_SCOPE, isSecretVar, listSecrets, mintSecret, renderSecretList, rewriteEnv, scopeFor, scopeReason, SECRET_SCOPES, syncSecrets } from "../src/secrets.js";
+import { accountFor, DEFAULT_SCOPE, isSecretVar, listSecrets, mintSecret, purgeSecrets, renderSecretList, rewriteEnv, scopeFor, scopeReason, SECRET_SCOPES, syncSecrets } from "../src/secrets.js";
 
 /** One instance's id — the account its own secrets are filed under. */
 const INSTANCE_ID = "11111111-2222-4333-8444-555555555555";
@@ -288,6 +288,61 @@ describe("instance-scoped secrets", () => {
     expect(table).toContain("METISTRY_DB_PASSWORD");
     for (const v of ["not-yet-migrated", "scoped"]) expect(table).not.toContain(v);
     for (const c of kc.calls) expect(c.args).not.toContain("-w");
+  });
+});
+
+describe("metistry secrets purge", () => {
+  const seeded = () =>
+    fakeSecurity({
+      [key(INSTANCE_ID, "METISTRY_DB_PASSWORD")]: "db",
+      [key(INSTANCE_ID, "METISTRY_VAPID_PRIVATE")]: "vapid",
+      [key(USER, "CLAUDE_CODE_OAUTH_TOKEN")]: "the-person's-claude-login",
+      [key(USER, "METISTRY_DB_PASSWORD")]: "a-sibling-instance's-old-copy",
+    });
+
+  it("previews and deletes NOTHING without --yes", async () => {
+    const file = await envFile();
+    const kc = seeded();
+    const lines: string[] = [];
+    const before = new Map(kc.store);
+    const r = await purgeSecrets({ envFile: file, instanceDir: "/i/test-two", exec: kc.exec, out: (l) => lines.push(l), platform: "darwin", env: {}, instanceId: INSTANCE_ID });
+
+    expect(r.found).toEqual(["METISTRY_DB_PASSWORD", "METISTRY_VAPID_PRIVATE"]);
+    expect(r.deleted).toEqual([]);
+    expect(Object.fromEntries(kc.store)).toEqual(Object.fromEntries(before));
+    expect(kc.calls.some((c) => c.args[0] === "delete-generic-password")).toBe(false);
+    expect(lines.join("\n")).toContain("rerun with --yes");
+    expect(lines.join("\n")).toContain("/i/test-two");
+    for (const l of lines) expect(l).not.toContain("the-person's-claude-login");
+  });
+
+  it("with --yes deletes only this instance's account, never the per-user one", async () => {
+    const file = await envFile();
+    const kc = seeded();
+    const lines: string[] = [];
+    const r = await purgeSecrets({ envFile: file, instanceDir: "/i/test-two", exec: kc.exec, out: (l) => lines.push(l), platform: "darwin", env: {}, instanceId: INSTANCE_ID, yes: true });
+
+    expect(r.deleted).toEqual(["METISTRY_DB_PASSWORD", "METISTRY_VAPID_PRIVATE"]);
+    expect(r.kept).toEqual(["CLAUDE_CODE_OAUTH_TOKEN"]);
+    expect(Object.fromEntries(kc.store)).toEqual({
+      [key(USER, "CLAUDE_CODE_OAUTH_TOKEN")]: "the-person's-claude-login",
+      [key(USER, "METISTRY_DB_PASSWORD")]: "a-sibling-instance's-old-copy",
+    });
+    // every delete named this instance's account explicitly
+    for (const c of kc.calls.filter((x) => x.args[0] === "delete-generic-password")) {
+      expect(c.args[c.args.indexOf("-a") + 1]).toBe(INSTANCE_ID);
+    }
+  });
+
+  it("refuses an instance with no id, and refuses to purge the per-user account", async () => {
+    const file = await envFile();
+    const kc = seeded();
+    await expect(purgeSecrets({ envFile: file, instanceDir: "/i/old", exec: kc.exec, out: () => {}, platform: "darwin", env: {} })).rejects.toThrow(/no instance_id/);
+    // METISTRY_KEYCHAIN_ACCOUNT pointed at the instance's own id: purging it would take the person's secrets with it
+    await expect(
+      purgeSecrets({ envFile: file, instanceDir: "/i/x", exec: kc.exec, out: () => {}, platform: "darwin", env: { METISTRY_KEYCHAIN_ACCOUNT: INSTANCE_ID }, instanceId: INSTANCE_ID, yes: true }),
+    ).rejects.toThrow(/refusing to purge/);
+    expect(kc.calls.some((c) => c.args[0] === "delete-generic-password")).toBe(false);
   });
 });
 

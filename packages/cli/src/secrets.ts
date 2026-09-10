@@ -310,6 +310,65 @@ export async function mintSecret(name: string, opts: SecretsOptions): Promise<vo
   if (!instance && scopeFor(name) === "instance") opts.out(`(no instance_id available, so it went to the user account ${accounts.user}; the next \`secrets sync --to env\` with an instance copies it across)`);
 }
 
+// ---- purge -------------------------------------------------------------------
+
+export interface PurgeOptions extends SecretsOptions {
+  /** The instance directory being deleted — named in the output so an operator can see which one this is. */
+  instanceDir: string;
+  /** Without it, nothing is deleted: the preview is the whole command. */
+  yes?: boolean | undefined;
+}
+
+export interface PurgeResult {
+  /** the account whose items were listed/deleted — always the instance's, never the user's */
+  account: string;
+  /** instance-scoped names that HAVE an item under that account */
+  found: string[];
+  /** what was actually deleted (empty without `--yes`) */
+  deleted: string[];
+  /** user-scoped names deliberately left alone */
+  kept: string[];
+}
+
+/**
+ * Delete one instance's Keychain items, so removing a test instance
+ * directory does not orphan them. Preview-then-confirm: without `--yes`
+ * nothing is touched. Two refusals make it incapable of reaching the
+ * person's own secrets — no instance_id, or an instance account that is
+ * somehow the user account — rather than trusting the caller.
+ */
+export async function purgeSecrets(opts: PurgeOptions): Promise<PurgeResult> {
+  const platform = opts.platform ?? process.platform;
+  requireDarwin(platform, opts.out);
+  const { instance, accounts } = keychains(opts);
+  if (!instance || !accounts.instance) {
+    throw new Error(`${opts.instanceDir} has no instance_id in identity.yaml, so it owns no Keychain account — there is nothing to purge (an instance gets one from \`metistry init\`, or from the next \`metistry secrets sync\`/\`metistry up\`)`);
+  }
+  if (accounts.instance === accounts.user) {
+    throw new Error(`refusing to purge: this instance's account (${accounts.instance}) is the per-user account, and purging it would delete secrets that belong to you rather than to ${opts.instanceDir}`);
+  }
+  const names = await knownSecretNames(opts);
+  const scoped = names.filter((n) => scopeFor(n) === "instance");
+  const kept = names.filter((n) => scopeFor(n) === "user");
+  const found: string[] = [];
+  for (const n of scoped) if (await instance.hasSecret(n)) found.push(n);
+
+  opts.out(`instance: ${opts.instanceDir}`);
+  opts.out(`keychain account: ${accounts.instance} (this instance's instance_id)`);
+  opts.out(`${found.length} item(s) to delete: ${found.join(", ") || "(none)"}`);
+  opts.out(`never touched — the per-user account ${accounts.user} keeps: ${kept.join(", ") || "(nothing user-scoped)"}`);
+  if (!opts.yes) {
+    opts.out("");
+    opts.out(`preview only. Nothing was deleted — rerun with --yes to delete the ${found.length} item(s) above. This does not remove ${opts.instanceDir} itself.`);
+    return { account: accounts.instance, found, deleted: [], kept };
+  }
+  const deleted: string[] = [];
+  for (const n of found) if (await instance.deleteSecret(n)) deleted.push(n);
+  opts.out(`deleted ${deleted.length} item(s) from account ${accounts.instance}: ${deleted.join(", ") || "(none)"}`);
+  if (deleted.length !== found.length) opts.out(`could not delete: ${found.filter((n) => !deleted.includes(n)).join(", ")}`);
+  return { account: accounts.instance, found, deleted, kept };
+}
+
 export interface SecretListing {
   name: string;
   /** which account it BELONGS under, from the scope table */

@@ -198,7 +198,14 @@ public struct WizardView: View {
     // 2. Instance
     private func instanceStep(_ p: Palette) -> some View {
         VStack(alignment: .leading, spacing: MetistrySpace.s4) {
-            options(WizardOptions.instanceMode, selection: steps.instanceMode, p) { steps.instanceMode = $0 }
+            options(WizardOptions.instanceMode, selection: steps.instanceMode, p) { mode in
+                steps.instanceMode = mode
+                // Choosing "use an existing folder" AFTER picking one is the
+                // same act as picking one while already in that mode: the step
+                // is satisfied either way, and Continue must not stay dark
+                // because of the order the two were done in.
+                steps.markAdopted()
+            }
             VStack(alignment: .leading, spacing: MetistrySpace.s3) {
                 folderRow(
                     label: steps.instanceMode == .create ? "New instance folder" : "Existing instance folder",

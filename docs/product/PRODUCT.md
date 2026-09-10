@@ -1040,3 +1040,33 @@ doctor` now reports a real authenticated health read instead of a hopeful
 misconfiguration also stopped looking like a broken console: an origin
 mismatch answers 401 naming the origin it expected and the one it got,
 instead of HTTP 500.
+
+**2026-09-10 — moving a running install to the Docker-free shape is one
+verb, rehearsed, and reversible.** The launchd shape was proven end to end
+on a scratch instance; what was still missing was the thing an existing
+user actually has to do — move an install that is *already running*, with
+years of history in it. `metistry migrate-shape launchd` is that move: it
+quiesces the writers, dumps the live database through the running
+container and **verifies the dump before it stops anything**, stops the
+containers without touching the volume, initialises the new Postgres,
+restores *before* migrations run (the dump carries the migration record,
+so the next update applies none), and then **compares every table's exact
+row count and fails by name if a single row did not come across**.
+`metistry migrate-shape compose` puts it back — the old volume is
+untouched, which is what makes the rollback real rather than theoretical.
+Rehearsed on a scratch copy of the Studio's own install with the
+production database restored into it, running beside the live one the
+whole time and never touching it: exit 0, doctor 23 ok / 0 failed, every
+row count identical, `0 applied, 13 total` migrations afterwards, and the
+console answering the same named query with the same data. **The
+user-visible promise: leaving Docker behind is a single command you can
+read the plan of first, that refuses rather than half-finishes, and that
+you can undo.** Four refusals fire while the old shape is still running —
+including a release too old to carry the assistant's sandbox profile,
+which would have produced an install whose engine could not start at all.
+Five more defects came out of running it that a green test suite had not:
+a verification query the bundled Postgres cannot execute, rows written
+into the gap between the dump and the stop, a bridge re-render that sent a
+second install looking for the *first* install's port, and a final health
+verdict that raced the jobs it had just started — a false failure being
+precisely the thing that makes someone roll back a cutover that worked.

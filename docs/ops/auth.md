@@ -161,6 +161,10 @@ misconfigured install stops looking like a broken one.
   (Keychain + `.env`), then `metistry restart console`. The old value stops
   working the moment the console restarts — there is no revocation list
   because there is no row: the environment *is* the record.
+  Note that `secrets sync --to env` will mint one again if it finds none —
+  turning the local door *off* permanently means removing the variable from
+  the console's environment (unset it in `docker-compose.yml` or the job's
+  plist), not clearing the `.env` line.
 - **A passkey session:** the devices tab, or `POST /api/devices/<id>/revoke`.
 - **A host-minted owner token** (the capture Shortcut,
   `docs/ops/capture-shortcut.md`): `UPDATE owner_tokens SET revoked_at =

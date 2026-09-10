@@ -35,7 +35,7 @@ token.
 | Variable | Meaning |
 | --- | --- |
 | `METISTRY_URL` | The instance origin, e.g. `https://mac-studio.example.ts.net` |
-| `METISTRY_OWNER_TOKEN` | A bearer for `/capture`: an **agent token** (recommended) or an owner token (below). The variable name predates the agent registry; either class works. |
+| `METISTRY_OWNER_TOKEN` | A bearer for `/capture`: an **agent token** (recommended), a host-minted owner token (below), or — when Claude Code runs on the same machine as the console — that install's local owner token (`docs/ops/auth.md`), which is what this variable now holds by default. The variable name predates the agent registry; every class works here. |
 | `METISTRY_CAPTURE_ON_STOP` | `1` enables the session-end summary hook. Default off. |
 
 **Recommended: an agent token from the registry.** Register the session

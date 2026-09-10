@@ -5,7 +5,7 @@ transport: http
 port: 8080               # no bind of its own: mounted at the console's POST /mcp, so this is the console's port
 runs_on: container
 requires_tcc: []
-discovery: eager         # 22 tools, 17,611 chars of definition ≈ 4.4k tokens (chars/4) — over the PoC-17 tool-COUNT guidance (>20), but the other axis (>5k definition tokens) is what the threshold is actually about; measured by test/brain.test.ts, still well under it. Deprecated spellings (src/aliases.ts) resolve at call time and are deliberately not exposed here: a second copy of these schemas would break the budget on its own.
+discovery: eager         # 23 tools, 18,369 chars of definition ≈ 4.6k tokens (chars/4) — over the PoC-17 tool-COUNT guidance (>20), but the other axis (>5k definition tokens) is what the threshold is actually about; measured by test/brain.test.ts, still well under it. Deprecated spellings (src/aliases.ts) resolve at call time and are deliberately not exposed here: a second copy of these schemas would break the budget on its own.
 degrades: absent
 exposes:
   - name: capture
@@ -19,9 +19,11 @@ exposes:
   - name: tasks_renew
     description: Renew the lease on a held task
   - name: tasks_update
-    description: Change status or append a note on a held task
+    description: Change status (in_progress/blocked) or append a note on a held task; use tasks_close to finish one
   - name: tasks_release
     description: Hand a held task back to the list
+  - name: tasks_close
+    description: Finish a held task in one step — status closed, claim released, optional closing note
   - name: tasks_create
     description: Create a task in one of the caller's projects (idempotent on idempotency_key)
   - name: knowledge_search

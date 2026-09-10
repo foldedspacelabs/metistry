@@ -91,7 +91,7 @@ export interface BrainServer {
 }
 
 /**
- * The eager surface (§4.3 default 1): 22 tools, no meta-tool indirection.
+ * The eager surface (§4.3 default 1): 23 tools, no meta-tool indirection.
  * Order = manifest order. One noun per thing, one verb set per object
  * (docs/product/glossary.md): folding tasks_list_ready + tasks_mine into
  * `tasks_list {filter}` paid for knowledge_list/knowledge_grep. This still
@@ -111,6 +111,7 @@ export const TOOL_NAMES = [
   "tasks_renew",
   "tasks_update",
   "tasks_release",
+  "tasks_close",
   "tasks_create",
   "knowledge_search",
   "knowledge_read",
@@ -327,7 +328,7 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
 
     reg(
       "tasks_update",
-      "Change status and/or append a note on a task you hold; `closed` releases the claim.",
+      "Change status (in_progress/blocked) and/or append a note on a task you hold; use tasks_close to finish one instead of passing status: closed here.",
       { id, status: z.enum(["in_progress", "blocked", "closed"]).optional(), note: z.string().max(4000).optional() },
       async (a) => {
         if (!(await scoped(principal, a.id))) return fail("not_found");
@@ -337,11 +338,21 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
 
     reg(
       "tasks_release",
-      "Return a task you hold to the list — status open, claim cleared.",
+      "Return a task you hold to the list — status open, claim cleared; use tasks_close instead when the work is actually done.",
       { id, note: z.string().max(4000).optional() },
       async (a) => {
         if (!(await scoped(principal, a.id))) return fail("not_found");
         return fromResult(await tasks.release(a.id, principal.id, a.note));
+      },
+    );
+
+    reg(
+      "tasks_close",
+      "Finish a task you hold in one step — status closed, claim released; append a closing note if you have one. The same tasks_update path, just the one call a closer actually wants.",
+      { id, note: z.string().max(4000).optional() },
+      async (a) => {
+        if (!(await scoped(principal, a.id))) return fail("not_found");
+        return fromResult(await tasks.update(a.id, principal.id, { status: "closed", ...(a.note !== undefined ? { note: a.note } : {}) }));
       },
     );
 

@@ -89,7 +89,7 @@ manifest by test so the two cannot drift:
 | `knowledge` | `knowledge_search`, `knowledge_read` — under `scope` | `brain-read` |
 | `requests` | `requests_create` — a request in the Needs You queue the assistant folds later | `brain-report`, `report` |
 | `capture` | `capture` — notes/files into the inbox as captures | |
-| `tasks` | `tasks_list`, `tasks_claim`, `tasks_renew`, `tasks_update`, `tasks_release`, `tasks_create` — within `projects` | |
+| `tasks` | `tasks_list`, `tasks_claim`, `tasks_renew`, `tasks_update`, `tasks_release`, `tasks_close`, `tasks_create` — within `projects` | |
 | `artifacts` | `artifacts_publish`, `artifacts_get`, `artifacts_list`, `artifacts_comment`, `artifacts_resolve`, `artifacts_review` — within `projects` | |
 
 `knowledge_write`, `agents_delegate`, `queries_list` and `queries_run` are

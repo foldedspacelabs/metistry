@@ -1,5 +1,28 @@
 # @foldedspacelabs/metistry-cli
 
+## 0.4.0
+
+### Patch Changes
+
+- 6b8b214: `metistry update --channel release` now pins `metistry.lock`'s
+  `product.commit` to the commit the installed runtime pack was actually
+  built from, read from that pack's own `metistry-runtime.json` — release
+  mode never does a git pull, so there was no HEAD to read, and the lock
+  previously kept whatever commit the prior release had pinned even after a
+  version bump. A pack built before this field shipped (0.3.0, 0.3.1) falls
+  back to the prior lock's commit rather than fabricating one.
+- 3d36953: The Mac app ships as a release asset. A signed, notarized `Metistry-<version>.dmg`
+  and an EdDSA-signed `appcast.xml` now come with every release, so the app can be
+  downloaded from GitHub Releases and update itself from there. Inside it: a Status
+  panel that is `metistry doctor` at a glance with a menu-bar glyph for the worst
+  fault, and a first-run flow that walks the install — locate the runtime, create
+  the instance, connect a GitHub repo by device flow, sync secrets to the Keychain,
+  bring the services up — showing the exact `metistry` command before it runs each
+  one. Nothing in the app talks to Postgres or git: it runs the same CLI the
+  terminal does.
+- Updated dependencies [c32b27d]
+  - @foldedspacelabs/metistry-core@0.4.0
+
 ## 0.3.1
 
 ### Patch Changes

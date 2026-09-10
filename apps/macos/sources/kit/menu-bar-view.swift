@@ -32,8 +32,14 @@ public struct MenuBarContent: View {
     }
 
     public var body: some View {
-        // The summary answers before the menu is read.
+        // The summary answers before the menu is read — and it carries the
+        // refresh hook, because SwiftUI has no "menu opened" callback and a
+        // `MenuBarExtra`'s content is realised when the menu is presented. The
+        // modifiers ride on a real menu item rather than on a zero-size spacer
+        // view, which a menu would render as a blank row.
         summary
+            .onAppear { model.menuOpened() }
+            .onDisappear { model.menuClosed() }
         if let outcome = model.lastOutcome {
             Text("\(outcome.ok ? "" : "failed — ")\(outcome.message)")
         }
@@ -122,23 +128,5 @@ public struct MenuBarContent: View {
         case .failed: return "✕"
         case .absent: return "○"
         }
-    }
-}
-
-/// The `.onAppear`/`.onDisappear` pair a `MenuBarExtra` needs to start and stop
-/// its refresh, wrapped so the executable target does not have to remember it.
-public struct MenuBarRefreshHook: View {
-    private let model: MenuBarModel
-
-    public init(model: MenuBarModel) {
-        self.model = model
-    }
-
-    public var body: some View {
-        // A zero-size view: it exists for the lifecycle callbacks.
-        Color.clear
-            .frame(width: 0, height: 0)
-            .onAppear { model.menuOpened() }
-            .onDisappear { model.menuClosed() }
     }
 }

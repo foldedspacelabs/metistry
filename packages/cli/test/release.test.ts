@@ -24,11 +24,12 @@ import {
   resolveRelease,
   rollbackRelease,
   runtimeAssetName,
+  runtimePackCommit,
   switchCurrent,
 } from "../src/release.js";
 import { StepFailed, StepRunner } from "../src/steps.js";
 import { update } from "../src/update.js";
-import { checkout, fakeExec, okDoctor } from "./fixtures.js";
+import { checkout, fakeExec, okDoctor, put } from "./fixtures.js";
 
 const NOW = new Date("2026-09-07T15:00:00Z");
 const REPO = "foldedspacelabs/metistry";
@@ -107,6 +108,17 @@ describe("release assets", () => {
     expect(script).toContain('metistry-runtime-$version-$target.tar.gz');
     const wf = readFileSync(new URL("../../../.github/workflows/release.yml", import.meta.url), "utf8");
     expect(wf).toContain("metistry-runtime-${{ needs.verify.outputs.version }}-${{ matrix.target }}.tar.gz");
+  });
+
+  it("runtimePackCommit reads the manifest's commit and never fabricates one", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "metistry-pack-"));
+    expect(await runtimePackCommit(dir)).toBeUndefined(); // no metistry-runtime.json at all
+    await writeFile(join(dir, "metistry-runtime.json"), JSON.stringify({ version: "0.2.0", target: TARGET, built_at: "2026-09-01T00:00:00Z" }));
+    expect(await runtimePackCommit(dir)).toBeUndefined(); // pack built before the commit field shipped
+    await writeFile(join(dir, "metistry-runtime.json"), JSON.stringify({ version: "0.2.0", commit: "" }));
+    expect(await runtimePackCommit(dir)).toBeUndefined(); // an empty string is not a commit
+    await writeFile(join(dir, "metistry-runtime.json"), JSON.stringify({ version: "0.2.0", commit: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef" }));
+    expect(await runtimePackCommit(dir)).toBe("deadbeefdeadbeefdeadbeefdeadbeefdeadbeef");
   });
 
   it("parses sha256sum output and ignores anything that is not a digest line", () => {
@@ -435,6 +447,35 @@ describe("metistry update --channel release", () => {
     // the lock is pinned to the release that was installed, not to the running CLI's version
     expect(r.lock).toEqual({ product: { version: "0.2.0", commit: "unknown", source: "release" }, updated_at: NOW.toISOString(), migrations_applied: [] });
     expect(await readFile(join(inst, "metistry.lock"), "utf8")).toContain('version: "0.2.0"');
+  });
+
+  it("reads the pack's own commit out of metistry-runtime.json (release channel never git-pulls, so this is the only honest source)", async () => {
+    const P = await mkdtemp(join(tmpdir(), "metistry-rel-"));
+    const inst = await mkdtemp(join(tmpdir(), "metistry-inst-"));
+    const src = await checkout();
+    await put(src, "metistry-runtime.json", JSON.stringify({ version: "0.2.0", target: TARGET, commit: "cafebabecafebabecafebabecafebabecafebabe" }));
+    const prior: LockFile = { product: { version: "0.1.0", commit: "prior-sha", source: "release" }, updated_at: "2026-09-01T00:00:00.000Z", migrations_applied: [] };
+    await writeFile(join(inst, "metistry.lock"), serializeLock(prior));
+    const exec = await tarInto(src);
+    const s = releaseServer({ versions: ["0.2.0"] });
+
+    const r = await update({ ...base(P, { METISTRY_INSTANCE_DIR: inst }), exec, fetchFn: s.fn, target: TARGET, skipMigrate: true, openSession: async () => null });
+
+    expect(r.lock).toEqual({ product: { version: "0.2.0", commit: "cafebabecafebabecafebabecafebabecafebabe", source: "release" }, updated_at: NOW.toISOString(), migrations_applied: [] });
+  });
+
+  it("falls through to the prior lock's commit when the installed pack has no commit field (packs built before it shipped, e.g. 0.3.0/0.3.1) — never fabricates one", async () => {
+    const P = await mkdtemp(join(tmpdir(), "metistry-rel-"));
+    const inst = await mkdtemp(join(tmpdir(), "metistry-inst-"));
+    const src = await checkout(); // no metistry-runtime.json at all in this fixture
+    const prior: LockFile = { product: { version: "0.1.0", commit: "prior-sha", source: "release" }, updated_at: "2026-09-01T00:00:00.000Z", migrations_applied: [] };
+    await writeFile(join(inst, "metistry.lock"), serializeLock(prior));
+    const exec = await tarInto(src);
+    const s = releaseServer({ versions: ["0.2.0"] });
+
+    const r = await update({ ...base(P, { METISTRY_INSTANCE_DIR: inst }), exec, fetchFn: s.fn, target: TARGET, skipMigrate: true, openSession: async () => null });
+
+    expect(r.lock).toEqual({ product: { version: "0.2.0", commit: "prior-sha", source: "release" }, updated_at: NOW.toISOString(), migrations_applied: [] });
   });
 
   it("--version pins a specific release; --rollback flips back without downloading anything", async () => {

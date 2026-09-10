@@ -46,8 +46,12 @@ path.
      disabled until the preview has been on screen** — preview-then-confirm is
      the rule the CLI holds destructive verbs to, and a `--yes` reachable
      without the preview would be the app confirming on the user's behalf.
-  6. The door — an `ASAuthorization` passkey, or the console's own enrolment
-     code with the reason on screen (below, and it is worth reading).
+  6. The door — **optional, and usually already done**: it opens with this
+     Mac's sign-in state (`metistry console whoami --json`, "Signing in" below)
+     and offers the console's enrolment code for a browser or a phone. The
+     `ASAuthorization` path is still written and still runs the moment an
+     install qualifies; the probe that measures why none does yet moved to
+     Settings → Advanced.
   7. `claude setup-token` in a terminal the app opens, then a watch on
      `metistry secrets list --json` for `CLAUDE_CODE_OAUTH_TOKEN`.
 
@@ -74,7 +78,8 @@ path.
 
 | | why | what to do today |
 | --- | --- | --- |
-| **A native passkey** (wizard step 6) | measured, not assumed — see "What ASAuthorization actually says" below. `ASAuthorization` refuses *every* relying party from a Developer ID build, because an application identifier comes from an embedded provisioning profile and a DMG from GitHub Releases has none | the step falls back to the console's own enrolment code — open the link here, or type it on the phone. Same `passkeys` row either way |
+| **Any authenticated console call except `whoami`** | the app asks the CLI rather than holding the token, and the CLI has exactly one verb that speaks to the console: `metistry console whoami`. There is no `metistry console call <METHOD> <path>`, and no verb that prints a bearer to the calling process alone — so devices, agents, projects, proposals and dispatch are unreachable from the app. It is a CLI change first, deliberately ("Signing in" below) | the PWA — "Add to Dock" in Safari |
+| **A native passkey** (wizard step 6) | measured, not assumed — see "What ASAuthorization actually says" below. `ASAuthorization` refuses *every* relying party from a Developer ID build, because an application identifier comes from an embedded provisioning profile and a DMG from GitHub Releases has none. **This stopped being step 6's problem on 2026-09-10**: this Mac needs no passkey at all | for a browser or a phone, the step's enrolment code — open the link here, or type it on the phone. Same `passkeys` row either way. The probe is under Settings → Advanced |
 | `connect-repo --auth token` | it reads the PAT from **stdin**, and the app gives every child an empty stdin on purpose so no verb can hang a progress view waiting for a paste | the wizard shows the option, disabled, with that reason; run it in a terminal |
 | **Minting an enrolment code** | there is no HTTP route that mints one, deliberately — whoever can run the host command already controls Postgres and the vault, so shell access is the root of trust for a first passkey (plan §4.2) — and `metistry enroll` is on the CLI's own "not yet" list | step 6 shows the exact `scripts/enroll.mjs` command and takes the code you paste back |
 | **A QR code** for the phone | nothing in this product renders one yet; `apps/console/scripts/enroll.mjs` says the same about itself ("QR rendering arrives with `packages/cli`"), and an encoder is a dependency nobody has asked for | step 6 shows the enrolment URL, selectable, to type or hand over |
@@ -94,6 +99,66 @@ launchd agents); and "an instance id" (`metistry init` mints one into
 An empty destination is not listed as a greyed-out placeholder. §3.15's
 distinction holds throughout: *empty* (nothing has happened) and *absent* (never
 configured) are different states, and neither is a failure.
+
+## Signing in: this Mac is the owner, and it never sees the token
+
+**The decision (owner, 2026-09-10).** The app is the same package as the CLI,
+on the same machine, running as the same person. It therefore authenticates to
+the **local** console *implicitly* — by a token only the logged-in user can
+read — and never by a passkey ceremony. Passkeys stay exactly as they were, for
+browsers, the phone, and every remote client. `docs/ops/auth.md` is the
+console's side of this; what follows is the app's.
+
+**The one call, and it is not HTTP.** On launch and on every instance switch
+the app runs
+
+```
+metistry console whoami --json
+```
+
+and renders what came back. It does **not** read the login Keychain from Swift,
+does **not** open `<instance>/state/.env`, and sends **no `Authorization`
+header** anywhere. The CLI is the one place that knows where
+`METISTRY_LOCAL_OWNER_TOKEN` lives, and it presents it over loopback without the
+value ever reaching this process — `ConsoleWhoami` has no field a token could
+land in. `apps/macos/tests/kit/console-sign-in-tests.swift` walks
+`apps/macos/sources` and asserts all of that: one file uses `URLSession`, no
+file sets a header other than `content-type`/`cookie`, no file names a Keychain
+API, and no file opens a file at all.
+
+**The five states, and what each says on screen.** Told apart by the CLI's exit
+code and by three phrases in its own message — never by the variable's name,
+which is being renamed and must not be load-bearing.
+
+| state | header / Connections | dot | what it offers |
+| --- | --- | --- | --- |
+| **signed in** | "Signed in as owner (local token)", with `via local_owner_token`, `management yes` and the console URL | `ok` | nothing — there is nothing to do |
+| **CLI too old** | "Cannot ask — this install's CLI has no `console whoami`" | `degraded` | `metistry update`. The install works; this app's view of it does not |
+| **token unset** | "No local owner token on this install", with the CLI's own line | `absent` | `metistry secrets sync --to env`, then `metistry restart console` — both, in that order, because a freshly minted token does nothing until the console is restarted with it |
+| **unreachable** | "The console did not answer", with the transport error verbatim | `failed` | nothing. No command this app could name would fix it |
+| **401** | "The console refused the token (401)" | `failed` | the same two commands, plus **which cause is likelier**: under `compose` the loopback rule (Docker's NAT means the console sees the bridge gateway, so it needs `METISTRY_TRUSTED_LOOPBACK_PROXY`); under `launchd`, that the value here is not the one the console was *started* with. Shape unknown → both, said as both |
+
+`absent` for an unminted token is the same rule as everywhere else: a thing
+nobody configured is a fact, not a fault.
+
+**Where it appears.** One `ConsoleSignInModel` for the whole app, so no two
+screens can disagree and the question is asked once per launch rather than four
+times: the Status panel's header (under the doctor summary, with `via`),
+Settings → Connections (the full card, with the remedy and the exact argument
+array), the menu bar (a second dot beside the `console` row, and the headline
+inside its submenu — a service being *up* and a service *knowing who you are*
+are different questions), and the wizard's step 6, which now leads with it.
+
+**What the app can and cannot call.** It can ask who it is. It cannot make any
+other authenticated console call, because PR #119 added `console whoami` and
+nothing else — there is no verb that performs an arbitrary authenticated
+request on the app's behalf, and none that prints a bearer to the calling
+process alone. Everything on the owner surface (devices, agents, projects,
+proposals, artifacts, targets, dispatch) is therefore the PWA's job for now.
+Adding it is a **CLI change first**: a `metistry console call <METHOD> <path>`
+keeps the token out of this process entirely, which a token-printing verb would
+not, and keeps the rule that makes this app safe — a front end for the CLI,
+never a second implementation.
 
 ## What `ASAuthorization` actually says about a local origin
 
@@ -260,6 +325,7 @@ fourth one fails CI rather than appearing quietly.
 | Services | shape, and which file it came from | `doctor --json` → the `deployment` row's `meta` (the CLI resolved the D4 overlay) |
 | Services | the service list with status | the same `meta`'s service plan, matched against doctor's `service` rows |
 | Services | Start at login | `SMAppService.mainApp` — macOS keeps the registration; the app writes nothing (above) |
+| Connections | console sign-in: who this Mac is, with `via`, the remedy, and the argument array | `metistry console whoami --json` — the app never resolves, holds or displays the token ("Signing in" above) |
 | Connections | instance repo status, HEAD, queue depth | `doctor --json` → the `reconciler` row's `meta`. The reconciler is the sole committer, so the app runs no git of its own |
 | Connections | Claude token set / not set | `metistry secrets list --json` — never a value |
 | Connections | bridges | `doctor --json` → the `bridge` rows |
@@ -270,6 +336,7 @@ fourth one fails CI rather than appearing quietly.
 | Advanced | product and bundled-runtime versions | `metistry version --json` |
 | Advanced | developer runtime override | the persisted pointer |
 | Advanced | Run doctor | `metistry doctor --json` |
+| Advanced | passkey diagnostic ("Ask macOS") | `ASAuthorization` against the console's relying party with a LOCAL challenge — nothing is sent and nothing can be enrolled. It was wizard step 6 until 2026-09-10; it is a diagnostic, not a setup step |
 | Advanced | log folder | the launchd plists' `StandardOutPath` convention (`/tmp/metistry-<name>.log`), labelled as a convention. The menu's **View Log** uses `metistry logs <name> --lines 200` instead, because a container's or a systemd unit's log is not a file here |
 
 **There are no file reads left.** The scaffold read `identity.yaml` and

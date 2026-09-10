@@ -86,6 +86,10 @@ public final class SettingsModel {
     /// The shared doctor report. Services and Connections render it; they never
     /// run their own probes (invariant 3 — one read path).
     public let status: StatusModel
+    /// Who the console takes this Mac to be. The app's one sign-in model, shared
+    /// with the Status header, the menu bar and the wizard — Connections renders
+    /// it, and no pane asks the question a second time.
+    public let consoleSignIn: ConsoleSignInModel
     public private(set) var cli: MetistryCLI?
     public private(set) var instanceDir: URL?
 
@@ -100,10 +104,16 @@ public final class SettingsModel {
     public private(set) var secretsPhase: ReadPhase = .idle
     public private(set) var secretsCommand: String?
 
-    public init(status: StatusModel, cli: MetistryCLI?, instanceDir: URL?) {
+    public init(
+        status: StatusModel,
+        cli: MetistryCLI?,
+        instanceDir: URL?,
+        consoleSignIn: ConsoleSignInModel? = nil
+    ) {
         self.status = status
         self.cli = cli
         self.instanceDir = instanceDir
+        self.consoleSignIn = consoleSignIn ?? ConsoleSignInModel(cli: cli)
     }
 
     /// Re-point at another install. Everything read-through is dropped rather
@@ -252,4 +262,14 @@ public final class SettingsModel {
     }
 
     public var bridges: [DoctorRow] { status.report?.bridges ?? [] }
+
+    /// What the Connections pane says about the console's door, under the
+    /// sign-in state itself. The decision, in one paragraph, because "why does
+    /// this Mac not need a passkey?" is the question the row provokes.
+    public static let consoleSignInNote =
+        "This Mac authenticates to the LOCAL console implicitly: the app and the `metistry` command are the same package on the "
+        + "same machine, so the console accepts \(ConsoleSignIn.tokenVariable) as the `user` principal — the same principal a "
+        + "passkey session yields — but only over a connection from this machine (docs/ops/auth.md). The app never reads the "
+        + "token: `metistry console whoami --json` resolves it, presents it, and prints the answer, and there is no field on "
+        + "this pane that could hold a value. Passkeys are unchanged, and are what a browser or a phone enrols."
 }

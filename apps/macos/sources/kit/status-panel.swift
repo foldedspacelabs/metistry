@@ -13,10 +13,12 @@ import SwiftUI
 public struct StatusPanel: View {
     @Environment(\.colorScheme) private var scheme
     private let model: StatusModel
+    private let signIn: ConsoleSignInModel
     private let runtime: MetistryRuntime?
 
-    public init(model: StatusModel, runtime: MetistryRuntime?) {
+    public init(model: StatusModel, signIn: ConsoleSignInModel, runtime: MetistryRuntime?) {
         self.model = model
+        self.signIn = signIn
         self.runtime = runtime
     }
 
@@ -43,6 +45,11 @@ public struct StatusPanel: View {
         .background(p[.bg])
         .task {
             if model.phase == .idle { await model.refresh() }
+            // Doctor first, then whoami: a 401's diagnosis wants the resolved
+            // deployment shape to say which of the loopback rule and a stale
+            // value is likelier, and doctor is the only thing that knows it.
+            signIn.shape = model.report?.shape
+            await signIn.refreshIfNeeded()
         }
     }
 
@@ -55,6 +62,7 @@ public struct StatusPanel: View {
                 // The summary answers before the page is read (§3.13).
                 Text(model.report?.summary ?? summaryPlaceholder)
                     .metistryText(.footnote, p, .textSecondary)
+                signInLine(p)
             }
             Spacer(minLength: MetistrySpace.s4)
             Button {
@@ -69,6 +77,38 @@ public struct StatusPanel: View {
             .disabled(model.isChecking)
             .accessibilityLabel("Run metistry doctor again")
         }
+    }
+
+    /// Who this Mac is to the console, on the line under the summary.
+    ///
+    /// It is a header line and not a doctor row because it answers a different
+    /// question: doctor's `console` row says whether the service is up, and this
+    /// says whether it takes this Mac as the owner. The detail — `via`, and the
+    /// exact command when there is one to run — is under Settings → Connections;
+    /// this line is the one sentence, and it never has a token in it to show
+    /// (`ConsoleWhoami` has no field for one).
+    @ViewBuilder
+    private func signInLine(_ p: Palette) -> some View {
+        HStack(spacing: MetistrySpace.s2) {
+            if signIn.isChecking {
+                ProgressView().controlSize(.small)
+            } else if let status = signIn.status {
+                Image(systemName: status.symbolName)
+                    .foregroundStyle(p[status.colorRole])
+                    .accessibilityHidden(true)
+            }
+            Text(signIn.headline)
+                .metistryText(.footnote, p, signIn.status?.colorRole ?? .textTertiary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+            if let via = signIn.signIn?.whoami?.via {
+                Text("via \(via)")
+                    .metistryText(.caption1, p, .textTertiary)
+                    .textSelection(.enabled)
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Console sign-in: \(signIn.headline)")
     }
 
     private var summaryPlaceholder: String {

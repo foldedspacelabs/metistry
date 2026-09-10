@@ -1,18 +1,37 @@
-// The app's first HTTP client for the console, and it speaks exactly the four
-// routes the PWA speaks — no more.
+// The app's ONE client for the console. Everything the app asks the console —
+// now and later — goes through this type, and it has exactly two surfaces.
 //
-// `apps/console/web/app.js` is the reference implementation and this mirrors it
-// field for field: `POST /auth/enroll/start` with `{code}` answering
-// `{options}`, `POST /auth/enroll/finish` with `{code, label, response}`
-// answering `{ok}` plus a `metistry_session` cookie, `POST /auth/login/start`
-// answering `{key, options}`, and `GET /health`. There are no private endpoints
-// for the app (docs/product/desktop-app-plan.md, ratified: "no private
-// endpoints"), so a native client that needed a route the PWA does not have
-// would be a design error rather than a missing feature.
+// THE PUBLIC SURFACE, over HTTP, speaks exactly the four routes the PWA speaks
+// and no more. `apps/console/web/app.js` is the reference implementation and
+// this mirrors it field for field: `POST /auth/enroll/start` with `{code}`
+// answering `{options}`, `POST /auth/enroll/finish` with
+// `{code, label, response}` answering `{ok}` plus a `metistry_session` cookie,
+// `POST /auth/login/start` answering `{key, options}`, and `GET /health`. All
+// four are unauthenticated by design — they are the bootstrap, the thing you
+// can reach before you have a door. There are no private endpoints for the app
+// (docs/product/desktop-app-plan.md, ratified), so a native client that needed
+// a route the PWA does not have would be a design error rather than a missing
+// feature.
+//
+// THE AUTHENTICATED SURFACE is not HTTP at all: it is the CLI. `signIn` runs
+// `metistry console whoami --json` and renders the answer (console-sign-in.swift).
+// The app does not read the login Keychain, does not parse `<instance>/state/.env`,
+// and sends no `Authorization` header anywhere — because there is no CLI verb
+// that would hand it a bearer scoped to the calling process, and inventing one
+// in Swift would be exactly the second implementation this app exists not to be.
+//
+// SO: WHAT THE APP CAN AND CANNOT CALL TODAY. It can ask *who it is*. It cannot
+// make any other authenticated console call — devices, agents, projects,
+// proposals, dispatch are all `user`-gated and all unreachable from here until
+// the CLI grows a verb that performs the request (a `metistry console call
+// GET /api/…`) or one that prints a token to the calling process alone. Neither
+// exists (PR #119 added `console whoami` and nothing else), and this app will
+// not add either from the Swift side. The console's own PWA is the answer in
+// the meantime.
 //
 // WHAT THIS IS NOT. It is not a second read path into state (invariant 3): the
-// only things asked for here are the WebAuthn ceremony's own challenge and the
-// console's liveness. Everything else the app shows still comes from a
+// only things asked for over HTTP are the WebAuthn ceremony's own challenge and
+// the console's liveness. Everything else the app shows still comes from a
 // `metistry` verb.
 
 import Foundation
@@ -285,6 +304,46 @@ public struct ConsoleClient: Sendable {
             return .success(options)
         case .failure(let error):
             return .failure(error)
+        }
+    }
+
+    /// Every route this client speaks over HTTP, and the fact that matters
+    /// about each: all four are the console's PUBLIC bootstrap surface. A test
+    /// asserts this list is the whole of it and that nothing in the app sends
+    /// an `Authorization` header (console-sign-in-tests.swift).
+    public static let publicRoutes = [
+        "GET /health",
+        "POST /auth/login/start",
+        "POST /auth/enroll/start",
+        "POST /auth/enroll/finish",
+    ]
+
+    /// The verb behind the authenticated surface, named once so the screens
+    /// that print "here is what was run" and the code that runs it cannot drift.
+    public static let whoamiVerb = ["console", "whoami", "--json"]
+
+    /// **The app's only authenticated console call**, and it is made by the CLI.
+    ///
+    /// `metistry console whoami --json` resolves the local owner token itself —
+    /// environment, then the instance's Keychain account, then the user's
+    /// (`packages/cli/src/console-client.ts`) — presents it as a bearer over
+    /// loopback, and prints the answer. The token never reaches argv, never
+    /// reaches this process, and has no field to land in on the way back
+    /// (`ConsoleWhoami`).
+    ///
+    /// It cannot throw a "signed in" it did not get: every failure path is one
+    /// of `ConsoleSignIn`'s five states, each carrying the CLI's own words.
+    public static func signIn(using cli: MetistryCLI?, shape: String?) async -> ConsoleSignIn {
+        guard let cli else {
+            return .cliTooOld(CLIReadError.noRuntime.localizedDescription)
+        }
+        do {
+            let result = try await cli.run(whoamiVerb)
+            return ConsoleSignIn.from(result, shape: shape)
+        } catch {
+            // The process could not be started at all — not an answer from the
+            // console, and it must not be dressed as one.
+            return .unreachable("could not run `metistry console whoami`: \(error.localizedDescription)")
         }
     }
 

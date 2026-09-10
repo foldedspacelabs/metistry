@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// `metistry` — init | connect-repo | secrets | doctor | up | update (plan
+// `metistry` — init | connect-repo | secrets | console | doctor | up | update (plan
 // §4.16; connect-repo and secrets are the install verbs the Mac app drives,
 // docs/product/desktop-app-plan.md). Hand-rolled argument parsing: a handful
 // of subcommands and flags does not justify a dependency this project would
@@ -14,6 +14,7 @@ import { doctor, renderTable, type DoctorDeps } from "./doctor.js";
 import { loadInstallEnv, productVersion, resolveProductDir, resolveSeedDir, type LoadedEnv } from "./env.js";
 import { realExec, type Exec } from "./exec.js";
 import { AUTH_MODES, connectRepo, type AuthMode } from "./connect-repo.js";
+import { renderWhoami, whoami } from "./console-client.js";
 import { importSessions } from "./import-sessions.js";
 import { init } from "./init.js";
 import { ensureInstanceId, instanceEnvFile, readInstanceId } from "./instance.js";
@@ -146,6 +147,16 @@ const USAGE = `metistry — Metistry command line
       under the shared per-user account — secrets.ts SECRET_SCOPES is the table.
       purge deletes one instance's items and nothing else; without --yes it only
       previews.
+
+  metistry console whoami [--json] [--instance <dir>] [--env-file <path>]
+      Ask the console who it thinks you are, using this install's
+      METISTRY_OWNER_TOKEN (docs/ops/auth.md): principal, how it was proved,
+      and whether that credential reaches the management surface. The local
+      owner token authenticates as the "user" principal — the same principal
+      a passkey session yields — but only over a connection from THIS
+      machine, so this is also the check that the door works before the Mac
+      app is blamed for it. The token comes from the environment
+      (<instance>/state/.env) or the login Keychain, and is never printed.
 
   metistry identity [--json] [--instance <dir>]
       The instance's identity.yaml (name, mention, voice, icon, instance_id) —
@@ -449,6 +460,25 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
       }
       out(flags.json === true ? JSON.stringify(identity, null, 2) : renderIdentity(identity));
       return 0;
+    }
+    case "console": {
+      if (positional[0] !== "whoami") {
+        err("usage: metistry console whoami [--json] [--instance <dir>] [--env-file <path>]");
+        return 2;
+      }
+      const loaded = loadEnv();
+      try {
+        const w = await whoami({
+          ...(loaded.instanceDir ? { instanceId: await readInstanceId(loaded.instanceDir) } : {}),
+          ...(io.exec ? { exec: io.exec } : {}),
+          ...(io.platform ? { platform: io.platform } : {}),
+        });
+        out(flags.json === true ? JSON.stringify(w, null, 2) : renderWhoami(w));
+        return 0;
+      } catch (e) {
+        err(`metistry console whoami: ${e instanceof Error ? e.message : String(e)}`);
+        return 1;
+      }
     }
     case "version": {
       const loaded = loadEnv();

@@ -1017,3 +1017,26 @@ beside a live install without disturbing it, **several instances can now
 run on one Mac at once**, each with its own jobs, ports and logs: the
 groundwork for the app holding a real install and a test install side by
 side.
+
+**2026-09-10 — the app signs in without a ceremony, and the door proves it.**
+The Mac app is the same package as the CLI, on the same machine, running as
+the same person; asking it to perform a passkey ceremony against a local
+origin was theatre, because anything that could impersonate it could also
+read the passkey's own storage. So a **local owner token** now authenticates
+the app to a console on this machine as the *same principal* a passkey
+session yields — one predicate in the code gates both, so they cannot drift
+— and it is refused, with an audit line, from any address that is not this
+machine. Remote clients (a browser, the phone) are unchanged: they still
+enroll passkeys. The safety mechanism is that the rule is decided from the
+TCP socket and nothing else — `X-Forwarded-For` and friends are the caller's
+to write and are never read — and the refusal is byte-identical to what an
+unknown token gets, so a prober learns nothing from holding the real secret.
+Proven live, including the container case a compose install actually has:
+the host reaching the published loopback port succeeds, a sibling container
+on the same network holding the same token gets 401. **The user-visible
+promise: the app shows "signed in as owner" the moment it opens, `metistry
+doctor` now reports a real authenticated health read instead of a hopeful
+401, and a leaked token still cannot be used from off your Mac.** A passkey
+misconfiguration also stopped looking like a broken console: an origin
+mismatch answers 401 naming the origin it expected and the one it got,
+instead of HTTP 500.

@@ -1,4 +1,4 @@
-# `metistry` — init, connect-repo, secrets, doctor, up, update, service control
+# `metistry` — init, connect-repo, secrets, console, doctor, up, update, service control
 
 `packages/cli` (`@foldedspacelabs/metistry-cli`, plan §4.16: `init | doctor
 | up | update`, plus the install verbs the Mac app drives — `connect-repo`,
@@ -12,6 +12,7 @@ All of them are real.
 | `init <dir>` | create a private instance repo |
 | `connect-repo <url>` | point the instance repo at a remote, mint credentials the reconciler can push with |
 | `secrets sync\|mint\|list [--json]` | move secrets between the Keychain and `.env` |
+| `console whoami [--json]` | ask the console who it thinks you are, with this install's owner token |
 | `identity [--json]` | the instance's identity.yaml (name, mention, voice, icon, instance_id) |
 | `--version` / `version [--json]` | this CLI's version, the resolved product dir's, the lock's pin, and a release's runtime pack |
 | `deployment [--json]` | the effective shape (D4 overlay) and the services it implies, with cheap running state |
@@ -49,6 +50,8 @@ node packages/cli/dist/main.js secrets list
 node packages/cli/dist/main.js secrets list --json
 
 # what the app's Settings/Advanced panes and its first-run wizard read instead of parsing files themselves
+node packages/cli/dist/main.js console whoami          # "signed in as owner" — docs/ops/auth.md
+node packages/cli/dist/main.js console whoami --json
 node packages/cli/dist/main.js identity --json
 node packages/cli/dist/main.js --version
 node packages/cli/dist/main.js deployment --json
@@ -56,9 +59,9 @@ node packages/cli/dist/main.js deployment set-shape launchd            # preview
 node packages/cli/dist/main.js deployment set-shape launchd --yes      # writes it
 ```
 
-## `identity`, `version`, `deployment`: what the app reads instead of the files
+## `identity`, `version`, `deployment`, `console whoami`: what the app reads instead of the files
 
-Four small, read-mostly verbs exist so the Mac app stops parsing
+Five small, read-mostly verbs exist so the Mac app stops parsing
 `identity.yaml`, `package.json` and the `secrets list` table itself
 (`apps/macos/sources/kit/instance-files.swift`,
 `apps/macos/sources/kit/secret-listing.swift`) — the same "a behaviour the
@@ -100,6 +103,30 @@ because the data does not move between shapes on its own
 the shape change, then `metistry up` would do. `--force` writes anyway.
 `reconciler`/`watchdog` being up is never a reason to refuse: they are host
 jobs under either shape (invariant 6).
+
+`metistry console whoami [--json]` asks the running console who it thinks
+you are, presenting this install's `METISTRY_OWNER_TOKEN`
+(`docs/ops/auth.md`): the principal, how it was proved, and whether that
+credential reaches the management surface. This is what the app calls to
+render "signed in as owner" without a passkey ceremony, and what an
+operator runs to prove the local door works before blaming the app.
+
+```
+$ metistry console whoami
+console    http://127.0.0.1:8080
+principal  user
+via        local_owner_token
+management yes
+origin     https://your-hostname.example
+```
+
+The URL comes from `METISTRY_CONSOLE_URL`, then `METISTRY_URL`, then
+`http://127.0.0.1:8080`. The token comes from the environment
+(`<instance>/state/.env`) or the login Keychain — this instance's account
+first, the per-user one behind it — and never reaches argv, stdout or an
+error message. A 401 is one of exactly two things and the error names both:
+a token the console was not started with, or a request that did not arrive
+from this machine (under compose, the NAT question — `docs/ops/auth.md`).
 
 Package-level detail (flags, resolution order, probe table) lives in
 `packages/cli/README.md`; this page is the operator's runbook.
@@ -174,13 +201,19 @@ created` authored `Metistry <metistry@localhost>`:
 
 It refuses a non-empty directory unless `--force`, never prompts, and
 **never writes a secret**. What it prints at the end is the next step —
-three lines for `<dir>/state/.env`, this instance's own environment:
+four lines for `<dir>/state/.env`, this instance's own environment:
 
 ```
 METISTRY_INSTANCE_DIR=<dir>
 METISTRY_BRIDGE_TOKEN_RECONCILER=<minted once; shown only here>
 METISTRY_RECONCILER_URL=http://host.docker.internal:7812
+METISTRY_OWNER_TOKEN=<minted once; shown only here>
 ```
+
+`METISTRY_OWNER_TOKEN` is the console's local owner door
+(`docs/ops/auth.md`): presented from this machine it authenticates as the
+`user` principal, which is how the Mac app and `metistry console whoami`
+reach the console without a passkey ceremony.
 
 Then `pnpm -r build && metistry up` — containers, every launchd job,
 doctor (below). Add a private remote to the instance repo whenever you
@@ -333,7 +366,7 @@ cannot disagree:
 
 | scope | account | which variables |
 | --- | --- | --- |
-| **instance** | the instance's `instance_id` | `METISTRY_DB_PASSWORD`, every `METISTRY_BRIDGE_TOKEN_*`, `METISTRY_ASSISTANT_TOKEN`, `METISTRY_VAPID_*`, `METISTRY_GITHUB_*` — **and anything not listed**, because self-containment is the rule |
+| **instance** | the instance's `instance_id` | `METISTRY_DB_PASSWORD`, `METISTRY_OWNER_TOKEN`, every `METISTRY_BRIDGE_TOKEN_*`, `METISTRY_ASSISTANT_TOKEN`, `METISTRY_VAPID_*`, `METISTRY_GITHUB_*` — **and anything not listed**, because self-containment is the rule |
 | **user** | `metistry` (override: `METISTRY_KEYCHAIN_ACCOUNT`) | `CLAUDE_CODE_OAUTH_TOKEN` (one Claude login per Mac), `METISTRY_AWS_SECRET_ACCESS_KEY`, `METISTRY_AWS_SESSION_TOKEN` (your AWS account, not this instance's) |
 
 `METISTRY_SIGN_IDENTITY` and `METISTRY_GITHUB_OAUTH_CLIENT_ID` are not
@@ -350,6 +383,24 @@ so `instance / user` reads "not migrated yet".
 With no `instance_id` available — no instance directory configured, or one
 created before 2026-09-09 that has not run `sync`/`up` yet — every secret
 stays under the user account exactly as before.
+
+**`sync --to env` mints the generated ones.** A secret that exists in
+neither the Keychain nor `.env` is normally reported ("not in the Keychain,
+left as they are") — inventing a GitHub PAT would be nonsense. The
+exception is `GENERATED_SECRETS` (`packages/cli/src/secrets.ts`): a secret
+whose value means nothing outside this install, so minting one can never be
+the wrong guess and nobody has to paste it anywhere. `metistry up`'s
+generated `METISTRY_DB_PASSWORD` is the precedent; `METISTRY_OWNER_TOKEN`
+(`docs/ops/auth.md`) is the current list. An install that predates the
+variable gains one on the next sync — restart the console for it to take
+effect:
+
+```
+$ metistry secrets sync --to env
+minted METISTRY_OWNER_TOKEN — it was in neither the Keychain nor …/state/.env:
+  the console's local owner door — an install that predates it gets one here
+restart the console for a freshly minted secret to take effect (`metistry restart console`).
+```
 
 ### `secrets purge --instance <dir>`
 
@@ -488,8 +539,13 @@ doctor runs on the host). The bridge's own `check()` — a *behavioral* probe
 (apple-fm classifies a sentence; eventkit reads a calendar; the reconciler
 reads `HEAD` and lists `Knowledge/`) — is what decides `ok` vs `degraded`,
 and its remediation string is what you see. The console's `/health` and
-`/api/status` are hit directly (`401` on `/api/status` is correct — a
-passkey session is required — anything else non-200 is not). Then the db
+`/api/status` are hit directly, and with `METISTRY_OWNER_TOKEN` in the
+environment `/api/status` is a real **authenticated** read through the same
+door the Mac app uses (`docs/ops/auth.md`) — `meta.authenticated` says which
+it was. A refused token *degrades* that row (the console is up and serving)
+and names both causes: a `.env` the console was not started with, or a
+request that did not arrive from this machine. Without the token, `401` is
+still correct and still passes — a passkey session is required. Then the db
 (`SELECT 1`, and `schema_migrations` vs `db/migrations/*.sql`), the launchd
 jobs behind every plist in `ops/launchd` (macOS), and `docker compose ps`
 against the services in `docker-compose.yml`.

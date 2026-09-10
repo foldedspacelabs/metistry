@@ -75,7 +75,7 @@ describe("the app's launcher file", () => {
 
   it("names the same file the bundled MetistrySupervisor script reads", async () => {
     expect(supervisorLauncherEnvPath("/Users/o")).toBe("/Users/o/Library/Application Support/Metistry/supervisor.env");
-    const script = await readFile(join(REPO, "apps", "macos", "resources", "launchd", "MetistrySupervisor"), "utf8");
+    const script = await readFile(join(REPO, "apps", "macos", "resources", "launchd", "metistry-supervisor"), "utf8");
     expect(script).toContain('conf="$HOME/Library/Application Support/Metistry/supervisor.env"');
     for (const v of ["METISTRY_SUPERVISOR_BIN", "METISTRY_SUPERVISOR_MAIN", "METISTRY_SUPERVISOR_CONFIG"]) expect(script).toContain(v);
     // and the plist the app registers names that script, bundle-relative

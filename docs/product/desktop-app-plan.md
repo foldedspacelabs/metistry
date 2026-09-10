@@ -146,6 +146,49 @@ forced.
   directories, and a terminal `metistry up` and the app would install
   different job sets. It stays a CLI change first.
 
+**Decision 0 — one background item, named Metistry (2026-09-10).** macOS
+shows one background item per launchd agent, named after its program, so the
+five-agent launchd shape introduced itself as "postgres", "node", "node",
+"node" — `sfltool dumpbtm` on the Studio said `Executable Path: /bin/sh` four
+times. Under the launchd shape the core is now **one agent**,
+`com.foldedspacelabs.metistry`, whose program is a symlink named `Metistry`;
+Postgres, the console, the reconciler, the assistant and any configured
+bridge are its children, with ordered start, per-child restart policy,
+per-child logs and a local control socket that `metistry restart|stop|start
+<service>` speaks. The TCC helpers keep an agent each — a grant attaches to
+the binary that asks — renamed `…metistry.calendar` and displayed as
+"Metistry Calendar Access" / "Metistry Apple Intelligence", with their bundle
+identifiers untouched so no install re-consents.
+`docs/ops/deployment-shapes.md` is the reference.
+
+**The remaining app change, precisely.** The bundle now carries
+`Contents/Library/LaunchAgents/com.foldedspacelabs.metistry.plist` and its
+`BundleProgram`, `Contents/MacOS/MetistrySupervisor`; `metistry up
+--register-via app` installs everything except that agent and writes
+`~/Library/Application Support/Metistry/supervisor.env` for it. What is left
+is in `apps/macos`:
+
+1. `sources/kit/login-item.swift` — a second seam beside `LoginItemService`,
+   e.g. `AgentRegistrationService` with the same four calls
+   (`currentStatus`/`register`/`unregister`/`openSystemSettings`) and its own
+   `LoginItemModel`-shaped model. Reuse `LoginItemStatus`: the status enum is
+   `SMAppService.Status` either way.
+2. `sources/app/login-item-service.swift` — the implementation:
+   `SMAppService.agent(plistName: "com.foldedspacelabs.metistry.plist")`.
+3. `sources/kit/settings-view.swift` — a Services row: "Run Metistry in the
+   background", with `notFound` explained as "this build is not an app
+   bundle" exactly as the existing row does.
+4. The CLI call: the app's `metistry up` invocation gains `--register-via
+   app` when it is running from a bundle (`runtime-locator.swift` already
+   knows whether it is).
+5. `tests/kit/` — the fake, and the states: `notRegistered` before the first
+   run, `requiresApproval` after `register()` on a fresh Mac, `enabled`
+   after approval, and `notFound` for a `swift build` executable.
+
+Deliberately NOT in the CLI change that made it possible: it is ~150 lines of
+Swift with its own tests and its own prose, and the terminal path must keep
+working unchanged either way.
+
 **Decision 1 — where a bundled install's writable product dir lives:
 `~/Library/Application Support/Metistry/product`.** The bundle is a **seed**
 (the first of the two options above, which "Two channels, both signed" below
@@ -313,7 +356,7 @@ identical, so open-source users and the app share one tested path
 5. *Services.* `metistry up`, preceded by `metistry deployment set-shape`
    after a preview of what the other shape would do. `doctor` becomes the
    app's status view and menu-bar item. **`SMAppService` registers the APP**
-   as a login item (built 2026-09-10); the install's launchd agents stay
+   as a login item (built 2026-09-10); the install's one launchd agent stays
    `metistry up`'s, and moving them is a CLI change first — see below.
 6. *Door.* **Optional, and usually already done** (owner decision
    2026-09-10, "Decision 3" below): this Mac is signed in to the local

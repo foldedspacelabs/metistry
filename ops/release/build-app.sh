@@ -119,40 +119,51 @@ say "icon: placeholder (ops/release/make-app-icon.mjs — replace before launch)
 
 # ---- the product runtime, if we were handed one ----
 resources_metistry="$contents/Resources/metistry"
-unpack_into() { # <tar.gz|dir> <destination dir>
+
+# Both packs are tarballs with exactly one top-level directory
+# (`metistry-<version>/` and `runtime/`). Given a DIRECTORY instead, the
+# directory IS that top level — so `--runtime-deps <product>/runtime` works,
+# and neither flag can be pointed at a parent and quietly copy a whole
+# checkout. Either way the result lands at <dest>, renamed.
+place_pack() { # <tar.gz|dir> <destination path>
   local src="$1" dest="$2"
-  mkdir -p "$dest"
+  rm -rf "$dest"
+  mkdir -p "$(dirname "$dest")"
   if [ -d "$src" ]; then
-    cp -R "$src/." "$dest/"
-  else
-    tar -xzf "$src" -C "$dest"
+    cp -R "$src" "$dest"
+    return
   fi
+  local staging
+  staging="$(mktemp -d "$icon_tmp/pack.XXXXXX")"
+  tar -xzf "$src" -C "$staging"
+  local top
+  top="$(find "$staging" -mindepth 1 -maxdepth 1 -type d)"
+  [ "$(printf '%s\n' "$top" | wc -l | tr -d ' ')" = "1" ] && [ -n "$top" ] \
+    || die "$src does not have exactly one top-level directory — is it a Metistry pack?"
+  mv "$top" "$dest"
 }
 
 if [ -n "$runtime_src" ]; then
   [ -e "$runtime_src" ] || die "--runtime $runtime_src does not exist"
   say "embedding the runtime pack from $runtime_src"
-  mkdir -p "$resources_metistry/releases"
-  staging="$icon_tmp/runtime-pack"
-  unpack_into "$runtime_src" "$staging"
-  # The pack's single top-level directory is `metistry-<version>/`
-  # (ops/release/pack-runtime.sh); rename it to the release coordinate so the
-  # layout is byte-for-byte what `metistry update` would have produced.
-  top="$(find "$staging" -mindepth 1 -maxdepth 1 -type d | head -1)"
-  [ -n "$top" ] || die "--runtime $runtime_src had no top-level directory"
-  mv "$top" "$resources_metistry/releases/$version"
+  # releases/<version> + a RELATIVE `current` symlink: byte-for-byte the layout
+  # `metistry update` produces in release mode, so the app's locator and the CLI
+  # agree, and the bundle survives being moved to /Applications.
+  place_pack "$runtime_src" "$resources_metistry/releases/$version"
   ( cd "$resources_metistry" && ln -sfn "releases/$version" current )
+  [ -f "$resources_metistry/current/packages/cli/dist/main.js" ] \
+    || die "the runtime pack has no packages/cli/dist/main.js — the app would find no CLI inside itself"
   say "  Contents/Resources/metistry/current -> releases/$version"
 fi
 
 if [ -n "$runtime_deps_src" ]; then
   [ -e "$runtime_deps_src" ] || die "--runtime-deps $runtime_deps_src does not exist"
   say "embedding the bundled runtime (Node, Postgres, git) from $runtime_deps_src"
-  mkdir -p "$resources_metistry"
-  # Its single top-level directory is `runtime/`, so it unpacks straight in —
-  # beside releases/, never inside one (docs/ops/bundled-runtime.md).
-  unpack_into "$runtime_deps_src" "$resources_metistry"
-  [ -x "$resources_metistry/runtime/node/bin/node" ] || say "  WARNING: no runtime/node/bin/node — the app will not find a bundled CLI"
+  # Beside releases/, never inside one, so a version flip never orphans the
+  # Postgres the plists point at (docs/ops/bundled-runtime.md).
+  place_pack "$runtime_deps_src" "$resources_metistry/runtime"
+  [ -x "$resources_metistry/runtime/node/bin/node" ] \
+    || die "no runtime/node/bin/node in $runtime_deps_src — the app would find no bundled CLI"
 fi
 
 # ---------------------------------------------------------------- 3. sign

@@ -38,10 +38,10 @@ import { doctor, renderTable, type DoctorDeps, type DoctorReport } from "./docto
 import type { Exec } from "./exec.js";
 import { labelFor, launchdCommands, loadPlistTemplates, launchAgentsDir, renderPlist, withEnvironmentVariables, type PlistTemplate } from "./launchd.js";
 import { loadNamespace } from "./namespace.js";
-import { findPgToolchain, pgCandidates, pgSocketDir, type PgToolchain } from "./postgres.js";
+import { findPgToolchain, pgCandidates, pgDataDir, pgIsReady, pgSocketDir, type PgToolchain } from "./postgres.js";
 import { runtimeDir, runtimeNodeBin, RUNTIME_DIRNAME } from "./runtime-deps.js";
 import { StepFailed, StepRunner } from "./steps.js";
-import { awaitBootout, composeEnvArgs, instanceLock, runDirFor, stateRoot, up, type UpOptions, type UpResult } from "./up.js";
+import { awaitBootout, composeEnvArgs, COMPOSE_TIMEOUT_MS, instanceLock, runDirFor, stateRoot, up, type UpOptions, type UpResult } from "./up.js";
 
 /** The services that actually change supervisor. `reconciler` and `watchdog` are host jobs in either shape (invariant 6). */
 export const SHAPE_SERVICES = ["db", "console", "assistant"] as const;
@@ -579,7 +579,7 @@ export async function migrateShape(opts: MigrateShapeOptions): Promise<MigrateSh
       throw new StepFailed(`this install is already shape: ${opts.target} (from ${loaded.from}) — nothing to migrate`);
     }
     dumpPath =
-      opts.target === "launchd" ? await toLaunchd(ctx, opts, exists, loaded.deployment) : await toCompose(ctx, opts, loaded.deployment);
+      opts.target === "launchd" ? await toLaunchd(ctx, opts, exists, loaded.deployment) : await toCompose(ctx, opts, exists, loaded.deployment);
   } catch (err) {
     if (!(err instanceof StepFailed)) throw err;
     r.out(`metistry migrate-shape: ${err.message}`);
@@ -623,107 +623,124 @@ async function toLaunchd(ctx: Ctx, opts: MigrateShapeOptions, exists: (p: string
   const stop = compose(ctx, ["stop", "db"]);
   await r.run(stop.cmd, stop.args, { cwd: stop.cwd, timeoutMs: 10 * 60_000 });
 
-  r.section("deployment.yaml");
-  r.note("a §4.7 protected path — written through the reconciler as the `user` principal, the same path `metistry deployment set-shape` uses (invariant 2)");
-  const set = await (opts.setShapeFn ?? setDeploymentShape)({
-    productDir: ctx.productDir,
-    instanceDir: ctx.instanceDir,
-    targetShape: "launchd",
-    yes: !r.dryRun,
-    // the services this would refuse over are the ones we just stopped, with
-    // a verified dump in hand — which is exactly the condition --force
-    // documents ("the operator saying they already took the dump")
-    force: true,
-    env: ctx.env,
-    platform: ctx.platform,
-    uid: ctx.uid,
-    fetchFn: opts.fetchFn ?? fetch,
-    ...(opts.exec ? { exec: opts.exec } : {}),
-    out: r.out,
-  });
-  r.commands.push(`deployment set-shape launchd (${set.detail})`);
-  if (set.refused) throw new StepFailed(`deployment.yaml was not written: ${set.detail}`);
-  r.note(set.detail);
+  // from here on the compose db is stopped: a failure below must bring
+  // compose back rather than leave the install with neither shape running
+  // (2026-09-10's outage was the ROLLBACK direction of this same defect —
+  // see restoreCompose)
+  try {
+    r.section("deployment.yaml");
+    r.note("a §4.7 protected path — written through the reconciler as the `user` principal, the same path `metistry deployment set-shape` uses (invariant 2)");
+    const set = await (opts.setShapeFn ?? setDeploymentShape)({
+      productDir: ctx.productDir,
+      instanceDir: ctx.instanceDir,
+      targetShape: "launchd",
+      yes: !r.dryRun,
+      // the services this would refuse over are the ones we just stopped, with
+      // a verified dump in hand — which is exactly the condition --force
+      // documents ("the operator saying they already took the dump")
+      force: true,
+      env: ctx.env,
+      platform: ctx.platform,
+      uid: ctx.uid,
+      fetchFn: opts.fetchFn ?? fetch,
+      ...(opts.exec ? { exec: opts.exec } : {}),
+      out: r.out,
+    });
+    r.commands.push(`deployment set-shape launchd (${set.detail})`);
+    if (set.refused) throw new StepFailed(`deployment.yaml was not written: ${set.detail}`);
+    r.note(set.detail);
 
-  r.section("up (launchd)");
-  const upResult = await (opts.upFn ?? up)({
-    productDir: ctx.productDir,
-    env: ctx.env,
-    exec: opts.exec,
-    out: r.out,
-    dryRun: r.dryRun,
-    compose: false,
-    platform: ctx.platform,
-    uid: ctx.uid,
-    home: ctx.home,
-    envFile: opts.envFile,
-    namespace: opts.namespace,
-    // the shape changes; the instance's per-service overrides do NOT — a
-    // `services: { assistant: { enabled: false } }` must survive a migration
-    deployment: { ...current, shape: "launchd" },
-    fetchFn: opts.fetchFn,
-    exists: opts.exists,
-    doctorFn: deferredDoctor,
-  });
-  for (const c of upResult.commands) r.commands.push(c);
-  if (upResult.code !== 0) {
-    throw new StepFailed(
-      `\`metistry up\` failed under the launchd shape (exit ${upResult.code}). The dump is at ${dumpPath} and the compose containers and volume are ` +
-        `untouched — roll back with \`metistry migrate-shape compose\`.`,
-      upResult.code,
-    );
-  }
-
-  r.section("restore");
-  r.note("restored BEFORE any migration runs: the dump carries schema_migrations, so the next `metistry update` finds every file already recorded and applies none");
-  const socketDir = pgSocketDir(stateRoot(ctx.productDir, ctx.env));
-  const conn = ["-h", socketDir, "-p", String(dbPort(ctx.env)), "-U", ctx.env.METISTRY_DB_USER || "metistry", "-d", ctx.env.METISTRY_DB_NAME || "metistry"];
-  await r.run(join(pre.toolchain.bin, "pg_restore"), [...conn, "--no-owner", "--no-privileges", "--exit-on-error", dumpPath], {
-    timeoutMs: 60 * 60_000,
-    comment: "local socket, --auth-local=trust — no password on a command line",
-  });
-
-  if (r.dryRun) {
-    r.action(`${DRY_RUN_COUNTS}, against the restored database — compared with the counts taken beside the dump, and a table that lost rows fails the migration`);
-  } else if (countsSql !== "") {
-    // the SAME text the compose side ran, so a table that did not survive the
-    // restore fails the query rather than quietly dropping out of the diff
-    const after = await r.run(join(pre.toolchain.bin, "psql"), [...conn, "-tA", "--no-psqlrc", "-c", countsSql], { comment: "the same count query, against the restored database" });
-    const now = parseCounts(after.stdout);
-    const lost = countLosses(before, now);
-    if (lost.length > 0) {
-      throw new StepFailed(
-        `the restored database is missing rows the dump had — ${lost.join("; ")}. The dump is at ${dumpPath} and the compose volume is untouched; ` +
-          `roll back with \`metistry migrate-shape compose\` and report this.`,
-      );
+    r.section("up (launchd)");
+    // a SECOND forward run (after a rollback) finds `state/pg` already
+    // initialised — the restored copy, plus whatever launchd wrote before
+    // the rollback — and `up` skips initdb whenever PG_VERSION is there.
+    // `pg_restore --exit-on-error` into a database that already has every
+    // table would fail immediately, so a leftover data directory is moved
+    // aside (never deleted — docs/ops/migrate-compose-to-launchd.md
+    // explains the `.stale` directories and when it is safe to remove one)
+    // and `up` initialises a fresh one for the restore to land in.
+    const pgDir = pgDataDir(stateRoot(ctx.productDir, ctx.env));
+    if (exists(join(pgDir, "PG_VERSION"))) {
+      const stalePgDir = `${pgDir}.${ts}.stale`;
+      r.note(`${pgDir} is already initialised — a previous migration's data, left over from a rollback. Moving it aside so \`up\` initdbs fresh and the restore below lands in an empty schema:`);
+      await r.run("mv", [pgDir, stalePgDir]);
+      r.note(`kept at ${stalePgDir} — never deleted by this verb`);
     }
-    // a table that GREW is the launchd console recording its own startup
-    // between the restore and this query — expected, and not a loss
-    const grew = countDiff(before, now);
-    r.note(`counts: every one of the ${Object.keys(before).length} tables came across with at least the rows the dump had${grew.length > 0 ? ` (written since the restore: ${grew.join(", ")})` : " — every count identical"}`);
-  }
-
-  r.section("tcc helpers");
-  const templates = await loadPlistTemplates(ctx.runDir, "launchd", ctx.labelSuffix);
-  const pinned = await pinTccHelpers(ctx, templates, exists);
-  if (pinned.length > 0) r.note(`pinned at the signed bundles that hold the TCC grant (same bundle id + certificate chain = same designated requirement, so no re-grant): ${pinned.join(", ")}`);
-
-  r.section("restart the services that were waiting on a schema");
-  // only the jobs this product tree actually installed: a trial install that
-  // removed a plist (or a shape with no assistant) must not fail here on a
-  // kickstart of a label launchd has never heard of
-  for (const s of ["console", "assistant"]) {
-    if (!templates.some((t) => t.service === s)) {
-      r.note(`${s}: no plist in ${join(ctx.runDir, "ops", "launchd")} — not installed, so nothing to restart`);
-      continue;
+    const upResult = await (opts.upFn ?? up)({
+      productDir: ctx.productDir,
+      env: ctx.env,
+      exec: opts.exec,
+      out: r.out,
+      dryRun: r.dryRun,
+      compose: false,
+      platform: ctx.platform,
+      uid: ctx.uid,
+      home: ctx.home,
+      envFile: opts.envFile,
+      namespace: opts.namespace,
+      // the shape changes; the instance's per-service overrides do NOT — a
+      // `services: { assistant: { enabled: false } }` must survive a migration
+      deployment: { ...current, shape: "launchd" },
+      fetchFn: opts.fetchFn,
+      exists: opts.exists,
+      doctorFn: deferredDoctor,
+    });
+    for (const c of upResult.commands) r.commands.push(c);
+    if (upResult.code !== 0) {
+      throw new StepFailed(`\`metistry up\` failed under the launchd shape (exit ${upResult.code}). The dump is at ${dumpPath}.`, upResult.code);
     }
-    await r.run("launchctl", ["kickstart", "-k", `gui/${ctx.uid}/${labelFor(s, ctx.labelSuffix)}`], { comment: "it started against an empty database" });
+
+    r.section("restore");
+    r.note("restored BEFORE any migration runs: the dump carries schema_migrations, so the next `metistry update` finds every file already recorded and applies none");
+    const socketDir = pgSocketDir(stateRoot(ctx.productDir, ctx.env));
+    const conn = ["-h", socketDir, "-p", String(dbPort(ctx.env)), "-U", ctx.env.METISTRY_DB_USER || "metistry", "-d", ctx.env.METISTRY_DB_NAME || "metistry"];
+    await r.run(join(pre.toolchain.bin, "pg_restore"), [...conn, "--no-owner", "--no-privileges", "--exit-on-error", dumpPath], {
+      timeoutMs: 60 * 60_000,
+      comment: "local socket, --auth-local=trust — no password on a command line",
+    });
+
+    if (r.dryRun) {
+      r.action(`${DRY_RUN_COUNTS}, against the restored database — compared with the counts taken beside the dump, and a table that lost rows fails the migration`);
+    } else if (countsSql !== "") {
+      // the SAME text the compose side ran, so a table that did not survive the
+      // restore fails the query rather than quietly dropping out of the diff
+      const after = await r.run(join(pre.toolchain.bin, "psql"), [...conn, "-tA", "--no-psqlrc", "-c", countsSql], { comment: "the same count query, against the restored database" });
+      const now = parseCounts(after.stdout);
+      const lost = countLosses(before, now);
+      if (lost.length > 0) {
+        throw new StepFailed(`the restored database is missing rows the dump had — ${lost.join("; ")}. The dump is at ${dumpPath}.`);
+      }
+      // a table that GREW is the launchd console recording its own startup
+      // between the restore and this query — expected, and not a loss
+      const grew = countDiff(before, now);
+      r.note(`counts: every one of the ${Object.keys(before).length} tables came across with at least the rows the dump had${grew.length > 0 ? ` (written since the restore: ${grew.join(", ")})` : " — every count identical"}`);
+    }
+
+    r.section("tcc helpers");
+    const templates = await loadPlistTemplates(ctx.runDir, "launchd", ctx.labelSuffix);
+    const pinned = await pinTccHelpers(ctx, templates, exists);
+    if (pinned.length > 0) r.note(`pinned at the signed bundles that hold the TCC grant (same bundle id + certificate chain = same designated requirement, so no re-grant): ${pinned.join(", ")}`);
+
+    r.section("restart the services that were waiting on a schema");
+    // only the jobs this product tree actually installed: a trial install that
+    // removed a plist (or a shape with no assistant) must not fail here on a
+    // kickstart of a label launchd has never heard of
+    for (const s of ["console", "assistant"]) {
+      if (!templates.some((t) => t.service === s)) {
+        r.note(`${s}: no plist in ${join(ctx.runDir, "ops", "launchd")} — not installed, so nothing to restart`);
+        continue;
+      }
+      await r.run("launchctl", ["kickstart", "-k", `gui/${ctx.uid}/${labelFor(s, ctx.labelSuffix)}`], { comment: "it started against an empty database" });
+    }
+
+    await awaitReady(ctx, opts.fetchFn ?? fetch, opts.sleep);
+
+    r.note(`dump kept at ${dumpPath} — it is the only copy of the compose database outside the Docker volume, which stays until you run \`docker compose down -v\``);
+    return dumpPath;
+  } catch (err) {
+    if (!(err instanceof StepFailed)) throw err;
+    return restoreCompose(ctx, opts, err);
   }
-
-  await awaitReady(ctx, opts.fetchFn ?? fetch, opts.sleep);
-
-  r.note(`dump kept at ${dumpPath} — it is the only copy of the compose database outside the Docker volume, which stays until you run \`docker compose down -v\``);
-  return dumpPath;
 }
 
 /** How long the migration waits for a just-restarted service to answer before letting doctor judge it (20 × 500ms = 10s). */
@@ -770,20 +787,74 @@ export async function awaitReady(ctx: Ctx, fetchFn: typeof fetch, sleep: (ms: nu
   }
 }
 
-/** launchd → compose: the documented rollback. */
-async function toCompose(ctx: Ctx, opts: MigrateShapeOptions, current: Deployment): Promise<undefined> {
-  const { r } = ctx;
-  r.section("rollback to compose");
-  r.note("THE DATA DOES NOT COME BACK WITH YOU. The compose volume still holds the database as it was at the cutover; everything written under the");
-  r.note("launchd shape since then stays in " + join(stateRoot(ctx.productDir, ctx.env), "state", "pg") + " and is NOT copied over. Dump it first if you want it:");
-  r.note(`  ${join(runtimeDir(ctx.productDir), "postgres", "bin", "pg_dump")} -h ${pgSocketDir(stateRoot(ctx.productDir, ctx.env))} -U ${ctx.env.METISTRY_DB_USER || "metistry"} -d ${ctx.env.METISTRY_DB_NAME || "metistry"} -Fc -f <somewhere>`);
+// ---- the two compensations -----------------------------------------------------
+//
+// The production defect (2026-09-10): the rollback booted the three launchd
+// jobs out, wrote deployment.yaml, and then `docker compose up -d` failed
+// immediately — `ports are not available … address already in use` — because
+// the bundled Postgres was still asynchronously letting go of 5432. The
+// migration exited 1 with launchd down AND compose failed to start: nothing
+// running at all, on production, until an operator brought it up by hand.
+//
+// The fix is two-part. `awaitPgDown` closes the race itself (below). These
+// two functions close the OTHER half: whichever half of a migration fails
+// AFTER the old shape has been stopped must put the old shape back before
+// giving up — a failed migration is a no-op with a message, never a second
+// way to take the install down.
 
-  r.section("stop the launchd jobs");
-  for (const s of SHAPE_SERVICES) {
-    await r.run("launchctl", ["bootout", `gui/${ctx.uid}/${labelFor(s, ctx.labelSuffix)}`], { tolerateFailure: true, comment: "ok if not loaded" });
+/** How long the rollback waits for the bundled Postgres to let go of its port before trying `docker compose up`. */
+export const PG_DOWN_TRIES = 25;
+export const PG_DOWN_INTERVAL_MS = 200;
+
+/**
+ * Wait until the bundled Postgres is no longer answering on its port, after
+ * the `db` job has been booted out and before compose tries to bind the
+ * same one.
+ *
+ * `bootout` returning is not the server actually exiting — same asynchrony
+ * as launchd forgetting the label (`awaitBootout`), just on the other end:
+ * the label can be gone from `launchctl print` while the `postgres` process
+ * is still unwinding and holding `127.0.0.1:5432`. `pg_isready` answering
+ * anything but "accepting connections" (exit 0) is "gone enough" — a
+ * refusal or no response both mean nothing is listening there any more.
+ *
+ * No toolchain found is not a reason to skip the wait AND not a reason to
+ * fail here: `up`'s own bind failure, if the port really is still held,
+ * will say the true thing with docker's own words.
+ */
+export async function awaitPgDown(ctx: Ctx, toolchain: PgToolchain | undefined, sleep: (ms: number) => Promise<void> = (ms) => new Promise((res) => setTimeout(res, ms))): Promise<void> {
+  if (!toolchain || ctx.r.dryRun) return;
+  const probe = pgIsReady({
+    toolchain,
+    dataDir: "",
+    socketDir: pgSocketDir(stateRoot(ctx.productDir, ctx.env)),
+    port: dbPort(ctx.env),
+    user: ctx.env.METISTRY_DB_USER || "metistry",
+    database: ctx.env.METISTRY_DB_NAME || "metistry",
+    password: "",
+    initialised: true,
+  });
+  for (let i = 0; i < PG_DOWN_TRIES; i++) {
+    const p = await ctx.r.exec(probe.cmd, probe.args, { env: ctx.r.env });
+    if (p.code !== 0) return; // not accepting connections — the port is free for compose to bind
+    await sleep(PG_DOWN_INTERVAL_MS);
   }
+  ctx.r.note(`${probe.cmd} still reports the bundled Postgres accepting connections ${(PG_DOWN_TRIES * PG_DOWN_INTERVAL_MS) / 1000}s after bootout — trying \`docker compose up\` anyway`);
+}
 
-  r.section("deployment.yaml");
+/**
+ * Forward-path compensation: `up (launchd)`, the restore, or the count
+ * check failed AFTER `docker compose stop db` — the compose db (and the
+ * writers stopped earlier) are down and nothing under launchd is known
+ * good either. Bring the compose stack straight back rather than leaving
+ * both shapes down, then fail loudly.
+ */
+async function restoreCompose(ctx: Ctx, opts: MigrateShapeOptions, cause: StepFailed): Promise<never> {
+  const { r } = ctx;
+  r.section("compensating: bring the compose stack back");
+  r.note(`the launchd side failed after the compose db was stopped — restoring compose rather than leaving neither shape running: ${cause.message}`);
+  const up1 = compose(ctx, ["up", "-d"]);
+  await r.run(up1.cmd, up1.args, { cwd: up1.cwd, timeoutMs: COMPOSE_TIMEOUT_MS, tolerateFailure: true, comment: "bringing the compose stack back after the launchd attempt failed" });
   const set = await (opts.setShapeFn ?? setDeploymentShape)({
     productDir: ctx.productDir,
     instanceDir: ctx.instanceDir,
@@ -798,28 +869,128 @@ async function toCompose(ctx: Ctx, opts: MigrateShapeOptions, current: Deploymen
     out: r.out,
   });
   r.commands.push(`deployment set-shape compose (${set.detail})`);
-  if (set.refused) throw new StepFailed(`deployment.yaml was not written: ${set.detail}`);
   r.note(set.detail);
+  throw new StepFailed(
+    `${cause.message} The compose stack has been brought back up and deployment.yaml is set back to compose — nothing is down. Fix the problem above and re-run \`metistry migrate-shape launchd\`.`,
+    cause.code,
+  );
+}
 
-  r.section("up (compose)");
-  const upResult = await (opts.upFn ?? up)({
+/**
+ * Rollback-path compensation: `up (compose)` failed after the three launchd
+ * jobs were booted out. Restore them from the plists still on disk
+ * (bootstrap + kickstart — nothing was rewritten, so the plists this
+ * rollback just tore down are exactly what launchd had running a moment
+ * ago) and flip deployment.yaml back to launchd, then fail loudly.
+ */
+async function restoreLaunchd(ctx: Ctx, opts: MigrateShapeOptions, cause: StepFailed): Promise<never> {
+  const { r } = ctx;
+  r.section("compensating: bring the launchd jobs back");
+  r.note(`\`docker compose up\` failed after the launchd jobs were booted out — restoring them rather than leaving neither shape running: ${cause.message}`);
+  const templates = await loadPlistTemplates(ctx.runDir, "launchd", ctx.labelSuffix);
+  for (const s of SHAPE_SERVICES) {
+    const t = templates.find((x) => x.service === s);
+    const label = labelFor(s, ctx.labelSuffix);
+    if (!t) {
+      r.note(`${s}: no plist in ${join(ctx.runDir, "ops", "launchd")} — not installed, nothing to restore`);
+      continue;
+    }
+    const target = join(launchAgentsDir(ctx.home), t.file);
+    await r.run("launchctl", ["bootstrap", `gui/${ctx.uid}`, target], { tolerateFailure: true, comment: "restoring the shape this rollback just booted out" });
+    await r.run("launchctl", ["kickstart", "-k", `gui/${ctx.uid}/${label}`], { tolerateFailure: true });
+  }
+  const set = await (opts.setShapeFn ?? setDeploymentShape)({
     productDir: ctx.productDir,
+    instanceDir: ctx.instanceDir,
+    targetShape: "launchd",
+    yes: !r.dryRun,
+    force: true,
     env: ctx.env,
-    exec: opts.exec,
-    out: r.out,
-    dryRun: r.dryRun,
     platform: ctx.platform,
     uid: ctx.uid,
-    home: ctx.home,
-    envFile: opts.envFile,
-    deployment: { ...current, shape: "compose" },
-    fetchFn: opts.fetchFn,
-    exists: opts.exists,
-    doctorFn: deferredDoctor,
+    fetchFn: opts.fetchFn ?? fetch,
+    ...(opts.exec ? { exec: opts.exec } : {}),
+    out: r.out,
   });
-  for (const c of upResult.commands) r.commands.push(c);
-  if (upResult.code !== 0) throw new StepFailed(`\`metistry up\` failed under the compose shape (exit ${upResult.code})`, upResult.code);
+  r.commands.push(`deployment set-shape launchd (${set.detail})`);
+  r.note(set.detail);
+  throw new StepFailed(
+    `${cause.message} The launchd jobs have been restored and deployment.yaml is set back to launchd — nothing is down. Fix docker (or whatever \`up\` reported above) and re-run \`metistry migrate-shape compose\` when compose is ready.`,
+    cause.code,
+  );
+}
 
-  await awaitReady(ctx, opts.fetchFn ?? fetch, opts.sleep);
-  return undefined;
+/** launchd → compose: the documented rollback. */
+async function toCompose(ctx: Ctx, opts: MigrateShapeOptions, exists: (p: string) => boolean, current: Deployment): Promise<undefined> {
+  const { r } = ctx;
+  r.section("rollback to compose");
+  r.note("THE DATA DOES NOT COME BACK WITH YOU. The compose volume still holds the database as it was at the cutover; everything written under the");
+  r.note("launchd shape since then stays in " + join(stateRoot(ctx.productDir, ctx.env), "state", "pg") + " and is NOT copied over. Dump it first if you want it:");
+  r.note(`  ${join(runtimeDir(ctx.productDir), "postgres", "bin", "pg_dump")} -h ${pgSocketDir(stateRoot(ctx.productDir, ctx.env))} -U ${ctx.env.METISTRY_DB_USER || "metistry"} -d ${ctx.env.METISTRY_DB_NAME || "metistry"} -Fc -f <somewhere>`);
+
+  r.section("stop the launchd jobs");
+  for (const s of SHAPE_SERVICES) {
+    const label = labelFor(s, ctx.labelSuffix);
+    await r.run("launchctl", ["bootout", `gui/${ctx.uid}/${label}`], { tolerateFailure: true, comment: "ok if not loaded" });
+    // `bootout` is asynchronous — the same wait `up` uses before bootstrapping
+    // a label again, here so `docker compose up` never races a job still
+    // being torn down
+    await awaitBootout(r, label, ctx.uid, opts.sleep);
+  }
+  // the db job's bootout returning is not the SERVER exiting — it can still
+  // hold 127.0.0.1:5432 for a moment after launchd has forgotten the label,
+  // and `docker compose up` binding the same port a moment too soon is
+  // exactly what took production down on 2026-09-10 (`ports are not
+  // available … address already in use`)
+  const toolchain = findPgToolchain(pgCandidates(ctx.env, ctx.productDir), exists);
+  await awaitPgDown(ctx, toolchain, opts.sleep);
+
+  // from here on, `docker compose stop`/`bootout` already tore the launchd
+  // jobs down: a failure below must restore them rather than leave the
+  // install with neither shape running (the OTHER half of 2026-09-10's
+  // outage — see restoreLaunchd)
+  try {
+    r.section("deployment.yaml");
+    const set = await (opts.setShapeFn ?? setDeploymentShape)({
+      productDir: ctx.productDir,
+      instanceDir: ctx.instanceDir,
+      targetShape: "compose",
+      yes: !r.dryRun,
+      force: true,
+      env: ctx.env,
+      platform: ctx.platform,
+      uid: ctx.uid,
+      fetchFn: opts.fetchFn ?? fetch,
+      ...(opts.exec ? { exec: opts.exec } : {}),
+      out: r.out,
+    });
+    r.commands.push(`deployment set-shape compose (${set.detail})`);
+    if (set.refused) throw new StepFailed(`deployment.yaml was not written: ${set.detail}`);
+    r.note(set.detail);
+
+    r.section("up (compose)");
+    const upResult = await (opts.upFn ?? up)({
+      productDir: ctx.productDir,
+      env: ctx.env,
+      exec: opts.exec,
+      out: r.out,
+      dryRun: r.dryRun,
+      platform: ctx.platform,
+      uid: ctx.uid,
+      home: ctx.home,
+      envFile: opts.envFile,
+      deployment: { ...current, shape: "compose" },
+      fetchFn: opts.fetchFn,
+      exists: opts.exists,
+      doctorFn: deferredDoctor,
+    });
+    for (const c of upResult.commands) r.commands.push(c);
+    if (upResult.code !== 0) throw new StepFailed(`\`metistry up\` failed under the compose shape (exit ${upResult.code})`, upResult.code);
+
+    await awaitReady(ctx, opts.fetchFn ?? fetch, opts.sleep);
+    return undefined;
+  } catch (err) {
+    if (!(err instanceof StepFailed)) throw err;
+    return restoreLaunchd(ctx, opts, err);
+  }
 }

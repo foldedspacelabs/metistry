@@ -385,10 +385,16 @@ export function parseComposePs(text: string): ComposeEntry[] {
   }
 }
 
-export async function composeRows(productDir: string, exec: Exec): Promise<DoctorRow[]> {
+/** The container names docker-compose.yml declares under `services:` — what `up` builds, what doctor probes, what `metistry restart|stop|start` acts on under the compose shape. */
+export async function composeServiceNames(productDir: string): Promise<string[]> {
   const composeFile = join(productDir, "docker-compose.yml");
   if (!existsSync(composeFile)) return [];
-  const expected = Object.keys(((parseYaml(await readFile(composeFile, "utf8")) as { services?: Record<string, unknown> })?.services ?? {})).sort();
+  return Object.keys(((parseYaml(await readFile(composeFile, "utf8")) as { services?: Record<string, unknown> })?.services ?? {})).sort();
+}
+
+export async function composeRows(productDir: string, exec: Exec): Promise<DoctorRow[]> {
+  const expected = await composeServiceNames(productDir);
+  if (expected.length === 0) return [];
 
   const r = await exec("docker", ["compose", "ps", "--all", "--format", "json"], { cwd: productDir });
   if (r.code === 127) {

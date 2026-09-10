@@ -79,7 +79,11 @@ unpacks to a single `metistry-<version>/` directory holding:
 - `collectors/` and `routines/` with their per-directory manifests
 - `node_modules/` — production dependencies only, which is why the pack
   is per os-arch
-- `metistry-runtime.json` — version, target, build time
+- `metistry-runtime.json` — version, target, build time, and the commit it
+  was built from (`metistry update` reads this into `metistry.lock`'s
+  `product.commit` on the release channel, since there is no git pull to
+  read a HEAD from; a pack built before this field shipped falls back to
+  the lock's prior commit rather than fabricating one)
 
 Left out on purpose: `src/`, tests, tsconfigs, Dockerfiles, `.git`. A
 release is compiled output. `metistry update` never builds in release

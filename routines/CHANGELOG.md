@@ -1,5 +1,11 @@
 # @metistry-apps/routines
 
+## 0.7.1
+
+### Patch Changes
+
+- @foldedspacelabs/metistry-core@0.7.1
+
 ## 0.7.0
 
 ### Patch Changes

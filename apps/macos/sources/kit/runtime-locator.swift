@@ -3,18 +3,20 @@
 // Four shapes, in this order (docs/product/desktop-app-plan.md, "Bundled
 // runtime"):
 //
-//   1. installed — `~/Library/Application Support/Metistry/product/`, which
+//   1. checkout — a product checkout the user pointed the app at, or
+//                 METISTRY_PRODUCT_DIR: run `node packages/cli/dist/main.js`.
+//                 This is the developer's shape and the terminal user's shape,
+//                 and it is FIRST because it is the only one a person names by
+//                 hand (see the comment on the stage itself).
+//   2. installed — `~/Library/Application Support/Metistry/product/`, which
 //                 `metistry runtime install --from <bundle> --to <dir>` wrote
 //                 out of the bundle. THE WRITABLE ONE, and therefore the one
 //                 `metistry update` can lay a new `releases/<version>/` into.
-//   2. bundled  — `Metistry.app/Contents/Resources/metistry/`, the runtime pack
+//   3. bundled  — `Metistry.app/Contents/Resources/metistry/`, the runtime pack
 //                 plus the runtime-deps pack (Node, Postgres, git) that
 //                 ops/release/build-app.sh embedded and notarized with the app.
 //                 Nothing on the user's machine is required — but a signed
 //                 bundle's `Resources` cannot be written to, so this is a SEED.
-//   3. checkout — a product checkout the user pointed the app at, or
-//                 METISTRY_PRODUCT_DIR: run `node packages/cli/dist/main.js`.
-//                 This is the developer's shape and the terminal user's shape.
 //   4. path     — a `metistry` on PATH (`npx @foldedspacelabs/metistry-cli`
 //                 installed it, or a global install).
 //
@@ -150,29 +152,19 @@ public enum RuntimeLocator {
         var attempts: [String] = []
         let bundledSeed = bundleResourceURL?.appendingPathComponent("metistry", isDirectory: true)
 
-        // ---- 1. the writable install ----
-        if let runtime = packShape(at: installedDir, source: .installed, fileManager: fileManager) {
-            return RuntimeResolution(runtime: runtime, attempts: attempts, bundledSeed: bundledSeed, installTarget: installedDir)
-        }
-        attempts.append(fileManager.fileExists(atPath: installedDir.path)
-            ? "installed runtime at \(installedDir.path): incomplete (needs runtime/node/bin/node and packages/cli/dist/main.js) — `metistry runtime install` lays it out"
-            : "no installed runtime at \(installedDir.path) yet — first run copies the bundled one there")
-
-        // ---- 2. the bundle's read-only seed ----
-        if let bundled = bundledSeed {
-            if fileManager.fileExists(atPath: bundled.path) {
-                if let runtime = packShape(at: bundled, source: .bundled, fileManager: fileManager) {
-                    return RuntimeResolution(runtime: runtime, attempts: attempts, bundledSeed: bundled, installTarget: installedDir)
-                }
-                attempts.append("bundled runtime at \(bundled.path): incomplete (needs runtime/node/bin/node and packages/cli/dist/main.js)")
-            } else {
-                attempts.append("no bundled runtime at \(bundled.path) — this build did not embed one")
-            }
-        } else {
-            attempts.append("no app bundle resources to search (running the raw executable from .build/)")
-        }
-
-        // ---- 3. a product checkout ----
+        // ---- 1. a product checkout somebody NAMED ----
+        //
+        // The scaffold looked here third, after the bundle. It goes first now,
+        // and the reason is the new second stage: an installed runtime in
+        // Application Support is something the app put there, and a developer
+        // override is the only pointer in this app a person sets by hand. An
+        // explicit choice has to beat one the app made for itself, or a stale
+        // Application Support copy silently shadows the checkout somebody is
+        // actively working on — which is exactly what happened the first time
+        // this stage was ordered the other way round.
+        //
+        // Nothing changes for a shipped app: it has neither of these set, so it
+        // falls straight through to its own runtime.
         let checkoutCandidates: [(URL, String)] = [
             userProductDir.map { ($0, "chosen in the app") },
             environment["METISTRY_PRODUCT_DIR"].map { (URL(fileURLWithPath: $0), "METISTRY_PRODUCT_DIR") },
@@ -197,6 +189,28 @@ public enum RuntimeLocator {
         }
         if checkoutCandidates.isEmpty {
             attempts.append("no product checkout chosen, and METISTRY_PRODUCT_DIR is unset")
+        }
+
+        // ---- 2. the writable install ----
+        if let runtime = packShape(at: installedDir, source: .installed, fileManager: fileManager) {
+            return RuntimeResolution(runtime: runtime, attempts: attempts, bundledSeed: bundledSeed, installTarget: installedDir)
+        }
+        attempts.append(fileManager.fileExists(atPath: installedDir.path)
+            ? "installed runtime at \(installedDir.path): incomplete (needs runtime/node/bin/node and packages/cli/dist/main.js) — `metistry runtime install` lays it out"
+            : "no installed runtime at \(installedDir.path) yet — first run copies the bundled one there")
+
+        // ---- 3. the bundle's read-only seed ----
+        if let bundled = bundledSeed {
+            if fileManager.fileExists(atPath: bundled.path) {
+                if let runtime = packShape(at: bundled, source: .bundled, fileManager: fileManager) {
+                    return RuntimeResolution(runtime: runtime, attempts: attempts, bundledSeed: bundled, installTarget: installedDir)
+                }
+                attempts.append("bundled runtime at \(bundled.path): incomplete (needs runtime/node/bin/node and packages/cli/dist/main.js)")
+            } else {
+                attempts.append("no bundled runtime at \(bundled.path) — this build did not embed one")
+            }
+        } else {
+            attempts.append("no app bundle resources to search (running the raw executable from .build/)")
         }
 
         // ---- 4. a `metistry` on PATH ----

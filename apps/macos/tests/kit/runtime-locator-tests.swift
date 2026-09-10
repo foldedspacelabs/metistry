@@ -149,6 +149,29 @@ private struct Sandbox: ~Copyable {
     #expect(!resolved.needsRuntimeInstall)
 }
 
+@Test func aNamedCheckoutBeatsAnInstalledCopyTheAppPutThere() throws {
+    // The one pointer a person sets by hand wins over the one the app made for
+    // itself. Without this, a stale Application Support install silently shadows
+    // the checkout somebody is actively working on.
+    let box = try Sandbox()
+    let checkout = box.root.appendingPathComponent("checkout")
+    _ = try box.touch("checkout/packages/cli/dist/main.js")
+    _ = try box.touch("checkout/runtime/node/bin/node", executable: true)
+    let installed = box.root.appendingPathComponent("installed")
+    _ = try box.touch("installed/runtime/node/bin/node", executable: true)
+    _ = try box.touch("installed/packages/cli/dist/main.js")
+
+    let resolved = RuntimeLocator.locate(
+        bundleResourceURL: nil, environment: [:], userProductDir: checkout, installedDir: installed
+    )
+    #expect(resolved.runtime?.source == .checkout)
+    #expect(resolved.runtime?.productDir == checkout)
+
+    // With nothing named, the installed copy is what a shipped app uses.
+    let unnamed = RuntimeLocator.locate(bundleResourceURL: nil, environment: [:], installedDir: installed)
+    #expect(unnamed.runtime?.source == .installed)
+}
+
 @Test func aBundledRuntimeWithNoWritableCopyAsksToBeInstalled() throws {
     let box = try Sandbox()
     let resources = box.root.appendingPathComponent("Resources")

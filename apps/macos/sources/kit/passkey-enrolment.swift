@@ -26,6 +26,30 @@
 //      own PWA flow works — but a browser's secure-context exemption for
 //      loopback is not an associated-domain exemption, so (3) still bites.
 //
+// WHAT THE SYSTEM ACTUALLY SAYS, measured. A Developer ID build signed with this
+// project's identity and bundle id, asking to register against `127.0.0.1`,
+// `localhost` and `studio.ts.net` in turn, gets the SAME answer for all three:
+//
+//   com.apple.AuthenticationServices.AuthorizationError 1004: The operation
+//   couldn't be completed. The calling process does not have an application
+//   identifier. Make sure it is properly configured.
+//
+// So the refusal is not about the relying party at all — it is about the app.
+// `ASAuthorization` wants `com.apple.application-identifier`, which comes from
+// an embedded provisioning profile, and a Developer ID build has none. Signing
+// one in by hand (`application-identifier` + `associated-domains`, same
+// identity) does not help either: AMFI kills the process at launch, SIGKILL,
+// before `main` runs, because those are restricted entitlements that need a
+// profile to match.
+//
+// THAT IS THE PRODUCT FINDING. Native passkeys are not blocked by the local
+// origin alone; they are blocked by distribution. A Developer ID DMG from
+// GitHub Releases — the ratified channel — cannot embed a provisioning profile
+// with an associated-domains entitlement, so `ASAuthorization` will refuse a
+// passkey however the origin is configured. It would take either an App Store
+// build or a Developer ID build provisioned through a profile, AND an origin
+// that is a plain `https://<domain>` on 443 whose AASA Apple can fetch.
+//
 // So the app does what it does everywhere else: it says exactly which of those
 // is true of this install, and falls back to the flow that does work — the
 // console's own enrolment code, opened in a browser here or typed on a phone.
@@ -86,10 +110,22 @@ public enum PasskeyRouting {
             return .consoleCode(reason: "`localhost` is a valid relying party in a browser, which is why the console's own enrolment page works — but macOS still requires this app to be associated with the domain, and Apple verifies that by fetching https://localhost/.well-known/apple-app-site-association from its own CDN, which cannot reach this Mac.")
         }
         guard associatedDomains.contains(host) else {
-            return .consoleCode(reason: "This app is not associated with `\(host)`. macOS only lets an app use a relying-party ID it declares as `webcredentials:\(host)` in com.apple.developer.associated-domains, and Apple verifies that by fetching https://\(host)/.well-known/apple-app-site-association — which needs \(host) reachable from Apple's CDN over HTTPS. This build declares no associated domains (apps/macos/resources/metistry.entitlements).")
+            return .consoleCode(reason: "This app is not associated with `\(host)`. macOS only lets an app use a relying-party ID it declares as `webcredentials:\(host)` in com.apple.developer.associated-domains, and Apple verifies that by fetching https://\(host)/.well-known/apple-app-site-association — which needs \(host) reachable from Apple's CDN over HTTPS. This build declares no associated domains (apps/macos/resources/metistry.entitlements). \(distributionNote)")
         }
         return .native(rpID: host)
     }
+
+    /// The finding that outranks every origin question, measured rather than
+    /// assumed (passkey-enrolment.swift's header has the transcript). Carried in
+    /// the reason text so the screen says the thing that is actually true, and
+    /// kept as its own constant so the day a provisioned build exists it is one
+    /// string to delete.
+    public static let distributionNote =
+        "There is a second obstacle behind that one: ASAuthorization answers error 1004, \"the calling process does not have "
+        + "an application identifier\", for ANY relying party in a build distributed the way this one is. An application "
+        + "identifier comes from an embedded provisioning profile, and a Developer ID app downloaded from GitHub Releases has "
+        + "none — signing the entitlement in by hand gets the process killed at launch instead. Native passkeys need a "
+        + "provisioned build, not just a better origin."
 
     /// An IPv4 dotted quad or anything bracketed/colon-bearing (IPv6). Not a
     /// general address parser: the question is only "is this a domain?", and a

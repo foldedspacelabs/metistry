@@ -6,7 +6,7 @@
 // (Reaching out of the package into ops/ follows lock-key.test.ts: the
 // facts two files must agree on are asserted where the code lives.)
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 import { describe, expect, it } from "vitest";
@@ -340,14 +340,17 @@ describe(".github/workflows/release.yml", () => {
   });
 
   it("no assistant name is baked into the app (CLAUDE.md: it lives only in identity.yaml)", () => {
-    // The one place a name can enter is the first-run text field, which sends
-    // it to `metistry init --name`.
-    for (const file of [
-      "apps/macos/sources/kit/first-run-model.swift",
-      "apps/macos/sources/kit/first-run-view.swift",
-      "apps/macos/sources/app/metistry-app.swift",
-      "apps/macos/resources/Info.plist",
-    ]) {
+    // The one place a name can enter is the wizard's text field, which sends it
+    // to `metistry init --name`. Every Swift source is walked rather than a
+    // hand-written list, so adding a view cannot quietly escape the rule.
+    const swiftSources = ["sources/kit", "sources/app"].flatMap((dir) => {
+      const abs = fileURLToPath(new URL(`../../../apps/macos/${dir}`, import.meta.url));
+      return readdirSync(abs)
+        .filter((f) => f.endsWith(".swift"))
+        .map((f) => `apps/macos/${dir}/${f}`);
+    });
+    expect(swiftSources.length).toBeGreaterThan(10);
+    for (const file of [...swiftSources, "apps/macos/resources/Info.plist"]) {
       expect(repoFile(file).toLowerCase(), `${file} must not name the assistant`).not.toContain("metis ");
     }
     expect(repoFile("apps/macos/sources/kit/first-run-model.swift")).toContain('"--name"');

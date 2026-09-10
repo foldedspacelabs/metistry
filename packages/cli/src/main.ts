@@ -16,6 +16,7 @@ import { importSessions } from "./import-sessions.js";
 import { init } from "./init.js";
 import { ensureInstanceId, instanceEnvFile, readInstanceId } from "./instance.js";
 import type { LockSource } from "./lock.js";
+import { installRuntime } from "./runtime-install.js";
 import { listSecrets, mintSecret, purgeSecrets, renderSecretList, syncSecrets, type SyncDirection } from "./secrets.js";
 import { controlServices, renderServiceResults, serviceLogs, UnknownServiceError, type ServiceAction } from "./service-control.js";
 import { StepRunner } from "./steps.js";
@@ -29,7 +30,7 @@ export interface ParsedArgs {
 }
 
 /** Flags that never take a value, so `metistry init --force <dir>` keeps its dir. */
-export const BOOLEAN_FLAGS = new Set(["force", "json", "help", "dry-run", "no-launchd", "no-compose", "skip-build", "skip-migrate", "rollback", "yes", "follow"]);
+export const BOOLEAN_FLAGS = new Set(["force", "json", "help", "dry-run", "no-launchd", "no-compose", "skip-build", "skip-migrate", "rollback", "yes", "follow", "namespace"]);
 
 /** `--channel git|release` — anything else is a typo, not a guess (the lock parser is strict for the same reason). */
 export function parseChannel(v: string | undefined): LockSource | undefined {
@@ -152,12 +153,28 @@ const USAGE = `metistry — Metistry command line
       Validate every manifest in the checkout and probe every bridge, service,
       container and launchd job. Exit 0 when nothing is failed.
 
+  metistry runtime install --from <Metistry.app | .../Contents/Resources/metistry>
+                           [--to <dir>] [--force] [--dry-run]
+      Copy a signed bundle's product SEED to a writable product dir — by default
+      ~/Library/Application Support/Metistry/product. A bundle's Resources cannot
+      be written to, and "metistry update --channel release" must write
+      releases/<version>/, flip current and unpack runtime/; so the bundle seeds
+      the product dir once and the CLI owns it from then on, identically to a
+      checkout install. Idempotent: the same seed twice is a no-op, verified
+      against the pack's own metistry-runtime.json and runtime/manifest.json,
+      whose sha256s go into .metistry-install.json beside current.
+
   metistry up [--no-compose] [--no-launchd] [--dry-run] [--product-dir <checkout>]
-              [--instance <dir>] [--env-file <path>]
+              [--instance <dir>] [--env-file <path>] [--namespace]
       Bring an install to running from a checkout + .env: docker compose up (built
       from source, or pulled when metistry.lock pins a release), every launchd job
       in ops/launchd rendered into ~/Library/LaunchAgents and (re)bootstrapped
       (macOS; Linux prints systemd units), then doctor — its verdict is the exit code.
+      --namespace allocates this instance its own launchd label suffix (from
+      instance_id) and an 8-port block, recorded ONCE in <instance>/state/ports.yaml,
+      so a second instance can run beside the first. Every later up/doctor/
+      restart/stop/start/logs reads that file; delete it (after "metistry stop")
+      to go back to the fixed labels and ports.
 
   metistry update [--skip-build] [--skip-migrate] [--dry-run] [--product-dir <dir>]
                   [--channel git|release] [--version <x.y.z>] [--rollback]
@@ -403,6 +420,26 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
       out(flags.json === true ? JSON.stringify(report, null, 2) : renderTable(report));
       return report.ok ? 0 : 1;
     }
+    case "runtime": {
+      if (positional[0] !== "install") {
+        err("usage: metistry runtime install --from <Metistry.app | .../Contents/Resources/metistry> [--to <dir>] [--force]");
+        return 2;
+      }
+      const from = str(flags, "from");
+      if (!from) {
+        err("usage: metistry runtime install --from <Metistry.app | .../Contents/Resources/metistry> [--to <dir>] [--force]");
+        return 2;
+      }
+      const runner = new StepRunner({ dryRun: flags["dry-run"] === true, out, ...(io.exec ? { exec: io.exec } : {}) });
+      try {
+        const r = await installRuntime(runner, { from, to: str(flags, "to"), force: flags.force === true, home: io.home });
+        out(r.installed ? `runtime installed: ${r.productDir} (${r.version})` : `runtime unchanged: ${r.productDir} (${r.reason ?? "already current"})`);
+        return 0;
+      } catch (e) {
+        err(`metistry runtime install: ${e instanceof Error ? e.message : String(e)}`);
+        return 1;
+      }
+    }
     case "up": {
       if (!productDir) {
         err("up needs a Metistry checkout: pass --product-dir or set METISTRY_PRODUCT_DIR");
@@ -417,6 +454,7 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
         dryRun: flags["dry-run"] === true,
         compose: flags["no-compose"] !== true,
         launchd: flags["no-launchd"] !== true,
+        namespace: flags.namespace === true,
         doctorDeps: io.doctorDeps,
       });
       return r.code;

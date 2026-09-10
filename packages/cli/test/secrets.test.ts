@@ -132,10 +132,10 @@ describe("metistry secrets sync", () => {
 
   // GENERATED_SECRETS: an install that predates a variable gains it on the
   // next sync instead of needing a verb. The bar is that the value means
-  // nothing outside this install — METISTRY_OWNER_TOKEN, like the DB
+  // nothing outside this install — METISTRY_LOCAL_OWNER_TOKEN, like the DB
   // password `metistry up` generates.
-  it("mints METISTRY_OWNER_TOKEN when it is in neither the Keychain nor .env, into both, under the instance's account", async () => {
-    const file = await envFile("METISTRY_DB_HOST=127.0.0.1\nMETISTRY_OWNER_TOKEN=\n");
+  it("mints METISTRY_LOCAL_OWNER_TOKEN when it is in neither the Keychain nor .env, into both, under the instance's account", async () => {
+    const file = await envFile("METISTRY_DB_HOST=127.0.0.1\nMETISTRY_LOCAL_OWNER_TOKEN=\n");
     const kc = fakeSecurity();
     const out: string[] = [];
     const r = await syncSecrets("env", {
@@ -147,18 +147,18 @@ describe("metistry secrets sync", () => {
       env: {},
       mint: () => "MINTED-OWNER-TOKEN",
     });
-    expect(r.minted).toEqual(["METISTRY_OWNER_TOKEN"]);
-    expect(kc.store.get(key(INSTANCE_ID, "METISTRY_OWNER_TOKEN"))).toBe("MINTED-OWNER-TOKEN");
-    expect(kc.store.has(key(USER, "METISTRY_OWNER_TOKEN"))).toBe(false); // instance-scoped, not the person's
-    expect(readFileSync(file, "utf8")).toBe("METISTRY_DB_HOST=127.0.0.1\nMETISTRY_OWNER_TOKEN=MINTED-OWNER-TOKEN\n");
-    expect(out.join("\n")).toContain("minted METISTRY_OWNER_TOKEN");
+    expect(r.minted).toEqual(["METISTRY_LOCAL_OWNER_TOKEN"]);
+    expect(kc.store.get(key(INSTANCE_ID, "METISTRY_LOCAL_OWNER_TOKEN"))).toBe("MINTED-OWNER-TOKEN");
+    expect(kc.store.has(key(USER, "METISTRY_LOCAL_OWNER_TOKEN"))).toBe(false); // instance-scoped, not the person's
+    expect(readFileSync(file, "utf8")).toBe("METISTRY_DB_HOST=127.0.0.1\nMETISTRY_LOCAL_OWNER_TOKEN=MINTED-OWNER-TOKEN\n");
+    expect(out.join("\n")).toContain("minted METISTRY_LOCAL_OWNER_TOKEN");
     expect(out.join("\n")).not.toContain("MINTED-OWNER-TOKEN"); // a value is never printed
     for (const c of kc.calls) for (const a of c.args) expect(a).not.toContain("MINTED-OWNER-TOKEN");
 
     // idempotent: a second run reads the item back rather than rotating it
     const again = await syncSecrets("env", { envFile: file, instanceId: INSTANCE_ID, exec: kc.exec, out: () => {}, platform: "darwin", env: {}, mint: () => "SECOND" });
     expect(again.minted).toEqual([]);
-    expect(readFileSync(file, "utf8")).toContain("METISTRY_OWNER_TOKEN=MINTED-OWNER-TOKEN");
+    expect(readFileSync(file, "utf8")).toContain("METISTRY_LOCAL_OWNER_TOKEN=MINTED-OWNER-TOKEN");
   });
 
   it("mints only the generated names — a missing third-party secret is still reported, never invented", async () => {

@@ -30,7 +30,7 @@ describe.skipIf(!hasDb)("console server (integration)", () => {
   let queries: QueryStore;
   let sessionCookie: string;
   let ownerToken: string;
-  // METISTRY_OWNER_TOKEN: an env value, not a database row — minted here the
+  // METISTRY_LOCAL_OWNER_TOKEN: an env value, not a database row — minted here the
   // way `metistry init` mints it, and never registered in `owner_tokens`.
   const localOwnerToken = mintToken();
 
@@ -108,7 +108,7 @@ sql: SELECT id, title FROM work WHERE status <> 'closed' ORDER BY updated_at DES
   // The unit-level misuse matrix lives in test/local-owner.test.ts, where a
   // peer address can be fabricated. These are the same rules over real
   // sockets, plus what the token is actually GRANTED.
-  it("METISTRY_OWNER_TOKEN over loopback is the `user` principal — the same one a passkey session yields", async () => {
+  it("METISTRY_LOCAL_OWNER_TOKEN over loopback is the `user` principal — the same one a passkey session yields", async () => {
     const auth = { authorization: `Bearer ${localOwnerToken}` };
 
     const who = await fetch(`${base}/api/whoami`, { headers: auth });

@@ -70,7 +70,7 @@ console.log(`targets: ${targets.names().join(", ") || "(none)"}`);
 const origins = requireEnv("METISTRY_ORIGIN"); // canonical HTTPS origin(s) (§4.2)
 const origin = canonicalOrigin(origins);
 
-// The local owner door (docs/ops/auth.md): METISTRY_OWNER_TOKEN over a
+// The local owner door (docs/ops/auth.md): METISTRY_LOCAL_OWNER_TOKEN over a
 // connection from this machine authenticates as the `user` principal — the
 // Mac app and the CLI, which run as the logged-in user and can already read
 // the Keychain this token lives in. Unset = no local door; there is no
@@ -81,7 +81,7 @@ const origin = canonicalOrigin(origins);
 // sentinel `docker-gateway`, resolved here, once, from this container's own
 // default route. Unset (launchd, and any console nothing configured) =
 // plain loopback.
-const ownerToken = process.env.METISTRY_OWNER_TOKEN ?? "";
+const ownerToken = process.env.METISTRY_LOCAL_OWNER_TOKEN ?? "";
 const trustedProxies = parseTrustedProxies(process.env.METISTRY_TRUSTED_LOOPBACK_PROXY, () => {
   try {
     return defaultGatewayFrom(readFileSync("/proc/net/route", "utf8"));
@@ -93,7 +93,7 @@ const localOwner = ownerToken ? { token: ownerToken, trusted: trustedProxies } :
 console.log(
   localOwner
     ? `local owner token: enabled (peer must be loopback${trustedProxies.length ? ` or ${trustedProxies.join(", ")}` : ""})`
-    : "local owner token absent: set METISTRY_OWNER_TOKEN for `metistry console whoami` and the Mac app (degrades: passkeys only)",
+    : "local owner token absent: set METISTRY_LOCAL_OWNER_TOKEN for `metistry console whoami` and the Mac app (degrades: passkeys only)",
 );
 const push = pushConfigFromEnv();
 if (!push) console.warn("web push absent: set METISTRY_VAPID_* to enable (degrades: absent)");

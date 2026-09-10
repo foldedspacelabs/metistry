@@ -197,10 +197,10 @@ async function componentRow(m: FoundManifest, deps: Required<Pick<DoctorDeps, "e
     // AUTHENTICATED read — the same door the Mac app comes through, so this
     // row now proves it works instead of settling for "the 401 shape looks
     // right" (docs/ops/auth.md). Without it, unchanged: 401 is a pass.
-    const token = (deps.env.METISTRY_OWNER_TOKEN ?? "").trim();
+    const token = (deps.env.METISTRY_LOCAL_OWNER_TOKEN ?? "").trim();
     const headers = token ? { authorization: `Bearer ${token}` } : {};
     const probe = token
-      ? `GET ${url}/health ok; /api/status authenticates with METISTRY_OWNER_TOKEN`
+      ? `GET ${url}/health ok; /api/status authenticates with METISTRY_LOCAL_OWNER_TOKEN`
       : `GET ${url}/health ok; /api/status answers (401 = a passkey session is required)`;
     return {
       kind,
@@ -219,7 +219,7 @@ async function componentRow(m: FoundManifest, deps: Required<Pick<DoctorDeps, "e
         if (token && status.status === 401) {
           return {
             status: "degraded" as const,
-            remediation: `${url} refused METISTRY_OWNER_TOKEN (401): the console was started with a different value (\`metistry secrets sync --to env\` then ${restartHint("console", deps.shape, deps.labelSuffix)}), or the request did not reach it from this machine — under compose it needs METISTRY_TRUSTED_LOOPBACK_PROXY (docs/ops/auth.md)`,
+            remediation: `${url} refused METISTRY_LOCAL_OWNER_TOKEN (401): the console was started with a different value (\`metistry secrets sync --to env\` then ${restartHint("console", deps.shape, deps.labelSuffix)}), or the request did not reach it from this machine — under compose it needs METISTRY_TRUSTED_LOOPBACK_PROXY (docs/ops/auth.md)`,
             meta,
           };
         }

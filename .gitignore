@@ -39,3 +39,8 @@ runtime/
 # Sparkle CLI tools (ops/release/fetch-sparkle-tools.sh): the downloaded
 # archive and the extracted bin/ — fetched on demand, never tracked.
 ops/release/.tools/
+
+# a release-channel install in this checkout (metistry update --channel release):
+# the unpacked runtime packs and the `current` symlink. Never source.
+releases/
+current

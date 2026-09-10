@@ -24,8 +24,10 @@ worktree is removed. Run it from any worktree; it links the main one.
 
 - **`token-efficient-agents`** (skill) — routes a large task across models and
   effort levels for the least token spend: picks the orchestrator's own model
-  and effort, decides whether delegating pays at all, and dispatches subagents
-  at the cheapest tier that can do each subtask. Its
+  and effort, decides whether delegating pays at all, dispatches subagents at
+  the cheapest tier that can do each subtask, and calls the moment to compact,
+  clear, or start a fresh session (writing a handoff file first, which beats
+  `/compact` on both fidelity and tokens). Its
   `references/model-routing.md` carries a dated model/price/effort table with a
   30-day staleness stamp; the skill refreshes it from the `claude-api` skill or
   Anthropic's docs when the stamp expires, so new model releases and effort

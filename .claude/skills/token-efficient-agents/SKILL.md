@@ -1,6 +1,6 @@
 ---
 name: token-efficient-agents
-description: Route a large, multi-part task across models and effort levels for the least token spend — pick the orchestrator's own model and effort, decide whether delegating pays at all, and dispatch subagents at the cheapest tier that can do each subtask. Use when a task is big enough to need a plan and several independent pieces (a migration, an audit, a multi-file refactor, a research sweep), or when the user asks to run something cheaply, efficiently, or with subagents.
+description: Route a large, multi-part task across models and effort levels for the least token spend — pick the orchestrator's own model and effort, decide whether delegating pays at all, dispatch subagents at the cheapest tier that can do each subtask, and call the moment to compact, clear, or start a fresh session. Use when a task is big enough to need a plan and several independent pieces (a migration, an audit, a multi-file refactor, a research sweep), when the user asks to run something cheaply or efficiently or with subagents, or when they ask whether to clear, compact, or start over.
 user-invocable: true
 ---
 
@@ -82,6 +82,50 @@ Integrate the digests. Close with two or three lines: what ran at which tier,
 and what the naive alternative would have been. If you declined to delegate,
 say that too — a skill that only ever fans out is not a routing skill.
 
+## 7. Call the context boundary
+
+A phase just ended. That is the cheapest moment in the whole run to shed
+context, and the most expensive moment to keep it: everything still in the
+transcript is re-billed on every remaining turn, and the detail that earned its
+place during a phase rarely earns it after.
+
+Recommend one of three and **wait** — `/compact` and `/clear` are the user's
+commands, and clearing is not reversible. Say which, and why, in a line or two.
+
+| Situation | Recommend |
+|---|---|
+| The next phase builds on this one's conclusions, and the conclusions are short | **Write a handoff, then `/clear`** |
+| The next phase needs continuity you can't write down in a page | **`/compact`** |
+| The next task is genuinely unrelated to this one | **`/clear`** |
+| The working directory, repo, or worktree changes | **New session** |
+| The transcript is mostly a record of approaches that didn't work | **Write a handoff, then `/clear`** — never `/compact` |
+
+**The handoff is the technique.** Before clearing, write the live state to a
+short file — decisions made, what's done, what's next, the three file paths that
+matter. Then `/clear` and open with that file. It beats `/compact` on fidelity
+*and* on tokens: you choose what survives instead of paying a summarisation
+pass over everything and accepting what it kept.
+
+Prefer `/compact` over letting auto-compact fire. A compaction you call at a
+boundary summarises spent detail; one that fires mid-task summarises the thing
+you are in the middle of.
+
+Never `/compact` a transcript whose bulk is failed attempts. The summary carries
+the failures forward faithfully and at length, which is the opposite of what you
+want — the next session should start from what you learned, in one paragraph,
+not from a transcript of how you learned it.
+
+Signals to raise this outside a delegated run, unprompted:
+
+- Subagent digests are merged and the raw exploration behind them is dead weight.
+- A long debugging tangent just resolved — the resolution is three lines, the
+  tangent is not.
+- Something large got read into context for one question that has been answered.
+- The user is about to start a task with no relationship to the last one.
+
+Raise it once, briefly. If they say keep going, keep going and don't ask again
+until the next boundary.
+
 ## Cache discipline
 
 Prompt caching is a bigger lever than model or effort selection — 2.7–5.3× on
@@ -91,9 +135,9 @@ Cache reads cost a tenth of input; a break costs a rewrite. So:
 - **Change effort at most once, at step 2, before any work.** Changing it
   mid-run invalidates the cache for everything after it and destroys the saving
   the change was meant to buy.
-- **Prune at task boundaries, not mid-task.** When a phase completes and its
-  detail is spent, that is the moment to drop it. Mid-task editing is the
-  expensive kind.
+- **Prune at task boundaries, not mid-task** — step 7. Measured: 89% cache
+  reads on the turns after a boundary prune, against mid-task editing, which
+  breaks the cache from the edit point on and saves nothing.
 - Each subagent starts a fresh context. That is a feature — it is why bulk
   reading belongs in a subagent rather than in the orchestrator's own history,
   where it is re-billed every turn.
@@ -108,5 +152,8 @@ Cache reads cost a tenth of input; a break costs a rewrite. So:
 - **Never set `effort` on a haiku agent** — Haiku 4.5 rejects the parameter.
 - **Never paste conversation history into a subagent prompt.** If a subtask
   needs the transcript, it isn't separable; do it yourself.
+- **Recommend context boundaries; never take them.** Say when to compact,
+  clear, or start fresh, then wait. Losing context the user still wanted is
+  worse than carrying it a phase too long.
 - **Report honestly.** If a subagent came back thin or wrong, say so and
   re-run at the next tier up. Don't paper over it with your own guesses.

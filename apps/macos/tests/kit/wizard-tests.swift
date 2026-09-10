@@ -9,14 +9,14 @@ import Testing
 @testable import MetistryKit
 
 @MainActor
-private func wizard(withRuntime: Bool = true) -> WizardModel {
+private func wizard(withRuntime: Bool = true, runner: any CommandRunner = WizardNoopRunner()) -> WizardModel {
     let runtime = MetistryRuntime(
         source: .checkout,
         executable: URL(fileURLWithPath: "/usr/bin/node"),
         leadingArguments: ["/src/packages/cli/dist/main.js"],
         productDir: URL(fileURLWithPath: "/src")
     )
-    let cli = withRuntime ? MetistryCLI(runtime: runtime, runner: WizardNoopRunner()) : nil
+    let cli = withRuntime ? MetistryCLI(runtime: runtime, runner: runner) : nil
     let steps = FirstRunModel(
         cli: cli,
         resolution: RuntimeResolution(runtime: withRuntime ? runtime : nil, attempts: [])
@@ -88,16 +88,24 @@ private func wizard(withRuntime: Bool = true) -> WizardModel {
 }
 
 @MainActor
-@Test func stepsSixAndSevenAreSatisfiedByBeingHonestNotByBeingDone() {
+@Test func stepsSixAndSevenAnswerFromTheirOwnModelsAndNeverWallTheWizard() {
     let w = wizard()
     w.present(from: .door)
-    #expect(w.steps.state(.door) == .notYet)
-    #expect(w.isSatisfied(.door))
-    #expect(w.canContinue)
+    // Neither is a `metistry` verb, so neither has an argument array or a run
+    // row — and neither is satisfied until the thing itself happened.
     #expect(!w.steps.canRun(.door))
+    #expect(!w.isSatisfied(.door))
+    // Optional, so Continue and Skip are both open. The passkey in particular
+    // may be unreachable natively for reasons the step explains and nobody can
+    // fix from this screen; walling the wizard on it would be a trap.
+    #expect(w.canContinue)
+    #expect(w.canSkip)
+
     w.advance()
     #expect(w.current == .claude)
     #expect(w.isOnLastStep)
+    #expect(!w.isSatisfied(.claude))
+    #expect(w.canContinue)
 }
 
 @MainActor
@@ -205,6 +213,54 @@ private func wizard(withRuntime: Bool = true) -> WizardModel {
     #expect(planned?.first == "METISTRY_DEPLOYMENT_SHAPE=launchd")
     #expect(planned?.contains("--dry-run") == true)
     #expect(planned?.contains("up") == true)
+}
+
+@MainActor
+@Test func settingTheShapeIsAVerbWithAnExplicitYesAndTheInstance() throws {
+    let w = wizard()
+    w.steps.instanceDirectory = URL(fileURLWithPath: "/Users/you/instance")
+    let planned = try #require(w.steps.plannedSetShapeArguments(shape: "launchd"))
+    #expect(planned.contains("deployment"))
+    #expect(planned.contains("set-shape"))
+    #expect(planned.contains("launchd"))
+    // `set-shape` is preview-then-confirm like every other destructive verb; the
+    // wizard collected the confirmation by showing the preview first, so --yes
+    // is that answer and not a bypass of it.
+    #expect(planned.contains("--yes"))
+    #expect(planned.contains("--instance"))
+    #expect(planned.contains("/Users/you/instance"))
+    // The app still writes no file: the verb does.
+    #expect(!planned.contains("deployment.yaml"))
+}
+
+@MainActor
+@Test func aSetShapeThatSucceededDoesNotClaimTheServicesStep() async {
+    let w = wizard(runner: FixedWizardRunner(result: CommandResult(exitCode: 0, stdout: "shape set to launchd\n", stderr: "")))
+    await w.steps.setShape("launchd")
+    // A shape that was written is not an install that is up: `metistry up` still
+    // has to run, so the step goes back to pending rather than green.
+    #expect(w.steps.state(.services) == .pending)
+}
+
+@MainActor
+@Test func aCliWithoutSetShapeSaysSoRatherThanReportingAFailedWrite() async {
+    let stale = CommandResult(exitCode: 2, stdout: "", stderr: "unknown command: deployment\n\nmetistry — Metistry command line\n")
+    let w = wizard(runner: FixedWizardRunner(result: stale))
+    await w.steps.setShape("launchd")
+    #expect(w.steps.state(.services) == .failed(
+        "this CLI has no `deployment set-shape` verb yet — update it (metistry update, or Check for Updates…)"
+    ))
+}
+
+private struct FixedWizardRunner: CommandRunner {
+    let result: CommandResult
+
+    func run(
+        executable: URL, arguments: [String], environment: [String: String],
+        currentDirectory: URL?, onOutput: @escaping @Sendable (OutputLine) -> Void
+    ) async throws -> CommandResult {
+        result
+    }
 }
 
 @Test func everyChoiceCarriesBothSidesOfItself() {

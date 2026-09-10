@@ -166,10 +166,22 @@ public final class WizardModel {
 
     public func isOptional(_ step: FirstRunStep) -> Bool { !Self.requiredSteps.contains(step) }
 
-    /// Has this step got what it came for? A "not yet" step counts: steps 6 and
-    /// 7 are honest cards, and the wizard is not blocked on a thing the product
-    /// cannot do.
+    /// Has this step got what it came for? Steps 6 and 7 answer from their own
+    /// models rather than from a `metistry` verb's exit code, because neither is
+    /// one: the door is enrolled or it is not, and the token's name is set or it
+    /// is not. Both are optional either way, so neither can wall the wizard —
+    /// the passkey in particular may be unreachable natively for reasons the
+    /// step explains and nobody can fix from here.
     public func isSatisfied(_ step: FirstRunStep) -> Bool {
+        switch step {
+        case .door:
+            if case .enrolled = steps.passkey.phase { return true }
+            return false
+        case .claude:
+            return steps.claude.isSet
+        default:
+            break
+        }
         switch steps.state(step) {
         case .succeeded: return true
         case .notYet: return true

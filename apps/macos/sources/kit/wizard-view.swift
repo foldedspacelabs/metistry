@@ -20,6 +20,9 @@ public struct WizardView: View {
     private let model: WizardModel
     private let bridges: [DoctorRow]
     private let resolvedShape: String?
+    /// Where doctor found the console. Step 6 needs it to decide whether an
+    /// `ASAuthorization` ceremony is possible against this install's origin.
+    private let consoleURL: String?
     private let developerProductDir: URL?
     private let onRelocate: () -> Void
     private let onChooseDeveloperProductDirectory: (URL) -> Void
@@ -27,11 +30,17 @@ public struct WizardView: View {
     @State private var pickingInstanceDirectory = false
     @State private var pickingProductDirectory = false
     @State private var shapeUnderConsideration: String?
+    /// Shapes whose `up --dry-run` has actually been on screen. "Set the Shape"
+    /// stays dark until one has: preview-then-confirm is the rule the CLI holds
+    /// destructive verbs to, and a `--yes` the person could reach without seeing
+    /// the preview would be the app confirming on their behalf.
+    @State private var previewed: Set<String> = []
 
     public init(
         model: WizardModel,
         bridges: [DoctorRow],
         resolvedShape: String?,
+        consoleURL: String? = nil,
         developerProductDir: URL?,
         onRelocate: @escaping () -> Void,
         onChooseDeveloperProductDirectory: @escaping (URL) -> Void
@@ -39,6 +48,7 @@ public struct WizardView: View {
         self.model = model
         self.bridges = bridges
         self.resolvedShape = resolvedShape
+        self.consoleURL = consoleURL
         self.developerProductDir = developerProductDir
         self.onRelocate = onRelocate
         self.onChooseDeveloperProductDirectory = onChooseDeveloperProductDirectory
@@ -137,17 +147,20 @@ public struct WizardView: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
 
-        if let reason = step.notYetReason {
-            NotYetCard(reason: reason)
-        } else {
-            switch step {
-            case .runtime: runtimeStep(p)
-            case .instance: instanceStep(p)
-            case .versioning: versioningStep(p)
-            case .secrets: secretsStep(p)
-            case .services: servicesStep(p)
-            case .door, .claude: EmptyView()
-            }
+        switch step {
+        case .runtime: runtimeStep(p)
+        case .instance: instanceStep(p)
+        case .versioning: versioningStep(p)
+        case .secrets: secretsStep(p)
+        case .services: servicesStep(p)
+        case .door:
+            PasskeyStepView(model: steps.passkey)
+                .task(id: consoleURL) { steps.passkey.adopt(consoleURL: consoleURL) }
+        case .claude:
+            ClaudeStepView(model: steps.claude)
+                .task { await steps.claude.check() }
+        }
+        if !step.hasOwnScreen {
             runRow(step, p)
             if step == .versioning, let code = steps.deviceCode {
                 deviceCodeCard(code, p)
@@ -174,6 +187,22 @@ public struct WizardView: View {
                             .metistryText(.caption1, p, .textTertiary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
+                }
+            }
+            // A bundle's Resources are signed and read-only, so the runtime in
+            // there is a seed: `metistry update` has to be able to write
+            // releases/<version>/ and flip `current`. The copy is one verb, and
+            // the row says what it is for rather than doing it silently at
+            // launch.
+            if steps.resolution.needsRuntimeInstall {
+                VStack(alignment: .leading, spacing: MetistrySpace.s1) {
+                    Text("This app's runtime is inside its own bundle, which is signed and cannot be written to. `metistry update` needs somewhere it can write, so the bundle is a seed and the working copy goes to your Application Support folder. One command, below; nothing else on the Mac is touched.")
+                        .metistryText(.footnote, p, .textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(steps.resolution.installTarget.path)
+                        .metistryText(.mono, p, .textSecondary)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             // Only a build with nothing bundled needs this, and it says so: a
@@ -344,17 +373,34 @@ public struct WizardView: View {
                         p: p
                     ) { shapeUnderConsideration = option.value }
                 }
-                // The honest part: the shape is deployment.yaml's to state, and
-                // deployment.yaml is a §4.7 protected path — the user's own hand
-                // writes it, and no metistry verb does. So the app explains, and
-                // previews, and stops there.
-                Text("Changing the shape is a one-line edit to the instance's deployment.yaml, in your own hand: it is a protected path, and no `metistry` verb writes it. The preview below shows exactly what the other shape would do, and changes nothing.")
+                // Preview first, then set. `deployment.yaml` is a §4.7 protected
+                // path and the app still writes no file — `metistry deployment
+                // set-shape` does, and it is preview-then-confirm like every
+                // other destructive verb, which is what `--yes` here is
+                // confirming. The preview is not ceremony: choosing a shape
+                // decides whether Docker is in the picture and where Postgres
+                // keeps its data.
+                Text("The preview shows exactly what the other shape would do and changes nothing. Setting it writes the one line to the instance's deployment.yaml through `metistry deployment set-shape` — the app writes no file itself, and nothing moves until `metistry up` runs below.")
                     .metistryText(.caption1, p, .textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
                 if let shape = shapeUnderConsideration, shape != resolvedShape {
                     CommandCard(title: "Preview", argument: steps.plannedPreviewArguments(shape: shape))
-                    Button("Preview This Shape") { Task { await steps.previewShape(shape) } }
+                    HStack(spacing: MetistrySpace.s3) {
+                        Button("Preview This Shape") {
+                            Task {
+                                await steps.previewShape(shape)
+                                if case .failed = steps.state(.services) {} else { previewed.insert(shape) }
+                            }
+                        }
                         .disabled(steps.state(.services) == .running)
+                        Button("Set the Shape") { Task { await steps.setShape(shape) } }
+                            .disabled(steps.state(.services) == .running || !previewed.contains(shape))
+                        if !previewed.contains(shape) {
+                            Text("preview it first")
+                                .metistryText(.caption1, p, .textTertiary)
+                        }
+                    }
+                    CommandCard(title: "Sets", argument: steps.plannedSetShapeArguments(shape: shape))
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -374,9 +420,10 @@ public struct WizardView: View {
                     arguments: ([planned].compactMap { $0 }) + followUps,
                     placeholder: placeholder(for: step)
                 )
+                let looksOnly = step == .runtime && planned == nil
                 HStack(spacing: MetistrySpace.s3) {
                     Button {
-                        if step == .runtime { onRelocate() } else { Task { await steps.run(step) } }
+                        if looksOnly { onRelocate() } else { Task { await steps.run(step) } }
                     } label: {
                         if steps.state(step) == .running {
                             HStack(spacing: MetistrySpace.s2) {
@@ -384,11 +431,11 @@ public struct WizardView: View {
                                 Text("Running…")
                             }
                         } else {
-                            Text(step == .runtime ? "Look Again" : "Run")
+                            Text(looksOnly ? "Look Again" : (step == .runtime ? "Install It" : "Run"))
                         }
                     }
                     .buttonStyle(.bordered)
-                    .disabled(step != .runtime && !steps.canRun(step))
+                    .disabled(!looksOnly && !steps.canRun(step))
 
                     switch steps.state(step) {
                     case .failed(let why):

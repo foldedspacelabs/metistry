@@ -38,7 +38,12 @@ struct MetistryApp: App {
         let model = AppModel(
             bundleResourceURL: resources,
             runner: runner,
-            appVersion: version ?? UpdateStatus.devBuildVersion
+            appVersion: version ?? UpdateStatus.devBuildVersion,
+            // The three platform seams MetistryKit declares and does not have:
+            // ServiceManagement, AuthenticationServices, and a terminal.
+            loginItemService: SMAppServiceLoginItem(),
+            passkeyRegistrar: ASAuthorizationPasskeyRegistrar(),
+            terminalOpener: DotCommandTerminalOpener()
         )
         _model = State(initialValue: model)
         #if os(macOS)
@@ -57,6 +62,7 @@ struct MetistryApp: App {
                         model: model.wizard,
                         bridges: model.status.report?.bridges ?? [],
                         resolvedShape: model.status.report?.deployment?.shape,
+                        consoleURL: PasskeyRouting.consoleURL(in: model.status.report),
                         developerProductDir: model.developerProductDir,
                         onRelocate: { model.relocate() },
                         onChooseDeveloperProductDirectory: { model.chooseDeveloperProductDirectory($0) }

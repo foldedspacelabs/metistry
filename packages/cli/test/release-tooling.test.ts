@@ -259,8 +259,14 @@ describe(".github/workflows/release.yml", () => {
       expect(wf.jobs[job], `${job} is missing`).toBeDefined();
       // These were `if: false` stubs until the app existed (apps/macos, 2026-09-09).
       expect(wf.jobs[job]!.if, `${job} must not be disabled`).not.toBe(false);
-      expect(wf.jobs[job]!["runs-on"]).toBe("macos-14");
+      expect(String(wf.jobs[job]!["runs-on"]), `${job} must run on macOS`).toMatch(/^macos-/);
     }
+    // Swift 6 tools version: the macos-14 image's Xcode is 15.4 / Swift 5.10 and
+    // refuses the package outright, so the job that COMPILES has to be newer.
+    // `appcast` only runs sign_update and node, so it can stay on macos-14.
+    expect(wf.jobs["macos-app"]!["runs-on"]).toBe("macos-15");
+    expect(repoFile("apps/macos/Package.swift")).toContain("swift-tools-version: 6.0");
+    expect(parseYaml(repoFile(".github/workflows/ci.yml")).jobs["macos-app"]["runs-on"]).toBe("macos-15");
     const text = repoFile(".github/workflows/release.yml");
     expect(text).toContain("ops/release/build-app.sh");
     expect(text).toContain("ops/release/notarize.sh");

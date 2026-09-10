@@ -11,9 +11,9 @@ import type { Exec, ExecOptions, ExecResult } from "../src/exec.js";
 const plist = (label: string, args: string, extra = "") =>
   `<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0">\n<dict>\n  <key>Label</key><string>${label}</string>\n  <key>ProgramArguments</key>\n  <array>${args}</array>\n${extra}  <key>KeepAlive</key><true/>\n</dict>\n</plist>\n`;
 
-/** The shape ops/launchd uses for node services: `set -a; . .env; set +a; exec node <dist>`. */
+/** The shape ops/launchd uses for node services: `set -a; . <instance>/state/.env; set +a; exec node <dist>`. */
 export const nodeJob = (label: string, rel: string) =>
-  plist(label, `<string>/bin/sh</string><string>-c</string><string>set -a; . __REPO__/.env; set +a; exec __NODE__ __REPO__/${rel}</string>`, `  <key>WorkingDirectory</key><string>__REPO__</string>\n`);
+  plist(label, `<string>/bin/sh</string><string>-c</string><string>set -a; . __ENV_FILE__; set +a; exec __NODE__ __REPO__/${rel}</string>`, `  <key>WorkingDirectory</key><string>__REPO__</string>\n`);
 
 /** The eventkit-helper shape: the signed binary is the job's root process; env via EnvironmentVariables. */
 export const binJob = (label: string, rel: string) =>

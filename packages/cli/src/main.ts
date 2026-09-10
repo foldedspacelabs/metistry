@@ -9,7 +9,7 @@ import { realpathSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { doctor, renderTable, type DoctorDeps } from "./doctor.js";
-import { loadDotEnv, productVersion, resolveProductDir, resolveSeedDir } from "./env.js";
+import { loadInstallEnv, productVersion, resolveProductDir, resolveSeedDir, type LoadedEnv } from "./env.js";
 import { realExec, type Exec } from "./exec.js";
 import { AUTH_MODES, connectRepo, type AuthMode } from "./connect-repo.js";
 import { importSessions } from "./import-sessions.js";
@@ -183,6 +183,16 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
     return command === undefined && !flags.help ? 2 : 0;
   }
   const productDir = resolveProductDir(str(flags, "product-dir"));
+  /**
+   * This install's environment, from the instance's own `state/.env` and
+   * then the product checkout's deprecated one. Deprecation notices go to
+   * STDERR so `doctor --json` stays machine-readable.
+   */
+  const loadEnv = (): LoadedEnv => {
+    const loaded = loadInstallEnv({ productDir, instanceDir: str(flags, "instance"), envFile: str(flags, "env-file") });
+    for (const n of loaded.notices) err(n);
+    return loaded;
+  };
   let channel: LockSource | undefined;
   try {
     channel = parseChannel(str(flags, "channel"));
@@ -224,7 +234,7 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
         err("usage: metistry connect-repo <url> [--instance <dir>] [--auth device|token|ssh] [--force]");
         return 2;
       }
-      if (productDir) loadDotEnv(productDir);
+      loadEnv();
       const instanceDir = str(flags, "instance") ?? process.env.METISTRY_INSTANCE_DIR;
       if (!instanceDir) {
         err("connect-repo needs the instance repo: pass --instance <dir> or set METISTRY_INSTANCE_DIR (docs/ops/cli.md)");
@@ -248,7 +258,7 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
     }
     case "secrets": {
       const sub = positional[0];
-      if (productDir) loadDotEnv(productDir);
+      loadEnv();
       const envFile = str(flags, "env-file") ?? (productDir ? join(productDir, ".env") : undefined);
       if (!envFile) {
         err("secrets needs a .env to read or generate: pass --env-file or run inside a checkout (--product-dir / METISTRY_PRODUCT_DIR)");
@@ -287,7 +297,7 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
       }
     }
     case "import-sessions": {
-      if (productDir) loadDotEnv(productDir);
+      loadEnv();
       const limitRaw = str(flags, "limit");
       const limit = limitRaw === undefined ? undefined : Number(limitRaw);
       if (limit !== undefined && (!Number.isInteger(limit) || limit <= 0)) {
@@ -315,7 +325,7 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
         err("doctor needs a Metistry checkout to walk: pass --product-dir or set METISTRY_PRODUCT_DIR");
         return 2;
       }
-      loadDotEnv(productDir);
+      loadEnv();
       const report = await doctor({ productDir, ...io.doctorDeps });
       out(flags.json === true ? JSON.stringify(report, null, 2) : renderTable(report));
       return report.ok ? 0 : 1;
@@ -325,11 +335,12 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
         err("up needs a Metistry checkout: pass --product-dir or set METISTRY_PRODUCT_DIR");
         return 2;
       }
-      loadDotEnv(productDir);
+      loadEnv();
       const r = await up({
         productDir,
         out,
         exec: io.exec,
+        envFile: str(flags, "env-file"),
         dryRun: flags["dry-run"] === true,
         compose: flags["no-compose"] !== true,
         launchd: flags["no-launchd"] !== true,
@@ -342,11 +353,12 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
         err("update needs a Metistry checkout: pass --product-dir or set METISTRY_PRODUCT_DIR");
         return 2;
       }
-      loadDotEnv(productDir);
+      loadEnv();
       const r = await update({
         productDir,
         out,
         exec: io.exec,
+        envFile: str(flags, "env-file"),
         dryRun: flags["dry-run"] === true,
         skipBuild: flags["skip-build"] === true,
         skipMigrate: flags["skip-migrate"] === true,

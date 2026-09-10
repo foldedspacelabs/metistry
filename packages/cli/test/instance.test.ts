@@ -23,6 +23,7 @@ import {
   withInstanceId,
   INSTANCE_ID_RE,
 } from "../src/instance.js";
+import { loadInstallEnv } from "../src/env.js";
 import { StepRunner } from "../src/steps.js";
 import type { Exec } from "../src/exec.js";
 
@@ -98,6 +99,59 @@ describe("where .env lives", () => {
     expect(resolveInstanceDir({ METISTRY_INSTANCE_DIR: "/from/env/" }, "/from/flag")).toBe("/from/flag");
     expect(resolveInstanceDir({ METISTRY_INSTANCE_DIR: "/from/env/" })).toBe("/from/env");
     expect(resolveInstanceDir({})).toBeUndefined();
+  });
+});
+
+describe("loadInstallEnv", () => {
+  /** A checkout whose .env carries only the pointer, and an instance whose state/.env carries the rest. */
+  async function pair(): Promise<{ prod: string; inst: string }> {
+    const inst = await instanceDir();
+    const prod = await mkdtemp(join(tmpdir(), "metistry-product-"));
+    await writeFile(productEnvFile(prod), `METISTRY_INSTANCE_DIR=${inst}\nMETISTRY_DB_PASSWORD=old-and-stale\nMETISTRY_TZ=UTC\n`);
+    await mkdir(instanceStateDir(inst), { recursive: true });
+    await writeFile(instanceEnvFile(inst), "METISTRY_DB_PASSWORD=the-real-one\n");
+    return { prod, inst };
+  }
+
+  it("follows the checkout's pointer to the instance, then lets the instance's own values win", async () => {
+    const { prod, inst } = await pair();
+    const env: NodeJS.ProcessEnv = {};
+    const loaded = loadInstallEnv({ productDir: prod, env });
+    expect(loaded.instanceDir).toBe(inst);
+    expect(loaded.files).toEqual([instanceEnvFile(inst), productEnvFile(prod)]);
+    // the instance's file is applied FIRST, so the checkout's stale copy cannot win
+    expect(env.METISTRY_DB_PASSWORD).toBe("the-real-one");
+    // and the checkout's file still supplies what the instance's does not name
+    expect(env.METISTRY_TZ).toBe("UTC");
+    expect(env.METISTRY_INSTANCE_DIR).toBe(inst);
+    expect(loaded.notices.join(" ")).toContain("deprecated");
+  });
+
+  it("nothing the caller already set is overwritten, by either file", async () => {
+    const { prod } = await pair();
+    const env: NodeJS.ProcessEnv = { METISTRY_DB_PASSWORD: "from-the-shell", METISTRY_TZ: "Europe/Lisbon" };
+    loadInstallEnv({ productDir: prod, env });
+    expect(env.METISTRY_DB_PASSWORD).toBe("from-the-shell");
+    expect(env.METISTRY_TZ).toBe("Europe/Lisbon");
+  });
+
+  it("an explicit --instance wins over the environment and is what downstream reads", async () => {
+    const { prod, inst } = await pair();
+    const other = await instanceDir({ ownEnv: true });
+    const env: NodeJS.ProcessEnv = { METISTRY_INSTANCE_DIR: inst };
+    const loaded = loadInstallEnv({ productDir: prod, env, instanceDir: other });
+    expect(loaded.instanceDir).toBe(other);
+    expect(env.METISTRY_INSTANCE_DIR).toBe(other);
+  });
+
+  it("with no instance anywhere it is the checkout's .env and no notice at all", async () => {
+    const prod = await mkdtemp(join(tmpdir(), "metistry-product-"));
+    await writeFile(productEnvFile(prod), "METISTRY_TZ=UTC\n");
+    const env: NodeJS.ProcessEnv = {};
+    const loaded = loadInstallEnv({ productDir: prod, env });
+    expect(loaded.files).toEqual([productEnvFile(prod)]);
+    expect(loaded.notices).toEqual([]);
+    expect(env.METISTRY_TZ).toBe("UTC");
   });
 });
 

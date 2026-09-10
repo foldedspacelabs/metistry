@@ -47,6 +47,9 @@ function fakeFetch(status = 201, body: unknown = { queued: true }) {
   return { fn, calls };
 }
 
+/** compose is pointed at the INSTANCE's .env: its own `./.env` is not this install's environment. */
+const envFileArg = (inst: string) => `--env-file ${join(inst, "state", ".env")}`;
+
 describe("metistry update", () => {
   it("--dry-run prints the exact command list and touches nothing: no subprocess, no db, no bridge, no doctor", async () => {
     const P = await checkout({ git: true });
@@ -74,7 +77,7 @@ describe("metistry update", () => {
       `(cd ${P} && pnpm install --frozen-lockfile)`,
       `(cd ${P} && pnpm -r build)`,
       `apply db/migrations/*.sql not yet in schema_migrations (2 on disk) under pg_advisory_lock(${MIGRATION_LOCK_KEY}), one transaction each`,
-      `(cd ${P} && docker compose up -d --build)`,
+      `(cd ${P} && docker compose ${envFileArg(inst)} up -d --build)`,
       `launchctl kickstart -k gui/501/${HELPER}`,
       `launchctl kickstart -k gui/501/${RECONCILER}`,
       `launchctl kickstart -k gui/501/${WATCHDOG}`,
@@ -106,7 +109,7 @@ describe("metistry update", () => {
       "git pull --ff-only --quiet",
       "pnpm install --frozen-lockfile",
       "pnpm -r build",
-      "docker compose up -d --build",
+      `docker compose ${envFileArg(inst)} up -d --build`,
       `launchctl kickstart -k gui/501/${WATCHDOG}`,
       "git rev-parse HEAD",
     ]);
@@ -242,8 +245,8 @@ describe("metistry update", () => {
     expect(r.commands.join("\n")).not.toContain("pnpm");
     expect(r.commands.join("\n")).not.toContain("git ");
     // no `current` yet in this checkout-shaped dir, so the plan still names the product dir
-    expect(r.commands).toContain(`(cd ${P} && docker compose pull)`);
-    expect(r.commands).toContain(`(cd ${P} && docker compose up -d --no-build)`);
+    expect(r.commands).toContain(`(cd ${P} && docker compose ${envFileArg(inst)} pull)`);
+    expect(r.commands).toContain(`(cd ${P} && docker compose ${envFileArg(inst)} up -d --no-build)`);
     expect(r.lock).toEqual({ product: { version: "0.0.9", commit: "rel-commit", source: "release" }, updated_at: NOW.toISOString(), migrations_applied: ["0001_a.sql"] });
     expect(await publishedPackages(P)).toEqual(["@foldedspacelabs/metistry-cli", "@foldedspacelabs/metistry-core"]);
   });

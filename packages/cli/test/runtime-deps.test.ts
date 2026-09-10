@@ -145,7 +145,7 @@ describe("the reconciler's plist gets the bundled git", () => {
   });
 
   it("adds an EnvironmentVariables dict with PATH, without disturbing the rendered job", () => {
-    const rendered = renderPlist(real, { repo: "/p", node: "/usr/bin/node" });
+    const rendered = renderPlist(real, { repo: "/p", node: "/usr/bin/node", envFile: "/i/state/.env" });
     const withPath = withEnvironmentVariables(rendered, { PATH: `/p/${RUNTIME_DIRNAME}/git/bin:${LAUNCHD_BASE_PATH}` });
     expect(withPath).toContain("<key>EnvironmentVariables</key>");
     expect(withPath).toContain(`<key>PATH</key><string>/p/${RUNTIME_DIRNAME}/git/bin:${LAUNCHD_BASE_PATH}</string>`);

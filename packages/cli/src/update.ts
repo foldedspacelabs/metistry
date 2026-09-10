@@ -19,6 +19,7 @@ import { usesCompose } from "@foldedspacelabs/metistry-core";
 import { loadDeployment } from "./deployment.js";
 import { doctor, type DoctorDeps, type DoctorReport } from "./doctor.js";
 import { productVersion } from "./env.js";
+import { envPaths } from "./instance.js";
 import type { Exec } from "./exec.js";
 import { loadPlistTemplates, type PlistTemplate } from "./launchd.js";
 import { instanceLockPath, LOCK_FILENAME, readLock, serializeLock, type LockFile, type LockSource } from "./lock.js";
@@ -49,6 +50,8 @@ export interface UpdateOptions {
   rollback?: boolean | undefined;
   /** release mode: the runtime pack's os-arch (default: this host's) */
   target?: string | undefined;
+  /** `--env-file`: the dotenv file this install runs from (default: `<instance>/state/.env`, falling back to the checkout's) */
+  envFile?: string | undefined;
   now?: Date | undefined;
   fetchFn?: typeof fetch | undefined;
   /** test seam: a single-session db handle for the migration runner (null = no db configured) */
@@ -174,6 +177,12 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
   const openSession = opts.openSession ?? openMigrationSession;
   const productDir = opts.productDir;
 
+  // compose interpolates from `./.env` unless told otherwise, and this
+  // install's environment now lives in the instance (`state/.env`)
+  const instanceDir = env.METISTRY_INSTANCE_DIR ? { instanceDir: env.METISTRY_INSTANCE_DIR.replace(/\/+$/, "") } : {};
+  const envPathsFound = envPaths({ ...instanceDir, productDir, ...(opts.envFile ? { explicit: opts.envFile } : {}) });
+  const envFile = envPathsFound?.read[0] ?? envPathsFound?.write;
+
   const lockPath = instanceLockPath(env);
   const prior = lockPath ? await readLock(lockPath) : undefined;
   const source = opts.channel ?? prior?.product.source ?? "git";
@@ -256,7 +265,7 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
     }
 
     r.section("restart");
-    if (usesCompose(deployment)) await composeUp(r, runDir, source, source === "release" ? releaseVersion : undefined);
+    if (usesCompose(deployment)) await composeUp(r, runDir, source, source === "release" ? releaseVersion : undefined, envFile);
     else r.note("shape launchd: no containers, so docker is never called — console, assistant and db are kickstarted below with the other host jobs");
     if (platform === "darwin") {
       const after = await hashHostJobs(runDir, templates);

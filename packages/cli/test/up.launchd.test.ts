@@ -203,8 +203,9 @@ describe("the rendered plists", () => {
     expect(db).toContain(`<string>${PG}/postgres</string>`);
     expect(db).toContain(`<string>${I}/state/pg</string>`);
 
-    // the host jobs that exist in BOTH shapes are untouched: still sh -c + .env
-    expect(await read("watchdog")).toContain(`set -a; . ${P}/.env; set +a; exec ${NODE} ${P}/apps/watchdog/dist/main.js`);
+    // the host jobs that exist in BOTH shapes still source a dotenv file with
+    // sh -c — but the INSTANCE's, not the checkout's (self-contained instances)
+    expect(await read("watchdog")).toContain(`set -a; . ${I}/state/.env; set +a; exec ${NODE} ${P}/apps/watchdog/dist/main.js`);
   });
 
   it("under the compose shape the shaped plists are not installed at all", async () => {

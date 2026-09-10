@@ -30,7 +30,7 @@ describe("metistry up", () => {
     expect(r.source).toBe("git");
     const LA = "/h/Library/LaunchAgents";
     const job = (label: string) => [
-      `write ${LA}/${label}.plist  (from ops/launchd/${label}.plist, __REPO__=${P}, __NODE__=${NODE})`,
+      `write ${LA}/${label}.plist  (from ops/launchd/${label}.plist, __REPO__=${P}, __NODE__=${NODE}, __ENV_FILE__=${join(P, ".env")})`,
       `launchctl bootout gui/501/${label}`,
       `launchctl bootstrap gui/501 ${LA}/${label}.plist`,
       `launchctl kickstart -k gui/501/${label}`,
@@ -101,7 +101,9 @@ describe("metistry up", () => {
     await writeFile(join(inst, "metistry.lock"), serializeLock({ product: { version: "1.0.0", commit: "abc", source: "release" }, updated_at: "2026-09-07T00:00:00.000Z", migrations_applied: [] }));
     const r = await up({ ...base(P), env: { METISTRY_INSTANCE_DIR: inst }, exec: fakeExec(), out: () => {}, dryRun: true, home: "/h", launchd: false });
     expect(r.source).toBe("release");
-    expect(r.commands).toEqual([`(cd ${P} && docker compose pull)`, `(cd ${P} && docker compose up -d --no-build)`, "metistry doctor"]);
+    // compose is told where the instance's .env is: its own `./.env` is not this install's environment
+    const ef = join(inst, "state", ".env");
+    expect(r.commands).toEqual([`(cd ${P} && docker compose --env-file ${ef} pull)`, `(cd ${P} && docker compose --env-file ${ef} up -d --no-build)`, "metistry doctor"]);
   });
 
   it("on Linux prints the systemd user units instead of touching launchd, and writes nothing", async () => {

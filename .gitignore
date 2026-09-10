@@ -44,3 +44,9 @@ ops/release/.tools/
 # the unpacked runtime packs and the `current` symlink. Never source.
 releases/
 current
+
+# Claude Code: local session state and this repo's worktrees live under
+# .claude/, but .claude/skills and .claude/agents ARE tracked — they are the
+# source of truth that ops/scripts/install-claude-assets.sh links into ~/.claude.
+.claude/settings.local.json
+.claude/worktrees/

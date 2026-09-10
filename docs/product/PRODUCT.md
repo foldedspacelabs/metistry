@@ -1090,3 +1090,25 @@ passkey only for browsers and your phone" — with the enrolment code kept intac
 for exactly those, and the `ASAuthorization` probe moved to Settings → Advanced
 where a diagnostic belongs. One less ceremony in the install, and one less
 credential that had no reason to exist.
+
+**2026-09-10 — the project's own Claude Code sessions get a router, and it is
+allowed to say "don't."** `.claude/skills/token-efficient-agents` turns
+`docs/research/2026-09-cost-optimization.md`'s ruling — tiers are `(model,
+effort)` pairs — into something a session actually runs. It classifies the task
+(shape, bulk, is there a checker, cost of error), recommends a model and effort
+for its *own* seat and waits, because a session cannot change its own model
+mid-flight and pretending otherwise is theatre, then routes each subtask to the
+cheapest tier that can genuinely do it: four tracked agent definitions
+(`scout` on Haiku, `digest` on Sonnet/medium, `implement` on Sonnet/xhigh,
+`deep` on Opus/xhigh), with inline model overrides as the fallback outside this
+checkout. The routing data is a dated table with a 30-day staleness stamp, so a
+new model release or a changed effort range reaches it by refresh rather than by
+a code change. **The part that makes it honest:** the measured finding is that
+an orchestrator only beats a single model when the work genuinely exceeds one
+context window — on one dependent chain the coordinator's model alone at lower
+effort wins every time — so the skill's third step is a gate that can conclude
+"do it yourself at lower effort," and it is instructed to say so out loud. A
+fan-out skill that always fans out is a cost centre, not a router. The
+definitions are prompts like any other, so CI's `prompt-lint` now scans
+`.claude/` too, and `ops/scripts/install-claude-assets.sh` symlinks them into
+`~/.claude` so every session on the machine gets them, not just this repo's.

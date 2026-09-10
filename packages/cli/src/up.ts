@@ -20,8 +20,9 @@ import { usesCompose, type Deployment } from "@foldedspacelabs/metistry-core";
 import { assistantEnv, consoleEnv, consolePort, dbPort, loadDeployment, type ShapeContext } from "./deployment.js";
 import { doctor, renderTable, type DoctorDeps, type DoctorReport } from "./doctor.js";
 import type { Exec } from "./exec.js";
-import { GIT_SPAWNING_SERVICES, launchAgentsDir, launchdCommands, loadPlistTemplates, nodeOnPath, renderPlist, renderSystemdUnit, withEnvironmentVariables, type PlistTemplate, type PlistValues } from "./launchd.js";
+import { GIT_SPAWNING_SERVICES, LABEL_PREFIX, launchAgentsDir, launchdCommands, loadPlistTemplates, nodeOnPath, renderPlist, renderSystemdUnit, withEnvironmentVariables, type PlistTemplate, type PlistValues } from "./launchd.js";
 import { ensureInstanceId, envPaths } from "./instance.js";
+import { allocateBase, applyPorts, loadNamespace, PORTED_SERVICES, portsFile, portsOf, serializeNamespace, suffixFor, type Namespace } from "./namespace.js";
 import { instanceLockPath, readLock, type LockFile, type LockSource } from "./lock.js";
 import { currentLink, imageEnv, imageRef, IMAGE_SERVICES } from "./release.js";
 import { installRuntimeDeps, pathWithRuntimeGit, runtimeDepsEnabled, RUNTIME_DIRNAME } from "./runtime-deps.js";
@@ -63,6 +64,10 @@ export interface UpOptions {
   envFile?: string | undefined;
   /** test seam: the deployment shape, normally read from deployment.yaml */
   deployment?: Deployment | undefined;
+  /** `--namespace`: allocate this instance its own launchd label suffix and port block (writes `<instance>/state/ports.yaml` once) */
+  namespace?: boolean | undefined;
+  /** test seam: the port probe `--namespace` allocates with */
+  portFree?: ((port: number) => Promise<boolean>) | undefined;
   /** test seam: filesystem probes (the Postgres toolchain, an initialised data dir) */
   exists?: ((p: string) => boolean) | undefined;
   /** test seam: the password generated for a fresh Postgres */
@@ -157,6 +162,8 @@ export interface ShapeValues extends ShapeContext {
   pgData?: string | undefined;
   /** `<install>/runtime/git/bin:/usr/bin:…` when a bundled git is installed; undefined otherwise */
   gitPath?: string | undefined;
+  /** this instance's launchd label suffix (namespace.ts); undefined = the fixed default labels */
+  labelSuffix?: string | undefined;
   home: string;
 }
 
@@ -184,12 +191,43 @@ export function plistValuesFor(t: PlistTemplate, v: ShapeValues): PlistValues {
   }
 }
 
+/**
+ * This instance's namespace, allocating one on `--namespace` when it has
+ * none yet. Allocation is a probe (is this block free right now?) followed
+ * by a write, and it happens EXACTLY ONCE per instance: after that
+ * `state/ports.yaml` is the record, so a re-run of `up` on a running
+ * instance never sees its own ports as taken and never moves them.
+ */
+export async function ensureNamespace(
+  r: StepRunner,
+  opts: { instanceDir?: string | undefined; instanceId?: string | undefined; want: boolean; portFree?: ((port: number) => Promise<boolean>) | undefined },
+): Promise<Namespace | undefined> {
+  const existing = await loadNamespace(opts.instanceDir);
+  if (existing) {
+    if (opts.want) r.note(`--namespace: ${portsFile(opts.instanceDir!)} already allocates this instance's block — it is never reallocated`);
+    return existing;
+  }
+  if (!opts.want) return undefined;
+  if (!opts.instanceDir) throw new StepFailed("--namespace needs an instance directory: pass --instance <dir> or set METISTRY_INSTANCE_DIR");
+  if (!opts.instanceId) throw new StepFailed(`--namespace needs this instance's instance_id, and ${opts.instanceDir}/identity.yaml has none — run \`metistry init\` (or \`metistry secrets sync\`) first`);
+  const file = portsFile(opts.instanceDir);
+  if (r.dryRun) {
+    const base = "<the first free block>";
+    r.action(`allocate a launchd label suffix (${suffixFor(opts.instanceId)}) and a port block (${base}) and write ${file}`);
+    return undefined;
+  }
+  const base = await allocateBase(opts.instanceId, opts.portFree);
+  const ns: Namespace = { labelSuffix: suffixFor(opts.instanceId), base, ports: portsOf(base), from: file };
+  await r.write(file, serializeNamespace(ns, opts.instanceId), `allocated once: labels ${LABEL_PREFIX}${ns.labelSuffix}.<service>, ports ${base}-${base + PORTED_SERVICES.length - 1}`);
+  return ns;
+}
+
 /** The plists whose EnvironmentVariables dict holds this install's secrets, so they are written 0600. */
 export const SECRET_BEARING_SERVICES = new Set(["console", "assistant"]);
 
 /** Render every template into ~/Library/LaunchAgents and (re)bootstrap it; on anything but macOS, print the systemd units instead. */
 export async function installLaunchd(r: StepRunner, productDir: string, le: LaunchdEnv, deployment: Deployment, values: ShapeValues): Promise<void> {
-  const templates = await loadPlistTemplates(productDir, deployment.shape);
+  const templates = await loadPlistTemplates(productDir, deployment.shape, values.labelSuffix);
   if (templates.length === 0) {
     r.note("no ops/launchd/*.plist in this checkout — nothing to install");
     return;
@@ -390,9 +428,21 @@ export async function up(opts: UpOptions): Promise<UpResult> {
   r.note(`env: ${envFile}${paths?.pendingMove ? " — the product checkout's; `metistry secrets sync --to env` moves it to " + paths.write : paths?.legacy ? ` (${paths.legacy} still read as a deprecated fallback)` : ""}`);
   // an instance created before instance_id existed gets one here, so the
   // Mac app and `secrets` can tell this instance from any other on the Mac
+  let instanceId: string | undefined;
   if (instanceDir.instanceDir) {
     const id = await ensureInstanceId(r, { instanceDir: instanceDir.instanceDir, env, platform: le.platform, uid: le.uid, fetchFn: opts.fetchFn ?? fetch });
     r.note(id.detail);
+    if (id.id) instanceId = id.id;
+  }
+  // the namespace: one file, allocated once, then read. It is what lets a
+  // SECOND instance run beside the first — without it an install keeps the
+  // fixed labels and ports it has always had
+  const ns = await ensureNamespace(r, { instanceDir: instanceDir.instanceDir, instanceId, want: opts.namespace === true, portFree: opts.portFree });
+  if (ns) {
+    values.labelSuffix = ns.labelSuffix;
+    const applied = applyPorts(env, ns);
+    r.note(`namespace: labels ${LABEL_PREFIX}${ns.labelSuffix}.<service>, ports ${ns.base}-${ns.base + PORTED_SERVICES.length - 1} — from ${ns.from}`);
+    r.note(applied.length ? `namespace → environment: ${applied.join(" ")}` : "namespace → environment: nothing to fill; .env already sets every port and URL");
   }
   let failure: StepFailed | undefined;
 

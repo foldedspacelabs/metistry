@@ -29,21 +29,39 @@
 // compared before it is called done.
 
 import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Deployment, DeploymentShape } from "@foldedspacelabs/metistry-core";
-import { loadDeployment, dbPort } from "./deployment.js";
+import { consolePort, dbPort, loadDeployment } from "./deployment.js";
 import { setDeploymentShape } from "./deployment-report.js";
 import { doctor, renderTable, type DoctorDeps, type DoctorReport } from "./doctor.js";
 import type { Exec } from "./exec.js";
-import { labelFor, loadPlistTemplates, launchAgentsDir, renderPlist, withEnvironmentVariables, type PlistTemplate } from "./launchd.js";
+import { labelFor, launchdCommands, loadPlistTemplates, launchAgentsDir, renderPlist, withEnvironmentVariables, type PlistTemplate } from "./launchd.js";
 import { loadNamespace } from "./namespace.js";
 import { findPgToolchain, pgCandidates, pgSocketDir, type PgToolchain } from "./postgres.js";
 import { runtimeDir, runtimeNodeBin, RUNTIME_DIRNAME } from "./runtime-deps.js";
 import { StepFailed, StepRunner } from "./steps.js";
-import { composeEnvArgs, instanceLock, runDirFor, stateRoot, up, type UpOptions, type UpResult } from "./up.js";
+import { awaitBootout, composeEnvArgs, instanceLock, runDirFor, stateRoot, up, type UpOptions, type UpResult } from "./up.js";
 
 /** The services that actually change supervisor. `reconciler` and `watchdog` are host jobs in either shape (invariant 6). */
 export const SHAPE_SERVICES = ["db", "console", "assistant"] as const;
+
+/**
+ * Stopped FIRST, before the dump is taken.
+ *
+ * Everything that writes to the database. `pg_dump` is a consistent
+ * snapshot of the moment it runs, so any row written between the dump and
+ * `docker compose stop db` lives in the volume and is silently absent from
+ * the restored database — a small window, and a real one: the rehearsal
+ * caught the console recording a `runs` row inside it. Quiescing the
+ * writers first closes it, and it is also what makes the row counts taken
+ * beside the dump mean anything.
+ *
+ * The reconciler is deliberately NOT here: it is a host job in either shape,
+ * it holds no database connection it cannot re-open, and it is what commits
+ * the `deployment.yaml` write two steps later.
+ */
+export const WRITER_SERVICES = ["console", "assistant"] as const;
 
 /**
  * The file whose presence means "this product carries #117's launchd
@@ -63,16 +81,42 @@ export const SANDBOX_PROFILE_REL = join("ops", "sandbox", "assistant.sb");
 /** `pg_dump`/`pg_restore` are not in `PG_BINARIES` (nothing else calls them), so this verb checks for them itself. */
 export const MIGRATE_PG_BINARIES = ["pg_dump", "pg_restore", "psql"] as const;
 
+/** Every base table in `public`, one per line — asked of the SOURCE, and the list both count queries are then built from. */
+export const TABLE_LIST_SQL =
+  "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE' ORDER BY table_name";
+
 /**
- * Exact per-table row counts for every table in `public`, as
- * `name=count` lines. `pg_stat_user_tables.n_live_tup` would be one query
- * instead of this mouthful, but it is an ESTIMATE and a freshly restored
- * database has not been analysed — the whole point here is to prove the
- * restore moved every row, so the count has to be a real `count(*)`.
+ * Exact per-table row counts as `name=count` lines, as ONE query over a
+ * known table list.
+ *
+ * The obvious one-liner is `query_to_xml` over `information_schema` — and
+ * it is what the first cut used, until the rehearsal ran it against the
+ * bundled Postgres and got `unsupported XML feature: this functionality
+ * requires the server to be built with libxml support`. The bundled runtime
+ * is built deliberately minimal (`--without-icu --without-readline
+ * --with-zlib`, and no libxml), so anything this verb runs on BOTH sides of
+ * the migration has to be plain SQL. `pg_stat_user_tables.n_live_tup` is
+ * the other tempting shortcut and is an ESTIMATE, which proves nothing
+ * about a freshly restored database that has never been analysed.
+ *
+ * Building the same text for both sides has a second payoff: a table that
+ * did not survive the restore fails the query outright rather than quietly
+ * dropping out of a comparison.
  */
-export const TABLE_COUNTS_SQL =
-  "SELECT table_name || '=' || (xpath('/row/c/text()', query_to_xml(format('SELECT count(*) AS c FROM %I.%I', table_schema, table_name), false, true, '')))[1]::text " +
-  "FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE' ORDER BY table_name";
+export function tableCountsSql(tables: string[]): string {
+  const lit = (s: string) => `'${s.replace(/'/g, "''")}'`;
+  const ident = (s: string) => `"${s.replace(/"/g, '""')}"`;
+  return `${tables.map((t) => `SELECT ${lit(`${t}=`)} || count(*) FROM ${ident(t)}`).join(" UNION ALL ")} ORDER BY 1`;
+}
+
+/**
+ * What the plan says in place of the count query during a `--dry-run`.
+ *
+ * The real query is generated from the table list the source database hands
+ * back, and a dry run never asks it — so the alternative to a line like this
+ * is a plan with a step silently missing from it.
+ */
+export const DRY_RUN_COUNTS = "psql: one count(*) per table from the list above";
 
 /**
  * The Developer-ID-signed Swift helper bundles (D3), which the runtime pack
@@ -191,10 +235,30 @@ export function parseCounts(text: string): Record<string, string> {
   return out;
 }
 
-/** Tables whose count changed (or which appeared/vanished) between the dump and the restore. Empty = the data all came across. */
+/** Tables whose count changed (or which appeared/vanished) between the dump and the restore. Empty = every count identical. */
 export function countDiff(before: Record<string, string>, after: Record<string, string>): string[] {
   const names = [...new Set([...Object.keys(before), ...Object.keys(after)])].sort();
   return names.filter((n) => before[n] !== after[n]).map((n) => `${n}: ${before[n] ?? "(absent)"} → ${after[n] ?? "(absent)"}`);
+}
+
+/**
+ * The subset of `countDiff` that is a FAILURE: a table that lost rows, or
+ * that is not there at all. Growth is not a failure — the console starts
+ * under launchd while the database is still empty and records its own
+ * startup the moment the restore lands, so `runs` is legitimately one or two
+ * ahead by the time this runs. Losing a row never is.
+ */
+export function countLosses(before: Record<string, string>, after: Record<string, string>): string[] {
+  const out: string[] = [];
+  for (const [name, was] of Object.entries(before).sort(([a], [b]) => a.localeCompare(b))) {
+    const now = after[name];
+    if (now === undefined) {
+      out.push(`${name}: ${was} → the table is not there`);
+      continue;
+    }
+    if (Number(now) < Number(was)) out.push(`${name}: ${was} → ${now}`);
+  }
+  return out;
 }
 
 interface Ctx {
@@ -324,19 +388,30 @@ export async function preflightLaunchd(ctx: Ctx, exists: (p: string) => boolean)
  * also why this never puts one in an argv `ps` could read (postgres.ts's
  * pwfile rule, same reasoning).
  */
-export async function dumpCompose(ctx: Ctx, toolchain: PgToolchain, ts: string): Promise<{ path: string; before: Record<string, string> }> {
+export async function dumpCompose(ctx: Ctx, toolchain: PgToolchain, ts: string): Promise<{ path: string; before: Record<string, string>; countsSql: string }> {
   const user = ctx.env.METISTRY_DB_USER || "metistry";
   const database = ctx.env.METISTRY_DB_NAME || "metistry";
   const inContainer = `/tmp/metistry-migrate-${ts}.dump`;
   const path = join(migrateDir(stateRoot(ctx.productDir, ctx.env)), `${ts}.dump`);
+  const psql = (sql: string) => compose(ctx, ["exec", "-T", "db", "psql", "-U", user, "-d", database, "-tA", "--no-psqlrc", "-c", sql]);
 
-  // the counts are taken from the SAME live database the dump comes from,
-  // and compared after the restore — the check that the data actually moved
+  // the table list comes from the source, and the SAME generated count query
+  // then runs on both sides — see tableCountsSql
+  const list = psql(TABLE_LIST_SQL);
+  const lres = await ctx.r.run(list.cmd, list.args, { cwd: list.cwd, comment: "the tables whose rows must survive the move" });
+  const tables = lres.stdout.split("\n").map((s) => s.trim()).filter(Boolean);
+  const countsSql = tables.length > 0 ? tableCountsSql(tables) : "";
   let before: Record<string, string> = {};
-  const counts = compose(ctx, ["exec", "-T", "db", "psql", "-U", user, "-d", database, "-tA", "--no-psqlrc", "-c", TABLE_COUNTS_SQL]);
-  const cres = await ctx.r.run(counts.cmd, counts.args, { cwd: counts.cwd, comment: "row counts before the dump" });
-  before = parseCounts(cres.stdout);
-  if (!ctx.r.dryRun) ctx.r.note(`counts: ${Object.keys(before).length} tables, ${Object.entries(before).map(([k, v]) => `${k}=${v}`).join(" ")}`);
+  if (ctx.r.dryRun) {
+    ctx.r.action(`${DRY_RUN_COUNTS}, through the db container — the counts the restore is checked against`);
+  } else if (countsSql !== "") {
+    const counts = psql(countsSql);
+    const cres = await ctx.r.run(counts.cmd, counts.args, { cwd: counts.cwd, comment: "row counts, taken with the writers already stopped" });
+    before = parseCounts(cres.stdout);
+    ctx.r.note(`counts: ${Object.keys(before).length} tables — ${Object.entries(before).map(([k, v]) => `${k}=${v}`).join(" ")}`);
+  } else {
+    ctx.r.note("no tables in public — nothing to compare after the restore");
+  }
 
   const dump = compose(ctx, ["exec", "-T", "db", "pg_dump", "-U", user, "-d", database, "--format=custom", "--compress=6", "--file", inContainer]);
   await ctx.r.run(dump.cmd, dump.args, { cwd: dump.cwd, timeoutMs: 30 * 60_000, comment: "the container's own pg_dump — same version as the server" });
@@ -348,13 +423,13 @@ export async function dumpCompose(ctx: Ctx, toolchain: PgToolchain, ts: string):
 
   // verify BEFORE anything is stopped: a dump that pg_restore cannot read is
   // a migration that must not start
-  const list = await ctx.r.run(join(toolchain.bin, "pg_restore"), ["--list", path], { comment: "the dump must be readable before anything is stopped" });
+  const toc = await ctx.r.run(join(toolchain.bin, "pg_restore"), ["--list", path], { comment: "the dump must be readable before anything is stopped" });
   if (!ctx.r.dryRun) {
-    const entries = tocEntryCount(list.stdout);
+    const entries = tocEntryCount(toc.stdout);
     if (entries === 0) throw new StepFailed(`${path} has no restorable entries — refusing to stop a healthy install behind an empty dump`);
     ctx.r.note(`dump verified: ${path}, ${entries} TOC entries`);
   }
-  return { path, before };
+  return { path, before, countsSql };
 }
 
 // ---- the TCC helper bundles ----------------------------------------------------
@@ -368,7 +443,7 @@ export async function dumpCompose(ctx: Ctx, toolchain: PgToolchain, ts: string):
  * calendar bridge is a healthy install (doctor reports `absent`), and
  * failing a database migration over a missing Swift binary would be absurd.
  */
-export async function pinTccHelpers(ctx: Ctx, templates: PlistTemplate[], node: string, exists: (p: string) => boolean): Promise<string[]> {
+export async function pinTccHelpers(ctx: Ctx, templates: PlistTemplate[], exists: (p: string) => boolean): Promise<string[]> {
   const pinned: string[] = [];
   for (const h of TCC_HELPERS) {
     const t = templates.find((x) => x.service === h.service);
@@ -387,23 +462,45 @@ export async function pinTccHelpers(ctx: Ctx, templates: PlistTemplate[], node: 
       );
       continue;
     }
+    // PATCH the plist `up` just wrote — never re-render it from the template.
+    //
+    // `up` puts more into these files than the three placeholders: this
+    // instance's namespaced ports for the jobs that source `.env`, and the
+    // bundled git on the reconciler's PATH. A re-render here dropped the
+    // ports, and the rehearsal's scratch apple-fm bridge went looking for
+    // the DEFAULT 7810 — which is the production install's, and it only
+    // failed to take it because production had it (`EADDRINUSE`). Patching
+    // what `up` wrote cannot forget something `up` knows.
     const target = join(launchAgentsDir(ctx.home), t.file);
+    const written = existsSync(target) && !ctx.r.dryRun ? await readFile(target, "utf8") : renderPlist(t.template, { repo: ctx.runDir, node: runtimeNodeBin(ctx.productDir), envFile: ctx.envFile });
     if (h.envVar) {
       // the bridge is a node service that resolves its helper relative to its
-      // own dist/; the override is one environment entry, so the plist is
-      // rendered exactly as `up` rendered it and then gains the variable
-      const rendered = renderPlist(t.template, { repo: ctx.runDir, node, envFile: ctx.envFile });
-      await ctx.r.write(target, withEnvironmentVariables(rendered, { [h.envVar]: join(ctx.productDir, h.bundle, h.exe) }), `ops/launchd/${t.file}, ${h.envVar}=${onHost} (the signed bundle holding the TCC grant; this release carries none)`);
+      // own dist/; the override is one added environment entry
+      await ctx.r.write(target, withEnvironmentVariables(written, { [h.envVar]: onHost }), `the plist up wrote, plus ${h.envVar}=${onHost} (the signed bundle holding the TCC grant; this release carries none)`);
     } else {
-      // the helper IS the job's root process, so the path is in
-      // ProgramArguments: render this one template against the tree that has
-      // the bundle
-      await ctx.r.write(target, renderPlist(t.template, { repo: ctx.productDir, node, envFile: ctx.envFile }), `ops/launchd/${t.file}, __REPO__=${ctx.productDir} (the signed bundle holding the TCC grant; this release carries none)`);
+      // the helper IS the job's root process — that is what the TCC grant
+      // attaches to — so its path is in ProgramArguments, and only there
+      const from = join(ctx.runDir, h.bundle);
+      const to = join(ctx.productDir, h.bundle);
+      if (!written.includes(from)) {
+        ctx.r.note(`${h.service}: ${target} does not name ${from} — leaving it alone rather than guessing`);
+        continue;
+      }
+      await ctx.r.write(target, written.split(from).join(to), `the plist up wrote, with ${from} → ${to} (the signed bundle holding the TCC grant; this release carries none)`);
     }
+    // the SAME sequence `up` installs a job with, wait included: `bootout` is
+    // asynchronous, and bootstrapping the label straight after races launchd
+    // and fails `Bootstrap failed: 5: Input/output error` (#117's fourth
+    // defect — and this section reproduced it exactly once by hand-rolling
+    // the three commands)
     const label = labelFor(h.service, ctx.labelSuffix);
-    await ctx.r.run("launchctl", ["bootout", `gui/${ctx.uid}/${label}`], { tolerateFailure: true, comment: "ok if not loaded" });
-    await ctx.r.run("launchctl", ["bootstrap", `gui/${ctx.uid}`, target]);
-    await ctx.r.run("launchctl", ["kickstart", "-k", `gui/${ctx.uid}/${label}`]);
+    for (const c of launchdCommands(label, target, ctx.uid)) {
+      if (c.awaitGone) {
+        await awaitBootout(ctx.r, label, ctx.uid);
+        continue;
+      }
+      await ctx.r.run(c.cmd, c.args, { tolerateFailure: c.tolerateFailure, comment: c.tolerateFailure ? "ok if not loaded" : undefined });
+    }
     pinned.push(`${h.service} → ${onHost}`);
   }
   return pinned;
@@ -510,13 +607,18 @@ async function toLaunchd(ctx: Ctx, opts: MigrateShapeOptions, exists: (p: string
     );
   }
 
+  r.section("quiesce the writers");
+  r.note("the console and the assistant stop BEFORE the dump: a row written between `pg_dump` and `docker compose stop db` would live in the volume and be absent from the restore");
+  const quiesce = compose(ctx, ["stop", ...WRITER_SERVICES]);
+  await r.run(quiesce.cmd, quiesce.args, { cwd: quiesce.cwd, timeoutMs: 10 * 60_000 });
+
   r.section("dump");
   const ts = stamp((opts.now ?? (() => new Date()))());
-  const { path: dumpPath, before } = await dumpCompose(ctx, pre.toolchain, ts);
+  const { path: dumpPath, before, countsSql } = await dumpCompose(ctx, pre.toolchain, ts);
 
-  r.section("stop compose");
+  r.section("stop the database");
   r.note("the containers and the named volume are LEFT IN PLACE — that is what makes this reversible (`metistry migrate-shape compose`)");
-  const stop = compose(ctx, ["stop", ...SHAPE_SERVICES]);
+  const stop = compose(ctx, ["stop", "db"]);
   await r.run(stop.cmd, stop.args, { cwd: stop.cwd, timeoutMs: 10 * 60_000 });
 
   r.section("deployment.yaml");
@@ -579,22 +681,29 @@ async function toLaunchd(ctx: Ctx, opts: MigrateShapeOptions, exists: (p: string
     comment: "local socket, --auth-local=trust — no password on a command line",
   });
 
-  const after = await r.run(join(pre.toolchain.bin, "psql"), [...conn, "-tA", "--no-psqlrc", "-c", TABLE_COUNTS_SQL], { comment: "row counts after the restore" });
-  if (!r.dryRun) {
-    const diff = countDiff(before, parseCounts(after.stdout));
-    if (diff.length > 0) {
+  if (r.dryRun) {
+    r.action(`${DRY_RUN_COUNTS}, against the restored database — compared with the counts taken beside the dump, and a table that lost rows fails the migration`);
+  } else if (countsSql !== "") {
+    // the SAME text the compose side ran, so a table that did not survive the
+    // restore fails the query rather than quietly dropping out of the diff
+    const after = await r.run(join(pre.toolchain.bin, "psql"), [...conn, "-tA", "--no-psqlrc", "-c", countsSql], { comment: "the same count query, against the restored database" });
+    const now = parseCounts(after.stdout);
+    const lost = countLosses(before, now);
+    if (lost.length > 0) {
       throw new StepFailed(
-        `the restored database does not match the dump — ${diff.join("; ")}. The dump is at ${dumpPath} and the compose volume is untouched; ` +
+        `the restored database is missing rows the dump had — ${lost.join("; ")}. The dump is at ${dumpPath} and the compose volume is untouched; ` +
           `roll back with \`metistry migrate-shape compose\` and report this.`,
       );
     }
-    r.note(`counts match: ${Object.keys(before).length} tables, every row count identical to the compose database`);
+    // a table that GREW is the launchd console recording its own startup
+    // between the restore and this query — expected, and not a loss
+    const grew = countDiff(before, now);
+    r.note(`counts: every one of the ${Object.keys(before).length} tables came across with at least the rows the dump had${grew.length > 0 ? ` (written since the restore: ${grew.join(", ")})` : " — every count identical"}`);
   }
 
   r.section("tcc helpers");
   const templates = await loadPlistTemplates(ctx.runDir, "launchd", ctx.labelSuffix);
-  const node = runtimeNodeBin(ctx.productDir);
-  const pinned = await pinTccHelpers(ctx, templates, node, exists);
+  const pinned = await pinTccHelpers(ctx, templates, exists);
   if (pinned.length > 0) r.note(`pinned at the signed bundles that hold the TCC grant (same bundle id + certificate chain = same designated requirement, so no re-grant): ${pinned.join(", ")}`);
 
   r.section("restart the services that were waiting on a schema");
@@ -609,8 +718,54 @@ async function toLaunchd(ctx: Ctx, opts: MigrateShapeOptions, exists: (p: string
     await r.run("launchctl", ["kickstart", "-k", `gui/${ctx.uid}/${labelFor(s, ctx.labelSuffix)}`], { comment: "it started against an empty database" });
   }
 
+  await awaitReady(ctx, opts.fetchFn ?? fetch);
+
   r.note(`dump kept at ${dumpPath} — it is the only copy of the compose database outside the Docker volume, which stays until you run \`docker compose down -v\``);
   return dumpPath;
+}
+
+/** How long the migration waits for a just-restarted service to answer before letting doctor judge it (20 × 500ms = 10s). */
+export const READY_TRIES = 20;
+export const READY_INTERVAL_MS = 500;
+
+/**
+ * Wait for the services this migration restarted to answer, before running
+ * doctor.
+ *
+ * Without this the verdict is a race the migration usually loses: a job is
+ * kickstarted, doctor runs milliseconds later, and it reports
+ * `console down (fetch failed)` / `reconciler down (fetch failed)` for
+ * processes that are up two seconds after the command exits. A migration
+ * whose final word is a false failure is worse than useless — it is the
+ * thing that makes an operator roll back a cutover that worked. (Both
+ * appeared exactly this way in the rehearsal.)
+ *
+ * Timing out is NOT an error: doctor still runs, and its remediation says
+ * the true thing about whatever is actually wrong.
+ */
+export async function awaitReady(ctx: Ctx, fetchFn: typeof fetch, sleep: (ms: number) => Promise<void> = (ms) => new Promise((res) => setTimeout(res, ms))): Promise<void> {
+  const targets: { name: string; url: string }[] = [{ name: "console", url: `http://127.0.0.1:${consolePort(ctx.env)}/health` }];
+  // the reconciler is the D5 committer and is restarted in both directions;
+  // it is only probeable when this install configured its URL
+  const rec = ctx.env.METISTRY_RECONCILER_URL;
+  if (rec) targets.push({ name: "reconciler", url: `${rec.replace(/\/+$/, "")}/check` });
+
+  if (!ctx.r.action(`wait for ${targets.map((t) => t.name).join(" and ")} to answer — doctor's verdict must not be a race with a job kickstarted a moment ago`)) return;
+  for (const t of targets) {
+    let ok = false;
+    for (let i = 0; i < READY_TRIES && !ok; i++) {
+      try {
+        // any answer at all means the socket is bound; a 401 is doctor's
+        // business, not a reason to keep waiting
+        await fetchFn(t.url, { signal: AbortSignal.timeout(2000) });
+        ctx.r.note(`${t.name}: ${t.url} answered after ${(i * READY_INTERVAL_MS) / 1000}s`);
+        ok = true;
+      } catch {
+        await sleep(READY_INTERVAL_MS);
+      }
+    }
+    if (!ok) ctx.r.note(`${t.name}: ${t.url} did not answer within ${(READY_TRIES * READY_INTERVAL_MS) / 1000}s — doctor below says what is actually wrong`);
+  }
 }
 
 /** launchd → compose: the documented rollback. */
@@ -662,5 +817,7 @@ async function toCompose(ctx: Ctx, opts: MigrateShapeOptions, current: Deploymen
   });
   for (const c of upResult.commands) r.commands.push(c);
   if (upResult.code !== 0) throw new StepFailed(`\`metistry up\` failed under the compose shape (exit ${upResult.code})`, upResult.code);
+
+  await awaitReady(ctx, opts.fetchFn ?? fetch);
   return undefined;
 }

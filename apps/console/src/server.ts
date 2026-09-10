@@ -7,7 +7,7 @@
 //
 // Inside the owner class there is one principal, `user`, and two ways to
 // prove you are it: a passkey session (any client, anywhere) and
-// METISTRY_OWNER_TOKEN presented over a connection from THIS machine — the
+// METISTRY_LOCAL_OWNER_TOKEN presented over a connection from THIS machine — the
 // Mac app and the CLI, which are the same package on the same filesystem
 // (docs/ops/auth.md, local-owner.ts). `isUser()` below is the single
 // predicate both take, so the two cannot drift apart. A host-minted owner
@@ -47,7 +47,7 @@ export interface ConsoleConfig {
   origin: string; // canonical HTTPS origin (§4.2)
   /** Every origin the passkey ceremonies accept, raw (METISTRY_ORIGIN, comma-separated). Absent = `origin` alone. */
   origins?: string | undefined;
-  /** METISTRY_OWNER_TOKEN + the peer addresses that count as this machine (local-owner.ts). Absent = no local owner door at all. */
+  /** METISTRY_LOCAL_OWNER_TOKEN + the peer addresses that count as this machine (local-owner.ts). Absent = no local owner door at all. */
   localOwner?: LocalOwnerConfig | undefined;
   inboxDir: string;
   policy: SessionPolicy;
@@ -74,7 +74,7 @@ export interface ConsoleConfig {
 
 type Auth =
   | { kind: "session"; sessionId: number }
-  | { kind: "local_owner" } // METISTRY_OWNER_TOKEN over a connection from this machine
+  | { kind: "local_owner" } // METISTRY_LOCAL_OWNER_TOKEN over a connection from this machine
   | { kind: "owner_token" } // an `owner_tokens` row (the capture Shortcut): capture-only, any address
   | { kind: "agent"; agent: agents.AgentPrincipal }
   | null;

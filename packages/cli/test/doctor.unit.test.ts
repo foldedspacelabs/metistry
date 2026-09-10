@@ -157,10 +157,10 @@ describe("doctor: everything healthy", () => {
 });
 
 // The console row used to settle for "a 401 has the right shape". With
-// METISTRY_OWNER_TOKEN in the environment it is a real authenticated read
+// METISTRY_LOCAL_OWNER_TOKEN in the environment it is a real authenticated read
 // through the same door the Mac app comes in by (docs/ops/auth.md).
 describe("doctor: the console row with the local owner token", () => {
-  const withToken = { ...env, METISTRY_OWNER_TOKEN: "owner-token" };
+  const withToken = { ...env, METISTRY_LOCAL_OWNER_TOKEN: "owner-token" };
 
   it("presents the token and records that the read authenticated", async () => {
     const productDir = await checkout();
@@ -175,7 +175,7 @@ describe("doctor: the console row with the local owner token", () => {
     });
     const r = byName(report.rows);
     expect(r.console).toMatchObject({ status: "ok", meta: { api_status: 200, authenticated: true } });
-    expect(r.console?.probe).toContain("authenticates with METISTRY_OWNER_TOKEN");
+    expect(r.console?.probe).toContain("authenticates with METISTRY_LOCAL_OWNER_TOKEN");
     expect(seen.find((s) => s.url.endsWith("/api/status"))?.auth).toBe("Bearer owner-token");
   });
 

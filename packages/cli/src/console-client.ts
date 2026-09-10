@@ -18,7 +18,7 @@ export const DEFAULT_CONSOLE_URL = "http://127.0.0.1:8080";
 
 export interface ConsoleTargetOptions {
   env?: NodeJS.ProcessEnv | undefined;
-  /** this instance's `instance_id`: the Keychain account METISTRY_OWNER_TOKEN is filed under */
+  /** this instance's `instance_id`: the Keychain account METISTRY_LOCAL_OWNER_TOKEN is filed under */
   instanceId?: string | undefined;
   exec?: Exec | undefined;
   platform?: NodeJS.Platform | undefined;
@@ -39,26 +39,26 @@ function normalizeUrl(v: string): string {
  * The console's URL and this install's owner token. The environment (which
  * is `<instance>/state/.env`, already loaded) comes first; the login
  * Keychain is the fallback, under the account the scope table files
- * METISTRY_OWNER_TOKEN under — the instance's, with the per-user account
+ * METISTRY_LOCAL_OWNER_TOKEN under — the instance's, with the per-user account
  * behind it for an item that has not been migrated yet.
  */
 export async function consoleTarget(opts: ConsoleTargetOptions = {}): Promise<ConsoleTarget> {
   const env = opts.env ?? process.env;
   const platform = opts.platform ?? process.platform;
   const url = normalizeUrl(CONSOLE_URL_VARS.map((v) => env[v]).find((v) => (v ?? "").trim() !== "") ?? DEFAULT_CONSOLE_URL);
-  let token = (env.METISTRY_OWNER_TOKEN ?? "").trim();
+  let token = (env.METISTRY_LOCAL_OWNER_TOKEN ?? "").trim();
   let tokenFrom: ConsoleTarget["tokenFrom"] = "env";
   if (!token && platform === "darwin") {
     const exec = opts.exec ?? realExec;
     const user = keychainAccount(env);
-    const account = accountFor("METISTRY_OWNER_TOKEN", { user, ...(opts.instanceId ? { instance: opts.instanceId } : {}) });
-    token = (await new Keychain(exec, account).getSecret("METISTRY_OWNER_TOKEN"))?.trim() ?? "";
-    if (!token && account !== user) token = (await new Keychain(exec, user).getSecret("METISTRY_OWNER_TOKEN"))?.trim() ?? "";
+    const account = accountFor("METISTRY_LOCAL_OWNER_TOKEN", { user, ...(opts.instanceId ? { instance: opts.instanceId } : {}) });
+    token = (await new Keychain(exec, account).getSecret("METISTRY_LOCAL_OWNER_TOKEN"))?.trim() ?? "";
+    if (!token && account !== user) token = (await new Keychain(exec, user).getSecret("METISTRY_LOCAL_OWNER_TOKEN"))?.trim() ?? "";
     tokenFrom = "keychain";
   }
   if (!token) {
     throw new Error(
-      "METISTRY_OWNER_TOKEN is not set (env, <instance>/state/.env, or the login Keychain) — `metistry secrets sync --to env` mints one for an install that predates it, then restart the console",
+      "METISTRY_LOCAL_OWNER_TOKEN is not set (env, <instance>/state/.env, or the login Keychain) — `metistry secrets sync --to env` mints one for an install that predates it, then restart the console",
     );
   }
   return { url, token, tokenFrom };
@@ -109,7 +109,7 @@ export async function whoami(opts: WhoamiOptions = {}): Promise<Whoami> {
   }
   if (res.status === 401) {
     throw new Error(
-      `${target.url} refused the owner token (401). Either METISTRY_OWNER_TOKEN here is not the one the console was started with (restart it after a \`metistry secrets sync --to env\`), or the request did not reach it from this machine — under compose the console needs METISTRY_TRUSTED_LOOPBACK_PROXY (docs/ops/auth.md).`,
+      `${target.url} refused the owner token (401). Either METISTRY_LOCAL_OWNER_TOKEN here is not the one the console was started with (restart it after a \`metistry secrets sync --to env\`), or the request did not reach it from this machine — under compose the console needs METISTRY_TRUSTED_LOOPBACK_PROXY (docs/ops/auth.md).`,
     );
   }
   if (!res.ok) throw new Error(`${target.url}/api/whoami returned HTTP ${res.status}`);

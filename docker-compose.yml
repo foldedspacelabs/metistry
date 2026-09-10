@@ -41,7 +41,7 @@ services:
       # the LOCAL owner door (docs/ops/auth.md): this token authenticates as
       # the `user` principal, but ONLY over a connection from this machine.
       # Unset = passkeys only.
-      METISTRY_OWNER_TOKEN: ${METISTRY_OWNER_TOKEN:-}
+      METISTRY_LOCAL_OWNER_TOKEN: ${METISTRY_LOCAL_OWNER_TOKEN:-}
       # …and under compose "from this machine" arrives NATed: the port below
       # is published on 127.0.0.1, and Docker rewrites the source address to
       # this container's bridge gateway. `docker-gateway` tells the console

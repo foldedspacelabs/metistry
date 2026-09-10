@@ -8,7 +8,7 @@ the CLI authenticate to a console on this machine without a passkey
 ceremony — they are the same package, on the same filesystem, running as the
 same person.
 
-- `Authorization: Bearer $METISTRY_OWNER_TOKEN` yields the `user` principal,
+- `Authorization: Bearer $METISTRY_LOCAL_OWNER_TOKEN` yields the `user` principal,
   the same one a passkey session yields, through the same `isUser()`
   predicate — but **only** when the connection's peer address is loopback.
   The decision comes from the socket; `X-Forwarded-For`, `Forwarded`,
@@ -29,7 +29,7 @@ same person.
   mismatch, which used to escape as HTTP 500, is a 401 naming expected vs
   presented.
 
-CLI: `METISTRY_OWNER_TOKEN` joins `SECRET_SCOPES` as instance-scoped;
+CLI: `METISTRY_LOCAL_OWNER_TOKEN` joins `SECRET_SCOPES` as instance-scoped;
 `metistry init` mints it into the `.env` lines it prints; `secrets sync --to
 env` mints one for an install that predates it (`GENERATED_SECRETS`, the
 same "generated, so minting cannot be the wrong guess" rule as `up`'s DB

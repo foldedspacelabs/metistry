@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { main } from "../src/main.js";
 import { buildServiceTargets, controlServices, resolveServices, serviceLogs, UnknownServiceError } from "../src/service-control.js";
-import { checkout, fakeExec, put, shown, HELPER, RECONCILER, WATCHDOG } from "./fixtures.js";
+import { checkout, fakeExec, put, shown, HELPER, RECONCILER, SUPERVISOR, WATCHDOG } from "./fixtures.js";
 
 const base = (P: string) => ({ productDir: P, platform: "darwin" as const, uid: 501, home: "/h" });
 
@@ -17,19 +17,32 @@ describe("buildServiceTargets", () => {
     const P = await checkout();
     const ctx = await buildServiceTargets({ ...base(P), env: {} });
     expect(ctx.shape).toBe("compose");
-    expect(ctx.targets.map((t) => t.name)).toEqual(["eventkit-helper", "reconciler", "watchdog", "console", "db"]);
+    // the compose shape is untouched by the supervisor: it installs no
+    // supervisor agent, and the EventKit helper's agent is `calendar` now
+    expect(ctx.targets.map((t) => t.name)).toEqual(["calendar", "reconciler", "watchdog", "console", "db"]);
     expect(ctx.targets.filter((t) => t.kind === "launchd").map((t) => t.label)).toEqual([HELPER, RECONCILER, WATCHDOG]);
     expect(ctx.targets.find((t) => t.name === "watchdog")).toMatchObject({ kind: "launchd", label: WATCHDOG, plistPath: `/h/Library/LaunchAgents/${WATCHDOG}.plist` });
     expect(ctx.targets.filter((t) => t.kind === "compose").map((t) => t.name)).toEqual(["console", "db"]);
   });
 
-  it("launchd shape: no containers at all — db/console/assistant aren't shipped as plists in this fixture, so the service list shrinks to the host-only jobs", async () => {
+  it("launchd shape: one agent for the core, the TCC helper only when configured, and the rest as the supervisor's children", async () => {
     const P = await checkout();
     await put(P, "seed/deployment.yaml", "shape: launchd\nservices: {}\n");
     const ctx = await buildServiceTargets({ ...base(P), env: {} });
     expect(ctx.shape).toBe("launchd");
-    expect(ctx.targets.every((t) => t.kind === "launchd")).toBe(true);
-    expect(ctx.targets.map((t) => t.name)).toEqual(["eventkit-helper", "reconciler", "watchdog"]);
+    // no METISTRY_EK_URL: this install has no calendar bridge, so neither the
+    // helper's agent nor the bridge child is a target at all
+    expect(ctx.targets.map((t) => t.name)).toEqual(["supervisor", "reconciler"]);
+    expect(ctx.targets.find((t) => t.name === "supervisor")).toMatchObject({ kind: "launchd", label: SUPERVISOR, plistPath: `/h/Library/LaunchAgents/${SUPERVISOR}.plist` });
+    // a child: launchctl cannot address it, so it carries no label or plist —
+    // only the log file `metistry logs reconciler` tails
+    expect(ctx.targets.find((t) => t.name === "reconciler")).toEqual({ name: "reconciler", kind: "child", logPath: "/tmp/metistry-reconciler.log" });
+    // the watchdog is not a job of its own any more: it IS the supervisor
+    expect(ctx.targets.some((t) => t.name === "watchdog")).toBe(false);
+
+    const withBridge = await buildServiceTargets({ ...base(P), env: { METISTRY_EK_URL: "http://127.0.0.1:7811" } });
+    expect(withBridge.targets.map((t) => t.name)).toEqual(["supervisor", "calendar", "reconciler"]);
+    expect(withBridge.targets.find((t) => t.name === "calendar")).toMatchObject({ kind: "launchd", label: HELPER });
   });
 
   it("non-darwin: no launchd targets at all (there is no launchd to act on)", async () => {
@@ -67,7 +80,7 @@ describe("metistry restart|stop|start", () => {
     expect(exec.calls.filter((c) => c.cmd === "docker").every((c) => c.cwd === P)).toBe(true);
     expect(r.ok).toBe(true);
     expect(r.results).toEqual([
-      { service: "eventkit-helper", action: "restart", ok: true, detail: `launchctl kickstart -k gui/501/${HELPER}` },
+      { service: "calendar", action: "restart", ok: true, detail: `launchctl kickstart -k gui/501/${HELPER}` },
       { service: "reconciler", action: "restart", ok: true, detail: `launchctl kickstart -k gui/501/${RECONCILER}` },
       { service: "watchdog", action: "restart", ok: true, detail: `launchctl kickstart -k gui/501/${WATCHDOG}` },
       { service: "console", action: "restart", ok: true, detail: "docker compose restart console" },
@@ -132,7 +145,7 @@ describe("metistry restart|stop|start", () => {
     const P = await checkout();
     const exec = fakeExec();
     await expect(controlServices({ ...base(P), env: {}, action: "restart", names: ["bogus"], exec, out: () => {} })).rejects.toThrow(UnknownServiceError);
-    await expect(controlServices({ ...base(P), env: {}, action: "restart", names: ["bogus"], exec, out: () => {} })).rejects.toThrow(/unknown service: bogus.*known services.*console.*db.*eventkit-helper.*reconciler.*watchdog/s);
+    await expect(controlServices({ ...base(P), env: {}, action: "restart", names: ["bogus"], exec, out: () => {} })).rejects.toThrow(/unknown service: bogus.*known services.*calendar.*console.*db.*reconciler.*watchdog/s);
     expect(exec.calls).toEqual([]);
   });
 

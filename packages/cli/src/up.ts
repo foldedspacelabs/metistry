@@ -20,7 +20,37 @@ import { usesCompose, type Deployment } from "@foldedspacelabs/metistry-core";
 import { assistantEnv, consoleEnv, consolePort, dbPort, loadDeployment, type ShapeContext } from "./deployment.js";
 import { doctor, renderTable, type DoctorDeps, type DoctorReport } from "./doctor.js";
 import type { Exec } from "./exec.js";
-import { GIT_SPAWNING_SERVICES, LABEL_PREFIX, launchAgentsDir, launchdCommands, loadPlistTemplates, nodeOnPath, renderPlist, renderSystemdUnit, withEnvironmentVariables, type PlistTemplate, type PlistValues } from "./launchd.js";
+import {
+  GIT_SPAWNING_SERVICES,
+  LABEL_PREFIX,
+  labelFor,
+  launchAgentsDir,
+  launchdCommands,
+  loadPlistTemplates,
+  loadSupervisedTemplates,
+  SUPERVISOR_PLIST_FILE,
+  nodeOnPath,
+  renderPlist,
+  renderSystemdUnit,
+  retiredServicesFor,
+  withEnvironmentVariables,
+  type PlistTemplate,
+  type PlistValues,
+} from "./launchd.js";
+import {
+  childFromRenderedPlist,
+  launchdBaseEnv,
+  mintControlToken,
+  readSupervisorConfig,
+  serializeSupervisorConfig,
+  supervisorBinPath,
+  supervisorConfig,
+  supervisorConfigPath,
+  supervisorLauncherEnvPath,
+  serializeLauncherEnv,
+  supervisorSocketPath,
+  SUPERVISOR_SERVICE,
+} from "./supervisor.js";
 import { shellUnsafeEnvLines } from "./env.js";
 import { ensureInstanceId, envPaths } from "./instance.js";
 import { allocateBase, applyPorts, loadNamespace, portEnv, PORTED_SERVICES, portsFile, portsOf, serializeNamespace, suffixFor, type Namespace } from "./namespace.js";
@@ -67,6 +97,15 @@ export interface UpOptions {
   deployment?: Deployment | undefined;
   /** `--namespace`: allocate this instance its own launchd label suffix and port block (writes `<instance>/state/ports.yaml` once) */
   namespace?: boolean | undefined;
+  /**
+   * `--register-via app`: leave the supervisor's own agent to the Mac app,
+   * which registers the copy inside its bundle through
+   * `SMAppService.agent(plistName:)` — that is what makes Login Items show
+   * ONE item, "Metistry", nested under the app. Everything else `up` does is
+   * identical, the config included, so the two paths differ by exactly who
+   * bootstraps one plist (docs/ops/mac-app.md).
+   */
+  registerVia?: "launchd" | "app" | undefined;
   /** test seam: the port probe `--namespace` allocates with */
   portFree?: ((port: number) => Promise<boolean>) | undefined;
   /** test seam: filesystem probes (the Postgres toolchain, an initialised data dir) */
@@ -183,6 +222,12 @@ export interface ShapeValues extends ShapeContext {
   /** this instance's namespace (namespace.ts); undefined = the fixed default labels and ports */
   namespace?: Namespace | undefined;
   home: string;
+  /** `--register-via app`: the app registers the supervisor's agent from its bundle, so `up` installs every OTHER job and stops there */
+  registerVia?: "launchd" | "app" | undefined;
+  /** the `Metistry` symlink the supervisor's plist execs; filled by `installSupervisorPlan` */
+  supervisorBin?: string | undefined;
+  /** `<instance>/state/supervisor.json`; filled by `installSupervisorPlan` */
+  supervisorConfig?: string | undefined;
 }
 
 /**
@@ -194,6 +239,15 @@ export interface ShapeValues extends ShapeContext {
 export function plistValuesFor(t: PlistTemplate, v: ShapeValues): PlistValues {
   const base = { repo: v.productDir, node: v.node, envFile: v.envFile };
   switch (t.service) {
+    case SUPERVISOR_SERVICE:
+      // the same passthrough the console gets: the supervisor is still the
+      // watchdog, and the watchdog probed the db, the console and every
+      // bridge from exactly this environment when it sourced `.env` itself
+      return {
+        ...base,
+        env: consoleEnv(v),
+        extra: { SUPERVISOR_BIN: v.supervisorBin ?? supervisorBinPath(stateRoot(v.productDir, v.env)), SUPERVISOR_CONFIG: v.supervisorConfig ?? supervisorConfigPath(stateRoot(v.productDir, v.env)) },
+      };
     case "console":
       return { ...base, env: consoleEnv(v) };
     case "assistant": {
@@ -271,7 +325,7 @@ export const SECRET_BEARING_SERVICES = new Set(["console", "assistant"]);
 
 /** Render every template into ~/Library/LaunchAgents and (re)bootstrap it; on anything but macOS, print the systemd units instead. */
 export async function installLaunchd(r: StepRunner, productDir: string, le: LaunchdEnv, deployment: Deployment, values: ShapeValues): Promise<void> {
-  const templates = await loadPlistTemplates(productDir, deployment.shape, values.namespace?.labelSuffix);
+  const templates = await loadPlistTemplates(productDir, deployment.shape, values.namespace?.labelSuffix, values.env);
   if (templates.length === 0) {
     r.note("no ops/launchd/*.plist in this checkout — nothing to install");
     return;
@@ -285,27 +339,29 @@ export async function installLaunchd(r: StepRunner, productDir: string, le: Laun
     }
     return;
   }
+  // an install that predates the supervisor is still running the old agents:
+  // boot them out ONCE, or the same services run twice
+  await bootoutRetired(r, le, deployment.shape, values.namespace?.labelSuffix);
+  // the launchd shape's core is the supervisor's child list, not a plist each
+  if (deployment.shape === "launchd") await installSupervisorPlan(r, productDir, le, values);
   const dir = launchAgentsDir(le.home);
   for (const t of templates) {
+    if (t.service === SUPERVISOR_SERVICE && values.registerVia === "app") {
+      // the app's copy is inside its signed bundle and registered with
+      // SMAppService; a second, identical agent in ~/Library/LaunchAgents
+      // would be the same install running twice
+      r.note(
+        `--register-via app: ${t.label} is NOT installed here — the Mac app registers ${SUPERVISOR_PLIST_FILE} from Metistry.app/Contents/Library/LaunchAgents through SMAppService.agent(plistName:), and Login Items shows one item nested under the app (docs/ops/mac-app.md)`,
+      );
+      continue;
+    }
     const target = join(dir, t.file);
-    const v = plistValuesFor(t, values);
-    // a launchd job's PATH is /usr/bin:/bin and nothing else, so a bundled git
-    // has to be put there explicitly for the job that spawns one
-    const gitPath = values.gitPath && GIT_SPAWNING_SERVICES.has(t.service) ? { PATH: values.gitPath } : undefined;
-    // the jobs `up` renders a whole environment for (console, assistant) already
-    // have the namespace's ports — it was applied to `env` before this. The
-    // ones that source `<instance>/state/.env` themselves see only that file,
-    // which knows nothing about this instance's block, so they get it here or
-    // they bind the DEFAULT install's ports.
-    const nsPorts = values.namespace && !v.env ? portEnv(values.namespace) : undefined;
-    const extraEnv = { ...(gitPath ?? {}), ...(nsPorts ?? {}) };
-    const from = `ops/launchd/${t.file}, __REPO__=${productDir}, __NODE__=${le.node}, __ENV_FILE__=${values.envFile}${v.env ? `, ${Object.keys(v.env).length} EnvironmentVariables from ${values.envFile}` : ""}${gitPath ? `, PATH=${values.gitPath}` : ""}${nsPorts ? `, ${Object.keys(nsPorts).length} namespaced ports` : ""}`;
-    const rendered = renderPlist(t.template, v);
-    await r.write(target, Object.keys(extraEnv).length > 0 ? withEnvironmentVariables(rendered, extraEnv) : rendered, from);
+    const { rendered, from, secret } = renderJob(t, productDir, le, values);
+    await r.write(target, rendered, from);
     // the console's and the assistant's dicts carry db passwords, bridge
     // tokens and CLAUDE_CODE_OAUTH_TOKEN; ~/Library/LaunchAgents is 0755, so
     // the file itself has to be the boundary
-    if (SECRET_BEARING_SERVICES.has(t.service)) await r.run("chmod", ["600", target], { comment: "the env dict holds secrets" });
+    if (secret) await r.run("chmod", ["600", target], { comment: "the env dict holds secrets" });
     for (const c of launchdCommands(t.label, target, le.uid)) {
       if (c.awaitGone) {
         await awaitBootout(r, t.label, le.uid);
@@ -313,6 +369,110 @@ export async function installLaunchd(r: StepRunner, productDir: string, le: Laun
       }
       await r.run(c.cmd, c.args, { tolerateFailure: c.tolerateFailure, comment: c.tolerateFailure ? "ok if not loaded" : undefined });
     }
+  }
+}
+
+/**
+ * One template, rendered the way `up` has always rendered it: the
+ * placeholders, then the entries that are computed rather than templated (a
+ * bundled git's PATH, a namespaced install's ports). Shared by the agents
+ * `up` installs and the children it hands the supervisor, so a child runs
+ * byte-for-byte the command its agent used to.
+ */
+export function renderJob(t: PlistTemplate, productDir: string, le: LaunchdEnv, values: ShapeValues): { rendered: string; from: string; secret: boolean } {
+  const v = plistValuesFor(t, values);
+  // a launchd job's PATH is /usr/bin:/bin and nothing else, so a bundled git
+  // has to be put there explicitly for the job that spawns one
+  const gitPath = values.gitPath && GIT_SPAWNING_SERVICES.has(t.service) ? { PATH: values.gitPath } : undefined;
+  // the jobs `up` renders a whole environment for (console, assistant) already
+  // have the namespace's ports — it was applied to `env` before this. The
+  // ones that source `<instance>/state/.env` themselves see only that file,
+  // which knows nothing about this instance's block, so they get it here or
+  // they bind the DEFAULT install's ports.
+  const nsPorts = values.namespace && !v.env ? portEnv(values.namespace) : undefined;
+  const extraEnv = { ...(gitPath ?? {}), ...(nsPorts ?? {}) };
+  const from = `ops/launchd/${t.file}, __REPO__=${productDir}, __NODE__=${le.node}, __ENV_FILE__=${values.envFile}${v.env ? `, ${Object.keys(v.env).length} EnvironmentVariables from ${values.envFile}` : ""}${gitPath ? `, PATH=${values.gitPath}` : ""}${nsPorts ? `, ${Object.keys(nsPorts).length} namespaced ports` : ""}`;
+  const base = renderPlist(t.template, v);
+  return { rendered: Object.keys(extraEnv).length > 0 ? withEnvironmentVariables(base, extraEnv) : base, from, secret: SECRET_BEARING_SERVICES.has(t.service) };
+}
+
+/**
+ * Boot out the agents this shape no longer installs, and delete their
+ * plists. Tolerant of every one of them being absent — a fresh install runs
+ * this and nothing happens — and deliberately NOT conditional on finding
+ * them: `launchctl bootout` of a label that is not loaded is the cheapest
+ * possible no-op, and an `up` that only cleaned up when it noticed would
+ * leave a job running on the one Mac where the notice failed.
+ */
+export async function bootoutRetired(r: StepRunner, le: LaunchdEnv, shape: Deployment["shape"], labelSuffix: string | undefined): Promise<void> {
+  const dir = launchAgentsDir(le.home);
+  const retired = retiredServicesFor(shape);
+  if (retired.length === 0) return;
+  r.note(
+    shape === "launchd"
+      ? `retiring the pre-supervisor agents (${retired.join(", ")}) — they are the supervisor's children now`
+      : `retiring ${retired.join(", ")} — renamed (eventkit-helper → calendar)`,
+  );
+  for (const service of retired) {
+    const label = labelFor(service, labelSuffix);
+    await r.run("launchctl", ["bootout", `gui/${le.uid}/${label}`], { tolerateFailure: true, comment: "ok if not loaded" });
+    await r.run("rm", ["-f", join(dir, `${label}.plist`)], { tolerateFailure: true });
+  }
+}
+
+/**
+ * The supervisor's plan: the `Metistry` symlink its plist execs, and
+ * `<instance>/state/supervisor.json` — the child list, each child's argv,
+ * environment and log path, and the control socket.
+ *
+ * The token is REUSED when this install already has a config: `up` may run
+ * while the supervisor is up, and a token change would break the control
+ * socket for every verb until the kickstart landed.
+ */
+export async function installSupervisorPlan(r: StepRunner, productDir: string, le: LaunchdEnv, values: ShapeValues): Promise<void> {
+  const root = stateRoot(values.productDir, values.env);
+  const configPath = supervisorConfigPath(root);
+  const socket = supervisorSocketPath(root);
+  if (socket.length > 103) {
+    throw new StepFailed(`the supervisor's control socket path is ${socket.length} bytes (${socket}) — over the 103-byte unix socket limit; move the instance directory somewhere shorter`);
+  }
+  const bin = supervisorBinPath(root);
+  values.supervisorBin = bin;
+  values.supervisorConfig = configPath;
+
+  const templates = await loadSupervisedTemplates(productDir, values.namespace?.labelSuffix, values.env);
+  const base = launchdBaseEnv(values.env);
+  const children = templates.map((t) => {
+    const { rendered } = renderJob(t, productDir, le, values);
+    const ready =
+      t.service === "db"
+        ? { kind: "tcp" as const, port: dbPort(values.env) }
+        : t.service === "console"
+          ? { kind: "tcp" as const, port: consolePort(values.env) }
+          : undefined;
+    return childFromRenderedPlist(t, rendered, base, ready);
+  });
+
+  const existing = await readSupervisorConfig(configPath);
+  const token = existing?.token ?? mintControlToken();
+  const config = supervisorConfig({ label: labelFor(SUPERVISOR_SERVICE, values.namespace?.labelSuffix), socket, token, env: consoleEnv(values), children });
+
+  await r.run("mkdir", ["-p", join(bin, "..")]);
+  // the name is the product: System Settings names a background item after
+  // the agent's program, and `node` is not a name a user can act on
+  await r.run("ln", ["-sfn", le.node, bin], { comment: `the supervisor's program name — ${le.node}` });
+  await r.run("mkdir", ["-p", join(socket, "..")]);
+  await r.write(configPath, serializeSupervisorConfig(config), `${children.length} child(ren): ${children.map((c) => c.name).join(", ")}${existing ? " (control token kept)" : ""}`);
+  await r.run("chmod", ["600", configPath], { comment: "it holds this install's environment and the control token" });
+
+  // the app path: the agent inside Metistry.app is immutable and identical on
+  // every Mac, so the three paths THIS install runs from go in a file its
+  // launcher sources
+  if (values.registerVia === "app") {
+    if (!le.home) throw new StepFailed("--register-via app needs HOME — that is where the app's launcher looks for supervisor.env");
+    const launcherEnv = supervisorLauncherEnvPath(le.home);
+    await r.run("mkdir", ["-p", join(launcherEnv, "..")]);
+    await r.write(launcherEnv, serializeLauncherEnv({ bin, main: join(productDir, "apps", "watchdog", "dist", "main.js"), config: configPath }), "read by Metistry.app/Contents/MacOS/MetistrySupervisor");
   }
 }
 
@@ -475,6 +635,7 @@ export async function up(opts: UpOptions): Promise<UpResult> {
     // flip must not orphan the assistant's state or the Postgres data dir
     stateDir: assistantStateDir({ ...instanceDir, productDir: opts.productDir }),
     node: le.node,
+    ...(opts.registerVia ? { registerVia: opts.registerVia } : {}),
     envFile,
     home: le.home,
   };

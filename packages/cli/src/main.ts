@@ -202,10 +202,17 @@ const USAGE = `metistry — Metistry command line
 
   metistry up [--no-compose] [--no-launchd] [--dry-run] [--product-dir <checkout>]
               [--instance <dir>] [--env-file <path>] [--namespace]
+              [--register-via launchd|app]
       Bring an install to running from a checkout + .env: docker compose up (built
       from source, or pulled when metistry.lock pins a release), every launchd job
-      in ops/launchd rendered into ~/Library/LaunchAgents and (re)bootstrapped
+      this shape installs rendered into ~/Library/LaunchAgents and (re)bootstrapped
       (macOS; Linux prints systemd units), then doctor — its verdict is the exit code.
+      Under the launchd shape that is ONE agent for the core — com.foldedspacelabs.metistry,
+      "Metistry" — which runs Postgres, the console, the reconciler, the assistant
+      and any configured bridge as its children (docs/ops/deployment-shapes.md);
+      the TCC helpers keep an agent each. --register-via app leaves that one
+      agent to the Mac app, which registers its bundled copy through
+      SMAppService so Login Items shows one item nested under the app.
       --namespace allocates this instance its own launchd label suffix (from
       instance_id) and an 8-port block, recorded ONCE in <instance>/state/ports.yaml,
       so a second instance can run beside the first. Every later up/doctor/
@@ -570,6 +577,12 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
         err("up needs a Metistry checkout: pass --product-dir or set METISTRY_PRODUCT_DIR");
         return 2;
       }
+      const registerViaRaw = str(flags, "register-via");
+      if (registerViaRaw !== undefined && registerViaRaw !== "launchd" && registerViaRaw !== "app") {
+        err(`--register-via must be launchd or app, not ${JSON.stringify(registerViaRaw)}`);
+        return 2;
+      }
+      const registerVia = registerViaRaw as "launchd" | "app" | undefined;
       loadEnv();
       const r = await up({
         productDir,
@@ -580,6 +593,7 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
         compose: flags["no-compose"] !== true,
         launchd: flags["no-launchd"] !== true,
         namespace: flags.namespace === true,
+        ...(registerVia ? { registerVia } : {}),
         doctorDeps: io.doctorDeps,
       });
       return r.code;

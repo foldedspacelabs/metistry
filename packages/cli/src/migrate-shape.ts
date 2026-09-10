@@ -36,7 +36,8 @@ import { consolePort, dbPort, loadDeployment } from "./deployment.js";
 import { setDeploymentShape } from "./deployment-report.js";
 import { doctor, renderTable, type DoctorDeps, type DoctorReport } from "./doctor.js";
 import type { Exec } from "./exec.js";
-import { labelFor, launchdCommands, loadPlistTemplates, launchAgentsDir, renderPlist, withEnvironmentVariables, type PlistTemplate } from "./launchd.js";
+import { labelFor, launchdCommands, loadPlistTemplates, launchAgentsDir, renderPlist, withEnvironmentVariables, SUPERVISOR_PLIST_FILE, type PlistTemplate } from "./launchd.js";
+import { readSupervisorConfig, serializeSupervisorConfig, supervisorConfigPath, SUPERVISOR_SERVICE } from "./supervisor.js";
 import { loadNamespace } from "./namespace.js";
 import { findPgToolchain, pgCandidates, pgSocketDir, type PgToolchain } from "./postgres.js";
 import { runtimeDir, runtimeNodeBin, RUNTIME_DIRNAME } from "./runtime-deps.js";
@@ -139,13 +140,17 @@ export const DRY_RUN_COUNTS = "psql: one count(*) per table from the list above"
  * Two different mechanisms, because the two bridges find their helper two
  * different ways:
  *
- *   eventkit-helper  the helper IS the launchd job — the path is in the
- *                    plist's ProgramArguments, so that plist is re-rendered
- *                    with `__REPO__` = the bundle's directory.
+ *   calendar         the EventKit helper IS the launchd job — the path is in
+ *                    the plist's ProgramArguments, so that plist is patched
+ *                    with the bundle's directory.
  *   apple-fm         the node bridge spawns its helper from a path relative
  *                    to its own dist/ (`packages/mcp-apple-fm/src/main.ts`),
  *                    overridable by METISTRY_AFM_HELPER — so the override
- *                    goes into that job's EnvironmentVariables.
+ *                    goes into that job's environment. Under the supervisor
+ *                    that job is a CHILD, so the entry goes into its child
+ *                    spec in `<instance>/state/supervisor.json` and the
+ *                    supervisor is kickstarted; there is no plist of its own
+ *                    to patch any more.
  */
 export interface TccHelper {
   /** the plist service whose job needs the pin */
@@ -160,7 +165,7 @@ export interface TccHelper {
 
 export const TCC_HELPERS: TccHelper[] = [
   {
-    service: "eventkit-helper",
+    service: "calendar",
     bundle: join("packages", "mcp-eventkit", "helper", "ek-helper.app"),
     exe: join("Contents", "MacOS", "ek-helper"),
   },
@@ -445,11 +450,49 @@ export async function dumpCompose(ctx: Ctx, toolchain: PgToolchain, ts: string):
  * calendar bridge is a healthy install (doctor reports `absent`), and
  * failing a database migration over a missing Swift binary would be absurd.
  */
+/** The child spec `up` wrote for this service, when there is one. */
+async function supervisorChild(ctx: Ctx, service: string): Promise<{ name: string } | undefined> {
+  const config = await readSupervisorConfig(supervisorConfigPath(supervisorStateRoot(ctx))).catch(() => undefined);
+  return config?.children.find((c) => c.name === service);
+}
+
+function supervisorStateRoot(ctx: Ctx): string {
+  return ctx.env.METISTRY_INSTANCE_DIR?.replace(/\/+$/, "") || ctx.productDir;
+}
+
+/**
+ * Put one variable into a child's environment in `supervisor.json` and
+ * kickstart the supervisor so it takes.
+ *
+ * The same reasoning as patching the plist `up` wrote rather than
+ * re-rendering it: the config already carries this instance's namespaced
+ * ports and everything else `up` computed, and rebuilding it here could only
+ * forget something.
+ */
+export async function pinSupervisorChild(ctx: Ctx, service: string, envVar: string, value: string): Promise<void> {
+  const path = supervisorConfigPath(supervisorStateRoot(ctx));
+  const config = await readSupervisorConfig(path);
+  if (!config) {
+    ctx.r.note(`${service}: no ${path} — nothing to pin (metistry up writes it)`);
+    return;
+  }
+  const next = {
+    ...config,
+    children: config.children.map((c) => (c.name === service ? { ...c, env: { ...c.env, [envVar]: value } } : c)),
+  };
+  await ctx.r.write(path, serializeSupervisorConfig(next), `the config up wrote, plus ${service}'s ${envVar}=${value} (the signed bundle holding the TCC grant; this release carries none)`);
+  await ctx.r.run("launchctl", ["kickstart", "-k", `gui/${ctx.uid}/${labelFor(SUPERVISOR_SERVICE, ctx.labelSuffix)}`], { comment: `${service} restarts with the pinned helper` });
+}
+
 export async function pinTccHelpers(ctx: Ctx, templates: PlistTemplate[], exists: (p: string) => boolean): Promise<string[]> {
   const pinned: string[] = [];
   for (const h of TCC_HELPERS) {
     const t = templates.find((x) => x.service === h.service);
-    if (!t) continue;
+    // under the supervisor a bridge is a child, not an agent: it has no plist
+    // in ~/Library/LaunchAgents to patch, and its environment lives in the
+    // supervisor's config
+    const child = t ? undefined : await supervisorChild(ctx, h.service);
+    if (!t && !child) continue;
     const inRelease = join(ctx.runDir, h.bundle, h.exe);
     if (exists(inRelease)) {
       ctx.r.note(`${h.service}: ${inRelease} is in this release — no pin needed`);
@@ -462,6 +505,16 @@ export async function pinTccHelpers(ctx: Ctx, templates: PlistTemplate[], exists
           `Build it (packages/${h.service === "apple-fm" ? "mcp-apple-fm" : "mcp-eventkit"}/scripts/build-helper.sh) and re-run \`metistry up\`; ` +
           `doctor reports the bridge absent until then.`,
       );
+      continue;
+    }
+    if (!t) {
+      // a child: one entry in its spec, then the supervisor restarts it
+      if (!h.envVar) {
+        ctx.r.note(`${h.service}: it is a supervisor child with no environment override — nothing to pin`);
+        continue;
+      }
+      await pinSupervisorChild(ctx, h.service, h.envVar, onHost);
+      pinned.push(`${h.service} → ${onHost}`);
       continue;
     }
     // PATCH the plist `up` just wrote — never re-render it from the template.
@@ -704,20 +757,19 @@ async function toLaunchd(ctx: Ctx, opts: MigrateShapeOptions, exists: (p: string
   }
 
   r.section("tcc helpers");
-  const templates = await loadPlistTemplates(ctx.runDir, "launchd", ctx.labelSuffix);
+  const templates = await loadPlistTemplates(ctx.runDir, "launchd", ctx.labelSuffix, ctx.env);
   const pinned = await pinTccHelpers(ctx, templates, exists);
   if (pinned.length > 0) r.note(`pinned at the signed bundles that hold the TCC grant (same bundle id + certificate chain = same designated requirement, so no re-grant): ${pinned.join(", ")}`);
 
   r.section("restart the services that were waiting on a schema");
-  // only the jobs this product tree actually installed: a trial install that
-  // removed a plist (or a shape with no assistant) must not fail here on a
-  // kickstart of a label launchd has never heard of
-  for (const s of ["console", "assistant"]) {
-    if (!templates.some((t) => t.service === s)) {
-      r.note(`${s}: no plist in ${join(ctx.runDir, "ops", "launchd")} — not installed, so nothing to restart`);
-      continue;
-    }
-    await r.run("launchctl", ["kickstart", "-k", `gui/${ctx.uid}/${labelFor(s, ctx.labelSuffix)}`], { comment: "it started against an empty database" });
+  // the console and the assistant came up against an empty database, before
+  // the restore. They are the supervisor's children, so ONE kickstart brings
+  // both back — launchd knows nothing about them individually.
+  const supervisorLabel = labelFor(SUPERVISOR_SERVICE, ctx.labelSuffix);
+  if (templates.some((t) => t.service === SUPERVISOR_SERVICE)) {
+    await r.run("launchctl", ["kickstart", "-k", `gui/${ctx.uid}/${supervisorLabel}`], { comment: "its children started against an empty database" });
+  } else {
+    r.note(`no ${SUPERVISOR_PLIST_FILE} in ${join(ctx.runDir, "ops", "launchd")} — nothing to restart`);
   }
 
   await awaitReady(ctx, opts.fetchFn ?? fetch, opts.sleep);

@@ -36,6 +36,8 @@ export const PREVIOUS_FILE = ".previous";
 export const CHECKSUMS_ASSET = "checksums.txt";
 /** How many unpacked releases stay on disk: the running one and the one to roll back to. */
 export const KEEP_RELEASES = 2;
+/** Written at the pack's root by `ops/release/pack-runtime.sh`; unpacking strips the tarball's one top-level dir, so this lands directly in a release's dir. */
+export const RUNTIME_PACK_MANIFEST = "metistry-runtime.json";
 
 export function releasesDir(productDir: string): string {
   return join(productDir, RELEASES_DIRNAME);
@@ -297,6 +299,20 @@ export async function currentVersion(productDir: string): Promise<string | undef
     const target = await readlink(currentLink(productDir));
     const name = target.replace(/\/+$/, "").split("/").pop();
     return name && name !== CURRENT_LINK ? name : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The commit `pack-runtime.sh` was built from, read from the installed
+ * pack's own `metistry-runtime.json` — undefined for a pack built before
+ * that field shipped (e.g. 0.3.0/0.3.1), never fabricated.
+ */
+export async function runtimePackCommit(dir: string): Promise<string | undefined> {
+  try {
+    const manifest = JSON.parse(await readFile(join(dir, RUNTIME_PACK_MANIFEST), "utf8")) as { commit?: unknown };
+    return typeof manifest.commit === "string" && manifest.commit !== "" ? manifest.commit : undefined;
   } catch {
     return undefined;
   }

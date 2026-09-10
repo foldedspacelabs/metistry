@@ -180,6 +180,52 @@ reason on screen and an "Ask macOS" button that runs the request against a
 local challenge so the claim is checkable. The native path is written, not
 stubbed, and runs the moment an install qualifies.
 
+### Then (2026-09-10, fourth pass): the Mac is signed in, not enrolled
+
+**Decision 3 — the app authenticates to the LOCAL console implicitly, by a
+token only the logged-in user can read, and never by a passkey ceremony.**
+Owner ruling, 2026-09-10. The Mac app is the **same package as the CLI, on
+the same machine, running as the same person, with that person's filesystem
+access**. Asking it to perform a WebAuthn ceremony against a local origin is
+theatre: anything that could impersonate it could also read the passkey's own
+storage. So the console accepts `METISTRY_LOCAL_OWNER_TOKEN` over loopback as
+the `user` principal — the same principal a passkey session yields, through
+the same predicate — and the app is signed in the moment the install has one
+(`docs/ops/auth.md`; the CLI side shipped in PR #119).
+
+It is **not weaker than a passkey on this machine**: possession of the token
+means being able to read this login Keychain, which on macOS is the logged-in
+user — the same claim a platform passkey makes. What the loopback rule adds is
+that a token which leaks into a log or a screenshot still cannot be replayed
+from off the machine. **Passkeys are unchanged** and remain the door for
+browsers, the phone, and every remote client; nothing about enrolment or login
+moved.
+
+Three consequences for the app, all of them shipped:
+
+- **The app never touches the token.** It does not read the login Keychain
+  from Swift, does not open `<instance>/state/.env`, and sends no
+  `Authorization` header anywhere. It runs `metistry console whoami --json`
+  and renders the answer — the CLI is the one place that knows where the
+  token lives. A test walks `apps/macos/sources` and asserts all of that
+  rather than trusting the comment above it.
+- **Wizard step 6 is optional and reframed**, from "enrol a passkey against
+  the local origin" to "your Mac is signed in automatically; enrol a passkey
+  only for browsers and your phone". The enrolment-code path is kept intact
+  for exactly those. The "Ask macOS" `ASAuthorization` probe left the main
+  flow for **Settings → Advanced** — it is real measured behaviour and worth
+  being able to check, but it is a diagnostic, not a setup step.
+- **The app cannot yet make any OTHER authenticated console call.** PR #119
+  added `console whoami` and nothing else: there is no verb that performs an
+  arbitrary authenticated request on the app's behalf, and none that prints a
+  bearer to the calling process alone. Devices, agents, projects, proposals
+  and dispatch are therefore unreachable from the app, and the PWA remains
+  the answer for them. **The follow-up is a CLI change first** — a
+  `metistry console call <METHOD> <path>` is the shape that keeps the rule
+  ("the app is a front end for the CLI") intact; a token-printing verb keeps
+  the token out of argv but puts it in the app's memory, which is the weaker
+  of the two. Not decided here.
+
 ### The bundle is a seed (ratified 2026-09-10)
 
 **The decision: a signed bundle's `Contents/Resources/metistry/` is the
@@ -269,11 +315,14 @@ identical, so open-source users and the app share one tested path
    app's status view and menu-bar item. **`SMAppService` registers the APP**
    as a login item (built 2026-09-10); the install's launchd agents stay
    `metistry up`'s, and moving them is a CLI change first — see below.
-6. *Door.* Passkey enrollment in-app via `ASAuthorization` against the
-   local origin — **which is not possible from a Developer ID build at all**
-   (measured 2026-09-10, below). The app says so with the system's own
-   words and falls back to the console's existing code flow, here or on the
-   phone.
+6. *Door.* **Optional, and usually already done** (owner decision
+   2026-09-10, "Decision 3" below): this Mac is signed in to the local
+   console implicitly, by `METISTRY_LOCAL_OWNER_TOKEN` over loopback, so the
+   step leads with that state and asks nothing. Enrolling a passkey is what a
+   **browser or a phone** needs, and the console's existing enrolment-code
+   flow is kept for them. Native `ASAuthorization` against a local origin is
+   still not possible from a Developer ID build (measured 2026-09-10, below);
+   the probe that proves it moved to Settings → Advanced.
 7. *Claude.* `claude setup-token` guided in-app — opened in a real terminal
    because it is interactive — and the app watches `secrets list --json`
    for the token's name. It never handles the value.

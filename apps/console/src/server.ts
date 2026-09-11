@@ -33,6 +33,7 @@ import { parseCookies, readBody, readJson, sendError, sendJson, sessionCookie } 
 import * as wa from "./webauthn.js";
 import { checkLocalOwner, type LocalOwnerConfig } from "./local-owner.js";
 import { serveStatic } from "./static.js";
+import type { PublicIdentity } from "./identity.js";
 import { route as routeMessage, type Rules } from "./router.js";
 import { sendToSession, storeSubscription, type PushConfig } from "./push.js";
 import { dispatch, type TargetRegistry } from "./dispatch.js";
@@ -70,6 +71,39 @@ export interface ConsoleConfig {
   vault?: VaultClient;
   /** Loaded crew manifests (crews.ts); absent = agents_delegate answers not_available. */
   crews?: CrewRegistry;
+  /** identity.yaml's public fields for `GET /api/identity` (identity.ts); absent = 503 not_available. */
+  identity?: PublicIdentity | undefined;
+  /** What `GET /api/identity` reports as `version` — the console package's; absent = null. */
+  version?: string | undefined;
+}
+
+// ----- since-cursors (docs/ops/console-api.md) -----
+// A cursor is an opaque string the server minted: Postgres's own text form
+// of a timestamptz (it round-trips microseconds; a JS Date does not), then
+// the row's tiebreakers, `|`-joined — two rows written in one transaction
+// share a `now()`, so a bare timestamp would skip the second of them. The
+// client never parses it; it hands it back as `?since=`. Rows come oldest
+// first when a cursor is given (a reconnect replays forward), newest first
+// without one (a fresh paint), and the response always carries the cursor
+// for the next call — the newest row seen, or the caller's own when there
+// was nothing new.
+const MAX_LIST = 100;
+function listArgs(url: URL, dflt: number): { limit: number; since: string | null } {
+  const raw = Number(url.searchParams.get("limit") ?? dflt);
+  const limit = Number.isFinite(raw) && raw > 0 ? Math.min(Math.floor(raw), MAX_LIST) : dflt;
+  const since = url.searchParams.get("since");
+  return { limit, since: since && since.trim() !== "" ? since.trim() : null };
+}
+/** `since` must be a cursor this server could have minted; anything else is a 400, not a silent full repaint. */
+const CURSOR_TS = String.raw`\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:[+-]\d{2}(?::?\d{2})?|Z)?`;
+const MESSAGES_CURSOR_RE = new RegExp(`^(${CURSOR_TS})\\|(in|out)\\|(\\d{1,12})$`);
+const PROPOSALS_CURSOR_RE = new RegExp(`^(${CURSOR_TS})\\|(\\d{1,12})$`);
+function pageOf<T extends { cursor: string }>(rows: T[], limit: number, since: string | null): { page: Omit<T, "cursor">[]; cursor: string | null; more: boolean } {
+  const more = rows.length > limit;
+  const page = more ? rows.slice(0, limit) : rows;
+  const cursors = page.map((r) => r.cursor);
+  const cursor = since === null ? (cursors[0] ?? null) : (cursors[cursors.length - 1] ?? since);
+  return { page: page.map(({ cursor: _c, ...r }) => r), cursor, more };
 }
 
 type Auth =
@@ -172,6 +206,14 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     }
 
     // ----- public -----
+    // Who this instance is, before sign-in: the phone's picker renders a
+    // name from it and recognises an origin it already has by instance_id
+    // (research 2026-09-11). Public on purpose and nothing more than the
+    // login page already shows — no origin, no counts, no state.
+    if (key === "GET /api/identity") {
+      if (!cfg.identity) return sendError(res, "not_available");
+      return sendJson(res, 200, { ...cfg.identity, version: cfg.version ?? null, as_of: new Date().toISOString() });
+    }
     if (key === "GET /health") {
       try {
         await db.query("SELECT 1");
@@ -263,6 +305,13 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       // Tier 0 (§4.11): a capture-only agent needs nothing more than this
       // endpoint. Provenance is stamped from the credential (§4.19).
       const sourceAgent = auth.kind === "agent" ? auth.agent.id : null;
+      // Idempotency-Key (docs/ops/console-api.md): scoped to the credential
+      // CLASS the server derived, never to anything in the request. Owner
+      // tokens share one scope — they are all the owner's hand.
+      const rawKey = req.headers["idempotency-key"];
+      const idemKey = typeof rawKey === "string" ? rawKey.trim() : undefined;
+      if (idemKey !== undefined && (idemKey === "" || idemKey.length > 200)) return sendError(res, "invalid_request");
+      const idempotency = idemKey ? { principal: sourceAgent ? `agent:${sourceAgent}` : isUser(auth) ? "user" : "owner_token", key: idemKey } : undefined;
       const runId = await startRun(db, { component: "console", kind: "capture", meta: sourceAgent ? { agent: sourceAgent } : {} });
       try {
         let filename: string;
@@ -278,9 +327,11 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
           filename = String(req.headers["x-metistry-filename"] ?? `capture-${Date.now()}.bin`);
         }
         // one write path for every capture door (the brain bridge's `capture` tool uses the same function)
-        const r = await captureToInbox(db, cfg.inboxDir, { bytes, filename, mime: req.headers["content-type"] ?? null, note, source: "http", sourceAgent });
-        await finishRun(db, runId, { ok: true, meta: { inbox_id: r.id, bytes: bytes.length } });
-        return sendJson(res, 201, r);
+        const r = await captureToInbox(db, cfg.inboxDir, { bytes, filename, mime: req.headers["content-type"] ?? null, note, source: "http", sourceAgent, idempotency });
+        await finishRun(db, runId, { ok: true, meta: { inbox_id: r.id, bytes: bytes.length, ...(r.replayed ? { replayed: true } : {}) } });
+        // a replay is the ORIGINAL response — same status, same id — with one header saying so
+        if (r.replayed) res.setHeader("idempotency-replayed", "true");
+        return sendJson(res, 201, { id: r.id, path: r.path, sha256: r.sha256 });
       } catch (err) {
         await finishRun(db, runId, { ok: false, error: String(err) });
         throw err;
@@ -406,25 +457,32 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     }
 
     if (key === "GET /api/messages") {
-      const limit = Math.min(Number(url.searchParams.get("limit") ?? 20), 100);
+      const { limit, since } = listArgs(url, 20);
+      const c = since === null ? null : MESSAGES_CURSOR_RE.exec(since);
+      if (since !== null && !c) return sendError(res, "invalid_request");
+      // `tier` is the name the router (or a routine) put on the row — what
+      // the composer chips show, so a turn's tier is visible in the thread
+      // rather than only in `runs`. `changed_at` is the cursor column: an
+      // outbound row moves when its feedback does, so a rating given from
+      // the Mac resurfaces on the phone's next `since` pull.
       const { rows } = await db.query(
-        // `tier` is the name the router (or a routine) put on the row — what
-        // the composer chips show, so a turn's tier is visible in the thread
-        // rather than only in `runs`.
-        `SELECT * FROM (
+        `SELECT id, ts, thread, text, status, direction, feedback, tier, changed_at::text || '|' || direction || '|' || id AS cursor FROM (
            SELECT id, ts, thread, text, status, 'in'  AS direction, NULL::jsonb AS feedback,
-                  coalesce(meta->'route'->>'tier', meta->>'tier') AS tier
+                  coalesce(meta->'route'->>'tier', meta->>'tier') AS tier, ts AS changed_at
            FROM inbound_messages
            UNION ALL
            SELECT o.id, o.ts, o.thread, o.text, o.kind, 'out' AS direction,
                   CASE WHEN f.id IS NULL THEN NULL
                        ELSE jsonb_build_object('rating', f.rating, 'note', f.note, 'ts', f.ts) END,
-                  NULL::text
+                  NULL::text, greatest(o.ts, f.ts)
            FROM outbound_messages o LEFT JOIN reply_feedback f ON f.outbound_message_id = o.id
-         ) m ORDER BY ts DESC LIMIT $1`,
-        [limit],
+         ) m
+         WHERE $2::text IS NULL OR (changed_at, direction, id) > ($2::timestamptz, $3::text, $4::bigint)
+         ORDER BY changed_at ${since === null ? "DESC" : "ASC"}, direction ${since === null ? "DESC" : "ASC"}, id ${since === null ? "DESC" : "ASC"} LIMIT $1`,
+        [limit + 1, c?.[1] ?? null, c?.[2] ?? "", c?.[3] ?? 0],
       );
-      return sendJson(res, 200, { messages: rows });
+      const { page, cursor, more } = pageOf(rows as ({ cursor: string } & Record<string, unknown>)[], limit, since);
+      return sendJson(res, 200, { messages: page, cursor, more });
     }
 
     // ----- push: bound to the device session specifically -----
@@ -526,18 +584,38 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
 
     // ----- proposal triage (D7 unified table; owner session only) -----
     if (key === "GET /api/proposals") {
+      const { limit, since } = listArgs(url, 200);
+      const c = since === null ? null : PROPOSALS_CURSOR_RE.exec(since);
+      if (since !== null && !c) return sendError(res, "invalid_request");
+      // Without a cursor: the triage queue, pending only, as always. With
+      // one: everything that CHANGED since — new rows and rows decided since
+      // (decided_at moves the cursor), with `decision` and `decided_at` on
+      // each, so a reconnect learns what was settled while it was away
+      // instead of showing a stale queue.
       const { rows } = await db.query(
-        `SELECT id, ts, kind, source_agent, trust, payload FROM proposals
-         WHERE decision = 'pending' ORDER BY ts DESC LIMIT 200`,
+        since === null
+          ? `SELECT id, ts, kind, source_agent, trust, payload, decision, decided_at, ts::text || '|' || id AS cursor FROM proposals
+             WHERE decision = 'pending' ORDER BY ts DESC, id DESC LIMIT $1`
+          : `SELECT id, ts, kind, source_agent, trust, payload, decision, decided_at, greatest(ts, decided_at)::text || '|' || id AS cursor FROM proposals
+             WHERE (greatest(ts, decided_at), id) > ($2::timestamptz, $3::bigint) ORDER BY greatest(ts, decided_at) ASC, id ASC LIMIT $1`,
+        since === null ? [limit + 1] : [limit + 1, c![1], c![2]],
       );
-      return sendJson(res, 200, { proposals: rows });
+      const { page, cursor, more } = pageOf(rows as ({ cursor: string } & Record<string, unknown>)[], limit, since);
+      return sendJson(res, 200, { proposals: page, cursor, more });
     }
 
     const triage = /^POST \/api\/proposals\/(\d+)$/.exec(key);
     if (triage) {
       const body = (await readJson(req)) as { decision?: string; feedback?: string };
-      const row = (await db.query(`SELECT id, kind, payload FROM proposals WHERE id = $1 AND decision = 'pending'`, [triage[1]])).rows[0];
-      if (!row) return sendError(res, "not_found"); // unknown or already decided — no re-triage
+      const row = (await db.query(`SELECT id, kind, payload, decision, decided_at FROM proposals WHERE id = $1`, [triage[1]])).rows[0];
+      if (!row) return sendError(res, "not_found");
+      // Already decided — from another device, or this one before it went
+      // offline. 409 with the winner, so a client that queued an answer can
+      // show what actually happened rather than "failed"
+      // (docs/ops/console-api.md). No re-triage, ever.
+      if (row.decision !== "pending") {
+        return sendJson(res, 409, { ...errorEnvelope("conflict", "already decided"), decision: row.decision, decided_at: row.decided_at });
+      }
       // A `decision` proposal (the assistant asked a blocking question) is
       // answered with one of ITS OWN options; everything else takes the three
       // triage verbs. Either way the option set comes from the stored row,
@@ -574,7 +652,10 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         [triage[1], body.decision, body.feedback ?? null],
       );
       await audit("triage", body.decision!, rows.length === 1, { proposal: triage[1], kind: row.kind, ...(applied ? { overlay: applied.path } : {}) });
-      return rows.length === 1 ? sendJson(res, 200, { ok: true, ...(applied ? { applied } : {}) }) : sendError(res, "not_found");
+      if (rows.length === 1) return sendJson(res, 200, { ok: true, ...(applied ? { applied } : {}) });
+      // lost the race between the read above and this update: someone else decided it
+      const now = (await db.query(`SELECT decision, decided_at FROM proposals WHERE id = $1`, [triage[1]])).rows[0];
+      return sendJson(res, 409, { ...errorEnvelope("conflict", "already decided"), decision: now?.decision ?? null, decided_at: now?.decided_at ?? null });
     }
 
     // ----- reply quality: 👍/👎 on one outbound message (docs/ops/reply-feedback.md) -----

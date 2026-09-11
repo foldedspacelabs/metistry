@@ -29,7 +29,10 @@
 #   METISTRY_SIGN_IDENTITY  a Developer ID Application identity. Set → every
 #                           Mach-O is `codesign --force --options runtime
 #                           --timestamp`ed as
-#                           com.foldedspacelabs.metistry.runtime.<name>.
+#                           com.foldedspacelabs.metistry.runtime.<name>, with
+#                           the entitlements it came with carried over minus
+#                           get-task-allow (Node needs its JIT exceptions;
+#                           notarization refuses get-task-allow).
 #                           Unset → skipped with a notice. A missing identity
 #                           is NEVER a build failure (docs/ops/apple-signing.md).
 #   METISTRY_RUNTIME_JOBS   make -j (default: hw.ncpu)
@@ -274,27 +277,56 @@ assemble() {
 }
 
 # ---- signing ---------------------------------------------------------------------
-# CI has no identity yet (the DMG job will have one). Unset is a notice, never
-# a failure; a codesign that actually fails is.
+# Unset is a notice, never a failure; a codesign that actually fails is.
+#
+# Entitlements are CARRIED OVER, minus get-task-allow. Node's official binary
+# is signed with the hardened runtime plus allow-jit,
+# allow-unsigned-executable-memory, disable-library-validation and friends —
+# V8 cannot run without the first two — and with get-task-allow, which
+# notarization rejects (the v0.4.0 lesson, ops/release/build-app.sh). Signing
+# it with `--options runtime` and NO entitlements produces a node that dies
+# at startup. Postgres and git carry none and get none.
+
+codesign_retry() { # Apple's timestamp server flakes now and then; one flake must not cost a build
+  local attempt
+  for attempt in 1 2 3; do
+    codesign "$@" 2>/dev/null && return 0
+    say "  codesign failed (attempt $attempt/3) — retrying in 5s"
+    sleep 5
+  done
+  return 1
+}
 
 sign() {
-  local id="${METISTRY_SIGN_IDENTITY:-}" f name signed=0
+  local id="${METISTRY_SIGN_IDENTITY:-}" f name signed=0 ents ent_args
   if [ -z "$id" ]; then
     log "signing: skipped"
     say "METISTRY_SIGN_IDENTITY is unset — every Mach-O keeps the signature it came with"
-    say "(Node's own Developer ID for node; ad-hoc for what was compiled here). The DMG job sets it."
+    say "(Node's own Developer ID for node; ad-hoc for what was compiled here). The DMG job re-signs what it embeds."
     return 0
   fi
   log "signing every Mach-O as \"$id\""
+  ents="$(mktemp -t runtime-ents)"
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     name="$(basename "$f" | tr -c 'A-Za-z0-9.-' '-')"
-    codesign --force --options runtime --timestamp \
+    ent_args=()
+    if codesign -d --entitlements :- "$f" 2>/dev/null > "$ents" && [ -s "$ents" ] && plutil -lint -s "$ents" >/dev/null 2>&1; then
+      plutil -remove 'com\.apple\.security\.get-task-allow' "$ents" >/dev/null 2>&1 || true
+      if [ "$(plutil -p "$ents" | grep -c '=>')" -gt 0 ]; then ent_args=(--entitlements "$ents"); fi
+    fi
+    codesign_retry --force --options runtime --timestamp \
       --identifier "com.foldedspacelabs.metistry.runtime.$name" \
-      --sign "$id" "$f" >/dev/null 2>&1 || die "codesign failed for $f"
+      ${ent_args[@]+"${ent_args[@]}"} \
+      --sign "$id" "$f" || die "codesign failed for $f"
     signed=$((signed + 1))
   done < <(machos "$out")
+  rm -f "$ents"
   say "signed $signed Mach-O files"
+  # the proof that matters: the signed node still runs (a JIT-less hardened node does not)
+  "$out/node/bin/node" -e 'process.exit(0)' || die "signed node does not start — entitlements were lost"
+  codesign -d --entitlements :- "$out/node/bin/node" 2>/dev/null | grep -q 'get-task-allow' && die "signed node still carries get-task-allow"
+  say "signed node starts, without get-task-allow"
 }
 
 # ---- verification: from a MOVED copy ----------------------------------------------

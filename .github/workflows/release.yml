@@ -110,6 +110,22 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm -r build
+      # The Swift TCC helpers (calendar, apple-fm) ship in the darwin pack as
+      # signed app bundles, so a release install has something for `metistry
+      # up` to pin its bridges at (packages/cli/src/tcc-pin.ts). Signed under
+      # the Developer ID when the secrets are set: TCC keys a grant on
+      # identifier + certificate chain, so a helper the release built keeps
+      # the grant a checkout's build earned (docs/ops/apple-signing.md §3).
+      # Without the cert they are built ad-hoc — the grant then rots on the
+      # next release, which is still better than no helper at all.
+      - if: matrix.target == 'darwin-arm64'
+        uses: ./.github/actions/apple-keychain
+        with:
+          certificate-p12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          certificate-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      - if: matrix.target == 'darwin-arm64'
+        name: build + sign the TCC helper bundles
+        run: pnpm -r --if-present run build:helper
       - name: pack the runtime
         run: ops/release/pack-runtime.sh "${{ needs.verify.outputs.version }}" "${{ matrix.target }}" "$GITHUB_WORKSPACE/dist-release"
       - uses: actions/upload-artifact@v4
@@ -135,10 +151,18 @@ jobs:
         with:
           path: .runtime-build/cache
           key: runtime-deps-darwin-arm64-${{ hashFiles('ops/release/runtime-versions.env') }}
-      # Unsigned on purpose: this runner has no certificate. The DMG job, which
-      # does, re-signs every Mach-O it embeds from this pack under the Developer
-      # ID (ops/release/build-app.sh) — the one place notarization looks.
-      - name: build runtime/ (verified from a MOVED copy before it is packed)
+      # Signed under the Developer ID when the secrets are set, so a pack
+      # installed by `metistry update` (no app, no DMG) carries Node, Postgres
+      # and git under Folded Space Labs — the supervisor's Login Item is then
+      # attributed to us rather than to the Node.js Foundation. Node keeps its
+      # JIT entitlements minus get-task-allow (build-runtime-deps.sh sign()).
+      # Without the secrets the pack is unsigned, as before, and the DMG job
+      # re-signs whatever it embeds either way (ops/release/build-app.sh).
+      - uses: ./.github/actions/apple-keychain
+        with:
+          certificate-p12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          certificate-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      - name: build runtime/ (signed when a Developer ID is present; verified from a MOVED copy before it is packed)
         run: ops/release/build-runtime-deps.sh
       - name: pack metistry-runtime-deps-<version>-darwin-arm64.tar.gz (+ .sha256)
         env:
@@ -296,50 +320,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - id: gate
-        name: do we have a Developer ID certificate?
-        env:
-          APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-        run: |
-          if [ -n "$APPLE_CERTIFICATE_P12" ] && [ -n "$APPLE_CERTIFICATE_PASSWORD" ]; then
-            echo "ok=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "ok=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::APPLE_CERTIFICATE_P12/APPLE_CERTIFICATE_PASSWORD are not set — skipping the macOS app. The release's other assets are unaffected. (docs/ops/apple-signing.md §4)"
-          fi
-
-      - if: steps.gate.outputs.ok == 'true'
-        name: import the Developer ID cert into a temporary keychain
-        env:
-          APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-        run: |
-          keychain="$RUNNER_TEMP/build.keychain-db"
-          security create-keychain -p "$RUNNER_TEMP" "$keychain"
-          security set-keychain-settings -lut 21600 "$keychain"
-          security unlock-keychain -p "$RUNNER_TEMP" "$keychain"
-          # codesign searches the keychain SEARCH LIST, not just the default —
-          # so the temp keychain has to be on it, with login kept for anything
-          # else the runner needs.
-          security list-keychains -d user -s "$keychain" login.keychain-db
-          security default-keychain -s "$keychain"
-          echo "$APPLE_CERTIFICATE_P12" | base64 --decode -o "$RUNNER_TEMP/cert.p12"
-          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
-          rm -f "$RUNNER_TEMP/cert.p12"
-          # Without this, codesign prompts for keychain access and hangs the job.
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$RUNNER_TEMP" "$keychain"
-          echo "METISTRY_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
-
-      - if: steps.gate.outputs.ok == 'true'
-        name: pin METISTRY_SIGN_IDENTITY to the imported cert's hash
-        run: |
-          # The HASH, not the display name: a keychain holding two valid certs
-          # for one team (a renewal) has two byte-identical names and
-          # `codesign -s "<name>"` fails with "ambiguous". The hash is unique.
-          identity="$(security find-identity -v -p codesigning "$METISTRY_KEYCHAIN" | grep 'Developer ID Application' | head -1 | awk '{print $2}')"
-          [ -n "$identity" ] || { echo "the imported .p12 has no Developer ID Application identity" >&2; exit 1; }
-          echo "METISTRY_SIGN_IDENTITY=$identity" >> "$GITHUB_ENV"
-          echo "signing identity: $identity"
+        uses: ./.github/actions/apple-keychain
+        with:
+          certificate-p12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          certificate-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      - if: steps.gate.outputs.ok != 'true'
+        run: echo "::notice::skipping the macOS app — no Developer ID certificate. The release's other assets are unaffected. (docs/ops/apple-signing.md §4)"
 
       # The packs this run already built — the app embeds them rather than
       # rebuilding the product a second time.

@@ -116,6 +116,7 @@ Set `METISTRY_SIGN_IDENTITY` and every Mach-O in `runtime/` — found with
 ```sh
 codesign --force --options runtime --timestamp \
   --identifier com.foldedspacelabs.metistry.runtime.<name> \
+  [--entitlements <what it came with, minus get-task-allow>] \
   --sign "$METISTRY_SIGN_IDENTITY" <file>
 ```
 
@@ -124,19 +125,36 @@ signature. Unset, signing is skipped with a notice and the build still
 succeeds. A `codesign` that actually fails is a build failure; a missing
 identity never is.
 
-**In CI the pack is deliberately unsigned.** The `runtime-deps` runner holds
-no certificate, so the pack on GitHub Releases carries Postgres and git
-ad-hoc and Node under the Node.js Foundation's Developer ID. The one place
-with a certificate is the `macos-app` job, and `ops/release/build-app.sh`
-re-signs **every** Mach-O it embeds under the FSL identity — hardened
-runtime, secure timestamp, existing entitlements carried over minus
-`get-task-allow` (Node's official signature has it; notarization refuses
-it) — then audits the whole bundle before producing the DMG. That is the
-lesson of v0.4.0's `status: Invalid`: the earlier rule only signed what had
-*no* signature, and ad-hoc counts as one. A pack consumed directly by
-`metistry up` (the launchd shape, no app) is unpacked by `tar`, which sets
-no quarantine attribute, so Gatekeeper never assesses it; signing it there
-is a nicety, not a requirement.
+**Entitlements are carried over, minus `get-task-allow`.** Node's official
+binary is signed with the hardened runtime plus `allow-jit`,
+`allow-unsigned-executable-memory`, `disable-library-validation` and
+friends — V8 cannot run without the first two — and with `get-task-allow`,
+which notarization rejects. A hardened-runtime signature with no
+entitlements produces a `node` that is killed at startup; `sign()` proves
+the signed node still runs before the build goes on, and that
+`get-task-allow` is gone. Postgres and git carry no entitlements and get
+none.
+
+**In CI the pack is signed** when the `APPLE_CERTIFICATE_P12` /
+`APPLE_CERTIFICATE_PASSWORD` secrets are set (`.github/actions/apple-keychain`
+imports the cert into a temporary keychain and pins the identity by hash —
+the same setup the DMG job and the darwin runtime pack's TCC helpers use).
+That is what a pack installed by `metistry update` — the launchd shape,
+no app, no DMG — carries: Node, Postgres and git under Folded Space Labs,
+so the supervisor's Login Item (`Metistry`, a symlink to the bundled
+`node`) is attributed to us rather than to the Node.js Foundation. Without
+the secrets — a fork — the pack is unsigned as before: Postgres and git
+ad-hoc, Node under the Node.js Foundation's Developer ID. `tar` sets no
+quarantine attribute, so Gatekeeper never assesses a pack `metistry up`
+unpacks either way; the signature is about attribution and about what the
+DMG embeds.
+
+The DMG job re-signs **every** Mach-O it embeds regardless
+(`ops/release/build-app.sh`): a file already under the same team, with the
+hardened runtime and a secure timestamp, is kept; anything else is signed
+with the same entitlements rule, then the whole bundle is audited before
+the DMG is produced. That is the lesson of v0.4.0's `status: Invalid`: the
+earlier rule only signed what had *no* signature, and ad-hoc counts as one.
 
 ## Building it
 

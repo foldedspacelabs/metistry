@@ -79,8 +79,11 @@ unpacks to a single `metistry-<version>/` directory holding:
   `targets/`
 - every workspace package's `package.json`, `manifest.yaml` and `dist/`
   — `apps/*`, `packages/*`, `plugins/*` — plus `apps/console/web` (the
-  PWA) and the Swift TCC helper binaries under
-  `packages/mcp-*/helper/` when the pack was built on macOS
+  PWA) and the Swift TCC helper bundles under
+  `packages/mcp-*/helper/` when the pack was built on macOS — built and
+  signed by the darwin `runtime` job under the Developer ID when the
+  signing secrets are set (ad-hoc otherwise), so `metistry up` on a release
+  install pins its bridges at helpers that keep a checkout's TCC grant
 - `collectors/` and `routines/` with their per-directory manifests
 - `node_modules/` — production dependencies only, which is why the pack
   is per os-arch

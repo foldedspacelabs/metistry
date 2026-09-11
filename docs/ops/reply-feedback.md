@@ -26,7 +26,7 @@ derived state; a rebuild from collectors cannot reconstruct it.
 | --- | --- | --- |
 | `POST /api/messages/:id/feedback` `{rating, note?}` | passkey session only | upsert (one judgement per message); `runs` row kind `feedback`, tool `up`/`down` |
 | `DELETE /api/messages/:id/feedback` | passkey session only | clears it; `runs` row tool `clear` |
-| `GET /api/messages` | owner | outbound rows carry `feedback: {rating, note, ts}` |
+| `GET /api/messages` | owner | outbound rows carry `feedback: {rating, note, ts}`; `?since=<cursor>` replays changes forward, and a rating moves its row (`docs/ops/console-api.md`) |
 
 An owner token (the capture Shortcut, scripts) gets a uniform 403: rating a
 reply is the user's own judgement, and least privilege inside the owner class

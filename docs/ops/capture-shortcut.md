@@ -16,6 +16,9 @@ lost phone leaks capture ability, not control. Revoke from the Studio:
 `UPDATE owner_tokens SET revoked_at = now() WHERE label = 'iphone-shortcut'`.
 (An **agent token** — minted in the console's *agents* tab — also works on
 `/capture`, and only there: the inbox row records which agent sent it.)
+A client that retries — the native app's outbox, a script — sends an
+`Idempotency-Key` so a retry returns the first row instead of a duplicate
+(`docs/ops/console-api.md`). The Shortcut sends none and is unchanged.
 
 ## 2. Build the Shortcut ("Capture to Metistry")
 

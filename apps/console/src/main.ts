@@ -1,4 +1,5 @@
 import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 import { EMBED_DEFAULT_DIM, EMBED_DEFAULT_MODEL, EMBED_DEFAULT_URL, EmbedClient, intEnv, optionalEnv, requireEnv } from "@foldedspacelabs/metistry-core";
 import { QueryStore } from "@foldedspacelabs/metistry-queries";
 import { makePool } from "./db.js";
@@ -17,6 +18,9 @@ import { readFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { defaultGatewayFrom, parseTrustedProxies } from "./local-owner.js";
 import { canonicalOrigin } from "./webauthn.js";
+import { loadPublicIdentity } from "./identity.js";
+
+const require_ = createRequire(import.meta.url);
 
 const pool = makePool();
 const queries = new QueryStore(pool);
@@ -138,9 +142,18 @@ const logCrewSync = (s: Awaited<ReturnType<CrewRegistry["refresh"]>>) => {
 logCrewSync(await crews.refresh());
 setInterval(() => crews.refresh().then(logCrewSync, (err) => console.error("crews: refresh failed:", err)), intEnv("METISTRY_CREWS_SYNC_S", 300) * 1000).unref();
 
+// GET /api/identity: identity.yaml through the assistant's overlay rule
+// (docs/ops/assistant-tools.md), defaulting to the instance repo's copy when
+// METISTRY_INSTANCE_DIR says where that is.
+const identityFiles = optionalEnv("METISTRY_IDENTITY_FILES", `seed/identity.yaml:${process.env.METISTRY_INSTANCE_DIR?.replace(/\/+$/, "") || "."}/identity.yaml`);
+const identity = await loadPublicIdentity(identityFiles);
+if (!identity) console.warn(`identity absent: no complete identity.yaml (name + instance_id) in ${identityFiles} — GET /api/identity answers 503 (degrades: absent)`);
+
 const server = makeServer(pool, queries, {
   origin,
   origins,
+  ...(identity ? { identity } : {}),
+  version: require_("../package.json").version,
   ...(localOwner ? { localOwner } : {}),
   inboxDir: optionalEnv("METISTRY_INBOX_DIR", "./inbox"),
   policy: {

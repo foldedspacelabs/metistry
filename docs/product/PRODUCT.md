@@ -1142,3 +1142,12 @@ launchd cannot even see.
   not wake for the network, so the phone queues — appends only (capture,
   feedback), never claims or decisions — behind an `Idempotency-Key`
   contract on `POST /capture` and `since` cursors on the polled lists.
+- 2026-09-11 — **The server side of "the backend is not always there" shipped
+  before the phone app exists.** `GET /api/identity` (public: `instance_id`,
+  name, icon, version), an `Idempotency-Key` contract on `POST /capture`
+  that returns the original row on replay — one inbox row even under a
+  race — `409` with the winner for an already-settled decision, and opaque
+  `since` cursors on the messages and proposals lists so a reconnect is one
+  bounded pull per list (`docs/ops/console-api.md`). Small on purpose: these
+  are the only server changes the offline design needs, and the PWA gets
+  them today.

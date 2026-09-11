@@ -1134,3 +1134,11 @@ than a name — one supervisor means the database is up before the console tries
 to use it, a service that keeps dying is *reported as crash-looping* instead of
 respawning silently forever, and `metistry restart console` works on a process
 launchd cannot even see.
+- 2026-09-11 — Research: **one phone, two instances, and backends that
+  sleep** (`docs/research/2026-09-11-multi-instance-and-offline-client.md`).
+  An instance on the phone is `(origin, instance_id)`; existing per-origin
+  passkeys and per-instance owner tokens already cover N instances with no
+  server change beyond a public `GET /api/identity`. A closed laptop does
+  not wake for the network, so the phone queues — appends only (capture,
+  feedback), never claims or decisions — behind an `Idempotency-Key`
+  contract on `POST /capture` and `since` cursors on the polled lists.

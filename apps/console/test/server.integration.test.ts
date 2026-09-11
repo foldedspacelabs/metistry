@@ -338,8 +338,12 @@ sql: SELECT id, title FROM work WHERE status <> 'closed' ORDER BY updated_at DES
     const cookie = `metistry_session=${await store.issueSession(pool, pkId, policy)}`;
     expect((await fetch(`${base}/api/proposals/${id}`, { method: "POST", headers: { cookie, "content-type": "application/json" }, body: JSON.stringify({ decision: "yolo" }) })).status).toBe(400);
     expect((await fetch(`${base}/api/proposals/${id}`, { method: "POST", headers: { cookie, "content-type": "application/json" }, body: JSON.stringify({ decision: "allow" }) })).status).toBe(200);
-    // already decided → not_found (no re-triage)
-    expect((await fetch(`${base}/api/proposals/${id}`, { method: "POST", headers: { cookie, "content-type": "application/json" }, body: JSON.stringify({ decision: "deny" }) })).status).toBe(404);
+    // already decided → 409 with the winner (no re-triage; docs/ops/console-api.md)
+    const again = await fetch(`${base}/api/proposals/${id}`, { method: "POST", headers: { cookie, "content-type": "application/json" }, body: JSON.stringify({ decision: "deny" }) });
+    expect(again.status).toBe(409);
+    expect(await again.json()).toMatchObject({ error: { code: "conflict" }, decision: "allow" });
+    // unknown stays 404
+    expect((await fetch(`${base}/api/proposals/999999999`, { method: "POST", headers: { cookie, "content-type": "application/json" }, body: JSON.stringify({ decision: "deny" }) })).status).toBe(404);
     const after = await pool.query(`SELECT decision FROM proposals WHERE id = $1`, [id]);
     expect(after.rows[0].decision).toBe("allow");
   });

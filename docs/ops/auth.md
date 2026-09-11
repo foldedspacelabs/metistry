@@ -133,6 +133,10 @@ rather than reading `.env` itself — the CLI is the one place that knows
 where the token lives (docs/product/desktop-app-plan.md: the app is a front
 end for the CLI, never a second implementation).
 
+`GET /api/identity` is the one unauthenticated read — instance id, name,
+icon, version, nothing the login page does not show — for a phone to name
+an instance before sign-in (`docs/ops/console-api.md`).
+
 ## Passkeys: origins
 
 `METISTRY_ORIGIN` is the canonical HTTPS origin passkeys bind to. It may be

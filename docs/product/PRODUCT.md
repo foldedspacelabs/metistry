@@ -1151,3 +1151,16 @@ launchd cannot even see.
   bounded pull per list (`docs/ops/console-api.md`). Small on purpose: these
   are the only server changes the offline design needs, and the PWA gets
   them today.
+- 2026-09-11 — Research: **local models, OpenRouter and OpenCode**
+  (`docs/research/2026-09-11-local-models-openrouter-opencode.md`). The
+  engine stays Claude-only on the subscription (Anthropic supports no
+  gateway routing to other models, and a gateway credential flips to API
+  billing); a non-Claude tier gets a small second, OpenAI-compatible
+  engine that loops over the console's own `/mcp` — so invariant 9 holds
+  for every provider. Providers become manifests, tiers gain a
+  `provider/` prefix, `auto` routing is rejected at parse time (invariant
+  4), off-machine providers carry a target-shaped data policy, one env var
+  serves Ollama and LM Studio alike, and OpenCode gets the same capture
+  plugin Claude Code has. Flagged for the owner: the Agent SDK overview now
+  says third parties may not offer claude.ai login for their products
+  "unless previously approved" — a question for the distributed app.

@@ -294,8 +294,14 @@ describe(".github/workflows/release.yml", () => {
     const text = repoFile(".github/workflows/release.yml");
     // `secrets` is not available in a job-level `if`, so each job gates itself
     // in its first step and says so — the same courtesy `images` extends a fork
-    // without packages:write, rather than failing the whole release.
-    expect(text).toContain("::notice::APPLE_CERTIFICATE_P12/APPLE_CERTIFICATE_PASSWORD are not set");
+    // without packages:write, rather than failing the whole release. The
+    // Developer ID gate lives in the composite action every darwin job uses.
+    const keychain = repoFile(".github/actions/apple-keychain/action.yml");
+    expect(keychain).toContain("::notice::APPLE_CERTIFICATE_P12/APPLE_CERTIFICATE_PASSWORD are not set");
+    for (const job of ["runtime", "runtime-deps", "macos-app"]) {
+      const steps = (wf.jobs[job] as { steps: { uses?: string }[] }).steps;
+      expect(steps.some((st) => st.uses === "./.github/actions/apple-keychain"), `${job} imports the Developer ID via the composite action`).toBe(true);
+    }
     expect(text).toContain("::notice::SPARKLE_PRIVATE_KEY is not set");
     expect(text).toContain("::notice::APPLE_API_KEY_P8 is not set");
     expect(wf.jobs["macos-app"]!.outputs).toMatchObject({ built: "${{ steps.gate.outputs.ok }}" });

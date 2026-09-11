@@ -1,6 +1,6 @@
 {
   "name": "@foldedspacelabs/metistry-mcp-apple-fm",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "Metistry Apple Foundation Models bridge: free on-device classification over the §4.3 wire contract (HTTP + bearer auth + check()). Ships a compiled Swift helper; no TCC grants required. Usable standalone.",
   "license": "Apache-2.0",
   "type": "module",

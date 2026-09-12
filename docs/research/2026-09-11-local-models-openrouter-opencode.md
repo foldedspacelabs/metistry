@@ -269,6 +269,127 @@ allow_fallbacks: false }`; `kind: anthropic` and the SDK dependency leave
 the product with the scrub. Keep the native Messages adapter as a
 documented, unbuilt option.
 
+### Claude Managed Agents as the main agent's harness?
+
+Verified 2026-09-11 ([Anthropic][ma-overview], [ma-reference], [ma-budgets]).
+Managed Agents is Anthropic's hosted harness: "the model, system prompt,
+tools, MCP servers, and skills" defined once as an *agent*, run in
+*sessions* inside an *environment* — an Anthropic cloud sandbox or a
+self-hosted sandbox driven by a worker on your own machine — with
+server-side event history, compaction, prompt caching, scheduled
+deployments, multiagent threads, and hard dollar budgets per session.
+
+**Terms.** Authentication is a Claude API key; there is no claude.ai login
+path at all, so the SDK overview's third-party clause does not arise — this
+*is* the product Anthropic offers to third parties who want Claude as an
+agent. Its branding guidelines are the SDK's ("Claude Agent", "Powered by
+Claude"; never "Claude Code"), and the Commercial Terms apply. Cleaner
+than the SDK on that axis, and equal to OpenRouter.
+
+**Pricing.** List cost per session = model tokens at list price + web
+searches at $10 per 1,000 + **session running time at $0.08 per hour**
+([ma-budgets]). A session that is always on — the shape Metis has — is
+~$58/month of running time before a token is billed; a session-per-turn
+shape avoids that but pays the sandbox start each time. Budgets are hard
+caps enforced between model requests and pause the session at
+`budget_reached`; a nice primitive, and one `compute.yaml` budgets would
+have to mirror for every other provider anyway.
+
+**Fit.** Poor for the main agent, for three reasons that are not about
+terms:
+
+1. **The tools are the wrong tools.** The harness brings bash, file
+   operations and web fetch in *its* sandbox — the surface invariant 9
+   removes. Metis's tools are the console's `/mcp`; the harness can reach
+   it only as a "remote MCP server" with a public HTTP endpoint or through
+   an MCP tunnel, which is "a more limited research preview" needing a
+   request form ([ma-overview], [ma-reference]). Either way the vault's
+   knowledge and the user's comms cross to Anthropic's sandbox per call.
+2. **Not ZDR-eligible.** "Managed Agents is not currently eligible for
+   Zero Data Retention or HIPAA BAA coverage" because sessions, sandbox
+   state and outputs are stored server-side ([ma-overview]) — the
+   opposite of an instance whose Postgres and vault are the record.
+3. **Beta, Claude-only.** The `managed-agents-2026-04-01` beta header on
+   every call; "behaviors may be refined between releases"; and it would
+   be a third engine kind for one vendor, which is what rev 3 just removed.
+
+**Where it does fit:** as a *compute target* (`targets/`), the same shape
+as `github-issues` — "dispatch this brief to a hosted Claude session with
+a $N budget, results back through `/mcp`". Off-machine by construction, so
+the data policy already governs it, and a session budget maps onto the
+target's cost row. Worth a manifest later; not the main agent.
+
+### A non-Claude main agent: the safest route, and what it costs
+
+The owner's second question: run Metis on a non-Claude model, so nothing
+in the product's default path touches Anthropic's harness terms or the
+"Claude calling non-Claude" rule at all. With one engine and
+`compute.yaml` this is *only a seed default* — the user picks any
+`provider/model` for `default` and every tier — so the question is which
+default to ship and what it costs.
+
+**What the main agent needs from a model:** reliable tool calling over
+~12 MCP tools (verified `tools=true` on OpenRouter for every row below),
+JSON-schema output for the router-adjacent work (`response_format`), a
+reasoning knob for the `deep` tier, prompt caching for the loop, and a
+context window that holds a fold. Every candidate below clears those on
+paper; **quality on Metistry's own eval is not measured** — PoC-15/16's
+fixtures are the harness to reuse before a default is chosen.
+
+**Live list prices via OpenRouter, 2026-09-11** (`/api/v1/models`;
+no markup; caching discounts vary by vendor):
+
+| model | in $/M | out $/M | ctx | note |
+| --- | --- | --- | --- | --- |
+| anthropic/claude-sonnet-5 | 2.00 | 10.00 | 1M | the reference; cache reads 0.1× |
+| anthropic/claude-haiku-4.5 | 1.00 | 5.00 | 200k | today's `default` tier |
+| anthropic/claude-opus-5 | 5.00 | 25.00 | 1M | today's `deep` |
+| openai/gpt-5 | 1.25 | 10.00 | 400k | automatic caching |
+| google/gemini-3.5-flash | 1.50 | 9.00 | 1M | |
+| google/gemini-3.5-flash-lite | 0.30 | 2.50 | 1M | |
+| moonshotai/kimi-k2.5 | 0.45 | 2.25 | 262k | open weights |
+| deepseek/deepseek-v4-pro | 0.85 | 1.70 | 1M | open weights; automatic caching |
+| deepseek/deepseek-v4-flash | 0.07 | 0.13 | 1M | open weights |
+| minimax/minimax-m2.7 | 0.30 | 1.20 | 205k | open weights |
+| lmstudio/… (local) | 0 | 0 | model-dependent | electricity + RAM |
+
+**A monthly estimate for one instance**, stated assumptions so the table
+can be re-run: 90 turns/day (60 chat, 30 routine), 8k input tokens per
+turn (a ~4.4k tool list + identity prompt + thread), 600 output tokens,
+70% of input served from cache where the vendor discounts cache reads at
+0.1× (Anthropic, and treated the same for the others' automatic caching —
+optimistic for vendors that discount less), 30 days:
+
+| default model | tokens in/mo | est. $/mo | vs Sonnet |
+| --- | --- | --- | --- |
+| claude-sonnet-5 | 21.6M in (6.5M billed-equivalent), 1.6M out | ≈ $29 | 1.0× |
+| claude-haiku-4.5 | same | ≈ $15 | 0.5× |
+| gpt-5 | same | ≈ $24 | 0.8× |
+| gemini-3.5-flash-lite | same | ≈ $6 | 0.2× |
+| kimi-k2.5 | same | ≈ $7 | 0.24× |
+| deepseek-v4-pro | same | ≈ $8 | 0.28× |
+| deepseek-v4-flash | same | ≈ $0.65 | 0.02× |
+| local (LM Studio, gemma-class) | same | $0 + power | — |
+
+Two things the table hides. Effort: the `deep` tier's reasoning tokens
+are billed as output and dominate on a hard question, whichever vendor;
+the estimate is for the default tier. Quality: a cheaper default that
+needs two turns to do one costs more than the dearer one, and the cost
+research found "correct routing beats always-standard on quality, never
+cost" (PoC-15). So the honest recommendation is a **two-default seed**:
+`default` on a strong mid-price non-Claude model and `deep` on the best
+model the user will pay for — with the choice made on Metistry's own
+fixtures, not on this table.
+
+**Recommendation.** Ship the seed with a non-Claude `default` (candidate:
+`deepseek/deepseek-v4-pro` or `moonshotai/kimi-k2.5` via OpenRouter,
+decided by a PoC on the PoC-15/16 fixtures plus a 20-turn tool-loop
+transcript) and Claude Sonnet as the *suggested* `deep`, both one line in
+`compute.yaml`. The product's default path then never has Claude driving
+the loop, which removes the harness question entirely; a user who wants
+Sonnet everywhere changes one line. This does not change rev 3's
+architecture — it is the seed's contents.
+
 ## Apple Foundation Models in the provider model
 
 Answer: **both — same package, but to the engine just another local
@@ -497,8 +618,21 @@ says "API key" and nothing else.
 5. **Skip the SDK; Claude through OpenRouter** — the trade-off is written
    out under "Dropping the SDK entirely"; recommendation accepted.
 
+## Owner questions (rev 4, 2026-09-11)
+
+- **Managed Agents for the main agent?** No — API-key-only so its terms
+  are clean, but it brings the sandbox tools invariant 9 removes, reaches
+  `/mcp` only via a public endpoint or a research-preview tunnel, is not
+  ZDR-eligible, is beta, and bills $0.08/hour of session time. Right shape
+  for a later *compute target*.
+- **A non-Claude main agent?** Yes as the seed default, with the model
+  chosen by a PoC on Metistry's fixtures; cost table above.
+
 ## Open questions (rev 3)
 
+0. Which non-Claude model is the seed `default` — decided by the PoC, but
+   is "open weights" a criterion the owner wants (portability to local
+   later) or only price and quality?
 1. What is `critical: true` allowed to cover — the router's fast paths and
    `/note` cost nothing already; is it the `default` tier, a named
    routine, or nothing by default?
@@ -525,6 +659,10 @@ says "API key" and nothing else.
 
 - [or-faq] <https://openrouter.ai/docs/faq> — fees (5.5% card credits, 5% BYOK), pass-through pricing, no logging by default (fetched 2026-09-11).
 - [or-cache] <https://openrouter.ai/docs/features/prompt-caching> — Anthropic caching via OpenRouter: automatic top-level `cache_control` or ≤4 breakpoints; 0.1× reads, 1.25×/2× writes; `cached_tokens`/`cache_write_tokens` in usage (fetched 2026-09-11).
+- [ma-overview] <https://platform.claude.com/docs/en/managed-agents/overview> — concepts, API-key beta access, built-in tools, "not currently eligible for Zero Data Retention", MCP tunnels as research preview (fetched 2026-09-11).
+- [ma-reference] <https://platform.claude.com/docs/en/managed-agents/reference> — supported MCP server types (remote HTTP or tunnels), rate limits, branding guidelines (fetched 2026-09-11).
+- [ma-budgets] <https://platform.claude.com/docs/en/managed-agents/budgets> — list cost: tokens at list, $10/1k web searches, $0.08/hour session running time; hard-cap semantics (fetched 2026-09-11).
+- [or-models] <https://openrouter.ai/api/v1/models> — live prices and `supported_parameters` for the table (fetched 2026-09-11).
 - [openai-compat] <https://platform.claude.com/docs/en/api/openai-sdk> — Anthropic's OpenAI compatibility layer: testing-oriented, no prompt caching, `response_format`/`strict`/`reasoning_effort` ignored (fetched 2026-09-11).
 
 - LM Studio (<https://lmstudio.ai/docs/…>): `developer/openai-compat`,

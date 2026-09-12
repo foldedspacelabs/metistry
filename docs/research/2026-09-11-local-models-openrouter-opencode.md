@@ -411,7 +411,11 @@ no plugin — OpenCode mounts `/mcp`, written by `metistry connect opencode`:
   subscription's quota — instance overlay, or a generic per-provider spend
   view. `docs/poc/RESULTS.md` and the plan are the record and stay.
 
-**The mechanism for a private re-add, never named by the product:**
+**The mechanism for a private re-add, never named by the product** (rev
+2; superseded by the one-engine decision in rev 3 — with no SDK in the
+product there is nothing to inject, and the Studio's subscription reaches
+Metistry only as a Claude Code collaborator over `/mcp`; kept for the
+record):
 
 1. `compute.yaml` is instance-owned and overlays the seed. A provider of
    `kind: anthropic` carries `auth: { secret: <any Keychain name>,

@@ -1151,3 +1151,21 @@ launchd cannot even see.
   bounded pull per list (`docs/ops/console-api.md`). Small on purpose: these
   are the only server changes the offline design needs, and the PWA gets
   them today.
+- 2026-09-11 — Research: **local models, OpenRouter and OpenCode — and
+  the pivot to configurable compute**
+  (`docs/research/2026-09-11-local-models-openrouter-opencode.md`).
+  Anthropic's Agent SDK docs say third parties may not offer claude.ai
+  login for their products unless approved, so a distributed Metistry
+  cannot ship the subscription path. Decision: all AI compute — the main
+  agent included — is user-configured by provider and model in one
+  instance-owned `compute.yaml` (providers, per-tier and per-crew
+  assignments, budgets), edited by the CLI and the app through the
+  protected-write path and hot-reloaded. Two engines behind one interface:
+  Claude Agent SDK on an API key, and an OpenAI-compatible loop over the
+  console's own `/mcp` for OpenRouter, OpenCode Zen, LM Studio, Ollama and
+  Apple FM (which grows a `/v1` surface). Claude never routes to non-Claude
+  models; every provider's agents collaborate through `/mcp`. Cost lands
+  on every `runs` row with budgets enforced before the call; non-ZDR
+  providers warn, never block. The subscription path leaves the product
+  repo entirely; an instance re-adds it privately through a mechanism the
+  product never names.

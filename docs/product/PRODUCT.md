@@ -1192,6 +1192,19 @@ launchd cannot even see.
   one real gap is conversation *before* a deliverable exists, and the safety
   finding worth keeping: a channel between agents is safe exactly when it
   cannot address, because addressing is triggering.
+- 2026-09-12 — Research: **Hermes Agent's Kanban board** (Nous Research;
+  `docs/research/2026-09-12-hermes-agent-review.md`). Their board is the
+  strongest confirmation yet that Metistry's coordination model is right:
+  on every axis of their own "Kanban vs `delegate_task`" table — durable
+  rows over fork/join, leases, peer claim, human-in-the-loop, per-attempt
+  audit — we already chose the side they argue for, and `agents_delegate`
+  is that shape. Skipped as a dependency (Python-first; a second source of
+  truth for tasks; unauthenticated plugin routes). Adopted as a **view**:
+  the pending / assigned / working / blocked / done board the owner asked
+  for is derivable from today's `work` table with no migration and no new
+  status value, and the cross-project board that Hermes's per-board
+  isolation structurally forbids is a `GROUP BY` for us. Proposed as three
+  PRs, read-only first.
 - 2026-09-12 — Research: **Hermes Agent part 2 — profiles, automation,
   skills, architecture, security**
   (`docs/research/2026-09-12-hermes-agent-review-2.md`). The one area where a

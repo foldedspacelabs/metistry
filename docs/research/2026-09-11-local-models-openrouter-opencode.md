@@ -390,6 +390,81 @@ the loop, which removes the harness question entirely; a user who wants
 Sonnet everywhere changes one line. This does not change rev 3's
 architecture — it is the seed's contents.
 
+### The path to a local main agent (plan, not a decision)
+
+The owner would like Metis itself on a local open-weights model and is
+unsure of the steps, the evaluation, and whether the quality is reachable.
+Facts first, then a staged path where each stage is useful on its own and
+no stage bets the main agent on an unmeasured model.
+
+**The machine.** The Studio is an M4 Max with 64 GB; LM Studio is already
+serving `google/gemma-4-e4b` and `nomic-embed-text-v1.5`. With Postgres,
+the console and the engine resident, ~40 GB is the practical ceiling for
+a loaded model, which means: dense models up to ~32B at 4-bit (~18–20 GB,
+comfortable), sparse ~30B-active-3B MoEs (fast, the sweet spot for an
+agent loop), and *not* the 100B+ MoEs or 70B dense at any useful speed.
+That is the class to evaluate, not the frontier.
+
+**What "quality" means for Metis, concretely** — the main agent's turns
+are not general chat: (1) a tool loop over ~12 MCP tools with correct
+arguments and no hallucinated tools; (2) reading a thread and the brief
+and knowing when to *stop* (no runaway loops); (3) judgment on triage —
+what becomes a proposal, what is noise; (4) the voice in `identity.yaml`
+held over long sessions; (5) briefs and folds that a person actually
+reads. Only (1) and (2) are cheap to score automatically; (3)–(5) need a
+rubric and a human, at least at first. The cost research's warning
+applies: a model that needs two turns for one is dearer than Sonnet in
+both money and trust.
+
+**Fine-tuning is not the lever — and Claude transcripts are not training
+data.** Anthropic's usage policy forbids using Claude outputs to develop
+competing models, so "distil Sonnet into a local model" is off the table
+regardless of how well it would work. What is on the table: harness
+tuning (tool descriptions, the system prompt, structured-output shapes,
+turn limits) — where most of a local model's gap on an agent loop
+actually lives — and, last and only with owner-authored data, a LoRA.
+Plan for zero fine-tuning; treat it as a later experiment.
+
+**Stages** (each ships something; each gate is a number on the same
+fixtures):
+
+0. **The bar.** Owner-authored fixtures — 50 real turns from the Studio's
+   history, rewritten as prompts with expected tool calls and a rubric —
+   run against Sonnet via OpenRouter to set the reference score and cost.
+   Reuse the PoC-15/16 fixture format. This is a PoC, not a PR.
+1. **Local where it already wins** (rev 3, PR 2/3): embeddings, the
+   scorer once its eval passes, `fast` and `routine` tiers, extraction
+   crews. Zero risk to the main agent; real savings; real telemetry on
+   local latency and tool-call reliability from day one.
+2. **Shadow mode** (PR 3 adds it cheaply): for a configurable fraction of
+   `default` turns the engine also runs the same turn on
+   `lmstudio/<candidate>` with the tools *stubbed to record-only*, stores
+   both transcripts on the `runs` row, never shows the local answer. A
+   weekly-review line reports agreement on tool calls and a sampled
+   rubric score. This is the evaluation the owner is asking about, on real
+   traffic, at no user-facing risk.
+3. **Promote per tier.** When a candidate holds ≥ the bar on fixtures and
+   shadow agreement for two weeks, flip `default` to it in `compute.yaml`
+   — one line, reversible — with `deep` staying on Sonnet. Metis is now
+   local for most turns and Claude for the hard ones.
+4. **Then decide about `deep`.** Probably never local on 64 GB; that is
+   what the two-default seed is for.
+
+**Candidates to put through stage 0–2** (verify availability and quant in
+LM Studio's catalog at PoC time; do not trust this list's names): the
+current Qwen 3.x ~30B MoE and ~32B dense, GLM ~30B-A3B "flash" class,
+gemma-4 at its largest size that fits, gpt-oss-20b. Criteria in order:
+native tool calling in the chat template, JSON-schema output, ≥128k
+context, MLX build, tokens/s at 8k prompt on this machine.
+
+**Honest expectation.** On (1)–(2) a good 30B-class model in 2026 is
+close to Sonnet with harness tuning; on (3)–(5) the gap is real and shows
+up as blander briefs and more "safe" triage. Whether that is acceptable is
+a judgment the shadow numbers make cheap to form. The cost side is
+already known: ~$29/month on Sonnet for the profile above versus $0 —
+meaningful but not decisive for one person; the stronger reasons are
+privacy and independence, which the owner has already ranked.
+
 ## Apple Foundation Models in the provider model
 
 Answer: **both — same package, but to the engine just another local

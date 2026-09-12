@@ -1192,3 +1192,15 @@ launchd cannot even see.
   one real gap is conversation *before* a deliverable exists, and the safety
   finding worth keeping: a channel between agents is safe exactly when it
   cannot address, because addressing is triggering.
+- 2026-09-12 — Research: **Hermes Agent part 2 — profiles, automation,
+  skills, architecture, security**
+  (`docs/research/2026-09-12-hermes-agent-review-2.md`). The one area where a
+  30-adapter, 70-tool competitor is plainly ahead of us is *scheduled-work
+  failure handling*: it preflights a job so "a misconfigured job never spends
+  tokens", dedupes repeat failures by error signature, counts a failure
+  streak, and ships a `cron doctor` that exits non-zero — where our runner
+  records a failed run and surfaces it as one number on a tile. Four cheap
+  ADOPTs close it. Everything else — messaging bots, installable skills that
+  can widen the credential surface, in-process plugins — is skipped on
+  invariant grounds, and its eight-layer shell-safety stack mostly argues for
+  the invariant that means we have no shell to protect.

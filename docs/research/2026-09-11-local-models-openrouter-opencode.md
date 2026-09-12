@@ -1,399 +1,459 @@
-# Local models, OpenRouter and OpenCode in Metistry (2026-09-11)
+# Configurable compute: local models, OpenRouter/Zen, OpenCode (2026-09-11, rev 2)
 
-> Research + design note. Owner wants Metistry to (a) install and use local
-> models in setup, (b) route work via OpenRouter / OpenCode Zen, (c) support
-> OpenCode as a dev tool like the Claude Code plugin. Nothing here is built.
-> Vendor claims verified against official docs on 2026-09-11 (Sources).
+> Revised for the owner's pivot: **all AI compute — the main agent included
+> — is user-configurable by provider and model**, the subscription path
+> leaves the product repo, and every provider's agents collaborate through
+> Metistry's MCP. Nothing here is built. Vendor claims verified 2026-09-11
+> (Sources); the plan is not edited, contradictions are listed.
 
 ## Summary
 
-- **The engine is Claude-only and stays so.** Anthropic "doesn't support
-  routing Claude Code to non-Claude models through any gateway", and a
-  gateway credential replaces the subscription with per-token billing (the
-  PoC-4 prohibition) ([Anthropic][cc-gateway]). A non-Claude tier needs a
-  **second engine**, not a base-URL trick.
-- **Recommend a small in-house OpenAI-compatible engine** in
-  `apps/assistant` (raw `fetch` + the pre-approved MCP client), not OpenCode
-  as the engine — OpenCode ships a shell tool by design (invariant 9) and is
-  a second runtime to bundle. OpenCode is the right *dev tool*, mirrored
-  from `plugins/claude-code`.
-- **Providers become directories with manifests** (`providers/<name>/`),
-  and a tier's `model` gains an optional `<provider>/` prefix. Pinned
-  always; `openrouter/auto` is rejected at parse time because the Auto
-  Router is "a fast, lightweight classifier" — a model choosing a model,
-  invariant 4's exact prohibition ([OpenRouter][or-auto]).
-- **One env var for local servers: `METISTRY_LOCAL_MODEL_URL`** (an
-  OpenAI-compatible base URL). LM Studio and Ollama both serve
-  `/v1/chat/completions`, `/v1/embeddings`, `/v1/models`
-  ([LM Studio][lms-openai], [Ollama][ollama-openai]); `METISTRY_OLLAMA_URL`
-  stays as a deprecated alias. Default stays Ollama (open source, already
-  ratified); LM Studio is detected and offered as an equal.
-- **Off-machine providers are compute targets in all but name**: the same
-  `data_policy`, enforced the same way — a per-run `/mcp` credential scoped
-  to the provider's `allow`, plus `checkBrief` on crew briefs — with ZDR
-  and provider pinning as manifest fields, not prompt text.
-- **Where local wins today**: embeddings (already), the PoC-16 scorer once
-  the eval passes, inbox reduction where Apple FM collapses, the `routine`
-  tier, crews that extract. Not `deep`; not anything a collector bills.
+- **One file, `compute.yaml`, in the instance repo** (protected path)
+  holds providers, model assignments per tier and crew, and budgets. The
+  CLI and the app edit it *as the user* through the same protected-write
+  path `deployment set-shape` uses; the console and assistant hot-reload
+  it. Directories-per-provider are withdrawn: a provider is configuration,
+  not a component, so invariant 5 is met by a schema in `packages/core`.
+- **Two engines behind one `Engine` interface**: `anthropic` (Claude Agent
+  SDK on an **API key** — the SDK docs say to use API-key auth) and
+  `openai-compatible` (OpenRouter, Zen, LM Studio, Ollama, Apple FM, any
+  base URL). Library evaluation says **none yet**: the in-house loop is
+  ~300 lines over pre-approved `@modelcontextprotocol/sdk` + `zod`; the
+  Vercel AI SDK is the one to revisit if that grows.
+- **The subscription path leaves the product.** `CLAUDE_CODE_OAUTH_TOKEN`,
+  the PoC-4 rule that forbids `ANTHROPIC_API_KEY`, wizard step 7 and the
+  "subscription" copy are the scrub list below. An instance re-adds it
+  privately through a generic mechanism the product never names.
+- **Apple FM becomes a local provider**: the existing Swift bridge grows
+  `/v1/chat/completions` + `/v1/models`, so the engine speaks one protocol
+  and the package stays where macOS requires it (invariant 6).
+- **Cost is a first-class row**: provider, model, tokens, cost on every
+  `runs` row; per-instance and per-provider budgets enforced before the
+  call; non-ZDR assignments warn, never block.
+- **Collaboration rule**: Claude never routes to non-Claude models nor
+  spawns non-Claude agents; every provider's agents meet through the
+  console's `/mcp` rows. Enforced by the absence of any engine-calling tool.
+- **Local default is LM Studio when detected, Ollama equal**, both
+  discovered via `/v1/models`; `lms get` / `POST /api/pull` install.
 
 ## What the repo already has
 
-- Tiers are `(model, effort)` pairs in `rules.yaml`; `resolveTier` "never
-  invents a model" (`packages/core/src/tiers.ts`). Crews carry the same
-  pair, `model` limited to `haiku|sonnet|opus` (`manifest.ts:171`).
-- One SDK `query()` per turn with `model: spec.model`
-  (`apps/assistant/src/engine.ts:66-92`). `main.ts:11-14` throws on
-  `ANTHROPIC_API_KEY`, requires `CLAUDE_CODE_OAUTH_TOKEN`.
-  `ASSISTANT_ENV_KEYS` (`packages/cli/src/deployment.ts:164`) is an
-  allowlist and `sandbox.ts:31` allows only `ANTHROPIC_HOSTS` — a provider
-  key or host reaching the engine is a deliberate, reviewable edit.
-- Embeddings: Ollama `nomic-embed-text` via `METISTRY_OLLAMA_URL` and
-  native `/api/embed`, degrading to keyword (`docs/ops/knowledge-search.md`);
-  model + dim per row (plan 2424). `packages/mcp-apple-fm` classifies in
-  `collectors/inbox-drain` under the "free on-device tier" rule (plan
-  ~2012). PoC-15: FM's cheap class collapsed; PoC-16: `gemma4:e4b` passed
-  as scorer at $0, invariant-4 amendment gated on a blind eval.
-- Targets: `data_policy` enforced by `checkBrief`
-  (`apps/console/src/dispatch.ts:59`); `targets/local-crew` narrows it by
-  crew `scope` with a per-run credential.
-- Claude Code plugin: `SessionEnd` → `POST /capture`, `kind: session`,
-  `idempotency_key = <source>:<sessionId>:<sha256(...)[0:16]>`
-  (`packages/core/src/session-summary.ts:226`), dependency-free `.mjs`,
-  `test/session-parity.test.ts`.
-- Secrets: Keychain `metistry:<VAR>`, `_KEY` suffix = secret, user vs
-  instance scope (`docs/ops/cli.md`). Mac app panes are read-through fronts
-  for CLI verbs; `rules.yaml` is §4.7-protected (`protected-write.ts`).
-- `docs/research/2026-09-agent-proxy-routing.md` already ruled a gateway
-  "transport, never routing" and proposed `metistry connect <client>`.
+- Tiers are `(model, effort)` pairs in `rules.yaml` (`packages/core/src/
+  tiers.ts`); crews' `model` is `haiku|sonnet|opus` (`manifest.ts:171`).
+  One SDK `query()` per turn (`apps/assistant/src/engine.ts`);
+  `main.ts:11-14` throws on `ANTHROPIC_API_KEY`, requires
+  `CLAUDE_CODE_OAUTH_TOKEN`; `ASSISTANT_ENV_KEYS` (`deployment.ts:164`)
+  and `sandbox.ts:31` allowlist the engine's env and hosts.
+- `runs` already has `tokens_in`, `tokens_out`, `cost_usd`
+  (`db/migrations/0001_init.sql:17-19`).
+- Embeddings: Ollama via `METISTRY_OLLAMA_URL` + native `/api/embed`,
+  degrading to keyword. `packages/mcp-apple-fm`: Swift helper with a static
+  `@Generable` schema and `LanguageModelSession.respond(to:generating:)`
+  (`helper/afm-helper.swift:11-51`), HTTP bridge on 7810 (`POST /classify`,
+  `GET /check`). PoC-3 passed headless; PoC-15 rejected FM as scorer;
+  PoC-16 passed `gemma4:e4b` at $0 (amendment gated on a blind eval).
+- Targets: `data_policy` enforced by `checkBrief` (`dispatch.ts:59`);
+  `local-crew` narrows by crew `scope` with a per-run credential.
+  Protected-path writes go through `protected-write.ts` as the `user`
+  principal (`deployment set-shape`). Claude Code plugin: `SessionEnd` →
+  `POST /capture`, `idempotency_key = <source>:<sessionId>:<sha256[0:16]>`
+  (`session-summary.ts:226`), parity test. Secrets: Keychain, `_KEY` =
+  secret, user vs instance scope (`secrets.ts:64-66`).
 
 ## What the vendors actually offer (verified 2026-09-11)
 
 | | LM Studio | Ollama | OpenRouter | OpenCode Zen |
 | --- | --- | --- | --- | --- |
-| Chat API | `/v1/chat/completions`, `/v1/responses`, plus Anthropic `/v1/messages` on port 1234 | `/v1/chat/completions` on 11434 | `/api/v1/chat/completions`, Bearer key | `/zen/v1/chat/completions`, `/zen/v1/messages`, `/zen/v1/responses` |
-| Embeddings | `/v1/embeddings`; SDK example `nomic-embed-text-v1.5` | `/v1/embeddings` (`model`, `input`, `dimensions`) | n/a | not stated |
-| Model mgmt | `lms get/load/unload/ls/ps/server`, bundled with the app; **llmster** = headless core, `curl -fsSL https://lmstudio.ai/install.sh \| bash`, `lms daemon up` | `ollama pull` / HTTP API | n/a | n/a |
-| Idle | JIT load; TTL default 60 min; auto-evict keeps 1 JIT model | `keep_alive` | n/a | n/a |
-| Apple silicon | MLX + GGUF, mixable; `mlx-engine` MIT; macOS 14+, 16 GB+ recommended | Metal | n/a | n/a |
-| Licence | app proprietary, "free to use both at home and at work" (2025-07-08); `@lmstudio/sdk` MIT | MIT | service | service; OpenCode MIT (`anomalyco/opencode`) |
-| Routing | — | — | default "load balance … prioritizing price"; pin with `provider.order` + `allow_fallbacks: false`; `openrouter/auto` = classifier | curated list, pay-as-you-go, auto-reload $20 under $5 |
-| Data | local | local | ZDR by account scope or per-request `provider.zdr: true`; "OpenRouter itself has a ZDR policy" unless prompt logging is opted in; BYOK 5 % fee; `:free` 20/min, 50 or 1000/day | US-hosted; zero-retention except OpenAI/Anthropic 30-day and free models that may train |
+| Chat API | `/v1/chat/completions`, `/v1/responses`, Anthropic `/v1/messages`; port 1234 | `/v1/chat/completions`; 11434 | `/api/v1/chat/completions`, Bearer | `/zen/v1/chat/completions`, `/zen/v1/messages`, `/zen/v1/responses` |
+| Models / embeddings | `/v1/models` (all downloaded when JIT on); `/v1/embeddings`, `nomic-embed-text-v1.5` | `/v1/models`, `/api/tags`; `/v1/embeddings` | `/api/v1/models` | curated list |
+| Structured output | `response_format: json_schema` (GGUF grammar, MLX Outlines; "LLMs below 7B" may fail) | `format` (JSON schema) and `response_format` on `/v1` | `response_format: json_schema`; per-provider — some "treat it as a strong hint"; `require_parameters: true` to filter | not stated |
+| Install / mgmt | `lms get/load/unload/ls/ps/server`; **llmster** headless (`curl -fsSL https://lmstudio.ai/install.sh \| bash`, `lms daemon up`); JIT, TTL 60 min, auto-evict | `POST /api/pull`; `keep_alive` | n/a | n/a |
+| Apple silicon | MLX + GGUF; `mlx-engine` MIT; macOS 14+, 16 GB+ | Metal | n/a | n/a |
+| Cost / usage | 0 | 0 | response `usage.cost` always present (`usage.include` deprecated); `/generation` by id | pay-as-you-go, reload $20 under $5; prices on the page |
+| Data | local | local | ZDR per account scope or `provider.zdr: true`; OpenRouter itself ZDR unless prompt logging opted in; BYOK 5 % | US-hosted; zero-retention except OpenAI/Anthropic 30-day, free models may train |
+| Licence | proprietary, free at home and work (2025-07-08); `@lmstudio/sdk` MIT | MIT | service | service; OpenCode MIT (`anomalyco/opencode`) |
 
 OpenCode (`opencode-ai` on npm, `brew install anomalyco/tap/opencode`):
-providers include Zen, Anthropic (API key **or** "Claude Pro/Max" OAuth),
-OpenRouter, and any OpenAI-compatible server via `@ai-sdk/openai-compatible`
-+ `baseURL` (LM Studio `:1234/v1`, Ollama `:11434/v1`). `opencode.json`
-(global `~/.config/opencode/` or project root): `model`, `small_model`,
+providers include Zen, Anthropic (API key or Claude Pro/Max OAuth),
+OpenRouter, any OpenAI-compatible base URL. `opencode.json`: `model`,
 `provider`, `mcp`, `agent`, `plugin`, `share` (default `manual`),
-`permission`, `{env:VAR}`. Plugins: `.js/.ts` in `~/.config/opencode/
-plugins/` or `.opencode/plugins/`, signature `({ project, client, $,
-directory, worktree })`, hook `event` with verified names
-`session.created|updated|idle|status|compacted|deleted|error|diff`,
-`message.updated`, `tool.execute.before|after`, `permission.asked|replied`,
-`file.edited`, `command.executed`, `server.connected`. `opencode run -m
-provider/model --format json --attach http://localhost:4096`; `opencode
-serve --port 4096 --hostname 127.0.0.1` (`OPENCODE_SERVER_PASSWORD` basic
-auth); `@opencode-ai/sdk` `createOpencodeClient({ baseUrl })`,
-`session.prompt({ model: { providerID, modelID }, parts })`.
+`{env:VAR}`. Plugins in `~/.config/opencode/plugins/` or
+`.opencode/plugins/`, signature `({ project, client, $, directory,
+worktree })`, `event` hook with verified names `session.created|updated|
+idle|status|compacted|deleted|error|diff`, `message.updated`,
+`tool.execute.before|after`, `permission.asked|replied`, `file.edited`.
 
-Anthropic ([cc-gateway], [sdk-overview]): "doesn't support routing Claude
-Code to non-Claude models through any gateway"; "While a gateway credential
-variable … is active, a developer's claude.ai subscription isn't used …
-billed per token"; `ANTHROPIC_BASE_URL` alone keeps the saved login. Also:
-"Anthropic does not allow third party developers to offer claude.ai login
-or rate limits for their products, including agents built on the Claude
-Agent SDK" — outside scope, flagged under Contradictions.
+**Anthropic, and the framing that follows.** Claude Code docs: "doesn't
+support routing Claude Code to non-Claude models through any gateway";
+`ANTHROPIC_API_KEY` "is used instead of your Claude Pro, Max, Team, or
+Enterprise subscription even if you are logged in" ([env-vars]). Agent SDK
+overview: "Unless previously approved, Anthropic does not allow third party
+developers to offer claude.ai login or rate limits for their products,
+including agents built on the Claude Agent SDK. Use the API key
+authentication methods" ([sdk-overview]). The SDK `Options` has an `env`
+record that "replaces the subprocess environment" and no `apiKey` field
+([sdk-ts]). So: **the Agent SDK is a legitimate engine for an
+`anthropic` provider when the credential is an API key**; what leaves the
+product is the subscription path only.
 
-## Q1 — where local models win, and where they do not
+## The compute model — `compute.yaml`, not env vars
 
-| use | today | next | why |
-| --- | --- | --- | --- |
-| Embeddings | Ollama `nomic-embed-text` | same on either server via `/v1/embeddings` | on-machine, free, per-row model/dim |
-| Inbox reduction (stage 2) | Apple FM bridge | local chat model as declared fallback where FM collapses, still through the deterministic redaction pass | plan 1857 already names "Local model via Ollama" as FM's fallback |
-| Tier scorer | none (gated) | `local/gemma4:e4b` single-shot JSON after the blind eval | PoC-16: 97.9 %, 667 ms p95, $0 |
-| `routine` tier | haiku | `local/<model>` per instance overlay | cheap, latency-tolerant, small tool surface |
-| Crews that extract | haiku | `model: local/...` or `openrouter/...` | "absorb a lot of context on a cheap model" (`docs/ops/crews.md`) |
-| `default`/`fast` chat | haiku | keep | tool-heavy; local tool-calling is the weak spot |
-| `deep` | opus | keep | the point of the tier |
-| Anything a collector bills | never | never | collectors "never call *billable* models"; OpenRouter/Zen bill, local does not |
-
-Rule: local for **classification, extraction, one JSON verdict** over
-sensitive input; cloud non-Claude where a named vendor model is better for a
-crew; Claude where tools, memory and judgement matter.
-
-## Q2 — a provider model for tiers, and the second engine
-
-**Tier syntax.** `model` becomes `[<provider>/]<model-id>`; no prefix means
-`anthropic` (existing `haiku|sonnet|opus` keep working). The first segment
-is a provider only if `providers/<segment>/manifest.yaml` exists; the rest
-is verbatim, so `openrouter/anthropic/claude-haiku-4.5` and
-`local/gemma4:e4b` both parse. CI rejects `/auto`, fallback lists, unknown
-providers.
+**Name.** `compute.yaml`: it holds providers, assignments *and* budgets,
+and "configurable compute" is the owner's word; `providers.yaml` would
+misname two thirds of it. **Where.** Instance repo root, a §4.7 protected
+path (invariant 2: where work runs and where data goes is how the system
+behaves); the CLI and app write it *as the user* via `protected-write.ts`,
+as `deployment set-shape` does. `seed/compute.yaml` ships the default
+(Anthropic API key, Sonnet suggested "because that is what we test
+against"), overlaid D4-style (`METISTRY_COMPUTE_FILES`). The `tiers:` block
+moves here (model **and** effort); one left in `rules.yaml` still parses.
 
 ```yaml
-tiers:
-  fast:    { model: haiku, effort: low }
-  default: { model: haiku, effort: medium }
-  deep:    { model: opus,  effort: high }
-  routine: { model: local/gemma4:e4b, effort: low }   # instance overlay
-scorer:    { model: local/gemma4:e4b }                  # only after the eval
+providers:
+  lmstudio:
+    kind: openai-compatible
+    base_url: http://127.0.0.1:1234/v1
+    locality: on_machine                      # cost 0; no data_policy needed
+  openrouter:
+    kind: openai-compatible
+    base_url: https://openrouter.ai/api/v1
+    auth: { secret: METISTRY_OPENROUTER_API_KEY }          # Keychain, user scope
+    locality: off_machine
+    zdr: true                                 # false → warning row, never a block
+    request: { provider: { order: [anthropic], allow_fallbacks: false } }
+    data_policy: { allow: [Knowledge/Projects], deny_sources: [comms], max_brief_bytes: 65536 }
+  anthropic:
+    kind: anthropic                           # Claude Agent SDK
+    auth: { secret: METISTRY_ANTHROPIC_API_KEY, inject_as: ANTHROPIC_API_KEY }
+    locality: off_machine
+    pricing: { claude-sonnet-5: { in_per_m: 0, out_per_m: 0 } }   # illustrative shape; real rates come from the template
+assignments:
+  default: { model: anthropic/claude-sonnet-5, effort: medium }
+  tiers:
+    fast:    { model: lmstudio/google/gemma-3n-e4b, effort: low }
+    routine: { model: lmstudio/google/gemma-3n-e4b, effort: low }
+    deep:    { model: anthropic/claude-opus-5, effort: high }
+  crews: { researcher: { model: openrouter/deepseek/deepseek-v3.2 } }
+budgets:
+  instance:  { daily_usd: 5, monthly_usd: 60, action: warn }
+  providers: { openrouter: { monthly_usd: 20, action: stop } }
 ```
 
-**Routing table (deterministic, config → engine):**
+**Rules the schema enforces** (`packages/core/src/compute.ts`, zod; CI and
+the app validate the same schema): `model` is `<provider>/<id>`, first
+segment a provider in this file, the rest verbatim (LM Studio ids contain
+slashes); no `/auto`, no fallback lists (invariant 4); `auth.secret` is a
+Keychain name, never a value; `inject_as` is any `^[A-Z][A-Z0-9_]*$` — the
+template says `ANTHROPIC_API_KEY`, nothing else; `off_machine` requires
+`data_policy`; a collector naming a provider with cost > 0 fails CI.
 
-| step | who | input | output |
-| --- | --- | --- | --- |
-| 1 | router (rules over regex) | text, `/deep`, `meta.tier` | tier **name** |
-| 2 | `resolveTier` | name | `(provider, model, effort)` |
-| 3 | provider manifest | provider | `api: anthropic-sdk \| openai-chat`, base URL, key ref, locality |
-| 4 | drain | `api` | `engine.ts` (SDK) or `engine-openai.ts` |
+**Hot reload.** Console and assistant watch the resolved file with
+`chokidar` (pre-approved); a valid parse swaps the in-memory map
+atomically; an invalid one keeps the last good map and writes a `runs`
+warning row (startup still fails loudly on a bad file, as `tiers.ts` does).
 
-No model appears in steps 1-4; a scorer, if ever admitted, picks only among
-named tiers and cannot touch step 3 (plan ~2010).
+**Verbs** (all `--json` for the app):
 
-- **(A) OpenCode as engine** (`opencode serve` + SDK, console `/mcp`
-  mounted). Rejected for this role: its built-ins include bash and edit, so
-  invariant 9 would rest on `permission: { bash: "deny" }` in a foreign
-  binary's config; it is a second runtime to bundle and supervise.
-- **(B) In-house OpenAI-compatible engine**, `apps/assistant/src/
-  engine-openai.ts`: `fetch` to `<base>/chat/completions` with `tools`
-  built from the console's `tools/list` (client from
-  `@modelcontextprotocol/sdk`, pre-approved, StreamableHTTP to
-  `METISTRY_BRAIN_URL`), the standard function-calling loop, `max_turns`
-  from the tier/crew. Invariant 9 holds **by construction**: the only tools
-  that exist are the console's. Zero new dependencies. Effort → `reasoning:
-  { effort }` on OpenRouter, reasoning-off on local (PoC-16: reasoning hurt).
-- **(C) Gateway behind `ANTHROPIC_BASE_URL`** (LiteLLM, LM Studio's or
-  Zen's `/v1/messages`). Rejected: unsupported for non-Claude models, a
-  gateway credential flips to API billing (PoC-4), and it is per-process.
+```
+metistry compute providers list|add --from openrouter|zen|lmstudio|ollama|anthropic|remove <name>|test <name>
+metistry compute models list [--provider <name>]        # /v1/models, live
+metistry compute assign <tier|crew:<name>|default> <provider/model> [--effort low|medium|high]
+metistry compute install <provider/model>               # lms get | POST /api/pull
+metistry compute budget <instance|provider:<name>> --daily|--monthly <usd> --action warn|stop
+```
 
-**Recommend (B).** Cost: an agent loop we own (~400 lines with tests),
-weaker than the SDK's — acceptable for small-tool-surface tiers. First cut
-needs no tools (`completeJson()` for scorer and inbox reduction).
+`add --from <template>` writes a validated block from `seed/compute-
+templates/<name>.yaml`, prompts for the secret via `metistry secrets`
+(user-scoped Keychain), then runs `test` (a real `/v1/models` or a
+one-token completion). The app's **Compute** pane is those verbs: provider
+list with status, model picker per tier/crew fed by `models list`, budgets,
+a warning badge on non-ZDR assignments. Wizard step 7 becomes "Choose your
+compute".
 
-## Q3 — installing local models from setup
+## The engine layer
 
-- **`metistry doctor`**: a `provider` row per manifest — `GET <base>/models`
-  → `ok | absent | failed`; for `local`, say which server answered
-  (`owned_by: library` is Ollama).
-- **`metistry models`** (host CLI, never the engine): `list` (`/v1/models`),
-  `pull <id>` (Ollama `POST /api/pull`; LM Studio spawns `lms get`, which
-  ships with the app and with llmster), `load <id> [--ttl]` (`lms load`;
-  Ollama loads on first call), `check`. Every verb degrades absent.
-- **Mac app "Models" pane** (read-through only): provider rows from
-  `doctor --json`; install buttons — Ollama one-click as ratified
-  (`docs/product/desktop-app-plan.md` ~555), LM Studio via its download or
-  llmster's script; a per-tier picker that runs `metistry rules set-tier
-  <tier> <provider/model>` through `protected-write.ts` (the user's hand,
-  invariant 2). The app never edits `rules.yaml` itself.
-- **Default**: keep **Ollama** — MIT, brew, validated by PoC-5/16, named in
-  the plan. LM Studio is the better pick for GUI, MLX speed, TTL/JIT and
-  `lms`; the pane says so. Flipping the default is an owner call.
-- **Env**: `METISTRY_LOCAL_MODEL_URL` (default `http://127.0.0.1:11434/v1`;
-  LM Studio is `http://127.0.0.1:1234/v1`); `METISTRY_OLLAMA_URL` accepted,
-  mapped to `<url>/v1`, warned by doctor. Embeddings move from `/api/embed`
-  to `/v1/embeddings` so one code path serves both; `METISTRY_EMBED_MODEL`
-  already covers the differing ids (`nomic-embed-text` vs
-  `text-embedding-nomic-embed-text-v1.5`).
+One interface in `apps/assistant/src/engine.ts`:
 
-## Q4 — secrets and data policy
+```ts
+interface Engine { run(spec: TurnSpec & { provider: Provider }): AsyncIterable<EngineEvent>; }
+// TurnSpec adds provider/model/effort; EngineEvent carries text, tool calls, usage.
+```
 
-- **Names**: `METISTRY_OPENROUTER_API_KEY`, `METISTRY_OPENCODE_ZEN_API_KEY`
-  (`_KEY` = secret); **user-scoped** Keychain like `CLAUDE_CODE_OAUTH_TOKEN`.
-- **Who holds them**: the process that makes the call — under (B) the
-  assistant, so both names join `ASSISTANT_ENV_KEYS` and `openrouter.ai` /
-  `opencode.ai` join the sandbox host allowlist: two explicit edits, which
-  is what an allowlist is for. Local providers carry no key.
-- **Data policy = the target's.** Each off-machine provider manifest
-  carries a target-shaped `data_policy`, enforced at the tool: (1) a turn
-  or crew run on provider P gets a per-run `/mcp` credential scoped to
-  `P.data_policy.allow` (the `targets/local-crew` mechanism), so
-  `knowledge_*` on that session cannot return paths outside it and
-  comms-derived rows are excluded; (2) crew briefs still pass `checkBrief`
-  against `P.data_policy` ∩ crew scope; (3) a refusal is a `runs` row with
-  `error = 'data_policy: …'`. Pinning and ZDR are manifest fields sent
-  verbatim (`provider.order`, `allow_fallbacks: false`, `zdr: true`); an
-  OpenRouter tier without `zdr: true` is a CI warning.
+`anthropic` → the existing SDK path, credential injected through the
+SDK's `env` option under `inject_as`; MCP and SDK subagents as today.
+`openai-compatible` → everything else. Engine choice is `provider.kind`,
+fixed by config; routing stays router → tier name → `resolveTier` →
+`(provider, model, effort)` → engine, no model in the loop.
 
-## Q5 — OpenCode as a dev tool
+**Libraries for the second engine, honestly:**
 
-1. **`plugins/opencode/metistry.ts`** — one dependency-free file (OpenCode
-   runs it in its own Bun; `fetch` and the injected `client` suffice).
-   Hook `event`; on `session.idle` (OpenCode has no session-end event; idle
-   is "the agent finished a turn") read `client.session.messages({ path:
-   { id } })`, build the same deterministic summary (turns, duration, tools
-   with counts, files touched, first prompt, last response — never a
-   transcript), `POST /capture` with `source: "opencode"`, `kind:
-   "session"`, and the existing key formula with `source = "opencode"`.
-   Inert unless `METISTRY_CAPTURE_ON_STOP=1`; 8 s cap; never throws into
-   the session. Idle fires per turn; a new key per turn is the documented
-   "new summary" semantics.
-2. **Parity test**: a `fromOpenCode(messages)` normaliser in
-   `packages/core/src/session-summary.ts`, one shared fixture, and
-   `plugins/opencode/test/session-parity.test.ts` reading it through both —
-   the pattern that already guards the Claude Code `.mjs`.
+| candidate | licence | adds | MCP | structured | verdict |
+| --- | --- | --- | --- | --- | --- |
+| Vercel AI SDK `ai` + `@ai-sdk/openai-compatible` | Apache-2.0 (LICENSE verified); 26.7k★ | provider abstraction, tool loop, `generateObject`, `createMCPClient` (http/sse/stdio, not experimental) | yes | yes (`supportsStructuredOutputs`) | the only one that removes real code (~180 lines); brings a second MCP client and a large tree (size unverified — npm returned 403); a third agent loop in the repo |
+| `openai` | Apache-2.0 | typed client, `baseURL`, `zodResponseFormat` | no | helper only | types over `fetch`; no loop, no MCP — little gain |
+| token.js | MIT, 311★ | 200+ providers in OpenAI format | no | not stated | too small to depend on for years |
+| in-house | — | `fetch`, loop, cost | via `@modelcontextprotocol/sdk` (pre-approved) | `zod` validate | **recommend** |
 
-The Tier-0/1 surface needs no plugin: OpenCode mounts the console's `/mcp`
-with an agent token, so `knowledge_search`, `capture`, `tasks_*` are tools.
-Documented in `docs/ops/opencode.md`, written by `metistry connect opencode`:
+**Recommend none, for now** — because OpenAI-compatible base URLs already
+give the provider abstraction the AI SDK sells, the two pre-approved
+packages cover MCP and validation, and a dependency here is a decade-long
+obligation for one person. Revisit the AI SDK (one ask-first dependency,
+two packages) if the loop passes ~600 lines or needs streaming UI.
+
+**What the loop must own regardless of library:** the tool loop over the
+console's `tools/list`, `max_turns`, backoff on 429/5xx, `usage` → cost,
+`response_format: json_schema` **plus a validating fallback** (parse → zod
+→ one repair retry) because LM Studio warns sub-7B models may fail and
+OpenRouter says some endpoints "treat it as a strong hint"; effort →
+`reasoning: { effort }` on OpenRouter, reasoning-off locally (PoC-16); the
+provider's `request:` block merged verbatim. ~300 lines with tests.
+
+## Apple Foundation Models in the provider model
+
+Answer: **both — same package, but to the engine just another local
+provider.** `packages/mcp-apple-fm` stays a Swift-helper bridge because
+macOS requires it (invariant 6; PoC-3: no non-Swift SDK). Its wire grows
+`GET /v1/models` (one id, `apple-fm/system`) and `POST /v1/chat/completions`
+with `response_format: json_schema`; `compute.yaml` lists it as `kind:
+openai-compatible`, `base_url: http://127.0.0.1:7810/v1`, cost 0.
+
+- **(a) special `kind: apple-fm`** over the existing `/classify` — rejected:
+  a third engine path for one bridge, answering one compiled-in schema.
+- **(b) OpenAI-compatible surface on the bridge** — recommended. Cost: Swift
+  in the helper mapping messages → `LanguageModelSession` and JSON schema →
+  a runtime schema (Apple's `DynamicGenerationSchema`; page unfetchable —
+  verify in Xcode first), no tool calling in v1, `/classify` kept until
+  `inbox-drain` switches. Limits stay: small on-device model, Apple silicon
+  + macOS 26 + Apple Intelligence on, weak as scorer (PoC-15), fine for
+  reduction.
+
+The collector rule becomes mechanical: `inbox-drain` may name `apple-fm`
+or `lmstudio` (cost 0) and CI refuses `openrouter`.
+
+## Cost controls and monitoring
+
+Users now pay per call, so every engine call writes one `runs` row with
+additive columns `provider`, `model` beside the existing `tokens_in`,
+`tokens_out`, `cost_usd`. Cost source: OpenRouter — the response's
+`usage.cost` (verified, always present); Anthropic — the SDK's result cost
+or the `pricing:` table; Zen and other clouds — the `pricing:` table (Zen
+publishes prices); local and Apple FM — 0. `budgets:` are enforced **in
+the engine before the call** against a `spend` named query
+(`queries/spend.yaml`: by provider, model, tier, crew, day); `warn` writes
+a warning row and continues, `stop` refuses with `error = 'budget: …'` and
+a Needs You item. A non-ZDR off-machine assignment writes one warning row
+and shows a badge — informed choice, never a block (owner ruling). The
+weekly review's routing report grows a spend section from the same query.
+
+## The collaboration rule (MCP, not gateways) — rules and their enforcement
+
+1. **A Claude turn never runs on a non-Claude model; no cross-kind
+   fallback.** Engine is `provider.kind` from config; the `anthropic`
+   engine has no base-URL override (that would be option C).
+2. **No tool calls an engine.** `anthropic` has SDK subagents (Claude only)
+   plus the console's `/mcp`; `openai-compatible` has `/mcp` only. Neither
+   has a "run this on provider X" tool — invariant 9 by absence.
+3. **Crews are assigned a provider; their engine follows its kind.** Crews
+   never call each other: work moves as `work` rows (`agents_delegate` →
+   row → drain → engine by the crew's provider), results as
+   `report`/`capture`/artifact rows.
+4. **Claude delegates only to Claude crews.** The console refuses
+   `agents_delegate` from an `anthropic` turn when the target crew's kind
+   differs (`invalid_request`, a `runs` row) — "not spawning, triggering,
+   or directly collaborating". Non-Claude crews claim work the router,
+   routines or the user assign, from the same queue with the same lease.
+   Whether a *row* is "triggering" is Open question 2.
+5. **Every provider's agents are peers at `/mcp`** — an OpenCode session
+   on Zen, a Claude crew and a local crew see the same `tasks_*`, `report`,
+   `capture`, `knowledge_*`, each with its own token and scope.
+
+## Local model discovery and install
+
+- **Discovery** is `GET <base>/v1/models` for every `openai-compatible`
+  provider — LM Studio (all downloaded models when JIT is on), Ollama, Apple
+  FM's one id, OpenRouter's catalogue; `compute models list` and the app's
+  picker are that call, live. **Doctor**: one row per provider, naming
+  which local server answered (`owned_by: library` is Ollama) and what
+  `lms ps` has loaded.
+- **Install**: `compute install lmstudio/<id>` spawns `lms get <id>`;
+  `ollama/<id>` posts `/api/pull`; `compute models load|unload [--ttl]`
+  wraps `lms` (Ollama loads on first call). Embeddings move to
+  `/v1/embeddings` on the provider `assignments.embed` names;
+  `METISTRY_OLLAMA_URL` + `METISTRY_EMBED_MODEL` seed it as a transition.
+- **Default**: LM Studio when detected (owner's preference; MLX on
+  M-series), Ollama equally supported; the wizard offers both with their
+  install path (LM Studio download or llmster script; Ollama app or brew).
+
+## Where local models win
+
+| use | next | why |
+| --- | --- | --- |
+| Embeddings | same model on either local server | on-machine, free, per-row model/dim |
+| Inbox reduction | `apple-fm` first, `lmstudio/<small>` where FM collapses, always through the redaction pass | plan 1857 names a local model as FM's fallback |
+| Tier scorer | `lmstudio/…gemma…` after the blind eval | PoC-16: 97.9 %, 667 ms p95, $0 |
+| `fast`, `routine`, crews that extract | local, or a named cloud vendor model | latency-tolerant, small tool surface; "absorb a lot of context on a cheap model" (`docs/ops/crews.md`) |
+| `default`, `deep` | Sonnet / Opus suggested, user's choice | tools, memory, judgement — and what is tested |
+
+## OpenCode as a dev tool
+
+`plugins/opencode/metistry.ts`: one dependency-free file; hook `event`, on
+`session.idle` (no session-end event exists) read `client.session.messages`,
+build the same deterministic summary, `POST /capture` with `source:
+"opencode"`, `kind: "session"`, the existing key formula; inert unless
+`METISTRY_CAPTURE_ON_STOP=1`; 8 s cap. Parity test: `fromOpenCode()` in
+`session-summary.ts`, one fixture through both. Search/tasks/capture need
+no plugin — OpenCode mounts `/mcp`, written by `metistry connect opencode`:
 
 ```json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "share": "disabled",
-  "mcp": {
-    "metistry": {
-      "type": "remote",
-      "url": "https://<origin>/mcp",
-      "headers": { "Authorization": "Bearer {env:METISTRY_AGENT_TOKEN}" },
-      "timeout": 15000,
-      "enabled": true
-    }
-  }
-}
+{ "$schema": "https://opencode.ai/config.json", "share": "disabled",
+  "mcp": { "metistry": { "type": "remote", "url": "https://<origin>/mcp",
+    "headers": { "Authorization": "Bearer {env:METISTRY_AGENT_TOKEN}" },
+    "timeout": 15000, "enabled": true } } }
 ```
 
-`share: "disabled"` because `manual` still allows a transcript onto someone
-else's server. Instance split as today (work profile → work URL + token).
+## The subscription scrub
 
-## Q6 — provider manifests (invariant 5)
+**Touch points** (grep for `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`,
+`PoC-4`, "subscription"; `apps/console/{auth-store,push,server}.ts` and
+`web/` matches are *web-push* subscriptions, not in scope):
 
-`providers/<name>/manifest.yaml`, `type: provider`; `providerManifest` in
-`packages/core/src/manifest.ts`; validated by `manifests.test.ts`;
-`GET /api/providers` with live `check()`; overlay via
-`METISTRY_PROVIDERS_DIRS` (D4). Product ships four:
+- Engine: `apps/assistant/src/main.ts:10-14` (throw + `requireEnv`),
+  `engine.ts` comments, `apps/assistant/Dockerfile`, `packages/core/src/
+  supervisor.ts:68`.
+- CLI: `deployment.ts:180,197` (`ASSISTANT_ENV_KEYS`), `secrets.ts:30,66,
+  87` (`SECRET_NAMES`, user-scope rule), `main.ts:141,147`, `up.ts:362`,
+  `README.md`, tests `deployment`, `secrets`, `up.launchd`.
+- Shapes: `docker-compose.yml:112-113`, `.env.example:24-38`, `ops/launchd/
+  …assistant.plist`, `apps/watchdog/src/probes.ts` + its supervisor test.
+- Mac app: `kit/claude-token.swift` (step 7), `first-run-model.swift:7`,
+  `wizard-step-views.swift:299`, `settings-view.swift:261-270` ("Claude
+  Token"), `settings-model.swift:258-261`, `app/terminal-opener.swift`,
+  tests `claude-token-tests`, `settings-model-tests`.
+- Docs: `docs/ops/{cli,deployment-shapes,mac-app,reconciler,auth}.md`,
+  `docs/product/{desktop-app-plan,PRODUCT}.md`, `docs/history/START-HERE.md`,
+  `targets/local-crew/manifest.yaml` ("on the same subscription").
+- Review, do not delete: `collectors/claude-usage`, `seed/queries/
+  claude_usage_daily.yaml`, `routines/weekly-review/run.ts` read a
+  subscription's quota — instance overlay, or a generic per-provider spend
+  view. `docs/poc/RESULTS.md` and the plan are the record and stay.
 
-```yaml
-name: openrouter
-type: provider
-description: OpenRouter — one key, many vendors, OpenAI-compatible
-runs_on: cloud                         # host | container | cloud
-api: openai-chat                       # anthropic-sdk | openai-chat
-base_url: https://openrouter.ai/api/v1
-auth: env:METISTRY_OPENROUTER_API_KEY  # env reference; user-scoped Keychain
-locality: off_machine                  # on_machine providers skip data_policy
-routing: { order: [anthropic], allow_fallbacks: false, zdr: true }
-cost: { billable: true }               # collectors may never name a billable provider
-data_policy:
-  allow: [Knowledge/Projects, Knowledge/Resources, Knowledge/Techniques]
-  deny_sources: [comms]
-  max_brief_bytes: 65536
-```
+**The mechanism for a private re-add, never named by the product:**
 
-```yaml
-name: local
-type: provider
-description: A local OpenAI-compatible server (Ollama or LM Studio)
-runs_on: host
-api: openai-chat
-base_url: env:METISTRY_LOCAL_MODEL_URL # default http://127.0.0.1:11434/v1
-auth: none
-locality: on_machine
-cost: { billable: false }
-check: { list_models: true }           # doctor: GET base_url/models
-```
+1. `compute.yaml` is instance-owned and overlays the seed. A provider of
+   `kind: anthropic` carries `auth: { secret: <any Keychain name>,
+   inject_as: <any env name> }`. The engine reads the secret and passes it
+   to the SDK subprocess through `Options.env` under `inject_as`. The seed
+   template injects `ANTHROPIC_API_KEY`; the product validates the name's
+   shape only.
+2. `engine_env:` in `deployment.yaml` (instance-controlled) lists extra
+   variable names the CLI's `assistantEnv()` passes through from
+   `state/.env`; the product default is empty. `sandbox.ts` hosts come
+   from `compute.yaml` providers' `base_url`s plus Anthropic's.
+3. `metistry secrets` treats any `auth.secret` name in `compute.yaml` as a
+   secret with the scope the file declares (`scope: user|instance`), so
+   the hard-coded exception in `secrets.ts:66` goes.
 
-`anthropic` is `api: anthropic-sdk`, `auth: env:CLAUDE_CODE_OAUTH_TOKEN`,
-`locality: off_machine`; `opencode-zen` is the `openrouter` shape with
-`base_url: https://opencode.ai/zen/v1` and no `routing:` block.
+The Studio keeps its subscription in its own instance repo; the product
+says "API key" and nothing else.
 
-## Q7 — phasing
+## Phasing (revised)
 
-| PR | what | proves | deps |
+| PR | what | proves | who |
 | --- | --- | --- | --- |
-| 1 | `METISTRY_LOCAL_MODEL_URL` (+ alias), embeddings over `/v1/embeddings`, doctor detects Ollama/LM Studio, `providers/local` + schema, `metistry models list/check` | one env var serves both servers; first `type: provider` passes CI | none |
-| 2 | `providers/{anthropic,openrouter,opencode-zen}`, `<provider>/` prefix in tier and crew `model` (parse; CI rejects `/auto`, fallback lists), `metistry models pull/load`, secret names, `GET /api/providers`, docs | the config surface is complete and validated before any call is made | none (`lms` spawned) |
-| 3 | `plugins/opencode` + parity test + `docs/ops/opencode.md` + `metistry connect opencode` | an OpenCode session lands in the inbox with the same key shape as Claude Code | `@opencode-ai/plugin` **types only, dev** — ask |
-| 4 | `engine-openai.ts`: `completeJson()` first (scorer behind the eval flag; inbox-drain fallback), then the MCP tool loop; `routine` and crews on `local/...`; `ASSISTANT_ENV_KEYS` + sandbox hosts; per-run scoped credential; runs rows with cost | a non-Claude tier runs end-to-end with the console's tools and the same enforcement | none (MCP SDK pre-approved) |
-
-PR 5 (later): the Mac app "Models" pane over those verbs. `@lmstudio/sdk`,
-`@opencode-ai/sdk` and `openai` are **not** needed; raw `fetch` suffices.
+| 1 | `compute.yaml` schema in core, seed + templates, `metistry compute providers|assign|budget` verbs, hot reload, `anthropic` provider on an API key via `inject_as`, **the scrub** (list above), wizard step 7 → Compute, Settings pane, docs | the repo is clean of the subscription path and the engine starts on an API-key provider read from config | product |
+| 2 | `/v1/models` discovery, doctor rows, `compute models list|install|load|unload`, LM Studio + Ollama, embeddings over `/v1/embeddings` with the alias | both local servers discovered, installed and used from one protocol | product |
+| 3 | `Engine` interface, `openai-compatible` engine (`completeJson` then the tool loop), `runs` provider/model columns, `spend` query, budgets, non-ZDR warning, per-run scoped credential, cross-kind delegation refusal | a `routine` tier on LM Studio and a crew on OpenRouter run end-to-end with the console's tools, cost on every row, a budget stop observed | product |
+| 4 | Apple FM helper `/v1` surface; `inbox-drain` moves to provider `apple-fm`; CI check on collector providers | one protocol; the free tier is a provider | product |
+| 5 | `plugins/opencode`, parity test, `metistry connect opencode`, `docs/ops/opencode.md` | an OpenCode session lands in the inbox with the same key shape | product; `@opencode-ai/plugin` types, ask |
+| — | the Studio's private `compute.yaml` overlay (subscription provider, LM Studio assignments, budgets), `engine_env`, `metistry compute` runs against the live instance | the owner's own setup works with the product never naming it | owner |
 
 ## Recommendations
 
-1. **Build a second, OpenAI-compatible engine in `apps/assistant`; never
-   point the SDK at a gateway** — because Anthropic does not support
-   non-Claude models through any gateway, a gateway credential replaces the
-   subscription (PoC-4), and a loop over `/mcp` keeps invariant 9 true.
-2. **Make providers manifests and tiers `provider/model` strings, with
-   `auto` and fallback lists rejected at parse time** — because invariant 4
-   survives OpenRouter only if the model is pinned in config and
-   `openrouter/auto` is a classifier choosing a model.
-3. **One local env var, `METISTRY_LOCAL_MODEL_URL`, embeddings on
-   `/v1/embeddings`, Ollama the default and LM Studio a detected equal** —
-   because both speak the same three endpoints and Ollama is MIT and
-   already ratified.
-4. **Treat off-machine providers as targets: same `data_policy`, enforced
-   by a scoped per-run `/mcp` credential and `checkBrief`, ZDR and pinning
-   as manifest fields** — because "comms never leaves" is enforced at the
-   tool today and must not become prompt text for a second party.
-5. **Ship `plugins/opencode` as a `session.idle` plugin with the existing
-   idempotency-key formula and a documented `/mcp` snippet, in its own PR**
-   — because it is independent, dependency-free, and gives OpenCode the
-   whole Tier-0/1 surface without a second engine.
+1. **One instance-owned `compute.yaml` (providers, assignments, budgets),
+   protected path, edited by CLI and app as the user, hot-reloaded** —
+   because "which compute" is how the system behaves (invariant 2), users
+   change it on the fly, and one schema beats a directory per provider.
+2. **Two engines behind one interface — SDK on an API key, and an in-house
+   OpenAI-compatible loop — with no library yet** — because the SDK docs
+   direct API-key auth, base URLs already abstract providers, and the two
+   pre-approved packages cover MCP and validation; revisit the AI SDK at
+   ~600 lines.
+3. **Scrub the subscription path in PR 1 and re-add it privately through
+   `inject_as` + `engine_env`** — because the product must not encourage a
+   ToS violation and the mechanism is generic enough to name nothing.
+4. **Make Apple FM an OpenAI-compatible local provider on its existing
+   bridge** — because the engine then speaks one protocol, the package
+   stays Swift where macOS requires it, and the "free tier" becomes a
+   `cost: 0` check CI can run.
+5. **Cost on every run row, budgets enforced before the call, non-ZDR as a
+   warning** — because per-call billing makes spend the user's first
+   question and informed choice is the owner's ruling.
+6. **Enforce the collaboration rule by absence of tools and a console
+   refusal on cross-kind delegation** — because "no Claude → non-Claude"
+   must be something the system cannot do, not something it is told.
 
 ## Contradictions with the plan (not edited)
 
-- Plan line 1857 and `desktop-app-plan.md` name **Ollama** as the local
-  path; this note keeps it and adds LM Studio as an equal.
-- `CREW_MODELS = haiku|sonnet|opus` and `docs/ops/crews.md` limit a crew's
-  model to three; recommendation 2 widens it to `provider/model`.
-- The SDK overview's "does not allow third party developers to offer
-  claude.ai login … including agents built on the Claude Agent SDK" sits
-  uneasily with PoC-4's subscription rule for a *distributed* app. Outside
-  scope; flagged.
+- **PoC-4's rule** ("subscription token, never `ANTHROPIC_API_KEY`") and
+  every "subscription" sentence in the plan, `desktop-app-plan.md` and
+  `PRODUCT.md` now contradict the pivot: the product path is an API key,
+  the subscription is an instance's private overlay.
+- Plan line 1857 and `desktop-app-plan.md` name Ollama; the default becomes
+  LM Studio when detected.
+- `CREW_MODELS = haiku|sonnet|opus` and `rules.yaml`'s `tiers:` are
+  superseded by `compute.yaml` assignments (rev 1's `providers/` dirs too).
 
 ## Open questions
 
-1. Default local server for the Mac app: keep Ollama (plan) or flip to LM
-   Studio now that the owner has used it?
-2. Should an OpenRouter tier without `zdr: true` be a CI **error** rather
-   than a warning, given invariant 8?
-3. Is a per-run scoped `/mcp` credential acceptable for *chat* turns on
-   non-Anthropic providers, or should those providers be crew-only at first?
-4. Does the SDK-overview clause on claude.ai login change anything about
-   distributing the Mac app on the subscription path?
-5. `@opencode-ai/plugin` as a dev-only types dependency — approve, or type
-   the hook by hand?
+1. Is a per-provider `scope: instance` secret ever wanted, or is user
+   scope the rule for every provider key?
+2. Does a `work` row created by a Claude turn for a non-Claude crew count
+   as "triggering"? This note refuses it at the console; the alternative
+   is to allow rows and forbid only direct calls.
+3. Should `action: stop` on a budget also pause routines that would enqueue
+   billable turns, or only refuse at the engine?
+4. Apple FM via `DynamicGenerationSchema` could not be verified by fetch;
+   if runtime schemas are not available, (b) shrinks to a fixed set of
+   compiled schemas — acceptable, or fall back to (a)?
+5. Ship the `anthropic` template at all (SDK branding note), or seed
+   OpenRouter with `anthropic/claude-sonnet-5` pinned?
 
 ## Sources
 
-- [lms-openai] <https://lmstudio.ai/docs/developer/openai-compat>;
-  [lms-anthropic] <https://lmstudio.ai/docs/developer/anthropic-compat>;
-  [lms-cli] <https://lmstudio.ai/docs/cli>; [lms-headless]
-  <https://lmstudio.ai/docs/developer/core/headless>; [lms-ttl]
-  <https://lmstudio.ai/docs/developer/core/ttl-and-auto-evict>; [lms-mlx]
-  <https://lmstudio.ai/mlx> (2024-10-08); [lms-sysreq]
-  <https://lmstudio.ai/docs/app/system-requirements>; [lms-work]
-  <https://lmstudio.ai/blog/free-for-work> (2025-07-08); [lms-sdk]
-  <https://lmstudio.ai/docs/typescript>,
-  <https://lmstudio.ai/docs/typescript/embedding>, licence from
-  <https://github.com/lmstudio-ai/lmstudio-js> (npm page 403).
-- [ollama-openai] <https://docs.ollama.com/api/openai-compatibility>
-- [or-api] <https://openrouter.ai/docs/api-reference/overview>;
-  [or-routing] <https://openrouter.ai/docs/features/provider-routing>;
-  [or-auto] <https://openrouter.ai/docs/features/model-routing>; [or-zdr]
-  <https://openrouter.ai/docs/features/zdr>; [or-privacy]
-  <https://openrouter.ai/docs/features/privacy-and-logging>; [or-byok]
-  <https://openrouter.ai/docs/use-cases/byok>; [or-limits]
-  <https://openrouter.ai/docs/api-reference/limits>
-- [oc-docs] <https://opencode.ai/docs/> (2026-09-10) and its `providers/`,
-  `config/`, `plugins/`, `server/`, `cli/`, `mcp-servers/`, `sdk/`,
-  `agents/`, `share/` pages; licence MIT at
-  <https://github.com/anomalyco/opencode>; [oc-zen]
-  <https://opencode.ai/docs/zen/> (2026-09-10)
-- [cc-gateway] <https://code.claude.com/docs/en/llm-gateway>;
-  <https://code.claude.com/docs/en/third-party-integrations>;
-  [sdk-overview] <https://code.claude.com/docs/en/agent-sdk/overview>
-- **Failed fetches:** an OpenRouter Anthropic-Messages-format endpoint
-  could not be verified (`/docs/api-reference/messages` and
-  `/docs/guides/claude-code-integration` both 404) — treat as unknown;
-  `lmstudio.ai/docs/developer/sdk`, `/docs/developer/core/llmster`,
-  `/docs/app/advanced/mlx` 404 — content taken from the pages above.
+- LM Studio (<https://lmstudio.ai/docs/…>): `developer/openai-compat`,
+  `developer/openai-compat/structured-output`, `developer/anthropic-compat`,
+  `cli`, `developer/core/headless`, `developer/core/ttl-and-auto-evict`,
+  `app/system-requirements`, `typescript`; <https://lmstudio.ai/mlx>
+  (2024-10-08); <https://lmstudio.ai/blog/free-for-work> (2025-07-08); SDK
+  MIT at <https://github.com/lmstudio-ai/lmstudio-js>.
+- Ollama (<https://docs.ollama.com/…>): `api/openai-compatibility`,
+  `capabilities/structured-outputs`.
+- OpenRouter (<https://openrouter.ai/docs/…>): `api-reference/overview`,
+  `features/provider-routing`, `features/model-routing` (Auto Router),
+  `features/zdr`, `features/structured-outputs`,
+  `use-cases/usage-accounting`, `use-cases/byok`, `api-reference/limits`.
+- OpenCode: <https://opencode.ai/docs/> and `providers/`, `config/`,
+  `plugins/`, `server/`, `cli/`, `mcp-servers/`, `sdk/`, `share/` (all
+  2026-09-10); Zen <https://opencode.ai/docs/zen/>; MIT at
+  <https://github.com/anomalyco/opencode>.
+- Anthropic: [cc-gateway] <https://code.claude.com/docs/en/llm-gateway>;
+  [env-vars] <https://code.claude.com/docs/en/env-vars>; [sdk-overview]
+  <https://code.claude.com/docs/en/agent-sdk/overview>; [sdk-ts]
+  <https://code.claude.com/docs/en/agent-sdk/typescript>.
+- Libraries: Vercel AI SDK <https://ai-sdk.dev/docs/ai-sdk-core/mcp-tools>,
+  <https://ai-sdk.dev/providers/openai-compatible-providers>, licence
+  <https://raw.githubusercontent.com/vercel/ai/main/LICENSE>;
+  `openai` <https://github.com/openai/openai-node>; token.js
+  <https://github.com/token-js/token.js>.
+- **Failed / unverified:** OpenRouter Anthropic-Messages endpoint (404 on
+  two paths); `npmjs.com` for `ai` and `@lmstudio/sdk` (403 — sizes
+  unverified); Apple's FoundationModels pages (JS-rendered, empty) —
+  `DynamicGenerationSchema` unverified; Apple FM facts come from
+  `packages/mcp-apple-fm/helper/afm-helper.swift` and `docs/poc/RESULTS.md`.
 - Repo: `CLAUDE.md`; `metistry-build-plan.md` (11, 133, 372, 552-576,
   1349, 1857, 2010-2016, 2424, 2511); `seed/rules.yaml`; `packages/core/
-  src/{tiers,manifest,session-summary}.ts`; `apps/assistant/src/{engine,
-  main,tiers,crew,crew-drain}.ts`; `apps/console/src/dispatch.ts`;
-  `packages/cli/src/{deployment,sandbox,protected-write}.ts`; `targets/*/
-  manifest.yaml`; `plugins/claude-code/`; `docs/ops/*.md`;
+  src/{tiers,manifest,session-summary}.ts`; `apps/assistant/src/*.ts`;
+  `apps/console/src/dispatch.ts`; `packages/cli/src/{deployment,sandbox,
+  secrets,protected-write}.ts`; `db/migrations/0001_init.sql`;
+  `packages/mcp-apple-fm/`; `plugins/claude-code/`; `docs/ops/*.md`;
   `docs/product/desktop-app-plan.md`; `docs/poc/RESULTS.md`.

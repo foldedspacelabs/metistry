@@ -179,11 +179,12 @@ interface Engine { run(spec: TurnSpec & { provider: Provider }): AsyncIterable<E
 // TurnSpec adds provider/model/effort; EngineEvent carries text, tool calls, usage.
 ```
 
-`anthropic` → the existing SDK path, credential injected through the
-SDK's `env` option under `inject_as`; MCP and SDK subagents as today.
-`openai-compatible` → everything else. Engine choice is `provider.kind`,
-fixed by config; routing stays router → tier name → `resolveTier` →
-`(provider, model, effort)` → engine, no model in the loop.
+Rev 2 of this note had two kinds — `anthropic` (the SDK on an API key)
+and `openai-compatible`. Rev 3 (owner decision, below) drops the SDK:
+**one engine, `openai-compatible`**, and Claude arrives through OpenRouter
+like every other cloud model. The interface stays so a native Anthropic
+Messages adapter can slot in later. Routing stays router → tier name →
+`resolveTier` → `(provider, model, effort)` → engine, no model in the loop.
 
 **Libraries for the second engine, honestly:**
 
@@ -208,6 +209,66 @@ OpenRouter says some endpoints "treat it as a strong hint"; effort →
 `reasoning: { effort }` on OpenRouter, reasoning-off locally (PoC-16); the
 provider's `request:` block merged verbatim. ~300 lines with tests.
 
+### Dropping the SDK entirely: one engine, Claude through OpenRouter
+
+The owner's instinct is to skip the Agent SDK and reach Claude only
+through OpenRouter, so billing is cut and dry and nothing in the product
+brushes the SDK's login and branding notes. What that buys and what it
+gives up, verified 2026-09-11:
+
+**Buys.** One engine, one protocol, one session store, one cost path.
+OpenRouter passes Anthropic's prices through "without any markup"
+([OpenRouter][or-faq]); prompt caching works for Claude via OpenRouter —
+one top-level `cache_control` for automatic caching or up to four explicit
+breakpoints, cache reads at 0.1× and 5-minute writes at 1.25×, with
+`cached_tokens` and `cache_write_tokens` reported per response
+([OpenRouter][or-cache]) — so the agent loop keeps the caching economics
+the cost research measured. Prompts and completions are "not logged by
+default" at OpenRouter ([OpenRouter][or-faq]); Anthropic's own retention
+still applies behind it. No SDK subprocess, no `inject_as`, no
+`engine_env` — the private-re-add mechanism shrinks to "the Studio's
+`compute.yaml` names its own provider", and the Claude subscription
+reaches Metistry only as a *collaborator*: Claude Code sessions with the
+plugin and `/mcp`, working tasks from the queue. That is the cleanest ToS
+posture available.
+
+**Gives up.**
+
+1. **~5%.** OpenRouter's platform fee is 5.5% on card credit purchases and
+   5% on BYOK usage above the plan allowance ([OpenRouter][or-faq]).
+2. **Anthropic-native features that do not cross the OpenAI wire**: the
+   native structured-outputs guarantee (OpenRouter's `response_format` is
+   a strong hint on some endpoints), server-side tools (web search, code
+   execution), PDFs and citations, and the step-by-step thinking stream.
+   Metistry uses none of these today; `json_schema` + the validating
+   fallback covers structured output.
+3. **The SDK's turnkey machinery** — session persistence and resume,
+   automatic compaction, hooks, skills, subagents. But the OpenAI engine
+   must own sessions and compaction for every other provider anyway, and
+   Metistry disables the SDK's built-in tools by design (invariant 9), so
+   this is "build once for everyone", not a lost capability. Claude
+   subagents become Claude crews — the same mechanism every provider gets.
+4. **Translation risk.** OpenAI-format tool calling through OpenRouter's
+   normalisation, not the native Messages API: cache breakpoint placement
+   and tool-result images need care and a test. Not a quality gap in
+   practice for text + tools, but a thing to measure once.
+5. **Anthropic's own OpenAI-compatible endpoint is not a fallback.**
+   Anthropic says it "is primarily intended to test and compare model
+   capabilities, and is not considered a long-term or production-ready
+   solution"; prompt caching is unsupported, `response_format`, `strict`
+   and `reasoning_effort` are ignored ([Anthropic][openai-compat]). So
+   "direct to Anthropic without the SDK" means a *native Messages adapter*
+   (~150 lines behind the same `Engine` interface: no fee, full caching,
+   native structured outputs, still plain API-key billing) — a later
+   option if the fee or a feature bites, not part of the first build.
+
+**Recommendation:** take the owner's route. One engine; the seed's
+Anthropic template becomes an OpenRouter provider with
+`anthropic/claude-sonnet-5` pinned and `provider: { order: [anthropic],
+allow_fallbacks: false }`; `kind: anthropic` and the SDK dependency leave
+the product with the scrub. Keep the native Messages adapter as a
+documented, unbuilt option.
+
 ## Apple Foundation Models in the provider model
 
 Answer: **both — same package, but to the engine just another local
@@ -230,6 +291,11 @@ openai-compatible`, `base_url: http://127.0.0.1:7810/v1`, cost 0.
 The collector rule becomes mechanical: `inbox-drain` may name `apple-fm`
 or `lmstudio` (cost 0) and CI refuses `openrouter`.
 
+**PoC first (owner ruling):** before PR 4, a PoC in `docs/poc/` proves the
+helper can serve a runtime-supplied JSON schema through Foundation Models'
+structured output (or establishes that only compiled `@Generable` schemas
+work, which shrinks the surface to a fixed set for `inbox-drain`).
+
 ## Cost controls and monitoring
 
 Users now pay per call, so every engine call writes one `runs` row with
@@ -239,9 +305,14 @@ additive columns `provider`, `model` beside the existing `tokens_in`,
 or the `pricing:` table; Zen and other clouds — the `pricing:` table (Zen
 publishes prices); local and Apple FM — 0. `budgets:` are enforced **in
 the engine before the call** against a `spend` named query
-(`queries/spend.yaml`: by provider, model, tier, crew, day); `warn` writes
-a warning row and continues, `stop` refuses with `error = 'budget: …'` and
-a Needs You item. A non-ZDR off-machine assignment writes one warning row
+(`queries/spend.yaml`: by provider, model, tier, crew, day); `action` is
+`allow` (record only), `stop` (the default: refuse the call with
+`error = 'budget: …'`, a Needs You item, **and pause routines** — the
+runner skips any routine whose tier would bill until the window resets,
+since a stopped engine with a running scheduler just fills the queue with
+refusals) or `critical_only` (only tiers or routines marked `critical:
+true` in `compute.yaml` keep running — the escape hatch for "Metistry must
+keep working"; what counts as critical is the owner's next discussion). A non-ZDR off-machine assignment writes one warning row
 and shows a badge — informed choice, never a block (owner ruling). The
 weekly review's routing report grows a spend section from the same query.
 
@@ -257,12 +328,15 @@ weekly review's routing report grows a spend section from the same query.
    never call each other: work moves as `work` rows (`agents_delegate` →
    row → drain → engine by the crew's provider), results as
    `report`/`capture`/artifact rows.
-4. **Claude delegates only to Claude crews.** The console refuses
-   `agents_delegate` from an `anthropic` turn when the target crew's kind
-   differs (`invalid_request`, a `runs` row) — "not spawning, triggering,
-   or directly collaborating". Non-Claude crews claim work the router,
-   routines or the user assign, from the same queue with the same lease.
-   Whether a *row* is "triggering" is Open question 2.
+4. **Claude may scope work for anyone; it may not push work to a named
+   non-Claude agent** (owner ruling, 2026-09-11). A Claude turn can create
+   an *unassigned* `work` row — "any agent could do this" — that a Claude
+   crew, a non-Claude crew or an OpenCode session claims from the same
+   queue with the same lease. What the console refuses is a *directed*
+   push: `agents_delegate` from an `anthropic` turn naming a crew (or
+   `tasks_claim`-on-behalf) whose provider kind differs — `invalid_request`
+   plus a `runs` row. Documenting work is collaboration with Metistry;
+   naming the non-Claude worker is triggering it.
 5. **Every provider's agents are peers at `/mcp`** — an OpenCode session
    on Zen, a Claude crew and a local crew see the same `tasks_*`, `report`,
    `capture`, `knowledge_*`, each with its own token and scope.
@@ -360,7 +434,7 @@ says "API key" and nothing else.
 
 | PR | what | proves | who |
 | --- | --- | --- | --- |
-| 1 | `compute.yaml` schema in core, seed + templates, `metistry compute providers|assign|budget` verbs, hot reload, `anthropic` provider on an API key via `inject_as`, **the scrub** (list above), wizard step 7 → Compute, Settings pane, docs | the repo is clean of the subscription path and the engine starts on an API-key provider read from config | product |
+| 1 | `compute.yaml` schema in core, seed + templates, `metistry compute providers|assign|budget` verbs, hot reload, OpenRouter seed provider with Claude pinned, **the scrub** (list above, plus the Agent SDK dependency and `engine.ts`'s `query()` path), wizard step 7 → Compute, Settings pane, docs | the repo is clean of the subscription path and the engine starts on an API-key provider read from config | product |
 | 2 | `/v1/models` discovery, doctor rows, `compute models list|install|load|unload`, LM Studio + Ollama, embeddings over `/v1/embeddings` with the alias | both local servers discovered, installed and used from one protocol | product |
 | 3 | `Engine` interface, `openai-compatible` engine (`completeJson` then the tool loop), `runs` provider/model columns, `spend` query, budgets, non-ZDR warning, per-run scoped credential, cross-kind delegation refusal | a `routine` tier on LM Studio and a crew on OpenRouter run end-to-end with the console's tools, cost on every row, a budget stop observed | product |
 | 4 | Apple FM helper `/v1` surface; `inbox-drain` moves to provider `apple-fm`; CI check on collector providers | one protocol; the free tier is a provider | product |
@@ -373,14 +447,18 @@ says "API key" and nothing else.
    protected path, edited by CLI and app as the user, hot-reloaded** —
    because "which compute" is how the system behaves (invariant 2), users
    change it on the fly, and one schema beats a directory per provider.
-2. **Two engines behind one interface — SDK on an API key, and an in-house
-   OpenAI-compatible loop — with no library yet** — because the SDK docs
-   direct API-key auth, base URLs already abstract providers, and the two
-   pre-approved packages cover MCP and validation; revisit the AI SDK at
-   ~600 lines.
-3. **Scrub the subscription path in PR 1 and re-add it privately through
-   `inject_as` + `engine_env`** — because the product must not encourage a
-   ToS violation and the mechanism is generic enough to name nothing.
+2. **One in-house OpenAI-compatible engine, Claude via OpenRouter, the
+   Agent SDK removed with the scrub, no library yet** — because one
+   protocol means one session store and one cost path, OpenRouter passes
+   Anthropic prices and prompt caching through, the ~5% fee buys a product
+   that never touches the SDK's login/branding terms, and the two
+   pre-approved packages cover MCP and validation; a native Messages
+   adapter stays a documented later option.
+3. **Scrub the subscription path — and the SDK — in PR 1** — because the
+   product must not encourage a ToS violation; with one engine the
+   Studio's private overlay is just its own `compute.yaml` provider, and
+   the subscription reaches Metistry only as a collaborator (Claude Code +
+   plugin + `/mcp`).
 4. **Make Apple FM an OpenAI-compatible local provider on its existing
    bridge** — because the engine then speaks one protocol, the package
    stays Swift where macOS requires it, and the "free tier" becomes a
@@ -403,7 +481,28 @@ says "API key" and nothing else.
 - `CREW_MODELS = haiku|sonnet|opus` and `rules.yaml`'s `tiers:` are
   superseded by `compute.yaml` assignments (rev 1's `providers/` dirs too).
 
-## Open questions
+## Owner decisions (2026-09-11, on rev 2's open questions)
+
+1. Provider secrets are **user scope**.
+2. Claude may **scope work for any agent**; it may not **push work to a
+   named non-Claude agent** (collaboration rule 4 rewritten above).
+3. Budget `action` is **`allow | stop | critical_only`**, default `stop`,
+   and `stop` **pauses routines** too; critical vs non-critical work is a
+   follow-up discussion.
+4. Apple FM runtime schemas: **PoC first**.
+5. **Skip the SDK; Claude through OpenRouter** — the trade-off is written
+   out under "Dropping the SDK entirely"; recommendation accepted.
+
+## Open questions (rev 3)
+
+1. What is `critical: true` allowed to cover — the router's fast paths and
+   `/note` cost nothing already; is it the `default` tier, a named
+   routine, or nothing by default?
+2. Should the seed ship OpenRouter as the *only* cloud template, with Zen
+   as a second, and leave "add any OpenAI-compatible URL" to the form?
+3. Prompt caching on the engine: one top-level `cache_control` (simple,
+   automatic) or explicit breakpoints on the system prompt and tool list
+   (cheaper on long loops, more code) — measure both in PR 3?
 
 1. Is a per-provider `scope: instance` secret ever wanted, or is user
    scope the rule for every provider key?
@@ -419,6 +518,10 @@ says "API key" and nothing else.
    OpenRouter with `anthropic/claude-sonnet-5` pinned?
 
 ## Sources
+
+- [or-faq] <https://openrouter.ai/docs/faq> — fees (5.5% card credits, 5% BYOK), pass-through pricing, no logging by default (fetched 2026-09-11).
+- [or-cache] <https://openrouter.ai/docs/features/prompt-caching> — Anthropic caching via OpenRouter: automatic top-level `cache_control` or ≤4 breakpoints; 0.1× reads, 1.25×/2× writes; `cached_tokens`/`cache_write_tokens` in usage (fetched 2026-09-11).
+- [openai-compat] <https://platform.claude.com/docs/en/api/openai-sdk> — Anthropic's OpenAI compatibility layer: testing-oriented, no prompt caching, `response_format`/`strict`/`reasoning_effort` ignored (fetched 2026-09-11).
 
 - LM Studio (<https://lmstudio.ai/docs/…>): `developer/openai-compat`,
   `developer/openai-compat/structured-output`, `developer/anthropic-compat`,

@@ -1169,3 +1169,15 @@ launchd cannot even see.
   providers warn, never block. The subscription path leaves the product
   repo entirely; an instance re-adds it privately through a mechanism the
   product never names.
+- 2026-09-12 — Research: **Rivet agentOS and the rivet-dev org**
+  (`docs/research/2026-09-12-rivet-agentos-review.md`). Their VM is a V8
+  isolate plus a Rust syscall broker, not a machine — a fit for untrusted
+  code, which Metistry does not run, so it is read rather than depended on
+  (0.2.x beta, and a 132 MB third-party binary the Mac app would have to
+  notarize). Three of their habits are worth copying and cost nothing:
+  warn at 80% of a budget rather than only refusing at 100%, make every
+  refusal name the config field that would permit it, and fail CI on any
+  limit constant not wired to config. Flagged for the owner: the engine's
+  outbound allowlist is documentation, not enforcement — `sandbox-exec`
+  filters by port — and App Sandbox may not fix that, which would make a
+  loopback CONNECT proxy the real path to hostname-level egress control.

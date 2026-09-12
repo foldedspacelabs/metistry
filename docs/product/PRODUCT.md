@@ -1181,3 +1181,14 @@ launchd cannot even see.
   outbound allowlist is documentation, not enforcement — `sandbox-exec`
   filters by port — and App Sandbox may not fix that, which would make a
   loopback CONNECT proxy the real path to hostname-level egress control.
+- 2026-09-12 — Research: **Agent Room, and the agent-to-agent conversation we
+  already have** (`docs/research/2026-09-12-agent-room-review.md`). Reviewing a
+  chat-room-for-agents project found most of it already shipped as rows:
+  threaded `artifact_comments` with resolve state, a ping-pong cap that
+  escalates an unresolved agent-vs-agent argument to the owner after 10 turns,
+  per-agent autonomy narrowing, project budgets and a one-toggle kill switch —
+  where theirs enforces turn discipline and role behaviour with a briefing
+  string and accepts identity as a tool argument. Skipped as a dependency. The
+  one real gap is conversation *before* a deliverable exists, and the safety
+  finding worth keeping: a channel between agents is safe exactly when it
+  cannot address, because addressing is triggering.

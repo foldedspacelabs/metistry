@@ -1205,3 +1205,15 @@ launchd cannot even see.
   status value, and the cross-project board that Hermes's per-board
   isolation structurally forbids is a `GROUP BY` for us. Proposed as three
   PRs, read-only first.
+- 2026-09-12 — Research: **Hermes Agent part 2 — profiles, automation,
+  skills, architecture, security**
+  (`docs/research/2026-09-12-hermes-agent-review-2.md`). The one area where a
+  30-adapter, 70-tool competitor is plainly ahead of us is *scheduled-work
+  failure handling*: it preflights a job so "a misconfigured job never spends
+  tokens", dedupes repeat failures by error signature, counts a failure
+  streak, and ships a `cron doctor` that exits non-zero — where our runner
+  records a failed run and surfaces it as one number on a tile. Four cheap
+  ADOPTs close it. Everything else — messaging bots, installable skills that
+  can widen the credential surface, in-process plugins — is skipped on
+  invariant grounds, and its eight-layer shell-safety stack mostly argues for
+  the invariant that means we have no shell to protect.

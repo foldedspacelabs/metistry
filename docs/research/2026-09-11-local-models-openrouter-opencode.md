@@ -777,3 +777,41 @@ says "API key" and nothing else.
   secrets,protected-write}.ts`; `db/migrations/0001_init.sql`;
   `packages/mcp-apple-fm/`; `plugins/claude-code/`; `docs/ops/*.md`;
   `docs/product/desktop-app-plan.md`; `docs/poc/RESULTS.md`.
+
+## Addendum 2026-09-12 — the local server is a bake-off axis, and llama-server is the packaging fit
+
+After the Atomic Agent review (`2026-09-12-atomic-agent-review.md`) the
+owner reopened the LM Studio default: "the main thing is that it needs to
+perform well … how we package things up in the Metistry app is important
+too, but day-to-day usage and usability is key." Three things follow.
+
+1. **The server is a variable, not a given.** LM Studio and Ollama are
+   both front ends over llama.cpp (LM Studio adds an MLX engine on Apple
+   silicon). The bake-off therefore runs each candidate model on three
+   servers — `llama-server` direct, LM Studio, Ollama — and records
+   tokens/s at an 8k prompt, time-to-first-token, KV reuse across turns,
+   and which structured-output controls the API exposes. Stage 0 gains a
+   `server` column next to `model`.
+2. **Two of the Atomic adopts need `llama-server`.** Tool *names* as
+   grammar terminals (ADOPT 1) needs a GBNF `grammar` field; slot-pinned
+   KV reuse (ADOPT 5) needs slot control. `llama-server` exposes both;
+   LM Studio's and Ollama's OpenAI-compatible APIs expose `json_schema`
+   only (verify at PoC time — this is the first thing the PoC checks).
+   If the grammar adopt is what closes the quality gap, the default server
+   is decided by that alone.
+3. **Packaging favours `llama-server`.** It is one Metal-enabled binary
+   built from pinned source — exactly the Postgres/git pattern in
+   `ops/release/build-runtime-deps.sh`, signed under the same identity,
+   invisible to the user, no third app to install. Day-to-day usability
+   then lives in the app's Compute pane: pull a GGUF from Hugging Face,
+   load/unload, keep-alive, RAM headroom shown against the 64 GB — UX
+   Metistry owns rather than delegates to another app's window. LM Studio
+   and Ollama stay fully supported as external OpenAI-compatible providers
+   discovered via `/v1/models`, for users who already run them.
+
+**Revised recommendation:** a bundled `llama-server` is the *no-install*
+local provider the app manages; LM Studio and Ollama are peers, not the
+default. The bake-off decides model *and* server on measured numbers,
+with quality on the owner's fixtures first and throughput second. The
+phasing moves "build `llama-server` into the runtime-deps pack" into PR 2
+alongside discovery, so stage 0 runs on the bundled binary from the start.

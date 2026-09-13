@@ -64,6 +64,32 @@ web push, which we already do.
 3. **HealthKit + widgets + App Intents** — the phone-only data and surfaces.
 4. **On-phone FM tier** — classify at capture time, offline.
 
+## Two instances, and a backend that is not always there (recorded 2026-09-13)
+
+From `docs/research/2026-09-11-multi-instance-and-offline-client.md`, whose
+recommendations the owner accepted; the server half already shipped (#132,
+`docs/ops/console-api.md`). Recorded here so the app is not designed against a
+different answer later:
+
+- An **instance on the phone is `(origin, instance_id)`** — display name,
+  passkey credential, session cookie, push registration, local store and outbox
+  are all keyed by `instance_id`, because an origin can move. Two instances are
+  two of everything; nothing is shared unless the owner asks. Existing auth
+  needs no server change: passkeys are per-origin, enrolment codes are minted
+  per instance, `apns-topic` is the bundle id and the instance is disambiguated
+  in the payload.
+- **A per-instance switcher, never a unified inbox** — a merged feed cannot say
+  which half is stale, which the design system's "state is reported, never
+  inferred" forbids. The presence chip reads "unreachable · 3 queued", never
+  "offline".
+- **Queue appends, never queue claims or answers.** `capture` and 👍/👎 queue
+  in an outbox with a client-minted `Idempotency-Key`; **decision controls are
+  disabled while the backend is unreachable** (owner's ruling), and task claims,
+  dispatch and artifact replies are never queued — each is a statement about
+  server state at delivery time.
+- **No wake-the-laptop path is built.** A closed notebook does not wake for
+  network; a tailnet only makes it addressable.
+
 ## Open questions (decide later, deliberately)
 
 - App Store distribution vs TestFlight-first; FSL developer account setup.

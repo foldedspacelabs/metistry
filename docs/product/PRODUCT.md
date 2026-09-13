@@ -1217,3 +1217,22 @@ launchd cannot even see.
   can widen the credential surface, in-process plugins — is skipped on
   invariant grounds, and its eight-layer shell-safety stack mostly argues for
   the invariant that means we have no shell to protect.
+- 2026-09-12 — Research: **Atomic Agent** (MIT, TypeScript;
+  `docs/research/2026-09-12-atomic-agent-review.md`). The first prior-art
+  project to publish a *controlled* local-model agent benchmark with raw
+  artifacts on our own hardware class — GAIA L1 69.8 % vs 58.5 % for Hermes,
+  both driving the same 4-bit Qwen MoE on the same `llama-server` on an M4
+  Max, deterministically scored. Their throughput claims (+30-50 %, 6.4× KV)
+  are unmeasured marketing for a llama.cpp fork, and the head-to-head
+  controls that fork *out* — so the gap is harness design, which is free:
+  tool names baked into the sampling grammar so a hallucinated tool is
+  unsamplable, one inference emitting a batch of tool calls, results
+  compressed rather than pasted back, and a no-progress veto. Corrects two
+  of our assumptions: the strongest published local-agent result on Apple
+  silicon is llama.cpp + Metal, not MLX; and gemma-4 passing PoC-16 as a
+  single-shot *scorer* does not transfer to an agent loop (their gemma-4-12b
+  scored 45.3 % at twice the wall time). Their eval harness — one capability
+  axis per fixture with an axis→fix map, six trace columns separating a wrong
+  answer from planner churn, and a judge from a third model family that fails
+  rather than passes when unavailable — is the shape of the bake-off the
+  local-main-agent path needs at stage 0.

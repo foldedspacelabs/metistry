@@ -29,7 +29,7 @@ import {
   type ChildStatus,
   type Manifest,
 } from "@foldedspacelabs/metistry-core";
-import { loadDeployment } from "./deployment.js";
+import { ENGINE_CREDENTIAL_VAR, engineCredentialPresent, loadDeployment } from "./deployment.js";
 import { realExec, type Exec } from "./exec.js";
 import { labelFor, loadPlistTemplates, logPathFor, SUPERVISED_SERVICES } from "./launchd.js";
 import { readSupervisorConfig, supervisorConfigPath, controlRequest, SUPERVISOR_SERVICE } from "./supervisor.js";
@@ -246,6 +246,21 @@ async function componentRow(m: FoundManifest, deps: Required<Pick<DoctorDeps, "e
         });
         if (r.status !== 401 && r.status !== 200) throw new Error(`/mcp returned ${r.status} — ${logHint("console", deps.shape, deps.labelSuffix)}`);
       })),
+    };
+  }
+
+  // The engine is the one component an install may deliberately run without
+  // (docs/ops/assistant-tools.md, "Running without an engine"): with no
+  // credential `up` leaves the assistant out of the supervisor's children,
+  // so reporting it `ok` would be a lie and `failed` would be wrong — it is
+  // the same "not configured, degrades" row a bridge gets.
+  if (man.type === "service" && man.name === "assistant" && !engineCredentialPresent(deps.env)) {
+    return {
+      kind,
+      ...(await runCheck(man.name, `${ENGINE_CREDENTIAL_VAR} set → the supervisor starts the engine`, async () => ({
+        status: "absent",
+        remediation: `no engine credential: set ${ENGINE_CREDENTIAL_VAR} (\`claude setup-token\`) in this install's .env and \`metistry secrets sync --to keychain\`, then metistry up — meanwhile the assistant is not started at all: captures, tasks, search and the console run, and fold turns wait (docs/ops/assistant-tools.md)`,
+      }))),
     };
   }
 

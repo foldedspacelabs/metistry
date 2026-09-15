@@ -79,6 +79,13 @@ services:
       METISTRY_AWS_ACCESS_KEY_ID: ${METISTRY_AWS_ACCESS_KEY_ID:-}
       METISTRY_AWS_SECRET_ACCESS_KEY: ${METISTRY_AWS_SECRET_ACCESS_KEY:-}
       METISTRY_AWS_SESSION_TOKEN: ${METISTRY_AWS_SESSION_TOKEN:-}
+      # devin-knowledge collector (degrades absent; docs/ops/devin.md): the
+      # owner's own `cog_` Devin key. ORG_ID only for account-scoped tokens
+      # (enterprise service users, PATs); REPOS is the opt-in wiki half.
+      METISTRY_DEVIN_API_KEY: ${METISTRY_DEVIN_API_KEY:-}
+      METISTRY_DEVIN_ORG_ID: ${METISTRY_DEVIN_ORG_ID:-}
+      METISTRY_DEVIN_REPOS: ${METISTRY_DEVIN_REPOS:-}
+      METISTRY_DEVIN_MAX_ITEMS: ${METISTRY_DEVIN_MAX_ITEMS:-}
       # user's timezone for brief/schedule rendering (Me/profile.md drives this later)
       TZ: ${METISTRY_TZ:-UTC}
       # the assistant as the first INTERNAL agent on /mcp (docs/ops/assistant-tools.md):

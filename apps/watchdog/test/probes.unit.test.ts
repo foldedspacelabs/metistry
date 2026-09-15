@@ -193,6 +193,28 @@ describe("probes over a fake db", () => {
     expect(await loadScheduled(join(dirs.routinesDir, "does-not-exist"))).toEqual([]);
   });
 
+  it("assistant-drain: a queue nobody is draining is `absent` when the assistant is not a supervisor child (W1), and still failed when it is", async () => {
+    const db = fakeDb({ lastRuns: [], fmCounts: { fm: 0, rule_default: 0 } });
+    // three fold turns waiting, one abandoned mid-processing
+    const query = ((orig) => async (text: string, values?: unknown[]) => {
+      if (text.includes("FROM inbound_messages")) return { rows: [{ stuck_new: "3", stuck_proc: "1" }] };
+      return orig(text, values);
+    })(db.query.bind(db));
+
+    // with an engine configured, this is the probe it has always been
+    const running = (await runProbes({ query }, await cfgFor(), bridgeFetch("ok"))).find((c) => c.name === "assistant-drain")!;
+    expect(running.status).toBe("failed");
+    expect(isFailure(running)).toBe(true);
+
+    // without one, the same rows are the expected state — and alert.ts raises
+    // nothing for `absent`, so the operator is not paged every minute
+    const absent = (await runProbes({ query }, await cfgFor({ assistantAbsent: true }), bridgeFetch("ok"))).find((c) => c.name === "assistant-drain")!;
+    expect(absent.status).toBe("absent");
+    expect(isFailure(absent)).toBe(false);
+    expect(absent.remediation).toMatch(/no engine credential/);
+    expect(absent.meta).toEqual({ waiting_new: 3, waiting_processing: 1 });
+  });
+
   it("silent-collector names the quiet component with its limit and schedule, never a changing age (dedupe-stable)", async () => {
     const db = fakeDb({ lastRuns: [{ component: "fast", kind: "collector_run", last: ago(0) }], fmCounts: { fm: 0, rule_default: 0 } });
     const cfg = await cfgFor();

@@ -158,6 +158,12 @@ importers:
       '@foldedspacelabs/metistry-core':
         specifier: workspace:*
         version: link:../packages/core
+      '@foldedspacelabs/metistry-mcp-brain':
+        specifier: workspace:*
+        version: link:../packages/mcp-brain
+      '@modelcontextprotocol/sdk':
+        specifier: ^1.30.0
+        version: 1.30.0(zod@4.5.2)
     devDependencies:
       '@types/node':
         specifier: ^22.20.1

@@ -1,0 +1,7 @@
+name: devin-knowledge
+type: collector
+description: Devin (Cognition) knowledge and repo wikis into the inbox as captures (source devin), so the fold organises them into the vault. Knowledge notes over REST v3; repo wikis over mcp.devin.ai/mcp (no REST route exists). Degrades absent without METISTRY_DEVIN_API_KEY.
+schedule: "@hourly"
+writes: [inbox]
+reads: []
+requires: [devin-api-key]

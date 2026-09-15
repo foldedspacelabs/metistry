@@ -78,6 +78,42 @@ the console re-keys the row, the old token dies at once. The console's
 `/api/agents` list shows the row (`assistant · internal`) with no hash,
 ever.
 
+### Running without an engine
+
+An install with **no engine credential** is a supported shape, not a broken
+one. Under the launchd shape `metistry up` leaves the assistant out of the
+supervisor's children rather than starting a process that can only
+crash-loop, and prints one line:
+
+```
+assistant: absent — no engine credential (CLAUDE_CODE_OAUTH_TOKEN); captures, tasks, search and the console run; fold turns wait (docs/ops/assistant-tools.md)
+```
+
+`metistry doctor` reports `assistant  service  absent` with the same
+remediation, and it is **not** a failure — exit 0. Everything model-free
+keeps working: captures land, `inbox-drain` classifies them deterministically
+into proposals, tasks and search and the console and the reconciler all run.
+What waits is the engine's queue — the evening fold's turn sits in
+`inbound_messages` until there is a model — and the watchdog knows it:
+`assistant-drain` reports `absent` (no alert) while the assistant is not a
+child, instead of paging you every minute about a queue nobody is draining.
+
+Add the credential and re-run `metistry up`: the supervisor's config is
+rewritten whole each time, so the child is simply back — and taking the
+credential away again removes it, with nothing to hand-edit either way.
+
+```sh
+claude setup-token                      # → CLAUDE_CODE_OAUTH_TOKEN
+# put it in <instance>/state/.env, then file it in the login Keychain:
+metistry secrets sync --to keychain
+metistry up
+```
+
+The **compose shape still needs it**: `docker-compose.yml` interpolates
+`CLAUDE_CODE_OAUTH_TOKEN` as a required variable, so `docker compose up`
+refuses the whole file without one. An install that wants to run engine-less
+today runs the launchd shape (`docs/ops/deployment-shapes.md`).
+
 ## Tiers: (model, effort) pairs
 
 A **tier** is a model *and* an effort level, chosen together — a stronger

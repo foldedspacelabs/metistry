@@ -1287,3 +1287,12 @@ launchd cannot even see.
   Two risks are the owner's plan, not the design: an enterprise PAT policy is
   **disabled by default**, and on Teams **only an admin** can opt out of
   training on dispatched briefs.
+- 2026-09-15 — **A second instance runs with no engine credential.** The assistant
+  is the only component that needs a model, so without one `metistry up` leaves
+  it out of the supervisor's children (rather than crash-looping), `doctor`
+  reports `assistant: absent` and still exits 0, and the watchdog stops paging
+  about an undrained queue. Captures, `inbox-drain`, tasks, search, the console
+  and the reconciler are the product on day one on a new machine; the evening fold's
+  turn waits in the inbox until a credential exists, and one `metistry up` later
+  the child is back. Proves the degradation story the plan claims — every
+  component absent-degrades — for the one component it had never been true of.

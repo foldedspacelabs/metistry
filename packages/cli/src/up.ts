@@ -17,7 +17,7 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { usesCompose, type Deployment } from "@foldedspacelabs/metistry-core";
-import { assistantEnv, consoleEnv, consolePort, dbPort, loadDeployment, type ShapeContext } from "./deployment.js";
+import { assistantEnv, consoleEnv, consolePort, dbPort, ENGINE_ABSENT_NOTE, ENGINE_CREDENTIAL_VAR, engineCredentialPresent, loadDeployment, type ShapeContext } from "./deployment.js";
 import { doctor, renderTable, type DoctorDeps, type DoctorReport } from "./doctor.js";
 import type { Exec } from "./exec.js";
 import {
@@ -460,7 +460,15 @@ export async function installSupervisorPlan(r: StepRunner, productDir: string, l
   values.supervisorBin = bin;
   values.supervisorConfig = configPath;
 
-  const templates = await loadSupervisedTemplates(productDir, values.namespace?.labelSuffix, values.env);
+  // No engine credential, no assistant child: the engine hard-requires one
+  // (apps/assistant/src/main.ts) and would crash-loop, which is not what an
+  // install with no model looks like — it looks like everything else running
+  // and the fold's turns waiting. Read through ONE function, so the rename
+  // the compute pivot brings lands in one place; the config is rewritten
+  // whole on every `up`, so a credential that appears later re-adds the child.
+  const templates = (await loadSupervisedTemplates(productDir, values.namespace?.labelSuffix, values.env)).filter(
+    (t) => t.service !== "assistant" || engineCredentialPresent(values.env),
+  );
   const base = launchdBaseEnv(values.env);
   const children = templates.map((t) => {
     const { rendered } = renderJob(t, productDir, le, values);
@@ -687,6 +695,17 @@ export async function up(opts: UpOptions): Promise<UpResult> {
     const applied = applyPorts(env, ns);
     r.note(`namespace: labels ${LABEL_PREFIX}${ns.labelSuffix}.<service>, ports ${ns.base}-${ns.base + PORTED_SERVICES.length - 1} — from ${ns.from}`);
     r.note(applied.length ? `namespace → environment: ${applied.join(" ")}` : "namespace → environment: nothing to fill; .env already sets every port and URL");
+  }
+  // one line, before anything is written: an install with no engine is a
+  // shape, not a fault (docs/ops/assistant-tools.md, "Running without an
+  // engine"), and the operator should see WHY there is no assistant below
+  if (!engineCredentialPresent(env)) {
+    r.note(ENGINE_ABSENT_NOTE);
+    if (usesCompose(deployment)) {
+      r.note(
+        `compose shape: docker-compose.yml interpolates ${ENGINE_CREDENTIAL_VAR} as a required variable, so \`docker compose up\` refuses the whole file without it — the launchd shape is the one that runs engine-less (docs/ops/deployment-shapes.md)`,
+      );
+    }
   }
   let failure: StepFailed | undefined;
 

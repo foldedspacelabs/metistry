@@ -50,7 +50,7 @@ public enum AppPreference: String, CaseIterable, Sendable {
 @Observable
 public final class InstanceBookmarks {
     /// How many recents the Instance pane and the wizard offer. Long enough to
-    /// cover a work install, a personal one and a scratch one; short enough that
+    /// cover a second install, a personal one and a scratch one; short enough that
     /// the list is read rather than searched.
     public static let recentsLimit = 8
 

@@ -110,7 +110,7 @@ short budget; the hook's own network timeout is 8 s.
 Each Metistry instance is its own private repo with its own URL and its
 own tokens (plan §4.16). The plugin has no notion of "which vault"; it
 posts to whatever `METISTRY_URL` says. So a **work** Claude Code
-configuration pointed at the work instance's URL and token can only land
+configuration pointed at the second instance's URL and token can only land
 work context in the work vault, and the personal configuration can only
 land personal context in the personal vault. The boundary is the
 environment the session inherits, not a setting inside the plugin —

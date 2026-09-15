@@ -17,7 +17,7 @@ the repo.
 
 The assistant's name must never appear in a path, table name, env var, package
 name, class, or function. Internally everything is `assistant_*`; prompts
-template the name from config. This is what makes the work instance and any fork
+template the name from config. This is what makes a second instance and any fork
 a clone rather than a rewrite. Treat a hardcoded "Metis" as a bug.
 
 ## Casing

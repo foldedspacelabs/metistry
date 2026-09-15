@@ -1269,7 +1269,7 @@ launchd cannot even see.
   premise that a spawned CLI honours `HTTPS_PROXY`.
 - 2026-09-15 — Research: **Devin and Cursor as Metistry surfaces**
   (`docs/research/2026-09-15-devin-cursor-integration.md`). Verified that three
-  of the four integrations the owner's new job needs require **no product
+  of the four integrations the owner's second instance needs require **no product
   code**: Devin takes custom Streamable-HTTP MCP servers with an
   `Authorization: Bearer` header at *personal* scope, so it can be an external
   agent at the console's `/mcp` with today's `POST /api/agents`; Cursor mounts

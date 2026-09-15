@@ -1,8 +1,8 @@
 # Devin and Cursor as Metistry surfaces (2026-09-15)
 
-The owner has started a new job. Knowledge is arriving that needs organising;
+The owner is standing up a second instance for a separate context. Knowledge is arriving that needs organising;
 three agents (Devin, Claude Code, Cursor) need access to it; Devin is already
-connected to almost everything at work and holds context on the code, culture,
+connected to almost everything in that context and holds context on the code, culture,
 process and tech that Metistry will need. Devin is currently organising the
 docs by hand, which is the thing to replace.
 
@@ -200,7 +200,7 @@ result:
 auth: env:METISTRY_DEVIN_API_KEY    # user scope in the Keychain (C6)
 cost: { per_run_estimate_usd: 0 }   # real cost is ACUs, read back per session
 data_policy:
-  allow: [Knowledge/Areas/<the work areas>, Knowledge/Projects]
+  allow: [Knowledge/Areas/<that instance's areas>, Knowledge/Projects]
   deny_sources: [comms]
   max_brief_bytes: 16384
 ```
@@ -277,7 +277,7 @@ provenance class, and `checkBrief`'s `denied_source` scanner keys on exactly
 these markers. Devin-derived notes are *work-internal* by nature, so the
 moment they are in the vault they are citable in a brief to any target whose
 `allow` list covers their area. Either add `devin` to `deny_sources` on the
-outbound targets, or accept that work knowledge can be re-exported to the
+outbound targets, or accept that that instance's knowledge can be re-exported to the
 system it came from (which is harmless) and to others (which is not). The
 conservative default is to add it.
 
@@ -371,9 +371,9 @@ strings minted by `POST /api/agents`. **S3** (`agent:<name>@<instance_id>`) and
 resource registry is the general form of this table. Worth sequencing with
 them rather than against them.
 
-## 9. Proposal F — phasing, for "usable at work ASAP"
+## 9. Proposal F — phasing, for "usable on the second instance ASAP"
 
-**None of this depends on the compute pivot's PR 1.** The work instance can run
+**None of this depends on the compute pivot's PR 1.** The second instance can run
 today's release with an owner token and a Devin API key; nothing here touches
 the engine, `compute.yaml`, or the provider path. The one adjacency is B's
 `submit.max_acu`, which is a target ceiling and not an engine budget.

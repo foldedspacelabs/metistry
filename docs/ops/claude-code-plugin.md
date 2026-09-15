@@ -8,6 +8,12 @@ the operator's checklist.
 
 ## 1. Mint a capture token per machine/profile
 
+`metistry connect claude-code` does this for you (docs/ops/cli.md): it
+registers `claude-code` as an external agent, puts the bearer in the login
+Keychain, and prints the two `export` lines in §2 with the account filled
+in. It does **not** install the plugin — §3 still does. The rest of this
+section is the by-hand path, and the owner-token alternative.
+
 On the Studio, one owner token per place the plugin runs — label them so
 revocation is surgical:
 

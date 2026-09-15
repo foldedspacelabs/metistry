@@ -368,7 +368,19 @@ identical, so open-source users and the app share one tested path
    the probe that proves it moved to Settings → Advanced.
 7. *Claude.* `claude setup-token` guided in-app — opened in a real terminal
    because it is interactive — and the app watches `secrets list --json`
-   for the token's name. It never handles the value.
+   for the token's name. It never handles the value. **(Superseded — refresh
+   2026-09-13.) Step 7 becomes "Choose your compute":** the Compute pane in
+   miniature — pick a provider from the templates (OpenRouter for cloud, the
+   bundled `llama-server` for local, LM Studio/Ollama if already running),
+   paste an API key which `metistry secrets` files in the **Keychain** at user
+   scope, then a live `test` against `/v1/models`. **No subscription login and
+   no `claude setup-token`**: the Agent SDK's overview says third-party products
+   must use API-key authentication, and the product now has one
+   OpenAI-compatible engine with Claude reached through OpenRouter
+   (`docs/research/2026-09-11-local-models-openrouter-opencode.md` rev 3, owner
+   decision 5; §4.18 of the build plan). The rule that the app never handles a
+   secret's value is unchanged — the CLI writes it, the app polls for the name.
+   A local-only choice needs no key at all, which is the point.
 
 **Updates.** Two channels, both signed: the app updates itself
 (Sparkle-style appcast, or the App Store if that route is ever taken);
@@ -534,27 +546,50 @@ two instances would share one helper. Both are listed in
 ## Bundled runtime (ratified 2026-09-09)
 
 Everything the app needs ships inside the bundle except the user's own
-accounts and permissions. Download, open, sign in to Claude, name the
-assistant, approve two permissions; nothing else is the user's job.
+accounts and permissions. Download, open, **choose your compute** (refresh
+2026-09-13 — a provider API key, or the bundled local server and no key at
+all; ~~sign in to Claude~~), name the assistant, approve two permissions;
+nothing else is the user's job.
 
 | Shipped inside `Metistry.app/Contents/Resources/metistry/` | Notes |
 | --- | --- |
 | **Node** | console, assistant, reconciler, watchdog, bridge Node halves |
 | **Postgres 17 + pgvector** | relocatable build, every Mach-O signed (hardened runtime), data under the instance's `state/`, loopback + Unix socket, our launchd job starts it — the Postgres.app model. The launchd shape already resolves `runtime/postgres/` before Homebrew; the release workflow produces it. Permissive licences. ~50 MB |
 | **git** | a clean Mac has none until Xcode Command Line Tools are installed; the reconciler spawns it. A minimal build, ~30 MB |
-| **Claude Code CLI** | arrives with the Agent SDK package; nothing separate |
+| ~~**Claude Code CLI**~~ | *(superseded, refresh 2026-09-13: it arrived with the Agent SDK package, and the SDK leaves the product with the subscription scrub — the engine is OpenAI-compatible and talks to a base URL. Claude Code stays a **collaborator** over `/mcp` with the plugin, installed by the user, not bundled.)* |
+| **`llama-server`** | Metal-enabled, built from pinned source and signed like Postgres and git; the no-install local provider — *planned, lands with the discovery PR; the bake-off confirms the server choice* (refresh 2026-09-13) |
 | **Swift helpers** | EventKit, Apple FM — prebuilt, Developer ID signed, bundled (#84) |
 | **The product runtime pack** | the release asset, pinned by `metistry.lock` |
 
 Not required, ever: Docker, Homebrew, pnpm, Xcode, build tools.
 
-**Optional, offered in-app, degrades absent:** **Ollama** for embeddings
-(search is keyword-only without it; one-click install from the app;
-Apple's on-device `NLEmbedding` behind a Swift bridge is the candidate
-no-install default, lower quality than nomic — evaluate before adopting);
-**Tailscale** for phone access away from the local network.
+**Local inference ships inside the bundle (refresh 2026-09-13).** A
+**`llama-server`** binary, built from pinned source and signed like the Postgres
+and git builds beside it, is the no-install local provider. It serves chat
+completions, and is expected to serve `/v1/embeddings` as well — **verify at
+bake-off time**; if it does, search is no longer keyword-only on a clean
+machine, and if it does not, the embedding model keeps its own provider. The
+app's **Compute** pane owns the day-to-day — pull a GGUF, load/unload,
+keep-alive, RAM headroom against the machine's memory. It is also what two
+measured wins need (a GBNF grammar so a hallucinated tool name is unsamplable,
+and slot-pinned KV reuse), which the other servers' OpenAI-compatible APIs may
+not expose. **LM Studio and Ollama remain fully supported external peers**,
+discovered over `/v1/models` for users who already run one — no longer the
+thing we ask a new user to install. Which server the bundle ships is confirmed
+by the bake-off (`docs/plan-refresh-2026-09-13.md` §3), which measures all three
+on the same model. Sources:
+`docs/research/2026-09-11-local-models-openrouter-opencode.md` (addendum
+2026-09-12), `docs/research/2026-09-12-atomic-agent-review.md`.
 
-**The user's own, unavoidable:** the Claude subscription login (browser),
+**Optional, offered in-app, degrades absent:** **Tailscale** for phone access
+away from the local network. *(Ollama was here as the embeddings dependency
+until the refresh above; Apple's on-device `NLEmbedding` behind a Swift bridge
+stays a candidate to evaluate, now as one more `compute.yaml` provider.)*
+
+**The user's own, unavoidable:** ~~the Claude subscription login (browser)~~
+*(superseded, refresh 2026-09-13: **an API key for whichever cloud provider they
+choose, or none at all if they run local** — the product has no subscription
+login; the Agent SDK's own docs say third parties must use API-key auth)*,
 a GitHub account only if they want the instance repo backed up (local git
 works without a remote), Calendars/Reminders and notification
 permissions, the passkey.

@@ -35,6 +35,27 @@ export {
   type ParsedRemote,
 } from "./connect-repo.js";
 export {
+  connect,
+  connectList,
+  renderConnect,
+  renderConnectList,
+  cursorConfigFile,
+  cursorServerEntry,
+  writeCursorConfig,
+  readCursorServer,
+  agentTokenVar,
+  serverKey,
+  parseTool,
+  CONNECT_TOOLS,
+  DEFAULT_GRANTS,
+  TOOL_SPECS,
+  type ConnectTool,
+  type ConnectOptions,
+  type ConnectResult,
+  type ConnectListRow,
+  type Grants,
+} from "./connect.js";
+export {
   syncSecrets,
   mintSecret,
   listSecrets,

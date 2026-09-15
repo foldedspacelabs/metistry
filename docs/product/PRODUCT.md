@@ -1320,6 +1320,21 @@ launchd cannot even see.
   the bridge, so "read-only unless granted" is a property, not a setting. The
   benefit is switching cost: adopting or dropping a tool is one command, and
   a second instance's tools are separate rows with separate tokens.
+- 2026-09-15 — **A dev session records itself whichever tool it happened in.**
+  `plugins/cursor` adds a Cursor `sessionEnd` hook beside the Claude Code
+  plugin's: same `kind: "session"` frontmatter, same `idempotency_key` formula,
+  so three doors (two hooks and `metistry import-sessions`) dedupe against each
+  other and `inbox-drain` needed no change to classify the third. Both plugins
+  are held to one 300-line file in `packages/core` by a byte-equality test,
+  which is how duplicated logic stays honest in a repo one person maintains.
+  The capture-never-drops rule reaches a hook for the first time: with
+  `METISTRY_CAPTURE_DIR` set, an unreachable console means the note is written
+  to disk, and because the key is a pure function of the session id the later
+  retry is an exact no-op rather than a second note. Also a product decision
+  worth naming: the note says **what it could not capture**. Cursor's transcript
+  format is undocumented, so the file is not read and each note carries a
+  `## Not captured` line — a gap the user can see beats a summary that quietly
+  reads thinner than the other tool's.
 - 2026-09-15 — **Another organisation's knowledge arrives on its own.**
   `collectors/devin-knowledge` pulls Devin (Cognition) Knowledge notes and
   private-repo wiki pages into the inbox as captures with `source: devin`

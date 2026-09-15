@@ -1267,3 +1267,23 @@ launchd cannot even see.
   remote agents, `agent@instance_id` identity, an `instances.yaml` peer
   registry, a `runs` export. Separately, SAM's sandbox design contradicts R1's
   premise that a spawned CLI honours `HTTPS_PROXY`.
+- 2026-09-15 — Research: **Devin and Cursor as Metistry surfaces**
+  (`docs/research/2026-09-15-devin-cursor-integration.md`). Verified that three
+  of the four integrations the owner's new job needs require **no product
+  code**: Devin takes custom Streamable-HTTP MCP servers with an
+  `Authorization: Bearer` header at *personal* scope, so it can be an external
+  agent at the console's `/mcp` with today's `POST /api/agents`; Cursor mounts
+  the same `/mcp` from `~/.cursor/mcp.json` and resolves `${env:…}` inside
+  `headers`, so the token never touches disk. Cursor also has a `sessionEnd`
+  hook and *loads Claude Code's own hooks*, so the plugin pattern ports. The
+  two that need code are a collector (Devin Knowledge + DeepWiki → inbox) and
+  an `http` dispatcher (`dispatch()` supports only `github` and `local` today).
+  Ruled `collectors/devin-knowledge` over a `packages/mcp-deepwiki` bridge on
+  repo evidence: the assistant mounts exactly one MCP server
+  (`apps/assistant/src/brain.ts`), so a foreign bridge would have no caller.
+  Named a new pattern — *the same external system as both compute target and
+  authenticated principal*, which closes `github-issues`' open
+  `TODO(report-queue)` content-return gap. Nothing here waits on compute PR 1.
+  Two risks are the owner's plan, not the design: an enterprise PAT policy is
+  **disabled by default**, and on Teams **only an admin** can opt out of
+  training on dispatched briefs.

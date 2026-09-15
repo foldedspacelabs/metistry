@@ -1296,3 +1296,17 @@ launchd cannot even see.
   turn waits in the inbox until a credential exists, and one `metistry up` later
   the child is back. Proves the degradation story the plan claims — every
   component absent-degrades — for the one component it had never been true of.
+- 2026-09-15 — **One door per external dev tool: `metistry connect <tool>`.**
+  Cursor, Devin and Claude Code each get their own agent row, their own bearer
+  and their own revocation, from one generic verb: `connect cursor` merges
+  `mcpServers.metistry` into `~/.cursor/mcp.json` (0600, other servers
+  preserved) naming the bearer as `${env:…}` so it stays in the login Keychain
+  rather than on disk; `connect claude-code` mints the token the plugin docs
+  had the owner mint by hand; `connect devin` prints the three fields Devin's
+  web form needs, because no API can write them. Idempotent (the agent id is
+  the tool name), and a re-run never prints a secret — the console returns a
+  bearer only when it mints or rotates one. Grants stay default-deny and no
+  flag can grant `knowledge_write`: an external principal cannot reach it at
+  the bridge, so "read-only unless granted" is a property, not a setting. The
+  benefit is switching cost: adopting or dropping a tool is one command, and
+  a second instance's tools are separate rows with separate tokens.

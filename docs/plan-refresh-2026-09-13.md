@@ -60,7 +60,13 @@ containing a "proposal open" item is not, by being listed, authorised.
 
 | # | Adopt | Source | Status |
 |---|---|---|---|
-| R1 | Loopback **CONNECT proxy** so the engine's host allowlist is enforced, not documented; hosts from `compute.yaml` | rivet | proposal open (*unverified*: that a spawned CLI honours `HTTPS_PROXY`; and whether App Sandbox can do per-host at all) |
+| R1 | ~~Loopback CONNECT proxy~~ → **allowlist enforced inside the engine's own `fetch`** (the one engine is in-process code, so the host check is a function, not an environment variable a subprocess may ignore); hosts from `compute.yaml`; a CI test that every outbound call goes through it | rivet, revised 2026-09-15 after the SAM note (`2026-09-13-google-sam-review.md` argues `HTTPS_PROXY` honouring is unreliable; owner agreed) | **decided** (revision); the sandbox profile keeps port filtering as defence in depth |
+| S1 | Coarse **capability advertisement** on `GET /api/identity`; `tools/list` stays token-gated | sam | **proposal accepted** 2026-09-15 ("I really like your read on the registry and advertisement") |
+| S2 | **Approve-before-enroll** for remote agents | sam | proposal accepted 2026-09-15 |
+| S3 | Agent identity `agent:<name>@<instance_id>` | sam | proposal accepted 2026-09-15 |
+| S4 | `instances.yaml` **peer registry** (the phone's instance list, and a work instance's directory of exposable resources: CLI commands, directories, MCP servers, compute, tasks/knowledge, Slack, Linear — discoverable and grantable by cloud and local agents wherever they run) | sam | proposal accepted 2026-09-15; scope of "resource" is OPEN-7 |
+| S5 | `runs` NDJSON audit export | sam | proposal accepted 2026-09-15 |
+| S6 | An **internal mesh** (self-contained cross-device service wrapping, no tailnet dependency) | sam | BORROW-LATER — owner: "worth considering in the future"; not before the registry (S4) exists |
 | R2 | **Warn at 80 %** of every budget window, deduped, before `stop` fires | rivet | proposal open |
 | R3 | **Every refusal names the config field** that would permit it | rivet | proposal open |
 | R4 | **CI audit for unwired limits** — fail on a cap-shaped literal absent from a manifest/config schema | rivet | proposal open |
@@ -267,7 +273,7 @@ only an OpenRouter key, the local half needs PR 2's binary.
 | **1** | `compute.yaml` schema in `packages/core` (zod), `seed/compute.yaml` + templates, `metistry compute providers\|models\|assign\|budget`, hot reload, OpenRouter seed provider with Claude pinned, **the scrub** (engine, CLI env allowlist, secrets, shapes, docs — plus the Agent SDK dependency and `engine.ts`'s `query()` path) | ratify the SDK removal in `CLAUDE.md` first (§2.10) |
 | **1a** | **App part, split out:** the Compute pane, wizard step 7 → "Choose your compute", Settings. Separated so the schema/CLI PR is reviewable alone and the SwiftUI change lands against a settled verb surface | — |
 | **2** | `/v1/models` discovery, doctor rows, `compute models list\|install\|load\|unload`, LM Studio + Ollama as peers, embeddings over `/v1/embeddings` (C18) — **and the bundled `llama-server`** built from pinned source into the runtime-deps pack, signed like Postgres and git | — |
-| **3** | `Engine` interface + the `openai-compatible` loop, `runs` provider/model columns, `spend` query, budgets `allow\|stop\|critical_only` with the routine pause, non-ZDR warning, per-run scoped credential, cross-kind delegation refusal — **plus** R1 loopback proxy, R2 80 % warning, R3 refusals name the field, T4 no-progress veto, T1/T5 where the server exposes them, and **stage-2 shadow mode** | OPEN-3, OPEN-4, OPEN-6 |
+| **3** | `Engine` interface + the `openai-compatible` loop, `runs` provider/model columns, `spend` query, budgets `allow\|stop\|critical_only` with the routine pause, non-ZDR warning, per-run scoped credential, cross-kind delegation refusal — **plus** R1 in-engine host allowlist, R2 80 % warning, R3 refusals name the field, T4 no-progress veto, T1/T5 where the server exposes them, and **stage-2 shadow mode** | OPEN-3, OPEN-4, OPEN-6 |
 | **4** | Apple FM `/v1` surface **after** the `DynamicGenerationSchema` PoC (C8); `inbox-drain` moves to provider `apple-fm`; CI check that no collector names a provider with cost > 0 | — |
 | **5** | `plugins/opencode`, parity test, `metistry connect opencode`, `docs/ops/opencode.md` | `@opencode-ai/plugin` types — ask before adding |
 

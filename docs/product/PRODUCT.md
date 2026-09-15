@@ -1251,3 +1251,19 @@ launchd cannot even see.
   measured numbers — pass rate per quality axis, tool-call agreement, tokens/s,
   cost per turn against a Sonnet bar the cost note estimates at ~$29/month — with the rule that Claude
   is the bar and never the training data.
+- 2026-09-13 — Research: **SAM, Sovereign Agent Mesh** (Apache-2.0, Go;
+  `docs/research/2026-09-13-google-sam-review.md`). A libp2p mesh with an OIDC
+  →Biscuit control plane, evaluated as a replacement for tailnet + the console's
+  `/mcp`. **SKIP as a dependency**: it buys reachability and network-layer
+  identity, both of which one tailnet and a per-request-authenticated `/mcp`
+  already supply for one person's two instances, while costing a Go daemon the
+  Mac app must sign under the one-background-item rule, an OIDC IdP beside
+  passkeys, a control plane to host, a Datalog policy language beside
+  `grants`/`data_policy` — and, decisively, *coarser* authorization: "the
+  service is the unit of authorization … mesh policy does not filter individual
+  MCP tools inside a service." Threshold to revisit is a count of
+  administrators, not of agents. Five registry ideas are worth borrowing now —
+  capability advertisement on `GET /api/identity`, approve-before-enroll for
+  remote agents, `agent@instance_id` identity, an `instances.yaml` peer
+  registry, a `runs` export. Separately, SAM's sandbox design contradicts R1's
+  premise that a spawned CLI honours `HTTPS_PROXY`.

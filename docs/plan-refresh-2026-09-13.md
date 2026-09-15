@@ -64,7 +64,7 @@ containing a "proposal open" item is not, by being listed, authorised.
 | S1 | Coarse **capability advertisement** on `GET /api/identity`; `tools/list` stays token-gated | sam | **proposal accepted** 2026-09-15 ("I really like your read on the registry and advertisement") |
 | S2 | **Approve-before-enroll** for remote agents | sam | proposal accepted 2026-09-15 |
 | S3 | Agent identity `agent:<name>@<instance_id>` | sam | proposal accepted 2026-09-15 |
-| S4 | `instances.yaml` **peer registry** (the phone's instance list, and a work instance's directory of exposable resources: CLI commands, directories, MCP servers, compute, tasks/knowledge, Slack, Linear — discoverable and grantable by cloud and local agents wherever they run) | sam | proposal accepted 2026-09-15; scope of "resource" is OPEN-7 |
+| S4 | `instances.yaml` **peer registry** (the phone's instance list, and a second instance's directory of exposable resources: CLI commands, directories, MCP servers, compute, tasks/knowledge, Slack, Linear — discoverable and grantable by cloud and local agents wherever they run) | sam | proposal accepted 2026-09-15; scope of "resource" is OPEN-7 |
 | S5 | `runs` NDJSON audit export | sam | proposal accepted 2026-09-15 |
 | S6 | An **internal mesh** (self-contained cross-device service wrapping, no tailnet dependency) | sam | BORROW-LATER — owner: "worth considering in the future"; not before the registry (S4) exists |
 | R2 | **Warn at 80 %** of every budget window, deduped, before `stop` fires | rivet | proposal open |

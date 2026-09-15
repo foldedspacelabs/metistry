@@ -1,9 +1,9 @@
 # CodeGraff review — lessons for a Metistry desktop app (2026-09-07)
 
 Owner prompt: Metistry has a PWA and a planned iOS app but no desktop
-app; at work the owner will mostly be at a desktop, likely with Metistry
-hosted on the same machine, and uses the Claude desktop app more than the
-CLI even for Claude Code. Review [justrach/codegraff](https://github.com/justrach/codegraff)
+app; in the second context the owner will mostly be at a desktop, likely
+with Metistry hosted on the same machine, and uses the Claude desktop app
+more than the CLI even for Claude Code. Review [justrach/codegraff](https://github.com/justrach/codegraff)
 for the "single pane of glass" and multi-agent overlap, then plan a
 desktop client. Companion: `docs/product/ios-app-plan.md`,
 `docs/product/ux-direction.md`; outcome in `docs/product/desktop-app-plan.md`.
@@ -107,9 +107,9 @@ web and iOS" (ux-direction) becomes **web + Apple**.
 
 ## Hosted-on-the-same-machine
 
-At work the console will run on the desktop itself. Nothing changes in
-the API: the origin is `https://localhost:8080`-class or a tailnet name;
-WebAuthn works on `localhost` as a secure context, and the native app's
+In the second context the console will run on the desktop itself. Nothing
+changes in the API: the origin is `https://localhost:8080`-class or a tailnet
+name; WebAuthn works on `localhost` as a secure context, and the native app's
 `ASAuthorization` passkey flow hits the same RP. One consequence worth
 designing for: **local-file linking** (Artifact Server's ADR 0023 — a
 file that stays on disk, live for the owner, snapshotted for everyone

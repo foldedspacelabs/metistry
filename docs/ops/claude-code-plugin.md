@@ -34,10 +34,10 @@ export METISTRY_CAPTURE_ON_STOP=1
 Or per Claude Code profile in `~/.claude/settings.json` under `env`.
 Nothing is read from files in the repo; the plugin ships no config.
 
-**Instance split.** A work Claude Code profile gets the *work* instance's
-URL and a token minted *there*; the personal profile gets the personal
-pair. The plugin cannot route to more than one instance, so work context
-can only land in the work vault (§4.11, §4.16).
+**Instance split.** A Claude Code profile for the second context gets the
+*second* instance's URL and a token minted *there*; the personal profile gets
+the personal pair. The plugin cannot route to more than one instance, so a
+context can only land in its own vault (§4.11, §4.16).
 
 ## 3. Install
 

@@ -97,7 +97,7 @@ Each item: what → evidence → where it lands.
    obsidian-second-brain. → vault rules + weekly routine, Phase 5.
 4. **Bi-temporal columns on derived facts** (`valid_at`/`invalid_at` +
    `learned_at`/`expired_at`); contradictions expire rows, never delete. →
-   Two nullable timestamp pairs buy what Zep built a company on; Mem0's
+   Two nullable timestamp pairs buy what Zep built a business on; Mem0's
    stale-fact and conflicting-fact bugs exist precisely because they skipped
    it. → db schema (cheap while young), Phase 2-3 migration.
 5. **Untrusted-content quarantine (MemGhost rule).** The agent that reads
@@ -137,7 +137,7 @@ Each item: what → evidence → where it lands.
 11. **BM25/FTS + recency term alongside pgvector; chunks stay verbatim.** →
     Hybrid `0.5×vector + 0.3×FTS + 0.2×recency/importance` in plain SQL;
     extraction-at-ingest is losing to not-extracting across the field; recency
-    prevents the stale-employer class of retrieval bug. → named queries /
+    prevents the stale-affiliation class of retrieval bug. → named queries /
     Phase 6 retrieval.
 12. **Lazy discovery = a search entry point, resolved at runtime** — refine
     the §4.3 design toward the shape every system that scaled converged on

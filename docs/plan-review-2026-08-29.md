@@ -238,7 +238,7 @@ churn of fixes:
   *model output*, server-side grants, reader/writer separation for untrusted
   content.
 - **The product/instance split** — decided before a vault existed; makes the
-  work/personal IP boundary mechanical.
+  IP boundary between contexts mechanical.
 - **The cost architecture** — deterministic router failing open to the model,
   fast paths, per-tier budgets, model-free watchdog. The user-voice review calls
   it the best-defended flank it has seen.

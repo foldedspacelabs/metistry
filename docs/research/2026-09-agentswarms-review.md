@@ -78,8 +78,8 @@ assistant).
    now, but it is the shape of future *capture sources*: collectors that
    pull documents into `inbox/` with provenance and content-hash dedup,
    flowing through the same triage gate. Record the pattern; build when a
-   real source is needed (work instance: Confluence/SharePoint are the
-   obvious first two).
+   real source is needed (on the second instance, another organisation's
+   tools — Confluence/SharePoint — are the obvious first two).
 
 ## Not taking
 
@@ -103,4 +103,4 @@ assistant).
 - `mcp-brain` gains `queries_list` / `queries_run` (Phase 5 `brain-query`
   item, now specified) and an optional `turn_id` join key on every tool.
 - Capture-source collectors (Drive/Notion/Confluence-style, hash-dedup)
-  are a recorded pattern for the work instance, not scheduled.
+  are a recorded pattern for the second instance, not scheduled.

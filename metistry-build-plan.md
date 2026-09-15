@@ -1356,11 +1356,11 @@ agents the *capture/report surface only*, never `brain-commit`:
   by definition (memory-poisoning is a one-email attack, per the prior-art
   review) — it can propose knowledge; it can never write it.
 
-Two properties fall out: the instance split preserves the IP boundary (a
-work agent's config points at the work instance's endpoint and token, so
-work context can only land in the work vault), and capture-from-anywhere is
-the single most-demanded capability class in the 2026 skill ecosystem —
-this is the highest-leverage door after the web app itself.
+Two properties fall out: the instance split preserves the IP boundary (an
+agent in a separate context is configured with that instance's endpoint and
+token, so that context can only land in that instance's vault), and
+capture-from-anywhere is the single most-demanded capability class in the 2026
+skill ecosystem — this is the highest-leverage door after the web app itself.
 
 **External read access: tiered, default-deny, user-granted.** Writing
 proposals is safe by construction; *reading* knowledge is where the risk
@@ -1562,8 +1562,8 @@ Knowledge/                    the live Obsidian vault
   Attachments/
 ```
 
-**Areas nest; Projects don't.** Areas are hierarchical and stable — a company owns
-a product, permanently. Projects are temporal and frequently cross-cutting (a
+**Areas nest; Projects don't.** Areas are hierarchical and stable — an organisation
+owns a product, permanently. Projects are temporal and frequently cross-cutting (a
 rebrand touches both Drey and FSL), so forcing them into a tree means choosing one
 parent for something with two. Projects carry `area: "[[Drey]]"` instead.
 
@@ -1711,15 +1711,16 @@ survive it. Mechanics, cheapest first:
 
 Built to be forked. Someone else should be able to run this, name their assistant
 whatever they like, and use any single bridge on its own. The same properties make
-the work instance a clone rather than a rebuild.
+a second instance a clone rather than a rebuild.
 
 **The product and each instance are separate repos** (decided 2026-08-28,
 before Phase 2 put anything real in a vault). One repo holding both code and a
 live vault breaks on every multi-install requirement at once: instance
-histories diverge from upstream forever, knowledge commits during work hours
-entangle an employer's information with the open-source project (and vice
-versa — personal or work knowledge would sit in an FSL-owned repo), and
-strangers must be able to fork code without inheriting anyone's vault.
+histories diverge from upstream forever, knowledge commits made in a separate
+context entangle another organisation's information with the open-source
+project (and vice versa — either instance's knowledge would sit in an
+FSL-owned repo), and strangers must be able to fork code without inheriting
+anyone's vault.
 
 **The product repo** (`foldedspacelabs/metistry`, Apache-2.0, eventually
 public) is code only:
@@ -1800,10 +1801,11 @@ versioned artifacts — npm packages for bridges/core/cli, container images for
 the apps. `metistry update` bumps `metistry.lock`, pulls the pinned artifacts,
 and runs migrations (the `schema_migrations` table makes that idempotent). An
 instance has **no git relationship with upstream at all** — which is exactly
-what makes the work install clean: consuming released open source at work is
-ordinary OSS use; contributing happens upstream, on personal time, from a
-personal machine. Improvements conceived at work are re-implemented upstream
-on personal time (§5). Data flows in no direction; code flows down.
+what makes a second install clean: consuming released open source in a
+separate context is ordinary OSS use; contributing happens upstream, on
+personal time, from a personal machine. Improvements conceived in one context
+are re-implemented upstream on personal time (§5). Data flows in no direction;
+code flows down.
 
 Knowledge versioning is simply each instance repo's own git history, written
 by `brain-commit` and the reconciler as designed — §4.7's split becomes
@@ -2470,37 +2472,39 @@ code; `extensions/` is the user's own code, owned like their vault.)
   routine is wrong. If you stop checking the dashboard, delete the panels you
   don't read.
 
-### Portability to work
+### Portability to a second context
 
-### Work: a separate instance, not a separate folder
+### A second context: a separate instance, not a separate folder
 
-Two Metis instances is more annoying, and it's still right. The boundary isn't your
-preference — it's your employer's, and MDM plus an AI usage policy will likely
-decide it before you get a vote.
+Two Metis instances is more annoying, and it's still right. The boundary isn't
+your preference — it belongs to the other organisation, and MDM plus an AI
+usage policy will likely decide it before you get a vote.
 
 One instance with logical scoping also violates the project's own principle:
 enforce at the bridge, never by prompting. A shared vector index and shared
 session transcripts are exactly where silent leakage happens, with no tool
 boundary to catch it.
 
-**What's separate:** the instance repo (work's vault on a work-owned remote),
-Postgres, Claude account, Apple ID, machine, and door (each instance's own
-web app; a Slack or Teams bridge at work if ever wanted).
+**What's separate:** the instance repo (the second vault on a remote owned by
+the other organisation), Postgres, Claude account, Apple ID, machine, and door
+(each instance's own web app; a Slack or Teams bridge on that side if ever
+wanted).
 
 **What's shared:** the product — consumed as pinned releases (`metistry.lock`),
 never as a git fork. The §4.16 split is what makes the IP boundary mechanical
-rather than disciplinary: *using* released Apache-2.0 open source at work is
-ordinary OSS consumption; *contributing* happens upstream, on personal time,
-from a personal machine. An improvement conceived at work is re-implemented
-upstream on personal time — never committed from work hardware, never during
-work hours — then flows back down to the work instance as a release like any
-other. Data flows in no direction.
+rather than disciplinary: *using* released Apache-2.0 open source in a separate
+context is ordinary OSS consumption; *contributing* happens upstream, on
+personal time, from a personal machine. An improvement conceived in one context
+is re-implemented upstream on personal time — never committed from the second
+Mac, never from inside that context — then flows back down to the second
+instance as a release like any other. Data flows in no direction.
 
-The annoyance is smaller than it sounds: context does the switching. You're on
-work hardware during work hours. Obsidian being free for commercial use as of
-early 2026 means no licensing friction on the work side. (Worth one check of
-the employer's OSS-use policy — most permit use freely; some want the license
-on a list. Apache-2.0 is usually the easiest answer.)
+The annoyance is smaller than it sounds: the hardware does the switching. The
+second Mac reaches the second instance and nothing else. Obsidian being free
+for commercial use as of early 2026 means no licensing friction on that side.
+(Worth one check of the other organisation's OSS-use policy — most permit use
+freely; some want the license on a list. Apache-2.0 is usually the easiest
+answer.)
 
 ---
 

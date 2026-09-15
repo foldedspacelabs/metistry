@@ -55,7 +55,7 @@ adoption — that's the gap Metis fills for its own user.
 - **Letta's own docs** mark concurrent shared-memory rewrite an anti-pattern
   and recommend one owner for heavy edits — the sole-writer invariant,
   reached after the failure instead of before it.
-- Orchestrator graveyard: ~16 dormant projects; the flagship's company shut
+- Orchestrator graveyard: ~16 dormant projects; the flagship's vendor shut
   down Apr 2026. Cost: multi-agent ≈ 10–15× tokens; Cursor reportedly
   abandoned equal-status agents + locking for planner/worker/judge
   (secondary source — flagged). **Hub holds state; agents pull. That is the

@@ -28,8 +28,8 @@ thread:
   device sessions; the share extension carries an owner access token like
   the Shortcut does today.
 - **Instance-pointed, not cloud-pointed**: the app talks to *your*
-  instance's origin. Multi-instance (work/personal) = two configurations
-  in one app.
+  instance's origin. Multi-instance (personal plus a second instance) = two
+  configurations in one app.
 
 ## The one hard architectural problem: APNs for self-hosters
 

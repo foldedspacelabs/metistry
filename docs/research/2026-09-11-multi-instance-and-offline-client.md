@@ -38,7 +38,7 @@ On the phone an instance is a record:
 | --- | --- | --- |
 | `origin` | typed or scanned at enrolment | the HTTPS origin, what passkeys bind to (`METISTRY_ORIGIN`, `docs/ops/auth.md`) |
 | `instance_id` | `GET /api/identity` | the v4 UUID `metistry init` writes into `identity.yaml` (`docs/ops/cli.md`) |
-| `name`, `icon` | `GET /api/identity` | the assistant's name is config, never code (`CLAUDE.md`) — the phone shows "Metis" for one and whatever the work instance is called for the other |
+| `name`, `icon` | `GET /api/identity` | the assistant's name is config, never code (`CLAUDE.md`) — the phone shows "Metis" for one and whatever the second instance is called for the other |
 | passkey | Keychain, rpID = origin's host | one credential per instance; native `ASAuthorization` against the same RP ID (ios-app-plan) |
 | session | `metistry_session` cookie, per origin | the `auth_sessions` row is a *device* session on that instance |
 | owner token | Keychain item `metistry:<instance_id>:owner_token` | for the share extension, same as the Shortcut today (`docs/ops/capture-shortcut.md`) |
@@ -53,9 +53,9 @@ same instance after the move.
 
 Nothing about the door changes. Passkeys are scoped to an RP ID, so a
 credential enrolled at `metis.tail.example` cannot be presented to
-`work.example`; the console already rejects an origin it does not expect with
+`second.example`; the console already rejects an origin it does not expect with
 a 401 that names both sides. Enrolment codes are minted on the instance
-(`enroll.mjs`), so enrolling the phone against the work instance is the same
+(`enroll.mjs`), so enrolling the phone against the second instance is the same
 ceremony run again against a second origin. Host-minted `owner_tokens` are
 rows in that instance's Postgres and reach only `/capture`, `/message`,
 `/api/status` and named queries (CRIT-7) — the right credential class for a
@@ -82,16 +82,17 @@ scoped to the selected instance. Not a unified inbox with instance chips.
 Reasons, from `docs/product/design-system.md`:
 
 - **P5 — state is reported, never inferred.** A merged Needs You list whose
-  work half is three hours stale, because the laptop is asleep, presents one
-  list with two truth levels. Per-instance views can show "last synced 14:02
-  · instance unreachable" honestly at the top of *that* instance's screens.
+  second-instance half is three hours stale, because that laptop is asleep,
+  presents one list with two truth levels. Per-instance views can show "last
+  synced 14:02 · instance unreachable" honestly at the top of *that*
+  instance's screens.
 - **The ten destinations are the same on every platform.** An eleventh
   concept ("all instances") that exists only on the phone breaks the rule
   that nothing exists on one platform without a home on the others.
 
 Chips still appear, but as the **presence chip for the selected instance**
 (reachable / queued · 3 / asleep), not as a per-row provenance badge.
-The share extension's "capture to: Personal | Work" choice is the one
+The share extension's "capture to: Personal | Second" choice is the one
 cross-instance control.
 
 ### Push with two backends
@@ -121,10 +122,10 @@ APNs** with payload-free wake-and-fetch pings. Multi-instance confirms it:
 One store file per `instance_id`; one Keychain access group with items
 namespaced by `instance_id`; one outbox per instance. Search is scoped to the
 selected instance; "search all instances" is an explicit action only — the
-work vault is under a different employer's rules, and blending by default is
-a data-handling decision the owner never made. Deleting an
-instance from the phone deletes its store, Keychain items, and outbox, and
-calls `POST /api/devices/<id>/revoke` on the way out if reachable.
+second vault is under another organisation's rules, and blending by default
+is a data-handling decision the owner never made. Deleting an instance from
+the phone deletes its store, Keychain items, and outbox, and calls
+`POST /api/devices/<id>/revoke` on the way out if reachable.
 
 ## Q2 — backends that are not always there
 

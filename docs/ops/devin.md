@@ -5,12 +5,13 @@ Three surfaces, one of which exists today:
 | # | surface | direction | status |
 | --- | --- | --- | --- |
 | 1 | **Devin as an external agent** at the console's `/mcp` | Devin → this instance | **now**, `metistry connect devin` |
-| 2 | **Devin knowledge into the vault** (`collectors/devin-knowledge`) | Devin → inbox | W5, not built |
+| 2 | **Devin knowledge into the vault** (`collectors/devin-knowledge`) | Devin → inbox | **now**, W5 |
 | 3 | **Devin as a compute target** (`targets/devin-sessions`) | this instance → Devin | W6, not built |
 
-W5/W6 are `docs/plan-refresh-2026-09-13.md` §4b; both need the owner's Devin
-PAT, and an enterprise PAT policy is **disabled by default**, so check that
-before promising either. What follows is surface 1.
+W5/W6 are `docs/plan-refresh-2026-09-13.md` §4b; both need a Devin `cog_`
+credential, and an enterprise PAT policy is **disabled by default**, so check
+that before promising either. Surface 1 is next; surface 2 is
+"[Knowledge in](#knowledge-in)".
 
 ## Connect
 
@@ -118,13 +119,142 @@ there is no file on this machine to read, so "connected" for Devin means
 "the row exists and you pasted it". Revocation is permanent — the row stays
 for provenance and the id cannot be re-minted.
 
+## Knowledge in
+
+`collectors/devin-knowledge` pulls Devin Knowledge notes and repository wiki
+pages into the inbox as captures, and the evening fold
+(`docs/ops/knowledge-fold.md`) organises them into the vault. This is the
+"learn the repos and the process" half, and it is **outbound-only**: Metistry
+calls Devin, so it needs no inbound path and nothing to do with the tunnel
+question above.
+
+Ruled a **collector**, not a bridge: the assistant mounts exactly one MCP
+server (`brainOptions`' `strictMcpConfig`, invariant 9), so a first-party
+DeepWiki bridge would have no caller inside Metistry. A collector is not the
+assistant, so it may speak to a foreign server as an ordinary HTTP client.
+
+### Configure
+
+```sh
+# <instance>/state/.env
+METISTRY_DEVIN_API_KEY=cog_…      # service-user key or PAT; user-scoped in the Keychain
+METISTRY_DEVIN_ORG_ID=org-…       # only for account-scoped tokens (see below)
+METISTRY_DEVIN_REPOS=acme/api,acme/web   # optional: the wiki half
+METISTRY_DEVIN_MAX_ITEMS=200      # cap per run
+```
+
+Then `metistry secrets sync --to keychain` and restart the console. With no
+key the collector **degrades absent**: `run()` returns 0 without error and
+`check()` reports `absent` with that remediation — captures, tasks, search and
+every other collector carry on.
+
+`METISTRY_DEVIN_API_KEY` is **user-scoped** in the Keychain
+(`packages/cli/src/secrets.ts`), like `CLAUDE_CODE_OAUTH_TOKEN` and the AWS
+keys: it is the person's own credential, shared by every instance on the Mac,
+and `metistry secrets purge` must never take it.
+
+`METISTRY_DEVIN_ORG_ID` is only needed when the token is account-scoped — an
+enterprise service-user key, or any PAT. An org-scoped service-user key
+resolves its own organization, which is what `check()`'s probe
+(`GET /v3/self`) reports. Without either, `doctor`/`check()` says `degraded`
+and names the variable rather than failing silently.
+
+### Transports, and why each one
+
+Chosen by what Devin documents, not by preference (all verified against
+docs.devin.ai on 2026-09-15):
+
+| what | how | why |
+| --- | --- | --- |
+| Knowledge notes | REST v3 `GET /v3/organizations/{org_id}/knowledge/notes`, `fetch` | a documented REST route exists, so no MCP client is needed |
+| Repo wikis | MCP `https://mcp.devin.ai/mcp`, `read_wiki_contents` / `read_wiki_structure` | **there is no REST route** — the v3 `repositories/*` endpoints cover indexing status only |
+
+> "The Devin MCP server is an authenticated service that provides access to
+> both public and private repositories" — `/work-with-devin/devin-mcp`
+
+Notes pagination is cursor-based: `first` (default 100, max 200) + `after`,
+answering `{items, has_next_page, end_cursor, total?}`. `KnowledgeNoteResponse`
+carries `note_id`, `name`, `body`, `trigger`, `folder_path`, `pinned_repo`,
+`is_enabled`, `access_type` and `created_at` / `updated_at` as **integer**
+epochs. There is no `updated_after` filter, so the watermark is applied
+client-side.
+
+`ask_question` is never called. It is AI-powered synthesis and it spends; a
+collector never calls a model. If a question needs answering, that is a
+dispatch (W6), not a collector.
+
+### Schedule, watermark, and the 429 rule
+
+`schedule: "@hourly"`. Devin publishes **no rate limits** — `429 Too Many
+Requests` is in the status-code table and nothing else — so hourly is a
+conservative guess, not a documented ceiling.
+
+The watermark is `meta.since` on the collector's own `runs` row (plus
+`since_iso`, so an operator can read it): Devin's raw `updated_at` integer,
+which needs no guess about the unit. First run with no watermark = everything,
+oldest first, capped at `METISTRY_DEVIN_MAX_ITEMS`; the next run resumes
+where the batch stopped.
+
+A `429` is **backoff-and-stop, not a failed run**: the partial listing is
+discarded, the watermark does not move, `run()` returns what it had, and the
+wiki half is skipped. The next hourly tick re-lists from the same point.
+
+### What lands in the inbox
+
+One capture per note, and one per wiki page, `source: "devin"`, mime
+`text/markdown`, frontmatter then the source text unchanged:
+
+```yaml
+---
+source: "devin"
+kind: "knowledge"            # or "wiki"
+devin_id: "note_abc123"      # wiki: "owner/repo#3"
+title: "Deploy runbook"
+folder: "/Engineering"       # knowledge only
+repo: "acme/api"             # pinned_repo, or the wiki's repo
+trigger: "when deploying"    # knowledge only
+updated_at: "2026-09-14T10:02:00.000Z"   # knowledge only — see below
+content_sha256: "…"          # wiki only — see below
+captured_at: "2026-09-15T12:00:00.000Z"
+---
+```
+
+`idempotency: {principal: "collector:devin-knowledge", key: "<kind>:<devin_id>:<version>"}`,
+so a re-run is a no-op and a changed item lands **once per version**. For a
+note the version is `updated_at`; for a wiki page it is the content digest,
+because the wiki tools return neither a page id nor a timestamp — which is
+also why a wiki capture carries `content_sha256` instead of `updated_at`
+rather than inventing one.
+
+`source_agent` is **NULL**. Identity comes from the credential, and this
+credential is the owner's own Devin key, not an agent's bearer — so
+`inbox-drain` proposes these at `user` trust. The content is foreign, and if
+that should read `external` it is a rule in `inbox-drain` keyed on `source`,
+not something this collector may decide.
+
+### Two safety points
+
+- **Nothing is redacted, deliberately.** Redaction is core's job at a
+  boundary (`redactSecrets`, §4.3), and today `captureToInbox` does **not**
+  apply it — every capture door stores bytes verbatim, including the owner's
+  own. So a Devin note with a secret in its body lands verbatim in the inbox.
+  That is the existing contract, stated here so nobody assumes otherwise.
+- **`source: devin` is a new provenance class**, and it is exactly what
+  `checkBrief`'s `deny_sources` scanner keys on (§4.18.B). Once these notes
+  are folded into the vault they are citable in a brief to any target whose
+  `allow` list covers their area. Add `devin` to `deny_sources` on outbound
+  targets unless re-export is wanted.
+
+### The reverse direction is not built, on purpose
+
+Vault → Devin Knowledge is possible (`POST/PUT …/knowledge/notes`,
+`devin_knowledge_manage`) and ships **nowhere**. Invariant 9: an outbound
+mutation needs an allowlisted bridge with preview-then-confirm, and this one
+would push the owner's own notes into a third-party cloud whose default is
+"we may train on your data".
+
 ## Coming
 
-- **W5 — knowledge in.** A TypeScript collector pulling Devin Knowledge notes
-  and repository wiki pages into the inbox as captures with
-  `source: devin` provenance, so the fold organises them. Ruled a
-  **collector**, not a bridge: the assistant mounts exactly one MCP server,
-  so a first-party DeepWiki bridge would have no caller inside Metistry.
 - **W6 — dispatch out.** `targets/devin-sessions` with a `transport: http`
   dispatcher, `max_acu_limit` from the budget, a `structured_output_schema`
   for the report, and **polling** for completion (Devin has no outbound

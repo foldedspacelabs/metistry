@@ -65,6 +65,7 @@ export interface ScopeRule {
 export const SECRET_SCOPES: readonly ScopeRule[] = [
   { scope: "user", match: "CLAUDE_CODE_OAUTH_TOKEN", why: "the person's Claude subscription login — one per Mac, shared by every instance" },
   { scope: "user", match: /^METISTRY_AWS_(SECRET_ACCESS_KEY|SESSION_TOKEN)$/, why: "the person's own AWS credentials (aws-costs), not this instance's" },
+  { scope: "user", match: /^METISTRY_DEVIN_API_KEY$/, why: "the person's own Devin (Cognition) credential (devin-knowledge) — one per Mac, shared by every instance, and it outlives any one instance directory" },
   { scope: "instance", match: /^METISTRY_DB_PASSWORD$/, why: "this instance's Postgres, in its own state/pg" },
   { scope: "instance", match: /^METISTRY_LOCAL_OWNER_TOKEN$/, why: "the local owner door into THIS instance's console (docs/ops/auth.md) — a second instance must not open the first's" },
   { scope: "instance", match: /^METISTRY_BRIDGE_TOKEN_/, why: "a bearer this instance's bridges were started with" },

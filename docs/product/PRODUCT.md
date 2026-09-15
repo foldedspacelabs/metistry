@@ -1348,3 +1348,18 @@ launchd cannot even see.
   `429` is backoff-and-stop rather than a failed run, with the watermark held so
   nothing is skipped. Outbound-only, so it needs no inbound exposure — the shape
   that works on a machine behind no tunnel.
+- 2026-09-15 — **Automation that admits when it is broken.** Scheduled work
+  now has a failure model: a collector that fails five times in a row stops
+  being run at all until it succeeds again, a component whose declared
+  prerequisites are missing never starts a run (so a misconfigured one costs
+  nothing rather than an API call an hour), and one fault raises one **Needs
+  You** item a day instead of one an hour — deduped by a signature that
+  survives the ids, paths and timings that change between two occurrences of
+  the same error. `metistry doctor` gained a `schedules` section that says,
+  per component, when it last ran, whether it worked, how many failures are
+  open and whether the runner has given up on it. The benefit is the sentence
+  that did not exist before: a token that expires on holiday used to show up
+  as a slightly lower number on a tile, and now says "this has failed 168
+  times — here is the variable that fixes it". Nothing here counts dollars;
+  it is the cheap half of not wasting them. `docs/ops/automation.md`.
+

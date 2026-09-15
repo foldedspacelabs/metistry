@@ -7,9 +7,13 @@
 //
 // Every dispatch — refused or sent — is a two-phase `runs` row (CRIT-8)
 // carrying the target's cost profile, so per-target spend is one query.
-// The first transport is `github`: an issue in the configured repo is the
-// external work queue (§6 decision 4); github-state reconciles its status
-// back onto the same work row by `gh:owner/repo#n`.
+// Two transports dispatch today. `github`: an issue in the configured repo is
+// the external work queue (§6 decision 4); github-state reconciles its status
+// back onto the same work row by `gh:owner/repo#n`. `http` + `submit.kind:
+// devin-session`: a Devin session (W6), bound as `devin:<session_id>` and
+// polled home by `collectors/devin-sessions` — Devin publishes no completion
+// webhook, so the return is a poll, and the answer lands as a `report`
+// proposal rather than as a status change.
 
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -24,6 +28,15 @@ import {
   type ErrorCode,
   type TargetManifest,
 } from "@foldedspacelabs/metistry-core";
+import { DEVIN_API, devinRef, type DevinWorkMeta } from "@metistry-apps/collectors";
+import {
+  DEFAULT_PURPOSE,
+  DEVIN_ANSWER_SCHEMA,
+  devinSessionBody,
+  resolveMaxAcu,
+  schemaIssues,
+  type DevinPurpose,
+} from "./devin.js";
 
 export interface Db {
   query(text: string, values?: unknown[]): Promise<{ rows: any[] }>;
@@ -115,6 +128,25 @@ export function resolveRef(value: unknown, env: NodeJS.ProcessEnv): string | und
 }
 
 const GITHUB_API = "https://api.github.com";
+/** `submit.kind` of the one http target this console implements (targets/devin-sessions). */
+export const DEVIN_SUBMIT_KIND = "devin-session";
+
+export interface DevinSubmitInput {
+  brief: string;
+  title: string;
+  taskId: number;
+  purpose: DevinPurpose;
+  /** Per-dispatch ACU ceiling; falls back to the manifest's `submit.max_acu`, then to the small default. */
+  maxAcu?: number | undefined;
+}
+
+export interface DevinSubmission {
+  ref: string;
+  url: string;
+  session_id: string;
+  org: string;
+  max_acu: number;
+}
 
 export class TargetRegistry {
   private readonly targets = new Map<string, TargetManifest>();
@@ -191,6 +223,25 @@ export class TargetRegistry {
     };
   }
 
+  /**
+   * Resolved Devin config, or the reason it is unavailable. `submit.org` is
+   * REQUIRED here even though collectors/devin-knowledge can resolve an org
+   * from `GET /v3/self`: a session is a spend, and which organization it is
+   * charged to is not something to infer.
+   */
+  private devin(m: TargetManifest): { ok: true; token: string; org: string; base: string } | { ok: false; remediation: string } {
+    const token = resolveRef(m.auth, this.env);
+    const org = resolveRef(m.submit.org, this.env);
+    if (!token) return { ok: false, remediation: `set ${String(m.auth)} (the same \`cog_\` key collectors/devin-knowledge reads — docs/ops/devin.md)` };
+    if (!org) return { ok: false, remediation: `set ${String(m.submit.org)} to the organization id the session should be charged to (\`org-…\`; GET /v3/self reports it for an org-scoped key)` };
+    return { ok: true, token, org, base: resolveRef(m.submit.url, this.env) ?? DEVIN_API };
+  }
+
+  /** `http` targets this console implements. An http target with another `submit.kind` validates and lists, and dispatch refuses it by name. */
+  static isDevin(m: TargetManifest): boolean {
+    return m.transport === "http" && m.submit.kind === DEVIN_SUBMIT_KIND;
+  }
+
   /** Behavioral probe (Phase 0 rule 3): unset config → absent; set → the repo is actually readable with the write token. */
   async check(name: string): Promise<CheckResult> {
     const m = this.targets.get(name);
@@ -202,10 +253,23 @@ export class TargetRegistry {
         meta: { via: "agents_delegate", submit: m.submit, result: m.result },
       }));
     }
+    if (TargetRegistry.isDevin(m)) {
+      const dv = this.devin(m);
+      if (!dv.ok) return runCheck(name, "resolve auth + submit.org from environment", async () => ({ status: "absent", remediation: dv.remediation }));
+      return runCheck(name, "GET /v3/self with the Devin key (session creation itself is not probed — it spends)", async () => {
+        const res = await this.fetchFn(`${dv.base}/v3/self`, {
+          headers: this.devinHeaders(dv.token),
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (res.status === 429) return { status: "degraded" as const, remediation: "Devin answered 429 — the key works but the API is rate limiting; dispatch retries on the next attempt" };
+        if (!res.ok) throw new Error(`devin HTTP ${res.status} — check the key (legacy apk_ keys are dead; use a cog_ service-user key or PAT)`);
+        return { meta: { org: dv.org, base: dv.base } };
+      });
+    }
     if (m.transport !== "github") {
       return runCheck(name, `dispatcher for transport ${m.transport}`, async () => ({
         status: "absent",
-        remediation: `transport ${m.transport} has no dispatcher in this console yet`,
+        remediation: `transport ${m.transport}${m.transport === "http" ? ` with submit.kind ${JSON.stringify(m.submit.kind ?? null)}` : ""} has no dispatcher in this console yet`,
       }));
     }
     const gh = this.github(m);
@@ -257,7 +321,42 @@ export class TargetRegistry {
     return { ref: `gh:${gh.repo}#${issue.number}`, url: issue.html_url };
   }
 
+  private devinHeaders(token: string): Record<string, string> {
+    return {
+      authorization: `Bearer ${token}`,
+      accept: "application/json",
+      "user-agent": "metistry-dispatch",
+    };
+  }
+
+  /**
+   * Create the session. Exposed for the dispatcher only. The structured-output
+   * contract is validated BEFORE the request goes out: `structured_output_required`
+   * defaults to true at Devin, so a malformed schema would turn the whole
+   * dispatch into an unvalidated blob, and that is a refusal, not a warning.
+   */
+  async submitDevin(m: TargetManifest, input: DevinSubmitInput): Promise<DevinSubmission> {
+    const dv = this.devin(m);
+    if (!dv.ok) throw new Error(`target ${m.name} unavailable: ${dv.remediation}`);
+    const issues = schemaIssues(DEVIN_ANSWER_SCHEMA);
+    if (issues.length > 0) throw new Error(`structured_output_schema is not Draft 7: ${issues.join("; ")}`);
+    const maxAcu = resolveMaxAcu(input.maxAcu, m.submit.max_acu);
+    const body = devinSessionBody({ ...input, target: m.name, maxAcu });
+    const res = await this.fetchFn(`${dv.base}/v3/organizations/${encodeURIComponent(dv.org)}/sessions`, {
+      method: "POST",
+      headers: { ...this.devinHeaders(dv.token), "content-type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!res.ok) throw new Error(`devin sessions (org ${dv.org}): HTTP ${res.status}`);
+    const session = (await res.json()) as { session_id?: string; url?: string };
+    if (!session.session_id) throw new Error("devin sessions: response carried no session_id");
+    const url = session.url ?? `${dv.base}/sessions/${session.session_id}`;
+    return { ref: devinRef(session.session_id), url, session_id: session.session_id, org: dv.org, max_acu: maxAcu };
+  }
+
   available(m: TargetManifest): boolean {
+    if (TargetRegistry.isDevin(m)) return this.devin(m).ok;
     return m.transport === "github" && this.github(m).ok;
   }
 }
@@ -277,6 +376,19 @@ export function returnFooter(taskId: number, target: string): string {
   ].join("\n");
 }
 
+export interface DispatchOptions {
+  /**
+   * Why the brief is going. `knowledge_research` is the W6 brief kind: a
+   * question the assistant cannot answer, whose whole output is the answer.
+   * A `purpose` rather than a new `work.kind` on purpose — `packages/tasks`
+   * owns two claimable kinds and github-state owns the rest, so a third
+   * would ripple for no gain (apps/console/src/devin.ts).
+   */
+  purpose?: DevinPurpose | undefined;
+  /** Per-dispatch budget ceiling, in Devin ACUs; overrides the manifest's `submit.max_acu`. */
+  max_acu?: number | undefined;
+}
+
 /**
  * Send a task's brief to a target. `principal` is the SERVER-SIDE identity
  * the adapter derived from the credential (§4.19) — it is written to the
@@ -291,6 +403,7 @@ export async function dispatch(
   brief: string,
   principal: string,
   sources: string[] = [],
+  opts: DispatchOptions = {},
 ): Promise<DispatchResult> {
   const target = registry.get(targetName);
   if (!target) return { ok: false, code: "not_found", message: "unknown target" };
@@ -303,11 +416,12 @@ export async function dispatch(
   if (task.status === "closed") return { ok: false, code: "conflict", message: "task is closed" };
 
   // Refusals are runs rows too: the safety mechanism must be visible, not silent.
+  const purpose: DevinPurpose = opts.purpose ?? DEFAULT_PURPOSE;
   const runId = await startRun(db, {
     component: "console",
     kind: "dispatch",
     tool: target.name,
-    meta: { target: target.name, task: taskId, principal, brief_bytes: Buffer.byteLength(brief, "utf8") },
+    meta: { target: target.name, task: taskId, principal, purpose, brief_bytes: Buffer.byteLength(brief, "utf8") },
   });
 
   const violations = checkBrief(target.data_policy, brief, sources);
@@ -316,10 +430,14 @@ export async function dispatch(
     return { ok: false, code: "invalid_request", message: "brief violates the target's data policy", violations };
   }
 
-  if (target.transport !== "github") {
+  const isDevin = TargetRegistry.isDevin(target);
+  if (target.transport !== "github" && !isDevin) {
     await finishRun(db, runId, { ok: false, error: `transport ${target.transport} not dispatchable` });
     // a local target is a crew's: it is dispatched by the assistant's agents_delegate tool (apps/console/src/crews.ts), never by this route
-    const message = target.transport === "local" ? `transport local is dispatched by the assistant's agents_delegate tool, not by this route (docs/ops/crews.md)` : `transport ${target.transport} has no dispatcher in this console yet`;
+    const message =
+      target.transport === "local"
+        ? `transport local is dispatched by the assistant's agents_delegate tool, not by this route (docs/ops/crews.md)`
+        : `transport ${target.transport}${target.transport === "http" ? ` with submit.kind ${JSON.stringify(target.submit.kind ?? null)}` : ""} has no dispatcher in this console yet`;
     return { ok: false, code: "invalid_request", message };
   }
 
@@ -330,8 +448,25 @@ export async function dispatch(
   }
 
   let submitted: { ref: string; url: string };
+  let devinMeta: DevinWorkMeta | null = null;
   try {
-    submitted = await registry.submitGithub(target, task.title, `${brief.trimEnd()}\n\n${returnFooter(taskId, target.name)}\n`);
+    if (isDevin) {
+      const session = await registry.submitDevin(target, { brief, title: task.title, taskId, purpose, maxAcu: opts.max_acu });
+      submitted = { ref: session.ref, url: session.url };
+      // Everything the poller needs, frozen onto the row: it must not have to
+      // re-derive the organization from the environment to read an answer back.
+      devinMeta = {
+        session_id: session.session_id,
+        org: session.org,
+        url: session.url,
+        max_acu: session.max_acu,
+        purpose,
+        target: target.name,
+        dispatch_run_id: runId,
+      };
+    } else {
+      submitted = await registry.submitGithub(target, task.title, `${brief.trimEnd()}\n\n${returnFooter(taskId, target.name)}\n`);
+    }
   } catch (err) {
     await finishRun(db, runId, { ok: false, error: err instanceof Error ? err.message : String(err) });
     return { ok: false, code: "internal", message: "target submission failed" };
@@ -345,9 +480,9 @@ export async function dispatch(
   try {
     const upd = await db.query(
       `UPDATE work SET external_ref = $2, status = 'in_progress', claimed_by = $3, lease_expires_at = NULL,
-         history = history || $4::jsonb, updated_at = now()
+         history = history || $4::jsonb, meta = meta || $5::jsonb, updated_at = now()
        WHERE id = $1 AND external_ref IS NULL RETURNING id`,
-      [taskId, submitted.ref, `target:${target.name}`, entry],
+      [taskId, submitted.ref, `target:${target.name}`, entry, JSON.stringify(devinMeta ? { devin: devinMeta } : {})],
     );
     bound = upd.rows.length;
   } catch (err) {
@@ -361,7 +496,10 @@ export async function dispatch(
   await finishRun(db, runId, {
     ok: true,
     ...(target.cost ? { cost_usd: target.cost.per_run_estimate_usd } : {}),
-    meta: { ref: submitted.ref, url: submitted.url },
+    // The ACU cap IS the budget for a Devin dispatch; the spend Devin
+    // actually reports lands on this same row when the poller sees the
+    // session finish (collectors/devin-sessions).
+    meta: { ref: submitted.ref, url: submitted.url, ...(devinMeta ? { session_id: devinMeta.session_id, org: devinMeta.org, max_acu: devinMeta.max_acu } : {}) },
   });
   return { ok: true, ...submitted, run_id: runId };
 }

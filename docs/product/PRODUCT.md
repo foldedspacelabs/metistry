@@ -1348,3 +1348,20 @@ launchd cannot even see.
   `429` is backoff-and-stop rather than a failed run, with the watermark held so
   nothing is skipped. Outbound-only, so it needs no inbound exposure — the shape
   that works on a machine behind no tunnel.
+- 2026-09-15 — **Which model answers, and what it may spend, is one file the
+  owner edits.** `compute.yaml` names providers (any OpenAI-compatible
+  endpoint: a local server, OpenRouter, anything with a base URL), assigns a
+  pinned `<provider>/<model>` to each tier and crew, and records a daily or
+  monthly budget per provider and for the instance. The product benefit is
+  that compute stops being a build-time decision: the same install can run
+  entirely on this machine at zero marginal cost, or reach a frontier model
+  for the work that earns it, and moving between them is one command rather
+  than a rebuild. Three properties make it safe to hand someone: a refusal
+  always names the field that would permit it, so a bad edit is
+  self-explaining; an API key is read from stdin into the Keychain and can
+  never reach the repo, an argument list or a log; and an invalid file saved
+  while the system is running keeps the last good configuration instead of
+  falling back to nothing. The controls that spend money — the engine, the
+  budget check before each call — are deliberately not in this change: the
+  file and its verbs land first so the surface is settled before anything
+  bills against it.

@@ -152,17 +152,88 @@ Instance separation is the same mechanism as everywhere else: a Cursor
 window pointed at one instance can only reach that instance's vault
 (plan §4.16).
 
-## Coming: session capture
+## Session capture
 
-`sessionEnd` in `.cursor/hooks.json` — a Cursor session summarising itself
-into the inbox, with the same `idempotency_key` the Claude Code plugin and
-`metistry import-sessions` compute — is **W4** in
-`docs/plan-refresh-2026-09-13.md` §4b and not built. It is gated on one
-unknown: the format of the file at `transcript_path` is undocumented.
+`plugins/cursor` is the Cursor half of "a dev session lands in the inbox
+whichever tool it happened in". One `sessionEnd` hook, one note per finished
+session, the same `kind: "session"` frontmatter and the same
+`idempotency_key` the Claude Code plugin and `metistry import-sessions`
+compute — so the console dedupes across all three doors and `inbox-drain`
+classifies them identically.
 
-Worth knowing meanwhile: with "Include third-party Plugins, Skills, and
-other configs" enabled, Cursor reads `~/.claude/settings.json` and maps
-`SessionEnd` → `sessionEnd`, so if you have the Claude Code plugin's hook
-enabled Cursor will already invoke it — and it will read a transcript it
-cannot parse and capture nothing. That is a silent no-op, not a failure, and
-it is written down here so nobody debugs it twice.
+```sh
+node plugins/cursor/install.mjs          # merges into ~/.cursor/hooks.json
+export METISTRY_CAPTURE_ON_STOP=1        # the hook is inert without this
+```
+
+Both lines go next to the `METISTRY_AGENT_TOKEN_CURSOR` export above; the
+hook reads that same variable (an owner token is accepted as a fallback), so
+capture needs no second secret. Restart Cursor from that shell afterwards —
+the config is read at startup. `install.mjs` is idempotent, preserves every
+other hook in the file, replaces an entry left by a checkout that has moved,
+and `--remove` takes it back out. What it writes is Cursor's native shape,
+verified against `cursor.com/docs/hooks`:
+
+```json
+{
+  "version": 1,
+  "hooks": { "sessionEnd": [{ "command": "<checkout>/plugins/cursor/hooks/session-end.mjs", "timeout": 10 }] }
+}
+```
+
+**The seam for this verb.** `metistry connect cursor` does not install the
+hook today. When it does, it is one call and no new logic — the plugin owns
+its own installation:
+
+```
+node <plugin dir>/install.mjs --json   → { file, state, command, entry, event, enabled_by }
+```
+
+### What the note records, and what is missing
+
+The payload gives the session id, the workspace root (there is no `cwd` at
+session end), `duration_ms`, `reason`, `final_status`, `is_background_agent`,
+`error_message`, the model and the Cursor version. All of that is in the
+note.
+
+**There is no content summary — no turn counts, prompts, tools or files
+touched.** `sessionEnd` carries none of it, and the *format* of the file at
+`transcript_path` is undocumented: `cursor.com/docs/hooks` says only "Path to
+the main conversation transcript file (null if transcripts disabled)". A
+format is never guessed here, so the file is not read at all, and each note
+carries a short `## Not captured` section saying so rather than leaving you to
+wonder why a Cursor session reads thinner than a Claude Code one (whose
+transcript layout *is* confirmed — JSONL, documented in
+`packages/core/src/session-summary.ts`). If Cursor documents the format, that
+section disappears on its own and nothing else about the note changes.
+
+One consequence worth knowing: `started` and `ended` are `null`, because
+Cursor sends a duration and no timestamps and the wall clock cannot go in
+`ended` without changing the `idempotency_key` on every invocation. The wall
+clock is `captured_at`; the duration is a fact in the body. The key is
+therefore a pure function of the session id, which is what makes a retry
+after the offline fallback below an exact no-op.
+
+### The offline fallback
+
+```sh
+export METISTRY_CAPTURE_DIR="$HOME/Library/Mobile Documents/com~apple~CloudDocs/Metistry Inbox"
+```
+
+With that set, a session whose capture cannot reach the console is written
+there instead of dropped (SHOULD-10: one silent drop ends the trust) — the
+same folder `docs/ops/capture-shortcut.md` uses, and the same caveat applies:
+`inbox-drain` does not sweep it yet, so those notes wait until it does. The
+hook exits 0 either way; it can never fail or block the session it is
+capturing from.
+
+### If you already run the Claude Code plugin
+
+With "Include third-party Plugins, Skills, and other configs" enabled, Cursor
+reads `~/.claude/settings.json` and maps `SessionEnd` → `sessionEnd`
+(`docs/reference/third-party-hooks`; it must also be enabled for your
+account). So that hook may already fire inside Cursor — and it captures
+nothing, because it tries to parse a Claude Code transcript and finds
+something else. That is a silent no-op, not a failure, and it is written down
+here so nobody debugs it twice. `plugins/cursor` is the reason you do not
+need it to work.

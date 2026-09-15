@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "noEmit": true,
+    "declaration": false,
+    // The shipped scripts are plain .mjs (the plugin has no build step), and
+    // test/session-parity.test.ts imports lib.mjs to hold it to packages/core.
+    // allowJs lets tsc infer types for it; checkJs stays off — the .mjs is
+    // held to its behaviour by tests, not to type annotations it cannot carry.
+    "allowJs": true,
+    "checkJs": false
+  },
+  "include": ["test/*.ts", "scripts/*.mjs", "hooks/*.mjs", "install.mjs"]
+}

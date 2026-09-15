@@ -9,8 +9,13 @@ hosting-agnostic by construction (invariants 7–8): services bind configured
 ports, network exposure is the user's routing layer, and the Apple tier is a
 satellite, not a dependency. Local-first in ownership (your data in your git
 and your Postgres, local models where they win), not local-only in
-deployment. Two kinds of repo: one public product repo (code, Apache-2.0),
-and one private instance repo per install (vault + config) — see §4.16.
+deployment. **(refresh 2026-09-13)** "Where they win" is now settled by
+configuration, not by us: all compute — the main agent included — is chosen by
+the user in `compute.yaml`, one OpenAI-compatible engine speaks to every
+provider, and a bundled `llama-server` makes the local option no-install. See
+§4.18 and `docs/plan-refresh-2026-09-13.md`. Two kinds of repo: one public
+product repo (code, Apache-2.0), and one private instance repo per install
+(vault + config) — see §4.16.
 
 ---
 
@@ -281,7 +286,7 @@ the EventKit and Apple FM bridges.
 | 1 MCP+TCC headless | **PASS** | The headless door works. TCC attributes access to the responsible process, so a stdio MCP server inherits the *agent's* TCC identity — an HTTP bridge as its own launchd service is the only shape that works without granting FDA to the agent binary. |
 | 2 iMessage attachments | **PARTIAL / PASS** | Text door + *opportunistic* media door: ~89% of images older than a few days are iCloud-offloaded, but a just-received image is on disk within a minute. Copy-on-detect works; the share sheet is the canonical media path. |
 | 3 Apple FM headless | **PASS** | 2.2 items/sec under launchd, byte-identical to interactive. Swift-only (no Python SDK). 4096-token context, fresh session per item. |
-| 4 Container → host bridge | **PASS** | Networking (explicit `add-host`, no Desktop magic), subscription-token auth, and session-survives-restart all pass. **Decision #9 = Docker.** |
+| 4 Container → host bridge | **PASS** | Networking (explicit `add-host`, no Desktop magic), subscription-token auth, and session-survives-restart all pass. **Decision #9 = Docker.** *(The auth leg is superseded — refresh 2026-09-13: the product's credential is a provider API key named by `compute.yaml`; networking and session survival stand. See §4.18.)* |
 | 5 pgvector | **PASS (mechanics)** | Ollama `nomic-embed-text` (768d), ~125 chunks/sec, deterministic rebuild. Retrieval *quality* deferred until the real vault has content. |
 | 6 PWA + web push | **PASS** | Delivered to iPhone over the tailnet. VAPID `sub` must be a real contact (Apple rejects `example.invalid`); tailnet needs Serve + HTTPS enabled. |
 | 7 HTTP capture | **PASS** | All surfaces incl. a 25 MB binary, byte-identical. |
@@ -322,7 +327,10 @@ tool," and each is now load-bearing rather than stylistic):**
 6. **Container config is Linux-portable by construction** — explicit
    `extra_hosts: host-gateway`, bridge URLs from env, subscription token via
    `CLAUDE_CODE_OAUTH_TOKEN` (never set `ANTHROPIC_API_KEY` in-container). See
-   §4.17, §6 #9.
+   §4.17, §6 #9. *(The credential clause is superseded — refresh 2026-09-13:
+   the subscription path leaves the product; the engine reads a provider API
+   key from the Keychain via `compute.yaml`. Portability of the container
+   config is unaffected. `docs/research/2026-09-11-local-models-openrouter-opencode.md`.)*
 
 ### PoC-1 — MCP tool call under `claude -p` with macOS permissions
 
@@ -406,6 +414,14 @@ survival:
 docker compose restart cos
 # resume a session UUID created before the restart, confirm it remembers
 ```
+
+*(Superseded in part — refresh 2026-09-13: PoC-4's **auth** finding
+("subscription `setup-token`; never `ANTHROPIC_API_KEY`") no longer describes
+the product. The subscription path leaves the repo and the engine authenticates
+with a provider API key named by `compute.yaml` — see §4.18 and
+`docs/research/2026-09-11-local-models-openrouter-opencode.md`. What PoC-4
+measured — host reachability without Docker-Desktop magic, and session survival
+across a restart — stands unchanged.)*
 
 ### PoC-5 — pgvector retrieval quality on your notes
 
@@ -573,7 +589,13 @@ Haiku baseline on every quality axis on identical fixtures; reasoning-mode
 measurably hurt the task; calibration, not parameter count, decides. The
 invariant-4 amendment remains gated on an independent confirmatory eval
 (blind fixtures, ≥50 deep items) with `gemma4:e4b` as candidate. Full
-evidence: `docs/poc/RESULTS.md` §PoC-16.
+evidence: `docs/poc/RESULTS.md` §PoC-16. **(refresh 2026-09-13)** A
+single-shot scoring pass does not transfer to an agent loop, so the **bake-off
+PoC** in `docs/plan-refresh-2026-09-13.md` §3 supersedes the gated amendment as
+the route to a *main-agent* default: owner-authored fixtures, one quality axis
+each, a third-family judge, and the local server as a measured axis. The blind
+confirmatory eval still governs the **scorer** question; gemma-4 is a
+scorer-only candidate there (`docs/research/2026-09-12-atomic-agent-review.md`).
 
 ### Already settled
 
@@ -757,6 +779,38 @@ decision #15, resolved) — and ships through **GitHub Releases** with
 signed, notarized builds and **auto-update** from a release-backed
 appcast. The product framing still accumulates in `docs/product/PRODUCT.md`,
 now for launch material rather than a pitch.
+
+### Queue refresh (2026-09-13)
+
+Phases 1–5 are built, so the work is PR-shaped rather than phase-shaped. The
+day's decisions (seven research notes, 2026-09-11/12) are consolidated in
+**`docs/plan-refresh-2026-09-13.md`** — decisions log, contradictions resolved,
+the bake-off, and what is still open. In brief, in order:
+
+1. **`compute.yaml`** — schema in `packages/core`, seed + templates, `metistry
+   compute` verbs, hot reload, OpenRouter seed provider with Claude pinned, and
+   **the subscription/SDK scrub**. The Mac app's Compute pane and wizard step 7
+   split into their own PR.
+2. **Discovery and the local binary** — `/v1/models`, doctor rows, `compute
+   models list|install|load|unload`, LM Studio and Ollama as peers, embeddings
+   over `/v1/embeddings`, and the bundled `llama-server` in the runtime-deps
+   pack.
+3. **The bake-off PoC** (stage 0: the bar) once 2 lands and the owner's 50
+   fixtures exist.
+4. **The engine** — `openai-compatible` loop, cost columns, `spend`, budgets
+   with the routine pause, non-ZDR warning, cross-kind delegation refusal, plus
+   the loopback egress proxy, the 80 % budget warning, refusals that name the
+   config field, a no-progress veto, and shadow mode.
+5. **Apple FM `/v1`** after its PoC, then the **OpenCode plugin**.
+
+Independent of that chain, four grouped adopts from the prior-art reviews:
+automation hardening (preflight before spend, per-signature alert dedupe,
+failure streak, `doctor schedules`); a board view over `work` rows (two named
+queries → read-only panel → drags); threads hung off `work` rows (view →
+`work_id` anchor → autonomy levels, the last blocked on an open question); and
+contract hygiene (CI audit of unwired limits, a stdout-is-the-protocol
+conformance test, crew descriptions in `agents_delegate`). Each carries its own
+status in the refresh doc — several are proposals, not ratified work.
 
 ---
 
@@ -1854,7 +1908,7 @@ option open costs almost nothing if the rules below hold from the start.
 | EventKit | macOS framework | CalDAV / Google Calendar |
 | HealthKit ingest | iOS/macOS only | No fallback — accept the loss |
 | HomeKit | No headless API | No fallback |
-| Apple FM | Apple silicon + OS | Local model via Ollama, or Haiku |
+| Apple FM | Apple silicon + OS | Any `openai-compatible` provider in `compute.yaml` — the bundled `llama-server` first, LM Studio/Ollama if the user runs one, or a cloud model (refresh 2026-09-13) |
 | RTSP cameras | LAN presence | Reachable from cloud via the user's routing layer (e.g. tailnet) |
 
 **Two profiles**, selected in `deployment.yaml`:
@@ -1895,7 +1949,14 @@ option open costs almost nothing if the rules below hold from the start.
    survive `docker restart` via the mounted volume, so re-briefing is the
    recovery path, not the daily path.) Phase 2 adds the test: delete the
    transcript, re-brief, verify the thread continues sensibly.
-7. **Container auth is a subscription `setup-token` (PoC-4).** Mint on the host
+7. **Container auth is a subscription `setup-token` (PoC-4).** *(Superseded —
+   refresh 2026-09-13. Kept for the record; the rule now reads: **the engine
+   authenticates with a provider API key**, held in the Keychain under the name
+   `compute.yaml` gives it, user-scoped, never baked into an image and never in
+   argv. There is no token expiry for the watchdog to track. The subscription
+   path leaves the product entirely (§4.18); an instance may re-add one as its
+   own provider. See `docs/research/2026-09-11-local-models-openrouter-opencode.md`.)*
+   Mint on the host
    with `claude setup-token`, inject as `CLAUDE_CODE_OAUTH_TOKEN` via env/secret
    (never bake into the image). Never set `ANTHROPIC_API_KEY` in-container — it
    silently overrides onto per-token API billing. The token is ~1 year with no
@@ -1906,13 +1967,37 @@ Linux container surfaces. CI runs on Linux from Phase 1 for exactly this reason.
 
 ### 4.18 Flexible compute (added 2026-08-28)
 
+**(refresh 2026-09-13 — read this first; A–E below are the 2026-08-28 design
+and are superseded where they conflict.)** All AI compute, the main agent
+included, is user-configured in **one `compute.yaml`** in the instance repo — a
+§4.7 protected path holding `providers:` (kind, base URL, Keychain secret name,
+locality, ZDR, data policy, pricing), `assignments:` (`default`, per tier, per
+crew, as pinned `<provider>/<model>` with an effort; `/auto` and fallback lists
+are refused by the schema, so invariant 4 holds) and `budgets:`. The CLI
+(`metistry compute …`) and the Mac app's Compute pane edit it *as the user*;
+console and assistant hot-reload it. The product ships **one engine,
+`openai-compatible`** — the Claude Agent SDK and the subscription path leave the
+repo, and Claude arrives through OpenRouter with `anthropic/claude-sonnet-5`
+pinned. A **bundled, signed `llama-server`** (built from pinned source into the
+runtime-deps pack, like Postgres and git) is the no-install local provider;
+LM Studio and Ollama are supported peers discovered via `/v1/models`; Apple FM
+becomes a local provider by growing a `/v1` surface on its existing Swift
+bridge. The seed's non-Claude `default` and the bundled server are both chosen
+by a bake-off, not by this document. Sources:
+`docs/research/2026-09-11-local-models-openrouter-opencode.md` (rev 3–4, owner
+decisions, addendum 2026-09-12); queue and open questions in
+`docs/plan-refresh-2026-09-13.md`.
+
 The user configures what compute runs where — Claude subscription, other
 providers' APIs, local models, and external systems — without the router ever
 becoming model-driven. Three mechanisms, in increasing order of cost, and the
 constraint that binds all three: **v1 validates Claude-primary plus one
 alternate path; everything else is supported-by-configuration, not promised.**
 
-**A. Model configuration inside the assistant (now).** The Agent SDK reads
+**A. Model configuration inside the assistant (now).** *(Superseded — refresh
+2026-09-13: provider choice is `compute.yaml`, not `deployment.yaml` + env, and
+there is no SDK and no gateway in the path; a provider is a base URL plus a
+Keychain secret name.)* The Agent SDK reads
 model names and endpoint from environment; a gateway (LiteLLM-style,
 Bedrock, Vertex) puts non-Anthropic models behind the same interface. So
 provider choice is instance config (`deployment.yaml` + env), not
@@ -1934,7 +2019,10 @@ loops), and it only works on a byte-stable prefix. So: nothing volatile in
 the system prompt (dates, `now.md`, the brief go in the first user
 message); the tool list changes only with releases; model and effort
 change only at turn boundaries, never mid-turn; **tiers are (model,
-effort) pairs**, crews declare `effort`; fold and crew turns get fresh
+effort) pairs** — *since the refresh 2026-09-13 those pairs live in
+`compute.yaml` `assignments`, which supersede `rules.yaml`'s `tiers:` block and
+the `CREW_MODELS = haiku|sonnet|opus` crew field; `rules.yaml` keeps the routing
+rules and stops naming models* — crews declare `effort`; fold and crew turns get fresh
 sessions and chat sessions roll at task boundaries; on API billing,
 deferred turns route through the Batch API (50% off, stacks with
 caching). A deterministic prompt lint in CI catches the documented
@@ -1970,7 +2058,12 @@ data_policy: no_personal_comms # what a brief may carry — enforced at dispatch
 is a container with a defined contract: messages in from the router,
 `sessions` rows in Postgres, brain tools via MCP, every call logged to
 `runs`. That contract is documented; the product ships exactly **one** engine
-(Claude Agent SDK — the reference engine). Anyone can build another container
+(Claude Agent SDK — the reference engine). *(Superseded — refresh 2026-09-13:
+the one engine is now `openai-compatible`, in-house over the pre-approved MCP
+SDK + zod; the Agent SDK leaves the product and Claude is reached through
+OpenRouter. "Exactly one engine" is unchanged as a principle — only its identity
+moved. A native Anthropic Messages adapter behind the same interface stays a
+documented, unbuilt option.)* Anyone can build another container
 honoring the contract. No in-process provider-abstraction layer inside the
 engine — flexibility lives at the container boundary, so the primary path
 pays zero complexity tax.
@@ -2015,6 +2108,20 @@ the scenario warrants it (ruled 2026-09-01: inbox-drain classification
 qualifies — zero cost, on-device, output passes the deterministic
 redaction pass like any model output).
 
+**(refresh 2026-09-13)** Three additions, none of them a change of purpose.
+*The free on-device tier is now a provider*: Apple FM and the bundled
+`llama-server` are `openai-compatible` entries at cost 0, so "collectors never
+call a billable model" becomes a CI check on the provider a collector names
+rather than a rule to remember. *Budgets are enforced in the engine before the
+call*, against a `spend` named query, with `action: allow | stop |
+critical_only` — `stop` is the default and also **pauses routines**, since a
+stopped engine with a running scheduler just fills the queue with refusals
+(what counts as `critical` is still open). *Every call writes `provider` and
+`model` beside the existing tokens and `cost_usd`.* Off-machine assignments
+without ZDR write a warning row and show a badge — informed choice, never a
+block (owner ruling; the counter-proposal to send `data_collection: "deny"` is
+open, `docs/research/2026-09-12-hermes-agent-review-2.md`).
+
 **E. The gateway seam and the agent seam (added 2026-09-07).** Research
 in `docs/research/2026-09-agent-proxy-routing.md` (Quotio, CLIProxyAPI,
 LiteLLM) separated two questions that "an AI-agent proxy layer" blurs:
@@ -2030,7 +2137,10 @@ LiteLLM) separated two questions that "an AI-agent proxy layer" blurs:
   that re-present pooled subscription OAuth sessions as an API are not
   adopted or documented: the engine already runs on the subscription
   token by the sanctioned path, and the terms-of-service exposure is one
-  the project cannot underwrite for its users.
+  the project cannot underwrite for its users. *(The clause after the colon is
+  superseded — refresh 2026-09-13: the engine runs on a provider API key and the
+  subscription is gone from the product. The refusal to adopt pooled-OAuth
+  proxies stands, and now costs nothing to hold.)*
 - A gateway with virtual keys, budgets and cost attribution would have
   been a hosted tier's metering layer; the hosted plan was dropped
   2026-09-07 (fully open source), so this is simply a supported
@@ -2432,7 +2542,11 @@ Worth settling before Phase 1, since each is cheap now and annoying later.
    (explicit `add-host`, no Docker-Desktop magic), auth (subscription
    `setup-token` in `CLAUDE_CODE_OAUTH_TOKEN`, never `ANTHROPIC_API_KEY`), and
    session survival across `docker restart`. Watchdog tracks the ~1yr token
-   expiry (no auto-refresh). See §4.17.
+   expiry (no auto-refresh). See §4.17. *(Two amendments, both recorded rather
+   than rewritten: decision #15 (2026-09-07) made launchd the primary macOS
+   shape, compose the Linux/cloud one; and the auth leg is superseded — refresh
+   2026-09-13 — by a provider API key from `compute.yaml`, so there is no token
+   expiry left to track.)*
 
 **Resolved by the 2026-08-29 pre-implementation review** (D1–D10, ratified
 — full findings and rationale in `docs/plan-review-2026-08-29.md` §8):
@@ -2443,6 +2557,17 @@ Assistant cut, everything else kept (D9); soft daily-review budget (D10).
 All propagated into this document.
 
 **Still open**
+
+*Opened by the 2026-09-13 plan refresh* — stated in full, with their sources, in
+`docs/plan-refresh-2026-09-13.md` §4, and deliberately left unnumbered here
+until the owner rules: whether "open weights" is a criterion for the seed
+`default` model; whether per-agent `autonomy` may ever *widen* (it is
+narrowing-only by construction, which the owner's "lower the bar as trust
+grows" cuts against); whether non-ZDR stays a warning or becomes
+`data_collection: "deny"` by default with a per-provider opt-out; what
+`critical: true` may cover under a budget stop; whether `work.owner` is
+"addressed to" or authoritative; the prompt-caching shape to measure in the
+engine PR; and which cloud provider templates the seed ships.
 
 10. **HomeKit.** Deferred. No headless API; Home Assistant was considered
     for this and **cut (D9)**. The Apple-native path is Shortcuts
@@ -2515,7 +2640,13 @@ All propagated into this document.
 
 ## 7. Frameworks — decisions
 
-**Claude Agent SDK** — Metis. Already chosen, now framed precisely: it is the
+**Claude Agent SDK** — Metis. *(Superseded — refresh 2026-09-13: the SDK leaves
+the product with the subscription scrub. The one engine is in-house and
+OpenAI-compatible, and Claude is reached through OpenRouter on an API key
+(§4.18, `docs/research/2026-09-11-local-models-openrouter-opencode.md` rev 3,
+owner decision 5). `CLAUDE.md`'s Stack section and pre-approved dependency list
+still name the SDK; that is the owner's file to change, and it should change
+before the scrub PR lands.)* Already chosen, now framed precisely: it is the
 **reference engine** behind the documented assistant contract (§4.18.C). It
 is the agent framework for the shipped engine — explicitly a building block
 rather than an orchestration platform — and model/provider variation happens

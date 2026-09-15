@@ -11,7 +11,15 @@ import { loadTiers, RULES_FILES_DEFAULT } from "./tiers.js";
 if (process.env.ANTHROPIC_API_KEY) {
   throw new Error("ANTHROPIC_API_KEY must not be set (silently flips to API billing — PoC-4); use CLAUDE_CODE_OAUTH_TOKEN");
 }
-requireEnv("CLAUDE_CODE_OAUTH_TOKEN");
+// The engine never starts half-configured — but an install with NO credential
+// is a supported shape: `metistry up` leaves the assistant out of the
+// supervisor's children and doctor reports `assistant: absent`. So reaching
+// this line means something started the engine that should not have.
+if (!(process.env.CLAUDE_CODE_OAUTH_TOKEN ?? "").trim()) {
+  throw new Error(
+    "CLAUDE_CODE_OAUTH_TOKEN is unset — the supervisor should not have started the assistant without an engine credential (`metistry up` omits the child and `metistry doctor` reports `assistant: absent`); set it and re-run `metistry up`",
+  );
+}
 
 const pool = new pg.Pool({
   host: optionalEnv("METISTRY_DB_HOST", "127.0.0.1"),

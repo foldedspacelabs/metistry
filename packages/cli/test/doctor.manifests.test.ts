@@ -46,9 +46,10 @@ describe("manifest walk over the checkout", () => {
     });
     const rows = Object.fromEntries(report.rows.map((r) => [r.name, r]));
     // manifest-only kinds validate
-    for (const n of ["inbox-drain", "morning-brief", "github-issues", "assistant", "watchdog"]) expect(rows[n]?.status, n).toBe("ok");
-    // bridges with an env-configured URL are absent until configured
-    for (const n of ["apple-fm", "eventkit", "reconciler"]) expect(rows[n]?.status, n).toBe("absent");
+    for (const n of ["inbox-drain", "morning-brief", "github-issues", "watchdog"]) expect(rows[n]?.status, n).toBe("ok");
+    // bridges with an env-configured URL are absent until configured, and the
+    // assistant is absent until this install has an engine credential (W1)
+    for (const n of ["apple-fm", "eventkit", "reconciler", "assistant"]) expect(rows[n]?.status, n).toBe("absent");
     expect(rows["apple-fm"]?.remediation).toMatch(/set METISTRY_AFM_URL .*7810.* and METISTRY_BRIDGE_TOKEN_APPLE_FM/);
     expect(rows.eventkit?.remediation).toMatch(/METISTRY_EK_URL .*7811/);
     expect(rows.reconciler?.remediation).toMatch(/METISTRY_RECONCILER_URL .*7812/);
@@ -57,5 +58,29 @@ describe("manifest walk over the checkout", () => {
     expect(rows.brain?.status).toBe("failed");
     expect(rows.db?.status).toBe("absent");
     expect(rows.compose?.status).toBe("absent");
+  });
+
+  it("the assistant row: absent with the credential's own remediation, ok once it is set — never a failure either way", async () => {
+    const deps = {
+      productDir: repoRoot,
+      fetchFn: (async () => { throw new Error("no network in this test"); }) as unknown as typeof fetch,
+      db: null,
+      exec: async () => ({ code: 127, stdout: "", stderr: "" }),
+      platform: "linux" as const,
+    };
+    const rowFor = async (env: NodeJS.ProcessEnv) => (await doctor({ ...deps, env })).rows.find((r) => r.name === "assistant")!;
+
+    const absent = await rowFor({});
+    expect(absent.status).toBe("absent");
+    expect(absent.probe).toContain("CLAUDE_CODE_OAUTH_TOKEN set");
+    expect(absent.remediation).toMatch(/no engine credential: set CLAUDE_CODE_OAUTH_TOKEN/);
+    expect(absent.remediation).toMatch(/metistry secrets sync --to keychain/);
+    // an operator has to be able to tell "no model" from "broken"
+    expect(absent.remediation).toMatch(/captures, tasks, search and the console run, and fold turns wait/);
+
+    // a blank value is not a credential — .env keeps the commented-out line
+    expect((await rowFor({ CLAUDE_CODE_OAUTH_TOKEN: "  " })).status).toBe("absent");
+
+    expect((await rowFor({ CLAUDE_CODE_OAUTH_TOKEN: "oauth" })).status).toBe("ok");
   });
 });

@@ -88,6 +88,11 @@ export interface CollectorCtx {
   awsCostDays?: number;
   claudeUsageDays?: number; // claude-usage collector (trailing window)
   githubRepos?: string[];
+  devinApiKey?: string; // devin-knowledge collector (`cog_…` service-user key or PAT)
+  devinOrgId?: string; // `org-…`; resolved from GET /v3/self when unset
+  devinRepos?: string[]; // ["owner/repo", ...] whose wikis to pull; empty = notes only
+  devinMaxItems?: number; // cap per run (default 200)
+  inboxDir?: string; // where devin-knowledge's captureToInbox writes files
   fetchFn?: typeof fetch;
 }
 

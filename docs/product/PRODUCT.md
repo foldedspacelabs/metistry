@@ -1335,3 +1335,16 @@ launchd cannot even see.
   format is undocumented, so the file is not read and each note carries a
   `## Not captured` line — a gap the user can see beats a summary that quietly
   reads thinner than the other tool's.
+- 2026-09-15 — **Another organisation's knowledge arrives on its own.**
+  `collectors/devin-knowledge` pulls Devin (Cognition) Knowledge notes and
+  private-repo wiki pages into the inbox as captures with `source: devin`
+  provenance, and the evening fold organises them into the vault — replacing
+  organising those docs by hand. The benefit is that a second instance stops
+  being empty on day one: the context an existing agent already holds about a
+  codebase, its process and its culture becomes searchable vault pages without
+  anyone copying a page. Two properties make it safe to leave running: every
+  capture is idempotent on `(collector:devin-knowledge, <kind>:<id>:<version>)`,
+  so a re-run inserts nothing and an edited item lands exactly once more; and a
+  `429` is backoff-and-stop rather than a failed run, with the watermark held so
+  nothing is skipped. Outbound-only, so it needs no inbound exposure — the shape
+  that works on a machine behind no tunnel.

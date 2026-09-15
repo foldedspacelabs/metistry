@@ -2,11 +2,15 @@
 // prove control flow; only Postgres can prove the SQL — a partial unique
 // index needs its predicate repeated in ON CONFLICT, and the fake happily
 // accepted the statement Postgres rejected. Skipped without a db.
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
+import { startRun, finishRun } from "@foldedspacelabs/metistry-core";
 import { run as githubState } from "../github-state/run.js";
 import { run as claudeUsage } from "../claude-usage/run.js";
+import { PRINCIPAL, readWatermark, run as devinKnowledge } from "../devin-knowledge/run.js";
 
 try {
   for (const line of readFileSync(new URL("../../.env", import.meta.url), "utf8").split("\n")) {
@@ -30,8 +34,17 @@ describe.skipIf(!hasDb)("collectors (real db)", () => {
     await pool.query(`DELETE FROM work WHERE external_ref LIKE 'gh:itest/%'`);
     await pool.query(`DELETE FROM runs WHERE component = 'assistant' AND kind = 'turn'`); // scratch db: other suites' drain turns would land in the window
     await pool.query(`DELETE FROM metrics WHERE name LIKE 'claude.%'`);
+    await pool.query(`DELETE FROM inbox WHERE idempotency_principal = $1`, [PRINCIPAL]);
+    await pool.query(`DELETE FROM runs WHERE component = 'devin-knowledge'`);
   });
-  afterAll(async () => pool.end());
+  // The scratch db is shared with every other suite in the run, so rows this
+  // one made must not survive it: routines' weekly-review renders whatever
+  // `runs` holds, and three stray devin-knowledge rows failed it once.
+  afterAll(async () => {
+    await pool.query(`DELETE FROM runs WHERE component = 'devin-knowledge'`);
+    await pool.query(`DELETE FROM inbox WHERE idempotency_principal = $1`, [PRINCIPAL]);
+    await pool.end();
+  });
 
   it("github-state upserts through the partial unique index, then closes what vanished (recording merged state)", async () => {
     const page = (items: any[]) => (async (url: string) => ({
@@ -90,5 +103,62 @@ describe.skipIf(!hasDb)("collectors (real db)", () => {
       { day: "2026-09-05", model: "sonnet", name: "claude.tokens_in", value: 2000 },
       { day: "2026-09-05", model: "sonnet", name: "claude.tokens_out", value: 300 },
     ]);
+  });
+
+  // devin-knowledge writes through `captureToInbox`, whose retry safety is a
+  // PARTIAL unique index on (idempotency_principal, idempotency_key) — the
+  // one thing a fake db cannot prove. Two passes over the same note must
+  // leave one row, and the watermark must survive on the runs row the
+  // runner's `finishRun` then merges its own meta into.
+  it("devin-knowledge captures once per note version and carries a watermark on its runs row", async () => {
+    const inboxDir = mkdtempSync(join(tmpdir(), "metistry-devin-itest-"));
+    const note = (updated: number, body: string) => ({
+      note_id: "itest-1",
+      name: "Deploy runbook",
+      body,
+      trigger: "when deploying",
+      folder_path: "/Engineering",
+      pinned_repo: "itest/api",
+      is_enabled: true,
+      updated_at: updated,
+    });
+    const fetchFor = (updated: number, body: string) =>
+      (async (url: string) =>
+        new URL(url).pathname === "/v3/self"
+          ? { ok: true, status: 200, json: async () => ({ org_id: "org-itest" }) }
+          : { ok: true, status: 200, json: async () => ({ items: [note(updated, body)], has_next_page: false, end_cursor: null }) }) as unknown as typeof fetch;
+
+    // pass 1, inside a runs row exactly as the console's runner opens one
+    const ctx = { devinApiKey: "cog_itest", inboxDir };
+    let runId = await startRun(pool, { component: "devin-knowledge", kind: "collector_run" });
+    expect(await devinKnowledge(pool, { ...ctx, fetchFn: fetchFor(1_700_000_000, "v1") })).toBe(1);
+    await finishRun(pool, runId, { ok: true, meta: { processed: 1 } });
+    expect(await readWatermark(pool)).toBe(1_700_000_000);
+
+    // pass 2, same version: the unique index turns the insert into a replay
+    runId = await startRun(pool, { component: "devin-knowledge", kind: "collector_run" });
+    expect(await devinKnowledge(pool, { ...ctx, fetchFn: fetchFor(1_700_000_000, "v1") })).toBe(0);
+    await finishRun(pool, runId, { ok: true, meta: { processed: 0 } });
+
+    // pass 3, edited note: a new version is a new key, so one more row
+    runId = await startRun(pool, { component: "devin-knowledge", kind: "collector_run" });
+    expect(await devinKnowledge(pool, { ...ctx, fetchFn: fetchFor(1_700_000_900, "v2") })).toBe(1);
+    await finishRun(pool, runId, { ok: true, meta: { processed: 1 } });
+
+    const { rows } = await pool.query(
+      `SELECT source, source_agent, mime, idempotency_key, note FROM inbox
+       WHERE idempotency_principal = $1 ORDER BY idempotency_key`,
+      [PRINCIPAL],
+    );
+    expect(rows.map((r) => r.idempotency_key)).toEqual(["knowledge:itest-1:1700000000", "knowledge:itest-1:1700000900"]);
+    expect(rows.every((r) => r.source === "devin" && r.source_agent === null && r.mime === "text/markdown")).toBe(true);
+    expect(String(rows[1].note)).toContain(`devin_id: "itest-1"`);
+    expect(String(rows[1].note)).toContain("v2");
+    // the watermark rode through finishRun's `meta || …` merge, alongside `processed`
+    expect(await readWatermark(pool)).toBe(1_700_000_900);
+    const { rows: meta } = await pool.query(
+      `SELECT meta FROM runs WHERE component = 'devin-knowledge' AND kind = 'collector_run' ORDER BY id DESC LIMIT 1`,
+    );
+    expect(meta[0].meta).toMatchObject({ processed: 1, since: 1_700_000_900, since_iso: "2023-11-14T22:28:20.000Z" });
   });
 });

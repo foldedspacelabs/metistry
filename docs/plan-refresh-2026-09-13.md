@@ -64,7 +64,7 @@ containing a "proposal open" item is not, by being listed, authorised.
 | S1 | Coarse **capability advertisement** on `GET /api/identity`; `tools/list` stays token-gated | sam | **proposal accepted** 2026-09-15 ("I really like your read on the registry and advertisement") |
 | S2 | **Approve-before-enroll** for remote agents | sam | proposal accepted 2026-09-15 |
 | S3 | Agent identity `agent:<name>@<instance_id>` | sam | proposal accepted 2026-09-15 |
-| S4 | `instances.yaml` **peer registry** (the phone's instance list, and a work instance's directory of exposable resources: CLI commands, directories, MCP servers, compute, tasks/knowledge, Slack, Linear — discoverable and grantable by cloud and local agents wherever they run) | sam | proposal accepted 2026-09-15; scope of "resource" is OPEN-7 |
+| S4 | `instances.yaml` **peer registry** (the phone's instance list, and an instance's directory of exposable resources: CLI commands, directories, MCP servers, compute, tasks/knowledge, Slack, Linear — discoverable and grantable by cloud and local agents wherever they run) | sam | proposal accepted 2026-09-15; scope of "resource" is OPEN-7 |
 | S5 | `runs` NDJSON audit export | sam | proposal accepted 2026-09-15 |
 | S6 | An **internal mesh** (self-contained cross-device service wrapping, no tailnet dependency) | sam | BORROW-LATER — owner: "worth considering in the future"; not before the registry (S4) exists |
 | R2 | **Warn at 80 %** of every budget window, deduped, before `stop` fires | rivet | proposal open |
@@ -307,6 +307,42 @@ the Studio's overlay; ratifying `packages/eval`; the SDK removal in
 | OPEN-7 | Seed cloud templates: OpenRouter only, plus Zen, and leave "any base URL" to the form? | compute rev 3 Q2 |
 
 ---
+
+## 4b. Second-instance-first re-phase (2026-09-15)
+
+The owner is standing up a second instance in a separate context: knowledge to organise, project and
+long-term planning, the team's repositories to learn, and three agents
+that need access — Devin (connected to everything there; debugging and
+research), Cursor, and Claude Code (dev tool undecided; stay flexible).
+Second Mac: M5 Pro, 64 GB, full admin. **No Claude access on that instance for
+~a week.** Ruling: "develop capabilities in the main repo I can use
+there." Facts that shape the order: `inbox-drain` is deterministic
+(model-free), so captures still become proposals without an engine; only
+the evening fold enqueues an assistant turn; the assistant job
+hard-requires `CLAUDE_CODE_OAUTH_TOKEN` (`apps/assistant/src/main.ts`)
+and would crash-loop under the supervisor without it. Devin/Cursor
+surfaces verified in `2026-09-15-devin-cursor-integration.md` (#143).
+
+| # | what | proves / unblocks | who |
+| --- | --- | --- | --- |
+| W1 | **Assistant degrades absent**: no token → the supervisor does not start the assistant child, `doctor` reports `assistant: absent (no engine credential)`, fold turns queue and wait; everything else runs | a second instance runs today with no model | agent (Opus) |
+| W2 | **Cut v0.8.0** (changesets pending: offline contract #132, signed packs #133) | the second Mac installs signed packs + helpers via the Mac app | owner tags |
+| W3 | **`metistry connect <tool>`** — one generic verb: mint a per-tool agent token (`POST /api/agents` + grants, principal kind external), write the tool's native config: Cursor `~/.cursor/mcp.json` (`url` + `headers` with `${env:NAME}` so the token never hits disk), Devin (personal-scope custom Streamable-HTTP MCP with `Authorization: Bearer`, printed as instructions — no API to write it), Claude Code (existing plugin), OpenCode later (shrinks compute PR 5). Plus `docs/ops/{cursor,devin}.md` | Cursor and Devin read/search the vault, capture, and take tasks through `/mcp` | agent |
+| W4 | **Cursor session capture**: `sessionEnd` in `.cursor/hooks.json` (Cursor also loads `~/.claude/settings.json`, mapping `SessionEnd`), same idempotency key as the Claude Code plugin; gated on Cursor's transcript format (unverified) | dev sessions land in the inbox whichever tool is used | agent |
+| W5 | **Devin knowledge-in**: a collector pulling DeepWiki pages for the org's private repos and `devin_knowledge` items via `mcp.devin.ai/mcp` / REST v3 into the inbox as captures (`source: devin`, provenance), so the fold — or Cursor with a knowledge-write grant, until an engine exists — organises them | "learn the team's repos"; Devin's context reaches the vault | agent; owner's Devin PAT (enterprise PAT policy is off by default — owner to enable) |
+| W6 | **Devin as a compute target**: `targets/devin-sessions` with a new `transport: http` in `dispatch.ts`, `max_acu_limit` from the budget, `structured_output_schema` for the report, **polling** for completion (no outbound webhook exists), result → report proposal | debugging/research briefs dispatched, answers triaged; the first off-machine target that is not GitHub | agent |
+| W7 | Compute PRs 1→3 **with the local provider first** (bundled `llama-server`/LM Studio on the M5 Pro), Claude via OpenRouter second — the engine on the second instance is local until Claude access arrives; the bake-off (§3) runs alongside on both machines | Metis thinks on the second instance with zero cloud | agent + owner (fixtures) |
+
+**Exposure (2026-09-15 ruling):** the owner's home gateway is not available to the second instance, and no inbound exposure is assumed. The shapes that need none: W6 is *outbound-only* (Metis calls Devin's API and polls; results land in the inbox), and a local Devin CLI on the same Mac reaches `/mcp` on loopback. Cloud Devin as an MCP *client* (W3's Devin half) needs an inbound path — a per-instance tunnel with the console's own auth in front (Tailscale Funnel or Cloudflare Tunnel are the candidates; the S6 internal mesh is the long-term answer) — and is deferred until one is chosen. W6 grows a **knowledge-research** brief kind: a question Metis cannot answer is dispatched to Devin, the structured answer returns as a `report` proposal with provenance, and the fold files it — "agent delegation of knowledge research and gathering, collected and organised into the knowledge store."
+
+Dependencies: W1–W6 do **not** depend on the compute pivot; W5/W6 need
+the owner's Devin PAT; W6's data policy is that instance's own
+areas (a brief citing personal areas never leaves). The collaboration
+rule holds: Devin is a non-Claude agent — it claims unassigned work, is
+never pushed to by name. Grants today are `{tier, areas, queries}` and
+tool access follows principal kind (autonomy levels are A3, OPEN-2), so
+W3 needs no new grant shape. Training opt-out on dispatched briefs is a
+Teams-admin setting at Devin — owner to check before W6 ships a brief.
 
 ## 5. What this refresh did **not** change, and why
 

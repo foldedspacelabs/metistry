@@ -1,6 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
-import { EMBED_DEFAULT_DIM, EMBED_DEFAULT_MODEL, EMBED_DEFAULT_URL, EmbedClient, intEnv, optionalEnv, requireEnv } from "@foldedspacelabs/metistry-core";
+import { EMBED_DEFAULT_DIM, EMBED_DEFAULT_MODEL, EMBED_DEFAULT_URL, EmbedClient, computeTiers, intEnv, optionalEnv, requireEnv } from "@foldedspacelabs/metistry-core";
 import { QueryStore } from "@foldedspacelabs/metistry-queries";
 import { makePool } from "./db.js";
 import { makeServer } from "./server.js";
@@ -9,6 +9,7 @@ import { collectors } from "@metistry-apps/collectors";
 import { routines } from "@metistry-apps/routines";
 import { loadSchedules, startRunner } from "./runner.js";
 import { loadRules } from "./router.js";
+import { watchCompute } from "./compute.js";
 import { TargetRegistry } from "./dispatch.js";
 import { vaultBridgeLister, vaultBridgeSearcher, vaultBridgeWriter } from "@foldedspacelabs/metistry-mcp-brain";
 import { ASSISTANT_DEFAULT_AREAS, INTERNAL_ASSISTANT_ID, ensureInternalAgent, revokeAgent, validateGrants } from "./agents.js";
@@ -60,6 +61,20 @@ for (const p of optionalEnv("METISTRY_RULES_FILES", "seed/rules.yaml:rules.yaml"
   }
 }
 if (!rules) throw new Error("no rules.yaml found (METISTRY_RULES_FILES)");
+
+// compute.yaml (C1): providers, assignments and budgets, hot-reloaded.
+// The ONE thing it changes about routing in this PR: when the file carries
+// `assignments:`, they are the (model, effort) map `resolveTier` reads, and
+// `rules.yaml`'s `tiers:` is the fallback when it does not. Nothing else
+// about how a turn runs moves until the engine lands (docs/ops/compute.md).
+const rulesTiers = rules.tiers;
+const applyAssignments = (): void => {
+  const assigned = computeTiers(compute.store.current);
+  rules!.tiers = assigned ?? rulesTiers;
+  console.log(assigned ? `tiers from compute.yaml assignments: ${Object.entries(assigned).map(([k, t]) => `${k}=${t.model}/${t.effort}`).join(" ")}` : "tiers from rules.yaml (compute.yaml assigns nothing)");
+};
+const compute = await watchCompute(pool, "console", applyAssignments);
+applyAssignments();
 
 // D4 overlay for compute targets (§4.18): product dir first, instance dirs after.
 const targets = new TargetRegistry();

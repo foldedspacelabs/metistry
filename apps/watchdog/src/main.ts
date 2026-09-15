@@ -27,7 +27,8 @@ export function configPathFrom(argv: string[], env: NodeJS.ProcessEnv): string |
   return env.METISTRY_SUPERVISOR_CONFIG || undefined;
 }
 
-async function runSupervisor(path: string): Promise<void> {
+/** Returns the config it started, so the probe half can read the child set. */
+async function runSupervisor(path: string): Promise<{ children: { name: string }[] }> {
   const config = parseSupervisorConfig(JSON.parse(await readFile(path, "utf8")), path);
   // the config's own env: the plist `metistry up` installs carries the same
   // dict, but the one the Mac app embeds in its signed bundle can carry
@@ -51,9 +52,17 @@ async function runSupervisor(path: string): Promise<void> {
   process.on("SIGTERM", () => stop("SIGTERM"));
   process.on("SIGINT", () => stop("SIGINT"));
   await sup.start();
+  return config;
 }
 
-function startProbing(): void {
+/**
+ * `supervised` is the supervisor's child list when this process IS the
+ * supervisor, and undefined otherwise (the compose shape, Linux) — the only
+ * honest source for "is the assistant supposed to be running at all?". With
+ * no engine credential `metistry up` omits the child, and the queue it is
+ * not draining must not alert every cycle (probes.ts, `assistantAbsent`).
+ */
+function startProbing(supervised?: string[]): void {
   const pool = new pg.Pool({
     host: optionalEnv("METISTRY_DB_HOST", "127.0.0.1"),
     port: intEnv("METISTRY_DB_PORT", 5432),
@@ -78,6 +87,7 @@ function startProbing(): void {
     bridges: bridgesFromEnv(),
     fmMinCaptures: intEnv("METISTRY_WATCHDOG_FM_MIN_CAPTURES", 5),
     fmWindowHours: intEnv("METISTRY_WATCHDOG_FM_WINDOW_HOURS", 24),
+    assistantAbsent: supervised !== undefined && !supervised.includes("assistant"),
   };
   const intervalSec = intEnv("METISTRY_WATCHDOG_INTERVAL_SEC", 60);
   let lastHeartbeat = 0;
@@ -106,13 +116,14 @@ function startProbing(): void {
 }
 
 const configPath = configPathFrom(process.argv.slice(2), process.env);
+let supervised: string[] | undefined;
 if (configPath) {
   // children first: the probes are about a running install, and there is not
   // one until Postgres and the console are up
-  await runSupervisor(configPath);
+  supervised = (await runSupervisor(configPath)).children.map((c) => c.name);
 }
 try {
-  startProbing();
+  startProbing(supervised);
 } catch (err) {
   // a missing METISTRY_DB_PASSWORD is fatal to the watchdog and must NOT be
   // fatal to the supervisor: the children it just started are the install

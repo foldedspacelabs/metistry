@@ -29,6 +29,16 @@ export interface ProbeConfig {
   bridges: BridgeTarget[]; // configured host bridges (bridges.ts: bridgesFromEnv)
   fmMinCaptures: number; // rule-default captures needed before "the FM tier never fires" is a claim
   fmWindowHours: number;
+  /**
+   * The assistant is deliberately not running: the supervisor's child list
+   * has no `assistant`, because this install has no engine credential
+   * (docs/ops/assistant-tools.md, "Running without an engine"). A queue that
+   * nobody is draining is then the expected state, not a dead engine, so
+   * assistant-drain reports `absent` instead of alerting every cycle.
+   * Absent/false = probe as always (the compose shape, and Linux, where
+   * there is no child list to read).
+   */
+  assistantAbsent?: boolean;
 }
 
 // ---- decision logic, pure (unit-tested with fakes) -------------------------
@@ -92,18 +102,33 @@ export async function runProbes(db: Db, cfg: ProbeConfig, fetchFn = fetch): Prom
       if (!r.ok) throw new Error(`console /health returned ${r.status} — check the console service/container`);
     }),
 
-    await runCheck("assistant-drain", `no inbound stuck >${cfg.stuckNewMin}m new / >${cfg.stuckProcessingMin}m processing`, async () => {
-      const { rows } = await db.query(
-        `SELECT
+    await runCheck(
+      "assistant-drain",
+      cfg.assistantAbsent
+        ? "the assistant is not a supervisor child (no engine credential) — a waiting queue is expected"
+        : `no inbound stuck >${cfg.stuckNewMin}m new / >${cfg.stuckProcessingMin}m processing`,
+      async () => {
+        const { rows } = await db.query(
+          `SELECT
            count(*) FILTER (WHERE status = 'new' AND ts < now() - make_interval(mins => $1)) AS stuck_new,
            count(*) FILTER (WHERE status = 'processing' AND ts < now() - make_interval(mins => $2)) AS stuck_proc
          FROM inbound_messages`,
-        [cfg.stuckNewMin, cfg.stuckProcessingMin],
-      );
-      const { stuck_new, stuck_proc } = rows[0];
-      if (Number(stuck_new) > 0) throw new Error(`${stuck_new} message(s) unclaimed — assistant down? restart the assistant service`);
-      if (Number(stuck_proc) > 0) throw new Error(`${stuck_proc} message(s) stuck processing — assistant hung mid-turn`);
-    }),
+          [cfg.stuckNewMin, cfg.stuckProcessingMin],
+        );
+        const { stuck_new, stuck_proc } = rows[0];
+        // nothing is draining the queue ON PURPOSE: say so once, in the row,
+        // and raise no alert (alert.ts: `absent` is not a failure)
+        if (cfg.assistantAbsent) {
+          return {
+            status: "absent",
+            remediation: "no engine credential, so the supervisor does not start the assistant — turns wait in the queue until one exists (docs/ops/assistant-tools.md)",
+            meta: { waiting_new: Number(stuck_new), waiting_processing: Number(stuck_proc) },
+          };
+        }
+        if (Number(stuck_new) > 0) throw new Error(`${stuck_new} message(s) unclaimed — assistant down? restart the assistant service`);
+        if (Number(stuck_proc) > 0) throw new Error(`${stuck_proc} message(s) stuck processing — assistant hung mid-turn`);
+      },
+    ),
 
     await runCheck("runs-inflight", `no runs in flight >${cfg.inflightRunMin}m (CRIT-8)`, async () => {
       const { rows } = await db.query(

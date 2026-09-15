@@ -1296,6 +1296,16 @@ launchd cannot even see.
   turn waits in the inbox until a credential exists, and one `metistry up` later
   the child is back. Proves the degradation story the plan claims — every
   component absent-degrades — for the one component it had never been true of.
+- 2026-09-15 — Research: **Vercel Eve reviewed; six adopts, two of them budget
+  mechanisms** (`docs/research/2026-09-15-vercel-eve-review.md`). Eve is not a
+  dependency (beta, ~3 releases/day, Nitro + `@workflow/*` beta underneath), but
+  it independently reached Metistry's crew isolation model — brief-as-context-
+  transfer, no grandchild delegation, delegation is not an approval boundary —
+  and it answers two budget questions we had left open: a spend cap refuses
+  differently depending on whether a human can be reached (a chat turn is offered
+  one more window; a routine or crew fails at once with a named error), and a
+  delegated agent gets a *share of the dispatcher's remaining* budget rather than
+  its own independent per-run cap, so N helpers can no longer outspend the day.
 - 2026-09-15 — **One door per external dev tool: `metistry connect <tool>`.**
   Cursor, Devin and Claude Code each get their own agent row, their own bearer
   and their own revocation, from one generic verb: `connect cursor` merges

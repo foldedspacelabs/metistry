@@ -1,0 +1,20 @@
+# OpenCode Zen — an OpenAI-compatible cloud that publishes its prices on the
+# page rather than returning a cost on the response, so `pricing:` is how a
+# run's cost is worked out. Its retention is not zero for every upstream
+# (OpenAI/Anthropic keep 30 days; free models may train), so `zdr` is
+# deliberately NOT claimed here: a non-ZDR assignment warns rather than
+# blocks (C13), and a claim that was not true would remove the warning.
+#
+# Check the base URL against https://opencode.ai/docs/zen/ before you rely
+# on it — `metistry compute providers add --from zen --base-url <url>`
+# overrides it, and `metistry compute providers test zen` proves it.
+zen:
+  kind: openai-compatible
+  base_url: https://opencode.ai/zen/v1
+  locality: off_machine
+  auth: { secret: METISTRY_ZEN_API_KEY }
+  data_policy: { allow: [Knowledge/Projects], deny_sources: [comms], max_brief_bytes: 65536 }
+  pricing:
+    # USD per MILLION tokens, from the price page. A model with no entry
+    # records no cost rather than a wrong one.
+    example-model: { in_per_m: 0, out_per_m: 0 }

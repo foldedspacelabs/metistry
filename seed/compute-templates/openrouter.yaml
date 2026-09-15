@@ -1,0 +1,15 @@
+# OpenRouter — one key, most models, and a `provider:` block that pins the
+# upstream so a router in front of a model cannot become a second router
+# (invariant 4). `usage.cost` comes back on every response, so no pricing
+# table is needed here.
+#
+# `metistry compute providers add --from openrouter` writes this block into
+# the instance's compute.yaml and asks for the key on stdin.
+openrouter:
+  kind: openai-compatible
+  base_url: https://openrouter.ai/api/v1
+  locality: off_machine
+  auth: { secret: METISTRY_OPENROUTER_API_KEY }
+  zdr: true
+  request: { provider: { order: [anthropic], allow_fallbacks: false } }
+  data_policy: { allow: [Knowledge/Projects], deny_sources: [comms], max_brief_bytes: 65536 }

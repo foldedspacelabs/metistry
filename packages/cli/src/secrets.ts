@@ -70,6 +70,7 @@ export const SECRET_SCOPES: readonly ScopeRule[] = [
   { scope: "instance", match: /^METISTRY_LOCAL_OWNER_TOKEN$/, why: "the local owner door into THIS instance's console (docs/ops/auth.md) — a second instance must not open the first's" },
   { scope: "instance", match: /^METISTRY_BRIDGE_TOKEN_/, why: "a bearer this instance's bridges were started with" },
   { scope: "instance", match: /^METISTRY_ASSISTANT_TOKEN$/, why: "the internal agent's bearer, registered in this instance's console" },
+  { scope: "instance", match: /^METISTRY_AGENT_TOKEN_/, why: "an external tool's bearer, minted by THIS instance's console (`metistry connect <tool>`) — a second instance mints its own" },
   { scope: "instance", match: /^METISTRY_VAPID_/, why: "push keys bound to this instance's origin and subscriptions" },
   { scope: "instance", match: /^METISTRY_GITHUB_/, why: "a PAT scoped to the repos this instance watches or dispatches to" },
 ];

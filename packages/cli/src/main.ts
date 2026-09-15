@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// `metistry` — init | connect-repo | secrets | console | doctor | up | update (plan
+// `metistry` — init | connect-repo | connect | secrets | console | doctor | up |
+// update (plan
 // §4.16; connect-repo and secrets are the install verbs the Mac app drives,
 // docs/product/desktop-app-plan.md). Hand-rolled argument parsing: a handful
 // of subcommands and flags does not justify a dependency this project would
@@ -14,6 +15,7 @@ import { doctor, renderTable, type DoctorDeps } from "./doctor.js";
 import { loadInstallEnv, productVersion, resolveProductDir, resolveSeedDir, type LoadedEnv } from "./env.js";
 import { realExec, type Exec } from "./exec.js";
 import { AUTH_MODES, connectRepo, type AuthMode } from "./connect-repo.js";
+import { connect, connectList, CONNECT_TOOLS, parseTool, renderConnect, renderConnectList } from "./connect.js";
 import { renderWhoami, whoami } from "./console-client.js";
 import { importSessions } from "./import-sessions.js";
 import { init } from "./init.js";
@@ -36,7 +38,7 @@ export interface ParsedArgs {
 }
 
 /** Flags that never take a value, so `metistry init --force <dir>` keeps its dir. */
-export const BOOLEAN_FLAGS = new Set(["force", "json", "help", "version", "dry-run", "no-launchd", "no-compose", "skip-build", "skip-migrate", "rollback", "yes", "follow", "namespace"]);
+export const BOOLEAN_FLAGS = new Set(["force", "json", "help", "version", "dry-run", "no-launchd", "no-compose", "skip-build", "skip-migrate", "rollback", "yes", "follow", "namespace", "rotate", "list"]);
 
 /** `--channel git|release` — anything else is a typo, not a guess (the lock parser is strict for the same reason). */
 export function parseChannel(v: string | undefined): LockSource | undefined {
@@ -79,6 +81,13 @@ export function parseArgs(argv: string[], booleans = BOOLEAN_FLAGS): ParsedArgs 
 function str(flags: ParsedArgs["flags"], name: string): string | undefined {
   const v = flags[name];
   return typeof v === "string" ? v : undefined;
+}
+
+/** `--areas a,b` / `--project p,q` — one flag, several values, no repetition rules to remember. */
+export function csv(v: string | undefined): string[] | undefined {
+  if (v === undefined) return undefined;
+  const out = v.split(",").map((s) => s.trim()).filter((s) => s !== "");
+  return out.length > 0 ? out : undefined;
 }
 
 /** `--auth device|token|ssh` — a typo must not silently pick a weaker path. */
@@ -129,6 +138,31 @@ const USAGE = `metistry — Metistry command line
       from stdin; --auth ssh trusts your key) into the login Keychain, verify
       with git ls-remote, flush the reconciler's queue, and push once.
       The token is never printed, never written to .env, never in .git/config.
+
+  metistry connect <cursor|devin|claude-code> [--instance <dir>] [--rotate]
+                   [--areas Knowledge/A,Knowledge/B] [--project <slug>] [--json]
+  metistry connect --list [--json]
+      Give one external dev tool its own way into this instance: register it as
+      an EXTERNAL agent in the console (the agent id IS the tool name, so a
+      re-run finds the row the last one made), take the bearer the console
+      returns once, and configure the tool's own end.
+        cursor       merges mcpServers.<key> into ~/.cursor/mcp.json (0600,
+                     every other server preserved) as url + headers, with the
+                     bearer named "Bearer \${env:METISTRY_AGENT_TOKEN_CURSOR}"
+                     and the value in the login Keychain — never in the file.
+        claude-code  mints the token docs/ops/claude-code-plugin.md has you
+                     mint by hand and prints the plugin's env lines; it does
+                     NOT install the plugin.
+        devin        has no config file to write — prints the name, URL and
+                     Authorization value to paste at Customize -> MCPs.
+      Grants start default-deny ({tier: "none", areas: []}); --areas widens the
+      read grant to those TitleCase Knowledge/ prefixes, --project adds project
+      membership. No flag can grant knowledge_write: an external principal
+      cannot reach it at the bridge at all. --rotate mints a replacement bearer
+      (the old one stops authenticating at once) — without it an
+      already-registered tool is told its token is unchanged rather than shown a
+      secret. --list reports every tool's row, token and config.
+      docs/ops/cursor.md, docs/ops/devin.md.
 
   metistry secrets sync [--from keychain|env] [--to env|keychain]
                         [--instance <dir>] [--env-file <path>]
@@ -401,6 +435,49 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
         return 0;
       } catch (e) {
         err(`metistry connect-repo: ${e instanceof Error ? e.message : String(e)}`);
+        return 1;
+      }
+    }
+    case "connect": {
+      const loaded = loadEnv();
+      const instanceId = loaded.instanceDir ? await readInstanceId(loaded.instanceDir) : undefined;
+      // the same three seams every verb takes, so CI (Linux) can exercise the
+      // macOS paths: the platform, the `security` child, and $HOME
+      const common = {
+        ...(loaded.instanceDir ? { instanceDir: loaded.instanceDir } : {}),
+        ...(instanceId ? { instanceId } : {}),
+        ...(io.exec ? { exec: io.exec } : {}),
+        ...(io.platform ? { platform: io.platform } : {}),
+        ...(io.home ? { home: io.home } : {}),
+      };
+      if (flags.list === true) {
+        try {
+          const r = await connectList(common);
+          out(flags.json === true ? JSON.stringify(r, null, 2) : renderConnectList(r));
+          return 0;
+        } catch (e) {
+          err(`metistry connect --list: ${e instanceof Error ? e.message : String(e)}`);
+          return 1;
+        }
+      }
+      const tool = parseTool(positional[0]);
+      if (!tool) {
+        err(`usage: metistry connect <${CONNECT_TOOLS.join("|")}> [--rotate] [--areas Knowledge/A,Knowledge/B] [--project <slug>] [--json]`);
+        err("       metistry connect --list [--json]");
+        return 2;
+      }
+      try {
+        const r = await connect({
+          tool,
+          rotate: flags.rotate === true,
+          ...(csv(str(flags, "areas")) ? { areas: csv(str(flags, "areas")) } : {}),
+          ...(csv(str(flags, "project")) ? { projects: csv(str(flags, "project")) } : {}),
+          ...common,
+        });
+        out(flags.json === true ? JSON.stringify(r, null, 2) : renderConnect(r));
+        return 0;
+      } catch (e) {
+        err(`metistry connect ${tool}: ${e instanceof Error ? e.message : String(e)}`);
         return 1;
       }
     }

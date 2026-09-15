@@ -1306,3 +1306,18 @@ launchd cannot even see.
   one more window; a routine or crew fails at once with a named error), and a
   delegated agent gets a *share of the dispatcher's remaining* budget rather than
   its own independent per-run cap, so N helpers can no longer outspend the day.
+- 2026-09-15 — **A dev session records itself whichever tool it happened in.**
+  `plugins/cursor` adds a Cursor `sessionEnd` hook beside the Claude Code
+  plugin's: same `kind: "session"` frontmatter, same `idempotency_key` formula,
+  so three doors (two hooks and `metistry import-sessions`) dedupe against each
+  other and `inbox-drain` needed no change to classify the third. Both plugins
+  are held to one 300-line file in `packages/core` by a byte-equality test,
+  which is how duplicated logic stays honest in a repo one person maintains.
+  The capture-never-drops rule reaches a hook for the first time: with
+  `METISTRY_CAPTURE_DIR` set, an unreachable console means the note is written
+  to disk, and because the key is a pure function of the session id the later
+  retry is an exact no-op rather than a second note. Also a product decision
+  worth naming: the note says **what it could not capture**. Cursor's transcript
+  format is undocumented, so the file is not read and each note carries a
+  `## Not captured` line — a gap the user can see beats a summary that quietly
+  reads thinner than the other tool's.

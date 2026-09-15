@@ -9,6 +9,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { realPathish } from "../src/sandbox.js";
+import { ENGINE_ABSENT_NOTE } from "../src/deployment.js";
 import { nodeFor, up } from "../src/up.js";
 import { checkout, fakeExec, okDoctor, shown } from "./fixtures.js";
 
@@ -312,5 +313,95 @@ describe("the node every launchd job execs", () => {
     expect(JSON.stringify(assistant)).not.toContain("/opt/homebrew");
     // and the supervisor's own program is a symlink to it, named `Metistry`
     expect(await readFile(join(home, "Library", "LaunchAgents", "com.foldedspacelabs.metistry.plist"), "utf8")).toContain(`<string>${I}/state/bin/Metistry</string>`);
+  });
+});
+
+describe("an instance with no engine credential (W1)", () => {
+  /** The same install, minus the one variable the engine cannot start without. */
+  const noEngine = (instance: string): NodeJS.ProcessEnv => {
+    const e = env(instance);
+    delete e.CLAUDE_CODE_OAUTH_TOKEN;
+    return e;
+  };
+
+  /** The line an operator has to be able to read without knowing the code. */
+  const ABSENT_LINE =
+    "assistant: absent — no engine credential (CLAUDE_CODE_OAUTH_TOKEN); captures, tasks, search and the console run; fold turns wait (docs/ops/assistant-tools.md)";
+
+  it("is not written into the supervisor's children, and `up` says why in one line", async () => {
+    const P = await launchdCheckout();
+    const I = await mkdtemp(join(tmpdir(), "metistry-inst-"));
+    const lines: string[] = [];
+    const r = await up({
+      productDir: P,
+      env: noEngine(I),
+      exec: fakeExec(),
+      out: (l) => lines.push(l),
+      dryRun: true,
+      platform: "darwin",
+      uid: 501,
+      home: "/h",
+      node: NODE,
+      deployment: launchd,
+      exists: pgInstalled(),
+      mintPassword: () => "generated",
+      doctorFn: okDoctor,
+    });
+
+    // an install with no model is healthy, not broken: nothing failed here
+    expect(r.code).toBe(0);
+    expect(ENGINE_ABSENT_NOTE).toBe(ABSENT_LINE);
+    expect(lines.map((l) => l.trim())).toContain(ABSENT_LINE);
+    // the child list: everything model-free, and no assistant that could
+    // only crash-loop on `requireEnv`
+    expect(r.commands).toContain(`write ${I}/state/supervisor.json  (from 4 child(ren): db, console, reconciler, eventkit)`);
+  });
+
+  it("and comes back on the next `up` once the credential exists — the config is rewritten whole, so it is idempotent", async () => {
+    const P = await launchdCheckout();
+    const I = await mkdtemp(join(tmpdir(), "metistry-inst-"));
+    const home = await mkdtemp(join(tmpdir(), "metistry-home-"));
+    const opts = { productDir: P, exec: fakeExec(), out: () => {}, platform: "darwin" as const, uid: 501, home, node: NODE, deployment: launchd, exists: pgInstalled(), doctorFn: okDoctor };
+    const children = async () => {
+      const c = JSON.parse(await readFile(join(I, "state", "supervisor.json"), "utf8"));
+      return { names: c.children.map((x: { name: string }) => x.name) as string[], token: c.token as string };
+    };
+
+    expect((await up({ ...opts, env: noEngine(I) })).code).toBe(0);
+    const before = await children();
+    expect(before.names).toEqual(["db", "console", "reconciler", "eventkit"]);
+
+    // `metistry secrets sync` happened; the next `up` is the only step needed
+    expect((await up({ ...opts, env: env(I) })).code).toBe(0);
+    const after = await children();
+    expect(after.names).toEqual(["db", "console", "reconciler", "assistant", "eventkit"]);
+    // the control socket's secret survives, as it does on any re-run
+    expect(after.token).toBe(before.token);
+
+    // and taking it away again removes the child, without hand-editing anything
+    expect((await up({ ...opts, env: noEngine(I) })).code).toBe(0);
+    expect((await children()).names).toEqual(["db", "console", "reconciler", "eventkit"]);
+  });
+
+  it("under the compose shape it says the file itself refuses to interpolate — that shape needs the credential", async () => {
+    const P = await launchdCheckout();
+    const I = await mkdtemp(join(tmpdir(), "metistry-inst-"));
+    const lines: string[] = [];
+    await up({
+      productDir: P,
+      env: noEngine(I),
+      exec: fakeExec(),
+      out: (l) => lines.push(l),
+      dryRun: true,
+      platform: "darwin",
+      uid: 501,
+      home: "/h",
+      node: NODE,
+      deployment: { shape: "compose", services: {} },
+      doctorFn: okDoctor,
+    });
+    const text = lines.join("\n");
+    expect(text).toContain(ABSENT_LINE);
+    expect(text).toMatch(/compose shape: docker-compose\.yml interpolates CLAUDE_CODE_OAUTH_TOKEN as a required variable/);
   });
 });

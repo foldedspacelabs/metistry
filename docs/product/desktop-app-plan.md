@@ -48,7 +48,7 @@
    chips, collapsed tool activity, drag-to-dispatch — in the PWA first,
    so the native app copies a settled interaction rather than inventing.
 3. Post-Phase 6: the SwiftUI multiplatform app, macOS target first if
-   the work install lands before the phone matters, iOS first otherwise.
+   the second install lands before the phone matters, iOS first otherwise.
 4. **Next for the macOS target** — the 2026-09-09 list is done. It read:
    `metistry restart|stop|start|logs`, then the read verbs that delete the
    app's file readers (`identity --json`, `--version`,

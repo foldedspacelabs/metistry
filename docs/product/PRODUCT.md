@@ -62,7 +62,7 @@ naming lore in public copy stays about the *project*.
   freshness stamp and no model call; a real model turn round-tripped
   through the full stack (web API → durable queue → Agent SDK engine →
   reply) in 3.6 s on the cheap tier, with per-turn token/cost audit rows.
-- Work/personal separation that is mechanical, not disciplinary: separate
+- Separation between contexts that is mechanical, not disciplinary: separate
   instances, separate repos, code flows down as releases, data flows nowhere.
 
 ## Safety considerations (the differentiator — record every mechanism)
@@ -232,7 +232,7 @@ your git, on your machine.
   and an opt-in `SessionEnd` summary hook (`METISTRY_CAPTURE_ON_STOP=1`)
   that exits 0 on every path. Config is env-only; tokens are redacted from
   all output; no server change — it rides the existing owner-token
-  contract, so the instance split makes the work/personal boundary
+  contract, so the instance split makes the boundary between contexts
   mechanical. Installable from this repo as a marketplace
   (`/plugin marketplace add foldedspacelabs/metistry`).
 - 2026-09-06 — **tasks module shipped as a standalone package** (Phase 5's

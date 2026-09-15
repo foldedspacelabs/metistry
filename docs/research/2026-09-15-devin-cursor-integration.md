@@ -145,7 +145,7 @@ exactly. Mint a row, hand Devin the token, and Devin gets the same 20-tool
 surface any external principal gets, governed server-side.
 
 ```
-POST /api/agents        {"id":"devin","display_name":"Devin (work)","kind":"external"}
+POST /api/agents        {"id":"devin","display_name":"Devin","kind":"external"}
   → 201 {"id":"devin","token":"…"}        # the ONE time the token crosses the wire
 PUT  /api/agents/devin/grants    {"tier":"areas","areas":["Knowledge/Areas/…"]}
 PUT  /api/agents/devin/projects  ["new-job-onboarding"]
@@ -169,7 +169,7 @@ What Devin can then do: `knowledge_search` / `knowledge_read` /
 `knowledge_list` / `knowledge_grep` within its areas, `capture` into the inbox,
 `requests_create` to raise a finding into Needs You, and `tasks_*` /
 `artifacts_*` inside its projects. The collaboration rule holds by absence —
-**C7**: a Claude turn may create *unassigned* work Devin discovers with
+**C7**: a Claude turn may create *unassigned* tasks Devin discovers with
 `tasks_list` and takes with `tasks_claim`; a *directed* push to a named
 non-Claude agent is refused at the console with a `runs` row. There is no tool
 to violate it with.
@@ -274,7 +274,7 @@ hand to *Claude Code and Cursor* — see §8 — just not to Metis.)
 
 **A safety point that needs a decision.** `source: devin` would be a new
 provenance class, and `checkBrief`'s `denied_source` scanner keys on exactly
-these markers. Devin-derived notes are *work-internal* by nature, so the
+these markers. Devin-derived notes are *instance-internal* by nature, so the
 moment they are in the vault they are citable in a brief to any target whose
 `allow` list covers their area. Either add `devin` to `deny_sources` on the
 outbound targets, or accept that that instance's knowledge can be re-exported to the
@@ -387,8 +387,8 @@ the engine, `compute.yaml`, or the provider path. The one adjacency is B's
 | **5** | `metistry rules export --for cursor\|claude` | yes | nothing |
 
 PR 1 is the whole of A and D's useful half, and it is docs plus one verb. That
-is the smallest thing that makes work better this week: Devin and Cursor both
-searching and capturing into the work vault, Claude Code already doing so.
+is the smallest thing that makes the second instance useful this week: Devin and Cursor both
+searching and capturing into that instance's vault, Claude Code already doing so.
 
 `metistry connect` does not exist today — only `connect-repo` (`packages/cli/src/`).
 Neither does `metistry agents mint`; agents are minted through

@@ -1236,6 +1236,21 @@ launchd cannot even see.
   answer from planner churn, and a judge from a third model family that fails
   rather than passes when unavailable — is the shape of the bake-off the
   local-main-agent path needs at stage 0.
+- 2026-09-13 — **Plan refresh** (`docs/plan-refresh-2026-09-13.md`, with dated
+  edits to `metistry-build-plan.md` and both product plans). Consolidates a
+  week's decisions into one record: all compute — the main agent included —
+  configured by the user in `compute.yaml`; one OpenAI-compatible engine with
+  Claude reached through OpenRouter, the Agent SDK and the subscription path
+  scrubbed from the product; budgets enforced before the call, with a stop that
+  also pauses routines; a bundled, signed `llama-server` making local inference
+  a no-install default rather than a third app to install; and the phone's
+  offline contract (queue appends, never queue answers). It also resolves five
+  contradictions the day's reviews raised and leaves seven questions openly
+  marked as the owner's. **Next is a PoC, not a PR:** a bake-off on 50
+  owner-authored fixtures that picks the seed model *and* the local server on
+  measured numbers — pass rate per quality axis, tool-call agreement, tokens/s,
+  cost per turn against a Sonnet bar the cost note estimates at ~$29/month — with the rule that Claude
+  is the bar and never the training data.
 - 2026-09-13 — Research: **SAM, Sovereign Agent Mesh** (Apache-2.0, Go;
   `docs/research/2026-09-13-google-sam-review.md`). A libp2p mesh with an OIDC
   →Biscuit control plane, evaluated as a replacement for tailnet + the console's

@@ -1267,3 +1267,12 @@ launchd cannot even see.
   remote agents, `agent@instance_id` identity, an `instances.yaml` peer
   registry, a `runs` export. Separately, SAM's sandbox design contradicts R1's
   premise that a spawned CLI honours `HTTPS_PROXY`.
+- 2026-09-15 — **A work instance runs with no engine credential.** The assistant
+  is the only component that needs a model, so without one `metistry up` leaves
+  it out of the supervisor's children (rather than crash-looping), `doctor`
+  reports `assistant: absent` and still exits 0, and the watchdog stops paging
+  about an undrained queue. Captures, `inbox-drain`, tasks, search, the console
+  and the reconciler are the product on day one of a new job; the evening fold's
+  turn waits in the inbox until a credential exists, and one `metistry up` later
+  the child is back. Proves the degradation story the plan claims — every
+  component absent-degrades — for the one component it had never been true of.

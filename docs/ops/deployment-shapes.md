@@ -10,7 +10,7 @@ boundary differ. Set in `deployment.yaml` (plan §4.17, open decision 15
 |---|---|---|
 | db | `pgvector/pgvector:pg17` container | a user-space Postgres 17, `postgres -D`, a **child of the supervisor** |
 | console | container, published on `127.0.0.1:8080` | a child of the supervisor, binds `127.0.0.1:8080` |
-| assistant | container | a child of the supervisor, **under `ops/sandbox/assistant.sb`** |
+| assistant | container; the file requires `CLAUDE_CODE_OAUTH_TOKEN` | a child of the supervisor, **under `ops/sandbox/assistant.sb`** — and not a child at all without an engine credential (below) |
 | reconciler | launchd job | a child of the supervisor |
 | watchdog | launchd job | **it IS the supervisor** |
 | launchd agents | reconciler, watchdog, the bridges | **one**: `com.foldedspacelabs.metistry`, plus a TCC helper each |
@@ -282,6 +282,19 @@ where the notice failed. Under the compose shape only `eventkit-helper` is
 retired (it was renamed `calendar`); nothing else about that shape changes.
 
 `metistry migrate-shape launchd` produces the new set directly.
+
+### The assistant is a child only when there is an engine
+
+Same rule as the bridges, for the one component that needs a model: with no
+`CLAUDE_CODE_OAUTH_TOKEN` in the resolved environment, `up` leaves the
+assistant out of `supervisor.json` (it hard-requires the credential and could
+only crash-loop), prints `assistant: absent — no engine credential …`, and
+`doctor` reports the row `absent` rather than failed. The credential appearing
+later needs nothing but another `up` — the config is rewritten whole, so the
+child comes back. Everything model-free runs meanwhile; the fold's turns wait
+(docs/ops/assistant-tools.md, "Running without an engine"). The **compose
+shape is not engine-less**: `docker-compose.yml` interpolates the variable as
+required, so `docker compose up` refuses the file without it.
 
 ### Bridges are installed only when configured
 

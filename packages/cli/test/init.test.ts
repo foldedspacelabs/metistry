@@ -4,7 +4,7 @@
 // secret is ever written into the repo.
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -29,9 +29,10 @@ describe("metistry init", () => {
     expect(existsSync(join(dir, "Knowledge", "now.md"))).toBe(true);
     expect(existsSync(join(dir, "identity.yaml"))).toBe(true);
     expect(existsSync(join(dir, "rules.yaml"))).toBe(true);
-    expect(existsSync(join(dir, "inbox"))).toBe(true);
+    expect(existsSync(join(dir, "Knowledge", "Inbox", "README.md"))).toBe(true); // the vault inbox, tracked (docs/ops/inbox.md)
+    expect(existsSync(join(dir, "inbox"))).toBe(false); // the old gitignored inbox is gone
     for (const d of INSTANCE_DIRS) expect(existsSync(join(dir, d, ".gitkeep")), d).toBe(true);
-    expect(readFileSync(join(dir, ".gitignore"), "utf8")).toBe("inbox/\nstate/\n.obsidian/workspace*\n");
+    expect(readFileSync(join(dir, ".gitignore"), "utf8")).toBe("state/\n.obsidian/workspace*\nKnowledge/Inbox/.large/\n");
     expect(readFileSync(join(dir, "README.md"), "utf8")).toMatch(/^# Instance repo — private\./);
     expect(readFileSync(join(dir, "metistry.lock"), "utf8")).toBe(lockFile("1.2.3", new Date("2026-09-07T12:00:00Z")));
     // the documented lock shape (docs/ops/cli.md) — the same one `metistry update` moves; no db at init, so no migrations recorded
@@ -42,17 +43,22 @@ describe("metistry init", () => {
     });
     expect(parseLock(readFileSync(join(dir, "metistry.lock"), "utf8")).product.version).toBe("1.2.3");
 
-    // git: branch main, exactly one commit, the stamped author, clean tree, inbox ignored
+    // git: branch main, exactly one commit, the stamped author, clean tree, .large/ ignored
     expect(git(dir, "rev-parse", "--abbrev-ref", "HEAD")).toBe("main");
     expect(git(dir, "rev-list", "--count", "HEAD")).toBe("1");
     expect(git(dir, "log", "-1", "--format=%an <%ae>|%cn <%ce>|%s")).toBe("Metistry <metistry@localhost>|Metistry <metistry@localhost>|Instance created");
     expect(git(dir, "rev-parse", "HEAD")).toBe(r.commit);
     expect(git(dir, "status", "--porcelain")).toBe("");
     expect(git(dir, "ls-files").split("\n").sort()).toEqual(
-      [".gitignore", "Knowledge/now.md", "README.md", "compute.yaml", "identity.yaml", "metistry.lock", "rules.yaml", ...INSTANCE_DIRS.map((d) => `${d}/.gitkeep`)].sort(),
+      [".gitignore", "Knowledge/Inbox/README.md", "Knowledge/now.md", "README.md", "compute.yaml", "identity.yaml", "metistry.lock", "rules.yaml", ...INSTANCE_DIRS.map((d) => `${d}/.gitkeep`)].sort(),
     );
-    await writeFile(join(dir, "inbox", "x.txt"), "capture");
+    // a capture is part of the record now; only the .large/ spill is ignored
+    await mkdir(join(dir, "Knowledge", "Inbox", ".large"), { recursive: true });
+    await writeFile(join(dir, "Knowledge", "Inbox", ".large", "clip.mov"), "big");
     expect(git(dir, "status", "--porcelain")).toBe("");
+    await writeFile(join(dir, "Knowledge", "Inbox", "1757-x.md"), "capture");
+    expect(git(dir, "status", "--porcelain")).toBe("?? Knowledge/Inbox/1757-x.md");
+    await rm(join(dir, "Knowledge", "Inbox", "1757-x.md"));
 
     // the seed's default name stays when --name is not given; the .env lines are returned, not written
     expect(r.assistantName).toBe((parseYaml(readFileSync(join(seedDir, "identity.yaml"), "utf8")) as { name: string }).name);

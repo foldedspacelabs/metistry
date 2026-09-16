@@ -11,7 +11,9 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { parseCompute } from "@foldedspacelabs/metistry-core";
 import {
+  COMPUTE_TEMPLATES,
   apiRoot,
   assign,
   computeReport,
@@ -193,9 +195,30 @@ describe("providers add", () => {
   });
 
   it("every shipped template is one named provider block", async () => {
-    for (const name of ["openrouter", "zen", "lmstudio", "ollama"] as const) {
+    for (const name of COMPUTE_TEMPLATES) {
       expect((await readTemplate(SEED, name)).name).toBe(name);
     }
+  });
+
+  // The Apple FM provider IS one of Metistry's own bridges, so its
+  // credential is a secret this install already holds. Asking the operator
+  // to paste back a token we minted would be theatre.
+  it("applefm: adds with no prompt when the bridge token is already in the environment", async () => {
+    const dir = await instance();
+    const { o, lines } = harness(dir, { platform: "darwin", env: { METISTRY_KEYCHAIN_ACCOUNT: ACCOUNT, METISTRY_BRIDGE_TOKEN_APPLE_FM: "already-set" } });
+    const r = await providersAdd({ ...o, template: "applefm", skipTest: true, readSecret: async () => { throw new Error("must not prompt"); } });
+    expect(r.secret).toBe("METISTRY_BRIDGE_TOKEN_APPLE_FM");
+    expect(r.secretStatus).toBe("present");
+    expect(lines.join("\n")).toContain("already set in this install's environment");
+    expect(lines.join("\n")).not.toContain("already-set"); // the VALUE never prints
+    const text = await readFile(file(dir), "utf8");
+    expect(text).toContain("applefm:");
+    expect(text).toContain("secret: METISTRY_BRIDGE_TOKEN_APPLE_FM");
+    expect(text).toContain("runtime: applefm");
+    // and it parses back as a served, on-machine provider a collector may use
+    const cfg = parseCompute(text);
+    expect(cfg.providers.applefm?.locality).toBe("on_machine");
+    expect(cfg.providers.applefm?.serve).toEqual({ runtime: "applefm", port: 7810, extra_args: [] });
   });
 });
 

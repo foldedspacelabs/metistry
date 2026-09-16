@@ -28,7 +28,7 @@ import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, open, rename, rm } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join } from "node:path";
-import { runCheck, type ChildSpecInput, type CheckResult, type Compute, type Provider, type Serve } from "@foldedspacelabs/metistry-core";
+import { runCheck, type ChildSpecInput, type CheckResult, type Compute, type LlamaServe, type Provider } from "@foldedspacelabs/metistry-core";
 import type { Exec } from "./exec.js";
 import { StepFailed } from "./steps.js";
 
@@ -62,9 +62,15 @@ export function portOf(baseUrl: string): number | undefined {
   }
 }
 
-// ---- the three servers --------------------------------------------------------
+// ---- the local servers --------------------------------------------------------
+//
+// Four, of which Metistry owns two: the bundled `llama-server` it starts as
+// a supervisor child, and Apple Foundation Models behind the `apple-fm`
+// bridge, which is a supervised service already. LM Studio and Ollama are
+// peers. All four answer `GET <base>/v1/models`, which is the only reason
+// they can share one code path at all.
 
-export const LOCAL_SERVER_NAMES = ["lmstudio", "ollama", "llamaserver"] as const;
+export const LOCAL_SERVER_NAMES = ["lmstudio", "ollama", "llamaserver", "applefm"] as const;
 export type LocalServerName = (typeof LOCAL_SERVER_NAMES)[number];
 
 /**
@@ -77,6 +83,9 @@ export type LocalServerName = (typeof LOCAL_SERVER_NAMES)[number];
  */
 export const LLAMASERVER_DEFAULT_PORT = 7813;
 
+/** Where the `apple-fm` bridge listens — the first entry of the loopback block above (`namespace.ts` moves it for a namespaced instance). */
+export const APPLEFM_DEFAULT_PORT = 7810;
+
 export interface LocalServerSpec {
   name: LocalServerName;
   label: string;
@@ -85,16 +94,32 @@ export interface LocalServerSpec {
   template: string;
   /** where a person gets it, for the line that says one is missing */
   origin: string;
+  /**
+   * The environment variable holding this server's bearer, for the servers
+   * that authenticate. `apple-fm` is the only one: it is a Metistry bridge,
+   * and every bridge route takes the bearer (invariant 8 — loopback is not a
+   * trust boundary). A probe without it gets a truthful 401, which would
+   * then be reported as "absent" and be a lie.
+   */
+  tokenVar?: string;
 }
 
 export const LOCAL_SERVERS: Record<LocalServerName, LocalServerSpec> = {
   lmstudio: { name: "lmstudio", label: "LM Studio", defaultBaseUrl: "http://127.0.0.1:1234/v1", template: "lmstudio", origin: "lmstudio.ai (or the headless `lms` CLI)" },
   ollama: { name: "ollama", label: "Ollama", defaultBaseUrl: "http://127.0.0.1:11434/v1", template: "ollama", origin: "ollama.com" },
   llamaserver: { name: "llamaserver", label: "llama-server (bundled)", defaultBaseUrl: `http://127.0.0.1:${LLAMASERVER_DEFAULT_PORT}/v1`, template: "llamaserver", origin: "bundled — `metistry compute providers add --from llamaserver` and `metistry up`" },
+  applefm: {
+    name: "applefm",
+    label: "Apple Foundation Models (apple-fm bridge)",
+    defaultBaseUrl: `http://127.0.0.1:${APPLEFM_DEFAULT_PORT}/v1`,
+    template: "applefm",
+    origin: "the apple-fm bridge, started by `metistry up` on an Apple Silicon Mac with Apple Intelligence on",
+    tokenVar: "METISTRY_BRIDGE_TOKEN_APPLE_FM",
+  },
 };
 
 /**
- * Which of the three a provider block IS. A `serve:` block says so outright;
+ * Which of the four a provider block IS. A `serve:` block says so outright;
  * otherwise the default ports are the only evidence there is, and a provider
  * on neither is a local server Metistry can talk to but not manage.
  */
@@ -103,6 +128,7 @@ export function serverOf(name: string, p: Provider): LocalServerName | undefined
   const port = portOf(p.base_url);
   if (port === 1234) return "lmstudio";
   if (port === 11434) return "ollama";
+  if (port === APPLEFM_DEFAULT_PORT) return "applefm";
   if ((LOCAL_SERVER_NAMES as readonly string[]).includes(name)) return name as LocalServerName;
   return undefined;
 }
@@ -171,23 +197,29 @@ export interface LocalServerRow {
 }
 
 /**
- * Probe all three known local servers, at the URL `compute.yaml` gives when
- * it gives one and at the vendor's default port otherwise. In parallel:
- * three connection refusals in series is three timeouts a person waits for.
+ * Probe every known local server, at the URL `compute.yaml` gives when it
+ * gives one and at the server's default port otherwise. In parallel: four
+ * connection refusals in series is four timeouts a person waits for.
  */
-export async function probeLocalServers(opts: { compute?: Compute | undefined; fetchFn?: typeof fetch | undefined; timeoutMs?: number | undefined }): Promise<LocalServerRow[]> {
+export async function probeLocalServers(opts: { compute?: Compute | undefined; fetchFn?: typeof fetch | undefined; timeoutMs?: number | undefined; env?: NodeJS.ProcessEnv | undefined }): Promise<LocalServerRow[]> {
   const providers = Object.entries(opts.compute?.providers ?? {}).filter(([, p]) => p.locality === "on_machine");
   const byServer = new Map<LocalServerName, { name: string; provider: Provider }>();
   for (const [name, provider] of providers) {
     const s = serverOf(name, provider);
     if (s && !byServer.has(s)) byServer.set(s, { name, provider });
   }
+  const env = opts.env ?? process.env;
   return Promise.all(
     LOCAL_SERVER_NAMES.map(async (server): Promise<LocalServerRow> => {
       const spec = LOCAL_SERVERS[server];
       const configured = byServer.get(server);
       const url = apiRoot(configured?.provider.base_url ?? spec.defaultBaseUrl);
-      const probe = await fetchModels({ url, fetchFn: opts.fetchFn, timeoutMs: opts.timeoutMs ?? 2_000, local: true });
+      // The provider's own `auth.secret` when it declares one, the server's
+      // conventional variable when it does not: a bridge answers 401 without
+      // a bearer, and reporting that as "not running" would be a lie.
+      const tokenVar = configured?.provider.auth?.secret ?? spec.tokenVar;
+      const bearer = tokenVar ? env[tokenVar] : undefined;
+      const probe = await fetchModels({ url, bearer, fetchFn: opts.fetchFn, timeoutMs: opts.timeoutMs ?? 2_000, local: true });
       return {
         server,
         label: spec.label,
@@ -210,7 +242,7 @@ export async function probeLocalServers(opts: { compute?: Compute | undefined; f
  * Returned as plain `CheckResult & { kind }` rather than doctor's own
  * `DoctorRow` so the import arrow stays doctor.ts → here.
  */
-export async function localServerRows(opts: { compute?: Compute | undefined; fetchFn?: typeof fetch | undefined; timeoutMs?: number | undefined }): Promise<Array<CheckResult & { kind: string }>> {
+export async function localServerRows(opts: { compute?: Compute | undefined; fetchFn?: typeof fetch | undefined; timeoutMs?: number | undefined; env?: NodeJS.ProcessEnv | undefined }): Promise<Array<CheckResult & { kind: string }>> {
   const rows = await probeLocalServers(opts);
   return Promise.all(
     rows.map(async (r) => ({
@@ -539,7 +571,8 @@ export interface LlamaServerChildOptions {
   instanceDir: string;
   /** the provider's name in compute.yaml; the child is always called `llamaserver` */
   provider: string;
-  serve: Serve;
+  /** a `serve:` block whose runtime really is `llamaserver` — `applefm` starts nothing and never reaches here */
+  serve: LlamaServe;
   /** the base environment every supervisor child gets (`launchdBaseEnv`) */
   env: Record<string, string>;
   log: string;

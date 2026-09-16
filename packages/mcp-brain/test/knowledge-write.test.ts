@@ -112,10 +112,29 @@ describe("writeKnowledge rules", () => {
     const csv = await writeKnowledge(assistant, { path: "Knowledge/Attachments/data.csv", content: "a,b\n1,2\n", message: "data" }, writer, NOW);
     expect(csv.ok && csv.result.provenance).toBeNull();
     expect(calls[1]).toMatchObject({ content: "a,b\n1,2\n" });
-    expect("expected_sha256" in calls[1]!).toBe(false);
+    expect(calls[1]!.expected_sha256).toBe(""); // omitted = create only; there is no unconditional write
 
     const badFm = await writeKnowledge(assistant, { path: "Knowledge/x.md", content: "---\n- list\n---\n", message: "m" }, writer, NOW);
     expect(badFm).toMatchObject({ ok: false, code: "invalid_request", message: /mapping/ });
+  });
+
+  // Misuse test (invariant 8): the owner edits notes in Knowledge/ by hand —
+  // Obsidian, an editor, another device — and the assistant must never
+  // replace bytes it has not seen. Enforced at the tool: there is no way to
+  // ask for an unconditional write.
+  it("never clobbers: an omitted expected_sha256 reaches the bridge as create-only, and an existing note is a conflict", async () => {
+    const { writer, calls } = recorder(okReply);
+    await writeKnowledge(assistant, { path: "Knowledge/Areas/New.md", content: "# New\n", message: "m" }, writer, NOW);
+    expect(calls[0]!.expected_sha256).toBe(""); // "must not exist", every time
+
+    const current = "c".repeat(64);
+    const taken = recorder(() => ({ ok: false, code: "conflict", current_sha256: current }));
+    const r = await writeKnowledge(assistant, { path: "Knowledge/Areas/Mine.md", content: "mine", message: "m" }, taken.writer, NOW);
+    expect(r).toMatchObject({ ok: false, code: "conflict", meta: { current_sha256: current, create_only: true } });
+    expect(r.ok === false && r.message).toMatch(/already exists.*knowledge_read/s);
+    // and a retry cannot ask for less: the same call is the same refusal
+    expect(await writeKnowledge(assistant, { path: "Knowledge/Areas/Mine.md", content: "mine", message: "m" }, taken.writer, NOW)).toMatchObject({ ok: false, code: "conflict" });
+    expect(taken.calls.every((c) => c.expected_sha256 !== undefined)).toBe(true);
   });
 
   it("conflict: the current hash rides in the message and the audit meta so the agent can re-read; a vanished note says so", async () => {

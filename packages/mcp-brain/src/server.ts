@@ -427,7 +427,7 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
     reg(
       "knowledge_write",
       "Write one note under Knowledge/ as a commit in your name (internal assistant only; others get `not granted` — use requests_create). Whole-file replace; frontmatter gets `source`/`updated` stamped. " +
-        'Pass expected_sha256 from knowledge_read to avoid clobbering a concurrent edit ("" = create only; a conflict returns the current hash). ' +
+        'To CHANGE a note: knowledge_read it and pass its sha256 back as expected_sha256. Omitting it means create-only, so an existing note answers `conflict` with the current hash rather than being overwritten unseen. ' +
         "A note whose `source` is someone else's is refused — report instead; notes you or the fold wrote are yours. Protected paths are refused; deletes/renames are not available.",
       {
         path: z.string().min(1).max(500).describe("Vault path, Knowledge/... with TitleCase folders, e.g. Knowledge/Areas/Fsl/Drey.md."),
@@ -437,7 +437,7 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
           .string()
           .regex(/^(?:[0-9a-f]{64})?$/)
           .optional()
-          .describe('Current sha256 from knowledge_read; "" = must not exist; omit = unconditional.'),
+          .describe('Current sha256 from knowledge_read; "" or omitted = the note must not exist yet (create only).'),
       },
       async (a) => {
         const r = await writeKnowledge(principal, a, cfg.writeKnowledge, new Date(), cfg.readKnowledge);

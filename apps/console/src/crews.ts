@@ -28,12 +28,15 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import {
+  crossKindRefusal,
+  emptyCompute,
   finishRun,
   mintToken,
   startRun,
   tokenHash,
   validateManifest,
   type AgentManifest,
+  type Compute,
   type DataPolicy,
   type TargetManifest,
 } from "@foldedspacelabs/metistry-core";
@@ -70,7 +73,7 @@ export interface CrewDefinition {
 
 const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)([\s\S]*)$/;
 const CREW_FILE = /^(?:.*\/)?([a-z0-9-]+)\/([a-z0-9-]+)\.md$/; // <area>/<name>.md
-const MAX_PROMPT_CHARS = 32_000;
+const MAX_PROMPT_CHARS = 32_000;  // limit: fixed — a crew manifest longer than this is a malformed file; refusing it whole is the point
 
 /**
  * Parse one `agents/<area>/<name>.md`. Throws with `where:` on any miss —
@@ -391,12 +394,34 @@ export async function dispatchCrew(
   targets: TargetRegistry | undefined,
   input: CrewDispatchInput,
   principal: AgentPrincipal,
+  compute: Compute = emptyCompute(),
 ): Promise<CrewDispatchOutcome> {
   const def = registry.get(input.crew);
   if (!def) return { ok: false, code: "not_found", message: `unknown crew "${input.crew}" (registered: ${registry.names().join(", ") || "none"})` };
   const target = targets?.get(LOCAL_CREW_TARGET);
   if (!target || target.transport !== "local") {
     return { ok: false, code: "not_available", message: `target ${LOCAL_CREW_TARGET} is not loaded (METISTRY_TARGETS_DIRS) — crews cannot be dispatched` };
+  }
+
+  // Collaboration rule 4 (C7), enforced at the tool and nowhere else: a turn
+  // may SCOPE work for any agent — an unassigned `work` row anyone can claim
+  // — but it may not PUSH work to a named agent whose engine kind differs
+  // from its own. The caller's kind is the kind of `assignments.default`:
+  // that is what the instance's assistant runs on, and `agents_delegate` is
+  // internal-only, so there is no other caller this can be.
+  //
+  // Checked BEFORE the dispatch run row so a refused push costs nothing but
+  // its own audit row, and the refusal names the field that would permit it.
+  const cross = crossKindRefusal(compute, null, def.manifest.name);
+  if (cross) {
+    const id = await startRun(db, {
+      component: "console",
+      kind: "dispatch",
+      tool: LOCAL_CREW_TARGET,
+      meta: { crew: def.manifest.name, principal: principal.id, from_kind: cross.from, to_kind: cross.to },
+    });
+    await finishRun(db, id, { ok: false, error: `collaboration_rule: ${cross.message}` });
+    return { ok: false, code: "invalid_request", message: cross.message };
   }
 
   const briefBytes = Buffer.byteLength(input.brief, "utf8");
@@ -454,9 +479,16 @@ export async function dispatchCrew(
 }
 
 /** The mcp-brain adapter over the above. */
-export function crewDispatcher(db: Db, tasks: TasksService, registry: CrewRegistry, targets: TargetRegistry | undefined): CrewDispatcher {
+export function crewDispatcher(
+  db: Db,
+  tasks: TasksService,
+  registry: CrewRegistry,
+  targets: TargetRegistry | undefined,
+  /** `compute.yaml` in force, read per dispatch: it is hot-reloaded, and rule 4 must follow the file rather than the process's startup. */
+  compute?: () => Compute,
+): CrewDispatcher {
   return {
-    dispatch: (input, principal) => dispatchCrew(db, tasks, registry, targets, input, principal),
+    dispatch: (input, principal) => dispatchCrew(db, tasks, registry, targets, input, principal, compute?.()),
     names: () => registry.names(),
   };
 }

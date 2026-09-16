@@ -156,6 +156,27 @@ rather than "failed". Never re-triaged. This is also why the phone must not
 queue decisions by default — a lease or a decision is a statement about
 server state at delivery time.
 
+## A refusal names the field that would permit it — except on the door
+
+```
+400 {"error":{"code":"invalid_request","message":"area must be a TitleCase Knowledge/... prefix"}}
+503 {"error":{"code":"not_available","message":"artifacts are not configured in this deployment — the console needs a vault bridge (METISTRY_RECONCILER_URL + METISTRY_BRIDGE_TOKEN_RECONCILER, docs/ops/reconciler.md)"}}
+```
+
+Every 400, 404 and 503 on the owner's surfaces carries the parameter, the
+config field or the grant that would have made the request work. A `503` that
+says only "not available" tells an operator their deployment is missing
+something and refuses to say what, when the answer is two environment
+variables long.
+
+**The exceptions are the door, and they are absolute.** A `401` is always
+`{"code":"unauthenticated","message":"authentication required"}` — no detail,
+ever, whatever it was that failed. And an agent credential's `403` is always
+the canonical `"not granted"`, never anything that would let a caller tell
+"not granted" from "not found": that distinction is visible to the owner's
+surfaces only (invariant 8). `sendError` enforces both — it drops a detail
+passed with `unauthenticated` rather than trusting a call site to remember.
+
 ## `since` cursors on the polled lists — a reconnect is one bounded pull
 
 ```

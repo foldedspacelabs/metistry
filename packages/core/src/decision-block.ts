@@ -27,10 +27,10 @@ export interface DecisionBlock {
 }
 
 const FENCE = /(?:^|\n)```decision[ \t]*\r?\n([\s\S]*?)\r?\n?```[ \t]*$/;
-const MAX_TITLE = 200;
-const MAX_OPTION = 80;
-const MAX_OPTIONS = 8;
-const MIN_OPTIONS = 2;
+const MAX_TITLE = 200;  // limit: fixed — the decision-block wire format the console and the Mac app both parse
+const MAX_OPTION = 80;  // limit: fixed — an option has to fit on a notification button
+const MAX_OPTIONS = 8;  // limit: fixed — more choices than this is not a decision block
+const MIN_OPTIONS = 2;  // limit: fixed — one option is a statement, not a decision
 
 const unquote = (s: string): string => (/^(".*"|'.*')$/.test(s) ? s.slice(1, -1).trim() : s);
 

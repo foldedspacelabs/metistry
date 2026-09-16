@@ -61,7 +61,7 @@ import { writeProtected, type ProtectedWrite } from "./protected-write.js";
 import { StepFailed, StepRunner } from "./steps.js";
 
 /** The provider blocks `seed/compute-templates/` ships. A name that is not one of these is a typo, never a guess. */
-export const COMPUTE_TEMPLATES = ["openrouter", "zen", "lmstudio", "ollama", "llamaserver"] as const;
+export const COMPUTE_TEMPLATES = ["openrouter", "zen", "lmstudio", "ollama", "llamaserver", "applefm"] as const;
 export type ComputeTemplate = (typeof COMPUTE_TEMPLATES)[number];
 
 export function parseTemplate(v: string | undefined): ComputeTemplate | undefined {
@@ -401,7 +401,16 @@ export async function providersAdd(opts: ProvidersAddOptions): Promise<Providers
   let secretStatus: ProvidersAddResult["secretStatus"] = "none";
   if (provider.auth) {
     const varName = provider.auth.secret;
-    if (opts.platform !== "darwin") {
+    if (opts.env[varName]) {
+      // Already in this install's environment: nothing to ask for, nothing
+      // to store. The normal case for a provider that IS one of Metistry's
+      // own bridges — `applefm` authenticates with
+      // METISTRY_BRIDGE_TOKEN_APPLE_FM, an instance-scope secret this
+      // install already holds. Prompting would be asking the operator to
+      // paste back a value we minted.
+      opts.out(`${varName} is already set in this install's environment — nothing to store (\`metistry secrets list\` says where it lives).`);
+      secretStatus = "present";
+    } else if (opts.platform !== "darwin") {
       opts.out(`no login Keychain on ${opts.platform}: put ${varName} in this install's environment yourself (docs/ops/compute.md).`);
       secretStatus = "skipped";
     } else {
@@ -576,7 +585,7 @@ export async function modelsList(opts: ComputeOptions & { provider?: string | un
       providers.push({ name, ok: false, detail: e instanceof Error ? e.message : String(e), models: [] });
     }
   }
-  const detected = opts.provider ? [] : (await probeLocalServers({ compute, fetchFn: opts.fetchFn })).filter((r) => r.ok && r.provider === undefined);
+  const detected = opts.provider ? [] : (await probeLocalServers({ compute, env: opts.env, fetchFn: opts.fetchFn })).filter((r) => r.ok && r.provider === undefined);
   return { providers, detected };
 }
 

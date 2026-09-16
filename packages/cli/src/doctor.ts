@@ -786,12 +786,14 @@ export async function computeForDoctor(env: NodeJS.ProcessEnv, productDir: strin
 
 /**
  * One row per local model server — `local:lmstudio`, `local:ollama`,
- * `local:llamaserver` — whether or not `compute.yaml` names a provider for
- * it. Never `failed`: a Mac with no local server is a supported install, so
- * this section can only report ok or absent (local-models.ts).
+ * `local:llamaserver`, `local:applefm` — whether or not `compute.yaml` names
+ * a provider for it. Never `failed`: a Mac with no local server is a
+ * supported install, so this section can only report ok or absent
+ * (local-models.ts). `env` goes in because one of them authenticates: the
+ * `apple-fm` bridge takes a bearer on every route, `/v1` included.
  */
 export async function localModelRows(env: NodeJS.ProcessEnv, productDir: string, fetchFn: typeof fetch, timeoutMs: number): Promise<DoctorRow[]> {
-  return localServerRows({ compute: await computeForDoctor(env, productDir), fetchFn, timeoutMs: Math.min(timeoutMs, 2_000) });
+  return localServerRows({ compute: await computeForDoctor(env, productDir), env, fetchFn, timeoutMs: Math.min(timeoutMs, 2_000) });
 }
 
 // ---- the whole report -------------------------------------------------------------

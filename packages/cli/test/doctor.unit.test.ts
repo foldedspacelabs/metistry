@@ -126,6 +126,7 @@ describe("doctor: everything healthy", () => {
       "local-model:local:lmstudio=absent",
       "local-model:local:ollama=absent",
       "local-model:local:llamaserver=absent",
+      "local-model:local:applefm=absent",
     ]);
     // host.docker.internal rewritten to loopback, the bearer presented, the bridge's probe text kept
     expect(seen.find((s) => s.url.includes("7901"))).toEqual({ url: "http://127.0.0.1:7901/check", auth: "Bearer tok-x" });
@@ -152,8 +153,9 @@ describe("doctor: everything healthy", () => {
     expect(await main(["doctor", "--product-dir", productDir], { out: (s) => out.push(s), doctorDeps: deps })).toBe(0);
     const text = out.join("\n");
     expect(text).toMatch(/^name\s+kind\s+status\s+ms\s+remediation/);
-    expect(text).toMatch(/15 checks: 9 ok, 0 degraded, 0 failed, 6 absent — healthy \(.*, shape compose\)/);
+    expect(text).toMatch(/16 checks: 9 ok, 0 degraded, 0 failed, 7 absent — healthy \(.*, shape compose\)/);
     expect(text).toMatch(/^local:llamaserver\s+local-model\s+absent/m);
+    expect(text).toMatch(/^local:applefm\s+local-model\s+absent/m);
     expect(text).not.toMatch(/launchd:/); // linux: no launchd rows
     expect(text).toMatch(/^compose\s+compose\s+absent\s+\d+\s+docker not found/m);
 
@@ -161,7 +163,7 @@ describe("doctor: everything healthy", () => {
     expect(await main(["doctor", "--product-dir", productDir, "--json"], { out: (s) => json.push(s), doctorDeps: deps })).toBe(0);
     const parsed = JSON.parse(json.join("\n"));
     expect(parsed.ok).toBe(true);
-    expect(parsed.rows).toHaveLength(15);
+    expect(parsed.rows).toHaveLength(16);
     expect(parsed.shape).toBe("compose");
     expect(parsed.rows.every((r: DoctorRow) => typeof r.latency_ms === "number" && typeof r.probe === "string")).toBe(true);
   });

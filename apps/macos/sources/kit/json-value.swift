@@ -74,6 +74,13 @@ public extension JSONValue {
         return nil
     }
 
+    /// A budget is dollars, and dollars have cents: `$12.50/day` must survive
+    /// the round trip that `intValue` would round away.
+    var doubleValue: Double? {
+        if case .number(let d) = self, d.isFinite { return d }
+        return nil
+    }
+
     var boolValue: Bool? {
         if case .bool(let b) = self { return b }
         return nil

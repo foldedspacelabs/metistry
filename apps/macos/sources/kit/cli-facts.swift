@@ -239,3 +239,39 @@ public extension JSONValue {
         try JSONDecoder().decode(JSONValue.self, from: data)
     }
 }
+
+// MARK: - The CLI prints prose and JSON down the same pipe
+
+public extension JSONValue {
+    /// The last top-level JSON value in a stream that also carried prose.
+    ///
+    /// Most `metistry compute …` verbs narrate what they did through the SAME
+    /// `out()` the `--json` result goes to: `providers add` says where it filed
+    /// the key, `assign` warns about a non-ZDR provider, `budget` says nothing
+    /// enforces it yet, and every protected write prints its own step lines
+    /// (`packages/cli/src/main.ts` — `JSON.stringify(r, null, 2)` is printed
+    /// AFTER all of that). So stdout is lines of prose followed by one
+    /// pretty-printed object, and a whole-stream parse fails on the first word.
+    ///
+    /// `JSON.stringify(_, null, 2)` puts the opening brace and the closing one
+    /// in column zero, which is what this finds. Candidates are tried from the
+    /// last backwards, so a prose line that happens to start with a brace costs
+    /// an attempt rather than the answer.
+    ///
+    /// The app does no other repair: if nothing here parses, the caller says
+    /// the verb printed something it could not read and shows the stream.
+    static func parseTrailing(in text: String) -> JSONValue? {
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        var starts: [Int] = []
+        for (index, line) in lines.enumerated() where line.hasPrefix("{") || line.hasPrefix("[") {
+            starts.append(index)
+        }
+        for start in starts.reversed() {
+            let candidate = lines[start...].joined(separator: "\n")
+            if let data = candidate.data(using: .utf8), let value = try? JSONValue.parse(data) {
+                return value
+            }
+        }
+        return nil
+    }
+}

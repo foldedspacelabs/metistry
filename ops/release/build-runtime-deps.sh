@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Build the BUNDLED RUNTIME — `runtime/` — everything a Mac needs to run
-# Metistry that is not the product itself: Node, Postgres 17 + pgvector, and
-# git. The Mac app ships this inside
+# Metistry that is not the product itself: Node, Postgres 17 + pgvector, git,
+# and llama.cpp's `llama-server` (the no-install local model provider). The
+# Mac app ships this inside
 # `Metistry.app/Contents/Resources/metistry/runtime/`, and `metistry up`
 # already resolves `<product>/runtime/postgres/bin` ahead of Homebrew
 # (packages/cli/src/postgres.ts). Design: docs/product/desktop-app-plan.md
@@ -9,6 +10,12 @@
 # docs/ops/bundled-runtime.md.
 #
 #   ops/release/build-runtime-deps.sh [<outdir>]
+#   ops/release/build-runtime-deps.sh [<outdir>] --only llamacpp
+#
+# `--only <component>` is a development aid: build and verify ONE component
+# and stop, so a change to (say) the llama.cpp flags is provable in minutes
+# instead of behind a Postgres-from-source compile. It assembles nothing,
+# signs nothing and writes no manifest — a release build is the whole run.
 #
 # macOS arm64 only (the `runtime-deps (darwin-arm64)` release job). Every
 # version and every source digest is pinned in ops/release/runtime-versions.env
@@ -42,6 +49,17 @@ root="$(cd "$(dirname "$0")/../.." && pwd)"
 # shellcheck source=ops/release/runtime-versions.env
 . "$root/ops/release/runtime-versions.env"
 
+only=""
+args=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --only) only="${2:-}"; shift 2 || die "--only needs a component name" ;;
+    --only=*) only="${1#--only=}"; shift ;;
+    *) args+=("$1"); shift ;;
+  esac
+done
+set -- ${args[@]+"${args[@]}"}
+
 out="${1:-$root/runtime}"
 work="${METISTRY_RUNTIME_WORK:-$root/.runtime-build}"
 dl="$work/dl"
@@ -58,6 +76,7 @@ secs_since() { echo $(($(date -u +%s) - $1)); }
 [ "$(uname -s)" = "Darwin" ] || die "macOS only (this host is $(uname -s)); the release job is macos-14"
 [ "$(uname -m)" = "arm64" ] || die "darwin-arm64 only (this host is $(uname -m))"
 command -v clang >/dev/null || die "no clang — install the Xcode Command Line Tools (xcode-select --install)"
+command -v cmake >/dev/null || die "no cmake — llama.cpp is a CMake project (the macos-14 runner ships one; locally: brew install cmake, or unpack cmake.org's macos-universal tarball and put its CMake.app/Contents/bin on PATH)"
 
 mkdir -p "$dl" "$cache" "$build"
 
@@ -67,6 +86,11 @@ mkdir -p "$dl" "$cache" "$build"
 # is a deliberate omission rather than an accident.
 PG_DISABLED="icu (--without-icu: no ICU collations; initdb runs --locale=C), readline (--without-readline: psql has no line editing or history), rpath (--disable-rpath: install names are rewritten to @rpath instead), openssl (not linked: the launchd shape listens on loopback and a unix socket only)"
 GIT_DISABLED="gettext (NO_GETTEXT=1: English messages only), tcl/tk (NO_TCLTK=1: no gitk or git gui), perl (NO_PERL=1: no git add -p, git svn, git send-email), python (NO_PYTHON=1)"
+# Three of these four are RELOCATABILITY requirements, not preferences: each
+# names a find_package() that would happily link a Homebrew dylib on a runner
+# that happens to have one, and a runtime/ that needs /opt/homebrew is not a
+# bundled runtime. The fourth keeps the build hermetic.
+LLAMACPP_DISABLED="openssl (-DLLAMA_OPENSSL=OFF: no HTTPS in the server, so no Homebrew libssl gets linked in; the CLI downloads GGUFs itself), openmp (-DGGML_OPENMP=OFF: same reason, Homebrew libomp), the web UI (-DLLAMA_BUILD_UI=OFF -DLLAMA_USE_PREBUILT_UI=OFF: the prebuilt UI is an UNPINNED Hugging Face download at build time, and the app owns this UX), tools and examples other than the server (-DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_APP=OFF)"
 
 PG_BASE_URL="https://ftp.postgresql.org/pub/source"
 GIT_BASE_URL="https://mirrors.edge.kernel.org/pub/software/scm/git"
@@ -255,6 +279,90 @@ build_git() {
   say "git built in $(secs_since "$t0")s"
 }
 
+# ---- llama.cpp (llama-server) ----------------------------------------------------
+# The no-install local model provider: ONE Metal-enabled binary, so a fresh
+# Mac can run a local model without being sent to install a second app. LM
+# Studio and Ollama stay peers — `metistry compute models list` discovers all
+# three over /v1/models — this is only what is there when none of them is.
+#
+# BUILD_SHARED_LIBS=OFF on purpose: a static llama-server has no dylibs to
+# relocate, no @rpath to get wrong, and is one file to sign. (relocate() and
+# strip_tree() still run over the prefix, so flipping this back would be a
+# flag change rather than a rewrite.) GGML_METAL_EMBED_LIBRARY=ON is the
+# other half of that: without it the binary looks for a default.metallib
+# beside itself and a moved copy has no GPU.
+
+build_llamacpp() {
+  local prefix="$cache/llamacpp-$LLAMACPP_VERSION" src="$build/llamacpp" b="$build/llamacpp-build" t0
+  t0="$(date -u +%s)"
+  if [ -f "$prefix/.done" ]; then say "llama.cpp $LLAMACPP_VERSION: cached"; return 0; fi
+  log "llama.cpp $LLAMACPP_VERSION (llama-server, Metal)"
+  fetch "https://github.com/ggml-org/llama.cpp/archive/refs/tags/v$LLAMACPP_VERSION.tar.gz" "llama.cpp-$LLAMACPP_VERSION.tar.gz" "$LLAMACPP_SHA256"
+
+  rm -rf "$prefix" "$src" "$b"
+  mkdir -p "$src" "$prefix/bin"
+  tar -xzf "$dl/llama.cpp-$LLAMACPP_VERSION.tar.gz" -C "$src" --strip-components=1
+
+  # BUILD_IS_DEV=OFF is what upstream says to set when building from a
+  # release tag, and the COMMIT is stated rather than discovered: llama.cpp
+  # asks `git rev-parse HEAD` in its source dir, and with the default work dir
+  # inside this repo that is METISTRY's commit stamped into llama-server.
+  say "cmake configure (Metal on, static, no openssl/openmp/web UI)"
+  cmake -S "$src" -B "$b" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_OSX_DEPLOYMENT_TARGET=13.3 \
+    -DLLAMA_BUILD_IS_DEV=OFF \
+    -DLLAMA_BUILD_NUMBER=0 \
+    -DLLAMA_BUILD_COMMIT="v$LLAMACPP_VERSION" \
+    -DBUILD_SHARED_LIBS=OFF \
+    -DGGML_METAL=ON \
+    -DGGML_METAL_EMBED_LIBRARY=ON \
+    -DGGML_OPENMP=OFF \
+    -DLLAMA_OPENSSL=OFF \
+    -DLLAMA_BUILD_SERVER=ON \
+    -DLLAMA_BUILD_TOOLS=ON \
+    -DLLAMA_BUILD_APP=OFF \
+    -DLLAMA_BUILD_UI=OFF \
+    -DLLAMA_USE_PREBUILT_UI=OFF \
+    -DLLAMA_BUILD_EXAMPLES=OFF \
+    -DLLAMA_BUILD_TESTS=OFF \
+    >"$build/llamacpp-configure.log" 2>&1 || { tail -30 "$build/llamacpp-configure.log" >&2; die "llama.cpp configure failed"; }
+  # the SERVER TARGET only: llama-cli, quantize and the rest are another ten
+  # minutes of compile for binaries nothing in this product spawns
+  say "cmake --build --target llama-server -j$jobs"
+  cmake --build "$b" --target llama-server --config Release -j"$jobs" \
+    >"$build/llamacpp-make.log" 2>&1 || { tail -30 "$build/llamacpp-make.log" >&2; die "llama.cpp build failed"; }
+
+  [ -x "$b/bin/llama-server" ] || die "llama.cpp built no bin/llama-server"
+  cp "$b/bin/llama-server" "$prefix/bin/llama-server"
+  # a static build leaves nothing here, but the layout is the promise
+  for f in "$b"/bin/*.dylib; do [ -e "$f" ] || continue; mkdir -p "$prefix/lib"; cp "$f" "$prefix/lib/"; done
+  cp "$src/LICENSE" "$prefix/LICENSE"
+  rm -rf "$src" "$b"
+
+  say "strip + rewrite install names"
+  strip_tree "$prefix"
+  relocate "$prefix"
+  echo "$LLAMACPP_VERSION" > "$prefix/.done"
+  say "llama.cpp built in $(secs_since "$t0")s ($(du -sh "$prefix" | cut -f1))"
+}
+
+# The moved-copy check for llama-server, factored out so `--only llamacpp`
+# runs exactly what the full `verify` runs. `--list-devices` enumerates the
+# ggml backends: it is the cheapest thing that proves BOTH that the binary
+# runs from somewhere it was not built AND that the Metal backend registered
+# — a binary whose embedded metallib was lost lists CPU alone.
+verify_llamacpp() { # <prefix>
+  local prefix="$1" devices
+  say "llama-server $("$prefix/bin/llama-server" --version 2>&1 | head -1)"
+  devices="$("$prefix/bin/llama-server" --list-devices 2>&1 || true)"
+  printf '%s\n' "$devices" | sed 's/^/      /' >&2
+  # the Metal backend registers its device as MTL<n> ("MTL0: Apple M4 Max"),
+  # not as the word "metal" — a CPU/BLAS-only list is the failure this catches
+  printf '%s' "$devices" | grep -q 'MTL[0-9]' || die "llama-server --list-devices lists no MTL<n> device from the moved copy — the Metal backend did not register (GGML_METAL_EMBED_LIBRARY?):
+$devices"
+}
+
 # ---- assemble -------------------------------------------------------------------
 
 assemble() {
@@ -264,6 +372,7 @@ assemble() {
   cp -R "$cache/node-$NODE_VERSION" "$out/node"
   cp -R "$cache/postgres-$PG_VERSION-pgvector-$PGVECTOR_VERSION" "$out/postgres"
   cp -R "$cache/git-$GIT_VERSION" "$out/git"
+  cp -R "$cache/llamacpp-$LLAMACPP_VERSION" "$out/llamacpp"
   rm -f "$out"/*/.done
   # the layout packages/cli/src/postgres.ts and docs/ops/deployment-shapes.md
   # both promise; a missing one is a broken bundle, not a warning
@@ -273,6 +382,7 @@ assemble() {
   [ -f "$out/postgres/share/extension/vector.control" ] || die "runtime/postgres/share/extension/vector.control is missing"
   [ -x "$out/node/bin/node" ] || die "runtime/node/bin/node is missing"
   [ -x "$out/git/bin/git" ] || die "runtime/git/bin/git is missing"
+  [ -x "$out/llamacpp/bin/llama-server" ] || die "runtime/llamacpp/bin/llama-server is missing"
   say "$(du -sh "$out" | cut -f1) in $out"
 }
 
@@ -385,6 +495,8 @@ verify() {
     || die "git init/commit failed from the moved copy"
   say "git $("$moved/git/bin/git" --version | awk '{print $3}') committed from a moved tree"
 
+  verify_llamacpp "$moved/llamacpp"
+
   rm -rf "$work/verify"
   say "verified in $(secs_since "$t0")s"
 }
@@ -405,7 +517,8 @@ manifest() {
     printf '    "node": { "version": "%s", "origin": "nodejs.org official darwin-arm64 build", "source_sha256": "%s" },\n' "$NODE_VERSION" "$NODE_SHA256"
     printf '    "postgres": { "version": "%s", "origin": "built from source", "source_sha256": "%s", "disabled": "%s" },\n' "$PG_VERSION" "$PG_SHA256" "$PG_DISABLED"
     printf '    "pgvector": { "version": "%s", "origin": "built from source against runtime/postgres", "source_sha256": "%s" },\n' "$PGVECTOR_VERSION" "$PGVECTOR_SHA256"
-    printf '    "git": { "version": "%s", "origin": "built from source", "source_sha256": "%s", "disabled": "%s" }\n' "$GIT_VERSION" "$GIT_SHA256" "$GIT_DISABLED"
+    printf '    "git": { "version": "%s", "origin": "built from source", "source_sha256": "%s", "disabled": "%s" },\n' "$GIT_VERSION" "$GIT_SHA256" "$GIT_DISABLED"
+    printf '    "llamacpp": { "version": "%s", "origin": "built from source (CMake, Metal on, static)", "source_sha256": "%s", "disabled": "%s" }\n' "$LLAMACPP_VERSION" "$LLAMACPP_SHA256" "$LLAMACPP_DISABLED"
     printf '  },\n'
     printf '  "binaries": {\n'
     while IFS= read -r f; do
@@ -423,9 +536,31 @@ manifest() {
 
 # ---- run ----------------------------------------------------------------------------
 
+# `--only <component>`: build one thing and prove it from a MOVED copy, then
+# stop. Nothing is assembled, signed or hashed — that is a release build's
+# job, and a half-filled runtime/ would be worse than none.
+if [ -n "$only" ]; then
+  case "$only" in
+    llamacpp)
+      build_llamacpp
+      log "verifying a MOVED copy (relocatability)"
+      rm -rf "$work/only"
+      mkdir -p "$work/only"
+      cp -R "$cache/llamacpp-$LLAMACPP_VERSION" "$work/only/llamacpp"
+      rm -f "$work/only/llamacpp/.done"
+      verify_llamacpp "$work/only/llamacpp"
+      say "$(du -sh "$work/only/llamacpp/bin/llama-server" | cut -f1) llama-server, verified from $work/only/llamacpp"
+      ;;
+    *) die "--only takes llamacpp (node, postgres and git are proved by a full run)" ;;
+  esac
+  log "done in $(secs_since "$started")s (--only $only: nothing was assembled, signed or hashed)"
+  exit 0
+fi
+
 build_node
 build_postgres
 build_git
+build_llamacpp
 assemble
 sign
 verify

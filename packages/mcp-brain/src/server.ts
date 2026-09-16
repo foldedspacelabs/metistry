@@ -45,7 +45,7 @@ import { THREAD_TOOL_NAMES, registerThreadTools } from "./thread-tools.js";
 import { QUERIES_TOOL_NAMES, registerQueriesTools } from "./queries-tools.js";
 import { KNOWLEDGE_FS_TOOL_NAMES, registerKnowledgeFsTools, type KnowledgeLister, type KnowledgeVaultSearcher } from "./knowledge-fs.js";
 import { registerKnowledgeResources } from "./knowledge-resources.js";
-import { captureToInbox } from "./capture.js";
+import { captureToInbox, type CaptureSink } from "./capture.js";
 import { KNOWLEDGE_MODES, knowledgeScope, readKnowledge, searchKnowledge, type KnowledgeReader, type QueryEmbedder } from "./knowledge.js";
 import { sha256Text, writeKnowledge, type KnowledgeWriter } from "./knowledge-write.js";
 import { computeNudge } from "./nudge.js";
@@ -59,8 +59,10 @@ export interface BrainConfig {
   /** Credential → principal. Null means 401; the bridge never sees the token. */
   authenticate(req: IncomingMessage): Promise<AgentPrincipal | null>;
   tasks: TasksService;
-  /** Where `capture` writes files (the same directory the console's POST /capture uses). */
+  /** Where `capture` writes files when no sink is injected — a plain directory (the standalone shape). */
   inboxDir: string;
+  /** Where captures go in Metistry: the vault inbox over the reconciler's bridge (`vaultSink`). Absent → `dirSink(inboxDir)`. */
+  inbox?: CaptureSink | undefined;
   /** Vault read path for `knowledge_read`. Absent → the tool answers `not_available`. */
   readKnowledge?: KnowledgeReader | undefined;
   /** Query embedder for `knowledge_search` mode=semantic|hybrid (core's EmbedClient). Absent → every mode serves keyword. */
@@ -267,7 +269,7 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
         const bytes = a.content_base64 !== undefined ? Buffer.from(a.content_base64, "base64") : Buffer.from(a.note ?? "", "utf8");
         const mime = a.mime ?? (a.content_base64 !== undefined ? "application/octet-stream" : "text/markdown");
         const filename = a.filename ?? (a.content_base64 !== undefined ? `capture-${Date.now()}.bin` : `note-${Date.now()}.md`);
-        const r = await captureToInbox(db, cfg.inboxDir, { bytes, filename, mime, note: a.note ?? null, source: "mcp", sourceAgent: principal.id });
+        const r = await captureToInbox(db, cfg.inbox ?? cfg.inboxDir, { bytes, filename, mime, note: a.note ?? null, source: "mcp", sourceAgent: principal.id });
         return done(r, { inbox_id: r.id, bytes: bytes.length });
       },
     );
@@ -436,7 +438,7 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
     reg(
       "knowledge_write",
       "Write one note under Knowledge/ as a commit in your name (internal assistant only; others get `not granted` — use requests_create). Whole-file replace; frontmatter gets `source`/`updated` stamped. " +
-        'Pass expected_sha256 from knowledge_read to avoid clobbering a concurrent edit ("" = create only; a conflict returns the current hash). ' +
+        'To CHANGE a note: knowledge_read it and pass its sha256 back as expected_sha256. Omitting it means create-only, so an existing note answers `conflict` with the current hash rather than being overwritten unseen. ' +
         "A note whose `source` is someone else's is refused — report instead; notes you or the fold wrote are yours. Protected paths are refused; deletes/renames are not available.",
       {
         path: z.string().min(1).max(500).describe("Vault path, Knowledge/... with TitleCase folders, e.g. Knowledge/Areas/Fsl/Drey.md."),
@@ -446,7 +448,7 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
           .string()
           .regex(/^(?:[0-9a-f]{64})?$/)
           .optional()
-          .describe('Current sha256 from knowledge_read; "" = must not exist; omit = unconditional.'),
+          .describe('Current sha256 from knowledge_read; "" or omitted = the note must not exist yet (create only).'),
       },
       async (a) => {
         const r = await writeKnowledge(principal, a, cfg.writeKnowledge, new Date(), cfg.readKnowledge);

@@ -16,7 +16,7 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { usesCompose, type Deployment } from "@foldedspacelabs/metistry-core";
+import { COMPUTE_FILENAME, loadCompute, servedProviders, usesCompose, type ChildSpecInput, type Deployment } from "@foldedspacelabs/metistry-core";
 import { assistantEnv, consoleEnv, consolePort, dbPort, ENGINE_ABSENT_NOTE, ENGINE_CREDENTIAL_VAR, engineCredentialPresent, loadDeployment, type ShapeContext } from "./deployment.js";
 import { doctor, renderTable, type DoctorDeps, type DoctorReport } from "./doctor.js";
 import type { Exec } from "./exec.js";
@@ -28,6 +28,7 @@ import {
   launchAgentsDir,
   launchdCommands,
   loadPlistTemplates,
+  logPathFor,
   loadSupervisedTemplates,
   SUPERVISOR_PLIST_FILE,
   nodeOnPath,
@@ -56,6 +57,7 @@ import {
 import { shellUnsafeEnvLines } from "./env.js";
 import { ensureInstanceId, envPaths } from "./instance.js";
 import { allocateBase, applyPorts, loadNamespace, portEnv, PORTED_SERVICES, portsFile, portsOf, serializeNamespace, suffixFor, type Namespace } from "./namespace.js";
+import { llamaServerChild } from "./local-models.js";
 import { instanceLockPath, readLock, type LockFile, type LockSource } from "./lock.js";
 import { currentLink, imageEnv, imageRef, IMAGE_SERVICES } from "./release.js";
 import { installRuntimeDeps, pathWithRuntimeGit, runtimeDepsEnabled, runtimeNodeBin, RUNTIME_DIRNAME } from "./runtime-deps.js";
@@ -441,6 +443,48 @@ export async function bootoutRetired(r: StepRunner, le: LaunchdEnv, shape: Deplo
 }
 
 /**
+ * The OPTIONAL local-model children. There is no plist template for these:
+ * a `serve:` block in `compute.yaml` is what declares one, so the child is
+ * built from the configuration rather than rendered from `ops/launchd/`.
+ *
+ * Absent by default, and quietly. An install that uses LM Studio, Ollama or
+ * no local model at all names no `serve:` block and gets no child — which is
+ * why a missing binary or a missing GGUF is a NOTE and not a failure: `up`
+ * bringing the whole install down because a model file was moved would be a
+ * far worse answer than a console that runs with one fewer provider.
+ */
+export async function servedLocalModelChildren(r: StepRunner, productDir: string, values: ShapeValues, base: Record<string, string>): Promise<ChildSpecInput[]> {
+  const instanceDir = stateRoot(values.productDir, values.env);
+  const paths = values.env.METISTRY_COMPUTE_FILES ?? `${join(productDir, "seed", COMPUTE_FILENAME)}:${join(instanceDir, COMPUTE_FILENAME)}`;
+  let served: ReturnType<typeof servedProviders>;
+  try {
+    served = servedProviders((await loadCompute(paths)).compute);
+  } catch (e) {
+    r.note(`compute.yaml did not parse, so no local model server is declared this run (${e instanceof Error ? e.message : String(e)})`);
+    return [];
+  }
+  if (served.length === 0) return [];
+  if (served.length > 1) {
+    throw new StepFailed(`${served.map((x) => x.name).join(", ")} all declare a serve: block, and the supervisor has one \`llamaserver\` child — keep the one you want and remove serve: from the others`);
+  }
+  const { name, serve } = served[0]!;
+  const built = llamaServerChild({
+    productDir: values.installRoot,
+    instanceDir,
+    provider: name,
+    serve,
+    env: base,
+    log: logPathFor("llamaserver", values.namespace?.labelSuffix),
+  });
+  if ("skipped" in built) {
+    r.note(`no llamaserver child: ${built.skipped}`);
+    return [];
+  }
+  r.note(`llamaserver child: ${built.binary} serving ${built.model} on 127.0.0.1:${serve.port}`);
+  return [built.child];
+}
+
+/**
  * The supervisor's plan: the `Metistry` symlink its plist execs, and
  * `<instance>/state/supervisor.json` — the child list, each child's argv,
  * environment and log path, and the control socket.
@@ -480,6 +524,7 @@ export async function installSupervisorPlan(r: StepRunner, productDir: string, l
           : undefined;
     return childFromRenderedPlist(t, rendered, base, ready);
   });
+  children.push(...(await servedLocalModelChildren(r, productDir, values, base)));
 
   const existing = await readSupervisorConfig(configPath);
   const token = existing?.token ?? mintControlToken();

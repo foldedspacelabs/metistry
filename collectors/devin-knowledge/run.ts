@@ -34,7 +34,7 @@
 //     credential here is the OWNER's Devin key — not an agent's bearer.
 
 import { runCheck, type CheckResult } from "@foldedspacelabs/metistry-core";
-import { captureToInbox } from "@foldedspacelabs/metistry-mcp-brain";
+import { captureToInbox, type CaptureSink } from "@foldedspacelabs/metistry-mcp-brain";
 import { McpWikiSource, type WikiSource } from "./wiki.js";
 
 export interface Db {
@@ -50,8 +50,10 @@ export interface DevinCtx {
   devinRepos?: string[] | undefined;
   /** Cap per run, so a first pass on a large knowledge base cannot run away. */
   devinMaxItems?: number | undefined;
-  /** Where capture files land (the console's METISTRY_INBOX_DIR). */
+  /** Where capture files land when no sink is injected (the console's METISTRY_INBOX_DIR). */
   inboxDir?: string | undefined;
+  /** The capture sink the console built (the vault inbox over the reconciler's bridge). */
+  inboxSink?: CaptureSink | undefined;
   fetchFn?: typeof fetch | undefined;
   /** Injectable for tests; the real one is McpWikiSource. */
   wikiSource?: WikiSource | undefined;
@@ -244,7 +246,7 @@ export async function check(ctx: DevinCtx = {}): Promise<CheckResult> {
  */
 export async function run(db: Db, ctx: DevinCtx = {}): Promise<number> {
   if (!ctx.devinApiKey) return 0; // degrades absent
-  const inboxDir = ctx.inboxDir ?? "./inbox";
+  const sink = ctx.inboxSink ?? ctx.inboxDir ?? "./Knowledge/Inbox";
   const max = ctx.devinMaxItems ?? DEFAULT_MAX_ITEMS;
   const capturedAt = (ctx.now ?? new Date()).toISOString();
   let written = 0;
@@ -288,7 +290,7 @@ export async function run(db: Db, ctx: DevinCtx = {}): Promise<number> {
       },
       note.body ?? "",
     );
-    const r = await captureToInbox(db, inboxDir, {
+    const r = await captureToInbox(db, sink, {
       bytes: Buffer.from(body, "utf8"),
       filename: `devin-${slug(note.name)}.md`,
       mime: "text/markdown",
@@ -348,7 +350,7 @@ export async function run(db: Db, ctx: DevinCtx = {}): Promise<number> {
             },
             page.body,
           );
-          const r = await captureToInbox(db, inboxDir, {
+          const r = await captureToInbox(db, sink, {
             bytes: Buffer.from(body, "utf8"),
             filename: `devin-wiki-${slug(repo)}-${slug(page.title)}.md`,
             mime: "text/markdown",

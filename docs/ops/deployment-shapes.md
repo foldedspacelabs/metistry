@@ -106,13 +106,20 @@ migration rehearsal added.
 3. **`doctor` reports one instance, not the Mac.** It reads
    `METISTRY_INSTANCE_DIR` and probes that install. The app's
    instance-switching UI will want per-instance rows.
-4. **`metistry init` does not emit everything the console needs.** It
-   prints three lines; the console then refuses to start without
-   `METISTRY_ORIGIN`, and the assistant needs
-   `METISTRY_ASSISTANT_TOKEN`. It also prints a compose-shaped
-   `METISTRY_RECONCILER_URL=http://host.docker.internal:7812`, which on a
-   namespaced launchd install is both the wrong shape and the wrong port
-   (an explicit `.env` line wins over the block, by design).
+4. ~~**`metistry init` does not emit everything the console needs.**~~ Fixed
+   (2026-09-16): `init` now prints `METISTRY_ORIGIN` too — the console
+   refuses to start without it in either shape — defaulting to
+   `http://127.0.0.1:<console port>` for a loopback-only install (a
+   tailnet hostname or an HTTPS reverse proxy replaces it once this
+   instance is reachable off the machine; passkeys enrolled here bind to
+   whichever origin is configured at enrolment time). `METISTRY_RECONCILER_URL`
+   is shaped for the install `init` targets — launchd by default on
+   macOS, `http://host.docker.internal:7812` still the default for
+   `--shape compose` — on `127.0.0.1` with this instance's own ports once
+   it is namespaced (`state/ports.yaml`, below). `METISTRY_ASSISTANT_TOKEN`
+   was never a hard blocker: absent, the console still starts and only the
+   internal agent is revoked (the assistant runs tool-less,
+   `docs/ops/assistant-tools.md`).
 5. **A release install with no `METISTRY_GITHUB_TOKEN` cannot resolve a
    release from a private repo.** `resolveRelease` falls back to the `gh`
    CLI on 401/403 but not on 404, and GitHub answers 404 for a private

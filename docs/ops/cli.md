@@ -249,14 +249,28 @@ created` authored `Metistry <metistry@localhost>`:
 
 It refuses a non-empty directory unless `--force`, never prompts, and
 **never writes a secret**. What it prints at the end is the next step —
-four lines for `<dir>/state/.env`, this instance's own environment:
+five lines for `<dir>/state/.env`, this instance's own environment,
+shaped for `--shape compose|launchd` (default: launchd on macOS, compose
+elsewhere — `docs/ops/deployment-shapes.md`):
 
 ```
 METISTRY_INSTANCE_DIR=<dir>
 METISTRY_BRIDGE_TOKEN_RECONCILER=<minted once; shown only here>
-METISTRY_RECONCILER_URL=http://host.docker.internal:7812
+METISTRY_RECONCILER_URL=http://127.0.0.1:7812              # --shape compose: http://host.docker.internal:7812
+METISTRY_ORIGIN=http://127.0.0.1:8080
 METISTRY_LOCAL_OWNER_TOKEN=<minted once; shown only here>
 ```
+
+`METISTRY_ORIGIN` is the console's canonical origin (`docs/ops/auth.md`)
+— it refuses to start without one, in either shape. The default above is
+right for a loopback-only install; once this instance is reachable off
+the machine (a tailnet hostname, an HTTPS reverse proxy) that origin
+replaces it, and any passkeys already enrolled must be re-enrolled, since
+they bind to the origin they were enrolled against. `METISTRY_RECONCILER_URL`
+and `METISTRY_ORIGIN`'s port both follow this instance's own ports once
+it is namespaced (`state/ports.yaml`, "A second instance on one Mac" in
+`docs/ops/deployment-shapes.md`) — `--shape compose` never reads that
+file, since `docker compose` doesn't either.
 
 `METISTRY_LOCAL_OWNER_TOKEN` is the console's local owner door
 (`docs/ops/auth.md`): presented from this machine it authenticates as the

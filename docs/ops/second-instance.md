@@ -37,21 +37,21 @@ node packages/cli/dist/main.js init ~/metistry-instance --name "<the assistant's
 Produces a private instance repo: `Knowledge/Inbox/` (captures, in the vault), `identity.yaml`
 (the **only** place the assistant is named — CLAUDE.md: never in code, a path, or a table
 name), `rules.yaml`, an entirely-commented-out `compute.yaml` copied from the seed (nothing
-assigned yet, `docs/ops/compute.md`), and `metistry.lock`. It prints four `.env` lines — put
+assigned yet, `docs/ops/compute.md`), and `metistry.lock`. It prints five `.env` lines — put
 them in `~/metistry-instance/state/.env` (0600, gitignored) — and mints this instance's
 `instance_id`. Point Obsidian's vault at `~/metistry-instance/Knowledge`.
 
-**Two corrections `init` doesn't make** (`docs/ops/deployment-shapes.md`, "What is still
-missing" #4): its printed `METISTRY_RECONCILER_URL` is compose-shaped, and it never emits
-`METISTRY_ORIGIN`, which the console requires to start. On this Mac (launchd shape, no tunnel
-yet) add to `state/.env`:
-
-```
-METISTRY_ORIGIN=http://127.0.0.1:8080
-METISTRY_RECONCILER_URL=http://127.0.0.1:7812
-```
+On a macOS checkout like this one, `init` guesses the launchd shape by default (`--shape
+compose` picks the container shape instead — `docs/ops/deployment-shapes.md`), so the printed
+lines are already right for this Mac with no hand-editing: `METISTRY_RECONCILER_URL=http://127.0.0.1:7812`
+and `METISTRY_ORIGIN=http://127.0.0.1:8080` — the console refuses to start without the latter.
+(Previously `init` always printed the compose-shaped line and never emitted `METISTRY_ORIGIN`
+at all — `docs/ops/deployment-shapes.md`'s own "What is still missing" #4, fixed 2026-09-16.)
 
 ## 3. `metistry up`, on the launchd shape
+
+`init`'s guess above only decided what it printed; the instance's actual `deployment.yaml`
+still defaults to `compose` until this sets it:
 
 ```sh
 node packages/cli/dist/main.js deployment set-shape launchd --yes      # preview first without --yes

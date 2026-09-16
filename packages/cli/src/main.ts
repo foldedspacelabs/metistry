@@ -172,12 +172,16 @@ export function syncDirection(from: string | undefined, to: string | undefined):
 
 const USAGE = `metistry — Metistry command line
 
-  metistry init <dir> [--name <assistant name>] [--channel git|release] [--force]
-                      [--product-dir <checkout>]
+  metistry init <dir> [--name <assistant name>] [--channel git|release]
+                      [--shape compose|launchd] [--force] [--product-dir <checkout>]
       Create a private instance repo at <dir> from the product's seed/ (git init,
       Knowledge/, identity.yaml with a minted instance_id, rules.yaml, config dirs,
       metistry.lock, one commit).
-      Prints the .env lines to put in <dir>/state/.env next — never writes them.
+      Prints the .env lines to put in <dir>/state/.env next — never writes them,
+      including METISTRY_ORIGIN (the console refuses to start without it) and a
+      METISTRY_RECONCILER_URL shaped for --shape (default: launchd on macOS,
+      compose elsewhere — docs/ops/deployment-shapes.md); both are loopback
+      addresses that a namespaced instance's own ports replace.
       --channel writes metistry.lock's product.source: git (this install is a
       checkout update fast-forwards; the default) or release (it consumes
       published artifacts — docs/ops/releases.md).
@@ -521,7 +525,17 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
     case "init": {
       const dir = positional[0];
       if (!dir) {
-        err("usage: metistry init <dir> [--name <assistant name>] [--force]");
+        err("usage: metistry init <dir> [--name <assistant name>] [--shape compose|launchd] [--force]");
+        return 2;
+      }
+      // --shape decides which .env lines are printed below (compose or
+      // launchd — a typo must not silently fall back to the platform
+      // guess); undefined lets `init` guess from the platform, as launchd
+      // on darwin (docs/ops/deployment-shapes.md).
+      const shapeFlag = str(flags, "shape");
+      const shape = parseDeploymentShape(shapeFlag);
+      if (shapeFlag !== undefined && !shape) {
+        err(`--shape must be compose or launchd, not ${JSON.stringify(shapeFlag)}`);
         return 2;
       }
       const result = await init({
@@ -533,6 +547,8 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
         productSource: channel ?? "git",
         productCommit: productDir ? await gitHead(productDir, io.exec ?? realExec) : undefined,
         exec: io.exec,
+        shape,
+        platform: io.platform,
       });
       out(`instance created at ${result.dir} (commit ${result.commit.slice(0, 7)}; assistant named "${result.assistantName}" in identity.yaml; instance_id ${result.instanceId})`);
       out("");

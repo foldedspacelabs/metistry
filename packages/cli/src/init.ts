@@ -13,10 +13,11 @@ import { cp, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { COMPUTE_FILENAME, mintToken } from "@foldedspacelabs/metistry-core";
+import { COMPUTE_FILENAME, mintToken, type DeploymentShape } from "@foldedspacelabs/metistry-core";
 import { realExec, type Exec } from "./exec.js";
 import { mintInstanceId, withInstanceId } from "./instance.js";
 import { LOCK_FILENAME, serializeLock, type LockFile, type LockSource } from "./lock.js";
+import { DEFAULT_PORTS, loadNamespace } from "./namespace.js";
 
 export interface InitOptions {
   dir: string;
@@ -32,6 +33,15 @@ export interface InitOptions {
   productCommit?: string | undefined;
   /** How the product got here (docs/ops/cli.md): a git checkout `update` fast-forwards, or a pinned release. */
   productSource?: LockSource | undefined;
+  /**
+   * Which deployment shape the printed `.env` lines target (`--shape`,
+   * docs/ops/deployment-shapes.md). Undefined = guess from `platform`: this
+   * is only a printing decision — the instance's actual `deployment.yaml`
+   * shape is still set by `metistry deployment set-shape`, unchanged here.
+   */
+  shape?: DeploymentShape | undefined;
+  /** test seam: which OS this is stamping on, for the `shape` guess above. */
+  platform?: NodeJS.Platform | undefined;
   exec?: Exec | undefined;
   now?: Date | undefined;
   mint?: (() => string) | undefined;
@@ -163,6 +173,19 @@ export async function init(opts: InitOptions): Promise<InitResult> {
   await git("commit", "-q", "-m", "Instance created");
   const commit = await git("rev-parse", "HEAD");
 
+  // Which shape the printed lines target (docs/ops/deployment-shapes.md):
+  // launchd is what the Mac app installs and what a fresh macOS checkout
+  // runs by default (no Docker Desktop hurdle); `--shape compose` keeps the
+  // old compose-shaped line for a container install. Namespacing
+  // (`metistry up --namespace`) only ever applies to the launchd shape
+  // (`docs/ops/deployment-shapes.md`, "A second instance on one Mac") —
+  // compose's ports stay the fixed defaults docker-compose.yml publishes.
+  const shape: DeploymentShape = opts.shape ?? ((opts.platform ?? process.platform) === "darwin" ? "launchd" : "compose");
+  const ns = shape === "launchd" ? await loadNamespace(dir) : undefined;
+  const consolePort = shape === "launchd" ? (ns?.ports.console ?? DEFAULT_PORTS.console) : DEFAULT_PORTS.console;
+  const reconcilerUrl =
+    shape === "launchd" ? `http://127.0.0.1:${ns?.ports.reconciler ?? DEFAULT_PORTS.reconciler}` : "http://host.docker.internal:7812";
+
   return {
     dir,
     assistantName,
@@ -171,7 +194,14 @@ export async function init(opts: InitOptions): Promise<InitResult> {
     envLines: [
       `METISTRY_INSTANCE_DIR=${dir}`,
       `METISTRY_BRIDGE_TOKEN_RECONCILER=${mint()}`,
-      "METISTRY_RECONCILER_URL=http://host.docker.internal:7812",
+      `METISTRY_RECONCILER_URL=${reconcilerUrl}`,
+      // the console's canonical origin (docs/ops/auth.md) — required to
+      // start (apps/console/src/main.ts requireEnv) in EITHER shape. This is
+      // the default for a loopback-only install; a tailnet hostname or an
+      // HTTPS reverse proxy replaces it once this instance is reachable off
+      // the machine, and passkeys enrolled here bind to whichever origin is
+      // configured at enrolment time, so changing it later means re-enrolling.
+      `METISTRY_ORIGIN=http://127.0.0.1:${consolePort}`,
       // the console's local owner door (docs/ops/auth.md): the Mac app and
       // the CLI present this over loopback instead of a passkey ceremony
       `METISTRY_LOCAL_OWNER_TOKEN=${mint()}`,

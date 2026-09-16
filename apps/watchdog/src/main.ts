@@ -59,8 +59,8 @@ async function runSupervisor(path: string): Promise<{ children: { name: string }
  * `supervised` is the supervisor's child list when this process IS the
  * supervisor, and undefined otherwise (the compose shape, Linux) — the only
  * honest source for "is the assistant supposed to be running at all?". With
- * no engine credential `metistry up` omits the child, and the queue it is
- * not draining must not alert every cycle (probes.ts, `assistantAbsent`).
+ * no engine in compute.yaml `metistry up` omits the child, and the queue it
+ * is not draining must not alert every cycle (probes.ts, `assistantAbsent`).
  */
 function startProbing(supervised?: string[]): void {
   const pool = new pg.Pool({

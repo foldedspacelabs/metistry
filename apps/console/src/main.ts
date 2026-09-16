@@ -277,7 +277,7 @@ startRunner(pool, scheduled, {
   ...(process.env.METISTRY_DEVIN_SESSION_TIMEOUT_HOURS ? { devinSessionTimeoutHours: intEnv("METISTRY_DEVIN_SESSION_TIMEOUT_HOURS", 24) } : {}),
   inboxDir,
   inboxSink: inbox,
-}, intEnv("METISTRY_RUNNER_TICK_MS", 60_000), { budget: routineBudget });
+}, intEnv("METISTRY_RUNNER_TICK_MS", 60_000), { budget: routineBudget, compute: () => compute.store.current });
 console.log(`runner: ${scheduled.map((c) => `${c.name}/${c.intervalSec}s`).join(", ")}`);
 
 const host = optionalEnv("METISTRY_CONSOLE_HOST", "127.0.0.1"); // loopback default (invariant 8)

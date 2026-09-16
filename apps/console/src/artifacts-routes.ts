@@ -31,7 +31,7 @@ export function isArtifactRoute(pathname: string): boolean {
 }
 
 export async function artifactRoutes(req: IncomingMessage, res: ServerResponse, url: URL, service: ArtifactsService | undefined): Promise<void> {
-  if (!service) return sendError(res, "not_available");
+  if (!service) return sendError(res, "not_available", "artifacts are not configured in this deployment — the console needs a vault bridge (METISTRY_RECONCILER_URL + METISTRY_BRIDGE_TOKEN_RECONCILER, docs/ops/reconciler.md)");
   const key = `${req.method} ${url.pathname}`;
   const q = url.searchParams;
   const p = USER;
@@ -70,7 +70,7 @@ export async function artifactRoutes(req: IncomingMessage, res: ServerResponse, 
     }
     if (req.method === "GET" && (m = FILE.exec(url.pathname))) {
       const path = q.get("path");
-      if (!path) return sendError(res, "invalid_request");
+      if (!path) return sendError(res, "invalid_request", "?path= is required: the file inside this version to read");
       const f = await service.readFile(m[1]!, m[2]!, path, p);
       if (!f) return sendError(res, "not_found");
       if (q.get("raw") === "1") {
@@ -91,24 +91,24 @@ export async function artifactRoutes(req: IncomingMessage, res: ServerResponse, 
     }
     if (req.method === "GET" && (m = DIFF.exec(url.pathname))) {
       const from = q.get("from");
-      if (!from) return sendError(res, "invalid_request");
+      if (!from) return sendError(res, "invalid_request", "?from= is required: the version to diff from (?to= defaults to the latest)");
       const r = await service.diff(m[1]!, from, q.get("to"), p);
       return r ? sendJson(res, 200, r) : sendError(res, "not_found");
     }
     if (req.method === "GET" && (m = COMMENTS.exec(url.pathname))) {
       const version = q.get("version");
-      if (!version) return sendError(res, "invalid_request");
+      if (!version) return sendError(res, "invalid_request", "?version= is required: the artifact version whose comment threads to list");
       const r = await service.commentList(m[1]!, version, p);
       return r ? sendJson(res, 200, { threads: r }) : sendError(res, "not_found");
     }
     if (req.method === "POST" && (m = COMMENTS.exec(url.pathname))) {
       const body = (await readJson(req)) as { version?: string; body?: string; path?: string; anchor?: unknown; parent?: string };
-      if (typeof body.body !== "string") return sendError(res, "invalid_request");
+      if (typeof body.body !== "string") return sendError(res, "invalid_request", "body is required: the comment text");
       if (body.parent) {
         const r = await service.commentReply({ parent: body.parent, body: body.body }, p);
         return r ? sendJson(res, 201, r) : sendError(res, "not_found");
       }
-      if (typeof body.version !== "string") return sendError(res, "invalid_request");
+      if (typeof body.version !== "string") return sendError(res, "invalid_request", "version is required unless parent names the comment being replied to");
       const r = await service.commentCreate({ artifact: m[1]!, version: body.version, body: body.body, path: body.path, anchor: body.anchor }, p);
       return r ? sendJson(res, 201, { comment: r }) : sendError(res, "not_found");
     }
@@ -119,7 +119,7 @@ export async function artifactRoutes(req: IncomingMessage, res: ServerResponse, 
     return sendError(res, "not_found");
   } catch (err) {
     if (err instanceof ArtifactsError) return sendJson(res, statusFor(err.code), errorEnvelope(err.code, err.message));
-    if (err instanceof SyntaxError) return sendError(res, "invalid_request"); // malformed JSON body
+    if (err instanceof SyntaxError) return sendError(res, "invalid_request", "request body is not JSON");
     throw err;
   }
 }

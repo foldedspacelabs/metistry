@@ -268,6 +268,13 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
       JSON.stringify({ work_id: id.done, reports: 0 }),
     ]);
 
+    // one room, on the blocked card — the Needs You card is the one that most
+    // wants somewhere to answer (docs/ops/threads.md)
+    await pool.query(
+      `INSERT INTO artifact_comments (id, work_id, body, author_principal, author_kind) VALUES ($1, $2, 'why is this stuck?', 'user', 'human')`,
+      [`cmt_${tag}`, id.blocked],
+    );
+
     const { rows } = await store.run("board", { project: tag, limit: 50 });
     const col = new Map(rows.map((r) => [Number(r.id), r.column]));
     expect(col.get(id.backlog)).toBe("backlog");
@@ -289,6 +296,12 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
     expect(esc.get(id.working)).toBe(false);
     expect(esc.get(id.backlog)).toBe(false);
     expect(esc.get(id.done)).toBe(false);
+
+    // has_thread (0016): a card with a room links to it, one without opens its
+    // own detail. The panel asks no second endpoint to find that out.
+    const thread = new Map(rows.map((r) => [Number(r.id), r.has_thread]));
+    expect(thread.get(id.blocked)).toBe(true); // the room opened below
+    expect(thread.get(id.backlog)).toBe(false);
 
     const reported = rows.find((r) => Number(r.id) === id.reported)!;
     expect(reported.last_report_at).not.toBeNull();

@@ -12,7 +12,7 @@
 # 2026-09-06), so "assigned" and "in progress" would be lies about them.
 # `open_work` / `projects_overview` remain the view over those.
 name: board
-description: One row per board card over the tasks module's work rows — the derived column (backlog / assigned / in_progress / needs_you / done / reported), who it is addressed to, who holds the lease, age, last report, and whether it wants a human. Ordered by column, then most recently touched. `limit` applies PER COLUMN, so one busy column never crowds the others out.
+description: One row per board card over the tasks module's work rows — the derived column (backlog / assigned / in_progress / needs_you / done / reported), who it is addressed to, who holds the lease, age, last report, whether a room hangs on it, and whether it wants a human. Ordered by column, then most recently touched. `limit` applies PER COLUMN, so one busy column never crowds the others out.
 params:
   project: { type: text, default: "" } # blank = every project; rows with no project appear only in that view
   limit: { type: int, default: 50 } # per column, not per result set
@@ -42,6 +42,11 @@ sql: |
       -- the one detail view the console already has for a card: a review
       -- bundle names the artifact it was cut from (handles, never payloads)
       s.meta->'bundle'->>'artifact' AS artifact,
+      -- the room on this card (0016, docs/ops/threads.md). One room per work
+      -- row is a unique index, so this is an existence test, not a count: a
+      -- card with a room opens #/rooms/work/<id>; one without opens its own
+      -- detail. The console never asks a second endpoint to find that out.
+      EXISTS (SELECT 1 FROM artifact_comments c WHERE c.work_id = s.id AND c.parent_id IS NULL) AS has_thread,
       round(extract(epoch FROM (now() - s.created_at)) / 3600.0, 1)::float8 AS age_hours,
       CASE
         -- closed WITH a report from the agent that ran it vs closed with none
@@ -76,7 +81,7 @@ sql: |
     FROM carded c
   )
   SELECT "column", id, title, kind, project, owner, claimed_by, lease_expires_at,
-         age_hours, last_report_at, escalated, external_ref, artifact, status, due::text AS due, updated_at
+         age_hours, last_report_at, escalated, external_ref, artifact, has_thread, status, due::text AS due, updated_at
   FROM ranked
   WHERE rn <= :limit
   ORDER BY array_position(ARRAY['backlog','assigned','in_progress','needs_you','done','reported']::text[], "column"),

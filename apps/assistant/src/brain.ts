@@ -2,14 +2,12 @@
 // engine mounts exactly ONE MCP server — the console's mcp-brain at /mcp —
 // and authenticates to it like any external agent, as the first INTERNAL
 // agent in the registry. Invariant 9 is enforced here, not prompted: the
-// allowlist below is the assistant's entire tool surface; built-in tools
-// are disabled outright (`tools: []`), and `strictMcpConfig` ignores every
-// other MCP source (.mcp.json, user settings, plugins). Absent the env, the
-// engine runs tool-less exactly as before (degrades: absent).
+// allowlist below is the assistant's entire tool surface, and the engine has
+// no other tool source to ignore — the loop calls what `tools.ts` hands it
+// and nothing else (engine-openai.ts). Absent the env, the engine runs
+// tool-less exactly as before (degrades: absent).
 
-import type { McpHttpServerConfig, Options } from "@anthropic-ai/claude-agent-sdk";
-
-/** The MCP server name as the SDK sees it: tool names become `mcp__brain__<tool>`. */
+/** The MCP server name the tool host presents under: tool names become `mcp__brain__<tool>`. */
 export const BRAIN_SERVER = "brain";
 
 /**
@@ -61,7 +59,7 @@ export interface BrainConfig {
   token: string;
 }
 
-/** Fully-qualified SDK tool names for the allowlist. */
+/** Fully-qualified tool names for the allowlist. */
 export function brainToolNames(): string[] {
   return BRAIN_TOOLS.map((t) => `mcp__${BRAIN_SERVER}__${t}`);
 }
@@ -73,17 +71,4 @@ export function brainConfigFromEnv(env: NodeJS.ProcessEnv = process.env): BrainC
   if (!url || !token) return undefined;
   if (!/^https?:\/\//.test(url)) throw new Error("METISTRY_BRAIN_URL must be an http(s) URL");
   return { url, token };
-}
-
-/**
- * The tool-related slice of the SDK query options. With a brain: one HTTP
- * MCP server carrying the bearer, and `allowedTools` = exactly the brain
- * tools. Without: no servers, no allowlist. In both cases built-in tools
- * are off and foreign MCP config is ignored.
- */
-export function brainOptions(brain: BrainConfig | undefined): Pick<Options, "mcpServers" | "allowedTools" | "tools" | "strictMcpConfig"> {
-  const base = { tools: [] as string[], strictMcpConfig: true };
-  if (!brain) return base;
-  const server: McpHttpServerConfig = { type: "http", url: brain.url, headers: { Authorization: `Bearer ${brain.token}` } };
-  return { ...base, mcpServers: { [BRAIN_SERVER]: server }, allowedTools: brainToolNames() };
 }

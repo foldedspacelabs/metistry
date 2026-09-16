@@ -7,8 +7,9 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
 import { mintToken, tokenHash } from "@foldedspacelabs/metistry-core";
+import { emptyCompute, parseCompute, type ResolvedAssignment } from "@foldedspacelabs/metistry-core";
 import { briefThreadBlock, claimCrewRow, drainCrewOne, issueRunToken } from "../src/crew-drain.js";
-import { buildCrewOptions, type CrewRunInput, type CrewRunResult, type CrewSnapshot } from "../src/crew.js";
+import { crewSystemPrompt, crewToolNames, type CrewRunInput, type CrewRunResult, type CrewSnapshot } from "../src/crew.js";
 import { loadTestEnv } from "@foldedspacelabs/metistry-core/test-env";
 
 const { hasDb } = loadTestEnv(new URL("../../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
@@ -31,9 +32,21 @@ const snapshot: CrewSnapshot = {
   sha256: "c".repeat(64),
 };
 
+// The crew's compute (C2): a crew runs on ITS OWN provider, and a crew
+// nothing assigns has no engine at all. One local provider is enough — the
+// runner is faked, so nothing dials it.
+const computeFile = parseCompute(`
+providers:
+  testbench: { kind: openai-compatible, base_url: "http://127.0.0.1:1/v1", locality: on_machine }
+assignments:
+  default: { model: testbench/generalist }
+  crews:
+    ${crewId}: { model: testbench/sonnet, effort: medium }
+`);
+
 describe.skipIf(!hasDb)("crew drain (integration)", () => {
   let pool: pg.Pool;
-  const cfg = { brainUrl: "http://console:8080/mcp", identity: { name: "Tester" }, leaseSeconds: 60, maxAttempts: 2, retryBackoffSeconds: 120 };
+  const cfg = { brainUrl: "http://console:8080/mcp", identity: { name: "Tester" }, leaseSeconds: 60, maxAttempts: 2, retryBackoffSeconds: 120, compute: () => computeFile };
 
   beforeAll(async () => {
     pool = new pg.Pool({
@@ -73,13 +86,15 @@ describe.skipIf(!hasDb)("crew drain (integration)", () => {
     const id = await enqueue("Summarize Knowledge/Projects/X.md", { task_id: 77 });
     const hashBefore = await hashOf();
     let seen: CrewRunInput | null = null;
+    let assigned: ResolvedAssignment | null = null;
     let liveHashDuringRun = "";
-    const run = async (input: CrewRunInput) => {
+    const run = async (input: CrewRunInput, assignment: ResolvedAssignment) => {
       seen = input;
+      assigned = assignment;
       liveHashDuringRun = await hashOf();
       return ok;
     };
-    expect(await drainCrewOne(pool, cfg, run)).toBe(true);
+    expect(await drainCrewOne(pool, { ...cfg, runAssigned: run })).toBe(true);
 
     // the runner got the snapshot, the brief, the handle, the brain URL and a fresh bearer
     const s = seen!;
@@ -88,16 +103,16 @@ describe.skipIf(!hasDb)("crew drain (integration)", () => {
     expect(s.task_id).toBe(77);
     expect(s.brain.url).toBe("http://console:8080/mcp");
     expect(s.identity).toEqual({ name: "Tester" });
-    const o = buildCrewOptions(s);
-    expect(o).toMatchObject({
-      model: "sonnet",
-      effort: "medium", // the manifest's half of the tier pair, reaching the SDK
-      maxTurns: 5,
-      maxBudgetUsd: 0.1,
-      allowedTools: ["mcp__brain__knowledge_search", "mcp__brain__knowledge_read", "mcp__brain__knowledge_list", "mcp__brain__knowledge_grep", "mcp__brain__requests_create"],
-    });
-    expect((o.mcpServers as any).brain.headers.Authorization).toBe(`Bearer ${s.brain.token}`);
-    expect(o.systemPrompt).toMatch(/^You work for Tester\./);
+    // …and its OWN assignment (collaboration rule 3), not the assistant's default
+    expect(assigned!).toMatchObject({ provider: "testbench", model: "sonnet", effort: "medium", from: `crew:${crewId}` });
+    expect(crewSystemPrompt(s.crew, s.identity)).toMatch(/^You work for Tester\./);
+    expect(crewToolNames(s.crew.uses)).toEqual([
+      "mcp__brain__knowledge_search",
+      "mcp__brain__knowledge_read",
+      "mcp__brain__knowledge_list",
+      "mcp__brain__knowledge_grep",
+      "mcp__brain__requests_create",
+    ]);
 
     // single-run credential: minted for this run (its hash IS the row while live), dead afterwards
     expect(liveHashDuringRun).toBe(tokenHash(s.brain.token));
@@ -122,9 +137,9 @@ describe.skipIf(!hasDb)("crew drain (integration)", () => {
       return ok;
     };
     await enqueue("run two");
-    await drainCrewOne(pool, cfg, run);
+    await drainCrewOne(pool, { ...cfg, runAssigned: run });
     await enqueue("run three");
-    await drainCrewOne(pool, cfg, run);
+    await drainCrewOne(pool, { ...cfg, runAssigned: run });
     expect(tokens).toHaveLength(2);
     expect(tokens[0]).not.toBe(tokens[1]);
     const current = await hashOf();
@@ -139,7 +154,7 @@ describe.skipIf(!hasDb)("crew drain (integration)", () => {
     const boom = async () => {
       throw new Error("sdk exploded");
     };
-    expect(await drainCrewOne(pool, cfg, boom)).toBe(true);
+    expect(await drainCrewOne(pool, { ...cfg, runAssigned: boom })).toBe(true);
     let row = await workRow(id);
     expect(row).toMatchObject({ status: "in_progress", claimed_by: `crew:${crewId}` });
     expect(row.meta.attempts).toBe(1);
@@ -149,7 +164,7 @@ describe.skipIf(!hasDb)("crew drain (integration)", () => {
     expect(await claimCrewRow(pool, 60, 2)).toBeNull();
     // lapse it by hand: the next pass retries, hits the cap, parks
     await pool.query(`UPDATE work SET lease_expires_at = now() - interval '1 second' WHERE id = $1`, [id]);
-    expect(await drainCrewOne(pool, cfg, boom)).toBe(true);
+    expect(await drainCrewOne(pool, { ...cfg, runAssigned: boom })).toBe(true);
     row = await workRow(id);
     expect(row).toMatchObject({ status: "blocked" });
     expect(row.meta.attempts).toBe(2);
@@ -162,7 +177,7 @@ describe.skipIf(!hasDb)("crew drain (integration)", () => {
   it("a budget or turn stop is final: the run is recorded ok=false with the outcome, the row parks as blocked, nothing retries", async () => {
     const id = await enqueue("expensive");
     const stopped: CrewRunResult = { ...ok, outcome: "max_budget", num_turns: 5, cost_usd: 0.11, errors: ["budget exceeded"] };
-    await drainCrewOne(pool, cfg, async () => stopped);
+    await drainCrewOne(pool, { ...cfg, runAssigned: async () => stopped });
     const row = await workRow(id);
     expect(row.status).toBe("blocked");
     expect(row.history.at(-1).note).toMatch(/max_budget, 5 turns, 1 report, \$0\.1100 — budget exceeded/);
@@ -187,7 +202,7 @@ describe.skipIf(!hasDb)("crew drain (integration)", () => {
     const third = await say(3, "agent", "helper-b", "then I take the console side", root);
 
     let seen: CrewRunInput | null = null;
-    await drainCrewOne(pool, { ...cfg, briefThreadBytes: 4096 }, async (input) => { seen = input; return ok; });
+    await drainCrewOne(pool, { ...cfg, briefThreadBytes: 4096, runAssigned: async (input) => { seen = input; return ok; } });
     const brief = seen!.brief;
     expect(brief.startsWith("Summarize the room")).toBe(true); // the dispatched brief is untouched; the block is appended
     expect(brief).toContain(`--- prior work on #${id}`);
@@ -216,22 +231,40 @@ describe.skipIf(!hasDb)("crew drain (integration)", () => {
       capped,
     ]);
     let briefSeen = "";
-    await drainCrewOne(pool, { ...cfg, briefThreadBytes: 4096 }, async (input) => { briefSeen = input.brief; return ok; });
+    await drainCrewOne(pool, { ...cfg, briefThreadBytes: 4096, runAssigned: async (input) => { briefSeen = input.brief; return ok; } });
     expect(briefSeen).toBe("x".repeat(100)); // nothing appended: no headroom under the size checkBrief allowed
   });
 
   it("whatever the crew raised while it held the row is stamped with that work id — server-side, after the fact, never a tool argument", async () => {
     const id = await enqueue("raise something");
-    await drainCrewOne(pool, cfg, async () => {
-      // the crew's own requests_create, as mcp-brain would write it: no work id anywhere in the call
-      await pool.query(`INSERT INTO proposals (kind, source_agent, trust, payload) VALUES ('report', $1, 'external', $2::jsonb)`, [
-        crewId,
-        JSON.stringify({ title: "found a thing", body: "…" }),
-      ]);
-      return ok;
+    await drainCrewOne(pool, {
+      ...cfg,
+      runAssigned: async () => {
+        // the crew's own requests_create, as mcp-brain would write it: no work id anywhere in the call
+        await pool.query(`INSERT INTO proposals (kind, source_agent, trust, payload) VALUES ('report', $1, 'external', $2::jsonb)`, [
+          crewId,
+          JSON.stringify({ title: "found a thing", body: "…" }),
+        ]);
+        return ok;
+      },
     });
     const { rows } = await pool.query(`SELECT work_id, payload->>'title' AS title FROM proposals WHERE source_agent = $1 ORDER BY id DESC LIMIT 1`, [crewId]);
     expect(rows[0]).toEqual({ work_id: String(id), title: "found a thing" });
+  });
+
+  it("a crew compute.yaml assigns nothing to parks as blocked naming the line to write — no engine, so no run (C2/C3)", async () => {
+    const id = await enqueue("unassigned");
+    const calls: string[] = [];
+    const run = async (input: CrewRunInput) => {
+      calls.push(input.crew.name);
+      return ok;
+    };
+    expect(await drainCrewOne(pool, { ...cfg, compute: () => emptyCompute(), runAssigned: run })).toBe(true);
+    const row = await workRow(id);
+    expect(row.status).toBe("blocked");
+    expect(row.history.at(-1).note).toMatch(new RegExp(`has no compute:.*assignments\\.crews\\.${crewId}.*assignments\\.default`));
+    expect(row.history.at(-1).note).toContain(`metistry compute assign crew:${crewId} <provider/model>`);
+    expect(calls).toEqual([]); // nothing ran, and no token was minted for it
   });
 
   it("a row the runner cannot honour parks with the reason and never mints: no snapshot, a write tool in the snapshot, a revoked crew, no brain URL", async () => {
@@ -241,22 +274,22 @@ describe.skipIf(!hasDb)("crew drain (integration)", () => {
       return ok;
     };
     const noSnap = await enqueue("no snapshot", {}, null);
-    await drainCrewOne(pool, cfg, run);
+    await drainCrewOne(pool, { ...cfg, runAssigned: run });
     expect((await workRow(noSnap)).history.at(-1).note).toMatch(/crew run refused: crew snapshot missing/);
     const writer = await enqueue("writer", {}, { ...snapshot, uses: ["knowledge_write"] });
-    await drainCrewOne(pool, cfg, run);
+    await drainCrewOne(pool, { ...cfg, runAssigned: run });
     expect((await workRow(writer)).history.at(-1).note).toMatch(/never available to a crew/);
     const noBrain = await enqueue("no brain");
-    await drainCrewOne(pool, { ...cfg, brainUrl: undefined }, run);
+    await drainCrewOne(pool, { ...cfg, brainUrl: undefined, runAssigned: run });
     expect((await workRow(noBrain)).history.at(-1).note).toMatch(/METISTRY_BRAIN_URL is unset/);
     await pool.query(`UPDATE agents SET revoked_at = now() WHERE id = $1`, [crewId]);
     const hashBefore = await hashOf();
     const revoked = await enqueue("revoked crew");
-    await drainCrewOne(pool, cfg, run);
+    await drainCrewOne(pool, { ...cfg, runAssigned: run });
     expect((await workRow(revoked)).history.at(-1).note).toMatch(/not registered or is revoked/);
     expect(await issueRunToken(pool, crewId)).toBeNull();
     expect(await hashOf()).toBe(hashBefore); // a revoked row is never re-keyed
     expect(calls).toEqual([]);
-    expect(await drainCrewOne(pool, cfg, run)).toBe(false); // queue empty
+    expect(await drainCrewOne(pool, { ...cfg, runAssigned: run })).toBe(false); // queue empty
   });
 });

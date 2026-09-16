@@ -1,6 +1,8 @@
 # Assistant image — ghcr.io/foldedspacelabs/metistry-assistant
 # Build from the repo root: docker build -f apps/assistant/Dockerfile .
-# Auth: CLAUDE_CODE_OAUTH_TOKEN via env (PoC-4). NEVER ANTHROPIC_API_KEY.
+# Auth: the engine's provider key, named by compute.yaml's
+# providers.<name>.auth.secret and passed in as that environment variable
+# (docs/ops/compute.md). Never baked into the image.
 # build natively on the CI host; the compiled output is pure JS, so only the
 # runtime stage below is per-architecture (release.yml builds amd64 + arm64)
 FROM --platform=$BUILDPLATFORM node:22-slim AS build

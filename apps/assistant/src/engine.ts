@@ -7,24 +7,27 @@
 // all (invariant 9, collaboration rule 2): the factory is called by the
 // drain, never from inside a turn.
 //
-// Two kinds live here today:
+// ONE kind lives here (C2, and the owner's decision of 2026-09-11 recorded
+// under "Dropping the SDK entirely"):
 //
 //   openai-compatible — the in-house loop (engine-openai.ts). Every provider
-//                       `compute.yaml` can name: OpenRouter, Zen, LM Studio,
-//                       Ollama, a bundled llama-server, Apple FM once its
-//                       bridge grows /v1.
-//   anthropic         — the Claude Agent SDK (engine-sdk.ts), unchanged in
-//                       behaviour, and the engine for a turn `compute.yaml`
-//                       does not assign. C2 removes it with the subscription
-//                       scrub; until that PR lands it is the path every
-//                       existing install is still running on, so it is a
-//                       KIND here rather than a special case anywhere else.
+//                       `compute.yaml` can name: OpenRouter, OpenCode Zen,
+//                       LM Studio, Ollama, a bundled llama-server, Apple FM
+//                       once its bridge grows /v1. Claude arrives through
+//                       one of them like any other cloud model.
 //
-// Invariant 9 holds identically on both: the engine's only tools are the
-// console's `/mcp`, built-ins are off, and there is no shell and no raw git.
+// The interface stays an interface so a second kind is additive — a native
+// Messages adapter, a `llama-server` with GBNF grammars (C15) — but there is
+// no engine for a turn `compute.yaml` does not assign, and that is the
+// point: an install with no `assignments.default` has NO engine, the
+// assistant is not started at all, and `metistry doctor` says so. Everything
+// model-free keeps running (docs/ops/assistant-tools.md, "Running without an
+// engine").
+//
+// Invariant 9 holds by construction: the engine's only tools are the
+// console's `/mcp`, and there is no shell and no raw git.
 
-import { SDK_ENGINE_KIND, type CostSource, type Effort, type EngineKind, type ResolvedAssignment } from "@foldedspacelabs/metistry-core";
-import { makeSdkEngine, type SdkEngineConfig } from "./engine-sdk.js";
+import type { CostSource, Effort, EngineKind, ResolvedAssignment } from "@foldedspacelabs/metistry-core";
 import { makeOpenAiEngine, type OpenAiEngineConfig } from "./engine-openai.js";
 
 export interface TurnResult {
@@ -36,7 +39,7 @@ export interface TurnResult {
   cache_read?: number;
   cache_write?: number;
   cost_usd?: number;
-  /** The provider NAME that served the turn (`compute.yaml`'s key); absent on the un-assigned SDK path. */
+  /** The provider NAME that served the turn (`compute.yaml`'s key). */
   provider?: string;
   /** The model id as the provider knows it. */
   model?: string;
@@ -59,20 +62,19 @@ export interface TurnResult {
 
 /**
  * What one turn runs as: the model and effort (a tier is a (model, effort)
- * pair — core's `tiers.ts`), the session to continue, and — when
- * `compute.yaml` assigns this tier — the resolved assignment that says WHICH
- * PROVIDER serves it. The assignment is what the factory keys on; its
- * absence is the SDK path.
+ * pair — core's `tiers.ts`), the session to continue, and the resolved
+ * assignment that says WHICH PROVIDER serves it. The assignment is what the
+ * factory keys on; its absence is not another engine, it is no engine.
  */
 export interface TurnSpec {
-  /** The model as the engine wants it: an SDK alias on the SDK path, the provider's own id on an assigned one. */
+  /** The model as the provider knows it — the second half of the assignment's `<provider>/<id>`. */
   model: string;
   effort: Effort;
   /** Continue an existing session. Absent = a fresh one. */
   resume?: string | undefined;
-  /** The `compute.yaml` assignment for this turn; absent = nothing assigned it, so the SDK path runs. */
+  /** The `compute.yaml` assignment for this turn. Absent = nothing assigned it, and the factory refuses by name. */
   assignment?: ResolvedAssignment | undefined;
-  /** The thread this turn belongs to — the in-house engine's session key. */
+  /** The thread this turn belongs to — the engine's session key. */
   thread?: string | undefined;
   /** The tier or `crew:<name>` the turn resolved through, for the run row and the budget's `critical` flag. */
   tier?: string | undefined;
@@ -88,26 +90,40 @@ export type Engine = (prompt: string, spec: TurnSpec) => Promise<TurnResult>;
 /**
  * A pre-call gate the factory runs before EVERY turn on EVERY kind. Budgets
  * are the caller of record (budgets.ts): the check has to happen before the
- * call, and putting it here is what makes that true for the SDK path, the
- * in-house loop and every future adapter at once. Throws to refuse.
+ * call, and putting it here is what makes that true for the in-house loop
+ * and every future adapter at once. Throws to refuse.
  */
 export type TurnGuard = (spec: TurnSpec) => Promise<void>;
 
-export interface EngineConfig extends SdkEngineConfig, OpenAiEngineConfig {
+export interface EngineConfig extends OpenAiEngineConfig {
   /** Run before every turn; throw to refuse it (budgets, and anything else that must happen before money moves). */
   guard?: TurnGuard | undefined;
 }
 
 /** The kinds this build can run. A `compute.yaml` naming anything else fails its own schema long before it reaches here. */
-export const ENGINE_KINDS: readonly EngineKind[] = ["openai-compatible", SDK_ENGINE_KIND];
+export const ENGINE_KINDS: readonly EngineKind[] = ["openai-compatible"];
 
-/** Which engine a spec runs on. One rule, stated once: the provider's kind, or the SDK when nothing assigned it. */
-export function kindFor(spec: TurnSpec): EngineKind {
-  return spec.assignment?.config.kind ?? SDK_ENGINE_KIND;
+/**
+ * Raised when a turn arrives with nothing assigned to it, or with a kind
+ * this build has no engine for. Named, and carrying the field to edit (R3),
+ * because the drain has to tell it apart from a provider being down: an
+ * unassigned turn is a configuration state to report, not an outage to
+ * retry.
+ */
+export class NoEngineError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "NoEngineError";
+  }
+}
+
+/** Which engine a spec runs on. One rule, stated once: the provider's kind, and `undefined` when nothing assigned it. */
+export function kindFor(spec: TurnSpec): EngineKind | undefined {
+  return spec.assignment?.config.kind;
 }
 
 /**
- * The factory. Both engines are built once and picked per turn, because a
+ * The factory. The engine is built once and picked per turn, because a
  * turn's kind is a property of its tier and two tiers of one install may sit
  * on different providers — `routine` on a local server, `deep` on a cloud —
  * which is the normal case, not an edge one.
@@ -115,19 +131,20 @@ export function kindFor(spec: TurnSpec): EngineKind {
 export function makeEngine(cfg: EngineConfig): Engine {
   const engines: Record<EngineKind, Engine> = {
     "openai-compatible": makeOpenAiEngine(cfg),
-    [SDK_ENGINE_KIND]: makeSdkEngine(cfg),
   };
   return async (prompt, spec) => {
     const kind = kindFor(spec);
+    if (kind === undefined) {
+      throw new NoEngineError(
+        `no engine for ${spec.tier ?? "this turn"}: compute.yaml assigns nothing to it and there is no default — ` +
+          `\`metistry compute assign default <provider/model>\` (docs/ops/compute.md)`,
+      );
+    }
     const engine = engines[kind];
     if (!engine) {
-      throw new Error(`no engine for provider kind "${kind}" — compute.yaml's providers.<name>.kind must be one of ${ENGINE_KINDS.join(", ")}`);
+      throw new NoEngineError(`no engine for provider kind "${kind}" — compute.yaml's providers.<name>.kind must be one of ${ENGINE_KINDS.join(", ")}`);
     }
     await cfg.guard?.(spec); // before the call: a budget checked afterwards is a report, not a control
     return engine(prompt, spec);
   };
 }
-
-// The SDK path's surface, re-exported so `engine.js` stays the one import
-// path for callers that do not care which engine answered.
-export { DISALLOWED, buildQueryOptions, makeSdkEngine, tallyToolUse, type SdkEngineConfig } from "./engine-sdk.js";

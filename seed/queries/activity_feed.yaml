@@ -1,13 +1,54 @@
 # Seeded default (D4 overlay: an instance file of the same name wins).
+#
+# The timeline (docs/research/2026-09-16-taskuary-review.md ADOPT 1). A
+# capture used to be INVISIBLE until the `*/5` drain turned it into a
+# proposal — the loop's only accidental latency, and the one thing Taskuary's
+# funnel does that this union did not. The row already exists the instant the
+# capture lands, so showing it costs nothing: store the arrival, show it
+# wearing its own `status`, classify after. The `inbox` branch below is that.
+#
+# `kind` filters the stream. It matches either the exact row kind or the
+# coarser `group` the SQL derives (capture | proposal | decision | run | work
+# | message), so the console's chips read ONE closed vocabulary decided here
+# rather than each surface keeping its own copy of the kind list.
+#
+# `since` is the incremental-refresh param: hand back the newest `ts` already
+# rendered and get the rows at or after it. Inclusive on purpose — two rows
+# can share a microsecond across two branches, and a strict `>` would drop
+# the second of them forever. The caller de-duplicates on (ref, ts, kind),
+# which is cheap; losing an event is not.
 name: activity_feed
-description: Time-ordered "what happened" across the system (docs/product/desktop-app-plan.md "The window" — home panel) — a union of runs (tool/turn/crew_run/dispatch/task_op/agent_admin/project_mode, plus collector_run failures only), proposals (created + decided), work.history entries, and outbound_messages (brief/review/alert). Filterable by agent/project; the weekly review is this feed summarised. `turn_id` (mcp-brain tool calls only; null elsewhere) groups the calls one reply made.
+description: Time-ordered "what happened" across the system (docs/product/desktop-app-plan.md "The window" — home panel) — a union of inbox captures, runs (tool/turn/crew_run/dispatch/task_op/agent_admin/project_mode, plus collector_run failures only), proposals (created + decided), work.history entries, and outbound_messages (brief/review/alert). Filterable by agent/project/kind; `since` returns only what is at or after a timestamp already seen. The weekly review is this feed summarised. `turn_id` (mcp-brain tool calls only; null elsewhere) groups the calls one reply made.
 params:
   hours:   { type: int,  default: 24 }
   limit:   { type: int,  default: 100 }
   agent:   { type: text, default: "" }   # blank = every actor
   project: { type: text, default: "" }   # blank = every project
+  kind:    { type: text, default: "" }   # blank = every kind; an exact row kind, or one group name
+  since:   { type: text, default: "" }   # blank = the whole window; else a timestamptz text — rows AT or after it
 sql: |
   WITH feed AS (
+    -- A capture, the instant it lands — before any classifier has looked at
+    -- it. `status` is the pill: `new` is still waiting on the drain,
+    -- `classified` already has a proposal behind it.
+    SELECT
+      i.ts,
+      'capture'                                                                           AS kind,
+      coalesce(i.source_agent, i.source)                                                  AS actor,
+      coalesce(
+        nullif(btrim(split_part(regexp_replace(coalesce(i.note, ''), '^---.*?\n---\n', '', 's'), E'\n', 1)), ''),
+        regexp_replace(i.path, '^.*/', '')
+      )                                                                                   AS subject,
+      concat_ws(' · ', i.source, i.status)                                                AS detail,
+      'inbox:' || i.id                                                                    AS ref,
+      NULL::text                                                                          AS proj,
+      NULL::text                                                                          AS turn_id,
+      'capture'                                                                           AS grp
+    FROM inbox i
+    WHERE i.ts > now() - make_interval(hours => (:hours)::int)
+
+    UNION ALL
+
     SELECT
       r.ts,
       r.kind                                                                            AS kind,
@@ -32,7 +73,8 @@ sql: |
       END                                                                                 AS detail,
       'runs:' || r.id                                                                     AS ref,
       r.meta->>'project'                                                                  AS proj,
-      r.meta->>'turn_id'                                                                  AS turn_id
+      r.meta->>'turn_id'                                                                  AS turn_id,
+      CASE WHEN r.kind IN ('task_op') THEN 'work' ELSE 'run' END                          AS grp
     FROM runs r
     WHERE r.ts > now() - make_interval(hours => (:hours)::int)
       AND (
@@ -50,21 +92,30 @@ sql: |
       coalesce(p.payload->>'title', p.payload->>'reason', p.kind)                          AS detail,
       'proposals:' || p.id                                                                 AS ref,
       p.payload->>'project'                                                                AS proj,
-      NULL::text                                                                            AS turn_id
+      NULL::text                                                                            AS turn_id,
+      'proposal'                                                                            AS grp
     FROM proposals p
     WHERE p.ts > now() - make_interval(hours => (:hours)::int)
 
     UNION ALL
 
+    -- A decision event: what was asked, what was answered, and by whom. The
+    -- "whom" is not guessed and not a column — the decision route is
+    -- gated on the `user` principal, so every decision but `expired` (the
+    -- morning brief's auto-expiry, which is nobody's) is the owner's hand.
     SELECT
       p.decided_at                                                                        AS ts,
       'proposal_decided'                                                                  AS kind,
       p.source_agent                                                                      AS actor,
       p.kind                                                                               AS subject,
-      concat_ws(': ', p.decision, p.feedback)                                              AS detail,
+      CASE
+        WHEN p.decision = 'expired' THEN 'auto-expired — nobody decided it'
+        ELSE concat_ws(': ', 'you decided ' || p.decision, p.feedback)
+      END                                                                                   AS detail,
       'proposals:' || p.id                                                                 AS ref,
       p.payload->>'project'                                                                AS proj,
-      NULL::text                                                                            AS turn_id
+      NULL::text                                                                            AS turn_id,
+      'decision'                                                                            AS grp
     FROM proposals p
     WHERE p.decided_at IS NOT NULL
       AND p.decision <> 'pending'
@@ -80,7 +131,8 @@ sql: |
       concat_ws(' ', h->>'op', CASE WHEN h->>'status' IS NOT NULL THEN '-> ' || (h->>'status') END, h->>'note') AS detail,
       'work:' || w.id                                                                      AS ref,
       w.project                                                                            AS proj,
-      NULL::text                                                                            AS turn_id
+      NULL::text                                                                            AS turn_id,
+      'work'                                                                                AS grp
     FROM work w
     CROSS JOIN LATERAL jsonb_array_elements(w.history) AS h
     WHERE (h->>'ts')::timestamptz > now() - make_interval(hours => (:hours)::int)
@@ -95,15 +147,19 @@ sql: |
       m.text                                                                                AS detail,
       'outbound_messages:' || m.id                                                          AS ref,
       NULL::text                                                                            AS proj,
-      NULL::text                                                                            AS turn_id
+      NULL::text                                                                            AS turn_id,
+      'message'                                                                             AS grp
     FROM outbound_messages m
     WHERE m.kind IN ('brief', 'review', 'alert')
       AND m.ts > now() - make_interval(hours => (:hours)::int)
   )
-  SELECT ts, kind, actor, subject, left(detail, 200) AS detail, ref, turn_id
-  FROM feed
+  SELECT ts, kind, "group", actor, subject, left(detail, 200) AS detail, ref, turn_id
+  FROM (SELECT f.*, f.grp AS "group" FROM feed f) g
   WHERE (:agent = '' OR actor = :agent)
     AND (:project = '' OR proj = :project)
+    AND (:kind = '' OR kind = :kind OR grp = :kind)
+    -- a blank `since` casts to NULL, never to an error: nullif before the cast
+    AND (ts >= coalesce(nullif(:since::text, '')::timestamptz, '-infinity'::timestamptz))
   ORDER BY ts DESC
   LIMIT :limit
 cache_ttl: 0

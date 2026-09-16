@@ -118,6 +118,7 @@ nav button.active { color: var(--mt-color-accent); }
 nav button::before { content: "•"; font-size: var(--mt-text-callout-size); line-height: 1.1; }
 nav button[data-view="feed"]::before      { content: "◈"; }
 nav button[data-view="chat"]::before      { content: "💬"; }
+nav button[data-view="board"]::before     { content: "🗂"; }
 nav button[data-view="dashboard"]::before { content: "📊"; }
 nav button[data-view="capture"]::before   { content: "📥"; }
 nav button[data-view="triage"]::before    { content: "📝"; }
@@ -608,6 +609,40 @@ label { display: flex; flex-direction: column; gap: var(--mt-space-1);
 #dashboard td.num, #dashboard th.num { text-align: right; }
 #dashboard td .bar { min-width: 48px; }
 #dashboard summary { cursor: pointer; margin-top: var(--mt-space-2); min-height: var(--mt-size-pointer-target); }
+
+/* ----------------------------------------------------------------- board -- */
+/* Read-only Kanban (docs/ops/board.md). Phone: the columns STACK, because a
+   horizontally scrolling board on a phone hides the column that matters.
+   Wide: lanes side by side, the strip scrolling if six do not fit. Tokens
+   only — every value below comes from tokens.json. */
+#board-filter { flex-direction: row; align-items: center; }
+#board-filter select { width: auto; min-width: 140px; flex: 0 1 auto;
+  border-radius: var(--mt-radius-pill); padding: var(--mt-space-2) var(--mt-space-4);
+  font-size: var(--mt-text-subhead-size); }
+.board-hint { display: none; }
+
+.board { display: grid; gap: var(--mt-space-3); margin-top: var(--mt-space-3); }
+.board-col { background: var(--mt-color-surface); border-radius: var(--mt-radius-lg);
+  box-shadow: var(--mt-elevation-1); padding: var(--mt-space-3) var(--mt-space-4); }
+.board-col h3 { display: flex; justify-content: space-between; align-items: baseline; gap: var(--mt-space-3); }
+.board-count { font-size: var(--mt-text-subhead-size); font-weight: 400; color: var(--mt-color-text-secondary); }
+.board-why { margin-top: var(--mt-space-1); }
+.board-cards { margin-top: var(--mt-space-2); }
+.board-cards li { padding: var(--mt-space-3) 0; border-bottom: 1px solid var(--mt-color-border); }
+.board-cards li:last-child { border-bottom: 0; }
+.board-cards .row { display: flex; justify-content: space-between; align-items: baseline; gap: var(--mt-space-3); }
+.board-cards .card-title { font-size: var(--mt-text-callout-size); }
+.board-cards .card.escalated { border-left: 2px solid var(--mt-color-failed);
+  padding-left: var(--mt-space-3); margin-left: calc(-1 * var(--mt-space-3)); }
+/* only a card with somewhere to go looks like it has somewhere to go */
+.board-cards .card.linked { cursor: pointer; }
+.board-cards .card.linked .card-title { color: var(--mt-color-accent); }
+.board-none { padding: var(--mt-space-3) 0; }
+
+@media (min-width: 900px) {
+  .board { grid-auto-flow: column; grid-auto-columns: minmax(230px, 1fr); align-items: start; overflow-x: auto; }
+  .board-hint { display: inline; }
+}
 
 /* ------------------------------------------------------------- artifacts -- */
 #art-filter { flex-direction: row; flex-wrap: nowrap; align-items: center; }

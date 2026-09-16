@@ -5,7 +5,7 @@ transport: http
 port: 8080               # no bind of its own: mounted at the console's POST /mcp, so this is the console's port
 runs_on: container
 requires_tcc: []
-discovery: eager         # 25 tools, 19,698 chars of definition ≈ 4.9k tokens (chars/4) — over the PoC-17 tool-COUNT guidance (>20), and now within ~75 tokens of the other axis (>5k definition tokens), which is the one that actually gates lazy; measured by test/brain.test.ts. The next tool added here forces the lazy decision rather than fitting under it. Deprecated spellings (src/aliases.ts) resolve at call time and are deliberately not exposed here: a second copy of these schemas would break the budget on its own.
+discovery: eager         # 26 tools declared; 25 of them EAGER at 19,787 chars ≈ 4.9k definition tokens (chars/4), just under the >5k line that gates lazy. `propose_action` is the 26th and it is LAZY BY CREDENTIAL: registered only for a principal whose `autonomy` table admits an action (docs/ops/actions.md), i.e. nobody until the owner sets a level. So the surface every agent sees is unchanged, and a principal that has opted in carries 26 tools / 20,845 chars ≈ 5.2k tokens, knowingly, having bought something with it. Deferring on the credential rather than behind a tool_index/execute/batch meta-tool is the cheaper half of docs/research/2026-08-tool-discovery.md's advice — same saving, none of the +1 discovery turn. Deprecated spellings (src/aliases.ts) resolve at call time and are deliberately not exposed here. Measured by test/brain.test.ts.
 degrades: absent
 exposes:
   - name: capture
@@ -58,3 +58,5 @@ exposes:
     description: List the named queries available on this instance (invariant 3's one read path) — name, description, and each param's type + default
   - name: queries_run
     description: Run one named query by name with optional params, rows capped at 200; internal principals always, external agents only with a `queries` grant
+  - name: propose_action
+    description: Ask the console to do one of four things — dispatch a work row, patch a task, comment, capture — executed at once, queued for the user, or refused, by the caller's own autonomy table; offered only to a credential the owner has given room

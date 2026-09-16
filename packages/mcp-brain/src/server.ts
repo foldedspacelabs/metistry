@@ -43,6 +43,7 @@ import { ARTIFACTS_TOOL_NAMES, registerArtifactTools } from "./artifacts-tools.j
 import { CREW_TOOL_NAMES, registerCrewTools, type CrewDispatcher } from "./crew-tools.js";
 import { THREAD_TOOL_NAMES, registerThreadTools } from "./thread-tools.js";
 import { QUERIES_TOOL_NAMES, registerQueriesTools } from "./queries-tools.js";
+import { ACTION_TOOL_NAMES, registerActionTools, type ActionExecutor } from "./action-tools.js";
 import { KNOWLEDGE_FS_TOOL_NAMES, registerKnowledgeFsTools, type KnowledgeLister, type KnowledgeVaultSearcher } from "./knowledge-fs.js";
 import { registerKnowledgeResources } from "./knowledge-resources.js";
 import { captureToInbox, type CaptureSink } from "./capture.js";
@@ -79,6 +80,8 @@ export interface BrainConfig {
   crews?: CrewDispatcher | undefined;
   /** The one read path into state (invariant 3) for queries_list/queries_run. Absent → `not_available`. Internal principals always; external agents need grants.queries = true. */
   queries?: QueryStore | undefined;
+  /** The host's action executor for `propose_action` at mode `allow` (apps/console/src/actions.ts). Absent → an allowed action answers `not_available`; the tool itself is offered only to a credential the owner has given room (docs/ops/actions.md). */
+  actions?: ActionExecutor | undefined;
   /** Nudge when a held lease has this many seconds or fewer left (default 120). */
   leaseWarningSeconds?: number | undefined;
   /** Reported to MCP clients as the server version. */
@@ -94,7 +97,13 @@ export interface BrainServer {
 }
 
 /**
- * The eager surface (§4.3 default 1): 25 tools, no meta-tool indirection.
+ * The declared surface (§4.3 default 1): 26 tools, no meta-tool indirection.
+ * 25 of them are EAGER — every principal sees them — and `propose_action` is
+ * the one that is not: it is registered only for a credential whose autonomy
+ * table admits an action (docs/ops/actions.md), which is nobody until the
+ * owner sets a level. So the eager definition budget measured below is
+ * unchanged for everyone who has not opted in, and an admitted principal
+ * crosses the >5k line knowingly, having bought something with it.
  * Order = manifest order. One noun per thing, one verb set per object
  * (docs/product/glossary.md): folding tasks_list_ready + tasks_mine into
  * `tasks_list {filter}` paid for knowledge_list/knowledge_grep. This still
@@ -126,8 +135,19 @@ export const TOOL_NAMES = [
   ...ARTIFACTS_TOOL_NAMES,
   ...CREW_TOOL_NAMES,
   ...QUERIES_TOOL_NAMES,
+  ...ACTION_TOOL_NAMES,
 ] as const;
 export type ToolName = (typeof TOOL_NAMES)[number];
+
+/**
+ * What EVERY principal sees in `tools/list` — the declared surface minus the
+ * groups that are registered per credential. Today that is exactly
+ * `propose_action` (docs/ops/actions.md): an agent the owner has given no room
+ * is not shown a tool it could only be refused by. This is the list the
+ * definition-token budget is measured against, and the one a bake-off
+ * presents.
+ */
+export const EAGER_TOOL_NAMES: readonly ToolName[] = TOOL_NAMES.filter((n) => !(ACTION_TOOL_NAMES as readonly string[]).includes(n));
 
 // --- text boundary --------------------------------------------------------
 
@@ -464,6 +484,12 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
 
     // queries_list / queries_run (invariant 3's one read path, out to agents): internal always, external with grants.queries = true
     registerQueriesTools(reg, cfg.queries, principal);
+
+    // propose_action (docs/ops/actions.md): registered ONLY when this
+    // credential's autonomy table admits something — nobody, until the owner
+    // sets a level. That is this group's "lazy": the definition does not ride
+    // in a tools/list it could never be called from.
+    registerActionTools(reg, db, principal, cfg.actions);
 
     // Vault notes as MCP resources (metistry://Knowledge/<path>), same tier
     // rule as knowledge_read throughout — not a tool, so no runs row.

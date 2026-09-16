@@ -11,7 +11,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { TasksService } from "@foldedspacelabs/metistry-tasks";
 import { EmbedUnavailableError } from "@foldedspacelabs/metistry-core";
 import { QueryStore } from "@foldedspacelabs/metistry-queries";
-import { createBrainServer, sha256Text, TOOL_NAMES, type AgentPrincipal, type VaultWriteRequest } from "../src/index.js";
+import { createBrainServer, EAGER_TOOL_NAMES, sha256Text, type AgentPrincipal, type VaultWriteRequest } from "../src/index.js";
 import { loadTestEnv } from "@foldedspacelabs/metistry-core/test-env";
 
 const { hasDb } = loadTestEnv(new URL("../../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
@@ -196,7 +196,7 @@ cache_ttl: 0
   it("lists exactly the eager surface, in manifest order, with no agent-identity argument anywhere", async () => {
     const alice = await connect("tok-alice");
     const { tools } = await alice.listTools();
-    expect(tools.map((t) => t.name)).toEqual([...TOOL_NAMES]);
+    expect(tools.map((t) => t.name)).toEqual([...EAGER_TOOL_NAMES]);
     for (const t of tools) {
       const props = Object.keys((t.inputSchema as { properties?: Record<string, unknown> }).properties ?? {});
       expect(props, t.name).not.toContain("agent");
@@ -828,7 +828,7 @@ cache_ttl: 0
       [ALICE],
     );
     const tools = new Set(rows.map((r) => r.tool));
-    for (const t of TOOL_NAMES) expect(tools.has(t), t).toBe(true);
+    for (const t of EAGER_TOOL_NAMES) expect(tools.has(t), t).toBe(true);
     expect(rows.every((r) => r.finished && r.ok !== null)).toBe(true);
     const rep = rows.find((r) => r.tool === "requests_create" && r.ok);
     expect(rep.meta.args.body).toBe("<7 chars>");

@@ -50,6 +50,10 @@ services:
       # still remote. The launchd shape sets nothing and stays plain loopback.
       METISTRY_TRUSTED_LOOPBACK_PROXY: ${METISTRY_TRUSTED_LOOPBACK_PROXY:-docker-gateway}
       METISTRY_INBOX_DIR: /data/inbox
+      # runner hardening (docs/ops/automation.md): failure-streak limit and
+      # the per-error-signature alert window. Unset = the built-in 5 and 24h.
+      METISTRY_RUNNER_MAX_STREAK: ${METISTRY_RUNNER_MAX_STREAK:-}
+      METISTRY_ALERT_DEDUPE_H: ${METISTRY_ALERT_DEDUPE_H:-}
       METISTRY_VAPID_PUBLIC: ${METISTRY_VAPID_PUBLIC:-}
       METISTRY_VAPID_PRIVATE: ${METISTRY_VAPID_PRIVATE:-}
       METISTRY_VAPID_SUBJECT: ${METISTRY_VAPID_SUBJECT:-}

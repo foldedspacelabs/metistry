@@ -5,13 +5,16 @@
 // `mcp-brain` itself. A snapshot would pass this suite for a year and then
 // score a model on a tool surface that no longer exists.
 import { describe, expect, it } from "vitest";
-import { TOOL_NAMES } from "@foldedspacelabs/metistry-mcp-brain";
+import { EAGER_TOOL_NAMES } from "@foldedspacelabs/metistry-mcp-brain";
 import { brainToolDefs, DEFAULT_STUB_RESULT, qualify, recordingToolHost, toolDefsFromListResult, unqualify, type ToolDef } from "../src/tools.js";
 
 describe("the definitions are production's", () => {
   it("lists exactly the brain bridge's tools, qualified the way every runs row already spells them", async () => {
     const defs = await brainToolDefs();
-    expect(defs.map((d) => d.name)).toEqual(TOOL_NAMES.map((n) => `mcp__brain__${n}`));
+    // the EAGER surface: what a principal is actually presented with. A tool
+    // registered per credential (propose_action) is not on it, and a bake-off
+    // that scored against it would be scoring a surface no model was shown.
+    expect(defs.map((d) => d.name)).toEqual(EAGER_TOOL_NAMES.map((n) => `mcp__brain__${n}`));
     expect(defs.length).toBeGreaterThan(10); // §3.2 axis 1 is "a tool loop over ~12 MCP tools"
   });
 

@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
 import { QueryStore } from "@foldedspacelabs/metistry-queries";
 import { mintToken } from "@foldedspacelabs/metistry-core";
-import { TOOL_NAMES } from "@foldedspacelabs/metistry-mcp-brain";
+import { EAGER_TOOL_NAMES } from "@foldedspacelabs/metistry-mcp-brain";
 import { makeServer } from "../src/server.js";
 import * as store from "../src/auth-store.js";
 import * as agents from "../src/agents.js";
@@ -83,7 +83,8 @@ describe.skipIf(!hasDb)("POST /mcp (integration)", () => {
 
     const list = await rpc("tools/list", {}, auth);
     expect(list.status).toBe(200);
-    expect((await list.json()).result.tools.map((t: { name: string }) => t.name)).toEqual([...TOOL_NAMES]);
+    // EAGER, not declared: `propose_action` rides only on a credential with an autonomy level (docs/ops/actions.md), and this agent has none
+    expect((await list.json()).result.tools.map((t: { name: string }) => t.name)).toEqual([...EAGER_TOOL_NAMES]);
 
     const cap = await rpc("tools/call", { name: "capture", arguments: { note: "via mcp" } }, auth);
     expect(cap.status).toBe(200);
@@ -114,7 +115,7 @@ describe.skipIf(!hasDb)("POST /mcp (integration)", () => {
     await agents.ensureInternalAgent(pool, agents.INTERNAL_ASSISTANT_ID, { token, display_name: "itest assistant" });
     const auth = { authorization: `Bearer ${token}` };
     expect((await rpc("initialize", initParams, auth)).status).toBe(200);
-    expect(((await (await rpc("tools/list", {}, auth)).json()).result.tools as { name: string }[]).map((t) => t.name)).toEqual([...TOOL_NAMES]);
+    expect(((await (await rpc("tools/list", {}, auth)).json()).result.tools as { name: string }[]).map((t) => t.name)).toEqual([...EAGER_TOOL_NAMES]);
 
     // no project list → member of every project: creating in a project nobody granted it succeeds, and it is listed back
     const project = `itest-hub-${suffix}`;

@@ -201,6 +201,50 @@ project slug is dropped rather than invented; an unknown `kind` is a refusal
 rather than a silent fall back to `task`. `docs/ops/reply-feedback.md` has the
 rest, including why this leaves §4.12 intact.
 
+## `allow` on an `action` — the verb that does something
+
+```
+POST /api/proposals/31  {"decision":"allow"}
+200 {"ok":true,"action":{"kind":"dispatch","ref":"gh:owner/repo#41","url":"…","run_id":9001}}
+400 the stored payload.action does not validate — the message names the field
+409 / 422 / 503 the SERVICE refused (a lease, a data policy, no vault bridge):
+    the proposal stays pending, carrying payload.error, and you decide again
+```
+
+An `action` proposal carries a closed `payload.action = {kind, args}`
+(`dispatch | task_update | comment | capture`). Allowing it runs the action
+through the **same service call the owner's own route makes**, as the `user`
+principal, with the proposal's `source_agent` recorded as `on_behalf_of`; the
+result lands in `payload.result` and in a `runs` row. The action runs *before*
+the row is decided — as the `improvement` path does — so a refusal leaves a
+pending proposal rather than a settled decision that did nothing. Nothing is
+half-applied, because one action is one service call. `docs/ops/actions.md`
+has the enum, the autonomy table, and why `dispatch` stays human by default.
+
+Rows an agent was allowed to run on its own arrive already decided `auto` —
+never in this queue, always in the timeline.
+
+## `PUT /api/agents/:id/autonomy` — the one route that may widen
+
+```
+PUT /api/agents/researcher/autonomy
+    {"level":"act_within_scope","actions":{"dispatch":"deny"},"max_open_bundles":2}
+200 {"ok":true,"autonomy":{…},"actions":{"dispatch":"deny","task_update":"allow",…},
+     "widened":["level observe → act_within_scope"]}
+400 the field is named (unknown key, unknown action kind, bad level)
+403 a widening arrived somewhere that is not the user's own hand
+409 the record changed between the read that checked it and this write
+```
+
+The §4.21 keys (`may_dispatch_to`, `accept_from`, `max_open_bundles`) narrow
+and only narrow, as they always have. `level` and `actions` may go either way,
+and **this route is the door that permits it** — it is reached by the `user`
+principal alone, and `setAutonomy` refuses a widening from any caller that
+does not say so, so a future call site cannot widen by forgetting. Every raise
+writes a `runs` row (`agent_admin` / `autonomy_widened`) and one Needs You
+alert per change per `METISTRY_ALERT_DEDUPE_H`. The body **replaces** the
+record; `metistry agents autonomy` does the read-merge for you.
+
 ## `POST /api/proposals/batch` — one verb, many rows
 
 ```

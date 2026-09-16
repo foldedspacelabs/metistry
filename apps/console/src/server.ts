@@ -16,12 +16,11 @@
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { runCheck, startRun, finishRun, errorEnvelope, rollSession, statusFor, type CheckResult, type Compute } from "@foldedspacelabs/metistry-core";
 import { QueryError, QueryStore } from "@foldedspacelabs/metistry-queries";
-import { captureToInbox, createBrainServer, type KnowledgeLister, type KnowledgeReader, type KnowledgeVaultSearcher, type KnowledgeWriter, type QueryEmbedder } from "@foldedspacelabs/metistry-mcp-brain";
+import { captureToInbox, createBrainServer, dirSink, type CaptureSink, type KnowledgeLister, type KnowledgeReader, type KnowledgeVaultSearcher, type KnowledgeWriter, type QueryEmbedder } from "@foldedspacelabs/metistry-mcp-brain";
 import { TasksService } from "@foldedspacelabs/metistry-tasks";
 import { ArtifactsService, VaultError, type VaultClient } from "@foldedspacelabs/metistry-artifacts";
 import { artifactRoutes, isArtifactRoute } from "./artifacts-routes.js";
@@ -51,7 +50,10 @@ export interface ConsoleConfig {
   origins?: string | undefined;
   /** METISTRY_LOCAL_OWNER_TOKEN + the peer addresses that count as this machine (local-owner.ts). Absent = no local owner door at all. */
   localOwner?: LocalOwnerConfig | undefined;
+  /** Fallback capture directory when no sink is injected (tests, and a console with no vault bridge). */
   inboxDir: string;
+  /** Where captures land: `vaultSink(vault)` — `Knowledge/Inbox/` through the reconciler's bridge (docs/ops/inbox.md). Absent → `dirSink(inboxDir)`. */
+  inbox?: CaptureSink | undefined;
   policy: SessionPolicy;
   secureCookies: boolean;
   webRoot?: string; // PWA shell dir; absent = API-only (tests)
@@ -141,6 +143,9 @@ const FEEDBACK_ROUTE = /^(POST|DELETE) \/api\/messages\/(\d{1,12})\/feedback$/;
 
 export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Server {
   const rp = wa.rpFromOrigin(cfg.origins ?? cfg.origin);
+  // ONE capture sink for every door: POST /capture, the `/note` fast path,
+  // the bridge's `capture` tool (docs/ops/inbox.md).
+  const inbox = cfg.inbox ?? dirSink(cfg.inboxDir);
   const challenges = new wa.ChallengeStore();
   const tasks = new TasksService(db);
   // artifacts (§4.21): one service, adapted twice — the routes below for the user's session, the mcp-brain tools for agents
@@ -150,6 +155,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     authenticate: (req) => agents.authenticateAgent(db, req), // the same principal source as /capture
     tasks,
     inboxDir: cfg.inboxDir,
+    inbox,
     readKnowledge: cfg.readKnowledge,
     embedder: cfg.embedder,
     writeKnowledge: cfg.writeKnowledge,
@@ -330,7 +336,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
           filename = String(req.headers["x-metistry-filename"] ?? `capture-${Date.now()}.bin`);
         }
         // one write path for every capture door (the brain bridge's `capture` tool uses the same function)
-        const r = await captureToInbox(db, cfg.inboxDir, { bytes, filename, mime: req.headers["content-type"] ?? null, note, source: "http", sourceAgent, idempotency });
+        const r = await captureToInbox(db, inbox, { bytes, filename, mime: req.headers["content-type"] ?? null, note, source: "http", sourceAgent, idempotency });
         await finishRun(db, runId, { ok: true, meta: { inbox_id: r.id, bytes: bytes.length, ...(r.replayed ? { replayed: true } : {}) } });
         // a replay is the ORIGINAL response — same status, same id — with one header saying so
         if (r.replayed) res.setHeader("idempotency-replayed", "true");
@@ -403,19 +409,22 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
 
       // /note: file + inbox row + instant ack — no model, no assistant (§4.1)
       if (decision?.kind === "note") {
-        await mkdir(cfg.inboxDir, { recursive: true });
-        const rel = `${Date.now()}-note.md`;
-        await writeFile(join(cfg.inboxDir, rel), decision.text);
-        const ins = await db.query(
-          `INSERT INTO inbox (source, path, mime, note) VALUES ('note', $1, 'text/markdown', $2) RETURNING id`,
-          [rel, decision.text],
-        );
-        const reply = `noted → inbox #${ins.rows[0]?.id}`;
+        // the same sink as every other door, so a /note lands in the vault
+        // inbox, is committed, and is visible in Obsidian like any capture
+        const r = await captureToInbox(db, inbox, {
+          bytes: Buffer.from(decision.text, "utf8"),
+          filename: "note.md",
+          mime: "text/markdown",
+          note: decision.text,
+          source: "note",
+          sourceAgent: null,
+        });
+        const reply = `noted → inbox #${r.id}`;
         await db.query(`INSERT INTO outbound_messages (thread, text, in_reply_to, kind) VALUES ($1, $2, $3, 'ack')`, [
           thread, reply, messageId,
         ]);
         await db.query(`UPDATE inbound_messages SET status = 'done' WHERE id = $1`, [messageId]);
-        await audit("capture", "note", true, { inbox_id: ins.rows[0]?.id, message_id: messageId });
+        await audit("capture", "note", true, { inbox_id: r.id, path: r.path, message_id: messageId });
         return sendJson(res, 202, { message_id: messageId, reply });
       }
 
@@ -514,8 +523,8 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         await runCheck("db", "SELECT 1 round-trip", async () => {
           await db.query("SELECT 1");
         }),
-        await runCheck("inbox-dir", "mkdir -p inbox dir", async () => {
-          await mkdir(cfg.inboxDir, { recursive: true });
+        await runCheck("inbox", `reach the capture sink (${inbox.describe})`, async () => {
+          await inbox.check();
         }),
       ];
       return sendJson(res, 200, { checks, as_of: new Date().toISOString() });

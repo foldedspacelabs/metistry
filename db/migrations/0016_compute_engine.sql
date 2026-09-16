@@ -1,4 +1,4 @@
--- 0015_compute_engine — cost is a first-class row, and the engine owns its
+-- 0016_compute_engine — cost is a first-class row, and the engine owns its
 -- own message history (docs/plan-refresh-2026-09-13.md C12 and §4 PR 3).
 --
 -- Additive only, as every migration must be: new columns are nullable and

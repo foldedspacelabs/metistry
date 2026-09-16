@@ -1,17 +1,19 @@
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import {
+  budgetMiss,
+  computeTiers,
   EMBED_DEFAULT_DIM,
   EMBED_DEFAULT_MODEL,
   EMBED_DEFAULT_URL,
   EmbedClient,
-  ROUTINE_TIER,
-  SPEND_QUERY,
-  budgetMiss,
-  computeTiers,
+  firstOnMachineBaseUrl,
   intEnv,
   optionalEnv,
   requireEnv,
+  resolveLocalModelUrl,
+  ROUTINE_TIER,
+  SPEND_QUERY,
   type PreflightMiss,
   type SpendRow,
 } from "@foldedspacelabs/metistry-core";
@@ -25,7 +27,7 @@ import { loadSchedules, startRunner } from "./runner.js";
 import { loadRules } from "./router.js";
 import { watchCompute } from "./compute.js";
 import { TargetRegistry } from "./dispatch.js";
-import { vaultBridgeLister, vaultBridgeSearcher, vaultBridgeWriter } from "@foldedspacelabs/metistry-mcp-brain";
+import { dirSink, vaultSink, DEFAULT_MAX_TRACKED_BYTES, INBOX_PREFIX, vaultBridgeLister, vaultBridgeSearcher, vaultBridgeWriter } from "@foldedspacelabs/metistry-mcp-brain";
 import { ASSISTANT_DEFAULT_AREAS, INTERNAL_ASSISTANT_ID, ensureInternalAgent, revokeAgent, validateGrants } from "./agents.js";
 import { httpVaultClient } from "./vault-client.js";
 import { CrewRegistry } from "./crews.js";
@@ -146,18 +148,36 @@ const listKnowledge = reconcilerUrl && reconcilerToken ? vaultBridgeLister({ url
 const searchVaultKeyword = reconcilerUrl && reconcilerToken ? vaultBridgeSearcher({ url: reconcilerUrl, token: reconcilerToken }) : undefined;
 if (!vault) console.warn("vault bridge absent: set METISTRY_RECONCILER_URL + METISTRY_BRIDGE_TOKEN_RECONCILER for knowledge_read, knowledge_write, knowledge_list, knowledge_grep and artifacts (degrades: absent)");
 
+// Captures live in the vault at `Knowledge/Inbox/` (docs/ops/inbox.md), so
+// Obsidian sees them and git carries them. The bytes go through the SAME
+// bridge as every other vault write — the reconciler stays the only process
+// holding the instance repo (D5), and this container gets no mount.
+// Without a bridge the sink degrades to a plain directory: capture keeps
+// working (SHOULD-10 — one silent drop ends the trust), those files are not
+// in the vault, and moving them into `Knowledge/Inbox/` later is enough for
+// the reconciler's scan to pick them up.
+const inboxDir = optionalEnv("METISTRY_INBOX_DIR", process.env.METISTRY_INSTANCE_DIR ? `${process.env.METISTRY_INSTANCE_DIR.replace(/\/+$/, "")}/${INBOX_PREFIX}` : `./${INBOX_PREFIX}`);
+const maxTrackedBytes = intEnv("METISTRY_INBOX_MAX_TRACKED_BYTES", DEFAULT_MAX_TRACKED_BYTES);
+const inbox = vault ? vaultSink(vault, { maxTrackedBytes }) : dirSink(inboxDir, { prefix: inboxDir.endsWith(INBOX_PREFIX) ? INBOX_PREFIX : "", maxTrackedBytes });
+console.log(`captures: ${inbox.describe}${maxTrackedBytes > 0 ? `, over ${maxTrackedBytes} bytes to .large/ (gitignored)` : ""}`);
+
 // Phase 6: knowledge_search mode=semantic|hybrid needs to embed the QUERY
 // with the same model the reconciler embedded the notes with. The vectors
-// are already in Postgres; this is one call to the same local Ollama.
+// are already in Postgres; this is one call to the local server's
+// /v1/embeddings (C18) — LM Studio, Ollama or the bundled llama-server,
+// whichever compute.yaml's first on_machine provider names.
 // Absent or unreachable → every mode answers, in keyword (degrades).
+const localModel = resolveLocalModelUrl(process.env, firstOnMachineBaseUrl(compute.store.current));
+if (localModel.warning) console.warn(localModel.warning);
 const embedder =
   optionalEnv("METISTRY_EMBED_ENABLED", "true") === "false"
     ? undefined
     : new EmbedClient({
-        url: optionalEnv("METISTRY_OLLAMA_URL", EMBED_DEFAULT_URL),
+        url: localModel.url,
         model: optionalEnv("METISTRY_EMBED_MODEL", EMBED_DEFAULT_MODEL),
         dim: intEnv("METISTRY_EMBED_DIM", EMBED_DEFAULT_DIM),
       });
+console.log(`embeddings: ${localModel.url}/embeddings (from ${localModel.from}), model ${optionalEnv("METISTRY_EMBED_MODEL", EMBED_DEFAULT_MODEL)}`);
 
 // Crews (Phase 5; docs/ops/crews.md): agents/<area>/<name>.md manifests,
 // D4 overlay — an entry not on disk is read through the vault bridge (that
@@ -185,7 +205,8 @@ const server = makeServer(pool, queries, {
   ...(identity ? { identity } : {}),
   version: require_("../package.json").version,
   ...(localOwner ? { localOwner } : {}),
-  inboxDir: optionalEnv("METISTRY_INBOX_DIR", "./inbox"),
+  inboxDir,
+  inbox,
   policy: {
     idleDays: intEnv("METISTRY_SESSION_IDLE_DAYS", 30),
     maxDays: intEnv("METISTRY_SESSION_MAX_DAYS", 365),
@@ -244,7 +265,8 @@ startRunner(pool, scheduled, {
   // needed here; the base URL is shared with devin-knowledge.
   ...(process.env.METISTRY_DEVIN_API_URL ? { devinApiUrl: process.env.METISTRY_DEVIN_API_URL } : {}),
   ...(process.env.METISTRY_DEVIN_SESSION_TIMEOUT_HOURS ? { devinSessionTimeoutHours: intEnv("METISTRY_DEVIN_SESSION_TIMEOUT_HOURS", 24) } : {}),
-  inboxDir: optionalEnv("METISTRY_INBOX_DIR", "./inbox"),
+  inboxDir,
+  inboxSink: inbox,
 }, intEnv("METISTRY_RUNNER_TICK_MS", 60_000), { budget: routineBudget });
 console.log(`runner: ${scheduled.map((c) => `${c.name}/${c.intervalSec}s`).join(", ")}`);
 

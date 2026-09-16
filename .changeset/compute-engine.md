@@ -29,7 +29,7 @@ stop — the turn cap, a crew's per-run cost cap, the veto — still ANSWERS.
 
 **Cost is a first-class row.** `runs` gains `provider`, `cache_read_tokens`
 and `cache_write_tokens` beside the existing model and token columns
-(additive migration `0015`), and `meta.cost_source` records where the number
+(additive migration `0016`), and `meta.cost_source` records where the number
 came from: the response's own `usage.cost`, the provider's `pricing:` table,
 `local` (0 by definition), or `unknown` — an off-machine call nothing can
 price is recorded at $0 **and says so**, never at a guessed rate. The

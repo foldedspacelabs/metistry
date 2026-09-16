@@ -207,7 +207,7 @@ describe("the rendered plists", () => {
       METISTRY_CONSOLE_HOST: "127.0.0.1",
       METISTRY_DB_HOST: "127.0.0.1",
       METISTRY_EK_URL: "http://127.0.0.1:7811",
-      METISTRY_INBOX_DIR: `${I}/inbox`,
+      METISTRY_INBOX_DIR: `${I}/Knowledge/Inbox`,
     });
 
     const assistant = child("assistant");

@@ -15,6 +15,10 @@
 //   Secrets      names and scope from `metistry secrets list` (READ-THROUGH;
 //                never a value, and there is no code path here that could hold
 //                one)
+//   Compute      providers, assignments, budgets and the local model servers,
+//                over `metistry compute …` (READ-THROUGH, and WRITE-THROUGH:
+//                every control is a verb that edits compute.yaml as the user;
+//                the app stores nothing about compute — compute-model.swift)
 //   Updates      Sparkle's own preferences, read and written by Sparkle
 //   Advanced     the resolved runtime, `metistry version --json`,
 //                `metistry doctor`, logs
@@ -51,6 +55,7 @@ public final class SettingsModel {
         case instance
         case services
         case connections
+        case compute
         case secrets
         case updates
         case advanced
@@ -63,6 +68,7 @@ public final class SettingsModel {
             case .instance: return "Instance"
             case .services: return "Services"
             case .connections: return "Connections"
+            case .compute: return "Compute"
             case .secrets: return "Secrets"
             case .updates: return "Updates"
             case .advanced: return "Advanced"
@@ -74,6 +80,7 @@ public final class SettingsModel {
             case .instance: return "folder"
             case .services: return "gearshape.2"
             case .connections: return "link"
+            case .compute: return "cpu"
             case .secrets: return "key"
             case .updates: return "arrow.down.circle"
             case .advanced: return "wrench.and.screwdriver"
@@ -90,6 +97,10 @@ public final class SettingsModel {
     /// with the Status header, the menu bar and the wizard — Connections renders
     /// it, and no pane asks the question a second time.
     public let consoleSignIn: ConsoleSignInModel
+    /// The Compute pane. It owns the write verbs; `compute` below is the
+    /// read-only summary the Connections pane has always shown, and both come
+    /// from the same `compute show --json`.
+    public let computePane: ComputeModel
     public private(set) var cli: MetistryCLI?
     public private(set) var instanceDir: URL?
 
@@ -103,20 +114,19 @@ public final class SettingsModel {
     public private(set) var secrets: [SecretListing] = []
     public private(set) var secretsPhase: ReadPhase = .idle
     public private(set) var secretsCommand: String?
-    public private(set) var compute: ComputeFacts?
-    public private(set) var computePhase: ReadPhase = .idle
-    public private(set) var computeCommand: String?
 
     public init(
         status: StatusModel,
         cli: MetistryCLI?,
         instanceDir: URL?,
-        consoleSignIn: ConsoleSignInModel? = nil
+        consoleSignIn: ConsoleSignInModel? = nil,
+        computePane: ComputeModel? = nil
     ) {
         self.status = status
         self.cli = cli
         self.instanceDir = instanceDir
         self.consoleSignIn = consoleSignIn ?? ConsoleSignInModel(cli: cli)
+        self.computePane = computePane ?? ComputeModel(status: status, cli: cli)
     }
 
     /// Re-point at another install. Everything read-through is dropped rather
@@ -134,9 +144,7 @@ public final class SettingsModel {
         secrets = []
         secretsPhase = .idle
         secretsCommand = nil
-        compute = nil
-        computePhase = .idle
-        computeCommand = nil
+        computePane.adopt(cli: cli)
     }
 
     // MARK: - Instance
@@ -225,24 +233,20 @@ public final class SettingsModel {
 
     // MARK: - Compute
 
+    // ONE read of `compute show --json` for the whole window. The Compute pane
+    // owns it (compute-model.swift); Connections shows the summary through
+    // these three, so the two panes cannot disagree about which model answers a
+    // turn and neither runs the verb the other already ran.
+
+    public var compute: ComputeFacts? { computePane.report }
+    public var computePhase: ReadPhase { computePane.phase }
+    public var computeCommand: String? { computePane.showCommand }
+
     /// `metistry compute show --json` — which provider and model each tier runs
     /// on, and whether the key each provider NAMES is present. No value of any
     /// key crosses this boundary, because the verb cannot print one.
     public func refreshCompute() async {
-        guard let cli else {
-            computePhase = .unavailable(CLIReadError.noRuntime.localizedDescription ?? "no runtime")
-            return
-        }
-        computeCommand = cli.plannedArguments(for: ["compute", "show", "--json"]).joined(separator: " ")
-        computePhase = .reading
-        switch await cli.computeShow() {
-        case .success(let facts):
-            compute = facts
-            computePhase = .read
-        case .failure(let error):
-            compute = nil
-            computePhase = .unavailable(error.localizedDescription ?? "unavailable")
-        }
+        await computePane.refresh()
     }
 
     // MARK: - Services

@@ -129,6 +129,73 @@ import Testing
     #expect(model.phase == .unavailable("this CLI has no `logs` verb yet — update it (metistry update, or Check for Updates…)"))
 }
 
+// MARK: - the menu bar
+
+@Test func theSupervisorsChildrenAreListedWithTheServicesAndCanBeRestarted() throws {
+    let report = try DoctorReport.decode(from: Data(supervisedDoctorJSON.utf8))
+    let services = try #require(report.componentGroups.first { $0.kind == "service" })
+    // One group, not two: `console` is a service row and `llamaserver` is a
+    // child row, and a person opening the menu is looking for both in Services.
+    #expect(services.components.map(\.name).contains("console"))
+    #expect(services.components.map(\.name).contains("llamaserver"))
+    #expect(!report.componentGroups.contains { $0.kind == "child" })
+
+    let llama = try #require(services.components.first { $0.name == "llamaserver" })
+    // `child:llamaserver` is the row's name; `llamaserver` is what
+    // `metistry restart|stop|start|logs` takes.
+    #expect(llama.row.name == "child:llamaserver")
+    #expect(llama.canControl)
+    // The supervisor itself keeps its own group — it owns the children.
+    #expect(report.componentGroups.contains { $0.kind == "supervisor" })
+}
+
+@Test func theAppleFmBridgeSaysWhatItServesOnceAProviderDialsIt() throws {
+    let report = try DoctorReport.decode(from: Data(supervisedDoctorJSON.utf8))
+    #expect(report.bridgeNote(for: "apple-fm") == "serves foundation-model")
+    // Every other component says nothing extra, including the other bridge.
+    #expect(report.bridgeNote(for: "console") == nil)
+    #expect(report.bridgeNote(for: "calendar") == nil)
+
+    // And a Mac where compute.yaml dials nothing says nothing either: the
+    // bridge being up is not the same fact as the engine being able to use it.
+    let unconfigured = DoctorReport(
+        asOf: "now", productDir: "/p", shape: "launchd", ok: true,
+        rows: [DoctorRow(
+            name: "local:applefm", kind: "local-model", status: .ok, latencyMs: 1,
+            probe: "http://127.0.0.1:7810/v1/models answers",
+            meta: .object(["url": .string("http://127.0.0.1:7810/v1"), "configured": .bool(false)])
+        )]
+    )
+    #expect(unconfigured.bridgeNote(for: "apple-fm") == nil)
+}
+
+
+/// A report from an install that runs a local model: a supervisor with a
+/// `llamaserver` child of its own, and an `apple-fm` bridge that `compute.yaml`
+/// now dials. Separate from `sampleDoctorJSON` because neither shape existed
+/// when that one was written, and both rows are the point here.
+private let supervisedDoctorJSON = """
+{
+  "as_of": "2026-09-17T09:00:00.000Z",
+  "product_dir": "/p",
+  "shape": "launchd",
+  "ok": true,
+  "rows": [
+    { "name": "console", "kind": "service", "status": "ok", "latency_ms": 12, "probe": "GET /health" },
+    { "name": "apple-fm", "kind": "bridge", "status": "ok", "latency_ms": 8, "probe": "GET /check" },
+    { "name": "calendar", "kind": "bridge", "status": "absent", "latency_ms": 0, "probe": "GET /check" },
+    { "name": "supervisor:com.foldedspacelabs.metistry.supervisor", "kind": "supervisor", "status": "ok", "latency_ms": 4,
+      "probe": "the socket answers status with 2 child(ren)" },
+    { "name": "child:console", "kind": "child", "status": "ok", "latency_ms": 1, "probe": "the supervisor reports console running" },
+    { "name": "child:llamaserver", "kind": "child", "status": "ok", "latency_ms": 1,
+      "probe": "the supervisor reports llamaserver running", "meta": { "pid": 5312, "restarts": 0 } },
+    { "name": "local:applefm", "kind": "local-model", "status": "ok", "latency_ms": 6,
+      "probe": "http://127.0.0.1:7810/v1/models answers",
+      "meta": { "url": "http://127.0.0.1:7810/v1", "models": ["foundation-model"], "loaded": 1, "provider": "applefm" } }
+  ]
+}
+"""
+
 private final class ArgumentRecorder: CommandRunner, @unchecked Sendable {
     private let lock = NSLock()
     private var calls: [[String]] = []

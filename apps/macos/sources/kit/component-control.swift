@@ -29,6 +29,9 @@ public struct ComponentControl: Sendable, Equatable, Identifiable {
     /// The argument the lifecycle verbs get.
     public let name: String
     public let affordance: ControlAffordance
+    /// Which menu group this row is listed under: doctor's own `kind`, except
+    /// that a `child` is listed with the services — see `groupKind`.
+    public let groupKind: String
 
     public var id: String { row.id }
     public var canControl: Bool { affordance == .lifecycle }
@@ -37,6 +40,22 @@ public struct ComponentControl: Sendable, Equatable, Identifiable {
         self.row = row
         self.name = Self.componentName(for: row)
         self.affordance = Self.affordance(forKind: row.kind)
+        self.groupKind = Self.groupKind(forKind: row.kind)
+    }
+
+    /// The supervisor's children are services — to the person restarting one
+    /// and to the CLI. `metistry restart llamaserver`, `metistry stop
+    /// llamaserver` and `metistry logs llamaserver` all resolve a `child`
+    /// target over the supervisor's control socket
+    /// (`packages/cli/src/service-control.ts`), which is the same four verbs a
+    /// launchd job or a container gets. Doctor reports them under their own
+    /// `kind` because HOW they are addressed differs; the menu groups by what
+    /// somebody is looking for, and nobody opens a menu looking for a `child`.
+    ///
+    /// The supervisor itself keeps its own group: it owns the children, and
+    /// booting it out takes them with it.
+    public static func groupKind(forKind kind: String) -> String {
+        kind == "child" ? "service" : kind
     }
 
     /// The launchd label prefix every Metistry job shares
@@ -63,8 +82,11 @@ public struct ComponentControl: Sendable, Equatable, Identifiable {
 
     static func affordance(forKind kind: String) -> ControlAffordance {
         switch kind {
-        // Things with a process behind them, in one shape or another.
-        case "service", "bridge", "launchd", "container": return .lifecycle
+        // Things with a process behind them, in one shape or another. `child`
+        // is the supervisor's — `llamaserver` most of all, whose existence is a
+        // `serve:` block in compute.yaml rather than a plist in ops/launchd, so
+        // it exists on exactly the installs that configured a local model.
+        case "service", "bridge", "launchd", "container", "child": return .lifecycle
         // `collector`, `routine`, `target` are manifests that validate;
         // `db`/`migrations` are probes; `deployment` is the resolved shape.
         default: return .none
@@ -94,6 +116,8 @@ public struct ComponentGroup: Sendable, Equatable, Identifiable {
         case "target": return "Targets"
         case "db": return "Database"
         case "deployment": return "Deployment"
+        case "supervisor": return "Supervisor"
+        case "local-model": return "Local Models"
         default: return kind.capitalized
         }
     }
@@ -109,8 +133,17 @@ public struct ComponentGroup: Sendable, Equatable, Identifiable {
 
 public extension DoctorReport {
     /// The menu's shape: doctor's own `kind` grouping, in doctor's own order,
-    /// each row carrying the name the lifecycle verbs take.
+    /// each row carrying the name the lifecycle verbs take — with the
+    /// supervisor's children folded into Services, because that is what they
+    /// are to the person restarting one.
     var componentGroups: [ComponentGroup] {
-        groupedByKind.map { ComponentGroup(kind: $0.kind, components: $0.rows.map(ComponentControl.init(row:))) }
+        var order: [String] = []
+        var byKind: [String: [ComponentControl]] = [:]
+        for row in rows {
+            let control = ComponentControl(row: row)
+            if byKind[control.groupKind] == nil { order.append(control.groupKind) }
+            byKind[control.groupKind, default: []].append(control)
+        }
+        return order.map { ComponentGroup(kind: $0, components: byKind[$0] ?? []) }
     }
 }

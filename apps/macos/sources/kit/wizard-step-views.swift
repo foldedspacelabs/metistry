@@ -337,6 +337,14 @@ public struct ComputeStepView: View {
                     StatusDot(.ok)
                     Text("assigned — turns run on \(ref)").metistryText(.footnote, p, .ok)
                 }
+            case .added(let name):
+                // Not reachable from the wizard, which always assigns the
+                // default; the case exists for the Compute pane's sheet, which
+                // shares this model (compute-model.swift).
+                HStack(spacing: MetistrySpace.s2) {
+                    StatusDot(.ok)
+                    Text("provider \(name) added").metistryText(.footnote, p, .ok)
+                }
             case .working(let what):
                 HStack(spacing: MetistrySpace.s2) {
                     ProgressView().controlSize(.small)

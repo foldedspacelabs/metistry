@@ -153,6 +153,15 @@ export const CREW_TOOL_GROUPS = {
   capture: ["capture"],
   /** The shared task list, within the crew's `projects`. */
   tasks: ["tasks_list", "tasks_claim", "tasks_renew", "tasks_update", "tasks_release", "tasks_close", "tasks_create"],
+  /**
+   * The room on a task (0016, docs/ops/threads.md): read what was said, add
+   * to it. Its OWN group rather than part of `tasks` on purpose — speaking
+   * is a new power, so an existing crew gains it only when the user edits
+   * the manifest, never by a release. A crew still READS the last of the
+   * room without this group: the brief carries it (the prior-work block),
+   * and the brief is not a tool.
+   */
+  rooms: ["tasks_comment", "tasks_thread"],
   /** Versioned output into the crew's projects (§4.21). */
   artifacts: ["artifacts_publish", "artifacts_get", "artifacts_list", "artifacts_comment", "artifacts_resolve", "artifacts_review"],
 } as const;

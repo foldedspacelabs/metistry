@@ -368,6 +368,13 @@ export interface CrewQueueMeta {
   dispatch_run_id: number;
   /** The effective allow list the brief passed. */
   allow: string[];
+  /**
+   * The size cap the brief was checked against (target `data_policy`).
+   * Frozen here because the runner appends the prior-work block from the
+   * task's room (docs/ops/threads.md) and must stay inside the SAME cap the
+   * dispatch was allowed under — the container has no target manifest.
+   */
+  max_brief_bytes: number;
 }
 
 export function snapshotOf(def: CrewDefinition): CrewSnapshot {
@@ -448,6 +455,7 @@ export async function dispatchCrew(
     ...(input.task_id !== undefined ? { task_id: input.task_id } : {}),
     dispatch_run_id: runId,
     allow: policy.allow,
+    max_brief_bytes: policy.max_brief_bytes,
   };
   let work;
   try {

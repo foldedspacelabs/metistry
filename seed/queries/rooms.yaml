@@ -1,0 +1,87 @@
+# Seeded default (D4 overlay: an instance file of the same name wins).
+name: rooms
+description: >-
+  Every conversation in the system, one row per thread, most recent first (docs/ops/threads.md) — the cross-artifact
+  room view of docs/research/2026-09-12-agent-room-review.md phase 1, plus the rooms that hang on `work` rows (0016).
+  `anchor` is `artifact` or `work`; `participants` is who has spoken, not a membership list (nobody is invited to a
+  room and nobody is addressed by one). `escalated` is true when a PENDING proposal cites this thread, and `reason`
+  is that proposal's `payload.reason` — the "why this came to you" line, already stored, finally rendered as a
+  sentence. `agent_tail` is the trailing run of agent-only messages: at `cap` (10) the next agent message escalates
+  instead of being stored.
+params:
+  limit: { type: int, default: 50 }
+  state: { type: text, default: "" } # "" = every room; open | resolved
+  project: { type: text, default: "" } # "" = every project
+  anchor: { type: text, default: "" } # "" = both; artifact | work
+sql: |
+  WITH root AS (
+    SELECT c.id, c.artifact_id, c.version_id, c.work_id, c.state, c.path, c.created_at, c.resolved_by, c.resolved_at
+    FROM artifact_comments c
+    WHERE c.parent_id IS NULL
+  ),
+  msg AS (
+    -- the root and its replies are one flat transcript; nothing here reads a body
+    SELECT r.id AS root_id, m.author_principal, m.author_kind, m.created_at
+    FROM root r
+    JOIN artifact_comments m ON m.id = r.id OR m.parent_id = r.id
+  ),
+  agg AS (
+    SELECT
+      root_id,
+      count(*)::int                                                                   AS messages,
+      max(created_at)                                                                 AS last_at,
+      (array_agg(author_principal ORDER BY created_at DESC))[1]                       AS last_author,
+      coalesce(jsonb_agg(DISTINCT jsonb_build_object('principal', author_principal, 'kind', author_kind)), '[]'::jsonb) AS participants
+    FROM msg GROUP BY root_id
+  ),
+  tail AS (
+    -- consecutive agent messages at the end of the transcript (pingPongDemotes, restated in SQL)
+    SELECT m.root_id, count(*)::int AS agent_tail
+    FROM (
+      SELECT root_id, author_kind,
+             row_number() OVER (PARTITION BY root_id ORDER BY created_at DESC) AS rn_desc,
+             row_number() OVER (PARTITION BY root_id, author_kind ORDER BY created_at DESC) AS rn_kind
+      FROM msg
+    ) m
+    WHERE m.author_kind = 'agent' AND m.rn_desc = m.rn_kind
+    GROUP BY m.root_id
+  )
+  SELECT
+    r.id                                                                              AS thread_id,
+    CASE WHEN r.work_id IS NOT NULL THEN 'work' ELSE 'artifact' END                   AS anchor,
+    coalesce(w.project, a.project)                                                    AS project,
+    CASE WHEN r.work_id IS NOT NULL THEN 'work #' || r.work_id || ' — ' || w.title
+         ELSE a.project || '/' || a.slug END                                          AS title,
+    r.work_id,
+    r.artifact_id,
+    r.version_id,
+    r.path,
+    r.state,
+    r.resolved_by,
+    r.resolved_at,
+    coalesce(g.messages, 0)                                                           AS messages,
+    coalesce(g.participants, '[]'::jsonb)                                             AS participants,
+    coalesce(t.agent_tail, 0)                                                         AS agent_tail,
+    10                                                                                AS cap,
+    g.last_at,
+    g.last_author,
+    p.id IS NOT NULL                                                                  AS escalated,
+    p.payload->>'reason'                                                              AS reason,
+    p.id                                                                              AS proposal_id
+  FROM root r
+  LEFT JOIN work      w ON w.id = r.work_id
+  LEFT JOIN artifacts a ON a.id = r.artifact_id
+  LEFT JOIN agg       g ON g.root_id = r.id
+  LEFT JOIN tail      t ON t.root_id = r.id
+  LEFT JOIN LATERAL (
+    SELECT pr.id, pr.payload FROM proposals pr
+    WHERE pr.decision = 'pending'
+      AND (pr.work_id = r.work_id OR pr.payload->>'thread_id' = r.id)
+    ORDER BY pr.ts DESC LIMIT 1
+  ) p ON true
+  WHERE (:state = '' OR r.state = :state)
+    AND (:project = '' OR coalesce(w.project, a.project) = :project)
+    AND (:anchor = '' OR (CASE WHEN r.work_id IS NOT NULL THEN 'work' ELSE 'artifact' END) = :anchor)
+  ORDER BY coalesce(g.last_at, r.created_at) DESC, r.id DESC
+  LIMIT :limit
+cache_ttl: 0

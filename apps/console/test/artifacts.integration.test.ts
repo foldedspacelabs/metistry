@@ -40,6 +40,19 @@ describe("PWA shell: HTML artifacts render only in an opaque-origin sandbox (dec
     expect(html).toContain('id="artifacts"');
     expect(html).toContain('data-view="artifacts"');
   });
+
+  // Rooms (0016): every value in a room came out of the database and may be
+  // agent-authored, so the panel builds its markup from esc() only, and the
+  // one mutating control it has — resolve — is a POST to the work route.
+  it("the Rooms panel escapes every agent-authored value and has exactly one resolve path", () => {
+    expect(html).toContain('id="rooms"');
+    expect(html).toContain('data-view="rooms"');
+    expect(app).toContain("function roomCard(r)");
+    expect(app).not.toMatch(/room-messages"\)\.innerHTML\s*=\s*[^;]*\$\{c\.body\}/); // bodies go through esc()
+    expect(app).toContain("${esc(c.body)}");
+    expect(app).toMatch(/\/thread\/\$\{op\}/); // resolve/reopen: the console route, nothing else
+    expect(app).not.toContain("tasks_resolve"); // no agent-side verb exists to call
+  });
 });
 
 describe.skipIf(!hasDb)("artifacts routes (integration, real reconciler in-process)", () => {
@@ -68,6 +81,8 @@ describe.skipIf(!hasDb)("artifacts routes (integration, real reconciler in-proce
     await pool.query(`DELETE FROM artifact_comments WHERE artifact_id IN (SELECT id FROM artifacts WHERE project = $1)`, [P]);
     await pool.query(`DELETE FROM artifact_versions WHERE artifact_id IN (SELECT id FROM artifacts WHERE project = $1)`, [P]);
     await pool.query(`DELETE FROM artifacts WHERE project = $1`, [P]);
+    await pool.query(`DELETE FROM artifact_comments WHERE work_id IN (SELECT id FROM work WHERE project = $1)`, [P]); // rooms hang on work rows (0016)
+    await pool.query(`DELETE FROM proposals WHERE work_id IN (SELECT id FROM work WHERE project = $1)`, [P]);
     await pool.query(`DELETE FROM work WHERE project = $1`, [P]);
 
     // the real vault bridge on a throwaway repo, exactly as launchd would run it
@@ -78,7 +93,10 @@ describe.skipIf(!hasDb)("artifacts routes (integration, real reconciler in-proce
     await new Promise<void>((r) => bridge.listen(0, "127.0.0.1", r));
     const vault = httpVaultClient({ url: `http://127.0.0.1:${(bridge.address() as AddressInfo).port}`, token });
 
-    server = makeServer(pool, new QueryStore(pool), {
+    // the Rooms panel calls /api/q/rooms and nothing else (invariant 3), so the seed dir is loaded here
+    const queries = new QueryStore(pool);
+    await queries.loadDir(fileURLToPath(new URL("../../../seed/queries", import.meta.url)));
+    server = makeServer(pool, queries, {
       origin: "https://console.test",
       inboxDir: `/tmp/metistry-test-inbox-art-${Date.now()}`,
       policy,
@@ -104,7 +122,7 @@ describe.skipIf(!hasDb)("artifacts routes (integration, real reconciler in-proce
   });
 
   it("management gate: no credential → 401; owner token and agent token → uniform 403 on every artifact/dispatch route", async () => {
-    for (const [method, path] of [["GET", "/api/artifacts"], ["POST", "/api/artifacts"], ["GET", "/api/artifacts/art_01J00000000000000000000000"], ["POST", "/api/dispatches"], ["GET", "/api/dispatches/1"]] as const) {
+    for (const [method, path] of [["GET", "/api/artifacts"], ["POST", "/api/artifacts"], ["GET", "/api/artifacts/art_01J00000000000000000000000"], ["POST", "/api/dispatches"], ["GET", "/api/dispatches/1"], ["GET", "/api/work/1/thread"], ["POST", "/api/work/1/comments"], ["POST", "/api/work/1/thread/resolve"]] as const) {
       const body = method === "POST" ? {} : undefined;
       expect((await json(method, path, body, {})).status, `${method} ${path} anon`).toBe(401);
       expect((await json(method, path, body, { authorization: `Bearer ${ownerToken}` })).status, `${method} ${path} owner token`).toBe(403);
@@ -211,6 +229,51 @@ describe.skipIf(!hasDb)("artifacts routes (integration, real reconciler in-proce
     expect((await (await json("GET", `/api/dispatches/${dispatched.work.id}`)).json()).addressed).toBe(true);
     expect((await json("GET", `/api/dispatches/999999999`)).status).toBe(404);
     expect((await json("POST", "/api/dispatches", { artifact: artifactId, version: v2, thread_ids: ["cmt_01J00000000000000000000000"], to_agent: agentId })).status).toBe(400);
+  });
+
+  // --- rooms on work rows (0016) ---------------------------------------------------
+
+  it("a room on a work row: the user posts as `user`, resolve is a route with no counterpart anywhere else, and the `rooms` query renders both anchors", async () => {
+    const { rows } = await pool.query(`INSERT INTO work (title, project, kind, status) VALUES ('scope the console room', $1, 'task', 'open') RETURNING id`, [P]);
+    const workId = Number(rows[0]!.id);
+
+    const empty = await (await json("GET", `/api/work/${workId}/thread`)).json();
+    expect(empty).toMatchObject({ work_id: workId, project: P, state: "open", comments: [], participants: [] });
+    expect((await json("GET", "/api/work/999999999/thread")).status).toBe(404);
+
+    const posted = await json("POST", `/api/work/${workId}/comments`, { body: "does this include the migration?" });
+    expect(posted.status).toBe(201);
+    expect((await posted.json()).comment).toMatchObject({ work_id: workId, author_principal: "user", author_kind: "human" });
+    expect((await json("POST", `/api/work/${workId}/comments`, {})).status).toBe(400); // no body
+
+    // an agent's voice in the same room, through the module (the bridge's path)
+    await pool.query(
+      `INSERT INTO artifact_comments (id, work_id, body, author_principal, author_kind, parent_id)
+       SELECT 'cmt_' || $1, $2, 'it does — I will take the schema', $3, 'agent', c.id FROM artifact_comments c WHERE c.work_id = $2 AND c.parent_id IS NULL`,
+      ["0".repeat(25) + "9", workId, agentId],
+    );
+
+    const read = await (await json("GET", `/api/work/${workId}/thread`)).json();
+    expect(read.comments.map((c: { body: string }) => c.body)).toEqual(["does this include the migration?", "it does — I will take the schema"]);
+    expect(read.participants.map((p: { principal: string }) => p.principal)).toEqual(["user", agentId]);
+    expect(read.link).toBe(`https://console.test/#/rooms/work/${workId}`);
+
+    // resolve: this route and no other. Nothing on the agent surface, nothing on a timer.
+    const resolved = await json("POST", `/api/work/${workId}/thread/resolve`);
+    expect(resolved.status).toBe(200);
+    expect(await resolved.json()).toMatchObject({ state: "resolved", resolved_by: "user" });
+    expect((await (await json("POST", `/api/work/${workId}/thread/reopen`)).json()).state).toBe("open");
+    expect((await json("POST", `/api/work/${workId}/thread/close`)).status).toBe(404); // no third verb
+
+    // the room view reads one named query and nothing else (invariant 3)
+    const roomsRes = await json("GET", `/api/q/rooms?project=${P}&limit=50`);
+    expect(roomsRes.status).toBe(200);
+    const roomRows = (await roomsRes.json()).rows as any[];
+    const room = roomRows.find((r) => r.anchor === "work" && Number(r.work_id) === workId)!;
+    expect(room).toMatchObject({ state: "open", messages: 2, agent_tail: 1, cap: 10, escalated: false });
+    expect(room.title).toContain("scope the console room");
+    expect(room.participants.map((p: { principal: string }) => p.principal).sort()).toEqual([agentId, "user"].sort());
+    expect(roomRows.some((r) => r.anchor === "artifact")).toBe(true); // the artifact threads this suite made are in the same view
   });
 
   it("without a vault the routes answer not_available (degrades: absent)", async () => {

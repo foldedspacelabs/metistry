@@ -24,7 +24,7 @@
 // kind = tool) on the same component.
 
 import { createHash } from "node:crypto";
-import { emptyCompute, finishRun, mintToken, startRun, tokenHash, type Compute, type ResolvedAssignment, type TierMap } from "@foldedspacelabs/metistry-core";
+import { emptyCompute, finishRun, mintToken, sanitizeForAgent, startRun, tokenHash, type Compute, type ResolvedAssignment, type TierMap } from "@foldedspacelabs/metistry-core";
 import { crewSystemPrompt, crewToolNames, parseCrewSnapshot, runCrew, runCrewOnEngine, type CrewRunInput, type CrewRunResult, type CrewSdk } from "./crew.js";
 import { makeEngine, type Engine, type TurnGuard } from "./engine.js";
 import { memorySessionStore } from "./sessions.js";
@@ -49,6 +49,12 @@ export interface CrewDrainConfig {
   maxAttempts?: number | undefined;
   /** Wait before a failed attempt is re-picked (default 300s). */
   retryBackoffSeconds?: number | undefined;
+  /**
+   * Byte budget for the prior-work block appended to the brief from the
+   * task's room (METISTRY_BRIEF_THREAD_BYTES, default 4096). 0 turns it
+   * off. The block is clipped again by the brief cap the dispatch passed.
+   */
+  briefThreadBytes?: number | undefined;
   /** Injected SDK for tests. */
   sdk?: CrewSdk | undefined;
   /**
@@ -77,6 +83,8 @@ function engineForCrew(cfg: CrewDrainConfig, input: CrewRunInput, guard?: TurnGu
     ...(guard ? { guard } : {}),
   });
 }
+
+export const DEFAULT_BRIEF_THREAD_BYTES = 4096;
 
 /** A queued crew row as claimed. */
 export interface ClaimedCrewRow {
@@ -115,6 +123,27 @@ export async function issueRunToken(db: Db, crewId: string): Promise<string | nu
   return rows.length === 1 ? token : null;
 }
 
+/**
+ * Name the work row on everything this crew raised while it held it
+ * (`proposals.work_id`, 0016). Server-side and after the fact: the crew
+ * never passes a work id — `requests_create` has no such argument — so
+ * nothing an agent says decides which card its report lands on. The window
+ * is this run: rows by this crew, raised since it started, not already
+ * stamped. A crew holds one row at a time (its token is rotated per run),
+ * so the window cannot overlap another of its own runs.
+ *
+ * This is the link the board was missing: no proposal kind carried a work
+ * id, so "which proposal is about this card" had no answer
+ * (docs/ops/board.md).
+ */
+export async function stampProposalWork(db: Db, crewId: string, workId: number, since: Date): Promise<number> {
+  const { rows } = await db.query(
+    `UPDATE proposals SET work_id = $2 WHERE source_agent = $1 AND work_id IS NULL AND ts >= $3 RETURNING id`,
+    [crewId, workId, since],
+  );
+  return rows.length;
+}
+
 /** Burn it: replace the hash with one of a token that is discarded here. The run's bearer is dead from this statement on. */
 export async function burnRunToken(db: Db, crewId: string): Promise<void> {
   await db.query(`UPDATE agents SET token_hash = $2 WHERE id = $1 AND kind = 'crew'`, [crewId, tokenHash(mintToken(32))]);
@@ -137,6 +166,57 @@ async function settle(db: Db, id: number, s: Settle, agent: string): Promise<voi
      WHERE id = $1`,
     [id, s.status, entry(s.status)],
   );
+}
+
+/**
+ * The prior-work block (Taskuary review ADOPT 4, agent-room review phase 2):
+ * "the brief is the context transfer", so a crew that claims a row with a
+ * room gets the last N messages of it — inside a byte budget, newest kept,
+ * rendered oldest-first the way the thread reads.
+ *
+ * Why here and not at dispatch: the room keeps moving while the row sits in
+ * the queue, and what matters is what was said by the time the crew runs.
+ * `brief_sha` therefore stays the sha of the DISPATCHED brief (what policy
+ * checked); what the block added is recorded separately on the run row, so
+ * "what did this crew actually see" is answerable from `runs` without
+ * re-reading a thread that has moved on again.
+ *
+ * Budget: `min(METISTRY_BRIEF_THREAD_BYTES, what is left under the brief cap
+ * the dispatch passed)`. The cap is frozen into the row at dispatch
+ * (`meta.max_brief_bytes`) precisely so this cannot smuggle a brief past the
+ * size `checkBrief` allowed.
+ */
+export interface BriefThreadBlock {
+  text: string;
+  comment_ids: string[];
+  bytes: number;
+}
+
+export async function briefThreadBlock(db: Db, workId: number, budget: number): Promise<BriefThreadBlock | null> {
+  if (budget <= 0) return null;
+  const { rows } = await db.query(
+    `SELECT id, body, author_principal, author_kind, created_at FROM artifact_comments
+     WHERE work_id = $1 ORDER BY created_at ASC, id ASC`,
+    [workId],
+  );
+  if (rows.length === 0) return null;
+  const header = `\n\n--- prior work on #${workId} (the room on this task; nobody is addressed here) ---\n`;
+  const footer = `--- end prior work ---\n`;
+  const line = (r: any) =>
+    `[${new Date(r.created_at).toISOString()}] ${r.author_kind === "agent" ? "agent " : ""}${r.author_principal}: ${sanitizeForAgent(String(r.body))}\n`;
+  // newest first while filling, so a long room contributes its LAST messages
+  const kept: { id: string; text: string }[] = [];
+  let bytes = Buffer.byteLength(header + footer, "utf8");
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const text = line(rows[i]);
+    const size = Buffer.byteLength(text, "utf8");
+    if (bytes + size > budget) break;
+    bytes += size;
+    kept.push({ id: String(rows[i]!.id), text });
+  }
+  if (kept.length === 0) return null;
+  kept.reverse(); // read oldest-first, like the thread
+  return { text: header + kept.map((k) => k.text).join("") + footer, comment_ids: kept.map((k) => k.id), bytes };
 }
 
 /** One pass: claim a row, run it, record it. Returns false when the queue is empty. */
@@ -170,6 +250,22 @@ export async function drainCrewOne(db: Db, cfg: CrewDrainConfig, run: (input: Cr
   // No assignment → the SDK path with the manifest's model, unchanged.
   const turn = resolveTurn(cfg.compute?.() ?? emptyCompute(), {} as TierMap, `crew:${crewId}`, { model: crew.model, effort: crew.effort });
 
+  // The room on the row this crew is about (the dispatched task if there is
+  // one, else the crew row itself) becomes the brief's prior-work block —
+  // budgeted, and clipped again by the size cap the dispatch passed.
+  const roomId = taskId ?? row.id;
+  const maxBrief = typeof row.meta?.max_brief_bytes === "number" ? row.meta.max_brief_bytes : Number.POSITIVE_INFINITY;
+  const headroom = maxBrief - Buffer.byteLength(brief, "utf8");
+  const budget = Math.max(0, Math.min(cfg.briefThreadBytes ?? DEFAULT_BRIEF_THREAD_BYTES, headroom));
+  let block: BriefThreadBlock | null = null;
+  try {
+    block = await briefThreadBlock(db, roomId, budget);
+  } catch {
+    block = null; // a room is context, never a precondition: a read that fails must not park the row
+  }
+  if (block) brief += block.text;
+
+  const startedAt = new Date();
   const token = await issueRunToken(db, crewId);
   if (!token) {
     await settle(db, row.id, { status: "blocked", note: `crew '${crewId}' is not registered or is revoked — the console syncs agents/<area>/<name>.md; is the manifest still there?` }, agent);
@@ -185,6 +281,8 @@ export async function drainCrewOne(db: Db, cfg: CrewDrainConfig, run: (input: Cr
       work_id: row.id,
       brief_sha: briefSha,
       ...(taskId !== undefined ? { task_id: taskId } : {}),
+      // which messages the brief actually carried — answerable later without re-reading a room that has moved on
+      ...(block ? { thread_room: roomId, thread_comments: block.comment_ids, thread_bytes: block.bytes } : {}),
       attempt: row.attempts,
       effort: turn.effort,
       engine: turn.assignment?.config.kind ?? "anthropic",
@@ -224,6 +322,8 @@ export async function drainCrewOne(db: Db, cfg: CrewDrainConfig, run: (input: Cr
     else await settle(db, row.id, { status: "retry", note: `crew run attempt ${row.attempts} failed (${message.slice(0, 200)}); retry after ${backoff}s`, backoffSeconds: backoff }, agent);
   } finally {
     await burnRunToken(db, crewId);
+    // whatever it raised belongs to the row it held — even on a failed run
+    await stampProposalWork(db, crewId, row.id, startedAt).catch(() => undefined);
   }
   return true;
 }

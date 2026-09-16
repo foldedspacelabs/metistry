@@ -16,7 +16,7 @@ describe("brain allowlist", () => {
   it("is exactly mcp-brain's manifest, in order, fully qualified as mcp__brain__<tool>", () => {
     expect([...BRAIN_TOOLS]).toEqual(manifest.exposes.map((t) => t.name));
     expect(brainToolNames()).toEqual(manifest.exposes.map((t) => `mcp__${BRAIN_SERVER}__${t.name}`));
-    expect(brainToolNames()).toHaveLength(23);
+    expect(brainToolNames()).toHaveLength(25);
     expect(brainToolNames()).toContain("mcp__brain__queries_run"); // invariant 3's one read path, out to agents (internal always; external needs grants.queries)
     expect(brainToolNames()).toContain("mcp__brain__knowledge_write"); // the assistant's brain-commit rides the same allowlist; the bridge admits it for the internal principal only
     expect(brainToolNames()).toContain("mcp__brain__knowledge_grep"); // filesystem semantics over the same areas grant as knowledge_read

@@ -1,0 +1,44 @@
+# Seeded default (D4 overlay: an instance file of the same name wins).
+name: runs_export
+description: >-
+  One page of the `runs` audit ledger, oldest first, for `metistry runs export`
+  (S5) — every column plus a `cursor` the caller hands back as (since_ts,
+  since_id) to get the next page. Paged rather than unbounded on purpose —
+  invariant 3 says the query driver is the only thing that talks to Postgres,
+  and the driver buffers a whole result set, so the STREAM is the console
+  looping over this query (apps/console/src/runs-export.ts) rather than a
+  cursor held open in the database. Filter with `component`, bound with
+  `until`; redaction is core's, applied to every row before it leaves.
+params:
+  since_ts:  { type: text, default: "" }   # blank = from the beginning of the ledger
+  since_id:  { type: int,  default: 0 }    # the `|`-tiebreaker: two rows in one transaction share a ts
+  until:     { type: text, default: "" }   # blank = up to now
+  component: { type: text, default: "" }   # blank = every component
+  limit:     { type: int,  default: 500 }
+sql: |
+  SELECT
+    r.id,
+    r.ts,
+    r.component,
+    r.kind,
+    r.session_id,
+    r.tool,
+    r.model,
+    r.tokens_in,
+    r.tokens_out,
+    r.cost_usd,
+    r.duration_ms,
+    r.started_at,
+    r.finished_at,
+    r.ok,
+    r.error,
+    r.meta,
+    r.ts::text || '|' || r.id AS cursor
+  FROM runs r
+  WHERE (NULLIF(:since_ts, '')::timestamptz IS NULL
+         OR (r.ts, r.id) > (NULLIF(:since_ts, '')::timestamptz, (:since_id)::bigint))
+    AND (NULLIF(:until, '')::timestamptz IS NULL OR r.ts <= NULLIF(:until, '')::timestamptz)
+    AND (:component = '' OR r.component = :component)
+  ORDER BY r.ts ASC, r.id ASC
+  LIMIT :limit
+cache_ttl: 0

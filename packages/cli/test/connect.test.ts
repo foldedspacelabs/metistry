@@ -4,7 +4,7 @@
 // secret, a fresh one's bearer reaches the Keychain and NOT the config
 // file, another editor's servers survive the merge, and the file comes
 // back 0600.
-import { readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,11 +15,14 @@ import {
   connectList,
   cursorConfigFile,
   DEFAULT_GRANTS,
+  opencodeConfigFile,
+  opencodeServerEntry,
   parseTool,
   renderConnect,
   renderConnectList,
   serverKey,
   writeCursorConfig,
+  writeOpencodeConfig,
 } from "../src/connect.js";
 import type { Exec, ExecOptions } from "../src/exec.js";
 import { main } from "../src/main.js";
@@ -314,6 +317,114 @@ describe("connect cursor: ~/.cursor/mcp.json", () => {
   });
 });
 
+describe("connect opencode: ~/.config/opencode/opencode.json", () => {
+  it("merges an mcp entry, preserves every other server and setting, and writes 0600 with the bearer NOT in the file", async () => {
+    const { home, instanceDir } = await scratch();
+    const file = opencodeConfigFile(home, {});
+    await mkdir(join(home, ".config", "opencode"), { recursive: true });
+    await writeFile(
+      file,
+      JSON.stringify({ $schema: "https://opencode.ai/config.json", model: "anthropic/some-model", mcp: { jira: { type: "remote", url: "https://jira.example.com/mcp", enabled: true } } }, null, 2),
+    );
+
+    const kc = fakeSecurity();
+    const c = fakeConsole();
+    const r = await connect({ tool: "opencode", ...base(home, instanceDir, kc.exec, c.fetchFn), env: { METISTRY_LOCAL_OWNER_TOKEN: OWNER, HOME: home } });
+    expect(r).toMatchObject({ display_name: "OpenCode", config_file: file, config_key: "metistry", config_state: "written", token_var: "METISTRY_AGENT_TOKEN_OPENCODE" });
+
+    const text = readFileSync(file, "utf8");
+    const doc = JSON.parse(text) as { model: string; mcp: Record<string, Record<string, unknown>> };
+    expect(doc.model).toBe("anthropic/some-model");
+    expect(doc.mcp.jira).toEqual({ type: "remote", url: "https://jira.example.com/mcp", enabled: true });
+    // the shape OpenCode documents for a remote server, with its own {env:…} interpolation
+    expect(doc.mcp.metistry).toEqual({ type: "remote", url: "http://127.0.0.1:8080/mcp", enabled: true, headers: { Authorization: "Bearer {env:METISTRY_AGENT_TOKEN_OPENCODE}" } });
+    expect(doc.mcp.metistry).toEqual(opencodeServerEntry("http://127.0.0.1:8080/mcp", "METISTRY_AGENT_TOKEN_OPENCODE"));
+    expect(text).not.toContain("minted-1");
+    expect(statSync(file).mode & 0o777).toBe(0o600);
+
+    // the bearer went to the Keychain instead, on stdin
+    expect(kc.store.get(`${INSTANCE_ID}/metistry:METISTRY_AGENT_TOKEN_OPENCODE`)).toBe("minted-1");
+    const printed = renderConnect(r);
+    expect(printed).not.toContain("minted-1");
+    expect(printed).toContain("{env:METISTRY_AGENT_TOKEN_OPENCODE}");
+    expect(printed).toContain("plugins/opencode/install.mjs");
+  });
+
+  it("creates the file (with the schema line) when there is none, and a re-run changes nothing", async () => {
+    const { home, instanceDir } = await scratch();
+    const kc = fakeSecurity();
+    const c = fakeConsole();
+    const first = await connect({ tool: "opencode", ...base(home, instanceDir, kc.exec, c.fetchFn), env: { METISTRY_LOCAL_OWNER_TOKEN: OWNER, HOME: home } });
+    expect(first.config_state).toBe("written");
+    const text = readFileSync(opencodeConfigFile(home, {}), "utf8");
+    expect(JSON.parse(text).$schema).toBe("https://opencode.ai/config.json");
+
+    const second = await connect({ tool: "opencode", ...base(home, instanceDir, kc.exec, c.fetchFn), env: { METISTRY_LOCAL_OWNER_TOKEN: OWNER, HOME: home } });
+    expect(second.config_state).toBe("unchanged");
+    expect(readFileSync(opencodeConfigFile(home, {}), "utf8")).toBe(text);
+  });
+
+  it("writes the file OpenCode loads last: an existing opencode.jsonc, not a new opencode.json beside it", async () => {
+    const { home } = await scratch();
+    const dir = join(home, ".config", "opencode");
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, "opencode.jsonc"), JSON.stringify({ plugin: ["opencode-something"] }, null, 2));
+    const file = opencodeConfigFile(home, {});
+    expect(file).toBe(join(dir, "opencode.jsonc"));
+    expect(await writeOpencodeConfig(file, "metistry", "http://127.0.0.1:8080/mcp", "METISTRY_AGENT_TOKEN_OPENCODE")).toBe("written");
+    const doc = JSON.parse(readFileSync(file, "utf8")) as { plugin: string[]; mcp: Record<string, unknown> };
+    expect(doc.plugin).toEqual(["opencode-something"]);
+    expect(doc.mcp.metistry).toBeDefined();
+    expect(existsSync(join(dir, "opencode.json"))).toBe(false);
+  });
+
+  it("follows XDG_CONFIG_HOME, which is where OpenCode looks when it is set", async () => {
+    const { home } = await scratch();
+    const xdg = join(home, "xdg");
+    expect(opencodeConfigFile(home, { XDG_CONFIG_HOME: xdg })).toBe(join(xdg, "opencode", "opencode.json"));
+  });
+
+  it("refuses a file it cannot parse — a .jsonc with real comments included — and says what to add by hand", async () => {
+    const { home } = await scratch();
+    const dir = join(home, ".config", "opencode");
+    await mkdir(dir, { recursive: true });
+    const file = join(dir, "opencode.jsonc");
+    await writeFile(file, "// a comment OpenCode tolerates and JSON.parse does not\n{}\n");
+    await expect(writeOpencodeConfig(file, "metistry", "http://127.0.0.1:8080/mcp", "METISTRY_AGENT_TOKEN_OPENCODE")).rejects.toThrow(/not JSON.*"mcp"/s);
+    expect(readFileSync(file, "utf8")).toContain("// a comment");
+
+    await writeFile(file, JSON.stringify({ mcp: [] }));
+    await expect(writeOpencodeConfig(file, "metistry", "http://127.0.0.1:8080/mcp", "METISTRY_AGENT_TOKEN_OPENCODE")).rejects.toThrow(/"mcp" is not an object/);
+  });
+
+  it("namespaces the entry and the variable for a second instance on one Mac", async () => {
+    const { home, instanceDir } = await scratch();
+    await writeFile(
+      join(instanceDir, "state", "ports.yaml"),
+      ["schema: 1", `instance_id: "${INSTANCE_ID}"`, 'label_suffix: "a1b2c3d4"', "base: 8304", "ports:", "  console: 8304", "  db: 8305", "  reconciler: 8306", "  eventkit: 8307", "  apple-fm: 8308", ""].join("\n"),
+    );
+    const kc = fakeSecurity();
+    const c = fakeConsole();
+    const r = await connect({ tool: "opencode", ...base(home, instanceDir, kc.exec, c.fetchFn), env: { METISTRY_LOCAL_OWNER_TOKEN: OWNER, HOME: home } });
+    expect(r).toMatchObject({ config_key: "metistry-a1b2c3d4", token_var: "METISTRY_AGENT_TOKEN_OPENCODE_A1B2C3D4" });
+    const doc = JSON.parse(readFileSync(opencodeConfigFile(home, {}), "utf8")) as { mcp: Record<string, { headers: Record<string, string> }> };
+    expect(doc.mcp["metistry-a1b2c3d4"]!.headers.Authorization).toBe("Bearer {env:METISTRY_AGENT_TOKEN_OPENCODE_A1B2C3D4}");
+    expect(doc.mcp.metistry).toBeUndefined();
+  });
+
+  it("shows up in --list with its file and its entry", async () => {
+    const { home, instanceDir } = await scratch();
+    const kc = fakeSecurity();
+    const c = fakeConsole();
+    const common = { ...base(home, instanceDir, kc.exec, c.fetchFn), env: { METISTRY_LOCAL_OWNER_TOKEN: OWNER, HOME: home } };
+    const before = await connectList(common);
+    expect(before.tools.find((t) => t.tool === "opencode")).toMatchObject({ agent: "absent", token: "absent", config: `${opencodeConfigFile(home, {})}: no metistry entry` });
+    await connect({ tool: "opencode", ...common });
+    const after = await connectList(common);
+    expect(after.tools.find((t) => t.tool === "opencode")).toMatchObject({ agent: "registered", token: "keychain", config: `${opencodeConfigFile(home, {})} → mcp.metistry` });
+  });
+});
+
 describe("connect devin: the three fields to paste", () => {
   it("prints (and --json carries) name, URL and Authorization value, with the loopback warning", async () => {
     const { home, instanceDir } = await scratch();
@@ -383,7 +494,7 @@ describe("connect --list", () => {
     const listed = await connectList({ ...base(home, instanceDir, kc.exec, c.fetchFn) });
 
     expect(listed.console_url).toBe("http://127.0.0.1:8080");
-    expect(listed.tools.map((t) => t.tool)).toEqual(["claude-code", "cursor", "devin"]);
+    expect(listed.tools.map((t) => t.tool)).toEqual(["claude-code", "cursor", "devin", "opencode"]);
     expect(listed.tools.find((t) => t.tool === "cursor")).toMatchObject({ agent: "registered", token: "keychain", config: `${cursorConfigFile(home)} → mcpServers.metistry` });
     expect(listed.tools.find((t) => t.tool === "claude-code")).toMatchObject({ agent: "absent", token: "absent" });
     expect(listed.tools.find((t) => t.tool === "devin")).toMatchObject({ agent: "absent", token: "n/a" });
@@ -404,10 +515,10 @@ describe("connect --list", () => {
 });
 
 describe("metistry connect (argv)", () => {
-  it("names the three tools rather than guessing, exit 2", async () => {
+  it("names the tools it knows rather than guessing, exit 2", async () => {
     const err: string[] = [];
     expect(await main(["connect", "windsurf"], { out: () => {}, err: (s) => err.push(s) })).toBe(2);
-    expect(err.join("\n")).toContain("metistry connect <claude-code|cursor|devin>");
+    expect(err.join("\n")).toContain("metistry connect <claude-code|cursor|devin|opencode>");
     expect(parseTool("windsurf")).toBeUndefined();
     expect(parseTool("cursor")).toBe("cursor");
   });
@@ -416,8 +527,9 @@ describe("metistry connect (argv)", () => {
     const out: string[] = [];
     expect(await main(["help"], { out: (s) => out.push(s), err: () => {} })).toBe(0);
     const usage = out.join("\n");
-    expect(usage).toContain("metistry connect <cursor|devin|claude-code>");
+    expect(usage).toContain("metistry connect <cursor|opencode|devin|claude-code>");
     expect(usage).toContain("~/.cursor/mcp.json");
+    expect(usage).toContain("~/.config/opencode/opencode.json");
     expect(usage).toContain('{tier: "none", areas: []}');
     expect(usage).toContain("--rotate");
   });

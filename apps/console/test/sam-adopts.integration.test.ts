@@ -380,7 +380,8 @@ describe.skipIf(!hasDb)("SAM adopts (integration)", () => {
     expect(await none.text()).toBe("");
 
     // the export is itself a run (an audit export that is not audited is a hole)
-    const audit = await pool.query(`SELECT ok, meta->>'lines' AS lines FROM runs WHERE kind='export' AND tool='runs' AND meta->>'component'=$1`, [component]);
+    // four exports ran above; the FIRST one is the full ledger — pin it, or the assertion depends on row order
+    const audit = await pool.query(`SELECT ok, meta->>'lines' AS lines FROM runs WHERE kind='export' AND tool='runs' AND meta->>'component'=$1 ORDER BY id ASC LIMIT 1`, [component]);
     expect(audit.rows[0]).toMatchObject({ ok: true, lines: "3" });
   });
 

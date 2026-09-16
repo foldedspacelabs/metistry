@@ -1,6 +1,19 @@
 export { createBrainServer, sanitizeDeep, TASK_FILTERS, TOOL_NAMES, type BrainConfig, type BrainServer, type TaskFilter, type ToolName } from "./server.js";
 export { ALIAS_NAMES, TOOL_ALIASES, resolveAliasCall } from "./aliases.js";
-export { captureToInbox, type CaptureInput, type CaptureResult } from "./capture.js";
+export {
+  captureToInbox,
+  dirSink,
+  vaultSink,
+  placeCapture,
+  DEFAULT_MAX_TRACKED_BYTES,
+  INBOX_LARGE_DIRNAME,
+  INBOX_PREFIX,
+  type CaptureInput,
+  type CaptureResult,
+  type CaptureSink,
+  type CaptureVault,
+  type SinkOptions,
+} from "./capture.js";
 export { submitReport, REPORT_KINDS, type ReportInput, type ReportKind, type ReportResult } from "./report.js";
 export {
   searchKnowledge,

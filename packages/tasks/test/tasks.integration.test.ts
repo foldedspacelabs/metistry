@@ -12,6 +12,7 @@ import { loadTestEnv } from "@foldedspacelabs/metistry-core/test-env";
 
 const { hasDb } = loadTestEnv(new URL("../../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
 const P = "itest-tasks"; // project scope keeps this suite's rows apart from everything else in the scratch db
+const P2 = "itest-tasks-moved"; // the board arm can re-file a card, so it needs a second slug to move it to
 
 describe.skipIf(!hasDb)("tasks (real db)", () => {
   let pool: pg.Pool;
@@ -27,7 +28,8 @@ describe.skipIf(!hasDb)("tasks (real db)", () => {
     });
     await pool.query(`DELETE FROM work WHERE project = $1`, [P]);
     await pool.query(`DELETE FROM runs WHERE kind = 'task_op' AND component LIKE 'itest-%'`);
-    await pool.query(`DELETE FROM projects WHERE id = $1`, [P]);
+    await pool.query(`DELETE FROM work WHERE project = $1`, [P2]);
+    await pool.query(`DELETE FROM projects WHERE id = ANY($1::text[])`, [[P, P2]]);
     svc = new TasksService(pool);
   });
 
@@ -156,5 +158,69 @@ describe.skipIf(!hasDb)("tasks (real db)", () => {
     const { rows } = await pool.query(`SELECT count(*)::int AS n FROM work WHERE idempotency_key = $1`, [key]);
     expect(rows[0]?.n).toBe(1);
     await expect(svc.create({ title: "orphan", project: P, depends_on: [2_000_000_000] }, "itest-alice")).rejects.toMatchObject({ code: "unknown_dependency" });
+  });
+
+  // --- the three gaps the board named (docs/ops/board.md "Drags") ---
+
+  it("unblock: a blocked row reaches `open` again, and only from blocked", async () => {
+    const t = await svc.create({ title: "queued bundle", project: P, kind: "review", status: "blocked", note: "over_cap" }, "itest-alice");
+    expect(await svc.claim(t.id, "itest-bob")).toMatchObject({ ok: false, reason: "blocked" });
+    const un = await svc.update(t.id, "user", { status: "open", note: "cap raised" });
+    expect(un.ok && un.task).toMatchObject({ status: "open", claimed_by: null, lease_expires_at: null });
+    expect((await svc.listReady({ project: P })).map((x) => x.id)).toContain(t.id);
+    // the same call on a row that is not blocked is refused, named
+    expect(await svc.update(t.id, "user", { status: "open" })).toMatchObject({ ok: false, reason: "not_blocked" });
+    // and a blocked row a crew still holds unblocks without the crew's hand — that is the point
+    expect((await svc.claim(t.id, "itest-holder")).ok).toBe(true);
+    expect((await svc.update(t.id, "itest-holder", { status: "blocked" })).ok).toBe(true);
+    const un2 = await svc.update(t.id, "user", { status: "open" });
+    expect(un2.ok && un2.task).toMatchObject({ status: "open", claimed_by: null });
+  });
+
+  it("assign: owner is set and cleared after create, on a row nobody holds", async () => {
+    const t = await svc.create({ title: "unassigned", project: P }, "itest-alice");
+    expect(t.owner).toBeNull();
+    const assigned = await svc.update(t.id, "user", { owner: "helper-a" });
+    expect(assigned.ok && assigned.task.owner).toBe("helper-a");
+    expect(assigned.ok && assigned.task.status).toBe("open"); // still Assigned, not started — claim() is what starts it
+    expect(assigned.ok && assigned.task.history.at(-1)).toMatchObject({ agent: "user", op: "update", owner: "helper-a" });
+    const cleared = await svc.update(t.id, "user", { owner: null });
+    expect(cleared.ok && cleared.task.owner).toBeNull();
+    // owner is informational: a DIFFERENT agent can still claim an addressed row
+    expect((await svc.update(t.id, "user", { owner: "helper-a" })).ok).toBe(true);
+    expect((await svc.claim(t.id, "itest-bob")).ok).toBe(true);
+    // and a closed row refuses the board arm outright
+    expect((await svc.update(t.id, "itest-bob", { status: "closed" })).ok).toBe(true);
+    expect(await svc.update(t.id, "user", { owner: "helper-b" })).toMatchObject({ ok: false, reason: "closed" });
+  });
+
+  it("the board arm refuses a collected row — github-state owns what an issue says", async () => {
+    const { rows } = await pool.query(
+      `INSERT INTO work (title, project, kind, status, external_ref) VALUES ('an issue', $1, 'issue', 'open', $2) RETURNING id`,
+      [P, `gh:itest/repo#${Date.now() % 100000}`],
+    );
+    const id = Number(rows[0].id);
+    expect(await svc.update(id, "user", { owner: "helper-a" })).toMatchObject({ ok: false, reason: "not_claimable" });
+    expect(await svc.update(id, "user", { title: "renamed" })).toMatchObject({ ok: false, reason: "not_claimable" });
+    expect((await svc.get(id))?.title).toBe("an issue");
+    await pool.query(`DELETE FROM work WHERE id = $1`, [id]);
+  });
+
+  it("title and project move with the card, and a new project slug gets its projects row", async () => {
+    const t = await svc.create({ title: "misfiled", project: P }, "itest-alice");
+    const moved = await svc.update(t.id, "user", { title: "filed right", project: P2 });
+    expect(moved.ok && moved.task).toMatchObject({ title: "filed right", project: P2 });
+    expect((await pool.query(`SELECT 1 FROM projects WHERE id = $1`, [P2])).rows).toHaveLength(1);
+  });
+
+  it("renew with a note lands on history; renew without one leaves history alone", async () => {
+    const t = await svc.create({ title: "long job", project: P }, "itest-alice");
+    expect((await svc.claim(t.id, "itest-holder")).ok).toBe(true);
+    const before = (await svc.get(t.id))!.history.length;
+    expect((await svc.heartbeat(t.id, "itest-holder")).ok).toBe(true);
+    expect((await svc.get(t.id))!.history).toHaveLength(before);
+    const noted = await svc.heartbeat(t.id, "itest-holder", 900, "still reading the diff");
+    expect(noted.ok && noted.task.history.at(-1)).toMatchObject({ agent: "itest-holder", op: "heartbeat", note: "still reading the diff" });
+    expect(noted.ok && noted.task.history).toHaveLength(before + 1);
   });
 });

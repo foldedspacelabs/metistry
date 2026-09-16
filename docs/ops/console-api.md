@@ -361,3 +361,43 @@ The read side of `instances.yaml` for the app and the phone. The file is the
 instance repo's and a §4.7 protected path, written only by `metistry
 instances` as the `user`; the whole design, including why `resources` is
 empty, is `docs/ops/instances.md`.
+
+## The task routes — the board's drags, and nothing else (`user` principal)
+
+```
+PATCH /api/tasks/:id   {status?, owner?, project?, title?}
+POST  /api/tasks/:id/claim    {lease_seconds?}
+POST  /api/tasks/:id/release  {note?}
+POST  /api/tasks/:id/renew    {note?, lease_seconds?}
+200 {"ok":true,"task":{…}}
+400 the field is named (unknown key, bad status, a mixed change)
+404 the task does not exist
+409 the row's state refuses — the message names the route that would fix it
+```
+
+Until this shipped, `POST /api/tasks/:id/dispatch` was the *only* task route
+the console had; every other mutation was an mcp-brain tool. These four are a
+thin adapter over `TasksService` (`apps/console/src/task-routes.ts`) —
+"adapters adapt this and add nothing". No policy lives in the adapter: every
+refusal above came out of the `WHERE` clause of one atomic statement in
+`packages/tasks`, and the route only turns it into a sentence.
+
+They sit behind the same management gate as `/api/projects`, so an agent
+token and a capture owner token both get the canonical `403`, never a `404`
+that would say whether the task exists. One `runs` row per request records
+the **door** (`component: console`, `kind: task_admin`); the service writes
+its own for the **op** (`component: user`, `kind: task_op`).
+
+`PATCH` has two arms and the fields pick which — see `packages/tasks`' README.
+`status: "open"` is the **unblock** and is legal from `blocked` only;
+`owner`/`title`/`project` need no claim; `in_progress | blocked | closed` are
+the holder's, so closing a card you do not hold answers `409 … held by X, not
+by user — claim it first`. Mixing the two arms in one body is a `400` naming
+both fields, because the looser gate must never carry the stricter arm's write.
+
+**Assignment is the human's alone.** `owner` exists on this route and on no
+agent surface: `tasks_update`'s schema has no `owner` key and its status enum
+has no `open`. That is collaboration rule 4 enforced by absence rather than by
+a check — a human may address a card to any crew, and an agent cannot address
+one at all. If an agent verb ever gains assignment, `crossKindRefusal` is the
+guard it needs (`docs/research/2026-09-11-local-models-openrouter-opencode.md`).

@@ -110,7 +110,7 @@ describe.skipIf(!hasDb)("console PWA chunk", () => {
     const html = await (await fetch(base + "/")).text();
     // "Needs You" is the triage tab's label since the reply-quality loop
     // (docs/ops/reply-feedback.md) made it the single list — Title Case too.
-    for (const label of ["Feed", "Chat", "Board", "Dashboard", "Capture", "Needs You", "Status", "Devices", "Agents", "Artifacts"]) {
+    for (const label of ["Feed", "Chat", "Board", "Dashboard", "Capture", "Needs You", "Status", "Devices", "Agents", "Artifacts", "Rooms"]) {
       expect(html).toContain(`>${label}</button>`);
     }
     expect(html).toContain("<h3>Components</h3>");

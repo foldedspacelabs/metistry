@@ -49,7 +49,7 @@ describe("tool surface", () => {
     expect(TOOL_NAMES.slice(-tail, -1 - QUERIES_TOOL_NAMES.length)).toEqual([...ARTIFACTS_TOOL_NAMES]);
     expect(TOOL_NAMES.at(-1 - QUERIES_TOOL_NAMES.length)).toBe("agents_delegate");
     expect(TOOL_NAMES.slice(-QUERIES_TOOL_NAMES.length)).toEqual([...QUERIES_TOOL_NAMES]);
-    expect(TOOL_NAMES.length).toBeLessThan(24); // over the PoC-17 tool-COUNT guidance (>20) since knowledge_list/knowledge_grep and tasks_close — flagged in manifest.yaml; the definition-token axis (test/brain.test.ts) is what actually gates lazy
+    expect(TOOL_NAMES.length).toBeLessThan(26); // over the PoC-17 tool-COUNT guidance (>20) since knowledge_list/knowledge_grep, tasks_close and the two room tools — flagged in manifest.yaml; the definition-token axis (test/brain.test.ts) is what actually gates lazy
   });
 
   it("the whole eager surface stays inside the PoC-17 definition budget, and deprecated names cost it nothing", async () => {
@@ -128,6 +128,8 @@ describe.skipIf(!hasDb)("artifacts_* (real db, real MCP client)", () => {
     await pool.query(`DELETE FROM artifact_comments WHERE artifact_id IN (SELECT id FROM artifacts WHERE project = $1)`, [P]);
     await pool.query(`DELETE FROM artifact_versions WHERE artifact_id IN (SELECT id FROM artifacts WHERE project = $1)`, [P]);
     await pool.query(`DELETE FROM artifacts WHERE project = $1`, [P]);
+    await pool.query(`DELETE FROM artifact_comments WHERE work_id IN (SELECT id FROM work WHERE project = $1)`, [P]); // rooms hang on work rows (0016)
+    await pool.query(`DELETE FROM proposals WHERE work_id IN (SELECT id FROM work WHERE project = $1)`, [P]);
     await pool.query(`DELETE FROM work WHERE project = $1`, [P]);
     await pool.query(`DELETE FROM proposals WHERE source_agent IN ($1, $2, $3)`, [ALICE, BOB, CAROL]);
     await pool.query(`DELETE FROM runs WHERE component IN ($1, $2, $3)`, [ALICE, BOB, CAROL]);
@@ -233,5 +235,48 @@ describe.skipIf(!hasDb)("artifacts_* (real db, real MCP client)", () => {
     expect(runs.rows[0]!.n).toBeGreaterThanOrEqual(6);
     await alice.close();
     await bob.close();
+  });
+
+  // --- tasks_comment / tasks_thread (0016) -----------------------------------------
+
+  it("tasks_comment / tasks_thread: the principal comes from the credential, the room is read newest-last, and there is no addressee field to fill in", async () => {
+    const alice = await connect("tok-alice");
+    const bob = await connect("tok-bob");
+    const work = (await new TasksService(pool).create({ title: "room through the bridge", project: P, kind: "task" }, "user")).id;
+
+    // no tool on this surface takes an addressee for a room — the schema has two keys and neither is one
+    const listed = (await alice.listTools()).tools;
+    const comment = listed.find((t) => t.name === "tasks_comment")!;
+    expect(Object.keys(comment.inputSchema.properties ?? {}).sort()).toEqual(["body", "turn_id", "work_id"]);
+    expect(JSON.stringify(comment.inputSchema)).not.toMatch(/to_agent|addressee|mention/);
+
+    const said = await call(alice, "tasks_comment", { work_id: work, body: "does this include the migration?" });
+    expect(said.isError).toBe(false);
+    expect(said.body.comment).toMatchObject({ work_id: work, author_principal: ALICE, author_kind: "agent" });
+
+    expect((await call(bob, "tasks_comment", { work_id: work, body: "it does" })).body.comment.author_principal).toBe(BOB);
+    const read = await call(bob, "tasks_thread", { work_id: work });
+    expect(read.body).toMatchObject({ work_id: work, project: P, state: "open", cap: 2 });
+    expect(read.body.comments.map((c: any) => c.body)).toEqual(["does this include the migration?", "it does"]); // newest LAST
+    expect(read.body.participants.map((p: any) => p.principal)).toEqual([ALICE, BOB]);
+
+    // the cap (2 here) escalates to the owner instead of storing the next agent message
+    const demoted = await call(alice, "tasks_comment", { work_id: work, body: "but does it?" });
+    expect(demoted.body).toMatchObject({ demoted: true, cap: 2 });
+    const prop = await pool.query(`SELECT kind, work_id, payload->>'reason' AS reason FROM proposals WHERE work_id = $1`, [work]);
+    expect(prop.rows).toEqual([{ kind: "review", work_id: String(work), reason: "ping_pong_cap" }]);
+    expect((await call(alice, "tasks_thread", { work_id: work })).body.comments).toHaveLength(2);
+
+    // outside the project: not_found, uniform with tasks_*
+    const carol = await connect("tok-carol");
+    expect((await call(carol, "tasks_thread", { work_id: work })).body.error.code).toBe("not_found");
+    expect((await call(carol, "tasks_comment", { work_id: work, body: "hi" })).body.error.code).toBe("not_found");
+
+    // every call is a runs row on the caller
+    const rows = await pool.query(`SELECT tool, ok FROM runs WHERE component = $1 AND kind = 'tool' AND tool IN ('tasks_comment', 'tasks_thread') ORDER BY id`, [ALICE]);
+    expect(rows.rows.length).toBeGreaterThanOrEqual(3);
+    await alice.close();
+    await bob.close();
+    await carol.close();
   });
 });

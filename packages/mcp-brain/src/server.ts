@@ -41,6 +41,7 @@ import type { QueryStore } from "@foldedspacelabs/metistry-queries";
 import { ALIAS_NAMES, resolveAliasCall } from "./aliases.js";
 import { ARTIFACTS_TOOL_NAMES, registerArtifactTools } from "./artifacts-tools.js";
 import { CREW_TOOL_NAMES, registerCrewTools, type CrewDispatcher } from "./crew-tools.js";
+import { THREAD_TOOL_NAMES, registerThreadTools } from "./thread-tools.js";
 import { QUERIES_TOOL_NAMES, registerQueriesTools } from "./queries-tools.js";
 import { KNOWLEDGE_FS_TOOL_NAMES, registerKnowledgeFsTools, type KnowledgeLister, type KnowledgeVaultSearcher } from "./knowledge-fs.js";
 import { registerKnowledgeResources } from "./knowledge-resources.js";
@@ -93,15 +94,17 @@ export interface BrainServer {
 }
 
 /**
- * The eager surface (§4.3 default 1): 23 tools, no meta-tool indirection.
+ * The eager surface (§4.3 default 1): 25 tools, no meta-tool indirection.
  * Order = manifest order. One noun per thing, one verb set per object
  * (docs/product/glossary.md): folding tasks_list_ready + tasks_mine into
  * `tasks_list {filter}` paid for knowledge_list/knowledge_grep. This still
  * sits over PoC-17's documented >20-tools guidance for switching to
  * `discovery: lazy` on tool COUNT — noted, not acted on, because the
  * guidance's other axis (definition tokens, measured by test/brain.test.ts's
- * "definition size" test) stays well under the >5k-token line that would make
- * lazy worth its own +1-turn cost (docs/research/2026-08-tool-discovery.md).
+ * "definition size" test) is what actually gates lazy. The room tools
+ * (tasks_comment/tasks_thread, 0016) put that measurement at ~4.9k of the
+ * >5k line: the NEXT tool registered here forces the lazy decision rather
+ * than fitting under it (docs/research/2026-08-tool-discovery.md).
  * Deprecated spellings live in aliases.ts and resolve at call time — they are
  * NOT listed here, so neither the count nor the token budget grows for them.
  */
@@ -115,6 +118,7 @@ export const TOOL_NAMES = [
   "tasks_release",
   "tasks_close",
   "tasks_create",
+  ...THREAD_TOOL_NAMES,
   "knowledge_search",
   "knowledge_read",
   ...KNOWLEDGE_FS_TOOL_NAMES,
@@ -386,6 +390,13 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
         return done({ task }, { task_id: task.id });
       },
     );
+
+    // tasks_comment / tasks_thread (0016): the room on a work row. Registered
+    // here, beside the rest of tasks_*, because that is the grant they ride
+    // and the order the manifest lists. The service is the artifacts one —
+    // same table, same escalation — so an unconfigured deployment answers
+    // not_available like artifact_* does.
+    registerThreadTools(reg, cfg.artifacts, principal);
 
     reg(
       "knowledge_search",

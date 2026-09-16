@@ -91,6 +91,7 @@ manifest by test so the two cannot drift:
 | `capture` | `capture` — notes/files into the inbox as captures | |
 | `tasks` | `tasks_list`, `tasks_claim`, `tasks_renew`, `tasks_update`, `tasks_release`, `tasks_close`, `tasks_create` — within `projects` | |
 | `artifacts` | `artifacts_publish`, `artifacts_get`, `artifacts_list`, `artifacts_comment`, `artifacts_resolve`, `artifacts_review` — within `projects` | |
+| `rooms` | `tasks_comment`, `tasks_thread` — the room on a task, within `projects` ([threads.md](threads.md)). Its own group, not part of `tasks`: speaking is a new power, so a crew gains it when you edit its manifest, never because a release widened `tasks`. A crew still *reads* the last of a room without this group — the brief carries it. | |
 
 `knowledge_write`, `agents_delegate`, `queries_list` and `queries_run` are
 **not groups**. Naming any of them in `uses` is refused by the schema with
@@ -108,7 +109,8 @@ assistant.
 **Can:** read settled notes under its `scope` (drafts are invisible at
 every tier); search their titles; report findings, decisions, gotchas and
 progress; capture; work the shared task list and publish artifacts inside
-its `projects`. Every call is one `runs` row on the crew's own id.
+its `projects`; with the `rooms` group, read and add to the room on a task
+([threads.md](threads.md)). Every call is one `runs` row on the crew's own id.
 
 **Cannot:** write knowledge; dispatch crews; touch any protected path; reach
 a shell, the filesystem, the web, or a second MCP server; read outside its
@@ -138,9 +140,10 @@ assistant container drain loop ◀── claim (SKIP LOCKED, lease) ──┘
    │ mint a token for THIS run → agents.token_hash
    │ SDK query: crew model + effort, prompt + trailer, brief, ONE mcp server (/mcp + run token),
    │            allowedTools = groups, maxTurns, maxBudgetUsd
+   │ brief += the prior-work block: the last of the room on the row, budgeted (threads.md)
    │ crew calls requests_create / tasks_* / capture → requests, work, inbox (its own runs rows)
    │ runs row: component = <crew>, kind = crew_run (cost, tokens, tools_used, brief_sha)
-   │ burn the token; close the work row (or park it: blocked / retry)
+   │ burn the token; stamp proposals.work_id on whatever it raised; close the row (or park it)
 ```
 
 1. **The tool.** `agents_delegate` is the nineteenth mcp-brain tool and is for
@@ -260,6 +263,7 @@ panel is a named query away (`seed/queries/`), not new machinery (§4.18.D).
 | `METISTRY_CREW_LEASE_S` | assistant | Claim lease per run (default 1800). Longer than any sane run; a dead runner's row is re-picked after it. |
 | `METISTRY_CREW_MAX_ATTEMPTS` | assistant | Infrastructure-failure retries before `blocked` (default 3). |
 | `METISTRY_CREW_RETRY_S` | assistant | Backoff between retries (default 300). |
+| `METISTRY_BRIEF_THREAD_BYTES` | assistant | Bytes of the task's room appended to the brief as the prior-work block (default 4096, `0` = off). Clipped again by the target's `max_brief_bytes`. See [threads.md](threads.md). |
 
 No new secret: the crew credential is minted and burned by the runner
 against the database both containers already share.

@@ -5,7 +5,7 @@ transport: http
 port: 8080               # no bind of its own: mounted at the console's POST /mcp, so this is the console's port
 runs_on: container
 requires_tcc: []
-discovery: eager         # 23 tools, 18,369 chars of definition ≈ 4.6k tokens (chars/4) — over the PoC-17 tool-COUNT guidance (>20), but the other axis (>5k definition tokens) is what the threshold is actually about; measured by test/brain.test.ts, still well under it. Deprecated spellings (src/aliases.ts) resolve at call time and are deliberately not exposed here: a second copy of these schemas would break the budget on its own.
+discovery: eager         # 25 tools, 19,698 chars of definition ≈ 4.9k tokens (chars/4) — over the PoC-17 tool-COUNT guidance (>20), and now within ~75 tokens of the other axis (>5k definition tokens), which is the one that actually gates lazy; measured by test/brain.test.ts. The next tool added here forces the lazy decision rather than fitting under it. Deprecated spellings (src/aliases.ts) resolve at call time and are deliberately not exposed here: a second copy of these schemas would break the budget on its own.
 degrades: absent
 exposes:
   - name: capture
@@ -26,6 +26,10 @@ exposes:
     description: Finish a held task in one step — status closed, claim released, optional closing note
   - name: tasks_create
     description: Create a task in one of the caller's projects (idempotent on idempotency_key)
+  - name: tasks_comment
+    description: Append one message to the room on a work row — no addressee field exists, so it wakes nobody; past the agent-only cap the room escalates to the user
+  - name: tasks_thread
+    description: Read the room on a work row — every message oldest-first, its participants, and whether the user has resolved it
   - name: knowledge_search
     description: Search the knowledge index (titles + one-line descriptions) within the caller's grant tier
   - name: knowledge_read

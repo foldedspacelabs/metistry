@@ -694,6 +694,21 @@ label { display: flex; flex-direction: column; gap: var(--mt-space-1);
   padding-left: var(--mt-space-2); border-left: 2px solid var(--mt-color-border); }
 #art-threads form { margin: var(--mt-space-2) 0 0 var(--mt-space-6); flex-wrap: nowrap; }
 
+/* ------------------------------------------------------------ rooms (0016) - */
+/* The room list reuses the thread shapes; what it adds is the escalation
+   line — the one sentence saying why a conversation reached the owner. */
+#room-list li.thread { padding: var(--mt-space-3) 0; border-bottom: 1px solid var(--mt-color-border); }
+#room-list li.thread.open { border-left: 2px solid var(--mt-color-accent); padding-left: var(--mt-space-3); }
+#room-list li.resolved { opacity: .6; }
+#room-list .row { display: flex; justify-content: space-between; align-items: center; gap: var(--mt-space-3); }
+#room-messages .reply { margin: var(--mt-space-2) 0 0 0;
+  padding-left: var(--mt-space-2); border-left: 2px solid var(--mt-color-border); }
+#room-messages .body { white-space: pre-wrap; overflow-wrap: anywhere; margin: var(--mt-space-1) 0 0 0; }
+.room-why { margin: var(--mt-space-2) 0 0 0; padding: var(--mt-space-2) var(--mt-space-3);
+  border-left: 2px solid var(--mt-color-accent); background: var(--mt-color-surface);
+  border-radius: var(--mt-radius-md); font-size: var(--mt-text-subhead-size); }
+#room-comment { flex-direction: column; align-items: stretch; }
+
 /* ----------------------------------------------- rendered markdown (md.js) - */
 .art-md {
   background: var(--mt-color-surface);

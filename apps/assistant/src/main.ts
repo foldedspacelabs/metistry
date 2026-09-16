@@ -2,7 +2,7 @@ import pg from "pg";
 import { SPEND_QUERY, intEnv, optionalEnv, requireEnv, type SpendRow } from "@foldedspacelabs/metistry-core";
 import { QueryStore } from "@foldedspacelabs/metistry-queries";
 import { drainOne } from "./drain.js";
-import { drainCrewOne } from "./crew-drain.js";
+import { DEFAULT_BRIEF_THREAD_BYTES, drainCrewOne } from "./crew-drain.js";
 import { makeEngine } from "./engine.js";
 import { makeBudgetGuard } from "./budgets.js";
 import { pgSessionStore } from "./sessions.js";
@@ -131,6 +131,8 @@ const crewCfg = {
   leaseSeconds: intEnv("METISTRY_CREW_LEASE_S", 1800),
   maxAttempts: intEnv("METISTRY_CREW_MAX_ATTEMPTS", 3),
   retryBackoffSeconds: intEnv("METISTRY_CREW_RETRY_S", 300),
+  // the brief is the context transfer: how many bytes of the task's room ride along (docs/ops/threads.md)
+  briefThreadBytes: intEnv("METISTRY_BRIEF_THREAD_BYTES", DEFAULT_BRIEF_THREAD_BYTES),
 };
 if (!brain) console.warn("crews: no METISTRY_BRAIN_URL — queued crew runs will park as blocked");
 

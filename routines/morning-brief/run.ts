@@ -85,8 +85,12 @@ async function sectionToday(db: Db): Promise<string[] | null> {
      ORDER BY due NULLS LAST, updated_at DESC LIMIT 8`,
   );
   const todos = await db.query(
+    // `snoozed_until` (migration 0019): a `later` is not an answer, but it IS
+    // "not before then" — a brief that pushes it at 07:00 anyway makes the
+    // verb a lie. Pending, minus what the user put down.
     `SELECT id, payload FROM proposals
-     WHERE decision = 'pending' AND payload->'classification'->>'has_action' = 'true'
+     WHERE decision = 'pending' AND (snoozed_until IS NULL OR snoozed_until <= now())
+       AND payload->'classification'->>'has_action' = 'true'
      ORDER BY ts LIMIT 5`,
   );
   const lines = [
@@ -115,7 +119,9 @@ async function sectionReviews(db: Db): Promise<string[] | null> {
 
 async function sectionRequests(db: Db, expiredCount: number): Promise<string[] | null> {
   const { rows } = await db.query(
-    `SELECT id, kind, ts, payload FROM proposals WHERE decision = 'pending' ORDER BY ts`,
+    `SELECT id, kind, ts, payload FROM proposals
+     WHERE decision = 'pending' AND (snoozed_until IS NULL OR snoozed_until <= now())
+     ORDER BY ts`,
   );
   if (rows.length === 0) return null;
   const now = new Date();

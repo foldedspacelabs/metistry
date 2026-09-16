@@ -322,6 +322,25 @@ label { display: flex; flex-direction: column; gap: var(--mt-space-1);
 .feed-time { flex: 0 0 auto; white-space: nowrap; color: var(--mt-color-text-tertiary);
   font-size: var(--mt-text-footnote-size); }
 
+/* the kind chips: filters, so a pressed one has to look pressed at a glance
+   and not only read as pressed to the accessibility tree */
+#feed-kinds { display: flex; flex-wrap: wrap; gap: var(--mt-space-2); margin-top: var(--mt-space-3); }
+#feed-kinds button.chip { cursor: pointer; border: 1px solid transparent; min-height: 0; }
+#feed-kinds button.chip.on {
+  background: var(--mt-color-accent-quiet);
+  color: var(--mt-color-accent);
+  border-color: var(--mt-color-accent);
+}
+
+/* ------------------------------------------------- Needs You (triage) ----- */
+/* Later and Skip are not answers to the request, so they do not compete with
+   the three that are: same size, quieter surface (§3.2 — weight carries
+   meaning before colour does). */
+#proposal-list button.quiet { background: transparent; color: var(--mt-color-text-secondary); }
+#proposal-list button.quiet:hover { background: var(--mt-color-sunken); }
+#proposal-list input[type="checkbox"] { margin-right: var(--mt-space-2); vertical-align: middle; }
+#triage-batch { display: flex; align-items: center; gap: var(--mt-space-2); flex-wrap: wrap; }
+
 /* ------------------------------------------------------------------ chat -- */
 /* Reply text (design-system.md §4). A reply is the longest text in the product
    and the thing most often read on a phone, so it uses the --mt-reply-* group

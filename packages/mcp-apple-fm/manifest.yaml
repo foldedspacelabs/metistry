@@ -1,12 +1,17 @@
 name: apple-fm
 type: bridge
-description: On-device Foundation Models classification (free tier, PoC-3)
+description: Apple Foundation Models on-device — an OpenAI-compatible /v1 provider surface (runtime JSON schemas, PoC-19) plus the classify route (PoC-3). Free tier, cost 0.
 transport: http
 port: 7810
 runs_on: host            # FoundationModels is macOS-only; NO TCC grants needed
 requires_tcc: []
 discovery: eager         # 2 tools — far under the >20/>5k lazy threshold (PoC-17)
 degrades: absent         # router stops offering classification when absent
+# `exposes:` is the AGENT-facing surface — what a tool caller may invoke.
+# `/v1/models` and `/v1/chat/completions` are deliberately NOT listed: they
+# are a provider wire for the engine and for collectors, not a tool the
+# assistant may reach for. Invariant 9 by absence — nothing in this list can
+# make the assistant run a model of its choosing (docs/ops/compute.md).
 exposes:
   - name: classify
     description: Classify inbox capture items (category, has_action, action)

@@ -130,8 +130,7 @@ metistry secrets purge --instance <dir> [--yes]   # delete one instance's items
 
 Secret-shaped names are those ending `_TOKEN`, `_PASSWORD`, `_PRIVATE`,
 `_SECRET`, `_KEY`, those carrying `_TOKEN_`/`_PASSWORD_`/`_SECRET_`
-mid-name (`METISTRY_BRIDGE_TOKEN_<NAME>`), plus
-`CLAUDE_CODE_OAUTH_TOKEN`; the names come from
+mid-name (`METISTRY_BRIDGE_TOKEN_<NAME>`); the names come from
 `.env` and `.env.example`, including their commented-out declarations.
 `--to env` rewrites only those lines, in place, `0600`, leaving every
 comment and non-secret line byte-for-byte intact. Values reach `security`
@@ -142,7 +141,8 @@ An item is `metistry:<VAR>` plus an **account**, and `SECRET_SCOPES` in
 (`METISTRY_DB_PASSWORD`, `METISTRY_BRIDGE_TOKEN_*`,
 `METISTRY_ASSISTANT_TOKEN`, `METISTRY_VAPID_*`, `METISTRY_GITHUB_*`, and
 anything unlisted) go under the instance's `instance_id`; user-scoped ones
-(`CLAUDE_CODE_OAUTH_TOKEN`, `METISTRY_AWS_SECRET_ACCESS_KEY`,
+(every `METISTRY_*_API_KEY` — a compute provider credential named by
+`compute.yaml` — plus `METISTRY_AWS_SECRET_ACCESS_KEY` and
 `METISTRY_AWS_SESSION_TOKEN`) go under the per-user account
 (`METISTRY_KEYCHAIN_ACCOUNT`, default `metistry`). `sync --to env`
 resolves the instance account first, falls back to the user account and

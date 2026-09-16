@@ -1,8 +1,6 @@
-// The tool surface for the in-house engine (§4.11, invariant 9). The Agent
-// SDK mounts the console's `/mcp` for us on the SDK path; the
-// OpenAI-compatible loop has to do it itself, so this file is the MCP client
-// half of `engine-openai.ts`: `tools/list` once per run, `tools/call` per
-// tool call, the same bearer the SDK path presents, and nothing else.
+// The tool surface for the engine (§4.11, invariant 9). This file is the MCP
+// client half of `engine-openai.ts`: `tools/list` once per run, `tools/call`
+// per tool call, the run's own bearer, and nothing else.
 //
 // Why the seam. `ToolHost` is an interface with two methods, and the MCP
 // client is one implementation of it. That is what lets the loop's tests run
@@ -12,9 +10,10 @@
 // "run this on provider X" (invariant 9, collaboration rule 2 — enforced by
 // absence, not by prompting).
 //
-// Names are kept in the SDK's spelling — `mcp__brain__<tool>` — so a
-// `tools_used` tally, an allowlist and a `runs` row mean the same thing
-// whichever engine ran the turn.
+// Names carry the server prefix — `mcp__brain__<tool>` — so a `tools_used`
+// tally, an allowlist and a `runs` row mean the same thing wherever they are
+// read, and rows written before the scrub still line up with rows written
+// after it.
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -52,7 +51,7 @@ export const NO_TOOLS: ToolHost = {
   async close() {},
 };
 
-/** `<tool>` → `mcp__brain__<tool>`, the SDK's spelling and the one the allowlist and every `runs` row already use. */
+/** `<tool>` → `mcp__brain__<tool>`, the spelling the allowlist and every `runs` row already use. */
 export function qualify(tool: string): string {
   return `mcp__${BRAIN_SERVER}__${tool}`;
 }

@@ -211,7 +211,8 @@ describe("probes over a fake db", () => {
     const absent = (await runProbes({ query }, await cfgFor({ assistantAbsent: true }), bridgeFetch("ok"))).find((c) => c.name === "assistant-drain")!;
     expect(absent.status).toBe("absent");
     expect(isFailure(absent)).toBe(false);
-    expect(absent.remediation).toMatch(/no engine credential/);
+    expect(absent.remediation).toMatch(/no engine, so the supervisor does not start the assistant/);
+    expect(absent.remediation).toContain("metistry compute assign default"); // the line that would give it one (R3)
     expect(absent.meta).toEqual({ waiting_new: 3, waiting_processing: 1 });
   });
 

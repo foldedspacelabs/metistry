@@ -258,20 +258,29 @@ public struct SettingsView: View {
             Button("Connect a Repository…", action: onSetUpAgain)
         }
 
-        SettingsSection("Claude Token") {
-            if let listing = settings.claudeTokenListing {
-                FactRow("CLAUDE_CODE_OAUTH_TOKEN", listing.isSet ? "set" : "not set", help: listing.scopeLabel, mono: true, role: listing.isSet ? .ok : .absent)
-            } else if case .unavailable(let why) = settings.secretsPhase {
-                UnavailableCard(what: "Could not read the secret list", reason: why, command: settings.secretsCommand)
+        SettingsSection("Compute") {
+            if let facts = settings.compute {
+                FactRow("Default", facts.engineSummary, mono: true, role: facts.assignsNothing ? .absent : .ok)
+                ForEach(facts.providers) { provider in
+                    FactRow(provider.name, provider.baseURL, help: provider.summary, mono: true, role: provider.secretPresent == false ? .absent : .textPrimary)
+                }
+                if let file = facts.file {
+                    FactRow("From", file, mono: true)
+                }
+            } else if case .unavailable(let why) = settings.computePhase {
+                UnavailableCard(what: "Could not read the compute configuration", reason: why, command: settings.computeCommand)
             } else {
-                Text(settings.secretsPhase == .reading ? "reading `metistry secrets list`…" : "not read yet — open the Secrets pane, or press Read below.")
+                Text(settings.computePhase == .reading ? "reading `metistry compute show`…" : "not read yet — press Read below.")
                     .metistryText(.footnote, p, .textSecondary)
             }
-            Text("Set or not set, from `metistry secrets list --json`. The value is never requested and never displayed. The wizard's step 7 guides `claude setup-token` in a terminal and watches for this name to appear; `\(ClaudeTokenModel.importCommand)` is what carries it into the login Keychain.")
+            ForEach(settings.providerSecretListings) { listing in
+                FactRow(listing.name, listing.isSet ? "set" : "not set", help: listing.scopeLabel, mono: true, role: listing.isSet ? .ok : .absent)
+            }
+            Text("Where the assistant's turns run, from `metistry compute show --json`. No key's value is requested or displayed — a provider's `auth.secret` is a NAME, and the only thing the app learns about it is whether it is in the Keychain. `metistry compute assign default <provider/model>` changes the engine; the wizard's step 7 is the same two verbs.")
                 .metistryText(.caption1, p, .textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
-            Button("Read Secret List") { Task { await settings.refreshSecrets() } }
-                .disabled(settings.secretsPhase == .reading)
+            Button("Read Compute") { Task { await settings.refreshCompute(); await settings.refreshSecrets() } }
+                .disabled(settings.computePhase == .reading)
         }
 
         SettingsSection("Bridges") {

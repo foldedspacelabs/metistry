@@ -4,7 +4,8 @@ import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { assistantEnv, consoleEnv, deploymentPaths, loadDeployment, type ShapeContext } from "../src/deployment.js";
+import { emptyCompute, parseCompute } from "@foldedspacelabs/metistry-core";
+import { ASSISTANT_ENV_KEYS, assistantEnv, assistantEnvKeys, consoleEnv, deploymentPaths, loadDeployment, type ShapeContext } from "../src/deployment.js";
 
 async function dirs(): Promise<{ product: string; instance: string }> {
   const root = await mkdtemp(join(tmpdir(), "metistry-deploy-"));
@@ -101,26 +102,48 @@ describe("the assistant's launchd environment is an allowlist, not a passthrough
     METISTRY_DB_HOST: "db",
     METISTRY_ASSISTANT_TOKEN: "tok",
     METISTRY_BRAIN_URL: "http://console:8080/mcp",
-    CLAUDE_CODE_OAUTH_TOKEN: "oauth",
+    METISTRY_OPENROUTER_API_KEY: "sk-or-declared",
+    METISTRY_SOMEWHERE_ELSE_API_KEY: "sk-not-declared",
     METISTRY_GITHUB_WRITE_TOKEN: "ghp_x",
     METISTRY_AWS_SECRET_ACCESS_KEY: "aws",
     METISTRY_VAPID_PRIVATE: "vapid",
-    ANTHROPIC_API_KEY: "sk-ant-should-never-appear",
   };
+  // The engine's credential has no fixed NAME: compute.yaml says which one
+  // each provider uses, so the allowlist is the static keys plus exactly the
+  // secrets THIS file declares (C2/C3).
+  const compute = parseCompute(`
+providers:
+  openrouter:
+    kind: openai-compatible
+    base_url: https://openrouter.ai/api/v1
+    locality: off_machine
+    auth: { secret: METISTRY_OPENROUTER_API_KEY }
+    data_policy: { allow: [Knowledge/Projects], deny_sources: [comms], max_brief_bytes: 65536 }
+assignments:
+  default: { model: openrouter/anthropic/claude-sonnet-5 }
+`);
 
-  it("gets the db, its own token and the brain URL — and nothing else", () => {
-    const e = assistantEnv(ctx(env));
+  it("gets the db, its own token, the brain URL and the provider key compute.yaml names — and nothing else", () => {
+    const e = assistantEnv(ctx(env), compute);
     expect(e.METISTRY_DB_HOST).toBe("127.0.0.1");
     expect(e.METISTRY_BRAIN_URL).toBe("http://127.0.0.1:8080/mcp");
     expect(e.METISTRY_ASSISTANT_TOKEN).toBe("tok");
-    expect(e.CLAUDE_CODE_OAUTH_TOKEN).toBe("oauth");
-    expect(e.HOME).toBe("/i/state/assistant"); // the SDK's transcripts, and the only writable path
+    expect(e.METISTRY_OPENROUTER_API_KEY).toBe("sk-or-declared");
+    expect(e.HOME).toBe("/i/state/assistant"); // the one writable path the sandbox allows
     // the console's outbound credentials never enter the engine's environment
     expect(e.METISTRY_GITHUB_WRITE_TOKEN).toBeUndefined();
     expect(e.METISTRY_AWS_SECRET_ACCESS_KEY).toBeUndefined();
     expect(e.METISTRY_VAPID_PRIVATE).toBeUndefined();
-    // PoC-4: an API key silently moves billing off the subscription
-    expect(e.ANTHROPIC_API_KEY).toBeUndefined();
+    // a provider key in the operator's shell that this file does not name
+    // cannot reach the engine and buy tokens on somebody else's account
+    expect(e.METISTRY_SOMEWHERE_ELSE_API_KEY).toBeUndefined();
+  });
+
+  it("with no compute.yaml at all, no provider key is passed through — the static keys are the whole list", () => {
+    const e = assistantEnv(ctx(env));
+    expect(e.METISTRY_OPENROUTER_API_KEY).toBeUndefined();
+    expect(assistantEnvKeys(emptyCompute())).toEqual([...ASSISTANT_ENV_KEYS]);
+    expect(assistantEnvKeys(compute)).toContain("METISTRY_OPENROUTER_API_KEY");
   });
 
   it("defaults the brain URL to the console's own port when .env has none", () => {

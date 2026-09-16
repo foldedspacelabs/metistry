@@ -4,9 +4,10 @@
 // All seven do something now. Step 1 installs the bundle's read-only runtime to
 // a writable product dir (`metistry runtime install`); step 5 SETS the
 // deployment shape after previewing it (`metistry deployment set-shape --yes`)
-// rather than explaining that it cannot; step 7 guides `claude setup-token` and
-// watches for the token appearing, without ever handling its value
-// (claude-token.swift).
+// rather than explaining that it cannot; step 7 chooses where the assistant's
+// turns run — a provider template, a key straight to the CLI's stdin, and one
+// `compute assign default` line — or skips, which is a supported install and
+// says so (compute-step.swift).
 //
 // STEP 6 CHANGED SHAPE on 2026-09-10 (owner decision). It used to be "enrol a
 // passkey, or explain at length why this origin cannot host one". It is now
@@ -37,7 +38,7 @@ public enum FirstRunStep: Int, CaseIterable, Identifiable, Sendable {
     case secrets
     case services
     case door
-    case claude
+    case compute
 
     public var id: Int { rawValue }
 
@@ -49,7 +50,7 @@ public enum FirstRunStep: Int, CaseIterable, Identifiable, Sendable {
         case .secrets: return "Secrets"
         case .services: return "Services"
         case .door: return "Door"
-        case .claude: return "Claude"
+        case .compute: return "Compute"
         }
     }
 
@@ -69,8 +70,8 @@ public enum FirstRunStep: Int, CaseIterable, Identifiable, Sendable {
             return "Bring the install to running: containers or launchd jobs, then doctor."
         case .door:
             return "Your Mac is signed in automatically. Enrol a passkey only for browsers and your phone."
-        case .claude:
-            return "Sign in to Claude and put the token in the Keychain."
+        case .compute:
+            return "Choose where the assistant's turns run: a cloud provider on your own key, a local server, or nothing yet."
         }
     }
 
@@ -84,16 +85,16 @@ public enum FirstRunStep: Int, CaseIterable, Identifiable, Sendable {
         case .secrets: return "metistry secrets sync"
         case .services: return "metistry up"
         case .door: return nil
-        case .claude: return nil
+        case .compute: return nil
         }
     }
 
-    /// Steps 6 and 7 do real work, but not by running a `metistry` verb: one
-    /// talks to `AuthenticationServices` and the console, the other opens a
-    /// terminal for an interactive login and then watches `secrets list --json`.
-    /// They own their own models, so the generic run row does not apply to them.
+    /// Steps 6 and 7 do real work, but not by running ONE `metistry` verb: one
+    /// talks to `AuthenticationServices` and the console, the other runs two
+    /// compute verbs in order and writes a key to the first one's stdin. They
+    /// own their own models, so the generic run row does not apply to them.
     public var hasOwnScreen: Bool {
-        self == .door || self == .claude
+        self == .door || self == .compute
     }
 }
 
@@ -202,10 +203,10 @@ public final class FirstRunModel {
     public var selected: FirstRunStep = .runtime
 
     /// Steps 6 and 7 own their own models: one talks to `AuthenticationServices`
-    /// and the console, the other opens a terminal and watches a secret's NAME.
-    /// Neither is a `metistry` verb, so neither fits the generic run row.
+    /// and the console, the other drives the `metistry compute` verbs. Neither
+    /// is a single `metistry` verb, so neither fits the generic run row.
     public let passkey: PasskeyEnrolmentModel
-    public let claude: ClaudeTokenModel
+    public let compute: ComputeStepModel
     /// Step 6 now LEADS with this: whether the console already takes this Mac as
     /// the owner. It is the same instance the Status header and Settings →
     /// Connections show, so the wizard cannot disagree with the rest of the app
@@ -238,21 +239,21 @@ public final class FirstRunModel {
         cli: MetistryCLI?,
         resolution: RuntimeResolution,
         passkey: PasskeyEnrolmentModel = PasskeyEnrolmentModel(),
-        claude: ClaudeTokenModel? = nil,
+        compute: ComputeStepModel? = nil,
         consoleSignIn: ConsoleSignInModel? = nil
     ) {
         self.cli = cli
         self.resolution = resolution
         self.passkey = passkey
-        self.claude = claude ?? ClaudeTokenModel(cli: cli)
+        self.compute = compute ?? ComputeStepModel(cli: cli)
         self.consoleSignIn = consoleSignIn ?? ConsoleSignInModel(cli: cli)
         reset()
     }
 
-    public func adopt(cli: MetistryCLI?, resolution: RuntimeResolution, claudeBinary: URL? = nil) {
+    public func adopt(cli: MetistryCLI?, resolution: RuntimeResolution) {
         self.cli = cli
         self.resolution = resolution
-        claude.adopt(cli: cli, claudeBinary: claudeBinary ?? claude.claudeBinary)
+        compute.adopt(cli: cli)
         // Step 1's verdict changes with the runtime; the rest keep whatever
         // they achieved — re-pointing the app at another checkout does not
         // un-create an instance repo.
@@ -298,7 +299,7 @@ public final class FirstRunModel {
             guard repoPlan == .now, repoAuth.runnableFromTheApp else { return false }
             return instanceDirectory != nil && !remoteURL.trimmingCharacters(in: .whitespaces).isEmpty
         case .secrets, .services: return true
-        case .door, .claude: return false
+        case .door, .compute: return false
         }
     }
 
@@ -338,7 +339,7 @@ public final class FirstRunModel {
 
     private func verb(for step: FirstRunStep) -> [String]? {
         switch step {
-        case .door, .claude:
+        case .door, .compute:
             return nil
         case .runtime:
             // `metistry runtime install --from <bundle> --to <writable dir>`.

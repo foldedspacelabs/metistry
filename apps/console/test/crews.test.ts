@@ -10,7 +10,7 @@ import { memoryVault } from "@foldedspacelabs/metistry-artifacts";
 import type { AgentPrincipal } from "@foldedspacelabs/metistry-mcp-brain";
 import type { TasksService } from "@foldedspacelabs/metistry-tasks";
 import { TargetRegistry } from "../src/dispatch.js";
-import { emptyCompute, parseCompute, SDK_ENGINE_KIND, type Compute } from "@foldedspacelabs/metistry-core";
+import { emptyCompute, parseCompute, type Compute } from "@foldedspacelabs/metistry-core";
 import { CrewRegistry, crewPolicy, dispatchCrew, intersectAllow, loadCrews, LOCAL_CREW_TARGET, parseCrewFile, readCrewVault, snapshotOf } from "../src/crews.js";
 
 const root = fileURLToPath(new URL("../../../", import.meta.url));
@@ -237,10 +237,12 @@ describe("dispatchCrew (fakes)", () => {
 // --- the collaboration rule (C7, owner decision 2026-09-11) ----------------------
 
 // A valid `compute.yaml` can only name `openai-compatible` providers today
-// (core's PROVIDER_KINDS, C2), so a second kind has to be built by hand here.
-// That is the point of the guard: it is what makes the rule hold the day a
-// native Messages adapter or a bundled llama-server kind lands, rather than a
-// thing someone has to remember to add then.
+// (core's PROVIDER_KINDS, C2 — the SDK's `anthropic` kind left with the
+// scrub), so a second kind has to be built by hand here. That is the point of
+// the guard: it is what makes the rule hold the day a native Messages adapter
+// or a bundled llama-server kind lands, rather than a thing someone has to
+// remember to add then.
+const FUTURE_KIND = "native-messages";
 const withKinds = (callerKind: string, crewKind: string): Compute => {
   const cfg = parseCompute(`
 providers:
@@ -262,7 +264,7 @@ describe("cross-kind delegation (collaboration rule 4)", () => {
     const reg = await registryWith(seed);
     const db = fakeDb();
     const tasks = fakeTasks();
-    const r = await dispatchCrew(db, tasks, reg, targets, { crew: "researcher", brief: "Summarize Knowledge/Projects/Ios.md" }, assistant, withKinds(SDK_ENGINE_KIND, "openai-compatible"));
+    const r = await dispatchCrew(db, tasks, reg, targets, { crew: "researcher", brief: "Summarize Knowledge/Projects/Ios.md" }, assistant, withKinds(FUTURE_KIND, "openai-compatible"));
     expect(r).toMatchObject({ ok: false, code: "invalid_request" });
     if (r.ok) return;
     expect(r.message).toContain("assignments.crews.researcher");
@@ -270,7 +272,7 @@ describe("cross-kind delegation (collaboration rule 4)", () => {
     expect(tasks.created).toHaveLength(0); // nothing queued
     const [finish] = db.finishes();
     expect(String(finish![2])).toMatch(/^collaboration_rule: /);
-    expect(JSON.parse(String(db.q[0]!.values[6]))).toMatchObject({ from_kind: SDK_ENGINE_KIND, to_kind: "openai-compatible" });
+    expect(JSON.parse(String(db.q[0]!.values[6]))).toMatchObject({ from_kind: FUTURE_KIND, to_kind: "openai-compatible" });
   });
 
   it("allows it when both sides are the same kind — which is every valid compute.yaml today, and an install with none", async () => {

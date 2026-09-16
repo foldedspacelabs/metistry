@@ -38,8 +38,8 @@ import {
   type ChildStatus,
   type Manifest,
 } from "@foldedspacelabs/metistry-core";
-import { loadCompute, type Compute } from "@foldedspacelabs/metistry-core";
-import { ENGINE_CREDENTIAL_VAR, engineCredentialPresent, loadDeployment } from "./deployment.js";
+import { emptyCompute, loadCompute, type Compute } from "@foldedspacelabs/metistry-core";
+import { engineStatus, loadDeployment } from "./deployment.js";
 import { localServerRows } from "./local-models.js";
 import { realExec, type Exec } from "./exec.js";
 import { labelFor, loadPlistTemplates, logPathFor, SUPERVISED_SERVICES } from "./launchd.js";
@@ -197,7 +197,10 @@ async function probeCheck(name: string, url: string, token: string | undefined, 
 }
 
 /** One component row: manifest validity first; then the network probe for anything that declares an http surface. */
-async function componentRow(m: FoundManifest, deps: Required<Pick<DoctorDeps, "env" | "fetchFn" | "timeoutMs">> & { shape: DeploymentShape; labelSuffix?: string | undefined }): Promise<DoctorRow> {
+async function componentRow(
+  m: FoundManifest,
+  deps: Required<Pick<DoctorDeps, "env" | "fetchFn" | "timeoutMs">> & { shape: DeploymentShape; labelSuffix?: string | undefined; compute: Compute },
+): Promise<DoctorRow> {
   const kind = m.result.ok ? m.result.manifest.type : m.type;
   if (!m.result.ok) {
     return {
@@ -262,17 +265,22 @@ async function componentRow(m: FoundManifest, deps: Required<Pick<DoctorDeps, "e
 
   // The engine is the one component an install may deliberately run without
   // (docs/ops/assistant-tools.md, "Running without an engine"): with no
-  // credential `up` leaves the assistant out of the supervisor's children,
-  // so reporting it `ok` would be a lie and `failed` would be wrong — it is
-  // the same "not configured, degrades" row a bridge gets.
-  if (man.type === "service" && man.name === "assistant" && !engineCredentialPresent(deps.env)) {
-    return {
-      kind,
-      ...(await runCheck(man.name, `${ENGINE_CREDENTIAL_VAR} set → the supervisor starts the engine`, async () => ({
-        status: "absent",
-        remediation: `no engine credential: set ${ENGINE_CREDENTIAL_VAR} (\`claude setup-token\`) in this install's .env and \`metistry secrets sync --to keychain\`, then metistry up — meanwhile the assistant is not started at all: captures, tasks, search and the console run, and fold turns wait (docs/ops/assistant-tools.md)`,
-      }))),
-    };
+  // `assignments.default` — or with one whose provider key is unset — `up`
+  // leaves the assistant out of the supervisor's children, so reporting it
+  // `ok` would be a lie and `failed` would be wrong. It is the same "not
+  // configured, degrades" row a bridge gets, read through the SAME seam `up`
+  // reads (core's `engineStatus`), so the two can never disagree.
+  if (man.type === "service" && man.name === "assistant") {
+    const engine = engineStatus(deps.compute, deps.env);
+    if (!engine.ok) {
+      return {
+        kind,
+        ...(await runCheck(man.name, "compute.yaml assigns a default → the supervisor starts the engine", async () => ({
+          status: "absent",
+          remediation: `${engine.why} — \`${engine.fix}\`; meanwhile the assistant is not started at all: captures, tasks, search and the console run, and fold turns wait (docs/ops/assistant-tools.md)`,
+        }))),
+      };
+    }
   }
 
   const httpSurface = (man.type === "bridge" && man.transport === "http") || (man.type === "service" && man.port !== undefined);
@@ -304,6 +312,34 @@ async function componentRow(m: FoundManifest, deps: Required<Pick<DoctorDeps, "e
         : `process state: compose:${man.name}`
       : undefined;
   return { kind, ...(await runCheck(man.name, `${m.dir}/manifest.yaml validates${via ? `; ${via}` : ""}`, async () => {})) };
+}
+
+// ---- instance layout --------------------------------------------------------
+//
+// The pre-#156 layout (docs/ops/inbox.md): captures at a gitignored
+// `<instance>/inbox/` instead of the vault's `Knowledge/Inbox/`. Purely a
+// filesystem check — no manifest, no probe — so an instance that has not
+// run `metistry migrate-inbox` yet is told, instead of quietly falling back
+// to writing untracked files nobody in the vault ever sees.
+
+const LEGACY_INBOX_GITIGNORE_LINE = /^\/?inbox\/?$/;
+
+export async function inboxRow(instanceDir: string): Promise<DoctorRow> {
+  return {
+    kind: "instance",
+    ...(await runCheck("inbox", `${instanceDir}/inbox/ absent, and .gitignore does not list it — captures live at Knowledge/Inbox/`, async () => {
+      const legacyDir = join(instanceDir, "inbox");
+      const entries = existsSync(legacyDir) ? (await readdir(legacyDir)).filter((e) => e !== ".DS_Store") : [];
+      const gitignorePath = join(instanceDir, ".gitignore");
+      const gitignored = existsSync(gitignorePath) && (await readFile(gitignorePath, "utf8")).split("\n").some((l) => LEGACY_INBOX_GITIGNORE_LINE.test(l.trim()));
+      if (entries.length === 0 && !gitignored) return;
+      return {
+        status: "degraded",
+        remediation: "the pre-#156 layout: run `metistry migrate-inbox --dry-run` to see the plan, then `metistry migrate-inbox` to move captures into Knowledge/Inbox/ (docs/ops/inbox.md)",
+        meta: { dir: legacyDir, entries: entries.length, gitignored },
+      };
+    })),
+  };
 }
 
 // ---- db -------------------------------------------------------------------
@@ -793,7 +829,11 @@ export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
       }))),
     },
   ];
-  for (const m of await walkManifests(deps.productDir)) rows.push(await componentRow(m, { env, fetchFn, timeoutMs, shape, labelSuffix }));
+  // Read once and shared: the `assistant` row and the local-server rows both
+  // ask what compute.yaml says, and doctor must not answer twice differently.
+  const compute = (await computeForDoctor(env, deps.productDir)) ?? emptyCompute();
+  for (const m of await walkManifests(deps.productDir)) rows.push(await componentRow(m, { env, fetchFn, timeoutMs, shape, labelSuffix, compute }));
+  rows.push(await inboxRow(env.METISTRY_INSTANCE_DIR?.replace(/\/+$/, "") || deps.productDir));
 
   const db = deps.db === undefined ? await openDbFromEnv(env) : deps.db;
   try {
@@ -813,7 +853,7 @@ export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
   if (usesCompose(loaded.deployment)) rows.push(...(await composeRows(deps.productDir, exec)));
   // last: the local model servers. Absent is the common case and never a
   // failure, so these rows can only add information, never a red run.
-  rows.push(...(await localModelRows(env, deps.productDir, fetchFn, timeoutMs)));
+  rows.push(...(await localServerRows({ compute, fetchFn, timeoutMs: Math.min(timeoutMs, 2_000) })));
 
   return { as_of: new Date().toISOString(), product_dir: deps.productDir, shape, ok: !rows.some((r) => r.status === "failed"), rows };
 }

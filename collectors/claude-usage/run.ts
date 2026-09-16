@@ -1,8 +1,14 @@
 // claude-usage: daily rollup of assistant turns from `runs` into `metrics`
-// by model tier. cost_usd is the SDK's API-equivalent figure — on a
-// subscription it's headroom consumed, not money billed; the dashboard
-// labels it that way. Trailing window replaced atomically each run
-// (in-flight turns finish late), so the series is idempotent.
+// by model. cost_usd is what the provider billed for the turn, as the engine
+// recorded it (`packages/core/src/cost.ts`). Trailing window replaced
+// atomically each run (in-flight turns finish late), so the series is
+// idempotent.
+//
+// KEPT AT ITS NAME on purpose (PR 1b). It reads local data only and needs no
+// credential, so it degrades to nothing on an engine-less install rather than
+// failing; the `claude.*` metric names are DATA that existing installs
+// already carry, and renaming them would be a migration with no benefit to
+// the reader. Nothing here names a plan or a login.
 
 export interface Db {
   query(text: string, values?: unknown[]): Promise<{ rows: any[] }>;

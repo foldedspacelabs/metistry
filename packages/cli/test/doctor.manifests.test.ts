@@ -2,6 +2,9 @@
 // must validate, and every http bridge/service must map onto a probe. This
 // is the test that keeps doctor generic — a new component either validates
 // or breaks CI here.
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { doctor, launchdLabels, walkManifests } from "../src/doctor.js";
@@ -60,7 +63,10 @@ describe("manifest walk over the checkout", () => {
     expect(rows.compose?.status).toBe("absent");
   });
 
-  it("the assistant row: absent with the credential's own remediation, ok once it is set — never a failure either way", async () => {
+  // C2/C3: an engine is `assignments.default` in compute.yaml PLUS the key
+  // its provider names, read through the SAME seam `up` reads — so doctor's
+  // row and the supervisor's child list can never disagree.
+  it("the assistant row: absent when compute.yaml assigns no default, absent when the assigned provider's key is unset, ok once both hold — never a failure", async () => {
     const deps = {
       productDir: repoRoot,
       fetchFn: (async () => { throw new Error("no network in this test"); }) as unknown as typeof fetch,
@@ -68,19 +74,40 @@ describe("manifest walk over the checkout", () => {
       exec: async () => ({ code: 127, stdout: "", stderr: "" }),
       platform: "linux" as const,
     };
+    const dir = await mkdtemp(join(tmpdir(), "metistry-doctor-compute-"));
+    const file = join(dir, "compute.yaml");
+    await writeFile(
+      file,
+      `providers:
+  openrouter:
+    kind: openai-compatible
+    base_url: https://openrouter.ai/api/v1
+    locality: off_machine
+    auth: { secret: METISTRY_OPENROUTER_API_KEY }
+    data_policy: { allow: [Knowledge/Projects], deny_sources: [comms], max_brief_bytes: 65536 }
+assignments:
+  default: { model: openrouter/anthropic/claude-sonnet-5 }
+`,
+    );
     const rowFor = async (env: NodeJS.ProcessEnv) => (await doctor({ ...deps, env })).rows.find((r) => r.name === "assistant")!;
 
-    const absent = await rowFor({});
-    expect(absent.status).toBe("absent");
-    expect(absent.probe).toContain("CLAUDE_CODE_OAUTH_TOKEN set");
-    expect(absent.remediation).toMatch(/no engine credential: set CLAUDE_CODE_OAUTH_TOKEN/);
-    expect(absent.remediation).toMatch(/metistry secrets sync --to keychain/);
+    // the seed assigns nothing, so a bare checkout has no engine
+    const unassigned = await rowFor({});
+    expect(unassigned.status).toBe("absent");
+    expect(unassigned.probe).toContain("compute.yaml assigns a default");
+    expect(unassigned.remediation).toMatch(/no assignments\.default in compute\.yaml/);
+    expect(unassigned.remediation).toContain("metistry compute assign default <provider/model>");
     // an operator has to be able to tell "no model" from "broken"
-    expect(absent.remediation).toMatch(/captures, tasks, search and the console run, and fold turns wait/);
+    expect(unassigned.remediation).toMatch(/captures, tasks, search and the console run, and fold turns wait/);
 
-    // a blank value is not a credential — .env keeps the commented-out line
-    expect((await rowFor({ CLAUDE_CODE_OAUTH_TOKEN: "  " })).status).toBe("absent");
+    // assigned, but nobody has pasted the key: the row names THAT variable
+    const noKey = await rowFor({ METISTRY_COMPUTE_FILES: file });
+    expect(noKey.status).toBe("absent");
+    expect(noKey.remediation).toMatch(/providers\.openrouter\.auth\.secret names METISTRY_OPENROUTER_API_KEY/);
 
-    expect((await rowFor({ CLAUDE_CODE_OAUTH_TOKEN: "oauth" })).status).toBe("ok");
+    // a blank value is not a key — .env keeps the commented-out line
+    expect((await rowFor({ METISTRY_COMPUTE_FILES: file, METISTRY_OPENROUTER_API_KEY: "  " })).status).toBe("absent");
+
+    expect((await rowFor({ METISTRY_COMPUTE_FILES: file, METISTRY_OPENROUTER_API_KEY: "sk-or-x" })).status).toBe("ok");
   });
 });

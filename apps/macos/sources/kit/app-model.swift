@@ -51,8 +51,7 @@ public final class AppModel {
         defaults: UserDefaults = .standard,
         appVersion: String = UpdateStatus.devBuildVersion,
         loginItemService: (any LoginItemService)? = nil,
-        passkeyRegistrar: (any PasskeyRegistrar)? = nil,
-        terminalOpener: (any TerminalOpener)? = nil
+        passkeyRegistrar: (any PasskeyRegistrar)? = nil
     ) {
         let instances = InstanceBookmarks(defaults: defaults)
         let developerProductDir = Self.loadDeveloperProductDir(defaults)
@@ -69,11 +68,7 @@ public final class AppModel {
             cli: cli,
             resolution: resolution,
             passkey: PasskeyEnrolmentModel(registrar: passkeyRegistrar),
-            claude: ClaudeTokenModel(
-                cli: cli,
-                terminal: terminalOpener,
-                claudeBinary: ClaudeCodeLocator.locate(productDir: resolution.runtime?.productDir)
-            ),
+            compute: ComputeStepModel(cli: cli),
             consoleSignIn: consoleSignIn
         )
 
@@ -161,11 +156,7 @@ public final class AppModel {
         status.cli = cli
         menu.cli = cli
         logs.cli = cli
-        firstRun.adopt(
-            cli: cli,
-            resolution: resolution,
-            claudeBinary: ClaudeCodeLocator.locate(productDir: resolution.runtime?.productDir)
-        )
+        firstRun.adopt(cli: cli, resolution: resolution)
         settings.adopt(cli: cli, instanceDir: instances.active)
         // The previous instance's answer is dropped, not carried over: a "signed
         // in" belongs to the install it was asked about. Then it is asked again,

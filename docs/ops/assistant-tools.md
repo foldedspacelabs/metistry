@@ -81,13 +81,21 @@ ever.
 
 ### Running without an engine
 
-An install with **no engine credential** is a supported shape, not a broken
-one. Under the launchd shape `metistry up` leaves the assistant out of the
+An install with **no engine** is a supported shape, not a broken one. There
+are two ways to have none, and they are the two halves of one answer
+(`compute.yaml`, docs/ops/compute.md):
+
+1. **`assignments.default` is not set** — nothing says which provider and
+   model a turn runs on.
+2. **It is set, but the key its provider names is not** — `providers.<name>.
+   auth.secret` names a variable that is unset in this install's environment.
+
+Under the launchd shape `metistry up` leaves the assistant out of the
 supervisor's children rather than starting a process that can only
-crash-loop, and prints one line:
+crash-loop, and prints one line naming which half is missing:
 
 ```
-assistant: absent — no engine credential (CLAUDE_CODE_OAUTH_TOKEN); captures, tasks, search and the console run; fold turns wait (docs/ops/assistant-tools.md)
+assistant: absent — no assignments.default in compute.yaml — nothing says which provider and model a turn runs on; captures, tasks, search and the console run; fold turns wait (docs/ops/assistant-tools.md). Fix: metistry compute assign default <provider/model>
 ```
 
 `metistry doctor` reports `assistant  service  absent` with the same
@@ -99,21 +107,22 @@ What waits is the engine's queue — the evening fold's turn sits in
 `assistant-drain` reports `absent` (no alert) while the assistant is not a
 child, instead of paging you every minute about a queue nobody is draining.
 
-Add the credential and re-run `metistry up`: the supervisor's config is
-rewritten whole each time, so the child is simply back — and taking the
-credential away again removes it, with nothing to hand-edit either way.
+Give it an engine and re-run `metistry up`: the supervisor's config is
+rewritten whole each time, so the child is simply back — and unassigning it
+again removes it, with nothing to hand-edit either way.
 
 ```sh
-claude setup-token                      # → CLAUDE_CODE_OAUTH_TOKEN
-# put it in <instance>/state/.env, then file it in the login Keychain:
-metistry secrets sync --to keychain
+metistry compute providers add --from openrouter          # key on stdin → login Keychain
+metistry compute assign default openrouter/anthropic/claude-sonnet-5
+metistry secrets sync --to env                            # the key into <instance>/state/.env
 metistry up
 ```
 
-The **compose shape still needs it**: `docker-compose.yml` interpolates
-`CLAUDE_CODE_OAUTH_TOKEN` as a required variable, so `docker compose up`
-refuses the whole file without one. An install that wants to run engine-less
-today runs the launchd shape (`docs/ops/deployment-shapes.md`).
+Both shapes run engine-less: `docker-compose.yml` passes the provider key
+through when it is set and does not require it, exactly as the launchd shape
+does. One seam decides for all of them — core's `engineStatus` — so `up`,
+`doctor`, the routine runner's preflight and the watchdog cannot disagree
+about whether this install has a model.
 
 ## Tiers: (model, effort) pairs
 
@@ -125,8 +134,9 @@ model at low effort is often cheaper than a weaker one working hard
 > `assignments:` block names a PINNED `<provider>/<model-id>` per tier and
 > per crew — which says *where* the turn runs as well as *what* runs it, and
 > therefore which engine answers. `rules.yaml`'s `tiers:` below is the
-> fallback: it is still the live map on every install that has not written
-> an `assignments:` block, and those turns run on the Claude Agent SDK.
+> fallback for the model NAME on an install that has not written an
+> `assignments:` block — but with no assignment there is no engine, so those
+> turns do not run at all until one exists.
 > Precedence, in one function (`resolveTurn`): `compute.yaml` assignments →
 > a crew manifest's own pair → `rules.yaml`. An unknown name lands on
 > `assignments.default` (or `rules.yaml`'s `default`) at every level.
@@ -179,7 +189,7 @@ token. There is a test for exactly that (`apps/assistant/test/brain.test.ts`).
 Startup log: `tiers from seed/rules.yaml: fast=haiku/low default=haiku/medium
 deep=opus/high routine=haiku/low`, then either `compute.yaml assignments:
 default=… routine=…` or `compute.yaml assigns nothing — rules.yaml's tiers:
-is the live map and turns run on the Agent SDK`. No rules file at all → one
+is the live map and there is no engine`. No rules file at all → one
 tier, the `METISTRY_MODEL_DEFAULT` model at medium, and a warning.
 
 ## Session rolls: fresh context at task boundaries
@@ -306,7 +316,7 @@ Operating instructions proper still land in `Knowledge/CLAUDE.md` later.
 
 ## Prompt hygiene (docs/research/2026-09-cost-optimization.md)
 
-Anthropic's prompt cache pays off only when the prefix — system prompt,
+A provider's prompt cache pays off only when the prefix — system prompt,
 tools, prior turns — is byte-identical across a session's turns; anything
 volatile ahead of it (today's date, a note's contents, a count, presence
 info) forces a full re-cache at 1.25x the read price every single turn.
@@ -343,7 +353,7 @@ Two kinds of `runs` rows, joined by time and thread:
   `cache_read_input_tokens` / `cache_creation_input_tokens`; `tokens_in`
   stays the uncached count) from the SDK result. The dashboard's runs tile
   counts these as turns; spend rolls into `runs_summary`; the
-  `claude-usage` collector rolls the cache fields into
+  `claude-usage` collector (a local rollup of `runs`; no credential) rolls the cache fields into
   `claude.cache_read` / `claude.cache_write` metrics, and
   `claude_usage_daily` computes `cache_hit_rate = cache_read /
   (cache_read + tokens_in + cache_write)` per model-day — shown on the

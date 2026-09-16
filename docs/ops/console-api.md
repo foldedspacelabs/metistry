@@ -144,8 +144,8 @@ moved-on thread is confusing); the research note says why.
 ```
 POST /api/proposals/17  {"decision":"allow"}
 200 {"ok":true}
-409 {"error":{"code":"conflict","message":"already decided"},
-     "decision":"deny","decided_at":"2026-09-11T01:02:03.004Z"}
+409 {"error":{"code":"conflict","message":"already decided"},"reason":"already_decided",
+     "decision":"deny","decided_at":"2026-09-11T01:02:03.004Z","proposal":{…}}
 404 {"error":{"code":"not_found","message":"not found"}}
 ```
 
@@ -155,6 +155,79 @@ gets `409` **with the winner**, so a client shows what actually happened
 rather than "failed". Never re-triaged. This is also why the phone must not
 queue decisions by default — a lease or a decision is a statement about
 server state at delivery time.
+
+`reason` and `proposal` (the row as it stands, so a client repaints rather
+than re-fetches) ride the same envelope as the staleness `409` below — one
+shape, two reasons, and the client branches on the field rather than on the
+message.
+
+## `if_unchanged` — a decision is an answer to the row you were shown
+
+```
+POST /api/proposals/17  {"decision":"allow","if_unchanged":{"seen_at":"2026-09-16T08:01:02.003Z"}}
+409 {"error":{"code":"conflict","message":"the proposal changed after you saw it"},
+     "reason":"stale","decision":"pending","decided_at":null,"proposal":{…, "ts":"…", "payload":{…}}}
+400 when `seen_at` is not a timestamp this server minted
+```
+
+Optional, and opt-in: omit it and the route behaves exactly as it always did.
+`seen_at` is the `ts` of the row the client **rendered** (or the list `cursor`
+it rendered from — both forms are accepted). The server compares it against
+when the row last *changed*, which is not one column: the proposal's own `ts`,
+the `work` row it came from, and the newest message in that row's room
+(`artifact_comments`, migration `0018`) — `greatest()` over all three. If any
+of them moved after `seen_at`, nothing is decided and the current row comes
+back so the client can show it again.
+
+Approving a thing is approving *that* thing. A payload rewritten by a re-drain,
+a linked task that moved, a negotiation that continued in the room — any of
+them means the answer was to a different question
+(`docs/research/2026-09-16-taskuary-review.md` ADOPT 3).
+
+## `accept_as_work` — one extra verb, where the row carries a suggestion
+
+```
+POST /api/proposals/17  {"decision":"accept_as_work"}
+200 {"ok":true,"work":{"id":214,"title":"renew the wildcard cert","project":null}}
+400 when the row carries no valid `payload.suggested_work`, or is not kind knowledge|report
+```
+
+Offered only on a `knowledge` or `report` proposal whose payload carries
+`suggested_work: {title, project?, kind?}` — validated **server-side against
+the stored row**, never against the request, exactly like the option set of a
+`decision` proposal. It inserts the `work` row (owner-less, unclaimed), sets
+`proposals.work_id`, and decides the proposal `allow`. `project` that is not a
+project slug is dropped rather than invented; an unknown `kind` is a refusal
+rather than a silent fall back to `task`. `docs/ops/reply-feedback.md` has the
+rest, including why this leaves §4.12 intact.
+
+## `POST /api/proposals/batch` — one verb, many rows
+
+```
+POST /api/proposals/batch  {"ids":[17,18,19],"decision":"skip"}
+200 {"results":[{"id":17,"ok":true},
+                {"id":18,"ok":true},
+                {"id":19,"ok":false,"error":{"code":"conflict","message":"already decided"},
+                 "reason":"already_decided","decision":"allow","decided_at":"…","proposal":{…}}]}
+400 when `ids` is not 1..100 positive integers, or `decision` is not later | skip | deny
+```
+
+**All-or-nothing per row, never per batch.** Each id is its own atomic
+statement and gets its own result, because the alternative is a batch that
+refuses ten items because one of them was answered on the phone thirty seconds
+ago. The response is always `200` — the per-row `ok` is the outcome.
+
+Only `later`, `skip` and `deny` may be batched: the verbs that need nothing
+from the individual row. `allow`, `accept_with_changes` and `accept_as_work`
+each *do* something per kind (a prompt overlay write, a `work` row), so they
+stay one at a time. `deny` still carries its own per-kind consequence —
+declining an enrolment revokes the agent — because it is the same handler
+reached through a second door, and a verb that meant two different things
+depending on the route would be worse than either. `feedback` applies to
+`deny`; `skip` writes its own marker and ignores it.
+
+Management surface, so the `user` principal only: an owner token gets the
+uniform `403`, never a `404` that would hide the route's existence.
 
 ## A refusal names the field that would permit it — except on the door
 
@@ -201,10 +274,13 @@ What moves a row past a cursor:
   feedback: a 👍 given from the Mac resurfaces that reply on the phone's
   next pull, with the rating on it.
 - **proposals** — its `ts`, or its `decided_at`: with `since`, the list is
-  *everything that changed*, each row carrying `decision` and `decided_at`,
-  so a reconnect learns what was settled while it was away instead of
-  showing a stale queue. Without `since` it is the triage queue as before —
-  pending only.
+  *everything that changed*, each row carrying `decision`, `decided_at` and
+  `snoozed_until`, so a reconnect learns what was settled while it was away
+  instead of showing a stale queue. Without `since` it is the triage queue as
+  before — pending only, now minus anything `later` put down until an instant
+  that has not arrived. A snooze deliberately does **not** move the cursor: it
+  names a future instant, and a cursor that jumped forward would skip live
+  rows.
 
 `runs` has no *list* endpoint; the activity feed is the `runs_summary` /
 `activity_feed` named queries, which take their own parameters. The whole

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classify, frontmatter } from "./run.js";
+import { classify, frontmatter, suggestedWork } from "./run.js";
 
 const base = { id: 1, path: "123-x.bin", mime: null, note: null, source: "http" };
 
@@ -65,5 +65,42 @@ describe("frontmatter is authoritative for kind", () => {
     const c = classify({ ...base, note: other });
     expect(c.kind).toBe("note");
     expect(c.title).toBe("Ship the router");
+  });
+});
+
+// ADOPT 2 (docs/research/2026-09-16-taskuary-review.md): the drain may
+// SUGGEST a work row; it still creates nothing. Deterministic throughout —
+// the Apple FM tier's `has_action` is deliberately not an input here, because
+// a model must not be what puts an extra button under a proposal
+// (invariant 4).
+describe("suggestedWork — a capture that is asking for a task", () => {
+  const fm = (lines: string[]) => ["---", ...lines, "---", ""].join("\n");
+
+  const sw = (note: string, path = "1-x.md") => {
+    const row = { ...base, note, path };
+    return suggestedWork(row, classify(row));
+  };
+
+  it("takes the three cues: frontmatter kind, an explicit leading marker, and the existing todo verdict", () => {
+    expect(sw(fm(['kind: "todo"', 'title: "renew the cert"']))?.title).toBe("renew the cert");
+    expect(sw(fm(['kind: "task"']) + "ship the release")?.title).toBe("ship the release");
+    expect(sw("@task pay the invoice")?.title).toBe("pay the invoice");
+    expect(sw("todo: pay the invoice")?.title).toBe("pay the invoice");
+    expect(sw("- [ ] pay the invoice")?.title).toBe("pay the invoice");
+    expect(sw("buy milk")?.title).toBe("buy milk"); // TODO_RE, the rule that already existed
+  });
+
+  it("suggests nothing for everything else — most captures are not tasks", () => {
+    expect(sw("an idea about routing")).toBeUndefined();
+    expect(sw("https://example.com/a")).toBeUndefined();
+    expect(sw("")).toBeUndefined();
+    expect(sw(fm(['kind: "session"']) + "a session summary")).toBeUndefined();
+    expect(sw("sam said to @task something later")).toBeUndefined(); // the cue must LEAD
+  });
+
+  it("carries a project only when the frontmatter names one in slug form", () => {
+    expect(sw(fm(['kind: "todo"', 'title: "x"', 'project: "metistry"']))?.project).toBe("metistry");
+    expect(sw(fm(['kind: "todo"', 'title: "x"', 'project: "Some Project"']))?.project).toBeUndefined();
+    expect(sw(fm(['kind: "todo"', 'title: "x"']))?.project).toBeUndefined();
   });
 });

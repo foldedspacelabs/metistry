@@ -134,6 +134,63 @@ describe("TasksService", () => {
     expect(hist).toMatchObject({ agent: "a", op: "update", status: "closed", note: "done" });
   });
 
+  // --- the three gaps the board named (docs/research/2026-09-12-hermes-agent-review.md §4.1-4.3) ---
+
+  it("the BOARD arm (owner / title / project / unblock) is one statement with NO claim in its WHERE", async () => {
+    const { db, work } = fakeDb([[{ ...ROW, owner: "helper-a" }]]);
+    const out = await new TasksService(db).update(7, "user", { owner: "helper-a" });
+    expect(out.ok).toBe(true);
+    const [assign, ...rest] = work();
+    expect(rest).toEqual([]); // no read before, no read after on success
+    const sql = assign?.text ?? "";
+    expect(sql).toMatch(/^\s*UPDATE work/);
+    expect(sql).not.toContain("w.claimed_by = $"); // addressing a card needs no lease
+    expect(sql).toContain("w.kind = ANY('{task,review}'"); // a collected row is never the board's to move
+    expect(sql).toContain("w.status <> 'closed'");
+    expect(assign?.values[2]).toBe(true); // owner WAS given …
+    expect(assign?.values[3]).toBe("helper-a"); // … and this is the value
+    expect(JSON.parse(String(assign?.values[7]))[0]).toMatchObject({ agent: "user", op: "update", owner: "helper-a" });
+  });
+
+  it("owner: null clears the addressee, and the history entry records the clearing", async () => {
+    const { db, work } = fakeDb([[ROW]]);
+    expect((await new TasksService(db).update(7, "user", { owner: null })).ok).toBe(true);
+    expect(work()[0]?.values[2]).toBe(true); // given …
+    expect(work()[0]?.values[3]).toBeNull(); // … as null
+    expect(JSON.parse(String(work()[0]?.values[7]))[0]).toMatchObject({ owner: null });
+  });
+
+  it("the unblock reaches `open`, from `blocked` ONLY, and hands the row back the way release does", async () => {
+    const { db, work } = fakeDb([[{ ...ROW, status: "open" }]]);
+    expect((await new TasksService(db).update(7, "user", { status: "open", note: "answered" })).ok).toBe(true);
+    const sql = work()[0]?.text ?? "";
+    expect(sql).toContain("($2::text IS DISTINCT FROM 'open' OR w.status = 'blocked')");
+    expect(sql).toContain("claimed_by = CASE WHEN $2::text = 'open' THEN NULL");
+    expect(sql).toContain("lease_expires_at = CASE WHEN $2::text = 'open' THEN NULL");
+
+    // …and a row that is not blocked explains itself rather than silently doing nothing
+    const miss = fakeDb([[], [{ ...ROW, status: "in_progress", claimed_by: "helper-a" }]]);
+    expect(await new TasksService(miss.db).update(7, "user", { status: "open" })).toMatchObject({ ok: false, reason: "not_blocked" });
+  });
+
+  it("a claim-gated status and a board field cannot ride in one call — the refusal names both", async () => {
+    const { db, calls } = fakeDb();
+    await expect(new TasksService(db).update(7, "user", { status: "closed", owner: "helper-a" })).rejects.toMatchObject({ code: "invalid_input" });
+    await expect(new TasksService(db).update(7, "user", { status: "closed", owner: "helper-a" })).rejects.toThrow(/status: closed is claim-gated and owner is not/);
+    expect(calls).toEqual([]); // refused before the database
+  });
+
+  it("renew carries a note onto history — and appends NOTHING without one", async () => {
+    const quiet = fakeDb([[{ ...ROW, status: "in_progress", claimed_by: "a", lease_expires_at: new Date() }]]);
+    await new TasksService(quiet.db).heartbeat(7, "a");
+    expect(quiet.work()[0]?.text).toContain("history = history || coalesce($4::jsonb, '[]'::jsonb)");
+    expect(quiet.work()[0]?.values[3]).toBeNull(); // a lease kept alive must not bury the row's history
+
+    const loud = fakeDb([[{ ...ROW, status: "in_progress", claimed_by: "a", lease_expires_at: new Date() }]]);
+    await new TasksService(loud.db).heartbeat(7, "a", 600, "still reading the diff");
+    expect(JSON.parse(String(loud.work()[0]?.values[3]))[0]).toMatchObject({ agent: "a", op: "heartbeat", note: "still reading the diff" });
+  });
+
   it("rejects malformed input before touching the database", async () => {
     const { db, calls } = fakeDb();
     const svc = new TasksService(db);
@@ -143,7 +200,8 @@ describe("TasksService", () => {
     await expect(svc.claim(0, "a")).rejects.toMatchObject({ code: "invalid_input" });
     await expect(svc.claim(1, "a", 0)).rejects.toMatchObject({ code: "invalid_input" });
     await expect(svc.update(1, "a", {})).rejects.toMatchObject({ code: "invalid_input" });
-    await expect(svc.update(1, "a", { status: "open" as never })).rejects.toMatchObject({ code: "invalid_input" });
+    await expect(svc.update(1, "a", { status: "reopened" as never })).rejects.toMatchObject({ code: "invalid_input" });
+    await expect(svc.update(1, "a", { title: "  " })).rejects.toMatchObject({ code: "invalid_input" });
     await expect(svc.listReady({ limit: 0 })).rejects.toMatchObject({ code: "invalid_input" });
     expect(calls).toEqual([]);
   });

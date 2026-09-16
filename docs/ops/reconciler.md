@@ -201,7 +201,7 @@ Setup, modes, and what "deterministic rebuild" means:
 | `METISTRY_VAULT_MAX_BYTES` | `2097152` | per-write size cap |
 | `METISTRY_COMMIT_EXTERNAL_EDITS` | `true` | sweep out-of-band edits into `user` commits |
 | `METISTRY_EMBED_ENABLED` | `true` | `false` turns embedding off entirely; search stays keyword |
-| `METISTRY_OLLAMA_URL` | `http://127.0.0.1:11434` | the local embedder |
+| `METISTRY_LOCAL_MODEL_URL` | compute.yaml's first `on_machine` provider, else `http://127.0.0.1:11434/v1` | the local model server the embedder posts `/v1/embeddings` to (`METISTRY_OLLAMA_URL` is a deprecated alias) |
 | `METISTRY_EMBED_MODEL` | `nomic-embed-text` | changing it requires a rebuild |
 | `METISTRY_EMBED_DIM` | `768` | must match the model AND the `vector(768)` column |
 | `METISTRY_EMBED_BATCH` | `16` | chunks per `/api/embed` request |

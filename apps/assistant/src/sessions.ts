@@ -38,8 +38,8 @@ export interface SessionDb {
 }
 
 /** How much history one session replays. A cap, not a compaction strategy: what falls off the front is gone, and the re-brief path is what recovers it. */
-export const MAX_HISTORY_MESSAGES = 60;
-export const MAX_HISTORY_CHARS = 120_000;
+export const MAX_HISTORY_MESSAGES = 60;  // limit: fixed — a ceiling on what one session may carry before a roll; task boundaries roll sooner, and a larger window is a cost decision the bake-off makes, not an env var
+export const MAX_HISTORY_CHARS = 120_000;  // limit: fixed — the byte-side of the same ceiling; sized under every candidate model's context so a session can never exceed it
 
 /**
  * Trim from the FRONT, then advance to the first `user` message.

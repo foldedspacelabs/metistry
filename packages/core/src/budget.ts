@@ -31,7 +31,7 @@ import type { PreflightMiss } from "./preflight.js";
 export const BUDGET_EXCEEDED = "budget_exceeded";
 
 /** Warn at 80 % of a window (R2) — early enough to act, late enough not to be noise. */
-export const BUDGET_WARN_FRACTION = 0.8;
+export const BUDGET_WARN_FRACTION = 0.8;  // limit: fixed — the documented 80 % warning (docs/ops/compute.md "Budgets"); the budget itself is the knob
 
 export const BUDGET_WINDOWS = ["daily", "monthly"] as const;
 export type BudgetWindow = (typeof BUDGET_WINDOWS)[number];

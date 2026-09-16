@@ -45,6 +45,17 @@ import { migrateInbox } from "./migrate-inbox.js";
 import { migrateShape } from "./migrate-shape.js";
 import { ensureInstanceId, instanceEnvFile, readInstanceId } from "./instance.js";
 import { readIdentity, renderIdentity } from "./identity.js";
+import {
+  INSTANCE_VERBS,
+  instancesAdd,
+  instancesList,
+  instancesRefresh,
+  instancesRemove,
+  parseInstanceVerb,
+  renderInstances,
+  type InstancesOptions,
+} from "./instances.js";
+import { renderRunsExport, runsExport } from "./runs.js";
 import type { LockSource } from "./lock.js";
 import { installRuntime } from "./runtime-install.js";
 import { listSecrets, mintSecret, purgeSecrets, renderSecretList, syncSecrets, type SyncDirection } from "./secrets.js";
@@ -61,7 +72,7 @@ export interface ParsedArgs {
 }
 
 /** Flags that never take a value, so `metistry init --force <dir>` keeps its dir. */
-export const BOOLEAN_FLAGS = new Set(["force", "json", "help", "version", "dry-run", "no-launchd", "no-compose", "skip-build", "skip-migrate", "rollback", "yes", "follow", "namespace", "rotate", "list", "complete", "skip-test"]);
+export const BOOLEAN_FLAGS = new Set(["force", "json", "help", "version", "dry-run", "no-launchd", "no-compose", "skip-build", "skip-migrate", "rollback", "yes", "follow", "namespace", "rotate", "list", "complete", "skip-test", "remote", "json-lines"]);
 
 /** `--channel git|release` — anything else is a typo, not a guess (the lock parser is strict for the same reason). */
 export function parseChannel(v: string | undefined): LockSource | undefined {
@@ -180,7 +191,7 @@ const USAGE = `metistry — Metistry command line
       with git ls-remote, flush the reconciler's queue, and push once.
       The token is never printed, never written to .env, never in .git/config.
 
-  metistry connect <cursor|devin|claude-code> [--instance <dir>] [--rotate]
+  metistry connect <cursor|devin|claude-code> [--instance <dir>] [--rotate] [--remote]
                    [--areas Knowledge/A,Knowledge/B] [--project <slug>] [--json]
   metistry connect --list [--json]
       Give one external dev tool its own way into this instance: register it as
@@ -203,7 +214,12 @@ const USAGE = `metistry — Metistry command line
       (the old one stops authenticating at once) — without it an
       already-registered tool is told its token is unchanged rather than shown a
       secret. --list reports every tool's row, token and config.
-      docs/ops/cursor.md, docs/ops/devin.md.
+      --remote says this tool will present its bearer from off this machine: the
+      row enrols PENDING and its token authenticates nothing — /mcp and /capture
+      answer the same 401 an unknown token gets — until you let it in from Needs
+      You or with POST /api/agents/<id>/approve. Loopback tools stay immediate,
+      and --remote is decided at enrolment, never added to a row afterwards.
+      docs/ops/cursor.md, docs/ops/devin.md, docs/ops/console-api.md.
 
   metistry secrets sync [--from keychain|env] [--to env|keychain]
                         [--instance <dir>] [--env-file <path>]
@@ -238,6 +254,39 @@ const USAGE = `metistry — Metistry command line
       The instance's identity.yaml (name, mention, voice, icon, instance_id) —
       the only place the assistant is named (CLAUDE.md). Read-only: identity.yaml
       is a §4.7 protected path, so this verb has no field to change it.
+
+  metistry instances list [--json] [--instance <dir>]
+  metistry instances add <origin> [--dry-run]
+  metistry instances remove <instance_id|name> [--dry-run]
+  metistry instances refresh [--dry-run]
+      The peer registry: which OTHER instances this one knows about
+      (instances.yaml, docs/ops/instances.md). "add" asks that origin who it is
+      — GET /api/identity, the one unauthenticated read a console has — and
+      records its instance_id, name and the coarse capabilities it advertises;
+      an origin that will not say is not written. Keyed by instance_id, never by
+      origin, because an origin can move; "refresh" re-asks every recorded one
+      and leaves an unreachable peer's row exactly as it was (a closed laptop is
+      not a departed instance). A §4.7 protected path like compute.yaml: every
+      write goes through the reconciler as the "user" principal, and an edit
+      that would not validate is refused rather than written. The console serves
+      the same file to the app and the phone at GET /api/instances.
+      What an instance exposes as a "resource" is OPEN-7 and is not designed
+      here — the file's "resources:" key stays empty.
+
+  metistry runs export [--since <cursor|timestamp>] [--until <timestamp>]
+                       [--component <name>] [--limit N] [--json-lines]
+      The runs audit ledger as NDJSON on stdout, oldest first, one JSON object
+      per line, with core's redaction already applied and each row carrying this
+      instance's instance_id and — where the row names an agent — the qualified
+      agent:<name>@<instance_id> form, so two instances' ledgers merge without
+      colliding. Streamed: lines are written as they arrive, and a stream that
+      stops mid-line is an error, never a short export.
+      Every line carries a "cursor"; the last one is what --since takes to
+      resume, and a bare timestamp works too. It goes through the console
+      (GET /api/runs/export, the "user" principal) and never straight to
+      Postgres — one read path into state (invariant 3). The summary line goes
+      to stderr so stdout stays pipeable; --json-lines is the explicit spelling
+      of the default and changes nothing.
 
   metistry --version
   metistry version [--json] [--product-dir <checkout>] [--instance <dir>]
@@ -533,7 +582,7 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
       }
       const tool = parseTool(positional[0]);
       if (!tool) {
-        err(`usage: metistry connect <${CONNECT_TOOLS.join("|")}> [--rotate] [--areas Knowledge/A,Knowledge/B] [--project <slug>] [--json]`);
+        err(`usage: metistry connect <${CONNECT_TOOLS.join("|")}> [--rotate] [--remote] [--areas Knowledge/A,Knowledge/B] [--project <slug>] [--json]`);
         err("       metistry connect --list [--json]");
         return 2;
       }
@@ -541,6 +590,7 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
         const r = await connect({
           tool,
           rotate: flags.rotate === true,
+          remote: flags.remote === true,
           ...(csv(str(flags, "areas")) ? { areas: csv(str(flags, "areas")) } : {}),
           ...(csv(str(flags, "project")) ? { projects: csv(str(flags, "project")) } : {}),
           ...common,
@@ -640,6 +690,93 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
       }
       out(flags.json === true ? JSON.stringify(identity, null, 2) : renderIdentity(identity));
       return 0;
+    }
+    case "instances": {
+      // The peer registry (S4, docs/ops/instances.md). Every write is a §4.7
+      // protected write through the reconciler as the `user`, like compute.
+      const loadedInstances = loadEnv();
+      const instanceDir = str(flags, "instance") ?? loadedInstances.instanceDir;
+      if (!instanceDir) {
+        err("instances needs the instance repo: pass --instance <dir> or set METISTRY_INSTANCE_DIR (docs/ops/cli.md) — instances.yaml lives there");
+        return 2;
+      }
+      const verb = parseInstanceVerb(positional[0]);
+      if (!verb) {
+        err(`usage: metistry instances ${INSTANCE_VERBS.join(" | ")}   (metistry --help)`);
+        return 2;
+      }
+      const json = flags.json === true;
+      const instancesOpts: InstancesOptions = {
+        instanceDir,
+        env: process.env,
+        platform: io.platform ?? process.platform,
+        uid: io.uid ?? (typeof process.getuid === "function" ? process.getuid() : 0),
+        fetchFn: fetch,
+        ...(io.exec ? { exec: io.exec } : {}),
+        dryRun: flags["dry-run"] === true,
+        out,
+      };
+      try {
+        if (verb === "list") {
+          const r = await instancesList(instancesOpts);
+          out(json ? JSON.stringify(r, null, 2) : renderInstances(r));
+          return 0;
+        }
+        if (verb === "add") {
+          const origin = positional[1];
+          if (!origin) {
+            err("usage: metistry instances add <origin>   (e.g. https://metis.example.com — the verb asks it who it is)");
+            return 2;
+          }
+          const selfId = await readInstanceId(instanceDir);
+          const r = await instancesAdd({ ...instancesOpts, origin, ...(selfId ? { selfInstanceId: selfId } : {}) });
+          out(json ? JSON.stringify(r, null, 2) : `${r.action} ${r.entry?.name} (${r.entry?.instance_id}) at ${r.entry?.origin} — ${r.delivery?.detail}\n\n${renderInstances(r)}`);
+          return 0;
+        }
+        if (verb === "remove") {
+          const target = positional[1];
+          if (!target) {
+            err("usage: metistry instances remove <instance_id|name>");
+            return 2;
+          }
+          const r = await instancesRemove({ ...instancesOpts, target });
+          out(json ? JSON.stringify(r, null, 2) : `removed ${r.entry?.name} (${r.entry?.instance_id}) — ${r.delivery?.detail}\n\n${renderInstances(r)}`);
+          return 0;
+        }
+        const r = await instancesRefresh(instancesOpts);
+        out(json ? JSON.stringify(r, null, 2) : `${r.action}${r.delivery ? ` — ${r.delivery.detail}` : ""}\n\n${renderInstances(r)}`);
+        return 0;
+      } catch (e) {
+        err(`metistry instances ${verb}: ${e instanceof Error ? e.message : String(e)}`);
+        return 1;
+      }
+    }
+    case "runs": {
+      if (positional[0] !== "export") {
+        err("usage: metistry runs export [--since <cursor|timestamp>] [--until <timestamp>] [--component <name>] [--limit N] [--json-lines]");
+        return 2;
+      }
+      const loadedRuns = loadEnv();
+      const instanceId = loadedRuns.instanceDir ? await readInstanceId(loadedRuns.instanceDir) : undefined;
+      try {
+        // NDJSON on stdout so a pipe gets nothing else; the summary is stderr's.
+        const r = await runsExport({
+          write: (chunk) => process.stdout.write(chunk),
+          ...(str(flags, "since") ? { since: str(flags, "since") } : {}),
+          ...(str(flags, "until") ? { until: str(flags, "until") } : {}),
+          ...(str(flags, "component") ? { component: str(flags, "component") } : {}),
+          ...(str(flags, "limit") ? { limit: Number(str(flags, "limit")) } : {}),
+          ...(loadedRuns.instanceDir ? { instanceDir: loadedRuns.instanceDir } : {}),
+          ...(instanceId ? { instanceId } : {}),
+          ...(io.exec ? { exec: io.exec } : {}),
+          ...(io.platform ? { platform: io.platform } : {}),
+        });
+        err(renderRunsExport(r));
+        return 0;
+      } catch (e) {
+        err(`metistry runs export: ${e instanceof Error ? e.message : String(e)}`);
+        return 1;
+      }
     }
     case "console": {
       if (positional[0] !== "whoami") {

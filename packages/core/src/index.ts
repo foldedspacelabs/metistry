@@ -186,6 +186,27 @@ export {
   type TierMap,
   type ResolvedTier,
 } from "./tiers.js";
+export {
+  INSTANCES_FILENAME,
+  CAPABILITIES,
+  AGENT_NAME_RE,
+  INSTANCE_ID_RE,
+  QUALIFIED_AGENT_RE,
+  normalizeCapabilities,
+  qualifyAgentId,
+  qualifyIfPossible,
+  parseAgentId,
+  instanceEntrySchema,
+  instancesSchema,
+  emptyInstances,
+  validateInstances,
+  parseInstances,
+  findInstance,
+  type Capability,
+  type InstanceEntry,
+  type Instances,
+  type InstancesResult,
+} from "./instances.js";
 export { rollSession, type RollResult } from "./session-roll.js";
 export {
   REDACTED,

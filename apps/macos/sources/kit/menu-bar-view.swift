@@ -107,7 +107,10 @@ public struct MenuBarContent: View {
     private func componentMenu(_ component: ComponentControl) -> some View {
         let row = component.row
         let isConsole = component.name == Self.signInComponent
-        Menu("\(dotPrefix(row.status)) \(row.name)\(isConsole ? signInSuffix : "")") {
+        // What this component IS, beyond being up: today only the apple-fm
+        // bridge has a second sentence, and only once compute.yaml dials it.
+        let note = model.report?.bridgeNote(for: component.name)
+        Menu("\(dotPrefix(row.status)) \(row.name)\(note.map { " · \($0)" } ?? "")\(isConsole ? signInSuffix : "")") {
             // The probe or the remediation, as a disabled item: the reason the
             // row is the colour it is, without leaving the menu.
             Text(row.remediation ?? row.probe)
@@ -117,6 +120,9 @@ public struct MenuBarContent: View {
             // dots rather than one blended verdict.
             if isConsole {
                 Text(signIn.headline)
+            }
+            if let note {
+                Text(note)
             }
             if component.canControl {
                 Divider()

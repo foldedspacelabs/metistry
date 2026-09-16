@@ -20,6 +20,15 @@ export {
   type CrewToolGroup,
 } from "./manifest.js";
 export { checkResultSchema, runCheck, type CheckResult, type Checkable } from "./check.js";
+export {
+  checkStdioConformance,
+  isJsonLineFrame,
+  renderStdoutViolations,
+  stdoutViolations,
+  type StdioConformanceOptions,
+  type StdioConformanceResult,
+  type StdoutViolation,
+} from "./stdio-conformance.js";
 export { errorEnvelope, statusFor, type ErrorCode, type ErrorEnvelope } from "./errors.js";
 export { requireEnv, optionalEnv, intEnv } from "./config.js";
 export {

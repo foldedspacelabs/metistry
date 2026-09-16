@@ -21,7 +21,7 @@ describe("manifest", () => {
     if (parsed.manifest.type !== "bridge") return;
     expect(parsed.manifest.discovery).toBe("eager");
     expect(parsed.manifest.exposes.map((t) => t.name)).toEqual([...TOOL_NAMES]);
-    expect(TOOL_NAMES.length).toBeLessThanOrEqual(23); // over the PoC-17 tool-COUNT guidance (>20) since knowledge_list/knowledge_grep and tasks_close — the definition-token axis is what actually gates lazy; see "definition size" below
+    expect(TOOL_NAMES.length).toBeLessThanOrEqual(25); // over the PoC-17 tool-COUNT guidance (>20) since knowledge_list/knowledge_grep, tasks_close and the two room tools — the definition-token axis is what actually gates lazy; see "definition size" below
     expect(parsed.manifest.exposes.map((t) => t.name).filter((n) => Object.hasOwn(TOOL_ALIASES, n))).toEqual([]); // deprecated spellings never reach the listed surface
     expect(parsed.manifest.exposes.every((t) => !t.destructive)).toBe(true); // nothing here mutates the user's world irreversibly: rows, not calendars
   });

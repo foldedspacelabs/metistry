@@ -821,6 +821,9 @@ cache_ttl: 0
       ["artifacts_comment", { artifact: artId, version: verId, body: "b" }],
       ["artifacts_resolve", { id: cmtId }],
       ["artifacts_review", { artifact: artId, version: verId, thread_ids: [cmtId], to_agent: BOB }],
+      // the room tools ride the same service, so an unwired deployment refuses them the same way
+      ["tasks_comment", { work_id: 1, body: "b" }],
+      ["tasks_thread", { work_id: 1 }],
     ] as const) {
       expect((await call(ar, name, args)).body.error.code, name).toBe("not_available");
     }

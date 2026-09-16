@@ -68,6 +68,10 @@ date). The stored values stay `autonomous` / `review`; the labels are the
 vocabulary (`docs/product/glossary.md`). Agent narrowing is edited in
 the agent's grants form and shown on its registry row.
 
+The **Board** tab is the per-card view of the same rows — one Kanban column
+per derived state, filtered by project, with the cross-project counts a
+project boundary never gets in its way (`docs/ops/board.md`).
+
 ## Verifying it
 
 ```sh

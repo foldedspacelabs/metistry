@@ -29,12 +29,14 @@ bootstrap of 2026-09-06:
   `Metistry <metistry@localhost>` (the same author the reconciler stamps)
 - `Knowledge/` copied from `seed/Knowledge` (incl. `now.md`)
 - `identity.yaml` and `rules.yaml` from seed
-- `inbox/` (gitignored) and the tracked, empty config dirs `queries/`
-  `agents/` `routines/` `extensions/` `instance-migrations/` — each with a
-  `.gitkeep` so they survive a clone. They start empty on purpose: the D4
-  overlay reads the product's seeded defaults until a same-named file
-  appears here.
-- `README.md`, `.gitignore` (`inbox/`, `.obsidian/workspace*`)
+- `Knowledge/Inbox/` — where captures land, inside the vault so Obsidian
+  sees them and git carries them (docs/ops/inbox.md)
+- the tracked, empty config dirs `queries/` `agents/` `routines/`
+  `extensions/` `instance-migrations/` — each with a `.gitkeep` so they
+  survive a clone. They start empty on purpose: the D4 overlay reads the
+  product's seeded defaults until a same-named file appears here.
+- `README.md`, `.gitignore` (`state/`, `.obsidian/workspace*`,
+  `Knowledge/Inbox/.large/`)
 - `metistry.lock` pinning the product version (this package's version) and
   the creation date
 
@@ -101,6 +103,20 @@ queue if one is running, and pushes the current branch once.
 
 No token is printed, logged, written to `.env`, or put in the remote URL.
 Every subprocess is an argument array — there is no shell.
+
+## `metistry migrate-inbox [--instance <dir>] [--dry-run]`
+
+Moves an instance created before 2026-09-16 onto the vault inbox
+(`docs/ops/inbox.md`): `inbox/*` — or a second instance's lowercase
+`Knowledge/inbox/`, renamed through a temp name because macOS is
+case-insensitive — into `Knowledge/Inbox/`, `git mv` for what git tracks and
+a plain move for what it does not; `inbox/` out of `.gitignore` and
+`Knowledge/Inbox/.large/` in; `inbox.path` rows rewritten to
+`Knowledge/Inbox/<file>`; one commit.
+
+Idempotent (a second run reports "already on the vault inbox" and changes
+nothing) and it restarts nothing — it prints the `metistry up` line and
+stops. `--dry-run` prints the same plan and runs none of it.
 
 ## `metistry secrets sync|mint|list|purge`
 

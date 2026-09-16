@@ -1,14 +1,18 @@
-// The real leg: real Postgres + pgvector, real Ollama, real
-// nomic-embed-text. Nothing here is stubbed, which is the point — the stub
+// The real leg: real Postgres + pgvector, a real local model server, a real
+// embedding model. Nothing here is stubbed, which is the point — the stub
 // suite proves the bookkeeping, this one proves the thing actually
-// retrieves. Skips cleanly (not fails) when either is absent, so a laptop
-// without `ollama serve` still runs the suite.
+// retrieves. Skips cleanly (not fails) when either is absent, so a Mac with
+// no local server still runs the suite.
+//
+// The server is whatever `METISTRY_LOCAL_MODEL_URL` names and, failing that,
+// a default Ollama — the probe is `/v1/embeddings` (C18), so LM Studio and
+// the bundled llama-server serve this suite equally well.
 import { readFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
-import { EMBED_DEFAULT_DIM, EMBED_DEFAULT_MODEL, EMBED_DEFAULT_URL, EmbedClient } from "@foldedspacelabs/metistry-core";
+import { EMBED_DEFAULT_DIM, EMBED_DEFAULT_MODEL, EmbedClient, resolveLocalModelUrl } from "@foldedspacelabs/metistry-core";
 import { Committer } from "../src/committer.js";
 import { Vault } from "../src/vault.js";
 import { Embeddings } from "../src/embeddings.js";
@@ -23,14 +27,14 @@ try {
   }
 } catch {}
 
-const OLLAMA = process.env.METISTRY_OLLAMA_URL ?? EMBED_DEFAULT_URL;
+const LOCAL = resolveLocalModelUrl(process.env).url;
 const MODEL = process.env.METISTRY_EMBED_MODEL ?? EMBED_DEFAULT_MODEL;
 const hasDb = !!process.env.METISTRY_DB_PASSWORD;
 
-/** Is the model actually pulled? A running Ollama without it is still "absent". */
-const ollamaReady = await (async () => {
+/** Is the model actually loaded? A running server without it is still "absent". */
+const embedderReady = await (async () => {
   try {
-    const res = await fetch(`${OLLAMA}/api/embed`, {
+    const res = await fetch(`${LOCAL}/embeddings`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ model: MODEL, input: ["probe"] }),
@@ -41,7 +45,7 @@ const ollamaReady = await (async () => {
     return false;
   }
 })();
-if (!ollamaReady) console.warn(`ollama: ${OLLAMA} has no ${MODEL} — skipping the real-embedder suite (\`ollama serve\` + \`ollama pull ${MODEL}\`)`);
+if (!embedderReady) console.warn(`local model server: ${LOCAL} does not serve ${MODEL} — skipping the real-embedder suite (\`metistry compute models install <provider>/${MODEL}\`)`);
 
 const NOTES: Record<string, string> = {
   "Knowledge/Areas/WaterHeater.md": [
@@ -77,7 +81,7 @@ const NOTES: Record<string, string> = {
   "Knowledge/Areas/Unsettled.md": ["---", "title: Unsettled", "status: draft", "---", "", "Tapering before a race is something I should write about properly one day."].join("\n"),
 };
 
-describe.skipIf(!hasDb || !ollamaReady)("reconciler embeddings (real db, real Ollama)", () => {
+describe.skipIf(!hasDb || !embedderReady)("reconciler embeddings (real db, a real local model server)", () => {
   let pool: pg.Pool;
   let repo: TempRepo;
   let deps: Parameters<typeof searchVault>[0];
@@ -103,7 +107,7 @@ describe.skipIf(!hasDb || !ollamaReady)("reconciler embeddings (real db, real Ol
     for (const [path, body] of Object.entries(NOTES)) await writeFile(join(repo.root, path), `${body}\n`);
     const committer = new Committer(repo.git, { authorPrefix: "Metistry", authorEmail: "metistry@test" });
     const vault = new Vault(repo.root, repo.git, committer, { maxBytes: 200_000 });
-    const client = new EmbedClient({ url: OLLAMA, model: MODEL, dim: EMBED_DEFAULT_DIM, batch: 16 });
+    const client = new EmbedClient({ url: LOCAL, model: MODEL, dim: EMBED_DEFAULT_DIM, batch: 16 });
     embeddings = new Embeddings(pool, client, async (p) => {
       const r = await vault.read(p);
       return r.ok ? r.value.content : null;

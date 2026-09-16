@@ -1,0 +1,34 @@
+{
+  "name": "@metistry-apps/eval",
+  "private": true,
+  "version": "0.7.1",
+  "description": "The bake-off harness (PoC-18): fixture format, runner, scorers and report. Private — never published.",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "@foldedspacelabs/metistry-mcp-brain": "workspace:*",
+    "@foldedspacelabs/metistry-tasks": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "typescript": "^7.0.2",
+    "vitest": "^4.0.18"
+  },
+  "bin": {
+    "metistry-eval": "./dist/main.js"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  }
+}

@@ -3,7 +3,19 @@
 // only process that holds it.
 
 import pg from "pg";
-import { EMBED_DEFAULT_BATCH, EMBED_DEFAULT_DIM, EMBED_DEFAULT_MODEL, EMBED_DEFAULT_URL, EmbedClient, intEnv, optionalEnv, requireEnv } from "@foldedspacelabs/metistry-core";
+import {
+  COMPUTE_FILES_DEFAULT,
+  EMBED_DEFAULT_BATCH,
+  EMBED_DEFAULT_DIM,
+  EMBED_DEFAULT_MODEL,
+  EmbedClient,
+  firstOnMachineBaseUrl,
+  intEnv,
+  loadCompute,
+  optionalEnv,
+  requireEnv,
+  resolveLocalModelUrl,
+} from "@foldedspacelabs/metistry-core";
 import { Git } from "./git.js";
 import { Committer } from "./committer.js";
 import { Vault } from "./vault.js";
@@ -40,9 +52,24 @@ const committer = new Committer(git, {
 const vault = new Vault(instanceDir, git, committer, { maxBytes: intEnv("METISTRY_VAULT_MAX_BYTES", 2 * 1024 * 1024) });
 
 // Phase 6: embeddings are on by default and cost nothing when the embedder
-// is absent — the cycle degrades, the index does not (§6 decision 8).
+// is absent — the cycle degrades, the index does not (§6 decision 8). The
+// wire is the local server's OpenAI-compatible /v1/embeddings (C18).
+//
+// compute.yaml is read here for ONE thing — the default URL when no variable
+// names one — so a file that will not parse degrades to the default rather
+// than stopping the reconciler. The console fails loudly on the same file;
+// this process has no business being the second one to.
+const computeBaseUrl = await loadCompute(optionalEnv("METISTRY_COMPUTE_FILES", COMPUTE_FILES_DEFAULT))
+  .then((c) => firstOnMachineBaseUrl(c.compute))
+  .catch((err: unknown) => {
+    console.warn(`compute.yaml is not readable for the embedder's default URL (${err instanceof Error ? err.message : String(err)})`);
+    return undefined;
+  });
+const localModel = resolveLocalModelUrl(process.env, computeBaseUrl);
+if (localModel.warning) console.warn(localModel.warning);
+console.log(`embeddings: ${localModel.url}/embeddings (from ${localModel.from}), model ${optionalEnv("METISTRY_EMBED_MODEL", EMBED_DEFAULT_MODEL)}`);
 const embedClient = new EmbedClient({
-  url: optionalEnv("METISTRY_OLLAMA_URL", EMBED_DEFAULT_URL),
+  url: localModel.url,
   model: optionalEnv("METISTRY_EMBED_MODEL", EMBED_DEFAULT_MODEL),
   dim: intEnv("METISTRY_EMBED_DIM", EMBED_DEFAULT_DIM),
   batch: intEnv("METISTRY_EMBED_BATCH", EMBED_DEFAULT_BATCH),
@@ -84,7 +111,7 @@ setInterval(() => {
 const reconcile = (trigger: string) =>
   indexer.reconcile(trigger).then(
     (s) => {
-      if (s.added || s.changed || s.renamed || s.removed || s.conflicts_new || s.external_edits) console.log(`reconciler: ${JSON.stringify(s)}`);
+      if (s.added || s.changed || s.renamed || s.removed || s.conflicts_new || s.external_edits || s.inbox.added || s.inbox.changed || s.inbox.archived) console.log(`reconciler: ${JSON.stringify(s)}`);
     },
     (err) => console.error("reconciler: reconcile failed:", err instanceof Error ? err.message : err),
   );

@@ -39,5 +39,5 @@ credential class, no second policy language.
   looks complete.
 
 New: `docs/ops/instances.md`; `docs/ops/console-api.md` and
-`docs/ops/cli.md` grew the sections. Migration `0015_agent_enrollment.sql`
+`docs/ops/cli.md` grew the sections. Migration `0017_agent_enrollment.sql`
 is additive and defaults to today's behaviour.

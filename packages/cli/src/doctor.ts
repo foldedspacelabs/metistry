@@ -8,8 +8,9 @@
 //
 // Beyond the manifests: the db (SELECT 1 + applied migrations vs. files on
 // disk — the invariant-3 exception the watchdog also holds), the launchd
-// jobs ops/launchd ships (macOS), and the compose containers. Every row is
-// a core CheckResult plus a `kind`; exit 0 when nothing is `failed`.
+// jobs ops/launchd ships (macOS), the compose containers, and one row per
+// local model server found on this Mac. Every row is a core CheckResult plus
+// a `kind`; exit 0 when nothing is `failed`.
 
 import { readdir, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
@@ -37,7 +38,9 @@ import {
   type ChildStatus,
   type Manifest,
 } from "@foldedspacelabs/metistry-core";
+import { loadCompute, type Compute } from "@foldedspacelabs/metistry-core";
 import { ENGINE_CREDENTIAL_VAR, engineCredentialPresent, loadDeployment } from "./deployment.js";
+import { localServerRows } from "./local-models.js";
 import { realExec, type Exec } from "./exec.js";
 import { labelFor, loadPlistTemplates, logPathFor, SUPERVISED_SERVICES } from "./launchd.js";
 import { readSupervisorConfig, supervisorConfigPath, controlRequest, SUPERVISOR_SERVICE } from "./supervisor.js";
@@ -725,6 +728,36 @@ export async function supervisorRows(stateRoot: string): Promise<DoctorRow[]> {
   return rows;
 }
 
+// ---- local model servers ------------------------------------------------------------
+
+/**
+ * `compute.yaml` through the D4 overlay, for the local-server rows ONLY —
+ * which is why a file that does not parse degrades here instead of throwing.
+ * Doctor's job is to report, and "compute.yaml is broken" is already the
+ * console's loud startup failure and a `runs` warning row; a doctor that
+ * could not run at all because of it would be the least useful possible
+ * response to that.
+ */
+export async function computeForDoctor(env: NodeJS.ProcessEnv, productDir: string): Promise<Compute | undefined> {
+  const instanceDir = env.METISTRY_INSTANCE_DIR?.replace(/\/+$/, "") || productDir;
+  const paths = env.METISTRY_COMPUTE_FILES ?? `${join(productDir, "seed", "compute.yaml")}:${join(instanceDir, "compute.yaml")}`;
+  try {
+    return (await loadCompute(paths)).compute;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * One row per local model server — `local:lmstudio`, `local:ollama`,
+ * `local:llamaserver` — whether or not `compute.yaml` names a provider for
+ * it. Never `failed`: a Mac with no local server is a supported install, so
+ * this section can only report ok or absent (local-models.ts).
+ */
+export async function localModelRows(env: NodeJS.ProcessEnv, productDir: string, fetchFn: typeof fetch, timeoutMs: number): Promise<DoctorRow[]> {
+  return localServerRows({ compute: await computeForDoctor(env, productDir), fetchFn, timeoutMs: Math.min(timeoutMs, 2_000) });
+}
+
 // ---- the whole report -------------------------------------------------------------
 
 export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
@@ -776,6 +809,9 @@ export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
   // no container runtime is consulted when no service runs in one: a
   // launchd install must not report "docker not found" as a finding
   if (usesCompose(loaded.deployment)) rows.push(...(await composeRows(deps.productDir, exec)));
+  // last: the local model servers. Absent is the common case and never a
+  // failure, so these rows can only add information, never a red run.
+  rows.push(...(await localModelRows(env, deps.productDir, fetchFn, timeoutMs)));
 
   return { as_of: new Date().toISOString(), product_dir: deps.productDir, shape, ok: !rows.some((r) => r.status === "failed"), rows };
 }

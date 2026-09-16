@@ -1,4 +1,4 @@
--- 0015_agent_enrollment — approve-before-enroll for REMOTE agents (S2,
+-- 0017_agent_enrollment — approve-before-enroll for REMOTE agents (S2,
 -- docs/research/2026-09-13-google-sam-review.md ADOPT 2).
 --
 -- SAM's `join` leaves an enrollment PENDING until an administrator

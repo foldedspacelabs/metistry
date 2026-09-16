@@ -13,7 +13,9 @@ import type { DeploymentShape } from "@foldedspacelabs/metistry-core";
 import {
   assign,
   computeReport,
+  modelsInstall,
   modelsList,
+  modelsLoad,
   parseAssignmentTarget,
   parseBudgetAction,
   parseBudgetTarget,
@@ -23,6 +25,7 @@ import {
   providersAdd,
   providersRemove,
   renderComputeReport,
+  renderModelsInstall,
   renderModelsList,
   renderProviderTest,
   setBudget,
@@ -38,6 +41,7 @@ import { connect, connectList, CONNECT_TOOLS, parseTool, renderConnect, renderCo
 import { renderWhoami, whoami } from "./console-client.js";
 import { importSessions } from "./import-sessions.js";
 import { init } from "./init.js";
+import { migrateInbox } from "./migrate-inbox.js";
 import { migrateShape } from "./migrate-shape.js";
 import { ensureInstanceId, instanceEnvFile, readInstanceId } from "./instance.js";
 import { readIdentity, renderIdentity } from "./identity.js";
@@ -119,6 +123,15 @@ export function usd(flags: ParsedArgs["flags"], name: string): number | undefine
   if (v === undefined || v === true) return undefined;
   const n = Number(v);
   if (!Number.isFinite(n) || n <= 0) throw new Error(`--${name} takes a positive number of US dollars, not ${JSON.stringify(v)}`);
+  return n;
+}
+
+/** `--ttl 3600` — a positive whole number of seconds, never silently 0 or NaN. */
+export function seconds(flags: ParsedArgs["flags"], name: string): number | undefined {
+  const v = flags[name];
+  if (v === undefined || v === true) return undefined;
+  const n = Number(v);
+  if (!Number.isInteger(n) || n <= 0) throw new Error(`--${name} takes a positive whole number of seconds, not ${JSON.stringify(v)}`);
   return n;
 }
 
@@ -368,6 +381,8 @@ const USAGE = `metistry — Metistry command line
   metistry compute providers remove <name>
   metistry compute providers test <name> [--complete]
   metistry compute models list [--provider <name>] [--json]
+  metistry compute models install <provider/model> [--json]
+  metistry compute models load|unload <provider/model> [--ttl <seconds>] [--json]
   metistry compute assign <default|<tier>|crew:<name>> <provider/model> [--effort low|medium|high]
   metistry compute budget <instance|provider:<name>> [--daily <usd>] [--monthly <usd>]
                           --action allow|stop|critical_only
@@ -391,6 +406,16 @@ const USAGE = `metistry — Metistry command line
       like metistry.lock/identity.yaml — preview without --yes, applied with
       it. Refuses while services still run under the current shape (the data
       does not move between shapes on its own); --force writes anyway.
+
+  metistry migrate-inbox [--instance <dir>] [--dry-run]
+      Move an existing instance's inbox into the vault: inbox/* (or a second
+      instance's lowercase Knowledge/inbox/, renamed through a temp name
+      because macOS is case-insensitive) into Knowledge/Inbox/, git mv for
+      what git tracks and a plain move for what it does not; drop inbox/
+      from .gitignore and add Knowledge/Inbox/.large/; rewrite inbox.path
+      rows to Knowledge/Inbox/<file>; commit it. Idempotent — a second run
+      says "already on the vault inbox" and changes nothing. Restarts
+      nothing: it prints the metistry up line and stops. docs/ops/inbox.md.
 
   metistry migrate-shape <launchd|compose> [--dry-run] [--namespace]
                          [--product-dir <checkout>] [--instance <dir>] [--env-file <path>]
@@ -879,6 +904,21 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
       });
       return r.code;
     }
+    case "migrate-inbox": {
+      const loadedMi = loadEnv();
+      const dir = loadedMi.instanceDir ?? str(flags, "instance");
+      if (!dir) {
+        err("usage: metistry migrate-inbox [--instance <dir>] [--dry-run]  (or set METISTRY_INSTANCE_DIR)");
+        return 2;
+      }
+      try {
+        const r = await migrateInbox({ instanceDir: dir, out, exec: io.exec, dryRun: flags["dry-run"] === true });
+        return r.code;
+      } catch (e) {
+        err(`metistry migrate-inbox: ${e instanceof Error ? e.message : String(e)}`);
+        return 1;
+      }
+    }
     case "migrate-shape": {
       if (!productDir) {
         err("migrate-shape needs a Metistry checkout: pass --product-dir or set METISTRY_PRODUCT_DIR");
@@ -1076,13 +1116,39 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
             }
           }
           case "models": {
-            if (positional[1] !== undefined && positional[1] !== "list") {
-              err("usage: metistry compute models list [--provider <name>]");
-              return 2;
+            switch (positional[1]) {
+              case undefined:
+              case "list": {
+                const r = await modelsList({ ...computeOpts, provider: str(flags, "provider") });
+                out(json ? JSON.stringify(r, null, 2) : renderModelsList(r));
+                return r.providers.every((p) => p.ok) ? 0 : 1;
+              }
+              case "install": {
+                const ref = positional[2];
+                if (!ref) {
+                  err("usage: metistry compute models install <provider>/<model>   (llamaserver: <provider>/<hf-owner>/<hf-repo>/<file>.gguf)");
+                  return 2;
+                }
+                const r = await modelsInstall({ ...computeOpts, ref });
+                out(json ? JSON.stringify(r, null, 2) : renderModelsInstall(r));
+                return r.ok ? 0 : 1;
+              }
+              case "load":
+              case "unload": {
+                const ref = positional[2];
+                if (!ref) {
+                  err(`usage: metistry compute models ${positional[1]} <provider>/<model> [--ttl <seconds>]`);
+                  return 2;
+                }
+                const ttl = seconds(flags, "ttl");
+                const r = await modelsLoad({ ...computeOpts, ref, unload: positional[1] === "unload", ttlSeconds: ttl });
+                if (json) out(JSON.stringify(r, null, 2));
+                return r.ok ? 0 : 1;
+              }
+              default:
+                err("usage: metistry compute models list [--provider <name>] | install <provider/model> | load|unload <provider/model>");
+                return 2;
             }
-            const r = await modelsList({ ...computeOpts, provider: str(flags, "provider") });
-            out(json ? JSON.stringify(r, null, 2) : renderModelsList(r));
-            return r.providers.every((p) => p.ok) ? 0 : 1;
           }
           case "assign": {
             const target = parseAssignmentTarget(positional[1]);

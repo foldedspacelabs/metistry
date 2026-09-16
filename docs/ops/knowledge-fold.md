@@ -39,7 +39,7 @@ Since the anchor:
 | `proposals` | decided `allow` or `accept_with_changes`, kind `knowledge`, `report`, `session`, `review` |
 | `work` | rows that reached `status = 'closed'` |
 | `artifact_versions` | versions published (with their artifact's project/slug) |
-| `inbox` | captures of kind `session` (`metistry import-sessions`) |
+| `inbox` | captures of kind `session` (`metistry import-sessions`); captures live at `Knowledge/Inbox/` (`docs/ops/inbox.md`) |
 
 Each becomes a **handle** — an id, a title, a one-line summary, sometimes a
 path. Never content: the assistant fetches what it needs with `queries_run`,
@@ -94,6 +94,13 @@ that, at the vault.
 A refusal is not an error the fold retries: the assistant `report`s the change
 it wanted to make and moves on, so it surfaces in your queue.
 
+Behind ownership sits compare-and-swap, which is what actually protects an
+edit *you* made: `knowledge_write` passes `expected_sha256` on every call
+and an omitted one means create-only, so a page that changed under the fold
+— you corrected it in Obsidian while the fold was thinking — is a
+`conflict`, and the fold re-reads and redoes the edit instead of replacing
+your version (`docs/ops/inbox.md`).
+
 ## Seeing what it did
 
 - **The morning brief**, ⚙️ section: `• folded 6 item(s) into the vault last
@@ -127,3 +134,10 @@ and the next enabled fold picks up from the last anchor.
 
 A model in the routine (invariant 4), a fold that reads the whole vault to
 "reorganise" it, per-item turns, and any write outside the reserved paths.
+
+Also: **moving a capture out of `Knowledge/Inbox/` to its home.** The fold
+writes pages; it never files the inbox. `delete` and `rename` are not
+exposed to the assistant at all, so a capture stays where it landed until
+your hand moves it. When that lands it will be bridge write + delete with
+compare-and-swap on both sides, so an edit made in Obsidian mid-fold wins
+and the fold reports the conflict.

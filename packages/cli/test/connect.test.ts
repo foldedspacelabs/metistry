@@ -58,6 +58,9 @@ interface Row {
   projects: string[];
   revoked: boolean;
   last_seen_at: string | null;
+  /** S2: enrolled --remote, and whether the owner has let it in yet */
+  remote?: boolean;
+  pending?: boolean;
 }
 
 /** The console's agent registry, in memory, behind the same routes and codes apps/console/src/server.ts serves. */
@@ -81,8 +84,9 @@ function fakeConsole(seed: Partial<Row>[] = []) {
     if (method === "POST" && url.pathname === "/api/agents") {
       const id = String((body as { id?: string }).id);
       if (rows.has(id)) return json(409, { error: { code: "conflict", message: "agent id already registered" } });
-      rows.set(id, { id, display_name: String((body as { display_name?: string }).display_name), kind: "external", grants: { tier: "none", areas: [] }, projects: [], revoked: false, last_seen_at: null });
-      return json(201, { id, token: `minted-${++minted}` });
+      const remote = (body as { remote?: boolean }).remote === true;
+      rows.set(id, { id, display_name: String((body as { display_name?: string }).display_name), kind: "external", grants: { tier: "none", areas: [] }, projects: [], revoked: false, last_seen_at: null, remote, pending: remote });
+      return json(201, { id, token: `minted-${++minted}`, pending: remote, ...(remote ? { proposal_id: 7 } : {}) });
     }
     const op = /^\/api\/agents\/([a-z][a-z0-9-]*)\/(rotate|grants|projects)$/.exec(url.pathname);
     if (op) {
@@ -197,6 +201,47 @@ describe("connect: the agent row", () => {
     const kc = fakeSecurity();
     const c = fakeConsole([{ id: "devin", revoked: true }]);
     await expect(connect({ tool: "devin", ...base(home, instanceDir, kc.exec, c.fetchFn) })).rejects.toThrow(/revoked/);
+  });
+
+  // S2: approve-before-enroll (docs/research/2026-09-13-google-sam-review.md ADOPT 2)
+  it("--remote enrols PENDING: the flag reaches the console, and the operator is told the bearer authenticates nothing yet", async () => {
+    const { home, instanceDir } = await scratch();
+    const kc = fakeSecurity();
+    const c = fakeConsole();
+    const r = await connect({ tool: "devin", remote: true, ...base(home, instanceDir, kc.exec, c.fetchFn) });
+
+    expect(c.calls[1]!.body).toEqual({ id: "devin", display_name: "Devin", kind: "external", remote: true });
+    expect(r.pending).toBe(true);
+    const text = renderConnect(r);
+    expect(text).toMatch(/authenticates NOTHING until you let it in/);
+    expect(text).toContain("/api/agents/devin/approve");
+  });
+
+  it("without --remote nothing changes: a loopback tool is immediate and the body carries no flag", async () => {
+    const { home, instanceDir } = await scratch();
+    const kc = fakeSecurity();
+    const c = fakeConsole();
+    const r = await connect({ tool: "cursor", ...base(home, instanceDir, kc.exec, c.fetchFn) });
+    expect(c.calls[1]!.body).toEqual({ id: "cursor", display_name: "Cursor", kind: "external" });
+    expect(r.pending).toBe(false);
+    expect(renderConnect(r)).not.toMatch(/authenticates NOTHING/);
+  });
+
+  it("--remote is decided at enrolment: it is refused on a row that already exists, rather than widening it", async () => {
+    const { home, instanceDir } = await scratch();
+    const kc = fakeSecurity();
+    const c = fakeConsole([{ id: "cursor", display_name: "Cursor", remote: false }]);
+    await expect(connect({ tool: "cursor", remote: true, ...base(home, instanceDir, kc.exec, c.fetchFn) })).rejects.toThrow(/decided at enrolment, not after it/);
+    expect(c.calls.map((x) => x.method)).toEqual(["GET"]); // nothing was minted or changed
+  });
+
+  it("--list shows a pending row as pending, not as registered", async () => {
+    const { home, instanceDir } = await scratch();
+    const kc = fakeSecurity();
+    const c = fakeConsole([{ id: "devin", display_name: "Devin", remote: true, pending: true }]);
+    const r = await connectList(base(home, instanceDir, kc.exec, c.fetchFn));
+    expect(r.tools.find((t) => t.tool === "devin")?.agent).toBe("pending");
+    expect(renderConnectList(r)).toContain("awaiting your approval");
   });
 
   it("mints nothing on a host with no Keychain to put the bearer in", async () => {

@@ -32,7 +32,9 @@ import { parseCookies, readBody, readJson, sendError, sendJson, sessionCookie } 
 import * as wa from "./webauthn.js";
 import { checkLocalOwner, type LocalOwnerConfig } from "./local-owner.js";
 import { serveStatic } from "./static.js";
-import type { PublicIdentity } from "./identity.js";
+import { capabilitiesOf, type PublicIdentity } from "./identity.js";
+import { loadInstances } from "./instances.js";
+import { NDJSON_CONTENT_TYPE, RUNS_EXPORT_QUERY, parseExportParams, streamRunsExport } from "./runs-export.js";
 import { route as routeMessage, type Rules } from "./router.js";
 import { sendToSession, storeSubscription, type PushConfig } from "./push.js";
 import { dispatch, type TargetRegistry } from "./dispatch.js";
@@ -80,6 +82,13 @@ export interface ConsoleConfig {
   identity?: PublicIdentity | undefined;
   /** What `GET /api/identity` reports as `version` — the console package's; absent = null. */
   version?: string | undefined;
+  /**
+   * Where `instances.yaml` is, for `GET /api/instances` (S4,
+   * docs/ops/instances.md): the same colon-separated, last-existing-wins
+   * overlay identity takes. Absent = the peer registry is not configured at
+   * all and the route answers 503 (degrades: absent).
+   */
+  instancesFiles?: string | undefined;
 }
 
 // ----- since-cursors (docs/ops/console-api.md) -----
@@ -132,7 +141,7 @@ function isUser(auth: Auth): boolean {
 
 // One shape for every per-agent verb so the management gate and the handler
 // cannot drift apart. Ids are slugs; anything else falls through to 404.
-const AGENT_ROUTE = /^(PUT|POST) \/api\/agents\/([a-z][a-z0-9-]{0,39})\/(grants|projects|autonomy|revoke|rotate)$/;
+const AGENT_ROUTE = /^(PUT|POST) \/api\/agents\/([a-z][a-z0-9-]{0,39})\/(grants|projects|autonomy|revoke|rotate|approve)$/;
 // Projects (§4.19 rollup, §4.21 controls): the kill switch, budget, caps. Session only — this is the user's hand.
 const PROJECT_ROUTE = /^PUT \/api\/projects\/([a-z][a-z0-9-]{0,39})$/;
 // Dispatch a work row to a compute target (§4.18). Body: { target, brief, sources? }.
@@ -219,9 +228,23 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     // name from it and recognises an origin it already has by instance_id
     // (research 2026-09-11). Public on purpose and nothing more than the
     // login page already shows — no origin, no counts, no state.
+    //
+    // `capabilities` (S1) is coarse tool-GROUP names derived from this
+    // console's own wiring (identity.ts capabilitiesOf) — never tool names,
+    // never counts. The full `tools/list` on /mcp stays token-gated.
     if (key === "GET /api/identity") {
       if (!cfg.identity) return sendError(res, "not_available", "no identity is configured in this deployment — METISTRY_IDENTITY_FILES names the files to read (default seed/identity.yaml plus the instance's own)");
-      return sendJson(res, 200, { ...cfg.identity, version: cfg.version ?? null, as_of: new Date().toISOString() });
+      return sendJson(res, 200, {
+        ...cfg.identity,
+        capabilities: capabilitiesOf({
+          hasKnowledge: cfg.readKnowledge !== undefined || cfg.listKnowledge !== undefined,
+          hasArtifacts: artifacts !== undefined,
+          queryCount: queries.names().length,
+          targetCount: cfg.targets ? cfg.targets.names().length : 0,
+        }),
+        version: cfg.version ?? null,
+        as_of: new Date().toISOString(),
+      });
     }
     if (key === "GET /health") {
       try {
@@ -573,11 +596,61 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         AGENT_ROUTE.test(key) ||
         key === "GET /api/projects" ||
         PROJECT_ROUTE.test(key) ||
+        key === "GET /api/runs/export" ||
+        key === "GET /api/instances" ||
         isArtifactRoute(url.pathname)
       ) {
         return sendError(res, "forbidden");
       }
       return sendError(res, "not_found");
+    }
+
+    // ----- the peer registry (S4): instances.yaml, as the app and the phone read it -----
+    // The file is the instance repo's and a §4.7 protected path — `metistry
+    // instances` writes it through the reconciler as the user. This is the
+    // read side only, and it degrades absent exactly as identity does.
+    if (key === "GET /api/instances") {
+      if (!cfg.instancesFiles) return sendError(res, "not_available");
+      const r = await loadInstances(cfg.instancesFiles);
+      if (!r.ok) {
+        await audit("instances", "read", false, { errors: r.errors.slice(0, 10) });
+        return sendJson(res, statusFor("invalid_request"), errorEnvelope("invalid_request", `instances.yaml does not validate: ${r.errors.join("; ")}`));
+      }
+      return sendJson(res, 200, { instances: r.value.instances, as_of: new Date().toISOString() });
+    }
+
+    // ----- the runs audit export (S5): NDJSON, streamed, through the named query -----
+    if (key === "GET /api/runs/export") {
+      const parsed = parseExportParams(url.searchParams);
+      if (!parsed.ok) return sendJson(res, statusFor("invalid_request"), errorEnvelope("invalid_request", `${parsed.field} is not in the form this server mints`));
+      // The named query is the read path (invariant 3), so its ABSENCE is a
+      // refusal with a status, not a stream that dies after the headers.
+      if (!queries.names().includes(RUNS_EXPORT_QUERY)) {
+        return sendJson(res, statusFor("not_available"), errorEnvelope("not_available", `the named query ${RUNS_EXPORT_QUERY} is not loaded (seed/queries/${RUNS_EXPORT_QUERY}.yaml, METISTRY_QUERIES_DIRS)`));
+      }
+      const runId = await startRun(db, {
+        component: "console",
+        kind: "export",
+        tool: "runs",
+        meta: { since: parsed.params.since_ts || null, until: parsed.params.until || null, component: parsed.params.component || null },
+      });
+      res.writeHead(200, { "content-type": NDJSON_CONTENT_TYPE, "cache-control": "no-store" });
+      try {
+        const r = await streamRunsExport(queries, res, {
+          params: parsed.params,
+          limit: parsed.limit,
+          ...(cfg.identity ? { instanceId: cfg.identity.instance_id } : {}),
+        });
+        await finishRun(db, runId, { ok: true, meta: { lines: r.lines, cursor: r.cursor } });
+        res.end();
+        return;
+      } catch (err) {
+        await finishRun(db, runId, { ok: false, error: err instanceof Error ? err.message : String(err) });
+        // headers are gone; an aborted chunked body is the only honest
+        // "this is not the whole thing" left, and the CLI reports it
+        res.destroy();
+        return;
+      }
     }
 
     // ----- projects (§4.19 panel, §4.21 controls; owner session only) -----
@@ -665,13 +738,28 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         }
       }
 
+      // An enrolment request (S2) answered from the queue does the same
+      // thing POST /api/agents/:id/approve does — one behaviour, reached
+      // two ways, so answering on the phone and answering in the registry
+      // pane cannot mean different things. `deny` revokes: a token nobody
+      // let in has no reason to keep existing, and revocation is the
+      // permanent verb the registry already has.
+      let enrolled: { agent: string; approved: boolean } | undefined;
+      const enrollAgent = row.kind === "decision" ? agents.enrollTarget(row.payload) : undefined;
+      if (enrollAgent !== undefined && (body.decision === "approve" || body.decision === "deny")) {
+        const approved = body.decision === "approve";
+        const ok = approved ? await agents.approveAgent(db, enrollAgent) : await agents.revokeAgent(db, enrollAgent);
+        await audit("agent_admin", approved ? "approve" : "revoke", ok, { agent: enrollAgent, op: approved ? "approve" : "revoke", via: "triage", proposal: row.id });
+        enrolled = { agent: enrollAgent, approved };
+      }
+
       const { rows } = await db.query(
         `UPDATE proposals SET decision = $2, feedback = $3, decided_at = now()
          WHERE id = $1 AND decision = 'pending' RETURNING id`,
         [triage[1], body.decision, body.feedback ?? null],
       );
       await audit("triage", body.decision!, rows.length === 1, { proposal: triage[1], kind: row.kind, ...(applied ? { overlay: applied.path } : {}) });
-      if (rows.length === 1) return sendJson(res, 200, { ok: true, ...(applied ? { applied } : {}) });
+      if (rows.length === 1) return sendJson(res, 200, { ok: true, ...(applied ? { applied } : {}), ...(enrolled ? { enrolled } : {}) });
       // lost the race between the read above and this update: someone else decided it
       const now = (await db.query(`SELECT decision, decided_at FROM proposals WHERE id = $1`, [triage[1]])).rows[0];
       return sendJson(res, 409, { ...errorEnvelope("conflict", "already decided"), decision: now?.decision ?? null, decided_at: now?.decided_at ?? null });
@@ -709,11 +797,16 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     if (key === "GET /api/agents") return sendJson(res, 200, { agents: await agents.listAgents(db) });
 
     if (key === "POST /api/agents") {
-      const body = (await readJson(req)) as { id?: unknown; display_name?: unknown; kind?: unknown };
+      const body = (await readJson(req)) as { id?: unknown; display_name?: unknown; kind?: unknown; remote?: unknown };
       try {
-        const { id, token } = await agents.createAgent(db, body);
-        await audit("agent_admin", "mint", true, { agent: id, op: "mint" });
-        return sendJson(res, 201, { id, token }); // the ONE time the token crosses the wire
+        const { id, token, pending } = await agents.createAgent(db, body);
+        // S2: a remote enrolment starts pending and asks the owner, in the
+        // one queue that needs the user (D7). The token is returned here
+        // all the same — the console shows a token exactly once — and it
+        // authenticates nothing until the answer arrives.
+        const proposalId = pending ? await agents.enrollmentProposal(db, { id, display_name: String(body.display_name) }) : undefined;
+        await audit("agent_admin", "mint", true, { agent: id, op: "mint", remote: pending, ...(proposalId ? { proposal: proposalId } : {}) });
+        return sendJson(res, 201, { id, token, pending, ...(proposalId ? { proposal_id: proposalId } : {}) }); // the ONE time the token crosses the wire
       } catch (err) {
         if (err instanceof agents.AgentError) return sendError(res, err.code, err.message); // the validator already named the field; do not throw that away
         throw err;
@@ -723,7 +816,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     const agentOp = AGENT_ROUTE.exec(key);
     if (agentOp) {
       const [, method, id, op] = agentOp as unknown as [string, string, string, string];
-      const verbOk = method === "PUT" ? op === "grants" || op === "projects" || op === "autonomy" : op === "revoke" || op === "rotate";
+      const verbOk = method === "PUT" ? op === "grants" || op === "projects" || op === "autonomy" : op === "revoke" || op === "rotate" || op === "approve";
       if (!verbOk) return sendError(res, "not_found");
       try {
         if (op === "grants") {
@@ -748,9 +841,21 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
           await audit("agent_admin", "autonomy", ok, { agent: id, op: "autonomy", autonomy });
           return ok ? sendJson(res, 200, { ok: true, autonomy }) : sendError(res, "not_found");
         }
+        if (op === "approve") {
+          // S2: the owner's hand on a pending enrolment (invariant 2 — the
+          // credential surface is never an agent's to widen). Idempotent,
+          // and it settles the Needs You item in the same breath so the two
+          // doors onto the same answer cannot drift.
+          const ok = await agents.approveAgent(db, id);
+          const settled = ok ? await agents.settleEnrollment(db, id, "approve") : [];
+          await audit("agent_admin", "approve", ok, { agent: id, op: "approve", ...(settled.length ? { proposals: settled } : {}) });
+          return ok ? sendJson(res, 200, { approved: true, ...(settled.length ? { proposals: settled } : {}) }) : sendError(res, "not_found");
+        }
         if (op === "revoke") {
           const ok = await agents.revokeAgent(db, id);
-          await audit("agent_admin", "revoke", ok, { agent: id, op: "revoke" });
+          // a revoked row is no longer a question: settle any enrolment still asking about it
+          const settled = ok ? await agents.settleEnrollment(db, id, "deny") : [];
+          await audit("agent_admin", "revoke", ok, { agent: id, op: "revoke", ...(settled.length ? { proposals: settled } : {}) });
           return ok ? sendJson(res, 200, { revoked: true }) : sendError(res, "not_found");
         }
         const token = await agents.rotateAgent(db, id);

@@ -158,6 +158,26 @@ system, and the `schedules` section is where you go to read why.
 Both are read by the console. Every refusal, skip and doctor remediation in
 this document names the variable or manifest field that would change it.
 
+## What a collector may call
+
+A collector runs unattended, on a clock, with nobody reading the answer until
+later, so it may never call a **billable** model. One manifest line says
+which model it may call, if any:
+
+```yaml
+# collectors/inbox-drain/manifest.yaml
+uses_model: applefm/foundation-model
+```
+
+One pinned `<provider>/<model-id>`, the same spelling `compute.yaml` uses.
+The runner hands it to the collector, so the manifest stays the single
+statement of what a component may do (invariant 5). Two checks enforce it —
+CI against the shipped provider templates, and `completeJson()` against the
+`compute.yaml` actually in force, which **throws** rather than degrading if
+the named provider is not `locality: on_machine`. Everything else about the
+tier degrades absent. Details in `docs/ops/compute.md` — "Apple Foundation
+Models".
+
 ## What this is not
 
 - **Not a budget.** Nothing here counts dollars; `compute.yaml` budgets are

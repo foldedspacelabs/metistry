@@ -20,6 +20,7 @@ import { describe, expect, it } from "vitest";
 import { parseCompute, providerSchema, type Compute } from "@foldedspacelabs/metistry-core";
 import { readTemplate } from "../src/compute.js";
 import {
+  APPLEFM_DEFAULT_PORT,
   LLAMASERVER_DEFAULT_PORT,
   LOCAL_SERVERS,
   NO_BROWSER_ORIGIN,
@@ -89,17 +90,19 @@ describe("URL helpers", () => {
     expect(portOf("not a url")).toBeUndefined();
   });
 
-  it("identifies which of the three a provider is — a serve: block outright, the default ports otherwise", () => {
+  it("identifies which of the four a provider is — a serve: block outright, the default ports otherwise", () => {
     const cfg = computeOf(`
 providers:
   lms:       { kind: openai-compatible, base_url: "http://127.0.0.1:1234/v1",  locality: on_machine }
   oll:       { kind: openai-compatible, base_url: "http://127.0.0.1:11434/v1", locality: on_machine }
   mine:      { kind: openai-compatible, base_url: "http://127.0.0.1:9999/v1",  locality: on_machine, serve: { runtime: llamaserver, model_path: a.gguf, port: 9999 } }
+  afm:       { kind: openai-compatible, base_url: "http://127.0.0.1:7810/v1",  locality: on_machine }
   elsewhere: { kind: openai-compatible, base_url: "http://127.0.0.1:5555/v1",  locality: on_machine }
 `);
     expect(serverOf("lms", cfg.providers.lms!)).toBe("lmstudio");
     expect(serverOf("oll", cfg.providers.oll!)).toBe("ollama");
     expect(serverOf("mine", cfg.providers.mine!)).toBe("llamaserver");
+    expect(serverOf("afm", cfg.providers.afm!)).toBe("applefm");
     // a local server on a port nobody recognises: talk to it, never claim to manage it
     expect(serverOf("elsewhere", cfg.providers.elsewhere!)).toBeUndefined();
   });
@@ -137,14 +140,14 @@ describe("discovery", () => {
   it("finds a server nothing is configured for, and says the command that would configure it", async () => {
     const http = fakeFetch({ [LMSTUDIO]: lmStudioModels });
     const rows = await probeLocalServers({ compute: computeOf("providers: {}"), fetchFn: http.fn });
-    expect(rows.map((r) => r.server)).toEqual(["lmstudio", "ollama", "llamaserver"]);
+    expect(rows.map((r) => r.server)).toEqual(["lmstudio", "ollama", "llamaserver", "applefm"]);
     const lms = rows.find((r) => r.server === "lmstudio")!;
     expect(lms.ok).toBe(true);
     expect(lms.provider).toBeUndefined();
     expect(lms.hint).toContain("metistry compute providers add --from lmstudio");
     expect(lms.models).toEqual(["qwen/qwen3-coder-30b", "text-embedding-nomic-embed-text-v1.5"]);
-    // the two that are not running: reported, with no hint to configure nothing
-    expect(rows.filter((r) => !r.ok).map((r) => r.server)).toEqual(["ollama", "llamaserver"]);
+    // the ones that are not running: reported, with no hint to configure nothing
+    expect(rows.filter((r) => !r.ok).map((r) => r.server)).toEqual(["ollama", "llamaserver", "applefm"]);
     expect(rows.find((r) => r.server === "ollama")?.hint).toBeUndefined();
   });
 
@@ -178,10 +181,10 @@ describe("doctor rows", () => {
   it("is one row per server, ok or absent — and ABSENT IS NEVER A FAILURE", async () => {
     const http = fakeFetch({ [OLLAMA]: ollamaModels });
     const rows = await localServerRows({ compute: computeOf("providers: {}"), fetchFn: http.fn });
-    expect(rows.map((r) => r.name)).toEqual(["local:lmstudio", "local:ollama", "local:llamaserver"]);
+    expect(rows.map((r) => r.name)).toEqual(["local:lmstudio", "local:ollama", "local:llamaserver", "local:applefm"]);
     expect(rows.every((r) => r.kind === "local-model")).toBe(true);
     expect(rows.some((r) => r.status === "failed")).toBe(false);
-    expect(rows.filter((r) => r.status === "absent").map((r) => r.name)).toEqual(["local:lmstudio", "local:llamaserver"]);
+    expect(rows.filter((r) => r.status === "absent").map((r) => r.name)).toEqual(["local:lmstudio", "local:llamaserver", "local:applefm"]);
 
     const ollama = rows.find((r) => r.name === "local:ollama")!;
     expect(ollama.status).toBe("ok");
@@ -204,6 +207,43 @@ describe("doctor rows", () => {
     expect(row.status).toBe("ok");
     expect(row.remediation).toBeUndefined();
     expect(row.meta).toMatchObject({ provider: "lmstudio", loaded: 2 });
+  });
+});
+
+// Apple FM is the one local server that AUTHENTICATES — it is a Metistry
+// bridge, and every bridge route takes the bearer (invariant 8). A probe
+// that forgot it would get a truthful 401 and report "absent", which is a
+// lie about a running server.
+describe("discovery: the apple-fm bridge", () => {
+  const AFM = `http://127.0.0.1:${APPLEFM_DEFAULT_PORT}/v1/models`;
+  const afmModels = { body: { object: "list", data: [{ id: "foundation-model", object: "model", owned_by: "apple" }] } };
+
+  it("sends the bridge bearer from the environment and lists applefm/foundation-model", async () => {
+    const http = fakeFetch({ [AFM]: afmModels });
+    const rows = await probeLocalServers({ compute: computeOf("providers: {}"), env: { METISTRY_BRIDGE_TOKEN_APPLE_FM: "t0ken" }, fetchFn: http.fn });
+    const afm = rows.find((r) => r.server === "applefm")!;
+    expect(afm.ok).toBe(true);
+    expect(afm.models).toEqual(["foundation-model"]);
+    expect(afm.hint).toContain("metistry compute providers add --from applefm");
+    const headers = http.calls.find((c) => c.url === AFM)!.init!.headers as Record<string, string>;
+    expect(headers.authorization).toBe("Bearer t0ken");
+  });
+
+  it("prefers the configured provider's own auth.secret over the conventional variable", async () => {
+    const http = fakeFetch({ [AFM]: afmModels });
+    const cfg = computeOf(`providers: { applefm: { kind: openai-compatible, base_url: "http://127.0.0.1:${APPLEFM_DEFAULT_PORT}/v1", locality: on_machine, auth: { secret: METISTRY_OTHER_TOKEN } } }`);
+    const rows = await probeLocalServers({ compute: cfg, env: { METISTRY_OTHER_TOKEN: "other", METISTRY_BRIDGE_TOKEN_APPLE_FM: "conventional" }, fetchFn: http.fn });
+    expect(rows.find((r) => r.server === "applefm")?.provider).toBe("applefm");
+    const headers = http.calls.find((c) => c.url === AFM)!.init!.headers as Record<string, string>;
+    expect(headers.authorization).toBe("Bearer other");
+  });
+
+  it("without the token the 401 is reported as refused, not as models", async () => {
+    const http = fakeFetch({ [AFM]: { status: 401 } });
+    const rows = await probeLocalServers({ compute: computeOf("providers: {}"), env: {}, fetchFn: http.fn });
+    const afm = rows.find((r) => r.server === "applefm")!;
+    expect(afm.ok).toBe(false);
+    expect(afm.detail).toContain("the credential was refused");
   });
 });
 

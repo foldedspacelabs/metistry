@@ -149,7 +149,10 @@ describe.skipIf(!hasDb)("watchdog", () => {
     expect(fm.meta).toEqual({ ruleDefault: 5, fm: 0 });
     expect(fm.remediation).toContain("apple-fm answers /check but inbox-drain never reaches it");
 
-    for (let i = 0; i < 5; i++) await insert("apple-fm", "apple-fm", `refined ${i}`);
+    // The tier recorded is the PROVIDER's name, whatever compute.yaml calls
+    // it — the probe counts "not deterministic", never one spelling.
+    for (let i = 0; i < 3; i++) await insert("applefm", "applefm", `refined ${i}`);
+    for (let i = 0; i < 2; i++) await insert("my-local", "my-local", `refined local ${i}`);
     fm = (await runProbes(pool, cfg, okFetch)).find((c) => c.name === "fm-tier-never-fires")!;
     expect(fm.status).toBe("ok");
     expect(fm.meta).toEqual({ ruleDefault: 5, fm: 5 });

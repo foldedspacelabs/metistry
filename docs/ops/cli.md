@@ -369,6 +369,7 @@ metistry connect devin                      # prints the fields to paste (no API
 metistry connect claude-code                # mints the plugin's token, prints its env lines
 metistry connect cursor --rotate            # a replacement bearer; the old one dies at once
 metistry connect cursor --areas Knowledge/Areas/Engineering --project second-instance
+metistry connect devin --remote             # enrols PENDING: its token works once you let it in
 metistry connect --list [--json]
 ```
 
@@ -403,10 +404,84 @@ the config key (`mcpServers.metistry-<suffix>`) and the variable name
 (`METISTRY_AGENT_TOKEN_CURSOR_<SUFFIX>`), so two instances on one Mac cannot
 overwrite each other's entry.
 
+### `--remote`: a tool that will call from off this machine
+
+A loopback tool is already on the Mac whose Keychain holds its bearer, so
+there is nothing more to prove and `connect` enrols it immediately. A tool
+that will present its token **from somewhere else** enrols `--remote`, and
+then:
+
+- the row starts **pending**: `/mcp` and `/capture` answer the same uniform
+  401 an unknown token gets, so the bearer is inert;
+- a **Needs You** item appears with two buttons, `approve` and `deny`
+  (`deny` revokes the row);
+- `metistry connect --list` shows the tool as `pending` rather than
+  `registered`, and `POST /api/agents/<id>/approve` is the same answer from
+  the console side.
+
+`--remote` is decided at enrolment and refused on a row that already exists:
+promoting a row the owner already let in would be a widening dressed as a
+flag. Approval is not a grant — a row let in still holds its default-deny
+read tier. `docs/ops/console-api.md` has the wire detail.
+
 `docs/ops/cursor.md` and `docs/ops/devin.md` are the per-tool pages —
 including what each tool can then do through `/mcp`, how to widen a grant,
 and (for Devin) why a cloud session needs an inbound path this install does
 not have yet.
+
+## Knowing other instances: `metistry instances`
+
+The peer registry — which *other* instances this one knows about, in the
+instance repo's `instances.yaml`:
+
+```sh
+metistry instances add https://second.example.com   # asks it who it is, then records it
+metistry instances list [--json]
+metistry instances refresh                          # re-ask every recorded origin
+metistry instances remove <instance_id|name>
+```
+
+`add` reads the origin's own `GET /api/identity` — the one unauthenticated
+read a console has — and records its `instance_id`, display name and the
+coarse capabilities it advertises. No credential is involved, and an origin
+that will not say who it is is refused rather than guessed at. Rows are
+keyed by `instance_id`, never by origin, because an origin can move;
+`refresh` leaves an unreachable peer exactly as it was (a closed laptop is
+not a departed instance) and refuses to repoint a row whose origin now
+answers as somebody else.
+
+A §4.7 protected path like `compute.yaml`: every write goes through the
+reconciler as the `user` principal, and an edit whose RESULT would not
+validate is refused rather than written. The console serves the same file to
+the Mac app and the phone at `GET /api/instances`.
+`docs/ops/instances.md` is the whole story, including why `resources:` is
+empty and what this deliberately is not.
+
+## Exporting the audit ledger: `metistry runs export`
+
+```sh
+metistry runs export > runs.ndjson
+metistry runs export --since '2026-09-01T00:00:00Z' --component reconciler
+metistry runs export --since "$(tail -1 runs.ndjson | jq -r .cursor)" >> runs.ndjson
+```
+
+Every `runs` row as NDJSON on stdout, oldest first, with `core`'s redaction
+already applied and each line carrying this instance's `instance_id` and —
+where the row names an agent — the qualified `agent:<name>@<instance_id>`
+form, so two instances' ledgers merge without colliding
+(`docs/ops/instances.md`).
+
+Each line carries its own `cursor`; the last one is what `--since` takes to
+resume, and a bare timestamp works too. `--until` bounds the far end,
+`--component` filters, `--limit` stops early. The summary goes to **stderr**
+so stdout stays pipeable; `--json-lines` is the explicit spelling of the
+default and changes nothing.
+
+It goes through the console (`GET /api/runs/export`, the `user` principal)
+and never straight to Postgres — one read path into state (invariant 3). A
+stream that stops mid-line is reported as an **error**, never as a short
+export: an audit export that is quietly incomplete is worse than one that
+failed, and the message names the cursor to resume from.
 
 ## Choosing compute: `metistry compute`
 

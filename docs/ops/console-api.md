@@ -1,16 +1,20 @@
 # The console's API for a client that is not always connected
 
-Three server-side pieces, all small, that the phone's offline design needs
+Server-side pieces, all small, that the phone's offline design needs
 (`docs/research/2026-09-11-multi-instance-and-offline-client.md`) and the
-PWA benefits from today. Everything else about the door is
-`docs/ops/auth.md`; capture is `docs/ops/capture-shortcut.md`; ratings are
-`docs/ops/reply-feedback.md`.
+PWA benefits from today — plus the three SAM adopts that touch this API
+(S1, S2, S5 in `docs/plan-refresh-2026-09-13.md` §1, reasoned in
+`docs/research/2026-09-13-google-sam-review.md`). Everything else about the
+door is `docs/ops/auth.md`; capture is `docs/ops/capture-shortcut.md`;
+ratings are `docs/ops/reply-feedback.md`; the peer registry these serve is
+`docs/ops/instances.md`.
 
 ## `GET /api/identity` — who this instance is, before sign-in
 
 ```
 GET /api/identity
 200 {"instance_id":"8b6a3a2e-…","name":"Metis","icon":"🦉",
+     "capabilities":["artifacts","capture","dispatch","knowledge","queries","tasks"],
      "version":"0.8.0","as_of":"2026-09-11T02:18:47.001Z"}
 503 {"error":{"code":"not_available","message":"not available"}}
 ```
@@ -29,6 +33,79 @@ assistant uses for its prompt: `METISTRY_IDENTITY_FILES`, colon-separated,
 last existing file wins; the default is `seed/identity.yaml` then
 `$METISTRY_INSTANCE_DIR/identity.yaml`. No `name` + `instance_id` → 503 and
 a startup warning (degrades: absent). `metistry init` stamps the id.
+
+### `capabilities` — coarse, and deliberately uninformative (S1)
+
+The vocabulary is fixed and lives in `packages/core`
+(`CAPABILITIES`): **`artifacts` · `capture` · `dispatch` · `knowledge` ·
+`queries` · `tasks`**. Each is a tool *group*, and each is derived from what
+this console actually has wired, so an instance cannot advertise something
+it would then answer `not_available` for:
+
+| group | present when |
+| --- | --- |
+| `capture`, `tasks` | always — `/capture` and the tasks service need nothing configured |
+| `knowledge` | a vault to read (the reconciler's bridge, D5) |
+| `artifacts` | the vault client the artifacts module stores through (§4.21) |
+| `queries` | at least one named query loaded (invariant 3's read path) |
+| `dispatch` | at least one compute target configured (§4.18) |
+
+**What it is not.** Never a tool name (`knowledge_read` is a tool;
+`knowledge` is a group), never a count of anything, never an origin, never
+a project or crew name. Two consoles with one query and with ninety
+advertise the same word — if it can be counted, it is inventory, and
+inventory is not public. The **full `tools/list` stays behind an agent
+token** at `/mcp`: SAM's own rule that discovery is itself grantable, which
+is the half of its `system://sam.catalog` worth borrowing.
+
+The invariant-8 reading is the same one that admitted this endpoint in the
+first place: authenticating every request means an unauthenticated response
+must survive being read by anyone, and "this instance can hold notes and
+answer queries" is on the login page's level. What an attacker learns is
+which of six doors exist; what they still cannot do is open one.
+
+## Approve-before-enroll for remote agents (S2)
+
+An agent whose bearer will be presented **from off this machine** does not
+get to start working because a token was minted. SAM's `join` leaves an
+enrollment PENDING until an administrator approves; invariant 2 says the
+credential surface is the user's hand, so the same rule holds here.
+
+```
+POST /api/agents            (user principal)
+{"id":"devin","display_name":"Devin","kind":"external","remote":true}
+201 {"id":"devin","token":"…","pending":true,"proposal_id":412}
+
+POST /api/agents/devin/approve   (user principal)
+200 {"approved":true,"proposals":[412]}
+404 — no such row, revoked, or never remote (nothing to approve)
+```
+
+- `remote` is optional and defaults to `false`; it must be a boolean, and
+  `kind: internal` can never be remote (an internal agent's token comes
+  from the user's own environment, which *is* the approval, §4.11).
+- The token **is** returned at mint, because the console shows a token
+  exactly once. It simply authenticates nothing yet.
+- While pending, `/mcp` and `/capture` answer **the same uniform 401 an
+  unknown token gets** — same status, same body — and `last_seen_at` is not
+  bumped, so there is nothing in the response to tell "waiting for approval"
+  apart from "never existed". The refusal is a `WHERE` clause in
+  `authenticateAgent`, not a branch a later edit could forget.
+- Enrolment raises a **Needs You item**: a `decision` proposal whose
+  `payload.options` are `["approve","deny"]`, so the PWA renders it with
+  the two buttons it already knows how to render. Answering it does exactly
+  what the route does — `approve` lets the row in, `deny` **revokes** it —
+  and the route settles the item in the same breath, so the two doors onto
+  one answer cannot drift.
+- `GET /api/agents` carries `remote`, `approved_at` and a derived
+  `pending`. `metistry connect <tool> --remote` sets the flag; `metistry
+  connect --list` shows `pending`. Loopback tools stay immediate, and
+  `--remote` is decided at enrolment — it is refused on a row that already
+  exists rather than widening it.
+
+Approval is **not** a grant: a row let in still holds the default-deny
+`{tier: "none", areas: []}` it was minted with. Two different questions,
+answered separately.
 
 ## `Idempotency-Key` on `POST /capture` — a retry is not a second note
 
@@ -105,8 +182,82 @@ What moves a row past a cursor:
   showing a stale queue. Without `since` it is the triage queue as before —
   pending only.
 
-`runs` has no list endpoint; the activity feed is the `runs_summary` /
-`activity_feed` named queries, which take their own parameters.
+`runs` has no *list* endpoint; the activity feed is the `runs_summary` /
+`activity_feed` named queries, which take their own parameters. The whole
+ledger, for merging two instances' timelines, is the export below.
 
 The client's side of the contract — drain the outbox head-first, then pull
 each list with its cursor, then repaint — is in the research note.
+
+## `GET /api/runs/export` — the audit ledger as NDJSON (S5)
+
+```
+GET /api/runs/export?since=<cursor>&until=<ts>&component=<name>&limit=N
+Authorization: Bearer <local owner token>      (or the session cookie)
+200 application/x-ndjson
+{"instance_id":"8b6a3a2e-…","id":91,"ts":"2026-09-16T00:00:00.001Z","component":"console",
+ "kind":"capture","tool":null,…,"meta":{"agent":"cursor"},
+ "source_agent":"agent:cursor@8b6a3a2e-…","cursor":"2026-09-16 00:00:00.001+00|91"}
+{"instance_id":"8b6a3a2e-…","id":92, … }
+400 when `since`, `until`, `component` or `limit` is not a form this server mints
+```
+
+The `user` principal only — an agent token is the uniform 403, an
+unauthenticated call a 401. One JSON object per line, **oldest first** (an
+export is a forward replay), with `core`'s `redactSecrets` applied to the
+whole row, so a secret-named key anywhere in the collector- or
+agent-authored `meta` is `***REDACTED***` before it leaves.
+
+- **`since`** is a cursor from a previous export's last line, or a bare
+  timestamp (which means "`|0`", i.e. from the start of that second). The
+  same opaque-cursor grammar the polled lists use.
+- **Every line carries its own `cursor`**, so a client resumes from the last
+  line it wrote rather than from a trailer it would have to wait for.
+- **`instance_id`** and, where the row names an agent, the qualified
+  **`source_agent`** (`agent:<name>@<instance_id>`, S3 — see
+  `docs/ops/instances.md`) are what let two ledgers merge without
+  colliding. `runs` has no `source_agent` column; the agent rides in `meta`,
+  stamped from the credential at the door, and the export reads `meta.agent`
+  / `meta.source_agent` / `meta.principal`. `user` and `owner` are
+  principals, not agents, and are never qualified.
+- **Streaming.** The response is chunked and written as it is produced.
+  A failure mid-stream **destroys the connection** rather than ending it
+  cleanly — an aborted chunked body is HTTP's way of saying "this is not the
+  whole thing", and `metistry runs export` reports it as an error instead of
+  writing a truncated export that looks complete.
+- The export is itself a `runs` row (`kind: export`, `tool: runs`, with the
+  line count) — an audit export that is not audited would be a hole.
+
+**Invariant 3, decided.** `runs` is special-cased for the watchdog's
+liveness probes and nothing else, so an export is not a second licence to
+open a connection. The query driver (`packages/queries`) is the only thing
+that talks to Postgres here — but it buffers a whole result set and has no
+streaming driver, so a single unbounded query for a year of runs would be
+one enormous array in memory. What ships is the **named query
+`runs_export.yaml` with a cursor parameter, paged**, and the streaming done
+by the route looping over it: the SQL stays in the instance's `queries/`
+where the owner can read and override it (D4), memory is bounded by one
+page, and the client still gets bytes as they are produced. The cost is one
+round trip per page instead of one held cursor — for an export that runs on
+the owner's own machine, not a cost worth a second read path.
+
+The CLI (`metistry runs export`, `docs/ops/cli.md`) is a client of this
+route and never touches Postgres.
+
+## `GET /api/instances` — the peer registry
+
+```
+GET /api/instances                             (user principal)
+200 {"instances":[{"instance_id":"0a1b2c3d-…","name":"Second",
+                   "origin":"https://second.example.com",
+                   "last_seen":"2026-09-16T01:00:00.000Z",
+                   "capabilities":["capture","knowledge"],"resources":[]}],
+     "as_of":"2026-09-16T01:02:03.004Z"}
+400 the file does not validate — the message names the field
+503 no registry configured (degrades: absent)
+```
+
+The read side of `instances.yaml` for the app and the phone. The file is the
+instance repo's and a §4.7 protected path, written only by `metistry
+instances` as the `user`; the whole design, including why `resources` is
+empty, is `docs/ops/instances.md`.

@@ -60,8 +60,8 @@ export const UNPRODUCTIVE_VETO = 5;
 
 /** Attempts per HTTP call, including the first. Four covers a rate-limit window and a model that is still loading. */
 export const DEFAULT_ATTEMPTS = 4;
-export const DEFAULT_BACKOFF_MS = 500;
-export const DEFAULT_MAX_TURNS = 12;
+export const DEFAULT_BACKOFF_MS = 500;  // limit: fixed — the base of the 429/5xx backoff schedule; `Retry-After` overrides it per response, and a knob here would only make a provider's rate limit worse
+export const DEFAULT_MAX_TURNS = 12;  // limit: fixed — the fallback when a tier names no `max_turns`; the assignment in compute.yaml is the knob, not the environment
 
 export class EngineHttpError extends Error {
   constructor(

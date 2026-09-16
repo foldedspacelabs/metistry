@@ -73,6 +73,12 @@ export interface AgentRow {
   created_at: string;
   last_seen_at: string | null;
   revoked: boolean;
+  /** S2: this token will be presented from off this machine, so enrolling it took the owner's hand. */
+  remote: boolean;
+  /** S2: when the owner let it in. Null on a `remote` row means PENDING — the token authenticates nothing yet. */
+  approved_at: string | null;
+  /** Derived from the two above, so no client has to recombine them and get it wrong. */
+  pending: boolean;
 }
 
 /** Thrown for caller mistakes; the route maps `code` to the uniform envelope. */
@@ -178,8 +184,17 @@ function coerceGrants(raw: unknown): Grants {
 
 /**
  * Resolve an agent bearer token to its principal. Pure function of
- * (db, Authorization header): hash lookup, not revoked, bumps last_seen_at.
- * Null on any miss — the caller returns the uniform 401.
+ * (db, Authorization header): hash lookup, not revoked, **not pending**,
+ * bumps last_seen_at. Null on any miss — the caller returns the uniform
+ * 401.
+ *
+ * The pending clause is the whole of S2's enforcement, and it lives in the
+ * WHERE rather than in a branch above on purpose: a token awaiting
+ * approval does not match, so it takes exactly the path an unknown token
+ * takes — same 401, same body, and `last_seen_at` is not bumped either, so
+ * there is nothing in the response to tell the two apart. "Enforce at the
+ * tool" (CLAUDE.md): the refusal is a row the query cannot see, not a rule
+ * a later edit could forget to apply.
  */
 export async function authenticateAgent(
   db: Db,
@@ -190,7 +205,7 @@ export async function authenticateAgent(
   if (!token) return null;
   const { rows } = await db.query(
     `UPDATE agents SET last_seen_at = now()
-     WHERE token_hash = $1 AND revoked_at IS NULL
+     WHERE token_hash = $1 AND revoked_at IS NULL AND (NOT remote OR approved_at IS NOT NULL)
      RETURNING id, kind, grants, projects`,
     [tokenHash(token)],
   );
@@ -236,7 +251,8 @@ export async function ensureInternalAgent(db: Db, id: string, cfg: InternalAgent
        token_hash = EXCLUDED.token_hash,
        grants = EXCLUDED.grants,
        projects = EXCLUDED.projects,
-       revoked_at = NULL
+       revoked_at = NULL,
+       remote = false
      RETURNING (xmax = 0) AS created`,
     [id, displayName, tokenHash(cfg.token), JSON.stringify(grants), projects],
   );
@@ -246,33 +262,115 @@ export async function ensureInternalAgent(db: Db, id: string, cfg: InternalAgent
 /** The registry, minus anything secret: token hashes never leave the db. */
 export async function listAgents(db: Db): Promise<AgentRow[]> {
   const { rows } = await db.query(
-    `SELECT id, display_name, kind, grants, projects, autonomy, created_at, last_seen_at, revoked_at IS NOT NULL AS revoked
+    `SELECT id, display_name, kind, grants, projects, autonomy, created_at, last_seen_at,
+            revoked_at IS NOT NULL AS revoked, remote, approved_at,
+            (remote AND approved_at IS NULL AND revoked_at IS NULL) AS pending
      FROM agents ORDER BY revoked, created_at`,
   );
-  return rows.map((r) => ({ ...r, grants: coerceGrants(r.grants), autonomy: coerceAutonomy(r.autonomy) }));
+  return rows.map((r) => ({ ...r, grants: coerceGrants(r.grants), autonomy: coerceAutonomy(r.autonomy) })) as AgentRow[];
 }
 
-/** Register an agent and mint its token. The token is returned ONCE. */
+/**
+ * Register an agent and mint its token. The token is returned ONCE.
+ *
+ * `remote: true` (S2) is the caller saying this bearer will be presented
+ * from off this machine. The token is minted either way — there is nothing
+ * to hand over later, because the console shows a token once — but a
+ * remote row starts PENDING and authenticates nothing until the owner
+ * approves it. An `internal` row can never be remote: its token comes from
+ * the user's own environment, which IS the approval (§4.11).
+ */
 export async function createAgent(
   db: Db,
-  input: { id?: unknown; display_name?: unknown; kind?: unknown },
-): Promise<{ id: string; token: string }> {
+  input: { id?: unknown; display_name?: unknown; kind?: unknown; remote?: unknown },
+): Promise<{ id: string; token: string; pending: boolean }> {
   const id = typeof input.id === "string" ? input.id : "";
   if (!AGENT_ID_RE.test(id)) throw new AgentError("invalid_request", "id must be a slug ^[a-z][a-z0-9-]{0,39}$");
   const displayName = typeof input.display_name === "string" ? input.display_name.trim().slice(0, 120) : "";
   if (!displayName) throw new AgentError("invalid_request", "display_name required");
   const kind = input.kind === undefined ? "external" : input.kind;
   if (!AGENT_KINDS.includes(kind as (typeof AGENT_KINDS)[number])) throw new AgentError("invalid_request", "kind must be external | internal");
+  if (input.remote !== undefined && typeof input.remote !== "boolean") throw new AgentError("invalid_request", "remote must be a boolean");
+  const remote = input.remote === true;
+  if (remote && kind !== "external") throw new AgentError("invalid_request", "remote applies to kind external only");
   const token = mintToken(32);
   try {
-    await db.query(`INSERT INTO agents (id, display_name, kind, token_hash) VALUES ($1, $2, $3, $4)`, [
-      id, displayName, kind, tokenHash(token),
+    await db.query(`INSERT INTO agents (id, display_name, kind, token_hash, remote, approved_at) VALUES ($1, $2, $3, $4, $5, $6)`, [
+      id, displayName, kind, tokenHash(token), remote, remote ? null : new Date().toISOString(),
     ]);
   } catch (err) {
     if ((err as { code?: string }).code === "23505") throw new AgentError("conflict", "agent id already registered");
     throw err;
   }
-  return { id, token };
+  return { id, token, pending: remote };
+}
+
+/**
+ * The owner's hand on a pending enrolment (S2). Idempotent — approving an
+ * already-approved row is a no-op that still answers true, because the
+ * owner's answer arriving twice (from the console and from the Needs You
+ * queue) must not read as a failure. False when there is no such row, when
+ * it is revoked, or when it was never remote (nothing to approve).
+ */
+export async function approveAgent(db: Db, id: string): Promise<boolean> {
+  const { rows } = await db.query(
+    `UPDATE agents SET approved_at = coalesce(approved_at, now())
+     WHERE id = $1 AND revoked_at IS NULL AND remote RETURNING id`,
+    [id],
+  );
+  return rows.length === 1;
+}
+
+/** The pending enrolments, oldest first — what the owner is being asked about. */
+export async function pendingAgents(db: Db): Promise<AgentRow[]> {
+  return (await listAgents(db)).filter((a) => a.pending);
+}
+
+/** The proposals payload key an enrolment request is recognised by, both here and at triage. */
+export const ENROLL_PAYLOAD_KEY = "enroll";
+
+/** An enrolment request's payload: a `decision` proposal answered with its own two options. */
+export interface EnrollPayload {
+  title: string;
+  options: ["approve", "deny"];
+  enroll: { agent: string };
+}
+
+/** The agent id an enrolment proposal is about, or undefined when this payload is not one. */
+export function enrollTarget(payload: unknown): string | undefined {
+  const e = (payload as { enroll?: { agent?: unknown } } | null)?.enroll;
+  return typeof e?.agent === "string" && AGENT_ID_RE.test(e.agent) ? e.agent : undefined;
+}
+
+/**
+ * Surface a pending enrolment in the one queue that needs the user (D7).
+ * A `decision` proposal, because that is the kind the PWA already renders
+ * with its OWN options rather than the three triage verbs — `approve` and
+ * `deny`, checked server-side against the stored row, never against the
+ * request. Nothing new to render, and answering it from the phone is the
+ * same gesture as answering it from the console.
+ */
+export async function enrollmentProposal(db: Db, row: { id: string; display_name: string }): Promise<number | undefined> {
+  const payload: EnrollPayload = {
+    title: `Let ${row.display_name} (${row.id}) in? It will present its token from another machine.`,
+    options: ["approve", "deny"],
+    enroll: { agent: row.id },
+  };
+  const { rows } = await db.query(
+    `INSERT INTO proposals (kind, source_agent, trust, payload) VALUES ('decision', $1, 'external', $2::jsonb) RETURNING id`,
+    [row.id, JSON.stringify(payload)],
+  );
+  return rows[0]?.id === undefined ? undefined : Number(rows[0].id);
+}
+
+/** Settle any pending enrolment request for this agent — the owner answered it elsewhere. */
+export async function settleEnrollment(db: Db, id: string, decision: "approve" | "deny"): Promise<number[]> {
+  const { rows } = await db.query(
+    `UPDATE proposals SET decision = $2, decided_at = now()
+     WHERE kind = 'decision' AND decision = 'pending' AND payload->'enroll'->>'agent' = $1 RETURNING id`,
+    [id, decision],
+  );
+  return rows.map((r) => Number(r.id));
 }
 
 /** Replace an active agent's grants. False if unknown or revoked. */

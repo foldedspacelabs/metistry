@@ -63,12 +63,15 @@ describe.skipIf(!hasDb)("offline contract (integration)", () => {
     await pool.end();
   });
 
-  it("GET /api/identity is public and says nothing but who the instance is", async () => {
+  it("GET /api/identity is public and says nothing but who the instance is and which coarse groups it has", async () => {
     const r = await fetch(`${base}/api/identity`);
     expect(r.status).toBe(200);
     const body = await r.json();
     expect(body).toMatchObject({ instance_id: "8b6a3a2e-1111-4222-8333-444455556666", name: "Metis", icon: null, version: "0.0.0-test" });
-    expect(Object.keys(body).sort()).toEqual(["as_of", "icon", "instance_id", "name", "version"]);
+    // `capabilities` (S1) is the ONE field this read has taken since: coarse tool
+    // GROUP names, never a tool name and never a count (docs/ops/console-api.md).
+    expect(Object.keys(body).sort()).toEqual(["as_of", "capabilities", "icon", "instance_id", "name", "version"]);
+    expect(body.capabilities).toEqual(["capture", "tasks"]); // this server wires nothing else
   });
 
   it("GET /api/identity is 503 not_available when the instance has no identity", async () => {

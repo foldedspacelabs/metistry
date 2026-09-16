@@ -682,9 +682,9 @@ export async function modelsInstall(opts: ComputeOptions & { ref: string }): Pro
   // into compute.yaml, so `metistry up` has something to serve.
   const gguf = parseGgufRef(ref.model);
   const dir = join(modelsDir(opts.instanceDir), gguf.repo);
-  const modelPath = relativeModelPath(gguf.repo, gguf.file);
+  const modelPath = relativeModelPath(gguf.repo, gguf.name);
   if (opts.dryRun === true) {
-    out(`[dry-run] would download ${gguf.url} to ${join(dir, gguf.file)} and set providers.${ref.provider}.serve.model_path = ${modelPath}`);
+    out(`[dry-run] would download ${gguf.url} to ${join(dir, gguf.name)} and set providers.${ref.provider}.serve.model_path = ${modelPath}`);
     return { provider: ref.provider, server, model: ref.model, ok: true, detail: `[dry-run] ${gguf.url}`, model_path: modelPath };
   }
   out(`downloading ${gguf.url}`);

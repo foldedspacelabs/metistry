@@ -277,9 +277,25 @@ What the schema refuses, and why:
 The **host is not configurable**: the child always binds `127.0.0.1`. A
 config line that could put an unauthenticated completion endpoint on the
 network would be exactly the kind of thing invariant 8 exists to prevent.
-`extra_args` is passed verbatim after the flags Metistry sets (`--model`,
-`--alias`, `--host`, `--port`), which is where `--ctx-size`, `--parallel` or
-`--embeddings` go.
+
+**Loopback alone is not enough, so `--cors-origins` is set too.**
+`llama-server`'s default is `*`, which means any web page you happen to visit
+can `fetch('http://127.0.0.1:7813/v1/…')` *and read the answer* — free use of
+your local model, and a fingerprint of what you have loaded. Metistry starts
+it with an origin value no browser can ever send, so the response is
+unreadable cross-origin.
+
+`extra_args` is passed verbatim **after** the flags Metistry sets (`--model`,
+`--alias`, `--host`, `--port`, `--cors-origins`), and llama.cpp takes the
+last occurrence of a flag — so it is also how you override one on purpose:
+
+```yaml
+      extra_args: ["--ctx-size", "8192", "--embeddings", "--pooling", "mean"]
+```
+
+`--embeddings` and `--pooling mean` go together: a causal model defaults to
+pooling `none`, and `/v1/embeddings` refuses that with
+`Pooling type 'none' is not OAI compatible`. Both flags or neither.
 
 A missing binary or a missing GGUF is a **note, not a failure**: `up` says
 which and carries on with one fewer provider, because bringing the whole

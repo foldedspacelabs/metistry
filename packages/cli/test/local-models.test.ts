@@ -22,6 +22,7 @@ import { readTemplate } from "../src/compute.js";
 import {
   LLAMASERVER_DEFAULT_PORT,
   LOCAL_SERVERS,
+  NO_BROWSER_ORIGIN,
   downloadGguf,
   fetchModels,
   llamaServerChild,
@@ -64,7 +65,9 @@ function fakeFetch(routes: Record<string, Route>) {
       return new Response(text, { status: route.status ?? 200, headers: { "content-type": "application/x-ndjson" } });
     }
     if (route.bytes) return new Response(route.bytes as BodyInit, { status: route.status ?? 200, headers: route.headers ?? {} });
-    return new Response(JSON.stringify(route.body ?? {}), { status: route.status ?? 200, headers: { "content-type": "application/json" } });
+    // a 3xx carries headers and no body — `new Response(body, {status: 3xx})` is refused by undici
+    if (route.status && route.status >= 300 && route.status < 400) return new Response(null, { status: route.status, headers: route.headers ?? {} });
+    return new Response(JSON.stringify(route.body ?? {}), { status: route.status ?? 200, headers: { ...(route.headers ?? {}), "content-type": "application/json" } });
   }) as unknown as typeof fetch;
   return { fn, calls };
 }
@@ -272,11 +275,21 @@ describe("install: a Hugging Face GGUF for llama-server", () => {
   const sha = async () => (await import("node:crypto")).createHash("sha256").update(BYTES).digest("hex");
   const URL_ = "https://huggingface.co/unsloth/gemma-3-4b-it-GGUF/resolve/main/gemma-3-4b-it-Q4_K_M.gguf";
 
-  it("parses `<owner>/<repo>/<file>.gguf` into the plain resolve/main URL — no library, one GET", () => {
+  it("parses `<owner>/<repo>/<path>.gguf` into the plain resolve/main URL — no library, one GET", () => {
     const ref = parseGgufRef("unsloth/gemma-3-4b-it-GGUF/gemma-3-4b-it-Q4_K_M.gguf");
-    expect(ref).toEqual({ repo: "unsloth/gemma-3-4b-it-GGUF", file: "gemma-3-4b-it-Q4_K_M.gguf", url: URL_ });
+    expect(ref).toEqual({ repo: "unsloth/gemma-3-4b-it-GGUF", file: "gemma-3-4b-it-Q4_K_M.gguf", name: "gemma-3-4b-it-Q4_K_M.gguf", url: URL_ });
     expect(() => parseGgufRef("unsloth/gemma-3-4b-it-GGUF")).toThrow(/is not a Hugging Face GGUF/);
     expect(() => parseGgufRef("a/b/model.safetensors")).toThrow(/is not a \.gguf/);
+    expect(() => parseGgufRef("a/b/../../etc/passwd.gguf")).toThrow(/is not a Hugging Face GGUF/);
+  });
+
+  it("keeps a path INSIDE the repo, because real repos keep quants in subdirectories", () => {
+    // ggml-org/models really does serve this one from tinyllamas/
+    const ref = parseGgufRef("ggml-org/models/tinyllamas/stories15M-q4_0.gguf");
+    expect(ref.repo).toBe("ggml-org/models");
+    expect(ref.file).toBe("tinyllamas/stories15M-q4_0.gguf");
+    expect(ref.name).toBe("stories15M-q4_0.gguf");
+    expect(ref.url).toBe("https://huggingface.co/ggml-org/models/resolve/main/tinyllamas/stories15M-q4_0.gguf");
   });
 
   it("verifies the sha256 Hugging Face publishes, and leaves no .part behind", async () => {
@@ -306,6 +319,31 @@ describe("install: a Hugging Face GGUF for llama-server", () => {
     const got = await downloadGguf({ ref: parseGgufRef("unsloth/gemma-3-4b-it-GGUF/gemma-3-4b-it-Q4_K_M.gguf"), dir, fetchFn: http.fn });
     expect(got.verified).toBe(false);
     expect(got.detail).toContain("the repo published no sha256");
+  });
+
+  it("follows redirects BY HAND, so the digest Hugging Face puts on an intermediate hop is not lost", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "metistry-gguf-"));
+    const cdn = "https://us.aws.cdn.hf.co/xet-bridge-us/deadbeef";
+    // the shape the real service answers with: 307 with nothing, 302 with the
+    // digest, then the bytes on ANOTHER ORIGIN
+    const http = fakeFetch({
+      [URL_]: { status: 307, headers: { location: "/unsloth/gemma-3-4b-it-GGUF/resolve/abc123/gemma-3-4b-it-Q4_K_M.gguf" } },
+      "https://huggingface.co/unsloth/gemma-3-4b-it-GGUF/resolve/abc123/gemma-3-4b-it-Q4_K_M.gguf": { status: 302, headers: { location: cdn, "x-linked-etag": `"${await sha()}"`, "x-linked-size": String(BYTES.byteLength) } },
+      [cdn]: { bytes: BYTES, headers: {} },
+    });
+    const got = await downloadGguf({ ref: parseGgufRef("unsloth/gemma-3-4b-it-GGUF/gemma-3-4b-it-Q4_K_M.gguf"), dir, fetchFn: http.fn, token: "hf_secret" });
+    expect(got.verified).toBe(true);
+    // and the token stopped at huggingface.co: a pre-signed CDN URL needs no
+    // credential, and forwarding one across origins is how it leaks
+    const auth = http.calls.map((c) => [c.url, (c.init?.headers as Record<string, string> | undefined)?.authorization]);
+    expect(auth.filter(([u]) => String(u).startsWith("https://huggingface.co")).every(([, a]) => a === "Bearer hf_secret")).toBe(true);
+    expect(auth.find(([u]) => u === cdn)?.[1]).toBeUndefined();
+  });
+
+  it("refuses a redirect loop rather than following forever", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "metistry-gguf-"));
+    const http = fakeFetch({ [URL_]: { status: 302, headers: { location: URL_ } } });
+    await expect(downloadGguf({ ref: parseGgufRef("unsloth/gemma-3-4b-it-GGUF/gemma-3-4b-it-Q4_K_M.gguf"), dir, fetchFn: http.fn })).rejects.toThrow(/redirected more than 5 times/);
   });
 
   it("a gated repo names METISTRY_HF_TOKEN, and a token is sent as a bearer when there is one", async () => {
@@ -341,7 +379,7 @@ describe("the supervisor child (darwin)", () => {
     if (!("child" in built)) return;
     expect(built.child).toMatchObject({
       name: "llamaserver",
-      argv: [binary, "--model", model, "--alias", "m", "--host", "127.0.0.1", "--port", "7813"],
+      argv: [binary, "--model", model, "--alias", "m", "--host", "127.0.0.1", "--port", "7813", "--cors-origins", NO_BROWSER_ORIGIN],
       env: base,
       log: "/tmp/metistry-llamaserver.log",
       ready: { kind: "tcp", port: 7813 },
@@ -349,6 +387,10 @@ describe("the supervisor child (darwin)", () => {
     // the host is hard-coded: no configuration path can put a completion
     // endpoint on the network (invariant 8)
     expect(built.child.argv).not.toContain("0.0.0.0");
+    // and llama-server's `*` default is not left in place: a web page the
+    // user visits must not be able to read this server's answers
+    expect(built.child.argv).not.toContain("*");
+    expect(built.child.argv.every((a) => a.length > 0)).toBe(true); // the child schema refuses an empty argv element
   });
 
   it("appends extra_args verbatim, after the flags the product sets", async () => {

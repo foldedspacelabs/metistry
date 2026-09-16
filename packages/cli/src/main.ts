@@ -10,6 +10,25 @@ import { realpathSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { DeploymentShape } from "@foldedspacelabs/metistry-core";
+import {
+  assign,
+  computeReport,
+  modelsList,
+  parseAssignmentTarget,
+  parseBudgetAction,
+  parseBudgetTarget,
+  parseEffort,
+  parseTemplate,
+  providerTest,
+  providersAdd,
+  providersRemove,
+  renderComputeReport,
+  renderModelsList,
+  renderProviderTest,
+  setBudget,
+  COMPUTE_TEMPLATES,
+  type ComputeOptions,
+} from "./compute.js";
 import { buildDeploymentReport, renderDeploymentReport, setDeploymentShape } from "./deployment-report.js";
 import { doctor, renderTable, type DoctorDeps } from "./doctor.js";
 import { loadInstallEnv, productVersion, resolveProductDir, resolveSeedDir, type LoadedEnv } from "./env.js";
@@ -38,7 +57,7 @@ export interface ParsedArgs {
 }
 
 /** Flags that never take a value, so `metistry init --force <dir>` keeps its dir. */
-export const BOOLEAN_FLAGS = new Set(["force", "json", "help", "version", "dry-run", "no-launchd", "no-compose", "skip-build", "skip-migrate", "rollback", "yes", "follow", "namespace", "rotate", "list"]);
+export const BOOLEAN_FLAGS = new Set(["force", "json", "help", "version", "dry-run", "no-launchd", "no-compose", "skip-build", "skip-migrate", "rollback", "yes", "follow", "namespace", "rotate", "list", "complete", "skip-test"]);
 
 /** `--channel git|release` — anything else is a typo, not a guess (the lock parser is strict for the same reason). */
 export function parseChannel(v: string | undefined): LockSource | undefined {
@@ -81,6 +100,15 @@ export function parseArgs(argv: string[], booleans = BOOLEAN_FLAGS): ParsedArgs 
 function str(flags: ParsedArgs["flags"], name: string): string | undefined {
   const v = flags[name];
   return typeof v === "string" ? v : undefined;
+}
+
+/** `--daily 5` / `--monthly 60` — a flag that must be a positive number of dollars, never silently 0 or NaN. */
+export function usd(flags: ParsedArgs["flags"], name: string): number | undefined {
+  const v = flags[name];
+  if (v === undefined || v === true) return undefined;
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) throw new Error(`--${name} takes a positive number of US dollars, not ${JSON.stringify(v)}`);
+  return n;
 }
 
 /** `--areas a,b` / `--project p,q` — one flag, several values, no repetition rules to remember. */
@@ -283,6 +311,24 @@ const USAGE = `metistry — Metistry command line
       Tail one service's log: the launchd job's StandardOutPath (default
       /tmp/metistry-<service>.log) or, under compose, docker compose logs.
       Default is the last 200 lines; --follow streams.
+
+  metistry compute show [--json]
+  metistry compute providers list [--json]
+  metistry compute providers add --from <openrouter|zen|lmstudio|ollama>
+                                 [--name <n>] [--base-url <url>] [--secret <NAME>] [--skip-test]
+  metistry compute providers remove <name>
+  metistry compute providers test <name> [--complete]
+  metistry compute models list [--provider <name>] [--json]
+  metistry compute assign <default|<tier>|crew:<name>> <provider/model> [--effort low|medium|high]
+  metistry compute budget <instance|provider:<name>> [--daily <usd>] [--monthly <usd>]
+                          --action allow|stop|critical_only
+      This instance's compute.yaml: which providers exist, which model each
+      tier and crew runs on, and what each may spend (docs/ops/compute.md).
+      A §4.7 protected path like deployment.yaml — every write goes through
+      the reconciler as the "user" principal, and an edit that would not
+      validate is refused rather than written. "providers add" reads the API
+      key from stdin into the login Keychain (user scope) and never takes it
+      as an argument. Nothing dials a provider or enforces a budget yet.
 
   metistry deployment [--json] [--product-dir <checkout>]
       The effective shape (deployment.yaml's D4 overlay) and the services it
@@ -801,6 +847,134 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
           return 2;
         }
         err(`metistry logs: ${e instanceof Error ? e.message : String(e)}`);
+        return 1;
+      }
+    }
+    case "compute": {
+      const loadedCompute = loadEnv();
+      const instanceDir = str(flags, "instance") ?? loadedCompute.instanceDir;
+      if (!instanceDir) {
+        err("compute needs the instance repo: pass --instance <dir> or set METISTRY_INSTANCE_DIR (docs/ops/cli.md) — compute.yaml lives there");
+        return 2;
+      }
+      let seedDir: string;
+      try {
+        seedDir = resolveSeedDir(productDir);
+      } catch (e) {
+        err(`metistry compute: ${e instanceof Error ? e.message : String(e)}`);
+        return 2;
+      }
+      const json = flags.json === true;
+      const computeOpts: ComputeOptions = {
+        instanceDir,
+        seedDir,
+        env: process.env,
+        platform: io.platform ?? process.platform,
+        uid: io.uid ?? (typeof process.getuid === "function" ? process.getuid() : 0),
+        fetchFn: fetch,
+        dryRun: flags["dry-run"] === true,
+        out,
+        ...(io.exec ? { exec: io.exec } : {}),
+      };
+      try {
+        switch (positional[0]) {
+          case undefined:
+          case "show": {
+            const report = await computeReport(computeOpts);
+            out(json ? JSON.stringify(report, null, 2) : renderComputeReport(report));
+            return 0;
+          }
+          case "providers": {
+            switch (positional[1]) {
+              case undefined:
+              case "list": {
+                const report = await computeReport(computeOpts);
+                out(json ? JSON.stringify({ providers: report.providers }, null, 2) : renderComputeReport(report));
+                return 0;
+              }
+              case "add": {
+                const template = parseTemplate(str(flags, "from"));
+                if (!template) {
+                  err(`usage: metistry compute providers add --from ${COMPUTE_TEMPLATES.join("|")} [--name <n>] [--base-url <url>] [--secret <NAME>] [--skip-test]`);
+                  return 2;
+                }
+                const r = await providersAdd({
+                  ...computeOpts,
+                  template,
+                  name: str(flags, "name"),
+                  baseUrl: str(flags, "base-url"),
+                  secret: str(flags, "secret"),
+                  skipTest: flags["skip-test"] === true,
+                });
+                if (json) out(JSON.stringify(r, null, 2));
+                else {
+                  out(`provider ${r.name} added (${r.provider.locality}, ${r.provider.base_url}) — ${r.delivery.detail}`);
+                  if (r.test) out(renderProviderTest(r.test));
+                }
+                return 0;
+              }
+              case "remove": {
+                const name = positional[2];
+                if (!name) {
+                  err("usage: metistry compute providers remove <name>");
+                  return 2;
+                }
+                const r = await providersRemove({ ...computeOpts, name });
+                out(json ? JSON.stringify(r, null, 2) : `provider ${r.name} removed — ${r.delivery.detail}`);
+                return 0;
+              }
+              case "test": {
+                const name = positional[2];
+                if (!name) {
+                  err("usage: metistry compute providers test <name> [--complete]");
+                  return 2;
+                }
+                const r = await providerTest({ ...computeOpts, name, complete: flags.complete === true });
+                out(json ? JSON.stringify(r, null, 2) : renderProviderTest(r));
+                return r.ok ? 0 : 1;
+              }
+              default:
+                err(`usage: metistry compute providers list | add --from ${COMPUTE_TEMPLATES.join("|")} | remove <name> | test <name>`);
+                return 2;
+            }
+          }
+          case "models": {
+            if (positional[1] !== undefined && positional[1] !== "list") {
+              err("usage: metistry compute models list [--provider <name>]");
+              return 2;
+            }
+            const r = await modelsList({ ...computeOpts, provider: str(flags, "provider") });
+            out(json ? JSON.stringify(r, null, 2) : renderModelsList(r));
+            return r.providers.every((p) => p.ok) ? 0 : 1;
+          }
+          case "assign": {
+            const target = parseAssignmentTarget(positional[1]);
+            const model = positional[2];
+            if (!model) {
+              err("usage: metistry compute assign <default|<tier>|crew:<name>> <provider/model> [--effort low|medium|high]");
+              return 2;
+            }
+            const r = await assign({ ...computeOpts, target, model, effort: parseEffort(str(flags, "effort")) });
+            out(json ? JSON.stringify(r, null, 2) : `${r.target} → ${r.provider}/${r.model} at ${r.effort} effort — ${r.delivery.detail}`);
+            return 0;
+          }
+          case "budget": {
+            const target = parseBudgetTarget(positional[1]);
+            const action = parseBudgetAction(str(flags, "action"));
+            if (!action) {
+              err("usage: metistry compute budget <instance|provider:<name>> [--daily <usd>] [--monthly <usd>] --action allow|stop|critical_only");
+              return 2;
+            }
+            const r = await setBudget({ ...computeOpts, target, daily: usd(flags, "daily"), monthly: usd(flags, "monthly"), action });
+            out(json ? JSON.stringify(r, null, 2) : `${r.target}: ${r.daily_usd ? `$${r.daily_usd}/day ` : ""}${r.monthly_usd ? `$${r.monthly_usd}/month ` : ""}action ${r.action} — ${r.delivery.detail}`);
+            return 0;
+          }
+          default:
+            err("usage: metistry compute show | providers … | models list | assign … | budget …   (metistry --help)");
+            return 2;
+        }
+      } catch (e) {
+        err(`metistry compute: ${e instanceof Error ? e.message : String(e)}`);
         return 1;
       }
     }

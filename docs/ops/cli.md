@@ -408,6 +408,26 @@ including what each tool can then do through `/mcp`, how to widen a grant,
 and (for Devin) why a cloud session needs an inbound path this install does
 not have yet.
 
+## Choosing compute: `metistry compute`
+
+`metistry compute` is this instance's `compute.yaml` — which providers
+exist, which model each tier and crew runs on, and what each may spend:
+
+```sh
+metistry compute providers add --from openrouter|zen|lmstudio|ollama
+metistry compute models list [--provider <name>]
+metistry compute assign default lmstudio/google/gemma-3n-e4b
+metistry compute budget instance --monthly 60 --action stop
+metistry compute show [--json]
+```
+
+A §4.7 protected path like `deployment.yaml`: every write goes through the
+reconciler as the `user` principal, and an edit whose RESULT would not
+validate is refused rather than written. `providers add` reads the API key
+from stdin into the login Keychain (user scope) and never takes it as an
+argument. Nothing dials a provider or enforces a budget yet — see
+`docs/ops/compute.md`, which is the whole story including what is missing.
+
 ## Secrets: the Keychain is the store, `.env` is generated
 
 `metistry secrets` makes the macOS login Keychain the canonical home of

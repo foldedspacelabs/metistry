@@ -1,11 +1,12 @@
 import pg from "pg";
-import { intEnv, optionalEnv, requireEnv } from "@foldedspacelabs/metistry-core";
+import { computeTiers, intEnv, optionalEnv, requireEnv } from "@foldedspacelabs/metistry-core";
 import { drainOne } from "./drain.js";
 import { drainCrewOne } from "./crew-drain.js";
 import { makeSdkEngine } from "./engine.js";
 import { brainConfigFromEnv, brainToolNames } from "./brain.js";
 import { loadSystemPrompt } from "./prompt.js";
 import { loadTiers, RULES_FILES_DEFAULT } from "./tiers.js";
+import { watchCompute } from "./compute.js";
 
 // PoC-4 rules: subscription token, never ANTHROPIC_API_KEY in-container.
 if (process.env.ANTHROPIC_API_KEY) {
@@ -34,9 +35,27 @@ const interval = intEnv("METISTRY_DRAIN_INTERVAL_MS", 1500);
 
 // Tiers are (model, effort) pairs, read from the same rules.yaml the console's
 // router reads (D4 overlay). The drain resolves a tier NAME per turn.
-const { tiers, path: tiersPath } = await loadTiers(optionalEnv("METISTRY_RULES_FILES", RULES_FILES_DEFAULT), model);
-if (tiersPath) console.log(`tiers from ${tiersPath}: ${Object.entries(tiers).map(([k, t]) => `${k}=${t.model}/${t.effort}`).join(" ")}`);
+const { tiers: rulesTiers, path: tiersPath } = await loadTiers(optionalEnv("METISTRY_RULES_FILES", RULES_FILES_DEFAULT), model);
+if (tiersPath) console.log(`tiers from ${tiersPath}: ${Object.entries(rulesTiers).map(([k, t]) => `${k}=${t.model}/${t.effort}`).join(" ")}`);
 else console.warn(`no rules.yaml found (METISTRY_RULES_FILES) — one tier only: default=${model}/medium`);
+
+// compute.yaml (C1), hot-reloaded from the same file the console watches.
+// Its `assignments:` supersede rules.yaml's `tiers:` when they are there —
+// the one routing change this PR makes. The models they name are PINNED
+// `<provider>/<id>` references, which the engine that lands next splits at
+// the point of the call; until then an assignment is what the console
+// records and what the app's picker shows.
+let tiers = rulesTiers;
+const applyAssignments = (): void => {
+  const assigned = computeTiers(compute.store.current);
+  tiers = assigned ?? rulesTiers;
+  if (assigned) {
+    console.log(`tiers from compute.yaml assignments: ${Object.entries(assigned).map(([k, t]) => `${k}=${t.model}/${t.effort}`).join(" ")}`);
+    console.warn("compute.yaml assigns pinned <provider>/<model> references; the engine that dials a provider is not in this build (docs/ops/compute.md) — leave `assignments:` out to keep rules.yaml's tiers live");
+  }
+};
+const compute = await watchCompute(pool, "assistant", applyAssignments);
+applyAssignments();
 
 // Tools: the console's mcp-brain, as the first internal agent (§4.11). Both
 // env vars or nothing — a URL without a token cannot authenticate, a token

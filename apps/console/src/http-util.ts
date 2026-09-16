@@ -8,8 +8,16 @@ export function sendJson(res: ServerResponse, status: number, body: unknown): vo
   res.end(text);
 }
 
-export function sendError(res: ServerResponse, code: ErrorCode): void {
-  sendJson(res, statusFor(code), errorEnvelope(code));
+/**
+ * A refusal names the config field, the parameter or the grant that would
+ * permit it (R3) — EXCEPT on the door: `unauthenticated` takes no detail, and
+ * an agent-facing `forbidden` stays the canonical "not granted", because a
+ * message that distinguishes "not granted" from "not found" is an oracle
+ * (invariant 8). Everything below those two is the owner's own surface, where
+ * a caller who cannot act on the answer is just a caller left guessing.
+ */
+export function sendError(res: ServerResponse, code: ErrorCode, detail?: string): void {
+  sendJson(res, statusFor(code), errorEnvelope(code, code === "unauthenticated" ? undefined : detail));
 }
 
 /** Largest request body the console will read. The default clears `capture`'s 25MB+ (PoC-7); an instance that captures bigger raises METISTRY_MAX_BODY_BYTES. */

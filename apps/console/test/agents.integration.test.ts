@@ -1,7 +1,6 @@
 // External-agent registry: misuse tests (CRIT-7 two token classes, §4.11
 // grants attach server-side, §4.19 identity from the credential) against
 // the real scratch database and a live server. Skipped without a db.
-import { readFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
@@ -11,15 +10,9 @@ import { makeServer } from "../src/server.js";
 import * as store from "../src/auth-store.js";
 import * as agents from "../src/agents.js";
 import { run as inboxDrain } from "../../../collectors/inbox-drain/run.js";
+import { loadTestEnv } from "@foldedspacelabs/metistry-core/test-env";
 
-try {
-  for (const line of readFileSync(new URL("../../../.env", import.meta.url), "utf8").split("\n")) {
-    const m = /^([A-Z_]+)=(.*)$/.exec(line.trim());
-    if (m && m[1] && process.env[m[1]] === undefined) process.env[m[1]] = m[2];
-  }
-} catch {}
-
-const hasDb = !!process.env.METISTRY_DB_PASSWORD;
+const { hasDb } = loadTestEnv(new URL("../../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
 const policy = { idleDays: 30, maxDays: 365 };
 
 describe("agent grants validation (pure)", () => {
@@ -182,6 +175,13 @@ describe.skipIf(!hasDb)("agent registry (integration)", () => {
   });
 
   it("grants attach to the token server-side: validation, then the principal reflects them", async () => {
+    // R3: the 400 carries the validator's own message, so `metistry connect
+    // <tool> --areas knowledge/…` tells the owner what to fix rather than "400"
+    const lower = await json("PUT", `/api/agents/${agentId}/grants`, { tier: "areas", areas: ["knowledge/Areas/Fsl"] });
+    expect(lower.status).toBe(400);
+    expect((await lower.json()).error).toMatchObject({ code: "invalid_request", message: expect.stringContaining("TitleCase Knowledge/... prefix") });
+    const noAreas = await json("PUT", `/api/agents/${agentId}/grants`, { tier: "areas", areas: [] });
+    expect((await noAreas.json()).error.message).toContain("tier=areas needs at least one area");
     expect((await json("PUT", `/api/agents/${agentId}/grants`, { tier: "areas", areas: ["knowledge/Areas/Fsl"] })).status).toBe(400);
     expect((await json("PUT", `/api/agents/${agentId}/grants`, { tier: "areas", areas: ["inbox/secrets"] })).status).toBe(400);
     expect((await json("PUT", `/api/agents/${agentId}/grants`, { tier: "root" })).status).toBe(400);

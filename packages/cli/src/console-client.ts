@@ -1,12 +1,15 @@
-// `metistry console whoami` — ask the console who it thinks you are, with
-// the local owner token (docs/ops/auth.md).
+// `metistry console whoami` / `console call` — ask the console who it
+// thinks you are, or make one authenticated request against it, with the
+// local owner token (docs/ops/auth.md).
 //
-// This is the verb the Mac app calls to render "signed in as owner" without
-// a passkey ceremony, and the one an operator runs to prove the door works
-// before blaming the app. It is deliberately the whole client: one GET, one
-// header, no state. The token is never printed and never reaches argv — it
-// goes into an Authorization header and nowhere else, and every error
-// message is redacted against it before it leaves this file.
+// `whoami` is the verb the Mac app calls to render "signed in as owner"
+// without a passkey ceremony, and the one an operator runs to prove the door
+// works before blaming the app. `call` is the scripting seam behind it — the
+// same door, any method and path, for the app and the second-instance guide.
+// Both are deliberately the whole client: one request, one header, no
+// state. The token is never printed and never reaches argv — it goes into
+// an Authorization header and nowhere else, and every error message is
+// redacted against it before it leaves this file.
 
 import { Keychain, keychainAccount } from "./keychain.js";
 import { realExec, type Exec } from "./exec.js";
@@ -132,4 +135,90 @@ export function renderWhoami(w: Whoami): string {
     `management ${w.management ? "yes" : "no"}`,
     ...(w.origin ? [`origin     ${w.origin}`] : []),
   ].join("\n");
+}
+
+/**
+ * True for the hostnames the local owner token is actually good for. It is
+ * minted for THIS machine's loopback (docs/ops/auth.md) — a console reached
+ * any other way is not the door this token opens, and `console call` refuses
+ * before it ever puts the token in a header aimed at one.
+ */
+export function isLoopbackConsoleUrl(url: string): boolean {
+  try {
+    // Node's URL keeps an IPv6 host bracketed (`[::1]`); strip the brackets
+    // before comparing rather than special-casing the bracketed spelling.
+    const h = new URL(url).hostname.replace(/^\[|\]$/g, "");
+    return h === "127.0.0.1" || h === "::1" || h === "localhost";
+  } catch {
+    return false;
+  }
+}
+
+export interface ConsoleCallOptions extends ConsoleTargetOptions {
+  method: string;
+  /** must start with `/` — this is a path on the console, not a whole URL */
+  path: string;
+  /** raw bytes, sent as-is (this verb does not parse or reshape a request body) */
+  body?: string | undefined;
+  fetchFn?: typeof fetch | undefined;
+  timeoutMs?: number | undefined;
+}
+
+export interface ConsoleCallResult {
+  status: number;
+  /** the response, parsed — the raw text when it does not parse as JSON, so a non-JSON answer is not swallowed */
+  body: unknown;
+  /** exactly what the console sent back, byte for byte — what `--json` prints */
+  raw: string;
+}
+
+/**
+ * One authenticated request against the instance's console, as the `user`
+ * principal — the same owner token `console whoami` presents, over the same
+ * loopback door. It is the scripting seam: no shape of its own, no retries,
+ * no interpretation of the response beyond "does it parse as JSON" — the
+ * caller (a script, the app, a person at a terminal) decides what the answer
+ * means.
+ */
+export async function consoleCall(opts: ConsoleCallOptions): Promise<ConsoleCallResult> {
+  const target = await consoleTarget(opts);
+  if (!isLoopbackConsoleUrl(target.url)) {
+    throw new Error(
+      `${target.url} is not loopback — the local owner token this verb presents is minted for THIS machine only (docs/ops/auth.md) and \`console call\` refuses to send it anywhere else. Point METISTRY_CONSOLE_URL/METISTRY_URL at a loopback address, or use a passkey session for a remote console.`,
+    );
+  }
+  const fetchFn = opts.fetchFn ?? fetch;
+  let res: Response;
+  try {
+    res = await fetchFn(`${target.url}${opts.path}`, {
+      method: opts.method,
+      headers: { authorization: `Bearer ${target.token}`, ...(opts.body !== undefined ? { "content-type": "application/json" } : {}) },
+      ...(opts.body !== undefined ? { body: opts.body } : {}),
+      signal: AbortSignal.timeout(opts.timeoutMs ?? 30_000),
+    });
+  } catch (err) {
+    throw new Error(`console unreachable at ${target.url}: ${redact((err as { cause?: { message?: string } })?.cause?.message ?? err, target.token)}`);
+  }
+  const raw = await res.text();
+  let body: unknown = raw;
+  if (raw !== "") {
+    try {
+      body = JSON.parse(raw);
+    } catch {
+      /* not JSON: raw text stands */
+    }
+  } else {
+    body = null;
+  }
+  return { status: res.status, body, raw };
+}
+
+/** The error envelope's `code`/`message` (and `field`, when the response carries one), for a non-2xx `console call`. */
+export function renderConsoleCallError(r: ConsoleCallResult): string {
+  const envelope = r.body && typeof r.body === "object" ? (r.body as Record<string, unknown>).error : undefined;
+  const e = envelope && typeof envelope === "object" ? (envelope as { code?: unknown; message?: unknown; field?: unknown }) : undefined;
+  const field = e?.field ?? (r.body && typeof r.body === "object" ? (r.body as Record<string, unknown>).field : undefined);
+  return [`HTTP ${r.status}`, e?.code ? String(e.code) : undefined, e?.message ? String(e.message) : undefined, field ? `(field: ${String(field)})` : undefined]
+    .filter((s): s is string => s !== undefined)
+    .join(" — ");
 }

@@ -1,0 +1,41 @@
+# Seeded default (D4 overlay: an instance file of the same name wins).
+#
+# The ONE read path into spend (invariant 3). The engine runs this BEFORE
+# every billable call to decide whether a budget refuses it, the runner runs
+# it before a routine that would enqueue a turn, and the weekly review runs
+# it for the spend section — so "what has this cost" has exactly one answer
+# and one definition wherever it is asked.
+#
+# `cache_ttl: 0` is load-bearing: a budget that read a cached number would
+# keep spending for the length of the cache after the limit was reached.
+name: spend
+description: >-
+  What compute has cost, per day, provider, model, tier and crew, from the
+  runs ledger (the provider/model/cost_usd columns). `is_today` and
+  `is_this_month` are Postgres's own window flags, so the clock that
+  recorded a call is the clock that decides which budget window it fell in.
+  Rows with no cost recorded are excluded; a call priced `unknown` (no
+  usage.cost and no pricing: entry) counts as $0 and says so in
+  meta.cost_source.
+params:
+  days: { type: int, default: 31 }
+sql: |
+  SELECT
+    ts::date                                                       AS day,
+    (ts::date = current_date)                                      AS is_today,
+    (date_trunc('month', ts) = date_trunc('month', now()))         AS is_this_month,
+    coalesce(provider, '')                                         AS provider,
+    coalesce(model, '')                                            AS model,
+    coalesce(meta->>'tier', '')                                    AS tier,
+    CASE WHEN kind = 'crew_run' THEN component ELSE '' END          AS crew,
+    count(*)                                                       AS calls,
+    coalesce(sum(tokens_in), 0)                                    AS tokens_in,
+    coalesce(sum(tokens_out), 0)                                   AS tokens_out,
+    coalesce(sum(cache_read_tokens), 0)                            AS cache_read,
+    coalesce(sum(cost_usd), 0)                                     AS cost_usd
+  FROM runs
+  WHERE ts >= current_date - make_interval(days => (:days)::int)
+    AND cost_usd IS NOT NULL
+  GROUP BY 1, 2, 3, 4, 5, 6, 7
+  ORDER BY day DESC, cost_usd DESC
+cache_ttl: 0

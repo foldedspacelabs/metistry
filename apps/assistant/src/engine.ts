@@ -1,122 +1,133 @@
-// The reference engine (§4.18.C): Claude Agent SDK behind the documented
-// contract — messages in, sessions rows, every call logged to runs.
-// Invariant 9: the engine has no shell and no raw git. Its ONLY tools are
-// mcp-brain's, mounted as one HTTP MCP server when configured (brain.ts);
-// built-in tools are disabled outright and the SDK is told to ignore every
-// other MCP source. Absent the brain config, the engine runs tool-less.
+// The engine layer (§4.18.C; C2 in docs/plan-refresh-2026-09-13.md §1).
+//
+// ONE interface, and a factory keyed on the provider's `kind`. What a turn
+// runs on is configuration — `compute.yaml`'s `assignments:` — resolved into
+// a (provider, model, effort) triple before anything is called. No model
+// decides which model runs (invariant 4), and no tool can reach an engine at
+// all (invariant 9, collaboration rule 2): the factory is called by the
+// drain, never from inside a turn.
+//
+// Two kinds live here today:
+//
+//   openai-compatible — the in-house loop (engine-openai.ts). Every provider
+//                       `compute.yaml` can name: OpenRouter, Zen, LM Studio,
+//                       Ollama, a bundled llama-server, Apple FM once its
+//                       bridge grows /v1.
+//   anthropic         — the Claude Agent SDK (engine-sdk.ts), unchanged in
+//                       behaviour, and the engine for a turn `compute.yaml`
+//                       does not assign. C2 removes it with the subscription
+//                       scrub; until that PR lands it is the path every
+//                       existing install is still running on, so it is a
+//                       KIND here rather than a special case anywhere else.
+//
+// Invariant 9 holds identically on both: the engine's only tools are the
+// console's `/mcp`, built-ins are off, and there is no shell and no raw git.
 
-import { query, type Options } from "@anthropic-ai/claude-agent-sdk";
-import type { Effort } from "@foldedspacelabs/metistry-core";
-import { brainOptions, type BrainConfig } from "./brain.js";
+import { SDK_ENGINE_KIND, type CostSource, type Effort, type EngineKind, type ResolvedAssignment } from "@foldedspacelabs/metistry-core";
+import { makeSdkEngine, type SdkEngineConfig } from "./engine-sdk.js";
+import { makeOpenAiEngine, type OpenAiEngineConfig } from "./engine-openai.js";
 
 export interface TurnResult {
   text: string;
   session_id: string;
   tokens_in?: number;
   tokens_out?: number;
-  /** Cache tokens from the SDK result's `usage` (Anthropic API's `cache_read_input_tokens` / `cache_creation_input_tokens`). `tokens_in` above stays the uncached input count — these are additional. */
+  /** Cache tokens as the provider reported them. `tokens_in` stays the count the provider billed as input. */
   cache_read?: number;
   cache_write?: number;
   cost_usd?: number;
+  /** The provider NAME that served the turn (`compute.yaml`'s key); absent on the un-assigned SDK path. */
+  provider?: string;
+  /** The model id as the provider knows it. */
+  model?: string;
+  /** Where the cost number came from — `unknown` is a finding, not a gap (core's cost.ts). */
+  cost_source?: CostSource;
+  /** Agentic turns the loop actually took. */
+  turns?: number;
+  /**
+   * Why the loop stopped early, when it did: the turn cap, the per-run
+   * budget, or the no-progress veto (Atomic ADOPT 4). Absent = the model
+   * finished on its own. Every one of the three still ANSWERS — the run ends
+   * in a reply, not a stack trace.
+   */
+  stopped?: "max_turns" | "max_budget" | "veto";
+  /** Lines worth keeping on the `runs` row — an unpriced call, a non-ZDR warning. Never user-facing text. */
+  notes?: string[];
   /** Tool calls the turn made, by name (`mcp__brain__capture`), with counts. Absent when none. */
   tools_used?: Record<string, number>;
 }
 
 /**
- * What one turn runs as: the resolved tier (core's `tiers.ts` — a tier is a
- * (model, effort) pair) plus the session to continue, if any.
+ * What one turn runs as: the model and effort (a tier is a (model, effort)
+ * pair — core's `tiers.ts`), the session to continue, and — when
+ * `compute.yaml` assigns this tier — the resolved assignment that says WHICH
+ * PROVIDER serves it. The assignment is what the factory keys on; its
+ * absence is the SDK path.
  */
 export interface TurnSpec {
+  /** The model as the engine wants it: an SDK alias on the SDK path, the provider's own id on an assigned one. */
   model: string;
   effort: Effort;
-  /** Continue an existing SDK session (PoC-4). Absent = a fresh session. */
+  /** Continue an existing session. Absent = a fresh one. */
   resume?: string | undefined;
-}
-
-/** One turn. */
-export type Engine = (prompt: string, spec: TurnSpec) => Promise<TurnResult>;
-
-export interface EngineConfig {
-  /** The console's mcp-brain; undefined = tool-less. */
-  brain?: BrainConfig | undefined;
-  /** Identity-templated system prompt (prompt.ts); undefined = the SDK's default (none). */
-  systemPrompt?: string | undefined;
-  /** Agentic turns per message. Tool use needs more than one; 4 was the tool-less default. */
+  /** The `compute.yaml` assignment for this turn; absent = nothing assigned it, so the SDK path runs. */
+  assignment?: ResolvedAssignment | undefined;
+  /** The thread this turn belongs to — the in-house engine's session key. */
+  thread?: string | undefined;
+  /** The tier or `crew:<name>` the turn resolved through, for the run row and the budget's `critical` flag. */
+  tier?: string | undefined;
+  /** A hard cap on what THIS turn may cost (a crew manifest's `budget_usd_per_run`). The loop stops and answers rather than exceeding it. */
+  maxCostUsd?: number | undefined;
+  /** Agentic turns for this turn only — a crew manifest's `max_turns`. Absent = the engine's own default. */
   maxTurns?: number | undefined;
 }
 
-// Kept alongside `tools: []` (brain.ts) as belt and braces: these must never
-// come back through any option the SDK grows later. Shared with the crew
-// runner (crew.ts) so a crew's built-in surface is exactly the assistant's: none.
-export const DISALLOWED = ["Bash", "Write", "Edit", "NotebookEdit", "WebFetch", "WebSearch", "Task", "Agent"];
+/** One turn. The whole contract: a prompt and a spec in, a result out — and nothing about the provider leaks into the caller. */
+export type Engine = (prompt: string, spec: TurnSpec) => Promise<TurnResult>;
 
 /**
- * The whole SDK option object for one turn — pure, so the allowlist is
- * testable without a live call.
- *
- * This function is also where "effort changes only at turn boundaries" is
- * enforced by construction rather than by prompting: the options are built
- * ONCE per turn from that turn's resolved tier and handed to a single
- * `query()`; nothing mutates them while the stream runs. Consecutive turns on
- * the same session with the same tier therefore produce byte-identical
- * options, which is what keeps the cached prompt prefix intact (a break costs
- * up to 50x the cache-read price per token on Fable/Mythos 5.1). Tested in
- * `test/brain.test.ts`.
+ * A pre-call gate the factory runs before EVERY turn on EVERY kind. Budgets
+ * are the caller of record (budgets.ts): the check has to happen before the
+ * call, and putting it here is what makes that true for the SDK path, the
+ * in-house loop and every future adapter at once. Throws to refuse.
  */
-export function buildQueryOptions(cfg: EngineConfig, spec: TurnSpec): Options {
-  return {
-    model: spec.model,
-    effort: spec.effort,
-    ...(spec.resume ? { resume: spec.resume } : {}),
-    ...(cfg.systemPrompt ? { systemPrompt: cfg.systemPrompt } : {}),
-    ...brainOptions(cfg.brain),
-    disallowedTools: DISALLOWED,
-    permissionMode: "default",
-    maxTurns: cfg.maxTurns ?? (cfg.brain ? 12 : 4),
+export type TurnGuard = (spec: TurnSpec) => Promise<void>;
+
+export interface EngineConfig extends SdkEngineConfig, OpenAiEngineConfig {
+  /** Run before every turn; throw to refuse it (budgets, and anything else that must happen before money moves). */
+  guard?: TurnGuard | undefined;
+}
+
+/** The kinds this build can run. A `compute.yaml` naming anything else fails its own schema long before it reaches here. */
+export const ENGINE_KINDS: readonly EngineKind[] = ["openai-compatible", SDK_ENGINE_KIND];
+
+/** Which engine a spec runs on. One rule, stated once: the provider's kind, or the SDK when nothing assigned it. */
+export function kindFor(spec: TurnSpec): EngineKind {
+  return spec.assignment?.config.kind ?? SDK_ENGINE_KIND;
+}
+
+/**
+ * The factory. Both engines are built once and picked per turn, because a
+ * turn's kind is a property of its tier and two tiers of one install may sit
+ * on different providers — `routine` on a local server, `deep` on a cloud —
+ * which is the normal case, not an edge one.
+ */
+export function makeEngine(cfg: EngineConfig): Engine {
+  const engines: Record<EngineKind, Engine> = {
+    "openai-compatible": makeOpenAiEngine(cfg),
+    [SDK_ENGINE_KIND]: makeSdkEngine(cfg),
   };
-}
-
-/** Count `tool_use` blocks in an assistant message's content, by tool name. */
-export function tallyToolUse(content: unknown, into: Record<string, number>): void {
-  if (!Array.isArray(content)) return;
-  for (const block of content) {
-    if (block && typeof block === "object" && (block as { type?: unknown }).type === "tool_use") {
-      const name = String((block as { name?: unknown }).name ?? "?");
-      into[name] = (into[name] ?? 0) + 1;
-    }
-  }
-}
-
-export function makeSdkEngine(cfg: EngineConfig): Engine {
   return async (prompt, spec) => {
-    const stream = query({ prompt, options: buildQueryOptions(cfg, spec) });
-
-    let text = "";
-    let sessionId = spec.resume ?? "";
-    let usage: any = {};
-    let cost: number | undefined;
-    const tools: Record<string, number> = {};
-    for await (const msg of stream) {
-      if (msg.type === "system" && msg.subtype === "init") sessionId = msg.session_id;
-      if (msg.type === "assistant") tallyToolUse(msg.message?.content, tools);
-      if (msg.type === "result") {
-        if (msg.subtype === "success") text = msg.result;
-        usage = (msg as any).usage ?? {};
-        cost = (msg as any).total_cost_usd;
-        sessionId = msg.session_id;
-      }
+    const kind = kindFor(spec);
+    const engine = engines[kind];
+    if (!engine) {
+      throw new Error(`no engine for provider kind "${kind}" — compute.yaml's providers.<name>.kind must be one of ${ENGINE_KINDS.join(", ")}`);
     }
-    if (!text) throw new Error("engine returned no result");
-    return {
-      text,
-      session_id: sessionId,
-      tokens_in: usage.input_tokens,
-      tokens_out: usage.output_tokens,
-      // cache_read_input_tokens / cache_creation_input_tokens (BetaUsage, via NonNullableUsage on the result message) — the main-loop total, same scope as tokens_in/out above.
-      cache_read: usage.cache_read_input_tokens,
-      cache_write: usage.cache_creation_input_tokens,
-      ...(cost !== undefined ? { cost_usd: cost } : {}),
-      ...(Object.keys(tools).length > 0 ? { tools_used: tools } : {}),
-    };
+    await cfg.guard?.(spec); // before the call: a budget checked afterwards is a report, not a control
+    return engine(prompt, spec);
   };
 }
+
+// The SDK path's surface, re-exported so `engine.js` stays the one import
+// path for callers that do not care which engine answered.
+export { DISALLOWED, buildQueryOptions, makeSdkEngine, tallyToolUse, type SdkEngineConfig } from "./engine-sdk.js";

@@ -75,7 +75,7 @@ describe("TasksService", () => {
     await new TasksService(db).claim(7, "bot-1");
     expect(calls[0]?.text).toMatch(/INSERT INTO runs/);
     expect(calls[0]?.values.slice(0, 2)).toEqual(["bot-1", "task_op"]);
-    expect(JSON.parse(String(calls[0]?.values[5]))).toEqual({ op: "claim", id: 7 });
+    expect(JSON.parse(String(calls[0]?.values[6]))).toEqual({ op: "claim", id: 7 }); // meta is the 7th bind since runs gained `provider` (0015)
     expect(calls.at(-1)?.text).toMatch(/UPDATE runs/);
     expect(calls.at(-1)?.values[1]).toBe(true); // ok
   });

@@ -151,7 +151,7 @@ describe("dispatch to devin-sessions (fakes)", () => {
     });
 
     const start = db.q.find((x) => x.text.startsWith("INSERT INTO runs"))!;
-    expect(JSON.parse(String(start.values[5]))).toMatchObject({ target: "devin-sessions", task: 7, principal: "owner", purpose: "knowledge_research" });
+    expect(JSON.parse(String(start.values[6]))).toMatchObject({ target: "devin-sessions", task: 7, principal: "owner", purpose: "knowledge_research" });
     const [finish] = db.runFinish();
     expect(finish![1]).toBe(true);
     expect(JSON.parse(String(finish![6]))).toEqual({ ref: "devin:devin-123", url: "https://app.devin.ai/sessions/123", session_id: "devin-123", org: "org-abc", max_acu: 3 });

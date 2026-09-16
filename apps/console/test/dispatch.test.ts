@@ -128,7 +128,7 @@ describe("dispatch (fakes)", () => {
 
     const start = db.q.find((x) => x.text.startsWith("INSERT INTO runs"))!;
     expect(start.values.slice(0, 4)).toEqual(["console", "dispatch", null, "github-issues"]);
-    expect(JSON.parse(String(start.values[5]))).toMatchObject({ target: "github-issues", task: 7, principal: "owner" });
+    expect(JSON.parse(String(start.values[6]))).toMatchObject({ target: "github-issues", task: 7, principal: "owner" });
     const [finish] = db.runFinish();
     expect(finish![1]).toBe(true); // ok
     expect(finish![5]).toBe(0.25); // cost_usd from the manifest's profile

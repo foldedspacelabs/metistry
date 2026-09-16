@@ -21,11 +21,13 @@ path.
   grey and labelled "not configured", a summary line first ("26 ok · 1 degraded
   · 1 not configured") so the panel answers before it is read. The remediation
   replaces the probe on any row that is not `ok`.
-- **Settings**, in the `Settings` scene: ⌘, and the app menu, six panes —
-  Instance, Services, Connections, Secrets, Updates, Advanced. Every value on
-  them is one of three things and the pane says which: a pointer the app
-  remembers, a read-through of a file or a verb the CLI owns, or a labelled
-  "not yet". The table below is the whole contract.
+- **Settings**, in the `Settings` scene: ⌘, and the app menu, seven panes —
+  Instance, Services, Connections, **Compute**, Secrets, Updates, Advanced.
+  Every value on them is one of three things and the pane says which: a pointer
+  the app remembers, a read-through of a file or a verb the CLI owns, or a
+  labelled "not yet". The table below is the whole contract. Compute is the
+  first pane that also **writes** — and it writes the only way anything in this
+  product does, by running a `metistry compute` verb ("The Compute pane" below).
 - **The first-launch wizard.** A sheet over the plan's seven steps, shown when
   no instance is selected and re-enterable from **Settings → Instance → Set up
   again…**. Back/Continue/Skip; each choice carries what it gets you and what it
@@ -68,6 +70,20 @@ path.
   Jobs, Containers, …) with a status dot and a submenu: Restart, Stop, Start,
   View Log. Above them: Restart All, Stop All, and "Update Available: x.y.z"
   when Sparkle has found one.
+
+  **Two things the compute work added.** The supervisor's **children** are
+  listed under *Services* rather than in a group of their own, and they carry
+  the same four controls: `metistry restart|stop|start|logs llamaserver`
+  resolves a `child` target over the supervisor's control socket
+  (`packages/cli/src/service-control.ts`), which is the same four verbs a
+  launchd job gets — doctor reports them under their own `kind` because *how*
+  they are addressed differs, and nobody opens a menu looking for a "child".
+  The supervisor itself keeps its own group: it owns them, and booting it out
+  takes them with it. And the **apple-fm** bridge row reads `apple-fm · serves
+  foundation-model` once `compute.yaml` declares a provider that dials it —
+  doctor's `local:applefm` row already names that provider, so the menu reads it
+  rather than asking `compute show` a second time. A bridge being *up* and a
+  bridge being *where turns run* are different facts.
 - **Sparkle auto-update.** Pinned to 2.9.6 — the same version
   `ops/release/runtime-versions.env` pins the signing tools to. The feed is
   `https://github.com/foldedspacelabs/metistry/releases/latest/download/appcast.xml`
@@ -327,6 +343,92 @@ keep working while queued turns wait (docs/ops/assistant-tools.md, "Running
 without an engine"). The step offers that as a button with the consequence
 written down, not as a dead end — and Settings → Compute adds one later.
 
+## The Compute pane
+
+Step 7 in miniature is the wizard's job. The pane is the rest of it: every
+`metistry compute` verb, with the file it edits never opened by this app.
+
+**Nine verbs, and no tenth thing.** `compute show`, `providers add|remove|test`,
+`models list|install|load|unload`, `assign`, `budget` — each with `--json`,
+each run as an argument array, each answered by decoding what came back
+(`sources/kit/compute-model.swift` lists them in one comment; the JSON shapes
+are `packages/cli/src/compute.ts`'s exported result types). The CLI writes
+`compute.yaml` as the **user**, through the reconciler, after re-parsing the
+result through core's schema — so a change this pane cannot express is a change
+the pane refuses to make up, and a change the CLI will not accept comes back as
+a refusal naming the field.
+
+**The pane persists nothing.** There is no `UserDefaults` key for a provider, a
+model list or a budget; the editors are drafts of what is about to become
+arguments, seeded from the last `compute show --json` and re-seeded the moment
+it changes. `compute.yaml` is the record, and it is a §4.7 protected path.
+
+**It re-reads on open, and there is no watcher.** The app watches no directory —
+it has no file watcher at all, which is the same rule that keeps the file
+*readers* out (`console-sign-in-tests.swift` walks `sources/` and asserts no
+file is opened anywhere). So a `compute.yaml` edited in a terminal shows up the
+next time the pane is opened or the instance is switched, and **Read Again**
+covers the pane that never closed.
+
+**The key still only goes to stdin, because it is the same model.** The
+add-a-provider sheet is bound to `ComputeStepModel` — the *wizard's* step 7
+model, with three fields the wizard leaves alone (`--name`, `--base-url`, and
+whether the run also assigns the default). One model owns the key's path to a
+child process, so there is one place to read to know the app never puts it in
+argv, a file or a log. The first provider on an install with no engine assigns
+`default` in the same run; every later one does not, because adding a provider
+is not a decision to run every turn on it.
+
+**Prose and JSON come down the same pipe.** Most of these verbs narrate through
+the same `out()` the `--json` result goes to — `providers add` says where it
+filed the key, `assign` warns about a non-ZDR provider, `budget` says nothing
+enforces it yet, every protected write prints its own step lines — so stdout is
+lines of prose and *then* one pretty-printed object. `JSONValue.parseTrailing`
+is that one fact in one place. It is also why **install progress is real**: the
+GGUF download's byte counts and Ollama's pull lines arrive on stdout as they
+happen and are shown verbatim, rather than a progress bar claiming a percentage
+nobody reported.
+
+**Exit codes are not the whole answer.** `providers test` and `models install`
+exit 1 when the thing they tested or installed did not work, having printed a
+perfectly good `{"ok": false, …}`. The pane reads `ok` from the JSON when the
+JSON says, and from the exit code when it does not — otherwise a provider that
+answered 401 would read as "the command broke".
+
+**The non-ZDR badge, and why it is only a badge.** A provider that is
+`off_machine` and does not claim `zdr: true` is badged on its row and on every
+assignment that uses it. It is never blocked (C13): zero data retention is what
+the *provider* states about itself, copied into `compute.yaml`, and nothing any
+client could run verifies it. The engine records one warning row per run.
+
+**`assistant: absent` is said where it can be acted on.** Doctor decides that an
+install has no engine — the app does not — and the banner quotes doctor's own
+remediation. With no providers at all the one button opens the sheet; with a
+provider but no `assignments.default` it prepares the default's row and asks
+that provider for its model list. There is a second reason doctor says `absent`
+(a default whose key is unset), and the banner says *that* with **no** button,
+because nothing one click here does would fix it: `providers add` refuses to
+re-declare a provider that already exists, which is the CLI being right.
+
+**The local models section reads doctor, not the servers.** The four
+`local:lmstudio|ollama|llamaserver|applefm` rows carry the URL probed, what is
+loaded, and the `compute.yaml` provider that dials it — so the pane runs no
+probe of its own (invariant 3). `absent` there is never a failure: a Mac that
+runs no local server is a supported install. Install is offered for the three
+Metistry has a mechanism for (`lms get`, Ollama's pull, a Hugging Face GGUF);
+Apple's Foundation Models get none, because there is nothing to pull.
+Load/unload is offered for LM Studio alone — the other two answer `noop` with
+the sentence about what actually governs their residency, and the pane prints
+that sentence instead of a tick it did not earn.
+
+**RAM headroom is an estimate and says so every time.**
+`ProcessInfo.physicalMemory` is how much memory the machine *has*, not how much
+is free; macOS compresses, caches and swaps, and the honest free figure changes
+second to second. The pane subtracts a reserve — a quarter of physical memory,
+never less than 4 GB — and labels the remainder an estimate, with "Not a
+measurement" in the same sentence. A model larger than it still loads; it is
+just slow, and that is the person's call.
+
 ## Settings: persisted vs read-through
 
 **The rule (owner direction 2026-09-09):** every setting is a front for a file
@@ -354,8 +456,16 @@ fourth one fails CI rather than appearing quietly.
 | Services | Start at login | `SMAppService.mainApp` — macOS keeps the registration; the app writes nothing (above) |
 | Connections | console sign-in: who this Mac is, with `via`, the remedy, and the argument array | `metistry console whoami --json` — the app never resolves, holds or displays the token ("Signing in" above) |
 | Connections | instance repo status, HEAD, queue depth | `doctor --json` → the `reconciler` row's `meta`. The reconciler is the sole committer, so the app runs no git of its own |
-| Connections | Claude token set / not set | `metistry secrets list --json` — never a value |
+| Connections | the provider keys `compute.yaml` names: set / not set | `metistry secrets list --json` — never a value |
 | Connections | bridges | `doctor --json` → the `bridge` rows |
+| Compute | providers, their base URL, locality, ZDR claim and whether the key each NAMES is present | `metistry compute show --json` |
+| Compute | Add Provider… (template, name, base URL, key) | `metistry compute providers add --from <t> [--name] [--base-url] --json`, **key on stdin** |
+| Compute | Test / Remove, per provider | `metistry compute providers test\|remove <name> --json` |
+| Compute | assignments: default, each tier, each `crew:<name>` — provider, model, effort | `metistry compute assign <target> <provider/model> --effort <e> --json`; the model picker is `metistry compute models list --provider <name> --json` |
+| Compute | budgets: the instance's and each provider's — daily, monthly, action | `metistry compute budget <instance\|provider:<name>> [--daily] [--monthly] --action … --json` |
+| Compute | the local model servers, with what each has loaded | `doctor --json` → the `local:lmstudio\|ollama\|llamaserver\|applefm` rows |
+| Compute | install a model; load / unload (LM Studio only) | `metistry compute models install\|load\|unload <provider/model> --json` |
+| Compute | RAM headroom | `ProcessInfo.physicalMemory` minus a documented reserve, **labelled an estimate** — nothing here reads free memory |
 | Secrets | names, scope, and the account each was found under | `metistry secrets list --json` — names only; the verb has no code path that can print a value, and neither has the pane |
 | Updates | version, channel, feed, automatic checks, Check Now | Sparkle, which owns those preferences itself |
 | Updates | instance pin | `metistry version --json` → its `lock` block |

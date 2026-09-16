@@ -145,6 +145,43 @@ const authSchema = z.strictObject({
   secret: z.string().regex(SECRET_NAME_RE, "auth.secret is the NAME of a secret (UPPER_SNAKE_CASE, e.g. METISTRY_OPENROUTER_API_KEY), never the key itself — `metistry compute providers add` puts the value in the login Keychain"),
 });
 
+/**
+ * The local server runtimes Metistry can START ITSELF. One today: the
+ * `llama-server` built into the bundled runtime pack
+ * (`ops/release/build-runtime-deps.sh`, docs/ops/bundled-runtime.md), so a
+ * fresh Mac has a local model without being sent to install a second app.
+ *
+ * LM Studio and Ollama are deliberately NOT in this list. They are peers,
+ * discovered over `/v1/models` like any other provider — Metistry uses them
+ * where they are already running and never claims their lifecycle.
+ */
+export const SERVE_RUNTIMES = ["llamaserver"] as const;
+export type ServeRuntime = (typeof SERVE_RUNTIMES)[number];
+
+/** A GGUF path under the instance, or an absolute one. Never a URL: what is loaded into memory is a file on this machine. */
+const MODEL_PATH_RE = /^[^\0]+\.gguf$/i;
+
+/**
+ * `serve:` — ADDITIVE, and optional everywhere. A provider WITHOUT it is
+ * exactly what PR 1 shipped: a base URL somebody else is listening on. A
+ * provider WITH it says "this one is mine to run", and `metistry up` renders
+ * a supervisor child for it beside the console and the reconciler.
+ *
+ * Nothing here decides anything a model could: the runtime is an enum of one
+ * and the port must be the port the `base_url` already names, so a served
+ * provider cannot be dialled anywhere other than where it listens.
+ */
+export const serveSchema = z.strictObject({
+  runtime: z.enum(SERVE_RUNTIMES, { error: `serve.runtime must be one of ${SERVE_RUNTIMES.join(", ")} — LM Studio and Ollama are peers discovered over /v1/models, never processes Metistry starts` }),
+  /** the GGUF this server loads; relative paths resolve against the INSTANCE directory, which is where `compute models install` puts them */
+  model_path: z.string().regex(MODEL_PATH_RE, "serve.model_path is the path of a .gguf file (relative to the instance directory, or absolute) — `metistry compute models install <provider>/<hf-repo>/<file.gguf>` downloads one and fills this in"),
+  port: z.number().int().min(1).max(65535),
+  /** passed verbatim after the flags this product sets; a way to tune context size or slots without a schema change */
+  extra_args: z.array(z.string().min(1)).default([]),
+});
+
+export type Serve = z.infer<typeof serveSchema>;
+
 /** Published rates, per million tokens — the cost source for providers whose responses do not carry one (Zen and other clouds). */
 const pricingSchema = z.strictObject({
   in_per_m: z.number().nonnegative(),
@@ -168,9 +205,46 @@ export const providerSchema = z.strictObject({
   data_policy: dataPolicySchema.optional(),
   /** model id → published rates. Only needed where the response carries no cost. */
   pricing: z.record(z.string().min(1), pricingSchema).optional(),
-});
+  /** present = Metistry runs this server itself (the bundled `llama-server`); absent = somebody else is listening there */
+  serve: serveSchema.optional(),
+})
+  .superRefine((p, ctx) => {
+    if (!p.serve) return;
+    if (p.locality !== "on_machine") {
+      ctx.addIssue({ code: "custom", path: ["serve"], message: `serve: is how a provider says Metistry starts it, so it only makes sense with locality: on_machine (this one is ${p.locality})` });
+    }
+    // The port is stated twice — once as the URL callers dial, once as the
+    // port the process binds — so it is checked once, here, rather than
+    // discovered as a connection refused at the first turn.
+    let port: string;
+    try {
+      const u = new URL(p.base_url);
+      port = u.port || (u.protocol === "https:" ? "443" : "80");
+    } catch {
+      return; // base_url already failed its own check
+    }
+    if (port !== String(p.serve.port)) {
+      ctx.addIssue({ code: "custom", path: ["serve", "port"], message: `serve.port is ${p.serve.port} but base_url dials port ${port} — a server Metistry starts must be dialled where it listens` });
+    }
+  });
 
 export type Provider = z.infer<typeof providerSchema>;
+
+/** Every provider this file says Metistry starts itself, in declaration order. `up` renders one supervisor child per entry. */
+export function servedProviders(cfg: Compute): Array<{ name: string; provider: Provider; serve: Serve }> {
+  return Object.entries(cfg.providers)
+    .filter((e): e is [string, Provider & { serve: Serve }] => e[1].serve !== undefined)
+    .map(([name, provider]) => ({ name, provider, serve: provider.serve }));
+}
+
+/**
+ * The first `on_machine` provider's API root, in declaration order — the
+ * embedder's default when nothing names a URL (C18). Undefined when this
+ * file declares no local provider at all.
+ */
+export function firstOnMachineBaseUrl(cfg: Compute): string | undefined {
+  return Object.values(cfg.providers).find((p) => p.locality === "on_machine")?.base_url;
+}
 
 // ---- assignments -------------------------------------------------------------
 

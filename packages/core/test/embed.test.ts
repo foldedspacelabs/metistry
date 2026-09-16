@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { EmbedClient, EmbedUnavailableError, chunkMarkdown, vectorLiteral, type FetchLike } from "../src/embed.js";
+import {
+  EMBED_DEFAULT_URL,
+  EmbedClient,
+  EmbedUnavailableError,
+  LOCAL_MODEL_URL_VAR,
+  OLLAMA_URL_VAR,
+  apiRootOf,
+  chunkMarkdown,
+  resolveLocalModelUrl,
+  vectorLiteral,
+  type FetchLike,
+} from "../src/embed.js";
 
 const para = (n: number, word: string) => Array.from({ length: n }, () => word).join(" ");
 
@@ -58,23 +69,47 @@ describe("chunkMarkdown", () => {
 describe("EmbedClient", () => {
   const vec = (n: number) => Array.from({ length: 4 }, () => n);
 
-  function stub(handler: (body: { model: string; input: string[] }) => unknown, ok = true, status = 200): { fetchImpl: FetchLike; calls: string[][] } {
+  function stub(handler: (body: { model: string; input: string[] }) => unknown, ok = true, status = 200): { fetchImpl: FetchLike; calls: string[][]; urls: string[] } {
     const calls: string[][] = [];
-    const fetchImpl: FetchLike = async (_url, init) => {
+    const urls: string[] = [];
+    const fetchImpl: FetchLike = async (url, init) => {
+      urls.push(url);
       const body = JSON.parse(init.body) as { model: string; input: string[] };
       calls.push(body.input);
       const payload = handler(body);
       return { ok, status, text: async () => JSON.stringify(payload), json: async () => payload };
     };
-    return { fetchImpl, calls };
+    return { fetchImpl, calls, urls };
   }
 
+  /** OpenAI's shape — what LM Studio, Ollama's /v1 and llama-server all answer. */
+  const openai = (vectors: number[][], withIndex = true) => ({ data: vectors.map((embedding, index) => (withIndex ? { index, embedding } : { embedding })) });
+
+  it("posts the OpenAI-compatible /v1/embeddings, not Ollama's /api/embed", async () => {
+    const { fetchImpl, urls } = stub(() => openai([vec(1)]));
+    await new EmbedClient({ dim: 4, fetchImpl }).embedOne("x");
+    expect(urls).toEqual([`${EMBED_DEFAULT_URL}/embeddings`]);
+  });
+
   it("batches requests and preserves order", async () => {
-    const { fetchImpl, calls } = stub((b) => ({ embeddings: b.input.map((_, i) => vec(i)) }));
+    const { fetchImpl, calls } = stub((b) => openai(b.input.map((_, i) => vec(i))));
     const client = new EmbedClient({ dim: 4, batch: 2, fetchImpl });
     const out = await client.embed(["a", "b", "c", "d", "e"]);
     expect(calls).toEqual([["a", "b"], ["c", "d"], ["e"]]);
     expect(out).toHaveLength(5);
+  });
+
+  it("honours `index`, so a server that answers out of order cannot mis-pair a chunk with its vector", async () => {
+    const { fetchImpl } = stub(() => ({ data: [{ index: 1, embedding: vec(9) }, { index: 0, embedding: vec(0) }] }));
+    const out = await new EmbedClient({ dim: 4, fetchImpl }).embed(["first", "second"]);
+    expect(out[0]).toEqual(vec(0));
+    expect(out[1]).toEqual(vec(9));
+  });
+
+  it("accepts a response with no `index` at all, in wire order", async () => {
+    const { fetchImpl } = stub(() => openai([vec(0), vec(1)], false));
+    const out = await new EmbedClient({ dim: 4, fetchImpl }).embed(["a", "b"]);
+    expect(out).toEqual([vec(0), vec(1)]);
   });
 
   it("turns a transport failure into EmbedUnavailableError", async () => {
@@ -85,13 +120,48 @@ describe("EmbedClient", () => {
   });
 
   it("rejects a wrong-dimension vector rather than storing it", async () => {
-    const { fetchImpl } = stub(() => ({ embeddings: [[1, 2]] }));
+    const { fetchImpl } = stub(() => openai([[1, 2]]));
     await expect(new EmbedClient({ dim: 4, fetchImpl }).embedOne("x")).rejects.toThrow(/4-dimension/);
   });
 
   it("reports a non-2xx (model not pulled) as unavailable", async () => {
-    const { fetchImpl } = stub(() => ({ error: 'model "nomic-embed-text" not found' }), false, 404);
+    const { fetchImpl } = stub(() => ({ error: { message: 'model "nomic-embed-text" not found' } }), false, 404);
     await expect(new EmbedClient({ fetchImpl }).embedOne("x")).rejects.toThrow(/404/);
+  });
+});
+
+describe("resolveLocalModelUrl", () => {
+  it("takes METISTRY_LOCAL_MODEL_URL over everything else, with no warning", () => {
+    const r = resolveLocalModelUrl({ [LOCAL_MODEL_URL_VAR]: "http://127.0.0.1:8080/v1", [OLLAMA_URL_VAR]: "http://127.0.0.1:11434" }, "http://127.0.0.1:1234/v1");
+    expect(r).toEqual({ url: "http://127.0.0.1:8080/v1", from: "env" });
+  });
+
+  it("still honours METISTRY_OLLAMA_URL, maps a bare host onto /v1, and says it is deprecated", () => {
+    const r = resolveLocalModelUrl({ [OLLAMA_URL_VAR]: "http://127.0.0.1:11434" });
+    expect(r.url).toBe("http://127.0.0.1:11434/v1");
+    expect(r.from).toBe("alias");
+    expect(r.warning).toMatch(/METISTRY_OLLAMA_URL is deprecated/);
+    expect(r.warning).toContain(LOCAL_MODEL_URL_VAR);
+  });
+
+  it("does not append /v1 twice when the alias already names the API root", () => {
+    expect(resolveLocalModelUrl({ [OLLAMA_URL_VAR]: "http://127.0.0.1:11434/v1/" }).url).toBe("http://127.0.0.1:11434/v1");
+  });
+
+  it("falls back to compute.yaml's first on_machine provider, then to a default Ollama", () => {
+    expect(resolveLocalModelUrl({}, "http://127.0.0.1:1234/v1")).toEqual({ url: "http://127.0.0.1:1234/v1", from: "compute.yaml" });
+    expect(resolveLocalModelUrl({})).toEqual({ url: EMBED_DEFAULT_URL, from: "default" });
+    expect(EMBED_DEFAULT_URL).toMatch(/\/v1$/);
+  });
+
+  it("ignores an empty or whitespace-only variable rather than dialling nowhere", () => {
+    expect(resolveLocalModelUrl({ [LOCAL_MODEL_URL_VAR]: "   ", [OLLAMA_URL_VAR]: "" }, undefined).from).toBe("default");
+  });
+
+  it("apiRootOf leaves a path alone and trims trailing slashes", () => {
+    expect(apiRootOf("http://h:1/v1//")).toBe("http://h:1/v1");
+    expect(apiRootOf("http://h:1/")).toBe("http://h:1/v1");
+    expect(apiRootOf("not a url")).toBe("not a url");
   });
 });
 

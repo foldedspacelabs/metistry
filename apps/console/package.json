@@ -23,6 +23,7 @@
     "@foldedspacelabs/metistry-tasks": "workspace:*",
     "@metistry-apps/collectors": "workspace:*",
     "@metistry-apps/routines": "workspace:*",
+    "chokidar": "^4.0.3",
     "@simplewebauthn/browser": "^13.3.0",
     "@simplewebauthn/server": "^13.2.2",
     "pg": "^8.16.0",

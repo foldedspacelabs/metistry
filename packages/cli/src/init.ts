@@ -13,7 +13,7 @@ import { cp, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { mintToken } from "@foldedspacelabs/metistry-core";
+import { COMPUTE_FILENAME, mintToken } from "@foldedspacelabs/metistry-core";
 import { realExec, type Exec } from "./exec.js";
 import { mintInstanceId, withInstanceId } from "./instance.js";
 import { LOCK_FILENAME, serializeLock, type LockFile, type LockSource } from "./lock.js";
@@ -116,6 +116,11 @@ export async function init(opts: InitOptions): Promise<InitResult> {
   identity = withInstanceId(identity, instanceId);
   await writeFile(join(dir, "identity.yaml"), identity);
   await cp(join(opts.seedDir, "rules.yaml"), join(dir, "rules.yaml"));
+  // compute.yaml — providers, assignments, budgets (docs/ops/compute.md).
+  // The seed's copy is entirely commented out, so a fresh instance assigns
+  // nothing and rules.yaml's `tiers:` stays the live map; `metistry compute`
+  // writes into this file from here on.
+  if (existsSync(join(opts.seedDir, COMPUTE_FILENAME))) await cp(join(opts.seedDir, COMPUTE_FILENAME), join(dir, COMPUTE_FILENAME));
   const assistantName = String((parseYaml(identity) as { name?: unknown })?.name ?? "");
 
   // config-shaped dirs the instance owns; the D4 overlay reads seed defaults

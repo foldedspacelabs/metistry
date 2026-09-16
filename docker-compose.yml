@@ -75,6 +75,11 @@ services:
       METISTRY_GITHUB_WRITE_TOKEN: ${METISTRY_GITHUB_WRITE_TOKEN:-}
       METISTRY_GITHUB_DISPATCH_REPO: ${METISTRY_GITHUB_DISPATCH_REPO:-}
       METISTRY_TARGETS_DIRS: ${METISTRY_TARGETS_DIRS:-targets}
+      # compute.yaml (docs/ops/compute.md): providers, assignments, budgets.
+      # The seed's copy ships in the image and assigns nothing; an instance
+      # overlays its own file (D4, last existing wins) and both the console
+      # and the assistant hot-reload it.
+      METISTRY_COMPUTE_FILES: ${METISTRY_COMPUTE_FILES:-seed/compute.yaml:compute.yaml}
       # crews (docs/ops/crews.md): seed/agents ships in the image; `agents` is
       # the instance repo's protected dir, reached through the vault bridge
       METISTRY_AGENTS_DIRS: ${METISTRY_AGENTS_DIRS:-seed/agents:agents}
@@ -127,6 +132,7 @@ services:
       # with the SAME token the console registers (degrades: tool-less when unset)
       METISTRY_BRAIN_URL: ${METISTRY_BRAIN_URL:-http://console:8080/mcp}
       METISTRY_ASSISTANT_TOKEN: ${METISTRY_ASSISTANT_TOKEN:-}
+      METISTRY_COMPUTE_FILES: ${METISTRY_COMPUTE_FILES:-seed/compute.yaml:compute.yaml}
       # identity + seed prompt ship in the image; an instance overlays via METISTRY_IDENTITY_FILES / METISTRY_PROMPT_FILES
     volumes:
       - assistant-home:/home/node   # SDK transcripts survive restarts (PoC-4)

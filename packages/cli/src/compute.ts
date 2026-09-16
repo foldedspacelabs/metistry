@@ -1,0 +1,648 @@
+// `metistry compute` — the verbs over `compute.yaml` (C1), and the surface
+// the Mac app's Compute pane drives (`--json` on every one of them).
+//
+// Three properties this module exists to hold:
+//
+//   * It never writes an invalid file. Every verb edits the instance's
+//     `compute.yaml` as a yaml Document (so comments, ordering and
+//     hand-written blocks survive the way `deployment set-shape` preserves
+//     them), then re-parses the RESULT through core's schema and refuses
+//     the whole write if it does not validate.
+//   * It writes as the `user`. `compute.yaml` says how the system behaves,
+//     so it is a §4.7 protected path: the write goes through the
+//     reconciler as the `user` principal (protected-write.ts), exactly as
+//     `deployment.yaml`, `metistry.lock` and `identity.yaml` do.
+//   * A secret value never reaches an argument. `--secret` names a
+//     variable; the value is read from stdin into the login Keychain under
+//     the USER account (C6: provider secrets are the person's, shared by
+//     every instance on this Mac), and nothing here can print one.
+
+import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { parseDocument, parse as parseYaml } from "yaml";
+import {
+  BUDGET_ACTIONS,
+  COMPUTE_FILENAME,
+  PROVIDER_NAME_RE,
+  SECRET_NAME_RE,
+  loadCompute,
+  modelRefIssue,
+  parseCompute,
+  parseModelRef,
+  providerSchema,
+  type Budget,
+  type BudgetAction,
+  type Compute,
+  type Effort,
+  type Provider,
+} from "@foldedspacelabs/metistry-core";
+import { readStdin } from "./connect-repo.js";
+import { realExec, type Exec } from "./exec.js";
+import { Keychain, keychainAccount, serviceFor } from "./keychain.js";
+import { writeProtected, type ProtectedWrite } from "./protected-write.js";
+import { StepFailed, StepRunner } from "./steps.js";
+
+/** The provider blocks `seed/compute-templates/` ships. A name that is not one of these is a typo, never a guess. */
+export const COMPUTE_TEMPLATES = ["openrouter", "zen", "lmstudio", "ollama"] as const;
+export type ComputeTemplate = (typeof COMPUTE_TEMPLATES)[number];
+
+export function parseTemplate(v: string | undefined): ComputeTemplate | undefined {
+  return (COMPUTE_TEMPLATES as readonly string[]).includes(v ?? "") ? (v as ComputeTemplate) : undefined;
+}
+
+/** `--action allow|stop|critical_only` — strict, because a typo must not silently weaken a budget. */
+export function parseBudgetAction(v: string | undefined): BudgetAction | undefined {
+  return (BUDGET_ACTIONS as readonly string[]).includes(v ?? "") ? (v as BudgetAction) : undefined;
+}
+
+/** `--effort low|medium|high`; anything else throws rather than defaulting. */
+export function parseEffort(v: string | undefined): Effort | undefined {
+  if (v === undefined) return undefined;
+  if (v !== "low" && v !== "medium" && v !== "high") throw new Error(`--effort must be low, medium or high, not ${JSON.stringify(v)}`);
+  return v;
+}
+
+/** The three things an assignment can be addressed as. */
+export type AssignmentTarget = { kind: "default" } | { kind: "tier"; name: string } | { kind: "crew"; name: string };
+
+/** `default`, `<tier>`, `crew:<name>`. Never a guess: an unparseable target is an error with the three spellings in it. */
+export function parseAssignmentTarget(v: string | undefined): AssignmentTarget {
+  if (!v) throw new Error("say what to assign: `default`, a tier name (e.g. `deep`), or `crew:<name>`");
+  if (v === "default") return { kind: "default" };
+  if (v.startsWith("crew:")) {
+    const name = v.slice("crew:".length);
+    if (!PROVIDER_NAME_RE.test(name)) throw new Error(`crew names are lowercase kebab-case — ${JSON.stringify(name)} is not one`);
+    return { kind: "crew", name };
+  }
+  if (!PROVIDER_NAME_RE.test(v)) throw new Error(`${JSON.stringify(v)} is not an assignment target — use \`default\`, a tier name (lowercase kebab-case), or \`crew:<name>\``);
+  return { kind: "tier", name: v };
+}
+
+/** Where an assignment lives in the file — also the field name a refusal names. */
+export function assignmentPath(t: AssignmentTarget): string[] {
+  return t.kind === "default" ? ["assignments", "default"] : t.kind === "tier" ? ["assignments", "tiers", t.name] : ["assignments", "crews", t.name];
+}
+
+/** `instance` or `provider:<name>`. */
+export type BudgetTarget = { kind: "instance" } | { kind: "provider"; name: string };
+
+export function parseBudgetTarget(v: string | undefined): BudgetTarget {
+  if (!v) throw new Error("say whose budget: `instance` or `provider:<name>`");
+  if (v === "instance") return { kind: "instance" };
+  if (v.startsWith("provider:")) {
+    const name = v.slice("provider:".length);
+    if (!PROVIDER_NAME_RE.test(name)) throw new Error(`provider names are lowercase kebab-case — ${JSON.stringify(name)} is not one`);
+    return { kind: "provider", name };
+  }
+  throw new Error(`${JSON.stringify(v)} is not a budget target — use \`instance\` or \`provider:<name>\``);
+}
+
+export function budgetPath(t: BudgetTarget): string[] {
+  return t.kind === "instance" ? ["budgets", "instance"] : ["budgets", "providers", t.name];
+}
+
+// ---- the options every verb takes --------------------------------------------
+
+export interface ComputeOptions {
+  /** the instance repo: where the file this command edits lives */
+  instanceDir: string;
+  /** the product's `seed/`: where `compute-templates/` is read from */
+  seedDir: string;
+  env: NodeJS.ProcessEnv;
+  platform: NodeJS.Platform;
+  uid: number;
+  exec?: Exec | undefined;
+  fetchFn?: typeof fetch | undefined;
+  /** `providers add` reads the key here — stdin, so it is never in argv or shell history */
+  readSecret?: (() => Promise<string>) | undefined;
+  /** print the plan and change nothing */
+  dryRun?: boolean | undefined;
+  out: (line: string) => void;
+}
+
+/** The candidate files, in overlay order: the product's seed, then this instance's own. */
+export function computeFiles(opts: Pick<ComputeOptions, "instanceDir" | "seedDir" | "env">): string {
+  return opts.env.METISTRY_COMPUTE_FILES ?? `${join(opts.seedDir, COMPUTE_FILENAME)}:${instanceComputeFile(opts.instanceDir)}`;
+}
+
+export function instanceComputeFile(instanceDir: string): string {
+  return join(instanceDir.replace(/\/+$/, ""), COMPUTE_FILENAME);
+}
+
+/** The login Keychain under the USER account: a provider credential belongs to the person, not to one instance (C6). */
+function providerKeychain(opts: ComputeOptions): Keychain {
+  return new Keychain(opts.exec ?? realExec, keychainAccount(opts.env));
+}
+
+const HEADER = [
+  `# ${COMPUTE_FILENAME} — this instance's compute: providers, assignments, budgets.`,
+  "# Written by `metistry compute` (docs/ops/compute.md); hand-edit anything",
+  "# the verbs do not cover. A §4.7 protected path: it says how the system",
+  "# behaves, so only you change it (invariant 2).",
+  "",
+];
+
+interface Editable {
+  path: string;
+  doc: ReturnType<typeof parseDocument>;
+}
+
+/** What is at `path` in the document, as plain JS — `getIn` hands back YAML nodes, whose fields are not where a reader expects them. */
+function plainAt(edit: Editable, path: string[]): Record<string, unknown> | undefined {
+  const node = edit.doc.getIn(path) as { toJSON?: () => unknown } | undefined;
+  const value = node && typeof node.toJSON === "function" ? node.toJSON() : node;
+  return value && typeof value === "object" ? (value as Record<string, unknown>) : undefined;
+}
+
+/** The instance's own file as an editable document — comments and all. A file that does not exist yet starts from the header, freshly written rather than copied. */
+async function openInstanceFile(opts: ComputeOptions): Promise<Editable> {
+  const path = instanceComputeFile(opts.instanceDir);
+  const text = existsSync(path) ? await readFile(path, "utf8") : HEADER.join("\n");
+  const doc = parseDocument(text);
+  if (doc.errors.length > 0) throw new StepFailed(`${path} is not valid YAML (${doc.errors[0]?.message}) — fix it by hand; refusing to edit a file this command cannot read back`);
+  return { path, doc };
+}
+
+/**
+ * Serialize, validate the RESULT through the same schema the console and
+ * the app use, and only then write — as `user`, through the reconciler.
+ * An edit that would produce a file the engine could not load is refused
+ * with the field that caused it, and nothing is written.
+ */
+async function commit(opts: ComputeOptions, edit: Editable, message: string): Promise<{ compute: Compute; content: string; delivery: ProtectedWrite }> {
+  const content = String(edit.doc);
+  let compute: Compute;
+  try {
+    compute = parseCompute(content);
+  } catch (e) {
+    throw new StepFailed(`refusing to write ${edit.path}: the result would be invalid — ${e instanceof Error ? e.message : String(e)}`);
+  }
+  const r = new StepRunner({ dryRun: opts.dryRun === true, out: opts.out, exec: opts.exec ?? realExec, env: opts.env });
+  const delivery = await writeProtected(r, COMPUTE_FILENAME, content, message, {
+    env: opts.env,
+    platform: opts.platform,
+    uid: opts.uid,
+    fetchFn: opts.fetchFn ?? fetch,
+    instanceDir: opts.instanceDir,
+  });
+  return { compute, content, delivery };
+}
+
+// ---- show --------------------------------------------------------------------
+
+export interface ProviderRow {
+  name: string;
+  kind: string;
+  locality: string;
+  base_url: string;
+  zdr: boolean | undefined;
+  /** the NAME of the secret this provider authenticates with, never its value */
+  secret?: string;
+  /** whether an item of that name exists in the login Keychain — presence only */
+  secret_present?: boolean;
+  models_assigned: string[];
+  budget?: Budget;
+}
+
+export interface AssignmentRow {
+  target: string;
+  provider: string;
+  model: string;
+  effort: Effort;
+  critical?: boolean;
+  /** an off_machine provider that does not claim ZDR: a warning, never a block (C13) */
+  warn_non_zdr: boolean;
+}
+
+export interface ComputeReport {
+  /** the file the effective configuration came from; absent = none of the overlay's candidates exist */
+  file?: string;
+  /** the overlay this report resolved */
+  files: string[];
+  /** the instance's own file, whether or not it exists yet — what the verbs edit */
+  instance_file: string;
+  providers: ProviderRow[];
+  assignments: AssignmentRow[];
+  instance_budget?: Budget;
+  /** true while `rules.yaml`'s `tiers:` is still the live map */
+  assigns_nothing: boolean;
+}
+
+export async function computeReport(opts: ComputeOptions): Promise<ComputeReport> {
+  const files = computeFiles(opts);
+  const loaded = await loadCompute(files);
+  const cfg = loaded.compute;
+  const kc = opts.platform === "darwin" ? providerKeychain(opts) : undefined;
+
+  const assigned = new Map<string, string[]>();
+  const rows: AssignmentRow[] = [];
+  const add = (target: string, model: string, effort: Effort, critical?: boolean): void => {
+    const ref = parseModelRef(model);
+    const p = cfg.providers[ref.provider];
+    assigned.set(ref.provider, [...(assigned.get(ref.provider) ?? []), ref.model]);
+    rows.push({
+      target,
+      provider: ref.provider,
+      model: ref.model,
+      effort,
+      ...(critical ? { critical } : {}),
+      warn_non_zdr: p?.locality === "off_machine" && p.zdr !== true,
+    });
+  };
+  if (cfg.assignments) {
+    add("default", cfg.assignments.default.model, cfg.assignments.default.effort, cfg.assignments.default.critical);
+    for (const [name, a] of Object.entries(cfg.assignments.tiers)) add(name, a.model, a.effort, a.critical);
+    for (const [name, a] of Object.entries(cfg.assignments.crews)) add(`crew:${name}`, a.model, a.effort, a.critical);
+  }
+
+  const providers: ProviderRow[] = [];
+  for (const [name, p] of Object.entries(cfg.providers)) {
+    providers.push({
+      name,
+      kind: p.kind,
+      locality: p.locality,
+      base_url: p.base_url,
+      zdr: p.zdr,
+      ...(p.auth ? { secret: p.auth.secret, secret_present: kc ? await kc.hasSecret(p.auth.secret) : false } : {}),
+      models_assigned: [...new Set(assigned.get(name) ?? [])],
+      ...(cfg.budgets?.providers[name] ? { budget: cfg.budgets.providers[name] } : {}),
+    });
+  }
+
+  return {
+    ...(loaded.path ? { file: loaded.path } : {}),
+    files: files.split(":").filter(Boolean),
+    instance_file: instanceComputeFile(opts.instanceDir),
+    providers,
+    assignments: rows,
+    ...(cfg.budgets?.instance ? { instance_budget: cfg.budgets.instance } : {}),
+    assigns_nothing: cfg.assignments === undefined,
+  };
+}
+
+function table(head: string[], body: string[][]): string[] {
+  const widths = head.map((h, i) => Math.max(h.length, ...body.map((r) => (r[i] ?? "").length)));
+  const line = (cells: string[]) => cells.map((c, i) => (c ?? "").padEnd(widths[i] ?? 0)).join("  ").trimEnd();
+  return [line(head), line(widths.map((w) => "-".repeat(w))), ...body.map(line)];
+}
+
+const money = (n: number | undefined): string => (n === undefined ? "-" : `$${n}`);
+
+export function renderComputeReport(r: ComputeReport): string {
+  const lines: string[] = [];
+  lines.push(r.file ? `compute: ${r.file} (overlay: ${r.files.join(" → ")}, last existing wins)` : `compute: none of ${r.files.join(", ")} exists yet`);
+  lines.push(`this instance's file: ${r.instance_file}`);
+  lines.push("");
+  lines.push(
+    ...table(
+      ["provider", "locality", "base_url", "zdr", "secret", "budget"],
+      r.providers.map((p) => [
+        p.name,
+        p.locality,
+        p.base_url,
+        p.zdr === undefined ? "-" : p.zdr ? "yes" : "no",
+        p.secret ? `${p.secret} ${p.secret_present ? "(in Keychain)" : "(MISSING)"}` : "-",
+        p.budget ? `${money(p.budget.daily_usd)}/day ${money(p.budget.monthly_usd)}/mo ${p.budget.action}` : "-",
+      ]),
+    ),
+  );
+  if (r.providers.length === 0) lines.push("(no providers — `metistry compute providers add --from openrouter|zen|lmstudio|ollama`)");
+  lines.push("");
+  if (r.assignments.length === 0) {
+    lines.push("assignments: none — rules.yaml's `tiers:` is still the live map (`metistry compute assign default <provider/model>` moves it here).");
+  } else {
+    lines.push(...table(["assignment", "provider", "model", "effort", ""], r.assignments.map((a) => [a.target, a.provider, a.model, a.effort, a.warn_non_zdr ? "⚠ off-machine, no ZDR claimed" : a.critical ? "critical" : ""])));
+  }
+  if (r.instance_budget) {
+    lines.push("");
+    lines.push(`instance budget: ${money(r.instance_budget.daily_usd)}/day ${money(r.instance_budget.monthly_usd)}/month, action ${r.instance_budget.action}`);
+  }
+  lines.push("");
+  lines.push("Not wired yet: nothing dials a provider, counts a token or enforces a budget — that is the engine (docs/ops/compute.md).");
+  return lines.join("\n");
+}
+
+// ---- providers add / remove --------------------------------------------------
+
+export interface ProvidersAddOptions extends ComputeOptions {
+  template: ComputeTemplate;
+  /** the name this provider gets in the file; default = the template's own */
+  name?: string | undefined;
+  baseUrl?: string | undefined;
+  /** the NAME of the Keychain item (never a value) */
+  secret?: string | undefined;
+  /** skip the live `/models` probe this normally ends with */
+  skipTest?: boolean | undefined;
+}
+
+export interface ProvidersAddResult {
+  name: string;
+  provider: Provider;
+  /** the secret's NAME, when this provider authenticates */
+  secret?: string;
+  /** what happened to it: stored from stdin, already there, or none needed */
+  secretStatus: "stored" | "present" | "none" | "skipped";
+  test?: ProviderTestResult;
+  delivery: ProtectedWrite;
+}
+
+/** One template file: a map of exactly one provider name → block. */
+export async function readTemplate(seedDir: string, template: ComputeTemplate): Promise<{ name: string; block: Record<string, unknown> }> {
+  const path = join(seedDir, "compute-templates", `${template}.yaml`);
+  if (!existsSync(path)) throw new StepFailed(`no template at ${path} — set METISTRY_PRODUCT_DIR to a Metistry checkout (or pass --product-dir)`);
+  const parsed = (parseYaml(await readFile(path, "utf8")) ?? {}) as Record<string, unknown>;
+  const [name, block] = Object.entries(parsed)[0] ?? [];
+  if (!name || typeof block !== "object" || block === null) throw new StepFailed(`${path} is not a provider template (one top-level <name>: block expected)`);
+  return { name, block: block as Record<string, unknown> };
+}
+
+export async function providersAdd(opts: ProvidersAddOptions): Promise<ProvidersAddResult> {
+  const { name: templateName, block } = await readTemplate(opts.seedDir, opts.template);
+  const name = opts.name ?? templateName;
+  if (!PROVIDER_NAME_RE.test(name)) throw new StepFailed(`--name ${JSON.stringify(name)} is not a provider name (lowercase, digits, - and _, starting with a letter)`);
+  if (opts.baseUrl !== undefined) block.base_url = opts.baseUrl;
+  if (opts.secret !== undefined) {
+    if (!SECRET_NAME_RE.test(opts.secret)) throw new StepFailed(`--secret takes the NAME of a secret (UPPER_SNAKE_CASE, e.g. METISTRY_OPENROUTER_API_KEY), never the key itself — ${JSON.stringify(opts.secret)} is not a name`);
+    block.auth = { secret: opts.secret };
+  }
+  const parsed = providerSchema.safeParse(block);
+  if (!parsed.success) {
+    throw new StepFailed(`the ${opts.template} template with these overrides is not a valid provider: ${parsed.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ")}`);
+  }
+  const provider = parsed.data;
+
+  const edit = await openInstanceFile(opts);
+  if (edit.doc.hasIn(["providers", name])) {
+    throw new StepFailed(`${edit.path} already declares provider ${name} — \`metistry compute providers remove ${name}\` first, or pass --name <other> to add a second one`);
+  }
+  edit.doc.setIn(["providers", name], block);
+
+  // The value: stdin → the login Keychain, user account. Before the write,
+  // so a run that cannot store the credential does not leave a provider in
+  // the file with nothing behind it.
+  let secretStatus: ProvidersAddResult["secretStatus"] = "none";
+  if (provider.auth) {
+    const varName = provider.auth.secret;
+    if (opts.platform !== "darwin") {
+      opts.out(`no login Keychain on ${opts.platform}: put ${varName} in this install's environment yourself (docs/ops/compute.md).`);
+      secretStatus = "skipped";
+    } else {
+      const kc = providerKeychain(opts);
+      if (await kc.hasSecret(varName)) {
+        opts.out(`${varName} is already in the login Keychain under account ${kc.account} — left as it is (\`metistry compute providers test ${name}\` proves it works).`);
+        secretStatus = "present";
+      } else if (opts.dryRun === true) {
+        opts.out(`[dry-run] would ask for ${varName} on stdin and store it under Keychain account ${kc.account}`);
+        secretStatus = "skipped";
+      } else {
+        opts.out(`paste the ${name} API key, then Ctrl-D (read from stdin, never echoed, never in argv):`);
+        const value = (await (opts.readSecret ?? readStdin)()).trim();
+        if (!value) throw new StepFailed(`no key on stdin — ${edit.path} was NOT changed`);
+        await kc.setSecret(varName, value);
+        opts.out(`stored ${varName} in the login Keychain under account ${kc.account} (user scope: a provider credential is yours, shared by every instance on this Mac).`);
+        secretStatus = "stored";
+      }
+    }
+  }
+
+  const { delivery } = await commit(opts, edit, `metistry compute providers add ${name} (--from ${opts.template})`);
+  const test = opts.skipTest === true || opts.dryRun === true ? undefined : await providerTest({ ...opts, name }).catch((e) => ({ name, ok: false, url: provider.base_url, detail: e instanceof Error ? e.message : String(e), models: [] }) as ProviderTestResult);
+  return { name, provider, ...(provider.auth ? { secret: provider.auth.secret } : {}), secretStatus, ...(test ? { test } : {}), delivery };
+}
+
+export interface ProvidersRemoveResult {
+  name: string;
+  delivery: ProtectedWrite;
+}
+
+export async function providersRemove(opts: ComputeOptions & { name: string }): Promise<ProvidersRemoveResult> {
+  const edit = await openInstanceFile(opts);
+  if (!edit.doc.hasIn(["providers", opts.name])) {
+    throw new StepFailed(`${edit.path} does not declare a provider called ${opts.name}`);
+  }
+  edit.doc.deleteIn(["providers", opts.name]);
+  // The schema refuses an assignment whose provider is gone, so `commit`
+  // would fail anyway — this says which field to change first instead of
+  // making the operator read a validation error.
+  const before = parseCompute(await readFile(edit.path, "utf8").catch(() => ""));
+  const users = [
+    ...(before.assignments && parseModelRef(before.assignments.default.model).provider === opts.name ? ["assignments.default"] : []),
+    ...Object.entries(before.assignments?.tiers ?? {}).filter(([, a]) => parseModelRef(a.model).provider === opts.name).map(([n]) => `assignments.tiers.${n}`),
+    ...Object.entries(before.assignments?.crews ?? {}).filter(([, a]) => parseModelRef(a.model).provider === opts.name).map(([n]) => `assignments.crews.${n}`),
+    ...(before.budgets?.providers[opts.name] ? [`budgets.providers.${opts.name}`] : []),
+  ];
+  if (users.length > 0) {
+    throw new StepFailed(`${opts.name} is still named by ${users.join(", ")} — reassign those first (\`metistry compute assign <target> <other-provider>/<model>\`); ${edit.path} was NOT changed`);
+  }
+  const { delivery } = await commit(opts, edit, `metistry compute providers remove ${opts.name}`);
+  opts.out(`the ${opts.name} secret (if any) is left in the login Keychain — \`metistry secrets\` is the only thing that deletes one.`);
+  return { name: opts.name, delivery };
+}
+
+// ---- providers test / models list --------------------------------------------
+
+export interface ProviderTestResult {
+  name: string;
+  ok: boolean;
+  url: string;
+  /** model ids the provider served back, capped for display */
+  models: string[];
+  /** one line: an HTTP status, a model count, or why it failed. Never a secret. */
+  detail: string;
+  /** `--complete`: a real one-token call */
+  completion?: { ok: boolean; model: string; detail: string };
+}
+
+/** The provider's block from the effective (overlaid) configuration, with the field name in the refusal when it is not there. */
+async function providerOf(opts: ComputeOptions, name: string): Promise<{ provider: Provider; compute: Compute }> {
+  const { compute } = await loadCompute(computeFiles(opts));
+  const provider = compute.providers[name];
+  if (!provider) {
+    throw new StepFailed(`providers.${name} is not declared in ${computeFiles(opts).split(":").filter(Boolean).join(" or ")} (declared: ${Object.keys(compute.providers).join(", ") || "none"})`);
+  }
+  return { provider, compute };
+}
+
+/** The API root with no trailing slash, so `${root}/models` is right whatever the file says. */
+export function apiRoot(baseUrl: string): string {
+  return baseUrl.replace(/\/+$/, "");
+}
+
+/** The bearer for a provider, from the login Keychain. Returns undefined for a provider that declares no auth; throws when the item is missing, naming the variable and not its value. */
+async function bearerFor(opts: ComputeOptions, name: string, provider: Provider): Promise<string | undefined> {
+  if (!provider.auth) return undefined;
+  const varName = provider.auth.secret;
+  const fromEnv = opts.env[varName];
+  if (fromEnv) return fromEnv;
+  if (opts.platform !== "darwin") throw new StepFailed(`${varName} is not in this environment and there is no login Keychain on ${opts.platform} — export it before running this`);
+  const value = await providerKeychain(opts).getSecret(varName);
+  if (!value) {
+    throw new StepFailed(`providers.${name}.auth.secret names ${varName}, which is not in the login Keychain under account ${keychainAccount(opts.env)} — \`metistry compute providers add --from <template> --name ${name} --secret ${varName}\` stores it (or \`security add-generic-password -a ${keychainAccount(opts.env)} -s ${serviceFor(varName)} -w\`)`);
+  }
+  return value;
+}
+
+interface ModelsResponse {
+  data?: Array<{ id?: unknown }>;
+}
+
+async function listModelsFrom(opts: ComputeOptions, name: string, provider: Provider): Promise<{ ok: boolean; models: string[]; detail: string }> {
+  const url = `${apiRoot(provider.base_url)}/models`;
+  const bearer = await bearerFor(opts, name, provider);
+  let res: Response;
+  try {
+    res = await (opts.fetchFn ?? fetch)(url, {
+      headers: { accept: "application/json", ...(bearer ? { authorization: `Bearer ${bearer}` } : {}) },
+      signal: AbortSignal.timeout(15_000),
+    });
+  } catch (err) {
+    return { ok: false, models: [], detail: `${url} did not answer (${err instanceof Error ? err.message : String(err)})${provider.locality === "on_machine" ? " — is the local server running?" : ""}` };
+  }
+  if (!res.ok) return { ok: false, models: [], detail: `${url} → HTTP ${res.status}${res.status === 401 || res.status === 403 ? " (the credential was refused)" : ""}` };
+  let body: ModelsResponse;
+  try {
+    body = (await res.json()) as ModelsResponse;
+  } catch {
+    return { ok: false, models: [], detail: `${url} answered ${res.status} but not JSON` };
+  }
+  const models = (body.data ?? []).map((m) => String(m?.id ?? "")).filter(Boolean).sort();
+  return { ok: true, models, detail: `${url} → ${models.length} model(s)` };
+}
+
+export async function providerTest(opts: ComputeOptions & { name: string; complete?: boolean | undefined }): Promise<ProviderTestResult> {
+  const { provider, compute } = await providerOf(opts, opts.name);
+  const probe = await listModelsFrom(opts, opts.name, provider);
+  const result: ProviderTestResult = { name: opts.name, ok: probe.ok, url: apiRoot(provider.base_url), models: probe.models.slice(0, 20), detail: probe.detail };
+  if (!opts.complete || !probe.ok) return result;
+
+  // A real one-token call: the only thing that proves the credential can
+  // actually buy a completion rather than just list a catalogue.
+  const assignedHere = [
+    compute.assignments?.default.model,
+    ...Object.values(compute.assignments?.tiers ?? {}).map((a) => a.model),
+    ...Object.values(compute.assignments?.crews ?? {}).map((a) => a.model),
+  ]
+    .filter((m): m is string => typeof m === "string" && !modelRefIssue(m))
+    .map(parseModelRef)
+    .filter((m) => m.provider === opts.name)
+    .map((m) => m.model);
+  const model = assignedHere[0] ?? probe.models[0];
+  if (!model) return { ...result, completion: { ok: false, model: "", detail: "nothing to call: this provider served no models and nothing is assigned to it" } };
+  const url = `${apiRoot(provider.base_url)}/chat/completions`;
+  const bearer = await bearerFor(opts, opts.name, provider);
+  try {
+    const res = await (opts.fetchFn ?? fetch)(url, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...(bearer ? { authorization: `Bearer ${bearer}` } : {}) },
+      body: JSON.stringify({ model, messages: [{ role: "user", content: "ping" }], max_tokens: 1, ...(provider.request ?? {}) }),
+      signal: AbortSignal.timeout(60_000),
+    });
+    return { ...result, ok: result.ok && res.ok, completion: { ok: res.ok, model, detail: `${url} → HTTP ${res.status}` } };
+  } catch (err) {
+    return { ...result, ok: false, completion: { ok: false, model, detail: `${url} did not answer (${err instanceof Error ? err.message : String(err)})` } };
+  }
+}
+
+export function renderProviderTest(t: ProviderTestResult): string {
+  const lines = [`${t.name}: ${t.ok ? "ok" : "FAILED"} — ${t.detail}`];
+  if (t.models.length > 0) lines.push(`  models: ${t.models.slice(0, 8).join(", ")}${t.models.length > 8 ? `, … (${t.models.length} total)` : ""}`);
+  if (t.completion) lines.push(`  completion (${t.completion.model}): ${t.completion.ok ? "ok" : "FAILED"} — ${t.completion.detail}`);
+  return lines.join("\n");
+}
+
+export interface ModelsListResult {
+  providers: Array<{ name: string; ok: boolean; detail: string; models: string[] }>;
+}
+
+/** `/v1/models`, live, for one provider or every declared one. */
+export async function modelsList(opts: ComputeOptions & { provider?: string | undefined }): Promise<ModelsListResult> {
+  const { compute } = await loadCompute(computeFiles(opts));
+  const names = opts.provider ? [opts.provider] : Object.keys(compute.providers);
+  if (opts.provider && !compute.providers[opts.provider]) await providerOf(opts, opts.provider); // one refusal, one place
+  const providers: ModelsListResult["providers"] = [];
+  for (const name of names) {
+    const p = compute.providers[name]!;
+    try {
+      const probe = await listModelsFrom(opts, name, p);
+      providers.push({ name, ok: probe.ok, detail: probe.detail, models: probe.models });
+    } catch (e) {
+      providers.push({ name, ok: false, detail: e instanceof Error ? e.message : String(e), models: [] });
+    }
+  }
+  return { providers };
+}
+
+export function renderModelsList(r: ModelsListResult): string {
+  if (r.providers.length === 0) return "no providers declared — `metistry compute providers add --from openrouter|zen|lmstudio|ollama`";
+  const lines: string[] = [];
+  for (const p of r.providers) {
+    lines.push(`${p.name}: ${p.detail}`);
+    for (const m of p.models) lines.push(`  ${p.name}/${m}`);
+    if (p.models.length === 0 && p.ok) lines.push("  (none loaded)");
+  }
+  lines.push("");
+  lines.push("Assign one with: metistry compute assign <default|tier|crew:name> <provider/model> [--effort low|medium|high]");
+  return lines.join("\n");
+}
+
+// ---- assign ------------------------------------------------------------------
+
+export interface AssignResult {
+  target: string;
+  provider: string;
+  model: string;
+  effort: Effort;
+  warn_non_zdr: boolean;
+  delivery: ProtectedWrite;
+}
+
+export async function assign(opts: ComputeOptions & { target: AssignmentTarget; model: string; effort?: Effort | undefined }): Promise<AssignResult> {
+  const why = modelRefIssue(opts.model);
+  if (why) throw new StepFailed(`${assignmentPath(opts.target).join(".")}.model: ${why}`);
+  const ref = parseModelRef(opts.model);
+  const edit = await openInstanceFile(opts);
+  const path = assignmentPath(opts.target);
+  // `assignments.default` is where every unknown and unnamed tier lands, so
+  // it has to exist before a tier or a crew can be assigned — otherwise some
+  // turns would resolve here and the rest would still resolve in rules.yaml,
+  // which is the one thing "one read path into state" is against.
+  if (opts.target.kind !== "default" && plainAt(edit, ["assignments", "default"]) === undefined) {
+    throw new StepFailed(`assignments.default is not set yet, and it is where every unnamed and unknown tier lands — run \`metistry compute assign default <provider/model>\` first; ${edit.path} was NOT changed`);
+  }
+  const existing = plainAt(edit, path);
+  const effort = opts.effort ?? (typeof existing?.effort === "string" ? (existing.effort as Effort) : "medium");
+  edit.doc.setIn(path, { model: opts.model, effort });
+  const { compute, delivery } = await commit(opts, edit, `metistry compute assign ${path.join(".")} → ${opts.model}`);
+  const p = compute.providers[ref.provider]!;
+  const warn = p.locality === "off_machine" && p.zdr !== true;
+  if (warn) opts.out(`⚠ ${ref.provider} is off_machine and does not claim zero data retention — this is recorded, never blocked (C13); the engine writes one warning row per run.`);
+  return { target: path.join("."), provider: ref.provider, model: ref.model, effort, warn_non_zdr: warn, delivery };
+}
+
+// ---- budget ------------------------------------------------------------------
+
+export interface BudgetResult {
+  target: string;
+  daily_usd?: number;
+  monthly_usd?: number;
+  action: BudgetAction;
+  delivery: ProtectedWrite;
+}
+
+export async function setBudget(
+  opts: ComputeOptions & { target: BudgetTarget; daily?: number | undefined; monthly?: number | undefined; action: BudgetAction },
+): Promise<BudgetResult> {
+  const path = budgetPath(opts.target);
+  const edit = await openInstanceFile(opts);
+  const existing = plainAt(edit, path) ?? {};
+  const daily = opts.daily ?? (typeof existing.daily_usd === "number" ? existing.daily_usd : undefined);
+  const monthly = opts.monthly ?? (typeof existing.monthly_usd === "number" ? existing.monthly_usd : undefined);
+  if (daily === undefined && monthly === undefined) {
+    throw new StepFailed(`${path.join(".")}: give --daily <usd> or --monthly <usd> — an action with no limit never fires`);
+  }
+  edit.doc.setIn(path, { ...(daily === undefined ? {} : { daily_usd: daily }), ...(monthly === undefined ? {} : { monthly_usd: monthly }), action: opts.action });
+  const { delivery } = await commit(opts, edit, `metistry compute budget ${path.join(".")} → ${opts.action}`);
+  opts.out("Recorded. Nothing enforces it yet — budgets are checked in the engine, before the call (docs/ops/compute.md).");
+  return { target: path.join("."), ...(daily === undefined ? {} : { daily_usd: daily }), ...(monthly === undefined ? {} : { monthly_usd: monthly }), action: opts.action, delivery };
+}

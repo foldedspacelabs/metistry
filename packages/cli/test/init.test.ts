@@ -49,7 +49,7 @@ describe("metistry init", () => {
     expect(git(dir, "rev-parse", "HEAD")).toBe(r.commit);
     expect(git(dir, "status", "--porcelain")).toBe("");
     expect(git(dir, "ls-files").split("\n").sort()).toEqual(
-      [".gitignore", "Knowledge/now.md", "README.md", "identity.yaml", "metistry.lock", "rules.yaml", ...INSTANCE_DIRS.map((d) => `${d}/.gitkeep`)].sort(),
+      [".gitignore", "Knowledge/now.md", "README.md", "compute.yaml", "identity.yaml", "metistry.lock", "rules.yaml", ...INSTANCE_DIRS.map((d) => `${d}/.gitkeep`)].sort(),
     );
     await writeFile(join(dir, "inbox", "x.txt"), "capture");
     expect(git(dir, "status", "--porcelain")).toBe("");

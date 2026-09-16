@@ -14,6 +14,7 @@ import { applyName, init, lockFile, mentionFor, INSTANCE_DIRS } from "../src/ini
 import { readInstanceId, INSTANCE_ID_RE } from "../src/instance.js";
 import { parseLock } from "../src/lock.js";
 import { main } from "../src/main.js";
+import { portsFile, portsOf, serializeNamespace, type Namespace } from "../src/namespace.js";
 
 const seedDir = fileURLToPath(new URL("../../../seed/", import.meta.url));
 const git = (dir: string, ...args: string[]) => execFileSync("git", args, { cwd: dir, encoding: "utf8" }).trim();
@@ -23,7 +24,7 @@ const MINTED = "TEST-TOKEN-NEVER-ON-DISK";
 describe("metistry init", () => {
   it("stamps the instance repo exactly like the by-hand bootstrap, in one commit authored Metistry", async () => {
     const dir = join(await fresh(), "instance");
-    const r = await init({ dir, seedDir, version: "1.2.3", now: new Date("2026-09-07T12:00:00Z"), mint: () => MINTED });
+    const r = await init({ dir, seedDir, version: "1.2.3", now: new Date("2026-09-07T12:00:00Z"), mint: () => MINTED, platform: "linux" });
 
     expect(r.dir).toBe(dir);
     expect(existsSync(join(dir, "Knowledge", "now.md"))).toBe(true);
@@ -66,6 +67,7 @@ describe("metistry init", () => {
       `METISTRY_INSTANCE_DIR=${dir}`,
       `METISTRY_BRIDGE_TOKEN_RECONCILER=${MINTED}`,
       "METISTRY_RECONCILER_URL=http://host.docker.internal:7812",
+      "METISTRY_ORIGIN=http://127.0.0.1:8080", // required to start in either shape (apps/console/src/main.ts requireEnv)
       `METISTRY_LOCAL_OWNER_TOKEN=${MINTED}`, // the console's local owner door (docs/ops/auth.md)
     ]);
     for (const f of git(dir, "ls-files").split("\n")) expect(readFileSync(join(dir, f), "utf8"), f).not.toContain(MINTED);
@@ -127,12 +129,13 @@ describe("metistry init", () => {
   it("main: init prints the .env lines and exits 0; usage errors exit 2", async () => {
     const dir = join(await fresh(), "instance");
     const lines: string[] = [];
-    const code = await main(["init", dir, "--name", "Ada", "--product-dir", fileURLToPath(new URL("../../../", import.meta.url))], { out: (s) => lines.push(s) });
+    const code = await main(["init", dir, "--name", "Ada", "--product-dir", fileURLToPath(new URL("../../../", import.meta.url))], { out: (s) => lines.push(s), platform: "linux" });
     expect(code).toBe(0);
     const text = lines.join("\n");
     expect(text).toContain(`METISTRY_INSTANCE_DIR=${dir}`);
     expect(text).toMatch(/METISTRY_BRIDGE_TOKEN_RECONCILER=[A-Za-z0-9_-]{40,}/);
     expect(text).toContain("METISTRY_RECONCILER_URL=http://host.docker.internal:7812");
+    expect(text).toContain("METISTRY_ORIGIN=http://127.0.0.1:8080");
     expect(text).toContain('assistant named "Ada"');
     expect(existsSync(join(dir, ".env"))).toBe(false);
 
@@ -158,5 +161,56 @@ describe("metistry init", () => {
     expect(await main(["init", bad, "--channel", "stable", "--product-dir", product], { out: () => {}, err: (s) => errs.push(s) })).toBe(2);
     expect(errs[0]).toMatch(/--channel must be git or release/);
     expect(existsSync(bad)).toBe(false);
+  });
+
+  it("on darwin, prints launchd-shaped lines with METISTRY_ORIGIN; --shape compose keeps the old lines even there (docs/ops/deployment-shapes.md #4)", async () => {
+    const dir = join(await fresh(), "instance");
+    const launchd = await init({ dir, seedDir, version: "0.0.1", mint: () => MINTED, platform: "darwin" });
+    expect(launchd.envLines).toEqual([
+      `METISTRY_INSTANCE_DIR=${dir}`,
+      `METISTRY_BRIDGE_TOKEN_RECONCILER=${MINTED}`,
+      "METISTRY_RECONCILER_URL=http://127.0.0.1:7812",
+      "METISTRY_ORIGIN=http://127.0.0.1:8080",
+      `METISTRY_LOCAL_OWNER_TOKEN=${MINTED}`,
+    ]);
+
+    const composeDir = join(await fresh(), "instance");
+    const compose = await init({ dir: composeDir, seedDir, version: "0.0.1", mint: () => MINTED, platform: "darwin", shape: "compose" });
+    expect(compose.envLines).toEqual([
+      `METISTRY_INSTANCE_DIR=${composeDir}`,
+      `METISTRY_BRIDGE_TOKEN_RECONCILER=${MINTED}`,
+      "METISTRY_RECONCILER_URL=http://host.docker.internal:7812",
+      "METISTRY_ORIGIN=http://127.0.0.1:8080",
+      `METISTRY_LOCAL_OWNER_TOKEN=${MINTED}`,
+    ]);
+
+    // and a non-darwin platform keeps today's compose default without --shape
+    const linuxDir = join(await fresh(), "instance");
+    const linux = await init({ dir: linuxDir, seedDir, version: "0.0.1", mint: () => MINTED, platform: "linux" });
+    expect(linux.envLines).toContain("METISTRY_RECONCILER_URL=http://host.docker.internal:7812");
+  });
+
+  it("a namespaced instance's launchd lines use its own ports (state/ports.yaml), not the fixed defaults", async () => {
+    const dir = join(await fresh(), "instance");
+    const namespace: Namespace = { labelSuffix: "a1b2c3d4", base: 8460, ports: portsOf(8460), from: "test" };
+    await mkdir(join(dir, "state"), { recursive: true });
+    await writeFile(portsFile(dir), serializeNamespace(namespace, "a1b2c3d4-0000-4000-8000-000000000000"));
+
+    const r = await init({ dir, seedDir, version: "0.0.1", force: true, mint: () => MINTED, platform: "darwin" });
+    expect(r.envLines).toContain(`METISTRY_RECONCILER_URL=http://127.0.0.1:${namespace.ports.reconciler}`);
+    expect(r.envLines).toContain(`METISTRY_ORIGIN=http://127.0.0.1:${namespace.ports.console}`);
+
+    // compose ignores the namespace entirely — docker compose never reads ports.yaml
+    const r2 = await init({ dir, seedDir, version: "0.0.1", force: true, mint: () => MINTED, shape: "compose" });
+    expect(r2.envLines).toContain("METISTRY_RECONCILER_URL=http://host.docker.internal:7812");
+    expect(r2.envLines).toContain("METISTRY_ORIGIN=http://127.0.0.1:8080");
+  });
+
+  it("main: --shape rejects a typo rather than falling back to the platform guess", async () => {
+    const dir = join(await fresh(), "instance");
+    const errs: string[] = [];
+    expect(await main(["init", dir, "--shape", "docker"], { out: () => {}, err: (s) => errs.push(s) })).toBe(2);
+    expect(errs[0]).toMatch(/--shape must be compose or launchd/);
+    expect(existsSync(dir)).toBe(false);
   });
 });

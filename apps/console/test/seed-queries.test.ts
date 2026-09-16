@@ -32,6 +32,7 @@ const REQUIRED = [
   "activity_feed",
   "agent_presence",
   "reply_feedback_summary",
+  "spend", // the budget's read path (invariant 3) — the engine runs it before every billable call
   "board",
   "board_projects",
 ];

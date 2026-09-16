@@ -13,7 +13,17 @@
 
 import { readFile } from "node:fs/promises";
 import { parse as parseYaml } from "yaml";
-import { parseTiers, type TierMap } from "@foldedspacelabs/metistry-core";
+import {
+  DEFAULT_TIER,
+  parseTiers,
+  resolveAssignment,
+  resolveTier,
+  type Compute,
+  type Effort,
+  type ResolvedAssignment,
+  type Tier,
+  type TierMap,
+} from "@foldedspacelabs/metistry-core";
 
 export const RULES_FILES_DEFAULT = "seed/rules.yaml:rules.yaml";
 
@@ -43,4 +53,42 @@ export async function loadTiers(paths: string, fallbackModel: string): Promise<L
     loaded = { tiers: parseTiers(doc.tiers), path: p };
   }
   return loaded ?? { tiers: fallbackTiers(fallbackModel) };
+}
+
+// ---- one resolution point: tier NAME → (provider, model, effort) --------------
+
+/**
+ * What a turn actually runs as. `assignment` is present exactly when
+ * `compute.yaml` assigned this tier or crew — which is also what decides
+ * WHICH ENGINE runs it (engine.ts `kindFor`), so the two can never disagree.
+ */
+export interface ResolvedTurn {
+  /** The key that applied: a tier name, `crew:<name>`, or `default` when the name was unknown. */
+  tier: string;
+  /** The model as the engine wants it: the provider's own id when assigned, the rules.yaml/manifest string otherwise. */
+  model: string;
+  effort: Effort;
+  assignment?: ResolvedAssignment | undefined;
+}
+
+/**
+ * The precedence, in one place and one order:
+ *
+ *   1. `compute.yaml` `assignments:` — tiers by name, crews by `crew:<name>`,
+ *      everything unknown on `assignments.default` (C1, §2.4: assignments
+ *      supersede `rules.yaml`'s `tiers:` and a crew manifest's `model`).
+ *   2. the caller's own fallback pair — a crew manifest's (model, effort),
+ *      which is the only pair `rules.yaml` never had.
+ *   3. `rules.yaml`'s `tiers:` block, which still decides on every install
+ *      that has not written an `assignments:` block.
+ *
+ * An unknown name lands on `default` at every level. The resolver never
+ * invents a model and never passes a name through as though it had matched.
+ */
+export function resolveTurn(cfg: Compute, tiers: TierMap, name?: string | null, fallback?: Tier | undefined): ResolvedTurn {
+  const assignment = resolveAssignment(cfg, name);
+  if (assignment) return { tier: assignment.from, model: assignment.model, effort: assignment.effort, assignment };
+  if (fallback) return { tier: typeof name === "string" ? name : DEFAULT_TIER, model: fallback.model, effort: fallback.effort };
+  const t = resolveTier(tiers, name);
+  return { tier: t.tier, model: t.model, effort: t.effort };
 }

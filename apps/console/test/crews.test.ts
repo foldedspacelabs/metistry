@@ -10,6 +10,7 @@ import { memoryVault } from "@foldedspacelabs/metistry-artifacts";
 import type { AgentPrincipal } from "@foldedspacelabs/metistry-mcp-brain";
 import type { TasksService } from "@foldedspacelabs/metistry-tasks";
 import { TargetRegistry } from "../src/dispatch.js";
+import { emptyCompute, parseCompute, SDK_ENGINE_KIND, type Compute } from "@foldedspacelabs/metistry-core";
 import { CrewRegistry, crewPolicy, dispatchCrew, intersectAllow, loadCrews, LOCAL_CREW_TARGET, parseCrewFile, readCrewVault, snapshotOf } from "../src/crews.js";
 
 const root = fileURLToPath(new URL("../../../", import.meta.url));
@@ -181,7 +182,7 @@ describe("dispatchCrew (fakes)", () => {
     expect(tasks.created).toHaveLength(0);
     const start = db.q.find((x) => x.text.startsWith("INSERT INTO runs"))!;
     expect(start.values.slice(0, 4)).toEqual(["console", "dispatch", null, "local-crew"]);
-    expect(JSON.parse(String(start.values[5]))).toMatchObject({ crew: "researcher", principal: "assistant", target: "local-crew" });
+    expect(JSON.parse(String(start.values[6]))).toMatchObject({ crew: "researcher", principal: "assistant", target: "local-crew" });
     const [finish] = db.finishes();
     expect(finish![1]).toBe(false);
     expect(String(finish![2])).toBe("data_policy: path_outside_allow");
@@ -230,5 +231,54 @@ describe("dispatchCrew (fakes)", () => {
     expect(await dispatchCrew(db, tasks, reg, undefined, { crew: "researcher", brief: "x" }, assistant)).toMatchObject({ ok: false, code: "not_available" });
     expect(db.q.filter((x) => x.text.startsWith("INSERT INTO runs"))).toHaveLength(0);
     expect(tasks.created).toHaveLength(0);
+  });
+});
+
+// --- the collaboration rule (C7, owner decision 2026-09-11) ----------------------
+
+// A valid `compute.yaml` can only name `openai-compatible` providers today
+// (core's PROVIDER_KINDS, C2), so a second kind has to be built by hand here.
+// That is the point of the guard: it is what makes the rule hold the day a
+// native Messages adapter or a bundled llama-server kind lands, rather than a
+// thing someone has to remember to add then.
+const withKinds = (callerKind: string, crewKind: string): Compute => {
+  const cfg = parseCompute(`
+providers:
+  a: { kind: openai-compatible, base_url: "http://127.0.0.1:1/v1", locality: on_machine }
+  b: { kind: openai-compatible, base_url: "http://127.0.0.1:2/v1", locality: on_machine }
+assignments:
+  default: { model: a/one }
+  crews: { researcher: { model: b/two } }
+`);
+  (cfg.providers.a as { kind: string }).kind = callerKind;
+  (cfg.providers.b as { kind: string }).kind = crewKind;
+  return cfg;
+};
+
+describe("cross-kind delegation (collaboration rule 4)", () => {
+  it("refuses a DIRECTED push to a crew whose engine kind differs, with invalid_request, a runs row, and the field to edit", async () => {
+    const targets = new TargetRegistry({ env: {} });
+    await targets.loadDir(`${root}targets`);
+    const reg = await registryWith(seed);
+    const db = fakeDb();
+    const tasks = fakeTasks();
+    const r = await dispatchCrew(db, tasks, reg, targets, { crew: "researcher", brief: "Summarize Knowledge/Projects/Ios.md" }, assistant, withKinds(SDK_ENGINE_KIND, "openai-compatible"));
+    expect(r).toMatchObject({ ok: false, code: "invalid_request" });
+    if (r.ok) return;
+    expect(r.message).toContain("assignments.crews.researcher");
+    expect(r.message).toContain("Create the work unassigned instead");
+    expect(tasks.created).toHaveLength(0); // nothing queued
+    const [finish] = db.finishes();
+    expect(String(finish![2])).toMatch(/^collaboration_rule: /);
+    expect(JSON.parse(String(db.q[0]!.values[6]))).toMatchObject({ from_kind: SDK_ENGINE_KIND, to_kind: "openai-compatible" });
+  });
+
+  it("allows it when both sides are the same kind — which is every valid compute.yaml today, and an install with none", async () => {
+    const targets = new TargetRegistry({ env: {} });
+    await targets.loadDir(`${root}targets`);
+    const reg = await registryWith(seed);
+    const brief = { crew: "researcher", brief: "Summarize Knowledge/Projects/Ios.md" };
+    expect(await dispatchCrew(fakeDb(), fakeTasks(), reg, targets, brief, assistant, withKinds("openai-compatible", "openai-compatible"))).toMatchObject({ ok: true });
+    expect(await dispatchCrew(fakeDb(), fakeTasks(), reg, targets, brief, assistant, emptyCompute())).toMatchObject({ ok: true });
   });
 });

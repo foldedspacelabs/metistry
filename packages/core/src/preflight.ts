@@ -28,9 +28,11 @@ export function requirementsOf(manifest: unknown): Requirements {
 }
 
 export interface PreflightMiss {
-  /** the environment variable that would fix it — never a bare "misconfigured" */
+  /** the environment variable — or, for a config miss, the dotted field — that would fix it; never a bare "misconfigured" */
   name: string;
   why: string;
+  /** what to DO about it, when the fix is not "set this environment variable" (a budget field in compute.yaml, say) */
+  fix?: string;
 }
 
 export interface PreflightResult {
@@ -42,6 +44,16 @@ export interface PreflightOptions {
   env: NodeJS.ProcessEnv;
   fetchFn?: typeof fetch;
   timeoutMs?: number;
+  /**
+   * The budget check (C5: `stop` pauses routines too), asked ONLY of a
+   * component that declares `requires.engine` — the declaration that says
+   * "this run enqueues a turn something will pay for".
+   *
+   * It lives here rather than in the runner because preflight is already the
+   * one place that answers "is starting this run worth it": a stopped engine
+   * behind a running scheduler just fills the queue with refusals.
+   */
+  budget?: () => Promise<PreflightMiss | null>;
 }
 
 function trimmed(env: NodeJS.ProcessEnv, name: string): string {
@@ -72,6 +84,11 @@ export async function preflight(req: Requirements, opts: PreflightOptions): Prom
     });
   }
 
+  if (req.engine && opts.budget) {
+    const miss = await opts.budget();
+    if (miss) missing.push(miss);
+  }
+
   for (const name of req.reachable) {
     const base = trimmed(opts.env, name);
     if (base === "") {
@@ -96,10 +113,15 @@ export async function preflight(req: Requirements, opts: PreflightOptions): Prom
  * of the component, a failure to configure it.
  */
 export function blockedConfigMessage(component: string, dir: string, result: PreflightResult): string {
-  const names = result.missing.map((m) => m.name).join(", ");
-  return (
-    `blocked_config: ${component} did not run — ${result.missing.map((m) => m.why).join("; ")}. ` +
-    `Set ${names} in this install's .env (\`metistry secrets sync --to env\`), or drop ${names} from \`requires\` in ${dir}/manifest.yaml if it is no longer needed. ` +
-    `No run was started, so nothing was spent.`
-  );
+  const env = result.missing.filter((m) => m.fix === undefined);
+  const names = env.map((m) => m.name).join(", ");
+  const parts = [`blocked_config: ${component} did not run — ${result.missing.map((m) => m.why).join("; ")}.`];
+  if (env.length > 0) {
+    parts.push(
+      `Set ${names} in this install's .env (\`metistry secrets sync --to env\`), or drop ${names} from \`requires\` in ${dir}/manifest.yaml if it is no longer needed.`,
+    );
+  }
+  for (const m of result.missing) if (m.fix !== undefined) parts.push(m.fix);
+  parts.push("No run was started, so nothing was spent.");
+  return parts.join(" ");
 }

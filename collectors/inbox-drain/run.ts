@@ -92,6 +92,8 @@ export interface CollectorCtx {
   devinOrgId?: string; // `org-…`; resolved from GET /v3/self when unset
   devinRepos?: string[]; // ["owner/repo", ...] whose wikis to pull; empty = notes only
   devinMaxItems?: number; // cap per run (default 200)
+  devinApiUrl?: string; // REST base override (devin-sessions); default https://api.devin.ai
+  devinSessionTimeoutHours?: number; // devin-sessions: how long a dispatched session may sit non-terminal (default 24)
   inboxDir?: string; // where devin-knowledge's captureToInbox writes files
   fetchFn?: typeof fetch;
 }

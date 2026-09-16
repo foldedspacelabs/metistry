@@ -205,8 +205,10 @@ describe("dispatch (fakes)", () => {
 describe("target registry", () => {
   it("loads targets/* from the repo, resolves env refs, and describe() carries the check", async () => {
     const reg = new TargetRegistry({ env: {} });
-    expect(await reg.loadDir(`${root}targets`)).toEqual(["github-issues", "local-crew"]); // the shipped targets; local-crew is the crews' (docs/ops/crews.md)
-    const [d, local] = await reg.describe();
+    expect(await reg.loadDir(`${root}targets`)).toEqual(["devin-sessions", "github-issues", "local-crew"]); // the shipped targets; local-crew is the crews' (docs/ops/crews.md), devin-sessions is W6's (docs/ops/devin.md)
+    const described = await reg.describe();
+    const d = described.find((t) => t.name === "github-issues");
+    const local = described.find((t) => t.name === "local-crew");
     expect(d).toMatchObject({ name: "github-issues", transport: "github", auth: "env:METISTRY_GITHUB_WRITE_TOKEN", check: { status: "absent" } });
     // the local target needs no auth and has a dispatcher (the assistant's agents_delegate) — never reported as "no dispatcher"
     expect(local).toMatchObject({ name: "local-crew", transport: "local", check: { status: "ok", meta: { via: "agents_delegate" } } });

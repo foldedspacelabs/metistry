@@ -37,6 +37,7 @@ import type { PublicIdentity } from "./identity.js";
 import { route as routeMessage, type Rules } from "./router.js";
 import { sendToSession, storeSubscription, type PushConfig } from "./push.js";
 import { dispatch, type TargetRegistry } from "./dispatch.js";
+import { isDevinPurpose } from "./devin.js";
 import { listProjects, updateProject, validateProjectPatch } from "./projects.js";
 import { applyImprovement } from "./prompt-overlay.js";
 import { crewDispatcher, type CrewRegistry } from "./crews.js";
@@ -524,14 +525,21 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       if (key === "GET /api/targets") {
         return sendJson(res, 200, { targets: cfg.targets ? await cfg.targets.describe() : [], as_of: new Date().toISOString() });
       }
-      const body = (await readJson(req)) as { target?: unknown; brief?: unknown; sources?: unknown };
+      const body = (await readJson(req)) as { target?: unknown; brief?: unknown; sources?: unknown; purpose?: unknown; max_acu?: unknown };
       if (typeof body.target !== "string" || typeof body.brief !== "string") return sendError(res, "invalid_request");
       const sources = Array.isArray(body.sources) ? body.sources.filter((s): s is string => typeof s === "string") : [];
+      // `purpose` is the W6 knowledge-research brief kind (apps/console/src/devin.ts):
+      // an unknown one is a refusal, not a silent fallback to `work`.
+      if (body.purpose !== undefined && !isDevinPurpose(body.purpose)) return sendError(res, "invalid_request");
+      if (body.max_acu !== undefined && !(Number.isInteger(body.max_acu) && (body.max_acu as number) > 0)) return sendError(res, "invalid_request");
       if (!cfg.targets) return sendError(res, "not_found");
       const taskId = Number(DISPATCH_ROUTE.exec(key)![1]);
       // principal is the credential class, never the body (§4.19); the data
       // policy and the runs row are dispatch()'s — nothing is decided here
-      const r = await dispatch(db, cfg.targets, taskId, body.target, body.brief, "owner", sources);
+      const r = await dispatch(db, cfg.targets, taskId, body.target, body.brief, "owner", sources, {
+        ...(body.purpose !== undefined ? { purpose: body.purpose } : {}),
+        ...(body.max_acu !== undefined ? { max_acu: body.max_acu as number } : {}),
+      });
       if (r.ok) return sendJson(res, 201, { ok: true, ref: r.ref, url: r.url, run_id: r.run_id });
       return sendJson(res, statusFor(r.code), {
         ...errorEnvelope(r.code, r.message),

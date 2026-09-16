@@ -93,7 +93,7 @@ describe("one asset name, three files", () => {
   it("the build script and the CLI pin the same Postgres major and the same layout", () => {
     const versions = repoFile("ops/release/runtime-versions.env");
     expect(/^PG_VERSION=17\./m.test(versions)).toBe(true);
-    for (const k of ["NODE_SHA256", "PG_SHA256", "PGVECTOR_SHA256", "GIT_SHA256"]) {
+    for (const k of ["NODE_SHA256", "PG_SHA256", "PGVECTOR_SHA256", "GIT_SHA256", "LLAMACPP_SHA256"]) {
       expect(new RegExp(`^${k}=[0-9a-f]{64}$`, "m").test(versions), `${k} must pin a sha256`).toBe(true);
     }
     // engines.node must be satisfiable by the pinned Node
@@ -106,6 +106,30 @@ describe("one asset name, three files", () => {
     expect(script).toContain("--timestamp");
     // a missing identity must never fail the build
     expect(script).toContain('if [ -z "$id" ]; then');
+  });
+
+  it("the llama.cpp step pins a SEMVER tag and keeps the flags that make the binary relocatable", () => {
+    const versions = repoFile("ops/release/runtime-versions.env");
+    // a `b<number>` nightly is a build, not a version — the pin must be semver
+    expect(/^LLAMACPP_VERSION=\d+\.\d+\.\d+$/m.test(versions), "LLAMACPP_VERSION must be a semver release tag, not a b<number> nightly").toBe(true);
+    const script = repoFile("ops/release/build-runtime-deps.sh");
+    // Metal, and the embedded metallib without which a MOVED copy has no GPU
+    expect(script).toContain("-DGGML_METAL=ON");
+    expect(script).toContain("-DGGML_METAL_EMBED_LIBRARY=ON");
+    // the three find_package()s that would otherwise link Homebrew into a
+    // tree that is supposed to need nothing, plus the unpinned UI download
+    expect(script).toContain("-DLLAMA_OPENSSL=OFF");
+    expect(script).toContain("-DGGML_OPENMP=OFF");
+    expect(script).toContain("-DLLAMA_USE_PREBUILT_UI=OFF");
+    expect(script).toContain("-DBUILD_SHARED_LIBS=OFF");
+    // stated, never discovered from whatever git repo the work dir sits in
+    expect(script).toContain('-DLLAMA_BUILD_COMMIT="v$LLAMACPP_VERSION"');
+    expect(script).toContain("-DLLAMA_BUILD_IS_DEV=OFF");
+    // the layout the CLI resolves, and the moved-copy check that proves it
+    expect(script).toContain("llamacpp/bin/llama-server");
+    expect(script).toContain("--list-devices");
+    // cmake is a refusal with a remediation, never a half-built pack
+    expect(script).toContain('command -v cmake >/dev/null || die');
   });
 });
 

@@ -161,6 +161,7 @@ describe("doctor: everything healthy", () => {
 
     const json: string[] = [];
     expect(await main(["doctor", "--product-dir", productDir, "--json"], { out: (s) => json.push(s), doctorDeps: deps })).toBe(0);
+    expect(json).toHaveLength(1); // --json purity: nothing but the one document reaches stdout
     const parsed = JSON.parse(json.join("\n"));
     expect(parsed.ok).toBe(true);
     expect(parsed.rows).toHaveLength(16);

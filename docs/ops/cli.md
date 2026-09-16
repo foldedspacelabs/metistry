@@ -68,6 +68,17 @@ node packages/cli/dist/main.js deployment set-shape launchd            # preview
 node packages/cli/dist/main.js deployment set-shape launchd --yes      # writes it
 ```
 
+**`--json`, uniformly.** Every verb above that takes `--json` writes exactly
+one JSON document to stdout and nothing else — a step's own notes, a
+download's progress, "already in the Keychain" asides, every human line a
+verb would otherwise print goes to stderr instead. This is enforced in each
+verb's own case in `main.ts` (the step runner it hands to a module is a
+stderr writer under `--json`, a stdout one without it), not left to a
+"remember not to print there" convention. It closed off the Mac app's
+Compute pane having to parse a trailing object out of a stream of prose
+(`docs/ops/mac-app.md`); without `--json` the same notes print to stdout
+inline, exactly as before.
+
 ## `identity`, `version`, `deployment`, `console whoami`: what the app reads instead of the files
 
 Five small, read-mostly verbs exist so the Mac app stops parsing
@@ -884,7 +895,8 @@ than a second table that could drift from theirs:
 Every named service is acted on even when an earlier one fails — this is a
 "try everything, report what happened" command, unlike `up`'s
 stop-at-first-failure plan. `--json` prints one object per service,
-`{service, action, ok, detail}`, for the app to render; without it the
+`{service, action, ok, detail}`, for the app to render and nothing else — a
+step's progress line goes to stderr instead of vanishing; without it the
 output is a table like `doctor`'s. A name that isn't a service this shape
 runs fails the whole command (exit 2) with the list of known ones — it
 never guesses which subprocess a name might mean. `--dry-run` prints the

@@ -484,6 +484,8 @@ export interface MainIo {
   platform?: NodeJS.Platform;
   uid?: number;
   home?: string;
+  /** test seam: `connect`'s request to the console */
+  fetchFn?: typeof fetch;
 }
 
 export async function main(argv: string[], io: MainIo = {}): Promise<number> {
@@ -601,6 +603,7 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
         ...(io.exec ? { exec: io.exec } : {}),
         ...(io.platform ? { platform: io.platform } : {}),
         ...(io.home ? { home: io.home } : {}),
+        ...(io.fetchFn ? { fetchFn: io.fetchFn } : {}),
       };
       if (flags.list === true) {
         try {
@@ -746,7 +749,9 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
         fetchFn: fetch,
         ...(io.exec ? { exec: io.exec } : {}),
         dryRun: flags["dry-run"] === true,
-        out,
+        // --json is a wire contract (docs/ops/cli.md): only the final JSON
+        // document goes to stdout, so a step's progress line goes to stderr.
+        out: json ? err : out,
       };
       try {
         if (verb === "list") {
@@ -1021,8 +1026,9 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
           action: command as ServiceAction,
           names: positional,
           // --json is a wire contract for the Mac app (docs/ops/cli.md): only
-          // the final array goes to stdout, none of the plan's progress lines
-          out: asJson ? () => {} : out,
+          // the final array goes to stdout — the plan's progress lines go to
+          // stderr rather than vanish, so they are still there to read.
+          out: asJson ? err : out,
           exec: io.exec,
           platform: io.platform ?? undefined,
           uid: io.uid,
@@ -1105,7 +1111,10 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
         uid: io.uid ?? (typeof process.getuid === "function" ? process.getuid() : 0),
         fetchFn: fetch,
         dryRun: flags["dry-run"] === true,
-        out,
+        // --json is a wire contract (docs/ops/cli.md): only the final JSON
+        // document goes to stdout, so a step's progress line (a stored-secret
+        // notice, a download's progress, a budget's reminder) goes to stderr.
+        out: json ? err : out,
         ...(io.exec ? { exec: io.exec } : {}),
       };
       try {

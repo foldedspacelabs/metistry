@@ -19,6 +19,31 @@ export {
   type AgentManifest,
   type CrewToolGroup,
 } from "./manifest.js";
+export {
+  ACTION_KINDS,
+  ACTION_MODES,
+  AUTONOMY_LEVELS,
+  DEFAULT_AUTONOMY_LEVEL,
+  LEVEL_CEILING,
+  ACTION_DEFAULTS,
+  ACTION_TASK_PATCH_FIELDS,
+  ACTION_TASK_STATUSES,
+  actionSchema,
+  actionTableSchema,
+  parseAction,
+  actionWorkId,
+  describeAction,
+  effectiveActions,
+  admitsAnyAction,
+  autonomyWidenings,
+  modeRank,
+  levelRank,
+  type Action,
+  type ActionKind,
+  type ActionMode,
+  type ActionAutonomy,
+  type AutonomyLevel,
+} from "./actions.js";
 export { checkResultSchema, runCheck, type CheckResult, type Checkable } from "./check.js";
 export {
   checkStdioConformance,

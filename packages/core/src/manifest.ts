@@ -3,6 +3,8 @@
 // validate against this, so the schema is the contract.
 
 import { z } from "zod";
+
+import { actionTableSchema, AUTONOMY_LEVELS } from "./actions.js";
 import { EFFORTS } from "./tiers.js";
 
 const cron = z
@@ -162,6 +164,15 @@ export const CREW_TOOL_GROUPS = {
    * and the brief is not a tool.
    */
   rooms: ["tasks_comment", "tasks_thread"],
+  /**
+   * Ask the console to DO one of four things (docs/ops/actions.md): dispatch
+   * a work row, patch a task, comment, capture. Its own group for the same
+   * reason `rooms` is — acting is a new power, so a crew gains it only when
+   * the user edits the manifest — and holding the tool is only half the gate:
+   * the agent's `autonomy` record decides whether each kind is refused,
+   * proposed, or run on the spot.
+   */
+  actions: ["propose_action"],
   /** Versioned output into the crew's projects (§4.21). */
   artifacts: ["artifacts_publish", "artifacts_get", "artifacts_list", "artifacts_comment", "artifacts_resolve", "artifacts_review"],
 } as const;
@@ -230,6 +241,16 @@ export const autonomySchema = z.strictObject({
   /** agent ids and/or the literal "user" */
   accept_from: z.array(z.union([autonomyAgentRef, z.literal("user")])).optional(),
   max_open_bundles: z.number().int().min(1).optional(),
+  /**
+   * A3 (docs/ops/actions.md): how much room this crew has with an `action`
+   * proposal. The one key here that can WIDEN — `agents/` is a §4.7 protected
+   * path, so a manifest that raises it is the owner's own hand, and the
+   * registry sync records and alerts the raise exactly as the console route
+   * does. Absent = `observe`: nothing.
+   */
+  level: z.enum(AUTONOMY_LEVELS).optional(),
+  /** Per-kind override, clamped by `level` (never past it). Absent kinds take the level's default. */
+  actions: actionTableSchema.optional(),
 });
 
 export type AgentAutonomy = z.infer<typeof autonomySchema>;

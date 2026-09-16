@@ -21,6 +21,13 @@ llamaserver:
     runtime: llamaserver
     model_path: state/models/REPLACE-ME.gguf
     port: 7813
-    # passed verbatim after the flags Metistry sets; `--ctx-size`, `--parallel`,
-    # `--embeddings` (llama-server serves /v1/embeddings only when asked)
+    # Passed verbatim AFTER the flags Metistry sets (--model, --alias, --host
+    # 127.0.0.1, --port, --cors-origins), and llama.cpp takes the last
+    # occurrence of a flag — so this is also how you override one deliberately.
+    #
+    #   --ctx-size 8192            a bigger context window
+    #   --parallel 4               more slots
+    #   --embeddings --pooling mean   serve /v1/embeddings (a causal model
+    #                              defaults to pooling 'none', which the
+    #                              OpenAI route refuses — both flags or neither)
     extra_args: []

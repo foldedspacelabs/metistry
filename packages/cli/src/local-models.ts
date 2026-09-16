@@ -337,27 +337,36 @@ async function* ndjson(res: Response): AsyncGenerator<unknown> {
   }
 }
 
-/** `<owner>/<repo>/<file>.gguf` — what `compute models install llamaserver/…` takes. */
+/** `<owner>/<repo>/<path…>.gguf` — what `compute models install llamaserver/…` takes. */
 export interface GgufRef {
+  /** `<owner>/<repo>` */
   repo: string;
+  /** the path INSIDE the repo, which is often a directory deep (`tinyllamas/stories15M-q4_0.gguf`) */
   file: string;
+  /** the basename, for the file on disk and the server's `--alias` */
+  name: string;
   url: string;
 }
 
 /**
  * Split and refuse in one place. A Hugging Face GGUF is addressed by repo
- * and file and nothing else; `resolve/main/<file>` is the plain-HTTPS form
+ * and path and nothing else; `resolve/main/<path>` is the plain-HTTPS form
  * of that, which is why no library is needed to fetch one.
+ *
+ * Everything after the second segment is the PATH, not one file name: real
+ * repos keep quants in subdirectories (`tinyllamas/stories15M-q4_0.gguf`),
+ * and a parser that insisted on exactly three segments would simply be
+ * unable to name half of Hugging Face.
  */
 export function parseGgufRef(ref: string): GgufRef {
-  const parts = ref.split("/").filter(Boolean);
-  if (parts.length !== 3 || parts.join("/") !== ref) {
-    throw new StepFailed(`${JSON.stringify(ref)} is not a Hugging Face GGUF — give \`<owner>/<repo>/<file>.gguf\`, e.g. unsloth/gemma-3-4b-it-GGUF/gemma-3-4b-it-Q4_K_M.gguf (the file name is on the repo's Files tab)`);
+  const parts = ref.split("/");
+  if (parts.length < 3 || parts.some((p) => p === "" || p === "." || p === "..")) {
+    throw new StepFailed(`${JSON.stringify(ref)} is not a Hugging Face GGUF — give \`<owner>/<repo>/<path>.gguf\`, e.g. unsloth/gemma-3-4b-it-GGUF/gemma-3-4b-it-Q4_K_M.gguf (the path is on the repo's Files tab)`);
   }
-  const [owner, repo, file] = parts as [string, string, string];
+  const [owner, repo, ...rest] = parts as [string, string, ...string[]];
+  const file = rest.join("/");
   if (!/\.gguf$/i.test(file)) throw new StepFailed(`${file} is not a .gguf — llama-server loads GGUF files only`);
-  if (file.includes("..")) throw new StepFailed(`${file} is not a file name`);
-  return { repo: `${owner}/${repo}`, file, url: `https://huggingface.co/${owner}/${repo}/resolve/main/${encodeURIComponent(file)}` };
+  return { repo: `${owner}/${repo}`, file, name: rest[rest.length - 1]!, url: `https://huggingface.co/${owner}/${repo}/resolve/main/${rest.map(encodeURIComponent).join("/")}` };
 }
 
 export interface GgufDownload {
@@ -379,6 +388,15 @@ export interface GgufDownload {
  * a Hugging Face repo is. When it is absent the size is still checked
  * against `X-Linked-Size`/`content-length`, and `verified` says which of the
  * two happened rather than implying a check that did not occur.
+ *
+ * REDIRECTS ARE FOLLOWED BY HAND, for two reasons that are both about this
+ * header. Hugging Face serves the digest on an INTERMEDIATE hop
+ * (`resolve/main` → `resolve/<commit>` 307 → CDN 302, and the 302 is the one
+ * that carries it), so `redirect: "follow"` hands back a final response with
+ * no digest at all and the check would silently never happen. And the last
+ * hop is a pre-signed URL on another origin: the token goes to
+ * `huggingface.co` and stops there, because forwarding an Authorization
+ * header across origins is how credentials leak to a CDN.
  */
 export async function downloadGguf(opts: {
   ref: GgufRef;
@@ -389,26 +407,41 @@ export async function downloadGguf(opts: {
   onProgress?: PullProgress | undefined;
   timeoutMs?: number | undefined;
 }): Promise<GgufDownload> {
-  const dest = join(opts.dir, opts.ref.file);
+  const dest = join(opts.dir, opts.ref.name);
   const part = `${dest}.part`;
   await mkdir(opts.dir, { recursive: true });
+  const fetchFn = opts.fetchFn ?? fetch;
+  const signal = AbortSignal.timeout(opts.timeoutMs ?? 2 * 60 * 60_000);
+
+  let url = opts.ref.url;
   let res: Response;
-  try {
-    res = await (opts.fetchFn ?? fetch)(opts.ref.url, {
-      redirect: "follow",
-      headers: { accept: "application/octet-stream", ...(opts.token ? { authorization: `Bearer ${opts.token}` } : {}) },
-      signal: AbortSignal.timeout(opts.timeoutMs ?? 2 * 60 * 60_000),
-    });
-  } catch (err) {
-    throw new StepFailed(`${opts.ref.url} did not answer (${err instanceof Error ? err.message : String(err)})`);
-  }
-  if (res.status === 401 || res.status === 403) {
-    throw new StepFailed(`${opts.ref.repo} refused the download (HTTP ${res.status}) — a gated or private repo needs METISTRY_HF_TOKEN set to a Hugging Face access token with read scope`);
+  let want = "";
+  let wantBytes = 0;
+  for (let hop = 0; ; hop++) {
+    if (hop > 5) throw new StepFailed(`${opts.ref.url} redirected more than 5 times — refusing to keep following`);
+    const sameOrigin = safeOrigin(url);
+    try {
+      res = await fetchFn(url, {
+        redirect: "manual",
+        headers: { accept: "application/octet-stream", ...(opts.token && sameOrigin ? { authorization: `Bearer ${opts.token}` } : {}) },
+        signal,
+      });
+    } catch (err) {
+      throw new StepFailed(`${url} did not answer (${err instanceof Error ? err.message : String(err)})`);
+    }
+    // any hop may carry the LFS object's digest and size; the last one does not
+    want = want || (res.headers.get("x-linked-etag") ?? "").replace(/"/g, "").trim();
+    wantBytes = wantBytes || Number(res.headers.get("x-linked-size") ?? 0);
+    if (res.status === 401 || res.status === 403) {
+      throw new StepFailed(`${opts.ref.repo} refused the download (HTTP ${res.status}) — a gated or private repo needs METISTRY_HF_TOKEN set to a Hugging Face access token with read scope`);
+    }
+    if (res.status < 300 || res.status >= 400) break;
+    const location = res.headers.get("location");
+    if (!location) throw new StepFailed(`${url} → HTTP ${res.status} with no Location to follow`);
+    url = new URL(location, url).toString();
   }
   if (!res.ok) throw new StepFailed(`${opts.ref.url} → HTTP ${res.status}`);
-
-  const want = (res.headers.get("x-linked-etag") ?? "").replace(/"/g, "").trim();
-  const wantBytes = Number(res.headers.get("x-linked-size") ?? res.headers.get("content-length") ?? 0);
+  wantBytes = wantBytes || Number(res.headers.get("content-length") ?? 0);
   const hash = createHash("sha256");
   let bytes = 0;
   let announced = -1;
@@ -428,7 +461,7 @@ export async function downloadGguf(opts: {
         const pct = Math.floor((bytes / wantBytes) * 10) * 10;
         if (pct > announced) {
           announced = pct;
-          opts.onProgress?.(`${opts.ref.file}: ${pct}% (${mib(bytes)} of ${mib(wantBytes)})`);
+          opts.onProgress?.(`${opts.ref.name}: ${pct}% (${mib(bytes)} of ${mib(wantBytes)})`);
         }
       }
     }
@@ -453,6 +486,16 @@ export async function downloadGguf(opts: {
     verified: looksSha,
     detail: looksSha ? `${mib(bytes)}, sha256 ${sha256.slice(0, 12)}… verified against Hugging Face` : `${mib(bytes)}${wantBytes > 0 ? " (size matched; the repo published no sha256)" : " (the repo published neither a size nor a sha256)"}`,
   };
+}
+
+/** Is this URL still Hugging Face's own, rather than the pre-signed CDN it redirects to? Only then may the token go with the request. */
+function safeOrigin(url: string): boolean {
+  try {
+    const host = new URL(url).hostname;
+    return host === "huggingface.co" || host.endsWith(".huggingface.co");
+  } catch {
+    return false;
+  }
 }
 
 function mib(n: number): string {
@@ -481,6 +524,14 @@ export function relativeModelPath(repo: string, file: string): string {
   return join("state", "models", repo, file);
 }
 
+/**
+ * A `--cors-origins` value no browser can ever send, which is what makes the
+ * bundled server's answers unreadable to a web page that dials loopback. Not
+ * the empty string: an empty argv element is refused by the child schema,
+ * and a word in `ps` says what it is for.
+ */
+export const NO_BROWSER_ORIGIN = "metistry-no-browser-origin";
+
 export interface LlamaServerChildOptions {
   /** the install root — where `runtime/` is */
   productDir: string;
@@ -508,6 +559,15 @@ export type LlamaServerChild = { child: ChildSpecInput; binary: string; model: s
  * model server that binds 0.0.0.0 because a config line said so would be an
  * unauthenticated completion endpoint on the network (invariant 8).
  *
+ * `--cors-origins` is the other half of that, and loopback alone does NOT
+ * cover it: llama-server's default is `*`, which lets any web page the user
+ * happens to visit `fetch('http://127.0.0.1:<port>/v1/…')` AND READ THE
+ * ANSWER — free use of the local model, and a fingerprint of what is loaded.
+ * The value here is deliberately one no browser can ever send, so the
+ * response is unreadable cross-origin. (`extra_args` is appended after it and
+ * llama.cpp takes the last occurrence, so an install that really does want a
+ * browser origin can say `--cors-origins localhost` and mean it.)
+ *
  * No TCC: it reads one GGUF the user chose and listens on loopback.
  */
 export function llamaServerChild(opts: LlamaServerChildOptions): LlamaServerChild {
@@ -526,7 +586,7 @@ export function llamaServerChild(opts: LlamaServerChildOptions): LlamaServerChil
     model,
     child: {
       name: "llamaserver",
-      argv: [binary, "--model", model, "--alias", alias, "--host", "127.0.0.1", "--port", String(opts.serve.port), ...opts.serve.extra_args],
+      argv: [binary, "--model", model, "--alias", alias, "--host", "127.0.0.1", "--port", String(opts.serve.port), "--cors-origins", NO_BROWSER_ORIGIN, ...opts.serve.extra_args],
       cwd: dirname(binary),
       env: opts.env,
       log: opts.log,

@@ -44,7 +44,7 @@ import { CREW_TOOL_NAMES, registerCrewTools, type CrewDispatcher } from "./crew-
 import { QUERIES_TOOL_NAMES, registerQueriesTools } from "./queries-tools.js";
 import { KNOWLEDGE_FS_TOOL_NAMES, registerKnowledgeFsTools, type KnowledgeLister, type KnowledgeVaultSearcher } from "./knowledge-fs.js";
 import { registerKnowledgeResources } from "./knowledge-resources.js";
-import { captureToInbox } from "./capture.js";
+import { captureToInbox, type CaptureSink } from "./capture.js";
 import { KNOWLEDGE_MODES, knowledgeScope, readKnowledge, searchKnowledge, type KnowledgeReader, type QueryEmbedder } from "./knowledge.js";
 import { sha256Text, writeKnowledge, type KnowledgeWriter } from "./knowledge-write.js";
 import { computeNudge } from "./nudge.js";
@@ -58,8 +58,10 @@ export interface BrainConfig {
   /** Credential → principal. Null means 401; the bridge never sees the token. */
   authenticate(req: IncomingMessage): Promise<AgentPrincipal | null>;
   tasks: TasksService;
-  /** Where `capture` writes files (the same directory the console's POST /capture uses). */
+  /** Where `capture` writes files when no sink is injected — a plain directory (the standalone shape). */
   inboxDir: string;
+  /** Where captures go in Metistry: the vault inbox over the reconciler's bridge (`vaultSink`). Absent → `dirSink(inboxDir)`. */
+  inbox?: CaptureSink | undefined;
   /** Vault read path for `knowledge_read`. Absent → the tool answers `not_available`. */
   readKnowledge?: KnowledgeReader | undefined;
   /** Query embedder for `knowledge_search` mode=semantic|hybrid (core's EmbedClient). Absent → every mode serves keyword. */
@@ -263,7 +265,7 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
         const bytes = a.content_base64 !== undefined ? Buffer.from(a.content_base64, "base64") : Buffer.from(a.note ?? "", "utf8");
         const mime = a.mime ?? (a.content_base64 !== undefined ? "application/octet-stream" : "text/markdown");
         const filename = a.filename ?? (a.content_base64 !== undefined ? `capture-${Date.now()}.bin` : `note-${Date.now()}.md`);
-        const r = await captureToInbox(db, cfg.inboxDir, { bytes, filename, mime, note: a.note ?? null, source: "mcp", sourceAgent: principal.id });
+        const r = await captureToInbox(db, cfg.inbox ?? cfg.inboxDir, { bytes, filename, mime, note: a.note ?? null, source: "mcp", sourceAgent: principal.id });
         return done(r, { inbox_id: r.id, bytes: bytes.length });
       },
     );

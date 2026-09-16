@@ -1,0 +1,38 @@
+[
+  {
+    "case": "a-text",
+    "what": "plain text, no schema",
+    "n": 20,
+    "ok": "20/20",
+    "schema_valid": "n/a",
+    "distinct_outputs": 1,
+    "p50_ms": 124.2,
+    "p95_ms": 150.2,
+    "min_ms": 121.7,
+    "max_ms": 13470.4
+  },
+  {
+    "case": "b-classify",
+    "what": "3-field classification schema",
+    "n": 20,
+    "ok": "20/20",
+    "schema_valid": "20/20",
+    "distinct_outputs": 11,
+    "p50_ms": 348.4,
+    "p95_ms": 410.7,
+    "min_ms": 292,
+    "max_ms": 2162.1
+  },
+  {
+    "case": "c-nested",
+    "what": "nested schema with two arrays",
+    "n": 20,
+    "ok": "20/20",
+    "schema_valid": "20/20",
+    "distinct_outputs": 20,
+    "p50_ms": 1509.5,
+    "p95_ms": 1688,
+    "min_ms": 1435.9,
+    "max_ms": 1853.8
+  }
+]

@@ -337,6 +337,67 @@ export function launchAgentsDir(home: string): string {
 }
 
 /**
+ * Who registered the ONE background item, from launchd's point of view.
+ *
+ * Two registrars can install `com.foldedspacelabs.metistry`, and only ever
+ * one of them at a time (docs/ops/deployment-shapes.md, "Two registrars"):
+ *
+ *   `app`      the Mac app, `SMAppService.agent(plistName:)`, from the plist
+ *              sealed inside `Metistry.app/Contents/Library/LaunchAgents/`
+ *   `launchd`  a terminal install, `launchctl bootstrap` of the plist `up`
+ *              rendered into `~/Library/LaunchAgents`
+ *   `none`     nothing is loaded under that label
+ *
+ * WHY THIS SIGNAL AND NOT A MARKER FILE. A marker (in `state/supervisor.json`,
+ * say) is a second record of the same fact, and it goes stale the moment the
+ * person drags the app to the Trash or switches the item off in System
+ * Settings — `up` would then skip a bootstrap on the strength of a
+ * registration that no longer exists, and the install would simply not run.
+ * What launchd itself reports cannot be stale, and it costs one `launchctl
+ * print`. Both the plist path and the resolved program are inspected, because
+ * `SMAppService` hands launchd a job whose plist AND whose `BundleProgram`
+ * are inside the `.app` — either one being in a bundle is the answer, and
+ * neither is a string this repo has to keep in sync with Apple.
+ */
+export type Registrar = "app" | "launchd" | "none" | "unknown";
+
+export interface RegistrarFinding {
+  registrar: Registrar;
+  /** the bundle or plist launchd named, when it named one — printed, never parsed further */
+  path?: string | undefined;
+}
+
+/** Anything under `…/Something.app/Contents/` was put there by a signed bundle, not by `up`. */
+const IN_APP_BUNDLE = /\.app\/Contents\//;
+
+/** `launchctl print gui/<uid>/<label>` → which registrar owns it. `code !== 0` means nothing is loaded. */
+export function parseRegistrar(code: number, text: string): RegistrarFinding {
+  if (code !== 0) return { registrar: "none" };
+  const path = /^\s*path = (.+?)\s*$/m.exec(text)?.[1];
+  const program = /^\s*program = (.+?)\s*$/m.exec(text)?.[1];
+  const bundled = [path, program].find((p) => p !== undefined && IN_APP_BUNDLE.test(p));
+  if (bundled !== undefined) return { registrar: "app", path: bundled };
+  if (path !== undefined) return { registrar: "launchd", path };
+  // loaded, but launchd named neither — report that rather than guessing a
+  // registrar and skipping (or repeating) a bootstrap on the strength of it
+  return { registrar: "unknown" };
+}
+
+/** How the registrar reads in a `note()` or a doctor probe — prose, not a name. */
+export function registrarPhrase(f: RegistrarFinding): string {
+  switch (f.registrar) {
+    case "app":
+      return `the Mac app, through SMAppService.agent(plistName:)${f.path ? ` (${f.path})` : ""}`;
+    case "launchd":
+      return `launchctl bootstrap${f.path ? ` (${f.path})` : ""}`;
+    case "none":
+      return "nobody — no such job is loaded";
+    case "unknown":
+      return "launchd, which named no plist for it";
+  }
+}
+
+/**
  * The launchd steps for one job, in order: bootout (tolerated when not
  * loaded), WAIT for it to actually be gone, bootstrap the freshly written
  * plist, kickstart -k so a job that was already running restarts on the new

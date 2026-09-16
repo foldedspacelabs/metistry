@@ -45,7 +45,7 @@ describe.skipIf(!hasDb)("task routes — the board's drags (integration)", () =>
     await store.storePasskey(pool, { id: pkId, publicKey: new Uint8Array([1]), signCount: 0, transports: [], origin: "t", label: "drags-test" });
     session = `metistry_session=${await store.issueSession(pool, pkId, policy)}`;
     ownerToken = await store.mintOwnerToken(pool, "drags-test");
-    agentToken = (await agents.createAgent(pool, { id: `drag-agent-${mintToken(4).toLowerCase()}`, display_name: "drag agent" })).token;
+    agentToken = (await agents.createAgent(pool, { id: `drag-agent-${mintToken(4).toLowerCase().replaceAll(/[^a-z0-9]/g, "").slice(0, 6) || "x"}`, display_name: "drag agent" })).token;
   });
 
   afterAll(async () => {

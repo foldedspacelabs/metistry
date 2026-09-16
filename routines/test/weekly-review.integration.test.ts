@@ -38,7 +38,7 @@ describe.skipIf(!hasDb)("weekly review (real db)", () => {
     if (db !== want || !/^metistry_test/.test(db)) {
       throw new Error(`refusing to empty ${db}: the weekly review suite only runs against the scratch db (METISTRY_TEST_DB_NAME=${want}, ops/scripts/test-db.sh)`);
     }
-    await pool.query(`TRUNCATE ${REVIEW_TABLES.join(", ")} RESTART IDENTITY`);
+    await pool.query(`TRUNCATE ${REVIEW_TABLES.join(", ")} RESTART IDENTITY CASCADE`); // CASCADE: artifact_comments and proposals now reference work (0018), and any future dependent must not break this reset
   };
   const cleanup = async () => {
     await pool.query(`DELETE FROM work WHERE project = 'itest-weekly'`);

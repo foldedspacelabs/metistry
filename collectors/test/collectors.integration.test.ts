@@ -2,7 +2,7 @@
 // prove control flow; only Postgres can prove the SQL — a partial unique
 // index needs its predicate repeated in ON CONFLICT, and the fake happily
 // accepted the statement Postgres rejected. Skipped without a db.
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -11,15 +11,9 @@ import { startRun, finishRun } from "@foldedspacelabs/metistry-core";
 import { run as githubState } from "../github-state/run.js";
 import { run as claudeUsage } from "../claude-usage/run.js";
 import { PRINCIPAL, readWatermark, run as devinKnowledge } from "../devin-knowledge/run.js";
+import { loadTestEnv } from "@foldedspacelabs/metistry-core/test-env";
 
-try {
-  for (const line of readFileSync(new URL("../../.env", import.meta.url), "utf8").split("\n")) {
-    const m = /^([A-Z_]+)=(.*)$/.exec(line.trim());
-    if (m && m[1] && process.env[m[1]] === undefined) process.env[m[1]] = m[2];
-  }
-} catch {}
-
-const hasDb = !!process.env.METISTRY_DB_PASSWORD;
+const { hasDb } = loadTestEnv(new URL("../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
 
 describe.skipIf(!hasDb)("collectors (real db)", () => {
   let pool: pg.Pool;

@@ -20,15 +20,9 @@ import { Committer } from "../../reconciler/src/committer.js";
 import { Vault } from "../../reconciler/src/vault.js";
 import { makeBridge } from "../../reconciler/src/server.js";
 import { tempRepo, type TempRepo } from "../../reconciler/test/helpers.js";
+import { loadTestEnv } from "@foldedspacelabs/metistry-core/test-env";
 
-try {
-  for (const line of readFileSync(new URL("../../../.env", import.meta.url), "utf8").split("\n")) {
-    const m = /^([A-Z_]+)=(.*)$/.exec(line.trim());
-    if (m && m[1] && process.env[m[1]] === undefined) process.env[m[1]] = m[2];
-  }
-} catch {}
-
-const hasDb = !!process.env.METISTRY_DB_PASSWORD;
+const { hasDb } = loadTestEnv(new URL("../../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
 const policy = { idleDays: 30, maxDays: 365 };
 const P = "itest-console-art";
 

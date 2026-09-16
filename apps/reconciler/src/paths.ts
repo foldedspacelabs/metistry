@@ -18,8 +18,8 @@ export interface Confined {
   segments: string[];
 }
 
-const MAX_PATH = 500;
-const MAX_SEGMENT = 255;
+const MAX_PATH = 500;  // limit: fixed — the vault path contract every bridge validates against
+const MAX_SEGMENT = 255;  // limit: fixed — every filesystem we target stops at 255 bytes per component
 // Every path an agent may touch: no control characters, no backslashes
 // (Windows separators are not paths here), no leading/trailing whitespace
 // in a segment (Obsidian/macOS both mangle those).

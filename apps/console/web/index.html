@@ -183,6 +183,15 @@
         <input id="agent-may-dispatch-to" type="text" placeholder="may dispatch to: agent ids, comma-separated" autocomplete="off" autocapitalize="none" />
         <input id="agent-accept-from" type="text" placeholder="accept bundles from: agent ids and/or user, comma-separated" autocomplete="off" autocapitalize="none" />
         <input id="agent-max-bundles" type="number" min="0" max="1000" placeholder="max open bundles (default 3)" autocomplete="off" />
+        <p class="muted">actions — what this agent may do on your behalf. The level is a ceiling: "run it" only takes effect at act within scope. Raising anything is recorded and alerted (docs/ops/actions.md)</p>
+        <label>Level
+          <select id="agent-level">
+            <option value="observe">observe — no actions at all (the default)</option>
+            <option value="propose">propose — it asks, you answer in Needs You</option>
+            <option value="act_within_scope">act within scope — it may run what the table allows</option>
+          </select>
+        </label>
+        <div id="agent-actions"></div>
         <p id="agent-grants-msg" class="muted"></p>
         <span><button type="submit">Save</button> <button type="button" id="agent-grants-cancel" class="secondary">Cancel</button></span>
       </form>

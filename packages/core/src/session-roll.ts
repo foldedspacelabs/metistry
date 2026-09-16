@@ -40,6 +40,11 @@ export async function rollSession(db: RunExecutor, thread: string, reason: strin
 
   const rolled = rows.map((r) => String(r.id));
   const turns = rows.reduce((n, r) => n + Number(r.turns ?? 0), 0);
+  // The OpenAI-compatible engine keeps its message history in
+  // `assistant_sessions` under the SAME id (0016_compute_engine). One roll
+  // path, both tables: a boundary that ends the session must also end the
+  // history the in-house loop would otherwise replay.
+  await db.query(`UPDATE assistant_sessions SET rolled_at = now() WHERE id = ANY($1::uuid[]) AND rolled_at IS NULL`, [rolled]);
   // One `runs` row per roll, kind `session_roll`: what rolled, on which
   // thread, why, and how far the session got. The dashboard reads `runs`;
   // this needs no new table and no new mechanism (§4.18.D).

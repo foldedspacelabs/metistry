@@ -3,19 +3,12 @@
 // idempotency check that reads its own proposal's payload. The fake-db suite
 // proves the rendering; the weekly review's new line is asserted there too.
 // Every row carries an `itest-reply` marker and is removed again.
-import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
 import { run as replyReview } from "../reply-review/run.js";
+import { loadTestEnv } from "@foldedspacelabs/metistry-core/test-env";
 
-try {
-  for (const line of readFileSync(new URL("../../.env", import.meta.url), "utf8").split("\n")) {
-    const m = /^([A-Z_]+)=(.*)$/.exec(line.trim());
-    if (m && m[1] && process.env[m[1]] === undefined) process.env[m[1]] = m[2];
-  }
-} catch {}
-
-const hasDb = !!process.env.METISTRY_DB_PASSWORD;
+const { hasDb } = loadTestEnv(new URL("../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
 const now = new Date(2026, 8, 8, 12, 0, 0);
 const THREAD = "itest-reply";
 

@@ -1,12 +1,12 @@
 // Drain loop against the real db with a fake engine (the SDK is smoked
 // manually — this proves claim/reply/session/runs mechanics).
-import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
 import { drainOne } from "../src/drain.js";
 import type { Engine } from "../src/engine.js";
 import type { TierMap } from "@foldedspacelabs/metistry-core";
+import { loadTestEnv } from "@foldedspacelabs/metistry-core/test-env";
 
 // The tier map the drain resolves against — (model, effort) pairs, as
 // seed/rules.yaml ships them.
@@ -16,14 +16,7 @@ const tiers: TierMap = {
   routine: { model: "haiku", effort: "low" },
 };
 
-try {
-  for (const line of readFileSync(new URL("../../../.env", import.meta.url), "utf8").split("\n")) {
-    const m = /^([A-Z_]+)=(.*)$/.exec(line.trim());
-    if (m && m[1] && process.env[m[1]] === undefined) process.env[m[1]] = m[2];
-  }
-} catch {}
-
-const hasDb = !!process.env.METISTRY_DB_PASSWORD;
+const { hasDb } = loadTestEnv(new URL("../../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
 
 describe.skipIf(!hasDb)("assistant drain", () => {
   let pool: pg.Pool;

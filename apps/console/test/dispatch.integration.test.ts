@@ -3,7 +3,6 @@
 // partial unique index, the runs row, and the return path — github-state's
 // reconcile upserts onto the SAME work row and closes it when the issue
 // closes. GitHub itself is a fake; nothing here touches the network.
-import { readFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -14,15 +13,9 @@ import { collectors } from "@metistry-apps/collectors";
 import { makeServer } from "../src/server.js";
 import { TargetRegistry } from "../src/dispatch.js";
 import * as store from "../src/auth-store.js";
+import { loadTestEnv } from "@foldedspacelabs/metistry-core/test-env";
 
-try {
-  for (const line of readFileSync(new URL("../../../.env", import.meta.url), "utf8").split("\n")) {
-    const m = /^([A-Z_]+)=(.*)$/.exec(line.trim());
-    if (m && m[1] && process.env[m[1]] === undefined) process.env[m[1]] = m[2];
-  }
-} catch {}
-
-const hasDb = !!process.env.METISTRY_DB_PASSWORD;
+const { hasDb } = loadTestEnv(new URL("../../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
 const policy = { idleDays: 30, maxDays: 365 };
 const root = fileURLToPath(new URL("../../../", import.meta.url));
 // unique per run: external_ref is unique, and a verbose re-run reuses the scratch db
@@ -167,6 +160,16 @@ describe.skipIf(!hasDb)("dispatch (integration)", () => {
     expect((await post(`/api/tasks/${id}/dispatch`, { target: "nope", brief: "x" }, { cookie: session })).status).toBe(404);
     expect((await post(`/api/tasks/999999999/dispatch`, { target: "github-issues", brief: "x" }, { cookie: session })).status).toBe(404);
     expect((await post(`/api/tasks/abc/dispatch`, { target: "github-issues", brief: "x" }, { cookie: session })).status).toBe(404);
+  });
+
+  // R3: the owner is already past the door here, so a refusal that does not
+  // say which field was wrong is just a caller left guessing.
+  it("every refusal on this route names the field that would permit it", async () => {
+    const id = await newTask("named");
+    const msg = async (body: unknown) => (await (await post(`/api/tasks/${id}/dispatch`, body, { cookie: session })).json()).error.message;
+    expect(await msg({ brief: "x" })).toContain("target and brief are required");
+    expect(await msg({ target: "github-issues", brief: "x", purpose: "nonsense" })).toMatch(/purpose must be one of .*knowledge_research/);
+    expect(await msg({ target: "github-issues", brief: "x", max_acu: 0 })).toContain("max_acu must be a positive integer");
   });
 
   // ----- return path: nothing new — github-state already reconciles the ref -----

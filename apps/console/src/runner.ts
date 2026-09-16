@@ -39,6 +39,7 @@ import {
   RUNNER_KIND,
   SKIPPED_STREAK,
   type ComponentStreak,
+  type PreflightMiss,
   type Requirements,
 } from "@foldedspacelabs/metistry-core";
 import type { RegisteredCollector, Db, CollectorCtx } from "@metistry-apps/collectors";
@@ -62,6 +63,13 @@ export interface RunnerOptions {
   maxStreak?: number;
   /** how long one (component, error signature) stays quiet after alerting (METISTRY_ALERT_DEDUPE_H) */
   alertDedupeHours?: number;
+  /**
+   * The budget half of preflight (C5: `stop` pauses routines too). Asked only
+   * of a component that declares `requires.engine`, so a model-free collector
+   * never pays for the lookup. Absent = no budget pause at all, which is what
+   * an install with no `budgets:` block gets.
+   */
+  budget?: () => Promise<PreflightMiss | null>;
   /** injected by tests; production always uses the wall clock */
   now?: Date;
 }
@@ -71,6 +79,7 @@ interface ResolvedOptions {
   fetchFn: typeof fetch;
   maxStreak: number;
   alertDedupeHours: number;
+  budget?: (() => Promise<PreflightMiss | null>) | undefined;
   now: Date;
 }
 
@@ -81,6 +90,7 @@ function resolve(opts: RunnerOptions): ResolvedOptions {
     fetchFn: opts.fetchFn ?? fetch,
     maxStreak: opts.maxStreak ?? intEnv("METISTRY_RUNNER_MAX_STREAK", DEFAULT_MAX_STREAK, env),
     alertDedupeHours: opts.alertDedupeHours ?? intEnv("METISTRY_ALERT_DEDUPE_H", DEFAULT_ALERT_DEDUPE_HOURS, env),
+    ...(opts.budget ? { budget: opts.budget } : {}),
     now: opts.now ?? new Date(),
   };
 }
@@ -215,7 +225,7 @@ export async function tick(db: Db, scheduled: ScheduledCollector[], ctx: Collect
     }
 
     // 2. preflight: never spend a window on a component that cannot succeed
-    const pre = await preflight(c.requires, { env: opts.env, fetchFn: opts.fetchFn });
+    const pre = await preflight(c.requires, { env: opts.env, fetchFn: opts.fetchFn, ...(opts.budget ? { budget: opts.budget } : {}) });
     if (!pre.ok) {
       if (opts.now.getTime() - windows.lastPreflight >= windowMs) {
         const message = blockedConfigMessage(c.name, c.dir, pre);

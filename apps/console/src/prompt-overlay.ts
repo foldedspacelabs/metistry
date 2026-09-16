@@ -25,7 +25,7 @@ export const OVERLAY_PATH = "assistant-prompt.md";
 /** The product seed, shipped in the console image at /app/seed. */
 export const SEED_PROMPT_PATH = "seed/assistant-prompt.md";
 
-const MAX_SECTION = 20_000;
+const MAX_SECTION = 20_000;  // limit: fixed — a proposal suggesting more prose than this is not an edit to review
 
 /** The section of prose an `improvement` proposal suggests appending, or null when the payload carries none. */
 export function suggestedSection(payload: unknown): string | null {

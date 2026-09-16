@@ -250,11 +250,15 @@ Layers, honest about which carry the load:
    invented. `source` is the credential, so a note claiming another
    author is corrected, not trusted. A block that is not a YAML mapping
    is refused, not guessed at.
-4. **No lost updates.** `knowledge_read` returns the note's `sha256`; the
-   assistant passes it back as `expected_sha256`. A concurrent edit (yours
-   in Obsidian, say) turns the write into `conflict` carrying the current
-   hash, and the prompt tells it to re-read and redo the edit. `""` means
-   create-only.
+4. **No lost updates, and no way to ask for one.** `knowledge_read`
+   returns the note's `sha256`; the assistant passes it back as
+   `expected_sha256`. A concurrent edit (yours in Obsidian, say) turns the
+   write into `conflict` carrying the current hash, and the prompt tells it
+   to re-read and redo the edit. **Omitting `expected_sha256` means
+   create-only** (the bridge gets `""`): an existing note comes back
+   `conflict` instead of being overwritten blind. There is no unconditional
+   write — you edit these files by hand, and the assistant has to have seen
+   the bytes it replaces (ruled 2026-09-16).
 5. **Audit.** Every call — refusals included — is a `runs` row (below),
    and every landed write is a commit in the instance repo's history.
 

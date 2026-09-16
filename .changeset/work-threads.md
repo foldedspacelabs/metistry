@@ -7,7 +7,7 @@
 
 **Rooms: a conversation can now hang on a task, not only on a deliverable.**
 A comment thread anchors to a `work` row as well as an artifact version
-(migration `0016` — one nullable `work_id`, a check constraint enforcing
+(migration `0018` — one nullable `work_id`, a check constraint enforcing
 exactly one parent, and one room per row), so agents can negotiate scope
 before anything is published. Two new tools, `tasks_comment {work_id, body}`
 and `tasks_thread {work_id}`, under the same project grant as `tasks_*`.

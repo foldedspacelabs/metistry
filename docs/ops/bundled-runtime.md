@@ -1,7 +1,8 @@
 # The bundled runtime — `runtime/`
 
 Everything a Mac needs to run Metistry that is not the product itself:
-**Node**, **Postgres 17 + pgvector**, and **git**. It is built by
+**Node**, **Postgres 17 + pgvector**, **git**, and **llama.cpp's
+`llama-server`** — the no-install local model provider. It is built by
 `ops/release/build-runtime-deps.sh`, shipped as its own release asset, and
 unpacked at `<product-dir>/runtime/`. The decision is
 `docs/product/desktop-app-plan.md` → "Bundled runtime" (ratified
@@ -32,12 +33,21 @@ runtime/
     bin/git, bin/git-shell, bin/scalar
     libexec/git-core/   the builtins, as SYMLINKS to `git`
     share/git-core/templates
+  llamacpp/
+    bin/llama-server    one static, Metal-enabled binary (~11 MB)
+    LICENSE             llama.cpp's MIT licence, as shipped
 ```
 
 `packages/cli/src/postgres.ts` resolves `<product>/runtime/postgres/bin` as
 the **bundled** candidate, ahead of Homebrew and behind only an explicit
 `METISTRY_PG_BIN` (`docs/ops/deployment-shapes.md`). The reconciler's plist
 gets `runtime/git/bin` on the front of its `PATH`.
+`packages/cli/src/local-models.ts` resolves
+`<product>/runtime/llamacpp/bin/llama-server`, and `metistry up` turns it
+into a supervisor child **only** when `compute.yaml` names a provider with a
+`serve:` block (`docs/ops/compute.md` → "Local models"). No `serve:` block,
+no process: the binary ships whether or not anything uses it, exactly as
+`git` does on a Mac with Xcode installed.
 
 ## Pinned in one place
 
@@ -53,6 +63,12 @@ why in the PR.
 | Postgres | `PG_VERSION` / `PG_SHA256` | built from source, relocatable |
 | pgvector | `PGVECTOR_VERSION` / `PGVECTOR_SHA256` | built from source against `runtime/postgres`'s `pg_config` |
 | git | `GIT_VERSION` / `GIT_SHA256` | built from source, `RUNTIME_PREFIX=1` |
+| llama.cpp | `LLAMACPP_VERSION` / `LLAMACPP_SHA256` | built from source with CMake, Metal on, statically linked |
+
+llama.cpp cuts **semver releases** (`v0.4.1`) alongside its nightly
+`b<number>` tags. Pin a semver one: a nightly is a build, not a version, and
+the release tag is what upstream tells you to set `LLAMA_BUILD_IS_DEV=OFF`
+for.
 
 Node's major must satisfy the root `package.json`'s `engines.node`, and
 Postgres's major must equal `PG_MAJOR` in `packages/cli/src/postgres.ts` —
@@ -79,6 +95,38 @@ of the above is on that path. `NO_INSTALL_HARDLINKS=1` makes the builtins
 symlinks rather than hardlinks — a hardlinked builtin becomes a second full
 copy the moment `codesign` rewrites the file.
 
+**llama.cpp** — `-DLLAMA_OPENSSL=OFF` (no HTTPS in the server: the CLI
+downloads GGUFs itself), `-DGGML_OPENMP=OFF`, `-DLLAMA_BUILD_UI=OFF
+-DLLAMA_USE_PREBUILT_UI=OFF`, and everything except the server target
+(`--target llama-server`; no `llama-cli`, no `quantize`, no examples, no
+tests).
+
+Three of those four are **relocatability requirements, not preferences.**
+`LLAMA_OPENSSL` and `GGML_OPENMP` each end in a `find_package()` that would
+happily link `/opt/homebrew/opt/openssl@3` or `libomp` on a runner that
+happens to have one — and a `runtime/` that needs Homebrew is not a bundled
+runtime. The prebuilt web UI is an **unpinned Hugging Face download at build
+time**, inside a build whose whole point is that every byte is pinned; the
+Compute pane is the UX Metistry owns anyway. `otool -L` on the result lists
+system frameworks and nothing else:
+
+```
+/System/Library/Frameworks/Accelerate.framework/…/Accelerate
+/System/Library/Frameworks/Metal.framework/…/Metal
+/System/Library/Frameworks/MetalKit.framework/…/MetalKit
+/System/Library/Frameworks/Foundation.framework/…/Foundation
+/System/Library/Frameworks/CoreFoundation.framework/…/CoreFoundation
+/usr/lib/libSystem.B.dylib, /usr/lib/libc++.1.dylib, /usr/lib/libobjc.A.dylib
+```
+
+**The build number and commit are STATED, not discovered.** llama.cpp's
+`build-info.cmake` runs `git rev-parse HEAD` in its source directory — and
+with the default work dir (`<repo>/.runtime-build`) that is *Metistry's*
+commit, stamped into `llama-server --version`. The script passes
+`-DLLAMA_BUILD_COMMIT=v$LLAMACPP_VERSION -DLLAMA_BUILD_NUMBER=0
+-DLLAMA_BUILD_IS_DEV=OFF`, so the binary reports
+`version: 0.4.1 (build 0, commit v0.4.1)`.
+
 **git is held at 2.54.x on purpose.** 2.55 added a Rust component
 (`target/release/libgitcore.a`) whose build needs `cargo`, which this script
 will not install and the macOS runner does not ship. Moving past it means
@@ -96,13 +144,22 @@ A tree that only works where it was compiled is not a bundled runtime.
   `@rpath/<name>`, each dependency inside the prefix becomes `@rpath/…`,
   and every binary gains an `@executable_path/../lib` (and matching
   `@loader_path`) rpath.
+- **llama-server** is linked `-DBUILD_SHARED_LIBS=OFF`: nothing to relocate,
+  nothing to `@rpath`, one file to sign. `GGML_METAL_EMBED_LIBRARY=ON` is the
+  other half — without it the binary hunts for a `default.metallib` beside
+  itself and a moved copy has no GPU. (`relocate()` and `strip_tree()` still
+  run over the prefix, so flipping the flag back would be a flag change
+  rather than a rewrite.)
 - **git** is built `RUNTIME_PREFIX=1`, so it resolves its exec path,
   templates and system config from its own location (`_NSGetExecutablePath`
   on Darwin) rather than from a prefix baked in on the CI runner.
 - **The build script proves both before it exits**: it copies `runtime/`
   somewhere else and, from the copy, runs `initdb`, `pg_ctl start`,
-  `CREATE EXTENSION vector`, `pg_dump`, and a `git init` + `add` + `commit`.
-  A failure there fails the build.
+  `CREATE EXTENSION vector`, `pg_dump`, a `git init` + `add` + `commit`, and
+  `llama-server --version` + `--list-devices`. The last one has to list an
+  `MTL<n>` device (`MTL0: Apple M4 Max`): a CPU/BLAS-only list means the
+  Metal backend did not register, which is a bundled model server that
+  cannot use the GPU. A failure anywhere there fails the build.
 - `packages/cli/test/runtime-deps.integration.test.ts` does the same thing
   again from the test suite, through the same `findPgToolchain` /
   `planPostgresBootstrap` code `metistry up` uses. It **skips** when
@@ -132,8 +189,10 @@ friends — V8 cannot run without the first two — and with `get-task-allow`,
 which notarization rejects. A hardened-runtime signature with no
 entitlements produces a `node` that is killed at startup; `sign()` proves
 the signed node still runs before the build goes on, and that
-`get-task-allow` is gone. Postgres and git carry no entitlements and get
-none.
+`get-task-allow` is gone. Postgres, git and `llama-server` carry no
+entitlements and get none — **Metal needs none**: shader compilation goes
+through the Metal compiler service, not through a JIT mapping the hardened
+runtime would refuse.
 
 **In CI the pack is signed** when the `APPLE_CERTIFICATE_P12` /
 `APPLE_CERTIFICATE_PASSWORD` secrets are set (`.github/actions/apple-keychain`
@@ -162,9 +221,16 @@ earlier rule only signed what had *no* signature, and ad-hoc counts as one.
 ops/release/build-runtime-deps.sh                 # -> ./runtime
 ops/release/build-runtime-deps.sh /tmp/rt         # -> /tmp/rt
 METISTRY_RUNTIME_WORK=/tmp/rt-work ops/release/build-runtime-deps.sh
+
+# one component, built and proved from a moved copy, then stop — minutes
+# instead of a Postgres-from-source compile. Assembles nothing, signs
+# nothing, writes no manifest.
+ops/release/build-runtime-deps.sh --only llamacpp
 ```
 
-macOS arm64, Xcode Command Line Tools, and nothing else. Downloads and
+macOS arm64, Xcode Command Line Tools, **and `cmake`** (llama.cpp is a
+CMake project; the macos-14 runner ships one, and a missing one is a refusal
+with the two ways to get it, not a half-built pack). Downloads and
 build trees live under `METISTRY_RUNTIME_WORK` (default
 `<repo>/.runtime-build`); `…/cache/<component>-<version>` is what CI caches,
 so only a versions bump pays for the compile again.

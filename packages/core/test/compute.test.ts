@@ -11,6 +11,7 @@ import {
   assignsNothing,
   computeTiers,
   emptyCompute,
+  firstOnMachineBaseUrl,
   loadCompute,
   modelRefIssue,
   parseCompute,
@@ -18,6 +19,7 @@ import {
   parseTiers,
   resolveAssignment,
   resolveTier,
+  servedProviders,
   startComputeWatch,
   validateCompute,
   type ReadFile,
@@ -288,3 +290,92 @@ describe("the D4 overlay and hot reload", () => {
 function local(): string {
   return "providers: { local: { kind: openai-compatible, base_url: http://127.0.0.1:1234/v1, locality: on_machine } }";
 }
+
+// ---- `serve:` — the bundled llama-server (PR 2) -------------------------------
+//
+// ADDITIVE, and the tests say so: the PR-1 file shape must keep parsing
+// unchanged, and everything the new block adds must REFUSE loudly rather
+// than start a server somewhere nobody is dialling.
+
+describe("serve:", () => {
+  const served = (extra = "") => `
+providers:
+  llamaserver:
+    kind: openai-compatible
+    base_url: http://127.0.0.1:8080/v1
+    locality: on_machine
+    serve:
+      runtime: llamaserver
+      model_path: state/models/unsloth/gemma-3-4b-it-GGUF/gemma-3-4b-it-Q4_K_M.gguf
+      port: 8080${extra}
+`;
+
+  it("is optional: a provider without it parses exactly as it did in PR 1", () => {
+    const cfg = parseCompute(local());
+    expect(cfg.providers.local?.serve).toBeUndefined();
+    expect(servedProviders(cfg)).toEqual([]);
+  });
+
+  it("parses, defaults extra_args to [], and is reported by servedProviders", () => {
+    const cfg = parseCompute(served());
+    const [only] = servedProviders(cfg);
+    expect(only?.name).toBe("llamaserver");
+    expect(only?.serve).toEqual({ runtime: "llamaserver", model_path: "state/models/unsloth/gemma-3-4b-it-GGUF/gemma-3-4b-it-Q4_K_M.gguf", port: 8080, extra_args: [] });
+  });
+
+  it("keeps extra_args verbatim", () => {
+    const cfg = parseCompute(served("\n      extra_args: ['--ctx-size', '8192']"));
+    expect(servedProviders(cfg)[0]?.serve.extra_args).toEqual(["--ctx-size", "8192"]);
+  });
+
+  it("refuses a serve.port the base_url does not dial — a server Metistry starts must be reachable where it listens", () => {
+    const bad = served().replace("port: 8080", "port: 8081");
+    expect(() => parseCompute(bad)).toThrow(/serve\.port is 8081 but base_url dials port 8080/);
+  });
+
+  it("refuses serve: on an off_machine provider, naming the field", () => {
+    expect(() =>
+      parseCompute(`
+providers:
+  remote:
+    kind: openai-compatible
+    base_url: https://example.invalid:8080/v1
+    locality: off_machine
+    data_policy: { allow: [Knowledge], deny_sources: [], max_brief_bytes: 1024 }
+    serve: { runtime: llamaserver, model_path: a.gguf, port: 8080 }
+`),
+    ).toThrow(/serve: is how a provider says Metistry starts it/);
+  });
+
+  it("refuses a runtime that is not the bundled one — LM Studio and Ollama are peers, never children", () => {
+    expect(() => parseCompute(served().replace("runtime: llamaserver", "runtime: lmstudio"))).toThrow(/serve\.runtime must be one of llamaserver/);
+  });
+
+  it("refuses a model_path that is not a .gguf", () => {
+    expect(() => parseCompute(served().replace(/model_path: .*/, "model_path: state/models/model.safetensors"))).toThrow(/is the path of a \.gguf file/);
+  });
+
+  it("refuses an unknown key inside serve: (strict, like every other block)", () => {
+    expect(() => parseCompute(served("\n      keep_alive: 60"))).toThrow(/keep_alive/);
+  });
+});
+
+describe("firstOnMachineBaseUrl", () => {
+  it("is the embedder's default URL: the first on_machine provider, in declaration order", () => {
+    const cfg = parseCompute(`
+providers:
+  openrouter:
+    kind: openai-compatible
+    base_url: https://openrouter.ai/api/v1
+    locality: off_machine
+    data_policy: { allow: [Knowledge], deny_sources: [], max_brief_bytes: 1024 }
+  lmstudio: { kind: openai-compatible, base_url: http://127.0.0.1:1234/v1, locality: on_machine }
+  ollama: { kind: openai-compatible, base_url: http://127.0.0.1:11434/v1, locality: on_machine }
+`);
+    expect(firstOnMachineBaseUrl(cfg)).toBe("http://127.0.0.1:1234/v1");
+  });
+
+  it("is undefined when nothing runs on this machine", () => {
+    expect(firstOnMachineBaseUrl(emptyCompute())).toBeUndefined();
+  });
+});

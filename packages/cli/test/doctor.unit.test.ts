@@ -119,6 +119,12 @@ describe("doctor: everything healthy", () => {
       "container:compose:assistant=ok",
       "container:compose:console=ok",
       "container:compose:db=ok",
+      // the local model servers, last. ABSENT, and report.ok is still true:
+      // a Mac that runs no local server is a supported install, so these
+      // rows can only add information (docs/ops/compute.md "Local models").
+      "local-model:local:lmstudio=absent",
+      "local-model:local:ollama=absent",
+      "local-model:local:llamaserver=absent",
     ]);
     // host.docker.internal rewritten to loopback, the bearer presented, the bridge's probe text kept
     expect(seen.find((s) => s.url.includes("7901"))).toEqual({ url: "http://127.0.0.1:7901/check", auth: "Bearer tok-x" });
@@ -129,6 +135,7 @@ describe("doctor: everything healthy", () => {
     expect(r.migrations?.meta).toMatchObject({ applied: 2, files: 2, pending: [], unknown: [] });
     expect(r["launchd:com.foldedspacelabs.metistry.a"]?.meta).toEqual({ pid: 4242 });
     expect(r["compose:db"]?.meta).toMatchObject({ state: "running", health: "healthy" });
+    expect(r["local:lmstudio"]?.remediation).toContain("nothing is wrong unless you meant to run it");
   });
 
   it("main: exit 0, the table has one row per check and a summary; --json is the report", async () => {
@@ -144,7 +151,8 @@ describe("doctor: everything healthy", () => {
     expect(await main(["doctor", "--product-dir", productDir], { out: (s) => out.push(s), doctorDeps: deps })).toBe(0);
     const text = out.join("\n");
     expect(text).toMatch(/^name\s+kind\s+status\s+ms\s+remediation/);
-    expect(text).toMatch(/11 checks: 8 ok, 0 degraded, 0 failed, 3 absent — healthy \(.*, shape compose\)/);
+    expect(text).toMatch(/14 checks: 8 ok, 0 degraded, 0 failed, 6 absent — healthy \(.*, shape compose\)/);
+    expect(text).toMatch(/^local:llamaserver\s+local-model\s+absent/m);
     expect(text).not.toMatch(/launchd:/); // linux: no launchd rows
     expect(text).toMatch(/^compose\s+compose\s+absent\s+\d+\s+docker not found/m);
 
@@ -152,7 +160,7 @@ describe("doctor: everything healthy", () => {
     expect(await main(["doctor", "--product-dir", productDir, "--json"], { out: (s) => json.push(s), doctorDeps: deps })).toBe(0);
     const parsed = JSON.parse(json.join("\n"));
     expect(parsed.ok).toBe(true);
-    expect(parsed.rows).toHaveLength(11);
+    expect(parsed.rows).toHaveLength(14);
     expect(parsed.shape).toBe("compose");
     expect(parsed.rows.every((r: DoctorRow) => typeof r.latency_ms === "number" && typeof r.probe === "string")).toBe(true);
   });

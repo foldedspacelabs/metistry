@@ -25,7 +25,7 @@ recipient.
 
 | Piece | File |
 | --- | --- |
-| The schema | `db/migrations/0016_work_threads.sql` |
+| The schema | `db/migrations/0018_work_threads.sql` |
 | The service | `packages/artifacts/src/service.ts` (`workThread`, `workComment`, `workThreadResolve`) |
 | The escalation | `packages/artifacts/src/policy.ts` `pingPongDemotes()` — unchanged, reused |
 | The agent tools | `packages/mcp-brain/src/thread-tools.ts` (`tasks_comment`, `tasks_thread`) |

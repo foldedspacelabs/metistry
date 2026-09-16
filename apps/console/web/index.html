@@ -22,6 +22,7 @@
     <nav id="nav" hidden>
       <button data-view="feed">Feed</button>
       <button data-view="chat">Chat</button>
+      <button data-view="board">Board</button>
       <button data-view="dashboard">Dashboard</button>
       <button data-view="capture">Capture</button>
       <button data-view="triage">Needs You</button>
@@ -199,6 +200,24 @@
       <p id="dash-aws-total"></p>
       <ul id="dash-aws" class="dash-list"></ul>
       <ul id="dash-aws-services" class="dash-list"></ul>
+    </section>
+
+    <!-- board (docs/ops/board.md): the read-only Kanban over the tasks
+         module's work rows. Columns are derived SERVER-SIDE by the `board`
+         seed query (invariant 3) — this panel never decides which column a
+         card belongs to, so the Mac app renders the same rows unchanged.
+         Read-only on purpose: there is no drag and no drop target, because
+         every task mutation is still a tool call (invariant 9). Phase 3 of
+         docs/research/2026-09-12-hermes-agent-review.md adds the writes.
+         Every server value is output-encoded via esc() (CRIT-7). -->
+    <section id="board" hidden>
+      <form id="board-filter">
+        <select id="board-project" aria-label="Project"><option value="">all projects</option></select>
+        <span id="board-asof" class="muted"></span>
+        <span class="muted board-hint">[ and ] move the project filter</span>
+      </form>
+      <div id="board-columns" class="board"></div>
+      <p id="board-empty" class="muted" hidden>no tasks yet — one appears when an agent calls tasks_create or a crew is delegated work</p>
     </section>
 
     <!-- artifacts (§4.21): versioned, commentable agent output. Every server

@@ -32,6 +32,8 @@ const REQUIRED = [
   "activity_feed",
   "agent_presence",
   "reply_feedback_summary",
+  "board",
+  "board_projects",
   "rooms",
 ];
 
@@ -227,6 +229,117 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
     expect(byId.get(ids.working)?.current_claims).toHaveLength(1);
     expect(byId.get(ids.interrupted)?.interrupted_claims).toHaveLength(1);
     expect(byId.get(ids.overCap)?.blocked_bundles).toHaveLength(1);
+  });
+
+  // docs/ops/board.md — the board view (Hermes note §4/§6a, phase 1). One
+  // fixture per derived column, plus the two rows that must NOT move: a
+  // collected `issue` (never claimable, so it has no board state) and an
+  // over-cap queued bundle (blocked, but releasing itself — not a human's
+  // problem). If a predicate drifts, exactly one of these lands in the
+  // wrong column.
+  const BOARD_ORDER = ["backlog", "assigned", "in_progress", "needs_you", "done", "reported"];
+
+  it("board buckets one fixture per column, flags what wants a human, and limits PER column", async () => {
+    const tag = `boardq-${Date.now()}`;
+    const mk = async (label: string, cols: string, vals: unknown[]) => {
+      const { rows } = await pool.query(
+        `INSERT INTO work (title, project, kind, ${cols}) VALUES ($1, $2, $3, ${vals.map((_, i) => `$${i + 4}`).join(", ")}) RETURNING id`,
+        [`${tag} ${label}`, tag, label === "collected" ? "issue" : label === "queued" ? "review" : "task", ...vals],
+      );
+      return Number(rows[0]!.id);
+    };
+    const id = {
+      backlog: await mk("backlog", "status", ["open"]),
+      overdue: await mk("overdue", "status, due", ["open", "2020-01-01"]),
+      assigned: await mk("assigned", "status, owner", ["open", `${tag}-agent`]),
+      working: await mk("working", "status, claimed_by, lease_expires_at", ["in_progress", `${tag}-agent`, new Date(Date.now() + 300_000)]),
+      interrupted: await mk("interrupted", "status, claimed_by, lease_expires_at", ["in_progress", `${tag}-agent`, new Date(Date.now() - 300_000)]),
+      blocked: await mk("blocked", "status", ["blocked"]),
+      queued: await mk("queued", "status, meta", ["blocked", JSON.stringify({ bundle: { queued: "agent_cap" } })]),
+      done: await mk("done", "status, closed_at", ["closed", new Date()]),
+      reported: await mk("reported", "status, closed_at", ["closed", new Date()]),
+      collected: await mk("collected", "status", ["open"]),
+    };
+    // the one confirmed work→output join: crew-drain stamps meta.work_id at
+    // start and merges `reports` at finish (apps/assistant/src/crew-drain.ts)
+    await pool.query(`INSERT INTO runs (component, kind, ok, started_at, finished_at, meta) VALUES ($1, 'crew_run', true, now(), now(), $2::jsonb)`, [
+      tag,
+      JSON.stringify({ work_id: id.reported, reports: 1 }),
+    ]);
+    // a run with no reports must NOT promote `done` to `reported`
+    await pool.query(`INSERT INTO runs (component, kind, ok, started_at, finished_at, meta) VALUES ($1, 'crew_run', true, now(), now(), $2::jsonb)`, [
+      tag,
+      JSON.stringify({ work_id: id.done, reports: 0 }),
+    ]);
+
+    const { rows } = await store.run("board", { project: tag, limit: 50 });
+    const col = new Map(rows.map((r) => [Number(r.id), r.column]));
+    expect(col.get(id.backlog)).toBe("backlog");
+    expect(col.get(id.overdue)).toBe("backlog");
+    expect(col.get(id.assigned)).toBe("assigned"); // owner set, never claimed — the "assigned but not started" state
+    expect(col.get(id.working)).toBe("in_progress");
+    expect(col.get(id.interrupted)).toBe("in_progress"); // a lapsed lease is still in_progress on the row; the flag says it stalled
+    expect(col.get(id.blocked)).toBe("needs_you");
+    expect(col.get(id.queued)).toBe("needs_you");
+    expect(col.get(id.done)).toBe("done");
+    expect(col.get(id.reported)).toBe("reported");
+    expect(col.has(id.collected)).toBe(false); // kind `issue` — a collector owns its status, so it has no board state
+
+    const esc = new Map(rows.map((r) => [Number(r.id), r.escalated]));
+    expect(esc.get(id.interrupted)).toBe(true); // lease lapsed mid-flight
+    expect(esc.get(id.blocked)).toBe(true); // blocked with no route back to open — only the user's hand
+    expect(esc.get(id.overdue)).toBe(true); // past due
+    expect(esc.get(id.queued)).toBe(false); // over-cap, releases itself when a slot frees
+    expect(esc.get(id.working)).toBe(false);
+    expect(esc.get(id.backlog)).toBe(false);
+    expect(esc.get(id.done)).toBe(false);
+
+    const reported = rows.find((r) => Number(r.id) === id.reported)!;
+    expect(reported.last_report_at).not.toBeNull();
+    expect(rows.find((r) => Number(r.id) === id.done)!.last_report_at).toBeNull();
+    expect(reported.project).toBe(tag);
+    expect(Number(reported.age_hours)).toBeGreaterThanOrEqual(0);
+    expect(rows.find((r) => Number(r.id) === id.working)!.claimed_by).toBe(`${tag}-agent`);
+    expect(rows.find((r) => Number(r.id) === id.queued)!.kind).toBe("review");
+
+    // ordered by column (board order, not alphabetical) then updated_at desc
+    const seen = rows.map((r) => BOARD_ORDER.indexOf(String(r.column)));
+    expect(seen).toEqual([...seen].sort((a, b) => a - b));
+    expect(seen).not.toContain(-1);
+
+    // `limit` is per column, not per result set: backlog, in_progress and
+    // needs_you each hold two fixtures, so limit 1 drops one from each and
+    // every column still shows its most recent card. A busy column never
+    // crowds another out.
+    const capped = (await store.run("board", { project: tag, limit: 1 })).rows;
+    const counts = new Map<string, number>();
+    for (const r of capped) counts.set(String(r.column), (counts.get(String(r.column)) ?? 0) + 1);
+    for (const [c, n] of counts) expect(n, c).toBe(1);
+    expect([...counts.keys()].sort()).toEqual([...BOARD_ORDER].sort()); // all six survive
+  });
+
+  it("board_projects groups the same predicate by project × column for the cross-project view", async () => {
+    const tag = `boardp-${Date.now()}`;
+    await pool.query(
+      `INSERT INTO work (title, project, kind, status, created_at) VALUES
+         ($1, $2, 'task', 'open',    now() - interval '10 hours'),
+         ($1, $2, 'task', 'open',    now() - interval '1 hour'),
+         ($1, $2, 'task', 'blocked', now() - interval '2 hours')`,
+      [`${tag} card`, tag],
+    );
+    const rows = (await store.run("board_projects", { limit: 100000 })).rows.filter((r) => r.project === tag);
+    const byCol = new Map(rows.map((r) => [String(r.column), r]));
+    expect([...byCol.keys()].sort()).toEqual(["backlog", "needs_you"]);
+    expect(Number(byCol.get("backlog")!.cards)).toBe(2);
+    expect(Number(byCol.get("backlog")!.escalations)).toBe(0);
+    expect(Number(byCol.get("backlog")!.oldest_age_hours)).toBeGreaterThanOrEqual(10);
+    expect(Number(byCol.get("needs_you")!.cards)).toBe(1);
+    expect(Number(byCol.get("needs_you")!.escalations)).toBe(1); // blocked and not queued — a human has to move it
+    expect(byCol.get("needs_you")!.last_activity).not.toBeNull();
+
+    // the counts must match the cards, or the filter's labels lie
+    const cards = (await store.run("board", { project: tag, limit: 50 })).rows;
+    for (const [c, r] of byCol) expect(cards.filter((k) => k.column === c)).toHaveLength(Number(r.cards));
   });
 
   // The room view (docs/ops/threads.md): one row per thread across both

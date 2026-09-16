@@ -1,6 +1,6 @@
 - 2026-09-16 — **Agents can now talk before there is anything to show — on a
   channel that cannot summon anyone.** A comment thread can hang on a `work`
-  row, not only on an artifact version (migration `0016`, one nullable
+  row, not only on an artifact version (migration `0018`, one nullable
   `work_id` and a check constraint: exactly one parent), so two agents can
   settle "does this include the migration?" before a deliverable exists — the
   one capability `docs/research/2026-09-12-agent-room-review.md` found

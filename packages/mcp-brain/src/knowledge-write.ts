@@ -16,8 +16,14 @@
 //   instead") — one writer, but not one owner; new notes are free;
 // - a markdown write is stamped with provenance (§4.15): `source` is the
 //   credential's id — never an argument — and `updated` is today;
-// - compare-and-swap passes through: a 409 comes back as `conflict`
-//   carrying the current hash so the agent can re-read instead of clobber.
+// - compare-and-swap is NOT optional (2026-09-16): an omitted
+//   `expected_sha256` means CREATE ONLY — the bridge gets CAS on the empty
+//   string, so an existing note comes back `conflict` instead of being
+//   overwritten blind. The user edits `Knowledge/` constantly (Obsidian on
+//   a phone, an editor, another device), and the one rule that makes those
+//   edits safe is that the assistant must have SEEN the bytes it replaces.
+//   A 409 carries the current hash so the agent re-reads and redoes the
+//   edit rather than clobbering it.
 //
 // Deletes and renames are NOT exposed: they stay the user's hand for now.
 
@@ -281,11 +287,15 @@ export async function writeKnowledge(
   }
   if (Buffer.byteLength(content, "utf8") > MAX_WRITE_BYTES) return { ok: false, code: "invalid_request", message: `content exceeds ${MAX_WRITE_BYTES} bytes`, meta };
 
+  // Omitted = create only. There is no unconditional write: whatever is on
+  // disk was put there by someone, and "whatever is there" is not something
+  // an agent can consent to on the user's behalf.
+  const createOnly = args.expected_sha256 === undefined;
   const out = await writer({
     path: args.path,
     content,
     intent: { principal: principal.id, message: args.message, group: principal.id },
-    ...(args.expected_sha256 !== undefined ? { expected_sha256: args.expected_sha256 } : {}),
+    expected_sha256: args.expected_sha256 ?? "",
   });
   if (!out.ok) {
     if (out.code === "conflict") {
@@ -294,9 +304,11 @@ export async function writeKnowledge(
         ok: false,
         code: "conflict",
         message: current
-          ? `the note changed since you read it (current sha256 ${current}) — knowledge_read it again and retry with expected_sha256`
+          ? createOnly
+            ? `that note already exists (current sha256 ${current}) — knowledge_read it, fold your change into what is there, and write it back with expected_sha256. Omitting expected_sha256 means "create only", so nobody's edit is ever overwritten unseen`
+            : `the note changed since you read it (current sha256 ${current}) — knowledge_read it again and retry with expected_sha256`
           : "the note no longer exists — knowledge_read it again and retry",
-        meta: { ...meta, current_sha256: current },
+        meta: { ...meta, current_sha256: current, ...(createOnly ? { create_only: true } : {}) },
       };
     }
     return { ok: false, code: out.code, message: out.message, meta };

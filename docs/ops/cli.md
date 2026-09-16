@@ -669,6 +669,17 @@ still correct and still passes — a passkey session is required. Then the db
 jobs behind every plist in `ops/launchd` (macOS), and `docker compose ps`
 against the services in `docker-compose.yml`.
 
+**The `schedules` rows.** Every collector and routine manifest also gets a
+`kind: schedule` row read from the `runs` table: when it last ran, whether
+that run succeeded, how many failures are open since its last success, when it
+is next due, and whether the runner has stopped running it (a failure streak
+at `METISTRY_RUNNER_MAX_STREAK`) or never started it (a declared prerequisite
+missing). `failed` — and so exit 1 — is reserved for the states you have to
+act on: given up on, blocked on configuration, or more than 2× its interval
+with no run at all. A component that has simply never run is `absent`, because
+a fresh install is not broken. `docs/ops/automation.md` has the whole failure
+model and the `--json` shape.
+
 Add a component by adding a directory with a manifest; doctor covers it.
 A new http bridge named `foo` on port 7820 is probed the moment
 `METISTRY_FOO_URL` (and `METISTRY_BRIDGE_TOKEN_FOO`) exist in `.env`.

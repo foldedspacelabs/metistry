@@ -61,6 +61,7 @@ const fakeDb = (applied: string[] | "no-table" | Error): Db => ({
     if (text.startsWith("SELECT 1")) return { rows: [{ "?column?": 1 }] };
     if (text.includes("to_regclass")) return { rows: [{ t: applied === "no-table" ? null : "schema_migrations" }] };
     if (text.includes("FROM schema_migrations")) return { rows: (applied as string[]).map((filename) => ({ filename })) };
+    if (text.includes("FROM runs")) return { rows: [] }; // no history: the schedules section reports `absent`
     throw new Error(`unexpected query ${text}`);
   },
 });
@@ -112,6 +113,7 @@ describe("doctor: everything healthy", () => {
       "target:tgt=ok",
       "db:db=ok",
       "db:migrations=ok",
+      "schedule:good=absent",
       "launchd:launchd:com.foldedspacelabs.metistry.a=ok",
       "launchd:launchd:com.foldedspacelabs.metistry.b=ok",
       "container:compose:assistant=ok",
@@ -142,7 +144,7 @@ describe("doctor: everything healthy", () => {
     expect(await main(["doctor", "--product-dir", productDir], { out: (s) => out.push(s), doctorDeps: deps })).toBe(0);
     const text = out.join("\n");
     expect(text).toMatch(/^name\s+kind\s+status\s+ms\s+remediation/);
-    expect(text).toMatch(/10 checks: 8 ok, 0 degraded, 0 failed, 2 absent — healthy \(.*, shape compose\)/);
+    expect(text).toMatch(/11 checks: 8 ok, 0 degraded, 0 failed, 3 absent — healthy \(.*, shape compose\)/);
     expect(text).not.toMatch(/launchd:/); // linux: no launchd rows
     expect(text).toMatch(/^compose\s+compose\s+absent\s+\d+\s+docker not found/m);
 
@@ -150,7 +152,7 @@ describe("doctor: everything healthy", () => {
     expect(await main(["doctor", "--product-dir", productDir, "--json"], { out: (s) => json.push(s), doctorDeps: deps })).toBe(0);
     const parsed = JSON.parse(json.join("\n"));
     expect(parsed.ok).toBe(true);
-    expect(parsed.rows).toHaveLength(10);
+    expect(parsed.rows).toHaveLength(11);
     expect(parsed.shape).toBe("compose");
     expect(parsed.rows.every((r: DoctorRow) => typeof r.latency_ms === "number" && typeof r.probe === "string")).toBe(true);
   });

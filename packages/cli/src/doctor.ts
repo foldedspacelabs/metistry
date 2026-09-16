@@ -17,12 +17,20 @@ import { basename, join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import {
   checkResultSchema,
+  failureStreaks,
+  intEnv,
   resolveUrl,
   runCheck,
+  scheduleToSeconds,
   servicePlan,
   SHAPED_SERVICES,
   usesCompose,
   validateManifest,
+  DEFAULT_MAX_STREAK,
+  PREFLIGHT_FAILED,
+  RUNNER_KIND,
+  SCHEDULED_KINDS,
+  SKIPPED_STREAK,
   type CheckResult,
   type Deployment,
   type DeploymentShape,
@@ -355,6 +363,180 @@ export async function dbRows(db: Db | null, productDir: string, shape: Deploymen
   return [dbRow, migRow];
 }
 
+// ---- schedules -------------------------------------------------------------
+//
+// The gap the Hermes review named (docs/research/2026-09-12-hermes-agent-review-2.md
+// §2): a collector whose token expired failed every hour forever, contributed
+// one number to a tile, and nothing said "this has failed 168 times". These
+// rows are that sentence. Generic over manifests as the rest of doctor is —
+// the component list comes from `walkManifests`, the history from `runs`, and
+// nothing here imports the collectors package or knows what any of them do.
+
+/** Overdue at more than this many intervals with no run (Hermes ADOPT 3). */
+export const OVERDUE_FACTOR = 2;
+
+function humanSec(sec: number): string {
+  if (sec >= 86400 && sec % 86400 === 0) return `${sec / 86400}d`;
+  if (sec >= 3600 && sec % 3600 === 0) return `${sec / 3600}h`;
+  if (sec >= 60) return `${Math.round(sec / 60)}m`;
+  return `${Math.max(0, Math.round(sec))}s`;
+}
+
+interface LastRun {
+  ts: Date;
+  ok: boolean | null;
+  error: string | null;
+}
+
+/**
+ * One row per schedulable manifest: when it last ran, whether that run
+ * succeeded, its open failure streak, when it is next due, and whether the
+ * runner has stopped running it (`skipped_streak`) or never started it
+ * (`preflight_failed`). Actionable ⇒ `failed`, so `metistry doctor` exits
+ * non-zero on exactly the states a person has to act on.
+ */
+export async function scheduleRows(
+  db: Db | null,
+  productDir: string,
+  env: NodeJS.ProcessEnv = {},
+  now: Date = new Date(),
+): Promise<DoctorRow[]> {
+  const scheduled = (await walkManifests(productDir)).flatMap((m) => {
+    if (!m.result.ok) return [];
+    const man = m.result.manifest;
+    if (man.type !== "collector" && man.type !== "routine") return [];
+    return [{ dir: m.dir, name: man.name, schedule: man.schedule, runKind: man.type === "routine" ? "routine_run" : "collector_run" }];
+  });
+  if (scheduled.length === 0) return [];
+
+  if (!db) {
+    return [
+      {
+        kind: "schedule",
+        ...(await runCheck("schedules", `${scheduled.length} scheduled component(s) have a recent, successful run`, async () => ({
+          status: "absent",
+          remediation: "not checked — no db configured (METISTRY_DB_PASSWORD is unset); the runs table is where every schedule's history lives",
+          meta: { scheduled: scheduled.length },
+        }))),
+      },
+    ];
+  }
+
+  const maxStreak = intEnv("METISTRY_RUNNER_MAX_STREAK", DEFAULT_MAX_STREAK, env);
+  const last = new Map<string, LastRun>();
+  const markers = new Map<string, { ts: Date; error: string | null }>();
+  let streaks: Awaited<ReturnType<typeof failureStreaks>> = [];
+  try {
+    streaks = await failureStreaks(db);
+    const { rows: lastRows } = await db.query(
+      `SELECT DISTINCT ON (component, kind) component, kind, ts, ok, error
+       FROM runs WHERE kind = ANY($1) ORDER BY component, kind, ts DESC`,
+      [[...SCHEDULED_KINDS]],
+    );
+    for (const r of lastRows) {
+      last.set(`${r.component}/${r.kind}`, { ts: new Date(r.ts), ok: r.ok === null ? null : Boolean(r.ok), error: r.error ?? null });
+    }
+    const { rows: markerRows } = await db.query(
+      `SELECT component, tool, max(ts) AS ts, (array_agg(error ORDER BY ts DESC))[1] AS error
+       FROM runs WHERE kind = $1 AND tool = ANY($2) GROUP BY component, tool`,
+      [RUNNER_KIND, [SKIPPED_STREAK, PREFLIGHT_FAILED]],
+    );
+    for (const r of markerRows) markers.set(`${r.component}/${r.tool}`, { ts: new Date(r.ts), error: r.error ?? null });
+  } catch (err) {
+    // the db answered SELECT 1 but not this: an un-migrated schema, most
+    // likely. One honest row beats an exception that takes the whole report
+    // with it — the migrations row above is the real finding.
+    return [
+      {
+        kind: "schedule",
+        ...(await runCheck("schedules", `${scheduled.length} scheduled component(s) have a recent, successful run`, async () => ({
+          status: "degraded",
+          remediation: `could not read the runs table (${err instanceof Error ? err.message : String(err)}) — run pnpm db:migrate`,
+          meta: { scheduled: scheduled.length },
+        }))),
+      },
+    ];
+  }
+
+  const out: DoctorRow[] = [];
+  for (const s of scheduled) {
+    const intervalSec = (() => {
+      try {
+        return scheduleToSeconds(s.schedule);
+      } catch {
+        return 0;
+      }
+    })();
+    const lastRun = last.get(`${s.name}/${s.runKind}`);
+    const streak = streaks.find((x) => x.component === s.name && x.kind === s.runKind);
+    const skipped = markers.get(`${s.name}/${SKIPPED_STREAK}`);
+    const blocked = markers.get(`${s.name}/${PREFLIGHT_FAILED}`);
+    // a marker only describes the CURRENT state while it is inside its own
+    // window plus a tick's grace — an old one is history, not a finding
+    const fresh = (m: { ts: Date } | undefined): boolean =>
+      m !== undefined && intervalSec > 0 && now.getTime() - m.ts.getTime() <= intervalSec * OVERDUE_FACTOR * 1000;
+    const nextDue = lastRun && intervalSec > 0 ? new Date(lastRun.ts.getTime() + intervalSec * 1000) : null;
+    const overdueSec = lastRun ? Math.floor((now.getTime() - lastRun.ts.getTime()) / 1000) - intervalSec : null;
+    const meta = {
+      dir: s.dir,
+      schedule: s.schedule,
+      interval_sec: intervalSec,
+      run_kind: s.runKind,
+      last_run_at: lastRun ? lastRun.ts.toISOString() : null,
+      last_ok: lastRun ? lastRun.ok : null,
+      streak: streak?.count ?? 0,
+      error_signature: streak?.signature ?? null,
+      next_due_at: nextDue ? nextDue.toISOString() : null,
+      overdue_sec: overdueSec !== null && overdueSec > 0 ? overdueSec : 0,
+      skipped_streak: fresh(skipped),
+      preflight_failed: fresh(blocked),
+    };
+
+    out.push({
+      kind: "schedule",
+      ...(await runCheck(s.name, `${s.schedule} (every ${humanSec(intervalSec)}): ran inside ${OVERDUE_FACTOR}× its interval, last run ok, no open failure streak`, async () => {
+        if (fresh(skipped)) {
+          return {
+            status: "failed" as const,
+            remediation: `the runner has stopped running ${s.name}: ${meta.streak} failures in a row reached METISTRY_RUNNER_MAX_STREAK (${maxStreak}) — ${skipped?.error ?? "see the runner rows"}; the next successful run clears it, or raise METISTRY_RUNNER_MAX_STREAK, or remove \`schedule\` from ${s.dir}/manifest.yaml`,
+            meta,
+          };
+        }
+        if (fresh(blocked)) {
+          return {
+            status: "failed" as const,
+            remediation: `${blocked?.error ?? `${s.name} is blocked_config`} (declared in \`requires\` in ${s.dir}/manifest.yaml)`,
+            meta,
+          };
+        }
+        if (!lastRun) {
+          return {
+            status: "absent" as const,
+            remediation: `no run recorded yet — the console's runner writes one row per window; check that the console is up and that ${s.dir}/manifest.yaml is registered`,
+            meta,
+          };
+        }
+        if (intervalSec > 0 && now.getTime() - lastRun.ts.getTime() > intervalSec * OVERDUE_FACTOR * 1000) {
+          return {
+            status: "failed" as const,
+            remediation: `${s.name} last ran ${humanSec(Math.floor((now.getTime() - lastRun.ts.getTime()) / 1000))} ago, over ${OVERDUE_FACTOR}× its "${s.schedule}" interval — the console's runner is not running it: metistry logs console`,
+            meta,
+          };
+        }
+        if ((streak?.count ?? 0) > 0) {
+          return {
+            status: "degraded" as const,
+            remediation: `${streak?.count} failed run(s) in a row since ${streak?.since.toISOString()}: ${streak?.lastError ?? "(no error text)"} — at METISTRY_RUNNER_MAX_STREAK (${maxStreak}) the runner stops running it`,
+            meta,
+          };
+        }
+        return { meta };
+      })),
+    });
+  }
+  return out;
+}
+
 // ---- launchd (macOS) ----------------------------------------------------------
 
 /**
@@ -581,6 +763,9 @@ export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
   const db = deps.db === undefined ? await openDbFromEnv(env) : deps.db;
   try {
     rows.push(...(await dbRows(db, deps.productDir, shape, labelSuffix)));
+    // schedules last of the db rows: they read `runs`, so they are only
+    // meaningful once the db row above has said the database answers
+    rows.push(...(await scheduleRows(db, deps.productDir, env)));
   } finally {
     if (deps.db === undefined && db?.end) await db.end().catch(() => {});
   }

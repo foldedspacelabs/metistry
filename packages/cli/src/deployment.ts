@@ -13,6 +13,8 @@ import { parse as parseYaml } from "yaml";
 import {
   DEFAULT_DEPLOYMENT,
   DEPLOYMENT_FILENAME,
+  ENGINE_CREDENTIAL_VAR,
+  engineCredentialPresent,
   overlayDeployment,
   parseDeployment,
   resolveUrl,
@@ -153,29 +155,11 @@ export function consoleEnv(ctx: ShapeContext): Record<string, string> {
 }
 
 /**
- * The credential the engine cannot start without, named in ONE place.
- *
- * `up` and `doctor` both ask `engineCredentialPresent` rather than reading
- * it themselves, so when the compute pivot renames it (plan refresh
- * 2026-09-13, C2/C3: one `openai-compatible` engine configured by
- * `compute.yaml`) there is one constant and one function to move.
+ * The engine credential seam lives in `packages/core` (deployment.ts) — the
+ * console preflights routines against it and `apps/` may not import the CLI.
+ * Re-exported here so `up`, `doctor` and the shape tests keep one import.
  */
-export const ENGINE_CREDENTIAL_VAR = "CLAUDE_CODE_OAUTH_TOKEN";
-
-/**
- * Is there an engine at all?
- *
- * An install with no credential is a SUPPORTED shape, not a broken one: the
- * assistant is the only component that needs a model, so without one `up`
- * leaves it out of the supervisor's children — the same "a child that could
- * only crash-loop is not started at all" rule the bridges already get — and
- * `doctor` reports it `absent` rather than failed. Everything model-free
- * (captures, inbox-drain, tasks, search, the console) runs; a queued fold
- * turn waits for a credential.
- */
-export function engineCredentialPresent(env: NodeJS.ProcessEnv): boolean {
-  return (env[ENGINE_CREDENTIAL_VAR] ?? "").trim() !== "";
-}
+export { ENGINE_CREDENTIAL_VAR, engineCredentialPresent };
 
 /** The one line `up` prints when this install has no engine. */
 export const ENGINE_ABSENT_NOTE = `assistant: absent — no engine credential (${ENGINE_CREDENTIAL_VAR}); captures, tasks, search and the console run; fold turns wait (docs/ops/assistant-tools.md)`;

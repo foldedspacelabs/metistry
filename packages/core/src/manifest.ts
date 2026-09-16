@@ -64,18 +64,48 @@ export const bridgeManifest = base.extend({
   }
 });
 
+const envName = z
+  .string()
+  .regex(/^[A-Z][A-Z0-9_]*$/, "environment variable names are UPPER_SNAKE_CASE");
+
+/**
+ * What a scheduled component needs before a run is worth starting
+ * (preflight, docs/ops/automation.md): environment variables that must be
+ * non-empty, environment variables holding a base URL whose `/check` must
+ * answer, and whether the run ends up enqueueing an assistant turn — an
+ * install with no engine credential should never spend a window producing
+ * one. The manifest already declares what a component needs (invariant 5);
+ * this makes that declaration machine-checkable instead of prose.
+ */
+export const requirementsSchema = z.object({
+  env: z.array(envName).default([]),
+  reachable: z.array(envName).default([]),
+  engine: z.boolean().default(false),
+});
+
+export type Requirements = z.infer<typeof requirementsSchema>;
+
+/**
+ * `requires` has two forms and the older one still validates: an array of
+ * free-text labels (`requires: [aws-credentials]` — documentation only, no
+ * preflight) or the structured form above. `requirementsOf` (preflight.ts)
+ * normalises both, so no manifest has to be rewritten to keep working.
+ */
+const requiresField = z.union([z.array(z.string()), requirementsSchema]).default([]);
+
 export const collectorManifest = base.extend({
   type: z.literal("collector"),
   schedule: cron,
   writes: z.array(z.string()).min(1),
   reads: z.array(z.string()).default([]),
-  requires: z.array(z.string()).default([]),
+  requires: requiresField,
 });
 
 export const routineManifest = base.extend({
   type: z.literal("routine"),
   schedule: cron,
   agent: z.string().optional(),
+  requires: requiresField,
 });
 
 // Secrets are referenced, never written into a manifest: `env:VAR`.

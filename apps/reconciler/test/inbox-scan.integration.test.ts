@@ -1,0 +1,144 @@
+// The vault inbox against the real (scratch) database: a file that appears
+// under `Knowledge/Inbox/` without a capture call must get a triage row, a
+// human's edit must refresh it (and re-open it for the drain), and a
+// deleted file must archive it — the owner's 2026-09-16 ruling that edits
+// made in `Knowledge/` are first-class and never lost. Skipped without a db.
+import { readFileSync } from "node:fs";
+import { mkdir, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import pg from "pg";
+import { Committer } from "../src/committer.js";
+import { Vault } from "../src/vault.js";
+import { Indexer } from "../src/indexer.js";
+import { tempRepo, type TempRepo } from "./helpers.js";
+
+try {
+  for (const line of readFileSync(new URL("../../../.env", import.meta.url), "utf8").split("\n")) {
+    const m = /^([A-Z_]+)=(.*)$/.exec(line.trim());
+    if (m && m[1] && process.env[m[1]] === undefined) process.env[m[1]] = m[2];
+  }
+} catch {}
+
+const hasDb = !!process.env.METISTRY_DB_PASSWORD;
+const INBOX = "Knowledge/Inbox";
+
+describe.skipIf(!hasDb)("the vault inbox is indexed from the tree (real db)", () => {
+  let pool: pg.Pool;
+  let repo: TempRepo;
+  let indexer: Indexer;
+
+  const rowsNow = async () =>
+    (await pool.query(`SELECT path, source, mime, note, sha256, status FROM inbox WHERE path LIKE $1 ORDER BY path`, [`${INBOX}/%`])).rows;
+  const clean = async () => {
+    await pool.query(`DELETE FROM inbox WHERE path LIKE $1`, [`${INBOX}/%`]);
+    await pool.query(`DELETE FROM knowledge_links`);
+    await pool.query(`DELETE FROM knowledge_files`);
+    await pool.query(`DELETE FROM runs WHERE component = 'reconciler'`);
+  };
+
+  beforeAll(async () => {
+    pool = new pg.Pool({
+      host: process.env.METISTRY_DB_HOST ?? "127.0.0.1",
+      port: Number(process.env.METISTRY_DB_PORT ?? 5432),
+      user: process.env.METISTRY_DB_USER ?? "metistry",
+      database: process.env.METISTRY_TEST_DB_NAME ?? "metistry_test", // scratch db (ops/scripts/test-db.sh)
+      password: process.env.METISTRY_DB_PASSWORD,
+    });
+    await clean();
+    repo = await tempRepo();
+    const committer = new Committer(repo.git, { authorPrefix: "Metistry", authorEmail: "metistry@test" });
+    const vault = new Vault(repo.root, repo.git, committer, { maxBytes: 65536 });
+    indexer = new Indexer(pool, vault, committer, { commitExternalEdits: false });
+    await mkdir(join(repo.root, INBOX), { recursive: true });
+  });
+  afterAll(async () => {
+    await repo.cleanup();
+    await clean();
+    await pool.end();
+  });
+
+  it("a note written in Obsidian (no capture call) becomes a triage row", async () => {
+    await writeFile(join(repo.root, INBOX, "1757980000000-idea.md"), "# Rebuild the deck\n\nstart from the Q3 numbers\n");
+    const s = await indexer.reconcile("test");
+    expect(s.inbox).toEqual({ added: 1, changed: 0, archived: 0 });
+    expect(await rowsNow()).toEqual([
+      {
+        path: `${INBOX}/1757980000000-idea.md`,
+        source: "vault",
+        mime: "text/markdown",
+        note: "Rebuild the deck",
+        sha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+        status: "new",
+      },
+    ]);
+  });
+
+  it("a second pass over an unchanged inbox does nothing", async () => {
+    const s = await indexer.reconcile("test");
+    expect(s.inbox).toEqual({ added: 0, changed: 0, archived: 0 });
+  });
+
+  it("a human's refinement re-hashes the row and sends a classified capture back to the drain", async () => {
+    const path = `${INBOX}/1757980000000-idea.md`;
+    const before = (await rowsNow())[0];
+    await pool.query(`UPDATE inbox SET status = 'classified', proposal = '{"kind":"note"}'::jsonb WHERE path = $1`, [path]);
+    await writeFile(join(repo.root, path), "# Rebuild the deck (this quarter)\n\nstart from the Q3 numbers, then the pipeline\n");
+
+    const s = await indexer.reconcile("test");
+    expect(s.inbox).toEqual({ added: 0, changed: 1, archived: 0 });
+    const row = (await pool.query(`SELECT sha256, status, note, proposal FROM inbox WHERE path = $1`, [path])).rows[0];
+    expect(row.sha256).not.toBe(before.sha256);
+    expect(row.status).toBe("new"); // a refinement is new information
+    expect(row.proposal).toBeNull();
+    expect(row.note).toBe("Rebuild the deck (this quarter)");
+  });
+
+  it("a rejected row is not re-opened by an edit — the user's no stands", async () => {
+    const path = `${INBOX}/1757980000001-nope.md`;
+    await writeFile(join(repo.root, path), "junk\n");
+    await indexer.reconcile("test");
+    await pool.query(`UPDATE inbox SET status = 'rejected' WHERE path = $1`, [path]);
+    await writeFile(join(repo.root, path), "junk, with a typo fixed\n");
+
+    const s = await indexer.reconcile("test");
+    expect(s.inbox.changed).toBe(1);
+    expect((await pool.query(`SELECT status FROM inbox WHERE path = $1`, [path])).rows[0].status).toBe("rejected");
+  });
+
+  it("a deleted file archives its row, and the same file coming back re-opens it", async () => {
+    const path = `${INBOX}/1757980000001-nope.md`;
+    await rm(join(repo.root, path));
+    expect((await indexer.reconcile("test")).inbox).toEqual({ added: 0, changed: 0, archived: 1 });
+    expect((await pool.query(`SELECT status FROM inbox WHERE path = $1`, [path])).rows[0].status).toBe("archived");
+
+    await writeFile(join(repo.root, path), "junk, restored from git\n");
+    expect((await indexer.reconcile("test")).inbox).toEqual({ added: 0, changed: 1, archived: 0 });
+    expect((await pool.query(`SELECT status FROM inbox WHERE path = $1`, [path])).rows[0].status).toBe("new");
+  });
+
+  it("an existing capture row is left alone, and `.large/` rows are never archived", async () => {
+    const captured = `${INBOX}/1757980000002-photo.jpg`;
+    await writeFile(join(repo.root, captured), Buffer.from([0xff, 0xd8, 0xff, 0x00]));
+    await pool.query(`INSERT INTO inbox (source, path, mime, note, sha256, status) VALUES ('http', $1, 'image/jpeg', 'the whiteboard', $2, 'classified')`, [
+      captured,
+      "0".repeat(64),
+    ]);
+    // a large capture lives in a dot-directory the walk never sees
+    await pool.query(`INSERT INTO inbox (source, path, mime, sha256) VALUES ('http', $1, 'video/quicktime', $2)`, [`${INBOX}/.large/1757980000003-clip.mov`, "1".repeat(64)]);
+
+    const s = await indexer.reconcile("test");
+    expect(s.inbox.added).toBe(0); // the capture already had a row
+    expect(s.inbox.archived).toBe(0); // .large/ is invisible, not gone
+    const rows = await pool.query(`SELECT path, status, source, note FROM inbox WHERE path LIKE $1 ORDER BY path`, [`${INBOX}/.large/%`]);
+    expect(rows.rows).toEqual([{ path: `${INBOX}/.large/1757980000003-clip.mov`, status: "new", source: "http", note: null }]);
+    const cap = (await pool.query(`SELECT status, note, source FROM inbox WHERE path = $1`, [captured])).rows[0];
+    expect(cap).toEqual({ status: "new", note: "the whiteboard", source: "http" }); // re-hashed (the row's sha was a placeholder), note kept
+  });
+
+  it("one row per inbox file, whoever writes it (the 0015 partial unique index)", async () => {
+    await expect(
+      pool.query(`INSERT INTO inbox (source, path, sha256) VALUES ('http', $1, $2)`, [`${INBOX}/1757980000000-idea.md`, "2".repeat(64)]),
+    ).rejects.toMatchObject({ code: "23505" });
+  });
+});

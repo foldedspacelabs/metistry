@@ -175,7 +175,7 @@ export async function drainOne(db: Db, engine: Engine, tiers: TierMap, opts: Dra
       ...(result.tokens_in !== undefined ? { tokens_in: result.tokens_in } : {}),
       ...(result.tokens_out !== undefined ? { tokens_out: result.tokens_out } : {}),
       ...(result.cost_usd !== undefined ? { cost_usd: result.cost_usd } : {}),
-      // cache read/write are COLUMNS now (0015): cache hit rate is a cost
+      // cache read/write are COLUMNS now (0016): cache hit rate is a cost
       // number, and the budget and the weekly review both read it as one.
       ...(result.cache_read !== undefined ? { cache_read_tokens: result.cache_read } : {}),
       ...(result.cache_write !== undefined ? { cache_write_tokens: result.cache_write } : {}),

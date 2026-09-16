@@ -99,7 +99,7 @@ export function applyShapeToYaml(existing: string | undefined, shape: Deployment
 
 export interface ShapeContext {
   productDir: string;
-  /** METISTRY_INSTANCE_DIR: where state/ and inbox/ live when there is an instance repo */
+  /** METISTRY_INSTANCE_DIR: where state/ and the vault (with its Knowledge/Inbox/) live when there is an instance repo */
   instanceDir?: string | undefined;
   /** the install's environment — .env, already loaded (env.ts loadDotEnv) */
   env: NodeJS.ProcessEnv;
@@ -138,11 +138,14 @@ function metistryVars(ctx: ShapeContext): Record<string, string> {
  * that talks to everything, so a passthrough of `METISTRY_*` is the honest
  * translation of docker-compose.yml — with the container-only values
  * replaced: the db is on loopback rather than the `db` alias, the bind stays
- * loopback (invariant 8), and the inbox is a real directory rather than a
- * named volume.
+ * loopback (invariant 8), and the inbox is the vault's own directory rather
+ * than a named volume (it is only a fallback either way — with a reconciler
+ * configured, captures go through the bridge).
  */
 export function consoleEnv(ctx: ShapeContext): Record<string, string> {
-  const inbox = ctx.instanceDir ? join(ctx.instanceDir, "inbox") : join(ctx.productDir, "inbox");
+  // the inbox is vault content now (docs/ops/inbox.md): `<instance>/Knowledge/Inbox`,
+  // or the product checkout's own vault when this install has no instance repo yet
+  const inbox = join(ctx.instanceDir ?? ctx.productDir, "Knowledge", "Inbox");
   return {
     ...metistryVars(ctx),
     METISTRY_DB_HOST: "127.0.0.1",

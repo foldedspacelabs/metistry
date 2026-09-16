@@ -80,7 +80,7 @@ describe("the console's launchd environment", () => {
     expect(e.METISTRY_DB_HOST).toBe("127.0.0.1");
     expect(e.METISTRY_CONSOLE_HOST).toBe("127.0.0.1"); // loopback bind (invariant 8)
     expect(e.METISTRY_EK_URL).toBe("http://127.0.0.1:7811"); // resolved for a host process
-    expect(e.METISTRY_INBOX_DIR).toBe("/i/inbox"); // a real directory, not the named volume
+    expect(e.METISTRY_INBOX_DIR).toBe("/i/Knowledge/Inbox"); // the vault inbox, not the named volume (docs/ops/inbox.md)
     expect(e.METISTRY_ORIGIN).toBe("https://studio.ts.net");
     expect(e.METISTRY_GITHUB_WRITE_TOKEN).toBe("ghp_x");
     expect(e.TZ).toBe("America/New_York");
@@ -91,7 +91,7 @@ describe("the console's launchd environment", () => {
 
   it("an inbox the operator set to a real path is kept", () => {
     expect(consoleEnv(ctx({ ...env, METISTRY_INBOX_DIR: "/Users/someone/inbox" })).METISTRY_INBOX_DIR).toBe("/Users/someone/inbox");
-    expect(consoleEnv(ctx({ ...env, METISTRY_INSTANCE_DIR: undefined })).METISTRY_INBOX_DIR).toBe("/i/inbox");
+    expect(consoleEnv(ctx({ ...env, METISTRY_INSTANCE_DIR: undefined })).METISTRY_INBOX_DIR).toBe("/i/Knowledge/Inbox"); // the container volume path is never kept
   });
 });
 

@@ -134,26 +134,28 @@ jobs:
           path: dist-release/metistry-runtime-${{ needs.verify.outputs.version }}-${{ matrix.target }}.tar.gz
           if-no-files-found: error
 
-  # The BUNDLED RUNTIME: Node, Postgres 17 + pgvector and git, built as a
-  # relocatable tree and shipped as its own asset (docs/ops/bundled-runtime.md).
-  # macOS arm64 only — it is what the Mac app embeds, and Linux hosts run the
-  # compose shape. The Postgres and git source builds are cached by version, so
-  # only a versions bump pays for them again; assembling, signing and the
-  # moved-copy verification always run.
+  # The BUNDLED RUNTIME: Node, Postgres 17 + pgvector, git and llama.cpp's
+  # llama-server, built as a relocatable tree and shipped as its own asset
+  # (docs/ops/bundled-runtime.md). macOS arm64 only — it is what the Mac app
+  # embeds, and Linux hosts run the compose shape. The source builds are cached
+  # by version, so only a versions bump pays for them again; assembling,
+  # signing and the moved-copy verification always run. `cmake` (llama.cpp is a
+  # CMake project) is on the macos-14 image; the script refuses with a
+  # remediation rather than half-building if it ever is not.
   runtime-deps:
     name: runtime-deps (darwin-arm64)
     needs: verify
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
-      - name: cache the Postgres and git source builds, keyed on the pinned versions
+      - name: cache the Postgres, git and llama.cpp source builds, keyed on the pinned versions
         uses: actions/cache@v4
         with:
           path: .runtime-build/cache
           key: runtime-deps-darwin-arm64-${{ hashFiles('ops/release/runtime-versions.env') }}
       # Signed under the Developer ID when the secrets are set, so a pack
-      # installed by `metistry update` (no app, no DMG) carries Node, Postgres
-      # and git under Folded Space Labs — the supervisor's Login Item is then
+      # installed by `metistry update` (no app, no DMG) carries Node, Postgres,
+      # git and llama-server under Folded Space Labs — the Login Item is then
       # attributed to us rather than to the Node.js Foundation. Node keeps its
       # JIT entitlements minus get-task-allow (build-runtime-deps.sh sign()).
       # Without the secrets the pack is unsigned, as before, and the DMG job

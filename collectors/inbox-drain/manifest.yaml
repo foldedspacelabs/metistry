@@ -4,3 +4,11 @@ description: Classify new inbox captures deterministically and emit proposals â€
 schedule: "*/5 * * * *"
 writes: [proposals, inbox]
 reads: [inbox]
+# The ONE model this collector may call, pinned `<provider>/<model-id>` (core's
+# `collectorManifest`). `applefm` is the Apple Foundation Models provider
+# `metistry compute providers add --from applefm` writes: on-device, cost 0.
+# CI refuses a billable provider here and `completeJson()` refuses again at the
+# call, so "collectors never call a billable model" is a check, not a habit.
+# An install whose compute.yaml declares no such provider simply stays
+# deterministic â€” the drain works either way.
+uses_model: applefm/foundation-model

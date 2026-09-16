@@ -161,6 +161,7 @@ export {
   serveSchema,
   SERVE_RUNTIMES,
   servedProviders,
+  collectorProviderIssue,
   firstOnMachineBaseUrl,
   modelRefIssue,
   parseModelRef,
@@ -195,6 +196,7 @@ export {
   type ReadFile,
   type ResolvedAssignment,
   type Serve,
+  type LlamaServe,
   type ServeRuntime,
   type WatchSeam,
 } from "./compute.js";

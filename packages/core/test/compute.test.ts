@@ -20,6 +20,7 @@ import {
   resolveAssignment,
   resolveTier,
   servedProviders,
+  collectorProviderIssue,
   startComputeWatch,
   validateCompute,
   type ReadFile,
@@ -357,6 +358,80 @@ providers:
 
   it("refuses an unknown key inside serve: (strict, like every other block)", () => {
     expect(() => parseCompute(served("\n      keep_alive: 60"))).toThrow(/keep_alive/);
+  });
+
+  it("requires model_path for llamaserver — a server with no model to load starts and then dies", () => {
+    expect(() => parseCompute(served().replace(/\n      model_path: .*/, ""))).toThrow(/serve\.runtime: llamaserver needs serve\.model_path/);
+  });
+});
+
+// ---- `serve: { runtime: applefm }` — the Apple FM bridge (PR 4) ---------------
+//
+// Additive again, and with the opposite shape: `applefm` starts NOTHING (the
+// bridge is a supervised service already), so the block that would describe a
+// process is refused rather than ignored.
+
+describe("serve: { runtime: applefm }", () => {
+  const applefm = (extra = "") => `
+providers:
+  applefm:
+    kind: openai-compatible
+    base_url: http://127.0.0.1:7810/v1
+    locality: on_machine
+    auth: { secret: METISTRY_BRIDGE_TOKEN_APPLE_FM }
+    serve:
+      runtime: applefm
+      port: 7810${extra}
+`;
+
+  it("parses with no model_path at all, and is reported by servedProviders", () => {
+    const cfg = parseCompute(applefm());
+    const [only] = servedProviders(cfg);
+    expect(only?.name).toBe("applefm");
+    expect(only?.serve).toEqual({ runtime: "applefm", port: 7810, extra_args: [] });
+    expect(cfg.providers.applefm?.auth).toEqual({ secret: "METISTRY_BRIDGE_TOKEN_APPLE_FM" });
+  });
+
+  it("refuses model_path: the model is the operating system's and nothing would ever load the file", () => {
+    expect(() => parseCompute(applefm("\n      model_path: state/models/x.gguf"))).toThrow(/applefm loads no file/);
+  });
+
+  it("refuses extra_args: there is no argv to extend", () => {
+    expect(() => parseCompute(applefm("\n      extra_args: ['--verbose']"))).toThrow(/starts no process, so there is no argv/);
+  });
+
+  it("still ties the port to the base_url", () => {
+    expect(() => parseCompute(applefm().replace("port: 7810", "port: 7811"))).toThrow(/serve\.port is 7811 but base_url dials port 7810/);
+  });
+});
+
+describe("collectorProviderIssue — the collector money rule", () => {
+  const cfg = parseCompute(`
+providers:
+  applefm:
+    kind: openai-compatible
+    base_url: http://127.0.0.1:7810/v1
+    locality: on_machine
+  openrouter:
+    kind: openai-compatible
+    base_url: https://openrouter.ai/api/v1
+    locality: off_machine
+    data_policy: { allow: [Knowledge], deny_sources: [], max_brief_bytes: 1024 }
+`);
+
+  it("allows an on_machine provider — cost 0 by definition, not by a second field", () => {
+    expect(collectorProviderIssue("inbox-drain", "applefm", cfg.providers.applefm)).toBeUndefined();
+  });
+
+  it("refuses an off_machine one, naming both the collector and the field that would permit it", () => {
+    const why = collectorProviderIssue("inbox-drain", "openrouter", cfg.providers.openrouter);
+    expect(why).toContain("inbox-drain names openrouter");
+    expect(why).toContain("locality: off_machine");
+    expect(why).toContain("uses_model:");
+  });
+
+  it("says nothing about a provider this file does not declare — that is 'no tier configured', not 'billable'", () => {
+    expect(collectorProviderIssue("inbox-drain", "nope", undefined)).toBeUndefined();
   });
 });
 

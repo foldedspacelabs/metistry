@@ -1,6 +1,6 @@
 // Tiny hand-rolled HTTP plumbing (recipes over frameworks — CLAUDE.md).
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { errorEnvelope, statusFor, type ErrorCode } from "@foldedspacelabs/metistry-core";
+import { errorEnvelope, intEnv, statusFor, type ErrorCode } from "@foldedspacelabs/metistry-core";
 
 export function sendJson(res: ServerResponse, status: number, body: unknown): void {
   const text = JSON.stringify(body);
@@ -12,7 +12,8 @@ export function sendError(res: ServerResponse, code: ErrorCode): void {
   sendJson(res, statusFor(code), errorEnvelope(code));
 }
 
-const MAX_BODY = 32 * 1024 * 1024; // capture handles 25MB+ (PoC-7)
+/** Largest request body the console will read. The default clears `capture`'s 25MB+ (PoC-7); an instance that captures bigger raises METISTRY_MAX_BODY_BYTES. */
+const MAX_BODY = intEnv("METISTRY_MAX_BODY_BYTES", 32 * 1024 * 1024);
 
 export async function readBody(req: IncomingMessage): Promise<Buffer> {
   const chunks: Buffer[] = [];

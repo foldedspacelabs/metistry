@@ -88,7 +88,7 @@ export interface ConsoleConfig {
 // without one (a fresh paint), and the response always carries the cursor
 // for the next call — the newest row seen, or the caller's own when there
 // was nothing new.
-const MAX_LIST = 100;
+const MAX_LIST = 100;  // limit: fixed — the API's own page ceiling, documented in docs/ops/console-api.md
 function listArgs(url: URL, dflt: number): { limit: number; since: string | null } {
   const raw = Number(url.searchParams.get("limit") ?? dflt);
   const limit = Number.isFinite(raw) && raw > 0 ? Math.min(Math.floor(raw), MAX_LIST) : dflt;

@@ -41,9 +41,9 @@ export function isDevinPurpose(v: unknown): v is DevinPurpose {
 }
 
 /** Default ACU ceiling when neither the manifest nor the caller names one. Small on purpose. */
-export const DEFAULT_MAX_ACU = 5;
+export const DEFAULT_MAX_ACU = 5;  // limit: fixed — the floor when nothing names one; the manifest and the caller both override it
 /** Devin's own cap on the schema (documented: "Max 64KB"). */
-export const MAX_SCHEMA_BYTES = 64 * 1024;
+export const MAX_SCHEMA_BYTES = 64 * 1024;  // limit: fixed — Devin's own documented cap — ours cannot be larger than theirs
 
 /**
  * The answer contract. Sent as `structured_output_schema`, so

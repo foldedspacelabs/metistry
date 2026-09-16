@@ -6,8 +6,8 @@
 export const PROJECT_RE = /^[a-z][a-z0-9-]{0,39}$/; // the agents/projects slug shape (console validateProjects)
 export const SLUG_RE = /^[a-z0-9][a-z0-9._-]{0,79}$/;
 export const AGENT_RE = /^[a-z][a-z0-9-]{0,39}$/;
-const MAX_FILE_PATH = 300;
-const MAX_SEGMENTS = 20;
+const MAX_FILE_PATH = 300;  // limit: fixed — the artifact path contract, mirrored by the reconciler's own bound
+const MAX_SEGMENTS = 20;  // limit: fixed — an artifact is a small directory; deeper is a mistake, not a preference
 
 /** A path inside an artifact directory: relative, POSIX, no dot-segments, no dotfiles, no control chars. */
 export function validFilePath(p: unknown): p is string {
@@ -41,7 +41,7 @@ export function agentTailLength(thread: ReadonlyArray<{ author_kind: string }>):
   return n;
 }
 
-export const DEFAULT_PING_PONG_CAP = 10;
+export const DEFAULT_PING_PONG_CAP = 10;  // limit: fixed — the default a project's own autonomy payload overrides
 
 /**
  * The ping-pong control: an agent reply that would make the trailing
@@ -88,9 +88,9 @@ export interface Autonomy {
   max_open_bundles?: number | undefined;
 }
 
-export const DEFAULT_AGENT_BUNDLE_CAP = 3;
-export const DEFAULT_PROJECT_BUNDLE_CAP = 20;
-export const MAX_BUNDLE_CAP = 1000;
+export const DEFAULT_AGENT_BUNDLE_CAP = 3;  // limit: fixed — the default an agent's own max_open_bundles overrides
+export const DEFAULT_PROJECT_BUNDLE_CAP = 20;  // limit: fixed — the default a project row's max_open_bundles overrides
+export const MAX_BUNDLE_CAP = 1000;  // limit: fixed — the ceiling on what either of those may be set to
 
 /** Tolerant reader for the jsonb column: unknown keys and malformed values are ignored, never widened. */
 export function parseAutonomy(raw: unknown): Autonomy {

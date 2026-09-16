@@ -314,6 +314,34 @@ async function componentRow(
   return { kind, ...(await runCheck(man.name, `${m.dir}/manifest.yaml validates${via ? `; ${via}` : ""}`, async () => {})) };
 }
 
+// ---- instance layout --------------------------------------------------------
+//
+// The pre-#156 layout (docs/ops/inbox.md): captures at a gitignored
+// `<instance>/inbox/` instead of the vault's `Knowledge/Inbox/`. Purely a
+// filesystem check — no manifest, no probe — so an instance that has not
+// run `metistry migrate-inbox` yet is told, instead of quietly falling back
+// to writing untracked files nobody in the vault ever sees.
+
+const LEGACY_INBOX_GITIGNORE_LINE = /^\/?inbox\/?$/;
+
+export async function inboxRow(instanceDir: string): Promise<DoctorRow> {
+  return {
+    kind: "instance",
+    ...(await runCheck("inbox", `${instanceDir}/inbox/ absent, and .gitignore does not list it — captures live at Knowledge/Inbox/`, async () => {
+      const legacyDir = join(instanceDir, "inbox");
+      const entries = existsSync(legacyDir) ? (await readdir(legacyDir)).filter((e) => e !== ".DS_Store") : [];
+      const gitignorePath = join(instanceDir, ".gitignore");
+      const gitignored = existsSync(gitignorePath) && (await readFile(gitignorePath, "utf8")).split("\n").some((l) => LEGACY_INBOX_GITIGNORE_LINE.test(l.trim()));
+      if (entries.length === 0 && !gitignored) return;
+      return {
+        status: "degraded",
+        remediation: "the pre-#156 layout: run `metistry migrate-inbox --dry-run` to see the plan, then `metistry migrate-inbox` to move captures into Knowledge/Inbox/ (docs/ops/inbox.md)",
+        meta: { dir: legacyDir, entries: entries.length, gitignored },
+      };
+    })),
+  };
+}
+
 // ---- db -------------------------------------------------------------------
 
 export async function openDbFromEnv(env: NodeJS.ProcessEnv): Promise<Db | null> {
@@ -803,6 +831,7 @@ export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
   // ask what compute.yaml says, and doctor must not answer twice differently.
   const compute = (await computeForDoctor(env, deps.productDir)) ?? emptyCompute();
   for (const m of await walkManifests(deps.productDir)) rows.push(await componentRow(m, { env, fetchFn, timeoutMs, shape, labelSuffix, compute }));
+  rows.push(await inboxRow(env.METISTRY_INSTANCE_DIR?.replace(/\/+$/, "") || deps.productDir));
 
   const db = deps.db === undefined ? await openDbFromEnv(env) : deps.db;
   try {

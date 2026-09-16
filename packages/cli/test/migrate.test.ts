@@ -63,7 +63,10 @@ describe.skipIf(!hasDb)("migration runner against a scratch db", () => {
     }
     expect((await a.query("SELECT count(*)::int AS n FROM mig_b")).rows[0].n).toBe(1);
     expect((await a.query("SELECT filename, applied_at FROM schema_migrations ORDER BY filename")).rows.map((r) => r.filename)).toEqual(["0001_a.sql", "0002_b.sql"]);
-    expect((await a.query("SELECT count(*)::int AS n FROM pg_locks WHERE locktype = 'advisory' AND objid = $1", [MIGRATION_LOCK_KEY])).rows[0].n).toBe(0);
+    // this session's own backend, not a cluster-wide count — another
+    // process (ops/scripts/migrate.sh, a concurrent worktree) can hold the
+    // same MIGRATION_LOCK_KEY on a database of its own at the same moment
+    expect((await a.query("SELECT count(*)::int AS n FROM pg_locks WHERE locktype = 'advisory' AND objid = $1 AND pid = pg_backend_pid()", [MIGRATION_LOCK_KEY])).rows[0].n).toBe(0);
   });
 
   it("two runners racing on two pools: one applies, the other waits on the advisory lock and then finds nothing to do", async () => {
@@ -113,7 +116,8 @@ describe.skipIf(!hasDb)("migration runner against a scratch db", () => {
     expect(recorded).toEqual(["0020_ok.sql"]);
     expect((await a.query("SELECT to_regclass('mig_bad') AS t")).rows[0].t).toBeNull();
     expect((await a.query("SELECT to_regclass('mig_never') AS t")).rows[0].t).toBeNull();
-    expect((await a.query("SELECT count(*)::int AS n FROM pg_locks WHERE locktype = 'advisory' AND objid = $1", [MIGRATION_LOCK_KEY])).rows[0].n).toBe(0);
+    // same fix as above: this backend's own lock, not a cluster-wide count
+    expect((await a.query("SELECT count(*)::int AS n FROM pg_locks WHERE locktype = 'advisory' AND objid = $1 AND pid = pg_backend_pid()", [MIGRATION_LOCK_KEY])).rows[0].n).toBe(0);
 
     await writeFile(join(d, "0021_bad.sql"), "CREATE TABLE mig_bad (id int);");
     const s2 = await b.connect();
@@ -128,9 +132,11 @@ describe.skipIf(!hasDb)("migration runner against a scratch db", () => {
     expect(await openMigrationSession({})).toBeNull();
     const s = await openMigrationSession({ ...process.env, METISTRY_DB_NAME: DB });
     expect(s).not.toBeNull();
-    // session-scoped: the lock this session takes is visible in pg_locks from the pool, and gone after unlock
+    // session-scoped: asked of the session itself (pid = pg_backend_pid()),
+    // never a cluster-wide count — another process can hold this same
+    // MIGRATION_LOCK_KEY on a database of its own at the same moment
     await s!.query("SELECT pg_advisory_lock($1)", [MIGRATION_LOCK_KEY]);
-    expect((await a.query("SELECT count(*)::int AS n FROM pg_locks WHERE locktype = 'advisory' AND objid = $1", [MIGRATION_LOCK_KEY])).rows[0].n).toBe(1);
+    expect((await s!.query("SELECT count(*)::int AS n FROM pg_locks WHERE locktype = 'advisory' AND objid = $1 AND pid = pg_backend_pid()", [MIGRATION_LOCK_KEY])).rows[0].n).toBe(1);
     await s!.query("SELECT pg_advisory_unlock($1)", [MIGRATION_LOCK_KEY]);
     await s!.end();
   });

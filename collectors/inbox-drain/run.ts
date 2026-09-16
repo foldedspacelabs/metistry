@@ -1,10 +1,18 @@
 // inbox-drain: classify new captures, emit PROPOSALS (D7) — never
-// auto-create (§4.12's over-extraction lesson). Collectors never call a
-// model (invariant terminology); today's classifier is the deterministic
-// prefilter tier. The Apple FM tier slots in behind the same interface
-// when the bridge lands (degrades: absent until then).
+// auto-create (§4.12's over-extraction lesson). Two tiers, in this order:
+// the deterministic prefilter, then — for what the rules could not place —
+// the on-device model `compute.yaml` names, through the ordinary provider
+// wire (`completeJson`, ../compute-client.ts).
+//
+// The model tier is the free on-device one and only ever that: the manifest
+// pins `uses_model: applefm/foundation-model`, CI refuses a billable
+// provider there, and `completeJson` refuses again at the call. Absent is
+// normal — no such provider in `compute.yaml`, no credential, a bridge that
+// is not running, an answer that is not the schema, and the deterministic
+// result stands.
 
 import type { CaptureSink } from "@foldedspacelabs/metistry-mcp-brain";
+import { completeJson, type ComputeAccess } from "../compute-client.js";
 
 export interface Db {
   query(text: string, values?: unknown[]): Promise<{ rows: any[] }>;
@@ -133,14 +141,12 @@ export function suggestedWork(row: InboxRow, c: Classification): SuggestedWork |
   return { title: trimmed, ...(/^[a-z][a-z0-9-]{0,39}$/.test(project) ? { project } : {}) };
 }
 
-// The optional on-device FM tier (ruled 2026-09-01: free on-device
+// The optional on-device model tier (ruled 2026-09-01: free on-device
 // classification permitted for this collector; billable models never).
 // Deterministic rules that positively fired stand; only default-"note"
-// fallthroughs with text are refined by the bridge. Degrades absent: no
-// config, or any bridge failure, keeps the deterministic result.
-export interface CollectorCtx {
-  afmUrl?: string; // e.g. http://host.docker.internal:7810
-  afmToken?: string; // per-bridge bearer (CRIT-9)
+// fallthroughs with text are refined by the model. Degrades absent: no
+// provider, or any failure of it, keeps the deterministic result.
+export interface CollectorCtx extends ComputeAccess {
   ekUrl?: string; // eventkit bridge (routines use it for schedule/meeting prep)
   ekToken?: string;
   githubToken?: string; // github-state collector (fine-grained read-only PAT)
@@ -159,29 +165,76 @@ export interface CollectorCtx {
   fetchFn?: typeof fetch;
 }
 
-interface FmResult {
+export interface FmResult {
   category: string;
   has_action: boolean;
   action: string;
 }
 
-async function fmClassify(ctx: CollectorCtx, items: { id: number; text: string }[]): Promise<Map<number, FmResult>> {
-  const out = new Map<number, FmResult>();
-  if (!ctx.afmUrl || !ctx.afmToken || items.length === 0) return out;
-  try {
-    const res = await (ctx.fetchFn ?? fetch)(`${ctx.afmUrl}/classify`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${ctx.afmToken}`, "content-type": "application/json" },
-      body: JSON.stringify({ items }),
-      signal: AbortSignal.timeout(60_000),
-    });
-    if (!res.ok) return out;
-    const body = (await res.json()) as { results: { id: number; ok: boolean; classification?: FmResult }[] };
-    for (const r of body.results) if (r.ok && r.classification) out.set(Number(r.id), r.classification);
-  } catch {
-    /* degrades: absent — deterministic tier stands */
-  }
-  return out;
+/**
+ * The schema the model is held to. It was a compiled `@Generable` struct in
+ * the bridge's Swift helper; it is a JSON Schema here, which is what moving
+ * to the provider wire buys — the shape and the wording belong to the
+ * collector that needs them, not to the bridge, and changing either is a
+ * TypeScript edit rather than a Swift rebuild and a re-sign.
+ *
+ * Three fields, all required. PoC-19 measured roughly 32 tokens per
+ * described field against a 4096-token window, so this is nowhere near the
+ * ceiling; a schema that got near it would be refused with a 400 naming the
+ * field rather than failing mid-generation.
+ */
+export const FM_SCHEMA = {
+  type: "object",
+  properties: {
+    category: { type: "string", enum: ["todo", "event", "idea", "link", "note"], description: "The single best category for this inbox item." },
+    has_action: { type: "boolean", description: "true ONLY if the item states a concrete task the user personally must do. Pure information, musings, and links with no stated intent are false." },
+    action: { type: "string", description: "If has_action is true, a short imperative action phrase of at most 8 words. If has_action is false, the empty string." },
+  },
+  required: ["category", "has_action", "action"],
+  additionalProperties: false,
+} as const;
+
+const FM_CATEGORIES = new Set(FM_SCHEMA.properties.category.enum as readonly string[]);
+
+export const FM_INSTRUCTIONS = [
+  "You classify short personal-inbox capture items for a productivity assistant.",
+  "Choose exactly one category: todo (user must do), event (dated calendar item),",
+  "idea (thought or speculation), link (primarily a URL), note (fact, nothing to do).",
+  "Set has_action true ONLY for a concrete task the user must personally perform.",
+  "Be conservative: precision matters more than recall. Do not invent tasks.",
+].join("\n");
+
+/** How many items one pass may send to the model. */
+const FM_MAX_ITEMS = 25; // limit: fixed — the select above takes 50 rows; on-device generation is serial and ~0.5s each, so half a pass is the most worth spending inside a 5-minute window
+
+/** How much of a capture the model sees. */
+const FM_MAX_CHARS = 2000; // limit: fixed — the model's context is 4096 tokens and the schema is charged to it; 2000 characters leaves room for both
+
+/**
+ * One capture through the on-device tier, or undefined. Serial on purpose:
+ * the Apple FM helper answers one generation at a time by design, so
+ * firing these in parallel would only move the queue.
+ */
+async function fmClassify(ctx: CollectorCtx, text: string): Promise<FmResult | undefined> {
+  const r = await completeJson<Partial<FmResult>>(ctx, {
+    collector: "inbox-drain",
+    schemaName: "classification",
+    schema: FM_SCHEMA as unknown as Record<string, unknown>,
+    messages: [
+      { role: "system", content: FM_INSTRUCTIONS },
+      { role: "user", content: text.slice(0, FM_MAX_CHARS) },
+    ],
+  });
+  if (!r.ok) return undefined;
+  // PARSE, NEVER MATCH (PoC-19 result 3: key order out of Apple's
+  // structured output is not stable between identical runs). And validate:
+  // `strict: true` is the provider's promise, not this collector's
+  // assumption — a category outside the enum would otherwise become a
+  // proposal `kind` nothing in the console can render.
+  const v = r.value;
+  if (typeof v.category !== "string" || !FM_CATEGORIES.has(v.category)) return undefined;
+  if (typeof v.has_action !== "boolean") return undefined;
+  return { category: v.category, has_action: v.has_action, action: typeof v.action === "string" ? v.action : "" };
 }
 
 /** One drain pass. Returns how many rows were classified. */
@@ -192,18 +245,25 @@ export async function run(db: Db, ctx: CollectorCtx = {}): Promise<number> {
   const items = rows as InboxRow[];
   const deterministic = new Map(items.map((r) => [r.id, classify(r)]));
 
-  // FM refines only what the rules couldn't place (reason "default")
-  const fallthroughs = items.filter((r) => deterministic.get(r.id)!.reason === "default" && (r.note ?? "").trim());
+  // The model refines only what the rules couldn't place (reason "default")
+  const fallthroughs = items.filter((r) => deterministic.get(r.id)!.reason === "default" && (r.note ?? "").trim()).slice(0, FM_MAX_ITEMS);
   // pg returns bigint ids as strings — normalize map keys to Number
-  const fm = await fmClassify(ctx, fallthroughs.map((r) => ({ id: Number(r.id), text: (r.note ?? "").trim().slice(0, 2000) })));
+  const fm = new Map<number, FmResult>();
+  for (const r of fallthroughs) {
+    const got = await fmClassify(ctx, (r.note ?? "").trim());
+    if (got) fm.set(Number(r.id), got);
+  }
+  // The tier's name in the proposal row IS the provider's, so "which model
+  // said this" is answerable from the row rather than from the calendar.
+  const tierName = ctx.usesModel?.split("/")[0] ?? "model";
 
   for (const row of items) {
     const det = deterministic.get(row.id)!;
     const refined = fm.get(Number(row.id));
     const final = refined
-      ? { kind: refined.category, reason: "apple-fm", title: det.title, has_action: refined.has_action, action: refined.action }
+      ? { kind: refined.category, reason: tierName, title: det.title, has_action: refined.has_action, action: refined.action }
       : det;
-    const tier = refined ? "apple-fm" : "deterministic";
+    const tier = refined ? tierName : "deterministic";
     // Provenance rides the credential (§4.19): a capture made with an agent
     // token proposes AS that agent, at external trust; the owner's own
     // captures propose as this collector, at user trust.

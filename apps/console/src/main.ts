@@ -254,8 +254,13 @@ const routineBudget = async (): Promise<PreflightMiss | null> => {
 };
 
 startRunner(pool, scheduled, {
-  ...(process.env.METISTRY_AFM_URL ? { afmUrl: process.env.METISTRY_AFM_URL } : {}),
-  ...(process.env.METISTRY_BRIDGE_TOKEN_APPLE_FM ? { afmToken: process.env.METISTRY_BRIDGE_TOKEN_APPLE_FM } : {}),
+  // Which model a collector may call is `compute.yaml`'s to say, not an
+  // environment variable's: a GETTER, so an edit to the file reaches the
+  // next pass without a restart, plus the install's environment, because
+  // that is where a provider's `auth.secret` resolves. The manifest's
+  // `uses_model:` picks the provider out of it (runner.ts).
+  compute: () => compute.store.current,
+  secretEnv: process.env,
   ...(process.env.METISTRY_EK_URL ? { ekUrl: process.env.METISTRY_EK_URL } : {}),
   ...(process.env.METISTRY_BRIDGE_TOKEN_EVENTKIT ? { ekToken: process.env.METISTRY_BRIDGE_TOKEN_EVENTKIT } : {}),
   ...(process.env.METISTRY_GITHUB_TOKEN ? { githubToken: process.env.METISTRY_GITHUB_TOKEN } : {}),

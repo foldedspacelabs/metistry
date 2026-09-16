@@ -27,24 +27,24 @@ containing a "proposal open" item is not, by being listed, authorised.
 
 | # | Decision | Date | Status |
 |---|---|---|---|
-| C1 | **One `compute.yaml`** in the instance repo (providers, assignments, budgets), a §4.7 protected path written *as the user*, hot-reloaded by console and assistant; provider = configuration, not a component (invariant 5 met by a schema in `packages/core`) | 09-11 | decided (owner's pivot) |
-| C2 | **One engine, `openai-compatible`**; the Claude Agent SDK leaves the product; Claude arrives through OpenRouter with `anthropic/claude-sonnet-5` pinned and `provider: { order: [anthropic], allow_fallbacks: false }`. A native Messages adapter stays a documented, unbuilt option | 09-11 | decided (Owner decision 5) |
-| C3 | **The subscription path is scrubbed from the product repo** — `CLAUDE_CODE_OAUTH_TOKEN`, the PoC-4 "never `ANTHROPIC_API_KEY`" rule, wizard step 7, the "subscription" copy. An instance re-adds it privately as its own `compute.yaml` provider; the product never names it | 09-11 | decided |
-| C4 | **No library for the engine loop** — ~300 lines over pre-approved `@modelcontextprotocol/sdk` + `zod`; revisit the Vercel AI SDK past ~600 lines or streaming UI | 09-11 | proposal accepted |
-| C5 | **Budgets `allow \| stop \| critical_only`**, default `stop`, and `stop` **pauses routines** as well as refusing at the engine | 09-11 | decided (Owner decision 3) |
-| C6 | **Provider secrets are user scope** in the Keychain | 09-11 | decided (Owner decision 1) |
-| C7 | **Collaboration rule 4** — a Claude turn may create *unassigned* work; a *directed* push to a named non-Claude agent is refused at the console (`invalid_request` + a `runs` row). Enforced by absence of any engine-calling tool | 09-11 | decided (Owner decision 2) |
-| C8 | **Apple FM becomes an OpenAI-compatible local provider** on its existing Swift bridge (`/v1/models`, `/v1/chat/completions`), **PoC first** on runtime-supplied JSON schemas | 09-11 | decided (Owner decision 4) |
+| C1 | **One `compute.yaml`** in the instance repo (providers, assignments, budgets), a §4.7 protected path written *as the user*, hot-reloaded by console and assistant; provider = configuration, not a component (invariant 5 met by a schema in `packages/core`) | 09-11 | **done** (#152) |
+| C2 | **One engine, `openai-compatible`**; the Claude Agent SDK leaves the product; Claude arrives through OpenRouter with `anthropic/claude-sonnet-5` pinned and `provider: { order: [anthropic], allow_fallbacks: false }`. A native Messages adapter stays a documented, unbuilt option | 09-11 | **done** (#159, #167) |
+| C3 | **The subscription path is scrubbed from the product repo** — `CLAUDE_CODE_OAUTH_TOKEN`, the PoC-4 "never `ANTHROPIC_API_KEY`" rule, wizard step 7, the "subscription" copy. An instance re-adds it privately as its own `compute.yaml` provider; the product never names it | 09-11 | **done** (#167) |
+| C4 | **No library for the engine loop** — ~300 lines over pre-approved `@modelcontextprotocol/sdk` + `zod`; revisit the Vercel AI SDK past ~600 lines or streaming UI | 09-11 | **done** (#159) |
+| C5 | **Budgets `allow \| stop \| critical_only`**, default `stop`, and `stop` **pauses routines** as well as refusing at the engine | 09-11 | **done** (#159) |
+| C6 | **Provider secrets are user scope** in the Keychain | 09-11 | **done** (#152) |
+| C7 | **Collaboration rule 4** — a Claude turn may create *unassigned* work; a *directed* push to a named non-Claude agent is refused at the console (`invalid_request` + a `runs` row). Enforced by absence of any engine-calling tool | 09-11 | **done** (#159) |
+| C8 | **Apple FM becomes an OpenAI-compatible local provider** on its existing Swift bridge (`/v1/models`, `/v1/chat/completions`), **PoC first** on runtime-supplied JSON schemas | 09-11 | **done** (#164 PoC-19, #169 provider) |
 | C9 | **Claude Managed Agents is not the main agent's harness** — sandbox tools invariant 9 removes, `/mcp` only via a public endpoint or a preview tunnel, not ZDR-eligible, beta, $0.08/hour session time. Right shape for a later **compute target** | 09-11 | decided (rev 4) |
 | C10 | **The seed `default` is non-Claude, chosen by a bake-off** on Metistry's own fixtures; Sonnet is the suggested `deep` | 09-11 | decided (rev 4) |
 | C11 | **Never train on Claude outputs** — no distillation, no Claude transcripts as training data (Anthropic usage policy). Plan for zero fine-tuning; harness tuning is the lever | 09-11 | decided |
-| C12 | **Cost is a first-class row** — `provider`, `model` beside `tokens_in/out/cost_usd`; a `spend` named query; budgets enforced **before** the call | 09-11 | proposal accepted |
-| C13 | **Non-ZDR off-machine assignments warn, never block** — one `runs` warning row and a badge; informed choice | 09-11 | decided — contested, see §2.6 |
-| C14 | **The local server is a bake-off axis**, not a given: `llama-server`, LM Studio and Ollama on the same model, measured | 09-12 | decided (addendum; owner reopened the LM Studio default) |
-| C15 | **A bundled, signed `llama-server`** is the no-install local provider the app manages, built from pinned source like Postgres/git in the runtime-deps pack; LM Studio and Ollama stay supported peers discovered via `/v1/models` | 09-12 | proposal accepted (the *default* is the bake-off's to confirm) |
+| C12 | **Cost is a first-class row** — `provider`, `model` beside `tokens_in/out/cost_usd`; a `spend` named query; budgets enforced **before** the call | 09-11 | **done** (#159) |
+| C13 | **Non-ZDR off-machine assignments warn, never block** — one `runs` warning row and a badge; informed choice | 09-11 | **done** (#159) — contested, see §2.6 |
+| C14 | **The local server is a bake-off axis**, not a given: `llama-server`, LM Studio and Ollama on the same model, measured | 09-12 | decided (addendum; owner reopened the LM Studio default) — harness ready (#158, #160), measurement run pending |
+| C15 | **A bundled, signed `llama-server`** is the no-install local provider the app manages, built from pinned source like Postgres/git in the runtime-deps pack; LM Studio and Ollama stay supported peers discovered via `/v1/models` | 09-12 | **done** (#158) — the *default* is the bake-off's to confirm |
 | C16 | ~~LM Studio when detected is the local default~~ | 09-11 | **superseded** by C14/C15 |
-| C17 | **OpenCode as a dev tool** — `plugins/opencode` mirroring the Claude Code plugin, `metistry connect opencode` writing the `/mcp` entry | 09-11 | proposal accepted |
-| C18 | **Embeddings move to `/v1/embeddings`** on the provider `assignments.embed` names; `METISTRY_OLLAMA_URL` + `METISTRY_EMBED_MODEL` seed it as a transition | 09-11 | proposal accepted |
+| C17 | **OpenCode as a dev tool** — `plugins/opencode` mirroring the Claude Code plugin, `metistry connect opencode` writing the `/mcp` entry | 09-11 | **done** (#171) |
+| C18 | **Embeddings move to `/v1/embeddings`** on the provider `assignments.embed` names; `METISTRY_OLLAMA_URL` + `METISTRY_EMBED_MODEL` seed it as a transition | 09-11 | **done** (#158) |
 
 ### Offline and multi-instance — `docs/research/2026-09-11-multi-instance-and-offline-client.md`
 
@@ -60,36 +60,36 @@ containing a "proposal open" item is not, by being listed, authorised.
 
 | # | Adopt | Source | Status |
 |---|---|---|---|
-| R1 | ~~Loopback CONNECT proxy~~ → **allowlist enforced inside the engine's own `fetch`** (the one engine is in-process code, so the host check is a function, not an environment variable a subprocess may ignore); hosts from `compute.yaml`; a CI test that every outbound call goes through it | rivet, revised 2026-09-15 after the SAM note (`2026-09-13-google-sam-review.md` argues `HTTPS_PROXY` honouring is unreliable; owner agreed) | **decided** (revision); the sandbox profile keeps port filtering as defence in depth |
-| S1 | Coarse **capability advertisement** on `GET /api/identity`; `tools/list` stays token-gated | sam | **proposal accepted** 2026-09-15 ("I really like your read on the registry and advertisement") |
-| S2 | **Approve-before-enroll** for remote agents | sam | proposal accepted 2026-09-15 |
-| S3 | Agent identity `agent:<name>@<instance_id>` | sam | proposal accepted 2026-09-15 |
-| S4 | `instances.yaml` **peer registry** (the phone's instance list, and an instance's directory of exposable resources: CLI commands, directories, MCP servers, compute, tasks/knowledge, Slack, Linear — discoverable and grantable by cloud and local agents wherever they run) | sam | proposal accepted 2026-09-15; scope of "resource" is OPEN-7 |
-| S5 | `runs` NDJSON audit export | sam | proposal accepted 2026-09-15 |
-| S6 | An **internal mesh** (self-contained cross-device service wrapping, no tailnet dependency) | sam | BORROW-LATER — owner: "worth considering in the future"; not before the registry (S4) exists |
-| R2 | **Warn at 80 %** of every budget window, deduped, before `stop` fires | rivet | proposal open |
-| R3 | **Every refusal names the config field** that would permit it | rivet | proposal open |
-| R4 | **CI audit for unwired limits** — fail on a cap-shaped literal absent from a manifest/config schema | rivet | proposal open |
-| R5 | **stdout is the protocol** — a `packages/core` conformance test that a stdio bridge emits only framed protocol | rivet | proposal open |
-| A1 | A **cross-artifact thread ("room") view** in the console, no schema, with `payload.reason` rendered as a sentence | agent-room | proposal accepted (owner likes it) |
-| A2 | **Threads hung off `work` rows** — nullable `work_id` on `artifact_comments` + check constraint, **no `to_agent` field** (collaboration rule 4 holds by absence) | agent-room | proposal accepted (owner likes it) |
-| A3 | `autonomy.level: observe \| propose \| act_within_scope` + escalation on `checkBrief` and the budget flip | agent-room | blocked on OPEN-2 |
-| A4 | **Do not auto-close quiet threads** — `commentResolve` releases queued bundles, so a sweep would start work overnight | agent-room | decided constraint (owner) |
-| H1 | The board as **two named queries** (`board.yaml`, `board_projects.yaml`) — every column derivable today, no migration, no fifth status | hermes-1 | proposal open (owner: "good read") |
-| H2 | A **read-only board panel** in the PWA over `GET /api/q/board`; MetistryKit renders the same query | hermes-1 | proposal open |
-| H3 | **The drags** — `reopen()`, `assign()`, a `note` on `tasks_renew`, a thin console adapter; nobody drags into Working; drag out of Working = release, never orphan | hermes-1 | proposal open |
-| H4 | **Preflight before spend** — check a component's declared prerequisites before `tick()` starts a run; `error = 'blocked_config: …'`, alert once | hermes-2 | proposal open |
-| H5 | **One alert per (component, error signature)** with an ack that silences that signature only | hermes-2 | proposal open |
-| H6 | A **`schedules` section in `metistry doctor`** — last run, overdue by >2× interval, non-zero exit when actionable | hermes-2 | proposal open |
-| H7 | **`failure_streak`** in the morning brief; at 3, one line offering fix / pause / remove | hermes-2 | proposal open |
+| R1 | ~~Loopback CONNECT proxy~~ → **allowlist enforced inside the engine's own `fetch`** (the one engine is in-process code, so the host check is a function, not an environment variable a subprocess may ignore); hosts from `compute.yaml`; a CI test that every outbound call goes through it | rivet, revised 2026-09-15 after the SAM note (`2026-09-13-google-sam-review.md` argues `HTTPS_PROXY` honouring is unreliable; owner agreed) | **done** (#159); the sandbox profile keeps port filtering as defence in depth |
+| S1 | Coarse **capability advertisement** on `GET /api/identity`; `tools/list` stays token-gated | sam | **done** (#162) |
+| S2 | **Approve-before-enroll** for remote agents | sam | **done** (#162) |
+| S3 | Agent identity `agent:<name>@<instance_id>` | sam | **done** (#162) |
+| S4 | `instances.yaml` **peer registry** (the phone's instance list, and an instance's directory of exposable resources: CLI commands, directories, MCP servers, compute, tasks/knowledge, Slack, Linear — discoverable and grantable by cloud and local agents wherever they run) | sam | **done** (#162); scope of "resource" is OPEN-7 |
+| S5 | `runs` NDJSON audit export | sam | **done** (#162) |
+| S6 | An **internal mesh** (self-contained cross-device service wrapping, no tailnet dependency) | sam | BORROW-LATER — owner: "worth considering in the future"; the registry it waited on (S4) is now shipped (#162), still not scheduled |
+| R2 | **Warn at 80 %** of every budget window, deduped, before `stop` fires | rivet | **done** (#159) |
+| R3 | **Every refusal names the config field** that would permit it | rivet | **done** (#163) |
+| R4 | **CI audit for unwired limits** — fail on a cap-shaped literal absent from a manifest/config schema | rivet | **done** (#163) |
+| R5 | **stdout is the protocol** — a `packages/core` conformance test that a stdio bridge emits only framed protocol | rivet | **done** (#163) |
+| A1 | A **cross-artifact thread ("room") view** in the console, no schema, with `payload.reason` rendered as a sentence | agent-room | **done** (#161) |
+| A2 | **Threads hung off `work` rows** — nullable `work_id` on `artifact_comments` + check constraint, **no `to_agent` field** (collaboration rule 4 holds by absence) | agent-room | **done** (#161) |
+| A3 | `autonomy.level: observe \| propose \| act_within_scope` + escalation on `checkBrief` and the budget flip | agent-room | **done** (#170) — OPEN-2 resolved 2026-09-16, the narrowing-only rule overturned by the owner |
+| A4 | **Do not auto-close quiet threads** — `commentResolve` releases queued bundles, so a sweep would start work overnight | agent-room | **done** (#161) — decided constraint (owner) |
+| H1 | The board as **two named queries** (`board.yaml`, `board_projects.yaml`) — every column derivable today, no migration, no fifth status | hermes-1 | **done** (#155) |
+| H2 | A **read-only board panel** in the PWA over `GET /api/q/board`; MetistryKit renders the same query | hermes-1 | **done** (#155) |
+| H3 | **The drags** — `reopen()`, `assign()`, a `note` on `tasks_renew`, a thin console adapter; nobody drags into Working; drag out of Working = release, never orphan | hermes-1 | **done** (#166) |
+| H4 | **Preflight before spend** — check a component's declared prerequisites before `tick()` starts a run; `error = 'blocked_config: …'`, alert once | hermes-2 | **done** (#153) |
+| H5 | **One alert per (component, error signature)** with an ack that silences that signature only | hermes-2 | **done** (#153) |
+| H6 | A **`schedules` section in `metistry doctor`** — last run, overdue by >2× interval, non-zero exit when actionable | hermes-2 | **done** (#153) |
+| H7 | **`failure_streak`** in the morning brief; at 3, one line offering fix / pause / remove | hermes-2 | **done** (#153) |
 | H8 | **Crew descriptions in `agents_delegate`** from the manifest | hermes-2 | proposal open |
-| H9 | **`data_collection: "deny"`** in the OpenRouter request body | hermes-2 | proposal open — conflicts with C13, see §2.6 |
+| H9 | **`data_collection: "deny"`** in the OpenRouter request body | hermes-2 | proposal open — conflicts with C13, see §2.6; C13 shipped instead (#159), warning-only |
 | T1 | **Tool *names* as grammar terminals** (or a `json_schema` enum from the live `tools/list`); keep parse → zod → one repair retry where a provider only hints | atomic | proposal open (needs the server check in §3.4) |
 | T2 | **Lead the candidate list with a ~30–35B A3B-class MoE at Q4**; demote gemma-4 to scorer-only | atomic | folded into the bake-off (§3.3) |
-| T3 | **Axis tag + six trace columns** on every bake-off record | atomic | folded into the bake-off (§3.5) |
-| T4 | **No-progress veto** — warn at 3 identical calls, hard veto at 5, graceful reply after 3 vetoes | atomic | proposal open |
+| T3 | **Axis tag + six trace columns** on every bake-off record | atomic | **done** (#160) |
+| T4 | **No-progress veto** — warn at 3 identical calls, hard veto at 5, graceful reply after 3 vetoes | atomic | **done** (#159) |
 | T5 | **Slot-pinned KV reuse** (`cache_prompt` + session-stable slot id) and a **byte-stable-prefix test** | atomic | proposal open (needs the server check) |
-| T6 | **A judge from a third model family** that **fails** when absent, over stored raw JSONL | atomic | folded into the bake-off (§3.2) |
+| T6 | **A judge from a third model family** that **fails** when absent, over stored raw JSONL | atomic | **done** (#160) |
 
 ---
 
@@ -264,18 +264,32 @@ scripts, trace columns, the write-up. Fixtures gate stage 0; the bundled
 
 ## 4. The refreshed queue
 
+**Status as of 2026-09-17.** Merges since 2026-09-15 (#141–#171) shipped
+essentially the whole chain: PRs 1, 1a, 2, 3, 4 and 5 are **done** (49 rows
+across §1's decisions log, the small-adopts table, this queue and §4b's
+W1–W7 now read `done (#NNN)`), plus every grouped adopt except crew
+descriptions (H8). The Taskuary executable-action proposal (ADOPT 6) and the
+autonomy-widening question (OPEN-2) were both accepted and shipped the same
+day, in #170. **Decided but not yet built:** C9–C11 and C14 (bake-off calls
+that need the owner's fixtures to run), O1–O4 and S6 (accepted, unscheduled).
+**Genuinely open** — nothing built on either side, per this doc's status
+vocabulary above: OPEN-1, OPEN-3, OPEN-4, OPEN-5, OPEN-6, OPEN-7 (OPEN-2 alone
+resolved); H8 (crew descriptions), H9 (superseded in practice by C13's
+warning-only shape, but not itself ruled on); T1, T2 and T5 (wait on the
+bake-off's server check); and W2 (no `v0.8.0` tag cut yet).
+
 Sequence: **PR 1 → PR 2 → PoC-18 stage 0 → PR 3 → PR 4/5**, grouped adopts
 landing independently. Fixture authoring can start now; the Sonnet bar needs
 only an OpenRouter key, the local half needs PR 2's binary.
 
-| PR | Contents | Owner needed |
-|---|---|---|
-| **1** | `compute.yaml` schema in `packages/core` (zod), `seed/compute.yaml` + templates, `metistry compute providers\|models\|assign\|budget`, hot reload, OpenRouter seed provider with Claude pinned, **the scrub** (engine, CLI env allowlist, secrets, shapes, docs — plus the Agent SDK dependency and `engine.ts`'s `query()` path) | ratify the SDK removal in `CLAUDE.md` first (§2.10) |
-| **1a** | **App part, split out:** the Compute pane, wizard step 7 → "Choose your compute", Settings. Separated so the schema/CLI PR is reviewable alone and the SwiftUI change lands against a settled verb surface | — |
-| **2** | `/v1/models` discovery, doctor rows, `compute models list\|install\|load\|unload`, LM Studio + Ollama as peers, embeddings over `/v1/embeddings` (C18) — **and the bundled `llama-server`** built from pinned source into the runtime-deps pack, signed like Postgres and git | — |
-| **3** | `Engine` interface + the `openai-compatible` loop, `runs` provider/model columns, `spend` query, budgets `allow\|stop\|critical_only` with the routine pause, non-ZDR warning, per-run scoped credential, cross-kind delegation refusal — **plus** R1 in-engine host allowlist, R2 80 % warning, R3 refusals name the field, T4 no-progress veto, T1/T5 where the server exposes them, and **stage-2 shadow mode** | OPEN-3, OPEN-4, OPEN-6 |
-| **4** | Apple FM `/v1` surface **after** the `DynamicGenerationSchema` PoC (C8); `inbox-drain` moves to provider `apple-fm`; CI check that no collector names a provider with cost > 0 | — |
-| **5** | `plugins/opencode`, parity test, `metistry connect opencode`, `docs/ops/opencode.md` | `@opencode-ai/plugin` types — ask before adding |
+| PR | Contents | Owner needed | Status (2026-09-17) |
+|---|---|---|---|
+| **1** | `compute.yaml` schema in `packages/core` (zod), `seed/compute.yaml` + templates, `metistry compute providers\|models\|assign\|budget`, hot reload, OpenRouter seed provider with Claude pinned, **the scrub** (engine, CLI env allowlist, secrets, shapes, docs — plus the Agent SDK dependency and `engine.ts`'s `query()` path) | ratify the SDK removal in `CLAUDE.md` first (§2.10) | **done** (#152 schema/verbs, #167 the scrub) |
+| **1a** | **App part, split out:** the Compute pane, wizard step 7 → "Choose your compute", Settings. Separated so the schema/CLI PR is reviewable alone and the SwiftUI change lands against a settled verb surface | — | **done** (#167) |
+| **2** | `/v1/models` discovery, doctor rows, `compute models list\|install\|load\|unload`, LM Studio + Ollama as peers, embeddings over `/v1/embeddings` (C18) — **and the bundled `llama-server`** built from pinned source into the runtime-deps pack, signed like Postgres and git | — | **done** (#158) |
+| **3** | `Engine` interface + the `openai-compatible` loop, `runs` provider/model columns, `spend` query, budgets `allow\|stop\|critical_only` with the routine pause, non-ZDR warning, per-run scoped credential, cross-kind delegation refusal — **plus** R1 in-engine host allowlist, R2 80 % warning, R3 refusals name the field, T4 no-progress veto, T1/T5 where the server exposes them, and **stage-2 shadow mode** | OPEN-3, OPEN-4, OPEN-6 | **done** (#159) except T1/T5 (no server exposes grammar/slot control yet) and stage-2 shadow mode (not found in the codebase) |
+| **4** | Apple FM `/v1` surface **after** the `DynamicGenerationSchema` PoC (C8); `inbox-drain` moves to provider `apple-fm`; CI check that no collector names a provider with cost > 0 | — | **done** (#164 PoC-19, #169) |
+| **5** | `plugins/opencode`, parity test, `metistry connect opencode`, `docs/ops/opencode.md` | `@opencode-ai/plugin` types — ask before adding | **done** (#171) |
 
 **Grouped adopts** (each independent of the compute chain):
 
@@ -296,15 +310,15 @@ the Studio's overlay; ratifying `packages/eval`; the SDK removal in
 
 **Still open after this refresh**
 
-| # | Question | Source |
-|---|---|---|
-| OPEN-1 | Is "open weights" a criterion for the seed `default`, or only price and quality? | compute rev 3 Q0 |
-| OPEN-2 | `autonomy` narrowing-only vs "lower the bar as trust grows" (§2.5) | agent-room |
-| OPEN-3 | Non-ZDR: keep the warning, or send `data_collection: deny` by default with a per-provider opt-out (§2.6) | hermes-2 |
-| OPEN-4 | What may `critical: true` cover under `action: critical_only`? | compute rev 3 Q1 |
-| OPEN-5 | `work.owner` — "addressed to" or authoritative? An Assigned column makes it look authoritative | hermes-1 |
-| OPEN-6 | Prompt caching: one top-level `cache_control` or explicit breakpoints — measure both in PR 3 | compute rev 3 Q3 |
-| OPEN-7 | Seed cloud templates: OpenRouter only, plus Zen, and leave "any base URL" to the form? | compute rev 3 Q2 |
+| # | Question | Source | Status (2026-09-17) |
+|---|---|---|---|
+| OPEN-1 | Is "open weights" a criterion for the seed `default`, or only price and quality? | compute rev 3 Q0 | open |
+| OPEN-2 | `autonomy` narrowing-only vs "lower the bar as trust grows" (§2.5) | agent-room | **resolved 2026-09-16** — owner overturned the narrowing-only rule; shipped as A3, autonomy levels the owner can raise (#170) |
+| OPEN-3 | Non-ZDR: keep the warning, or send `data_collection: deny` by default with a per-provider opt-out (§2.6) | hermes-2 | open — the warning shipped (#159); the default-deny question is unresolved |
+| OPEN-4 | What may `critical: true` cover under `action: critical_only`? | compute rev 3 Q1 | open |
+| OPEN-5 | `work.owner` — "addressed to" or authoritative? An Assigned column makes it look authoritative | hermes-1 | open |
+| OPEN-6 | Prompt caching: one top-level `cache_control` or explicit breakpoints — measure both in PR 3 | compute rev 3 Q3 | open |
+| OPEN-7 | Seed cloud templates: OpenRouter only, plus Zen, and leave "any base URL" to the form? | compute rev 3 Q2 | open |
 
 ---
 
@@ -323,15 +337,15 @@ hard-requires `CLAUDE_CODE_OAUTH_TOKEN` (`apps/assistant/src/main.ts`)
 and would crash-loop under the supervisor without it. Devin/Cursor
 surfaces verified in `2026-09-15-devin-cursor-integration.md` (#143).
 
-| # | what | proves / unblocks | who |
-| --- | --- | --- | --- |
-| W1 | **Assistant degrades absent**: no token → the supervisor does not start the assistant child, `doctor` reports `assistant: absent (no engine credential)`, fold turns queue and wait; everything else runs | a second instance runs today with no model | agent (Opus) |
-| W2 | **Cut v0.8.0** (changesets pending: offline contract #132, signed packs #133) | the second Mac installs signed packs + helpers via the Mac app | owner tags |
-| W3 | **`metistry connect <tool>`** — one generic verb: mint a per-tool agent token (`POST /api/agents` + grants, principal kind external), write the tool's native config: Cursor `~/.cursor/mcp.json` (`url` + `headers` with `${env:NAME}` so the token never hits disk), Devin (personal-scope custom Streamable-HTTP MCP with `Authorization: Bearer`, printed as instructions — no API to write it), Claude Code (existing plugin), OpenCode later (shrinks compute PR 5). Plus `docs/ops/{cursor,devin}.md` | Cursor and Devin read/search the vault, capture, and take tasks through `/mcp` | agent |
-| W4 | **Cursor session capture**: `sessionEnd` in `.cursor/hooks.json` (Cursor also loads `~/.claude/settings.json`, mapping `SessionEnd`), same idempotency key as the Claude Code plugin; gated on Cursor's transcript format (unverified) | dev sessions land in the inbox whichever tool is used | agent |
-| W5 | **Devin knowledge-in**: a collector pulling DeepWiki pages for the org's private repos and `devin_knowledge` items via `mcp.devin.ai/mcp` / REST v3 into the inbox as captures (`source: devin`, provenance), so the fold — or Cursor with a knowledge-write grant, until an engine exists — organises them | "learn the team's repos"; Devin's context reaches the vault | agent; owner's Devin PAT (enterprise PAT policy is off by default — owner to enable) |
-| W6 | **Devin as a compute target**: `targets/devin-sessions` with a new `transport: http` in `dispatch.ts`, `max_acu_limit` from the budget, `structured_output_schema` for the report, **polling** for completion (no outbound webhook exists), result → report proposal | debugging/research briefs dispatched, answers triaged; the first off-machine target that is not GitHub | agent |
-| W7 | Compute PRs 1→3 **with the local provider first** (bundled `llama-server`/LM Studio on the M5 Pro), Claude via OpenRouter second — the engine on the second instance is local until Claude access arrives; the bake-off (§3) runs alongside on both machines | Metis thinks on the second instance with zero cloud | agent + owner (fixtures) |
+| # | what | proves / unblocks | who | Status (2026-09-17) |
+| --- | --- | --- | --- | --- |
+| W1 | **Assistant degrades absent**: no token → the supervisor does not start the assistant child, `doctor` reports `assistant: absent (no engine credential)`, fold turns queue and wait; everything else runs | a second instance runs today with no model | agent (Opus) | **done** (#145) |
+| W2 | **Cut v0.8.0** (changesets pending: offline contract #132, signed packs #133) | the second Mac installs signed packs + helpers via the Mac app | owner tags | open — no `v0.8.0` tag yet |
+| W3 | **`metistry connect <tool>`** — one generic verb: mint a per-tool agent token (`POST /api/agents` + grants, principal kind external), write the tool's native config: Cursor `~/.cursor/mcp.json` (`url` + `headers` with `${env:NAME}` so the token never hits disk), Devin (personal-scope custom Streamable-HTTP MCP with `Authorization: Bearer`, printed as instructions — no API to write it), Claude Code (existing plugin), OpenCode later (shrinks compute PR 5). Plus `docs/ops/{cursor,devin}.md` | Cursor and Devin read/search the vault, capture, and take tasks through `/mcp` | agent | **done** (#148) |
+| W4 | **Cursor session capture**: `sessionEnd` in `.cursor/hooks.json` (Cursor also loads `~/.claude/settings.json`, mapping `SessionEnd`), same idempotency key as the Claude Code plugin; gated on Cursor's transcript format (unverified) | dev sessions land in the inbox whichever tool is used | agent | **done** (#149) |
+| W5 | **Devin knowledge-in**: a collector pulling DeepWiki pages for the org's private repos and `devin_knowledge` items via `mcp.devin.ai/mcp` / REST v3 into the inbox as captures (`source: devin`, provenance), so the fold — or Cursor with a knowledge-write grant, until an engine exists — organises them | "learn the team's repos"; Devin's context reaches the vault | agent; owner's Devin PAT (enterprise PAT policy is off by default — owner to enable) | **done** (#150) |
+| W6 | **Devin as a compute target**: `targets/devin-sessions` with a new `transport: http` in `dispatch.ts`, `max_acu_limit` from the budget, `structured_output_schema` for the report, **polling** for completion (no outbound webhook exists), result → report proposal | debugging/research briefs dispatched, answers triaged; the first off-machine target that is not GitHub | agent | **done** (#151) |
+| W7 | Compute PRs 1→3 **with the local provider first** (bundled `llama-server`/LM Studio on the M5 Pro), Claude via OpenRouter second — the engine on the second instance is local until Claude access arrives; the bake-off (§3) runs alongside on both machines | Metis thinks on the second instance with zero cloud | agent + owner (fixtures) | **done** (#152, #158, #159, #167, #169) |
 
 **Exposure (2026-09-15 ruling):** the owner's home gateway is not available to the second instance, and no inbound exposure is assumed. The shapes that need none: W6 is *outbound-only* (Metis calls Devin's API and polls; results land in the inbox), and a local Devin CLI on the same Mac reaches `/mcp` on loopback. Cloud Devin as an MCP *client* (W3's Devin half) needs an inbound path — a per-instance tunnel with the console's own auth in front (Tailscale Funnel or Cloudflare Tunnel are the candidates; the S6 internal mesh is the long-term answer) — and is deferred until one is chosen. W6 grows a **knowledge-research** brief kind: a question Metis cannot answer is dispatched to Devin, the structured answer returns as a `report` proposal with provenance, and the fold files it — "agent delegation of knowledge research and gathering, collected and organised into the knowledge store."
 
@@ -387,6 +401,22 @@ A′, C, D, E; §6 decision 9 and a pointer under "Still open"; §7's Agent SDK
 entry. `desktop-app-plan.md`: "Optional, offered in-app", "the user's own,
 unavoidable", wizard step 7. `ios-app-plan.md`: one dated block (O1–O5).
 `PRODUCT.md`: one line.
+
+## 6a. Proposed for CLAUDE.md (owner to accept)
+
+A principle for the console's mutating surface after #170: "The console's
+mutating surface is a closed, enumerated set of actions, each a door onto an
+existing audited service; a new action is a product change, never a prompt or
+a config line." Not applied to `CLAUDE.md` here — that file is the owner's
+(§2.10) — recorded as a status-pass finding for him to rule on.
+
+Why: invariant 9 already closes the *engine's* mutating and outbound surface
+(`brain-commit` plus allowlisted bridges); #170's executable action proposals
+gave the *console* an equivalent surface for the first time (a closed set of
+four kinds — dispatch, patch, comment, capture — each running the same
+service call the owner's own click makes), and nothing in the invariants
+currently says that surface has to stay closed by construction rather than by
+convention.
 
 ## 7. Sources
 

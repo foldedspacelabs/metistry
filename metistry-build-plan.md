@@ -790,27 +790,36 @@ the bake-off, and what is still open. In brief, in order:
 1. **`compute.yaml`** — schema in `packages/core`, seed + templates, `metistry
    compute` verbs, hot reload, OpenRouter seed provider with Claude pinned, and
    **the subscription/SDK scrub**. The Mac app's Compute pane and wizard step 7
-   split into their own PR.
+   split into their own PR. **Done** (#152, #167) *(status 2026-09-17)*.
 2. **Discovery and the local binary** — `/v1/models`, doctor rows, `compute
    models list|install|load|unload`, LM Studio and Ollama as peers, embeddings
    over `/v1/embeddings`, and the bundled `llama-server` in the runtime-deps
-   pack.
+   pack. **Done** (#158) *(status 2026-09-17)*.
 3. **The bake-off PoC** (stage 0: the bar) once 2 lands and the owner's 50
-   fixtures exist.
+   fixtures exist. **Not started** — the harness (`packages/eval`) shipped in
+   #160, but stage 0 still waits on the owner's fixtures *(status
+   2026-09-17)*.
 4. **The engine** — `openai-compatible` loop, cost columns, `spend`, budgets
    with the routine pause, non-ZDR warning, cross-kind delegation refusal, plus
    the loopback egress proxy, the 80 % budget warning, refusals that name the
-   config field, a no-progress veto, and shadow mode.
-5. **Apple FM `/v1`** after its PoC, then the **OpenCode plugin**.
+   config field, a no-progress veto, and shadow mode. **Done** (#159), except
+   shadow mode, which is not yet in the codebase *(status 2026-09-17)*.
+5. **Apple FM `/v1`** after its PoC, then the **OpenCode plugin**. **Done**
+   (#164 PoC-19, #169 the provider, #171 OpenCode) *(status 2026-09-17)*.
 
 Independent of that chain, four grouped adopts from the prior-art reviews:
 automation hardening (preflight before spend, per-signature alert dedupe,
-failure streak, `doctor schedules`); a board view over `work` rows (two named
-queries → read-only panel → drags); threads hung off `work` rows (view →
-`work_id` anchor → autonomy levels, the last blocked on an open question); and
+failure streak, `doctor schedules`) — **done, #153**; a board view over `work`
+rows (two named queries → read-only panel → drags) — **done, #155 and #166**;
+threads hung off `work` rows (view → `work_id` anchor → autonomy levels, the
+last blocked on an open question) — **done, #161**, and the open question
+(OPEN-2) was itself resolved and shipped as autonomy levels in **#170**;
 contract hygiene (CI audit of unwired limits, a stdout-is-the-protocol
-conformance test, crew descriptions in `agents_delegate`). Each carries its own
+conformance test, crew descriptions in `agents_delegate`) — the first two
+**done, #163**, crew descriptions still a proposal. Each carries its own
 status in the refresh doc — several are proposals, not ratified work.
+*(status 2026-09-17: see `docs/plan-refresh-2026-09-13.md` §4 for the
+row-by-row detail.)*
 
 ---
 

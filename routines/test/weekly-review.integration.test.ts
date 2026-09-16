@@ -1,21 +1,25 @@
 // Weekly review against the real (scratch) database. The fake-db unit tests
 // prove the rendering; only Postgres can prove the SQL — FILTER clauses,
 // the jsonb history unnest, to_char on a date, the CTE unions. Skipped
-// without a db. Every row inserted here carries an `itest-` marker and is
-// removed again, since other suites assert exact contents of the same tables.
-import { readFileSync } from "node:fs";
+// without a db.
+//
+// Unlike every other integration suite, this one cannot isolate itself with a
+// marker: the review is a WHOLE-DATABASE aggregate, and two of its sections
+// rank (top 10 agents by activity, top projects). A sibling suite's leftover
+// `runs` rows — written at the real `now()`, which is inside this fixture's
+// unbounded `ts > since` window — simply outrank the fixture and push it off
+// the end of the list. That is what made the suite pass on a freshly created
+// scratch db and fail on the second run against the same one.
+//
+// So this suite takes the database for the length of its run: `isolate()`
+// empties the eight tables the review reads, and refuses to do it unless the
+// database it is connected to really is the scratch one.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
 import { run as weeklyReview } from "../weekly-review/run.js";
+import { loadTestEnv } from "@foldedspacelabs/metistry-core/test-env";
 
-try {
-  for (const line of readFileSync(new URL("../../.env", import.meta.url), "utf8").split("\n")) {
-    const m = /^([A-Z_]+)=(.*)$/.exec(line.trim());
-    if (m && m[1] && process.env[m[1]] === undefined) process.env[m[1]] = m[2];
-  }
-} catch {}
-
-const hasDb = !!process.env.METISTRY_DB_PASSWORD;
+const { hasDb } = loadTestEnv(new URL("../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
 
 // Local Sep 6 noon: inside the monthly gate, so the run covers Aug 30–Sep 6
 // and adds August. Age-sensitive fixtures sit at UTC midnight so a whole
@@ -24,6 +28,18 @@ const now = new Date(2026, 8, 6, 12, 0, 0);
 
 describe.skipIf(!hasDb)("weekly review (real db)", () => {
   let pool: pg.Pool;
+  /** The tables `weekly-review/run.ts` reads. reply_feedback references outbound_messages, so both go together and no CASCADE is needed. */
+  const REVIEW_TABLES = ["agents", "inbox", "metrics", "outbound_messages", "proposals", "reply_feedback", "runs", "work"];
+  /** Empty them — after proving this is the scratch database and not somebody's install (docs/ops/testing.md). */
+  const isolate = async () => {
+    const want = process.env.METISTRY_TEST_DB_NAME ?? "metistry_test";
+    const { rows } = await pool.query<{ db: string }>(`SELECT current_database() AS db`);
+    const db = rows[0]!.db;
+    if (db !== want || !/^metistry_test/.test(db)) {
+      throw new Error(`refusing to empty ${db}: the weekly review suite only runs against the scratch db (METISTRY_TEST_DB_NAME=${want}, ops/scripts/test-db.sh)`);
+    }
+    await pool.query(`TRUNCATE ${REVIEW_TABLES.join(", ")} RESTART IDENTITY`);
+  };
   const cleanup = async () => {
     await pool.query(`DELETE FROM work WHERE project = 'itest-weekly'`);
     await pool.query(`DELETE FROM proposals WHERE source_agent = 'itest-agent'`);
@@ -41,7 +57,7 @@ describe.skipIf(!hasDb)("weekly review (real db)", () => {
       database: process.env.METISTRY_TEST_DB_NAME ?? "metistry_test", // scratch db (ops/scripts/test-db.sh)
       password: process.env.METISTRY_DB_PASSWORD,
     });
-    await cleanup();
+    await isolate();
   });
   afterAll(async () => {
     await cleanup();

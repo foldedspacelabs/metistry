@@ -64,9 +64,9 @@ export interface KnowledgeFsDeps {
 const NOT_AVAILABLE_LIST = "the vault bridge's listing is not configured in this deployment (knowledge_list needs METISTRY_RECONCILER_URL + METISTRY_BRIDGE_TOKEN_RECONCILER, same as knowledge_read)";
 const NOT_AVAILABLE_READ = "note contents are not readable from this deployment yet (knowledge_grep needs the same vault read path as knowledge_read)";
 
-const MAX_GREP_FILES = 50;
-const MAX_GREP_HITS = 200;
-const GREP_TIMEOUT_MS = 1500;
+const MAX_GREP_FILES = 50;  // limit: fixed — named in knowledge_grep's own description, so it is contract the model reads
+const MAX_GREP_HITS = 200;  // limit: fixed — same — it is the input schema's .max() as well
+const GREP_TIMEOUT_MS = 1500;  // limit: fixed — refusing an expensive pattern is the behaviour; a tunable one would defeat it
 const LIST_FALLBACK_DEPTH = 10;
 
 // --- the bridge clients (mirrors knowledge-write.ts's vaultBridgeWriter) --

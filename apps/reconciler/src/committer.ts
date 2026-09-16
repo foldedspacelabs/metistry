@@ -37,7 +37,7 @@ export interface PushResult {
   error?: string;
 }
 
-const MAX_MESSAGE = 4000;
+const MAX_MESSAGE = 4000;  // limit: fixed — a commit message, not a document; git's own conventions bound it
 
 export function authorFor(cfg: CommitterConfig, principal: string): GitIdentity {
   return { name: `${cfg.authorPrefix} ${principal}`, email: cfg.authorEmail };

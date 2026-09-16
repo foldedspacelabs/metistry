@@ -4,20 +4,13 @@
 // and the partial-index ON CONFLICT, the dependency subquery, and lease
 // arithmetic. Skipped without a db. Scratch db: ops/scripts/test-db.sh
 // (honours METISTRY_TEST_DB_NAME so concurrent runs stay apart).
-import { readFileSync } from "node:fs";
 import { setTimeout as sleep } from "node:timers/promises";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
 import { TasksService, check, ensureSchema } from "../src/index.js";
+import { loadTestEnv } from "@foldedspacelabs/metistry-core/test-env";
 
-try {
-  for (const line of readFileSync(new URL("../../../.env", import.meta.url), "utf8").split("\n")) {
-    const m = /^([A-Z_]+)=(.*)$/.exec(line.trim());
-    if (m && m[1] && process.env[m[1]] === undefined) process.env[m[1]] = m[2];
-  }
-} catch {}
-
-const hasDb = !!process.env.METISTRY_DB_PASSWORD;
+const { hasDb } = loadTestEnv(new URL("../../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
 const P = "itest-tasks"; // project scope keeps this suite's rows apart from everything else in the scratch db
 
 describe.skipIf(!hasDb)("tasks (real db)", () => {

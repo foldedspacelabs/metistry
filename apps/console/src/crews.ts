@@ -73,7 +73,7 @@ export interface CrewDefinition {
 
 const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)([\s\S]*)$/;
 const CREW_FILE = /^(?:.*\/)?([a-z0-9-]+)\/([a-z0-9-]+)\.md$/; // <area>/<name>.md
-const MAX_PROMPT_CHARS = 32_000;
+const MAX_PROMPT_CHARS = 32_000;  // limit: fixed — a crew manifest longer than this is a malformed file; refusing it whole is the point
 
 /**
  * Parse one `agents/<area>/<name>.md`. Throws with `where:` on any miss —

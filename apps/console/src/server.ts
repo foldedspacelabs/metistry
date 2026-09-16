@@ -36,7 +36,7 @@ import type { PublicIdentity } from "./identity.js";
 import { route as routeMessage, type Rules } from "./router.js";
 import { sendToSession, storeSubscription, type PushConfig } from "./push.js";
 import { dispatch, type TargetRegistry } from "./dispatch.js";
-import { isDevinPurpose } from "./devin.js";
+import { DEVIN_PURPOSES, isDevinPurpose } from "./devin.js";
 import { listProjects, updateProject, validateProjectPatch } from "./projects.js";
 import { applyImprovement } from "./prompt-overlay.js";
 import { crewDispatcher, type CrewRegistry } from "./crews.js";
@@ -92,7 +92,7 @@ export interface ConsoleConfig {
 // without one (a fresh paint), and the response always carries the cursor
 // for the next call — the newest row seen, or the caller's own when there
 // was nothing new.
-const MAX_LIST = 100;
+const MAX_LIST = 100;  // limit: fixed — the API's own page ceiling, documented in docs/ops/console-api.md
 function listArgs(url: URL, dflt: number): { limit: number; since: string | null } {
   const raw = Number(url.searchParams.get("limit") ?? dflt);
   const limit = Number.isFinite(raw) && raw > 0 ? Math.min(Math.floor(raw), MAX_LIST) : dflt;
@@ -220,7 +220,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     // (research 2026-09-11). Public on purpose and nothing more than the
     // login page already shows — no origin, no counts, no state.
     if (key === "GET /api/identity") {
-      if (!cfg.identity) return sendError(res, "not_available");
+      if (!cfg.identity) return sendError(res, "not_available", "no identity is configured in this deployment — METISTRY_IDENTITY_FILES names the files to read (default seed/identity.yaml plus the instance's own)");
       return sendJson(res, 200, { ...cfg.identity, version: cfg.version ?? null, as_of: new Date().toISOString() });
     }
     if (key === "GET /health") {
@@ -499,7 +499,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
 
     // ----- push: bound to the device session specifically -----
     if (url.pathname.startsWith("/api/push/")) {
-      if (auth.kind !== "session") return sendError(res, "forbidden");
+      if (auth.kind !== "session") return sendError(res, "forbidden", "push subscriptions belong to a device session; this credential is the local owner token, which has no device to push to (docs/ops/auth.md)");
       if (!cfg.push) return sendJson(res, 200, { push: "absent" }); // degrades: absent
       if (key === "GET /api/push/vapid-key") return sendJson(res, 200, { key: cfg.push.publicKey });
       if (key === "POST /api/push/subscribe") {
@@ -537,13 +537,13 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         return sendJson(res, 200, { targets: cfg.targets ? await cfg.targets.describe() : [], as_of: new Date().toISOString() });
       }
       const body = (await readJson(req)) as { target?: unknown; brief?: unknown; sources?: unknown; purpose?: unknown; max_acu?: unknown };
-      if (typeof body.target !== "string" || typeof body.brief !== "string") return sendError(res, "invalid_request");
+      if (typeof body.target !== "string" || typeof body.brief !== "string") return sendError(res, "invalid_request", "target and brief are required: target is a name from GET /api/targets, brief is the instruction sent to it (docs/ops/targets.md)");
       const sources = Array.isArray(body.sources) ? body.sources.filter((s): s is string => typeof s === "string") : [];
       // `purpose` is the W6 knowledge-research brief kind (apps/console/src/devin.ts):
       // an unknown one is a refusal, not a silent fallback to `work`.
-      if (body.purpose !== undefined && !isDevinPurpose(body.purpose)) return sendError(res, "invalid_request");
-      if (body.max_acu !== undefined && !(Number.isInteger(body.max_acu) && (body.max_acu as number) > 0)) return sendError(res, "invalid_request");
-      if (!cfg.targets) return sendError(res, "not_found");
+      if (body.purpose !== undefined && !isDevinPurpose(body.purpose)) return sendError(res, "invalid_request", `purpose must be one of ${DEVIN_PURPOSES.join(" | ")} — an unknown one is refused, never a silent fallback to work`);
+      if (body.max_acu !== undefined && !(Number.isInteger(body.max_acu) && (body.max_acu as number) > 0)) return sendError(res, "invalid_request", "max_acu must be a positive integer — the ACU ceiling for this dispatch; omit it to take the target manifest's");
+      if (!cfg.targets) return sendError(res, "not_found", "no compute targets are registered in this deployment — METISTRY_TARGETS_DIRS names the directories to load (default targets/, docs/ops/targets.md)");
       const taskId = Number(DISPATCH_ROUTE.exec(key)![1]);
       // principal is the credential class, never the body (§4.19); the data
       // policy and the runs row are dispatch()'s — nothing is decided here
@@ -592,8 +592,8 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         const project = await updateProject(db, projectOp[1]!, patch, "user"); // records runs kind project_admin itself
         return sendJson(res, 200, { ok: true, project });
       } catch (err) {
-        if (err instanceof agents.AgentError) return sendError(res, err.code);
-        if (err instanceof SyntaxError) return sendError(res, "invalid_request");
+        if (err instanceof agents.AgentError) return sendError(res, err.code, err.message); // the validator already named the field; do not throw that away
+        if (err instanceof SyntaxError) return sendError(res, "invalid_request", "request body is not JSON");
         throw err;
       }
     }
@@ -652,7 +652,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       // pending instead of silently dropping the change.
       let applied: { path: string; created: boolean } | undefined;
       if (row.kind === "improvement" && body.decision === "allow") {
-        if (!cfg.vault) return sendError(res, "not_available");
+        if (!cfg.vault) return sendError(res, "not_available", "applying an improvement proposal writes assistant-prompt.md, and no vault bridge is configured in this deployment — METISTRY_RECONCILER_URL + METISTRY_BRIDGE_TOKEN_RECONCILER (docs/ops/reconciler.md)");
         try {
           const r = await applyImprovement(cfg.vault, row.payload, row.id);
           applied = { path: r.path, created: r.created };
@@ -715,7 +715,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         await audit("agent_admin", "mint", true, { agent: id, op: "mint" });
         return sendJson(res, 201, { id, token }); // the ONE time the token crosses the wire
       } catch (err) {
-        if (err instanceof agents.AgentError) return sendError(res, err.code);
+        if (err instanceof agents.AgentError) return sendError(res, err.code, err.message); // the validator already named the field; do not throw that away
         throw err;
       }
     }
@@ -757,7 +757,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         await audit("agent_admin", "rotate", token !== null, { agent: id, op: "rotate" });
         return token ? sendJson(res, 200, { id, token }) : sendError(res, "not_found");
       } catch (err) {
-        if (err instanceof agents.AgentError) return sendError(res, err.code);
+        if (err instanceof agents.AgentError) return sendError(res, err.code, err.message); // the validator already named the field; do not throw that away
         throw err;
       }
     }
@@ -772,7 +772,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     if (key === "POST /auth/logout") {
       // Acts on the caller's own session ROW, so it needs one. The local
       // owner token has no session to end — its lifetime is the secret's.
-      if (auth.kind !== "session") return sendError(res, "forbidden");
+      if (auth.kind !== "session") return sendError(res, "forbidden", "logout ends a device session row and the local owner token has none — its lifetime is the secret's (docs/ops/auth.md)");
       await store.revokeSession(db, auth.sessionId);
       return sendJson(res, 200, { ok: true });
     }

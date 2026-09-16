@@ -21,7 +21,7 @@ export type QueriesToolName = (typeof QUERIES_TOOL_NAMES)[number];
 /** The server's registration function, narrowed to these names. */
 export type Register = <S extends z.ZodRawShape>(name: QueriesToolName, description: string, inputSchema: S, body: (args: z.infer<z.ZodObject<S>>) => Promise<Outcome>) => void;
 
-export const MAX_ROWS = 200;
+export const MAX_ROWS = 200; // limit: fixed — part of the tool's contract; a named query wanting more needs its own LIMIT
 
 const NOT_AVAILABLE = "named queries are not configured in this deployment (the console loads seed/queries + the instance's queries/)";
 

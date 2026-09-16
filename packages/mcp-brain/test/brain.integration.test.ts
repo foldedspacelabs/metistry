@@ -2,7 +2,6 @@
 // client over Streamable HTTP — misuse tests first (invariant 8): the
 // principal is injected, so every trust rule is exercised by swapping
 // tokens, never by asking the tools nicely. Skipped without a db.
-import { readFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -13,15 +12,9 @@ import { TasksService } from "@foldedspacelabs/metistry-tasks";
 import { EmbedUnavailableError } from "@foldedspacelabs/metistry-core";
 import { QueryStore } from "@foldedspacelabs/metistry-queries";
 import { createBrainServer, sha256Text, TOOL_NAMES, type AgentPrincipal, type VaultWriteRequest } from "../src/index.js";
+import { loadTestEnv } from "@foldedspacelabs/metistry-core/test-env";
 
-try {
-  for (const line of readFileSync(new URL("../../../.env", import.meta.url), "utf8").split("\n")) {
-    const m = /^([A-Z_]+)=(.*)$/.exec(line.trim());
-    if (m && m[1] && process.env[m[1]] === undefined) process.env[m[1]] = m[2];
-  }
-} catch {}
-
-const hasDb = !!process.env.METISTRY_DB_PASSWORD;
+const { hasDb } = loadTestEnv(new URL("../../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
 const PA = "itest-brain-a";
 const PB = "itest-brain-b";
 const ALICE = "itest-brain-alice";

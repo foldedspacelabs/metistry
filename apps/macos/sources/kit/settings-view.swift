@@ -56,6 +56,7 @@ public struct SettingsView: View {
                 case .instance: instancePane(p)
                 case .services: servicesPane(p)
                 case .connections: connectionsPane(p)
+                case .compute: computePane(p)
                 case .secrets: secretsPane(p)
                 case .updates: updatesPane(p)
                 case .advanced: advancedPane(p)
@@ -304,6 +305,21 @@ public struct SettingsView: View {
                 }
             }
         }
+    }
+
+    // MARK: - Compute
+
+    /// The whole pane is `ComputePaneView` — it has enough state of its own
+    /// (four editors and a sheet) to be its own file, and this keeps the rule
+    /// that a Settings pane renders a model rather than holding one.
+    @ViewBuilder
+    private func computePane(_ p: Palette) -> some View {
+        ComputePaneView(model: settings.computePane)
+            // Re-read on open and on every instance switch. There is no file
+            // watcher anywhere in this app, so this IS the refresh: a
+            // compute.yaml changed in a terminal shows up when the pane is
+            // next opened, and "Read Again" covers the pane that never closed.
+            .task(id: model.instances.active) { await settings.computePane.refresh() }
     }
 
     // MARK: - Secrets

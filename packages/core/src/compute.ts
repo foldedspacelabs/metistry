@@ -24,6 +24,7 @@ import { readFile } from "node:fs/promises";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { dataPolicySchema } from "./manifest.js";
+import { PROVIDER_NAME_RE, modelRefIssue, parseModelRef, type ModelRef } from "./model-ref.js";
 import { DEFAULT_TIER, EFFORTS, type Effort, type TierMap } from "./tiers.js";
 
 /** The file's name wherever it lives — the instance repo's root, and `seed/`. */
@@ -61,55 +62,17 @@ export const DEFAULT_BUDGET_ACTION: BudgetAction = "stop";
 /** An environment-variable NAME. A value can never match it, which is the point. */
 export const SECRET_NAME_RE = /^[A-Z][A-Z0-9_]*$/;
 
-/** Provider names are lowercase kebab-case — the casing rule: only `Knowledge/` is TitleCase. */
-export const PROVIDER_NAME_RE = /^[a-z][a-z0-9_-]*$/;
-
 /** Tier and crew names, the same spelling `tiersSchema` already enforces. */
 const NAME_RE = /^[a-z][a-z0-9_-]*$/;
 
 // ---- model references --------------------------------------------------------
+//
+// The rule itself lives in `model-ref.ts` — `manifest.ts` needs it too (a
+// collector's `uses_model:`) and this file needs `manifest.ts`, so the
+// shared half sits under both. Re-exported here because this is where every
+// caller already imports it from.
 
-export interface ModelRef {
-  /** the first segment: a provider named in THIS file */
-  provider: string;
-  /** everything after it, verbatim — LM Studio and OpenRouter ids contain slashes */
-  model: string;
-  /** the `<provider>/<id>` string as written */
-  ref: string;
-}
-
-/**
- * Why a string is not a usable model reference, or undefined when it is.
- * Returned as a message rather than thrown so the schema, the CLI's
- * argument parsing and the app can all refuse in the same words.
- *
- * `/auto` and anything list-shaped are refused outright: invariant 4 says
- * the router is deterministic — no model decides which model runs — and an
- * auto-router or a fallback list hands that choice to the provider.
- */
-export function modelRefIssue(ref: string): string | undefined {
-  if (ref.trim() !== ref || ref === "") return "must not be empty or padded with spaces";
-  if (/\s/.test(ref)) return `${JSON.stringify(ref)} contains whitespace — a model reference is one \`<provider>/<model-id>\` token`;
-  const slash = ref.indexOf("/");
-  if (slash <= 0 || slash === ref.length - 1) {
-    return `${JSON.stringify(ref)} is not \`<provider>/<model-id>\` — pin the provider that serves it (e.g. openrouter/anthropic/claude-sonnet-5), so nothing has to guess where it runs`;
-  }
-  const provider = ref.slice(0, slash);
-  const model = ref.slice(slash + 1);
-  if (!PROVIDER_NAME_RE.test(provider)) return `provider ${JSON.stringify(provider)} is not a provider name (lowercase, digits, - and _, starting with a letter)`;
-  if (model.split("/").includes("auto") || model.endsWith(":auto")) {
-    return `${JSON.stringify(ref)} names an auto-router — pin one model instead (invariant 4: the router is deterministic; no model decides which model runs)`;
-  }
-  return undefined;
-}
-
-/** Split a validated reference. Throws with the same message the schema would give. */
-export function parseModelRef(ref: string): ModelRef {
-  const why = modelRefIssue(ref);
-  if (why) throw new Error(`model: ${why}`);
-  const slash = ref.indexOf("/");
-  return { provider: ref.slice(0, slash), model: ref.slice(slash + 1), ref };
-}
+export { PROVIDER_NAME_RE, modelRefIssue, parseModelRef, type ModelRef };
 
 const modelRefSchema = z
   .string({
@@ -146,16 +109,27 @@ const authSchema = z.strictObject({
 });
 
 /**
- * The local server runtimes Metistry can START ITSELF. One today: the
- * `llama-server` built into the bundled runtime pack
- * (`ops/release/build-runtime-deps.sh`, docs/ops/bundled-runtime.md), so a
- * fresh Mac has a local model without being sent to install a second app.
+ * The local server runtimes Metistry RUNS ITSELF — the two whose lifecycle
+ * this install owns:
+ *
+ *   `llamaserver` the `llama-server` built into the bundled runtime pack
+ *                 (`ops/release/build-runtime-deps.sh`,
+ *                 docs/ops/bundled-runtime.md), so a fresh Mac has a local
+ *                 model without being sent to install a second app. `up`
+ *                 renders a supervisor child for it from the `serve:` block.
+ *   `applefm`     the `apple-fm` bridge's OpenAI-compatible `/v1` surface
+ *                 over Apple Foundation Models (PoC-19). No new process:
+ *                 the bridge is ALREADY a supervised service, so this
+ *                 `serve:` block starts nothing — it declares that the
+ *                 provider on the other end of `base_url` is Metistry's own,
+ *                 which is what keeps its port honest (checked below) and
+ *                 tells `up` not to look for a second one.
  *
  * LM Studio and Ollama are deliberately NOT in this list. They are peers,
  * discovered over `/v1/models` like any other provider — Metistry uses them
  * where they are already running and never claims their lifecycle.
  */
-export const SERVE_RUNTIMES = ["llamaserver"] as const;
+export const SERVE_RUNTIMES = ["llamaserver", "applefm"] as const;
 export type ServeRuntime = (typeof SERVE_RUNTIMES)[number];
 
 /** A GGUF path under the instance, or an absolute one. Never a URL: what is loaded into memory is a file on this machine. */
@@ -171,16 +145,36 @@ const MODEL_PATH_RE = /^[^\0]+\.gguf$/i;
  * and the port must be the port the `base_url` already names, so a served
  * provider cannot be dialled anywhere other than where it listens.
  */
-export const serveSchema = z.strictObject({
-  runtime: z.enum(SERVE_RUNTIMES, { error: `serve.runtime must be one of ${SERVE_RUNTIMES.join(", ")} — LM Studio and Ollama are peers discovered over /v1/models, never processes Metistry starts` }),
-  /** the GGUF this server loads; relative paths resolve against the INSTANCE directory, which is where `compute models install` puts them */
-  model_path: z.string().regex(MODEL_PATH_RE, "serve.model_path is the path of a .gguf file (relative to the instance directory, or absolute) — `metistry compute models install <provider>/<hf-repo>/<file.gguf>` downloads one and fills this in"),
-  port: z.number().int().min(1).max(65535),
-  /** passed verbatim after the flags this product sets; a way to tune context size or slots without a schema change */
-  extra_args: z.array(z.string().min(1)).default([]),
-});
+export const serveSchema = z
+  .strictObject({
+    runtime: z.enum(SERVE_RUNTIMES, { error: `serve.runtime must be one of ${SERVE_RUNTIMES.join(", ")} — LM Studio and Ollama are peers discovered over /v1/models, never processes Metistry starts` }),
+    /** the GGUF this server loads; relative paths resolve against the INSTANCE directory, which is where `compute models install` puts them. `llamaserver` only — `applefm` loads nothing from disk. */
+    model_path: z.string().regex(MODEL_PATH_RE, "serve.model_path is the path of a .gguf file (relative to the instance directory, or absolute) — `metistry compute models install <provider>/<hf-repo>/<file.gguf>` downloads one and fills this in").optional(),
+    port: z.number().int().min(1).max(65535),
+    /** passed verbatim after the flags this product sets; a way to tune context size or slots without a schema change. `llamaserver` only. */
+    extra_args: z.array(z.string().min(1)).default([]),
+  })
+  // Each runtime takes exactly the fields that mean something to it. A
+  // `model_path` under `applefm` is not a harmless extra line: it would read
+  // as "this is the model it loads", and nothing would ever load it.
+  .superRefine((s, ctx) => {
+    if (s.runtime === "llamaserver" && s.model_path === undefined) {
+      ctx.addIssue({ code: "custom", path: ["model_path"], message: "serve.runtime: llamaserver needs serve.model_path — `metistry compute models install <provider>/<owner>/<repo>/<file>.gguf` downloads a GGUF and fills it in" });
+    }
+    if (s.runtime === "applefm") {
+      if (s.model_path !== undefined) {
+        ctx.addIssue({ code: "custom", path: ["model_path"], message: "serve.runtime: applefm loads no file: the model is the operating system's, already resident. Remove serve.model_path." });
+      }
+      if (s.extra_args.length > 0) {
+        ctx.addIssue({ code: "custom", path: ["extra_args"], message: "serve.runtime: applefm starts no process, so there is no argv to extend. Remove serve.extra_args." });
+      }
+    }
+  });
 
 export type Serve = z.infer<typeof serveSchema>;
+
+/** A `serve:` block that really does name a GGUF — what `llamaServerChild` needs and what the schema above guarantees for `runtime: llamaserver`. */
+export type LlamaServe = Serve & { model_path: string };
 
 /** Published rates, per million tokens — the cost source for providers whose responses do not carry one (Zen and other clouds). */
 const pricingSchema = z.strictObject({
@@ -235,6 +229,42 @@ export function servedProviders(cfg: Compute): Array<{ name: string; provider: P
   return Object.entries(cfg.providers)
     .filter((e): e is [string, Provider & { serve: Serve }] => e[1].serve !== undefined)
     .map(([name, provider]) => ({ name, provider, serve: provider.serve }));
+}
+
+// ---- the collector rule (plan §"collectors never call a billable model") -----
+
+/**
+ * Why this collector may not call this model, or undefined when it may.
+ *
+ * A collector runs unattended, on a clock, with nobody reading the result
+ * until later. The plan's rule has always been "collectors never call a
+ * BILLABLE model; a free on-device tier is permitted" (ruled 2026-09-01 for
+ * `inbox-drain`); since the refresh made Apple FM and `llama-server`
+ * ordinary providers, that rule becomes mechanical — one condition on the
+ * provider a collector names.
+ *
+ * The condition is `locality: on_machine`, and that is the whole of it: cost
+ * for an on-machine provider is not a field anyone fills in, it is 0 BY
+ * DEFINITION (`cost.ts`, `cost_source: "local"`). A second "and cost must be
+ * 0" check would be theatre — there is no way to write a billing rate that
+ * an on-machine provider would be charged at.
+ *
+ * `undefined` for a provider this file does not declare is deliberate and is
+ * NOT the caller's cue to call something else: `completeJson` treats an
+ * undeclared provider as "no model tier configured" and takes the
+ * deterministic path. A name that is declared and billable is the case this
+ * refuses, loudly, in CI and again at the call.
+ */
+export function collectorProviderIssue(collector: string, providerName: string, provider: Provider | undefined): string | undefined {
+  if (!provider) return undefined;
+  if (provider.locality !== "on_machine") {
+    return (
+      `${collector} names ${providerName}, which is locality: ${provider.locality} — a collector runs unattended on a schedule and may only call an on_machine provider, ` +
+      `whose calls cost 0 by definition (docs/ops/compute.md "Apple Foundation Models"). ` +
+      `Point providers.${providerName} at a local server, or drop uses_model: from ${collector}/manifest.yaml and let it stay deterministic.`
+    );
+  }
+  return undefined;
 }
 
 /**

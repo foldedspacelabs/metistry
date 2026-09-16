@@ -55,6 +55,14 @@ export interface ScheduledCollector extends RegisteredCollector {
   requires: Requirements;
   /** the component's directory, so a refusal can name the file you would edit */
   dir: string;
+  /**
+   * The pinned `<provider>/<model-id>` a collector's manifest declares, if it
+   * declares one. It reaches the collector THROUGH HERE rather than being a
+   * constant in its `run.ts`, so the manifest stays the single statement of
+   * what a component may call (invariant 5) and CI's check reads the same
+   * line the runner does.
+   */
+  usesModel?: string;
 }
 
 export interface RunnerOptions {
@@ -124,6 +132,7 @@ export async function loadSchedules(
       requires: requirementsOf(m),
       intervalSec: scheduleToSeconds(m.schedule),
       runKind: m.type === "routine" ? "routine_run" : "collector_run",
+      ...(m.type === "collector" && m.uses_model ? { usesModel: m.uses_model } : {}),
     });
   }
   return out;
@@ -253,7 +262,7 @@ export async function tick(db: Db, scheduled: ScheduledCollector[], ctx: Collect
     // 3. the run itself, unchanged — plus the signature on the failing row
     const runId = await startRun(db, { component: c.name, kind: c.runKind });
     try {
-      const n = await c.run(db, ctx);
+      const n = await c.run(db, c.usesModel ? { ...ctx, usesModel: c.usesModel } : ctx);
       await finishRun(db, runId, { ok: true, meta: { processed: n } });
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);

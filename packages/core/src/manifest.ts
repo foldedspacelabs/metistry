@@ -3,6 +3,9 @@
 // validate against this, so the schema is the contract.
 
 import { z } from "zod";
+
+import { actionTableSchema, AUTONOMY_LEVELS } from "./actions.js";
+import { modelRefIssue } from "./model-ref.js";
 import { EFFORTS } from "./tiers.js";
 
 const cron = z
@@ -93,12 +96,36 @@ export type Requirements = z.infer<typeof requirementsSchema>;
  */
 const requiresField = z.union([z.array(z.string()), requirementsSchema]).default([]);
 
+/**
+ * The ONE model a collector may call, written as the same pinned
+ * `<provider>/<model-id>` string `compute.yaml` uses everywhere else.
+ *
+ * Why a model reference and not a bare provider name: the cost rule is about
+ * the provider, but invariant 4 is about the model — "no model decides which
+ * model runs" is not satisfied by naming a server and taking whatever
+ * `/v1/models` happens to list first. One field says both, checked by the
+ * same `modelRefIssue` the compute file uses, so the two cannot drift.
+ *
+ * Absent — the default, and what every collector but `inbox-drain` is — means
+ * this collector calls nothing at all.
+ *
+ * What makes it SAFE is not this field but what reads it: CI refuses a
+ * reference whose provider is billable, and `completeJson()` refuses again at
+ * the call (`collectorProviderIssue`, compute.ts). Declaring it here is how
+ * the refusal becomes mechanical instead of a rule to remember.
+ */
+const usesModel = z.string().superRefine((v, ctx) => {
+  const why = modelRefIssue(v);
+  if (why) ctx.addIssue({ code: "custom", message: `uses_model ${why}` });
+});
+
 export const collectorManifest = base.extend({
   type: z.literal("collector"),
   schedule: cron,
   writes: z.array(z.string()).min(1),
   reads: z.array(z.string()).default([]),
   requires: requiresField,
+  uses_model: usesModel.optional(),
 });
 
 export const routineManifest = base.extend({
@@ -162,6 +189,15 @@ export const CREW_TOOL_GROUPS = {
    * and the brief is not a tool.
    */
   rooms: ["tasks_comment", "tasks_thread"],
+  /**
+   * Ask the console to DO one of four things (docs/ops/actions.md): dispatch
+   * a work row, patch a task, comment, capture. Its own group for the same
+   * reason `rooms` is — acting is a new power, so a crew gains it only when
+   * the user edits the manifest — and holding the tool is only half the gate:
+   * the agent's `autonomy` record decides whether each kind is refused,
+   * proposed, or run on the spot.
+   */
+  actions: ["propose_action"],
   /** Versioned output into the crew's projects (§4.21). */
   artifacts: ["artifacts_publish", "artifacts_get", "artifacts_list", "artifacts_comment", "artifacts_resolve", "artifacts_review"],
 } as const;
@@ -230,6 +266,16 @@ export const autonomySchema = z.strictObject({
   /** agent ids and/or the literal "user" */
   accept_from: z.array(z.union([autonomyAgentRef, z.literal("user")])).optional(),
   max_open_bundles: z.number().int().min(1).optional(),
+  /**
+   * A3 (docs/ops/actions.md): how much room this crew has with an `action`
+   * proposal. The one key here that can WIDEN — `agents/` is a §4.7 protected
+   * path, so a manifest that raises it is the owner's own hand, and the
+   * registry sync records and alerts the raise exactly as the console route
+   * does. Absent = `observe`: nothing.
+   */
+  level: z.enum(AUTONOMY_LEVELS).optional(),
+  /** Per-kind override, clamped by `level` (never past it). Absent kinds take the level's default. */
+  actions: actionTableSchema.optional(),
 });
 
 export type AgentAutonomy = z.infer<typeof autonomySchema>;

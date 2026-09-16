@@ -39,6 +39,7 @@ import { realExec, type Exec } from "./exec.js";
 import { AUTH_MODES, connectRepo, type AuthMode } from "./connect-repo.js";
 import { connect, connectList, CONNECT_TOOLS, parseTool, renderConnect, renderConnectList } from "./connect.js";
 import { renderWhoami, whoami } from "./console-client.js";
+import { agentAutonomy, parseAutonomyFlags, renderAutonomy } from "./agents.js";
 import { importSessions } from "./import-sessions.js";
 import { init } from "./init.js";
 import { migrateInbox } from "./migrate-inbox.js";
@@ -292,6 +293,16 @@ const USAGE = `metistry — Metistry command line
       Postgres — one read path into state (invariant 3). The summary line goes
       to stderr so stdout stays pipeable; --json-lines is the explicit spelling
       of the default and changes nothing.
+
+  metistry agents autonomy <id> [--level observe|propose|act_within_scope]
+                   [--allow <kind>] [--propose <kind>] [--deny <kind>] [--json]
+      Show, or change, how much room one agent has with an action — dispatch,
+      task_update, comment, capture (docs/ops/actions.md). With no flags it
+      prints the effective table. The level is a CEILING: "allow" only takes
+      effect at act_within_scope. A change that RAISES anything is a widening:
+      it goes through the console as you, lands in runs as
+      agent_admin/autonomy_widened, and puts one alert in Needs You. Kinds may
+      repeat or be comma-separated.
 
   metistry --version
   metistry version [--json] [--product-dir <checkout>] [--instance <dir>]
@@ -799,6 +810,29 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
         return 0;
       } catch (e) {
         err(`metistry console whoami: ${e instanceof Error ? e.message : String(e)}`);
+        return 1;
+      }
+    }
+    case "agents": {
+      // The owner's own hand on an agent's autonomy — one of the two doors a
+      // WIDENING may come through (docs/ops/actions.md). The mode flags are
+      // read off the RAW argv because each of them may be repeated, and the
+      // shared parser keeps only the last of a repeated flag.
+      if (positional[0] !== "autonomy" || !positional[1]) {
+        err("usage: metistry agents autonomy <id> [--level observe|propose|act_within_scope] [--allow <kind>] [--propose <kind>] [--deny <kind>] [--json]");
+        return 2;
+      }
+      const loaded = loadEnv();
+      try {
+        const view = await agentAutonomy(positional[1], parseAutonomyFlags(argv), {
+          ...(loaded.instanceDir ? { instanceId: await readInstanceId(loaded.instanceDir) } : {}),
+          ...(io.exec ? { exec: io.exec } : {}),
+          ...(io.platform ? { platform: io.platform } : {}),
+        });
+        out(flags.json === true ? JSON.stringify(view, null, 2) : renderAutonomy(view));
+        return 0;
+      } catch (e) {
+        err(`metistry agents autonomy: ${e instanceof Error ? e.message : String(e)}`);
         return 1;
       }
     }

@@ -113,6 +113,22 @@ describe("manifest schema", () => {
     expect(validateManifest({ name: "watchdog", type: "service", runs_on: "host" }).ok).toBe(true);
   });
 
+  // `uses_model:` — the ONE model a collector may call (PR 4). The manifest
+  // states it; CI and `completeJson()` are what refuse a billable one.
+  it("a collector may pin one `<provider>/<model-id>`, and nothing else", () => {
+    const drain = { name: "inbox-drain", type: "collector", schedule: "*/5 * * * *", writes: ["proposals"] };
+    expect(validateManifest({ ...drain, uses_model: "applefm/foundation-model" }).ok).toBe(true);
+    expect(validateManifest(drain).ok).toBe(true); // absent is the normal case
+
+    for (const bad of ["applefm", "applefm/auto", "openrouter/anthropic/claude-sonnet-5:auto", "", "  spaced/model "]) {
+      const r = validateManifest({ ...drain, uses_model: bad });
+      expect(r.ok, bad).toBe(false);
+      if (!r.ok) expect(r.errors.join(" ")).toContain("uses_model");
+    }
+    // a list of fallbacks is the thing invariant 4 exists to refuse
+    expect(validateManifest({ ...drain, uses_model: ["applefm/foundation-model", "openrouter/x"] }).ok).toBe(false);
+  });
+
   it("rejects an unparseable cron schedule", () => {
     expect(
       validateManifest({ name: "x", type: "collector", schedule: "whenever", writes: ["metrics"] }).ok,

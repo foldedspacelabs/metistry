@@ -462,6 +462,29 @@ the Mac app and the phone at `GET /api/instances`.
 `docs/ops/instances.md` is the whole story, including why `resources:` is
 empty and what this deliberately is not.
 
+## How much room an agent has: `metistry agents autonomy`
+
+```sh
+metistry agents autonomy researcher                       # show the effective table
+metistry agents autonomy researcher --level act_within_scope --deny dispatch
+metistry agents autonomy researcher --allow comment,capture --json
+```
+
+What one agent may do with an **action** — `dispatch`, `task_update`,
+`comment`, `capture` ([actions.md](actions.md)). `--level` sets the ceiling
+(`observe | propose | act_within_scope`); `--allow` / `--propose` / `--deny`
+set one kind each and may repeat or take a comma-separated list. With no flags
+it prints what is stored and what that resolves to.
+
+The command is a **client of `PUT /api/agents/:id/autonomy`**, not a second
+implementation: it reads the record, merges your flags onto it (so setting one
+kind never erases the §4.21 narrowing beside it) and sends it back with this
+install's `METISTRY_LOCAL_OWNER_TOKEN`, which never reaches argv or stdout. It
+is one of exactly two doors a **widening** may come through — the console's own
+form is the other — and any raise it makes prints, lands in `runs` as
+`agent_admin` / `autonomy_widened`, and puts one alert in Needs You. A record
+that changed underneath answers `409` and is not retried.
+
 ## Exporting the audit ledger: `metistry runs export`
 
 ```sh

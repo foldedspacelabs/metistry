@@ -102,7 +102,9 @@ sql: |
     -- A decision event: what was asked, what was answered, and by whom. The
     -- "whom" is not guessed and not a column — the decision route is
     -- gated on the `user` principal, so every decision but `expired` (the
-    -- morning brief's auto-expiry, which is nobody's) is the owner's hand.
+    -- morning brief's auto-expiry, which is nobody's) and `auto` (an action
+    -- an agent was allowed to run within its scope, docs/ops/actions.md) is
+    -- the owner's hand.
     SELECT
       p.decided_at                                                                        AS ts,
       'proposal_decided'                                                                  AS kind,
@@ -110,6 +112,7 @@ sql: |
       p.kind                                                                               AS subject,
       CASE
         WHEN p.decision = 'expired' THEN 'auto-expired — nobody decided it'
+        WHEN p.decision = 'auto' THEN concat_ws(' ', 'ran within its autonomy:', p.payload->'action'->>'kind')
         ELSE concat_ws(': ', 'you decided ' || p.decision, p.feedback)
       END                                                                                   AS detail,
       'proposals:' || p.id                                                                 AS ref,

@@ -18,7 +18,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 
-import { runCheck, startRun, finishRun, errorEnvelope, intEnv, PROJECT_SLUG_RE, rollSession, statusFor, SKIP_FEEDBACK, type CheckResult, type Compute, type ErrorEnvelope } from "@foldedspacelabs/metistry-core";
+import { runCheck, startRun, finishRun, errorEnvelope, intEnv, parseAction, PROJECT_SLUG_RE, rollSession, statusFor, SKIP_FEEDBACK, type CheckResult, type Compute, type ErrorEnvelope } from "@foldedspacelabs/metistry-core";
 import { QueryError, QueryStore } from "@foldedspacelabs/metistry-queries";
 import { captureToInbox, createBrainServer, dirSink, type CaptureSink, type KnowledgeLister, type KnowledgeReader, type KnowledgeVaultSearcher, type KnowledgeWriter, type QueryEmbedder } from "@foldedspacelabs/metistry-mcp-brain";
 import { TasksError, TasksService } from "@foldedspacelabs/metistry-tasks";
@@ -43,6 +43,7 @@ import { DEVIN_PURPOSES, isDevinPurpose } from "./devin.js";
 import { listProjects, updateProject, validateProjectPatch } from "./projects.js";
 import { applyImprovement } from "./prompt-overlay.js";
 import { crewDispatcher, type CrewRegistry } from "./crews.js";
+import { runAction, type ActionServices } from "./actions.js";
 import { createRequire } from "node:module";
 
 const require_ = createRequire(import.meta.url);
@@ -243,6 +244,9 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
   const tasks = new TasksService(db);
   // artifacts (§4.21): one service, adapted twice — the routes below for the user's session, the mcp-brain tools for agents
   const artifacts = cfg.vault ? new ArtifactsService(db, cfg.vault, { origin: cfg.origin, tasks }) : undefined;
+  /** The services one action may reach. Read per call: `cfg.targets` and the vault bridge are hot-reloaded, and an action must follow the file rather than the process's startup. */
+  const actionServices = (): ActionServices => ({ db, tasks, inbox, ...(cfg.targets ? { targets: cfg.targets } : {}), ...(artifacts ? { artifacts } : {}) });
+
   const brain = createBrainServer({
     db,
     authenticate: (req) => agents.authenticateAgent(db, req), // the same principal source as /capture
@@ -259,6 +263,10 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     crews: cfg.crews ? crewDispatcher(db, tasks, cfg.crews, cfg.targets, cfg.compute) : undefined,
     // queries_list/queries_run: the SAME QueryStore the dashboard reads through (invariant 3, one read path)
     queries,
+    // propose_action at mode `allow` (docs/ops/actions.md): the bridge asks,
+    // this console runs it — through the same service call the owner's own
+    // click goes through, never a second implementation.
+    actions: { execute: (action, actionCtx) => runAction(actionServices(), action, actionCtx) },
   });
 
   async function authenticate(req: IncomingMessage): Promise<Auth> {
@@ -891,11 +899,20 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
           return ok ? sendJson(res, 200, { ok: true, projects }) : sendError(res, "not_found");
         }
         if (op === "autonomy") {
-          // §4.21 narrowing, never widening: the keys can only restrict below "project members"
+          // The §4.21 keys narrow and only narrow. `level` / `actions` (A3,
+          // docs/ops/actions.md) may go the other way — and THIS route is the
+          // door that permits it, because it is reached by the `user`
+          // principal alone (the management gate above). The store refuses a
+          // widening from anyone who does not say so, so the permission lives
+          // in one call rather than in a comment.
           const autonomy = agents.validateAutonomy(await readJson(req));
-          const ok = await agents.setAutonomy(db, id, autonomy);
-          await audit("agent_admin", "autonomy", ok, { agent: id, op: "autonomy", autonomy });
-          return ok ? sendJson(res, 200, { ok: true, autonomy }) : sendError(res, "not_found");
+          const r = await agents.setAutonomy(db, id, autonomy, { allowWidening: true });
+          await audit("agent_admin", "autonomy", r.ok, { agent: id, op: "autonomy", autonomy, ...(r.widened.length ? { widened: r.widened } : {}) });
+          // A raised bar is never silent: its own runs row and one alert.
+          await agents.recordWidening(db, id, r.widened, "console");
+          return r.ok
+            ? sendJson(res, 200, { ok: true, autonomy, actions: agents.autonomyTable(autonomy), ...(r.widened.length ? { widened: r.widened } : {}) })
+            : sendError(res, "not_found");
         }
         if (op === "approve") {
           // S2: the owner's hand on a pending enrolment (invariant 2 — the
@@ -1046,6 +1063,38 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       }
     }
 
+    // Allowing an `action` is the second executable verb (ADOPT 6,
+    // docs/ops/actions.md). Like the improvement path above it runs BEFORE
+    // the row is decided, so a refusal leaves the proposal pending with the
+    // error on it rather than settling a decision that did nothing. The
+    // action itself is re-validated from the STORED payload — an `action`
+    // row whose payload was written by an older build, or by hand, is a 400
+    // naming the field, never a best-effort execution.
+    let acted: Record<string, unknown> | undefined;
+    if (row.kind === "action" && verb === "allow") {
+      const parsed = parseAction((row.payload as { action?: unknown } | null)?.action);
+      if (!parsed.ok) {
+        await audit("triage", "action", false, { proposal: row.id, error: parsed.error });
+        return { status: statusFor("invalid_request"), body: errorEnvelope("invalid_request", `this proposal does not carry a valid action — ${parsed.error}`) };
+      }
+      const r = await runAction(actionServices(), parsed.action, { proposalId: Number(row.id), onBehalfOf: String(row.source_agent) });
+      if (!r.ok) {
+        // the row stays pending, carrying why: the user still has a decision
+        await db.query(
+          `UPDATE proposals SET payload = payload || jsonb_build_object('error', $2::jsonb) WHERE id = $1 AND decision = 'pending'`,
+          [id, JSON.stringify({ code: r.code, message: r.message, at: new Date().toISOString(), ...(r.details ?? {}) })],
+        );
+        await audit("triage", `action:${parsed.action.kind}`, false, { proposal: row.id, action: parsed.action.kind, on_behalf_of: row.source_agent, error: r.code });
+        return { status: statusFor(r.code), body: { ...errorEnvelope(r.code, r.message), ...(r.details ?? {}) } };
+      }
+      acted = { kind: parsed.action.kind, ...r.result };
+      await db.query(
+        `UPDATE proposals SET payload = payload || jsonb_build_object('result', $2::jsonb) WHERE id = $1 AND decision = 'pending'`,
+        [id, JSON.stringify({ ...r.result, at: new Date().toISOString(), by: "user", on_behalf_of: row.source_agent })],
+      );
+      await audit("triage", `action:${parsed.action.kind}`, true, { proposal: row.id, action: parsed.action.kind, on_behalf_of: row.source_agent });
+    }
+
     // Approve as work (ADOPT 2). The click is what creates the row — §4.12
     // is intact because a human clicked, and this is the *only* difference
     // from `allow`: the drain still creates nothing, the crews still create
@@ -1112,9 +1161,10 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       kind: row.kind,
       ...(applied ? { overlay: applied.path } : {}),
       ...(created ? { work_id: created.id } : {}),
+      ...(acted ? { action: acted.kind } : {}),
     });
     if (rows.length === 1) {
-      return { status: 200, body: { ok: true, ...(applied ? { applied } : {}), ...(enrolled ? { enrolled } : {}), ...(created ? { work: created } : {}) } };
+      return { status: 200, body: { ok: true, ...(applied ? { applied } : {}), ...(enrolled ? { enrolled } : {}), ...(created ? { work: created } : {}), ...(acted ? { action: acted } : {}) } };
     }
     // lost the race between the read above and this update: someone else decided it
     const now = (await db.query(PROPOSAL_FOR_DECISION_SQL, [id])).rows[0];

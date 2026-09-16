@@ -45,7 +45,7 @@ export interface RunsExportResult {
 }
 
 /** An export is legitimately long; the ceiling is here so a hung console does not hang the shell forever. */
-export const EXPORT_TIMEOUT_MS = 300_000;
+export const EXPORT_TIMEOUT_MS = 300_000;  // limit: fixed — a wall-clock guard on a streaming export; the `since` cursor is how a longer export continues, not a longer timeout
 
 function redact(text: unknown, token: string): string {
   const s = text instanceof Error ? (text.message ?? String(text)) : String(text);

@@ -16,7 +16,7 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { COMPUTE_FILENAME, loadCompute, servedProviders, usesCompose, type ChildSpecInput, type Deployment } from "@foldedspacelabs/metistry-core";
+import { COMPUTE_FILENAME, intEnv, loadCompute, servedProviders, usesCompose, type ChildSpecInput, type Deployment } from "@foldedspacelabs/metistry-core";
 import { assistantEnv, consoleEnv, consolePort, dbPort, ENGINE_ABSENT_NOTE, ENGINE_CREDENTIAL_VAR, engineCredentialPresent, loadDeployment, type ShapeContext } from "./deployment.js";
 import { doctor, renderTable, type DoctorDeps, type DoctorReport } from "./doctor.js";
 import type { Exec } from "./exec.js";
@@ -153,8 +153,8 @@ export function runDirFor(productDir: string, source: LockSource): string {
   return source === "release" && existsSync(currentLink(productDir)) ? currentLink(productDir) : productDir;
 }
 
-/** Compose timeouts are generous on purpose: a cold `--build` compiles two images. */
-export const COMPOSE_TIMEOUT_MS = 30 * 60 * 1000;
+/** Compose timeouts are generous on purpose: a cold `--build` compiles two images. A slow machine raises METISTRY_COMPOSE_TIMEOUT_MS. */
+export const COMPOSE_TIMEOUT_MS = intEnv("METISTRY_COMPOSE_TIMEOUT_MS", 30 * 60 * 1000);
 
 /**
  * `docker compose` reads `./.env` from its project directory for variable

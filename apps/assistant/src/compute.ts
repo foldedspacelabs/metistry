@@ -10,7 +10,21 @@
 // would mean a package neither of them wants.
 
 import chokidar from "chokidar";
-import { COMPUTE_FILES_DEFAULT, finishRun, optionalEnv, startComputeWatch, startRun, type ComputeReload, type ComputeWatch, type RunExecutor, type WatchSeam } from "@foldedspacelabs/metistry-core";
+import {
+  COMPUTE_FILES_DEFAULT,
+  DEFAULT_TIER,
+  finishRun,
+  optionalEnv,
+  resolveAssignment,
+  startComputeWatch,
+  startRun,
+  type Compute,
+  type ComputeReload,
+  type ComputeWatch,
+  type ResolvedAssignment,
+  type RunExecutor,
+  type WatchSeam,
+} from "@foldedspacelabs/metistry-core";
 
 /**
  * chokidar (pre-approved) rather than `fs.watch`: `git checkout` and every
@@ -74,4 +88,54 @@ export async function watchCompute(db: RunExecutor, component: string, onChange?
 
 function describe(r: ComputeReload): string {
   return `in force from ${r.path ?? "(none)"}`;
+}
+
+/**
+ * The non-ZDR warning (C13, the owner's ruling): an `off_machine` assignment
+ * on a provider that does not claim zero data retention writes ONE warning
+ * `runs` row and then WORKS. Informed choice, never a block — and the row is
+ * what makes it informed, because the badge in the app and the weekly review
+ * both read it.
+ *
+ * Once per (provider, model, day): a warning repeated on every turn is not a
+ * warning, it is noise, and the second one tells you nothing the first did
+ * not. The day is the natural window — it is how long a decision to keep
+ * using a provider stays fresh.
+ */
+export async function warnNonZdr(db: RunExecutor, component: string, assignment: ResolvedAssignment, now: Date = new Date()): Promise<boolean> {
+  if (assignment.config.locality !== "off_machine" || assignment.config.zdr === true) return false;
+  const key = `${assignment.provider}/${assignment.model}:${now.toISOString().slice(0, 10)}`;
+  const { rows } = await db.query(`SELECT 1 FROM runs WHERE kind = 'config' AND tool = 'non_zdr' AND meta->>'window_key' = $1 LIMIT 1`, [key]);
+  if (rows.length > 0) return false;
+  const id = await startRun(db, {
+    component,
+    kind: "config",
+    tool: "non_zdr",
+    provider: assignment.provider,
+    model: assignment.model,
+    meta: { window_key: key, assignment: assignment.from, ref: assignment.ref },
+  });
+  await finishRun(db, id, {
+    ok: false,
+    error:
+      `${assignment.from} runs on ${assignment.ref}, and compute.yaml does not set providers.${assignment.provider}.zdr: true — ` +
+      `prompts and completions sent to it may be retained by the provider. This is a warning, not a block: the assignment stands. ` +
+      `Set zdr: true once you have confirmed the provider's policy, or assign this tier to an on_machine provider.`,
+  });
+  return true;
+}
+
+/**
+ * Every off-machine assignment in force, warned once each. Called at startup
+ * and after every reload that changed something, so a NEW non-ZDR assignment
+ * is announced the moment it is written rather than at the next turn.
+ */
+export async function warnNonZdrAssignments(db: RunExecutor, component: string, cfg: Compute): Promise<number> {
+  const names = cfg.assignments ? [DEFAULT_TIER, ...Object.keys(cfg.assignments.tiers), ...Object.keys(cfg.assignments.crews).map((c) => `crew:${c}`)] : [];
+  let warned = 0;
+  for (const name of names) {
+    const a = resolveAssignment(cfg, name);
+    if (a && (await warnNonZdr(db, component, a))) warned++;
+  }
+  return warned;
 }

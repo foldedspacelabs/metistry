@@ -20,6 +20,15 @@ export {
   type CrewToolGroup,
 } from "./manifest.js";
 export { checkResultSchema, runCheck, type CheckResult, type Checkable } from "./check.js";
+export {
+  checkStdioConformance,
+  isJsonLineFrame,
+  renderStdoutViolations,
+  stdoutViolations,
+  type StdioConformanceOptions,
+  type StdioConformanceResult,
+  type StdoutViolation,
+} from "./stdio-conformance.js";
 export { errorEnvelope, statusFor, type ErrorCode, type ErrorEnvelope } from "./errors.js";
 export { requireEnv, optionalEnv, intEnv } from "./config.js";
 export {
@@ -80,6 +89,34 @@ export {
 } from "./supervisor.js";
 export { scheduleToSeconds } from "./schedule.js";
 export {
+  COST_SOURCES,
+  usageFromResponse,
+  costOf,
+  unpricedNote,
+  type CallCost,
+  type CallUsage,
+  type CostSource,
+} from "./cost.js";
+export {
+  BUDGET_EXCEEDED,
+  BUDGET_WARN_FRACTION,
+  BUDGET_WINDOWS,
+  NO_SPEND,
+  SPEND_QUERY,
+  checkBudgets,
+  budgetRefusalMessage,
+  budgetWarningMessage,
+  budgetWindowKey,
+  budgetMiss,
+  spentFrom,
+  type BudgetCheckInput,
+  type BudgetHit,
+  type BudgetVerdict,
+  type BudgetWindow,
+  type SpendRow,
+  type Spent,
+} from "./budget.js";
+export {
   COMPUTE_FILENAME,
   COMPUTE_FILES_DEFAULT,
   PROVIDER_KINDS,
@@ -94,6 +131,9 @@ export {
   budgetSchema,
   budgetsSchema,
   computeSchema,
+  SDK_ENGINE_KIND,
+  engineKindFor,
+  crossKindRefusal,
   serveSchema,
   SERVE_RUNTIMES,
   servedProviders,
@@ -116,6 +156,8 @@ export {
   type BudgetAction,
   type Budgets,
   type Compute,
+  type CrossKindRefusal,
+  type EngineKind,
   type ComputeReload,
   type ComputeResult,
   type ComputeWatch,

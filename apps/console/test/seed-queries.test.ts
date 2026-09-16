@@ -4,18 +4,13 @@
 // scratch db is available (ops/scripts/test-db.sh) — every seed query
 // actually executes against the migrated schema, so a column typo fails
 // here instead of on the dashboard.
-import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
 import { QueryStore, type SqlExecutor } from "@foldedspacelabs/metistry-queries";
+import { loadTestEnv } from "@foldedspacelabs/metistry-core/test-env";
 
-try {
-  for (const line of readFileSync(new URL("../../../.env", import.meta.url), "utf8").split("\n")) {
-    const m = /^([A-Z_]+)=(.*)$/.exec(line.trim());
-    if (m && m[1] && process.env[m[1]] === undefined) process.env[m[1]] = m[2];
-  }
-} catch {}
+loadTestEnv(new URL("../../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
 
 const SEED_DIR = fileURLToPath(new URL("../../../seed/queries", import.meta.url));
 
@@ -32,6 +27,7 @@ const REQUIRED = [
   "activity_feed",
   "agent_presence",
   "reply_feedback_summary",
+  "spend", // the budget's read path (invariant 3) — the engine runs it before every billable call
   "board",
   "board_projects",
   "rooms",

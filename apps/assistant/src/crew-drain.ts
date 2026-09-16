@@ -24,8 +24,13 @@
 // kind = tool) on the same component.
 
 import { createHash } from "node:crypto";
-import { finishRun, mintToken, sanitizeForAgent, startRun, tokenHash } from "@foldedspacelabs/metistry-core";
-import { parseCrewSnapshot, runCrew, type CrewRunInput, type CrewRunResult, type CrewSdk } from "./crew.js";
+import { emptyCompute, finishRun, mintToken, sanitizeForAgent, startRun, tokenHash, type Compute, type ResolvedAssignment, type TierMap } from "@foldedspacelabs/metistry-core";
+import { crewSystemPrompt, crewToolNames, parseCrewSnapshot, runCrew, runCrewOnEngine, type CrewRunInput, type CrewRunResult, type CrewSdk } from "./crew.js";
+import { makeEngine, type Engine, type TurnGuard } from "./engine.js";
+import { memorySessionStore } from "./sessions.js";
+import { mcpToolHost } from "./tools.js";
+import { resolveTurn } from "./tiers.js";
+import { isBudgetRefusal } from "./budgets.js";
 import type { Identity } from "./prompt.js";
 
 export interface Db {
@@ -52,6 +57,31 @@ export interface CrewDrainConfig {
   briefThreadBytes?: number | undefined;
   /** Injected SDK for tests. */
   sdk?: CrewSdk | undefined;
+  /**
+   * `compute.yaml` in force. A crew named in `assignments.crews` runs on ITS
+   * OWN provider through the in-house engine (collaboration rule 3); one
+   * that is not keeps running on the SDK path with its manifest's model.
+   */
+  compute?: (() => Compute) | undefined;
+  /** The pre-call gate (budgets). Applies to crew runs exactly as it does to the assistant's own turns. */
+  guard?: TurnGuard | undefined;
+  /** Injected for tests: run an ASSIGNED crew. Production builds the engine from the assignment and this run's bearer. */
+  runAssigned?: ((input: CrewRunInput, assignment: ResolvedAssignment) => Promise<CrewRunResult>) | undefined;
+}
+
+/**
+ * The engine one assigned crew run gets: its own provider, its own operating
+ * prompt, its own `uses` allowlist on the tool host, and THIS run's bearer —
+ * which the drain burns in `finally`. Built per run and thrown away with it,
+ * so no two runs can ever share a credential or a session.
+ */
+function engineForCrew(cfg: CrewDrainConfig, input: CrewRunInput, guard?: TurnGuard): Engine {
+  return makeEngine({
+    systemPrompt: crewSystemPrompt(input.crew, input.identity),
+    sessions: memorySessionStore(), // a crew run never resumes one (cost research decision 3)
+    tools: () => mcpToolHost({ url: input.brain.url, token: input.brain.token, allow: crewToolNames(input.crew.uses), clientName: `metistry-crew-${input.crew.name}` }),
+    ...(guard ? { guard } : {}),
+  });
 }
 
 export const DEFAULT_BRIEF_THREAD_BYTES = 4096;
@@ -216,6 +246,10 @@ export async function drainCrewOne(db: Db, cfg: CrewDrainConfig, run: (input: Cr
   const taskId = typeof row.meta?.task_id === "number" ? row.meta.task_id : undefined;
   const briefSha = typeof row.meta?.brief_sha === "string" ? row.meta.brief_sha : createHash("sha256").update(brief).digest("hex");
 
+  // The crew's own assignment decides the engine (collaboration rule 3).
+  // No assignment → the SDK path with the manifest's model, unchanged.
+  const turn = resolveTurn(cfg.compute?.() ?? emptyCompute(), {} as TierMap, `crew:${crewId}`, { model: crew.model, effort: crew.effort });
+
   // The room on the row this crew is about (the dispatched task if there is
   // one, else the crew row itself) becomes the brief's prior-work block —
   // budgeted, and clipped again by the size cap the dispatch passed.
@@ -241,7 +275,8 @@ export async function drainCrewOne(db: Db, cfg: CrewDrainConfig, run: (input: Cr
   const runId = await startRun(db, {
     component: crewId,
     kind: "crew_run",
-    model: crew.model,
+    ...(turn.assignment ? { provider: turn.assignment.provider } : {}),
+    model: turn.model,
     meta: {
       work_id: row.id,
       brief_sha: briefSha,
@@ -249,7 +284,9 @@ export async function drainCrewOne(db: Db, cfg: CrewDrainConfig, run: (input: Cr
       // which messages the brief actually carried — answerable later without re-reading a room that has moved on
       ...(block ? { thread_room: roomId, thread_comments: block.comment_ids, thread_bytes: block.bytes } : {}),
       attempt: row.attempts,
-      effort: crew.effort,
+      effort: turn.effort,
+      engine: turn.assignment?.config.kind ?? "anthropic",
+      ...(turn.assignment ? { model_ref: turn.assignment.ref } : {}),
       fresh_session: true,
       crew_sha: crew.sha256,
       dispatch_run_id: row.meta?.dispatch_run_id ?? null,
@@ -257,7 +294,10 @@ export async function drainCrewOne(db: Db, cfg: CrewDrainConfig, run: (input: Cr
     },
   });
   try {
-    const r = await run({ crew, brief, task_id: taskId, brain: { url: cfg.brainUrl, token }, identity: cfg.identity }, cfg.sdk);
+    const input: CrewRunInput = { crew, brief, task_id: taskId, brain: { url: cfg.brainUrl, token }, identity: cfg.identity };
+    const r = turn.assignment
+      ? await (cfg.runAssigned ?? ((i, a) => runCrewOnEngine(i, a, engineForCrew(cfg, i, cfg.guard))))(input, turn.assignment)
+      : await run(input, cfg.sdk);
     const reports = r.tools_used["mcp__brain__report"] ?? 0;
     await finishRun(db, runId, {
       ok: r.outcome === "ok",
@@ -273,7 +313,12 @@ export async function drainCrewOne(db: Db, cfg: CrewDrainConfig, run: (input: Cr
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await finishRun(db, runId, { ok: false, error: message, meta: { attempt: row.attempts } });
-    if (row.attempts >= maxAttempts) await settle(db, row.id, { status: "blocked", note: `crew run failed ${row.attempts}× — last: ${message.slice(0, 300)}` }, agent);
+    // A budget refusal is final for this window: retrying would re-run the
+    // check and land in the same place, and the row stays visible on the list
+    // with the field that would release it (the Eve adopt: a crew fails with
+    // budget_exceeded; only a person-facing turn is offered another window).
+    if (isBudgetRefusal(err)) await settle(db, row.id, { status: "blocked", note: message.slice(0, 500) }, agent);
+    else if (row.attempts >= maxAttempts) await settle(db, row.id, { status: "blocked", note: `crew run failed ${row.attempts}× — last: ${message.slice(0, 300)}` }, agent);
     else await settle(db, row.id, { status: "retry", note: `crew run attempt ${row.attempts} failed (${message.slice(0, 200)}); retry after ${backoff}s`, backoffSeconds: backoff }, agent);
   } finally {
     await burnRunToken(db, crewId);

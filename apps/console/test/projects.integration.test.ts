@@ -3,7 +3,6 @@
 // then the rollup (members from the registry, a project row made lazily by
 // membership), the user's toggle recorded as runs kind project_admin, and
 // the agent autonomy route. Skipped without a db.
-import { readFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -14,15 +13,9 @@ import { makeServer } from "../src/server.js";
 import * as store from "../src/auth-store.js";
 import * as agents from "../src/agents.js";
 import { validateProjectPatch } from "../src/projects.js";
+import { loadTestEnv } from "@foldedspacelabs/metistry-core/test-env";
 
-try {
-  for (const line of readFileSync(new URL("../../../.env", import.meta.url), "utf8").split("\n")) {
-    const m = /^([A-Z_]+)=(.*)$/.exec(line.trim());
-    if (m && m[1] && process.env[m[1]] === undefined) process.env[m[1]] = m[2];
-  }
-} catch {}
-
-const hasDb = !!process.env.METISTRY_DB_PASSWORD;
+const { hasDb } = loadTestEnv(new URL("../../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
 const policy = { idleDays: 30, maxDays: 365 };
 const SEED_DIR = fileURLToPath(new URL("../../../seed/queries", import.meta.url));
 

@@ -21,9 +21,9 @@
 // queue"). This file only returns the accounting the runs row needs.
 
 import { query, type McpHttpServerConfig, type Options, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { crewToolsFor, validateManifest, type AgentManifest } from "@foldedspacelabs/metistry-core";
+import { crewToolsFor, validateManifest, type AgentManifest, type ResolvedAssignment } from "@foldedspacelabs/metistry-core";
 import { BRAIN_SERVER } from "./brain.js";
-import { DISALLOWED, tallyToolUse } from "./engine.js";
+import { DISALLOWED, tallyToolUse, type Engine } from "./engine.js";
 import { renderPrompt, type Identity } from "./prompt.js";
 
 /** The console's snapshot of a crew, frozen into the work row at dispatch (apps/console/src/crews.ts `CrewSnapshot`). */
@@ -158,3 +158,47 @@ export async function runCrew(input: CrewRunInput, sdk: CrewSdk = defaultCrewSdk
   if (!result) throw new Error("crew run produced no result message");
   return result;
 }
+
+// ---- the same crew, on an assigned provider (C2, collaboration rule 3) ---------
+
+/**
+ * A crew's engine follows ITS OWN provider, not the assistant's
+ * (collaboration rule 3): `assignments.crews.<name>` in `compute.yaml` is
+ * what decides, and a crew with no assignment keeps running on the SDK path
+ * with its manifest's `model` exactly as before.
+ *
+ * Everything that makes a crew a crew is unchanged on this path — the same
+ * operating prompt and trailer, the same `uses` allowlist (now enforced by
+ * the tool host rather than by `allowedTools`), the same per-run bearer the
+ * drain minted and burns after, the same `max_turns` and
+ * `budget_usd_per_run`, and the same rule that the final text is not a
+ * result channel. Crews still never resume a session (cost research decision
+ * 3), which is why the store is in memory and dies with the run.
+ */
+export async function runCrewOnEngine(input: CrewRunInput, assignment: ResolvedAssignment, engine: Engine): Promise<CrewRunResult> {
+  const spec = {
+    model: assignment.model,
+    effort: assignment.effort,
+    assignment,
+    thread: `${CREW_THREAD_PREFIX}${input.crew.name}`,
+    tier: `crew:${input.crew.name}`,
+    maxTurns: input.crew.max_turns,
+    maxCostUsd: input.crew.budget_usd_per_run,
+  };
+  const result = await engine(crewUserPrompt(input.brief, input.task_id), spec);
+  const outcome: CrewOutcome = result.stopped === "max_budget" ? "max_budget" : result.stopped === "max_turns" ? "max_turns" : "ok";
+  return {
+    outcome,
+    session_id: result.session_id,
+    num_turns: result.turns ?? 0,
+    tokens_in: result.tokens_in,
+    tokens_out: result.tokens_out,
+    cost_usd: result.cost_usd,
+    tools_used: result.tools_used ?? {},
+    text_chars: result.text.length,
+    ...(result.notes?.length ? { errors: result.notes } : {}),
+  };
+}
+
+/** The thread a crew run's session is filed under. Never a person's thread: a crew's history is its own. */
+export const CREW_THREAD_PREFIX = "crew:";

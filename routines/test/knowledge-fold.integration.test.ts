@@ -4,19 +4,12 @@
 // second pass with nothing new stays silent. The fake-db suite proves the
 // gates and the rendering. Every fixture carries an `itest-fold` marker and is
 // removed again.
-import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
 import { COMPONENT, run as knowledgeFold } from "../knowledge-fold/run.js";
+import { loadTestEnv } from "@foldedspacelabs/metistry-core/test-env";
 
-try {
-  for (const line of readFileSync(new URL("../../.env", import.meta.url), "utf8").split("\n")) {
-    const m = /^([A-Z_]+)=(.*)$/.exec(line.trim());
-    if (m && m[1] && process.env[m[1]] === undefined) process.env[m[1]] = m[2];
-  }
-} catch {}
-
-const hasDb = !!process.env.METISTRY_DB_PASSWORD;
+const { hasDb } = loadTestEnv(new URL("../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
 const AGENT = "itest-fold-agent";
 const MARK = "itest-fold";
 const ART = "art_itest_fold";

@@ -28,7 +28,7 @@ const artId = z.string().regex(/^art_[0-9A-HJKMNP-TV-Z]{26}$/);
 const verId = z.string().regex(/^ver_[0-9A-HJKMNP-TV-Z]{26}$/);
 const cmtId = z.string().regex(/^cmt_[0-9A-HJKMNP-TV-Z]{26}$/);
 const TEXT_KINDS = new Set(["markdown", "text", "json", "csv", "html"]);
-const MAX_TEXT = 200_000;
+const MAX_TEXT = 200_000;  // limit: fixed — part of the tool's input schema, which is its contract with the model
 
 const NOT_AVAILABLE = "artifacts are not configured in this deployment (the console needs a vault bridge — docs/ops/reconciler.md)";
 

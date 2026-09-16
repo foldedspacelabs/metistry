@@ -35,7 +35,7 @@ import { createHash } from "node:crypto";
 /** Tool inputs whose paths are worth recording, and the key each keeps them under. */
 const PATH_KEYS = ["file_path", "notebook_path", "path"] as const;
 
-export const MAX_FILES = 40;
+export const MAX_FILES = 40;  // limit: fixed — the summary's shape — a longer list stops being a summary
 export const FIRST_PROMPT_CHARS = 300;
 export const LAST_MESSAGE_CHARS = 500;
 

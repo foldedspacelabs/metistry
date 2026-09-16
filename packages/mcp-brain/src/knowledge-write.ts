@@ -235,7 +235,7 @@ export type KnowledgeWriteOutcome =
   | { ok: true; result: { path: string; sha256: string; bytes: number; created: boolean; queued: true; provenance: { source: string; updated: string } | null }; meta: Record<string, unknown> }
   | { ok: false; code: ErrorCode; message?: string | undefined; meta: Record<string, unknown> };
 
-export const MAX_WRITE_BYTES = 2 * 1024 * 1024; // the bridge's default cap; it enforces its own
+export const MAX_WRITE_BYTES = 2 * 1024 * 1024; // limit: fixed — mirrors the bridge's own default cap, which enforces it; ours cannot be larger
 
 /** Hex sha256 of UTF-8 text — the same hash the bridge reports for the bytes it stores. */
 export function sha256Text(text: string): string {

@@ -1,0 +1,58 @@
+# Seeded default (D4 overlay: an instance file of the same name wins).
+#
+# The cross-project board: one row per project × column. This is the view
+# Hermes structurally cannot produce — its boards are the isolation unit and
+# "linking tasks across boards is not allowed" — and for us it is a GROUP BY
+# on a column `work` already carries
+# (docs/research/2026-09-12-hermes-agent-review.md §2, §6a).
+#
+# Same scope and same CASE as `board`, deliberately: if the two ever disagree
+# the counts stop matching the cards, so the predicate is copied verbatim
+# rather than approximated. Kept as two queries (not one with a GROUP BY
+# param) because the driver binds values, never SQL.
+name: board_projects
+description: Cross-project board counts — one row per project and board column with the number of cards, how many want a human, the oldest card's age in hours, and the last time anything in that cell moved. Feeds the board panel's project filter and the Mac sidebar. A project of NULL is the user's default project.
+params:
+  limit: { type: int, default: 200 }
+sql: |
+  WITH scoped AS (
+    SELECT w.* FROM work w WHERE w.kind = ANY('{task,review}'::text[])
+  ),
+  reported AS (
+    SELECT r.meta->>'work_id' AS work_id, max(coalesce(r.finished_at, r.ts)) AS last_report_at
+    FROM runs r
+    WHERE r.meta ? 'work_id'
+      AND jsonb_typeof(r.meta->'reports') = 'number'
+      AND (r.meta->>'reports')::numeric > 0
+    GROUP BY 1
+  ),
+  carded AS (
+    SELECT
+      s.project, s.created_at, s.updated_at,
+      CASE
+        WHEN s.status = 'closed' AND rp.last_report_at IS NOT NULL THEN 'reported'
+        WHEN s.status = 'closed'                                   THEN 'done'
+        WHEN s.status = 'blocked'                                  THEN 'needs_you'
+        WHEN s.status = 'in_progress'                              THEN 'in_progress'
+        WHEN s.owner IS NOT NULL                                   THEN 'assigned'
+        ELSE 'backlog'
+      END AS "column",
+      (s.status <> 'closed' AND (
+         (s.status = 'in_progress' AND s.lease_expires_at IS NOT NULL AND s.lease_expires_at <= now())
+         OR (s.status = 'blocked' AND s.meta->'bundle'->>'queued' IS NULL)
+         OR (s.due IS NOT NULL AND s.due < current_date)
+      )) AS escalated
+    FROM scoped s
+    LEFT JOIN reported rp ON rp.work_id = s.id::text
+  )
+  SELECT project, "column",
+         count(*)                                                                    AS cards,
+         count(*) FILTER (WHERE escalated)                                           AS escalations,
+         round(extract(epoch FROM (now() - min(created_at))) / 3600.0, 1)::float8     AS oldest_age_hours,
+         max(updated_at)                                                             AS last_activity
+  FROM carded
+  GROUP BY project, "column"
+  ORDER BY project ASC NULLS FIRST,
+           array_position(ARRAY['backlog','assigned','in_progress','needs_you','done','reported']::text[], "column")
+  LIMIT :limit
+cache_ttl: 0 # same reason as `board` — these counts are the filter's labels

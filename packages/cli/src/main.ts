@@ -356,7 +356,9 @@ const USAGE = `metistry — Metistry command line
       and any configured bridge as its children (docs/ops/deployment-shapes.md);
       the TCC helpers keep an agent each. --register-via app leaves that one
       agent to the Mac app, which registers its bundled copy through
-      SMAppService so Login Items shows one item nested under the app.
+      SMAppService so Login Items shows one item nested under the app; without
+      the flag, up asks launchd who already registered it and leaves an
+      app-registered agent alone, saying so in one line.
       --namespace allocates this instance its own launchd label suffix (from
       instance_id) and an 8-port block, recorded ONCE in <instance>/state/ports.yaml,
       so a second instance can run beside the first. Every later up/doctor/

@@ -1,6 +1,20 @@
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
-import { EMBED_DEFAULT_DIM, EMBED_DEFAULT_MODEL, EMBED_DEFAULT_URL, EmbedClient, computeTiers, intEnv, optionalEnv, requireEnv } from "@foldedspacelabs/metistry-core";
+import {
+  EMBED_DEFAULT_DIM,
+  EMBED_DEFAULT_MODEL,
+  EMBED_DEFAULT_URL,
+  EmbedClient,
+  ROUTINE_TIER,
+  SPEND_QUERY,
+  budgetMiss,
+  computeTiers,
+  intEnv,
+  optionalEnv,
+  requireEnv,
+  type PreflightMiss,
+  type SpendRow,
+} from "@foldedspacelabs/metistry-core";
 import { QueryStore } from "@foldedspacelabs/metistry-queries";
 import { makePool } from "./db.js";
 import { makeServer } from "./server.js";
@@ -63,10 +77,11 @@ for (const p of optionalEnv("METISTRY_RULES_FILES", "seed/rules.yaml:rules.yaml"
 if (!rules) throw new Error("no rules.yaml found (METISTRY_RULES_FILES)");
 
 // compute.yaml (C1): providers, assignments and budgets, hot-reloaded.
-// The ONE thing it changes about routing in this PR: when the file carries
-// `assignments:`, they are the (model, effort) map `resolveTier` reads, and
-// `rules.yaml`'s `tiers:` is the fallback when it does not. Nothing else
-// about how a turn runs moves until the engine lands (docs/ops/compute.md).
+// Here it does two things: when the file carries `assignments:`, they are the
+// (model, effort) map the ROUTER records against (the assistant re-resolves
+// the same names to a provider at the point of the call), and the file in
+// force is what the collaboration rule and the routine budget pause read
+// (docs/ops/compute.md).
 const rulesTiers = rules.tiers;
 const applyAssignments = (): void => {
   const assigned = computeTiers(compute.store.current);
@@ -187,6 +202,7 @@ const server = makeServer(pool, queries, {
   ...(searchVaultKeyword ? { searchVaultKeyword } : {}),
   ...(vault ? { vault } : {}),
   crews,
+  compute: () => compute.store.current,
 });
 if (push) startNotifier(pool, push);
 
@@ -195,6 +211,17 @@ const scheduled = [
   ...(await loadSchedules(collectors, optionalEnv("METISTRY_COLLECTORS_DIR", "collectors"))),
   ...(await loadSchedules(routines, optionalEnv("METISTRY_ROUTINES_DIR", "routines"))),
 ];
+// The routine pause (C5): a routine that declares `requires.engine` is not
+// started at all when the tier its turn would run on is over a `stop` budget
+// — the same verdict the engine's guard reaches, from the same `spend` query
+// (invariant 3), so the scheduler and the engine can never disagree.
+const routineBudget = async (): Promise<PreflightMiss | null> => {
+  const cfg = compute.store.current;
+  if (!cfg.budgets || !queries.names().includes(SPEND_QUERY)) return null;
+  const { rows } = await queries.run(SPEND_QUERY);
+  return budgetMiss(cfg, rows as SpendRow[], ROUTINE_TIER);
+};
+
 startRunner(pool, scheduled, {
   ...(process.env.METISTRY_AFM_URL ? { afmUrl: process.env.METISTRY_AFM_URL } : {}),
   ...(process.env.METISTRY_BRIDGE_TOKEN_APPLE_FM ? { afmToken: process.env.METISTRY_BRIDGE_TOKEN_APPLE_FM } : {}),
@@ -218,7 +245,7 @@ startRunner(pool, scheduled, {
   ...(process.env.METISTRY_DEVIN_API_URL ? { devinApiUrl: process.env.METISTRY_DEVIN_API_URL } : {}),
   ...(process.env.METISTRY_DEVIN_SESSION_TIMEOUT_HOURS ? { devinSessionTimeoutHours: intEnv("METISTRY_DEVIN_SESSION_TIMEOUT_HOURS", 24) } : {}),
   inboxDir: optionalEnv("METISTRY_INBOX_DIR", "./inbox"),
-});
+}, intEnv("METISTRY_RUNNER_TICK_MS", 60_000), { budget: routineBudget });
 console.log(`runner: ${scheduled.map((c) => `${c.name}/${c.intervalSec}s`).join(", ")}`);
 
 const host = optionalEnv("METISTRY_CONSOLE_HOST", "127.0.0.1"); // loopback default (invariant 8)

@@ -19,7 +19,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { runCheck, startRun, finishRun, errorEnvelope, rollSession, statusFor, type CheckResult } from "@foldedspacelabs/metistry-core";
+import { runCheck, startRun, finishRun, errorEnvelope, rollSession, statusFor, type CheckResult, type Compute } from "@foldedspacelabs/metistry-core";
 import { QueryError, QueryStore } from "@foldedspacelabs/metistry-queries";
 import { captureToInbox, createBrainServer, type KnowledgeLister, type KnowledgeReader, type KnowledgeVaultSearcher, type KnowledgeWriter, type QueryEmbedder } from "@foldedspacelabs/metistry-mcp-brain";
 import { TasksService } from "@foldedspacelabs/metistry-tasks";
@@ -58,6 +58,8 @@ export interface ConsoleConfig {
   push?: PushConfig; // absent = push degrades absent
   rules?: Rules; // router rules; absent = everything routes to the model
   targets?: TargetRegistry; // compute targets (§4.18); absent = no dispatch surface
+  /** `compute.yaml` in force (hot-reloaded). Absent = nothing assigned, so every agent is the same engine kind and rule 4 refuses nothing. */
+  compute?: () => Compute;
   /** Note-content reader for mcp-brain's knowledge_read (the reconciler's vault bridge, D5); absent = not_available, exactly as before. */
   readKnowledge?: KnowledgeReader;
   /** Query embedder for mcp-brain's knowledge_search mode=semantic|hybrid (Phase 6); absent = every mode serves keyword. */
@@ -155,7 +157,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     searchVaultKeyword: cfg.searchVaultKeyword,
     artifacts,
     // crews (Phase 5): the dispatcher reuses dispatch.ts's policy check and lands rows through the same tasks service
-    crews: cfg.crews ? crewDispatcher(db, tasks, cfg.crews, cfg.targets) : undefined,
+    crews: cfg.crews ? crewDispatcher(db, tasks, cfg.crews, cfg.targets, cfg.compute) : undefined,
     // queries_list/queries_run: the SAME QueryStore the dashboard reads through (invariant 3, one read path)
     queries,
   });

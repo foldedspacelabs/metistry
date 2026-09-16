@@ -90,8 +90,8 @@ export class AgentError extends Error {
 // and normalized to VAULT_ROOT_AREA).
 const AREA_RE = /^Knowledge(\/[A-Z][A-Za-z0-9 _.'-]*)+$/;
 const BARE_VAULT_RE = /^Knowledge\/?$/;
-const MAX_AREAS = 64;
-const MAX_AREA_LEN = 200;
+const MAX_AREAS = 64;  // limit: fixed — a grant list this long is a mistake, not a configuration
+const MAX_AREA_LEN = 200;  // limit: fixed — AREA_RE's shape bounds it; a longer string is not a vault path
 
 export interface GrantsOptions {
   /** The row's kind. `internal` admits the bare vault (`Knowledge/`); anything else (the default) refuses it. */
@@ -134,7 +134,7 @@ export function validateProjects(input: unknown): string[] {
   return out;
 }
 
-const MAX_BUNDLE_CAP = 1000;
+const MAX_BUNDLE_CAP = 1000;  // limit: fixed — the ceiling on what an autonomy payload may ask for — the API contract, not a knob
 
 /** Validate + normalize an autonomy payload. Unknown keys are refused (a typo must not silently mean "no narrowing"). */
 export function validateAutonomy(input: unknown): Autonomy {

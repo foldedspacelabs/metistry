@@ -4,21 +4,14 @@
 // after), recorded as a crew_run row on the crew's id, and closed; a second
 // run gets a different token; failures retry with a backoff then park as
 // blocked; a budget stop parks at once. Skipped without a db.
-import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
 import { mintToken, tokenHash } from "@foldedspacelabs/metistry-core";
 import { briefThreadBlock, claimCrewRow, drainCrewOne, issueRunToken } from "../src/crew-drain.js";
 import { buildCrewOptions, type CrewRunInput, type CrewRunResult, type CrewSnapshot } from "../src/crew.js";
+import { loadTestEnv } from "@foldedspacelabs/metistry-core/test-env";
 
-try {
-  for (const line of readFileSync(new URL("../../../.env", import.meta.url), "utf8").split("\n")) {
-    const m = /^([A-Z_]+)=(.*)$/.exec(line.trim());
-    if (m && m[1] && process.env[m[1]] === undefined) process.env[m[1]] = m[2];
-  }
-} catch {}
-
-const hasDb = !!process.env.METISTRY_DB_PASSWORD;
+const { hasDb } = loadTestEnv(new URL("../../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
 const suffix = mintToken(4).toLowerCase().replaceAll(/[^a-z0-9]/g, "").slice(0, 6) || "x";
 const crewId = `itest-runner-${suffix}`;
 

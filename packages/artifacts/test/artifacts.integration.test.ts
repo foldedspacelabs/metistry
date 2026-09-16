@@ -4,20 +4,13 @@
 // conflict, idempotent retry, the autonomy boundary demoting to a
 // proposal, the ping-pong cap, addressed inference, and agent scoping.
 // Skipped without a db. Scratch db: ops/scripts/test-db.sh.
-import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
 import { TasksService } from "@foldedspacelabs/metistry-tasks";
 import { ArtifactsService, memoryVault, staticDirectory, type MemoryVault, type Principal, type Thread } from "../src/index.js";
+import { loadTestEnv } from "@foldedspacelabs/metistry-core/test-env";
 
-try {
-  for (const line of readFileSync(new URL("../../../.env", import.meta.url), "utf8").split("\n")) {
-    const m = /^([A-Z_]+)=(.*)$/.exec(line.trim());
-    if (m && m[1] && process.env[m[1]] === undefined) process.env[m[1]] = m[2];
-  }
-} catch {}
-
-const hasDb = !!process.env.METISTRY_DB_PASSWORD;
+const { hasDb } = loadTestEnv(new URL("../../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
 const P = "itest-art"; // project scope keeps this suite's rows apart
 const P2 = "itest-art-other";
 const P3 = "itest-art-caps"; // the §4.21 controls get their own project so the counts are exact

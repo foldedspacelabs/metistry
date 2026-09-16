@@ -119,8 +119,29 @@ today runs the launchd shape (`docs/ops/deployment-shapes.md`).
 
 A **tier** is a model *and* an effort level, chosen together — a stronger
 model at low effort is often cheaper than a weaker one working hard
-(`docs/research/2026-09-cost-optimization.md`, decision 2). Tiers live in
-`rules.yaml`, so an instance overlay (D4) moves them:
+(`docs/research/2026-09-cost-optimization.md`, decision 2).
+
+> **`compute.yaml` is where tiers live now** (`docs/ops/compute.md`). An
+> `assignments:` block names a PINNED `<provider>/<model-id>` per tier and
+> per crew — which says *where* the turn runs as well as *what* runs it, and
+> therefore which engine answers. `rules.yaml`'s `tiers:` below is the
+> fallback: it is still the live map on every install that has not written
+> an `assignments:` block, and those turns run on the Claude Agent SDK.
+> Precedence, in one function (`resolveTurn`): `compute.yaml` assignments →
+> a crew manifest's own pair → `rules.yaml`. An unknown name lands on
+> `assignments.default` (or `rules.yaml`'s `default`) at every level.
+
+```yaml
+# compute.yaml — where a tier says which provider serves it
+assignments:
+  default: { model: openrouter/anthropic/claude-sonnet-5, effort: medium }
+  tiers:
+    routine: { model: lmstudio/google/gemma-3n-e4b, effort: low }
+  crews:
+    researcher: { model: lmstudio/google/gemma-3n-e4b }
+```
+
+Tiers in `rules.yaml`, the fallback, and an instance overlay (D4) moves them:
 
 ```yaml
 tiers:
@@ -146,16 +167,20 @@ file wins), so there is one definition and one place a name becomes a pair
 | a routine | `meta.tier` on the `inbound_messages` row. The evening fold writes `routine` |
 
 **Effort changes only at turn boundaries — by construction, not by
-instruction.** One SDK query per turn, its options built once from that turn's
-tier and never mutated mid-stream (`buildQueryOptions`). Two consecutive turns
+instruction.** One request per turn, its options built once from that turn's
+tier and never mutated mid-stream (`buildQueryOptions` on the SDK path; the
+in-house loop builds the body once per call from the same resolved
+assignment). Two consecutive turns
 on one session at one tier produce byte-identical options, which is the point:
 changing model, effort, tools or system prompt mid-session invalidates the
 cached prompt prefix, and a break costs up to 50x the cache-read price per
 token. There is a test for exactly that (`apps/assistant/test/brain.test.ts`).
 
 Startup log: `tiers from seed/rules.yaml: fast=haiku/low default=haiku/medium
-deep=opus/high routine=haiku/low`. No rules file at all → one tier, the
-`METISTRY_MODEL_DEFAULT` model at medium, and a warning.
+deep=opus/high routine=haiku/low`, then either `compute.yaml assignments:
+default=… routine=…` or `compute.yaml assigns nothing — rules.yaml's tiers:
+is the live map and turns run on the Agent SDK`. No rules file at all → one
+tier, the `METISTRY_MODEL_DEFAULT` model at medium, and a warning.
 
 ## Session rolls: fresh context at task boundaries
 

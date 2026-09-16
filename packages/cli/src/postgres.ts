@@ -99,7 +99,7 @@ export function pgSocketDir(root: string): string {
   return join(root, "state", "run");
 }
 
-export const SOCKET_PATH_LIMIT = 103;
+export const SOCKET_PATH_LIMIT = 103;  // limit: fixed — sockaddr_un.sun_path on macOS; the kernel's number, not ours
 
 export function socketPathTooLong(socketDir: string, port: number): boolean {
   return join(socketDir, `.s.PGSQL.${port}`).length > SOCKET_PATH_LIMIT;

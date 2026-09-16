@@ -389,6 +389,12 @@ GGUF download's byte counts and Ollama's pull lines arrive on stdout as they
 happen and are shown verbatim, rather than a progress bar claiming a percentage
 nobody reported.
 
+Belt-and-braces, as of the CLI's `--json` purity fix (`docs/ops/cli.md`):
+`parseTrailing` no longer has anything trailing to skip past — under
+`--json` the CLI itself now keeps every prose line (including the install
+progress above) off stdout and puts it on stderr instead — but the parser
+is left as it is, a second line of defense rather than a removed one.
+
 **Exit codes are not the whole answer.** `providers test` and `models install`
 exit 1 when the thing they tested or installed did not work, having printed a
 perfectly good `{"ok": false, …}`. The pane reads `ok` from the JSON when the

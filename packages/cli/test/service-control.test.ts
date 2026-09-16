@@ -168,14 +168,16 @@ describe("metistry restart|stop|start", () => {
 });
 
 describe("metistry restart|stop|start via main()", () => {
-  it("--json prints [{service, action, ok, detail}, …] and nothing else", async () => {
+  it("--json prints [{service, action, ok, detail}, …] and nothing else — the plan's progress line goes to stderr rather than vanishing", async () => {
     const P = await checkout();
     const exec = fakeExec();
     const lines: string[] = [];
-    const code = await main(["restart", "watchdog", "--json", "--product-dir", P], { platform: "darwin", uid: 501, home: "/h", out: (l) => lines.push(l), err: () => {}, exec });
+    const errs: string[] = [];
+    const code = await main(["restart", "watchdog", "--json", "--product-dir", P], { platform: "darwin", uid: 501, home: "/h", out: (l) => lines.push(l), err: (l) => errs.push(l), exec });
     expect(code).toBe(0);
     expect(lines).toHaveLength(1);
     expect(JSON.parse(lines[0]!)).toEqual([{ service: "watchdog", action: "restart", ok: true, detail: `launchctl kickstart -k gui/501/${WATCHDOG}` }]);
+    expect(errs.join("\n")).toContain(`launchctl kickstart -k gui/501/${WATCHDOG}`);
   });
 
   it("a failing service exits 1 even though other services succeeded", async () => {

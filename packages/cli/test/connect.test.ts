@@ -533,4 +533,26 @@ describe("metistry connect (argv)", () => {
     expect(usage).toContain('{tier: "none", areas: []}');
     expect(usage).toContain("--rotate");
   });
+
+  it("--list --json: exactly one JSON document on stdout (connect.ts hands main() no progress channel to leak)", async () => {
+    const { home, instanceDir } = await scratch();
+    // a permissive Keychain: this test is about the stdout/stderr split, not
+    // about which account the owner token is filed under (console-client.test.ts covers that)
+    const permissiveKeychain: Exec = async (cmd, args) =>
+      cmd === "security" && args[0] === "find-generic-password" ? { code: 0, stdout: `${OWNER}\n`, stderr: "" } : { code: 1, stdout: "", stderr: "unexpected" };
+    const c = fakeConsole();
+    const out: string[] = [];
+    const err: string[] = [];
+    const code = await main(["connect", "--list", "--json", "--instance", instanceDir], {
+      out: (s) => out.push(s),
+      err: (s) => err.push(s),
+      platform: "darwin",
+      home,
+      exec: permissiveKeychain,
+      fetchFn: c.fetchFn,
+    });
+    expect(code).toBe(0);
+    expect(out).toHaveLength(1);
+    expect(JSON.parse(out[0]!).console_url).toBe("http://127.0.0.1:8080");
+  });
 });

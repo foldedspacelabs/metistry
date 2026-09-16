@@ -342,6 +342,7 @@ describe("instance-scoped secrets", () => {
       platform: "darwin",
     });
     expect(code).toBe(0);
+    expect(out).toHaveLength(1); // --json purity: nothing but the one document reaches stdout
     const printed = out.join("\n");
     const rows = JSON.parse(printed) as unknown[];
     expect(rows).toEqual(await listSecrets({ envFile: file, exec: kc.exec, out: () => {}, platform: "darwin", env: {} }));

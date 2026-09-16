@@ -219,6 +219,23 @@ public final class FirstRunModel {
     /// `AppModel`'s business, not a step's.
     public var onRuntimeInstalled: () -> Void = {}
 
+    /// Called after step 5's `up --register-via app` succeeds — the point at
+    /// which `<instance>/state/supervisor.json` and the launcher's
+    /// `supervisor.env` both exist and the bundled agent has something to
+    /// point at. `AppModel` turns it into `backgroundAgent.set(true)`; the step
+    /// does not call `SMAppService` itself, the same way it does not relocate
+    /// itself.
+    public var onSupervisorInstalled: () -> Void = {}
+
+    /// Whether THIS build carries a background agent to register
+    /// (background-agent.swift). It decides one flag on step 5's command line:
+    /// with it, `up` installs every agent EXCEPT the supervisor's and the app
+    /// registers its bundled copy through `SMAppService.agent(plistName:)`, so
+    /// Login Items shows one item nested under the app. Without it — a raw
+    /// `swift build`, or a platform with no `SMAppService` — `up` does exactly
+    /// what the terminal path has always done.
+    public var registersSupervisorAgent: Bool = false
+
     // Inputs the steps need. Empty by default: nothing is guessed on the
     // user's behalf, least of all where their vault goes.
     public var instanceDirectory: URL?
@@ -375,16 +392,21 @@ public final class FirstRunModel {
             if let dir = instanceDirectory { verb += ["--instance", dir.path] }
             return verb
         case .services:
-            // Plain launchd for now. SMAppService (macOS 13+) is the sanctioned
-            // way an app installs its own launchd agents — the user approves
-            // once in System Settings and there is no plist to edit — and it is
-            // the recorded follow-up (docs/product/desktop-app-plan.md, step 5).
-            // `metistry up` writing ~/Library/LaunchAgents by hand is what the
-            // terminal path does today, so the app does the same and no second
-            // implementation appears. `--instance` says which instance's
+            // `metistry up` does the whole job either way — this app installs
+            // nothing itself and never will. `--instance` says which instance's
             // environment, state and Postgres data directory to bring up.
+            //
+            // `--register-via app` changes exactly one thing: `up` leaves the
+            // supervisor's agent uninstalled, because the app registers the
+            // copy sealed in its own bundle through
+            // `SMAppService.agent(plistName:)` — which is what makes System
+            // Settings › General › Login Items show ONE item, "Metistry", with
+            // the agent nested under the app rather than listed beside it. A
+            // build with no bundled agent omits the flag and gets the terminal
+            // path, unchanged (docs/ops/mac-app.md).
             var verb = ["up"]
             if let dir = instanceDirectory { verb += ["--instance", dir.path] }
+            if registersSupervisorAgent { verb += ["--register-via", "app"] }
             return verb
         }
     }
@@ -423,6 +445,11 @@ public final class FirstRunModel {
             // The writable copy exists now, so the app should be using it rather
             // than the read-only seed it just copied.
             if result.ok, step == .runtime { onRuntimeInstalled() }
+            // `up --register-via app` left the supervisor's agent to us, and
+            // has now written the two files it reads. Register it — otherwise
+            // the install has no background item at all and the step would have
+            // "succeeded" into nothing running.
+            if result.ok, step == .services, registersSupervisorAgent { onSupervisorInstalled() }
         } catch {
             output[step.rawValue] = sink.drain()
             states[step.rawValue] = .failed(error.localizedDescription)

@@ -24,6 +24,7 @@ import { captureToInbox, createBrainServer, dirSink, type CaptureSink, type Know
 import { TasksService } from "@foldedspacelabs/metistry-tasks";
 import { ArtifactsService, VaultError, type VaultClient } from "@foldedspacelabs/metistry-artifacts";
 import { artifactRoutes, isArtifactRoute } from "./artifacts-routes.js";
+import { isTaskOpRoute, taskRoutes } from "./task-routes.js";
 import type { Db } from "./auth-store.js";
 import * as store from "./auth-store.js";
 import * as agents from "./agents.js";
@@ -598,6 +599,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         PROJECT_ROUTE.test(key) ||
         key === "GET /api/runs/export" ||
         key === "GET /api/instances" ||
+        isTaskOpRoute(key) ||
         isArtifactRoute(url.pathname)
       ) {
         return sendError(res, "forbidden");
@@ -670,6 +672,11 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         throw err;
       }
     }
+
+    // ----- the board's drags (docs/ops/board.md; owner session only) -----
+    // A thin adapter over TasksService and nothing else: every refusal comes
+    // out of a WHERE clause in packages/tasks, never from a rule written here.
+    if (isTaskOpRoute(key)) return taskRoutes(req, res, key, tasks, audit);
 
     // ----- artifacts + review dispatch (§4.21; owner session only) -----
     if (isArtifactRoute(url.pathname)) return artifactRoutes(req, res, url, artifacts);

@@ -9,6 +9,7 @@ import { run as githubState } from "./github-state/run.js";
 import { run as awsCosts } from "./aws-costs/run.js";
 import { run as claudeUsage } from "./claude-usage/run.js";
 import { run as devinKnowledge } from "./devin-knowledge/run.js";
+import { run as devinSessions } from "./devin-sessions/run.js";
 
 export interface RegisteredCollector {
   name: string;
@@ -22,5 +23,18 @@ export const collectors: RegisteredCollector[] = [
   { name: "aws-costs", run: awsCosts },
   { name: "claude-usage", run: claudeUsage },
   { name: "devin-knowledge", run: devinKnowledge },
+  { name: "devin-sessions", run: devinSessions },
 ];
 export type { Db, CollectorCtx };
+
+// The Devin conventions the console's dispatcher shares with these
+// collectors — ONE base URL and ONE `external_ref` format in the repo, not a
+// copy on each side of the round trip (targets/devin-sessions).
+export { DEVIN_API } from "./devin-knowledge/run.js";
+export {
+  REF_PREFIX as DEVIN_REF_PREFIX,
+  devinRef,
+  parseDevinRef,
+  SOURCE_AGENT as DEVIN_SOURCE_AGENT,
+  type DevinWorkMeta,
+} from "./devin-sessions/run.js";

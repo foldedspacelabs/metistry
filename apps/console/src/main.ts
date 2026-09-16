@@ -212,6 +212,11 @@ startRunner(pool, scheduled, {
   ...(process.env.METISTRY_DEVIN_ORG_ID ? { devinOrgId: process.env.METISTRY_DEVIN_ORG_ID } : {}),
   ...(process.env.METISTRY_DEVIN_REPOS ? { devinRepos: process.env.METISTRY_DEVIN_REPOS.split(",").map((s) => s.trim()).filter(Boolean) } : {}),
   ...(process.env.METISTRY_DEVIN_MAX_ITEMS ? { devinMaxItems: intEnv("METISTRY_DEVIN_MAX_ITEMS", 200) } : {}),
+  // devin-sessions collector: the return path of targets/devin-sessions. It
+  // reads the organization off each work row's meta, so only the key is
+  // needed here; the base URL is shared with devin-knowledge.
+  ...(process.env.METISTRY_DEVIN_API_URL ? { devinApiUrl: process.env.METISTRY_DEVIN_API_URL } : {}),
+  ...(process.env.METISTRY_DEVIN_SESSION_TIMEOUT_HOURS ? { devinSessionTimeoutHours: intEnv("METISTRY_DEVIN_SESSION_TIMEOUT_HOURS", 24) } : {}),
   inboxDir: optionalEnv("METISTRY_INBOX_DIR", "./inbox"),
 });
 console.log(`runner: ${scheduled.map((c) => `${c.name}/${c.intervalSec}s`).join(", ")}`);

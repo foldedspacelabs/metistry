@@ -39,12 +39,29 @@ import {
 } from "@foldedspacelabs/metistry-core";
 import { readStdin } from "./connect-repo.js";
 import { realExec, type Exec } from "./exec.js";
+import {
+  LOCAL_SERVERS,
+  apiRoot,
+  downloadGguf,
+  fetchModels,
+  lmsGet,
+  lmsLoad,
+  modelsDir,
+  ollamaPull,
+  parseGgufRef,
+  probeLocalServers,
+  relativeModelPath,
+  serverOf,
+  serverOrigin,
+  type LocalServerName,
+  type LocalServerRow,
+} from "./local-models.js";
 import { Keychain, keychainAccount, serviceFor } from "./keychain.js";
 import { writeProtected, type ProtectedWrite } from "./protected-write.js";
 import { StepFailed, StepRunner } from "./steps.js";
 
 /** The provider blocks `seed/compute-templates/` ships. A name that is not one of these is a typo, never a guess. */
-export const COMPUTE_TEMPLATES = ["openrouter", "zen", "lmstudio", "ollama"] as const;
+export const COMPUTE_TEMPLATES = ["openrouter", "zen", "lmstudio", "ollama", "llamaserver"] as const;
 export type ComputeTemplate = (typeof COMPUTE_TEMPLATES)[number];
 
 export function parseTemplate(v: string | undefined): ComputeTemplate | undefined {
@@ -464,10 +481,8 @@ async function providerOf(opts: ComputeOptions, name: string): Promise<{ provide
   return { provider, compute };
 }
 
-/** The API root with no trailing slash, so `${root}/models` is right whatever the file says. */
-export function apiRoot(baseUrl: string): string {
-  return baseUrl.replace(/\/+$/, "");
-}
+/** The API root with no trailing slash, so `${root}/models` is right whatever the file says. Defined with the rest of the local-server wire in local-models.ts; re-exported because this is where every caller already imports it from. */
+export { apiRoot };
 
 /** The bearer for a provider, from the login Keychain. Returns undefined for a provider that declares no auth; throws when the item is missing, naming the variable and not its value. */
 async function bearerFor(opts: ComputeOptions, name: string, provider: Provider): Promise<string | undefined> {
@@ -483,31 +498,10 @@ async function bearerFor(opts: ComputeOptions, name: string, provider: Provider)
   return value;
 }
 
-interface ModelsResponse {
-  data?: Array<{ id?: unknown }>;
-}
-
+/** One provider's `/v1/models`, with its credential. The call itself is `fetchModels` — the one place that knows the wire — so a cloud provider, a local one and doctor all report a failure in the same words. */
 async function listModelsFrom(opts: ComputeOptions, name: string, provider: Provider): Promise<{ ok: boolean; models: string[]; detail: string }> {
-  const url = `${apiRoot(provider.base_url)}/models`;
   const bearer = await bearerFor(opts, name, provider);
-  let res: Response;
-  try {
-    res = await (opts.fetchFn ?? fetch)(url, {
-      headers: { accept: "application/json", ...(bearer ? { authorization: `Bearer ${bearer}` } : {}) },
-      signal: AbortSignal.timeout(15_000),
-    });
-  } catch (err) {
-    return { ok: false, models: [], detail: `${url} did not answer (${err instanceof Error ? err.message : String(err)})${provider.locality === "on_machine" ? " — is the local server running?" : ""}` };
-  }
-  if (!res.ok) return { ok: false, models: [], detail: `${url} → HTTP ${res.status}${res.status === 401 || res.status === 403 ? " (the credential was refused)" : ""}` };
-  let body: ModelsResponse;
-  try {
-    body = (await res.json()) as ModelsResponse;
-  } catch {
-    return { ok: false, models: [], detail: `${url} answered ${res.status} but not JSON` };
-  }
-  const models = (body.data ?? []).map((m) => String(m?.id ?? "")).filter(Boolean).sort();
-  return { ok: true, models, detail: `${url} → ${models.length} model(s)` };
+  return fetchModels({ url: provider.base_url, bearer, fetchFn: opts.fetchFn, local: provider.locality === "on_machine" });
 }
 
 export async function providerTest(opts: ComputeOptions & { name: string; complete?: boolean | undefined }): Promise<ProviderTestResult> {
@@ -553,9 +547,21 @@ export function renderProviderTest(t: ProviderTestResult): string {
 
 export interface ModelsListResult {
   providers: Array<{ name: string; ok: boolean; detail: string; models: string[] }>;
+  /**
+   * Local servers found on this Mac that NO provider in `compute.yaml`
+   * dials. Discovery is not "what did I configure" — a person who already
+   * runs LM Studio should be told so, with the one command that wires it
+   * up, rather than shown an empty list.
+   */
+  detected: LocalServerRow[];
 }
 
-/** `/v1/models`, live, for one provider or every declared one. */
+/**
+ * `/v1/models`, live, for one provider or every declared one — plus the
+ * local servers nothing is configured for (skipped when `--provider` asks
+ * about one in particular, where a Mac-wide scan would be an answer to a
+ * question nobody asked).
+ */
 export async function modelsList(opts: ComputeOptions & { provider?: string | undefined }): Promise<ModelsListResult> {
   const { compute } = await loadCompute(computeFiles(opts));
   const names = opts.provider ? [opts.provider] : Object.keys(compute.providers);
@@ -570,20 +576,177 @@ export async function modelsList(opts: ComputeOptions & { provider?: string | un
       providers.push({ name, ok: false, detail: e instanceof Error ? e.message : String(e), models: [] });
     }
   }
-  return { providers };
+  const detected = opts.provider ? [] : (await probeLocalServers({ compute, fetchFn: opts.fetchFn })).filter((r) => r.ok && r.provider === undefined);
+  return { providers, detected };
 }
 
 export function renderModelsList(r: ModelsListResult): string {
-  if (r.providers.length === 0) return "no providers declared — `metistry compute providers add --from openrouter|zen|lmstudio|ollama`";
   const lines: string[] = [];
+  if (r.providers.length === 0) {
+    lines.push(`no providers declared — \`metistry compute providers add --from ${COMPUTE_TEMPLATES.join("|")}\``);
+  }
   for (const p of r.providers) {
     lines.push(`${p.name}: ${p.detail}`);
     for (const m of p.models) lines.push(`  ${p.name}/${m}`);
     if (p.models.length === 0 && p.ok) lines.push("  (none loaded)");
   }
+  for (const d of r.detected) {
+    lines.push("");
+    lines.push(`${d.label} on ${d.url}: not configured — \`metistry compute providers add --from ${LOCAL_SERVERS[d.server].template}\``);
+    for (const m of d.models.slice(0, 12)) lines.push(`  (${LOCAL_SERVERS[d.server].template})/${m}`);
+    if (d.models.length > 12) lines.push(`  … ${d.models.length} models in total`);
+    if (d.models.length === 0) lines.push("  (none loaded)");
+  }
   lines.push("");
   lines.push("Assign one with: metistry compute assign <default|tier|crew:name> <provider/model> [--effort low|medium|high]");
   return lines.join("\n");
+}
+
+// ---- models install / load / unload ----------------------------------------------
+
+export interface ModelsInstallResult {
+  provider: string;
+  server: LocalServerName;
+  model: string;
+  ok: boolean;
+  detail: string;
+  /** llamaserver only: where the GGUF landed, and the `model_path` written into compute.yaml */
+  path?: string;
+  model_path?: string;
+  bytes?: number;
+  sha256?: string;
+  /** llamaserver only: absent when nothing had to be written (the path was already right) */
+  delivery?: ProtectedWrite;
+}
+
+/**
+ * Which of the three servers a provider IS, or a refusal that says why
+ * Metistry cannot install into it. A cloud provider has a catalogue, not an
+ * install; a local server on a port nobody recognises is one Metistry can
+ * talk to but has no mechanism for.
+ */
+function installServerFor(name: string, provider: Provider): LocalServerName {
+  if (provider.locality !== "on_machine") {
+    throw new StepFailed(`${name} is ${provider.locality}: its models are a catalogue, not an install. \`metistry compute models list --provider ${name}\` shows what it serves.`);
+  }
+  const server = serverOf(name, provider);
+  if (!server) {
+    throw new StepFailed(
+      `Metistry does not know how to install a model into ${name} (${provider.base_url}) — it recognises LM Studio (:1234), Ollama (:11434) and the bundled llama-server (a \`serve:\` block). Install the model with that server's own tools; \`metistry compute models list\` will see it either way.`,
+    );
+  }
+  return server;
+}
+
+/**
+ * `metistry compute models install <provider>/<model>` — each server's own
+ * mechanism, spoken directly:
+ *
+ *   * **LM Studio** — `lms get <id>`, its CLI, which owns its model directory.
+ *   * **Ollama** — `POST /api/pull`, streamed, progress as it arrives.
+ *   * **llama-server** — one HTTPS GET of a Hugging Face GGUF into
+ *     `<instance>/state/models/`, then `serve.model_path` written into
+ *     `compute.yaml` as the `user`. The download is checked against the
+ *     digest Hugging Face publishes before anything is written.
+ */
+export async function modelsInstall(opts: ComputeOptions & { ref: string }): Promise<ModelsInstallResult> {
+  const why = modelRefIssue(opts.ref);
+  if (why) throw new StepFailed(`${why} — \`metistry compute models install <provider>/<model>\``);
+  const ref = parseModelRef(opts.ref);
+  const { provider } = await providerOf(opts, ref.provider);
+  const server = installServerFor(ref.provider, provider);
+  const out = opts.out;
+
+  if (server === "lmstudio") {
+    if (opts.dryRun === true) {
+      out(`[dry-run] would run: lms get ${ref.model}`);
+      return { provider: ref.provider, server, model: ref.model, ok: true, detail: `[dry-run] lms get ${ref.model}` };
+    }
+    const r = await lmsGet({ exec: opts.exec ?? realExec, model: ref.model });
+    out(r.detail);
+    return { provider: ref.provider, server, model: ref.model, ok: r.ok, detail: r.detail };
+  }
+
+  if (server === "ollama") {
+    const origin = serverOrigin(provider.base_url);
+    if (opts.dryRun === true) {
+      out(`[dry-run] would POST ${origin}/api/pull { model: ${ref.model} }`);
+      return { provider: ref.provider, server, model: ref.model, ok: true, detail: `[dry-run] ${origin}/api/pull ${ref.model}` };
+    }
+    const r = await ollamaPull({ origin, model: ref.model, fetchFn: opts.fetchFn, onProgress: (line) => out(`  ${line}`) });
+    out(r.detail);
+    return { provider: ref.provider, server, model: ref.model, ok: r.ok, detail: r.detail };
+  }
+
+  // llamaserver: a GGUF, by URL, into this instance's state — then the path
+  // into compute.yaml, so `metistry up` has something to serve.
+  const gguf = parseGgufRef(ref.model);
+  const dir = join(modelsDir(opts.instanceDir), gguf.repo);
+  const modelPath = relativeModelPath(gguf.repo, gguf.file);
+  if (opts.dryRun === true) {
+    out(`[dry-run] would download ${gguf.url} to ${join(dir, gguf.file)} and set providers.${ref.provider}.serve.model_path = ${modelPath}`);
+    return { provider: ref.provider, server, model: ref.model, ok: true, detail: `[dry-run] ${gguf.url}`, model_path: modelPath };
+  }
+  out(`downloading ${gguf.url}`);
+  const got = await downloadGguf({ ref: gguf, dir, fetchFn: opts.fetchFn, token: opts.env.METISTRY_HF_TOKEN, onProgress: (line) => out(`  ${line}`) });
+  out(`${got.path}: ${got.detail}`);
+
+  const edit = await openInstanceFile(opts);
+  if (!edit.doc.hasIn(["providers", ref.provider])) {
+    throw new StepFailed(`${got.path} was downloaded, but ${edit.path} declares no provider ${ref.provider} to point at it — \`metistry compute providers add --from llamaserver\` (the file was NOT changed)`);
+  }
+  const already = plainAt(edit, ["providers", ref.provider, "serve"])?.model_path === modelPath;
+  if (already) {
+    return { provider: ref.provider, server, model: ref.model, ok: true, detail: got.detail, path: got.path, model_path: modelPath, bytes: got.bytes, sha256: got.sha256 };
+  }
+  edit.doc.setIn(["providers", ref.provider, "serve", "model_path"], modelPath);
+  const { delivery } = await commit(opts, edit, `metistry compute models install ${opts.ref}`);
+  out(`providers.${ref.provider}.serve.model_path = ${modelPath} — \`metistry up\` (or \`metistry restart llamaserver\`) loads it.`);
+  return { provider: ref.provider, server, model: ref.model, ok: true, detail: got.detail, path: got.path, model_path: modelPath, bytes: got.bytes, sha256: got.sha256, delivery };
+}
+
+export interface ModelsLoadResult {
+  provider: string;
+  server: LocalServerName;
+  model: string;
+  action: "load" | "unload";
+  ok: boolean;
+  /** true when this server has no addressable load and the call was a message rather than an action */
+  noop: boolean;
+  detail: string;
+}
+
+/**
+ * `load`/`unload`. LM Studio is the only one of the three with an
+ * addressable load, so it is the only one this does anything for — and the
+ * other two get a MESSAGE that says what actually governs their residency,
+ * not a silent success that implies an action nobody took.
+ */
+export async function modelsLoad(opts: ComputeOptions & { ref: string; unload?: boolean | undefined; ttlSeconds?: number | undefined }): Promise<ModelsLoadResult> {
+  const why = modelRefIssue(opts.ref);
+  if (why) throw new StepFailed(`${why} — \`metistry compute models ${opts.unload ? "unload" : "load"} <provider>/<model>\``);
+  const ref = parseModelRef(opts.ref);
+  const { provider } = await providerOf(opts, ref.provider);
+  const server = installServerFor(ref.provider, provider);
+  const action = opts.unload ? "unload" : "load";
+  const base = { provider: ref.provider, server, model: ref.model, action } as const;
+
+  if (server === "lmstudio") {
+    if (opts.dryRun === true) return { ...base, ok: true, noop: false, detail: `[dry-run] lms ${action} ${ref.model}` };
+    const r = await lmsLoad({ exec: opts.exec ?? realExec, model: ref.model, unload: opts.unload === true, ttlSeconds: opts.ttlSeconds });
+    opts.out(r.detail);
+    return { ...base, ok: r.ok, noop: false, detail: r.detail };
+  }
+  const detail =
+    server === "ollama"
+      ? `Ollama has no addressable ${action}: it loads a model on the first request and evicts it after keep_alive (default 5 minutes). Nothing to do — \`metistry compute models list --provider ${ref.provider}\` shows what it will serve.`
+      : `The bundled llama-server holds exactly the model compute.yaml names, for as long as it runs. To change it: \`metistry compute models install ${ref.provider}/<owner>/<repo>/<file>.gguf\`, then \`metistry restart llamaserver\`.`;
+  opts.out(detail);
+  return { ...base, ok: true, noop: true, detail };
+}
+
+export function renderModelsInstall(r: ModelsInstallResult): string {
+  return `${r.provider}/${r.model}: ${r.ok ? "installed" : "FAILED"} — ${r.detail}${r.model_path ? `\n  serve.model_path = ${r.model_path}` : ""}`;
 }
 
 // ---- assign ------------------------------------------------------------------

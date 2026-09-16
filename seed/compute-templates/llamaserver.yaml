@@ -1,0 +1,26 @@
+# llama-server — the one local server Metistry BRINGS. It is built from
+# pinned llama.cpp source into the bundled runtime pack, with Metal on and
+# signed like Postgres and git (docs/ops/bundled-runtime.md), so a fresh Mac
+# has a local model without being sent to install a second app.
+#
+# The `serve:` block is what makes it Metistry's to run: `metistry up`
+# renders a supervisor child for it, on loopback, on the port base_url
+# already dials. LM Studio and Ollama have no `serve:` block on purpose —
+# they are peers Metistry discovers, never processes it starts.
+#
+# The port is 7813, not llama.cpp's own 8080: 8080 is already the Metistry
+# console's. It continues the loopback block the bridges use (7810-7812).
+#
+# model_path is filled in for you by:
+#   metistry compute models install llamaserver/<owner>/<repo>/<file>.gguf
+llamaserver:
+  kind: openai-compatible
+  base_url: http://127.0.0.1:7813/v1
+  locality: on_machine
+  serve:
+    runtime: llamaserver
+    model_path: state/models/REPLACE-ME.gguf
+    port: 7813
+    # passed verbatim after the flags Metistry sets; `--ctx-size`, `--parallel`,
+    # `--embeddings` (llama-server serves /v1/embeddings only when asked)
+    extra_args: []

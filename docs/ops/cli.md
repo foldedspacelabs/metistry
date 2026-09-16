@@ -414,7 +414,7 @@ not have yet.
 exist, which model each tier and crew runs on, and what each may spend:
 
 ```sh
-metistry compute providers add --from openrouter|zen|lmstudio|ollama
+metistry compute providers add --from openrouter|zen|lmstudio|ollama|llamaserver
 metistry compute models list [--provider <name>]
 metistry compute assign default lmstudio/google/gemma-3n-e4b
 metistry compute budget instance --monthly 60 --action stop
@@ -427,6 +427,35 @@ validate is refused rather than written. `providers add` reads the API key
 from stdin into the login Keychain (user scope) and never takes it as an
 argument. Nothing dials a provider or enforces a budget yet — see
 `docs/ops/compute.md`, which is the whole story including what is missing.
+
+### Local models
+
+`models list` is live `/v1/models` against every declared provider **and** a
+scan of the three local servers Metistry knows — LM Studio (1234), Ollama
+(11434) and the bundled `llama-server` (7813). One that is answering but
+that nothing dials is reported with the command that would wire it up, and
+`metistry doctor` carries the same finding as `local:lmstudio`,
+`local:ollama` and `local:llamaserver` rows. **Absent is never a failure.**
+
+```sh
+metistry compute models install lmstudio/qwen/qwen3-coder-30b
+metistry compute models install ollama/gemma3:4b
+metistry compute models install llamaserver/unsloth/gemma-3-4b-it-GGUF/gemma-3-4b-it-Q4_K_M.gguf
+metistry compute models load|unload lmstudio/qwen/qwen3-coder-30b [--ttl 3600]
+```
+
+Each is the server's own mechanism: `lms get` for LM Studio, `POST
+/api/pull` for Ollama, and for `llama-server` one HTTPS GET of a Hugging
+Face GGUF into `<instance>/state/models/`, checked against the sha256
+Hugging Face publishes and then written into `serve.model_path`. `load` and
+`unload` act for LM Studio only — the other two have no addressable load and
+say what actually governs their residency instead of reporting a success
+nobody caused. `METISTRY_HF_TOKEN` is only needed for a gated repo.
+
+A provider with a `serve:` block is one Metistry runs itself: `metistry up`
+gives it a supervisor child called `llamaserver`, so `metistry logs
+llamaserver` and `metistry restart llamaserver` work like any other service.
+Details, and what the schema refuses, in `docs/ops/compute.md`.
 
 ## Secrets: the Keychain is the store, `.env` is generated
 

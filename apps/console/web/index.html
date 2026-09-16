@@ -42,13 +42,21 @@
     </section>
 
     <!-- feed (home): docs/product/desktop-app-plan.md "The window" — activity_feed
-         seed query, time-ordered across runs/proposals/work.history/outbound_messages.
+         seed query, time-ordered across captures/runs/proposals/work.history/
+         outbound_messages. THE TIMELINE (docs/research/2026-09-16-taskuary-review.md
+         ADOPT 1): a capture appears the instant it lands, wearing its status,
+         rather than waiting for the */5 drain to turn it into a proposal.
+         Read-only — there is no control in here that changes anything.
          Every server value is output-encoded via esc() (CRIT-7). -->
     <section id="feed" hidden>
       <form id="feed-filter">
         <select id="feed-agent"><option value="">All Agents</option></select>
         <select id="feed-project"><option value="">All Projects</option></select>
       </form>
+      <!-- the kind chips. Written by app.js from one list; the groups are the
+           `group` column activity_feed.yaml derives, so the vocabulary is the
+           query's and not a second copy of it. -->
+      <div id="feed-kinds" role="group" aria-label="Filter by kind"></div>
       <ul id="feed-list"></ul>
       <p id="feed-empty" class="muted" hidden>nothing in the last 24h</p>
     </section>
@@ -116,7 +124,17 @@
       <p id="capture-result"></p>
     </section>
 
+    <!-- Needs You. Five answers now, not three: Approve / Revise / Decline,
+         plus Later (a snooze — the row stays pending and comes back) and Skip
+         (declined, with nothing to learn from it). Multi-select applies the
+         two of them to many rows at once; `l` and `s` are the keys. -->
     <section id="triage" hidden>
+      <p id="triage-batch" hidden>
+        <span id="triage-selected" class="muted"></span>
+        <button id="triage-later" type="button">Later</button>
+        <button id="triage-skip" type="button">Skip</button>
+        <button id="triage-clear" type="button">Clear</button>
+      </p>
       <ul id="proposal-list"></ul>
       <p id="triage-empty" hidden>nothing needs you 🎉</p>
     </section>

@@ -13,6 +13,7 @@
 // every query takes it as $1 rather than calling now() so the real-db test
 // is deterministic too.
 
+import { SKIP_FEEDBACK } from "@foldedspacelabs/metistry-core";
 import type { Db, RoutineCtx } from "../morning-brief/run.js";
 
 export interface WeeklyCtx extends RoutineCtx {
@@ -105,11 +106,14 @@ async function sectionDecisions(db: Db, now: Date): Promise<string[]> {
     `• ${total} decided: ${made.map((r: any) => `${num(r.n)} ${DECISION_LABEL[r.decision] ?? r.decision}`).join(", ") || "none by you"}${expired ? `; ${num(expired.n)} auto-expired (still searchable)` : ""}`,
   ];
   const reasons = await db.query(
+    // `skipped` is the marker the `skip` verb writes (docs/ops/reply-feedback.md),
+    // not a reason anyone gave: it is excluded here because this line is the
+    // one place a decline's WORDS travel anywhere, and a skip has none.
     `SELECT feedback, count(*) AS n FROM proposals
      WHERE decision IN ('deny', 'accept_with_changes') AND decided_at > $1::timestamptz - interval '7 days'
-       AND feedback IS NOT NULL AND feedback <> ''
+       AND feedback IS NOT NULL AND feedback <> '' AND feedback <> $2
      GROUP BY feedback ORDER BY n DESC, feedback LIMIT 3`,
-    [now],
+    [now, SKIP_FEEDBACK],
   );
   if (reasons.rows.length > 0) {
     lines.push(`• top reasons you declined or revised: ${reasons.rows.map((r: any) => `"${String(r.feedback).slice(0, 40)}" (${num(r.n)})`).join(", ")}`);

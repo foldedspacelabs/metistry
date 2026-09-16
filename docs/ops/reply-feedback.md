@@ -5,6 +5,85 @@ you decide on**. Nothing in this loop changes how the assistant behaves on its
 own: the routine suggests, you allow, and only then is anything written —
 in your name (invariant 2, plan §4.10).
 
+## The Needs You queue's five verbs
+
+Every item in Needs You is a **request**, and a request has one of six types
+(`glossary.md`). Whatever its type, these are the answers:
+
+| Verb | Wire (`proposals.decision`) | What it does | Ends the item? |
+| --- | --- | --- | --- |
+| **Approve** | `allow` | The verb with per-kind consequences: an `improvement` writes the prompt overlay, an enrolment lets the agent in, everything else is recorded and read by the evening fold. | yes |
+| **Revise** | `accept_with_changes` | Keeps your reason on the row. An empty reason cancels rather than sends — the assistant has nothing to change without one. | yes |
+| **Decline** | `deny` | Also per-kind: declining an enrolment **revokes** the agent's token. Your reason is kept. | yes |
+| **Approve as Work** | `allow`, plus a `work` row | Only where the row carries `payload.suggested_work`. See below. | yes |
+| **Later** | *unchanged* — `snoozed_until` is set | A snooze. The row stays `pending`, leaves the queue, and comes back by itself (`METISTRY_SNOOZE_HOURS`, default 3). | **no** |
+| **Skip** | `deny`, `feedback = 'skipped'` | Declines it with nothing to say. Fires **none** of Decline's per-kind consequences. | yes |
+
+**Skip is not Decline.** The difference is what travels afterwards:
+
+- For a **`decision`** request that is an enrolment, Decline revokes the
+  agent's token. Skip does not — it settles the queue item and leaves the
+  registry exactly as it was. "Not this, and I have nothing to say about it"
+  must not be a way to lock someone out by accident.
+- For an **`improvement`**, Decline keeps your wording, and that wording is the
+  one thing in this loop that carries a judgement anywhere — today the weekly
+  review's *"top reasons you declined or revised"* line, and any future path
+  that hands a reason back to the source agent. Skip writes the fixed marker
+  `SKIP_FEEDBACK` (`packages/core`) instead of your words, and every such path
+  excludes it *by that value*. A skip is you putting something down; it is not
+  feedback, and nothing may read it as feedback.
+
+**Later never ends a proposal.** `decision` stays `pending` and `decided_at`
+stays null, so the fold, the weekly review and the auto-expiry see exactly what
+they saw before. The only thing that brings a snoozed row back is the clock —
+there is no un-snooze verb, because a queue you can pull items back into has
+two orders in it. It is hidden from the console's Needs You list **and** from
+the morning brief, which is the point: a `later` that still pushes at 07:00 is
+a lie. (A snoozed row still ages toward the brief's auto-expiry; a three-hour
+snooze does not outlive a fourteen-day clock.)
+
+**Multi-select.** Tick rows and apply one verb to all of them
+(`POST /api/proposals/batch`); `l` and `s` are the keys. Only `later`, `skip`
+and `deny` may be batched — the verbs that need nothing from the individual
+row. Approve, Revise and Approve as Work each *do* something per kind, so they
+stay one at a time. The batch is **all-or-nothing per row**: each id is its own
+statement with its own result, so one item answered on the phone thirty seconds
+ago does not refuse the other nine.
+
+## Approve as Work — the click is what creates the row
+
+A `knowledge` or `report` proposal whose payload carries
+`suggested_work: {title, project?, kind?}` shows one extra answer. Accepting
+inserts the `work` row, links it as `proposals.work_id`, and decides the
+proposal `allow` — one gesture instead of "allow it, then go and type the task
+out again". Before this, a todo captured on the phone ended the night as a
+vault page and nothing else: there was no capture → `work` path at all.
+
+- **Who suggests.** `inbox-drain` sets the field **deterministically** —
+  frontmatter `kind: todo|task`, a leading `@task …` / `todo: …` / `- [ ] …` on
+  the first body line, or the `todo` verdict its rules already reached. No
+  model is consulted; the Apple FM tier's `has_action` is deliberately **not**
+  an input, because a model must not be what puts an extra button under a
+  proposal (invariant 4). Crews may set the same field on a report.
+- **§4.12 is intact.** Nothing auto-creates. A suggestion nobody accepts stays
+  a suggestion forever; the drain still emits only proposals.
+- **The row is owner-less and unclaimed.** Any agent may take it (collaboration
+  rule 4) — addressing it to someone would be a second decision nobody made.
+- **Exactly one.** The insert is keyed on `proposal:<id>`, so a double-tap or a
+  retried request returns the same row rather than making a second. It happens
+  *before* the proposal is settled, for the same reason the overlay write does:
+  a refused insert leaves the item in the queue.
+
+## Deciding against a row that moved
+
+Every decision the console sends carries `if_unchanged: {seen_at}` — the `ts`
+of the row it painted. If the proposal changed after that (its payload was
+rewritten, the `work` row it came from moved, a message landed in that row's
+room) the answer is refused with a `409` carrying `reason: "stale"` and the row
+as it stands, and the PWA repaints it. Approving a thing is approving *that*
+thing; if the question changed, the answer was to a different question.
+`docs/ops/console-api.md` has the envelope.
+
 ## What the user sees
 
 - Two tapbacks under every reply in chat. 👎 asks for an optional one-line

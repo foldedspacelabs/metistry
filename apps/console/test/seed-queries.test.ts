@@ -182,6 +182,70 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
     // outbound_messages carry no agent identity (actor = 'assistant'), so check them unfiltered.
     const unfiltered = (await store.run("activity_feed", { hours: 1, limit: 500 })).rows;
     expect(unfiltered.some((r) => r.kind === "alert" && r.detail === alertText)).toBe(true);
+
+    // a decision event says what was answered, and that YOU answered it — the
+    // decision route is `user`-gated, so `expired` is the only one that is nobody's
+    expect(rows.find((r) => r.kind === "proposal_decided")!.detail).toBe("you decided allow");
+  });
+
+  // ADOPT 1 (docs/research/2026-09-16-taskuary-review.md): the feed is the
+  // TIMELINE. A capture is in it the instant it lands — the accidental
+  // latency the review found was that it waited for the `*/5` drain — and the
+  // stream is filterable by kind and pullable incrementally.
+  it("activity_feed carries inbox captures, derives a group per row, and filters by kind", async () => {
+    const tag = `tl-${Date.now()}`;
+    await pool.query(`INSERT INTO inbox (source, path, note, status) VALUES ($1, $2, $3, 'new')`, [
+      tag,
+      `Knowledge/Inbox/${tag}.md`,
+      `---\ntitle: "ignored"\nkind: todo\n---\nrenew the cert\nsecond line`,
+    ]);
+    const capture = (await store.run("activity_feed", { hours: 1, limit: 500, agent: tag })).rows;
+    expect(capture).toHaveLength(1);
+    expect(capture[0]).toMatchObject({
+      kind: "capture",
+      group: "capture",
+      actor: tag,
+      subject: "renew the cert", // the first BODY line, not the frontmatter and not the whole note
+      detail: `${tag} · new`, // source · status — the "still being triaged" pill
+    });
+    expect(String(capture[0]!.ref)).toMatch(/^inbox:\d+$/);
+
+    // a capture with no note falls back to the file name, never to an empty row
+    await pool.query(`INSERT INTO inbox (source, path, status) VALUES ($1, $2, 'new')`, [tag, `Knowledge/Inbox/${tag}-photo.heic`]);
+    const both = (await store.run("activity_feed", { hours: 1, limit: 500, agent: tag })).rows;
+    expect(both.map((r) => r.subject)).toContain(`${tag}-photo.heic`);
+
+    // every row carries a group, and the groups are the closed set the chips read
+    const all = (await store.run("activity_feed", { hours: 1, limit: 500 })).rows;
+    for (const r of all) expect(["capture", "proposal", "decision", "run", "work", "message"]).toContain(r.group);
+
+    // `kind` matches an exact kind OR a group name
+    const byGroup = (await store.run("activity_feed", { hours: 1, limit: 500, kind: "capture" })).rows;
+    expect(byGroup.every((r) => r.kind === "capture")).toBe(true);
+    expect(byGroup.length).toBeGreaterThanOrEqual(2);
+    const byKind = (await store.run("activity_feed", { hours: 1, limit: 500, kind: "proposal_created" })).rows;
+    expect(byKind.every((r) => r.kind === "proposal_created")).toBe(true);
+    expect((await store.run("activity_feed", { hours: 1, limit: 500, kind: "no-such-kind" })).rows).toHaveLength(0);
+  });
+
+  it("activity_feed `since` is inclusive, and blank means the whole window — never an error", async () => {
+    const tag = `tls-${Date.now()}`;
+    await pool.query(`INSERT INTO runs (component, kind, ok, tool) VALUES ($1, 'tool', true, 'first')`, [tag]);
+    const first = (await store.run("activity_feed", { hours: 1, limit: 500, agent: tag })).rows;
+    expect(first).toHaveLength(1);
+    const cursor = new Date(first[0]!.ts as string).toISOString();
+
+    await pool.query(`INSERT INTO runs (component, kind, ok, tool) VALUES ($1, 'tool', true, 'second')`, [tag]);
+    const incremental = (await store.run("activity_feed", { hours: 1, limit: 500, agent: tag, since: cursor })).rows;
+    // inclusive: the boundary row comes back with the new one, because two
+    // sources can share a microsecond and a strict `>` would drop one forever
+    expect(incremental.map((r) => r.subject)).toContain("second");
+    expect(incremental.map((r) => r.subject)).toContain("first");
+    // strictly after everything: nothing, and still not an error
+    const future = new Date(Date.now() + 60_000).toISOString();
+    expect((await store.run("activity_feed", { hours: 1, limit: 500, agent: tag, since: future })).rows).toHaveLength(0);
+    // the default (blank) is the whole window — casting '' must never throw
+    expect((await store.run("activity_feed", { hours: 1, limit: 500, agent: tag, since: "" })).rows).toHaveLength(2);
   });
 
   // docs/product/desktop-app-plan.md "The window" — Agents panel: the state

@@ -774,6 +774,98 @@ single-shot tasks — a long chatty session changes the amortization (the
 definitions ride every turn in eager, but caching largely neutralizes
 that too).
 
+## PoC-19 — Apple FM behind an OpenAI-compatible `/v1` (runtime JSON schemas)
+
+**Gates:** compute PR 4 — whether Apple FM becomes a normal
+`kind: openai-compatible` provider at cost 0, or stays a special case.
+
+| | |
+|---|---|
+| Status | PASS |
+| Date | 2026-09-16 |
+
+Scratch server, harness and full run logs in `docs/poc/poc19-apple-fm-v1/`.
+macOS 26.4 (25E246), Swift 6.3.3 / Xcode 26.6. Run in a worktree on port
+7841 as a plain process; the Studio's production `apple-fm` bridge on
+`:7810` was not touched.
+
+**Does Foundation Models accept a schema built at runtime?** **Yes —
+`DynamicGenerationSchema`.** Apple's own doc JSON calls it "the dynamic
+counterpart to the generation schema type that you use to construct schemas
+at runtime" (macOS 26.0+), and the installed SDK's `.swiftinterface` has
+the line that settles it: `GenerationSchema.init(root: DynamicGenerationSchema,
+dependencies: [DynamicGenerationSchema]) throws` — which produces exactly
+the `GenerationSchema` that `session.respond(to:schema:)` already takes.
+**No `@Generable` type is involved anywhere on that path.** The
+compiled-shapes fallback this PoC was allowed to settle for was never
+needed. The research note's **option (b) is confirmed; option (a)'s special
+`kind: apple-fm` stays rejected.**
+
+**The surface works.** A single-file `swiftc` server (the shipped helper's
+build shape) serves `GET /v1/models` → `apple/foundation-model` and
+`POST /v1/chat/completions` with `response_format: {type: json_schema}`,
+translating the caller's JSON Schema per request. Objects, string `enum`s,
+arrays with `minItems`/`maxItems`, nested objects inside arrays and `anyOf`
+unions of object subschemas all translate — a discriminated union assembled
+at request time is something `/classify` could never express.
+
+**20 requests × 3 shapes, end-to-end client latency:**
+
+| case | ok | schema-valid | p50 | p95 |
+|---|---|---|---|---|
+| plain text, no schema | 20/20 | n/a | **268 ms** | 309 ms |
+| 3-field classification schema | 20/20 | **20/20** | **497 ms** | 516 ms |
+| nested schema, two arrays | 20/20 | **20/20** | **1464 ms** | 1626 ms |
+
+**Zero schema violations in 40 structured generations**, matching PoC-3's
+result for compiled types. Cold start is a non-event (first call 0.33 s —
+the model is a resident system daemon). Same three prompts through LM
+Studio's `google/gemma-4-e4b` on `:1234` for a like-for-like line: 124 /
+348 / 1510 ms p50 — faster on short work, level on the nested case, 13.5 s
+on its first (loading) request, and non-deterministic at its defaults. The
+difference that decides routing is residency: 22.7 MB for the Apple FM
+server (weights already in RAM for the OS) against 842 MB RSS for the GGUF
+backend, RSS understating the mmapped weights.
+
+**Four things PR 4 has to get right, each found the hard way:**
+
+1. **Key order out of `GeneratedContent.jsonString` is not stable.** Across
+   20 identical nested requests: 20 distinct byte strings, **1 distinct
+   value**. Greedy sampling is deterministic in the way that matters, but
+   any consumer that hashes, regexes or string-compares model output will
+   see phantom differences. Parse, never match.
+2. **The schema is charged to the 4096-token window.** With
+   `includeSchemaInPrompt` the schema sits inside it, ~32 tokens per
+   described field. Measured ceiling on one flat object: 80 fields works
+   (2604 prompt tokens, 16.9 s), 160 fails with `exceededContextWindowSize`
+   ("5342 tokens … maximum allowed context size of 4096"). Practical limit
+   is ~40 fields on latency alone. `tokenCount(for: schema)` makes this
+   checkable *before* the call — a `400` instead of a `500`.
+3. **Refuse what you cannot translate.** `$ref`, `$defs`, `oneOf`, `allOf`,
+   `not`, `patternProperties` have no `DynamicGenerationSchema` equivalent.
+   Dropping them silently would make the provider lie about `strict: true`;
+   the PoC returns `400 unsupported_schema` naming the offending keyword.
+4. **`usage` can be real, and cost is genuinely 0.**
+   `SystemLanguageModel.tokenCount(for:)` (macOS 26.4+) has overloads for
+   prompt, instructions, tools, schema and transcript entries. Apple exposes
+   no per-response usage object, so this is the honest substitute: three
+   round-trips, 39–57 ms — ~16% of a plain-text call, ~4% of a nested one.
+   Worth a flag for callers who do not want it.
+
+PoC-3's rules survive unchanged: **fresh `LanguageModelSession` per
+request** (the window is per session) and Swift-only (invariant 6).
+
+**Not verified:** concurrency (the server is deliberately serial, so the
+latencies carry no queueing noise — what Foundation Models does under
+parallel sessions is an open PR 4 decision); streaming onto SSE; tool
+calling; any of `core`'s wire contract (auth, manifest, `check()`) since
+this is a bare loopback process, not a bridge; output *quality* (latency
+and conformance only — PoC-3 and PoC-15/16 own that question); multi-turn
+`messages` beyond one system + one user; and any Mac other than this one —
+`DynamicGenerationSchema` is annotated macOS 26.0 but `.null`, `tokenCount`
+and `representNilExplicitlyInGeneratedContent` are 26.4-only, so the
+`#available` guards the PoC carries are untested on 26.0–26.3.
+
 ## Contradictions with BUILD-PLAN.md
 
 Anything a finding invalidates. Note it here; don't edit the plan.

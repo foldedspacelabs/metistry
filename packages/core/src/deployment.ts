@@ -156,30 +156,9 @@ export function resolveUrl(url: string, ctx: UrlContext): string {
 }
 
 // ---- the engine credential ------------------------------------------------
-
-/**
- * The credential the engine cannot start without, named in ONE place.
- *
- * In core rather than the CLI because the console asks it too: a routine
- * that would enqueue an assistant turn is preflighted against it
- * (preflight.ts), and `apps/` never imports `packages/cli`. `up` and
- * `doctor` still ask through their own re-export, so when the compute pivot
- * renames it (plan refresh 2026-09-13, C2/C3) there is one constant and one
- * function to move.
- */
-export const ENGINE_CREDENTIAL_VAR = "CLAUDE_CODE_OAUTH_TOKEN";
-
-/**
- * Is there an engine at all?
- *
- * An install with no credential is a SUPPORTED shape, not a broken one: the
- * assistant is the only component that needs a model, so without one `up`
- * leaves it out of the supervisor's children — the same "a child that could
- * only crash-loop is not started at all" rule the bridges already get — and
- * `doctor` reports it `absent` rather than failed. Everything model-free
- * (captures, inbox-drain, tasks, search, the console) runs; a queued fold
- * turn waits for a credential.
- */
-export function engineCredentialPresent(env: NodeJS.ProcessEnv): boolean {
-  return (env[ENGINE_CREDENTIAL_VAR] ?? "").trim() !== "";
-}
+//
+// It used to live here as one environment variable. Since C2/C3 an engine is
+// `assignments.default` in compute.yaml plus that provider's secret, so the
+// seam moved to `compute.ts` (`engineStatus` / `engineConfigured`) where the
+// file it reads is already modelled. Nothing about WHERE services run — this
+// file's subject — depends on it.

@@ -109,11 +109,14 @@
 ;;    put in the managed conf block — not a range, and not "loopback".
 (allow network-outbound (remote tcp (param "DB_TCP")))
 
-;; 3. Anthropic's API over TLS. sandbox-exec filters by port, not by
+;; 3. The engine's provider over TLS. sandbox-exec filters by port, not by
 ;;    hostname, so this reads as "outbound TLS" — the host allowlist itself
-;;    is documentation (ANTHROPIC_HOSTS in packages/cli/src/sandbox.ts,
-;;    docs/ops/deployment-shapes.md) — NOT enforced here, and not enforced
-;;    anywhere else today. Name-level enforcement arrives with App Sandbox.
+;;    is documentation (`engineHosts`, derived from compute.yaml's providers
+;;    in packages/cli/src/sandbox.ts; docs/ops/deployment-shapes.md) — NOT
+;;    enforced here, and not enforced anywhere else today. Name-level
+;;    enforcement arrives with App Sandbox. A local-only install still needs
+;;    this rule for nothing, and keeping it is the honest default rather
+;;    than a confinement that changes shape with a config file.
 (allow network-outbound (remote tcp "*:443"))
 
 ;; DNS resolution goes through mDNSResponder, not a socket to :53.

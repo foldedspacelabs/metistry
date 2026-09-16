@@ -1,6 +1,6 @@
 # Seeded default (D4 overlay: an instance file of the same name wins).
 name: claude_usage_daily
-description: Assistant token use, API-equivalent cost, and prompt-cache hit rate per day and model tier (claude-usage collector). On a subscription, cost is headroom consumed, not money billed.
+description: Assistant token use, cost and prompt-cache hit rate per day and model (claude-usage collector — a local rollup of `runs`, no credential). Cost is what the provider billed for the turn.
 params:
   days: { type: int, default: 30 }
 sql: |

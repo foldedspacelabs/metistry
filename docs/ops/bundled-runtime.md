@@ -267,8 +267,9 @@ this existed) is a note, not a failure.
 
 ## What is NOT in here
 
-- **The Claude Code CLI** — it arrives with the Agent SDK package, inside
-  the product's own `node_modules`.
+- **The Claude Code CLI** — a collaborator, not a component: it reaches
+  Metistry over `/mcp` with the plugin, installed by the person who wants it
+  (`plugins/claude-code/`). Nothing in the product depends on it.
 - **The Swift TCC helpers** (`ek-helper`, `afm-helper`) — they ship in the
   product runtime pack, Developer ID signed by their own build scripts.
 - **Ollama** and **Tailscale** — optional, offered in-app, degrade absent.

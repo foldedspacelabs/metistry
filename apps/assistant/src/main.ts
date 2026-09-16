@@ -1,5 +1,5 @@
 import pg from "pg";
-import { SPEND_QUERY, intEnv, optionalEnv, requireEnv, type SpendRow } from "@foldedspacelabs/metistry-core";
+import { SPEND_QUERY, engineStatus, intEnv, optionalEnv, requireEnv, type SpendRow } from "@foldedspacelabs/metistry-core";
 import { QueryStore } from "@foldedspacelabs/metistry-queries";
 import { drainOne } from "./drain.js";
 import { DEFAULT_BRIEF_THREAD_BYTES, drainCrewOne } from "./crew-drain.js";
@@ -11,11 +11,6 @@ import { brainConfigFromEnv, brainToolNames } from "./brain.js";
 import { loadSystemPrompt } from "./prompt.js";
 import { loadTiers, RULES_FILES_DEFAULT } from "./tiers.js";
 import { warnNonZdrAssignments, watchCompute } from "./compute.js";
-
-// PoC-4 rules: subscription token, never ANTHROPIC_API_KEY in-container.
-if (process.env.ANTHROPIC_API_KEY) {
-  throw new Error("ANTHROPIC_API_KEY must not be set (silently flips to API billing — PoC-4); use CLAUDE_CODE_OAUTH_TOKEN");
-}
 
 const pool = new pg.Pool({
   host: optionalEnv("METISTRY_DB_HOST", "127.0.0.1"),
@@ -48,7 +43,7 @@ const currentCompute = () => compute.store.current;
 const describeAssignments = (): void => {
   const cfg = currentCompute();
   if (!cfg.assignments) {
-    console.log("compute.yaml assigns nothing — rules.yaml's tiers: is the live map and turns run on the Agent SDK");
+    console.log("compute.yaml assigns nothing — there is no engine, so this process should not have started (see below)");
     return;
   }
   const a = cfg.assignments;
@@ -63,15 +58,17 @@ const describeAssignments = (): void => {
 const compute = await watchCompute(pool, "assistant", describeAssignments);
 describeAssignments();
 
-// The engine never starts half-configured. An install with NO credential is a
-// supported shape (`metistry up` omits the child, doctor reports `assistant:
-// absent`) — but an install whose compute.yaml ASSIGNS every tier to a
-// provider needs no SDK token at all, because no turn can reach the SDK path:
-// an unknown tier resolves to `assignments.default`, never to nothing.
-if (!currentCompute().assignments && !(process.env.CLAUDE_CODE_OAUTH_TOKEN ?? "").trim()) {
-  throw new Error(
-    "CLAUDE_CODE_OAUTH_TOKEN is unset and compute.yaml assigns nothing — either set the credential and re-run `metistry up`, or assign every tier to a provider (`metistry compute assign default <provider/model>`; docs/ops/compute.md)",
-  );
+// The engine never starts half-configured. An install with NO engine is a
+// SUPPORTED shape, not a fault: `metistry up` omits this child, doctor
+// reports `assistant: absent`, and captures, tasks, search and the console
+// all run (docs/ops/assistant-tools.md, "Running without an engine"). So if
+// this process is running at all and there is still no engine, something
+// started it by hand — say which half is missing and stop, rather than
+// crash-looping on the first turn. The same seam `up` and `doctor` read
+// (core's `engineStatus`), so the three can never disagree.
+const engineReady = engineStatus(currentCompute());
+if (!engineReady.ok) {
+  throw new Error(`${engineReady.why} — ${engineReady.fix}`);
 }
 
 // Spend is read through the ONE read path (invariant 3): the `spend` named
@@ -106,18 +103,18 @@ const loaded = await loadSystemPrompt();
 if (loaded) console.log(`identity: ${loaded.identity.name} (system prompt ${loaded.prompt.length} chars)`);
 else console.warn("system prompt absent: no identity.yaml / assistant-prompt.md found (METISTRY_IDENTITY_FILES, METISTRY_PROMPT_FILES)");
 
-// One engine object, two kinds behind it (engine.ts): the provider's `kind`
-// for an assigned turn, the Agent SDK for one nothing assigned.
+// One engine object (engine.ts): the provider's `kind` decides which adapter
+// serves a turn, and today there is one — the in-house OpenAI-compatible
+// loop. Claude arrives through OpenRouter like any other cloud model.
 const engine = makeEngine({
-  brain,
   systemPrompt: loaded?.prompt,
   guard,
   sessions: pgSessionStore(pool),
   tools: () => (brain ? mcpToolHost({ url: brain.url, token: brain.token, allow: brainToolNames() }) : NO_TOOLS),
   ...(process.env.METISTRY_MAX_TURNS ? { maxTurns: intEnv("METISTRY_MAX_TURNS", 12) } : {}),
 });
-const shown = currentCompute().assignments?.default;
-console.log(`assistant draining (default ${shown ? `${shown.model}/${shown.effort}` : `${tiers.default!.model}/${tiers.default!.effort}`}, every ${interval}ms)`);
+const shown = engineReady.assignment!;
+console.log(`assistant draining (default ${shown.ref} at ${shown.effort} effort, every ${interval}ms)`);
 
 // Crews (docs/ops/crews.md): the same loop drains the crew queue after the
 // inbound one. Each run gets a per-run token minted here and burned after;

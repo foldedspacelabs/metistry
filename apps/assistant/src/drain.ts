@@ -107,7 +107,7 @@ export async function drainOne(db: Db, engine: Engine, tiers: TierMap, opts: Dra
       routed_by: routeMeta.routed_by ?? "rule",
       tier,
       effort,
-      ...(assignment ? { engine: assignment.config.kind, model_ref: assignment.ref } : { engine: "anthropic" }),
+      ...(assignment ? { engine: assignment.config.kind, model_ref: assignment.ref } : {}),
       ...(fresh ? { fresh_session: true } : {}),
     },
   });

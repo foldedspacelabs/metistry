@@ -130,12 +130,16 @@ forced.
   the preview, with the confirm button disabled until the preview has been
   on screen. The invariant moved to where it belongs — the tool — and the
   app still writes no file.
-- **Step 7 is real without a pty.** `claude setup-token` opens in a
-  `.command` file the user's own terminal handles (AppleScript would mean
-  an Apple Events TCC prompt this app otherwise needs none of), and the app
-  then polls `secrets list --json` for the token's *name*. It never handles
-  the value. The pty is still what `--auth token` needs; step 7 no longer
-  waits on it.
+- ~~**Step 7 is real without a pty.**~~ *(superseded, PR 1b 2026-09-16: the
+  step is now **Compute**. It runs `metistry compute providers add --from
+  <template> --json` with the API key on the child's **stdin** — the one
+  exception to the empty-stdin rule, and the reason the runner grew a
+  `standardInput` seam — then `metistry compute assign default
+  <provider/model> --json`. No terminal, no `.command` file, no polling. The
+  app still never STORES the value: the property holding it is cleared before
+  the process runs, and everything it knows afterwards is the boolean
+  `compute show --json` reports. The pty is still what `connect-repo --auth
+  token` needs.)*
 - **`SMAppService` shipped, for the app only.** `SMAppService.mainApp` is
   one call and one approval, with `requiresApproval` reported as
   registered-and-waiting rather than off. The old follow-up had conflated
@@ -494,8 +498,11 @@ A secret is either the instance's or the person's, and one table in
   `METISTRY_VAPID_*`, `METISTRY_GITHUB_*` (a PAT is scoped to the repos
   *this* instance watches). **Unlisted secret-shaped names default here:**
   self-containment is the rule, user-scope the enumerated exception.
-- **user** — account = `metistry` (or `METISTRY_KEYCHAIN_ACCOUNT`):
-  `CLAUDE_CODE_OAUTH_TOKEN` (one Claude login per Mac) and
+- **user** — account = `metistry` (or `METISTRY_KEYCHAIN_ACCOUNT`): every
+  `METISTRY_*_API_KEY` *(refresh 2026-09-16: a compute provider credential
+  named by `compute.yaml`'s `auth.secret` — the person's own account with
+  that provider, shared by every instance on this Mac; it replaced the
+  claude.ai-login token here with PR 1b)*, `METISTRY_DEVIN_API_KEY`, and
   `METISTRY_AWS_SECRET_ACCESS_KEY` / `_SESSION_TOKEN` (the person's own
   AWS account, for the aws-costs collector).
 

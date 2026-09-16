@@ -13,11 +13,13 @@ import { parse as parseYaml } from "yaml";
 import {
   DEFAULT_DEPLOYMENT,
   DEPLOYMENT_FILENAME,
-  ENGINE_CREDENTIAL_VAR,
-  engineCredentialPresent,
+  engineConfigured,
+  engineStatus,
   overlayDeployment,
   parseDeployment,
   resolveUrl,
+  emptyCompute,
+  type Compute,
   type Deployment,
   type DeploymentShape,
 } from "@foldedspacelabs/metistry-core";
@@ -158,14 +160,20 @@ export function consoleEnv(ctx: ShapeContext): Record<string, string> {
 }
 
 /**
- * The engine credential seam lives in `packages/core` (deployment.ts) — the
- * console preflights routines against it and `apps/` may not import the CLI.
+ * "Is there an engine" lives in `packages/core` (compute.ts) — the console
+ * preflights routines against it and `apps/` may not import the CLI.
  * Re-exported here so `up`, `doctor` and the shape tests keep one import.
+ *
+ * Since C2/C3 it takes the resolved `compute.yaml` as well as the
+ * environment: an engine is `assignments.default` plus that provider's
+ * secret, not one variable.
  */
-export { ENGINE_CREDENTIAL_VAR, engineCredentialPresent };
+export { engineConfigured, engineStatus };
 
-/** The one line `up` prints when this install has no engine. */
-export const ENGINE_ABSENT_NOTE = `assistant: absent — no engine credential (${ENGINE_CREDENTIAL_VAR}); captures, tasks, search and the console run; fold turns wait (docs/ops/assistant-tools.md)`;
+/** The one line `up` prints when this install has no engine, with the missing half named. */
+export function engineAbsentNote(why: string, fix: string): string {
+  return `assistant: absent — ${why}; captures, tasks, search and the console run; fold turns wait (docs/ops/assistant-tools.md). Fix: ${fix}`;
+}
 
 /**
  * The engine's environment is an ALLOWLIST, not a passthrough.
@@ -196,12 +204,28 @@ export const ASSISTANT_ENV_KEYS = [
   // changes. Config, not a credential — the provider secrets it NAMES stay
   // in the Keychain and reach the engine per run, never through this list.
   "METISTRY_COMPUTE_FILES",
-  ENGINE_CREDENTIAL_VAR,
 ] as const;
 
-export function assistantEnv(ctx: ShapeContext): Record<string, string> {
+/**
+ * The engine's credential is NOT in the list above, because its NAME is not
+ * fixed: `compute.yaml` says which Keychain item each provider uses
+ * (`providers.<name>.auth.secret`), and the engine reads the environment
+ * variable of that name at the point of the call (`credentialFor`,
+ * apps/assistant/src/engine-openai.ts). So the allowlist is the static keys
+ * plus exactly the secret names THIS install's compute.yaml declares —
+ * still an allowlist, and still one this file computes rather than a
+ * passthrough of whatever is in the operator's shell.
+ */
+export function assistantEnvKeys(compute: Compute): readonly string[] {
+  const named = Object.values(compute.providers)
+    .map((p) => p.auth?.secret)
+    .filter((n): n is string => typeof n === "string");
+  return [...ASSISTANT_ENV_KEYS, ...new Set(named)];
+}
+
+export function assistantEnv(ctx: ShapeContext, compute: Compute = emptyCompute()): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const k of ASSISTANT_ENV_KEYS) {
+  for (const k of assistantEnvKeys(compute)) {
     const v = ctx.env[k];
     if (v !== undefined && v !== "") out[k] = k.endsWith("_URL") ? resolveUrl(v, { shape: ctx.shape, vantage: "host" }) : v;
   }
@@ -209,12 +233,11 @@ export function assistantEnv(ctx: ShapeContext): Record<string, string> {
   out.METISTRY_DB_PORT = String(dbPort(ctx.env));
   out.METISTRY_BRAIN_URL = resolveUrl(ctx.env.METISTRY_BRAIN_URL || `http://127.0.0.1:${consolePort(ctx.env)}/mcp`, { shape: ctx.shape, vantage: "host" });
   // HOME is the state dir, which is also the only writable path the sandbox
-  // profile allows: the SDK writes its session transcripts under it, and
-  // they must survive a restart (the launchd twin of the assistant-home
-  // volume in docker-compose.yml).
+  // profile allows (the launchd twin of the assistant-home volume in
+  // docker-compose.yml). Sessions themselves live in Postgres.
   out.HOME = ctx.stateDir;
-  // ANTHROPIC_API_KEY is never set (PoC-4; the engine refuses to start with
-  // it) — an allowlist rather than a passthrough is what guarantees that a
-  // stray key in the operator's shell cannot reach the engine.
+  // A provider key the file does not name never reaches the engine: an
+  // allowlist rather than a passthrough is what guarantees that a stray key
+  // in the operator's shell cannot buy tokens on somebody's account.
   return out;
 }

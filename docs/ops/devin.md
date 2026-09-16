@@ -151,7 +151,7 @@ key the collector **degrades absent**: `run()` returns 0 without error and
 every other collector carry on.
 
 `METISTRY_DEVIN_API_KEY` is **user-scoped** in the Keychain
-(`packages/cli/src/secrets.ts`), like `CLAUDE_CODE_OAUTH_TOKEN` and the AWS
+(`packages/cli/src/secrets.ts`), like the compute provider keys and the AWS
 keys: it is the person's own credential, shared by every instance on the Mac,
 and `metistry secrets purge` must never take it.
 

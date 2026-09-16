@@ -210,7 +210,7 @@ private func suite(_ name: String) -> (UserDefaults, () -> Void) {
     [
       { "name": "METISTRY_DB_PASSWORD", "scope": "instance", "inKeychain": true, "foundUnder": "instance", "inEnv": true },
       { "name": "METISTRY_BRIDGE_TOKEN_EVENTKIT", "scope": "instance", "inKeychain": true, "foundUnder": "user", "inEnv": false },
-      { "name": "CLAUDE_CODE_OAUTH_TOKEN", "scope": "user", "inKeychain": false, "inEnv": true },
+      { "name": "METISTRY_OPENROUTER_API_KEY", "scope": "user", "inKeychain": false, "inEnv": true },
       { "name": "METISTRY_VAPID_PRIVATE", "scope": "instance", "inKeychain": false, "inEnv": false }
     ]
     """
@@ -229,8 +229,10 @@ private func suite(_ name: String) -> (UserDefaults, () -> Void) {
     // gap between them is a migration the next `sync --to env` finishes.
     #expect(model.secrets[1].scopeLabel.contains("still under the user account"))
     #expect(model.secrets[2].scopeLabel.contains("one per Mac"))
-    // The Claude token is set or not set. There is no third thing this can say.
-    #expect(model.claudeTokenListing?.isSet == true)
+    // A provider key the app has not yet read compute.yaml for is not claimed
+    // as one: the app keeps no list of provider names, so the pane shows none
+    // until `compute show --json` has named them.
+    #expect(model.providerSecretListings.isEmpty)
 
     // Nothing in the listing can hold a value: the type has four fields and the
     // verb has no code path that prints one.
@@ -253,7 +255,7 @@ private struct FixedRunner: CommandRunner {
 
     func run(
         executable: URL, arguments: [String], environment: [String: String],
-        currentDirectory: URL?, onOutput: @escaping @Sendable (OutputLine) -> Void
+        currentDirectory: URL?, standardInput: String?, onOutput: @escaping @Sendable (OutputLine) -> Void
     ) async throws -> CommandResult {
         result
     }
@@ -308,7 +310,7 @@ private struct CannedRunner: CommandRunner {
 
     func run(
         executable: URL, arguments: [String], environment: [String: String],
-        currentDirectory: URL?, onOutput: @escaping @Sendable (OutputLine) -> Void
+        currentDirectory: URL?, standardInput: String?, onOutput: @escaping @Sendable (OutputLine) -> Void
     ) async throws -> CommandResult {
         CommandResult(exitCode: 0, stdout: stdout, stderr: "")
     }
@@ -317,7 +319,7 @@ private struct CannedRunner: CommandRunner {
 private struct NoopRunner: CommandRunner {
     func run(
         executable: URL, arguments: [String], environment: [String: String],
-        currentDirectory: URL?, onOutput: @escaping @Sendable (OutputLine) -> Void
+        currentDirectory: URL?, standardInput: String?, onOutput: @escaping @Sendable (OutputLine) -> Void
     ) async throws -> CommandResult {
         CommandResult(exitCode: 0, stdout: "", stderr: "")
     }

@@ -12,11 +12,12 @@
      parameter (packages/cli/src/sandbox.ts) and the misuse tests in
      packages/cli/test/sandbox.test.ts prove the four denials.
 
-     STATE_DIR is also HOME (see the env dict `up` renders): the Agent
-     SDK's session transcripts live there and must survive a restart —
-     the launchd equivalent of the assistant-home volume in
-     docker-compose.yml. The env dict carries CLAUDE_CODE_OAUTH_TOKEN,
-     so `up` writes the rendered plist mode 600. -->
+     STATE_DIR is also HOME (see the env dict `up` renders): the engine
+     needs one writable directory and this is it — the launchd equivalent
+     of the assistant-home volume in docker-compose.yml. Sessions
+     themselves live in Postgres. The env dict carries the db password and
+     the compute provider's API key, so `up` writes the rendered plist
+     mode 600. -->
 <plist version="1.0">
 <dict>
   <key>Label</key><string>com.foldedspacelabs.metistry.assistant</string>

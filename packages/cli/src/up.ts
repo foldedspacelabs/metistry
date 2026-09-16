@@ -16,8 +16,8 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { COMPUTE_FILENAME, intEnv, loadCompute, servedProviders, usesCompose, type ChildSpecInput, type Deployment } from "@foldedspacelabs/metistry-core";
-import { assistantEnv, consoleEnv, consolePort, dbPort, ENGINE_ABSENT_NOTE, ENGINE_CREDENTIAL_VAR, engineCredentialPresent, loadDeployment, type ShapeContext } from "./deployment.js";
+import { COMPUTE_FILENAME, emptyCompute, intEnv, loadCompute, servedProviders, usesCompose, type ChildSpecInput, type Compute, type Deployment } from "@foldedspacelabs/metistry-core";
+import { assistantEnv, consoleEnv, consolePort, dbPort, engineAbsentNote, engineStatus, loadDeployment, type ShapeContext } from "./deployment.js";
 import { doctor, renderTable, type DoctorDeps, type DoctorReport } from "./doctor.js";
 import type { Exec } from "./exec.js";
 import {
@@ -240,6 +240,13 @@ export interface ShapeValues extends ShapeContext {
   supervisorBin?: string | undefined;
   /** `<instance>/state/supervisor.json`; filled by `installSupervisorPlan` */
   supervisorConfig?: string | undefined;
+  /**
+   * `compute.yaml` as resolved for THIS install (seed + instance overlay).
+   * `up` reads it once and passes it down: it decides whether there is an
+   * assistant child at all (C2/C3), which provider secrets the engine's env
+   * allowlist admits, and which local model server the supervisor starts.
+   */
+  compute: Compute;
 }
 
 /**
@@ -266,7 +273,7 @@ export function plistValuesFor(t: PlistTemplate, v: ShapeValues): PlistValues {
       const p = sandboxParams({ productDir: v.productDir, nodeBin: v.node, stateDir: v.stateDir, consolePort: consolePort(v.env), dbPort: dbPort(v.env), tmpDir: tmpDirOf(v.env) });
       // every path parameter is the REAL path: the kernel matches the
       // profile's subpaths after resolving symlinks (/tmp → /private/tmp)
-      return { ...base, env: assistantEnv(v), extra: { NODE_PREFIX: p.NODE_PREFIX, PRODUCT_DIR: p.PRODUCT_DIR, STATE_DIR: p.STATE_DIR, TMP_DIR: p.TMP_DIR, CONSOLE_TCP: p.CONSOLE_TCP, DB_TCP: p.DB_TCP } };
+      return { ...base, env: assistantEnv(v, v.compute), extra: { NODE_PREFIX: p.NODE_PREFIX, PRODUCT_DIR: p.PRODUCT_DIR, STATE_DIR: p.STATE_DIR, TMP_DIR: p.TMP_DIR, CONSOLE_TCP: p.CONSOLE_TCP, DB_TCP: p.DB_TCP } };
     }
     case "db":
       return { ...base, extra: { PG_BIN: v.pgBin ?? "", PG_DATA: v.pgData ?? pgDataDir(stateRoot(v.productDir, v.env)) } };
@@ -361,7 +368,7 @@ export async function installLaunchd(r: StepRunner, productDir: string, le: Laun
     const { rendered, from, secret } = renderJob(t, productDir, le, values);
     await r.write(target, rendered, from);
     // the console's and the assistant's dicts carry db passwords, bridge
-    // tokens and CLAUDE_CODE_OAUTH_TOKEN; ~/Library/LaunchAgents is 0755, so
+    // tokens and the compute provider's API key; ~/Library/LaunchAgents is 0755, so
     // the file itself has to be the boundary
     if (secret) await r.run("chmod", ["600", target], { comment: "the env dict holds secrets" });
   }
@@ -455,14 +462,7 @@ export async function bootoutRetired(r: StepRunner, le: LaunchdEnv, shape: Deplo
  */
 export async function servedLocalModelChildren(r: StepRunner, productDir: string, values: ShapeValues, base: Record<string, string>): Promise<ChildSpecInput[]> {
   const instanceDir = stateRoot(values.productDir, values.env);
-  const paths = values.env.METISTRY_COMPUTE_FILES ?? `${join(productDir, "seed", COMPUTE_FILENAME)}:${join(instanceDir, COMPUTE_FILENAME)}`;
-  let served: ReturnType<typeof servedProviders>;
-  try {
-    served = servedProviders((await loadCompute(paths)).compute);
-  } catch (e) {
-    r.note(`compute.yaml did not parse, so no local model server is declared this run (${e instanceof Error ? e.message : String(e)})`);
-    return [];
-  }
+  const served = servedProviders(values.compute);
   if (served.length === 0) return [];
   if (served.length > 1) {
     throw new StepFailed(`${served.map((x) => x.name).join(", ")} all declare a serve: block, and the supervisor has one \`llamaserver\` child — keep the one you want and remove serve: from the others`);
@@ -504,14 +504,15 @@ export async function installSupervisorPlan(r: StepRunner, productDir: string, l
   values.supervisorBin = bin;
   values.supervisorConfig = configPath;
 
-  // No engine credential, no assistant child: the engine hard-requires one
+  // No engine, no assistant child: the engine hard-requires one
   // (apps/assistant/src/main.ts) and would crash-loop, which is not what an
   // install with no model looks like — it looks like everything else running
-  // and the fold's turns waiting. Read through ONE function, so the rename
-  // the compute pivot brings lands in one place; the config is rewritten
-  // whole on every `up`, so a credential that appears later re-adds the child.
+  // and the fold's turns waiting. Read through ONE function (core's
+  // `engineStatus`: `assignments.default` plus its provider's secret), the
+  // same one doctor reads; the config is rewritten whole on every `up`, so a
+  // provider assigned later re-adds the child.
   const templates = (await loadSupervisedTemplates(productDir, values.namespace?.labelSuffix, values.env)).filter(
-    (t) => t.service !== "assistant" || engineCredentialPresent(values.env),
+    (t) => t.service !== "assistant" || engineStatus(values.compute, values.env).ok,
   );
   const base = launchdBaseEnv(values.env);
   const children = templates.map((t) => {
@@ -697,6 +698,18 @@ export async function up(opts: UpOptions): Promise<UpResult> {
   // Mac app's override — it knows which instance it opened.
   const paths = envPaths({ ...instanceDir, productDir: opts.productDir, ...(opts.envFile ? { explicit: opts.envFile } : {}), ...(opts.exists ? { exists: opts.exists } : {}) });
   const envFile = paths?.read[0] ?? paths?.write ?? join(opts.productDir, ".env");
+  // compute.yaml, once: the same file `servedLocalModelChildren` reads, the
+  // same one doctor reads. A file that does not parse is a NOTE and an
+  // engine-less install for this run — `up` bringing the whole install down
+  // because one line of YAML is wrong would be the worse answer, and
+  // `metistry compute show` says exactly what is wrong.
+  const computePaths = env.METISTRY_COMPUTE_FILES ?? `${join(runDir, "seed", COMPUTE_FILENAME)}:${join(stateRoot(opts.productDir, env), COMPUTE_FILENAME)}`;
+  let compute = emptyCompute();
+  try {
+    compute = (await loadCompute(computePaths)).compute;
+  } catch (e) {
+    r.note(`compute.yaml did not parse, so this run has no engine and no served local model (${e instanceof Error ? e.message : String(e)}) — \`metistry compute show\``);
+  }
   const values: ShapeValues = {
     // the product's files: `current` in release mode, so the plists exec the
     // running release and a rollback stays a symlink flip
@@ -715,6 +728,7 @@ export async function up(opts: UpOptions): Promise<UpResult> {
     ...(opts.registerVia ? { registerVia: opts.registerVia } : {}),
     envFile,
     home: le.home,
+    compute,
   };
   r.note(`product: ${runDir} (${source === "release" ? `pinned release${lock ? ` ${lock.product.version}` : ""} — images pulled, not built` : "git checkout — images built from source"})`);
   r.note(`shape: ${deployment.shape} — from ${loaded.from}`);
@@ -744,14 +758,8 @@ export async function up(opts: UpOptions): Promise<UpResult> {
   // one line, before anything is written: an install with no engine is a
   // shape, not a fault (docs/ops/assistant-tools.md, "Running without an
   // engine"), and the operator should see WHY there is no assistant below
-  if (!engineCredentialPresent(env)) {
-    r.note(ENGINE_ABSENT_NOTE);
-    if (usesCompose(deployment)) {
-      r.note(
-        `compose shape: docker-compose.yml interpolates ${ENGINE_CREDENTIAL_VAR} as a required variable, so \`docker compose up\` refuses the whole file without it — the launchd shape is the one that runs engine-less (docs/ops/deployment-shapes.md)`,
-      );
-    }
-  }
+  const engine = engineStatus(values.compute, env);
+  if (!engine.ok) r.note(engineAbsentNote(engine.why as string, engine.fix as string));
   let failure: StepFailed | undefined;
 
   try {

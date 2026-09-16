@@ -1,8 +1,9 @@
 # The local compute target (plan §4.18.B "local subagents", Phase 5 crews).
 # A crew — `agents/<area>/<name>.md` in the instance repo — runs in the
-# assistant container itself, on the same subscription, against the same
-# console `/mcp`, with a per-run credential and only the tool groups its
-# manifest names. Nothing here reaches a third party.
+# assistant process itself, on the provider `compute.yaml` assigns it
+# (`assignments.crews.<name>`; collaboration rule 3), against the same console
+# `/mcp`, with a per-run credential and only the tool groups its manifest
+# names. No third party beyond that provider is reached.
 #
 # Dispatch is the assistant's `agents_delegate` tool (mcp-brain). The console
 # checks the brief with the SAME enforcement every target gets

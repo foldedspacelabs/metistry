@@ -65,8 +65,9 @@ export const childSpecSchema = z
     /**
      * The child's COMPLETE environment — the supervisor's own is never
      * inherited. That is what keeps `assistantEnv`'s allowlist an allowlist:
-     * a stray ANTHROPIC_API_KEY in the operator's shell reached the engine
-     * through neither the plist dict before nor this now (PoC-4).
+     * a provider key in the operator's shell that this install's
+     * compute.yaml does not name reaches the engine through neither the
+     * plist dict before nor this now.
      */
     env: z.record(z.string(), z.string()).default({}),
     /** StandardOut+StandardError, appended — the same path `metistry logs <service>` tails */

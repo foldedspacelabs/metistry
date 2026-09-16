@@ -197,8 +197,10 @@ public final class WizardModel {
 
     /// Has this step got what it came for? Steps 6 and 7 answer from their own
     /// models rather than from a `metistry` verb's exit code, because neither is
-    /// one: the door is open or it is not, and the token's name is set or it is
-    /// not. Both are optional either way, so neither can wall the wizard.
+    /// one: the door is open or it is not, and compute.yaml assigns a default or
+    /// it does not. Both are optional either way, so neither can wall the
+    /// wizard — an install with no engine is a supported shape, and step 7 says
+    /// so where it offers to skip.
     ///
     /// Step 6's answer changed with the owner decision of 2026-09-10. The
     /// console has a door the moment it takes this Mac as the owner — which it
@@ -211,8 +213,9 @@ public final class WizardModel {
             if steps.consoleSignIn.signIn?.isSignedIn == true { return true }
             if case .enrolled = steps.passkey.phase { return true }
             return false
-        case .claude:
-            return steps.claude.isSet
+        case .compute:
+            if case .skipped = steps.compute.phase { return true } // a knowing choice, not an unfinished step
+            return steps.compute.isSet
         default:
             break
         }

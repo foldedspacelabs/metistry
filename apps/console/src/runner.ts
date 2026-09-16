@@ -38,6 +38,8 @@ import {
   PREFLIGHT_FAILED,
   RUNNER_KIND,
   SKIPPED_STREAK,
+  emptyCompute,
+  type Compute,
   type ComponentStreak,
   type PreflightMiss,
   type Requirements,
@@ -70,6 +72,13 @@ export interface RunnerOptions {
    * an install with no `budgets:` block gets.
    */
   budget?: () => Promise<PreflightMiss | null>;
+  /**
+   * `compute.yaml` in force, for the `requires.engine` half of preflight
+   * (C2/C3): a routine that would enqueue an assistant turn is not started
+   * when nothing assigns a default, because nothing would answer it. A
+   * function, not a value, so a hot reload takes effect on the next window.
+   */
+  compute?: () => Compute;
   /** injected by tests; production always uses the wall clock */
   now?: Date;
 }
@@ -80,6 +89,7 @@ interface ResolvedOptions {
   maxStreak: number;
   alertDedupeHours: number;
   budget?: (() => Promise<PreflightMiss | null>) | undefined;
+  compute: () => Compute;
   now: Date;
 }
 
@@ -91,6 +101,7 @@ function resolve(opts: RunnerOptions): ResolvedOptions {
     maxStreak: opts.maxStreak ?? intEnv("METISTRY_RUNNER_MAX_STREAK", DEFAULT_MAX_STREAK, env),
     alertDedupeHours: opts.alertDedupeHours ?? intEnv("METISTRY_ALERT_DEDUPE_H", DEFAULT_ALERT_DEDUPE_HOURS, env),
     ...(opts.budget ? { budget: opts.budget } : {}),
+    compute: opts.compute ?? emptyCompute,
     now: opts.now ?? new Date(),
   };
 }
@@ -225,7 +236,7 @@ export async function tick(db: Db, scheduled: ScheduledCollector[], ctx: Collect
     }
 
     // 2. preflight: never spend a window on a component that cannot succeed
-    const pre = await preflight(c.requires, { env: opts.env, fetchFn: opts.fetchFn, ...(opts.budget ? { budget: opts.budget } : {}) });
+    const pre = await preflight(c.requires, { env: opts.env, compute: opts.compute(), fetchFn: opts.fetchFn, ...(opts.budget ? { budget: opts.budget } : {}) });
     if (!pre.ok) {
       if (opts.now.getTime() - windows.lastPreflight >= windowMs) {
         const message = blockedConfigMessage(c.name, c.dir, pre);

@@ -39,9 +39,12 @@ struct MetistryApp: App {
             bundleResourceURL: resources,
             runner: runner,
             appVersion: version ?? UpdateStatus.devBuildVersion,
-            // The two platform seams MetistryKit declares and does not have:
-            // ServiceManagement and AuthenticationServices.
+            // The platform seams MetistryKit declares and does not have:
+            // ServiceManagement — twice, because the app as a login item and
+            // the install's one background item are two registrations — and
+            // AuthenticationServices.
             loginItemService: SMAppServiceLoginItem(),
+            backgroundAgentService: SMAppServiceBackgroundAgent(),
             passkeyRegistrar: ASAuthorizationPasskeyRegistrar()
         )
         _model = State(initialValue: model)

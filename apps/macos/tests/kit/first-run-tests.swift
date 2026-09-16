@@ -120,6 +120,57 @@ private func model() -> FirstRunModel {
     #expect(FirstRunModel.parseDeviceCode(from: lines) == nil)
 }
 
+@MainActor
+@Test func aBuildThatCarriesAnAgentInstallsEveryOtherOneAndRegistersThatOneItself() {
+    // The two registrars must not both install `com.foldedspacelabs.metistry`
+    // (docs/ops/deployment-shapes.md, "Two registrars"). The app's half of that
+    // is one flag on one command line — no second implementation of anything.
+    let m = model()
+    m.instanceDirectory = URL(fileURLWithPath: "/Users/you/instance")
+    // No bundled agent — a `swift build` executable, or a platform with no
+    // SMAppService. The terminal path, unchanged.
+    #expect(m.plannedArguments(.services) == [
+        "/usr/bin/node", "/src/packages/cli/dist/main.js",
+        "up", "--instance", "/Users/you/instance",
+        "--product-dir", "/src",
+    ])
+
+    m.registersSupervisorAgent = true
+    #expect(m.plannedArguments(.services) == [
+        "/usr/bin/node", "/src/packages/cli/dist/main.js",
+        "up", "--instance", "/Users/you/instance",
+        "--register-via", "app",
+        "--product-dir", "/src",
+    ])
+}
+
+@MainActor
+@Test func theAgentIsRegisteredAFTERUpHasWrittenTheFilesItReads() async {
+    // Registering first would start an agent with no supervisor.json and no
+    // supervisor.env to find this install by — it exits 78 and looks broken.
+    // The step owns the ordering; it does not call SMAppService itself.
+    let m = model()
+    m.instanceDirectory = URL(fileURLWithPath: "/Users/you/instance")
+    m.registersSupervisorAgent = true
+    var stateWhenAsked: StepState?
+    m.onSupervisorInstalled = { stateWhenAsked = m.state(.services) }
+    await m.run(.services)
+    // `up` had already finished, and finished successfully: the config and the
+    // launcher file the agent reads exist by the time it is registered.
+    guard case .succeeded = stateWhenAsked else {
+        Issue.record("the agent was registered before `up` had succeeded: \(String(describing: stateWhenAsked))")
+        return
+    }
+
+    // …and a build with no agent to register never asks the app to register one.
+    let plain = model()
+    plain.instanceDirectory = URL(fileURLWithPath: "/Users/you/instance")
+    var asked = false
+    plain.onSupervisorInstalled = { asked = true }
+    await plain.run(.services)
+    #expect(!asked)
+}
+
 private struct NoopRunner: CommandRunner {
     func run(
         executable: URL, arguments: [String], environment: [String: String],

@@ -38,8 +38,13 @@ public final class AppModel {
     public var logs: LogViewerModel
     /// Filled in by the platform (Sparkle on macOS); a plain box here.
     public let updates: UpdateStatus
-    /// Start at login. `nil` service on a platform with no `SMAppService`.
+    /// Start at login — the APP. `nil` service on a platform with no
+    /// `SMAppService`.
     public let loginItem: LoginItemModel
+    /// The install's ONE background item, registered from this bundle's
+    /// `Contents/Library/LaunchAgents` (background-agent.swift). A different
+    /// registration from `loginItem`, and a different promise.
+    public let backgroundAgent: BackgroundAgentModel
     /// Who the console takes this Mac to be — asked on launch and on every
     /// instance switch, by `metistry console whoami --json` and nothing else
     /// (console-sign-in.swift).
@@ -51,6 +56,7 @@ public final class AppModel {
         defaults: UserDefaults = .standard,
         appVersion: String = UpdateStatus.devBuildVersion,
         loginItemService: (any LoginItemService)? = nil,
+        backgroundAgentService: (any BackgroundAgentService)? = nil,
         passkeyRegistrar: (any PasskeyRegistrar)? = nil
     ) {
         let instances = InstanceBookmarks(defaults: defaults)
@@ -79,6 +85,8 @@ public final class AppModel {
         self.developerProductDir = developerProductDir
         self.updates = UpdateStatus(appVersion: appVersion)
         self.loginItem = LoginItemModel(service: loginItemService)
+        let backgroundAgent = BackgroundAgentModel(service: backgroundAgentService)
+        self.backgroundAgent = backgroundAgent
         self.resolution = resolution
         self.status = status
         self.consoleSignIn = consoleSignIn
@@ -94,6 +102,15 @@ public final class AppModel {
         // Step 1's `runtime install` writes the copy the app should be using;
         // re-resolving is what makes it start using it.
         firstRun.onRuntimeInstalled = { [weak self] in self?.relocate() }
+        // Step 5 (`up`) has to know which registrar will own the one background
+        // item BEFORE it runs, because the flag goes on the command line: when
+        // this build carries an agent to register, `up` installs everything
+        // except that one and the app registers its bundled copy.
+        firstRun.registersSupervisorAgent = backgroundAgent.bundlesAgent
+        // …and then actually registers it, once `up` has written the config and
+        // the launcher file the agent reads. Doing it before would register an
+        // agent with nothing to point at (docs/ops/mac-app.md).
+        firstRun.onSupervisorInstalled = { [weak self] in self?.backgroundAgent.set(true) }
         // An install with no instance chosen has one useful screen, and it is the
         // wizard. This is the only thing that presents it automatically.
         if instances.active == nil {

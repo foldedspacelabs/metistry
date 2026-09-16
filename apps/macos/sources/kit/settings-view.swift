@@ -199,10 +199,55 @@ public struct SettingsView: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .task { model.loginItem.refresh() }
+
+        // The OTHER registration, and the one that matters: the install's
+        // services. Deliberately its own section, below Start at Login, because
+        // the two are constantly confused and the prose on each says which is
+        // which (background-agent.swift).
+        SettingsSection("Background") {
+            Toggle(BackgroundAgentModel.title, isOn: Binding(
+                get: { model.backgroundAgent.isOn },
+                set: { model.backgroundAgent.set($0) }
+            ))
+            .disabled(!model.backgroundAgent.isSupported || !model.backgroundAgent.bundlesAgent)
+            HStack(spacing: MetistrySpace.s2) {
+                StatusDot(agentDot)
+                Text(model.backgroundAgent.statusLabel)
+                    .metistryText(.footnote, p, model.backgroundAgent.colorRole)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if model.backgroundAgent.needsApproval {
+                Button("Open Login Items…") { model.backgroundAgent.openSystemSettings() }
+            }
+            if model.backgroundAgent.status == .notFound {
+                Text(BackgroundAgentModel.notAnAppBundleNote)
+                    .metistryText(.caption1, p, .textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(BackgroundAgentModel.terminalNote)
+                    .metistryText(.caption1, p, .textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let error = model.backgroundAgent.lastError {
+                UnavailableCard(what: "SMAppService refused", reason: error)
+            }
+            Text(BackgroundAgentModel.note)
+                .metistryText(.caption1, p, .textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .task { model.backgroundAgent.refresh() }
     }
 
     private var loginDot: CheckStatus {
         switch model.loginItem.status {
+        case .enabled: return .ok
+        case .requiresApproval: return .degraded
+        case .notRegistered: return .absent
+        case .notFound, .unknown: return .failed
+        }
+    }
+
+    private var agentDot: CheckStatus {
+        switch model.backgroundAgent.status {
         case .enabled: return .ok
         case .requiresApproval: return .degraded
         case .notRegistered: return .absent

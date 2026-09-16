@@ -11,35 +11,55 @@ prerequisite.
 
 ## Setting up the embedder
 
-The embedder is a local [Ollama](https://ollama.com) with
+The embedder is **any local model server's `POST /v1/embeddings`** with
 `nomic-embed-text` (768 dimensions) — §6 decision 8, validated by PoC-5.
 Nothing leaves the machine.
 
+One protocol, three servers (`docs/ops/compute.md` → "Local models"): LM
+Studio, Ollama, or the `llama-server` Metistry bundles. Whichever you
+already run:
+
 ```sh
-brew install ollama          # or the app
-ollama serve                 # a launch agent on this install
-ollama pull nomic-embed-text
+metistry compute models list                 # what is answering on this Mac
+metistry compute providers add --from ollama # …or lmstudio, or llamaserver
+metistry compute models install ollama/nomic-embed-text
 ```
 
 Confirm it answers:
 
 ```sh
-curl -s http://127.0.0.1:11434/api/embed \
+curl -s http://127.0.0.1:11434/v1/embeddings \
+  -H 'content-type: application/json' \
   -d '{"model":"nomic-embed-text","input":["probe"]}' | head -c 80
 ```
 
-The reconciler and the console both read the same three variables, and
-**they must agree** — a query embedded by a different model than the notes
-is nonsense that still returns rows:
+The reconciler and the console both read the same variables, and **they must
+agree** — a query embedded by a different model than the notes is nonsense
+that still returns rows:
 
 | Variable | Default |
 | --- | --- |
-| `METISTRY_OLLAMA_URL` | `http://127.0.0.1:11434` |
+| `METISTRY_LOCAL_MODEL_URL` | the **first `on_machine` provider's `base_url`** in `compute.yaml`, else `http://127.0.0.1:11434/v1` |
 | `METISTRY_EMBED_MODEL` | `nomic-embed-text` |
 | `METISTRY_EMBED_DIM` | `768` |
 
+It is an **API root** — the thing `/embeddings` and `/models` hang off — so
+`http://127.0.0.1:1234/v1`, not `http://127.0.0.1:1234`.
+
 `METISTRY_EMBED_ENABLED=false` turns the whole thing off; search stays
 keyword and no vectors are written.
+
+### `METISTRY_OLLAMA_URL` is deprecated
+
+It still works. It is read when `METISTRY_LOCAL_MODEL_URL` is unset, a bare
+host is mapped onto its `/v1` root (`http://127.0.0.1:11434` →
+`http://127.0.0.1:11434/v1`), and the console and the reconciler each log one
+line at startup saying so. Rename it when convenient; nothing breaks on the
+day you do.
+
+Why it moved: the old name and the old wire (`/api/embed`) made **Ollama the
+only server that could ever embed**. `/v1/embeddings` is served by all three,
+so which one embeds is now a URL rather than a rewrite (C18).
 
 ## The three modes
 

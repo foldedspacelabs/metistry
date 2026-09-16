@@ -5,6 +5,7 @@
 // that would not validate is never written, a provider still named by an
 // assignment cannot be removed, and a refusal names the field.
 import { cp, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -14,7 +15,9 @@ import {
   apiRoot,
   assign,
   computeReport,
+  modelsInstall,
   modelsList,
+  modelsLoad,
   parseAssignmentTarget,
   parseBudgetAction,
   parseBudgetTarget,
@@ -25,6 +28,7 @@ import {
   providersRemove,
   readTemplate,
   renderComputeReport,
+  renderModelsInstall,
   renderModelsList,
   renderProviderTest,
   setBudget,
@@ -334,6 +338,116 @@ describe("test / models list: live probes through the one seam", () => {
     expect(r.providers[1]?.ok).toBe(false); // no route: HTTP 502 from the fake
     expect(renderModelsList(r)).toContain("lmstudio/google/gemma-3n-e4b");
     expect((await modelsList({ ...o, provider: "lmstudio" })).providers).toHaveLength(1);
+  });
+
+  it("also reports a local server that is RUNNING but that no provider dials, with the command that would add it", async () => {
+    const dir = await instance();
+    // Ollama is up on its default port; compute.yaml knows only about LM Studio
+    const http = fakeFetch({
+      "http://127.0.0.1:1234/v1/models": { body: { data: [{ id: "qwen/qwen3-coder-30b" }] } },
+      "http://127.0.0.1:11434/v1/models": { body: { data: [{ id: "gemma3:4b", owned_by: "library" }] } },
+    });
+    const { o } = harness(dir, { platform: "linux", fetchFn: http.fn });
+    await providersAdd({ ...o, template: "lmstudio", skipTest: true });
+    const r = await modelsList({ ...o });
+    expect(r.providers.map((p) => p.name)).toEqual(["lmstudio"]);
+    expect(r.detected.map((d) => d.server)).toEqual(["ollama"]);
+    const text = renderModelsList(r);
+    expect(text).toContain("not configured — `metistry compute providers add --from ollama`");
+    expect(text).toContain("(ollama)/gemma3:4b");
+    // asking about ONE provider is not an excuse to scan the whole Mac
+    expect((await modelsList({ ...o, provider: "lmstudio" })).detected).toEqual([]);
+  });
+});
+
+describe("models install", () => {
+  /** `lms`, recorded. Every other command falls through to the Keychain fake. */
+  function fakeLms(code = 0) {
+    const calls: string[][] = [];
+    const exec: Exec = async (cmd, args) => {
+      calls.push([cmd, ...args]);
+      return { code, stdout: "", stderr: code === 0 ? "" : "boom" };
+    };
+    return { exec, calls };
+  }
+
+  it("LM Studio: `lms get <id>`", async () => {
+    const dir = await instance();
+    const lms = fakeLms();
+    const { o, lines } = harness(dir, { platform: "linux", fetchFn: fakeFetch({}).fn, exec: lms.exec });
+    await providersAdd({ ...o, template: "lmstudio", skipTest: true });
+    const r = await modelsInstall({ ...o, ref: "lmstudio/qwen/qwen3-coder-30b" });
+    expect(r).toMatchObject({ provider: "lmstudio", server: "lmstudio", model: "qwen/qwen3-coder-30b", ok: true });
+    expect(lms.calls).toContainEqual(["lms", "get", "qwen/qwen3-coder-30b"]);
+    expect(lines.at(-1)).toContain("lms get qwen/qwen3-coder-30b");
+    expect(renderModelsInstall(r)).toContain("installed");
+  });
+
+  it("Ollama: POST /api/pull above /v1, with progress", async () => {
+    const dir = await instance();
+    const ndjson = [{ status: "pulling manifest" }, { status: "success" }].map((o) => JSON.stringify(o)).join("\n");
+    const http = ((async (input: string | URL | Request) => {
+      if (String(input) === "http://127.0.0.1:11434/api/pull") return new Response(ndjson, { status: 200 });
+      return new Response("{}", { status: 502 });
+    }) as unknown) as typeof fetch;
+    const { o, lines } = harness(dir, { platform: "linux", fetchFn: http });
+    await providersAdd({ ...o, template: "ollama", skipTest: true });
+    const r = await modelsInstall({ ...o, ref: "ollama/gemma3:4b" });
+    expect(r.ok).toBe(true);
+    expect(lines.join("\n")).toContain("pulling manifest");
+  });
+
+  it("llama-server: downloads the GGUF and writes serve.model_path as the `user`", async () => {
+    const dir = await instance();
+    const bytes = new TextEncoder().encode("GGUF-bytes");
+    const sha = createHash("sha256").update(bytes).digest("hex");
+    const url = "https://huggingface.co/unsloth/gemma-3-4b-it-GGUF/resolve/main/gemma-3-4b-it-Q4_K_M.gguf";
+    const http = ((async (input: string | URL | Request) => {
+      if (String(input) === url) return new Response(bytes as unknown as BodyInit, { status: 200, headers: { "x-linked-etag": `"${sha}"`, "x-linked-size": String(bytes.byteLength) } });
+      return new Response("{}", { status: 502 });
+    }) as unknown) as typeof fetch;
+    const { o } = harness(dir, { platform: "linux", fetchFn: http });
+    await providersAdd({ ...o, template: "llamaserver", skipTest: true });
+    const r = await modelsInstall({ ...o, ref: "llamaserver/unsloth/gemma-3-4b-it-GGUF/gemma-3-4b-it-Q4_K_M.gguf" });
+    expect(r.model_path).toBe("state/models/unsloth/gemma-3-4b-it-GGUF/gemma-3-4b-it-Q4_K_M.gguf");
+    expect(r.sha256).toBe(sha);
+    expect(existsSync(join(dir, r.model_path!))).toBe(true);
+    // the file on disk is what the schema accepts back — a write that would
+    // not validate is refused before it is written
+    const after = await readFile(file(dir), "utf8");
+    expect(after).toContain("model_path: state/models/unsloth/gemma-3-4b-it-GGUF/gemma-3-4b-it-Q4_K_M.gguf");
+    expect((await computeReport(o)).providers[0]?.name).toBe("llamaserver");
+  });
+
+  it("refuses to install into a cloud provider, and into a local one it has no mechanism for", async () => {
+    const dir = await instance();
+    const kc = fakeSecurity();
+    const { o } = harness(dir, { exec: kc.exec, fetchFn: fakeFetch({}).fn });
+    await providersAdd({ ...o, template: "openrouter", skipTest: true, readSecret: async () => KEY });
+    await expect(modelsInstall({ ...o, ref: "openrouter/anthropic/claude-sonnet-5" })).rejects.toThrow(/its models are a catalogue, not an install/);
+
+    await writeFile(file(dir), `${await readFile(file(dir), "utf8")}\n  odd: { kind: openai-compatible, base_url: "http://127.0.0.1:5555/v1", locality: on_machine }\n`);
+    await expect(modelsInstall({ ...o, ref: "odd/some-model" })).rejects.toThrow(/does not know how to install a model into odd/);
+  });
+
+  it("load/unload acts for LM Studio and says what governs residency for the other two", async () => {
+    const dir = await instance();
+    const lms = fakeLms();
+    const { o } = harness(dir, { platform: "linux", fetchFn: fakeFetch({}).fn, exec: lms.exec });
+    await providersAdd({ ...o, template: "lmstudio", skipTest: true });
+    await providersAdd({ ...o, template: "ollama", skipTest: true });
+    await providersAdd({ ...o, template: "llamaserver", skipTest: true });
+
+    expect(await modelsLoad({ ...o, ref: "lmstudio/m", ttlSeconds: 600 })).toMatchObject({ ok: true, noop: false, action: "load" });
+    expect(lms.calls).toContainEqual(["lms", "load", "m", "--ttl", "600"]);
+    expect(await modelsLoad({ ...o, ref: "lmstudio/m", unload: true })).toMatchObject({ action: "unload", noop: false });
+
+    const oll = await modelsLoad({ ...o, ref: "ollama/gemma3:4b" });
+    expect(oll).toMatchObject({ ok: true, noop: true });
+    expect(oll.detail).toContain("keep_alive");
+    const llama = await modelsLoad({ ...o, ref: "llamaserver/whatever" });
+    expect(llama.noop).toBe(true);
+    expect(llama.detail).toContain("metistry restart llamaserver");
   });
 });
 

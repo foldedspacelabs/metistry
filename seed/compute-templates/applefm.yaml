@@ -1,0 +1,35 @@
+# Apple Foundation Models — the on-device model macOS already keeps resident,
+# served through the `apple-fm` bridge's OpenAI-compatible `/v1` surface
+# (PoC-19, docs/ops/compute.md "Apple Foundation Models").
+#
+# Why it is worth a provider block: cost 0 and ~0 extra resident memory. The
+# weights belong to Apple Intelligence and are in RAM for the OS whether
+# Metistry runs or not, so this is the one local model that costs nothing to
+# keep available. It is small — good at REDUCTION (classify, extract, tag),
+# weak as a judge (PoC-15) — and it has a 4096-token context window that the
+# JSON schema is charged against. Pin real work elsewhere.
+#
+# auth: the bridge authenticates every route, `/v1` included (invariant 8:
+# the network is not a boundary, and loopback is network). The engine
+# presents METISTRY_BRIDGE_TOKEN_APPLE_FM exactly as it presents an
+# OpenRouter key; `metistry secrets sync --to env` is what puts it in the
+# environment the engine reads.
+#
+# serve: starts nothing. The bridge is already a supervised service — this
+# block says "the thing on the other end of base_url is mine", which is what
+# makes `metistry up` leave it alone and what ties the port to the URL.
+#
+# base_url: loopback, because the bridge binds loopback. In the container
+# shape the console and assistant reach the host as `host.docker.internal`:
+#   metistry compute providers add --from applefm \
+#     --base-url http://host.docker.internal:7810/v1
+# A namespaced instance (`metistry up --namespace`) moves the port; use
+# --base-url and edit serve.port to match.
+applefm:
+  kind: openai-compatible
+  base_url: http://127.0.0.1:7810/v1
+  locality: on_machine
+  auth: { secret: METISTRY_BRIDGE_TOKEN_APPLE_FM }   # a NAME. The value is this instance's bridge bearer.
+  serve:
+    runtime: applefm
+    port: 7810

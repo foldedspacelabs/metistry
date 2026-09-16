@@ -452,6 +452,11 @@ export async function bootoutRetired(r: StepRunner, le: LaunchdEnv, shape: Deplo
  * why a missing binary or a missing GGUF is a NOTE and not a failure: `up`
  * bringing the whole install down because a model file was moved would be a
  * far worse answer than a console that runs with one fewer provider.
+ *
+ * `serve: { runtime: applefm }` is filtered out here rather than handled:
+ * the Apple FM provider IS the `apple-fm` bridge, which is a supervised
+ * service with its own plist already. Its `serve:` block declares ownership
+ * (and ties the port to the base URL); it declares no second process.
  */
 export async function servedLocalModelChildren(r: StepRunner, productDir: string, values: ShapeValues, base: Record<string, string>): Promise<ChildSpecInput[]> {
   const instanceDir = stateRoot(values.productDir, values.env);
@@ -463,16 +468,21 @@ export async function servedLocalModelChildren(r: StepRunner, productDir: string
     r.note(`compute.yaml did not parse, so no local model server is declared this run (${e instanceof Error ? e.message : String(e)})`);
     return [];
   }
-  if (served.length === 0) return [];
-  if (served.length > 1) {
-    throw new StepFailed(`${served.map((x) => x.name).join(", ")} all declare a serve: block, and the supervisor has one \`llamaserver\` child — keep the one you want and remove serve: from the others`);
+  const own = served.filter((x) => x.serve.runtime === "llamaserver");
+  for (const x of served) {
+    if (x.serve.runtime === "applefm") r.note(`providers.${x.name} serves Apple Foundation Models through the apple-fm bridge on 127.0.0.1:${x.serve.port} — already a supervised service, so no extra child`);
   }
-  const { name, serve } = served[0]!;
+  if (own.length === 0) return [];
+  if (own.length > 1) {
+    throw new StepFailed(`${own.map((x) => x.name).join(", ")} all declare a serve: { runtime: llamaserver } block, and the supervisor has one \`llamaserver\` child — keep the one you want and remove serve: from the others`);
+  }
+  const { name, serve } = own[0]!;
+  if (serve.model_path === undefined) return []; // unreachable: the schema requires it for llamaserver
   const built = llamaServerChild({
     productDir: values.installRoot,
     instanceDir,
     provider: name,
-    serve,
+    serve: { ...serve, model_path: serve.model_path },
     env: base,
     log: logPathFor("llamaserver", values.namespace?.labelSuffix),
   });

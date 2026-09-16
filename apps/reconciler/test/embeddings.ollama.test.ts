@@ -3,7 +3,6 @@
 // suite proves the bookkeeping, this one proves the thing actually
 // retrieves. Skips cleanly (not fails) when either is absent, so a laptop
 // without `ollama serve` still runs the suite.
-import { readFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -15,13 +14,9 @@ import { Embeddings } from "../src/embeddings.js";
 import { Indexer } from "../src/indexer.js";
 import { searchVault } from "../src/search.js";
 import { tempRepo, type TempRepo } from "./helpers.js";
+import { loadTestEnv } from "@foldedspacelabs/metistry-core/test-env";
 
-try {
-  for (const line of readFileSync(new URL("../../../.env", import.meta.url), "utf8").split("\n")) {
-    const m = /^([A-Z_]+)=(.*)$/.exec(line.trim());
-    if (m && m[1] && process.env[m[1]] === undefined) process.env[m[1]] = m[2];
-  }
-} catch {}
+loadTestEnv(new URL("../../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
 
 const OLLAMA = process.env.METISTRY_OLLAMA_URL ?? EMBED_DEFAULT_URL;
 const MODEL = process.env.METISTRY_EMBED_MODEL ?? EMBED_DEFAULT_MODEL;

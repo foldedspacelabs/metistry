@@ -11,16 +11,10 @@ import { QueryStore } from "@foldedspacelabs/metistry-queries";
 import { mintToken } from "@foldedspacelabs/metistry-core";
 import { makeServer } from "../src/server.js";
 import * as store from "../src/auth-store.js";
+import { loadTestEnv } from "@foldedspacelabs/metistry-core/test-env";
 
 // load ../.env for local runs
-try {
-  for (const line of readFileSync(new URL("../../../.env", import.meta.url), "utf8").split("\n")) {
-    const m = /^([A-Z_]+)=(.*)$/.exec(line.trim());
-    if (m && m[1] && process.env[m[1]] === undefined) process.env[m[1]] = m[2];
-  }
-} catch {}
-
-const hasDb = !!process.env.METISTRY_DB_PASSWORD;
+const { hasDb } = loadTestEnv(new URL("../../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
 const policy = { idleDays: 30, maxDays: 365 };
 
 describe.skipIf(!hasDb)("console server (integration)", () => {

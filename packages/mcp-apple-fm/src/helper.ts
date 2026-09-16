@@ -8,10 +8,33 @@ export interface HelperResponse {
   id: number;
   ok: boolean;
   error?: string;
+  /** the helper's own failure code — `unsupported_schema`, `context_length_exceeded`, `not_available`, … (v1.ts maps it to a status) */
+  code?: string;
   classification?: { category: string; has_action: boolean; action: string };
+  /** `op: "complete"` — the `/v1/chat/completions` engine room */
+  completion?: { content: string; prompt_tokens: number; completion_tokens: number; usage_ok: boolean; schema_mode: string; respond_ms: number };
+  /** `op: "models"` */
+  models?: Array<{ id: string; owned_by: string }>;
   probe?: string;
   category?: string;
   ready?: boolean;
+  model?: string;
+}
+
+/**
+ * One line to the helper. `text` classifies; `op` names everything else.
+ * The helper answers strictly in order — it reads a line, awaits the
+ * generation, and only then reads the next — so several in-flight requests
+ * queue rather than run together (helper/afm-helper.swift: serial by design).
+ */
+export interface HelperRequest {
+  text?: string;
+  op?: string;
+  prompt?: string;
+  instructions?: string;
+  schema?: unknown;
+  temperature?: number;
+  max_tokens?: number;
 }
 
 export type Spawner = () => ChildProcess;
@@ -52,7 +75,7 @@ export class Helper {
     return child;
   }
 
-  async request(payload: { text?: string; op?: string }): Promise<HelperResponse> {
+  async request(payload: HelperRequest): Promise<HelperResponse> {
     const id = this.nextId++;
     const child = this.ensure();
     return new Promise<HelperResponse>((resolve) => {

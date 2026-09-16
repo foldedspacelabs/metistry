@@ -1,13 +1,13 @@
 {
   "name": "@foldedspacelabs/metistry-mcp-apple-fm",
   "version": "0.7.1",
-  "description": "Metistry Apple Foundation Models bridge: free on-device classification over the §4.3 wire contract (HTTP + bearer auth + check()). Ships a compiled Swift helper; no TCC grants required. Usable standalone.",
+  "description": "Metistry Apple Foundation Models bridge: an OpenAI-compatible /v1 surface (runtime JSON schemas) plus free on-device classification, over the §4.3 wire contract (HTTP + bearer auth + check()). Ships a compiled Swift helper; no TCC grants required. Usable standalone.",
   "license": "Apache-2.0",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": { "metistry-mcp-apple-fm": "./dist/main.js" },
-  "files": ["dist", "helper/afm-helper.app", "manifest.yaml"],
+  "files": ["dist", "helper/afm-helper.app", "manifest.yaml", "README.md"],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "build:helper": "./scripts/build-helper.sh",

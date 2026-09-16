@@ -324,7 +324,7 @@ export function renderComputeReport(r: ComputeReport): string {
       ]),
     ),
   );
-  if (r.providers.length === 0) lines.push("(no providers — `metistry compute providers add --from openrouter|zen|lmstudio|ollama`)");
+  if (r.providers.length === 0) lines.push(`(no providers — \`metistry compute providers add --from ${COMPUTE_TEMPLATES.join("|")}\`)`);
   lines.push("");
   if (r.assignments.length === 0) {
     lines.push("assignments: none — rules.yaml's `tiers:` is still the live map (`metistry compute assign default <provider/model>` moves it here).");

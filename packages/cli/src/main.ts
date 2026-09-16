@@ -396,7 +396,7 @@ const USAGE = `metistry — Metistry command line
 
   metistry compute show [--json]
   metistry compute providers list [--json]
-  metistry compute providers add --from <openrouter|zen|lmstudio|ollama>
+  metistry compute providers add --from <${COMPUTE_TEMPLATES.join("|")}>
                                  [--name <n>] [--base-url <url>] [--secret <NAME>] [--skip-test]
   metistry compute providers remove <name>
   metistry compute providers test <name> [--complete]

@@ -1,0 +1,84 @@
+# Seeded default (D4 overlay: an instance file of the same name wins).
+#
+# The board view over `work` (docs/ops/board.md; derived from
+# docs/research/2026-09-12-hermes-agent-review.md §4/§6a). Phase 1 of that
+# note's plan: read-only, no migration, no fifth status value — every column
+# is a CASE over columns that already exist, so the panel never derives a
+# state and MetistryKit renders the same rows with no extra server work.
+#
+# Scope: the two kinds the tasks module owns (`task`, `review`). Rows a
+# collector reconciles from a source of truth (issue/pr/event) are visible in
+# `work` but never claimable (packages/tasks CLAIMABLE_KINDS, ruling
+# 2026-09-06), so "assigned" and "in progress" would be lies about them.
+# `open_work` / `projects_overview` remain the view over those.
+name: board
+description: One row per board card over the tasks module's work rows — the derived column (backlog / assigned / in_progress / needs_you / done / reported), who it is addressed to, who holds the lease, age, last report, and whether it wants a human. Ordered by column, then most recently touched. `limit` applies PER COLUMN, so one busy column never crowds the others out.
+params:
+  project: { type: text, default: "" } # blank = every project; rows with no project appear only in that view
+  limit: { type: int, default: 50 } # per column, not per result set
+sql: |
+  WITH scoped AS (
+    SELECT w.* FROM work w
+    WHERE w.kind = ANY('{task,review}'::text[])
+      AND (:project = '' OR w.project = :project)
+  ),
+  -- The only confirmed join from a work row to what an agent produced:
+  -- crew-drain stamps runs.meta.work_id at start and merges `reports` (the
+  -- mcp__brain__report call count) at finish. One grouped pass, not a
+  -- correlated subquery per card — `runs` has no index on meta.
+  reported AS (
+    SELECT r.meta->>'work_id' AS work_id, max(coalesce(r.finished_at, r.ts)) AS last_report_at
+    FROM runs r
+    WHERE r.meta ? 'work_id'
+      AND jsonb_typeof(r.meta->'reports') = 'number'
+      AND (r.meta->>'reports')::numeric > 0
+    GROUP BY 1
+  ),
+  carded AS (
+    SELECT
+      s.id, s.title, s.kind, s.project, s.owner, s.claimed_by, s.lease_expires_at,
+      s.external_ref, s.updated_at, s.status, s.due, s.meta,
+      rp.last_report_at,
+      -- the one detail view the console already has for a card: a review
+      -- bundle names the artifact it was cut from (handles, never payloads)
+      s.meta->'bundle'->>'artifact' AS artifact,
+      round(extract(epoch FROM (now() - s.created_at)) / 3600.0, 1)::float8 AS age_hours,
+      CASE
+        -- closed WITH a report from the agent that ran it vs closed with none
+        -- (Hermes note §4.5: "done" and "reported" are not the same card)
+        WHEN s.status = 'closed' AND rp.last_report_at IS NOT NULL THEN 'reported'
+        WHEN s.status = 'closed'                                   THEN 'done'
+        -- blocked is the human-gated state: UpdateInput.status is
+        -- Exclude<TaskStatus,'open'>, so nothing in the system can move a
+        -- blocked row forward — only the user's hand (§4.1 of the note)
+        WHEN s.status = 'blocked'                                  THEN 'needs_you'
+        WHEN s.status = 'in_progress'                              THEN 'in_progress'
+        -- open and addressed to someone, not yet claimed (claim() sets
+        -- status = 'in_progress' atomically, so open + owner IS the
+        -- "assigned but not started" column the owner asked for)
+        WHEN s.owner IS NOT NULL                                   THEN 'assigned'
+        ELSE 'backlog'
+      END AS "column",
+      -- Wants a human. NOT the Hermes note's "a pending decision proposal
+      -- cites the row" — no proposal kind carries a work id (verified against
+      -- every INSERT INTO proposals in the tree), so that join does not
+      -- exist. These three do, on columns the row already has.
+      (s.status <> 'closed' AND (
+         (s.status = 'in_progress' AND s.lease_expires_at IS NOT NULL AND s.lease_expires_at <= now())
+         OR (s.status = 'blocked' AND s.meta->'bundle'->>'queued' IS NULL)
+         OR (s.due IS NOT NULL AND s.due < current_date)
+      )) AS escalated
+    FROM scoped s
+    LEFT JOIN reported rp ON rp.work_id = s.id::text
+  ),
+  ranked AS (
+    SELECT c.*, row_number() OVER (PARTITION BY c."column" ORDER BY c.updated_at DESC, c.id DESC) AS rn
+    FROM carded c
+  )
+  SELECT "column", id, title, kind, project, owner, claimed_by, lease_expires_at,
+         age_hours, last_report_at, escalated, external_ref, artifact, status, due::text AS due, updated_at
+  FROM ranked
+  WHERE rn <= :limit
+  ORDER BY array_position(ARRAY['backlog','assigned','in_progress','needs_you','done','reported']::text[], "column"),
+           updated_at DESC, id DESC
+cache_ttl: 0 # a board that lags is a board that lies about who holds the lease

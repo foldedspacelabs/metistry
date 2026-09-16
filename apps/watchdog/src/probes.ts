@@ -191,18 +191,24 @@ export async function runProbes(db: Db, cfg: ProbeConfig, fetchFn = fetch): Prom
       return summarizeBridges(bridgeOutcomes);
     }),
 
-    // The FM tier degrades ABSENT on any failure (inbox-drain), which is
+    // The model tier degrades ABSENT on any failure (inbox-drain), which is
     // right for a collector and invisible for an operator: a bad token in
     // the console container and a healthy bridge look identical from the
     // data alone. This probe is the difference between "configured" and
     // "used".
-    await runCheck("fm-tier-never-fires", `apple-fm classified some rule-default capture in the last ${cfg.fmWindowHours}h (bridge healthy, ≥${cfg.fmMinCaptures} candidates)`, async () => {
+    //
+    // The count is "tier is anything but deterministic", not "tier is
+    // apple-fm": since PR 4 the tier recorded on a proposal is the PROVIDER
+    // that classified it, whatever compute.yaml called it, and a probe that
+    // pinned one spelling would report a healthy custom-named provider as a
+    // failure.
+    await runCheck("fm-tier-never-fires", `the on-device model tier classified some rule-default capture in the last ${cfg.fmWindowHours}h (bridge healthy, ≥${cfg.fmMinCaptures} candidates)`, async () => {
       const afm = bridgeOutcomes.find((o) => o.name === "apple-fm");
       if (!afm) return { status: "absent", meta: { configured: false } };
       if (afm.state !== "ok") return { meta: { bridge: afm.state, skipped: "bridge not healthy — bridge-degraded reports it" } };
       const { rows } = await db.query(
         `SELECT
-           count(*) FILTER (WHERE payload->>'tier' = 'apple-fm') AS fm,
+           count(*) FILTER (WHERE payload->>'tier' <> 'deterministic') AS fm,
            count(*) FILTER (WHERE payload->>'tier' = 'deterministic'
                               AND payload->'classification'->>'reason' = 'default'
                               AND coalesce(trim(payload->>'note'), '') <> '') AS rule_default
@@ -215,8 +221,8 @@ export async function runProbes(db: Db, cfg: ProbeConfig, fetchFn = fetch): Prom
       return {
         status: "degraded",
         remediation:
-          `apple-fm answers /check but inbox-drain never reaches it: in the last ${cfg.fmWindowHours}h the deterministic fallbacks outnumber apple-fm classifications (≥${cfg.fmMinCaptures} rule-default captures seen) — ` +
-          `check METISTRY_AFM_URL and METISTRY_BRIDGE_TOKEN_APPLE_FM in the console container's env (docker compose exec console env | grep AFM) and the console log for /classify errors`,
+          `apple-fm answers /check but inbox-drain never reaches it: in the last ${cfg.fmWindowHours}h the deterministic fallbacks outnumber model classifications (≥${cfg.fmMinCaptures} rule-default captures seen) — ` +
+          `check that compute.yaml declares the provider inbox-drain's manifest pins (\`metistry compute providers add --from applefm\`), that METISTRY_BRIDGE_TOKEN_APPLE_FM is in the console's env, and the console log for /v1/chat/completions errors`,
         meta: { ...counts },
       };
     }),

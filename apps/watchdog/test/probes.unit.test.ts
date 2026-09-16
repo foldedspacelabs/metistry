@@ -240,13 +240,16 @@ describe("probes over a fake db", () => {
     expect(silent.remediation).toContain('slow (never ran since watchdog start; schedule "@daily")');
   });
 
-  it("fm-tier-never-fires: healthy bridge + deterministic fallbacks outnumbering apple-fm = degraded, with the console-side fix", async () => {
+  it("fm-tier-never-fires: healthy bridge + deterministic fallbacks outnumbering the model = degraded, with the console-side fix", async () => {
     const db = fakeDb({ lastRuns: [{ component: "fast", kind: "collector_run", last: new Date() }], fmCounts: { fm: 0, rule_default: 7 } });
     const checks = await runProbes(db, await cfgFor(), bridgeFetch("ok"));
     const byName = Object.fromEntries(checks.map((c) => [c.name, c]));
     expect(byName["bridge-degraded"]!.status).toBe("ok");
     expect(byName["fm-tier-never-fires"]!.status).toBe("degraded");
-    expect(byName["fm-tier-never-fires"]!.remediation).toContain("METISTRY_BRIDGE_TOKEN_APPLE_FM in the console container");
+    // the fix is now two-sided: the provider has to be declared, AND the
+    // bearer has to be where the console can read it
+    expect(byName["fm-tier-never-fires"]!.remediation).toContain("metistry compute providers add --from applefm");
+    expect(byName["fm-tier-never-fires"]!.remediation).toContain("METISTRY_BRIDGE_TOKEN_APPLE_FM");
     expect(byName["fm-tier-never-fires"]!.meta).toEqual({ ruleDefault: 7, fm: 0 });
   });
 

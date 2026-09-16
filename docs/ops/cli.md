@@ -235,14 +235,16 @@ created` authored `Metistry <metistry@localhost>`:
   rules.yaml                router rules, seeded default
   identity.yaml             …and its instance_id: a v4 UUID minted once, the
                             Keychain account this instance's secrets file under
-  inbox/                    gitignored
+  Knowledge/Inbox/README.md where captures land — in the vault, so Obsidian
+                            sees them and git carries them (docs/ops/inbox.md)
   state/                    gitignored — .env, Postgres data, assistant state
   queries/ agents/ routines/ extensions/ instance-migrations/
                             tracked, empty (.gitkeep) — the D4 overlay reads
                             seed defaults until a same-named file lands here
   metistry.lock             product { version, commit, source } + updated_at +
                             migrations_applied; `metistry update` moves it
-  README.md  .gitignore     (inbox/, state/, .obsidian/workspace*)
+  README.md  .gitignore     (state/, .obsidian/workspace*,
+                            Knowledge/Inbox/.large/ — captures too big for git)
 ```
 
 It refuses a non-empty directory unless `--force`, never prompts, and
@@ -489,7 +491,7 @@ failed, and the message names the cursor to resume from.
 exist, which model each tier and crew runs on, and what each may spend:
 
 ```sh
-metistry compute providers add --from openrouter|zen|lmstudio|ollama
+metistry compute providers add --from openrouter|zen|lmstudio|ollama|llamaserver
 metistry compute models list [--provider <name>]
 metistry compute assign default lmstudio/google/gemma-3n-e4b
 metistry compute budget instance --monthly 60 --action stop
@@ -502,6 +504,35 @@ validate is refused rather than written. `providers add` reads the API key
 from stdin into the login Keychain (user scope) and never takes it as an
 argument. Nothing dials a provider or enforces a budget yet — see
 `docs/ops/compute.md`, which is the whole story including what is missing.
+
+### Local models
+
+`models list` is live `/v1/models` against every declared provider **and** a
+scan of the three local servers Metistry knows — LM Studio (1234), Ollama
+(11434) and the bundled `llama-server` (7813). One that is answering but
+that nothing dials is reported with the command that would wire it up, and
+`metistry doctor` carries the same finding as `local:lmstudio`,
+`local:ollama` and `local:llamaserver` rows. **Absent is never a failure.**
+
+```sh
+metistry compute models install lmstudio/qwen/qwen3-coder-30b
+metistry compute models install ollama/gemma3:4b
+metistry compute models install llamaserver/unsloth/gemma-3-4b-it-GGUF/gemma-3-4b-it-Q4_K_M.gguf
+metistry compute models load|unload lmstudio/qwen/qwen3-coder-30b [--ttl 3600]
+```
+
+Each is the server's own mechanism: `lms get` for LM Studio, `POST
+/api/pull` for Ollama, and for `llama-server` one HTTPS GET of a Hugging
+Face GGUF into `<instance>/state/models/`, checked against the sha256
+Hugging Face publishes and then written into `serve.model_path`. `load` and
+`unload` act for LM Studio only — the other two have no addressable load and
+say what actually governs their residency instead of reporting a success
+nobody caused. `METISTRY_HF_TOKEN` is only needed for a gated repo.
+
+A provider with a `serve:` block is one Metistry runs itself: `metistry up`
+gives it a supervisor child called `llamaserver`, so `metistry logs
+llamaserver` and `metistry restart llamaserver` work like any other service.
+Details, and what the schema refuses, in `docs/ops/compute.md`.
 
 ## Secrets: the Keychain is the store, `.env` is generated
 
@@ -1084,6 +1115,34 @@ release; it is `git` until releases exist. The parser is strict — a
 malformed lock is an error, not a guess — with one exception: the shape
 an earlier `metistry init` wrote (`version:` + `created:`) is read as a
 `git` pin and rewritten in the current shape on the next `update`.
+
+## Moving the inbox into the vault: `metistry migrate-inbox`
+
+An instance created before 2026-09-16 keeps its captures in a gitignored
+`<instance>/inbox/`, where Obsidian cannot see them and git does not carry
+them. One verb moves it (`docs/ops/inbox.md` has the why):
+
+```sh
+metistry migrate-inbox --dry-run     # the whole plan, nothing run
+metistry migrate-inbox               # do it
+metistry up                          # the verb restarts nothing itself
+```
+
+It moves `inbox/*` into `Knowledge/Inbox/` — `git mv` for what git tracks,
+a plain move for the rest, since the old inbox was ignored — drops `inbox/`
+from `.gitignore`, adds `Knowledge/Inbox/.large/` (captures too big for git),
+rewrites `inbox.path` rows to `Knowledge/Inbox/<file>`, and commits once in
+the instance repo. It is idempotent: a second run reports "already on the
+vault inbox" and changes nothing.
+
+A second instance that already moved its inbox to a **lowercase**
+`Knowledge/inbox/` is detected by reading the real directory entry — on a
+case-insensitive Mac `existsSync("Knowledge/Inbox")` answers true for it —
+and renamed through a temporary name, because `git mv Knowledge/inbox
+Knowledge/Inbox` would otherwise move the directory inside itself.
+
+`--instance <dir>` picks the instance; without it, `METISTRY_INSTANCE_DIR`.
+Obsidian needs no change: the vault root is still `Knowledge/`.
 
 ## Maintenance
 

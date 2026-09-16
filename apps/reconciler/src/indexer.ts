@@ -12,7 +12,7 @@ import { finishRun, startRun, type RunExecutor } from "@foldedspacelabs/metistry
 import type { Committer } from "./committer.js";
 import { EMPTY_SUMMARY, type Embeddings, type EmbedSummary } from "./embeddings.js";
 import type { Vault } from "./vault.js";
-import { basenameTitle, extractLinks, isConflictFile, isMarkdown, parseFrontmatter, resolveLink, sha256, type NoteLink, type NoteMeta } from "./notes.js";
+import { basenameTitle, extractLinks, inboxNoteFor, INBOX_PREFIX, isConflictFile, isInboxPath, isMarkdown, mimeForPath, parseFrontmatter, resolveLink, sha256, type NoteLink, type NoteMeta } from "./notes.js";
 
 export interface Db extends RunExecutor {
   query(text: string, values?: unknown[]): Promise<{ rows: Record<string, unknown>[]; rowCount?: number | null }>;
@@ -34,9 +34,20 @@ export interface ReconcileSummary {
   conflicts_new: number; // newly proposed this cycle
   links: number;
   external_edits: number; // paths swept into a `user` commit intent
+  /** `Knowledge/Inbox/` rows brought up to date this cycle (docs/ops/inbox.md). */
+  inbox: InboxSummary;
   /** Phase 6: vectors brought up to date this cycle. Absent when no embedder is configured. */
   embeddings?: EmbedSummary;
   duration_ms: number;
+}
+
+export interface InboxSummary {
+  /** files under `Knowledge/Inbox/` that had no triage row — a human's note, a `git pull` */
+  added: number;
+  /** rows whose file changed under them (re-triaged when they had already been classified) */
+  changed: number;
+  /** rows whose file is gone */
+  archived: number;
 }
 
 interface Scanned {
@@ -46,6 +57,8 @@ interface Scanned {
   meta: NoteMeta;
   links: NoteLink[];
   conflict: boolean;
+  /** kept only for `Knowledge/Inbox/` files, where the triage row wants a one-line note */
+  bytes?: Buffer;
 }
 
 export class Indexer {
@@ -97,7 +110,7 @@ export class Indexer {
         meta = parsed.meta;
         links = extractLinks(parsed.body);
       }
-      scanned.set(p, { path: p, hash: sha256(bytes), mtime: st.mtime, meta, links, conflict });
+      scanned.set(p, { path: p, hash: sha256(bytes), mtime: st.mtime, meta, links, conflict, ...(isInboxPath(p) ? { bytes } : {}) });
     }
 
     const { rows } = await this.db.query(`SELECT path, content_hash FROM knowledge_files`);
@@ -196,6 +209,10 @@ export class Indexer {
       if (ins.rows[0]) conflictsNew++;
     }
 
+    // the vault inbox: a file that appears or changes under
+    // `Knowledge/Inbox/` without a capture call is triage material too
+    const inbox = await this.syncInbox(scanned);
+
     // external edits: Obsidian (any device) writes straight to the tree;
     // nothing else can commit them. Paths with a pending bridge intent are
     // that principal's; conflict copies are flagged, not committed.
@@ -240,8 +257,69 @@ export class Indexer {
       conflicts_new: conflictsNew,
       links,
       external_edits: externalEdits,
+      inbox,
       ...(embeddings ? { embeddings } : {}),
       duration_ms: Date.now() - started,
     };
+  }
+
+  /**
+   * `Knowledge/Inbox/` is ordinary vault content — Obsidian adds to it, an
+   * editor refines it, a `git pull` brings someone else's capture in — and
+   * the triage queue has to see all of that, not only what came through
+   * `POST /capture` (docs/ops/inbox.md). This is that reconciliation, and it
+   * lives here because this is already the process that walks the tree and
+   * hashes it: no second watcher, no second holder of the repo (D5), and no
+   * new component talking to Postgres (invariant 3).
+   *
+   * - a file with no row → one `source: 'vault'` row, hashed and titled;
+   * - a row whose file changed → the new hash, and back to `new` when it had
+   *   already been classified or accepted: a human refinement is new
+   *   information, so the drain looks again. A `rejected` row stays
+   *   rejected — the user said no, and editing a file is not an appeal;
+   * - a row whose file is gone → `archived`, never deleted.
+   *
+   * `Knowledge/Inbox/.large/` (and any other dot-directory) is invisible to
+   * `walkKnowledge`, so rows pointing into it are left alone rather than
+   * archived the moment they are written.
+   */
+  private async syncInbox(scanned: Map<string, Scanned>): Promise<InboxSummary> {
+    const files = [...scanned.values()].filter((s) => isInboxPath(s.path) && !s.conflict);
+    const { rows } = await this.db.query(`SELECT id, path, sha256, status FROM inbox WHERE path LIKE $1`, [`${INBOX_PREFIX}/%`]);
+    const existing = new Map(rows.map((r) => [String(r.path), { id: Number(r.id), sha256: (r.sha256 as string | null) ?? null, status: String(r.status) }]));
+    const summary: InboxSummary = { added: 0, changed: 0, archived: 0 };
+
+    for (const f of files) {
+      const row = existing.get(f.path);
+      const note = f.bytes ? inboxNoteFor(f.path, f.bytes) : null;
+      if (!row) {
+        // ON CONFLICT: the capture path may have written this file a
+        // millisecond ago and be inserting its own (better) row right now.
+        const ins = await this.db.query(
+          `INSERT INTO inbox (source, path, mime, note, sha256) VALUES ('vault', $1, $2, $3, $4)
+           ON CONFLICT (path) WHERE path LIKE 'Knowledge/Inbox/%' DO NOTHING RETURNING id`,
+          [f.path, mimeForPath(f.path), note, f.hash],
+        );
+        if (ins.rows[0]) summary.added++;
+        continue;
+      }
+      if (row.sha256 === f.hash && row.status !== "archived") continue;
+      const reopen = row.status === "classified" || row.status === "accepted" || row.status === "archived";
+      await this.db.query(
+        `UPDATE inbox SET sha256 = $2, note = COALESCE($3, note), mime = COALESCE(mime, $4)${reopen ? ", status = 'new', proposal = NULL, triaged_at = NULL" : ""} WHERE id = $1`,
+        [row.id, f.hash, note, mimeForPath(f.path)],
+      );
+      summary.changed++;
+    }
+
+    const present = new Set(files.map((f) => f.path));
+    const gone = [...existing.entries()]
+      .filter(([p, r]) => !present.has(p) && r.status !== "archived" && !p.slice(INBOX_PREFIX.length + 1).startsWith("."))
+      .map(([p]) => p);
+    if (gone.length > 0) {
+      await this.db.query(`UPDATE inbox SET status = 'archived', triaged_at = now() WHERE path = ANY($1::text[])`, [gone]);
+      summary.archived = gone.length;
+    }
+    return summary;
   }
 }

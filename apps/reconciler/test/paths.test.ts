@@ -38,6 +38,21 @@ describe("protected paths (§4.7)", () => {
     expect(isProtected("Knowledge/identity.yaml")).toBe(false);
     expect(writeAllowed("Knowledge/Areas/Alpha.md", "assistant")).toBe(true);
   });
+
+  // The vault inbox (docs/ops/inbox.md) is ordinary vault content, not a
+  // protected path: the capture principal writes into it, the assistant
+  // reads it like the rest of Knowledge/, and the gitignored `.large/`
+  // spill is a directory name, not a `.git`-class refusal.
+  it("Knowledge/Inbox is writable by the capture principal, .large/ included", () => {
+    for (const p of ["Knowledge/Inbox/1757556000000-note.md", "Knowledge/Inbox/.large/1757556000000-clip.mov"]) {
+      expect(parseVaultPath(p).ok, p).toBe(true);
+      expect(isProtected(p), p).toBe(false);
+      expect(writeAllowed(p, "capture"), p).toBe(true);
+      expect(writeAllowed(p, "assistant"), p).toBe(true);
+    }
+    // ...and the casing rule still forbids the other spelling of it
+    expect(parseVaultPath("knowledge/Inbox/x.md")).toEqual({ ok: false, code: "invalid_request" });
+  });
 });
 
 describe("confine (filesystem)", () => {

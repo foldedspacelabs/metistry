@@ -41,12 +41,28 @@ data_policy:                         # REQUIRED, every field
 4. Restart the console; `GET /api/targets` shows the manifest with its live
    `check()` (`absent` until configured, `ok` once the probe passes).
 
-Two transports have a dispatcher today: `github` (below, via
-`POST /api/tasks/:id/dispatch`) and `local` (`targets/local-crew`, via the
-assistant's `agents_delegate` tool — `docs/ops/crews.md`; its policy is this
-target's `data_policy` narrowed by the crew's `scope`). Other transports
-validate and list, and `dispatch()` refuses them explicitly
+## The shipped targets
+
+| target | transport | goes out as | comes back as | doc |
+| --- | --- | --- | --- | --- |
+| `github-issues` | `github` | an issue in `METISTRY_GITHUB_DISPATCH_REPO` | status only — `github-state` closes the work row (`gh:owner/repo#n`) | [below](#the-first-target-github-issues) |
+| `local-crew` | `local` | a `work` row the assistant container's drain loop claims | whatever the crew reports, plus a `crew_run` row | `docs/ops/crews.md` |
+| `devin-sessions` | `http` (`submit.kind: devin-session`) | a Devin session (`devin:<session_id>`) | the structured answer as a `report` proposal, polled home by `collectors/devin-sessions` | `docs/ops/devin.md` |
+
+Three transports have a dispatcher today. `github` and `http` go through
+`POST /api/tasks/:id/dispatch` (the `user` principal only); `local` goes
+through the assistant's `agents_delegate` tool — its policy is that target's
+`data_policy` narrowed by the crew's `scope`. An `http` target whose
+`submit.kind` this console does not implement, and every other transport,
+validate and list, and `dispatch()` refuses them explicitly by name
 (`invalid_request`) — a registered target is never a silent no-op.
+
+`devin-sessions` is the first target whose **content** comes back, not just
+its status: `result.via: report_queue` is real there, where `github-issues`
+still carries it as a TODO. It is also the first with a real per-dispatch
+budget (Devin's `max_acu_limit`) and a machine-checkable return (a Draft-7
+`structured_output_schema`) — both reasons to prefer it over an issue for
+research. See `docs/ops/devin.md`, "Dispatch out".
 
 ## The data policy, precisely
 
@@ -122,7 +138,15 @@ psql ... -c "SELECT tool, count(*), sum(cost_usd) FROM runs WHERE kind='dispatch
 | route                              | auth            | body / result                                                                                      |
 | ---------------------------------- | --------------- | -------------------------------------------------------------------------------------------------- |
 | `GET /api/targets`                 | passkey session | `{ targets: [{ name, transport, submit, result, auth, cost, data_policy, check }], as_of }`         |
-| `POST /api/tasks/:id/dispatch`     | passkey session | `{ target, brief, sources? }` → `201 { ok, ref, url, run_id }`; `400` + `violations[]` on a policy refusal; `409` + `check` when the target is unavailable or the task is already bound/closed; `404` unknown task/target |
+| `POST /api/tasks/:id/dispatch`     | passkey session | `{ target, brief, sources?, purpose?, max_acu? }` → `201 { ok, ref, url, run_id }`; `400` + `violations[]` on a policy refusal (and on an unknown `purpose` or a non-positive `max_acu`); `409` + `check` when the target is unavailable or the task is already bound/closed; `404` unknown task/target |
+
+`purpose` is `work` (default) or `knowledge_research` — why the brief is
+going, which selects the preamble and is recorded on the runs row, the work
+row and the session's tags. Deliberately a field on the dispatch call rather
+than a new `work.kind`: `packages/tasks` owns two claimable kinds and
+`github-state` owns the rest, so a third would ripple for no gain.
+`max_acu` is the per-dispatch budget ceiling for targets that have one; it
+overrides the manifest's `submit.max_acu`.
 
 Owner tokens and agent tokens get a uniform `403` — dispatch is outbound and
 lives on the management surface (CRIT-7).

@@ -1,0 +1,61 @@
+# The first `transport: http` compute target (plan §4.18.B; W6 of
+# docs/plan-refresh-2026-09-13.md §4b). A work row is dispatched by creating
+# a Devin session; the answer comes back as a `report` proposal the owner
+# triages and the fold files (docs/ops/devin.md, "Dispatch out").
+#
+# Outbound-only: Metistry calls Devin and polls. Devin publishes no
+# completion webhook, so there is nothing inbound to expose — which is why
+# this target can ship before the tunnel question is settled.
+#
+# The data policy below is ENFORCED by the console's dispatch tool
+# (apps/console/src/dispatch.ts `checkBrief`) before a single byte leaves.
+name: devin-sessions
+type: target
+description: Dispatch a brief to a Devin session — debugging and knowledge research; the structured answer returns as a report proposal
+transport: http
+submit:
+  # Which HTTP dispatcher runs. `dispatch()` refuses an http target whose
+  # `kind` it does not implement rather than silently no-op'ing it.
+  kind: devin-session
+  # REST base. Unset falls back to the collector's own `DEVIN_API`
+  # (https://api.devin.ai) — the same constant collectors/devin-knowledge
+  # uses, so there is one Devin base URL in the repo, not two.
+  url: env:METISTRY_DEVIN_API_URL
+  # `org-…`. REQUIRED for dispatch even though the collector can resolve it
+  # from GET /v3/self: a session is a spend, and which organization it is
+  # charged to is not something to infer.
+  org: env:METISTRY_DEVIN_ORG_ID
+  # The budget. Devin's `max_acu_limit` is a per-session ceiling, and it is
+  # the ONLY budget this target has — deliberately small, raise per dispatch.
+  # TODO(compute-budgets): engine-side budgets are compute pivot PR 3
+  # (compute.yaml). When they land, this stays the target's own ceiling; the
+  # two intersect, they do not replace each other. Nothing partial here.
+  max_acu: 5
+result:
+  # The only return path (§4.18.B): the structured answer becomes a `report`
+  # proposal (source_agent devin, trust external) for the owner to triage.
+  via: report_queue
+  # Devin has NO outbound completion event (automations are inbound only), so
+  # status is polled by a collector of this name rather than pushed.
+  status_via: devin-sessions
+# The owner's own `cog_` key — the same one collectors/devin-knowledge reads.
+# Always an env reference, never a literal.
+auth: env:METISTRY_DEVIN_API_KEY
+cost:
+  # Devin bills in ACUs, not dollars, and the rate is per-contract. The real
+  # number that lands on the runs row is `acus_consumed`, read back per
+  # session (runs.meta), not this.
+  per_run_estimate_usd: 0
+data_policy:
+  # EMPTY ON PURPOSE. This is a third party with a train-on-your-data
+  # default; the product default therefore lets a brief cite NOTHING from the
+  # vault. An instance widens it in an overlay dir (METISTRY_TARGETS_DIRS,
+  # D4) to its own areas — never here.
+  allow: []
+  # comms never leaves the machine (§4.12). `devin` is denied too: Devin's
+  # own knowledge, once folded into the vault, must not be quietly
+  # re-exported as if it were ours (docs/ops/devin.md, "Two safety points").
+  deny_sources:
+    - comms
+    - devin
+  max_brief_bytes: 16384

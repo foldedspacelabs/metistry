@@ -116,42 +116,71 @@ describe("migrate-inbox (fixture instance repo)", () => {
     await expect(migrateInbox({ instanceDir: plain, out, openSession: async () => null })).rejects.toThrow(/not a git repository/);
   });
 
-  it.skipIf(!hasDb)("rewrites inbox.path rows to the repo-relative form, once", async () => {
-    const pool = new pg.Pool({
-      host: process.env.METISTRY_DB_HOST ?? "127.0.0.1",
-      port: Number(process.env.METISTRY_DB_PORT ?? 5432),
-      database: process.env.METISTRY_TEST_DB_NAME ?? "metistry_test",
-      user: process.env.METISTRY_DB_USER ?? "metistry",
-      password: process.env.METISTRY_DB_PASSWORD,
-      max: 1,
+  // Both tests below run migrateInbox's real UPDATE (REWRITE_PATHS_SQL) against
+  // the shared scratch db, and other suites hold rows in the same `inbox`
+  // table at the same time. So each test owns a `source` no other run can
+  // collide with (pid + timestamp + random, never a literal like 'mig-test'
+  // that a previous crashed run could have left behind), every assertion is
+  // filtered to that source, and cleanup happens in `afterAll` — never a
+  // TRUNCATE, which would take other suites' rows with it.
+  describe.skipIf(!hasDb)("inbox.path rewrite against the scratch db", () => {
+    let pool: pg.Pool;
+    const sources: string[] = [];
+    beforeAll(() => {
+      pool = new pg.Pool({
+        host: process.env.METISTRY_DB_HOST ?? "127.0.0.1",
+        port: Number(process.env.METISTRY_DB_PORT ?? 5432),
+        database: process.env.METISTRY_TEST_DB_NAME ?? "metistry_test",
+        user: process.env.METISTRY_DB_USER ?? "metistry",
+        password: process.env.METISTRY_DB_PASSWORD,
+        max: 1,
+      });
     });
-    try {
-      await pool.query(`DELETE FROM inbox WHERE source = 'mig-test'`);
-      await pool.query(`INSERT INTO inbox (source, path, sha256) VALUES ('mig-test', '1757000000000-note.md', $1), ('mig-test', 'inbox/1757000000001-old.md', $2), ('mig-test', 'Knowledge/Inbox/1757000000002-new.md', $3)`, [
-        "a".repeat(64),
-        "b".repeat(64),
-        "c".repeat(64),
-      ]);
+    afterAll(async () => {
+      for (const s of sources) await pool.query(`DELETE FROM inbox WHERE source = $1`, [s]).catch(() => {});
+      await pool.end();
+    });
+    /** A source this run owns exclusively; recorded so `afterAll` deletes exactly what it inserted. */
+    const ownSource = (label: string): string => {
+      const s = `mig-test-${label}-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      sources.push(s);
+      return s;
+    };
+    const openOn = (session: pg.PoolClient) => async () => ({ query: (t: string, v?: unknown[]) => session.query(t, v as never), end: async () => session.release() });
+
+    it("rewrites inbox.path rows to the repo-relative form, once", async () => {
+      const source = ownSource("rewrite");
+      await pool.query(
+        `INSERT INTO inbox (source, path, sha256) VALUES ($1, '1757000000000-note.md', $2), ($1, 'inbox/1757000000001-old.md', $3), ($1, 'Knowledge/Inbox/1757000000002-new.md', $4)`,
+        [source, "a".repeat(64), "b".repeat(64), "c".repeat(64)],
+      );
       const dir = await fixture();
       const session = await pool.connect();
-      const r = await migrateInbox({
-        instanceDir: dir,
-        out,
-        openSession: async () => ({ query: (t: string, v?: unknown[]) => session.query(t, v as never), end: async () => session.release() }),
-      });
+      const r = await migrateInbox({ instanceDir: dir, out, openSession: openOn(session) });
       expect(r.rowsRewritten).toBeGreaterThanOrEqual(2);
-      const { rows } = await pool.query(`SELECT path FROM inbox WHERE source = 'mig-test' ORDER BY path`);
+      const { rows } = await pool.query(`SELECT path FROM inbox WHERE source = $1 ORDER BY path`, [source]);
       expect(rows.map((x) => x.path)).toEqual([
         "Knowledge/Inbox/1757000000000-note.md",
         "Knowledge/Inbox/1757000000001-old.md",
         "Knowledge/Inbox/1757000000002-new.md", // already migrated: untouched, not double-prefixed
       ]);
-      // idempotent at the SQL level too
-      const second = await pool.query(REWRITE_PATHS_SQL);
+      // idempotent at the SQL level too — scoped to this run's own rows, so
+      // a concurrent suite inserting a legacy-shaped path elsewhere can
+      // never be mistaken for a row THIS run failed to rewrite
+      const second = await pool.query(`${REWRITE_PATHS_SQL} AND source = $1`, [source]);
       expect(second.rowCount).toBe(0);
-    } finally {
-      await pool.query(`DELETE FROM inbox WHERE source = 'mig-test'`).catch(() => {});
-      await pool.end();
-    }
+    });
+
+    it("two inbox rows would end up at the same path", async () => {
+      const source = ownSource("dup");
+      // 'inbox/dup.md' and 'Knowledge/inbox/dup.md' both rewrite to
+      // 'Knowledge/Inbox/dup.md' — the partial unique index (inbox_vault_path_uidx,
+      // db/migrations/0015_inbox_in_vault.sql) is what actually raises 23505 here.
+      await pool.query(`INSERT INTO inbox (source, path, sha256) VALUES ($1, 'inbox/dup.md', $2), ($1, 'Knowledge/inbox/dup.md', $3)`, [source, "d".repeat(64), "e".repeat(64)]);
+      const dir = await fixture();
+      const session = await pool.connect();
+      // migrateInbox releases the session itself (its own `finally`), on both branches
+      await expect(migrateInbox({ instanceDir: dir, out, openSession: openOn(session) })).rejects.toThrow(/two inbox rows would end up at the same Knowledge\/Inbox\/ path/);
+    });
   });
 });

@@ -92,6 +92,7 @@ manifest by test so the two cannot drift:
 | `tasks` | `tasks_list`, `tasks_claim`, `tasks_renew`, `tasks_update`, `tasks_release`, `tasks_close`, `tasks_create` — within `projects` | |
 | `artifacts` | `artifacts_publish`, `artifacts_get`, `artifacts_list`, `artifacts_comment`, `artifacts_resolve`, `artifacts_review` — within `projects` | |
 | `rooms` | `tasks_comment`, `tasks_thread` — the room on a task, within `projects` ([threads.md](threads.md)). Its own group, not part of `tasks`: speaking is a new power, so a crew gains it when you edit its manifest, never because a release widened `tasks`. A crew still *reads* the last of a room without this group — the brief carries it. | |
+| `actions` | `propose_action` — ask the console to dispatch a work row, patch a task, comment, or capture ([actions.md](actions.md)). Same rule as `rooms`, and **holding the tool is only half the gate**: the crew's `autonomy` record decides whether each kind is refused, proposed, or run on the spot, and with no `level` the answer is "refused" — so naming this group alone changes nothing. | |
 
 `knowledge_write`, `agents_delegate`, `queries_list` and `queries_run` are
 **not groups**. Naming any of them in `uses` is refused by the schema with
@@ -110,7 +111,10 @@ assistant.
 every tier); search their titles; report findings, decisions, gotchas and
 progress; capture; work the shared task list and publish artifacts inside
 its `projects`; with the `rooms` group, read and add to the room on a task
-([threads.md](threads.md)). Every call is one `runs` row on the crew's own id.
+([threads.md](threads.md)); with the `actions` group **and** an `autonomy`
+level you set, ask for — or, within that table, carry out — one of four
+actions ([actions.md](actions.md)). Every call is one `runs` row on the crew's
+own id.
 
 **Cannot:** write knowledge; dispatch crews; touch any protected path; reach
 a shell, the filesystem, the web, or a second MCP server; read outside its
@@ -125,6 +129,17 @@ external shape: TitleCase areas, bare `Knowledge/` refused — a crew is not
 the assistant). Its `projects` are the manifest's. At the bridge a crew
 authenticates like any external principal: `knowledge_write` and
 `agents_delegate` are "not granted", project membership is exactly its list.
+
+### Autonomy in the manifest
+
+`autonomy` may carry `level: observe | propose | act_within_scope` and an
+`actions: {<kind>: allow | propose | deny}` table beside the §4.21 narrowing
+keys ([actions.md](actions.md)). This is the one key in a crew manifest that
+can *widen* rather than narrow — which is admissible because `agents/` is a
+protected path (§4.7) that only your hand writes. The registry sync treats it
+exactly as the console route does: the raise lands in `runs` as
+`agent_admin` / `autonomy_widened` and puts one alert in Needs You. Absent =
+`observe` = nothing.
 
 ## How dispatch works
 

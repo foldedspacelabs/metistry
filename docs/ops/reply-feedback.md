@@ -7,17 +7,23 @@ in your name (invariant 2, plan §4.10).
 
 ## The Needs You queue's five verbs
 
-Every item in Needs You is a **request**, and a request has one of six types
+Every item in Needs You is a **request**, and a request has one of seven types
 (`glossary.md`). Whatever its type, these are the answers:
 
 | Verb | Wire (`proposals.decision`) | What it does | Ends the item? |
 | --- | --- | --- | --- |
-| **Approve** | `allow` | The verb with per-kind consequences: an `improvement` writes the prompt overlay, an enrolment lets the agent in, everything else is recorded and read by the evening fold. | yes |
+| **Approve** | `allow` | The verb with per-kind consequences: an `improvement` writes the prompt overlay, an enrolment lets the agent in, an **`action` runs** ([actions.md](actions.md)), everything else is recorded and read by the evening fold. | yes |
 | **Revise** | `accept_with_changes` | Keeps your reason on the row. An empty reason cancels rather than sends — the assistant has nothing to change without one. | yes |
 | **Decline** | `deny` | Also per-kind: declining an enrolment **revokes** the agent's token. Your reason is kept. | yes |
 | **Approve as Work** | `allow`, plus a `work` row | Only where the row carries `payload.suggested_work`. See below. | yes |
 | **Later** | *unchanged* — `snoozed_until` is set | A snooze. The row stays `pending`, leaves the queue, and comes back by itself (`METISTRY_SNOOZE_HOURS`, default 3). | **no** |
 | **Skip** | `deny`, `feedback = 'skipped'` | Declines it with nothing to say. Fires **none** of Decline's per-kind consequences. | yes |
+
+**An `action` is the second kind whose Approve *does* something**
+([actions.md](actions.md)): the console runs it through the same service call
+your own click would, and if that service refuses, the row stays pending
+carrying the error rather than settling a decision that did nothing. Only one
+at a time, for the same reason `improvement` is — see the batch note below.
 
 **Skip is not Decline.** The difference is what travels afterwards:
 
@@ -46,7 +52,8 @@ snooze does not outlive a fourteen-day clock.)
 (`POST /api/proposals/batch`); `l` and `s` are the keys. Only `later`, `skip`
 and `deny` may be batched — the verbs that need nothing from the individual
 row. Approve, Revise and Approve as Work each *do* something per kind, so they
-stay one at a time. The batch is **all-or-nothing per row**: each id is its own
+stay one at a time (an `action` most of all: a batched allow would dispatch
+five briefs on one gesture). The batch is **all-or-nothing per row**: each id is its own
 statement with its own result, so one item answered on the phone thirty seconds
 ago does not refuse the other nine.
 

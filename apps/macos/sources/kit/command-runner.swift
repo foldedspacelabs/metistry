@@ -46,11 +46,19 @@ public protocol CommandRunner: Sendable {
     /// Run `executable` with `arguments`, streaming output lines to `onOutput`
     /// as they arrive, and return the exit code with the full captured streams.
     /// Throws only when the process could not be started at all.
+    ///
+    /// `standardInput` is the ONE way a value reaches a verb without passing
+    /// through argv: `metistry compute providers add` reads an API key on
+    /// stdin so it is never in a command line, a shell history or a log
+    /// (compute-step.swift). `nil` — the default, and what every other verb
+    /// gets — means an EMPTY stdin, so a verb that would wait for a paste
+    /// fails fast instead of hanging a progress view forever.
     func run(
         executable: URL,
         arguments: [String],
         environment: [String: String],
         currentDirectory: URL?,
+        standardInput: String?,
         onOutput: @escaping @Sendable (OutputLine) -> Void
     ) async throws -> CommandResult
 }

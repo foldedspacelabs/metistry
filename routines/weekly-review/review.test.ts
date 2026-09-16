@@ -215,6 +215,6 @@ describe("weekly review", () => {
     expect(weekly).toContain("• AWS: no cost data");
     expect(monthly).toContain("• assistant (API-equivalent): 14.00 USD — opus 12.50, haiku 1.50");
     expect(monthly).toContain("• AWS: 80.00 USD — EC2 80.00");
-    expect(monthly).toContain("subscription headroom check");
+    expect(monthly).toContain("monthly spend check");
   });
 });

@@ -1,15 +1,15 @@
-// The crew runner's controls, without a live SDK call: the allowlist builder
-// is exhaustive against mcp-brain's manifest (every tool is in exactly one
-// group or is a never-tool), the option object carries the crew's model,
-// its per-run bearer, its tool groups and nothing else, and the runner maps
-// the SDK's result subtypes to outcomes. Pure functions plus a fake stream.
+// The crew runner's controls, without a live call: the allowlist builder is
+// exhaustive against mcp-brain's manifest (every tool is in exactly one group
+// or is a never-tool), the turn the engine is handed carries the crew's own
+// assignment, turns and budget and never a session to resume, and the runner
+// maps a stopped loop to an outcome. Pure functions plus a fake engine.
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { parse as parseYaml } from "yaml";
-import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { CREW_NEVER_TOOLS, CREW_TOOL_GROUPS } from "@foldedspacelabs/metistry-core";
+import { CREW_NEVER_TOOLS, CREW_TOOL_GROUPS, parseCompute, resolveAssignment } from "@foldedspacelabs/metistry-core";
 import { BRAIN_TOOLS, brainToolNames } from "../src/brain.js";
-import { buildCrewOptions, crewSystemPrompt, crewToolNames, crewUserPrompt, parseCrewSnapshot, runCrew, type CrewSnapshot } from "../src/crew.js";
+import { crewSystemPrompt, crewToolNames, crewUserPrompt, parseCrewSnapshot, runCrewOnEngine, type CrewSnapshot } from "../src/crew.js";
+import type { Engine, TurnResult, TurnSpec } from "../src/engine.js";
 
 const manifest = parseYaml(readFileSync(new URL("../../../packages/mcp-brain/manifest.yaml", import.meta.url), "utf8")) as { exposes: { name: string }[] };
 const seedFile = readFileSync(new URL("../../../seed/agents/example/researcher.md", import.meta.url), "utf8");
@@ -58,27 +58,6 @@ describe("allowlist from tool groups", () => {
 });
 
 describe("crew options", () => {
-  const brain = { url: "http://console:8080/mcp", token: "run-token-xyz" };
-
-  it("model + effort, per-run bearer on the ONE server, allowlist = exactly the groups, built-ins off, foreign MCP ignored, turns + budget from the manifest", () => {
-    const o = buildCrewOptions({ crew: researcher, brief: "b", brain, identity: { name: "Tester" } });
-    expect(o).toMatchObject({
-      model: "haiku",
-      effort: "low",
-      tools: [],
-      strictMcpConfig: true,
-      mcpServers: { brain: { type: "http", url: "http://console:8080/mcp", headers: { Authorization: "Bearer run-token-xyz" } } },
-      allowedTools: ["mcp__brain__knowledge_search", "mcp__brain__knowledge_read", "mcp__brain__knowledge_list", "mcp__brain__knowledge_grep", "mcp__brain__requests_create"],
-      permissionMode: "default",
-      maxTurns: 7,
-      maxBudgetUsd: 0.2,
-    });
-    expect(Object.keys(o.mcpServers ?? {})).toEqual(["brain"]);
-    expect(o.disallowedTools).toEqual(expect.arrayContaining(["Bash", "Write", "Edit", "WebFetch", "Task", "Agent"]));
-    expect("resume" in o).toBe(false); // every run is a fresh session
-    expect(o.allowedTools?.every((t) => t.startsWith("mcp__brain__"))).toBe(true);
-  });
-
   it("system prompt = the operating prompt templated from identity (never a hardcoded name) + the fixed trailer; user prompt = the brief + task handle", () => {
     const sys = crewSystemPrompt(researcher, { name: "Tester" });
     expect(sys.startsWith("You research for Tester.")).toBe(true);
@@ -107,38 +86,70 @@ describe("crew options", () => {
   });
 });
 
-function fakeStream(messages: unknown[]) {
-  return async function* () {
-    for (const m of messages) yield m as SDKMessage;
-  };
-}
-const init = { type: "system", subtype: "init", session_id: "sess-9" };
-const toolTurn = { type: "assistant", message: { content: [{ type: "tool_use", name: "mcp__brain__knowledge_read", id: "1", input: {} }, { type: "tool_use", name: "mcp__brain__requests_create", id: "2", input: {} }] } };
+// The crew's own assignment (collaboration rule 3): `assignments.crews.<name>`
+// decides the provider, and a crew nothing assigns never reaches here at all
+// — the drain parks its row (crew-drain.ts).
+const compute = parseCompute(`
+providers:
+  bench: { kind: openai-compatible, base_url: "http://127.0.0.1:1/v1", locality: on_machine }
+assignments:
+  default: { model: bench/generalist }
+  crews: { researcher: { model: bench/small, effort: low } }
+`);
+const assignment = resolveAssignment(compute, "crew:researcher")!;
 
-describe("runCrew (fake SDK)", () => {
+describe("runCrewOnEngine (fake engine)", () => {
   const input = { crew: researcher, brief: "do X", brain: { url: "http://c/mcp", token: "t" } };
-
-  it("success → ok with cost, tokens, tool tally, text length (never the text); the prompt + options reach the SDK", async () => {
-    let seen: { prompt: string; options: Record<string, unknown> } | null = null;
-    const sdk = (prompt: string, options: Record<string, unknown>) => {
-      seen = { prompt, options };
-      return fakeStream([init, toolTurn, { type: "result", subtype: "success", is_error: false, result: "the answer", num_turns: 3, total_cost_usd: 0.0123, usage: { input_tokens: 100, output_tokens: 40 }, session_id: "sess-9" }])();
-    };
-    const r = await runCrew(input, sdk as never);
-    expect(r).toEqual({ outcome: "ok", session_id: "sess-9", num_turns: 3, tokens_in: 100, tokens_out: 40, cost_usd: 0.0123, tools_used: { mcp__brain__knowledge_read: 1, mcp__brain__requests_create: 1 }, text_chars: 10 });
-    expect(seen!.prompt).toBe("do X");
-    expect(seen!.options).toMatchObject({ model: "haiku", effort: "low", maxTurns: 7, maxBudgetUsd: 0.2, allowedTools: crewToolNames(researcher.uses) });
-    expect("resume" in seen!.options).toBe(false); // decision 3: a crew run never resumes a prior session
+  const result = (over: Partial<TurnResult> = {}): TurnResult => ({
+    text: "the answer",
+    session_id: "sess-9",
+    tokens_in: 100,
+    tokens_out: 40,
+    cost_usd: 0.0123,
+    turns: 3,
+    tools_used: { mcp__brain__knowledge_read: 1, mcp__brain__requests_create: 1 },
+    ...over,
   });
 
-  it("error_max_budget_usd → max_budget; error_max_turns → max_turns; an is_error success → error with the text as the error; no result → throws", async () => {
-    const budget = await runCrew(input, fakeStream([init, { type: "result", subtype: "error_max_budget_usd", is_error: true, num_turns: 9, total_cost_usd: 0.21, usage: {}, session_id: "s", errors: ["budget"] }]) as never);
-    expect(budget).toMatchObject({ outcome: "max_budget", cost_usd: 0.21, num_turns: 9, errors: ["budget"] });
-    const turns = await runCrew(input, fakeStream([init, { type: "result", subtype: "error_max_turns", is_error: true, num_turns: 7, total_cost_usd: 0.05, usage: {}, session_id: "s", errors: [] }]) as never);
+  it("hands the engine the crew's assignment, turns and budget — never a session to resume — and reports the accounting, never the text", async () => {
+    let seen: { prompt: string; spec: TurnSpec } | null = null;
+    const engine: Engine = async (prompt, spec) => {
+      seen = { prompt, spec };
+      return result();
+    };
+    const r = await runCrewOnEngine(input, assignment, engine);
+    expect(r).toEqual({
+      outcome: "ok",
+      session_id: "sess-9",
+      num_turns: 3,
+      tokens_in: 100,
+      tokens_out: 40,
+      cost_usd: 0.0123,
+      tools_used: { mcp__brain__knowledge_read: 1, mcp__brain__requests_create: 1 },
+      text_chars: 10,
+    });
+    expect(seen!.prompt).toBe("do X");
+    expect(seen!.spec).toMatchObject({ model: "small", effort: "low", tier: "crew:researcher", maxTurns: 7, maxCostUsd: 0.2 });
+    expect(seen!.spec.assignment?.provider).toBe("bench");
+    expect(seen!.spec.thread).toBe("crew:researcher"); // its own thread, never a person's
+    expect(seen!.spec.resume).toBeUndefined(); // decision 3: a crew run never resumes a prior session
+  });
+
+  it("a stopped loop is an OUTCOME, not a throw: max_budget and max_turns come back with the accounting, and notes ride as errors", async () => {
+    const stopped = async (over: Partial<TurnResult>) => runCrewOnEngine(input, assignment, async () => result(over));
+    expect(await stopped({ stopped: "max_budget", cost_usd: 0.21, turns: 9, notes: ["budget"] })).toMatchObject({ outcome: "max_budget", cost_usd: 0.21, num_turns: 9, errors: ["budget"] });
+    const turns = await stopped({ stopped: "max_turns", turns: 7 });
     expect(turns).toMatchObject({ outcome: "max_turns" });
     expect("errors" in turns).toBe(false);
-    const apiErr = await runCrew(input, fakeStream([init, { type: "result", subtype: "success", is_error: true, result: "API 529", num_turns: 1, total_cost_usd: 0, usage: {}, session_id: "s" }]) as never);
-    expect(apiErr).toMatchObject({ outcome: "error", errors: ["API 529"], text_chars: 7 });
-    await expect(runCrew(input, fakeStream([init]) as never)).rejects.toThrow(/no result message/);
+    // the veto still ANSWERS, so it is an ordinary run as far as the queue is concerned
+    expect(await stopped({ stopped: "veto" })).toMatchObject({ outcome: "ok" });
+  });
+
+  it("an infrastructure failure is the engine's to throw — the drain decides retry or park, not this function", async () => {
+    await expect(
+      runCrewOnEngine(input, assignment, async () => {
+        throw new Error("provider down");
+      }),
+    ).rejects.toThrow(/provider down/);
   });
 });

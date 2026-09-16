@@ -245,11 +245,14 @@ public struct PasskeyDiagnosticView: View {
 
 // MARK: - Step 7
 
-public struct ClaudeStepView: View {
+/// Choosing where the assistant's turns run. Three cards and a way out: the
+/// provider, the model, and — where the provider needs one — a secure field
+/// whose value goes to the CLI's STDIN and nowhere else (compute-step.swift).
+public struct ComputeStepView: View {
     @Environment(\.colorScheme) private var scheme
-    private let model: ClaudeTokenModel
+    @Bindable private var model: ComputeStepModel
 
-    public init(model: ClaudeTokenModel) {
+    public init(model: ComputeStepModel) {
         self.model = model
     }
 
@@ -257,98 +260,107 @@ public struct ClaudeStepView: View {
         let p = Palette(scheme)
         VStack(alignment: .leading, spacing: MetistrySpace.s4) {
             VStack(alignment: .leading, spacing: MetistrySpace.s3) {
-                FactRow(
-                    "claude",
-                    model.claudeBinary?.path ?? "not found",
-                    mono: true,
-                    role: model.claudeBinary == nil ? .absent : .textPrimary
-                )
-                if model.claudeBinary == nil {
-                    Text(ClaudeCodeLocator.notFoundReason)
+                Text("Provider").metistryText(.headline, p)
+                Picker("", selection: $model.template) {
+                    ForEach(ComputeTemplate.allCases) { t in
+                        Text(t.label).tag(t)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                Text(model.template.detail)
+                    .metistryText(.caption1, p, .textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .metistryCard(p)
+
+            VStack(alignment: .leading, spacing: MetistrySpace.s3) {
+                Text("Model").metistryText(.headline, p)
+                TextField("model id", text: $model.model)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.body, design: .monospaced))
+                Text("The id as \(model.template.label) knows it. It becomes `assignments.default` in compute.yaml — one pinned `<provider>/<model>`, never an auto-router: no model decides which model runs.")
+                    .metistryText(.caption1, p, .textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if !model.modelRef.isEmpty {
+                    FactRow("Will assign", model.modelRef, mono: true)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .metistryCard(p)
+
+            if model.template.needsKey {
+                VStack(alignment: .leading, spacing: MetistrySpace.s3) {
+                    Text("API Key").metistryText(.headline, p)
+                    SecureField("paste your \(model.template.label) key", text: $model.apiKey)
+                        .textFieldStyle(.roundedBorder)
+                    Text(ComputeStepModel.keyNote)
                         .metistryText(.caption1, p, .textTertiary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .metistryCard(p)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .metistryCard(p)
 
             VStack(alignment: .leading, spacing: MetistrySpace.s3) {
-                Text("Sign In to Claude").metistryText(.headline, p)
-                CommandCard(
-                    title: "Opens a terminal on",
-                    argument: model.setupCommand.map { [$0] },
-                    placeholder: "nothing — there is no claude to run"
-                )
-                Text("It opens a browser and waits for you, which is why it runs in a terminal rather than behind a progress bar: this app hands every command it runs an empty input, so nothing it spawns can sit waiting for an answer.")
-                    .metistryText(.caption1, p, .textTertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-                HStack(spacing: MetistrySpace.s3) {
-                    Button("Open a Terminal and Sign In") { Task { await model.signIn() } }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(model.setupCommand == nil || model.phase == .awaitingLogin)
-                    Button("Check") { Task { await model.check() } }
-                        .disabled(model.phase == .checking)
+                ForEach(Array(model.plannedCommands.enumerated()), id: \.offset) { _, command in
+                    CommandCard(title: "Runs", argument: command)
                 }
+                HStack(spacing: MetistrySpace.s3) {
+                    Button("Add and Assign") { Task { await model.apply() } }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(!model.canApply)
+                    Button("Skip: No Engine Yet") { model.skip() }
+                }
+                statusCard(p)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .metistryCard(p)
 
-            VStack(alignment: .leading, spacing: MetistrySpace.s3) {
-                Text("Then, in the Same Terminal").metistryText(.headline, p)
-                CommandCard(title: "Run", argument: [ClaudeTokenModel.importCommand])
-                Text("`claude setup-token` leaves the token where Claude Code keeps it. That carries it into the login Keychain, which is where every service is started from. It is user-scoped — one Claude login per Mac, shared by every instance.")
-                    .metistryText(.caption1, p, .textTertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .metistryCard(p)
-
-            statusCard(p)
-
-            Text(ClaudeTokenModel.note)
+            Text(ComputeStepModel.skipNote)
                 .metistryText(.caption1, p, .textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
+
+            if !model.output.isEmpty {
+                OutputLogView(lines: model.output)
+            }
         }
     }
 
+    @ViewBuilder
     private func statusCard(_ p: Palette) -> some View {
         VStack(alignment: .leading, spacing: MetistrySpace.s2) {
-            Text(ClaudeTokenModel.variable).metistryText(.mono, p)
             switch model.phase {
-            case .set(let scope):
+            case .assigned(let ref):
                 HStack(spacing: MetistrySpace.s2) {
                     StatusDot(.ok)
-                    Text("set — \(scope)").metistryText(.footnote, p, .ok)
+                    Text("assigned — turns run on \(ref)").metistryText(.footnote, p, .ok)
                 }
-            case .awaitingLogin:
+            case .working(let what):
                 HStack(spacing: MetistrySpace.s2) {
                     ProgressView().controlSize(.small)
-                    Text("watching for it — check \(model.polls) of \(ClaudeTokenModel.pollLimit)")
-                        .metistryText(.footnote, p, .textSecondary)
-                        .monospacedDigit()
+                    Text(what).metistryText(.footnote, p, .textSecondary)
                 }
-            case .checking:
-                HStack(spacing: MetistrySpace.s2) {
-                    ProgressView().controlSize(.small)
-                    Text("reading `metistry secrets list --json`…").metistryText(.footnote, p, .textSecondary)
-                }
-            case .notSet(let why):
+            case .skipped:
                 HStack(alignment: .top, spacing: MetistrySpace.s2) {
                     StatusDot(.absent)
-                    Text(why).metistryText(.footnote, p, .textSecondary).fixedSize(horizontal: false, vertical: true)
+                    Text("no engine — the assistant will not be started, and everything else will").metistryText(.footnote, p, .textSecondary)
                 }
-            case .unavailable(let why):
-                Text(why).metistryText(.footnote, p, .textSecondary).fixedSize(horizontal: false, vertical: true)
             case .failed(let why):
-                UnavailableCard(what: "Could not tell", reason: why, command: model.lastCommand)
+                UnavailableCard(what: "Could not set compute", reason: why, command: model.lastCommand)
             case .idle:
-                Text("not checked yet").metistryText(.footnote, p, .textTertiary)
+                HStack(alignment: .top, spacing: MetistrySpace.s2) {
+                    StatusDot(model.isSet ? .ok : .absent)
+                    Text(model.report?.engineSummary ?? "not read yet")
+                        .metistryText(.footnote, p, .textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             if let command = model.lastCommand {
                 Text(command).metistryText(.caption1, p, .textTertiary).textSelection(.enabled)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .metistryCard(p)
     }
 }

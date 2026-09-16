@@ -32,9 +32,12 @@ engine that dials a provider. Deliberately still absent, each a named PR in
 - **No shadow mode.** Running a `default` turn again on a candidate with
   tools stubbed, to compare, is the bake-off's stage 2.
 
-Until you write `assignments:`, **`rules.yaml`'s `tiers:` block is still the
-live map** and turns run on the Claude Agent SDK, exactly as before. That is
-why the seed's `seed/compute.yaml` ships entirely commented out.
+Until you write `assignments:`, **there is no engine**: `metistry up` does not
+start the assistant, `metistry doctor` reports `assistant: absent`, and
+captures, tasks, search and the console all keep running while queued turns
+wait (docs/ops/assistant-tools.md, "Running without an engine"). That is why
+the seed's `seed/compute.yaml` ships entirely commented out — a seed that
+assigned a model would spend somebody's money on an assumption.
 
 ## The file
 
@@ -184,15 +187,21 @@ model should run (invariant 4).
 
 | kind | engine | when |
 | --- | --- | --- |
-| `openai-compatible` | the in-house loop, `engine-openai.ts` | the tier or crew has an `assignments:` entry |
-| `anthropic` | the Claude Agent SDK, `engine-sdk.ts` | nothing in `compute.yaml` assigns it |
+| `openai-compatible` | the in-house loop, `engine-openai.ts` | always — it is the only kind |
 
-`anthropic` is not a kind you can write in the file — it is the *absence* of
-an assignment, and it leaves the product with the subscription scrub. Because
-an unknown tier resolves to `assignments.default`, an install that assigns
-anything assigns everything: write a `default` and no turn can reach the SDK
-path, which is why the assistant then starts without an engine credential at
-all.
+**One kind, one wire protocol** (C2). Claude arrives through OpenRouter like
+any other cloud model; there is no second engine, and nothing in the product
+brushes a vendor SDK. `kind` stays a field rather than being dropped because a
+later one — a bundled `llama-server` with GBNF grammars, a native Messages
+adapter — is then an additive change to an enum instead of a schema rewrite,
+and because a file naming an unknown kind must fail loudly rather than be
+treated as OpenAI-shaped.
+
+There is no engine for a turn nothing assigns. Because an unknown tier
+resolves to `assignments.default`, an install that assigns anything assigns
+everything: write a `default` and every turn has somewhere to run. Write
+nothing and the assistant is not started at all — a supported shape, reported
+as `absent`, never as a failure.
 
 **The loop**, about 300 lines over `fetch`, the MCP client and zod — no new
 dependency (C4):

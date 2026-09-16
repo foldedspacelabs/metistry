@@ -8,7 +8,7 @@
 // Every miss names the environment variable that would fix it: a refusal
 // that does not tell you the knob is a riddle.
 
-import { engineCredentialPresent, ENGINE_CREDENTIAL_VAR } from "./deployment.js";
+import { COMPUTE_FILENAME, emptyCompute, engineStatus, type Compute } from "./compute.js";
 import type { Requirements } from "./manifest.js";
 
 export const DEFAULT_PREFLIGHT_TIMEOUT_MS = 3_000;  // limit: fixed — the default every caller may pass timeoutMs over
@@ -42,6 +42,13 @@ export interface PreflightResult {
 
 export interface PreflightOptions {
   env: NodeJS.ProcessEnv;
+  /**
+   * The compute configuration in force, for the `requires.engine` check
+   * (C2/C3): an engine is `assignments.default` plus its provider's secret,
+   * not an environment variable. Absent = an empty file, which is an install
+   * that assigns nothing and therefore has no engine.
+   */
+  compute?: Compute;
   fetchFn?: typeof fetch;
   timeoutMs?: number;
   /**
@@ -77,11 +84,18 @@ export async function preflight(req: Requirements, opts: PreflightOptions): Prom
     if (trimmed(opts.env, name) === "") missing.push({ name, why: `${name} is unset` });
   }
 
-  if (req.engine && !engineCredentialPresent(opts.env)) {
-    missing.push({
-      name: ENGINE_CREDENTIAL_VAR,
-      why: `${ENGINE_CREDENTIAL_VAR} is unset, and this run would enqueue an assistant turn nothing would answer`,
-    });
+  if (req.engine) {
+    const engine = engineStatus(opts.compute ?? emptyCompute(), opts.env);
+    if (!engine.ok) {
+      missing.push({
+        // The secret's NAME when the file names one and it is unset (an
+        // environment miss like any other); the file itself when nothing is
+        // assigned at all, because there is no variable to blame.
+        name: engine.secret ?? COMPUTE_FILENAME,
+        why: `${engine.why}, and this run would enqueue an assistant turn nothing would answer`,
+        ...(engine.secret ? {} : { fix: engine.fix as string }),
+      });
+    }
   }
 
   if (req.engine && opts.budget) {

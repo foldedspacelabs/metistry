@@ -156,9 +156,9 @@ public struct WizardView: View {
         case .door:
             PasskeyStepView(steps: steps)
                 .task(id: consoleURL) { steps.passkey.adopt(consoleURL: consoleURL) }
-        case .claude:
-            ClaudeStepView(model: steps.claude)
-                .task { await steps.claude.check() }
+        case .compute:
+            ComputeStepView(model: steps.compute)
+                .task { await steps.compute.refresh() }
         }
         if !step.hasOwnScreen {
             runRow(step, p)

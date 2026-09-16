@@ -556,8 +556,7 @@ of a secret copy is how a Keychain gets overwritten with placeholders.
 **What counts as a secret** is the name: anything ending `_TOKEN`,
 `_PASSWORD`, `_PRIVATE`, `_SECRET` or `_KEY`; anything carrying `_TOKEN_`,
 `_PASSWORD_` or `_SECRET_` mid-name (the per-bridge variables are
-`METISTRY_BRIDGE_TOKEN_<NAME>`); plus
-`CLAUDE_CODE_OAUTH_TOKEN` by name. So `METISTRY_VAPID_PRIVATE` is one and
+`METISTRY_BRIDGE_TOKEN_<NAME>`). So `METISTRY_VAPID_PRIVATE` is one and
 `METISTRY_VAPID_PUBLIC` is not; `METISTRY_AWS_SECRET_ACCESS_KEY` is one
 and `METISTRY_AWS_ACCESS_KEY_ID` is not. The names themselves come from
 your `.env` plus `.env.example`, including the commented-out
@@ -592,7 +591,7 @@ cannot disagree:
 | scope | account | which variables |
 | --- | --- | --- |
 | **instance** | the instance's `instance_id` | `METISTRY_DB_PASSWORD`, `METISTRY_LOCAL_OWNER_TOKEN`, every `METISTRY_BRIDGE_TOKEN_*`, `METISTRY_ASSISTANT_TOKEN`, `METISTRY_VAPID_*`, `METISTRY_GITHUB_*` — **and anything not listed**, because self-containment is the rule |
-| **user** | `metistry` (override: `METISTRY_KEYCHAIN_ACCOUNT`) | `CLAUDE_CODE_OAUTH_TOKEN` (one Claude login per Mac), `METISTRY_AWS_SECRET_ACCESS_KEY`, `METISTRY_AWS_SESSION_TOKEN` (your AWS account, not this instance's) |
+| **user** | `metistry` (override: `METISTRY_KEYCHAIN_ACCOUNT`) | every `METISTRY_*_API_KEY` (a compute provider credential named by `compute.yaml`'s `auth.secret` — your account with that provider, shared by every instance on this Mac), `METISTRY_DEVIN_API_KEY`, `METISTRY_AWS_SECRET_ACCESS_KEY`, `METISTRY_AWS_SESSION_TOKEN` (your AWS account, not this instance's) |
 
 `METISTRY_SIGN_IDENTITY` and `METISTRY_GITHUB_OAUTH_CLIENT_ID` are not
 secrets; they stay plain `.env`/config values.

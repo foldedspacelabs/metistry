@@ -52,8 +52,11 @@ path.
      `ASAuthorization` path is still written and still runs the moment an
      install qualifies; the probe that measures why none does yet moved to
      Settings → Advanced.
-  7. `claude setup-token` in a terminal the app opens, then a watch on
-     `metistry secrets list --json` for `CLAUDE_CODE_OAUTH_TOKEN`.
+  7. **Compute** — pick a provider template, paste its API key into a secure
+     field, name a model, and the app runs `metistry compute providers add
+     --from <template> --json` (key on stdin) then `metistry compute assign
+     default <provider/model> --json`. "Skip: no engine yet" is a real
+     choice, with its consequence on screen.
 
   Steps 6 and 7 are the two that are **not** a `metistry` verb, so they own
   their own screens rather than being forced through the generic run row
@@ -290,33 +293,39 @@ item rather than nested.
 
 A terminal install keeps `~/Library/LaunchAgents` and needs none of this.
 
-## Step 7: the Claude token, and what the app never touches
+## Step 7: choosing compute, and what the app never stores
 
-`claude setup-token` opens a browser and waits. The app hands every child an
-**empty stdin** on purpose (`sources/app/process-command-runner.swift`) so no
-verb can hang a progress view waiting for input — which means the app
-structurally cannot drive this one. Rather than fake a progress bar over
-something it is not driving, it opens the command where the person can answer it.
+The step is a provider template, a model id and — where the provider needs one
+— an API key. It runs two verbs in order and implements neither
+(`sources/kit/compute-step.swift`):
 
-**A `.command` file, not AppleScript.** Telling Terminal to `do script` is
-automation, which means an Apple Events TCC prompt and a permission this app
-otherwise needs none of (the entitlements file's whole argument is that it
-touches no TCC-protected resource itself). A `.command` file is just a document
-macOS opens with whichever terminal the person has set as the handler — no
-entitlement, no prompt, their choice honoured. It is written `0700` into the
-app's own caches directory and contains one command line the app already shows on
-screen.
+```
+metistry compute providers add --from <openrouter|zen|lmstudio|ollama|llamaserver> --json
+metistry compute assign default <provider>/<model> --json
+```
 
-Then the app polls `metistry secrets list --json` for
-`CLAUDE_CODE_OAUTH_TOKEN` — every 4 seconds, 60 times, and it **says so when it
-gives up** rather than quietly stopping. `metistry secrets sync --to keychain` is
-shown as the exact command that carries the token from where Claude Code left it
-into the login Keychain, which is user-scoped: one Claude login per Mac, shared
-by every instance (`packages/cli/src/secrets.ts`'s `SECRET_SCOPES`).
+**The key goes to stdin, never to argv.** The app hands every child an **empty
+stdin** by default (`sources/app/process-command-runner.swift`) so no verb can
+hang a progress view waiting for input. `compute providers add` is the one
+exception, and it is the reason the seam exists: its whole design is "read the
+value on stdin so it is never in a command line, a shell history or a log".
+The pipe is written once and closed at once — the child gets one value and EOF,
+never a prompt it can sit at. The `SecureField`'s property is cleared *before*
+the process runs, so nothing observable holds it for longer than one statement,
+and a test asserts both halves: the key appears in no argument of any call, and
+the runner was handed it as `standardInput`.
 
-**The app never handles the value.** Not in a field, not in a variable, not in a
-log line. Everything it knows about that secret is a boolean, and the verb it
-asks has no code path that can print one.
+Everything the app knows afterwards is what `metistry compute show --json`
+reports: the provider's `auth.secret` **name**, and whether an item of that name
+is in the Keychain. The verb has no code path that can print a value, and
+`ComputeProviderFacts` has no field that could hold one.
+
+**Skipping is a supported install, and says so.** With no `assignments.default`
+there is no engine: `metistry up` does not start the assistant, `metistry
+doctor` reports `assistant: absent`, and captures, tasks, search and the console
+keep working while queued turns wait (docs/ops/assistant-tools.md, "Running
+without an engine"). The step offers that as a button with the consequence
+written down, not as a dead end — and Settings → Compute adds one later.
 
 ## Settings: persisted vs read-through
 

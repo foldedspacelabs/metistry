@@ -21,9 +21,9 @@ const ENV_TEXT = `# Metistry environment — copy to .env and fill in.
 METISTRY_DB_HOST=127.0.0.1
 METISTRY_DB_PASSWORD=change-me
 
-# --- assistant container auth ---
-# Mint with \`claude setup-token\`; never bake into an image.
-CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat-EXAMPLE
+# --- compute: the engine's provider key (docs/ops/compute.md) ---
+# Named by compute.yaml's providers.<name>.auth.secret; never bake into an image.
+METISTRY_OPENROUTER_API_KEY=sk-or-v1-EXAMPLE
 
 # Web push (PoC-6). The subject must be a REAL mailto: contact.
 METISTRY_VAPID_PUBLIC=BPublicKeyIsNotASecret
@@ -76,7 +76,7 @@ async function envFile(text = ENV_TEXT): Promise<string> {
 
 describe("isSecretVar", () => {
   it("catches the secret-shaped names and leaves the public ones alone", () => {
-    for (const n of ["METISTRY_DB_PASSWORD", "METISTRY_GITHUB_TOKEN", "METISTRY_VAPID_PRIVATE", "METISTRY_ASSISTANT_TOKEN", "METISTRY_AWS_SECRET_ACCESS_KEY", "METISTRY_BRIDGE_TOKEN_RECONCILER", "CLAUDE_CODE_OAUTH_TOKEN"]) {
+    for (const n of ["METISTRY_DB_PASSWORD", "METISTRY_GITHUB_TOKEN", "METISTRY_VAPID_PRIVATE", "METISTRY_ASSISTANT_TOKEN", "METISTRY_AWS_SECRET_ACCESS_KEY", "METISTRY_BRIDGE_TOKEN_RECONCILER", "METISTRY_OPENROUTER_API_KEY"]) {
       expect(isSecretVar(n), n).toBe(true);
     }
     for (const n of ["METISTRY_VAPID_PUBLIC", "METISTRY_VAPID_SUBJECT", "METISTRY_DB_HOST", "METISTRY_GITHUB_REPOS", "METISTRY_GITHUB_OAUTH_CLIENT_ID", "METISTRY_AWS_ACCESS_KEY_ID"]) {
@@ -93,11 +93,11 @@ describe("metistry secrets sync", () => {
     const opts = { envFile: file, exec: kc.exec, out: (l: string) => lines.push(l), platform: "darwin" as const, env: {} };
 
     const imported = await syncSecrets("keychain", opts);
-    expect(imported.changed).toEqual(["METISTRY_DB_PASSWORD", "CLAUDE_CODE_OAUTH_TOKEN", "METISTRY_VAPID_PRIVATE"]);
+    expect(imported.changed).toEqual(["METISTRY_DB_PASSWORD", "METISTRY_OPENROUTER_API_KEY", "METISTRY_VAPID_PRIVATE"]);
     expect(imported.skipped).toEqual(["METISTRY_GITHUB_TOKEN"]); // declared but commented out, so nothing to import
     expect(Object.fromEntries(kc.store)).toEqual({
       [key(USER, "METISTRY_DB_PASSWORD")]: "change-me",
-      [key(USER, "CLAUDE_CODE_OAUTH_TOKEN")]: "sk-ant-oat-EXAMPLE",
+      [key(USER, "METISTRY_OPENROUTER_API_KEY")]: "sk-or-v1-EXAMPLE",
       [key(USER, "METISTRY_VAPID_PRIVATE")]: "vapid-private-EXAMPLE",
     });
     // importing never touches the file
@@ -108,7 +108,7 @@ describe("metistry secrets sync", () => {
     // now rotate one in the Keychain and regenerate .env from it
     kc.store.set(key(USER, "METISTRY_DB_PASSWORD"), "rotated-in-the-keychain");
     const back = await syncSecrets("env", opts);
-    expect(back.changed.sort()).toEqual(["CLAUDE_CODE_OAUTH_TOKEN", "METISTRY_DB_PASSWORD", "METISTRY_VAPID_PRIVATE"]);
+    expect(back.changed.sort()).toEqual(["METISTRY_DB_PASSWORD", "METISTRY_OPENROUTER_API_KEY", "METISTRY_VAPID_PRIVATE"]);
     expect(back.skipped).toEqual(["METISTRY_GITHUB_TOKEN"]);
 
     const after = readFileSync(file, "utf8");
@@ -162,12 +162,12 @@ describe("metistry secrets sync", () => {
   });
 
   it("mints only the generated names — a missing third-party secret is still reported, never invented", async () => {
-    const file = await envFile("METISTRY_GITHUB_TOKEN=\nCLAUDE_CODE_OAUTH_TOKEN=\nMETISTRY_BRIDGE_TOKEN_RECONCILER=\n");
+    const file = await envFile("METISTRY_GITHUB_TOKEN=\nMETISTRY_OPENROUTER_API_KEY=\nMETISTRY_BRIDGE_TOKEN_RECONCILER=\n");
     const kc = fakeSecurity();
     const r = await syncSecrets("env", { envFile: file, instanceId: INSTANCE_ID, exec: kc.exec, out: () => {}, platform: "darwin", env: {} });
     expect(r.minted).toEqual([]);
-    expect(r.skipped.sort()).toEqual(["CLAUDE_CODE_OAUTH_TOKEN", "METISTRY_BRIDGE_TOKEN_RECONCILER", "METISTRY_GITHUB_TOKEN"]);
-    expect(readFileSync(file, "utf8")).toBe("METISTRY_GITHUB_TOKEN=\nCLAUDE_CODE_OAUTH_TOKEN=\nMETISTRY_BRIDGE_TOKEN_RECONCILER=\n");
+    expect(r.skipped.sort()).toEqual(["METISTRY_BRIDGE_TOKEN_RECONCILER", "METISTRY_GITHUB_TOKEN", "METISTRY_OPENROUTER_API_KEY"]);
+    expect(readFileSync(file, "utf8")).toBe("METISTRY_GITHUB_TOKEN=\nMETISTRY_OPENROUTER_API_KEY=\nMETISTRY_BRIDGE_TOKEN_RECONCILER=\n");
   });
 
   it("uncomments a documented-but-unset declaration in place", () => {
@@ -227,21 +227,21 @@ describe("the scope table", () => {
     for (const n of ["METISTRY_DB_PASSWORD", "METISTRY_BRIDGE_TOKEN_RECONCILER", "METISTRY_BRIDGE_TOKEN_APPLE_FM", "METISTRY_ASSISTANT_TOKEN", "METISTRY_VAPID_PRIVATE", "METISTRY_GITHUB_TOKEN", "METISTRY_GITHUB_WRITE_TOKEN"]) {
       expect(scopeFor(n), n).toBe("instance");
     }
-    for (const n of ["CLAUDE_CODE_OAUTH_TOKEN", "METISTRY_AWS_SECRET_ACCESS_KEY", "METISTRY_AWS_SESSION_TOKEN"]) {
+    for (const n of ["METISTRY_OPENROUTER_API_KEY", "METISTRY_AWS_SECRET_ACCESS_KEY", "METISTRY_AWS_SESSION_TOKEN"]) {
       expect(scopeFor(n), n).toBe("user");
     }
     // self-containment is the rule, so anything unlisted belongs to the instance
     expect(scopeFor("METISTRY_SOMETHING_NEW_TOKEN")).toBe("instance");
     expect(DEFAULT_SCOPE).toBe("instance");
     for (const r of SECRET_SCOPES) expect(r.why.length).toBeGreaterThan(10);
-    expect(scopeReason("CLAUDE_CODE_OAUTH_TOKEN")).toContain("subscription");
+    expect(scopeReason("METISTRY_OPENROUTER_API_KEY")).toContain("compute provider credential");
     expect(scopeReason("METISTRY_SOMETHING_NEW_TOKEN")).toContain("default");
   });
 
   it("accountFor sends instance-scoped items to the instance_id and user-scoped ones to the user account", () => {
     const accounts = { user: "metistry", instance: INSTANCE_ID };
     expect(accountFor("METISTRY_DB_PASSWORD", accounts)).toBe(INSTANCE_ID);
-    expect(accountFor("CLAUDE_CODE_OAUTH_TOKEN", accounts)).toBe("metistry");
+    expect(accountFor("METISTRY_OPENROUTER_API_KEY", accounts)).toBe("metistry");
     // with no instance id there is nowhere else to put it — the user account, as before
     expect(accountFor("METISTRY_DB_PASSWORD", { user: "metistry" })).toBe("metistry");
   });
@@ -253,12 +253,12 @@ describe("instance-scoped secrets", () => {
     const kc = fakeSecurity();
     const lines: string[] = [];
     const r = await syncSecrets("keychain", { envFile: file, exec: kc.exec, out: (l) => lines.push(l), platform: "darwin", env: {}, instanceId: INSTANCE_ID });
-    expect(r.changed).toEqual(["METISTRY_DB_PASSWORD", "CLAUDE_CODE_OAUTH_TOKEN", "METISTRY_VAPID_PRIVATE"]);
+    expect(r.changed).toEqual(["METISTRY_DB_PASSWORD", "METISTRY_OPENROUTER_API_KEY", "METISTRY_VAPID_PRIVATE"]);
     expect(Object.fromEntries(kc.store)).toEqual({
       [key(INSTANCE_ID, "METISTRY_DB_PASSWORD")]: "change-me",
       [key(INSTANCE_ID, "METISTRY_VAPID_PRIVATE")]: "vapid-private-EXAMPLE",
       // the person's Claude login is deliberately shared by every instance
-      [key(USER, "CLAUDE_CODE_OAUTH_TOKEN")]: "sk-ant-oat-EXAMPLE",
+      [key(USER, "METISTRY_OPENROUTER_API_KEY")]: "sk-or-v1-EXAMPLE",
     });
     expect(lines.join("\n")).toContain(`instance ${INSTANCE_ID}`);
   });
@@ -268,7 +268,7 @@ describe("instance-scoped secrets", () => {
     const kc = fakeSecurity({
       // an install that predates scoping: everything under the user account
       [key(USER, "METISTRY_DB_PASSWORD")]: "from-before-scoping",
-      [key(USER, "CLAUDE_CODE_OAUTH_TOKEN")]: "oauth",
+      [key(USER, "METISTRY_OPENROUTER_API_KEY")]: "oauth",
       // …except one that has already been scoped, and must win over the user copy
       [key(USER, "METISTRY_VAPID_PRIVATE")]: "stale-user-copy",
       [key(INSTANCE_ID, "METISTRY_VAPID_PRIVATE")]: "the-instance-one",
@@ -286,7 +286,7 @@ describe("instance-scoped secrets", () => {
     const after = readFileSync(file, "utf8");
     expect(after).toContain("METISTRY_DB_PASSWORD=from-before-scoping");
     expect(after).toContain("METISTRY_VAPID_PRIVATE=the-instance-one"); // the instance account won
-    expect(after).toContain("CLAUDE_CODE_OAUTH_TOKEN=oauth");
+    expect(after).toContain("METISTRY_OPENROUTER_API_KEY=oauth");
     expect(lines.join("\n")).toContain("copied from the user account to this instance's");
     for (const l of lines) expect(l).not.toContain("from-before-scoping");
   });
@@ -356,7 +356,7 @@ describe("metistry secrets purge", () => {
     fakeSecurity({
       [key(INSTANCE_ID, "METISTRY_DB_PASSWORD")]: "db",
       [key(INSTANCE_ID, "METISTRY_VAPID_PRIVATE")]: "vapid",
-      [key(USER, "CLAUDE_CODE_OAUTH_TOKEN")]: "the-person's-claude-login",
+      [key(USER, "METISTRY_OPENROUTER_API_KEY")]: "the-person's-provider-key",
       [key(USER, "METISTRY_DB_PASSWORD")]: "a-sibling-instance's-old-copy",
     });
 
@@ -373,7 +373,7 @@ describe("metistry secrets purge", () => {
     expect(kc.calls.some((c) => c.args[0] === "delete-generic-password")).toBe(false);
     expect(lines.join("\n")).toContain("rerun with --yes");
     expect(lines.join("\n")).toContain("/i/test-two");
-    for (const l of lines) expect(l).not.toContain("the-person's-claude-login");
+    for (const l of lines) expect(l).not.toContain("the-person's-provider-key");
   });
 
   it("with --yes deletes only this instance's account, never the per-user one", async () => {
@@ -383,9 +383,9 @@ describe("metistry secrets purge", () => {
     const r = await purgeSecrets({ envFile: file, instanceDir: "/i/test-two", exec: kc.exec, out: (l) => lines.push(l), platform: "darwin", env: {}, instanceId: INSTANCE_ID, yes: true });
 
     expect(r.deleted).toEqual(["METISTRY_DB_PASSWORD", "METISTRY_VAPID_PRIVATE"]);
-    expect(r.kept).toEqual(["CLAUDE_CODE_OAUTH_TOKEN"]);
+    expect(r.kept).toEqual(["METISTRY_OPENROUTER_API_KEY"]);
     expect(Object.fromEntries(kc.store)).toEqual({
-      [key(USER, "CLAUDE_CODE_OAUTH_TOKEN")]: "the-person's-claude-login",
+      [key(USER, "METISTRY_OPENROUTER_API_KEY")]: "the-person's-provider-key",
       [key(USER, "METISTRY_DB_PASSWORD")]: "a-sibling-instance's-old-copy",
     });
     // every delete named this instance's account explicitly
@@ -414,12 +414,12 @@ describe("metistry secrets list", () => {
 
     expect(rows).toEqual([
       { name: "METISTRY_DB_PASSWORD", scope: "instance", inKeychain: false, inEnv: true },
-      { name: "CLAUDE_CODE_OAUTH_TOKEN", scope: "user", inKeychain: false, inEnv: true },
+      { name: "METISTRY_OPENROUTER_API_KEY", scope: "user", inKeychain: false, inEnv: true },
       { name: "METISTRY_VAPID_PRIVATE", scope: "instance", inKeychain: false, inEnv: true },
       { name: "METISTRY_GITHUB_TOKEN", scope: "instance", inKeychain: true, foundUnder: "user", inEnv: false },
     ]);
     const table = renderSecretList(rows);
-    for (const v of ["ghp_only-in-the-keychain", "change-me", "sk-ant-oat-EXAMPLE", "vapid-private-EXAMPLE"]) expect(table).not.toContain(v);
+    for (const v of ["ghp_only-in-the-keychain", "change-me", "sk-or-v1-EXAMPLE", "vapid-private-EXAMPLE"]) expect(table).not.toContain(v);
     expect(table).toContain("METISTRY_GITHUB_TOKEN");
     // presence is checked WITHOUT -w, so `security` is never even asked for a value
     for (const c of kc.calls) expect(c.args).not.toContain("-w");

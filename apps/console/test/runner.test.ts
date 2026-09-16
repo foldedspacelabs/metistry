@@ -5,7 +5,7 @@
 // one row per window however often the runner ticks, and one fault costs one
 // notification.
 import { describe, expect, it } from "vitest";
-import { errorSignature } from "@foldedspacelabs/metistry-core";
+import { errorSignature, parseCompute } from "@foldedspacelabs/metistry-core";
 import { scheduleToSeconds, tick, type ScheduledCollector } from "../src/runner.js";
 
 interface RunRow {
@@ -250,6 +250,9 @@ describe("routine runner", () => {
     expect(db.rowsFor("t", "preflight_failed")[0]?.error).toContain("METISTRY_EK_URL");
   });
 
+  // C2/C3: an engine is `assignments.default` in compute.yaml plus the key its
+  // provider names — read through core's one seam, the same one `up` and
+  // doctor read, so the scheduler and the supervisor cannot disagree.
   it("preflight: a routine that would enqueue a turn is blocked when the install has no engine", async () => {
     const db = new Fake(NOW);
     let ran = 0;
@@ -260,10 +263,31 @@ describe("routine runner", () => {
       requires: { env: [], reachable: [], engine: true },
       run: async () => (ran++, 1),
     });
+    const compute = parseCompute(`
+providers:
+  openrouter:
+    kind: openai-compatible
+    base_url: https://openrouter.ai/api/v1
+    locality: off_machine
+    auth: { secret: METISTRY_OPENROUTER_API_KEY }
+    data_policy: { allow: [Knowledge/Projects], deny_sources: [comms], max_brief_bytes: 65536 }
+assignments:
+  default: { model: openrouter/anthropic/claude-sonnet-5 }
+`);
+
+    // nothing assigned at all: the file itself is the miss, and the verb is the fix
     await tick(db, [fold], {}, opts());
     expect(ran).toBe(0);
-    expect(db.rowsFor("knowledge-fold", "preflight_failed")[0]?.error).toContain("CLAUDE_CODE_OAUTH_TOKEN");
-    await tick(db, [fold], {}, opts({ env: { CLAUDE_CODE_OAUTH_TOKEN: "tok" } }));
+    expect(db.rowsFor("knowledge-fold", "preflight_failed")[0]?.error).toContain("no assignments.default in compute.yaml");
+
+    // assigned, but the provider's key is unset: the miss names THAT variable.
+    // A fresh db, because one blocked window per component is recorded once.
+    const noKey = new Fake(NOW);
+    await tick(noKey, [fold], {}, opts({ compute: () => compute }));
+    expect(ran).toBe(0);
+    expect(noKey.rowsFor("knowledge-fold", "preflight_failed")[0]?.error).toContain("METISTRY_OPENROUTER_API_KEY");
+
+    await tick(new Fake(NOW), [fold], {}, opts({ compute: () => compute, env: { METISTRY_OPENROUTER_API_KEY: "sk-or-x" } }));
     expect(ran).toBe(1);
   });
 });

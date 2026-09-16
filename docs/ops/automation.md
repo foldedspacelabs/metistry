@@ -77,14 +77,17 @@ You item every day. That is why no shipped manifest declares the structured
 form yet; the older `requires: [aws-credentials]` label list stays valid and
 is documentation only, checked by nothing.
 
-`engine: true` asks core's one engine-credential seam
-(`packages/core/src/deployment.ts`, `engineCredentialPresent`) — the same
-function `metistry up` and `metistry doctor` ask, so an install with no engine
-has one answer everywhere. **Known gap:** neither deployment shape currently
-puts `CLAUDE_CODE_OAUTH_TOKEN` in the *console's* environment (compose passes
-an explicit list; launchd passes `METISTRY_*` only), and giving it one widens
-the console's credential surface — a decision, not an oversight. Until that is
-ruled on, a routine that declares `engine: true` would block on every install.
+`engine: true` asks core's one engine seam (`packages/core/src/compute.ts`,
+`engineStatus`) — the same function `metistry up`, `metistry doctor` and the
+watchdog ask, so an install with no engine has one answer everywhere. It reads
+the resolved `compute.yaml` the console already watches plus the environment:
+an `assignments.default`, and the key its provider names. **Known gap:**
+neither deployment shape currently puts the *provider key* in the console's
+environment (compose passes an explicit list; launchd passes `METISTRY_*`
+only), so the second half of that check is answered "unset" there even when the
+engine has it. Widening the console's credential surface is a decision, not an
+oversight; until it is ruled on, a routine that declares `engine: true` would
+block on an install whose provider needs a key.
 `knowledge-fold` therefore does not declare it: an engine-less install
 deliberately queues the fold turn and lets it wait
 (`docs/ops/assistant-tools.md`, "Running without an engine").

@@ -294,7 +294,15 @@ import Testing
     // 4. And no file is opened at all — which is what makes "the app does not
     //    parse <instance>/state/.env" a fact rather than a promise. Every value
     //    on every screen arrives from a `metistry` verb's stdout.
-    let readsFiles = sources.filter { $0.body.contains("contentsOf:") }.map(\.name)
+    //
+    //    `FileHandle.write(contentsOf:)` is the one `contentsOf:` that reads
+    //    nothing: it is how a pasted API key reaches `metistry compute
+    //    providers add`'s STDIN without ever passing through argv
+    //    (compute-step.swift, process-command-runner.swift). Excluded by name
+    //    so the rest of the guard stays a guard.
+    let readsFiles = sources
+        .filter { $0.body.replacingOccurrences(of: "write(contentsOf:", with: "").contains("contentsOf:") }
+        .map(\.name)
     #expect(readsFiles.isEmpty, "these read a file directly: \(readsFiles)")
 }
 
@@ -364,7 +372,7 @@ private final class ScriptedRunner: CommandRunner {
 
     nonisolated func run(
         executable: URL, arguments: [String], environment: [String: String],
-        currentDirectory: URL?, onOutput: @escaping @Sendable (OutputLine) -> Void
+        currentDirectory: URL?, standardInput: String?, onOutput: @escaping @Sendable (OutputLine) -> Void
     ) async throws -> CommandResult {
         await record(arguments.joined(separator: " "))
         return result
@@ -376,7 +384,7 @@ private final class ScriptedRunner: CommandRunner {
 private struct ThrowingRunner: CommandRunner {
     func run(
         executable: URL, arguments: [String], environment: [String: String],
-        currentDirectory: URL?, onOutput: @escaping @Sendable (OutputLine) -> Void
+        currentDirectory: URL?, standardInput: String?, onOutput: @escaping @Sendable (OutputLine) -> Void
     ) async throws -> CommandResult {
         throw CommandRunnerError.notExecutable(executable)
     }

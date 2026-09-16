@@ -54,6 +54,11 @@ The workflow refuses a tag whose number does not match `package.json` and
 `packages/cli/package.json` (`node ops/scripts/sync-root-version.mjs
 --check`), so a hand-made tag cannot produce a mislabelled release.
 
+`release:version` also runs `ops/scripts/fold-product-record.mjs`, folding
+every PR's fragment under `docs/product/record/` into `docs/product/PRODUCT.md`
+and deleting them — the reason `PRODUCT.md` only changes on a release branch
+rather than in every PR that touches it (`docs/product/record/README.md`).
+
 ## What a release contains
 
 | asset | what it is |

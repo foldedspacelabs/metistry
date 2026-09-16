@@ -152,8 +152,11 @@ export interface Version {
 
 export interface Comment {
   id: string;
-  artifact_id: string;
-  version_id: string;
+  /** NULL on a work thread: exactly one parent, enforced by 0016's check constraint. */
+  artifact_id: string | null;
+  version_id: string | null;
+  /** NULL on an artifact thread; the `work` row this thread hangs on otherwise. */
+  work_id: number | null;
   path: string | null;
   anchor: unknown;
   body: string;
@@ -166,8 +169,68 @@ export interface Comment {
   created_at: Date;
 }
 
+/** A comment anchored to an artifact version: what every artifact path hands back, once `work_id` has been ruled out. */
+export interface ArtifactComment extends Comment {
+  artifact_id: string;
+  version_id: string;
+  work_id: null;
+}
+
 export interface Thread extends Comment {
   replies: Comment[];
+}
+
+// --- work threads (0016) ---------------------------------------------------------
+//
+// The room is the task. One thread per `work` row, flat (root + replies in
+// one list), read newest-LAST. There is no addressee field here or in the
+// tool surface: a message cannot wake a named agent, so the channel cannot
+// address — which is the whole reason it is safe to let agents talk freely
+// on it (the collaboration rule).
+
+/** One message in a work thread — the same row as an artifact comment, minus everything version-shaped. */
+export interface WorkComment {
+  id: string;
+  work_id: number;
+  body: string;
+  author_principal: string;
+  author_kind: AuthorKind;
+  parent_id: string | null;
+  created_at: Date;
+}
+
+export interface WorkParticipant {
+  principal: string;
+  kind: AuthorKind;
+  comments: number;
+}
+
+export interface WorkThreadView {
+  work_id: number;
+  project: string | null;
+  title: string;
+  status: string;
+  /** `open` until the USER resolves it; nothing automatic ever writes this. */
+  state: "open" | "resolved";
+  resolved_by: string | null;
+  resolved_at: Date | null;
+  participants: WorkParticipant[];
+  /** Chronological, newest LAST — the order a reader (and a brief) wants. */
+  comments: WorkComment[];
+  /** Trailing run of agent-authored messages, and the cap it escalates at. */
+  agent_tail: number;
+  cap: number;
+  link: string;
+}
+
+export type WorkCommentResult = { demoted: false; comment: WorkComment } | { demoted: true; proposal_id: number; cap: number };
+
+/** The `work` row a thread hangs on, as the thread paths need it. */
+interface WorkRow {
+  id: number;
+  project: string | null;
+  title: string;
+  status: string;
 }
 
 /** The three links every publish returns (§4.21): follows-current, exact, and exact-with-comments-open. */
@@ -292,11 +355,14 @@ const fail = (code: ErrorCode, message?: string) => new ArtifactsError(code, mes
 
 const ART_COLS = `id, project, slug, kind, current_version, visibility, created_by, created_at, updated_at`;
 const VER_COLS = `id, artifact_id, commit, path_prefix, manifest, author_principal, author_kind, message, idempotency_key, created_at`;
-const CMT_COLS = `id, artifact_id, version_id, path, anchor, body, state, author_principal, author_kind, resolved_by, resolved_at, parent_id, created_at`;
+const CMT_COLS = `id, artifact_id, version_id, work_id, path, anchor, body, state, author_principal, author_kind, resolved_by, resolved_at, parent_id, created_at`;
+const WORK_COLS = `id, project, title, status`;
 
 const toArtifact = (r: Record<string, unknown>): Artifact => r as unknown as Artifact;
 const toVersion = (r: Record<string, unknown>): Version => ({ ...(r as unknown as Version), manifest: (r.manifest as Record<string, ManifestEntry> | null) ?? {} });
-const toComment = (r: Record<string, unknown>): Comment => r as unknown as Comment;
+// pg hands back bigint as a string; work_id is the one numeric column here.
+const toComment = (r: Record<string, unknown>): Comment => ({ ...(r as unknown as Comment), work_id: r.work_id === null || r.work_id === undefined ? null : Number(r.work_id) });
+const toWorkComment = (c: Comment): WorkComment => ({ id: c.id, work_id: c.work_id!, body: c.body, author_principal: c.author_principal, author_kind: c.author_kind, parent_id: c.parent_id, created_at: c.created_at });
 
 const VERSION_TAG = /\((ver_[0-9A-HJKMNP-TV-Z]{26})\)$/;
 
@@ -672,17 +738,21 @@ export class ArtifactsService {
     return [...threads.values()];
   }
 
-  private async rootComment(id: unknown, p: Principal): Promise<Comment | null> {
+  private async rootComment(id: unknown, p: Principal): Promise<ArtifactComment | null> {
     if (!isId(id, "cmt")) return null;
     const { rows } = await this.db.query(`SELECT ${CMT_COLS} FROM artifact_comments WHERE id = $1`, [id]);
     const c = rows[0] ? toComment(rows[0]) : null;
     if (!c) return null;
+    // A work thread is not reachable through the artifact verbs: it has no
+    // version to anchor to, and its resolve is the user's hand alone
+    // (workThreadResolve). Uniform `not_found`, like every other scope miss.
+    if (c.work_id !== null) return null;
     if (c.parent_id !== null) throw fail("invalid_request", "replies are one level: reply to the thread root");
     if (!(await this.scoped(c.artifact_id, p))) return null;
-    return c;
+    return c as ArtifactComment;
   }
 
-  private async threadRows(root: Comment): Promise<Comment[]> {
+  private async threadRows(root: ArtifactComment): Promise<Comment[]> {
     const { rows } = await this.db.query(`SELECT ${CMT_COLS} FROM artifact_comments WHERE parent_id = $1 ORDER BY created_at ASC, id ASC`, [root.id]);
     return [root, ...rows.map(toComment)];
   }
@@ -692,7 +762,7 @@ export class ArtifactsService {
   }
 
   /** The thread becomes a `review` proposal for the user, with its transcript — once per thread while pending. */
-  private async demoteThread(root: Comment, thread: Comment[], p: Principal): Promise<number> {
+  private async demoteThread(root: ArtifactComment, thread: Comment[], p: Principal): Promise<number> {
     const pending = await this.db.query(
       `SELECT id FROM proposals WHERE kind = 'review' AND decision = 'pending' AND payload->>'reason' = 'ping_pong_cap' AND payload->>'thread_id' = $1`,
       [root.id],
@@ -711,6 +781,173 @@ export class ArtifactsService {
     };
     const { rows } = await this.db.query(`INSERT INTO proposals (kind, source_agent, trust, payload) VALUES ('review', $1, $2, $3::jsonb) RETURNING id`, [
       p.id, this.trustOf(p), JSON.stringify(payload),
+    ]);
+    return Number(rows[0]!.id);
+  }
+
+  // --- work threads (0016) -----------------------------------------------------------
+  //
+  // Same table, same escalation, second anchor. What differs from an
+  // artifact thread, and why:
+  // - ONE flat room per work row (root + replies), because the task IS the
+  //   room; there is nothing to sub-thread about before a deliverable
+  //   exists. The unique partial index makes "one root" a schema fact.
+  // - NO addressee field anywhere on the path. Triggering stays with
+  //   `agents_delegate` and review dispatch, where the routing policy
+  //   already lives; a room that cannot address cannot wake anyone.
+  // - Resolve is the USER's hand only (`workThreadResolve` refuses every
+  //   other principal) and nothing calls it on a timer. Auto-resolving a
+  //   quiet thread would fire `commentResolve`'s queued-bundle release and
+  //   silently start work overnight; there is no sweep here, by design.
+
+  /** The user's link to a room; work threads live under the console's Rooms panel, not under an artifact. */
+  workLink(workId: number): string {
+    return `${this.origin}/#/rooms/work/${workId}`;
+  }
+
+  /**
+   * The work row as a thread anchor, under the same scope rule as tasks_*:
+   * a row outside an agent's projects does not exist for it, and a row with
+   * NO project is the user's alone (mcp-brain scope.ts, restated here so
+   * the module enforces it rather than trusting an adapter).
+   */
+  private async scopedWork(workId: unknown, p: Principal): Promise<WorkRow | null> {
+    if (typeof workId !== "number" || !Number.isInteger(workId) || workId <= 0) return null;
+    const { rows } = await this.db.query(`SELECT ${WORK_COLS} FROM work WHERE id = $1`, [workId]);
+    const r = rows[0];
+    if (!r) return null;
+    const project = (r.project as string | null) ?? null;
+    if (p.kind === "agent" && (project === null || !(await this.callerIsMember(p, project)))) return null;
+    return { id: Number(r.id), project, title: String(r.title), status: String(r.status) };
+  }
+
+  private async workThreadRows(workId: number): Promise<Comment[]> {
+    const { rows } = await this.db.query(`SELECT ${CMT_COLS} FROM artifact_comments WHERE work_id = $1 ORDER BY created_at ASC, id ASC`, [workId]);
+    const all = rows.map(toComment);
+    const root = all.find((c) => c.parent_id === null);
+    // root first, then replies in time order — the order pingPongDemotes reads
+    return root ? [root, ...all.filter((c) => c.id !== root.id)] : [];
+  }
+
+  /** The room on one work row: participants, messages newest-last, and how close the agents are to the cap. Empty is a valid room. */
+  async workThread(workId: number, p: Principal): Promise<WorkThreadView | null> {
+    const w = await this.scopedWork(workId, p);
+    if (!w) return null;
+    const thread = await this.workThreadRows(w.id);
+    const root = thread[0] ?? null;
+    const seen = new Map<string, WorkParticipant>();
+    for (const c of thread) {
+      const hit = seen.get(c.author_principal);
+      if (hit) hit.comments++;
+      else seen.set(c.author_principal, { principal: c.author_principal, kind: c.author_kind, comments: 1 });
+    }
+    return {
+      work_id: w.id,
+      project: w.project,
+      title: w.title,
+      status: w.status,
+      state: root?.state ?? "open",
+      resolved_by: root?.resolved_by ?? null,
+      resolved_at: root?.resolved_at ?? null,
+      participants: [...seen.values()],
+      comments: thread.map(toWorkComment),
+      agent_tail: agentTailLength(thread),
+      cap: this.cap,
+      link: this.workLink(w.id),
+    };
+  }
+
+  /**
+   * Append one message. No addressee, no thread id: the work row is the
+   * room. Past the cap an AGENT message is NOT stored — the room demotes to
+   * a proposal carrying the transcript AND the work id, so the owner's queue
+   * says which card it is about. A user message resets the run.
+   */
+  async workComment(input: { work: number; body: string }, p: Principal): Promise<WorkCommentResult | null> {
+    const body = requireText("body", input.body, 20_000);
+    const w = await this.scopedWork(input.work, p);
+    if (!w) return null;
+    const authorKind = this.authorKind(p);
+    const thread = await this.workThreadRows(w.id);
+    const root = thread[0] ?? null;
+    return this.recorded(p, "work_comment", { work_id: w.id, ...(w.project !== null ? { project: w.project } : {}) }, async () => {
+      if (root && pingPongDemotes(thread, authorKind, this.cap)) {
+        const proposalId = await this.demoteWorkThread(w, root, thread, p);
+        return { demoted: true as const, proposal_id: proposalId, cap: this.cap };
+      }
+      return { demoted: false as const, comment: await this.insertWorkComment(w.id, root?.id ?? null, body, p, authorKind) };
+    }, (r) => (r?.demoted ? { demoted: true, proposal_id: r.proposal_id, agent_tail: agentTailLength(thread) } : { comment: r?.comment.id }));
+  }
+
+  /** One room per work row: the loser of a root race (23505 on the partial unique index) re-reads and lands as a reply. */
+  private async insertWorkComment(workId: number, parentId: string | null, body: string, p: Principal, authorKind: AuthorKind): Promise<WorkComment> {
+    const insert = (parent: string | null) =>
+      this.db.query(
+        `INSERT INTO artifact_comments (id, work_id, body, author_principal, author_kind, parent_id)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING ${CMT_COLS}`,
+        [newId("cmt"), workId, body, p.id, authorKind, parent],
+      );
+    try {
+      const { rows } = await insert(parentId);
+      return toWorkComment(toComment(rows[0]!));
+    } catch (err) {
+      if (parentId !== null || (err as { code?: string }).code !== "23505") throw err;
+      const root = (await this.workThreadRows(workId))[0];
+      if (!root) throw err; // unreachable: the conflict says a root exists
+      const { rows } = await insert(root.id);
+      return toWorkComment(toComment(rows[0]!));
+    }
+  }
+
+  /**
+   * Resolve (or reopen) a room — the USER's hand only, never a sweep, never
+   * a timer. Two reasons it is not merely "not implemented for agents":
+   * `commentResolve` releases a queued review bundle when a thread closes,
+   * so anything that resolved threads on a schedule would start queued work
+   * unattended; and a room the agents can close is a room they can close on
+   * themselves instead of escalating. No caller here touches the queue.
+   */
+  async workThreadResolve(workId: number, p: Principal): Promise<WorkThreadView | null> {
+    return this.setWorkThreadState(workId, "resolved", p);
+  }
+
+  async workThreadReopen(workId: number, p: Principal): Promise<WorkThreadView | null> {
+    return this.setWorkThreadState(workId, "open", p);
+  }
+
+  private async setWorkThreadState(workId: number, state: "open" | "resolved", p: Principal): Promise<WorkThreadView | null> {
+    if (p.kind !== "user") throw fail("forbidden", "a room on a work row is resolved by the user's hand only");
+    const w = await this.scopedWork(workId, p);
+    if (!w) return null;
+    const root = (await this.workThreadRows(w.id))[0];
+    if (!root) return null; // nothing to resolve: an empty room has no state to write
+    return this.recorded(p, state === "resolved" ? "work_resolve" : "work_reopen", { work_id: w.id, thread: root.id }, async () => {
+      await this.db.query(`UPDATE artifact_comments SET state = $2, resolved_by = $3, resolved_at = $4 WHERE id = $1`, [
+        root.id, state, state === "resolved" ? p.id : null, state === "resolved" ? new Date() : null,
+      ]);
+      return (await this.workThread(w.id, p))!;
+    });
+  }
+
+  /** The room becomes a `review` proposal for the user — once per room while pending — with `work_id` on the row, so the board can join it to the card. */
+  private async demoteWorkThread(w: WorkRow, root: Comment, thread: Comment[], p: Principal): Promise<number> {
+    const pending = await this.db.query(
+      `SELECT id FROM proposals WHERE kind = 'review' AND decision = 'pending' AND payload->>'reason' = 'ping_pong_cap' AND work_id = $1`,
+      [w.id],
+    );
+    if (pending.rows[0]) return Number(pending.rows[0].id);
+    const payload = {
+      reason: "ping_pong_cap",
+      cap: this.cap,
+      title: `room needs you: ${thread.length} agent exchanges on work #${w.id} — ${w.title.slice(0, 80)}`,
+      work_id: w.id,
+      ...(w.project !== null ? { project: w.project } : {}),
+      thread_id: root.id,
+      links: { work: this.workLink(w.id) },
+      transcript: thread.map((c) => ({ id: c.id, author: c.author_principal, author_kind: c.author_kind, at: c.created_at, body: c.body.slice(0, 2000) })),
+    };
+    const { rows } = await this.db.query(`INSERT INTO proposals (kind, source_agent, trust, payload, work_id) VALUES ('review', $1, $2, $3::jsonb, $4) RETURNING id`, [
+      p.id, this.trustOf(p), JSON.stringify(payload), w.id,
     ]);
     return Number(rows[0]!.id);
   }
@@ -931,7 +1168,8 @@ export class ArtifactsService {
       await this.db.query(`SELECT ${ART_COLS} FROM artifacts WHERE false`);
       await this.db.query(`SELECT ${VER_COLS} FROM artifact_versions WHERE false`);
       await this.db.query(`SELECT ${CMT_COLS} FROM artifact_comments WHERE false`);
-      await this.db.query(`SELECT id, kind, source_agent, trust, payload, decision FROM proposals WHERE false`);
+      await this.db.query(`SELECT ${WORK_COLS} FROM work WHERE false`);
+      await this.db.query(`SELECT id, kind, source_agent, trust, payload, decision, work_id FROM proposals WHERE false`);
       await this.db.query(`SELECT ${PROJECT_COLS} FROM projects WHERE false`);
       await this.vault.list("Artifacts", 1);
       return { meta: { tasks: this.opts.tasks ? "available" : "not_available" } };

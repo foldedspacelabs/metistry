@@ -217,7 +217,7 @@ after the offline fallback below an exact no-op.
 ### The offline fallback
 
 ```sh
-export METISTRY_CAPTURE_DIR="$HOME/Library/Mobile Documents/com~apple~CloudDocs/Metistry Inbox"
+export METISTRY_CAPTURE_DIR="$HOME/metistry-instance/Knowledge/Inbox"   # or any folder; the vault inbox is picked up by the reconciler (docs/ops/inbox.md)
 ```
 
 With that set, a session whose capture cannot reach the console is written

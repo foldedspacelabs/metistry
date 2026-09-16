@@ -15,6 +15,13 @@ mtime — sync churns mtime), renames are recognised by hash, and Obsidian /
 Syncthing conflict copies are flagged once as a `proposals` report instead
 of being indexed.
 
+The same walk keeps the **vault inbox** honest. `Knowledge/Inbox/` is where
+captures live (`docs/ops/inbox.md`), and a file you put there yourself — in
+Obsidian, in an editor, with a `git pull` — gets an `inbox` row like any
+capture; an edit to one that is already there refreshes its hash and sends
+it back to the drain; a deleted file archives its row. It lives here
+because this is already the process that walks the tree and hashes it.
+
 ## Pointing it at an instance repo
 
 The reconciler needs exactly one path: `METISTRY_INSTANCE_DIR`, the working
@@ -103,7 +110,7 @@ Every route requires `Authorization: Bearer $METISTRY_BRIDGE_TOKEN_RECONCILER`
 | `POST /vault/delete` | `{path, intent, expected_sha256?}` |
 | `POST /vault/rename` | `{from, to, intent}` — git-mv semantics; never clobbers |
 | `POST /flush` | commit the queue now (the interval does this every `METISTRY_COMMIT_INTERVAL_SEC`; the artifacts module calls it after every publish so one version is one commit) |
-| `POST /reconcile` | run the index cycle now (the interval does this every `METISTRY_RECONCILE_INTERVAL_SEC`) |
+| `POST /reconcile` | run the index cycle now (the interval does this every `METISTRY_RECONCILE_INTERVAL_SEC`); the summary carries `inbox: {added, changed, archived}` |
 | `POST /embeddings/rebuild` | forget every vector and re-embed the vault under the configured model (§6 decision 8's deterministic rebuild) |
 | `GET /embeddings/status` | what is stored: model, dim, row count, how many notes are behind, whether a rebuild is required |
 
@@ -121,6 +128,10 @@ letters, control characters, any `.git` segment, anything under
 (`knowledge/`, `Knowledge/areas/` when `Areas/` exists — macOS would
 silently comply, a Linux container would fork the tree), and content over
 `METISTRY_VAULT_MAX_BYTES`.
+
+`Knowledge/Inbox/` is ordinary vault content, not a protected path:
+listable and readable like the rest of `Knowledge/`, writable through this
+bridge by the capture principal and the assistant alike.
 
 **What only the `user` principal may write (§4.7 protected paths):**
 `identity.yaml`, `rules.yaml`, `sources.yaml`, `deployment.yaml`,
@@ -153,6 +164,13 @@ on the Mac — are swept by the reconcile loop into one `user` commit
 them (PoC-12: "edit on iPhone → commits cleanly"). Paths with a pending
 bridge intent belong to that intent; conflict copies are flagged, not
 committed. Turn the sweep off with `METISTRY_COMMIT_EXTERNAL_EDITS=false`.
+
+Those edits are also **never overwritten**. Every caller's write is
+compare-and-swap: captures go in with `expected_sha256: ""` (must not
+exist), and `knowledge_write` sends a hash on every call — omitted means
+create-only — so a note that changed under an agent comes back `409
+conflict` rather than being replaced by bytes the agent never read
+(`docs/ops/inbox.md`, `docs/ops/assistant-tools.md`).
 
 
 ## Embeddings (Phase 6)

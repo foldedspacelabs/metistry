@@ -32,6 +32,8 @@ import {
   loadSupervisedTemplates,
   SUPERVISOR_PLIST_FILE,
   nodeOnPath,
+  parseRegistrar,
+  registrarPhrase,
   renderPlist,
   renderSystemdUnit,
   retiredServicesFor,
@@ -349,6 +351,10 @@ export async function installLaunchd(r: StepRunner, productDir: string, le: Laun
   // an install that predates the supervisor is still running the old agents:
   // boot them out ONCE, or the same services run twice
   await bootoutRetired(r, le, deployment.shape, values.namespace?.labelSuffix);
+  // …and the app may already own the one that is left. Asked BEFORE the
+  // supervisor plan is written, because the answer decides whether this run
+  // also writes the launcher file that agent reads.
+  const detected = await detectAppRegistrar(r, templates, le, values);
   // the launchd shape's core is the supervisor's child list, not a plist each
   if (deployment.shape === "launchd") await installSupervisorPlan(r, productDir, le, values);
   const dir = launchAgentsDir(le.home);
@@ -356,7 +362,7 @@ export async function installLaunchd(r: StepRunner, productDir: string, le: Laun
   // SMAppService; a second, identical agent in ~/Library/LaunchAgents
   // would be the same install running twice
   const installable = templates.filter((t) => !(t.service === SUPERVISOR_SERVICE && values.registerVia === "app"));
-  if (installable.length < templates.length) {
+  if (installable.length < templates.length && !detected) {
     const sup = templates.find((t) => t.service === SUPERVISOR_SERVICE)!;
     r.note(
       `--register-via app: ${sup.label} is NOT installed here — the Mac app registers ${SUPERVISOR_PLIST_FILE} from Metistry.app/Contents/Library/LaunchAgents through SMAppService.agent(plistName:), and Login Items shows one item nested under the app (docs/ops/mac-app.md)`,
@@ -399,6 +405,47 @@ export async function installLaunchd(r: StepRunner, productDir: string, le: Laun
       await r.run(c.cmd, c.args, { tolerateFailure: c.tolerateFailure, comment: c.tolerateFailure ? "ok if not loaded" : undefined });
     }
   }
+}
+
+/**
+ * Does the Mac app already own `com.foldedspacelabs.metistry`?
+ *
+ * Two registrars can install the one background item, and only ever one of
+ * them at a time (docs/ops/deployment-shapes.md, "Two registrars").
+ * `--register-via app` is that said deliberately; this is the safety net for
+ * every `up` that follows, because `metistry update` runs one on every
+ * release and a person who installed with the app and then ran `metistry up`
+ * in a terminal would otherwise end up with the app's agent AND a rendered
+ * one under the same label — the same install running twice.
+ *
+ * The signal is what launchd itself reports (`parseRegistrar`), not a marker
+ * either side has to remember to write: live state cannot go stale when the
+ * app is dragged to the Trash or the item switched off in System Settings.
+ * The probe is a read-only `launchctl print`, so it runs under `--dry-run`
+ * too — a dry run that did not ask would print a bootstrap it would not do.
+ *
+ * Returns true when it flipped THIS run onto the app path.
+ */
+async function detectAppRegistrar(r: StepRunner, templates: PlistTemplate[], le: LaunchdEnv, values: ShapeValues): Promise<boolean> {
+  if (values.registerVia === "app") return false;
+  const sup = templates.find((t) => t.service === SUPERVISOR_SERVICE);
+  if (!sup) return false;
+  // `--dry-run` runs nothing at all, probe included — so it has to SAY that
+  // this is the one thing it could not look up, rather than print a bootstrap
+  // the real run might skip.
+  if (r.dryRun) {
+    r.note(`(not asked: whether ${sup.label} is already registered by the Mac app. A real run asks launchd, and skips the two steps below when it is.)`);
+    return false;
+  }
+  const p = await r.exec("launchctl", ["print", `gui/${le.uid}/${sup.label}`], { env: r.env });
+  const finding = parseRegistrar(p.code, p.stdout);
+  if (finding.registrar !== "app") return false;
+  values.registerVia = "app";
+  r.note(
+    `${sup.label} is already registered by ${registrarPhrase(finding)} — not rendered, not bootstrapped, not kickstarted here; ` +
+      `the app's Settings › Services › "Run Metistry in the background" owns it, and the new supervisor.json is picked up by turning that off and on (or \`launchctl kickstart -k gui/${le.uid}/${sup.label}\`).`,
+  );
+  return true;
 }
 
 /**

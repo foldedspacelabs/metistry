@@ -42,7 +42,7 @@ import { emptyCompute, loadCompute, type Compute } from "@foldedspacelabs/metist
 import { engineStatus, loadDeployment } from "./deployment.js";
 import { localServerRows } from "./local-models.js";
 import { realExec, type Exec } from "./exec.js";
-import { labelFor, loadPlistTemplates, logPathFor, SUPERVISED_SERVICES } from "./launchd.js";
+import { labelFor, loadPlistTemplates, logPathFor, parseRegistrar, registrarPhrase, SUPERVISED_SERVICES, type RegistrarFinding } from "./launchd.js";
 import { readSupervisorConfig, supervisorConfigPath, controlRequest, SUPERVISOR_SERVICE } from "./supervisor.js";
 import { applyPorts, loadNamespace, type Namespace } from "./namespace.js";
 
@@ -611,11 +611,17 @@ export async function launchdRows(
   const rows: DoctorRow[] = [];
   const shaped = new Set<string>([...SHAPED_SERVICES, SUPERVISOR_SERVICE]);
   for (const { file, label, service } of await launchdLabels(productDir, shape, labelSuffix, env)) {
-    rows.push({
+    // The one background item has two possible registrars, and which one owns
+    // it decides who may start and stop it (docs/ops/deployment-shapes.md,
+    // "Two registrars"). Reported on the supervisor's row only: the TCC
+    // helpers are never the app's.
+    let found: RegistrarFinding | undefined;
+    const row: DoctorRow = {
       kind: "launchd",
       ...(await runCheck(`launchd:${label}`, `launchctl print gui/${uid}/${label} reports state = running`, async () => {
         const r = await exec("launchctl", ["print", `gui/${uid}/${label}`]);
         if (r.code === 127) return { status: "absent", remediation: "launchctl not found — not macOS?" };
+        if (service === SUPERVISOR_SERVICE) found = parseRegistrar(r.code, r.stdout);
         if (r.code !== 0) {
           return {
             status: "absent",
@@ -634,7 +640,14 @@ export async function launchdRows(
           meta: { state: p.state, last_exit: p.lastExit },
         };
       })),
-    });
+    };
+    if (found && found.registrar !== "none") {
+      // the probe is what the table prints for a row that is not ok, and what
+      // the Mac app's Services pane prints for one that is (docs/ops/mac-app.md)
+      row.probe += `; registered by ${registrarPhrase(found)}`;
+      row.meta = { ...row.meta, registrar: found.registrar, ...(found.path ? { registered_from: found.path } : {}) };
+    }
+    rows.push(row);
   }
   return rows;
 }

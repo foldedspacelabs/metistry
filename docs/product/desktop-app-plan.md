@@ -165,6 +165,19 @@ the binary that asks — renamed `…metistry.calendar` and displayed as
 identifiers untouched so no install re-consents.
 `docs/ops/deployment-shapes.md` is the reference.
 
+**Shipped 2026-09-17** — all five below, with two departures from the sketch
+worth recording: the seam is called `BackgroundAgentService` and its model
+`BackgroundAgentModel`, in a file of their own (`sources/kit/background-agent.swift`),
+because *background item* is what macOS calls the thing and the row has to say
+what it is rather than which API registers it; and (4) keys off whether the
+build has an agent to register (`SMAppService.agent(…).status != .notFound`)
+rather than off `runtime-locator.swift`, because that is macOS answering about
+the bundle rather than the app inferring it. One thing the sketch did not
+anticipate: two registrars can now install the same label, so `metistry up`
+asks launchd who owns it and leaves an app-registered agent alone
+(`docs/ops/deployment-shapes.md`, "Two registrars"). The record of what was
+planned follows.
+
 **The remaining app change, precisely.** The bundle now carries
 `Contents/Library/LaunchAgents/com.foldedspacelabs.metistry.plist` and its
 `BundleProgram`, `Contents/Resources/MetistrySupervisor`; `metistry up

@@ -262,6 +262,50 @@ describe("doctor: the launchd shape", () => {
     expect(r.console?.remediation).not.toMatch(/docker/);
     expect(r.y?.remediation).toMatch(/default http:\/\/127\.0\.0\.1:7902/);
   });
+
+  it("says WHICH registrar owns the one background item — the Mac app, or launchctl bootstrap", async () => {
+    const productDir = await checkout();
+    // the two agents the launchd shape actually installs (deployment-shapes.md):
+    // the supervisor, and the TCC helper that keeps one of its own
+    await mkdir(join(productDir, "ops", "launchd"), { recursive: true });
+    await writeFile(join(productDir, "ops", "launchd", "com.foldedspacelabs.metistry.plist"), PLIST("com.foldedspacelabs.metistry"));
+    await writeFile(join(productDir, "ops", "launchd", "com.foldedspacelabs.metistry.calendar.plist"), PLIST("com.foldedspacelabs.metistry.calendar"));
+    // METISTRY_EK_URL turns the calendar helper's agent on, so the shape has
+    // the two agents it really installs
+    const shapeEnv = { ...env, METISTRY_EK_URL: "http://127.0.0.1:7811" };
+    const run = async (exec: Exec) =>
+      byName((await doctor({ productDir, env: shapeEnv, deployment: { shape: "launchd", services: {} }, fetchFn: fakeFetch({}), db: null, exec, platform: "darwin", uid: 501 })).rows);
+    const printing = (out: string) =>
+      fakeExec({
+        launchctl: {
+          "com.foldedspacelabs.metistry": { code: 0, stdout: out },
+          // the helper, loaded from a bundle path too — the registrar is read
+          // off the SUPERVISOR's row only, because no other job is the app's
+          "com.foldedspacelabs.metistry.calendar": { code: 0, stdout: `\tpath = /Applications/Metistry.app/Contents/Library/LaunchAgents/x.plist\n${LAUNCHCTL_RUNNING}` },
+        },
+      });
+
+    const app = (await run(printing("\tpath = /Applications/Metistry.app/Contents/Library/LaunchAgents/com.foldedspacelabs.metistry.plist\n\tstate = running\n\tpid = 99\n")))[
+      "launchd:com.foldedspacelabs.metistry"
+    ];
+    expect(app?.status).toBe("ok");
+    expect(app?.probe).toContain("registered by the Mac app, through SMAppService.agent(plistName:)");
+    expect(app?.meta).toMatchObject({ registrar: "app", registered_from: "/Applications/Metistry.app/Contents/Library/LaunchAgents/com.foldedspacelabs.metistry.plist" });
+
+    const terminal = await run(printing("\tpath = /Users/o/Library/LaunchAgents/com.foldedspacelabs.metistry.plist\n\tstate = running\n\tpid = 99\n"));
+    expect(terminal["launchd:com.foldedspacelabs.metistry"]?.probe).toContain("registered by launchctl bootstrap");
+    expect(terminal["launchd:com.foldedspacelabs.metistry"]?.meta).toMatchObject({ registrar: "launchd" });
+    // asked of the supervisor only — no other agent is ever the app's
+    expect(terminal["launchd:com.foldedspacelabs.metistry.calendar"]?.status).toBe("ok");
+    expect(terminal["launchd:com.foldedspacelabs.metistry.calendar"]?.probe).not.toContain("registered by");
+
+    // nothing loaded: the row is the "not bootstrapped" one it always was,
+    // and no registrar is invented for a job that does not exist
+    const none = (await run(fakeExec({})))["launchd:com.foldedspacelabs.metistry"];
+    expect(none?.status).toBe("absent");
+    expect(none?.probe).not.toContain("registered by");
+    expect(none?.meta?.registrar).toBeUndefined();
+  });
 });
 
 describe("doctor: degraded (runs, needs a hand) never fails the exit code", () => {

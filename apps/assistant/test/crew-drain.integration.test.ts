@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
 import { mintToken, tokenHash } from "@foldedspacelabs/metistry-core";
-import { claimCrewRow, drainCrewOne, issueRunToken } from "../src/crew-drain.js";
+import { briefThreadBlock, claimCrewRow, drainCrewOne, issueRunToken } from "../src/crew-drain.js";
 import { buildCrewOptions, type CrewRunInput, type CrewRunResult, type CrewSnapshot } from "../src/crew.js";
 
 try {
@@ -56,6 +56,8 @@ describe.skipIf(!hasDb)("crew drain (integration)", () => {
     await pool.query(`UPDATE work SET status = 'closed' WHERE kind = 'task' AND owner LIKE 'crew:%' AND status <> 'closed' AND owner <> $1`, [`crew:${crewId}`]);
   });
   afterAll(async () => {
+    await pool.query(`DELETE FROM proposals WHERE source_agent = $1`, [crewId]);
+    await pool.query(`DELETE FROM artifact_comments WHERE work_id IN (SELECT id FROM work WHERE owner = $1)`, [`crew:${crewId}`]);
     await pool.query(`DELETE FROM work WHERE owner = $1`, [`crew:${crewId}`]);
     await pool.query(`DELETE FROM runs WHERE component = $1`, [crewId]);
     await pool.query(`DELETE FROM agents WHERE id = $1`, [crewId]);
@@ -173,6 +175,70 @@ describe.skipIf(!hasDb)("crew drain (integration)", () => {
     expect(row.history.at(-1).note).toMatch(/max_budget, 5 turns, 1 report, \$0\.1100 — budget exceeded/);
     const r = (await pool.query(`SELECT ok, error, meta->>'outcome' AS outcome FROM runs WHERE component = $1 AND kind = 'crew_run' AND (meta->>'work_id')::bigint = $2`, [crewId, id])).rows[0];
     expect(r).toEqual({ ok: false, error: "crew run max_budget: budget exceeded", outcome: "max_budget" });
+  });
+
+  // --- the prior-work block (0016; "the brief is the context transfer") ---------
+
+  it("a room on the claimed row rides along in the brief, newest messages kept under the byte budget, and the run records exactly which ones", async () => {
+    const id = await enqueue("Summarize the room");
+    const say = async (n: number, kind: "human" | "agent", who: string, body: string, parent: string | null) => {
+      const cid = `cmt_${String(n).padStart(6, "0")}${"0".repeat(20)}`;
+      await pool.query(
+        `INSERT INTO artifact_comments (id, work_id, body, author_principal, author_kind, parent_id, created_at) VALUES ($1, $2, $3, $4, $5, $6, now() + ($7::int * interval '1 second'))`,
+        [cid, id, body, who, kind, parent, n],
+      );
+      return cid;
+    };
+    const root = await say(1, "human", "user", "does this include the migration?", null);
+    const second = await say(2, "agent", "helper-a", "it does — I will take the schema", root);
+    const third = await say(3, "agent", "helper-b", "then I take the console side", root);
+
+    let seen: CrewRunInput | null = null;
+    await drainCrewOne(pool, { ...cfg, briefThreadBytes: 4096 }, async (input) => { seen = input; return ok; });
+    const brief = seen!.brief;
+    expect(brief.startsWith("Summarize the room")).toBe(true); // the dispatched brief is untouched; the block is appended
+    expect(brief).toContain(`--- prior work on #${id}`);
+    expect(brief.indexOf("does this include the migration?")).toBeLessThan(brief.indexOf("then I take the console side")); // oldest first
+    expect(brief).toContain("agent helper-a:");
+    expect(brief).toContain("--- end prior work ---");
+
+    const run = (await pool.query(`SELECT meta FROM runs WHERE component = $1 AND kind = 'crew_run' AND (meta->>'work_id')::bigint = $2`, [crewId, id])).rows[0];
+    expect(run.meta).toMatchObject({ thread_room: id, thread_comments: [root, second, third] });
+    expect(run.meta.thread_bytes).toBeLessThanOrEqual(4096);
+    expect(run.meta.brief_sha).toBe("d".repeat(64)); // still the sha of what policy checked
+  });
+
+  it("the budget clips the block to the LAST messages, 0 turns it off, and the dispatch's max_brief_bytes clips it again", async () => {
+    const id = (await pool.query(`SELECT id FROM work WHERE owner = $1 AND title LIKE $2 ORDER BY id DESC LIMIT 1`, [`crew:${crewId}`, "%Summarize the room%"])).rows[0].id;
+    const tiny = await briefThreadBlock(pool, Number(id), 220);
+    expect(tiny!.comment_ids).toHaveLength(1);
+    expect(tiny!.text).toContain("then I take the console side"); // the newest survives, not the oldest
+    expect(await briefThreadBlock(pool, Number(id), 0)).toBeNull();
+    expect(await briefThreadBlock(pool, 999_999_999, 4096)).toBeNull(); // no room, no block
+
+    // a row whose dispatch allowed almost nothing gets no block, however big the env budget is
+    const capped = await enqueue("x".repeat(100), { max_brief_bytes: 120 });
+    await pool.query(`INSERT INTO artifact_comments (id, work_id, body, author_principal, author_kind) VALUES ($1, $2, 'a long thing to say', 'helper-a', 'agent')`, [
+      `cmt_${"7".repeat(26)}`,
+      capped,
+    ]);
+    let briefSeen = "";
+    await drainCrewOne(pool, { ...cfg, briefThreadBytes: 4096 }, async (input) => { briefSeen = input.brief; return ok; });
+    expect(briefSeen).toBe("x".repeat(100)); // nothing appended: no headroom under the size checkBrief allowed
+  });
+
+  it("whatever the crew raised while it held the row is stamped with that work id — server-side, after the fact, never a tool argument", async () => {
+    const id = await enqueue("raise something");
+    await drainCrewOne(pool, cfg, async () => {
+      // the crew's own requests_create, as mcp-brain would write it: no work id anywhere in the call
+      await pool.query(`INSERT INTO proposals (kind, source_agent, trust, payload) VALUES ('report', $1, 'external', $2::jsonb)`, [
+        crewId,
+        JSON.stringify({ title: "found a thing", body: "…" }),
+      ]);
+      return ok;
+    });
+    const { rows } = await pool.query(`SELECT work_id, payload->>'title' AS title FROM proposals WHERE source_agent = $1 ORDER BY id DESC LIMIT 1`, [crewId]);
+    expect(rows[0]).toEqual({ work_id: String(id), title: "found a thing" });
   });
 
   it("a row the runner cannot honour parks with the reason and never mints: no snapshot, a write tool in the snapshot, a revoked crew, no brain URL", async () => {

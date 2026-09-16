@@ -462,8 +462,8 @@ $("push-test").onclick = async () => {
 };
 
 // ----- Needs You (D7: ONE queue for everything that needs the user). Every
-// row is a REQUEST, and a request has one of six types (glossary.md):
-// note · report · review · question · access · improvement. The stored
+// row is a REQUEST, and a request has one of seven types (glossary.md):
+// note · report · review · question · access · improvement · action. The stored
 // `proposals.kind` values are unchanged — this is the view layer mapping the
 // eight-or-so internal kinds onto the six words the user reads, so the queue
 // has one vocabulary instead of the union of everything that fills it.
@@ -475,7 +475,7 @@ const REQUEST_TYPE = {
   improvement: "improvement",
   knowledge: "note",
   draft_settle: "note",
-  action: "note",
+  action: "action",
   report: "report",
   review: "review",
 };
@@ -487,6 +487,7 @@ const TYPE_LABEL = {
   question: "Questions",
   access: "Access",
   improvement: "Improvements",
+  action: "Actions",
 };
 const requestType = (kind) => REQUEST_TYPE[kind] ?? kind;
 // Approve / Revise / Decline are the three answers to every request. The wire
@@ -528,7 +529,24 @@ async function decide(id, body) {
     if (b.reason === "stale") alert("this one changed while it was on screen — here it is again");
     return false;
   }
+  const answered = await res.json().catch(() => ({}));
+  // An `action` is the one verb whose allow DOES something (docs/ops/actions.md).
+  // What it did is held for the next paint rather than alerted: the row leaves
+  // the queue on success, and "it worked, here is what it made" belongs where
+  // the row was, not in a modal. A refusal keeps the row and says why.
+  lastAction = res.ok
+    ? (answered.action ? { ok: true, ...answered.action } : null)
+    : (answered.error ? { ok: false, message: answered.error.message ?? "refused" } : lastAction);
   return res.ok;
+}
+
+// What the last action did, rendered once above the queue and then forgotten.
+let lastAction = null;
+const ACTION_NOISE = ["ok", "kind", "at", "by", "on_behalf_of"];
+function actionNote(a) {
+  if (!a.ok) return `refused — ${a.message}`;
+  const parts = Object.entries(a).filter(([k]) => !ACTION_NOISE.includes(k)).map(([k, v]) => `${k} ${v}`);
+  return `${a.kind}${parts.length ? `: ${parts.join(" · ")}` : ""}`;
 }
 
 async function loadTriage() {
@@ -547,7 +565,9 @@ async function loadTriage() {
     if (!groups.has(type)) groups.set(type, []);
     groups.get(type).push(p);
   }
-  $("proposal-list").innerHTML = [...groups]
+  const note = lastAction ? `<li class="muted">last action — ${esc(actionNote(lastAction))}</li>` : "";
+  lastAction = null; // said once; the record keeps it (runs, and the proposal's payload.result)
+  $("proposal-list").innerHTML = note + [...groups]
     .map(([type, rows]) => `<li class="muted">${esc(TYPE_LABEL[type] ?? type)} · ${rows.length}</li>` + rows.map(proposalRow).join(""))
     .join("");
   document.querySelectorAll("[data-triage]").forEach((b) => (b.onclick = async () => {
@@ -592,6 +612,30 @@ async function batchDecide(decision) {
   loadTriage();
 }
 
+/**
+ * An `action` row says what it would DO before you answer it
+ * (docs/ops/actions.md): the kind, a short preview of its own arguments, and
+ * the reason the agent gave. Arguments are agent-authored text, so every one
+ * of them is output-encoded and clipped — the queue renders a claim, never a
+ * document. `payload.result` (after an allow) and `payload.error` (after a
+ * failure that left the row pending) render the same way.
+ */
+const ARG_PREVIEW_CHARS = 140;
+function actionDetail(p) {
+  if (p.kind !== "action") return "";
+  const a = p.payload?.action ?? {};
+  const args = Object.entries(a.args ?? {})
+    .map(([k, v]) => `${k}=${typeof v === "object" && v !== null ? JSON.stringify(v) : String(v)}`)
+    .join(" ")
+    .slice(0, ARG_PREVIEW_CHARS);
+  const outcome = p.payload?.result
+    ? `<br><span class="muted">done — ${esc(actionNote({ ok: true, kind: a.kind, ...p.payload.result }))}</span>`
+    : p.payload?.error
+      ? `<br><span class="muted">last try refused — ${esc(String(p.payload.error.message ?? p.payload.error.code ?? ""))}</span>`
+      : "";
+  return `<br><span class="muted"><b>${esc(a.kind ?? "?")}</b> ${esc(args)}</span>${p.payload?.reason ? `<br><span class="muted">why: ${esc(String(p.payload.reason).slice(0, ARG_PREVIEW_CHARS))}</span>` : ""}${outcome}`;
+}
+
 function proposalRow(p) {
   const c = p.payload?.classification ?? {};
   const label = c.action || c.title || p.payload?.title || p.kind; // review proposals (§4.21) carry a top-level title
@@ -609,7 +653,7 @@ function proposalRow(p) {
     ? ` <button data-triage="${p.id}" data-d="accept_as_work" title="${attr(`creates the task “${work.title}”, unassigned`)}">Approve as Work</button>`
     : "";
   const defer = DEFER.map((x) => `<button data-triage="${p.id}" data-d="${x.d}" class="quiet">${x.label}</button>`).join(" ");
-  return `<li><span><input type="checkbox" data-pick="${p.id}" aria-label="${attr(`select ${label}`)}"> ${esc(label)} <span class="muted">${esc(requestType(p.kind))} · ${esc(c.kind ?? "")} · ${esc(p.source_agent)} · ${new Date(p.ts).toLocaleDateString()}</span></span>
+  return `<li><span><input type="checkbox" data-pick="${p.id}" aria-label="${attr(`select ${label}`)}"> ${esc(label)} <span class="muted">${esc(requestType(p.kind))} · ${esc(c.kind ?? "")} · ${esc(p.source_agent)} · ${new Date(p.ts).toLocaleDateString()}</span>${actionDetail(p)}</span>
         <span>${answers}${asWork} ${defer}</span></li>`;
 }
 
@@ -657,6 +701,30 @@ try {
 // the stored values (kind internal|external, tier none|index|areas), which do
 // not change.
 const ROLE_LABEL = { internal: "assistant", external: "external", crew: "helper" };
+// The action vocabulary, and the same resolution the server does
+// (packages/core/src/actions.ts). Duplicated here because the PWA is plain
+// modules with no bundler — the SERVER re-validates every change, so this copy
+// is a view, never a gate. The order is the enum's.
+const ACTION_KINDS = ["dispatch", "task_update", "comment", "capture"];
+const AUTONOMY_LEVELS = ["observe", "propose", "act_within_scope"];
+const LEVEL_CEILING = { observe: "deny", propose: "propose", act_within_scope: "allow" };
+const ACTION_DEFAULTS = {
+  observe: { dispatch: "deny", task_update: "deny", comment: "deny", capture: "deny" },
+  propose: { dispatch: "propose", task_update: "propose", comment: "propose", capture: "propose" },
+  act_within_scope: { dispatch: "propose", task_update: "allow", comment: "allow", capture: "allow" },
+};
+const MODE_RANK = { deny: 0, propose: 1, allow: 2 };
+const levelOf = (au) => (AUTONOMY_LEVELS.includes(au?.level) ? au.level : "observe");
+function effectiveActions(au) {
+  const level = levelOf(au);
+  const ceiling = LEVEL_CEILING[level];
+  const out = {};
+  for (const k of ACTION_KINDS) {
+    const asked = au?.actions?.[k] ?? ACTION_DEFAULTS[level][k];
+    out[k] = MODE_RANK[asked] <= MODE_RANK[ceiling] ? asked : ceiling;
+  }
+  return out;
+}
 const ACCESS_LABEL = { none: "none", index: "titles", areas: "folders" };
 const accessLabel = (t) => ACCESS_LABEL[t] ?? t;
 let agentsCache = [];
@@ -677,11 +745,18 @@ async function loadAgents() {
         au.accept_from ? `accepts from ${au.accept_from.map(esc).join(", ") || "nobody"}` : "",
         au.max_open_bundles !== undefined ? `max ${Number(au.max_open_bundles) || 0} bundles` : "",
       ].filter(Boolean).join(" · ");
+      // The action table, resolved the same way the server resolves it
+      // (docs/ops/actions.md) — level as a ceiling, kinds below it. Shown for
+      // every row, including `observe`, because "this one can do nothing" is
+      // the fact worth being able to see at a glance.
+      const table = effectiveActions(au);
+      const actionLine = `level: ${esc(levelOf(au))} · ${ACTION_KINDS.map((k) => `${esc(k)} ${esc(table[k])}`).join(" · ")}`;
       const actions = a.revoked
         ? '<span class="muted">revoked</span>'
         : `<span><button data-agent-grants="${esc(a.id)}" class="secondary">grants</button> <button data-agent-rotate="${esc(a.id)}" class="secondary">rotate</button> <button data-agent-revoke="${esc(a.id)}">revoke</button></span>`;
       return `<li class="${a.revoked ? "revoked" : ""}"><span><b>${esc(a.display_name)}</b> <span class="muted">${esc(a.id)}</span> <span class="chip">${esc(ROLE_LABEL[a.kind] ?? a.kind)}</span><br>
         <span class="muted">access: ${scope}${projects} · ${seen}</span>${narrowing ? `<br><span class="muted">autonomy: ${narrowing}</span>` : ""}<br>
+        <span class="muted">actions: ${actionLine}</span><br>
         <span id="presence-${esc(a.id)}" class="presence"></span></span>${actions}</li>`;
     })
     .join("");
@@ -733,17 +808,51 @@ function openGrants(id) {
   $("agent-may-dispatch-to").value = (au.may_dispatch_to ?? []).join(", ");
   $("agent-accept-from").value = (au.accept_from ?? []).join(", ");
   $("agent-max-bundles").value = au.max_open_bundles ?? "";
+  // The action table, one select per kind, pre-set to what is STORED (not to
+  // the resolved value) so saving without touching it changes nothing. The
+  // level's ceiling is shown beside each as the effective answer.
+  $("agent-level").value = levelOf(au);
+  renderActionControls(au);
+  $("agent-level").onchange = () => renderActionControls(autonomyFromForm());
   $("agent-grants-msg").textContent = "";
   $("agent-grants").hidden = false;
 }
 
-// Blank = the key is absent = "project members" (never widening: a key can only narrow).
+/** One select per action kind, plus what the level's ceiling makes of it. Rebuilt whenever the level changes, so the consequence is visible before Save. */
+function renderActionControls(au) {
+  const stored = au?.actions ?? {};
+  const table = effectiveActions(au);
+  $("agent-actions").innerHTML = ACTION_KINDS.map((k) => `<label>${esc(k)}
+      <select data-action-kind="${esc(k)}">
+        <option value="">default for this level (${esc(table[k])})</option>
+        <option value="deny">deny — refuse it at the tool</option>
+        <option value="propose">propose — ask me</option>
+        <option value="allow">allow — run it (act within scope only)</option>
+      </select></label>`).join("");
+  for (const sel of document.querySelectorAll("[data-action-kind]")) sel.value = stored[sel.dataset.actionKind] ?? "";
+  for (const sel of document.querySelectorAll("[data-action-kind]")) sel.onchange = () => renderActionControlsKeepingValues();
+}
+
+// Re-render after a kind changes so every "default for this level (…)" label
+// stays honest, without losing what the user just picked.
+function renderActionControlsKeepingValues() {
+  renderActionControls(autonomyFromForm());
+}
+
+// Blank = the key is absent. The §4.21 keys can only narrow; `level` and
+// `actions` may go either way, and this form is one of the two doors allowed
+// to widen — the server records and alerts whatever this raises.
 function autonomyFromForm() {
   const list = (id) => $(id).value.split(",").map((s) => s.trim()).filter(Boolean);
   const out = {};
   if ($("agent-may-dispatch-to").value.trim()) out.may_dispatch_to = list("agent-may-dispatch-to");
   if ($("agent-accept-from").value.trim()) out.accept_from = list("agent-accept-from");
   if ($("agent-max-bundles").value.trim()) out.max_open_bundles = Number($("agent-max-bundles").value);
+  const level = $("agent-level").value;
+  if (AUTONOMY_LEVELS.includes(level)) out.level = level;
+  const actions = {};
+  for (const sel of document.querySelectorAll("[data-action-kind]")) if (sel.value) actions[sel.dataset.actionKind] = sel.value;
+  if (Object.keys(actions).length) out.actions = actions;
   return out;
 }
 
@@ -761,7 +870,11 @@ $("agent-grants").onsubmit = async (e) => {
   const p = await api(`/api/agents/${encodeURIComponent(id)}/projects`, { method: "PUT", body: JSON.stringify({ projects }) });
   if (!p.ok) { $("agent-grants-msg").textContent = "projects rejected — comma-separated slugs (a-z, 0-9, -)"; return; }
   const au = await api(`/api/agents/${encodeURIComponent(id)}/autonomy`, { method: "PUT", body: JSON.stringify(autonomyFromForm()) });
-  if (!au.ok) { $("agent-grants-msg").textContent = "autonomy rejected — agent ids (and `user` for accept-from), comma-separated; max open bundles 0..1000"; return; }
+  if (!au.ok) {
+    const why = (await au.json().catch(() => ({})))?.error?.message;
+    $("agent-grants-msg").textContent = why || "autonomy rejected — agent ids (and `user` for accept-from), comma-separated; max open bundles 0..1000";
+    return;
+  }
   $("agent-grants").hidden = true;
   loadAgents();
 };

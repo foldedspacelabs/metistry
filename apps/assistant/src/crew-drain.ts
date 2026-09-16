@@ -6,14 +6,14 @@
 // failing parks as `blocked` (visible on the list) instead of looping.
 //
 // Credentials: the crew's `agents` row holds the hash of a token nobody has.
-// Each run MINTS a fresh one (rotate), hands it to the SDK query for that
+// Each run MINTS a fresh one (rotate), hands it to the tool host for that
 // run only, and BURNS it in `finally` (rotate again, discard) — a crew never
 // keeps a bearer, and two runs never share one. The same SQL the console's
 // rotateAgent uses; the plaintext never touches a log or a row.
 //
 // Sessions: a crew run NEVER resumes one (cost research decision 3 — a fresh
-// session per crew run). Nothing here reads or writes the `sessions` table and
-// `buildCrewOptions` has no `resume` to set, so this is a property of the code
+// session per crew run). The engine is handed an in-memory session store
+// that dies with the run and no `resume`, so this is a property of the code
 // rather than a rule anyone has to remember; the run row says `fresh_session`
 // so the fact is visible where cost is read.
 //
@@ -25,7 +25,7 @@
 
 import { createHash } from "node:crypto";
 import { emptyCompute, finishRun, mintToken, sanitizeForAgent, startRun, tokenHash, type Compute, type ResolvedAssignment, type TierMap } from "@foldedspacelabs/metistry-core";
-import { crewSystemPrompt, crewToolNames, parseCrewSnapshot, runCrew, runCrewOnEngine, type CrewRunInput, type CrewRunResult, type CrewSdk } from "./crew.js";
+import { crewSystemPrompt, crewToolNames, parseCrewSnapshot, runCrewOnEngine, type CrewRunInput, type CrewRunResult } from "./crew.js";
 import { makeEngine, type Engine, type TurnGuard } from "./engine.js";
 import { memorySessionStore } from "./sessions.js";
 import { mcpToolHost } from "./tools.js";
@@ -55,12 +55,11 @@ export interface CrewDrainConfig {
    * off. The block is clipped again by the brief cap the dispatch passed.
    */
   briefThreadBytes?: number | undefined;
-  /** Injected SDK for tests. */
-  sdk?: CrewSdk | undefined;
   /**
    * `compute.yaml` in force. A crew named in `assignments.crews` runs on ITS
    * OWN provider through the in-house engine (collaboration rule 3); one
-   * that is not keeps running on the SDK path with its manifest's model.
+   * that neither `assignments.crews` nor `assignments.default` covers has no
+   * engine at all, and its row parks as blocked naming the field to add.
    */
   compute?: (() => Compute) | undefined;
   /** The pre-call gate (budgets). Applies to crew runs exactly as it does to the assistant's own turns. */
@@ -220,7 +219,7 @@ export async function briefThreadBlock(db: Db, workId: number, budget: number): 
 }
 
 /** One pass: claim a row, run it, record it. Returns false when the queue is empty. */
-export async function drainCrewOne(db: Db, cfg: CrewDrainConfig, run: (input: CrewRunInput, sdk?: CrewSdk) => Promise<CrewRunResult> = runCrew): Promise<boolean> {
+export async function drainCrewOne(db: Db, cfg: CrewDrainConfig): Promise<boolean> {
   const leaseSeconds = cfg.leaseSeconds ?? 1800;
   const maxAttempts = cfg.maxAttempts ?? 3;
   const backoff = cfg.retryBackoffSeconds ?? 300;
@@ -247,8 +246,23 @@ export async function drainCrewOne(db: Db, cfg: CrewDrainConfig, run: (input: Cr
   const briefSha = typeof row.meta?.brief_sha === "string" ? row.meta.brief_sha : createHash("sha256").update(brief).digest("hex");
 
   // The crew's own assignment decides the engine (collaboration rule 3).
-  // No assignment → the SDK path with the manifest's model, unchanged.
+  // Nothing assigned → no engine, and a row parked with the line to write
+  // rather than a run that could only fail (C2/C3).
   const turn = resolveTurn(cfg.compute?.() ?? emptyCompute(), {} as TierMap, `crew:${crewId}`, { model: crew.model, effort: crew.effort });
+  if (!turn.assignment) {
+    await settle(
+      db,
+      row.id,
+      {
+        status: "blocked",
+        note:
+          `crew '${crewId}' has no compute: compute.yaml assigns neither assignments.crews.${crewId} nor assignments.default — ` +
+          `\`metistry compute assign crew:${crewId} <provider/model>\` (docs/ops/compute.md)`,
+      },
+      agent,
+    );
+    return true;
+  }
 
   // The room on the row this crew is about (the dispatched task if there is
   // one, else the crew row itself) becomes the brief's prior-work block —
@@ -275,7 +289,7 @@ export async function drainCrewOne(db: Db, cfg: CrewDrainConfig, run: (input: Cr
   const runId = await startRun(db, {
     component: crewId,
     kind: "crew_run",
-    ...(turn.assignment ? { provider: turn.assignment.provider } : {}),
+    provider: turn.assignment.provider,
     model: turn.model,
     meta: {
       work_id: row.id,
@@ -285,8 +299,8 @@ export async function drainCrewOne(db: Db, cfg: CrewDrainConfig, run: (input: Cr
       ...(block ? { thread_room: roomId, thread_comments: block.comment_ids, thread_bytes: block.bytes } : {}),
       attempt: row.attempts,
       effort: turn.effort,
-      engine: turn.assignment?.config.kind ?? "anthropic",
-      ...(turn.assignment ? { model_ref: turn.assignment.ref } : {}),
+      engine: turn.assignment.config.kind,
+      model_ref: turn.assignment.ref,
       fresh_session: true,
       crew_sha: crew.sha256,
       dispatch_run_id: row.meta?.dispatch_run_id ?? null,
@@ -295,9 +309,7 @@ export async function drainCrewOne(db: Db, cfg: CrewDrainConfig, run: (input: Cr
   });
   try {
     const input: CrewRunInput = { crew, brief, task_id: taskId, brain: { url: cfg.brainUrl, token }, identity: cfg.identity };
-    const r = turn.assignment
-      ? await (cfg.runAssigned ?? ((i, a) => runCrewOnEngine(i, a, engineForCrew(cfg, i, cfg.guard))))(input, turn.assignment)
-      : await run(input, cfg.sdk);
+    const r = await (cfg.runAssigned ?? ((i, a) => runCrewOnEngine(i, a, engineForCrew(cfg, i, cfg.guard))))(input, turn.assignment);
     const reports = r.tools_used["mcp__brain__report"] ?? 0;
     await finishRun(db, runId, {
       ok: r.outcome === "ok",

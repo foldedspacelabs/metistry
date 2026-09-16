@@ -39,11 +39,10 @@ struct MetistryApp: App {
             bundleResourceURL: resources,
             runner: runner,
             appVersion: version ?? UpdateStatus.devBuildVersion,
-            // The three platform seams MetistryKit declares and does not have:
-            // ServiceManagement, AuthenticationServices, and a terminal.
+            // The two platform seams MetistryKit declares and does not have:
+            // ServiceManagement and AuthenticationServices.
             loginItemService: SMAppServiceLoginItem(),
-            passkeyRegistrar: ASAuthorizationPasskeyRegistrar(),
-            terminalOpener: DotCommandTerminalOpener()
+            passkeyRegistrar: ASAuthorizationPasskeyRegistrar()
         )
         _model = State(initialValue: model)
         #if os(macOS)

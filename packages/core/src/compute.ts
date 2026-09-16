@@ -637,26 +637,87 @@ export async function startComputeWatch(opts: ComputeWatchOptions): Promise<Comp
   };
 }
 
+// ---- is there an engine at all? ----------------------------------------------
+
+/**
+ * The ONE seam for "does this install have an engine": `up` (whether to
+ * render the assistant child), `doctor` (the `assistant` row), the routine
+ * runner's preflight (whether a turn would be answered) and — through the
+ * supervisor's child list — the watchdog all ask it, and they must never
+ * disagree.
+ *
+ * It used to be one environment variable. Since C2/C3 an engine is
+ * configuration plus a credential: `assignments.default` says which provider
+ * and model a turn runs on, and the provider's `auth.secret` names the
+ * Keychain item whose value reaches the process as an environment variable
+ * of that name. Either half missing = no engine, and that is a SUPPORTED
+ * shape, not a fault: the assistant is the only component that needs a
+ * model, so `up` leaves it out of the supervisor's children rather than
+ * starting a child that could only crash-loop. Everything model-free
+ * (captures, inbox-drain, tasks, search, the console) runs; a queued fold
+ * turn waits.
+ */
+export interface EngineStatus {
+  /** an engine can start */
+  ok: boolean;
+  /** what `default` resolved to, when `assignments.default` is there at all */
+  assignment?: ResolvedAssignment;
+  /** the secret NAME the default provider declares, when it declares one (a local server needs none) */
+  secret?: string;
+  /** why not, naming the field or the variable that is missing — never a bare "misconfigured" */
+  why?: string;
+  /** what to DO about it: one command */
+  fix?: string;
+}
+
+export function engineStatus(cfg: Compute, env: NodeJS.ProcessEnv = process.env): EngineStatus {
+  const assignment = resolveAssignment(cfg, DEFAULT_TIER);
+  if (!assignment) {
+    return {
+      ok: false,
+      why: `no assignments.default in ${COMPUTE_FILENAME} — nothing says which provider and model a turn runs on`,
+      fix: "metistry compute assign default <provider/model>",
+    };
+  }
+  const secret = assignment.config.auth?.secret;
+  if (secret && (env[secret] ?? "").trim() === "") {
+    return {
+      ok: false,
+      assignment,
+      secret,
+      why: `assignments.default runs on ${assignment.ref}, and providers.${assignment.provider}.auth.secret names ${secret}, which is unset here`,
+      fix: `metistry compute providers add --from <template> --name ${assignment.provider} --secret ${secret}, then metistry secrets sync --to env`,
+    };
+  }
+  return { ok: true, assignment, ...(secret ? { secret } : {}) };
+}
+
+/** The boolean every caller wants. `engineStatus` is for the ones that also want the sentence. */
+export function engineConfigured(cfg: Compute, env: NodeJS.ProcessEnv = process.env): boolean {
+  return engineStatus(cfg, env).ok;
+}
+
 // ---- the collaboration rule (C7) ---------------------------------------------
 
 /**
- * The kind of the engine that runs a turn nothing in `compute.yaml`
- * assigns: the Claude Agent SDK path, still the second engine kind until
- * the subscription scrub removes it. Deliberately NOT a member of
- * `PROVIDER_KINDS` — no `compute.yaml` may name it, because it is not a
- * provider you configure but the absence of one.
+ * One engine, one wire protocol (C2), so today this is `ProviderKind` and
+ * nothing else: the Claude Agent SDK and its `anthropic` kind left the
+ * product with the scrub. The type keeps its name because the collaboration
+ * rule below is about KINDS rather than providers, and a second kind (a
+ * `llama-server` with GBNF grammars, C15; a native Messages adapter) is then
+ * an additive change here rather than a rewrite there.
  */
-export const SDK_ENGINE_KIND = "anthropic";
-export type EngineKind = ProviderKind | typeof SDK_ENGINE_KIND;
+export type EngineKind = ProviderKind;
 
 /**
- * Which engine kind serves this tier or `crew:<name>`. The whole of rule 1
- * ("a Claude turn never runs on a non-Claude model; engine is
- * `provider.kind` from config") in one function, so nothing has to derive it
- * twice and differently.
+ * Which engine kind serves this tier or `crew:<name>`, and `undefined` when
+ * nothing assigns it — which now means "no engine runs this at all", not
+ * "some other engine does". The whole of rule 1 ("engine is `provider.kind`
+ * from config") in one function, so nothing has to derive it twice and
+ * differently.
  */
-export function engineKindFor(cfg: Compute, tierOrCrew?: string | null): EngineKind {
-  return resolveAssignment(cfg, tierOrCrew)?.config.kind ?? SDK_ENGINE_KIND;
+export function engineKindFor(cfg: Compute, tierOrCrew?: string | null): EngineKind | undefined {
+  return resolveAssignment(cfg, tierOrCrew)?.config.kind;
 }
 
 export interface CrossKindRefusal {
@@ -679,7 +740,10 @@ export interface CrossKindRefusal {
 export function crossKindRefusal(cfg: Compute, caller: string | null | undefined, crew: string): CrossKindRefusal | undefined {
   const from = engineKindFor(cfg, caller ?? DEFAULT_TIER);
   const to = engineKindFor(cfg, `crew:${crew}`);
-  if (from === to) return undefined;
+  // `assignments.default` is required whenever `assignments:` exists, so
+  // `undefined` here means the file assigns NOTHING — both sides at once,
+  // and a turn that never runs rather than a push to refuse.
+  if (from === to || from === undefined || to === undefined) return undefined;
   const assigned = resolveAssignment(cfg, `crew:${crew}`);
   const where = assigned?.from === `crew:${crew}` ? `assignments.crews.${crew}` : "assignments.default";
   return {

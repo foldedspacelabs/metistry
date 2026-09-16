@@ -133,18 +133,21 @@ services:
     environment:
       METISTRY_DB_HOST: db
       METISTRY_DB_PASSWORD: ${METISTRY_DB_PASSWORD:?set METISTRY_DB_PASSWORD in .env}
-      # subscription token, ~1yr, no auto-refresh (watchdog tracks expiry).
-      # NEVER set ANTHROPIC_API_KEY here — the engine refuses to start with it.
-      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:?set CLAUDE_CODE_OAUTH_TOKEN in .env (claude setup-token)}
       METISTRY_MODEL_DEFAULT: ${METISTRY_MODEL_DEFAULT:-haiku}
       # tools: the console's mcp-brain over the compose network, authenticated
       # with the SAME token the console registers (degrades: tool-less when unset)
       METISTRY_BRAIN_URL: ${METISTRY_BRAIN_URL:-http://console:8080/mcp}
       METISTRY_ASSISTANT_TOKEN: ${METISTRY_ASSISTANT_TOKEN:-}
       METISTRY_COMPUTE_FILES: ${METISTRY_COMPUTE_FILES:-seed/compute.yaml:compute.yaml}
+      # The engine's credential is named BY compute.yaml, not here: a
+      # provider's `auth.secret` is the environment variable the engine reads
+      # at the point of the call (docs/ops/compute.md). Pass through whichever
+      # one this install declares — the default matches the openrouter
+      # template, and an install using another provider adds its own line.
+      METISTRY_OPENROUTER_API_KEY: ${METISTRY_OPENROUTER_API_KEY:-}
       # identity + seed prompt ship in the image; an instance overlays via METISTRY_IDENTITY_FILES / METISTRY_PROMPT_FILES
     volumes:
-      - assistant-home:/home/node   # SDK transcripts survive restarts (PoC-4)
+      - assistant-home:/home/node   # writable HOME; sessions themselves live in Postgres
 
 volumes:
   db-data:

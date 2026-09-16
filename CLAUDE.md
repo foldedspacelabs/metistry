@@ -86,7 +86,8 @@ Every bridge is a published npm package usable by a stranger.
 ## Stack
 
 TypeScript, pnpm workspaces, changesets. Postgres + pgvector in Docker. Node for
-the console. Claude Agent SDK for Metis. Swift for TCC bridges. **Collectors
+the console. One OpenAI-compatible engine for Metis, on whichever provider
+`compute.yaml` assigns (ruled 2026-09-11). Swift for TCC bridges. **Collectors
 are TypeScript** — no Python anywhere (ruled 2026-08-29; Phase 0's stack had
 already gone zero-Python).
 
@@ -97,8 +98,8 @@ advisory lock.
 
 Ask before adding a dependency. This is a system maintained by one person over
 years; every dependency is a future maintenance obligation. **Pre-approved**
-(no per-PR debate): `@anthropic-ai/claude-agent-sdk`,
-`@modelcontextprotocol/sdk`, `pg`, `zod`, `yaml`, `chokidar`, `web-push`,
+(no per-PR debate): `@modelcontextprotocol/sdk`, `pg`, `zod`, `yaml`,
+`chokidar`, `web-push`,
 `@simplewebauthn/server` + `@simplewebauthn/browser` (passkeys — never
 hand-roll WebAuthn), and dev tooling (`typescript`, `vitest`,
 `changesets`). **Deliberately hand-rolled**

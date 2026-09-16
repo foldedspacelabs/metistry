@@ -49,7 +49,7 @@ describe("loadTestEnv", () => {
         "METISTRY_INSTANCE_DIR=/Users/nobody/Development/metistry-instance",
         "METISTRY_RECONCILER_URL=http://127.0.0.1:8788",
         "METISTRY_BRIDGE_TOKEN_RECONCILER=secret",
-        "CLAUDE_CODE_OAUTH_TOKEN=also-secret",
+        "METISTRY_OPENROUTER_API_KEY=also-secret",
       ].join("\n") + "\n",
     );
     const env: NodeJS.ProcessEnv = { METISTRY_ORIGIN: "https://studio.ts.net" };

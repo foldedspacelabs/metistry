@@ -10,7 +10,7 @@ boundary differ. Set in `deployment.yaml` (plan §4.17, open decision 15
 |---|---|---|
 | db | `pgvector/pgvector:pg17` container | a user-space Postgres 17, `postgres -D`, a **child of the supervisor** |
 | console | container, published on `127.0.0.1:8080` | a child of the supervisor, binds `127.0.0.1:8080` |
-| assistant | container; the file requires `CLAUDE_CODE_OAUTH_TOKEN` | a child of the supervisor, **under `ops/sandbox/assistant.sb`** — and not a child at all without an engine credential (below) |
+| assistant | container; the file passes through the provider key `compute.yaml` names | a child of the supervisor, **under `ops/sandbox/assistant.sb`** — and not a child at all without an engine (below) |
 | reconciler | launchd job | a child of the supervisor |
 | watchdog | launchd job | **it IS the supervisor** |
 | launchd agents | reconciler, watchdog, the bridges | **one**: `com.foldedspacelabs.metistry`, plus a TCC helper each |
@@ -285,16 +285,20 @@ retired (it was renamed `calendar`); nothing else about that shape changes.
 
 ### The assistant is a child only when there is an engine
 
-Same rule as the bridges, for the one component that needs a model: with no
-`CLAUDE_CODE_OAUTH_TOKEN` in the resolved environment, `up` leaves the
-assistant out of `supervisor.json` (it hard-requires the credential and could
-only crash-loop), prints `assistant: absent — no engine credential …`, and
-`doctor` reports the row `absent` rather than failed. The credential appearing
-later needs nothing but another `up` — the config is rewritten whole, so the
-child comes back. Everything model-free runs meanwhile; the fold's turns wait
-(docs/ops/assistant-tools.md, "Running without an engine"). The **compose
-shape is not engine-less**: `docker-compose.yml` interpolates the variable as
-required, so `docker compose up` refuses the file without it.
+Same rule as the bridges, for the one component that needs a model. An engine
+is two things (`compute.yaml`, docs/ops/compute.md): an `assignments.default`,
+and the key the provider it names declares in `providers.<name>.auth.secret`.
+With either missing, `up` leaves the assistant out of `supervisor.json` (it
+hard-requires both and could only crash-loop), prints `assistant: absent — …`
+naming the half that is missing and the command that fixes it, and `doctor`
+reports the row `absent` rather than failed. Both come from ONE seam in
+`packages/core/src/compute.ts` (`engineStatus`), which the routine runner's
+preflight reads too — so nothing can disagree about whether there is a model.
+An assignment appearing later needs nothing but another `up`: the config is
+rewritten whole, so the child comes back. Everything model-free runs meanwhile;
+the fold's turns wait (docs/ops/assistant-tools.md, "Running without an
+engine"). **Both shapes run engine-less**: `docker-compose.yml` passes the
+provider key through when it is set and never requires it.
 
 ### Bridges are installed only when configured
 
@@ -503,8 +507,7 @@ either shape.
 
 The container was defence in depth behind invariant 9's allowlist. On
 the host, `ops/sandbox/assistant.sb` is. The engine's root process is
-`/usr/bin/sandbox-exec`, so every child — including the Agent SDK's
-own CLI subprocess — inherits the confinement. That is unchanged by the
+`/usr/bin/sandbox-exec`, so every child inherits the confinement. That is unchanged by the
 supervisor: the supervisor spawns exactly the argv the plist used to name,
 `sandbox-exec` first and every `-D` parameter identical, and the misuse tests
 confine a probe with those same values.
@@ -515,7 +518,7 @@ confine a probe with those same values.
 | filesystem write | the state dir and tmp. Nothing else. |
 | exec | the node binary. No shell (invariant 9). |
 | network out | the console and Postgres, on loopback, on **this instance's** ports, and TLS. Nothing else — a namespaced engine cannot reach another install's console. |
-| state dir | `<instance>/state/assistant`, which is also `HOME` — the SDK's session transcripts live there and survive restarts (the launchd twin of the `assistant-home` volume) |
+| state dir | `<instance>/state/assistant`, which is also `HOME` — the engine's one writable directory (the launchd twin of the `assistant-home` volume). Sessions themselves live in Postgres. |
 
 The parameters are computed in one place (`packages/cli/src/sandbox.ts`)
 and the misuse tests in `packages/cli/test/sandbox.test.ts` confine a
@@ -534,15 +537,20 @@ managed conf block — not a range, and not "loopback".
 **Two honest limits.**
 
 1. **Outbound is filtered by port, not by host name.** `sandbox-exec`
-   cannot express "api.anthropic.com". The profile allows loopback to the
-   console and TLS outbound; the Anthropic host list lives as data in
-   `packages/cli/src/sandbox.ts` (`ANTHROPIC_HOSTS`:
-   `api.anthropic.com`, `statsig.anthropic.com`, `console.anthropic.com`)
-   and is documentation today — the variable name
-   `METISTRY_ASSISTANT_ALLOWED_HOSTS` is reserved for when there is a
-   layer that can enforce it. Read the profile as "the engine
-   cannot reach your LAN's other services on their own ports", not as
-   "the engine can only reach Anthropic".
+   cannot express "openrouter.ai". The profile allows loopback to the
+   console and TLS outbound; the host list is DERIVED from this install's
+   own `compute.yaml` — every provider's `base_url` hostname and nothing
+   else (`engineHosts` in `packages/cli/src/sandbox.ts`) — and is
+   documentation today, not an enforced rule. The variable name
+   `METISTRY_ASSISTANT_ALLOWED_HOSTS` is reserved for when there is a layer
+   that can enforce it. Read the profile as "the engine cannot reach your
+   LAN's other services on their own ports", not as "the engine can only
+   reach its provider". What *is* enforced by construction is narrower and
+   more useful: the loop's only outbound call is
+   `<base_url>/chat/completions` on the provider the turn was assigned
+   (`apps/assistant/src/engine-openai.ts`), so the host check is a property
+   of the code rather than of an environment variable a subprocess may
+   ignore (R1).
 2. **`sandbox-exec(1)` is deprecated** — and functional; this profile is
    verified on macOS 26.4 and the shape has worked since 14. The
    migration path is App Sandbox entitlements once the Mac app hosts the
@@ -577,11 +585,12 @@ The two secret-bearing dicts are built differently on purpose:
   instead of the named volume, a loopback bind). It is the component
   that talks to everything.
 - **assistant** — an **allowlist**: the db, its own token, the brain URL,
-  the model knobs. The GitHub write PAT, the AWS keys and the VAPID
-  private key stay with the console; the engine reaches those through an
-  allowlisted tool or not at all. The same allowlist is why a stray
-  `ANTHROPIC_API_KEY` in the operator's shell cannot reach the engine and
-  silently move billing off the subscription (PoC-4).
+  the model knobs, and exactly the provider secrets this install's
+  `compute.yaml` NAMES (`assistantEnvKeys`). The GitHub write PAT, the AWS
+  keys and the VAPID private key stay with the console; the engine reaches
+  those through an allowlisted tool or not at all. The same allowlist is why
+  a provider key in the operator's shell that this file does not name cannot
+  reach the engine and buy tokens on somebody else's account.
 
 ## Doctor
 

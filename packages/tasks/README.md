@@ -70,8 +70,8 @@ second) and records a `runs` row (`component = agent`, `kind = 'task_op'`,
 | `create(input, agent)` | Insert a task. `input`: `title` (required), `project?`, `area?`, `depends_on?: number[]`, `due?: 'YYYY-MM-DD'`, `idempotency_key?`, `external_ref?`. Unknown `depends_on` ids are refused. Same key → the existing row, untouched. | `Task` |
 | `listReady({project?, limit?})` | Status `open`, kind `task`/`review`, unclaimed or lease expired, every dependency `closed`. Due dates first, then oldest. Rows collected from a source of truth (`issue`, `pr`, `event`) are never listed or claimable — their status belongs to the source. | `Task[]` |
 | `claim(id, agent, leaseSeconds?)` | One atomic `UPDATE`: requires unclaimed-or-expired, status `open`/`in_progress`, dependencies closed. Sets holder, lease, `in_progress`. | `Result` |
-| `heartbeat(id, agent, leaseSeconds?)` | Extend the lease. Holder only, and only while the lease is live — an expired lease is never renewed. | `Result` |
-| `update(id, agent, {status?, note?})` | Holder only. `status` ∈ `in_progress \| blocked \| closed`. `closed` releases the claim and sets `closed_at`; `blocked` keeps the claim. Appends to `history`. | `Result` |
+| `heartbeat(id, agent, leaseSeconds?, note?)` | Extend the lease. Holder only, and only while the lease is live — an expired lease is never renewed. `note` lands on `history`; a renew *without* one appends nothing, so a lease kept alive every few minutes never buries the row's record. | `Result` |
+| `update(id, agent, {status?, note?, owner?, title?, project?})` | **Two arms** — see below. Holder arm: `status` ∈ `in_progress \| blocked \| closed` (`closed` releases the claim and sets `closed_at`; `blocked` keeps it), and/or a bare `note`. Board arm: `owner` (`null` clears), `title`, `project`, and `status: 'open'` (the unblock, legal from `blocked` only). Appends to `history`. | `Result` |
 | `release(id, agent, note?)` | Holder hands the task back: clears the claim, status → `open`. | `Result` |
 | `get(id)` | One task or `null`. | `Task \| null` |
 | `listForAgent(agent)` | Everything the agent currently holds. | `Task[]` |
@@ -80,10 +80,35 @@ second) and records a `runs` row (`component = agent`, `kind = 'task_op'`,
 
 `Result` is `{ ok: true, task }` or `{ ok: false, reason, task? }` with
 `reason` one of `not_found`, `closed`, `blocked`, `claimed`,
-`dependencies_open`, `not_holder`, `lease_expired`. Policy refusals are
+`dependencies_open`, `not_holder`, `lease_expired`, `not_blocked`. Policy refusals are
 outcomes, not exceptions; malformed input throws `TasksError` with `code`
 `invalid_input`, `unknown_dependency`, or `conflict` (duplicate
 `external_ref`).
+
+### `update` has two arms, and the FIELDS pick the arm
+
+Which gate a change meets is derived from what it names — never from a flag
+the caller passes:
+
+| Arm | Fields | Gate |
+| --- | --- | --- |
+| **holder** | `status: in_progress \| blocked \| closed`, a bare `note` | `claimed_by = agent` |
+| **board** | `owner`, `title`, `project`, `status: 'open'` | none — but kind `task`/`review`, not closed, and `open` only from `blocked` |
+
+The board arm exists because addressing, renaming and re-filing a card are
+gestures on a row nobody need hold, and because `blocked` is the one state
+nothing in the system could leave: `UpdateInput.status` used to be
+`Exclude<TaskStatus, 'open'>`, so *unblock was unreachable*.
+
+**The two may not be mixed in one call** — `{status: 'closed', owner: 'x'}`
+throws `invalid_input` naming both fields. Mixing would let the arm with the
+looser gate carry the other arm's write, which is the whole reason the gate
+lives in the `WHERE` clause and not in an adapter.
+
+The unblock hands the row back the way `release()` does (claim and lease
+cleared), so it lands wherever `owner` says it should. `owner` stays
+informational throughout: claims are first-come, and an agent that is not the
+addressee can still claim an addressed row.
 
 ### Rules worth knowing
 
@@ -92,8 +117,9 @@ outcomes, not exceptions; malformed input throws `TasksError` with `code`
   `heartbeat` and other agents' `claim` care about expiry.
 - A `blocked` task is not listed as ready and cannot be claimed by others —
   the holder is expected to keep heartbeating and set it back to
-  `in_progress`. If the holder vanishes, the holder (or the user, in SQL)
-  must `release` it; nothing else can.
+  `in_progress`. If the holder vanishes, `update(id, …, {status: 'open'})`
+  is the way out: it needs no claim, precisely because the holder is the
+  thing that is stuck.
 - A dangling `depends_on` id (row deleted later) **blocks**; a typo must not
   silently release work.
 - Identity strings are bind values everywhere. The SQL never contains

@@ -25,6 +25,7 @@ struct ProcessCommandRunner: CommandRunner {
         arguments: [String],
         environment: [String: String],
         currentDirectory: URL?,
+        standardInput: String?,
         onOutput: @escaping @Sendable (OutputLine) -> Void
     ) async throws -> CommandResult {
         guard FileManager.default.isExecutableFile(atPath: executable.path) else {
@@ -44,7 +45,13 @@ struct ProcessCommandRunner: CommandRunner {
         // Nothing here is interactive. Handing the child an empty stdin means a
         // verb that would otherwise wait for a paste (`connect-repo --auth
         // token`) fails fast instead of hanging a progress view forever.
-        process.standardInput = Pipe()
+        //
+        // The exception is a verb whose whole design is "read the value on
+        // stdin so it is never in argv" (`compute providers add`). It is
+        // written and the pipe is closed at once — the child gets one value
+        // and EOF, never a prompt it can sit at.
+        let stdin = Pipe()
+        process.standardInput = stdin
 
         let collector = StreamCollector(onOutput: onOutput)
         out.fileHandleForReading.readabilityHandler = { handle in
@@ -61,6 +68,10 @@ struct ProcessCommandRunner: CommandRunner {
             err.fileHandleForReading.readabilityHandler = nil
             throw CommandRunnerError.launchFailed(executable, underlying: error.localizedDescription)
         }
+        if let standardInput, let data = standardInput.data(using: .utf8) {
+            try? stdin.fileHandleForWriting.write(contentsOf: data)
+        }
+        try? stdin.fileHandleForWriting.close()
 
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             process.terminationHandler = { _ in continuation.resume() }

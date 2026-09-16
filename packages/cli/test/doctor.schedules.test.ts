@@ -151,10 +151,10 @@ describe("doctor: schedules", () => {
 
   it("a blocked_config window reports the missing variable and the file that declares it", async () => {
     const r = await rowsFor([
-      { component: "fold", kind: "runner", tool: "preflight_failed", at: ago(30), ok: false, error: "blocked_config: fold did not run — CLAUDE_CODE_OAUTH_TOKEN is unset" },
+      { component: "fold", kind: "runner", tool: "preflight_failed", at: ago(30), ok: false, error: "blocked_config: fold did not run — METISTRY_OPENROUTER_API_KEY is unset" },
     ]);
     expect(r.fold?.status).toBe("failed");
-    expect(r.fold?.remediation).toContain("CLAUDE_CODE_OAUTH_TOKEN is unset");
+    expect(r.fold?.remediation).toContain("METISTRY_OPENROUTER_API_KEY is unset");
     expect(r.fold?.remediation).toContain("`requires` in routines/fold/manifest.yaml");
     expect(r.fold?.meta).toMatchObject({ preflight_failed: true });
   });

@@ -229,13 +229,13 @@ const USAGE = `metistry — Metistry command line
       The macOS login Keychain (service metistry:<VAR>) is the canonical store;
       .env is generated from it, at <instance>/state/.env. --to keychain imports
       .env's secret-shaped variables (names ending _TOKEN _PASSWORD _PRIVATE
-      _SECRET _KEY, plus CLAUDE_CODE_OAUTH_TOKEN); --to env rewrites just those
+      _SECRET _KEY); --to env rewrites just those
       lines in place (0600; every comment and non-secret line preserved) and
       moves a product-checkout .env into the instance the first time. mint makes
       a new random token in both. list prints names and scopes, never values
       (--json: the same rows as an array).
       Items are scoped by account: instance-scoped ones under the instance's
-      instance_id, user-scoped ones (CLAUDE_CODE_OAUTH_TOKEN, your AWS keys)
+      instance_id, user-scoped ones (your compute provider keys, your AWS keys)
       under the shared per-user account — secrets.ts SECRET_SCOPES is the table.
       purge deletes one instance's items and nothing else; without --yes it only
       previews.

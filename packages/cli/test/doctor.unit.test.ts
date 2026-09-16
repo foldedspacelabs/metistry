@@ -6,7 +6,7 @@ import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { doctor, hostLocal, parseComposePs, parseLaunchctlPrint, probeTargetFor, renderTable, walkManifests, type Db, type DoctorRow } from "../src/doctor.js";
+import { doctor, hostLocal, inboxRow, parseComposePs, parseLaunchctlPrint, probeTargetFor, renderTable, walkManifests, type Db, type DoctorRow } from "../src/doctor.js";
 import { parseDotEnv } from "../src/env.js";
 import { main, parseArgs } from "../src/main.js";
 import type { Exec } from "../src/exec.js";
@@ -111,6 +111,7 @@ describe("doctor: everything healthy", () => {
       "service:console=ok",
       "service:watchdog=ok",
       "target:tgt=ok",
+      "instance:inbox=ok",
       "db:db=ok",
       "db:migrations=ok",
       "schedule:good=absent",
@@ -152,7 +153,7 @@ describe("doctor: everything healthy", () => {
     expect(await main(["doctor", "--product-dir", productDir], { out: (s) => out.push(s), doctorDeps: deps })).toBe(0);
     const text = out.join("\n");
     expect(text).toMatch(/^name\s+kind\s+status\s+ms\s+remediation/);
-    expect(text).toMatch(/15 checks: 8 ok, 0 degraded, 0 failed, 7 absent — healthy \(.*, shape compose\)/);
+    expect(text).toMatch(/16 checks: 9 ok, 0 degraded, 0 failed, 7 absent — healthy \(.*, shape compose\)/);
     expect(text).toMatch(/^local:llamaserver\s+local-model\s+absent/m);
     expect(text).toMatch(/^local:applefm\s+local-model\s+absent/m);
     expect(text).not.toMatch(/launchd:/); // linux: no launchd rows
@@ -383,6 +384,52 @@ describe("doctor: absent (not configured / not installed) is informational", () 
     const report = await doctor({ productDir, env: {}, fetchFn: fakeFetch({ "/health": res(200), "/api/status": res(401) }), db: null, exec: fakeExec({ docker: { code: 1, stderr: "Cannot connect to the Docker daemon at unix:///var/run/docker.sock" } }), platform: "linux" });
     expect(byName(report.rows).compose).toMatchObject({ status: "failed", remediation: expect.stringMatching(/Cannot connect to the Docker daemon.*is the Docker daemon running\?/) });
     expect(report.ok).toBe(false);
+  });
+});
+
+describe("doctor: the pre-#156 inbox layout (docs/ops/inbox.md)", () => {
+  it("ok when there is no legacy inbox/ and .gitignore does not list it", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "metistry-doctor-inbox-"));
+    expect(await inboxRow(dir)).toMatchObject({ name: "inbox", kind: "instance", status: "ok" });
+  });
+
+  it("degraded when <instance>/inbox/ still holds files", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "metistry-doctor-inbox-"));
+    await mkdir(join(dir, "inbox"), { recursive: true });
+    await writeFile(join(dir, "inbox", "1757000000000-note.md"), "# an old capture\n");
+    const row = await inboxRow(dir);
+    expect(row).toMatchObject({ status: "degraded" });
+    expect(row.remediation).toMatch(/metistry migrate-inbox --dry-run/);
+    expect(row.meta).toMatchObject({ entries: 1, gitignored: false });
+  });
+
+  it("an empty inbox/ (just .DS_Store) is not itself a finding, but .gitignore still listing it is", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "metistry-doctor-inbox-"));
+    await mkdir(join(dir, "inbox"), { recursive: true });
+    await writeFile(join(dir, "inbox", ".DS_Store"), "");
+    expect(await inboxRow(dir)).toMatchObject({ status: "ok" });
+
+    await writeFile(join(dir, ".gitignore"), "inbox/\nstate/\n");
+    const row = await inboxRow(dir);
+    expect(row).toMatchObject({ status: "degraded" });
+    expect(row.meta).toMatchObject({ entries: 0, gitignored: true });
+  });
+
+  it("doctor() reports it as one row, at the instance dir (METISTRY_INSTANCE_DIR) rather than the product checkout", async () => {
+    const productDir = await checkout();
+    const instanceDir = await mkdtemp(join(tmpdir(), "metistry-doctor-instance-"));
+    await mkdir(join(instanceDir, "inbox"), { recursive: true });
+    await writeFile(join(instanceDir, "inbox", "1757000000000-note.md"), "# an old capture\n");
+    const report = await doctor({
+      productDir,
+      env: { ...env, METISTRY_INSTANCE_DIR: instanceDir },
+      fetchFn: fakeFetch({ "7901/check": res(200, checkBody("ok")), "/health": res(200), "/api/status": res(401) }),
+      db: null,
+      exec: fakeExec({ docker: { code: 127 } }),
+      platform: "linux",
+    });
+    expect(byName(report.rows).inbox).toMatchObject({ kind: "instance", status: "degraded" });
+    expect(report.ok).toBe(true); // degraded never fails the exit code
   });
 });
 

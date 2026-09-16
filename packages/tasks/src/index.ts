@@ -29,6 +29,8 @@ export interface HistoryEntry {
   op: "create" | "claim" | "heartbeat" | "update" | "release";
   note?: string;
   status?: TaskStatus;
+  /** Present on an assign/unassign: the value `owner` was moved TO (null = cleared). */
+  owner?: string | null;
 }
 
 export interface Task {
@@ -80,10 +82,37 @@ export interface CreateInput {
   note?: string;
 }
 
+/**
+ * `update` has TWO arms, and which one a change lands in is derived from the
+ * fields it names — never from a flag the caller passes:
+ *
+ * - **the holder arm** (`status` ∈ `in_progress | blocked | closed`, and/or a
+ *   bare `note`) is claim-gated exactly as it always was;
+ * - **the board arm** (`owner`, `title`, `project`, and `status: 'open'` —
+ *   the unblock) is not. Addressing, renaming and re-filing a card are
+ *   gestures on a row nobody need hold, and the unblock is by definition a
+ *   row whose holder is stuck: `blocked` is the state nothing but a human
+ *   leaves (docs/ops/board.md).
+ *
+ * The two may not be mixed in one call. Mixing would let the arm with the
+ * looser gate carry the other arm's write, which is the whole reason the
+ * gate is in the WHERE clause and not in an adapter.
+ */
 export interface UpdateInput {
-  /** `closed` releases the claim and stamps closed_at; `blocked` keeps the claim. */
-  status?: Exclude<TaskStatus, "open">;
+  /**
+   * HOLDER: `closed` releases the claim and stamps closed_at; `blocked` keeps
+   * the claim. BOARD: `open` is the **unblock** — legal from `blocked` only,
+   * and it hands the row back the way `release()` does (claim and lease
+   * cleared), so it lands in Backlog or Assigned by whether `owner` is set.
+   */
+  status?: TaskStatus;
   note?: string;
+  /** BOARD: who the row is addressed to; `null` clears it. Informational — claims stay first-come. */
+  owner?: string | null;
+  /** BOARD: re-title the card. */
+  title?: string;
+  /** BOARD: move the card to another project; `null` takes it out of every project. */
+  project?: string | null;
 }
 
 export type ClaimFailure =
@@ -94,7 +123,8 @@ export type ClaimFailure =
   | "claimed" // held by another agent with a live lease
   | "dependencies_open"
   | "not_holder" // heartbeat/update/release by someone other than the claim holder
-  | "lease_expired"; // heartbeat after expiry — the task is up for grabs again
+  | "lease_expired" // heartbeat after expiry — the task is up for grabs again
+  | "not_blocked"; // unblock (status: 'open') on a row that is not blocked — `open` is reachable from nowhere else
 
 export { CLAIMABLE_KINDS };
 export type Result = { ok: true; task: Task } | { ok: false; reason: ClaimFailure; task?: Task };
@@ -144,10 +174,11 @@ function toTask(row: Record<string, unknown>): Task {
   };
 }
 
-function entry(agent: string, op: HistoryEntry["op"], extra: { note?: string; status?: TaskStatus } = {}): string {
+function entry(agent: string, op: HistoryEntry["op"], extra: { note?: string; status?: TaskStatus; owner?: string | null } = {}): string {
   const e: HistoryEntry = { ts: new Date().toISOString(), agent, op };
   if (extra.note !== undefined) e.note = extra.note;
   if (extra.status !== undefined) e.status = extra.status;
+  if (extra.owner !== undefined) e.owner = extra.owner;
   return JSON.stringify([e]);
 }
 
@@ -318,19 +349,29 @@ export class TasksService {
     return { ok: false, reason: "claimed", task };
   }
 
-  /** Extend the lease — holder only, and only while it is still live. An expired lease is not renewed. */
-  async heartbeat(id: number, agent: string, leaseSeconds?: number): Promise<Result> {
+  /**
+   * Extend the lease — holder only, and only while it is still live. An
+   * expired lease is not renewed.
+   *
+   * `note` is what makes an In Progress card readable instead of merely
+   * alive (Hermes review §4.3: their `kanban_heartbeat(note=…)`). A renew
+   * WITHOUT one appends nothing — a lease kept alive every few minutes must
+   * not bury the row's history under its own ticking.
+   */
+  async heartbeat(id: number, agent: string, leaseSeconds?: number, note?: string): Promise<Result> {
     id = requireId(id);
     agent = requireAgent(agent);
     const lease = leaseSeconds ?? this.defaultLease;
     if (!Number.isInteger(lease) || lease <= 0 || lease > 86_400) throw new TasksError("invalid_input", "leaseSeconds must be 1..86400");
+    const n = optionalText("note", note);
     return this.recorded(agent, "heartbeat", id, async () => {
       const { rows } = await this.db.query(
         `UPDATE work w
-         SET lease_expires_at = now() + ($3::int * interval '1 second'), updated_at = now()
+         SET lease_expires_at = now() + ($3::int * interval '1 second'), updated_at = now(),
+             history = history || coalesce($4::jsonb, '[]'::jsonb)
          WHERE w.id = $1 AND w.claimed_by = $2 AND w.lease_expires_at > now() AND w.status IN ('in_progress', 'blocked')
          RETURNING ${COLS}`,
-        [id, agent, lease],
+        [id, agent, lease, n !== null ? entry(agent, "heartbeat", { note: n }) : null],
       );
       if (rows[0]) return { ok: true as const, task: toTask(rows[0]) };
       return this.explainHolderFailure(id, agent, true);
@@ -338,36 +379,99 @@ export class TasksService {
   }
 
   /**
-   * Holder-only status/note change. `closed` stamps closed_at and releases
-   * the claim; `blocked` keeps it (the holder is waiting on something and
-   * should keep heartbeating). The holder keeps its authority after lease
-   * expiry until someone else claims the task — late work can still land.
+   * Status / note / addressing change. Two arms, one atomic statement each
+   * (see `UpdateInput`):
+   *
+   * - HOLDER — `closed` stamps closed_at and releases the claim; `blocked`
+   *   keeps it (the holder is waiting on something and should keep
+   *   heartbeating). The holder keeps its authority after lease expiry until
+   *   someone else claims the task, so late work can still land.
+   * - BOARD — `owner`, `title`, `project`, and the unblock (`open`, legal
+   *   from `blocked` only). No claim required; a closed row is refused, and
+   *   a row the list does not own (a collected issue/pr/event) is refused
+   *   too — its source of truth, not the board, decides what it says.
    */
   async update(id: number, agent: string, change: UpdateInput): Promise<Result> {
     id = requireId(id);
     agent = requireAgent(agent);
     const status = change.status ?? null;
-    // The type excludes "open", but adapters hand us JSON — guard at runtime too.
-    if (status !== null && (!STATUSES.includes(status) || (status as string) === "open")) {
-      throw new TasksError("invalid_input", "status must be in_progress, blocked, or closed (use release() to hand a task back)");
+    // adapters hand us JSON — guard at runtime, never only in the type
+    if (status !== null && !STATUSES.includes(status)) {
+      throw new TasksError("invalid_input", `status must be one of ${STATUSES.join(", ")} (open is the unblock and is legal from blocked only; use release() to hand a claimed task back)`);
     }
     const note = optionalText("note", change.note);
-    if (status === null && note === null) throw new TasksError("invalid_input", "update needs a status or a note");
+    const ownerGiven = change.owner !== undefined;
+    const owner = ownerGiven ? optionalText("owner", change.owner, 200) : null;
+    const titleGiven = change.title !== undefined;
+    const title = titleGiven ? optionalText("title", change.title, 500) : null;
+    if (titleGiven && (title === null || title.trim() === "")) throw new TasksError("invalid_input", "title must be a non-empty string");
+    const projectGiven = change.project !== undefined;
+    const project = projectGiven ? optionalText("project", change.project, 200) : null;
+
+    const boardFields = [ownerGiven && "owner", titleGiven && "title", projectGiven && "project"].filter((f): f is string => typeof f === "string");
+    const board = boardFields.length > 0 || status === "open";
+    // Never both in one call: the board arm's WHERE has no claim in it, so a
+    // mixed change would let it carry a holder-only write past the gate.
+    if (boardFields.length > 0 && status !== null && status !== "open") {
+      throw new TasksError(
+        "invalid_input",
+        `status: ${status} is claim-gated and ${boardFields.join("/")} is not — send them as two calls so one arm's gate never carries the other arm's write`,
+      );
+    }
+    if (status === null && note === null && !board) {
+      throw new TasksError("invalid_input", "update needs a status, a note, or one of owner, title, project");
+    }
+    const hist = entry(agent, "update", {
+      ...(note !== null ? { note } : {}),
+      ...(status !== null ? { status } : {}),
+      ...(ownerGiven ? { owner } : {}),
+    });
+
     return this.recorded(agent, "update", id, async () => {
+      if (!board) {
+        const { rows } = await this.db.query(
+          `UPDATE work w
+           SET status = COALESCE($3::text, w.status),
+               closed_at = CASE WHEN $3::text = 'closed' THEN now() ELSE w.closed_at END,
+               claimed_by = CASE WHEN $3::text = 'closed' THEN NULL ELSE w.claimed_by END,
+               lease_expires_at = CASE WHEN $3::text = 'closed' THEN NULL ELSE w.lease_expires_at END,
+               updated_at = now(), history = history || $4::jsonb
+           WHERE w.id = $1 AND w.claimed_by = $2 AND w.status <> 'closed'
+           RETURNING ${COLS}`,
+          [id, agent, status, hist],
+        );
+        if (rows[0]) return { ok: true as const, task: toTask(rows[0]) };
+        return this.explainHolderFailure(id, agent, false);
+      }
+      // the project row exists from the first use of its slug (0011), exactly as create does it
+      if (project !== null && PROJECT_SLUG_RE.test(project)) await ensureProject(this.db, project);
       const { rows } = await this.db.query(
         `UPDATE work w
-         SET status = COALESCE($3::text, w.status),
-             closed_at = CASE WHEN $3::text = 'closed' THEN now() ELSE w.closed_at END,
-             claimed_by = CASE WHEN $3::text = 'closed' THEN NULL ELSE w.claimed_by END,
-             lease_expires_at = CASE WHEN $3::text = 'closed' THEN NULL ELSE w.lease_expires_at END,
-             updated_at = now(), history = history || $4::jsonb
-         WHERE w.id = $1 AND w.claimed_by = $2 AND w.status <> 'closed'
+         SET status = COALESCE($2::text, w.status),
+             owner = CASE WHEN $3::boolean THEN $4::text ELSE w.owner END,
+             title = COALESCE($5::text, w.title),
+             project = CASE WHEN $6::boolean THEN $7::text ELSE w.project END,
+             claimed_by = CASE WHEN $2::text = 'open' THEN NULL ELSE w.claimed_by END,
+             lease_expires_at = CASE WHEN $2::text = 'open' THEN NULL ELSE w.lease_expires_at END,
+             updated_at = now(), history = history || $8::jsonb
+         WHERE w.id = $1 AND ${CLAIMABLE} AND w.status <> 'closed'
+           AND ($2::text IS DISTINCT FROM 'open' OR w.status = 'blocked')
          RETURNING ${COLS}`,
-        [id, agent, status, entry(agent, "update", { ...(note !== null ? { note } : {}), ...(status !== null ? { status } : {}) })],
+        [id, status, ownerGiven, owner, title, projectGiven, project, hist],
       );
       if (rows[0]) return { ok: true as const, task: toTask(rows[0]) };
-      return this.explainHolderFailure(id, agent, false);
+      return this.explainBoardFailure(id, status === "open");
     });
+  }
+
+  /** Why did a board-arm update return no row? Diagnostic only — never a decision input. */
+  private async explainBoardFailure(id: number, unblocking: boolean): Promise<Result> {
+    const task = await this.get(id);
+    if (!task) return { ok: false, reason: "not_found" };
+    if (!(CLAIMABLE_KINDS as readonly string[]).includes(task.kind)) return { ok: false, reason: "not_claimable", task };
+    if (task.status === "closed") return { ok: false, reason: "closed", task };
+    if (unblocking && task.status !== "blocked") return { ok: false, reason: "not_blocked", task };
+    return { ok: false, reason: "not_found", task }; // unreachable: the WHERE has no other arm
   }
 
   /** Hand a task back: clears the claim and reopens it. Holder only (lease expiry does not matter). */

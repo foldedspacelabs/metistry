@@ -1,5 +1,5 @@
-// Watchdog probes — model-free by construction: nothing here touches
-// Anthropic, so "the token expired" and "the assistant is dead" are still
+// Watchdog probes — model-free by construction: nothing here calls a model
+// provider, so "the key expired" and "the assistant is dead" are still
 // reportable. Direct db access is the named invariant-3 exception (the
 // watchdog must be able to say the console itself is down). All probes
 // return the frozen check() shape.
@@ -31,8 +31,9 @@ export interface ProbeConfig {
   fmWindowHours: number;
   /**
    * The assistant is deliberately not running: the supervisor's child list
-   * has no `assistant`, because this install has no engine credential
-   * (docs/ops/assistant-tools.md, "Running without an engine"). A queue that
+   * has no `assistant`, because this install has no engine — no
+   * `assignments.default` in compute.yaml, or no key for the provider it
+   * names (docs/ops/assistant-tools.md, "Running without an engine"). A queue that
    * nobody is draining is then the expected state, not a dead engine, so
    * assistant-drain reports `absent` instead of alerting every cycle.
    * Absent/false = probe as always (the compose shape, and Linux, where
@@ -105,7 +106,7 @@ export async function runProbes(db: Db, cfg: ProbeConfig, fetchFn = fetch): Prom
     await runCheck(
       "assistant-drain",
       cfg.assistantAbsent
-        ? "the assistant is not a supervisor child (no engine credential) — a waiting queue is expected"
+        ? "the assistant is not a supervisor child (no engine in compute.yaml) — a waiting queue is expected"
         : `no inbound stuck >${cfg.stuckNewMin}m new / >${cfg.stuckProcessingMin}m processing`,
       async () => {
         const { rows } = await db.query(
@@ -121,7 +122,7 @@ export async function runProbes(db: Db, cfg: ProbeConfig, fetchFn = fetch): Prom
         if (cfg.assistantAbsent) {
           return {
             status: "absent",
-            remediation: "no engine credential, so the supervisor does not start the assistant — turns wait in the queue until one exists (docs/ops/assistant-tools.md)",
+            remediation: "no engine, so the supervisor does not start the assistant — turns wait in the queue until `metistry compute assign default <provider/model>` gives it one (docs/ops/assistant-tools.md)",
             meta: { waiting_new: Number(stuck_new), waiting_processing: Number(stuck_proc) },
           };
         }

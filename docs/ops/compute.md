@@ -18,27 +18,23 @@ assistant cannot write it at all.
 
 ## What is NOT wired yet
 
-This page describes a file and the verbs over it. Deliberately absent, and
-each one is a named PR in `docs/plan-refresh-2026-09-13.md` §4:
+This page describes the file, the verbs over it, and — since PR 3 — the
+engine that dials a provider. Deliberately still absent, each a named PR in
+`docs/plan-refresh-2026-09-13.md` §4:
 
-- **Nothing dials a provider.** The engine that turns an assignment into a
-  call is PR 3. Until it lands, an `assignments:` block changes the model
-  string the console records and the assistant's tier map — not what
-  actually answers a turn.
-- **Nothing enforces a budget.** Budgets are recorded and validated; the
-  check happens in the engine, before the call, against a `spend` query
-  (PR 3). A budget you write today is a decision stored, not a control.
-- **Nothing counts a token.** `runs.provider` / `runs.model` and the cost
-  columns arrive with the engine.
 - **No app pane.** The Compute pane, and wizard step 7 becoming "Choose your
   compute", are PR 1a — deliberately split so the verb surface settles first.
 - **No bundled local server.** `llama-server` built into the runtime-deps
   pack is PR 2; LM Studio and Ollama work today as ordinary
   OpenAI-compatible providers.
+- **No local discovery.** `compute models list` against a live `/v1/models`
+  is PR 2.
+- **No shadow mode.** Running a `default` turn again on a candidate with
+  tools stubbed, to compare, is the bake-off's stage 2.
 
 Until you write `assignments:`, **`rules.yaml`'s `tiers:` block is still the
-live map** and nothing about routing changes. That is why the seed's
-`seed/compute.yaml` ships entirely commented out.
+live map** and turns run on the Claude Agent SDK, exactly as before. That is
+why the seed's `seed/compute.yaml` ships entirely commented out.
 
 ## The file
 
@@ -174,6 +170,151 @@ catalogue.
 machine's Ollama is `--from ollama --name box --base-url http://10.0.0.4:11434/v1`.
 Any OpenAI-compatible endpoint works without a template — write the block by
 hand, or start from the nearest one.
+
+## The engine
+
+One interface, `apps/assistant/src/engine.ts`, and a factory keyed on the
+provider's `kind`. What a turn runs on is configuration, resolved to a
+(provider, model, effort) triple **before** anything is called — the router
+names a tier, `resolveTurn` resolves it, and no model is ever asked which
+model should run (invariant 4).
+
+| kind | engine | when |
+| --- | --- | --- |
+| `openai-compatible` | the in-house loop, `engine-openai.ts` | the tier or crew has an `assignments:` entry |
+| `anthropic` | the Claude Agent SDK, `engine-sdk.ts` | nothing in `compute.yaml` assigns it |
+
+`anthropic` is not a kind you can write in the file — it is the *absence* of
+an assignment, and it leaves the product with the subscription scrub. Because
+an unknown tier resolves to `assignments.default`, an install that assigns
+anything assigns everything: write a `default` and no turn can reach the SDK
+path, which is why the assistant then starts without an engine credential at
+all.
+
+**The loop**, about 300 lines over `fetch`, the MCP client and zod — no new
+dependency (C4):
+
+- **Tools** are the console's `/mcp` and nothing else (invariant 9). One
+  `tools/list` per run, `tools/call` per call, the same bearer the SDK path
+  presents — a crew gets its own per-run token and its `uses` allowlist.
+- **`max_turns`**, and a graceful ending: when the cap, the per-run cost cap
+  or the veto stops the loop, one more request goes out with `tool_choice:
+  "none"` so the run answers instead of throwing. Which one stopped it is on
+  the `runs` row as `meta.stopped`.
+- **The no-progress veto** (Atomic ADOPT 4). A turn is *unproductive* when
+  every tool call it made repeats a (name, arguments) already made in this
+  run **and** comes back byte-identical. Three in a row adds one nudge; five
+  ends tool use and asks for the answer. A call whose answer changed is
+  productive however often it repeats.
+- **Backoff** on 429 and 5xx, honouring `Retry-After`; a refused connection
+  (the local server is still loading) retries on the same schedule. A 4xx
+  that is not 429 is not retried — a bad request will be bad again.
+- **Structured output** is `response_format: json_schema` *plus* a zod
+  validation and ONE repair retry, because LM Studio warns sub-7B models may
+  fail it and OpenRouter says some endpoints treat it as a hint. Two failures
+  is a failure; it never returns unvalidated JSON.
+- **Effort** becomes `reasoning: { effort }` off-machine and reasoning-off
+  on-machine (PoC-16). Per-model reasoning style is a bake-off measurement,
+  not an assumption.
+- **The provider's `request:` block is merged verbatim** — except `model` and
+  `messages`, which belong to the assignment. A `request:` that could repoint
+  the call would hand the routing decision back to the file the router was
+  supposed to obey.
+
+**Sessions.** The SDK kept a transcript and gave us an id to resume; an
+OpenAI-compatible endpoint has none, so the message array *is* the session
+and lives in `assistant_sessions` (migration `0015`) under the same id
+`sessions` uses. A task boundary rolls both tables at once, so a rolled
+thread cannot be replayed. A session built against a different (provider,
+model) is never resumed: re-assignment is exactly the moment a fresh session
+is cheap.
+
+**Cost lands on the row, not in an estimate.** Every call writes `provider`,
+`model`, `tokens_in`, `tokens_out`, `cache_read_tokens`, `cache_write_tokens`
+and `cost_usd` on `runs`, plus `meta.cost_source` saying where the number
+came from:
+
+| source | meaning |
+| --- | --- |
+| `provider` | the response's own `usage.cost` — OpenRouter always sends it, and it is the only number that knows your account's discounts |
+| `pricing` | the provider's `pricing:` table, for clouds whose responses carry no cost |
+| `local` | `locality: on_machine` is 0 by definition |
+| `unknown` | nothing could price it: recorded as $0 **and said so**, never a guessed rate. `metistry doctor` and the weekly review read this |
+
+## Budgets
+
+Enforced **in the engine, before the call**, against the `spend` named query
+(`seed/queries/spend.yaml` — invariant 3: one read path, and `cache_ttl: 0`,
+because a budget that read a cached number would keep spending for the length
+of the cache). A budget checked after the call is a report; checked before it
+is a control.
+
+```yaml
+budgets:
+  instance:  { daily_usd: 5, monthly_usd: 60, action: stop }
+  providers: { openrouter: { monthly_usd: 20, action: stop } }
+```
+
+| `action` | at the limit |
+| --- | --- |
+| `allow` | record only — the call proceeds, and a `runs` row says the window is spent |
+| `stop` (default) | the call is refused with `budget_exceeded`, nothing is bought, **and routines pause** |
+| `critical_only` | only an assignment marked `critical: true` keeps running. What may carry that mark is still open (OPEN-4) — the flag is enforced, the policy is not decided |
+
+**At 80 %** of any window a warning `runs` row is written, once per calendar
+window (so once today, again tomorrow; once this month for a monthly one).
+**At 100 %** what happens depends on who asked:
+
+- **a chat turn** is refused, and gets ONE more window *offered* as a Needs
+  You item — a `decision` proposal plus an alert. It does not raise the
+  budget and could not: `compute.yaml` is a protected path, so the limit
+  moves by your hand (`metistry compute budget …`) or not at all. What the
+  item buys is that you hear about it where you already read things, with the
+  exact field in front of you.
+- **a routine** does not start. `requires: { engine: true }` in a routine's
+  manifest is the declaration that its run would enqueue a billable turn; the
+  runner's preflight asks the same budget question first and records
+  `blocked_config` instead of spending the window (C5 — a stopped engine
+  behind a running scheduler just fills the queue with refusals).
+- **a crew** fails with `budget_exceeded` and its work row parks as `blocked`
+  with the reason. Retrying would re-run the check and land in the same place.
+
+Every refusal names the field that would permit it, and the action that would
+relax it. A budget that cannot be measured — `budgets:` set but the `spend`
+query not loaded — **refuses**, because a control that silently cannot run is
+worse than no control at all.
+
+## The non-ZDR warning
+
+An `off_machine` provider without `zdr: true` writes one warning `runs` row
+per (provider, model, day) and then **works**. Informed choice, never a block
+(C13, the owner's ruling). The row is what makes it informed: the app's badge
+and the weekly review both read it. Sending `data_collection: "deny"` by
+default instead is OPEN-3 and is not built.
+
+## The collaboration rule
+
+Five rules, enforced by the shape of the system rather than by prompting
+(C7):
+
+1. **Engine is `provider.kind` from config.** A turn never runs on an engine
+   its tier did not name, and there is no cross-kind fallback.
+2. **No tool calls an engine.** There is no "run this on provider X" tool —
+   invariant 9 by absence. The factory is called by the drain, never from
+   inside a turn.
+3. **A crew follows its own provider**, `assignments.crews.<name>`, not the
+   assistant's. Crews never call each other: work moves as `work` rows and
+   results come back as reports.
+4. **Scoping work is collaboration; naming the worker is triggering it.** A
+   turn may create *unassigned* work any agent can claim. A **directed**
+   `agents_delegate` to a crew whose engine kind differs from the caller's is
+   refused with `invalid_request` and a `runs` row naming the field
+   (`assignments.crews.<name>`). With one provider kind in the schema today a
+   valid `compute.yaml` cannot produce that mismatch — the guard is what
+   makes the rule hold the day a second kind lands, rather than a thing
+   someone has to remember to add then.
+5. **Every provider's agents are peers at `/mcp`**, each with its own token
+   and scope.
 
 ## Related
 

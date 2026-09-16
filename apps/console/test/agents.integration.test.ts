@@ -119,7 +119,8 @@ describe.skipIf(!hasDb)("agent registry (integration)", () => {
     expect((await json("POST", "/api/agents", { id: agentId, display_name: "dup" })).status).toBe(409);
 
     const principal = await agents.authenticateAgent(pool, { headers: { authorization: `Bearer ${agentToken}` } });
-    expect(principal).toEqual({ id: agentId, kind: "external", grants: { tier: "none", areas: [] }, projects: [] });
+    // `autonomy` rides the principal like grants do (docs/ops/actions.md): server-side, from the row, empty until the owner sets a level
+    expect(principal).toEqual({ id: agentId, kind: "external", grants: { tier: "none", areas: [] }, projects: [], autonomy: {} });
     expect(await agents.authenticateAgent(pool, { headers: { authorization: `Bearer ${mintToken()}` } })).toBeNull();
     expect(await agents.authenticateAgent(pool, { headers: {} })).toBeNull();
 
@@ -194,7 +195,7 @@ describe.skipIf(!hasDb)("agent registry (integration)", () => {
     expect((await json("POST", `/api/agents/${agentId}/grants`, { tier: "none" })).status).toBe(404);
 
     const principal = await agents.authenticateAgent(pool, { headers: { authorization: `Bearer ${agentToken}` } });
-    expect(principal).toEqual({ id: agentId, kind: "external", grants: { tier: "areas", areas: ["Knowledge/Areas/Fsl"] }, projects: ["drey"] });
+    expect(principal).toEqual({ id: agentId, kind: "external", grants: { tier: "areas", areas: ["Knowledge/Areas/Fsl"] }, projects: ["drey"], autonomy: {} });
     // rejected payloads never reach the audit log; the accepted ones do
     const audit = await pool.query(`SELECT meta->>'op' AS op FROM runs WHERE kind='agent_admin' AND meta->>'agent'=$1 ORDER BY id`, [agentId]);
     expect(audit.rows.map((r) => r.op)).toEqual(["mint", "grant", "projects"]);
@@ -225,7 +226,7 @@ describe.skipIf(!hasDb)("agent registry (integration)", () => {
 
     // the token authenticates like any agent's, and the principal carries the kind
     const principal = await agents.authenticateAgent(pool, { headers: { authorization: `Bearer ${token}` } });
-    expect(principal).toEqual({ id, kind: "internal", grants: { tier: "areas", areas: [...agents.ASSISTANT_DEFAULT_AREAS] }, projects: [] });
+    expect(principal).toEqual({ id, kind: "internal", grants: { tier: "areas", areas: [...agents.ASSISTANT_DEFAULT_AREAS] }, projects: [], autonomy: {} });
 
     // second call, same token, new projects: hash unchanged, projects replaced, not "created"
     expect(await agents.ensureInternalAgent(pool, id, { token, projects: ["drey", "drey"] })).toEqual({ id, created: false });

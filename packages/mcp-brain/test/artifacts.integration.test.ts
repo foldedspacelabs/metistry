@@ -10,7 +10,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { TasksService } from "@foldedspacelabs/metistry-tasks";
 import { ArtifactsService, memoryVault, staticDirectory } from "@foldedspacelabs/metistry-artifacts";
-import { ALIAS_NAMES, ARTIFACTS_TOOL_NAMES, QUERIES_TOOL_NAMES, createBrainServer, TOOL_NAMES, type AgentPrincipal, type Db } from "../src/index.js";
+import { ALIAS_NAMES, ARTIFACTS_TOOL_NAMES, EAGER_TOOL_NAMES, QUERIES_TOOL_NAMES, createBrainServer, TOOL_NAMES, type AgentPrincipal, type Db } from "../src/index.js";
 import { loadTestEnv } from "@foldedspacelabs/metistry-core/test-env";
 
 const { hasDb } = loadTestEnv(new URL("../../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
@@ -45,17 +45,20 @@ async function bareServer(): Promise<{ client: Client; log: string[]; close: () 
 
 describe("tool surface", () => {
   it("the six artifact tools are on the eager surface, contiguous and ahead of agents_delegate then queries_*, and the total stays near the lazy threshold", () => {
+    // the ORDER lock, read off the eager list: `propose_action` is declared
+    // last and registered per credential, so it is not part of this shape
+    const eager = EAGER_TOOL_NAMES;
     const tail = ARTIFACTS_TOOL_NAMES.length + 1 + QUERIES_TOOL_NAMES.length; // artifacts + agents_delegate + queries_*
-    expect(TOOL_NAMES.slice(-tail, -1 - QUERIES_TOOL_NAMES.length)).toEqual([...ARTIFACTS_TOOL_NAMES]);
-    expect(TOOL_NAMES.at(-1 - QUERIES_TOOL_NAMES.length)).toBe("agents_delegate");
-    expect(TOOL_NAMES.slice(-QUERIES_TOOL_NAMES.length)).toEqual([...QUERIES_TOOL_NAMES]);
-    expect(TOOL_NAMES.length).toBeLessThan(26); // over the PoC-17 tool-COUNT guidance (>20) since knowledge_list/knowledge_grep, tasks_close and the two room tools — flagged in manifest.yaml; the definition-token axis (test/brain.test.ts) is what actually gates lazy
+    expect(eager.slice(-tail, -1 - QUERIES_TOOL_NAMES.length)).toEqual([...ARTIFACTS_TOOL_NAMES]);
+    expect(eager.at(-1 - QUERIES_TOOL_NAMES.length)).toBe("agents_delegate");
+    expect(eager.slice(-QUERIES_TOOL_NAMES.length)).toEqual([...QUERIES_TOOL_NAMES]);
+    expect(eager.length).toBeLessThan(26); // over the PoC-17 tool-COUNT guidance (>20) since knowledge_list/knowledge_grep, tasks_close and the two room tools — flagged in manifest.yaml; the definition-token axis (test/brain.test.ts) is what actually gates lazy
   });
 
   it("the whole eager surface stays inside the PoC-17 definition budget, and deprecated names cost it nothing", async () => {
     const { client, close } = await bareServer();
     const { tools } = await client.listTools();
-    expect(tools.map((t) => t.name)).toEqual([...TOOL_NAMES]);
+    expect(tools.map((t) => t.name)).toEqual([...EAGER_TOOL_NAMES]);
     // The budget PoC-17 measured: past >20 tools / >5k definition tokens a
     // bridge switches to discovery: lazy. chars/4 is the conservative estimate
     // (the word-based one lands ~1.5k lower). Measured 2026-09-09: 19,370

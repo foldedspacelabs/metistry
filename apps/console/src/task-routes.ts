@@ -32,7 +32,7 @@ const USER = "user";
 const PATCH_TASK = /^PATCH \/api\/tasks\/(\d{1,12})$/;
 const TASK_OP = /^POST \/api\/tasks\/(\d{1,12})\/(claim|release|renew)$/;
 /** The fields PATCH accepts. Anything else is refused BY NAME rather than ignored — a silently dropped field is a lie about what happened. */
-const PATCH_FIELDS = ["status", "owner", "project", "title"] as const;
+export const PATCH_FIELDS = ["status", "owner", "project", "title"] as const;
 const STATUSES = ["open", "in_progress", "blocked", "closed"] as const;
 
 /**
@@ -44,8 +44,8 @@ export function isTaskOpRoute(key: string): boolean {
   return PATCH_TASK.test(key) || TASK_OP.test(key);
 }
 
-/** Every refusal the service can return, as the sentence that names what would permit it (R3). */
-function refusalMessage(r: Extract<Result, { ok: false }>, id: number): string {
+/** Every refusal the service can return, as the sentence that names what would permit it (R3). Exported because an `action` proposal reaches the same service and must say the same thing (docs/ops/actions.md). */
+export function refusalMessage(r: Extract<Result, { ok: false }>, id: number): string {
   const t: Task | undefined = r.task;
   switch (r.reason) {
     case "not_found":
@@ -70,7 +70,7 @@ function refusalMessage(r: Extract<Result, { ok: false }>, id: number): string {
 }
 
 /** A refusal's HTTP code: only "no such row" is a 404; a kind the list does not own is the caller's mistake; everything else is the row's state saying no. */
-function refusalCode(reason: Extract<Result, { ok: false }>["reason"]): ErrorCode {
+export function refusalCode(reason: Extract<Result, { ok: false }>["reason"]): ErrorCode {
   if (reason === "not_found") return "not_found";
   if (reason === "not_claimable") return "invalid_request";
   return "conflict";

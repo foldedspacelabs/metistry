@@ -54,7 +54,7 @@ private func model() -> FirstRunModel {
     // Steps that run nothing say so rather than inventing a command.
     #expect(m.plannedArguments(.runtime) == nil)
     #expect(m.plannedArguments(.door) == nil)
-    #expect(m.plannedArguments(.claude) == nil)
+    #expect(m.plannedArguments(.compute) == nil)
 }
 
 @MainActor
@@ -77,13 +77,13 @@ private func model() -> FirstRunModel {
     // 6 and 7 own their own screens: neither is a `metistry` verb, so neither
     // goes through the run row.
     #expect(!m.canRun(.door))
-    #expect(!m.canRun(.claude))
+    #expect(!m.canRun(.compute))
 }
 
 @MainActor
 @Test func theTwoStepsThatAreNotVerbsAreTheTwoThatOwnTheirOwnScreens() {
     let withOwnScreens = FirstRunStep.allCases.filter(\.hasOwnScreen)
-    #expect(withOwnScreens == [.door, .claude])
+    #expect(withOwnScreens == [.door, .compute])
     // A step with its own screen shows no argument array, because there is none
     // to show: one is an ASAuthorization ceremony, the other an interactive
     // terminal login.
@@ -123,7 +123,7 @@ private func model() -> FirstRunModel {
 private struct NoopRunner: CommandRunner {
     func run(
         executable: URL, arguments: [String], environment: [String: String],
-        currentDirectory: URL?, onOutput: @escaping @Sendable (OutputLine) -> Void
+        currentDirectory: URL?, standardInput: String?, onOutput: @escaping @Sendable (OutputLine) -> Void
     ) async throws -> CommandResult {
         CommandResult(exitCode: 0, stdout: "", stderr: "")
     }

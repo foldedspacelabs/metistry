@@ -108,9 +108,9 @@ private func wizard(
     #expect(w.canSkip)
 
     w.advance()
-    #expect(w.current == .claude)
+    #expect(w.current == .compute)
     #expect(w.isOnLastStep)
-    #expect(!w.isSatisfied(.claude))
+    #expect(!w.isSatisfied(.compute))
     #expect(w.canContinue)
 }
 
@@ -224,7 +224,7 @@ private struct SucceedingRegistrar: PasskeyRegistrar {
 @MainActor
 @Test func finishingTheLastStepClosesTheSheet() {
     let w = wizard()
-    w.present(from: .claude)
+    w.present(from: .compute)
     w.advance()
     #expect(w.isFinished)
     #expect(!w.isPresented)
@@ -370,7 +370,7 @@ private struct FixedWizardRunner: CommandRunner {
 
     func run(
         executable: URL, arguments: [String], environment: [String: String],
-        currentDirectory: URL?, onOutput: @escaping @Sendable (OutputLine) -> Void
+        currentDirectory: URL?, standardInput: String?, onOutput: @escaping @Sendable (OutputLine) -> Void
     ) async throws -> CommandResult {
         result
     }
@@ -405,7 +405,7 @@ private struct FixedWizardRunner: CommandRunner {
 private struct WizardNoopRunner: CommandRunner {
     func run(
         executable: URL, arguments: [String], environment: [String: String],
-        currentDirectory: URL?, onOutput: @escaping @Sendable (OutputLine) -> Void
+        currentDirectory: URL?, standardInput: String?, onOutput: @escaping @Sendable (OutputLine) -> Void
     ) async throws -> CommandResult {
         CommandResult(exitCode: 0, stdout: "", stderr: "")
     }

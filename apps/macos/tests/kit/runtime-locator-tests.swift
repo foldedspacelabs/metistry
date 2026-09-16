@@ -246,7 +246,7 @@ private struct Sandbox: ~Copyable {
 private struct NeverRunner: CommandRunner {
     func run(
         executable: URL, arguments: [String], environment: [String: String],
-        currentDirectory: URL?, onOutput: @escaping @Sendable (OutputLine) -> Void
+        currentDirectory: URL?, standardInput: String?, onOutput: @escaping @Sendable (OutputLine) -> Void
     ) async throws -> CommandResult {
         Issue.record("nothing in these tests should spawn a process")
         return CommandResult(exitCode: 0, stdout: "", stderr: "")

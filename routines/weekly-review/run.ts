@@ -6,7 +6,7 @@
 // silence-default: the user asked for a cadence, so the review always goes
 // out, and an empty section says one honest line instead of vanishing.
 // In the first 7 days of a month it adds §5's monthly check — last month's
-// assistant spend by model tier against subscription headroom, and AWS.
+// assistant spend by model tier, and AWS.
 //
 // Model-free end to end (invariant 4): every line is SQL plus formatting.
 // `ctx.now` is injectable so the window and the monthly gate are testable;
@@ -169,8 +169,8 @@ async function sectionAgents(db: Db, now: Date): Promise<string[]> {
 }
 
 // Spend between two local dates [from, to). Shared by the weekly section and
-// the monthly block. Assistant cost is API-equivalent: on a subscription it
-// is headroom consumed, not a bill (Phase 4 wording).
+// the monthly block. Assistant cost is what the provider billed for the turn
+// (`runs.cost_usd`, rolled up hourly by the claude-usage collector).
 async function spendBetween(db: Db, from: string, to: string): Promise<string[]> {
   const claude = await db.query(
     `SELECT labels->>'model' AS model, sum(value) AS usd FROM metrics
@@ -328,8 +328,8 @@ async function sectionNextWeek(db: Db, ctx: WeeklyCtx, now: Date): Promise<strin
   }
 }
 
-// §5 monthly: token spend by tier against subscription headroom. Gated on
-// the first week so it rides the first weekly review of each month.
+// §5 monthly: token spend by tier, month over month. Gated on the first week
+// so it rides the first weekly review of each month.
 export function monthlyWindow(now: Date): { from: string; to: string; label: string } | null {
   if (now.getDate() > MONTHLY_GATE_DAY) return null;
   const from = new Date(now.getFullYear(), now.getMonth() - 1, 1);
@@ -377,7 +377,7 @@ export async function run(db: Db, ctx: WeeklyCtx = {}): Promise<number> {
     ...next,
   ];
   if (month && lastMonth) {
-    parts.push("", `📅 Last month (${month.label}):`, ...lastMonth, "    subscription headroom check (§5): if the assistant is crowding your plan, that is the signal to move it to an API key");
+    parts.push("", `📅 Last month (${month.label}):`, ...lastMonth, "    monthly spend check (§5): compare it with the budgets in compute.yaml — `metistry compute budget instance --monthly <usd>` is what makes a number a limit");
   }
   if (!ctx.ekUrl || !ctx.ekToken) parts.push("", "🔭 Calendar joins next week's view once the EventKit bridge is connected.");
 

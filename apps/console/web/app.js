@@ -7,7 +7,7 @@ import { renderMarkdown } from "./md.js";
 const { startRegistration, startAuthentication } = window.SimpleWebAuthnBrowser;
 
 const $ = (id) => document.getElementById(id);
-const views = ["feed", "chat", "dashboard", "capture", "triage", "status", "devices", "agents", "artifacts"];
+const views = ["feed", "chat", "board", "dashboard", "capture", "triage", "status", "devices", "agents", "artifacts"];
 const enrollCode = new URLSearchParams(location.hash.slice(1)).get("enroll");
 
 async function api(path, opts = {}) {
@@ -20,7 +20,7 @@ function show(view) {
   $("nav").hidden = false; $("auth").hidden = true;
   for (const v of views) $(v).hidden = v !== view;
   document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("active", b.dataset.view === view));
-  ({ feed: loadFeedView, chat: loadMessages, dashboard: loadDashboard, status: loadStatus, devices: loadDevices, triage: loadTriage, agents: loadAgents, artifacts: loadArtifacts }[view] ?? (() => {}))();
+  ({ feed: loadFeedView, chat: loadMessages, board: loadBoardView, dashboard: loadDashboard, status: loadStatus, devices: loadDevices, triage: loadTriage, agents: loadAgents, artifacts: loadArtifacts }[view] ?? (() => {}))();
 }
 
 function showAuth() {
@@ -692,7 +692,9 @@ const fmtDay = (v) => {
 };
 const barPct = (v, max) => (max > 0 ? Math.max(0, Math.min(100, (asNum(v) / max) * 100)) : 0);
 const barHtml = (v, max) => `<span class="bar"><span style="width:${barPct(v, max).toFixed(1)}%"></span></span>`;
-const dashStamp = (id, as_of) => { $(`dash-${id}-asof`).textContent = as_of ? `as of ${new Date(as_of).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : ""; };
+// staleness is visible, never silent: every panel stamps the envelope's as_of
+const asOfText = (as_of) => (as_of ? `as of ${new Date(as_of).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : "");
+const dashStamp = (id, as_of) => { $(`dash-${id}-asof`).textContent = asOfText(as_of); };
 
 // one review list across every configured repo (github-state → prs_for_review); the status page uses it too
 function reviewListHtml(rows) {
@@ -1123,6 +1125,154 @@ document.addEventListener("visibilitychange", () => {
 
 $("feed-agent").onchange = () => loadFeed().catch(() => {});
 $("feed-project").onchange = () => loadFeed().catch(() => {});
+
+// ===== board (docs/ops/board.md) =====
+// A read-only Kanban over the tasks module's work rows. Two named queries do
+// all the thinking (invariant 3): `board` returns one card per row with its
+// `column` ALREADY DECIDED server-side, and `board_projects` returns the
+// project × column counts that fill the filter and the column headers.
+// Nothing below derives a state — a wrong predicate is wrong in
+// seed/queries/board.yaml, in one place, for this panel and the Mac app
+// alike. Every server value goes through esc() (CRIT-7).
+//
+// Read-only on purpose. Every task mutation is still a tool call (invariant
+// 9), so the board offers no drop a service would refuse by offering none at
+// all; phase 3 of docs/research/2026-09-12-hermes-agent-review.md adds the
+// write paths and the misuse tests that go with them.
+
+// The six columns in board order, each with the sentence its predicate means
+// (P10: Title Case names things). The order here must match board.yaml's.
+const BOARD_COLUMNS = [
+  ["backlog", "Backlog", "open, addressed to no one"],
+  ["assigned", "Assigned", "addressed to someone, not started"],
+  ["in_progress", "In Progress", "an agent holds the lease"],
+  ["needs_you", "Needs You", "blocked — nothing but your hand moves it"],
+  ["done", "Done", "closed, no report came back"],
+  ["reported", "Reported", "closed, and a report landed"],
+];
+const BOARD_LIMIT = 50; // per column — board.yaml's default, named here so the header can say "showing N of M"
+
+const fmtAge = (h) => {
+  const n = asNum(h);
+  if (n < 1) return `${Math.max(1, Math.round(n * 60))}m`;
+  if (n < 48) return `${Math.round(n)}h`;
+  return `${Math.round(n / 24)}d`;
+};
+
+// The SERVER decides `escalated`; this only names it, from fields already on
+// the wire. A chip that says nothing but "escalated" is a card you have to
+// open to understand — and there is nothing to open yet.
+function escalationLabel(c) {
+  if (c.lease_expires_at && new Date(c.lease_expires_at) <= new Date()) return "lease lapsed";
+  if (c.status === "blocked") return "blocked";
+  return "overdue";
+}
+
+function boardCardHtml(c) {
+  const bits = [c.claimed_by ? `held by ${c.claimed_by}` : c.owner ? `for ${c.owner}` : "unclaimed", `${fmtAge(c.age_hours)} old`];
+  if (c.kind === "review") bits.push("review bundle");
+  if (c.last_report_at) bits.push(`reported ${relTime(c.last_report_at)}`);
+  // a review bundle names its artifact, and the artifacts panel is the one
+  // card detail the console already has; everything else has none yet, so it
+  // gets no click affordance rather than a dead one
+  const open = c.artifact ? ` data-board-art="${esc(c.artifact)}" tabindex="0" role="link"` : "";
+  return `<li class="card${c.escalated ? " escalated" : ""}${c.artifact ? " linked" : ""}"${open}>
+    <div class="row"><span class="card-title">${esc(c.title)}</span><span class="muted">#${esc(c.id)}</span></div>
+    <div class="muted">${esc(bits.join(" · "))}${c.escalated ? ` <span class="chip failed">${esc(escalationLabel(c))}</span>` : ""}</div></li>`;
+}
+
+// Counts come from board_projects, not from the cards: `board` caps each
+// column at BOARD_LIMIT, so counting the rendered cards would quietly
+// understate a busy column.
+function boardTotals(rows, project) {
+  const totals = new Map();
+  for (const r of rows) {
+    if (project && r.project !== project) continue;
+    const t = totals.get(String(r.column)) ?? { cards: 0, escalations: 0 };
+    t.cards += asNum(r.cards);
+    t.escalations += asNum(r.escalations);
+    totals.set(String(r.column), t);
+  }
+  return totals;
+}
+
+function renderBoard(cards, totals) {
+  const byColumn = new Map(BOARD_COLUMNS.map(([key]) => [key, []]));
+  for (const c of cards) byColumn.get(String(c.column))?.push(c);
+  $("board-columns").innerHTML = BOARD_COLUMNS.map(([key, label, why]) => {
+    const list = byColumn.get(key) ?? [];
+    const t = totals.get(key) ?? { cards: list.length, escalations: 0 };
+    const more = t.cards > list.length ? ` <span class="muted">showing ${list.length}</span>` : "";
+    return `<section class="board-col" data-column="${esc(key)}">
+      <h3>${esc(label)} <span class="board-count">${asNum(t.cards)}${t.escalations ? ` <span class="failed">${asNum(t.escalations)}</span>` : ""}</span></h3>
+      <p class="muted board-why">${esc(why)}${more}</p>
+      <ul class="board-cards">${list.length ? list.map(boardCardHtml).join("") : `<li class="muted board-none">none</li>`}</ul>
+    </section>`;
+  }).join("");
+  const open = (el) => { location.hash = `#/artifacts/${el.dataset.boardArt}`; };
+  document.querySelectorAll("[data-board-art]").forEach((el) => {
+    el.onclick = () => open(el);
+    el.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(el); } };
+  });
+}
+
+async function loadBoard() {
+  const project = $("board-project").value;
+  const [cards, totals] = await Promise.all([
+    dashQuery("board", { project, limit: BOARD_LIMIT }),
+    dashQuery("board_projects", { limit: 500 }),
+  ]);
+  populateBoardProjects(totals.rows);
+  $("board-empty").hidden = cards.rows.length > 0;
+  $("board-asof").textContent = asOfText(cards.as_of);
+  renderBoard(cards.rows, boardTotals(totals.rows, project));
+}
+
+// The filter's options are the projects that actually have cards — from the
+// board's own counts, so it never offers a project with an empty board. Rows
+// with no project (the user's default project) are counted under "all
+// projects" and have no option of their own.
+function populateBoardProjects(rows) {
+  const sel = $("board-project");
+  const current = sel.value;
+  const projects = [...new Set(rows.map((r) => r.project).filter(Boolean))].sort();
+  sel.innerHTML = [`<option value="">all projects</option>`, ...projects.map((p) => `<option value="${esc(p)}">${esc(p)}</option>`)].join("");
+  sel.value = projects.includes(current) ? current : "";
+}
+
+async function loadBoardView() {
+  await loadBoard();
+  pollBoard();
+}
+
+// auto-refresh on the feed's cadence — a board that lags lies about who holds
+// the lease
+let boardTimer = null;
+function pollBoard(intervalMs = 10000) {
+  if (boardTimer) clearInterval(boardTimer);
+  boardTimer = setInterval(() => {
+    if (!$("board").hidden && document.visibilityState === "visible") loadBoard().catch(() => {});
+  }, intervalMs);
+}
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && !$("board").hidden) loadBoard().catch(() => {});
+});
+
+$("board-project").onchange = () => loadBoard().catch(() => {});
+
+// [ and ] step the project filter — the one keyboard gesture a board with no
+// drag still wants. Never while typing: a bracket belongs to the composer.
+document.addEventListener("keydown", (e) => {
+  if ($("board").hidden || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.key !== "[" && e.key !== "]") return;
+  const t = e.target;
+  if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+  const sel = $("board-project");
+  if (sel.options.length < 2) return;
+  e.preventDefault();
+  sel.selectedIndex = Math.min(sel.options.length - 1, Math.max(0, sel.selectedIndex + (e.key === "]" ? 1 : -1)));
+  loadBoard().catch(() => {});
+});
 
 // presence chips on the existing agents tab list (§ agents section above
 // leaves a <span id="presence-{id}"> placeholder per row for this to fill).

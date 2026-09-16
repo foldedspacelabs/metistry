@@ -110,12 +110,29 @@ describe.skipIf(!hasDb)("console PWA chunk", () => {
     const html = await (await fetch(base + "/")).text();
     // "Needs You" is the triage tab's label since the reply-quality loop
     // (docs/ops/reply-feedback.md) made it the single list — Title Case too.
-    for (const label of ["Feed", "Chat", "Dashboard", "Capture", "Needs You", "Status", "Devices", "Agents", "Artifacts"]) {
+    for (const label of ["Feed", "Chat", "Board", "Dashboard", "Capture", "Needs You", "Status", "Devices", "Agents", "Artifacts"]) {
       expect(html).toContain(`>${label}</button>`);
     }
     expect(html).toContain("<h3>Components</h3>");
     expect(html).toContain("<h3>Reviews Waiting on You</h3>");
     expect(html).toContain('<h1 id="title">Metistry</h1>');
+  });
+
+  // docs/ops/board.md — the board panel ships in the shell. Asserted on the
+  // served markup (there is no DOM harness here): app.js wires #board-project
+  // and #board-columns at module scope, so if either id disappears the whole
+  // shell throws on load. The panel is READ-ONLY in this phase: no draggable
+  // attribute, no drop target, no mutating form.
+  it("ships the read-only board panel", async () => {
+    const html = await (await fetch(base + "/")).text();
+    expect(html).toContain('<section id="board" hidden>');
+    expect(html).toContain('id="board-project"'); // the project filter app.js binds [ and ] to
+    expect(html).toContain('id="board-columns"');
+    expect(html).toContain('id="board-asof"'); // staleness is visible, never silent
+    expect(html).toContain('id="board-empty"');
+    const board = /<section id="board" hidden>[\s\S]*?<\/section>/.exec(html)?.[0] ?? "";
+    expect(board).not.toMatch(/draggable/); // phase 3 adds the drags, with the misuse tests
+    expect(board).not.toMatch(/<button/); // nothing in here mutates a task
   });
 
   // Regression: every view is a sibling <section> under <main>. An unclosed

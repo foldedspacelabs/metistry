@@ -4,6 +4,12 @@ Capture from any app → `POST /capture`, with the **local-file fallback**
 (SHOULD-10: one silent drop ends the trust). Until the native iOS app's
 share extension exists, this Shortcut *is* the share sheet.
 
+What lands: a file in `Knowledge/Inbox/` — inside the vault, so it shows up
+in Obsidian on every device and git carries it — plus its triage row.
+Anything over `METISTRY_INBOX_MAX_TRACKED_BYTES` (5 MiB: a screen
+recording, a big PDF) goes to `Knowledge/Inbox/.large/`, which git does not
+carry. `docs/ops/inbox.md`.
+
 ## 1. Mint an owner access token (on the Studio)
 
 ```bash
@@ -58,6 +64,9 @@ the same headers.
 
 ## 4. Mac side of the fallback
 
-`inbox-drain` should also sweep `~/Library/Mobile Documents/com~apple~CloudDocs/Metistry Inbox/`
-(the `local-mac` profile only) — filed as the collector's next
-increment; until then, offline captures wait in that folder.
+Offline captures wait in that iCloud folder. The cheapest way to ingest them
+now that the inbox is in the vault: move the files into
+`<instance>/Knowledge/Inbox/`. The reconciler's scan notices anything that
+appears there by content hash and files a triage row for it, exactly as if
+it had come through `POST /capture` (`docs/ops/inbox.md`). An automatic
+sweep of the iCloud folder is still unbuilt.

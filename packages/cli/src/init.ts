@@ -50,14 +50,18 @@ export interface InitResult {
   envLines: string[];
 }
 
-/** Tracked config dirs the instance owns (§4.16); `inbox/` is created too but is gitignored, so it carries no placeholder. */
+/** Tracked config dirs the instance owns (§4.16). The inbox is NOT one of them any more: it lives in the vault at `Knowledge/Inbox/` (docs/ops/inbox.md) and comes from seed/. */
 export const INSTANCE_DIRS = ["queries", "agents", "routines", "extensions", "instance-migrations"] as const;
 // `state/` holds this instance's derived state — the Postgres data
 // directory, the assistant's SDK transcripts, and the generated `.env`.
 // Invariant 1: git is the record, Postgres is derived, so none of it
 // belongs in the instance repo — and `.env` holds secrets, which must
 // never be committable at all.
-export const GITIGNORE = "inbox/\nstate/\n.obsidian/workspace*\n";
+// `state/` holds this instance's derived state; `Knowledge/Inbox/.large/`
+// holds captures too big for git to carry (METISTRY_INBOX_MAX_TRACKED_BYTES)
+// — Obsidian still sees them, the repo stays small. The inbox ITSELF is
+// tracked now: a capture is part of the record (invariant 1).
+export const GITIGNORE = "state/\n.obsidian/workspace*\nKnowledge/Inbox/.large/\n";
 export const COMMIT_AUTHOR = { name: "Metistry", email: "metistry@localhost" } as const;
 
 /** The mention trigger follows the name: "Metis" → "@metis". */
@@ -123,9 +127,12 @@ export async function init(opts: InitOptions): Promise<InitResult> {
   if (existsSync(join(opts.seedDir, COMPUTE_FILENAME))) await cp(join(opts.seedDir, COMPUTE_FILENAME), join(dir, COMPUTE_FILENAME));
   const assistantName = String((parseYaml(identity) as { name?: unknown })?.name ?? "");
 
+  // the vault inbox (docs/ops/inbox.md): seed/ carries its README, and this
+  // guarantees the directory exists even for a seed that does not
+  await mkdir(join(dir, "Knowledge", "Inbox"), { recursive: true });
+
   // config-shaped dirs the instance owns; the D4 overlay reads seed defaults
   // until a same-named file appears here, so they start empty
-  await mkdir(join(dir, "inbox"), { recursive: true });
   for (const d of INSTANCE_DIRS) {
     await mkdir(join(dir, d), { recursive: true });
     await writeFile(join(dir, d, ".gitkeep"), "");

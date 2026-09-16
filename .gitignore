@@ -45,6 +45,11 @@ ops/release/.tools/
 releases/
 current
 
+# PoC-18 bake-off transcripts (docs/poc/poc18-bakeoff/README.md). The run
+# ROWS are committed evidence; the full message histories they point at are
+# large and can carry vault content, so they stay on the machine that ran them.
+docs/poc/poc18-bakeoff/runs/.transcripts/
+
 # Claude Code: local session state and this repo's worktrees live under
 # .claude/, but .claude/skills and .claude/agents ARE tracked — they are the
 # source of truth that ops/scripts/install-claude-assets.sh links into ~/.claude.

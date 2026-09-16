@@ -103,6 +103,10 @@ export {
   budgetSchema,
   budgetsSchema,
   computeSchema,
+  serveSchema,
+  SERVE_RUNTIMES,
+  servedProviders,
+  firstOnMachineBaseUrl,
   modelRefIssue,
   parseModelRef,
   parseCompute,
@@ -132,6 +136,8 @@ export {
   type ProviderKind,
   type ReadFile,
   type ResolvedAssignment,
+  type Serve,
+  type ServeRuntime,
   type WatchSeam,
 } from "./compute.js";
 export {
@@ -214,10 +220,15 @@ export {
   EMBED_DEFAULT_MODEL,
   EMBED_DEFAULT_DIM,
   EMBED_DEFAULT_BATCH,
+  LOCAL_MODEL_URL_VAR,
+  OLLAMA_URL_VAR,
+  apiRootOf,
+  resolveLocalModelUrl,
   type Chunk,
   type ChunkOptions,
   type EmbedClientOptions,
   type FetchLike,
+  type LocalModelUrl,
 } from "./embed.js";
 export {
   summarizeTranscript,

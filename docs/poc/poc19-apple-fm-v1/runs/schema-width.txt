@@ -1,0 +1,7 @@
+  3 string fields     929 ms  ok    3 keys back   prompt_tokens= 161  completion_tokens=34
+  5 string fields     719 ms  ok    5 keys back   prompt_tokens= 219  completion_tokens=53
+ 10 string fields    1372 ms  ok   10 keys back   prompt_tokens= 364  completion_tokens=110
+ 20 string fields    2526 ms  ok   20 keys back   prompt_tokens= 684  completion_tokens=190
+ 40 string fields    4831 ms  ok   40 keys back   prompt_tokens=1324  completion_tokens=415
+ 80 string fields   16865 ms  ok   80 keys back   prompt_tokens=2604  completion_tokens=1117
+160 string fields     134 ms  HTTP 500  exceededContextWindowSize(FoundationModels.LanguageModelSession.GenerationError.Context(debugDescription: "Content contains 5342 tokens, which exceeds the maximum allowed context size of 4096.", under

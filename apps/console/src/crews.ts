@@ -28,6 +28,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import {
+  autonomyWidenings,
   crossKindRefusal,
   emptyCompute,
   finishRun,
@@ -43,7 +44,7 @@ import {
 import type { VaultClient } from "@foldedspacelabs/metistry-artifacts";
 import { TasksError, type TasksService } from "@foldedspacelabs/metistry-tasks";
 import type { AgentPrincipal, CrewDispatcher, CrewDispatchInput, CrewDispatchOutcome } from "@foldedspacelabs/metistry-mcp-brain";
-import { AgentError, validateAutonomy, validateGrants, type Autonomy, type Grants } from "./agents.js";
+import { AgentError, recordWidening, validateAutonomy, validateGrants, type Autonomy, type Grants } from "./agents.js";
 import { checkBrief, type TargetRegistry } from "./dispatch.js";
 
 export interface Db {
@@ -262,6 +263,11 @@ export async function syncCrews(db: Db, crews: Map<string, CrewDefinition>): Pro
       ]);
       out.registered.push(name);
       await audit(name, "register", true, { grants: def.grants, projects, autonomy: def.autonomy, where: def.where });
+      // A manifest may RAISE a crew's action autonomy — `agents/` is a §4.7
+      // protected path, so editing it is the user's own hand, which is the
+      // same permission the console route has. It gets the same receipt:
+      // a runs row and one alert (docs/ops/actions.md).
+      await recordWidening(db, name, autonomyWidenings({}, def.autonomy), `manifest ${def.where}`);
       continue;
     }
     const same = !row.revoked && row.display_name === display && JSON.stringify(row.grants) === grantsJson
@@ -272,6 +278,7 @@ export async function syncCrews(db: Db, crews: Map<string, CrewDefinition>): Pro
     ]);
     out.resynced.push(name);
     await audit(name, "resync", true, { grants: def.grants, projects, autonomy: def.autonomy, where: def.where });
+    await recordWidening(db, name, autonomyWidenings((row.autonomy ?? {}) as Autonomy, def.autonomy), `manifest ${def.where}`);
   }
 
   const { rows: gone } = await db.query(

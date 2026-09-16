@@ -8,7 +8,23 @@
 // (db, Authorization header). The future mcp-brain bridge calls the same
 // thing, so there is one place to get "who is this agent" right.
 
-import { ensureProject, mintToken, parseBearer, tokenHash } from "@foldedspacelabs/metistry-core";
+import {
+  ACTION_KINDS,
+  ACTION_MODES,
+  AUTONOMY_LEVELS,
+  autonomyWidenings,
+  effectiveActions,
+  ensureProject,
+  finishRun,
+  intEnv,
+  mintToken,
+  parseBearer,
+  startRun,
+  tokenHash,
+  type ActionKind,
+  type ActionMode,
+  type AutonomyLevel,
+} from "@foldedspacelabs/metistry-core";
 import type { Db } from "./auth-store.js";
 
 export const AGENT_ID_RE = /^[a-z][a-z0-9-]{0,39}$/;
@@ -35,6 +51,8 @@ export interface AgentPrincipal {
   kind: AgentKind;
   grants: Grants;
   projects: string[];
+  /** The A3 half of `agents.autonomy` (docs/ops/actions.md) — what this credential may do with an `action`. Absent = observe. */
+  autonomy?: { level?: AutonomyLevel | undefined; actions?: Partial<Record<ActionKind, ActionMode>> | undefined } | undefined;
 }
 
 /** The registry id of the instance's own assistant (CLAUDE.md naming: never the assistant's name). */
@@ -61,6 +79,16 @@ export interface Autonomy {
   /** agent ids and/or the literal "user" */
   accept_from?: string[];
   max_open_bundles?: number;
+  /**
+   * A3 (docs/ops/actions.md): how much room this agent has with an `action`
+   * proposal. The ONE key in this record that can widen rather than narrow —
+   * which is why raising it is admitted only through the console's
+   * user-principal route, and why every raise is recorded and alerted.
+   * Absent = `observe`, so nothing an existing row can do changes.
+   */
+  level?: AutonomyLevel;
+  /** Per-kind override, clamped by `level`; absent kinds take the level's default (core's ACTION_DEFAULTS). */
+  actions?: Partial<Record<ActionKind, ActionMode>>;
 }
 
 export interface AgentRow {
@@ -83,7 +111,7 @@ export interface AgentRow {
 
 /** Thrown for caller mistakes; the route maps `code` to the uniform envelope. */
 export class AgentError extends Error {
-  constructor(public readonly code: "invalid_request" | "conflict" | "not_found", message: string) {
+  constructor(public readonly code: "invalid_request" | "conflict" | "not_found" | "forbidden", message: string) {
     super(message);
   }
 }
@@ -147,7 +175,7 @@ export function validateAutonomy(input: unknown): Autonomy {
   if (input === null || typeof input !== "object" || Array.isArray(input)) throw new AgentError("invalid_request", "autonomy must be an object");
   const a = input as Record<string, unknown>;
   for (const k of Object.keys(a)) {
-    if (!["may_dispatch_to", "accept_from", "max_open_bundles"].includes(k)) throw new AgentError("invalid_request", `unknown autonomy key ${k}`);
+    if (!["may_dispatch_to", "accept_from", "max_open_bundles", "level", "actions"].includes(k)) throw new AgentError("invalid_request", `unknown autonomy key ${k}`);
   }
   const out: Autonomy = {};
   const ids = (name: string, v: unknown, allowUser: boolean): string[] => {
@@ -165,6 +193,24 @@ export function validateAutonomy(input: unknown): Autonomy {
     const n = a.max_open_bundles;
     if (typeof n !== "number" || !Number.isInteger(n) || n < 0 || n > MAX_BUNDLE_CAP) throw new AgentError("invalid_request", `max_open_bundles must be an integer 0..${MAX_BUNDLE_CAP}`);
     out.max_open_bundles = n;
+  }
+  // A3 (docs/ops/actions.md). Shape only here — whether this record may be
+  // STORED (a narrowing may come from anywhere; a widening is the owner's
+  // hand) is setAutonomy's question, so the validator stays pure and the
+  // policy has one home.
+  if (a.level !== undefined && a.level !== null) {
+    if (!AUTONOMY_LEVELS.includes(a.level as AutonomyLevel)) throw new AgentError("invalid_request", `level must be ${AUTONOMY_LEVELS.join(" | ")}`);
+    out.level = a.level as AutonomyLevel;
+  }
+  if (a.actions !== undefined && a.actions !== null) {
+    if (typeof a.actions !== "object" || Array.isArray(a.actions)) throw new AgentError("invalid_request", "actions must be an object of action kind → allow | propose | deny");
+    const actions: Partial<Record<ActionKind, ActionMode>> = {};
+    for (const [kind, mode] of Object.entries(a.actions as Record<string, unknown>)) {
+      if (!ACTION_KINDS.includes(kind as ActionKind)) throw new AgentError("invalid_request", `unknown action kind ${kind} — one of ${ACTION_KINDS.join(" | ")} (docs/ops/actions.md)`);
+      if (!ACTION_MODES.includes(mode as ActionMode)) throw new AgentError("invalid_request", `actions.${kind} must be ${ACTION_MODES.join(" | ")}`);
+      actions[kind as ActionKind] = mode as ActionMode;
+    }
+    if (Object.keys(actions).length > 0) out.actions = actions;
   }
   return out;
 }
@@ -206,12 +252,23 @@ export async function authenticateAgent(
   const { rows } = await db.query(
     `UPDATE agents SET last_seen_at = now()
      WHERE token_hash = $1 AND revoked_at IS NULL AND (NOT remote OR approved_at IS NOT NULL)
-     RETURNING id, kind, grants, projects`,
+     RETURNING id, kind, grants, projects, autonomy`,
     [tokenHash(token)],
   );
   const row = rows[0];
   if (!row) return null;
-  return { id: row.id, kind: row.kind === "internal" ? "internal" : "external", grants: coerceGrants(row.grants), projects: row.projects ?? [] };
+  // `autonomy` rides the principal for the same reason grants do: what this
+  // credential may DO is server-side, attached to the token, and never
+  // asserted by the caller (§4.19). mcp-brain resolves it through core's
+  // `effectiveActions`; nothing downstream re-derives the rules.
+  const autonomy = coerceAutonomy(row.autonomy);
+  return {
+    id: row.id,
+    kind: row.kind === "internal" ? "internal" : "external",
+    grants: coerceGrants(row.grants),
+    projects: row.projects ?? [],
+    autonomy: { ...(autonomy.level !== undefined ? { level: autonomy.level } : {}), ...(autonomy.actions !== undefined ? { actions: autonomy.actions } : {}) },
+  };
 }
 
 export interface InternalAgentConfig {
@@ -391,13 +448,78 @@ export async function setProjects(db: Db, id: string, projects: string[]): Promi
   return rows.length === 1;
 }
 
-/** Replace an active agent's §4.21 narrowing (validated). False if unknown or revoked. */
-export async function setAutonomy(db: Db, id: string, autonomy: Autonomy): Promise<boolean> {
+/** How long one widening stays quiet before it would alert again. Config, not a literal: "tell me once a day about this" is an opinion. */
+const AUTONOMY_ALERT_DEDUPE_HOURS = intEnv("METISTRY_ALERT_DEDUPE_H", 24);
+
+export interface SetAutonomyResult {
+  /** False = no such row, or it is revoked. */
+  ok: boolean;
+  /** The raises this change made, as `autonomyWidenings` names them. Empty on a narrowing or a no-op. */
+  widened: string[];
+}
+
+/**
+ * Replace an active agent's autonomy record (validated).
+ *
+ * The §4.21 keys narrow and only narrow, as they always have. `level` and
+ * `actions` (A3, docs/ops/actions.md) can go the other way, and that is the
+ * whole of OPEN-2's resolution: a change that RAISES the level or any
+ * effective mode is admitted only when the caller says it is the owner's own
+ * route (`allowWidening`), which in this console is `PUT /api/agents/:id/
+ * autonomy` — reached by the `user` principal alone — the CLI that calls it,
+ * and the crew registry sync, whose input is a §4.7 protected file. Every
+ * other caller, present or future, is narrowing-only by default: the
+ * parameter is opt-IN, so a new call site cannot widen by forgetting.
+ *
+ * Compare-and-set on the record we checked: a concurrent change answers
+ * `conflict` rather than being overwritten, so a widening can never ride in
+ * on a stale read.
+ */
+export async function setAutonomy(db: Db, id: string, autonomy: Autonomy, opts: { allowWidening?: boolean } = {}): Promise<SetAutonomyResult> {
+  const before = await db.query(`SELECT autonomy FROM agents WHERE id = $1 AND revoked_at IS NULL`, [id]);
+  const row = before.rows[0] as { autonomy: unknown } | undefined;
+  if (!row) return { ok: false, widened: [] };
+  const previousJson = JSON.stringify(row.autonomy ?? {});
+  const widened = autonomyWidenings(coerceAutonomy(row.autonomy), autonomy);
+  if (widened.length > 0 && opts.allowWidening !== true) {
+    throw new AgentError(
+      "forbidden",
+      `this would widen ${id}'s autonomy (${widened.join("; ")}) — a raise is the user's own hand: PUT /api/agents/${id}/autonomy from a console session, or \`metistry agents autonomy ${id}\` (docs/ops/actions.md)`,
+    );
+  }
   const { rows } = await db.query(
-    `UPDATE agents SET autonomy = $2 WHERE id = $1 AND revoked_at IS NULL RETURNING id`,
-    [id, JSON.stringify(autonomy)],
+    `UPDATE agents SET autonomy = $2 WHERE id = $1 AND revoked_at IS NULL AND autonomy IS NOT DISTINCT FROM $3::jsonb RETURNING id`,
+    [id, JSON.stringify(autonomy), previousJson],
   );
-  return rows.length === 1;
+  if (rows.length !== 1) {
+    throw new AgentError("conflict", `${id}'s autonomy changed while this change was being checked — re-read GET /api/agents and send it again`);
+  }
+  return { ok: true, widened };
+}
+
+/**
+ * A raised bar is never silent (docs/ops/actions.md). One `runs` row per
+ * widening — `agent_admin` / `autonomy_widened`, so `metistry runs` and the
+ * NDJSON export carry it — and one Needs You alert per distinct change per
+ * METISTRY_ALERT_DEDUPE_H, the same shape and the same dedupe the project
+ * budget flip uses. Best effort on the alert: failing to notify must not
+ * fail the change the owner already made.
+ */
+export async function recordWidening(db: Db, id: string, widened: string[], via: string): Promise<void> {
+  if (widened.length === 0) return;
+  const runId = await startRun(db, { component: "console", kind: "agent_admin", tool: "autonomy_widened", meta: { agent: id, op: "autonomy_widened", widened, via } });
+  await finishRun(db, runId, { ok: true });
+  const text = `agent ${id} was given more room: ${widened.join("; ")} — it can now act on its own within that table (dashboard → agents, docs/ops/actions.md)`;
+  const dup = await db.query(
+    `SELECT 1 FROM outbound_messages WHERE kind = 'alert' AND text = $1 AND ts > now() - make_interval(hours => $2::int)`,
+    [text, AUTONOMY_ALERT_DEDUPE_HOURS],
+  );
+  if (!dup.rows[0]) await db.query(`INSERT INTO outbound_messages (thread, text, kind) VALUES ('default', $1, 'alert')`, [text]);
+}
+
+/** The effective (kind → mode) table for one stored record — what the registry pane and `metistry agents autonomy` both render. */
+export function autonomyTable(autonomy: Autonomy): Record<ActionKind, ActionMode> {
+  return effectiveActions(autonomy);
 }
 
 /** Revocation is permanent: the row stays (provenance on old proposals), the token dies. */

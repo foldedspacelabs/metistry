@@ -1,0 +1,7 @@
+name: devin-sessions
+type: collector
+description: "Poll dispatched Devin sessions (work rows whose external_ref starts `devin:`) and land the structured answer as a report proposal. Devin publishes no completion webhook, so the return path is a poll; this is the `result.status_via` of targets/devin-sessions. Degrades absent without METISTRY_DEVIN_API_KEY."
+schedule: "*/5 * * * *"
+writes: [work, proposals, runs]
+reads: [work]
+requires: [devin-api-key]

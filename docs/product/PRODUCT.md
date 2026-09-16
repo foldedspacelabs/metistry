@@ -1348,6 +1348,26 @@ launchd cannot even see.
   `429` is backoff-and-stop rather than a failed run, with the watermark held so
   nothing is skipped. Outbound-only, so it needs no inbound exposure — the shape
   that works on a machine behind no tunnel.
+- 2026-09-15 — **The assistant can ask another agent a question, and the answer
+  is triaged rather than believed.** `targets/devin-sessions` is the first
+  compute target that is not GitHub and the first whose *content* comes home:
+  a brief becomes a Devin session, and the session's structured answer
+  (`{answer, sources[], confidence, open_questions[]}`, held to a Draft-7
+  schema Devin validates before the session may end) lands as a `report`
+  proposal in Needs You, which the evening fold files into the vault once the
+  owner accepts it. The new `knowledge_research` brief kind is the shape that
+  matters — "what does Devin know about X" — because it turns a question the
+  assistant cannot answer into a citable vault page instead of a guess. Three
+  properties make it safe to point at a third party: the shipped data policy
+  allows **no** vault path at all (an instance widens it to its own areas in an
+  overlay; a brief citing anything else is refused before a byte leaves, with
+  the refusal recorded as a run), the budget is a real per-session ACU ceiling
+  written to the runs row at dispatch and reconciled with the spend Devin
+  reports, and dispatch is the owner's action only — the collaboration rule
+  that a non-Claude agent is never pushed to by name is enforced by there
+  being no tool for a model turn to do it with. Devin publishes no completion
+  webhook, so the return is a five-minute poll collector, and every terminal
+  state that is not an answer blocks the work row and says why.
 - 2026-09-15 — **Automation that admits when it is broken.** Scheduled work
   now has a failure model: a collector that fails five times in a row stops
   being run at all until it succeeds again, a component whose declared

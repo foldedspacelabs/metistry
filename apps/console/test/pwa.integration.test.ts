@@ -121,18 +121,59 @@ describe.skipIf(!hasDb)("console PWA chunk", () => {
   // docs/ops/board.md — the board panel ships in the shell. Asserted on the
   // served markup (there is no DOM harness here): app.js wires #board-project
   // and #board-columns at module scope, so if either id disappears the whole
-  // shell throws on load. The panel is READ-ONLY in this phase: no draggable
-  // attribute, no drop target, no mutating form.
-  it("ships the read-only board panel", async () => {
+  // shell throws on load.
+  it("ships the board panel and the three popovers the drags need", async () => {
     const html = await (await fetch(base + "/")).text();
     expect(html).toContain('<section id="board" hidden>');
     expect(html).toContain('id="board-project"'); // the project filter app.js binds [ and ] to
     expect(html).toContain('id="board-columns"');
     expect(html).toContain('id="board-asof"'); // staleness is visible, never silent
     expect(html).toContain('id="board-empty"');
-    const board = /<section id="board" hidden>[\s\S]*?<\/section>/.exec(html)?.[0] ?? "";
-    expect(board).not.toMatch(/draggable/); // phase 3 adds the drags, with the misuse tests
-    expect(board).not.toMatch(/<button/); // nothing in here mutates a task
+    const board = /<section id="board" hidden>[\s\S]*?<p id="board-empty"[^>]*>[^<]*<\/p>/.exec(html)?.[0] ?? "";
+    expect(board).not.toBe("");
+    // every id app.js binds at module scope — a missing one throws on load
+    for (const id of [
+      "board-msg", "board-move", "board-move-card", "board-move-targets", "board-move-cancel",
+      "board-assign", "board-assign-card", "board-assign-to", "board-assign-cancel",
+      "board-detail", "board-detail-title", "board-detail-fields", "board-detail-link", "board-detail-close",
+    ]) {
+      expect(html, id).toContain(`id="${id}"`);
+    }
+    // the refusal line is a live region: a snapped-back card must announce why
+    expect(html).toMatch(/id="board-msg"[^>]*aria-live="polite"/);
+  });
+
+  // The drags (docs/ops/board.md "Drags"). There is no DOM harness here, so
+  // this asserts the SHAPE of the handlers in the served app.js: every drop
+  // the table names maps to exactly one route, `reported` is never a target,
+  // and a closed card has no drops at all.
+  it("the board's drag handlers are present, and each drop maps to exactly one route", async () => {
+    const js = await (await fetch(base + "/app.js")).text();
+    for (const handler of ["ondragstart", "ondragover", "ondragleave", "ondrop", "ondragend"]) {
+      expect(js, handler).toContain(handler);
+    }
+    // the §6c policy table, as it stands in the panel
+    const drops = /function dropsFor\(c\) \{[\s\S]*?\n\}/.exec(js)?.[0] ?? "";
+    expect(drops).not.toBe("");
+    expect(drops).toContain('if (c.status === "closed") return d;'); // done/reported are terminal
+    expect(drops).toContain('d.assigned = "assign"');
+    expect(drops).toContain('d.in_progress = "claim"');
+    expect(drops).toContain('d.backlog = "unassign"');
+    expect(drops).toContain('d[boardHome(c)] = "release"');
+    expect(drops).toContain('d[boardHome(c)] = "unblock"');
+    expect(drops).toContain('d.done = "close"');
+    expect(drops).not.toContain("reported"); // nothing you can drag makes a report exist
+    // one op, one route — and the two POST verbs are the only POSTs
+    const routes = /function boardRoute\(op, card, extra\) \{[\s\S]*?\n\}/.exec(js)?.[0] ?? "";
+    expect(routes).toContain('method: "PATCH"');
+    expect(routes).toContain("`/api/tasks/${id}/${op}`");
+    expect(routes).toContain('return patch({ owner: extra.owner })');
+    expect(routes).toContain('return patch({ owner: null })');
+    expect(routes).toContain('return patch({ status: "open" })');
+    expect(routes).toContain('return patch({ status: "closed" })');
+    // the keyboard alternative, and the room link a card opens when it has one
+    expect(js).toContain('e.key === "m"');
+    expect(js).toContain("`#/rooms/work/${Number(c.id)}`");
   });
 
   // Regression: every view is a sibling <section> under <main>. An unclosed
@@ -171,13 +212,17 @@ describe.skipIf(!hasDb)("console PWA chunk", () => {
   });
 
   it("lists inbound messages for the thread view", async () => {
-    await fetch(`${base}/message`, {
+    const posted = await fetch(`${base}/message`, {
       method: "POST",
       headers: { cookie: sessionCookie, "content-type": "application/json" },
       body: JSON.stringify({ text: "pwa test msg" }),
     });
-    const r = await fetch(`${base}/api/messages?limit=5`, { headers: { cookie: sessionCookie } });
+    // by the id the POST returned, not by the text: other suites in this file
+    // set post to the same scratch database in parallel, and a fixed `limit`
+    // makes "is it listed" a race against how many messages they sent
+    const { message_id } = await posted.json();
+    const r = await fetch(`${base}/api/messages?limit=50`, { headers: { cookie: sessionCookie } });
     const { messages } = await r.json();
-    expect(messages.some((m: any) => m.text === "pwa test msg")).toBe(true);
+    expect(messages.some((m: any) => Number(m.id) === Number(message_id) && m.text === "pwa test msg")).toBe(true);
   });
 });

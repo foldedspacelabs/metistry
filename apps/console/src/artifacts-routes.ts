@@ -1,5 +1,8 @@
 // Console routes for the artifacts module (§4.21) — an adapter over the
-// one service, adding nothing. Reached ONLY by a passkey session (the
+// one service, adding nothing. That includes the rooms on `work` rows
+// (0016, docs/ops/threads.md): same service, same table, and the one
+// place a room is resolved, because the user's hand is the only principal
+// allowed to. Reached ONLY by a passkey session (the
 // caller has already passed the management gate in server.ts), so the
 // principal here is always the user's hand. The raw-file route is the one
 // place bytes leave the vault for a browser: images and PDFs render
@@ -22,12 +25,25 @@ const DIFF = new RegExp(`^/api/artifacts/(art_${ID})/diff$`);
 const COMMENTS = new RegExp(`^/api/artifacts/(art_${ID})/comments$`);
 const COMMENT_STATE = new RegExp(`^/api/artifacts/(art_${ID})/comments/(cmt_${ID})/(resolve|reopen)$`);
 const DISPATCH = /^\/api\/dispatches\/(\d{1,12})$/;
+// Rooms on `work` rows (0016). The console is the USER's hand — the only
+// principal that may resolve one — and the only surface that sees every
+// room at once; agents reach the same threads through tasks_comment /
+// tasks_thread, which have no resolve and no addressee.
+const WORK_THREAD = /^\/api\/work\/(\d{1,12})\/thread$/;
+const WORK_COMMENTS = /^\/api\/work\/(\d{1,12})\/comments$/;
+const WORK_THREAD_STATE = /^\/api\/work\/(\d{1,12})\/thread\/(resolve|reopen)$/;
 const TEXT_KINDS = new Set(["markdown", "text", "json", "csv", "html"]);
 const MAX_INLINE_TEXT = 2 * 1024 * 1024;
 
-/** True when the path belongs to this adapter (the management gate uses it to answer 403, never 404, to non-sessions). */
+/** True when the path belongs to this adapter — artifacts, review dispatches, and rooms on work rows (the management gate uses it to answer 403, never 404, to non-sessions). */
 export function isArtifactRoute(pathname: string): boolean {
-  return pathname === "/api/artifacts" || pathname.startsWith("/api/artifacts/") || pathname === "/api/dispatches" || pathname.startsWith("/api/dispatches/");
+  return (
+    pathname === "/api/artifacts" ||
+    pathname.startsWith("/api/artifacts/") ||
+    pathname === "/api/dispatches" ||
+    pathname.startsWith("/api/dispatches/") ||
+    pathname.startsWith("/api/work/")
+  );
 }
 
 export async function artifactRoutes(req: IncomingMessage, res: ServerResponse, url: URL, service: ArtifactsService | undefined): Promise<void> {
@@ -111,6 +127,24 @@ export async function artifactRoutes(req: IncomingMessage, res: ServerResponse, 
       if (typeof body.version !== "string") return sendError(res, "invalid_request");
       const r = await service.commentCreate({ artifact: m[1]!, version: body.version, body: body.body, path: body.path, anchor: body.anchor }, p);
       return r ? sendJson(res, 201, { comment: r }) : sendError(res, "not_found");
+    }
+    // ----- rooms on work rows (0016) -----
+    if (req.method === "GET" && (m = WORK_THREAD.exec(url.pathname))) {
+      const r = await service.workThread(Number(m[1]), p);
+      return r ? sendJson(res, 200, r) : sendError(res, "not_found");
+    }
+    if (req.method === "POST" && (m = WORK_COMMENTS.exec(url.pathname))) {
+      const body = (await readJson(req)) as { body?: string };
+      if (typeof body.body !== "string") return sendError(res, "invalid_request");
+      const r = await service.workComment({ work: Number(m[1]), body: body.body }, p);
+      return r ? sendJson(res, 201, r) : sendError(res, "not_found");
+    }
+    // Resolve is here and nowhere else: no tool, no sweep, no timer. The
+    // service refuses any principal but the user, so this route being the
+    // only door is a property of the code rather than a convention.
+    if (req.method === "POST" && (m = WORK_THREAD_STATE.exec(url.pathname))) {
+      const r = m[2] === "resolve" ? await service.workThreadResolve(Number(m[1]), p) : await service.workThreadReopen(Number(m[1]), p);
+      return r ? sendJson(res, 200, r) : sendError(res, "not_found");
     }
     if (req.method === "POST" && (m = COMMENT_STATE.exec(url.pathname))) {
       const r = m[3] === "resolve" ? await service.commentResolve(m[2]!, p) : await service.commentReopen(m[2]!, p);

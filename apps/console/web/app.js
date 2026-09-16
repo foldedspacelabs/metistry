@@ -7,7 +7,7 @@ import { renderMarkdown } from "./md.js";
 const { startRegistration, startAuthentication } = window.SimpleWebAuthnBrowser;
 
 const $ = (id) => document.getElementById(id);
-const views = ["feed", "chat", "dashboard", "capture", "triage", "status", "devices", "agents", "artifacts"];
+const views = ["feed", "chat", "dashboard", "capture", "triage", "status", "devices", "agents", "artifacts", "rooms"];
 const enrollCode = new URLSearchParams(location.hash.slice(1)).get("enroll");
 
 async function api(path, opts = {}) {
@@ -20,7 +20,7 @@ function show(view) {
   $("nav").hidden = false; $("auth").hidden = true;
   for (const v of views) $(v).hidden = v !== view;
   document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("active", b.dataset.view === view));
-  ({ feed: loadFeedView, chat: loadMessages, dashboard: loadDashboard, status: loadStatus, devices: loadDevices, triage: loadTriage, agents: loadAgents, artifacts: loadArtifacts }[view] ?? (() => {}))();
+  ({ feed: loadFeedView, chat: loadMessages, dashboard: loadDashboard, status: loadStatus, devices: loadDevices, triage: loadTriage, agents: loadAgents, artifacts: loadArtifacts, rooms: loadRooms }[view] ?? (() => {}))();
 }
 
 function showAuth() {
@@ -559,7 +559,7 @@ function esc(s) { const d = document.createElement("div"); d.textContent = s ?? 
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {}); // push degrades absent
 try {
   const probe = await fetch("/api/status");
-  if (probe.ok) { show(artifactRoute() ? "artifacts" : "feed"); replayDraft(); pollChat(); } else showAuth(); // a #/artifacts/… link (the review link) opens straight there; feed is the home tab
+  if (probe.ok) { show(artifactRoute() ? "artifacts" : roomRoute() ? "rooms" : "feed"); replayDraft(); pollChat(); } else showAuth(); // a #/artifacts/… or #/rooms/work/… link (what a proposal carries) opens straight there; feed is the home tab
 } catch { showAuth(); }
 
 // ----- agents (external-agent registry; every agent-authored field output-encoded — CRIT-7) -----
@@ -1002,6 +1002,108 @@ $("art-dispatch").onsubmit = async (e) => {
       ? `review task #${body.work.id} ${body.queued ? `queued for ${to_agent} (${body.queued.reason} ${body.queued.open}/${body.queued.cap})` : `created for ${to_agent}`}`
       : `queued as proposal #${body.proposal_id} (${body.reason ?? "outside the project"})`
     : `dispatch failed: ${body.error?.message ?? r.status}`;
+};
+
+// ===== rooms (docs/ops/threads.md) =====
+// The owner's window onto every conversation at once: threads on artifact
+// versions and rooms on `work` rows, from the one `rooms` seed query
+// (invariant 3 — this panel calls /api/q/rooms and nothing else). Two
+// things it adds over the per-artifact thread list:
+//
+// - **why this came to you.** A demoted thread has carried
+//   `payload.reason` since the ping-pong cap shipped; it was never
+//   rendered as a sentence. WHY_LINE turns the stored value into one.
+// - **a room you can answer.** A work room's composer posts as the user,
+//   which resets the agent-only run — the human turn IS the release valve.
+//
+// Resolve is a button here and nowhere else: no tool resolves a room and
+// nothing resolves one on a timer (a sweep would fire the queued-bundle
+// release and start work unattended).
+const WHY_LINE = {
+  ping_pong_cap: (p) => `Ten agent turns went by without a human. The next agent message was not stored — this is where it came to you. Answer, or resolve the room.`,
+  outside_project: () => `An agent tried to hand this across a project boundary. Only your hand dispatches across it.`,
+  review_mode: () => `The project is in review mode, so every agent-to-agent hand-off queues for you.`,
+  may_dispatch_to: () => `The sending agent's manifest does not list this target.`,
+  accept_from: () => `The receiving agent's manifest does not accept work from the sender.`,
+};
+
+function roomRoute() {
+  // hoisted (called at boot): the regex lives inline, like artifactRoute's
+  const m = /^#\/rooms\/work\/(\d{1,12})$/.exec(location.hash);
+  return m ? { work_id: Number(m[1]) } : null;
+}
+
+let roomOpen = null; // { work_id }
+
+async function loadRooms() {
+  const project = $("room-project").value.trim();
+  const params = new URLSearchParams({ limit: "50" });
+  if (project) params.set("project", project);
+  if ($("room-open-only").checked) params.set("state", "open");
+  const { rows } = await (await api(`/api/q/rooms?${params}`)).json();
+  $("room-empty").hidden = rows.length > 0;
+  $("room-list").innerHTML = rows.map(roomCard).join("");
+  document.querySelectorAll("[data-room]").forEach((el) => (el.onclick = (e) => { e.preventDefault(); location.hash = el.dataset.room; }));
+  const r = roomRoute();
+  if (r) await openRoom(r.work_id);
+  else $("room-detail").hidden = true;
+}
+
+// Every value below came out of the database and may be agent-authored: esc() on all of it (CRIT-7).
+function roomCard(r) {
+  const href = r.anchor === "work" ? `#/rooms/work/${r.work_id}` : `#/artifacts/${r.artifact_id}/${r.version_id}`;
+  const who = (r.participants ?? []).map((p) => `${p.kind === "agent" ? "🤖 " : ""}${esc(p.principal)}`).join(", ");
+  const why = r.escalated && WHY_LINE[r.reason] ? `<div class="room-why">${esc(WHY_LINE[r.reason](r))}</div>` : "";
+  return `<li class="thread ${esc(r.state)}">
+    <div class="row"><a href="${esc(href)}" data-room="${esc(href)}"><b>${esc(r.title ?? "")}</b></a>
+      <span class="muted">${esc(r.anchor)} · ${esc(r.state)} · ${r.messages} message${r.messages === 1 ? "" : "s"}${r.agent_tail ? ` · ${r.agent_tail}/${r.cap} agent turns` : ""}</span></div>
+    <div class="muted">${who || "—"}${r.last_at ? ` · last ${new Date(r.last_at).toLocaleString()}` : ""}</div>
+    ${why}
+  </li>`;
+}
+
+async function openRoom(workId) {
+  const res = await api(`/api/work/${encodeURIComponent(workId)}/thread`);
+  if (!res.ok) { $("room-detail").hidden = true; return; }
+  const t = await res.json();
+  roomOpen = { work_id: t.work_id };
+  $("room-detail").hidden = false;
+  $("room-title").textContent = `work #${t.work_id} — ${t.title}`;
+  $("room-meta").textContent = `${t.project ?? "no project"} · ${t.status} · ${t.state}${t.resolved_by ? ` by ${t.resolved_by}` : ""} · ${t.agent_tail}/${t.cap} consecutive agent turns`;
+  const why = t.agent_tail >= t.cap;
+  $("room-why").hidden = !why;
+  if (why) $("room-why").textContent = WHY_LINE.ping_pong_cap();
+  const who = (c) => `${c.author_kind === "agent" ? "🤖 " : ""}${esc(c.author_principal)}`; // agent text is labeled agent-sourced (§4.19)
+  $("room-messages").innerHTML = t.comments.length
+    ? t.comments.map((c) => `<li class="reply"><span class="muted">${who(c)} · ${new Date(c.created_at).toLocaleString()}</span><div class="body">${esc(c.body)}</div></li>`).join("")
+    : `<li class="muted">nothing said yet</li>`;
+  $("room-resolve").textContent = t.state === "open" ? "Resolve" : "Reopen";
+  $("room-resolve").dataset.op = t.state === "open" ? "resolve" : "reopen";
+  $("room-msg").textContent = "";
+}
+
+window.addEventListener("hashchange", () => {
+  const r = roomRoute();
+  if (r) { if ($("rooms").hidden) show("rooms"); else openRoom(r.work_id); }
+});
+
+$("room-filter").onsubmit = (e) => { e.preventDefault(); loadRooms(); };
+
+$("room-comment").onsubmit = async (e) => {
+  e.preventDefault();
+  const body = $("room-comment-body").value.trim();
+  if (!body || !roomOpen) return;
+  const r = await api(`/api/work/${encodeURIComponent(roomOpen.work_id)}/comments`, { method: "POST", body: JSON.stringify({ body }) });
+  if (r.ok) { $("room-comment-body").value = ""; await openRoom(roomOpen.work_id); }
+  else $("room-msg").textContent = `could not post: ${r.status}`;
+};
+
+$("room-resolve").onclick = async () => {
+  if (!roomOpen) return;
+  const op = $("room-resolve").dataset.op ?? "resolve";
+  const r = await api(`/api/work/${encodeURIComponent(roomOpen.work_id)}/thread/${op}`, { method: "POST" });
+  if (r.ok) await openRoom(roomOpen.work_id);
+  else $("room-msg").textContent = op === "resolve" ? "nothing to resolve yet — a room needs a message first" : `could not reopen: ${r.status}`;
 };
 
 // ===== feed (home) + agent presence =====

@@ -2,7 +2,6 @@
 // exercised by swapping principals, the boundary by a target outside the
 // project, the cap by replying past it. The reader-less/module-less
 // deployment answers not_available. Skipped without a db.
-import { readFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -12,15 +11,9 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { TasksService } from "@foldedspacelabs/metistry-tasks";
 import { ArtifactsService, memoryVault, staticDirectory } from "@foldedspacelabs/metistry-artifacts";
 import { ALIAS_NAMES, ARTIFACTS_TOOL_NAMES, QUERIES_TOOL_NAMES, createBrainServer, TOOL_NAMES, type AgentPrincipal, type Db } from "../src/index.js";
+import { loadTestEnv } from "@foldedspacelabs/metistry-core/test-env";
 
-try {
-  for (const line of readFileSync(new URL("../../../.env", import.meta.url), "utf8").split("\n")) {
-    const m = /^([A-Z_]+)=(.*)$/.exec(line.trim());
-    if (m && m[1] && process.env[m[1]] === undefined) process.env[m[1]] = m[2];
-  }
-} catch {}
-
-const hasDb = !!process.env.METISTRY_DB_PASSWORD;
+const { hasDb } = loadTestEnv(new URL("../../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
 const P = "itest-brain-art";
 const ALICE = "itest-brain-art-alice";
 const BOB = "itest-brain-art-bob";

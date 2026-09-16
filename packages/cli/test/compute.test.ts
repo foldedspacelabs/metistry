@@ -4,7 +4,7 @@
 // that matter are the conservative ones — a key never reaches argv, an edit
 // that would not validate is never written, a provider still named by an
 // assignment cannot be removed, and a refusal names the field.
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -33,8 +33,15 @@ import {
 import type { Exec, ExecOptions } from "../src/exec.js";
 import { main } from "../src/main.js";
 
-const REPO = fileURLToPath(new URL("../../..", import.meta.url));
+// A product checkout these tests may safely hand to `main()`: seed/ copied out
+// of the real one, and — the whole point — no `.env`. Passing the real
+// checkout instead makes `main()` load a RUNNING install's environment,
+// reconciler bridge included, and `compute providers add` is then committed to
+// the operator's instance repo no matter what `--instance` said. That is not a
+// worry, it happened (docs/ops/testing.md).
+const REPO = await mkdtemp(join(tmpdir(), "metistry-compute-product-"));
 const SEED = join(REPO, "seed");
+await cp(fileURLToPath(new URL("../../../seed", import.meta.url)), SEED, { recursive: true });
 
 /** A login Keychain in a Map, keyed by (account, service). Records calls so a test can prove a value never reached argv. */
 function fakeSecurity(seed: Record<string, string> = {}) {
@@ -399,7 +406,10 @@ describe("metistry compute (the command)", () => {
     expect((await run(["compute", "budget", "instance", "--daily", "5", "--action", "warn", ...P])).code).toBe(2);
     expect((await run(["compute", "nonesuch", ...P])).code).toBe(2);
     delete process.env.METISTRY_INSTANCE_DIR; // loadInstallEnv writes it back into the environment; an earlier test's --instance must not answer for this one
-    expect((await run(["compute", "show"])).code).toBe(2); // no instance dir
+    // --product-dir even here: without one the CLI resolves the checkout it is
+    // running inside and reads that install's .env, which would answer with a
+    // real instance directory and turn this exit-2 case into an exit 0.
+    expect((await run(["compute", "show", "--product-dir", REPO])).code).toBe(2); // no instance dir
     expect(existsSync(file(dir))).toBe(false);
   });
 

@@ -70,6 +70,7 @@ jobs:
             exit 1
           fi
       - run: ops/scripts/check-path-case.sh
+      - run: node ops/scripts/fold-product-record.mjs --check
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:

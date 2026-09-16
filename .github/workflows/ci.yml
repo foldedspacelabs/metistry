@@ -26,6 +26,9 @@ jobs:
       - uses: actions/checkout@v4
       - run: ops/scripts/check-path-case.sh
       - run: node ops/scripts/prompt-lint.mjs
+      - run: node ops/scripts/fold-product-record.mjs --check
+      - name: ops/scripts unit tests
+        run: node --test 'ops/scripts/test/*.test.mjs'
       # tokens.css, preview.html and the Mac app's design-tokens.swift are all
       # generated from tokens.json. This is what stops one of them drifting —
       # and it re-checks every declared colour pair against WCAG AA.

@@ -147,10 +147,15 @@ private func stepModel(_ runner: RecordingRunner) -> ComputeStepModel {
 
 @Test func theTemplatesAreTheOnesTheCliAccepts() {
     // `COMPUTE_TEMPLATES` in packages/cli/src/compute.ts. A template the CLI
-    // does not know would be a button that can only fail.
-    #expect(ComputeTemplate.allCases.map(\.rawValue) == ["openrouter", "zen", "lmstudio", "ollama", "llamaserver"])
+    // does not know would be a button that can only fail — and one the CLI has
+    // that the app does not is a provider nobody can add from here, which is
+    // how `applefm` was missing until the Compute pane went looking for it.
+    #expect(ComputeTemplate.allCases.map(\.rawValue) == ["openrouter", "zen", "lmstudio", "ollama", "llamaserver", "applefm"])
     #expect(ComputeTemplate.openrouter.needsKey)
     #expect(!ComputeTemplate.llamaserver.needsKey)
+    // apple-fm authenticates with a bridge token this install already minted,
+    // so `providers add` finds it in the environment and asks for nothing.
+    #expect(!ComputeTemplate.applefm.needsKey)
     #expect(ComputeStepModel.keyNote.contains("standard input"))
 }
 

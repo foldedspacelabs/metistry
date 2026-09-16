@@ -112,11 +112,13 @@ restart. The degradation is deliberate:
 ```sh
 metistry compute show [--json]
 metistry compute providers list [--json]
-metistry compute providers add --from openrouter|zen|lmstudio|ollama \
+metistry compute providers add --from openrouter|zen|lmstudio|ollama|llamaserver \
         [--name <n>] [--base-url <url>] [--secret <NAME>] [--skip-test]
 metistry compute providers remove <name>
 metistry compute providers test <name> [--complete]
 metistry compute models list [--provider <name>] [--json]
+metistry compute models install <provider>/<model> [--json]
+metistry compute models load|unload <provider>/<model> [--ttl <seconds>] [--json]
 metistry compute assign <default|<tier>|crew:<name>> <provider/model> [--effort low|medium|high]
 metistry compute budget <instance|provider:<name>> [--daily <usd>] [--monthly <usd>] \
         --action allow|stop|critical_only
@@ -169,11 +171,128 @@ catalogue.
 | `zen` | OpenCode Zen; prices come from the `pricing:` table because the response carries no cost. Verify the base URL against its docs. |
 | `lmstudio` | LM Studio's local server on port 1234 |
 | `ollama` | Ollama's OpenAI-compatible surface on port 11434 |
+| `llamaserver` | the **bundled** `llama-server` on port 7813 — the only one with a `serve:` block, because it is the only one Metistry runs itself |
 
 `--name` and `--base-url` rewrite the block on the way in, so a second
 machine's Ollama is `--from ollama --name box --base-url http://10.0.0.4:11434/v1`.
 Any OpenAI-compatible endpoint works without a template — write the block by
 hand, or start from the nearest one.
+
+## Local models
+
+Three local servers, **one protocol**: `GET <base_url>/v1/models` is how all
+of them are discovered, and `POST /v1/chat/completions` is how all of them
+will be called. Two of them are **peers** Metistry finds where they already
+run; one is **bundled**, and is what is there when neither peer is.
+
+| | port | Metistry's relationship to it | installing a model |
+| --- | --- | --- | --- |
+| **LM Studio** | 1234 | a peer — discovered, never started | `lms get <id>` (its own CLI) |
+| **Ollama** | 11434 | a peer — discovered, never started | `POST /api/pull`, streamed |
+| **`llama-server`** | 7813 | **bundled**: built from pinned source into `runtime/llamacpp/`, signed with Postgres and git, started by the supervisor | one HTTPS GET of a Hugging Face GGUF |
+
+### Discovery
+
+```sh
+metistry compute models list
+```
+
+lists every declared provider's live `/v1/models` **and** any of the three
+local servers that is answering but that no provider dials:
+
+```
+lmstudio: http://127.0.0.1:1234/v1/models → 2 model(s)
+  lmstudio/qwen/qwen3-coder-30b
+  lmstudio/text-embedding-nomic-embed-text-v1.5
+
+Ollama on http://127.0.0.1:11434/v1: not configured — `metistry compute providers add --from ollama`
+  (ollama)/gemma3:4b
+```
+
+`metistry doctor` carries the same finding as three rows — `local:lmstudio`,
+`local:ollama`, `local:llamaserver` — each `ok` with what it has loaded, or
+`absent`. **Absent is never a failure.** A Mac with no local model server is
+a supported install, so these rows can only add information.
+
+### Installing a model
+
+```sh
+metistry compute models install lmstudio/qwen/qwen3-coder-30b
+metistry compute models install ollama/gemma3:4b
+metistry compute models install llamaserver/unsloth/gemma-3-4b-it-GGUF/gemma-3-4b-it-Q4_K_M.gguf
+```
+
+Each one is the server's own mechanism, spoken directly. For
+`llamaserver` the reference is `<hf-owner>/<hf-repo>/<file>.gguf` — the file
+name is on the repo's **Files** tab — and Metistry:
+
+1. downloads `https://huggingface.co/<owner>/<repo>/resolve/main/<file>`
+   into `<instance>/state/models/<owner>/<repo>/`, streamed to disk;
+2. checks it against the sha256 Hugging Face publishes (`X-Linked-Etag`).
+   A mismatch **discards the download and writes nothing**;
+3. writes `providers.<name>.serve.model_path` into `compute.yaml` as the
+   `user`, through the reconciler, like every other write here.
+
+`METISTRY_HF_TOKEN` is only needed for a gated or private repo; a 401/403
+says so by name.
+
+`load`/`unload` act for LM Studio (`lms load --ttl`) and are a **message**
+for the other two, because neither has an addressable load: Ollama loads on
+the first request and evicts after `keep_alive`, and the bundled
+`llama-server` holds exactly the model `compute.yaml` names for as long as
+it runs.
+
+### `serve:` — the one server Metistry runs
+
+```yaml
+providers:
+  llamaserver:
+    kind: openai-compatible
+    base_url: http://127.0.0.1:7813/v1
+    locality: on_machine
+    serve:
+      runtime: llamaserver
+      model_path: state/models/unsloth/gemma-3-4b-it-GGUF/gemma-3-4b-it-Q4_K_M.gguf
+      port: 7813
+      extra_args: ["--ctx-size", "8192"]
+```
+
+`serve:` is **additive and optional**: a provider without it is exactly what
+PR 1 shipped, a base URL somebody else is listening on. A provider *with* it
+says "this one is mine to run", and `metistry up` renders a supervisor child
+called `llamaserver` beside the console and the reconciler —
+`metistry logs llamaserver`, `metistry restart llamaserver`, and a
+`child:llamaserver` row in `doctor`.
+
+What the schema refuses, and why:
+
+- `serve.port` that `base_url` does not dial — a server Metistry starts must
+  be reachable where it listens, and the port is otherwise stated twice.
+- `serve:` on an `off_machine` provider — it is a statement about a process
+  on this machine.
+- a `runtime:` other than `llamaserver` — LM Studio and Ollama are peers, not
+  children. Metistry never claims another app's lifecycle.
+- a `model_path` that is not a `.gguf`.
+
+The **host is not configurable**: the child always binds `127.0.0.1`. A
+config line that could put an unauthenticated completion endpoint on the
+network would be exactly the kind of thing invariant 8 exists to prevent.
+`extra_args` is passed verbatim after the flags Metistry sets (`--model`,
+`--alias`, `--host`, `--port`), which is where `--ctx-size`, `--parallel` or
+`--embeddings` go.
+
+A missing binary or a missing GGUF is a **note, not a failure**: `up` says
+which and carries on with one fewer provider, because bringing the whole
+install down over a moved model file would be a far worse answer.
+
+### Embeddings
+
+Knowledge search embeds through the same protocol —
+`POST <root>/v1/embeddings` against `METISTRY_LOCAL_MODEL_URL`, defaulting
+to the **first `on_machine` provider's `base_url`** in `compute.yaml` and, if
+there is none, to a default Ollama. `METISTRY_OLLAMA_URL` still works as a
+deprecated alias (with one startup warning) — details in
+`docs/ops/knowledge-search.md`.
 
 ## Related
 

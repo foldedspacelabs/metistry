@@ -532,3 +532,58 @@ export async function startComputeWatch(opts: ComputeWatchOptions): Promise<Comp
     },
   };
 }
+
+// ---- the collaboration rule (C7) ---------------------------------------------
+
+/**
+ * The kind of the engine that runs a turn nothing in `compute.yaml`
+ * assigns: the Claude Agent SDK path, still the second engine kind until
+ * the subscription scrub removes it. Deliberately NOT a member of
+ * `PROVIDER_KINDS` — no `compute.yaml` may name it, because it is not a
+ * provider you configure but the absence of one.
+ */
+export const SDK_ENGINE_KIND = "anthropic";
+export type EngineKind = ProviderKind | typeof SDK_ENGINE_KIND;
+
+/**
+ * Which engine kind serves this tier or `crew:<name>`. The whole of rule 1
+ * ("a Claude turn never runs on a non-Claude model; engine is
+ * `provider.kind` from config") in one function, so nothing has to derive it
+ * twice and differently.
+ */
+export function engineKindFor(cfg: Compute, tierOrCrew?: string | null): EngineKind {
+  return resolveAssignment(cfg, tierOrCrew)?.config.kind ?? SDK_ENGINE_KIND;
+}
+
+export interface CrossKindRefusal {
+  /** The kind running the turn that asked. */
+  from: EngineKind;
+  /** The kind that would run the named agent. */
+  to: EngineKind;
+  message: string;
+}
+
+/**
+ * Collaboration rule 4 (C7, owner decision 2026-09-11): a turn may SCOPE
+ * work for anyone — an unassigned `work` row any agent can claim — but it
+ * may not PUSH work to a named agent whose engine kind differs from its own.
+ * Documenting work is collaboration; naming the worker is triggering it.
+ *
+ * Undefined when the push is allowed. The message names the field that
+ * would permit it (R3): both sides are one line of `compute.yaml`.
+ */
+export function crossKindRefusal(cfg: Compute, caller: string | null | undefined, crew: string): CrossKindRefusal | undefined {
+  const from = engineKindFor(cfg, caller ?? DEFAULT_TIER);
+  const to = engineKindFor(cfg, `crew:${crew}`);
+  if (from === to) return undefined;
+  const assigned = resolveAssignment(cfg, `crew:${crew}`);
+  const where = assigned?.from === `crew:${crew}` ? `assignments.crews.${crew}` : "assignments.default";
+  return {
+    from,
+    to,
+    message:
+      `a ${from} turn may not delegate directly to "${crew}", which runs on ${to} (${where} in compute.yaml). ` +
+      `Create the work unassigned instead — any agent, this one included, can claim it from the same queue — ` +
+      `or assign both sides to one engine kind by editing ${where}.`,
+  };
+}

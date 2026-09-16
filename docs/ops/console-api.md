@@ -37,7 +37,7 @@ POST /capture
 Authorization: Bearer <owner or agent token>   (or the session cookie)
 Idempotency-Key: 6f2c4e0a-…                     (client-minted, ≤200 chars)
 
-201 {"id":42,"path":"1757556000000-note.md","sha256":"…"}
+201 {"id":42,"path":"Knowledge/Inbox/1757556000000-note.md","sha256":"…"}
 201 {"id":42, … }   Idempotency-Replayed: true   ← the SAME response, later
 ```
 
@@ -53,6 +53,9 @@ on the inbox row itself, and inbox rows are permanent.
 
 Without the header nothing changes: today's Shortcut and every existing
 door insert as before. An empty or oversized key is a `400`.
+
+`path` is relative to the instance repo root: captures live in the vault at
+`Knowledge/Inbox/` so Obsidian can see and edit them (`docs/ops/inbox.md`).
 
 `POST /api/messages/:id/feedback` needs no key: it is an upsert on the
 message id, so a replay is already the same row. `POST /message` is not

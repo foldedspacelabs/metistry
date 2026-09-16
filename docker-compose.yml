@@ -49,7 +49,16 @@ services:
       # default route — not the compose subnet, so a sibling container is
       # still remote. The launchd shape sets nothing and stays plain loopback.
       METISTRY_TRUSTED_LOOPBACK_PROXY: ${METISTRY_TRUSTED_LOOPBACK_PROXY:-docker-gateway}
+      # Captures live in the vault at Knowledge/Inbox/ (docs/ops/inbox.md) and
+      # go there through the reconciler's bridge — this container never mounts
+      # the instance repo (D5, invariant 7). The volume below is the FALLBACK
+      # for a console with no bridge configured: capture keeps working, those
+      # files are not in the vault, and moving them into Knowledge/Inbox/
+      # later is enough for the reconciler's scan to pick them up.
       METISTRY_INBOX_DIR: /data/inbox
+      # Above this many bytes a capture goes to Knowledge/Inbox/.large/, which
+      # the instance gitignores. Unset = 5 MiB.
+      METISTRY_INBOX_MAX_TRACKED_BYTES: ${METISTRY_INBOX_MAX_TRACKED_BYTES:-}
       # runner hardening (docs/ops/automation.md): failure-streak limit and
       # the per-error-signature alert window. Unset = the built-in 5 and 24h.
       METISTRY_RUNNER_MAX_STREAK: ${METISTRY_RUNNER_MAX_STREAK:-}
@@ -108,7 +117,7 @@ services:
       # loopback by default (invariant 8) — the user's routing layer adds reach
       - "127.0.0.1:${METISTRY_CONSOLE_PORT:-8080}:8080"
     volumes:
-      - inbox:/data/inbox
+      - inbox:/data/inbox   # fallback only (see METISTRY_INBOX_DIR above)
     healthcheck:
       test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8080/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))\""]
       interval: 15s

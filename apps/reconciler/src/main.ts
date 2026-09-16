@@ -84,7 +84,7 @@ setInterval(() => {
 const reconcile = (trigger: string) =>
   indexer.reconcile(trigger).then(
     (s) => {
-      if (s.added || s.changed || s.renamed || s.removed || s.conflicts_new || s.external_edits) console.log(`reconciler: ${JSON.stringify(s)}`);
+      if (s.added || s.changed || s.renamed || s.removed || s.conflicts_new || s.external_edits || s.inbox.added || s.inbox.changed || s.inbox.archived) console.log(`reconciler: ${JSON.stringify(s)}`);
     },
     (err) => console.error("reconciler: reconcile failed:", err instanceof Error ? err.message : err),
   );

@@ -38,6 +38,7 @@ import { connect, connectList, CONNECT_TOOLS, parseTool, renderConnect, renderCo
 import { renderWhoami, whoami } from "./console-client.js";
 import { importSessions } from "./import-sessions.js";
 import { init } from "./init.js";
+import { migrateInbox } from "./migrate-inbox.js";
 import { migrateShape } from "./migrate-shape.js";
 import { ensureInstanceId, instanceEnvFile, readInstanceId } from "./instance.js";
 import { readIdentity, renderIdentity } from "./identity.js";
@@ -342,6 +343,16 @@ const USAGE = `metistry — Metistry command line
       like metistry.lock/identity.yaml — preview without --yes, applied with
       it. Refuses while services still run under the current shape (the data
       does not move between shapes on its own); --force writes anyway.
+
+  metistry migrate-inbox [--instance <dir>] [--dry-run]
+      Move an existing instance's inbox into the vault: inbox/* (or a second
+      instance's lowercase Knowledge/inbox/, renamed through a temp name
+      because macOS is case-insensitive) into Knowledge/Inbox/, git mv for
+      what git tracks and a plain move for what it does not; drop inbox/
+      from .gitignore and add Knowledge/Inbox/.large/; rewrite inbox.path
+      rows to Knowledge/Inbox/<file>; commit it. Idempotent — a second run
+      says "already on the vault inbox" and changes nothing. Restarts
+      nothing: it prints the metistry up line and stops. docs/ops/inbox.md.
 
   metistry migrate-shape <launchd|compose> [--dry-run] [--namespace]
                          [--product-dir <checkout>] [--instance <dir>] [--env-file <path>]
@@ -741,6 +752,21 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
         doctorDeps: io.doctorDeps,
       });
       return r.code;
+    }
+    case "migrate-inbox": {
+      const loadedMi = loadEnv();
+      const dir = loadedMi.instanceDir ?? str(flags, "instance");
+      if (!dir) {
+        err("usage: metistry migrate-inbox [--instance <dir>] [--dry-run]  (or set METISTRY_INSTANCE_DIR)");
+        return 2;
+      }
+      try {
+        const r = await migrateInbox({ instanceDir: dir, out, exec: io.exec, dryRun: flags["dry-run"] === true });
+        return r.code;
+      } catch (e) {
+        err(`metistry migrate-inbox: ${e instanceof Error ? e.message : String(e)}`);
+        return 1;
+      }
     }
     case "migrate-shape": {
       if (!productDir) {

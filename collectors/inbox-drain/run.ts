@@ -4,6 +4,8 @@
 // prefilter tier. The Apple FM tier slots in behind the same interface
 // when the bridge lands (degrades: absent until then).
 
+import type { CaptureSink } from "@foldedspacelabs/metistry-mcp-brain";
+
 export interface Db {
   query(text: string, values?: unknown[]): Promise<{ rows: any[] }>;
 }
@@ -94,7 +96,8 @@ export interface CollectorCtx {
   devinMaxItems?: number; // cap per run (default 200)
   devinApiUrl?: string; // REST base override (devin-sessions); default https://api.devin.ai
   devinSessionTimeoutHours?: number; // devin-sessions: how long a dispatched session may sit non-terminal (default 24)
-  inboxDir?: string; // where devin-knowledge's captureToInbox writes files
+  inboxDir?: string; // fallback capture directory when no sink is injected
+  inboxSink?: CaptureSink; // where devin-knowledge's captures land: the vault inbox over the reconciler's bridge (docs/ops/inbox.md)
   fetchFn?: typeof fetch;
 }
 

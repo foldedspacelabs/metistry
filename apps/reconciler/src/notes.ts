@@ -127,3 +127,64 @@ export function isConflictFile(path: string): boolean {
 export function isMarkdown(path: string): boolean {
   return /\.md$/i.test(path);
 }
+
+// ---- the vault inbox (docs/ops/inbox.md) ----------------------------------
+
+/** The vault directory captures live in. TitleCase, like everything under `Knowledge/` (CLAUDE.md). */
+export const INBOX_PREFIX = "Knowledge/Inbox";
+
+export function isInboxPath(path: string): boolean {
+  return path.startsWith(`${INBOX_PREFIX}/`);
+}
+
+/**
+ * Enough of a mime type for `inbox-drain`'s classifier, by extension alone.
+ * A file a human dropped into the inbox carries no HTTP header to read, and
+ * sniffing content would be a dependency; unknown is null, which the
+ * classifier already handles.
+ */
+const MIME_BY_EXT: Record<string, string> = {
+  md: "text/markdown",
+  markdown: "text/markdown",
+  txt: "text/plain",
+  csv: "text/csv",
+  json: "application/json",
+  yaml: "application/yaml",
+  yml: "application/yaml",
+  pdf: "application/pdf",
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  heic: "image/heic",
+  svg: "image/svg+xml",
+  mp3: "audio/mpeg",
+  m4a: "audio/mp4",
+  wav: "audio/wav",
+  mp4: "video/mp4",
+  mov: "video/quicktime",
+};
+
+export function mimeForPath(path: string): string | null {
+  const ext = /\.([A-Za-z0-9]+)$/.exec(path)?.[1]?.toLowerCase();
+  return (ext && MIME_BY_EXT[ext]) ?? null;
+}
+
+const TEXTUAL = new Set(["application/json", "application/yaml", "image/svg+xml"]);
+
+/**
+ * The one-line `inbox.note` for a file nobody captured through an API: the
+ * frontmatter title if there is one, else the first non-empty line with its
+ * markdown heading marker stripped. Binary content has none.
+ */
+export function inboxNoteFor(path: string, bytes: Uint8Array): string | null {
+  const mime = mimeForPath(path);
+  if (mime === null ? !isMarkdown(path) : !(mime.startsWith("text/") || TEXTUAL.has(mime))) return null;
+  const text = Buffer.from(bytes).toString("utf8");
+  if (text.includes("\0")) return null; // binary wearing a text extension
+  const { meta, body } = parseFrontmatter(text);
+  const first = body.split(/\r?\n/).find((l) => l.trim() !== "");
+  const line = (meta.title ?? first ?? "").replace(/^#{1,6}\s*/, "").trim();
+  return line === "" ? null : line.slice(0, 2000);
+}

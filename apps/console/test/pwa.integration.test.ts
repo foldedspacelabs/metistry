@@ -135,6 +135,28 @@ describe.skipIf(!hasDb)("console PWA chunk", () => {
     expect(board).not.toMatch(/<button/); // nothing in here mutates a task
   });
 
+  // docs/research/2026-09-16-taskuary-review.md ADOPT 1 + 5 — the two new
+  // sets of controls ship in the shell. Asserted on the served markup (there
+  // is no DOM harness here): app.js wires #feed-kinds and the three
+  // #triage-* buttons at module scope, so if any id disappears the whole
+  // shell throws on load and every other test in this file goes with it.
+  it("ships the timeline's kind chips and Needs You's batch controls", async () => {
+    const html = await (await fetch(base + "/")).text();
+    expect(html).toContain('id="feed-kinds"'); // the chips app.js writes the closed group list into
+    expect(html).toContain('aria-label="Filter by kind"');
+    for (const id of ["triage-batch", "triage-selected", "triage-later", "triage-skip", "triage-clear"]) {
+      expect(html, id).toContain(`id="${id}"`);
+    }
+    // P10: the two new verbs are buttons the user reads, so Title Case
+    expect(html).toContain(">Later</button>");
+    expect(html).toContain(">Skip</button>");
+    // the feed stays read-only: its only controls are filters, and the chips
+    // themselves are written by app.js rather than shipped as markup
+    const feed = /<section id="feed" hidden>[\s\S]*?<\/section>/.exec(html)?.[0] ?? "";
+    expect(feed).not.toMatch(/<button/);
+    expect(feed).not.toMatch(/draggable/);
+  });
+
   // Regression: every view is a sibling <section> under <main>. An unclosed
   // one nests the following views inside it, so show() unhides a section
   // whose ancestor is still hidden and the tab renders blank (this is exactly

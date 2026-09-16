@@ -51,6 +51,26 @@ finishes. `last_report_at` is the latest such run; a run with `reports: 0`
 leaves the card in Done, which is the point — a crew that produced nothing
 should not look like one that produced a finding.
 
+## A card can be born from a proposal
+
+Most cards arrive from `tasks_create`, from a crew's dispatch, or from a
+collector reconciling a source of truth. One more door exists since
+`docs/research/2026-09-16-taskuary-review.md` ADOPT 2: **Approve as Work** in
+Needs You. A `knowledge` or `report` proposal whose payload carries
+`suggested_work` — which the drain sets deterministically for a `todo`-shaped
+capture, no model — offers one extra answer, and the click inserts the `work`
+row and links it back as `proposals.work_id`.
+
+Such a card lands in **Backlog**: `status = 'open'`, `owner IS NULL`, no claim.
+That is not a default nobody thought about — accepting a capture says *this
+should get done*, not *this is So-and-so's*, and addressing it to somebody
+would be a second decision the click did not make. Any agent may claim it, like
+any other backlog card.
+
+§4.12 is intact throughout: nothing auto-creates a card. The drain still emits
+only proposals, and a suggestion nobody accepts stays a suggestion.
+`docs/ops/reply-feedback.md` has the verb.
+
 ## `escalated` — and one thing it is not
 
 `escalated` is a boolean on every card. It is true when the row is not closed
@@ -63,15 +83,16 @@ and any of:
 - it is past `due`.
 
 **It is not "a pending decision proposal cites this row."** The research note
-proposed that join and flagged it unverified; it does not exist. Checked
-against every `INSERT INTO proposals` in the tree: `decision` proposals carry
-`{title, options, message_id, thread, in_reply_to}` (a chat message),
-`review` proposals carry an artifact, a version and a thread, `report`
-proposals carry free-text `refs`. **No proposal kind carries a work id**, so
-there is no way to ask "which proposal is about this card". Either a future
-migration adds one, or Needs You stays what it is here — which is arguably
-more correct anyway, because `blocked` is *already* the state nothing but a
-human can leave.
+proposed that join and flagged it unverified. When this page was written the
+join did not exist at all: checked against every `INSERT INTO proposals` in the
+tree, no proposal kind carried a work id. Migration `0018` added
+`proposals.work_id` and two paths set it — a work thread past the ping-pong cap,
+and an Approve as Work above — so the join is now *possible*. It is still not
+what `escalated` means, deliberately: `blocked` is already the state nothing
+but a human can leave, and a card is not more stuck because somebody filed a
+note about it. If that ever changes it should change in `board.yaml`, as a
+fourth clause with its own sentence, rather than by widening one of these
+three.
 
 The panel labels the flag from fields on the wire (`lease lapsed` / `blocked`
 / `overdue`) so a red chip says why. The **decision** stays in the query.

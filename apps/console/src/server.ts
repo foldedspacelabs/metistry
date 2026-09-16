@@ -18,10 +18,10 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 
-import { runCheck, startRun, finishRun, errorEnvelope, rollSession, statusFor, type CheckResult, type Compute } from "@foldedspacelabs/metistry-core";
+import { runCheck, startRun, finishRun, errorEnvelope, intEnv, PROJECT_SLUG_RE, rollSession, statusFor, SKIP_FEEDBACK, type CheckResult, type Compute, type ErrorEnvelope } from "@foldedspacelabs/metistry-core";
 import { QueryError, QueryStore } from "@foldedspacelabs/metistry-queries";
 import { captureToInbox, createBrainServer, dirSink, type CaptureSink, type KnowledgeLister, type KnowledgeReader, type KnowledgeVaultSearcher, type KnowledgeWriter, type QueryEmbedder } from "@foldedspacelabs/metistry-mcp-brain";
-import { TasksService } from "@foldedspacelabs/metistry-tasks";
+import { TasksError, TasksService } from "@foldedspacelabs/metistry-tasks";
 import { ArtifactsService, VaultError, type VaultClient } from "@foldedspacelabs/metistry-artifacts";
 import { artifactRoutes, isArtifactRoute } from "./artifacts-routes.js";
 import type { Db } from "./auth-store.js";
@@ -149,6 +149,89 @@ const DISPATCH_ROUTE = /^POST \/api\/tasks\/(\d{1,12})\/dispatch$/;
 // A thumbs up/down on one reply (docs/ops/reply-feedback.md). Session only —
 // this is the user's own judgement, not something a script speaks for.
 const FEEDBACK_ROUTE = /^(POST|DELETE) \/api\/messages\/(\d{1,12})\/feedback$/;
+
+// ----- the two verbs that are not answers (docs/ops/reply-feedback.md) -----
+//
+// Needs You had Approve, Revise and Decline, and no way to say *not now*. An
+// item you cannot answer and cannot put down stays at the top of the queue
+// forever, and a queue you scroll past stops meaning "these need you"
+// (docs/research/2026-09-16-taskuary-review.md ADOPT 5).
+//
+// `later` snoozes: the row stays pending, leaves the list, comes back by
+// itself. `skip` answers "no, and there is nothing to learn from it" — it
+// stores a `deny` whose feedback is exactly SKIP_FEEDBACK, which is how the
+// paths that route a reason back to the source agent know to leave it alone,
+// and it fires NONE of `deny`'s per-kind consequences.
+const UNIVERSAL_DECISIONS = ["later", "skip"] as const;
+/** What `POST /api/proposals/batch` will apply to many rows at once — see the refusal message there for why `allow` is not on it. */
+const BATCH_DECISIONS = ["later", "skip", "deny"];
+/** How long `later` puts something down for. Config, not a literal: "back in three hours" is an opinion about a working day. */
+const SNOOZE_HOURS = intEnv("METISTRY_SNOOZE_HOURS", 3);
+
+/**
+ * The row a decision reads, plus when it last CHANGED — which is not one
+ * column, because a proposal can be moved by things that are not the
+ * proposal: the work row it came from, and the room hanging on that work row
+ * (`artifact_comments`, migration 0018). `greatest()` over all of them is
+ * what `if_unchanged` compares against.
+ */
+const PROPOSAL_FOR_DECISION_SQL = `
+  SELECT p.id, p.ts, p.kind, p.source_agent, p.trust, p.payload, p.decision, p.feedback, p.decided_at, p.work_id, p.snoozed_until,
+         greatest(
+           p.ts,
+           coalesce(p.decided_at, p.ts),
+           coalesce(w.updated_at, p.ts),
+           coalesce((SELECT max(c.created_at) FROM artifact_comments c WHERE c.work_id = p.work_id), p.ts)
+         ) AS changed_at
+  FROM proposals p
+  LEFT JOIN work w ON w.id = p.work_id
+  WHERE p.id = $1`;
+
+/** What one answer to one proposal comes back as: a status and the body to send, so the batch caller gets an outcome rather than a socket. */
+type DecisionOutcome = { status: number; body: ErrorEnvelope | Record<string, unknown> };
+
+/** `seen_at`: the row's own `ts` as this server serialised it, or the list `cursor` it was rendered from. Anything else is a 400, never a silent decision. */
+const SEEN_AT_RE = new RegExp(`^(${CURSOR_TS})(?:\\|\\d{1,12})?$`);
+export function parseSeenAt(v: unknown): Date | null {
+  if (typeof v !== "string") return null;
+  const m = SEEN_AT_RE.exec(v.trim());
+  if (!m?.[1]) return null;
+  // pg's text form is `2026-09-11 02:18:47.001+00`; JS wants `T` and a
+  // two-part offset. Neither substitution can change which instant it names.
+  const iso = m[1].replace(" ", "T").replace(/([+-]\d{2})$/, "$1:00");
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/**
+ * The ONE 409 shape for a decision that did not happen (the envelope #132
+ * minted, plus `reason` and the row as it stands). A client branches on
+ * `reason` and repaints from `proposal`; it never has to guess from the
+ * message.
+ */
+function conflictBody(reason: "already_decided" | "stale", message: string, row: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...errorEnvelope("conflict", message),
+    reason,
+    decision: row.decision ?? null,
+    decided_at: row.decided_at ?? null,
+    proposal: row,
+  };
+}
+
+/** `{title, project?, kind?}` off a proposal payload, or undefined — the ONLY thing `accept_as_work` will build a row from, validated here rather than trusted. */
+export function suggestedWorkOf(row: { kind?: unknown; payload?: unknown }): { title: string; project?: string; kind?: "task" | "review" } | undefined {
+  if (row.kind !== "knowledge" && row.kind !== "report") return undefined;
+  const p = row.payload as { suggested_work?: unknown } | null;
+  const s = p?.suggested_work as { title?: unknown; project?: unknown; kind?: unknown } | undefined;
+  if (!s || typeof s !== "object" || Array.isArray(s)) return undefined;
+  const title = typeof s.title === "string" ? s.title.trim() : "";
+  if (title === "" || title.length > 500) return undefined;
+  const project = typeof s.project === "string" && PROJECT_SLUG_RE.test(s.project) ? s.project : undefined;
+  const kind = s.kind === "review" ? ("review" as const) : s.kind === "task" || s.kind === undefined ? undefined : null;
+  if (kind === null) return undefined; // an unknown kind is a refusal, never a silent fallback to `task`
+  return { title, ...(project ? { project } : {}), ...(kind ? { kind } : {}) };
+}
 
 export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Server {
   const rp = wa.rpFromOrigin(cfg.origins ?? cfg.origin);
@@ -589,6 +672,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         /^POST \/api\/devices\/\d+\/revoke$/.test(key) ||
         key === "POST /auth/logout" ||
         key === "GET /api/proposals" ||
+        key === "POST /api/proposals/batch" ||
         /^POST \/api\/proposals\/\d+$/.test(key) ||
         FEEDBACK_ROUTE.test(key) ||
         key === "GET /api/agents" ||
@@ -679,16 +763,19 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       const { limit, since } = listArgs(url, 200);
       const c = since === null ? null : PROPOSALS_CURSOR_RE.exec(since);
       if (since !== null && !c) return sendError(res, "invalid_request");
-      // Without a cursor: the triage queue, pending only, as always. With
-      // one: everything that CHANGED since — new rows and rows decided since
-      // (decided_at moves the cursor), with `decision` and `decided_at` on
-      // each, so a reconnect learns what was settled while it was away
-      // instead of showing a stale queue.
+      // Without a cursor: the triage queue, pending only, as always — minus
+      // anything `later` put down until an instant that has not arrived
+      // (migration 0019). With one: everything that CHANGED since — new rows
+      // and rows decided since (decided_at moves the cursor), with
+      // `decision`, `decided_at` and `snoozed_until` on each, so a reconnect
+      // learns what was settled while it was away instead of showing a stale
+      // queue. A snooze deliberately does NOT move the cursor: it is a future
+      // instant, and a cursor that jumped forward would skip live rows.
       const { rows } = await db.query(
         since === null
-          ? `SELECT id, ts, kind, source_agent, trust, payload, decision, decided_at, ts::text || '|' || id AS cursor FROM proposals
-             WHERE decision = 'pending' ORDER BY ts DESC, id DESC LIMIT $1`
-          : `SELECT id, ts, kind, source_agent, trust, payload, decision, decided_at, greatest(ts, decided_at)::text || '|' || id AS cursor FROM proposals
+          ? `SELECT id, ts, kind, source_agent, trust, payload, decision, decided_at, work_id, snoozed_until, ts::text || '|' || id AS cursor FROM proposals
+             WHERE decision = 'pending' AND (snoozed_until IS NULL OR snoozed_until <= now()) ORDER BY ts DESC, id DESC LIMIT $1`
+          : `SELECT id, ts, kind, source_agent, trust, payload, decision, decided_at, work_id, snoozed_until, greatest(ts, decided_at)::text || '|' || id AS cursor FROM proposals
              WHERE (greatest(ts, decided_at), id) > ($2::timestamptz, $3::bigint) ORDER BY greatest(ts, decided_at) ASC, id ASC LIMIT $1`,
         since === null ? [limit + 1] : [limit + 1, c![1], c![2]],
       );
@@ -696,73 +783,35 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       return sendJson(res, 200, { proposals: page, cursor, more });
     }
 
+    // One verb to many rows (docs/ops/reply-feedback.md). All-or-nothing PER
+    // ROW — each id is its own atomic statement and its own result — because
+    // the alternative is a batch that refuses everything because one item was
+    // answered on the phone thirty seconds ago.
+    if (key === "POST /api/proposals/batch") {
+      const body = (await readJson(req)) as { ids?: unknown; decision?: unknown; feedback?: unknown };
+      if (!Array.isArray(body.ids) || body.ids.length === 0 || body.ids.length > MAX_LIST) {
+        return sendError(res, "invalid_request", `ids must be an array of 1..${MAX_LIST} proposal ids`);
+      }
+      const ids = [...new Set(body.ids)];
+      if (!ids.every((v) => typeof v === "number" && Number.isInteger(v) && v > 0)) return sendError(res, "invalid_request", "ids must be positive integers");
+      if (typeof body.decision !== "string" || !BATCH_DECISIONS.includes(body.decision)) {
+        return sendError(res, "invalid_request", `decision must be one of ${BATCH_DECISIONS.join(" | ")} — the verbs that need nothing from the individual row. allow, accept_with_changes and accept_as_work each do something per kind (a prompt overlay write, a work row), so they stay one at a time`);
+      }
+      if (body.feedback !== undefined && typeof body.feedback !== "string") return sendError(res, "invalid_request", "feedback must be a string");
+      const results: Record<string, unknown>[] = [];
+      for (const id of ids as number[]) {
+        const r = await decideProposal(String(id), { decision: body.decision, ...(typeof body.feedback === "string" ? { feedback: body.feedback } : {}) });
+        results.push({ id, ok: r.status === 200, ...(r.body as Record<string, unknown>) });
+      }
+      await audit("triage", `batch:${body.decision}`, results.every((r) => r.ok === true), { proposals: ids, applied: results.filter((r) => r.ok === true).length, of: ids.length });
+      return sendJson(res, 200, { results });
+    }
+
     const triage = /^POST \/api\/proposals\/(\d+)$/.exec(key);
     if (triage) {
-      const body = (await readJson(req)) as { decision?: string; feedback?: string };
-      const row = (await db.query(`SELECT id, kind, payload, decision, decided_at FROM proposals WHERE id = $1`, [triage[1]])).rows[0];
-      if (!row) return sendError(res, "not_found");
-      // Already decided — from another device, or this one before it went
-      // offline. 409 with the winner, so a client that queued an answer can
-      // show what actually happened rather than "failed"
-      // (docs/ops/console-api.md). No re-triage, ever.
-      if (row.decision !== "pending") {
-        return sendJson(res, 409, { ...errorEnvelope("conflict", "already decided"), decision: row.decision, decided_at: row.decided_at });
-      }
-      // A `decision` proposal (the assistant asked a blocking question) is
-      // answered with one of ITS OWN options; everything else takes the three
-      // triage verbs. Either way the option set comes from the stored row,
-      // never from the request body.
-      const options: string[] =
-        row.kind === "decision" && Array.isArray(row.payload?.options)
-          ? [...(row.payload.options as unknown[]).filter((o): o is string => typeof o === "string"), "deny"]
-          : ["allow", "deny", "accept_with_changes"];
-      if (!options.includes(body.decision ?? "")) return sendError(res, "invalid_request");
-
-      // Allowing an `improvement` is the one self-modification path (§4.10):
-      // the console writes the prompt overlay through the vault bridge as
-      // principal `user` — a human change, in the user's name. It happens
-      // BEFORE the row is decided, so a refused write leaves the proposal
-      // pending instead of silently dropping the change.
-      let applied: { path: string; created: boolean } | undefined;
-      if (row.kind === "improvement" && body.decision === "allow") {
-        if (!cfg.vault) return sendError(res, "not_available", "applying an improvement proposal writes assistant-prompt.md, and no vault bridge is configured in this deployment — METISTRY_RECONCILER_URL + METISTRY_BRIDGE_TOKEN_RECONCILER (docs/ops/reconciler.md)");
-        try {
-          const r = await applyImprovement(cfg.vault, row.payload, row.id);
-          applied = { path: r.path, created: r.created };
-        } catch (err) {
-          if (err instanceof VaultError) {
-            await audit("triage", "improvement", false, { proposal: row.id, error: err.code });
-            return sendJson(res, statusFor(err.code), errorEnvelope(err.code, err.message));
-          }
-          throw err;
-        }
-      }
-
-      // An enrolment request (S2) answered from the queue does the same
-      // thing POST /api/agents/:id/approve does — one behaviour, reached
-      // two ways, so answering on the phone and answering in the registry
-      // pane cannot mean different things. `deny` revokes: a token nobody
-      // let in has no reason to keep existing, and revocation is the
-      // permanent verb the registry already has.
-      let enrolled: { agent: string; approved: boolean } | undefined;
-      const enrollAgent = row.kind === "decision" ? agents.enrollTarget(row.payload) : undefined;
-      if (enrollAgent !== undefined && (body.decision === "approve" || body.decision === "deny")) {
-        const approved = body.decision === "approve";
-        const ok = approved ? await agents.approveAgent(db, enrollAgent) : await agents.revokeAgent(db, enrollAgent);
-        await audit("agent_admin", approved ? "approve" : "revoke", ok, { agent: enrollAgent, op: approved ? "approve" : "revoke", via: "triage", proposal: row.id });
-        enrolled = { agent: enrollAgent, approved };
-      }
-
-      const { rows } = await db.query(
-        `UPDATE proposals SET decision = $2, feedback = $3, decided_at = now()
-         WHERE id = $1 AND decision = 'pending' RETURNING id`,
-        [triage[1], body.decision, body.feedback ?? null],
-      );
-      await audit("triage", body.decision!, rows.length === 1, { proposal: triage[1], kind: row.kind, ...(applied ? { overlay: applied.path } : {}) });
-      if (rows.length === 1) return sendJson(res, 200, { ok: true, ...(applied ? { applied } : {}), ...(enrolled ? { enrolled } : {}) });
-      // lost the race between the read above and this update: someone else decided it
-      const now = (await db.query(`SELECT decision, decided_at FROM proposals WHERE id = $1`, [triage[1]])).rows[0];
-      return sendJson(res, 409, { ...errorEnvelope("conflict", "already decided"), decision: now?.decision ?? null, decided_at: now?.decided_at ?? null });
+      const body = (await readJson(req)) as { decision?: string; feedback?: string; if_unchanged?: { seen_at?: unknown } };
+      const r = await decideProposal(triage[1]!, body);
+      return sendJson(res, r.status, r.body);
     }
 
     // ----- reply quality: 👍/👎 on one outbound message (docs/ops/reply-feedback.md) -----
@@ -896,5 +945,172 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
   async function audit(kind: string, tool: string, ok: boolean, meta: Record<string, unknown>): Promise<void> {
     const id = await startRun(db, { component: "console", kind, tool, meta });
     await finishRun(db, id, { ok });
+  }
+
+  /**
+   * One answer to one proposal. Extracted so the single route and the batch
+   * route cannot drift: a verb must not mean two things depending on which
+   * door it came through — the same reason answering an enrolment from Needs
+   * You does exactly what the registry pane's Approve does.
+   *
+   * Returns a status and a body rather than writing the response, because
+   * the batch caller needs the outcome, not a socket.
+   */
+  async function decideProposal(
+    id: string,
+    body: { decision?: string; feedback?: string; if_unchanged?: { seen_at?: unknown } },
+  ): Promise<DecisionOutcome> {
+    const row = (await db.query(PROPOSAL_FOR_DECISION_SQL, [id])).rows[0];
+    if (!row) return { status: 404, body: errorEnvelope("not_found", "not found") };
+    // Already decided — from another device, or this one before it went
+    // offline. 409 with the winner, so a client that queued an answer can
+    // show what actually happened rather than "failed"
+    // (docs/ops/console-api.md). No re-triage, ever.
+    if (row.decision !== "pending") return { status: 409, body: conflictBody("already_decided", "already decided", row) };
+
+    // Decide-time staleness (ADOPT 3). The client sends the `ts`/cursor of the
+    // row it RENDERED; if the row moved after that — its payload was
+    // rewritten, a comment landed in the linked work row's room, the work row
+    // itself moved — the answer was given to a different question, so it is
+    // refused and the current row comes back instead. Opt-in: a caller that
+    // sends nothing gets exactly the old behaviour.
+    if (body.if_unchanged !== undefined) {
+      if (body.if_unchanged === null || typeof body.if_unchanged !== "object") {
+        return { status: 400, body: errorEnvelope("invalid_request", "if_unchanged must be an object: {seen_at}") };
+      }
+      const seen = parseSeenAt(body.if_unchanged.seen_at);
+      if (seen === null) {
+        return { status: 400, body: errorEnvelope("invalid_request", "if_unchanged.seen_at must be a timestamp this server minted — the `ts` of the row you rendered, or the list `cursor` you rendered it from") };
+      }
+      if (new Date(row.changed_at as string).getTime() > seen.getTime()) {
+        await audit("triage", "stale", false, { proposal: row.id, kind: row.kind, seen_at: seen.toISOString() });
+        return { status: 409, body: conflictBody("stale", "the proposal changed after you saw it", row) };
+      }
+    }
+
+    // A `decision` proposal (the assistant asked a blocking question) is
+    // answered with one of ITS OWN options; everything else takes the three
+    // triage verbs. `later` and `skip` are valid for every kind, and
+    // `accept_as_work` appears only where the row carries a suggestion.
+    // Either way the option set comes from the stored row, never from the
+    // request body.
+    const suggested = suggestedWorkOf(row);
+    const options: string[] = [
+      ...(row.kind === "decision" && Array.isArray(row.payload?.options)
+        ? [...(row.payload.options as unknown[]).filter((o): o is string => typeof o === "string"), "deny"]
+        : ["allow", "deny", "accept_with_changes"]),
+      ...UNIVERSAL_DECISIONS,
+      ...(suggested ? ["accept_as_work"] : []),
+    ];
+    const verb = body.decision ?? "";
+    if (!options.includes(verb)) return { status: 400, body: errorEnvelope("invalid_request", "invalid request") };
+
+    // `later` is not an answer: the row keeps `decision = 'pending'` and gets
+    // an `until`. It leaves the queue, it comes back on its own, and nothing
+    // downstream ever sees a decision the user did not make.
+    if (verb === "later") {
+      const { rows } = await db.query(
+        `UPDATE proposals SET snoozed_until = now() + make_interval(hours => $2)
+         WHERE id = $1 AND decision = 'pending' RETURNING snoozed_until`,
+        [id, SNOOZE_HOURS],
+      );
+      await audit("triage", "later", rows.length === 1, { proposal: row.id, kind: row.kind, hours: SNOOZE_HOURS });
+      if (rows.length === 1) return { status: 200, body: { ok: true, snoozed_until: rows[0]!.snoozed_until } };
+      return { status: 409, body: conflictBody("already_decided", "already decided", (await db.query(PROPOSAL_FOR_DECISION_SQL, [id])).rows[0] ?? row) };
+    }
+
+    // Allowing an `improvement` is the one self-modification path (§4.10):
+    // the console writes the prompt overlay through the vault bridge as
+    // principal `user` — a human change, in the user's name. It happens
+    // BEFORE the row is decided, so a refused write leaves the proposal
+    // pending instead of silently dropping the change.
+    let applied: { path: string; created: boolean } | undefined;
+    if (row.kind === "improvement" && verb === "allow") {
+      if (!cfg.vault) return { status: statusFor("not_available"), body: errorEnvelope("not_available", "applying an improvement proposal writes assistant-prompt.md, and no vault bridge is configured in this deployment — METISTRY_RECONCILER_URL + METISTRY_BRIDGE_TOKEN_RECONCILER (docs/ops/reconciler.md)") };
+      try {
+        const r = await applyImprovement(cfg.vault, row.payload, row.id);
+        applied = { path: r.path, created: r.created };
+      } catch (err) {
+        if (err instanceof VaultError) {
+          await audit("triage", "improvement", false, { proposal: row.id, error: err.code });
+          return { status: statusFor(err.code), body: errorEnvelope(err.code, err.message) };
+        }
+        throw err;
+      }
+    }
+
+    // Approve as work (ADOPT 2). The click is what creates the row — §4.12
+    // is intact because a human clicked, and this is the *only* difference
+    // from `allow`: the drain still creates nothing, the crews still create
+    // nothing, and a suggestion nobody accepts stays a suggestion. The row
+    // is born OWNER-LESS and unclaimed: any agent may take it (collaboration
+    // rule 4), because addressing it to someone would be a second decision
+    // nobody made. Created before the proposal is settled, for the same
+    // reason the overlay write is, and keyed on the proposal id so a
+    // double-tap cannot make two.
+    let created: { id: number; title: string; project: string | null } | undefined;
+    if (verb === "accept_as_work") {
+      try {
+        const t = await tasks.create(
+          {
+            title: suggested!.title,
+            ...(suggested!.project ? { project: suggested!.project } : {}),
+            ...(suggested!.kind ? { kind: suggested!.kind } : {}),
+            idempotency_key: `proposal:${row.id}`,
+            note: `accepted as work from Needs You (proposal #${row.id})`,
+          },
+          "user",
+        );
+        created = { id: t.id, title: t.title, project: t.project };
+      } catch (err) {
+        if (err instanceof TasksError) {
+          await audit("triage", "accept_as_work", false, { proposal: row.id, error: err.code });
+          return { status: statusFor(err.code === "conflict" ? "conflict" : "invalid_request"), body: errorEnvelope(err.code === "conflict" ? "conflict" : "invalid_request", err.message) };
+        }
+        throw err;
+      }
+    }
+
+    // An enrolment request (S2) answered from the queue does the same
+    // thing POST /api/agents/:id/approve does — one behaviour, reached
+    // two ways, so answering on the phone and answering in the registry
+    // pane cannot mean different things. `deny` revokes: a token nobody
+    // let in has no reason to keep existing, and revocation is the
+    // permanent verb the registry already has. `skip` does not: that is
+    // the whole difference between putting something down and answering it.
+    let enrolled: { agent: string; approved: boolean } | undefined;
+    const enrollAgent = row.kind === "decision" ? agents.enrollTarget(row.payload) : undefined;
+    if (enrollAgent !== undefined && (verb === "approve" || verb === "deny")) {
+      const approved = verb === "approve";
+      const ok = approved ? await agents.approveAgent(db, enrollAgent) : await agents.revokeAgent(db, enrollAgent);
+      await audit("agent_admin", approved ? "approve" : "revoke", ok, { agent: enrollAgent, op: approved ? "approve" : "revoke", via: "triage", proposal: row.id });
+      enrolled = { agent: enrollAgent, approved };
+    }
+
+    // What lands in the row: `skip` stores a `deny` whose feedback is the
+    // fixed marker (never the user's words — a skip is not a reason, and
+    // SKIP_FEEDBACK is what keeps it out of the paths that route feedback
+    // back to the source agent), `accept_as_work` stores an `allow` and the
+    // work id it just created.
+    const storedDecision = verb === "skip" ? "deny" : verb === "accept_as_work" ? "allow" : verb;
+    const storedFeedback = verb === "skip" ? SKIP_FEEDBACK : (body.feedback ?? null);
+    const { rows } = await db.query(
+      `UPDATE proposals SET decision = $2, feedback = $3, decided_at = now(), snoozed_until = NULL,
+              work_id = coalesce($4::bigint, work_id)
+       WHERE id = $1 AND decision = 'pending' RETURNING id`,
+      [id, storedDecision, storedFeedback, created ? created.id : null],
+    );
+    await audit("triage", verb, rows.length === 1, {
+      proposal: row.id,
+      kind: row.kind,
+      ...(applied ? { overlay: applied.path } : {}),
+      ...(created ? { work_id: created.id } : {}),
+    });
+    if (rows.length === 1) {
+      return { status: 200, body: { ok: true, ...(applied ? { applied } : {}), ...(enrolled ? { enrolled } : {}), ...(created ? { work: created } : {}) } };
+    }
+    // lost the race between the read above and this update: someone else decided it
+    const now = (await db.query(PROPOSAL_FOR_DECISION_SQL, [id])).rows[0];
+    return { status: 409, body: conflictBody("already_decided", "already decided", now ?? row) };
   }
 }

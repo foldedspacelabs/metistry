@@ -196,6 +196,51 @@ become `calendar`.
 A namespaced install suffixes the **supervisor**, not each child:
 `com.foldedspacelabs.metistry.e5dbfa9c`. One instance is one agent either way.
 
+### Two registrars, and only ever one (2026-09-17)
+
+The same agent can be installed two ways, and which one did it decides who can
+switch it off:
+
+| registrar | how | what System Settings shows |
+|---|---|---|
+| **the Mac app** | `SMAppService.agent(plistName: "com.foldedspacelabs.metistry.plist")`, from the plist sealed inside `Metistry.app/Contents/Library/LaunchAgents` | one row, **Metistry**, with the agent nested under the app, attributed to Folded Space Labs, and a switch — mirrored by Settings → Services → "Run Metistry in the background" |
+| **a terminal install** | `metistry up` renders the plist into `~/Library/LaunchAgents` and `launchctl bootstrap`s it | a background item **beside** the app, named after its program (`Metistry`, because of the symlink), with no switch anywhere but a terminal |
+
+Both are supported and neither is going away — the terminal path is
+first-class (docs/ops/mac-app.md). What must never happen is **both**: two
+loaded jobs under one label is the same install running twice, and it is the
+normal accident, because `metistry update` runs an `up` on every release and
+somebody who installed with the app will eventually run one in a terminal.
+
+**`metistry up` asks launchd, before it installs anything.** `launchctl print
+gui/$UID/com.foldedspacelabs.metistry` names the job's plist and its resolved
+program; if either is inside a `.app` bundle, the app owns it, and `up` does
+not render, bootstrap or kickstart its own. It says so in one line, and
+everything else it does is unchanged — including writing
+`<instance>/state/supervisor.json` and the launcher's `supervisor.env`, which
+are exactly what the app's agent reads. `--register-via app` is the same
+decision made explicitly, for the first install, before anything is loaded to
+detect.
+
+**Why launchd's answer and not a marker file.** A marker in
+`state/supervisor.json` (or anywhere else) is a second record of a fact launchd
+already holds, and it goes stale the moment the app is dragged to the Trash or
+the item switched off in System Settings — after which `up` would skip a
+bootstrap on the strength of a registration that no longer exists, and the
+install would simply not run. Live state cannot be stale, and the cost is one
+read-only `launchctl print`. Where launchd reports nothing useful (no plist path
+at all), the answer is `unknown`, which does **not** skip: the failure mode of
+guessing wrong is a silent non-install, so the default is the behaviour that has
+always worked.
+
+`--dry-run` executes nothing, probe included, and prints a line saying that is
+the one thing it could not look up.
+
+**`metistry doctor` reports the owner** on the supervisor's row —
+`meta.registrar` (`app` | `launchd`), `meta.registered_from`, and the same in
+the probe text, which is what the Mac app's Services pane renders for a healthy
+row.
+
 ### What the supervisor does
 
 - **Ordered start.** Each child may declare a readiness probe; the next one

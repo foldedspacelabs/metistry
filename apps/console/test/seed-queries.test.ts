@@ -32,6 +32,7 @@ const REQUIRED = [
   "activity_feed",
   "agent_presence",
   "reply_feedback_summary",
+  "rooms",
 ];
 
 describe("seed queries", () => {
@@ -226,5 +227,47 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
     expect(byId.get(ids.working)?.current_claims).toHaveLength(1);
     expect(byId.get(ids.interrupted)?.interrupted_claims).toHaveLength(1);
     expect(byId.get(ids.overCap)?.blocked_bundles).toHaveLength(1);
+  });
+
+  // The room view (docs/ops/threads.md): one row per thread across both
+  // anchors, with the participants, the agent tail, and — the point of the
+  // whole panel — the pending proposal's reason as the "why this came to
+  // you" line.
+  it("rooms: work and artifact anchors in one list, participants, agent tail, and the escalation reason", async () => {
+    const project = `seedq-rooms-${Date.now()}`;
+    const { rows: w } = await pool.query(`INSERT INTO work (title, project, kind, status) VALUES ('room fixture', $1, 'task', 'open') RETURNING id`, [project]);
+    const workId = Number(w[0]!.id);
+    const root = `cmt_${"0".repeat(20)}${String(Date.now()).slice(-6)}`;
+    const reply = `cmt_${"1".repeat(20)}${String(Date.now()).slice(-6)}`;
+    await pool.query(`INSERT INTO artifact_comments (id, work_id, body, author_principal, author_kind) VALUES ($1, $2, 'scope?', 'user', 'human')`, [root, workId]);
+    await pool.query(`INSERT INTO artifact_comments (id, work_id, body, author_principal, author_kind, parent_id) VALUES ($1, $2, 'yes', 'seedq-agent', 'agent', $3)`, [reply, workId, root]);
+    await pool.query(`INSERT INTO proposals (kind, source_agent, trust, payload, work_id) VALUES ('review', 'seedq-agent', 'external', $1::jsonb, $2)`, [
+      JSON.stringify({ reason: "ping_pong_cap", title: "room needs you" }),
+      workId,
+    ]);
+
+    const { rows } = await store.run("rooms", { limit: 200, project });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      anchor: "work",
+      project,
+      state: "open",
+      messages: 2,
+      agent_tail: 1, // the trailing agent-only run; a human message resets it
+      cap: 10,
+      escalated: true,
+      reason: "ping_pong_cap",
+      last_author: "seedq-agent",
+    });
+    expect(rows[0]!.participants).toEqual(
+      expect.arrayContaining([{ principal: "user", kind: "human" }, { principal: "seedq-agent", kind: "agent" }]),
+    );
+    // the filters the panel offers
+    expect((await store.run("rooms", { limit: 200, project, state: "resolved" })).rows).toHaveLength(0);
+    expect((await store.run("rooms", { limit: 200, project, anchor: "artifact" })).rows).toHaveLength(0);
+
+    await pool.query(`DELETE FROM proposals WHERE work_id = $1`, [workId]);
+    await pool.query(`DELETE FROM artifact_comments WHERE work_id = $1`, [workId]);
+    await pool.query(`DELETE FROM work WHERE id = $1`, [workId]);
   });
 });

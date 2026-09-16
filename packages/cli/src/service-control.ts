@@ -138,6 +138,16 @@ export async function buildServiceTargets(opts: {
           ...(control ? { control } : {}),
         });
       }
+      // Children the supervisor runs that no plist template declares — the
+      // optional `llamaserver`, whose existence is a `serve:` block in
+      // compute.yaml rather than a file in ops/launchd. Read from the config
+      // `up` wrote, so `metistry logs llamaserver` and `restart llamaserver`
+      // work for exactly the children this install actually has.
+      const named = new Set(targets.map((t) => t.name));
+      for (const child of config?.children ?? []) {
+        if (named.has(child.name)) continue;
+        targets.push({ name: child.name, kind: "child", logPath: child.log, ...(control ? { control } : {}) });
+      }
     }
   }
   if (usesCompose(deployment)) {

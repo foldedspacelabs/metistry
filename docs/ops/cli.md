@@ -15,6 +15,7 @@ All of them are real.
 | `connect <tool> [--rotate]` | give one external dev tool (Cursor, OpenCode, Devin, Claude Code) its own agent token and config |
 | `connect --list [--json]` | which tools are connected: the row, the bearer, the config |
 | `console whoami [--json]` | ask the console who it thinks you are, with this install's owner token |
+| `console call <METHOD> <path> [--body @file\|-] [--json]` | one authenticated request against the console, as `whoami`'s same principal — the scripting seam |
 | `identity [--json]` | the instance's identity.yaml (name, mention, voice, icon, instance_id) |
 | `--version` / `version [--json]` | this CLI's version, the resolved product dir's, the lock's pin, and a release's runtime pack |
 | `deployment [--json]` | the effective shape (D4 overlay) and the services it implies, with cheap running state |
@@ -67,6 +68,17 @@ node packages/cli/dist/main.js deployment --json
 node packages/cli/dist/main.js deployment set-shape launchd            # preview only
 node packages/cli/dist/main.js deployment set-shape launchd --yes      # writes it
 ```
+
+**`--json`, uniformly.** Every verb above that takes `--json` writes exactly
+one JSON document to stdout and nothing else — a step's own notes, a
+download's progress, "already in the Keychain" asides, every human line a
+verb would otherwise print goes to stderr instead. This is enforced in each
+verb's own case in `main.ts` (the step runner it hands to a module is a
+stderr writer under `--json`, a stdout one without it), not left to a
+"remember not to print there" convention. It closed off the Mac app's
+Compute pane having to parse a trailing object out of a stream of prose
+(`docs/ops/mac-app.md`); without `--json` the same notes print to stdout
+inline, exactly as before.
 
 ## `identity`, `version`, `deployment`, `console whoami`: what the app reads instead of the files
 
@@ -173,6 +185,31 @@ first, the per-user one behind it — and never reaches argv, stdout or an
 error message. A 401 is one of exactly two things and the error names both:
 a token the console was not started with, or a request that did not arrive
 from this machine (under compose, the NAT question — `docs/ops/auth.md`).
+
+`metistry console call <METHOD> <path> [--body @<file>|-] [--json]` is the
+scripting seam behind `whoami`: one authenticated request against the
+console, as the same `user` principal, over the same loopback door. It
+prints the response body — pretty-printed unless `--json`, which prints the
+console's own bytes verbatim — and exits non-zero on a `>=400` answer,
+naming the error envelope's `code` and `message` (and `field`, when the
+body carries one) on stderr rather than the body on stdout. A body comes
+from a file (`--body @request.json`) or stdin (`--body -`, so a value never
+sits in shell history); GET needs neither. It refuses a non-loopback
+`METISTRY_CONSOLE_URL`/`METISTRY_URL` outright — the local owner token is
+minted for this machine only, and this verb will not carry it anywhere
+else. `docs/ops/console-api.md` is the routes it can call; the app and
+`docs/ops/second-instance.md` use it rather than a second HTTP client.
+
+```
+$ metistry console call GET /api/whoami
+{
+  "principal": "user",
+  "via": "local_owner_token",
+  "management": true
+}
+$ metistry console call POST /api/instances --body @peer.json --json
+{"action":"added","instances":[…]}
+```
 
 Package-level detail (flags, resolution order, probe table) lives in
 `packages/cli/README.md`; this page is the operator's runbook.
@@ -884,7 +921,8 @@ than a second table that could drift from theirs:
 Every named service is acted on even when an earlier one fails — this is a
 "try everything, report what happened" command, unlike `up`'s
 stop-at-first-failure plan. `--json` prints one object per service,
-`{service, action, ok, detail}`, for the app to render; without it the
+`{service, action, ok, detail}`, for the app to render and nothing else — a
+step's progress line goes to stderr instead of vanishing; without it the
 output is a table like `doctor`'s. A name that isn't a service this shape
 runs fails the whole command (exit 2) with the list of known ones — it
 never guesses which subprocess a name might mean. `--dry-run` prints the

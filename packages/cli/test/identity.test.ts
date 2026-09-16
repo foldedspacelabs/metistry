@@ -79,6 +79,7 @@ describe("metistry identity", () => {
     const out: string[] = [];
     const code = await main(["identity", "--json", "--instance", dir, "--product-dir", await noCheckout()], { out: (l) => out.push(l) });
     expect(code).toBe(0);
+    expect(out).toHaveLength(1); // --json purity: nothing but the one document reaches stdout
     const printed = JSON.parse(out.join("\n"));
     expect(printed).toEqual({ name: "Ada", mention: "@ada", voice: expect.any(String), icon: expect.any(String), instance_id: r.instanceId });
   });

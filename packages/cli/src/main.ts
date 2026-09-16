@@ -7,6 +7,7 @@
 // maintain for years (CLAUDE.md).
 
 import { realpathSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { DeploymentShape } from "@foldedspacelabs/metistry-core";
@@ -36,9 +37,9 @@ import { buildDeploymentReport, renderDeploymentReport, setDeploymentShape } fro
 import { doctor, renderTable, type DoctorDeps } from "./doctor.js";
 import { loadInstallEnv, productVersion, resolveProductDir, resolveSeedDir, type LoadedEnv } from "./env.js";
 import { realExec, type Exec } from "./exec.js";
-import { AUTH_MODES, connectRepo, type AuthMode } from "./connect-repo.js";
+import { AUTH_MODES, connectRepo, readStdin, type AuthMode } from "./connect-repo.js";
 import { connect, connectList, CONNECT_TOOLS, parseTool, renderConnect, renderConnectList } from "./connect.js";
-import { renderWhoami, whoami } from "./console-client.js";
+import { consoleCall, renderConsoleCallError, renderWhoami, whoami } from "./console-client.js";
 import { agentAutonomy, parseAutonomyFlags, renderAutonomy } from "./agents.js";
 import { importSessions } from "./import-sessions.js";
 import { init } from "./init.js";
@@ -259,6 +260,16 @@ const USAGE = `metistry — Metistry command line
       machine, so this is also the check that the door works before the Mac
       app is blamed for it. The token comes from the environment
       (<instance>/state/.env) or the login Keychain, and is never printed.
+
+  metistry console call <METHOD> <path> [--body @file|-] [--json] [--instance <dir>]
+      One authenticated request against the console, as the same principal and
+      token as console whoami — the scripting seam behind it (docs/ops/console-api.md
+      lists the routes). Prints the response body, pretty unless --json (which
+      prints the console's own bytes verbatim), and exits non-zero on a >=400
+      answer naming the error envelope's code/message on stderr. --body @file
+      or --body - (stdin) supplies a request body; a GET needs neither. Refuses
+      a non-loopback METISTRY_CONSOLE_URL/METISTRY_URL outright — the token is
+      minted for this machine only.
 
   metistry identity [--json] [--instance <dir>]
       The instance's identity.yaml (name, mention, voice, icon, instance_id) —
@@ -486,6 +497,10 @@ export interface MainIo {
   platform?: NodeJS.Platform;
   uid?: number;
   home?: string;
+  /** test seam: `console whoami`/`console call`/`connect`'s request to the console */
+  fetchFn?: typeof fetch;
+  /** test seam: `console call --body -` reads this instead of the real stdin */
+  readStdin?: () => Promise<string>;
 }
 
 export async function main(argv: string[], io: MainIo = {}): Promise<number> {
@@ -603,6 +618,7 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
         ...(io.exec ? { exec: io.exec } : {}),
         ...(io.platform ? { platform: io.platform } : {}),
         ...(io.home ? { home: io.home } : {}),
+        ...(io.fetchFn ? { fetchFn: io.fetchFn } : {}),
       };
       if (flags.list === true) {
         try {
@@ -748,7 +764,9 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
         fetchFn: fetch,
         ...(io.exec ? { exec: io.exec } : {}),
         dryRun: flags["dry-run"] === true,
-        out,
+        // --json is a wire contract (docs/ops/cli.md): only the final JSON
+        // document goes to stdout, so a step's progress line goes to stderr.
+        out: json ? err : out,
       };
       try {
         if (verb === "list") {
@@ -813,17 +831,55 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
       }
     }
     case "console": {
-      if (positional[0] !== "whoami") {
+      const printConsoleUsage = () => {
         err("usage: metistry console whoami [--json] [--instance <dir>] [--env-file <path>]");
+        err("       metistry console call <METHOD> <path> [--body @file|-] [--json] [--instance <dir>] [--env-file <path>]");
+      };
+      if (positional[0] !== "whoami" && positional[0] !== "call") {
+        printConsoleUsage();
         return 2;
       }
       const loaded = loadEnv();
+      const consoleCommon = {
+        ...(loaded.instanceDir ? { instanceId: await readInstanceId(loaded.instanceDir) } : {}),
+        ...(io.exec ? { exec: io.exec } : {}),
+        ...(io.platform ? { platform: io.platform } : {}),
+        ...(io.fetchFn ? { fetchFn: io.fetchFn } : {}),
+      };
+      if (positional[0] === "call") {
+        const method = positional[1];
+        const path = positional[2];
+        if (!method || !path || !path.startsWith("/")) {
+          printConsoleUsage();
+          return 2;
+        }
+        let body: string | undefined;
+        const bodyFlag = str(flags, "body");
+        if (bodyFlag !== undefined) {
+          try {
+            if (bodyFlag === "-") body = await (io.readStdin ?? readStdin)();
+            else if (bodyFlag.startsWith("@")) body = await readFile(bodyFlag.slice(1), "utf8");
+            else throw new Error(`--body takes @<file> or - (stdin), not ${JSON.stringify(bodyFlag)}`);
+          } catch (e) {
+            err(`metistry console call: ${e instanceof Error ? e.message : String(e)}`);
+            return 2;
+          }
+        }
+        try {
+          const r = await consoleCall({ method: method.toUpperCase(), path, body, ...consoleCommon });
+          if (r.status >= 400) {
+            err(`metistry console call: ${renderConsoleCallError(r)}`);
+            return 1;
+          }
+          out(flags.json === true ? r.raw : typeof r.body === "string" ? r.body : JSON.stringify(r.body, null, 2));
+          return 0;
+        } catch (e) {
+          err(`metistry console call: ${e instanceof Error ? e.message : String(e)}`);
+          return 1;
+        }
+      }
       try {
-        const w = await whoami({
-          ...(loaded.instanceDir ? { instanceId: await readInstanceId(loaded.instanceDir) } : {}),
-          ...(io.exec ? { exec: io.exec } : {}),
-          ...(io.platform ? { platform: io.platform } : {}),
-        });
+        const w = await whoami(consoleCommon);
         out(flags.json === true ? JSON.stringify(w, null, 2) : renderWhoami(w));
         return 0;
       } catch (e) {
@@ -1023,8 +1079,9 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
           action: command as ServiceAction,
           names: positional,
           // --json is a wire contract for the Mac app (docs/ops/cli.md): only
-          // the final array goes to stdout, none of the plan's progress lines
-          out: asJson ? () => {} : out,
+          // the final array goes to stdout — the plan's progress lines go to
+          // stderr rather than vanish, so they are still there to read.
+          out: asJson ? err : out,
           exec: io.exec,
           platform: io.platform ?? undefined,
           uid: io.uid,
@@ -1107,7 +1164,10 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
         uid: io.uid ?? (typeof process.getuid === "function" ? process.getuid() : 0),
         fetchFn: fetch,
         dryRun: flags["dry-run"] === true,
-        out,
+        // --json is a wire contract (docs/ops/cli.md): only the final JSON
+        // document goes to stdout, so a step's progress line (a stored-secret
+        // notice, a download's progress, a budget's reminder) goes to stderr.
+        out: json ? err : out,
         ...(io.exec ? { exec: io.exec } : {}),
       };
       try {

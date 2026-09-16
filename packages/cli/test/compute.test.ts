@@ -524,6 +524,19 @@ describe("metistry compute (the command)", () => {
     expect(report.file).toBe(join(SEED, "compute.yaml")); // the seed's, which assigns nothing
   });
 
+  it("providers add --json: exactly one JSON document on stdout, the Keychain notice on stderr", async () => {
+    // zen has a secret to ask about; linux has no login Keychain to ask it
+    // into, so `providersAdd` prints a notice through the same `out` the
+    // JSON result goes to — this is the case PR #174 found mixed on one
+    // stream (docs/ops/cli.md's `--json` paragraph).
+    const dir = await instance();
+    const r = await run(["compute", "providers", "add", "--from", "zen", "--skip-test", "--json", "--instance", dir, "--product-dir", REPO]);
+    expect(r.code).toBe(0);
+    const parsed = JSON.parse(r.out); // throws if the notice leaked onto stdout ahead of the document
+    expect(parsed).toMatchObject({ name: "zen", secretStatus: "skipped" });
+    expect(r.err).toContain("no login Keychain on linux");
+  });
+
   it("add → assign → budget → show, all through the command, and each write lands in the instance's file", async () => {
     const dir = await instance();
     const P = ["--instance", dir, "--product-dir", REPO];

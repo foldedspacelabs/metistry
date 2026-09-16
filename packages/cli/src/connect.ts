@@ -108,6 +108,14 @@ export interface ConnectOptions {
   areas?: string[] | undefined;
   /** `--project`: project membership (§4.21 — tasks and artifacts are scoped by it) */
   projects?: string[] | undefined;
+  /**
+   * `--remote`: this tool will present its bearer from off this machine, so
+   * the row enrols PENDING and the owner has to let it in before the token
+   * authenticates anything (S2). A loopback tool needs nothing of the sort
+   * — it is already on the Mac whose Keychain holds the token — so the
+   * default is immediate.
+   */
+  remote?: boolean | undefined;
   env?: NodeJS.ProcessEnv | undefined;
   platform?: NodeJS.Platform | undefined;
   /** where `~/.cursor/mcp.json` is, injected so the tests never touch a real home */
@@ -129,6 +137,8 @@ export interface ConnectResult {
   rotated: boolean;
   grants: Grants;
   projects: string[];
+  /** S2: the row was enrolled `--remote` and the owner has not let it in yet — the token authenticates nothing. */
+  pending: boolean;
   /** how the bearer reached the tool THIS run */
   token: "keychain" | "printed" | "unchanged";
   /** the environment variable the tool's config names (config shapes `file` and `env`) */
@@ -151,6 +161,10 @@ interface AgentRow {
   projects?: string[];
   revoked?: boolean;
   last_seen_at?: string | null;
+  /** S2: minted `--remote` and not yet let in. Absent on a console that predates the column. */
+  pending?: boolean;
+  /** S2: the row was enrolled as remote (approved or not). */
+  remote?: boolean;
 }
 
 function normalizeGrants(raw: Partial<Grants> | undefined): Grants {
@@ -235,13 +249,25 @@ export async function connect(opts: ConnectOptions): Promise<ConnectResult> {
       `agent "${spec.id}" is revoked on ${target.url}. Revocation is permanent — the row stays so old proposals keep their provenance, and its id cannot be re-minted (apps/console/src/agents.ts). Register a differently-named agent by hand if this tool is coming back.`,
     );
   }
+  // `--remote` is a property of the ENROLMENT, so it is settled when the row
+  // is minted and never afterwards: promoting a row the owner already let in
+  // would be a widening dressed as a flag, and demoting one would be an
+  // approval this verb granted itself. Both are the owner's, in the console.
+  if (opts.remote === true && existing && existing.remote !== true) {
+    throw new Error(
+      `agent "${spec.id}" is already registered on ${target.url} as a local (loopback) tool, and --remote is decided at enrolment, not after it. Revoke it in the console and connect again, or leave it as it is (docs/ops/console-api.md, "approve-before-enroll").`,
+    );
+  }
+
   let token: string | undefined;
   let created = false;
   let rotated = false;
+  let pending = existing?.pending === true;
   if (!existing) {
-    const r = await call(api, "POST", "/api/agents", { id: spec.id, display_name: spec.displayName, kind: "external" });
+    const r = await call(api, "POST", "/api/agents", { id: spec.id, display_name: spec.displayName, kind: "external", ...(opts.remote === true ? { remote: true } : {}) });
     token = String(r.json.token ?? "");
     created = true;
+    pending = r.json.pending === true;
     if (!token) throw new Error(`POST /api/agents answered ${r.status} without a token — nothing to give ${spec.displayName}`);
   } else if (opts.rotate === true) {
     const r = await call(api, "POST", `/api/agents/${spec.id}/rotate`, {});
@@ -278,6 +304,7 @@ export async function connect(opts: ConnectOptions): Promise<ConnectResult> {
     rotated,
     grants,
     projects,
+    pending,
     token: token ? "keychain" : "unchanged",
   };
 
@@ -407,6 +434,11 @@ export function renderConnect(r: ConnectResult): string {
   if (r.token === "unchanged") {
     lines.push(`token     unchanged — the console returns an agent token only when it mints or rotates one. \`metistry connect ${r.tool} --rotate\` issues a new one (the old one stops working immediately).`);
   }
+  if (r.pending) {
+    lines.push(
+      `pending   this row enrolled --remote, so the bearer below authenticates NOTHING until you let it in: answer the "${r.display_name}" item in Needs You, or POST /api/agents/${r.agent_id}/approve. Until then ${r.mcp_url} and /capture answer the same 401 an unknown token gets.`,
+    );
+  }
   lines.push("");
 
   if (r.tool === "cursor") {
@@ -458,8 +490,8 @@ export function describeGrants(g: Grants): string {
 export interface ConnectListRow {
   tool: ConnectTool;
   display_name: string;
-  /** `registered` | `revoked` | `absent` — what the console's registry says */
-  agent: "registered" | "revoked" | "absent";
+  /** `registered` | `pending` | `revoked` | `absent` — what the console's registry says */
+  agent: "registered" | "pending" | "revoked" | "absent";
   grants?: Grants;
   projects?: string[];
   last_seen_at?: string | null;
@@ -506,7 +538,7 @@ export async function connectList(opts: ConnectListOptions): Promise<{ console_u
     tools.push({
       tool,
       display_name: spec.displayName,
-      agent: row === undefined ? "absent" : row.revoked === true ? "revoked" : "registered",
+      agent: row === undefined ? "absent" : row.revoked === true ? "revoked" : row.pending === true ? "pending" : "registered",
       ...(row ? { grants: normalizeGrants(row.grants), projects: row.projects ?? [], last_seen_at: row.last_seen_at ?? null } : {}),
       config,
       token,
@@ -525,7 +557,7 @@ export function renderConnectList(r: { console_url: string; tools: ConnectListRo
     "-".repeat(head.length),
     ...r.tools.map((t) => `${t.tool.padEnd(w)}  ${t.agent.padEnd(10)}  ${t.token.padEnd(8)}  ${t.config}`),
     "",
-    "agent: the row in this instance's registry (absent = `metistry connect <tool>` has not run; revoked is permanent).",
+    "agent: the row in this instance's registry (absent = `metistry connect <tool>` has not run; pending = enrolled --remote and awaiting your approval, so its token authenticates nothing; revoked is permanent).",
     "token: whether the bearer is in the login Keychain where this verb puts it — its value is never read here.",
   ].join("\n");
 }

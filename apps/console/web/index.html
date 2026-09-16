@@ -202,22 +202,61 @@
       <ul id="dash-aws-services" class="dash-list"></ul>
     </section>
 
-    <!-- board (docs/ops/board.md): the read-only Kanban over the tasks
-         module's work rows. Columns are derived SERVER-SIDE by the `board`
-         seed query (invariant 3) — this panel never decides which column a
-         card belongs to, so the Mac app renders the same rows unchanged.
-         Read-only on purpose: there is no drag and no drop target, because
-         every task mutation is still a tool call (invariant 9). Phase 3 of
-         docs/research/2026-09-12-hermes-agent-review.md adds the writes.
-         Every server value is output-encoded via esc() (CRIT-7). -->
+    <!-- board (docs/ops/board.md): the Kanban over the tasks module's work
+         rows. Columns are derived SERVER-SIDE by the `board` seed query
+         (invariant 3) — this panel never decides which column a card belongs
+         to, so the Mac app renders the same rows unchanged.
+         The drags (phase 3 of docs/research/2026-09-12-hermes-agent-review.md)
+         are HTML5 drag-and-drop, no library: every drop maps to exactly ONE
+         route on the console's thin adapter over TasksService, and the board
+         offers no drop the service would refuse. A refused drop snaps the card
+         back carrying the server's own sentence. `m` on a focused card is the
+         keyboard alternative — a board that needs a mouse is a board half the
+         time you cannot use. Every server value is output-encoded via esc()
+         (CRIT-7). -->
     <section id="board" hidden>
       <form id="board-filter">
         <select id="board-project" aria-label="Project"><option value="">all projects</option></select>
         <span id="board-asof" class="muted"></span>
-        <span class="muted board-hint">[ and ] move the project filter</span>
+        <span class="muted board-hint">[ and ] move the project filter · drag a card, or press m on one</span>
       </form>
       <div id="board-columns" class="board"></div>
       <p id="board-empty" class="muted" hidden>no tasks yet — one appears when an agent calls tasks_create or a crew is delegated work</p>
+      <p id="board-msg" class="board-msg" role="status" aria-live="polite" hidden></p>
+
+      <!-- move (the keyboard alternative to a drag): the LEGAL targets for
+           the focused card only, built from the same rules the statements in
+           packages/tasks enforce. -->
+      <div id="board-move" class="board-pop" hidden role="dialog" aria-modal="false" aria-labelledby="board-move-title">
+        <h3 id="board-move-title">Move this card</h3>
+        <p id="board-move-card" class="muted"></p>
+        <div id="board-move-targets" class="board-pop-row"></div>
+        <button type="button" id="board-move-cancel" class="secondary">Cancel</button>
+      </div>
+
+      <!-- assign: the one drop that needs a value. Crew and agent names come
+           from GET /api/agents; "me" is the user's own hand. A HUMAN may
+           address a card to any crew (collaboration rule 4) — no agent
+           surface can address one at all. -->
+      <form id="board-assign" class="board-pop" hidden aria-labelledby="board-assign-title">
+        <h3 id="board-assign-title">Address this card to</h3>
+        <p id="board-assign-card" class="muted"></p>
+        <select id="board-assign-to" aria-label="Owner"></select>
+        <div class="board-pop-row">
+          <button type="submit">Assign</button>
+          <button type="button" id="board-assign-cancel" class="secondary">Cancel</button>
+        </div>
+      </form>
+
+      <!-- detail: what a card click opens when there is no room to open. -->
+      <div id="board-detail" class="board-pop" hidden role="dialog" aria-modal="false" aria-labelledby="board-detail-title">
+        <h3 id="board-detail-title"></h3>
+        <dl id="board-detail-fields"></dl>
+        <div class="board-pop-row">
+          <a id="board-detail-link" href="#" hidden>Open the artifact</a>
+          <button type="button" id="board-detail-close" class="secondary">Close</button>
+        </div>
+      </div>
     </section>
 
     <!-- artifacts (§4.21): versioned, commentable agent output. Every server

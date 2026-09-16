@@ -1,6 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
-import { EMBED_DEFAULT_DIM, EMBED_DEFAULT_MODEL, EMBED_DEFAULT_URL, EmbedClient, computeTiers, intEnv, optionalEnv, requireEnv } from "@foldedspacelabs/metistry-core";
+import { EMBED_DEFAULT_DIM, EMBED_DEFAULT_MODEL, EmbedClient, computeTiers, firstOnMachineBaseUrl, intEnv, optionalEnv, requireEnv, resolveLocalModelUrl } from "@foldedspacelabs/metistry-core";
 import { QueryStore } from "@foldedspacelabs/metistry-queries";
 import { makePool } from "./db.js";
 import { makeServer } from "./server.js";
@@ -133,16 +133,21 @@ if (!vault) console.warn("vault bridge absent: set METISTRY_RECONCILER_URL + MET
 
 // Phase 6: knowledge_search mode=semantic|hybrid needs to embed the QUERY
 // with the same model the reconciler embedded the notes with. The vectors
-// are already in Postgres; this is one call to the same local Ollama.
+// are already in Postgres; this is one call to the local server's
+// /v1/embeddings (C18) — LM Studio, Ollama or the bundled llama-server,
+// whichever compute.yaml's first on_machine provider names.
 // Absent or unreachable → every mode answers, in keyword (degrades).
+const localModel = resolveLocalModelUrl(process.env, firstOnMachineBaseUrl(compute.store.current));
+if (localModel.warning) console.warn(localModel.warning);
 const embedder =
   optionalEnv("METISTRY_EMBED_ENABLED", "true") === "false"
     ? undefined
     : new EmbedClient({
-        url: optionalEnv("METISTRY_OLLAMA_URL", EMBED_DEFAULT_URL),
+        url: localModel.url,
         model: optionalEnv("METISTRY_EMBED_MODEL", EMBED_DEFAULT_MODEL),
         dim: intEnv("METISTRY_EMBED_DIM", EMBED_DEFAULT_DIM),
       });
+console.log(`embeddings: ${localModel.url}/embeddings (from ${localModel.from}), model ${optionalEnv("METISTRY_EMBED_MODEL", EMBED_DEFAULT_MODEL)}`);
 
 // Crews (Phase 5; docs/ops/crews.md): agents/<area>/<name>.md manifests,
 // D4 overlay — an entry not on disk is read through the vault bridge (that

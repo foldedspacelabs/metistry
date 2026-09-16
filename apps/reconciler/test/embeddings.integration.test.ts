@@ -43,15 +43,21 @@ function fakeVector(text: string): number[] {
   return v.map((x) => x / norm);
 }
 
-/** Records every request so batching and "no request at all" are assertable. */
-class StubOllama {
+/**
+ * Records every request so batching and "no request at all" are assertable.
+ * Answers the OpenAI-compatible `/v1/embeddings` shape (C18) — the one wire
+ * LM Studio, Ollama and the bundled llama-server all speak.
+ */
+class StubLocalServer {
   batches: number[] = [];
+  urls: string[] = [];
   down = false;
-  readonly fetchImpl: FetchLike = async (_url, init) => {
+  readonly fetchImpl: FetchLike = async (url, init) => {
     if (this.down) throw new Error("connect ECONNREFUSED 127.0.0.1:11434");
+    this.urls.push(url);
     const body = JSON.parse(init.body) as { input: string[] };
     this.batches.push(body.input.length);
-    const payload = { embeddings: body.input.map(fakeVector) };
+    const payload = { data: body.input.map((t, index) => ({ index, embedding: fakeVector(t) })) };
     return { ok: true, status: 200, text: async () => JSON.stringify(payload), json: async () => payload };
   };
   get calls(): number {
@@ -69,7 +75,7 @@ describe.skipIf(!hasDb)("reconciler embeddings (real db, stub embedder)", () => 
   let embeddings: Embeddings;
   let indexer: Indexer;
   let client: EmbedClient;
-  const stub = new StubOllama();
+  const stub = new StubLocalServer();
 
   const clean = async () => {
     await pool.query(`DELETE FROM embeddings`);

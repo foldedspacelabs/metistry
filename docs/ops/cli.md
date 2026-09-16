@@ -235,14 +235,16 @@ created` authored `Metistry <metistry@localhost>`:
   rules.yaml                router rules, seeded default
   identity.yaml             …and its instance_id: a v4 UUID minted once, the
                             Keychain account this instance's secrets file under
-  inbox/                    gitignored
+  Knowledge/Inbox/README.md where captures land — in the vault, so Obsidian
+                            sees them and git carries them (docs/ops/inbox.md)
   state/                    gitignored — .env, Postgres data, assistant state
   queries/ agents/ routines/ extensions/ instance-migrations/
                             tracked, empty (.gitkeep) — the D4 overlay reads
                             seed defaults until a same-named file lands here
   metistry.lock             product { version, commit, source } + updated_at +
                             migrations_applied; `metistry update` moves it
-  README.md  .gitignore     (inbox/, state/, .obsidian/workspace*)
+  README.md  .gitignore     (state/, .obsidian/workspace*,
+                            Knowledge/Inbox/.large/ — captures too big for git)
 ```
 
 It refuses a non-empty directory unless `--force`, never prompts, and
@@ -1009,6 +1011,34 @@ release; it is `git` until releases exist. The parser is strict — a
 malformed lock is an error, not a guess — with one exception: the shape
 an earlier `metistry init` wrote (`version:` + `created:`) is read as a
 `git` pin and rewritten in the current shape on the next `update`.
+
+## Moving the inbox into the vault: `metistry migrate-inbox`
+
+An instance created before 2026-09-16 keeps its captures in a gitignored
+`<instance>/inbox/`, where Obsidian cannot see them and git does not carry
+them. One verb moves it (`docs/ops/inbox.md` has the why):
+
+```sh
+metistry migrate-inbox --dry-run     # the whole plan, nothing run
+metistry migrate-inbox               # do it
+metistry up                          # the verb restarts nothing itself
+```
+
+It moves `inbox/*` into `Knowledge/Inbox/` — `git mv` for what git tracks,
+a plain move for the rest, since the old inbox was ignored — drops `inbox/`
+from `.gitignore`, adds `Knowledge/Inbox/.large/` (captures too big for git),
+rewrites `inbox.path` rows to `Knowledge/Inbox/<file>`, and commits once in
+the instance repo. It is idempotent: a second run reports "already on the
+vault inbox" and changes nothing.
+
+A second instance that already moved its inbox to a **lowercase**
+`Knowledge/inbox/` is detected by reading the real directory entry — on a
+case-insensitive Mac `existsSync("Knowledge/Inbox")` answers true for it —
+and renamed through a temporary name, because `git mv Knowledge/inbox
+Knowledge/Inbox` would otherwise move the directory inside itself.
+
+`--instance <dir>` picks the instance; without it, `METISTRY_INSTANCE_DIR`.
+Obsidian needs no change: the vault root is still `Knowledge/`.
 
 ## Maintenance
 

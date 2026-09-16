@@ -120,6 +120,7 @@ Anything else: ask first.
   meant to be reviewable a year from now.
 - **Feed the product record.** When a change has product significance — a
   goal sharpened, a benefit proven with numbers, a safety mechanism shipped,
-  a premium candidate identified — add a line to `docs/product/PRODUCT.md`
-  in the same PR. Launch material gets written from that record later, not
-  reconstructed.
+  a premium candidate identified — add a fragment file under
+  `docs/product/record/` (one per PR; folded into `PRODUCT.md` at release by
+  `ops/scripts/fold-product-record.mjs`) in the same PR. Launch material gets
+  written from that record later, not reconstructed.

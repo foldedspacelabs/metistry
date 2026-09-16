@@ -1,0 +1,5 @@
+# Safety net for a local merge that touches docs/product/PRODUCT.md — GitHub's
+# PR-merge UI does NOT apply merge=union (it still blocks on a same-file
+# conflict there), which is why docs/product/record/ fragments exist as the
+# real fix (docs/product/record/README.md).
+docs/product/PRODUCT.md merge=union

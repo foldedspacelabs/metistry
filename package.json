@@ -13,7 +13,7 @@
     "db:migrate": "ops/scripts/migrate.sh",
     "hooks:install": "ops/scripts/install-git-hooks.sh",
     "typecheck": "pnpm -r --if-present run typecheck",
-    "release:version": "changeset version && node ops/scripts/sync-root-version.mjs",
+    "release:version": "changeset version && node ops/scripts/sync-root-version.mjs && node ops/scripts/fold-product-record.mjs",
     "release:pack": "ops/release/pack-runtime.sh",
     "test": "METISTRY_TEST_DB_NAME=${METISTRY_TEST_DB_NAME:-metistry_test_$(basename \"$PWD\" | tr A-Z a-z | tr -c 'a-z0-9\\n' _ | cut -c1-40)} sh -c 'ops/scripts/test-db.sh && pnpm -r --workspace-concurrency=1 --if-present run test'",
     "test:unit": "pnpm -r --if-present run test"

@@ -192,7 +192,7 @@ const USAGE = `metistry — Metistry command line
       with git ls-remote, flush the reconciler's queue, and push once.
       The token is never printed, never written to .env, never in .git/config.
 
-  metistry connect <cursor|devin|claude-code> [--instance <dir>] [--rotate] [--remote]
+  metistry connect <cursor|opencode|devin|claude-code> [--instance <dir>] [--rotate] [--remote]
                    [--areas Knowledge/A,Knowledge/B] [--project <slug>] [--json]
   metistry connect --list [--json]
       Give one external dev tool its own way into this instance: register it as
@@ -203,6 +203,10 @@ const USAGE = `metistry — Metistry command line
                      every other server preserved) as url + headers, with the
                      bearer named "Bearer \${env:METISTRY_AGENT_TOKEN_CURSOR}"
                      and the value in the login Keychain — never in the file.
+        opencode     merges mcp.<key> into ~/.config/opencode/opencode.json
+                     (0600, every other server preserved) as a "remote" server,
+                     with the bearer named "Bearer {env:…_OPENCODE}" and the
+                     value in the login Keychain — never in the file.
         claude-code  mints the token docs/ops/claude-code-plugin.md has you
                      mint by hand and prints the plugin's env lines; it does
                      NOT install the plugin.
@@ -220,7 +224,8 @@ const USAGE = `metistry — Metistry command line
       answer the same 401 an unknown token gets — until you let it in from Needs
       You or with POST /api/agents/<id>/approve. Loopback tools stay immediate,
       and --remote is decided at enrolment, never added to a row afterwards.
-      docs/ops/cursor.md, docs/ops/devin.md, docs/ops/console-api.md.
+      docs/ops/cursor.md, docs/ops/opencode.md, docs/ops/devin.md,
+      docs/ops/console-api.md.
 
   metistry secrets sync [--from keychain|env] [--to env|keychain]
                         [--instance <dir>] [--env-file <path>]

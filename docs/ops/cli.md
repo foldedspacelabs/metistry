@@ -12,7 +12,7 @@ All of them are real.
 | `init <dir>` | create a private instance repo |
 | `connect-repo <url>` | point the instance repo at a remote, mint credentials the reconciler can push with |
 | `secrets sync\|mint\|list [--json]` | move secrets between the Keychain and `.env` |
-| `connect <tool> [--rotate]` | give one external dev tool (Cursor, Devin, Claude Code) its own agent token and config |
+| `connect <tool> [--rotate]` | give one external dev tool (Cursor, OpenCode, Devin, Claude Code) its own agent token and config |
 | `connect --list [--json]` | which tools are connected: the row, the bearer, the config |
 | `console whoami [--json]` | ask the console who it thinks you are, with this install's owner token |
 | `identity [--json]` | the instance's identity.yaml (name, mention, voice, icon, instance_id) |
@@ -52,7 +52,7 @@ node packages/cli/dist/main.js secrets sync --to keychain
 node packages/cli/dist/main.js secrets list
 node packages/cli/dist/main.js secrets list --json
 
-# one external dev tool at a time — docs/ops/cursor.md, docs/ops/devin.md
+# one external dev tool at a time — docs/ops/cursor.md, docs/ops/opencode.md, docs/ops/devin.md
 node packages/cli/dist/main.js connect cursor
 node packages/cli/dist/main.js connect devin --rotate
 node packages/cli/dist/main.js connect claude-code --areas Knowledge/Areas/Engineering
@@ -359,7 +359,7 @@ the token in that file, `chmod 600`. Everything else (origin,
 
 ## Connecting an external dev tool: `metistry connect <tool>`
 
-`metistry connect <cursor|devin|claude-code>` is the other `connect` — not
+`metistry connect <cursor|opencode|devin|claude-code>` is the other `connect` — not
 the instance repo's remote, but one **external agent** per dev tool at the
 console's `/mcp` (plan refresh 2026-09-13 §4b W3). One row per tool, one
 bearer per tool, independently revocable: adopting a second tool is minting
@@ -367,6 +367,7 @@ a token and running one command, and dropping one is revoking its row.
 
 ```sh
 metistry connect cursor                     # ~/.cursor/mcp.json + the Keychain
+metistry connect opencode                   # ~/.config/opencode/opencode.json + the Keychain
 metistry connect devin                      # prints the fields to paste (no API to write them)
 metistry connect claude-code                # mints the plugin's token, prints its env lines
 metistry connect cursor --rotate            # a replacement bearer; the old one dies at once
@@ -386,12 +387,13 @@ One delivery per tool, chosen by what the tool can read:
 | tool | what is written | where the bearer goes |
 | --- | --- | --- |
 | `cursor` | `~/.cursor/mcp.json` → `mcpServers.metistry` (`url` + `headers`, 0600, other servers preserved) | the login Keychain; the file names it as `Bearer ${env:METISTRY_AGENT_TOKEN_CURSOR}` |
+| `opencode` | `~/.config/opencode/opencode.json` → `mcp.metistry` (`type: "remote"` + `headers`, 0600, other servers preserved; an existing `opencode.jsonc` is the file written, since OpenCode loads it last) | the login Keychain; the file names it as `Bearer {env:METISTRY_AGENT_TOKEN_OPENCODE}` |
 | `claude-code` | nothing — the plugin reads its environment | the login Keychain, with the `export` lines printed |
 | `devin` | nothing — MCP servers are registered in a web form | printed once, for pasting |
 
 Because a bearer that cannot be stored would have to be rotated to be
-recovered, `connect cursor` and `connect claude-code` refuse on a host with
-no Keychain **before** minting anything. `connect devin` works anywhere.
+recovered, `connect cursor`, `connect opencode` and `connect claude-code`
+refuse on a host with no Keychain **before** minting anything. `connect devin` works anywhere.
 
 Grants are the console's and start default-deny (`{tier: "none", areas: []}`
 — `db/migrations/0007_agents.sql`): `--areas` widens the read tier to those
@@ -426,7 +428,8 @@ promoting a row the owner already let in would be a widening dressed as a
 flag. Approval is not a grant — a row let in still holds its default-deny
 read tier. `docs/ops/console-api.md` has the wire detail.
 
-`docs/ops/cursor.md` and `docs/ops/devin.md` are the per-tool pages —
+`docs/ops/cursor.md`, `docs/ops/opencode.md` and `docs/ops/devin.md` are the
+per-tool pages —
 including what each tool can then do through `/mcp`, how to widen a grant,
 and (for Devin) why a cloud session needs an inbound path this install does
 not have yet.
@@ -730,6 +733,13 @@ host: "studio"
 captured_at: "2026-09-09T00:00:00.000Z"
 idempotency_key: "claude-code:<session id>:<16 hex>"
 ```
+
+**The other doors emit it too**, with their own `source` and the same key
+formula, so the console dedupes across all of them and `inbox-drain`
+classifies them identically: `plugins/claude-code` (`SessionEnd`),
+`plugins/cursor` (`sessionEnd` — `docs/ops/cursor.md`) and `plugins/opencode`
+(`session.idle`, with the quiet window and the one case it cannot reach —
+`docs/ops/opencode.md`).
 
 **Credentials.** `METISTRY_URL` and `METISTRY_OWNER_TOKEN` come from the
 environment (the checkout's `.env` is loaded first), else from the login

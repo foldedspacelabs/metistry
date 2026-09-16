@@ -9,7 +9,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { realPathish } from "../src/sandbox.js";
-import { ENGINE_ABSENT_NOTE } from "../src/deployment.js";
+import { engineAbsentNote } from "../src/deployment.js";
 import { nodeFor, up } from "../src/up.js";
 import { checkout, fakeExec, okDoctor, shown } from "./fixtures.js";
 
@@ -23,6 +23,22 @@ async function launchdCheckout(): Promise<string> {
   await cp(join(REPO, "ops", "launchd"), join(P, "ops", "launchd"), { recursive: true });
   await cp(join(REPO, "ops", "sandbox"), join(P, "ops", "sandbox"), { recursive: true });
   await writeFile(join(P, ".env"), "METISTRY_ORIGIN=https://studio.ts.net\n");
+  // This install's compute (C2/C3): `assignments.default` plus the key its
+  // provider names is what decides whether there is an assistant child at
+  // all, and which secret the engine's env allowlist admits.
+  await writeFile(
+    join(P, "seed", "compute.yaml"),
+    `providers:
+  openrouter:
+    kind: openai-compatible
+    base_url: https://openrouter.ai/api/v1
+    locality: off_machine
+    auth: { secret: METISTRY_OPENROUTER_API_KEY }
+    data_policy: { allow: [Knowledge/Projects], deny_sources: [comms], max_brief_bytes: 65536 }
+assignments:
+  default: { model: openrouter/anthropic/claude-sonnet-5 }
+`,
+  );
   return P;
 }
 
@@ -31,7 +47,7 @@ const env = (instance: string): NodeJS.ProcessEnv => ({
   METISTRY_DB_PASSWORD: "pw",
   METISTRY_ORIGIN: "https://studio.ts.net",
   METISTRY_ASSISTANT_TOKEN: "tok",
-  CLAUDE_CODE_OAUTH_TOKEN: "oauth",
+  METISTRY_OPENROUTER_API_KEY: "sk-or-x",
   METISTRY_EK_URL: "http://host.docker.internal:7811",
   HOME: "/h",
   TMPDIR: "/tmp",
@@ -219,12 +235,12 @@ describe("the rendered plists", () => {
     expect(assistant.argv).toContain(`STATE_DIR=${realPathish(join(I, "state", "assistant"))}`);
     expect(assistant.argv).toContain(`PRODUCT_DIR=${realPathish(P)}`);
     expect(assistant.env.HOME).toBe(`${I}/state/assistant`);
-    expect(assistant.env.CLAUDE_CODE_OAUTH_TOKEN).toBe("oauth");
+    expect(assistant.env.METISTRY_OPENROUTER_API_KEY).toBe("sk-or-x"); // named by compute.yaml, not by a fixed variable
     // the engine's environment is still an ALLOWLIST, and a child's
     // environment is the spec's whole: the supervisor's own never leaks in
     expect(assistant.env.METISTRY_ORIGIN).toBeUndefined();
     expect(Object.keys(assistant.env).sort()).toEqual(
-      ["CLAUDE_CODE_OAUTH_TOKEN", "HOME", "METISTRY_ASSISTANT_TOKEN", "METISTRY_BRAIN_URL", "METISTRY_DB_HOST", "METISTRY_DB_PASSWORD", "METISTRY_DB_PORT", "PATH", "TMPDIR"].sort(),
+      ["METISTRY_OPENROUTER_API_KEY", "HOME", "METISTRY_ASSISTANT_TOKEN", "METISTRY_BRAIN_URL", "METISTRY_DB_HOST", "METISTRY_DB_PASSWORD", "METISTRY_DB_PORT", "PATH", "TMPDIR"].sort(),
     );
 
     expect(child("db").argv).toEqual([`${PG}/postgres`, "-D", `${I}/state/pg`]);
@@ -316,17 +332,19 @@ describe("the node every launchd job execs", () => {
   });
 });
 
-describe("an instance with no engine credential (W1)", () => {
-  /** The same install, minus the one variable the engine cannot start without. */
+describe("an instance with no engine (W1)", () => {
+  /** The same install, minus the provider key compute.yaml names. */
   const noEngine = (instance: string): NodeJS.ProcessEnv => {
     const e = env(instance);
-    delete e.CLAUDE_CODE_OAUTH_TOKEN;
+    delete e.METISTRY_OPENROUTER_API_KEY;
     return e;
   };
 
   /** The line an operator has to be able to read without knowing the code. */
   const ABSENT_LINE =
-    "assistant: absent — no engine credential (CLAUDE_CODE_OAUTH_TOKEN); captures, tasks, search and the console run; fold turns wait (docs/ops/assistant-tools.md)";
+    "assistant: absent — assignments.default runs on openrouter/anthropic/claude-sonnet-5, and providers.openrouter.auth.secret names METISTRY_OPENROUTER_API_KEY, which is unset here; " +
+    "captures, tasks, search and the console run; fold turns wait (docs/ops/assistant-tools.md). " +
+    "Fix: metistry compute providers add --from <template> --name openrouter --secret METISTRY_OPENROUTER_API_KEY, then metistry secrets sync --to env";
 
   it("is not written into the supervisor's children, and `up` says why in one line", async () => {
     const P = await launchdCheckout();
@@ -350,14 +368,14 @@ describe("an instance with no engine credential (W1)", () => {
 
     // an install with no model is healthy, not broken: nothing failed here
     expect(r.code).toBe(0);
-    expect(ENGINE_ABSENT_NOTE).toBe(ABSENT_LINE);
+
     expect(lines.map((l) => l.trim())).toContain(ABSENT_LINE);
     // the child list: everything model-free, and no assistant that could
     // only crash-loop on `requireEnv`
     expect(r.commands).toContain(`write ${I}/state/supervisor.json  (from 4 child(ren): db, console, reconciler, eventkit)`);
   });
 
-  it("and comes back on the next `up` once the credential exists — the config is rewritten whole, so it is idempotent", async () => {
+  it("and comes back on the next `up` once the key exists — the config is rewritten whole, so it is idempotent", async () => {
     const P = await launchdCheckout();
     const I = await mkdtemp(join(tmpdir(), "metistry-inst-"));
     const home = await mkdtemp(join(tmpdir(), "metistry-home-"));
@@ -371,7 +389,7 @@ describe("an instance with no engine credential (W1)", () => {
     const before = await children();
     expect(before.names).toEqual(["db", "console", "reconciler", "eventkit"]);
 
-    // `metistry secrets sync` happened; the next `up` is the only step needed
+    // `metistry compute providers add` + `metistry secrets sync` happened; the next `up` is the only step needed
     expect((await up({ ...opts, env: env(I) })).code).toBe(0);
     const after = await children();
     expect(after.names).toEqual(["db", "console", "reconciler", "assistant", "eventkit"]);
@@ -383,7 +401,34 @@ describe("an instance with no engine credential (W1)", () => {
     expect((await children()).names).toEqual(["db", "console", "reconciler", "eventkit"]);
   });
 
-  it("under the compose shape it says the file itself refuses to interpolate — that shape needs the credential", async () => {
+  it("assigning nothing at all is the other half of the same absence, and says which verb writes the line", async () => {
+    const P = await launchdCheckout();
+    await writeFile(join(P, "seed", "compute.yaml"), "providers: {}\n");
+    const I = await mkdtemp(join(tmpdir(), "metistry-inst-"));
+    const lines: string[] = [];
+    const r = await up({
+      productDir: P,
+      env: env(I),
+      exec: fakeExec(),
+      out: (l) => lines.push(l),
+      dryRun: true,
+      platform: "darwin",
+      uid: 501,
+      home: "/h",
+      node: NODE,
+      deployment: launchd,
+      exists: pgInstalled(),
+      mintPassword: () => "generated",
+      doctorFn: okDoctor,
+    });
+    expect(r.code).toBe(0);
+    const text = lines.join("\n");
+    expect(text).toContain("no assignments.default in compute.yaml");
+    expect(text).toContain("metistry compute assign default <provider/model>");
+    expect(r.commands).toContain(`write ${I}/state/supervisor.json  (from 4 child(ren): db, console, reconciler, eventkit)`);
+  });
+
+  it("under the compose shape the note is the same one — the file's own interpolation is not what decides any more", async () => {
     const P = await launchdCheckout();
     const I = await mkdtemp(join(tmpdir(), "metistry-inst-"));
     const lines: string[] = [];
@@ -400,8 +445,10 @@ describe("an instance with no engine credential (W1)", () => {
       deployment: { shape: "compose", services: {} },
       doctorFn: okDoctor,
     });
-    const text = lines.join("\n");
-    expect(text).toContain(ABSENT_LINE);
-    expect(text).toMatch(/compose shape: docker-compose\.yml interpolates CLAUDE_CODE_OAUTH_TOKEN as a required variable/);
+    expect(lines.join("\n")).toContain(ABSENT_LINE);
+  });
+
+  it("the note is built from the seam's own words, so `up` and doctor cannot drift", () => {
+    expect(engineAbsentNote("why not", "do this")).toBe("assistant: absent — why not; captures, tasks, search and the console run; fold turns wait (docs/ops/assistant-tools.md). Fix: do this");
   });
 });

@@ -15,20 +15,37 @@
 
 import { realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
+import type { Compute } from "@foldedspacelabs/metistry-core";
 
 export const SANDBOX_EXEC = "/usr/bin/sandbox-exec";
 export const SANDBOX_PROFILE_REL = "ops/sandbox/assistant.sb";
 
 /**
- * The Anthropic hosts the Agent SDK talks to. sandbox-exec filters outbound
- * by port, not by name, so this list is documentation, not an enforced
- * rule — the profile allows TLS and nothing else, and the variable name
- * METISTRY_ASSISTANT_ALLOWED_HOSTS is reserved for when a layer exists
- * that can enforce it. Name-level enforcement arrives with App Sandbox;
- * docs/ops/deployment-shapes.md says so plainly rather than letting the
- * profile imply a guarantee it does not make.
+ * The hosts the engine is expected to reach, DERIVED from this install's
+ * `compute.yaml` rather than hardcoded to one vendor (C2): every provider's
+ * `base_url` and nothing else — which is also exactly the set the engine's
+ * own `fetch` can dial, because `completionsUrl` is built from the assigned
+ * provider's base URL and there is no other outbound call in the loop
+ * (apps/assistant/src/engine-openai.ts).
+ *
+ * sandbox-exec filters outbound by PORT, not by name, so this list is
+ * documentation, not an enforced rule — the profile allows TLS and nothing
+ * else, and the variable name METISTRY_ASSISTANT_ALLOWED_HOSTS is reserved
+ * for when a layer exists that can enforce it. Name-level enforcement
+ * arrives with App Sandbox; docs/ops/deployment-shapes.md says so plainly
+ * rather than letting the profile imply a guarantee it does not make.
  */
-export const ANTHROPIC_HOSTS = ["api.anthropic.com", "statsig.anthropic.com", "console.anthropic.com"] as const;
+export function engineHosts(compute: Compute): string[] {
+  const out = new Set<string>();
+  for (const p of Object.values(compute.providers)) {
+    try {
+      out.add(new URL(p.base_url).hostname);
+    } catch {
+      // a base_url that does not parse failed the schema already
+    }
+  }
+  return [...out].sort();
+}
 
 /**
  * The runtime tree the profile grants read + exec on.

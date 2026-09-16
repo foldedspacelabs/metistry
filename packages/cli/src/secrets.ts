@@ -26,8 +26,15 @@ import { Keychain, keychainAccount, serviceFor } from "./keychain.js";
 export const SECRET_SUFFIXES = ["_TOKEN", "_PASSWORD", "_PRIVATE", "_SECRET", "_KEY"] as const;
 /** …or carries one of them mid-name, because the per-bridge variables are `METISTRY_BRIDGE_TOKEN_<NAME>`. */
 export const SECRET_INFIXES = ["_TOKEN_", "_PASSWORD_", "_SECRET_"] as const;
-/** …or is one of these exactly (third-party names that follow no convention). */
-export const SECRET_NAMES = new Set(["CLAUDE_CODE_OAUTH_TOKEN"]);
+/**
+ * …or is one of these exactly (third-party names that follow no
+ * convention). Empty since the scrub: the product's only third-party
+ * credentials are compute-provider keys, and `compute.yaml` requires their
+ * names to be `_API_KEY`-shaped, which the suffix rule already catches. Kept
+ * as the seam, because the next vendor that ignores the convention lands
+ * here and nowhere else.
+ */
+export const SECRET_NAMES = new Set<string>([]);
 
 /** Name rules only. `METISTRY_VAPID_PUBLIC`, `..._ACCESS_KEY_ID` and `..._CLIENT_ID` are not secrets and are left alone. */
 export function isSecretVar(name: string): boolean {
@@ -63,7 +70,6 @@ export interface ScopeRule {
 
 /** First match wins, so the user-scoped exceptions are listed first. */
 export const SECRET_SCOPES: readonly ScopeRule[] = [
-  { scope: "user", match: "CLAUDE_CODE_OAUTH_TOKEN", why: "the person's Claude subscription login — one per Mac, shared by every instance" },
   { scope: "user", match: /^METISTRY_AWS_(SECRET_ACCESS_KEY|SESSION_TOKEN)$/, why: "the person's own AWS credentials (aws-costs), not this instance's" },
   { scope: "user", match: /^METISTRY_DEVIN_API_KEY$/, why: "the person's own Devin (Cognition) credential (devin-knowledge) — one per Mac, shared by every instance, and it outlives any one instance directory" },
   { scope: "user", match: /^METISTRY_[A-Z0-9_]*_API_KEY$/, why: "a compute provider credential (compute.yaml `auth.secret`) — the person's own account with that provider, shared by every instance on this Mac (docs/ops/compute.md)" },
@@ -86,9 +92,9 @@ export const DEFAULT_SCOPE: SecretScope = "instance";
  * meaningless outside this install, so minting one can never be the wrong
  * guess (nobody has to paste it anywhere, and nothing else already knows
  * it). `METISTRY_DB_PASSWORD` is the precedent — `metistry up` generates it
- * into `.env` when Postgres is first prepared. Everything else
- * (CLAUDE_CODE_OAUTH_TOKEN, the GitHub PATs, the bridge tokens a service was
- * already started with) stays "not in the Keychain, left as it is".
+ * into `.env` when Postgres is first prepared. Everything else (the compute
+ * provider keys, the GitHub PATs, the bridge tokens a service was already
+ * started with) stays "not in the Keychain, left as it is".
  */
 export const GENERATED_SECRETS: Readonly<Record<string, string>> = {
   METISTRY_LOCAL_OWNER_TOKEN: "the console's local owner door — an install that predates it gets one here (docs/ops/auth.md)",

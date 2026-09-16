@@ -31,7 +31,7 @@ export interface ProjectRow {
 export const PROJECT_COLS = `id, title, area, mode, daily_budget_usd, max_open_bundles, created_at, updated_at`;
 
 /** The defaults a slug with no row behaves as (identical to the table defaults). */
-export const DEFAULT_MAX_OPEN_BUNDLES = 20;
+export const DEFAULT_MAX_OPEN_BUNDLES = 20;  // limit: fixed — mirrors the projects table's column default; the two must agree
 
 export function toProjectRow(r: Record<string, unknown>): ProjectRow {
   return {

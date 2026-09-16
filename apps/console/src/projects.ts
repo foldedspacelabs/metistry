@@ -97,8 +97,8 @@ export interface ProjectPatch {
   area?: string | null;
 }
 
-const MAX_BUNDLE_CAP = 1000;
-const MAX_BUDGET = 1_000_000;
+const MAX_BUNDLE_CAP = 1000;  // limit: fixed — the ceiling on what a PUT may ask for — the API contract, not a knob
+const MAX_BUDGET = 1_000_000;  // limit: fixed — a sanity bound on a typed figure; a budget past this is a slipped decimal point
 
 /** Validate a PUT body. Unknown keys are refused; every present key is checked. Throws AgentError (same envelope mapping as the registry). */
 export function validateProjectPatch(input: unknown): ProjectPatch {

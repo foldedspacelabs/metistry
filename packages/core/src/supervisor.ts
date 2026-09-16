@@ -32,9 +32,9 @@ export const SUPERVISOR_CONFIG_FILENAME = "supervisor.json";
 export const SUPERVISOR_SOCKET_FILENAME = "supervisor.sock";
 
 /** A child is restarted with exponential backoff from this floor… */
-export const RESTART_BACKOFF_MS = 1_000;
+export const RESTART_BACKOFF_MS = 1_000;  // limit: fixed — the restart schedule is one decision and the supervisor's own tests pin it
 /** …up to this ceiling. */
-export const RESTART_BACKOFF_MAX_MS = 60_000;
+export const RESTART_BACKOFF_MAX_MS = 60_000;  // limit: fixed — same schedule
 /** A child that stays up this long is healthy again and its backoff resets. */
 export const RESTART_HEALTHY_MS = 60_000;
 /** More than this many restarts inside CRASH_LOOP_WINDOW_MS and the child is reported as crash-looping. */
@@ -43,7 +43,7 @@ export const CRASH_LOOP_WINDOW_MS = 120_000;
 /** SIGTERM, then this long, then SIGKILL. */
 export const STOP_GRACE_MS = 10_000;
 /** How long an ordered start waits for a child's readiness probe before starting the next one anyway. */
-export const READY_TIMEOUT_MS = 60_000;
+export const READY_TIMEOUT_MS = 60_000;  // limit: fixed — same schedule; a probe that has not answered in a minute is not slow, it is down
 
 export const readyProbeSchema = z
   .object({

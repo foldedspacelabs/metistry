@@ -11,7 +11,7 @@
 import { engineCredentialPresent, ENGINE_CREDENTIAL_VAR } from "./deployment.js";
 import type { Requirements } from "./manifest.js";
 
-export const DEFAULT_PREFLIGHT_TIMEOUT_MS = 3_000;
+export const DEFAULT_PREFLIGHT_TIMEOUT_MS = 3_000;  // limit: fixed — the default every caller may pass timeoutMs over
 
 /** The empty declaration: nothing to check, every run proceeds. */
 export const NO_REQUIREMENTS: Requirements = { env: [], reachable: [], engine: false };

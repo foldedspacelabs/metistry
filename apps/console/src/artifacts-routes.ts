@@ -23,7 +23,7 @@ const COMMENTS = new RegExp(`^/api/artifacts/(art_${ID})/comments$`);
 const COMMENT_STATE = new RegExp(`^/api/artifacts/(art_${ID})/comments/(cmt_${ID})/(resolve|reopen)$`);
 const DISPATCH = /^\/api\/dispatches\/(\d{1,12})$/;
 const TEXT_KINDS = new Set(["markdown", "text", "json", "csv", "html"]);
-const MAX_INLINE_TEXT = 2 * 1024 * 1024;
+const MAX_INLINE_TEXT = 2 * 1024 * 1024;  // limit: fixed — the request contract for inline file content; bigger belongs in the vault, not a body
 
 /** True when the path belongs to this adapter (the management gate uses it to answer 403, never 404, to non-sessions). */
 export function isArtifactRoute(pathname: string): boolean {

@@ -26,6 +26,10 @@ jobs:
       - uses: actions/checkout@v4
       - run: ops/scripts/check-path-case.sh
       - run: node ops/scripts/prompt-lint.mjs
+      # R4: a cap that lives only as a literal is a decision nobody can change
+      # without a release. Every limit-shaped constant is read from config or
+      # annotated `// limit: fixed — <reason>`.
+      - run: node ops/scripts/audit-limits.mjs
       - run: node ops/scripts/fold-product-record.mjs --check
       - name: ops/scripts unit tests
         run: node --test 'ops/scripts/test/*.test.mjs'

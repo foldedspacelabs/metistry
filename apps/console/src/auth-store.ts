@@ -9,7 +9,7 @@ export interface Db {
   query(text: string, values?: unknown[]): Promise<{ rows: any[] }>;
 }
 
-const ENROLL_TTL_MIN = 10;
+const ENROLL_TTL_MIN = 10;  // limit: fixed — a one-shot enrolment code's lifetime is a security parameter, and it is interpolated into SQL
 
 export async function mintEnrollmentCode(db: Db): Promise<string> {
   const code = mintToken(16);

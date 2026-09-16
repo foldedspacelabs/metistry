@@ -32,7 +32,7 @@ import { Keychain, keychainAccount, serviceFor } from "./keychain.js";
 import { applyPorts, loadNamespace } from "./namespace.js";
 import { accountFor } from "./secrets.js";
 
-export const CONNECT_TOOLS = ["claude-code", "cursor", "devin"] as const;
+export const CONNECT_TOOLS = ["claude-code", "cursor", "devin", "opencode"] as const;
 export type ConnectTool = (typeof CONNECT_TOOLS)[number];
 
 /** How a tool's end of the connection is configured. */
@@ -57,6 +57,7 @@ export const TOOL_SPECS: Record<ConnectTool, ToolSpec> = {
   "claude-code": { id: "claude-code", displayName: "Claude Code", config: "env", doc: "docs/ops/claude-code-plugin.md" },
   cursor: { id: "cursor", displayName: "Cursor", config: "file", doc: "docs/ops/cursor.md" },
   devin: { id: "devin", displayName: "Devin", config: "paste", doc: "docs/ops/devin.md" },
+  opencode: { id: "opencode", displayName: "OpenCode", config: "file", doc: "docs/ops/opencode.md" },
 };
 
 /** A tool name, or undefined — never a guess, the way `parseChannel` is strict. */
@@ -337,11 +338,14 @@ export async function connect(opts: ConnectOptions): Promise<ConnectResult> {
   }
 
   if (spec.config === "file") {
-    const file = cursorConfigFile(opts.home ?? env.HOME ?? "");
-    const merged = await writeCursorConfig(file, serverKey(suffix), mcpUrl, varName);
+    // Two tools, two files, one rule: merge one entry, leave everything else
+    // exactly as it was, and never write the bearer.
+    const home = opts.home ?? env.HOME ?? "";
+    const key = serverKey(suffix);
+    const file = spec.id === "opencode" ? opencodeConfigFile(home, env) : cursorConfigFile(home);
     result.config_file = file;
-    result.config_key = serverKey(suffix);
-    result.config_state = merged;
+    result.config_key = key;
+    result.config_state = spec.id === "opencode" ? await writeOpencodeConfig(file, key, mcpUrl, varName) : await writeCursorConfig(file, key, mcpUrl, varName);
   }
   return result;
 }
@@ -356,6 +360,8 @@ export async function connect(opts: ConnectOptions): Promise<ConnectResult> {
 // never rewrite.
 
 export const CURSOR_CONFIG_REL = [".cursor", "mcp.json"] as const;
+/** The schema URL OpenCode's own docs open every example with. */
+export const OPENCODE_SCHEMA = "https://opencode.ai/config.json";
 
 export function cursorConfigFile(home: string): string {
   return join(home, ...CURSOR_CONFIG_REL);
@@ -414,6 +420,98 @@ export async function readCursorServer(file: string, key: string): Promise<{ url
   return entry && typeof entry.url === "string" ? { url: entry.url } : undefined;
 }
 
+// ---- OpenCode's config -------------------------------------------------------
+//
+// OpenCode takes remote MCP servers as `mcp.<name> = { type: "remote", url,
+// headers }` and substitutes `{env:NAME}` anywhere in a config file
+// (opencode.ai/docs/mcp-servers and /docs/config, both checked 2026-09-16) —
+// so, exactly as with Cursor, the bearer never reaches disk. Everything else
+// in the file is the owner's business: merge, never rewrite.
+//
+// Global, not per-project: `~/.config/opencode/opencode.json` (or
+// `$XDG_CONFIG_HOME/opencode/…`, which `opencode debug paths` confirms wins
+// when it is set). A project `opencode.json` is documented as "safe to be
+// checked into Git", and an entry naming this instance's origin in a repo
+// someone else clones is a footgun; a project override is one hand-copied
+// block for anyone who wants it (docs/ops/opencode.md).
+
+export const OPENCODE_CONFIG_DIR_REL = [".config", "opencode"] as const;
+
+/** OpenCode's config directory: `$XDG_CONFIG_HOME/opencode`, else `~/.config/opencode`. */
+export function opencodeConfigDir(home: string, env: NodeJS.ProcessEnv = process.env): string {
+  const xdg = (env.XDG_CONFIG_HOME ?? "").trim();
+  return xdg ? join(xdg, "opencode") : join(home, ...OPENCODE_CONFIG_DIR_REL);
+}
+
+/**
+ * The file to merge into. OpenCode loads `opencode.json` AND `opencode.jsonc`,
+ * in that order, so when a `.jsonc` is already there it is the one that has the
+ * last word — and therefore the one this verb writes. Otherwise `.json`, which
+ * is what the docs tell people to create.
+ */
+export function opencodeConfigFile(home: string, env: NodeJS.ProcessEnv = process.env): string {
+  const dir = opencodeConfigDir(home, env);
+  const jsonc = join(dir, "opencode.jsonc");
+  return existsSync(jsonc) ? jsonc : join(dir, "opencode.json");
+}
+
+/** The one entry this verb owns, so the shape lives in exactly one place (the tests assert on this, not on a string). */
+export function opencodeServerEntry(mcpUrl: string, varName: string): { type: "remote"; url: string; enabled: true; headers: Record<string, string> } {
+  return { type: "remote", url: mcpUrl, enabled: true, headers: { Authorization: `Bearer {env:${varName}}` } };
+}
+
+/**
+ * Merge one server into OpenCode's global config and return whether anything
+ * changed. 0600 for the same reason Cursor's file gets it: it names a Metistry
+ * origin, and another server's entry may not be as careful with its own
+ * credentials as this one is. A file that is not JSON is an error, never a
+ * clobber — which is also what happens to a `.jsonc` that really does carry
+ * comments, and the message says what to paste in by hand.
+ */
+export async function writeOpencodeConfig(file: string, key: string, mcpUrl: string, varName: string): Promise<"written" | "unchanged"> {
+  let doc: Record<string, unknown> = {};
+  let before = "";
+  if (existsSync(file)) {
+    before = await readFile(file, "utf8");
+    if (before.trim() !== "") {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(before);
+      } catch (err) {
+        throw new Error(
+          `${file} is not JSON this verb can merge into (${err instanceof Error ? err.message : String(err)}) — fix it, or add this entry by hand under "mcp": ${JSON.stringify({ [key]: opencodeServerEntry(mcpUrl, varName) })}`,
+        );
+      }
+      if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error(`${file} does not hold a JSON object, so there is no "mcp" block to merge into`);
+      doc = parsed as Record<string, unknown>;
+    }
+  }
+  const servers = (doc.mcp ?? {}) as Record<string, unknown>;
+  if (typeof servers !== "object" || servers === null || Array.isArray(servers)) throw new Error(`${file}'s "mcp" is not an object — refusing to replace it`);
+  // `$schema` first if the file had none: OpenCode's own docs open every
+  // example with it, and an editor with the schema is how a typo gets caught.
+  const next = { ...(doc.$schema === undefined ? { $schema: OPENCODE_SCHEMA } : {}), ...doc, mcp: { ...servers, [key]: opencodeServerEntry(mcpUrl, varName) } };
+  const text = `${JSON.stringify(next, null, 2)}\n`;
+  if (text === before) return "unchanged";
+  await mkdir(dirname(file), { recursive: true });
+  await writeFile(file, text, { mode: 0o600 });
+  await chmod(file, 0o600);
+  return "written";
+}
+
+/** The entry this verb wrote, if it is there — how `--list` knows OpenCode is configured. */
+export async function readOpencodeServer(file: string, key: string): Promise<{ url: string } | undefined> {
+  if (!existsSync(file)) return undefined;
+  let doc: unknown;
+  try {
+    doc = JSON.parse(await readFile(file, "utf8"));
+  } catch {
+    return undefined;
+  }
+  const entry = (doc as { mcp?: Record<string, { url?: unknown }> })?.mcp?.[key];
+  return entry && typeof entry.url === "string" ? { url: entry.url } : undefined;
+}
+
 // ---- output ------------------------------------------------------------------
 
 /**
@@ -450,6 +548,15 @@ export function renderConnect(r: ConnectResult): string {
     lines.push(`  export ${r.token_var}="$(security find-generic-password -a ${r.keychain_account} -s ${r.keychain_service} -w)"`);
     lines.push("");
     lines.push(`then start Cursor from that shell (\`cursor .\`), not from the Dock — the CLI shim passes its environment to the app it launches. ${spec.doc} has the whole story, including how to widen the read grant.`);
+  } else if (r.tool === "opencode") {
+    lines.push(`config    ${r.config_file} → mcp.${r.config_key} (${r.config_state}, 0600; every other server left alone)`);
+    if (r.token === "keychain") lines.push(`token     stored in the login Keychain as ${r.keychain_service} under account ${r.keychain_account} — not printed, not written to ${r.config_file}`);
+    lines.push("");
+    lines.push(`OpenCode substitutes {env:${r.token_var}} when it reads the config, so the bearer never reaches disk. Put this in the profile OpenCode inherits:`);
+    lines.push("");
+    lines.push(`  export ${r.token_var}="$(security find-generic-password -a ${r.keychain_account} -s ${r.keychain_service} -w)"`);
+    lines.push("");
+    lines.push(`then start OpenCode from that shell. \`opencode mcp list\` is the check that it worked. ${spec.doc} has the whole story, including how to widen the read grant and how to capture finished sessions (\`node plugins/opencode/install.mjs\`).`);
   } else if (r.tool === "claude-code") {
     if (r.token === "keychain") lines.push(`token     stored in the login Keychain as ${r.keychain_service} under account ${r.keychain_account} — not printed`);
     lines.push("");
@@ -526,7 +633,11 @@ export async function connectList(opts: ConnectListOptions): Promise<{ console_u
       token = platform !== "darwin" ? "unknown" : (await new Keychain(exec, account).hasSecret(varName)) ? "keychain" : "absent";
     }
     let config: string;
-    if (spec.config === "file") {
+    if (spec.config === "file" && tool === "opencode") {
+      const file = opencodeConfigFile(home, env);
+      const entry = await readOpencodeServer(file, key);
+      config = entry ? `${file} → mcp.${key}` : `${file}: no ${key} entry`;
+    } else if (spec.config === "file") {
       const file = cursorConfigFile(home);
       const entry = await readCursorServer(file, key);
       config = entry ? `${file} → mcpServers.${key}` : `${file}: no ${key} entry`;

@@ -21,7 +21,7 @@ dropping it. Share sheet, Shortcuts, the Capture tab, an agent's `capture`
 call: all the same door, all under five seconds.
 
 **Request** — anything that needs *you*. The tab is titled **Needs You** and it
-lists requests. A request has one of six types:
+lists requests. A request has one of seven types:
 
 | Type | It is asking you to |
 |---|---|
@@ -31,6 +31,7 @@ lists requests. A request has one of six types:
 | **question** | answer something the assistant cannot continue without |
 | **access** | grant an agent more than it has |
 | **improvement** | change how the system itself behaves |
+| **action** | do one thing on your behalf — dispatch a brief, move a card, comment, capture |
 
 Every request takes the same three answers:
 

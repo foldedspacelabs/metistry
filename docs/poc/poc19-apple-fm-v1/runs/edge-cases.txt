@@ -1,0 +1,17 @@
+### GET /v1/models
+{"object":"list","data":[{"id":"apple/foundation-model","object":"model","created":1789566940,"owned_by":"apple"}]}
+
+### GET /healthz
+{"status":"available"}
+
+### POST /v1/chat/completions — runtime 3-field classification schema
+{"id":"chatcmpl-e0ab42ea-6a75-4cb4-9950-","object":"chat.completion","created":1789566940,"model":"apple/foundation-model","choices":[{"index":0,"message":{"role":"assistant","content":"{\"category\": \"todo\", \"action\": \"go to grocery store and pick up milk and bread before 6pm tomorrow\", \"has_action\": true}"},"finish_reason":"stop"}],"usage":{"prompt_tokens":208,"completion_tokens":42,"total_tokens":250},"x_metistry":{"cost_usd":0,"schema_mode":"dynamic","respond_ms":1002.9,"usage_ms":48.4}}
+
+### anyOf union of two object subschemas — a discriminated union built at runtime
+{"id":"chatcmpl-18822ea6-7243-461a-8802-","object":"chat.completion","created":1789566941,"model":"apple/foundation-model","choices":[{"index":0,"message":{"role":"assistant","content":"{\"kind\": \"task\", \"text\": \"Call the dentist on Monday\"}"},"finish_reason":"stop"}],"usage":{"prompt_tokens":252,"completion_tokens":24,"total_tokens":276},"x_metistry":{"cost_usd":0,"schema_mode":"dynamic","respond_ms":398.4,"usage_ms":63.5}}
+
+### refusals — untranslatable schema, tools, streaming, unknown route
+{"error":{"message":"schema not translatable: `$ref` is not supported at Response_a","type":"invalid_request_error","code":"unsupported_schema"}}  (HTTP 400)
+{"error":{"message":"tool calling is out of scope for v1","type":"invalid_request_error","code":"tools_unsupported"}}  (HTTP 400)
+{"error":{"message":"streaming is not implemented in this PoC","type":"invalid_request_error","code":"stream_unsupported"}}  (HTTP 400)
+{"error":{"message":"no such endpoint: /v1/embeddings","type":"invalid_request_error","code":"not_found"}}  (HTTP 404)

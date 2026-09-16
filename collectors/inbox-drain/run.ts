@@ -25,8 +25,27 @@ export interface Classification {
   title: string;
 }
 
+/**
+ * A task this capture is *asking for*, if it is asking for one. The console
+ * renders it as the extra decision **Approve as work**, which inserts the
+ * `work` row on the click (docs/research/2026-09-16-taskuary-review.md ADOPT
+ * 2). Nothing here creates anything — §4.12 is intact because the row is born
+ * of a human's hand, not of this collector's opinion.
+ */
+export interface SuggestedWork {
+  title: string;
+  project?: string;
+  kind?: "task" | "review";
+}
+
 const URL_RE = /^https?:\/\/\S+$/i;
 const TODO_RE = /^(todo|remind me|remember to|don't forget|buy|call|email|schedule)\b/i;
+// `@task do the thing`, `todo: do the thing`, and the markdown checkbox. The
+// same shape the router uses for `/note` (invariant 4, apps/console/src/router.ts):
+// an explicit leading cue, matched by regex, first match wins, NO model.
+const TASK_CUE_RE = /^(?:@task\b[:\s]*|todo\s*:\s*|[-*]\s*\[\s\]\s*)([\s\S]+)$/i;
+// Frontmatter `kind:` values that say "this capture is a task", verbatim.
+const TASK_KINDS = new Set(["todo", "task"]);
 
 /**
  * Leading YAML frontmatter, as scalars — enough to read `kind:` and `title:`
@@ -73,6 +92,45 @@ export function classify(row: InboxRow): Classification {
     return { kind: "document", reason: "document mime/extension", title };
   }
   return { kind: "note", reason: "default", title };
+}
+
+/** The note with its leading frontmatter removed — the part a human actually typed. */
+function body(note: string): string {
+  return note.replace(/^---\r?\n[\s\S]*?\r?\n---(\r?\n|$)/, "").trim();
+}
+
+/**
+ * Does this capture suggest a `work` row, and what would it say? Three cues,
+ * in order, all deterministic (invariant 4 — a collector never calls a model,
+ * and the Apple FM tier's `has_action` is deliberately NOT read here):
+ *
+ *   1. frontmatter `kind: todo|task` — our own doors declaring it;
+ *   2. an explicit leading cue on the first body line (`@task …`, `todo: …`,
+ *      `- [ ] …`) — the same "explicit command" shape the router uses;
+ *   3. the classifier's existing `todo` verdict (`TODO_RE`, "buy milk").
+ *
+ * Returns undefined for everything else, which is most things. A suggestion
+ * is not a decision: the proposal still waits for a click.
+ */
+export function suggestedWork(row: InboxRow, c: Classification): SuggestedWork | undefined {
+  const note = (row.note ?? "").trim();
+  if (!note) return undefined;
+  const fm = frontmatter(note);
+  const first = body(note).split(/\r?\n/)[0]?.trim() ?? "";
+  const cue = TASK_CUE_RE.exec(first);
+
+  let title: string | undefined;
+  if (TASK_KINDS.has((fm.kind ?? "").toLowerCase())) title = fm.title || cue?.[1] || first;
+  else if (cue?.[1]) title = cue[1];
+  else if (c.kind === "todo") title = c.title;
+  if (!title) return undefined;
+
+  const trimmed = title.trim().slice(0, 200); // limit: fixed — `work.title` is capped at 500 by TasksService; 200 keeps a card readable
+  if (!trimmed) return undefined;
+  // `project` only when the frontmatter names one in the slug form the
+  // projects table uses; free text would invent a project on accept.
+  const project = (fm.project ?? "").trim();
+  return { title: trimmed, ...(/^[a-z][a-z0-9-]{0,39}$/.test(project) ? { project } : {}) };
 }
 
 // The optional on-device FM tier (ruled 2026-09-01: free on-device
@@ -151,9 +209,17 @@ export async function run(db: Db, ctx: CollectorCtx = {}): Promise<number> {
     // captures propose as this collector, at user trust.
     const sourceAgent = row.source_agent || "inbox-drain";
     const trust = row.source_agent ? "external" : "user";
+    // The suggestion comes off the DETERMINISTIC classification, never the
+    // refined one: a model's `has_action` must not be what puts an extra
+    // button under a proposal (invariant 4).
+    const work = suggestedWork(row, det);
     await db.query(
       `INSERT INTO proposals (kind, source_agent, trust, payload) VALUES ('knowledge', $2, $3, $1)`,
-      [JSON.stringify({ inbox_id: row.id, path: row.path, classification: final, note: row.note, tier }), sourceAgent, trust],
+      [
+        JSON.stringify({ inbox_id: row.id, path: row.path, classification: final, note: row.note, tier, ...(work ? { suggested_work: work } : {}) }),
+        sourceAgent,
+        trust,
+      ],
     );
     await db.query(`UPDATE inbox SET status = 'classified', proposal = $2, triaged_at = NULL WHERE id = $1`, [
       row.id,

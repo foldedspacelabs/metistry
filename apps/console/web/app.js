@@ -491,12 +491,45 @@ const TYPE_LABEL = {
 const requestType = (kind) => REQUEST_TYPE[kind] ?? kind;
 // Approve / Revise / Decline are the three answers to every request. The wire
 // (and `proposals.decision`) keeps allow / accept_with_changes / deny.
+//
+// Later and Skip are the two that are NOT answers to the request
+// (docs/ops/reply-feedback.md): Later gives the row an `until` and leaves it
+// pending, Skip declines it with nothing to say. They are valid for every
+// kind — including a `decision` proposal answered with its own options —
+// because "I cannot deal with this right now" is true of anything.
 const DECISIONS = [
   { d: "allow", label: "Approve" },
   { d: "accept_with_changes", label: "Revise" },
   { d: "deny", label: "Decline", style: ' style="background:#7a3b3b"' },
 ];
+const DEFER = [
+  { d: "later", label: "Later" },
+  { d: "skip", label: "Skip" },
+];
 const attr = (s) => esc(s).replaceAll('"', "&quot;");
+
+// Multi-select. Ids the user ticked, and the `ts` each row was rendered with
+// — the second is what `if_unchanged` sends back, so an answer to a row that
+// moved under us is refused rather than applied to a different question.
+const picked = new Set();
+const seenAt = new Map();
+
+/** The one decision call. `if_unchanged` rides every single-row answer; a 409 repaints instead of alerting. */
+async function decide(id, body) {
+  const seen = seenAt.get(String(id));
+  const res = await api(`/api/proposals/${id}`, {
+    method: "POST",
+    body: JSON.stringify({ ...body, ...(seen ? { if_unchanged: { seen_at: seen } } : {}) }),
+  });
+  if (res.status === 409) {
+    const b = await res.json().catch(() => ({}));
+    // `stale` means the row changed, not that someone answered it: repaint
+    // and let the user read the new version before deciding again.
+    if (b.reason === "stale") alert("this one changed while it was on screen — here it is again");
+    return false;
+  }
+  return res.ok;
+}
 
 async function loadTriage() {
   const res = await api("/api/proposals");
@@ -504,6 +537,10 @@ async function loadTriage() {
   $("triage-empty").hidden = proposals.length > 0;
   const tab = document.querySelector('nav button[data-view="triage"]');
   if (tab) tab.textContent = proposals.length ? `Needs You (${proposals.length})` : "Needs You";
+  const live = new Set(proposals.map((p) => String(p.id)));
+  for (const id of [...picked]) if (!live.has(id)) picked.delete(id); // a row that left the queue leaves the selection
+  seenAt.clear();
+  for (const p of proposals) seenAt.set(String(p.id), p.ts);
   const groups = new Map();
   for (const p of [...proposals].sort((a, b) => new Date(a.ts) - new Date(b.ts))) {
     const type = requestType(p.kind);
@@ -522,9 +559,37 @@ async function loadTriage() {
       if (!feedback) return;
       body.feedback = feedback;
     }
-    await api(`/api/proposals/${b.dataset.triage}`, { method: "POST", body: JSON.stringify(body) });
+    await decide(b.dataset.triage, body);
     loadTriage();
   }));
+  document.querySelectorAll("[data-pick]").forEach((c) => (c.onchange = () => {
+    if (c.checked) picked.add(c.dataset.pick);
+    else picked.delete(c.dataset.pick);
+    renderBatchBar();
+  }));
+  renderBatchBar();
+}
+
+function renderBatchBar() {
+  const bar = $("triage-batch");
+  if (!bar) return;
+  bar.hidden = picked.size === 0;
+  $("triage-selected").textContent = picked.size ? `${picked.size} selected — l / s` : "";
+  for (const c of document.querySelectorAll("[data-pick]")) c.checked = picked.has(c.dataset.pick);
+}
+
+/** One verb, many rows. The server answers per row; anything it refused stays in the queue and says so. */
+async function batchDecide(decision) {
+  if (picked.size === 0) return;
+  const ids = [...picked].map(Number);
+  const res = await api("/api/proposals/batch", { method: "POST", body: JSON.stringify({ ids, decision }) });
+  if (res.ok) {
+    const { results } = await res.json();
+    const failed = results.filter((r) => !r.ok).length;
+    if (failed) alert(`${results.length - failed} of ${results.length} applied — the rest were already answered elsewhere`);
+  }
+  picked.clear();
+  loadTriage();
 }
 
 function proposalRow(p) {
@@ -532,12 +597,34 @@ function proposalRow(p) {
   const label = c.action || c.title || p.payload?.title || p.kind; // review proposals (§4.21) carry a top-level title
   // a `decision` proposal is answered with its OWN options (the server checks them again)
   const opts = p.kind === "decision" && Array.isArray(p.payload?.options) ? p.payload.options.slice(0, 8) : null;
-  const buttons = opts
+  // Approve as work: only where the row CARRIES a suggestion the drain or a
+  // crew put there deterministically. The click is what creates the `work`
+  // row (§4.12 intact — a human clicked); the server validates the payload
+  // again and refuses the verb on a row that has none.
+  const work = p.payload?.suggested_work;
+  const answers = opts
     ? opts.map((o) => `<button data-triage="${p.id}" data-d="${attr(o)}">${esc(o)}</button>`).join(" ")
     : DECISIONS.map((x) => `<button data-triage="${p.id}" data-d="${x.d}"${x.style ?? ""}>${x.label}</button>`).join(" ");
-  return `<li><span>${esc(label)} <span class="muted">${esc(requestType(p.kind))} · ${esc(c.kind ?? "")} · ${esc(p.source_agent)} · ${new Date(p.ts).toLocaleDateString()}</span></span>
-        <span>${buttons}</span></li>`;
+  const asWork = work?.title
+    ? ` <button data-triage="${p.id}" data-d="accept_as_work" title="${attr(`creates the task “${work.title}”, unassigned`)}">Approve as Work</button>`
+    : "";
+  const defer = DEFER.map((x) => `<button data-triage="${p.id}" data-d="${x.d}" class="quiet">${x.label}</button>`).join(" ");
+  return `<li><span><input type="checkbox" data-pick="${p.id}" aria-label="${attr(`select ${label}`)}"> ${esc(label)} <span class="muted">${esc(requestType(p.kind))} · ${esc(c.kind ?? "")} · ${esc(p.source_agent)} · ${new Date(p.ts).toLocaleDateString()}</span></span>
+        <span>${answers}${asWork} ${defer}</span></li>`;
 }
+
+$("triage-later").onclick = () => batchDecide("later");
+$("triage-skip").onclick = () => batchDecide("skip");
+$("triage-clear").onclick = () => { picked.clear(); renderBatchBar(); };
+
+// `l` and `s` over the selection. Never while typing — a shortcut that fires
+// from inside a text field is a bug, not an affordance.
+document.addEventListener("keydown", (e) => {
+  if ($("triage").hidden || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName ?? "")) return;
+  if (e.key === "l") { e.preventDefault(); batchDecide("later"); }
+  if (e.key === "s") { e.preventDefault(); batchDecide("skip"); }
+});
 
 // ----- devices -----
 async function loadDevices() {
@@ -1113,13 +1200,42 @@ $("room-resolve").onclick = async () => {
 // agent_presence seed queries, surfaced as the PWA's first tab and as
 // presence chips on the existing agents list. Every server value is
 // output-encoded via esc() before it touches the DOM (CRIT-7).
+//
+// It is the TIMELINE (docs/research/2026-09-16-taskuary-review.md ADOPT 1):
+// one ordered stream carrying captures, proposals, runs, work and decisions,
+// newest first, filterable by kind, refreshed incrementally through the
+// query's own `since` param. Read-only, and staying that way — every verb in
+// this system has a place already and none of them is a feed row.
 const FEED_ICONS = {
+  capture: "📥",
   tool: "🔧", turn: "💬", crew_run: "🧑‍🤝‍🧑", dispatch: "📨", task_op: "🗂️",
   agent_admin: "🛡️", project_mode: "🎛️", collector_run: "⚠️",
   proposal_created: "📝", proposal_decided: "✅", work_history: "🧾",
   brief: "📰", review: "🔍", alert: "🚨",
 };
 const feedIcon = (kind) => FEED_ICONS[kind] ?? "•";
+
+// The chips. Each value is passed straight through as the query's `kind`
+// param, which matches an exact row kind OR the `group` column
+// activity_feed.yaml derives — so this list names groups and the SQL owns
+// what is in each one. Adding a kind to the feed does not mean editing here.
+const FEED_CHIPS = [
+  ["", "All"],
+  ["capture", "Captures"],
+  ["proposal", "Proposals"],
+  ["decision", "Decisions"],
+  ["work", "Work"],
+  ["run", "Runs"],
+  ["message", "Messages"],
+];
+let feedKind = "";
+// The incremental refresh. `feedSince` is the newest `ts` already painted;
+// the query returns rows AT or after it (inclusive, because two sources can
+// share a microsecond), and `feedSeen` drops the ones we already have. A
+// filter change resets both — a different question deserves a full answer.
+let feedSince = "";
+let feedRows = [];
+const feedKeyOf = (r) => `${r.ref}|${r.ts}|${r.kind}`;
 
 function relTime(ts) {
   const s = Math.max(0, (Date.now() - new Date(ts).getTime()) / 1000);
@@ -1198,17 +1314,43 @@ async function populateFeedProjects() {
   } catch {}
 }
 
+function renderFeedChips() {
+  $("feed-kinds").innerHTML = FEED_CHIPS.map(
+    ([k, label]) => `<button type="button" class="chip${k === feedKind ? " on" : ""}" data-kind="${attr(k)}" aria-pressed="${k === feedKind}">${esc(label)}</button>`,
+  ).join(" ");
+  for (const b of document.querySelectorAll("#feed-kinds [data-kind]")) {
+    b.onclick = () => { feedKind = b.dataset.kind; resetFeed(); loadFeed().catch(() => {}); };
+  }
+}
+
+/** A filter changed: throw the painted stream away rather than merging two questions' answers. */
+function resetFeed() {
+  feedSince = "";
+  feedRows = [];
+}
+
 async function loadFeed() {
   const agent = $("feed-agent").value;
   const project = $("feed-project").value;
-  const { rows } = await dashQuery("activity_feed", { hours: 24, limit: 100, agent, project });
-  populateFeedAgents(rows);
-  $("feed-empty").hidden = rows.length > 0;
-  $("feed-list").innerHTML = rows.map(feedRowHtml).join("");
+  const { rows } = await dashQuery("activity_feed", { hours: 24, limit: 100, agent, project, kind: feedKind, since: feedSince });
+  // Merge, newest first, de-duplicated on (ref, ts, kind) — the inclusive
+  // `since` re-sends the boundary row on purpose, and losing an event to a
+  // strict `>` would be worse than re-rendering one.
+  const seen = new Set();
+  feedRows = [...rows, ...feedRows]
+    .filter((r) => !seen.has(feedKeyOf(r)) && seen.add(feedKeyOf(r)))
+    .sort((a, b) => new Date(b.ts) - new Date(a.ts))
+    .slice(0, 200);
+  if (feedRows[0]) feedSince = feedRows[0].ts;
+  populateFeedAgents(feedRows);
+  $("feed-empty").hidden = feedRows.length > 0;
+  $("feed-list").innerHTML = feedRows.map(feedRowHtml).join("");
 }
 
 async function loadFeedView() {
+  renderFeedChips();
   await populateFeedProjects();
+  resetFeed();
   await loadFeed();
   pollFeed();
 }
@@ -1225,8 +1367,8 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible" && !$("feed").hidden) loadFeed().catch(() => {});
 });
 
-$("feed-agent").onchange = () => loadFeed().catch(() => {});
-$("feed-project").onchange = () => loadFeed().catch(() => {});
+$("feed-agent").onchange = () => { resetFeed(); loadFeed().catch(() => {}); };
+$("feed-project").onchange = () => { resetFeed(); loadFeed().catch(() => {}); };
 
 // ===== board (docs/ops/board.md) =====
 // A read-only Kanban over the tasks module's work rows. Two named queries do

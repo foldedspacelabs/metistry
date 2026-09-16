@@ -68,3 +68,15 @@ export function parseDecisionBlock(reply: unknown): DecisionBlock | null {
   if (new Set(options).size !== options.length) return null;
   return { title, options };
 }
+
+/**
+ * What the `skip` verb writes into `proposals.feedback` (ADOPT 5,
+ * docs/ops/reply-feedback.md). Here, in core, because two components must
+ * agree on it and neither may own it: the console writes it, and every path
+ * that carries a decline's WORDS anywhere — the weekly review's "top reasons
+ * you declined" today, anything routing a reason back to a source agent
+ * later — reads it to know there is nothing to carry. A skip is the user
+ * putting something down, not a judgement about it, so its marker is a fixed
+ * value and never the user's own text.
+ */
+export const SKIP_FEEDBACK = "skipped";

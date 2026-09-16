@@ -1229,18 +1229,21 @@ $("feed-agent").onchange = () => loadFeed().catch(() => {});
 $("feed-project").onchange = () => loadFeed().catch(() => {});
 
 // ===== board (docs/ops/board.md) =====
-// A read-only Kanban over the tasks module's work rows. Two named queries do
-// all the thinking (invariant 3): `board` returns one card per row with its
-// `column` ALREADY DECIDED server-side, and `board_projects` returns the
+// A Kanban over the tasks module's work rows. Two named queries do all the
+// thinking (invariant 3): `board` returns one card per row with its `column`
+// ALREADY DECIDED server-side, and `board_projects` returns the
 // project × column counts that fill the filter and the column headers.
 // Nothing below derives a state — a wrong predicate is wrong in
 // seed/queries/board.yaml, in one place, for this panel and the Mac app
 // alike. Every server value goes through esc() (CRIT-7).
 //
-// Read-only on purpose. Every task mutation is still a tool call (invariant
-// 9), so the board offers no drop a service would refuse by offering none at
-// all; phase 3 of docs/research/2026-09-12-hermes-agent-review.md adds the
-// write paths and the misuse tests that go with them.
+// The drags (phase 3 of docs/research/2026-09-12-hermes-agent-review.md).
+// The rule that keeps invariant 8 honest: **the board offers no drop the
+// service would refuse.** `dropsFor()` below is the panel's copy of that
+// sentence — it draws a target only where a statement in packages/tasks
+// would succeed — and when the two disagree the STATEMENT wins: the card
+// snaps back carrying the server's own message. Every drop maps to exactly
+// ONE route, so "what did that drag do" has one answer in the `runs` ledger.
 
 // The six columns in board order, each with the sentence its predicate means
 // (P10: Title Case names things). The order here must match board.yaml's.
@@ -1252,7 +1255,12 @@ const BOARD_COLUMNS = [
   ["done", "Done", "closed, no report came back"],
   ["reported", "Reported", "closed, and a report landed"],
 ];
+const BOARD_LABEL = new Map(BOARD_COLUMNS.map(([key, label]) => [key, label]));
 const BOARD_LIMIT = 50; // per column — board.yaml's default, named here so the header can say "showing N of M"
+// The rendered cards, by id: the drag handlers read the ROW they came from
+// rather than re-deriving it out of data attributes, so a drop decides from
+// the same `column`/`owner`/`status` the server sent.
+const boardCards = new Map();
 
 const fmtAge = (h) => {
   const n = asNum(h);
@@ -1263,7 +1271,7 @@ const fmtAge = (h) => {
 
 // The SERVER decides `escalated`; this only names it, from fields already on
 // the wire. A chip that says nothing but "escalated" is a card you have to
-// open to understand — and there is nothing to open yet.
+// open to understand, and the reason is already on the row.
 function escalationLabel(c) {
   if (c.lease_expires_at && new Date(c.lease_expires_at) <= new Date()) return "lease lapsed";
   if (c.status === "blocked") return "blocked";
@@ -1274,13 +1282,185 @@ function boardCardHtml(c) {
   const bits = [c.claimed_by ? `held by ${c.claimed_by}` : c.owner ? `for ${c.owner}` : "unclaimed", `${fmtAge(c.age_hours)} old`];
   if (c.kind === "review") bits.push("review bundle");
   if (c.last_report_at) bits.push(`reported ${relTime(c.last_report_at)}`);
-  // a review bundle names its artifact, and the artifacts panel is the one
-  // card detail the console already has; everything else has none yet, so it
-  // gets no click affordance rather than a dead one
-  const open = c.artifact ? ` data-board-art="${esc(c.artifact)}" tabindex="0" role="link"` : "";
-  return `<li class="card${c.escalated ? " escalated" : ""}${c.artifact ? " linked" : ""}"${open}>
+  // A closed card has nowhere to go — `update()` refuses a row that is
+  // already closed — so it gets no grab affordance rather than a dead one.
+  const movable = Object.keys(dropsFor(c)).length > 0;
+  const label = `${c.title} — ${BOARD_LABEL.get(String(c.column)) ?? c.column}${movable ? ", press m to move it" : ""}`;
+  return `<li class="card${c.escalated ? " escalated" : ""}${c.has_thread ? " linked" : ""}" data-card="${esc(c.id)}"${movable ? ` draggable="true"` : ""} tabindex="0" role="button" aria-label="${esc(label)}">
     <div class="row"><span class="card-title">${esc(c.title)}</span><span class="muted">#${esc(c.id)}</span></div>
-    <div class="muted">${esc(bits.join(" · "))}${c.escalated ? ` <span class="chip failed">${esc(escalationLabel(c))}</span>` : ""}</div></li>`;
+    <div class="muted">${esc(bits.join(" · "))}${c.has_thread ? ` <span class="chip">room</span>` : ""}${c.escalated ? ` <span class="chip failed">${esc(escalationLabel(c))}</span>` : ""}</div></li>`;
+}
+
+// ----- the drags: which drop does what (docs/ops/board.md "Drags") -----
+//
+// Where a released or unblocked row LANDS is not our choice: `release()` and
+// the unblock both clear the claim and set status open, so board.yaml's CASE
+// puts the card in Assigned or Backlog by whether `owner` is set. Naming that
+// column here is what stops the drag from lying about where the card goes.
+const boardHome = (c) => (c.owner ? "assigned" : "backlog");
+
+/**
+ * The legal drops for ONE card: `{ targetColumn: op }`. Derived from the same
+ * rules the statements in packages/tasks enforce, so the board offers no drop
+ * the service would refuse. `reported` never appears — nothing you can drag
+ * makes a report exist — and a closed card has no drops at all.
+ */
+function dropsFor(c) {
+  const d = {};
+  if (c.status === "closed") return d;
+  if (c.column === "backlog") { d.assigned = "assign"; d.in_progress = "claim"; }
+  else if (c.column === "assigned") { d.backlog = "unassign"; d.in_progress = "claim"; }
+  else if (c.column === "in_progress") { d[boardHome(c)] = "release"; }   // never orphaned — Hermes's `reclaimed`, which we already had
+  else if (c.column === "needs_you") { d[boardHome(c)] = "unblock"; }     // the one route back to `open`
+  d.done = "close"; // offered from every open column; the SERVICE decides from the current status and a refusal is shown
+  return d;
+}
+
+// One op, one route. Anything that needs two calls is not a drop.
+const DROP_WHAT = {
+  assign: "address it to a crew",
+  unassign: "clear the addressee",
+  claim: "claim it as you",
+  release: "hand it back — release the lease",
+  unblock: "unblock it — the one route back to open",
+  close: "close it",
+};
+
+function boardRoute(op, card, extra) {
+  const id = encodeURIComponent(String(card.id));
+  const patch = (body) => [`/api/tasks/${id}`, { method: "PATCH", body: JSON.stringify(body) }];
+  if (op === "assign") return patch({ owner: extra.owner });
+  if (op === "unassign") return patch({ owner: null });
+  if (op === "unblock") return patch({ status: "open" });
+  if (op === "close") return patch({ status: "closed" });
+  return [`/api/tasks/${id}/${op}`, { method: "POST", body: "{}" }]; // claim | release
+}
+
+function boardMsg(text) {
+  const el = $("board-msg");
+  el.textContent = text ?? "";
+  el.hidden = !text;
+}
+
+function boardPopClose() {
+  for (const id of ["board-move", "board-assign", "board-detail"]) $(id).hidden = true;
+  boardAssignCard = null;
+}
+
+/**
+ * Optimistic, then authoritative. The card moves NOW — a board that waits for
+ * a round trip feels broken — and a refusal puts it back carrying the
+ * SERVER's sentence, never one invented here. Either way we refetch: the
+ * server owns the columns.
+ */
+async function boardRun(op, card, target, extra = {}) {
+  const el = document.querySelector(`#board-columns .card[data-card="${Number(card.id)}"]`);
+  const from = el?.parentElement ?? null;
+  const into = document.querySelector(`.board-col[data-column="${String(target).replace(/[^a-z_]/g, "")}"] .board-cards`);
+  if (el && into) into.prepend(el);
+  boardMsg("");
+  try {
+    const [path, init] = boardRoute(op, card, extra);
+    const res = await api(path, init);
+    if (res.ok) return true;
+    if (el && from) from.prepend(el); // snap back
+    const body = await res.json().catch(() => null);
+    boardMsg(body?.error?.message ?? `the console refused that move (${res.status})`);
+    return false;
+  } catch {
+    if (el && from) from.prepend(el);
+    boardMsg("the console did not answer — nothing moved");
+    return false;
+  } finally {
+    await loadBoard().catch(() => {});
+  }
+}
+
+function boardDrop(card, target) {
+  const op = dropsFor(card)[target];
+  if (!op) return Promise.resolve(false);
+  if (op === "assign") return openAssign(card); // the one drop that needs a value
+  return boardRun(op, card, target);
+}
+
+// Highlight ONLY the columns this card may land in — the board declining to
+// draw a target is the first half of "no drop the service would refuse".
+function paintTargets(card, on) {
+  const drops = on && card ? dropsFor(card) : {};
+  for (const col of document.querySelectorAll("#board-columns .board-col")) {
+    col.classList.toggle("drop", Boolean(drops[col.dataset.column]));
+    if (!on) col.classList.remove("drop-over");
+  }
+}
+
+// The keyboard alternative every drag needs: focus a card, press m, choose a
+// column. Same targets, same routes, same refusals.
+function openMove(card) {
+  const drops = dropsFor(card);
+  const keys = Object.keys(drops);
+  boardPopClose();
+  if (keys.length === 0) return boardMsg(`#${card.id} is closed — a closed card takes no further change here`);
+  $("board-move-card").textContent = `#${card.id} ${card.title ?? ""}`;
+  $("board-move-targets").innerHTML = keys
+    .map((k) => `<button type="button" data-move="${esc(k)}">${esc(BOARD_LABEL.get(k) ?? k)} — ${esc(DROP_WHAT[drops[k]])}</button>`)
+    .join("");
+  for (const b of $("board-move-targets").querySelectorAll("[data-move]")) {
+    b.onclick = () => { const t = b.dataset.move; boardPopClose(); boardDrop(card, t); };
+  }
+  $("board-move").hidden = false;
+  $("board-move-targets").querySelector("button")?.focus();
+}
+
+// The assign picker. Names come from the agent registry; "me" is the user's
+// own hand. A HUMAN may address a card to ANY crew (collaboration rule 4) —
+// and no agent surface can address one at all, which is why there is no
+// cross-kind check to run here.
+let boardOwners = null;
+let boardAssignCard = null;
+async function ownerOptions() {
+  if (boardOwners) return boardOwners;
+  try {
+    const { agents } = await (await api("/api/agents")).json();
+    boardOwners = agents.filter((a) => !a.revoked).map((a) => String(a.id)).sort();
+  } catch { boardOwners = []; }
+  return boardOwners;
+}
+
+async function openAssign(card) {
+  boardPopClose();
+  const names = await ownerOptions();
+  boardAssignCard = card;
+  $("board-assign-card").textContent = `#${card.id} ${card.title ?? ""}`;
+  $("board-assign-to").innerHTML = [`<option value="user">me</option>`, ...names.map((n) => `<option value="${esc(n)}">${esc(n)}</option>`)].join("");
+  if (card.owner && names.includes(String(card.owner))) $("board-assign-to").value = String(card.owner);
+  $("board-assign").hidden = false;
+  $("board-assign-to").focus();
+  return false;
+}
+
+// A click opens the room when there is one (#161 — the card's room IS the
+// conversation about it); otherwise the one card detail we can honestly show
+// from the row itself.
+function openCard(c) {
+  if (c.has_thread) { boardPopClose(); location.hash = `#/rooms/work/${Number(c.id)}`; return; }
+  boardPopClose();
+  $("board-detail-title").textContent = `#${c.id} ${c.title ?? ""}`;
+  const lease = c.claimed_by
+    ? `${c.claimed_by}${c.lease_expires_at ? ` until ${new Date(c.lease_expires_at).toLocaleString()}` : ""}`
+    : "unclaimed";
+  const fields = [
+    ["column", BOARD_LABEL.get(String(c.column)) ?? c.column],
+    ["owner", c.owner ?? "nobody — it is in the open queue"],
+    ["lease", lease],
+    ["external ref", c.external_ref ?? "none"],
+    ["last activity", c.updated_at ? relTime(c.updated_at) : "unknown"],
+  ];
+  $("board-detail-fields").innerHTML = fields.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(String(v))}</dd>`).join("");
+  const link = $("board-detail-link");
+  link.hidden = !c.artifact;
+  if (c.artifact) link.setAttribute("href", `#/artifacts/${encodeURIComponent(String(c.artifact))}`);
+  $("board-detail").hidden = false;
+  $("board-detail-close").focus();
 }
 
 // Counts come from board_projects, not from the cards: `board` caps each
@@ -1298,9 +1478,12 @@ function boardTotals(rows, project) {
   return totals;
 }
 
+let boardDragging = null; // the card under the pointer mid-drag, so a column knows what it is being offered
+
 function renderBoard(cards, totals) {
   const byColumn = new Map(BOARD_COLUMNS.map(([key]) => [key, []]));
-  for (const c of cards) byColumn.get(String(c.column))?.push(c);
+  boardCards.clear();
+  for (const c of cards) { boardCards.set(Number(c.id), c); byColumn.get(String(c.column))?.push(c); }
   $("board-columns").innerHTML = BOARD_COLUMNS.map(([key, label, why]) => {
     const list = byColumn.get(key) ?? [];
     const t = totals.get(key) ?? { cards: list.length, escalations: 0 };
@@ -1311,11 +1494,43 @@ function renderBoard(cards, totals) {
       <ul class="board-cards">${list.length ? list.map(boardCardHtml).join("") : `<li class="muted board-none">none</li>`}</ul>
     </section>`;
   }).join("");
-  const open = (el) => { location.hash = `#/artifacts/${el.dataset.boardArt}`; };
-  document.querySelectorAll("[data-board-art]").forEach((el) => {
-    el.onclick = () => open(el);
-    el.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(el); } };
-  });
+
+  // Four handlers and no library, exactly as the note said (§6b).
+  for (const el of document.querySelectorAll("#board-columns .card[data-card]")) {
+    const card = boardCards.get(Number(el.dataset.card));
+    if (!card) continue;
+    el.ondragstart = (e) => {
+      boardDragging = card;
+      el.classList.add("dragging");
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", String(card.id));
+      paintTargets(card, true);
+    };
+    el.ondragend = () => { el.classList.remove("dragging"); boardDragging = null; paintTargets(card, false); };
+    el.onclick = () => openCard(card);
+    el.onkeydown = (e) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openCard(card); }
+      else if (e.key === "m" || e.key === "M") { e.preventDefault(); openMove(card); }
+    };
+  }
+  for (const col of document.querySelectorAll("#board-columns .board-col")) {
+    col.ondragover = (e) => {
+      if (!boardDragging || !dropsFor(boardDragging)[col.dataset.column]) return; // no target drawn, no drop taken
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      col.classList.add("drop-over");
+    };
+    col.ondragleave = () => col.classList.remove("drop-over");
+    col.ondrop = (e) => {
+      e.preventDefault();
+      col.classList.remove("drop-over");
+      const card = boardDragging;
+      boardDragging = null;
+      paintTargets(null, false);
+      if (card) boardDrop(card, col.dataset.column);
+    };
+  }
 }
 
 async function loadBoard() {
@@ -1348,16 +1563,34 @@ async function loadBoardView() {
 }
 
 // auto-refresh on the feed's cadence — a board that lags lies about who holds
-// the lease
+// the lease. Never mid-gesture, though: re-rendering the columns under a drag
+// or under an open picker would cancel the thing the user was doing.
 let boardTimer = null;
+const boardBusy = () => boardDragging !== null || ["board-move", "board-assign", "board-detail"].some((id) => !$(id).hidden);
 function pollBoard(intervalMs = 10000) {
   if (boardTimer) clearInterval(boardTimer);
   boardTimer = setInterval(() => {
-    if (!$("board").hidden && document.visibilityState === "visible") loadBoard().catch(() => {});
+    if (!$("board").hidden && document.visibilityState === "visible" && !boardBusy()) loadBoard().catch(() => {});
   }, intervalMs);
 }
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible" && !$("board").hidden) loadBoard().catch(() => {});
+  if (document.visibilityState === "visible" && !$("board").hidden && !boardBusy()) loadBoard().catch(() => {});
+});
+
+// ----- the popovers: cancel is always one key or one button away -----
+$("board-move-cancel").onclick = () => boardPopClose();
+$("board-detail-close").onclick = () => boardPopClose();
+$("board-assign-cancel").onclick = () => boardPopClose();
+$("board-assign").onsubmit = (e) => {
+  e.preventDefault();
+  const card = boardAssignCard;
+  const owner = $("board-assign-to").value;
+  boardPopClose();
+  if (card) boardRun("assign", card, "assigned", { owner });
+};
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape" || $("board").hidden) return;
+  if (boardBusy()) { boardPopClose(); boardMsg(""); }
 });
 
 $("board-project").onchange = () => loadBoard().catch(() => {});

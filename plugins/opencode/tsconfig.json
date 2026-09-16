@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "noEmit": true,
+    "declaration": false,
+    // The shipped plugin is plain JS (no build step): `plugin.js` because
+    // OpenCode's loader takes `.js` and `.ts` and not `.mjs`, and `.mjs`
+    // everywhere else so nothing else can mistake it for a script to bundle.
+    // test/session-parity.test.ts imports lib.mjs to hold it to packages/core.
+    // allowJs lets tsc infer types for them; checkJs stays off — they are held
+    // to their behaviour by tests, not to type annotations they cannot carry.
+    "allowJs": true,
+    "checkJs": false
+  },
+  "include": ["test/*.ts", "scripts/*.mjs", "plugin.js", "install.mjs"]
+}

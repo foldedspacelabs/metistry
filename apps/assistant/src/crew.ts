@@ -1,29 +1,28 @@
 // The crew runner (plan §4.11 "the brief is the context transfer", §4.18.B
-// local target, Phase 5 crews). One crew run = one Agent SDK query with:
+// local target, Phase 5 crews). One crew run = one engine turn with:
 //
-// - the crew's model AND effort (the manifest's tier pair; effort defaults to
-//   low — a crew absorbs context and reports, the assistant does the thinking),
-//   the crew's operating prompt as the system prompt
-//   (identity-templated: `{{name}}` is the primary assistant's name, never
-//   a hardcoded one), the brief as the user turn;
+// - the crew's model AND effort, from `assignments.crews.<name>` in
+//   `compute.yaml` (collaboration rule 3: a crew's engine follows ITS OWN
+//   provider, not the assistant's); the crew's operating prompt as the
+//   system prompt (identity-templated: `{{name}}` is the primary
+//   assistant's name, never a hardcoded one), the brief as the user turn;
 // - exactly ONE MCP server — the console's mcp-brain — carrying a PER-RUN
 //   bearer the drain loop minted for this run and burns after it;
-// - `allowedTools` = exactly the tool groups the manifest's `uses` names
-//   (core's CREW_TOOL_GROUPS): `knowledge_write` and `agents_delegate` are not
-//   groups, so no `uses` list can reach them; built-ins are off, foreign
-//   MCP config ignored — invariant 9 holds for crews exactly as for the
-//   assistant (engine.ts);
-// - `maxTurns` and `maxBudgetUsd` from the manifest: the SDK stops the run
-//   past either and says so in the result subtype.
+// - a tool host holding exactly the tool groups the manifest's `uses` names
+//   (core's CREW_TOOL_GROUPS): `knowledge_write` and `agents_delegate` are
+//   not groups, so no `uses` list can reach them, and the loop can call
+//   nothing the host does not hold — invariant 9 holds for crews exactly as
+//   for the assistant (engine.ts);
+// - `max_turns` and `budget_usd_per_run` from the manifest: the loop stops
+//   past either, and still answers.
 //
 // The final text is NOT a result channel: what the crew wants kept, it
 // reports through its own tools (§4.11 "results land in the existing report
 // queue"). This file only returns the accounting the runs row needs.
 
-import { query, type McpHttpServerConfig, type Options, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { crewToolsFor, validateManifest, type AgentManifest, type ResolvedAssignment } from "@foldedspacelabs/metistry-core";
 import { BRAIN_SERVER } from "./brain.js";
-import { DISALLOWED, tallyToolUse, type Engine } from "./engine.js";
+import type { Engine } from "./engine.js";
 import { renderPrompt, type Identity } from "./prompt.js";
 
 /** The console's snapshot of a crew, frozen into the work row at dispatch (apps/console/src/crews.ts `CrewSnapshot`). */
@@ -50,7 +49,7 @@ export function parseCrewSnapshot(raw: unknown): CrewSnapshot {
   return { ...manifest, prompt: prompt.trim(), sha256 };
 }
 
-/** Fully-qualified SDK tool names for a `uses` list: mcp__brain__<tool>. */
+/** Fully-qualified tool names for a `uses` list: mcp__brain__<tool>. */
 export function crewToolNames(uses: readonly string[]): string[] {
   return crewToolsFor(uses).map((t) => `mcp__${BRAIN_SERVER}__${t}`);
 }
@@ -87,28 +86,6 @@ export function crewUserPrompt(brief: string, taskId?: number): string {
   return taskId !== undefined ? `${brief.trimEnd()}\n\n---\nRelated task on the shared list: #${taskId} (a handle — claim it with tasks_claim only if it is in your projects).` : brief;
 }
 
-/** The whole SDK option object for one crew run — pure, so the controls are testable without a live call. */
-export function buildCrewOptions(input: CrewRunInput): Options {
-  const server: McpHttpServerConfig = { type: "http", url: input.brain.url, headers: { Authorization: `Bearer ${input.brain.token}` } };
-  return {
-    model: input.crew.model,
-    // The other half of the crew's tier (core's `tiers.ts`): declared in the
-    // manifest, default low. A crew run is one query, so effort is fixed for
-    // the whole run by construction — there is no mid-run boundary to change
-    // it at, and nothing here can.
-    effort: input.crew.effort,
-    systemPrompt: crewSystemPrompt(input.crew, input.identity),
-    tools: [],
-    strictMcpConfig: true,
-    mcpServers: { [BRAIN_SERVER]: server },
-    allowedTools: crewToolNames(input.crew.uses),
-    disallowedTools: DISALLOWED,
-    permissionMode: "default",
-    maxTurns: input.crew.max_turns,
-    maxBudgetUsd: input.crew.budget_usd_per_run,
-  };
-}
-
 export type CrewOutcome = "ok" | "max_budget" | "max_turns" | "error";
 
 export interface CrewRunResult {
@@ -125,51 +102,17 @@ export interface CrewRunResult {
   errors?: string[] | undefined;
 }
 
-/** The SDK entry point, injectable so the drain is testable with a fake. */
-export type CrewSdk = (prompt: string, options: Options) => AsyncIterable<SDKMessage>;
-export const defaultCrewSdk: CrewSdk = (prompt, options) => query({ prompt, options });
-
-/** Run one crew to completion. Throws only on infrastructure failure (the SDK itself); a budget/turn stop is an outcome. */
-export async function runCrew(input: CrewRunInput, sdk: CrewSdk = defaultCrewSdk): Promise<CrewRunResult> {
-  const stream = sdk(crewUserPrompt(input.brief, input.task_id), buildCrewOptions(input));
-  let sessionId = "";
-  let result: CrewRunResult | null = null;
-  const tools: Record<string, number> = {};
-  for await (const msg of stream) {
-    if (msg.type === "system" && msg.subtype === "init") sessionId = msg.session_id;
-    if (msg.type === "assistant") tallyToolUse(msg.message?.content, tools);
-    if (msg.type === "result") {
-      const usage = (msg as { usage?: { input_tokens?: number; output_tokens?: number } }).usage ?? {};
-      const outcome: CrewOutcome =
-        msg.subtype === "success" ? (msg.is_error ? "error" : "ok") : msg.subtype === "error_max_budget_usd" ? "max_budget" : msg.subtype === "error_max_turns" ? "max_turns" : "error";
-      result = {
-        outcome,
-        session_id: msg.session_id || sessionId,
-        num_turns: msg.num_turns,
-        tokens_in: usage.input_tokens,
-        tokens_out: usage.output_tokens,
-        cost_usd: msg.total_cost_usd,
-        tools_used: tools,
-        text_chars: msg.subtype === "success" ? msg.result.length : 0,
-        ...(msg.subtype !== "success" && msg.errors?.length ? { errors: msg.errors } : msg.subtype === "success" && msg.is_error ? { errors: [msg.result] } : {}),
-      };
-    }
-  }
-  if (!result) throw new Error("crew run produced no result message");
-  return result;
-}
-
-// ---- the same crew, on an assigned provider (C2, collaboration rule 3) ---------
+// ---- one crew run, on its assigned provider (C2, collaboration rule 3) --------
 
 /**
  * A crew's engine follows ITS OWN provider, not the assistant's
  * (collaboration rule 3): `assignments.crews.<name>` in `compute.yaml` is
- * what decides, and a crew with no assignment keeps running on the SDK path
- * with its manifest's `model` exactly as before.
+ * what decides, and a crew nothing assigns has no engine at all — the drain
+ * parks its run as blocked rather than inventing one (crew-drain.ts).
  *
- * Everything that makes a crew a crew is unchanged on this path — the same
- * operating prompt and trailer, the same `uses` allowlist (now enforced by
- * the tool host rather than by `allowedTools`), the same per-run bearer the
+ * Everything that makes a crew a crew lives here — the same
+ * operating prompt and trailer, the same `uses` allowlist (enforced by the
+ * tool host the drain builds for this run), the same per-run bearer the
  * drain minted and burns after, the same `max_turns` and
  * `budget_usd_per_run`, and the same rule that the final text is not a
  * result channel. Crews still never resume a session (cost research decision

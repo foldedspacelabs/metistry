@@ -4,7 +4,7 @@
 // manifest over rules.yaml's tiers — because a half-applied precedence is
 // how an install ends up paying a cloud for a tier it moved to a local model.
 import { describe, expect, it } from "vitest";
-import { emptyCompute, parseCompute, SDK_ENGINE_KIND, type TierMap } from "@foldedspacelabs/metistry-core";
+import { emptyCompute, parseCompute, type TierMap } from "@foldedspacelabs/metistry-core";
 import { resolveTurn } from "../src/tiers.js";
 import { kindFor } from "../src/engine.js";
 
@@ -57,13 +57,13 @@ describe("resolveTurn precedence", () => {
     expect(t.assignment?.provider).toBe("openrouter"); // assignments.default still covers it
     const none = resolveTurn(emptyCompute(), rules, "crew:unassigned", { model: "sonnet", effort: "low" });
     expect(none).toEqual({ tier: "crew:unassigned", model: "sonnet", effort: "low" });
-    expect(kindFor(none)).toBe(SDK_ENGINE_KIND);
+    expect(kindFor(none)).toBeUndefined(); // nothing assigns it, so no engine runs it (C2/C3)
   });
 
-  it("with no assignments at all, rules.yaml's tiers: are still the live map and the SDK still runs the turn", () => {
+  it("with no assignments at all there is no engine — rules.yaml's tiers: still name a model, and nothing can serve one", () => {
     const t = resolveTurn(emptyCompute(), rules, "deep");
     expect(t).toEqual({ tier: "deep", model: "opus", effort: "high" });
-    expect(kindFor(t)).toBe(SDK_ENGINE_KIND);
+    expect(kindFor(t)).toBeUndefined();
     expect(resolveTurn(emptyCompute(), rules, "nope")).toEqual({ tier: "default", model: "haiku", effort: "medium" });
   });
 });

@@ -4,7 +4,7 @@
 // does not name its knob is a riddle (Rivet review).
 import { describe, expect, it } from "vitest";
 import { blockedConfigMessage, preflight, requirementsOf, NO_REQUIREMENTS } from "../src/preflight.js";
-import { ENGINE_CREDENTIAL_VAR } from "../src/deployment.js";
+import { parseCompute } from "../src/compute.js";
 import { validateManifest } from "../src/manifest.js";
 
 const res = (status: number) => ({ status, ok: status < 400 }) as Response;
@@ -70,12 +70,47 @@ describe("preflight", () => {
     expect(bad.missing[0]?.why).toContain("returned 503");
   });
 
-  it("checks the engine credential through core's one seam for a run that would enqueue a turn", async () => {
+  // C2/C3: an engine is `assignments.default` in compute.yaml PLUS the key
+  // its provider names. Both halves are checked through core's one seam
+  // (`engineStatus`), the same one `up` and `doctor` read.
+  const assigned = parseCompute(`
+providers:
+  openrouter:
+    kind: openai-compatible
+    base_url: https://openrouter.ai/api/v1
+    locality: off_machine
+    auth: { secret: METISTRY_OPENROUTER_API_KEY }
+    data_policy: { allow: [Knowledge/Projects], deny_sources: [comms], max_brief_bytes: 65536 }
+assignments:
+  default: { model: openrouter/anthropic/claude-sonnet-5 }
+`);
+  const local = parseCompute(`
+providers:
+  bench: { kind: openai-compatible, base_url: "http://127.0.0.1:1234/v1", locality: on_machine }
+assignments:
+  default: { model: bench/some-gguf }
+`);
+
+  it("refuses a run that would enqueue a turn when compute.yaml assigns no default, naming the file and the verb", async () => {
     const req = { env: [], reachable: [], engine: true };
     const missing = await preflight(req, { env: {}, fetchFn: never });
-    expect(missing.missing[0]?.name).toBe(ENGINE_CREDENTIAL_VAR);
+    expect(missing.missing[0]?.name).toBe("compute.yaml");
+    expect(missing.missing[0]?.why).toContain("no assignments.default");
     expect(missing.missing[0]?.why).toContain("nothing would answer");
-    expect((await preflight(req, { env: { [ENGINE_CREDENTIAL_VAR]: "tok" }, fetchFn: never })).ok).toBe(true);
+    expect(missing.missing[0]?.fix).toContain("metistry compute assign default");
+  });
+
+  it("refuses it when the assigned provider's key is unset, and names THAT variable", async () => {
+    const req = { env: [], reachable: [], engine: true };
+    const missing = await preflight(req, { env: {}, compute: assigned, fetchFn: never });
+    expect(missing.missing[0]?.name).toBe("METISTRY_OPENROUTER_API_KEY");
+    expect(missing.missing[0]?.why).toContain("providers.openrouter.auth.secret");
+  });
+
+  it("passes with the key set, and with a local provider that needs none", async () => {
+    const req = { env: [], reachable: [], engine: true };
+    expect((await preflight(req, { env: { METISTRY_OPENROUTER_API_KEY: "sk-or-x" }, compute: assigned, fetchFn: never })).ok).toBe(true);
+    expect((await preflight(req, { env: {}, compute: local, fetchFn: never })).ok).toBe(true);
   });
 
   it("blockedConfigMessage names the variables, the file and that nothing was spent", async () => {

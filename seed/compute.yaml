@@ -1,0 +1,65 @@
+# compute.yaml — where work runs, what it may carry, and what it may cost.
+# Instance config, seeded (D4 overlay: METISTRY_COMPUTE_FILES, last existing
+# file wins WHOLE — there is no deep merge, so your file stands alone).
+#
+# A §4.7 protected path: it says how the system behaves, so only you change
+# it (invariant 2). The CLI and the Mac app write it as the `user` principal
+# through the reconciler; the assistant cannot write it at all.
+#
+# EVERYTHING BELOW IS COMMENTED OUT ON PURPOSE. A seed that assigned a model
+# would change how every existing install routes the moment it updated, and
+# the engine that dials a provider lands in a later PR (docs/ops/compute.md
+# "What is not wired yet"). Uncomment what you want, or let the verbs write
+# it for you:
+#
+#   metistry compute providers add --from openrouter
+#   metistry compute providers add --from lmstudio
+#   metistry compute assign default openrouter/anthropic/claude-sonnet-5
+#   metistry compute budget instance --monthly 60 --action stop
+#   metistry compute show
+#
+# Until `assignments:` exists here, rules.yaml's `tiers:` block is still the
+# live map and nothing about routing changes.
+
+# providers:
+#   # An off_machine provider MUST declare data_policy — what may leave this
+#   # machine is a declaration, not a default. `request:` is sent verbatim:
+#   # pinning the upstream and refusing fallbacks is how "no model decides
+#   # which model runs" (invariant 4) survives a router in front of one.
+#   openrouter:
+#     kind: openai-compatible
+#     base_url: https://openrouter.ai/api/v1
+#     locality: off_machine
+#     auth: { secret: METISTRY_OPENROUTER_API_KEY }   # a NAME. The value lives in the login Keychain, user scope.
+#     zdr: true
+#     request: { provider: { order: [anthropic], allow_fallbacks: false } }
+#     data_policy: { allow: [Knowledge/Projects], deny_sources: [comms], max_brief_bytes: 65536 }
+#
+#   # on_machine costs nothing and needs no data policy, because nothing
+#   # leaves. LM Studio's default port; `metistry compute providers add
+#   # --from ollama` writes the Ollama equivalent.
+#   local:
+#     kind: openai-compatible
+#     base_url: http://127.0.0.1:1234/v1
+#     locality: on_machine
+
+# assignments:
+#   # `model` is ONE pinned `<provider>/<model-id>`. No `/auto`, no list of
+#   # fallbacks: the router is deterministic (invariant 4). The local ids
+#   # below are placeholders — which local model earns `fast`/`routine` is
+#   # the bake-off's to decide (plan refresh 2026-09-13 C10/C14).
+#   default: { model: openrouter/anthropic/claude-sonnet-5, effort: medium }
+#   tiers:
+#     fast:    { model: local/qwen/qwen3-coder-30b, effort: low }
+#     routine: { model: local/qwen/qwen3-coder-30b, effort: low }
+#     deep:    { model: openrouter/anthropic/claude-sonnet-5, effort: high }
+#   crews:
+#     researcher: { model: local/qwen/qwen3-coder-30b }
+
+# budgets:
+#   # action: allow (record only) | stop (refuse, and pause routines — the
+#   # default) | critical_only. Enforcement is the engine's; this file is
+#   # where the choice is recorded.
+#   instance: { monthly_usd: 60, action: stop }
+#   providers:
+#     openrouter: { daily_usd: 5, action: stop }

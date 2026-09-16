@@ -205,6 +205,10 @@ export const ASSISTANT_ENV_KEYS = [
   "METISTRY_CREW_RETRY_S",
   "METISTRY_IDENTITY_FILES",
   "METISTRY_PROMPT_FILES",
+  // compute.yaml's D4 overlay: the engine's own assignments, watched for
+  // changes. Config, not a credential — the provider secrets it NAMES stay
+  // in the Keychain and reach the engine per run, never through this list.
+  "METISTRY_COMPUTE_FILES",
   ENGINE_CREDENTIAL_VAR,
 ] as const;
 

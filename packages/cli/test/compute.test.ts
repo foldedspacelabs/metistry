@@ -1,0 +1,423 @@
+// `metistry compute` against fakes for everything outside the process: the
+// login Keychain is a Map behind a `security` exec fake, every provider call
+// is a fake fetch, and the instance repo is a temp directory. The assertions
+// that matter are the conservative ones — a key never reaches argv, an edit
+// that would not validate is never written, a provider still named by an
+// assignment cannot be removed, and a refusal names the field.
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import {
+  apiRoot,
+  assign,
+  computeReport,
+  modelsList,
+  parseAssignmentTarget,
+  parseBudgetAction,
+  parseBudgetTarget,
+  parseEffort,
+  parseTemplate,
+  providerTest,
+  providersAdd,
+  providersRemove,
+  readTemplate,
+  renderComputeReport,
+  renderModelsList,
+  renderProviderTest,
+  setBudget,
+  type ComputeOptions,
+} from "../src/compute.js";
+import type { Exec, ExecOptions } from "../src/exec.js";
+import { main } from "../src/main.js";
+
+const REPO = fileURLToPath(new URL("../../..", import.meta.url));
+const SEED = join(REPO, "seed");
+
+/** A login Keychain in a Map, keyed by (account, service). Records calls so a test can prove a value never reached argv. */
+function fakeSecurity(seed: Record<string, string> = {}) {
+  const store = new Map(Object.entries(seed));
+  const calls: Array<{ args: string[]; opts: ExecOptions }> = [];
+  const exec: Exec = async (cmd, args, opts = {}) => {
+    calls.push({ args, opts });
+    if (cmd !== "security") return { code: 1, stdout: "", stderr: "not security" };
+    const at = `${args[args.indexOf("-a") + 1] ?? ""}/${args[args.indexOf("-s") + 1] ?? ""}`;
+    if (args[0] === "add-generic-password") {
+      const [a, b] = String(opts.stdin ?? "").split("\n");
+      if (a === undefined || a !== b) return { code: 1, stdout: "", stderr: "passwords don't match" };
+      store.set(at, a);
+      return { code: 0, stdout: "", stderr: "" };
+    }
+    if (args[0] === "find-generic-password") {
+      if (!store.has(at)) return { code: 44, stdout: "", stderr: "not found" };
+      return { code: 0, stdout: args.includes("-w") ? `${store.get(at)}\n` : "", stderr: "" };
+    }
+    return { code: 1, stdout: "", stderr: `unexpected ${args[0]}` };
+  };
+  return { exec, store, calls };
+}
+
+interface FetchCall {
+  url: string;
+  init: RequestInit | undefined;
+}
+
+/** `/models` and `/chat/completions` from a table of routes; every call recorded. */
+function fakeFetch(routes: Record<string, { status?: number; body?: unknown }>) {
+  const calls: FetchCall[] = [];
+  const fn = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input);
+    calls.push({ url, init });
+    const route = routes[url];
+    if (!route) return new Response("no route", { status: 502 });
+    return new Response(JSON.stringify(route.body ?? {}), { status: route.status ?? 200, headers: { "content-type": "application/json" } });
+  }) as unknown as typeof fetch;
+  return { fn, calls };
+}
+
+const KEY = "sk-or-v1-never-in-argv";
+const ACCOUNT = "metistry-test-account";
+
+async function instance(): Promise<string> {
+  return await mkdtemp(join(tmpdir(), "metistry-compute-"));
+}
+
+/** Options plus the lines the verb printed. */
+function harness(dir: string, extra: Partial<ComputeOptions> = {}): { o: ComputeOptions; lines: string[] } {
+  const lines: string[] = [];
+  const o: ComputeOptions = {
+    instanceDir: dir,
+    seedDir: SEED,
+    env: { METISTRY_KEYCHAIN_ACCOUNT: ACCOUNT },
+    platform: "darwin",
+    uid: 501,
+    out: (l: string) => lines.push(l),
+    ...extra,
+  };
+  return { o, lines };
+}
+
+const file = (dir: string) => join(dir, "compute.yaml");
+
+describe("argument parsing: strict, never a guess", () => {
+  it("assignment targets", () => {
+    expect(parseAssignmentTarget("default")).toEqual({ kind: "default" });
+    expect(parseAssignmentTarget("deep")).toEqual({ kind: "tier", name: "deep" });
+    expect(parseAssignmentTarget("crew:researcher")).toEqual({ kind: "crew", name: "researcher" });
+    expect(() => parseAssignmentTarget("Deep")).toThrow(/not an assignment target/);
+    expect(() => parseAssignmentTarget(undefined)).toThrow(/default.*crew:/s);
+  });
+
+  it("budget targets, actions, efforts and templates", () => {
+    expect(parseBudgetTarget("instance")).toEqual({ kind: "instance" });
+    expect(parseBudgetTarget("provider:openrouter")).toEqual({ kind: "provider", name: "openrouter" });
+    expect(() => parseBudgetTarget("openrouter")).toThrow(/instance.*provider:/s);
+    expect(parseBudgetAction("critical_only")).toBe("critical_only");
+    expect(parseBudgetAction("warn")).toBeUndefined(); // the old spelling is not silently accepted
+    expect(parseEffort(undefined)).toBeUndefined();
+    expect(() => parseEffort("extreme")).toThrow(/low, medium or high/);
+    expect(parseTemplate("openrouter")).toBe("openrouter");
+    expect(parseTemplate("anthropic")).toBeUndefined();
+  });
+
+  it("apiRoot tolerates a trailing slash so `${root}/models` is always right", () => {
+    expect(apiRoot("http://127.0.0.1:1234/v1/")).toBe("http://127.0.0.1:1234/v1");
+  });
+});
+
+describe("providers add", () => {
+  it("writes a local provider with no secret and no network", async () => {
+    const dir = await instance();
+    const { o, lines } = harness(dir, { platform: "linux" });
+    const r = await providersAdd({ ...o, template: "lmstudio", skipTest: true });
+    expect(r.name).toBe("lmstudio");
+    expect(r.secretStatus).toBe("none");
+    const text = await readFile(file(dir), "utf8");
+    expect(text).toContain("base_url: http://127.0.0.1:1234/v1");
+    expect(text).toContain("locality: on_machine");
+    expect(text).toMatch(/^# compute\.yaml/); // the header this command writes for a file that did not exist
+    expect(lines.join("\n")).not.toContain(KEY);
+  });
+
+  it("reads the key from stdin into the USER Keychain account, never into argv or the file", async () => {
+    const dir = await instance();
+    const kc = fakeSecurity();
+    const http = fakeFetch({ "https://openrouter.ai/api/v1/models": { body: { data: [{ id: "anthropic/claude-sonnet-5" }] } } });
+    const { o } = harness(dir, { exec: kc.exec, fetchFn: http.fn, readSecret: async () => `${KEY}\n` });
+    const r = await providersAdd({ ...o, template: "openrouter" });
+
+    expect(r.secret).toBe("METISTRY_OPENROUTER_API_KEY");
+    expect(r.secretStatus).toBe("stored");
+    expect(kc.store.get(`${ACCOUNT}/metistry:METISTRY_OPENROUTER_API_KEY`)).toBe(KEY);
+    for (const c of kc.calls) expect(c.args.join(" ")).not.toContain(KEY); // stdin only
+    const text = await readFile(file(dir), "utf8");
+    expect(text).toContain("secret: METISTRY_OPENROUTER_API_KEY");
+    expect(text).not.toContain(KEY);
+
+    // and it ends with a real probe, carrying the bearer it just stored
+    expect(r.test?.ok).toBe(true);
+    expect(http.calls[0]?.url).toBe("https://openrouter.ai/api/v1/models");
+    expect((http.calls[0]?.init?.headers as Record<string, string>).authorization).toBe(`Bearer ${KEY}`);
+    expect(JSON.stringify(r)).not.toContain(KEY);
+  });
+
+  it("refuses a second provider of the same name, a bad --name, and a --secret that is a value", async () => {
+    const dir = await instance();
+    const { o } = harness(dir, { platform: "linux" });
+    await providersAdd({ ...o, template: "lmstudio", skipTest: true });
+    await expect(providersAdd({ ...o, template: "lmstudio", skipTest: true })).rejects.toThrow(/already declares provider lmstudio/);
+    await expect(providersAdd({ ...o, template: "lmstudio", name: "LM Studio", skipTest: true })).rejects.toThrow(/--name/);
+    await expect(providersAdd({ ...o, template: "openrouter", secret: KEY, skipTest: true })).rejects.toThrow(/never the key itself/);
+  });
+
+  it("--name and --base-url rewrite the template block", async () => {
+    const dir = await instance();
+    const { o } = harness(dir, { platform: "linux" });
+    await providersAdd({ ...o, template: "ollama", name: "box", baseUrl: "http://10.0.0.4:11434/v1", skipTest: true });
+    const text = await readFile(file(dir), "utf8");
+    expect(text).toContain("box:");
+    expect(text).toContain("base_url: http://10.0.0.4:11434/v1");
+  });
+
+  it("every shipped template is one named provider block", async () => {
+    for (const name of ["openrouter", "zen", "lmstudio", "ollama"] as const) {
+      expect((await readTemplate(SEED, name)).name).toBe(name);
+    }
+  });
+});
+
+describe("assign / budget: the file is edited in place and never left invalid", () => {
+  async function withLocal(): Promise<{ dir: string; o: ComputeOptions; lines: string[] }> {
+    const dir = await instance();
+    const { o, lines } = harness(dir, { platform: "linux" });
+    await providersAdd({ ...o, template: "lmstudio", skipTest: true });
+    return { dir, o, lines };
+  }
+
+  it("assigns default, a tier and a crew, keeping the file's comments", async () => {
+    const { dir, o } = await withLocal();
+    await writeFile(file(dir), `${await readFile(file(dir), "utf8")}\n# a note the operator wrote by hand\n`);
+    await assign({ ...o, target: parseAssignmentTarget("default"), model: "lmstudio/google/gemma-3n-e4b" });
+    const r = await assign({ ...o, target: parseAssignmentTarget("deep"), model: "lmstudio/google/gemma-3n-e4b", effort: "high" });
+    await assign({ ...o, target: parseAssignmentTarget("crew:researcher"), model: "lmstudio/google/gemma-3n-e4b" });
+    expect(r).toMatchObject({ target: "assignments.tiers.deep", provider: "lmstudio", model: "google/gemma-3n-e4b", effort: "high", warn_non_zdr: false });
+    const text = await readFile(file(dir), "utf8");
+    expect(text).toContain("# a note the operator wrote by hand");
+    expect(text).toContain("researcher:");
+    expect(text).toMatch(/model: lmstudio\/google\/gemma-3n-e4b/);
+  });
+
+  it("a tier cannot be assigned before default — every unknown tier lands there", async () => {
+    const { dir, o } = await withLocal();
+    await expect(assign({ ...o, target: parseAssignmentTarget("fast"), model: "lmstudio/a" })).rejects.toThrow(/assignments\.default is not set yet/);
+    expect(await readFile(file(dir), "utf8")).not.toContain("assignments:");
+  });
+
+  it("an effort already in the file survives a reassignment that does not name one", async () => {
+    const { dir, o } = await withLocal();
+    await assign({ ...o, target: parseAssignmentTarget("default"), model: "lmstudio/a" });
+    await assign({ ...o, target: parseAssignmentTarget("fast"), model: "lmstudio/a", effort: "low" });
+    const r = await assign({ ...o, target: parseAssignmentTarget("fast"), model: "lmstudio/b" });
+    expect(r.effort).toBe("low");
+  });
+
+  it("refuses a model whose provider is not in the file, naming the field, and writes nothing", async () => {
+    const { dir, o } = await withLocal();
+    await assign({ ...o, target: parseAssignmentTarget("default"), model: "lmstudio/a" });
+    const before = await readFile(file(dir), "utf8");
+    await expect(assign({ ...o, target: parseAssignmentTarget("deep"), model: "openrouter/anthropic/claude-sonnet-5" })).rejects.toThrow(/assignments\.tiers\.deep\.model/);
+    await expect(assign({ ...o, target: parseAssignmentTarget("deep"), model: "lmstudio/auto" })).rejects.toThrow(/auto-router/);
+    await expect(assign({ ...o, target: parseAssignmentTarget("deep"), model: "gemma" })).rejects.toThrow(/<provider>\/<model-id>/);
+    expect(await readFile(file(dir), "utf8")).toBe(before);
+  });
+
+  it("warns, never blocks, on an off_machine provider that does not claim ZDR (C13)", async () => {
+    const dir = await instance();
+    const kc = fakeSecurity({ [`${ACCOUNT}/metistry:METISTRY_ZEN_API_KEY`]: KEY });
+    const { o, lines } = harness(dir, { exec: kc.exec });
+    await providersAdd({ ...o, template: "zen", skipTest: true });
+    await assign({ ...o, target: parseAssignmentTarget("default"), model: "zen/example-model" });
+    const r = await assign({ ...o, target: parseAssignmentTarget("deep"), model: "zen/example-model" });
+    expect(r.warn_non_zdr).toBe(true);
+    expect(lines.join("\n")).toContain("zero data retention");
+    expect(await readFile(file(dir), "utf8")).toContain("model: zen/example-model");
+  });
+
+  it("budgets: an action with no limit is refused; --daily and --monthly accumulate", async () => {
+    const { dir, o } = await withLocal();
+    await expect(setBudget({ ...o, target: parseBudgetTarget("instance"), action: "stop" })).rejects.toThrow(/budgets\.instance.*never fires/s);
+    await setBudget({ ...o, target: parseBudgetTarget("instance"), monthly: 60, action: "stop" });
+    const r = await setBudget({ ...o, target: parseBudgetTarget("instance"), daily: 5, action: "critical_only" });
+    expect(r).toMatchObject({ target: "budgets.instance", daily_usd: 5, monthly_usd: 60, action: "critical_only" });
+    await setBudget({ ...o, target: parseBudgetTarget("provider:lmstudio"), daily: 1, action: "allow" });
+    expect(await readFile(file(dir), "utf8")).toContain("action: allow");
+    await expect(setBudget({ ...o, target: parseBudgetTarget("provider:nope"), daily: 1, action: "stop" })).rejects.toThrow(/budgets\.providers\.nope/);
+  });
+
+  it("refuses to remove a provider an assignment or a budget still names", async () => {
+    const { dir, o } = await withLocal();
+    await assign({ ...o, target: parseAssignmentTarget("default"), model: "lmstudio/a" });
+    await expect(providersRemove({ ...o, name: "lmstudio" })).rejects.toThrow(/assignments\.default/);
+    expect(await readFile(file(dir), "utf8")).toContain("lmstudio:");
+    await expect(providersRemove({ ...o, name: "nope" })).rejects.toThrow(/does not declare a provider called nope/);
+  });
+
+  it("removes an unreferenced provider", async () => {
+    const { dir, o } = await withLocal();
+    await providersAdd({ ...o, template: "ollama", skipTest: true });
+    await assign({ ...o, target: parseAssignmentTarget("default"), model: "ollama/llama" });
+    await providersRemove({ ...o, name: "lmstudio" });
+    const text = await readFile(file(dir), "utf8");
+    expect(text).not.toContain("lmstudio:");
+    expect(text).toContain("ollama:");
+  });
+});
+
+describe("test / models list: live probes through the one seam", () => {
+  it("carries the bearer, reports the model count, and fails a 401 without printing the key", async () => {
+    const dir = await instance();
+    const kc = fakeSecurity({ [`${ACCOUNT}/metistry:METISTRY_OPENROUTER_API_KEY`]: KEY });
+    const http = fakeFetch({ "https://openrouter.ai/api/v1/models": { status: 401, body: { error: "no" } } });
+    const { o } = harness(dir, { exec: kc.exec, fetchFn: http.fn });
+    await providersAdd({ ...o, template: "openrouter", skipTest: true });
+    const t = await providerTest({ ...o, name: "openrouter" });
+    expect(t.ok).toBe(false);
+    expect(t.detail).toContain("HTTP 401");
+    expect(renderProviderTest(t)).toContain("FAILED");
+    expect(JSON.stringify(t)).not.toContain(KEY);
+  });
+
+  it("--complete makes one real one-token call on an assigned model, with the provider's request block", async () => {
+    const dir = await instance();
+    const kc = fakeSecurity({ [`${ACCOUNT}/metistry:METISTRY_OPENROUTER_API_KEY`]: KEY });
+    const http = fakeFetch({
+      "https://openrouter.ai/api/v1/models": { body: { data: [{ id: "z" }, { id: "anthropic/claude-sonnet-5" }] } },
+      "https://openrouter.ai/api/v1/chat/completions": { body: { choices: [] } },
+    });
+    const { o } = harness(dir, { exec: kc.exec, fetchFn: http.fn });
+    await providersAdd({ ...o, template: "openrouter", skipTest: true });
+    await assign({ ...o, target: parseAssignmentTarget("default"), model: "openrouter/anthropic/claude-sonnet-5" });
+    const t = await providerTest({ ...o, name: "openrouter", complete: true });
+    expect(t.completion).toMatchObject({ ok: true, model: "anthropic/claude-sonnet-5" });
+    const body = JSON.parse(String(http.calls.at(-1)?.init?.body));
+    expect(body).toMatchObject({ model: "anthropic/claude-sonnet-5", max_tokens: 1, provider: { order: ["anthropic"], allow_fallbacks: false } });
+  });
+
+  it("a missing Keychain item names the variable and how to store it, never a value", async () => {
+    const dir = await instance();
+    const kc = fakeSecurity();
+    const { o } = harness(dir, { exec: kc.exec, fetchFn: fakeFetch({}).fn });
+    await providersAdd({ ...o, template: "openrouter", skipTest: true, readSecret: async () => KEY });
+    kc.store.clear();
+    await expect(providerTest({ ...o, name: "openrouter" })).rejects.toThrow(/METISTRY_OPENROUTER_API_KEY, which is not in the login Keychain/);
+    await expect(providerTest({ ...o, name: "nope" })).rejects.toThrow(/providers\.nope is not declared/);
+  });
+
+  it("models list reports every declared provider, and an unreachable local server says so", async () => {
+    const dir = await instance();
+    const http = fakeFetch({ "http://127.0.0.1:1234/v1/models": { body: { data: [{ id: "google/gemma-3n-e4b" }] } } });
+    const { o } = harness(dir, { platform: "linux", fetchFn: http.fn });
+    await providersAdd({ ...o, template: "lmstudio", skipTest: true });
+    await providersAdd({ ...o, template: "ollama", skipTest: true });
+    const r = await modelsList({ ...o });
+    expect(r.providers.map((p) => p.name)).toEqual(["lmstudio", "ollama"]);
+    expect(r.providers[0]?.models).toEqual(["google/gemma-3n-e4b"]);
+    expect(r.providers[1]?.ok).toBe(false); // no route: HTTP 502 from the fake
+    expect(renderModelsList(r)).toContain("lmstudio/google/gemma-3n-e4b");
+    expect((await modelsList({ ...o, provider: "lmstudio" })).providers).toHaveLength(1);
+  });
+});
+
+describe("show", () => {
+  it("reports the overlay, secret PRESENCE (never a value), assignments and the non-ZDR warning", async () => {
+    const dir = await instance();
+    const kc = fakeSecurity({ [`${ACCOUNT}/metistry:METISTRY_ZEN_API_KEY`]: KEY });
+    const { o } = harness(dir, { exec: kc.exec });
+    const empty = await computeReport(o);
+    expect(empty.assigns_nothing).toBe(true);
+    expect(renderComputeReport(empty)).toContain("rules.yaml's `tiers:` is still the live map");
+
+    await providersAdd({ ...o, template: "zen", skipTest: true });
+    await assign({ ...o, target: parseAssignmentTarget("default"), model: "zen/example-model" });
+    await assign({ ...o, target: parseAssignmentTarget("deep"), model: "zen/example-model", effort: "high" });
+    await setBudget({ ...o, target: parseBudgetTarget("instance"), monthly: 60, action: "stop" });
+    const r = await computeReport(o);
+    expect(r.file).toBe(file(dir));
+    expect(r.files).toEqual([join(SEED, "compute.yaml"), file(dir)]); // seed first, the instance's own last
+    expect(r.providers[0]).toMatchObject({ name: "zen", secret: "METISTRY_ZEN_API_KEY", secret_present: true, models_assigned: ["example-model"] });
+    expect(r.assignments.map((a) => a.target)).toEqual(["default", "deep"]);
+    expect(r.assignments[1]).toMatchObject({ target: "deep", provider: "zen", effort: "high", warn_non_zdr: true });
+    expect(r.instance_budget).toMatchObject({ monthly_usd: 60, action: "stop" });
+    const text = renderComputeReport(r);
+    expect(text).toContain("METISTRY_ZEN_API_KEY (in Keychain)");
+    expect(text).not.toContain(KEY);
+    expect(text).toContain("Not wired yet");
+    expect(JSON.stringify(r)).not.toContain(KEY);
+  });
+});
+
+describe("metistry compute (the command)", () => {
+  const run = async (args: string[], exec?: Exec) => {
+    const out: string[] = [];
+    const err: string[] = [];
+    const code = await main(args, { out: (s) => out.push(s), err: (s) => err.push(s), platform: "linux", uid: 501, ...(exec ? { exec } : {}) });
+    return { code, out: out.join("\n"), err: err.join("\n") };
+  };
+
+  it("show --json on an instance with no compute.yaml: valid, empty, and honest about it", async () => {
+    const dir = await instance();
+    const r = await run(["compute", "show", "--json", "--instance", dir, "--product-dir", REPO]);
+    expect(r.code).toBe(0);
+    const report = JSON.parse(r.out);
+    expect(report.assigns_nothing).toBe(true);
+    expect(report.providers).toEqual([]);
+    expect(report.file).toBe(join(SEED, "compute.yaml")); // the seed's, which assigns nothing
+  });
+
+  it("add → assign → budget → show, all through the command, and each write lands in the instance's file", async () => {
+    const dir = await instance();
+    const P = ["--instance", dir, "--product-dir", REPO];
+    expect((await run(["compute", "providers", "add", "--from", "lmstudio", "--skip-test", ...P])).code).toBe(0);
+    expect((await run(["compute", "assign", "default", "lmstudio/google/gemma-3n-e4b", ...P])).code).toBe(0);
+    expect((await run(["compute", "assign", "routine", "lmstudio/google/gemma-3n-e4b", "--effort", "low", ...P])).code).toBe(0);
+    expect((await run(["compute", "budget", "instance", "--monthly", "60", "--action", "stop", ...P])).code).toBe(0);
+    const text = await readFile(file(dir), "utf8");
+    expect(text).toContain("lmstudio:");
+    expect(text).toContain("routine:");
+    expect(text).toContain("monthly_usd: 60");
+
+    const shown = JSON.parse((await run(["compute", "show", "--json", ...P])).out);
+    expect(shown.assignments.map((a: { target: string }) => a.target)).toEqual(["default", "routine"]);
+  });
+
+  it("usage errors exit 2 and change nothing", async () => {
+    const dir = await instance();
+    const P = ["--instance", dir, "--product-dir", REPO];
+    expect((await run(["compute", "providers", "add", "--from", "anthropic", ...P])).code).toBe(2);
+    expect((await run(["compute", "budget", "instance", "--daily", "5", "--action", "warn", ...P])).code).toBe(2);
+    expect((await run(["compute", "nonesuch", ...P])).code).toBe(2);
+    delete process.env.METISTRY_INSTANCE_DIR; // loadInstallEnv writes it back into the environment; an earlier test's --instance must not answer for this one
+    expect((await run(["compute", "show"])).code).toBe(2); // no instance dir
+    expect(existsSync(file(dir))).toBe(false);
+  });
+
+  it("a refusal from the schema exits 1 with the field in it", async () => {
+    const dir = await instance();
+    const P = ["--instance", dir, "--product-dir", REPO];
+    await run(["compute", "providers", "add", "--from", "lmstudio", "--skip-test", ...P]);
+    await run(["compute", "assign", "default", "lmstudio/a", ...P]);
+    const r = await run(["compute", "assign", "deep", "openrouter/anthropic/claude-sonnet-5", ...P]);
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("assignments.tiers.deep.model");
+  });
+
+  it("--dry-run prints the plan and writes nothing", async () => {
+    const dir = await instance();
+    const r = await run(["compute", "providers", "add", "--from", "ollama", "--dry-run", "--instance", dir, "--product-dir", REPO]);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("[dry-run]");
+    expect(existsSync(file(dir))).toBe(false);
+  });
+});

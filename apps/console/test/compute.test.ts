@@ -38,7 +38,7 @@ describe("recordComputeReload", () => {
     expect(db.calls).toHaveLength(2);
     expect(db.calls[0]?.text).toContain("INSERT INTO runs");
     expect(db.calls[0]?.values.slice(0, 2)).toEqual(["console", "config"]);
-    expect(JSON.parse(String(db.calls[0]?.values[5]))).toEqual({ file: "compute.yaml", in_force: "seed/compute.yaml" });
+    expect(JSON.parse(String(db.calls[0]?.values[6]))).toEqual({ file: "compute.yaml", in_force: "seed/compute.yaml" });
     expect(db.calls[1]?.values[1]).toBe(false); // ok = false
     expect(String(db.calls[1]?.values[2])).toContain("the last good configuration is still in force");
   });

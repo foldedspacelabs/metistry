@@ -345,6 +345,24 @@ describe(".github/workflows/release.yml", () => {
     expect(repoFile("ops/release/build-app.sh")).toContain("--identifier com.foldedspacelabs.metistry");
   });
 
+  it("the bundle carries the ONE agent where SMAppService.agent(plistName:) looks, and the audit lets a plist through", () => {
+    // `SMAppService.agent(plistName:)` resolves exactly one path:
+    // <app>/Contents/Library/LaunchAgents/<plistName>. The Swift call names
+    // the file; build-app.sh puts it there; neither may drift from the other.
+    const build = repoFile("ops/release/build-app.sh");
+    expect(build).toContain('mkdir -p "$contents/Library/LaunchAgents"');
+    expect(build).toContain('cp "$app_src/resources/launchd/com.foldedspacelabs.metistry.plist" "$contents/Library/LaunchAgents/com.foldedspacelabs.metistry.plist"');
+    expect(repoFile("apps/macos/sources/kit/background-agent.swift")).toContain('"com.foldedspacelabs.metistry.plist"');
+    // Its BundleProgram is a RESOURCE, not Contents/MacOS: codesign treats
+    // everything in MacOS/ as nested code needing its own signature, and a
+    // shell script cannot carry one (the v0.7.0 DMG job learned this).
+    expect(repoFile("apps/macos/resources/launchd/com.foldedspacelabs.metistry.plist")).toContain("<key>BundleProgram</key><string>Contents/Resources/MetistrySupervisor</string>");
+    expect(build).toContain('cp "$app_src/resources/launchd/metistry-supervisor" "$contents/Resources/MetistrySupervisor"');
+    // …and the pre-notarization audit walks every file but only judges the
+    // Mach-O ones, so a plist sealed under Contents/Library is not a finding.
+    expect(build).toMatch(/case "\$\(file -b "\$f"\)" in Mach-O\*\) ;; \*\) continue ;; esac/);
+  });
+
   it("no assistant name is baked into the app (CLAUDE.md: it lives only in identity.yaml)", () => {
     // The one place a name can enter is the wizard's text field, which sends it
     // to `metistry init --name`. Every Swift source is walked rather than a

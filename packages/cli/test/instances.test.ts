@@ -19,6 +19,7 @@ import {
   parseInstanceVerb,
   renderInstances,
 } from "../src/instances.js";
+import { main } from "../src/main.js";
 
 const SELF = "11111111-2222-4333-8444-555555555555";
 const PEER = "a1b2c3d4-2222-4333-8444-666666666666";
@@ -235,5 +236,21 @@ describe("rendering", () => {
     const text = renderInstances(await instancesList(base(dir, fetchFn).opts));
     expect(text).toContain("instances add <origin>");
     expect(text).toContain("does not exist yet");
+  });
+});
+
+describe("metistry instances via main(): --json purity", () => {
+  it("remove --json: exactly one JSON document on stdout, the protected write's step lines on stderr", async () => {
+    const dir = await scratch();
+    const seed = fakeIdentity({ "https://peer.example": { body: identityBody(PEER, "Peer") } });
+    await instancesAdd({ ...base(dir, seed.fetchFn).opts, origin: "https://peer.example" });
+
+    const out: string[] = [];
+    const err: string[] = [];
+    const code = await main(["instances", "remove", PEER, "--json", "--instance", dir], { out: (l) => out.push(l), err: (l) => err.push(l), platform: "linux", uid: 501 });
+    expect(code).toBe(0);
+    const parsed = JSON.parse(out.join("\n")); // throws if a step line leaked onto stdout ahead of the document
+    expect(parsed).toMatchObject({ action: "removed", instances: [] });
+    expect(err.join("\n")).toContain("removed instance Peer");
   });
 });

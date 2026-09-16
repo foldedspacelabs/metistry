@@ -50,7 +50,9 @@ describe.skipIf(!hasDb)("artifacts (real db, memory vault)", () => {
     await pool.query(`DELETE FROM artifact_comments WHERE artifact_id IN (SELECT id FROM artifacts WHERE project IN ($1, $2, $3))`, [P, P2, P3]);
     await pool.query(`DELETE FROM artifact_versions WHERE artifact_id IN (SELECT id FROM artifacts WHERE project IN ($1, $2, $3))`, [P, P2, P3]);
     await pool.query(`DELETE FROM artifacts WHERE project IN ($1, $2, $3)`, [P, P2, P3]);
-    await pool.query(`DELETE FROM work WHERE project IN ($1, $2, $3)`, [P, P2, P3]);
+    await pool.query(`DELETE FROM artifact_comments WHERE work_id IN (SELECT id FROM work WHERE project IN ($1, $2, $3) OR title = 'no project')`, [P, P2, P3]);
+    await pool.query(`DELETE FROM proposals WHERE work_id IN (SELECT id FROM work WHERE project IN ($1, $2, $3) OR title = 'no project')`, [P, P2, P3]);
+    await pool.query(`DELETE FROM work WHERE project IN ($1, $2, $3) OR title = 'no project'`, [P, P2, P3]);
     await pool.query(`DELETE FROM proposals WHERE source_agent = ANY($1::text[])`, [IDS]);
     await pool.query(`DELETE FROM runs WHERE kind = 'artifact_op' AND component = ANY($1::text[])`, [["user", ...IDS]]);
     await pool.query(`DELETE FROM runs WHERE kind = 'project_mode' AND meta->>'project' = $1`, [P3]);
@@ -173,6 +175,124 @@ describe.skipIf(!hasDb)("artifacts (real db, memory vault)", () => {
     expect((props.rows[0]!.payload as { transcript: unknown[] }).transcript).toHaveLength(3); // the refused replies were not stored
     expect((await svc.commentReply({ parent: id, body: "settle down" }, user))?.demoted).toBe(false); // human resets the run
     expect((await svc.commentReply({ parent: id, body: "ok" }, bob))?.demoted).toBe(false);
+  });
+
+  // --- rooms on work rows (0016) --------------------------------------------------
+
+  describe("work threads: the task is the room", () => {
+    let roomWork: number;
+    let otherWork: number; // in P2 — carol's project, not alice's
+    let looseWork: number; // no project at all: the user's alone
+
+    beforeAll(async () => {
+      roomWork = (await tasks.create({ title: "scope the migration", project: P, kind: "task" }, "user")).id;
+      otherWork = (await tasks.create({ title: "someone else's", project: P2, kind: "task" }, "user")).id;
+      const { rows } = await pool.query(`INSERT INTO work (title, kind, status) VALUES ('no project', 'task', 'open') RETURNING id`);
+      looseWork = Number(rows[0]!.id);
+    });
+
+    it("the schema allows exactly one parent: an artifact anchor OR a work anchor, never both, never neither", async () => {
+      const both = pool.query(
+        `INSERT INTO artifact_comments (id, artifact_id, version_id, work_id, body, author_principal, author_kind) VALUES ($1, $2, $3, $4, 'x', 'user', 'human')`,
+        [`cmt_${"0".repeat(26)}`, artifactId, v2, roomWork],
+      );
+      await expect(both).rejects.toMatchObject({ constraint: "artifact_comments_one_parent" });
+      const neither = pool.query(
+        `INSERT INTO artifact_comments (id, body, author_principal, author_kind) VALUES ($1, 'x', 'user', 'human')`,
+        [`cmt_${"1".repeat(26)}`],
+      );
+      await expect(neither).rejects.toMatchObject({ constraint: "artifact_comments_one_parent" });
+      // and an artifact thread still names an exact version
+      const halfArtifact = pool.query(
+        `INSERT INTO artifact_comments (id, artifact_id, body, author_principal, author_kind) VALUES ($1, $2, 'x', 'user', 'human')`,
+        [`cmt_${"2".repeat(26)}`, artifactId],
+      );
+      await expect(halfArtifact).rejects.toMatchObject({ constraint: "artifact_comments_version_with_artifact" });
+    });
+
+    it("an empty room is a valid room; appending opens it, and everyone who has spoken is a participant", async () => {
+      const empty = await svc.workThread(roomWork, alice);
+      expect(empty).toMatchObject({ work_id: roomWork, project: P, state: "open", comments: [], participants: [], agent_tail: 0, cap: 3 });
+      expect(empty!.link).toBe(`https://itest.example/#/rooms/work/${roomWork}`);
+
+      const first = await svc.workComment({ work: roomWork, body: "does this include the migration?" }, alice);
+      expect(first).toMatchObject({ demoted: false, comment: { work_id: roomWork, author_principal: alice.id, author_kind: "agent", parent_id: null } });
+      const second = await svc.workComment({ work: roomWork, body: "it does — I will take the schema" }, bob);
+      expect(second).toMatchObject({ demoted: false, comment: { parent_id: (first as { comment: { id: string } }).comment.id } }); // one room: replies hang off the root
+
+      const t = await svc.workThread(roomWork, bob);
+      expect(t!.comments.map((c) => c.body)).toEqual(["does this include the migration?", "it does — I will take the schema"]); // newest LAST
+      expect(t!.participants).toEqual([
+        { principal: alice.id, kind: "agent", comments: 1 },
+        { principal: bob.id, kind: "agent", comments: 1 },
+      ]);
+      expect(t!.agent_tail).toBe(2);
+      // one root per work row, enforced in the schema
+      const roots = await pool.query(`SELECT count(*)::int AS n FROM artifact_comments WHERE work_id = $1 AND parent_id IS NULL`, [roomWork]);
+      expect(roots.rows[0]!.n).toBe(1);
+    });
+
+    it("every append is a runs row on the principal (kind artifact_op, op work_comment)", async () => {
+      const { rows } = await pool.query(
+        `SELECT ok, meta FROM runs WHERE kind = 'artifact_op' AND meta->>'op' = 'work_comment' AND (meta->>'work_id')::int = $1 ORDER BY id`,
+        [roomWork],
+      );
+      expect(rows).toHaveLength(2);
+      expect(rows[0]).toMatchObject({ ok: true, meta: expect.objectContaining({ module: "artifacts", project: P, principal_kind: "agent" }) });
+    });
+
+    it("scope is the same grant tasks_* gets: another project's row, and a row with NO project, do not exist for an agent", async () => {
+      expect(await svc.workThread(otherWork, alice)).toBeNull();
+      expect(await svc.workComment({ work: otherWork, body: "hello" }, alice)).toBeNull();
+      expect(await svc.workThread(looseWork, alice)).toBeNull(); // a project is the unit of coordination
+      expect(await svc.workThread(looseWork, user)).not.toBeNull(); // the user sees their own row
+      expect(await svc.workThread(999_999_999, user)).toBeNull();
+      expect(await svc.workThread(otherWork, carol)).not.toBeNull(); // carol IS a member of P2
+    });
+
+    it("the ping-pong cap applies to a room: the next agent message is not stored, the room demotes to ONE proposal that NAMES the work row, and a human message resets", async () => {
+      expect((await svc.workComment({ work: roomWork, body: "third" }, alice))?.demoted).toBe(false); // 3 = cap
+      const d = await svc.workComment({ work: roomWork, body: "fourth" }, bob);
+      expect(d).toMatchObject({ demoted: true, cap: 3 });
+      const again = await svc.workComment({ work: roomWork, body: "fifth" }, alice);
+      expect(again).toMatchObject({ demoted: true, proposal_id: (d as { proposal_id: number }).proposal_id }); // once, while pending
+
+      const props = await pool.query(`SELECT kind, source_agent, work_id, payload FROM proposals WHERE work_id = $1`, [roomWork]);
+      expect(props.rows).toHaveLength(1);
+      expect(props.rows[0]).toMatchObject({ kind: "review", source_agent: bob.id, work_id: String(roomWork) });
+      expect(props.rows[0]!.payload).toMatchObject({ reason: "ping_pong_cap", cap: 3, work_id: roomWork, project: P });
+      expect((props.rows[0]!.payload as { transcript: unknown[] }).transcript).toHaveLength(3); // the refused messages were not stored
+      expect((await svc.workThread(roomWork, user))!.comments).toHaveLength(3);
+
+      // the human turn is the release valve
+      expect((await svc.workComment({ work: roomWork, body: "include it; ship the migration" }, user))?.demoted).toBe(false);
+      expect((await svc.workThread(roomWork, user))!.agent_tail).toBe(0);
+      expect((await svc.workComment({ work: roomWork, body: "on it" }, alice))?.demoted).toBe(false);
+    });
+
+    it("resolve is the USER's hand and nothing else — no agent, no system principal, and no artifact verb reaches a room", async () => {
+      await expect(svc.workThreadResolve(roomWork, alice)).rejects.toMatchObject({ code: "forbidden" });
+      await expect(svc.workThreadResolve(roomWork, { kind: "system", id: "sweeper" })).rejects.toMatchObject({ code: "forbidden" });
+      expect((await svc.workThread(roomWork, user))!.state).toBe("open"); // nothing moved
+
+      const rootId = (await svc.workThread(roomWork, user))!.comments[0]!.id;
+      expect(await svc.commentResolve(rootId, user)).toBeNull(); // artifacts_resolve cannot address a room
+      expect(await svc.commentReply({ parent: rootId, body: "sneaking in" }, alice)).toBeNull(); // nor artifacts_comment
+
+      const resolved = await svc.workThreadResolve(roomWork, user);
+      expect(resolved).toMatchObject({ state: "resolved", resolved_by: "user" });
+      expect(resolved!.resolved_at).toBeInstanceOf(Date);
+      expect((await svc.workThreadReopen(roomWork, user))).toMatchObject({ state: "open", resolved_by: null, resolved_at: null });
+      const rec = await pool.query(`SELECT meta FROM runs WHERE kind = 'artifact_op' AND meta->>'op' IN ('work_resolve', 'work_reopen') AND (meta->>'work_id')::int = $1`, [roomWork]);
+      expect(rec.rows).toHaveLength(2);
+    });
+
+    it("an agent can still say something after the user resolved it — a room is a record, not a gate", async () => {
+      await svc.workThreadResolve(roomWork, user);
+      expect((await svc.workComment({ work: roomWork, body: "one more thing" }, bob))?.demoted).toBe(false);
+      expect((await svc.workThread(roomWork, user))!.state).toBe("resolved");
+      await svc.workThreadReopen(roomWork, user);
+    });
   });
 
   it("dispatch inside the project → ONE work row of kind review, claimable through the tasks module; addressed is inferred from thread states", async () => {

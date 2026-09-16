@@ -75,6 +75,13 @@ component writing these rows. This adds neither.
 `inbox-drain` then classifies the `new` rows into proposals exactly as it
 always has — it never moves or deletes a file.
 
+This is also what makes the inbox pass invariant 1's test. After `docker
+compose down -v` the `inbox` table is empty; the first reconcile cycle
+rebuilds a row for every file still in `Knowledge/Inbox/`, because the files
+are in git. What does not come back is the triage *outcome* (everything
+returns as `new`), which is the honest remainder of plan-review SHOULD-20 —
+still open, and now the only part of the inbox that a rebuild loses.
+
 ## Nothing overwrites your edit
 
 Two rules, both enforced at the tool rather than in a prompt:

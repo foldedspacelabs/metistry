@@ -23,6 +23,13 @@ export const BRAIN_SERVER = "brain";
  * them regardless of a `queries` grant. `knowledge_list` / `knowledge_grep`
  * are filesystem semantics over the same `areas` grant knowledge_read uses
  * (docs/research/2026-09-stash-review.md item 3) — no separate scope.
+ *
+ * `propose_action` (docs/ops/actions.md) is on the list because the list IS
+ * the manifest — but the bridge registers it only for a credential whose
+ * `autonomy` table admits an action, and the assistant's registry row carries
+ * none until the owner sets a level. An allowlist that omitted it would turn
+ * "the owner gave the assistant room" into a silent, unexplained refusal here
+ * instead of a working tool; the gate stays where it is enforced.
  */
 export const BRAIN_TOOLS = [
   "capture",
@@ -50,6 +57,7 @@ export const BRAIN_TOOLS = [
   "agents_delegate",
   "queries_list",
   "queries_run",
+  "propose_action",
 ] as const;
 
 export interface BrainConfig {

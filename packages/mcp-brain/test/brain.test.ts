@@ -21,16 +21,22 @@ describe("manifest", () => {
     if (parsed.manifest.type !== "bridge") return;
     expect(parsed.manifest.discovery).toBe("eager");
     expect(parsed.manifest.exposes.map((t) => t.name)).toEqual([...TOOL_NAMES]);
-    expect(TOOL_NAMES.length).toBeLessThanOrEqual(25); // over the PoC-17 tool-COUNT guidance (>20) since knowledge_list/knowledge_grep, tasks_close and the two room tools — the definition-token axis is what actually gates lazy; see "definition size" below
+    // 26 DECLARED, 25 of them eager: `propose_action` is registered only for a
+    // credential the owner has given room (docs/ops/actions.md), which is what
+    // keeps the eager budget below where it was. Both numbers are asserted, so
+    // a tool added without a discovery decision fails here first.
+    expect(TOOL_NAMES.length).toBeLessThanOrEqual(26);
+    expect(TOOL_NAMES.filter((n) => n !== "propose_action").length).toBeLessThanOrEqual(25);
     expect(parsed.manifest.exposes.map((t) => t.name).filter((n) => Object.hasOwn(TOOL_ALIASES, n))).toEqual([]); // deprecated spellings never reach the listed surface
     expect(parsed.manifest.exposes.every((t) => !t.destructive)).toBe(true); // nothing here mutates the user's world irreversibly: rows, not calendars
   });
 });
 
 describe("definition size (docs/research/2026-08-tool-discovery.md's other axis)", () => {
-  it("the full tools/list definition stays well under the >5k-token line that would make discovery: lazy worth its +1-turn cost", async () => {
+  /** What one principal actually sees listed, and what those definitions cost. */
+  async function listedFor(principal: AgentPrincipal): Promise<{ names: string[]; tokens: number }> {
     const db = fakeDb({}, []);
-    const brain = createBrainServer({ db, authenticate: async () => alice, tasks: new TasksService(db), inboxDir: "/tmp/unused" });
+    const brain = createBrainServer({ db, authenticate: async () => principal, tasks: new TasksService(db), inboxDir: "/tmp/unused" });
     const server = createServer((req, res) => void brain.handle(req, res));
     await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
     const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -40,13 +46,35 @@ describe("definition size (docs/research/2026-08-tool-discovery.md's other axis)
       const { tools } = await client.listTools();
       await client.close();
       const chars = JSON.stringify(tools).length;
-      const approxTokens = Math.ceil(chars / 4); // the industry's own rule of thumb (docs/research/2026-08-tool-discovery.md §1)
       // eslint-disable-next-line no-console
-      console.log(`mcp-brain tools/list: ${tools.length} tools, ${chars} chars, ~${approxTokens} tokens (PoC-17 lazy-load line: 5000)`);
-      expect(approxTokens).toBeLessThan(5000);
+      console.log(`mcp-brain tools/list (${principal.id}): ${tools.length} tools, ${chars} chars, ~${Math.ceil(chars / 4)} tokens (PoC-17 lazy-load line: 5000)`);
+      return { names: tools.map((t) => t.name), tokens: Math.ceil(chars / 4) }; // chars/4 is the industry's own rule of thumb (§1)
     } finally {
       await new Promise<void>((r) => server.close(() => r()));
     }
+  }
+
+  it("the EAGER definition stays under the >5k-token line that would make discovery: lazy worth its +1-turn cost", async () => {
+    const { names, tokens } = await listedFor(alice);
+    expect(names).not.toContain("propose_action"); // alice has no autonomy record: the group is not offered at all
+    expect(names.length).toBe(25);
+    expect(tokens).toBeLessThan(5000);
+  });
+
+  it("propose_action rides only on a credential the owner gave room — that is this group's lazy (docs/ops/actions.md)", async () => {
+    const actor: AgentPrincipal = { ...alice, id: "actor", autonomy: { level: "propose" } };
+    const { names, tokens } = await listedFor(actor);
+    expect(names).toContain("propose_action");
+    expect(names.length).toBe(26);
+    // Crossing the 5k line here is the KNOWN cost of opting in, not a
+    // regression: the eager surface above is what every other agent pays, and
+    // deferring by credential costs none of the +1 discovery turn a
+    // tool_index/execute/batch index would. The bound is a ceiling on the one
+    // definition, so the tool cannot grow unnoticed.
+    expect(tokens).toBeLessThan(5400);
+    // a level that admits nothing is exactly alice again — the refusal is the absence
+    const observer: AgentPrincipal = { ...alice, id: "observer", autonomy: { level: "observe", actions: { comment: "allow" } } };
+    expect((await listedFor(observer)).names).not.toContain("propose_action");
   });
 });
 

@@ -1,4 +1,4 @@
-export { createBrainServer, sanitizeDeep, TASK_FILTERS, TOOL_NAMES, type BrainConfig, type BrainServer, type TaskFilter, type ToolName } from "./server.js";
+export { createBrainServer, sanitizeDeep, EAGER_TOOL_NAMES, TASK_FILTERS, TOOL_NAMES, type BrainConfig, type BrainServer, type TaskFilter, type ToolName } from "./server.js";
 export { ALIAS_NAMES, TOOL_ALIASES, resolveAliasCall } from "./aliases.js";
 export {
   captureToInbox,
@@ -70,4 +70,5 @@ export { ARTIFACTS_TOOL_NAMES, registerArtifactTools, toPrincipal, type Artifact
 export { THREAD_TOOL_NAMES, registerThreadTools, type ThreadToolName } from "./thread-tools.js";
 export { CREW_TOOL_NAMES, registerCrewTools, type CrewDispatcher, type CrewDispatchInput, type CrewDispatchOutcome, type CrewToolName } from "./crew-tools.js";
 export { QUERIES_TOOL_NAMES, registerQueriesTools, MAX_ROWS as QUERIES_MAX_ROWS, type QueriesToolName } from "./queries-tools.js";
+export { ACTION_TOOL_NAMES, registerActionTools, proposeAction, type ActionExecutor, type ActionExecution, type ActionToolName } from "./action-tools.js";
 export { type Outcome } from "./outcome.js";

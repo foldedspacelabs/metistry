@@ -102,7 +102,6 @@ path.
 | `connect-repo --auth token` | it reads the PAT from **stdin**, and the app gives every child an empty stdin on purpose so no verb can hang a progress view waiting for a paste | the wizard shows the option, disabled, with that reason; run it in a terminal |
 | **Minting an enrolment code** | there is no HTTP route that mints one, deliberately — whoever can run the host command already controls Postgres and the vault, so shell access is the root of trust for a first passkey (plan §4.2) — and `metistry enroll` is on the CLI's own "not yet" list | step 6 shows the exact `scripts/enroll.mjs` command and takes the code you paste back |
 | **A QR code** for the phone | nothing in this product renders one yet; `apps/console/scripts/enroll.mjs` says the same about itself ("QR rendering arrives with `packages/cli`"), and an encoder is a dependency nobody has asked for | step 6 shows the enrolment URL, selectable, to type or hand over |
-| **Registering the launchd agents through `SMAppService`** | **"Start at login" is real now** — it registers *this app*, `SMAppService.mainApp`. The install's own agent (there is exactly one) is embedded in the bundle and `metistry up --register-via app` stands ready for it; the `SMAppService.agent(plistName:)` call itself is the app's next change. See "Start at login" below | nothing; `metistry up` owns that job and it already starts at login |
 | **The other eight destinations** | Feed, Chat, Agents, Projects, Artifacts, Capture, Needs You, Devices (design-system P6) | the PWA — "Add to Dock" in Safari |
 | **An iOS target** | `MetistryKit` is already free of AppKit and of `Process` so it can be shared; there is no iOS target in `Package.swift` | — |
 
@@ -114,6 +113,10 @@ belongs and the app still writes no file); "Start at login" (`SMAppService.mainA
 which needed no CLI change at all — the old entry had conflated it with the
 launchd agents); and "an instance id" (`metistry init` mints one into
 `identity.yaml`, and `metistry identity --json` reports it).
+
+**A fifth left it on 2026-09-17**: registering the install's launchd agent
+through `SMAppService.agent(plistName:)`. The app does that now, and Settings
+has the toggle — "The install's agent, nested under the app" below.
 
 An empty destination is not listed as a greyed-out placeholder. §3.15's
 distinction holds throughout: *empty* (nothing has happened) and *absent* (never
@@ -271,23 +274,26 @@ naming:
 has nothing to register and answers `notFound`. The pane says exactly that and
 points at `ops/release/build-app.sh`.
 
-### The install's agent, nested under the app (2026-09-10)
+### The install's agent, nested under the app (2026-09-17)
 
 The objection to `SMAppService.agent(plistName:)` used to be that it would mean
 registering a *job set* — several plists, signed and unwritable, in place of
 the ones `metistry up` renders. There is one job now (`docs/ops/deployment-shapes.md`,
-"One background item, called Metistry"): the supervisor. That makes the move
-small enough to be worth it, because it is what turns two rows in System
-Settings — the app, and a background item beside it — into one row with the
-agent nested underneath.
+"One background item, called Metistry"): the supervisor. That made the move
+small enough to be worth it, and it is what turns two rows in System Settings —
+the app, and a background item beside it — into one row with the agent nested
+underneath.
 
-The CLI half is done:
+**It is done.** The bundle carries the agent, the app registers it, and Settings
+has a toggle for it beside the app's own.
 
 | | |
 |---|---|
-| `apps/macos/resources/launchd/com.foldedspacelabs.metistry.plist` | the agent as the app registers it; `build-app.sh` copies it to `Contents/Library/LaunchAgents/`, where `SMAppService.agent(plistName:)` looks |
-| `apps/macos/resources/launchd/MetistrySupervisor` | its `BundleProgram`, copied to `Contents/Resources/` (not `MacOS/`, where codesign would demand a nested signature a script cannot carry). A plist inside a signed bundle is immutable and identical on every Mac, and `BundleProgram` is its only bundle-relative key — so this small script is what turns "the app's agent" into "this Mac's install" |
+| `apps/macos/resources/launchd/com.foldedspacelabs.metistry.plist` | the agent as the app registers it; `build-app.sh` copies it to `Contents/Library/LaunchAgents/`, the one path `SMAppService.agent(plistName:)` resolves |
+| `apps/macos/resources/launchd/metistry-supervisor` | its `BundleProgram`, copied to `Contents/Resources/MetistrySupervisor` (not `MacOS/`, where codesign would demand a nested signature a script cannot carry). A plist inside a signed bundle is immutable and identical on every Mac, and `BundleProgram` is its only bundle-relative key — so this small script is what turns "the app's agent" into "this Mac's install" |
 | `~/Library/Application Support/Metistry/supervisor.env` | the three paths it reads: this install's node (as `Metistry`), the supervisor's entry point, and `<instance>/state/supervisor.json`. Written by `metistry up --register-via app`, shell-quoted (the app's own default location has a space in it) |
+| `apps/macos/sources/kit/background-agent.swift` | `BackgroundAgentService` (the seam) and `BackgroundAgentModel` (the states, the prose). Named for what macOS calls it — a *background item* — rather than for the API |
+| `apps/macos/sources/app/login-item-service.swift` | both implementations: `SMAppServiceLoginItem` (`.mainApp`) and `SMAppServiceBackgroundAgent` (`.agent(plistName:)`) |
 | `metistry up --register-via app` | does everything a normal `up` does **except** install the supervisor's agent into `~/Library/LaunchAgents` — the app registers its bundled copy instead, so the install never has two |
 
 The launcher deliberately does **not** exec the product inside the bundle: the
@@ -296,18 +302,58 @@ bundle is a seed, and the install that runs is the writable one under
 forward. Pointing at the bundle would pin the running services to whatever
 shipped in the `.app`.
 
-**What is left is the Swift call**, and it is a real change rather than a line:
-`LoginItemService` today is `SMAppService.mainApp` — one status, one register,
-one unregister. The agent is a second registration with its own status,
-its own approval, and its own failure mode ("the app moved, macOS lost the
-registration"), which means a second seam in `MetistryKit`, a second row in the
-Services pane with its own prose, and the fakes and tests that go with them.
-It is specified in `docs/product/desktop-app-plan.md` and is the next thing the
-app should pick up. Until then the app path is `metistry up` as it always was —
-the terminal install — and Login Items shows Metistry as its own background
-item rather than nested.
+#### The toggle, and what it is not
 
-A terminal install keeps `~/Library/LaunchAgents` and needs none of this.
+Two rows in Settings → Services, in this order, because these two are
+constantly confused and each one's prose says which it is:
+
+| row | registration | what turning it on does |
+|---|---|---|
+| **Start Metistry at login** | `SMAppService.mainApp` | opens this window when you log in. Starts no service |
+| **Run Metistry in the background** | `SMAppService.agent(plistName: "com.foldedspacelabs.metistry.plist")` | runs the install: Postgres, the console, the reconciler, the assistant and any configured bridge, as children of one launchd agent |
+
+The status machine is the same one the login-item row uses (`LoginItemStatus`,
+`Int`-backed, `unknown(n)` for a value Apple adds later), and so are the two
+behaviours that make it trustworthy: **`requiresApproval` reads as ON** — macOS
+has the registration and is waiting for the person, with a button that opens
+General › Login Items — and **the status is always re-read from macOS after a
+write**, never assumed from `register()` returning.
+
+`notFound` is its own answer and not a failure: `SMAppService.agent` says that
+when the bundle has no `Contents/Library/LaunchAgents/<name>`, which is every
+`swift build` executable. The row says so, points at `build-app.sh`, and adds
+what a terminal install does instead.
+
+**Wizard step 5 carries the flag.** When the build has an agent to register
+(`BackgroundAgentModel.bundlesAgent`), step 5 runs `metistry up --instance <dir>
+--register-via app` and registers the agent *after* `up` returns — registering
+first would start an agent with no `supervisor.json` and no `supervisor.env` to
+find this install by, which exits 78 and looks broken.
+
+#### What Login Items shows
+
+One row, **Metistry**, with the agent nested under it, attributed to Folded
+Space Labs — and the same switch in two places, System Settings and this app,
+meaning the same thing.
+
+Before this, the item was registered by `launchctl bootstrap`, which makes it
+nobody's: it appeared *beside* the app as a separate background item, named
+after its program, with no way to turn it off but a terminal. Naming the program
+`Metistry` (the symlink `up` writes to `<instance>/state/bin/Metistry`) and
+signing the bundled node under the Folded Space Labs identity (#133,
+`docs/ops/bundled-runtime.md`) fixed the *name* and the *attribution*; neither
+could make it the app's, or give the app a switch. That is what this change is
+for.
+
+#### Two registrars, and only ever one
+
+A terminal install still bootstraps the same-named agent itself, and must keep
+working unchanged. So `metistry up` asks launchd who owns
+`com.foldedspacelabs.metistry` before it installs anything, and leaves an
+app-registered one alone — see `docs/ops/deployment-shapes.md`, "Two
+registrars", for the signal and why it is launchd's answer rather than a marker
+file. `metistry doctor` reports the owner on the supervisor's row
+(`meta.registrar`, and in the probe text the Services pane renders).
 
 ## Step 7: choosing compute, and what the app never stores
 
@@ -454,6 +500,7 @@ fourth one fails CI rather than appearing quietly.
 | Services | shape, and which file it came from | `doctor --json` → the `deployment` row's `meta` (the CLI resolved the D4 overlay) |
 | Services | the service list with status | the same `meta`'s service plan, matched against doctor's `service` rows |
 | Services | Start at login | `SMAppService.mainApp` — macOS keeps the registration; the app writes nothing (above) |
+| Services | Run Metistry in the background | `SMAppService.agent(plistName:)` on the plist sealed in this bundle — the install's ONE background item; macOS keeps this registration too (above) |
 | Connections | console sign-in: who this Mac is, with `via`, the remedy, and the argument array | `metistry console whoami --json` — the app never resolves, holds or displays the token ("Signing in" above) |
 | Connections | instance repo status, HEAD, queue depth | `doctor --json` → the `reconciler` row's `meta`. The reconciler is the sole committer, so the app runs no git of its own |
 | Connections | the provider keys `compute.yaml` names: set / not set | `metistry secrets list --json` — never a value |
@@ -546,8 +593,9 @@ apps/macos/
                        target shares it as is.
   sources/app/         the Metistry executable: @main and the four scenes
                        (window, Settings, log window, MenuBarExtra), Sparkle,
-                       the Process-backed CommandRunner, and the four platform
-                       seams the kit declares and does not have: SMAppService,
+                       the Process-backed CommandRunner, and the platform
+                       seams the kit declares and does not have: SMAppService
+                       (twice — the app, and the install's background item),
                        ASAuthorization, a terminal opener, and the AppKit calls
                        (reveal in Finder, quit, Sparkle's own UI)
   tests/kit/           swift-testing unit tests over the kit
@@ -555,9 +603,11 @@ apps/macos/
 ```
 
 **Every platform framework is behind a protocol the kit declares.**
-`CommandRunner` (a subprocess), `LoginItemService` (`SMAppService`),
-`PasskeyRegistrar` (`ASAuthorization`, which needs an `NSWindow` as its
-presentation anchor) and `TerminalOpener` (`NSWorkspace`). That is what keeps
+`CommandRunner` (a subprocess), `LoginItemService` (`SMAppService.mainApp`),
+`BackgroundAgentService` (`SMAppService.agent(plistName:)` — a second
+registration, so a second seam), `PasskeyRegistrar` (`ASAuthorization`, which
+needs an `NSWindow` as its presentation anchor) and `TerminalOpener`
+(`NSWorkspace`). That is what keeps
 `MetistryKit` free of AppKit and of `Process` — an iOS target supplies its own
 four — and it is also what makes the models testable: every one of those seams
 has a fake in `tests/kit/`, so the SMAppService status machine, the passkey route

@@ -7,7 +7,10 @@ PWA benefits from today — plus the three SAM adopts that touch this API
 `docs/research/2026-09-13-google-sam-review.md`). Everything else about the
 door is `docs/ops/auth.md`; capture is `docs/ops/capture-shortcut.md`;
 ratings are `docs/ops/reply-feedback.md`; the peer registry these serve is
-`docs/ops/instances.md`.
+`docs/ops/instances.md`. `metistry console call <METHOD> <path>`
+(`docs/ops/cli.md`) is the generic CLI client for any authenticated route
+below, as the `user` principal — the scripting seam behind `console
+whoami`, rather than a bespoke `curl` incantation.
 
 ## `GET /api/identity` — who this instance is, before sign-in
 

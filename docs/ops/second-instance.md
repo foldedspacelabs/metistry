@@ -199,13 +199,14 @@ data_policy:
 ```
 
 `node packages/cli/dist/main.js restart console`, then a first knowledge-research dispatch — a
-Board gesture; there is no CLI verb for dispatch itself, so the same call also works from a
-script:
+Board gesture, or `metistry console call` from a script (`docs/ops/cli.md`,
+`docs/ops/console-api.md`) with this install's own owner token rather than a pasted session
+cookie:
 
 ```sh
-curl -s --cookie "$SESSION" -H 'content-type: application/json' \
-  -d '{"target":"devin-sessions","purpose":"knowledge_research","max_acu":3,"brief":"…"}' \
-  https://<origin>/api/tasks/<id>/dispatch
+metistry console call POST /api/tasks/<id>/dispatch --body - <<'JSON'
+{"target":"devin-sessions","purpose":"knowledge_research","max_acu":3,"brief":"…"}
+JSON
 ```
 
 `doctor` walks `targets/` too: `devin-sessions` reads `absent` naming `METISTRY_DEVIN_ORG_ID`

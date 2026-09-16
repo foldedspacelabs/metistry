@@ -482,6 +482,10 @@ describe("show", () => {
     const empty = await computeReport(o);
     expect(empty.assigns_nothing).toBe(true);
     expect(renderComputeReport(empty)).toContain("rules.yaml's `tiers:` is still the live map");
+    // the no-providers hint names every template — a stale, partial list here
+    // is exactly the drift the 2026-09-17 second-instance guide caught in
+    // main.ts's --help (docs/product/record/2026-09-17-second-instance-guide.md)
+    for (const t of COMPUTE_TEMPLATES) expect(renderComputeReport(empty), t).toContain(t);
 
     await providersAdd({ ...o, template: "zen", skipTest: true });
     await assign({ ...o, target: parseAssignmentTarget("default"), model: "zen/example-model" });
@@ -566,5 +570,11 @@ describe("metistry compute (the command)", () => {
     expect(r.code).toBe(0);
     expect(r.out).toContain("[dry-run]");
     expect(existsSync(file(dir))).toBe(false);
+  });
+
+  it("the --help text for `providers add --from` names every template — it must derive from COMPUTE_TEMPLATES, not a copy of it", async () => {
+    const r = await run(["help"]);
+    expect(r.code).toBe(0);
+    for (const t of COMPUTE_TEMPLATES) expect(r.out, t).toContain(t);
   });
 });

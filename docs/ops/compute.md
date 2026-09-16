@@ -167,7 +167,8 @@ catalogue.
 | `zen` | OpenCode Zen; prices come from the `pricing:` table because the response carries no cost. Verify the base URL against its docs. |
 | `lmstudio` | LM Studio's local server on port 1234 |
 | `ollama` | Ollama's OpenAI-compatible surface on port 11434 |
-| `llamaserver` | the **bundled** `llama-server` on port 7813 — the only one with a `serve:` block, because it is the only one Metistry runs itself |
+| `llamaserver` | the **bundled** `llama-server` on port 7813 — Metistry starts it |
+| `applefm` | **Apple Foundation Models**, through the `apple-fm` bridge on port 7810. Cost 0, and the weights are already resident for the OS — see below |
 
 `--name` and `--base-url` rewrite the block on the way in, so a second
 machine's Ollama is `--from ollama --name box --base-url http://10.0.0.4:11434/v1`.
@@ -330,6 +331,7 @@ run; one is **bundled**, and is what is there when neither peer is.
 | **LM Studio** | 1234 | a peer — discovered, never started | `lms get <id>` (its own CLI) |
 | **Ollama** | 11434 | a peer — discovered, never started | `POST /api/pull`, streamed |
 | **`llama-server`** | 7813 | **bundled**: built from pinned source into `runtime/llamacpp/`, signed with Postgres and git, started by the supervisor | one HTTPS GET of a Hugging Face GGUF |
+| **Apple Foundation Models** | 7810 | **the OS's**: served by the `apple-fm` bridge, which the supervisor already runs | nothing to install — the model belongs to Apple Intelligence |
 
 ### Discovery
 
@@ -337,7 +339,7 @@ run; one is **bundled**, and is what is there when neither peer is.
 metistry compute models list
 ```
 
-lists every declared provider's live `/v1/models` **and** any of the three
+lists every declared provider's live `/v1/models` **and** any of the four
 local servers that is answering but that no provider dials:
 
 ```
@@ -349,10 +351,16 @@ Ollama on http://127.0.0.1:11434/v1: not configured — `metistry compute provid
   (ollama)/gemma3:4b
 ```
 
-`metistry doctor` carries the same finding as three rows — `local:lmstudio`,
-`local:ollama`, `local:llamaserver` — each `ok` with what it has loaded, or
-`absent`. **Absent is never a failure.** A Mac with no local model server is
-a supported install, so these rows can only add information.
+`metistry doctor` carries the same finding as four rows — `local:lmstudio`,
+`local:ollama`, `local:llamaserver`, `local:applefm` — each `ok` with what it
+has loaded, or `absent`. **Absent is never a failure.** A Mac with no local
+model server is a supported install, so these rows can only add information.
+
+Apple FM is the one local server that **authenticates**: it is a Metistry
+bridge, and every bridge route takes the bearer. Discovery sends
+`METISTRY_BRIDGE_TOKEN_APPLE_FM` (or the provider's own `auth.secret`, when
+`compute.yaml` names a different one), because a probe that forgot it would
+get a truthful 401 and report a running bridge as absent.
 
 ### Installing a model
 
@@ -410,9 +418,11 @@ What the schema refuses, and why:
   be reachable where it listens, and the port is otherwise stated twice.
 - `serve:` on an `off_machine` provider — it is a statement about a process
   on this machine.
-- a `runtime:` other than `llamaserver` — LM Studio and Ollama are peers, not
-  children. Metistry never claims another app's lifecycle.
-- a `model_path` that is not a `.gguf`.
+- a `runtime:` that is neither `llamaserver` nor `applefm` — LM Studio and
+  Ollama are peers, not children. Metistry never claims another app's
+  lifecycle.
+- a `model_path` that is not a `.gguf`, or a `llamaserver` block with no
+  `model_path` at all.
 
 The **host is not configurable**: the child always binds `127.0.0.1`. A
 config line that could put an unauthenticated completion endpoint on the
@@ -440,6 +450,140 @@ pooling `none`, and `/v1/embeddings` refuses that with
 A missing binary or a missing GGUF is a **note, not a failure**: `up` says
 which and carries on with one fewer provider, because bringing the whole
 install down over a moved model file would be a far worse answer.
+
+## Apple Foundation Models
+
+The model macOS already keeps resident, as an ordinary provider.
+
+```sh
+metistry compute providers add --from applefm
+```
+
+```yaml
+providers:
+  applefm:
+    kind: openai-compatible
+    base_url: http://127.0.0.1:7810/v1
+    locality: on_machine
+    auth: { secret: METISTRY_BRIDGE_TOKEN_APPLE_FM }
+    serve:
+      runtime: applefm
+      port: 7810
+```
+
+Pin it as `applefm/foundation-model` — one provider, one model id.
+
+**Why it is worth a provider block.** Cost 0 and ~0 extra resident memory:
+the weights belong to Apple Intelligence and are in RAM for the operating
+system whether Metistry runs or not (PoC-19 measured the bridge's own
+footprint at 23 MB against 840 MB for an LM Studio serving a 4B GGUF). It is
+the one local model that costs nothing to keep available — which is exactly
+what an unattended collector needs.
+
+**What it is for, and what it is not.** It is small: good at **reduction**
+(classify, extract, tag), weak as a judge (PoC-15). Latency is ~270 ms for
+plain text and ~500 ms for a three-field schema. Pin real work elsewhere.
+
+### The surface
+
+`GET /v1/models` and `POST /v1/chat/completions`, on the bridge's own
+loopback listener, under **the same bearer as every other bridge route**.
+Invariant 8 is why: the network is not a boundary, and a `/v1` that skipped
+authentication because "it is only a local model" would be an
+unauthenticated completion endpoint on loopback. The engine presents
+`METISTRY_BRIDGE_TOKEN_APPLE_FM` exactly as it presents an OpenRouter key —
+`metistry secrets sync --to env` is what puts it where the engine reads it.
+
+`response_format: { type: json_schema, … }` is the point of the surface: the
+caller's JSON Schema is translated per request into Apple's
+`DynamicGenerationSchema` and enforced at generation time. Supported:
+`object` with `properties`/`required`, `string` (with a string `enum`),
+`integer`, `number`, `boolean`, `null` (macOS 26.4+), `array` with
+`items`/`minItems`/`maxItems`, and `anyOf`.
+
+**What it refuses, loudly, rather than degrading:**
+
+| | |
+| --- | --- |
+| `$ref`, `$defs`, `oneOf`, `allOf`, `not`, `patternProperties` | `400 unsupported_schema` — silently dropping a constraint would make `strict: true` a lie |
+| a schema or prompt that would not fit the 4096-token window | `400 context_length_exceeded`, **naming the field**, preflighted with the model's own tokenizer rather than discovered as a `500` mid-generation |
+| `stream: true` | `400 stream_unsupported` — no SSE mapping is proven |
+| `tools:` | `400 tools_unsupported` — out of scope for v1 |
+| `n` other than 1 | `400 n_unsupported` |
+| macOS older than the API a request needs | `503 not_available` |
+
+`/v1` errors use OpenAI's envelope (`{error:{message,type,code}}`) because
+their caller is an OpenAI client; `/check` and `/classify` keep Metistry's
+(`{error:{code,message}}`).
+
+**The window is small and the schema is charged to it.** 4096 tokens total,
+and with the schema in the prompt each described field costs roughly 32 of
+them — about 40 fields before latency alone rules it out. That is why the
+preflight exists.
+
+**Serial by design.** The bridge's Swift helper answers one generation at a
+time: it reads a request, awaits it, and only then reads the next. Apple
+Foundation Models is one shared system daemon, and a queue of one is the only
+behaviour we can honestly describe. Concurrent callers see latency, never an
+error.
+
+**Parse the answer; never string-match it.** Apple's structured output does
+not emit object keys in a stable order — PoC-19 measured twenty identical
+generations coming back as twenty different byte strings and one value.
+Anything that hashed, regexed or compared raw output would see differences
+that are not there.
+
+**Redaction moved, and did not vanish.** `/classify` scrubs the model's free
+text before returning it; `/v1` cannot, because a provider surface has to
+hand back exactly what the model said. The deterministic scrub now runs in
+the caller — `completeJson()` applies it to every string leaf of the parsed
+result, which covers every collector rather than one route.
+
+### What a collector may call
+
+A collector runs unattended, on a clock, with nobody reading the answer until
+later, so it may never call a **billable** model. Since the refresh made the
+free on-device tier an ordinary provider, that rule is mechanical rather than
+something to remember:
+
+```yaml
+# collectors/inbox-drain/manifest.yaml
+uses_model: applefm/foundation-model
+```
+
+One pinned `<provider>/<model-id>`, the same spelling `compute.yaml` uses —
+a provider name alone would satisfy the cost rule but not invariant 4, since
+"no model decides which model runs" is not met by naming a server and taking
+whatever it lists first.
+
+Two checks, on purpose:
+
+- **CI** resolves the provider against `seed/compute-templates/<name>.yaml`
+  and fails if it is not `locality: on_machine`
+  (`apps/console/test/manifests.test.ts`). That catches the shipped default.
+- **`completeJson()`** resolves the same name against the `compute.yaml`
+  actually in force and **throws** before building a request. That catches
+  the live one — an instance can rename a provider or repoint it after CI has
+  run.
+
+`locality: on_machine` is the whole condition: cost for an on-machine
+provider is not a field anyone fills in, it is 0 by definition
+(`cost_source: "local"`).
+
+Everything else about the tier **degrades absent** — no such provider in
+`compute.yaml`, no credential in the environment, a bridge that is not
+running, an answer that is not the schema — and the deterministic
+classification stands. `metistry doctor`'s `local:applefm` row and the
+watchdog's `fm-tier-never-fires` probe are what make "configured but never
+used" visible rather than silent.
+
+> **Upgrading:** `inbox-drain` used to reach the bridge's own `/classify`
+> route from `METISTRY_AFM_URL`. It now goes through the provider, so an
+> install that wants the model tier back needs one command —
+> `metistry compute providers add --from applefm` (add
+> `--base-url http://host.docker.internal:7810/v1` in the container shape).
+> Without it the drain is deterministic, which is a supported install, and
+> `metistry doctor` says so.
 
 ### Embeddings
 

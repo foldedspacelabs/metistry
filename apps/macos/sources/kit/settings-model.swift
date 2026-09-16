@@ -103,6 +103,9 @@ public final class SettingsModel {
     public private(set) var secrets: [SecretListing] = []
     public private(set) var secretsPhase: ReadPhase = .idle
     public private(set) var secretsCommand: String?
+    public private(set) var compute: ComputeFacts?
+    public private(set) var computePhase: ReadPhase = .idle
+    public private(set) var computeCommand: String?
 
     public init(
         status: StatusModel,
@@ -131,6 +134,9 @@ public final class SettingsModel {
         secrets = []
         secretsPhase = .idle
         secretsCommand = nil
+        compute = nil
+        computePhase = .idle
+        computeCommand = nil
     }
 
     // MARK: - Instance
@@ -217,6 +223,28 @@ public final class SettingsModel {
         }
     }
 
+    // MARK: - Compute
+
+    /// `metistry compute show --json` — which provider and model each tier runs
+    /// on, and whether the key each provider NAMES is present. No value of any
+    /// key crosses this boundary, because the verb cannot print one.
+    public func refreshCompute() async {
+        guard let cli else {
+            computePhase = .unavailable(CLIReadError.noRuntime.localizedDescription ?? "no runtime")
+            return
+        }
+        computeCommand = cli.plannedArguments(for: ["compute", "show", "--json"]).joined(separator: " ")
+        computePhase = .reading
+        switch await cli.computeShow() {
+        case .success(let facts):
+            compute = facts
+            computePhase = .read
+        case .failure(let error):
+            compute = nil
+            computePhase = .unavailable(error.localizedDescription ?? "unavailable")
+        }
+    }
+
     // MARK: - Services
 
     public var deployment: DeploymentFacts? { status.report?.deployment }
@@ -255,10 +283,13 @@ public final class SettingsModel {
             : "last push to \(remote) failed\(when) — see the reconciler row in Status"
     }
 
-    /// The Claude token, as `secrets list` reports it: set or not set, never the
-    /// value. `nil` when the list has not been read yet.
-    public var claudeTokenListing: SecretListing? {
-        secrets.first { $0.name == "CLAUDE_CODE_OAUTH_TOKEN" }
+    /// The provider keys this install's compute.yaml NAMES, as `secrets list`
+    /// reports them: set or not set, never the value. Empty until both reads
+    /// have run — the app keeps no list of provider names of its own, because
+    /// compute.yaml is the only thing that decides them.
+    public var providerSecretListings: [SecretListing] {
+        let named = Set(compute?.providers.compactMap(\.secret) ?? [])
+        return secrets.filter { named.contains($0.name) }
     }
 
     public var bridges: [DoctorRow] { status.report?.bridges ?? [] }

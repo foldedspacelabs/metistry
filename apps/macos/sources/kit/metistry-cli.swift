@@ -50,6 +50,7 @@ public struct MetistryCLI: Sendable {
         _ verb: [String],
         includeProductDir: Bool = true,
         environment: [String: String] = [:],
+        standardInput: String? = nil,
         onOutput: @escaping @Sendable (OutputLine) -> Void = { _ in }
     ) async throws -> CommandResult {
         try await runner.run(
@@ -57,6 +58,7 @@ public struct MetistryCLI: Sendable {
             arguments: arguments(for: verb, includeProductDir: includeProductDir),
             environment: baseEnvironment.merging(environment) { _, override in override },
             currentDirectory: runtime.productDir,
+            standardInput: standardInput,
             onOutput: onOutput
         )
     }
@@ -137,6 +139,13 @@ public struct MetistryCLI: Sendable {
     /// were.
     public func secretsList() async -> Result<[SecretListing], CLIReadError> {
         await read(["secrets", "list", "--json"], naming: "secrets list") { SecretListing.decode($0) }
+    }
+
+    /// `metistry compute show --json` — this instance's providers, what each
+    /// tier and crew runs on, and whether the key each provider names is
+    /// present. Never a key's value; see compute-facts.swift.
+    public func computeShow() async -> Result<ComputeFacts, CLIReadError> {
+        await read(["compute", "show", "--json"], naming: "compute show") { ComputeFacts(json: $0) }
     }
 
     /// `metistry deployment --json` — the resolved shape and the file it came

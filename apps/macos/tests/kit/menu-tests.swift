@@ -139,7 +139,7 @@ private final class ArgumentRecorder: CommandRunner, @unchecked Sendable {
 
     func run(
         executable: URL, arguments: [String], environment: [String: String],
-        currentDirectory: URL?, onOutput: @escaping @Sendable (OutputLine) -> Void
+        currentDirectory: URL?, standardInput: String?, onOutput: @escaping @Sendable (OutputLine) -> Void
     ) async throws -> CommandResult {
         lock.withLock { calls.append(arguments) }
         return CommandResult(exitCode: 0, stdout: "line one\n", stderr: "")
@@ -151,7 +151,7 @@ private struct FixedResultRunner: CommandRunner {
 
     func run(
         executable: URL, arguments: [String], environment: [String: String],
-        currentDirectory: URL?, onOutput: @escaping @Sendable (OutputLine) -> Void
+        currentDirectory: URL?, standardInput: String?, onOutput: @escaping @Sendable (OutputLine) -> Void
     ) async throws -> CommandResult {
         result
     }

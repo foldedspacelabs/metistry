@@ -1,6 +1,8 @@
 // Shapes the bridge needs from its host. No pg, no project config
 // (CLAUDE.md packages rule): the executor and the principal are injected.
 
+import type { ActionAutonomy } from "@foldedspacelabs/metistry-core";
+
 /** Minimal executor shape — satisfied by pg.Pool / pg.Client / a fake in tests. */
 export interface Db {
   query(text: string, values?: unknown[]): Promise<{ rows: Record<string, unknown>[] }>;
@@ -26,4 +28,12 @@ export interface AgentPrincipal {
   grants: { tier: Tier; areas: string[]; queries?: boolean };
   /** Project membership — the collaboration boundary for every tasks_* tool (scope.ts holds the internal rule). */
   projects: string[];
+  /**
+   * A3 (docs/ops/actions.md): what this credential may DO — the level and the
+   * per-kind table, straight off the agent's registry row. Like `grants`, it
+   * is attached to the token server-side and never asserted by the caller;
+   * `propose_action` resolves it through core's `effectiveActions` and is not
+   * registered at all when the answer is "nothing". Absent = observe.
+   */
+  autonomy?: ActionAutonomy | undefined;
 }

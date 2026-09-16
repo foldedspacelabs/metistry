@@ -1,6 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
-import { EMBED_DEFAULT_DIM, EMBED_DEFAULT_MODEL, EMBED_DEFAULT_URL, EmbedClient, computeTiers, intEnv, optionalEnv, requireEnv } from "@foldedspacelabs/metistry-core";
+import { EMBED_DEFAULT_DIM, EMBED_DEFAULT_MODEL, EMBED_DEFAULT_URL, EmbedClient, INSTANCES_FILENAME, computeTiers, intEnv, optionalEnv, requireEnv } from "@foldedspacelabs/metistry-core";
 import { QueryStore } from "@foldedspacelabs/metistry-queries";
 import { makePool } from "./db.js";
 import { makeServer } from "./server.js";
@@ -164,10 +164,19 @@ const identityFiles = optionalEnv("METISTRY_IDENTITY_FILES", `seed/identity.yaml
 const identity = await loadPublicIdentity(identityFiles);
 if (!identity) console.warn(`identity absent: no complete identity.yaml (name + instance_id) in ${identityFiles} — GET /api/identity answers 503 (degrades: absent)`);
 
+// GET /api/instances (S4, docs/ops/instances.md): the peer registry the
+// instance repo holds, read through the same overlay rule. There is no seed
+// default — an install's peers are its own — so an instance dir is what
+// makes the route answer at all.
+const instanceDir = process.env.METISTRY_INSTANCE_DIR?.replace(/\/+$/, "");
+const instancesFiles = process.env.METISTRY_INSTANCES_FILES ?? (instanceDir ? `${instanceDir}/${INSTANCES_FILENAME}` : undefined);
+if (!instancesFiles) console.warn("peer registry absent: neither METISTRY_INSTANCES_FILES nor METISTRY_INSTANCE_DIR is set — GET /api/instances answers 503 (degrades: absent)");
+
 const server = makeServer(pool, queries, {
   origin,
   origins,
   ...(identity ? { identity } : {}),
+  ...(instancesFiles ? { instancesFiles } : {}),
   version: require_("../package.json").version,
   ...(localOwner ? { localOwner } : {}),
   inboxDir: optionalEnv("METISTRY_INBOX_DIR", "./inbox"),

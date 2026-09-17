@@ -131,14 +131,25 @@ PDFs.
 
 ## Moving an existing instance
 
-Two moves, one after the other if an instance predates both rulings:
+`metistry migrate-layout` is enough on its own, whichever ruling an instance
+predates — it carries a bare root `inbox/` up to `Inbox/` as well as
+everything else:
+
+```sh
+metistry migrate-layout --dry-run    # the whole plan, nothing run
+metistry migrate-layout
+metistry up                          # the verb restarts nothing itself
+```
+
+Two smaller, separately reviewable commits are also fine, if the instance
+predates both rulings:
 
 ```sh
 metistry migrate-inbox --dry-run     # bare inbox/ -> Knowledge/Inbox/ (2026-09-16 ruling)
 metistry migrate-inbox
 metistry migrate-layout --dry-run    # Knowledge/Inbox/ (and everything else) -> the flat layout (2026-09-17 ruling)
 metistry migrate-layout
-metistry up                          # the verb restarts nothing itself
+metistry up
 ```
 
 `migrate-inbox` moves `inbox/*` into `Knowledge/Inbox/` (`git mv` for what
@@ -155,10 +166,14 @@ temporary name — `git mv Knowledge/inbox Knowledge/Inbox` on macOS moves the
 directory inside itself.
 
 `migrate-layout` is the newer, idempotent `git mv` verb that carries
-`Knowledge/Inbox/` (and every other pre-ruling path) up to the instance
-root and everything that is not knowledge down into `.metistry/` —
-`docs/ops/instance-layout.md` has the full tree and the protected-path
-rule it preserves.
+`Knowledge/Inbox/` — or a bare root `inbox/`, in either casing — and every
+other pre-ruling path up to the instance root, and everything that is not
+knowledge down into `.metistry/`. It rewrites `inbox.path` the rest of the
+way (`Knowledge/Inbox/<file>` and a pre-2026-09-16 bare filename both become
+`Inbox/<file>`), refuses a file collision between two inboxes rather than
+clobbering one, and commits once. `docs/ops/instance-layout.md` has the full
+tree and the protected-path rule it preserves; `docs/ops/cli.md` has its
+flags.
 
 Obsidian needs no change beyond re-opening it at the instance directory:
 the vault root is the instance root, and `Inbox/` is a folder in it.

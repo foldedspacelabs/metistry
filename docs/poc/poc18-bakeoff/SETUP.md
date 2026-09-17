@@ -61,7 +61,7 @@ Qwen3.5-class GGUFs, so its row is expected to be partial.
 
 ## 3. Fixtures
 
-`<instance>/eval/fixtures-harvest.jsonl` holds verbatim raw material
+`<instance>/.metistry/eval/fixtures-harvest.jsonl` holds verbatim raw material
 harvested from the Studio's history, one candidate per line with
 `draft: true`. Turn ~10 per axis into fixtures in the owner's own words
 (README "Authoring fixtures"), then:

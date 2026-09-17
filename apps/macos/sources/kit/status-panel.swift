@@ -62,6 +62,18 @@ public struct StatusPanel: View {
                 // The summary answers before the page is read (§3.13).
                 Text(model.report?.summary ?? summaryPlaceholder)
                     .metistryText(.footnote, p, .textSecondary)
+                // The instance's layout, when it is not the current one. It is
+                // already a doctor row further down the page with the CLI's own
+                // remediation; this is the header's one sentence, because the
+                // whole install reads paths out of the answer and "run one
+                // verb" should not need scrolling to find (design-system §3.13,
+                // and doctor-report.swift states the sentence once).
+                if let notice = model.report?.instanceLayoutNotice {
+                    Text(notice)
+                        .metistryText(.footnote, p, .degraded)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 signInLine(p)
             }
             Spacer(minLength: MetistrySpace.s4)

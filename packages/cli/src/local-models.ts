@@ -28,7 +28,7 @@ import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, open, rename, rm } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join } from "node:path";
-import { runCheck, type ChildSpecInput, type CheckResult, type Compute, type LlamaServe, type Provider } from "@foldedspacelabs/metistry-core";
+import { INSTANCE_LAYOUT, runCheck, statePath, type ChildSpecInput, type CheckResult, type Compute, type LlamaServe, type Provider } from "@foldedspacelabs/metistry-core";
 import type { Exec } from "./exec.js";
 import { StepFailed } from "./steps.js";
 
@@ -548,12 +548,12 @@ export function resolveModelPath(instanceDir: string, modelPath: string): string
 
 /** Where `compute models install llamaserver/<owner>/<repo>/<file>` puts the file: per-machine state, not the vault. */
 export function modelsDir(instanceDir: string): string {
-  return join(instanceDir.replace(/\/+$/, ""), "state", "models");
+  return statePath(instanceDir, "models");
 }
 
 /** The same path, written into `compute.yaml` relative to the instance so the file survives a move. */
 export function relativeModelPath(repo: string, file: string): string {
-  return join("state", "models", repo, file);
+  return join(INSTANCE_LAYOUT.stateDir, "models", repo, file);
 }
 
 /**

@@ -8,7 +8,7 @@ const toolCase = {
   id: "T01",
   axis: "tool_calls",
   prompt: "file the note about the boiler under the house area",
-  expected: { tool_calls: [{ name: "knowledge_write", args_match: { path: { contains: "Knowledge/Areas" } } }] },
+  expected: { tool_calls: [{ name: "knowledge_write", args_match: { path: { contains: "Areas" } } }] },
 };
 
 describe("accepting", () => {
@@ -17,7 +17,7 @@ describe("accepting", () => {
     expect(parsed.success).toBe(true);
     if (!parsed.success) return;
     expect(parsed.data.weight).toBe(1);
-    expect(parsed.data.expected.tool_calls?.[0]?.args_match?.path).toEqual({ contains: "Knowledge/Areas" });
+    expect(parsed.data.expected.tool_calls?.[0]?.args_match?.path).toEqual({ contains: "Areas" });
   });
 
   it("reads a bare value as an equals matcher, and a single-key matcher object as itself", () => {

@@ -7,6 +7,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   COMPUTE_FILES_DEFAULT,
+  INSTANCE_LAYOUT,
   ComputeStore,
   assignsNothing,
   computeTiers,
@@ -40,7 +41,7 @@ providers:
     locality: off_machine
     zdr: true
     request: { provider: { order: [anthropic], allow_fallbacks: false } }
-    data_policy: { allow: [Knowledge/Projects], deny_sources: [comms], max_brief_bytes: 65536 }
+    data_policy: { allow: [Projects], deny_sources: [comms], max_brief_bytes: 65536 }
     pricing: { anthropic/claude-sonnet-5: { in_per_m: 3, out_per_m: 15 } }
 assignments:
   default: { model: openrouter/anthropic/claude-sonnet-5, effort: medium }
@@ -283,9 +284,11 @@ describe("shadow:", () => {
 
 describe("the D4 overlay and hot reload", () => {
   const paths = COMPUTE_FILES_DEFAULT;
+  // the instance half of the default overlay, now under `.metistry/` (INSTANCE_LAYOUT)
+  const INSTANCE = INSTANCE_LAYOUT.compute;
 
   it("the default overlay is seed first, the instance's own file after it", () => {
-    expect(paths).toBe("seed/compute.yaml:compute.yaml");
+    expect(paths).toBe(`seed/compute.yaml:${INSTANCE}`);
   });
 
   it("the last EXISTING file wins, whole", async () => {
@@ -293,8 +296,8 @@ describe("the D4 overlay and hot reload", () => {
     expect(seedOnly.path).toBe("seed/compute.yaml");
     expect(seedOnly.compute.assignments).toBeUndefined();
 
-    const both = await loadCompute(paths, fakeFs({ "seed/compute.yaml": SKETCH, "compute.yaml": `${local()}\nassignments: { default: { model: local/m } }` }));
-    expect(both.path).toBe("compute.yaml");
+    const both = await loadCompute(paths, fakeFs({ "seed/compute.yaml": SKETCH, [INSTANCE]: `${local()}\nassignments: { default: { model: local/m } }` }));
+    expect(both.path).toBe(INSTANCE);
     expect(Object.keys(both.compute.providers)).toEqual(["local"]); // replaced whole, not merged
   });
 
@@ -303,49 +306,49 @@ describe("the D4 overlay and hot reload", () => {
   });
 
   it("an invalid file at STARTUP fails loudly, naming the file", async () => {
-    await expect(loadCompute(paths, fakeFs({ "compute.yaml": "providers: { x: { kind: nope } }" }))).rejects.toThrow(/compute\.yaml:.*providers\.x\.kind/s);
+    await expect(loadCompute(paths, fakeFs({ [INSTANCE]: "providers: { x: { kind: nope } }" }))).rejects.toThrow(/compute\.yaml:.*providers\.x\.kind/s);
   });
 
   it("an invalid file at RELOAD keeps the last good configuration", async () => {
-    const files: Record<string, string> = { "compute.yaml": SKETCH };
+    const files: Record<string, string> = { [INSTANCE]: SKETCH };
     const store = new ComputeStore(await loadCompute(paths, fakeFs(files)));
     expect(resolveAssignment(store.current, "deep")?.provider).toBe("openrouter");
 
-    files["compute.yaml"] = "providers: { openrouter: { kind: openai-compatible, base_url: https://openrouter.ai/api/v1, locality: off_machine } }"; // half-written save
+    files[INSTANCE] = "providers: { openrouter: { kind: openai-compatible, base_url: https://openrouter.ai/api/v1, locality: off_machine } }"; // half-written save
     const bad = await store.reload(paths, fakeFs(files));
     expect(bad.ok).toBe(false);
-    expect(bad.failedPath).toBe("compute.yaml");
+    expect(bad.failedPath).toBe(INSTANCE);
     expect(bad.errors?.join(" ")).toContain("providers.openrouter.data_policy");
     expect(resolveAssignment(store.current, "deep")?.provider).toBe("openrouter"); // still the last good map
     expect(store.current.assignments).toBeDefined();
 
-    files["compute.yaml"] = `${local()}\nassignments: { default: { model: local/m } }`; // saved properly
+    files[INSTANCE] = `${local()}\nassignments: { default: { model: local/m } }`; // saved properly
     const good = await store.reload(paths, fakeFs(files));
-    expect(good).toEqual({ ok: true, path: "compute.yaml", changed: true });
+    expect(good).toEqual({ ok: true, path: INSTANCE, changed: true });
     expect(resolveAssignment(store.current, "deep")?.provider).toBe("local");
   });
 
   it("a watch event re-reads through the same path, and a reload that changes nothing says so", async () => {
-    const files: Record<string, string> = { "compute.yaml": SKETCH };
+    const files: Record<string, string> = { [INSTANCE]: SKETCH };
     const reloads: boolean[] = [];
     let fire = (): void => {};
     let closed = false;
     const watch = (watched: string[], onChange: () => void) => {
-      expect(watched).toEqual(["seed/compute.yaml", "compute.yaml"]);
+      expect(watched).toEqual(["seed/compute.yaml", INSTANCE]);
       fire = onChange;
       return () => {
         closed = true;
       };
     };
     const w = await startComputeWatch({ paths, readFileFn: fakeFs(files), watch, debounceMs: 0, onReload: (r) => reloads.push(r.changed) });
-    expect(w.store.path).toBe("compute.yaml");
+    expect(w.store.path).toBe(INSTANCE);
 
     fire();
     fire(); // two events, one save: coalesced by the debounce
     await new Promise((r) => setTimeout(r, 20));
     expect(reloads).toEqual([false]);
 
-    files["compute.yaml"] = `${local()}\nassignments: { default: { model: local/m } }`;
+    files[INSTANCE] = `${local()}\nassignments: { default: { model: local/m } }`;
     fire();
     await new Promise((r) => setTimeout(r, 20));
     expect(reloads).toEqual([false, true]);
@@ -410,7 +413,7 @@ providers:
     kind: openai-compatible
     base_url: https://example.invalid:8080/v1
     locality: off_machine
-    data_policy: { allow: [Knowledge], deny_sources: [], max_brief_bytes: 1024 }
+    data_policy: { allow: [Areas], deny_sources: [], max_brief_bytes: 1024 }
     serve: { runtime: llamaserver, model_path: a.gguf, port: 8080 }
 `),
     ).toThrow(/serve: is how a provider says Metistry starts it/);
@@ -484,7 +487,7 @@ providers:
     kind: openai-compatible
     base_url: https://openrouter.ai/api/v1
     locality: off_machine
-    data_policy: { allow: [Knowledge], deny_sources: [], max_brief_bytes: 1024 }
+    data_policy: { allow: [Areas], deny_sources: [], max_brief_bytes: 1024 }
 `);
 
   it("allows an on_machine provider — cost 0 by definition, not by a second field", () => {
@@ -511,7 +514,7 @@ providers:
     kind: openai-compatible
     base_url: https://openrouter.ai/api/v1
     locality: off_machine
-    data_policy: { allow: [Knowledge], deny_sources: [], max_brief_bytes: 1024 }
+    data_policy: { allow: [Areas], deny_sources: [], max_brief_bytes: 1024 }
   lmstudio: { kind: openai-compatible, base_url: http://127.0.0.1:1234/v1, locality: on_machine }
   ollama: { kind: openai-compatible, base_url: http://127.0.0.1:11434/v1, locality: on_machine }
 `);

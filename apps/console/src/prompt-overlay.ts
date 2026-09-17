@@ -6,8 +6,9 @@
 // through the vault bridge as principal `user`: a commit in the user's name,
 // in the instance repo, reviewable and revertable like any other. The
 // assistant itself cannot reach this path at all — mcp-brain's knowledge_write
-// is confined to `Knowledge/`, and `assistant-prompt.md` is a §4.7 protected
-// file, writable only by the `user` principal (apps/reconciler/src/paths.ts).
+// is confined to the vault, and `.metistry/assistant-prompt.md` is a §4.7
+// protected path, writable only by the `user` principal
+// (apps/reconciler/src/paths.ts).
 //
 // One subtlety worth stating out loud: the prompt overlay REPLACES the seed
 // prompt (D4: last existing file wins, apps/assistant/src/prompt.ts), it does
@@ -18,10 +19,11 @@
 // exactly what the user sees in the resulting diff.
 
 import { readFile } from "node:fs/promises";
+import { INSTANCE_LAYOUT } from "@foldedspacelabs/metistry-core";
 import { VaultError, type VaultClient } from "@foldedspacelabs/metistry-artifacts";
 
-/** The instance-repo overlay the assistant reads (METISTRY_PROMPT_FILES). */
-export const OVERLAY_PATH = "assistant-prompt.md";
+/** The instance-repo overlay the assistant reads (METISTRY_PROMPT_FILES), instance-relative. */
+export const OVERLAY_PATH = INSTANCE_LAYOUT.assistantPrompt;
 /** The product seed, shipped in the console image at /app/seed. */
 export const SEED_PROMPT_PATH = "seed/assistant-prompt.md";
 

@@ -46,6 +46,24 @@ export {
 } from "./actions.js";
 export { checkResultSchema, runCheck, type CheckResult, type Checkable } from "./check.js";
 export {
+  INSTANCE_LAYOUT,
+  INSTANCE_CONFIG_DIRS,
+  INSTANCE_GITIGNORE,
+  INSTANCE_GITIGNORE_LINES,
+  LEGACY_VAULT_DIR,
+  NON_VAULT_ROOTS,
+  PROTECTED_ROOT_FILES,
+  VAULT_ROOT_AREA,
+  detectLayout,
+  instancePath,
+  isProtectedPath,
+  isVaultPath,
+  metistryPath,
+  statePath,
+  type InstanceLayoutShape,
+  type InstancePathKey,
+} from "./instance-layout.js";
+export {
   checkStdioConformance,
   isJsonLineFrame,
   renderStdoutViolations,
@@ -142,6 +160,7 @@ export {
 export {
   COMPUTE_FILENAME,
   COMPUTE_FILES_DEFAULT,
+  RULES_FILES_DEFAULT,
   PROVIDER_KINDS,
   LOCALITIES,
   BUDGET_ACTIONS,

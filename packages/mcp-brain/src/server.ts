@@ -457,11 +457,11 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
     // The assistant's write path (knowledge-write.ts): internal principals only.
     reg(
       "knowledge_write",
-      "Write one note under Knowledge/ as a commit in your name (internal assistant only; others get `not granted` — use requests_create). Whole-file replace; frontmatter gets `source`/`updated` stamped. " +
+      "Write one note in the vault as a commit in your name (internal assistant only; others get `not granted` — use requests_create). Whole-file replace; frontmatter gets `source`/`updated` stamped. " +
         'To CHANGE a note: knowledge_read it and pass its sha256 back as expected_sha256. Omitting it means create-only, so an existing note answers `conflict` with the current hash rather than being overwritten unseen. ' +
         "A note whose `source` is someone else's is refused — report instead; notes you or the fold wrote are yours. Protected paths are refused; deletes/renames are not available.",
       {
-        path: z.string().min(1).max(500).describe("Vault path, Knowledge/... with TitleCase folders, e.g. Knowledge/Areas/Fsl/Drey.md."),
+        path: z.string().min(1).max(500).describe("Vault path, relative to the vault root, TitleCase folders, e.g. Areas/Fsl/Drey.md."),
         content: z.string().max(2_000_000).describe("The full new content of the file (UTF-8)."),
         message: z.string().min(1).max(2000).describe("Commit message; first line is the subject (≤ 200 chars)."),
         expected_sha256: z
@@ -491,7 +491,7 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
     // in a tools/list it could never be called from.
     registerActionTools(reg, db, principal, cfg.actions);
 
-    // Vault notes as MCP resources (metistry://Knowledge/<path>), same tier
+    // Vault notes as MCP resources (metistry://<vault path>), same tier
     // rule as knowledge_read throughout — not a tool, so no runs row.
     registerKnowledgeResources(server, principal, db, cfg.readKnowledge);
 

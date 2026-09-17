@@ -270,7 +270,7 @@ providers:
     base_url: https://openrouter.ai/api/v1
     locality: off_machine
     auth: { secret: METISTRY_OPENROUTER_API_KEY }
-    data_policy: { allow: [Knowledge/Projects], deny_sources: [comms], max_brief_bytes: 65536 }
+    data_policy: { allow: [Projects], deny_sources: [comms], max_brief_bytes: 65536 }
 assignments:
   default: { model: openrouter/anthropic/claude-sonnet-5 }
 `);

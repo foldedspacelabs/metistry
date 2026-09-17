@@ -3,7 +3,7 @@
 // running check reuses doctor.ts's own launchd/compose probes (no network),
 // and set-shape writes deployment.yaml through the reconciler exactly like
 // metistry.lock/identity.yaml already do.
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -156,7 +156,7 @@ describe("setDeploymentShape", () => {
     });
     expect(r.refused).toBe(false);
     expect(r.applied).toBe(true);
-    expect(await readFile(join(I, "deployment.yaml"), "utf8")).toMatch(/^shape: launchd$/m);
+    expect(await readFile(join(I, ".metistry", "deployment.yaml"), "utf8")).toMatch(/^shape: launchd$/m);
   });
 
   it("preview (no --yes): prints the plan, writes nothing, no fetch", async () => {
@@ -183,7 +183,7 @@ describe("setDeploymentShape", () => {
     expect(r.refused).toBe(false);
     expect(fetched).toBe(false);
     expect(lines.join("\n")).toContain("[dry-run]");
-    await expect(readFile(join(I, "deployment.yaml"), "utf8")).rejects.toThrow();
+    await expect(readFile(join(I, ".metistry", "deployment.yaml"), "utf8")).rejects.toThrow();
   });
 
   it("no reconciler configured: writes directly, refusing only if a reconciler job is actually running", async () => {
@@ -205,13 +205,14 @@ describe("setDeploymentShape", () => {
       out: () => {},
     });
     expect(r.applied).toBe(true);
-    expect(await readFile(join(I, "deployment.yaml"), "utf8")).toMatch(/^shape: launchd$/m);
+    expect(await readFile(join(I, ".metistry", "deployment.yaml"), "utf8")).toMatch(/^shape: launchd$/m);
   });
 
   it("through the reconciler bridge as user, exactly like metistry.lock/identity.yaml", async () => {
     const P = await composeCheckout();
     const I = await mkdtemp(join(tmpdir(), "metistry-dep-inst-"));
-    await writeFile(join(I, "deployment.yaml"), "shape: compose\nservices: {}\n");
+    await mkdir(join(I, ".metistry"), { recursive: true });
+    await writeFile(join(I, ".metistry", "deployment.yaml"), "shape: compose\nservices: {}\n");
     const exec = fakeExec({ launchctl: launchctlHandler([]), docker: composePsHandler([]) });
     const calls: { url: string; init: RequestInit }[] = [];
     const r = await setDeploymentShape({
@@ -233,9 +234,9 @@ describe("setDeploymentShape", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]!.url).toBe("http://127.0.0.1:7812/vault/write");
     const body = JSON.parse(String(calls[0]!.init.body));
-    expect(body).toEqual({ path: "deployment.yaml", content: "shape: launchd\nservices: {}\n", intent: { principal: "user", message: "metistry deployment set-shape → launchd" } });
+    expect(body).toEqual({ path: ".metistry/deployment.yaml", content: "shape: launchd\nservices: {}\n", intent: { principal: "user", message: "metistry deployment set-shape → launchd" } });
     // it went through the bridge, not straight to disk — the reconciler commits it on its next flush
-    await expect(readFile(join(I, "deployment.yaml"), "utf8")).resolves.toBe("shape: compose\nservices: {}\n");
+    await expect(readFile(join(I, ".metistry", "deployment.yaml"), "utf8")).resolves.toBe("shape: compose\nservices: {}\n");
   });
 });
 

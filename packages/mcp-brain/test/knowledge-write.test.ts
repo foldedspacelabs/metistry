@@ -13,9 +13,9 @@ import { TasksService } from "@foldedspacelabs/metistry-tasks";
 import { createBrainServer, frontmatterSource, ownershipRefusal, sha256Text, stampProvenance, vaultBridgeWriter, writeKnowledge, type AgentPrincipal, type Db, type KnowledgeWriter, type VaultWriteRequest } from "../src/index.js";
 
 const NOW = new Date("2026-09-07T15:04:05Z");
-const assistant: AgentPrincipal = { id: "assistant", kind: "internal", grants: { tier: "areas", areas: ["Knowledge/"] }, projects: [] };
-const narrow: AgentPrincipal = { id: "assistant", kind: "internal", grants: { tier: "areas", areas: ["Knowledge/Areas/Fsl"] }, projects: [] };
-const external: AgentPrincipal = { id: "drey-dev", grants: { tier: "areas", areas: ["Knowledge/"] }, projects: [] };
+const assistant: AgentPrincipal = { id: "assistant", kind: "internal", grants: { tier: "areas", areas: ["/"] }, projects: [] };
+const narrow: AgentPrincipal = { id: "assistant", kind: "internal", grants: { tier: "areas", areas: ["Areas/Fsl"] }, projects: [] };
+const external: AgentPrincipal = { id: "drey-dev", grants: { tier: "areas", areas: ["/"] }, projects: [] };
 
 function recorder(reply: (r: VaultWriteRequest) => Awaited<ReturnType<KnowledgeWriter>>): { writer: KnowledgeWriter; calls: VaultWriteRequest[] } {
   const calls: VaultWriteRequest[] = [];
@@ -68,14 +68,14 @@ describe("stampProvenance (§4.15)", () => {
 describe("writeKnowledge rules", () => {
   it("one writer (§4.11): an external principal is `forbidden` whatever the path, and the writer is never called", async () => {
     const { writer, calls } = recorder(okReply);
-    const r = await writeKnowledge(external, { path: "Knowledge/now.md", content: "x", message: "m" }, writer, NOW);
-    expect(r).toMatchObject({ ok: false, code: "forbidden", meta: { kind: "external", path: "Knowledge/now.md" } });
+    const r = await writeKnowledge(external, { path: "now.md", content: "x", message: "m" }, writer, NOW);
+    expect(r).toMatchObject({ ok: false, code: "forbidden", meta: { kind: "external", path: "now.md" } });
     expect(calls).toHaveLength(0);
   });
 
-  it("path rules: only Knowledge/... with no traversal; the vault's protected files are unreachable by shape alone", async () => {
+  it("path rules: a vault path with no traversal; the protected set is unreachable by shape alone", async () => {
     const { writer, calls } = recorder(okReply);
-    for (const bad of ["identity.yaml", "rules.yaml", "queries/x.yaml", "CLAUDE.md", "knowledge/now.md", "Knowledge", "Knowledge/", "/Knowledge/now.md", "Knowledge/../identity.yaml", "Knowledge/./x.md", ".git/config"]) {
+    for (const bad of [".metistry/identity.yaml", ".metistry/rules.yaml", ".metistry/queries/x.yaml", "CLAUDE.md", "README.md", "/", "Areas/", "/now.md", "Areas/../.metistry/identity.yaml", "Areas/./x.md", ".git/config", "Artifacts/bundle-1/x.pdf"]) {
       expect(await writeKnowledge(assistant, { path: bad, content: "x", message: "m" }, writer, NOW), bad).toMatchObject({ ok: false, code: "invalid_request" });
     }
     expect(calls).toHaveLength(0);
@@ -83,70 +83,70 @@ describe("writeKnowledge rules", () => {
 
   it("writes never exceed reads: outside the granted areas → forbidden; tier index/none → forbidden", async () => {
     const { writer, calls } = recorder(okReply);
-    expect(await writeKnowledge(narrow, { path: "Knowledge/People/Ada.md", content: "x", message: "m" }, writer, NOW)).toMatchObject({ ok: false, code: "forbidden" });
-    expect(await writeKnowledge(narrow, { path: "Knowledge/Areas/Fslx/Y.md", content: "x", message: "m" }, writer, NOW)).toMatchObject({ ok: false, code: "forbidden" });
-    expect(await writeKnowledge({ ...assistant, grants: { tier: "index", areas: [] } }, { path: "Knowledge/now.md", content: "x", message: "m" }, writer, NOW)).toMatchObject({ ok: false, code: "forbidden" });
+    expect(await writeKnowledge(narrow, { path: "People/Ada.md", content: "x", message: "m" }, writer, NOW)).toMatchObject({ ok: false, code: "forbidden" });
+    expect(await writeKnowledge(narrow, { path: "Areas/Fslx/Y.md", content: "x", message: "m" }, writer, NOW)).toMatchObject({ ok: false, code: "forbidden" });
+    expect(await writeKnowledge({ ...assistant, grants: { tier: "index", areas: [] } }, { path: "now.md", content: "x", message: "m" }, writer, NOW)).toMatchObject({ ok: false, code: "forbidden" });
     expect(calls).toHaveLength(0);
-    expect((await writeKnowledge(narrow, { path: "Knowledge/Areas/Fsl/Drey.md", content: "x", message: "m" }, writer, NOW)).ok).toBe(true);
+    expect((await writeKnowledge(narrow, { path: "Areas/Fsl/Drey.md", content: "x", message: "m" }, writer, NOW)).ok).toBe(true);
     expect(calls).toHaveLength(1);
   });
 
   it("no writer → not_available (a capability gap, not a permission)", async () => {
-    expect(await writeKnowledge(assistant, { path: "Knowledge/now.md", content: "x", message: "m" }, undefined, NOW)).toMatchObject({ ok: false, code: "not_available" });
+    expect(await writeKnowledge(assistant, { path: "now.md", content: "x", message: "m" }, undefined, NOW)).toMatchObject({ ok: false, code: "not_available" });
   });
 
   it("a markdown write is stamped and carries the intent in the principal's name; a non-markdown write is verbatim; CAS passes through", async () => {
     const { writer, calls } = recorder(okReply);
-    const r = await writeKnowledge(assistant, { path: "Knowledge/now.md", content: "# Now\n", message: "now: shipped the write path", expected_sha256: "" }, writer, NOW);
+    const r = await writeKnowledge(assistant, { path: "now.md", content: "# Now\n", message: "now: shipped the write path", expected_sha256: "" }, writer, NOW);
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(calls[0]).toEqual({
-      path: "Knowledge/now.md",
+      path: "now.md",
       content: "---\nsource: assistant\nupdated: 2026-09-07\n---\n# Now\n",
       intent: { principal: "assistant", message: "now: shipped the write path", group: "assistant" },
       expected_sha256: "",
     });
-    expect(r.result).toEqual({ path: "Knowledge/now.md", sha256: sha256Text(calls[0]!.content), bytes: calls[0]!.content.length, created: true, queued: true, provenance: { source: "assistant", updated: "2026-09-07" } });
-    expect(r.meta).toMatchObject({ kind: "internal", tier: "areas", areas: ["Knowledge/"], path: "Knowledge/now.md", created: true, provenance: { source: "assistant" } });
+    expect(r.result).toEqual({ path: "now.md", sha256: sha256Text(calls[0]!.content), bytes: calls[0]!.content.length, created: true, queued: true, provenance: { source: "assistant", updated: "2026-09-07" } });
+    expect(r.meta).toMatchObject({ kind: "internal", tier: "areas", areas: ["/"], path: "now.md", created: true, provenance: { source: "assistant" } });
 
-    const csv = await writeKnowledge(assistant, { path: "Knowledge/Attachments/data.csv", content: "a,b\n1,2\n", message: "data" }, writer, NOW);
+    const csv = await writeKnowledge(assistant, { path: "Attachments/data.csv", content: "a,b\n1,2\n", message: "data" }, writer, NOW);
     expect(csv.ok && csv.result.provenance).toBeNull();
     expect(calls[1]).toMatchObject({ content: "a,b\n1,2\n" });
     expect(calls[1]!.expected_sha256).toBe(""); // omitted = create only; there is no unconditional write
 
-    const badFm = await writeKnowledge(assistant, { path: "Knowledge/x.md", content: "---\n- list\n---\n", message: "m" }, writer, NOW);
+    const badFm = await writeKnowledge(assistant, { path: "x.md", content: "---\n- list\n---\n", message: "m" }, writer, NOW);
     expect(badFm).toMatchObject({ ok: false, code: "invalid_request", message: /mapping/ });
   });
 
-  // Misuse test (invariant 8): the owner edits notes in Knowledge/ by hand —
+  // Misuse test (invariant 8): the owner edits notes in  by hand —
   // Obsidian, an editor, another device — and the assistant must never
   // replace bytes it has not seen. Enforced at the tool: there is no way to
   // ask for an unconditional write.
   it("never clobbers: an omitted expected_sha256 reaches the bridge as create-only, and an existing note is a conflict", async () => {
     const { writer, calls } = recorder(okReply);
-    await writeKnowledge(assistant, { path: "Knowledge/Areas/New.md", content: "# New\n", message: "m" }, writer, NOW);
+    await writeKnowledge(assistant, { path: "Areas/New.md", content: "# New\n", message: "m" }, writer, NOW);
     expect(calls[0]!.expected_sha256).toBe(""); // "must not exist", every time
 
     const current = "c".repeat(64);
     const taken = recorder(() => ({ ok: false, code: "conflict", current_sha256: current }));
-    const r = await writeKnowledge(assistant, { path: "Knowledge/Areas/Mine.md", content: "mine", message: "m" }, taken.writer, NOW);
+    const r = await writeKnowledge(assistant, { path: "Areas/Mine.md", content: "mine", message: "m" }, taken.writer, NOW);
     expect(r).toMatchObject({ ok: false, code: "conflict", meta: { current_sha256: current, create_only: true } });
     expect(r.ok === false && r.message).toMatch(/already exists.*knowledge_read/s);
     // and a retry cannot ask for less: the same call is the same refusal
-    expect(await writeKnowledge(assistant, { path: "Knowledge/Areas/Mine.md", content: "mine", message: "m" }, taken.writer, NOW)).toMatchObject({ ok: false, code: "conflict" });
+    expect(await writeKnowledge(assistant, { path: "Areas/Mine.md", content: "mine", message: "m" }, taken.writer, NOW)).toMatchObject({ ok: false, code: "conflict" });
     expect(taken.calls.every((c) => c.expected_sha256 !== undefined)).toBe(true);
   });
 
   it("conflict: the current hash rides in the message and the audit meta so the agent can re-read; a vanished note says so", async () => {
     const cur = "a".repeat(64);
     const { writer } = recorder(() => ({ ok: false, code: "conflict", current_sha256: cur }));
-    const r = await writeKnowledge(assistant, { path: "Knowledge/now.md", content: "x", message: "m", expected_sha256: "b".repeat(64) }, writer, NOW);
+    const r = await writeKnowledge(assistant, { path: "now.md", content: "x", message: "m", expected_sha256: "b".repeat(64) }, writer, NOW);
     expect(r).toMatchObject({ ok: false, code: "conflict", message: expect.stringContaining(cur), meta: { current_sha256: cur } });
     const gone = recorder(() => ({ ok: false, code: "conflict", current_sha256: null }));
-    expect(await writeKnowledge(assistant, { path: "Knowledge/now.md", content: "x", message: "m", expected_sha256: cur }, gone.writer, NOW)).toMatchObject({ ok: false, code: "conflict", message: /no longer exists/ });
+    expect(await writeKnowledge(assistant, { path: "now.md", content: "x", message: "m", expected_sha256: cur }, gone.writer, NOW)).toMatchObject({ ok: false, code: "conflict", message: /no longer exists/ });
     // every other bridge refusal passes through untouched (the vault's protected-path rule included)
     const forb = recorder(() => ({ ok: false, code: "forbidden" }));
-    expect(await writeKnowledge(assistant, { path: "Knowledge/x.md", content: "x", message: "m" }, forb.writer, NOW)).toMatchObject({ ok: false, code: "forbidden" });
+    expect(await writeKnowledge(assistant, { path: "x.md", content: "x", message: "m" }, forb.writer, NOW)).toMatchObject({ ok: false, code: "forbidden" });
   });
 });
 
@@ -196,33 +196,33 @@ describe("vaultBridgeWriter (wire contract)", () => {
 
   it("create (201) and update (200) map to the outcome; the request carries path, content, intent and only a given expected_sha256", async () => {
     const w = vaultBridgeWriter({ url: `${base}/`, token: "bridge-tok" });
-    const a = await w({ path: "Knowledge/now.md", content: "v1", intent, expected_sha256: "" });
-    expect(a).toEqual({ ok: true, path: "Knowledge/now.md", sha256: sha("v1"), bytes: 2, created: true });
-    expect(seen.at(-1)).toEqual({ path: "Knowledge/now.md", content: "v1", intent, expected_sha256: "" });
-    const b = await w({ path: "Knowledge/now.md", content: "v2", intent: { ...intent, group: "assistant" }, expected_sha256: sha("v1") });
-    expect(b).toEqual({ ok: true, path: "Knowledge/now.md", sha256: sha("v2"), bytes: 2, created: false });
-    const c = await w({ path: "Knowledge/now.md", content: "v3", intent });
+    const a = await w({ path: "now.md", content: "v1", intent, expected_sha256: "" });
+    expect(a).toEqual({ ok: true, path: "now.md", sha256: sha("v1"), bytes: 2, created: true });
+    expect(seen.at(-1)).toEqual({ path: "now.md", content: "v1", intent, expected_sha256: "" });
+    const b = await w({ path: "now.md", content: "v2", intent: { ...intent, group: "assistant" }, expected_sha256: sha("v1") });
+    expect(b).toEqual({ ok: true, path: "now.md", sha256: sha("v2"), bytes: 2, created: false });
+    const c = await w({ path: "now.md", content: "v3", intent });
     expect(c.ok).toBe(true);
     expect("expected_sha256" in (seen.at(-1) as object)).toBe(false);
   });
 
   it("409 → conflict with the hash now on disk (one read), or null when the note is gone", async () => {
     const w = vaultBridgeWriter({ url: base, token: "bridge-tok" });
-    expect(await w({ path: "Knowledge/now.md", content: "v4", intent, expected_sha256: sha("v1") })).toEqual({ ok: false, code: "conflict", current_sha256: sha("v3") });
-    expect(await w({ path: "Knowledge/gone.md", content: "x", intent, expected_sha256: sha("v1") })).toEqual({ ok: false, code: "conflict", current_sha256: null });
+    expect(await w({ path: "now.md", content: "v4", intent, expected_sha256: sha("v1") })).toEqual({ ok: false, code: "conflict", current_sha256: sha("v3") });
+    expect(await w({ path: "gone.md", content: "x", intent, expected_sha256: sha("v1") })).toEqual({ ok: false, code: "conflict", current_sha256: null });
   });
 
   it("the vault's refusals pass through with their message: protected path → forbidden, size cap → invalid_request", async () => {
     const w = vaultBridgeWriter({ url: base, token: "bridge-tok" });
     expect(await w({ path: "identity.yaml", content: "name: X", intent })).toEqual({ ok: false, code: "forbidden", message: "not granted" });
-    expect(await w({ path: "Knowledge/big.md", content: "x".repeat(101), intent })).toEqual({ ok: false, code: "invalid_request", message: "content exceeds 100 bytes" });
+    expect(await w({ path: "big.md", content: "x".repeat(101), intent })).toEqual({ ok: false, code: "invalid_request", message: "content exceeds 100 bytes" });
   });
 
   it("a wrong bridge credential is a deployment fault, reported as not_available — never as the agent's `forbidden`; a non-JSON 5xx is not_available too", async () => {
     const w = vaultBridgeWriter({ url: base, token: "wrong" });
-    expect(await w({ path: "Knowledge/now.md", content: "x", intent })).toMatchObject({ ok: false, code: "not_available", message: /METISTRY_BRIDGE_TOKEN_RECONCILER/ });
+    expect(await w({ path: "now.md", content: "x", intent })).toMatchObject({ ok: false, code: "not_available", message: /METISTRY_BRIDGE_TOKEN_RECONCILER/ });
     const boom = vaultBridgeWriter({ url: base, token: "bridge-tok", fetch: (input, init) => fetch(`${base}/boom`, init) });
-    expect(await boom({ path: "Knowledge/now.md", content: "x", intent })).toEqual({ ok: false, code: "not_available", message: undefined });
+    expect(await boom({ path: "now.md", content: "x", intent })).toEqual({ ok: false, code: "not_available", message: undefined });
   });
 });
 
@@ -271,16 +271,16 @@ describe("the tool over MCP (fake db)", () => {
   }
 
   it("knowledge_write is listed for everyone, refused for the external agent with the uniform envelope, and a runs row either way", async () => {
-    const ext = await call("ext", { path: "Knowledge/now.md", content: "x", message: "m" });
+    const ext = await call("ext", { path: "now.md", content: "x", message: "m" });
     expect(ext).toEqual({ isError: true, body: { error: { code: "forbidden", message: "not granted" } } });
     expect(calls).toHaveLength(0);
-    const int = await call("int", { path: "Knowledge/now.md", content: "# Now\n", message: "now", expected_sha256: "" });
+    const int = await call("int", { path: "now.md", content: "# Now\n", message: "now", expected_sha256: "" });
     expect(int.isError).toBe(false);
-    expect(int.body).toMatchObject({ path: "Knowledge/now.md", created: true, queued: true, provenance: { source: "assistant" } });
+    expect(int.body).toMatchObject({ path: "now.md", created: true, queued: true, provenance: { source: "assistant" } });
     expect(calls[0]?.intent).toEqual({ principal: "assistant", message: "now", group: "assistant" });
     expect(runs).toEqual(["start", "finish", "start", "finish"]);
     // schema: a malformed expected_sha256 never reaches the body (the SDK refuses it before our wrapper runs)
-    const bad = await call("int", { path: "Knowledge/now.md", content: "x", message: "m", expected_sha256: "nope" });
+    const bad = await call("int", { path: "now.md", content: "x", message: "m", expected_sha256: "nope" });
     expect(bad.isError).toBe(true);
     expect(String(bad.body)).toMatch(/expected_sha256|invalid/i);
     expect(calls).toHaveLength(1);
@@ -292,7 +292,7 @@ describe("the tool over MCP (fake db)", () => {
 // not in the prompt (CLAUDE.md: "enforce at the tool, never by prompting").
 describe("writeKnowledge ownership (the fold's rule 2)", () => {
   const note = (source: string | null) => (source === null ? "# Ada\n" : `---\nid: 01J8\nsource: ${source}\nupdated: 2026-09-01\n---\n# Ada\n`);
-  const PATH = "Knowledge/People/Ada.md";
+  const PATH = "People/Ada.md";
   const reader = (content: string | null) => async () => content;
 
   it("reads the `source` out of frontmatter, and only a scalar one", () => {
@@ -338,7 +338,7 @@ describe("writeKnowledge ownership (the fold's rule 2)", () => {
 
   it("non-markdown paths carry no frontmatter, so there is nothing to own", async () => {
     const { writer, calls } = recorder(okReply);
-    expect((await writeKnowledge(assistant, { path: "Knowledge/Attachments/data.csv", content: "a,b\n", message: "m" }, writer, NOW, reader(note("user")))).ok).toBe(true);
+    expect((await writeKnowledge(assistant, { path: "Attachments/data.csv", content: "a,b\n", message: "m" }, writer, NOW, reader(note("user")))).ok).toBe(true);
     expect(calls).toHaveLength(1);
   });
 });

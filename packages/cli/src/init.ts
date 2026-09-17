@@ -1,9 +1,13 @@
-// `metistry init <dir>` — stamps an instance repo (plan §4.16) exactly the
-// way the 2026-09-06 by-hand bootstrap did (docs/ops/reconciler.md, now
-// docs/ops/cli.md): its own git repo, `Knowledge/` from seed, identity +
-// rules, the empty config dirs, README, .gitignore, `metistry.lock`, one
-// initial commit. Interactive-free: the assistant's name comes from
-// `--name` and lands in identity.yaml — the ONLY place it lives (CLAUDE.md).
+// `metistry init <dir>` — stamps an instance repo (plan §4.16): its own git
+// repo, the vault AT THE ROOT from `seed/vault/`, the config half under
+// `.metistry/` (identity, rules, compute, the five config dirs,
+// `metistry.lock`), README, .gitignore, one initial commit. Interactive-free:
+// the assistant's name comes from `--name` and lands in identity.yaml — the
+// ONLY place it lives (CLAUDE.md).
+//
+// The directory this stamps IS the Obsidian vault (owner's ruling
+// 2026-09-17). Every path below comes from core's INSTANCE_LAYOUT; nothing
+// here spells one.
 //
 // Secrets: the reconciler bearer and the console's local owner token are
 // minted and PRINTED, never written. The instance repo is a git repo the
@@ -13,7 +17,16 @@ import { cp, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { COMPUTE_FILENAME, mintToken, type DeploymentShape } from "@foldedspacelabs/metistry-core";
+import {
+  COMPUTE_FILENAME,
+  INSTANCE_CONFIG_DIRS,
+  INSTANCE_GITIGNORE,
+  INSTANCE_LAYOUT,
+  instancePath,
+  metistryPath,
+  mintToken,
+  type DeploymentShape,
+} from "@foldedspacelabs/metistry-core";
 import { realExec, type Exec } from "./exec.js";
 import { mintInstanceId, withInstanceId } from "./instance.js";
 import { LOCK_FILENAME, serializeLock, type LockFile, type LockSource } from "./lock.js";
@@ -60,18 +73,31 @@ export interface InitResult {
   envLines: string[];
 }
 
-/** Tracked config dirs the instance owns (§4.16). The inbox is NOT one of them any more: it lives in the vault at `Knowledge/Inbox/` (docs/ops/inbox.md) and comes from seed/. */
-export const INSTANCE_DIRS = ["queries", "agents", "routines", "extensions", "instance-migrations"] as const;
-// `state/` holds this instance's derived state — the Postgres data
-// directory, the assistant's SDK transcripts, and the generated `.env`.
-// Invariant 1: git is the record, Postgres is derived, so none of it
-// belongs in the instance repo — and `.env` holds secrets, which must
-// never be committable at all.
-// `state/` holds this instance's derived state; `Knowledge/Inbox/.large/`
-// holds captures too big for git to carry (METISTRY_INBOX_MAX_TRACKED_BYTES)
-// — Obsidian still sees them, the repo stays small. The inbox ITSELF is
-// tracked now: a capture is part of the record (invariant 1).
-export const GITIGNORE = "state/\n.obsidian/workspace*\nKnowledge/Inbox/.large/\n";
+/**
+ * The product seed's vault half: what lands at the instance ROOT, because
+ * the instance directory IS the Obsidian vault. TitleCase inside (CLAUDE.md
+ * casing rule); the name `vault` is lowercase like the rest of the repo.
+ */
+export const SEED_VAULT_DIR = "vault";
+/** The seed's compute.yaml, which lands at `.metistry/compute.yaml`. */
+export const SEED_COMPUTE_FILE = COMPUTE_FILENAME;
+
+/**
+ * Tracked config dirs the instance owns (§4.16), by bare name — they are
+ * stamped under `.metistry/`, and every one of them is protected. The inbox
+ * is NOT one of them: it is vault content at `Inbox/` (docs/ops/inbox.md)
+ * and comes from `seed/vault/`.
+ */
+export const INSTANCE_DIRS = INSTANCE_CONFIG_DIRS;
+// `.metistry/state/` holds this instance's derived state — the Postgres data
+// directory, the assistant's SDK transcripts, downloaded models, and the
+// generated `.env`. Invariant 1: git is the record, Postgres is derived, so
+// none of it belongs in the instance repo — and `.env` holds secrets, which
+// must never be committable at all. `Inbox/.large/` holds captures too big
+// for git to carry (METISTRY_INBOX_MAX_TRACKED_BYTES) — Obsidian still sees
+// them, the repo stays small. The inbox ITSELF is tracked: a capture is part
+// of the record (invariant 1).
+export const GITIGNORE = INSTANCE_GITIGNORE;
 export const COMMIT_AUTHOR = { name: "Metistry", email: "metistry@localhost" } as const;
 
 /** The mention trigger follows the name: "Metis" → "@metis". */
@@ -108,14 +134,16 @@ export async function init(opts: InitOptions): Promise<InitResult> {
   if (!(await isEmptyDir(dir)) && !opts.force) {
     throw new Error(`${dir} is not empty — pick another directory or pass --force to stamp into it anyway`);
   }
-  if (!existsSync(join(opts.seedDir, "identity.yaml")) || !existsSync(join(opts.seedDir, "Knowledge"))) {
-    throw new Error(`${opts.seedDir} is not a Metistry seed/ (identity.yaml + Knowledge/ expected)`);
+  if (!existsSync(join(opts.seedDir, "identity.yaml")) || !existsSync(join(opts.seedDir, SEED_VAULT_DIR))) {
+    throw new Error(`${opts.seedDir} is not a Metistry seed/ (identity.yaml + ${SEED_VAULT_DIR}/ expected)`);
   }
 
   await mkdir(dir, { recursive: true });
 
-  // the vault starter (incl. Knowledge/now.md, where brain-commit writes)
-  await cp(join(opts.seedDir, "Knowledge"), join(dir, "Knowledge"), { recursive: true });
+  // the vault starter, AT THE ROOT: now.md (where brain-commit writes),
+  // Inbox/, and the CLAUDE.md the user writes their own instructions into
+  await cp(join(opts.seedDir, SEED_VAULT_DIR), dir, { recursive: true });
+  await mkdir(metistryPath(dir), { recursive: true });
 
   // identity — the one place the assistant is named — and the router rules
   let identity = await readFile(join(opts.seedDir, "identity.yaml"), "utf8");
@@ -128,32 +156,33 @@ export async function init(opts: InitOptions): Promise<InitResult> {
   // tells several instance directories apart
   const instanceId = (opts.mintInstanceId ?? mintInstanceId)();
   identity = withInstanceId(identity, instanceId);
-  await writeFile(join(dir, "identity.yaml"), identity);
-  await cp(join(opts.seedDir, "rules.yaml"), join(dir, "rules.yaml"));
+  await writeFile(instancePath(dir, "identity"), identity);
+  await cp(join(opts.seedDir, "rules.yaml"), instancePath(dir, "rules"));
   // compute.yaml — providers, assignments, budgets (docs/ops/compute.md).
   // The seed's copy is entirely commented out, so a fresh instance assigns
   // nothing and rules.yaml's `tiers:` stays the live map; `metistry compute`
   // writes into this file from here on.
-  if (existsSync(join(opts.seedDir, COMPUTE_FILENAME))) await cp(join(opts.seedDir, COMPUTE_FILENAME), join(dir, COMPUTE_FILENAME));
+  if (existsSync(join(opts.seedDir, SEED_COMPUTE_FILE))) await cp(join(opts.seedDir, SEED_COMPUTE_FILE), instancePath(dir, "compute"));
   const assistantName = String((parseYaml(identity) as { name?: unknown })?.name ?? "");
 
-  // the vault inbox (docs/ops/inbox.md): seed/ carries its README, and this
-  // guarantees the directory exists even for a seed that does not
-  await mkdir(join(dir, "Knowledge", "Inbox"), { recursive: true });
+  // the vault inbox (docs/ops/inbox.md): seed/vault/ carries its README, and
+  // this guarantees the directory exists even for a seed that does not
+  await mkdir(instancePath(dir, "inboxDir"), { recursive: true });
 
-  // config-shaped dirs the instance owns; the D4 overlay reads seed defaults
-  // until a same-named file appears here, so they start empty
+  // config-shaped dirs the instance owns, under `.metistry/`; the D4 overlay
+  // reads seed defaults until a same-named file appears here, so they start
+  // empty
   for (const d of INSTANCE_DIRS) {
-    await mkdir(join(dir, d), { recursive: true });
-    await writeFile(join(dir, d, ".gitkeep"), "");
+    await mkdir(metistryPath(dir, d), { recursive: true });
+    await writeFile(metistryPath(dir, d, ".gitkeep"), "");
   }
 
   await writeFile(
-    join(dir, "README.md"),
-    `# Instance repo — private. Vault + config; created ${now.toISOString().slice(0, 10)} by \`metistry init\` (product docs/ops/cli.md).\n`,
+    instancePath(dir, "readme"),
+    `# Instance repo — private. This directory is the Obsidian vault; the machinery lives in \`.metistry/\`. Created ${now.toISOString().slice(0, 10)} by \`metistry init\` (product docs/ops/cli.md).\n`,
   );
   await writeFile(join(dir, ".gitignore"), GITIGNORE);
-  await writeFile(join(dir, LOCK_FILENAME), lockFile(opts.version, now, opts.productCommit ?? "unknown", opts.productSource ?? "git"));
+  await writeFile(instancePath(dir, "lock"), lockFile(opts.version, now, opts.productCommit ?? "unknown", opts.productSource ?? "git"));
 
   // its own repo: never a git relationship with the product (§4.16)
   const gitEnv = {

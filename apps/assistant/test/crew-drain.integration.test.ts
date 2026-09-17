@@ -23,7 +23,7 @@ const snapshot: CrewSnapshot = {
   effort: "medium",
   uses: ["brain-read", "brain-report"],
   skills: [],
-  scope: ["Knowledge/Projects"],
+  scope: ["Projects"],
   projects: [],
   manages: [],
   max_turns: 5,
@@ -57,7 +57,7 @@ describe.skipIf(!hasDb)("crew drain (integration)", () => {
       password: process.env.METISTRY_DB_PASSWORD,
     });
     // the console's registration, minimally: a crew row whose hash is of a token nobody holds
-    await pool.query(`INSERT INTO agents (id, display_name, kind, token_hash, grants, projects) VALUES ($1, 'itest crew', 'crew', $2, '{"tier":"areas","areas":["Knowledge/Projects"]}', '{}')`, [crewId, tokenHash(mintToken(32))]);
+    await pool.query(`INSERT INTO agents (id, display_name, kind, token_hash, grants, projects) VALUES ($1, 'itest crew', 'crew', $2, '{"tier":"areas","areas":["Projects"]}', '{}')`, [crewId, tokenHash(mintToken(32))]);
     // park other suites' crew rows so this suite drains only its own
     await pool.query(`UPDATE work SET status = 'closed' WHERE kind = 'task' AND owner LIKE 'crew:%' AND status <> 'closed' AND owner <> $1`, [`crew:${crewId}`]);
   });
@@ -73,7 +73,7 @@ describe.skipIf(!hasDb)("crew drain (integration)", () => {
   async function enqueue(brief: string, meta: Record<string, unknown> = {}, crew: unknown = snapshot): Promise<number> {
     const { rows } = await pool.query(
       `INSERT INTO work (title, kind, status, owner, created_by, meta) VALUES ($1, 'task', 'open', $2, 'assistant', $3::jsonb) RETURNING id`,
-      [`[crew:${crewId}] ${brief.slice(0, 40)}`, `crew:${crewId}`, JSON.stringify({ target: "local-crew", crew, brief, brief_sha: "d".repeat(64), dispatch_run_id: 1, allow: ["Knowledge/Projects"], ...meta })],
+      [`[crew:${crewId}] ${brief.slice(0, 40)}`, `crew:${crewId}`, JSON.stringify({ target: "local-crew", crew, brief, brief_sha: "d".repeat(64), dispatch_run_id: 1, allow: ["Projects"], ...meta })],
     );
     return Number(rows[0].id);
   }
@@ -83,7 +83,7 @@ describe.skipIf(!hasDb)("crew drain (integration)", () => {
   const ok: CrewRunResult = { outcome: "ok", session_id: "s1", num_turns: 4, tokens_in: 900, tokens_out: 120, cost_usd: 0.031, tools_used: { mcp__brain__knowledge_read: 2, mcp__brain__report: 1 }, text_chars: 50 };
 
   it("claims the row, runs with the crew's options and a token that authenticates ONLY during the run, records a crew_run row on the crew id, closes the row", async () => {
-    const id = await enqueue("Summarize Knowledge/Projects/X.md", { task_id: 77 });
+    const id = await enqueue("Summarize Projects/X.md", { task_id: 77 });
     const hashBefore = await hashOf();
     let seen: CrewRunInput | null = null;
     let assigned: ResolvedAssignment | null = null;
@@ -99,7 +99,7 @@ describe.skipIf(!hasDb)("crew drain (integration)", () => {
     // the runner got the snapshot, the brief, the handle, the brain URL and a fresh bearer
     const s = seen!;
     expect(s.crew).toEqual(snapshot);
-    expect(s.brief).toBe("Summarize Knowledge/Projects/X.md");
+    expect(s.brief).toBe("Summarize Projects/X.md");
     expect(s.task_id).toBe(77);
     expect(s.brain.url).toBe("http://console:8080/mcp");
     expect(s.identity).toEqual({ name: "Tester" });

@@ -42,8 +42,8 @@ describe("sandbox parameters", () => {
   });
 
   it("the state dir is beside the Postgres data dir, outside the vault", () => {
-    expect(assistantStateDir({ instanceDir: "/i", productDir: "/p" })).toBe("/i/state/assistant");
-    expect(assistantStateDir({ productDir: "/p" })).toBe("/p/state/assistant");
+    expect(assistantStateDir({ instanceDir: "/i", productDir: "/p" })).toBe("/i/.metistry/state/assistant");
+    expect(assistantStateDir({ productDir: "/p" })).toBe("/p/.metistry/state/assistant");
     expect(tmpDirOf({ TMPDIR: "/var/folders/xy/T/" })).toBe("/var/folders/xy/T");
   });
 

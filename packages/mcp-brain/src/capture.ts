@@ -5,7 +5,8 @@
 // credential — this function never sees a request body.
 //
 // WHERE the file lands is a `CaptureSink` (2026-09-16: the inbox moved into
-// the vault at `Knowledge/Inbox/`, so Obsidian can see and edit captures).
+// the vault, so Obsidian can see and edit captures; 2026-09-17: the vault is
+// the instance directory itself, so that is `Inbox/`).
 // Two of them:
 //
 //   `vaultSink(vault)` — the one Metistry uses. Captures are ordinary vault
@@ -16,7 +17,7 @@
 //     mcp-brain standalone has, and what this package did before sinks.
 //
 // Both carry the same two rules: the stored `inbox.path` is REPO-RELATIVE
-// (`Knowledge/Inbox/<file>`, as db/migrations/0001_init.sql always said) when
+// (`Inbox/<file>`, as db/migrations/0001_init.sql always said) when
 // the sink has a prefix, and a capture over `maxTrackedBytes` goes to
 // `<prefix>/.large/`, which the instance's .gitignore excludes — git does
 // not carry a 40 MB video; Obsidian still sees it (docs/ops/inbox.md).
@@ -24,10 +25,11 @@
 import { createHash } from "node:crypto";
 import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { INSTANCE_LAYOUT } from "@foldedspacelabs/metistry-core";
 import type { Db } from "./types.js";
 
-/** The vault directory captures land in. TitleCase, like everything under `Knowledge/` (CLAUDE.md). */
-export const INBOX_PREFIX = "Knowledge/Inbox";
+/** The vault directory captures land in, at the vault root. TitleCase (CLAUDE.md casing rule). */
+export const INBOX_PREFIX = INSTANCE_LAYOUT.inboxDir;
 /** Gitignored spill inside the inbox for captures git should not carry. */
 export const INBOX_LARGE_DIRNAME = ".large";
 /** Default `METISTRY_INBOX_MAX_TRACKED_BYTES`: above this a capture goes to `.large/`. */
@@ -36,7 +38,7 @@ export const DEFAULT_MAX_TRACKED_BYTES = 5 * 1024 * 1024;
 export interface SinkOptions {
   /**
    * Vault-relative directory the stored `inbox.path` is built from
-   * (`Knowledge/Inbox`). `""` — a bare directory nobody indexes — stores the
+   * (`Inbox`). `""` — a bare directory nobody indexes — stores the
    * filename alone, which is what this package did before the move.
    */
   prefix?: string | undefined;
@@ -110,7 +112,7 @@ export function dirSink(dir: string, o?: SinkOptions): CaptureSink {
  * The reconciler's vault bridge. Every write is compare-and-swap on the
  * empty string — "must not exist" — so a capture can never land on top of a
  * file already in the vault, whoever wrote it (invariant 2: a human edit in
- * `Knowledge/` is never overwritten by the assistant's side of the house).
+ * the vault is never overwritten by the assistant's side of the house).
  */
 export function vaultSink(vault: CaptureVault, o?: SinkOptions): CaptureSink {
   const { prefix, principal } = opts({ prefix: INBOX_PREFIX, ...o });
@@ -157,8 +159,8 @@ export interface CaptureResult {
   replayed?: boolean;
 }
 
-/** The partial unique index of migration 0015 — one `inbox` row per vault path, whoever wrote the file. */
-const VAULT_PATH_PREDICATE = `path LIKE 'Knowledge/Inbox/%'`;
+/** The partial unique index of migration 0021 — one `inbox` row per vault path, whoever wrote the file. Must match the index's predicate exactly: Postgres infers the conflict target from it. */
+const VAULT_PATH_PREDICATE = `path LIKE '${INBOX_PREFIX}/%'`;
 
 /** Write the capture through `sink` (a directory path is the bare `dirSink`) and insert the triage row. */
 export async function captureToInbox(db: Db, sink: CaptureSink | string, input: CaptureInput): Promise<CaptureResult> {
@@ -173,7 +175,7 @@ export async function captureToInbox(db: Db, sink: CaptureSink | string, input: 
   const rel = await dest.put(`${Date.now()}-${safe}`, input.bytes);
   const sha = createHash("sha256").update(input.bytes).digest("hex");
   // A file in the vault may already have an `inbox` row: the reconciler's
-  // scan indexes anything that appears under `Knowledge/Inbox/` (a human's
+  // scan indexes anything that appears under `Inbox/` (a human's
   // note, a `git pull`) and could have seen this one in the millisecond
   // between the write and this insert. Whoever writes second refines the
   // row — the capture knows more (source, mime, the credential) than a scan.

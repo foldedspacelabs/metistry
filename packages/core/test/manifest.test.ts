@@ -21,7 +21,7 @@ const cloudWorker = {
   result: { via: "report_queue" },
   auth: "env:CLOUD_WORKER_TOKEN",
   cost: { per_run_estimate_usd: 0.1 },
-  data_policy: { allow: ["Knowledge/Projects"], deny_sources: ["comms"], max_brief_bytes: 16384 },
+  data_policy: { allow: ["Projects"], deny_sources: ["comms"], max_brief_bytes: 16384 },
 };
 
 describe("target manifests (§4.18)", () => {
@@ -49,8 +49,10 @@ describe("target manifests (§4.18)", () => {
     expect(validateManifest({ ...cloudWorker, data_policy: { allow: [] } }).ok).toBe(false); // every field is a declaration
   });
 
-  it("rejects allow entries that are not Knowledge/ prefixes or that traverse", () => {
-    for (const bad of ["Areas/fsl", "Knowledge/../secrets", "Knowledge/Projects/", "/etc"]) {
+  it("rejects allow entries that are not vault prefixes or that traverse", () => {
+    // lowercase root (the casing rule), traversal, trailing slash, absolute,
+    // the machinery, and Artifacts/ — which is content but not knowledge
+    for (const bad of ["areas/Fsl", "Areas/../secrets", "Projects/", "/etc", ".metistry/queries", "Artifacts/bundle-1"]) {
       expect(validateManifest({ ...cloudWorker, data_policy: { ...cloudWorker.data_policy, allow: [bad] } }).ok).toBe(false);
     }
     expect(validateManifest({ ...cloudWorker, data_policy: { ...cloudWorker.data_policy, allow: [] } }).ok).toBe(true);

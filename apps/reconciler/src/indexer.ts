@@ -1,4 +1,4 @@
-// The reconcile loop (§4.13): walk `Knowledge/`, hash CONTENT (sync churns
+// The reconcile loop (§4.13): walk the vault (the instance root), hash CONTENT (sync churns
 // mtime, so mtime decides nothing), upsert `knowledge_files` +
 // `knowledge_links`, detect renames by hash, flag Obsidian/Syncthing
 // conflict files exactly once as a `proposals` report, and record one
@@ -8,7 +8,7 @@
 
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { finishRun, startRun, type RunExecutor } from "@foldedspacelabs/metistry-core";
+import { finishRun, isVaultPath, startRun, type RunExecutor } from "@foldedspacelabs/metistry-core";
 import type { Committer } from "./committer.js";
 import { EMPTY_SUMMARY, type Embeddings, type EmbedSummary } from "./embeddings.js";
 import type { Vault } from "./vault.js";
@@ -19,7 +19,7 @@ export interface Db extends RunExecutor {
 }
 
 export interface IndexerConfig {
-  /** Commit working-tree changes under Knowledge/ that arrived outside the bridge (Obsidian sync). */
+  /** Commit working-tree changes in the vault that arrived outside the bridge (Obsidian sync). */
   commitExternalEdits: boolean;
 }
 
@@ -34,7 +34,7 @@ export interface ReconcileSummary {
   conflicts_new: number; // newly proposed this cycle
   links: number;
   external_edits: number; // paths swept into a `user` commit intent
-  /** `Knowledge/Inbox/` rows brought up to date this cycle (docs/ops/inbox.md). */
+  /** `Inbox/` rows brought up to date this cycle (docs/ops/inbox.md). */
   inbox: InboxSummary;
   /** Phase 6: vectors brought up to date this cycle. Absent when no embedder is configured. */
   embeddings?: EmbedSummary;
@@ -42,7 +42,7 @@ export interface ReconcileSummary {
 }
 
 export interface InboxSummary {
-  /** files under `Knowledge/Inbox/` that had no triage row — a human's note, a `git pull` */
+  /** files under `Inbox/` that had no triage row — a human's note, a `git pull` */
   added: number;
   /** rows whose file changed under them (re-triaged when they had already been classified) */
   changed: number;
@@ -57,7 +57,7 @@ interface Scanned {
   meta: NoteMeta;
   links: NoteLink[];
   conflict: boolean;
-  /** kept only for `Knowledge/Inbox/` files, where the triage row wants a one-line note */
+  /** kept only for `Inbox/` files, where the triage row wants a one-line note */
   bytes?: Buffer;
 }
 
@@ -96,7 +96,7 @@ export class Indexer {
   }
 
   private async cycle(runId: number, started: number): Promise<ReconcileSummary> {
-    const paths = await this.vault.walkKnowledge();
+    const paths = await this.vault.walkVault();
     const scanned = new Map<string, Scanned>();
     for (const p of paths) {
       const abs = join(this.vault.root, p);
@@ -210,7 +210,7 @@ export class Indexer {
     }
 
     // the vault inbox: a file that appears or changes under
-    // `Knowledge/Inbox/` without a capture call is triage material too
+    // `Inbox/` without a capture call is triage material too
     const inbox = await this.syncInbox(scanned);
 
     // external edits: Obsidian (any device) writes straight to the tree;
@@ -219,12 +219,15 @@ export class Indexer {
     let externalEdits = 0;
     if (this.cfg.commitExternalEdits) {
       const pending = this.committer.pendingPaths();
-      const entries = await this.vault.git.status(["Knowledge"]);
+      // the whole working tree, filtered to vault paths: `.metistry/` is
+      // the user's hand (invariant 2) and must never ride along in a sweep
+      // commit, and `Artifacts/` is not knowledge
+      const entries = await this.vault.git.status(["."]);
       const touched = new Set<string>();
       for (const e of entries) {
         if (e.code === "!!") continue;
         for (const p of [e.path, e.from]) {
-          if (p && !pending.has(p) && !isConflictFile(p)) touched.add(p);
+          if (p && isVaultPath(p) && !pending.has(p) && !isConflictFile(p)) touched.add(p);
         }
       }
       if (touched.size > 0) {
@@ -264,7 +267,7 @@ export class Indexer {
   }
 
   /**
-   * `Knowledge/Inbox/` is ordinary vault content — Obsidian adds to it, an
+   * `Inbox/` is ordinary vault content — Obsidian adds to it, an
    * editor refines it, a `git pull` brings someone else's capture in — and
    * the triage queue has to see all of that, not only what came through
    * `POST /capture` (docs/ops/inbox.md). This is that reconciliation, and it
@@ -279,8 +282,8 @@ export class Indexer {
    *   rejected — the user said no, and editing a file is not an appeal;
    * - a row whose file is gone → `archived`, never deleted.
    *
-   * `Knowledge/Inbox/.large/` (and any other dot-directory) is invisible to
-   * `walkKnowledge`, so rows pointing into it are left alone rather than
+   * `Inbox/.large/` (and any other dot-directory) is invisible to
+   * `walkVault`, so rows pointing into it are left alone rather than
    * archived the moment they are written.
    */
   private async syncInbox(scanned: Map<string, Scanned>): Promise<InboxSummary> {
@@ -297,7 +300,7 @@ export class Indexer {
         // millisecond ago and be inserting its own (better) row right now.
         const ins = await this.db.query(
           `INSERT INTO inbox (source, path, mime, note, sha256) VALUES ('vault', $1, $2, $3, $4)
-           ON CONFLICT (path) WHERE path LIKE 'Knowledge/Inbox/%' DO NOTHING RETURNING id`,
+           ON CONFLICT (path) WHERE path LIKE '${INBOX_PREFIX}/%' DO NOTHING RETURNING id`,
           [f.path, mimeForPath(f.path), note, f.hash],
         );
         if (ins.rows[0]) summary.added++;

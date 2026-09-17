@@ -324,3 +324,127 @@ describe("completeJson", () => {
     await expect(completeJson(client, { messages: [{ role: "user", content: "x" }], schema, jsonSchema })).rejects.toThrow(/structured output failed twice/);
   });
 });
+
+// ---- stage-2 shadow mode -----------------------------------------------------
+//
+// The loop's half of shadow.ts: WHEN a second run happens, what it is pointed
+// at, and the two things it must never do — answer the user, or touch a tool.
+
+describe("shadow mode", () => {
+  const SHADOW_FILE = `
+providers:
+  lmstudio: { kind: openai-compatible, base_url: http://127.0.0.1:1234/v1, locality: on_machine }
+  candid:   { kind: openai-compatible, base_url: http://127.0.0.1:7813/v1, locality: on_machine }
+assignments:
+  default:
+    model: lmstudio/incumbent
+    shadow: { model: candid/qwen3.6-35b-a3b, fraction: 0.1 }
+`;
+  const shadowed = resolveAssignment(parseCompute(SHADOW_FILE), "default")!;
+  const spec = () => ({ model: shadowed.model, effort: shadowed.effort, assignment: shadowed, thread: "t" });
+
+  /** A session store that remembers every save, so "the shadow gets no session" is checkable. */
+  function recordingSessions() {
+    const inner = memorySessionStore();
+    const saved: { provider: string; model: string }[] = [];
+    return {
+      saved,
+      newId: () => inner.newId(),
+      load: inner.load,
+      async save(state: any) {
+        saved.push({ provider: state.provider, model: state.model });
+        return inner.save(state);
+      },
+    };
+  }
+
+  it("a sampled turn runs the SAME turn again on the candidate, and the user still gets the assignment's answer", async () => {
+    const s = server([{ body: chat("the incumbent's answer") }, { body: chat("the candidate's answer") }]);
+    const sessions = recordingSessions();
+    const r = await engineOn(shadowed, s, host({}), { sessions, random: () => 0.05 })("hello", spec());
+
+    expect(r.text).toBe("the incumbent's answer"); // what the drain writes to the user
+    expect(s.requests).toHaveLength(2);
+    expect(s.requests[1]!.url).toBe("http://127.0.0.1:7813/v1/chat/completions");
+    expect(s.requests[1]!.body.model).toBe("qwen3.6-35b-a3b");
+    // the same turn, not a summary: the system prompt and the user's words, verbatim
+    expect(s.requests[1]!.body.messages).toEqual(s.requests[0]!.body.messages);
+
+    expect(r.shadow?.shadow).toMatchObject({ provider: "candid", model: "qwen3.6-35b-a3b", text: "the candidate's answer", turns: 1 });
+    expect(r.shadow?.real).toMatchObject({ provider: "lmstudio", model: "incumbent", text: "the incumbent's answer" });
+    expect(r.shadow?.agreement).toMatchObject({ tool_sequence: true, score: expect.any(Number) });
+    // one session, the real one: a shadow transcript that could be resumed
+    // would be a second history for one thread
+    expect(sessions.saved).toEqual([{ provider: "lmstudio", model: "incumbent" }]);
+  });
+
+  it("an unsampled turn is one request, and carries no shadow at all", async () => {
+    const s = server([{ body: chat("just the one") }]);
+    const r = await engineOn(shadowed, s, host({}), { random: () => 0.5 })("hello", spec());
+    expect(s.requests).toHaveLength(1);
+    expect(r.shadow).toBeUndefined();
+  });
+
+  it("an assignment with no shadow: block never draws and never runs a second time", async () => {
+    const s = server([{ body: chat("ok") }]);
+    let draws = 0;
+    const r = await engineOn(cloud, s, host({}), {
+      random: () => {
+        draws++;
+        return 0;
+      },
+    })("hi", { model: cloud.model, effort: cloud.effort, assignment: cloud, thread: "t" });
+    expect(draws).toBe(0);
+    expect(s.requests).toHaveLength(1);
+    expect(r.shadow).toBeUndefined();
+  });
+
+  it("the shadow's tool calls are recorded, never executed — and the identical call gets the real run's result", async () => {
+    const search = toolCall("c1", "mcp__brain__knowledge_search", { q: "folds" });
+    const s = server([
+      { body: chat(null, { tool_calls: [search] }) },            // the real turn calls the tool …
+      { body: chat("three notes mention folds") },               // … and answers
+      { body: chat(null, { tool_calls: [search, toolCall("c2", "mcp__brain__knowledge_write", { path: "Knowledge/Areas/folds.md" })] }) }, // the shadow calls it, and a WRITE
+      { body: chat("two notes, and I wrote one") },
+    ]);
+    const h = host({ mcp__brain__knowledge_search: "Knowledge/Areas/folds.md" });
+    const r = await engineOn(shadowed, s, h, { random: () => 0 })("what about folds?", spec());
+
+    // the REAL host was called once, by the real turn, and not again
+    expect(h.calls).toEqual(["mcp__brain__knowledge_search"]);
+    expect(r.shadow?.shadow.tool_calls).toEqual([
+      { name: "mcp__brain__knowledge_search", args: { q: "folds" }, executed: false, result_from: "real_run" },
+      { name: "mcp__brain__knowledge_write", args: { path: "Knowledge/Areas/folds.md" }, executed: false, result_from: "stub" },
+    ]);
+    // the recorded result is the real one for the identical call; the write got the stub
+    const shadowTurn = s.requests[3]!.body.messages.filter((m: any) => m.role === "tool");
+    expect(shadowTurn[0].content).toBe("Knowledge/Areas/folds.md");
+    expect(shadowTurn[1].content).toContain("recorded, not executed");
+    // and the ORDER is what agreement compares, so a one-extra-call shadow disagrees
+    expect(r.shadow?.agreement.tool_sequence).toBe(false);
+  });
+
+  it("the budget gate is asked for the shadow too, with its own provider and critical: false — a refusal skips it", async () => {
+    const s = server([{ body: chat("the real answer") }]);
+    const asked: { provider: string; critical: boolean }[] = [];
+    const r = await engineOn(shadowed, s, host({}), {
+      random: () => 0,
+      guard: async (sp: any) => {
+        asked.push({ provider: sp.assignment.provider, critical: sp.assignment.critical });
+        throw new Error("budget_exceeded: instance daily_usd is spent");
+      },
+    })("hello", spec());
+    expect(asked).toEqual([{ provider: "candid", critical: false }]); // the real turn's gate ran in makeEngine, not here
+    expect(s.requests).toHaveLength(1);
+    expect(r.shadow).toBeUndefined();
+    expect(r.text).toBe("the real answer");
+  });
+
+  it("a candidate that is down costs the turn nothing: the answer stands and the shadow row carries the reason", async () => {
+    const s = server([{ body: chat("the real answer") }, { status: 500, body: "model not loaded" }]);
+    const r = await engineOn(shadowed, s, host({}), { random: () => 0, attempts: 1 })("hello", spec());
+    expect(r.text).toBe("the real answer");
+    expect(r.shadow?.shadow.error).toContain("returned 500");
+    expect(r.shadow?.shadow.cost_usd).toBe(0);
+  });
+});

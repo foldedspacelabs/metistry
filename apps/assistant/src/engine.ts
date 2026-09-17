@@ -29,6 +29,7 @@
 
 import type { CostSource, Effort, EngineKind, ResolvedAssignment } from "@foldedspacelabs/metistry-core";
 import { makeOpenAiEngine, type OpenAiEngineConfig } from "./engine-openai.js";
+import type { ShadowRun } from "./shadow.js";
 
 export interface TurnResult {
   text: string;
@@ -58,6 +59,13 @@ export interface TurnResult {
   notes?: string[];
   /** Tool calls the turn made, by name (`mcp__brain__capture`), with counts. Absent when none. */
   tools_used?: Record<string, number>;
+  /**
+   * The stage-2 shadow comparison, when this turn fell in the sampled
+   * fraction (`assignments.default.shadow`). It is here for the DRAIN to
+   * store and for nothing to render: `text` above is always the assignment's
+   * answer, and the candidate's is inside this (shadow.ts).
+   */
+  shadow?: ShadowRun;
 }
 
 /**
@@ -96,7 +104,12 @@ export type Engine = (prompt: string, spec: TurnSpec) => Promise<TurnResult>;
 export type TurnGuard = (spec: TurnSpec) => Promise<void>;
 
 export interface EngineConfig extends OpenAiEngineConfig {
-  /** Run before every turn; throw to refuse it (budgets, and anything else that must happen before money moves). */
+  /**
+   * Run before every turn; throw to refuse it (budgets, and anything else
+   * that must happen before money moves). It is declared on
+   * `OpenAiEngineConfig` as well, because the loop asks it one more time for
+   * a shadow run — the same gate, with the shadow's own provider.
+   */
   guard?: TurnGuard | undefined;
 }
 

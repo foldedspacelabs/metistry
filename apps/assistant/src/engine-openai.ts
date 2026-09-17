@@ -28,6 +28,12 @@
 // - EFFORT: `reasoning: { effort }` off-machine; reasoning off on-machine
 //   (PoC-16 measured reasoning mode hurting the local task). Per-model
 //   reasoning style is a bake-off measurement, not an assumption (§2.9).
+// - STAGE-2 SHADOW MODE, for the sampled fraction `assignments.default`'s
+//   `shadow:` block names: once the real answer exists, the same turn is run
+//   again on the candidate with tools stubbed record-only, and the comparison
+//   goes on the `runs` row. The candidate's answer is never returned as the
+//   turn's. The mechanism, and why it cannot execute a tool or break a turn,
+//   is shadow.ts.
 // - THE PROVIDER'S `request:` BLOCK, merged verbatim — except `model` and
 //   `messages`, which the assignment owns: invariant 4 says no model decides
 //   which model runs, and a `request:` that could repoint the call would hand
@@ -51,8 +57,9 @@ import {
 } from "@foldedspacelabs/metistry-core";
 import type { z } from "zod";
 import type { ChatMessage, SessionStore } from "./sessions.js";
-import type { ToolHost, ToolSpec } from "./tools.js";
-import type { Engine, TurnResult, TurnSpec } from "./engine.js";
+import { toolCallKey, type ToolHost, type ToolSpec } from "./tools.js";
+import type { Engine, TurnGuard, TurnResult, TurnSpec } from "./engine.js";
+import { runShadow, shouldShadow, type ShadowRubric, type ShadowRun } from "./shadow.js";
 
 /** Turns in a row with no new information before the loop nudges, and before it stops using tools (Atomic ADOPT 4). */
 export const UNPRODUCTIVE_WARN = 3;
@@ -330,9 +337,21 @@ export interface OpenAiEngineConfig {
   attempts?: number | undefined;
   backoffMs?: number | undefined;
   timeoutMs?: number | undefined;
+  /**
+   * The pre-call gate (budgets.ts). The REAL turn's gate already ran in
+   * `makeEngine` before this engine was called; the loop keeps a reference
+   * because the SHADOW is a turn too and has to ask the same question with
+   * its own provider and `critical: false` — a budget that would refuse a
+   * turn refuses the experiment first.
+   */
+  guard?: TurnGuard | undefined;
+  /** The shadow sampler's seam: `Math.random` in production, a script in tests. It decides what is MEASURED, never what answers (invariant 4). */
+  random?: (() => number) | undefined;
+  /** `packages/eval`'s rubric, when there is one. Absent today — shadow.ts's `ShadowRubric` says why this is a hook. */
+  rubric?: ShadowRubric | undefined;
 }
 
-const callKey = (c: ToolCall): string => `${c.name}(${JSON.stringify(c.args)})`;
+const callKey = (c: ToolCall): string => toolCallKey(c.name, c.args);
 
 const NUDGE =
   `Those calls returned nothing you had not already seen. Either take a different action or answer with what you have — ` +
@@ -363,9 +382,13 @@ export function makeOpenAiEngine(cfg: OpenAiEngineConfig): Engine {
     const resumed = spec.resume ? await cfg.sessions.load(spec.resume, assignment.provider, assignment.model) : null;
     const sessionId = resumed?.id ?? cfg.sessions.newId();
     const history: ChatMessage[] = [...(resumed?.messages ?? []), { role: "user", content: prompt }];
+    /** The turn as it STARTED, kept so a shadow re-runs the same turn rather than a summary of it. */
+    const opening: ChatMessage[] = [...history];
 
     const tools = await host.list();
     const toolsUsed: Record<string, number> = {};
+    /** Tool names in the order they were called — the sequence half of shadow agreement (`toolsUsed` is a tally and cannot say order). */
+    const toolSequence: string[] = [];
     const usage: CallUsage = { tokens_in: 0, tokens_out: 0, cache_read: 0, cache_write: 0 };
     let cost = 0;
     let costSource: CallCost["source"] = "unknown";
@@ -408,6 +431,7 @@ export function makeOpenAiEngine(cfg: OpenAiEngineConfig): Engine {
         let learned = false;
         for (const call of res.toolCalls) {
           toolsUsed[call.name] = (toolsUsed[call.name] ?? 0) + 1;
+          toolSequence.push(call.name);
           const out = await host.call(call.name, call.args);
           const key = callKey(call);
           const before = seen.get(key);
@@ -460,6 +484,58 @@ export function makeOpenAiEngine(cfg: OpenAiEngineConfig): Engine {
 
     await cfg.sessions.save({ id: sessionId, thread, provider: assignment.provider, model: assignment.model, messages: history });
 
+    // ---- stage-2 shadow mode (shadow.ts) -----------------------------------
+    //
+    // AFTER the answer exists and the session is saved: the turn the user is
+    // waiting on is finished before a token is spent on the experiment, and
+    // nothing below can change `text`. The shadow gets NO session of its own —
+    // a transcript that could be resumed would be a second history for one
+    // thread — and its tool calls are stubbed record-only by construction.
+    let shadow: ShadowRun | undefined;
+    const candidate = assignment.shadow;
+    if (candidate && shouldShadow(candidate, cfg.random ?? Math.random)) {
+      // The shadow is a turn, so it asks the gate every turn asks — with its
+      // OWN provider and critical: false, so `stop` and `critical_only` both
+      // skip it while the interactive turn they let through keeps its answer.
+      const shadowAssignment: ResolvedAssignment = {
+        provider: candidate.provider,
+        model: candidate.model,
+        ref: candidate.ref,
+        effort: assignment.effort,
+        from: `shadow:${assignment.from}`,
+        config: candidate.config,
+        critical: false,
+      };
+      let allowed = true;
+      try {
+        await cfg.guard?.({ ...spec, model: candidate.model, assignment: shadowAssignment });
+      } catch {
+        allowed = false; // a refused budget skips the comparison; the real answer already happened
+      }
+      if (allowed) {
+        shadow = await runShadow({
+          makeClient: () =>
+            makeChatClient({
+              assignment: shadowAssignment,
+              apiKey: credentialFor(candidate.config, candidate.provider, cfg.env ?? process.env),
+              fetchFn: cfg.fetchFn,
+              sleep: cfg.sleep,
+              attempts: cfg.attempts,
+              backoffMs: cfg.backoffMs,
+              timeoutMs: cfg.timeoutMs,
+            }),
+          candidate,
+          assignment,
+          messages: [...system, ...opening],
+          tools,
+          recorded: seen,
+          real: { text, tool_calls: toolSequence, messages: history },
+          maxTurns,
+          rubric: cfg.rubric,
+        });
+      }
+    }
+
     const result: TurnResult = {
       text: text || "(the model returned no text)",
       session_id: sessionId,
@@ -474,6 +550,7 @@ export function makeOpenAiEngine(cfg: OpenAiEngineConfig): Engine {
       ...(usage.cache_write ? { cache_write: usage.cache_write } : {}),
       ...(Object.keys(toolsUsed).length > 0 ? { tools_used: toolsUsed } : {}),
       ...(stopped ? { stopped } : {}),
+      ...(shadow ? { shadow } : {}),
       ...(costSource === "unknown" && assignment.config.locality === "off_machine"
         ? { notes: [unpricedNote(assignment.provider, assignment.model)] }
         : {}),

@@ -1,8 +1,9 @@
 # Metistry — development conventions
 
 **This file governs building Metistry.** It is not Metis's operating
-instructions — those live at `Knowledge/CLAUDE.md` and are written later, once
-the interaction has been felt rather than guessed at. Don't confuse the two.
+instructions — those live at the instance's own root `CLAUDE.md` and are
+written later, once the interaction has been felt rather than guessed at.
+Don't confuse the two.
 
 Read `metistry-build-plan.md` for the design. This file covers how to work in
 the repo.
@@ -24,14 +25,16 @@ a clone rather than a rewrite. Treat a hardcoded "Metis" as a bug.
 
 One boundary:
 
-- `Knowledge/` and everything inside it — **TitleCase**. Obsidian renders these
-  names to the user.
-- Everything else — **lowercase**. Code and tooling reference it, and `apps/`
-  and `packages/` are pnpm conventions.
+- The instance's vault root — everything in `<instance>/` except `.metistry/`
+  (`Journal/`, `Areas/`, `Me/`, `now.md`, …) — **TitleCase**. Obsidian renders
+  these names to the user (ruled 2026-09-17: the instance directory is the
+  vault; `.metistry/` holds everything that isn't knowledge).
+- `<instance>/.metistry/` and the product repo — **lowercase**. Code and
+  tooling reference it, and `apps/` and `packages/` are pnpm conventions.
 
-macOS is case-insensitive; Linux containers are not. `knowledge/Areas` in one
-file and `Knowledge/areas` in another works here and breaks in a container. CI
-runs on Linux and checks this.
+macOS is case-insensitive; Linux containers are not. `areas/` in one file and
+`Areas/` in another works here and breaks in a container. CI runs on Linux and
+checks this.
 
 ## Invariants
 

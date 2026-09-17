@@ -31,10 +31,10 @@ the key the phone stores everything under, because an origin can move
 (`METISTRY_ORIGIN` accepts a list for exactly that). `voice` and `mention`
 never cross the wire.
 
-The fields come from `identity.yaml` through the same overlay rule the
+The fields come from `.metistry/identity.yaml` through the same overlay rule the
 assistant uses for its prompt: `METISTRY_IDENTITY_FILES`, colon-separated,
 last existing file wins; the default is `seed/identity.yaml` then
-`$METISTRY_INSTANCE_DIR/identity.yaml`. No `name` + `instance_id` → 503 and
+`$METISTRY_INSTANCE_DIR/.metistry/identity.yaml`. No `name` + `instance_id` → 503 and
 a startup warning (degrades: absent). `metistry init` stamps the id.
 
 ### `capabilities` — coarse, and deliberately uninformative (S1)
@@ -117,7 +117,7 @@ POST /capture
 Authorization: Bearer <owner or agent token>   (or the session cookie)
 Idempotency-Key: 6f2c4e0a-…                     (client-minted, ≤200 chars)
 
-201 {"id":42,"path":"Knowledge/Inbox/1757556000000-note.md","sha256":"…"}
+201 {"id":42,"path":"Inbox/1757556000000-note.md","sha256":"…"}
 201 {"id":42, … }   Idempotency-Replayed: true   ← the SAME response, later
 ```
 
@@ -135,7 +135,7 @@ Without the header nothing changes: today's Shortcut and every existing
 door insert as before. An empty or oversized key is a `400`.
 
 `path` is relative to the instance repo root: captures live in the vault at
-`Knowledge/Inbox/` so Obsidian can see and edit them (`docs/ops/inbox.md`).
+`Inbox/` so Obsidian can see and edit them (`docs/ops/inbox.md`).
 
 `POST /api/messages/:id/feedback` needs no key: it is an upsert on the
 message id, so a replay is already the same row. `POST /message` is not
@@ -279,7 +279,7 @@ uniform `403`, never a `404` that would hide the route's existence.
 ## A refusal names the field that would permit it — except on the door
 
 ```
-400 {"error":{"code":"invalid_request","message":"area must be a TitleCase Knowledge/... prefix"}}
+400 {"error":{"code":"invalid_request","message":"area must be a TitleCase vault-root prefix"}}
 503 {"error":{"code":"not_available","message":"artifacts are not configured in this deployment — the console needs a vault bridge (METISTRY_RECONCILER_URL + METISTRY_BRIDGE_TOKEN_RECONCILER, docs/ops/reconciler.md)"}}
 ```
 

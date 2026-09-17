@@ -1208,6 +1208,16 @@ references, every `schedule` a parseable cron.
 
 ### 4.7 Repo governance
 
+> **Superseded 2026-09-17.** The instance-layout ruling moves the free/
+> protected split below onto a new floor: `Knowledge/` is gone (the instance
+> directory itself is the vault root, TitleCase at the root), and every
+> protected path here — `identity.yaml`, `rules.yaml`, `deployment.yaml`,
+> `queries/`, `agents/`, `routines/`, `extensions/`, `instance-migrations/` —
+> moves under `.metistry/`. The instance `CLAUDE.md` stays at the instance
+> root. This section is left as written for its reasoning about the split
+> between free and protected; see `docs/ops/instance-layout.md` for the
+> current tree.
+
 Shared responsibility: Metis writes knowledge without ceremony; you review
 changes to how the system works. Since the product/instance split (§4.16),
 this is two repos with different regimes (rewritten 2026-08-29, review
@@ -1738,6 +1748,16 @@ survive it. Mechanics, cheapest first:
    the morning brief so the permission consequence is visible, not silent.
 
 ### 4.16 Repo structure and distribution
+
+> **Superseded 2026-09-17.** The instance-repo tree below (`Knowledge/`,
+> `inbox/`, `identity.yaml` and friends all siblings at the instance root) is
+> the pre-ruling shape. The instance directory is now the Obsidian vault
+> itself — vault content (`Journal/`, `Areas/`, `now.md`, …) lives at the
+> root, and everything that isn't knowledge (`identity.yaml`, `rules.yaml`,
+> `compute.yaml`, `deployment.yaml`, `metistry.lock`, `agents/`, `routines/`,
+> `queries/`, `extensions/`, `instance-migrations/`, `state/`) moves under
+> `.metistry/`. The product repo's structure below is unaffected. See
+> `docs/ops/instance-layout.md` for the current tree and migration.
 
 Built to be forked. Someone else should be able to run this, name their assistant
 whatever they like, and use any single bridge on its own. The same properties make

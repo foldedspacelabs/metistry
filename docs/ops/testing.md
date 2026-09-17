@@ -16,7 +16,7 @@ whatever instance repo *it* serves.
 
 That is not a hypothetical. On 2026-09-15 a `metistry compute providers add`
 case in `packages/cli`, whose `--instance` was a `mkdtemp` directory, reached
-the running reconciler and had it commit `compute.yaml` into the operator's
+the running reconciler and had it commit `.metistry/compute.yaml` into the operator's
 private instance repo.
 
 ## What a test may inherit from the environment

@@ -22,10 +22,10 @@ Every step goes through the same StepRunner `up` and `update` use, so
 |---|---|
 | **preflight** | four refusals, all of them while the old shape is still up — below |
 | **quiesce the writers** | `docker compose stop console assistant`. The database stays up. |
-| **dump** | the table list and one exact `count(*)` per table, then `pg_dump --format=custom` **inside the running db container** (the container's own binary, so client and server versions match), copied out to `<instance>/state/migrate/<ts>.dump`, then verified with `pg_restore --list` |
+| **dump** | the table list and one exact `count(*)` per table, then `pg_dump --format=custom` **inside the running db container** (the container's own binary, so client and server versions match), copied out to `<instance>/.metistry/state/migrate/<ts>.dump`, then verified with `pg_restore --list` |
 | **stop the database** | `docker compose stop db`. **`stop`, never `down -v`** — the containers and the named volume stay, and that is what makes the rollback real. |
 | **deployment.yaml** | `shape: launchd`, written through the reconciler as the `user` principal — the same protected-write path `metistry deployment set-shape` uses (invariant 2, D5). The reconciler commits it. |
-| **up** | `initdb` under `<instance>/state/pg`, every host plist re-rendered against `current/`, the bundled node and `<instance>/state/.env`, then bootstrapped |
+| **up** | `initdb` under `<instance>/.metistry/state/pg`, every host plist re-rendered against `current/`, the bundled node and `<instance>/.metistry/state/.env`, then bootstrapped |
 | **restore** | `pg_restore` over the new server's unix socket, **before any migration runs** |
 | **check** | the same generated count query against the restored database; a table that lost rows fails the migration by name |
 | **tcc helpers** | the eventkit and apple-fm jobs are pinned at the signed bundles that hold the TCC grant — below |
@@ -68,7 +68,7 @@ database is only ever written once.
    refuses without it rather than downloading one mid-migration with the
    old shape already stopped.
 
-3. **`metistry secrets sync --to env` done**, so `<instance>/state/.env`
+3. **`metistry secrets sync --to env` done**, so `<instance>/.metistry/state/.env`
    is the install's environment. The launchd jobs read that file (or have
    it rendered into their plists); the product checkout's `.env` is a
    deprecated fallback.
@@ -99,30 +99,30 @@ do if it does not go that way.
 
 ### The `.stale` data directory — a second forward run after a rollback
 
-`up` skips `initdb` whenever `<instance>/state/pg/PG_VERSION` already
+`up` skips `initdb` whenever `<instance>/.metistry/state/pg/PG_VERSION` already
 exists — the normal case is a restart, where that is exactly right. After a
-`metistry migrate-shape compose` rollback it is not: `state/pg` still holds
+`metistry migrate-shape compose` rollback it is not: `.metistry/state/pg` still holds
 the restored copy from the cutover plus whatever launchd wrote afterwards,
 and `pg_restore --exit-on-error` into a database that already has every
 table fails immediately.
 
 So a second `metistry migrate-shape launchd` run checks for that leftover
 data directory itself, before calling `up`, and **moves it aside** —
-`state/pg.<timestamp>.stale` — rather than deleting it or reusing it. `up`
+`.metistry/state/pg.<timestamp>.stale` — rather than deleting it or reusing it. `up`
 then `initdb`s a fresh one and the restore lands in an empty schema, same
 as the first cutover. You will see:
 
 ```
-state/pg is already initialised — a previous migration's data, left over from a rollback. Moving it aside so `up` initdbs fresh …
-kept at state/pg.20260910T160403Z.stale — never deleted by this verb
+.metistry/state/pg is already initialised — a previous migration's data, left over from a rollback. Moving it aside so `up` initdbs fresh …
+kept at .metistry/state/pg.20260910T160403Z.stale — never deleted by this verb
 ```
 
 **Nothing prunes `.stale` directories.** They are exactly as much a copy of
-the database as the dump in `state/migrate/` is, just less convenient to
+the database as the dump in `.metistry/state/migrate/` is, just less convenient to
 restore from (no `pg_dump`/`pg_restore`, a directory copy over the socket
 is not how you get data out of it while another Postgres is using the same
 data directory name pattern). Once the *dump* for that same cutover
-(`state/migrate/<ts>.dump`) has been kept for the usual week and the
+(`.metistry/state/migrate/<ts>.dump`) has been kept for the usual week and the
 launchd shape has proven itself, the corresponding `.stale` directory is
 safe to `rm -rf` by hand — it is redundant with the dump by then, just
 bulkier.
@@ -141,7 +141,7 @@ bulkier.
   credential helper live in the instance repo and the Keychain, neither of
   which this touches.
 - **doctor's shape row** should read `shape launchd`.
-- **the dump is kept.** `<instance>/state/migrate/<ts>.dump` is the only
+- **the dump is kept.** `<instance>/.metistry/state/migrate/<ts>.dump` is the only
   copy of the compose database outside the Docker volume. Nothing prunes
   it.
 
@@ -155,7 +155,7 @@ nothing changed:
 | `ops/sandbox/assistant.sb is missing — this product tree predates the launchd-shape fixes (PR #117)` | `metistry update --channel release` to v0.6.0 or later |
 | `runtime/ has no node — this install has no bundled runtime` | same |
 | `no Postgres … toolchain` / `has no pg_dump, pg_restore` / `pgvector is not installed` | install the bundled runtime, or set `METISTRY_PG_BIN` |
-| `this instance is namespaced … but its docker compose project is not` | set `COMPOSE_PROJECT_NAME` in `<instance>/state/.env` — see below |
+| `this instance is namespaced … but its docker compose project is not` | set `COMPOSE_PROJECT_NAME` in `<instance>/.metistry/state/.env` — see below |
 | `no running compose db container` | `docker compose up -d db`, or use `deployment set-shape launchd` + `up` if there is no data to keep |
 
 ### Two installs on one Mac
@@ -190,11 +190,11 @@ use` — see the next section for what that looked like and how it was fixed
 by hand that day, and how it now fixes itself.
 
 **Anything written under launchd since the cutover is NOT copied back.**
-It stays in `<instance>/state/pg`. If you want it, dump it first — the
+It stays in `<instance>/.metistry/state/pg`. If you want it, dump it first — the
 command is printed by the rollback itself:
 
 ```sh
-<product>/runtime/postgres/bin/pg_dump -h <instance>/state/run \
+<product>/runtime/postgres/bin/pg_dump -h <instance>/.metistry/state/run \
   -U metistry -d metistry -Fc -f <somewhere>
 ```
 
@@ -236,7 +236,7 @@ this compensation itself could not recover from — read whatever message
 against the instance's own environment file:
 
 ```sh
-cd current && docker compose --env-file <instance>/state/.env up -d --no-build
+cd current && docker compose --env-file <instance>/.metistry/state/.env up -d --no-build
 ```
 
 `--no-build` matters: the images from the last cutover are still there,
@@ -256,7 +256,7 @@ docker compose down -v          # removes the containers AND the volume
 ```
 
 That is the irreversible step. After it, the only copy of the pre-cutover
-database is `<instance>/state/migrate/<ts>.dump` — keep that file, or
+database is `<instance>/.metistry/state/migrate/<ts>.dump` — keep that file, or
 take a fresh `ops/scripts/backup.sh` first.
 
 Docker itself stays installed on the Studio for unrelated projects
@@ -304,7 +304,7 @@ helper two different ways:
 | | how the helper is found | what the migration does |
 |---|---|---|
 | `calendar` (the EventKit helper) | the signed helper IS the agent's root process (that is what the grant attaches to — PoC-1), so the path is in `ProgramArguments` | substitutes that one path back to the install root's bundle |
-| `apple-fm` | a node bridge that spawns its helper from a path relative to its own `dist/`, overridable by `METISTRY_AFM_HELPER` | adds that variable to its **child spec** in `<instance>/state/supervisor.json` and kickstarts the supervisor — under the supervisor that bridge has no plist of its own |
+| `apple-fm` | a node bridge that spawns its helper from a path relative to its own `dist/`, overridable by `METISTRY_AFM_HELPER` | adds that variable to its **child spec** in `<instance>/.metistry/state/supervisor.json` and kickstarts the supervisor — under the supervisor that bridge has no plist of its own |
 
 Both **patch what `up` just wrote** — the plist, or the config — rather than
 re-rendering it from the template: a re-render dropped this instance's

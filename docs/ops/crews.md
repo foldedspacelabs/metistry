@@ -2,7 +2,7 @@
 
 A **crew** (plan §4.11, Phase 5 "crew definitions with their own toolsets")
 is a sub-agent the instance's own assistant can hand a brief to. It is one
-markdown file in your instance repo — `agents/<area>/<name>.md`: YAML
+markdown file in your instance repo — `.metistry/agents/<area>/<name>.md`: YAML
 frontmatter (validated by core's `agent` manifest schema), then the crew's
 operating prompt — and nothing else: no code, no container, no credential
 in your `.env`. The assistant dispatches it with one tool, the console
@@ -18,7 +18,7 @@ showing exactly what context crossed.
 ## Write a crew manifest
 
 Start from the shipped example, `seed/agents/example/researcher.md`, and put
-your copy under `agents/<area>/<name>.md` in the instance repo (a protected
+your copy under `.metistry/agents/<area>/<name>.md` in the instance repo (a protected
 path — §4.7 — changed by your hand only; the assistant cannot write it).
 
 ```yaml
@@ -31,7 +31,7 @@ effort: low                 # low | medium | high (default low) — the other ha
 description: Reads the granted notes and reports what it finds   # the assistant's roster line (H8)
 uses: [knowledge, requests]        # tool GROUPS, see below
 skills: []                  # recorded now; binds once skills/ exists (§4.4)
-scope: [Knowledge/Projects, Knowledge/Resources]   # read tier: TitleCase Knowledge/ prefixes
+scope: [Projects, Resources]   # read tier: TitleCase vault-root prefixes
 projects: []                # shared-list membership (§4.19); empty = none
 manages: []                 # hierarchy lives here, not in directory depth
 max_turns: 10               # agentic turns per run
@@ -71,7 +71,7 @@ through the same normalizer `PUT /api/agents/:id/autonomy` uses
 and a hand-set one land in the row identically.
 
 The body is the operating prompt. `{{name}}` is the primary assistant's
-name from `identity.yaml` (templated by the runner — the seed never names
+name from `.metistry/identity.yaml` (templated by the runner — the seed never names
 it, so a renamed instance is a clone, not a rewrite). Two rules the file
 must obey, both enforced at load: **the name is the filename** and, when
 `area` is present, **the area is the directory**. Anything that fails the
@@ -125,7 +125,7 @@ text is discarded, only what it *reported* survives.
 
 The registry row is `agents.kind = 'crew'`, with grants from `scope`
 through the **same validator external agents face** (`validateGrants`,
-external shape: TitleCase areas, bare `Knowledge/` refused — a crew is not
+external shape: TitleCase areas, the bare vault refused — a crew is not
 the assistant). Its `projects` are the manifest's. At the bridge a crew
 authenticates like any external principal: `knowledge_write` and
 `agents_delegate` are "not granted", project membership is exactly its list.
@@ -135,7 +135,7 @@ authenticates like any external principal: `knowledge_write` and
 `autonomy` may carry `level: observe | propose | act_within_scope` and an
 `actions: {<kind>: allow | propose | deny}` table beside the §4.21 narrowing
 keys ([actions.md](actions.md)). This is the one key in a crew manifest that
-can *widen* rather than narrow — which is admissible because `agents/` is a
+can *widen* rather than narrow — which is admissible because `.metistry/agents/` is a
 protected path (§4.7) that only your hand writes. The registry sync treats it
 exactly as the console route does: the raise lands in `runs` as
 `agent_admin` / `autonomy_widened` and puts one alert in Needs You. Absent =
@@ -176,8 +176,8 @@ assistant container drain loop ◀── claim (SKIP LOCKED, lease) ──┘
    checks the brief with the *existing* dispatch enforcement
    (`checkBrief`, `docs/ops/targets.md`) against the crew's `scope` ∩ the
    `local-crew` target's `allow` list, plus the target's `deny_sources` and
-   `max_brief_bytes`. A brief citing `Knowledge/Me/…` for a crew scoped to
-   `Knowledge/Projects` is refused with the violations in the error message
+   `max_brief_bytes`. A brief citing `Me/…` for a crew scoped to
+   `Projects` is refused with the violations in the error message
    (so the assistant sees which path to remove) and as a `runs` row
    (`kind = dispatch`, `tool = local-crew`, `ok = false`,
    `meta.violations`). **No work row is written on a refusal.**
@@ -225,7 +225,7 @@ The console loads manifests from `METISTRY_AGENTS_DIRS`
 (default `seed/agents:agents`, D4 overlay, later entries win by name) at
 startup and every `METISTRY_CREWS_SYNC_S` (default 300 s). An entry that is
 a directory on disk is read there; one that is not (the instance repo's
-`agents/`, which no container mounts) is read through the reconciler's
+`.metistry/agents/`, which no container mounts) is read through the reconciler's
 vault bridge (`GET /vault/list?prefix=agents&depth=2` + `/vault/read`) when
 `METISTRY_RECONCILER_URL` + `METISTRY_BRIDGE_TOKEN_RECONCILER` are set —
 that is the one way a protected path reaches the console, read-only. No
@@ -295,8 +295,8 @@ against the database both containers already share.
 `targets/local-crew/manifest.yaml` — `transport: local`, `submit.via:
 work_queue`, `result.via: report_queue`, `cost.per_run_estimate_usd: 0`
 (the real cost lands on the `crew_run` row). Its `data_policy.allow` is the
-**widest** any crew's scope may reach: `Knowledge/Areas`, `Knowledge/Projects`,
-`Knowledge/Resources`, `Knowledge/Techniques`. Personal roots (`Journal`,
+**widest** any crew's scope may reach: `Areas`, `Projects`,
+`Resources`, `Techniques`. Personal roots (`Journal`,
 `People`, `Me`, `Decisions`) are absent on purpose; a crew scoped to them
 gets an empty effective allow list and can cite no path. Widen in an
 instance overlay dir, never in the product default. `deny_sources: [comms]`

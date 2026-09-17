@@ -61,7 +61,7 @@ mesh is the long-term answer) — **and the owner has not chosen one**. Until
 that is chosen, surface 1 is the local-CLI shape.
 
 When an origin does exist, set `METISTRY_CONSOLE_URL` (or `METISTRY_URL`) in
-`<instance>/state/.env` and re-run `metistry connect devin --rotate`: the
+`<instance>/.metistry/state/.env` and re-run `metistry connect devin --rotate`: the
 printed URL follows the environment, and the loopback warning disappears on
 its own. The console's own auth is unchanged by a tunnel — an agent bearer is
 required on every request, because the network is not a boundary
@@ -87,7 +87,7 @@ returns arrives as a row for the owner to triage.
 Grants start default-deny (`{tier: "none", areas: []}`):
 
 ```sh
-metistry connect devin --areas Knowledge/Areas/Engineering --project second-instance
+metistry connect devin --areas Areas/Engineering --project second-instance
 ```
 
 The **collaboration rule** (C7) holds here by absence: Devin is a non-Claude
@@ -138,7 +138,7 @@ assistant, so it may speak to a foreign server as an ordinary HTTP client.
 ### Configure
 
 ```sh
-# <instance>/state/.env
+# <instance>/.metistry/state/.env
 METISTRY_DEVIN_API_KEY=cog_…      # service-user key or PAT; user-scoped in the Keychain
 METISTRY_DEVIN_ORG_ID=org-…       # only for account-scoped tokens (see below)
 METISTRY_DEVIN_REPOS=acme/api,acme/web   # optional: the wiki half
@@ -263,7 +263,7 @@ Metistry calls Devin and polls — so it needs no inbound path at all, which is
 why it ships before the tunnel question above is settled.
 
 ```sh
-# <instance>/state/.env — the SAME key the collector uses, plus one new var
+# <instance>/.metistry/state/.env — the SAME key the collector uses, plus one new var
 METISTRY_DEVIN_API_KEY=cog_…
 METISTRY_DEVIN_ORG_ID=org-…    # REQUIRED for dispatch (see below)
 METISTRY_DEVIN_SESSION_TIMEOUT_HOURS=24   # optional; when a session is given up on
@@ -350,7 +350,7 @@ FROM runs WHERE kind = 'dispatch' AND ok GROUP BY 1;
 `cost.per_run_estimate_usd` is `0` on purpose: the ACU-to-dollar rate is
 per-contract, so inventing a number here would be worse than none.
 **TODO(compute-budgets):** engine-side budgets are compute pivot PR 3
-(`compute.yaml`). When they land this stays the *target's* ceiling — the two
+(`.metistry/compute.yaml`). When they land this stays the *target's* ceiling — the two
 intersect, they do not replace each other — and nothing partial is
 implemented here in the meantime.
 

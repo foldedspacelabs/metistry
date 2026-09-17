@@ -98,7 +98,7 @@ immediately and can read **nothing** until you say so:
 
 ```sh
 # contents, but only under the prefixes you name
-metistry connect cursor --areas Knowledge/Areas/Engineering
+metistry connect cursor --areas Areas/Engineering
 
 # or titles across the whole vault and no contents at all, through the
 # console's own route (the local owner token, from this machine)
@@ -108,8 +108,8 @@ curl -X PUT http://127.0.0.1:8080/api/agents/cursor/grants \
 ```
 
 `--areas a,b` sets `{tier: "areas", areas: [a, b]}`; the prefixes are
-TitleCase `Knowledge/…` and the console validates them (a lowercase
-`knowledge/` is refused — CLAUDE.md's casing boundary). `--project <slug>`
+TitleCase vault-root prefixes and the console validates them (a lowercase
+first segment is refused — CLAUDE.md's casing boundary). `--project <slug>`
 adds project membership, which is what scopes `tasks_*` and `artifacts_*`.
 Neither flag can widen past a read tier: writes never exceed reads.
 
@@ -142,7 +142,7 @@ process (see above). A 401 at the door is the console refusing the bearer —
 ## A second instance on the same Mac
 
 An instance namespaced with `metistry up --namespace` has its own console
-port and its own 8-hex label suffix (`state/ports.yaml`). `connect` follows
+port and its own 8-hex label suffix (`.metistry/state/ports.yaml`). `connect` follows
 it: the entry becomes `mcpServers.metistry-<suffix>` and the variable
 `METISTRY_AGENT_TOKEN_CURSOR_<SUFFIX>`, so two instances cannot overwrite
 each other's entry or share one variable. An un-namespaced install keeps the
@@ -217,7 +217,7 @@ after the offline fallback below an exact no-op.
 ### The offline fallback
 
 ```sh
-export METISTRY_CAPTURE_DIR="$HOME/metistry-instance/Knowledge/Inbox"   # or any folder; the vault inbox is picked up by the reconciler (docs/ops/inbox.md)
+export METISTRY_CAPTURE_DIR="$HOME/metistry-instance/Inbox"   # or any folder; the vault inbox is picked up by the reconciler (docs/ops/inbox.md)
 ```
 
 With that set, a session whose capture cannot reach the console is written

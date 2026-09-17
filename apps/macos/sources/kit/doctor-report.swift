@@ -229,10 +229,38 @@ public struct ReconcilerFacts: Sendable, Equatable {
     }
 }
 
+/// The name of doctor's layout row, and the `meta.layout` values it reports —
+/// `packages/cli/src/doctor.ts`'s `layoutRow`. This is the AUTHORITATIVE
+/// reading of which layout an instance is in: `instance-files.swift` makes the
+/// same existence test locally so the wizard can answer before any verb has
+/// run, but once doctor has answered, doctor wins.
+public enum InstanceLayoutRow {
+    public static let name = "instance layout"
+
+    /// `nil` when there is no such row (a CLI older than the row, or older than
+    /// this app). An unrecognised value decodes as `.unknown` rather than being
+    /// guessed at `flat` — a fifth value would mean the app and the CLI
+    /// disagree about the contract, and saying so beats assuming the good case.
+    public static func layout(in report: DoctorReport) -> InstanceFiles.Layout? {
+        guard let row = report.rows.first(where: { $0.name == name }),
+              let raw = row.meta?["layout"]?.stringValue else { return nil }
+        return InstanceFiles.Layout(rawValue: raw) ?? .unknown
+    }
+}
+
 public extension DoctorReport {
     var deployment: DeploymentFacts? {
         rows.first { $0.kind == "deployment" }.flatMap { DeploymentFacts(row: $0) }
     }
+
+    /// Which layout this install's instance directory is in, per doctor.
+    /// `nil` when this install's CLI predates the row.
+    var instanceLayout: InstanceFiles.Layout? { InstanceLayoutRow.layout(in: self) }
+
+    /// The one sentence the Status panel and the wizard both print when the
+    /// instance is not on the flat layout yet. Stated once, so the two surfaces
+    /// cannot drift apart.
+    var instanceLayoutNotice: String? { instanceLayout?.notice }
 
     var reconciler: ReconcilerFacts? {
         rows.first { $0.kind == "service" && $0.name == "reconciler" }.flatMap { ReconcilerFacts(row: $0) }

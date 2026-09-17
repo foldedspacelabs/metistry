@@ -4,7 +4,7 @@
 // changed, lock written through the reconciler as `user`); the refusal
 // paths; the no-bridge direct write; release mode; the lock round trip.
 import { existsSync, readFileSync } from "node:fs";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -48,12 +48,12 @@ function fakeFetch(status = 201, body: unknown = { queued: true }) {
 }
 
 /** compose is pointed at the INSTANCE's .env: its own `./.env` is not this install's environment. */
-const envFileArg = (inst: string) => `--env-file ${join(inst, "state", ".env")}`;
+const envFileArg = (inst: string) => `--env-file ${join(inst, ".metistry", "state", ".env")}`;
 
 describe("metistry update", () => {
   it("--dry-run prints the exact command list and touches nothing: no subprocess, no db, no bridge, no doctor", async () => {
     const P = await checkout({ git: true });
-    const inst = await mkdtemp(join(tmpdir(), "metistry-inst-"));
+    const inst = await mkdtemp(join(tmpdir(), "mi-" /* short on purpose: the supervisor socket under .metistry/state/run/ has ~103 bytes to live in */));
     const exec = fakeExec();
     const f = fakeFetch();
     let doctorRan = false;
@@ -81,16 +81,16 @@ describe("metistry update", () => {
       `launchctl kickstart -k gui/501/${HELPER}`,
       `launchctl kickstart -k gui/501/${RECONCILER}`,
       `launchctl kickstart -k gui/501/${WATCHDOG}`,
-      `POST http://127.0.0.1:7812/vault/write metistry.lock (principal user, "metistry update → 0.0.9")`,
+      `POST http://127.0.0.1:7812/vault/write .metistry/metistry.lock (principal user, "metistry update → 0.0.9")`,
       "metistry doctor",
     ]);
     expect(r.lock).toEqual({ product: { version: "0.0.9", commit: "<HEAD after pull>", source: "git" }, updated_at: NOW.toISOString(), migrations_applied: [] });
-    expect(existsSync(join(inst, "metistry.lock"))).toBe(false);
+    expect(existsSync(join(inst, ".metistry", "metistry.lock"))).toBe(false);
   });
 
   it("fast-forwards, builds, migrates in one session under the lock, kickstarts only the changed host job, pins the lock through the reconciler as user", async () => {
     const P = await checkout({ git: true });
-    const inst = await mkdtemp(join(tmpdir(), "metistry-inst-"));
+    const inst = await mkdtemp(join(tmpdir(), "mi-" /* short on purpose: the supervisor socket under .metistry/state/run/ has ~103 bytes to live in */));
     const exec = fakeExec({
       git: (args) => (args[0] === "rev-parse" ? { stdout: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n" } : undefined),
       // the build changes the watchdog's dist and nothing else
@@ -129,7 +129,7 @@ describe("metistry update", () => {
     expect(f.calls[0]!.url).toBe("http://127.0.0.1:7812/vault/write");
     expect((f.calls[0]!.init.headers as Record<string, string>).authorization).toBe("Bearer tok");
     const body = JSON.parse(String(f.calls[0]!.init.body)) as { path: string; content: string; intent: unknown };
-    expect(body.path).toBe("metistry.lock");
+    expect(body.path).toBe(".metistry/metistry.lock");
     expect(body.intent).toEqual({ principal: "user", message: "metistry update → 0.0.9" });
     expect(parseLock(body.content)).toEqual(r.lock);
     expect(r.lock).toEqual({
@@ -137,7 +137,7 @@ describe("metistry update", () => {
       updated_at: NOW.toISOString(),
       migrations_applied: ["0001_a.sql", "0002_b.sql"],
     });
-    expect(existsSync(join(inst, "metistry.lock"))).toBe(false); // never written behind the reconciler
+    expect(existsSync(join(inst, ".metistry", "metistry.lock"))).toBe(false); // never written behind the reconciler
     expect(lines.join("\n")).toContain("migrations: 2 applied, 2 total");
   });
 
@@ -194,7 +194,7 @@ describe("metistry update", () => {
     const lines: string[] = [];
     const r = await update({ ...base(P, BRIDGE), out: (l) => lines.push(l), exec: fakeExec(), skipBuild: true, skipMigrate: true, fetchFn: refused.fn, doctorFn: okDoctor });
     expect(r.code).toBe(1);
-    expect(lines.join("\n")).toContain("reconciler refused the metistry.lock write (forbidden: principal may not write metistry.lock)");
+    expect(lines.join("\n")).toContain("reconciler refused the .metistry/metistry.lock write (forbidden: principal may not write metistry.lock)");
 
     const down = { fn: (async () => { throw new TypeError("fetch failed"); }) as unknown as typeof fetch };
     const r2 = await update({ ...base(P, BRIDGE), out: (l) => lines.push(l), exec: fakeExec(), skipBuild: true, skipMigrate: true, fetchFn: down.fn, doctorFn: okDoctor });
@@ -210,7 +210,7 @@ describe("metistry update", () => {
 
   it("without a bridge: a local instance dir gets the lock written directly (and read back); a running reconciler with no URL is refused; no instance dir writes nothing", async () => {
     const P = await checkout({ git: true });
-    const inst = await mkdtemp(join(tmpdir(), "metistry-inst-"));
+    const inst = await mkdtemp(join(tmpdir(), "mi-" /* short on purpose: the supervisor socket under .metistry/state/run/ has ~103 bytes to live in */));
     const env = { METISTRY_INSTANCE_DIR: inst };
     const exec = fakeExec({ git: () => ({ stdout: "abc123\n" }), launchctl: () => ({ code: 113, stderr: "Could not find service" }) });
     const lines: string[] = [];
@@ -230,14 +230,15 @@ describe("metistry update", () => {
     // no instance dir at all
     const r3 = await update({ ...base(P), out: (l) => lines.push(l), exec: fakeExec(), skipBuild: true, skipMigrate: true, doctorFn: okDoctor });
     expect(r3.code).toBe(0);
-    expect(lines.join("\n")).toContain("no METISTRY_INSTANCE_DIR — metistry.lock not written");
+    expect(lines.join("\n")).toContain("no METISTRY_INSTANCE_DIR — .metistry/metistry.lock not written");
   });
 
   it("release mode --dry-run: the download plan, the pinned pull, never a build; the prior lock's commit is kept", async () => {
     const P = await checkout({ git: true });
-    const inst = await mkdtemp(join(tmpdir(), "metistry-inst-"));
+    const inst = await mkdtemp(join(tmpdir(), "mi-" /* short on purpose: the supervisor socket under .metistry/state/run/ has ~103 bytes to live in */));
     const prior: LockFile = { product: { version: "0.0.8", commit: "rel-commit", source: "release" }, updated_at: "2026-09-01T00:00:00.000Z", migrations_applied: ["0001_a.sql"] };
-    await writeFile(join(inst, "metistry.lock"), serializeLock(prior));
+    await mkdir(join(inst, ".metistry"), { recursive: true });
+    await writeFile(join(inst, ".metistry", "metistry.lock"), serializeLock(prior));
     const r = await update({ ...base(P, { METISTRY_INSTANCE_DIR: inst, ...BRIDGE }), exec: fakeExec(), dryRun: true, fetchFn: fakeFetch().fn });
     expect(r.source).toBe("release");
     expect(r.commands[0]).toContain("resolve release <latest> of foldedspacelabs/metistry");
@@ -291,10 +292,11 @@ describe("metistry update", () => {
     );
     expect(parseLock(text)).toEqual(lock);
     expect(parseLock(serializeLock({ ...lock, migrations_applied: [] }))).toEqual({ ...lock, migrations_applied: [] });
-    const inst = await mkdtemp(join(tmpdir(), "metistry-inst-"));
-    expect(await readLock(join(inst, "metistry.lock"))).toBeUndefined();
-    await writeFile(join(inst, "metistry.lock"), text);
-    expect(await readLock(join(inst, "metistry.lock"))).toEqual(lock);
+    const inst = await mkdtemp(join(tmpdir(), "mi-" /* short on purpose: the supervisor socket under .metistry/state/run/ has ~103 bytes to live in */));
+    expect(await readLock(join(inst, ".metistry", "metistry.lock"))).toBeUndefined();
+    await mkdir(join(inst, ".metistry"), { recursive: true });
+    await writeFile(join(inst, ".metistry", "metistry.lock"), text);
+    expect(await readLock(join(inst, ".metistry", "metistry.lock"))).toEqual(lock);
 
     // the first by-hand instance's shape (init before 2026-09-07)
     expect(parseLock("version: 0.0.1\ncreated: 2026-09-06\n")).toEqual({ product: { version: "0.0.1", commit: "unknown", source: "git" }, updated_at: "2026-09-06T00:00:00.000Z", migrations_applied: [] });
@@ -302,7 +304,7 @@ describe("metistry update", () => {
     for (const bad of ["", "product: 1\n", "product: {version: x, commit: y, source: svn}\nupdated_at: 2026-01-01T00:00:00Z\nmigrations_applied: []\n", "product: {version: x, commit: y, source: git}\nupdated_at: yesterday\nmigrations_applied: []\n", "product: {version: x, commit: y, source: git}\nupdated_at: 2026-01-01T00:00:00Z\nmigrations_applied: 3\n"]) {
       expect(() => parseLock(bad), JSON.stringify(bad)).toThrow(/metistry\.lock:/);
     }
-    expect(instanceLockPath({ METISTRY_INSTANCE_DIR: "/x/inst/" })).toBe("/x/inst/metistry.lock");
+    expect(instanceLockPath({ METISTRY_INSTANCE_DIR: "/x/inst/" })).toBe("/x/inst/.metistry/metistry.lock");
     expect(instanceLockPath({})).toBeUndefined();
   });
 

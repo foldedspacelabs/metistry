@@ -2,7 +2,7 @@
 // must validate, and every http bridge/service must map onto a probe. This
 // is the test that keeps doctor generic — a new component either validates
 // or breaks CI here.
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -75,7 +75,8 @@ describe("manifest walk over the checkout", () => {
       platform: "linux" as const,
     };
     const dir = await mkdtemp(join(tmpdir(), "metistry-doctor-compute-"));
-    const file = join(dir, "compute.yaml");
+    const file = join(dir, ".metistry", "compute.yaml");
+    await mkdir(join(dir, ".metistry"), { recursive: true });
     await writeFile(
       file,
       `providers:

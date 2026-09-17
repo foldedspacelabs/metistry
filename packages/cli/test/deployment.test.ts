@@ -31,11 +31,12 @@ describe("loadDeployment", () => {
   it("the instance's copy wins, and its per-service keys merge over the seeded ones (D4)", async () => {
     const { product, instance } = await dirs();
     await writeFile(join(product, "seed", "deployment.yaml"), "shape: compose\nservices:\n  db:\n    shape: compose\n");
-    await writeFile(join(instance, "deployment.yaml"), "shape: launchd\nservices:\n  db:\n    enabled: false\n");
+    await mkdir(join(instance, ".metistry"), { recursive: true });
+    await writeFile(join(instance, ".metistry", "deployment.yaml"), "shape: launchd\nservices:\n  db:\n    enabled: false\n");
     const r = await loadDeployment(product, { METISTRY_INSTANCE_DIR: instance });
     expect(r.deployment).toEqual({ shape: "launchd", services: { db: { shape: "compose", enabled: false } } });
-    expect(r.from).toBe(join(instance, "deployment.yaml"));
-    expect(deploymentPaths(product, { METISTRY_INSTANCE_DIR: instance }).instance).toBe(join(instance, "deployment.yaml"));
+    expect(r.from).toBe(join(instance, ".metistry", "deployment.yaml"));
+    expect(deploymentPaths(product, { METISTRY_INSTANCE_DIR: instance }).instance).toBe(join(instance, ".metistry", "deployment.yaml"));
   });
 
   it("METISTRY_DEPLOYMENT_SHAPE overrides the file and says so", async () => {
@@ -81,7 +82,7 @@ describe("the console's launchd environment", () => {
     expect(e.METISTRY_DB_HOST).toBe("127.0.0.1");
     expect(e.METISTRY_CONSOLE_HOST).toBe("127.0.0.1"); // loopback bind (invariant 8)
     expect(e.METISTRY_EK_URL).toBe("http://127.0.0.1:7811"); // resolved for a host process
-    expect(e.METISTRY_INBOX_DIR).toBe("/i/Knowledge/Inbox"); // the vault inbox, not the named volume (docs/ops/inbox.md)
+    expect(e.METISTRY_INBOX_DIR).toBe("/i/Inbox"); // the vault inbox, not the named volume (docs/ops/inbox.md)
     expect(e.METISTRY_ORIGIN).toBe("https://studio.ts.net");
     expect(e.METISTRY_GITHUB_WRITE_TOKEN).toBe("ghp_x");
     expect(e.TZ).toBe("America/New_York");
@@ -92,7 +93,7 @@ describe("the console's launchd environment", () => {
 
   it("an inbox the operator set to a real path is kept", () => {
     expect(consoleEnv(ctx({ ...env, METISTRY_INBOX_DIR: "/Users/someone/inbox" })).METISTRY_INBOX_DIR).toBe("/Users/someone/inbox");
-    expect(consoleEnv(ctx({ ...env, METISTRY_INSTANCE_DIR: undefined })).METISTRY_INBOX_DIR).toBe("/i/Knowledge/Inbox"); // the container volume path is never kept
+    expect(consoleEnv(ctx({ ...env, METISTRY_INSTANCE_DIR: undefined })).METISTRY_INBOX_DIR).toBe("/i/Inbox"); // the container volume path is never kept
   });
 });
 

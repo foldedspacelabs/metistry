@@ -9,7 +9,7 @@
 //   <instance>/
 //     .metistry/
 //       identity.yaml  rules.yaml  compute.yaml  deployment.yaml  metistry.lock
-//       agents/  routines/  queries/  extensions/  instance-migrations/
+//       agents/  routines/  queries/  targets/  extensions/  instance-migrations/
 //       state/            gitignored: .env, models/, sockets, everything runtime
 //     .obsidian/          workspace* gitignored
 //     Inbox/              captures (Inbox/.large/ gitignored)
@@ -49,6 +49,7 @@ export const INSTANCE_LAYOUT = Object.freeze({
   queriesDir: ".metistry/queries",
   agentsDir: ".metistry/agents",
   routinesDir: ".metistry/routines",
+  targetsDir: ".metistry/targets",
   extensionsDir: ".metistry/extensions",
   instanceMigrationsDir: ".metistry/instance-migrations",
 
@@ -68,8 +69,12 @@ export const INSTANCE_LAYOUT = Object.freeze({
 
 export type InstancePathKey = keyof typeof INSTANCE_LAYOUT;
 
-/** The five config directories the instance owns, by their bare names. */
-export const INSTANCE_CONFIG_DIRS = Object.freeze(["queries", "agents", "routines", "extensions", "instance-migrations"] as const);
+/**
+ * The config directories the instance owns, by their bare name. Each is
+ * stamped under `.metistry/` and each is protected — they define how the
+ * system behaves, so they are the user's hand (invariant 2).
+ */
+export const INSTANCE_CONFIG_DIRS = Object.freeze(["queries", "agents", "routines", "targets", "extensions", "instance-migrations"] as const);
 
 /** The `.gitignore` a fresh instance is stamped with: derived state, Obsidian's per-machine workspace, oversized captures. */
 export const INSTANCE_GITIGNORE_LINES = Object.freeze([

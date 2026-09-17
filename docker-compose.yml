@@ -83,7 +83,7 @@ services:
       # (Issues read/write + Metadata on the dispatch repo only) + "owner/repo"
       METISTRY_GITHUB_WRITE_TOKEN: ${METISTRY_GITHUB_WRITE_TOKEN:-}
       METISTRY_GITHUB_DISPATCH_REPO: ${METISTRY_GITHUB_DISPATCH_REPO:-}
-      METISTRY_TARGETS_DIRS: ${METISTRY_TARGETS_DIRS:-targets}
+      METISTRY_TARGETS_DIRS: ${METISTRY_TARGETS_DIRS:-targets:.metistry/targets}
       # compute.yaml (docs/ops/compute.md): providers, assignments, budgets.
       # The seed's copy ships in the image and assigns nothing; an instance
       # overlays its own file (D4, last existing wins) and both the console

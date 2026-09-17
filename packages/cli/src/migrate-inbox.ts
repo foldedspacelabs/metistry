@@ -185,9 +185,16 @@ export async function migrateInbox(opts: MigrateInboxOptions): Promise<MigrateIn
   }
 
   // The pre-2026-09-16 layout: a gitignored `inbox/` beside the vault.
+  //
+  // Only when the vault inbox is somewhere ELSE. Under the flat layout the
+  // vault inbox IS `Inbox/` at the root, macOS answers `existsSync("inbox")`
+  // for it, and treating it as a legacy source would move the directory into
+  // itself and then remove "the empty legacy directory" — i.e. delete the
+  // vault inbox. The rename above is what handles a mis-cased one there.
+  const legacyApplies = vaultInbox.toLowerCase() !== "inbox";
   const legacy = join(dir, "inbox");
-  const legacyEntries = existsSync(legacy) ? (await readdir(legacy)).filter((e) => e !== ".DS_Store").sort() : [];
-  if (existsSync(legacy)) {
+  const legacyEntries = legacyApplies && existsSync(legacy) ? (await readdir(legacy)).filter((e) => e !== ".DS_Store").sort() : [];
+  if (legacyApplies && existsSync(legacy)) {
     from = from ?? "inbox";
     if (!r.dryRun) await mkdir(join(dir, vaultInbox), { recursive: true });
     for (const entry of legacyEntries) {

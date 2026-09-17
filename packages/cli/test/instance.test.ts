@@ -34,7 +34,8 @@ const okExec: Exec = async () => ({ code: 1, stdout: "", stderr: "not loaded" })
 
 async function instanceDir(opts: { identity?: string | undefined; ownEnv?: boolean } = {}): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "metistry-instance-"));
-  await writeFile(join(dir, "identity.yaml"), opts.identity ?? IDENTITY);
+  await mkdir(join(dir, ".metistry"), { recursive: true });
+    await writeFile(join(dir, ".metistry", "identity.yaml"), opts.identity ?? IDENTITY);
   if (opts.ownEnv) {
     await mkdir(instanceStateDir(dir), { recursive: true });
     await writeFile(instanceEnvFile(dir), "METISTRY_DB_PASSWORD=x\n");
@@ -51,9 +52,9 @@ async function productDir(withEnv = true): Promise<string> {
 describe("where .env lives", () => {
   it("puts an instance's .env under its own state/, gitignored by the seed", async () => {
     const dir = await instanceDir({ ownEnv: true });
-    expect(instanceEnvFile(dir)).toBe(join(dir, "state", ".env"));
+    expect(instanceEnvFile(dir)).toBe(join(dir, ".metistry", "state", ".env"));
     // a trailing slash must not produce `<dir>//state`
-    expect(instanceEnvFile(`${dir}/`)).toBe(join(dir, "state", ".env"));
+    expect(instanceEnvFile(`${dir}/`)).toBe(join(dir, ".metistry", "state", ".env"));
   });
 
   it("reads the instance's own .env first and the product checkout's second, calling the product one deprecated", async () => {
@@ -207,7 +208,7 @@ describe("ensureInstanceId", () => {
     const got = await ensureInstanceId(r, { instanceDir: dir, env: {}, platform: "linux", uid: 501, fetchFn: (async () => new Response()) as typeof fetch, mint: () => ID });
     expect(got).toMatchObject({ id: ID, minted: true, how: "direct" });
     expect(got.detail).toContain("written directly");
-    const identity = await readFile(join(dir, "identity.yaml"), "utf8");
+    const identity = await readFile(join(dir, ".metistry", "identity.yaml"), "utf8");
     expect(identity).toContain(`instance_id: "${ID}"`);
     expect(identity).toContain("name: Seed");
     expect(await readInstanceId(dir)).toBe(ID);
@@ -227,7 +228,7 @@ describe("ensureInstanceId", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]!.url).toBe("http://127.0.0.1:7812/vault/write");
     expect(calls[0]!.auth).toBe("Bearer tok");
-    expect(calls[0]!.body).toMatchObject({ path: "identity.yaml", intent: { principal: "user" } });
+    expect(calls[0]!.body).toMatchObject({ path: ".metistry/identity.yaml", intent: { principal: "user" } });
     expect(String((calls[0]!.body as { content: string }).content)).toContain(`instance_id: "${ID}"`);
     // the bridge is the committer: nothing was written to disk here
     expect(await readInstanceId(dir)).toBeUndefined();

@@ -278,9 +278,10 @@ describe("metistry up, launchd shape, release mode", () => {
     // the repo's REAL plists, so a template edit that breaks this fails here
     await cp(fileURLToPath(new URL("../../../ops/launchd", import.meta.url)), join(src, "ops", "launchd"), { recursive: true });
     await cp(fileURLToPath(new URL("../../../ops/sandbox", import.meta.url)), join(src, "ops", "sandbox"), { recursive: true });
-    const inst = await mkdtemp(join(tmpdir(), "metistry-inst-"));
+    const inst = await mkdtemp(join(tmpdir(), "mi-" /* short on purpose: the supervisor socket under .metistry/state/run/ has ~103 bytes to live in */));
     const { serializeLock } = await import("../src/lock.js");
-    await writeFile(join(inst, "metistry.lock"), serializeLock({ product: { version: "0.3.0", commit: "unknown", source: "release" }, updated_at: "2026-09-01T00:00:00.000Z", migrations_applied: [] }));
+    await mkdir(join(inst, ".metistry"), { recursive: true });
+    await writeFile(join(inst, ".metistry", "metistry.lock"), serializeLock({ product: { version: "0.3.0", commit: "unknown", source: "release" }, updated_at: "2026-09-01T00:00:00.000Z", migrations_applied: [] }));
     // a release install: `current` -> releases/0.3.0, and the install root holds
     // `.env` and (once fetched) `runtime/`
     const P = await mkdtemp(join(tmpdir(), "metistry-rel-"));
@@ -318,7 +319,7 @@ describe("metistry up, launchd shape, release mode", () => {
 
     // db and the reconciler are the supervisor's children now: what they run
     // is in its config, not in a plist each
-    const config = JSON.parse(await readFile(join(inst, "state", "supervisor.json"), "utf8"));
+    const config = JSON.parse(await readFile(join(inst, ".metistry", "state", "supervisor.json"), "utf8"));
     const child = (name: string) => config.children.find((c: { name: string }) => c.name === name);
     expect(child("db").argv[0]).toBe(`${join(P, RUNTIME_DIRNAME, "postgres", "bin")}/postgres`);
     expect(child("reconciler").env.PATH).toBe(`${join(P, RUNTIME_DIRNAME, "git", "bin")}:${LAUNCHD_BASE_PATH}`);
@@ -360,9 +361,10 @@ describe("metistry update --channel release", () => {
     const { cp } = await import("node:fs/promises");
     const src = await checkout();
     const P = await mkdtemp(join(tmpdir(), "metistry-rel-"));
-    const inst = await mkdtemp(join(tmpdir(), "metistry-inst-"));
+    const inst = await mkdtemp(join(tmpdir(), "mi-" /* short on purpose: the supervisor socket under .metistry/state/run/ has ~103 bytes to live in */));
     const { serializeLock } = await import("../src/lock.js");
-    await writeFile(join(inst, "metistry.lock"), serializeLock({ product: { version: "0.2.0", commit: "unknown", source: "release" }, updated_at: "2026-09-01T00:00:00.000Z", migrations_applied: [] }));
+    await mkdir(join(inst, ".metistry"), { recursive: true });
+    await writeFile(join(inst, ".metistry", "metistry.lock"), serializeLock({ product: { version: "0.2.0", commit: "unknown", source: "release" }, updated_at: "2026-09-01T00:00:00.000Z", migrations_applied: [] }));
 
     // the release's runtime pack unpacks a product tree; its deps pack unpacks runtime/
     const exec = fakeExec({

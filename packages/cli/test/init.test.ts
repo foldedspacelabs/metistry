@@ -27,22 +27,27 @@ describe("metistry init", () => {
     const r = await init({ dir, seedDir, version: "1.2.3", now: new Date("2026-09-07T12:00:00Z"), mint: () => MINTED, platform: "linux" });
 
     expect(r.dir).toBe(dir);
-    expect(existsSync(join(dir, "Knowledge", "now.md"))).toBe(true);
-    expect(existsSync(join(dir, "identity.yaml"))).toBe(true);
-    expect(existsSync(join(dir, "rules.yaml"))).toBe(true);
-    expect(existsSync(join(dir, "Knowledge", "Inbox", "README.md"))).toBe(true); // the vault inbox, tracked (docs/ops/inbox.md)
-    expect(existsSync(join(dir, "inbox"))).toBe(false); // the old gitignored inbox is gone
-    for (const d of INSTANCE_DIRS) expect(existsSync(join(dir, d, ".gitkeep")), d).toBe(true);
-    expect(readFileSync(join(dir, ".gitignore"), "utf8")).toBe("state/\n.obsidian/workspace*\nKnowledge/Inbox/.large/\n");
+    // the vault is the directory itself: notes at the root, machinery under .metistry/
+    expect(existsSync(join(dir, "now.md"))).toBe(true);
+    expect(existsSync(join(dir, "CLAUDE.md"))).toBe(true); // the assistant's operating instructions, the user's hand
+    expect(existsSync(join(dir, "Knowledge"))).toBe(false); // the legacy vault directory is gone
+    expect(existsSync(join(dir, ".metistry", "identity.yaml"))).toBe(true);
+    expect(existsSync(join(dir, ".metistry", "rules.yaml"))).toBe(true);
+    expect(existsSync(join(dir, ".metistry", "compute.yaml"))).toBe(true);
+    expect(existsSync(join(dir, "Inbox", "README.md"))).toBe(true); // the vault inbox, tracked (docs/ops/inbox.md)
+    // (no `existsSync(join(dir, "inbox"))` check: macOS is case-insensitive, so
+    // it would answer for `Inbox/`. The tracked-file list below is the real one.)
+    for (const d of INSTANCE_DIRS) expect(existsSync(join(dir, ".metistry", d, ".gitkeep")), d).toBe(true);
+    expect(readFileSync(join(dir, ".gitignore"), "utf8")).toBe(".metistry/state/\n.obsidian/workspace*\nInbox/.large/\n");
     expect(readFileSync(join(dir, "README.md"), "utf8")).toMatch(/^# Instance repo — private\./);
-    expect(readFileSync(join(dir, "metistry.lock"), "utf8")).toBe(lockFile("1.2.3", new Date("2026-09-07T12:00:00Z")));
+    expect(readFileSync(join(dir, ".metistry", "metistry.lock"), "utf8")).toBe(lockFile("1.2.3", new Date("2026-09-07T12:00:00Z")));
     // the documented lock shape (docs/ops/cli.md) — the same one `metistry update` moves; no db at init, so no migrations recorded
-    expect(parseYaml(readFileSync(join(dir, "metistry.lock"), "utf8"))).toEqual({
+    expect(parseYaml(readFileSync(join(dir, ".metistry", "metistry.lock"), "utf8"))).toEqual({
       product: { version: "1.2.3", commit: "unknown", source: "git" },
       updated_at: "2026-09-07T12:00:00.000Z",
       migrations_applied: [],
     });
-    expect(parseLock(readFileSync(join(dir, "metistry.lock"), "utf8")).product.version).toBe("1.2.3");
+    expect(parseLock(readFileSync(join(dir, ".metistry", "metistry.lock"), "utf8")).product.version).toBe("1.2.3");
 
     // git: branch main, exactly one commit, the stamped author, clean tree, .large/ ignored
     expect(git(dir, "rev-parse", "--abbrev-ref", "HEAD")).toBe("main");
@@ -51,15 +56,26 @@ describe("metistry init", () => {
     expect(git(dir, "rev-parse", "HEAD")).toBe(r.commit);
     expect(git(dir, "status", "--porcelain")).toBe("");
     expect(git(dir, "ls-files").split("\n").sort()).toEqual(
-      [".gitignore", "Knowledge/Inbox/README.md", "Knowledge/now.md", "README.md", "compute.yaml", "identity.yaml", "metistry.lock", "rules.yaml", ...INSTANCE_DIRS.map((d) => `${d}/.gitkeep`)].sort(),
+      [
+        ".gitignore",
+        ".metistry/compute.yaml",
+        ".metistry/identity.yaml",
+        ".metistry/metistry.lock",
+        ".metistry/rules.yaml",
+        "CLAUDE.md",
+        "Inbox/README.md",
+        "README.md",
+        "now.md",
+        ...INSTANCE_DIRS.map((d) => `.metistry/${d}/.gitkeep`),
+      ].sort(),
     );
     // a capture is part of the record now; only the .large/ spill is ignored
-    await mkdir(join(dir, "Knowledge", "Inbox", ".large"), { recursive: true });
-    await writeFile(join(dir, "Knowledge", "Inbox", ".large", "clip.mov"), "big");
+    await mkdir(join(dir, "Inbox", ".large"), { recursive: true });
+    await writeFile(join(dir, "Inbox", ".large", "clip.mov"), "big");
     expect(git(dir, "status", "--porcelain")).toBe("");
-    await writeFile(join(dir, "Knowledge", "Inbox", "1757-x.md"), "capture");
-    expect(git(dir, "status", "--porcelain")).toBe("?? Knowledge/Inbox/1757-x.md");
-    await rm(join(dir, "Knowledge", "Inbox", "1757-x.md"));
+    await writeFile(join(dir, "Inbox", "1757-x.md"), "capture");
+    expect(git(dir, "status", "--porcelain")).toBe("?? Inbox/1757-x.md");
+    await rm(join(dir, "Inbox", "1757-x.md"));
 
     // the seed's default name stays when --name is not given; the .env lines are returned, not written
     expect(r.assistantName).toBe((parseYaml(readFileSync(join(seedDir, "identity.yaml"), "utf8")) as { name: string }).name);
@@ -78,10 +94,11 @@ describe("metistry init", () => {
     // gitignored so none of it can ever be committed
     expect(r.instanceId).toMatch(INSTANCE_ID_RE);
     expect(await readInstanceId(dir)).toBe(r.instanceId);
-    expect(readFileSync(join(dir, "identity.yaml"), "utf8")).toContain(`instance_id: "${r.instanceId}"`);
+    expect(readFileSync(join(dir, ".metistry", "identity.yaml"), "utf8")).toContain(`instance_id: "${r.instanceId}"`);
     await writeFile(join(dir, "state.txt"), "not the dir"); // only `state/` is ignored
-    await mkdir(join(dir, "state"), { recursive: true });
-    await writeFile(join(dir, "state", ".env"), "METISTRY_DB_PASSWORD=secret");
+    await mkdir(join(dir, ".metistry", "state"), { recursive: true });
+    await mkdir(join(dir, ".metistry"), { recursive: true });
+    await writeFile(join(dir, ".metistry", "state", ".env"), "METISTRY_DB_PASSWORD=secret");
     expect(git(dir, "status", "--porcelain")).toBe("?? state.txt");
   });
 
@@ -89,7 +106,7 @@ describe("metistry init", () => {
     const dir = join(await fresh(), "instance");
     const r = await init({ dir, seedDir, version: "0.0.1", name: "Athena Prime", mint: () => MINTED });
     expect(r.assistantName).toBe("Athena Prime");
-    const text = readFileSync(join(dir, "identity.yaml"), "utf8");
+    const text = readFileSync(join(dir, ".metistry", "identity.yaml"), "utf8");
     const parsed = parseYaml(text) as { name: string; mention: string; voice: string; icon: string };
     expect(parsed.name).toBe("Athena Prime");
     expect(parsed.mention).toBe("@athena-prime");
@@ -98,7 +115,7 @@ describe("metistry init", () => {
     expect(text).toMatch(/^# SEED TEMPLATE/);
     // the name appears in identity.yaml and nowhere else in the repo
     const hits = execFileSync("git", ["grep", "-l", "Athena", "HEAD"], { cwd: dir, encoding: "utf8" }).trim().split("\n");
-    expect(hits).toEqual(["HEAD:identity.yaml"]);
+    expect(hits).toEqual(["HEAD:.metistry/identity.yaml"]);
   });
 
   it("refuses a non-empty directory unless --force, and never leaves a half-stamped tree behind", async () => {
@@ -145,7 +162,7 @@ describe("metistry init", () => {
     expect(await main(["bogus"], { out: () => {}, err: () => {} })).toBe(2);
     expect(await main([], { out: () => {}, err: () => {} })).toBe(2);
     // init from inside a checkout pins the checkout's HEAD into the lock
-    const lock = parseLock(readFileSync(join(dir, "metistry.lock"), "utf8"));
+    const lock = parseLock(readFileSync(join(dir, ".metistry", "metistry.lock"), "utf8"));
     expect(lock.product.commit).toMatch(/^[0-9a-f]{40}$/);
     expect(lock.product.source).toBe("git");
   });
@@ -154,7 +171,7 @@ describe("metistry init", () => {
     const product = fileURLToPath(new URL("../../../", import.meta.url));
     const dir = join(await fresh(), "release-instance");
     expect(await main(["init", dir, "--channel", "release", "--product-dir", product], { out: () => {} })).toBe(0);
-    expect(parseLock(readFileSync(join(dir, "metistry.lock"), "utf8")).product.source).toBe("release");
+    expect(parseLock(readFileSync(join(dir, ".metistry", "metistry.lock"), "utf8")).product.source).toBe("release");
 
     const errs: string[] = [];
     const bad = join(await fresh(), "nope");
@@ -193,7 +210,7 @@ describe("metistry init", () => {
   it("a namespaced instance's launchd lines use its own ports (state/ports.yaml), not the fixed defaults", async () => {
     const dir = join(await fresh(), "instance");
     const namespace: Namespace = { labelSuffix: "a1b2c3d4", base: 8460, ports: portsOf(8460), from: "test" };
-    await mkdir(join(dir, "state"), { recursive: true });
+    await mkdir(join(dir, ".metistry", "state"), { recursive: true });
     await writeFile(portsFile(dir), serializeNamespace(namespace, "a1b2c3d4-0000-4000-8000-000000000000"));
 
     const r = await init({ dir, seedDir, version: "0.0.1", force: true, mint: () => MINTED, platform: "darwin" });

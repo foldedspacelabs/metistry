@@ -4,7 +4,7 @@
 // the instance lock, and the Linux branch that prints systemd units instead
 // of touching launchd.
 import { existsSync, readFileSync } from "node:fs";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -116,12 +116,13 @@ describe("metistry up", () => {
 
   it("release mode (the instance lock says source: release) pulls the pinned images and never builds", async () => {
     const P = await checkout();
-    const inst = await mkdtemp(join(tmpdir(), "metistry-inst-"));
-    await writeFile(join(inst, "metistry.lock"), serializeLock({ product: { version: "1.0.0", commit: "abc", source: "release" }, updated_at: "2026-09-07T00:00:00.000Z", migrations_applied: [] }));
+    const inst = await mkdtemp(join(tmpdir(), "mi-" /* short on purpose: the supervisor socket under .metistry/state/run/ has ~103 bytes to live in */));
+    await mkdir(join(inst, ".metistry"), { recursive: true });
+    await writeFile(join(inst, ".metistry", "metistry.lock"), serializeLock({ product: { version: "1.0.0", commit: "abc", source: "release" }, updated_at: "2026-09-07T00:00:00.000Z", migrations_applied: [] }));
     const r = await up({ ...base(P), env: { METISTRY_INSTANCE_DIR: inst }, exec: fakeExec(), out: () => {}, dryRun: true, home: "/h", launchd: false });
     expect(r.source).toBe("release");
     // compose is told where the instance's .env is: its own `./.env` is not this install's environment
-    const ef = join(inst, "state", ".env");
+    const ef = join(inst, ".metistry", "state", ".env");
     expect(r.commands).toEqual([`(cd ${P} && docker compose --env-file ${ef} pull)`, `(cd ${P} && docker compose --env-file ${ef} up -d --no-build)`, "metistry doctor"]);
   });
 

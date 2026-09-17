@@ -82,8 +82,8 @@ containing a "proposal open" item is not, by being listed, authorised.
 | H5 | **One alert per (component, error signature)** with an ack that silences that signature only | hermes-2 | **done** (#153) |
 | H6 | A **`schedules` section in `metistry doctor`** — last run, overdue by >2× interval, non-zero exit when actionable | hermes-2 | **done** (#153) |
 | H7 | **`failure_streak`** in the morning brief; at 3, one line offering fix / pause / remove | hermes-2 | **done** (#153) |
-| H8 | **Crew descriptions in `agents_delegate`** from the manifest | hermes-2 | proposal open |
-| H9 | **`data_collection: "deny"`** in the OpenRouter request body | hermes-2 | proposal open — conflicts with C13, see §2.6; C13 shipped instead (#159), warning-only |
+| H8 | **Crew descriptions in `agents_delegate`** from the manifest | hermes-2 | **accepted 2026-09-17**, scheduled |
+| H9 | **`data_collection: "deny"`** in the OpenRouter request body | hermes-2 | **rejected 2026-09-17** — conflicts with C13, see §2.6; C13's warning-only shape stands (#159) |
 | T1 | **Tool *names* as grammar terminals** (or a `json_schema` enum from the live `tools/list`); keep parse → zod → one repair retry where a provider only hints | atomic | proposal open (needs the server check in §3.4) |
 | T2 | **Lead the candidate list with a ~30–35B A3B-class MoE at Q4**; demote gemma-4 to scorer-only | atomic | folded into the bake-off (§3.3) |
 | T3 | **Axis tag + six trace columns** on every bake-off record | atomic | **done** (#160) |
@@ -129,6 +129,10 @@ are never *selected*. Recorded resolution, **a proposal, not a decision**: send
 it by default with a per-provider opt-out in `compute.yaml`, keeping the
 warning row for anything still off-machine — the constraint becomes the
 default, informed choice stays available.
+
+**Ruled 2026-09-17:** keep the warning only (option A); H9 rejected —
+informed user choice is the imperative, and a user who wants a non-ZDR
+provider may pick it.
 
 **2.7 MLX as a selection criterion.** The compute note lists "MLX build" among
 stage-0 criteria; the only controlled local-agent result on this hardware class
@@ -201,8 +205,11 @@ written today.
 - **Cloud rows** for the seed-default question (the deepseek / kimi /
   gemini-flash-lite class in the compute note's price table) — the seed default
   may reasonably be cloud while local matures.
-- **OPEN-1:** is *open weights* a criterion (portability to local later) or
-  only price and quality? It changes the cloud shortlist.
+- **OPEN-1 — ruled 2026-09-17:** quality first, open weights (portability to
+  local later) as a tiebreaker within a quality band — not purely
+  score-based; a somewhat lower-quality open-weight model is an acceptable
+  choice if day-to-day performance and usability stay reasonable. Changes the
+  cloud shortlist accordingly.
 
 ### 3.4 Servers — and the first thing the PoC checks
 
@@ -234,6 +241,11 @@ shadow scoring and any CI regression reuse one scorer. *Rejected:* a throwaway
 script in `docs/poc/`, cheaper today and rewritten twice, since shadow mode
 needs the same scorer inside the engine's repo. **The new package is the
 owner's to ratify.**
+
+**Transcripts — ruled 2026-09-17.** `runs/.transcripts/` (full message
+histories) are kept, not discarded, but committed to the *instance* repo,
+never the product repo; the product repo's `.gitignore` entry is the
+enforcement (see `docs/poc/poc18-bakeoff/README.md`).
 
 ### 3.7 Stages, and the gate
 
@@ -268,14 +280,14 @@ scripts, trace columns, the write-up. Fixtures gate stage 0; the bundled
 essentially the whole chain: PRs 1, 1a, 2, 3, 4 and 5 are **done** (49 rows
 across §1's decisions log, the small-adopts table, this queue and §4b's
 W1–W7 now read `done (#NNN)`), plus every grouped adopt except crew
-descriptions (H8). The Taskuary executable-action proposal (ADOPT 6) and the
-autonomy-widening question (OPEN-2) were both accepted and shipped the same
-day, in #170. **Decided but not yet built:** C9–C11 and C14 (bake-off calls
-that need the owner's fixtures to run), O1–O4 and S6 (accepted, unscheduled).
-**Genuinely open** — nothing built on either side, per this doc's status
-vocabulary above: OPEN-1, OPEN-3, OPEN-4, OPEN-5, OPEN-6, OPEN-7 (OPEN-2 alone
-resolved); H8 (crew descriptions), H9 (superseded in practice by C13's
-warning-only shape, but not itself ruled on); T1, T2 and T5 (wait on the
+descriptions (H8, **accepted 2026-09-17**, scheduled). The Taskuary
+executable-action proposal (ADOPT 6) and the autonomy-widening question
+(OPEN-2) were both accepted and shipped the same day, in #170. **Decided but
+not yet built:** C9–C11 and C14 (bake-off calls that need the owner's
+fixtures to run), O1–O4 and S6 (accepted, unscheduled). OPEN-1 and OPEN-3
+through OPEN-7 were all **ruled 2026-09-17** (table below); H9 was
+**rejected** the same day. **Genuinely open** — nothing built on either
+side, per this doc's status vocabulary above: T1, T2 and T5 (wait on the
 bake-off's server check); and W2 (no `v0.8.0` tag cut yet).
 
 Sequence: **PR 1 → PR 2 → PoC-18 stage 0 → PR 3 → PR 4/5**, grouped adopts
@@ -312,13 +324,13 @@ the Studio's overlay; ratifying `packages/eval`; the SDK removal in
 
 | # | Question | Source | Status (2026-09-17) |
 |---|---|---|---|
-| OPEN-1 | Is "open weights" a criterion for the seed `default`, or only price and quality? | compute rev 3 Q0 | open |
+| OPEN-1 | Is "open weights" a criterion for the seed `default`, or only price and quality? | compute rev 3 Q0 | **ruled 2026-09-17** — quality first, open weights a tiebreaker within a quality band; not purely score-based (§3.3) |
 | OPEN-2 | `autonomy` narrowing-only vs "lower the bar as trust grows" (§2.5) | agent-room | **resolved 2026-09-16** — owner overturned the narrowing-only rule; shipped as A3, autonomy levels the owner can raise (#170) |
-| OPEN-3 | Non-ZDR: keep the warning, or send `data_collection: deny` by default with a per-provider opt-out (§2.6) | hermes-2 | open — the warning shipped (#159); the default-deny question is unresolved |
-| OPEN-4 | What may `critical: true` cover under `action: critical_only`? | compute rev 3 Q1 | open |
-| OPEN-5 | `work.owner` — "addressed to" or authoritative? An Assigned column makes it look authoritative | hermes-1 | open |
-| OPEN-6 | Prompt caching: one top-level `cache_control` or explicit breakpoints — measure both in PR 3 | compute rev 3 Q3 | open |
-| OPEN-7 | Seed cloud templates: OpenRouter only, plus Zen, and leave "any base URL" to the form? | compute rev 3 Q2 | open |
+| OPEN-3 | Non-ZDR: keep the warning, or send `data_collection: deny` by default with a per-provider opt-out (§2.6) | hermes-2 | **ruled 2026-09-17** — keep the warning only (option A); H9 rejected: informed user choice is the imperative (§2.6) |
+| OPEN-4 | What may `critical: true` cover under `action: critical_only`? | compute rev 3 Q1 | **ruled 2026-09-17** — covers the `default` assignment tier only by default; interactive turns keep answering, routines and delegation stop under `critical_only`; the seed marks the default assignment critical |
+| OPEN-5 | `work.owner` — "addressed to" or authoritative? An Assigned column makes it look authoritative | hermes-1 | **ruled 2026-09-17** — stays informational ("addressed to"), not authoritative; the board column renamed "Addressed to" |
+| OPEN-6 | Prompt caching: one top-level `cache_control` or explicit breakpoints — measure both in PR 3 | compute rev 3 Q3 | **ruled 2026-09-17** — ship automatic top-level `cache_control` first; an agent measures automatic vs explicit breakpoints on ~10 real turns before any further decision, waiting on a configured OpenRouter provider on the Studio |
+| OPEN-7 | Seed cloud templates: OpenRouter only, plus Zen, and leave "any base URL" to the form? | compute rev 3 Q2 | **ruled 2026-09-17** — OpenRouter is the only seeded cloud template; Zen removed from the seed, reached through the generic "any OpenAI-compatible base URL" form |
 
 ---
 
@@ -347,7 +359,7 @@ surfaces verified in `2026-09-15-devin-cursor-integration.md` (#143).
 | W6 | **Devin as a compute target**: `targets/devin-sessions` with a new `transport: http` in `dispatch.ts`, `max_acu_limit` from the budget, `structured_output_schema` for the report, **polling** for completion (no outbound webhook exists), result → report proposal | debugging/research briefs dispatched, answers triaged; the first off-machine target that is not GitHub | agent | **done** (#151) |
 | W7 | Compute PRs 1→3 **with the local provider first** (bundled `llama-server`/LM Studio on the M5 Pro), Claude via OpenRouter second — the engine on the second instance is local until Claude access arrives; the bake-off (§3) runs alongside on both machines | Metis thinks on the second instance with zero cloud | agent + owner (fixtures) | **done** (#152, #158, #159, #167, #169) |
 
-**Exposure (2026-09-15 ruling):** the owner's home gateway is not available to the second instance, and no inbound exposure is assumed. The shapes that need none: W6 is *outbound-only* (Metis calls Devin's API and polls; results land in the inbox), and a local Devin CLI on the same Mac reaches `/mcp` on loopback. Cloud Devin as an MCP *client* (W3's Devin half) needs an inbound path — a per-instance tunnel with the console's own auth in front (Tailscale Funnel or Cloudflare Tunnel are the candidates; the S6 internal mesh is the long-term answer) — and is deferred until one is chosen. W6 grows a **knowledge-research** brief kind: a question Metis cannot answer is dispatched to Devin, the structured answer returns as a `report` proposal with provenance, and the fold files it — "agent delegation of knowledge research and gathering, collected and organised into the knowledge store."
+**Exposure (2026-09-15 ruling):** the owner's home gateway is not available to the second instance, and no inbound exposure is assumed. The shapes that need none: W6 is *outbound-only* (Metis calls Devin's API and polls; results land in the inbox), and a local Devin CLI on the same Mac reaches `/mcp` on loopback. Cloud Devin as an MCP *client* (W3's Devin half) needs an inbound path — a per-instance tunnel with the console's own auth in front (Tailscale Funnel or Cloudflare Tunnel are the candidates; the S6 internal mesh is the long-term answer) — and is deferred until one is chosen. **Ruled 2026-09-17:** local CLI on loopback plus outbound dispatch (W6) is sufficient for now; revisit the tunnel once the second instance is running. W6 grows a **knowledge-research** brief kind: a question Metis cannot answer is dispatched to Devin, the structured answer returns as a `report` proposal with provenance, and the fold files it — "agent delegation of knowledge research and gathering, collected and organised into the knowledge store."
 
 Dependencies: W1–W6 do **not** depend on the compute pivot; W5/W6 need
 the owner's Devin PAT; W6's data policy is that instance's own
@@ -402,7 +414,7 @@ entry. `desktop-app-plan.md`: "Optional, offered in-app", "the user's own,
 unavoidable", wizard step 7. `ios-app-plan.md`: one dated block (O1–O5).
 `PRODUCT.md`: one line.
 
-## 6a. Proposed for CLAUDE.md (owner to accept)
+## 6a. Proposed for CLAUDE.md — accepted 2026-09-17
 
 A principle for the console's mutating surface after #170: "The console's
 mutating surface is a closed, enumerated set of actions, each a door onto an
@@ -417,6 +429,11 @@ four kinds — dispatch, patch, comment, capture — each running the same
 service call the owner's own click makes), and nothing in the invariants
 currently says that surface has to stay closed by construction rather than by
 convention.
+
+**Accepted 2026-09-17.** Applied to `CLAUDE.md` as invariant 10: "The
+console's mutating surface is closed. A closed, enumerated set of actions,
+each a door onto an existing audited service; a new action is a product
+change, never a prompt or a config line."
 
 ## 7. Sources
 

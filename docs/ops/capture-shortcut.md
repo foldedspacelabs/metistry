@@ -4,10 +4,10 @@ Capture from any app → `POST /capture`, with the **local-file fallback**
 (SHOULD-10: one silent drop ends the trust). Until the native iOS app's
 share extension exists, this Shortcut *is* the share sheet.
 
-What lands: a file in `Knowledge/Inbox/` — inside the vault, so it shows up
+What lands: a file in `Inbox/` — inside the vault, so it shows up
 in Obsidian on every device and git carries it — plus its triage row.
 Anything over `METISTRY_INBOX_MAX_TRACKED_BYTES` (5 MiB: a screen
-recording, a big PDF) goes to `Knowledge/Inbox/.large/`, which git does not
+recording, a big PDF) goes to `Inbox/.large/`, which git does not
 carry. `docs/ops/inbox.md`.
 
 ## 1. Mint an owner access token (on the Studio)
@@ -66,7 +66,7 @@ the same headers.
 
 Offline captures wait in that iCloud folder. The cheapest way to ingest them
 now that the inbox is in the vault: move the files into
-`<instance>/Knowledge/Inbox/`. The reconciler's scan notices anything that
+`<instance>/Inbox/`. The reconciler's scan notices anything that
 appears there by content hash and files a triage row for it, exactly as if
 it had come through `POST /capture` (`docs/ops/inbox.md`). An automatic
 sweep of the iCloud folder is still unbuilt.

@@ -120,15 +120,19 @@ describe("pure helpers", () => {
   });
 
   it("underAreas is prefix-by-segment, not by string", () => {
-    expect(underAreas("Knowledge/Areas/Fsl/Note.md", ["Knowledge/Areas/Fsl"])).toBe(true);
-    expect(underAreas("Knowledge/Areas/Fsl", ["Knowledge/Areas/Fsl"])).toBe(true);
-    expect(underAreas("Knowledge/Areas/Fslx/Note.md", ["Knowledge/Areas/Fsl"])).toBe(false);
-    expect(underAreas("Knowledge/Areas/Fsl/Note.md", [])).toBe(false);
+    expect(underAreas("Areas/Fsl/Note.md", ["Areas/Fsl"])).toBe(true);
+    expect(underAreas("Areas/Fsl", ["Areas/Fsl"])).toBe(true);
+    expect(underAreas("Areas/Fslx/Note.md", ["Areas/Fsl"])).toBe(false);
+    expect(underAreas("Areas/Fsl/Note.md", [])).toBe(false);
+    // the bare vault grant (`/`) trims to the empty prefix: everything, root notes included
+    expect(underAreas("now.md", ["/"])).toBe(true);
+    expect(underAreas("Areas/Fsl/Note.md", ["/"])).toBe(true);
   });
 
-  it("validKnowledgePath refuses traversal, absolute, non-vault, and casing slips", () => {
-    expect(validKnowledgePath("Knowledge/Areas/Fsl/Note.md")).toBe(true);
-    for (const bad of ["knowledge/Areas/Fsl/Note.md", "/Knowledge/Areas/x", "Knowledge", "Knowledge/", "Knowledge/Areas/../x", "Knowledge/./x", "inbox/x", ""]) {
+  it("validKnowledgePath refuses traversal, absolute, the machinery and Artifacts/", () => {
+    expect(validKnowledgePath("Areas/Fsl/Note.md")).toBe(true);
+    expect(validKnowledgePath("now.md")).toBe(true); // a root note is a vault path now
+    for (const bad of ["/Areas/x", "/", "Areas/", "Areas/../x", "Areas/./x", ".metistry/identity.yaml", ".metistry/state/.env", "Artifacts/bundle-1/x.pdf", ""]) {
       expect(validKnowledgePath(bad), bad).toBe(false);
     }
   });
@@ -158,7 +162,7 @@ function fakeDb(ready: Record<string, number>, held: { id: number; project: stri
   };
 }
 
-const alice: AgentPrincipal = { id: "alice", grants: { tier: "areas", areas: ["Knowledge/Areas/Itest"] }, projects: ["p1", "p2"] };
+const alice: AgentPrincipal = { id: "alice", grants: { tier: "areas", areas: ["Areas/Itest"] }, projects: ["p1", "p2"] };
 
 describe("nudge (server-side, deterministic)", () => {
   it("counts ready tasks per project in sorted order, warns on short and expired leases, ignores held tasks outside the projects", async () => {
@@ -236,7 +240,7 @@ describe("reader-less deployment", () => {
   it("knowledge_read answers not_available (a capability gap, distinct from not granted and not found)", async () => {
     const client = new Client({ name: "t", version: "0" });
     await client.connect(new StreamableHTTPClientTransport(new URL(base), { requestInit: { headers: { authorization: "Bearer ok" } } }));
-    const r = (await client.callTool({ name: "knowledge_read", arguments: { path: "Knowledge/Areas/Itest/Alpha.md" } })) as { isError?: boolean; content: { text: string }[] };
+    const r = (await client.callTool({ name: "knowledge_read", arguments: { path: "Areas/Itest/Alpha.md" } })) as { isError?: boolean; content: { text: string }[] };
     expect(r.isError).toBe(true);
     const body = JSON.parse(r.content[0]!.text);
     expect(body.error.code).toBe("not_available");

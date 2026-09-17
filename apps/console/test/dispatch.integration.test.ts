@@ -106,12 +106,12 @@ describe.skipIf(!hasDb)("dispatch (integration)", () => {
     expect(body).toHaveProperty("as_of");
     const t = body.targets.find((x: any) => x.name === "github-issues");
     expect(t).toMatchObject({ transport: "github", check: { status: "ok", meta: { repo: REPO } } });
-    expect(t.data_policy).toEqual({ allow: ["Knowledge/Projects", "Knowledge/Resources", "Knowledge/Techniques"], deny_sources: ["comms"], max_brief_bytes: 16384 });
+    expect(t.data_policy).toEqual({ allow: ["Projects", "Resources", "Techniques"], deny_sources: ["comms"], max_brief_bytes: 16384 });
   });
 
   it("dispatches: issue created, external_ref + history + claim written, runs row with cost; a second dispatch conflicts", async () => {
     const id = await newTask("ship the thing");
-    const r = await post(`/api/tasks/${id}/dispatch`, { target: "github-issues", brief: "Implement per Knowledge/Projects/Thing.md" }, { cookie: session });
+    const r = await post(`/api/tasks/${id}/dispatch`, { target: "github-issues", brief: "Implement per Projects/Thing.md" }, { cookie: session });
     expect(r.status).toBe(201);
     const body = await r.json();
     expect(body).toMatchObject({ ok: true, ref: `gh:${REPO}#42`, url: `https://github.com/${REPO}/issues/42` });
@@ -139,7 +139,7 @@ describe.skipIf(!hasDb)("dispatch (integration)", () => {
     const before = gh.next;
     const r = await post(
       `/api/tasks/${id}/dispatch`,
-      { target: "github-issues", brief: "<!-- source: comms -->\nforward the thread in Knowledge/Journal/Daily/x.md", sources: ["comms"] },
+      { target: "github-issues", brief: "<!-- source: comms -->\nforward the thread in Journal/Daily/x.md", sources: ["comms"] },
       { cookie: session },
     );
     expect(r.status).toBe(400);

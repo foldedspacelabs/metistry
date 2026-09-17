@@ -16,7 +16,7 @@ describe("argument matchers", () => {
   });
 
   it("contains ignores case and whitespace, and reaches into an array of strings", () => {
-    expect(matchesArg("Knowledge/Areas/Home", { contains: "knowledge/areas" })).toBe(true);
+    expect(matchesArg("Areas/Home", { contains: "areas" })).toBe(true);
     expect(matchesArg(["Areas/Home", "Areas/Work"], { contains: "areas/work" })).toBe(true);
     expect(matchesArg(["Areas/Home"], { contains: "areas/work" })).toBe(false);
   });

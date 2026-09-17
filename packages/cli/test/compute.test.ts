@@ -129,7 +129,7 @@ const HANDWRITTEN_CLOUD = `providers:
     base_url: https://cloud.example/v1
     locality: off_machine
     auth: { secret: METISTRY_CLOUD_API_KEY }
-    data_policy: { allow: [Knowledge/Projects], deny_sources: [comms], max_brief_bytes: 65536 }
+    data_policy: { allow: [Projects], deny_sources: [comms], max_brief_bytes: 65536 }
     pricing: { example-model: { in_per_m: 1, out_per_m: 2 } }
 `;
 

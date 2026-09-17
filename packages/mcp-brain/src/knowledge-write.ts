@@ -30,6 +30,7 @@
 import { createHash } from "node:crypto";
 import { parse as parseYaml } from "yaml";
 import type { ErrorCode } from "@foldedspacelabs/metistry-core";
+import { isProtectedPath } from "@foldedspacelabs/metistry-core";
 import { underAreas, validKnowledgePath, type KnowledgeReader } from "./knowledge.js";
 import type { AgentPrincipal } from "./types.js";
 
@@ -259,6 +260,12 @@ export async function writeKnowledge(
   const meta: Record<string, unknown> = { kind: principal.kind ?? "external", tier, areas, path: args.path };
   if (principal.kind !== "internal") return { ok: false, code: "forbidden", meta }; // §4.11: one writer
   if (!validKnowledgePath(args.path)) return { ok: false, code: "invalid_request", message: "path must be a vault path — TitleCase folders, no traversal, nothing under .metistry/ or Artifacts/", meta };
+  // A §4.7 protected path is the user's hand (invariant 2). The reconciler
+  // refuses it too — this is the same rule stated at the tool the assistant
+  // actually holds, so the refusal never depends on the bridge being reached.
+  // `.metistry/**` is already out by shape; the root CLAUDE.md and README.md
+  // are ordinary-looking vault paths and would not be.
+  if (isProtectedPath(args.path)) return { ok: false, code: "invalid_request", message: "that path defines how the system behaves — it is the user's hand alone (§4.7)", meta };
   if (tier !== "areas" || !underAreas(args.path, areas)) return { ok: false, code: "forbidden", meta }; // writes never exceed reads
   if (!writer) {
     return { ok: false, code: "not_available", message: "knowledge writes are not configured in this deployment (the vault bridge is absent)", meta };

@@ -196,7 +196,7 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
     const tag = `tl-${Date.now()}`;
     await pool.query(`INSERT INTO inbox (source, path, note, status) VALUES ($1, $2, $3, 'new')`, [
       tag,
-      `Knowledge/Inbox/${tag}.md`,
+      `Inbox/${tag}.md`,
       `---\ntitle: "ignored"\nkind: todo\n---\nrenew the cert\nsecond line`,
     ]);
     const capture = (await store.run("activity_feed", { hours: 1, limit: 500, agent: tag })).rows;
@@ -211,7 +211,7 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
     expect(String(capture[0]!.ref)).toMatch(/^inbox:\d+$/);
 
     // a capture with no note falls back to the file name, never to an empty row
-    await pool.query(`INSERT INTO inbox (source, path, status) VALUES ($1, $2, 'new')`, [tag, `Knowledge/Inbox/${tag}-photo.heic`]);
+    await pool.query(`INSERT INTO inbox (source, path, status) VALUES ($1, $2, 'new')`, [tag, `Inbox/${tag}-photo.heic`]);
     const both = (await store.run("activity_feed", { hours: 1, limit: 500, agent: tag })).rows;
     expect(both.map((r) => r.subject)).toContain(`${tag}-photo.heic`);
 

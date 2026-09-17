@@ -125,13 +125,18 @@ export async function actualName(dir: string, name: string): Promise<string | un
 
 /**
  * Rows whose path is not yet the vault inbox's, rewritten in place.
- * Idempotent: a second run matches nothing. The prefixes stripped are every
- * shape a row has ever held — the old gitignored `inbox/`, a lowercase vault
- * inbox, and (for a flat instance) the legacy `Knowledge/Inbox/`.
+ * Idempotent: a second run matches nothing.
+ *
+ * The prefixes stripped are the shapes a row could have held BEFORE this
+ * verb: the old gitignored `inbox/`, and the legacy vault inbox in either
+ * casing. Deliberately not `Inbox/` — the flat layout's own prefix is
+ * excluded by the WHERE clause anyway, and stripping it would collapse
+ * `Inbox/x.md` and a bare `x.md` onto the same path, which the partial
+ * unique index would (correctly) refuse.
  */
 export function rewritePathsSql(vaultInbox: string): string {
   return `UPDATE inbox
-   SET path = '${vaultInbox}/' || regexp_replace(path, '^(inbox/|Knowledge/[Ii]nbox/|Inbox/)', '')
+   SET path = '${vaultInbox}/' || regexp_replace(path, '^(inbox/|Knowledge/[Ii]nbox/)', '')
  WHERE path NOT LIKE '${vaultInbox}/%'`;
 }
 

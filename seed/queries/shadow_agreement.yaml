@@ -1,0 +1,56 @@
+# Seeded default (D4 overlay: an instance file of the same name wins).
+#
+# Stage-2 shadow mode's report (docs/plan-refresh-2026-09-13.md §3.7, and
+# docs/ops/compute.md "Shadow mode"). One read path (invariant 3): the weekly
+# review, `GET /api/q/shadow_agreement` and the assistant's `queries_run` all
+# ask this, so "how much does the candidate agree" has one definition.
+#
+# The window is the last N SHADOWED turns, not the last N days — the sample
+# rate decides how long N runs takes to accumulate, and the promotion gate
+# (stage 3) is stated in runs, not in dates.
+name: shadow_agreement
+description: >-
+  Shadow-mode agreement over the last N shadowed turns, per candidate model:
+  the mean agreement score (0..1), how often the candidate made the same
+  tool-call sequence as the model that really answered, mean final-answer
+  similarity (token Jaccard), what the shadowing cost, and how many shadow
+  runs failed outright. `agreement` is the cheap deterministic measure the
+  engine records, NOT a rubric score — the rubric is packages/eval's, on the
+  owner's fixtures.
+params:
+  runs: { type: int, default: 100 }
+sql: |
+  WITH sampled AS (
+    SELECT
+      shadow_provider,
+      shadow_model,
+      provider                                                          AS real_provider,
+      model                                                             AS real_model,
+      shadow_agreement,
+      shadow_cost_usd,
+      (shadow_transcript -> 'agreement' ->> 'tool_sequence')::boolean    AS tool_sequence,
+      (shadow_transcript -> 'agreement' ->> 'answer_similarity')::numeric AS answer_similarity,
+      (shadow_transcript -> 'shadow' ->> 'error')                        AS shadow_error,
+      ts
+    FROM runs
+    WHERE shadow_model IS NOT NULL
+    ORDER BY ts DESC
+    LIMIT (:runs)::int
+  )
+  SELECT
+    shadow_provider,
+    shadow_model,
+    real_provider,
+    real_model,
+    count(*)                                            AS shadowed_turns,
+    round(avg(shadow_agreement), 3)                     AS agreement,
+    count(*) FILTER (WHERE tool_sequence)               AS same_tool_sequence,
+    round(avg(answer_similarity), 3)                    AS answer_similarity,
+    round(coalesce(sum(shadow_cost_usd), 0), 6)         AS shadow_cost_usd,
+    count(*) FILTER (WHERE shadow_error IS NOT NULL)    AS failed,
+    min(ts)                                             AS since,
+    max(ts)                                             AS until
+  FROM sampled
+  GROUP BY 1, 2, 3, 4
+  ORDER BY shadowed_turns DESC, shadow_model
+cache_ttl: 300

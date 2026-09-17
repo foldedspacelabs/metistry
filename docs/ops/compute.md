@@ -29,8 +29,10 @@ engine that dials a provider. Deliberately still absent, each a named PR in
   OpenAI-compatible providers.
 - **No local discovery.** `compute models list` against a live `/v1/models`
   is PR 2.
-- **No shadow mode.** Running a `default` turn again on a candidate with
-  tools stubbed, to compare, is the bake-off's stage 2.
+- **No rubric score on a shadow run.** Shadow mode itself is here (below);
+  what it records is a deterministic agreement measure. The rubric is
+  `packages/eval`'s, on the owner's fixtures (§3.8), and the engine leaves a
+  hook for it rather than inventing a second scorer.
 
 Until you write `assignments:`, **there is no engine**: `metistry up` does not
 start the assistant, `metistry doctor` reports `assistant: absent`, and
@@ -84,6 +86,7 @@ so a validation error tells you what to edit.
 | A budget needs `daily_usd` or `monthly_usd` | An action with no limit never fires, so it is not a control. |
 | Unknown keys are errors | A typo must fail loudly rather than silently do nothing. |
 | `assignments.default` is required whenever `assignments:` exists | It is where every unnamed and unknown tier lands; half here and half in `rules.yaml` is the split "one read path into state" exists to prevent. |
+| `shadow:` needs a `fraction`, belongs to `default`, and may not name the model already assigned | The rate is the spend, the engine reads the block in one place, and a shadow of the incumbent measures nothing while costing twice ("Shadow mode" below). |
 
 `zdr: false` (or absent) on an `off_machine` provider is **a warning, never a
 block** — informed choice.
@@ -240,6 +243,9 @@ dependency (C4):
 - **Effort** becomes `reasoning: { effort }` off-machine and reasoning-off
   on-machine (PoC-16). Per-model reasoning style is a bake-off measurement,
   not an assumption.
+- **Shadow mode**, for the sampled fraction `assignments.default.shadow`
+  names: the same turn run again on a candidate with tools stubbed
+  record-only, after the real answer is already delivered. See "Shadow mode".
 - **The provider's `request:` block is merged verbatim** — except `model` and
   `messages`, which belong to the assignment. A `request:` that could repoint
   the call would hand the routing decision back to the file the router was
@@ -307,6 +313,90 @@ Every refusal names the field that would permit it, and the action that would
 relax it. A budget that cannot be measured — `budgets:` set but the `spend`
 query not loaded — **refuses**, because a control that silently cannot run is
 worse than no control at all.
+
+## Shadow mode
+
+The bake-off's **stage 2** (`docs/plan-refresh-2026-09-13.md` §3.7): measure a
+candidate model on your own real turns, before anything depends on it.
+
+```yaml
+assignments:
+  default:
+    model: openrouter/anthropic/claude-sonnet-5
+    critical: true
+    shadow: { model: llamaserver/qwen3.6-35b-a3b, fraction: 0.1 }
+```
+
+One turn in ten, **after** the real answer has been delivered and its session
+saved, the same turn is run again on the candidate. Both transcripts and an
+agreement number land on that turn's `runs` row. **The candidate's answer is
+never shown to anyone** — it is not the turn's reply, it is not a session, and
+there is no path from the column it lands in to the console or the phone.
+
+| | |
+| --- | --- |
+| `model` | one pinned `<provider>/<model-id>` this file declares, like every other model reference. It may not be the model the assignment already uses — a shadow of the incumbent measures nothing and doubles what the turn costs, so the schema refuses it by name |
+| `fraction` | 0..1, **required**. The rate *is* the spend: one turn in ten shadowed is one turn in ten paid for twice, and a default here would pick somebody's bill for them. `0` is a legal way to stage the block in with nothing running |
+| where | `assignments.default` only. A block on a tier or a crew is refused with the field, rather than accepted and never read |
+
+**Tools are stubbed record-only, by construction.** The shadow's tool surface
+is the same *list* the real run saw, and calls against it are written down and
+never performed:
+
+- a call the real run made **identically** (same name, same arguments, byte
+  for byte) is handed **the real run's own result**, so the candidate's next
+  step is judged against the same facts rather than a fiction;
+- anything else gets one fixed `(recorded, not executed: …)` string.
+
+This is not a promise the model is asked to keep. The stub host is handed a
+list of names and a map of strings and closes over nothing else — no MCP
+client, no URL, no token — so there is no object in scope it *could* execute a
+call against. A shadow of a turn that wrote to the vault does not write to the
+vault twice.
+
+**Agreement is cheap, deterministic, and says what it is.**
+`shadow_agreement` is the mean of two numbers: whether the candidate made the
+same tool calls **in the same order** (names only — a differently-phrased
+search for the same step is agreement), and token Jaccard over the two final
+answers. It needs no model, so it cannot drift, and the same row re-scored
+next year gives the same number. It is **not** a quality score: that is
+`packages/eval`'s rubric on the owner's fixtures, and stage 3's gate is both
+("≥ the bar on the fixtures *and* two weeks of shadow agreement").
+
+**The shadow is a turn, so it is budgeted like one.** Before it runs it asks
+the same pre-call gate every turn asks — with the candidate's own provider and
+`critical: false`. Under `stop` or `critical_only` the shadow simply does not
+happen while the interactive turn it followed keeps its answer. Its spend is
+its own `runs` row of kind `shadow`, carrying the provider that was actually
+paid, so `spend` and every per-provider budget count it with no change to the
+query; `runs.shadow_cost_usd` is the same number denormalised onto the turn
+for the report.
+
+**Nothing it does can cost you the turn.** The real answer exists before the
+shadow starts. A candidate that is down, a credential this install has not
+set, a model id that does not exist, a database write that fails — each lands
+as a note on the row, never as a failed reply.
+
+### Reading it back
+
+```sh
+metistry brain            # → queries_run shadow_agreement { runs: 200 }
+curl -s "$CONSOLE/api/q/shadow_agreement?runs=200" -H "authorization: Bearer $TOKEN"
+```
+
+`seed/queries/shadow_agreement.yaml` (invariant 3's one read path) reports, per
+candidate, mean agreement, how often the tool sequence matched, mean answer
+similarity, what the shadowing cost and how many shadow runs failed — over the
+last N **shadowed** turns, because the gate is stated in runs, not in dates.
+The weekly review's System section carries one line per candidate, and omits
+it entirely when nothing is being shadowed.
+
+Columns are additive migration `0020` on `runs`: `shadow_provider`,
+`shadow_model`, `shadow_transcript` (both transcripts and the measure, in one
+jsonb), `shadow_agreement`, `shadow_cost_usd`. The transcripts live in
+Postgres, which is derived (invariant 1) — a rebuild loses the trend line and
+nothing else, and no transcript is ever committed to the product repo
+(`docs/poc/poc18-bakeoff/README.md`).
 
 ## The non-ZDR warning
 

@@ -15,7 +15,7 @@ mtime — sync churns mtime), renames are recognised by hash, and Obsidian /
 Syncthing conflict copies are flagged once as a `proposals` report instead
 of being indexed.
 
-The same walk keeps the **vault inbox** honest. `Knowledge/Inbox/` is where
+The same walk keeps the **vault inbox** honest. `Inbox/` is where
 captures live (`docs/ops/inbox.md`), and a file you put there yourself — in
 Obsidian, in an editor, with a `git pull` — gets an `inbox` row like any
 capture; an edit to one that is already there refreshes its hash and sends
@@ -25,7 +25,8 @@ because this is already the process that walks the tree and hashes it.
 ## Pointing it at an instance repo
 
 The reconciler needs exactly one path: `METISTRY_INSTANCE_DIR`, the working
-tree of the instance repo (§4.16 — `Knowledge/`, `identity.yaml`, …). It is
+tree of the instance repo (§4.16 — the vault root, `.metistry/identity.yaml`,
+…). It is
 configured entirely from the product checkout's `.env`:
 
 ```sh
@@ -53,10 +54,10 @@ curl -s -H "Authorization: Bearer $METISTRY_BRIDGE_TOKEN_RECONCILER" http://127.
 ```
 
 `check()` probes behaviour, not configuration: the repo is present, git
-runs, `HEAD` is readable, `Knowledge/` lists, and it reports the commit
+runs, `HEAD` is readable, `.metistry/` lists, and it reports the commit
 queue depth plus the last flush / push / reconcile. `degraded` with a
 remediation string means "it runs but something needs your hand" (no
-commits yet, `Knowledge/` missing, last push failed).
+commits yet, `.metistry/` missing, last push failed).
 
 Restart the console (`docker compose up -d console`) so it picks up
 `METISTRY_RECONCILER_URL`; `mcp-brain`'s `knowledge_read` then serves note
@@ -77,18 +78,22 @@ npx @foldedspacelabs/metistry-cli init ~/metistry-instance --name "Athena"
 node packages/cli/dist/main.js init ~/metistry-instance --name "Athena"
 ```
 
-That is the `git init -b main` + `Knowledge/` + `identity.yaml` (the only
-place the assistant is named) + `rules.yaml` + config dirs + `.gitignore`
-+ `metistry.lock` + one `Instance created` commit the 2026-09-06 bootstrap
-did by hand. It ends by printing the three `.env` lines above — the
-`METISTRY_BRIDGE_TOKEN_RECONCILER` it shows is minted once and written
-nowhere, so copy it then. Add a private remote whenever you like —
-`metistry connect-repo <url>` sets `origin`, leaves a credential this
-service can push with unattended (macOS Keychain + the `osxkeychain`
-helper), flushes this queue and pushes once (`docs/ops/cli.md`); push
-from then on is best-effort on the schedule below.
+That is the `git init -b main` + a starter vault (`Journal/`, `Areas/`,
+`now.md`, …) + `.metistry/` (`identity.yaml` — the only place the assistant
+is named — `rules.yaml`, config dirs, `metistry.lock`) + `.gitignore` + one
+`Instance created` commit the 2026-09-06 bootstrap did by hand
+(`docs/ops/instance-layout.md` has the full tree). It ends by printing the
+three `.env` lines above — the `METISTRY_BRIDGE_TOKEN_RECONCILER` it shows
+is minted once and written nowhere, so copy it then. Add a private remote
+whenever you like — `metistry connect-repo <url>` sets `origin`, leaves a
+credential this service can push with unattended (macOS Keychain + the
+`osxkeychain` helper), flushes this queue and pushes once
+(`docs/ops/cli.md`); push from then on is best-effort on the schedule
+below.
 
-Point Obsidian at `Knowledge/` as the vault root, git at the repo root.
+Point Obsidian at the instance directory itself as the vault root — the
+same directory git treats as the repo root. `.metistry/` is a dot-folder,
+so Obsidian ignores it without any configuration.
 
 ## The bridge
 
@@ -102,7 +107,7 @@ Every route requires `Authorization: Bearer $METISTRY_BRIDGE_TOKEN_RECONCILER`
 | --- | --- |
 | `GET /check` | behavioural probe (frozen `check()` shape) |
 | `GET /vault/read?path=` | `{path, content, sha256, bytes}` from the working tree; `&encoding=base64` returns `content_base64` instead (binary artifacts) |
-| `GET /vault/list?prefix=&depth=` | files + dirs under a prefix (`.git`, `.obsidian` never listed) |
+| `GET /vault/list?prefix=&depth=` | files + dirs under a prefix (`.git`, `.obsidian`, `.metistry` never listed) |
 | `GET /vault/search?q=&limit=&mode=` | search over **settled** notes — `status: draft` and conflict copies are excluded before matching. `mode` is `keyword`, `semantic` or `hybrid`; omitted, it is `hybrid` once embeddings exist and `keyword` before that (docs/ops/knowledge-search.md) |
 | `GET /vault/log?path=&limit=` | `git log --follow` for a path (or the repo) |
 | `GET /vault/diff?path=&from=&to=` | unified diff between revisions; `to` absent = the working tree |
@@ -124,19 +129,22 @@ several writes into one commit; absent, the principal is the group.
 
 **What the tool refuses, for everyone:** `..`, absolute paths, drive
 letters, control characters, any `.git` segment, anything under
-`instance-migrations/`, any symlink component, a case-mismatched prefix
-(`knowledge/`, `Knowledge/areas/` when `Areas/` exists — macOS would
-silently comply, a Linux container would fork the tree), and content over
+`.metistry/instance-migrations/`, any symlink component, a case-mismatched
+prefix (`areas/` when `Areas/` exists — macOS would silently comply, a
+Linux container would fork the tree), and content over
 `METISTRY_VAULT_MAX_BYTES`.
 
-`Knowledge/Inbox/` is ordinary vault content, not a protected path:
-listable and readable like the rest of `Knowledge/`, writable through this
+`Inbox/` is ordinary vault content, not a protected path:
+listable and readable like the rest of the vault, writable through this
 bridge by the capture principal and the assistant alike.
 
 **What only the `user` principal may write (§4.7 protected paths):**
-`identity.yaml`, `rules.yaml`, `sources.yaml`, `deployment.yaml`,
-`metistry.lock`, `CLAUDE.md`, and everything under `queries/`, `agents/`,
-`routines/`, `extensions/`. Every other principal gets a uniform `forbidden`.
+everything under `.metistry/` except `.metistry/state/` —
+`.metistry/identity.yaml`, `.metistry/rules.yaml`, `.metistry/sources.yaml`,
+`.metistry/deployment.yaml`, `.metistry/metistry.lock`, and everything
+under `.metistry/queries/`, `.metistry/agents/`, `.metistry/routines/`,
+`.metistry/extensions/` — plus root `CLAUDE.md` and `README.md`. Every
+other principal gets a uniform `forbidden`.
 
 **Compare-and-swap.** Send `expected_sha256` (from a prior read) to refuse
 a write over content you have not seen (`409 conflict`); the empty string
@@ -219,7 +227,7 @@ Setup, modes, and what "deterministic rebuild" means:
 | `METISTRY_VAULT_MAX_BYTES` | `2097152` | per-write size cap |
 | `METISTRY_COMMIT_EXTERNAL_EDITS` | `true` | sweep out-of-band edits into `user` commits |
 | `METISTRY_EMBED_ENABLED` | `true` | `false` turns embedding off entirely; search stays keyword |
-| `METISTRY_LOCAL_MODEL_URL` | compute.yaml's first `on_machine` provider, else `http://127.0.0.1:11434/v1` | the local model server the embedder posts `/v1/embeddings` to (`METISTRY_OLLAMA_URL` is a deprecated alias) |
+| `METISTRY_LOCAL_MODEL_URL` | `.metistry/compute.yaml`'s first `on_machine` provider, else `http://127.0.0.1:11434/v1` | the local model server the embedder posts `/v1/embeddings` to (`METISTRY_OLLAMA_URL` is a deprecated alias) |
 | `METISTRY_EMBED_MODEL` | `nomic-embed-text` | changing it requires a rebuild |
 | `METISTRY_EMBED_DIM` | `768` | must match the model AND the `vector(768)` column |
 | `METISTRY_EMBED_BATCH` | `16` | chunks per `/api/embed` request |

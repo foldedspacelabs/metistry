@@ -112,11 +112,11 @@ A new row is `{tier: "none", areas: []}` — the column default in
 immediately and can read **nothing** until you say so:
 
 ```sh
-metistry connect opencode --areas Knowledge/Areas/Engineering
+metistry connect opencode --areas Areas/Engineering
 ```
 
 `--areas a,b` sets `{tier: "areas", areas: [a, b]}`; the prefixes are TitleCase
-`Knowledge/…` and the console validates them. `--project <slug>` adds project
+vault-root prefixes and the console validates them. `--project <slug>` adds project
 membership, which is what scopes `tasks_*` and `artifacts_*`. Re-running with no
 flags leaves grants exactly as you set them.
 
@@ -142,7 +142,7 @@ to. Fix the token.
 ## A second instance on the same Mac
 
 An instance namespaced with `metistry up --namespace` has its own console port
-and its own 8-hex label suffix (`state/ports.yaml`). `connect` follows it: the
+and its own 8-hex label suffix (`.metistry/state/ports.yaml`). `connect` follows it: the
 entry becomes `mcp.metistry-<suffix>` and the variable
 `METISTRY_AGENT_TOKEN_OPENCODE_<SUFFIX>`, so two instances cannot overwrite each
 other's entry or share one variable.
@@ -219,7 +219,7 @@ of the session id so a retry is an exact no-op.
 ### The offline fallback
 
 ```sh
-export METISTRY_CAPTURE_DIR="$HOME/metistry-instance/Knowledge/Inbox"
+export METISTRY_CAPTURE_DIR="$HOME/metistry-instance/Inbox"
 ```
 
 With that set, a session whose capture cannot reach the console is written there

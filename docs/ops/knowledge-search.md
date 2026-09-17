@@ -39,7 +39,7 @@ that still returns rows:
 
 | Variable | Default |
 | --- | --- |
-| `METISTRY_LOCAL_MODEL_URL` | the **first `on_machine` provider's `base_url`** in `compute.yaml`, else `http://127.0.0.1:11434/v1` |
+| `METISTRY_LOCAL_MODEL_URL` | the **first `on_machine` provider's `base_url`** in `.metistry/compute.yaml`, else `http://127.0.0.1:11434/v1` |
 | `METISTRY_EMBED_MODEL` | `nomic-embed-text` |
 | `METISTRY_EMBED_DIM` | `768` |
 

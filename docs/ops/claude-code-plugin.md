@@ -58,7 +58,7 @@ Validate a checkout with `claude plugin validate plugins/claude-code`.
 ## 4. What lands where
 
 Every capture is a `POST /capture` JSON body `{ note, filename }`:
-file in `Knowledge/Inbox/` (in the vault, where Obsidian sees it —
+file in `Inbox/` (in the vault, where Obsidian sees it —
 `docs/ops/inbox.md`), row in `inbox` (`source = 'http'`), a `runs` row
 (`component: console, kind: capture`). Provenance is in the note's
 frontmatter (`source: "claude-code"`, `session_id`, `host`, `repo`,

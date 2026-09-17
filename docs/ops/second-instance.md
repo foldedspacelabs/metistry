@@ -34,12 +34,14 @@ check.
 node packages/cli/dist/main.js init ~/metistry-instance --name "<the assistant's name>"
 ```
 
-Produces a private instance repo: `Knowledge/Inbox/` (captures, in the vault), `identity.yaml`
+Produces a private instance repo: `Inbox/` (captures, in the vault),
+`.metistry/identity.yaml`
 (the **only** place the assistant is named — CLAUDE.md: never in code, a path, or a table
-name), `rules.yaml`, an entirely-commented-out `compute.yaml` copied from the seed (nothing
-assigned yet, `docs/ops/compute.md`), and `metistry.lock`. It prints five `.env` lines — put
-them in `~/metistry-instance/state/.env` (0600, gitignored) — and mints this instance's
-`instance_id`. Point Obsidian's vault at `~/metistry-instance/Knowledge`.
+name), `.metistry/rules.yaml`, an entirely-commented-out `.metistry/compute.yaml` copied from the seed (nothing
+assigned yet, `docs/ops/compute.md`), and `.metistry/metistry.lock`. It prints five `.env` lines — put
+them in `~/metistry-instance/.metistry/state/.env` (0600, gitignored) — and mints this instance's
+`instance_id`. Point Obsidian's vault at `~/metistry-instance` itself — the instance directory
+is the vault root, and `.metistry/` is a dot-folder Obsidian ignores (`docs/ops/instance-layout.md`).
 
 On a macOS checkout like this one, `init` guesses the launchd shape by default (`--shape
 compose` picks the container shape instead — `docs/ops/deployment-shapes.md`), so the printed
@@ -50,7 +52,7 @@ at all — `docs/ops/deployment-shapes.md`'s own "What is still missing" #4, fix
 
 ## 3. `metistry up`, on the launchd shape
 
-`init`'s guess above only decided what it printed; the instance's actual `deployment.yaml`
+`init`'s guess above only decided what it printed; the instance's actual `.metistry/deployment.yaml`
 still defaults to `compose` until this sets it:
 
 ```sh
@@ -58,7 +60,7 @@ node packages/cli/dist/main.js deployment set-shape launchd --yes      # preview
 node packages/cli/dist/main.js up
 ```
 
-`launchd` is the macOS shape: no Docker, a user-space Postgres under `state/pg`, and **one**
+`launchd` is the macOS shape: no Docker, a user-space Postgres under `.metistry/state/pg`, and **one**
 background item — `com.foldedspacelabs.metistry` — supervising Postgres, the console and the
 reconciler as its children (`docs/ops/deployment-shapes.md`).
 
@@ -111,7 +113,7 @@ budget under its limit.
 ```sh
 pbpaste | node packages/cli/dist/main.js compute providers add --from openrouter   # the key on stdin, never an argument
 node packages/cli/dist/main.js compute assign deep openrouter/anthropic/claude-sonnet-5 --effort high
-node packages/cli/dist/main.js secrets sync --to env                               # Keychain → state/.env, where the assistant's plist reads it
+node packages/cli/dist/main.js secrets sync --to env                               # Keychain → .metistry/state/.env, where the assistant's plist reads it
 node packages/cli/dist/main.js up
 ```
 
@@ -153,7 +155,7 @@ The pull half — Devin's notes and repo wikis land in the inbox as captures
 (`docs/ops/devin.md`, "Knowledge in"):
 
 ```
-# <instance>/state/.env
+# <instance>/.metistry/state/.env
 METISTRY_DEVIN_API_KEY=cog_…
 METISTRY_DEVIN_ORG_ID=org-…
 METISTRY_DEVIN_REPOS=org/repo-a,org/repo-b   # optional: the wiki half
@@ -178,13 +180,13 @@ proposal (`docs/ops/devin.md`, "Dispatch out"). The product's manifest ships an 
 instance's own overlay, never the product file (`docs/ops/targets.md`):
 
 ```
-# <instance>/state/.env — METISTRY_DEVIN_ORG_ID: required for dispatch, not just knowledge-in
-METISTRY_TARGETS_DIRS=targets:$METISTRY_INSTANCE_DIR/targets
+# <instance>/.metistry/state/.env — METISTRY_DEVIN_ORG_ID: required for dispatch, not just knowledge-in
+METISTRY_TARGETS_DIRS=targets:$METISTRY_INSTANCE_DIR/.metistry/targets
 METISTRY_DEVIN_ORG_ID=org-…
 ```
 
 ```yaml
-# <instance>/targets/devin-sessions/manifest.yaml — the WHOLE file (D4: last one wins)
+# <instance>/.metistry/targets/devin-sessions/manifest.yaml — the WHOLE file (D4: last one wins)
 name: devin-sessions
 type: target
 transport: http
@@ -193,7 +195,7 @@ result: { via: report_queue, status_via: collectors/devin-sessions }
 auth: env:METISTRY_DEVIN_API_KEY
 cost: { per_run_estimate_usd: 0 }
 data_policy:
-  allow: [Knowledge/Projects]        # this instance's own areas
+  allow: [Projects]        # this instance's own areas
   deny_sources: [comms, devin]       # devin's own knowledge must not round-trip
   max_brief_bytes: 65536
 ```
@@ -245,6 +247,7 @@ reaches this Mac meanwhile.
 ```sh
 node packages/cli/dist/main.js update            # pull/build, migrate, restart what changed, pin, doctor
 node packages/cli/dist/main.js migrate-inbox      # only if this instance predates 2026-09-16's Knowledge/Inbox/ layout — says so and changes nothing otherwise
+node packages/cli/dist/main.js migrate-layout     # only if this instance predates the 2026-09-17 flat layout — says so and changes nothing otherwise
 node packages/cli/dist/main.js doctor             # weekly; a `degraded` row is a finding even at exit 0
 ```
 

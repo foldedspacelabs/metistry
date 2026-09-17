@@ -44,7 +44,7 @@ the **bundled** candidate, ahead of Homebrew and behind only an explicit
 gets `runtime/git/bin` on the front of its `PATH`.
 `packages/cli/src/local-models.ts` resolves
 `<product>/runtime/llamacpp/bin/llama-server`, and `metistry up` turns it
-into a supervisor child **only** when `compute.yaml` names a provider with a
+into a supervisor child **only** when `.metistry/compute.yaml` names a provider with a
 `serve:` block (`docs/ops/compute.md` → "Local models"). No `serve:` block,
 no process: the binary ships whether or not anything uses it, exactly as
 `git` does on a Mac with Xcode installed.
@@ -277,7 +277,7 @@ this existed) is a note, not a failure.
 ## A Postgres major upgrade
 
 The one update that needs a data migration step. Postgres 18 in a deps pack
-would find a `state/pg` initialised by 17 and refuse to start. Plan it as
+would find a `.metistry/state/pg` initialised by 17 and refuse to start. Plan it as
 its own `metistry update --pg-upgrade` when it first happens — never
 silently. Until then `PG_VERSION` stays on 17.x and `PG_MAJOR` in
 `packages/cli/src/postgres.ts` is the assertion that keeps it there.

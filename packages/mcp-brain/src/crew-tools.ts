@@ -51,11 +51,46 @@ export type CrewDispatchOutcome =
     }
   | { ok: false; code: ErrorCode; message?: string | undefined; violations?: unknown[] | undefined };
 
+/** One registered crew as the tool advertises it: its name, and the manifest's own `description` when it wrote one. */
+export interface CrewSummary {
+  name: string;
+  description?: string | undefined;
+}
+
 /** The host's side of dispatch: registry lookup, policy, durable enqueue. Injected; the bridge never sees a manifest. */
 export interface CrewDispatcher {
   dispatch(input: CrewDispatchInput, principal: AgentPrincipal): Promise<CrewDispatchOutcome>;
-  /** Registered crew names, for the tool description and `not_found` hints. */
-  names(): string[];
+  /** The registered crews, for the tool definition and `not_found` hints. */
+  crews(): CrewSummary[];
+}
+
+/**
+ * At most this many crews, each description trimmed to this many characters
+ * (H8). The roster is a HINT inside one field's description, and it is spent
+ * out of the same definition-token budget PoC-17 measured — a 40-crew install
+ * must not quietly double the brain's surface to advertise them all.
+ */
+const ROSTER_MAX = 20;
+const ROSTER_CHARS = 120;
+
+/**
+ * The roster sentence appended to the `crew` field's description: each crew's
+ * name and what its manifest says it does, so the assistant CHOOSES from the
+ * descriptions instead of learning the registry by refusal.
+ *
+ * The names come from the host's registry every time the tool is registered
+ * (the brain builds one server per request), so an edited or removed manifest
+ * shows up on the next call rather than at the next restart.
+ */
+export function crewRoster(crews: readonly CrewSummary[]): string {
+  if (crews.length === 0) return " None are registered in this deployment.";
+  const shown = crews.slice(0, ROSTER_MAX).map((c) => {
+    const d = (c.description ?? "").replaceAll(/\s+/g, " ").trim();
+    if (d === "") return c.name;
+    return `${c.name} — ${d.length > ROSTER_CHARS ? `${d.slice(0, ROSTER_CHARS - 1).trimEnd()}…` : d}`;
+  });
+  const more = crews.length > ROSTER_MAX ? `; and ${crews.length - ROSTER_MAX} more` : "";
+  return ` Registered: ${shown.join("; ")}${more}.`;
 }
 
 const NOT_AVAILABLE = "crews are not configured in this deployment (the console loads agents/<area>/<name>.md manifests — docs/ops/crews.md)";
@@ -66,7 +101,10 @@ export function registerCrewTools(reg: Register, dispatcher: CrewDispatcher | un
     "Delegate a brief to a named helper agent (agents/<area>/<name>.md — its own model, tool groups, and read scope); the brief is the full context transfer. " +
       "A path outside the agent's scope or the local target's data policy is refused with violations, nothing queued. Results return only via the helper's own requests_create/tasks_* calls. Instance assistant only; others get not granted.",
     {
-      crew: z.string().regex(/^[a-z][a-z0-9-]{0,39}$/).describe("The helper agent's name (agents/<area>/<name>.md)."),
+      crew: z
+        .string()
+        .regex(/^[a-z][a-z0-9-]{0,39}$/)
+        .describe(`The helper agent's name (agents/<area>/<name>.md).${dispatcher ? crewRoster(dispatcher.crews()) : ""}`),
       brief: z.string().min(1).max(200_000).describe("Everything the helper needs, in prose. Handles and paths, not pasted secrets."),
       task_id: z.number().int().positive().optional().describe("A related task id, passed to the crew as a handle."),
       idempotency_key: z.string().min(1).max(200).optional(),

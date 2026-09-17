@@ -26,8 +26,11 @@ const crewA = `itest-crew-a-${suffix}`;
 const crewB = `itest-crew-b-${suffix}`;
 const intent = { principal: "user", message: "t" };
 
+/** What the manifest says this crew is for — H8: it has to reach `agents_delegate`'s own definition, not just the registry. */
+const DESCRIBED = "Reads the granted notes and reports what it finds";
+
 function crewFile(name: string, patch: Record<string, unknown> = {}): string {
-  const fm = { name, type: "agent", area: "itest", model: "haiku", uses: ["brain-read", "brain-report"], scope: ["Knowledge/Projects"], projects: [], ...patch };
+  const fm = { name, type: "agent", area: "itest", model: "haiku", description: DESCRIBED, uses: ["brain-read", "brain-report"], scope: ["Knowledge/Projects"], projects: [], ...patch };
   return `---\n${Object.entries(fm).map(([k, v]) => `${k}: ${JSON.stringify(v)}`).join("\n")}\n---\nYou work for {{name}}. Report what you find.\n`;
 }
 
@@ -176,6 +179,22 @@ describe.skipIf(!hasDb)("crews (integration)", () => {
     const sent = (await pool.query(`SELECT ok, cost_usd::float8 AS cost_usd, meta FROM runs WHERE kind = 'dispatch' AND tool = 'local-crew' AND (meta->>'work_id')::bigint = $1`, [r.body.work_id])).rows;
     expect(sent[0]).toMatchObject({ ok: true, cost_usd: 0 });
     expect(sent[0].meta).toMatchObject({ crew: crewA, principal: assistantId });
+  });
+
+  // H8, 2026-09-17. The assistant saw crew NAMES only, so which crew fits a
+  // brief was guesswork the registry corrected by refusal. The `description`
+  // was already in the manifest; this is the whole path — vault file →
+  // CrewRegistry → the dispatcher's `crews()` → the tool definition served on
+  // `/mcp` — held to reaching the field the model fills in.
+  it("agents_delegate's tool definition carries each crew's manifest description (H8)", async () => {
+    await registry.refresh();
+    const r = await rpc("tools/list", {}, assistantToken);
+    expect(r.status).toBe(200);
+    const tools = (await r.json()).result.tools as Array<{ name: string; inputSchema: { properties?: Record<string, { description?: string }> } }>;
+    const crewField = tools.find((t) => t.name === "agents_delegate")?.inputSchema.properties?.crew;
+    expect(crewField?.description).toContain(`${crewA} — ${DESCRIBED}`);
+    expect(crewField?.description).toContain(`${crewB} — ${DESCRIBED}`);
+    expect(crewField?.description).toContain("agents/<area>/<name>.md"); // and it still says what the field IS
   });
 
   it("unknown crew is not_found for the assistant (naming the registered ones); the parse helper agrees with what was synced", async () => {

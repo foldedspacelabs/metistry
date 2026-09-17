@@ -43,7 +43,7 @@ import {
 } from "@foldedspacelabs/metistry-core";
 import type { VaultClient } from "@foldedspacelabs/metistry-artifacts";
 import { TasksError, type TasksService } from "@foldedspacelabs/metistry-tasks";
-import type { AgentPrincipal, CrewDispatcher, CrewDispatchInput, CrewDispatchOutcome } from "@foldedspacelabs/metistry-mcp-brain";
+import type { AgentPrincipal, CrewDispatcher, CrewDispatchInput, CrewDispatchOutcome, CrewSummary } from "@foldedspacelabs/metistry-mcp-brain";
 import { AgentError, recordWidening, validateAutonomy, validateGrants, type Autonomy, type Grants } from "./agents.js";
 import { checkBrief, type TargetRegistry } from "./dispatch.js";
 
@@ -327,6 +327,18 @@ export class CrewRegistry {
   names(): string[] {
     return [...this.crews.keys()].sort();
   }
+
+  /**
+   * What `agents_delegate` advertises: each crew's name and the `description`
+   * its own manifest wrote (H8). A crew with no description is still listed —
+   * the name is what dispatch needs; the description is what CHOOSING needs.
+   */
+  summaries(): CrewSummary[] {
+    return this.names().map((name) => {
+      const description = this.crews.get(name)?.manifest.description;
+      return description === undefined ? { name } : { name, description };
+    });
+  }
 }
 
 // --- data policy: crew scope ∩ target allow ----------------------------------------
@@ -504,6 +516,6 @@ export function crewDispatcher(
 ): CrewDispatcher {
   return {
     dispatch: (input, principal) => dispatchCrew(db, tasks, registry, targets, input, principal, compute?.()),
-    names: () => registry.names(),
+    crews: () => registry.summaries(),
   };
 }

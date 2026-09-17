@@ -33,7 +33,7 @@
 #     auth: { secret: METISTRY_OPENROUTER_API_KEY }   # a NAME. The value lives in the login Keychain, user scope.
 #     zdr: true
 #     request: { provider: { order: [anthropic], allow_fallbacks: false } }
-#     data_policy: { allow: [Knowledge/Projects], deny_sources: [comms], max_brief_bytes: 65536 }
+#     data_policy: { allow: [Projects], deny_sources: [comms], max_brief_bytes: 65536 }
 #
 #   # on_machine costs nothing and needs no data policy, because nothing
 #   # leaves. LM Studio's default port; `metistry compute providers add

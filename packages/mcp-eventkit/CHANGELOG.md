@@ -1,5 +1,22 @@
 # @foldedspacelabs/metistry-mcp-eventkit
 
+## 0.8.0
+
+### Patch Changes
+
+- Updated dependencies [6aa64c2]
+- Updated dependencies [26ffe39]
+- Updated dependencies [70f6580]
+- Updated dependencies [e48ea1e]
+- Updated dependencies [ae0f9db]
+- Updated dependencies [b99d4ad]
+- Updated dependencies [75c7547]
+- Updated dependencies [23d72db]
+- Updated dependencies [78d78d1]
+- Updated dependencies [d21f953]
+- Updated dependencies [26df04d]
+  - @foldedspacelabs/metistry-core@0.8.0
+
 ## 0.7.1
 
 ### Patch Changes

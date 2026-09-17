@@ -9,4 +9,6 @@
   never touch got simpler in the same move — it is now a *place* (everything
   under `.metistry/`, plus the instructions file you write for it) rather
   than a list of filenames each part of the system had to remember, which is
-  one rule the tool can enforce instead of seven a prompt could miss.
+  one rule the tool can enforce instead of seven a prompt could miss. The
+  instructions file itself stays out of the search index: it is what the
+  assistant is told, not something it should find and quote back to you.

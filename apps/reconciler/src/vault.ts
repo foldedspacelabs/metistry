@@ -129,6 +129,11 @@ export class Vault {
    * starts at the instance ROOT — that directory IS the Obsidian vault — and
    * skips `.metistry/`, `.obsidian/`, `.git/`, `Artifacts/` and every other
    * dot-directory (`Inbox/.large/` is captures git does not carry, not notes).
+   *
+   * `isVaultPath` also drops the root `CLAUDE.md` and `README.md`: the
+   * assistant's operating instructions and the repo readme are the user's
+   * files, not notes, and indexing them would put them into search and in
+   * front of the fold.
    */
   async walkVault(): Promise<string[]> {
     const out: string[] = [];

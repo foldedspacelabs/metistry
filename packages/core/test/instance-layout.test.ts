@@ -98,10 +98,18 @@ describe("isProtectedPath", () => {
 });
 
 describe("isVaultPath", () => {
-  it("is true for knowledge at the root, including the two protected root files", () => {
-    for (const p of ["now.md", "Journal/2026-09-17.md", "Me/profile.md", "Inbox/capture.md", "CLAUDE.md", "README.md"]) {
+  it("is true for knowledge at the root", () => {
+    for (const p of ["now.md", "Journal/2026-09-17.md", "Me/profile.md", "Inbox/capture.md"]) {
       expect(isVaultPath(p), p).toBe(true);
     }
+  });
+
+  it("is false for the two protected root files — instructions and a readme are not notes", () => {
+    expect(isVaultPath("CLAUDE.md")).toBe(false);
+    expect(isVaultPath("README.md")).toBe(false);
+    // …only at the ROOT: a note that happens to share the name is knowledge
+    expect(isVaultPath("Areas/CLAUDE.md")).toBe(true);
+    expect(isVaultPath("Areas/README.md")).toBe(true);
   });
 
   it("is false for the machinery, git, Obsidian, dot-directories and Artifacts", () => {

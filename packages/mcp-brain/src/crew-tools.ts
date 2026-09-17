@@ -64,13 +64,12 @@ export interface CrewDispatcher {
   crews(): CrewSummary[];
 }
 
-/**
- * At most this many crews, each description trimmed to this many characters
- * (H8). The roster is a HINT inside one field's description, and it is spent
- * out of the same definition-token budget PoC-17 measured — a 40-crew install
- * must not quietly double the brain's surface to advertise them all.
- */
+// The roster's two caps (H8). It is a HINT inside one field's description,
+// spent out of the same definition-token budget PoC-17 measured, so it is
+// bounded rather than as long as the registry happens to be.
+// limit: fixed — a 40-crew install must not double the brain's definition surface to advertise them all; past this the roster says "and N more" and the assistant asks
 const ROSTER_MAX = 20;
+// limit: fixed — one line per crew: a description longer than this is a paragraph, and what distinguishes two crews is in its first clause
 const ROSTER_CHARS = 120;
 
 /**

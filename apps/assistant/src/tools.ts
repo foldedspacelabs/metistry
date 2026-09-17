@@ -51,6 +51,19 @@ export const NO_TOOLS: ToolHost = {
   async close() {},
 };
 
+/**
+ * The identity of a tool call: its name and its arguments, byte for byte.
+ *
+ * One definition, two readers — the loop's no-progress veto ("the same call
+ * came back with the same answer") and shadow mode ("the real run already
+ * made this exact call, so the shadow is handed that result instead of a
+ * stub"). Two spellings of "the same call" would let those two mechanisms
+ * disagree about what sameness is.
+ */
+export function toolCallKey(name: string, args: unknown): string {
+  return `${name}(${JSON.stringify(args)})`;
+}
+
 /** `<tool>` → `mcp__brain__<tool>`, the spelling the allowlist and every `runs` row already use. */
 export function qualify(tool: string): string {
   return `mcp__${BRAIN_SERVER}__${tool}`;

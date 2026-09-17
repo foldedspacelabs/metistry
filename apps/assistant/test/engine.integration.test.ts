@@ -5,7 +5,10 @@
 //   2. `assistant_sessions` holds a turn's history and a session roll ends it
 //      in BOTH tables, so a rolled thread cannot be replayed;
 //   3. the `spend` named query — the one read path budgets use (invariant 3)
-//      — sees those rows and puts them in the right window.
+//      — sees those rows and puts them in the right window;
+//   4. shadow mode's columns (0020) take what `recordShadow` writes, the
+//      `shadow_agreement` query reads them back, and the candidate's spend
+//      lands against the CANDIDATE's provider in `spend`.
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -13,6 +16,7 @@ import pg from "pg";
 import { QueryStore } from "@foldedspacelabs/metistry-queries";
 import { checkBudgets, finishRun, parseCompute, resolveAssignment, rollSession, spentFrom, startRun, SPEND_QUERY, type SpendRow } from "@foldedspacelabs/metistry-core";
 import { makeOpenAiEngine } from "../src/engine-openai.js";
+import { recordShadow, type ShadowRun } from "../src/shadow.js";
 import { pgSessionStore } from "../src/sessions.js";
 import { NO_TOOLS } from "../src/tools.js";
 
@@ -117,5 +121,47 @@ describe.skipIf(!hasDb)("engine against the scratch db", () => {
     const verdict = checkBudgets({ budgets: cfg.budgets, provider: "openrouter", spent: { instance: spentFrom(rows), provider: spent } });
     expect(verdict.allowed).toBe(false);
     expect(verdict.refusal?.field).toBe("budgets.instance.daily_usd");
+  });
+
+  it("the shadow columns take the comparison (0020), the named query reads it back, and the candidate is billed to ITS provider", async () => {
+    const turnId = await startRun(pool, { component, kind: "turn", provider: "openrouter", model: "anthropic/claude-sonnet-5", meta: { tier: "default" } });
+    await finishRun(pool, turnId, { ok: true, tokens_in: 900, tokens_out: 80, cost_usd: 0.004 });
+    const run: ShadowRun = {
+      shadow: {
+        provider: "candid",
+        model: "qwen3.6-35b-a3b",
+        text: "three notes mention folds",
+        messages: [{ role: "assistant", content: "three notes mention folds" }],
+        tool_calls: [{ name: "mcp__brain__knowledge_search", args: { q: "folds" }, executed: false, result_from: "real_run" }],
+        turns: 2,
+        tokens_in: 900,
+        tokens_out: 70,
+        cost_usd: 0.000123,
+        cost_source: "pricing",
+      },
+      real: { provider: "openrouter", model: "anthropic/claude-sonnet-5", text: "three notes mention folds", messages: [{ role: "user", content: "folds?" }], tool_calls: ["mcp__brain__knowledge_search"] },
+      agreement: { score: 0.875, tool_sequence: true, answer_similarity: 0.75 },
+    };
+    const shadowRunId = await recordShadow(pool, turnId, run, { component, tier: "default" });
+
+    const stored = await pool.query(`SELECT shadow_provider, shadow_model, shadow_agreement, shadow_cost_usd, shadow_transcript FROM runs WHERE id = $1`, [turnId]);
+    expect(stored.rows[0]).toMatchObject({ shadow_provider: "candid", shadow_model: "qwen3.6-35b-a3b", shadow_agreement: "0.875", shadow_cost_usd: "0.000123" });
+    // both transcripts, in the one jsonb column
+    expect(stored.rows[0].shadow_transcript.shadow.tool_calls[0]).toMatchObject({ executed: false, result_from: "real_run" });
+    expect(stored.rows[0].shadow_transcript.real.messages[0]).toEqual({ role: "user", content: "folds?" });
+
+    // the candidate's spend is its own row, under its own provider — which is
+    // what makes a per-provider budget honest without changing spend.yaml
+    const spendRow = await pool.query(`SELECT kind, provider, model, cost_usd, meta FROM runs WHERE id = $1`, [shadowRunId]);
+    expect(spendRow.rows[0]).toMatchObject({ kind: "shadow", provider: "candid", model: "qwen3.6-35b-a3b", cost_usd: "0.000123" });
+    expect(spendRow.rows[0].meta).toMatchObject({ shadow_of: turnId, agreement: 0.875 });
+
+    const queries = new QueryStore(pool);
+    await queries.loadDir(SEED_QUERIES);
+    expect(queries.names()).toContain("shadow_agreement");
+    const report = (await queries.run("shadow_agreement", { runs: 50 })).rows as Record<string, unknown>[];
+    const mine = report.find((r) => r.shadow_model === "qwen3.6-35b-a3b")!;
+    expect(mine).toMatchObject({ shadow_provider: "candid", real_provider: "openrouter", agreement: "0.875", failed: "0" });
+    expect(Number(mine.same_tool_sequence)).toBeGreaterThanOrEqual(1);
   });
 });

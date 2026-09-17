@@ -93,10 +93,10 @@ export function makeBridge(deps: BridgeDeps, cfg: BridgeConfig): Server {
       const q = url.searchParams;
 
       if (key === "GET /check") {
-        const result = await runCheck("reconciler", "instance repo present, git runs, HEAD readable, Knowledge/ listable, queue depth reported", async () => {
+        const result = await runCheck("reconciler", "instance repo present, git runs, HEAD readable, vault listable, queue depth reported", async () => {
           if (!(await vault.git.isRepo())) throw new Error(`no git repository at ${vault.root} — set METISTRY_INSTANCE_DIR to the instance repo (docs/ops/reconciler.md)`);
           const head = await vault.git.head();
-          const listed = await vault.list("Knowledge", 1);
+          const listed = await vault.list("", 1);
           const embeddings = deps.embeddings ? await deps.embeddings.status().catch(() => null) : null;
           const meta = {
             head,
@@ -106,7 +106,7 @@ export function makeBridge(deps: BridgeDeps, cfg: BridgeConfig): Server {
             last_reconcile: deps.indexer?.last ?? null,
             embeddings,
           };
-          if (!listed.ok) return { status: "degraded" as const, remediation: "Knowledge/ is missing from the instance repo — create it (docs/ops/reconciler.md)", meta };
+          if (!listed.ok) return { status: "degraded" as const, remediation: `the vault at ${vault.root} is not listable — check the instance directory (docs/ops/reconciler.md)`, meta };
           if (head === null) return { status: "degraded" as const, remediation: "repository has no commits yet — the first flushed write creates one", meta };
           if (committer.lastPush && !committer.lastPush.result.ok) {
             return { status: "degraded" as const, remediation: `last push failed: ${committer.lastPush.result.error ?? "unknown"} — check the remote/credentials; commits are safe locally`, meta };

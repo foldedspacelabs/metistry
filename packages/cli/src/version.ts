@@ -19,8 +19,9 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { instancePath } from "@foldedspacelabs/metistry-core";
 import { productVersion } from "./env.js";
-import { LOCK_FILENAME, readLock, type LockSource } from "./lock.js";
+import { readLock, type LockSource } from "./lock.js";
 import { RUNTIME_PACK_MANIFEST } from "./release.js";
 import { runDirFor } from "./up.js";
 
@@ -54,7 +55,7 @@ export async function collectVersionInfo(opts: VersionInfoOptions): Promise<Vers
   // `service-control` use (up.ts runDirFor)
   let source: LockSource = "git";
   if (opts.instanceDir) {
-    const lock = await readLock(join(opts.instanceDir, LOCK_FILENAME)).catch(() => undefined);
+    const lock = await readLock(instancePath(opts.instanceDir, "lock")).catch(() => undefined);
     if (lock) {
       info.lock = { version: lock.product.version, channel: lock.product.source };
       source = lock.product.source;

@@ -28,7 +28,7 @@ describe("sanitizeForAgent (§4.20 text boundary)", () => {
   });
 
   it("is idempotent and leaves ordinary text alone", () => {
-    const plain = "Résumé — naïve café, 日本語, emoji 🎉, path Knowledge/Areas/Fsl";
+    const plain = "Résumé — naïve café, 日本語, emoji 🎉, path Areas/Fsl";
     expect(sanitizeForAgent(plain)).toBe(plain);
     const once = sanitizeForAgent("‮/x​");
     expect(sanitizeForAgent(once)).toBe(once);

@@ -317,7 +317,7 @@ describe.skipIf(!hasDb)("Taskuary adopts (integration)", () => {
   it("the timeline carries a capture the instant it lands — before any drain has seen it", async () => {
     const tag = `tq-cap-${Date.now()}`;
     await pool.query(`INSERT INTO inbox (source, path, note, status) VALUES ('http', $1, $2, 'new')`, [
-      `Knowledge/Inbox/${tag}.md`,
+      `Inbox/${tag}.md`,
       `call the dentist\nand the vet`,
     ]);
     const { rows } = await (await json("GET", "/api/q/activity_feed?hours=1&limit=200&kind=capture")).json();

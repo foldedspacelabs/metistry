@@ -46,7 +46,12 @@ public enum WizardOptions {
         .init(
             value: .create,
             title: "Create a New Instance",
-            pro: "`metistry init` lays out the whole thing: a git repo, Knowledge/, identity.yaml, config, one commit. Nothing else on the machine is touched.",
+            // TODO(follow-up PR: Mac app on the flat layout) — this copy, the
+            // wizard's path handling and `metistry connect`'s configs are the
+            // second half of the 2026-09-17 layout ruling. Swift is out of
+            // scope for the core-layout PR; core's INSTANCE_LAYOUT is the
+            // source of truth to mirror.
+            pro: "`metistry init` lays out the whole thing: a git repo, the vault at the root, .metistry/ with identity.yaml and config, one commit. Nothing else on the machine is touched.",
             con: "Refuses a folder that already has contents unless you force it, so it is not the way to reuse an install."
         ),
         .init(

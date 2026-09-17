@@ -34,7 +34,7 @@ async function launchdCheckout(): Promise<string> {
     base_url: https://openrouter.ai/api/v1
     locality: off_machine
     auth: { secret: METISTRY_OPENROUTER_API_KEY }
-    data_policy: { allow: [Knowledge/Projects], deny_sources: [comms], max_brief_bytes: 65536 }
+    data_policy: { allow: [Projects], deny_sources: [comms], max_brief_bytes: 65536 }
 assignments:
   default: { model: openrouter/anthropic/claude-sonnet-5 }
 `,
@@ -64,7 +64,7 @@ const launchd = { shape: "launchd" as const, services: {} };
 describe("metistry up --dry-run, launchd shape", () => {
   it("plans postgres, then every job including console/assistant/db, then the database — and never calls docker", async () => {
     const P = await launchdCheckout();
-    const I = await mkdtemp(join(tmpdir(), "metistry-inst-"));
+    const I = await mkdtemp(join(tmpdir(), "mi-" /* short on purpose: the supervisor socket under .metistry/state/run/ has ~103 bytes to live in */));
     const exec = fakeExec();
     const lines: string[] = [];
     const r = await up({
@@ -83,6 +83,7 @@ describe("metistry up --dry-run, launchd shape", () => {
       doctorFn: okDoctor,
     });
 
+    if (r.code !== 0) console.error(lines.join('\n'));
     expect(r.code).toBe(0);
     expect(exec.calls).toEqual([]);
     expect(r.commands.join("\n")).not.toContain("docker");
@@ -91,12 +92,12 @@ describe("metistry up --dry-run, launchd shape", () => {
     const LA = "/h/Library/LaunchAgents";
     const SUP = "com.foldedspacelabs.metistry";
     expect(r.commands).toEqual([
-      `mkdir -p ${I}/state/run`,
-      `write ${I}/state/pg.pwfile  (from generated superuser password (deleted in the next step))`,
-      `${PG}/initdb -D ${I}/state/pg -U metistry --pwfile=${I}/state/pg.pwfile --encoding=UTF8 --locale=C --auth-local=trust --auth-host=scram-sha-256`,
-      `/bin/rm -f ${I}/state/pg.pwfile`,
-      `write ${I}/state/pg/postgresql.conf  (from metistry managed block: loopback listen + unix socket)`,
-      `mkdir -p ${I}/state/assistant`,
+      `mkdir -p ${I}/.metistry/state/run`,
+      `write ${I}/.metistry/state/pg.pwfile  (from generated superuser password (deleted in the next step))`,
+      `${PG}/initdb -D ${I}/.metistry/state/pg -U metistry --pwfile=${I}/.metistry/state/pg.pwfile --encoding=UTF8 --locale=C --auth-local=trust --auth-host=scram-sha-256`,
+      `/bin/rm -f ${I}/.metistry/state/pg.pwfile`,
+      `write ${I}/.metistry/state/pg/postgresql.conf  (from metistry managed block: loopback listen + unix socket)`,
+      `mkdir -p ${I}/.metistry/state/assistant`,
       // 1. the pre-supervisor agents go, once: every one of them is a child now
       ...["db", "console", "assistant", "reconciler", "watchdog", "eventkit", "apple-fm", "eventkit-helper"].flatMap((s) => [
         `launchctl bootout gui/501/${SUP}.${s}`,
@@ -104,13 +105,13 @@ describe("metistry up --dry-run, launchd shape", () => {
       ]),
       // 2. the supervisor's plan: the `Metistry` symlink System Settings names
       // the background item after, and the child list
-      `mkdir -p ${I}/state/bin`,
-      `ln -sfn ${NODE} ${I}/state/bin/Metistry`,
-      `mkdir -p ${I}/state/run`,
+      `mkdir -p ${I}/.metistry/state/bin`,
+      `ln -sfn ${NODE} ${I}/.metistry/state/bin/Metistry`,
+      `mkdir -p ${I}/.metistry/state/run`,
       // apple-fm is absent on purpose: METISTRY_AFM_URL is unset, so this
       // install has no Apple Intelligence bridge and nothing starts one
-      `write ${I}/state/supervisor.json  (from 5 child(ren): db, console, reconciler, assistant, eventkit)`,
-      `chmod 600 ${I}/state/supervisor.json`,
+      `write ${I}/.metistry/state/supervisor.json  (from 5 child(ren): db, console, reconciler, assistant, eventkit)`,
+      `chmod 600 ${I}/.metistry/state/supervisor.json`,
       // 3. ONE agent for the core…
       expect.stringContaining(`write ${LA}/${SUP}.plist`),
       // 4. …plus the TCC helper, which must be its own binary for the grant —
@@ -124,15 +125,15 @@ describe("metistry up --dry-run, launchd shape", () => {
       `launchctl bootout gui/501/${SUP}.calendar`,
       `launchctl bootstrap gui/501 ${LA}/${SUP}.calendar.plist`,
       `launchctl kickstart -k gui/501/${SUP}.calendar`,
-      `${PG}/pg_isready -h ${I}/state/run -p 5432 -U metistry -d metistry`,
-      `${PG}/createdb -h ${I}/state/run -p 5432 -U metistry metistry`,
+      `${PG}/pg_isready -h ${I}/.metistry/state/run -p 5432 -U metistry -d metistry`,
+      `${PG}/createdb -h ${I}/.metistry/state/run -p 5432 -U metistry metistry`,
       "metistry doctor",
     ]);
   });
 
   it("a missing Postgres is a printed remediation, never an install this tool runs", async () => {
     const P = await launchdCheckout();
-    const I = await mkdtemp(join(tmpdir(), "metistry-inst-"));
+    const I = await mkdtemp(join(tmpdir(), "mi-" /* short on purpose: the supervisor socket under .metistry/state/run/ has ~103 bytes to live in */));
     const lines: string[] = [];
     const r = await up({
       productDir: P,
@@ -157,7 +158,7 @@ describe("metistry up --dry-run, launchd shape", () => {
 
   it("an initialised data directory is never re-initdb'd", async () => {
     const P = await launchdCheckout();
-    const I = await mkdtemp(join(tmpdir(), "metistry-inst-"));
+    const I = await mkdtemp(join(tmpdir(), "mi-" /* short on purpose: the supervisor socket under .metistry/state/run/ has ~103 bytes to live in */));
     const r = await up({
       productDir: P,
       env: env(I),
@@ -169,7 +170,7 @@ describe("metistry up --dry-run, launchd shape", () => {
       home: "/h",
       node: NODE,
       deployment: launchd,
-      exists: pgInstalled([join(I, "state", "pg", "PG_VERSION")]),
+      exists: pgInstalled([join(I, ".metistry", "state", "pg", "PG_VERSION")]),
       doctorFn: okDoctor,
     });
     expect(r.commands.filter((c) => c.includes("initdb"))).toEqual([]);
@@ -180,7 +181,7 @@ describe("metistry up --dry-run, launchd shape", () => {
 describe("the rendered plists", () => {
   it("leave no placeholder, keep secrets out of ProgramArguments, and confine the engine", async () => {
     const P = await launchdCheckout();
-    const I = await mkdtemp(join(tmpdir(), "metistry-inst-"));
+    const I = await mkdtemp(join(tmpdir(), "mi-" /* short on purpose: the supervisor socket under .metistry/state/run/ has ~103 bytes to live in */));
     const home = await mkdtemp(join(tmpdir(), "metistry-home-"));
     await mkdir(join(P, "apps", "console", "dist"), { recursive: true });
     const r = await up({
@@ -201,9 +202,9 @@ describe("the rendered plists", () => {
 
     // the core is ONE agent now: console/assistant/db have no plist of their
     // own, and what they run lives in the supervisor's config
-    const config = JSON.parse(await readFile(join(I, "state", "supervisor.json"), "utf8"));
+    const config = JSON.parse(await readFile(join(I, ".metistry", "state", "supervisor.json"), "utf8"));
     expect(config.label).toBe("com.foldedspacelabs.metistry");
-    expect(config.socket).toBe(join(I, "state", "run", "supervisor.sock"));
+    expect(config.socket).toBe(join(I, ".metistry", "state", "run", "supervisor.sock"));
     expect(config.token).toMatch(/^[0-9a-f]{64}$/);
     expect(config.children.map((c: { name: string }) => c.name)).toEqual(["db", "console", "reconciler", "assistant", "eventkit"]);
     const child = (name: string) => config.children.find((c: { name: string }) => c.name === name);
@@ -223,7 +224,7 @@ describe("the rendered plists", () => {
       METISTRY_CONSOLE_HOST: "127.0.0.1",
       METISTRY_DB_HOST: "127.0.0.1",
       METISTRY_EK_URL: "http://127.0.0.1:7811",
-      METISTRY_INBOX_DIR: `${I}/Knowledge/Inbox`,
+      METISTRY_INBOX_DIR: `${I}/Inbox`,
     });
 
     const assistant = child("assistant");
@@ -232,9 +233,9 @@ describe("the rendered plists", () => {
     expect(assistant.argv).toContain(`${P}/ops/sandbox/assistant.sb`);
     expect(assistant.argv).toContain("CONSOLE_TCP=localhost:8080");
     // the sandbox's path parameters are REAL paths (/var/folders → /private/var/folders)
-    expect(assistant.argv).toContain(`STATE_DIR=${realPathish(join(I, "state", "assistant"))}`);
+    expect(assistant.argv).toContain(`STATE_DIR=${realPathish(join(I, ".metistry", "state", "assistant"))}`);
     expect(assistant.argv).toContain(`PRODUCT_DIR=${realPathish(P)}`);
-    expect(assistant.env.HOME).toBe(`${I}/state/assistant`);
+    expect(assistant.env.HOME).toBe(`${I}/.metistry/state/assistant`);
     expect(assistant.env.METISTRY_OPENROUTER_API_KEY).toBe("sk-or-x"); // named by compute.yaml, not by a fixed variable
     // the engine's environment is still an ALLOWLIST, and a child's
     // environment is the spec's whole: the supervisor's own never leaks in
@@ -243,19 +244,19 @@ describe("the rendered plists", () => {
       ["METISTRY_OPENROUTER_API_KEY", "HOME", "METISTRY_ASSISTANT_TOKEN", "METISTRY_BRAIN_URL", "METISTRY_DB_HOST", "METISTRY_DB_PASSWORD", "METISTRY_DB_PORT", "PATH", "TMPDIR"].sort(),
     );
 
-    expect(child("db").argv).toEqual([`${PG}/postgres`, "-D", `${I}/state/pg`]);
+    expect(child("db").argv).toEqual([`${PG}/postgres`, "-D", `${I}/.metistry/state/pg`]);
 
     // the jobs that exist in BOTH shapes still source a dotenv file with
     // sh -c — but the INSTANCE's, not the checkout's (self-contained instances)
-    expect(child("reconciler").argv.join(" ")).toContain(`set -a; . '${I}/state/.env'; set +a; exec '${NODE}' '${P}/apps/reconciler/dist/main.js'`);
+    expect(child("reconciler").argv.join(" ")).toContain(`set -a; . '${I}/.metistry/state/.env'; set +a; exec '${NODE}' '${P}/apps/reconciler/dist/main.js'`);
     expect(child("reconciler").log).toBe("/tmp/metistry-reconciler.log");
 
     // the supervisor's own plist: 0600, because its dict carries the db password
     const sup = await read("");
     expect(sup).not.toMatch(/__[A-Z][A-Z0-9_]*__/);
-    expect(sup).toContain(`<string>${I}/state/bin/Metistry</string>`);
+    expect(sup).toContain(`<string>${I}/.metistry/state/bin/Metistry</string>`);
     expect(sup).toContain(`<string>${P}/apps/watchdog/dist/main.js</string>`);
-    expect(sup).toContain(`<string>${I}/state/supervisor.json</string>`);
+    expect(sup).toContain(`<string>${I}/.metistry/state/supervisor.json</string>`);
   });
 
   it("under the compose shape the shaped plists are not installed at all", async () => {
@@ -300,7 +301,7 @@ describe("the node every launchd job execs", () => {
 
   it("`up` renders that node into every plist, and the sandbox grants exec on ITS prefix, not Homebrew's", async () => {
     const P = await launchdCheckout();
-    const I = await mkdtemp(join(tmpdir(), "metistry-inst-"));
+    const I = await mkdtemp(join(tmpdir(), "mi-" /* short on purpose: the supervisor socket under .metistry/state/run/ has ~103 bytes to live in */));
     const home = await mkdtemp(join(tmpdir(), "metistry-home-"));
     const bundled = join(P, "runtime", "node", "bin", "node");
     await mkdir(join(P, "runtime", "node", "bin"), { recursive: true });
@@ -320,7 +321,7 @@ describe("the node every launchd job execs", () => {
     });
     expect(r.code).toBe(0);
     expect(lines.some((l) => l.includes(`node: ${bundled} (bundled runtime/node/bin/node)`))).toBe(true);
-    const config = JSON.parse(await readFile(join(I, "state", "supervisor.json"), "utf8"));
+    const config = JSON.parse(await readFile(join(I, ".metistry", "state", "supervisor.json"), "utf8"));
     const assistant = config.children.find((c: { name: string }) => c.name === "assistant");
     expect(assistant.argv).toContain(bundled);
     // the sandbox may exec node — THIS node. A Homebrew prefix in the profile
@@ -328,7 +329,7 @@ describe("the node every launchd job execs", () => {
     expect(assistant.argv).toContain(`NODE_PREFIX=${realPathish(join(P, "runtime", "node"))}`);
     expect(JSON.stringify(assistant)).not.toContain("/opt/homebrew");
     // and the supervisor's own program is a symlink to it, named `Metistry`
-    expect(await readFile(join(home, "Library", "LaunchAgents", "com.foldedspacelabs.metistry.plist"), "utf8")).toContain(`<string>${I}/state/bin/Metistry</string>`);
+    expect(await readFile(join(home, "Library", "LaunchAgents", "com.foldedspacelabs.metistry.plist"), "utf8")).toContain(`<string>${I}/.metistry/state/bin/Metistry</string>`);
   });
 });
 
@@ -348,7 +349,7 @@ describe("an instance with no engine (W1)", () => {
 
   it("is not written into the supervisor's children, and `up` says why in one line", async () => {
     const P = await launchdCheckout();
-    const I = await mkdtemp(join(tmpdir(), "metistry-inst-"));
+    const I = await mkdtemp(join(tmpdir(), "mi-" /* short on purpose: the supervisor socket under .metistry/state/run/ has ~103 bytes to live in */));
     const lines: string[] = [];
     const r = await up({
       productDir: P,
@@ -372,16 +373,16 @@ describe("an instance with no engine (W1)", () => {
     expect(lines.map((l) => l.trim())).toContain(ABSENT_LINE);
     // the child list: everything model-free, and no assistant that could
     // only crash-loop on `requireEnv`
-    expect(r.commands).toContain(`write ${I}/state/supervisor.json  (from 4 child(ren): db, console, reconciler, eventkit)`);
+    expect(r.commands).toContain(`write ${I}/.metistry/state/supervisor.json  (from 4 child(ren): db, console, reconciler, eventkit)`);
   });
 
   it("and comes back on the next `up` once the key exists — the config is rewritten whole, so it is idempotent", async () => {
     const P = await launchdCheckout();
-    const I = await mkdtemp(join(tmpdir(), "metistry-inst-"));
+    const I = await mkdtemp(join(tmpdir(), "mi-" /* short on purpose: the supervisor socket under .metistry/state/run/ has ~103 bytes to live in */));
     const home = await mkdtemp(join(tmpdir(), "metistry-home-"));
     const opts = { productDir: P, exec: fakeExec(), out: () => {}, platform: "darwin" as const, uid: 501, home, node: NODE, deployment: launchd, exists: pgInstalled(), doctorFn: okDoctor };
     const children = async () => {
-      const c = JSON.parse(await readFile(join(I, "state", "supervisor.json"), "utf8"));
+      const c = JSON.parse(await readFile(join(I, ".metistry", "state", "supervisor.json"), "utf8"));
       return { names: c.children.map((x: { name: string }) => x.name) as string[], token: c.token as string };
     };
 
@@ -404,7 +405,7 @@ describe("an instance with no engine (W1)", () => {
   it("assigning nothing at all is the other half of the same absence, and says which verb writes the line", async () => {
     const P = await launchdCheckout();
     await writeFile(join(P, "seed", "compute.yaml"), "providers: {}\n");
-    const I = await mkdtemp(join(tmpdir(), "metistry-inst-"));
+    const I = await mkdtemp(join(tmpdir(), "mi-" /* short on purpose: the supervisor socket under .metistry/state/run/ has ~103 bytes to live in */));
     const lines: string[] = [];
     const r = await up({
       productDir: P,
@@ -425,12 +426,12 @@ describe("an instance with no engine (W1)", () => {
     const text = lines.join("\n");
     expect(text).toContain("no assignments.default in compute.yaml");
     expect(text).toContain("metistry compute assign default <provider/model>");
-    expect(r.commands).toContain(`write ${I}/state/supervisor.json  (from 4 child(ren): db, console, reconciler, eventkit)`);
+    expect(r.commands).toContain(`write ${I}/.metistry/state/supervisor.json  (from 4 child(ren): db, console, reconciler, eventkit)`);
   });
 
   it("under the compose shape the note is the same one — the file's own interpolation is not what decides any more", async () => {
     const P = await launchdCheckout();
-    const I = await mkdtemp(join(tmpdir(), "metistry-inst-"));
+    const I = await mkdtemp(join(tmpdir(), "mi-" /* short on purpose: the supervisor socket under .metistry/state/run/ has ~103 bytes to live in */));
     const lines: string[] = [];
     await up({
       productDir: P,

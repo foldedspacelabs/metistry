@@ -36,7 +36,7 @@ export const ROUTINE_TIER = "routine";
 
 export const tiersSchema = z
   .record(
-    z.string().regex(/^[a-z][a-z0-9_-]*$/, "tier names are lowercase kebab-case (casing rule: only Knowledge/ is TitleCase)"),
+    z.string().regex(/^[a-z][a-z0-9_-]*$/, "tier names are lowercase kebab-case (casing rule: only the vault is TitleCase)"),
     tierSchema,
   )
   .refine((t) => DEFAULT_TIER in t, `tiers must include '${DEFAULT_TIER}'`);

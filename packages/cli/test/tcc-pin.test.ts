@@ -51,19 +51,21 @@ async function releaseTree(): Promise<{ P: string; runDir: string }> {
 }
 
 async function instance(opts: { release?: boolean } = {}): Promise<string> {
-  const I = await mkdtemp(join(tmpdir(), "metistry-inst-"));
-  await mkdir(join(I, "state"), { recursive: true });
-  await writeFile(join(I, "state", ".env"), "METISTRY_ORIGIN=https://studio.ts.net\n");
+  const I = await mkdtemp(join(tmpdir(), "mi-" /* short on purpose: the supervisor socket under .metistry/state/run/ has ~103 bytes to live in */));
+  await mkdir(join(I, ".metistry", "state"), { recursive: true });
+  await mkdir(join(I, ".metistry"), { recursive: true });
+    await writeFile(join(I, ".metistry", "state", ".env"), "METISTRY_ORIGIN=https://studio.ts.net\n");
   // what `up` leaves behind under the launchd shape: the supervisor's child
   // list. The apple-fm bridge is a CHILD now, so its TCC-helper override goes
   // here rather than into a plist of its own.
+  await mkdir(join(I, ".metistry"), { recursive: true });
   await writeFile(
-    join(I, "state", "supervisor.json"),
+      join(I, ".metistry", "state", "supervisor.json"),
     JSON.stringify(
       {
         schema: 1,
         label: "com.foldedspacelabs.metistry",
-        socket: join(I, "state", "run", "supervisor.sock"),
+        socket: join(I, ".metistry", "state", "run", "supervisor.sock"),
         token: "0".repeat(64),
         env: {},
         children: [
@@ -76,8 +78,9 @@ async function instance(opts: { release?: boolean } = {}): Promise<string> {
     ),
   );
   if (opts.release) {
-    await writeFile(
-      join(I, "metistry.lock"),
+    await mkdir(join(I, ".metistry"), { recursive: true });
+  await writeFile(
+      join(I, ".metistry", "metistry.lock"),
       'product:\n  version: "0.5.1"\n  commit: "abc"\n  source: release\nupdated_at: "2026-09-10T00:00:00.000Z"\nmigrations_applied: []\n',
     );
   }
@@ -271,7 +274,7 @@ describe("the TCC helper bundles — `up` re-pins on every run, not just migrate
     expect(calendar).not.toContain(join(P, "current", "packages", "mcp-eventkit"));
 
     // apple-fm is a supervisor child; its override lives in supervisor.json
-    const config = JSON.parse(await readFile(join(I, "state", "supervisor.json"), "utf8"));
+    const config = JSON.parse(await readFile(join(I, ".metistry", "state", "supervisor.json"), "utf8"));
     const child = config.children.find((c: { name: string }) => c.name === "apple-fm");
     expect(child.env.METISTRY_AFM_HELPER).toBe(join(P, "packages", "mcp-apple-fm", "helper", "afm-helper.app", "Contents", "MacOS", "afm-helper"));
 

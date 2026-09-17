@@ -23,11 +23,12 @@
 import { readFile } from "node:fs/promises";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
+import { INSTANCE_LAYOUT } from "./instance-layout.js";
 import { dataPolicySchema } from "./manifest.js";
 import { PROVIDER_NAME_RE, modelRefIssue, parseModelRef, type ModelRef } from "./model-ref.js";
 import { DEFAULT_TIER, EFFORTS, type Effort, type TierMap } from "./tiers.js";
 
-/** The file's name wherever it lives — the instance repo's root, and `seed/`. */
+/** The file's name wherever it lives — the instance's `.metistry/`, and `seed/`. */
 export const COMPUTE_FILENAME = "compute.yaml";
 
 /**
@@ -36,7 +37,10 @@ export const COMPUTE_FILENAME = "compute.yaml";
  * spelling) as `METISTRY_RULES_FILES`, so there is no deep merge to reason
  * about and an instance file is always self-contained.
  */
-export const COMPUTE_FILES_DEFAULT = `seed/${COMPUTE_FILENAME}:${COMPUTE_FILENAME}`;
+export const COMPUTE_FILES_DEFAULT = `seed/${COMPUTE_FILENAME}:${INSTANCE_LAYOUT.compute}`;
+
+/** The same overlay rule for `rules.yaml` (`METISTRY_RULES_FILES`) — the router's tier map. Here so the console and the engine cannot disagree about where it lives. */
+export const RULES_FILES_DEFAULT = `seed/rules.yaml:${INSTANCE_LAYOUT.rules}`;
 
 /**
  * One engine, one wire protocol (C2). `kind` stays a field rather than
@@ -325,8 +329,8 @@ export type Assignment = z.infer<typeof assignmentSchema>;
 export const assignmentsSchema = z.strictObject({
   /** Where every unnamed and unknown tier lands. Required whenever `assignments:` is present — a half-assigned file would silently fall back to `rules.yaml` for some turns and not others. */
   default: assignmentSchema,
-  tiers: z.record(z.string().regex(NAME_RE, "tier names are lowercase kebab-case (casing rule: only Knowledge/ is TitleCase)"), assignmentSchema).default({}),
-  crews: z.record(z.string().regex(NAME_RE, "crew names are lowercase kebab-case (casing rule: only Knowledge/ is TitleCase)"), assignmentSchema).default({}),
+  tiers: z.record(z.string().regex(NAME_RE, "tier names are lowercase kebab-case (casing rule: only the vault is TitleCase)"), assignmentSchema).default({}),
+  crews: z.record(z.string().regex(NAME_RE, "crew names are lowercase kebab-case (casing rule: only the vault is TitleCase)"), assignmentSchema).default({}),
 });
 
 export type Assignments = z.infer<typeof assignmentsSchema>;
@@ -360,7 +364,7 @@ export type Budgets = z.infer<typeof budgetsSchema>;
 
 export const computeSchema = z
   .strictObject({
-    providers: z.record(z.string().regex(PROVIDER_NAME_RE, "provider names are lowercase kebab-case (casing rule: only Knowledge/ is TitleCase)"), providerSchema).default({}),
+    providers: z.record(z.string().regex(PROVIDER_NAME_RE, "provider names are lowercase kebab-case (casing rule: only the vault is TitleCase)"), providerSchema).default({}),
     /** Absent = this file assigns nothing and `rules.yaml`'s `tiers:` still decides (the transition, until the engine lands). */
     assignments: assignmentsSchema.optional(),
     budgets: budgetsSchema.optional(),

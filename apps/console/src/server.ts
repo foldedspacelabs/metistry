@@ -56,7 +56,7 @@ export interface ConsoleConfig {
   localOwner?: LocalOwnerConfig | undefined;
   /** Fallback capture directory when no sink is injected (tests, and a console with no vault bridge). */
   inboxDir: string;
-  /** Where captures land: `vaultSink(vault)` — `Knowledge/Inbox/` through the reconciler's bridge (docs/ops/inbox.md). Absent → `dirSink(inboxDir)`. */
+  /** Where captures land: `vaultSink(vault)` — `Inbox/` through the reconciler's bridge (docs/ops/inbox.md). Absent → `dirSink(inboxDir)`. */
   inbox?: CaptureSink | undefined;
   policy: SessionPolicy;
   secureCookies: boolean;
@@ -884,7 +884,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       if (!verbOk) return sendError(res, "not_found");
       try {
         if (op === "grants") {
-          // the bare vault (`Knowledge/`) is admitted for internal rows only: the rule keys on the ROW's kind, never on the request
+          // the bare vault (`/`) is admitted for internal rows only: the rule keys on the ROW's kind, never on the request
           const row = (await agents.listAgents(db)).find((a) => a.id === id && !a.revoked);
           const grants = agents.validateGrants(await readJson(req), { kind: row?.kind === "internal" ? "internal" : "external" });
           const ok = await agents.setGrants(db, id, grants);

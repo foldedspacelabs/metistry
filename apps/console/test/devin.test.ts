@@ -168,10 +168,10 @@ describe("dispatch to devin-sessions (fakes)", () => {
   it("the shipped policy refuses EVERY vault citation — allow is empty on purpose — and sends nothing", async () => {
     const calls: Call[] = [];
     const db = fakeDb();
-    const r = await dispatch(db, await registry(calls), 7, "devin-sessions", "See Knowledge/Projects/x.md", "owner");
+    const r = await dispatch(db, await registry(calls), 7, "devin-sessions", "See Projects/x.md", "owner");
     expect(r).toMatchObject({ ok: false, code: "invalid_request" });
     if (r.ok) return;
-    expect(r.violations).toEqual([{ kind: "path_outside_allow", paths: ["Knowledge/Projects/x.md"], allow: [] }]);
+    expect(r.violations).toEqual([{ kind: "path_outside_allow", paths: ["Projects/x.md"], allow: [] }]);
     expect(calls).toHaveLength(0);
     expect(db.q.some((x) => x.text.startsWith("UPDATE work"))).toBe(false);
     expect(String(db.runFinish()[0]![2])).toBe("data_policy: path_outside_allow");

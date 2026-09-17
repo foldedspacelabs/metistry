@@ -4,6 +4,7 @@
 
 import { createHash } from "node:crypto";
 import { parse as parseYaml } from "yaml";
+import { INSTANCE_LAYOUT } from "@foldedspacelabs/metistry-core";
 
 export interface NoteMeta {
   title: string | null;
@@ -95,8 +96,6 @@ export function resolveLink(fromPath: string, target: string, paths: ReadonlySet
   const dir = fromPath.includes("/") ? fromPath.slice(0, fromPath.lastIndexOf("/")) : "";
   const rel = normalize(dir ? `${dir}/${withMd}` : withMd);
   if (rel && paths.has(rel)) return rel;
-  const vaultRel = `Knowledge/${withMd}`;
-  if (paths.has(vaultRel)) return vaultRel;
   const base = withMd.replace(/^.*\//, "").toLowerCase();
   const cands = byBasename.get(base);
   if (cands && cands.length === 1) return cands[0]!;
@@ -130,8 +129,8 @@ export function isMarkdown(path: string): boolean {
 
 // ---- the vault inbox (docs/ops/inbox.md) ----------------------------------
 
-/** The vault directory captures live in. TitleCase, like everything under `Knowledge/` (CLAUDE.md). */
-export const INBOX_PREFIX = "Knowledge/Inbox";
+/** The vault directory captures live in, at the vault root. TitleCase (CLAUDE.md casing rule). */
+export const INBOX_PREFIX = INSTANCE_LAYOUT.inboxDir;
 
 export function isInboxPath(path: string): boolean {
   return path.startsWith(`${INBOX_PREFIX}/`);

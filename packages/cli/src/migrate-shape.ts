@@ -30,8 +30,9 @@
 
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import type { Deployment, DeploymentShape } from "@foldedspacelabs/metistry-core";
+import { statePath, type Deployment, type DeploymentShape } from "@foldedspacelabs/metistry-core";
 import { consolePort, dbPort, loadDeployment } from "./deployment.js";
+import { instanceEnvFile } from "./instance.js";
 import { setDeploymentShape } from "./deployment-report.js";
 import { doctor, renderTable, type DoctorDeps, type DoctorReport } from "./doctor.js";
 import type { Exec } from "./exec.js";
@@ -180,9 +181,9 @@ export function stamp(d: Date): string {
   return d.toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
 }
 
-/** `<instance>/state/migrate` — derived, gitignored, beside `state/pg`. Dumps are kept, never pruned by this verb. */
+/** `<instance>/.metistry/state/migrate` — derived, gitignored, beside `state/pg`. Dumps are kept, never pruned by this verb. */
 export function migrateDir(root: string): string {
-  return join(root, "state", "migrate");
+  return statePath(root, "migrate");
 }
 
 /** `pg_restore --list` output is a TOC; the entry lines start with a number. Anything else is a header comment. */
@@ -440,7 +441,7 @@ export async function migrateShape(opts: MigrateShapeOptions): Promise<MigrateSh
     productDir: opts.productDir,
     runDir,
     instanceDir: instanceDir ?? "",
-    envFile: opts.envFile ?? (instanceDir ? join(instanceDir, "state", ".env") : join(opts.productDir, ".env")),
+    envFile: opts.envFile ?? (instanceDir ? instanceEnvFile(instanceDir) : join(opts.productDir, ".env")),
     platform: opts.platform ?? process.platform,
     uid: opts.uid ?? (typeof process.getuid === "function" ? process.getuid() : 0),
     home: opts.home ?? env.HOME ?? "",
@@ -449,7 +450,7 @@ export async function migrateShape(opts: MigrateShapeOptions): Promise<MigrateSh
     composeBase: [
       "compose",
       ...(composeProject(env) ? ["-p", composeProject(env)!] : []),
-      ...composeEnvArgs(runDir, opts.envFile ?? (instanceDir ? join(instanceDir, "state", ".env") : undefined)),
+      ...composeEnvArgs(runDir, opts.envFile ?? (instanceDir ? instanceEnvFile(instanceDir) : undefined)),
     ],
   };
 
@@ -463,7 +464,7 @@ export async function migrateShape(opts: MigrateShapeOptions): Promise<MigrateSh
   let dumpPath: string | undefined;
   try {
     if (!instanceDir) {
-      throw new StepFailed("migrate-shape needs the instance repo: pass --instance <dir> or set METISTRY_INSTANCE_DIR — deployment.yaml and state/ both live there");
+      throw new StepFailed("migrate-shape needs the instance repo: pass --instance <dir> or set METISTRY_INSTANCE_DIR — deployment.yaml and state/ both live under its .metistry/");
     }
     if (loaded.deployment.shape === opts.target) {
       throw new StepFailed(`this install is already shape: ${opts.target} (from ${loaded.from}) — nothing to migrate`);
@@ -820,7 +821,7 @@ async function toCompose(ctx: Ctx, opts: MigrateShapeOptions, exists: (p: string
   const { r } = ctx;
   r.section("rollback to compose");
   r.note("THE DATA DOES NOT COME BACK WITH YOU. The compose volume still holds the database as it was at the cutover; everything written under the");
-  r.note("launchd shape since then stays in " + join(stateRoot(ctx.productDir, ctx.env), "state", "pg") + " and is NOT copied over. Dump it first if you want it:");
+  r.note("launchd shape since then stays in " + pgDataDir(stateRoot(ctx.productDir, ctx.env)) + " and is NOT copied over. Dump it first if you want it:");
   r.note(`  ${join(runtimeDir(ctx.productDir), "postgres", "bin", "pg_dump")} -h ${pgSocketDir(stateRoot(ctx.productDir, ctx.env))} -U ${ctx.env.METISTRY_DB_USER || "metistry"} -d ${ctx.env.METISTRY_DB_NAME || "metistry"} -Fc -f <somewhere>`);
 
   r.section("stop the launchd jobs");

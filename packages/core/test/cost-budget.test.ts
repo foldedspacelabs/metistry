@@ -24,7 +24,7 @@ const cloud: Provider = {
   kind: "openai-compatible",
   base_url: "https://openrouter.ai/api/v1",
   locality: "off_machine",
-  data_policy: { allow: ["Knowledge/Projects"], deny_sources: [], max_brief_bytes: 65536 },
+  data_policy: { allow: ["Projects"], deny_sources: [], max_brief_bytes: 65536 },
   pricing: { "anthropic/claude-sonnet-5": { in_per_m: 3, out_per_m: 15 } },
 };
 
@@ -68,7 +68,7 @@ providers:
     kind: openai-compatible
     base_url: https://openrouter.ai/api/v1
     locality: off_machine
-    data_policy: { allow: [Knowledge], deny_sources: [], max_brief_bytes: 1024 }
+    data_policy: { allow: [Areas], deny_sources: [], max_brief_bytes: 1024 }
 assignments:
   default: { model: openrouter/anthropic/claude-sonnet-5 }
   tiers:

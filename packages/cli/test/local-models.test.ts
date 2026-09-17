@@ -396,24 +396,24 @@ describe("install: a Hugging Face GGUF for llama-server", () => {
   });
 
   it("writes an instance-RELATIVE model_path, so the file survives a move", () => {
-    expect(relativeModelPath("unsloth/gemma-3-4b-it-GGUF", "gemma-3-4b-it-Q4_K_M.gguf")).toBe("state/models/unsloth/gemma-3-4b-it-GGUF/gemma-3-4b-it-Q4_K_M.gguf");
+    expect(relativeModelPath("unsloth/gemma-3-4b-it-GGUF", "gemma-3-4b-it-Q4_K_M.gguf")).toBe(".metistry/state/models/unsloth/gemma-3-4b-it-GGUF/gemma-3-4b-it-Q4_K_M.gguf");
   });
 });
 
 describe("the supervisor child (darwin)", () => {
-  const serve = { runtime: "llamaserver" as const, model_path: "state/models/a/b/m.gguf", port: 7813, extra_args: [] };
+  const serve = { runtime: "llamaserver" as const, model_path: ".metistry/state/models/a/b/m.gguf", port: 7813, extra_args: [] };
   const base = { PATH: "/usr/bin:/bin", HOME: "/Users/t" };
 
   async function fixture(): Promise<{ product: string; instance: string }> {
     const product = await mkdtemp(join(tmpdir(), "metistry-prod-"));
-    const instance = await mkdtemp(join(tmpdir(), "metistry-inst-"));
+    const instance = await mkdtemp(join(tmpdir(), "mi-" /* short on purpose: the supervisor socket under .metistry/state/run/ has ~103 bytes to live in */));
     return { product, instance };
   }
 
   it("renders argv from the bundled binary, binds LOOPBACK, and aliases the model by file name", async () => {
     const { product, instance } = await fixture();
     const binary = join(product, "runtime", "llamacpp", "bin", "llama-server");
-    const model = join(instance, "state", "models", "a", "b", "m.gguf");
+    const model = join(instance, ".metistry", "state", "models", "a", "b", "m.gguf");
     const built = llamaServerChild({ productDir: product, instanceDir: instance, provider: "llamaserver", serve, env: base, log: "/tmp/metistry-llamaserver.log", exists: (p) => p === binary || p === model });
     expect("child" in built).toBe(true);
     if (!("child" in built)) return;

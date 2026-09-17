@@ -27,8 +27,10 @@ apps/macos/.build/
 dist-app/
 
 # launchd shape (deployment.yaml): derived state and the bundled runtime.
-# Postgres data and the assistant's SDK transcripts live under state/ —
-# invariant 1: git is the record, this is regenerable.
+# Postgres data and the assistant's SDK transcripts live under
+# .metistry/state/ — invariant 1: git is the record, this is regenerable.
+# (`state/` stays listed for a checkout that predates the 2026-09-17 layout.)
+.metistry/
 state/
 runtime/
 

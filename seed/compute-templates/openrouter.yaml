@@ -12,4 +12,4 @@ openrouter:
   auth: { secret: METISTRY_OPENROUTER_API_KEY }
   zdr: true
   request: { provider: { order: [anthropic], allow_fallbacks: false } }
-  data_policy: { allow: [Knowledge/Projects], deny_sources: [comms], max_brief_bytes: 65536 }
+  data_policy: { allow: [Projects], deny_sources: [comms], max_brief_bytes: 65536 }

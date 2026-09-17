@@ -176,9 +176,10 @@ const USAGE = `metistry — Metistry command line
   metistry init <dir> [--name <assistant name>] [--channel git|release]
                       [--shape compose|launchd] [--force] [--product-dir <checkout>]
       Create a private instance repo at <dir> from the product's seed/ (git init,
-      Knowledge/, identity.yaml with a minted instance_id, rules.yaml, config dirs,
-      metistry.lock, one commit).
-      Prints the .env lines to put in <dir>/state/.env next — never writes them,
+      the vault at the root — Inbox/, now.md, CLAUDE.md — and .metistry/ with
+      identity.yaml carrying a minted instance_id, rules.yaml, the config dirs
+      and metistry.lock; one commit). <dir> IS the Obsidian vault: open it.
+      Prints the .env lines to put in <dir>/.metistry/state/.env next — never writes them,
       including METISTRY_ORIGIN (the console refuses to start without it) and a
       METISTRY_RECONCILER_URL shaped for --shape (default: launchd on macOS,
       compose elsewhere — docs/ops/deployment-shapes.md); both are loopback
@@ -198,7 +199,7 @@ const USAGE = `metistry — Metistry command line
       The token is never printed, never written to .env, never in .git/config.
 
   metistry connect <cursor|opencode|devin|claude-code> [--instance <dir>] [--rotate] [--remote]
-                   [--areas Knowledge/A,Knowledge/B] [--project <slug>] [--json]
+                   [--areas Areas/A,Projects/B] [--project <slug>] [--json]
   metistry connect --list [--json]
       Give one external dev tool its own way into this instance: register it as
       an EXTERNAL agent in the console (the agent id IS the tool name, so a
@@ -218,7 +219,7 @@ const USAGE = `metistry — Metistry command line
         devin        has no config file to write — prints the name, URL and
                      Authorization value to paste at Customize -> MCPs.
       Grants start default-deny ({tier: "none", areas: []}); --areas widens the
-      read grant to those TitleCase Knowledge/ prefixes, --project adds project
+      read grant to those TitleCase vault prefixes, --project adds project
       membership. No flag can grant knowledge_write: an external principal
       cannot reach it at the bridge at all. --rotate mints a replacement bearer
       (the old one stops authenticating at once) — without it an
@@ -441,12 +442,13 @@ const USAGE = `metistry — Metistry command line
       does not move between shapes on its own); --force writes anyway.
 
   metistry migrate-inbox [--instance <dir>] [--dry-run]
-      Move an existing instance's inbox into the vault: inbox/* (or a second
-      instance's lowercase Knowledge/inbox/, renamed through a temp name
-      because macOS is case-insensitive) into Knowledge/Inbox/, git mv for
+      Move an existing instance's inbox into the vault: inbox/* (or a
+      differently-cased vault inbox, renamed through a temp name because
+      macOS is case-insensitive) into the vault inbox — Inbox/ under the flat
+      layout, Knowledge/Inbox/ while an instance is still legacy — git mv for
       what git tracks and a plain move for what it does not; drop inbox/
-      from .gitignore and add Knowledge/Inbox/.large/; rewrite inbox.path
-      rows to Knowledge/Inbox/<file>; commit it. Idempotent — a second run
+      from .gitignore and add the .large/ spill line; rewrite inbox.path
+      rows to <vault inbox>/<file>; commit it. Idempotent — a second run
       says "already on the vault inbox" and changes nothing. Restarts
       nothing: it prints the metistry up line and stops. docs/ops/inbox.md.
 
@@ -632,7 +634,7 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
       }
       const tool = parseTool(positional[0]);
       if (!tool) {
-        err(`usage: metistry connect <${CONNECT_TOOLS.join("|")}> [--rotate] [--remote] [--areas Knowledge/A,Knowledge/B] [--project <slug>] [--json]`);
+        err(`usage: metistry connect <${CONNECT_TOOLS.join("|")}> [--rotate] [--remote] [--areas Areas/A,Projects/B] [--project <slug>] [--json]`);
         err("       metistry connect --list [--json]");
         return 2;
       }

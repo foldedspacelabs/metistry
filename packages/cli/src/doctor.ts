@@ -38,7 +38,7 @@ import {
   type ChildStatus,
   type Manifest,
 } from "@foldedspacelabs/metistry-core";
-import { emptyCompute, loadCompute, type Compute } from "@foldedspacelabs/metistry-core";
+import { COMPUTE_FILENAME, INSTANCE_LAYOUT, LEGACY_VAULT_DIR, detectLayout, emptyCompute, instancePath, loadCompute, type Compute } from "@foldedspacelabs/metistry-core";
 import { engineStatus, loadDeployment } from "./deployment.js";
 import { localServerRows } from "./local-models.js";
 import { realExec, type Exec } from "./exec.js";
@@ -316,18 +316,48 @@ async function componentRow(
 
 // ---- instance layout --------------------------------------------------------
 //
-// The pre-#156 layout (docs/ops/inbox.md): captures at a gitignored
-// `<instance>/inbox/` instead of the vault's `Knowledge/Inbox/`. Purely a
-// filesystem check — no manifest, no probe — so an instance that has not
-// run `metistry migrate-inbox` yet is told, instead of quietly falling back
-// to writing untracked files nobody in the vault ever sees.
+// Two filesystem checks — no manifest, no probe — so an instance sitting on
+// an older shape is TOLD, rather than quietly degrading:
+//
+//   * `layout`: flat (this directory is the Obsidian vault, machinery under
+//     `.metistry/`) or legacy (`Knowledge/`, config at the root). The
+//     migration verb is a follow-up; the hint names it.
+//   * `inbox`: the pre-#156 captures directory, a gitignored
+//     `<instance>/inbox/` instead of the vault's `Inbox/`.
 
 const LEGACY_INBOX_GITIGNORE_LINE = /^\/?inbox\/?$/;
+
+/**
+ * Which shape this instance directory is in. A legacy instance is `degraded`,
+ * never `failed`: it still runs, and the row is where the operator learns
+ * the verb that moves it.
+ */
+export async function layoutRow(instanceDir: string): Promise<DoctorRow> {
+  return {
+    kind: "instance",
+    ...(await runCheck("instance layout", `${instanceDir} is the flat layout — the directory is the Obsidian vault, machinery under ${INSTANCE_LAYOUT.metistryDir}/`, async () => {
+      const shape = detectLayout(instanceDir);
+      if (shape === "flat") return { meta: { layout: "flat" } };
+      if (shape === "unknown") {
+        return {
+          status: "absent",
+          remediation: `${instanceDir} is not an instance directory (no ${INSTANCE_LAYOUT.identity} and no ${LEGACY_VAULT_DIR}/) — \`metistry init <dir>\` stamps one`,
+          meta: { layout: "unknown" },
+        };
+      }
+      return {
+        status: "degraded",
+        remediation: "instance layout: legacy (run metistry migrate-layout) — the vault still lives in Knowledge/ and config at the root",
+        meta: { layout: "legacy" },
+      };
+    })),
+  };
+}
 
 export async function inboxRow(instanceDir: string): Promise<DoctorRow> {
   return {
     kind: "instance",
-    ...(await runCheck("inbox", `${instanceDir}/inbox/ absent, and .gitignore does not list it — captures live at Knowledge/Inbox/`, async () => {
+    ...(await runCheck("inbox", `${instanceDir}/inbox/ absent, and .gitignore does not list it — captures live at ${INSTANCE_LAYOUT.inboxDir}/`, async () => {
       const legacyDir = join(instanceDir, "inbox");
       const entries = existsSync(legacyDir) ? (await readdir(legacyDir)).filter((e) => e !== ".DS_Store") : [];
       const gitignorePath = join(instanceDir, ".gitignore");
@@ -335,7 +365,7 @@ export async function inboxRow(instanceDir: string): Promise<DoctorRow> {
       if (entries.length === 0 && !gitignored) return;
       return {
         status: "degraded",
-        remediation: "the pre-#156 layout: run `metistry migrate-inbox --dry-run` to see the plan, then `metistry migrate-inbox` to move captures into Knowledge/Inbox/ (docs/ops/inbox.md)",
+        remediation: "the pre-#156 layout: run `metistry migrate-inbox --dry-run` to see the plan, then `metistry migrate-inbox` to move captures into the vault inbox (docs/ops/inbox.md)",
         meta: { dir: legacyDir, entries: entries.length, gitignored },
       };
     })),
@@ -789,7 +819,7 @@ export async function supervisorRows(stateRoot: string): Promise<DoctorRow[]> {
  */
 export async function computeForDoctor(env: NodeJS.ProcessEnv, productDir: string): Promise<Compute | undefined> {
   const instanceDir = env.METISTRY_INSTANCE_DIR?.replace(/\/+$/, "") || productDir;
-  const paths = env.METISTRY_COMPUTE_FILES ?? `${join(productDir, "seed", "compute.yaml")}:${join(instanceDir, "compute.yaml")}`;
+  const paths = env.METISTRY_COMPUTE_FILES ?? `${join(productDir, "seed", COMPUTE_FILENAME)}:${instancePath(instanceDir, "compute")}`;
   try {
     return (await loadCompute(paths)).compute;
   } catch {
@@ -846,7 +876,9 @@ export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
   // ask what compute.yaml says, and doctor must not answer twice differently.
   const compute = (await computeForDoctor(env, deps.productDir)) ?? emptyCompute();
   for (const m of await walkManifests(deps.productDir)) rows.push(await componentRow(m, { env, fetchFn, timeoutMs, shape, labelSuffix, compute }));
-  rows.push(await inboxRow(env.METISTRY_INSTANCE_DIR?.replace(/\/+$/, "") || deps.productDir));
+  const instanceDir = env.METISTRY_INSTANCE_DIR?.replace(/\/+$/, "") || deps.productDir;
+  rows.push(await layoutRow(instanceDir));
+  rows.push(await inboxRow(instanceDir));
 
   const db = deps.db === undefined ? await openDbFromEnv(env) : deps.db;
   try {

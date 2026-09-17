@@ -3,10 +3,10 @@
 <!-- Reconciler runs on the HOST (not in Docker): it is the only process that
      holds the instance repo's working tree and the only place git runs (D5).
      Config comes from the instance's .env (METISTRY_INSTANCE_DIR, the bridge
-     token, db), which lives at <instance>/state/.env — an instance directory
+     token, db), which lives at <instance>/.metistry/state/.env — an instance directory
      is self-contained (docs/product/desktop-app-plan.md).
      Install (adjust __REPO__ to your product checkout):
-       sed "s|__REPO__|$PWD|g; s|__NODE__|$(which node)|g; s|__ENV_FILE__|$METISTRY_INSTANCE_DIR/state/.env|g" ops/launchd/com.foldedspacelabs.metistry.reconciler.plist \
+       sed "s|__REPO__|$PWD|g; s|__NODE__|$(which node)|g; s|__ENV_FILE__|$METISTRY_INSTANCE_DIR/.metistry/state/.env|g" ops/launchd/com.foldedspacelabs.metistry.reconciler.plist \
          > ~/Library/LaunchAgents/com.foldedspacelabs.metistry.reconciler.plist
        launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.foldedspacelabs.metistry.reconciler.plist
      Proper KeepAlive plist, never `launchctl submit` (Phase 0 respawn-loop lesson). -->

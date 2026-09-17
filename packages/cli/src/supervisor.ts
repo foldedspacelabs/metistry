@@ -32,23 +32,24 @@ import {
   type ControlResponse,
   type SupervisorConfig,
   type SupervisorConfigInput,
+  statePath,
 } from "@foldedspacelabs/metistry-core";
 import { parsePlistTemplate, type PlistTemplate } from "./launchd.js";
 
 export { SUPERVISOR_LABEL, SUPERVISOR_SERVICE };
 
-/** `<instance>/state/supervisor.json` — 0600, because it carries what the plists' env dicts used to. */
+/** `<instance>/.metistry/state/supervisor.json` — 0600, because it carries what the plists' env dicts used to. */
 export function supervisorConfigPath(stateRoot: string): string {
-  return join(stateRoot, "state", SUPERVISOR_CONFIG_FILENAME);
+  return statePath(stateRoot, SUPERVISOR_CONFIG_FILENAME);
 }
 
 /**
- * `<instance>/state/run/supervisor.sock`. Beside Postgres' socket on purpose:
+ * `<instance>/.metistry/state/run/supervisor.sock`. Beside Postgres' socket on purpose:
  * that directory is already the one `up` length-checks, and a unix socket
  * path over 103 bytes is silently unusable in exactly the same way.
  */
 export function supervisorSocketPath(stateRoot: string): string {
-  return join(stateRoot, "state", "run", SUPERVISOR_SOCKET_FILENAME);
+  return statePath(stateRoot, "run", SUPERVISOR_SOCKET_FILENAME);
 }
 
 /**
@@ -63,7 +64,7 @@ export function supervisorSocketPath(stateRoot: string): string {
  * and makes the one item read `Metistry`.
  */
 export function supervisorBinPath(stateRoot: string): string {
-  return join(stateRoot, "state", "bin", "Metistry");
+  return statePath(stateRoot, "bin", "Metistry");
 }
 
 /**

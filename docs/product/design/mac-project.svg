@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 720" width="1000" height="720" role="img" aria-labelledby="ttl desc">
   <title id="ttl">macOS — project header with the mode toggle and rollup</title>
-  <desc id="desc">Annotated wireframe: a project detail view with a title, a review or autonomous mode chip, budget and cap metadata, member agent chips, a single mode toggle whose confirmation names the consequence, and the rollup of open tasks, bundles in flight, queued work, threads and spend.</desc>
+  <desc id="desc">Annotated wireframe of Work &#8250; Projects: a project detail view with a title, a review or autonomous mode chip, budget and cap metadata, member agent chips, a single mode toggle whose confirmation names the consequence, and the rollup of open tasks, bundles in flight, queued work, threads and spend.</desc>
   <style>
     text { font-family: -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", Roboto, sans-serif; fill: #12171c; font-size: 13px; }
     .t2 { fill: #4d565f; font-size: 12px } .t3 { fill: #646d77; font-size: 11px }
@@ -16,13 +16,13 @@
   </style>
 
   <rect width="1000" height="720" fill="#ffffff"/>
-  <text x="24" y="30" class="h2">macOS — Project</text>
-  <text x="24" y="50" class="t2">One mode chip, one toggle, and a confirmation that spells out what changes (P3)</text>
+  <text x="24" y="30" class="h2">macOS — Work › Projects</text>
+  <text x="24" y="50" class="t2">The fourth view of the Work section · one mode chip, one toggle, and a confirmation that spells out what changes (P3)</text>
 
   <rect class="win" x="24" y="66" width="720" height="580" rx="12"/>
   <path class="ln" d="M24 104 H744"/>
   <circle cx="46" cy="86" r="6" fill="#ff5f57"/><circle cx="66" cy="86" r="6" fill="#febc2e"/><circle cx="86" cy="86" r="6" fill="#28c840"/>
-  <text x="112" y="90" class="hd">Projects › metistry</text>
+  <text x="112" y="90" class="hd">Work › Projects › metistry</text>
 
   <!-- header -->
   <text x="48" y="146" class="h3">metistry</text>
@@ -92,5 +92,6 @@
   <text x="770" y="536" class="lg">refuses regardless — the confirmation</text>
   <text x="770" y="552" class="lg">exists so the click is not cheaper than</text>
   <text x="770" y="568" class="lg">the act.</text>
-  <text x="24" y="686" class="t3">docs/product/design-system.md §3.12 project header · §3.17 destructive confirmation</text>
+  <text x="24" y="664" class="t3">Shell — seven sections: Chat · Feed · Needs You · <tspan font-weight="600">Work</tspan> · Knowledge · Agents · System · Capture ⌘N (mac-feed.svg)</text>
+  <text x="24" y="686" class="t3">Board · Rooms · Artifacts · Projects are the four Work views · design-system.md §3.12 project header · §3.17 destructive confirmation</text>
 </svg>

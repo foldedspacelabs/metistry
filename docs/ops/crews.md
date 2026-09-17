@@ -28,7 +28,7 @@ type: agent
 area: example               # = the directory (optional; filled from the path)
 model: haiku                # haiku | sonnet | opus
 effort: low                 # low | medium | high (default low) — the other half of the tier
-description: Reads the granted notes and reports what it finds
+description: Reads the granted notes and reports what it finds   # the assistant's roster line (H8)
 uses: [knowledge, requests]        # tool GROUPS, see below
 skills: []                  # recorded now; binds once skills/ exists (§4.4)
 scope: [Knowledge/Projects, Knowledge/Resources]   # read tier: TitleCase Knowledge/ prefixes
@@ -164,7 +164,14 @@ assistant container drain loop ◀── claim (SKIP LOCKED, lease) ──┘
 1. **The tool.** `agents_delegate` is the nineteenth mcp-brain tool and is for
    `kind: internal` principals only — every other agent is told "not
    granted". The assistant's seed prompt says when to use it; the bridge
-   decides whether it may.
+   decides whether it may. The `crew` field's own description carries the
+   **roster**: every registered crew's name and the `description:` its
+   manifest wrote, so the assistant chooses from what each crew says it does
+   rather than learning the registry by refusal (H8, 2026-09-17). It is read
+   off the registry each time the tool is registered — the brain builds one
+   server per request — so an edited manifest shows up on the next call.
+   Capped at 20 crews and 120 characters each: the roster is spent out of the
+   same definition-token budget the whole surface is measured against.
 2. **The policy, at the tool.** The console (`apps/console/src/crews.ts`)
    checks the brief with the *existing* dispatch enforcement
    (`checkBrief`, `docs/ops/targets.md`) against the crew's `scope` ∩ the

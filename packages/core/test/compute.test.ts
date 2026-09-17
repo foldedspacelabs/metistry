@@ -95,8 +95,23 @@ describe("compute.yaml schema", () => {
     expect(resolveAssignment(seed, "deep")).toBeUndefined();
   });
 
+  // OPEN-4, ruled 2026-09-17. The seed assigns nothing (above), so the only
+  // way to hold it to the ruling is to READ the example it tells people to
+  // uncomment: uncomment it here and check what `critical_only` would keep.
+  it("the seed's uncommented example marks `default` critical and nothing else (OPEN-4)", () => {
+    const lines = readFileSync(new URL("../../../seed/compute.yaml", import.meta.url), "utf8").split("\n");
+    const example = lines.slice(lines.findIndex((l) => l.startsWith("# providers:"))).map((l) => l.replace(/^# ?/, "")).join("\n");
+    const cfg = parseCompute(example);
+    expect(resolveAssignment(cfg, "default")?.critical).toBe(true);   // the turn the user is waiting on
+    expect(resolveAssignment(cfg, "routine")?.critical).toBe(false);  // the evening fold stops
+    expect(resolveAssignment(cfg, "crew:researcher")?.critical).toBe(false); // delegation stops
+    // and the trap the seed's comment warns about: the mark travels with the
+    // assignment, so an UNDECLARED tier lands on default and inherits it
+    expect(resolveAssignment(cfg, "nonesuch")).toMatchObject({ from: "default", critical: true });
+  });
+
   it("every shipped provider template is a valid provider block", () => {
-    for (const name of ["openrouter", "zen", "lmstudio", "ollama"]) {
+    for (const name of ["openrouter", "lmstudio", "ollama"]) {
       const text = readFileSync(new URL(`../../../seed/compute-templates/${name}.yaml`, import.meta.url), "utf8");
       const cfg = parseCompute(`providers:\n${text.split("\n").filter((l) => !l.startsWith("#")).map((l) => (l.trim() === "" ? l : `  ${l}`)).join("\n")}`);
       expect(Object.keys(cfg.providers)).toEqual([name]);

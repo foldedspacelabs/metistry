@@ -362,7 +362,7 @@ The step is a provider template, a model id and — where the provider needs one
 (`sources/kit/compute-step.swift`):
 
 ```
-metistry compute providers add --from <openrouter|zen|lmstudio|ollama|llamaserver> --json
+metistry compute providers add --from <openrouter|lmstudio|ollama|llamaserver|applefm> --json
 metistry compute assign default <provider>/<model> --json
 ```
 

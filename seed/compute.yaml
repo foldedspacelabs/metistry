@@ -48,7 +48,16 @@
 #   # fallbacks: the router is deterministic (invariant 4). The local ids
 #   # below are placeholders — which local model earns `fast`/`routine` is
 #   # the bake-off's to decide (plan refresh 2026-09-13 C10/C14).
-#   default: { model: openrouter/anthropic/claude-sonnet-5, effort: medium }
+#   #
+#   # `critical: true` is the ONLY thing a budget's `action: critical_only`
+#   # lets through, and it belongs here (OPEN-4, ruled 2026-09-17): when the
+#   # month's money is spent, the turn you are waiting on still gets answered
+#   # while routines and delegation stop. It is on `default` alone — no tier
+#   # or crew below carries the mark, so the evening fold and a crew run are
+#   # what gets refused. The mark travels with the ASSIGNMENT, so keep
+#   # `routine:` declared if you set it: an unnamed tier lands on `default`
+#   # and inherits it.
+#   default: { model: openrouter/anthropic/claude-sonnet-5, effort: medium, critical: true }
 #   tiers:
 #     fast:    { model: local/qwen/qwen3-coder-30b, effort: low }
 #     routine: { model: local/qwen/qwen3-coder-30b, effort: low }

@@ -68,7 +68,7 @@ export { allProjects, memberOf } from "./scope.js";
 export type { AgentPrincipal, Db, Tier } from "./types.js";
 export { ARTIFACTS_TOOL_NAMES, registerArtifactTools, toPrincipal, type ArtifactsToolName } from "./artifacts-tools.js";
 export { THREAD_TOOL_NAMES, registerThreadTools, type ThreadToolName } from "./thread-tools.js";
-export { CREW_TOOL_NAMES, registerCrewTools, type CrewDispatcher, type CrewDispatchInput, type CrewDispatchOutcome, type CrewToolName } from "./crew-tools.js";
+export { CREW_TOOL_NAMES, crewRoster, registerCrewTools, type CrewDispatcher, type CrewDispatchInput, type CrewDispatchOutcome, type CrewSummary, type CrewToolName } from "./crew-tools.js";
 export { QUERIES_TOOL_NAMES, registerQueriesTools, MAX_ROWS as QUERIES_MAX_ROWS, type QueriesToolName } from "./queries-tools.js";
 export { ACTION_TOOL_NAMES, registerActionTools, proposeAction, type ActionExecutor, type ActionExecution, type ActionToolName } from "./action-tools.js";
 export { type Outcome } from "./outcome.js";

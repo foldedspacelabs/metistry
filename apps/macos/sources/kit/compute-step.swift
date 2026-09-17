@@ -30,7 +30,6 @@ import Observation
 /// names and nothing else: what each one writes is the CLI's file to own.
 public enum ComputeTemplate: String, CaseIterable, Sendable, Identifiable {
     case openrouter
-    case zen
     case lmstudio
     case ollama
     case llamaserver
@@ -42,7 +41,6 @@ public enum ComputeTemplate: String, CaseIterable, Sendable, Identifiable {
     public var label: String {
         switch self {
         case .openrouter: return "OpenRouter"
-        case .zen: return "OpenCode Zen"
         case .lmstudio: return "LM Studio"
         case .ollama: return "Ollama"
         case .llamaserver: return "Bundled Local Model"
@@ -54,7 +52,6 @@ public enum ComputeTemplate: String, CaseIterable, Sendable, Identifiable {
     public var detail: String {
         switch self {
         case .openrouter: return "One key, most models, prices passed through. Claude, GPT and the open-weights models all arrive this way."
-        case .zen: return "OpenCode's curated pay-as-you-go catalogue, on one key."
         case .lmstudio: return "An LM Studio server you already run on this Mac. Nothing leaves the machine, and nothing is billed."
         case .ollama: return "An Ollama server you already run on this Mac. Nothing leaves the machine, and nothing is billed."
         case .llamaserver: return "The llama-server Metistry bundles and starts itself. No second app to install, and nothing leaves the machine."
@@ -67,7 +64,7 @@ public enum ComputeTemplate: String, CaseIterable, Sendable, Identifiable {
     /// ignored.
     public var needsKey: Bool {
         switch self {
-        case .openrouter, .zen: return true
+        case .openrouter: return true
         // apple-fm authenticates with METISTRY_BRIDGE_TOKEN_APPLE_FM, which
         // this install already minted for itself — `providers add` finds it in
         // the environment and asks for nothing (compute.ts's `secretStatus`
@@ -84,7 +81,6 @@ public enum ComputeTemplate: String, CaseIterable, Sendable, Identifiable {
     public var suggestedModel: String {
         switch self {
         case .openrouter: return "anthropic/claude-sonnet-5"
-        case .zen: return "claude-sonnet-5"
         case .lmstudio, .ollama, .llamaserver, .applefm: return ""
         }
     }

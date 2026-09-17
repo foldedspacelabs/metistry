@@ -11,6 +11,10 @@ model: haiku                  # haiku | sonnet | opus
 # extraction crew — read a lot, report one page — wants haiku + low; the
 # assistant does the thinking. Raise it deliberately and watch the cost.
 effort: low
+# One line saying what this crew is FOR. It reaches the assistant's
+# `agents_delegate` tool — the `crew` field lists every registered crew with
+# this sentence beside it (H8, 2026-09-17) — so it is what the assistant
+# chooses from, trimmed past 120 characters.
 description: Reads the granted project and resource notes and reports what it finds
 # Tool GROUPS on the brain (never single tools): knowledge (search + read
 # under `scope`), requests, capture, tasks, artifacts. `brain-read`,

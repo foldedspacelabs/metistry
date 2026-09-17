@@ -568,7 +568,7 @@ failed, and the message names the cursor to resume from.
 exist, which model each tier and crew runs on, and what each may spend:
 
 ```sh
-metistry compute providers add --from openrouter|zen|lmstudio|ollama|llamaserver
+metistry compute providers add --from openrouter|lmstudio|ollama|llamaserver|applefm
 metistry compute models list [--provider <name>]
 metistry compute assign default lmstudio/google/gemma-3n-e4b
 metistry compute budget instance --monthly 60 --action stop

@@ -94,6 +94,19 @@ export const NON_VAULT_ROOTS = Object.freeze([
   INSTANCE_LAYOUT.artifactsDir,
 ] as const);
 
+/**
+ * How "the whole vault" is spelled in a grant or a crew scope.
+ *
+ * Before the flat layout this was the vault directory's name with a trailing
+ * slash (`Knowledge/`). With the vault AT the instance root there is no name
+ * to say, so the bare vault is `/` — the one prefix that trims to the empty
+ * string, which every prefix test (`underAreas`, the SQL `areaFilter`) reads
+ * as "everything, root notes included". The console admits it for internal
+ * principals only: for an external agent an area grant is a prefix, and
+ * "everything" is not an area.
+ */
+export const VAULT_ROOT_AREA = "/";
+
 /** Root files that are the user's hand alone, outside `.metistry/`. */
 export const PROTECTED_ROOT_FILES = Object.freeze([INSTANCE_LAYOUT.assistantInstructions, INSTANCE_LAYOUT.readme] as const);
 

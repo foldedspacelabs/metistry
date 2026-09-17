@@ -31,7 +31,9 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"          # Contents/MacOS is Apple's mandated
 cp helper/Info.plist "$APP/Contents/Info.plist"   # bundle layout, not ours.
 
-swiftc -O -framework EventKit -framework Foundation \
+# -target pins the floor to the app's own minimum (apps/macos Package.swift,
+# .macOS(.v14)); without it swiftc targets the build host.
+swiftc -O -target arm64-apple-macos14.0 -framework EventKit -framework Foundation \
   -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker helper/Info.plist \
   helper/ek-helper.swift -o "$APP/Contents/MacOS/ek-helper"
 

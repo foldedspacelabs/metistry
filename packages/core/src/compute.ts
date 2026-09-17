@@ -329,8 +329,8 @@ export type Assignment = z.infer<typeof assignmentSchema>;
 export const assignmentsSchema = z.strictObject({
   /** Where every unnamed and unknown tier lands. Required whenever `assignments:` is present — a half-assigned file would silently fall back to `rules.yaml` for some turns and not others. */
   default: assignmentSchema,
-  tiers: z.record(z.string().regex(NAME_RE, "tier names are lowercase kebab-case (casing rule: only Knowledge/ is TitleCase)"), assignmentSchema).default({}),
-  crews: z.record(z.string().regex(NAME_RE, "crew names are lowercase kebab-case (casing rule: only Knowledge/ is TitleCase)"), assignmentSchema).default({}),
+  tiers: z.record(z.string().regex(NAME_RE, "tier names are lowercase kebab-case (casing rule: only the vault is TitleCase)"), assignmentSchema).default({}),
+  crews: z.record(z.string().regex(NAME_RE, "crew names are lowercase kebab-case (casing rule: only the vault is TitleCase)"), assignmentSchema).default({}),
 });
 
 export type Assignments = z.infer<typeof assignmentsSchema>;
@@ -364,7 +364,7 @@ export type Budgets = z.infer<typeof budgetsSchema>;
 
 export const computeSchema = z
   .strictObject({
-    providers: z.record(z.string().regex(PROVIDER_NAME_RE, "provider names are lowercase kebab-case (casing rule: only Knowledge/ is TitleCase)"), providerSchema).default({}),
+    providers: z.record(z.string().regex(PROVIDER_NAME_RE, "provider names are lowercase kebab-case (casing rule: only the vault is TitleCase)"), providerSchema).default({}),
     /** Absent = this file assigns nothing and `rules.yaml`'s `tiers:` still decides (the transition, until the engine lands). */
     assignments: assignmentsSchema.optional(),
     budgets: budgetsSchema.optional(),

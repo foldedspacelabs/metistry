@@ -16,44 +16,45 @@ const { hasDb } = loadTestEnv(new URL("../../../.env", import.meta.url)); // MET
 const policy = { idleDays: 30, maxDays: 365 };
 
 describe("agent grants validation (pure)", () => {
-  it("accepts the three tiers with TitleCase Knowledge/ prefixes", () => {
+  it("accepts the three tiers with TitleCase vault prefixes", () => {
     expect(agents.validateGrants({ tier: "none" })).toEqual({ tier: "none", areas: [] });
     expect(agents.validateGrants({ tier: "index", areas: [] })).toEqual({ tier: "index", areas: [] });
-    expect(agents.validateGrants({ tier: "areas", areas: [" Knowledge/Areas/Fsl ", "Knowledge/Projects/Drey Dev", "Knowledge/Areas/Fsl"] }))
-      .toEqual({ tier: "areas", areas: ["Knowledge/Areas/Fsl", "Knowledge/Projects/Drey Dev"] });
+    expect(agents.validateGrants({ tier: "areas", areas: [" Areas/Fsl ", "Projects/Drey Dev", "Areas/Fsl"] }))
+      .toEqual({ tier: "areas", areas: ["Areas/Fsl", "Projects/Drey Dev"] });
   });
 
   it("accepts an optional `queries` boolean (mcp-brain's queries_list/queries_run grant, a separate axis from tier), default omitted (false)", () => {
     expect(agents.validateGrants({ tier: "none" })).toEqual({ tier: "none", areas: [] }); // default: no `queries` key at all
     expect(agents.validateGrants({ tier: "none", queries: false })).toEqual({ tier: "none", areas: [] });
     expect(agents.validateGrants({ tier: "none", queries: true })).toEqual({ tier: "none", areas: [], queries: true });
-    expect(agents.validateGrants({ tier: "areas", areas: ["Knowledge/Areas/Fsl"], queries: true })).toEqual({ tier: "areas", areas: ["Knowledge/Areas/Fsl"], queries: true });
+    expect(agents.validateGrants({ tier: "areas", areas: ["Areas/Fsl"], queries: true })).toEqual({ tier: "areas", areas: ["Areas/Fsl"], queries: true });
     expect(() => agents.validateGrants({ tier: "none", queries: "yes" })).toThrow(agents.AgentError);
   });
 
-  it("rejects lowercase knowledge/, non-Knowledge paths, traversal, and bare Knowledge", () => {
-    for (const bad of ["knowledge/Areas/Fsl", "Knowledge/areas/fsl", "inbox/", "/Knowledge/Areas", "Knowledge", "Knowledge/", "Knowledge/../secrets", "Knowledge/Areas/Fsl/", "../Knowledge/Areas"]) {
+  it("rejects lowercase roots, the machinery, traversal, and the bare vault", () => {
+    // `.metistry/` is unspellable here: an area starts with an uppercase letter
+    for (const bad of ["areas/Fsl", "Areas/fsl", "inbox/", "/Areas", "/", "Areas/../secrets", "Areas/Fsl/", "../Areas", ".metistry/queries"]) {
       expect(() => agents.validateGrants({ tier: "areas", areas: [bad] }), bad).toThrow(agents.AgentError);
       expect(() => agents.validateGrants({ tier: "areas", areas: [bad] }, { kind: "external" }), bad).toThrow(agents.AgentError);
     }
     expect(() => agents.validateGrants({ tier: "admin" })).toThrow(agents.AgentError);
-    expect(() => agents.validateGrants({ tier: "none", areas: ["Knowledge/Areas/Fsl"] })).toThrow(agents.AgentError); // areas only with tier=areas
+    expect(() => agents.validateGrants({ tier: "none", areas: ["Areas/Fsl"] })).toThrow(agents.AgentError); // areas only with tier=areas
     expect(() => agents.validateGrants({ tier: "areas", areas: [] })).toThrow(agents.AgentError);
-    expect(() => agents.validateGrants({ tier: "areas", areas: "Knowledge/Areas/Fsl" })).toThrow(agents.AgentError);
+    expect(() => agents.validateGrants({ tier: "areas", areas: "Areas/Fsl" })).toThrow(agents.AgentError);
   });
 
-  it("the bare vault (`Knowledge/`) is admitted for kind=internal only, normalized, and still refused everything else", () => {
-    // internal: `Knowledge` and `Knowledge/` both mean the whole vault, spelled `Knowledge/`
-    expect(agents.validateGrants({ tier: "areas", areas: ["Knowledge"] }, { kind: "internal" })).toEqual({ tier: "areas", areas: ["Knowledge/"] });
-    expect(agents.validateGrants({ tier: "areas", areas: [" Knowledge/ ", "Knowledge", "Knowledge/Areas/Fsl"] }, { kind: "internal" })).toEqual({ tier: "areas", areas: ["Knowledge/", "Knowledge/Areas/Fsl"] });
-    expect(agents.ASSISTANT_DEFAULT_AREAS).toEqual(["Knowledge/"]);
+  it("the bare vault (`/`) is admitted for kind=internal only, normalized, and still refused everything else", () => {
+    // internal: the whole vault is spelled `/` — there is no directory name to say any more
+    expect(agents.validateGrants({ tier: "areas", areas: ["/"] }, { kind: "internal" })).toEqual({ tier: "areas", areas: ["/"] });
+    expect(agents.validateGrants({ tier: "areas", areas: [" / ", "/", "Areas/Fsl"] }, { kind: "internal" })).toEqual({ tier: "areas", areas: ["/", "Areas/Fsl"] });
+    expect(agents.ASSISTANT_DEFAULT_AREAS).toEqual(["/"]);
     // internal is not a blank cheque: the other rules hold
-    for (const bad of ["knowledge/", "knowledge", "Knowledge//", "/Knowledge/", "Knowledge/areas", "Knowledge/../x", "inbox/"]) {
+    for (const bad of ["//", "./", "areas", "Areas/../x", "inbox/", ".metistry/"]) {
       expect(() => agents.validateGrants({ tier: "areas", areas: [bad] }, { kind: "internal" }), bad).toThrow(agents.AgentError);
     }
     // external (explicit or default): never
-    expect(() => agents.validateGrants({ tier: "areas", areas: ["Knowledge/"] }, { kind: "external" })).toThrow(/TitleCase Knowledge/);
-    expect(() => agents.validateGrants({ tier: "areas", areas: ["Knowledge/"] })).toThrow(agents.AgentError);
+    expect(() => agents.validateGrants({ tier: "areas", areas: ["/"] }, { kind: "external" })).toThrow(/TitleCase vault prefix/);
+    expect(() => agents.validateGrants({ tier: "areas", areas: ["/"] })).toThrow(agents.AgentError);
   });
 
   it("projects are slugs", () => {
@@ -180,14 +181,14 @@ describe.skipIf(!hasDb)("agent registry (integration)", () => {
     // <tool> --areas knowledge/…` tells the owner what to fix rather than "400"
     const lower = await json("PUT", `/api/agents/${agentId}/grants`, { tier: "areas", areas: ["knowledge/Areas/Fsl"] });
     expect(lower.status).toBe(400);
-    expect((await lower.json()).error).toMatchObject({ code: "invalid_request", message: expect.stringContaining("TitleCase Knowledge/... prefix") });
+    expect((await lower.json()).error).toMatchObject({ code: "invalid_request", message: expect.stringContaining("TitleCase vault prefix") });
     const noAreas = await json("PUT", `/api/agents/${agentId}/grants`, { tier: "areas", areas: [] });
     expect((await noAreas.json()).error.message).toContain("tier=areas needs at least one area");
     expect((await json("PUT", `/api/agents/${agentId}/grants`, { tier: "areas", areas: ["knowledge/Areas/Fsl"] })).status).toBe(400);
     expect((await json("PUT", `/api/agents/${agentId}/grants`, { tier: "areas", areas: ["inbox/secrets"] })).status).toBe(400);
     expect((await json("PUT", `/api/agents/${agentId}/grants`, { tier: "root" })).status).toBe(400);
     expect((await json("PUT", `/api/agents/nobody-${suffix}/grants`, { tier: "index" })).status).toBe(404);
-    const ok = await json("PUT", `/api/agents/${agentId}/grants`, { tier: "areas", areas: ["Knowledge/Areas/Fsl"] });
+    const ok = await json("PUT", `/api/agents/${agentId}/grants`, { tier: "areas", areas: ["Areas/Fsl"] });
     expect(ok.status).toBe(200);
     expect((await json("PUT", `/api/agents/${agentId}/projects`, { projects: ["Drey"] })).status).toBe(400);
     expect((await json("PUT", `/api/agents/${agentId}/projects`, { projects: ["drey"] })).status).toBe(200);
@@ -195,7 +196,7 @@ describe.skipIf(!hasDb)("agent registry (integration)", () => {
     expect((await json("POST", `/api/agents/${agentId}/grants`, { tier: "none" })).status).toBe(404);
 
     const principal = await agents.authenticateAgent(pool, { headers: { authorization: `Bearer ${agentToken}` } });
-    expect(principal).toEqual({ id: agentId, kind: "external", grants: { tier: "areas", areas: ["Knowledge/Areas/Fsl"] }, projects: ["drey"], autonomy: {} });
+    expect(principal).toEqual({ id: agentId, kind: "external", grants: { tier: "areas", areas: ["Areas/Fsl"] }, projects: ["drey"], autonomy: {} });
     // rejected payloads never reach the audit log; the accepted ones do
     const audit = await pool.query(`SELECT meta->>'op' AS op FROM runs WHERE kind='agent_admin' AND meta->>'agent'=$1 ORDER BY id`, [agentId]);
     expect(audit.rows.map((r) => r.op)).toEqual(["mint", "grant", "projects"]);
@@ -203,14 +204,14 @@ describe.skipIf(!hasDb)("agent registry (integration)", () => {
 
   it("grants: `queries` (mcp-brain's queries_list/queries_run access) round-trips through the same route, rejects non-booleans", async () => {
     expect((await json("PUT", `/api/agents/${agentId}/grants`, { tier: "none", queries: "yes" })).status).toBe(400);
-    const ok = await json("PUT", `/api/agents/${agentId}/grants`, { tier: "areas", areas: ["Knowledge/Areas/Fsl"], queries: true });
+    const ok = await json("PUT", `/api/agents/${agentId}/grants`, { tier: "areas", areas: ["Areas/Fsl"], queries: true });
     expect(ok.status).toBe(200);
-    expect((await ok.json()).grants).toEqual({ tier: "areas", areas: ["Knowledge/Areas/Fsl"], queries: true });
+    expect((await ok.json()).grants).toEqual({ tier: "areas", areas: ["Areas/Fsl"], queries: true });
     const principal = await agents.authenticateAgent(pool, { headers: { authorization: `Bearer ${agentToken}` } });
-    expect(principal?.grants).toEqual({ tier: "areas", areas: ["Knowledge/Areas/Fsl"], queries: true });
+    expect(principal?.grants).toEqual({ tier: "areas", areas: ["Areas/Fsl"], queries: true });
     // turning it back off drops the key entirely (default shape, byte for byte with a never-granted agent)
-    const off = await json("PUT", `/api/agents/${agentId}/grants`, { tier: "areas", areas: ["Knowledge/Areas/Fsl"] });
-    expect((await off.json()).grants).toEqual({ tier: "areas", areas: ["Knowledge/Areas/Fsl"] });
+    const off = await json("PUT", `/api/agents/${agentId}/grants`, { tier: "areas", areas: ["Areas/Fsl"] });
+    expect((await off.json()).grants).toEqual({ tier: "areas", areas: ["Areas/Fsl"] });
   });
 
   it("ensureInternalAgent: idempotent upsert from configuration — same token keeps the hash, projects re-sync, revocation clears, kind is internal", async () => {
@@ -252,15 +253,15 @@ describe.skipIf(!hasDb)("agent registry (integration)", () => {
     await expect(agents.ensureInternalAgent(pool, id, { token: rotated, projects: ["Drey"] })).rejects.toThrow(agents.AgentError);
     await expect(agents.ensureInternalAgent(pool, id, { token: "short" })).rejects.toThrow(agents.AgentError);
     await expect(agents.ensureInternalAgent(pool, "Bad Id", { token: rotated })).rejects.toThrow(agents.AgentError);
-    expect(() => agents.validateGrants({ tier: "areas", areas: ["Knowledge/"] })).toThrow(agents.AgentError); // "everything" is not an area for an external agent; the internal default is exactly that
+    expect(() => agents.validateGrants({ tier: "areas", areas: ["/"] })).toThrow(agents.AgentError); // "everything" is not an area for an external agent; the internal default is exactly that
     // the list never carries a hash for internal agents either
     const list = await (await json("GET", "/api/agents")).json();
     expect(list.agents.find((a: any) => a.id === id)).toMatchObject({ kind: "internal", revoked: false });
     expect(JSON.stringify(list)).not.toContain(rotated);
     // the management API keys the bare-vault rule on the ROW's kind, never on the request: accepted for this internal row, refused for the external agent
-    expect((await json("PUT", `/api/agents/${id}/grants`, { tier: "areas", areas: ["Knowledge"] })).status).toBe(200);
-    expect((await agents.authenticateAgent(pool, { headers: { authorization: `Bearer ${rotated}` } }))?.grants).toEqual({ tier: "areas", areas: ["Knowledge/"] });
-    expect((await json("PUT", `/api/agents/${agentId}/grants`, { tier: "areas", areas: ["Knowledge/"] })).status).toBe(400);
+    expect((await json("PUT", `/api/agents/${id}/grants`, { tier: "areas", areas: ["/"] })).status).toBe(200);
+    expect((await agents.authenticateAgent(pool, { headers: { authorization: `Bearer ${rotated}` } }))?.grants).toEqual({ tier: "areas", areas: ["/"] });
+    expect((await json("PUT", `/api/agents/${agentId}/grants`, { tier: "areas", areas: ["/"] })).status).toBe(400);
     expect((await json("PUT", `/api/agents/${id}/grants`, { tier: "areas", areas: ["knowledge/"] })).status).toBe(400);
   });
 

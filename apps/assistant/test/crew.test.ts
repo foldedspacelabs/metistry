@@ -21,7 +21,7 @@ const researcher: CrewSnapshot = {
   effort: "low",
   uses: ["brain-read", "brain-report"],
   skills: [],
-  scope: ["Knowledge/Projects"],
+  scope: ["Projects"],
   projects: [],
   manages: [],
   max_turns: 7,

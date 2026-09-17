@@ -20,7 +20,7 @@ const PB = "itest-brain-b";
 const ALICE = "itest-brain-alice";
 const BOB = "itest-brain-bob";
 const HUB = "itest-brain-hub";
-const AREA = "Knowledge/Areas/Itest";
+const AREA = "Areas/Itest";
 const EMBED_MODEL = "itest-embed";
 const EMBED_DIM = 768;
 
@@ -82,13 +82,19 @@ describe.skipIf(!hasDb)("mcp-brain (real db, real MCP client)", () => {
     await pool.query(`DELETE FROM proposals WHERE source_agent IN ($1, $2, $3)`, [ALICE, BOB, HUB]);
     await pool.query(`DELETE FROM runs WHERE component IN ($1, $2, $3)`, [ALICE, BOB, HUB]);
     await pool.query(`DELETE FROM inbox WHERE source_agent IN ($1, $2, $3)`, [ALICE, BOB, HUB]);
-    await pool.query(`DELETE FROM knowledge_files WHERE path LIKE 'Knowledge/Areas/Itest%' OR path LIKE 'Knowledge/Areas/Other/Gamma%'`);
+    // `Knowledge/…` too: a scratch db that ran this suite before the
+    // 2026-09-17 layout still holds rows under the old prefix, and they would
+    // show up in every unscoped search below
+    await pool.query(
+      `DELETE FROM knowledge_files WHERE path LIKE 'Areas/Itest%' OR path LIKE 'Areas/Other/Gamma%'
+         OR path LIKE 'Knowledge/Areas/Itest%' OR path LIKE 'Knowledge/Areas/Other/Gamma%'`,
+    );
     await pool.query(
       `INSERT INTO knowledge_files (path, title, description, draft) VALUES
-        ('Knowledge/Areas/Itest/Alpha.md', 'Alpha note', 'about alpha', false),
-        ('Knowledge/Areas/Itest/Sub/Beta.md', NULL, NULL, false),
-        ('Knowledge/Areas/Itest/Draft.md', 'Alpha draft', 'unsettled alpha', true),
-        ('Knowledge/Areas/Other/Gamma.md', 'Gamma alpha', NULL, false)`,
+        ('Areas/Itest/Alpha.md', 'Alpha note', 'about alpha', false),
+        ('Areas/Itest/Sub/Beta.md', NULL, NULL, false),
+        ('Areas/Itest/Draft.md', 'Alpha draft', 'unsettled alpha', true),
+        ('Areas/Other/Gamma.md', 'Gamma alpha', NULL, false)`,
     );
 
     const queries = new QueryStore(pool);
@@ -401,8 +407,8 @@ cache_ttl: 0
     const alice = await connect("tok-alice"); // tier none
     for (const [tool, args] of [
       ["knowledge_search", { query: "alpha" }],
-      ["knowledge_read", { path: "Knowledge/Areas/Itest/Alpha.md" }],
-      ["knowledge_read", { path: "Knowledge/Areas/Itest/Nope.md" }], // absent AND ungranted: still "not granted"
+      ["knowledge_read", { path: "Areas/Itest/Alpha.md" }],
+      ["knowledge_read", { path: "Areas/Itest/Nope.md" }], // absent AND ungranted: still "not granted"
     ] as const) {
       expect(await call(alice, tool, args), tool).toMatchObject({ isError: true, body: { error: { code: "forbidden", message: "not granted" } } });
     }
@@ -414,31 +420,31 @@ cache_ttl: 0
     expect(s.body.tier).toBe("index");
     expect(s.body.mode).toBe("keyword"); // nothing embedded yet: the default is keyword, not empty
     expect(s.body.hits).toEqual([
-      { path: "Knowledge/Areas/Itest/Alpha.md", title: "Alpha note", description: "about alpha", score: 1 },
-      { path: "Knowledge/Areas/Other/Gamma.md", title: "Gamma alpha", description: null, score: 0.5 },
+      { path: "Areas/Itest/Alpha.md", title: "Alpha note", description: "about alpha", score: 1 },
+      { path: "Areas/Other/Gamma.md", title: "Gamma alpha", description: null, score: 0.5 },
     ]); // the draft matched "alpha" and is invisible
-    expect((await call(idx, "knowledge_search", { query: "beta" })).body.hits).toEqual([{ path: "Knowledge/Areas/Itest/Sub/Beta.md", title: "Beta", description: null, score: 1 }]);
+    expect((await call(idx, "knowledge_search", { query: "beta" })).body.hits).toEqual([{ path: "Areas/Itest/Sub/Beta.md", title: "Beta", description: null, score: 1 }]);
     // an explicit mode with nothing embedded answers in keyword and says so, rather than failing or returning empty
     const askedSemantic = await call(idx, "knowledge_search", { query: "ALPHA", mode: "semantic" });
     expect(askedSemantic.isError).toBe(false);
     expect(askedSemantic.body).toMatchObject({ mode: "keyword", degraded: expect.stringContaining("no embeddings stored") });
     expect((await call(idx, "knowledge_search", { query: "%" })).body.hits).toEqual([]); // LIKE metacharacters are literal
-    expect(await call(idx, "knowledge_read", { path: "Knowledge/Areas/Itest/Alpha.md" })).toMatchObject({ isError: true, body: { error: { code: "forbidden" } } });
+    expect(await call(idx, "knowledge_read", { path: "Areas/Itest/Alpha.md" })).toMatchObject({ isError: true, body: { error: { code: "forbidden" } } });
     await idx.close();
 
     grant("tok-areas", { id: ALICE, grants: { tier: "areas", areas: [AREA] }, projects: [] });
     const ar = await connect("tok-areas");
-    expect((await call(ar, "knowledge_search", { query: "alpha" })).body.hits.map((h: any) => h.path)).toEqual(["Knowledge/Areas/Itest/Alpha.md"]); // Gamma is outside the grant
-    expect(await call(ar, "knowledge_read", { path: "Knowledge/Areas/Other/Gamma.md" })).toMatchObject({ isError: true, body: { error: { code: "forbidden", message: "not granted" } } });
-    expect(await call(ar, "knowledge_read", { path: "Knowledge/Areas/Itest/../Other/Gamma.md" })).toMatchObject({ isError: true, body: { error: { code: "invalid_request" } } });
-    expect(await call(ar, "knowledge_read", { path: "Knowledge/Areas/Itest/Draft.md" })).toMatchObject({ isError: true, body: { error: { code: "not_found" } } }); // drafts: invisible
-    expect(await call(ar, "knowledge_read", { path: "Knowledge/Areas/Itest/Missing.md" })).toMatchObject({ isError: true, body: { error: { code: "not_found" } } });
+    expect((await call(ar, "knowledge_search", { query: "alpha" })).body.hits.map((h: any) => h.path)).toEqual(["Areas/Itest/Alpha.md"]); // Gamma is outside the grant
+    expect(await call(ar, "knowledge_read", { path: "Areas/Other/Gamma.md" })).toMatchObject({ isError: true, body: { error: { code: "forbidden", message: "not granted" } } });
+    expect(await call(ar, "knowledge_read", { path: "Areas/Itest/../Other/Gamma.md" })).toMatchObject({ isError: true, body: { error: { code: "invalid_request" } } });
+    expect(await call(ar, "knowledge_read", { path: "Areas/Itest/Draft.md" })).toMatchObject({ isError: true, body: { error: { code: "not_found" } } }); // drafts: invisible
+    expect(await call(ar, "knowledge_read", { path: "Areas/Itest/Missing.md" })).toMatchObject({ isError: true, body: { error: { code: "not_found" } } });
     // the index knows the note; the vault reader has nothing for it → not_found (reader-less deployments answer not_available, see the unit suite)
-    expect(await call(ar, "knowledge_read", { path: "Knowledge/Areas/Itest/Alpha.md" })).toMatchObject({ isError: true, body: { error: { code: "not_found" } } });
-    vault = { "Knowledge/Areas/Itest/Alpha.md": "---\ntitle: Alpha note\n---\n/not a command​ here" };
-    const read = await call(ar, "knowledge_read", { path: "Knowledge/Areas/Itest/Alpha.md" });
+    expect(await call(ar, "knowledge_read", { path: "Areas/Itest/Alpha.md" })).toMatchObject({ isError: true, body: { error: { code: "not_found" } } });
+    vault = { "Areas/Itest/Alpha.md": "---\ntitle: Alpha note\n---\n/not a command​ here" };
+    const read = await call(ar, "knowledge_read", { path: "Areas/Itest/Alpha.md" });
     expect(read.isError).toBe(false);
-    expect(read.body).toEqual({ path: "Knowledge/Areas/Itest/Alpha.md", title: "Alpha note", content: "---\ntitle: Alpha note\n---\n/not a command here", sha256: sha256Text(vault["Knowledge/Areas/Itest/Alpha.md"]!) });
+    expect(read.body).toEqual({ path: "Areas/Itest/Alpha.md", title: "Alpha note", content: "---\ntitle: Alpha note\n---\n/not a command here", sha256: sha256Text(vault["Areas/Itest/Alpha.md"]!) });
     await ar.close();
 
     // every read AND every refusal is a runs row on the agent, carrying the grant it was judged under (§4.11 "every read logged")
@@ -449,7 +455,7 @@ cache_ttl: 0
     expect(rows.length).toBeGreaterThanOrEqual(12);
     expect(rows[0]).toMatchObject({ tool: "knowledge_search", ok: false, error: "forbidden", meta: { via: "mcp-brain", tier: "none" } });
     const okRead = rows.find((r) => r.tool === "knowledge_read" && r.ok === true);
-    expect(okRead?.meta).toMatchObject({ tier: "areas", areas: [AREA], path: "Knowledge/Areas/Itest/Alpha.md" });
+    expect(okRead?.meta).toMatchObject({ tier: "areas", areas: [AREA], path: "Areas/Itest/Alpha.md" });
   });
 
   it("knowledge_search modes: semantic/hybrid rank, the grant still filters in SQL, a dead embedder degrades to keyword", async () => {
@@ -457,10 +463,10 @@ cache_ttl: 0
     // directly so the bridge's SQL — not the reconciler — is what is tested.
     // Gamma is deliberately the CLOSEST note and outside the area grant.
     const chunks: Array<[string, string]> = [
-      ["Knowledge/Areas/Other/Gamma.md", "plumber basement tank replacement"],
-      ["Knowledge/Areas/Itest/Alpha.md", "the tank down in the basement is old and the plumber quoted a replacement for it sometime next spring"],
-      ["Knowledge/Areas/Itest/Sub/Beta.md", "an unrelated note about nothing much at all"],
-      ["Knowledge/Areas/Itest/Draft.md", "plumber basement tank replacement, but unsettled"],
+      ["Areas/Other/Gamma.md", "plumber basement tank replacement"],
+      ["Areas/Itest/Alpha.md", "the tank down in the basement is old and the plumber quoted a replacement for it sometime next spring"],
+      ["Areas/Itest/Sub/Beta.md", "an unrelated note about nothing much at all"],
+      ["Areas/Itest/Draft.md", "plumber basement tank replacement, but unsettled"],
     ];
     const open: Array<{ close(): Promise<void> }> = [];
     try {
@@ -482,8 +488,8 @@ cache_ttl: 0
       const sem = await call(idx, "knowledge_search", { query: q, mode: "semantic" });
       expect(sem.isError).toBe(false);
       expect(sem.body.mode).toBe("semantic");
-      expect(sem.body.hits.map((h: any) => h.path)).not.toContain("Knowledge/Areas/Itest/Draft.md");
-      expect(sem.body.hits[0].path).toBe("Knowledge/Areas/Other/Gamma.md"); // the closest chunk
+      expect(sem.body.hits.map((h: any) => h.path)).not.toContain("Areas/Itest/Draft.md");
+      expect(sem.body.hits[0].path).toBe("Areas/Other/Gamma.md"); // the closest chunk
       expect(sem.body.hits[0].score).toBeGreaterThan(sem.body.hits[1].score);
       // an index grant sees titles and descriptions — never the chunk text that produced the match
       expect(Object.keys(sem.body.hits[0]).sort()).toEqual(["description", "path", "score", "title"]);
@@ -501,7 +507,7 @@ cache_ttl: 0
       open.push(ar);
       for (const mode of ["semantic", "hybrid"] as const) {
         const r = await call(ar, "knowledge_search", { query: q, mode });
-        expect(r.body.hits.map((h: any) => h.path).sort(), mode).toEqual(["Knowledge/Areas/Itest/Alpha.md", "Knowledge/Areas/Itest/Sub/Beta.md"]);
+        expect(r.body.hits.map((h: any) => h.path).sort(), mode).toEqual(["Areas/Itest/Alpha.md", "Areas/Itest/Sub/Beta.md"]);
       }
 
       // a dead embedder costs the ranking, never the answer
@@ -510,7 +516,7 @@ cache_ttl: 0
       embedderDown = false;
       expect(dead.isError).toBe(false);
       expect(dead.body).toMatchObject({ mode: "keyword", degraded: expect.stringContaining("embedder unavailable") });
-      expect(dead.body.hits.map((h: any) => h.path)).toEqual(["Knowledge/Areas/Itest/Alpha.md"]);
+      expect(dead.body.hits.map((h: any) => h.path)).toEqual(["Areas/Itest/Alpha.md"]);
 
       // the mode that actually ran is on the audit row, next to the one asked for
       const { rows } = await pool.query(
@@ -526,20 +532,20 @@ cache_ttl: 0
     }
   });
 
-  it("knowledge_write: internal only (external → not granted, nothing reaches the vault); bare Knowledge/ grant reads root notes and searches everything; provenance + CAS round trip; audited", async () => {
-    const path = "Knowledge/Areas/Itest/Written.md";
+  it("knowledge_write: internal only (external → not granted, nothing reaches the vault); bare vault grant (/) reads root notes and searches everything; provenance + CAS round trip; audited", async () => {
+    const path = "Areas/Itest/Written.md";
     // an external agent with the widest imaginable grant still cannot write
-    grant("tok-alice-wide", { id: ALICE, grants: { tier: "areas", areas: ["Knowledge/"] }, projects: [] });
+    grant("tok-alice-wide", { id: ALICE, grants: { tier: "areas", areas: ["/"] }, projects: [] });
     const alice = await connect("tok-alice-wide");
     expect(await call(alice, "knowledge_write", { path, content: "# Alice was here\n", message: "alice" })).toMatchObject({ isError: true, body: { error: { code: "forbidden", message: "not granted" } } });
     await alice.close();
     expect(writes).toHaveLength(0);
 
     // the instance's own assistant under the bare vault grant (the console's internal default)
-    grant("tok-hub-vault", { id: HUB, kind: "internal", grants: { tier: "areas", areas: ["Knowledge/"] }, projects: [] });
+    grant("tok-hub-vault", { id: HUB, kind: "internal", grants: { tier: "areas", areas: ["/"] }, projects: [] });
     const hub = await connect("tok-hub-vault");
     // ...searches the whole index (the trailing-slash prefix is honoured in SQL), drafts still invisible
-    expect((await call(hub, "knowledge_search", { query: "alpha" })).body.hits.map((h: any) => h.path)).toEqual(["Knowledge/Areas/Itest/Alpha.md", "Knowledge/Areas/Other/Gamma.md"]);
+    expect((await call(hub, "knowledge_search", { query: "alpha" })).body.hits.map((h: any) => h.path)).toEqual(["Areas/Itest/Alpha.md", "Areas/Other/Gamma.md"]);
 
     // create-only write: stamped, queued, intent in the principal's name
     const created = await call(hub, "knowledge_write", { path, content: "# Written\n\nby the assistant\n", message: "itest: first write", expected_sha256: "" });
@@ -571,7 +577,7 @@ cache_ttl: 0
       [HUB, false, "conflict"],
     ]);
     expect(rows[0]!.meta).toMatchObject({ via: "mcp-brain", kind: "external", path });
-    expect(rows[1]!.meta).toMatchObject({ kind: "internal", tier: "areas", areas: ["Knowledge/"], path, created: true, provenance: { source: HUB } });
+    expect(rows[1]!.meta).toMatchObject({ kind: "internal", tier: "areas", areas: ["/"], path, created: true, provenance: { source: HUB } });
     expect(rows[1]!.meta.args.content).toMatch(/^<\d+ chars>$/);
     expect(rows[3]!.meta.current_sha256).toBe(updated.body.sha256);
   });
@@ -583,14 +589,14 @@ cache_ttl: 0
     // tests only ever populated Alpha.md and Written.md.
     vault = {
       ...vault,
-      "Knowledge/Areas/Itest/Alpha.md": "# Alpha\n\nThis note mentions banana twice: banana, banana are tasty.\n",
+      "Areas/Itest/Alpha.md": "# Alpha\n\nThis note mentions banana twice: banana, banana are tasty.\n",
       // A pathologically backtracking line for knowledge_grep's `(a+)+$`
       // test: a long run of "a" with no matching tail forces the classic
       // exponential blowup — deterministic enough to reliably exceed the
       // worker's timeout guard.
-      "Knowledge/Areas/Itest/Sub/Beta.md": `# Beta\n\nNo fruit here, just words.\n${"a".repeat(40)}!\n`,
-      "Knowledge/Areas/Itest/Draft.md": "# Draft\n\nbanana appears in the draft too, but must never surface.\n",
-      "Knowledge/Areas/Other/Gamma.md": "# Gamma\n\nbanana outside the itest grant entirely.\n",
+      "Areas/Itest/Sub/Beta.md": `# Beta\n\nNo fruit here, just words.\n${"a".repeat(40)}!\n`,
+      "Areas/Itest/Draft.md": "# Draft\n\nbanana appears in the draft too, but must never surface.\n",
+      "Areas/Other/Gamma.md": "# Gamma\n\nbanana outside the itest grant entirely.\n",
     };
 
     const none = await connect("tok-alice");
@@ -599,29 +605,29 @@ cache_ttl: 0
 
     grant("tok-fs-index", { id: ALICE, grants: { tier: "index", areas: [] }, projects: [] });
     const idx = await connect("tok-fs-index");
-    const globalList = await call(idx, "knowledge_list", { prefix: "Knowledge/Areas/Itest" });
+    const globalList = await call(idx, "knowledge_list", { prefix: "Areas/Itest" });
     expect(globalList.isError).toBe(false);
     const idxPaths = globalList.body.entries.map((e: any) => e.path);
-    expect(idxPaths).toContain("Knowledge/Areas/Itest/Alpha.md");
-    expect(idxPaths).not.toContain("Knowledge/Areas/Itest/Draft.md"); // drafts excluded even at tier index
-    const alphaEntry = globalList.body.entries.find((e: any) => e.path === "Knowledge/Areas/Itest/Alpha.md");
+    expect(idxPaths).toContain("Areas/Itest/Alpha.md");
+    expect(idxPaths).not.toContain("Areas/Itest/Draft.md"); // drafts excluded even at tier index
+    const alphaEntry = globalList.body.entries.find((e: any) => e.path === "Areas/Itest/Alpha.md");
     expect(alphaEntry).toMatchObject({ kind: "file", title: "Alpha note" });
     await idx.close();
 
     grant("tok-fs-areas", { id: ALICE, grants: { tier: "areas", areas: [AREA] }, projects: [] });
     const ar = await connect("tok-fs-areas");
     // a prefix outside the grant is forbidden, exactly like knowledge_read
-    expect(await call(ar, "knowledge_list", { prefix: "Knowledge/Areas/Other" })).toMatchObject({ isError: true, body: { error: { code: "forbidden", message: "not granted" } } });
+    expect(await call(ar, "knowledge_list", { prefix: "Areas/Other" })).toMatchObject({ isError: true, body: { error: { code: "forbidden", message: "not granted" } } });
     // an omitted prefix aggregates across every granted area (only one here)
     const scoped = await call(ar, "knowledge_list", { depth: 5 });
     expect(scoped.isError).toBe(false);
     const scopedPaths = scoped.body.entries.map((e: any) => e.path).sort();
-    expect(scopedPaths).toContain("Knowledge/Areas/Itest/Alpha.md");
-    expect(scopedPaths).toContain("Knowledge/Areas/Itest/Sub/Beta.md");
-    expect(scopedPaths).toContain("Knowledge/Areas/Itest/Sub"); // the intermediate directory, breadth-limited by depth
-    expect(scopedPaths).not.toContain("Knowledge/Areas/Itest/Draft.md");
-    expect(scopedPaths.some((p: string) => p.startsWith("Knowledge/Areas/Other"))).toBe(false); // Gamma is outside the grant
-    const beta = scoped.body.entries.find((e: any) => e.path === "Knowledge/Areas/Itest/Sub/Beta.md");
+    expect(scopedPaths).toContain("Areas/Itest/Alpha.md");
+    expect(scopedPaths).toContain("Areas/Itest/Sub/Beta.md");
+    expect(scopedPaths).toContain("Areas/Itest/Sub"); // the intermediate directory, breadth-limited by depth
+    expect(scopedPaths).not.toContain("Areas/Itest/Draft.md");
+    expect(scopedPaths.some((p: string) => p.startsWith("Areas/Other"))).toBe(false); // Gamma is outside the grant
+    const beta = scoped.body.entries.find((e: any) => e.path === "Areas/Itest/Sub/Beta.md");
     expect(beta).toMatchObject({ kind: "file", title: "Beta" }); // no frontmatter title: falls back to the basename
     await ar.close();
   });
@@ -642,16 +648,16 @@ cache_ttl: 0
     const ar = await connect("tok-fs-areas");
 
     // a prefix outside the grant is forbidden before any content is touched
-    expect(await call(ar, "knowledge_grep", { pattern: "banana", prefix: "Knowledge/Areas/Other" })).toMatchObject({ isError: true, body: { error: { code: "forbidden", message: "not granted" } } });
+    expect(await call(ar, "knowledge_grep", { pattern: "banana", prefix: "Areas/Other" })).toMatchObject({ isError: true, body: { error: { code: "forbidden", message: "not granted" } } });
 
     // matches Alpha (2 lines... actually 1 line, "banana" appears 3x on one line) but never Draft (excluded) or Gamma (outside the grant)
     const hits = await call(ar, "knowledge_grep", { pattern: "banana" });
     expect(hits.isError).toBe(false);
     const paths = new Set(hits.body.hits.map((h: any) => h.path));
-    expect(paths.has("Knowledge/Areas/Itest/Alpha.md")).toBe(true);
-    expect(paths.has("Knowledge/Areas/Itest/Draft.md")).toBe(false);
-    expect(paths.has("Knowledge/Areas/Other/Gamma.md")).toBe(false);
-    expect(hits.body.hits[0]).toMatchObject({ path: "Knowledge/Areas/Itest/Alpha.md", line: expect.any(Number), text: expect.stringContaining("banana") });
+    expect(paths.has("Areas/Itest/Alpha.md")).toBe(true);
+    expect(paths.has("Areas/Itest/Draft.md")).toBe(false);
+    expect(paths.has("Areas/Other/Gamma.md")).toBe(false);
+    expect(hits.body.hits[0]).toMatchObject({ path: "Areas/Itest/Alpha.md", line: expect.any(Number), text: expect.stringContaining("banana") });
 
     // a case with no matches anywhere in the grant
     expect((await call(ar, "knowledge_grep", { pattern: "xyz-nomatch-zyx" })).body.hits).toEqual([]);
@@ -672,7 +678,7 @@ cache_ttl: 0
   it("resources: metistry:// URIs mirror knowledge_read's tier rule — none/index see nothing, areas lists and reads under its grant", async () => {
     const none = await connect("tok-alice");
     expect((await none.listResources()).resources).toEqual([]);
-    await expect(none.readResource({ uri: "metistry://Knowledge/Areas/Itest/Alpha.md" })).rejects.toThrow();
+    await expect(none.readResource({ uri: "metistry://Areas/Itest/Alpha.md" })).rejects.toThrow();
     await none.close();
 
     grant("tok-fs-index", { id: ALICE, grants: { tier: "index", areas: [] }, projects: [] });
@@ -684,22 +690,22 @@ cache_ttl: 0
     const ar = await connect("tok-fs-areas");
     const { resources } = await ar.listResources();
     const uris = resources.map((r) => r.uri);
-    expect(uris).toContain("metistry://Knowledge/Areas/Itest/Alpha.md");
-    expect(uris).not.toContain("metistry://Knowledge/Areas/Itest/Draft.md"); // drafts excluded
-    expect(uris.every((u) => u.startsWith("metistry://Knowledge/Areas/Itest/"))).toBe(true); // never Other/Gamma
+    expect(uris).toContain("metistry://Areas/Itest/Alpha.md");
+    expect(uris).not.toContain("metistry://Areas/Itest/Draft.md"); // drafts excluded
+    expect(uris.every((u) => u.startsWith("metistry://Areas/Itest/"))).toBe(true); // never Other/Gamma
 
-    const read = await ar.readResource({ uri: "metistry://Knowledge/Areas/Itest/Alpha.md" });
-    expect(read.contents[0]).toMatchObject({ uri: "metistry://Knowledge/Areas/Itest/Alpha.md", mimeType: "text/markdown", text: expect.stringContaining("banana") });
-    await expect(ar.readResource({ uri: "metistry://Knowledge/Areas/Other/Gamma.md" })).rejects.toThrow(); // outside the grant
+    const read = await ar.readResource({ uri: "metistry://Areas/Itest/Alpha.md" });
+    expect(read.contents[0]).toMatchObject({ uri: "metistry://Areas/Itest/Alpha.md", mimeType: "text/markdown", text: expect.stringContaining("banana") });
+    await expect(ar.readResource({ uri: "metistry://Areas/Other/Gamma.md" })).rejects.toThrow(); // outside the grant
     await ar.close();
   });
 
   it("misuse matrix: every knowledge_* surface (search, read, list, grep, resources) derives its gating from the SAME knowledgeScope — tiers × draft/settled × inside/outside prefix", async () => {
     // Fixture reused from the knowledge_list/knowledge_grep/resources tests just above:
     // Alpha = settled, inside the grant; Draft = draft, inside the grant; Gamma = settled, outside the grant.
-    const inside = "Knowledge/Areas/Itest/Alpha.md";
-    const draft = "Knowledge/Areas/Itest/Draft.md";
-    const outside = "Knowledge/Areas/Other/Gamma.md";
+    const inside = "Areas/Itest/Alpha.md";
+    const draft = "Areas/Itest/Draft.md";
+    const outside = "Areas/Other/Gamma.md";
 
     grant("tok-matrix-none", { id: ALICE, grants: { tier: "none", areas: [] }, projects: [] });
     grant("tok-matrix-index", { id: ALICE, grants: { tier: "index", areas: [] }, projects: [] });
@@ -723,7 +729,7 @@ cache_ttl: 0
     // --- tier index: titles/paths ARE visible (search, list); content is NOT (read, grep, resources all refuse/empty) ---
     const idx = await connect("tok-matrix-index");
     expect((await call(idx, "knowledge_search", { query: "alpha" })).body.hits.map((h: any) => h.path)).toContain(inside);
-    expect((await call(idx, "knowledge_list", { prefix: "Knowledge/Areas/Itest" })).body.entries.map((e: any) => e.path)).toContain(inside);
+    expect((await call(idx, "knowledge_list", { prefix: "Areas/Itest" })).body.entries.map((e: any) => e.path)).toContain(inside);
     for (const [tool, args] of [
       ["knowledge_read", { path: inside }],
       ["knowledge_grep", { pattern: "alpha" }],
@@ -747,8 +753,8 @@ cache_ttl: 0
     // outside the grant: settled, but not under any granted prefix — forbidden ("not granted") wherever a path/prefix is a caller argument
     for (const [tool, args] of [
       ["knowledge_read", { path: outside }],
-      ["knowledge_list", { prefix: "Knowledge/Areas/Other" }],
-      ["knowledge_grep", { pattern: "banana", prefix: "Knowledge/Areas/Other" }],
+      ["knowledge_list", { prefix: "Areas/Other" }],
+      ["knowledge_grep", { pattern: "banana", prefix: "Areas/Other" }],
     ] as const) {
       expect(await call(ar, tool, args), `${tool} outside the grant`).toMatchObject({ isError: true, body: { error: { code: "forbidden", message: "not granted" } } });
     }

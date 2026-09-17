@@ -113,7 +113,7 @@ describe("artifacts and dispatch routes name what is missing", () => {
 
 // These validators already name the field; the routes used to answer
 // `sendError(res, err.code)` and throw the message away, which is the whole
-// difference between "400" and "area must be a TitleCase Knowledge/... prefix".
+// difference between "400" and "area must be a TitleCase vault prefix".
 describe("the validators behind the connect and budget paths name the field", () => {
   const message = (fn: () => unknown) => {
     try {
@@ -127,9 +127,9 @@ describe("the validators behind the connect and budget paths name the field", ()
 
   it("grants (metistry connect --areas lands here)", () => {
     expect(message(() => validateGrants({ tier: "root" }))).toContain("tier must be none | index | areas");
-    expect(message(() => validateGrants({ tier: "areas", areas: ["knowledge/projects"] }))).toContain("TitleCase Knowledge/... prefix");
+    expect(message(() => validateGrants({ tier: "areas", areas: ["areas/projects"] }))).toContain("TitleCase vault prefix");
     expect(message(() => validateGrants({ tier: "areas", areas: [] }))).toContain("tier=areas needs at least one area");
-    expect(message(() => validateGrants({ tier: "index", areas: ["Knowledge/Projects"] }))).toContain("areas only apply to tier=areas");
+    expect(message(() => validateGrants({ tier: "index", areas: ["Projects"] }))).toContain("areas only apply to tier=areas");
     expect(message(() => validateProjects(["Not A Slug"]))).toBeTruthy();
   });
 

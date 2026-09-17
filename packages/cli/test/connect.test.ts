@@ -99,9 +99,9 @@ function fakeConsole(seed: Partial<Row>[] = []) {
       if (op[2] === "grants") {
         const g = body as { tier: string; areas: string[] };
         if (g.tier === "areas" && (g.areas ?? []).length === 0) return json(400, { error: { code: "invalid_request", message: "tier=areas needs at least one area" } });
-        // the same casing rule validateGrants enforces (CLAUDE.md: Knowledge/ is TitleCase)
-        if ((g.areas ?? []).some((a) => !/^Knowledge(\/[A-Z][A-Za-z0-9 _.'-]*)+$/.test(a))) {
-          return json(400, { error: { code: "invalid_request", message: "area must be a TitleCase Knowledge/... prefix" } });
+        // the same casing rule validateGrants enforces (CLAUDE.md: the vault is TitleCase)
+        if ((g.areas ?? []).some((a) => !/^[A-Z][A-Za-z0-9 _.'-]*(\/[A-Z][A-Za-z0-9 _.'-]*)*$/.test(a))) {
+          return json(400, { error: { code: "invalid_request", message: "area must be a TitleCase vault prefix (e.g. Areas/Fsl)" } });
         }
         row.grants = { tier: g.tier, areas: g.areas ?? [] };
         return json(200, { ok: true, grants: row.grants });
@@ -178,17 +178,17 @@ describe("connect: the agent row", () => {
     const c = fakeConsole();
     const r = await connect({
       tool: "cursor",
-      areas: ["Knowledge/Areas/Engineering", "Knowledge/Projects"],
+      areas: ["Areas/Engineering", "Projects"],
       projects: ["second-instance"],
       ...base(home, instanceDir, kc.exec, c.fetchFn),
     });
-    expect(r.grants).toEqual({ tier: "areas", areas: ["Knowledge/Areas/Engineering", "Knowledge/Projects"] });
+    expect(r.grants).toEqual({ tier: "areas", areas: ["Areas/Engineering", "Projects"] });
     expect(r.projects).toEqual(["second-instance"]);
     expect(c.calls.map((x) => `${x.method} ${x.path}`)).toEqual(["GET /api/agents", "POST /api/agents", "PUT /api/agents/cursor/grants", "PUT /api/agents/cursor/projects"]);
-    expect(c.calls[2]!.body).toEqual({ tier: "areas", areas: ["Knowledge/Areas/Engineering", "Knowledge/Projects"] });
+    expect(c.calls[2]!.body).toEqual({ tier: "areas", areas: ["Areas/Engineering", "Projects"] });
 
     const again = await connect({ tool: "cursor", ...base(home, instanceDir, kc.exec, c.fetchFn) });
-    expect(again.grants).toEqual({ tier: "areas", areas: ["Knowledge/Areas/Engineering", "Knowledge/Projects"] });
+    expect(again.grants).toEqual({ tier: "areas", areas: ["Areas/Engineering", "Projects"] });
     expect(c.calls.filter((x) => x.path.endsWith("/grants"))).toHaveLength(1);
   });
 

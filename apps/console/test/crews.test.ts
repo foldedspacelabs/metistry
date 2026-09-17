@@ -17,7 +17,7 @@ const root = fileURLToPath(new URL("../../../", import.meta.url));
 const seed = readFileSync(`${root}seed/agents/example/researcher.md`, "utf8");
 
 function withFrontmatter(patch: Record<string, unknown>, body = "Do the thing.\n"): string {
-  const base = { name: "researcher", type: "agent", area: "example", model: "haiku", uses: ["brain-read", "brain-report"], scope: ["Knowledge/Projects"] };
+  const base = { name: "researcher", type: "agent", area: "example", model: "haiku", uses: ["brain-read", "brain-report"], scope: ["Projects"] };
   const fm = Object.entries({ ...base, ...patch })
     .filter(([, v]) => v !== undefined)
     .map(([k, v]) => `${k}: ${JSON.stringify(v)}`)
@@ -41,8 +41,8 @@ describe("crew manifest files", () => {
 
   it("parses the seed researcher: frontmatter → manifest, body → prompt, scope → an external-shaped grant, sha over the file", () => {
     const def = parseCrewFile(seed, "seed/agents/example/researcher.md", { area: "example", name: "researcher" });
-    expect(def.manifest).toMatchObject({ name: "researcher", area: "example", model: "haiku", uses: ["knowledge", "requests"], scope: ["Knowledge/Projects", "Knowledge/Resources"], max_turns: 10, budget_usd_per_run: 0.25 });
-    expect(def.grants).toEqual({ tier: "areas", areas: ["Knowledge/Projects", "Knowledge/Resources"] });
+    expect(def.manifest).toMatchObject({ name: "researcher", area: "example", model: "haiku", uses: ["knowledge", "requests"], scope: ["Projects", "Resources"], max_turns: 10, budget_usd_per_run: 0.25 });
+    expect(def.grants).toEqual({ tier: "areas", areas: ["Projects", "Resources"] });
     expect(def.prompt.startsWith("You are a researcher working for {{name}}")).toBe(true); // templated later, in the runner, from identity.yaml
     expect(def.prompt).not.toContain("---");
     expect(def.sha256).toMatch(/^[0-9a-f]{64}$/);
@@ -71,8 +71,8 @@ describe("crew manifest files", () => {
     expect(() => parseCrewFile(withFrontmatter({ uses: ["knowledge_write"] }), "x")).toThrow(/never available to a crew/);
     expect(() => parseCrewFile(withFrontmatter({ uses: ["agents_delegate"] }), "x")).toThrow(/never available to a crew/);
     expect(() => parseCrewFile(withFrontmatter({ uses: ["knowledge_read"] }), "x")).toThrow(/unknown tool group/);
-    expect(() => parseCrewFile(withFrontmatter({ scope: ["Knowledge/projects"] }), "x")).toThrow(/scope: area must be a TitleCase/); // the registry's validator, external shape
-    expect(() => parseCrewFile(withFrontmatter({ scope: ["Knowledge"] }), "x")).toThrow(/scope/);
+    expect(() => parseCrewFile(withFrontmatter({ scope: ["projects"] }), "x")).toThrow(/scope\.0: .*TitleCase first segment/); // the casing rule, at the vault root
+    expect(() => parseCrewFile(withFrontmatter({ scope: ["/"] }), "x")).toThrow(/scope/); // the bare vault is not a crew scope
     expect(() => parseCrewFile(withFrontmatter({ model: "gpt" }), "x")).toThrow(/model/);
     expect(() => parseCrewFile(withFrontmatter({}, "\n\n"), "x")).toThrow(/operating prompt and may not be empty/);
     expect(() => parseCrewFile(withFrontmatter({ bogus_field: true }), "x")).toThrow(/invalid manifest/); // strict: an unknown top-level key is refused, not stripped
@@ -106,10 +106,10 @@ describe("crew manifest files", () => {
 
 describe("policy: crew scope ∩ target allow", () => {
   it("keeps the narrower prefix of each overlapping pair, nothing for disjoint ones, empty scope → nothing", () => {
-    expect(intersectAllow(["Knowledge/Projects/Ios", "Knowledge/Areas"], ["Knowledge/Projects", "Knowledge/Areas/Fsl", "Knowledge/Resources"])).toEqual(["Knowledge/Areas/Fsl", "Knowledge/Projects/Ios"]);
-    expect(intersectAllow(["Knowledge/Me"], ["Knowledge/Projects"])).toEqual([]);
-    expect(intersectAllow([], ["Knowledge/Projects"])).toEqual([]);
-    expect(intersectAllow(["Knowledge/Projectsx"], ["Knowledge/Projects"])).toEqual([]); // per segment, not by string
+    expect(intersectAllow(["Projects/Ios", "Areas"], ["Projects", "Areas/Fsl", "Resources"])).toEqual(["Areas/Fsl", "Projects/Ios"]);
+    expect(intersectAllow(["Me"], ["Projects"])).toEqual([]);
+    expect(intersectAllow([], ["Projects"])).toEqual([]);
+    expect(intersectAllow(["Projectsx"], ["Projects"])).toEqual([]); // per segment, not by string
   });
 
   it("the shipped local-crew target narrows the seed researcher to its own scope and keeps the target's sources + cap", async () => {
@@ -118,9 +118,9 @@ describe("policy: crew scope ∩ target allow", () => {
     const target = reg.get(LOCAL_CREW_TARGET)!;
     expect(target).toMatchObject({ transport: "local", result: { via: "report_queue" } });
     const def = parseCrewFile(seed, "seed", { area: "example", name: "researcher" });
-    expect(crewPolicy(def.manifest, target)).toEqual({ allow: ["Knowledge/Projects", "Knowledge/Resources"], deny_sources: ["comms"], max_brief_bytes: 65536 });
+    expect(crewPolicy(def.manifest, target)).toEqual({ allow: ["Projects", "Resources"], deny_sources: ["comms"], max_brief_bytes: 65536 });
     // a crew scoped to a personal root gets nothing from the product default: widen per instance, never here
-    expect(crewPolicy({ ...def.manifest, scope: ["Knowledge/Me", "Knowledge/Journal"] }, target).allow).toEqual([]);
+    expect(crewPolicy({ ...def.manifest, scope: ["Me", "Journal"] }, target).allow).toEqual([]);
   });
 });
 
@@ -165,7 +165,7 @@ async function registryWith(text: string): Promise<CrewRegistry> {
   return reg;
 }
 
-const assistant: AgentPrincipal = { id: "assistant", kind: "internal", grants: { tier: "areas", areas: ["Knowledge/"] }, projects: [] };
+const assistant: AgentPrincipal = { id: "assistant", kind: "internal", grants: { tier: "areas", areas: ["/"] }, projects: [] };
 
 describe("dispatchCrew (fakes)", () => {
   it("refuses a brief citing a path outside scope ∩ allow with the violations, logs the refusal, creates NO work row", async () => {
@@ -174,11 +174,11 @@ describe("dispatchCrew (fakes)", () => {
     const reg = await registryWith(seed);
     const db = fakeDb();
     const tasks = fakeTasks();
-    const r = await dispatchCrew(db, tasks, reg, targets, { crew: "researcher", brief: "Summarize Knowledge/Me/profile.md and Knowledge/Projects/Ios.md" }, assistant);
+    const r = await dispatchCrew(db, tasks, reg, targets, { crew: "researcher", brief: "Summarize Me/profile.md and Projects/Ios.md" }, assistant);
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.code).toBe("invalid_request");
-    expect(r.violations).toEqual([{ kind: "path_outside_allow", paths: ["Knowledge/Me/profile.md"], allow: ["Knowledge/Projects", "Knowledge/Resources"] }]);
+    expect(r.violations).toEqual([{ kind: "path_outside_allow", paths: ["Me/profile.md"], allow: ["Projects", "Resources"] }]);
     expect(tasks.created).toHaveLength(0);
     const start = db.q.find((x) => x.text.startsWith("INSERT INTO runs"))!;
     expect(start.values.slice(0, 4)).toEqual(["console", "dispatch", null, "local-crew"]);
@@ -205,13 +205,13 @@ describe("dispatchCrew (fakes)", () => {
     const reg = await registryWith(seed);
     const db = fakeDb();
     const tasks = fakeTasks();
-    const brief = "# Compare the two iOS plans\n\nRead Knowledge/Projects/Ios.md and [[Knowledge/Resources/Swift.md]]; report the differences.";
+    const brief = "# Compare the two iOS plans\n\nRead Projects/Ios.md and [[Resources/Swift.md]]; report the differences.";
     const r = await dispatchCrew(db, tasks, reg, targets, { crew: "researcher", brief, task_id: 9, idempotency_key: "k1" }, assistant);
-    expect(r).toEqual({ ok: true, work_id: 70, run_id: 501, crew: "researcher", allow: ["Knowledge/Projects", "Knowledge/Resources"], deduplicated: false });
+    expect(r).toEqual({ ok: true, work_id: 70, run_id: 501, crew: "researcher", allow: ["Projects", "Resources"], deduplicated: false });
     const [{ input, agent }] = tasks.created as [{ input: any; agent: string }];
     expect(agent).toBe("assistant"); // server-side identity, from the principal
     expect(input).toMatchObject({ title: "[crew:researcher] Compare the two iOS plans", kind: "task", owner: "crew:researcher", idempotency_key: "k1" });
-    expect(input.meta).toMatchObject({ target: "local-crew", brief, task_id: 9, dispatch_run_id: 501, allow: ["Knowledge/Projects", "Knowledge/Resources"] });
+    expect(input.meta).toMatchObject({ target: "local-crew", brief, task_id: 9, dispatch_run_id: 501, allow: ["Projects", "Resources"] });
     expect(input.meta.brief_sha).toMatch(/^[0-9a-f]{64}$/);
     expect(input.meta.crew).toEqual(snapshotOf(reg.get("researcher")!));
     expect(input.meta.crew.prompt).toContain("{{name}}");
@@ -264,7 +264,7 @@ describe("cross-kind delegation (collaboration rule 4)", () => {
     const reg = await registryWith(seed);
     const db = fakeDb();
     const tasks = fakeTasks();
-    const r = await dispatchCrew(db, tasks, reg, targets, { crew: "researcher", brief: "Summarize Knowledge/Projects/Ios.md" }, assistant, withKinds(FUTURE_KIND, "openai-compatible"));
+    const r = await dispatchCrew(db, tasks, reg, targets, { crew: "researcher", brief: "Summarize Projects/Ios.md" }, assistant, withKinds(FUTURE_KIND, "openai-compatible"));
     expect(r).toMatchObject({ ok: false, code: "invalid_request" });
     if (r.ok) return;
     expect(r.message).toContain("assignments.crews.researcher");
@@ -279,7 +279,7 @@ describe("cross-kind delegation (collaboration rule 4)", () => {
     const targets = new TargetRegistry({ env: {} });
     await targets.loadDir(`${root}targets`);
     const reg = await registryWith(seed);
-    const brief = { crew: "researcher", brief: "Summarize Knowledge/Projects/Ios.md" };
+    const brief = { crew: "researcher", brief: "Summarize Projects/Ios.md" };
     expect(await dispatchCrew(fakeDb(), fakeTasks(), reg, targets, brief, assistant, withKinds("openai-compatible", "openai-compatible"))).toMatchObject({ ok: true });
     expect(await dispatchCrew(fakeDb(), fakeTasks(), reg, targets, brief, assistant, emptyCompute())).toMatchObject({ ok: true });
   });

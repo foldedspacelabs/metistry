@@ -485,6 +485,33 @@ describe("connect claude-code", () => {
   });
 });
 
+describe("connect: what reaches disk survives a layout migration", () => {
+  // The 2026-09-17 flat layout moved every instance path. A config this verb
+  // WROTE with an instance path in it would go stale the moment
+  // `metistry migrate-layout` ran, and nothing would say so — the tool would
+  // simply stop reaching the console. So the invariant is stated as a test:
+  // what `connect` writes is a URL and an env-var reference, never a path on
+  // this machine. `--rotate` and a re-run go through the same writer, so
+  // holding it here holds it for both.
+  it("no written config names a filesystem path, in either layout", async () => {
+    const { home, instanceDir } = await scratch();
+    const kc = fakeSecurity();
+    const c = fakeConsole();
+    for (const tool of ["cursor", "opencode"] as const) {
+      await connect({ tool, ...base(home, instanceDir, kc.exec, c.fetchFn) });
+      await connect({ tool, rotate: true, ...base(home, instanceDir, kc.exec, c.fetchFn) });
+    }
+    for (const file of [cursorConfigFile(home), opencodeConfigFile(home, {})]) {
+      const text = readFileSync(file, "utf8");
+      expect(text).not.toContain(instanceDir);
+      expect(text).not.toContain("Knowledge/");
+      expect(text).not.toContain(".metistry");
+      // the bearer is an interpolation the editor resolves, not a value
+      expect(text).toMatch(/\{env:METISTRY_AGENT_TOKEN_/); // `${env:…}` (Cursor) and `{env:…}` (OpenCode)
+    }
+  });
+});
+
 describe("connect --list", () => {
   it("reports each tool's row, bearer and config", async () => {
     const { home, instanceDir } = await scratch();

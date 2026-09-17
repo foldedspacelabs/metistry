@@ -397,16 +397,11 @@ the tokens, and honest screenshots of what we built last round.
 **Contradictions in the repo, logged rather than routed around** (per
 `CLAUDE.md`; none edited in place, and you should not be surprised by them):
 
-- **`design-system.md` P6 and §3.1 still say ten flat destinations** (Feed ·
-  Chat · Agents · Projects · Artifacts · Capture · Needs You · Dashboard ·
-  Status · Devices) and the PWA ships eleven in a different order; §3.1 above
-  supersedes both and neither has been amended yet. Capture is one of those
-  ten and one of the glossary's eight nouns: the noun stays, the tab goes.
-- **`design-system.md` §3.9 says a request has six types and three answers.**
-  `glossary.md` says **seven** types (it gained `action`) and
-  `docs/ops/reply-feedback.md` documents **six** answers; §3.6 above is the
-  ruled shape. (That page's heading still reads "five verbs" over a six-row
-  table — a stale heading, not a second design.)
+- **`design-system.md` P6, §3.1 and §3.9 were amended 2026-09-17 (#188)** to
+  the seven sections and the six answers; the struck lines there record the
+  old ten destinations and three answers. The PWA still ships its older nav
+  and follows in a later PR. Capture is one of the glossary's eight nouns:
+  the noun stays, the tab goes.
 - **Compute can be managed only on the Mac** (`metistry compute` verbs; the
   console exposes no `/api/compute` route), which P6 forbids. **Knowledge has
   no client read path at all** — captures go in and nothing comes back out to

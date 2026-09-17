@@ -33,12 +33,18 @@ lists requests. A request has one of seven types:
 | **improvement** | change how the system itself behaves |
 | **action** | do one thing on your behalf — dispatch a brief, move a card, comment, capture |
 
-Every request takes the same three answers:
+Every request takes the same six answers (`docs/ops/reply-feedback.md`):
 
 - **Approve** — yes, do it / keep it.
 - **Revise** — nearly; here is what to change. (You say what; that reason is
   what makes the next one better.)
 - **Decline** — no. It stays searchable; nothing is deleted.
+- **Approve as Work** — yes, and put it on the board; only where the request
+  suggests work.
+- **Later** — not now. A snooze: the item leaves the queue and comes back by
+  itself.
+- **Skip** — not this, and nothing to say. Settles it without Decline's
+  consequences, so skipping never revokes anything.
 
 **Task** — a row of work on one shared list that you and every agent work from.
 A task is **claimed** with a lease, **renewed** while held, **released** or

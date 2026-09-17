@@ -41,7 +41,7 @@ The hook writes Cursor's native shape (`cursor.com/docs/hooks`):
 | `METISTRY_URL` | yes | the instance's origin; `POST {url}/capture` is the only call |
 | `METISTRY_AGENT_TOKEN_CURSOR` | yes | Cursor's own agent bearer (`metistry connect cursor`). `METISTRY_OWNER_TOKEN` is accepted as a fallback |
 | `METISTRY_CAPTURE_ON_STOP` | yes | `1` enables the hook. Anything else and it does nothing at all |
-| `METISTRY_CAPTURE_DIR` | no | where a note goes when the console cannot be reached (SHOULD-10: one silent drop ends the trust). A leading `~/` is expanded. Point it at your instance's `Knowledge/Inbox` and the reconciler picks the file up on its next scan (docs/ops/inbox.md) |
+| `METISTRY_CAPTURE_DIR` | no | where a note goes when the console cannot be reached (SHOULD-10: one silent drop ends the trust). A leading `~/` is expanded. Point it at your instance's `Inbox/` — the instance directory IS the vault (docs/ops/instance-layout.md) — and the reconciler picks the file up on its next scan (docs/ops/inbox.md) |
 
 Nothing is read from a file. If the instance is namespaced
 (`METISTRY_AGENT_TOKEN_CURSOR_<SUFFIX>`), export that value *into*

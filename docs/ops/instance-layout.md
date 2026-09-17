@@ -76,13 +76,36 @@ exactly what `docker compose down -v` should be able to lose.
 ## Migrating an existing instance
 
 `metistry migrate-layout` carries an instance from the legacy layout to the
-flat one: idempotent `git mv`, safe to run more than once, and available
-with `--dry-run` to preview the whole plan first. `metistry doctor` reports
-which layout an instance is on (`instance layout: flat | legacy`), so a
-`legacy` reading is the signal to run it. An instance that predates the
-2026-09-16 inbox-in-vault ruling needs `metistry migrate-inbox` first —
-`migrate-layout` expects to find `Knowledge/Inbox/` already in the vault,
-not a bare `inbox/` (`docs/ops/cli.md`, `docs/ops/inbox.md`).
+flat one:
+
+```sh
+metistry migrate-layout --dry-run     # every move and every row count, nothing run
+metistry migrate-layout               # do it
+metistry up                           # the verb restarts nothing itself
+```
+
+`git mv` for what git tracks and a plain move for what it does not; the
+plan is read off the filesystem BEFORE anything moves, so a name collision
+between `Knowledge/` and the instance root (a root `Journal/` and a
+`Knowledge/Journal/`) is refused with both sides named and the tree
+untouched. The database half is one transaction: `Knowledge/` drops out of
+`knowledge_files`, `knowledge_links`, `embeddings`, `inbox` and
+`projects.area`, and the whole-vault grant sentinel becomes `/`
+(`VAULT_ROOT_AREA`). It ends in one commit, and it restarts nothing.
+
+It refuses a dirty git tree (`--allow-dirty` overrides) and warns if the
+supervisor or reconciler job is running — the reconciler is the instance
+repo's sole committer, so stop it first. `docs/ops/cli.md` has the step
+list, the flags, and what is deliberately NOT rewritten.
+
+`metistry doctor` reports which layout an instance is on (`instance layout:
+flat | legacy`), so a `legacy` reading is the signal to run it, and the Mac
+app shows the same sentence in Status and in the first-run wizard. An
+instance that predates the 2026-09-16 inbox-in-vault ruling needs nothing
+extra — `migrate-layout` carries a bare root `inbox/` up to `Inbox/` itself
+— though running `metistry migrate-inbox` first is still fine, and is the
+smaller step if you want the two moves in two commits
+(`docs/ops/inbox.md`).
 
 New instances need none of this: `metistry init` writes the flat layout
 from the start.

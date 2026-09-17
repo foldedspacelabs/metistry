@@ -49,14 +49,14 @@ services:
       # default route — not the compose subnet, so a sibling container is
       # still remote. The launchd shape sets nothing and stays plain loopback.
       METISTRY_TRUSTED_LOOPBACK_PROXY: ${METISTRY_TRUSTED_LOOPBACK_PROXY:-docker-gateway}
-      # Captures live in the vault at Knowledge/Inbox/ (docs/ops/inbox.md) and
+      # Captures live in the vault at Inbox/ (docs/ops/inbox.md) and
       # go there through the reconciler's bridge — this container never mounts
       # the instance repo (D5, invariant 7). The volume below is the FALLBACK
       # for a console with no bridge configured: capture keeps working, those
-      # files are not in the vault, and moving them into Knowledge/Inbox/
+      # files are not in the vault, and moving them into Inbox/
       # later is enough for the reconciler's scan to pick them up.
       METISTRY_INBOX_DIR: /data/inbox
-      # Above this many bytes a capture goes to Knowledge/Inbox/.large/, which
+      # Above this many bytes a capture goes to Inbox/.large/, which
       # the instance gitignores. Unset = 5 MiB.
       METISTRY_INBOX_MAX_TRACKED_BYTES: ${METISTRY_INBOX_MAX_TRACKED_BYTES:-}
       # runner hardening (docs/ops/automation.md): failure-streak limit and
@@ -88,10 +88,11 @@ services:
       # The seed's copy ships in the image and assigns nothing; an instance
       # overlays its own file (D4, last existing wins) and both the console
       # and the assistant hot-reload it.
-      METISTRY_COMPUTE_FILES: ${METISTRY_COMPUTE_FILES:-seed/compute.yaml:compute.yaml}
-      # crews (docs/ops/crews.md): seed/agents ships in the image; `agents` is
-      # the instance repo's protected dir, reached through the vault bridge
-      METISTRY_AGENTS_DIRS: ${METISTRY_AGENTS_DIRS:-seed/agents:agents}
+      METISTRY_COMPUTE_FILES: ${METISTRY_COMPUTE_FILES:-seed/compute.yaml:.metistry/compute.yaml}
+      # crews (docs/ops/crews.md): seed/agents ships in the image;
+      # `.metistry/agents` is the instance repo's protected dir, reached
+      # through the vault bridge
+      METISTRY_AGENTS_DIRS: ${METISTRY_AGENTS_DIRS:-seed/agents:.metistry/agents}
       METISTRY_CREWS_SYNC_S: ${METISTRY_CREWS_SYNC_S:-300}
       # aws-costs collector (degrades absent): read-only Cost Explorer credentials
       METISTRY_AWS_ACCESS_KEY_ID: ${METISTRY_AWS_ACCESS_KEY_ID:-}
@@ -138,7 +139,7 @@ services:
       # with the SAME token the console registers (degrades: tool-less when unset)
       METISTRY_BRAIN_URL: ${METISTRY_BRAIN_URL:-http://console:8080/mcp}
       METISTRY_ASSISTANT_TOKEN: ${METISTRY_ASSISTANT_TOKEN:-}
-      METISTRY_COMPUTE_FILES: ${METISTRY_COMPUTE_FILES:-seed/compute.yaml:compute.yaml}
+      METISTRY_COMPUTE_FILES: ${METISTRY_COMPUTE_FILES:-seed/compute.yaml:.metistry/compute.yaml}
       # The engine's credential is named BY compute.yaml, not here: a
       # provider's `auth.secret` is the environment variable the engine reads
       # at the point of the call (docs/ops/compute.md). Pass through whichever

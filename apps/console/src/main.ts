@@ -8,7 +8,9 @@ import {
   EMBED_DEFAULT_URL,
   EmbedClient,
   firstOnMachineBaseUrl,
-  INSTANCES_FILENAME,
+  INSTANCE_LAYOUT,
+  RULES_FILES_DEFAULT,
+  instancePath,
   intEnv,
   optionalEnv,
   requireEnv,
@@ -70,7 +72,7 @@ for (const dir of optionalEnv("METISTRY_QUERIES_DIRS", "seed/queries").split(":"
 
 // D4 overlay for rules too: last existing file wins.
 let rules;
-for (const p of optionalEnv("METISTRY_RULES_FILES", "seed/rules.yaml:rules.yaml").split(":")) {
+for (const p of optionalEnv("METISTRY_RULES_FILES", RULES_FILES_DEFAULT).split(":")) {
   try {
     rules = loadRules(await readFile(p, "utf8"));
   } catch (err: any) {
@@ -149,13 +151,13 @@ const listKnowledge = reconcilerUrl && reconcilerToken ? vaultBridgeLister({ url
 const searchVaultKeyword = reconcilerUrl && reconcilerToken ? vaultBridgeSearcher({ url: reconcilerUrl, token: reconcilerToken }) : undefined;
 if (!vault) console.warn("vault bridge absent: set METISTRY_RECONCILER_URL + METISTRY_BRIDGE_TOKEN_RECONCILER for knowledge_read, knowledge_write, knowledge_list, knowledge_grep and artifacts (degrades: absent)");
 
-// Captures live in the vault at `Knowledge/Inbox/` (docs/ops/inbox.md), so
+// Captures live in the vault at `Inbox/` (docs/ops/inbox.md), so
 // Obsidian sees them and git carries them. The bytes go through the SAME
 // bridge as every other vault write — the reconciler stays the only process
 // holding the instance repo (D5), and this container gets no mount.
 // Without a bridge the sink degrades to a plain directory: capture keeps
 // working (SHOULD-10 — one silent drop ends the trust), those files are not
-// in the vault, and moving them into `Knowledge/Inbox/` later is enough for
+// in the vault, and moving them into `Inbox/` later is enough for
 // the reconciler's scan to pick them up.
 const inboxDir = optionalEnv("METISTRY_INBOX_DIR", process.env.METISTRY_INSTANCE_DIR ? `${process.env.METISTRY_INSTANCE_DIR.replace(/\/+$/, "")}/${INBOX_PREFIX}` : `./${INBOX_PREFIX}`);
 const maxTrackedBytes = intEnv("METISTRY_INBOX_MAX_TRACKED_BYTES", DEFAULT_MAX_TRACKED_BYTES);
@@ -184,7 +186,7 @@ console.log(`embeddings: ${localModel.url}/embeddings (from ${localModel.from}),
 // D4 overlay — an entry not on disk is read through the vault bridge (that
 // is how the instance repo's protected `agents/` reaches this container).
 // Loaded now and re-synced on an interval; the registry rows are kind=crew.
-const crews = new CrewRegistry(pool, optionalEnv("METISTRY_AGENTS_DIRS", "seed/agents:agents").split(":"), vault);
+const crews = new CrewRegistry(pool, optionalEnv("METISTRY_AGENTS_DIRS", `seed/agents:${INSTANCE_LAYOUT.agentsDir}`).split(":"), vault);
 const logCrewSync = (s: Awaited<ReturnType<CrewRegistry["refresh"]>>) => {
   const changes = [`registered ${s.registered.length}`, `resynced ${s.resynced.length}`, `revoked ${s.revoked.length}`, ...(s.conflicts.length ? [`CONFLICTS ${s.conflicts.join(",")}`] : [])];
   console.log(`crews: ${crews.names().join(", ") || "(none)"} [${changes.join(", ")}] sources ${JSON.stringify(crews.sources)}`);
@@ -196,7 +198,7 @@ setInterval(() => crews.refresh().then(logCrewSync, (err) => console.error("crew
 // GET /api/identity: identity.yaml through the assistant's overlay rule
 // (docs/ops/assistant-tools.md), defaulting to the instance repo's copy when
 // METISTRY_INSTANCE_DIR says where that is.
-const identityFiles = optionalEnv("METISTRY_IDENTITY_FILES", `seed/identity.yaml:${process.env.METISTRY_INSTANCE_DIR?.replace(/\/+$/, "") || "."}/identity.yaml`);
+const identityFiles = optionalEnv("METISTRY_IDENTITY_FILES", `seed/identity.yaml:${instancePath(process.env.METISTRY_INSTANCE_DIR || ".", "identity")}`);
 const identity = await loadPublicIdentity(identityFiles);
 if (!identity) console.warn(`identity absent: no complete identity.yaml (name + instance_id) in ${identityFiles} — GET /api/identity answers 503 (degrades: absent)`);
 
@@ -205,7 +207,7 @@ if (!identity) console.warn(`identity absent: no complete identity.yaml (name + 
 // default — an install's peers are its own — so an instance dir is what
 // makes the route answer at all.
 const instanceDir = process.env.METISTRY_INSTANCE_DIR?.replace(/\/+$/, "");
-const instancesFiles = process.env.METISTRY_INSTANCES_FILES ?? (instanceDir ? `${instanceDir}/${INSTANCES_FILENAME}` : undefined);
+const instancesFiles = process.env.METISTRY_INSTANCES_FILES ?? (instanceDir ? instancePath(instanceDir, "instances") : undefined);
 if (!instancesFiles) console.warn("peer registry absent: neither METISTRY_INSTANCES_FILES nor METISTRY_INSTANCE_DIR is set — GET /api/instances answers 503 (degrades: absent)");
 
 const server = makeServer(pool, queries, {

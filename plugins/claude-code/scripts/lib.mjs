@@ -4,7 +4,7 @@
 // The server contract is POST /capture with a JSON body of
 // { note, filename } (apps/console/src/server.ts). /capture has no
 // metadata field, so provenance rides in the note's frontmatter — the same
-// place §4.15 puts it once a proposal is accepted into Knowledge/.
+// place §4.15 puts it once a proposal is accepted into the vault.
 
 import { existsSync } from "node:fs";
 import { hostname } from "node:os";

@@ -134,7 +134,7 @@ async function loadFileMeta(db: Db, paths: string[]): Promise<Map<string, FileMe
 function registerKnowledgeList(reg: Register, deps: KnowledgeFsDeps, principal: AgentPrincipal): void {
   reg(
     "knowledge_list",
-    "List files/directories under a Knowledge/ prefix, depth-limited. Tier `index` browses everything; tier `areas` is restricted to your granted prefixes. Drafts excluded.",
+    "List files/directories under a vault prefix, depth-limited. Tier `index` browses everything; tier `areas` is restricted to your granted prefixes. Drafts excluded.",
     { prefix: z.string().max(500).optional(), depth: z.number().int().min(1).max(5).optional() },
     async (a) => {
       const scope = knowledgeScope(principal);

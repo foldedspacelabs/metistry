@@ -15,6 +15,7 @@ import { readFile } from "node:fs/promises";
 import { parse as parseYaml } from "yaml";
 import {
   DEFAULT_TIER,
+  RULES_FILES_DEFAULT,
   parseTiers,
   resolveAssignment,
   resolveTier,
@@ -25,7 +26,8 @@ import {
   type TierMap,
 } from "@foldedspacelabs/metistry-core";
 
-export const RULES_FILES_DEFAULT = "seed/rules.yaml:rules.yaml";
+/** The D4 overlay default, from core so the console and the engine read the same file. */
+export { RULES_FILES_DEFAULT };
 
 /** The map used when no rules file is readable: one tier, the configured default model, medium effort. */
 export function fallbackTiers(model: string): TierMap {

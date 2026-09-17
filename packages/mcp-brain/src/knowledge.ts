@@ -1,7 +1,7 @@
 // Knowledge under grants (§4.11): tier `none` sees nothing and is told
 // "not granted" (never "not found" — absence of permission must not look
 // like absence of knowledge); `index` sees titles + one-line descriptions;
-// `areas` reads settled notes under its granted Knowledge/ prefixes. Draft
+// `areas` reads settled notes under its granted vault prefixes. Draft
 // notes are excluded at every tier by a WHERE clause the tool cannot skip.
 //
 // The index lives in `knowledge_files` (reconciler-owned). Note CONTENT has
@@ -9,7 +9,7 @@
 // lands, so `knowledge_read` degrades to `not_available` unless the host
 // injects a reader — no vault mount is invented here.
 
-import { EmbedUnavailableError, vectorLiteral, type ErrorCode } from "@foldedspacelabs/metistry-core";
+import { EmbedUnavailableError, isVaultPath, vectorLiteral, type ErrorCode } from "@foldedspacelabs/metistry-core";
 import type { AgentPrincipal, Db, Tier } from "./types.js";
 
 export interface KnowledgeHit {
@@ -43,23 +43,28 @@ export type ReadOutcome =
   | { ok: true; path: string; title: string; content: string }
   | { ok: false; code: ErrorCode; message?: string };
 
-// A vault path an agent may name: Knowledge/ plus segments, no traversal,
-// no leading slash. Mirrors the grant shape the console validates.
-const PATH_RE = /^Knowledge(\/[^/\0]+)+$/;
-
+/**
+ * A vault path an agent may name. Since the 2026-09-17 layout the vault root
+ * IS the instance directory, so there is no prefix to anchor on — the rule is
+ * core's `isVaultPath`: no traversal, no leading slash, nothing inside a
+ * dot-directory (`.metistry/` is the machinery, and an agent may not read it
+ * here any more than it may write it), and not `Artifacts/`, which is not
+ * knowledge. Mirrors the grant shape the console validates.
+ */
 export function validKnowledgePath(path: string): boolean {
-  return path.length <= 500 && PATH_RE.test(path) && !path.split("/").some((seg) => seg === "." || seg === "..");
+  return typeof path === "string" && path.length <= 500 && !/[\0\\]/.test(path) && isVaultPath(path);
 }
 
 /**
  * Prefix semantics of a grant: the area itself or anything below it. A
- * trailing slash names a directory as a whole — `Knowledge/` is the bare
- * vault grant the console admits for internal principals only.
+ * trailing slash names a directory as a whole, and the bare vault — every
+ * path, root notes included — is spelled `/`, which rtrims to the empty
+ * prefix. The console admits that spelling for internal principals only.
  */
 export function underAreas(path: string, areas: readonly string[]): boolean {
   return areas.some((raw) => {
     const a = raw.endsWith("/") ? raw.slice(0, -1) : raw;
-    return path === a || path.startsWith(`${a}/`);
+    return a === "" || path === a || path.startsWith(`${a}/`);
   });
 }
 
@@ -105,7 +110,7 @@ function escapeLike(s: string): string {
 export const areaFilter = (col: string, n: number) =>
   `($${n}::text[] IS NULL OR EXISTS (
       SELECT 1 FROM unnest($${n}::text[]) AS a(raw), LATERAL (SELECT rtrim(a.raw, '/') AS prefix) p
-      WHERE ${col} = p.prefix OR left(${col}, length(p.prefix) + 1) = p.prefix || '/'))`;
+      WHERE p.prefix = '' OR ${col} = p.prefix OR left(${col}, length(p.prefix) + 1) = p.prefix || '/'))`;
 
 /** Frontmatter title, else the basename. `t` is the table alias (empty for none). Exported for knowledge-fs.ts. */
 export const titleSql = (t = "") => `COALESCE(${t}title, regexp_replace(${t}path, '^.*/|\\.md$', '', 'g'))`;
@@ -216,7 +221,7 @@ function round(n: number): number {
 export async function readKnowledge(db: Db, principal: AgentPrincipal, path: string, reader: KnowledgeReader | undefined): Promise<ReadOutcome> {
   const scope = knowledgeScope(principal);
   if (scope.tier !== "areas") return { ok: false, code: "forbidden" };
-  if (!validKnowledgePath(path)) return { ok: false, code: "invalid_request", message: "path must be Knowledge/... with no traversal" };
+  if (!validKnowledgePath(path)) return { ok: false, code: "invalid_request", message: "path must be a vault path — TitleCase folders, no traversal, nothing under .metistry/ or Artifacts/" };
   if (!scope.canRead(path)) return { ok: false, code: "forbidden" };
   const { rows } = await db.query(`SELECT path, title, draft FROM knowledge_files WHERE path = $1`, [path]);
   const row = rows[0];

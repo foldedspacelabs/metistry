@@ -28,7 +28,7 @@ no extra server work — the query returns plain scalar columns on purpose.
 `kind = 'task'` or `'review'` — the two kinds the tasks module owns
 (`CLAIMABLE_KINDS`, ruling 2026-09-06). Rows a collector reconciles from a
 source of truth (`issue`, `pr`, `event`) are visible in `work` but never
-claimable, so "assigned" and "in progress" would be lies about them;
+claimable, so "addressed to" and "in progress" would be lies about them;
 `open_work` and `projects_overview` stay the view over those.
 
 ## The six columns
@@ -39,7 +39,7 @@ decision order, not a set of overlapping filters.
 | Column | Predicate | What it means |
 | --- | --- | --- |
 | **Backlog** | `status = 'open'` AND `owner IS NULL` | Nobody's name on it. Any agent may claim it. |
-| **Assigned** | `status = 'open'` AND `owner IS NOT NULL` | Addressed to someone and not started. `claim()` sets `status = 'in_progress'` in the same statement, so *open + owner* is exactly "assigned but not started". |
+| **Addressed to** | `status = 'open'` AND `owner IS NOT NULL` | Somebody's name is on it and it has not started. `claim()` sets `status = 'in_progress'` in the same statement, so *open + owner* is exactly "addressed to, not started". `owner` stays **informational** — a name, never a lease — which is why the label is "Addressed to" and not "Assigned" (ruled 2026-09-17). The derived value is still `assigned`. |
 | **In Progress** | `status = 'in_progress'` | Claimed. A **lapsed lease is still in this column** — the row says in progress, and the `escalated` flag says it stalled. Moving it elsewhere would hide that a claim was dropped. |
 | **Needs You** | `status = 'blocked'` | The human-gated state. It stays human-gated: the one route back to `open` is the unblock below, and no agent surface can reach it (`tasks_update`'s status enum has no `open`). Only your hand. |
 | **Done** | `status = 'closed'` and no report | Finished, nothing came back. |
@@ -143,11 +143,11 @@ panel invented.
 
 | Drop | Route | Who may | Note |
 | --- | --- | --- | --- |
-| Backlog → **Assigned** | `PATCH /api/tasks/:id {owner}` | the user, to **any** crew | A picker of agent names from `GET /api/agents`, plus *me*. The one drop that needs a value. |
-| Assigned → **Backlog** | `PATCH /api/tasks/:id {owner: null}` | the user | Clears the addressee; the row stays `open`. |
-| Backlog/Assigned → **In Progress** | `POST /api/tasks/:id/claim` | the user | The user claims *as themselves* (`claimed_by = user`). Nobody drags another agent into a lease. |
-| In Progress → **Assigned / Backlog** | `POST /api/tasks/:id/release` | the **holder** | Hermes's `reclaimed`, which we already had: never orphaned. Which column it lands in is `owner`'s to decide, so the board offers the one it will actually land in. |
-| Needs You → **Backlog / Assigned** | `PATCH /api/tasks/:id {status: "open"}` | the user | The unblock. Legal from `blocked` only, and it hands the row back the way `release()` does — so a row a stuck crew still holds comes free without the crew's hand. |
+| Backlog → **Addressed to** | `PATCH /api/tasks/:id {owner}` | the user, to **any** crew | A picker of agent names from `GET /api/agents`, plus *me*. The one drop that needs a value. |
+| Addressed to → **Backlog** | `PATCH /api/tasks/:id {owner: null}` | the user | Clears the addressee; the row stays `open`. |
+| Backlog/Addressed to → **In Progress** | `POST /api/tasks/:id/claim` | the user | The user claims *as themselves* (`claimed_by = user`). Nobody drags another agent into a lease. |
+| In Progress → **Addressed to / Backlog** | `POST /api/tasks/:id/release` | the **holder** | Hermes's `reclaimed`, which we already had: never orphaned. Which column it lands in is `owner`'s to decide, so the board offers the one it will actually land in. |
+| Needs You → **Backlog / Addressed to** | `PATCH /api/tasks/:id {status: "open"}` | the user | The unblock. Legal from `blocked` only, and it hands the row back the way `release()` does — so a row a stuck crew still holds comes free without the crew's hand. |
 | any open column → **Done** | `PATCH /api/tasks/:id {status: "closed"}` | the **holder** | Offered everywhere and decided by the service: close a card you do not hold and it refuses `held by X, not by user — claim it first`. |
 | → **Reported** | — | nobody | Not a drop target. Nothing you can drag makes a report exist. |
 | a **closed** card | — | nobody | Not draggable. `update()` refuses a closed row, so it gets no grab cursor either. |

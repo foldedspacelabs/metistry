@@ -60,7 +60,10 @@ sql: |
         WHEN s.status = 'in_progress'                              THEN 'in_progress'
         -- open and addressed to someone, not yet claimed (claim() sets
         -- status = 'in_progress' atomically, so open + owner IS the
-        -- "assigned but not started" column the owner asked for)
+        -- "addressed to, not started" column the owner asked for). The VALUE
+        -- stays `assigned` — the label the console renders was renamed to
+        -- "Addressed to" (2026-09-17); the key every drop and `runs` row
+        -- carries did not.
         WHEN s.owner IS NOT NULL                                   THEN 'assigned'
         ELSE 'backlog'
       END AS "column",

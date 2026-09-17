@@ -1502,9 +1502,15 @@ $("feed-project").onchange = () => { resetFeed(); loadFeed().catch(() => {}); };
 
 // The six columns in board order, each with the sentence its predicate means
 // (P10: Title Case names things). The order here must match board.yaml's.
+//
+// "Addressed to" is the label ruled 2026-09-17, in the owner's own words:
+// `work.owner` is informational — a name on the card, not a lease — and
+// "Assigned" read like a claim the row had not made. The KEY stays `assigned`
+// (board.yaml's derived value, every drop's route, the `runs` ledger): this is
+// a rename of what the user reads, not of what the service stores.
 const BOARD_COLUMNS = [
   ["backlog", "Backlog", "open, addressed to no one"],
-  ["assigned", "Assigned", "addressed to someone, not started"],
+  ["assigned", "Addressed to", "someone's name on it, not started"],
   ["in_progress", "In Progress", "an agent holds the lease"],
   ["needs_you", "Needs You", "blocked — nothing but your hand moves it"],
   ["done", "Done", "closed, no report came back"],

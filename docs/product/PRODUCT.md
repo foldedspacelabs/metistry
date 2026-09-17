@@ -1400,3 +1400,502 @@ launchd cannot even see.
   times — here is the variable that fixes it". Nothing here counts dollars;
   it is the cheap half of not wasting them. `docs/ops/automation.md`.
 
+- 2026-09-16 — **Approve can now *do* the thing, and how much an agent may do
+  on its own is a table you raise deliberately rather than a property of the
+  code.** The two accepted decisions that widen agent autonomy under enforced
+  gates, shipped together because neither is safe alone. **Executable actions**
+  (`docs/research/2026-09-16-taskuary-review.md` ADOPT 6): a request may now
+  carry `{kind, args}` from a **closed set of four** — dispatch a brief to a
+  target, patch a card, comment, capture — and allowing it runs the action
+  through the *same service call the owner's own click makes*, as the owner,
+  with the asking agent recorded as provenance and the result written onto the
+  request. What is absent is the design: no mail, no messages, no git, no
+  shell, no credential or grant change. Every kind is a **door onto something
+  the console could already do**, with the audit row it already wrote — so the
+  new power is a gesture saved, not a reach extended, and a failure leaves the
+  request pending with the error rather than half-applied, because one action
+  is one service call. **Autonomy levels** (agent-room A3; the narrowing-only
+  rule that blocked it was the owner's to overturn and was overturned the same
+  day): every agent carries `observe | propose | act_within_scope` plus a
+  per-kind table, and the level is a **ceiling** — the effective answer is the
+  lower of the two, which is what makes "it only ever acts unprompted at the
+  top level" arithmetic rather than a rule a later edit could forget. The
+  defaults are the product position: an absent level means *nothing*, so the
+  release widens nobody; and `dispatch` stays human at **every** level unless
+  you say otherwise, because that is the one kind that leaves the machine.
+  Trust is raised by hand, in one of exactly two places, and a raise is never
+  silent — it writes its own audit row and puts one alert in the queue that
+  needs you. The agent's tool follows the same instinct twice over: it is opt-in
+  per crew like the room tools, and an agent you have given no room is not even
+  *shown* that it exists — which, as a side effect, kept the shared tool surface
+  under the definition-token budget without paying the extra round trip a
+  lazy-loading index would have cost.
+
+- 2026-09-16 — **A second instance can be named, described and let in —
+  without a mesh.** Evaluating Google's SAM agent mesh produced a SKIP on the
+  dependency (a Go daemon per node, an OIDC provider, a public control plane
+  and a second policy language, to authorize one person's two instances) and
+  five registry ideas small enough to build: `GET /api/identity` now
+  advertises coarse tool *groups* so a phone or a peer can name what an
+  instance offers before sign-in — never a tool name or a count, with the
+  full tool list still behind a token; an agent enrolled `--remote` holds a
+  token that authenticates **nothing** until the owner approves it, refused
+  indistinguishably from an unknown token, which puts the credential surface
+  in the user's hand by construction rather than by policy; agent identity
+  gains the portable `agent:<name>@<instance_id>` form at the boundaries it
+  crosses; `instances.yaml` makes the peer list a protected file rather than
+  a service; and `metistry runs export` streams the audit ledger as redacted
+  NDJSON so two instances' timelines merge. The honest headline is the
+  proportion: the one thing a mesh would have added that Metistry lacked was
+  discovery, and discovery turned out to cost a few endpoints and one YAML
+  file.
+
+- 2026-09-16 — **The model the Mac already runs became a provider, and the
+  first unattended job to use one cannot spend a cent.** Apple Foundation
+  Models now answers `GET /v1/models` and `POST /v1/chat/completions` on the
+  `apple-fm` bridge, under the same bearer as every other route: a JSON
+  schema supplied at request time is enforced at generation time, usage comes
+  from the model's own tokenizer, and a prompt or schema that would overrun
+  the 4096-token window is refused with a `400` that names the field instead
+  of failing halfway through. Cost 0, and ~23 MB resident against 840 MB for
+  a comparable local GGUF server — the weights are already in RAM for the
+  operating system. `inbox-drain` moved onto it and, in doing so, made
+  "collectors never call a billable model" mechanical: the collector names
+  one pinned model in its manifest, CI refuses a billable provider there, and
+  the call itself throws rather than degrading quietly into spending.
+
+- 2026-09-16 — **Apple's on-device model can be driven by whatever shape the
+  caller asks for, which makes a free provider a real one.** The open question
+  was whether Foundation Models only answers in shapes compiled into the
+  binary; it does not — `DynamicGenerationSchema` builds a schema per request,
+  so Apple Intelligence can serve an ordinary `/v1/chat/completions` with
+  `response_format: json_schema` and appear in `compute.yaml` as just another
+  provider at cost 0. Measured on a Mac Studio (PoC-19): **60 of 60 requests
+  succeeded and 40 of 40 structured responses validated against the schema the
+  caller sent**, at 268 ms for plain text, 497 ms for a three-field
+  classification and 1.46 s for a nested shape with arrays — competitive with a
+  4-billion-parameter local model that costs 842 MB of resident memory, against
+  22.7 MB here because the weights are already in the operating system. Two
+  limits are now numbers rather than guesses: the schema is charged to a
+  4096-token window (~32 tokens per described field, ~40 fields before latency
+  decides it for you) and identical runs return identical *values* in
+  non-identical key order, so anything downstream parses rather than
+  string-matches. Both are checkable before the call, which is where a refusal
+  belongs.
+
+- 2026-09-16 — **The board moves work now, and the direct-manipulation UI made
+  "enforce at the tool" prove itself.** Dragging a card writes through four new
+  console routes (`PATCH /api/tasks/:id`, `claim`, `release`, `renew`) that are
+  a thin adapter over the same `TasksService` every agent uses — until now
+  `dispatch` was the *only* task route the console had — and the rule the whole
+  feature is built on is that **the board offers no drop the service would
+  refuse**: the panel draws a target only where a `WHERE` clause in
+  `packages/tasks` would succeed, and when the two disagree the statement wins
+  and the card snaps back carrying the server's own sentence, never one the UI
+  invented. Building it closed the three gaps the Hermes review named, the
+  first of which was a real hole: `UpdateInput.status` was
+  `Exclude<TaskStatus, 'open'>`, so **a blocked row could not be moved forward
+  by anything in the system** — "Needs You" was a state with no exit. `update`
+  now has two arms and the *fields* pick which, never a flag a caller passes:
+  addressing, renaming and unblocking a card need no lease (nobody holds a card
+  that is stuck), while status changes stay claim-gated, and mixing them in one
+  call is refused naming both fields so the looser gate can never carry the
+  stricter arm's write. The safety property that matters commercially is again
+  an absence: a human may address a card to any crew, and **no agent surface
+  can address one at all**, because the agents' `tasks_update` schema has no
+  `owner` key — collaboration rule 4 holding without a rule to run. Ten
+  route-level misuse tests ship with it (agent token → 403, owner token → 403,
+  every refusal's sentence asserted), plus one drop mapping per row of the
+  table. Cards now open the room hanging on them rather than nothing, which is
+  the first place two ideas the board and the threads work landed separately
+  compose into one gesture.
+
+- 2026-09-16 — **The board: the state was always durable; what was missing
+  was one view onto it.** A read-only Kanban over the task list — Backlog,
+  Assigned, In Progress, Needs You, Done, Reported — built with **no
+  migration and no fifth status value**, because every column is a `CASE`
+  over columns the `work` table already carried. That is the claim worth
+  making about the architecture rather than the panel: delegating to agents
+  had been producing durable rows for months, and the whole feature is two
+  named queries and a page. Two states it makes visible that nothing else
+  did: **"assigned but not started"** (a row addressed to an agent nobody has
+  claimed — the state a person actually means when they ask "did anything
+  pick that up?"), and **Done vs Reported**, so a closed task that produced a
+  finding no longer looks identical to one that produced nothing. The
+  cross-project board is the differentiator: products that make a board the
+  isolation unit — its own queue, its own store, no links across — cannot
+  show one at all, while here the project is a column on the shared table and
+  the view is a `GROUP BY`. It ships deliberately read-only: every task
+  mutation is still a tool call, so the panel has no drag, no drop target and
+  no mutating control, and a test asserts that — the rule for when the drags
+  do land is that **the board offers no drop the service would refuse**,
+  which is enforce-at-the-tool in direct-manipulation form. Holding the
+  writes until the read-only view has been lived with is the product
+  decision, not an unfinished feature. Worth remembering for how it was
+  built: the design note it came from proposed reading "waiting on a human"
+  from a pending proposal citing the task, and checking the code showed no
+  proposal kind carries a task id at all — so the column was re-grounded in
+  the state that is real and the gap written down in `docs/ops/board.md`
+  rather than papered over.
+
+- 2026-09-16 — **Three ways the system can no longer quietly drift, plus the
+  one that already bit.** A test harness that loaded the product checkout's
+  `.env` was handing CLI verbs a running install's reconciler URL and bridge
+  token, so a `compute providers add` case whose `--instance` was a temp
+  directory committed into the operator's real instance repo;
+  `@foldedspacelabs/metistry-core/test-env` now allowlists
+  `METISTRY_DB_*` and deletes the rest, pins `METISTRY_PRODUCT_DIR` at a
+  sandbox, and fails any test whose verb resolves a path outside
+  `os.tmpdir()` — proved by running the whole CLI suite with the operator's
+  environment simulated. Alongside it, `ops/scripts/audit-limits.mjs` fails
+  CI on a cap that lives only as a literal (forty on main; two became
+  `METISTRY_MAX_BODY_BYTES` and `METISTRY_COMPOSE_TIMEOUT_MS`, thirty-eight
+  now say why they are fixed), a `packages/core` conformance test requires a
+  stdio component to put nothing but protocol frames on stdout, and every
+  refusal on the console's owner surfaces names the field that would permit
+  it — while the door stays uniform, because a 401 that explains itself is an
+  oracle.
+
+- 2026-09-16 — **You can see what each turn costs, and cap it before it is
+  spent.** The engine now dials whichever provider `compute.yaml` assigns —
+  any OpenAI-compatible endpoint, so a local model, OpenRouter or anything
+  with a base URL — and writes the provider, the model, the tokens, the cache
+  hits and the dollars onto every run. Where the number came from is recorded
+  too: the provider's own charge, a published price list, zero because it ran
+  on this machine, or *unknown*, which is shown as $0 and named rather than
+  quietly guessed. On top of that ledger, a daily or monthly budget is checked
+  **before** each call rather than reported after it: at 80% you get one
+  warning per window, and at 100% the instance either records and carries on,
+  stops, or keeps only the work you marked critical. A stop is not silent —
+  chat offers you one more window with the exact line to edit, scheduled work
+  simply does not start (so a paused engine cannot sit behind a scheduler
+  filling the queue with refusals), and a helper agent's task parks with the
+  reason. Three smaller things ride along, each of them a control rather than
+  a suggestion: a run that keeps asking the same question and getting the same
+  answer is stopped at five repeats and made to answer with what it has; a
+  provider that does not promise zero data retention warns once a day and
+  still works, because that is the owner's choice to make; and the assistant
+  cannot hand work directly to a helper running on a different kind of engine,
+  though it can always write the work down for anyone to pick up.
+
+- 2026-09-16 — **A local model server in the box, and the one you already run
+  works too.** llama.cpp's `llama-server` is built from pinned source into
+  the runtime pack: one 11 MB Metal-enabled binary, signed like the bundled
+  Postgres and git, verified from a moved copy, loopback-only by
+  construction. LM Studio and Ollama stay first-class peers, discovered over
+  the same `GET /v1/models` and reported by `doctor`; `metistry compute
+  models list` volunteers a running-but-unconfigured server with the one
+  command that wires it up. Every model download is checked against the
+  digest Hugging Face publishes; absent is never a failure. The local half of
+  the bake-off (PoC-18) now has a server to run on.
+
+- 2026-09-16 — **The bake-off harness: choosing the default model becomes an
+  experiment with numbers instead of a preference.** `packages/eval` — private,
+  unpublished, TypeScript, no new dependency — turns "is a local model good
+  enough to be the assistant?" into five measurable axes (tool calls, knowing
+  when to stop, triage judgment, voice, writing), one owner-authored fixture
+  per axis, and one JSONL row per case carrying pass, score, tokens, cost,
+  latency, TTFT and six churn counters that separate a wrong answer from a
+  model thrashing. Three things are enforced at the tool rather than asked for
+  in a prompt: a fixture may not mix two axes, so a failure names the component
+  to fix; the three judgment axes are scored by a model from a *third* family —
+  neither the candidate's nor the reference's — and a judge that is absent or
+  same-family **refuses the run** rather than quietly passing the cases it
+  cannot score; and the candidate is shown the console's real tool definitions
+  while every call is stubbed record-only, so an evaluation can never touch the
+  vault. Runs are resumable, parallelism is 1 by default so throughput is
+  measured rather than the queue, and the report ends in the line the whole
+  exercise exists to produce — `≥ bar on all axes: yes/no` — stated as the
+  fixtures half of the promotion gate, with two weeks of shadow agreement named
+  as the other half. Reference models are the bar and never the source: no
+  model's output is a fixture, an expected answer or training data.
+
+- 2026-09-16 — **The inbox is in the vault, and what you type by hand is
+  first-class.** Captures used to land in a gitignored folder beside the
+  vault: invisible in Obsidian, absent from every backup the repo provides,
+  and gone after a rebuild — the one hole in "git is the record". They now
+  live at `Knowledge/Inbox/`, inside the vault Obsidian already opens, and
+  they are committed like everything else. The benefit is a sentence that
+  could not be said before: **the capture you made on your phone at the
+  airport is a file you can open, edit and search on the laptop, in the same
+  app as the rest of your notes, and it is in the backup.**
+  The other half is the promise underneath it. A note you add to that folder
+  by hand, or an edit you make to a capture that is already there, is noticed
+  by content hash and goes back into triage — a refinement is treated as new
+  information rather than ignored, while a "no" you already gave stays given.
+  And the assistant's only write path into the vault can no longer replace a
+  file it has not read: omitting the content hash now means *create only*, so
+  a correction you make in Obsidian while the assistant is mid-thought wins
+  and the assistant is told to re-read. That is a safety mechanism shipped,
+  not a prompt asking it to be careful — the difference the whole product
+  rests on.
+  Large captures (over 5 MiB) go to a `.large/` folder the repo does not
+  carry: visible in the vault, out of the history, stated as a trade-off
+  rather than a surprise. An instance created before today moves with one
+  verb, `metistry migrate-inbox`, which also handles a second instance that
+  had already moved its inbox under a different spelling.
+  `docs/ops/inbox.md`.
+
+- 2026-09-16 — **A third dev tool can now read the vault and write its sessions
+  back, and neither half needed the assistant's name or a new concept.**
+  `metistry connect opencode` mints OpenCode its own external-agent row and
+  merges one `mcp` entry into its global config, with the bearer left in the
+  Keychain and named in the file as `{env:…}` — verified live: the header
+  arrived at a probe server as `Bearer <the variable's value>`, so nothing
+  secret reaches disk. `plugins/opencode` is the other half: one
+  `kind: "session"` note per finished session, the same frontmatter and the same
+  `idempotency_key` formula as the Claude Code and Cursor plugins, so four
+  capture doors dedupe against each other server-side with no change to
+  `inbox-drain`. The proof it is the same door, not a lookalike: a real session
+  ran end to end against a stand-in console and landed with `turns: 1 user, 3
+  assistant`, `read × 2`, `glob × 1`, the file it touched, the first prompt and
+  the last response — and its recorded transcript is now the test fixture, so
+  the shapes asserted are the ones OpenCode sends rather than the ones we wish
+  it sent. The honest part is the limit: OpenCode has no session-end event, so a
+  quiet window stands in for one (default 90 s, configurable), and a headless
+  `opencode run` cannot be captured at all — the process exits 17 ms after the
+  idle event, `beforeExit` never fires and hook promises are not awaited, all
+  three measured rather than assumed, and written down in the docs so the gap is
+  a known shape instead of a silent drop. What this buys the owner is
+  portability of the record: the inbox no longer depends on which editor the
+  work happened in, which is the premise the whole capture surface rests on.
+
+- 2026-09-16 — **The product record stops being a merge conflict.**
+  `docs/product/record/` fragments — one file per PR, never an edit to
+  `docs/product/PRODUCT.md` itself — are the changesets fix applied to the
+  one file every product-significant PR used to append a line to, which made
+  any two such PRs open at once conflict there by construction.
+  `ops/scripts/fold-product-record.mjs` folds every fragment into
+  `PRODUCT.md`, in filename order, as part of `release:version`, so the file
+  only changes on a release branch; `--check` (wired into both
+  `release.yml`'s `verify` job and the PR `ci.yml`) refuses a fragment that
+  doesn't open `- 20`, and the fold is idempotent — no open fragments leaves
+  `PRODUCT.md` untouched. This entry is itself the first fragment written
+  under the new rule.
+
+- 2026-09-16 — **The product's path to a model is now one line of
+  configuration, and nothing else.** The Claude Agent SDK and the
+  claude.ai-login token path leave the repo entirely (owner's decision,
+  `docs/plan-refresh-2026-09-13.md` C2/C3): one engine remains — the
+  OpenAI-compatible loop — and Claude arrives through OpenRouter like any
+  other cloud model, so the default install brushes no vendor's login or
+  branding terms and the person's bill is theirs, itemised, from a provider
+  they chose. What replaced the fixed `CLAUDE_CODE_OAUTH_TOKEN` is the real
+  benefit: **compute is configurable, and the credential has no fixed name.**
+  `compute.yaml` says which provider serves a turn and which Keychain item
+  buys it, so the engine's environment allowlist is now "the static keys plus
+  exactly the secrets THIS install's file names" (`assistantEnvKeys`) — a
+  provider key sitting in the operator's shell that the file does not name
+  still cannot reach the engine and spend on somebody else's account. One
+  seam answers "is there an engine at all" for `metistry up` (whether the
+  assistant is a supervisor child), `metistry doctor` (the `assistant` row),
+  the routine runner's preflight (whether a turn would be answered) and the
+  watchdog (whether a waiting queue is a fault) — core's `engineStatus`,
+  taking the resolved file and the environment — so the four can no longer
+  disagree, and when one of them says no it names the half that is missing
+  and the command that fixes it. **An install with no engine stays a
+  supported shape, not a failure**: captures, `inbox-drain`, tasks, search
+  and the console all run while queued turns wait, on both deployment shapes
+  now — the compose file no longer refuses to start without a credential.
+  The Mac app's seventh first-run step becomes **Compute**: a provider
+  template, a model, and an API key pasted into a secure field that goes to
+  `metistry compute providers add`'s *stdin* — never argv, never a file the
+  app writes, never a log — with the field cleared before the process runs
+  and a test asserting both halves; "Skip: no engine yet" is a button with
+  its consequence written beside it. The sandbox profile's outbound host list
+  stops naming one vendor and is derived from the providers in the file, and
+  the honest limit is restated where it lives: it is documentation until App
+  Sandbox, while the engine's own `fetch` reaching exactly one base URL is
+  the enforcement that is real today.
+
+- 2026-09-16 — **A thing you captured is visible the moment you capture it, a
+  task you meant to make is one click away, and "not now" is finally an
+  answer.** Four findings from `docs/research/2026-09-16-taskuary-review.md`,
+  which compared the loop against a fast-moving product that puts its one human
+  gate at the *exit* rather than at capture. The **timeline**: `activity_feed`
+  unions `inbox`, so a note taken on the phone appears immediately wearing its
+  own status instead of surfacing five minutes later as a proposal — the review
+  found this to be the loop's only accidental latency, and it cost nothing to
+  close because the row already existed. Every row carries a coarse `group`
+  decided in SQL, which the panel reads as filter chips; one vocabulary, not one
+  copy per surface. **Approve as Work** answers the sharper finding — that there
+  was no capture → `work` path *at all*, so a todo captured on the phone ended
+  the night as a vault page and nothing else. The honest middle was not a
+  `draft` row written by the collector (that is auto-creation whatever the
+  status column says); it was making the click do the thing. A `todo`-shaped
+  capture — matched deterministically, **no model**, the on-device classifier's
+  `has_action` deliberately not an input — carries a suggestion, and accepting
+  it inserts the task, owner-less so any agent may claim it. §4.12 is intact
+  because a human clicked, and nothing that goes unclicked ever becomes
+  anything. **Decide-time staleness**: a decision now carries the timestamp of
+  the row the client painted, and if the row moved after that — payload
+  rewritten, its linked task touched, a message in that task's room — the answer
+  is refused with the current row rather than applied to a question that
+  changed. **`later` and `skip`** fix the queue's one failure mode, an item you
+  cannot answer yet and cannot put down: `later` is a snooze that never ends a
+  proposal (it leaves Needs You *and* the 07:00 brief, or the verb would be a
+  lie), `skip` declines with nothing to say and fires none of Decline's per-kind
+  consequences — skipping an enrolment request does not revoke the agent, and
+  its marker is excluded by value from every path that carries a decline's
+  words. Multi-select applies them to many rows, all-or-nothing **per row**, so
+  one item answered on the phone thirty seconds ago does not refuse the other
+  nine. Not adopted: executable action proposals, which would widen the
+  console's mutating surface and are the owner's ruling to make, not a PR's.
+
+- 2026-09-16 — **A competitor that puts the human gate at the other end, read
+  closely.** Taskuary (MIT, 1,139 commits in its first month) reaches the same
+  goal by a mirrored route: a model decides on arrival whether a message is
+  work, creates the task and starts a coding session unasked, and puts the
+  owner's single approval on the *exit* — where it is enforced in middleware by
+  a pure deny table matched before any handler runs, because "an instruction is
+  not a control". Read against Metistry's loop, that is one gate where we keep
+  three, which is the real reason their cycle looks faster; cadence is not the
+  lever. The review takes the exit-side mechanisms and leaves the entrance
+  alone: an approval that does something (a click that creates the work row,
+  rather than a note that waits for the evening fold), a refusal to send a
+  draft the world has moved past, and a budgeted block of what earlier work in
+  the same area learned, carried into the next brief. It also names the one
+  accidental slowness we had: a capture is invisible until the drain turns it
+  into a proposal, which one `inbox` branch in an existing named query fixes
+  with no migration. `docs/research/2026-09-16-taskuary-review.md`.
+
+- 2026-09-16 — **Agents can now talk before there is anything to show — on a
+  channel that cannot summon anyone.** A comment thread can hang on a `work`
+  row, not only on an artifact version (migration `0018`, one nullable
+  `work_id` and a check constraint: exactly one parent), so two agents can
+  settle "does this include the migration?" before a deliverable exists — the
+  one capability `docs/research/2026-09-12-agent-room-review.md` found
+  genuinely missing after crediting everything Metistry already did in rows.
+  The safety property is an **absence**, not a rule: there is no `to_agent`,
+  no `@name` and no addressee column anywhere on the path, so a message wakes
+  nobody and triggering stays with `agents_delegate`, where its policy already
+  lives — the collaboration rule survives by construction, and a test asserts
+  `tasks_comment`'s schema has three keys and none of them is a recipient.
+  Reusing `artifact_comments` rather than adding a table means the shipped
+  escalation applies unchanged: ten consecutive agent turns and the eleventh
+  is *not stored* — the room becomes an owner item carrying its transcript,
+  and a human message resets the run. Resolving is the owner's hand alone (no
+  tool, one route, no sweep — an auto-close would have fired the queued-bundle
+  release and started work overnight). Two things fall out of it: the Rooms
+  tab finally renders `payload.reason`, stored since the cap shipped, as the
+  sentence *"ten agent turns went by without a human — this is where it came
+  to you"*; and a room **is** the prior-work record, so a crew claiming the
+  row gets the last of it in its brief under a byte budget
+  (`METISTRY_BRIEF_THREAD_BYTES`, default 4096, clipped again by the size
+  policy already allowed), with the included message ids on the run row.
+  `proposals.work_id` — set server-side, never as a tool argument — closes the
+  gap the board named: "which proposal is about this card" now has an answer.
+  Watch item, measured not guessed: the eager tool surface is now ~4.9k of the
+  5k-token line that would force lazy discovery. The next tool added to
+  mcp-brain makes that a decision rather than a note.
+
+- 2026-09-17 — **Choosing where your thinking happens is now a settings pane,
+  not a YAML file.** The Mac app's Compute pane drives every `metistry compute`
+  verb: add a provider from a template with the API key typed into a secure
+  field that reaches the CLI's standard input and no argument list, test it
+  live, assign a model and an effort to the default and to each tier, set a
+  daily and monthly budget, and pull or load a local model — with the four
+  local servers (LM Studio, Ollama, the bundled llama-server, Apple's own
+  Foundation Models) discovered rather than configured, and RAM headroom shown
+  as the estimate it is. A provider off the machine that claims no zero data
+  retention is badged and never blocked. The app writes nothing itself: every
+  button is a CLI verb that validates `compute.yaml` before it saves it, so the
+  terminal path and the app path stay one tested path, and an install with no
+  engine says so where it can be fixed rather than failing quietly.
+
+- 2026-09-17 — **The thing running in the background is Metistry's, and there
+  is a switch for it.** macOS shows one background item per launchd agent, and
+  an item installed by `launchctl bootstrap` belongs to nobody: it sat in
+  System Settings › General › Login Items *beside* the app, and the only way to
+  turn it off was a terminal — which, for a product whose whole distribution
+  premise is "download a DMG and never open one", is the gap between plausible
+  and shippable. Two earlier changes fixed how it *read* (one agent instead of
+  five, its program a symlink named `Metistry`, the bundled node signed under
+  the Folded Space Labs identity so the attribution is a real company); neither
+  could make it the app's. Now the app registers it itself, through
+  `SMAppService.agent(plistName:)` on a plist sealed inside the bundle at build
+  time: **one row, "Metistry", with the agent nested underneath**, and the same
+  switch in two places — System Settings, and Settings → Services → "Run
+  Metistry in the background" — meaning the same thing. Two rows, deliberately,
+  because the two registrations are constantly confused and each one's sentence
+  says which it is: *Start at login* opens a window, *Run in the background*
+  runs the install. **The terminal path did not move an inch**, and that is the
+  part worth keeping: a CLI-only install still bootstraps the same agent
+  itself, both registrars are first-class, and what keeps them from ever
+  installing it twice is that `metistry up` asks launchd who owns it before
+  doing anything — live state, not a marker file that would go stale the moment
+  someone dragged the app to the Trash and leave the install silently not
+  running. `metistry doctor` names the owner. The app still installs nothing,
+  writes nothing, and runs one `metistry` verb per step; all it gained was the
+  right to say on/off about a registration macOS keeps.
+
+- 2026-09-17 — **The CLI's `--json` is now a real wire contract, not a
+  convention.** The Mac app's Compute pane found several verbs writing their
+  own progress notes onto the same stdout stream as the `--json` result, so
+  the app had to parse a trailing object out of a run of prose. Every verb
+  across `compute`, `instances`, `restart|stop|start`, `doctor`, `identity`
+  and `secrets` now writes exactly one JSON document to stdout under
+  `--json`, with every human line moved to stderr — enforced in each verb's
+  own case, not remembered — so a client (the app, a script, `metistry
+  console call`, the new scripting seam behind `console whoami`) can trust
+  the whole buffer parses.
+
+- 2026-09-17 — **One engine, configurable compute, and the second-instance-first
+  queue: caught up in a single day.** A docs status pass over
+  `docs/plan-refresh-2026-09-13.md` and `metistry-build-plan.md`'s Queue
+  refresh block, reconciling both against the 2026-09-15/17 merges
+  (#141–#171): 49 rows across the decisions log, the small-adopts table, the
+  refreshed queue and §4b's W1–W7 move to `done`, and the autonomy-widening
+  question (OPEN-2) is resolved — the owner overturned the narrowing-only
+  rule the same day #170 shipped it as executable action proposals plus
+  autonomy levels. The headline the numbers add up to: the product now
+  speaks exactly one engine (`openai-compatible`, no vendor SDK), compute is
+  a file the owner edits rather than a rebuild, and every second-instance-
+  first item that does not wait on a `v0.8.0` release (W1, W3–W7) is built.
+  What remains genuinely open is now a short, named list — OPEN-1 and
+  OPEN-3 through OPEN-7, crew descriptions (H8), the grammar/slot adopts
+  (T1, T5), and the owner's fixtures that gate the bake-off itself — rather
+  than a queue nobody had re-read since 2026-09-13. A companion note
+  proposes one addition to `CLAUDE.md`'s invariants, closing the console's
+  own mutating surface the same way invariant 9 already closes the
+  engine's; that edit is the owner's to make.
+
+- 2026-09-17 — **Four open questions answered in code, and three of the four
+  answers are subtractions.** The named list the plan-status pass left behind
+  loses OPEN-4, OPEN-5, OPEN-7 and H8. The seed ships **one** cloud template:
+  a seeded provider is a standing promise to keep somebody else's base URL,
+  price table and retention claim true, so OpenCode Zen's template is gone and
+  Zen is reached the way `compute.yaml` always allowed — a block you write, or
+  `--base-url` over the nearest template. `critical: true` now has a policy
+  instead of a placeholder: it sits on `assignments.default`, so when a budget
+  hits `critical_only` the turn the owner is waiting on still gets answered
+  while routines and delegation stop — the first budget behaviour that
+  distinguishes *someone is sitting here* from *a scheduler fired*. The board's
+  **Assigned** column is read **Addressed to**, because `work.owner` is a name
+  on a card and the lease is `claimed_by`: the label was making a claim the row
+  had not made, and the derived value underneath it did not change. And
+  `agents_delegate` now carries the **roster** — every registered helper with
+  the `description:` its own manifest wrote, in the tool definition rather than
+  a prompt line, capped so a large registry cannot quietly double the
+  assistant's definition budget. Writing one sentence in a manifest is now how
+  the owner steers which helper gets the brief, in place of the assistant
+  learning the registry by refusal.
+
+- 2026-09-17 — **A second instance has a written, end-to-end path now, and it
+  runs on zero cloud.** `docs/ops/second-instance.md` is the checklist: install
+  from a checkout (v0.8.0, the first release with the compute changes, has not
+  cut yet), `init` on the launchd shape, `up` with `assistant: absent` and
+  everything model-free still running, then `compute providers add --from
+  lmstudio|llamaserver` and `compute assign default` — the second Mac thinks
+  with no cloud credential at all, proving §4b W1/W7 as a real sequence rather
+  than a claim. Every command in it is grepped against `docs/ops/cli.md` and
+  `packages/cli/src/main.ts` rather than invented, and it names two real gaps
+  along the way: `metistry init` prints a compose-shaped
+  `METISTRY_RECONCILER_URL` and no `METISTRY_ORIGIN` at all on a launchd
+  install (`docs/ops/deployment-shapes.md`'s own "still missing" #4), and
+  `main.ts`'s printed `--help` for `compute providers add --from` has fallen
+  behind `COMPUTE_TEMPLATES` (`llamaserver`, `applefm` are missing from the
+  string, present in the code). Connecting Devin, Cursor and OpenCode, and
+  Devin's own knowledge-in/dispatch-out round trip, follow the same order the
+  plan refresh set: what an operator does with a second Mac is now a document,
+  not a memory of one session.

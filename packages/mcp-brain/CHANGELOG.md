@@ -1,5 +1,192 @@
 # @foldedspacelabs/metistry-mcp-brain
 
+## 0.8.0
+
+### Minor Changes
+
+- 6aa64c2: **Approve now does something on an `action`.** `action` was a word in the
+  console's view map that nothing emitted; it is now a request kind carrying a
+  **closed** `payload.action = {kind, args}` — exactly four kinds
+  (`dispatch`, `task_update`, `comment`, `capture`), held in `packages/core` as
+  data plus a zod schema each, so an unknown kind or an unnamed argument is a
+  `400` naming the field. Allowing one runs it through the *same service call the
+  owner's own click makes* (`dispatch()`, `TasksService.update()`,
+  `workComment()`, `captureToInbox()`), as the `user` principal, with the
+  proposal's `source_agent` recorded as `on_behalf_of` and the result written
+  back to `payload.result`. A refusal leaves the row **pending** carrying the
+  error — and nothing is half-applied, because one action is one service call.
+  No sending, no git, no shell, no grants: every kind is a door onto something
+  the console could already do, never a new power (taskuary review ADOPT 6).
+  
+  **Autonomy levels, and widening is now allowed — by your hand only** (A3 /
+  OPEN-2). `agents.autonomy` gains `{level: observe | propose |
+  act_within_scope, actions: {<kind>: allow | propose | deny}}` beside the §4.21
+  narrowing keys, so one record answers both "how much room" and "which action".
+  The level is a **ceiling** and the per-kind entry the value — the effective
+  mode is the lower of the two, which is what makes "it only ever runs on its own
+  at `act_within_scope`" arithmetic rather than a rule that could be forgotten.
+  Defaults: everything `deny` at `observe` (**and with no level at all**, so this
+  release widens nobody), everything `propose` at `propose`, and
+  `comment`/`capture`/`task_update` `allow` at `act_within_scope` while
+  `dispatch` stays `propose` — off-machine is a human decision by default. A
+  change that raises anything is admitted only through `PUT
+  /api/agents/:id/autonomy` (the `user` principal) and the new `metistry agents
+  autonomy <id> --level … --allow <kind>`; every other caller is narrowing-only
+  by default, and every raise writes a `runs` row `agent_admin` /
+  `autonomy_widened` plus one Needs You alert, so a raised bar is never silent.
+  
+  **`propose_action` in mcp-brain**, in its own crew grant group `actions` (the
+  same opt-in rule `rooms` follows). It answers `executed` or `pending`; a denied
+  kind is a `forbidden` envelope naming `autonomy.actions.<kind>`. Registration
+  is **lazy by credential**: an agent whose table admits nothing is not offered
+  the tool, which is every agent until you set a level — so the eager definition
+  surface stays at 25 tools / ~4.9k tokens for everyone, and an opted-in
+  principal carries 26 knowingly. Deferring on the credential costs none of the
+  +1 discovery turn a meta-tool index would.
+  
+  Needs You renders an action's kind, argument preview, reason and result; the
+  Agents panel shows each agent's level and resolved table with widen/narrow
+  controls. `docs/ops/actions.md` is the whole design.
+- 6fd4c28: The console's API contract for a client that is not always connected
+  (`docs/ops/console-api.md`, from the 2026-09-11 research note): a public
+  `GET /api/identity` (`instance_id`, `name`, `icon`, `version` — read from
+  `identity.yaml` through `METISTRY_IDENTITY_FILES`, 503 when absent) so a
+  phone can name an instance before sign-in and recognise it after its origin
+  moves; an `Idempotency-Key` header on `POST /capture`, scoped to the
+  credential class, that returns the original row on replay — one file, one
+  inbox row even when attempts race (migration `0014`, unique index on the
+  inbox row) — with `Idempotency-Replayed: true`; `409 conflict` carrying the
+  winning decision when a proposal was already settled (unknown stays `404`);
+  and opaque `since` cursors on `GET /api/messages` and `GET /api/proposals`
+  (`cursor`, `more`), where a rating moves a message and a decision moves a
+  proposal, so a reconnect after hours is one bounded pull per list. The
+  plain lists are unchanged.
+- 367f456: **Rooms: a conversation can now hang on a task, not only on a deliverable.**
+  A comment thread anchors to a `work` row as well as an artifact version
+  (migration `0018` — one nullable `work_id`, a check constraint enforcing
+  exactly one parent, and one room per row), so agents can negotiate scope
+  before anything is published. Two new tools, `tasks_comment {work_id, body}`
+  and `tasks_thread {work_id}`, under the same project grant as `tasks_*`.
+  
+  **A room cannot address anyone** — no `to_agent`, no `@name`, no addressee
+  field anywhere on the path — so posting wakes nobody and triggering stays with
+  `agents_delegate`. Because it is the same table, the shipped escalation
+  applies unchanged: ten consecutive agent messages and the next one is not
+  stored; the room becomes an owner item with its transcript, and a human
+  message resets the run. **Resolving is the owner's hand alone**: one console
+  route, no tool, and nothing on a timer.
+  
+  Also: a **Rooms** tab listing every conversation across both anchors, with the
+  escalation reason rendered as a sentence; the last of a task's room riding
+  along in a crew's brief under `METISTRY_BRIEF_THREAD_BYTES` (default 4096);
+  and `proposals.work_id`, set server-side, so a proposal can finally say which
+  work row it came from.
+  
+  Crews reach the new tools through a new `rooms` group in `uses` — its own
+  group rather than part of `tasks`, so no existing crew gains the ability to
+  speak without a manifest edit.
+
+### Patch Changes
+
+- cde0691: **The inbox moved inside the vault, and human edits became first-class.**
+  Captures live at `Knowledge/Inbox/` — Obsidian's vault root is `Knowledge/`,
+  so that is the only place it can see them, add to them and edit them — and
+  they are tracked, so git carries them: the inbox used to be the one thing a
+  `docker compose down -v` rebuild could not bring back (invariant 1).
+  `docs/ops/inbox.md`.
+  
+  - **One sink, every door.** `POST /capture`, the `/note` fast path, the
+    bridge's `capture` tool and the collectors all write through the
+    reconciler's vault bridge with `expected_sha256: ""` — must not exist — so
+    a capture can never land on a file someone already wrote. The console still
+    holds no part of the instance repo (D5, invariant 7), and each capture is a
+    commit. With no bridge configured it degrades to a plain directory: capture
+    keeps working, and moving those files into `Knowledge/Inbox/` later is
+    enough for the scan below to pick them up.
+  - **Files you write yourself are indexed.** The reconcile loop already walks
+    the vault by content hash, so it now also reconciles `Knowledge/Inbox/`: a
+    note you added in Obsidian gets a triage row, an edit to a capture
+    refreshes its hash and — if it had already been classified or accepted —
+    sends it back to `inbox-drain`, because a refinement is new information. A
+    `rejected` row stays rejected; a deleted file archives its row rather than
+    losing it; the file coming back re-opens it. No new watcher, no new
+    component talking to Postgres (invariant 3).
+  - **`knowledge_write` can no longer overwrite a note it has not seen.**
+    Omitting `expected_sha256` used to mean "unconditional", which meant an
+    edit *you* made to a page the assistant owns could vanish with no conflict
+    and no trace but the commit. It now means create-only: an existing note
+    answers `conflict` with the current hash, so changing a note requires
+    `knowledge_read` first. Misuse test ships with it.
+  - **Big captures.** Above `METISTRY_INBOX_MAX_TRACKED_BYTES` (5 MiB) a
+    capture goes to `Knowledge/Inbox/.large/`, which the instance gitignores:
+    Obsidian still sees a 40 MB screen recording, the repo does not carry it.
+  - **`metistry migrate-inbox`** moves an existing instance — files (`git mv`
+    for what git tracks), `.gitignore`, and `inbox.path` rows to the
+    repo-relative form `db/migrations/0001_init.sql` always documented — with
+    `--dry-run`, idempotent, restarting nothing. A second instance that already
+    moved its inbox to a lowercase `Knowledge/inbox/` is renamed through a temp
+    name, because macOS is case-insensitive and `git mv` would otherwise move
+    the directory inside itself.
+  
+  Migration `0015_inbox_in_vault.sql` is additive: a partial unique index makes
+  "one row per inbox file" true at the database, since the capture path and the
+  scan both reach that directory now.
+- 23d72db: **Four rulings from 2026-09-17, each one closing an open question rather than
+  adding a surface.**
+  
+  **One cloud template ships (OPEN-7).** `seed/compute-templates/zen.yaml` is
+  gone: a seeded template is a promise to keep a base URL, a price table and a
+  retention claim true, and OpenCode Zen's were ours to chase. `openrouter` is
+  the one cloud; Zen and every other OpenAI-compatible provider is reached the
+  way `compute.yaml` always allowed — a hand-written `providers:` block, or
+  `--base-url` over the nearest template. `COMPUTE_TEMPLATES` and the Mac app's
+  picker both lose the entry, and the C13 non-ZDR warning is now proved against
+  a hand-written cloud, because no shipped template is non-ZDR any more.
+  
+  **`critical: true` belongs on `assignments.default` (OPEN-4).** The flag was
+  already enforced; what carries it was open. The seed now marks the default
+  assignment, with the consequence written beside it: under a budget's
+  `action: critical_only` the turn you are waiting on keeps being answered while
+  routines and delegation stop. The mark travels with the assignment, so
+  `tiers.routine` has to stay declared for the pause to reach the evening fold —
+  the seed says so, and a test uncomments the seed's own example to prove it.
+  
+  **The board's Assigned column is read "Addressed to" (OPEN-5).**
+  `work.owner` is informational — a name on the card, not a lease; the lease is
+  `claimed_by`, and claiming is what moves a row to In Progress. A rename of
+  what the user reads only: the derived value stays `assigned`, so every drop's
+  route, board.yaml and the `runs` ledger are untouched, and a new test pins the
+  label and the key apart.
+  
+  **`agents_delegate` advertises each crew's description (H8).** The assistant
+  saw crew names and nothing else, so which helper fitted a brief was guesswork
+  the registry corrected by refusal — after the brief was written.
+  `CrewDispatcher.names(): string[]` becomes `crews(): CrewSummary[]`, and the
+  `crew` field's description now carries `<name> — <description>` from each
+  manifest. It is in the tool definition rather than a prompt line, so it
+  travels to whichever model `compute.yaml` assigned, and it is read off the
+  registry at registration, so an edited manifest lands on the next call rather
+  than the next restart. Capped at 20 crews and 120 characters each: the roster
+  is spent out of the same definition-token budget the eager surface is measured
+  against.
+- Updated dependencies [6aa64c2]
+- Updated dependencies [26ffe39]
+- Updated dependencies [70f6580]
+- Updated dependencies [f27e0af]
+- Updated dependencies [e48ea1e]
+- Updated dependencies [ae0f9db]
+- Updated dependencies [b99d4ad]
+- Updated dependencies [75c7547]
+- Updated dependencies [23d72db]
+- Updated dependencies [78d78d1]
+- Updated dependencies [d21f953]
+- Updated dependencies [26df04d]
+- Updated dependencies [367f456]
+  - @foldedspacelabs/metistry-core@0.8.0
+  - @foldedspacelabs/metistry-tasks@0.8.0
+  - @foldedspacelabs/metistry-artifacts@0.8.0
+  - @foldedspacelabs/metistry-queries@0.8.0
+
 ## 0.7.1
 
 ### Patch Changes

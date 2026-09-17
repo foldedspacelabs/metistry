@@ -1,0 +1,133 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 700" width="1000" height="700" role="img" aria-labelledby="ttl desc">
+  <title id="ttl">macOS — the setup wizard as a stepper, with "Choose your compute" as the step body</title>
+  <desc id="desc">Annotated wireframe: the first-run sheet with its seven steps drawn as a stepper — Runtime, Instance, Versioning, Secrets, Services, Door and Compute — and step seven rendered in full. A provider template, a base URL, a model id and a secure key field on the left; on the right, the two metistry verbs the step will run, shown before they run. Skipping is a real choice with its consequence on screen.</desc>
+  <style>
+    text { font-family: -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", Roboto, sans-serif; fill: #12171c; font-size: 13px; }
+    .t2 { fill: #4d565f; font-size: 12px } .t3 { fill: #646d77; font-size: 11px }
+    .hd { font-size: 15px; font-weight: 600 } .h2 { font-size: 20px; font-weight: 700 } .h3 { font-size: 18px; font-weight: 600 }
+    .st { font-size: 10px; text-anchor: middle; fill: #646d77 }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px }
+    .mn { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; fill: #4d565f }
+    .ln { stroke: #d9dee4; stroke-width: 1; fill: none }
+    .win { fill: #f6f7f9; stroke: #b6bec8 }
+    .sf { fill: #ffffff; stroke: #d9dee4 }
+    .snk { fill: #eef0f3; stroke: #d9dee4 }
+    .acc { fill: #2b5fd0 } .ag { fill: #6a4bbd } .ok { fill: #1c7a45 } .deg { fill: #8a5a00 } .bad { fill: #b3261e }
+    .cw { fill: #ffffff; stroke: #b3261e; stroke-width: 1.5 }
+    .cn { fill: #b3261e; font-size: 11px; font-weight: 700; text-anchor: middle }
+    .lg { font-size: 12px } .btn { font-size: 12px; text-anchor: middle }
+  </style>
+
+  <rect width="1000" height="700" fill="#ffffff"/>
+  <text x="24" y="30" class="h2">macOS — Setup wizard</text>
+  <text x="24" y="50" class="t2">Seven steps, each showing its argument array before it runs · step 7 is "Choose your compute" · skipping is a choice, not a gap</text>
+
+  <rect class="win" x="24" y="66" width="720" height="560" rx="12"/>
+  <path class="ln" d="M24 104 H744"/>
+  <circle cx="46" cy="86" r="6" fill="#ff5f57"/><circle cx="66" cy="86" r="6" fill="#febc2e"/><circle cx="86" cy="86" r="6" fill="#28c840"/>
+  <text x="112" y="90" class="hd">Metistry</text>
+  <rect x="25" y="105" width="718" height="520" fill="#12171c" opacity="0.24"/>
+
+  <!-- the sheet -->
+  <rect class="sf" x="84" y="120" width="600" height="470" rx="20" stroke="#b6bec8"/>
+  <text x="116" y="152" class="hd">Set Up Metistry</text>
+  <text x="652" y="152" class="t3" text-anchor="end">Step 7 of 7</text>
+
+  <!-- stepper -->
+  <path class="ln" d="M132 190 H648"/>
+  <g>
+    <circle cx="132" cy="190" r="9" fill="#1c7a45"/><text x="132" y="194" class="btn" fill="#fff">✓</text><text x="132" y="212" class="st">Runtime</text>
+    <circle cx="218" cy="190" r="9" fill="#1c7a45"/><text x="218" y="194" class="btn" fill="#fff">✓</text><text x="218" y="212" class="st">Instance</text>
+    <circle cx="304" cy="190" r="9" fill="#1c7a45"/><text x="304" y="194" class="btn" fill="#fff">✓</text><text x="304" y="212" class="st">Versioning</text>
+    <circle cx="390" cy="190" r="9" fill="#1c7a45"/><text x="390" y="194" class="btn" fill="#fff">✓</text><text x="390" y="212" class="st">Secrets</text>
+    <circle cx="476" cy="190" r="9" fill="#1c7a45"/><text x="476" y="194" class="btn" fill="#fff">✓</text><text x="476" y="212" class="st">Services</text>
+    <circle cx="562" cy="190" r="9" fill="#eef0f3" stroke="#b6bec8"/><text x="562" y="194" class="btn" fill="#646d77">–</text><text x="562" y="212" class="st">Door · skipped</text>
+    <circle cx="648" cy="190" r="10" fill="#2b5fd0"/><text x="648" y="194" class="btn" fill="#fff">7</text><text x="648" y="212" class="st" fill="#2b5fd0">Compute</text>
+  </g>
+  <path class="ln" d="M116 232 H652"/>
+
+  <!-- step body -->
+  <text x="116" y="260" class="h3">Choose your compute</text>
+  <text x="116" y="282" class="t2">Where the assistant's turns run: a cloud provider on your own key, a local server, or nothing yet.</text>
+
+  <text x="116" y="312" class="t3">PROVIDER</text>
+  <rect class="sf" x="116" y="320" width="184" height="24" rx="7" stroke="#b6bec8"/><text x="128" y="337">OpenRouter ⌄</text>
+  <text x="312" y="337" class="t3">LM Studio · Ollama · llama-server · Apple FM</text>
+
+  <text x="116" y="368" class="t3">BASE URL</text>
+  <rect class="sf" x="116" y="376" width="324" height="24" rx="7" stroke="#b6bec8"/><text x="128" y="393" class="mono">https://openrouter.ai/api/v1</text>
+
+  <text x="116" y="424" class="t3">MODEL</text>
+  <rect class="sf" x="116" y="432" width="324" height="24" rx="7" stroke="#b6bec8"/><text x="128" y="449" class="mono">anthropic/claude-sonnet-5</text>
+  <text x="116" y="470" class="t3">The id as OpenRouter knows it — it becomes the default.</text>
+
+  <text x="116" y="498" class="t3">API KEY</text>
+  <rect class="sf" x="116" y="506" width="324" height="24" rx="7" stroke="#b6bec8"/><text x="128" y="523" class="mono">••••••••••••••••••••••••</text>
+  <text x="116" y="544" class="t3">Sent to the command's stdin, then the login Keychain.</text>
+
+  <!-- what will run -->
+  <text x="472" y="368" class="t3">WHAT THIS STEP WILL RUN</text>
+  <rect class="snk" x="472" y="376" width="180" height="112" rx="10"/>
+  <text x="482" y="394" class="mn">metistry compute providers</text>
+  <text x="482" y="408" class="mn">  add --from openrouter --json</text>
+  <text x="482" y="424" class="mn" fill="#646d77">  (key on stdin)</text>
+  <text x="482" y="444" class="mn">metistry compute assign</text>
+  <text x="482" y="458" class="mn">  default openrouter/</text>
+  <text x="482" y="472" class="mn">  anthropic/claude-sonnet-5</text>
+  <text x="472" y="508" class="t3">This install has no engine yet,</text>
+  <text x="472" y="522" class="t3">so this provider also becomes</text>
+  <text x="472" y="536" class="t3">the default assignment.</text>
+
+  <!-- buttons -->
+  <rect class="sf" x="116" y="552" width="66" height="26" rx="8"/><text x="149" y="569" class="btn">‹ Back</text>
+  <rect class="sf" x="376" y="552" width="140" height="26" rx="8"/><text x="446" y="569" class="btn">Skip: No Engine Yet</text>
+  <rect x="524" y="552" width="128" height="26" rx="8" fill="#2b5fd0"/><text x="588" y="569" class="btn" fill="#fff">Add and Assign</text>
+  
+  <text x="24" y="652" class="t3">If you skip: no engine — the assistant will not be started, and everything else will. Captures, tasks,</text>
+  <text x="24" y="668" class="t3">search and the console all keep running. You can change all of this later in Settings.</text>
+
+  <!-- callouts -->
+  <g>
+    <circle class="cw" cx="104" cy="190" r="10"/><text class="cn" x="104" y="194">1</text>
+    <circle class="cw" cx="678" cy="190" r="10"/><text class="cn" x="678" y="194">2</text>
+    <circle class="cw" cx="104" cy="514" r="10"/><text class="cn" x="104" y="518">3</text>
+    <circle class="cw" cx="460" cy="440" r="10"/><text class="cn" x="460" y="444">4</text>
+    <circle class="cw" cx="362" cy="565" r="10"/><text class="cn" x="362" y="569">5</text>
+    <circle class="cw" cx="520" cy="190" r="10"/><text class="cn" x="520" y="194">6</text>
+  </g>
+
+  <!-- legend -->
+  <g>
+    <text x="770" y="120" class="hd">Callouts</text>
+    <text x="770" y="144" class="lg">① Seven steps, and only two are</text>
+    <text x="782" y="160" class="lg">required: Runtime and Instance. The</text>
+    <text x="782" y="176" class="lg">rest may be skipped, and the ones</text>
+    <text x="782" y="192" class="lg">you skipped are listed by name at</text>
+    <text x="782" y="208" class="lg">the end, so nothing goes missing.</text>
+    <text x="770" y="236" class="lg">② Steps 6 and 7 own their own</text>
+    <text x="782" y="252" class="lg">screens because neither is <tspan font-style="italic">one</tspan></text>
+    <text x="782" y="268" class="lg">metistry verb — one talks to the</text>
+    <text x="782" y="284" class="lg">system's passkey ceremony, the</text>
+    <text x="782" y="300" class="lg">other runs two verbs in order and</text>
+    <text x="782" y="316" class="lg">writes a key to the first's stdin.</text>
+    <text x="770" y="344" class="lg">③ The key is never an argument,</text>
+    <text x="782" y="360" class="lg">never echoed, never written to the</text>
+    <text x="782" y="376" class="lg">repo. A provider credential is</text>
+    <text x="782" y="392" class="lg">yours rather than one install's, so</text>
+    <text x="782" y="408" class="lg">every instance here shares it.</text>
+    <text x="770" y="436" class="lg">④ One pinned <tspan class="mono">provider/model</tspan>. No</text>
+    <text x="782" y="452" class="lg"><tspan class="mono">/auto</tspan>, no fallback list: the router</text>
+    <text x="782" y="468" class="lg">is deterministic; an auto-router</text>
+    <text x="782" y="484" class="lg">hands the choice to a model.</text>
+    <text x="770" y="512" class="lg">⑤ <tspan font-weight="600">Skip is a real answer</tspan>, with its</text>
+    <text x="782" y="528" class="lg">consequence on screen — not a</text>
+    <text x="782" y="544" class="lg">greyed Continue. An install that</text>
+    <text x="782" y="560" class="lg">assigns nothing is a supported</text>
+    <text x="782" y="576" class="lg">shape, reported absent, not failed.</text>
+    <text x="770" y="604" class="lg">⑥ A skipped step keeps its place in</text>
+    <text x="782" y="620" class="lg">the stepper and says so. A step</text>
+    <text x="782" y="636" class="lg">that vanished would be one you</text>
+    <text x="782" y="652" class="lg">could not come back to.</text>
+  </g>
+  <text x="24" y="692" class="t3">apps/macos/sources/kit/wizard-step-views.swift · first-run-model.swift · docs/ops/compute.md · design-system.md §3.15</text>
+</svg>

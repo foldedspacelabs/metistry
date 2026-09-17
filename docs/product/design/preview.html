@@ -541,6 +541,10 @@ td.num, th.num { text-align: right; }
 .typerow { display: flex; align-items: baseline; gap: var(--mt-space-3); padding: var(--mt-space-2) 0;
   border-bottom: 1px solid var(--mt-color-border); }
 .typerow .name { flex: 0 0 128px; color: var(--mt-color-text-tertiary); font-family: var(--mt-font-mono); font-size: var(--mt-text-caption-1-size); }
+.wireframes { margin: 0; padding-left: var(--mt-space-4); color: var(--mt-color-text-secondary);
+  font-size: var(--mt-text-subhead-size); }
+.wireframes li { padding: var(--mt-space-1) 0; }
+.wireframes a { color: var(--mt-color-accent); }
 </style>
 </head>
 <body>
@@ -1402,10 +1406,38 @@ td.num, th.num { text-align: right; }
     </section>
   </div>
 
+  <!-- ===================== WIREFRAMES ===================== -->
+  <h2><span class="num">5</span> Wireframes</h2>
+  <p class="lede">One architecture, three renderings. Every screen is an annotated SVG in this directory —
+    text-editable, tokens as literal values, numbered red callouts and a legend. Links rather than embeds, so this
+    page stays self-contained. The navigation in all of them is the <b>seven sections</b>
+    (Chat · Feed · Needs You · Work · Knowledge · Agents · System) with <b>Capture as a global action</b>.</p>
+  <div class="card">
+    <ul class="wireframes">
+      <li><a href="mac-feed.svg"><code>mac-feed.svg</code></a> — macOS — Feed (home): the seven-section sidebar, Capture in the toolbar, §3.2 rows</li>
+      <li><a href="mac-needs-you.svg"><code>mac-needs-you.svg</code></a> — macOS — Needs You: request cards with six answers, snooze, batch, the stale refusal</li>
+      <li><a href="mac-work-board.svg"><code>mac-work-board.svg</code></a> — macOS — Work › Board: six columns incl. Addressed to, drags and their refusals</li>
+      <li><a href="mac-project.svg"><code>mac-project.svg</code></a> — macOS — Work › Projects: mode chip, the one toggle, rollup, §3.17 confirmation</li>
+      <li><a href="mac-knowledge.svg"><code>mac-knowledge.svg</code></a> — macOS — Knowledge: pages list, page view with links and backlinks, search results</li>
+      <li><a href="mac-agents.svg"><code>mac-agents.svg</code></a> — macOS — Agents: presence chips, autonomy level and scope, drag-to-dispatch</li>
+      <li><a href="mac-system.svg"><code>mac-system.svg</code></a> — macOS — System: status, compute providers/assignments/budgets, spend, devices, instances</li>
+      <li><a href="mac-chat.svg"><code>mac-chat.svg</code></a> — macOS — Chat: collapsed tool activity, prompt card, model and effort picker</li>
+      <li><a href="mac-settings.svg"><code>mac-settings.svg</code></a> — macOS — Settings: every setting that exists today, in four groups</li>
+      <li><a href="mac-wizard.svg"><code>mac-wizard.svg</code></a> — macOS — the setup wizard as a stepper, with “Choose your compute” as the step body</li>
+      <li><a href="mac-menubar.svg"><code>mac-menubar.svg</code></a> — macOS — the menu bar extra: status, quick capture, the Needs You count, open window</li>
+      <li><a href="iphone-feed.svg"><code>iphone-feed.svg</code></a> — iPhone — Feed, with the five-section tab bar plus More</li>
+      <li><a href="iphone-triage.svg"><code>iphone-triage.svg</code></a> — iPhone — Needs You: six answers over two rows, swipe actions, the notification</li>
+      <li><a href="iphone-chat.svg"><code>iphone-chat.svg</code></a> — iPhone — Chat: bubbles, the composer menu, inline autocomplete</li>
+      <li><a href="iphone-capture.svg"><code>iphone-capture.svg</code></a> — iPhone — Capture at a medium detent; a global action, not a destination</li>
+      <li><a href="pwa-wide.svg"><code>pwa-wide.svg</code></a> — PWA — wide: the same nav as a seven-row sidebar</li>
+      <li><a href="pwa-narrow.svg"><code>pwa-narrow.svg</code></a> — PWA — narrow, installed: five sections plus More, safe areas</li>
+    </ul>
+  </div>
+
   <hr />
   <p class="muted">Source of truth: <code>docs/product/design/tokens.json</code> ·
     spec: <code>docs/product/design-system.md</code> ·
-    wireframes: <code>docs/product/design/*.svg</code>.
+    wireframes: <code>docs/product/design/*.svg</code>, indexed in §5 above.
     Regenerate the tokens and re-inline them here with
     <code>node ops/scripts/build-design-tokens.mjs</code>.</p>
 </div>

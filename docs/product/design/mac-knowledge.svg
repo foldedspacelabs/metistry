@@ -1,0 +1,181 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 880" width="1000" height="880" role="img" aria-labelledby="ttl desc">
+  <title id="ttl">macOS — Knowledge: pages list, page view, and search with full results</title>
+  <desc id="desc">Annotated wireframe: the Knowledge section of the seven-section sidebar, with its four views as a segmented control. Above, a pages list beside a rendered page at reading measure with its links and backlinks. Below, the same window with Search selected, showing a query, full results with their match kind, and the degraded banner that appears when semantic search is unavailable and the result set falls back to keyword only.</desc>
+  <style>
+    text { font-family: -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", Roboto, sans-serif; fill: #12171c; font-size: 13px; }
+    .t2 { fill: #4d565f; font-size: 12px } .t3 { fill: #646d77; font-size: 11px }
+    .hd { font-size: 15px; font-weight: 600 } .h2 { font-size: 20px; font-weight: 700 } .h3 { font-size: 22px; font-weight: 600 }
+    .ch { font-size: 12px; font-weight: 600 }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px }
+    .ln { stroke: #d9dee4; stroke-width: 1; fill: none }
+    .win { fill: #f6f7f9; stroke: #b6bec8 }
+    .sf { fill: #ffffff; stroke: #d9dee4 }
+    .sel { fill: #e6edfc } .snk { fill: #eef0f3; stroke: #d9dee4 } .agq { fill: #f1ecfc }
+    .acc { fill: #2b5fd0 } .ag { fill: #6a4bbd } .ok { fill: #1c7a45 } .deg { fill: #8a5a00 } .bad { fill: #b3261e }
+    .cw { fill: #ffffff; stroke: #b3261e; stroke-width: 1.5 }
+    .cn { fill: #b3261e; font-size: 11px; font-weight: 700; text-anchor: middle }
+    .lg { font-size: 12px }
+  </style>
+
+  <rect width="1000" height="880" fill="#ffffff"/>
+  <text x="24" y="30" class="h2">macOS — Knowledge</text>
+  <text x="24" y="50" class="t2">The product's first noun, and until this IA it had no home · page content comes through the vault bridge, not a query</text>
+
+  <!-- window: pages + page -->
+  <rect class="win" x="24" y="66" width="720" height="430" rx="12"/>
+  <path class="ln" d="M24 104 H744"/>
+  <circle cx="46" cy="86" r="6" fill="#ff5f57"/><circle cx="66" cy="86" r="6" fill="#febc2e"/><circle cx="86" cy="86" r="6" fill="#28c840"/>
+  <text x="112" y="90" class="hd">Knowledge</text>
+  <rect class="sf" x="618" y="76" width="100" height="22" rx="6"/><text x="628" y="91" class="acc">＋ Capture ⌘N</text>
+
+  <rect x="25" y="105" width="186" height="390" fill="#eef0f3"/>
+  <path class="ln" d="M211 105 V495"/>
+  <text x="40" y="126" class="t3">METISTRY</text>
+  <text x="45" y="152">💬</text><text x="66" y="152">Chat</text>
+  <text x="45" y="178">◈</text><text x="66" y="178">Feed</text>
+  <text x="45" y="204">📝</text><text x="66" y="204">Needs You</text>
+  <rect x="160" y="192" width="30" height="16" rx="8" fill="#2b5fd0"/><text x="175" y="204" fill="#fff" font-size="10" text-anchor="middle">4</text>
+  <text x="45" y="230">🗂️</text><text x="66" y="230">Work</text>
+  <rect class="sel" x="33" y="238" width="170" height="26" rx="7"/>
+  <text x="45" y="256">📚</text><text x="66" y="256" class="hd">Knowledge</text>
+  <text x="45" y="282">🤖</text><text x="66" y="282">Agents</text>
+  <text x="45" y="308">⚙️</text><text x="66" y="308">System</text>
+  <circle cx="176" cy="304" r="4" class="deg"/>
+  <path class="ln" d="M33 440 H203"/>
+  <text x="45" y="460" class="t3">⌘K  Commands · ⌘N  Capture</text>
+
+  <!-- segmented -->
+  <rect class="snk" x="228" y="120" width="272" height="26" rx="8"/>
+  <rect x="230" y="122" width="66" height="22" rx="7" fill="#ffffff" stroke="#d9dee4"/><text x="263" y="137" class="ch" text-anchor="middle">Pages</text>
+  <text x="330" y="137" class="t2" text-anchor="middle">Inbox</text>
+  <rect x="356" y="128" width="26" height="12" rx="6" fill="#2b5fd0"/><text x="369" y="137" fill="#fff" font-size="9" text-anchor="middle">12</text>
+  <text x="422" y="137" class="t2" text-anchor="middle">Search</text>
+  <text x="478" y="137" class="t2" text-anchor="middle">Links</text>
+
+  <!-- pages list -->
+  <text x="228" y="172" class="t3">412 PAGES · sorted by last change</text>
+  <path class="ln" d="M432 160 V486"/>
+  <g>
+    <text x="228" y="196" class="t2">Areas/Running/</text><text x="228" y="212" class="hd">Taper.md</text><text x="424" y="196" class="t3" text-anchor="end">2d</text>
+    <path class="ln" d="M228 224 H420"/>
+    <rect class="sel" x="222" y="230" width="204" height="40" rx="7"/>
+    <text x="228" y="246" class="t2">Areas/Health/</text><text x="228" y="262" class="hd">Taper.md</text><text x="418" y="246" class="t3" text-anchor="end">today</text>
+    <text x="228" y="296" class="t2">Areas/Work/</text><text x="228" y="312" class="hd">Weekly.md</text><text x="424" y="296" class="t3" text-anchor="end">today</text>
+    <path class="ln" d="M228 324 H420"/>
+    <text x="228" y="346" class="t2">Projects/Metistry/</text><text x="228" y="362" class="hd">Decisions.md</text><text x="424" y="346" class="t3" text-anchor="end">3d</text>
+    <path class="ln" d="M228 374 H420"/>
+    <text x="228" y="396" class="t2">People/</text><text x="228" y="412" class="hd">Physio.md</text><text x="424" y="396" class="t3" text-anchor="end">1w</text>
+    <path class="ln" d="M228 424 H420"/>
+    <text x="228" y="450" class="t3">Inbox/ — 12 captured, not yet filed</text>
+    <text x="228" y="470" class="t3">A capture is a page, in the vault —</text>
+    <text x="228" y="484" class="t3">Obsidian sees it, git carries it.</text>
+  </g>
+
+  <!-- page view -->
+  <g>
+    <text x="452" y="182" class="h3">Taper</text>
+    <text x="452" y="202" class="mono t3">Knowledge/Areas/Health/Taper.md</text>
+    <rect class="snk" x="452" y="212" width="256" height="20" rx="6"/>
+    <text x="462" y="226" class="t3">kind: note · updated today · principal: user</text>
+    <text x="452" y="256" class="t2">Cut volume by about 40% over the final three</text>
+    <text x="452" y="274" class="t2">weeks while keeping intensity. The last hard</text>
+    <text x="452" y="292" class="t2">session should sit ten days out.</text>
+    <text x="452" y="318" class="t3">reading measure — about 66 characters, and the</text>
+    <text x="452" y="332" class="t3">extra width goes to the panes, not the line.</text>
+    <path class="ln" d="M452 348 H708"/>
+    <text x="452" y="370" class="t3">LINKS · 3</text>
+    <text x="452" y="390" class="acc" font-size="12">Areas/Running/Taper · People/Physio</text>
+    <text x="452" y="408" class="acc" font-size="12">Projects/Metistry/Decisions</text>
+    <text x="452" y="432" class="t3">BACKLINKS · 2</text>
+    <text x="452" y="452" class="acc" font-size="12">Areas/Work/Weekly · Inbox/418</text>
+    <text x="452" y="478" class="t3">Edit in Obsidian ↗ · Reveal in Finder · History</text>
+  </g>
+
+  <!-- search panel -->
+  <text x="24" y="534" class="t3">THE SAME WINDOW, SEARCH SELECTED</text>
+  <rect class="win" x="24" y="544" width="720" height="252" rx="12"/>
+  <rect class="sf" x="44" y="562" width="440" height="28" rx="8" stroke="#2b5fd0" stroke-width="2"/>
+  <text x="56" y="581" class="t3">🔎</text><text x="76" y="581">taper</text>
+  <text x="474" y="581" class="t3" text-anchor="end">⌘F</text>
+  <rect class="snk" x="496" y="562" width="152" height="28" rx="8"/>
+  <rect x="498" y="564" width="74" height="24" rx="7" fill="#ffffff" stroke="#d9dee4"/><text x="535" y="580" class="ch" text-anchor="middle">Both</text>
+  <text x="610" y="580" class="t2" text-anchor="middle">Keyword</text>
+  <text x="724" y="581" class="t3" text-anchor="end">14 results</text>
+
+  <rect x="44" y="600" width="680" height="24" rx="8" fill="#faf1de"/>
+  <text x="56" y="616" class="deg" font-size="12">◐ semantic unavailable — embeddings are 3h stale. Results are keyword only: fewer, not wrong.</text>
+
+  <g>
+    <text x="44" y="652" class="hd">Areas/Health/Taper.md</text>
+    <rect class="agq" x="252" y="639" width="76" height="16" rx="8"/><text x="259" y="651" class="ag" font-size="10">semantic 0.81</text>
+    <text x="724" y="652" class="t3" text-anchor="end">today</text>
+    <text x="44" y="670" class="t2">…cut volume by about 40% over the final three weeks while keeping <tspan font-weight="600">taper</tspan> intensity…</text>
+    <path class="ln" d="M44 682 H724"/>
+    <text x="44" y="704" class="hd">Areas/Running/Taper.md</text>
+    <rect class="snk" x="262" y="691" width="58" height="16" rx="8"/><text x="269" y="703" class="t3" font-size="10">keyword</text>
+    <text x="724" y="704" class="t3" text-anchor="end">2d</text>
+    <text x="44" y="722" class="t2">…the last hard session should sit ten days out of the <tspan font-weight="600">taper</tspan>…</text>
+    <path class="ln" d="M44 734 H724"/>
+    <text x="44" y="756" class="hd">Inbox/418.md</text>
+    <rect class="snk" x="164" y="743" width="58" height="16" rx="8"/><text x="171" y="755" class="t3" font-size="10">keyword</text>
+    <text x="724" y="756" class="t3" text-anchor="end">today</text>
+    <text x="44" y="774" class="t2">…ask the physio about the calf before the <tspan font-weight="600">taper</tspan> starts — book the week of the 21st…</text>
+  </g>
+
+  <!-- callouts -->
+  <g>
+    <circle class="cw" cx="212" cy="250" r="10"/><text class="cn" x="212" y="254">1</text>
+    <circle class="cw" cx="438" cy="226" r="10"/><text class="cn" x="438" y="230">2</text>
+    <circle class="cw" cx="216" cy="450" r="10"/><text class="cn" x="216" y="454">3</text>
+    <circle class="cw" cx="756" cy="612" r="10"/><text class="cn" x="756" y="616">4</text>
+    <circle class="cw" cx="442" cy="390" r="10"/><text class="cn" x="442" y="394">5</text>
+    <circle class="cw" cx="436" cy="478" r="10"/><text class="cn" x="436" y="482">6</text>
+  </g>
+
+  <!-- legend -->
+  <g>
+    <text x="770" y="90" class="hd">Callouts</text>
+    <text x="770" y="114" class="lg">① Knowledge is a section, not a</text>
+    <text x="782" y="130" class="lg">folder someone forgot. Captures</text>
+    <text x="782" y="146" class="lg">went in and nothing came back out:</text>
+    <text x="782" y="162" class="lg">no route listed, read or searched</text>
+    <text x="782" y="178" class="lg">the vault at all before this.</text>
+    <text x="770" y="206" class="lg">② Page content is <tspan font-style="italic">not derived</tspan></text>
+    <text x="782" y="222" class="lg"><tspan font-style="italic">state</tspan>, so it does not come from a</text>
+    <text x="782" y="238" class="lg">named query. It comes through the</text>
+    <text x="782" y="254" class="lg">reconciler's vault bridge, because</text>
+    <text x="782" y="270" class="lg">invariant 3 sends it through the</text>
+    <text x="782" y="286" class="lg">bridge. The list and the link graph</text>
+    <text x="782" y="302" class="lg"><tspan font-style="italic">are</tspan> derived, and are a query.</text>
+    <text x="770" y="330" class="lg">③ Inbox lives here, in the vault,</text>
+    <text x="782" y="346" class="lg">so Obsidian sees it and git</text>
+    <text x="782" y="362" class="lg">carries it. A note you write by</text>
+    <text x="782" y="378" class="lg">hand is first-class: the reconcile</text>
+    <text x="782" y="394" class="lg">loop files it like any capture.</text>
+    <text x="770" y="422" class="lg">④ <tspan class="deg">Degraded, not failed</tspan> (P5). The</text>
+    <text x="782" y="438" class="lg">banner names what is missing and</text>
+    <text x="782" y="454" class="lg">what you get instead. Every result</text>
+    <text x="782" y="470" class="lg">says which kind of match it was,</text>
+    <text x="782" y="486" class="lg">so a thin result set is explained.</text>
+    <text x="770" y="514" class="lg">⑤ Links and backlinks are the same</text>
+    <text x="782" y="530" class="lg">graph read twice. Following one is</text>
+    <text x="782" y="546" class="lg">navigation inside the section, not</text>
+    <text x="782" y="562" class="lg">a new destination.</text>
+    <text x="770" y="590" class="lg">⑥ The vault is shared, but a write</text>
+    <text x="782" y="606" class="lg">to a protected path is refused for</text>
+    <text x="782" y="622" class="lg">every principal but you — at the</text>
+    <text x="782" y="638" class="lg">tool, not by a warning here.</text>
+    <text x="770" y="672" class="hd">States</text>
+    <text x="770" y="694" class="lg">empty ("No pages yet") · <tspan class="deg">degraded</tspan> ·</text>
+    <text x="770" y="710" class="lg">absent (no vault bridge) · <tspan class="bad">failed</tspan></text>
+    <text x="770" y="726" class="lg">(bridge unreachable) · stale</text>
+    <text x="770" y="754" class="hd">Open question</text>
+    <text x="770" y="776" class="lg">Whether knowledge gets a client</text>
+    <text x="770" y="792" class="lg">read path at all is undecided —</text>
+    <text x="770" y="808" class="lg">"edited in Obsidian, the app only</text>
+    <text x="770" y="824" class="lg">captures into it" is a legitimate</text>
+    <text x="770" y="840" class="lg">answer that deletes this screen.</text>
+    <text x="770" y="856" class="lg">Drawn so the choice is visible.</text>
+  </g>
+  <text x="24" y="836" class="t3">docs/ops/inbox.md · docs/ops/knowledge-search.md · design-system.md §3.11 document rendering · §3.15 empty states</text>
+</svg>

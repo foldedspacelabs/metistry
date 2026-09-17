@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 940" width="1000" height="940" role="img" aria-labelledby="ttl desc">
   <title id="ttl">macOS — chat with collapsed tool activity and the model picker</title>
-  <desc id="desc">Annotated wireframe: a chat thread where each assistant turn carries an explicit turn state, a collapsed tool-activity disclosure summarising count, duration and cost, and a structured question-answer prompt card; the toolbar holds the model and effort picker. The composer shows an inline suggestion listbox: the user has typed an at sign and a d, and three agents are offered, ranked prefix first.</desc>
+  <desc id="desc">Annotated wireframe of the Chat section: a chat thread where each assistant turn carries an explicit turn state, a collapsed tool-activity disclosure summarising count, duration and cost, and a structured question-answer prompt card; the toolbar holds the model and effort picker. The composer shows an inline suggestion listbox: the user has typed an at sign and a d, and three agents are offered, ranked prefix first.</desc>
   <style>
     text { font-family: -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", Roboto, sans-serif; fill: #12171c; font-size: 13px; }
     .t2 { fill: #4d565f; font-size: 12px } .t3 { fill: #646d77; font-size: 11px }
@@ -20,16 +20,17 @@
 
   <rect width="1000" height="940" fill="#ffffff"/>
   <text x="24" y="30" class="h2">macOS — Chat</text>
-  <text x="24" y="50" class="t2">Collapsed tool activity · explicit turn state · per-turn model and effort picker in the toolbar</text>
+  <text x="24" y="50" class="t2">The first of the seven sections · collapsed tool activity · explicit turn state · per-turn model and effort picker in the toolbar</text>
 
   <rect class="win" x="24" y="66" width="720" height="770" rx="12"/>
   <path class="ln" d="M24 104 H744"/>
   <circle cx="46" cy="86" r="6" fill="#ff5f57"/><circle cx="66" cy="86" r="6" fill="#febc2e"/><circle cx="86" cy="86" r="6" fill="#28c840"/>
   <text x="112" y="90" class="hd">Chat</text>
   <!-- model + effort picker -->
-  <rect class="sf" x="520" y="76" width="132" height="22" rx="6"/>
-  <text x="530" y="91" class="t2">◇ auto · <tspan class="acc">deep</tspan> · high ⌄</text>
-  <rect class="sf" x="660" y="76" width="60" height="22" rx="6"/><text x="670" y="91" class="t2">⌘K</text>
+  <rect class="sf" x="488" y="76" width="132" height="22" rx="6"/>
+  <text x="498" y="91" class="t2">◇ auto · <tspan class="acc">deep</tspan> · high ⌄</text>
+  <rect class="sf" x="628" y="76" width="44" height="22" rx="6"/><text x="638" y="91" class="t2">⌘K</text>
+  <rect class="sf" x="680" y="76" width="40" height="22" rx="6"/><text x="692" y="91" class="acc">＋</text>
 
   <!-- outbound turn (you) -->
   <rect class="accq" x="264" y="122" width="460" height="52" rx="14"/>
@@ -145,5 +146,6 @@
 
   <text x="770" y="900" class="hd">Reduced Motion · P9</text>
   <text x="770" y="920" class="lg">Disclosure opens instantly; a poll is a repaint, not a navigation.</text>
+  <text x="24" y="858" class="t3">Shell — seven sections: <tspan font-weight="600">Chat</tspan> · Feed · Needs You · Work · Knowledge · Agents · System · Capture is the ＋ (⌘N), not a tab</text>
   <text x="24" y="880" class="t3">docs/product/design-system.md §3.4 chat message · §3.5 prompt card · §3.6 composer actions menu, autocomplete and the ⌘K palette · §3.7 model picker · §4 reply text</text>
 </svg>

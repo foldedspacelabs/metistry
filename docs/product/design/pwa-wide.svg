@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 720" width="1000" height="720" role="img" aria-labelledby="ttl desc">
   <title id="ttl">PWA — wide layout, the same nav element as a sidebar</title>
-  <desc id="desc">Annotated wireframe at or above the 900 pixel breakpoint: a CSS grid places the identical nav element as a left sidebar beside the main content, with a dashboard of tiles, a doctor table and an error envelope; nothing in the markup or JavaScript changes between the two layouts.</desc>
+  <desc id="desc">Annotated wireframe at or above the 900 pixel breakpoint: a CSS grid places the identical nav element as a left sidebar beside the main content. The sidebar carries the seven sections — Chat, Feed, Needs You, Work, Knowledge, Agents, System — with Capture as a button rather than a destination; the main content is the System section&#39;s Status and Spend views, a doctor table and an error envelope. Nothing in the markup or JavaScript changes between the two layouts.</desc>
   <style>
     text { font-family: -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", Roboto, sans-serif; fill: #12171c; font-size: 13px; }
     .t2 { fill: #4d565f; font-size: 12px } .t3 { fill: #646d77; font-size: 11px }
@@ -17,7 +17,7 @@
 
   <rect width="1000" height="720" fill="#ffffff"/>
   <text x="24" y="30" class="h2">PWA — wide (≥ 900px)</text>
-  <text x="24" y="50" class="t2">One media query. The same &lt;nav id="nav"&gt; and the same buttons; only display and placement change.</text>
+  <text x="24" y="50" class="t2">One media query. The same &lt;nav id="nav"&gt; and the same seven buttons; only display and placement change.</text>
 
   <!-- browser frame -->
   <rect x="24" y="66" width="720" height="560" rx="10" fill="#f6f7f9" stroke="#b6bec8"/>
@@ -30,23 +30,24 @@
   <rect x="25" y="101" width="180" height="524" fill="#eef0f3"/>
   <path class="ln" d="M205 101 V625"/>
   <text x="42" y="126" class="hd">Metistry</text>
-  <rect x="34" y="140" width="162" height="26" rx="7" fill="#e6edfc"/>
-  <text x="46" y="158" class="acc">◈</text><text x="68" y="158" class="hd">Feed</text>
-  <text x="46" y="186">💬</text><text x="68" y="186">Chat</text>
-  <text x="46" y="212">🤖</text><text x="68" y="212">Agents</text>
-  <text x="46" y="238">📊</text><text x="68" y="238">Dashboard</text>
-  <text x="46" y="264">📄</text><text x="68" y="264">Artifacts</text>
-  <text x="46" y="290">📥</text><text x="68" y="290">Capture</text>
-  <text x="46" y="316">📝</text><text x="68" y="316">Triage</text>
-  <rect x="152" y="304" width="30" height="16" rx="8" fill="#2b5fd0"/><text x="167" y="316" fill="#fff" font-size="10" text-anchor="middle">3</text>
-  <text x="46" y="342">🩺</text><text x="68" y="342">Status</text>
-  <circle cx="170" cy="338" r="4" class="deg"/>
-  <text x="46" y="368">🔑</text><text x="68" y="368">Devices</text>
+  <rect x="34" y="140" width="162" height="26" rx="7" fill="#ffffff" stroke="#d9dee4"/>
+  <text x="46" y="158" class="acc">＋</text><text x="68" y="158" class="acc">Capture</text>
+  <text x="188" y="158" class="t3" text-anchor="end">N</text>
+  <text x="46" y="192">💬</text><text x="68" y="192">Chat</text>
+  <text x="46" y="218">◈</text><text x="68" y="218">Feed</text>
+  <text x="46" y="244">📝</text><text x="68" y="244">Needs You</text>
+  <rect x="152" y="232" width="30" height="16" rx="8" fill="#2b5fd0"/><text x="167" y="244" fill="#fff" font-size="10" text-anchor="middle">4</text>
+  <text x="46" y="270">🗂️</text><text x="68" y="270">Work</text>
+  <text x="46" y="296">📚</text><text x="68" y="296">Knowledge</text>
+  <text x="46" y="322">🤖</text><text x="68" y="322">Agents</text>
+  <rect x="34" y="330" width="162" height="26" rx="7" fill="#e6edfc"/>
+  <text x="46" y="348" class="acc">⚙️</text><text x="68" y="348" class="hd">System</text>
+  <circle cx="170" cy="344" r="4" class="deg"/>
   <path class="ln" d="M34 596 H196"/>
   <text x="46" y="614" class="t3">⌘K  Commands</text>
 
   <!-- main: dashboard -->
-  <text x="228" y="130" class="hd">Last 24h</text>
+  <text x="228" y="130" class="hd">System › Status · last 24h</text>
   <text x="720" y="130" class="t3" text-anchor="end">as of 09:41</text>
   <g>
     <rect class="sf" x="228" y="142" width="92" height="62" rx="12"/><text x="240" y="174" font-size="20" font-weight="600" class="ok">128</text><text x="240" y="192" class="t3">runs ok</text>
@@ -86,7 +87,7 @@
   <text x="266" y="514" class="t2"><tspan class="mono">collector_absent</tspan> — set METISTRY_AWS_* and run <tspan class="mono">metistry doctor</tspan>.</text>
   <text x="706" y="494" class="t3" text-anchor="end">req 01H8…9c</text>
 
-  <text x="228" y="562" class="t3">Other panels rendered normally — a panel that cannot answer stamps itself unavailable and leaves the rest alone.</text>
+  <text x="228" y="562" class="t3">Other panels render normally — a panel that cannot answer stamps itself unavailable.</text>
 
   <!-- callouts -->
   <circle class="cw" cx="216" cy="153" r="10"/><text class="cn" x="216" y="157">1</text>
@@ -120,10 +121,12 @@
   <text x="782" y="452" class="lg">a stack trace.</text>
 
   <text x="770" y="492" class="hd">Same at every width</text>
-  <text x="770" y="516" class="lg">Ten destinations, same order, same</text>
-  <text x="770" y="532" class="lg">names as macOS and iOS (P6).</text>
-  <text x="770" y="560" class="hd">Keyboard</text>
-  <text x="770" y="584" class="lg">⌘K · ⌘1–⌘9 · / focuses the composer ·</text>
-  <text x="770" y="600" class="lg">Esc closes · :focus-visible ring, 2px.</text>
+  <text x="770" y="516" class="lg">Seven sections, same order, same</text>
+  <text x="770" y="532" class="lg">names as macOS and iOS. Capture is</text>
+  <text x="770" y="548" class="lg">the button above them, every width.</text>
+  <text x="770" y="584" class="hd">Keyboard</text>
+  <text x="770" y="606" class="lg">⌘K · 1–7 sections · N captures ·</text>
+  <text x="770" y="622" class="lg">/ focuses the composer · Esc closes ·</text>
+  <text x="770" y="638" class="lg">:focus-visible ring, 2px.</text>
   <text x="24" y="672" class="t3">docs/product/design-system.md §3.1 navigation · §3.13 status rows · §3.16 error envelopes</text>
 </svg>

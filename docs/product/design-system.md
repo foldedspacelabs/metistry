@@ -1186,15 +1186,30 @@ in circles are callouts; the legend is in each file.
 | File | Screen |
 | --- | --- |
 | `design/mac-feed.svg` | macOS — activity feed home, sidebar + toolbar |
+| `design/mac-needs-you.svg` | macOS — the request queue: six answers, snooze, batch, the stale refusal |
+| `design/mac-work-board.svg` | macOS — Work › Board: six columns, "Addressed to", the drags and their refusals |
+| `design/mac-project.svg` | macOS — Work › Projects: header, mode toggle, rollup |
+| `design/mac-knowledge.svg` | macOS — Knowledge: pages list, page view with links and backlinks, search with full results |
+| `design/mac-agents.svg` | macOS — agents panel with presence, autonomy level and scope, and drag-to-dispatch |
+| `design/mac-system.svg` | macOS — System: status, compute (providers, assignments, budgets), spend, devices, instances |
 | `design/mac-chat.svg` | macOS — chat with collapsed tool activity and the model picker |
-| `design/mac-agents.svg` | macOS — agents panel with presence and drag-to-dispatch |
-| `design/mac-project.svg` | macOS — project header, mode toggle, rollup |
+| `design/mac-settings.svg` | macOS — Settings: every setting that exists today, in four groups |
+| `design/mac-wizard.svg` | macOS — the setup wizard as a stepper, with "Choose your compute" as the step body |
+| `design/mac-menubar.svg` | macOS — the menu bar extra: status, quick capture, the Needs You count, open window |
 | `design/iphone-feed.svg` | iPhone — feed with tab bar |
 | `design/iphone-chat.svg` | iPhone — chat: iMessage-style bubbles, the collapsed `+` composer, its expanded actions menu, and the new-reply pill |
-| `design/iphone-triage.svg` | iPhone — request cards in Needs You and the actionable notification |
+| `design/iphone-triage.svg` | iPhone — Needs You: request cards over two rows of answers, and the actionable notification |
 | `design/iphone-capture.svg` | iPhone — capture sheet at a medium detent |
 | `design/pwa-narrow.svg` | PWA — narrow (bottom tabs, installed, safe areas) |
 | `design/pwa-wide.svg` | PWA — wide (the same `<nav>` as a sidebar) |
+
+The wireframes were refreshed on 2026-09-17 to the seven-section IA of
+`app-ux-plan.md` §3 — Chat · Feed · Needs You · Work · Knowledge · Agents ·
+System, with Capture as a global action rather than a destination — matching
+the P6 and §3.1 amendment of the same day, and they draw the six request
+answers §3.9 now specifies. They are structural wireframes, not the visual
+design: the design language is being produced by the designer briefed in
+`design-brief.md`, so nothing here is implementable as drawn.
 
 The macOS and PWA-wide layouts are deliberately the same three-column
 idea (navigation · list · detail) because they are the same job on the

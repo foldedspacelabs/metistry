@@ -5,7 +5,7 @@ you decide on**. Nothing in this loop changes how the assistant behaves on its
 own: the routine suggests, you allow, and only then is anything written —
 in your name (invariant 2, plan §4.10).
 
-## The Needs You queue's five verbs
+## The Needs You queue's six verbs
 
 Every item in Needs You is a **request**, and a request has one of seven types
 (`glossary.md`). Whatever its type, these are the answers:

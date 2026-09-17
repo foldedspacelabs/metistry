@@ -143,12 +143,17 @@ const envRef = z
 
 // A vault-relative path prefix the brief may reference (plan §4.15: scopes
 // are prefix matches, so `Areas/Fsl` covers every sub-area). The vault root
-// is the instance directory, so a prefix has no `Knowledge/` to anchor on —
-// `isVaultPath` is the whole rule, which also refuses `.metistry/` (the
-// machinery) and `Artifacts/` (not knowledge).
+// is the instance directory, so a prefix has no `Knowledge/` to anchor on;
+// what anchors it instead is the casing rule — the FIRST segment is
+// TitleCase, exactly as Obsidian renders it, which is also why `.metistry/`
+// can never be named here. `isVaultPath` carries the rest: no traversal, no
+// dot-directory, not `Artifacts/`.
 const knowledgePrefix = z
   .string()
-  .regex(/^[A-Za-z0-9][A-Za-z0-9 _.'-]*(\/[A-Za-z0-9][A-Za-z0-9 _.'-]*)*$/, "allow entries are vault path prefixes (no leading slash, no '..', no trailing slash)")
+  .regex(
+    /^[A-Z][A-Za-z0-9 _.'-]*(\/[A-Za-z0-9_.'-][A-Za-z0-9 _.'-]*)*$/,
+    "allow entries are vault path prefixes with a TitleCase first segment (no leading slash, no '..', no trailing slash)",
+  )
   .refine((p) => isVaultPath(p), "allow entries must name vault content — not .metistry/, not Artifacts/, no traversal");
 
 // What a brief bound for this target may carry (§4.18.B). Every field is

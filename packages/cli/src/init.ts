@@ -84,8 +84,9 @@ export const SEED_COMPUTE_FILE = COMPUTE_FILENAME;
 
 /**
  * Tracked config dirs the instance owns (§4.16), by bare name — they are
- * stamped under `.metistry/`. The inbox is NOT one of them: it is vault
- * content at `Inbox/` (docs/ops/inbox.md) and comes from `seed/vault/`.
+ * stamped under `.metistry/`, and every one of them is protected. The inbox
+ * is NOT one of them: it is vault content at `Inbox/` (docs/ops/inbox.md)
+ * and comes from `seed/vault/`.
  */
 export const INSTANCE_DIRS = INSTANCE_CONFIG_DIRS;
 // `.metistry/state/` holds this instance's derived state — the Postgres data

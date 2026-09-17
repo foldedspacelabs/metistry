@@ -15,7 +15,7 @@ import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join, relative } from "node:path";
-import { usesCompose, type Deployment } from "@foldedspacelabs/metistry-core";
+import { INSTANCE_LAYOUT, usesCompose, type Deployment } from "@foldedspacelabs/metistry-core";
 import { loadDeployment } from "./deployment.js";
 import { doctor, type DoctorDeps, type DoctorReport } from "./doctor.js";
 import { productVersion } from "./env.js";
@@ -24,7 +24,7 @@ import { applyPorts, loadNamespace } from "./namespace.js";
 import type { Exec } from "./exec.js";
 import { loadPlistTemplates, loadSupervisedTemplates, type PlistTemplate } from "./launchd.js";
 import { SUPERVISOR_SERVICE } from "./supervisor.js";
-import { instanceLockPath, LOCK_FILENAME, readLock, serializeLock, type LockFile, type LockSource } from "./lock.js";
+import { instanceLockPath, readLock, serializeLock, type LockFile, type LockSource } from "./lock.js";
 import { writeProtected, type ProtectedWrite } from "./protected-write.js";
 import { listMigrationFiles, MIGRATION_LOCK_KEY, openMigrationSession, runMigrations, type MigrateResult, type MigrationSession } from "./migrate.js";
 import { currentVersion, installRelease, rollbackRelease, releaseTarget, runtimePackCommit, type InstallReleaseResult } from "./release.js";
@@ -181,8 +181,8 @@ export type LockDelivery = ProtectedWrite;
  * holds the policy, which `identity.yaml`'s `instance_id` shares.
  */
 export async function writeLock(r: StepRunner, lock: LockFile, opts: { env: NodeJS.ProcessEnv; platform: NodeJS.Platform; uid: number; fetchFn: typeof fetch }): Promise<LockDelivery> {
-  const delivery = await writeProtected(r, LOCK_FILENAME, serializeLock(lock), `metistry update → ${lock.product.version}`, opts);
-  if (delivery.how === "none") r.note(`no METISTRY_INSTANCE_DIR — ${LOCK_FILENAME} not written (metistry init creates the instance repo)`);
+  const delivery = await writeProtected(r, INSTANCE_LAYOUT.lock, serializeLock(lock), `metistry update → ${lock.product.version}`, opts);
+  if (delivery.how === "none") r.note(`no METISTRY_INSTANCE_DIR — ${INSTANCE_LAYOUT.lock} not written (metistry init creates the instance repo)`);
   return delivery;
 }
 

@@ -98,7 +98,7 @@ applyAssignments();
 
 // D4 overlay for compute targets (§4.18): product dir first, instance dirs after.
 const targets = new TargetRegistry();
-for (const dir of optionalEnv("METISTRY_TARGETS_DIRS", "targets").split(":")) {
+for (const dir of optionalEnv("METISTRY_TARGETS_DIRS", `targets:${INSTANCE_LAYOUT.targetsDir}`).split(":")) {
   await targets.loadDir(dir);
 }
 console.log(`targets: ${targets.names().join(", ") || "(none)"}`);

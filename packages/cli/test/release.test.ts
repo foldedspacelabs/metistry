@@ -6,7 +6,7 @@
 // installed.
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { cp, mkdtemp, readFile, readlink, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, readlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -418,10 +418,11 @@ describe("metistry update --channel release", () => {
 
   it("installs the release, pulls the VERSIONED images against current, migrates there and pins the lock to it", async () => {
     const P = await mkdtemp(join(tmpdir(), "metistry-rel-"));
-    const inst = await mkdtemp(join(tmpdir(), "metistry-inst-"));
+    const inst = await mkdtemp(join(tmpdir(), "mi-" /* short on purpose: the supervisor socket under .metistry/state/run/ has ~103 bytes to live in */));
     const src = await checkout();
     const prior: LockFile = { product: { version: "0.1.0", commit: "unknown", source: "release" }, updated_at: "2026-09-01T00:00:00.000Z", migrations_applied: [] };
-    await writeFile(join(inst, "metistry.lock"), serializeLock(prior));
+    await mkdir(join(inst, ".metistry"), { recursive: true });
+    await writeFile(join(inst, ".metistry", "metistry.lock"), serializeLock(prior));
     const exec = await tarInto(src);
     const s = releaseServer({ versions: ["0.2.0"] });
 
@@ -440,7 +441,7 @@ describe("metistry update --channel release", () => {
     expect(r.commands.join("\n")).not.toContain("pnpm");
     expect(r.commands.join("\n")).not.toContain("git ");
     // compose is told where the instance's .env is (a self-contained instance dir)
-    const ef = `--env-file ${join(inst, "state", ".env")}`;
+    const ef = `--env-file ${join(inst, ".metistry", "state", ".env")}`;
     expect(r.commands).toContain(`(cd ${join(P, "current")} && docker compose ${ef} pull)`);
     expect(r.commands).toContain(`(cd ${join(P, "current")} && docker compose ${ef} up -d --no-build)`);
     // the pull carries the pinned image refs — that is what "pull the release" means
@@ -448,16 +449,17 @@ describe("metistry update --channel release", () => {
     expect(pull.cwd).toBe(join(P, "current"));
     // the lock is pinned to the release that was installed, not to the running CLI's version
     expect(r.lock).toEqual({ product: { version: "0.2.0", commit: "unknown", source: "release" }, updated_at: NOW.toISOString(), migrations_applied: [] });
-    expect(await readFile(join(inst, "metistry.lock"), "utf8")).toContain('version: "0.2.0"');
+    expect(await readFile(join(inst, ".metistry", "metistry.lock"), "utf8")).toContain('version: "0.2.0"');
   });
 
   it("reads the pack's own commit out of metistry-runtime.json (release channel never git-pulls, so this is the only honest source)", async () => {
     const P = await mkdtemp(join(tmpdir(), "metistry-rel-"));
-    const inst = await mkdtemp(join(tmpdir(), "metistry-inst-"));
+    const inst = await mkdtemp(join(tmpdir(), "mi-" /* short on purpose: the supervisor socket under .metistry/state/run/ has ~103 bytes to live in */));
     const src = await checkout();
     await put(src, "metistry-runtime.json", JSON.stringify({ version: "0.2.0", target: TARGET, commit: "cafebabecafebabecafebabecafebabecafebabe" }));
     const prior: LockFile = { product: { version: "0.1.0", commit: "prior-sha", source: "release" }, updated_at: "2026-09-01T00:00:00.000Z", migrations_applied: [] };
-    await writeFile(join(inst, "metistry.lock"), serializeLock(prior));
+    await mkdir(join(inst, ".metistry"), { recursive: true });
+    await writeFile(join(inst, ".metistry", "metistry.lock"), serializeLock(prior));
     const exec = await tarInto(src);
     const s = releaseServer({ versions: ["0.2.0"] });
 
@@ -468,10 +470,11 @@ describe("metistry update --channel release", () => {
 
   it("falls through to the prior lock's commit when the installed pack has no commit field (packs built before it shipped, e.g. 0.3.0/0.3.1) — never fabricates one", async () => {
     const P = await mkdtemp(join(tmpdir(), "metistry-rel-"));
-    const inst = await mkdtemp(join(tmpdir(), "metistry-inst-"));
+    const inst = await mkdtemp(join(tmpdir(), "mi-" /* short on purpose: the supervisor socket under .metistry/state/run/ has ~103 bytes to live in */));
     const src = await checkout(); // no metistry-runtime.json at all in this fixture
     const prior: LockFile = { product: { version: "0.1.0", commit: "prior-sha", source: "release" }, updated_at: "2026-09-01T00:00:00.000Z", migrations_applied: [] };
-    await writeFile(join(inst, "metistry.lock"), serializeLock(prior));
+    await mkdir(join(inst, ".metistry"), { recursive: true });
+    await writeFile(join(inst, ".metistry", "metistry.lock"), serializeLock(prior));
     const exec = await tarInto(src);
     const s = releaseServer({ versions: ["0.2.0"] });
 
@@ -482,7 +485,7 @@ describe("metistry update --channel release", () => {
 
   it("--version pins a specific release; --rollback flips back without downloading anything", async () => {
     const P = await mkdtemp(join(tmpdir(), "metistry-rel-"));
-    const inst = await mkdtemp(join(tmpdir(), "metistry-inst-"));
+    const inst = await mkdtemp(join(tmpdir(), "mi-" /* short on purpose: the supervisor socket under .metistry/state/run/ has ~103 bytes to live in */));
     const src = await checkout();
     const exec = await tarInto(src);
     const s = releaseServer({ versions: ["0.1.0", "0.2.0"] });
@@ -502,11 +505,11 @@ describe("metistry update --channel release", () => {
 
   it("a bad checksum fails the update before anything restarts, and leaves the lock alone", async () => {
     const P = await mkdtemp(join(tmpdir(), "metistry-rel-"));
-    const inst = await mkdtemp(join(tmpdir(), "metistry-inst-"));
+    const inst = await mkdtemp(join(tmpdir(), "mi-" /* short on purpose: the supervisor socket under .metistry/state/run/ has ~103 bytes to live in */));
     const src = await checkout();
     const exec = await tarInto(src);
     await update({ ...base(P, { METISTRY_INSTANCE_DIR: inst }), exec, fetchFn: releaseServer({ versions: ["0.1.0"] }).fn, target: TARGET, skipMigrate: true, channel: "release", openSession: async () => null });
-    const lockBefore = await readFile(join(inst, "metistry.lock"), "utf8");
+    const lockBefore = await readFile(join(inst, ".metistry", "metistry.lock"), "utf8");
 
     const lines: string[] = [];
     const r = await update({
@@ -523,7 +526,7 @@ describe("metistry update --channel release", () => {
     expect(lines.join("\n")).toMatch(/failed its checksum/);
     expect(r.commands.join("\n")).not.toContain("docker compose");
     expect(await currentVersion(P)).toBe("0.1.0");
-    expect(await readFile(join(inst, "metistry.lock"), "utf8")).toBe(lockBefore);
+    expect(await readFile(join(inst, ".metistry", "metistry.lock"), "utf8")).toBe(lockBefore);
   });
 
   it("--dry-run in release mode reaches nothing: no GitHub, no download, no compose", async () => {

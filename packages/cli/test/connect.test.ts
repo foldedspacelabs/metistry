@@ -117,7 +117,7 @@ function fakeConsole(seed: Partial<Row>[] = []) {
 async function scratch(): Promise<{ home: string; instanceDir: string }> {
   const dir = await mkdtemp(join(tmpdir(), "metistry-connect-"));
   await mkdir(join(dir, "home"), { recursive: true });
-  await mkdir(join(dir, "instance", "state"), { recursive: true });
+  await mkdir(join(dir, "instance", ".metistry", "state"), { recursive: true });
   return { home: join(dir, "home"), instanceDir: join(dir, "instance") };
 }
 
@@ -303,7 +303,7 @@ describe("connect cursor: ~/.cursor/mcp.json", () => {
   it("namespaces the server key, the token variable and the port for a second instance on one Mac", async () => {
     const { home, instanceDir } = await scratch();
     await writeFile(
-      join(instanceDir, "state", "ports.yaml"),
+      join(instanceDir, ".metistry", "state", "ports.yaml"),
       ["schema: 1", `instance_id: "${INSTANCE_ID}"`, 'label_suffix: "a1b2c3d4"', "base: 8304", "ports:", "  console: 8304", "  db: 8305", "  reconciler: 8306", "  eventkit: 8307", "  apple-fm: 8308", ""].join("\n"),
     );
     const kc = fakeSecurity();
@@ -400,7 +400,7 @@ describe("connect opencode: ~/.config/opencode/opencode.json", () => {
   it("namespaces the entry and the variable for a second instance on one Mac", async () => {
     const { home, instanceDir } = await scratch();
     await writeFile(
-      join(instanceDir, "state", "ports.yaml"),
+      join(instanceDir, ".metistry", "state", "ports.yaml"),
       ["schema: 1", `instance_id: "${INSTANCE_ID}"`, 'label_suffix: "a1b2c3d4"', "base: 8304", "ports:", "  console: 8304", "  db: 8305", "  reconciler: 8306", "  eventkit: 8307", "  apple-fm: 8308", ""].join("\n"),
     );
     const kc = fakeSecurity();

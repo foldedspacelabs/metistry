@@ -44,7 +44,7 @@ const embedderReady = await (async () => {
 if (!embedderReady) console.warn(`local model server: ${LOCAL} does not serve ${MODEL} — skipping the real-embedder suite (\`metistry compute models install <provider>/${MODEL}\`)`);
 
 const NOTES: Record<string, string> = {
-  "Knowledge/Areas/WaterHeater.md": [
+  "Areas/WaterHeater.md": [
     "---",
     "title: Water heater",
     "description: the tank in the basement and what to do about it",
@@ -59,7 +59,7 @@ const NOTES: Record<string, string> = {
     "",
     "Replace it before winter rather than waiting for it to fail and flood the basement floor.",
   ].join("\n"),
-  "Knowledge/Areas/Marathon.md": [
+  "Areas/Marathon.md": [
     "---",
     "title: Marathon training",
     "description: the build to race day",
@@ -74,7 +74,7 @@ const NOTES: Record<string, string> = {
     "Cut volume sharply in the last three weeks before the race while keeping some intensity,",
     "so the legs arrive fresh on the start line instead of tired from training.",
   ].join("\n"),
-  "Knowledge/Areas/Unsettled.md": ["---", "title: Unsettled", "status: draft", "---", "", "Tapering before a race is something I should write about properly one day."].join("\n"),
+  "Areas/Unsettled.md": ["---", "title: Unsettled", "status: draft", "---", "", "Tapering before a race is something I should write about properly one day."].join("\n"),
 };
 
 describe.skipIf(!hasDb || !embedderReady)("reconciler embeddings (real db, a real local model server)", () => {
@@ -127,14 +127,14 @@ describe.skipIf(!hasDb || !embedderReady)("reconciler embeddings (real db, a rea
     const { rows } = await pool.query(`SELECT path, model, dim, vector_dims(embedding) AS d FROM embeddings ORDER BY path, chunk_index`);
     expect(rows.length).toBeGreaterThanOrEqual(4);
     expect(rows.every((r) => r.model === MODEL && Number(r.dim) === EMBED_DEFAULT_DIM && Number(r.d) === EMBED_DEFAULT_DIM)).toBe(true);
-    expect(rows.map((r) => String(r.path))).not.toContain("Knowledge/Areas/Unsettled.md"); // the draft, which mentions tapering
+    expect(rows.map((r) => String(r.path))).not.toContain("Areas/Unsettled.md"); // the draft, which mentions tapering
   });
 
   it("semantic finds the note by meaning where keyword finds nothing", async () => {
     // Not one word of this query appears in the taper section.
     const q = "how much should I ease off running in the final weeks so my legs are fresh";
     const kw = await searchVault(deps, q, 5, "keyword");
-    expect(kw.hits.map((h) => h.path)).not.toContain("Knowledge/Areas/Marathon.md");
+    expect(kw.hits.map((h) => h.path)).not.toContain("Areas/Marathon.md");
 
     const started = Date.now();
     const sem = await searchVault(deps, q, 5, "semantic");
@@ -142,15 +142,15 @@ describe.skipIf(!hasDb || !embedderReady)("reconciler embeddings (real db, a rea
     console.log(`ollama: semantic query in ${ms}ms → ${sem.hits.map((h) => `${h.path} ${h.score.toFixed(3)}`).join(", ")}`);
 
     expect(sem.mode).toBe("semantic");
-    expect(sem.hits[0]!.path).toBe("Knowledge/Areas/Marathon.md");
+    expect(sem.hits[0]!.path).toBe("Areas/Marathon.md");
     expect(sem.hits[0]!.score).toBeGreaterThan(0.5);
     expect(sem.hits[0]!.score).toBeGreaterThan(sem.hits[1]!.score);
-    expect(sem.hits.map((h) => h.path)).not.toContain("Knowledge/Areas/Unsettled.md");
+    expect(sem.hits.map((h) => h.path)).not.toContain("Areas/Unsettled.md");
   }, 60_000);
 
   it("the other note wins its own question — the ranking is about meaning, not one lucky note", async () => {
     const sem = await searchVault(deps, "should I replace the old tank in the basement before it leaks", 5, "semantic");
-    expect(sem.hits[0]!.path).toBe("Knowledge/Areas/WaterHeater.md");
+    expect(sem.hits[0]!.path).toBe("Areas/WaterHeater.md");
   }, 60_000);
 
   it("hybrid is the default once vectors exist, and fuses both lists", async () => {
@@ -158,7 +158,7 @@ describe.skipIf(!hasDb || !embedderReady)("reconciler embeddings (real db, a rea
     expect(auto.mode).toBe("hybrid"); // no mode asked for, vectors present
     // "taper" is a literal word in Marathon.md (keyword) and the semantic
     // neighbourhood of the same note: fusion should agree with both.
-    expect(auto.hits[0]!.path).toBe("Knowledge/Areas/Marathon.md");
+    expect(auto.hits[0]!.path).toBe("Areas/Marathon.md");
     expect(auto.hits.some((h) => h.source === "both")).toBe(true);
     expect(auto.hits.every((h) => h.score > 0)).toBe(true);
   }, 60_000);

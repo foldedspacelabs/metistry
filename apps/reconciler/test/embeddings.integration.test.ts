@@ -90,7 +90,7 @@ describe.skipIf(!hasDb)("reconciler embeddings (real db, stub embedder)", () => 
     repo = await tempRepo();
     // a note long enough to chunk, so batching is real and not one-per-file
     await writeFile(
-      join(repo.root, "Knowledge", "Areas", "Sleep.md"),
+      join(repo.root, "", "Areas", "Sleep.md"),
       ["---", "title: Sleep", "description: how I sleep", "---", "", "# Sleep", "", ...Array.from({ length: 16 }, (_, i) => `Section ${i}: ${"restful night ".repeat(40)}`).flatMap((p) => [p, ""])].join("\n"),
     );
     const committer = new Committer(repo.git, { authorPrefix: "Metistry", authorEmail: "metistry@test" });
@@ -122,14 +122,14 @@ describe.skipIf(!hasDb)("reconciler embeddings (real db, stub embedder)", () => 
     expect(stub.calls).toBeLessThan(s.embeddings!.chunks);
 
     const { rows } = await pool.query(`SELECT path, model, dim, count(*)::int AS n FROM embeddings GROUP BY path, model, dim ORDER BY path`);
-    expect(rows.map((r) => r.path)).toEqual(["Knowledge/Areas/Alpha.md", "Knowledge/Areas/Beta.md", "Knowledge/Areas/Sleep.md", "Knowledge/now.md"]);
+    expect(rows.map((r) => r.path)).toEqual(["Areas/Alpha.md", "Areas/Beta.md", "Areas/Sleep.md", "now.md"]);
     expect(rows.every((r) => r.model === MODEL && r.dim === DIM)).toBe(true);
-    expect(Number(rows.find((r) => r.path === "Knowledge/Areas/Sleep.md")!.n)).toBeGreaterThan(1);
+    expect(Number(rows.find((r) => r.path === "Areas/Sleep.md")!.n)).toBeGreaterThan(1);
 
     // the draft is indexed but never embedded — the exclusion is structural
-    const draft = await pool.query(`SELECT 1 FROM embeddings WHERE path = 'Knowledge/Areas/Draft.md'`);
+    const draft = await pool.query(`SELECT 1 FROM embeddings WHERE path = 'Areas/Draft.md'`);
     expect(draft.rows).toHaveLength(0);
-    expect((await pool.query(`SELECT draft FROM knowledge_files WHERE path = 'Knowledge/Areas/Draft.md'`)).rows[0]!.draft).toBe(true);
+    expect((await pool.query(`SELECT draft FROM knowledge_files WHERE path = 'Areas/Draft.md'`)).rows[0]!.draft).toBe(true);
   });
 
   it("a second cycle embeds nothing: unchanged content is not re-embedded", async () => {
@@ -140,43 +140,43 @@ describe.skipIf(!hasDb)("reconciler embeddings (real db, stub embedder)", () => 
   });
 
   it("an edit re-embeds only the chunks that changed", async () => {
-    const path = join(repo.root, "Knowledge", "Areas", "Beta.md");
+    const path = join(repo.root, "", "Areas", "Beta.md");
     await writeFile(path, "# Beta\n\nplain note mentioning zebra and now also quokka\n");
     stub.reset();
     const s = await indexer.reconcile("test");
     expect(s.embeddings).toMatchObject({ files: 1, chunks: 1, degraded: null });
     expect(stub.calls).toBe(1);
-    const { rows } = await pool.query(`SELECT content FROM embeddings WHERE path = 'Knowledge/Areas/Beta.md'`);
+    const { rows } = await pool.query(`SELECT content FROM embeddings WHERE path = 'Areas/Beta.md'`);
     expect(rows[0]!.content).toContain("quokka");
   });
 
   it("a rename re-keys the vectors instead of re-embedding them", async () => {
-    const before = await pool.query(`SELECT content_hash FROM embeddings WHERE path = 'Knowledge/Areas/Alpha.md' ORDER BY chunk_index`);
+    const before = await pool.query(`SELECT content_hash FROM embeddings WHERE path = 'Areas/Alpha.md' ORDER BY chunk_index`);
     expect(before.rows.length).toBeGreaterThan(0);
-    await rename(join(repo.root, "Knowledge", "Areas", "Alpha.md"), join(repo.root, "Knowledge", "Areas", "Renamed.md"));
+    await rename(join(repo.root, "", "Areas", "Alpha.md"), join(repo.root, "", "Areas", "Renamed.md"));
     stub.reset();
     const s = await indexer.reconcile("test");
     expect(s.renamed).toBe(1);
     expect(stub.calls).toBe(0); // the bytes did not change: no embedder call at all
     expect(s.embeddings).toMatchObject({ files: 0, chunks: 0, degraded: null });
-    const after = await pool.query(`SELECT content_hash FROM embeddings WHERE path = 'Knowledge/Areas/Renamed.md' ORDER BY chunk_index`);
+    const after = await pool.query(`SELECT content_hash FROM embeddings WHERE path = 'Areas/Renamed.md' ORDER BY chunk_index`);
     expect(after.rows).toEqual(before.rows);
-    expect((await pool.query(`SELECT 1 FROM embeddings WHERE path = 'Knowledge/Areas/Alpha.md'`)).rows).toHaveLength(0);
+    expect((await pool.query(`SELECT 1 FROM embeddings WHERE path = 'Areas/Alpha.md'`)).rows).toHaveLength(0);
   });
 
   it("a removed note's vectors go with it, and so do a note's when it becomes a draft", async () => {
-    await rm(join(repo.root, "Knowledge", "Areas", "Renamed.md"));
-    await writeFile(join(repo.root, "Knowledge", "Areas", "Beta.md"), "---\nstatus: draft\n---\n\nnot ready\n");
+    await rm(join(repo.root, "", "Areas", "Renamed.md"));
+    await writeFile(join(repo.root, "", "Areas", "Beta.md"), "---\nstatus: draft\n---\n\nnot ready\n");
     stub.reset();
     const s = await indexer.reconcile("test");
     expect(s.removed).toBe(1);
     expect(s.embeddings!.deleted).toBeGreaterThanOrEqual(2);
     const { rows } = await pool.query(`SELECT DISTINCT path FROM embeddings ORDER BY path`);
-    expect(rows.map((r) => r.path)).toEqual(["Knowledge/Areas/Sleep.md", "Knowledge/now.md"]);
+    expect(rows.map((r) => r.path)).toEqual(["Areas/Sleep.md", "now.md"]);
   });
 
   it("an embedder that is down degrades the cycle, never fails it, and the note is retried later", async () => {
-    await writeFile(join(repo.root, "Knowledge", "Areas", "Late.md"), "# Late\n\narrived while the embedder was down\n");
+    await writeFile(join(repo.root, "", "Areas", "Late.md"), "# Late\n\narrived while the embedder was down\n");
     stub.down = true;
     const s = await indexer.reconcile("test");
     stub.down = false;
@@ -184,20 +184,20 @@ describe.skipIf(!hasDb)("reconciler embeddings (real db, stub embedder)", () => 
     expect(s.added).toBe(1); // the INDEX is complete and correct
     expect(s.embeddings!.degraded).toMatch(/ECONNREFUSED/);
     expect(s.embeddings!.pending).toBeGreaterThan(0);
-    expect((await pool.query(`SELECT 1 FROM embeddings WHERE path = 'Knowledge/Areas/Late.md'`)).rows).toHaveLength(0);
+    expect((await pool.query(`SELECT 1 FROM embeddings WHERE path = 'Areas/Late.md'`)).rows).toHaveLength(0);
     expect((await embeddings.status()).degraded).toMatch(/ECONNREFUSED/);
 
     // no rebuild needed, no lost work: the next cycle picks up exactly that note
     const s2 = await indexer.reconcile("test");
     expect(s2.embeddings).toMatchObject({ files: 1, degraded: null, pending: 0 });
-    expect((await pool.query(`SELECT 1 FROM embeddings WHERE path = 'Knowledge/Areas/Late.md'`)).rows).toHaveLength(1);
+    expect((await pool.query(`SELECT 1 FROM embeddings WHERE path = 'Areas/Late.md'`)).rows).toHaveLength(1);
   });
 
   it("rows from another model mean a rebuild is required, and the rebuild is deterministic", async () => {
     const before = await pool.query(`SELECT path, chunk_index, content_hash FROM embeddings WHERE model = $1 ORDER BY path, chunk_index`, [MODEL]);
     await pool.query(
       `INSERT INTO embeddings (path, chunk_index, content, model, dim, embedding, content_hash)
-       VALUES ('Knowledge/now.md', 0, 'stale', 'some-other-model', $1, $2::vector, 'deadbeef')`,
+       VALUES ('now.md', 0, 'stale', 'some-other-model', $1, $2::vector, 'deadbeef')`,
       [DIM, `[${new Array(DIM).fill(0).join(",")}]`],
     );
     const stale = await embeddings.status();
@@ -214,23 +214,23 @@ describe.skipIf(!hasDb)("reconciler embeddings (real db, stub embedder)", () => 
   });
 
   it("search modes: keyword, semantic, hybrid — all with a score, drafts never present", async () => {
-    await writeFile(join(repo.root, "Knowledge", "Areas", "Nights.md"), "---\ntitle: Nights\n---\n\n# Nights\n\nrestful night after restful night, the quokka slept\n");
+    await writeFile(join(repo.root, "", "Areas", "Nights.md"), "---\ntitle: Nights\n---\n\n# Nights\n\nrestful night after restful night, the quokka slept\n");
     await indexer.reconcile("test");
     const deps = { vault, db: pool, embeddings, client };
 
     const kw = await searchVault(deps, "quokka", 10, "keyword");
     expect(kw.mode).toBe("keyword");
-    expect(kw.hits.map((h) => h.path)).toEqual(["Knowledge/Areas/Nights.md"]);
+    expect(kw.hits.map((h) => h.path)).toEqual(["Areas/Nights.md"]);
     expect(kw.hits[0]!.score).toBe(1);
 
     // "restful night" appears in both Sleep.md and Nights.md; the vector ranks them
     const sem = await searchVault(deps, "restful night", 10, "semantic");
     expect(sem.mode).toBe("semantic");
     expect(sem.hits.length).toBeGreaterThan(1);
-    expect(sem.hits.map((h) => h.path)).toContain("Knowledge/Areas/Sleep.md");
+    expect(sem.hits.map((h) => h.path)).toContain("Areas/Sleep.md");
     expect(sem.hits[0]!.score).toBeGreaterThan(sem.hits[sem.hits.length - 1]!.score);
     expect(sem.hits.every((h) => h.source === "semantic" && h.score <= 1)).toBe(true);
-    expect(sem.hits.map((h) => h.path)).not.toContain("Knowledge/Areas/Beta.md"); // the draft
+    expect(sem.hits.map((h) => h.path)).not.toContain("Areas/Beta.md"); // the draft
 
     // the default is hybrid once vectors exist, and fusion finds notes only one list had
     const auto = await searchVault(deps, "restful night", 10, null);
@@ -244,6 +244,6 @@ describe.skipIf(!hasDb)("reconciler embeddings (real db, stub embedder)", () => 
     stub.down = false;
     expect(fallback.mode).toBe("keyword");
     expect(fallback.degraded).toMatch(/embedder unavailable/);
-    expect(fallback.hits.map((h) => h.path)).toEqual(["Knowledge/Areas/Nights.md"]);
+    expect(fallback.hits.map((h) => h.path)).toEqual(["Areas/Nights.md"]);
   });
 });

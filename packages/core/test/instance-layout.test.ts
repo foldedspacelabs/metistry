@@ -32,8 +32,8 @@ describe("INSTANCE_LAYOUT", () => {
     expect(INSTANCE_LAYOUT.assistantInstructions).toBe("CLAUDE.md");
   });
 
-  it("names the five config dirs and places each under .metistry/", () => {
-    expect([...INSTANCE_CONFIG_DIRS]).toEqual(["queries", "agents", "routines", "extensions", "instance-migrations"]);
+  it("names the config dirs and places each under .metistry/", () => {
+    expect([...INSTANCE_CONFIG_DIRS]).toEqual(["queries", "agents", "routines", "targets", "extensions", "instance-migrations"]);
     for (const d of INSTANCE_CONFIG_DIRS) expect(metistryPath("/i", d)).toBe(`/i/.metistry/${d}`);
     expect(INSTANCE_LAYOUT.queriesDir).toBe(".metistry/queries");
     expect(INSTANCE_LAYOUT.instanceMigrationsDir).toBe(".metistry/instance-migrations");
@@ -66,7 +66,7 @@ describe("instancePath / statePath", () => {
 
 describe("isProtectedPath", () => {
   it("protects every config file and dir under .metistry/", () => {
-    for (const p of [".metistry", ".metistry/identity.yaml", ".metistry/rules.yaml", ".metistry/compute.yaml", ".metistry/deployment.yaml", ".metistry/metistry.lock", ".metistry/assistant-prompt.md", ".metistry/sources.yaml", ".metistry/queries/board.yaml", ".metistry/agents/fsl/scout.md", ".metistry/routines/x/manifest.yaml", ".metistry/extensions/x", ".metistry/instance-migrations/0001.sql"]) {
+    for (const p of [".metistry", ".metistry/identity.yaml", ".metistry/rules.yaml", ".metistry/compute.yaml", ".metistry/deployment.yaml", ".metistry/metistry.lock", ".metistry/assistant-prompt.md", ".metistry/sources.yaml", ".metistry/queries/board.yaml", ".metistry/agents/fsl/scout.md", ".metistry/routines/x/manifest.yaml", ".metistry/targets/x/manifest.yaml", ".metistry/extensions/x", ".metistry/instance-migrations/0001.sql"]) {
       expect(isProtectedPath(p), p).toBe(true);
     }
   });

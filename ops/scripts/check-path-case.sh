@@ -1,8 +1,10 @@
 #!/bin/sh
 # Path-case check (plan §4.16): macOS forgives what Linux containers don't.
 # 1. No two tracked paths may differ only by case.
-# 2. Outside Knowledge/ and seed/Knowledge/, tracked paths are lowercase
-#    (documented exceptions listed below).
+# 2. Outside the seed vault tree (seed/vault/ — what `metistry init` stamps
+#    at the instance ROOT, which is the Obsidian vault), tracked paths are
+#    lowercase (documented exceptions listed below). `.metistry/` is the
+#    machinery half of an instance and is lowercase like everything else.
 set -eu
 
 fail=0
@@ -27,10 +29,10 @@ fi
 # exception: SwiftPM looks for those exact names and there is no way to rename
 # them. Everything else under apps/macos IS lowercase — the Swift targets name
 # their own `path:` rather than taking SPM's default `Sources/<Target>/`.
-allowed='^(Knowledge/|seed/Knowledge/|.*/(README|LICENSE|CLAUDE|AGENTS|SKILL|RESULTS|SYNTHESIS|Dockerfile|Info\.plist|PRODUCT|MEMORY|CHANGELOG)[^/]*$|(README|LICENSE|CLAUDE|AGENTS)[^/]*$|apps/macos/Package\.(swift|resolved)$|metistry-build-plan\.md$|docs/)'
+allowed='^(seed/vault/|.*/(README|LICENSE|CLAUDE|AGENTS|SKILL|RESULTS|SYNTHESIS|Dockerfile|Info\.plist|PRODUCT|MEMORY|CHANGELOG)[^/]*$|(README|LICENSE|CLAUDE|AGENTS)[^/]*$|apps/macos/Package\.(swift|resolved)$|metistry-build-plan\.md$|docs/)'
 offenders=$(git ls-files | grep -Ev "$allowed" | grep '[A-Z]' || true)
 if [ -n "$offenders" ]; then
-  echo "unexpected uppercase outside Knowledge/ (casing rule, CLAUDE.md):" >&2
+  echo "unexpected uppercase outside the seed vault tree (casing rule, CLAUDE.md):" >&2
   echo "$offenders" >&2
   fail=1
 fi

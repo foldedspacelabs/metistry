@@ -90,15 +90,29 @@ the codegraff lesson "never dress a mailbox agent as working".
 
 ### P6 — One information architecture, three renderings
 
-Feed, Chat, Agents, Projects, Artifacts, Capture, Needs You, Dashboard,
-Status, Devices — the same ten destinations, the same order, the same
-names on macOS, iOS and the web. Only the navigation *chrome* changes:
-sidebar, tab bar, or responsive both. Nothing exists on one platform
-that has no home on the others.
+Chat, Feed, Needs You, Work, Knowledge, Agents, System — the same seven
+sections, the same order, the same names on macOS, iOS and the web.
+**Capture is a global action, not a section**: a destination you navigate
+to contradicts its own five-second promise, so it is a hotkey, a share
+sheet and a composer affordance, and the *list* of captures lives in
+Knowledge → Inbox. Only the navigation *chrome* changes: sidebar, tab
+bar, or responsive both. Nothing exists on one platform that has no home
+on the others.
 
 *Why:* the native app is a second client of the **same open management
 API — no private endpoints** (`ios-app-plan.md`). If the API is shared,
 the map should be too, or the owner learns the product twice.
+
+> **Amended 2026-09-17** — owner ruling on `app-ux-plan.md` §7.1. The
+> paragraph above read: ~~Feed, Chat, Agents, Projects, Artifacts,
+> Capture, Needs You, Dashboard, Status, Devices — the same ten
+> destinations.~~ Ten flat destinations left Knowledge — the glossary's
+> first noun, and the thing the product is *for* — with no home at all,
+> and split one object graph across Projects, Artifacts and a board. The
+> seven are that list folded (into Work and System) plus Knowledge;
+> `app-ux-plan.md` §3.1 carries the per-section reasoning. The PWA
+> renavigates to this IA in a later PR, so until then it is the one
+> client that disagrees with P6, knowingly.
 
 ### P7 — Native where the platform has an opinion
 
@@ -167,7 +181,7 @@ question.
 
 | Case | Applies to |
 | --- | --- |
-| **Title Case** | screen titles, section headers, navigation and tab-bar labels, table column headers, card titles, menu-group headings, the names of the ten destinations |
+| **Title Case** | screen titles, section headers, navigation and tab-bar labels, table column headers, card titles, menu-group headings, the names of the seven sections |
 | **sentence case** | body copy, helper text, placeholders, empty-state prose, receipts, error messages, and buttons — verb-first per the HIG ("Send", "Approve", "Revise", "Decline" are control labels and take Title Case; "queued — will send when the instance is reachable" is prose and does not) |
 | **as-is, always** | identifiers — agent ids, slugs, tool names, file paths, query names, `mode:` values, tier names. Rendered in `mono`, never case-corrected, because `drey-dev` is a key, not a word |
 
@@ -457,11 +471,22 @@ with realistic content in `design/preview.html`.
 
 ### 3.1 Navigation
 
-**Anatomy.** Ten destinations in one fixed order: Feed · Chat · Agents ·
-Projects · Artifacts · Capture · Needs You · Dashboard · Status · Devices.
-Each has a glyph, a label, and an optional count badge — shown only when
-the count is *actionable* (Needs You: requests awaiting you; Status:
-failing checks). Never a badge for "new activity".
+**Anatomy.** Seven sections in one fixed order: Chat · Feed · Needs You ·
+Work · Knowledge · Agents · System. Each has a glyph, a label, and an
+optional count badge — shown only when the count is *actionable* (Needs
+You: requests awaiting you; System: failing checks). Never a badge for
+"new activity".
+
+**Capture is not in the list.** It is a global action reachable from
+everywhere — `⌘N` and a drop target on Mac, the share extension and a
+medium-detent sheet on iOS, the composer's `+` and a sheet in the PWA —
+and its list lives in Knowledge → Inbox (P6).
+
+A section that carries several views (Work: Board · Tasks · Artifacts ·
+Rooms · Projects; Knowledge: Pages · Search · Inbox · Links; System:
+Status · Compute · Spend · Devices · Instances · Setup) puts them inside
+itself, never back in the navigation. The second level is the platform's
+own segmented control or list, and it is **not** a second nav.
 
 **States.** selected · hover · pressed · disabled (a destination whose
 data is absent stays enabled and shows its empty state — P5) · focused
@@ -475,18 +500,28 @@ data is absent stays enabled and shows its empty state — P5) · focused
   collapsible; selected row is `accent-quiet` with `text-primary` and an
   `accent` glyph. Toolbar carries the view's own controls (filters, the
   model picker in Chat) and never navigation.
-- **iOS** — `TabView` with a bottom tab bar for the top five (Feed, Chat,
-  Capture, Needs You, Status) and a **More** tab holding the rest, because a
-  tab bar is a global control that stays anchored to the bottom through
-  push transitions and does not survive being crowded. On iPad the same
-  `TabView` adopts the sidebar.
-- **PWA** — one `<nav id="nav">` element, two presentations. Below
-  `wide-breakpoint` (900px) it is a bottom tab bar: `position: fixed`,
-  `padding-bottom: env(safe-area-inset-bottom)`, five primary
-  destinations plus a "more" disclosure. At or above it, the same `<nav>`
-  becomes a left sidebar in a CSS grid — *no markup change, no JS*, so
-  the existing ids and test hooks survive. Buttons keep
+- **iOS** — `TabView` with a bottom tab bar for the first five of the
+  fixed order (Chat, Feed, Needs You, Work, Knowledge) and a **More** tab
+  holding Agents and System, because a tab bar is a global control that
+  stays anchored to the bottom through push transitions and does not
+  survive being crowded. The two under More are the ones you visit on
+  purpose rather than by habit — who may do what, and the machine. On
+  iPad the same `TabView` adopts the sidebar, with all seven.
+- **PWA** — one `<nav id="nav">` element, two presentations, **both** of
+  them the same seven. Below `wide-breakpoint` (900px) it is a bottom tab
+  bar: `position: fixed`, `padding-bottom: env(safe-area-inset-bottom)`,
+  the same five as iOS plus a "more" disclosure. At or above it, the same
+  `<nav>` becomes a left sidebar in a CSS grid — *no markup change, no
+  JS*, so the existing ids and test hooks survive. Buttons keep
   `aria-current="page"` on the active view.
+
+> **Amended 2026-09-17** — owner ruling on `app-ux-plan.md` §7.1, the
+> §3.1 half of the P6 amendment above. The anatomy read: ~~Ten
+> destinations in one fixed order: Feed · Chat · Agents · Projects ·
+> Artifacts · Capture · Needs You · Dashboard · Status · Devices.~~ The
+> shipped PWA never matched it (eleven flat buttons in a scrolling strip,
+> `index.html:22–33`); it renavigates to these seven in a later PR, and
+> the Mac app's sidebar is built to them from the start.
 
 ### 3.2 Activity feed row
 
@@ -647,7 +682,7 @@ implies otherwise, and a grant option is styled as destructive-adjacent
 Two renderings of one generated list. On touch it is a `+` button inside
 the composer; with a fine pointer the same list is also a ⌘K palette.
 Neither is hand-maintained: the contents come from live `rules.yaml`,
-the agent registry, and the ten destinations.
+the agent registry, and the seven sections.
 
 **Why it is not a pinned toolbar.** Nothing but the composer may occupy
 the space above the keyboard. A strip of commands pinned there costs two
@@ -818,9 +853,10 @@ never waits on the model. It writes to the inbox and returns.
 
 ### 3.9 Request card
 
-The card in **Needs You**. One card shape for all six request types (note ·
-report · review · question · access · improvement — `glossary.md`), because
-the three answers are the same whatever the type.
+The card in **Needs You**. One card shape for all seven request types (note ·
+report · review · question · access · improvement · action — `glossary.md`),
+because the answers are the same whatever the type — what differs is what
+Approve *does*, not what the card asks.
 
 **Anatomy.** Card at elevation 1: type glyph · title (`headline`, from
 the request payload — agent-sourced, so `agent`-attributed) · metadata
@@ -829,24 +865,48 @@ line (`footnote`: type · classification · source agent · date) · a
 written to, the diff summary, the access that would be extended) · action
 row.
 
-**Actions.** **Approve** (primary) · **Revise** (secondary — sends the
-request back with what to change, using the §3.5 free-text escape; an empty
-reason cancels rather than sends, because a revision without one changes
-nothing) · **Decline** (destructive tint, and per P3 it confirms with the
-reason when the request is not reversible).
+**Actions — six, and each one is a wire fact** (`docs/ops/reply-feedback.md`
+is the normative account; this is the rendering of it):
+
+| Answer | Wire (`proposals.decision`) | Rendering |
+| --- | --- | --- |
+| **Approve** | `allow` | primary. Per-kind consequences: an `improvement` writes the prompt overlay, an enrolment lets the agent in, an `action` **runs**. The preview above the action row is what will happen |
+| **Revise** | `accept_with_changes` | secondary — sends it back with what to change, using the §3.5 free-text escape. An empty reason **cancels rather than sends**: a revision without one changes nothing |
+| **Decline** | `deny` | destructive tint, and per P3 it confirms with the reason when the request is not reversible (declining an enrolment revokes the agent's token). Your wording is kept |
+| **Approve as Work** | `allow`, plus a `work` row | shown **only** when the row carries `payload.suggested_work` — otherwise the card has five. Secondary, beside Approve; the tooltip names the task it creates |
+| **Later** | *no decision* — sets `snoozed_until` | a snooze, so it is **not** an answer: the row stays `pending`, leaves both the queue and the morning brief, and returns by the clock alone. Styled as a dismissal, never as a decision, and there is no un-snooze |
+| **Skip** | `deny`, `feedback = 'skipped'` | "not this, and I have nothing to say about it": declines with none of Decline's per-kind consequences and writes the fixed `SKIP_FEEDBACK` marker instead of words. It must never be rendered as feedback, because nothing may read it as feedback |
+
+**Multi-select.** Later · Skip · Decline are the only verbs that may be
+applied to ticked rows at once (`l` and `s` are the keys), because they are
+the only ones that need nothing from the individual row; Approve, Revise and
+Approve as Work each *do* something per kind, so they stay one at a time and
+the batch bar must not offer them. Each row in a batch carries its own
+result — one item answered on the phone thirty seconds ago must not refuse
+the other nine.
 
 **States.** pending · previewing (the diff expanded) · deciding
 (buttons disabled, spinner-free) · approved / declined / revised
 (collapses to a one-line receipt with an undo affordance where the
-underlying operation is reversible, and none where it is not) · stale
-(the request was answered elsewhere — the card says so and refreshes).
+underlying operation is reversible, and none where it is not) · snoozed
+(leaves the list without a receipt — Later settled nothing) · stale (the
+answer was refused `409 reason: "stale"` because the row moved after the
+card was painted — every decision carries `if_unchanged: {seen_at}`, so
+the card repaints the new row and says why rather than re-sending).
 
 **Platform notes.** iOS adds swipe actions (leading = Approve, trailing =
-Decline) mirroring the notification actions, and the same three actions ship
-as a `UNNotificationCategory` so a request can be answered from the push
+Decline) mirroring the notification actions, and Approve · Revise · Decline
+ship as a `UNNotificationCategory` so a request can be answered from the push
 (ux-direction: answered from the push itself). SwiftUI: `.swipeActions`
 + `.confirmationDialog`. PWA: `<li>` with a `<button>` row; the existing
 `data-triage` hooks are kept (the id is the wire, not the word).
+
+> **Amended 2026-09-17** — owner ruling on `app-ux-plan.md` §7.4. This
+> component said ~~the three answers~~ (Approve · Revise · Decline) while the
+> console had shipped five and then six (#165). Six is the ruling, and the
+> table above is the design system catching up to the wire rather than the
+> other way round. `glossary.md`'s "same three answers" is the remaining
+> statement of the old count.
 
 ### 3.10 Task card + drag-to-dispatch
 

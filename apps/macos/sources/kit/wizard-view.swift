@@ -240,7 +240,7 @@ public struct WizardView: View {
                     label: steps.instanceMode == .create ? "New instance folder" : "Existing instance folder",
                     help: steps.instanceMode == .create
                         ? "Where the private instance repo is created — vault, identity.yaml, config."
-                        : "A folder that already holds an identity.yaml.",
+                        : "A folder that already holds an identity.yaml — under \(InstanceFiles.metistryDirname)/, or at its root on an instance that predates the flat layout.",
                     url: steps.instanceDirectory,
                     p: p
                 ) { pickingInstanceDirectory = true }
@@ -252,8 +252,14 @@ public struct WizardView: View {
                         Text("Written to identity.yaml, and read from there by everything else. Leave it blank to take the seed's default.")
                             .metistryText(.caption1, p, .textTertiary)
                     }
-                } else if let dir = steps.instanceDirectory, !InstanceFiles.looksLikeInstance(dir) {
-                    Text("No identity.yaml in that folder — pick the instance repo itself, or create a new instance instead.")
+                } else if let dir = steps.instanceDirectory, let notice = InstanceFiles.layout(of: dir).notice {
+                    // Two different sentences from one source: "that is not an
+                    // instance" (which blocks Continue) and "that instance is
+                    // still on the legacy layout" (which does not — adopting it
+                    // is fine, and `metistry migrate-layout` is the user's to
+                    // run when they choose to). Both are `degraded`, because
+                    // both are a fact the user has to act on.
+                    Text(notice)
                         .metistryText(.footnote, p, .degraded)
                         .fixedSize(horizontal: false, vertical: true)
                 }

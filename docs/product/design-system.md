@@ -1203,14 +1203,13 @@ in circles are callouts; the legend is in each file.
 | `design/pwa-narrow.svg` | PWA — narrow (bottom tabs, installed, safe areas) |
 | `design/pwa-wide.svg` | PWA — wide (the same `<nav>` as a sidebar) |
 
-The wireframes were refreshed on 2026-09-16 to the seven-section IA of
+The wireframes were refreshed on 2026-09-17 to the seven-section IA of
 `app-ux-plan.md` §3 — Chat · Feed · Needs You · Work · Knowledge · Agents ·
-System, with Capture as a global action rather than a destination. **That
-contradicts P6's ten destinations and §3.1 above, which are unchanged and still
-need a ruling** (`app-ux-plan.md` §7 Q1); the wireframes show what the amendment
-would look like, not a decision. The same applies to the request card's answers:
-the sheets draw the six the product ships (`docs/ops/reply-feedback.md`) while
-§3.9 below still says three.
+System, with Capture as a global action rather than a destination — matching
+the P6 and §3.1 amendment of the same day, and they draw the six request
+answers §3.9 now specifies. They are structural wireframes, not the visual
+design: the design language is being produced by the designer briefed in
+`design-brief.md`, so nothing here is implementable as drawn.
 
 The macOS and PWA-wide layouts are deliberately the same three-column
 idea (navigation · list · detail) because they are the same job on the

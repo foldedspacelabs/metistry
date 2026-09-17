@@ -1,0 +1,205 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" width="1200" height="800" role="img" aria-labelledby="ttl desc">
+  <title id="ttl">macOS — Work › Board, six columns over the work table</title>
+  <desc id="desc">Annotated wireframe: the Work section of the seven-section sidebar, with its four views as a segmented control and Board selected. Six columns — Backlog, Addressed to, In Progress, Needs You, Done, Reported — each a case in one named query. A card is mid-drag from Backlog to Addressed to with the owner picker open, an escalated card carries the reason it stalled, and a refusal is printed under the board in the service's own words. Wider viewBox than the other Mac sheets because six columns need the width.</desc>
+  <style>
+    text { font-family: -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", Roboto, sans-serif; fill: #12171c; font-size: 13px; }
+    .t2 { fill: #4d565f; font-size: 12px } .t3 { fill: #646d77; font-size: 11px } .t4 { fill: #646d77; font-size: 10px }
+    .hd { font-size: 15px; font-weight: 600 } .h2 { font-size: 20px; font-weight: 700 }
+    .ch { font-size: 12px; font-weight: 600 }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px }
+    .ln { stroke: #d9dee4; stroke-width: 1; fill: none }
+    .win { fill: #f6f7f9; stroke: #b6bec8 }
+    .sf { fill: #ffffff; stroke: #d9dee4 }
+    .sel { fill: #e6edfc } .snk { fill: #eef0f3; stroke: #d9dee4 } .agq { fill: #f1ecfc }
+    .acc { fill: #2b5fd0 } .ag { fill: #6a4bbd } .ok { fill: #1c7a45 } .deg { fill: #8a5a00 } .bad { fill: #b3261e } .oc { fill: #a24a00 }
+    .cw { fill: #ffffff; stroke: #b3261e; stroke-width: 1.5 }
+    .cn { fill: #b3261e; font-size: 11px; font-weight: 700; text-anchor: middle }
+    .lg { font-size: 12px }
+  </style>
+
+  <rect width="1200" height="800" fill="#ffffff"/>
+  <text x="24" y="30" class="h2">macOS — Work › Board</text>
+  <text x="24" y="50" class="t2">Four views of one object graph · six columns decided server-side · the board offers no drop the service would refuse</text>
+
+  <rect class="win" x="24" y="66" width="900" height="660" rx="12"/>
+  <path class="ln" d="M24 104 H924"/>
+  <circle cx="46" cy="86" r="6" fill="#ff5f57"/><circle cx="66" cy="86" r="6" fill="#febc2e"/><circle cx="86" cy="86" r="6" fill="#28c840"/>
+  <text x="112" y="90" class="hd">Work</text>
+  <rect class="sf" x="602" y="76" width="110" height="22" rx="6"/><text x="612" y="91" class="t2">metistry ⌄</text>
+  <rect class="sf" x="720" y="76" width="70" height="22" rx="6"/><text x="730" y="91" class="t2">＋ Task</text>
+  <rect class="sf" x="798" y="76" width="100" height="22" rx="6"/><text x="808" y="91" class="acc">＋ Capture ⌘N</text>
+
+  <!-- sidebar -->
+  <rect x="25" y="105" width="186" height="620" fill="#eef0f3"/>
+  <path class="ln" d="M211 105 V725"/>
+  <text x="40" y="126" class="t3">METISTRY</text>
+  <text x="45" y="152">💬</text><text x="66" y="152">Chat</text>
+  <text x="45" y="178">◈</text><text x="66" y="178">Feed</text>
+  <text x="45" y="204">📝</text><text x="66" y="204">Needs You</text>
+  <rect x="160" y="192" width="30" height="16" rx="8" fill="#2b5fd0"/><text x="175" y="204" fill="#fff" font-size="10" text-anchor="middle">4</text>
+  <rect class="sel" x="33" y="212" width="170" height="26" rx="7"/>
+  <text x="45" y="230">🗂️</text><text x="66" y="230" class="hd">Work</text>
+  <text x="45" y="256">📚</text><text x="66" y="256">Knowledge</text>
+  <text x="45" y="282">🤖</text><text x="66" y="282">Agents</text>
+  <text x="45" y="308">⚙️</text><text x="66" y="308">System</text>
+  <circle cx="176" cy="304" r="4" class="deg"/>
+  <path class="ln" d="M33 670 H203"/>
+  <text x="45" y="690" class="t3">⌘K  Commands · ⌘N  Capture</text>
+
+  <!-- segmented control: the four Work views -->
+  <rect class="snk" x="228" y="120" width="308" height="26" rx="8"/>
+  <rect x="230" y="122" width="74" height="22" rx="7" fill="#ffffff" stroke="#d9dee4"/><text x="267" y="137" class="ch" text-anchor="middle">Board</text>
+  <text x="343" y="137" class="t2" text-anchor="middle">Rooms</text>
+  <text x="419" y="137" class="t2" text-anchor="middle">Artifacts</text>
+  <text x="497" y="137" class="t2" text-anchor="middle">Projects</text>
+  <text x="902" y="137" class="t3" text-anchor="end">polls every 10s · [ ] step the project</text>
+
+  <!-- column headers -->
+  <g>
+    <text x="228" y="176" class="ch">Backlog</text><text x="332" y="176" class="t3" text-anchor="end">7</text>
+    <text x="342" y="176" class="ch">Addressed to</text><text x="446" y="176" class="t3" text-anchor="end">3</text>
+    <text x="456" y="176" class="ch">In Progress</text><text x="560" y="176" class="bad" font-size="11" text-anchor="end">1</text><text x="548" y="176" class="t3" text-anchor="end">2</text>
+    <text x="570" y="176" class="ch">Needs You</text><text x="674" y="176" class="t3" text-anchor="end">1</text>
+    <text x="684" y="176" class="ch">Done</text><text x="788" y="176" class="t3" text-anchor="end">12 · shows 8</text>
+    <text x="798" y="176" class="ch">Reported</text><text x="902" y="176" class="t3" text-anchor="end">4</text>
+    <path class="ln" d="M228 184 H902"/>
+  </g>
+
+  <!-- Backlog -->
+  <g>
+    <rect class="sf" x="228" y="196" width="104" height="58" rx="10" opacity="0.55" stroke-dasharray="4 3"/>
+    <text x="238" y="212" class="mono t3">wrk_01H8…221</text>
+    <text x="238" y="230" class="t3">review artifact</text><text x="238" y="244" class="t3">taper-plan</text>
+    <rect class="sf" x="228" y="262" width="104" height="58" rx="10"/>
+    <text x="238" y="278" class="mono t3">wrk_01H8…218</text>
+    <text x="238" y="296" class="t3">summarise week</text><text x="238" y="310" class="t3">in Areas/Work</text>
+    <rect class="sf" x="228" y="328" width="104" height="58" rx="10"/>
+    <text x="238" y="344" class="mono t3">wrk_01H8…214</text>
+    <text x="238" y="362" class="t3">check aws-costs</text><text x="238" y="376" class="t3">collector</text>
+    <rect class="sf" x="228" y="394" width="104" height="44" rx="10"/>
+    <text x="238" y="410" class="mono t3">wrk_01H8…209</text>
+    <text x="238" y="428" class="t3">from request #94</text>
+  </g>
+
+  <!-- Addressed to: active drop target with the owner picker -->
+  <rect x="338" y="192" width="112" height="250" rx="12" fill="#e6edfc" stroke="#2b5fd0" stroke-width="2"/>
+  <rect class="sf" x="342" y="196" width="104" height="58" rx="10" stroke="#2b5fd0" stroke-width="1.5"/>
+  <text x="352" y="212" class="mono t3">wrk_01H8…221</text>
+  <text x="352" y="230" class="t3">review artifact</text><text x="352" y="244" class="t3">taper-plan</text>
+  <rect class="sf" x="342" y="262" width="104" height="58" rx="10"/>
+  <text x="352" y="278" class="mono t3">wrk_01H8…205</text>
+  <text x="352" y="296" class="t3">draft release</text><text x="352" y="310" class="t3">notes</text>
+  <rect class="agq" x="352" y="314" width="66" height="14" rx="7"/><text x="357" y="325" class="ag" font-size="9">owner ops-bot</text>
+  <!-- owner picker -->
+  <rect class="sf" x="352" y="336" width="120" height="96" rx="10" stroke="#b6bec8"/>
+  <text x="362" y="352" class="t4">ADDRESS TO…</text>
+  <text x="362" y="370" class="t3">me</text>
+  <text x="362" y="388" class="t3">drey-dev</text>
+  <text x="362" y="406" class="t3">ops-bot</text>
+  <text x="362" y="424" class="t3">reviewer</text>
+  <path d="M300 220 L344 214" stroke="#2b5fd0" stroke-width="1.5" stroke-dasharray="4 4" fill="none"/>
+
+  <!-- In Progress -->
+  <g>
+    <rect class="sf" x="456" y="196" width="104" height="72" rx="10"/>
+    <text x="466" y="212" class="mono t3">wrk_01H8…198</text>
+    <text x="466" y="230" class="t3">reconcile</text><text x="466" y="244" class="t3">github-state</text>
+    <rect x="466" y="248" width="70" height="14" rx="7" fill="#fbe6e5"/><text x="471" y="259" class="bad" font-size="9">! lease lapsed</text>
+    <rect class="sf" x="456" y="276" width="104" height="58" rx="10"/>
+    <text x="466" y="292" class="mono t3">wrk_01H8…191</text>
+    <text x="466" y="310" class="t3">build the taper</text><text x="466" y="324" class="t3">page</text>
+  </g>
+
+  <!-- Needs You -->
+  <g>
+    <rect class="sf" x="570" y="196" width="104" height="72" rx="10"/>
+    <text x="580" y="212" class="mono t3">wrk_01H8…187</text>
+    <text x="580" y="230" class="t3">rotate reviewer</text><text x="580" y="244" class="t3">token</text>
+    <rect x="580" y="248" width="52" height="14" rx="7" fill="#f1ecfc"/><text x="585" y="259" class="ag" font-size="9">✋ blocked</text>
+    <text x="570" y="288" class="t4">only your hand leaves</text>
+    <text x="570" y="302" class="t4">this column</text>
+  </g>
+
+  <!-- Done -->
+  <g>
+    <rect class="sf" x="684" y="196" width="104" height="44" rx="10"/>
+    <text x="694" y="212" class="mono t3">wrk_01H8…176</text>
+    <text x="694" y="230" class="t3">tidy Inbox</text>
+    <rect class="sf" x="684" y="248" width="104" height="44" rx="10"/>
+    <text x="694" y="264" class="mono t3">wrk_01H8…170</text>
+    <text x="694" y="282" class="t3">pin versions</text>
+    <text x="684" y="312" class="t4">closed, nothing came</text>
+    <text x="684" y="326" class="t4">back to read</text>
+  </g>
+
+  <!-- Reported -->
+  <g>
+    <rect class="sf" x="798" y="196" width="104" height="58" rx="10"/>
+    <text x="808" y="212" class="mono t3">wrk_01H8…164</text>
+    <text x="808" y="230" class="t3">audit bridge</text><text x="808" y="244" class="t3">tokens</text>
+    <rect class="sf" x="798" y="262" width="104" height="58" rx="10"/>
+    <text x="808" y="278" class="mono t3">wrk_01H8…159</text>
+    <text x="808" y="296" class="t3">research: agent</text><text x="808" y="310" class="t3">rooms</text>
+    <text x="798" y="340" class="t4">a run stamped a</text>
+    <text x="798" y="354" class="t4">report: there is</text>
+    <text x="798" y="368" class="t4">something to read</text>
+  </g>
+
+  <path class="ln" d="M228 470 H902"/>
+  <text x="228" y="496" class="bad" font-size="12">✕ held by ops-bot, not by user — claim it first</text>
+  <text x="228" y="516" class="t3">The card snapped back. The refusal is the service's own sentence, never one the panel invented.</text>
+  <text x="228" y="548" class="t3">Clicking a card opens its <tspan font-style="italic">room</tspan> when one exists — the card's room is the conversation about it. A card with</text>
+  <text x="228" y="566" class="t3">no room opens a detail popover: title, owner, lease, external ref, last activity, the artifact it was cut from.</text>
+  <text x="228" y="598" class="t2">Keyboard: focus a card, press <tspan font-weight="600">m</tspan>, choose a column — the same targets, the same routes, the same refusals.</text>
+  <text x="228" y="618" class="t2">Esc closes any picker; Enter opens the card. A board that needs a mouse is a board you cannot use half the time.</text>
+
+  <!-- callouts -->
+  <g>
+    <circle class="cw" cx="214" cy="176" r="10"/><text class="cn" x="214" y="180">1</text>
+    <circle class="cw" cx="396" cy="157" r="10"/><text class="cn" x="396" y="161">2</text>
+    <circle class="cw" cx="548" cy="272" r="10"/><text class="cn" x="548" y="276">3</text>
+    <circle class="cw" cx="214" cy="492" r="10"/><text class="cn" x="214" y="496">4</text>
+    <circle class="cw" cx="662" cy="256" r="10"/><text class="cn" x="662" y="260">5</text>
+    <circle class="cw" cx="214" cy="594" r="10"/><text class="cn" x="214" y="598">6</text>
+    <circle class="cw" cx="214" cy="133" r="10"/><text class="cn" x="214" y="137">7</text>
+  </g>
+
+  <!-- legend -->
+  <g>
+    <text x="950" y="90" class="hd">Callouts</text>
+    <text x="950" y="114" class="lg">① Six columns are one CASE in</text>
+    <text x="962" y="130" class="lg"><tspan class="mono">board.yaml</tspan>, first match wins. Nothing</text>
+    <text x="962" y="146" class="lg">was migrated and no fifth status value</text>
+    <text x="962" y="162" class="lg">exists. The header counts <tspan font-style="italic">every</tspan> card;</text>
+    <text x="962" y="178" class="lg">the limit is per column, so a busy</text>
+    <text x="962" y="194" class="lg">Backlog never crowds Needs You out.</text>
+    <text x="950" y="222" class="lg">② <tspan font-weight="600">"Addressed to", not "Assigned".</tspan></text>
+    <text x="962" y="238" class="lg"><tspan class="mono">owner</tspan> is informational — a name, never</text>
+    <text x="962" y="254" class="lg">a lease. Open + owner is exactly</text>
+    <text x="962" y="270" class="lg">"addressed to, not started". It is the</text>
+    <text x="962" y="286" class="lg">one drop that needs a value, so it</text>
+    <text x="962" y="302" class="lg">opens a picker; and a human may</text>
+    <text x="962" y="318" class="lg">address a card to any crew, while an</text>
+    <text x="962" y="334" class="lg">agent cannot address one at all.</text>
+    <text x="950" y="362" class="lg">③ A <tspan class="bad">lapsed lease stays here</tspan> and says</text>
+    <text x="962" y="378" class="lg">so. Moving it would hide that a claim</text>
+    <text x="962" y="394" class="lg">was dropped. The red number beside a</text>
+    <text x="962" y="410" class="lg">count is that column's escalations.</text>
+    <text x="950" y="438" class="lg">④ Optimistic, then authoritative: the</text>
+    <text x="962" y="454" class="lg">card moves, the route runs, the board</text>
+    <text x="962" y="470" class="lg">refetches either way. When the panel</text>
+    <text x="962" y="486" class="lg">and the statement disagree, the</text>
+    <text x="962" y="502" class="lg">statement wins (invariant 8).</text>
+    <text x="950" y="530" class="lg">⑤ Needs You here is <tspan class="mono">status = blocked</tspan>,</text>
+    <text x="962" y="546" class="lg">the same words as the section, and the</text>
+    <text x="962" y="562" class="lg">one route back to open is your hand.</text>
+    <text x="950" y="590" class="lg">⑥ Every drag has a keyboard</text>
+    <text x="962" y="606" class="lg">equivalent, and it is the same route.</text>
+    <text x="950" y="634" class="lg">⑦ Board · Rooms · Artifacts · Projects</text>
+    <text x="962" y="650" class="lg">are four views of <tspan font-style="italic">one</tspan> object graph: a</text>
+    <text x="962" y="666" class="lg">task has a room, produces an artifact,</text>
+    <text x="962" y="682" class="lg">belongs to a project. Four sections</text>
+    <text x="962" y="698" class="lg">made the reader do that join.</text>
+  </g>
+  <text x="24" y="758" class="t3">docs/ops/board.md · docs/ops/threads.md · design-system.md §3.10 task card and drag-to-dispatch · §3.12 project header</text>
+</svg>

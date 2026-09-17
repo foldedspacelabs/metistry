@@ -1,0 +1,168 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 910" width="1000" height="910" role="img" aria-labelledby="ttl desc">
+  <title id="ttl">macOS — System: status, compute, spend, devices and instances</title>
+  <desc id="desc">Annotated wireframe: the System section of the seven-section sidebar — the instance as a machine. Six views as a segmented control with Compute selected, showing providers with their locality and data policy, per-tier assignments including shadow mode, and budgets with their action. Below, the other views of the same section stacked: doctor status rows, spend tiles, and the devices and instances lists with their revoke and reachability states.</desc>
+  <style>
+    text { font-family: -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", Roboto, sans-serif; fill: #12171c; font-size: 13px; }
+    .t2 { fill: #4d565f; font-size: 12px } .t3 { fill: #646d77; font-size: 11px }
+    .hd { font-size: 15px; font-weight: 600 } .h2 { font-size: 20px; font-weight: 700 }
+    .ch { font-size: 12px; font-weight: 600 }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px }
+    .ln { stroke: #d9dee4; stroke-width: 1; fill: none }
+    .win { fill: #f6f7f9; stroke: #b6bec8 }
+    .sf { fill: #ffffff; stroke: #d9dee4 }
+    .sel { fill: #e6edfc } .snk { fill: #eef0f3; stroke: #d9dee4 } .agq { fill: #f1ecfc }
+    .acc { fill: #2b5fd0 } .ag { fill: #6a4bbd } .ok { fill: #1c7a45 } .deg { fill: #8a5a00 } .bad { fill: #b3261e }
+    .cw { fill: #ffffff; stroke: #b3261e; stroke-width: 1.5 }
+    .cn { fill: #b3261e; font-size: 11px; font-weight: 700; text-anchor: middle }
+    .lg { font-size: 12px }
+  </style>
+
+  <rect width="1000" height="910" fill="#ffffff"/>
+  <text x="24" y="30" class="h2">macOS — System</text>
+  <text x="24" y="50" class="t2">The instance as a machine · today's Settings, Dashboard, Status and Devices are all this one question</text>
+
+  <rect class="win" x="24" y="66" width="720" height="790" rx="12"/>
+  <path class="ln" d="M24 104 H744"/>
+  <circle cx="46" cy="86" r="6" fill="#ff5f57"/><circle cx="66" cy="86" r="6" fill="#febc2e"/><circle cx="86" cy="86" r="6" fill="#28c840"/>
+  <text x="112" y="90" class="hd">System</text>
+  <rect class="sf" x="618" y="76" width="100" height="22" rx="6"/><text x="628" y="91" class="acc">＋ Capture ⌘N</text>
+
+  <rect x="25" y="105" width="186" height="750" fill="#eef0f3"/>
+  <path class="ln" d="M211 105 V855"/>
+  <text x="40" y="126" class="t3">METISTRY</text>
+  <text x="45" y="152">💬</text><text x="66" y="152">Chat</text>
+  <text x="45" y="178">◈</text><text x="66" y="178">Feed</text>
+  <text x="45" y="204">📝</text><text x="66" y="204">Needs You</text>
+  <rect x="160" y="192" width="30" height="16" rx="8" fill="#2b5fd0"/><text x="175" y="204" fill="#fff" font-size="10" text-anchor="middle">4</text>
+  <text x="45" y="230">🗂️</text><text x="66" y="230">Work</text>
+  <text x="45" y="256">📚</text><text x="66" y="256">Knowledge</text>
+  <text x="45" y="282">🤖</text><text x="66" y="282">Agents</text>
+  <rect class="sel" x="33" y="290" width="170" height="26" rx="7"/>
+  <text x="45" y="308">⚙️</text><text x="66" y="308" class="hd">System</text>
+  <circle cx="176" cy="304" r="4" class="deg"/>
+  <path class="ln" d="M33 800 H203"/>
+  <text x="45" y="820" class="t3">⌘K  Commands · ⌘N  Capture</text>
+
+  <!-- segmented: the six System views -->
+  <rect class="snk" x="228" y="120" width="464" height="26" rx="8"/>
+  <text x="258" y="137" class="t2" text-anchor="middle">Status</text>
+  <rect x="292" y="122" width="76" height="22" rx="7" fill="#ffffff" stroke="#d9dee4"/><text x="330" y="137" class="ch" text-anchor="middle">Compute</text>
+  <text x="400" y="137" class="t2" text-anchor="middle">Spend</text>
+  <text x="464" y="137" class="t2" text-anchor="middle">Devices</text>
+  <text x="546" y="137" class="t2" text-anchor="middle">Instances</text>
+  <text x="628" y="137" class="t2" text-anchor="middle">Setup</text>
+
+  <!-- compute -->
+  <text x="228" y="168" class="t3">ENGINE</text>
+  <text x="228" y="188" class="mono ok">openrouter/anthropic/claude-sonnet-5</text>
+  <text x="482" y="188" class="t3">default · medium · critical</text>
+  <rect class="sf" x="636" y="176" width="84" height="20" rx="6"/><text x="678" y="190" class="t2" text-anchor="middle">Change…</text>
+  <text x="228" y="208" class="t3">from <tspan class="mono">compute.yaml</tspan> — a protected path. The verbs write it as you; the assistant cannot.</text>
+
+  <text x="228" y="238" class="t3">PROVIDERS</text>
+  <text x="228" y="258" class="ok">●</text><text x="248" y="258" class="hd">lmstudio</text>
+  <text x="340" y="258" class="mono t3">http://127.0.0.1:1234/v1</text>
+  <text x="720" y="258" class="t3" text-anchor="end">on_machine · no key, no cost</text>
+  <text x="228" y="282" class="ok">●</text><text x="248" y="282" class="hd">openrouter</text>
+  <text x="340" y="282" class="mono t3">https://openrouter.ai/api/v1</text>
+  <text x="720" y="282" class="t3" text-anchor="end">off_machine · ZDR · key set</text>
+  <text x="248" y="298" class="t3">data policy: allow <tspan class="mono">Knowledge/Projects</tspan> · deny <tspan class="mono">comms</tspan> · brief ≤ 64 KB</text>
+  <text x="248" y="314" class="t3">key name <tspan class="mono">METISTRY_OPENROUTER_API_KEY</tspan> — the value is in the Keychain</text>
+  <text x="228" y="338" fill="#646d77">○</text><text x="248" y="338" fill="#646d77">apple-fm</text>
+  <text x="340" y="338" class="mono t3">http://127.0.0.1:7810/v1</text>
+  <text x="720" y="338" class="t3" text-anchor="end">not configured — nothing dials it</text>
+  <rect class="sf" x="228" y="350" width="52" height="20" rx="6"/><text x="254" y="364" class="t2" text-anchor="middle">Test</text>
+  <rect class="sf" x="288" y="350" width="62" height="20" rx="6"/><text x="319" y="364" class="t2" text-anchor="middle">Models</text>
+  <rect class="sf" x="358" y="350" width="72" height="20" rx="6" stroke="#b3261e"/><text x="394" y="364" class="bad" font-size="12" text-anchor="middle">Remove</text>
+  <rect class="sf" x="438" y="350" width="98" height="20" rx="6"/><text x="487" y="364" class="t2" text-anchor="middle">＋ Provider…</text>
+
+  <text x="228" y="386" class="t3">ASSIGNMENTS</text>
+  <text x="228" y="406" class="t2">fast</text><text x="344" y="406" class="mono t2">lmstudio/google/gemma-3n-e4b</text><text x="720" y="406" class="t3" text-anchor="end">low</text>
+  <text x="228" y="424" class="t2">routine</text><text x="344" y="424" class="mono t2">lmstudio/google/gemma-3n-e4b</text><text x="720" y="424" class="t3" text-anchor="end">low</text>
+  <text x="228" y="442" class="t2">deep</text><text x="344" y="442" class="mono t2">openrouter/anthropic/claude-sonnet-5</text><text x="720" y="442" class="t3" text-anchor="end">high</text>
+  <text x="228" y="460" class="t2">crew: researcher</text><text x="344" y="460" class="mono t2">lmstudio/google/gemma-3n-e4b</text>
+  <rect class="agq" x="228" y="468" width="492" height="36" rx="8"/>
+  <text x="238" y="484" class="ag" font-size="11">shadow — 5% of default turns also run on <tspan class="mono">lmstudio/google/gemma-3n-e4b</tspan>,</text>
+  <text x="238" y="498" class="ag" font-size="11">recorded and never served. The rate is the spend.</text>
+
+  <text x="228" y="520" class="t3">BUDGETS</text>
+  <text x="228" y="540" class="t2">instance</text><text x="320" y="540" class="t2">$5.00 / day · $60.00 / month</text>
+  <text x="528" y="540" class="t3">action: stop</text><text x="720" y="540" class="ok" font-size="12" text-anchor="end">$4.18 today</text>
+  <text x="228" y="558" class="t2">openrouter</text><text x="320" y="558" class="t2">$20.00 / month</text>
+  <text x="528" y="558" class="t3">action: stop</text><text x="720" y="558" class="deg" font-size="12" text-anchor="end">$11.40 this month</text>
+
+  <!-- the other views -->
+  <path d="M228 584 H720" stroke="#d9dee4" stroke-dasharray="4 4" fill="none"/>
+  <text x="228" y="604" class="t3">THE OTHER VIEWS OF THIS SECTION — ONE AT A TIME IN THE APP, STACKED HERE</text>
+
+  <text x="228" y="630" class="t3">STATUS</text><text x="720" y="630" class="t3" text-anchor="end">9 ok · 1 degraded · 2 not configured</text>
+  <text x="228" y="652" class="ok">●</text><text x="248" y="652">postgres</text><text x="380" y="652" class="mono t3">select 1</text><text x="720" y="652" class="ok" font-size="12" text-anchor="end">ok · 3 ms</text>
+  <text x="228" y="674" class="deg">◐</text><text x="248" y="674">github-state</text><text x="380" y="674" class="mono t3">last run</text><text x="720" y="674" class="deg" font-size="12" text-anchor="end">degraded · 3h stale</text>
+  <text x="228" y="696" fill="#646d77">○</text><text x="248" y="696" fill="#646d77">aws-costs</text><text x="380" y="696" class="mono t3">METISTRY_AWS_*</text><text x="720" y="696" class="t3" text-anchor="end">not configured</text>
+
+  <text x="228" y="726" class="t3">SPEND</text>
+  <rect class="sf" x="228" y="734" width="112" height="52" rx="10"/><text x="240" y="762" font-size="18" font-weight="600">$4.18</text><text x="240" y="778" class="t3">today</text>
+  <rect class="sf" x="348" y="734" width="112" height="52" rx="10"/><text x="360" y="762" font-size="18" font-weight="600">$61.20</text><text x="360" y="778" class="t3">this month</text>
+  <rect class="sf" x="468" y="734" width="112" height="52" rx="10"/><text x="480" y="762" font-size="18" font-weight="600" class="deg">72%</text><text x="480" y="778" class="t3">of the cap</text>
+  <rect class="sf" x="588" y="734" width="132" height="52" rx="10"/><text x="600" y="762" font-size="18" font-weight="600" fill="#646d77">—</text><text x="600" y="778" class="t3">aws · not configured</text>
+
+  <text x="228" y="808" class="t3">DEVICES</text>
+  <text x="308" y="808" class="t2">this Mac · local owner over loopback</text>
+  <text x="530" y="808" class="t2">iPhone · passkey · 2m</text>
+  <rect class="sf" x="666" y="796" width="54" height="18" rx="6" stroke="#b3261e"/><text x="693" y="809" class="bad" font-size="11" text-anchor="middle">Revoke</text>
+  <text x="228" y="836" class="t3">INSTANCES</text>
+  <circle cx="314" cy="832" r="4" class="ok"/><text x="326" y="836" class="t2">mac-studio (this one)</text>
+  <circle cx="474" cy="832" r="4" fill="#646d77"/><text x="486" y="836" class="t2">nuc — last reachable 2d ago</text>
+
+  <!-- callouts -->
+  <g>
+    <circle class="cw" cx="216" cy="137" r="10"/><text class="cn" x="216" y="141">1</text>
+    <circle class="cw" cx="216" cy="282" r="10"/><text class="cn" x="216" y="286">2</text>
+    <circle class="cw" cx="216" cy="338" r="10"/><text class="cn" x="216" y="342">3</text>
+    <circle class="cw" cx="216" cy="486" r="10"/><text class="cn" x="216" y="490">4</text>
+    <circle class="cw" cx="216" cy="540" r="10"/><text class="cn" x="216" y="544">5</text>
+    <circle class="cw" cx="216" cy="808" r="10"/><text class="cn" x="216" y="812">6</text>
+  </g>
+
+  <!-- legend -->
+  <g>
+    <text x="770" y="90" class="hd">Callouts</text>
+    <text x="770" y="114" class="lg">① One section, six views. Status,</text>
+    <text x="782" y="130" class="lg">Compute, Spend, Devices, Instances</text>
+    <text x="782" y="146" class="lg">and Setup answer one question, so</text>
+    <text x="782" y="162" class="lg">they stopped being six places.</text>
+    <text x="770" y="190" class="lg">② <tspan font-weight="600">Compute has to live here</tspan>, not</text>
+    <text x="782" y="206" class="lg">only in the Mac's Settings: nothing</text>
+    <text x="782" y="222" class="lg">exists on one platform with no home</text>
+    <text x="782" y="238" class="lg">on the others. That needs a console</text>
+    <text x="782" y="254" class="lg">route the product does not have yet</text>
+    <text x="782" y="270" class="lg">— this screen is what justifies it.</text>
+    <text x="782" y="292" class="lg t3">A key's value is never shown or</text>
+    <text x="782" y="308" class="lg t3">asked for. <tspan class="mono">auth.secret</tspan> is a NAME;</text>
+    <text x="782" y="324" class="lg t3">the only fact is "in the Keychain".</text>
+    <text x="770" y="352" class="lg">③ <tspan font-weight="600">absent ≠ failed.</tspan> A provider</text>
+    <text x="782" y="368" class="lg">nothing dials is grey, says so, and</text>
+    <text x="782" y="384" class="lg">never counts toward a failure.</text>
+    <text x="770" y="412" class="lg">④ Shadow mode is a fraction of</text>
+    <text x="782" y="428" class="lg">default turns run twice — the</text>
+    <text x="782" y="444" class="lg">second answer is recorded, never</text>
+    <text x="782" y="460" class="lg">served. Shown on the assignment it</text>
+    <text x="782" y="476" class="lg">belongs to: the rate is the spend.</text>
+    <text x="770" y="504" class="lg">⑤ A budget with no limit never</text>
+    <text x="782" y="520" class="lg">fires, so it is not a control: the</text>
+    <text x="782" y="536" class="lg">action sits beside the limit, never</text>
+    <text x="782" y="552" class="lg">apart from it. <tspan class="mono">critical_only</tspan> keeps</text>
+    <text x="782" y="568" class="lg">answering the turn you wait on.</text>
+    <text x="770" y="596" class="lg">⑥ Revoke confirms with the</text>
+    <text x="782" y="612" class="lg">consequence named (§3.17), and</text>
+    <text x="782" y="628" class="lg">reachability is a presence chip</text>
+    <text x="782" y="644" class="lg">with an honest last-seen.</text>
+    <text x="770" y="678" class="hd">Mac-only, and staying that way</text>
+    <text x="770" y="700" class="lg">Setup runs the wizard. Keychain,</text>
+    <text x="770" y="716" class="lg">login items, TCC permissions, log</text>
+    <text x="770" y="732" class="lg">windows and Sparkle are installing</text>
+    <text x="770" y="748" class="lg">and operating, not data. Everything</text>
+    <text x="770" y="764" class="lg">above them is the same everywhere.</text>
+  </g>
+  <text x="24" y="888" class="t3">docs/ops/compute.md · docs/ops/mac-app.md · design-system.md §3.13 status rows · §3.17 destructive confirmation</text>
+</svg>

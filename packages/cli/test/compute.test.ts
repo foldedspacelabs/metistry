@@ -114,6 +114,20 @@ function harness(dir: string, extra: Partial<ComputeOptions> = {}): { o: Compute
 
 const file = (dir: string) => join(dir, "compute.yaml");
 
+// A cloud that does NOT claim ZDR, written BY HAND. No shipped template is
+// non-ZDR any more (OPEN-7, 2026-09-17: the Zen template went, and every
+// other OpenAI-compatible cloud is a base URL you write yourself), so the
+// C13 warning has to be proved on the shape people are actually left with.
+const HANDWRITTEN_CLOUD = `providers:
+  cloud:
+    kind: openai-compatible
+    base_url: https://cloud.example/v1
+    locality: off_machine
+    auth: { secret: METISTRY_CLOUD_API_KEY }
+    data_policy: { allow: [Knowledge/Projects], deny_sources: [comms], max_brief_bytes: 65536 }
+    pricing: { example-model: { in_per_m: 1, out_per_m: 2 } }
+`;
+
 describe("argument parsing: strict, never a guess", () => {
   it("assignment targets", () => {
     expect(parseAssignmentTarget("default")).toEqual({ kind: "default" });
@@ -269,14 +283,14 @@ describe("assign / budget: the file is edited in place and never left invalid", 
 
   it("warns, never blocks, on an off_machine provider that does not claim ZDR (C13)", async () => {
     const dir = await instance();
-    const kc = fakeSecurity({ [`${ACCOUNT}/metistry:METISTRY_ZEN_API_KEY`]: KEY });
+    const kc = fakeSecurity({ [`${ACCOUNT}/metistry:METISTRY_CLOUD_API_KEY`]: KEY });
     const { o, lines } = harness(dir, { exec: kc.exec });
-    await providersAdd({ ...o, template: "zen", skipTest: true });
-    await assign({ ...o, target: parseAssignmentTarget("default"), model: "zen/example-model" });
-    const r = await assign({ ...o, target: parseAssignmentTarget("deep"), model: "zen/example-model" });
+    await writeFile(file(dir), HANDWRITTEN_CLOUD);
+    await assign({ ...o, target: parseAssignmentTarget("default"), model: "cloud/example-model" });
+    const r = await assign({ ...o, target: parseAssignmentTarget("deep"), model: "cloud/example-model" });
     expect(r.warn_non_zdr).toBe(true);
     expect(lines.join("\n")).toContain("zero data retention");
-    expect(await readFile(file(dir), "utf8")).toContain("model: zen/example-model");
+    expect(await readFile(file(dir), "utf8")).toContain("model: cloud/example-model");
   });
 
   it("budgets: an action with no limit is refused; --daily and --monthly accumulate", async () => {
@@ -477,7 +491,7 @@ describe("models install", () => {
 describe("show", () => {
   it("reports the overlay, secret PRESENCE (never a value), assignments and the non-ZDR warning", async () => {
     const dir = await instance();
-    const kc = fakeSecurity({ [`${ACCOUNT}/metistry:METISTRY_ZEN_API_KEY`]: KEY });
+    const kc = fakeSecurity({ [`${ACCOUNT}/metistry:METISTRY_CLOUD_API_KEY`]: KEY });
     const { o } = harness(dir, { exec: kc.exec });
     const empty = await computeReport(o);
     expect(empty.assigns_nothing).toBe(true);
@@ -487,19 +501,19 @@ describe("show", () => {
     // main.ts's --help (docs/product/record/2026-09-17-second-instance-guide.md)
     for (const t of COMPUTE_TEMPLATES) expect(renderComputeReport(empty), t).toContain(t);
 
-    await providersAdd({ ...o, template: "zen", skipTest: true });
-    await assign({ ...o, target: parseAssignmentTarget("default"), model: "zen/example-model" });
-    await assign({ ...o, target: parseAssignmentTarget("deep"), model: "zen/example-model", effort: "high" });
+    await writeFile(file(dir), HANDWRITTEN_CLOUD);
+    await assign({ ...o, target: parseAssignmentTarget("default"), model: "cloud/example-model" });
+    await assign({ ...o, target: parseAssignmentTarget("deep"), model: "cloud/example-model", effort: "high" });
     await setBudget({ ...o, target: parseBudgetTarget("instance"), monthly: 60, action: "stop" });
     const r = await computeReport(o);
     expect(r.file).toBe(file(dir));
     expect(r.files).toEqual([join(SEED, "compute.yaml"), file(dir)]); // seed first, the instance's own last
-    expect(r.providers[0]).toMatchObject({ name: "zen", secret: "METISTRY_ZEN_API_KEY", secret_present: true, models_assigned: ["example-model"] });
+    expect(r.providers[0]).toMatchObject({ name: "cloud", secret: "METISTRY_CLOUD_API_KEY", secret_present: true, models_assigned: ["example-model"] });
     expect(r.assignments.map((a) => a.target)).toEqual(["default", "deep"]);
-    expect(r.assignments[1]).toMatchObject({ target: "deep", provider: "zen", effort: "high", warn_non_zdr: true });
+    expect(r.assignments[1]).toMatchObject({ target: "deep", provider: "cloud", effort: "high", warn_non_zdr: true });
     expect(r.instance_budget).toMatchObject({ monthly_usd: 60, action: "stop" });
     const text = renderComputeReport(r);
-    expect(text).toContain("METISTRY_ZEN_API_KEY (in Keychain)");
+    expect(text).toContain("METISTRY_CLOUD_API_KEY (in Keychain)");
     expect(text).not.toContain(KEY);
     expect(text).toContain("Not wired yet");
     expect(JSON.stringify(r)).not.toContain(KEY);
@@ -525,15 +539,15 @@ describe("metistry compute (the command)", () => {
   });
 
   it("providers add --json: exactly one JSON document on stdout, the Keychain notice on stderr", async () => {
-    // zen has a secret to ask about; linux has no login Keychain to ask it
-    // into, so `providersAdd` prints a notice through the same `out` the
+    // openrouter has a secret to ask about; linux has no login Keychain to ask
+    // it into, so `providersAdd` prints a notice through the same `out` the
     // JSON result goes to — this is the case PR #174 found mixed on one
     // stream (docs/ops/cli.md's `--json` paragraph).
     const dir = await instance();
-    const r = await run(["compute", "providers", "add", "--from", "zen", "--skip-test", "--json", "--instance", dir, "--product-dir", REPO]);
+    const r = await run(["compute", "providers", "add", "--from", "openrouter", "--skip-test", "--json", "--instance", dir, "--product-dir", REPO]);
     expect(r.code).toBe(0);
     const parsed = JSON.parse(r.out); // throws if the notice leaked onto stdout ahead of the document
-    expect(parsed).toMatchObject({ name: "zen", secretStatus: "skipped" });
+    expect(parsed).toMatchObject({ name: "openrouter", secretStatus: "skipped" });
     expect(r.err).toContain("no login Keychain on linux");
   });
 

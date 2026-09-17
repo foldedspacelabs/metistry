@@ -111,7 +111,7 @@ restart. The degradation is deliberate:
 ```sh
 metistry compute show [--json]
 metistry compute providers list [--json]
-metistry compute providers add --from openrouter|zen|lmstudio|ollama|llamaserver \
+metistry compute providers add --from openrouter|lmstudio|ollama|llamaserver|applefm \
         [--name <n>] [--base-url <url>] [--secret <NAME>] [--skip-test]
 metistry compute providers remove <name>
 metistry compute providers test <name> [--complete]
@@ -167,7 +167,6 @@ catalogue.
 | template | what it is |
 | --- | --- |
 | `openrouter` | one key, most models; pins `provider: { order: [anthropic], allow_fallbacks: false }` so a router in front of a model does not become a second router |
-| `zen` | OpenCode Zen; prices come from the `pricing:` table because the response carries no cost. Verify the base URL against its docs. |
 | `lmstudio` | LM Studio's local server on port 1234 |
 | `ollama` | Ollama's OpenAI-compatible surface on port 11434 |
 | `llamaserver` | the **bundled** `llama-server` on port 7813 — Metistry starts it |
@@ -176,7 +175,14 @@ catalogue.
 `--name` and `--base-url` rewrite the block on the way in, so a second
 machine's Ollama is `--from ollama --name box --base-url http://10.0.0.4:11434/v1`.
 Any OpenAI-compatible endpoint works without a template — write the block by
-hand, or start from the nearest one.
+hand, or start from the nearest one. **One cloud template ships** (OPEN-7,
+ruled 2026-09-17): OpenCode Zen and every other OpenAI-compatible cloud are
+reached by writing the block — a base URL, a secret NAME, `data_policy`, and
+`pricing:` when the response carries no cost (the commented example in
+`seed/compute.yaml` is the shape) — rather than by a seeded file whose base URL,
+prices and retention we would be promising to keep true. Copy `openrouter` only
+if the provider really is ZDR: `zdr: true` is a claim, and claiming it removes
+the C13 warning.
 
 ## The engine
 

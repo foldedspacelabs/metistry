@@ -91,7 +91,15 @@ between `Knowledge/` and the instance root (a root `Journal/` and a
 untouched. The database half is one transaction: `Knowledge/` drops out of
 `knowledge_files`, `knowledge_links`, `embeddings`, `inbox` and
 `projects.area`, and the whole-vault grant sentinel becomes `/`
-(`VAULT_ROOT_AREA`). It ends in one commit, and it restarts nothing.
+(`VAULT_ROOT_AREA`). Crew `scope:` and target `data_policy.allow:` entries
+are rewritten in the manifest FILES in the same run — the console re-syncs
+the registry from `.metistry/agents/**` on an interval, so a grant migrated
+in the database and left stale in the manifest behind it would be undone by
+the next sync. That edit is a byte-range splice, so comments and formatting
+come back untouched. A pre-2026-09-17 `<instance>/eval/` moves to
+`.metistry/eval/` with the rest: bake-off fixtures and transcripts are
+instance-repo content, not knowledge. It ends in one commit, and it restarts
+nothing.
 
 It refuses a dirty git tree (`--allow-dirty` overrides) and warns if the
 supervisor or reconciler job is running — the reconciler is the instance

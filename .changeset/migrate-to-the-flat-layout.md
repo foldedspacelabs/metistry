@@ -19,6 +19,20 @@ sides named and the tree exactly as it was. A dirty git tree is refused too
 it is the instance repo's sole committer, and it would otherwise sweep the
 migration into commits of its own halfway through.
 
+Crew `scope:` and target `data_policy.allow:` entries are rewritten in the
+manifest files in the same run — the console re-syncs the crew registry from
+`.metistry/agents/**` on an interval, so a grant migrated in the database and
+left stale in the manifest behind it would be undone by the next sync, which
+is a migration that silently fails. That edit is a byte-range splice rather
+than a re-serialisation: aligned comments, flow-vs-block style and the
+operating prompt below the frontmatter come back byte-identical.
+
+A pre-2026-09-17 `<instance>/eval/` moves under `.metistry/` with the rest —
+bake-off fixtures and transcripts are instance-repo content, not knowledge —
+and preflight now lists any lowercase entry that will sit at the vault root
+after the move, since the vault root becomes the instance root and vault
+content is TitleCase.
+
 Stored paths follow in ONE transaction: `Knowledge/` drops out of
 `knowledge_files`, `knowledge_links`, `embeddings`, `inbox` and
 `projects.area`, a pre-2026-09-16 bare capture filename becomes

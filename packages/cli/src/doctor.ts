@@ -347,7 +347,7 @@ export async function layoutRow(instanceDir: string): Promise<DoctorRow> {
       }
       return {
         status: "degraded",
-        remediation: "instance layout: legacy (run metistry migrate-layout) — the vault still lives in Knowledge/ and config at the root",
+        remediation: `the vault still lives in ${LEGACY_VAULT_DIR}/ and the config files at the instance root — \`metistry migrate-layout --dry-run\` prints the whole plan, \`metistry migrate-layout\` runs it (docs/ops/instance-layout.md)`,
         meta: { layout: "legacy" },
       };
     })),

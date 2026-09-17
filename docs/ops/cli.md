@@ -20,6 +20,8 @@ All of them are real.
 | `--version` / `version [--json]` | this CLI's version, the resolved product dir's, the lock's pin, and a release's runtime pack |
 | `deployment [--json]` | the effective shape (D4 overlay) and the services it implies, with cheap running state |
 | `deployment set-shape <compose\|launchd>` | write the instance's `.metistry/deployment.yaml` through the reconciler, preview-then-confirm |
+| `migrate-layout [--dry-run] [--json] [--allow-dirty]` | carry an instance from the legacy layout to the flat one: the directory becomes the vault, the machinery moves under `.metistry/`, stored paths lose `Knowledge/` |
+| `migrate-inbox [--dry-run]` | move a pre-#156 `inbox/` into the vault inbox and rewrite `inbox.path` |
 | `migrate-shape <launchd\|compose>` | move a LIVE install between the shapes, with its data: dump, stop, flip, up, restore, verify, doctor |
 | `doctor` | validate every manifest and probe every bridge, service, container, launchd job |
 | `up` | bring an install to running: containers/host jobs, then doctor |
@@ -1243,21 +1245,120 @@ Obsidian needs no change: the vault root is still `Knowledge/`.
 
 The 2026-09-17 ruling moves the vault root itself: the instance directory
 becomes the Obsidian vault (so `Knowledge/` disappears and its contents —
-`Inbox/`, `now.md`, `Areas/`, …— sit at the instance root) and everything
-that is not knowledge (`identity.yaml`, `rules.yaml`, `compute.yaml`,
-`deployment.yaml`, `metistry.lock`, `agents/`, `routines/`, `queries/`,
-`extensions/`, `instance-migrations/`, `state/`) moves under `.metistry/`
+`Inbox/`, `now.md`, `Areas/`, `CLAUDE.md` — sit at the instance root) and
+everything that is not knowledge moves under `.metistry/`
 (`docs/ops/instance-layout.md` has the full tree and the reasoning).
-`metistry migrate-layout` is the verb that carries an existing instance
-across: idempotent `git mv`, safe to run more than once, and available
-with `--dry-run` to preview the whole plan before anything moves. Run
-`metistry migrate-inbox` first if the instance predates the 2026-09-16
-inbox-in-vault ruling too — `migrate-layout` expects to find `Knowledge/`
-already holding the vault, not a bare `inbox/`.
+
+```sh
+metistry migrate-layout --dry-run     # the whole plan, nothing run
+metistry migrate-layout               # do it
+metistry up                           # the verb restarts nothing itself
+```
+
+It refuses unless the layout is legacy; on an instance that is already flat
+it says so and changes nothing. In order:
+
+1. **preflight.** A git repo, a legacy layout, and a **clean git tree** —
+   refused otherwise, because a `git mv` of the whole tree on top of
+   uncommitted work is not a reviewable diff. `--allow-dirty` proceeds and
+   carries the uncommitted paths through the move. If the supervisor or the
+   reconciler job is running, the run **warns** and names it: the reconciler
+   is the instance repo's sole committer (D5) and will otherwise sweep the
+   migration into commits of its own halfway through, so stop it first
+   (`metistry stop`). It is a warning and not a refusal because `launchctl`
+   can say a label is running but not which instance directory it serves.
+   Preflight also **lists any lowercase entry that will sit at the vault
+   root** after the move. The vault root becomes the instance root, so a
+   lowercase directory that was merely sitting beside the vault becomes vault
+   content the reconciler walks, indexes and embeds — and vault content is
+   TitleCase (CLAUDE.md's one casing boundary). Seeing that list before the
+   commit is the point. `now.md` is excluded: the product ships it lowercase
+   itself, and a warning that always fires is one nobody reads.
+2. **`.metistry/`.** `git mv` for what git tracks, a plain move for what it
+   does not, of `identity.yaml`, `rules.yaml`, `compute.yaml`,
+   `deployment.yaml`, `instances.yaml`, `sources.yaml`,
+   `assistant-prompt.md`, `metistry.lock`, and the `agents/`, `routines/`,
+   `queries/`, `extensions/`, `instance-migrations/`, `targets/` and `eval/`
+   directories — each only if it is there. Then the gitignored `state/`,
+   which is a plain move because git never tracked it. (`eval/` is the
+   bake-off's fixtures and transcripts, `docs/poc/poc18-bakeoff`: instance-repo
+   content, not knowledge, so left at the root of a flat instance the
+   reconciler would index a harvested transcript as a note.)
+3. **`Inbox/`.** A pre-#156 root `inbox/` is normalised to `Inbox/` (through
+   a temporary name: `git mv inbox Inbox` on a case-insensitive filesystem
+   moves the directory inside itself) and merged with the vault's own inbox
+   if both exist. A file present on both sides is a refusal, not a clobber.
+4. **The vault.** Every entry of `Knowledge/` becomes a root entry —
+   `Knowledge/CLAUDE.md` becomes the root `CLAUDE.md`, a `Knowledge/.obsidian/`
+   comes up with it — and the emptied `Knowledge/` is removed. A name
+   collision with something already at the root (a root `Journal/` and a
+   `Knowledge/Journal/`) is **refused before anything moves**, naming both
+   sides: the plan is built off the filesystem first, so a refused run leaves
+   the instance exactly as it was.
+5. **Manifests.** A crew's `scope:` and a target's `data_policy.allow:` are
+   vault path prefixes that live in FILES, not in the database, and the
+   console re-syncs the registry from `.metistry/agents/**` on an interval
+   (`METISTRY_CREWS_SYNC_S`) — so a grant rewritten in step 7 and left stale
+   in the manifest behind it is a migration that silently fails at the next
+   sync. `Knowledge/<Area>` loses the prefix in every `*.md` crew manifest and
+   every `manifest.yaml` under `.metistry/`. The edit is a **splice**, not a
+   re-serialisation: `parseDocument` locates the entries, and only those
+   scalars' own byte ranges are replaced, so aligned comments, flow-vs-block
+   style, key order and the operating prompt below the frontmatter come back
+   byte-identical. A **bare** `Knowledge` is left alone with a warning naming
+   the file: it meant "the whole vault", the old schema admitted it
+   (`^Knowledge(\/[A-Za-z0-9_.-]+)*$` — note the `*`), and the flat one has no
+   spelling for it, because `knowledgePrefix` refuses a leading slash and a
+   crew `scope` refuses the bare vault outright. Writing `/` there would
+   produce a manifest that fails validation and revokes the crew's registry
+   row; naming the areas you actually mean is the fix.
+6. **`.gitignore`.** Rewritten to the flat layout's set (`.metistry/state/`,
+   `.obsidian/workspace*`, `Inbox/.large/`); every line the instance added is
+   kept.
+7. **The database, in one transaction.** `Knowledge/` drops out of
+   `knowledge_files.path`, `knowledge_links.from_path`/`to_path`,
+   `embeddings.path`, `inbox.path` and `projects.area`; a bare capture
+   filename (pre-2026-09-16) becomes `Inbox/<file>`; and in `agents.grants`
+   the whole-vault sentinel `Knowledge/` becomes `/` (`VAULT_ROOT_AREA` —
+   with the vault AT the root there is no name to say) while every
+   `Knowledge/<area>` grant loses the prefix. One transaction, so the stored
+   paths can never be half-migrated. **With no database configured** the
+   rewrites are named and skipped, and the files still move: re-run with the
+   install's environment to finish them. Three other path-shaped columns are
+   deliberately left alone — `artifact_versions.path_prefix` and
+   `artifact_comments.path` (`Artifacts/` was already at the instance root,
+   and a comment's path is relative to its version) and `runs.meta`, which is
+   the audit trail and is not edited to suit the present.
+8. **`.metistry/state/.env`.** `METISTRY_*` values that spelled the old
+   paths — `METISTRY_RULES_FILES`, `METISTRY_COMPUTE_FILES`,
+   `METISTRY_INBOX_DIR`, `METISTRY_ASSISTANT_AREAS` — are rewritten in place;
+   `METISTRY_INSTANCE_DIR` is what everything else is relative to and does
+   not move. A bare relative directory (`METISTRY_TARGETS_DIRS=targets`) is
+   **left alone with a warning** naming the flat spelling: the product
+   checkout has directories by those names too, so rewriting it would be a
+   guess. The launchd plists under `state/` are regenerated by `metistry up`,
+   so the verb says so rather than editing generated files it does not own.
+9. **One commit**, "Migrate to the flat instance layout (metistry
+   migrate-layout)", by the same author `init` and `migrate-inbox` use.
+
+`--dry-run` prints every move and every row count and touches nothing —
+including the `git mv` / plain-move distinction, which it resolves by asking
+git rather than guessing. `--json` prints the result (moves, per-table row
+counts, `.env` changes, warnings) on stdout with the step log on stderr.
+`--instance <dir>` picks the instance; without it, `METISTRY_INSTANCE_DIR`.
+
+An instance that predates the 2026-09-16 inbox-in-vault ruling needs nothing
+extra: `migrate-layout` carries a bare root `inbox/` up to `Inbox/` itself.
+Running `metistry migrate-inbox` first is still fine and is the smaller,
+more reviewable step if you want the two moves in two commits.
 
 `metistry doctor` reports which layout an instance is on (`instance
 layout: flat | legacy`), so a `legacy` reading is the signal to run this
-verb.
+verb — and the Mac app shows the same sentence in Status and in the wizard
+when you point it at a legacy folder.
+
+Obsidian: re-open the vault at the instance directory itself. `.metistry/`
+is dot-prefixed, so Obsidian ignores it the way it already ignores `.git`.
 
 ## Maintenance
 

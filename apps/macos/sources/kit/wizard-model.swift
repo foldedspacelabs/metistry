@@ -46,11 +46,10 @@ public enum WizardOptions {
         .init(
             value: .create,
             title: "Create a New Instance",
-            // TODO(follow-up PR: Mac app on the flat layout) — this copy, the
-            // wizard's path handling and `metistry connect`'s configs are the
-            // second half of the 2026-09-17 layout ruling. Swift is out of
-            // scope for the core-layout PR; core's INSTANCE_LAYOUT is the
-            // source of truth to mirror.
+            // The 2026-09-17 layout, in the app's own words. `instance-files.swift`
+            // mirrors core's INSTANCE_LAYOUT for the one existence test the
+            // wizard makes; everything else about an instance still comes from
+            // a CLI verb.
             pro: "`metistry init` lays out the whole thing: a git repo, the vault at the root, .metistry/ with identity.yaml and config, one commit. Nothing else on the machine is touched.",
             con: "Refuses a folder that already has contents unless you force it, so it is not the way to reuse an install."
         ),
@@ -58,7 +57,7 @@ public enum WizardOptions {
             value: .adopt,
             title: "Use an Existing Folder",
             pro: "Runs nothing at all — the app just points at an instance you already have, which is what a second Mac, a restored backup or a cloned instance repo looks like.",
-            con: "Nothing is validated beyond the folder holding an identity.yaml; a half-built instance will fail later, at doctor, rather than here."
+            con: "Nothing is validated beyond the folder holding an identity.yaml; a half-built instance will fail later, at doctor, rather than here. An instance still on the legacy layout is adopted and named as such — `metistry migrate-layout` moves it."
         ),
     ]
 

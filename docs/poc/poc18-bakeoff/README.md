@@ -20,6 +20,12 @@ scorers, the judge rule and the report.
 
 ---
 
+
+Fixtures and transcripts that belong to an INSTANCE rather than to this
+checkout live at `<instance>/.metistry/eval/` — instance-repo content, not
+knowledge, so the reconciler never indexes a harvested transcript as a note
+(`docs/ops/instance-layout.md`; `metistry migrate-layout` moves a pre-2026-09-17
+`<instance>/eval/` there).
 ## Authoring fixtures
 
 ### The one rule that is not negotiable

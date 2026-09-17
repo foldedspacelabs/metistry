@@ -246,8 +246,8 @@ reaches this Mac meanwhile.
 
 ```sh
 node packages/cli/dist/main.js update            # pull/build, migrate, restart what changed, pin, doctor
-node packages/cli/dist/main.js migrate-inbox      # only if this instance predates 2026-09-16's Knowledge/Inbox/ layout — says so and changes nothing otherwise
-node packages/cli/dist/main.js migrate-layout     # only if this instance predates the 2026-09-17 flat layout — says so and changes nothing otherwise
+node packages/cli/dist/main.js migrate-layout --dry-run   # only if this instance predates the 2026-09-17 flat layout; says so and changes nothing otherwise
+node packages/cli/dist/main.js migrate-layout            # carries a pre-2026-09-16 bare inbox/ up as well, so migrate-inbox is optional
 node packages/cli/dist/main.js doctor             # weekly; a `degraded` row is a finding even at exit 0
 ```
 

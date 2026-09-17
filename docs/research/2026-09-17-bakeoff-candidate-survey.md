@@ -114,7 +114,7 @@ Sonnet as the bar is unchanged.
 >   — which makes stage-2 shadow agreement a measurement of harness and quant
 >   rather than of two different models. That is worth more than the price
 >   delta between the open and closed rows.
-> - **New OPEN-2:** `z-ai/glm-5.2`'s licence is asserted by secondary sources
+> - **New OPEN-8:** `z-ai/glm-5.2`'s licence is asserted by secondary sources
 >   only. Verify before it counts as an open-weight row.
 
 Four findings behind that text, in the order they matter:

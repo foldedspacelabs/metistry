@@ -15,7 +15,7 @@ scorers, the judge rule and the report.
 | `packages/eval` | the runner — a private, unpublished workspace package (`@metistry-apps/eval`). Fixture schema, scorers, judge, report. |
 | `fixtures/` | the fixtures. One EXAMPLE per axis ships here; the owner's fifty go beside them. |
 | `runs/` | raw JSONL, one row per case per run, plus a `.meta.json` per run. **Committed** — this is the evidence (poc15/16 precedent). |
-| `runs/.transcripts/` | full message histories. **Gitignored**: they are large and can carry vault content. |
+| `runs/.transcripts/` | full message histories. **Gitignored** here: kept, but committed to the *instance* repo, never the product repo (ruled 2026-09-17) — they are large and can carry vault content. |
 | `docs/poc/RESULTS.md` §PoC-18 | the write-up, once there is one. |
 
 ---

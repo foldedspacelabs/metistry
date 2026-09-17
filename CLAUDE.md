@@ -63,6 +63,9 @@ Numbering matches the plan §1 (synced 2026-08-29 — they had drifted).
    authenticates as if internet-exposed.
 9. **The engine has no shell and no raw git.** `brain-commit` plus
    allowlisted bridges are the assistant's entire mutating/outbound surface.
+10. **The console's mutating surface is closed.** A closed, enumerated set of
+    actions, each a door onto an existing audited service; a new action is a
+    product change, never a prompt or a config line (ruled 2026-09-17).
 
 And the principle over all of them: **enforce at the tool, never by
 prompting.** "Be careful with X" in a prompt is not a control. If policy

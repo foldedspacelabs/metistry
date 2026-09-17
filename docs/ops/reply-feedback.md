@@ -174,7 +174,7 @@ which also pins that seed at that moment. You see exactly this in the diff.
 `assistant-prompt.md` is a §4.7 **protected path**: the vault bridge refuses a
 write to it from any principal but `user`, so the assistant cannot reach its
 own prompt even through a bug elsewhere (its `knowledge_write` is confined to
-`Knowledge/` on top of that).
+the vault root on top of that).
 
 ## Automatic vs. not
 

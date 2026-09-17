@@ -35,7 +35,7 @@ path.
   streams the CLI's own output. **All seven act:**
   1. `metistry runtime install --from <bundle> --to <product dir>` when this
      build is running out of its own read-only bundle (below).
-  2. `metistry init`, or adopt a folder that already holds an `identity.yaml`,
+  2. `metistry init`, or adopt a folder that already holds a `.metistry/identity.yaml`,
      which runs nothing.
   3. `metistry connect-repo --auth device|ssh` — the GitHub device code is
      parsed out of the CLI's stream and shown as a card with a link, while
@@ -107,12 +107,12 @@ path.
 
 **Four things left this table on 2026-09-10**, and it is worth saying what
 replaced them rather than letting them vanish: wizard step 7 (a terminal the app
-opens plus a watch on the secret's *name*); writing `deployment.yaml` (the CLI
+opens plus a watch on the secret's *name*); writing `.metistry/deployment.yaml` (the CLI
 grew `deployment set-shape`, so the invariant is enforced at the tool where it
 belongs and the app still writes no file); "Start at login" (`SMAppService.mainApp`,
 which needed no CLI change at all — the old entry had conflated it with the
 launchd agents); and "an instance id" (`metistry init` mints one into
-`identity.yaml`, and `metistry identity --json` reports it).
+`.metistry/identity.yaml`, and `metistry identity --json` reports it).
 
 **A fifth left it on 2026-09-17**: registering the install's launchd agent
 through `SMAppService.agent(plistName:)`. The app does that now, and Settings
@@ -139,7 +139,7 @@ metistry console whoami --json
 ```
 
 and renders what came back. It does **not** read the login Keychain from Swift,
-does **not** open `<instance>/state/.env`, and sends **no `Authorization`
+does **not** open `<instance>/.metistry/state/.env`, and sends **no `Authorization`
 header** anywhere. The CLI is the one place that knows where
 `METISTRY_LOCAL_OWNER_TOKEN` lives, and it presents it over loopback without the
 value ever reaching this process — `ConsoleWhoami` has no field a token could
@@ -291,7 +291,7 @@ has a toggle for it beside the app's own.
 |---|---|
 | `apps/macos/resources/launchd/com.foldedspacelabs.metistry.plist` | the agent as the app registers it; `build-app.sh` copies it to `Contents/Library/LaunchAgents/`, the one path `SMAppService.agent(plistName:)` resolves |
 | `apps/macos/resources/launchd/metistry-supervisor` | its `BundleProgram`, copied to `Contents/Resources/MetistrySupervisor` (not `MacOS/`, where codesign would demand a nested signature a script cannot carry). A plist inside a signed bundle is immutable and identical on every Mac, and `BundleProgram` is its only bundle-relative key — so this small script is what turns "the app's agent" into "this Mac's install" |
-| `~/Library/Application Support/Metistry/supervisor.env` | the three paths it reads: this install's node (as `Metistry`), the supervisor's entry point, and `<instance>/state/supervisor.json`. Written by `metistry up --register-via app`, shell-quoted (the app's own default location has a space in it) |
+| `~/Library/Application Support/Metistry/supervisor.env` | the three paths it reads: this install's node (as `Metistry`), the supervisor's entry point, and `<instance>/.metistry/state/supervisor.json`. Written by `metistry up --register-via app`, shell-quoted (the app's own default location has a space in it) |
 | `apps/macos/sources/kit/background-agent.swift` | `BackgroundAgentService` (the seam) and `BackgroundAgentModel` (the states, the prose). Named for what macOS calls it — a *background item* — rather than for the API |
 | `apps/macos/sources/app/login-item-service.swift` | both implementations: `SMAppServiceLoginItem` (`.mainApp`) and `SMAppServiceBackgroundAgent` (`.agent(plistName:)`) |
 | `metistry up --register-via app` | does everything a normal `up` does **except** install the supervisor's agent into `~/Library/LaunchAgents` — the app registers its bundled copy instead, so the install never has two |
@@ -339,7 +339,7 @@ meaning the same thing.
 Before this, the item was registered by `launchctl bootstrap`, which makes it
 nobody's: it appeared *beside* the app as a separate background item, named
 after its program, with no way to turn it off but a terminal. Naming the program
-`Metistry` (the symlink `up` writes to `<instance>/state/bin/Metistry`) and
+`Metistry` (the symlink `up` writes to `<instance>/.metistry/state/bin/Metistry`) and
 signing the bundled node under the Folded Space Labs identity (#133,
 `docs/ops/bundled-runtime.md`) fixed the *name* and the *attribution*; neither
 could make it the app's, or give the app a switch. That is what this change is
@@ -529,14 +529,14 @@ fourth one fails CI rather than appearing quietly.
 | Advanced | passkey diagnostic ("Ask macOS") | `ASAuthorization` against the console's relying party with a LOCAL challenge — nothing is sent and nothing can be enrolled. It was wizard step 6 until 2026-09-10; it is a diagnostic, not a setup step |
 | Advanced | log folder | the launchd plists' `StandardOutPath` convention (`/tmp/metistry-<name>.log`), labelled as a convention. The menu's **View Log** uses `metistry logs <name> --lines 200` instead, because a container's or a systemd unit's log is not a file here |
 
-**There are no file reads left.** The scaffold read `identity.yaml` and
+**There are no file reads left.** The scaffold read `.metistry/identity.yaml` and
 `metistry.lock` with a ~60-line YAML scalar reader, read the checkout's
 `package.json` for a version, and parsed `metistry secrets list`'s table — all
 four because the CLI reported none of it. This doc named the first as the thing
 `metistry identity --json` would delete. It did, along with the rest:
 `identity --json`, `version --json` and `secrets list --json` replaced every one,
 and `sources/kit/instance-files.swift` is now a single file-existence test (is
-there an `identity.yaml` here?), which is not a parse.
+there a `.metistry/identity.yaml` here?), which is not a parse.
 
 The table parser was worth deleting on its own: `secrets list` grew a `scope`
 column when instance directories became self-contained, and the app's
@@ -702,11 +702,12 @@ libpq's versioned-name symlink farm, and the pack's `node_modules` is
 pnpm's relative-symlink tree, which dereferencing severs.
 
 Instances go elsewhere and are self-contained:
-`~/Library/Application Support/Metistry/<name>/` holds the vault,
-`identity.yaml`, `state/.env`, `state/pg`, `state/assistant` and — when the
-install is namespaced — `state/ports.yaml`.
+`~/Library/Application Support/Metistry/<name>/` holds the vault at its
+root and, under `.metistry/`, `identity.yaml`, `state/.env`, `state/pg`,
+`state/assistant` and — when the install is namespaced —
+`state/ports.yaml`.
 
-> **`state/.env` values must be shell-quoted** when they contain a space.
+> **`.metistry/state/.env` values must be shell-quoted** when they contain a space.
 > The reconciler, watchdog and TCC bridge jobs load that file with
 > `set -a; . <file>`, which *runs* it. `metistry up` refuses rather than
 > installing jobs that respawn forever, but the app should write

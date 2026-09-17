@@ -16,10 +16,10 @@ All of them are real.
 | `connect --list [--json]` | which tools are connected: the row, the bearer, the config |
 | `console whoami [--json]` | ask the console who it thinks you are, with this install's owner token |
 | `console call <METHOD> <path> [--body @file\|-] [--json]` | one authenticated request against the console, as `whoami`'s same principal — the scripting seam |
-| `identity [--json]` | the instance's identity.yaml (name, mention, voice, icon, instance_id) |
+| `identity [--json]` | the instance's `.metistry/identity.yaml` (name, mention, voice, icon, instance_id) |
 | `--version` / `version [--json]` | this CLI's version, the resolved product dir's, the lock's pin, and a release's runtime pack |
 | `deployment [--json]` | the effective shape (D4 overlay) and the services it implies, with cheap running state |
-| `deployment set-shape <compose\|launchd>` | write the instance's deployment.yaml through the reconciler, preview-then-confirm |
+| `deployment set-shape <compose\|launchd>` | write the instance's `.metistry/deployment.yaml` through the reconciler, preview-then-confirm |
 | `migrate-shape <launchd\|compose>` | move a LIVE install between the shapes, with its data: dump, stop, flip, up, restore, verify, doctor |
 | `doctor` | validate every manifest and probe every bridge, service, container, launchd job |
 | `up` | bring an install to running: containers/host jobs, then doctor |
@@ -56,7 +56,7 @@ node packages/cli/dist/main.js secrets list --json
 # one external dev tool at a time — docs/ops/cursor.md, docs/ops/opencode.md, docs/ops/devin.md
 node packages/cli/dist/main.js connect cursor
 node packages/cli/dist/main.js connect devin --rotate
-node packages/cli/dist/main.js connect claude-code --areas Knowledge/Areas/Engineering
+node packages/cli/dist/main.js connect claude-code --areas Areas/Engineering
 node packages/cli/dist/main.js connect --list
 
 # what the app's Settings/Advanced panes and its first-run wizard read instead of parsing files themselves
@@ -83,16 +83,16 @@ inline, exactly as before.
 ## `identity`, `version`, `deployment`, `console whoami`: what the app reads instead of the files
 
 Five small, read-mostly verbs exist so the Mac app stops parsing
-`identity.yaml`, `package.json` and the `secrets list` table itself
+`.metistry/identity.yaml`, `package.json` and the `secrets list` table itself
 (`apps/macos/sources/kit/instance-files.swift`,
 `apps/macos/sources/kit/secret-listing.swift`) — the same "a behaviour the
 app needs is a CLI change first" rule as `doctor --json` and the
 `restart|stop|start|logs` verbs above.
 
-`metistry identity [--json] [--instance <dir>]` prints identity.yaml as the
+`metistry identity [--json] [--instance <dir>]` prints `.metistry/identity.yaml` as the
 CLI already understands it — `name`, `mention`, `voice`, `icon`,
 `instance_id` — resolving `--instance`/`METISTRY_INSTANCE_DIR` like every
-other instance verb. Read-only: identity.yaml is a §4.7 protected path, so
+other instance verb. Read-only: `.metistry/identity.yaml` is a §4.7 protected path, so
 there is no field here to change it.
 
 `metistry --version` / `metistry version [--json]` prints every version
@@ -100,10 +100,10 @@ number an install can be asked about, each only as far as it resolves:
 this binary's own package version (always); when a product dir resolves,
 that directory's OWN `package.json` version (the checkout root, or a
 release's unpacked `current/` — which can differ from the running CLI's own
-version); the instance's `metistry.lock` pin and channel; and, for a release
+version); the instance's `.metistry/metistry.lock` pin and channel; and, for a release
 install, `metistry-runtime.json`'s version, commit and build time.
 
-`metistry deployment [--json]` prints the effective shape (`deployment.yaml`'s
+`metistry deployment [--json]` prints the effective shape (`.metistry/deployment.yaml`'s
 D4 overlay, same as `doctor`'s `deployment` row) and the services it
 implies, each tagged with whether it is running — `launchctl print` /
 `docker compose ps`, the same cheap, no-network probes `doctor` itself uses
@@ -111,10 +111,10 @@ for those rows, reused rather than reimplemented. It never runs the full
 `doctor` (which also probes every bridge over HTTP).
 
 `metistry deployment set-shape <compose|launchd> [--yes] [--force]` writes
-the instance's `deployment.yaml`. It is a §4.7 protected path (invariant 2:
+the instance's `.metistry/deployment.yaml`. It is a §4.7 protected path (invariant 2:
 how the system behaves is a human change), so the write goes through the
-reconciler as the `user` principal — exactly like `metistry.lock` and
-`identity.yaml` (`protected-write.ts`) — with no reconciler configured
+reconciler as the `user` principal — exactly like `.metistry/metistry.lock` and
+`.metistry/identity.yaml` (`protected-write.ts`) — with no reconciler configured
 falling back to a direct write the same way those do. Preview-then-confirm:
 without `--yes` nothing is written or POSTed, only planned; with it, applied.
 It refuses when `db`/`console`/`assistant` (the services whose shape
@@ -135,12 +135,12 @@ that has to run inside it. So `migrate-shape` owns the ordering and calls
 protected-write path.
 
 Going to `launchd` it quiesces the writers, `pg_dump`s the live database
-through the running `db` container to `<instance>/state/migrate/<ts>.dump`
+through the running `db` container to `<instance>/.metistry/state/migrate/<ts>.dump`
 and verifies it with `pg_restore --list` **before stopping anything**,
 `docker compose stop`s (never `down -v` — the volume is the rollback),
 writes the shape through the reconciler, runs `up` (initdb under
-`<instance>/state/pg`, every host plist re-rendered against `current/`,
-the bundled node and `<instance>/state/.env`), `pg_restore`s **before any
+`<instance>/.metistry/state/pg`, every host plist re-rendered against `current/`,
+the bundled node and `<instance>/.metistry/state/.env`), `pg_restore`s **before any
 migration runs** — the dump carries `schema_migrations`, so the next
 `metistry update` applies none — compares every table's exact row count
 and fails by name if one lost rows, pins the two TCC bridge jobs at the
@@ -180,7 +180,7 @@ origin     https://your-hostname.example
 
 The URL comes from `METISTRY_CONSOLE_URL`, then `METISTRY_URL`, then
 `http://127.0.0.1:8080`. The token comes from the environment
-(`<instance>/state/.env`) or the login Keychain — this instance's account
+(`<instance>/.metistry/state/.env`) or the login Keychain — this instance's account
 first, the per-user one behind it — and never reaches argv, stdout or an
 error message. A 401 is one of exactly two things and the error names both:
 a token the console was not started with, or a request that did not arrive
@@ -220,18 +220,19 @@ Package-level detail (flags, resolution order, probe table) lives in
 2026-09-09, `docs/product/desktop-app-plan.md`). Nothing about it persists
 outside its directory except per-user secrets in the login Keychain. So:
 
-- **`.env` lives at `<instance>/state/.env`**, not in the product
+- **`.env` lives at `<instance>/.metistry/state/.env`**, not in the product
   checkout. It is gitignored by the seed and written `0600`.
-- **`identity.yaml` carries an `instance_id`** (a v4 UUID from `metistry
+- **`.metistry/identity.yaml` carries an `instance_id`** (a v4 UUID from `metistry
   init`). Instance-scoped Keychain items are filed under it as the account.
-- `state/` also holds the launchd shape's Postgres data (`state/pg`) and
-  the assistant's transcripts (`state/assistant`).
+- `.metistry/state/` also holds the launchd shape's Postgres data
+  (`.metistry/state/pg`) and the assistant's transcripts
+  (`.metistry/state/assistant`).
 
 Every verb takes **`--instance <dir>`** (the Mac app passes it), and
 `--env-file <path>` overrides the dotenv file outright. Resolution order
 for the environment:
 
-1. `<instance>/state/.env` — the instance named by `--instance`, else
+1. `<instance>/.metistry/state/.env` — the instance named by `--instance`, else
    `METISTRY_INSTANCE_DIR`.
 2. the product checkout's `.env` — **deprecated**, still read, and the
    place a terminal install may keep declaring `METISTRY_INSTANCE_DIR`
@@ -249,7 +250,7 @@ metistry secrets sync --to env      # or: … --instance <dir>
 ```
 
 It carries every line of the checkout's `.env` into
-`<instance>/state/.env` and **leaves the old file in place** — a running
+`<instance>/.metistry/state/.env` and **leaves the old file in place** — a running
 install keeps working. Delete the old one yourself once nothing reports a
 variable missing. Then `metistry up` renders the launchd plists to source
 the new path and points `docker compose` at it with `--env-file`.
@@ -262,31 +263,33 @@ instances need label/port namespacing — a recorded follow-up.
 ## Creating an instance repo
 
 `metistry init <dir>` replaces the by-hand bootstrap of 2026-09-06 and
-produces the same tree — its own git repo on `main`, one commit `Instance
-created` authored `Metistry <metistry@localhost>`:
+produces the flat instance layout (ruled 2026-09-17;
+`docs/ops/instance-layout.md`) — its own git repo on `main`, one commit
+`Instance created` authored `Metistry <metistry@localhost>`:
 
 ```
 <dir>/
-  Knowledge/now.md          from seed/Knowledge — the vault; brain-commit writes here
-  identity.yaml             the ONLY place the assistant is named (--name)
-  rules.yaml                router rules, seeded default
-  identity.yaml             …and its instance_id: a v4 UUID minted once, the
-                            Keychain account this instance's secrets file under
-  Knowledge/Inbox/README.md where captures land — in the vault, so Obsidian
+  now.md                    from seed/ — the vault; brain-commit writes here
+  Inbox/README.md           where captures land — in the vault, so Obsidian
                             sees them and git carries them (docs/ops/inbox.md)
-  state/                    gitignored — .env, Postgres data, assistant state
-  queries/ agents/ routines/ extensions/ instance-migrations/
+  .metistry/
+    identity.yaml           the ONLY place the assistant is named (--name)
+                            …and its instance_id: a v4 UUID minted once, the
+                            Keychain account this instance's secrets file under
+    rules.yaml              router rules, seeded default
+    queries/ agents/ routines/ extensions/ instance-migrations/
                             tracked, empty (.gitkeep) — the D4 overlay reads
                             seed defaults until a same-named file lands here
-  metistry.lock             product { version, commit, source } + updated_at +
+    metistry.lock           product { version, commit, source } + updated_at +
                             migrations_applied; `metistry update` moves it
-  README.md  .gitignore     (state/, .obsidian/workspace*,
-                            Knowledge/Inbox/.large/ — captures too big for git)
+    state/                  gitignored — .env, Postgres data, assistant state
+  README.md  .gitignore     (.metistry/state/, .obsidian/workspace*,
+                            Inbox/.large/ — captures too big for git)
 ```
 
 It refuses a non-empty directory unless `--force`, never prompts, and
 **never writes a secret**. What it prints at the end is the next step —
-five lines for `<dir>/state/.env`, this instance's own environment,
+five lines for `<dir>/.metistry/state/.env`, this instance's own environment,
 shaped for `--shape compose|launchd` (default: launchd on macOS, compose
 elsewhere — `docs/ops/deployment-shapes.md`):
 
@@ -305,7 +308,7 @@ the machine (a tailnet hostname, an HTTPS reverse proxy) that origin
 replaces it, and any passkeys already enrolled must be re-enrolled, since
 they bind to the origin they were enrolled against. `METISTRY_RECONCILER_URL`
 and `METISTRY_ORIGIN`'s port both follow this instance's own ports once
-it is namespaced (`state/ports.yaml`, "A second instance on one Mac" in
+it is namespaced (`.metistry/state/ports.yaml`, "A second instance on one Mac" in
 `docs/ops/deployment-shapes.md`) — `--shape compose` never reads that
 file, since `docker compose` doesn't either.
 
@@ -422,7 +425,7 @@ metistry connect opencode                   # ~/.config/opencode/opencode.json +
 metistry connect devin                      # prints the fields to paste (no API to write them)
 metistry connect claude-code                # mints the plugin's token, prints its env lines
 metistry connect cursor --rotate            # a replacement bearer; the old one dies at once
-metistry connect cursor --areas Knowledge/Areas/Engineering --project second-instance
+metistry connect cursor --areas Areas/Engineering --project second-instance
 metistry connect devin --remote             # enrols PENDING: its token works once you let it in
 metistry connect --list [--json]
 ```
@@ -448,13 +451,13 @@ refuse on a host with no Keychain **before** minting anything. `connect devin` w
 
 Grants are the console's and start default-deny (`{tier: "none", areas: []}`
 — `db/migrations/0007_agents.sql`): `--areas` widens the read tier to those
-TitleCase `Knowledge/` prefixes, `--project` adds membership. No flag grants
+TitleCase vault-root prefixes, `--project` adds membership. No flag grants
 `knowledge_write`: an `external` principal cannot reach it at the bridge at
 all, so "read-only by default" is true by construction rather than by
 configuration. A re-run with no flags leaves grants exactly as they were.
 
 A namespaced instance (`metistry up --namespace`) follows its own
-`state/ports.yaml`: the console port in the URL, and the label suffix in both
+`.metistry/state/ports.yaml`: the console port in the URL, and the label suffix in both
 the config key (`mcpServers.metistry-<suffix>`) and the variable name
 (`METISTRY_AGENT_TOKEN_CURSOR_<SUFFIX>`), so two instances on one Mac cannot
 overwrite each other's entry.
@@ -506,7 +509,7 @@ keyed by `instance_id`, never by origin, because an origin can move;
 not a departed instance) and refuses to repoint a row whose origin now
 answers as somebody else.
 
-A §4.7 protected path like `compute.yaml`: every write goes through the
+A §4.7 protected path like `.metistry/compute.yaml`: every write goes through the
 reconciler as the `user` principal, and an edit whose RESULT would not
 validate is refused rather than written. The console serves the same file to
 the Mac app and the phone at `GET /api/instances`.
@@ -564,7 +567,7 @@ failed, and the message names the cursor to resume from.
 
 ## Choosing compute: `metistry compute`
 
-`metistry compute` is this instance's `compute.yaml` — which providers
+`metistry compute` is this instance's `.metistry/compute.yaml` — which providers
 exist, which model each tier and crew runs on, and what each may spend:
 
 ```sh
@@ -575,7 +578,7 @@ metistry compute budget instance --monthly 60 --action stop
 metistry compute show [--json]
 ```
 
-A §4.7 protected path like `deployment.yaml`: every write goes through the
+A §4.7 protected path like `.metistry/deployment.yaml`: every write goes through the
 reconciler as the `user` principal, and an edit whose RESULT would not
 validate is refused rather than written. `providers add` reads the API key
 from stdin into the login Keychain (user scope) and never takes it as an
@@ -600,7 +603,7 @@ metistry compute models load|unload lmstudio/qwen/qwen3-coder-30b [--ttl 3600]
 
 Each is the server's own mechanism: `lms get` for LM Studio, `POST
 /api/pull` for Ollama, and for `llama-server` one HTTPS GET of a Hugging
-Face GGUF into `<instance>/state/models/`, checked against the sha256
+Face GGUF into `<instance>/.metistry/state/models/`, checked against the sha256
 Hugging Face publishes and then written into `serve.model_path`. `load` and
 `unload` act for LM Studio only — the other two have no addressable load and
 say what actually governs their residency instead of reporting a success
@@ -668,7 +671,7 @@ cannot disagree:
 | scope | account | which variables |
 | --- | --- | --- |
 | **instance** | the instance's `instance_id` | `METISTRY_DB_PASSWORD`, `METISTRY_LOCAL_OWNER_TOKEN`, every `METISTRY_BRIDGE_TOKEN_*`, `METISTRY_ASSISTANT_TOKEN`, `METISTRY_VAPID_*`, `METISTRY_GITHUB_*` — **and anything not listed**, because self-containment is the rule |
-| **user** | `metistry` (override: `METISTRY_KEYCHAIN_ACCOUNT`) | every `METISTRY_*_API_KEY` (a compute provider credential named by `compute.yaml`'s `auth.secret` — your account with that provider, shared by every instance on this Mac), `METISTRY_DEVIN_API_KEY`, `METISTRY_AWS_SECRET_ACCESS_KEY`, `METISTRY_AWS_SESSION_TOKEN` (your AWS account, not this instance's) |
+| **user** | `metistry` (override: `METISTRY_KEYCHAIN_ACCOUNT`) | every `METISTRY_*_API_KEY` (a compute provider credential named by `.metistry/compute.yaml`'s `auth.secret` — your account with that provider, shared by every instance on this Mac), `METISTRY_DEVIN_API_KEY`, `METISTRY_AWS_SECRET_ACCESS_KEY`, `METISTRY_AWS_SESSION_TOKEN` (your AWS account, not this instance's) |
 
 `METISTRY_SIGN_IDENTITY` and `METISTRY_GITHUB_OAUTH_CLIENT_ID` are not
 secrets; they stay plain `.env`/config values.
@@ -698,7 +701,7 @@ effect:
 
 ```
 $ metistry secrets sync --to env
-minted METISTRY_LOCAL_OWNER_TOKEN — it was in neither the Keychain nor …/state/.env:
+minted METISTRY_LOCAL_OWNER_TOKEN — it was in neither the Keychain nor …/.metistry/state/.env:
   the console's local owner door — an install that predates it gets one here
 restart the console for a freshly minted secret to take effect (`metistry restart console`).
 ```
@@ -837,6 +840,14 @@ how optional bridges are designed to behave (a Linux box has no apple-fm).
 Something you rely on that shows `absent` is still a finding — read the
 column, not just the exit code.
 
+**`instance layout`** is its own row, reported as `flat` or `legacy`:
+`flat` when the vault root holds the vault and `.metistry/` holds
+everything else (the 2026-09-17 layout, `docs/ops/instance-layout.md`),
+`legacy` when `Knowledge/` and the protected files still sit side by side
+at the instance root — the signal to run `metistry migrate-layout` above.
+It is a status check, not a probe: no network, no bridge, just which
+directories exist.
+
 **What is probed, generically.** Doctor knows no component by name. It
 walks every `manifest.yaml` under `collectors/ routines/ packages/ apps/
 targets/`, validates it with `core`'s schema, and for anything that
@@ -845,7 +856,7 @@ declares an http surface calls `GET /check` with the bearer from the same
 and the watchdog use (`host.docker.internal` rewritten to loopback because
 doctor runs on the host). The bridge's own `check()` — a *behavioral* probe
 (apple-fm classifies a sentence; eventkit reads a calendar; the reconciler
-reads `HEAD` and lists `Knowledge/`) — is what decides `ok` vs `degraded`,
+reads `HEAD` and lists `.metistry/`) — is what decides `ok` vs `degraded`,
 and its remediation string is what you see. The console's `/health` and
 `/api/status` are hit directly, and with `METISTRY_LOCAL_OWNER_TOKEN` in the
 environment `/api/status` is a real **authenticated** read through the same
@@ -874,7 +885,7 @@ A new http bridge named `foo` on port 7820 is probed the moment
 `METISTRY_FOO_URL` (and `METISTRY_BRIDGE_TOKEN_FOO`) exist in `.env`.
 
 `.env` is read for variables that are unset — the `ops/scripts` convention
-— from `<instance>/state/.env` and then the checkout's deprecated one
+— from `<instance>/.metistry/state/.env` and then the checkout's deprecated one
 ("Instance directories are self-contained" above), so
 `METISTRY_EK_URL=… metistry doctor` overrides a line in the file for one
 run (handy for checking a token before writing it down).
@@ -894,7 +905,7 @@ implementation of "how do I restart the reconciler": a behaviour the menu
 bar needs is a CLI change first (the same rule `docs/ops/mac-app.md`
 states for `doctor --json`).
 
-No args = every service the current shape runs — read from `deployment.yaml`
+No args = every service the current shape runs — read from `.metistry/deployment.yaml`
 exactly the way `up` reads it (`runDirFor`, the instance's D4 overlay), and
 split into host jobs vs. containers using the same functions `up` and
 `doctor` already call (`loadPlistTemplates`, `composeServiceNames`) rather
@@ -909,7 +920,7 @@ than a second table that could drift from theirs:
   state.
 - **the supervisor's children** (`db`, `console`, `reconciler`,
   `assistant`, a configured bridge) — one line on the supervisor's control
-  socket, `<instance>/state/run/supervisor.sock`. launchd has never heard of
+  socket, `<instance>/.metistry/state/run/supervisor.sock`. launchd has never heard of
   these processes, so launchctl cannot address them; the answer carries the
   state the request produced (`console restart → running (pid 80650)`).
   With **no service named**, only the agents are acted on and the children
@@ -971,13 +982,13 @@ half-installed.
 
 `metistry up [--no-compose] [--no-launchd] [--namespace] [--dry-run] [--instance <dir>]`
 takes a product checkout plus an instance with a filled-in
-`state/.env` to *running*. It prints which dotenv file that is, renders it
+`.metistry/state/.env` to *running*. It prints which dotenv file that is, renders it
 into the plists as `__ENV_FILE__`, and hands it to `docker compose` as
 `--env-file` (compose interpolates from its own `./.env` otherwise, which
 is no longer the install's environment).
 
 **What it starts is the same in every deployment shape; where depends on
-`deployment.yaml`** (`docs/ops/deployment-shapes.md`). The default is
+`.metistry/deployment.yaml`** (`docs/ops/deployment-shapes.md`). The default is
 `compose` and the steps below describe it. Under `shape: launchd` there
 is no docker at all: `up` prepares a user-space Postgres (step 0), then
 installs **one launchd agent** — `com.foldedspacelabs.metistry`, the
@@ -995,13 +1006,13 @@ installing the supervisor, so nothing runs twice.
 
 **`--namespace`** allocates this instance its own launchd label suffix
 (from `instance_id`) and an 8-port block, recorded **once** in
-`<instance>/state/ports.yaml`, so a second instance can run beside the
+`<instance>/.metistry/state/ports.yaml`, so a second instance can run beside the
 first. Everything afterwards — `up`, `doctor`, `restart|stop|start`,
 `logs`, `update` — reads that file; delete it (after `metistry stop`) to
 return the instance to the fixed labels and ports.
 `docs/ops/deployment-shapes.md` has the layout and the rules.
 
-> **Quote `state/.env` values that contain a space.** The reconciler,
+> **Quote `.metistry/state/.env` values that contain a space.** The reconciler,
 > watchdog and TCC bridge jobs load that file with `set -a; . <file>`,
 > which *runs* it, so `KEY=/Users/…/Application Support/…` is a command,
 > not an assignment. `up` refuses with the offending variables and line
@@ -1009,11 +1020,11 @@ return the instance to the fixed labels and ports.
 
 0. **Postgres (launchd shape only).** Find the binaries
    (`METISTRY_PG_BIN`, a bundled `runtime/postgres/bin`, Homebrew
-   `postgresql@17`), `initdb` into `<instance>/state/pg` once, write the
+   `postgresql@17`), `initdb` into `<instance>/.metistry/state/pg` once, write the
    managed block in `postgresql.conf`. A missing toolchain prints a
    `brew install` line and stops — `up` installs nothing itself.
 1. **Containers.** `docker compose up -d --build` in the checkout — or,
-   when the instance's `metistry.lock` says `source: release`,
+   when the instance's `.metistry/metistry.lock` says `source: release`,
    `docker compose pull` then `up -d --no-build` (a release install never
    builds; plan §4.16).
 2. **Host jobs (macOS).** Every `ops/launchd/*.plist` is a template with
@@ -1026,7 +1037,7 @@ return the instance to the fixed labels and ports.
    comment, so a job installed by hand is simply re-rendered in place.
    Under the launchd shape the same templates are rendered the same way,
    but only the supervisor's and the TCC helpers' become agents: the rest
-   become **children** in `<instance>/state/supervisor.json` (0600), each
+   become **children** in `<instance>/.metistry/state/supervisor.json` (0600), each
    with the argv, working directory, environment and log path its plist
    named. `console` and `assistant` carry their whole environment in a dict
    rendered from `.env` (no shell, nothing interpolated), and the
@@ -1053,11 +1064,11 @@ included; it is the same code path with execution turned off, so what it
 prints is what a real run does.
 
 ```
-   env: /Users/you/instance/state/.env
+   env: /Users/you/instance/.metistry/state/.env
 [dry-run] == compose
-[dry-run] (cd /srv/metistry && docker compose --env-file /Users/you/instance/state/.env up -d --build)
+[dry-run] (cd /srv/metistry && docker compose --env-file /Users/you/instance/.metistry/state/.env up -d --build)
 [dry-run] == launchd
-[dry-run] write ~/Library/LaunchAgents/com.foldedspacelabs.metistry.watchdog.plist  (from ops/launchd/…, __REPO__=/srv/metistry, __NODE__=/opt/homebrew/bin/node, __ENV_FILE__=/Users/you/instance/state/.env)
+[dry-run] write ~/Library/LaunchAgents/com.foldedspacelabs.metistry.watchdog.plist  (from ops/launchd/…, __REPO__=/srv/metistry, __NODE__=/opt/homebrew/bin/node, __ENV_FILE__=/Users/you/instance/.metistry/state/.env)
 [dry-run] launchctl bootout gui/501/com.foldedspacelabs.metistry.watchdog   # ok if not loaded
 [dry-run] launchctl bootstrap gui/501 ~/Library/LaunchAgents/com.foldedspacelabs.metistry.watchdog.plist
 [dry-run] launchctl kickstart -k gui/501/com.foldedspacelabs.metistry.watchdog
@@ -1070,7 +1081,7 @@ prints is what a real run does.
 
 There is no launchd, and this has not been run on a Linux host yet, so
 `up` **prints** the equivalent systemd user units — one per plist,
-`EnvironmentFile=<instance>/state/.env`, `ExecStart=<node> <checkout>/…/dist/main.js`,
+`EnvironmentFile=<instance>/.metistry/state/.env`, `ExecStart=<node> <checkout>/…/dist/main.js`,
 `Restart=always` — and writes nothing. Save each to
 `~/.config/systemd/user/`, then `systemctl --user daemon-reload &&
 systemctl --user enable --now <unit>`. Turning that into an installed
@@ -1084,13 +1095,13 @@ units to restart rather than restarting them.
 `metistry update [--skip-build] [--skip-migrate] [--dry-run]` moves an
 install forward, in this order:
 
-| step | git mode (the product is a checkout) | release mode (`metistry.lock`: `source: release`, or `--channel release`) |
+| step | git mode (the product is a checkout) | release mode (`.metistry/metistry.lock`: `source: release`, or `--channel release`) |
 | --- | --- | --- |
 | product | `git fetch` + `git pull --ff-only` — a diverged checkout stops the update (exit code git's) | resolve the release, download its runtime pack + `checksums.txt`, **verify the sha256**, unpack to `releases/<version>/`, point `current` at it (`docs/ops/releases.md`) |
 | build | `pnpm install --frozen-lockfile` + `pnpm -r build` (`--skip-build` to reuse `dist/`) | no build — the pack is compiled output |
 | migrations | `db/migrations/*.sql` not yet in `schema_migrations`, in filename order, one transaction each, under `pg_advisory_lock` (below); `--skip-migrate` leaves them to doctor to report | same, read from `current` |
 | restart | `docker compose up -d --build`; `launchctl kickstart -k` for each host job whose code changed | `docker compose pull` + `up -d --no-build` in `current`, with the versioned ghcr images; same kickstart rule |
-| lock | write `metistry.lock` into the instance repo | same, pinned to the release actually installed |
+| lock | write `.metistry/metistry.lock` into the instance repo | same, pinned to the release actually installed |
 | doctor | the verdict, as for `up` | same, against `current` |
 
 Release-mode flags: `--version 0.2.0` installs a specific release instead
@@ -1152,12 +1163,12 @@ whole sequence in **one** psql session (advisory locks are
 session-scoped) — `\gset`/`\if` per file, `ON_ERROR_STOP` ending the
 session on error.
 
-**Writing the lock.** `metistry.lock` lives in the *instance* repo, and
+**Writing the lock.** `.metistry/metistry.lock` lives in the *instance* repo, and
 the reconciler is that repo's sole committer (`docs/ops/reconciler.md`,
 D5) — so `update` writes it as a bridge call, never as a file:
 `POST $METISTRY_RECONCILER_URL/vault/write` with
 `intent: { principal: "user", message: "metistry update → <version>" }`.
-`metistry.lock` is a §4.7 protected path; `user` is the one principal
+`.metistry/metistry.lock` is a §4.7 protected path; `user` is the one principal
 allowed to write it, and the commit lands on the reconciler's next flush.
 A bridge that is configured but not answering, or that refuses, fails
 the update (exit 1) with the reason — the lock is then simply not moved;
@@ -1174,13 +1185,13 @@ dir at all → nothing is written, and `update` says so.
 line and the kickstarts annotated with the path each one depends on —
 and opens no db session, calls no bridge, runs no doctor.
 
-## `metistry.lock`
+## `.metistry/metistry.lock`
 
 One shape, written by `init` and moved by `update`; YAML, in the instance
-repo's root:
+repo's `.metistry/`:
 
 ```yaml
-# metistry.lock — the product release this instance runs (plan §4.16).
+# .metistry/metistry.lock — the product release this instance runs (plan §4.16).
 # `metistry update` moves the pin; edit by hand only to roll back.
 product:
   version: "0.0.1"          # the cli package's version — the release this instance runs
@@ -1228,6 +1239,26 @@ Knowledge/Inbox` would otherwise move the directory inside itself.
 `--instance <dir>` picks the instance; without it, `METISTRY_INSTANCE_DIR`.
 Obsidian needs no change: the vault root is still `Knowledge/`.
 
+## Moving to the flat layout: `metistry migrate-layout`
+
+The 2026-09-17 ruling moves the vault root itself: the instance directory
+becomes the Obsidian vault (so `Knowledge/` disappears and its contents —
+`Inbox/`, `now.md`, `Areas/`, …— sit at the instance root) and everything
+that is not knowledge (`identity.yaml`, `rules.yaml`, `compute.yaml`,
+`deployment.yaml`, `metistry.lock`, `agents/`, `routines/`, `queries/`,
+`extensions/`, `instance-migrations/`, `state/`) moves under `.metistry/`
+(`docs/ops/instance-layout.md` has the full tree and the reasoning).
+`metistry migrate-layout` is the verb that carries an existing instance
+across: idempotent `git mv`, safe to run more than once, and available
+with `--dry-run` to preview the whole plan before anything moves. Run
+`metistry migrate-inbox` first if the instance predates the 2026-09-16
+inbox-in-vault ruling too — `migrate-layout` expects to find `Knowledge/`
+already holding the vault, not a bare `inbox/`.
+
+`metistry doctor` reports which layout an instance is on (`instance
+layout: flat | legacy`), so a `legacy` reading is the signal to run this
+verb.
+
 ## Maintenance
 
 The cadence is plan §5 "Maintenance cadence"; the CLI is how the
@@ -1236,7 +1267,7 @@ operator-facing parts of it happen:
 - **On every product change:** `metistry update` (or `update --dry-run`
   first). Pull, build, migrate, restart what changed, pin, doctor — one
   command, idempotent, safe to rerun.
-- **After changing `deployment.yaml`:** `metistry up`, having stopped
+- **After changing `.metistry/deployment.yaml`:** `metistry up`, having stopped
   what the old shape was running and taken a dump — the data does not
   move between shapes (`docs/ops/deployment-shapes.md`).
 - **After a reboot, a Docker restart, or a `brew upgrade node`:**
@@ -1252,7 +1283,7 @@ operator-facing parts of it happen:
   fast, while the weekly review's System section flags anything quiet for
   a flat 7 days, matching its own weekly cadence.
 - **Quarterly:** the restore test (`ops/scripts/restore-test.sh`) —
-  `metistry.lock`'s `migrations_applied` says which schema the dump was
+  `.metistry/metistry.lock`'s `migrations_applied` says which schema the dump was
   taken under.
 - **On drift:** if `up --dry-run` shows a plist that differs from what
   is installed, or `doctor` shows `absent` for a job you rely on, the
@@ -1276,7 +1307,7 @@ for a command-line tool and inventing one is worse than the gap.
 Status panel, and is expected to move onto `secrets list --json`,
 `identity --json`, `version --json`, `deployment --json` and
 `deployment set-shape` for the Settings pane and wizard code that today
-parses `identity.yaml`/`package.json`/the `secrets list` table itself
+parses `.metistry/identity.yaml`/`package.json`/the `secrets list` table itself
 (`apps/macos/sources/kit/instance-files.swift`,
 `apps/macos/sources/kit/secret-listing.swift`) — the same commands, with
 `--product-dir` always passed

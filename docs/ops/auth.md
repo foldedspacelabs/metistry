@@ -21,7 +21,7 @@ predicate the owner surface is gated on, so the two cannot drift apart.
 `METISTRY_LOCAL_OWNER_TOKEN` is an instance-scoped secret. `metistry init` mints
 it; `metistry secrets sync --to env` mints one for an install that predates
 it; the login Keychain is its home (`metistry:METISTRY_LOCAL_OWNER_TOKEN`, under
-the instance's `instance_id`), and `<instance>/state/.env` — 0600, generated
+the instance's `instance_id`), and `<instance>/.metistry/state/.env` — 0600, generated
 from the Keychain — is how it reaches the console's environment.
 
 **Why it exists.** The Mac app is the same package as the CLI, on the same

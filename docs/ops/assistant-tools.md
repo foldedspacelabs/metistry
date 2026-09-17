@@ -19,7 +19,7 @@ manifest by test):
 | shared work | `tasks_list` (`filter: ready \| mine \| all`), `tasks_claim`, `tasks_renew`, `tasks_update`, `tasks_release`, `tasks_close`, `tasks_create` | Works the same shared list as every other agent — claims, leases, notes, and `tasks_close` to finish one in a single call. |
 | rooms | `tasks_comment`, `tasks_thread` | The conversation on a task ([threads.md](threads.md)) — say what you found, read what the last crew left. Nobody is addressed by it, so nothing is woken; use `agents_delegate` when someone has to act. Resolving a room is your hand in the console, not a tool. |
 | out | `knowledge_search`, `knowledge_read`, `knowledge_list`, `knowledge_grep` | Reads the knowledge index, page contents, a directory listing, and a content regex (all via the reconciler's vault bridge), within its grant — `knowledge_list`/`knowledge_grep` are filesystem semantics over the same tiers `knowledge_search`/`knowledge_read` already enforce (docs/research/2026-09-stash-review.md item 3). `knowledge_read` returns the page's `sha256`. |
-| write | `knowledge_write` | **This is `brain-commit`** (plan §4.7, D5): one page under `Knowledge/` → the reconciler's `POST /vault/write` with a commit intent in the assistant's name. Internal principals only; every external agent is told "not granted". No delete, no rename — those stay your hand. |
+| write | `knowledge_write` | **This is `brain-commit`** (plan §4.7, D5): one page under the vault root (anywhere outside `.metistry/`) → the reconciler's `POST /vault/write` with a commit intent in the assistant's name. Internal principals only; every external agent is told "not granted". No delete, no rename — those stay your hand. |
 | artifacts | `artifacts_publish`, `artifacts_get`, `artifacts_list`, `artifacts_comment`, `artifacts_resolve`, `artifacts_review` | Publishes versioned output into `Artifacts/<project>/<slug>/` (one commit per version via the reconciler), comments on exact versions, and sends review bundles to other agents in the same project — a review sent across the project boundary becomes a request for you (§4.21). |
 | helper agents | `agents_delegate` | Hands a brief to a helper agent you defined in `agents/<area>/<name>.md` (`docs/ops/crews.md`). Internal principals only; the brief is policy-checked against the helper's scope before a durable work row is written; results come back as the helper's own `requests_create` requests. The `crew` field lists the registered helpers with each manifest's `description:`, so writing one is how you steer the choice. |
 | queries | `queries_list`, `queries_run` | Runs a named query from `seed/queries/` or the instance's `queries/` (invariant 3 — the one read path) for anything you'd otherwise have to guess at or ask the user to look up. Internal principals always have this; an external agent needs an explicit `queries: true` grant. Rows cap at 200. |
@@ -64,10 +64,10 @@ docker compose up -d --build   # both services read .env
 | `METISTRY_ASSISTANT_TOKEN` | console + assistant | The bearer. The console stores only its SHA-256 (row `agents.id = 'assistant'`, `kind = 'internal'`); the assistant presents it on every `/mcp` request. **Unset → the console revokes the row at startup and the assistant runs tool-less.** |
 | `METISTRY_BRAIN_URL` | assistant | Where `/mcp` is; compose defaults to `http://console:8080/mcp` over the compose network. |
 | `METISTRY_ASSISTANT_PROJECTS` | console | Comma-separated project slugs. **Empty = every project** (mcp-brain's internal rule, `packages/mcp-brain/src/scope.ts`); a list narrows it like any external agent. |
-| `METISTRY_ASSISTANT_AREAS` | console | Comma-separated `Knowledge/` prefixes for the grant. Default `Knowledge/` — the whole vault, root notes included (below). |
+| `METISTRY_ASSISTANT_AREAS` | console | Comma-separated vault-root prefixes for the grant (anything outside `.metistry/`). Default is the bare vault — the whole thing, root notes included (below). |
 | `METISTRY_RECONCILER_URL`, `METISTRY_BRIDGE_TOKEN_RECONCILER` | console | The reconciler's vault bridge (`docs/ops/reconciler.md`). `knowledge_read`, `knowledge_write`, `knowledge_list`, and `knowledge_grep` all go through it; unset → all answer `not_available` and the brain's `check()` is `degraded`. |
-| `METISTRY_IDENTITY_FILES`, `METISTRY_PROMPT_FILES` | assistant | D4 overlays for `identity.yaml` and the seed system prompt (`seed/assistant-prompt.md`); last existing file wins. |
-| `METISTRY_RULES_FILES` | console + assistant | D4 overlay for `rules.yaml` (default `seed/rules.yaml:rules.yaml`). The console reads the fast paths and the tier menu; the assistant reads the **same `tiers:` block** to resolve a tier name to (model, effort). Unreadable by the assistant → one tier, `METISTRY_MODEL_DEFAULT` at medium effort. |
+| `METISTRY_IDENTITY_FILES`, `METISTRY_PROMPT_FILES` | assistant | D4 overlays for `.metistry/identity.yaml` and the seed system prompt (`seed/assistant-prompt.md`); last existing file wins. |
+| `METISTRY_RULES_FILES` | console + assistant | D4 overlay for `.metistry/rules.yaml` (default `seed/rules.yaml:.metistry/rules.yaml`). The console reads the fast paths and the tier menu; the assistant reads the **same `tiers:` block** to resolve a tier name to (model, effort). Unreadable by the assistant → one tier, `METISTRY_MODEL_DEFAULT` at medium effort. |
 | `METISTRY_MAX_TURNS` | assistant | Agentic turns per message (default 12 with tools, 4 without). |
 
 Startup logs to look for: console `internal agent 'assistant' registered`
@@ -114,7 +114,7 @@ again removes it, with nothing to hand-edit either way.
 ```sh
 metistry compute providers add --from openrouter          # key on stdin → login Keychain
 metistry compute assign default openrouter/anthropic/claude-sonnet-5
-metistry secrets sync --to env                            # the key into <instance>/state/.env
+metistry secrets sync --to env                            # the key into <instance>/.metistry/state/.env
 metistry up
 ```
 
@@ -242,19 +242,21 @@ has two consequences worth knowing:
   unsetting `METISTRY_ASSISTANT_TOKEN`, which revokes the row on the next
   start.
 
-**Grant width — the internal rule.** `validateGrants` refuses bare
-`Knowledge/` for an external agent (an area grant is a prefix; "everything"
-is not an area) and requires TitleCase segments. For a `kind: internal`
-row — and only there — the bare vault is admitted, spelled `Knowledge/`
-(`Knowledge` normalizes to it), and it is the default. That is what lets
-the assistant read root notes such as `Knowledge/now.md`, which sit under
+**Grant width — the internal rule.** `validateGrants` refuses a bare vault
+grant for an external agent (an area grant is a prefix; "everything" is not
+an area) and requires TitleCase segments. For a `kind: internal` row — and
+only there — the bare vault is admitted, and it is the default (the exact
+sentinel spelling, now that the vault root is the instance root itself
+rather than a `Knowledge/` subfolder, is a detail of the grant-validation
+code updated alongside `metistry migrate-layout`). That is what lets
+the assistant read root notes such as `now.md`, which sit under
 no area prefix (the gap reported when the tools shipped is closed; the
 integration test that proves it is `apps/console/test/brain.integration.test.ts`).
 The management API keys the rule on the *row's* kind, never on the
 request, so an external agent can never be granted the bare vault by a
 typo in the UI.
 
-**Narrow it** with `METISTRY_ASSISTANT_AREAS=Knowledge/Areas/Fsl` and/or
+**Narrow it** with `METISTRY_ASSISTANT_AREAS=Areas/Fsl` and/or
 `METISTRY_ASSISTANT_PROJECTS=drey,fsl-2026`; both are validated exactly as
 the management API validates them, and a bad value fails console startup
 loudly rather than landing a partial grant. Narrowing the areas narrows
@@ -271,12 +273,13 @@ Layers, honest about which carry the load:
 
 1. **Who.** Only a `kind: internal` principal reaches the write at all;
    `requests_create`/`capture` remain the door for everyone else (§4.11 one writer).
-2. **Where.** The bridge accepts `Knowledge/...` only, inside the grant;
-   behind it the reconciler refuses the §4.7 protected set
+2. **Where.** The bridge accepts vault-root paths only, inside the grant;
+   behind it the reconciler refuses everything under `.metistry/` (except
+   `.metistry/state/`) plus root `CLAUDE.md` — the §4.7 protected set
    (`identity.yaml`, `rules.yaml`, `sources.yaml`, `deployment.yaml`,
-   `CLAUDE.md`, `queries/`, `agents/`, `routines/`, `extensions/`,
-   `instance-migrations/`) for every principal but `user`, plus
-   traversal, `.git`, symlinks and `knowledge/` casing slips. Two
+   `queries/`, `agents/`, `routines/`, `extensions/`,
+   `instance-migrations/`) — for every principal but `user`, plus
+   traversal, `.git`, symlinks and casing slips. Two
    independent refusals; the assistant cannot touch how the system
    behaves.
 3. **Provenance.** A markdown write gets `source: assistant` and
@@ -304,7 +307,7 @@ when you ask (the prompt says when).
 ## What the prompt says (and does not control)
 
 `seed/assistant-prompt.md` is templated with the name and voice from
-`identity.yaml` (the only place the assistant is named — CLAUDE.md) and
+`.metistry/identity.yaml` (the only place the assistant is named — CLAUDE.md) and
 tells the assistant what each tool is *for*: `capture`/`requests_create` for
 anything unsettled, `knowledge_write` for settled facts (`now.md`
 updates, folding an approved request, correcting a page you corrected)
@@ -312,7 +315,8 @@ with read-then-CAS and one logical change per write, `tasks_*` is the
 shared list (claim, heartbeat, release), knowledge reads are logged, the
 `nudge:` line is system-computed. None of that is a control — the surface
 is enforced in code — it is a seed so the first turns are sensible.
-Operating instructions proper still land in `Knowledge/CLAUDE.md` later.
+Operating instructions proper still land in the instance's own root
+`CLAUDE.md` later.
 
 ## Prompt hygiene (docs/research/2026-09-cost-optimization.md)
 
@@ -323,7 +327,7 @@ info) forces a full re-cache at 1.25x the read price every single turn.
 Two rules, enforced rather than just documented:
 
 - **Nothing volatile in the system prompt, ever.** `loadSystemPrompt`
-  (`apps/assistant/src/prompt.ts`) reads only `identity.yaml` and the seed
+  (`apps/assistant/src/prompt.ts`) reads only `.metistry/identity.yaml` and the seed
   prompt file at process startup — no clock, no `now.md`, no query result
   — so the same prompt string serves every turn of every session for the
   life of the process. `apps/assistant/test/prompt.test.ts` builds it
@@ -394,7 +398,7 @@ ORDER BY ts DESC;
 ```
 
 And in the instance repo: `git log --author="Metistry assistant"` (or
-`GET /vault/log?path=Knowledge/now.md` on the bridge) is the write
+`GET /vault/log?path=now.md` on the bridge) is the write
 history; a wrong write is a revert.
 
 What lands where: `capture` → an `inbox` row (`source = 'mcp',

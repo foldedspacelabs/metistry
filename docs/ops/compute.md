@@ -2,7 +2,7 @@
 
 One file says where work runs, what may leave the machine to get there, and
 what it may cost: **providers**, **assignments** and **budgets**. It lives in
-the instance repo, next to `rules.yaml` and `deployment.yaml`.
+the instance repo's `.metistry/`, next to `rules.yaml` and `deployment.yaml`.
 
 A provider is **configuration, not a component** — there is no
 `providers/<name>/manifest.yaml` to write. Invariant 5 ("everything is a
@@ -10,10 +10,10 @@ directory with a manifest") is met the way `deployment.yaml` meets it: by a
 schema in `packages/core` (`src/compute.ts`) that the CLI, CI and the Mac app
 all validate against. Adding a provider is one command, not a directory.
 
-`compute.yaml` is a **§4.7 protected path**. Where work runs is how the
+`.metistry/compute.yaml` is a **§4.7 protected path**. Where work runs is how the
 system behaves, so only you change it (invariant 2): `metistry compute` and
 the app write it through the reconciler as the `user` principal, the way
-`deployment.yaml`, `identity.yaml` and `metistry.lock` are written. The
+`.metistry/deployment.yaml`, `.metistry/identity.yaml` and `.metistry/metistry.lock` are written. The
 assistant cannot write it at all.
 
 ## What is NOT wired yet
@@ -56,7 +56,7 @@ providers:
     auth: { secret: METISTRY_OPENROUTER_API_KEY }   # a NAME. The value is in the Keychain.
     zdr: true
     request: { provider: { order: [anthropic], allow_fallbacks: false } }
-    data_policy: { allow: [Knowledge/Projects], deny_sources: [comms], max_brief_bytes: 65536 }
+    data_policy: { allow: [Projects], deny_sources: [comms], max_brief_bytes: 65536 }
     pricing: { anthropic/claude-sonnet-5: { in_per_m: 3, out_per_m: 15 } }
 assignments:
   default: { model: openrouter/anthropic/claude-sonnet-5, effort: medium, critical: true }
@@ -101,7 +101,7 @@ declare `tiers.routine` explicitly if the pause is meant to apply to it.
 ## Where it is read from — the D4 overlay
 
 `METISTRY_COMPUTE_FILES`, colon-separated, default
-`seed/compute.yaml:compute.yaml`. The **last existing file wins, whole** —
+`seed/compute.yaml:.metistry/compute.yaml`. The **last existing file wins, whole** —
 there is no deep merge, so your instance's file always stands alone and is
 always readable on its own. The same rule as `METISTRY_RULES_FILES`.
 
@@ -485,7 +485,7 @@ Each one is the server's own mechanism, spoken directly. For
 name is on the repo's **Files** tab — and Metistry:
 
 1. downloads `https://huggingface.co/<owner>/<repo>/resolve/main/<file>`
-   into `<instance>/state/models/<owner>/<repo>/`, streamed to disk;
+   into `<instance>/.metistry/state/models/<owner>/<repo>/`, streamed to disk;
 2. checks it against the sha256 Hugging Face publishes (`X-Linked-Etag`).
    A mismatch **discards the download and writes nothing**;
 3. writes `providers.<name>.serve.model_path` into `compute.yaml` as the
@@ -510,7 +510,7 @@ providers:
     locality: on_machine
     serve:
       runtime: llamaserver
-      model_path: state/models/unsloth/gemma-3-4b-it-GGUF/gemma-3-4b-it-Q4_K_M.gguf
+      model_path: .metistry/state/models/unsloth/gemma-3-4b-it-GGUF/gemma-3-4b-it-Q4_K_M.gguf
       port: 7813
       extra_args: ["--ctx-size", "8192"]
 ```

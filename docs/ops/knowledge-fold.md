@@ -19,14 +19,14 @@ rules kept as invariants.
    past unread material. With no anchor at all — a fresh instance — the window
    is the last 7 days, not all of history.
 2. **It writes only inside reserved paths.** The routine writes nothing to the
-   vault. The assistant writes `Knowledge/Journal/<date>.md` and the entity
-   pages under `Knowledge/People/`, `Knowledge/Projects/`,
-   `Knowledge/Resources/` that it owns, plus a one-line "last fold" note in
-   `Knowledge/now.md`. `Knowledge/Me/`, the protected paths, and any note
+   vault. The assistant writes `Journal/<date>.md` and the entity
+   pages under `People/`, `Projects/`,
+   `Resources/` that it owns, plus a one-line "last fold" note in
+   `now.md`. `Me/`, the protected paths, and any note
    someone else owns are refused **at the tool**, not by the prompt (below).
 3. **It never reads its own output.** By construction: every handle in the
    brief comes from a Postgres table, and the routine never opens the vault —
-   so `Knowledge/Journal/*` and every page the fold wrote are unreachable as
+   so `Journal/*` and every page the fold wrote are unreachable as
    input. Items the fold itself produced (proposals, artifact versions or
    captures whose principal is `knowledge-fold`) are excluded in SQL too.
 
@@ -39,7 +39,7 @@ Since the anchor:
 | `proposals` | decided `allow` or `accept_with_changes`, kind `knowledge`, `report`, `session`, `review` |
 | `work` | rows that reached `status = 'closed'` |
 | `artifact_versions` | versions published (with their artifact's project/slug) |
-| `inbox` | captures of kind `session` (`metistry import-sessions`); captures live at `Knowledge/Inbox/` (`docs/ops/inbox.md`) |
+| `inbox` | captures of kind `session` (`metistry import-sessions`); captures live at `Inbox/` (`docs/ops/inbox.md`) |
 
 Each becomes a **handle** — an id, a title, a one-line summary, sometimes a
 path. Never content: the assistant fetches what it needs with `queries_run`,
@@ -87,8 +87,8 @@ forbidden: owned by user; propose instead
 New notes are always allowed. `source` is stamped from the credential and can
 never be claimed in an argument, so "notes I wrote" is a fact, not an
 assertion. When the deployment's vault read path is unavailable the write is
-refused rather than waved through. Protected paths (`identity.yaml`,
-`rules.yaml`, `queries/`, `agents/`, `routines/`, …) are still refused behind
+refused rather than waved through. Protected paths (`.metistry/identity.yaml`,
+`.metistry/rules.yaml`, `.metistry/queries/`, `.metistry/agents/`, `.metistry/routines/`, …) are still refused behind
 that, at the vault.
 
 A refusal is not an error the fold retries: the assistant `report`s the change
@@ -118,7 +118,7 @@ your version (`docs/ops/inbox.md`).
   ```
 
 - **The commits**: every page the fold writes is a commit by the assistant
-  principal in the instance repo — `git log --oneline -- Knowledge/Journal`.
+  principal in the instance repo — `git log --oneline -- Journal`.
 
 ## Turning it off
 
@@ -135,7 +135,7 @@ and the next enabled fold picks up from the last anchor.
 A model in the routine (invariant 4), a fold that reads the whole vault to
 "reorganise" it, per-item turns, and any write outside the reserved paths.
 
-Also: **moving a capture out of `Knowledge/Inbox/` to its home.** The fold
+Also: **moving a capture out of `Inbox/` to its home.** The fold
 writes pages; it never files the inbox. `delete` and `rename` are not
 exposed to the assistant at all, so a capture stays where it landed until
 your hand moves it. When that lands it will be bridge write + delete with

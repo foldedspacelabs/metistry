@@ -1,16 +1,17 @@
-# The inbox — `Knowledge/Inbox/`
+# The inbox — `Inbox/`
 
-Captures live **inside the vault**, at `Knowledge/Inbox/` (ruled
-2026-09-16). Obsidian's vault root is `Knowledge/`, so that is the only
-place it can see them, add to them and edit them; and being in the instance
-repo means git carries them, so the inbox now survives `docker compose down
--v` like everything else that matters (invariant 1 — the inbox used to be
-the hole in it).
+Captures live **inside the vault**, at `Inbox/` (ruled 2026-09-16; the
+2026-09-17 layout ruling then moved the vault root itself to the instance
+directory, so what was `Knowledge/Inbox/` is `Inbox/` at the instance root —
+`docs/ops/instance-layout.md`). Obsidian's vault root is the instance
+directory, so that is the only place it can see them, add to them and edit
+them; and being in the instance repo means git carries them, so the inbox
+survives `docker compose down -v` like everything else that matters
+(invariant 1 — the inbox used to be the hole in it).
 
-TitleCase, like everything under `Knowledge/` (CLAUDE.md casing). The
-reconciler refuses `knowledge/inbox` and `Knowledge/inbox` at the tool, so
-the two spellings cannot both exist on a case-insensitive Mac and then fork
-in a Linux container.
+TitleCase, like everything at the vault root (CLAUDE.md casing). The
+reconciler refuses a lowercase `inbox` at the tool, so it and `Inbox` cannot
+both exist on a case-insensitive Mac and then fork in a Linux container.
 
 ## Every door
 
@@ -25,7 +26,7 @@ in a Linux container.
 
 The first five go through **one function** (`captureToInbox`), so a capture
 is the same row whichever door it came through: a file in
-`Knowledge/Inbox/`, and an `inbox` row carrying its sha256, mime, note and
+`Inbox/`, and an `inbox` row carrying its sha256, mime, note and
 the credential's `source_agent`. The last one is the new part, below.
 
 ## How a capture reaches the vault
@@ -45,7 +46,7 @@ Each capture is committed on the next flush, principal `capture`, group
 files in `METISTRY_INBOX_DIR` — capture keeps working, because one silent
 drop ends the trust (SHOULD-10) — but those files are not in the vault and
 Obsidian will not see them. The recovery is a plain `mv` into
-`<instance>/Knowledge/Inbox/`: the scan below picks them up.
+`<instance>/Inbox/`: the scan below picks them up.
 
 ## Files you write yourself are first-class
 
@@ -77,7 +78,7 @@ always has — it never moves or deletes a file.
 
 This is also what makes the inbox pass invariant 1's test. After `docker
 compose down -v` the `inbox` table is empty; the first reconcile cycle
-rebuilds a row for every file still in `Knowledge/Inbox/`, because the files
+rebuilds a row for every file still in `Inbox/`, because the files
 are in git. What does not come back is the triage *outcome* (everything
 returns as `new`), which is the honest remainder of plan-review SHOULD-20 —
 still open, and now the only part of the inbox that a rebuild loses.
@@ -97,16 +98,17 @@ Two rules, both enforced at the tool rather than in a prompt:
 Behind both, the reconciler's own compare-and-swap is what actually decides:
 a mismatch is `409 conflict`, never a retry-and-overwrite.
 
-`Knowledge/Inbox/` is **not** a protected path. It is ordinary vault
+`Inbox/` is **not** a protected path. It is ordinary vault
 content: readable and listable by the assistant like the rest of
-`Knowledge/`, writable through the bridge. The protected set
-(`identity.yaml`, `rules.yaml`, `queries/`, …) is unchanged.
+the vault, writable through the bridge. The protected set
+(`.metistry/identity.yaml`, `.metistry/rules.yaml`, `.metistry/queries/`, …)
+is unchanged.
 
 ## Big files
 
 `METISTRY_INBOX_MAX_TRACKED_BYTES` (default **5 MiB**) is the line between
 "git carries this" and "git does not". Above it, a capture is written to
-`Knowledge/Inbox/.large/` instead, which `metistry init` puts in the
+`Inbox/.large/` instead, which `metistry init` puts in the
 instance's `.gitignore`.
 
 The trade-off, stated plainly: a 40 MB screen recording in git history is
@@ -129,15 +131,19 @@ PDFs.
 
 ## Moving an existing instance
 
+Two moves, one after the other if an instance predates both rulings:
+
 ```sh
-metistry migrate-inbox --dry-run     # the whole plan, nothing run
+metistry migrate-inbox --dry-run     # bare inbox/ -> Knowledge/Inbox/ (2026-09-16 ruling)
 metistry migrate-inbox
+metistry migrate-layout --dry-run    # Knowledge/Inbox/ (and everything else) -> the flat layout (2026-09-17 ruling)
+metistry migrate-layout
 metistry up                          # the verb restarts nothing itself
 ```
 
-It moves `inbox/*` into `Knowledge/Inbox/` (`git mv` for what git tracks, a
-plain move for the rest — the old inbox was gitignored, so most of it is
-untracked), drops `inbox/` from `.gitignore`, adds
+`migrate-inbox` moves `inbox/*` into `Knowledge/Inbox/` (`git mv` for what
+git tracks, a plain move for the rest — the old inbox was gitignored, so
+most of it is untracked), drops `inbox/` from `.gitignore`, adds
 `Knowledge/Inbox/.large/`, rewrites `inbox.path` rows to
 `Knowledge/Inbox/<file>`, and commits. Idempotent: a second run reports
 "already on the vault inbox" and changes nothing.
@@ -148,18 +154,26 @@ A second instance that had already moved its inbox to a **lowercase**
 temporary name — `git mv Knowledge/inbox Knowledge/Inbox` on macOS moves the
 directory inside itself.
 
-Obsidian needs no change: the vault root is still `Knowledge/`, and `Inbox/`
-is now a folder in it.
+`migrate-layout` is the newer, idempotent `git mv` verb that carries
+`Knowledge/Inbox/` (and every other pre-ruling path) up to the instance
+root and everything that is not knowledge down into `.metistry/` —
+`docs/ops/instance-layout.md` has the full tree and the protected-path
+rule it preserves.
+
+Obsidian needs no change beyond re-opening it at the instance directory:
+the vault root is the instance root, and `Inbox/` is a folder in it.
 
 ## `inbox.path`
 
-**Relative to the instance repo root** — `Knowledge/Inbox/<file>` — which is
+**Relative to the instance repo root** — `Inbox/<file>` — which is
 what `db/migrations/0001_init.sql` always said the column held, and what it
-actually holds from migration `0015` on. Before the move the capture path
-stored a bare filename; `metistry migrate-inbox` rewrites those rows.
+actually holds from migration `0015` on (through the `Knowledge/Inbox/<file>`
+intermediate form for instances migrated between the two rulings). Before the
+first move the capture path stored a bare filename; `metistry migrate-inbox`
+and `metistry migrate-layout` rewrite those rows in turn.
 
 A partial unique index (`inbox_vault_path_uidx`, on paths under
-`Knowledge/Inbox/`) makes "one row per inbox file" true at the database,
+`Inbox/`) makes "one row per inbox file" true at the database,
 because two writers now reach that directory: the capture path and the
 scan. Whoever writes second refines the row rather than duplicating it.
 
@@ -167,8 +181,8 @@ scan. Whoever writes second refines the row rather than duplicating it.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `METISTRY_INBOX_DIR` | `<instance>/Knowledge/Inbox` | the fallback directory when this console has no vault bridge |
-| `METISTRY_INBOX_MAX_TRACKED_BYTES` | `5242880` | above this, a capture goes to `Knowledge/Inbox/.large/` |
+| `METISTRY_INBOX_DIR` | `<instance>/Inbox` | the fallback directory when this console has no vault bridge |
+| `METISTRY_INBOX_MAX_TRACKED_BYTES` | `5242880` | above this, a capture goes to `Inbox/.large/` |
 | `METISTRY_RECONCILER_URL`, `METISTRY_BRIDGE_TOKEN_RECONCILER` | — | the bridge captures are written through (`docs/ops/reconciler.md`) |
 | `METISTRY_VAULT_MAX_BYTES` | `2097152` | the bridge's own per-write cap |
 | `METISTRY_RECONCILE_INTERVAL_SEC` | `300` | how often files you wrote yourself are noticed |

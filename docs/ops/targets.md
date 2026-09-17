@@ -30,7 +30,7 @@ result:
 auth: env:METISTRY_GITHUB_WRITE_TOKEN  # ALWAYS an env reference, never a literal
 cost: { per_run_estimate_usd: 0 }    # written to runs.cost_usd on every dispatch
 data_policy:                         # REQUIRED, every field
-  allow: [Knowledge/Projects]        # vault prefixes a brief may cite; [] = none
+  allow: [Projects]        # vault prefixes a brief may cite; [] = none
   deny_sources: [comms]              # provenance classes that never leave
   max_brief_bytes: 16384
 ```
@@ -73,7 +73,7 @@ it finds:
 | -------------------- | ------------------------------------------------------------------------------------- |
 | `brief_too_large`    | UTF-8 bytes > `max_brief_bytes` (checked first; an oversized brief is not scanned)     |
 | `denied_source`      | a `source:`/`sources:` marker (frontmatter, `<!-- source: comms -->`, or `[a, b]` list) naming a class in `deny_sources`, or the caller's own `sources: []` declaration |
-| `path_outside_allow` | any `Knowledge/...` token (plain, wikilink, backticks) not under an `allow` prefix — per segment, `..`/`.` never match |
+| `path_outside_allow` | any vault-root token (plain, wikilink, backticks) not under an `allow` prefix — per segment, `..`/`.` never match |
 
 A refusal is a `runs` row too (`kind = 'dispatch'`, `ok = false`,
 `error = 'data_policy: ...'`, `meta.violations`), so the mechanism is visible,
@@ -127,7 +127,7 @@ whole world, and a leaked read token must not be able to write anything.
 curl -s --cookie "$SESSION" https://<origin>/api/targets | jq '.targets[] | {name, check}'
 # dispatch task 12 (session cookie only — an owner token is 403)
 curl -s --cookie "$SESSION" -H 'content-type: application/json' \
-  -d '{"target":"github-issues","brief":"Implement X per Knowledge/Projects/X.md"}' \
+  -d '{"target":"github-issues","brief":"Implement X per Projects/X.md"}' \
   https://<origin>/api/tasks/12/dispatch
 # per-target spend, straight from runs (§4.18.D)
 psql ... -c "SELECT tool, count(*), sum(cost_usd) FROM runs WHERE kind='dispatch' AND ok GROUP BY 1"

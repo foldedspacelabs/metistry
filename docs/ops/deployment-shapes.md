@@ -1,9 +1,9 @@
 # Deployment shapes — `compose` and `launchd`
 
 Where an install's services run. Same code, same `.env`
-(`<instance>/state/.env` — `docs/ops/cli.md`), same
+(`<instance>/.metistry/state/.env` — `docs/ops/cli.md`), same
 migrations, same `metistry` verbs; only the supervisor and the isolation
-boundary differ. Set in `deployment.yaml` (plan §4.17, open decision 15
+boundary differ. Set in `.metistry/deployment.yaml` (plan §4.17, open decision 15
 — resolved 2026-09-07).
 
 |  | `compose` | `launchd` |
@@ -34,7 +34,7 @@ point.
 | product dir | `~/Library/Application Support/Metistry/product` — seeded from a bundle by `metistry runtime install` (`docs/ops/mac-app.md`) |
 | instance | `~/Library/Application Support/Metistry/trial-instance`, `metistry init --channel release`, `shape: launchd` |
 | namespace | `metistry up --namespace` → labels `com.foldedspacelabs.metistry.e5dbfa9c.*`, ports 8460-8464 |
-| db | bundled Postgres 17.11 + pgvector 0.8.6, initdb'd under `<instance>/state/pg`, socket in `<instance>/state/run` |
+| db | bundled Postgres 17.11 + pgvector 0.8.6, initdb'd under `<instance>/.metistry/state/pg`, socket in `<instance>/.metistry/state/run` |
 | migrations | 13 applied under `pg_advisory_lock(1296389203)` by `metistry update` |
 | node | the bundled `runtime/node/bin/node` 22.23.2 — every plist execs it |
 | git | the bundled `runtime/git/bin` on the reconciler's PATH |
@@ -59,7 +59,7 @@ five are fixed in the same PR, with tests:
 2. **`.env` is RUN, not parsed, by those jobs.** `set -a; . <file>` means
    an unquoted value with a space in it is a command. `up` now refuses,
    naming the variables and line numbers, rather than installing four jobs
-   that respawn forever. **Quote values in `<instance>/state/.env`.**
+   that respawn forever. **Quote values in `<instance>/.metistry/state/.env`.**
 3. **The assistant's sandbox had no rule for Postgres.** Under compose the
    engine reached the db over the container network; under launchd it is a
    loopback port and the profile denies by default, so the engine died at
@@ -116,7 +116,7 @@ migration rehearsal added.
    is shaped for the install `init` targets — launchd by default on
    macOS, `http://host.docker.internal:7812` still the default for
    `--shape compose` — on `127.0.0.1` with this instance's own ports once
-   it is namespaced (`state/ports.yaml`, below). `METISTRY_ASSISTANT_TOKEN`
+   it is namespaced (`.metistry/state/ports.yaml`, below). `METISTRY_ASSISTANT_TOKEN`
    was never a hard blocker: absent, the console still starts and only the
    internal agent is revoked (the assistant runs tool-less,
    `docs/ops/assistant-tools.md`).
@@ -217,13 +217,13 @@ gui/$UID/com.foldedspacelabs.metistry` names the job's plist and its resolved
 program; if either is inside a `.app` bundle, the app owns it, and `up` does
 not render, bootstrap or kickstart its own. It says so in one line, and
 everything else it does is unchanged — including writing
-`<instance>/state/supervisor.json` and the launcher's `supervisor.env`, which
+`<instance>/.metistry/state/supervisor.json` and the launcher's `supervisor.env`, which
 are exactly what the app's agent reads. `--register-via app` is the same
 decision made explicitly, for the first install, before anything is loaded to
 detect.
 
 **Why launchd's answer and not a marker file.** A marker in
-`state/supervisor.json` (or anywhere else) is a second record of a fact launchd
+`.metistry/state/supervisor.json` (or anywhere else) is a second record of a fact launchd
 already holds, and it goes stale the moment the app is dragged to the Trash or
 the item switched off in System Settings — after which `up` would skip a
 bootstrap on the strength of a registration that no longer exists, and the
@@ -257,7 +257,7 @@ row.
 - **The watchdog, unchanged.** The probes and the presence feed run in this
   same process; invariant 3's sole exception did not move.
 
-### `<instance>/state/supervisor.json`
+### `<instance>/.metistry/state/supervisor.json`
 
 Written by `metistry up`, mode 0600, and readable by a person:
 
@@ -265,7 +265,7 @@ Written by `metistry up`, mode 0600, and readable by a person:
 {
   "schema": 1,
   "label": "com.foldedspacelabs.metistry",
-  "socket": "<instance>/state/run/supervisor.sock",
+  "socket": "<instance>/.metistry/state/run/supervisor.sock",
   "token": "…",
   "env": { "METISTRY_DB_PASSWORD": "…", "…": "…" },
   "children": [
@@ -295,7 +295,7 @@ used to get implicitly (`PATH=/usr/bin:/bin:/usr/sbin:/sbin`, `HOME`,
 
 ### The control socket
 
-`<instance>/state/run/supervisor.sock`, mode 0600, one JSON object per line:
+`<instance>/.metistry/state/run/supervisor.sock`, mode 0600, one JSON object per line:
 
 ```
 {"op":"status","token":"…"}                     → {"ok":true,"children":[…]}
@@ -361,11 +361,11 @@ bridge child nor the `calendar` agent is installed at all, rather than a job
 that can only crash-loop. That closes "What is still missing" #2 for the
 launchd shape.
 
-## `deployment.yaml`
+## `.metistry/deployment.yaml`
 
 Instance config with the D4 overlay: the product ships the default in
 `seed/deployment.yaml`, and an instance's own copy — same filename, in
-`$METISTRY_INSTANCE_DIR` — wins. New seeded defaults appear on
+`$METISTRY_INSTANCE_DIR/.metistry` — wins. New seeded defaults appear on
 `metistry update` without touching the user's copy.
 
 ```yaml
@@ -389,7 +389,7 @@ Parsing is strict. `shape: lauchd` is an error, not a silent compose.
 shape without editing anything; `up` and `doctor` both print which of
 the two they read.
 
-## A second instance on one Mac — `state/ports.yaml`
+## A second instance on one Mac — `.metistry/state/ports.yaml`
 
 launchd labels and ports used to be fixed, so only one instance could run
 (`docs/product/desktop-app-plan.md`, "The limit that remains"). One file
@@ -399,7 +399,7 @@ lifts that:
 metistry up --namespace --instance ~/some/other/instance
 ```
 
-writes `<instance>/state/ports.yaml` **once**:
+writes `<instance>/.metistry/state/ports.yaml` **once**:
 
 ```yaml
 schema: 1
@@ -434,7 +434,7 @@ inside 8300-8999, so a namespaced instance cannot collide with an
 un-namespaced one.
 
 **The block fills only variables that are UNSET.** An explicit
-`METISTRY_CONSOLE_PORT` in `<instance>/state/.env` still wins everywhere —
+`METISTRY_CONSOLE_PORT` in `<instance>/.metistry/state/.env` still wins everywhere —
 that is the one rule under which the jobs whose environment `up` renders
 into a plist and the jobs that source `.env` themselves cannot disagree.
 `up` renders the block into the sourcing jobs' plists for the same reason:
@@ -460,14 +460,14 @@ prerequisites, what to watch, the rollback, and when it is safe to
 `docker compose down -v`. In short, `migrate-shape launchd` quiesces the
 writers, dumps the live database through the running container and
 verifies the dump before stopping anything, `docker compose stop`s (never
-`down -v` — the volume is the rollback), writes `deployment.yaml` through
+`down -v` — the volume is the rollback), writes `.metistry/deployment.yaml` through
 the reconciler as `user`, runs `up`, restores **before any migration**
 (the dump carries `schema_migrations`, so the next `metistry update`
 applies none), compares every table's row count, and ends with doctor.
 `metistry migrate-shape compose` is the documented rollback.
 
 The two shapes keep their data in different places — a Docker volume
-versus `<instance>/state/pg` — so switching is a fresh database plus a
+versus `<instance>/.metistry/state/pg` — so switching is a fresh database plus a
 restore, not a move; that is why there is a verb rather than an edit.
 Invariant 1 is what makes even a bad outcome survivable: git is the
 record, Postgres is derived, and a rebuild costs trend lines rather than
@@ -476,7 +476,7 @@ You, `work` threads, artifact comments — open decision 13) before you
 switch a live install without a dump.
 
 By hand, if you ever need to: stop the old shape, edit
-`$METISTRY_INSTANCE_DIR/deployment.yaml`, `metistry up`, restore. That is
+`$METISTRY_INSTANCE_DIR/.metistry/deployment.yaml`, `metistry up`, restore. That is
 what the verb does, in the order that turns out to matter.
 
 ## Postgres, without Docker
@@ -522,7 +522,7 @@ and `up` stops. `pgvector` is checked separately: migration
 `0001_init.sql` does `CREATE EXTENSION vector`, so its absence is
 called out before the migration fails.
 
-**What `up` does, once:** `initdb -D <instance>/state/pg` with the
+**What `up` does, once:** `initdb -D <instance>/.metistry/state/pg` with the
 superuser password handed over in a file that the next step deletes
 (never a command line — `ps` shows those), `--auth-local=trust` for the
 operator's own socket connections and `--auth-host=scram-sha-256` for
@@ -533,7 +533,7 @@ marker-delimited managed block in `postgresql.conf`:
 # --- metistry (managed: metistry up rewrites this block) ---
 listen_addresses = '127.0.0.1'
 port = 5432
-unix_socket_directories = '<instance>/state/run'
+unix_socket_directories = '<instance>/.metistry/state/run'
 # --- end metistry ---
 ```
 
@@ -542,7 +542,7 @@ left alone, and re-running `up` rewrites only the block. An initialised
 data directory is never re-initdb'd.
 
 If `METISTRY_DB_PASSWORD` is unset, `up` generates one and appends it to
-this install's `.env` — `<instance>/state/.env` (gitignored, `0600`, never
+this install's `.env` — `<instance>/.metistry/state/.env` (gitignored, `0600`, never
 printed, never committed), or the product checkout's while an install
 predates that move (`docs/ops/cli.md`, "Instance directories are
 self-contained").
@@ -570,7 +570,7 @@ confine a probe with those same values.
 | filesystem write | the state dir and tmp. Nothing else. |
 | exec | the node binary. No shell (invariant 9). |
 | network out | the console and Postgres, on loopback, on **this instance's** ports, and TLS. Nothing else — a namespaced engine cannot reach another install's console. |
-| state dir | `<instance>/state/assistant`, which is also `HOME` — the engine's one writable directory (the launchd twin of the `assistant-home` volume). Sessions themselves live in Postgres. |
+| state dir | `<instance>/.metistry/state/assistant`, which is also `HOME` — the engine's one writable directory (the launchd twin of the `assistant-home` volume). Sessions themselves live in Postgres. |
 
 The parameters are computed in one place (`packages/cli/src/sandbox.ts`)
 and the misuse tests in `packages/cli/test/sandbox.test.ts` confine a
@@ -621,7 +621,7 @@ through `sh -c` — no shell, and nothing interpolated. That puts real
 secrets in `~/Library/LaunchAgents`, which is `0755`, so `up` writes
 those two plists `0600`. The other jobs (reconciler, watchdog, the TCC
 bridges) still source a dotenv file themselves, through the plists'
-`__ENV_FILE__` placeholder — `<instance>/state/.env`, because an instance
+`__ENV_FILE__` placeholder — `<instance>/.metistry/state/.env`, because an instance
 directory is self-contained.
 
 The **reconciler's** dict is a third case, and carries no secret: when this
@@ -666,7 +666,7 @@ Sandbox denials: `log stream --predicate 'sender == "Sandbox"'`.
 
 ## `metistry update` under either shape
 
-`update` loads the same `deployment.yaml` and asks for **that shape's**
+`update` loads the same `.metistry/deployment.yaml` and asks for **that shape's**
 plist set. On a launchd install that is the supervisor, and its entry tracks
 its CHILDREN's code as well as its own: when a console build changes, the
 supervisor is kickstarted and every child comes back on the new code. Blunter

@@ -49,21 +49,21 @@ the boundary from `(name, instance_id)`. A reader that has to cope with both
 uses `parseAgentId`, which returns `undefined` for a bare name rather than
 guessing an instance.
 
-When the console has no complete `identity.yaml` — no `instance_id` to
+When the console has no complete `.metistry/identity.yaml` — no `instance_id` to
 qualify with — `qualifyIfPossible` passes the bare name through rather than
 inventing one. An export from such an instance is honest about being
 unqualified.
 
-## `instances.yaml` — the peer registry (S4)
+## `.metistry/instances.yaml` — the peer registry (S4)
 
 A file in the instance repo, listing the *other* instances this one knows
-about. A §4.7 protected path, like `compute.yaml` and `deployment.yaml`:
-every write goes through the reconciler as the `user` principal (D5,
-invariant 2), because which machines this instance will talk to is a
-statement about how the system behaves.
+about. A §4.7 protected path, like `.metistry/compute.yaml` and
+`.metistry/deployment.yaml`: every write goes through the reconciler as the
+`user` principal (D5, invariant 2), because which machines this instance
+will talk to is a statement about how the system behaves.
 
 ```yaml
-# instances.yaml — the instances this one knows about (docs/ops/instances.md).
+# .metistry/instances.yaml — the instances this one knows about (docs/ops/instances.md).
 instances:
   - instance_id: "0a1b2c3d-4e5f-4a6b-8c9d-0e1f2a3b4c5d"
     name: Second
@@ -112,7 +112,7 @@ and records what it answers. Three consequences worth stating:
    whose registry needed a shared secret would be the second credential
    class the review said to skip.
 2. **An origin that will not say who it is does not go in the file.** A 503
-   (no complete `identity.yaml`), a non-Metistry answer, a timeout — all
+   (no complete `.metistry/identity.yaml`), a non-Metistry answer, a timeout — all
    refusals, and nothing is written from a guess.
 3. **Adding *this* instance is refused.** A registry of peers that contains
    itself makes every consumer filter it.

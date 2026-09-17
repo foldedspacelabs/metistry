@@ -7,7 +7,7 @@
 
      `metistry up` finds the binaries (METISTRY_PG_BIN, a bundled
      runtime/postgres/, then Homebrew postgresql@17), initdbs
-     <instance>/state/pg if it is not there yet, writes the managed block
+     <instance>/.metistry/state/pg if it is not there yet, writes the managed block
      in postgresql.conf (loopback listen + a unix socket), and renders
      __PG_BIN__ / __PG_DATA__ here. Migrations run exactly as they do
      against the container: ops/scripts/migrate.sh, or `metistry update`.

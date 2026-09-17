@@ -13,6 +13,7 @@ import { parse as parseYaml } from "yaml";
 import {
   DEFAULT_DEPLOYMENT,
   DEPLOYMENT_FILENAME,
+  instancePath,
   engineConfigured,
   engineStatus,
   overlayDeployment,
@@ -40,7 +41,7 @@ export function deploymentPaths(productDir: string, env: NodeJS.ProcessEnv): { s
   const instanceDir = env.METISTRY_INSTANCE_DIR;
   return {
     seed: join(productDir, "seed", DEPLOYMENT_FILENAME),
-    ...(instanceDir ? { instance: join(instanceDir, DEPLOYMENT_FILENAME) } : {}),
+    ...(instanceDir ? { instance: instancePath(instanceDir, "deployment") } : {}),
   };
 }
 
@@ -101,7 +102,7 @@ export function applyShapeToYaml(existing: string | undefined, shape: Deployment
 
 export interface ShapeContext {
   productDir: string;
-  /** METISTRY_INSTANCE_DIR: where state/ and the vault (with its Knowledge/Inbox/) live when there is an instance repo */
+  /** METISTRY_INSTANCE_DIR: the instance directory — the vault itself (with its `Inbox/`), with `.metistry/state/` under it */
   instanceDir?: string | undefined;
   /** the install's environment — .env, already loaded (env.ts loadDotEnv) */
   env: NodeJS.ProcessEnv;
@@ -145,9 +146,9 @@ function metistryVars(ctx: ShapeContext): Record<string, string> {
  * configured, captures go through the bridge).
  */
 export function consoleEnv(ctx: ShapeContext): Record<string, string> {
-  // the inbox is vault content now (docs/ops/inbox.md): `<instance>/Knowledge/Inbox`,
-  // or the product checkout's own vault when this install has no instance repo yet
-  const inbox = join(ctx.instanceDir ?? ctx.productDir, "Knowledge", "Inbox");
+  // the inbox is vault content (docs/ops/inbox.md): `<instance>/Inbox`, the
+  // vault root being the instance directory itself
+  const inbox = instancePath(ctx.instanceDir ?? ctx.productDir, "inboxDir");
   return {
     ...metistryVars(ctx),
     METISTRY_DB_HOST: "127.0.0.1",

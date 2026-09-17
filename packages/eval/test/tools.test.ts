@@ -74,8 +74,8 @@ describe("the recording host", () => {
   });
 
   it("answers a canned result where a fixture needs the model to react to one", async () => {
-    const host = recordingToolHost(defs, { responses: { knowledge_search: "1 hit: Knowledge/Areas/House/Boiler.md" } });
-    expect((await host.call("mcp__brain__knowledge_search", {})).text).toBe("1 hit: Knowledge/Areas/House/Boiler.md");
+    const host = recordingToolHost(defs, { responses: { knowledge_search: "1 hit: Areas/House/Boiler.md" } });
+    expect((await host.call("mcp__brain__knowledge_search", {})).text).toBe("1 hit: Areas/House/Boiler.md");
   });
 
   it("marks a call to a tool that was never listed as a hallucination and answers with an error", async () => {

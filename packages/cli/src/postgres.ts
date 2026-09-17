@@ -23,6 +23,7 @@
 
 import { join } from "node:path";
 import { existsSync } from "node:fs";
+import { statePath } from "@foldedspacelabs/metistry-core";
 
 /** The major version the schema is developed against (docker-compose.yml pins pgvector/pgvector:pg17). */
 export const PG_MAJOR = "17";
@@ -82,12 +83,12 @@ export const PGVECTOR_MISSING_REMEDIATION = `pgvector is not installed next to t
 // ---- the data directory ----------------------------------------------------
 
 /**
- * `<instance>/state/pg` — outside `Knowledge/`, gitignored, and a sibling
- * of the assistant's state dir. Falls back to the product checkout when
- * there is no instance yet (a bare checkout running `up --dry-run`).
+ * `<instance>/.metistry/state/pg` — outside the vault, gitignored, and a
+ * sibling of the assistant's state dir. Falls back to the product checkout
+ * when there is no instance yet (a bare checkout running `up --dry-run`).
  */
 export function pgDataDir(root: string): string {
-  return join(root, "state", "pg");
+  return statePath(root, "pg");
 }
 
 /**
@@ -96,7 +97,7 @@ export function pgDataDir(root: string): string {
  * instance directory is a real failure mode — `doctor` reports the length.
  */
 export function pgSocketDir(root: string): string {
-  return join(root, "state", "run");
+  return statePath(root, "run");
 }
 
 export const SOCKET_PATH_LIMIT = 103;  // limit: fixed — sockaddr_un.sun_path on macOS; the kernel's number, not ours

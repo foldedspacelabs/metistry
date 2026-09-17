@@ -24,6 +24,8 @@ import { parseDocument, parse as parseYaml } from "yaml";
 import {
   BUDGET_ACTIONS,
   COMPUTE_FILENAME,
+  INSTANCE_LAYOUT,
+  instancePath,
   PROVIDER_NAME_RE,
   SECRET_NAME_RE,
   loadCompute,
@@ -149,7 +151,7 @@ export function computeFiles(opts: Pick<ComputeOptions, "instanceDir" | "seedDir
 }
 
 export function instanceComputeFile(instanceDir: string): string {
-  return join(instanceDir.replace(/\/+$/, ""), COMPUTE_FILENAME);
+  return instancePath(instanceDir, "compute");
 }
 
 /** The login Keychain under the USER account: a provider credential belongs to the person, not to one instance (C6). */
@@ -201,7 +203,7 @@ async function commit(opts: ComputeOptions, edit: Editable, message: string): Pr
     throw new StepFailed(`refusing to write ${edit.path}: the result would be invalid — ${e instanceof Error ? e.message : String(e)}`);
   }
   const r = new StepRunner({ dryRun: opts.dryRun === true, out: opts.out, exec: opts.exec ?? realExec, env: opts.env });
-  const delivery = await writeProtected(r, COMPUTE_FILENAME, content, message, {
+  const delivery = await writeProtected(r, INSTANCE_LAYOUT.compute, content, message, {
     env: opts.env,
     platform: opts.platform,
     uid: opts.uid,

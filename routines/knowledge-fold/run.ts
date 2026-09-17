@@ -14,7 +14,7 @@
 //      (packages/mcp-brain/src/knowledge-write.ts).
 //   3. **Never reads its own output.** Enforced by construction: every
 //      handle below comes from a Postgres table, and nothing here opens the
-//      vault — so `Knowledge/Journal/*` and every `source: knowledge-fold`
+//      vault — so `Journal/*` and every `source: knowledge-fold`
 //      note are unreachable as input. Items the fold itself produced
 //      (proposals or captures whose `source_agent` is this routine) are
 //      excluded in SQL as well.
@@ -101,8 +101,8 @@ export function renderBrief(handles: Handle[], window: { start: Date; end: Date 
     `${BRIEF_PREFIX} — ${localDate(window.end)}`,
     "",
     `New since the last fold (${stamp(window.start)}). Fold it: read each handle, write`,
-    `Knowledge/Journal/${localDate(window.end)}.md, and create or update only the entity pages you own.`,
-    "Anything belonging to the user (Knowledge/Me/, a note whose source is theirs) → report, don't write.",
+    `Journal/${localDate(window.end)}.md, and create or update only the entity pages you own.`,
+    "Anything belonging to the user (Me/, a note whose source is theirs) → report, don't write.",
     "",
   ].join("\n");
 

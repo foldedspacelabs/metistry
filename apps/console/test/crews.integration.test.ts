@@ -30,7 +30,7 @@ const intent = { principal: "user", message: "t" };
 const DESCRIBED = "Reads the granted notes and reports what it finds";
 
 function crewFile(name: string, patch: Record<string, unknown> = {}): string {
-  const fm = { name, type: "agent", area: "itest", model: "haiku", description: DESCRIBED, uses: ["brain-read", "brain-report"], scope: ["Knowledge/Projects"], projects: [], ...patch };
+  const fm = { name, type: "agent", area: "itest", model: "haiku", description: DESCRIBED, uses: ["brain-read", "brain-report"], scope: ["Projects"], projects: [], ...patch };
   return `---\n${Object.entries(fm).map(([k, v]) => `${k}: ${JSON.stringify(v)}`).join("\n")}\n---\nYou work for {{name}}. Report what you find.\n`;
 }
 
@@ -71,7 +71,7 @@ describe.skipIf(!hasDb)("crews (integration)", () => {
     });
     vault = memoryVault();
     await vault.write(`agents/itest/${crewA}.md`, Buffer.from(crewFile(crewA)), intent);
-    await vault.write(`agents/itest/${crewB}.md`, Buffer.from(crewFile(crewB, { projects: ["itest-p"], scope: ["Knowledge/Resources"], autonomy: { max_open_bundles: 2, accept_from: ["user"] } })), intent);
+    await vault.write(`agents/itest/${crewB}.md`, Buffer.from(crewFile(crewB, { projects: ["itest-p"], scope: ["Resources"], autonomy: { max_open_bundles: 2, accept_from: ["user"] } })), intent);
     registry = new CrewRegistry(pool, ["agents"], vault);
     const targets = new TargetRegistry({ env: {} });
     await targets.loadDir(`${root}targets`);
@@ -100,12 +100,12 @@ describe.skipIf(!hasDb)("crews (integration)", () => {
     expect(s).toMatchObject({ resynced: [], conflicts: [] });
     const rows = await rowsOf();
     expect(rows.map((r) => r.kind)).toEqual(["crew", "crew"]);
-    expect(rows[0]).toMatchObject({ id: crewA, display_name: `${crewA} (crew, itest)`, grants: { tier: "areas", areas: ["Knowledge/Projects"] }, projects: [], autonomy: {}, revoked_at: null });
-    expect(rows[1]).toMatchObject({ id: crewB, grants: { tier: "areas", areas: ["Knowledge/Resources"] }, projects: ["itest-p"], autonomy: { max_open_bundles: 2, accept_from: ["user"] } });
+    expect(rows[0]).toMatchObject({ id: crewA, display_name: `${crewA} (crew, itest)`, grants: { tier: "areas", areas: ["Projects"] }, projects: [], autonomy: {}, revoked_at: null });
+    expect(rows[1]).toMatchObject({ id: crewB, grants: { tier: "areas", areas: ["Resources"] }, projects: ["itest-p"], autonomy: { max_open_bundles: 2, accept_from: ["user"] } });
     expect(rows.every((r) => /^[0-9a-f]{64}$/.test(r.token_hash))).toBe(true); // a hash of a token nobody holds
     expect((await adminRuns()).filter((r) => r.op === "register").map((r) => r.agent).sort()).toEqual([crewA, crewB].sort());
     // the registry lists them like any agent, minus anything secret
-    expect((await agents.listAgents(pool)).filter((a) => a.id === crewA).map((a) => ({ kind: a.kind, grants: a.grants }))).toEqual([{ kind: "crew", grants: { tier: "areas", areas: ["Knowledge/Projects"] } }]);
+    expect((await agents.listAgents(pool)).filter((a) => a.id === crewA).map((a) => ({ kind: a.kind, grants: a.grants }))).toEqual([{ kind: "crew", grants: { tier: "areas", areas: ["Projects"] } }]);
   });
 
   it("second sync is a no-op: same rows, same token hashes, no new audit rows", async () => {
@@ -119,13 +119,13 @@ describe.skipIf(!hasDb)("crews (integration)", () => {
 
   it("a changed manifest re-syncs grants/projects only (hash untouched); a removed one is revoked; a foreign id is a conflict, never overwritten", async () => {
     const before = await rowsOf();
-    await vault.write(`agents/itest/${crewA}.md`, Buffer.from(crewFile(crewA, { scope: ["Knowledge/Projects", "Knowledge/Techniques"], projects: ["itest-q"], autonomy: { may_dispatch_to: [crewB] } })), intent);
+    await vault.write(`agents/itest/${crewA}.md`, Buffer.from(crewFile(crewA, { scope: ["Projects", "Techniques"], projects: ["itest-q"], autonomy: { may_dispatch_to: [crewB] } })), intent);
     await vault.delete(`agents/itest/${crewB}.md`, intent);
     await vault.write(`agents/itest/${externalId}.md`, Buffer.from(crewFile(externalId)), intent); // same slug as the external agent registered above
     const s = await registry.refresh();
     expect(s).toEqual({ registered: [], resynced: [crewA], revoked: [crewB], conflicts: [externalId] });
     const after = await rowsOf();
-    expect(after[0]).toMatchObject({ grants: { tier: "areas", areas: ["Knowledge/Projects", "Knowledge/Techniques"] }, projects: ["itest-q"], autonomy: { may_dispatch_to: [crewB] }, token_hash: before[0]!.token_hash, revoked_at: null });
+    expect(after[0]).toMatchObject({ grants: { tier: "areas", areas: ["Projects", "Techniques"] }, projects: ["itest-q"], autonomy: { may_dispatch_to: [crewB] }, token_hash: before[0]!.token_hash, revoked_at: null });
     expect(after[1]!.revoked_at).not.toBeNull();
     const ext = (await pool.query(`SELECT kind, revoked_at FROM agents WHERE id = $1`, [externalId])).rows[0];
     expect(ext).toEqual({ kind: "external", revoked_at: null }); // the external agent's row is exactly as it was
@@ -137,38 +137,38 @@ describe.skipIf(!hasDb)("crews (integration)", () => {
     expect(ops).toContain(`${externalId}:conflict:false`);
     // restore B for the dispatch tests
     await vault.delete(`agents/itest/${externalId}.md`, intent);
-    await vault.write(`agents/itest/${crewB}.md`, Buffer.from(crewFile(crewB, { projects: ["itest-p"], scope: ["Knowledge/Resources"] })), intent);
+    await vault.write(`agents/itest/${crewB}.md`, Buffer.from(crewFile(crewB, { projects: ["itest-p"], scope: ["Resources"] })), intent);
     const back = await registry.refresh();
     expect(back.resynced).toEqual([crewB]); // revocation cleared, same hash
     expect((await rowsOf())[1]).toMatchObject({ revoked_at: null, token_hash: before[1]!.token_hash });
   });
 
   it("agents_delegate: an external agent is told not granted; the assistant's brief outside scope is refused with violations and NO work row", async () => {
-    const ext = await call("agents_delegate", { crew: crewA, brief: "read Knowledge/Projects/X.md" }, externalToken);
+    const ext = await call("agents_delegate", { crew: crewA, brief: "read Projects/X.md" }, externalToken);
     expect(ext).toEqual({ isError: true, body: { error: { code: "forbidden", message: "not granted" } } });
 
-    const bad = await call("agents_delegate", { crew: crewA, brief: "Compare Knowledge/Projects/X.md with Knowledge/Me/profile.md" }, assistantToken);
+    const bad = await call("agents_delegate", { crew: crewA, brief: "Compare Projects/X.md with Me/profile.md" }, assistantToken);
     expect(bad.isError).toBe(true);
     expect(bad.body.error.code).toBe("invalid_request");
-    expect(bad.body.error.message).toContain("Knowledge/Me/profile.md"); // the assistant sees WHICH path to remove
+    expect(bad.body.error.message).toContain("Me/profile.md"); // the assistant sees WHICH path to remove
     expect(bad.body.error.message).toContain("path_outside_allow");
     expect((await pool.query(`SELECT count(*)::int AS n FROM work WHERE owner = $1`, [`crew:${crewA}`])).rows[0].n).toBe(0);
     const refusal = (await pool.query(`SELECT ok, error, meta FROM runs WHERE kind = 'dispatch' AND tool = 'local-crew' AND meta->>'crew' = $1 ORDER BY id DESC LIMIT 1`, [crewA])).rows[0];
     expect(refusal).toMatchObject({ ok: false, error: "data_policy: path_outside_allow" });
-    expect(refusal.meta.violations[0]).toMatchObject({ kind: "path_outside_allow", paths: ["Knowledge/Me/profile.md"] });
+    expect(refusal.meta.violations[0]).toMatchObject({ kind: "path_outside_allow", paths: ["Me/profile.md"] });
     // the tool call itself is audited on the assistant, like every tool call
     const toolRun = (await pool.query(`SELECT ok, error FROM runs WHERE component = $1 AND kind = 'tool' AND tool = 'agents_delegate' ORDER BY id DESC LIMIT 1`, [assistantId])).rows[0];
     expect(toolRun).toEqual({ ok: false, error: "invalid_request" });
   });
 
   it("agents_delegate: a clean brief becomes ONE durable work row (kind task, owner crew:<name>, project NULL, brief + snapshot in meta); idempotent on the key", async () => {
-    const brief = "# Summarize the X plan\n\nRead Knowledge/Projects/X.md and report the open questions.";
+    const brief = "# Summarize the X plan\n\nRead Projects/X.md and report the open questions.";
     const r = await call("agents_delegate", { crew: crewA, brief, task_id: 1, idempotency_key: `itest-${suffix}` }, assistantToken);
     expect(r.isError).toBe(false);
-    expect(r.body).toMatchObject({ queued: true, crew: crewA, allow: ["Knowledge/Projects", "Knowledge/Techniques"], deduplicated: false });
+    expect(r.body).toMatchObject({ queued: true, crew: crewA, allow: ["Projects", "Techniques"], deduplicated: false });
     const row = (await pool.query(`SELECT id, kind, status, owner, project, claimed_by, created_by, meta, title FROM work WHERE id = $1`, [r.body.work_id])).rows[0];
     expect(row).toMatchObject({ kind: "task", status: "open", owner: `crew:${crewA}`, project: null, claimed_by: null, created_by: assistantId, title: `[crew:${crewA}] Summarize the X plan` });
-    expect(row.meta).toMatchObject({ target: "local-crew", brief, task_id: 1, allow: ["Knowledge/Projects", "Knowledge/Techniques"] });
+    expect(row.meta).toMatchObject({ target: "local-crew", brief, task_id: 1, allow: ["Projects", "Techniques"] });
     expect(row.meta.crew).toMatchObject({ name: crewA, model: "haiku", uses: ["brain-read", "brain-report"], max_turns: 12, budget_usd_per_run: 0.5 });
     expect(row.meta.crew.prompt).toBe("You work for {{name}}. Report what you find.");
     expect(row.meta.brief_sha).toMatch(/^[0-9a-f]{64}$/);
@@ -202,6 +202,6 @@ describe.skipIf(!hasDb)("crews (integration)", () => {
     expect(r.isError).toBe(true);
     expect(r.body.error).toMatchObject({ code: "not_found", message: expect.stringContaining(crewA) });
     const def = parseCrewFile(crewFile(crewA), "x", { area: "itest", name: crewA });
-    expect(def.grants).toEqual({ tier: "areas", areas: ["Knowledge/Projects"] });
+    expect(def.grants).toEqual({ tier: "areas", areas: ["Projects"] });
   });
 });

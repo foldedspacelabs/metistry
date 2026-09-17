@@ -13,7 +13,7 @@ const researcher = {
   model: "haiku",
   description: "Reads the granted areas and reports findings",
   uses: ["brain-read", "brain-report"],
-  scope: ["Knowledge/Projects", "Knowledge/Resources"],
+  scope: ["Projects", "Resources"],
   projects: ["example"],
   max_turns: 10,
   budget_usd_per_run: 0.25,
@@ -53,9 +53,9 @@ describe("crew manifest schema", () => {
     expect(errorsOf({ ...researcher, model: undefined })).toMatch(/model/);
   });
 
-  it("scope is Knowledge/ prefixes below the root, no traversal, no trailing slash", () => {
-    expect(errorsOf({ ...researcher, scope: ["Knowledge/Areas/Fsl"] })).toBe("");
-    for (const bad of ["Knowledge", "Knowledge/", "knowledge/Areas", "Areas/fsl", "Knowledge/../x", "Knowledge/Projects/"]) {
+  it("scope is TitleCase vault prefixes, no bare vault, no traversal, no trailing slash", () => {
+    expect(errorsOf({ ...researcher, scope: ["Areas/Fsl"] })).toBe("");
+    for (const bad of ["/", "areas/Fsl", "Areas/../x", "Projects/", ".metistry/agents", "Artifacts/bundle-1"]) {
       expect(errorsOf({ ...researcher, scope: [bad] }), bad).toMatch(/scope/);
     }
   });

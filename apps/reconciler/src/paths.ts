@@ -4,10 +4,11 @@
 
 import { lstat, readdir, realpath } from "node:fs/promises";
 import { join, sep } from "node:path";
+import { INSTANCE_LAYOUT, NON_VAULT_ROOTS, PROTECTED_ROOT_FILES, isProtectedPath } from "@foldedspacelabs/metistry-core";
 
 export type PathRefusal =
   | "invalid_request" // malformed / traversal / absolute / bad casing / control chars
-  | "forbidden"; // .git, instance-migrations/, symlink component, outside the repo
+  | "forbidden"; // .git, .metistry/instance-migrations/, symlink component, outside the repo
 
 export interface Confined {
   /** Vault-relative POSIX path exactly as it will be stored. */
@@ -25,21 +26,30 @@ const MAX_SEGMENT = 255;  // limit: fixed — every filesystem we target stops a
 // in a segment (Obsidian/macOS both mangle those).
 const BAD_CHARS = /[\x00-\x1f\x7f\\]/;
 
-/** §4.7 protected paths — the user's hand only. Prefix match on `instance-migrations/`. */
-export const PROTECTED_FILES = new Set([
-  "identity.yaml",
-  "assistant-prompt.md", // the D4 system-prompt overlay: how the assistant behaves = the user's hand (invariant 2)
-  "rules.yaml",
-  "sources.yaml",
-  "deployment.yaml",
-  "metistry.lock",
-  "CLAUDE.md",
-]);
-export const PROTECTED_DIRS = ["instance-migrations", "queries", "agents", "routines", "extensions"];
+/**
+ * §4.7 protected paths — the user's hand only. The set is no longer a list
+ * of filenames: since the 2026-09-17 layout it is a PLACE. Everything under
+ * `.metistry/` defines how the system behaves, except `.metistry/state/`,
+ * which is derived; plus the two root files (`CLAUDE.md`, `README.md`).
+ * Stated once in core (isProtectedPath) and enforced here.
+ */
+export const PROTECTED_ROOT = INSTANCE_LAYOUT.metistryDir;
+export { PROTECTED_ROOT_FILES };
 
 /** Never writable by anyone through the bridge: git's own state and the schema dir. */
 const NEVER_WRITABLE_SEGMENTS = new Set([".git"]);
-const NEVER_WRITABLE_DIRS = ["instance-migrations"];
+const NEVER_WRITABLE_PREFIXES = [INSTANCE_LAYOUT.instanceMigrationsDir];
+
+/**
+ * Root names whose casing the bridge pins. On a case-insensitive filesystem
+ * `inbox/x.md` and `Inbox/x.md` are the same file; on a Linux container they
+ * are two. The general sibling/realpath checks in `confine` catch a collision
+ * with something that EXISTS — this catches the first write, before the
+ * directory is there to collide with.
+ */
+const PINNED_ROOTS = new Map<string, string>(
+  [...NON_VAULT_ROOTS, INSTANCE_LAYOUT.inboxDir, ...PROTECTED_ROOT_FILES].map((n) => [n.toLowerCase(), n]),
+);
 
 export const PRINCIPAL_RE = /^[a-z][a-z0-9-]{0,39}$/;
 /** The one principal allowed to change how the system behaves (§4.7). */
@@ -57,20 +67,20 @@ export function parseVaultPath(input: unknown): { ok: true; segments: string[]; 
     if (s.length > MAX_SEGMENT || s !== s.trim()) return { ok: false, code: "invalid_request" };
     if (NEVER_WRITABLE_SEGMENTS.has(s.toLowerCase())) return { ok: false, code: "forbidden" };
   }
-  // Casing rule (CLAUDE.md): the vault directory is exactly `Knowledge`.
-  // macOS would happily write `knowledge/x.md` into `Knowledge/`; a Linux
-  // container would then have two directories. Refuse at the tool.
+  // Casing rule (CLAUDE.md), now at the ROOT: the instance directory is the
+  // vault, so `Inbox`, `Artifacts` and `.metistry` are spelled exactly that
+  // way or not at all.
   const first = segments[0]!;
-  if (first.toLowerCase() === "knowledge" && first !== "Knowledge") return { ok: false, code: "invalid_request" };
-  if (NEVER_WRITABLE_DIRS.includes(first)) return { ok: false, code: "forbidden" };
-  return { ok: true, segments, rel: segments.join("/") };
+  const pinned = PINNED_ROOTS.get(first.toLowerCase());
+  if (pinned !== undefined && pinned !== first) return { ok: false, code: "invalid_request" };
+  const rel = segments.join("/");
+  if (NEVER_WRITABLE_PREFIXES.some((p) => rel === p || rel.startsWith(`${p}/`))) return { ok: false, code: "forbidden" };
+  return { ok: true, segments, rel };
 }
 
-/** True iff `rel` is in the §4.7 protected set (files or directory prefixes). */
+/** True iff `rel` is in the §4.7 protected set. One rule, stated in core. */
 export function isProtected(rel: string): boolean {
-  if (PROTECTED_FILES.has(rel)) return true;
-  const first = rel.split("/")[0]!;
-  return PROTECTED_DIRS.includes(first);
+  return isProtectedPath(rel);
 }
 
 /**
@@ -78,7 +88,7 @@ export function isProtected(rel: string): boolean {
  * rules: every EXISTING component is lstat'ed and must not be a symlink,
  * and the realpath of the existing prefix must equal its nominal path —
  * which also catches a case-mismatched prefix on a case-insensitive
- * filesystem (`Knowledge/areas/…` when `Knowledge/Areas/` exists).
+ * filesystem (`areas/…` when `Areas/` exists).
  */
 export async function confine(repoRoot: string, input: unknown): Promise<{ ok: true; path: Confined } | { ok: false; code: PathRefusal }> {
   const parsed = parseVaultPath(input);

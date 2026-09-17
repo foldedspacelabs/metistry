@@ -80,7 +80,7 @@ describe("knowledge-fold anchor and enqueue", () => {
     expect(inbound!.values[0]).toBe("fold");
     const text = String(inbound!.values[1]);
     expect(text.startsWith(BRIEF_PREFIX)).toBe(true);
-    expect(text).toContain("Knowledge/Journal/2026-09-09.md");
+    expect(text).toContain("Journal/2026-09-09.md");
     expect(text).toContain("proposal #41 — Drey rebrand starts Oct 1");
     expect(text).toContain("work #12 — EventKit bridge");
     expect(text).toContain("art_1 ver_2 — v3: tighten the positioning");

@@ -68,15 +68,15 @@ describe("the stubbed tool surface (the misuse test)", () => {
   it("records a call and returns the fixed stub — there is no host, client or token in scope to execute it against", async () => {
     const host = shadowToolHost(TOOLS, new Map());
     expect(await host.list()).toEqual(TOOLS);
-    const out = await host.call("mcp__brain__knowledge_write", { path: "Knowledge/Areas/x.md", text: "hi" });
+    const out = await host.call("mcp__brain__knowledge_write", { path: "Areas/x.md", text: "hi" });
     expect(out).toEqual({ text: SHADOW_STUB_RESULT, isError: false });
-    expect(host.calls).toEqual([{ name: "mcp__brain__knowledge_write", args: { path: "Knowledge/Areas/x.md", text: "hi" }, executed: false, result_from: "stub" }]);
+    expect(host.calls).toEqual([{ name: "mcp__brain__knowledge_write", args: { path: "Areas/x.md", text: "hi" }, executed: false, result_from: "stub" }]);
   });
 
   it("hands back the REAL run's result for the identical call, and the stub for anything else", async () => {
-    const recorded = new Map([[toolCallKey("mcp__brain__knowledge_search", { q: "folds" }), "Knowledge/Areas/folds.md"]]);
+    const recorded = new Map([[toolCallKey("mcp__brain__knowledge_search", { q: "folds" }), "Areas/folds.md"]]);
     const host = shadowToolHost(TOOLS, recorded);
-    expect((await host.call("mcp__brain__knowledge_search", { q: "folds" })).text).toBe("Knowledge/Areas/folds.md");
+    expect((await host.call("mcp__brain__knowledge_search", { q: "folds" })).text).toBe("Areas/folds.md");
     expect((await host.call("mcp__brain__knowledge_search", { q: "FOLDS" })).text).toBe(SHADOW_STUB_RESULT); // different arguments are a different call
     expect(host.calls.map((c) => c.result_from)).toEqual(["real_run", "stub"]);
   });
@@ -94,10 +94,10 @@ describe("the stubbed tool surface (the misuse test)", () => {
       async close() {},
     };
     const run = await runShadow(
-      input(client([{ calls: [{ id: "c1", name: "mcp__brain__knowledge_write", args: { path: "Knowledge/Areas/x.md" } }] }, { text: "written" }])),
+      input(client([{ calls: [{ id: "c1", name: "mcp__brain__knowledge_write", args: { path: "Areas/x.md" } }] }, { text: "written" }])),
     );
     expect(real.calls).toBe(0);
-    expect(run.shadow.tool_calls).toEqual([{ name: "mcp__brain__knowledge_write", args: { path: "Knowledge/Areas/x.md" }, executed: false, result_from: "stub" }]);
+    expect(run.shadow.tool_calls).toEqual([{ name: "mcp__brain__knowledge_write", args: { path: "Areas/x.md" }, executed: false, result_from: "stub" }]);
     expect(run.shadow.text).toBe("written");
   });
 });

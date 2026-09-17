@@ -52,11 +52,11 @@ function fakeVault(): CaptureVault & { writes: Array<{ path: string; bytes: numb
 
 describe("placeCapture", () => {
   it("prefixes the vault inbox and spills over the threshold into .large/", () => {
-    expect(placeCapture("1-a.md", 10, { prefix: INBOX_PREFIX })).toBe("Knowledge/Inbox/1-a.md");
+    expect(placeCapture("1-a.md", 10, { prefix: INBOX_PREFIX })).toBe("Inbox/1-a.md");
     expect(placeCapture("1-a.md", 10, {})).toBe("1-a.md"); // a bare directory: the filename alone, as before the move
-    expect(placeCapture("1-big.mov", 6 * 1024 * 1024, { prefix: INBOX_PREFIX })).toBe("Knowledge/Inbox/.large/1-big.mov");
-    expect(placeCapture("1-big.mov", 6 * 1024 * 1024, { prefix: INBOX_PREFIX, maxTrackedBytes: 0 })).toBe("Knowledge/Inbox/1-big.mov"); // 0 = never spill
-    expect(placeCapture("1-a.md", 100, { prefix: INBOX_PREFIX, maxTrackedBytes: 50 })).toBe("Knowledge/Inbox/.large/1-a.md");
+    expect(placeCapture("1-big.mov", 6 * 1024 * 1024, { prefix: INBOX_PREFIX })).toBe("Inbox/.large/1-big.mov");
+    expect(placeCapture("1-big.mov", 6 * 1024 * 1024, { prefix: INBOX_PREFIX, maxTrackedBytes: 0 })).toBe("Inbox/1-big.mov"); // 0 = never spill
+    expect(placeCapture("1-a.md", 100, { prefix: INBOX_PREFIX, maxTrackedBytes: 50 })).toBe("Inbox/.large/1-a.md");
   });
 });
 
@@ -69,18 +69,18 @@ describe("vaultSink", () => {
     expect(vault.writes).toHaveLength(1);
     expect(vault.writes[0]!.expected).toBe(""); // "must not exist" — never over a human's file
     expect(vault.writes[0]!.principal).toBe("capture");
-    expect(vault.writes[0]!.path).toMatch(/^Knowledge\/Inbox\/\d+-note\.md$/);
+    expect(vault.writes[0]!.path).toMatch(/^Inbox\/\d+-note\.md$/);
     expect(r.path).toBe(vault.writes[0]!.path);
     const insert = db.calls.find((c) => c.text.includes("INSERT INTO inbox"))!;
     expect(insert.values[1]).toBe(r.path); // the row records the repo-relative path
-    expect(insert.text).toContain("ON CONFLICT (path) WHERE path LIKE 'Knowledge/Inbox/%'"); // the scan may have inserted first
+    expect(insert.text).toContain("ON CONFLICT (path) WHERE path LIKE 'Inbox/%'"); // the scan may have inserted first
   });
 
   it("puts an oversized capture in .large/ and probes by listing the prefix", async () => {
     const vault = fakeVault();
     const sink = vaultSink(vault, { maxTrackedBytes: 8 });
     const r = await captureToInbox(fakeDb(), sink, { bytes: Buffer.alloc(64), filename: "clip.mov", source: "share", sourceAgent: null });
-    expect(r.path).toMatch(/^Knowledge\/Inbox\/\.large\/\d+-clip\.mov$/);
+    expect(r.path).toMatch(/^Inbox\/\.large\/\d+-clip\.mov$/);
     await sink.check();
     expect(vault.listed).toEqual([INBOX_PREFIX]);
   });
@@ -97,7 +97,7 @@ describe("dirSink", () => {
 
   it("writes the bytes and records the prefixed path; a bare directory keeps the old bare name", async () => {
     const prefixed = await captureToInbox(fakeDb(), dirSink(dir, { prefix: INBOX_PREFIX }), { bytes: Buffer.from("x"), filename: "a.md", source: "http", sourceAgent: null });
-    expect(prefixed.path).toMatch(/^Knowledge\/Inbox\/\d+-a\.md$/);
+    expect(prefixed.path).toMatch(/^Inbox\/\d+-a\.md$/);
     expect(await readFile(join(dir, prefixed.path.slice(INBOX_PREFIX.length + 1)), "utf8")).toBe("x");
 
     const bare = await captureToInbox(fakeDb(), dir, { bytes: Buffer.from("y"), filename: "b.md", source: "http", sourceAgent: null });
@@ -107,7 +107,7 @@ describe("dirSink", () => {
 
   it("sanitizes a hostile filename — no traversal out of the inbox", async () => {
     const r = await captureToInbox(fakeDb(), dirSink(dir, { prefix: INBOX_PREFIX }), { bytes: Buffer.from("z"), filename: "../../etc/passwd", source: "http", sourceAgent: null });
-    expect(r.path).toMatch(/^Knowledge\/Inbox\/\d+-_+etc_passwd$/);
+    expect(r.path).toMatch(/^Inbox\/\d+-_+etc_passwd$/);
     expect((await readdir(dir)).some((f) => f.includes("etc_passwd"))).toBe(true);
   });
 });

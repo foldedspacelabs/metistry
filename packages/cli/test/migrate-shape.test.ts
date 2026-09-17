@@ -60,19 +60,21 @@ async function releaseTree(): Promise<{ P: string; runDir: string }> {
 }
 
 async function instance(opts: { release?: boolean } = {}): Promise<string> {
-  const I = await mkdtemp(join(tmpdir(), "metistry-inst-"));
-  await mkdir(join(I, "state"), { recursive: true });
-  await writeFile(join(I, "state", ".env"), "METISTRY_ORIGIN=https://studio.ts.net\n");
+  const I = await mkdtemp(join(tmpdir(), "mi-" /* short on purpose: the supervisor socket under .metistry/state/run/ has ~103 bytes to live in */));
+  await mkdir(join(I, ".metistry", "state"), { recursive: true });
+  await mkdir(join(I, ".metistry"), { recursive: true });
+    await writeFile(join(I, ".metistry", "state", ".env"), "METISTRY_ORIGIN=https://studio.ts.net\n");
   // what `up` leaves behind under the launchd shape: the supervisor's child
   // list. The apple-fm bridge is a CHILD now, so its TCC-helper override goes
   // here rather than into a plist of its own.
+  await mkdir(join(I, ".metistry"), { recursive: true });
   await writeFile(
-    join(I, "state", "supervisor.json"),
+      join(I, ".metistry", "state", "supervisor.json"),
     JSON.stringify(
       {
         schema: 1,
         label: "com.foldedspacelabs.metistry",
-        socket: join(I, "state", "run", "supervisor.sock"),
+        socket: join(I, ".metistry", "state", "run", "supervisor.sock"),
         token: "0".repeat(64),
         env: {},
         children: [
@@ -85,8 +87,9 @@ async function instance(opts: { release?: boolean } = {}): Promise<string> {
     ),
   );
   if (opts.release) {
-    await writeFile(
-      join(I, "metistry.lock"),
+    await mkdir(join(I, ".metistry"), { recursive: true });
+  await writeFile(
+      join(I, ".metistry", "metistry.lock"),
       'product:\n  version: "0.5.1"\n  commit: "abc"\n  source: release\nupdated_at: "2026-09-10T00:00:00.000Z"\nmigrations_applied: []\n',
     );
   }
@@ -213,9 +216,9 @@ describe("metistry migrate-shape launchd --dry-run", () => {
 
     expect(r.code).toBe(0);
     expect(exec.calls).toEqual([]); // a dry run runs nothing at all
-    const dump = `${I}/state/migrate/${TS}.dump`;
-    const dc = (args: string[]) => formatCommand("docker", ["compose", "--env-file", `${I}/state/.env`, ...args], P);
-    const conn = ["-h", `${I}/state/run`, "-p", "5432", "-U", "metistry", "-d", "metistry"];
+    const dump = `${I}/.metistry/state/migrate/${TS}.dump`;
+    const dc = (args: string[]) => formatCommand("docker", ["compose", "--env-file", `${I}/.metistry/state/.env`, ...args], P);
+    const conn = ["-h", `${I}/.metistry/state/run`, "-p", "5432", "-U", "metistry", "-d", "metistry"];
     expect(r.commands).toEqual([
       dc(["ps", "-q", "db"]),
       // the writers stop BEFORE the dump, so nothing is written into the gap
@@ -225,7 +228,7 @@ describe("metistry migrate-shape launchd --dry-run", () => {
       // generated — the step is still in the plan, described
       `${DRY_RUN_COUNTS}, through the db container — the counts the restore is checked against`,
       dc(["exec", "-T", "db", "pg_dump", "-U", "metistry", "-d", "metistry", "--format=custom", "--compress=6", "--file", `/tmp/metistry-migrate-${TS}.dump`]),
-      `mkdir -p ${I}/state/migrate`,
+      `mkdir -p ${I}/.metistry/state/migrate`,
       dc(["cp", `db:/tmp/metistry-migrate-${TS}.dump`, dump]),
       dc(["exec", "-T", "db", "rm", "-f", `/tmp/metistry-migrate-${TS}.dump`]),
       `${PG}/pg_restore --list ${dump}`,
@@ -369,8 +372,9 @@ describe("refusals — every one of them while the old shape is still up", () =>
   it("refuses a namespaced instance whose compose project is not namespaced — it would stop another install's containers", async () => {
     const P = await productTree();
     const I = await instance();
-    await writeFile(
-      join(I, "state", "ports.yaml"),
+    await mkdir(join(I, ".metistry"), { recursive: true });
+  await writeFile(
+      join(I, ".metistry", "state", "ports.yaml"),
       'schema: 1\ninstance_id: "e5dbfa9c-0000-4000-8000-000000000000"\nlabel_suffix: "e5dbfa9c"\nbase: 8460\nports:\n  console: 8460\n  db: 8461\n  reconciler: 8462\n  eventkit: 8463\n  apple-fm: 8464\n',
     );
     const lines: string[] = [];
@@ -384,8 +388,9 @@ describe("refusals — every one of them while the old shape is still up", () =>
   it("a namespaced instance WITH its own compose project passes -p on every docker call", async () => {
     const P = await productTree();
     const I = await instance();
-    await writeFile(
-      join(I, "state", "ports.yaml"),
+    await mkdir(join(I, ".metistry"), { recursive: true });
+  await writeFile(
+      join(I, ".metistry", "state", "ports.yaml"),
       'schema: 1\ninstance_id: "e5dbfa9c-0000-4000-8000-000000000000"\nlabel_suffix: "e5dbfa9c"\nbase: 8460\nports:\n  console: 8460\n  db: 8461\n  reconciler: 8462\n  eventkit: 8463\n  apple-fm: 8464\n',
     );
     const r = await run({
@@ -581,15 +586,15 @@ describe("both directions compensate a failed `up` so the install is never left 
     const failingUp = async (o: UpOptions): Promise<UpResult> => ({ code: 1, source: "release", commands: [`up(${o.deployment?.shape}) FAILED`] });
     const r = await run({ productDir: P, env: env(I), exec: liveCompose(), exists: ready(P), upFn: failingUp, out: (l) => lines.push(l) });
     expect(r.code).toBe(1);
-    const dc = (args: string[]) => formatCommand("docker", ["compose", "--env-file", `${I}/state/.env`, ...args], P);
-    const dump = `${I}/state/migrate/${TS}.dump`;
+    const dc = (args: string[]) => formatCommand("docker", ["compose", "--env-file", `${I}/.metistry/state/.env`, ...args], P);
+    const dump = `${I}/.metistry/state/migrate/${TS}.dump`;
     expect(r.commands).toEqual([
       dc(["ps", "-q", "db"]),
       dc(["stop", "console", "assistant"]),
       dc(["exec", "-T", "db", "psql", "-U", "metistry", "-d", "metistry", "-tA", "--no-psqlrc", "-c", TABLE_LIST_SQL]),
       dc(["exec", "-T", "db", "psql", "-U", "metistry", "-d", "metistry", "-tA", "--no-psqlrc", "-c", COUNTS_SQL]),
       dc(["exec", "-T", "db", "pg_dump", "-U", "metistry", "-d", "metistry", "--format=custom", "--compress=6", "--file", `/tmp/metistry-migrate-${TS}.dump`]),
-      `mkdir -p ${I}/state/migrate`,
+      `mkdir -p ${I}/.metistry/state/migrate`,
       dc(["cp", `db:/tmp/metistry-migrate-${TS}.dump`, dump]),
       dc(["exec", "-T", "db", "rm", "-f", `/tmp/metistry-migrate-${TS}.dump`]),
       `${PG}/pg_restore --list ${dump}`,
@@ -607,7 +612,7 @@ describe("a second forward run — a leftover launchd data directory from a roll
   it("moves state/pg aside, never deleting it, before `up` initdbs a fresh one", async () => {
     const P = await productTree();
     const I = await instance();
-    const pgDir = join(I, "state", "pg");
+    const pgDir = join(I, ".metistry", "state", "pg");
     const r = await run({
       productDir: P,
       env: env(I),

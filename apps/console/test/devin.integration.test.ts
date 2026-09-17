@@ -65,7 +65,7 @@ describe.skipIf(!hasDb)("devin-sessions target (integration)", () => {
     await targets.loadDir(`${root}targets`);
     // The instance overlay (D4) is what widens the empty product allow list;
     // here it is done inline so the policy under test is a real one.
-    targets.add({ ...targets.get("devin-sessions")!, data_policy: { allow: ["Knowledge/Projects"], deny_sources: ["comms", "devin"], max_brief_bytes: 16384 } });
+    targets.add({ ...targets.get("devin-sessions")!, data_policy: { allow: ["Projects"], deny_sources: ["comms", "devin"], max_brief_bytes: 16384 } });
     server = makeServer(pool, new QueryStore(pool), {
       origin: "http://127.0.0.1:0",
       inboxDir: `/tmp/metistry-test-inbox-${Date.now()}`,
@@ -114,14 +114,14 @@ describe.skipIf(!hasDb)("devin-sessions target (integration)", () => {
 
   it("a knowledge-research dispatch creates the session, binds devin:<id>, and freezes what the poller needs", async () => {
     const id = await newTask("what deploys the payments service");
-    const res = await dispatchAs({ cookie: session }, id, { brief: "Answer from Knowledge/Projects/payments.md context.", purpose: "knowledge_research", max_acu: 3 });
+    const res = await dispatchAs({ cookie: session }, id, { brief: "Answer from Projects/payments.md context.", purpose: "knowledge_research", max_acu: 3 });
     expect(res.status).toBe(201);
     const body = (await res.json()) as { ref: string; url: string; run_id: number };
     expect(body.ref).toBe(`devin:devin-${RUN}-${devin.next - 1}`);
 
     const sent = devin.posts.at(-1)!;
     expect(String(sent.prompt)).toContain("**Knowledge research.**");
-    expect(String(sent.prompt)).toContain("Answer from Knowledge/Projects/payments.md context.");
+    expect(String(sent.prompt)).toContain("Answer from Projects/payments.md context.");
     expect(sent.max_acu_limit).toBe(3);
     expect(sent.structured_output_required).toBe(true);
     expect((sent.structured_output_schema as { $schema: string }).$schema).toContain("draft-07");
@@ -191,14 +191,14 @@ describe.skipIf(!hasDb)("devin-sessions target (integration)", () => {
   it("a brief that cites outside the overlay's allow list never leaves, and the refusal is a runs row", async () => {
     const id = await newTask("policy refusal");
     const before = devin.posts.length;
-    const res = await dispatchAs({ cookie: session }, id, { brief: "Summarize Knowledge/Journal/Daily/2026-09-15.md", purpose: "knowledge_research" });
+    const res = await dispatchAs({ cookie: session }, id, { brief: "Summarize Journal/Daily/2026-09-15.md", purpose: "knowledge_research" });
     expect(res.status).toBe(400);
     expect((await res.json()).violations[0].kind).toBe("path_outside_allow");
     expect(devin.posts).toHaveLength(before);
     expect((await row(id)).external_ref).toBeNull();
     const { rows } = await pool.query(`SELECT ok, error, meta FROM runs WHERE kind = 'dispatch' AND tool = 'devin-sessions' AND ok = false ORDER BY id DESC LIMIT 1`);
     expect(rows[0].error).toMatch(/^data_policy: path_outside_allow$/);
-    expect(rows[0].meta.violations[0].paths).toEqual(["Knowledge/Journal/Daily/2026-09-15.md"]);
+    expect(rows[0].meta.violations[0].paths).toEqual(["Journal/Daily/2026-09-15.md"]);
   });
 
   it("GET /api/targets lists the target with its live check", async () => {

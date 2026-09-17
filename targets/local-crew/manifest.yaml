@@ -34,10 +34,10 @@ data_policy:
   # Personal roots (Journal, People, Me, Decisions) are absent on purpose:
   # widen per instance in an overlay dir (METISTRY_TARGETS_DIRS), never here.
   allow:
-    - Knowledge/Areas
-    - Knowledge/Projects
-    - Knowledge/Resources
-    - Knowledge/Techniques
+    - Areas
+    - Projects
+    - Resources
+    - Techniques
   # comms-derived text stays out of briefs even locally: a crew's brief is a
   # reviewable artifact (§4.11) and the assistant can read the thread itself
   deny_sources:

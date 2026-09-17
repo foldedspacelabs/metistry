@@ -22,10 +22,10 @@ description: Reads the granted project and resource notes and reports what it fi
 # accepted. knowledge_write is not a group: sub-agents never write knowledge.
 uses: [knowledge, requests]
 skills: []                    # recorded; skills bind here once skills/ exists (§4.4)
-# Read tier (§4.11): TitleCase Knowledge/ prefixes. Every dispatch is checked
+# Read tier (§4.11): TitleCase vault prefixes. Every dispatch is checked
 # against scope ∩ the local-crew target's allow list; a brief citing a path
 # outside it is refused before anything runs.
-scope: [Knowledge/Projects, Knowledge/Resources]
+scope: [Projects, Resources]
 projects: []                  # shared-list membership (§4.19); empty = none
 manages: []                   # hierarchy lives here, not in directory depth
 max_turns: 10                 # agentic turns per run

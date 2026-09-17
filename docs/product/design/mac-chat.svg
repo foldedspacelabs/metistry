@@ -20,7 +20,7 @@
 
   <rect width="1000" height="940" fill="#ffffff"/>
   <text x="24" y="30" class="h2">macOS — Chat</text>
-  <text x="24" y="50" class="t2">The first of the seven sections · collapsed tool activity · explicit turn state · per-turn model and effort picker in the toolbar</text>
+  <text x="24" y="50" class="t2">The first of the six sections · collapsed tool activity · explicit turn state · per-turn model and effort picker in the toolbar</text>
 
   <rect class="win" x="24" y="66" width="720" height="770" rx="12"/>
   <path class="ln" d="M24 104 H744"/>
@@ -146,6 +146,6 @@
 
   <text x="770" y="900" class="hd">Reduced Motion · P9</text>
   <text x="770" y="920" class="lg">Disclosure opens instantly; a poll is a repaint, not a navigation.</text>
-  <text x="24" y="858" class="t3">Shell — seven sections: <tspan font-weight="600">Chat</tspan> · Feed · Needs You · Work · Knowledge · Agents · System · Capture is the ＋ (⌘N), not a tab</text>
+  <text x="24" y="858" class="t3">Shell — six sections: <tspan font-weight="600">Chat</tspan> · Feed · Work ▸ · Knowledge ▸ · Agents · Insights, then Pinned · capture is the ＋ (⌘N), Needs You the 🔔 — neither is a place</text>
   <text x="24" y="880" class="t3">docs/product/design-system.md §3.4 chat message · §3.5 prompt card · §3.6 composer actions menu, autocomplete and the ⌘K palette · §3.7 model picker · §4 reply text</text>
 </svg>

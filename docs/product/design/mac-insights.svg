@@ -1,0 +1,177 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 800" width="1000" height="800" role="img" aria-labelledby="ttl desc">
+  <title id="ttl">macOS — Insights: what the instance did, measured</title>
+  <desc id="desc">Annotated wireframe of the Insights section, which is what is left of the old System section once status, compute, devices and instances became Settings panes and setup became an app-menu item. Spend tiles for today and the month against the cap, thirty days of spend as bars with the days that crossed the daily limit tinted, run counts with failures and the worst failure streak, shadow-mode agreement between the local and hosted models with its sample size, and token and latency trends per tier. Nothing on this screen is a control: every number is read, and the thing that would change it lives in Settings.</desc>
+  <style>
+    text { font-family: -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", Roboto, sans-serif; fill: #12171c; font-size: 13px; }
+    .t2 { fill: #4d565f; font-size: 12px } .t3 { fill: #646d77; font-size: 11px }
+    .hd { font-size: 15px; font-weight: 600 } .h2 { font-size: 20px; font-weight: 700 }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px }
+    .ln { stroke: #d9dee4; stroke-width: 1; fill: none }
+    .win { fill: #f6f7f9; stroke: #b6bec8 }
+    .sf { fill: #ffffff; stroke: #d9dee4 }
+    .sel { fill: #e6edfc } .snk { fill: #eef0f3; stroke: #d9dee4 } .agq { fill: #f1ecfc }
+    .acc { fill: #2b5fd0 } .ag { fill: #6a4bbd } .ok { fill: #1c7a45 } .deg { fill: #8a5a00 } .bad { fill: #b3261e }
+    .cw { fill: #ffffff; stroke: #b3261e; stroke-width: 1.5 }
+    .cn { fill: #b3261e; font-size: 11px; font-weight: 700; text-anchor: middle }
+    .lg { font-size: 12px }
+  </style>
+
+  <rect width="1000" height="800" fill="#ffffff"/>
+  <text x="24" y="30" class="h2">macOS — Insights</text>
+  <text x="24" y="50" class="t2">What the instance <tspan font-style="italic">did</tspan>, measured · everything you <tspan font-style="italic">configure</tspan> moved to Settings, and setup to the app menu (2026-09-17)</text>
+
+  <rect class="win" x="24" y="66" width="720" height="660" rx="12"/>
+  <path class="ln" d="M24 104 H744"/>
+  <circle cx="46" cy="86" r="6" fill="#ff5f57"/><circle cx="66" cy="86" r="6" fill="#febc2e"/><circle cx="86" cy="86" r="6" fill="#28c840"/>
+  <text x="112" y="90" class="hd">Insights</text>
+  <rect class="sf" x="500" y="76" width="106" height="22" rx="6"/><text x="510" y="91" class="t2">Last 30 days ⌄</text>
+  <rect class="sf" x="620" y="76" width="44" height="22" rx="6"/><text x="634" y="91" class="acc">＋</text>
+  <rect class="sf" x="672" y="76" width="46" height="22" rx="6"/><text x="686" y="92">🔔</text>
+  <circle cx="712" cy="78" r="8" fill="#2b5fd0"/><text x="712" y="82" fill="#fff" font-size="10" text-anchor="middle">4</text>
+
+  <!-- sidebar -->
+  <rect x="25" y="105" width="186" height="620" fill="#eef0f3"/>
+  <path class="ln" d="M211 105 V725"/>
+  <text x="40" y="126" class="t3">METISTRY</text>
+  <text x="45" y="152">💬</text><text x="66" y="152">Chat</text>
+  <text x="45" y="178">◈</text><text x="66" y="178">Feed</text>
+  <text x="45" y="204">🗂️</text><text x="66" y="204">Work</text><text x="196" y="204" class="t3" text-anchor="end">▸</text>
+  <text x="45" y="230">📚</text><text x="66" y="230">Knowledge</text><text x="196" y="230" class="t3" text-anchor="end">▸</text>
+  <text x="45" y="256">🤖</text><text x="66" y="256">Agents</text>
+  <rect class="sel" x="33" y="264" width="170" height="26" rx="7"/>
+  <text x="45" y="282" class="acc">📈</text><text x="66" y="282" class="hd">Insights</text>
+  <path class="ln" d="M33 300 H203"/>
+  <text x="45" y="320" class="t3">PINNED</text>
+  <text x="45" y="346">📌</text><text x="68" y="346" class="t2">metistry</text>
+  <text x="45" y="370">📌</text><text x="68" y="370" class="t2">Areas/Health</text>
+  <text x="45" y="394">📌</text><text x="68" y="394" class="t2 mono">drey-dev</text>
+  <text x="45" y="436" class="t3">Status, Compute, Devices</text>
+  <text x="45" y="452" class="t3">&amp; Instances are now</text>
+  <text x="45" y="468" class="t3">Settings panes (⌘,).</text>
+  <text x="45" y="492" class="t3">Set up… is in the</text>
+  <text x="45" y="508" class="t3">Metistry app menu.</text>
+  <rect class="sf" x="33" y="634" width="170" height="26" rx="7"/>
+  <text x="45" y="652" class="acc">＋</text><text x="68" y="652" class="acc">New Capture</text><text x="196" y="652" class="t3" text-anchor="end">⌘N</text>
+  <path class="ln" d="M33 670 H203"/>
+  <text x="45" y="690" class="t3">⌘K  Commands · ⌘9  Needs You</text>
+
+  <!-- spend tiles -->
+  <text x="228" y="130" class="t3">SPEND</text>
+  <text x="720" y="130" class="t3" text-anchor="end">as of 09:41 · from <tspan class="mono">spend</tspan>, <tspan class="mono">claude_usage_daily</tspan>, <tspan class="mono">aws_costs_*</tspan></text>
+  <rect class="sf" x="228" y="140" width="112" height="56" rx="10"/><text x="240" y="168" font-size="18" font-weight="600">$4.18</text><text x="240" y="186" class="t3">today</text>
+  <rect class="sf" x="348" y="140" width="112" height="56" rx="10"/><text x="360" y="168" font-size="18" font-weight="600">$61.20</text><text x="360" y="186" class="t3">this month</text>
+  <rect class="sf" x="468" y="140" width="112" height="56" rx="10"/><text x="480" y="168" font-size="18" font-weight="600" class="deg">72%</text><text x="480" y="186" class="t3">of the $85 cap</text>
+  <rect class="sf" x="588" y="140" width="132" height="56" rx="10"/><text x="600" y="168" font-size="18" font-weight="600" fill="#646d77">—</text><text x="600" y="186" class="t3">aws · not configured</text>
+
+  <!-- spend over time -->
+  <text x="228" y="228" class="t3">SPEND OVER TIME · 30 DAYS</text>
+  <text x="720" y="228" class="t3" text-anchor="end">daily limit $5.00 · <tspan class="deg">3 days over</tspan></text>
+  <g>
+    <rect x="232" y="290" width="12" height="40" rx="2" class="acc"/>
+    <rect x="248" y="299" width="12" height="31" rx="2" class="acc"/>
+    <rect x="264" y="278" width="12" height="52" rx="2" class="acc"/>
+    <rect x="280" y="314" width="12" height="16" rx="2" class="acc"/>
+    <rect x="296" y="322" width="12" height="8" rx="2" class="acc"/>
+    <rect x="312" y="294" width="12" height="36" rx="2" class="acc"/>
+    <rect x="328" y="283" width="12" height="47" rx="2" class="acc"/>
+    <rect x="344" y="273" width="12" height="57" rx="2" class="acc"/>
+    <rect x="360" y="303" width="12" height="27" rx="2" class="acc"/>
+    <rect x="376" y="287" width="12" height="43" rx="2" class="acc"/>
+    <rect x="392" y="262" width="12" height="68" rx="2" class="deg"/>
+    <rect x="408" y="268" width="12" height="62" rx="2" class="acc"/>
+    <rect x="424" y="305" width="12" height="25" rx="2" class="acc"/>
+    <rect x="440" y="325" width="12" height="5" rx="2" class="acc"/>
+    <rect x="456" y="301" width="12" height="29" rx="2" class="acc"/>
+    <rect x="472" y="279" width="12" height="51" rx="2" class="acc"/>
+    <rect x="488" y="277" width="12" height="53" rx="2" class="acc"/>
+    <rect x="504" y="252" width="12" height="78" rx="2" class="deg"/>
+    <rect x="520" y="258" width="12" height="72" rx="2" class="deg"/>
+    <rect x="536" y="291" width="12" height="39" rx="2" class="acc"/>
+    <rect x="552" y="296" width="12" height="34" rx="2" class="acc"/>
+    <rect x="568" y="316" width="12" height="14" rx="2" class="acc"/>
+    <rect x="584" y="318" width="12" height="12" rx="2" class="acc"/>
+    <rect x="600" y="286" width="12" height="44" rx="2" class="acc"/>
+    <rect x="616" y="270" width="12" height="60" rx="2" class="acc"/>
+    <rect x="632" y="264" width="12" height="66" rx="2" class="deg"/>
+    <rect x="648" y="275" width="12" height="55" rx="2" class="acc"/>
+    <rect x="664" y="292" width="12" height="38" rx="2" class="acc"/>
+    <rect x="680" y="281" width="12" height="49" rx="2" class="acc"/>
+    <rect x="696" y="276" width="12" height="54" rx="2" class="acc"/>
+  </g>
+  <path d="M228 265 H720" stroke="#8a5a00" stroke-width="1" stroke-dasharray="4 3" fill="none"/>
+  <path class="ln" d="M228 330 H720"/>
+  <text x="232" y="344" class="t3">18 Aug</text>
+  <text x="720" y="344" class="t3" text-anchor="end">today</text>
+
+  <!-- runs -->
+  <text x="228" y="378" class="t3">RUNS</text>
+  <text x="228" y="402" class="ok">●</text><text x="248" y="402">collectors</text><text x="380" y="402" class="t2">1,412 runs</text><text x="720" y="402" class="ok" font-size="12" text-anchor="end">99.1% ok</text>
+  <text x="228" y="424" class="bad">✕</text><text x="248" y="424">github-state</text><text x="380" y="424" class="t2">13 failures</text><text x="720" y="424" class="bad" font-size="12" text-anchor="end">streak 4 · rate limited</text>
+  <text x="228" y="446" class="ok">●</text><text x="248" y="446">routines</text><text x="380" y="446" class="t2">210 runs · 4 skipped</text><text x="720" y="446" class="ok" font-size="12" text-anchor="end">p95 2.4 s</text>
+  <text x="228" y="468" class="ok">●</text><text x="248" y="468">turns</text><text x="380" y="468" class="t2">874 · 31 today</text><text x="720" y="468" class="t3" text-anchor="end">9 deep · 802 routine · 63 fast</text>
+
+  <!-- shadow -->
+  <text x="228" y="504" class="t3">SHADOW AGREEMENT</text>
+  <rect class="agq" x="228" y="512" width="492" height="52" rx="10"/>
+  <text x="240" y="532" class="ag" font-size="12">5% of default turns also ran on <tspan class="mono">lmstudio/google/gemma-3n-e4b</tspan> — recorded, never served.</text>
+  <text x="240" y="552" class="ag" font-size="12">Agreed with the hosted answer on <tspan font-weight="600">78%</tspan> of 44 sampled turns · disagreed 8 · unscored 2.</text>
+
+  <!-- tokens and latency -->
+  <text x="228" y="596" class="t3">TOKENS &amp; LATENCY, BY TIER</text>
+  <text x="228" y="620" class="t2">fast</text><text x="330" y="620" class="mono t3">lmstudio/gemma-3n-e4b</text><text x="560" y="620" class="t2">1.2 M in · 96 K out</text><text x="720" y="620" class="ok" font-size="12" text-anchor="end">p50 310 ms</text>
+  <text x="228" y="642" class="t2">routine</text><text x="330" y="642" class="mono t3">lmstudio/gemma-3n-e4b</text><text x="560" y="642" class="t2">8.4 M in · 1.1 M out</text><text x="720" y="642" class="ok" font-size="12" text-anchor="end">p50 780 ms</text>
+  <text x="228" y="664" class="t2">deep</text><text x="330" y="664" class="mono t3">openrouter/claude-sonnet-5</text><text x="560" y="664" class="t2">0.9 M in · 180 K out</text><text x="720" y="664" class="deg" font-size="12" text-anchor="end">p50 4.1 s · p95 11 s</text>
+  <text x="228" y="696" class="t3">Nothing here is a control. The assignment that made these numbers is Settings → Compute.</text>
+
+  <!-- callouts -->
+  <g>
+    <circle class="cw" cx="216" cy="282" r="10"/><text class="cn" x="216" y="286">1</text>
+    <circle class="cw" cx="216" cy="186" r="10"/><text class="cn" x="216" y="190">2</text>
+    <circle class="cw" cx="216" cy="228" r="10"/><text class="cn" x="216" y="232">3</text>
+    <circle class="cw" cx="216" cy="532" r="10"/><text class="cn" x="216" y="536">4</text>
+    <circle class="cw" cx="216" cy="696" r="10"/><text class="cn" x="216" y="700">5</text>
+    <circle class="cw" cx="216" cy="452" r="10"/><text class="cn" x="216" y="456">6</text>
+  </g>
+
+  <!-- legend -->
+  <g>
+    <text x="770" y="90" class="hd">Callouts</text>
+    <text x="770" y="114" class="lg">① <tspan font-weight="600">Insights is what is left of System</tspan></text>
+    <text x="782" y="130" class="lg">once the configuration left it. The old</text>
+    <text x="782" y="146" class="lg">section answered two questions at once</text>
+    <text x="782" y="162" class="lg">— "set this up" and "how is it going"</text>
+    <text x="782" y="178" class="lg">— and you visit them on completely</text>
+    <text x="782" y="194" class="lg">different days. The name is a proposal</text>
+    <text x="782" y="210" class="lg">and the owner's to change.</text>
+    <text x="770" y="238" class="lg">② <tspan font-weight="600">absent ≠ zero.</tspan> An unconfigured cost</text>
+    <text x="782" y="254" class="lg">source shows an em dash and says why;</text>
+    <text x="782" y="270" class="lg">a configured one showing $0.00 is a</text>
+    <text x="782" y="286" class="lg">different, and much better, fact (P5).</text>
+    <text x="770" y="314" class="lg">③ The cap is drawn on the chart, not</text>
+    <text x="782" y="330" class="lg">written beside it, because the question</text>
+    <text x="782" y="346" class="lg">is "how often did I cross it". Days</text>
+    <text x="782" y="362" class="lg">over the daily limit carry the <tspan class="deg">degraded</tspan></text>
+    <text x="782" y="378" class="lg">tint and a label — never colour alone.</text>
+    <text x="770" y="406" class="lg">④ Shadow mode is a fraction of turns</text>
+    <text x="782" y="422" class="lg">run twice; the second answer is</text>
+    <text x="782" y="438" class="lg">recorded and never served. <tspan font-weight="600">Agreement</tspan></text>
+    <text x="782" y="454" class="lg"><tspan font-weight="600">without the sample size is a rumour</tspan>, so</text>
+    <text x="782" y="470" class="lg">the denominator is on screen with it.</text>
+    <text x="770" y="498" class="lg">⑤ <tspan font-weight="600">Read-only, on purpose.</tspan> A number and</text>
+    <text x="782" y="514" class="lg">the knob that moves it in one place is</text>
+    <text x="782" y="530" class="lg">how a dashboard becomes a console</text>
+    <text x="782" y="546" class="lg">nobody trusts. The knob is in Settings,</text>
+    <text x="782" y="562" class="lg">and this screen links to it.</text>
+    <text x="770" y="590" class="lg">⑥ Everything here is <tspan font-style="italic">derived</tspan>: Postgres,</text>
+    <text x="782" y="606" class="lg">through a named query, through</text>
+    <text x="782" y="622" class="lg"><tspan class="mono">packages/queries</tspan>. Invariant 3, and the</text>
+    <text x="782" y="638" class="lg">reason a rebuilt database costs this</text>
+    <text x="782" y="654" class="lg">screen its history and nothing else.</text>
+    <text x="770" y="686" class="hd">Empty and absent</text>
+    <text x="770" y="708" class="lg">A fresh instance says "nothing has run</text>
+    <text x="770" y="724" class="lg">yet" — an empty state, not an error.</text>
+    <text x="770" y="740" class="lg">A collector nobody configured is grey</text>
+    <text x="770" y="756" class="lg">and named, and counts toward nothing.</text>
+  </g>
+  <text x="24" y="758" class="t3">docs/ops/compute.md (shadow mode) · design-system.md §3.1 navigation · §3.13 status rows · §3.15 empty states · invariant 3</text>
+</svg>

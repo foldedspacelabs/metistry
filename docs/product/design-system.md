@@ -90,14 +90,20 @@ the codegraff lesson "never dress a mailbox agent as working".
 
 ### P6 — One information architecture, three renderings
 
-Chat, Feed, Needs You, Work, Knowledge, Agents, System — the same seven
-sections, the same order, the same names on macOS, iOS and the web.
-**Capture is a global action, not a section**: a destination you navigate
-to contradicts its own five-second promise, so it is a hotkey, a share
-sheet and a composer affordance, and the *list* of captures lives in
-Knowledge → Inbox. Only the navigation *chrome* changes: sidebar, tab
-bar, or responsive both. Nothing exists on one platform that has no home
-on the others.
+Chat, Feed, Work, Knowledge, Agents, Insights — the same six sections,
+the same order, the same names on macOS, iOS and the web. **Capture and
+Needs You are global controls, not sections**: capture is a floating
+"+" that opens the composer (§3.8) and the *list* of captures lives in
+Knowledge → Inbox; the request queue hangs off a **bell with an unread
+count** in the top-right of every screen (§3.18). A destination you
+navigate to contradicts capture's own five-second promise, and a queue
+you answer in thirty seconds is a notification pattern rather than a
+place. **Settings is where configuration lives** — status, compute,
+devices and instances — reached the way the platform reaches settings,
+and **Setup is an app-menu item**, not a destination. Only the
+navigation *chrome* changes: sidebar (plus a user-filled **Pinned**
+area, §3.19), tab bar, or responsive both. Nothing exists on one
+platform that has no home on the others.
 
 *Why:* the native app is a second client of the **same open management
 API — no private endpoints** (`ios-app-plan.md`). If the API is shared,
@@ -113,6 +119,24 @@ the map should be too, or the owner learns the product twice.
 > `app-ux-plan.md` §3.1 carries the per-section reasoning. The PWA
 > renavigates to this IA in a later PR, so until then it is the one
 > client that disagrees with P6, knowingly.
+>
+> **Amended again 2026-09-17 (second ruling)** — the owner read the
+> wireframes drawn to the amendment above and ruled on what they showed;
+> `app-ux-plan.md` §7.7–§7.11. The seven read: ~~Chat, Feed, Needs You,
+> Work, Knowledge, Agents, System — the same seven sections~~. Four
+> changes, all of them removals from the map: **Needs You left the
+> navigation** for a bell with an unread count, top-right on every
+> screen (§3.18) — it is still the only badge in the product, and now it
+> is a notification pattern rather than a row; **Capture hardened** from
+> "a global action" into one drawn control, a floating "+" (§3.8);
+> **System split** into Settings panes (status, compute, devices and
+> instances), an app-menu item (Setup) and a section named **Insights**
+> holding what is actually read rather than configured — cost, spend
+> over time, run metrics, shadow agreement, token and latency trends;
+> and the Mac sidebar gained **disclosure groups** for Work and
+> Knowledge and a user-filled **Pinned** area (§3.19), so the fixed part
+> of it is six rows and the rest is the owner's. Insights is a proposed
+> name and the owner's to change.
 
 ### P7 — Native where the platform has an opinion
 
@@ -181,7 +205,7 @@ question.
 
 | Case | Applies to |
 | --- | --- |
-| **Title Case** | screen titles, section headers, navigation and tab-bar labels, table column headers, card titles, menu-group headings, the names of the seven sections |
+| **Title Case** | screen titles, section headers, navigation and tab-bar labels, table column headers, card titles, menu-group headings, the names of the six sections and of the Pinned group |
 | **sentence case** | body copy, helper text, placeholders, empty-state prose, receipts, error messages, and buttons — verb-first per the HIG ("Send", "Approve", "Revise", "Decline" are control labels and take Title Case; "queued — will send when the instance is reachable" is prose and does not) |
 | **as-is, always** | identifiers — agent ids, slugs, tool names, file paths, query names, `mode:` values, tier names. Rendered in `mono`, never case-corrected, because `drey-dev` is a key, not a word |
 
@@ -471,26 +495,42 @@ with realistic content in `design/preview.html`.
 
 ### 3.1 Navigation
 
-**Anatomy.** Seven sections in one fixed order: Chat · Feed · Needs You ·
-Work · Knowledge · Agents · System. Each has a glyph, a label, and an
-optional count badge — shown only when the count is *actionable* (Needs
-You: requests awaiting you; System: failing checks). Never a badge for
-"new activity".
+**Anatomy.** Six sections in one fixed order: Chat · Feed · **Work ▸** ·
+**Knowledge ▸** · Agents · Insights. Each has a glyph, a label, and an
+optional count badge — shown only when the count is *actionable*. Never
+a badge for "new activity". **Work and Knowledge are expandable**, and
+their children are rows of the navigation itself, not a second nav:
+Work → Board · Projects · Artifacts · Rooms; Knowledge → Pages · Search
+· Inbox. Expanding is what keeps four views of one object graph together
+*and* keeps each of them one click away.
 
-**Capture is not in the list.** It is a global action reachable from
-everywhere — `⌘N` and a drop target on Mac, the share extension and a
-medium-detent sheet on iOS, the composer's `+` and a sheet in the PWA —
-and its list lives in Knowledge → Inbox (P6).
+**Two things are not in the list, because they are controls.**
 
-A section that carries several views (Work: Board · Tasks · Artifacts ·
-Rooms · Projects; Knowledge: Pages · Search · Inbox · Links; System:
-Status · Compute · Spend · Devices · Instances · Setup) puts them inside
-itself, never back in the navigation. The second level is the platform's
-own segmented control or list, and it is **not** a second nav.
+- **Capture** — a floating "+" (§3.8): bottom-right on iOS, the toolbar
+  and the sidebar footer plus `⌘N` and the global hotkey on Mac, the
+  header on the web. Its list lives in Knowledge → Inbox (P6).
+- **Needs You** — a bell with the unread count, top-right on every
+  screen (§3.18), opening the queue as a panel, popover or sheet. It is
+  the product's **only** badge, and it is the same queue the OS surfaces
+  as an actionable notification.
+
+**Settings is not a section either.** Status, compute, devices and
+instances are its panes; on macOS it is the app menu and `⌘,` opening
+the `Settings` scene, so it is **not** a sidebar row — a row would be a
+second door to one window. On iOS and the web it sits under **More**,
+because there is no app menu to put it in. **Setup** is an app-menu item
+("Set up…" / "Run setup again"), not a pane and not a destination.
+
+**Pinned (macOS).** Below the six, an area the user fills — a project, a
+board, a knowledge page, a saved search, an agent (§3.19). The six are
+fixed and not reorderable, because P6's "same order, same names" is what
+stops the owner learning the product twice; everything below them is the
+user's, because a pin is a shortcut to a destination that already exists.
 
 **States.** selected · hover · pressed · disabled (a destination whose
 data is absent stays enabled and shows its empty state — P5) · focused
-(2px `focus-ring`, offset 2px).
+(2px `focus-ring`, offset 2px) · expanded / collapsed (the two
+disclosure groups; the state persists per instance).
 
 **Platform notes.**
 
@@ -498,30 +538,48 @@ data is absent stays enabled and shows its empty state — P5) · focused
   leading side (the HIG's sidebar is exactly this: navigate between areas
   of the app or top-level collections). Width `sidebar` 248px, resizable,
   collapsible; selected row is `accent-quiet` with `text-primary` and an
-  `accent` glyph. Toolbar carries the view's own controls (filters, the
-  model picker in Chat) and never navigation.
-- **iOS** — `TabView` with a bottom tab bar for the first five of the
-  fixed order (Chat, Feed, Needs You, Work, Knowledge) and a **More** tab
-  holding Agents and System, because a tab bar is a global control that
-  stays anchored to the bottom through push transitions and does not
-  survive being crowded. The two under More are the ones you visit on
-  purpose rather than by habit — who may do what, and the machine. On
-  iPad the same `TabView` adopts the sidebar, with all seven.
+  `accent` glyph. `List(selection:)` with two `Section`s — the six, then
+  Pinned — and a `DisclosureGroup` for Work and for Knowledge. The
+  sidebar footer carries the "+"; the toolbar carries the bell, the "+"
+  and the view's own controls (filters, the model picker in Chat) and
+  never navigation.
+- **iOS** — `TabView` with a bottom tab bar of **five items, maximum**:
+  Chat, Feed, Work, Knowledge and a **More** tab holding Agents,
+  Insights and Settings. Four plus More rather than five plus More,
+  because the HIG's iPhone bar tops out around five and a sixth becomes
+  a system More list nobody designed; the three under More are the ones
+  you visit on purpose rather than by habit. The bell rides the
+  navigation bar and the "+" floats bottom-right, so both survive push
+  transitions exactly as the tab bar does. On iPad the same `TabView`
+  adopts the sidebar, with all six plus Pinned.
 - **PWA** — one `<nav id="nav">` element, two presentations, **both** of
-  them the same seven. Below `wide-breakpoint` (900px) it is a bottom tab
+  them the same six. Below `wide-breakpoint` (900px) it is a bottom tab
   bar: `position: fixed`, `padding-bottom: env(safe-area-inset-bottom)`,
-  the same five as iOS plus a "more" disclosure. At or above it, the same
+  the same four as iOS plus a "more" disclosure. At or above it, the same
   `<nav>` becomes a left sidebar in a CSS grid — *no markup change, no
   JS*, so the existing ids and test hooks survive. Buttons keep
-  `aria-current="page"` on the active view.
+  `aria-current="page"` on the active view. The bell and the "+" are
+  header buttons at both widths.
 
 > **Amended 2026-09-17** — owner ruling on `app-ux-plan.md` §7.1, the
 > §3.1 half of the P6 amendment above. The anatomy read: ~~Ten
 > destinations in one fixed order: Feed · Chat · Agents · Projects ·
 > Artifacts · Capture · Needs You · Dashboard · Status · Devices.~~ The
 > shipped PWA never matched it (eleven flat buttons in a scrolling strip,
-> `index.html:22–33`); it renavigates to these seven in a later PR, and
-> the Mac app's sidebar is built to them from the start.
+> `index.html:22–33`); it renavigates in a later PR, and the Mac app's
+> sidebar is built to the ruled IA from the start.
+>
+> **Amended again 2026-09-17 (second ruling)** — `app-ux-plan.md`
+> §7.7–§7.11, after the wireframe review. The anatomy then read: ~~Seven
+> sections in one fixed order: Chat · Feed · Needs You · Work ·
+> Knowledge · Agents · System~~, and the second level was ~~the
+> platform's own segmented control or list~~ inside each section. Needs
+> You became the bell (§3.18); Capture became the floating "+"; System
+> became Settings panes, an app-menu item and **Insights**; and Work and
+> Knowledge put their children in the sidebar instead of behind a
+> segmented control, because the owner's reading of the wireframes was
+> that Work had become too nested. The Mac sidebar gained **Pinned**
+> (§3.19), which is the first part of this navigation the user composes.
 
 ### 3.2 Activity feed row
 
@@ -682,7 +740,7 @@ implies otherwise, and a grant option is styled as destructive-adjacent
 Two renderings of one generated list. On touch it is a `+` button inside
 the composer; with a fine pointer the same list is also a ⌘K palette.
 Neither is hand-maintained: the contents come from live `rules.yaml`,
-the agent registry, and the seven sections.
+the agent registry, and the six sections plus the two global controls.
 
 **Why it is not a pinned toolbar.** Nothing but the composer may occupy
 the space above the keyboard. A strip of commands pinned there costs two
@@ -842,9 +900,22 @@ captured (receipt, field cleared) · queued-offline (a `degraded` chip:
 "queued — will send when the instance is reachable") · failed (inline
 reason, content preserved, retry button).
 
-**Platform notes.** iOS: a sheet with a medium detent from the tab bar,
-plus the share extension and its offline queue. macOS: a global hotkey
-panel and a drop target on the window. PWA: today's `<form
+**The control that opens it — a floating "+".** Amended 2026-09-17
+(second ruling, `app-ux-plan.md` §7.7): the composer has **one** drawn
+affordance in **one** position on each platform, rather than a list of
+places it can be reached from. iOS: a **floating "+" bottom-right**, over
+the content, clear of the tab bar and the home indicator, opening the
+composer as a medium-detent sheet. macOS: a **"+" in the toolbar and in
+the sidebar footer**, plus `⌘N` and the global hotkey, opening it as a
+**popover or panel**. PWA: the header "+". ~~The composer's `+` and a
+sheet in the PWA~~ and the other entry points (share extension, drop
+target, Shortcut, menu-bar item) still exist — they are *additional
+doors to this control*, not alternatives to it. **There is no Capture
+tab and no Capture screen anywhere.**
+
+**Platform notes.** iOS: the sheet at a medium detent, plus the share
+extension and its offline queue. macOS: the popover from the "+", the
+global hotkey panel and a drop target on the window. PWA: today's `<form
 id="capture-form">`, restyled; the file input becomes a labelled button
 plus a chip so it stops looking like a raw control.
 
@@ -853,7 +924,15 @@ never waits on the model. It writes to the inbox and returns.
 
 ### 3.9 Request card
 
-The card in **Needs You**. One card shape for all seven request types (note ·
+The card in the **Needs You panel** — the popover/panel (Mac) or sheet
+(iOS) the §3.18 bell opens, over whatever screen you were on; amended
+2026-09-17 (second ruling, `app-ux-plan.md` §7.8), where it read ~~the
+card in Needs You~~, a section. Nothing about the card changed with it:
+the same six answers, the same batch rule, the same staleness envelope,
+the same rendering in an actionable notification. What changed is that
+it is now always reachable and never somewhere you navigate to.
+
+One card shape for all seven request types (note ·
 report · review · question · access · improvement · action — `glossary.md`),
 because the answers are the same whatever the type — what differs is what
 Approve *does*, not what the card asks.
@@ -907,6 +986,11 @@ ship as a `UNNotificationCategory` so a request can be answered from the push
 > table above is the design system catching up to the wire rather than the
 > other way round. `glossary.md`'s "same three answers" is the remaining
 > statement of the old count.
+>
+> **Amended again 2026-09-17 (second ruling)** — `app-ux-plan.md` §7.8:
+> the card's home is the bell's panel/sheet (§3.18), not a section. Six
+> cards in a popover is the sizing constraint this adds — the panel
+> scrolls and the batch bar pins to its bottom edge.
 
 ### 3.10 Task card + drag-to-dispatch
 
@@ -927,7 +1011,7 @@ own words:
 - **queued** — "queued for `drey-dev` — 3/3 open bundles" (`degraded`,
   with the cap named).
 - **request** — "queued as request #97 — `metistry` is Supervised"
-  (`presence-blocked` tint, with a link to Needs You).
+  (`presence-blocked` tint, with a link that opens the Needs You panel).
 
 **States.** idle · dragging (source at 60% opacity) · valid target ·
 invalid target (with a tooltip naming the boundary: "not a member of
@@ -1044,7 +1128,7 @@ Real copy, per surface: Feed — "nothing in the last 24h." · Needs You —
 an outside tool a scoped door." · Artifacts — "no artifacts yet — an
 agent publishes one with `artifacts_publish`." · Projects — "no projects
 yet — one appears the first time an agent, task or artifact uses a
-project slug." · Dashboard/AWS — "not configured — set `METISTRY_AWS_*`
+project slug." · Insights/AWS — "not configured — set `METISTRY_AWS_*`
 to fill this in."
 
 **The distinction that matters.** *Empty* (nothing has happened yet) and
@@ -1095,6 +1179,91 @@ with the affirmative button styled `failed` and `autofocus` on Cancel.
 **The rule.** The dialog is *never* the control. The server refuses
 regardless. If a confirmation is the only thing standing between a click
 and an irreversible act, the tool is wrong, not the copy.
+
+### 3.18 Needs You bell + panel
+
+New 2026-09-17 (second ruling, `app-ux-plan.md` §7.8). The queue used to
+be a section; it is now a control with a count and a panel behind it.
+Numbered 3.18 rather than inserted beside §3.9 so that every existing
+cross-reference to §3.10–§3.17 in this repo keeps pointing at what it
+named.
+
+**Purpose.** Put the one thing that needs a human within reach of every
+screen, without giving it a place you have to go to. It is the same
+queue the OS surfaces as an actionable notification — one surface, two
+front doors — so a request answered from the lock screen and a request
+answered from the bell take the identical path.
+
+**Anatomy.** A bell glyph in the **top-right** of every screen · an
+unread **count badge** (requests awaiting you; absent at zero, never a
+dot for "new activity") · a **panel** it opens: a header line ("4
+waiting · 1 snoozed"), a type filter, the §3.9 cards grouped by type and
+oldest-first, and a batch bar pinned to the bottom edge offering only
+Later · Skip · Decline. A footer link opens the full-height list for the
+rare long queue.
+
+**States.** idle (no badge, bell in `text-secondary`) · waiting (badge
+with the count) · open (panel presented; the bell reads pressed) ·
+answering (the card's own `deciding` state; the count decrements on the
+receipt, not on the click) · empty ("Queue is clear." — §3.15, a good
+state and it reads like one) · unreachable (the bell keeps the last
+count and the panel says the count is stale; **decision controls are
+disabled, never queued** — O3, and P5's "state is reported, never
+inferred").
+
+**Platform notes.**
+
+- **macOS** — a `.toolbar` `ToolbarItem` with `.badge(count)`, opening a
+  `.popover` anchored to the bell; over 6 cards it becomes a resizable
+  panel. `Esc` closes, `⌘9` toggles, arrow keys move between cards, and
+  the card's own `a`/`r`/`d`/`l`/`s` keys still answer. The menu-bar
+  extra's "Needs You" item opens the window *and* this panel.
+- **iOS** — a navigation-bar trailing item with a badge, opening a sheet
+  at the large detent (a queue is a list, not a glance). Swipe actions
+  and the `UNNotificationCategory` are §3.9's, unchanged.
+- **PWA** — a header `<button>` with `aria-label="Needs You, 4
+  waiting"`, opening a `<dialog>`; the existing `data-triage` hooks move
+  into it untouched, so the shell tests keep passing.
+
+**Never.** The bell never badges for activity, never badges a count the
+instance could not confirm, and never lets the panel answer a request
+whose card it cannot render — a decision needs its card (the same rule
+the menu-bar extra already follows).
+
+### 3.19 Pinned sidebar items
+
+New 2026-09-17 (second ruling, `app-ux-plan.md` §7.10). **macOS only.**
+
+**Purpose.** The six sections are fixed so the product is the same on
+every screen (P6); pinning is where that stops applying. It gives the
+one thing the fixed map cannot — *this* project, *this* page, *this*
+agent, one click away — without adding a section for it.
+
+**Anatomy.** A `Pinned` section header below the six · rows of
+`[kind glyph] [name]` in the user's order, where kind is project ·
+board · knowledge page · saved search · agent · a drop target for
+dragging any of those in from a list · a context menu on each row
+(Open · Unpin · Reveal the section it lives in). Empty, the section
+header is hidden entirely rather than showing a placeholder — an empty
+affordance you never asked for is clutter, not guidance.
+
+**States.** idle · hover (the unpin affordance appears) · selected (the
+same `accent-quiet` treatment as a section row, because it navigates to
+the same place) · dragging / drop-target (2px `accent` outline,
+`accent-quiet` fill — §3.10's rule) · **dangling** (the target is gone:
+dimmed, `text-tertiary`, the row says what it pointed at and offers
+Unpin. Never a crash, never a silent disappearance — P5).
+
+**Platform notes.** `List` `Section("Pinned")` with `ForEach` +
+`.onMove` and `.contextMenu`; `.dropDestination` for a `Transferable`
+that carries the destination, so the same drag that dispatches a task
+elsewhere cannot be confused with pinning it. **Persistence: app
+preferences, keyed by instance id** — kind, id, display name and order,
+and nothing else. It is per-machine client state, it is not derived from
+anything, and it goes nowhere near the instance repo, Postgres or the
+vault (`app-ux-plan.md` §3.4 has the table). iOS and the PWA have no
+equivalent and are not missing one: P6's "nothing on one platform with
+no home on the others" is about *data*, and a pin is furniture.
 
 ---
 
@@ -1185,38 +1354,46 @@ in circles are callouts; the legend is in each file.
 
 | File | Screen |
 | --- | --- |
-| `design/mac-feed.svg` | macOS — activity feed home, sidebar + toolbar |
-| `design/mac-needs-you.svg` | macOS — the request queue: six answers, snooze, batch, the stale refusal |
-| `design/mac-work-board.svg` | macOS — Work › Board: six columns, "Addressed to", the drags and their refusals |
+| `design/mac-feed.svg` | macOS — activity feed home: the six-section sidebar with Work and Knowledge expandable, Pinned, the toolbar bell and "+" |
+| `design/mac-needs-you.svg` | macOS — the request queue **as the bell's panel over any screen**: six answers, snooze, batch, the stale refusal |
+| `design/mac-work-board.svg` | macOS — Work › Board, **reached from the sidebar's expanded Work group**: six columns, "Addressed to", the drags and their refusals |
 | `design/mac-project.svg` | macOS — Work › Projects: header, mode toggle, rollup |
 | `design/mac-knowledge.svg` | macOS — Knowledge: pages list, page view with links and backlinks, search with full results |
 | `design/mac-agents.svg` | macOS — agents panel with presence, autonomy level and scope, and drag-to-dispatch |
-| `design/mac-system.svg` | macOS — System: status, compute (providers, assignments, budgets), spend, devices, instances |
+| `design/mac-insights.svg` | macOS — **Insights**: spend over time, run metrics, shadow agreement, token and latency trends (was `mac-system.svg`) |
 | `design/mac-chat.svg` | macOS — chat with collapsed tool activity and the model picker |
-| `design/mac-settings.svg` | macOS — Settings: every setting that exists today, in four groups |
+| `design/mac-settings.svg` | macOS — Settings: six panes, now including **Status, Compute and Devices & Instances** |
 | `design/mac-wizard.svg` | macOS — the setup wizard as a stepper, with "Choose your compute" as the step body |
-| `design/mac-menubar.svg` | macOS — the menu bar extra: status, quick capture, the Needs You count, open window |
-| `design/iphone-feed.svg` | iPhone — feed with tab bar |
+| `design/mac-menubar.svg` | macOS — **the app menu, with "Set up…"**, beside the menu bar extra: status, quick capture, the Needs You count |
+| `design/iphone-feed.svg` | iPhone — feed with the **four-plus-More** tab bar, the bell, and the floating "+" |
 | `design/iphone-chat.svg` | iPhone — chat: iMessage-style bubbles, the collapsed `+` composer, its expanded actions menu, and the new-reply pill |
-| `design/iphone-triage.svg` | iPhone — Needs You: request cards over two rows of answers, and the actionable notification |
-| `design/iphone-capture.svg` | iPhone — capture sheet at a medium detent |
+| `design/iphone-triage.svg` | iPhone — the request queue **as the bell's sheet**: six answers over two rows, and the actionable notification |
+| `design/iphone-capture.svg` | iPhone — the capture composer **as the floating "+"'s sheet**, at a medium detent |
 | `design/pwa-narrow.svg` | PWA — narrow (bottom tabs, installed, safe areas) |
 | `design/pwa-wide.svg` | PWA — wide (the same `<nav>` as a sidebar) |
 
 The wireframes were refreshed on 2026-09-17 to the seven-section IA of
-`app-ux-plan.md` §3 — Chat · Feed · Needs You · Work · Knowledge · Agents ·
-System, with Capture as a global action rather than a destination — matching
-the P6 and §3.1 amendment of the same day, and they draw the six request
-answers §3.9 now specifies. They are structural wireframes, not the visual
-design: the design language is being produced by the designer briefed in
-`design-brief.md`, so nothing here is implementable as drawn.
+`app-ux-plan.md` §3, and **revised the same day to the second ruling**
+(§7.7–§7.11): six sections — Chat · Feed · Work ▸ · Knowledge ▸ · Agents ·
+Insights — with **Capture as a floating "+"**, **Needs You as a bell and its
+panel** (§3.18), **Pinned** in the Mac sidebar (§3.19), Status, Compute and
+Devices & Instances as Settings panes, and Setup in the app menu. They draw
+the six request answers §3.9 specifies. `mac-system.svg` was renamed
+`mac-insights.svg` in that revision; there is no wireframe of a Capture
+screen or a Needs You screen, because there are none. They are structural
+wireframes, not the visual design: the design language is being produced by
+the designer briefed in `design-brief.md`, so nothing here is implementable
+as drawn.
 
 The macOS and PWA-wide layouts are deliberately the same three-column
 idea (navigation · list · detail) because they are the same job on the
 same screen size; the iPhone and PWA-narrow layouts are the same
 single-column stack for the same reason. What must not differ is the
 order and naming of destinations, the vocabulary of states, and where a
-refusal appears.
+refusal appears. The two global controls differ only in presentation:
+the bell's queue is a panel on the Mac and a sheet on the phone, capture
+is a popover on the Mac and a sheet on the phone, and both hold the same
+component with the same states.
 
 ---
 
@@ -1254,8 +1431,8 @@ reader is scrolled up is *spoken*, never *scrolled to* (P9).
 
 **Keyboard (macOS and PWA).** Full keyboard reachability with a visible
 2px `focus-ring` at 2px offset — `:focus-visible` on the web, never
-`outline: none`. `⌘K` palette · `⌘1`–`⌘9` destinations · `/` focuses the
-composer · `Esc` closes any disclosure, menu, or dialog · `Tab` order
+`outline: none`. `⌘K` palette · `⌘1`–`⌘6` destinations · `⌘9` the Needs You
+panel · `⌘N` capture · `/` focuses the composer · `Esc` closes any disclosure, menu, or dialog · `Tab` order
 follows reading order · every drag gesture has a menu equivalent (§3.10).
 `<dialog>` gives focus trapping and restoration for free; nothing in the
 system implements its own focus manager.

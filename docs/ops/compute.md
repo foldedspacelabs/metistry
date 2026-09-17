@@ -57,7 +57,7 @@ providers:
     data_policy: { allow: [Knowledge/Projects], deny_sources: [comms], max_brief_bytes: 65536 }
     pricing: { anthropic/claude-sonnet-5: { in_per_m: 3, out_per_m: 15 } }
 assignments:
-  default: { model: openrouter/anthropic/claude-sonnet-5, effort: medium }
+  default: { model: openrouter/anthropic/claude-sonnet-5, effort: medium, critical: true }
   tiers:
     fast:    { model: lmstudio/google/gemma-3n-e4b, effort: low }
     routine: { model: lmstudio/google/gemma-3n-e4b, effort: low }
@@ -86,9 +86,14 @@ so a validation error tells you what to edit.
 | `assignments.default` is required whenever `assignments:` exists | It is where every unnamed and unknown tier lands; half here and half in `rules.yaml` is the split "one read path into state" exists to prevent. |
 
 `zdr: false` (or absent) on an `off_machine` provider is **a warning, never a
-block** — informed choice. `critical: true` may be set on an assignment; it
-is recorded only, because what it may cover under `action: critical_only` is
-still an open question (OPEN-4).
+block** — informed choice.
+
+`critical: true` may be set on any assignment, and the seed sets it on
+`default` (OPEN-4, ruled 2026-09-17): under a budget's `critical_only` the
+turn you are waiting on keeps being answered, while routines and delegation
+stop. The mark travels with the **assignment**, not with the turn's
+importance, so a tier or crew that falls back to `default` inherits it —
+declare `tiers.routine` explicitly if the pause is meant to apply to it.
 
 ## Where it is read from — the D4 overlay
 
@@ -278,7 +283,7 @@ budgets:
 | --- | --- |
 | `allow` | record only — the call proceeds, and a `runs` row says the window is spent |
 | `stop` (default) | the call is refused with `budget_exceeded`, nothing is bought, **and routines pause** |
-| `critical_only` | only an assignment marked `critical: true` keeps running. What may carry that mark is still open (OPEN-4) — the flag is enforced, the policy is not decided |
+| `critical_only` | only an assignment marked `critical: true` keeps running — the seed marks `assignments.default`, so interactive turns still get answers while routines and delegation stop (OPEN-4, ruled 2026-09-17) |
 
 **At 80 %** of any window a warning `runs` row is written, once per calendar
 window (so once today, again tomorrow; once this month for a monthly one).

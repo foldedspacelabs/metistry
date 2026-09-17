@@ -283,9 +283,13 @@ export const assignmentSchema = z.strictObject({
   /** Absent = medium, exactly as `tierSchema` already defaults it: effort is the other half of the model choice, not a separate knob. */
   effort: z.enum(EFFORTS).default("medium"),
   /**
-   * Marks work that keeps running under `action: critical_only`. Recorded
-   * only: WHAT may be marked critical is OPEN-4, and enforcement is the
-   * engine's (PR 3), so nothing in this repo reads it yet.
+   * The one thing `action: critical_only` lets through (`checkBudgets`, and
+   * the runner's `budgetMiss`). WHAT carries it was OPEN-4, ruled
+   * 2026-09-17: the seed marks `assignments.default`, so an interactive turn
+   * keeps being answered with the month's money spent while routines and
+   * delegation stop. The mark travels with the ASSIGNMENT, so a tier or crew
+   * that falls back to `default` inherits it — declare `tiers.routine` when
+   * the pause is meant to apply to it.
    */
   critical: z.boolean().optional(),
 });

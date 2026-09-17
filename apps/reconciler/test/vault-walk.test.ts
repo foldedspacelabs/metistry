@@ -30,8 +30,14 @@ describe("Vault.walkVault", () => {
     expect(paths).toContain("now.md");
     expect(paths).toContain("Areas/Alpha.md");
     expect(paths).toContain("Inbox/capture.md");
-    // the root files are vault content: Obsidian renders them, so the index sees them
-    expect(paths).toContain("CLAUDE.md");
+  });
+
+  it("does not index the assistant's operating instructions or the readme", async () => {
+    const paths = await vault.walkVault();
+    expect(paths).not.toContain("CLAUDE.md");
+    expect(paths).not.toContain("README.md");
+    // the fixture really does have one, or this proves nothing
+    expect(await readdir(repo.root)).toContain("CLAUDE.md");
   });
 
   it("skips .metistry/, .obsidian/, .git/ and Artifacts/", async () => {

@@ -23,8 +23,9 @@ capture is `Inbox/…`, and a read grant covering everything is spelled `/`.
 `.metistry/` is the user's hand alone — except `.metistry/state/`, which is
 derived and nobody's record — plus the root `CLAUDE.md` and `README.md`.
 That is one rule the reconciler enforces at the tool, instead of seven
-filenames each component had to remember, and `Artifacts/` stays out of the
-knowledge index where it has always been.
+filenames each component had to remember. Neither those two root files nor
+`Artifacts/` are indexed as knowledge: your instructions and your bundles are
+yours to read, not search results.
 
 This ships the layout for NEW instances. An existing instance keeps working
 unchanged and `metistry doctor` now says which shape it is in; the verb that

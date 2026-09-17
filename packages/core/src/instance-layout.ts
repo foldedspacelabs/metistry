@@ -157,16 +157,18 @@ export function isProtectedPath(rel: string): boolean {
  * `Artifacts/`, and anything inside a dot-directory (`Inbox/.large/` is
  * captures git does not carry, not notes).
  *
- * Note: the root `CLAUDE.md` and `README.md` ARE vault paths — Obsidian
- * renders them and the user reads them there. They are protected, so the
- * assistant cannot write them; being indexed is a separate question and the
- * honest answer is yes.
+ * The root `CLAUDE.md` and `README.md` are false too. Obsidian renders them,
+ * and they are the user's to edit — but they are the assistant's operating
+ * instructions and the repo's readme, not notes. Indexing them would put the
+ * instructions into search results and in front of the fold, which is noise
+ * at best and a loop at worst.
  */
 export function isVaultPath(rel: string): boolean {
   if (typeof rel !== "string" || rel === "") return false;
   const segments = rel.split("/");
   if (segments.some((s) => s === "" || s === "." || s === ".." || s.startsWith("."))) return false;
-  return segments[0] !== INSTANCE_LAYOUT.artifactsDir;
+  if (segments[0] === INSTANCE_LAYOUT.artifactsDir) return false;
+  return !(segments.length === 1 && (PROTECTED_ROOT_FILES as readonly string[]).includes(segments[0]!));
 }
 
 /** Which shape an instance directory is in. `unknown` = not an instance directory (or not stamped yet). */

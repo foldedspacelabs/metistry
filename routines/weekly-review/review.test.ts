@@ -167,6 +167,27 @@ describe("weekly review", () => {
     expect(sent[0]).toContain("• inbox: 4 untriaged, oldest 9d");
   });
 
+  // Stage-2 shadow mode (§3.7): the gate is "two weeks of shadow agreement",
+  // so the number belongs where the user already reads things. Omitted, not
+  // reported as zero, when nothing is being shadowed — which is every install
+  // that has written no `shadow:` block.
+  it("system: one shadow-agreement line per candidate, and no line at all when nothing is shadowed", async () => {
+    const { db, sent } = fakeDb([
+      ["shadow_model IS NOT NULL", [
+        { candidate: "llamaserver/qwen3.6-35b-a3b", n: "34", agreement: "0.81", same_tools: "29", cost: "0.12" },
+        { candidate: "candid/small", n: "4", agreement: "0.40", same_tools: "1", cost: "0" },
+      ]],
+    ]);
+    await run(db, { now });
+    expect(sent[0]).toContain("• shadow llamaserver/qwen3.6-35b-a3b: 0.81 agreement over 34 turns, same tool sequence 29/34, cost 0.12 USD");
+    expect(sent[0]).toContain("• shadow candid/small: 0.40 agreement over 4 turns, same tool sequence 1/4"); // a free local candidate says no money
+    expect(sent[0]).not.toContain("cost 0.00 USD");
+
+    const quiet = fakeDb([]);
+    await run(quiet.db, { now });
+    expect(quiet.sent[0]).not.toContain("shadow");
+  });
+
   it("next week: due dates (overdue marked) plus calendar events when the bridge is configured; bridge failure degrades to one line", async () => {
     const { db, sent } = fakeDb([
       ["to_char(due", [

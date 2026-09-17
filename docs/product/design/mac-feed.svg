@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 800" width="1000" height="800" role="img" aria-labelledby="ttl desc">
-  <title id="ttl">macOS — activity feed (home), sidebar + toolbar</title>
-  <desc id="desc">Annotated wireframe: NavigationSplitView with a source-list sidebar of the seven sections — Chat, Feed, Needs You, Work, Knowledge, Agents, System — a Capture button in the toolbar rather than a destination of its own, a toolbar of filters, and a time-ordered activity feed of rows made of a kind glyph, an actor chip, a subject, a detail line and a relative time.</desc>
+  <title id="ttl">macOS — activity feed (home): the six-section sidebar, Pinned, the bell and the plus</title>
+  <desc id="desc">Annotated wireframe: NavigationSplitView with a source-list sidebar of the six sections — Chat, Feed, Work, Knowledge, Agents, Insights — where Work is expanded to show Board, Projects, Artifacts and Rooms as children and Knowledge is collapsed. Below them a Pinned group the user fills with a project, a knowledge page and an agent, and a sidebar footer carrying the capture plus button. The toolbar holds the view&#39;s filters, a plus that opens the capture composer as a popover, and a bell top right with the unread request count that opens the Needs You panel. The content is a time-ordered activity feed of rows made of a kind glyph, an actor chip, a subject, a detail line and a relative time.</desc>
   <style>
     text { font-family: -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", Roboto, sans-serif; fill: #12171c; font-size: 13px; }
     .t2 { fill: #4d565f; font-size: 12px } .t3 { fill: #646d77; font-size: 11px }
@@ -19,7 +19,7 @@
 
   <rect width="1000" height="800" fill="#ffffff"/>
   <text x="24" y="30" class="h2">macOS — Feed (home)</text>
-  <text x="24" y="50" class="t2">Seven sections, not ten destinations · Capture is a global action, not a tab · light shown; dark swaps token values only</text>
+  <text x="24" y="50" class="t2">Six sections · Work and Knowledge expand in place · Pinned is the user's · Capture is a ＋ and Needs You a 🔔 — neither is a place</text>
 
   <!-- window -->
   <rect class="win" x="24" y="66" width="720" height="560" rx="12"/>
@@ -27,10 +27,12 @@
   <path class="ln" d="M24 104 H744"/>
   <circle cx="46" cy="86" r="6" fill="#ff5f57"/><circle cx="66" cy="86" r="6" fill="#febc2e"/><circle cx="86" cy="86" r="6" fill="#28c840"/>
   <text x="112" y="90" class="hd">Feed</text>
-  <!-- toolbar controls (right) -->
-  <rect class="sf" x="400" y="76" width="108" height="22" rx="6"/><text x="410" y="91" class="t2">All Agents ⌄</text>
-  <rect class="sf" x="516" y="76" width="112" height="22" rx="6"/><text x="526" y="91" class="t2">All Projects ⌄</text>
-  <rect class="sf" x="636" y="76" width="82" height="22" rx="6"/><text x="646" y="91" class="acc">＋ Capture</text>
+  <!-- toolbar: filters, then the two global controls -->
+  <rect class="sf" x="380" y="76" width="108" height="22" rx="6"/><text x="390" y="91" class="t2">All Agents ⌄</text>
+  <rect class="sf" x="496" y="76" width="112" height="22" rx="6"/><text x="506" y="91" class="t2">All Projects ⌄</text>
+  <rect class="sf" x="620" y="76" width="44" height="22" rx="6"/><text x="634" y="91" class="acc">＋</text>
+  <rect class="sf" x="672" y="76" width="46" height="22" rx="6"/><text x="686" y="92">🔔</text>
+  <circle cx="712" cy="78" r="8" fill="#2b5fd0"/><text x="712" y="82" fill="#fff" font-size="10" text-anchor="middle">4</text>
 
   <!-- sidebar -->
   <rect x="25" y="105" width="186" height="520" fill="#eef0f3"/>
@@ -40,20 +42,28 @@
     <text x="45" y="152">💬</text><text x="66" y="152">Chat</text>
     <rect class="sel" x="33" y="160" width="170" height="26" rx="7"/>
     <text x="45" y="178" class="acc">◈</text><text x="66" y="178" class="hd" fill="#12171c">Feed</text>
-    <text x="45" y="204">📝</text><text x="66" y="204">Needs You</text>
-    <rect x="160" y="192" width="30" height="16" rx="8" fill="#2b5fd0"/><text x="175" y="204" fill="#fff" font-size="10" text-anchor="middle">4</text>
-    <text x="45" y="230">🗂️</text><text x="66" y="230">Work</text>
-    <text x="45" y="256">📚</text><text x="66" y="256">Knowledge</text>
-    <text x="45" y="282">🤖</text><text x="66" y="282">Agents</text>
-    <text x="45" y="308">⚙️</text><text x="66" y="308">System</text>
-    <circle cx="176" cy="304" r="4" class="deg"/>
-    <text x="45" y="344" class="t3">Work: Board · Rooms ·</text>
-    <text x="45" y="360" class="t3">Artifacts · Projects</text>
-    <text x="45" y="384" class="t3">Knowledge: Pages · Inbox ·</text>
-    <text x="45" y="400" class="t3">Search · Links</text>
+    <!-- Work, expanded -->
+    <text x="45" y="204">🗂️</text><text x="66" y="204">Work</text><text x="196" y="204" class="t3" text-anchor="end">▾</text>
+    <text x="88" y="226" class="t2">Board</text>
+    <text x="88" y="248" class="t2">Projects</text>
+    <text x="88" y="270" class="t2">Artifacts</text>
+    <text x="88" y="292" class="t2">Rooms</text>
+    <!-- Knowledge, collapsed -->
+    <text x="45" y="318">📚</text><text x="66" y="318">Knowledge</text><text x="196" y="318" class="t3" text-anchor="end">▸</text>
+    <text x="45" y="344">🤖</text><text x="66" y="344">Agents</text>
+    <text x="45" y="370">📈</text><text x="66" y="370">Insights</text>
+    <!-- Pinned -->
+    <path class="ln" d="M33 388 H203"/>
+    <text x="45" y="408" class="t3">PINNED</text><text x="196" y="408" class="t3" text-anchor="end">⇅ drag</text>
+    <text x="45" y="434">📌</text><text x="68" y="434" class="t2">metistry</text><text x="196" y="434" class="t3" text-anchor="end">project</text>
+    <text x="45" y="458">📌</text><text x="68" y="458" class="t2">Areas/Health</text><text x="196" y="458" class="t3" text-anchor="end">page</text>
+    <text x="45" y="482">📌</text><text x="68" y="482" class="t2 mono">drey-dev</text><text x="196" y="482" class="t3" text-anchor="end">agent</text>
+    <text x="45" y="506" fill="#646d77">📌</text><text x="68" y="506" class="t3">taper-plan</text><text x="196" y="506" class="t3" text-anchor="end">gone</text>
   </g>
+  <rect class="sf" x="33" y="560" width="170" height="26" rx="7"/>
+  <text x="45" y="578" class="acc">＋</text><text x="68" y="578" class="acc">New Capture</text><text x="196" y="578" class="t3" text-anchor="end">⌘N</text>
   <path class="ln" d="M33 596 H203"/>
-  <text x="45" y="614" class="t3">⌘K  Commands · ⌘N  Capture</text>
+  <text x="45" y="614" class="t3">⌘K  Commands · ⌘9  Needs You</text>
 
   <!-- feed list -->
   <g>
@@ -76,7 +86,7 @@
     <rect x="252" y="235" width="52" height="17" rx="8" fill="#eef0f3"/><text x="260" y="248" class="t2 mono">system</text>
     <text x="312" y="248" class="hd">proposal #97 — write Areas/Health/Taper.md</text>
     <text x="690" y="248" class="t3" text-anchor="end">1h ago</text>
-    <text x="252" y="265" class="t2">awaiting you · from inbox #418</text>
+    <text x="252" y="265" class="t2">awaiting you · from inbox #418 · answered in the 🔔 panel</text>
     <path class="ln" d="M228 278 H720"/>
     <!-- row 4 -->
     <text x="228" y="304">⚠️</text>
@@ -110,40 +120,54 @@
 
   <!-- callouts -->
   <g>
-    <circle class="cw" cx="216" cy="178" r="10"/><text class="cn" x="216" y="182">1</text>
-    <circle class="cw" cx="216" cy="304" r="10"/><text class="cn" x="216" y="308">2</text>
-    <circle class="cw" cx="756" cy="87" r="10"/><text class="cn" x="756" y="91">3</text>
-    <circle class="cw" cx="200" cy="204" r="10"/><text class="cn" x="200" y="208">4</text>
-    <circle class="cw" cx="216" cy="186" r="10"/><text class="cn" x="216" y="190">5</text>
+    <circle class="cw" cx="216" cy="204" r="10"/><text class="cn" x="216" y="208">1</text>
+    <circle class="cw" cx="216" cy="248" r="10"/><text class="cn" x="216" y="252">2</text>
+    <circle class="cw" cx="216" cy="434" r="10"/><text class="cn" x="216" y="438">3</text>
+    <circle class="cw" cx="216" cy="506" r="10"/><text class="cn" x="216" y="510">4</text>
+    <circle class="cw" cx="756" cy="87" r="10"/><text class="cn" x="756" y="91">5</text>
+    <circle class="cw" cx="600" cy="56" r="10"/><text class="cn" x="600" y="60">6</text>
+    <circle class="cw" cx="216" cy="578" r="10"/><text class="cn" x="216" y="582">7</text>
   </g>
 
   <!-- legend -->
   <g>
     <text x="770" y="90" class="hd">Callouts</text>
-    <text x="770" y="116" class="lg">① Sidebar = the <tspan font-weight="600">seven sections</tspan>, in</text>
-    <text x="782" y="130" class="lg">the same order everywhere. Capture</text>
-    <text x="782" y="144" class="lg">is a global action, not a place: a</text>
-    <text x="782" y="158" class="lg">tab you navigate to contradicts it.</text>
-    <text x="770" y="176" class="lg">② Feed row anatomy: kind glyph · actor</text>
-    <text x="782" y="192" class="lg">chip · subject · detail · relative time.</text>
-    <text x="782" y="208" class="lg">A failing run tints the <tspan class="bad">glyph line</tspan>, never</text>
-    <text x="782" y="224" class="lg">the whole row (P2).</text>
-    <text x="770" y="252" class="lg">③ Toolbar carries the view's filters,</text>
-    <text x="782" y="268" class="lg">and Capture, which belongs to none.</text>
-    <text x="770" y="296" class="lg">④ A badge only when the count is</text>
-    <text x="782" y="312" class="lg">actionable: proposals awaiting you,</text>
-    <text x="782" y="328" class="lg">failing checks. Never "new activity".</text>
-    <text x="770" y="356" class="lg">⑤ Agent-authored strings carry the</text>
-    <text x="782" y="372" class="lg"><tspan class="ag">agent tint</tspan> on the actor chip and are</text>
-    <text x="782" y="388" class="lg">output-encoded — data, not chrome (P1).</text>
-    <text x="770" y="424" class="hd">States on this screen</text>
-    <text x="770" y="448" class="lg"><tspan class="ok">ok</tspan> · <tspan class="deg">degraded/queued</tspan> · <tspan class="bad">failed</tspan> · absent</text>
-    <text x="770" y="470" class="lg">Row hover lifts to `elevated`; no colour.</text>
-    <text x="770" y="492" class="lg">Right-click = quick actions ("summarize</text>
-    <text x="770" y="508" class="lg">this", "what's the latest on X").</text>
-    <text x="770" y="544" class="hd">Keyboard</text>
-    <text x="770" y="568" class="lg">⌘K palette · ⌘1–⌘7 · ⌘N capture ·</text>
-    <text x="770" y="584" class="lg">↑↓ rows · ⏎ opens · Esc closes.</text>
+    <text x="770" y="116" class="lg">① Six sections, one fixed order,</text>
+    <text x="782" y="132" class="lg">everywhere. <tspan font-weight="600">Work and Knowledge</tspan></text>
+    <text x="782" y="148" class="lg"><tspan font-weight="600">expand in place</tspan>, so Board, Projects,</text>
+    <text x="782" y="164" class="lg">Artifacts and Rooms are one click</text>
+    <text x="782" y="180" class="lg">from here — not a section, then a</text>
+    <text x="782" y="196" class="lg">segmented control, then a column.</text>
+    <text x="770" y="222" class="lg">② Children are rows of <tspan font-style="italic">this</tspan> list, not a</text>
+    <text x="782" y="238" class="lg">second navigation. Open/closed state</text>
+    <text x="782" y="254" class="lg">persists per instance.</text>
+    <text x="770" y="280" class="lg">③ <tspan font-weight="600">Pinned is the user's.</tspan> A project, a</text>
+    <text x="782" y="296" class="lg">board, a page, a saved search or an</text>
+    <text x="782" y="312" class="lg">agent. Drag to reorder, unpin from the</text>
+    <text x="782" y="328" class="lg">context menu. The six above it cannot</text>
+    <text x="782" y="344" class="lg">be reordered: one product, one map</text>
+    <text x="782" y="360" class="lg">(P6). Pins live in app preferences,</text>
+    <text x="782" y="376" class="lg">keyed by instance — never in the repo.</text>
+    <text x="770" y="402" class="lg">④ A pin whose target is gone dims,</text>
+    <text x="782" y="418" class="lg">says so and offers Unpin. Never a</text>
+    <text x="782" y="434" class="lg">crash, never a silent removal (P5).</text>
+    <text x="770" y="460" class="lg">⑤ <tspan font-weight="600">Needs You is a 🔔, not a section.</tspan></text>
+    <text x="782" y="476" class="lg">Top-right on every screen, carrying</text>
+    <text x="782" y="492" class="lg">the only badge in the product (P2).</text>
+    <text x="782" y="508" class="lg">It opens the queue as a popover <tspan font-style="italic">over</tspan></text>
+    <text x="782" y="524" class="lg">this screen (mac-needs-you.svg), and</text>
+    <text x="782" y="540" class="lg">it is the same queue the OS shows as</text>
+    <text x="782" y="556" class="lg">an actionable notification.</text>
+    <text x="770" y="582" class="lg">⑥ ＋ opens the capture composer as a</text>
+    <text x="782" y="598" class="lg">popover. ⑦ The same ＋ in the sidebar</text>
+    <text x="782" y="614" class="lg">footer, with ⌘N and the global hotkey.</text>
+    <text x="782" y="630" class="lg">There is no Capture tab, anywhere.</text>
+    <text x="770" y="658" class="hd">Keyboard</text>
+    <text x="770" y="680" class="lg">⌘K palette · ⌘1–⌘6 sections · ⌘9 the</text>
+    <text x="770" y="696" class="lg">🔔 panel · ⌘N capture · ⌘, Settings ·</text>
+    <text x="770" y="712" class="lg">↑↓ rows · ⏎ opens · Esc closes.</text>
+    <text x="770" y="740" class="lg t3"><tspan class="ok">ok</tspan> · <tspan class="deg">degraded/queued</tspan> · <tspan class="bad">failed</tspan> · absent · row</text>
+    <text x="770" y="756" class="lg t3">hover lifts to `elevated`, with no colour.</text>
   </g>
-  <text x="24" y="660" class="t3">docs/product/design-system.md §3.1 navigation · §3.2 activity feed row · §3.3 presence chip</text>
+  <text x="24" y="660" class="t3">design-system.md §3.1 navigation · §3.2 activity feed row · §3.18 Needs You bell + panel · §3.19 pinned sidebar items</text>
 </svg>

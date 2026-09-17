@@ -92,6 +92,6 @@
   <text x="770" y="536" class="lg">refuses regardless — the confirmation</text>
   <text x="770" y="552" class="lg">exists so the click is not cheaper than</text>
   <text x="770" y="568" class="lg">the act.</text>
-  <text x="24" y="664" class="t3">Shell — seven sections: Chat · Feed · Needs You · <tspan font-weight="600">Work</tspan> · Knowledge · Agents · System · Capture ⌘N (mac-feed.svg)</text>
-  <text x="24" y="686" class="t3">Board · Rooms · Artifacts · Projects are the four Work views · design-system.md §3.12 project header · §3.17 destructive confirmation</text>
+  <text x="24" y="664" class="t3">Shell — six sections: Chat · Feed · <tspan font-weight="600">Work ▸</tspan> · Knowledge ▸ · Agents · Insights, then Pinned · capture is the ＋, Needs You the 🔔 (mac-feed.svg)</text>
+  <text x="24" y="686" class="t3">Board · Projects · Artifacts · Rooms are children of the Work row in the sidebar · design-system.md §3.12 project header · §3.17 confirmation</text>
 </svg>

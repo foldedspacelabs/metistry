@@ -216,6 +216,6 @@
   <text x="1394" y="984" class="lg">receipts, typing indicators, anything that animates on</text>
   <text x="1394" y="1001" class="lg">arrival (P2).</text>
 
-  <text x="24" y="1018" class="t3">Shell — five tabs plus More: <tspan font-weight="600">Chat</tspan> · Feed · Needs You · Work · More (Knowledge, Agents, System). Chat is a tab root, so there is no back button; ＋ is capture, which is global.</text>
+  <text x="24" y="1018" class="t3">Shell — four tabs plus More: <tspan font-weight="600">Chat</tspan> · Feed · Work · Knowledge · More (Agents, Insights, Settings). Chat is a tab root, so there is no back button. The ＋ inside the composer is the chat attachment menu, not capture — capture is the floating ＋, and Needs You the 🔔 in the nav bar.</text>
   <text x="24" y="1040" class="t3">docs/product/design-system.md §3.4 chat message · §3.5 prompt card · §3.6 composer actions menu + autocomplete · §3.7 model picker · §4 reply text · P8 iMessage · P9 scroll · P10 Title Case</text>
 </svg>

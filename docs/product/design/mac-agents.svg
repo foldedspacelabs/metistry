@@ -147,6 +147,6 @@
   <text x="770" y="698" class="lg">credential reaches that route.</text>
   <text x="770" y="724" class="lg t3">VoiceOver: "reviewer, over cap, 3 of</text>
   <text x="770" y="740" class="lg t3">open bundles, autonomy observe"</text>
-  <text x="24" y="700" class="t3">Shell — seven sections: Chat · Feed · Needs You · Work · Knowledge · <tspan font-weight="600">Agents</tspan> · System · Capture ⌘N (mac-feed.svg)</text>
+  <text x="24" y="700" class="t3">Shell — six sections: Chat · Feed · Work ▸ · Knowledge ▸ · <tspan font-weight="600">Agents</tspan> · Insights, then Pinned · capture is the ＋, Needs You the 🔔 (mac-feed.svg)</text>
   <text x="24" y="722" class="t3">docs/ops/actions.md (autonomy) · design-system.md §3.3 presence chip · §3.10 drag-to-dispatch · §3.17 destructive confirmation</text>
 </svg>

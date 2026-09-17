@@ -7,15 +7,17 @@
 > **constraints**, restated for a designer in §4; that file's **tokens**
 > (`docs/product/design/tokens.json`) are a **starting point you may replace**,
 > provided the replacement keeps the semantic role names and passes the contrast
-> check CI runs (§6); the seven-section IA in §3 is ruled. The look of the thing,
+> check CI runs (§6); the six-section IA in §3 is ruled. The look of the thing,
 > the brand and the icon are the work. **Every fact here names a file**; where
 > this brief and the repo disagree, the repo wins and we want to hear about it.
 
-**Rulings that shape it (2026-09-17).** Native SwiftUI Mac app first, iOS
-later, the PWA for non-Apple machines; one design language across all three;
-the seven-section IA of §3 with Capture as a global action; requests take six
-answers; the Mac app is a client of the **local** instance only; settings and
-the setup wizard are in scope.
+**Rulings that shape it (2026-09-17, both of that day's rulings).** Native
+SwiftUI Mac app first, iOS later, the PWA for non-Apple machines; one design
+language across all three; the **six-section** IA of §3, with capture as a
+floating "+" and Needs You as a **bell**, a customizable Mac sidebar, and
+System split into Settings and **Insights**; requests take six answers; the
+Mac app is a client of the **local** instance only; settings and the setup
+wizard are in scope.
 
 ---
 
@@ -38,8 +40,8 @@ editor and we do not replace it. **Capture** is the thing you drop in without
 sorting it — share sheet, Shortcut, hotkey, an agent's `capture` call — one
 door, under five seconds, landing in `Knowledge/Inbox/` inside the vault
 (`docs/ops/inbox.md`).
-**Requests** are anything that needs *you*: one list, **Needs You**, with
-seven types (note · report · review · question · access · improvement ·
+**Requests** are anything that needs *you*: one list, **Needs You** — reached
+from the bell rather than from a tab — with seven types (note · report · review · question · access · improvement ·
 action) and six answers (§3.6). **Work** is one shared task list you and every
 agent work from; a task is claimed with a lease, renewed, released, closed.
 The **Board** is a view over it in six columns — Backlog · Addressed to · In
@@ -129,25 +131,46 @@ never a unified inbox** — a merged feed cannot say which half is stale.
 
 ## 3. The information architecture, and every screen
 
-### 3.1 Seven sections (ruled 2026-09-17)
+### 3.1 Six sections, two global controls (ruled 2026-09-17, second ruling)
 
 | Section | Contains | Why it is one section |
 | --- | --- | --- |
 | **Chat** | the conversation, tier picker, tapbacks | most-touched surface; has its own rules (P8, P9) |
 | **Feed** | activity, filters, run detail | "what happened" is one question |
-| **Needs You** | requests, grouped by type | the product's only badge |
-| **Work** | Board · Tasks · Artifacts · Rooms · Projects | four views of one object graph |
-| **Knowledge** | Pages · Search · Inbox · Links | the product's first noun |
+| **Work** ▸ | Board · Projects · Artifacts · Rooms, **expandable in the sidebar** | four views of one object graph — each one click away, not two |
+| **Knowledge** ▸ | Pages · Search · Inbox, likewise | the product's first noun |
 | **Agents** | agents, presence, scope/autonomy, crews, targets | who may do what, and what are they doing |
-| **System** | Status · Compute · Spend · Devices · Instances · Setup | the instance as a machine |
+| **Insights** | cost, spend over time, run metrics, shadow agreement, token and latency trends | what the instance did, measured. Proposed name; the owner may rename it |
 
-**Capture is a global action, not a destination** — `⌘N` and a window drop
-target on Mac, the share extension and a medium-detent sheet on iOS, the
-composer's `+` in the PWA; the *list* of captures lives in Knowledge → Inbox.
-A tab you navigate to contradicts the five-second promise. Identical on all
-three surfaces: section order, names, the vocabulary of states, and where a
-refusal appears. Only layout differs — three columns (nav · list · detail) on
-Mac and wide PWA, one column with push navigation on phone and narrow PWA.
+**Two global controls, on every screen, and they are a real part of this ask:**
+
+- **Capture is a floating "+"** — bottom-right on iOS, the toolbar and
+  sidebar footer plus `⌘N` and a global hotkey on Mac, the header on the web.
+  It opens the capture composer as a **popover/panel** (Mac) or a
+  **medium-detent sheet** (iOS). **There is no Capture tab and no Capture
+  screen**; the *list* of captures lives in Knowledge → Inbox. A destination
+  you navigate to contradicts the five-second promise.
+- **Needs You is a bell** — top-right on iOS and Mac with an unread count
+  (the product's **only** badge), opening the request queue as a
+  panel/popover (Mac) or a sheet (iOS) holding the six-answer cards. The
+  actionable notification is the same queue surfaced by the OS: one surface,
+  two front doors.
+
+**Settings** holds Status, Compute (providers · models · assignments ·
+budgets) and Devices & Instances beside today's panes; on Mac it is the app
+menu and `⌘,`, on iOS and the web it sits under **More**. **Setup is an
+app-menu item** (Metistry → "Set up…" / "Run setup again"), not a section.
+
+**The Mac sidebar is customizable below the six.** A **Pinned** area the
+owner fills — a project or board, a knowledge page or saved search, an agent
+— drag to reorder, unpin from the context menu. The six are fixed; the pins
+are not. **iOS is four tabs plus More** (Chat · Feed · Work · Knowledge ·
+More → Agents, Insights, Settings): five items, maximum.
+
+Identical on all three surfaces: section order, names, the vocabulary of
+states, and where a refusal appears. Only layout differs — three columns
+(nav · list · detail) on Mac and wide PWA, one column with push navigation on
+phone and narrow PWA.
 
 ### 3.2 Screens to design
 
@@ -155,15 +178,28 @@ Mac and wide PWA, one column with push navigation on phone and narrow PWA.
 | --- | --- | --- |
 | Chat | Conversation | bubbles, collapsed tool activity, prompt cards, composer `+` menu, ⌘K palette, model/effort picker, "↓ New Reply" pill |
 | Feed | Activity · Run detail | row = kind glyph · actor chip · subject · detail · relative time |
-| Needs You | Queue | the request card and its six answers; grouped by type, oldest first |
+| **global** | **Needs You panel** (the bell) | the bell with its count, and the panel/sheet behind it: the request card and its six answers, grouped by type, oldest first. **Not a screen — a popover on Mac, a sheet on iOS** |
+| **global** | **Capture popover** (the "+") | the floating button and the composer it opens. Never blocks, never asks a question, never waits on the model |
 | Work | Board · Task detail · Artifact · Project | board density is the hardest layout in the product |
 | Knowledge | Pages · Page · Search · Inbox | **entirely undesigned; no client read path exists yet** |
 | Agents | Agents · Agent detail · Crews/Targets | presence chips, scope and autonomy controls, destructive confirmations |
-| System | Status · Compute · Spend · Devices · Instances · Setup | Status and Compute are the two that exist in Swift today |
+| Insights | Spend · Runs & models | cost over time, run counts and failure streaks, shadow agreement, token and latency trends. The spend tiles exist in the PWA; nothing else is designed |
+| Settings | General · Status · Compute · Connections · Devices · Advanced | §3.3. Status and Compute are the two that exist in Swift today |
+| *chrome* | **Mac sidebar** | six rows, Work and Knowledge expandable, then **Pinned** — the one part of the navigation the user composes |
 
-### 3.3 Settings (Mac, `⌘,` — in scope)
+### 3.3 Settings (Mac, `⌘,` — in scope, and it grew)
 
-Seven panes (`sources/kit/settings-view.swift`, `settings-model.swift`). The
+**Six panes**, regrouped from today's seven and then given three more by the
+second ruling: **General · Status · Compute · Connections · Devices ·
+Advanced**. Status absorbs today's *Services* pane, because a service row
+already *is* a doctor row with Restart / Stop / Start / View Log on it;
+Compute keeps everything the compute pane does today and is now the canonical
+home of compute configuration; Devices holds devices and instances, with
+revoke and an honest reachability chip. **Setup left Settings for the app
+menu.** The table below is today's seven panes, which is what exists in Swift
+— read it as the inventory, and §3.1 as the destination.
+
+The rule that shapes all of them (unchanged). The
 rule that shapes all of them: **every setting is a front for a file the CLI
 owns**; the app persists three pointers and no configuration. Every value is one
 of exactly three things and the pane says which — a **pointer** the app
@@ -173,7 +209,7 @@ in `docs/ops/mac-app.md`, "Settings: persisted vs read-through".
 
 | Pane | What is on it |
 | --- | --- |
-| **Instance** | active instance directory · recents · Open in Finder · instance id, assistant name, mention (read-only — a protected path) · Set Up Again… |
+| **Instance** | active instance directory · recents · Open in Finder · instance id, assistant name, mention (read-only — a protected path) · ~~Set Up Again…~~ — now Metistry → "Run setup again" |
 | **Services** | deployment shape and the file it came from · the service list with status · Start at Login · Run Metistry in the Background |
 | **Connections** | console sign-in (who this Mac is, and how) · instance repo status, HEAD, queue depth · which provider keys are set (names, never values) · bridges |
 | **Compute** | providers (base URL, locality, ZDR claim, key present?) · Add Provider… · Test / Remove · assignments per tier · budgets, daily and monthly · local model servers · install / load / unload a model · RAM headroom, labelled an estimate |
@@ -184,8 +220,9 @@ in `docs/ops/mac-app.md`, "Settings: persisted vs read-through".
 ### 3.4 The setup wizard (in scope)
 
 A **sheet** over seven steps, shown when no instance is selected and
-re-enterable from Settings → Instance. Back · Continue · Skip; only steps 1
-and 2 are required. Two rules baked in and worth keeping: **every choice
+re-enterable from the **app menu** — Metistry → "Set up…" / "Run setup
+again" (second ruling, 2026-09-17; it used to be Settings → Instance).
+Back · Continue · Skip; only steps 1 and 2 are required. Two rules baked in and worth keeping: **every choice
 carries both a pro and a con** (a choice offered without a cost is one the app
 already made for you — `WizardOption` in `wizard-model.swift` makes both
 non-optional), and **every step shows the exact argument array before it
@@ -204,9 +241,17 @@ can change all of this later in Settings."
 | 7 | **Compute** | pick a provider template, paste a key into a secure field, name a model. "Skip: no engine yet" is a real choice, with its consequence on screen |
 
 Steps 2 and 7 are the product's first impression, and are currently a progress
-log with a command in it.
+log with a command in it. Setup is **not** a section and not a Settings pane:
+it is the one thing you do once, so it lives where macOS puts once-only
+things.
 
-### 3.5 The menu bar (Mac only)
+### 3.5 The menu bar and the app menu (Mac only)
+
+**The app menu** (Metistry → About · **Set up… / Run setup again** ·
+Settings… `⌘,` · Check for Updates… · Quit) is now load-bearing: it is where
+setup lives and where settings are reached, so neither needs a row in the
+sidebar. It is a standard menu and needs no design beyond getting the item
+names right.
 
 A `MenuBarExtra` whose glyph is the **worst fault** across components —
 `absent` never drives it, because a bridge nobody configured is not a fault.
@@ -220,7 +265,9 @@ without colour alone.
 ### 3.6 The six answers on a request (ruled 2026-09-17)
 
 One card shape for all seven request types, because the answers are the same
-whatever the type (`docs/ops/reply-feedback.md`):
+whatever the type (`docs/ops/reply-feedback.md`). **It lives in the bell's
+panel/sheet** (§3.1), not in a section — so it is designed for a popover's
+width and a scrolling list, with the batch bar pinned to the bottom edge:
 
 | Answer | What it does | Ends the item? |
 | --- | --- | --- |
@@ -327,7 +374,7 @@ mark that cannot be drawn in one weight of one colour at 16 px.
 | 2 | **Colour system**, light and dark | **semantic roles**, not hues — the list is `design-system.md` §2.1 (canvas, surface, elevated, sunken, borders, three text levels, the accent set, the **agent** tint, four state colours, six presence colours, focus ring, scrim), because a role may be re-pointed without renaming a call site. Every foreground/background pair must pass **WCAG AA — 4.5:1 text, 3:1 non-text**; we compute this in CI (`ops/scripts/build-design-tokens.mjs --check` checks all 74 declared pairs and fails the build, `design-system.md` §2.2). Chips are not large text and get no exemption. Every state also carries a label and a glyph: **colour is never the only signal** |
 | 3 | **Type scale** | mapped to Apple's Dynamic Type styles; **SF Pro** on Apple (`.font(.body)` picks it), the system stack as the web fallback (`-apple-system, BlinkMacSystemFont, system-ui, …`) and `ui-monospace, SFMono-Regular, …` for identifiers and code. **No third-party font, ever.** Reply prose gets its **own** scale tuned for density, not scanning (`design-system.md` §4: 15pt phone / 16pt Mac, 1.45 line, 12px paragraph gap, 38em measure) |
 | 4 | **Spacing, radius, elevation, motion** | a 4pt grid; 44pt touch targets, 28pt pointer targets; four elevation levels where **dark mode raises by getting lighter, not by a bigger shadow**; motion that explains a change of state and nothing else, collapsing to ~0 under Reduce Motion |
-| 5 | **Component designs** | every component in `design-system.md` §3 plus the two this brief adds: navigation · activity feed row · presence chip · chat message with collapsed tool activity · question–answer prompt card · composer actions menu and ⌘K palette · model & effort picker · capture composer · **request card (six answers)** · task card and drag-to-dispatch · artifact viewer · project header and mode toggle · status/doctor row · notification with actions · empty states (*empty* and *absent* differ and get different copy) · error envelopes · destructive confirmation · **settings panes** · **wizard steps** |
+| 5 | **Component designs** | every component in `design-system.md` §3 plus the two this brief adds: navigation (six rows, two disclosure groups, **Pinned**) · activity feed row · presence chip · chat message with collapsed tool activity · question–answer prompt card · composer actions menu and ⌘K palette · model & effort picker · capture composer **and the floating "+" that opens it** · **request card (six answers)** · **the Needs You bell and its panel (§3.18)** · **pinned sidebar items (§3.19)** · task card and drag-to-dispatch · artifact viewer · project header and mode toggle · status/doctor row · notification with actions · empty states (*empty* and *absent* differ and get different copy) · error envelopes · destructive confirmation · **settings panes** · **wizard steps** |
 | 6 | **Per-screen mockups, Mac first** | in the §3.2 order, light and dark. `docs/product/design/*.svg` shows the house style (1000×800 Mac/wide, 390×844 phone, realistic content, numbered callouts, a legend) — match the rigour, not necessarily the look |
 | 7 | **Icon set direction** | **SF Symbols first**: name the symbol for each kind, state and destination; propose custom glyphs only where none fits, and say why. `design-system.md` §3.2 already lists a symbol per activity kind — the starting inventory |
 | 8 | **The brand kit** | per §5 |
@@ -384,9 +431,10 @@ name its data source does not pass.
 **Questions we want you to ask, early:** which current tokens are load-bearing
 and which are habit (say which you would replace and what it buys); for any
 screen, what is the one thing the user came here to do and what makes the
-calm-surface rule hard to hold there; where the seven-section IA fights the
-content (Work is five things in one section, Knowledge is undesigned — both may
-be wrong); what is missing from the vocabulary (a word you needed and could not
+calm-surface rule hard to hold there; where the six-section IA fights the
+content (Work is four things in one expandable group, Knowledge is undesigned
+— both may be wrong; and "Insights" is a name we propose, not one we are
+attached to); what is missing from the vocabulary (a word you needed and could not
 find in `docs/product/glossary.md` is a finding, not a licence to invent one —
 the eight nouns are ratified); and which states here have no visual answer.
 
@@ -398,10 +446,14 @@ the tokens, and honest screenshots of what we built last round.
 `CLAUDE.md`; none edited in place, and you should not be surprised by them):
 
 - **`design-system.md` P6, §3.1 and §3.9 were amended 2026-09-17 (#188)** to
-  the seven sections and the six answers; the struck lines there record the
-  old ten destinations and three answers. The PWA still ships its older nav
-  and follows in a later PR. Capture is one of the glossary's eight nouns:
-  the noun stays, the tab goes.
+  the seven sections and the six answers, and **amended again the same day**
+  (second ruling) to the six sections, the floating "+", the Needs You bell
+  and Insights; §3.18 and §3.19 are new. The struck lines there record the
+  old ten destinations, the seven sections and the three answers — read them
+  as the trail, not as alternatives. The PWA still ships its older nav and
+  follows in a later PR. Capture is one of the glossary's eight nouns: the
+  noun stays, the tab goes. **Needs You is still the product's only badge**
+  (P2) — it moved onto a bell, it did not multiply.
 - **Compute can be managed only on the Mac** (`metistry compute` verbs; the
   console exposes no `/api/compute` route), which P6 forbids. **Knowledge has
   no client read path at all** — captures go in and nothing comes back out to
@@ -422,10 +474,14 @@ the tokens, and honest screenshots of what we built last round.
 >
 > Read `docs/product/design-brief.md` first — the full brief: what the product
 > is, its surfaces (native SwiftUI Mac app first, iOS later, a PWA for
-> non-Apple machines), the seven-section information architecture (Chat, Feed,
-> Needs You, Work, Knowledge, Agents, System, with Capture as a global
-> action), every screen including Settings and the seven-step setup wizard,
-> and exactly what we need back. Then read `docs/product/design-system.md`:
+> non-Apple machines), the **six-section** information architecture (Chat,
+> Feed, Work, Knowledge, Agents, Insights) with **two global controls** —
+> capture is a floating "+" that opens a composer, and the queue of things
+> needing a human hangs off a **bell with an unread count** in the top-right
+> of every screen, never a tab — plus a user-filled **Pinned** area in the Mac
+> sidebar, Settings (which holds status, compute, devices and instances) and
+> a setup wizard in the app menu; every screen, and exactly what we need
+> back. Then read `docs/product/design-system.md`:
 > its ten principles **P1–P10 are constraints you must honour** — above all,
 > agent-written text is data and never looks like a control; silence is the
 > default so the surface stays calm; refusals are explained inline where they

@@ -17,7 +17,7 @@
      install's node — that name is what System Settings shows, and it is the
      entire reason the program is not `…/node` directly.
 
-     __SUPERVISOR_CONFIG__ is <instance>/state/supervisor.json, written by
+     __SUPERVISOR_CONFIG__ is <instance>/.metistry/state/supervisor.json, written by
      `metistry up` (0600): the child list, each child's argv, environment and
      log path, and the control socket's token. `metistry restart|stop|start
      <service>` talks to that socket rather than to launchctl, because

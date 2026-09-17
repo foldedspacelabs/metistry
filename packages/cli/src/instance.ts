@@ -1,9 +1,10 @@
 // An instance directory is self-contained (owner-ratified 2026-09-09,
-// docs/product/desktop-app-plan.md). The vault, identity, rules, queries,
-// routines, `metistry.lock`, `inbox/` and the launchd shape's derived
-// `state/` already live there; this module is the rest of it:
+// docs/product/desktop-app-plan.md). The vault is the directory itself;
+// identity, rules, queries, routines, `metistry.lock` and the derived
+// `state/` live under `.metistry/` (core's INSTANCE_LAYOUT). This module is
+// the rest of it:
 //
-//   * `<instance>/state/.env` — the derived environment file. It used to
+//   * `<instance>/.metistry/state/.env` — the derived environment file. It used to
 //     live in the PRODUCT checkout, which made one checkout serve exactly
 //     one instance. The product-dir `.env` is still read as a deprecated
 //     fallback so a running install keeps working until its next
@@ -12,33 +13,35 @@
 //     account this instance's Keychain items are filed under, and how the
 //     Mac app tells several instance directories apart.
 //
-// Nothing here writes a secret into the instance REPO: `state/` is
+// Nothing here writes a secret into the instance REPO: `.metistry/state/` is
 // gitignored by the seed `metistry init` stamps.
 
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { INSTANCE_LAYOUT, instancePath, statePath } from "@foldedspacelabs/metistry-core";
 import { writeProtected } from "./protected-write.js";
 import type { StepRunner } from "./steps.js";
 
-/** Derived, gitignored state under the instance dir: Postgres data, the assistant's transcripts, and now `.env`. */
-export const STATE_DIRNAME = "state";
+/** Derived, gitignored state under the instance dir: Postgres data, the assistant's transcripts, downloaded models, and `.env`. */
+export const STATE_DIRNAME = INSTANCE_LAYOUT.stateDir;
 export const ENV_FILENAME = ".env";
-export const IDENTITY_FILENAME = "identity.yaml";
+/** Instance-relative — the path `writeProtected` posts to the vault bridge. */
+export const IDENTITY_FILENAME = INSTANCE_LAYOUT.identity;
 
-/** Trailing slashes make `<dir>//state` — normalise once, here. */
+/** Trailing slashes make `<dir>//.metistry` — normalise once, here. */
 export function normalizeDir(dir: string): string {
   return dir.replace(/\/+$/, "");
 }
 
 export function instanceStateDir(instanceDir: string): string {
-  return join(normalizeDir(instanceDir), STATE_DIRNAME);
+  return statePath(instanceDir);
 }
 
 /** Where an instance's derived `.env` belongs. */
 export function instanceEnvFile(instanceDir: string): string {
-  return join(instanceStateDir(instanceDir), ENV_FILENAME);
+  return statePath(instanceDir, ENV_FILENAME);
 }
 
 /** The product checkout's `.env` — deprecated as an install's environment, still read as a fallback. */
@@ -143,7 +146,7 @@ export function withInstanceId(identityYaml: string, id: string): string {
 }
 
 export function identityPath(instanceDir: string): string {
-  return join(normalizeDir(instanceDir), IDENTITY_FILENAME);
+  return instancePath(instanceDir, "identity");
 }
 
 /** The instance's id, or undefined when the directory has none yet (every instance created before 2026-09-09). */

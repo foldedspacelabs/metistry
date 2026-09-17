@@ -7,7 +7,7 @@
 import { mkdir, readdir, readFile, realpath, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
-import type { ErrorCode } from "@foldedspacelabs/metistry-core";
+import { NON_VAULT_ROOTS, isVaultPath, type ErrorCode } from "@foldedspacelabs/metistry-core";
 import { Committer } from "./committer.js";
 import { Git } from "./git.js";
 import { confine, isProtected, validPrincipal, writeAllowed, type Confined } from "./paths.js";
@@ -25,7 +25,11 @@ export interface VaultConfig {
   maxBytes: number;
 }
 
-const SKIP_DIRS = new Set([".git", ".obsidian", ".trash", "node_modules"]);
+// Directories the walk never descends into. The vault root is the instance
+// directory itself now, so this is the whole "not knowledge" list:
+// `.metistry/` (the machinery), git, Obsidian's own config and trash, and
+// `Artifacts/` — owner-visible content nothing indexes (core's NON_VAULT_ROOTS).
+const SKIP_DIRS = new Set([...NON_VAULT_ROOTS, ".trash", "node_modules"]);
 
 function fail<T>(code: ErrorCode, message?: string): Outcome<T> {
   return message ? { ok: false, code, message } : { ok: false, code };
@@ -120,8 +124,13 @@ export class Vault {
     return { ok: true, value: out };
   }
 
-  /** Every regular file under `Knowledge/` as vault-relative paths (symlinks and dot-dirs skipped). */
-  async walkKnowledge(): Promise<string[]> {
+  /**
+   * Every regular file in the vault as instance-relative paths. The walk
+   * starts at the instance ROOT — that directory IS the Obsidian vault — and
+   * skips `.metistry/`, `.obsidian/`, `.git/`, `Artifacts/` and every other
+   * dot-directory (`Inbox/.large/` is captures git does not carry, not notes).
+   */
+  async walkVault(): Promise<string[]> {
     const out: string[] = [];
     const walk = async (dir: string, relDir: string) => {
       let entries;
@@ -132,12 +141,12 @@ export class Vault {
       }
       for (const e of entries) {
         if (SKIP_DIRS.has(e.name) || e.name.startsWith(".") || e.isSymbolicLink()) continue;
-        const r = `${relDir}/${e.name}`;
+        const r = relDir ? `${relDir}/${e.name}` : e.name;
         if (e.isDirectory()) await walk(join(dir, e.name), r);
-        else if (e.isFile()) out.push(r);
+        else if (e.isFile() && isVaultPath(r)) out.push(r);
       }
     };
-    await walk(join(this.root, "Knowledge"), "Knowledge");
+    await walk(this.root, "");
     return out.sort();
   }
 
@@ -150,7 +159,7 @@ export class Vault {
     const needle = q.toLowerCase();
     const hits: Array<{ path: string; title: string; description: string | null; snippet: string }> = [];
     if (!needle) return hits;
-    for (const rel of await this.walkKnowledge()) {
+    for (const rel of await this.walkVault()) {
       if (!isMarkdown(rel) || isConflictFile(rel)) continue;
       const text = await readFile(join(this.root, rel), "utf8");
       const { meta, body } = parseFrontmatter(text);

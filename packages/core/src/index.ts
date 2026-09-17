@@ -53,6 +53,7 @@ export {
   LEGACY_VAULT_DIR,
   NON_VAULT_ROOTS,
   PROTECTED_ROOT_FILES,
+  VAULT_ROOT_AREA,
   detectLayout,
   instancePath,
   isProtectedPath,
@@ -159,6 +160,7 @@ export {
 export {
   COMPUTE_FILENAME,
   COMPUTE_FILES_DEFAULT,
+  RULES_FILES_DEFAULT,
   PROVIDER_KINDS,
   LOCALITIES,
   BUDGET_ACTIONS,

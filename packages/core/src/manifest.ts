@@ -3,6 +3,7 @@
 // validate against this, so the schema is the contract.
 
 import { z } from "zod";
+import { VAULT_ROOT_AREA, isVaultPath } from "./instance-layout.js";
 
 import { actionTableSchema, AUTONOMY_LEVELS } from "./actions.js";
 import { modelRefIssue } from "./model-ref.js";
@@ -17,7 +18,7 @@ const cron = z
 
 const name = z
   .string()
-  .regex(/^[a-z][a-z0-9-]*$/, "names are lowercase kebab-case (casing rule: only Knowledge/ is TitleCase)");
+  .regex(/^[a-z][a-z0-9-]*$/, "names are lowercase kebab-case (casing rule: only the vault is TitleCase)");
 
 const base = z.object({
   name,
@@ -141,18 +142,21 @@ const envRef = z
   .regex(/^env:[A-Z][A-Z0-9_]*$/, "must be an environment reference (env:VAR) — never a literal secret");
 
 // A vault-relative path prefix the brief may reference (plan §4.15: scopes
-// are prefix matches, so `Knowledge/Areas/fsl` covers every sub-area).
+// are prefix matches, so `Areas/Fsl` covers every sub-area). The vault root
+// is the instance directory, so a prefix has no `Knowledge/` to anchor on —
+// `isVaultPath` is the whole rule, which also refuses `.metistry/` (the
+// machinery) and `Artifacts/` (not knowledge).
 const knowledgePrefix = z
   .string()
-  .regex(/^Knowledge(\/[A-Za-z0-9_.-]+)*$/, "allow entries are Knowledge/... path prefixes (no '..', no trailing slash)")
-  .refine((p) => !p.split("/").includes(".."), "allow entries may not contain '..'");
+  .regex(/^[A-Za-z0-9][A-Za-z0-9 _.'-]*(\/[A-Za-z0-9][A-Za-z0-9 _.'-]*)*$/, "allow entries are vault path prefixes (no leading slash, no '..', no trailing slash)")
+  .refine((p) => isVaultPath(p), "allow entries must name vault content — not .metistry/, not Artifacts/, no traversal");
 
 // What a brief bound for this target may carry (§4.18.B). Every field is
 // required so the policy is a declaration, not a default nobody chose. The
 // dispatch tool enforces it — a manifest is the contract, the tool is the
 // control.
 export const dataPolicySchema = z.object({
-  /** Knowledge path prefixes a brief may reference; empty = no vault references at all. */
+  /** Vault path prefixes a brief may reference; empty = no vault references at all. */
   allow: z.array(knowledgePrefix),
   /** Provenance classes that may never leave the machine via this target, e.g. `comms` (§4.12). */
   deny_sources: z.array(z.string().regex(/^[a-z][a-z0-9_-]*$/, "source names are lowercase kebab-case")),
@@ -297,8 +301,8 @@ export const agentManifest = base
     effort: z.enum(EFFORTS).default("low"),
     uses: z.array(crewUse).default([]),
     skills: z.array(name).default([]),
-    /** Read-tier areas (§4.11 scoped escape hatch): Knowledge/ prefixes below the root. The console's grant validator holds the exact (TitleCase) shape; here: never bare, never traversal. */
-    scope: z.array(knowledgePrefix.refine((p) => p !== "Knowledge", "scope entries must name an area below Knowledge/ — the bare vault is not a crew scope")).default([]),
+    /** Read-tier areas (§4.11 scoped escape hatch): vault prefixes below the root. The console's grant validator holds the exact (TitleCase) shape; here: never the bare vault, never traversal. */
+    scope: z.array(knowledgePrefix.refine((p) => p !== VAULT_ROOT_AREA, "scope entries must name an area of the vault — the bare vault is not a crew scope")).default([]),
     /** Project membership (§4.19; §4.21 autonomy boundary): slugs. Empty = member of no project. */
     projects: z.array(name).default([]),
     manages: z.array(name).default([]),

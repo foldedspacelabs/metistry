@@ -82,7 +82,7 @@ containing a "proposal open" item is not, by being listed, authorised.
 | H5 | **One alert per (component, error signature)** with an ack that silences that signature only | hermes-2 | **done** (#153) |
 | H6 | A **`schedules` section in `metistry doctor`** — last run, overdue by >2× interval, non-zero exit when actionable | hermes-2 | **done** (#153) |
 | H7 | **`failure_streak`** in the morning brief; at 3, one line offering fix / pause / remove | hermes-2 | **done** (#153) |
-| H8 | **Crew descriptions in `agents_delegate`** from the manifest | hermes-2 | **accepted 2026-09-17**, scheduled |
+| H8 | **Crew descriptions in `agents_delegate`** from the manifest | hermes-2 | **done** (#180) |
 | H9 | **`data_collection: "deny"`** in the OpenRouter request body | hermes-2 | **rejected 2026-09-17** — conflicts with C13, see §2.6; C13's warning-only shape stands (#159) |
 | T1 | **Tool *names* as grammar terminals** (or a `json_schema` enum from the live `tools/list`); keep parse → zod → one repair retry where a provider only hints | atomic | proposal open (needs the server check in §3.4) |
 | T2 | **Lead the candidate list with a ~30–35B A3B-class MoE at Q4**; demote gemma-4 to scorer-only | atomic | folded into the bake-off (§3.3) |
@@ -191,25 +191,52 @@ is** — Sonnet's score and cost per turn on the same fixtures. A PoC in
 
 ### 3.3 Candidates
 
-Criteria in order: native tool calling in the chat template; structured output
-(grammar or `json_schema`); ≥128k context; fits alongside Postgres, the console
-and the engine inside the ~40 GB practical ceiling on 64 GB; tokens/s at 8k.
-Verify names and quants in the catalogue at PoC time — do not trust a list
-written today.
+**Shortlist accepted 2026-09-17 from the survey**
+(`docs/research/2026-09-17-bakeoff-candidate-survey.md`), superseding the text
+this section held since 2026-09-13.
 
-- **Lead:** a ~30–35B **A3B-class MoE at Q4** (~22 GB) — the class behind the
-  only controlled result on this hardware.
-- **Control:** one ~32B dense at 4-bit.
-- **Scorer-only:** gemma-4 — kept in the harness for the PoC-16 lane, **not a
-  main-agent candidate**.
-- **Cloud rows** for the seed-default question (the deepseek / kimi /
-  gemini-flash-lite class in the compute note's price table) — the seed default
-  may reasonably be cloud while local matures.
-- **OPEN-1 — ruled 2026-09-17:** quality first, open weights (portability to
-  local later) as a tiebreaker within a quality band — not purely
-  score-based; a somewhat lower-quality open-weight model is an acceptable
-  choice if day-to-day performance and usability stay reasonable. Changes the
-  cloud shortlist accordingly.
+Criteria in order: native tool calling in the chat template; structured
+output (grammar or `json_schema`); **≥128k native** context (YaRN-extended
+does not count); fits alongside Postgres, the console and the engine inside
+the ~40 GB practical ceiling **including KV cache at the context the run
+uses**; tokens/s at 8k. Names and quants verified 2026-09-17 in
+`docs/research/2026-09-17-bakeoff-candidate-survey.md`; re-verify if PoC-18
+starts more than a month after that date.
+
+Selection rule (owner, 2026-09-17): **quality first**; open weights are a
+tiebreaker within a quality band; a somewhat lower-quality open-weight model
+is acceptable where day-to-day performance and usability stay reasonable.
+
+- **Quality lead:** **Qwen3.8-27B dense at Q4_K_M** (~17 GB weights, ~25 GB
+  with a 128k KV cache), Apache-2.0, 262k native. The strongest agentic
+  scores of anything that fits (Terminal-Bench 2.1 73.0, SWE-bench Pro 61.7)
+  at a measured ~34 tok/s on this hardware.
+- **Usability control:** **Qwen3.6-35B-A3B at Q4_K_M** (21.2 GB), the
+  A3B-class MoE the plan previously named as lead — measured **~85 tok/s** on
+  M5 Pro, ~2.5× the dense lead, at visibly lower agentic scores. This lane
+  answers the ruling's usability clause with a number instead of a guess.
+- **Third-family control:** **GLM-4.7-Flash** (30B-A3B, MIT, 128k, ~17.5 GB)
+  — τ²-Bench 79.5, the best multi-turn tool-use evidence of any local
+  candidate, and a non-Qwen family so the judge rule has somewhere to stand.
+  Run it with `--repeat-penalty 1.0`.
+- **Optional fourth:** **Nemotron-3.5-Lightning-30B-A3B** (OpenMDW-1.1, 1M
+  context, ~19 GB, measured 67.7 tok/s) — include only if its tool-call
+  evidence gap is closed by the PoC's own tool-loop axis; it has no published
+  agentic benchmark.
+- **Scorer-only:** **Gemma 4** — E4B stays the PoC-16 scorer; 26B-A4B or 31B
+  may be tried as the rubric judge. **Not a main-agent candidate.**
+- **Cloud rows for the seed default:** `qwen/qwen3.6-35b-a3b`
+  ($0.05/$0.70, Apache-2.0), `deepseek/deepseek-v4-flash` (MIT, ~$0.14/$0.28),
+  `z-ai/glm-5.2` (~$0.447/$3.31 realised) and `minimax/minimax-m3`
+  ($0.098/$1.21 realised) — with Sonnet as the bar, not a candidate.
+- **OPEN-1 resolved in favour of open weights.** The lead MoE is served on
+  OpenRouter at $0.05/$0.70 *and* runs locally from the same weights, so the
+  seed default can be cloud today and local later **without changing model**
+  — which makes stage-2 shadow agreement a measurement of harness and quant
+  rather than of two different models. That is worth more than the price
+  delta between the open and closed rows.
+- **New OPEN-8:** `z-ai/glm-5.2`'s licence is asserted by secondary sources
+  only. Verify before it counts as an open-weight row.
 
 ### 3.4 Servers — and the first thing the PoC checks
 
@@ -219,6 +246,16 @@ structured-output controls each server exposes** — GBNF `grammar`,
 `response_format: json_schema`, slot control (`slot_id`/`id_slot`),
 `cache_prompt`. T1 and T5 need grammar and slot control; if the grammar adopt
 is what closes the quality gap, that check alone decides the server.
+
+**Ruled 2026-09-17 (survey finding).** "Every candidate runs on all three
+servers" is not satisfiable as a precondition: Ollama does not support the
+Qwen3.5-class llama.cpp GGUFs at all, and Qwen3.8 needs **`--jinja`** plus a
+current (non-stale, non-`--depth 1`) llama.cpp build — without it there is no
+reliable turn boundary, and a stale build silently corrupts its DeltaNet path
+while still reporting normally. Server coverage is therefore recorded as a
+**result** per (model, server), not a gate for entering the bake-off;
+`server_build` (already in each run's `.meta.json`) is now load-bearing, not
+bookkeeping.
 
 ### 3.5 Metrics
 
@@ -279,8 +316,8 @@ scripts, trace columns, the write-up. Fixtures gate stage 0; the bundled
 **Status as of 2026-09-17.** Merges since 2026-09-15 (#141–#171) shipped
 essentially the whole chain: PRs 1, 1a, 2, 3, 4 and 5 are **done** (49 rows
 across §1's decisions log, the small-adopts table, this queue and §4b's
-W1–W7 now read `done (#NNN)`), plus every grouped adopt except crew
-descriptions (H8, **accepted 2026-09-17**, scheduled). The Taskuary
+W1–W7 now read `done (#NNN)`), plus every grouped adopt including crew
+descriptions (H8, **done**, #180 — see below). The Taskuary
 executable-action proposal (ADOPT 6) and the autonomy-widening question
 (OPEN-2) were both accepted and shipped the same day, in #170. **Decided but
 not yet built:** C9–C11 and C14 (bake-off calls that need the owner's
@@ -288,7 +325,20 @@ fixtures to run), O1–O4 and S6 (accepted, unscheduled). OPEN-1 and OPEN-3
 through OPEN-7 were all **ruled 2026-09-17** (table below); H9 was
 **rejected** the same day. **Genuinely open** — nothing built on either
 side, per this doc's status vocabulary above: T1, T2 and T5 (wait on the
-bake-off's server check); and W2 (no `v0.8.0` tag cut yet).
+bake-off's server check). W2 has since moved past "open" — v0.8.0 is being
+cut as of 2026-09-17 (below, and §4b).
+
+**Later the same day (2026-09-17).** #178 recorded the day's rulings in this
+document and added invariant 10 to `CLAUDE.md`. #179 is the bake-off
+candidate survey (`docs/research/2026-09-17-bakeoff-candidate-survey.md`)
+whose accepted shortlist now replaces §3.3, and which raised the new OPEN-8
+(§3.3, §4 table). #180 applies the rulings in code: the Zen seed template is
+gone (OPEN-7), the default assignment ships marked `critical` (OPEN-4), the
+board's Assigned column reads "Addressed to" (OPEN-5), and crew descriptions
+ship in `agents_delegate` — **H8 is done.** **O1–O4** (the phone/offline
+client) stay **reserved by the owner, not scheduled** — accepted proposals
+with no PR against them. **Stage-2 shadow mode** (the one piece PR 3 still
+lacks) is **in progress**. **v0.8.0 is being cut** (W2, §4b).
 
 Sequence: **PR 1 → PR 2 → PoC-18 stage 0 → PR 3 → PR 4/5**, grouped adopts
 landing independently. Fixture authoring can start now; the Sonnet bar needs
@@ -299,7 +349,7 @@ only an OpenRouter key, the local half needs PR 2's binary.
 | **1** | `compute.yaml` schema in `packages/core` (zod), `seed/compute.yaml` + templates, `metistry compute providers\|models\|assign\|budget`, hot reload, OpenRouter seed provider with Claude pinned, **the scrub** (engine, CLI env allowlist, secrets, shapes, docs — plus the Agent SDK dependency and `engine.ts`'s `query()` path) | ratify the SDK removal in `CLAUDE.md` first (§2.10) | **done** (#152 schema/verbs, #167 the scrub) |
 | **1a** | **App part, split out:** the Compute pane, wizard step 7 → "Choose your compute", Settings. Separated so the schema/CLI PR is reviewable alone and the SwiftUI change lands against a settled verb surface | — | **done** (#167) |
 | **2** | `/v1/models` discovery, doctor rows, `compute models list\|install\|load\|unload`, LM Studio + Ollama as peers, embeddings over `/v1/embeddings` (C18) — **and the bundled `llama-server`** built from pinned source into the runtime-deps pack, signed like Postgres and git | — | **done** (#158) |
-| **3** | `Engine` interface + the `openai-compatible` loop, `runs` provider/model columns, `spend` query, budgets `allow\|stop\|critical_only` with the routine pause, non-ZDR warning, per-run scoped credential, cross-kind delegation refusal — **plus** R1 in-engine host allowlist, R2 80 % warning, R3 refusals name the field, T4 no-progress veto, T1/T5 where the server exposes them, and **stage-2 shadow mode** | OPEN-3, OPEN-4, OPEN-6 | **done** (#159) except T1/T5 (no server exposes grammar/slot control yet) and stage-2 shadow mode (not found in the codebase) |
+| **3** | `Engine` interface + the `openai-compatible` loop, `runs` provider/model columns, `spend` query, budgets `allow\|stop\|critical_only` with the routine pause, non-ZDR warning, per-run scoped credential, cross-kind delegation refusal — **plus** R1 in-engine host allowlist, R2 80 % warning, R3 refusals name the field, T4 no-progress veto, T1/T5 where the server exposes them, and **stage-2 shadow mode** | OPEN-3, OPEN-4, OPEN-6 | **done** (#159) except T1/T5 (no server exposes grammar/slot control yet) and stage-2 shadow mode (**in progress**, 2026-09-17) |
 | **4** | Apple FM `/v1` surface **after** the `DynamicGenerationSchema` PoC (C8); `inbox-drain` moves to provider `apple-fm`; CI check that no collector names a provider with cost > 0 | — | **done** (#164 PoC-19, #169) |
 | **5** | `plugins/opencode`, parity test, `metistry connect opencode`, `docs/ops/opencode.md` | `@opencode-ai/plugin` types — ask before adding | **done** (#171) |
 
@@ -331,6 +381,7 @@ the Studio's overlay; ratifying `packages/eval`; the SDK removal in
 | OPEN-5 | `work.owner` — "addressed to" or authoritative? An Assigned column makes it look authoritative | hermes-1 | **ruled 2026-09-17** — stays informational ("addressed to"), not authoritative; the board column renamed "Addressed to" |
 | OPEN-6 | Prompt caching: one top-level `cache_control` or explicit breakpoints — measure both in PR 3 | compute rev 3 Q3 | **ruled 2026-09-17** — ship automatic top-level `cache_control` first; an agent measures automatic vs explicit breakpoints on ~10 real turns before any further decision, waiting on a configured OpenRouter provider on the Studio |
 | OPEN-7 | Seed cloud templates: OpenRouter only, plus Zen, and leave "any base URL" to the form? | compute rev 3 Q2 | **ruled 2026-09-17** — OpenRouter is the only seeded cloud template; Zen removed from the seed, reached through the generic "any OpenAI-compatible base URL" form |
+| OPEN-8 | Is `z-ai/glm-5.2` actually open-weight? Its licence is asserted by secondary sources only | 2026-09-17 bake-off survey, §3.3 | open — verify the licence before it counts as an open-weight row |
 
 ---
 
@@ -352,7 +403,7 @@ surfaces verified in `2026-09-15-devin-cursor-integration.md` (#143).
 | # | what | proves / unblocks | who | Status (2026-09-17) |
 | --- | --- | --- | --- | --- |
 | W1 | **Assistant degrades absent**: no token → the supervisor does not start the assistant child, `doctor` reports `assistant: absent (no engine credential)`, fold turns queue and wait; everything else runs | a second instance runs today with no model | agent (Opus) | **done** (#145) |
-| W2 | **Cut v0.8.0** (changesets pending: offline contract #132, signed packs #133) | the second Mac installs signed packs + helpers via the Mac app | owner tags | open — no `v0.8.0` tag yet |
+| W2 | **Cut v0.8.0** (changesets pending: offline contract #132, signed packs #133) | the second Mac installs signed packs + helpers via the Mac app | owner tags | **in progress (2026-09-17)** — v0.8.0 is being cut, tag not yet pushed |
 | W3 | **`metistry connect <tool>`** — one generic verb: mint a per-tool agent token (`POST /api/agents` + grants, principal kind external), write the tool's native config: Cursor `~/.cursor/mcp.json` (`url` + `headers` with `${env:NAME}` so the token never hits disk), Devin (personal-scope custom Streamable-HTTP MCP with `Authorization: Bearer`, printed as instructions — no API to write it), Claude Code (existing plugin), OpenCode later (shrinks compute PR 5). Plus `docs/ops/{cursor,devin}.md` | Cursor and Devin read/search the vault, capture, and take tasks through `/mcp` | agent | **done** (#148) |
 | W4 | **Cursor session capture**: `sessionEnd` in `.cursor/hooks.json` (Cursor also loads `~/.claude/settings.json`, mapping `SessionEnd`), same idempotency key as the Claude Code plugin; gated on Cursor's transcript format (unverified) | dev sessions land in the inbox whichever tool is used | agent | **done** (#149) |
 | W5 | **Devin knowledge-in**: a collector pulling DeepWiki pages for the org's private repos and `devin_knowledge` items via `mcp.devin.ai/mcp` / REST v3 into the inbox as captures (`source: devin`, provenance), so the fold — or Cursor with a knowledge-write grant, until an engine exists — organises them | "learn the team's repos"; Devin's context reaches the vault | agent; owner's Devin PAT (enterprise PAT policy is off by default — owner to enable) | **done** (#150) |

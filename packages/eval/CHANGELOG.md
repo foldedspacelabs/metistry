@@ -1,5 +1,12 @@
 # @metistry-apps/eval
 
+## 0.8.1
+
+### Patch Changes
+
+- @foldedspacelabs/metistry-mcp-brain@0.8.1
+  - @foldedspacelabs/metistry-tasks@0.8.1
+
 ## 0.8.0
 
 ### Patch Changes

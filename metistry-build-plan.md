@@ -210,7 +210,8 @@ typed one produce the identical string. Rendering is `design-system.md`
 
 ## 1. Invariants
 
-Nine rules. Every later decision should be checkable against these.
+Ten rules (#10 added 2026-09-17). Every later decision should be checkable
+against these.
 
 1. **Git is the record. Postgres is derived and operational.**
    Test: `docker compose down -v`, rebuild from the repo, run collectors once →
@@ -263,6 +264,12 @@ Nine rules. Every later decision should be checkable against these.
    *entire* mutating and outbound surface. Most of §4.7's governance
    silently depended on this premise — now it is written, and it ships with
    a misuse test like every other boundary.
+
+10. **The console's mutating surface is closed** (added 2026-09-17,
+    `docs/plan-refresh-2026-09-13.md` §6a, added to `CLAUDE.md` in #178). A
+    closed, enumerated set of actions, each a door onto an existing audited
+    service; a new action is a product change, never a prompt or a config
+    line.
 
 ---
 
@@ -798,12 +805,17 @@ the bake-off, and what is still open. In brief, in order:
 3. **The bake-off PoC** (stage 0: the bar) once 2 lands and the owner's 50
    fixtures exist. **Not started** — the harness (`packages/eval`) shipped in
    #160, but stage 0 still waits on the owner's fixtures *(status
-   2026-09-17)*.
+   2026-09-17)*. The candidate shortlist itself is settled: the owner-accepted
+   survey (`docs/research/2026-09-17-bakeoff-candidate-survey.md`, **built
+   #179**) replaces `docs/plan-refresh-2026-09-13.md` §3.3, swapping the
+   plan's original lead/control lanes (Qwen3.8-27B dense now leads,
+   Qwen3.6-35B-A3B becomes the usability control) *(status 2026-09-17)*.
 4. **The engine** — `openai-compatible` loop, cost columns, `spend`, budgets
    with the routine pause, non-ZDR warning, cross-kind delegation refusal, plus
    the loopback egress proxy, the 80 % budget warning, refusals that name the
    config field, a no-progress veto, and shadow mode. **Done** (#159), except
-   shadow mode, which is not yet in the codebase *(status 2026-09-17)*.
+   shadow mode, which is **in progress**, not yet merged *(status
+   2026-09-17)*.
 5. **Apple FM `/v1`** after its PoC, then the **OpenCode plugin**. **Done**
    (#164 PoC-19, #169 the provider, #171 OpenCode) *(status 2026-09-17)*.
 
@@ -815,11 +827,20 @@ threads hung off `work` rows (view → `work_id` anchor → autonomy levels, the
 last blocked on an open question) — **done, #161**, and the open question
 (OPEN-2) was itself resolved and shipped as autonomy levels in **#170**;
 contract hygiene (CI audit of unwired limits, a stdout-is-the-protocol
-conformance test, crew descriptions in `agents_delegate`) — the first two
-**done, #163**, crew descriptions still a proposal. Each carries its own
-status in the refresh doc — several are proposals, not ratified work.
-*(status 2026-09-17: see `docs/plan-refresh-2026-09-13.md` §4 for the
-row-by-row detail.)*
+conformance test, crew descriptions in `agents_delegate`) — all three now
+**done**: the first two in #163, crew descriptions **built #180** *(status
+2026-09-17)*. Each carries its own status in the refresh doc — several are
+proposals, not ratified work. *(status 2026-09-17: see
+`docs/plan-refresh-2026-09-13.md` §4 for the row-by-row detail.)*
+
+**Later the same day (status 2026-09-17):** #178 recorded the day's rulings
+and added invariant 10 above; #179 is the candidate survey folded into item 3;
+#180 built the rulings — the Zen seed template removed, the default
+assignment marked `critical`, the board's Assigned column reading "Addressed
+to", and crew descriptions (H8, now done). **O1–O4** (the phone/offline
+client) remain **reserved by the owner, not scheduled** — accepted proposals,
+no PR yet. **v0.8.0 is being cut** (`docs/plan-refresh-2026-09-13.md` §4b,
+W2).
 
 ---
 
@@ -2514,6 +2535,11 @@ for commercial use as of early 2026 means no licensing friction on that side.
 (Worth one check of the other organisation's OSS-use policy — most permit use
 freely; some want the license on a list. Apache-2.0 is usually the easiest
 answer.)
+
+**Status 2026-09-17:** the concrete second-instance work (W1–W7) standing up
+this shape is tracked row-by-row in `docs/plan-refresh-2026-09-13.md` §4b —
+**built** #145, #148, #149, #150, #151, #152, #158, #159, #167, #169; W2
+(cutting `v0.8.0`) is in progress.
 
 ---
 

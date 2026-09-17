@@ -278,6 +278,30 @@ export function firstOnMachineBaseUrl(cfg: Compute): string | undefined {
 
 // ---- assignments -------------------------------------------------------------
 
+/**
+ * `shadow:` — stage 2 of the bake-off (§3.7), as configuration.
+ *
+ * A fraction of the turns this assignment serves are run a SECOND time on a
+ * candidate model, with every tool call stubbed record-only, purely to
+ * measure agreement. The candidate's answer is stored and never shown: the
+ * user's answer is always the assignment's (invariant 4 — this block cannot
+ * change which model answers, only which model is measured).
+ *
+ * `fraction` has NO default on purpose. The rate IS the spend — a shadow
+ * block with an implied rate would pick somebody's bill for them — so the
+ * file has to say it. `0` is a legal way to stage the block in with nothing
+ * running.
+ */
+export const shadowSchema = z.strictObject({
+  model: modelRefSchema,
+  fraction: z
+    .number({ error: "shadow.fraction is required: the fraction of this assignment's turns to shadow, 0..1 (0.1 = one turn in ten). It has no default because the rate is the spend." })
+    .min(0, "shadow.fraction is a fraction between 0 and 1 — 0 stages the block in with nothing running")
+    .max(1, "shadow.fraction is a fraction between 0 and 1 — 1 shadows every turn, which is the most that can be spent"),
+});
+
+export type Shadow = z.infer<typeof shadowSchema>;
+
 export const assignmentSchema = z.strictObject({
   model: modelRefSchema,
   /** Absent = medium, exactly as `tierSchema` already defaults it: effort is the other half of the model choice, not a separate knob. */
@@ -292,6 +316,8 @@ export const assignmentSchema = z.strictObject({
    * the pause is meant to apply to it.
    */
   critical: z.boolean().optional(),
+  /** Stage-2 shadow mode. Only legal on `assignments.default` (checked below) — it is the only place the engine reads it. */
+  shadow: shadowSchema.optional(),
 });
 
 export type Assignment = z.infer<typeof assignmentSchema>;
@@ -366,9 +392,34 @@ export const computeSchema = z
         });
       }
     };
+    // `shadow:` is read in ONE place — the default assignment — so that is
+    // the only place it may be written. A block on a tier or a crew would
+    // parse, cost nothing, measure nothing, and look like it worked.
+    const noShadowHere = (a: Assignment, kind: "tier" | "crew", name: string): void => {
+      if (a.shadow === undefined) return;
+      ctx.addIssue({
+        code: "custom",
+        path: ["assignments", kind === "tier" ? "tiers" : "crews", name, "shadow"],
+        message: `shadow: is stage-2 shadow mode and the engine reads it on \`assignments.default\` only (docs/ops/compute.md "Shadow mode") — move it there, rather than leaving a block on the ${kind} ${name} that nothing runs`,
+      });
+    };
     if (cfg.assignments) {
       check(cfg.assignments.default.model, ["assignments", "default", "model"]);
+      const shadow = cfg.assignments.default.shadow;
+      if (shadow) {
+        check(shadow.model, ["assignments", "default", "shadow", "model"]);
+        // Shadowing the model that already answered buys no comparison and
+        // doubles the turn's spend to produce it.
+        if (shadow.model === cfg.assignments.default.model) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["assignments", "default", "shadow", "model"],
+            message: `assignments.default.shadow.model is the model that already answers the turn (${shadow.model}) — a shadow of the same model measures nothing and doubles what the turn costs. Name the candidate you are considering instead.`,
+          });
+        }
+      }
       for (const [name, a] of Object.entries(cfg.assignments.tiers)) {
+        noShadowHere(a, "tier", name);
         if (name === DEFAULT_TIER) {
           ctx.addIssue({
             code: "custom",
@@ -378,7 +429,10 @@ export const computeSchema = z
         }
         check(a.model, ["assignments", "tiers", name, "model"]);
       }
-      for (const [name, a] of Object.entries(cfg.assignments.crews)) check(a.model, ["assignments", "crews", name, "model"]);
+      for (const [name, a] of Object.entries(cfg.assignments.crews)) {
+        noShadowHere(a, "crew", name);
+        check(a.model, ["assignments", "crews", name, "model"]);
+      }
     }
     for (const name of Object.keys(cfg.budgets?.providers ?? {})) {
       if (!Object.hasOwn(cfg.providers, name)) {
@@ -434,6 +488,15 @@ export interface ResolvedAssignment extends ModelRef {
   /** the provider's block, so a caller never has to look it up again */
   config: Provider;
   critical: boolean;
+  /** The stage-2 shadow candidate, resolved the same way. Present only where the file declared one (`assignments.default`). */
+  shadow?: ResolvedShadow;
+}
+
+/** A shadow candidate, resolved to (provider, model) with its provider block and the rate it is sampled at. */
+export interface ResolvedShadow extends ModelRef {
+  /** 0..1, straight from the file: the share of this assignment's turns that are run a second time. */
+  fraction: number;
+  config: Provider;
 }
 
 /**
@@ -460,7 +523,24 @@ export function resolveAssignment(cfg: Compute, tierOrCrew?: string | null): Res
         : ([DEFAULT_TIER, a.default] as const);
   const [from, assignment] = picked;
   const ref = parseModelRef(assignment.model);
-  return { ...ref, effort: assignment.effort, from, config: cfg.providers[ref.provider]!, critical: assignment.critical === true };
+  // The shadow travels with the assignment that carried it, so a turn that
+  // FELL BACK to `default` is shadowed exactly like one that named it — which
+  // is the whole population §3.7 stage 2 wants to measure.
+  const shadow = assignment.shadow;
+  return {
+    ...ref,
+    effort: assignment.effort,
+    from,
+    config: cfg.providers[ref.provider]!,
+    critical: assignment.critical === true,
+    ...(shadow ? { shadow: resolveShadow(cfg, shadow) } : {}),
+  };
+}
+
+/** The `shadow:` block as (provider, model, fraction, provider block) — the same resolution the assignment itself gets. */
+export function resolveShadow(cfg: Compute, shadow: Shadow): ResolvedShadow {
+  const ref = parseModelRef(shadow.model);
+  return { ...ref, fraction: shadow.fraction, config: cfg.providers[ref.provider]! };
 }
 
 /**

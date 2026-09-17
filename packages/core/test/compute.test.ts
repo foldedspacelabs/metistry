@@ -228,6 +228,59 @@ describe("resolution", () => {
   });
 });
 
+// Stage-2 shadow mode (§3.7). The schema's whole job here is that a block
+// which would spend money twice says so explicitly, and that a block the
+// engine does not read is refused instead of accepted.
+describe("shadow:", () => {
+  const both = `providers:
+  local: { kind: openai-compatible, base_url: http://127.0.0.1:1234/v1, locality: on_machine }
+  other: { kind: openai-compatible, base_url: http://127.0.0.1:7813/v1, locality: on_machine }
+`;
+  const withShadow = (block: string): string => `${both}assignments: { default: { model: local/a, ${block} } }`;
+
+  it("resolves the candidate to (provider, model, fraction) beside the assignment it belongs to", () => {
+    const cfg = parseCompute(withShadow("shadow: { model: other/qwen3.6-35b-a3b, fraction: 0.1 }"));
+    expect(cfg.assignments?.default.shadow).toEqual({ model: "other/qwen3.6-35b-a3b", fraction: 0.1 });
+    const a = resolveAssignment(cfg, "default")!;
+    expect(a.shadow).toEqual({ provider: "other", model: "qwen3.6-35b-a3b", ref: "other/qwen3.6-35b-a3b", fraction: 0.1, config: cfg.providers.other });
+    // and it travels with the assignment, so a turn that FELL BACK to default is shadowed too
+    expect(resolveAssignment(cfg, "nonesuch")?.shadow?.model).toBe("qwen3.6-35b-a3b");
+  });
+
+  it("is absent by default — every install without the block resolves a shadow of undefined", () => {
+    expect(resolveAssignment(parseCompute(SKETCH), "default")?.shadow).toBeUndefined();
+  });
+
+  it("fraction is REQUIRED and is a fraction: the rate is the spend, so nothing picks it for you", () => {
+    expect(why(withShadow("shadow: { model: other/m }"))).toContain("shadow.fraction is required");
+    expect(why(withShadow("shadow: { model: other/m, fraction: 1.5 }"))).toContain("assignments.default.shadow.fraction");
+    expect(why(withShadow("shadow: { model: other/m, fraction: -0.1 }"))).toContain("assignments.default.shadow.fraction");
+    // the two ends are legal: 0 stages the block in, 1 shadows everything
+    expect(parseCompute(withShadow("shadow: { model: other/m, fraction: 0 }")).assignments?.default.shadow?.fraction).toBe(0);
+    expect(parseCompute(withShadow("shadow: { model: other/m, fraction: 1 }")).assignments?.default.shadow?.fraction).toBe(1);
+  });
+
+  it("the candidate is one pinned <provider>/<model> that this file declares", () => {
+    expect(why(withShadow("shadow: { model: nosuch/m, fraction: 0.1 }"))).toContain("assignments.default.shadow.model");
+    expect(why(withShadow("shadow: { model: bare-id, fraction: 0.1 }"))).toContain("assignments.default.shadow.model");
+    expect(why(withShadow("shadow: { model: other/auto, fraction: 0.1 }"))).toContain("auto-router");
+    expect(why(withShadow("shadow: { model: other/m, fraction: 0.1, effort: low }"))).toContain("shadow");
+  });
+
+  it("refuses a shadow of the model that already answers — it measures nothing and doubles the turn", () => {
+    expect(why(withShadow("shadow: { model: local/a, fraction: 0.1 }"))).toContain("measures nothing and doubles what the turn costs");
+  });
+
+  it("refuses the block on a tier or a crew, naming the field — the engine reads it on `default` only", () => {
+    expect(why(`${both}assignments: { default: { model: local/a }, tiers: { deep: { model: local/a, shadow: { model: other/m, fraction: 0.1 } } } }`)).toContain(
+      "assignments.tiers.deep.shadow",
+    );
+    expect(why(`${both}assignments: { default: { model: local/a }, crews: { researcher: { model: local/a, shadow: { model: other/m, fraction: 0.1 } } } }`)).toContain(
+      "assignments.crews.researcher.shadow",
+    );
+  });
+});
+
 describe("the D4 overlay and hot reload", () => {
   const paths = COMPUTE_FILES_DEFAULT;
 

@@ -22,9 +22,38 @@ import { promisify } from "node:util";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
 import { INSTANCE_GITIGNORE, VAULT_ROOT_AREA } from "@foldedspacelabs/metistry-core";
-import { DB_REWRITES, LayoutCollision, migrateLayout, planMigration, rewriteEnvFile, rewriteEnvValue, rewriteGitignore } from "../src/migrate-layout.js";
+import { DB_REWRITES, LayoutCollision, migrateLayout, planMigration, rewriteEnvFile, rewriteEnvValue, rewriteGitignore, rewriteManifestAreas } from "../src/migrate-layout.js";
 
 const exec = promisify(execFile);
+
+/** A crew manifest in the shape `seed/agents/example/researcher.md` has: frontmatter, aligned comments, a flow scope, then the operating prompt. */
+const CREW_FIXTURE = `---
+name: analyst
+type: agent
+model: haiku                  # haiku | sonnet | opus
+uses: [knowledge, requests]
+# Read tier (§4.11): TitleCase vault prefixes.
+scope: [Knowledge/Projects, Knowledge/Resources]
+projects: []                  # shared-list membership (§4.19); empty = none
+max_turns: 10                 # agentic turns per run
+---
+
+You are an analyst. The brief is the brief.
+`;
+
+/** A target manifest with a block allow-list, including the bare vault the old schema admitted. */
+const TARGET_FIXTURE = `name: local-crew
+type: target
+description: the local crew target
+data_policy:
+  # Personal roots are absent on purpose.
+  allow:
+    - Knowledge/Areas         # the aligned comment must survive
+    - Knowledge/Projects
+    - Knowledge
+  deny_sources: [comms]
+  max_brief_bytes: 65536
+`;
 
 try {
   for (const line of readFileSync(new URL("../../../.env", import.meta.url), "utf8").split("\n")) {
@@ -69,6 +98,16 @@ async function legacyInstance(extra: (dir: string) => Promise<void> = async () =
     await mkdir(join(dir, d), { recursive: true });
     await writeFile(join(dir, d, ".gitkeep"), "");
   }
+  // A crew and a target that name vault prefixes, both hand-written and
+  // column-aligned exactly the way the seed copies are: the rewrite has to
+  // come back byte-identical apart from the prefixes themselves.
+  await mkdir(join(dir, "agents", "research"), { recursive: true });
+  await writeFile(join(dir, "agents", "research", "analyst.md"), CREW_FIXTURE);
+  await mkdir(join(dir, "targets", "local-crew"), { recursive: true });
+  await writeFile(join(dir, "targets", "local-crew", "manifest.yaml"), TARGET_FIXTURE);
+  // The bake-off's fixtures and transcripts (docs/poc/poc18-bakeoff).
+  await mkdir(join(dir, "eval"), { recursive: true });
+  await writeFile(join(dir, "eval", "fixtures-harvest.jsonl"), '{"draft":true}\n');
   await writeFile(join(dir, "README.md"), "# Instance repo\n");
   await writeFile(join(dir, ".gitignore"), "state/\ninbox/\n.obsidian/workspace*\n");
   await exec("git", ["add", "-A"], { cwd: dir, env });
@@ -104,6 +143,7 @@ describe("planMigration", () => {
     expect(moves["instances.yaml"]).toBe(".metistry/instances.yaml");
     expect(moves["targets"]).toBe(".metistry/targets");
     expect(moves["state"]).toBe(".metistry/state");
+    expect(moves["eval"]).toBe(".metistry/eval");
     expect(moves["Knowledge/CLAUDE.md"]).toBe("CLAUDE.md");
     expect(moves["Knowledge/.obsidian"]).toBe(".obsidian");
     expect(moves["Knowledge/Inbox"]).toBe("Inbox");
@@ -152,7 +192,7 @@ describe("migrate-layout (fixture instance repo)", () => {
 
     // the config half, under one dot-folder
     expect((await readdir(join(dir, ".metistry"))).sort()).toEqual([
-      "agents", "compute.yaml", "deployment.yaml", "extensions", "identity.yaml", "instance-migrations",
+      "agents", "compute.yaml", "deployment.yaml", "eval", "extensions", "identity.yaml", "instance-migrations",
       "instances.yaml", "metistry.lock", "queries", "routines", "rules.yaml", "state", "targets",
     ]);
     expect(await readFile(join(dir, ".metistry", "state", ".env"), "utf8")).toContain("METISTRY_RULES_FILES=seed/rules.yaml:.metistry/rules.yaml");
@@ -252,6 +292,95 @@ describe("migrate-layout (fixture instance repo)", () => {
     await expect(migrateLayout({ instanceDir: plain, ...base })).rejects.toThrow(/not a git repository/);
     await exec("git", ["init", "-q", "-b", "main"], { cwd: plain, env: { ...process.env, HOME: plain } });
     await expect(migrateLayout({ instanceDir: plain, ...base })).rejects.toThrow(/not an instance directory/);
+  });
+});
+
+describe("manifests: the scopes the database grant would otherwise be undone by", () => {
+  const dirs: string[] = [];
+  afterAll(async () => {
+    for (const d of dirs) await rm(d, { recursive: true, force: true });
+  });
+
+  it("rewrites a crew scope and a target allow-list, and changes NOTHING else in either file", async () => {
+    const dir = await legacyInstance();
+    dirs.push(dir);
+    const r = await migrateLayout({ instanceDir: dir, ...base });
+
+    expect(r.manifests.map((m) => m.file).sort()).toEqual([".metistry/agents/research/analyst.md", ".metistry/targets/local-crew/manifest.yaml"]);
+    expect(r.manifests.find((m) => m.file.endsWith("analyst.md"))?.changed).toEqual(["Knowledge/Projects → Projects", "Knowledge/Resources → Resources"]);
+
+    const crew = await readFile(join(dir, ".metistry", "agents", "research", "analyst.md"), "utf8");
+    // one changed line, and the aligned comments, the flow style, the blank
+    // line and the operating prompt all byte-identical
+    expect(crew).toBe(CREW_FIXTURE.replace("scope: [Knowledge/Projects, Knowledge/Resources]", "scope: [Projects, Resources]"));
+
+    const target = await readFile(join(dir, ".metistry", "targets", "local-crew", "manifest.yaml"), "utf8");
+    expect(target).toBe(
+      TARGET_FIXTURE.replace("    - Knowledge/Areas         #", "    - Areas         #").replace("    - Knowledge/Projects\n", "    - Projects\n"),
+    );
+    // the bare vault is LEFT, because neither schema has a flat spelling for
+    // it — writing `/` there would fail validation and revoke the crew's row
+    expect(target).toContain("    - Knowledge\n");
+    expect(r.warnings.some((w) => w.includes("means the whole vault"))).toBe(true);
+  });
+
+  it("is idempotent, and a manifest with nothing to change is not rewritten at all", async () => {
+    const dir = await legacyInstance();
+    dirs.push(dir);
+    await migrateLayout({ instanceDir: dir, ...base });
+    const crewPath = join(dir, ".metistry", "agents", "research", "analyst.md");
+    const after = await readFile(crewPath, "utf8");
+    const r2 = await migrateLayout({ instanceDir: dir, ...base });
+    expect(r2.alreadyFlat).toBe(true);
+    expect(await readFile(crewPath, "utf8")).toBe(after);
+    // and the pure function itself: a flat manifest comes back identical
+    expect(rewriteManifestAreas(after)).toMatchObject({ text: after, changed: [] });
+  });
+
+  it("a dry run reports the rewrites and writes none", async () => {
+    const dir = await legacyInstance();
+    dirs.push(dir);
+    const r = await migrateLayout({ instanceDir: dir, ...base, dryRun: true });
+    expect(r.manifests).toHaveLength(2);
+    // still at the legacy path, still legacy-spelled
+    expect(await readFile(join(dir, "agents", "research", "analyst.md"), "utf8")).toBe(CREW_FIXTURE);
+  });
+
+  it("leaves a malformed manifest alone and says so rather than failing the migration", () => {
+    const r = rewriteManifestAreas("---\nscope: [unclosed\n---\nbody\n");
+    expect(r.changed).toEqual([]);
+    expect(r.warnings[0]).toMatch(/YAML errors|not YAML/);
+  });
+});
+
+describe("the casing warning: what becomes vault content", () => {
+  it("names every lowercase root entry the reconciler will index after the move", async () => {
+    const dir = await legacyInstance(async (d) => {
+      await mkdir(join(d, "scratch"), { recursive: true });
+      await writeFile(join(d, "scratch", "x.txt"), "x\n");
+      await writeFile(join(d, "notes.md"), "# loose\n");
+      await git(d, "add", "-A");
+      await git(d, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "loose");
+    });
+    try {
+      const plan = await planMigration(dir);
+      // `eval/` is NOT here: it moves under .metistry/ and so never becomes
+      // vault content. The two that stay at the root are.
+      expect(plan.lowercaseVaultRoots).toEqual(["notes.md", "scratch"]);
+      const r = await migrateLayout({ instanceDir: dir, ...base, dryRun: true });
+      expect(r.warnings.some((w) => w.includes("scratch") && w.includes("TitleCase"))).toBe(true);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("says nothing when the vault root is already all TitleCase", async () => {
+    const dir = await legacyInstance();
+    try {
+      expect((await planMigration(dir)).lowercaseVaultRoots).toEqual([]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
 

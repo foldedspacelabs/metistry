@@ -39,13 +39,16 @@
 import { existsSync } from "node:fs";
 import { mkdir, readdir, readFile, rename, rm, rmdir } from "node:fs/promises";
 import { join } from "node:path";
+import { isScalar, isSeq, parseDocument } from "yaml";
 import {
   INSTANCE_GITIGNORE_LINES,
   INSTANCE_LAYOUT,
   LEGACY_VAULT_DIR,
   SUPERVISOR_LABEL,
+  isVaultPath,
   VAULT_ROOT_AREA,
   detectLayout,
+  metistryPath,
   type InstanceLayoutShape,
 } from "@foldedspacelabs/metistry-core";
 import { COMMIT_AUTHOR } from "./init.js";
@@ -85,6 +88,12 @@ export const METISTRY_MOVES = Object.freeze([
   "extensions",
   "instance-migrations",
   "targets",
+  // The bake-off's fixtures and transcripts (docs/poc/poc18-bakeoff). They are
+  // instance-repo content, not knowledge: left at the root of a FLAT instance
+  // a lowercase `eval/` is vault content by `isVaultPath`, so the reconciler
+  // would index harvested transcripts as notes. Optional like every other
+  // entry here — only moved if it is there.
+  "eval",
 ] as const);
 
 /** The derived half. Gitignored in both layouts, so it never goes through `git mv`. */
@@ -110,6 +119,8 @@ export interface LayoutPlan {
   removeVaultDir?: string | undefined;
   /** things the operator should see but that do not stop the migration */
   warnings: string[];
+  /** root entries that will be walked as vault content and break the TitleCase casing rule (CLAUDE.md) */
+  lowercaseVaultRoots: string[];
 }
 
 /** A name collision this verb refuses on, with both sides named. */
@@ -126,6 +137,15 @@ export class LayoutCollision extends StepFailed {
 /** Finder metadata, regenerated on sight. Never a collision worth refusing a migration over. */
 const NOISE = new Set([".DS_Store"]);
 
+/**
+ * Lowercase vault-root names the PRODUCT itself ships (`seed/vault/`), and so
+ * not a casing surprise anybody needs telling about. `now.md` is the only one:
+ * it is where `brain-commit` writes, and the plan spells it lowercase on
+ * purpose. Warning about it would fire on every instance that has ever
+ * existed, and a warning that always fires is one nobody reads.
+ */
+const SEED_VAULT_LOWERCASE = new Set(["now.md"]);
+
 async function entriesOf(dir: string): Promise<string[]> {
   return (await readdir(dir).catch(() => [] as string[])).sort();
 }
@@ -141,7 +161,7 @@ export async function planMigration(dir: string): Promise<LayoutPlan> {
   const layout = detectLayout(dir);
   const warnings: string[] = [];
   const moves: LayoutMove[] = [];
-  if (layout !== "legacy") return { layout, moves, warnings };
+  if (layout !== "legacy") return { layout, moves, warnings, lowercaseVaultRoots: [] };
 
   const root = await entriesOf(dir);
   const has = (name: string) => root.includes(name);
@@ -215,7 +235,22 @@ export async function planMigration(dir: string): Promise<LayoutPlan> {
     if (collisions.length > 0) throw new LayoutCollision(collisions);
   }
 
-  return { layout, vaultDir, moves, removeVaultDir, warnings };
+  // What the vault root will hold, and which of it breaks the casing rule.
+  // CLAUDE.md: vault content is TitleCase because Obsidian renders it and a
+  // Linux container does not forgive `areas/`. After this migration the vault
+  // root IS the instance root, so a lowercase directory that was merely
+  // sitting beside the vault becomes vault content the reconciler walks,
+  // indexes and embeds. That is a surprise worth seeing BEFORE the commit,
+  // not after the first `metistry up`.
+  const projectedRoot = new Set(root);
+  for (const m of moves) {
+    if (!m.from.includes("/")) projectedRoot.delete(m.from);
+    if (m.to !== "" && !m.to.includes("/")) projectedRoot.add(m.to);
+  }
+  if (vaultDir) projectedRoot.delete(vaultDir);
+  const lowercaseVaultRoots = [...projectedRoot].filter((e) => isVaultPath(e) && !SEED_VAULT_LOWERCASE.has(e) && e[0] !== e[0]?.toUpperCase()).sort();
+
+  return { layout, vaultDir, moves, removeVaultDir, warnings, lowercaseVaultRoots };
 }
 
 /** Files that exist on both sides of a directory merge, as `src → dst` lines. Empty = the merge is safe. */
@@ -353,6 +388,146 @@ export function rewriteEnvFile(text: string, instanceDir: string): { text: strin
   return { text: lines.join("\n"), changed, warnings };
 }
 
+// ---- manifests ------------------------------------------------------------
+//
+// A crew's `scope:` and a target's `data_policy.allow:` are vault path
+// prefixes, and they live in FILES in the instance repo — not in the database.
+// Rewriting `agents.grants` without rewriting the manifest behind it is a
+// migration that silently fails: the console re-syncs the registry from
+// `.metistry/agents/**` on an interval (METISTRY_CREWS_SYNC_S), and the next
+// sync writes the legacy scope straight back over the migrated grant.
+//
+// A YAML-DOCUMENT edit, and then a SPLICE rather than a re-print. Every one of
+// these files is hand-written and commented — `seed/agents/example/researcher.md`
+// is eleven comment lines to nine keys, with the comments column-aligned — and
+// a manifest that came back reformatted would be a worse outcome than the
+// stale prefix.
+//
+// `parseDocument` is what locates the entries (the same parser the console
+// validates them with, so this can never disagree with it about which
+// scalars are areas), but what gets written is the ORIGINAL text with only
+// those scalars' own byte ranges replaced. `String(doc)` was the first cut
+// and it was rejected on sight: printing the seed crew back collapsed the
+// aligned `# haiku | sonnet | opus` comments onto one space and turned
+// `[knowledge, requests]` into `[ knowledge, requests ]` — eight reformatted
+// lines to carry one real change. Splicing gives exactly one changed
+// substring per entry, and the operating prompt below the frontmatter is
+// never even read.
+
+/** `agents/<area>/<name>.md`, and the frontmatter/prompt split crews.ts parses. */
+const FRONTMATTER = /^(---\r?\n)([\s\S]*?)(\r?\n---\r?\n?)/;
+
+/** Where a vault path prefix can appear in a manifest: a crew's scope, a target's allow-list. */
+export const MANIFEST_AREA_KEYS = Object.freeze([["scope"], ["data_policy", "allow"]] as const);
+
+/**
+ * One area entry, for the flat layout.
+ *
+ * `Knowledge/<Area>` simply loses the prefix. A BARE `Knowledge` (or
+ * `Knowledge/`) is left exactly as it is, with a warning, because it has no
+ * valid flat spelling here: it meant "the whole vault", and the old schema
+ * admitted it (`^Knowledge(\/[A-Za-z0-9_.-]+)*$` — note the `*`), but core's
+ * `knowledgePrefix` refuses a leading slash and a crew `scope` refuses
+ * VAULT_ROOT_AREA outright. Writing `/` there would produce a manifest that
+ * fails validation, which revokes the crew's registry row — strictly worse
+ * than a prefix the owner can see and resolve. The bare vault survives only
+ * as a DB grant, for an internal principal (agents.grants, above).
+ */
+export function rewriteManifestArea(value: string): { value: string; warning?: string } {
+  if (value === LEGACY_VAULT_DIR || value === `${LEGACY_VAULT_DIR}/`) {
+    return {
+      value,
+      warning: `"${value}" means the whole vault, and neither a crew scope nor a target allow-list has a flat spelling for that — left as it is. Name the areas it should cover (e.g. Areas, Projects) before the next crew sync, or the manifest is refused whole.`,
+    };
+  }
+  if (value.startsWith(`${LEGACY_VAULT_DIR}/`)) return { value: value.slice(LEGACY_VAULT_DIR.length + 1) };
+  return { value };
+}
+
+/** One scalar's own byte range in the source, and the text to put there. */
+interface Splice {
+  start: number;
+  end: number;
+  text: string;
+}
+
+/** The area scalars under `keyPath`, as splices against the source. Nothing is mutated. */
+function spliceSeq(doc: ReturnType<typeof parseDocument>, keyPath: readonly string[], src: string): { splices: Splice[]; changed: string[]; warnings: string[] } {
+  const splices: Splice[] = [];
+  const changed: string[] = [];
+  const warnings: string[] = [];
+  const node = doc.getIn([...keyPath], true);
+  if (!isSeq(node)) return { splices, changed, warnings };
+  for (const item of node.items) {
+    if (!isScalar(item) || typeof item.value !== "string" || !item.range) continue;
+    const r = rewriteManifestArea(item.value);
+    if (r.warning) warnings.push(`${keyPath.join(".")}: ${r.warning}`);
+    if (r.value === item.value) continue;
+    // The raw token, quotes and all. The rewrite only ever DROPS a leading
+    // `Knowledge/` from the value, so replacing that substring inside the raw
+    // token is correct for a plain, single- and double-quoted scalar alike —
+    // and it cannot change the token's kind, which is what makes re-quoting a
+    // question that never has to be asked.
+    const [start, end] = [item.range[0], item.range[1]];
+    const raw = src.slice(start, end);
+    const text = raw.replace(`${LEGACY_VAULT_DIR}/`, "");
+    if (text === raw) continue;
+    splices.push({ start, end, text });
+    changed.push(`${item.value} → ${r.value}`);
+  }
+  return { splices, changed, warnings };
+}
+
+/**
+ * One manifest's areas, rewritten. Handles both shapes: a crew is YAML
+ * frontmatter inside a `.md`, a target is a whole `manifest.yaml`. Returns
+ * the text unchanged (and `changed: []`) when there was nothing to do, so the
+ * caller can leave the file's mtime alone.
+ */
+export function rewriteManifestAreas(text: string): { text: string; changed: string[]; warnings: string[] } {
+  const fm = FRONTMATTER.exec(text);
+  // Offsets are into the YAML half, so the frontmatter's opening `---\n` is
+  // the amount every splice has to be shifted by to land in the whole file.
+  const offset = fm ? fm[1]!.length : 0;
+  const yamlText = fm ? fm[2]! : text;
+  let doc: ReturnType<typeof parseDocument>;
+  try {
+    doc = parseDocument(yamlText);
+  } catch {
+    return { text, changed: [], warnings: ["not YAML this verb can edit — left untouched"] };
+  }
+  if (doc.errors.length > 0) return { text, changed: [], warnings: [`YAML errors (${doc.errors[0]?.message ?? "?"}) — left untouched`] };
+  const splices: Splice[] = [];
+  const changed: string[] = [];
+  const warnings: string[] = [];
+  for (const keyPath of MANIFEST_AREA_KEYS) {
+    const r = spliceSeq(doc, keyPath, yamlText);
+    splices.push(...r.splices);
+    changed.push(...r.changed);
+    warnings.push(...r.warnings);
+  }
+  if (splices.length === 0) return { text, changed, warnings };
+  // Back to front, so an earlier splice never moves a later one's offsets.
+  let out = text;
+  for (const sp of [...splices].sort((a, b) => b.start - a.start)) {
+    out = out.slice(0, sp.start + offset) + sp.text + out.slice(sp.end + offset);
+  }
+  return { text: out, changed, warnings };
+}
+
+/** Every manifest under `dir` that could carry a vault prefix: `*.md` crews at any depth, and any `manifest.yaml`. */
+async function manifestsUnder(dir: string, rel = ""): Promise<string[]> {
+  const out: string[] = [];
+  for (const entry of await entriesOf(join(dir, rel))) {
+    if (entry.startsWith(".")) continue;
+    const child = rel ? `${rel}/${entry}` : entry;
+    const nested = await readdir(join(dir, child)).catch(() => null);
+    if (nested !== null) out.push(...(await manifestsUnder(dir, child)));
+    else if (entry.endsWith(".md") || entry === "manifest.yaml") out.push(child);
+  }
+  return out;
+}
+
 // ---- the database ---------------------------------------------------------
 
 /**
@@ -479,6 +654,8 @@ export interface MigrateLayoutResult {
   /** false when no database was configured: the counts are unknown and the rewrite was skipped */
   database: boolean;
   gitignore: "updated" | "unchanged";
+  /** manifests whose vault prefixes were rewritten, with what changed in each */
+  manifests: { file: string; changed: string[] }[];
   env: { key: string; from: string; to: string }[];
   committed: boolean;
   warnings: string[];
@@ -519,6 +696,7 @@ export async function migrateLayout(opts: MigrateLayoutOptions): Promise<Migrate
     rows: {},
     database: false,
     gitignore: "unchanged",
+    manifests: [],
     env: [],
     committed: false,
     warnings,
@@ -575,6 +753,12 @@ export async function migrateLayout(opts: MigrateLayoutOptions): Promise<Migrate
       }
     }
     if (running === 0) r.note("no supervisor or reconciler job is running");
+  }
+  if (plan.lowercaseVaultRoots.length > 0) {
+    warnings.push(
+      `after this migration the vault root IS the instance root, so these lowercase entries become vault content the reconciler walks, indexes and embeds: ${plan.lowercaseVaultRoots.join(", ")}. ` +
+        `Vault content is TitleCase (CLAUDE.md's one casing boundary); anything here that is not knowledge wants renaming, or moving under ${INSTANCE_LAYOUT.metistryDir}/, BEFORE you commit.`,
+    );
   }
   for (const w of warnings) r.note(`warning: ${w}`);
 
@@ -637,7 +821,35 @@ export async function migrateLayout(opts: MigrateLayoutOptions): Promise<Migrate
     }
   }
 
-  // ---- 6. .gitignore ------------------------------------------------------
+  // ---- 6. manifests -------------------------------------------------------
+  //
+  // Reads from wherever the files are RIGHT NOW: after the moves above they
+  // are under `.metistry/`, but a dry run has moved nothing, so the legacy
+  // root copy is what there is to read. Same seam the `.env` step uses.
+  r.section("manifests — crew scopes and target allow-lists");
+  for (const bare of ["agents", "routines", "targets", "extensions"]) {
+    const moved = metistryPath(dir, bare);
+    const base = existsSync(moved) ? moved : join(dir, bare);
+    const shown = existsSync(moved) ? `${INSTANCE_LAYOUT.metistryDir}/${bare}` : bare;
+    if (!existsSync(base)) continue;
+    for (const rel of await manifestsUnder(base)) {
+      const file = join(base, ...rel.split("/"));
+      const before = await readFile(file, "utf8");
+      const rewritten = rewriteManifestAreas(before);
+      for (const w of rewritten.warnings) warnings.push(`${shown}/${rel}: ${w}`);
+      if (rewritten.changed.length === 0) continue;
+      result.manifests.push({ file: `${shown}/${rel}`, changed: rewritten.changed });
+      r.note(`${shown}/${rel}: ${rewritten.changed.join(", ")}`);
+      await r.write(file, rewritten.text, "the same document with the vault prefixes dropped — comments, key order and the prompt body untouched");
+    }
+  }
+  if (result.manifests.length === 0) r.note("no crew scope or target allow-list names a legacy vault prefix");
+  else
+    r.note(
+      `${result.manifests.length} manifest(s) rewritten — without this the console's next crew sync (METISTRY_CREWS_SYNC_S) would write the legacy scope straight back over the grant the database step just migrated.`,
+    );
+
+  // ---- 7. .gitignore ------------------------------------------------------
   r.section(".gitignore");
   const ignorePath = join(dir, ".gitignore");
   const before = existsSync(ignorePath) ? await readFile(ignorePath, "utf8") : "";
@@ -649,7 +861,7 @@ export async function migrateLayout(opts: MigrateLayoutOptions): Promise<Migrate
     r.note("already the flat layout's set");
   }
 
-  // ---- 7. the database ----------------------------------------------------
+  // ---- 8. the database ----------------------------------------------------
   r.section("database — the Knowledge/ prefix drops out of every stored path");
   const session = await (opts.openSession ?? openMigrationSession)(env);
   result.database = session !== null;
@@ -693,7 +905,7 @@ export async function migrateLayout(opts: MigrateLayoutOptions): Promise<Migrate
     }
   }
 
-  // ---- 8. state/.env ------------------------------------------------------
+  // ---- 9. state/.env ------------------------------------------------------
   r.section(`${INSTANCE_LAYOUT.stateDir}/.env`);
   const envFile = join(dir, ...INSTANCE_LAYOUT.stateDir.split("/"), ".env");
   const envExists = existsSync(envFile) || (r.dryRun && existsSync(join(dir, STATE_MOVE, ".env")));
@@ -711,7 +923,7 @@ export async function migrateLayout(opts: MigrateLayoutOptions): Promise<Migrate
   }
   r.note(`launchd plists under ${INSTANCE_LAYOUT.stateDir}/ are regenerated by \`metistry up\` — this verb does not edit generated files it does not own.`);
 
-  // ---- 9. commit ----------------------------------------------------------
+  // ---- 10. commit ----------------------------------------------------------
   r.section("commit");
   await git(["add", "-A"], "the whole tree moved; -A is the only honest scope");
   const commit = await r.run("git", ["-C", dir, "-c", "commit.gpgsign=false", "commit", "-q", "-m", MIGRATE_LAYOUT_MESSAGE], { env: gitEnv, tolerateFailure: true });

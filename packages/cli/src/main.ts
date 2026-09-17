@@ -459,19 +459,26 @@ const USAGE = `metistry — Metistry command line
       everything that is not knowledge under .metistry/ (2026-09-17 ruling,
       docs/ops/instance-layout.md). Refuses unless the layout is legacy, and
       says so and changes nothing when it is already flat.
-        preflight   a git repo, a clean tree (--allow-dirty overrides), and a
+        preflight   a git repo, a clean tree (--allow-dirty overrides), a
                     warning naming the supervisor/reconciler job if one is
-                    running — stop it first, it is the repo's sole committer
+                    running (stop it first — it is the repo's sole committer),
+                    and a list of any lowercase root entry that becomes vault
+                    content after the move (vault content is TitleCase)
         .metistry/  identity.yaml, rules.yaml, compute.yaml, deployment.yaml,
                     instances.yaml, sources.yaml, assistant-prompt.md,
                     metistry.lock, agents/ routines/ queries/ extensions/
-                    instance-migrations/ targets/, and the gitignored state/
+                    instance-migrations/ targets/ eval/, and the gitignored
+                    state/
         Inbox/      the pre-#156 root inbox/, renamed through a temp name
                     (macOS is case-insensitive) and merged if both exist
         vault       every entry of Knowledge/ to the root — Knowledge/CLAUDE.md
                     becomes the root CLAUDE.md, .obsidian/ comes up with it —
                     then the empty Knowledge/ is removed. A name collision with
                     an existing root entry is refused BEFORE anything moves.
+        manifests   crew scope: and target data_policy.allow: lose the
+                    Knowledge/ prefix, spliced byte-for-byte so comments and
+                    formatting survive. Without this the console's next crew
+                    sync writes the legacy scope back over the migrated grant.
         .gitignore  core's set for the flat layout; lines you added are kept
         database    one transaction: Knowledge/ drops out of knowledge_files,
                     knowledge_links, embeddings, inbox and projects.area, and

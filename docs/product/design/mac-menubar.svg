@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 700" width="1000" height="700" role="img" aria-labelledby="ttl desc">
-  <title id="ttl">macOS — the menu bar extra: status, quick capture, the Needs You count, open window</title>
-  <desc id="desc">Annotated wireframe of the menu bar item. Its glyph is the worst fault across components and a component that was never configured never drives it. The menu opens with the Needs You count and quick capture at the top, then Open Metistry Window, then every component grouped by the kind doctor itself reports, each with a submenu of Restart, Stop, Start and View Log. A check with no process behind it gets no controls. Beside the menu, the quick capture popover that writes to the inbox and returns.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 780" width="1000" height="780" role="img" aria-labelledby="ttl desc">
+  <title id="ttl">macOS — the app menu with Set up…, beside the menu bar extra</title>
+  <desc id="desc">Annotated wireframe of both menus in the macOS menu bar. On the left, the Metistry app menu, which is where setup now lives — Set up… on a fresh install, Run setup again… once an instance exists — together with Settings, Check for Updates and Quit; the setup wizard is no longer a section and no longer a Settings pane. On the right, the menu bar item. Its glyph is the worst fault across components and a component that was never configured never drives it. The menu opens with the Needs You count and quick capture at the top, then Open Metistry Window, then every component grouped by the kind doctor itself reports, each with a submenu of Restart, Stop, Start and View Log. A check with no process behind it gets no controls. Beside the menu, the quick capture popover that writes to the inbox and returns.</desc>
   <style>
     text { font-family: -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", Roboto, sans-serif; fill: #12171c; font-size: 13px; }
     .t2 { fill: #4d565f; font-size: 12px } .t3 { fill: #646d77; font-size: 11px }
@@ -17,28 +17,46 @@
     .lg { font-size: 12px } .btn { font-size: 12px; text-anchor: middle }
   </style>
 
-  <rect width="1000" height="700" fill="#ffffff"/>
-  <text x="24" y="30" class="h2">macOS — Menu bar extra</text>
-  <text x="24" y="50" class="t2">Worst fault, never worst state · grouped by the kind doctor itself reports · quick capture at the top, because capture is global</text>
+  <rect width="1000" height="780" fill="#ffffff"/>
+  <text x="24" y="30" class="h2">macOS — The app menu and the menu bar extra</text>
+  <text x="24" y="50" class="t2">Setup is an app-menu item, not a section and not a pane · worst fault, never worst state · quick capture at the top, because capture is global</text>
 
   <!-- desktop + menu bar -->
   <rect class="win" x="24" y="66" width="720" height="580" rx="8"/>
   <rect x="25" y="67" width="718" height="24" fill="#ffffff" opacity="0.96"/>
   <path class="ln" d="M25 91 H743"/>
-  <text x="44" y="84" class="t2" font-weight="600">Finder</text>
-  <text x="96" y="84" class="t2">File  Edit  View  Go</text>
+  <rect class="sel" x="36" y="69" width="76" height="20" rx="5"/>
+  <text x="44" y="84" class="t2" font-weight="600">Metistry</text>
+  <text x="122" y="84" class="t2">File  Edit  View  Window  Help</text>
   <rect class="sel" x="546" y="69" width="28" height="20" rx="5"/>
   <text x="560" y="84" class="deg btn" font-size="13">◐</text>
   <text x="600" y="84" class="t3">⌁  ▮▮</text>
   <text x="724" y="84" class="t3" text-anchor="end">9:41</text>
 
-  <!-- the menu -->
+  <!-- the app menu -->
+  <rect class="sf" x="36" y="94" width="216" height="228" rx="10" stroke="#b6bec8"/>
+  <text x="50" y="116" class="mi">About Metistry</text>
+  <path class="ln" d="M46 126 H242"/>
+  <text x="50" y="146" class="mi">Settings…</text><text x="242" y="146" class="key">⌘,</text>
+  <path class="ln" d="M46 156 H242"/>
+  <rect class="sel" x="40" y="160" width="208" height="22" rx="5"/>
+  <text x="50" y="176" class="mi">Run setup again…</text>
+  <text x="50" y="196" class="t3">"Set up…" before there is an instance</text>
+  <text x="50" y="222" class="mi">Check for Updates…</text>
+  <text x="242" y="222" class="acc" font-size="11" text-anchor="end">1.4.2</text>
+  <path class="ln" d="M46 232 H242"/>
+  <text x="50" y="252" class="mi">Hide Metistry</text><text x="242" y="252" class="key">⌘H</text>
+  <text x="50" y="274" class="mi">Hide Others</text><text x="242" y="274" class="key">⌥⌘H</text>
+  <path class="ln" d="M46 284 H242"/>
+  <text x="50" y="306" class="mi">Quit Metistry</text><text x="242" y="306" class="key">⌘Q</text>
+
+  <!-- the menu bar extra's menu -->
   <rect class="sf" x="430" y="94" width="290" height="530" rx="10" stroke="#b6bec8"/>
   <text x="444" y="118" class="hd">Metistry — 1 degraded</text>
   <text x="444" y="134" class="t3">as of 09:41 · re-read when this menu opened</text>
   <path class="ln" d="M440 146 H710"/>
   <rect class="sel" x="434" y="150" width="282" height="22" rx="5"/>
-  <text x="444" y="166" class="mi">📝  Needs You</text>
+  <text x="444" y="166" class="mi">🔔  Needs You</text>
   <rect x="672" y="154" width="30" height="14" rx="7" fill="#2b5fd0"/><text x="687" y="165" fill="#fff" font-size="9" text-anchor="middle">3</text>
   <text x="444" y="190" class="mi">＋  Capture…</text><text x="710" y="190" class="key">⌃⌥⌘N</text>
   <path class="ln" d="M440 200 H710"/>
@@ -69,6 +87,7 @@
   <path class="ln" d="M440 586 H710"/>
   <text x="444" y="604" class="mi">Settings…</text><text x="710" y="604" class="key">⌘,</text>
   <text x="444" y="620" class="mi">Quit Metistry</text><text x="710" y="620" class="key">⌘Q</text>
+  <text x="444" y="644" class="t3">Setup is not repeated here: one door per thing.</text>
 
   <!-- the row submenu -->
   <rect class="sf" x="262" y="262" width="150" height="92" rx="8" stroke="#b6bec8"/>
@@ -100,6 +119,7 @@
     <circle class="cw" cx="418" cy="246" r="10"/><text class="cn" x="418" y="250">4</text>
     <circle class="cw" cx="418" cy="522" r="10"/><text class="cn" x="418" y="526">5</text>
     <circle class="cw" cx="418" cy="436" r="10"/><text class="cn" x="418" y="440">6</text>
+    <circle class="cw" cx="268" cy="176" r="10"/><text class="cn" x="268" y="180">7</text>
   </g>
 
   <!-- legend -->
@@ -112,7 +132,7 @@
     <text x="782" y="178" class="lg">rule that keeps it out of the exit.</text>
     <text x="770" y="206" class="lg">② The only count in the menu, and</text>
     <text x="782" y="222" class="lg">the only actionable one (P2). It</text>
-    <text x="782" y="238" class="lg">opens the window at Needs You</text>
+    <text x="782" y="238" class="lg">opens the window and the 🔔 panel</text>
     <text x="782" y="254" class="lg">rather than answering here: a</text>
     <text x="782" y="270" class="lg">decision needs its card.</text>
     <text x="770" y="298" class="lg">③ Quick capture is at the top</text>
@@ -134,9 +154,16 @@
     <text x="782" y="578" class="lg">than reporting a failed restart.</text>
     <text x="770" y="606" class="lg">⑥ <tspan font-weight="600">absent ≠ failed</tspan> here too: grey,</text>
     <text x="782" y="622" class="lg">named, out of the glyph's sum.</text>
-    <text x="770" y="650" class="lg t3">Doctor re-runs when the menu opens</text>
-    <text x="770" y="666" class="lg t3">and every 30s while it stays open —</text>
-    <text x="770" y="682" class="lg t3">never continuously. A sweep is heavy.</text>
+    <text x="770" y="644" class="lg">⑦ <tspan font-weight="600">Setup lives here now</tspan> — not in the</text>
+    <text x="782" y="660" class="lg">sidebar, where it was a destination you</text>
+    <text x="782" y="676" class="lg">visit once, and not in Settings, where</text>
+    <text x="782" y="692" class="lg">it was a button under a group heading.</text>
+    <text x="782" y="708" class="lg">The item renames itself: <tspan font-style="italic">Set up…</tspan> before</text>
+    <text x="782" y="724" class="lg">there is an instance, <tspan font-style="italic">Run setup again…</tspan></text>
+    <text x="782" y="740" class="lg">after. Settings → Instance keeps a</text>
+    <text x="782" y="756" class="lg">signpost to it, never a second copy.</text>
+    <text x="24" y="712" class="lg t3">Doctor re-runs when the menu opens and every 30s while it stays</text>
+    <text x="24" y="728" class="lg t3">open — never continuously. A sweep is heavy.</text>
   </g>
-  <text x="24" y="672" class="t3">docs/ops/mac-app.md "The menu bar" · docs/ops/inbox.md · design-system.md §3.13 status rows · §3.8 capture composer</text>
+  <text x="24" y="756" class="t3">docs/ops/mac-app.md "The menu bar" · docs/ops/inbox.md · design-system.md §3.13 status rows · §3.8 capture composer · §3.18 Needs You bell</text>
 </svg>

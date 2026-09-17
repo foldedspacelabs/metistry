@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 1080" width="940" height="1080" role="img" aria-labelledby="ttl desc">
-  <title id="ttl">iPhone — activity feed with the tab bar</title>
-  <desc id="desc">Annotated wireframe at 390 by 844 points: a large-title feed screen with filter chips, activity rows carrying a kind glyph, an agent-tinted actor chip, subject in Title Case where the console composed it, detail and relative time, and a bottom tab bar of five sections — Chat, Feed, Needs You, Work — plus a More tab holding Knowledge, Agents and System, anchored above the home indicator inside the safe area. Capture is the plus button in the navigation bar, not a tab.</desc>
+  <title id="ttl">iPhone — activity feed: the reduced tab bar, the bell and the floating plus</title>
+  <desc id="desc">Annotated wireframe at 390 by 844 points: a large-title feed screen with filter chips, activity rows carrying a kind glyph, an agent-tinted actor chip, subject in Title Case where the console composed it, detail and relative time, and a bottom tab bar of exactly five items — Chat, Feed, Work, Knowledge and a More tab holding Agents, Insights and Settings — anchored above the home indicator inside the safe area. Capture is a floating plus button bottom right, and the queue of requests hangs off a bell in the navigation bar with its unread count. Neither is a tab.</desc>
   <style>
     text { font-family: -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", Roboto, sans-serif; fill: #12171c; font-size: 15px; }
     .t2 { fill: #4d565f; font-size: 13px } .t3 { fill: #646d77; font-size: 12px }
@@ -17,7 +17,7 @@
 
   <rect width="940" height="1080" fill="#ffffff"/>
   <text x="24" y="30" class="h2">iPhone — Feed</text>
-  <text x="24" y="50" class="t2">390 × 844 pt · five sections plus More · Capture is a ＋ in the nav bar, not a tab · large title collapses on scroll</text>
+  <text x="24" y="50" class="t2">390 × 844 pt · four sections plus More, five items in all · Capture is a floating ＋ · Needs You is a 🔔 · neither is a tab</text>
 
   <!-- phone -->
   <rect x="60" y="70" width="390" height="844" rx="46" fill="#f6f7f9" stroke="#b6bec8" stroke-width="2"/>
@@ -28,8 +28,8 @@
 
   <!-- large title -->
   <text x="84" y="164" class="lt">Feed</text>
-  <text x="392" y="158" class="acc" text-anchor="end" font-size="17">⌘</text>
-  <text x="426" y="158" class="acc" text-anchor="end" font-size="19">＋</text>
+  <text x="418" y="160" text-anchor="end" font-size="19">🔔</text>
+  <circle cx="422" cy="140" r="9" fill="#2b5fd0"/><text x="422" y="144" fill="#fff" font-size="10" text-anchor="middle">4</text>
   <!-- filter chips -->
   <rect x="84" y="182" width="88" height="28" rx="14" fill="#e6edfc" stroke="#c6d6f7"/><text x="98" y="201" class="acc" font-size="13">All Agents ⌄</text>
   <rect x="180" y="182" width="96" height="28" rx="14" class="sf"/><text x="194" y="201" class="t2" font-size="13">All Projects ⌄</text>
@@ -79,16 +79,19 @@
     <text x="84" y="764" class="ok" font-size="13">✓ committed 4a1c93e</text>
   </g>
 
-  <!-- tab bar -->
+  <!-- floating capture button -->
+  <circle cx="398" cy="752" r="28" fill="#2b5fd0"/>
+  <text x="398" y="762" fill="#fff" font-size="26" text-anchor="middle">＋</text>
+
+  <!-- tab bar: four sections plus More, five items in all -->
   <path class="ln" d="M62 796 H448"/>
   <rect x="62" y="796" width="386" height="84" fill="#ffffff" opacity="0.96"/>
   <g text-anchor="middle">
-    <text x="116" y="828" font-size="17">💬</text><text x="116" y="846" class="t3" font-size="10">Chat</text>
-    <text x="180" y="828" class="acc" font-size="17">◈</text><text x="180" y="846" class="acc" font-size="10">Feed</text>
-    <text x="244" y="828" font-size="17">📝</text><text x="244" y="846" class="t3" font-size="10">Needs You</text>
-    <circle cx="262" cy="818" r="8" fill="#2b5fd0"/><text x="262" y="822" fill="#fff" font-size="9">4</text>
-    <text x="308" y="828" font-size="17">🗂️</text><text x="308" y="846" class="t3" font-size="10">Work</text>
-    <text x="376" y="828" font-size="17">•••</text><text x="376" y="846" class="t3" font-size="10">More</text>
+    <text x="100" y="828" font-size="17">💬</text><text x="100" y="846" class="t3" font-size="10">Chat</text>
+    <text x="178" y="828" class="acc" font-size="17">◈</text><text x="178" y="846" class="acc" font-size="10">Feed</text>
+    <text x="255" y="828" font-size="17">🗂️</text><text x="255" y="846" class="t3" font-size="10">Work</text>
+    <text x="332" y="828" font-size="17">📚</text><text x="332" y="846" class="t3" font-size="10">Knowledge</text>
+    <text x="409" y="828" font-size="17">☰</text><text x="409" y="846" class="t3" font-size="10">More</text>
   </g>
   <rect x="195" y="890" width="120" height="5" rx="2.5" fill="#12171c"/>
 
@@ -97,8 +100,8 @@
   <circle class="cw" cx="470" cy="196" r="10"/><text class="cn" x="470" y="200">2</text>
   <circle class="cw" cx="470" cy="264" r="10"/><text class="cn" x="470" y="268">3</text>
   <circle class="cw" cx="470" cy="838" r="10"/><text class="cn" x="470" y="842">4</text>
-  <circle class="cw" cx="470" cy="890" r="10"/><text class="cn" x="470" y="894">5</text>
-  <circle class="cw" cx="470" cy="556" r="10"/><text class="cn" x="470" y="560">6</text>
+  <circle class="cw" cx="470" cy="752" r="10"/><text class="cn" x="470" y="756">5</text>
+  <circle class="cw" cx="446" cy="140" r="10"/><text class="cn" x="446" y="144">6</text>
   <circle class="cw" cx="470" cy="368" r="10"/><text class="cn" x="470" y="372">7</text>
 
   <!-- legend -->
@@ -106,8 +109,8 @@
   <text x="510" y="146" class="lg">① Large title (largeTitle, 34pt) collapses to</text>
   <text x="524" y="166" class="lg">an inline title on scroll — the standard</text>
   <text x="524" y="186" class="lg">iOS navigation bar behaviour, not a custom</text>
-  <text x="524" y="206" class="lg">header. ⌘ opens the palette; ＋ opens</text>
-  <text x="524" y="226" class="lg">capture at a medium detent.</text>
+  <text x="524" y="206" class="lg">header. The 🔔 is its trailing item, so it</text>
+  <text x="524" y="226" class="lg">survives push transitions with the bar.</text>
 
   <text x="510" y="266" class="lg">② Filters are chips, not a hidden menu:</text>
   <text x="524" y="286" class="lg">buttons and menus over memorised syntax</text>
@@ -119,36 +122,39 @@
   <text x="524" y="406" class="lg">survive accessibilityExtraExtraExtraLarge,</text>
   <text x="524" y="426" class="lg">so nothing here is a fixed height.</text>
 
-  <text x="510" y="466" class="lg">④ Tab bar: <tspan font-weight="600">Chat · Feed · Needs You · Work</tspan></text>
-  <text x="524" y="486" class="lg">plus More — Knowledge, Agents, System, in</text>
-  <text x="524" y="506" class="lg">the sidebar's own order. Capture left the</text>
-  <text x="524" y="526" class="lg">bar: a tab you navigate to contradicts its</text>
-  <text x="524" y="546" class="lg">own promise. Badge only when actionable.</text>
+  <text x="510" y="466" class="lg">④ Tab bar: <tspan font-weight="600">Chat · Feed · Work · Knowledge</tspan></text>
+  <text x="524" y="486" class="lg">plus <tspan font-weight="600">More</tspan> — Agents, Insights, Settings, in</text>
+  <text x="524" y="506" class="lg">the sidebar's own order. <tspan font-weight="600">Four plus More,</tspan></text>
+  <text x="524" y="526" class="lg"><tspan font-weight="600">not five plus More:</tspan> the bar tops out around</text>
+  <text x="524" y="546" class="lg">five and a sixth becomes a system More list</text>
+  <text x="524" y="566" class="lg">nobody designed. Work and Knowledge keep</text>
+  <text x="524" y="586" class="lg">their places because they are opened by</text>
+  <text x="524" y="606" class="lg">habit; the three under More are opened on</text>
+  <text x="524" y="626" class="lg">purpose. The bar sits above the home</text>
+  <text x="524" y="646" class="lg">indicator, inside the safe area.</text>
 
-  <text x="510" y="586" class="lg">⑤ Safe area: the bar sits above the home</text>
-  <text x="524" y="606" class="lg">indicator; the PWA does the same with</text>
-  <text x="524" y="626" class="lg">env(safe-area-inset-bottom).</text>
+  <text x="510" y="686" class="lg">⑤ <tspan font-weight="600">Capture is a floating ＋</tspan>, bottom-right,</text>
+  <text x="524" y="706" class="lg">clear of the bar and the home indicator. It</text>
+  <text x="524" y="726" class="lg">opens the composer at a medium detent and</text>
+  <text x="524" y="746" class="lg">returns. 56pt across — well over 44 — and</text>
+  <text x="524" y="766" class="lg">it is the same control the share extension</text>
+  <text x="524" y="786" class="lg">and the Mac's ⌘N reach.</text>
 
-  <text x="510" y="666" class="lg">⑥ Subject in <tspan font-style="italic">Title Case</tspan> — but applied at</text>
-  <text x="524" y="686" class="lg">render, in the view layer, and only for</text>
-  <text x="524" y="706" class="lg">kinds the console itself composes:</text>
-  <text x="524" y="726" class="lg"><tspan class="mono">collector_run</tspan>, <tspan class="mono">proposal_*</tspan>, <tspan class="mono">brief</tspan>,</text>
-  <text x="524" y="746" class="lg"><tspan class="mono">project_mode</tspan>, <tspan class="mono">alert</tspan> and the rest of a</text>
-  <text x="524" y="766" class="lg">closed allow-list (§3.2). Never written</text>
-  <text x="524" y="786" class="lg">back to the database. Identifiers inside a</text>
-  <text x="524" y="806" class="lg">subject are skipped, joining words stay</text>
-  <text x="524" y="826" class="lg">lowercase, detail lines stay sentence</text>
-  <text x="524" y="846" class="lg">case — they are prose (P10).</text>
+  <text x="510" y="826" class="lg">⑥ <tspan font-weight="600">Needs You is the 🔔</tspan>, with the unread</text>
+  <text x="524" y="846" class="lg">count — the only badge in the product (P2).</text>
+  <text x="524" y="866" class="lg">It opens the queue as a <tspan font-style="italic">sheet</tspan> over this</text>
+  <text x="524" y="886" class="lg">screen (iphone-triage.svg), and it is the</text>
+  <text x="524" y="906" class="lg">same queue the OS shows as an actionable</text>
+  <text x="524" y="926" class="lg">notification. It left the tab bar.</text>
 
-  <text x="510" y="886" class="lg">⑦ These two are <tspan class="mono">tool</tspan> and <tspan class="mono">dispatch</tspan>, whose</text>
-  <text x="524" y="906" class="lg">subjects can carry agent-authored text.</text>
-  <text x="524" y="926" class="lg">They render exactly as stored. Agent text</text>
-  <text x="524" y="946" class="lg">is data, and data is not case-corrected</text>
-  <text x="524" y="966" class="lg">(P1) — that is why the rule is a list of</text>
-  <text x="524" y="986" class="lg">kinds and not a guess about the string.</text>
+  <text x="510" y="966" class="lg">⑦ These two are <tspan class="mono">tool</tspan> and <tspan class="mono">dispatch</tspan>, whose</text>
+  <text x="524" y="986" class="lg">subjects carry agent-authored text and</text>
+  <text x="524" y="1006" class="lg">render exactly as stored: agent text is</text>
+  <text x="524" y="1026" class="lg">data, and data is not case-corrected (P1).</text>
+  <text x="524" y="1046" class="lg">Title Case is applied at render, only for</text>
+  <text x="524" y="1066" class="lg">the kinds the console itself composes (§3.2).</text>
 
-  <text x="510" y="1022" class="h2">Colour budget · VoiceOver</text>
-  <text x="510" y="1044" class="lg">One accent · four states · six presence values.</text>
-  <text x="510" y="1062" class="lg t3">"from agent drey-dev: dispatch queued for ops-bot, 14 minutes ago, queued"</text>
-  <text x="24" y="1012" class="t3">docs/product/design-system.md §3.1 navigation · §3.2 activity feed row (Title Case at render) · P10</text>
+  <text x="24" y="1004" class="t3">VoiceOver: "Needs You, 4 waiting" · "from agent drey-dev: dispatch queued for ops-bot, 14 minutes ago, queued"</text>
+  <text x="24" y="1026" class="t3">One accent · four states · six presence values.</text>
+  <text x="24" y="1052" class="t3">design-system.md §3.1 navigation · §3.2 activity feed row (Title Case at render) · §3.8 capture composer · §3.18 Needs You bell · P10</text>
 </svg>

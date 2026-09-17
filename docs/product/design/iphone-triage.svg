@@ -1,10 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 940" width="940" height="940" role="img" aria-labelledby="ttl desc">
-  <title id="ttl">iPhone — Needs You: request cards with six answers, and the actionable notification</title>
-  <desc id="desc">Annotated wireframe at 390 by 844 points: the Needs You section on a phone. Request cards each preview exactly what will happen and carry six answers over two rows — Approve, Revise, Decline and Skip, then Approve as Work where the payload suggests one, and Later, which snoozes the row so it comes back by itself. A decided card collapses to a receipt, the empty state reads as a good state, and a lock-screen notification offers the non-destructive subset from the same payload.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 1020" width="940" height="1020" role="img" aria-labelledby="ttl desc">
+  <title id="ttl">iPhone — the request queue as the bell's sheet, over the screen you were on</title>
+  <desc id="desc">Annotated wireframe at 390 by 844 points: Needs You is not a tab. A bell in the navigation bar carries the unread count, and tapping it presents the queue as a sheet at the large detent over the Feed screen that was already there. Each request card previews exactly what will happen and carries six answers over two rows — Approve, Revise, Decline and Skip, then Approve as Work where the payload suggests one, and Later, which snoozes the row so it comes back by itself. A swipe exposes the reversible answers, a decided card collapses to a receipt, the empty state reads as a good state, and a lock-screen notification offers the non-destructive subset from the same payload — the same queue, surfaced by the system.</desc>
   <style>
     text { font-family: -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", Roboto, sans-serif; fill: #12171c; font-size: 15px; }
     .t2 { fill: #4d565f; font-size: 13px } .t3 { fill: #646d77; font-size: 12px }
-    .hd { font-size: 16px; font-weight: 600 } .h2 { font-size: 20px; font-weight: 700 } .lt { font-size: 30px; font-weight: 700 }
+    .hd { font-size: 16px; font-weight: 600 } .h2 { font-size: 20px; font-weight: 700 } .lt { font-size: 28px; font-weight: 700 }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px }
     .ln { stroke: #d9dee4; stroke-width: 1; fill: none }
     .sf { fill: #ffffff; stroke: #d9dee4 }
@@ -16,69 +16,70 @@
     .lg { font-size: 13px }
   </style>
 
-  <rect width="940" height="940" fill="#ffffff"/>
-  <text x="24" y="30" class="h2">iPhone — Needs You</text>
-  <text x="24" y="50" class="t2">The card previews exactly what will happen · six answers over two rows · only the safe ones ride the notification</text>
+  <rect width="940" height="1020" fill="#ffffff"/>
+  <text x="24" y="30" class="h2">iPhone — Needs You (the 🔔 sheet)</text>
+  <text x="24" y="50" class="t2">Not a tab: a bell with the count, and a sheet over the screen you were on · six answers over two rows · only the safe ones ride the notification</text>
 
   <rect x="60" y="70" width="390" height="844" rx="46" fill="#f6f7f9" stroke="#b6bec8" stroke-width="2"/>
   <rect x="165" y="78" width="180" height="28" rx="14" fill="#12171c"/>
   <text x="88" y="102" class="t3">9:41</text>
 
-  <text x="84" y="164" class="lt">Needs You</text>
-  <text x="426" y="158" class="t2" text-anchor="end">4 waiting</text>
+  <!-- the screen underneath -->
+  <g opacity="0.4">
+    <text x="84" y="156" class="lt">Feed</text>
+    <text x="84" y="186" class="t2">🔧 drey-dev · knowledge_search · 3 hits</text>
+  </g>
+  <text x="418" y="152" text-anchor="end" font-size="19">🔔</text>
+  <circle cx="422" cy="132" r="9" fill="#2b5fd0"/><text x="422" y="136" fill="#fff" font-size="10" text-anchor="middle">4</text>
+  <rect x="62" y="196" width="386" height="14" fill="#12171c" opacity="0.2"/>
+
+  <!-- the sheet -->
+  <rect class="sf" x="62" y="210" width="386" height="670" rx="24" stroke="#b6bec8"/>
+  <rect x="235" y="224" width="40" height="5" rx="2.5" fill="#b6bec8"/>
+  <text x="84" y="264" class="lt">Needs You</text>
+  <text x="426" y="262" class="acc" text-anchor="end" font-size="15">Done</text>
+  <text x="84" y="288" class="t3">4 waiting · 1 snoozed · oldest first</text>
 
   <!-- card 1 -->
-  <rect class="sf" x="76" y="186" width="358" height="212" rx="16"/>
-  <text x="94" y="212">📝</text>
-  <rect x="118" y="198" width="78" height="18" rx="9" fill="#f1ecfc"/><text x="126" y="211" class="ag mono">drey-dev</text>
-  <text x="94" y="238" class="hd">Write a taper section to Health</text>
-  <text x="94" y="256" class="t3">knowledge · #97 · from inbox #418 · today</text>
-  <rect class="snk" x="94" y="266" width="322" height="46" rx="10"/>
-  <text x="106" y="284" class="mono t2">+ Knowledge/Areas/Health/Taper.md</text>
-  <text x="106" y="302" class="mono t3">  ## Taper · +18 lines · shown as data</text>
-  <rect x="94" y="322" width="86" height="30" rx="9" fill="#2b5fd0"/><text x="137" y="342" fill="#fff" text-anchor="middle" font-size="13">Approve</text>
-  <rect class="sf" x="188" y="322" width="70" height="30" rx="9" stroke="#b6bec8"/><text x="223" y="342" text-anchor="middle" font-size="13">Revise</text>
-  <rect class="sf" x="266" y="322" width="78" height="30" rx="9" stroke="#b3261e"/><text x="305" y="342" text-anchor="middle" font-size="13" class="bad">Decline</text>
-  <rect class="sf" x="352" y="322" width="64" height="30" rx="9" stroke="#b6bec8"/><text x="384" y="342" text-anchor="middle" font-size="13">Skip</text>
-  <rect class="sf" x="94" y="358" width="144" height="30" rx="9" stroke="#2b5fd0"/><text x="166" y="378" text-anchor="middle" font-size="13" class="acc">Approve as Work</text>
-  <rect class="sf" x="246" y="358" width="76" height="30" rx="9" stroke="#b6bec8"/><text x="284" y="378" text-anchor="middle" font-size="13">Later</text>
-  <text x="330" y="378" class="t3">returns in 3h</text>
+  <rect class="sf" x="76" y="300" width="358" height="212" rx="16"/>
+  <text x="94" y="326">📝</text>
+  <rect x="118" y="312" width="78" height="18" rx="9" fill="#f1ecfc"/><text x="126" y="325" class="ag mono">drey-dev</text>
+  <text x="94" y="352" class="hd">Write a taper section to Health</text>
+  <text x="94" y="370" class="t3">knowledge · #97 · from inbox #418 · today</text>
+  <rect class="snk" x="94" y="380" width="322" height="46" rx="10"/>
+  <text x="106" y="398" class="mono t2">+ Knowledge/Areas/Health/Taper.md</text>
+  <text x="106" y="416" class="mono t3">  ## Taper · +18 lines · shown as data</text>
+  <rect x="94" y="436" width="86" height="30" rx="9" fill="#2b5fd0"/><text x="137" y="456" fill="#fff" text-anchor="middle" font-size="13">Approve</text>
+  <rect class="sf" x="188" y="436" width="70" height="30" rx="9" stroke="#b6bec8"/><text x="223" y="456" text-anchor="middle" font-size="13">Revise</text>
+  <rect class="sf" x="266" y="436" width="78" height="30" rx="9" stroke="#b3261e"/><text x="305" y="456" text-anchor="middle" font-size="13" class="bad">Decline</text>
+  <rect class="sf" x="352" y="436" width="64" height="30" rx="9" stroke="#b6bec8"/><text x="384" y="456" text-anchor="middle" font-size="13">Skip</text>
+  <rect class="sf" x="94" y="472" width="144" height="30" rx="9" stroke="#2b5fd0"/><text x="166" y="492" text-anchor="middle" font-size="13" class="acc">Approve as Work</text>
+  <rect class="sf" x="246" y="472" width="76" height="30" rx="9" stroke="#b6bec8"/><text x="284" y="492" text-anchor="middle" font-size="13">Later</text>
+  <text x="330" y="492" class="t3">returns in 3h</text>
 
   <!-- card 2: swipe -->
-  <rect class="sf" x="76" y="410" width="358" height="104" rx="16"/>
-  <text x="94" y="436">🛡️</text>
-  <rect x="118" y="422" width="66" height="18" rx="9" fill="#eef0f3"/><text x="126" y="435" class="t3 mono">ops-bot</text>
-  <text x="94" y="466" class="hd">Extend grant: +Areas/Work</text>
-  <text x="94" y="486" class="t3">grant · #98 · widens what it can read</text>
-  <rect x="352" y="410" width="82" height="104" rx="16" fill="#faf1de"/>
-  <text x="393" y="462" class="deg" text-anchor="middle" font-size="14">Later</text>
-  <text x="393" y="480" class="t3" text-anchor="middle">snooze</text>
+  <rect class="sf" x="76" y="524" width="358" height="104" rx="16"/>
+  <text x="94" y="550">🛡️</text>
+  <rect x="118" y="536" width="66" height="18" rx="9" fill="#eef0f3"/><text x="126" y="549" class="t3 mono">ops-bot</text>
+  <text x="94" y="580" class="hd">Extend grant: +Areas/Work</text>
+  <text x="94" y="600" class="t3">grant · #98 · widens what it can read</text>
+  <rect x="352" y="524" width="82" height="104" rx="16" fill="#faf1de"/>
+  <text x="393" y="576" class="deg" text-anchor="middle" font-size="14">Later</text>
+  <text x="393" y="594" class="t3" text-anchor="middle">snooze</text>
 
   <!-- card 3: decided receipt -->
-  <rect class="sf" x="76" y="526" width="358" height="62" rx="16"/>
-  <text x="94" y="558" class="ok">✓</text>
-  <text x="116" y="558" class="t2">Approved #94 · committed 4a1c93e · 8h ago</text>
-  <text x="116" y="578" class="acc" font-size="13">Undo</text>
+  <rect class="sf" x="76" y="640" width="358" height="62" rx="16"/>
+  <text x="94" y="672" class="ok">✓</text>
+  <text x="116" y="672" class="t2">Approved #94 · committed 4a1c93e · 8h ago</text>
+  <text x="116" y="692" class="acc" font-size="13">Undo</text>
 
   <!-- empty state -->
-  <rect class="ln" x="76" y="612" width="358" height="128" rx="16" stroke-dasharray="4 4"/>
-  <text x="255" y="660" text-anchor="middle" font-size="24" fill="#646d77">✓</text>
-  <text x="255" y="690" text-anchor="middle" class="t2">Queue is clear.</text>
-  <text x="255" y="712" text-anchor="middle" class="t3">Requests appear here when something needs</text>
-  <text x="255" y="728" text-anchor="middle" class="t3">your decision. Snoozed rows come back by</text>
-  <text x="255" y="744" text-anchor="middle" class="t3">themselves.</text>
+  <rect class="ln" x="76" y="714" width="358" height="112" rx="16" stroke-dasharray="4 4"/>
+  <text x="255" y="756" text-anchor="middle" font-size="24" fill="#646d77">✓</text>
+  <text x="255" y="784" text-anchor="middle" class="t2">Queue is clear.</text>
+  <text x="255" y="806" text-anchor="middle" class="t3">Snoozed rows come back by themselves.</text>
 
-  <!-- tab bar -->
-  <path class="ln" d="M62 796 H448"/>
-  <rect x="62" y="796" width="386" height="84" fill="#ffffff" opacity="0.96"/>
-  <g text-anchor="middle">
-    <text x="116" y="828" font-size="17">💬</text><text x="116" y="846" class="t3" font-size="10">Chat</text>
-    <text x="180" y="828" font-size="17">◈</text><text x="180" y="846" class="t3" font-size="10">Feed</text>
-    <text x="244" y="828" class="acc" font-size="17">📝</text><text x="244" y="846" class="acc" font-size="10">Needs You</text>
-    <circle cx="262" cy="818" r="8" fill="#2b5fd0"/><text x="262" y="822" fill="#fff" font-size="9">4</text>
-    <text x="308" y="828" font-size="17">🗂️</text><text x="308" y="846" class="t3" font-size="10">Work</text>
-    <text x="376" y="828" font-size="17">•••</text><text x="376" y="846" class="t3" font-size="10">More</text>
-  </g>
+  <text x="255" y="856" text-anchor="middle" class="t3">Swipe down or Done returns you to Feed, where you were.</text>
   <rect x="195" y="890" width="120" height="5" rx="2.5" fill="#12171c"/>
 
   <!-- notification -->
@@ -95,43 +96,49 @@
   <text x="842" y="732" text-anchor="middle" class="acc" font-size="13">Later</text>
 
   <!-- callouts -->
-  <circle class="cw" cx="470" cy="300" r="10"/><text class="cn" x="470" y="304">1</text>
-  <circle class="cw" cx="470" cy="366" r="10"/><text class="cn" x="470" y="370">2</text>
-  <circle class="cw" cx="470" cy="462" r="10"/><text class="cn" x="470" y="466">3</text>
-  <circle class="cw" cx="470" cy="556" r="10"/><text class="cn" x="470" y="560">4</text>
-  <circle class="cw" cx="470" cy="676" r="10"/><text class="cn" x="470" y="680">5</text>
+  <circle class="cw" cx="446" cy="132" r="10"/><text class="cn" x="446" y="136">1</text>
+  <circle class="cw" cx="470" cy="224" r="10"/><text class="cn" x="470" y="228">2</text>
+  <circle class="cw" cx="470" cy="480" r="10"/><text class="cn" x="470" y="484">3</text>
+  <circle class="cw" cx="470" cy="576" r="10"/><text class="cn" x="470" y="580">4</text>
+  <circle class="cw" cx="470" cy="670" r="10"/><text class="cn" x="470" y="674">5</text>
   <circle class="cw" cx="496" cy="640" r="10"/><text class="cn" x="496" y="644">6</text>
 
   <!-- legend -->
   <text x="510" y="110" class="h2">Callouts</text>
-  <text x="510" y="146" class="lg">① The card previews <tspan font-style="italic">exactly what will</tspan></text>
-  <text x="524" y="166" class="lg"><tspan font-style="italic">happen</tspan> — the path, the diff size, the grant</text>
-  <text x="524" y="186" class="lg">that would widen. Agent-authored content</text>
-  <text x="524" y="206" class="lg">sits on the sunken/agent wash and is</text>
-  <text x="524" y="226" class="lg">labelled; it never borrows control styling.</text>
+  <text x="510" y="146" class="lg">① <tspan font-weight="600">The bell is the entry point</tspan>, in the</text>
+  <text x="524" y="166" class="lg">navigation bar's trailing slot with the</text>
+  <text x="524" y="186" class="lg">unread count — the only badge in the</text>
+  <text x="524" y="206" class="lg">product (P2). Needs You left the tab bar,</text>
+  <text x="524" y="226" class="lg">which is now Chat · Feed · Work ·</text>
+  <text x="524" y="246" class="lg">Knowledge · More.</text>
 
-  <text x="510" y="266" class="lg">② <tspan font-weight="600">Six answers, fixed order</tspan>, wrapped to two</text>
-  <text x="524" y="286" class="lg">rows on a phone: Approve · Revise · Decline ·</text>
-  <text x="524" y="306" class="lg">Skip, then Approve as Work (only where the</text>
-  <text x="524" y="326" class="lg">payload suggests one) and Later, which</text>
-  <text x="524" y="346" class="lg">snoozes — it never ends the request.</text>
+  <text x="510" y="286" class="lg">② A <tspan font-weight="600">sheet at the large detent</tspan>, because a</text>
+  <text x="524" y="306" class="lg">queue is a list and not a glance. Grabber</text>
+  <text x="524" y="326" class="lg">shown; swipe down or Done returns you to</text>
+  <text x="524" y="346" class="lg">exactly where you were. Answering a</text>
+  <text x="524" y="366" class="lg">request should not cost you your place.</text>
 
-  <text x="510" y="386" class="lg">③ Swipe gets the reversible answers only —</text>
-  <text x="524" y="406" class="lg">leading Approve, trailing Later. Decline has</text>
-  <text x="524" y="426" class="lg">per-kind consequences, so it keeps its</text>
-  <text x="524" y="446" class="lg">button and its confirmation.</text>
+  <text x="510" y="406" class="lg">③ <tspan font-weight="600">Six answers, fixed order</tspan>, wrapped to two</text>
+  <text x="524" y="426" class="lg">rows: Approve · Revise · Decline · Skip,</text>
+  <text x="524" y="446" class="lg">then Approve as Work (only where the</text>
+  <text x="524" y="466" class="lg">payload suggests one) and Later, which</text>
+  <text x="524" y="486" class="lg">snoozes — it never ends the request. The</text>
+  <text x="524" y="506" class="lg">card previews <tspan font-style="italic">exactly what will happen</tspan>;</text>
+  <text x="524" y="526" class="lg">agent-authored content sits on the agent</text>
+  <text x="524" y="546" class="lg">wash and never borrows control styling.</text>
 
-  <text x="510" y="486" class="lg">④ A decided card collapses to a one-line</text>
-  <text x="524" y="506" class="lg">receipt, with Undo only where the</text>
-  <text x="524" y="526" class="lg">underlying operation is reversible.</text>
+  <text x="510" y="790" class="lg">④ Swipe exposes the reversible answers only — leading Approve, trailing</text>
+  <text x="524" y="810" class="lg">Later. Decline has per-kind consequences, so it keeps its button and its</text>
+  <text x="524" y="830" class="lg">confirmation.</text>
 
-  <text x="510" y="556" class="lg">⑤ Empty ≠ absent. "Queue is clear" is a</text>
-  <text x="524" y="576" class="lg">good state and reads like one (§3.15).</text>
+  <text x="510" y="870" class="lg">⑤ A decided card collapses to a one-line receipt, with Undo only where</text>
+  <text x="524" y="890" class="lg">the underlying operation is reversible. Empty ≠ absent: "Queue is clear"</text>
+  <text x="524" y="910" class="lg">is a good state and reads like one (§3.15).</text>
 
-  <text x="510" y="790" class="lg">⑥ The notification renders the same payload:</text>
-  <text x="524" y="810" class="lg">same question, answered without opening the</text>
-  <text x="524" y="830" class="lg">app — but only the answers that are safe to</text>
-  <text x="524" y="850" class="lg">give from a lock screen. It stays thin —</text>
-  <text x="524" y="870" class="lg">wake-and-fetch — and carries no authority.</text>
-  <text x="24" y="928" class="t3">docs/ops/reply-feedback.md (the six answers) · design-system.md §3.9 request card · §3.14 notifications · §3.15 empty states</text>
+  <text x="510" y="930" class="lg">⑥ <tspan font-weight="600">The notification is this queue, surfaced by the OS</tspan> — same payload, same</text>
+  <text x="524" y="950" class="lg">question, answered without opening the app, but only the answers that are</text>
+  <text x="524" y="970" class="lg">safe to give from a lock screen. It stays thin (wake-and-fetch) and carries</text>
+  <text x="524" y="990" class="lg">no authority. One queue, two doors — never two implementations.</text>
+  <text x="24" y="990" class="t3">docs/ops/reply-feedback.md · design-system.md §3.18</text>
+  <text x="24" y="1008" class="t3">Needs You bell + panel · §3.9 request card · §3.14 notifications</text>
 </svg>

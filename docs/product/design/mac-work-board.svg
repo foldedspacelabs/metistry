@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" width="1200" height="800" role="img" aria-labelledby="ttl desc">
   <title id="ttl">macOS — Work › Board, six columns over the work table</title>
-  <desc id="desc">Annotated wireframe: the Work section of the seven-section sidebar, with its four views as a segmented control and Board selected. Six columns — Backlog, Addressed to, In Progress, Needs You, Done, Reported — each a case in one named query. A card is mid-drag from Backlog to Addressed to with the owner picker open, an escalated card carries the reason it stalled, and a refusal is printed under the board in the service's own words. Wider viewBox than the other Mac sheets because six columns need the width.</desc>
+  <desc id="desc">Annotated wireframe: the Work section of the six-section sidebar, expanded so that Board, Projects, Artifacts and Rooms are children of the Work row and Board is the selected child — there is no second navigation inside the section. Six columns — Backlog, Addressed to, In Progress, Needs You, Done, Reported — each a case in one named query. A card is mid-drag from Backlog to Addressed to with the owner picker open, an escalated card carries the reason it stalled, and a refusal is printed under the board in the service's own words. Wider viewBox than the other Mac sheets because six columns need the width. The toolbar carries the capture plus and the Needs You bell with its count.</desc>
   <style>
     text { font-family: -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", Roboto, sans-serif; fill: #12171c; font-size: 13px; }
     .t2 { fill: #4d565f; font-size: 12px } .t3 { fill: #646d77; font-size: 11px } .t4 { fill: #646d77; font-size: 10px }
@@ -19,7 +19,7 @@
 
   <rect width="1200" height="800" fill="#ffffff"/>
   <text x="24" y="30" class="h2">macOS — Work › Board</text>
-  <text x="24" y="50" class="t2">Four views of one object graph · six columns decided server-side · the board offers no drop the service would refuse</text>
+  <text x="24" y="50" class="t2">Four views of one object graph, reached from the sidebar · six columns decided server-side · the board offers no drop the service would refuse</text>
 
   <rect class="win" x="24" y="66" width="900" height="660" rx="12"/>
   <path class="ln" d="M24 104 H924"/>
@@ -27,7 +27,9 @@
   <text x="112" y="90" class="hd">Work</text>
   <rect class="sf" x="602" y="76" width="110" height="22" rx="6"/><text x="612" y="91" class="t2">metistry ⌄</text>
   <rect class="sf" x="720" y="76" width="70" height="22" rx="6"/><text x="730" y="91" class="t2">＋ Task</text>
-  <rect class="sf" x="798" y="76" width="100" height="22" rx="6"/><text x="808" y="91" class="acc">＋ Capture ⌘N</text>
+  <rect class="sf" x="800" y="76" width="44" height="22" rx="6"/><text x="814" y="91" class="acc">＋</text>
+  <rect class="sf" x="852" y="76" width="46" height="22" rx="6"/><text x="866" y="92">🔔</text>
+  <circle cx="892" cy="78" r="8" fill="#2b5fd0"/><text x="892" y="82" fill="#fff" font-size="10" text-anchor="middle">4</text>
 
   <!-- sidebar -->
   <rect x="25" y="105" width="186" height="620" fill="#eef0f3"/>
@@ -35,24 +37,29 @@
   <text x="40" y="126" class="t3">METISTRY</text>
   <text x="45" y="152">💬</text><text x="66" y="152">Chat</text>
   <text x="45" y="178">◈</text><text x="66" y="178">Feed</text>
-  <text x="45" y="204">📝</text><text x="66" y="204">Needs You</text>
-  <rect x="160" y="192" width="30" height="16" rx="8" fill="#2b5fd0"/><text x="175" y="204" fill="#fff" font-size="10" text-anchor="middle">4</text>
-  <rect class="sel" x="33" y="212" width="170" height="26" rx="7"/>
-  <text x="45" y="230">🗂️</text><text x="66" y="230" class="hd">Work</text>
-  <text x="45" y="256">📚</text><text x="66" y="256">Knowledge</text>
-  <text x="45" y="282">🤖</text><text x="66" y="282">Agents</text>
-  <text x="45" y="308">⚙️</text><text x="66" y="308">System</text>
-  <circle cx="176" cy="304" r="4" class="deg"/>
+  <text x="45" y="204">🗂️</text><text x="66" y="204" class="hd">Work</text><text x="196" y="204" class="t3" text-anchor="end">▾</text>
+  <rect class="sel" x="33" y="212" width="170" height="24" rx="7"/>
+  <text x="88" y="229" class="ch">Board</text>
+  <text x="88" y="252" class="t2">Projects</text>
+  <text x="88" y="274" class="t2">Artifacts</text>
+  <text x="88" y="296" class="t2">Rooms</text>
+  <text x="45" y="322">📚</text><text x="66" y="322">Knowledge</text><text x="196" y="322" class="t3" text-anchor="end">▸</text>
+  <text x="45" y="348">🤖</text><text x="66" y="348">Agents</text>
+  <text x="45" y="374">📈</text><text x="66" y="374">Insights</text>
+  <path class="ln" d="M33 392 H203"/>
+  <text x="45" y="412" class="t3">PINNED</text>
+  <text x="45" y="438">📌</text><text x="68" y="438" class="t2">metistry</text><text x="196" y="438" class="t3" text-anchor="end">project</text>
+  <text x="45" y="462">📌</text><text x="68" y="462" class="t2">Board · metistry</text>
+  <text x="45" y="486">📌</text><text x="68" y="486" class="t2 mono">drey-dev</text><text x="196" y="486" class="t3" text-anchor="end">agent</text>
+  <rect class="sf" x="33" y="634" width="170" height="26" rx="7"/>
+  <text x="45" y="652" class="acc">＋</text><text x="68" y="652" class="acc">New Capture</text><text x="196" y="652" class="t3" text-anchor="end">⌘N</text>
   <path class="ln" d="M33 670 H203"/>
-  <text x="45" y="690" class="t3">⌘K  Commands · ⌘N  Capture</text>
+  <text x="45" y="690" class="t3">⌘K  Commands · ⌘9  Needs You</text>
 
-  <!-- segmented control: the four Work views -->
-  <rect class="snk" x="228" y="120" width="308" height="26" rx="8"/>
-  <rect x="230" y="122" width="74" height="22" rx="7" fill="#ffffff" stroke="#d9dee4"/><text x="267" y="137" class="ch" text-anchor="middle">Board</text>
-  <text x="343" y="137" class="t2" text-anchor="middle">Rooms</text>
-  <text x="419" y="137" class="t2" text-anchor="middle">Artifacts</text>
-  <text x="497" y="137" class="t2" text-anchor="middle">Projects</text>
-  <text x="902" y="137" class="t3" text-anchor="end">polls every 10s · [ ] step the project</text>
+  <!-- no segmented control: the four views are sidebar rows now -->
+  <text x="228" y="138" class="hd">Board</text>
+  <text x="286" y="138" class="t3">Projects · Artifacts · Rooms are rows of the sidebar — the section has no second nav</text>
+  <text x="902" y="138" class="t3" text-anchor="end">polls every 10s · [ ] step the project</text>
 
   <!-- column headers -->
   <g>
@@ -161,7 +168,7 @@
     <circle class="cw" cx="214" cy="492" r="10"/><text class="cn" x="214" y="496">4</text>
     <circle class="cw" cx="662" cy="256" r="10"/><text class="cn" x="662" y="260">5</text>
     <circle class="cw" cx="214" cy="594" r="10"/><text class="cn" x="214" y="598">6</text>
-    <circle class="cw" cx="214" cy="133" r="10"/><text class="cn" x="214" y="137">7</text>
+    <circle class="cw" cx="216" cy="229" r="10"/><text class="cn" x="216" y="233">7</text>
   </g>
 
   <!-- legend -->
@@ -191,15 +198,20 @@
     <text x="962" y="486" class="lg">and the statement disagree, the</text>
     <text x="962" y="502" class="lg">statement wins (invariant 8).</text>
     <text x="950" y="530" class="lg">⑤ Needs You here is <tspan class="mono">status = blocked</tspan>,</text>
-    <text x="962" y="546" class="lg">the same words as the section, and the</text>
-    <text x="962" y="562" class="lg">one route back to open is your hand.</text>
-    <text x="950" y="590" class="lg">⑥ Every drag has a keyboard</text>
-    <text x="962" y="606" class="lg">equivalent, and it is the same route.</text>
-    <text x="950" y="634" class="lg">⑦ Board · Rooms · Artifacts · Projects</text>
-    <text x="962" y="650" class="lg">are four views of <tspan font-style="italic">one</tspan> object graph: a</text>
-    <text x="962" y="666" class="lg">task has a room, produces an artifact,</text>
-    <text x="962" y="682" class="lg">belongs to a project. Four sections</text>
-    <text x="962" y="698" class="lg">made the reader do that join.</text>
+    <text x="962" y="546" class="lg">the same words as the 🔔 queue — a</text>
+    <text x="962" y="562" class="lg">board column, not a second copy of it</text>
+    <text x="962" y="578" class="lg">— and the one route back to open is</text>
+    <text x="962" y="594" class="lg">your hand.</text>
+    <text x="950" y="622" class="lg">⑥ Every drag has a keyboard</text>
+    <text x="962" y="638" class="lg">equivalent, and it is the same route.</text>
+    <text x="950" y="666" class="lg">⑦ Board · Projects · Artifacts · Rooms</text>
+    <text x="962" y="682" class="lg">are four views of <tspan font-style="italic">one</tspan> object graph: a</text>
+    <text x="962" y="698" class="lg">task has a room, produces an artifact,</text>
+    <text x="962" y="714" class="lg">belongs to a project. Four <tspan font-style="italic">sections</tspan> made</text>
+    <text x="962" y="730" class="lg">the reader do that join; a segmented</text>
+    <text x="962" y="746" class="lg">control <tspan font-style="italic">inside</tspan> one section buried them</text>
+    <text x="962" y="762" class="lg">a click deep. <tspan font-weight="600">Expanding the sidebar row</tspan></text>
+    <text x="962" y="778" class="lg"><tspan font-weight="600">is the answer to both</tspan> (2026-09-17).</text>
   </g>
-  <text x="24" y="758" class="t3">docs/ops/board.md · docs/ops/threads.md · design-system.md §3.10 task card and drag-to-dispatch · §3.12 project header</text>
+  <text x="24" y="758" class="t3">docs/ops/board.md · docs/ops/threads.md · design-system.md §3.1 navigation · §3.10 task card and drag-to-dispatch · §3.12 project header</text>
 </svg>

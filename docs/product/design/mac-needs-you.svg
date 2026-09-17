@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 820" width="1000" height="820" role="img" aria-labelledby="ttl desc">
-  <title id="ttl">macOS — Needs You, the request queue with six answers</title>
-  <desc id="desc">Annotated wireframe: the Needs You section of the seven-section sidebar, holding request cards grouped by type. Each card previews exactly what will happen and offers Approve, Revise, Decline, Approve as Work where the payload suggests one, Later and Skip. A snoozed row, a batch bar limited to the three verbs that need nothing from the individual row, and a stale-row refusal are shown.</desc>
+  <title id="ttl">macOS — Needs You as the bell's panel, opened over whatever screen you were on</title>
+  <desc id="desc">Annotated wireframe: the request queue is no longer a section. A bell in the top right of the toolbar carries the unread count, and clicking it opens a popover anchored to the bell, over the Feed screen the user was already on. The popover holds request cards grouped by type; each previews exactly what will happen and offers Approve, Revise, Decline, Skip and — where the payload suggests one — Approve as Work, plus Later, which snoozes. Six answers wrap to two rows at popover width. A batch bar limited to the three verbs that need nothing from the individual row, a snoozed row and a stale refusal are shown at the foot of the panel.</desc>
   <style>
     text { font-family: -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", Roboto, sans-serif; fill: #12171c; font-size: 13px; }
     .t2 { fill: #4d565f; font-size: 12px } .t3 { fill: #646d77; font-size: 11px }
@@ -17,137 +17,164 @@
   </style>
 
   <rect width="1000" height="820" fill="#ffffff"/>
-  <text x="24" y="30" class="h2">macOS — Needs You</text>
-  <text x="24" y="50" class="t2">Six answers, always in this order · Later is a snooze and the row returns · only three verbs may be batched</text>
+  <text x="24" y="30" class="h2">macOS — Needs You (the 🔔 panel)</text>
+  <text x="24" y="50" class="t2">Not a section: a bell with the count, and a popover over the screen you were already on · six answers, fixed order · only three may be batched</text>
 
   <rect class="win" x="24" y="66" width="720" height="690" rx="12"/>
   <path class="ln" d="M24 104 H744"/>
   <circle cx="46" cy="86" r="6" fill="#ff5f57"/><circle cx="66" cy="86" r="6" fill="#febc2e"/><circle cx="86" cy="86" r="6" fill="#28c840"/>
-  <text x="112" y="90" class="hd">Needs You</text>
-  <rect class="sf" x="470" y="76" width="118" height="22" rx="6"/><text x="480" y="91" class="t2">All types ⌄</text>
-  <rect class="sf" x="596" y="76" width="122" height="22" rx="6"/><text x="606" y="91" class="acc">＋ Capture ⌘N</text>
+  <text x="112" y="90" class="hd">Feed</text>
+  <rect class="sf" x="560" y="76" width="44" height="22" rx="6"/><text x="574" y="91" class="acc">＋</text>
+  <rect class="sel" x="612" y="76" width="46" height="22" rx="6" stroke="#2b5fd0"/><text x="626" y="92">🔔</text>
+  <circle cx="652" cy="78" r="8" fill="#2b5fd0"/><text x="652" y="82" fill="#fff" font-size="10" text-anchor="middle">4</text>
 
-  <!-- sidebar: the seven sections -->
+  <!-- sidebar: the six sections, Feed still selected — the panel does not navigate -->
   <rect x="25" y="105" width="186" height="650" fill="#eef0f3"/>
   <path class="ln" d="M211 105 V755"/>
   <text x="40" y="126" class="t3">METISTRY</text>
   <g>
     <text x="45" y="152">💬</text><text x="66" y="152">Chat</text>
-    <text x="45" y="178">◈</text><text x="66" y="178">Feed</text>
-    <rect class="sel" x="33" y="186" width="170" height="26" rx="7"/>
-    <text x="45" y="204">📝</text><text x="66" y="204" class="hd">Needs You</text>
-    <rect x="160" y="192" width="30" height="16" rx="8" fill="#2b5fd0"/><text x="175" y="204" fill="#fff" font-size="10" text-anchor="middle">4</text>
-    <text x="45" y="230">🗂️</text><text x="66" y="230">Work</text>
-    <text x="45" y="256">📚</text><text x="66" y="256">Knowledge</text>
-    <text x="45" y="282">🤖</text><text x="66" y="282">Agents</text>
-    <text x="45" y="308">⚙️</text><text x="66" y="308">System</text>
-    <circle cx="176" cy="304" r="4" class="deg"/>
+    <rect class="sel" x="33" y="160" width="170" height="26" rx="7"/>
+    <text x="45" y="178" class="acc">◈</text><text x="66" y="178" class="hd">Feed</text>
+    <text x="45" y="204">🗂️</text><text x="66" y="204">Work</text><text x="196" y="204" class="t3" text-anchor="end">▸</text>
+    <text x="45" y="230">📚</text><text x="66" y="230">Knowledge</text><text x="196" y="230" class="t3" text-anchor="end">▸</text>
+    <text x="45" y="256">🤖</text><text x="66" y="256">Agents</text>
+    <text x="45" y="282">📈</text><text x="66" y="282">Insights</text>
+    <path class="ln" d="M33 300 H203"/>
+    <text x="45" y="320" class="t3">PINNED</text>
+    <text x="45" y="346">📌</text><text x="68" y="346" class="t2">metistry</text>
+    <text x="45" y="370">📌</text><text x="68" y="370" class="t2">Areas/Health</text>
+    <text x="45" y="394">📌</text><text x="68" y="394" class="t2 mono">drey-dev</text>
+    <text x="45" y="430" class="t3">No "Needs You" row — the queue</text>
+    <text x="45" y="446" class="t3">left the sidebar for the 🔔.</text>
   </g>
+  <rect class="sf" x="33" y="662" width="170" height="26" rx="7"/>
+  <text x="45" y="680" class="acc">＋</text><text x="68" y="680" class="acc">New Capture</text><text x="196" y="680" class="t3" text-anchor="end">⌘N</text>
   <path class="ln" d="M33 700 H203"/>
-  <text x="45" y="720" class="t3">⌘K  Commands and Agents</text>
-  <text x="45" y="738" class="t3">⌘N  Capture — from anywhere</text>
+  <text x="45" y="720" class="t3">⌘K  Commands · ⌘9  Needs You</text>
 
-  <!-- queue -->
-  <text x="228" y="130" class="t3">4 WAITING · 1 SNOOZED</text>
-  <text x="720" y="130" class="t3" text-anchor="end">oldest first ⌄</text>
-
-  <text x="228" y="154" class="t3">KNOWLEDGE · 2</text>
-  <rect class="sf" x="228" y="162" width="492" height="190" rx="14"/>
-  <text x="244" y="188">📝</text>
-  <rect class="agq" x="268" y="175" width="74" height="17" rx="8"/><text x="276" y="188" class="ag mono">drey-dev</text>
-  <text x="244" y="214" class="hd">write a taper section to Health</text>
-  <text x="244" y="232" class="t3">#97 · knowledge · from inbox #418 · payload carries <tspan class="mono">suggested_work</tspan></text>
-  <rect class="snk" x="244" y="242" width="460" height="46" rx="10"/>
-  <text x="256" y="261" class="mono t2">+ Knowledge/Areas/Health/Taper.md</text>
-  <text x="256" y="279" class="mono t3">## Taper — +18 lines, 180 words · agent-authored, shown as data</text>
-  <g>
-    <rect x="244" y="300" width="78" height="30" rx="8" fill="#2b5fd0"/><text x="283" y="320" class="btn" fill="#fff">Approve</text>
-    <rect class="sf" x="330" y="300" width="66" height="30" rx="8"/><text x="363" y="320" class="btn">Revise</text>
-    <rect class="sf" x="404" y="300" width="70" height="30" rx="8" stroke="#b3261e"/><text x="439" y="320" class="btn bad">Decline</text>
-    <rect class="sf" x="482" y="300" width="124" height="30" rx="8" stroke="#2b5fd0"/><text x="544" y="320" class="btn acc">Approve as Work</text>
-    <rect class="sf" x="614" y="300" width="54" height="30" rx="8"/><text x="641" y="320" class="btn">Later</text>
-    <rect class="sf" x="676" y="300" width="44" height="30" rx="8"/><text x="698" y="320" class="btn">Skip</text>
+  <!-- the screen underneath, still there -->
+  <g opacity="0.4">
+    <text x="228" y="136">🔧</text>
+    <text x="252" y="136" class="t2">drey-dev · knowledge_search · 3 hits</text>
+    <text x="228" y="176">📨</text>
+    <text x="252" y="176" class="t2">drey-dev · dispatch queued</text>
+    <text x="228" y="216">📝</text>
+    <text x="252" y="216" class="t2">system · proposal #97</text>
+    <text x="228" y="256">⚠️</text>
+    <text x="252" y="256" class="t2">github-state · run failed</text>
   </g>
 
-  <text x="228" y="378" class="t3">ACTION · 1</text>
-  <rect class="sf" x="228" y="386" width="492" height="136" rx="14"/>
-  <text x="244" y="412">⚡</text>
-  <rect class="agq" x="268" y="399" width="80" height="17" rx="8"/><text x="276" y="412" class="ag mono">inbox-drain</text>
-  <text x="244" y="438" class="hd">dispatch: review artifact taper-plan → claude-code</text>
-  <text x="244" y="456" class="t3">#101 · action · autonomy <tspan class="mono">propose</tspan> under ceiling <tspan class="mono">act_within_scope</tspan></text>
-  <text x="244" y="474" class="deg" font-size="12">Approve runs it — the same service call your own click goes through.</text>
+  <!-- the popover -->
+  <path d="M644 112 L652 100 L660 112 Z" fill="#ffffff" stroke="#b6bec8"/>
+  <rect class="sf" x="300" y="112" width="436" height="630" rx="14" stroke="#b6bec8"/>
+  <text x="316" y="138" class="hd">Needs You</text>
+  <text x="720" y="138" class="t3" text-anchor="end">4 waiting · 1 snoozed</text>
+  <path class="ln" d="M312 150 H724"/>
+  <rect class="sf" x="316" y="158" width="100" height="20" rx="6"/><text x="326" y="172" class="t3">All types ⌄</text>
+  <text x="720" y="172" class="t3" text-anchor="end">oldest first ⌄</text>
+
+  <text x="316" y="198" class="t3">KNOWLEDGE · 2</text>
+  <rect class="sf" x="316" y="206" width="404" height="196" rx="12"/>
+  <text x="330" y="230">📝</text>
+  <rect class="agq" x="354" y="217" width="74" height="17" rx="8"/><text x="362" y="230" class="ag mono">drey-dev</text>
+  <text x="330" y="256" class="hd">write a taper section to Health</text>
+  <text x="330" y="272" class="t3">#97 · knowledge · from inbox #418 · payload carries <tspan class="mono">suggested_work</tspan></text>
+  <rect class="snk" x="330" y="280" width="376" height="42" rx="8"/>
+  <text x="342" y="298" class="mono t2">+ Knowledge/Areas/Health/Taper.md</text>
+  <text x="342" y="314" class="mono t3">## Taper — +18 lines · agent-authored, shown as data</text>
   <g>
-    <rect x="244" y="482" width="78" height="30" rx="8" fill="#2b5fd0"/><text x="283" y="502" class="btn" fill="#fff">Approve</text>
-    <rect class="sf" x="330" y="482" width="66" height="30" rx="8"/><text x="363" y="502" class="btn">Revise</text>
-    <rect class="sf" x="404" y="482" width="70" height="30" rx="8" stroke="#b3261e"/><text x="439" y="502" class="btn bad">Decline</text>
-    <rect class="sf" x="614" y="482" width="54" height="30" rx="8"/><text x="641" y="502" class="btn">Later</text>
-    <rect class="sf" x="676" y="482" width="44" height="30" rx="8"/><text x="698" y="502" class="btn">Skip</text>
-    <text x="482" y="502" class="t3">no <tspan class="mono">suggested_work</tspan></text>
+    <rect x="330" y="330" width="76" height="28" rx="8" fill="#2b5fd0"/><text x="368" y="349" class="btn" fill="#fff">Approve</text>
+    <rect class="sf" x="414" y="330" width="62" height="28" rx="8"/><text x="445" y="349" class="btn">Revise</text>
+    <rect class="sf" x="484" y="330" width="66" height="28" rx="8" stroke="#b3261e"/><text x="517" y="349" class="btn bad">Decline</text>
+    <rect class="sf" x="558" y="330" width="44" height="28" rx="8"/><text x="580" y="349" class="btn">Skip</text>
+    <rect class="sf" x="330" y="366" width="120" height="28" rx="8" stroke="#2b5fd0"/><text x="390" y="385" class="btn acc">Approve as Work</text>
+    <rect class="sf" x="458" y="366" width="52" height="28" rx="8"/><text x="484" y="385" class="btn">Later</text>
+    <text x="522" y="385" class="t3">returns in 3h · settles nothing</text>
   </g>
 
-  <text x="228" y="548" class="t3">DECISION · 1</text>
-  <rect class="sf" x="228" y="556" width="492" height="64" rx="14" stroke="#2b5fd0"/>
-  <rect x="244" y="578" width="16" height="16" rx="4" fill="#2b5fd0"/><text x="252" y="591" fill="#fff" font-size="11" text-anchor="middle">✓</text>
-  <text x="272" y="581" class="hd">enrolment: register agent reviewer-2</text>
-  <text x="272" y="601" class="t3">#102 · Decline <tspan font-style="italic">revokes</tspan> the token. Skip settles it and leaves the registry alone.</text>
+  <text x="316" y="424" class="t3">ACTION · 1</text>
+  <rect class="sf" x="316" y="432" width="404" height="120" rx="12"/>
+  <text x="330" y="456">⚡</text>
+  <rect class="agq" x="354" y="443" width="80" height="17" rx="8"/><text x="362" y="456" class="ag mono">inbox-drain</text>
+  <text x="330" y="482" class="hd">dispatch: review taper-plan → claude-code</text>
+  <text x="330" y="498" class="t3">#101 · <tspan class="deg">Approve runs it</tspan> — the same call your own click goes through</text>
+  <g>
+    <rect x="330" y="512" width="76" height="28" rx="8" fill="#2b5fd0"/><text x="368" y="531" class="btn" fill="#fff">Approve</text>
+    <rect class="sf" x="414" y="512" width="62" height="28" rx="8"/><text x="445" y="531" class="btn">Revise</text>
+    <rect class="sf" x="484" y="512" width="66" height="28" rx="8" stroke="#b3261e"/><text x="517" y="531" class="btn bad">Decline</text>
+    <rect class="sf" x="558" y="512" width="52" height="28" rx="8"/><text x="584" y="531" class="btn">Later</text>
+    <rect class="sf" x="618" y="512" width="44" height="28" rx="8"/><text x="640" y="531" class="btn">Skip</text>
+    <text x="672" y="531" class="t3" text-anchor="end"> </text>
+  </g>
+  <text x="330" y="548" class="t3">no <tspan class="mono">suggested_work</tspan> — so this card has five, and the row does not wrap</text>
 
-  <rect class="sel" x="228" y="634" width="492" height="38" rx="12"/>
-  <text x="244" y="658" class="t2">1 selected —</text>
-  <text x="318" y="658" class="acc" font-size="12">Later · Skip · Decline</text>
-  <text x="428" y="658" class="t3">the other three stay one at a time.</text>
+  <text x="316" y="574" class="t3">DECISION · 1</text>
+  <rect class="sf" x="316" y="582" width="404" height="60" rx="12" stroke="#2b5fd0"/>
+  <rect x="330" y="602" width="16" height="16" rx="4" fill="#2b5fd0"/><text x="338" y="615" fill="#fff" font-size="11" text-anchor="middle">✓</text>
+  <text x="358" y="606" class="hd">enrolment: register agent reviewer-2</text>
+  <text x="358" y="626" class="t3">#102 · Decline <tspan font-style="italic">revokes</tspan> the token. Skip settles it and leaves the registry alone.</text>
 
-  <text x="228" y="700" class="deg" font-size="12">⏳ 1 snoozed — #95 returns at 12:40. There is no un-snooze verb.</text>
-  <text x="228" y="724" class="bad" font-size="12">✕ stale — #99 changed after you saw it. Repainted; answer it again.</text>
+  <rect class="sel" x="316" y="660" width="404" height="34" rx="10"/>
+  <text x="330" y="682" class="t2">1 selected —</text>
+  <text x="404" y="682" class="acc" font-size="12">Later · Skip · Decline</text>
+  <text x="514" y="682" class="t3">the other three stay one at a time.</text>
+
+  <text x="316" y="712" class="deg" font-size="12">⏳ 1 snoozed — #95 returns at 12:40. There is no un-snooze verb.</text>
+  <text x="316" y="730" class="bad" font-size="12">✕ stale — #99 changed after you saw it. Repainted; answer it again.</text>
 
   <!-- callouts -->
   <g>
-    <circle class="cw" cx="216" cy="315" r="10"/><text class="cn" x="216" y="319">1</text>
-    <circle class="cw" cx="216" cy="700" r="10"/><text class="cn" x="216" y="704">2</text>
-    <circle class="cw" cx="216" cy="588" r="10"/><text class="cn" x="216" y="592">3</text>
-    <circle class="cw" cx="216" cy="653" r="10"/><text class="cn" x="216" y="657">4</text>
-    <circle class="cw" cx="216" cy="724" r="10"/><text class="cn" x="216" y="728">5</text>
-    <circle class="cw" cx="218" cy="204" r="10"/><text class="cn" x="218" y="208">6</text>
-    <circle class="cw" cx="694" cy="56" r="10"/><text class="cn" x="694" y="60">7</text>
+    <circle class="cw" cx="652" cy="56" r="10"/><text class="cn" x="652" y="60">1</text>
+    <circle class="cw" cx="288" cy="138" r="10"/><text class="cn" x="288" y="142">2</text>
+    <circle class="cw" cx="288" cy="380" r="10"/><text class="cn" x="288" y="384">3</text>
+    <circle class="cw" cx="288" cy="712" r="10"/><text class="cn" x="288" y="716">4</text>
+    <circle class="cw" cx="288" cy="681" r="10"/><text class="cn" x="288" y="685">5</text>
+    <circle class="cw" cx="288" cy="730" r="10"/><text class="cn" x="288" y="734">6</text>
+    <circle class="cw" cx="216" cy="438" r="10"/><text class="cn" x="216" y="442">7</text>
   </g>
 
   <!-- legend -->
   <g>
     <text x="770" y="90" class="hd">Callouts</text>
-    <text x="770" y="114" class="lg">① Six answers, fixed order. Approve</text>
-    <text x="782" y="130" class="lg">as Work shows only where the payload</text>
-    <text x="782" y="146" class="lg">carries <tspan class="mono">suggested_work</tspan> — set by the</text>
-    <text x="782" y="162" class="lg">drain deterministically, never by a</text>
-    <text x="782" y="178" class="lg">model (invariant 4).</text>
-    <text x="770" y="204" class="lg">② <tspan font-weight="600">Later = snooze; the row returns.</tspan></text>
-    <text x="782" y="220" class="lg">It stays <tspan class="mono">pending</tspan>, leaves the queue</text>
-    <text x="782" y="236" class="lg">and comes back by the clock. There</text>
-    <text x="782" y="252" class="lg">is no un-snooze: a queue you can</text>
-    <text x="782" y="268" class="lg">reach into has two orders in it.</text>
-    <text x="770" y="294" class="lg">③ <tspan font-weight="600">Skip is not Decline.</tspan> It fires</text>
-    <text x="782" y="310" class="lg">none of Decline's per-kind</text>
-    <text x="782" y="326" class="lg">consequences, and writes a marker</text>
-    <text x="782" y="342" class="lg">rather than your words.</text>
-    <text x="770" y="368" class="lg">④ Batch takes only the verbs that</text>
-    <text x="782" y="384" class="lg">need nothing from the row. Each id</text>
-    <text x="782" y="400" class="lg">is its own statement, so one</text>
-    <text x="782" y="416" class="lg">answered elsewhere refuses nothing.</text>
-    <text x="770" y="442" class="lg">⑤ Every answer carries the time of</text>
-    <text x="782" y="458" class="lg">the row it painted. If the question</text>
-    <text x="782" y="474" class="lg">changed, the answer was to another</text>
-    <text x="782" y="490" class="lg">question — 409, repaint, ask again.</text>
-    <text x="770" y="516" class="lg">⑥ The only badge in the product.</text>
-    <text x="782" y="532" class="lg">Needs You is a section, and never a</text>
-    <text x="782" y="548" class="lg">tab inside something else.</text>
-    <text x="770" y="574" class="lg">⑦ <tspan font-weight="600">Capture is a global action</tspan>, not</text>
-    <text x="782" y="590" class="lg">a destination: ⌘N, the hotkey, a</text>
-    <text x="782" y="606" class="lg">drop. The list of captures lives in</text>
-    <text x="782" y="622" class="lg">Knowledge → Inbox.</text>
-    <text x="770" y="656" class="hd">States</text>
-    <text x="770" y="678" class="lg">waiting · snoozed · decided · <tspan class="bad">stale</tspan></text>
-    <text x="770" y="694" class="lg">· empty ("Queue is clear.")</text>
-    <text x="770" y="722" class="hd">Keyboard</text>
-    <text x="770" y="744" class="lg">↑↓ rows · space selects · a/r/d ·</text>
-    <text x="770" y="760" class="lg">l Later · s Skip · ⏎ opens source.</text>
+    <text x="770" y="114" class="lg">① <tspan font-weight="600">The bell is the whole entry point.</tspan></text>
+    <text x="782" y="130" class="lg">Top-right on every screen, badged only</text>
+    <text x="782" y="146" class="lg">when the count is <tspan font-style="italic">actionable</tspan> — still the</text>
+    <text x="782" y="162" class="lg">only badge in the product (P2). The</text>
+    <text x="782" y="178" class="lg">actionable notification is this same</text>
+    <text x="782" y="194" class="lg">queue, surfaced by the OS: one queue,</text>
+    <text x="782" y="210" class="lg">two doors, not two implementations.</text>
+    <text x="770" y="238" class="lg">② A popover <tspan font-style="italic">over</tspan> the screen you were</text>
+    <text x="782" y="254" class="lg">on — it does not navigate, and Esc</text>
+    <text x="782" y="270" class="lg">returns you to exactly where you were.</text>
+    <text x="782" y="286" class="lg">Answering a request is a thirty-second</text>
+    <text x="782" y="302" class="lg">job; it should not cost a place.</text>
+    <text x="770" y="330" class="lg">③ <tspan font-weight="600">Six answers wrap to two rows</tspan> at</text>
+    <text x="782" y="346" class="lg">popover width, the same wrap the phone</text>
+    <text x="782" y="362" class="lg">makes. Order is fixed. Approve as Work</text>
+    <text x="782" y="378" class="lg">appears only where the payload carries</text>
+    <text x="782" y="394" class="lg"><tspan class="mono">suggested_work</tspan> — set deterministically</text>
+    <text x="782" y="410" class="lg">by the drain, never by a model.</text>
+    <text x="770" y="438" class="lg">④ <tspan font-weight="600">Later = snooze; the row returns.</tspan></text>
+    <text x="782" y="454" class="lg">It stays <tspan class="mono">pending</tspan>, leaves the queue and</text>
+    <text x="782" y="470" class="lg">the brief, and comes back by the clock.</text>
+    <text x="782" y="486" class="lg">There is no un-snooze.</text>
+    <text x="770" y="514" class="lg">⑤ Batch takes only the verbs that need</text>
+    <text x="782" y="530" class="lg">nothing from the row. Each id is its</text>
+    <text x="782" y="546" class="lg">own statement. The bar pins to the</text>
+    <text x="782" y="562" class="lg">panel's bottom edge as it scrolls.</text>
+    <text x="770" y="590" class="lg">⑥ Every answer carries the time of the</text>
+    <text x="782" y="606" class="lg">row it painted. If the question changed,</text>
+    <text x="782" y="622" class="lg">the answer was to another question —</text>
+    <text x="782" y="638" class="lg">409, repaint, ask again.</text>
+    <text x="770" y="666" class="lg">⑦ The sidebar has <tspan font-weight="600">no Needs You row</tspan>,</text>
+    <text x="782" y="682" class="lg">and never had a Capture one. Both are</text>
+    <text x="782" y="698" class="lg">controls, and both are on this screen.</text>
+    <text x="770" y="728" class="hd">States · Keyboard</text>
+    <text x="770" y="750" class="lg">waiting · snoozed · decided · <tspan class="bad">stale</tspan> ·</text>
+    <text x="770" y="766" class="lg">empty ("Queue is clear.") · unreachable</text>
+    <text x="770" y="782" class="lg">(count goes stale, decisions disable).</text>
+    <text x="770" y="800" class="lg">⌘9 toggles · ↑↓ cards · a/r/d · l · s · Esc.</text>
   </g>
-  <text x="24" y="790" class="t3">docs/ops/reply-feedback.md · docs/ops/actions.md · design-system.md §3.9 request card · §3.17 destructive confirmation</text>
+  <text x="24" y="790" class="t3">docs/ops/reply-feedback.md · design-system.md §3.18 Needs You bell + panel · §3.9 request card · §3.14 notifications</text>
 </svg>

@@ -7,7 +7,11 @@
 > Nothing here was a ruling when it was written; §7 is what needed one, and
 > **§7 now carries the owner's rulings of 2026-09-17** — the IA, the
 > rendering, the scope of the Mac client, the request card's answers, the
-> designer, and a sizing for knowledge (§6.1).
+> designer, and a sizing for knowledge (§6.1) — **and the second ruling of
+> the same day**, made after reading the wireframes those first rulings
+> produced: capture is a floating "+", Needs You is a bell, the Mac sidebar
+> is flexible and customizable, and System splits into Settings and
+> **Insights** (§7.7–§7.11).
 >
 > Companions: `design-system.md` (tokens and components — normative),
 > `ux-direction.md` (what the interaction must feel like), `glossary.md` (the
@@ -148,31 +152,62 @@ that quotes the API's own refusal string (P3/P4).
 
 ## 3. One information architecture, three renderings
 
-### 3.1 Seven sections, not ten destinations
+### 3.1 Six sections, two global controls, and Settings
 
 P6 fixed ten flat destinations; the PWA shipped eleven in a different order
-(§1.4); this plan proposed **seven**, with Capture demoted to a global action
-and Knowledge promoted to a section. **Ruled 2026-09-17 (§7.1): the seven
-replace the ten.** `design-system.md` P6 and §3.1 carry the amendment, each
-with the old line struck and dated; the PWA renavigates to the same IA in a
-later PR, not the first one, so it is knowingly the one client that disagrees
-until then.
+(§1.4); this plan proposed **seven**, and they were ruled in on 2026-09-17
+(§7.1). Then the owner read the wireframes drawn to those seven and **ruled
+again the same day** (§7.7–§7.11): the two entries that were *not* places —
+the queue you answer and the note you dash off — stop pretending to be, and
+the one entry that was two different questions under one name splits. What
+is left is **six sections**, **two global controls** reachable from every one
+of them, and **Settings**.
 
 | Section | Contains | Why it is one section |
 | --- | --- | --- |
 | **Chat** | the conversation, tier picker, tapbacks | P8/P9 give it its own rules; it is the most-touched surface |
 | **Feed** | activity, filters, run detail | the desktop plan's centrepiece; "what happened" is one question |
-| **Needs You** | requests, grouped by type | P2's only badge. It must never be a tab inside something else |
-| **Work** | Board · Tasks · Artifacts · Rooms · Projects | four views of **one** object graph: a task has a room, produces an artifact, belongs to a project. Four tabs made the reader do that join |
-| **Knowledge** | Pages · Search · Inbox · Links | the product's first noun, currently homeless |
+| **Work** ▸ | Board · Projects · Artifacts · Rooms — **children of the row, not tabs inside it** | four views of **one** object graph: a task has a room, produces an artifact, belongs to a project. Expanding the row is what keeps that true *and* keeps each view one click away (§7.10) |
+| **Knowledge** ▸ | Pages · Search · Inbox — likewise | the product's first noun, until now homeless |
 | **Agents** | agents, presence, scope/autonomy, crews, targets | one question: who may do what, and what are they doing |
-| **System** | Status · Compute · Spend · Devices · Instances · Setup | "the instance as a machine" — today's Settings, Dashboard, Status and Devices are all this |
+| **Insights** | cost data, spend over time, run metrics, shadow agreement, token and latency trends | what the instance *did*, measured. The name is a proposal and the owner's to change (§7.11) |
 
-**Capture stops being a destination.** A tab you navigate to contradicts its
-own five-second promise. It becomes: `⌘N`/global hotkey and a drop target on
-Mac, the share extension and a medium-detent sheet on iOS, the composer's `+`
-and a sheet in the PWA — with the *list* of captures living in Knowledge →
-Inbox. (Also a P6 contradiction: Capture is one of the ten.)
+**Two global controls, on every screen.**
+
+- **Capture is a floating "+".** Bottom-right on iOS, a button that floats
+  over the content clear of the tab bar and the home indicator; on the Mac a
+  "+" in the toolbar and in the sidebar footer, plus `⌘N` and the global
+  hotkey. It opens the §3.8 capture composer as a **popover or panel** (Mac)
+  or a **medium-detent sheet** (iOS) and returns. **There is no Capture tab
+  and no Capture screen on any platform**; the *list* of captures is
+  Knowledge → Inbox. A destination you navigate to contradicts its own
+  five-second promise, and a button that is always in the same corner is the
+  shortest version of that promise the platform has.
+- **Needs You is a bell, not a section.** Top-right on both iOS and Mac,
+  carrying the unread count — still the product's **only** badge (P2).
+  Tapping it opens the request queue as a **popover/panel over whatever is on
+  screen** (Mac) or a **sheet** (iOS), holding the same §3.9 cards and the
+  same six answers. It leaves the sidebar and it leaves the tab bar. The
+  actionable notification (`ux-direction.md`) is *this queue surfaced by the
+  OS*, so the bell and the notification are one surface with two front doors,
+  not two implementations to keep in step.
+
+**Settings, and what moved into it.** Status, compute (providers · models ·
+assignments · budgets), and devices and instances are **Settings panes** —
+configuration and operation, which you visit on purpose and rarely, not daily
+reading. **Compute configuration lives in Settings**, which is where the
+`metistry compute` verbs already point. **Setup stops being anywhere in the
+navigation**: it is an app-menu item, Metistry → "Set up…" / "Run setup
+again". On the Mac, Settings is reached the way macOS reaches settings — the
+app menu and `⌘,`, opening the standard `Settings` scene — so it is **not** a
+sidebar row (§3.4 below); on iOS it sits under More, because there is no
+app menu to put it in.
+
+**Pinned — the Mac sidebar is the user's (§7.10).** Below the six fixed rows,
+an area the owner fills: pin a project or a board, a knowledge page or a
+saved search, or an agent, and it becomes a one-click row. Drag to reorder;
+unpin from the context menu. §3.4 below has the SwiftUI shape and what
+persists where.
 
 ### 3.2 Screens, and the components each uses
 
@@ -181,44 +216,114 @@ Inbox. (Also a P6 contradiction: Capture is one of the ten.)
 | Chat | Conversation | 3.4 message + collapsed tools, 3.5 prompt card, 3.6 composer menu + palette, **3.7 tier picker (unbuilt)**, §4 reply tokens, 3.14 notifications | `/api/messages`, `POST /message` |
 | Feed | Activity | 3.2 feed row, 3.3 presence chip, 3.15 empty, 3.16 errors | `/api/q/activity_feed` |
 | Feed | Run detail | 3.4 tool disclosure, 3.16 | `runs` (needs a query — §6) |
-| Needs You | Queue | 3.9 request card, 3.5, 3.17, 3.14 | `/api/proposals`, `…/batch` |
+| **global** | **Needs You panel** (the bell) | **3.18 bell + panel**, 3.9 request card, 3.5, 3.17, 3.14 | `/api/proposals`, `…/batch` |
+| **global** | **Capture popover** (the "+") | 3.8 capture composer, 3.15, 3.16 | `POST /capture` |
 | Work | Board | 3.10 task card + drag-to-dispatch (+ keyboard equivalent), 3.12 mode chip | `/api/q/board`, `/api/tasks/*` |
 | Work | Task detail | 3.10, room thread (3.11's comment threads), 3.16 | `/api/q/board`, rooms |
 | Work | Artifact | 3.11 viewer (sandboxed HTML band), 3.17 on review dispatch | `/api/artifacts` |
 | Work | Project | 3.12 header + mode toggle, 3.3, 3.17 | `projects_rollup`, `PUT /api/projects/:id` |
-| Knowledge | Pages / Inbox | 3.2-shaped rows, 3.8 capture composer, 3.15 (empty vs absent) | **new** (§6 phase E) |
+| Knowledge | Pages / Inbox | 3.2-shaped rows, 3.15 (empty vs absent) | **new** (§6 phase E) |
 | Knowledge | Page | 3.11's markdown renderer at `reading-measure`, links/backlinks | **new** |
 | Knowledge | Search | 3.6-style suggest, 3.16 (degraded = keyword only, P5) | **new** |
 | Agents | Agents | 3.3 presence chip, 3.10 drop target, 3.17 (rotate/revoke/widen) | `/api/agents`, `agent_presence` |
 | Agents | Agent detail | scope/tier/autonomy controls, 3.17, 3.4 for its runs | `PUT /api/agents/:id/*` |
 | Agents | Crews / Targets | 3.13-shaped rows, read-only + dispatch | manifests, `/api/targets` |
-| System | Status | 3.13 doctor row (**built, Mac + PWA**) | `doctor`, `/api/status` |
-| System | Compute | 3.13 rows + 3.17, tier assignment | `metistry compute` (**no API — §6**) |
-| System | Spend | tiles, 3.15 absent copy | `spend`, `aws_costs_*`, `claude_usage_daily` |
-| System | Devices / Instances | 3.13 rows, 3.17 revoke, presence chip for reachability | `/api/devices`, `/api/instances` |
-| System | Setup | wizard (Mac), enrolment code (PWA/iOS) | CLI verbs |
+| Insights | Spend | tiles, 3.15 absent copy | `spend`, `aws_costs_*`, `claude_usage_daily` |
+| Insights | Runs & models | 3.13-shaped rows, sparkline tiles, 3.15 absent copy — run counts and failure streaks, shadow agreement, token and latency trends | `runs`, the shadow rows (needs a query — §6) |
+| Settings | Status | 3.13 doctor row (**built, Mac + PWA**) | `doctor`, `/api/status` |
+| Settings | Compute | 3.13 rows + 3.17, tier assignment, budgets | `metistry compute` (**no API — §6**) |
+| Settings | Devices & Instances | 3.13 rows, 3.17 revoke, presence chip for reachability | `/api/devices`, `/api/instances` |
+| *app menu* | Set up… | wizard (Mac), enrolment code (PWA/iOS) | CLI verbs |
+| *sidebar* | **Pinned** | **3.19 pinned sidebar items** | whatever the pin points at |
 
 ### 3.3 Same on all three, and platform-specific (P7)
 
 **Identical** (same rows, same order, same words, same refusal text): Feed,
-Needs You, Work in all four screens, Knowledge, Agents, Chat's transcript,
-Status, Spend, Devices. These are renderings of the same API response and must
-never disagree.
+the request queue behind the bell, Work in all four screens, Knowledge,
+Agents, Chat's transcript, Status, Spend, Devices. These are renderings of the
+same API response and must never disagree.
 
 **Layout differs, architecture does not:** three columns (nav · list · detail)
 on Mac and wide PWA; one column with push navigation on iPhone and narrow PWA
-— which is what §5's wireframes already show.
+— which is what §5's wireframes already show. The two global controls differ
+in *presentation* and not in content: the bell's queue is a panel on the Mac
+and a sheet on the phone; capture is a popover on the Mac and a sheet on the
+phone; both hold the same component with the same states.
+
+**Per platform, the navigation chrome (§7.9, §7.10).**
+
+| | Mac | iOS | PWA |
+| --- | --- | --- | --- |
+| Sections | sidebar: Chat · Feed · **Work ▸** · **Knowledge ▸** · Agents · Insights, then **Pinned** | tab bar, **five items, maximum**: Chat · Feed · Work · Knowledge · **More** | the same `<nav>`: sidebar ≥900px, the five-item tab bar below it |
+| Capture | toolbar "+" · sidebar-footer "+" · `⌘N` · global hotkey · window drop | **floating "+", bottom-right** · share extension | header "+" (wide: sidebar footer) |
+| Needs You | **bell, top-right**, count badge → popover/panel | **bell, top-right**, count badge → sheet | bell in the header → dialog |
+| Settings | **app menu + `⌘,`** (the `Settings` scene) — not a sidebar row | under **More** | under **More** |
+| Setup | app menu → "Set up…" / "Run setup again" | enrolment code, in Settings | enrolment code, in Settings |
+| Under More | — | Agents, Insights, Settings | Agents, Insights, Settings |
+
+Four sections plus More, not five plus More: the HIG's iPhone tab bar tops
+out around five items and a sixth silently becomes a system "More" list you
+did not design. Work and Knowledge earn their place over Agents and Insights
+because they are the ones you open by habit rather than on purpose.
 
 **Mac only:** menu-bar item, the Settings scene, the first-run wizard, log
 windows, Keychain and secrets, TCC bridge permissions, Sparkle updates, login
-item, global capture hotkey, drag-drop capture, "reveal in Finder", terminal
-hand-off. All of it is *installing and operating*, and none of it is data.
+item, global capture hotkey, drag-drop capture, **the Pinned sidebar area**,
+"reveal in Finder", terminal hand-off. All of it is *installing and
+operating*, or it is chrome the platform gives us — and none of it is data.
 
 **iOS only:** share extension + offline outbox, APNs categories, widgets and
 Live Activities, App Intents/Siri, HealthKit, on-device classification, the
 per-instance switcher with the honest presence chip (O1/O2).
 
 **PWA only:** install prompt, web push, the enrolment-code wall.
+
+### 3.4 The Mac sidebar in SwiftUI, and what persists where
+
+The owner's worry was that Work had become too nested — Board is a section, a
+segmented control and then a column. The fix is the disclosure group: the
+sidebar carries the children, so **Board, Projects, Artifacts and Rooms are
+one click from the sidebar**, and the second-level segmented control inside
+Work becomes a redundancy to delete rather than a step to take.
+
+```
+NavigationSplitView
+  sidebar: List(selection: $destination)
+    Section {                       // the six, fixed order, not reorderable
+      Chat · Feed
+      DisclosureGroup("Work")      { Board · Projects · Artifacts · Rooms }
+      DisclosureGroup("Knowledge") { Pages · Search · Inbox }
+      Agents · Insights
+    }
+    Section("Pinned") {            // the user's, reorderable, removable
+      ForEach(pins) { … }          // .onMove, .contextMenu { Unpin }
+    }
+    .safeAreaInset(.bottom) { "+" capture }
+  detail: the selected destination
+.toolbar { bell (badge) · "+" · the view's own controls }
+```
+
+Two rules the shape encodes. **The six are not customizable** — P6's "the
+same order, the same names" is what stops the owner learning the product
+twice, and a sidebar you can rearrange into a different product is not one
+architecture in three renderings. **Everything below them is** — a pin is a
+shortcut to a destination that already exists, so it can be anything without
+touching the map.
+
+**What persists, and where.**
+
+| State | Where | Why |
+| --- | --- | --- |
+| Pins (kind, id, display name, order) | **app preferences, keyed by instance id** | A pin points at a project, page, saved search or agent *in one instance*; the same app against a second instance must not show the first one's pins |
+| Disclosure open/closed, sidebar width, last selection | app preferences, same key | Window state, per machine. Restoring it is the platform's habit, not ours |
+| The pinned *object* | nowhere new | The pin holds a reference. The project is in Postgres, the page is in the vault, the agent is in `agents` — the sidebar reads them like any other screen |
+
+Nothing about pinning goes into the instance repo, Postgres or the vault: it
+is per-machine client state, it is not derived from anything, and invariant 1
+("git is the record; Postgres is derived") does not want a fourth category.
+Losing it costs the owner one drag. A pin whose target has gone renders as a
+dimmed row that says so and offers Unpin — never a crash, never a silent
+disappearance (P5).
 
 ---
 
@@ -360,11 +465,11 @@ console must gain; everything unmarked exists today.
 
 | # | Phase | Size | Needs from the console API |
 | --- | --- | --- | --- |
-| **0** | IA ruling (**done — §7.1/§7.2, 2026-09-17**) + the four CI checks + the token holes (§5) | **S** | — |
-| **A** | **Shell + navigation + Feed.** Seven sections in the sidebar; an authenticated API client and store in `MetistryKit` (local owner token over loopback); §3.2 feed row, §3.3 presence chip, §3.15/§3.16 as shared Swift components. The PWA keeps its nav for now — §7.1 renavigates it in a later PR, not this one | **M** | none — `/api/q/activity_feed` exists |
-| **B** | **Needs You + Chat.** Request cards with the **six** answers (§7.4, `design-system.md` §3.9), §3.5 prompt cards, local notifications with actions; the transcript under P9; §3.7 tier picker, built once for both clients | **M** | a `rules.yaml` **commands endpoint** (the PWA's `COMMANDS` array is a labelled placeholder, `index.html:93–103`, `app.js:198`); a `runs` detail query for the feed's drill-down |
-| **C** | **Work.** Board + task detail + artifact + project in one list/detail pane, drags with keyboard equivalents, rooms | **L** | none for reads; `PATCH /api/tasks/:id`, `/dispatch`, `PUT /api/projects/:id` exist |
-| **D** | **Agents + Compute + System.** Presence, scope/autonomy with §3.17 on every widening, then Compute and Devices/Instances | **M** | **`/api/compute`** (list providers/models, assign, budgets) — otherwise compute stays Mac-only and P6 stays violated |
+| **0** | IA ruling (**done — §7.1/§7.2 and the second ruling §7.7–§7.11, 2026-09-17**) + the four CI checks + the token holes (§5) | **S** | — |
+| **A** | **Shell + navigation + Feed.** The six sections in the sidebar, Work and Knowledge as `DisclosureGroup`s, the **Pinned** area (§3.4) and the toolbar's **bell** and **"+"**; the capture popover behind the "+" (§3.8 is built, so this is the panel, not the composer); an authenticated API client and store in `MetistryKit` (local owner token over loopback); §3.2 feed row, §3.3 presence chip, §3.15/§3.16 as shared Swift components. The PWA keeps its nav for now — §7.1 renavigates it in a later PR, not this one | **M** | none — `/api/q/activity_feed` exists |
+| **B** | **The bell's queue + Chat.** The request queue as a **popover/panel from the toolbar bell** (§3.18), not a section: unread count, cards with the **six** answers (§7.4, `design-system.md` §3.9), §3.5 prompt cards, and local notifications with actions that are the *same* queue surfaced by the OS; the transcript under P9; §3.7 tier picker, built once for both clients | **M** | a `rules.yaml` **commands endpoint** (the PWA's `COMMANDS` array is a labelled placeholder, `index.html:93–103`, `app.js:198`); a `runs` detail query for the feed's drill-down |
+| **C** | **Work.** Board + task detail + artifact + project in one list/detail pane, drags with keyboard equivalents, rooms. The sidebar already reaches all four (phase A), so nothing here is a second navigation | **L** | none for reads; `PATCH /api/tasks/:id`, `/dispatch`, `PUT /api/projects/:id` exist |
+| **D** | **Agents + Settings + Insights.** Presence, scope/autonomy with §3.17 on every widening. Then **Settings grows**: Status, Compute and Devices & Instances become panes beside today's four, and "Set up…" moves to the app menu — the largest single piece of this phase, because Compute is 1,921 Swift lines that have to be re-homed rather than rewritten. **Insights is small** (**S**): it is the spend tiles and run metrics that already exist, in a section of their own | **M** | **`/api/compute`** (list providers/models, assign, budgets) — otherwise compute stays Mac-only and P6 stays violated |
 | **E** | **Knowledge.** Pages, page view, search, Inbox — sized piece by piece in §6.1 (**≈7.5 agent-days**; the cheapest slice that delivers search with full results is **≈3** and needs no query and no migration) | **L** | **the biggest ask, but smaller than it looked**: no migration at all (`0009` already added `title`, `description`, `draft`), one named query over `knowledge_files`/`knowledge_links`, and three console routes proxying the reconciler's `/vault/read` and `/vault/search` — both of which are already served. Page content is not derived state, so invariant 3 sends it through the bridge, not a query |
 | **F** | **iOS target.** Share extension + outbox, APNs relay, widgets, App Intents | **L** | O1–O5 are shipped (`docs/ops/console-api.md`); the relay is its own project. **O1–O4 belong to this phase alone** — §7.3 gives the Mac app no instance switcher and no outbox |
 
@@ -471,6 +576,62 @@ the app.** Sized end to end in **§6.1** — ≈7.5 agent-days total, of which t
 cheapest slice that delivers search with full results is ≈3 and needs neither
 a named query nor a migration.
 
+### Second ruling — 2026-09-17, after reading the wireframes
+
+The rulings above produced §5's wireframes; reading them, the owner ruled
+again the same day. These five change the IA itself, so they are applied
+everywhere it is stated: `design-system.md` P6, §3.1, §3.8 and §3.9 carry
+dated amendments with the old lines struck, §3.18 and §3.19 are new
+components, and `design-brief.md` §3 and its paste-ready prompt are rewritten
+to match.
+
+**7.7 — Capture is a floating "+".** Bottom-right on iOS; on the Mac a
+toolbar and sidebar-footer "+" plus `⌘N`. It opens a popover or panel holding
+the §3.8 capture composer. **No Capture tab and no Capture screen anywhere.**
+This hardens §7.1's "a global action" into one drawn control with one
+position, which is what the wireframes were missing.
+
+**7.8 — Needs You is a notification pattern, not a section.** A bell
+top-right on both iOS and Mac with an unread count; tapping it opens the
+request queue as a panel/popover (Mac) or a sheet (iOS), with the six-answer
+cards unchanged. It leaves the sidebar and it leaves the tab bar.
+**Actionable notifications are the same queue surfaced by the OS**, so there
+is one queue with two front doors. The badge is still the only one in the
+product (P2) — it moved, it did not multiply.
+
+**7.9 — The iOS tab bar is reduced to five items, maximum.** With Capture and
+Needs You gone it is **Chat · Feed · Work · Knowledge · More**, where More
+holds Agents, Insights and Settings. **Four plus More, not five plus More:**
+the HIG's iPhone bar tops out around five and a sixth becomes a system More
+list nobody designed. Work and Knowledge keep their places over Agents and
+Insights because they are opened by habit rather than on purpose.
+
+**7.10 — The Mac sidebar is flexible and customizable.** Six fixed rows —
+Chat, Feed, **Work ▸**, **Knowledge ▸**, Agents, Insights — with Work and
+Knowledge as expandable groups so **Board, Projects, Artifacts and Rooms are
+one click from the sidebar**; that expandable group is the answer to the
+owner's worry that Work had become too nested. Below them, **Pinned**: an
+area the owner fills with a project or board, a knowledge page or search, or
+an agent; drag to reorder, unpin from the context menu. §3.4 has the SwiftUI
+shape (`NavigationSplitView` sidebar, `List` sections, `DisclosureGroup`,
+pins persisted per instance in app preferences) and the table of what
+persists where.
+
+**7.11 — System splits into Settings and Insights.** Status, compute
+(providers · models · assignments · budgets), and devices and instances
+become **Settings** panes — **compute configuration lives in Settings** —
+grouped so the pane count grows by three and not by four (today's *Services*
+rows are doctor rows, so they fold into **Status**). **Setup** stops being a
+destination and becomes an app-menu item: Metistry → "Set up…" / "Run setup
+again". What is left of System — cost data, spend over time, run metrics,
+shadow agreement, token and latency trends — becomes a section named
+**Insights**. The name is proposed here and is the owner's to rename; nothing
+but labels and this paragraph depends on it. The Mac sidebar therefore ends
+as **Chat · Feed · Work ▸ · Knowledge ▸ · Agents · Insights · Pinned**, and
+**Settings is not in it**: macOS puts settings in the app menu under `⌘,` and
+a sidebar row would be a second door to the same window, which is the kind of
+duplication P6 exists to prevent.
+
 ### The questions as they were put
 
 Each is answered by the ruling of the same number above.
@@ -509,8 +670,22 @@ Per `CLAUDE.md` ("report contradictions, don't route around them"), and none of
 these were edited in place:
 
 - **P6's ten destinations** vs the PWA's eleven vs this plan's seven (Q1) —
-  **settled 2026-09-17 (7.1): seven.** The PWA is the one remaining
-  disagreement, and it is deliberate until it renavigates.
+  **settled 2026-09-17 (7.1): seven**, then **six the same day (7.7–7.11)**,
+  once Needs You and Capture became controls rather than places and System
+  split. The PWA is the one remaining disagreement, and it is deliberate
+  until it renavigates.
+- **P2's "Needs You must never be a tab inside something else"** vs 7.8,
+  which takes it out of the navigation altogether. These agree in substance —
+  the rule was written against *burying* the queue, and a bell with a count
+  on every screen is less buried than a row you scroll past — but the
+  sentence had to be amended rather than reinterpreted, and it is, in
+  `design-system.md` §3.1 and §3.18.
+- **`docs/ops/mac-app.md` still says the wizard is "re-enterable from
+  Settings → Instance → Set up again"** (`mac-app.md:32`), which 7.11 moves to
+  the app menu, and `apps/console/web` still ships the Capture and Needs You
+  views as destinations. Noticed while applying 7.7–7.11; neither is edited
+  here — the ops doc follows the build, and the PWA renavigates in its own
+  PR (7.1).
 - **P6's "nothing on one platform with no home on the others"** vs compute
   being Mac-only and knowledge being nowhere.
 - **§3.9's three answers** vs the shipped six (Q4) — **settled (7.4): six**,

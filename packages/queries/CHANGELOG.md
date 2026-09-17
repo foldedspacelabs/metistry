@@ -1,5 +1,7 @@
 # @foldedspacelabs/metistry-queries
 
+## 0.8.0
+
 ## 0.7.1
 
 ## 0.7.0

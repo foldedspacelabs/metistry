@@ -109,14 +109,37 @@ async function legacyInstance(extra: (dir: string) => Promise<void> = async () =
   await mkdir(join(dir, "eval"), { recursive: true });
   await writeFile(join(dir, "eval", "fixtures-harvest.jsonl"), '{"draft":true}\n');
   await writeFile(join(dir, "README.md"), "# Instance repo\n");
+  // Verbatim the shape a real legacy instance has (the owner's own carries
+  // exactly these three lines). The unanchored `inbox/` is load-bearing for
+  // the test below: see the note on `extra`.
   await writeFile(join(dir, ".gitignore"), "state/\ninbox/\n.obsidian/workspace*\n");
+
+  // `extra` runs BEFORE the commit, so whatever a test sets up is part of the
+  // committed baseline and the tree is clean on EITHER filesystem.
+  //
+  // It used to run after, and that was a platform bug the Linux CI caught.
+  // `git init` sets `core.ignorecase=true` on a case-insensitive filesystem,
+  // which case-folds `.gitignore` matching too — so on macOS the legacy
+  // `inbox/` line also matches `Knowledge/Inbox/`, and the vault inbox is
+  // never committed at all. On Linux (and on a case-sensitive APFS volume)
+  // it IS committed, so a test that removed it after the commit left
+  // ` D Knowledge/Inbox/…` behind and the verb refused the dirty tree —
+  // correctly, and only on one of the two platforms.
+  await extra(dir);
+
   await exec("git", ["add", "-A"], { cwd: dir, env });
   await exec("git", ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "seed"], { cwd: dir, env });
 
-  // the untracked half, after the commit so the tree stays clean
+  // Held here rather than discovered forty lines later inside the verb: a
+  // fixture that hands out a dirty tree makes every migrate-layout test fail
+  // with the preflight refusal instead of whatever it was actually asserting.
+  const status = await exec("git", ["status", "--porcelain"], { cwd: dir, env });
+  if (status.stdout.trim() !== "") throw new Error(`legacyInstance left an uncommitted tree:\n${status.stdout}`);
+
+  // the gitignored half, after the commit — it is derived state, and the
+  // instance's `.gitignore` keeps it out of the index on both filesystems
   await mkdir(join(dir, "state"), { recursive: true });
   await writeFile(join(dir, "state", ".env"), "METISTRY_INSTANCE_DIR=" + dir + "\nMETISTRY_RULES_FILES=seed/rules.yaml:rules.yaml\n");
-  await extra(dir);
   return dir;
 }
 
@@ -265,25 +288,35 @@ describe("migrate-layout (fixture instance repo)", () => {
   it("refuses a root collision before anything moves", async () => {
     const dir = await fixture(async (d) => {
       await writeFile(join(d, "now.md"), "# a root now.md that is not the vault's\n");
-      await git(d, "add", "-A");
-      await git(d, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "collide");
     });
     await expect(migrateLayout({ instanceDir: dir, ...base })).rejects.toThrow(/name collision/);
     expect(existsSync(join(dir, ".metistry"))).toBe(false);
     expect(await readFile(join(dir, "Knowledge", "now.md"), "utf8")).toBe("# Now\n");
   });
 
-  it("renames a lowercase root inbox/ through a temp name (macOS is case-insensitive)", async () => {
+  // The two-step rename is only NEEDED on a case-insensitive filesystem —
+  // `git mv inbox Inbox` there moves the directory inside itself — but it has
+  // to be CORRECT on both, and CI runs on Linux. This asserts the end state
+  // and the temp hop on either, and it asserts the filesystem it is actually
+  // running on rather than assuming macOS, so a failure names which one.
+  it("renames a lowercase root inbox/ through a temp name, on either kind of filesystem", async () => {
     const dir = await fixture(async (d) => {
       await rm(join(d, "Knowledge", "Inbox"), { recursive: true, force: true });
       await mkdir(join(d, "inbox"), { recursive: true });
       await writeFile(join(d, "inbox", "1757000000002-lower.md"), "# lowercase\n");
     });
+    const caseInsensitive = existsSync(join(dir, "knowledge"));
     const r = await migrateLayout({ instanceDir: dir, ...base });
+
     expect(r.moves).toContainEqual({ from: "inbox", to: "Inbox", via: "rename" });
     expect(r.commands.some((c) => c.includes("Inbox-migrating"))).toBe(true);
-    expect((await readdir(dir)).filter((e) => e.toLowerCase() === "inbox")).toEqual(["Inbox"]);
+    // the real directory entries: `existsSync("inbox")` answers true for
+    // `Inbox/` on a case-insensitive disk, so it proves nothing here
+    expect((await readdir(dir)).filter((e) => e.toLowerCase() === "inbox"), `filesystem is ${caseInsensitive ? "case-insensitive" : "case-sensitive"}`).toEqual(["Inbox"]);
     expect(await readFile(join(dir, "Inbox", "1757000000002-lower.md"), "utf8")).toBe("# lowercase\n");
+    // and the migration still ends clean — the temp name is never left behind
+    expect((await git(dir, "status", "--porcelain")).stdout.trim()).toBe("");
+    expect((await readdir(dir)).some((e) => e.includes("-migrating"))).toBe(false);
   });
 
   it("refuses a directory that is not a git repository, and one that is not an instance", async () => {
@@ -359,8 +392,6 @@ describe("the casing warning: what becomes vault content", () => {
       await mkdir(join(d, "scratch"), { recursive: true });
       await writeFile(join(d, "scratch", "x.txt"), "x\n");
       await writeFile(join(d, "notes.md"), "# loose\n");
-      await git(d, "add", "-A");
-      await git(d, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "loose");
     });
     try {
       const plan = await planMigration(dir);

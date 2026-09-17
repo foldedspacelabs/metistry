@@ -266,6 +266,26 @@ async function sectionSystem(db: Db, now: Date): Promise<string[]> {
   if (flips.rows.length > 0) {
     lines.push(`• budget flipped to review mode: ${flips.rows.map((r: any) => `${r.project}${num(r.n) > 1 ? ` ×${num(r.n)}` : ""}`).join(", ")}`);
   }
+  // Stage-2 shadow mode (§3.7): one line per candidate, omitted entirely when
+  // nothing is being shadowed — which is every install that has not written a
+  // `shadow:` block. The promotion gate is "two weeks of agreement", so the
+  // number has to be somewhere the user already reads.
+  const shadow = await db.query(
+    `SELECT shadow_provider || '/' || shadow_model AS candidate, count(*) AS n,
+            round(avg(shadow_agreement), 2) AS agreement,
+            count(*) FILTER (WHERE (shadow_transcript->'agreement'->>'tool_sequence')::boolean) AS same_tools,
+            coalesce(sum(shadow_cost_usd), 0) AS cost
+     FROM runs WHERE shadow_model IS NOT NULL AND ts > $1::timestamptz - interval '7 days'
+     GROUP BY 1 ORDER BY n DESC, 1 LIMIT 3`,
+    [now],
+  );
+  for (const r of shadow.rows) {
+    const n = num(r.n);
+    lines.push(
+      `• shadow ${r.candidate}: ${num(r.agreement).toFixed(2)} agreement over ${plural(n, "turn")}` +
+        `, same tool sequence ${num(r.same_tools)}/${n}${num(r.cost) > 0 ? `, cost ${usd(r.cost)}` : ""}`,
+    );
+  }
   lines.push(await replyQuality(db, now));
   const inbox = await db.query(
     `SELECT count(*) AS n, min(ts) AS oldest FROM inbox WHERE triaged_at IS NULL AND status IN ('new', 'classified')`,

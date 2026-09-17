@@ -8,6 +8,7 @@
 
 import { emptyCompute, finishRun, parseDecisionBlock, rollSession, startRun, type Compute, type TierMap } from "@foldedspacelabs/metistry-core";
 import { isBudgetRefusal, offerBudgetWindow, BudgetRefusal } from "./budgets.js";
+import { recordShadow } from "./shadow.js";
 import { resolveTurn } from "./tiers.js";
 import type { Engine } from "./engine.js";
 
@@ -170,6 +171,22 @@ export async function drainOne(db: Db, engine: Engine, tiers: TierMap, opts: Dra
     if (result.stopped) meta.stopped = result.stopped;
     if (result.notes?.length) meta.notes = result.notes;
     if (rolled.length > 0) meta.rolled_sessions = rolled;
+    // The stage-2 shadow comparison, when this turn was sampled: both
+    // transcripts and the agreement onto THIS row (0020), and the candidate's
+    // spend as its own `runs` row against its own provider (shadow.ts). The
+    // reply above has already been written from `result.text` — the shadow's
+    // answer has no path to the user from here.
+    //
+    // Caught on purpose: the turn SUCCEEDED, and a measurement that failed to
+    // store must not turn a delivered reply into a failed message.
+    if (result.shadow) {
+      meta.shadow_agreement = result.shadow.agreement.score;
+      try {
+        await recordShadow(db, runId, result.shadow, { tier });
+      } catch (err) {
+        meta.shadow_not_recorded = err instanceof Error ? err.message : String(err);
+      }
+    }
     await finishRun(db, runId, {
       ok: true,
       ...(result.tokens_in !== undefined ? { tokens_in: result.tokens_in } : {}),

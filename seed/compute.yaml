@@ -57,6 +57,18 @@
 #   # what gets refused. The mark travels with the ASSIGNMENT, so keep
 #   # `routine:` declared if you set it: an unnamed tier lands on `default`
 #   # and inherits it.
+#   #
+#   # `shadow:` (optional, and `default` only) measures a candidate model on
+#   # your real turns without ever answering with it: a share of turns is run
+#   # a second time on the candidate with every tool call stubbed record-only,
+#   # and the comparison lands on the turn's `runs` row. It is left OFF here
+#   # because the fraction IS spend — one turn in ten shadowed is one turn in
+#   # ten paid for twice. Add it while you are choosing a model:
+#   #
+#   #   shadow: { model: local/qwen/qwen3-coder-30b, fraction: 0.1 }
+#   #
+#   # and read it back with the `shadow_agreement` named query, or wait for
+#   # the weekly review (docs/ops/compute.md "Shadow mode").
 #   default: { model: openrouter/anthropic/claude-sonnet-5, effort: medium, critical: true }
 #   tiers:
 #     fast:    { model: local/qwen/qwen3-coder-30b, effort: low }

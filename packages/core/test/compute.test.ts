@@ -96,7 +96,7 @@ describe("compute.yaml schema", () => {
   });
 
   it("every shipped provider template is a valid provider block", () => {
-    for (const name of ["openrouter", "zen", "lmstudio", "ollama"]) {
+    for (const name of ["openrouter", "lmstudio", "ollama"]) {
       const text = readFileSync(new URL(`../../../seed/compute-templates/${name}.yaml`, import.meta.url), "utf8");
       const cfg = parseCompute(`providers:\n${text.split("\n").filter((l) => !l.startsWith("#")).map((l) => (l.trim() === "" ? l : `  ${l}`)).join("\n")}`);
       expect(Object.keys(cfg.providers)).toEqual([name]);

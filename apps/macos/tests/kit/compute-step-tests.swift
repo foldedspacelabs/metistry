@@ -150,7 +150,9 @@ private func stepModel(_ runner: RecordingRunner) -> ComputeStepModel {
     // does not know would be a button that can only fail — and one the CLI has
     // that the app does not is a provider nobody can add from here, which is
     // how `applefm` was missing until the Compute pane went looking for it.
-    #expect(ComputeTemplate.allCases.map(\.rawValue) == ["openrouter", "zen", "lmstudio", "ollama", "llamaserver", "applefm"])
+    // One cloud template only since OPEN-7 (2026-09-17): any other
+    // OpenAI-compatible cloud is a base URL, not a button.
+    #expect(ComputeTemplate.allCases.map(\.rawValue) == ["openrouter", "lmstudio", "ollama", "llamaserver", "applefm"])
     #expect(ComputeTemplate.openrouter.needsKey)
     #expect(!ComputeTemplate.llamaserver.needsKey)
     // apple-fm authenticates with a bridge token this install already minted,

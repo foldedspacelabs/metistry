@@ -1,6 +1,6 @@
 {
   "name": "@foldedspacelabs/metistry-artifacts",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "description": "Publish-and-review for agent output, backed by a versioned vault: compare-and-swap publish (idempotent, attributed), comment threads on exact versions, and review dispatch that rides a shared task list — with the agent-to-agent autonomy boundary enforced in the service. One TypeScript service over any pg-shaped client and any vault client; adapters (HTTP, MCP, CLI) add nothing.",
   "license": "Apache-2.0",
   "type": "module",

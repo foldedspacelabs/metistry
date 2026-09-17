@@ -100,7 +100,12 @@ jobs:
       matrix:
         include:
           - { os: ubuntu-latest, target: linux-x64 }
-          - { os: macos-14, target: darwin-arm64 }
+          # macos-26, not macos-14/15: the apple-fm helper imports FoundationModels
+          # and guards on macOS 26.4, so it needs the 26.4 SDK (Xcode 26.4+), which
+          # only the macos-26 image carries (macos-15 tops out at Xcode 26.3).
+          # The helpers pin their own deployment targets, so the SDK the runner
+          # builds with is not the floor they run on.
+          - { os: macos-26, target: darwin-arm64 }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4

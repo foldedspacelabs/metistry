@@ -19,7 +19,10 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"          # Contents/MacOS is Apple's mandated
 cp helper/Info.plist "$APP/Contents/Info.plist"   # bundle layout, not ours.
 
-swiftc -O -parse-as-library helper/afm-helper.swift -o "$APP/Contents/MacOS/afm-helper"
+# -target pins the floor: FoundationModels is macOS 26.0+, and the 26.4-only
+# API is guarded in source. Without it swiftc targets the build host, and a
+# helper built on a newer macOS refuses to launch on an older 26.x.
+swiftc -O -parse-as-library -target arm64-apple-macos26.0 helper/afm-helper.swift -o "$APP/Contents/MacOS/afm-helper"
 
 # METISTRY_SIGN_IDENTITY pins an identity verbatim (a name or a SHA-1 hash —
 # codesign -s takes either); unset falls back to auto-detecting the first

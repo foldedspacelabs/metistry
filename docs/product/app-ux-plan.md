@@ -4,7 +4,10 @@
 > is on screen today, names the objects the interface has to expose, proposes
 > one information architecture in three renderings, and lays out the one
 > technical decision that has to be made before a second screen is built.
-> Nothing here is a ruling; §7 is what needs one.
+> Nothing here was a ruling when it was written; §7 is what needed one, and
+> **§7 now carries the owner's rulings of 2026-09-17** — the IA, the
+> rendering, the scope of the Mac client, the request card's answers, the
+> designer, and a sizing for knowledge (§6.1).
 >
 > Companions: `design-system.md` (tokens and components — normative),
 > `ux-direction.md` (what the interaction must feel like), `glossary.md` (the
@@ -87,7 +90,7 @@ gaps are narrower and listed below.
 | §3.1 navigation | **drifted**: eleven flat buttons in a horizontally scrolling strip, not five + a "more" disclosure; and the order is not P6's | `index.html:22–33`, `style.css:78–92` |
 | §3.17 destructive confirmation | **not applied**: four `window.confirm()` calls where the spec says `<dialog>`, destructive-styled affirmative, `autofocus` on Cancel | `app.js:682, 767, 774, 959` |
 | §3.7 model & effort picker | **built nowhere.** The tier is *shown* on a turn, never chosen; `/deep` is the only path | `app.js:96–101` |
-| §3.9 request card | built, but with **five** answers (Approve · Revise · Decline · Later · Skip), where §3.9 says three | `index.html:131–141` |
+| §3.9 request card | built, with **six** (Approve · Revise · Decline · Later · Skip, plus Approve as Work where the row carries `suggested_work`); §3.9 said three until the 2026-09-17 amendment (§7.4) | `index.html:131–141`, `app.js:493–502, 644–653` |
 | §3.2–3.6, 3.8, 3.10–3.16 | built in the PWA, in HTML/CSS only | `apps/console/web/` |
 | the same components in SwiftUI | **only §3.13.** Sixteen of seventeen components have no Swift implementation | `apps/macos/sources/kit/` |
 | mockups track the tokens | not checked — the SVGs carry literal hexes (`#2b5fd0`, `#6a4bbd`) that no `--check` verifies | `docs/product/design/*.svg` |
@@ -147,11 +150,13 @@ that quotes the API's own refusal string (P3/P4).
 
 ### 3.1 Seven sections, not ten destinations
 
-P6 fixes ten flat destinations; the PWA shipped eleven in a different order
-(§1.4); this plan proposes **seven**, with Capture demoted to a global action
-and Knowledge promoted to a section. **This contradicts P6 and needs the
-owner's ruling before any screen is drawn** — it is open question 1, and
-§7 says what the amendment would be.
+P6 fixed ten flat destinations; the PWA shipped eleven in a different order
+(§1.4); this plan proposed **seven**, with Capture demoted to a global action
+and Knowledge promoted to a section. **Ruled 2026-09-17 (§7.1): the seven
+replace the ten.** `design-system.md` P6 and §3.1 carry the amendment, each
+with the old line struck and dated; the PWA renavigates to the same IA in a
+later PR, not the first one, so it is knowingly the one client that disagrees
+until then.
 
 | Section | Contains | Why it is one section |
 | --- | --- | --- |
@@ -217,9 +222,26 @@ per-instance switcher with the honest presence chip (O1/O2).
 
 ---
 
-## 4. The central technical decision (not decided here)
+## 4. The central technical decision — ruled 2026-09-17: **(a)**
 
-How do the **data** views reach the Mac? Three shapes.
+> **Ruling (§7.2).** Native SwiftUI for Mac and iOS, and **no PWA embedding
+> for application surfaces**. In the owner's words: "a native optimized UI
+> that feels fast and native to the OS." §3.11's `WKWebView` for *document*
+> rendering stands — the precedent option (c) noticed is kept exactly where
+> the design system drew it, at documents, and does not extend to lists and
+> controls. Order: **Mac first**, iOS when it is prioritised.
+>
+> What follows from it. The `WKWebView`/WebAuthn spike in (b) is **not run**:
+> §7.3 keeps the app a client of *this* machine over loopback with the local
+> owner token, so there is no ceremony to complete. The sixteen unimplemented
+> components in (a)'s own "against" column are the real cost, and §6 is how
+> they are paid. The PWA stays the desktop client for every non-Apple
+> machine, which no option changed. And the owner runs the Mac app on **both**
+> instances — each Mac against its own local instance — which is two installs
+> of one client, not one client of two instances (§7.3).
+
+How the **data** views reach the Mac was the question. Three shapes were
+weighed; they are kept here as the record.
 
 **(a) Native SwiftUI, shared with iOS.** Build the seven sections in
 `MetistryKit` against the management API; one codebase, two targets.
@@ -294,14 +316,19 @@ desktop client for every non-Apple machine.
    the PWA rendering, and a `tests/kit/` case for the Swift model if the screen
    is native.
 
-**Review gates.** (1) IA gate — §7's questions answered before any wireframe.
+**Review gates.** (1) IA gate — §7's questions answered before any wireframe
+(**passed 2026-09-17**).
 (2) Wireframe gate — the owner reads the SVG and the spec together; a screen
 whose spec cannot name its data source does not pass. (3) Build gate — the
 component exists in `preview.html` before it is used in a screen. (4) Ship
 gate — CI green, including the token check, and a product-record fragment.
 
-**Where a human designer earns their keep** (`ux-direction.md` already assumes
-one): the Work section's list/detail density and the board card; reply
+**Where a designer earns their keep** (`ux-direction.md` already assumes
+one, and 7.5 engages one — an AI designer, Claude Design, briefed separately
+at `docs/product/design-brief.md` for the design language, the colour and
+pattern system, consistent UI traits, and a new brand identity including the
+logo and app icon that replace the placeholder "M"): the Work section's
+list/detail density and the board card; reply
 typography at phone sizes (the §4 tokens are declared but have never been read
 in anger); empty and first-run states, which are the product's first
 impression; the icon set (`docs/ops/mac-app.md`: "the icon is a placeholder");
@@ -333,20 +360,120 @@ console must gain; everything unmarked exists today.
 
 | # | Phase | Size | Needs from the console API |
 | --- | --- | --- | --- |
-| **0** | IA ruling + the four CI checks + the token holes (§5) | **S** | — |
-| **A** | **Shell + navigation + Feed.** Seven sections in the sidebar; an authenticated API client and store in `MetistryKit` (local owner token over loopback); §3.2 feed row, §3.3 presence chip, §3.15/§3.16 as shared Swift components. PWA renav to the same IA in the same PR | **M** | none — `/api/q/activity_feed` exists |
-| **B** | **Needs You + Chat.** Request cards with the three (five) answers, §3.5 prompt cards, local notifications with actions; the transcript under P9; §3.7 tier picker, built once for both clients | **M** | a `rules.yaml` **commands endpoint** (the PWA's `COMMANDS` array is a labelled placeholder, `index.html:93–103`, `app.js:198`); a `runs` detail query for the feed's drill-down |
+| **0** | IA ruling (**done — §7.1/§7.2, 2026-09-17**) + the four CI checks + the token holes (§5) | **S** | — |
+| **A** | **Shell + navigation + Feed.** Seven sections in the sidebar; an authenticated API client and store in `MetistryKit` (local owner token over loopback); §3.2 feed row, §3.3 presence chip, §3.15/§3.16 as shared Swift components. The PWA keeps its nav for now — §7.1 renavigates it in a later PR, not this one | **M** | none — `/api/q/activity_feed` exists |
+| **B** | **Needs You + Chat.** Request cards with the **six** answers (§7.4, `design-system.md` §3.9), §3.5 prompt cards, local notifications with actions; the transcript under P9; §3.7 tier picker, built once for both clients | **M** | a `rules.yaml` **commands endpoint** (the PWA's `COMMANDS` array is a labelled placeholder, `index.html:93–103`, `app.js:198`); a `runs` detail query for the feed's drill-down |
 | **C** | **Work.** Board + task detail + artifact + project in one list/detail pane, drags with keyboard equivalents, rooms | **L** | none for reads; `PATCH /api/tasks/:id`, `/dispatch`, `PUT /api/projects/:id` exist |
 | **D** | **Agents + Compute + System.** Presence, scope/autonomy with §3.17 on every widening, then Compute and Devices/Instances | **M** | **`/api/compute`** (list providers/models, assign, budgets) — otherwise compute stays Mac-only and P6 stays violated |
-| **E** | **Knowledge.** Pages, page view, search, Inbox | **L** | **the biggest ask**: a named query over `knowledge_files`/`knowledge_links` (no schema change for paths and the link graph; an *additive* title/description column the reconciler fills if rows need to be readable without fetching content), plus a console route proxying the reconciler's `/vault/read` and `/vault/search` — page content is not derived state, so invariant 3 sends it through the bridge, not a query |
-| **F** | **iOS target.** Share extension + outbox, APNs relay, widgets, App Intents | **L** | O1–O5 are shipped (`docs/ops/console-api.md`); the relay is its own project |
+| **E** | **Knowledge.** Pages, page view, search, Inbox — sized piece by piece in §6.1 (**≈7.5 agent-days**; the cheapest slice that delivers search with full results is **≈3** and needs no query and no migration) | **L** | **the biggest ask, but smaller than it looked**: no migration at all (`0009` already added `title`, `description`, `draft`), one named query over `knowledge_files`/`knowledge_links`, and three console routes proxying the reconciler's `/vault/read` and `/vault/search` — both of which are already served. Page content is not derived state, so invariant 3 sends it through the bridge, not a query |
+| **F** | **iOS target.** Share extension + outbox, APNs relay, widgets, App Intents | **L** | O1–O5 are shipped (`docs/ops/console-api.md`); the relay is its own project. **O1–O4 belong to this phase alone** — §7.3 gives the Mac app no instance switcher and no outbox |
 
 Phase A is the one that changes the owner's daily experience, because it turns
 the window from a status page into a place where something happened.
 
+### 6.1 Sizing phase E — what a knowledge read path costs, end to end
+
+Asked for by the owner (§7.6), who wants vault browsing and **especially
+full-result search** in the app. Sized against what is actually in the repo
+today, not against the phase-E line above — which turns out to have
+over-estimated the server side and under-estimated the client.
+
+**What "full results" is taken to mean here:** the complete hit list the
+bridge will return, each hit carrying its snippet, and one gesture from a hit
+to the whole page. Not every note's full text inline — that is one
+`/vault/read` per hit, and it is a different (and worse) product.
+
+| Piece | Size | What exists, and what is missing |
+| --- | --- | --- |
+| **Named query over `knowledge_files` / `knowledge_links`** | **S** | **No migration.** `0009_brain.sql` already added `title`, `description` and `draft`, and `0001` has `path`, `mtime`, `content_hash`, `status`; `knowledge_links` has the edges both ways with an index on `to_path`. So the plan's "an *additive* title/description column if rows need to be readable without fetching content" is **already true**. What is missing is only the YAML: one `knowledge_pages` (prefix, limit; `NOT draft AND status <> 'conflict'`) and one `knowledge_page_links` (links + backlinks for one path), in `seed/queries/`, shaped like `board.yaml` — scalar columns so the client joins nothing |
+| **Reconciler `/vault/read`** | **none** | Shipped. `{path, content, sha256, bytes}`, or `content_base64` with `&encoding=base64` |
+| **Reconciler `/vault/search`** | **S** | Shipped, and better than the plan assumed: three modes, `{q, mode, hits[], degraded?}`, hits `{path, title, description, snippet, score, source}`. Two limits are the whole of the work: the snippet is capped at 300 chars (`search.ts` `snippetOf`, and keyword's is a ±120-char window around the match), and `limit` **clamps at 100 with no offset and no cursor** (`server.ts`, `clampInt(q.get("limit"), 20, 1, 100)`). Paging past 100 is an additive `offset` — but RRF fuses over a pool of `min(100, limit × 4)`, so an offset re-ranks rather than continues. Either state "top 100, honestly" in the UI or add a cursor; the first is free and the second is the S |
+| **Console proxy routes** | **M** | **Nothing is exposed today.** The console holds a vault reader, lister and searcher (`main.ts:144–149`) but wires them only into `mcp-brain`'s tools — there is no `/api/knowledge*` route of any kind. Three are needed: the named query, `GET /api/knowledge/search` and `GET /api/knowledge/page?path=`, on the existing owner/session auth and the existing `not_available` envelope when no bridge is configured. Two wrinkles: `vaultBridgeSearcher` pins `mode=keyword` (`packages/mcp-brain/src/knowledge-fs.ts:101`), so the proxy takes a mode or calls the bridge itself; and the `degraded` string must reach the client rather than being swallowed — P5 |
+| **Swift: API client and store** | **not counted** | Phase A's, and a hard prerequisite. `console-client.swift` is 364 lines of health plus the auth ceremony; there is no data client to add a knowledge call to |
+| **Swift: Pages list + Inbox** | **S** | §3.2-shaped rows over the named query, §3.15's empty-vs-absent |
+| **Swift: page view + renderer** | **M** | The renderer is the cost, not the fetch. §3.11's Apple note routes markdown through `Text(AttributedString(markdown:))` and html through a `WKWebView`; a vault page with wikilinks, embeds and `reading-measure` is the `WKWebView` path — JavaScript disabled, same CSP, the same document boundary §7.2 preserved |
+| **Swift: search with full results** | **M** | Field, debounce, the results list, the mode + `degraded` chip (P5: "keyword only — the embedder is down" is a fact, not an error), and the jump into a page |
+| **Wireframes + screen specs (§5)** | **S** | Three screens × (SVG + spec + acceptance entry) |
+
+**Total: ≈7.5 agent-days** — 0.5 query, 0.5 bridge, 1 console routes with
+their misuse tests (invariant 8: they ship with the interface), 4.5 Swift, 1
+design artifacts. **L**, and the L is on the client side, which inverts the
+phase table's original guess that this was mostly a server ask.
+
+**The cheapest slice that delivers "search with full results" first: ≈3
+agent-days, and it needs no named query and no migration.** `GET
+/api/knowledge/search` and `GET /api/knowledge/page` proxying the two bridge
+routes, and one Swift screen — a search field, the full hit list, and the page
+view opened from a hit. It is entirely the bridge, so it can land the day the
+Mac app has an authenticated client, and it delivers the half of §7.6 the
+owner emphasised. Pages, Inbox and the link graph — the *browse* half — come
+after, because those are the parts that need the derived state.
+
+**Invariant 3, stated once so no screen re-opens it.** The list, the link
+graph and anything countable are **derived**: Postgres, through a named query,
+through `packages/queries`. The page bytes and the search ranking are **not**:
+they are the working tree, through the reconciler's bridge. So a page's
+content never arrives from a query, and the console never reads note bodies
+from the database — there is no column holding them, which is the schema
+enforcing the rule rather than a convention asking for it.
+
 ---
 
-## 7. Open questions
+## 7. Open questions — answered
+
+### Rulings — 2026-09-17
+
+The owner's answers, numbered to the questions below. Each is applied where
+it belongs: the `design-system.md` amendments landed with these rulings, the
+build consequences are in §4 and §6.
+
+**7.1 — Yes: the seven-section IA replaces P6's ten destinations.**
+`design-system.md` P6 and §3.1 are amended to Chat · Feed · Needs You · Work
+· Knowledge · Agents · System, with Capture as a global action and the old
+list kept as a struck, dated line. **The PWA is updated to the same IA
+later, not in the first PR** — so the Mac app is built to the seven from the
+start and the PWA is a known, temporary disagreement rather than a second
+architecture.
+
+**7.2 — (a): native SwiftUI for Mac and iOS, no PWA embedding for
+application surfaces.** In the owner's words, the goal is "a native optimized
+UI that feels fast and native to the OS." §3.11's `WKWebView` for **document
+rendering** stands: the line is drawn at documents, not at lists and
+controls. Order is **Mac app first, iOS later when it is prioritised**. The
+owner will run the Mac app on both instances — each Mac against its own local
+instance. §4 carries the consequences, including that the `WKWebView`
+WebAuthn spike is not run.
+
+**7.3 — Local instance only.** The Mac app is a client of *this* machine,
+over loopback, with the local owner token. Reading a remote instance is a
+possible future and is **explicitly avoided now for the complexity it
+brings**. So the Mac app has **no instance switcher and no outbox**, and the
+O1–O4 offline rules stay reserved for iOS (§6 phase F).
+
+**7.4 — Six answers, not three.** Approve · Revise · Decline · Approve as
+Work (only where the row carries `payload.suggested_work`) · Later (a snooze,
+which settles nothing) · Skip — as shipped in #165 and documented in
+`docs/ops/reply-feedback.md`, which stays the normative account of what each
+one does on the wire. `design-system.md` §3.9 is amended to match, including
+the batch rule (only Later, Skip and Decline may be applied to many rows) and
+the `if_unchanged` staleness envelope.
+
+**7.5 — Yes, a designer is engaged: an AI designer (Claude Design).** Scope:
+the design language, the colour and pattern system, consistent UI traits, and
+a **new brand identity including a logo and app icon** replacing the current
+placeholder "M". A separate brief is being written at
+`docs/product/design-brief.md`; it is not written here, and §5's "where a
+designer earns their keep" is an input to that brief rather than an answer to
+it.
+
+**7.6 — Yes: vault browsing, and especially full-result search, are wanted in
+the app.** Sized end to end in **§6.1** — ≈7.5 agent-days total, of which the
+cheapest slice that delivers search with full results is ≈3 and needs neither
+a named query nor a migration.
+
+### The questions as they were put
+
+Each is answered by the ruling of the same number above.
 
 1. **Does the seven-section IA replace P6's ten destinations?** If yes,
    `design-system.md` P6 and §3.1 are amended (seven names, Capture as a
@@ -381,14 +508,22 @@ the window from a status page into a place where something happened.
 Per `CLAUDE.md` ("report contradictions, don't route around them"), and none of
 these were edited in place:
 
-- **P6's ten destinations** vs the PWA's eleven vs this plan's seven (Q1).
+- **P6's ten destinations** vs the PWA's eleven vs this plan's seven (Q1) —
+  **settled 2026-09-17 (7.1): seven.** The PWA is the one remaining
+  disagreement, and it is deliberate until it renavigates.
 - **P6's "nothing on one platform with no home on the others"** vs compute
   being Mac-only and knowledge being nowhere.
-- **§3.9's three answers** vs the shipped five (Q4).
+- **§3.9's three answers** vs the shipped six (Q4) — **settled (7.4): six**,
+  and `design-system.md` §3.9 now says so. `glossary.md` still reads "the
+  same three answers" and lists seven request types where §3.9 listed six;
+  the type count is fixed in §3.9, the answer count in the glossary is
+  noticed and not edited here.
 - **`ux-direction.md`'s 2026-09-07 "same SwiftUI codebase as the phone"** vs
-  the option (b)/(c) tradeoffs this plan is obliged to lay out (Q2).
-- **`desktop-app-plan.md`'s "not doing: an Electron/Tauri wrapper"** — it does
-  not settle the `WKWebView` question, but it is the nearest ruling to it.
+  the option (b)/(c) tradeoffs this plan is obliged to lay out (Q2) —
+  **settled (7.2): the 2026-09-07 ruling stands**, and (b) is rejected for
+  application surfaces.
+- **`desktop-app-plan.md`'s "not doing: an Electron/Tauri wrapper"** — it did
+  not settle the `WKWebView` question; 7.2 does, at the document boundary.
 - **`targets/` is not in the reconciler's protected-path list** while
   `agents/`, `routines/`, `queries/` and `extensions/` are, even though a
   target manifest names where work may be sent off the machine. Noticed while

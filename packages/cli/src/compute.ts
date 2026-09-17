@@ -60,8 +60,13 @@ import { Keychain, keychainAccount, serviceFor } from "./keychain.js";
 import { writeProtected, type ProtectedWrite } from "./protected-write.js";
 import { StepFailed, StepRunner } from "./steps.js";
 
-/** The provider blocks `seed/compute-templates/` ships. A name that is not one of these is a typo, never a guess. */
-export const COMPUTE_TEMPLATES = ["openrouter", "zen", "lmstudio", "ollama", "llamaserver", "applefm"] as const;
+/**
+ * The provider blocks `seed/compute-templates/` ships. A name that is not one
+ * of these is a typo, never a guess. **One cloud template only** (OPEN-7,
+ * ruled 2026-09-17): every other OpenAI-compatible cloud — OpenCode Zen
+ * included — is reached with `--base-url`, or by writing the block by hand.
+ */
+export const COMPUTE_TEMPLATES = ["openrouter", "lmstudio", "ollama", "llamaserver", "applefm"] as const;
 export type ComputeTemplate = (typeof COMPUTE_TEMPLATES)[number];
 
 export function parseTemplate(v: string | undefined): ComputeTemplate | undefined {

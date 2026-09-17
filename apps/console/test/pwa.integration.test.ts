@@ -147,6 +147,17 @@ describe.skipIf(!hasDb)("console PWA chunk", () => {
   // this asserts the SHAPE of the handlers in the served app.js: every drop
   // the table names maps to exactly one route, `reported` is never a target,
   // and a closed card has no drops at all.
+  // Ruled 2026-09-17: `work.owner` is a name on the card, not a lease, so the
+  // column is read "Addressed to". The KEY stays `assigned` (board.yaml's
+  // derived value, every route above), which is exactly what this pins apart.
+  it("the `assigned` column is labelled “Addressed to”, and the key it is drawn from is unchanged", async () => {
+    const js = await (await fetch(base + "/app.js")).text();
+    const cols = /const BOARD_COLUMNS = \[[\s\S]*?\n\];/.exec(js)?.[0] ?? "";
+    expect(cols).not.toBe("");
+    expect(cols).toContain('["assigned", "Addressed to"');
+    expect(cols).not.toContain('"Assigned"');
+  });
+
   it("the board's drag handlers are present, and each drop maps to exactly one route", async () => {
     const js = await (await fetch(base + "/app.js")).text();
     for (const handler of ["ondragstart", "ondragover", "ondragleave", "ondrop", "ondragend"]) {

@@ -564,7 +564,7 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
           knowledge_write: cfg.writeKnowledge ? "available" : "not_available",
           knowledge_list: cfg.listKnowledge ? "available" : "not_available",
           artifacts: cfg.artifacts ? "available" : "not_available",
-          crews: cfg.crews ? cfg.crews.names() : "not_available",
+          crews: cfg.crews ? cfg.crews.crews().map((c) => c.name) : "not_available",
           queries: cfg.queries ? "available" : "not_available",
           // Phase 6: semantic ranking is additive — without an embedder every mode still answers, in keyword.
           knowledge_search_modes: cfg.embedder ? ["keyword", "semantic", "hybrid"] : ["keyword"],

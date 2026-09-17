@@ -227,8 +227,8 @@ reaches this Mac meanwhile.
 ## 10. Daily use
 
 - **Feed** — the console web app's chronological timeline, polling every 10s.
-- **Board** — a Kanban view over `work` (`docs/ops/board.md`): Backlog, Assigned, In Progress,
-  Needs You, Done, Reported. A drag is offered only where the service would accept it.
+- **Board** — a Kanban view over `work` (`docs/ops/board.md`): Backlog, Addressed to, In
+  Progress, Needs You, Done, Reported. A drag is offered only where the service would accept it.
 - **Needs You** — five verbs; `l` (later — snoozes, never ends the item) and `s` (skip —
   settles it, nothing said) are the two batchable ones. **Approve as Work**, the sixth answer,
   appears on a `knowledge`/`report` proposal carrying `suggested_work`: one click decides the

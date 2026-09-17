@@ -49,10 +49,17 @@ export type PolicyViolation =
   | { kind: "denied_source"; sources: string[] }
   | { kind: "path_outside_allow"; paths: string[]; allow: string[] };
 
-// A vault reference is any `Knowledge/...` token (plain, in a wikilink, in
-// backticks, in a markdown link). Terminators are the characters that end
-// one in prose or markup; trailing sentence punctuation is stripped after.
-const VAULT_PATH = /Knowledge\/[^\s"'`()[\]<>|,;]+/g;
+// A vault reference is any TitleCase-rooted path token (plain, in a
+// wikilink, in backticks, in a markdown link) — since the vault root became
+// the instance directory there is no `Knowledge/` to anchor on, so the
+// anchor is the casing rule: an uppercase first segment followed by at least
+// one `/segment`. Terminators are the characters that end one in prose or
+// markup; trailing sentence punctuation is stripped after.
+//
+// This scanner only ever ADDS refusals (a token outside `allow` blocks the
+// brief), so a false positive is strict and a false negative is the danger.
+// Erring wide is the right direction here.
+const VAULT_PATH = /\b[A-Z][A-Za-z0-9_.'-]*(?:\/[^\s"'`()[\]<>|,;]+)+/g;
 // Provenance markers as they occur in frontmatter (`source: comms`,
 // `sources: [comms, x]`) or an inline stamp (`<!-- source: comms -->`).
 const SOURCE_MARKER = /\bsources?\s*:\s*(\[[^\]\n]*\]|[A-Za-z][A-Za-z0-9_-]*)/g;

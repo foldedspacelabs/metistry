@@ -7,7 +7,7 @@
 // - only a principal of kind `internal` may write (§4.11: sub-agents and
 //   external agents never write knowledge — they `report`); anyone else
 //   gets the uniform `forbidden` envelope, whatever the path;
-// - the path must be `Knowledge/...` (the §4.7 free zone) AND inside the
+// - the path must be a vault path (the §4.7 free zone) AND inside the
 //   principal's read grant — writes never reach wider than reads;
 // - the bridge's own rules stay in force behind this one (protected paths
 //   are the user's hand; traversal, `.git`, symlinks, casing slips refused);
@@ -19,7 +19,7 @@
 // - compare-and-swap is NOT optional (2026-09-16): an omitted
 //   `expected_sha256` means CREATE ONLY — the bridge gets CAS on the empty
 //   string, so an existing note comes back `conflict` instead of being
-//   overwritten blind. The user edits `Knowledge/` constantly (Obsidian on
+//   overwritten blind. The user edits the vault constantly (Obsidian on
 //   a phone, an editor, another device), and the one rule that makes those
 //   edits safe is that the assistant must have SEEN the bytes it replaces.
 //   A 409 carries the current hash so the agent re-reads and redoes the
@@ -258,7 +258,7 @@ export async function writeKnowledge(
   const { tier, areas } = principal.grants;
   const meta: Record<string, unknown> = { kind: principal.kind ?? "external", tier, areas, path: args.path };
   if (principal.kind !== "internal") return { ok: false, code: "forbidden", meta }; // §4.11: one writer
-  if (!validKnowledgePath(args.path)) return { ok: false, code: "invalid_request", message: "path must be Knowledge/... with no traversal", meta };
+  if (!validKnowledgePath(args.path)) return { ok: false, code: "invalid_request", message: "path must be a vault path — TitleCase folders, no traversal, nothing under .metistry/ or Artifacts/", meta };
   if (tier !== "areas" || !underAreas(args.path, areas)) return { ok: false, code: "forbidden", meta }; // writes never exceed reads
   if (!writer) {
     return { ok: false, code: "not_available", message: "knowledge writes are not configured in this deployment (the vault bridge is absent)", meta };

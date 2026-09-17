@@ -34,7 +34,7 @@
 //     credential here is the OWNER's Devin key — not an agent's bearer.
 
 import { runCheck, type CheckResult } from "@foldedspacelabs/metistry-core";
-import { captureToInbox, type CaptureSink } from "@foldedspacelabs/metistry-mcp-brain";
+import { captureToInbox, INBOX_PREFIX, type CaptureSink } from "@foldedspacelabs/metistry-mcp-brain";
 import { McpWikiSource, type WikiSource } from "./wiki.js";
 
 export interface Db {
@@ -246,7 +246,7 @@ export async function check(ctx: DevinCtx = {}): Promise<CheckResult> {
  */
 export async function run(db: Db, ctx: DevinCtx = {}): Promise<number> {
   if (!ctx.devinApiKey) return 0; // degrades absent
-  const sink = ctx.inboxSink ?? ctx.inboxDir ?? "./Knowledge/Inbox";
+  const sink = ctx.inboxSink ?? ctx.inboxDir ?? `./${INBOX_PREFIX}`;
   const max = ctx.devinMaxItems ?? DEFAULT_MAX_ITEMS;
   const capturedAt = (ctx.now ?? new Date()).toISOString();
   let written = 0;

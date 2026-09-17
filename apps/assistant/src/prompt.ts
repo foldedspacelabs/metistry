@@ -8,10 +8,11 @@
 // This is a seed, not a control: nothing in the prompt is relied on for
 // safety (the tool surface is enforced in brain.ts). Its tools section says
 // what each tool is FOR; the operating instructions proper still live at
-// Knowledge/CLAUDE.md, written later (CLAUDE.md).
+// the instance's root CLAUDE.md, written later (CLAUDE.md).
 
 import { readFile } from "node:fs/promises";
 import { parse as parseYaml } from "yaml";
+import { INSTANCE_LAYOUT } from "@foldedspacelabs/metistry-core";
 
 export interface Identity {
   name: string;
@@ -50,8 +51,8 @@ export async function readOverlay(paths: string): Promise<string | null> {
 
 /** Resolve the system prompt from the environment's overlay lists; undefined = run without one. */
 export async function loadSystemPrompt(env: NodeJS.ProcessEnv = process.env): Promise<{ prompt: string; identity: Identity } | undefined> {
-  const identityText = await readOverlay(env.METISTRY_IDENTITY_FILES ?? "seed/identity.yaml:identity.yaml");
-  const template = await readOverlay(env.METISTRY_PROMPT_FILES ?? "seed/assistant-prompt.md:assistant-prompt.md");
+  const identityText = await readOverlay(env.METISTRY_IDENTITY_FILES ?? `seed/identity.yaml:${INSTANCE_LAYOUT.identity}`);
+  const template = await readOverlay(env.METISTRY_PROMPT_FILES ?? `seed/assistant-prompt.md:${INSTANCE_LAYOUT.assistantPrompt}`);
   if (identityText === null || template === null) return undefined;
   const identity = parseIdentity(identityText);
   return { prompt: renderPrompt(template, identity), identity };

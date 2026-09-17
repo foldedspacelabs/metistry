@@ -866,7 +866,7 @@ $("agent-grants").onsubmit = async (e) => {
   const queries = $("agent-queries").checked;
   const projects = $("agent-projects").value.split(",").map((s) => s.trim()).filter(Boolean);
   const g = await api(`/api/agents/${encodeURIComponent(id)}/grants`, { method: "PUT", body: JSON.stringify({ tier, areas, queries }) });
-  if (!g.ok) { $("agent-grants-msg").textContent = "grants rejected — areas must be TitleCase Knowledge/… prefixes, one per line, and only for tier areas (bare Knowledge/ is for the internal assistant only)"; return; }
+  if (!g.ok) { $("agent-grants-msg").textContent = "grants rejected — areas must be TitleCase vault prefixes (e.g. Areas/Fsl), one per line, and only for tier areas (the bare vault, /, is for the internal assistant only)"; return; }
   const p = await api(`/api/agents/${encodeURIComponent(id)}/projects`, { method: "PUT", body: JSON.stringify({ projects }) });
   if (!p.ok) { $("agent-grants-msg").textContent = "projects rejected — comma-separated slugs (a-z, 0-9, -)"; return; }
   const au = await api(`/api/agents/${encodeURIComponent(id)}/autonomy`, { method: "PUT", body: JSON.stringify(autonomyFromForm()) });

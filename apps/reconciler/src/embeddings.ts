@@ -62,11 +62,13 @@ export interface EmbedStatus {
   degraded: string | null;
 }
 
-// Settled markdown under Knowledge/: drafts and conflict copies are excluded
-// in SQL, not after, so no caller can forget.
+// Settled markdown in the vault: drafts and conflict copies are excluded in
+// SQL, not after, so no caller can forget. Every row in `knowledge_files` is
+// already a vault path — the walk that fills the table skips `.metistry/`,
+// `Artifacts/` and the dot-directories — so the filter is the extension.
 const BEHIND_SQL = `
   SELECT path FROM knowledge_files
-  WHERE NOT draft AND status <> 'conflict' AND path ILIKE 'Knowledge/%.md'
+  WHERE NOT draft AND status <> 'conflict' AND path ILIKE '%.md'
     AND (embedded_model IS DISTINCT FROM $1 OR embedded_hash IS DISTINCT FROM content_hash)
   ORDER BY path`;
 

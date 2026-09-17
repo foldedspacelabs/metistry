@@ -145,7 +145,7 @@ describe("ports.yaml", () => {
     const dir = await mkdtemp(join(tmpdir(), "metistry-ns-"));
     expect(await loadNamespace(dir)).toBeUndefined();
     expect(await loadNamespace(undefined)).toBeUndefined();
-    await mkdir(join(dir, "state"), { recursive: true });
+    await mkdir(join(dir, ".metistry", "state"), { recursive: true });
     await writeFile(portsFile(dir), serializeNamespace(ns(), ID));
     expect((await loadNamespace(dir))?.labelSuffix).toBe("3f2a1b0c");
     // a trailing slash is the same instance

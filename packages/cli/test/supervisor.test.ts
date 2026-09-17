@@ -19,11 +19,11 @@ const NODE = "/usr/local/bin/node";
 
 describe("paths", () => {
   it("all three hang off the instance's state dir — the config beside the socket, the socket beside Postgres'", () => {
-    expect(supervisorConfigPath("/i")).toBe("/i/state/supervisor.json");
-    expect(supervisorSocketPath("/i")).toBe("/i/state/run/supervisor.sock");
+    expect(supervisorConfigPath("/i")).toBe("/i/.metistry/state/supervisor.json");
+    expect(supervisorSocketPath("/i")).toBe("/i/.metistry/state/run/supervisor.sock");
     // the program name is the whole point: System Settings names the
     // background item after it, and `node` is not a name a user can act on
-    expect(supervisorBinPath("/i")).toBe("/i/state/bin/Metistry");
+    expect(supervisorBinPath("/i")).toBe("/i/.metistry/state/bin/Metistry");
     expect(mintControlToken()).toMatch(/^[0-9a-f]{64}$/);
   });
 });
@@ -88,10 +88,11 @@ describe("the app's launcher file", () => {
 describe("metistry up --register-via app", () => {
   it("writes the config and the launcher file, and installs every agent EXCEPT the supervisor's", async () => {
     const P = await checkout();
-    const I = await mkdtemp(join(tmpdir(), "metistry-inst-"));
+    const I = await mkdtemp(join(tmpdir(), "mi-" /* short on purpose: the supervisor socket under .metistry/state/run/ has ~103 bytes to live in */));
     const home = await mkdtemp(join(tmpdir(), "metistry-home-"));
-    await mkdir(join(I, "state"), { recursive: true });
-    await writeFile(join(I, "state", ".env"), "METISTRY_ORIGIN=https://x.test\n");
+    await mkdir(join(I, ".metistry", "state"), { recursive: true });
+    await mkdir(join(I, ".metistry"), { recursive: true });
+    await writeFile(join(I, ".metistry", "state", ".env"), "METISTRY_ORIGIN=https://x.test\n");
     const lines: string[] = [];
     const r = await up({
       productDir: P,
@@ -110,12 +111,12 @@ describe("metistry up --register-via app", () => {
     expect(r.code).toBe(0);
 
     // the config is there, and so is the file the bundled launcher reads
-    const config = parseSupervisorConfig(JSON.parse(await readFile(join(I, "state", "supervisor.json"), "utf8")));
+    const config = parseSupervisorConfig(JSON.parse(await readFile(join(I, ".metistry", "state", "supervisor.json"), "utf8")));
     expect(config.children.map((c) => c.name)).toEqual(["reconciler"]);
     const launcher = await readFile(join(home, "Library", "Application Support", "Metistry", "supervisor.env"), "utf8");
-    expect(launcher).toContain(`METISTRY_SUPERVISOR_BIN='${join(I, "state", "bin", "Metistry")}'`);
+    expect(launcher).toContain(`METISTRY_SUPERVISOR_BIN='${join(I, ".metistry", "state", "bin", "Metistry")}'`);
     expect(launcher).toContain(`METISTRY_SUPERVISOR_MAIN='${join(P, "apps", "watchdog", "dist", "main.js")}'`);
-    expect(launcher).toContain(`METISTRY_SUPERVISOR_CONFIG='${join(I, "state", "supervisor.json")}'`);
+    expect(launcher).toContain(`METISTRY_SUPERVISOR_CONFIG='${join(I, ".metistry", "state", "supervisor.json")}'`);
 
     // the supervisor's agent is the app's to register — this run installed none
     expect(existsSync(join(home, "Library", "LaunchAgents", "com.foldedspacelabs.metistry.plist"))).toBe(false);
@@ -156,10 +157,11 @@ describe("which registrar owns the one background item", () => {
 
   it("`up` leaves an app-registered agent alone without being told to, and says so once", async () => {
     const P = await checkout();
-    const I = await mkdtemp(join(tmpdir(), "metistry-inst-"));
+    const I = await mkdtemp(join(tmpdir(), "mi-" /* short on purpose: the supervisor socket under .metistry/state/run/ has ~103 bytes to live in */));
     const home = await mkdtemp(join(tmpdir(), "metistry-home-"));
-    await mkdir(join(I, "state"), { recursive: true });
-    await writeFile(join(I, "state", ".env"), "METISTRY_ORIGIN=https://x.test\n");
+    await mkdir(join(I, ".metistry", "state"), { recursive: true });
+    await mkdir(join(I, ".metistry"), { recursive: true });
+    await writeFile(join(I, ".metistry", "state", ".env"), "METISTRY_ORIGIN=https://x.test\n");
     const lines: string[] = [];
     // launchd says the label is loaded from inside a signed bundle — the
     // person installed with the Mac app and is now running `metistry up` in a
@@ -197,17 +199,18 @@ describe("which registrar owns the one background item", () => {
     expect(said[0]).toContain("launchctl kickstart -k gui/501/com.foldedspacelabs.metistry");
     // and everything ELSE up does still happened: the config the app's
     // launcher execs, and the file that tells it where this install lives
-    expect(existsSync(join(I, "state", "supervisor.json"))).toBe(true);
+    expect(existsSync(join(I, ".metistry", "state", "supervisor.json"))).toBe(true);
     expect(await readFile(join(home, "Library", "Application Support", "Metistry", "supervisor.env"), "utf8")).toContain("METISTRY_SUPERVISOR_CONFIG=");
     expect(existsSync(join(home, "Library", "LaunchAgents", "com.foldedspacelabs.metistry.calendar.plist"))).toBe(true);
   });
 
   it("a terminal install is untouched: launchd names ~/Library/LaunchAgents, so `up` bootstraps as it always did", async () => {
     const P = await checkout();
-    const I = await mkdtemp(join(tmpdir(), "metistry-inst-"));
+    const I = await mkdtemp(join(tmpdir(), "mi-" /* short on purpose: the supervisor socket under .metistry/state/run/ has ~103 bytes to live in */));
     const home = await mkdtemp(join(tmpdir(), "metistry-home-"));
-    await mkdir(join(I, "state"), { recursive: true });
-    await writeFile(join(I, "state", ".env"), "METISTRY_ORIGIN=https://x.test\n");
+    await mkdir(join(I, ".metistry", "state"), { recursive: true });
+    await mkdir(join(I, ".metistry"), { recursive: true });
+    await writeFile(join(I, ".metistry", "state", ".env"), "METISTRY_ORIGIN=https://x.test\n");
     // loaded when the registrar is asked, gone once `up` has booted it out —
     // otherwise `awaitBootout` waits five seconds for a job this fake never
     // lets go of

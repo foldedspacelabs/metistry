@@ -36,9 +36,9 @@ data_policy:
   # Vault prefixes a brief may cite. Personal areas (Journal, People, Me,
   # Areas/health ...) are absent on purpose — widen per instance, never here.
   allow:
-    - Knowledge/Projects
-    - Knowledge/Resources
-    - Knowledge/Techniques
+    - Projects
+    - Resources
+    - Techniques
   # Provenance classes that never leave the machine (§4.12: comms-derived
   # content is the one that costs the most to leak).
   deny_sources:

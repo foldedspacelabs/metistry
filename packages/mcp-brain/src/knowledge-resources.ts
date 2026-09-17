@@ -1,5 +1,5 @@
 // MCP resources over the vault (docs/research/2026-09-stash-review.md item
-// 3): settled notes exposed as `metistry://Knowledge/<path>` for any client
+// 3): settled notes exposed as `metistry://<vault path>` for any client
 // that browses resources rather than calling tools. Same tier rule as
 // knowledge_read throughout — a resource grant does not exist as a
 // separate concept, `areas` is what makes a note visible or readable.
@@ -23,7 +23,7 @@ import type { AgentPrincipal, Db } from "./types.js";
 const SCHEME = "metistry";
 const PAGE_SIZE = 100;
 
-/** Vault path → resource URI. Not a special URL scheme, so the host segment is never lowercased — `Knowledge` round-trips. */
+/** Vault path → resource URI. Not a special URL scheme, so the host segment is never lowercased — `Areas` round-trips. */
 export function resourceUriFor(path: string): string {
   return `${SCHEME}://${path}`;
 }

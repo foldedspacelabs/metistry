@@ -80,7 +80,7 @@ function startProbing(supervised?: string[]): void {
     hourlyCostUsd: intEnv("METISTRY_WATCHDOG_HOURLY_USD", 5),
     // silent-collector: manifests read from the checkout (WorkingDirectory in the launchd plist)
     collectorsDir: optionalEnv("METISTRY_COLLECTORS_DIR", "collectors"),
-    routinesDir: optionalEnv("METISTRY_ROUTINES_DIR", "routines"),
+    routinesDir: optionalEnv("METISTRY_ROUTINES_DIR", "routines"), // the PRODUCT's routines/ (cwd-relative); the instance's own live at .metistry/routines
     silenceFactor: intEnv("METISTRY_WATCHDOG_SILENCE_FACTOR", 3),
     startedAt: new Date(),
     // bridge-degraded + fm-tier-never-fires: the same URL/token pairs the console gets

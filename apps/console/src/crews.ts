@@ -12,7 +12,7 @@
 //   later entries win by name.
 // - SYNC the registry. Every valid manifest is an `agents` row of
 //   `kind: 'crew'` — grants = its `scope` through the SAME validator external
-//   agents face (bare `Knowledge/` refused: a crew is not the assistant),
+//   agents face (the bare vault refused: a crew is not the assistant),
 //   projects from the manifest. The token hash stored at registration is of
 //   a token nobody holds: the assistant's runner mints a fresh one per run
 //   and burns it after (apps/assistant/src/crew-drain.ts), so a crew never

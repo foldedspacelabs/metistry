@@ -105,7 +105,7 @@ export interface ConnectOptions {
   instanceId?: string | undefined;
   /** mint a replacement token; the old one stops authenticating immediately */
   rotate?: boolean | undefined;
-  /** `--areas`: widen the read grant to `{tier: "areas", areas}` (TitleCase `Knowledge/…` prefixes; the console validates) */
+  /** `--areas`: widen the read grant to `{tier: "areas", areas}` (TitleCase vault prefixes, e.g. `Areas/Fsl`; the console validates) */
   areas?: string[] | undefined;
   /** `--project`: project membership (§4.21 — tasks and artifacts are scoped by it) */
   projects?: string[] | undefined;

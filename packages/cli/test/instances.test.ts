@@ -50,7 +50,7 @@ const identityBody = (instance_id: string, name: string, capabilities?: string[]
 
 async function scratch(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "metistry-instances-"));
-  await mkdir(join(dir, "state"), { recursive: true });
+  await mkdir(join(dir, ".metistry", "state"), { recursive: true });
   return dir;
 }
 

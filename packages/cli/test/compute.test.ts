@@ -4,7 +4,7 @@
 // that matter are the conservative ones — a key never reaches argv, an edit
 // that would not validate is never written, a provider still named by an
 // assignment cannot be removed, and a refusal names the field.
-import { cp, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -112,7 +112,12 @@ function harness(dir: string, extra: Partial<ComputeOptions> = {}): { o: Compute
   return { o, lines };
 }
 
-const file = (dir: string) => join(dir, "compute.yaml");
+const file = (dir: string) => join(dir, ".metistry", "compute.yaml");
+/** The instance fixture: `.metistry/` has to exist before a hand-written compute.yaml can land in it. */
+const withMetistryDir = async (dir: string) => {
+  await mkdir(join(dir, ".metistry"), { recursive: true });
+  return dir;
+};
 
 // A cloud that does NOT claim ZDR, written BY HAND. No shipped template is
 // non-ZDR any more (OPEN-7, 2026-09-17: the Zen template went, and every
@@ -124,7 +129,7 @@ const HANDWRITTEN_CLOUD = `providers:
     base_url: https://cloud.example/v1
     locality: off_machine
     auth: { secret: METISTRY_CLOUD_API_KEY }
-    data_policy: { allow: [Knowledge/Projects], deny_sources: [comms], max_brief_bytes: 65536 }
+    data_policy: { allow: [Projects], deny_sources: [comms], max_brief_bytes: 65536 }
     pricing: { example-model: { in_per_m: 1, out_per_m: 2 } }
 `;
 
@@ -285,7 +290,7 @@ describe("assign / budget: the file is edited in place and never left invalid", 
     const dir = await instance();
     const kc = fakeSecurity({ [`${ACCOUNT}/metistry:METISTRY_CLOUD_API_KEY`]: KEY });
     const { o, lines } = harness(dir, { exec: kc.exec });
-    await writeFile(file(dir), HANDWRITTEN_CLOUD);
+    await writeFile(file(await withMetistryDir(dir)), HANDWRITTEN_CLOUD);
     await assign({ ...o, target: parseAssignmentTarget("default"), model: "cloud/example-model" });
     const r = await assign({ ...o, target: parseAssignmentTarget("deep"), model: "cloud/example-model" });
     expect(r.warn_non_zdr).toBe(true);
@@ -446,13 +451,13 @@ describe("models install", () => {
     const { o } = harness(dir, { platform: "linux", fetchFn: http });
     await providersAdd({ ...o, template: "llamaserver", skipTest: true });
     const r = await modelsInstall({ ...o, ref: "llamaserver/unsloth/gemma-3-4b-it-GGUF/gemma-3-4b-it-Q4_K_M.gguf" });
-    expect(r.model_path).toBe("state/models/unsloth/gemma-3-4b-it-GGUF/gemma-3-4b-it-Q4_K_M.gguf");
+    expect(r.model_path).toBe(".metistry/state/models/unsloth/gemma-3-4b-it-GGUF/gemma-3-4b-it-Q4_K_M.gguf");
     expect(r.sha256).toBe(sha);
     expect(existsSync(join(dir, r.model_path!))).toBe(true);
     // the file on disk is what the schema accepts back — a write that would
     // not validate is refused before it is written
     const after = await readFile(file(dir), "utf8");
-    expect(after).toContain("model_path: state/models/unsloth/gemma-3-4b-it-GGUF/gemma-3-4b-it-Q4_K_M.gguf");
+    expect(after).toContain("model_path: .metistry/state/models/unsloth/gemma-3-4b-it-GGUF/gemma-3-4b-it-Q4_K_M.gguf");
     expect((await computeReport(o)).providers[0]?.name).toBe("llamaserver");
   });
 
@@ -501,7 +506,7 @@ describe("show", () => {
     // main.ts's --help (docs/product/record/2026-09-17-second-instance-guide.md)
     for (const t of COMPUTE_TEMPLATES) expect(renderComputeReport(empty), t).toContain(t);
 
-    await writeFile(file(dir), HANDWRITTEN_CLOUD);
+    await writeFile(file(await withMetistryDir(dir)), HANDWRITTEN_CLOUD);
     await assign({ ...o, target: parseAssignmentTarget("default"), model: "cloud/example-model" });
     await assign({ ...o, target: parseAssignmentTarget("deep"), model: "cloud/example-model", effort: "high" });
     await setBudget({ ...o, target: parseBudgetTarget("instance"), monthly: 60, action: "stop" });

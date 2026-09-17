@@ -21,6 +21,7 @@ import {
   parseBearer,
   startRun,
   tokenHash,
+  VAULT_ROOT_AREA,
   type ActionKind,
   type ActionMode,
   type AutonomyLevel,
@@ -33,7 +34,7 @@ export type AgentKind = (typeof AGENT_KINDS)[number];
 export const TIERS = ["none", "index", "areas"] as const;
 export type Tier = (typeof TIERS)[number];
 
-/** A grant is a read tier plus, for `areas`, the Knowledge/ prefixes it covers. `queries` is a separate axis — mcp-brain's queries_list/queries_run (invariant 3's read path) — default false; internal principals get it regardless (mcp-brain's own rule, not this one). */
+/** A grant is a read tier plus, for `areas`, the vault prefixes it covers. `queries` is a separate axis — mcp-brain's queries_list/queries_run (invariant 3's read path) — default false; internal principals get it regardless (mcp-brain's own rule, not this one). */
 export interface Grants {
   tier: Tier;
   areas: string[];
@@ -59,14 +60,15 @@ export interface AgentPrincipal {
 export const INTERNAL_ASSISTANT_ID = "assistant";
 
 /**
- * The bare vault grant: the whole of `Knowledge/`, root notes included
- * (`Knowledge/now.md`). Admitted by the validator for `kind: internal`
- * rows ONLY — the owner's own assistant, whose scope is configuration in
- * the user's hand (§4.11) — and the internal default. External agents can
- * never hold it: for them an area grant is a prefix, and "everything" is
- * not an area. Narrow per instance with METISTRY_ASSISTANT_AREAS.
+ * The bare vault grant: the whole vault, root notes included (`now.md`).
+ * Spelled `/` since the vault became the instance directory itself — core's
+ * VAULT_ROOT_AREA. Admitted by the validator for `kind: internal` rows
+ * ONLY — the owner's own assistant, whose scope is configuration in the
+ * user's hand (§4.11) — and the internal default. External agents can never
+ * hold it: for them an area grant is a prefix, and "everything" is not an
+ * area. Narrow per instance with METISTRY_ASSISTANT_AREAS.
  */
-export const VAULT_ROOT_AREA = "Knowledge/";
+export { VAULT_ROOT_AREA };
 export const ASSISTANT_DEFAULT_AREAS = [VAULT_ROOT_AREA] as const;
 
 /**
@@ -116,19 +118,19 @@ export class AgentError extends Error {
   }
 }
 
-// A vault area prefix: `Knowledge/` plus one or more TitleCase segments
+// A vault area prefix: one or more TitleCase segments from the vault root
 // (CLAUDE.md casing rule — Obsidian renders these; Linux containers do not
-// forgive `knowledge/`). No traversal, no trailing slash, no bare
-// `Knowledge` (that would be "everything", which is not an area grant —
-// except for an internal row, where the bare vault is spelled `Knowledge/`
-// and normalized to VAULT_ROOT_AREA).
-const AREA_RE = /^Knowledge(\/[A-Z][A-Za-z0-9 _.'-]*)+$/;
-const BARE_VAULT_RE = /^Knowledge\/?$/;
+// forgive `areas/`). No traversal, no trailing slash, and no way to spell
+// `.metistry/` (it does not start with an uppercase letter) — the machinery
+// is not grantable. "Everything" is not an area grant: it is the bare vault,
+// spelled `/` and admitted for an internal row alone.
+const AREA_RE = /^[A-Z][A-Za-z0-9 _.'-]*(\/[A-Z][A-Za-z0-9 _.'-]*)*$/;
+const BARE_VAULT_RE = /^\/$/;
 const MAX_AREAS = 64;  // limit: fixed — a grant list this long is a mistake, not a configuration
 const MAX_AREA_LEN = 200;  // limit: fixed — AREA_RE's shape bounds it; a longer string is not a vault path
 
 export interface GrantsOptions {
-  /** The row's kind. `internal` admits the bare vault (`Knowledge/`); anything else (the default) refuses it. */
+  /** The row's kind. `internal` admits the bare vault (`/`); anything else (the default) refuses it. */
   kind?: AgentKind | undefined;
 }
 
@@ -146,7 +148,7 @@ export function validateGrants(input: unknown, opts: GrantsOptions = {}): Grants
     let s = a.trim();
     if (bareAllowed && BARE_VAULT_RE.test(s)) s = VAULT_ROOT_AREA;
     else if (s.length > MAX_AREA_LEN || !AREA_RE.test(s) || s.includes("..")) {
-      throw new AgentError("invalid_request", bareAllowed ? "area must be a TitleCase Knowledge/... prefix, or Knowledge/ for the whole vault" : "area must be a TitleCase Knowledge/... prefix");
+      throw new AgentError("invalid_request", bareAllowed ? "area must be a TitleCase vault prefix (e.g. Areas/Fsl), or / for the whole vault" : "area must be a TitleCase vault prefix (e.g. Areas/Fsl)");
     }
     if (!areas.includes(s)) areas.push(s);
   }

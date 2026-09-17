@@ -19,8 +19,9 @@ async function checkout(version = "0.4.0"): Promise<string> {
 async function instance(lock?: { version: string; commit: string; source: "git" | "release" }): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "metistry-version-inst-"));
   if (lock) {
-    await writeFile(
-      join(dir, "metistry.lock"),
+    await mkdir(join(dir, ".metistry"), { recursive: true });
+  await writeFile(
+      join(dir, ".metistry", "metistry.lock"),
       `product:\n  version: ${JSON.stringify(lock.version)}\n  commit: ${JSON.stringify(lock.commit)}\n  source: ${lock.source}\nupdated_at: "2026-09-09T00:00:00.000Z"\nmigrations_applied: []\n`,
     );
   }

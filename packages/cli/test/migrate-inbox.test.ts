@@ -1,8 +1,12 @@
 // `metistry migrate-inbox` against a fixture instance repo (a real `git
 // init`, real files) and the scratch database. What it has to get right:
-// the untracked legacy `inbox/`, a second instance's lowercase
-// `Knowledge/inbox/` on a case-insensitive filesystem, the .gitignore
-// rewrite, the row rewrite, idempotency, and `--dry-run` changing nothing.
+// the untracked legacy `inbox/`, a differently-cased vault inbox on a
+// case-insensitive filesystem, the .gitignore rewrite, the row rewrite,
+// idempotency, and `--dry-run` changing nothing.
+//
+// Most fixtures here are LEGACY instances (vault at `Knowledge/`, config at
+// the root) on purpose: this verb has to keep serving one until the layout
+// migration runs. The flat case has its own test at the end.
 import { execFile } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
@@ -12,7 +16,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
-import { actualName, migrateInbox, rewriteGitignore, REWRITE_PATHS_SQL } from "../src/migrate-inbox.js";
+import { actualName, inboxTargetFor, migrateInbox, rewriteGitignore, rewritePathsSql } from "../src/migrate-inbox.js";
 import { GITIGNORE } from "../src/init.js";
 
 const exec = promisify(execFile);
@@ -43,10 +47,15 @@ async function legacyInstance(files: Record<string, string> = { "1757000000000-n
 const lines: string[] = [];
 const out = (l: string) => lines.push(l);
 
+const LEGACY_LARGE = inboxTargetFor("legacy").largeIgnoreLine;
+
 describe("gitignore rewrite", () => {
   it("drops the inbox line and adds the .large spill, keeping everything else", () => {
-    expect(rewriteGitignore("inbox/\nstate/\n.obsidian/workspace*\n")).toBe("state/\n.obsidian/workspace*\nKnowledge/Inbox/.large/\n");
-    expect(rewriteGitignore("/inbox\nstate/\n")).toBe("state/\nKnowledge/Inbox/.large/\n");
+    // the flat layout's spill line is the default
+    expect(rewriteGitignore("inbox/\n.metistry/state/\n.obsidian/workspace*\n")).toBe(".metistry/state/\n.obsidian/workspace*\nInbox/.large/\n");
+    expect(rewriteGitignore("/inbox\n.metistry/state/\n")).toBe(".metistry/state/\nInbox/.large/\n");
+    // a legacy instance gets ITS spill line, because that is where its inbox is
+    expect(rewriteGitignore("inbox/\nstate/\n.obsidian/workspace*\n", LEGACY_LARGE)).toBe("state/\n.obsidian/workspace*\nKnowledge/Inbox/.large/\n");
     // already migrated: byte-identical to what `metistry init` stamps today
     expect(rewriteGitignore(GITIGNORE)).toBe(GITIGNORE);
     // a hand-added rule survives
@@ -73,7 +82,7 @@ describe("migrate-inbox (fixture instance repo)", () => {
     expect(existsSync(join(dir, "inbox"))).toBe(false);
     expect((await readdir(join(dir, "Knowledge", "Inbox"))).sort()).toEqual(["1757000000000-note.md", "1757000000001-shot.png"]);
     expect(await readFile(join(dir, "Knowledge", "Inbox", "1757000000000-note.md"), "utf8")).toBe("# an old capture\n");
-    expect(await readFile(join(dir, ".gitignore"), "utf8")).toBe(GITIGNORE);
+    expect(await readFile(join(dir, ".gitignore"), "utf8")).toBe(`state/\n.obsidian/workspace*\n${LEGACY_LARGE}\n`);
 
     // committed: the captures are part of the record now (invariant 1)
     const tracked = await exec("git", ["-C", dir, "ls-files"], { env: { ...process.env, HOME: dir } });
@@ -96,6 +105,26 @@ describe("migrate-inbox (fixture instance repo)", () => {
     expect(existsSync(join(dir, "inbox", "1757000000000-note.md"))).toBe(true); // still there
     expect(existsSync(join(dir, "Knowledge", "Inbox"))).toBe(false);
     expect(await readFile(join(dir, ".gitignore"), "utf8")).toContain("inbox/\n");
+  });
+
+  it("a flat instance: the vault inbox is Inbox/ at the root, and `inbox/` is the SAME directory — never moved into itself", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "metistry-inbox-flat-"));
+    dirs.push(dir);
+    const env = { ...process.env, GIT_CONFIG_NOSYSTEM: "1", HOME: dir };
+    await exec("git", ["init", "-q", "-b", "main"], { cwd: dir, env });
+    await mkdir(join(dir, ".metistry"), { recursive: true });
+    await writeFile(join(dir, ".metistry", "identity.yaml"), "name: Seed\n");
+    await mkdir(join(dir, "Inbox"), { recursive: true });
+    await writeFile(join(dir, "Inbox", "1757000000003-kept.md"), "# kept\n");
+    await writeFile(join(dir, ".gitignore"), GITIGNORE);
+    await exec("git", ["add", "-A"], { cwd: dir, env });
+    await exec("git", ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "seed"], { cwd: dir, env });
+
+    const r = await migrateInbox({ instanceDir: dir, out, openSession: async () => null });
+    expect(r).toMatchObject({ from: null, moved: 0, gitignore: "unchanged", alreadyDone: true });
+    // the capture is still there: the legacy branch must not have "removed the empty inbox/"
+    expect(await readFile(join(dir, "Inbox", "1757000000003-kept.md"), "utf8")).toBe("# kept\n");
+    expect(await readFile(join(dir, ".gitignore"), "utf8")).toBe(GITIGNORE);
   });
 
   it("a second instance's lowercase Knowledge/inbox is renamed through a temp name (macOS is case-insensitive)", async () => {
@@ -167,7 +196,8 @@ describe("migrate-inbox (fixture instance repo)", () => {
       // idempotent at the SQL level too — scoped to this run's own rows, so
       // a concurrent suite inserting a legacy-shaped path elsewhere can
       // never be mistaken for a row THIS run failed to rewrite
-      const second = await pool.query(`${REWRITE_PATHS_SQL} AND source = $1`, [source]);
+      // the legacy fixture's own statement — a flat instance would target `Inbox/`
+      const second = await pool.query(`${rewritePathsSql(inboxTargetFor("legacy").vaultInbox)} AND source = $1`, [source]);
       expect(second.rowCount).toBe(0);
     });
 

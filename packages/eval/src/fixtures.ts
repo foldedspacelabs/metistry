@@ -58,7 +58,7 @@ export function looksLikeMatcher(v: unknown): boolean {
 }
 
 /**
- * `"Knowledge/Areas/Home"` and `{ "equals": "Knowledge/Areas/Home" }` mean the
+ * `"Areas/Home"` and `{ "equals": "Areas/Home" }` mean the
  * same thing — the shorthand exists because the owner is writing fifty of
  * these by hand and the common case is an exact argument. The disambiguation
  * is mechanical, not a guess: only a single-key object whose key is one of

@@ -54,10 +54,10 @@ describe("finding a Postgres", () => {
 });
 
 describe("the data directory", () => {
-  it("lives under state/, outside the vault", () => {
-    expect(pgDataDir("/i")).toBe("/i/state/pg");
-    expect(pgSocketDir("/i")).toBe("/i/state/run");
-    expect(pwFilePath("/i/state/pg")).toBe("/i/state/pg.pwfile");
+  it("lives under .metistry/state/, outside the vault", () => {
+    expect(pgDataDir("/i")).toBe("/i/.metistry/state/pg");
+    expect(pgSocketDir("/i")).toBe("/i/.metistry/state/run");
+    expect(pwFilePath("/i/.metistry/state/pg")).toBe("/i/.metistry/state/pg.pwfile");
   });
 
   it("catches a socket path the kernel would silently truncate", () => {

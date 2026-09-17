@@ -11,7 +11,7 @@
 // compute.ts re-exports everything below, so no caller has to know this
 // file exists.
 
-/** Provider names are lowercase kebab-case — the casing rule: only `Knowledge/` is TitleCase. */
+/** Provider names are lowercase kebab-case — the casing rule: only the vault is TitleCase. */
 export const PROVIDER_NAME_RE = /^[a-z][a-z0-9_-]*$/;
 
 export interface ModelRef {

@@ -111,6 +111,7 @@ describe("doctor: everything healthy", () => {
       "service:console=ok",
       "service:watchdog=ok",
       "target:tgt=ok",
+      "instance:instance layout=absent", // a bare temp dir is not an instance directory
       "instance:inbox=ok",
       "db:db=ok",
       "db:migrations=ok",
@@ -153,7 +154,7 @@ describe("doctor: everything healthy", () => {
     expect(await main(["doctor", "--product-dir", productDir], { out: (s) => out.push(s), doctorDeps: deps })).toBe(0);
     const text = out.join("\n");
     expect(text).toMatch(/^name\s+kind\s+status\s+ms\s+remediation/);
-    expect(text).toMatch(/16 checks: 9 ok, 0 degraded, 0 failed, 7 absent — healthy \(.*, shape compose\)/);
+    expect(text).toMatch(/17 checks: 9 ok, 0 degraded, 0 failed, 8 absent — healthy \(.*, shape compose\)/);
     expect(text).toMatch(/^local:llamaserver\s+local-model\s+absent/m);
     expect(text).toMatch(/^local:applefm\s+local-model\s+absent/m);
     expect(text).not.toMatch(/launchd:/); // linux: no launchd rows
@@ -164,7 +165,7 @@ describe("doctor: everything healthy", () => {
     expect(json).toHaveLength(1); // --json purity: nothing but the one document reaches stdout
     const parsed = JSON.parse(json.join("\n"));
     expect(parsed.ok).toBe(true);
-    expect(parsed.rows).toHaveLength(16);
+    expect(parsed.rows).toHaveLength(17);
     expect(parsed.shape).toBe("compose");
     expect(parsed.rows.every((r: DoctorRow) => typeof r.latency_ms === "number" && typeof r.probe === "string")).toBe(true);
   });

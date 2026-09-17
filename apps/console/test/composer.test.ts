@@ -66,7 +66,7 @@ describe("feed subjects: Title Case at render, and only for kinds we compose", (
     expect(titleCase("collector_run", "github-state run failed")).toBe("github-state Run Failed");
     expect(titleCase("alert", "budget over the cap for aws-costs")).toBe("Budget Over the Cap for aws-costs");
     expect(titleCase("agent_admin", "rotated drey_dev token")).toBe("Rotated drey_dev Token");
-    expect(titleCase("review", "wrote Knowledge/Areas/Health/Taper.md")).toBe("Wrote Knowledge/Areas/Health/Taper.md");
+    expect(titleCase("review", "wrote Areas/Health/Taper.md")).toBe("Wrote Areas/Health/Taper.md");
   });
 
   it("keeps short joining words lowercase unless they lead (P10)", () => {

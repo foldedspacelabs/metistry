@@ -10,30 +10,30 @@ import { checkBrief, dispatch, resolveRef, returnFooter, TargetRegistry } from "
 const root = fileURLToPath(new URL("../../../", import.meta.url));
 
 const policy: DataPolicy = {
-  allow: ["Knowledge/Projects", "Knowledge/Areas/fsl"],
+  allow: ["Projects", "Areas/fsl"],
   deny_sources: ["comms"],
   max_brief_bytes: 200,
 };
 
 describe("data policy — enforced at the tool", () => {
   it("passes a brief that cites only allowed prefixes (plain, wikilink, backticks)", () => {
-    const brief = "See Knowledge/Projects/Ios-app.md, [[Knowledge/Areas/fsl/drey/drey.md]] and `Knowledge/Projects`.";
+    const brief = "See Projects/Ios-app.md, [[Areas/fsl/drey/drey.md]] and `Projects`.";
     expect(checkBrief(policy, brief)).toEqual([]);
   });
 
   it("refuses a vault path outside allow, naming the offending paths", () => {
-    const v = checkBrief(policy, "Context: Knowledge/Journal/Daily/2026-09-06.md plus Knowledge/Projects/x.md.");
-    expect(v).toEqual([{ kind: "path_outside_allow", paths: ["Knowledge/Journal/Daily/2026-09-06.md"], allow: policy.allow }]);
+    const v = checkBrief(policy, "Context: Journal/Daily/2026-09-06.md plus Projects/x.md.");
+    expect(v).toEqual([{ kind: "path_outside_allow", paths: ["Journal/Daily/2026-09-06.md"], allow: policy.allow }]);
   });
 
   it("prefix match is per path segment, and traversal never matches", () => {
-    expect(checkBrief(policy, "Knowledge/Areas/fslx/secret.md")[0]?.kind).toBe("path_outside_allow");
-    expect(checkBrief(policy, "Knowledge/Projects/../Me/profile.md")[0]?.kind).toBe("path_outside_allow");
-    expect(checkBrief(policy, "Knowledge/Projects/./x.md")[0]?.kind).toBe("path_outside_allow");
+    expect(checkBrief(policy, "Areas/fslx/secret.md")[0]?.kind).toBe("path_outside_allow");
+    expect(checkBrief(policy, "Projects/../Me/profile.md")[0]?.kind).toBe("path_outside_allow");
+    expect(checkBrief(policy, "Projects/./x.md")[0]?.kind).toBe("path_outside_allow");
   });
 
   it("an empty allow list refuses every vault reference", () => {
-    expect(checkBrief({ ...policy, allow: [] }, "read Knowledge/Projects/x.md")[0]?.kind).toBe("path_outside_allow");
+    expect(checkBrief({ ...policy, allow: [] }, "read Projects/x.md")[0]?.kind).toBe("path_outside_allow");
     expect(checkBrief({ ...policy, allow: [] }, "no vault refs here")).toEqual([]);
   });
 
@@ -53,7 +53,7 @@ describe("data policy — enforced at the tool", () => {
   });
 
   it("reports every violation kind found, in a stable order", () => {
-    const v = checkBrief(policy, "source: comms — see Knowledge/Me/profile.md");
+    const v = checkBrief(policy, "source: comms — see Me/profile.md");
     expect(v.map((x) => x.kind)).toEqual(["denied_source", "path_outside_allow"]);
   });
 });
@@ -110,7 +110,7 @@ describe("dispatch (fakes)", () => {
     const reg = new TargetRegistry({ env: { TOKEN: "t", REPO: "o/r" }, fetchFn: fakeFetch(calls) });
     reg.add(manifest);
     const db = fakeDb(task);
-    const r = await dispatch(db, reg, 7, "github-issues", "Do X per Knowledge/Projects/x.md", "owner");
+    const r = await dispatch(db, reg, 7, "github-issues", "Do X per Projects/x.md", "owner");
     expect(r).toEqual({ ok: true, ref: "gh:o/r#42", url: "https://github.com/o/r/issues/42", run_id: 101 });
 
     expect(calls).toHaveLength(1);
@@ -118,7 +118,7 @@ describe("dispatch (fakes)", () => {
     expect((calls[0]!.init!.headers as Record<string, string>).authorization).toBe("Bearer t");
     const body = JSON.parse(String(calls[0]!.init!.body));
     expect(body.title).toBe("ship the thing");
-    expect(body.body).toContain("Do X per Knowledge/Projects/x.md");
+    expect(body.body).toContain("Do X per Projects/x.md");
     expect(body.body).toContain(returnFooter(7, "github-issues"));
     expect(body.body).toMatch(/task #7/);
 
@@ -140,7 +140,7 @@ describe("dispatch (fakes)", () => {
     const reg = new TargetRegistry({ env: { TOKEN: "t", REPO: "o/r" }, fetchFn: fakeFetch(calls) });
     reg.add(manifest);
     const db = fakeDb(task);
-    const r = await dispatch(db, reg, 7, "github-issues", "summarize Knowledge/Me/profile.md", "owner", ["comms"]);
+    const r = await dispatch(db, reg, 7, "github-issues", "summarize Me/profile.md", "owner", ["comms"]);
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.code).toBe("invalid_request");

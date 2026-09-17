@@ -158,7 +158,7 @@ describe("the tool loop", () => {
       { body: chat(null, { tool_calls: [toolCall("c1", "mcp__brain__knowledge_search", { q: "folds" })] }) },
       { body: chat("three notes mention folds") },
     ]);
-    const h = host({ mcp__brain__knowledge_search: "Knowledge/Areas/folds.md" });
+    const h = host({ mcp__brain__knowledge_search: "Areas/folds.md" });
     const r = await engineOn(cloud, s, h)("what do we know about folds?", { model: cloud.model, effort: cloud.effort, assignment: cloud, thread: "t" });
 
     expect(h.calls).toEqual(["mcp__brain__knowledge_search"]);
@@ -167,7 +167,7 @@ describe("the tool loop", () => {
     expect(r.turns).toBe(2);
     expect(h.closed).toBe(1); // the host is closed even on the happy path
     const second = s.requests[1]!.body.messages;
-    expect(second.at(-1)).toMatchObject({ role: "tool", tool_call_id: "c1", content: "Knowledge/Areas/folds.md" });
+    expect(second.at(-1)).toMatchObject({ role: "tool", tool_call_id: "c1", content: "Areas/folds.md" });
     expect(s.requests[0]!.body.tools[0].function.name).toBe("mcp__brain__knowledge_search");
   });
 
@@ -404,21 +404,21 @@ assignments:
     const s = server([
       { body: chat(null, { tool_calls: [search] }) },            // the real turn calls the tool …
       { body: chat("three notes mention folds") },               // … and answers
-      { body: chat(null, { tool_calls: [search, toolCall("c2", "mcp__brain__knowledge_write", { path: "Knowledge/Areas/folds.md" })] }) }, // the shadow calls it, and a WRITE
+      { body: chat(null, { tool_calls: [search, toolCall("c2", "mcp__brain__knowledge_write", { path: "Areas/folds.md" })] }) }, // the shadow calls it, and a WRITE
       { body: chat("two notes, and I wrote one") },
     ]);
-    const h = host({ mcp__brain__knowledge_search: "Knowledge/Areas/folds.md" });
+    const h = host({ mcp__brain__knowledge_search: "Areas/folds.md" });
     const r = await engineOn(shadowed, s, h, { random: () => 0 })("what about folds?", spec());
 
     // the REAL host was called once, by the real turn, and not again
     expect(h.calls).toEqual(["mcp__brain__knowledge_search"]);
     expect(r.shadow?.shadow.tool_calls).toEqual([
       { name: "mcp__brain__knowledge_search", args: { q: "folds" }, executed: false, result_from: "real_run" },
-      { name: "mcp__brain__knowledge_write", args: { path: "Knowledge/Areas/folds.md" }, executed: false, result_from: "stub" },
+      { name: "mcp__brain__knowledge_write", args: { path: "Areas/folds.md" }, executed: false, result_from: "stub" },
     ]);
     // the recorded result is the real one for the identical call; the write got the stub
     const shadowTurn = s.requests[3]!.body.messages.filter((m: any) => m.role === "tool");
-    expect(shadowTurn[0].content).toBe("Knowledge/Areas/folds.md");
+    expect(shadowTurn[0].content).toBe("Areas/folds.md");
     expect(shadowTurn[1].content).toContain("recorded, not executed");
     // and the ORDER is what agreement compares, so a one-extra-call shadow disagrees
     expect(r.shadow?.agreement.tool_sequence).toBe(false);

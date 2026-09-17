@@ -1,8 +1,8 @@
 // The vault inbox against the real (scratch) database: a file that appears
-// under `Knowledge/Inbox/` without a capture call must get a triage row, a
+// under `Inbox/` without a capture call must get a triage row, a
 // human's edit must refresh it (and re-open it for the drain), and a
 // deleted file must archive it — the owner's 2026-09-16 ruling that edits
-// made in `Knowledge/` are first-class and never lost. Skipped without a db.
+// made in `` are first-class and never lost. Skipped without a db.
 import { readFileSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -21,7 +21,7 @@ try {
 } catch {}
 
 const hasDb = !!process.env.METISTRY_DB_PASSWORD;
-const INBOX = "Knowledge/Inbox";
+const INBOX = "Inbox";
 
 describe.skipIf(!hasDb)("the vault inbox is indexed from the tree (real db)", () => {
   let pool: pg.Pool;

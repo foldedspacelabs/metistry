@@ -24,6 +24,9 @@ engine that dials a provider. Deliberately still absent, each a named PR in
 
 - **No app pane.** The Compute pane, and wizard step 7 becoming "Choose your
   compute", are PR 1a — deliberately split so the verb surface settles first.
+  The *server* half is no longer missing: five of the verbs are console routes
+  ("From the console", below), so the pane is a client to write rather than an
+  API to design.
 - **No bundled local server.** `llama-server` built into the runtime-deps
   pack is PR 2; LM Studio and Ollama work today as ordinary
   OpenAI-compatible providers.
@@ -167,6 +170,53 @@ instance's, so every instance on this Mac shares it and
 assigned model, carrying the provider's own `request:` block — the only
 thing that proves the key can buy a completion rather than just list a
 catalogue.
+
+### From the console
+
+Five of the verbs above are also console routes, so compute is not Mac-only
+and the Compute pane works from the phone (`docs/ops/console-api.md`
+`/api/compute*`, `docs/product/app-ux-plan.md` §6 phase D):
+
+| route | the verb it is |
+| --- | --- |
+| `GET /api/compute` | `compute show --json`, plus `spend` (both budget windows, from the `spend` named query) and `writable` |
+| `GET /api/compute/models[?provider=]` | `compute models list --json` |
+| `POST /api/compute/assign` `{tier\|crew, model, effort?}` | `compute assign` |
+| `POST /api/compute/budget` `{scope, daily?, monthly?, action}` | `compute budget` |
+| `POST /api/compute/providers/test` `{name, complete?}` | `compute providers test` |
+
+They are the **same exported functions**, not a second implementation: the
+same YAML-document edit, the same re-validation of the result before anything
+is written, the same write through the reconciler as `user`. A refusal reads
+identically on both doors because it *is* the same refusal.
+
+**Two verbs are deliberately not there: `providers add` and `providers
+remove`.** Adding a provider takes a key, and a key goes on stdin into the
+login Keychain from the hand of the person at the machine — a *user*-scoped
+credential shared by every instance on that Mac is not one instance's to
+accept over HTTP. So **adding or removing a provider, and anything that takes
+a secret, stays CLI/app-only.** `GET /api/compute` reports the secret's NAME
+and whether an item of that name exists (`secret_present`), never a value;
+where there is no login Keychain — a container — it reports the honest
+`false`.
+
+**They are owner-only configuration, not console "actions".** Invariant 10
+closes the console's *action* surface: a closed, enumerated set, each entry a
+door onto an existing audited service, a new one a product change
+(`docs/ops/actions.md`). These routes are not on that list and must not be
+added to it. `compute.yaml` says how the system behaves, so it is the `user`
+principal's alone (invariant 2) — an agent bearer and a capture owner token
+both get the canonical `403`, no `propose_action` kind reaches it, and no
+autonomy level can.
+
+**Writing needs a readable instance directory.** Every write opens
+`<instance>/.metistry/compute.yaml` as a document, so the console must be able
+to read it: the launchd/native shape can, the compose shape deliberately
+cannot (D5 — the reconciler is the sole holder of the instance repo), and
+there every route answers `503` naming `METISTRY_INSTANCE_DIR` while
+`metistry compute` keeps working. If `METISTRY_COMPUTE_FILES` ends somewhere
+other than that file the write is refused with both paths named, rather than
+starting from a bare header and overwriting the real one.
 
 ## Templates
 

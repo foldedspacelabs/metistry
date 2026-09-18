@@ -248,7 +248,7 @@ const computeAdmin: ComputeAdmin | undefined =
     : undefined;
 console.log(
   computeAdmin
-    ? `compute admin: ${instancePath(computeAdmin.instanceDir, "compute")} (secret presence ${computeAdmin.platform === "darwin" ? "from the login Keychain" : "unknown — no Keychain on " + computeAdmin.platform})`
+    ? `compute admin: ${resolveInstanceLayout(computeAdmin.instanceDir).path("compute")} (secret presence ${computeAdmin.platform === "darwin" ? "from the login Keychain" : "unknown — no Keychain on " + computeAdmin.platform})`
     : "compute admin absent: METISTRY_INSTANCE_DIR is unset or not readable — /api/compute* answers 503; `metistry compute` still works (degrades: absent)",
 );
 

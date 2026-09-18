@@ -848,15 +848,19 @@ nothing.
   `aria-controls` / `aria-activedescendant`, so the caret never leaves
   the textarea.
 
-**Sources, and the one that does not exist yet.** Agents come from
-`GET /api/agents` — live today. Commands **must** come from a real
-endpoint over the instance's own `rules.yaml`; that endpoint is not built
-(§4.2 has no route for it), so the PWA ships a short static list with the
-gap marked in code at its single definition site. It is a placeholder
-with an expiry, not a design: a hand-maintained command list is exactly
-what ux-direction ruled out, and the first instance whose `rules.yaml`
-differs from the shipped defaults will be lied to. Nothing else in the
-menu is allowed a fallback of this kind.
+**Sources — both generated.** Agents come from `GET /api/agents`.
+Commands come from `GET /api/commands`, which derives them from the
+instance's own `rules.yaml` (`docs/ops/console-api.md`): `/note`, the
+`deep` alias under whatever name that instance gives it, `/model`, and a
+slash command for every `fast_path` rule whose pattern spells one
+unambiguously. Each entry carries the tier it routes to and, for a fast
+path, the named query that answers it — so the menu's one-line
+description is the query's own and there is nothing to keep in sync. A
+rule whose regex is a sentence rather than a command (`^what's my
+status`) yields no entry, on purpose: it is reachable by writing the
+sentence. **Neither list may have a hand-maintained fallback** — that is
+exactly what ux-direction ruled out, and until 2026-09-18 the PWA's
+static array was the one exception, marked in code with an expiry.
 
 **Never.** The menu never survives a send. It never covers the last
 message while collapsed, and it is never rendered as a permanent row of

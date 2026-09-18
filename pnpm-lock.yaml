@@ -57,6 +57,9 @@ importers:
       '@foldedspacelabs/metistry-artifacts':
         specifier: workspace:*
         version: link:../../packages/artifacts
+      '@foldedspacelabs/metistry-cli':
+        specifier: workspace:*
+        version: link:../../packages/cli
       '@foldedspacelabs/metistry-core':
         specifier: workspace:*
         version: link:../../packages/core

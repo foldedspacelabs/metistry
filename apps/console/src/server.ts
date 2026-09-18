@@ -44,6 +44,9 @@ import { listProjects, updateProject, validateProjectPatch } from "./projects.js
 import { applyImprovement } from "./prompt-overlay.js";
 import { crewDispatcher, type CrewRegistry } from "./crews.js";
 import { runAction, type ActionServices } from "./actions.js";
+import { computeRoutes, isComputeRoute, type ComputeAdmin } from "./compute-routes.js";
+import { isKnowledgeRoute, knowledgeRoutes, OWNER_SCOPE, type KnowledgeSearcher } from "./knowledge-routes.js";
+import { agentList, commandList } from "./commands.js";
 import { createRequire } from "node:module";
 
 const require_ = createRequire(import.meta.url);
@@ -76,6 +79,10 @@ export interface ConsoleConfig {
   listKnowledge?: KnowledgeLister;
   /** Keyword-mode content search for mcp-brain's knowledge_grep candidate pre-filter (the reconciler's GET /vault/search?mode=keyword); absent = knowledge_grep falls back to listKnowledge for candidates. */
   searchVaultKeyword?: KnowledgeVaultSearcher;
+  /** Full-result vault search in a caller-chosen mode, for `GET /api/knowledge/search` (knowledge-routes.ts); absent = that route answers not_available. */
+  searchKnowledge?: KnowledgeSearcher | undefined;
+  /** What `/api/compute*` may edit: the instance repo whose `.metistry/compute.yaml` the verbs open. Absent = compute is not reachable from this console and every one of those routes answers not_available (compute-routes.ts). */
+  computeAdmin?: ComputeAdmin | undefined;
   /** The vault client the artifacts module (§4.21) stores content through; absent = artifacts degrade to not_available. */
   vault?: VaultClient;
   /** Loaded crew manifests (crews.ts); absent = agents_delegate answers not_available. */
@@ -151,6 +158,12 @@ const DISPATCH_ROUTE = /^POST \/api\/tasks\/(\d{1,12})\/dispatch$/;
 // A thumbs up/down on one reply (docs/ops/reply-feedback.md). Session only —
 // this is the user's own judgement, not something a script speaks for.
 const FEEDBACK_ROUTE = /^(POST|DELETE) \/api\/messages\/(\d{1,12})\/feedback$/;
+// One row of the ledger, in full — what a tap on an activity-feed `runs:<id>`
+// opens (docs/product/app-ux-plan.md §6 phase B). Read-only, `user` principal,
+// through the `run_detail` named query like every other read (invariant 3).
+const RUN_DETAIL_ROUTE = /^GET \/api\/runs\/(\d{1,12})$/;
+/** The named query `GET /api/runs/:id` is served from. Its ABSENCE is a refusal with a status, exactly as the export's is. */
+const RUN_DETAIL_QUERY = "run_detail";
 
 // ----- the two verbs that are not answers (docs/ops/reply-feedback.md) -----
 //
@@ -690,7 +703,16 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         key === "GET /api/projects" ||
         PROJECT_ROUTE.test(key) ||
         key === "GET /api/runs/export" ||
+        RUN_DETAIL_ROUTE.test(key) ||
         key === "GET /api/instances" ||
+        key === "GET /api/commands" ||
+        // `/api/compute*` is owner-only CONFIGURATION, not an invariant-10
+        // action: it changes how the system behaves, so it is the user's
+        // hand and nothing else's (invariant 2). `/api/knowledge/*` is the
+        // owner's read path into their own vault; an agent reaches knowledge
+        // under its grants on the `/mcp` mount, never here.
+        isComputeRoute(url.pathname) ||
+        isKnowledgeRoute(url.pathname) ||
         isTaskOpRoute(key) ||
         isArtifactRoute(url.pathname)
       ) {
@@ -745,6 +767,47 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         res.destroy();
         return;
       }
+    }
+
+    // ----- one run, in full: the activity feed's drill-down (owner only) -----
+    const runDetail = RUN_DETAIL_ROUTE.exec(key);
+    if (runDetail) {
+      if (!queries.names().includes(RUN_DETAIL_QUERY)) {
+        return sendError(res, "not_available", `the named query ${RUN_DETAIL_QUERY} is not loaded (seed/queries/${RUN_DETAIL_QUERY}.yaml, METISTRY_QUERIES_DIRS)`);
+      }
+      const result = await queries.run(RUN_DETAIL_QUERY, { id: runDetail[1]! });
+      const row = result.rows[0];
+      if (!row) return sendError(res, "not_found", `no run ${runDetail[1]} in the ledger`);
+      return sendJson(res, 200, { run: row, as_of: result.as_of.toISOString() });
+    }
+
+    // ----- the composer's command list, GENERATED (docs/ops/console-api.md) -----
+    // rules.yaml's routes plus the agent registry — never a hand-maintained
+    // array, which is what docs/product/ux-direction.md rules out. `tiers` is
+    // the LIVE map: compute.yaml's assignments when it has any, else
+    // rules.yaml's own block (main.ts keeps `rules.tiers` on the file in
+    // force), so a reassignment shows in the menu without a restart.
+    if (key === "GET /api/commands") {
+      if (!cfg.rules) return sendError(res, "not_available", "no rules.yaml is loaded in this deployment — METISTRY_RULES_FILES names the files to read (default seed/rules.yaml plus the instance's own)");
+      const described = new Map(queries.list().map((q) => [q.name, q.description]));
+      return sendJson(res, 200, {
+        commands: commandList(cfg.rules, (name) => described.get(name)),
+        agents: agentList(await agents.listAgents(db)),
+        as_of: new Date().toISOString(),
+      });
+    }
+
+    // ----- compute (C1): owner-only configuration, never an action -----
+    if (isComputeRoute(url.pathname)) {
+      return computeRoutes(req, res, key, url, { admin: cfg.computeAdmin, queries, audit });
+    }
+
+    // ----- knowledge: the owner's read path into their own vault -----
+    // OWNER_SCOPE is "every vault path", which is not "every path": the
+    // route still refuses `.metistry/`, `Artifacts/` and the root CLAUDE.md,
+    // because the bridge underneath it does not (knowledge-routes.ts).
+    if (isKnowledgeRoute(url.pathname)) {
+      return knowledgeRoutes(req, res, key, url, { ...(cfg.searchKnowledge ? { search: cfg.searchKnowledge } : {}), ...(cfg.vault ? { vault: cfg.vault } : {}) }, OWNER_SCOPE, audit);
     }
 
     // ----- projects (§4.19 panel, §4.21 controls; owner session only) -----

@@ -32,6 +32,7 @@
 #     locality: off_machine
 #     auth: { secret: METISTRY_OPENROUTER_API_KEY }   # a NAME. The value lives in the login Keychain, user scope.
 #     zdr: true
+#     caching: auto                                   # send OpenRouter's automatic prompt-caching field on every call (off everywhere else)
 #     request: { provider: { order: [anthropic], allow_fallbacks: false } }
 #     data_policy: { allow: [Projects], deny_sources: [comms], max_brief_bytes: 65536 }
 #

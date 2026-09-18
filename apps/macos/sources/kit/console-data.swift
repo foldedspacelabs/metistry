@@ -1,0 +1,1437 @@
+// The wire shapes `docs/ops/console-api.md` documents, and nothing more.
+//
+// Two kinds of thing live here and they are not the same kind.
+//
+//   * **Route replies** — `/api/identity`, `/api/proposals`, `/api/compute`,
+//     `/api/knowledge/*`, `/api/commands`, `/api/runs/:id`, `/api/tasks/*`.
+//     Hand-written objects in `apps/console/src`, snake_case, a real contract.
+//   * **Named-query results** — `/api/q/<name>` is always `{rows, as_of}` and
+//     the row's columns are the query's `SELECT` list. Invariant 3 is why these
+//     arrive this way: the SQL lives in the instance's `queries/` where the
+//     owner can override it (D4), so these types restate a column list that a
+//     local overlay may legitimately widen. Every added column is ignored; a
+//     missing one is `nil` and the row still renders (P5).
+//
+// TWO THINGS THAT BITE, AND ARE HANDLED HERE RATHER THAN AT EVERY CALL SITE.
+//
+// **Postgres `numeric` arrives as a STRING.** `pg` installs no type parser, so
+// `runs.cost_usd numeric(10,6)` is `"0.001234"` on the wire while an
+// `::float8` column is a number. `wireDouble` decodes either and guesses
+// neither; `packages/core/src/budget.ts`'s `money_()` is the same tolerance on
+// the server side, for the same reason.
+//
+// **Timestamps are text.** `JSON.stringify` turns a `pg` Date into an ISO
+// string, and these types keep them as `String` — the app renders what the
+// console said. `WireTime.date(_:)` parses one where a comparison is needed
+// (staleness, ordering), with and without fractional seconds.
+
+import Foundation
+
+// MARK: - Reading the wire's two number spellings, and its timestamps
+
+extension KeyedDecodingContainer {
+    /// A `numeric` column (a string) or a `float8` one (a number). Absent,
+    /// null and a spelling that is neither are all nil, and none of them
+    /// throws: one unexpected column type must not blank a whole pane (P5).
+    /// `decodeIfPresent` is deliberately not used — it THROWS on a type
+    /// mismatch, which is exactly the case this exists to absorb.
+    func wireDouble(_ key: Key) -> Double? {
+        if let d = try? decode(Double.self, forKey: key) { return d }
+        if let s = try? decode(String.self, forKey: key) { return Double(s) }
+        return nil
+    }
+
+    /// The same tolerance for a count. `count(*)` is a `bigint`, which `pg`
+    /// also hands back as a string once it exceeds 2^53 — and the casts in
+    /// `seed/queries/` are inconsistent about `::int`.
+    func wireInt(_ key: Key) -> Int? {
+        if let i = try? decode(Int.self, forKey: key) { return i }
+        if let s = try? decode(String.self, forKey: key) { return Int(s) }
+        return nil
+    }
+}
+
+public enum WireTime {
+    /// An ISO 8601 instant as the console prints it, with or without fractional
+    /// seconds. Nil for anything else — never `Date()`, which would be a
+    /// staleness claim nobody made.
+    public static func date(_ text: String?) -> Date? {
+        guard let text, !text.isEmpty else { return nil }
+        let withFraction = ISO8601DateFormatter()
+        withFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let d = withFraction.date(from: text) { return d }
+        return ISO8601DateFormatter().date(from: text)
+    }
+}
+
+// MARK: - identity and whoami
+
+/// `GET /api/identity`. `voice` and `mention` never cross this wire.
+public struct ConsoleIdentity: Codable, Sendable, Equatable {
+    /// The key everything else is filed under, because an origin can move.
+    public let instanceID: String
+    public let name: String
+    public let icon: String?
+    /// The fixed, deliberately uninformative vocabulary: `artifacts` ·
+    /// `capture` · `dispatch` · `knowledge` · `queries` · `tasks`. A tool
+    /// GROUP, never a tool name and never a count of anything.
+    public let capabilities: [String]
+    public let version: String?
+    public let asOf: String?
+
+    enum CodingKeys: String, CodingKey {
+        case name, icon, capabilities, version
+        case instanceID = "instance_id"
+        case asOf = "as_of"
+    }
+
+    public init(instanceID: String, name: String, icon: String? = nil, capabilities: [String] = [], version: String? = nil, asOf: String? = nil) {
+        self.instanceID = instanceID
+        self.name = name
+        self.icon = icon
+        self.capabilities = capabilities
+        self.version = version
+        self.asOf = asOf
+    }
+
+    public func has(_ capability: String) -> Bool { capabilities.contains(capability) }
+}
+
+/// `GET /api/whoami`. There is no field a token could land in, which is the
+/// same property `ConsoleWhoami` has for the CLI's answer.
+public struct ConsoleWhoamiReply: Codable, Sendable, Equatable {
+    public let principal: String
+    public let via: String
+    public let management: Bool
+    public let origin: String?
+    public let asOf: String?
+
+    enum CodingKeys: String, CodingKey {
+        case principal, via, management, origin
+        case asOf = "as_of"
+    }
+}
+
+// MARK: - the feed
+
+/// `GET /api/q/activity_feed` — `{rows, as_of}`, newest first.
+public struct ActivityFeed: Codable, Sendable, Equatable {
+    public let rows: [ActivityFeedRow]
+    public let asOf: String?
+
+    enum CodingKeys: String, CodingKey {
+        case rows
+        case asOf = "as_of"
+    }
+
+    public init(rows: [ActivityFeedRow], asOf: String? = nil) {
+        self.rows = rows
+        self.asOf = asOf
+    }
+
+    /// The newest `ts` on the page — what to send back as `since`.
+    public var cursor: String? { rows.map(\.ts).max() }
+
+    /// Fold a `since` page into what is already on screen.
+    ///
+    /// `since` is **inclusive** (the query's own comment says why: two rows can
+    /// share a microsecond across two branches of the union, and a strict `>`
+    /// would drop the second forever), so the newest rows always come back
+    /// again. De-duplication is on `(ref, ts, kind)` — the tuple the query
+    /// names — and never on `ref` alone, because one work row produces many
+    /// history events and they are all real.
+    public func merging(_ page: ActivityFeed) -> ActivityFeed {
+        var seen = Set(page.rows.map(\.identity))
+        var merged = page.rows
+        for row in rows where !seen.contains(row.identity) {
+            seen.insert(row.identity)
+            merged.append(row)
+        }
+        merged.sort { $0.ts > $1.ts }
+        return ActivityFeed(rows: merged, asOf: page.asOf ?? asOf)
+    }
+}
+
+public struct ActivityFeedRow: Codable, Sendable, Equatable, Identifiable {
+    public let ts: String
+    /// The exact row kind — `capture`, `tool`, `turn`, `task_op`, `proposal`, …
+    public let kind: String
+    /// The coarser closed vocabulary the chips read: capture | proposal |
+    /// decision | run | work | message. Decided in the query, not per surface.
+    public let group: String?
+    public let actor: String?
+    public let subject: String?
+    /// Truncated to 200 characters by the query. What is shown is what came.
+    public let detail: String?
+    /// `runs:<id>`, `inbox:<id>`, `work:<id>`, `outbound_messages:<id>` — what a
+    /// tap opens.
+    public let ref: String?
+    /// The id stamped on every brain tool call made while answering one
+    /// message; nil on everything that is not one.
+    public let turnID: String?
+
+    enum CodingKeys: String, CodingKey {
+        case ts, kind, group, actor, subject, detail, ref
+        case turnID = "turn_id"
+    }
+
+    public init(ts: String, kind: String, group: String? = nil, actor: String? = nil, subject: String? = nil, detail: String? = nil, ref: String? = nil, turnID: String? = nil) {
+        self.ts = ts
+        self.kind = kind
+        self.group = group
+        self.actor = actor
+        self.subject = subject
+        self.detail = detail
+        self.ref = ref
+        self.turnID = turnID
+    }
+
+    /// The de-duplication tuple, and the row's identity for a `ForEach`. `ref`
+    /// alone is not unique: a work row emits one event per history entry.
+    public var identity: String { "\(ref ?? "-")|\(ts)|\(kind)" }
+    public var id: String { identity }
+
+    /// The run this row drills into, when it is one.
+    public var runID: Int? {
+        guard let ref, ref.hasPrefix("runs:") else { return nil }
+        return Int(ref.dropFirst(5))
+    }
+}
+
+// MARK: - Needs You
+
+/// `GET /api/proposals`. Without a cursor: the triage queue, pending only,
+/// newest first. With one: **everything that changed**, oldest first, each row
+/// carrying its decision — so a reconnect learns what was settled while it was
+/// away instead of showing a stale queue.
+public struct RequestPage: Codable, Sendable, Equatable {
+    public let proposals: [RequestRow]
+    /// Opaque. Handed back, never parsed.
+    public let cursor: String?
+    /// Whether a page was cut at `limit`.
+    public let more: Bool
+
+    public init(proposals: [RequestRow], cursor: String? = nil, more: Bool = false) {
+        self.proposals = proposals
+        self.cursor = cursor
+        self.more = more
+    }
+
+    /// What is still in the queue, after folding a `since` page in.
+    ///
+    /// A changed row REPLACES the one on screen; a row that came back settled
+    /// or snoozed into the future leaves the queue, because that is what the
+    /// queue means. Order is the queue's own — newest first.
+    public func merging(_ page: RequestPage, now: Date = Date()) -> RequestPage {
+        var byID: [Int: RequestRow] = Dictionary(uniqueKeysWithValues: proposals.map { ($0.id, $0) })
+        for row in page.proposals { byID[row.id] = row }
+        let live = byID.values
+            .filter { $0.isInQueue(now: now) }
+            .sorted { $0.ts > $1.ts }
+        return RequestPage(proposals: live, cursor: page.cursor ?? cursor, more: page.more)
+    }
+}
+
+public struct RequestRow: Codable, Sendable, Equatable, Identifiable {
+    public let id: Int
+    public let ts: String
+    /// One of the seven request types (`glossary.md`). `decision` is the kind
+    /// whose answers come from its own `payload.options`.
+    public let kind: String
+    public let sourceAgent: String?
+    public let trust: String?
+    /// The payload as it stands. Held as JSON because every kind's is a
+    /// different shape and a struct per kind would be a catalogue that goes
+    /// stale (json-value.swift explains the rule).
+    public let payload: JSONValue?
+    /// `pending` until answered. `later` leaves it `pending` on purpose.
+    public let decision: String?
+    public let decidedAt: String?
+    /// The `work` row this request came from or made.
+    public let workID: Int?
+    /// Set by Later. The row stays pending and comes back by itself.
+    public let snoozedUntil: String?
+    /// The cursor for THIS row, accepted as `if_unchanged.seen_at`.
+    public let cursor: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, ts, kind, trust, payload, decision, cursor
+        case sourceAgent = "source_agent"
+        case decidedAt = "decided_at"
+        case workID = "work_id"
+        case snoozedUntil = "snoozed_until"
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = c.wireInt(.id) ?? 0
+        ts = try c.decodeIfPresent(String.self, forKey: .ts) ?? ""
+        kind = try c.decodeIfPresent(String.self, forKey: .kind) ?? ""
+        trust = try c.decodeIfPresent(String.self, forKey: .trust)
+        payload = try c.decodeIfPresent(JSONValue.self, forKey: .payload)
+        decision = try c.decodeIfPresent(String.self, forKey: .decision)
+        cursor = try c.decodeIfPresent(String.self, forKey: .cursor)
+        sourceAgent = try c.decodeIfPresent(String.self, forKey: .sourceAgent)
+        decidedAt = try c.decodeIfPresent(String.self, forKey: .decidedAt)
+        workID = c.wireInt(.workID)
+        snoozedUntil = try c.decodeIfPresent(String.self, forKey: .snoozedUntil)
+    }
+
+    public init(id: Int, ts: String, kind: String, payload: JSONValue? = nil, decision: String? = "pending", cursor: String? = nil, snoozedUntil: String? = nil, sourceAgent: String? = nil, trust: String? = nil, decidedAt: String? = nil, workID: Int? = nil) {
+        self.id = id
+        self.ts = ts
+        self.kind = kind
+        self.payload = payload
+        self.decision = decision
+        self.cursor = cursor
+        self.snoozedUntil = snoozedUntil
+        self.sourceAgent = sourceAgent
+        self.trust = trust
+        self.decidedAt = decidedAt
+        self.workID = workID
+    }
+
+    public var isPending: Bool { (decision ?? "pending") == "pending" }
+
+    /// Snoozed to an instant that has not arrived. It is hidden from the queue
+    /// AND from the morning brief — a `later` that still pushes at 07:00 is a
+    /// lie — and there is no un-snooze verb, because a queue you can pull items
+    /// back into has two orders in it.
+    public func isSnoozed(now: Date = Date()) -> Bool {
+        guard let until = WireTime.date(snoozedUntil) else { return false }
+        return until > now
+    }
+
+    public func isInQueue(now: Date = Date()) -> Bool { isPending && !isSnoozed(now: now) }
+
+    /// The answers this row actually offers. The server validates the same set
+    /// **against the stored row**, never against the request, so this is the
+    /// client half of one rule rather than a second rule.
+    public var answers: [RequestAnswer] {
+        var offered: [RequestAnswer]
+        if kind == "decision", let options = payload?["options"]?.arrayValue?.compactMap(\.stringValue), !options.isEmpty {
+            // A blocking question is answered with its OWN options, plus
+            // Decline, which is always available.
+            offered = options.map { RequestAnswer.option($0) } + [.decline(nil)]
+        } else {
+            offered = [.approve, .revise(""), .decline(nil)]
+        }
+        offered += [.later, .skip]
+        if suggestedWork != nil { offered.append(.approveAsWork) }
+        return offered
+    }
+
+    /// `payload.suggested_work` — the one thing Approve as Work builds a row
+    /// from, and the only reason that answer appears.
+    public var suggestedWork: SuggestedWork? {
+        guard let s = payload?["suggested_work"], let title = s.string("title") else { return nil }
+        return SuggestedWork(title: title, project: s.string("project"), kind: s.string("kind"))
+    }
+
+    /// The title a card shows, when the payload carries one.
+    public var title: String? { payload?.string("title") }
+}
+
+public struct SuggestedWork: Sendable, Equatable {
+    public let title: String
+    public let project: String?
+    public let kind: String?
+
+    public init(title: String, project: String? = nil, kind: String? = nil) {
+        self.title = title
+        self.project = project
+        self.kind = kind
+    }
+}
+
+/// The six answers (app-ux-plan.md §7.4; docs/ops/reply-feedback.md is the
+/// normative account of what each does on the wire), plus the option form a
+/// `decision` request is answered with.
+public enum RequestAnswer: Sendable, Equatable {
+    /// The verb with per-kind consequences: an `improvement` writes the prompt
+    /// overlay, an enrolment lets the agent in, an `action` RUNS.
+    case approve
+    /// Keeps your reason on the row. An empty reason cancels rather than sends
+    /// — the assistant has nothing to change without one, which is why
+    /// `isSendable` is false for it.
+    case revise(String)
+    /// Also per-kind: declining an enrolment REVOKES the agent's token.
+    case decline(String?)
+    /// Offered only where the row carries `payload.suggested_work`.
+    case approveAsWork
+    /// A snooze. Settles nothing: the row stays pending and comes back by
+    /// itself.
+    case later
+    /// Declines with nothing to say, and fires NONE of Decline's per-kind
+    /// consequences. The server writes the fixed `SKIP_FEEDBACK` marker, not
+    /// your words — a skip is you putting something down, and nothing may read
+    /// it as feedback.
+    case skip
+    /// A `decision` request is answered with one of its own `payload.options`
+    /// (an enrolment's are `approve` and `deny`), and the option set is
+    /// validated against the stored row. The client sends the option it was
+    /// SHOWN rather than a verb it chose.
+    case option(String)
+
+    public var wire: String {
+        switch self {
+        case .approve: return "allow"
+        case .revise: return "accept_with_changes"
+        case .decline: return "deny"
+        case .approveAsWork: return "accept_as_work"
+        case .later: return "later"
+        case .skip: return "skip"
+        case .option(let value): return value
+        }
+    }
+
+    public var feedback: String? {
+        switch self {
+        case .revise(let reason): return reason
+        case .decline(let reason): return reason
+        default: return nil
+        }
+    }
+
+    /// Only Later, Skip and Decline may be applied to many rows: the verbs that
+    /// need nothing from the individual row. Approve, Revise and Approve as
+    /// Work each DO something per kind — an `action` most of all, where a
+    /// batched allow would dispatch five briefs on one gesture.
+    public var isBatchable: Bool {
+        switch self {
+        case .later, .skip, .decline: return true
+        default: return false
+        }
+    }
+
+    /// Revise with an empty reason is a cancel, not a send.
+    public var isSendable: Bool {
+        if case .revise(let reason) = self { return !reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        return true
+    }
+
+    /// The button's label. A builder word must never reach one, so these are
+    /// the product's words and not the wire's.
+    public var label: String {
+        switch self {
+        case .approve: return "Approve"
+        case .revise: return "Revise"
+        case .decline: return "Decline"
+        case .approveAsWork: return "Approve as Work"
+        case .later: return "Later"
+        case .skip: return "Skip"
+        case .option(let value): return value.replacingOccurrences(of: "_", with: " ").capitalized
+        }
+    }
+}
+
+/// `POST /api/proposals/:id`'s 200. `work` on an Approve as Work, `action` on
+/// an allowed `action` request.
+public struct RequestAnswerResult: Codable, Sendable, Equatable {
+    public let ok: Bool
+    public let work: AnsweredWork?
+    public let action: AnsweredAction?
+
+    public struct AnsweredWork: Codable, Sendable, Equatable {
+        public let id: Int
+        public let title: String?
+        public let project: String?
+    }
+
+    public struct AnsweredAction: Codable, Sendable, Equatable {
+        public let kind: String
+        public let ref: String?
+        public let url: String?
+        public let runID: Int?
+
+        enum CodingKeys: String, CodingKey {
+            case kind, ref, url
+            case runID = "run_id"
+        }
+    }
+}
+
+/// `POST /api/proposals/batch` — always a 200; the per-row `ok` is the outcome.
+public struct RequestBatchResult: Codable, Sendable, Equatable {
+    public let results: [Row]
+
+    public struct Row: Codable, Sendable, Equatable, Identifiable {
+        public let id: Int
+        public let ok: Bool
+        /// `already_decided` or `stale` — the client branches on this field
+        /// rather than on the message.
+        public let reason: String?
+        /// The winner, when this row lost: the first answer to arrive wins by
+        /// delivery order, and the second gets the row as it stands so a client
+        /// shows what actually happened rather than "failed".
+        public let decision: String?
+        public let decidedAt: String?
+        public let error: Envelope?
+
+        public struct Envelope: Codable, Sendable, Equatable {
+            public let code: String
+            public let message: String
+        }
+
+        enum CodingKeys: String, CodingKey {
+            case id, ok, reason, decision, error
+            case decidedAt = "decided_at"
+        }
+    }
+
+    public var refused: [Row] { results.filter { !$0.ok } }
+}
+
+// MARK: - Work: the board and its drags
+
+/// `GET /api/q/board`. Scalar columns, so a native client renders them without
+/// server work; `limit` was per column, so `rows` is every column's page.
+public struct Board: Codable, Sendable, Equatable {
+    public let rows: [BoardCard]
+    public let asOf: String?
+
+    enum CodingKeys: String, CodingKey {
+        case rows
+        case asOf = "as_of"
+    }
+
+    public init(rows: [BoardCard], asOf: String? = nil) {
+        self.rows = rows
+        self.asOf = asOf
+    }
+
+    /// The six columns in the query's own order. The order is the query's
+    /// because a second opinion about it would be a second board.
+    public static let columnOrder = ["backlog", "assigned", "in_progress", "needs_you", "done", "reported"]
+
+    /// Column key → the label the console renders. `assigned` reads
+    /// "Addressed to" since 2026-09-17; the KEY every drop and `runs` row
+    /// carries did not change.
+    public static func label(for column: String) -> String {
+        switch column {
+        case "backlog": return "Backlog"
+        case "assigned": return "Addressed to"
+        case "in_progress": return "In progress"
+        case "needs_you": return "Needs you"
+        case "done": return "Done"
+        case "reported": return "Reported"
+        default: return column
+        }
+    }
+
+    /// Grouped in the fixed order, including a column with nothing in it —
+    /// an empty column is a fact about the board and not a reason to hide it
+    /// (§3.15's empty-vs-absent).
+    public var columns: [BoardColumn] {
+        Self.columnOrder.map { key in
+            BoardColumn(key: key, label: Self.label(for: key), cards: rows.filter { $0.column == key })
+        }
+    }
+}
+
+public struct BoardColumn: Sendable, Equatable, Identifiable {
+    public let key: String
+    public let label: String
+    public let cards: [BoardCard]
+
+    public var id: String { key }
+
+    public init(key: String, label: String, cards: [BoardCard]) {
+        self.key = key
+        self.label = label
+        self.cards = cards
+    }
+}
+
+public struct BoardCard: Codable, Sendable, Equatable, Identifiable {
+    public let id: Int
+    public let column: String
+    public let title: String
+    /// `task` or `review`.
+    public let kind: String?
+    public let project: String?
+    /// Who it is addressed to. Assignment is the human's alone — no agent verb
+    /// has an `owner` key at all.
+    public let owner: String?
+    public let claimedBy: String?
+    public let leaseExpiresAt: String?
+    public let ageHours: Double?
+    public let lastReportAt: String?
+    /// Wants a human: an expired lease, a blocked row that is not queued, or a
+    /// due date in the past. Three conditions on columns the row already has.
+    public let escalated: Bool
+    public let externalRef: String?
+    /// The artifact a review bundle was cut from — a handle, never a payload.
+    public let artifact: String?
+    /// An existence test, not a count: a card with a room opens the room.
+    public let hasThread: Bool
+    public let status: String?
+    public let due: String?
+    public let updatedAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, column, title, kind, project, owner, escalated, artifact, status, due
+        case claimedBy = "claimed_by"
+        case leaseExpiresAt = "lease_expires_at"
+        case ageHours = "age_hours"
+        case lastReportAt = "last_report_at"
+        case externalRef = "external_ref"
+        case hasThread = "has_thread"
+        case updatedAt = "updated_at"
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = c.wireInt(.id) ?? 0
+        column = try c.decodeIfPresent(String.self, forKey: .column) ?? "backlog"
+        title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
+        kind = try c.decodeIfPresent(String.self, forKey: .kind)
+        project = try c.decodeIfPresent(String.self, forKey: .project)
+        owner = try c.decodeIfPresent(String.self, forKey: .owner)
+        claimedBy = try c.decodeIfPresent(String.self, forKey: .claimedBy)
+        leaseExpiresAt = try c.decodeIfPresent(String.self, forKey: .leaseExpiresAt)
+        ageHours = c.wireDouble(.ageHours)
+        lastReportAt = try c.decodeIfPresent(String.self, forKey: .lastReportAt)
+        escalated = try c.decodeIfPresent(Bool.self, forKey: .escalated) ?? false
+        externalRef = try c.decodeIfPresent(String.self, forKey: .externalRef)
+        artifact = try c.decodeIfPresent(String.self, forKey: .artifact)
+        hasThread = try c.decodeIfPresent(Bool.self, forKey: .hasThread) ?? false
+        status = try c.decodeIfPresent(String.self, forKey: .status)
+        due = try c.decodeIfPresent(String.self, forKey: .due)
+        updatedAt = try c.decodeIfPresent(String.self, forKey: .updatedAt)
+    }
+
+    /// The lease is live. `claimed_by` alone does not mean held: an expired
+    /// lease still holds the column, which is what `interrupted` reads.
+    public func isHeld(now: Date = Date()) -> Bool {
+        guard let until = WireTime.date(leaseExpiresAt) else { return false }
+        return until > now
+    }
+}
+
+/// A `PATCH /api/tasks/:id` body, built so a request the route would refuse
+/// cannot be sent by accident.
+///
+/// The route has **two arms and the fields pick which**:
+/// `owner`/`title`/`project` need no claim; `in_progress | blocked | closed`
+/// are the lease-holder's; `open` is the unblock and is legal from `blocked`
+/// only. Mixing the arms in one body is a 400 naming both fields — "because
+/// the looser gate must never carry the stricter arm's write" — so this type
+/// refuses to build one rather than discovering it on submit.
+public struct TaskPatch: Sendable, Equatable {
+    public var status: String?
+    public var owner: String?
+    public var project: String?
+    public var title: String?
+
+    public static let statuses = ["open", "in_progress", "blocked", "closed"]
+    public static let mixedArmsRefusal = "a status change and an owner/title/project change are two different arms of PATCH /api/tasks/:id and cannot travel in one body — send them as two requests"
+
+    public init(status: String? = nil, owner: String? = nil, project: String? = nil, title: String? = nil) {
+        self.status = status
+        self.owner = owner
+        self.project = project
+        self.title = title
+    }
+
+    /// The drag a board column makes: one status, nothing else.
+    public static func moving(to column: String) -> TaskPatch {
+        TaskPatch(status: column == "needs_you" ? "blocked" : column)
+    }
+
+    /// Addressing a card to a crew — human-only by the collaboration rule, and
+    /// `owner` exists on this route and on no agent surface.
+    public static func addressing(to owner: String) -> TaskPatch {
+        TaskPatch(owner: owner)
+    }
+
+    public var isEmpty: Bool { status == nil && owner == nil && project == nil && title == nil }
+
+    /// Nil when the patch mixes the two arms, or says nothing.
+    public var wireBody: [String: Any]? {
+        if isEmpty { return nil }
+        let carriesAttributes = owner != nil || project != nil || title != nil
+        if status != nil && carriesAttributes { return nil }
+        var body: [String: Any] = [:]
+        if let status { body["status"] = status }
+        if let owner { body["owner"] = owner }
+        if let project { body["project"] = project }
+        if let title { body["title"] = title }
+        return body
+    }
+}
+
+/// `{"ok":true,"task":{…}}` from every task route.
+public struct TaskMutation: Codable, Sendable, Equatable {
+    public let ok: Bool
+    public let task: JSONValue?
+}
+
+public struct TaskDispatchResult: Codable, Sendable, Equatable {
+    public let ok: Bool
+    public let runID: Int?
+    public let ref: String?
+    public let url: String?
+
+    enum CodingKeys: String, CodingKey {
+        case ok, ref, url
+        case runID = "run_id"
+    }
+}
+
+// MARK: - Rooms
+
+/// `GET /api/q/rooms`. Nothing here reads a message body: a room is a handle,
+/// a count and who is in it.
+public struct RoomList: Codable, Sendable, Equatable {
+    public let rows: [Room]
+    public let asOf: String?
+
+    enum CodingKeys: String, CodingKey {
+        case rows
+        case asOf = "as_of"
+    }
+
+    public init(rows: [Room], asOf: String? = nil) {
+        self.rows = rows
+        self.asOf = asOf
+    }
+}
+
+public struct Room: Codable, Sendable, Equatable, Identifiable {
+    public let threadID: Int
+    /// `work` or `artifact` — what this room hangs off.
+    public let anchor: String
+    public let project: String?
+    public let title: String?
+    public let workID: Int?
+    public let artifactID: Int?
+    public let versionID: Int?
+    public let path: String?
+    /// `open` or `resolved`.
+    public let state: String?
+    public let resolvedBy: String?
+    public let resolvedAt: String?
+    public let messages: Int
+    public let participants: [Participant]
+    /// Consecutive agent messages at the end of the transcript — the ping-pong
+    /// rule, counted in SQL so the client does not re-derive it.
+    public let agentTail: Int
+    /// What the tail is measured against.
+    public let cap: Int?
+    public let lastAt: String?
+    public let lastAuthor: String?
+    public let escalated: Bool
+    public let reason: String?
+    public let proposalID: Int?
+
+    public struct Participant: Codable, Sendable, Equatable, Hashable {
+        public let principal: String?
+        /// `agent` or `user`. Nothing in a room may address anyone.
+        public let kind: String?
+    }
+
+    public var id: Int { threadID }
+
+    enum CodingKeys: String, CodingKey {
+        case anchor, project, title, path, state, messages, participants, cap, escalated, reason
+        case threadID = "thread_id"
+        case workID = "work_id"
+        case artifactID = "artifact_id"
+        case versionID = "version_id"
+        case resolvedBy = "resolved_by"
+        case resolvedAt = "resolved_at"
+        case agentTail = "agent_tail"
+        case lastAt = "last_at"
+        case lastAuthor = "last_author"
+        case proposalID = "proposal_id"
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        threadID = c.wireInt(.threadID) ?? 0
+        anchor = try c.decodeIfPresent(String.self, forKey: .anchor) ?? "artifact"
+        project = try c.decodeIfPresent(String.self, forKey: .project)
+        title = try c.decodeIfPresent(String.self, forKey: .title)
+        workID = c.wireInt(.workID)
+        artifactID = c.wireInt(.artifactID)
+        versionID = c.wireInt(.versionID)
+        path = try c.decodeIfPresent(String.self, forKey: .path)
+        state = try c.decodeIfPresent(String.self, forKey: .state)
+        resolvedBy = try c.decodeIfPresent(String.self, forKey: .resolvedBy)
+        resolvedAt = try c.decodeIfPresent(String.self, forKey: .resolvedAt)
+        messages = c.wireInt(.messages) ?? 0
+        participants = try c.decodeIfPresent([Participant].self, forKey: .participants) ?? []
+        agentTail = c.wireInt(.agentTail) ?? 0
+        cap = c.wireInt(.cap)
+        lastAt = try c.decodeIfPresent(String.self, forKey: .lastAt)
+        lastAuthor = try c.decodeIfPresent(String.self, forKey: .lastAuthor)
+        escalated = try c.decodeIfPresent(Bool.self, forKey: .escalated) ?? false
+        reason = try c.decodeIfPresent(String.self, forKey: .reason)
+        proposalID = c.wireInt(.proposalID)
+    }
+}
+
+// MARK: - Agents: the registry, and what each one is doing
+
+/// `GET /api/agents`.
+public struct AgentList: Codable, Sendable, Equatable {
+    public let agents: [AgentRecord]
+
+    public init(agents: [AgentRecord]) { self.agents = agents }
+}
+
+public struct AgentRecord: Codable, Sendable, Equatable, Identifiable {
+    public let id: String
+    public let displayName: String?
+    /// `external` or `internal`. An internal agent's token comes from the
+    /// user's own environment, which IS its approval.
+    public let kind: String?
+    /// Default-deny: `{tier: "none", areas: []}` at mint. Approval is NOT a
+    /// grant — two different questions, answered separately.
+    public let grants: JSONValue?
+    public let projects: [String]?
+    public let autonomy: JSONValue?
+    public let createdAt: String?
+    public let lastSeenAt: String?
+    public let revoked: Bool
+    /// This bearer will be presented from off this machine, so the row starts
+    /// pending and authenticates nothing until the owner approves it.
+    public let remote: Bool
+    public let approvedAt: String?
+    /// Derived by the server: remote, unapproved, unrevoked.
+    public let pending: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case id, kind, grants, projects, autonomy, revoked, remote, pending
+        case displayName = "display_name"
+        case createdAt = "created_at"
+        case lastSeenAt = "last_seen_at"
+        case approvedAt = "approved_at"
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        displayName = try c.decodeIfPresent(String.self, forKey: .displayName)
+        kind = try c.decodeIfPresent(String.self, forKey: .kind)
+        grants = try c.decodeIfPresent(JSONValue.self, forKey: .grants)
+        projects = try c.decodeIfPresent([String].self, forKey: .projects)
+        autonomy = try c.decodeIfPresent(JSONValue.self, forKey: .autonomy)
+        createdAt = try c.decodeIfPresent(String.self, forKey: .createdAt)
+        lastSeenAt = try c.decodeIfPresent(String.self, forKey: .lastSeenAt)
+        revoked = try c.decodeIfPresent(Bool.self, forKey: .revoked) ?? false
+        remote = try c.decodeIfPresent(Bool.self, forKey: .remote) ?? false
+        approvedAt = try c.decodeIfPresent(String.self, forKey: .approvedAt)
+        pending = try c.decodeIfPresent(Bool.self, forKey: .pending) ?? false
+    }
+
+    /// `autonomy.level` — `observe`, `act_within_scope`, … Held as JSON
+    /// because the record's shape is §4.21's and grows there, not here.
+    public var autonomyLevel: String? { autonomy?.string("level") }
+    public var grantTier: String? { grants?.string("tier") }
+    public var grantAreas: [String] { grants?["areas"]?.arrayValue?.compactMap(\.stringValue) ?? [] }
+}
+
+/// `GET /api/q/agent_presence` — presence is derived state, so it comes through
+/// a named query rather than as a field on the registry (invariant 3).
+public struct AgentPresenceList: Codable, Sendable, Equatable {
+    public let rows: [AgentPresence]
+    public let asOf: String?
+
+    enum CodingKeys: String, CodingKey {
+        case rows
+        case asOf = "as_of"
+    }
+
+    public init(rows: [AgentPresence], asOf: String? = nil) {
+        self.rows = rows
+        self.asOf = asOf
+    }
+}
+
+public struct AgentPresence: Codable, Sendable, Equatable, Identifiable {
+    public let id: String
+    public let displayName: String?
+    public let kind: String?
+    public let lastSeenAt: String?
+    public let projects: [String]?
+    /// `working` · `queued` · `interrupted` · `over-cap` · `idle`, decided in
+    /// the query. The chip reports it; nothing here infers one.
+    public let state: String
+    public let currentClaims: [Claim]
+    /// A claim whose lease has expired and still holds `claimed_by`.
+    public let interruptedClaims: [Claim]
+    public let blockedBundles: [Claim]
+    public let spendTodayUSD: Double?
+
+    public struct Claim: Codable, Sendable, Equatable, Identifiable {
+        public let id: Int
+        public let title: String?
+        public let leaseExpiresAt: String?
+
+        enum CodingKeys: String, CodingKey {
+            case id, title
+            case leaseExpiresAt = "lease_expires_at"
+        }
+
+        public init(from decoder: any Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            id = c.wireInt(.id) ?? 0
+            title = try c.decodeIfPresent(String.self, forKey: .title)
+            leaseExpiresAt = try c.decodeIfPresent(String.self, forKey: .leaseExpiresAt)
+        }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, kind, projects, state
+        case displayName = "display_name"
+        case lastSeenAt = "last_seen_at"
+        case currentClaims = "current_claims"
+        case interruptedClaims = "interrupted_claims"
+        case blockedBundles = "blocked_bundles"
+        case spendTodayUSD = "spend_today_usd"
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        displayName = try c.decodeIfPresent(String.self, forKey: .displayName)
+        kind = try c.decodeIfPresent(String.self, forKey: .kind)
+        lastSeenAt = try c.decodeIfPresent(String.self, forKey: .lastSeenAt)
+        projects = try c.decodeIfPresent([String].self, forKey: .projects)
+        state = try c.decodeIfPresent(String.self, forKey: .state) ?? "idle"
+        currentClaims = try c.decodeIfPresent([Claim].self, forKey: .currentClaims) ?? []
+        interruptedClaims = try c.decodeIfPresent([Claim].self, forKey: .interruptedClaims) ?? []
+        blockedBundles = try c.decodeIfPresent([Claim].self, forKey: .blockedBundles) ?? []
+        spendTodayUSD = c.wireDouble(.spendTodayUSD)
+    }
+}
+
+/// A `PUT /api/agents/:id/autonomy` body. The record is **replaced**, so this
+/// is built from a read and merged by the caller — `metistry agents autonomy`
+/// does the same read-merge for the terminal.
+public struct AgentAutonomyUpdate: Sendable, Equatable {
+    /// May go either way, and this route is the door that permits it.
+    public var level: String?
+    /// Per-action-kind `allow`/`deny`. Also two-way.
+    public var actions: [String: String]?
+    /// §4.21's keys narrow and only narrow, as they always have.
+    public var maxOpenBundles: Int?
+    public var mayDispatchTo: [String]?
+    public var acceptFrom: [String]?
+
+    public init(level: String? = nil, actions: [String: String]? = nil, maxOpenBundles: Int? = nil, mayDispatchTo: [String]? = nil, acceptFrom: [String]? = nil) {
+        self.level = level
+        self.actions = actions
+        self.maxOpenBundles = maxOpenBundles
+        self.mayDispatchTo = mayDispatchTo
+        self.acceptFrom = acceptFrom
+    }
+
+    public var wireBody: [String: Any] {
+        var body: [String: Any] = [:]
+        if let level { body["level"] = level }
+        if let actions { body["actions"] = actions }
+        if let maxOpenBundles { body["max_open_bundles"] = maxOpenBundles }
+        if let mayDispatchTo { body["may_dispatch_to"] = mayDispatchTo }
+        if let acceptFrom { body["accept_from"] = acceptFrom }
+        return body
+    }
+}
+
+public struct AgentAutonomyResult: Codable, Sendable, Equatable {
+    public let ok: Bool
+    public let autonomy: JSONValue?
+    public let actions: JSONValue?
+    /// Every raise, named. This is the sentence a §3.17 confirmation has to
+    /// quote — and it is the server's sentence, not one composed on screen.
+    public let widened: [String]?
+}
+
+public struct AgentApprovalResult: Codable, Sendable, Equatable {
+    public let approved: Bool
+    public let proposals: [Int]?
+}
+
+// MARK: - Compute
+
+/// `GET /api/compute`. The body IS `metistry compute show --json`'s report plus
+/// three keys, so the report half decodes into the same `ComputeFacts` the
+/// Compute pane already reads from the CLI — one shape, two doors.
+public struct ConsoleCompute: Decodable, Sendable, Equatable {
+    public let facts: ComputeFacts
+    /// Folded from the `spend` named query — the same read path the engine
+    /// checks before every billable call. **nil when that query is not
+    /// loaded**, never a guessed zero.
+    public let spend: ComputeSpend?
+    /// Whether the write verbs will work here, so a client greys the controls
+    /// instead of discovering it on submit.
+    public let writable: Bool
+    public let asOf: String?
+
+    public init(facts: ComputeFacts, spend: ComputeSpend? = nil, writable: Bool, asOf: String? = nil) {
+        self.facts = facts
+        self.spend = spend
+        self.writable = writable
+        self.asOf = asOf
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let json = try JSONValue(from: decoder)
+        guard let facts = ComputeFacts(json: json) else {
+            throw DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "not a compute report"))
+        }
+        self.init(
+            facts: facts,
+            spend: json["spend"].flatMap(ComputeSpend.init(json:)),
+            writable: json.bool("writable") ?? false,
+            asOf: json.string("as_of")
+        )
+    }
+}
+
+public struct ComputeSpend: Sendable, Equatable {
+    public let instance: Window
+    public let providers: [String: Window]
+
+    public struct Window: Sendable, Equatable {
+        public let daily: Double
+        public let monthly: Double
+
+        public init(daily: Double, monthly: Double) {
+            self.daily = daily
+            self.monthly = monthly
+        }
+
+        init?(json: JSONValue) {
+            guard case .object = json else { return nil }
+            self.init(daily: json.number("daily"), monthly: json.number("monthly"))
+        }
+    }
+
+    public init(instance: Window, providers: [String: Window]) {
+        self.instance = instance
+        self.providers = providers
+    }
+
+    init?(json: JSONValue) {
+        guard let instance = json["instance"].flatMap(Window.init(json:)) else { return nil }
+        var providers: [String: Window] = [:]
+        if let block = json["providers"] {
+            for name in block.objectKeys {
+                if let window = block[name].flatMap(Window.init(json:)) { providers[name] = window }
+            }
+        }
+        self.init(instance: instance, providers: providers)
+    }
+}
+
+/// Exactly one of `tier` or `crew`: two targets in one body is a request nobody
+/// can mean, and the route says so by name.
+public enum ComputeAssignTarget: Sendable, Equatable {
+    case tier(String)
+    case crew(String)
+
+    var key: String {
+        switch self {
+        case .tier: return "tier"
+        case .crew: return "crew"
+        }
+    }
+
+    var name: String {
+        switch self {
+        case .tier(let value), .crew(let value): return value
+        }
+    }
+}
+
+/// `GET /api/compute/models` — live `/v1/models` per provider, plus the local
+/// servers this instance has not configured. Held as JSON above the per-provider
+/// rows `ModelCatalogue` already decodes.
+public struct ComputeModelsReply: Decodable, Sendable, Equatable {
+    public let providers: [ModelCatalogue]
+    public let asOf: String?
+
+    public init(providers: [ModelCatalogue], asOf: String? = nil) {
+        self.providers = providers
+        self.asOf = asOf
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let json = try JSONValue(from: decoder)
+        self.init(
+            providers: (json["providers"]?.arrayValue ?? []).compactMap(ModelCatalogue.init(json:)),
+            asOf: json.string("as_of")
+        )
+    }
+}
+
+/// `POST /api/compute/assign` and `/budget`. `notes` is the lines the CLI would
+/// have printed — the non-ZDR warning, "nothing enforces this yet" — and they
+/// are shown rather than dropped, because they are the reason the pane is
+/// honest about what a write does.
+public struct ComputeWriteResult: Decodable, Sendable, Equatable {
+    public let ok: Bool
+    public let target: String?
+    public let provider: String?
+    public let model: String?
+    public let effort: String?
+    public let warnNonZDR: Bool
+    public let notes: [String]
+
+    public init(from decoder: any Decoder) throws {
+        let json = try JSONValue(from: decoder)
+        ok = json.bool("ok") ?? false
+        target = json.string("target")
+        provider = json.string("provider")
+        model = json.string("model")
+        effort = json.string("effort")
+        warnNonZDR = json.bool("warn_non_zdr") ?? false
+        notes = (json["notes"]?.arrayValue ?? []).compactMap(\.stringValue)
+    }
+}
+
+/// `POST /api/compute/providers/test`. Uses the credential and reports only
+/// whether it worked — `ProviderTestFacts` is the same shape from the CLI.
+public struct ComputeProviderTestReply: Decodable, Sendable, Equatable {
+    public let facts: ProviderTestFacts
+    public let notes: [String]
+
+    public init(from decoder: any Decoder) throws {
+        let json = try JSONValue(from: decoder)
+        guard let facts = ProviderTestFacts(json: json) else {
+            throw DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "not a provider test result"))
+        }
+        self.facts = facts
+        self.notes = (json["notes"]?.arrayValue ?? []).compactMap(\.stringValue)
+    }
+}
+
+// MARK: - Knowledge
+
+/// `GET /api/knowledge/search`. The complete hit list the bridge will return,
+/// capped at 100 with no offset and no cursor — RRF fuses over a pool, so an
+/// offset would re-rank rather than continue. "Top 100, honestly" is the
+/// contract, and the UI states it.
+public struct KnowledgeSearchReply: Codable, Sendable, Equatable {
+    public let q: String
+    /// What the bridge actually did: `keyword`, `semantic` or `hybrid`. Omitting
+    /// `mode` on the request means "choose for me" AT THE BRIDGE, so this is
+    /// the answer and not the request echoed back.
+    public let mode: String?
+    public let hits: [KnowledgeHit]
+    /// "keyword only — the embedder is down" is a fact the UI states, not an
+    /// error it swallows (P5).
+    public let degraded: String?
+    public let asOf: String?
+
+    enum CodingKeys: String, CodingKey {
+        case q, mode, hits, degraded
+        case asOf = "as_of"
+    }
+
+    public init(q: String, mode: String? = nil, hits: [KnowledgeHit] = [], degraded: String? = nil, asOf: String? = nil) {
+        self.q = q
+        self.mode = mode
+        self.hits = hits
+        self.degraded = degraded
+        self.asOf = asOf
+    }
+
+    /// The bridge's own ceiling. A result list of exactly this length is "top
+    /// 100, honestly" rather than "100 of N".
+    public static let maximumHits = 100
+    public var isAtCeiling: Bool { hits.count >= Self.maximumHits }
+}
+
+public struct KnowledgeHit: Codable, Sendable, Equatable, Identifiable {
+    /// Vault-relative. The sensitive half of a hit — a hit outside the scope is
+    /// DROPPED rather than flagged, so this list is never a directory listing
+    /// of what was filtered.
+    public let path: String
+    public let title: String?
+    public let description: String?
+    /// Capped at 300 characters by the bridge (±120 around the match, for
+    /// keyword).
+    public let snippet: String?
+    public let score: Double?
+    /// Which arm of the search found it.
+    public let source: String?
+
+    public var id: String { path }
+
+    enum CodingKeys: String, CodingKey {
+        case path, title, description, snippet, score, source
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        path = try c.decode(String.self, forKey: .path)
+        title = try c.decodeIfPresent(String.self, forKey: .title)
+        description = try c.decodeIfPresent(String.self, forKey: .description)
+        snippet = try c.decodeIfPresent(String.self, forKey: .snippet)
+        score = c.wireDouble(.score)
+        source = try c.decodeIfPresent(String.self, forKey: .source)
+    }
+
+    public init(path: String, title: String? = nil, description: String? = nil, snippet: String? = nil, score: Double? = nil, source: String? = nil) {
+        self.path = path
+        self.title = title
+        self.description = description
+        self.snippet = snippet
+        self.score = score
+        self.source = source
+    }
+}
+
+/// `GET /api/knowledge/page`. Page bytes come through the vault bridge and
+/// never from a query: content is not derived state, and there is no column
+/// holding it.
+public struct KnowledgePage: Codable, Sendable, Equatable {
+    public let path: String
+    public let content: String
+    public let sha256: String?
+    public let bytes: Int?
+    public let asOf: String?
+
+    enum CodingKeys: String, CodingKey {
+        case path, content, sha256, bytes
+        case asOf = "as_of"
+    }
+}
+
+// MARK: - The composer's menu
+
+/// `GET /api/commands` — generated from this instance's own `rules.yaml` plus
+/// the agent registry. Order is deterministic (`/` then `@`, each sorted by
+/// id); the client re-ranks by prefix, then substring, then recency.
+public struct CommandMenu: Codable, Sendable, Equatable {
+    public let commands: [CommandEntry]
+    public let agents: [CommandAgent]
+    public let asOf: String?
+
+    enum CodingKeys: String, CodingKey {
+        case commands, agents
+        case asOf = "as_of"
+    }
+
+    public init(commands: [CommandEntry], agents: [CommandAgent], asOf: String? = nil) {
+        self.commands = commands
+        self.agents = agents
+        self.asOf = asOf
+    }
+}
+
+public struct CommandEntry: Codable, Sendable, Equatable, Identifiable {
+    /// `/status`, `/note`, `/model`, or whatever this instance calls its deep
+    /// alias.
+    public let id: String
+    /// A fast path's line IS the named query's own description, so there is
+    /// nothing to keep in sync.
+    public let description: String?
+    /// The router's own vocabulary: `note`, `fast_path`, `model_override`.
+    public let routesTo: String?
+    public let tier: String?
+    /// What that tier resolves to right now, so a reassignment shows in the
+    /// menu without a restart.
+    public let model: String?
+    public let effort: String?
+    /// The named query that answers a fast path.
+    public let query: String?
+    public let takesArgument: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case id, description, tier, model, effort, query
+        case routesTo = "routes_to"
+        case takesArgument = "takes_argument"
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        description = try c.decodeIfPresent(String.self, forKey: .description)
+        routesTo = try c.decodeIfPresent(String.self, forKey: .routesTo)
+        tier = try c.decodeIfPresent(String.self, forKey: .tier)
+        model = try c.decodeIfPresent(String.self, forKey: .model)
+        effort = try c.decodeIfPresent(String.self, forKey: .effort)
+        query = try c.decodeIfPresent(String.self, forKey: .query)
+        takesArgument = try c.decodeIfPresent(Bool.self, forKey: .takesArgument) ?? false
+    }
+}
+
+public struct CommandAgent: Codable, Sendable, Equatable, Identifiable {
+    /// `@drey` — the mention, as the menu shows it.
+    public let id: String
+    public let description: String?
+    public let kind: String?
+    /// An approved, unrevoked row that has authenticated at least once. A
+    /// pending enrolment is listed and never present.
+    public let present: Bool
+    public let lastSeenAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, description, kind, present
+        case lastSeenAt = "last_seen_at"
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        description = try c.decodeIfPresent(String.self, forKey: .description)
+        kind = try c.decodeIfPresent(String.self, forKey: .kind)
+        present = try c.decodeIfPresent(Bool.self, forKey: .present) ?? false
+        lastSeenAt = try c.decodeIfPresent(String.self, forKey: .lastSeenAt)
+    }
+}
+
+// MARK: - One run
+
+/// `GET /api/runs/:id` — what the tap on a feed row's `runs:<id>` opens.
+public struct RunDetailReply: Codable, Sendable, Equatable {
+    public let run: RunDetail
+    public let asOf: String?
+
+    enum CodingKeys: String, CodingKey {
+        case run
+        case asOf = "as_of"
+    }
+}
+
+public struct RunDetail: Codable, Sendable, Equatable, Identifiable {
+    public let id: Int
+    public let ts: String?
+    public let startedAt: String?
+    public let finishedAt: String?
+    public let component: String?
+    public let kind: String?
+    public let sessionID: String?
+    public let tool: String?
+    public let ok: Bool?
+    public let error: String?
+    public let durationMs: Int?
+    public let provider: String?
+    public let model: String?
+    public let tokensIn: Int?
+    public let tokensOut: Int?
+    public let cacheReadTokens: Int?
+    public let cacheWriteTokens: Int?
+    /// `numeric(10,6)` — a STRING on the wire. See the file header.
+    public let costUSD: Double?
+    public let meta: JSONValue?
+    /// The calls the same reply made, joined **exactly** on `meta.turn_id` or
+    /// `meta.message_id`. A run with neither reports none, which is the honest
+    /// answer: a ±N-minute window would attribute another reply's calls here.
+    public let toolCalls: [RunToolCall]
+    public let toolCallsTotal: Int
+    public let toolCallsFailed: Int
+    /// nil on every unshadowed turn, which is also how "shadow mode is not
+    /// configured" reads. The two transcripts are deliberately not returned.
+    public let shadowProvider: String?
+    public let shadowModel: String?
+    public let shadowAgreement: Double?
+    public let shadowCostUSD: Double?
+    public let shadowSameToolSequence: Bool?
+    public let shadowAnswerSimilarity: Double?
+    public let shadowError: String?
+
+    public struct RunToolCall: Codable, Sendable, Equatable, Identifiable {
+        public let id: Int
+        public let ts: String?
+        public let component: String?
+        public let tool: String?
+        public let ok: Bool?
+        public let error: String?
+        public let durationMs: Int?
+
+        enum CodingKeys: String, CodingKey {
+            case id, ts, component, tool, ok, error
+            case durationMs = "duration_ms"
+        }
+
+        public init(from decoder: any Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            id = c.wireInt(.id) ?? 0
+            ts = try c.decodeIfPresent(String.self, forKey: .ts)
+            component = try c.decodeIfPresent(String.self, forKey: .component)
+            tool = try c.decodeIfPresent(String.self, forKey: .tool)
+            ok = try c.decodeIfPresent(Bool.self, forKey: .ok)
+            error = try c.decodeIfPresent(String.self, forKey: .error)
+            durationMs = c.wireInt(.durationMs)
+        }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, ts, component, kind, tool, ok, error, provider, model, meta
+        case startedAt = "started_at"
+        case finishedAt = "finished_at"
+        case sessionID = "session_id"
+        case durationMs = "duration_ms"
+        case tokensIn = "tokens_in"
+        case tokensOut = "tokens_out"
+        case cacheReadTokens = "cache_read_tokens"
+        case cacheWriteTokens = "cache_write_tokens"
+        case costUSD = "cost_usd"
+        case toolCalls = "tool_calls"
+        case toolCallsTotal = "tool_calls_total"
+        case toolCallsFailed = "tool_calls_failed"
+        case shadowProvider = "shadow_provider"
+        case shadowModel = "shadow_model"
+        case shadowAgreement = "shadow_agreement"
+        case shadowCostUSD = "shadow_cost_usd"
+        case shadowSameToolSequence = "shadow_same_tool_sequence"
+        case shadowAnswerSimilarity = "shadow_answer_similarity"
+        case shadowError = "shadow_error"
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = c.wireInt(.id) ?? 0
+        ts = try c.decodeIfPresent(String.self, forKey: .ts)
+        startedAt = try c.decodeIfPresent(String.self, forKey: .startedAt)
+        finishedAt = try c.decodeIfPresent(String.self, forKey: .finishedAt)
+        component = try c.decodeIfPresent(String.self, forKey: .component)
+        kind = try c.decodeIfPresent(String.self, forKey: .kind)
+        sessionID = try c.decodeIfPresent(String.self, forKey: .sessionID)
+        tool = try c.decodeIfPresent(String.self, forKey: .tool)
+        ok = try c.decodeIfPresent(Bool.self, forKey: .ok)
+        error = try c.decodeIfPresent(String.self, forKey: .error)
+        durationMs = c.wireInt(.durationMs)
+        provider = try c.decodeIfPresent(String.self, forKey: .provider)
+        model = try c.decodeIfPresent(String.self, forKey: .model)
+        tokensIn = c.wireInt(.tokensIn)
+        tokensOut = c.wireInt(.tokensOut)
+        cacheReadTokens = c.wireInt(.cacheReadTokens)
+        cacheWriteTokens = c.wireInt(.cacheWriteTokens)
+        costUSD = c.wireDouble(.costUSD)
+        meta = try c.decodeIfPresent(JSONValue.self, forKey: .meta)
+        toolCalls = try c.decodeIfPresent([RunToolCall].self, forKey: .toolCalls) ?? []
+        toolCallsTotal = c.wireInt(.toolCallsTotal) ?? 0
+        toolCallsFailed = c.wireInt(.toolCallsFailed) ?? 0
+        shadowProvider = try c.decodeIfPresent(String.self, forKey: .shadowProvider)
+        shadowModel = try c.decodeIfPresent(String.self, forKey: .shadowModel)
+        shadowAgreement = c.wireDouble(.shadowAgreement)
+        shadowCostUSD = c.wireDouble(.shadowCostUSD)
+        shadowSameToolSequence = try c.decodeIfPresent(Bool.self, forKey: .shadowSameToolSequence)
+        shadowAnswerSimilarity = c.wireDouble(.shadowAnswerSimilarity)
+        shadowError = try c.decodeIfPresent(String.self, forKey: .shadowError)
+    }
+
+    /// True where this turn was shadowed. "Not shadowed" and "shadow mode is
+    /// not configured" read the same, and both are facts rather than faults.
+    public var wasShadowed: Bool { shadowProvider != nil || shadowModel != nil }
+}
+
+// MARK: - one JSONValue convenience these shapes want
+
+extension JSONValue {
+    /// A number, or a Postgres `numeric`'s string spelling, or 0. Named
+    /// `number` rather than `doubleValue` so it cannot be confused with
+    /// json-value.swift's property of that name.
+    func number(_ key: String) -> Double {
+        if let d = self[key]?.doubleValue { return d }
+        if let s = self[key]?.stringValue, let d = Double(s) { return d }
+        return 0
+    }
+}

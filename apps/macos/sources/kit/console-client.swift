@@ -67,11 +67,29 @@ public struct ConsoleEndpoint: Sendable, Equatable {
 public struct ConsoleErrorEnvelope: Sendable, Equatable {
     public let code: String
     public let message: String
+    /// The field a refusal names, when the response carried one as its own KEY.
+    ///
+    /// Today's envelope is `{code, message}` and nothing else, and "a refusal
+    /// names the field that would permit it" (docs/ops/console-api.md) puts the
+    /// field **in the message** — so this is nil on every console this repo
+    /// ships. It is read anyway because the CLI's own renderer already looks
+    /// for one (`renderConsoleCallError`), so the day the envelope grows the
+    /// key both doors pick it up without a second change.
+    public let field: String?
+
+    public init(code: String, message: String, field: String? = nil) {
+        self.code = code
+        self.message = message
+        self.field = field
+    }
 
     public init?(json: JSONValue) {
         guard let error = json["error"], let code = error.string("code") else { return nil }
-        self.code = code
-        self.message = error.string("message") ?? code
+        self.init(
+            code: code,
+            message: error.string("message") ?? code,
+            field: error.string("field") ?? json.string("field")
+        )
     }
 }
 
@@ -80,6 +98,15 @@ public enum ConsoleError: LocalizedError, Equatable {
     case transport(String)
     case http(status: Int, envelope: ConsoleErrorEnvelope?)
     case undecodable(String)
+    /// This install's CLI predates the verb the authenticated surface is made
+    /// of (`metistry console call`, console-api.swift). The install works; this
+    /// app's view of it does not — the same distinction `ConsoleSignIn` draws
+    /// for `console whoami`.
+    case cliUnavailable(String)
+    /// There is no door on this install to knock on: no local owner token, or a
+    /// console URL the token is not minted for. The CLI's own sentence,
+    /// verbatim, because it already names the fix.
+    case notConfigured(String)
 
     public var errorDescription: String? {
         switch self {
@@ -87,6 +114,9 @@ public enum ConsoleError: LocalizedError, Equatable {
             return "`\(origin)` is not a URL this app can address the console at"
         case .transport(let detail):
             return "could not reach the console: \(detail)"
+        case .cliUnavailable(let detail), .notConfigured(let detail):
+            // The CLI already said the useful thing, and it names the fix.
+            return detail
         case .http(let status, let envelope):
             // 500 is the console's answer to a WebAuthn verification that
             // THREW rather than returned false — an origin, RP-ID, challenge or

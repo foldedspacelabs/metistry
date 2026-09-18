@@ -171,16 +171,65 @@ array), the menu bar (a second dot beside the `console` row, and the headline
 inside its submenu — a service being *up* and a service *knowing who you are*
 are different questions), and the wizard's step 6, which now leads with it.
 
-**What the app can and cannot call.** It can ask who it is. It cannot make any
-other authenticated console call, because PR #119 added `console whoami` and
-nothing else — there is no verb that performs an arbitrary authenticated
-request on the app's behalf, and none that prints a bearer to the calling
-process alone. Everything on the owner surface (devices, agents, projects,
-proposals, artifacts, targets, dispatch) is therefore the PWA's job for now.
-Adding it is a **CLI change first**: a `metistry console call <METHOD> <path>`
-keeps the token out of this process entirely, which a token-printing verb would
-not, and keeps the rule that makes this app safe — a front end for the CLI,
-never a second implementation.
+**What the app can and cannot call.** It can ask who it is, and — since the
+data layer below — it can make any authenticated request the owner surface
+offers. That took the **CLI change first**, exactly as this section said it
+would: `metistry console call <METHOD> <path>` keeps the token out of this
+process entirely, which a token-printing verb would not, and keeps the rule
+that makes this app safe — a front end for the CLI, never a second
+implementation. ~~Everything on the owner surface is therefore the PWA's job
+for now~~ (struck 2026-09-18; the verb shipped and `ConsoleAPI` is its client).
+
+## Data layer
+
+Phase A's non-visual half (`docs/product/app-ux-plan.md` §6): the typed client
+and the store the seven sections read. **Views never call `URLSession` and
+never run a verb** — a view reads an `InstanceStore` section and calls a method
+on it, and a screen that reached past the store would be the bug this section
+exists to name.
+
+| Type | File | What it is |
+| --- | --- | --- |
+| `ConsoleCallTransport` | `sources/kit/console-api.swift` | One authenticated request against this machine's console, behind a protocol so the store is testable with nothing spawned and no network |
+| `CLIConsoleCallTransport` | same | The only production transport: `metistry console call <METHOD> <path> [--body -] --json`. A body goes on **stdin**, never argv |
+| `ConsoleAPI` | same | One method per route in `docs/ops/console-api.md` — identity, whoami, `activity_feed`, proposals (+ batch), board and the four task routes, rooms, agents and `agent_presence` (+ autonomy, approve), `/api/compute*`, `/api/knowledge/search|page`, `/api/commands`, `/api/runs/:id` |
+| `ConsoleError` | `sources/kit/console-client.swift` | The standard envelope, plus `cliUnavailable` (this install's CLI predates the verb) and `notConfigured` (no token, or a non-loopback console). `namedField(among:)` attributes a refusal to a field **the caller already sent** — the envelope is `{code, message}` and names its field in prose, so nothing is inferred from the sentence's shape |
+| `ConsoleReachability` | `sources/kit/console-api.swift` | reachable / degraded / unreachable, **reported not inferred** (P5). A `401` is unreachable; a `403` is not — the console answered and one route declined this credential |
+| the wire shapes | `sources/kit/console-data.swift` | `Codable` per route and per named-query row. Two tolerances live here so no call site repeats them: a Postgres `numeric` arrives as a **string**, and timestamps are text |
+| `RequestAnswer` | same | The six answers and the option form a `decision` request takes. `isBatchable` is "only Later, Skip and Decline"; `isSendable` is "Revise with an empty reason is a cancel" |
+| `TaskPatch` | same | `PATCH /api/tasks/:id`'s two arms. A body mixing them is refused **here**, because the route's own refusal names both fields and discovering that on submit is worse |
+| `LoadState` · `Section<Value>` | `sources/kit/instance-store.swift` | loading / loaded / failed / stale, with the console's `as_of` beside the value. A failed refresh over data already on screen goes **stale and keeps it** — never a blank pane |
+| `RefreshPolicy` | same | The intervals, and a backoff that changes how often the app *asks* and never what it *claims*. No timer is started here: a view owns its `.task` and the policy says whether it is too soon |
+| `InstanceStore` | same | One `@Observable` store per instance, a `Section` per section, and the only thing that holds a `ConsoleAPI`. `adopt` drops every section on an instance switch |
+| `PinnedItem` · `PinnedItems` | `sources/kit/pinned-items.swift` | The sidebar's Pinned area: project · board · page · search · agent, reorderable and removable, filed in app preferences under `pinnedItems.<instance_id>` |
+
+Three rules the layer encodes rather than asks for:
+
+- **`isRefreshing` is not a state.** P2 wants calm, so a background refresh is
+  a flag beside `.loaded` rather than a fifth case — there is nothing for a
+  view to draw a spinner from. Only `.loading` with no value yet earns one.
+- **`allowsDecisions` is O3, in one place.** The Mac app is local-only (§7.3)
+  and the rule still holds: while a section is unreachable, `answer`,
+  `answerMany`, `move`, `address` and `dispatch` refuse **before sending**, in
+  a sentence, rather than as a request that fails where nobody can see it.
+- **The two cursors are not the same mechanism.** The feed's `since` is an
+  inclusive timestamp and de-duplicates on `(ref, ts, kind)`; the request
+  queue's is an opaque cursor whose page is *everything that changed*, so a row
+  answered on the phone leaves the queue instead of lingering. Both folds live
+  in `merging(_:)` and are called from the store and nowhere else.
+
+**What this transport costs, and the one change that removes it.** `metistry
+console call` prints the error envelope on **stderr** for a `>= 400` and does
+not print the response body, so the extra keys on a conflict `409` — `reason`,
+`decision`, `decided_at`, and the row itself — do not survive the trip.
+Nothing phase A reads is affected (the envelope *is* `{code, message}`, so a
+400/401/403/404/503 comes back whole), and `ConsoleError.conflictBodyIsUnavailable`
+says so out loud rather than letting a caller read the absence as "the console
+sent none". The queue's `if_unchanged` repaint in phase B wants that body: the
+fix is for `console call` to print `r.raw` on stdout for a `>= 400` as well,
+**not** a second HTTP client in Swift. And because `console call` sets no
+request headers, `POST /capture`'s `Idempotency-Key` is unreachable from this
+layer — which is why capture is not on it.
 
 ## What `ASAuthorization` actually says about a local origin
 

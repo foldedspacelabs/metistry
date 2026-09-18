@@ -25,6 +25,7 @@ const REQUIRED = [
   "projects_rollup",
   "runs_summary",
   "activity_feed",
+  "run_detail", // GET /api/runs/:id — what a tap on the feed's `runs:<id>` ref opens
   "agent_presence",
   "reply_feedback_summary",
   "spend", // the budget's read path (invariant 3) — the engine runs it before every billable call

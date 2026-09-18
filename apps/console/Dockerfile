@@ -9,6 +9,12 @@ COPY pnpm-lock.yaml pnpm-workspace.yaml package.json tsconfig.base.json ./
 COPY packages ./packages
 COPY collectors ./collectors
 COPY routines ./routines
+# `seed/` in the BUILD stage, not just the runtime one below: the console
+# depends on `@foldedspacelabs/metistry-cli` (for the `metistry compute` verbs
+# `/api/compute*` drives — one implementation, docs/ops/compute.md), and that
+# package's build step copies `seed/` into itself so `npx metistry init` can
+# stamp an instance. Without this the transitive build fails at `cp -R ../../seed`.
+COPY seed ./seed
 COPY apps/console ./apps/console
 RUN pnpm install --frozen-lockfile --filter "@metistry-apps/console..." \
  && pnpm --filter "@metistry-apps/console..." run build \

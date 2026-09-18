@@ -188,8 +188,18 @@ curl -s -H "Authorization: Bearer $METISTRY_BRIDGE_TOKEN_RECONCILER" \
 - The console's named queries are unchanged and stay keyword: none of the
   seeded queries in `seed/queries/` searches knowledge, and a vector
   parameter has no clean binding in the named-query driver yet. Semantic
-  search reaches agents through `knowledge_search` and operators through
-  the vault bridge.
+  search reaches agents through `knowledge_search`, the owner's own clients
+  through **`GET /api/knowledge/search`** — a thin proxy onto `/vault/search`
+  in a caller-chosen mode, carrying `degraded` through rather than swallowing
+  it (`docs/ops/console-api.md`) — and operators through the vault bridge
+  directly.
+- **The console's proxy narrows what the bridge serves.** `/vault/read` is
+  confined to the instance repo and nothing more, because the protected-path
+  writes (`metistry update`, `metistry compute`) go through it; `GET
+  /api/knowledge/page` adds core's `isVaultPath`, so `.metistry/`,
+  `Artifacts/` and the root `CLAUDE.md` are not reachable as "knowledge" from
+  any client. The same predicate the indexer's walk and `mcp-brain`'s
+  `validKnowledgePath` use, so the three cannot drift.
 - PoC-5's open question — retrieval *quality* on a real corpus of your own
   writing — is still open by design. The mechanics are proven; the
   judgement waits for a year of notes.

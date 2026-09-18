@@ -111,3 +111,33 @@ export {
   type SeedDescription,
 } from "./runtime-install.js";
 export { StepRunner, StepFailed } from "./steps.js";
+// The `metistry compute` verbs (docs/ops/compute.md). Exported because the
+// CONSOLE drives the same ones over HTTP (`/api/compute*`,
+// docs/ops/console-api.md): `compute.yaml` is edited as a YAML document,
+// validated against core's schema, and written through the reconciler as
+// `user` in exactly one place, so the CLI verb and the app's Compute pane
+// cannot drift into two behaviours. `providers add`/`remove` are
+// deliberately NOT on this list — they take a secret, and secrets never
+// cross the console (apps/console/src/compute-routes.ts).
+export {
+  assign,
+  computeFiles,
+  computeReport,
+  instanceComputeFile,
+  modelsList,
+  parseAssignmentTarget,
+  parseBudgetAction,
+  parseBudgetTarget,
+  parseEffort,
+  providerTest,
+  renderComputeReport,
+  setBudget,
+  type AssignResult,
+  type AssignmentTarget,
+  type BudgetResult,
+  type BudgetTarget,
+  type ComputeOptions,
+  type ComputeReport,
+  type ModelsListResult,
+  type ProviderTestResult,
+} from "./compute.js";

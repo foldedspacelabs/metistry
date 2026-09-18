@@ -448,3 +448,252 @@ has no `open`. That is collaboration rule 4 enforced by absence rather than by
 a check — a human may address a card to any crew, and an agent cannot address
 one at all. If an agent verb ever gains assignment, `crossKindRefusal` is the
 guard it needs (`docs/research/2026-09-11-local-models-openrouter-opencode.md`).
+
+## `/api/compute*` — providers, assignments and budgets (`user` principal)
+
+```
+GET  /api/compute                                     the same report as `metistry compute show --json`
+GET  /api/compute/models[?provider=<name>]            live /v1/models, per provider, plus unconfigured local servers
+POST /api/compute/assign          {tier|crew, model, effort?}
+POST /api/compute/budget          {scope, daily?, monthly?, action}
+POST /api/compute/providers/test  {name, complete?}
+200  the verb's own JSON result, plus `notes` (the lines the CLI would print) and `as_of`
+400  the field that would permit it — including a `compute.yaml` that does not validate
+403  `not granted` — an agent bearer, or a capture owner token
+503  compute is not reachable from this console (see "Which shapes can write" below)
+```
+
+Until these existed, compute was **Mac-only**: `metistry compute` on the
+machine holding the instance repo was the whole surface, so the phone could
+see what a turn had cost and could not move it to a cheaper model. P6 ("every
+client can do everything") was violated by construction, and that is what
+`docs/product/app-ux-plan.md` §6 phase D is asking for.
+
+**One implementation, not a second one.** Every verb here calls the same
+exported function `metistry compute` calls
+(`packages/cli/src/compute.ts`, `docs/ops/compute.md`): the instance's
+`compute.yaml` is edited as a **YAML document** so comments, ordering and
+hand-written blocks survive; the RESULT is re-parsed through core's schema and
+the whole write is refused if it does not validate; and the write goes through
+the reconciler as the **`user` principal** (invariant 2, D5). There is no
+second editor and no second validator, so a CLI verb and the app's Compute
+pane cannot come to mean different things.
+
+**These are configuration, not "actions".** Invariant 10 closes the console's
+*action* surface: an enumerated set of doors onto existing audited services,
+each new one a product change rather than a prompt or a config line
+(`docs/ops/actions.md`). `/api/compute*` is **not** on that list and is not
+meant to be. It is the owner's own configuration of how the system behaves —
+`user` principal only, no agent, no proposal, no `propose_action` kind, no
+autonomy level that reaches it. `runAction` has no compute kind, which is that
+sentence in code rather than in a comment.
+
+**A secret never crosses this boundary.** `providers add` and `providers
+remove` are deliberately **absent**. Adding a provider takes a key; a key
+belongs on stdin into the login Keychain, from the hand of the person at the
+machine (`docs/ops/compute.md` "Secrets"), and provider credentials are
+*user*-scoped — shared by every instance on that Mac, and never one
+instance's to hand out over HTTP. So **adding or removing a provider, and
+anything that takes a secret, stays CLI/app-only.** What `GET /api/compute`
+reports is the **NAME** of the secret a provider authenticates with and
+whether an item of that name exists:
+
+```json
+{"name":"openrouter","locality":"off_machine","zdr":true,
+ "secret":"METISTRY_OPENROUTER_API_KEY","secret_present":true,
+ "models_assigned":["anthropic/claude-opus-4"],
+ "budget":{"daily_usd":5,"monthly_usd":60,"action":"stop"}}
+```
+
+Presence, never a value. `secret_present` needs a login Keychain to be
+truthful, so it is `false` wherever there is none (a container): the honest
+`false`, not a missing field. `POST /api/compute/providers/test` does use the
+credential — a real `GET <base_url>/models`, and with `complete: true` a
+one-token completion — and reports only whether it worked.
+
+`GET /api/compute` adds two fields the CLI report does not carry:
+
+- **`spend`** — `{instance:{daily,monthly}, providers:{<name>:{daily,monthly}}}`,
+  folded from the **`spend` named query** (invariant 3: the same read path the
+  engine checks before every billable call), so the pane shows a budget beside
+  what has been spent against it. `null` when that query is not loaded — never
+  a guessed zero.
+- **`writable`** — whether the write verbs will work here, so a client greys
+  the controls instead of discovering it on submit.
+
+**Which shapes can write.** Every write verb OPENS the instance's own
+`.metistry/compute.yaml`, edits the document and writes the whole thing back,
+so the console has to be able to *read* that file. The compose shape
+deliberately gives the console no instance mount (D5: the reconciler is the
+sole holder of the instance repo), so there `METISTRY_INSTANCE_DIR` is unset
+and every route answers `503` naming it. The launchd/native shape runs the
+console as the user with the instance's own environment, and it works.
+
+And one guard that is not about a caller's mistake at all: if the overlay in
+force (`METISTRY_COMPUTE_FILES`) ends somewhere other than
+`<instanceDir>/.metistry/compute.yaml`, the write is refused with both paths
+named. Unguarded, the verb would find nothing at the path it opens, start from
+a bare header, and deliver a four-line file over the real one — data loss
+rather than a refusal. `apps/console/test/compute-routes.test.ts` holds it.
+
+## `/api/knowledge/*` — the vault read path (`user` principal)
+
+```
+GET /api/knowledge/search?q=&mode=keyword|semantic|hybrid&limit=
+200 {"q":"sleep","mode":"hybrid","hits":[{"path","title","description","snippet","score","source"}],
+     "degraded":null,"as_of":"…"}
+GET /api/knowledge/page?path=Areas/Health/sleep.md
+200 {"path","content","sha256","bytes","as_of"}
+400 q / mode / limit / a missing path — by name
+404 the page is not there, OR is not knowledge (indistinguishable, on purpose)
+503 no vault bridge configured
+```
+
+The console has held a vault reader, lister and searcher since Phase 6 and
+wired them only into `mcp-brain`'s tools — so knowledge was reachable by an
+**agent** over MCP and by nothing the owner holds. These two routes are that
+gap closed, and they are deliberately thin: a proxy onto the reconciler's
+`GET /vault/search` and `GET /vault/read`, which serve them already
+(`docs/ops/reconciler.md`, `docs/ops/knowledge-search.md`). Not streamed — the
+bridge's hit list is bounded and a page is one file.
+
+`mode` omitted means **"choose for me"** at the bridge (hybrid where vectors
+exist, keyword otherwise) rather than a default invented in the console.
+`limit` defaults to 20 and is capped at **100**, which is the bridge's own
+ceiling: there is no offset and no cursor, and RRF fuses over a pool, so an
+offset would re-rank rather than continue. "Top 100, honestly" is the
+contract. `degraded` reaches the client rather than being swallowed (P5):
+"keyword only — the embedder is down" is a **fact the UI states**, not an
+error.
+
+**What the bridge does not refuse, this does.** The reconciler's `/vault/read`
+confines a path to the instance repo and stops there — it will serve
+`.metistry/state/.env`, `.metistry/compute.yaml` or the root `CLAUDE.md`,
+because `metistry update` and `metistry compute` write those files through the
+same bridge and a read gate would break the write path. Knowledge is a
+narrower thing than "a file in the instance repo", so the narrowing happens
+**here**, on core's `isVaultPath`: no traversal, no leading slash, nothing
+inside a dot-directory, not `Artifacts/`, not the root `CLAUDE.md` /
+`README.md`. The same predicate `mcp-brain`'s `validKnowledgePath` applies to
+agents and the indexer applies to the walk, so the three cannot drift.
+
+A refusal answers **`404`, not `403`** — for the same reason a decision on an
+unknown proposal does: the owner may read `.metistry/compute.yaml` with a text
+editor or `metistry compute show`, and the honest thing to say on the
+*knowledge* route is "there is no such page", not "there is one and you may
+not have it". "Refused" and "absent" are indistinguishable from outside.
+
+**Grant areas.** Both routes filter through one predicate (`canSee(path,
+scope)`): is this vault content at all, *and* does it fall under the scope's
+areas. A hit the scope does not cover is **dropped**, never returned with a
+flag — a path is the sensitive half of a hit, and a filtered list must not
+become a directory listing of what was filtered. The only principal that
+reaches these routes today is `user`, whose scope is the whole vault (which is
+still not "every path": the `isVaultPath` half applies to the owner too). An
+**agent** reaches knowledge under its grants on the `/mcp` mount —
+`knowledge_search`, `knowledge_read`, `knowledge_list`, `knowledge_grep`,
+where `knowledgeScope(principal)` produces exactly this shape from
+`grants.areas` — and is the uniform `403` here, like everywhere outside
+`/capture` and `/mcp` (CRIT-7). The narrowed form is implemented and tested so
+that a narrower console principal, if one is ever minted, inherits the filter
+rather than reinventing it at the call site.
+
+**No `GET /api/knowledge/pages`.** The page LIST and the link graph are
+derived state, so invariant 3 sends them through a named query over
+`knowledge_files` / `knowledge_links` — and `seed/queries/` carries no such
+query yet. The route is a `404` that names what the read path *is*. When
+`knowledge_pages` / `knowledge_page_links` land (sized in
+`docs/product/app-ux-plan.md` §6.1 — no migration needed; `0009_brain.sql`
+already added `title`, `description`, `draft`), `GET /api/q/knowledge_pages`
+serves them through the generic query door with no new route at all.
+
+## `GET /api/commands` — the composer's list, generated (`user` principal)
+
+```
+GET /api/commands
+200 {"commands":[{"id":"/status","description":"Work items not yet closed, newest first",
+                  "routes_to":"fast_path","tier":null,"model":null,"effort":null,
+                  "query":"open_work","takes_argument":false}],
+     "agents":[{"id":"@drey","description":"Drey","kind":"external",
+                "present":true,"last_seen_at":"…"}],
+     "as_of":"…"}
+503 no rules.yaml is loaded (METISTRY_RULES_FILES)
+```
+
+`docs/product/ux-direction.md` ruled that discoverability is **generated, not
+hand-maintained**, and until this route existed every client shipped a static
+array with the gap marked in code — so any instance whose `rules.yaml`
+differed from the shipped defaults was lied to by its own menu. This is the
+one source: the instance's own router rules plus the agent registry.
+
+What it derives, and from where:
+
+| entry | from |
+| --- | --- |
+| `/note` | the router itself (`router.ts`) — a file, an inbox row, an instant ack, no model |
+| `/<deep_alias>` | `rules.commands.deep_alias`, so an instance that calls it `/think` gets `/think` |
+| `/model` | the general override, listing the instance's own tier names |
+| one per `fast_path` rule | the rule's `match`, **only** where the pattern spells a command unambiguously |
+
+`routes_to` is the router's own vocabulary (`note`, `fast_path`,
+`model_override`); a model route carries the `tier` it takes and the
+`model`/`effort` that tier resolves to **right now** — `compute.yaml`'s
+assignments when it has any, else `rules.yaml`'s `tiers:` block — so a
+reassignment shows in the menu without a restart. A fast path carries the
+named query that answers it, and its one-line `description` **is that query's
+own description**, so there is nothing to keep in sync.
+
+**It refuses to guess.** A `fast_path` rule is a regex, and most regexes are
+sentences: `^what('| i)?s (my |the )?(status|open work)\b` matches real
+messages and is not something anybody types with a slash. So only `^/name…`
+and `^/(a|b|c)…` yield commands; `^/s[ua]m`, `^/st(at)?us` and a branch
+containing a space yield **nothing**, and one unreadable branch discards the
+whole rule. A rule that yields no command is not a bug and is not hidden — it
+is a rule you reach by writing the sentence. `takes_argument` says whether the
+router needs text after the command.
+
+**Order is deterministic** (the same discipline invariant 4 applies to the
+router): `/` commands first, then `@` agents, each group sorted by `id`. That
+is what a menu opened with nothing typed shows; the *client* re-ranks the same
+list by prefix-then-substring-then-recency against the token being typed
+(`design-system.md` §3.6). First match wins among `fast_path` rules, exactly
+as in the router, so a later rule re-using a word does not overwrite it.
+
+Agents come from the registry, `revoked` rows dropped. `present` means an
+approved, unrevoked row that has authenticated at least once — a **pending**
+enrolment (S2) is listed and never `present`, because it authenticates nothing
+until the owner approves it.
+
+An integration test routes every command the endpoint offers back through
+`route()` and asserts the decision matches what the entry claims. Nothing else
+in the repo holds the menu and the router together.
+
+## `GET /api/runs/:id` — one row of the ledger (`user` principal)
+
+```
+GET /api/runs/123
+200 {"run":{…},"as_of":"…"}
+404 no run 123 in the ledger
+503 the named query `run_detail` is not loaded
+```
+
+`activity_feed` gives every event a `ref` of `runs:<id>`; this is what the tap
+on it opens. Through the `run_detail` named query like every other read
+(invariant 3) — component, kind, timing, provider/model, token and cache
+counts, cost, the error if it failed, `meta`, and:
+
+- **`tool_calls`** (plus `tool_calls_total`, `tool_calls_failed`) — the calls
+  the same reply made, joined **exactly** on `meta.turn_id` (the id the
+  assistant stamps on every brain tool call while answering one message,
+  `docs/ops/assistant-tools.md`) or `meta.message_id`. A run with neither
+  reports none, which is the honest answer: a ±N-minute window around a
+  session would attribute another reply's calls to this one.
+- **`shadow_*`** — the candidate provider/model, the deterministic agreement
+  score, whether the tool-call sequence matched, the answer similarity, and
+  what the shadow cost (`docs/ops/compute.md` "Shadow mode"). `null` on every
+  unshadowed turn, which is also how "shadow mode is not configured" reads.
+  The **transcripts themselves are not returned** — they are two full replies,
+  and the drill-down wants the measure, not the text.
+
+There is still no `runs` *list* endpoint: the timeline is `activity_feed` /
+`runs_summary`, and the whole ledger is `GET /api/runs/export` above.

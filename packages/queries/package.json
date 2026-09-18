@@ -1,6 +1,6 @@
 {
   "name": "@foldedspacelabs/metistry-queries",
-  "version": "0.8.1",
+  "version": "0.9.0",
   "description": "The one implementation of Metistry invariant 3: named queries from YAML, typed param validation, parameterized execution, TTL cache, {rows, as_of} envelope.",
   "license": "Apache-2.0",
   "type": "module",

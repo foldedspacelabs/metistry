@@ -419,7 +419,10 @@ describe("the legacy instance layout", () => {
     // through; the pull brings the checkout's own package.json past it
     const exec = fakeExec({ git: (args) => (args[0] === "pull" ? (writeFileSync(join(P, "package.json"), JSON.stringify({ name: "metistry", version: "0.9.0" })), undefined) : undefined) });
     const lines: string[] = [];
-    const r = await update({ ...base(P, { METISTRY_INSTANCE_DIR: I }), version: undefined, exec, out: (l) => lines.push(l), doctorFn: okDoctor, openSession: async () => null });
+    // the running CLI is pinned to the supported line explicitly: the default is
+    // this package's own version, which moves past 0.8.x on release and would
+    // make the first gate refuse before the fetch
+    const r = await update({ ...base(P, { METISTRY_INSTANCE_DIR: I }), version: "0.8.1", exec, out: (l) => lines.push(l), doctorFn: okDoctor, openSession: async () => null });
     expect(r.code).not.toBe(0);
     // it pulled, and then stopped: nothing installed, nothing built, nothing migrated
     expect(exec.calls.map((c) => c.args[0])).toEqual(["fetch", "pull"]);

@@ -57,3 +57,6 @@ docs/poc/poc18-bakeoff/runs/.transcripts/
 # source of truth that ops/scripts/install-claude-assets.sh links into ~/.claude.
 .claude/settings.local.json
 .claude/worktrees/
+
+# Designer session output dropped at the repo root; never product content
+Claude outputs/

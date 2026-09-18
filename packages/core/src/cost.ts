@@ -24,6 +24,22 @@ import type { Provider } from "./compute.js";
 
 /** Where the number on the row came from. Recorded so an unpriced call is visible rather than invisible. */
 export const COST_SOURCES = ["provider", "pricing", "local", "unknown"] as const;
+
+/**
+ * What a cached prompt token costs as a multiple of `in_per_m`, when
+ * `pricing:` names no multiplier of its own. These are Anthropic's rates as
+ * OpenRouter passes them through — cache reads at 0.1×, five-minute cache
+ * writes at 1.25× (`docs/research/2026-09-11-local-models-openrouter-opencode.md`
+ * [or-cache] = <https://openrouter.ai/docs/features/prompt-caching>, fetched
+ * 2026-09-11) — because that is the one provider the product ships a
+ * template for and the only caching shape the engine sends today. A cloud
+ * written by hand states its own two numbers.
+ *
+ * They only ever apply on the `pricing` path: OpenRouter itself sends
+ * `usage.cost`, which already knows what the cache saved.
+ */
+export const DEFAULT_CACHE_READ_MULTIPLIER = 0.1;
+export const DEFAULT_CACHE_WRITE_MULTIPLIER = 1.25;
 export type CostSource = (typeof COST_SOURCES)[number];
 
 /**
@@ -83,7 +99,26 @@ export function costOf(usage: CallUsage, provider: Provider, model: string): Cal
   if (usage.cost_usd !== undefined) return { cost_usd: usage.cost_usd, source: "provider" };
   const rate = provider.pricing?.[model];
   if (rate) {
-    const cost = (usage.tokens_in / 1_000_000) * rate.in_per_m + (usage.tokens_out / 1_000_000) * rate.out_per_m;
+    // Caching splits the prompt into three prices. `tokens_in` is the whole
+    // prompt as the provider billed it, and `cache_read`/`cache_write` are
+    // subsets of it (the CallUsage note above), so the FRESH remainder is
+    // what is left after both — clamped, because a provider that reported
+    // more cached tokens than prompt tokens must not be able to produce a
+    // negative charge. A response that reports neither prices exactly as it
+    // did before caching existed.
+    //
+    // The "cache writes are inside `tokens_in`" half of that is the
+    // assumption OPEN-6's measurement checks: if a provider reports them
+    // beside the prompt instead, this undercharges a write by 1× the input
+    // rate and nothing else moves.
+    const cacheRead = Math.min(Math.max(0, usage.cache_read ?? 0), usage.tokens_in);
+    const cacheWrite = Math.min(Math.max(0, usage.cache_write ?? 0), usage.tokens_in - cacheRead);
+    const fresh = usage.tokens_in - cacheRead - cacheWrite;
+    const cost =
+      (fresh / 1_000_000) * rate.in_per_m +
+      (cacheRead / 1_000_000) * rate.in_per_m * (rate.cache_read_multiplier ?? DEFAULT_CACHE_READ_MULTIPLIER) +
+      (cacheWrite / 1_000_000) * rate.in_per_m * (rate.cache_write_multiplier ?? DEFAULT_CACHE_WRITE_MULTIPLIER) +
+      (usage.tokens_out / 1_000_000) * rate.out_per_m;
     // six decimals is what `runs.cost_usd` stores (numeric(10,6)); rounding
     // here rather than at the column keeps the number the engine logged and
     // the number the budget added up identical.

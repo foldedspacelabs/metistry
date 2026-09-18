@@ -15,7 +15,7 @@ import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join, relative } from "node:path";
-import { INSTANCE_LAYOUT, usesCompose, type Deployment } from "@foldedspacelabs/metistry-core";
+import { INSTANCE_LAYOUT, LEGACY_VAULT_DIR, detectLayout, usesCompose, type Deployment, type InstanceLayoutShape } from "@foldedspacelabs/metistry-core";
 import { loadDeployment } from "./deployment.js";
 import { doctor, type DoctorDeps, type DoctorReport } from "./doctor.js";
 import { productVersion } from "./env.js";
@@ -25,7 +25,7 @@ import type { Exec } from "./exec.js";
 import { loadPlistTemplates, loadSupervisedTemplates, type PlistTemplate } from "./launchd.js";
 import { SUPERVISOR_SERVICE } from "./supervisor.js";
 import { instanceLockPath, readLock, serializeLock, type LockFile, type LockSource } from "./lock.js";
-import { writeProtected, type ProtectedWrite } from "./protected-write.js";
+import { protectedRel, writeProtected, type ProtectedWrite } from "./protected-write.js";
 import { listMigrationFiles, MIGRATION_LOCK_KEY, openMigrationSession, runMigrations, type MigrateResult, type MigrationSession } from "./migrate.js";
 import { currentVersion, installRelease, rollbackRelease, releaseTarget, runtimePackCommit, type InstallReleaseResult } from "./release.js";
 import { installRuntimeDeps, runtimeDepsEnabled, RUNTIME_DIRNAME, type InstallRuntimeDepsResult } from "./runtime-deps.js";
@@ -52,6 +52,8 @@ export interface UpdateOptions {
   rollback?: boolean | undefined;
   /** release mode: the runtime pack's os-arch (default: this host's) */
   target?: string | undefined;
+  /** `--allow-legacy`: pin a version past 0.8.x onto an instance that has not run `metistry migrate-layout` yet */
+  allowLegacy?: boolean | undefined;
   /** `--env-file`: the dotenv file this install runs from (default: `<instance>/state/.env`, falling back to the checkout's) */
   envFile?: string | undefined;
   now?: Date | undefined;
@@ -80,6 +82,67 @@ export interface UpdateResult {
 }
 
 export { RECONCILER_LABEL } from "./protected-write.js";
+
+// ---- the legacy-layout gate ----------------------------------------------------
+//
+// 0.8.x is the last line that can read a legacy instance. The readers resolve
+// both layouts (core's `resolveInstanceLayout`) precisely so that an instance
+// which has not run `metistry migrate-layout` keeps working on THIS line —
+// and that resolution is compatibility, not a second supported layout. An
+// update that pins a later version would move an install onto code nobody
+// has run against `Knowledge/` and a root `identity.yaml`.
+//
+// So the gate is here, at the one verb that moves the pin, and it is a
+// refusal rather than a warning: the whole point of enforcing at the tool is
+// that "you should migrate first" in a release note is not a control.
+
+/** The last minor line that reads a legacy instance. */
+export const LEGACY_LAYOUT_LAST_MINOR = "0.8";
+
+/** `0.8.1` → `[0, 8]`; undefined when `version` is not a plain semver triple (a tag, a hash, `<latest>`). */
+function majorMinor(version: string): [number, number] | undefined {
+  const m = /^v?(\d+)\.(\d+)(?:\.|$)/.exec(version.trim());
+  return m ? [Number(m[1]), Number(m[2])] : undefined;
+}
+
+/** True when `version` is later than the last line that reads a legacy instance. An unparseable version is NOT past it — a refusal has to be sure. */
+export function pastLegacyLayoutSupport(version: string): boolean {
+  const target = majorMinor(version);
+  const last = majorMinor(LEGACY_LAYOUT_LAST_MINOR)!;
+  if (!target) return false;
+  return target[0] > last[0] || (target[0] === last[0] && target[1] > last[1]);
+}
+
+/**
+ * The one line to print and stop on, or null when this update may proceed.
+ * Pure, so the refusal's exact wording is a test rather than a screenshot.
+ */
+export function legacyLayoutRefusal(opts: { shape: InstanceLayoutShape; instanceDir: string; version: string; allowLegacy?: boolean | undefined }): string | null {
+  if (opts.shape !== "legacy" || opts.allowLegacy === true) return null;
+  if (!pastLegacyLayoutSupport(opts.version)) return null;
+  return (
+    `${opts.instanceDir} is on the legacy instance layout (the vault in ${LEGACY_VAULT_DIR}/, the config files at the instance root) and this update would pin ${opts.version}, ` +
+    `past the ${LEGACY_LAYOUT_LAST_MINOR}.x line that reads it. Run this first:\n` +
+    `  metistry migrate-layout --dry-run   # every move and every row count, nothing run\n` +
+    `  metistry migrate-layout\n` +
+    `Then \`metistry update\` again. \`--allow-legacy\` pins it anyway (docs/ops/instance-layout.md).`
+  );
+}
+
+/**
+ * The version in `<dir>/package.json` — the CHECKOUT's, which after a pull is
+ * the version this update moves the install onto. `productVersion()` cannot
+ * answer this: it reads the package this process is running FROM, which is
+ * still the pre-pull code.
+ */
+export async function checkoutVersion(dir: string): Promise<string | undefined> {
+  try {
+    const v = (JSON.parse(await readFile(join(dir, "package.json"), "utf8")) as { version?: unknown }).version;
+    return typeof v === "string" && v !== "" ? v : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 /** `git rev-parse HEAD` in a checkout; undefined when it is not one (or git is missing). */
 export async function gitHead(dir: string, exec: Exec): Promise<string | undefined> {
@@ -180,9 +243,10 @@ export type LockDelivery = ProtectedWrite;
  * write it), else directly into a local instance dir. protected-write.ts
  * holds the policy, which `identity.yaml`'s `instance_id` shares.
  */
-export async function writeLock(r: StepRunner, lock: LockFile, opts: { env: NodeJS.ProcessEnv; platform: NodeJS.Platform; uid: number; fetchFn: typeof fetch }): Promise<LockDelivery> {
-  const delivery = await writeProtected(r, INSTANCE_LAYOUT.lock, serializeLock(lock), `metistry update → ${lock.product.version}`, opts);
-  if (delivery.how === "none") r.note(`no METISTRY_INSTANCE_DIR — ${INSTANCE_LAYOUT.lock} not written (metistry init creates the instance repo)`);
+export async function writeLock(r: StepRunner, lock: LockFile, opts: { env: NodeJS.ProcessEnv; platform: NodeJS.Platform; uid: number; fetchFn: typeof fetch; instanceDir?: string | undefined }): Promise<LockDelivery> {
+  const rel = protectedRel(opts.instanceDir ?? opts.env.METISTRY_INSTANCE_DIR, "lock");
+  const delivery = await writeProtected(r, rel, serializeLock(lock), `metistry update → ${lock.product.version}`, opts);
+  if (delivery.how === "none") r.note(`no METISTRY_INSTANCE_DIR — ${rel} not written (metistry init creates the instance repo)`);
   return delivery;
 }
 
@@ -234,7 +298,23 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
   // hashed before the build/switch and again after: only jobs whose code moved are kickstarted
   let before = await hashHostJobs(runDir, await templatesForRestart(runDir, deployment.shape, labelSuffix, env));
 
+  // The legacy-layout gate, asked with whatever version is knowable at the
+  // time. In release mode that is `--version` (or "latest", which is not a
+  // number and so never refuses) and this is the whole check. In git mode
+  // the version this run moves the install ONTO is only knowable after the
+  // pull — the process is running the pre-pull code — so it is asked again
+  // below, with the checkout's own package.json re-read off disk, while
+  // nothing has been built, migrated or restarted.
+  const gate = (v: string): void => {
+    const dir = env.METISTRY_INSTANCE_DIR?.replace(/\/+$/, "");
+    if (!dir) return;
+    const refusal = legacyLayoutRefusal({ shape: detectLayout(dir), instanceDir: dir, version: v, allowLegacy: opts.allowLegacy });
+    if (refusal) throw new StepFailed(refusal);
+  };
+
   try {
+    gate(opts.releaseVersion ?? version);
+
     r.section("product");
     r.note(`${productDir} — ${source === "git" ? "git checkout: fast-forward to the remote" : "release: download the pinned runtime pack"}${prior ? ` (lock: ${prior.product.version} @ ${prior.product.commit.slice(0, 7)}, ${prior.updated_at})` : " (no metistry.lock yet)"}`);
     r.note(`shape: ${deployment.shape} — from ${loaded.from}`);
@@ -244,6 +324,12 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
         await r.run("git", ["fetch", "--quiet"], { cwd: productDir, timeoutMs: 120_000 });
         await r.run("git", ["pull", "--ff-only", "--quiet"], { cwd: productDir, timeoutMs: 120_000 });
       } else r.note("not a git checkout (no .git) — nothing to pull");
+      // the pull has landed; this is the first moment the new version exists
+      // on disk. It is read from the CHECKOUT, not from this process: the
+      // running code is the pre-pull code, and `productVersion()` reports
+      // that. Undefined (no package.json, no version) does not refuse.
+      const pulled = await checkoutVersion(productDir);
+      if (pulled) gate(pulled);
     } else if (r.dryRun) {
       // a dry run reaches nothing, GitHub included — so the version it prints is the request, not a resolved tag
       const want = opts.releaseVersion ?? "<latest>";

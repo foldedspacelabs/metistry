@@ -21,6 +21,15 @@ export interface Db extends RunExecutor {
 export interface IndexerConfig {
   /** Commit working-tree changes in the vault that arrived outside the bridge (Obsidian sync). */
   commitExternalEdits: boolean;
+  /**
+   * Where captures live, vault-relative: `Inbox` (the flat layout) or
+   * `Knowledge/Inbox` on an instance `metistry migrate-layout` has not
+   * carried over yet. It reaches the SQL as well as the path test — the
+   * triage rows of a legacy instance are `Knowledge/Inbox/…`, and a cycle
+   * that looked for `Inbox/%` would neither find them nor make new ones.
+   * Unset = the flat spelling.
+   */
+  inboxPrefix?: string | undefined;
 }
 
 export interface ReconcileSummary {
@@ -74,6 +83,11 @@ export class Indexer {
     private readonly embeddings?: Embeddings | undefined,
   ) {}
 
+  /** `Inbox`, or the legacy `Knowledge/Inbox` when the config says so. One place, so the SQL and the path test can never disagree. */
+  private get inboxPrefix(): string {
+    return this.cfg.inboxPrefix ?? INBOX_PREFIX;
+  }
+
   /** Coalesce: a reconcile requested while one runs joins it. */
   reconcile(trigger: string): Promise<ReconcileSummary> {
     if (this.running) return this.running;
@@ -110,7 +124,7 @@ export class Indexer {
         meta = parsed.meta;
         links = extractLinks(parsed.body);
       }
-      scanned.set(p, { path: p, hash: sha256(bytes), mtime: st.mtime, meta, links, conflict, ...(isInboxPath(p) ? { bytes } : {}) });
+      scanned.set(p, { path: p, hash: sha256(bytes), mtime: st.mtime, meta, links, conflict, ...(isInboxPath(p, this.inboxPrefix) ? { bytes } : {}) });
     }
 
     const { rows } = await this.db.query(`SELECT path, content_hash FROM knowledge_files`);
@@ -287,8 +301,8 @@ export class Indexer {
    * archived the moment they are written.
    */
   private async syncInbox(scanned: Map<string, Scanned>): Promise<InboxSummary> {
-    const files = [...scanned.values()].filter((s) => isInboxPath(s.path) && !s.conflict);
-    const { rows } = await this.db.query(`SELECT id, path, sha256, status FROM inbox WHERE path LIKE $1`, [`${INBOX_PREFIX}/%`]);
+    const files = [...scanned.values()].filter((s) => isInboxPath(s.path, this.inboxPrefix) && !s.conflict);
+    const { rows } = await this.db.query(`SELECT id, path, sha256, status FROM inbox WHERE path LIKE $1`, [`${this.inboxPrefix}/%`]);
     const existing = new Map(rows.map((r) => [String(r.path), { id: Number(r.id), sha256: (r.sha256 as string | null) ?? null, status: String(r.status) }]));
     const summary: InboxSummary = { added: 0, changed: 0, archived: 0 };
 
@@ -300,7 +314,7 @@ export class Indexer {
         // millisecond ago and be inserting its own (better) row right now.
         const ins = await this.db.query(
           `INSERT INTO inbox (source, path, mime, note, sha256) VALUES ('vault', $1, $2, $3, $4)
-           ON CONFLICT (path) WHERE path LIKE '${INBOX_PREFIX}/%' DO NOTHING RETURNING id`,
+           ON CONFLICT (path) WHERE path LIKE '${this.inboxPrefix}/%' DO NOTHING RETURNING id`,
           [f.path, mimeForPath(f.path), note, f.hash],
         );
         if (ins.rows[0]) summary.added++;
@@ -317,7 +331,7 @@ export class Indexer {
 
     const present = new Set(files.map((f) => f.path));
     const gone = [...existing.entries()]
-      .filter(([p, r]) => !present.has(p) && r.status !== "archived" && !p.slice(INBOX_PREFIX.length + 1).startsWith("."))
+      .filter(([p, r]) => !present.has(p) && r.status !== "archived" && !p.slice(this.inboxPrefix.length + 1).startsWith("."))
       .map(([p]) => p);
     if (gone.length > 0) {
       await this.db.query(`UPDATE inbox SET status = 'archived', triaged_at = now() WHERE path = ANY($1::text[])`, [gone]);

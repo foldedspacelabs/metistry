@@ -1106,6 +1106,16 @@ install forward, in this order:
 | lock | write `.metistry/metistry.lock` into the instance repo | same, pinned to the release actually installed |
 | doctor | the verdict, as for `up` | same, against `current` |
 
+**A legacy instance is refused past 0.8.x.** Before the product step —
+before anything is fetched, built or migrated — `update` reads the instance
+layout and stops if it is the pre-2026-09-17 shape (the vault in
+`Knowledge/`, the config files at the instance root) and the version it
+would pin is later than `0.8.x`, printing the `metistry migrate-layout`
+lines to run. `--allow-legacy` pins it anyway. 0.8.x reads both layouts
+(`docs/ops/instance-layout.md`, "Until the verb runs"); nothing past it has
+been run against the old one, and compatibility nobody tests is not
+compatibility.
+
 Release-mode flags: `--version 0.2.0` installs a specific release instead
 of the latest; `--rollback` flips `current` back to the previous release
 without downloading anything (migrations are additive-first and are **not**

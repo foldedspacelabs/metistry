@@ -14,6 +14,7 @@ import {
   loadCompute,
   optionalEnv,
   requireEnv,
+  resolveInstanceLayout,
   resolveLocalModelUrl,
 } from "@foldedspacelabs/metistry-core";
 import { Git } from "./git.js";
@@ -39,6 +40,15 @@ const pool = new pg.Pool({
   password: requireEnv("METISTRY_DB_PASSWORD"),
   max: 2,
 });
+
+// Which layout this instance is in, read ONCE. The vault root is the
+// instance directory in both — what differs is where the inbox and the
+// machinery sit, and a legacy instance has not run `metistry migrate-layout`
+// yet (docs/ops/instance-layout.md).
+const instanceLayout = resolveInstanceLayout(instanceDir);
+if (instanceLayout.shape === "legacy") {
+  console.warn(`instance layout: legacy — captures are ${instanceLayout.layout.inboxDir}/ and the config files are at the instance root. \`metistry migrate-layout\` moves them; \`metistry update\` will not carry this instance past 0.8.x until it has run.`);
+}
 
 const git = new Git(instanceDir);
 if (!(await git.isRepo())) {
@@ -87,7 +97,7 @@ const indexer = new Indexer(
   pool,
   vault,
   committer,
-  { commitExternalEdits: optionalEnv("METISTRY_COMMIT_EXTERNAL_EDITS", "true") !== "false" },
+  { commitExternalEdits: optionalEnv("METISTRY_COMMIT_EXTERNAL_EDITS", "true") !== "false", inboxPrefix: instanceLayout.layout.inboxDir },
   embeddings,
 );
 

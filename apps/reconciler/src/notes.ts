@@ -129,11 +129,20 @@ export function isMarkdown(path: string): boolean {
 
 // ---- the vault inbox (docs/ops/inbox.md) ----------------------------------
 
-/** The vault directory captures live in, at the vault root. TitleCase (CLAUDE.md casing rule). */
+/**
+ * The vault directory captures live in, at the vault root. TitleCase
+ * (CLAUDE.md casing rule).
+ *
+ * The default, not the only value: an instance that has not run
+ * `metistry migrate-layout` yet keeps its vault — and so its inbox — in
+ * `Knowledge/Inbox/`, and the indexer is given that prefix instead
+ * (`IndexerConfig.inboxPrefix`, resolved once at startup). Everything that
+ * takes the prefix takes it as an argument for that reason.
+ */
 export const INBOX_PREFIX = INSTANCE_LAYOUT.inboxDir;
 
-export function isInboxPath(path: string): boolean {
-  return path.startsWith(`${INBOX_PREFIX}/`);
+export function isInboxPath(path: string, prefix: string = INBOX_PREFIX): boolean {
+  return path.startsWith(`${prefix}/`);
 }
 
 /**

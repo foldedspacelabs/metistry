@@ -13,7 +13,7 @@ import { parse as parseYaml } from "yaml";
 import {
   DEFAULT_DEPLOYMENT,
   DEPLOYMENT_FILENAME,
-  instancePath,
+  instanceFile,
   engineConfigured,
   engineStatus,
   overlayDeployment,
@@ -41,7 +41,7 @@ export function deploymentPaths(productDir: string, env: NodeJS.ProcessEnv): { s
   const instanceDir = env.METISTRY_INSTANCE_DIR;
   return {
     seed: join(productDir, "seed", DEPLOYMENT_FILENAME),
-    ...(instanceDir ? { instance: instancePath(instanceDir, "deployment") } : {}),
+    ...(instanceDir ? { instance: instanceFile(instanceDir, "deployment") } : {}),
   };
 }
 
@@ -148,7 +148,7 @@ function metistryVars(ctx: ShapeContext): Record<string, string> {
 export function consoleEnv(ctx: ShapeContext): Record<string, string> {
   // the inbox is vault content (docs/ops/inbox.md): `<instance>/Inbox`, the
   // vault root being the instance directory itself
-  const inbox = instancePath(ctx.instanceDir ?? ctx.productDir, "inboxDir");
+  const inbox = instanceFile(ctx.instanceDir ?? ctx.productDir, "inboxDir");
   return {
     ...metistryVars(ctx),
     METISTRY_DB_HOST: "127.0.0.1",

@@ -142,3 +142,68 @@ describe.skipIf(!hasDb)("the vault inbox is indexed from the tree (real db)", ()
     ).rejects.toMatchObject({ code: "23505" });
   });
 });
+
+// ---- the same scan on an instance that has not been migrated yet -------------
+//
+// A legacy instance keeps its captures at `Knowledge/Inbox/` and its triage
+// rows under that prefix (migration 0015's partial index still covers them).
+// The flat-only prefix made the cycle look for `Inbox/%`: it found none of
+// the existing rows and made no new ones, so the capture → triage pipeline
+// stopped on exactly the installs that had not migrated.
+
+const LEGACY_INBOX = "Knowledge/Inbox";
+
+describe.skipIf(!hasDb)("the vault inbox on a legacy instance (real db)", () => {
+  let pool: pg.Pool;
+  let repo: TempRepo;
+  let indexer: Indexer;
+
+  const clean = async () => {
+    await pool.query(`DELETE FROM inbox WHERE path LIKE $1`, [`${LEGACY_INBOX}/%`]);
+    await pool.query(`DELETE FROM knowledge_links`);
+    await pool.query(`DELETE FROM knowledge_files`);
+    await pool.query(`DELETE FROM runs WHERE component = 'reconciler'`);
+  };
+
+  beforeAll(async () => {
+    pool = new pg.Pool({
+      host: process.env.METISTRY_DB_HOST ?? "127.0.0.1",
+      port: Number(process.env.METISTRY_DB_PORT ?? 5432),
+      user: process.env.METISTRY_DB_USER ?? "metistry",
+      database: process.env.METISTRY_TEST_DB_NAME ?? "metistry_test",
+      password: process.env.METISTRY_DB_PASSWORD,
+    });
+    await clean();
+    repo = await tempRepo();
+    const committer = new Committer(repo.git, { authorPrefix: "Metistry", authorEmail: "metistry@test" });
+    const vault = new Vault(repo.root, repo.git, committer, { maxBytes: 65536 });
+    // what `resolveInstanceLayout` hands the reconciler on a legacy instance
+    indexer = new Indexer(pool, vault, committer, { commitExternalEdits: false, inboxPrefix: LEGACY_INBOX });
+    await mkdir(join(repo.root, LEGACY_INBOX), { recursive: true });
+  });
+  afterAll(async () => {
+    await repo.cleanup();
+    await clean();
+    await pool.end();
+  });
+
+  it("makes triage rows under the legacy prefix, and archives them there", async () => {
+    const path = `${LEGACY_INBOX}/1757990000000-idea.md`;
+    await writeFile(join(repo.root, path), "# A legacy idea\n\nstill a capture\n");
+    expect((await indexer.reconcile("test")).inbox).toEqual({ added: 1, changed: 0, archived: 0 });
+    expect((await pool.query(`SELECT path, source, note, status FROM inbox WHERE path LIKE $1`, [`${LEGACY_INBOX}/%`])).rows).toEqual([
+      { path, source: "vault", note: "A legacy idea", status: "new" },
+    ]);
+
+    await rm(join(repo.root, path));
+    expect((await indexer.reconcile("test")).inbox).toEqual({ added: 0, changed: 0, archived: 1 });
+    expect((await pool.query(`SELECT status FROM inbox WHERE path = $1`, [path])).rows[0].status).toBe("archived");
+  });
+
+  it("does not touch a flat-layout row that happens to be in the same table", async () => {
+    await pool.query(`INSERT INTO inbox (source, path, mime, sha256) VALUES ('http', $1, 'text/markdown', $2)`, ["Inbox/1757990000001-other.md", "2".repeat(64)]);
+    expect((await indexer.reconcile("test")).inbox).toEqual({ added: 0, changed: 0, archived: 0 });
+    expect((await pool.query(`SELECT status FROM inbox WHERE path = $1`, ["Inbox/1757990000001-other.md"])).rows[0].status).toBe("new");
+    await pool.query(`DELETE FROM inbox WHERE path = $1`, ["Inbox/1757990000001-other.md"]);
+  });
+});

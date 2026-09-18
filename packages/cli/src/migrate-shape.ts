@@ -30,7 +30,7 @@
 
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { statePath, type Deployment, type DeploymentShape } from "@foldedspacelabs/metistry-core";
+import { instanceStatePath, type Deployment, type DeploymentShape } from "@foldedspacelabs/metistry-core";
 import { consolePort, dbPort, loadDeployment } from "./deployment.js";
 import { instanceEnvFile } from "./instance.js";
 import { setDeploymentShape } from "./deployment-report.js";
@@ -183,7 +183,7 @@ export function stamp(d: Date): string {
 
 /** `<instance>/.metistry/state/migrate` — derived, gitignored, beside `state/pg`. Dumps are kept, never pruned by this verb. */
 export function migrateDir(root: string): string {
-  return statePath(root, "migrate");
+  return instanceStatePath(root, "migrate");
 }
 
 /** `pg_restore --list` output is a TOC; the entry lines start with a number. Anything else is a header comment. */

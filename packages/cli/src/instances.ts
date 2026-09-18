@@ -30,15 +30,14 @@ import { join } from "node:path";
 import { parseDocument } from "yaml";
 import {
   INSTANCES_FILENAME,
-  INSTANCE_LAYOUT,
-  instancePath,
+  instanceFile,
   normalizeCapabilities,
   parseInstances,
   type InstanceEntry,
   type Instances,
 } from "@foldedspacelabs/metistry-core";
 import { realExec, type Exec } from "./exec.js";
-import { writeProtected, type ProtectedWrite } from "./protected-write.js";
+import { protectedRel, writeProtected, type ProtectedWrite } from "./protected-write.js";
 import { StepFailed, StepRunner } from "./steps.js";
 
 export const INSTANCE_VERBS = ["list", "add", "remove", "refresh"] as const;
@@ -63,7 +62,7 @@ export interface InstancesOptions {
 }
 
 export function instancesFile(instanceDir: string): string {
-  return instancePath(instanceDir, "instances");
+  return instanceFile(instanceDir, "instances");
 }
 
 const HEADER = [
@@ -102,7 +101,7 @@ async function commit(opts: InstancesOptions, entries: InstanceEntry[], message:
   if (!validated.ok) throw new StepFailed(`refusing to write ${file}: the result would be invalid — ${validated.errors.join("; ")}`);
 
   const r = new StepRunner({ dryRun: opts.dryRun === true, out: opts.out, exec: opts.exec ?? realExec, env: opts.env });
-  const delivery = await writeProtected(r, INSTANCE_LAYOUT.instances, content, message, {
+  const delivery = await writeProtected(r, protectedRel(opts.instanceDir, "instances"), content, message, {
     env: opts.env,
     platform: opts.platform,
     uid: opts.uid,

@@ -5,6 +5,7 @@ export {
   dirSink,
   vaultSink,
   placeCapture,
+  vaultPathPredicate,
   DEFAULT_MAX_TRACKED_BYTES,
   INBOX_LARGE_DIRNAME,
   INBOX_PREFIX,

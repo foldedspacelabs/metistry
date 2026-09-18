@@ -38,7 +38,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import {
   BUDGET_ACTIONS,
   EFFORTS,
-  INSTANCE_LAYOUT,
+  resolveInstanceLayout,
   SPEND_QUERY,
   computePaths,
   errorEnvelope,
@@ -135,7 +135,7 @@ export function writeTargetIssue(opts: ComputeOptions): string | undefined {
   const target = instanceComputeFile(opts.instanceDir);
   if (last !== undefined && resolve(last) === resolve(target)) return undefined;
   return (
-    `refusing to write ${INSTANCE_LAYOUT.compute}: the overlay in force is ${paths.join(" → ") || "(empty)"}, whose last entry is ` +
+    `refusing to write ${resolveInstanceLayout(opts.instanceDir).layout.compute}: the overlay in force is ${paths.join(" → ") || "(empty)"}, whose last entry is ` +
     `${last ?? "(none)"}, not ${target}. This console would edit a file it cannot read and overwrite the one you have — ` +
     `point METISTRY_COMPUTE_FILES at ${target} last, or use \`metistry compute\` on the machine that holds the instance repo.`
   );

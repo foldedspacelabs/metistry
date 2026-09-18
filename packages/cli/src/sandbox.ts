@@ -15,7 +15,7 @@
 
 import { realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { statePath } from "@foldedspacelabs/metistry-core";
+import { instanceStatePath } from "@foldedspacelabs/metistry-core";
 import type { Compute } from "@foldedspacelabs/metistry-core";
 
 export const SANDBOX_EXEC = "/usr/bin/sandbox-exec";
@@ -145,7 +145,7 @@ export function sandboxProfilePath(productDir: string): string {
 
 /** The assistant's state directory: outside the vault, gitignored, and the only path the profile lets it write. */
 export function assistantStateDir(opts: { instanceDir?: string | undefined; productDir: string }): string {
-  return statePath(opts.instanceDir ?? opts.productDir, "assistant");
+  return instanceStatePath(opts.instanceDir ?? opts.productDir, "assistant");
 }
 
 /** The per-user temporary directory, without a trailing slash (macOS `TMPDIR` has one). */

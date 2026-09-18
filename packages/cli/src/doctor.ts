@@ -38,7 +38,7 @@ import {
   type ChildStatus,
   type Manifest,
 } from "@foldedspacelabs/metistry-core";
-import { COMPUTE_FILENAME, INSTANCE_LAYOUT, LEGACY_VAULT_DIR, detectLayout, emptyCompute, instancePath, loadCompute, type Compute } from "@foldedspacelabs/metistry-core";
+import { COMPUTE_FILENAME, INSTANCE_LAYOUT, LEGACY_VAULT_DIR, detectLayout, emptyCompute, instanceFile, loadCompute, type Compute } from "@foldedspacelabs/metistry-core";
 import { engineStatus, loadDeployment } from "./deployment.js";
 import { localServerRows } from "./local-models.js";
 import { realExec, type Exec } from "./exec.js";
@@ -819,7 +819,7 @@ export async function supervisorRows(stateRoot: string): Promise<DoctorRow[]> {
  */
 export async function computeForDoctor(env: NodeJS.ProcessEnv, productDir: string): Promise<Compute | undefined> {
   const instanceDir = env.METISTRY_INSTANCE_DIR?.replace(/\/+$/, "") || productDir;
-  const paths = env.METISTRY_COMPUTE_FILES ?? `${join(productDir, "seed", COMPUTE_FILENAME)}:${instancePath(instanceDir, "compute")}`;
+  const paths = env.METISTRY_COMPUTE_FILES ?? `${join(productDir, "seed", COMPUTE_FILENAME)}:${instanceFile(instanceDir, "compute")}`;
   try {
     return (await loadCompute(paths)).compute;
   } catch {

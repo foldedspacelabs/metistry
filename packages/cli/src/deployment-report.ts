@@ -10,12 +10,12 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { DEPLOYMENT_FILENAME, INSTANCE_LAYOUT, SHAPED_SERVICES, instancePath, servicePlan, usesCompose, type Deployment, type DeploymentShape, type ServiceName } from "@foldedspacelabs/metistry-core";
+import { DEPLOYMENT_FILENAME, SHAPED_SERVICES, instanceFile, servicePlan, usesCompose, type Deployment, type DeploymentShape, type ServiceName } from "@foldedspacelabs/metistry-core";
 import { applyShapeToYaml, loadDeployment } from "./deployment.js";
 import { composeRows, launchdRows } from "./doctor.js";
 import { realExec, type Exec } from "./exec.js";
 import { serviceOf } from "./launchd.js";
-import { writeProtected } from "./protected-write.js";
+import { protectedRel, writeProtected } from "./protected-write.js";
 import { StepRunner } from "./steps.js";
 
 export interface DeploymentServiceRow {
@@ -156,10 +156,10 @@ export async function setDeploymentShape(opts: SetShapeOptions): Promise<SetShap
     return { shape: opts.targetShape, applied: false, refused: true, detail };
   }
 
-  const path = instancePath(opts.instanceDir, "deployment");
+  const path = instanceFile(opts.instanceDir, "deployment");
   const existing = existsSync(path) ? await readFile(path, "utf8") : undefined;
   const content = applyShapeToYaml(existing, opts.targetShape);
-  const delivery = await writeProtected(r, INSTANCE_LAYOUT.deployment, content, `metistry deployment set-shape → ${opts.targetShape}`, {
+  const delivery = await writeProtected(r, protectedRel(opts.instanceDir, "deployment"), content, `metistry deployment set-shape → ${opts.targetShape}`, {
     env: opts.env,
     platform: opts.platform,
     uid: opts.uid,

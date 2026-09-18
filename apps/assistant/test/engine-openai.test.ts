@@ -29,6 +29,7 @@ providers:
     locality: off_machine
     auth: { secret: METISTRY_OPENROUTER_API_KEY }
     zdr: true
+    caching: auto
     request: { provider: { order: [anthropic], allow_fallbacks: false } }
     data_policy: { allow: [Knowledge], deny_sources: [], max_brief_bytes: 4096 }
     pricing: { anthropic/claude-sonnet-5: { in_per_m: 3, out_per_m: 15 } }
@@ -147,6 +148,88 @@ describe("the request", () => {
       expect((err as Error).message).toContain("providers.openrouter.auth.secret = METISTRY_OPENROUTER_API_KEY");
     }
     expect(completionsUrl("http://x/v1/")).toBe("http://x/v1/chat/completions");
+  });
+});
+
+// ---- prompt caching (OPEN-6, ruled 2026-09-17) -------------------------------
+
+describe("automatic prompt caching", () => {
+  const spec = (a: ResolvedAssignment) => ({ model: a.model, effort: a.effort, assignment: a, thread: "t" });
+
+  it("sends ONE top-level cache_control on a provider whose block says caching: auto", async () => {
+    const s = server([{ body: chat("ok") }]);
+    await engineOn(cloud, s, host({}))("hi", spec(cloud));
+    expect(s.requests[0]!.body.cache_control).toEqual({ type: "ephemeral" });
+  });
+
+  it("sends nothing for caching: off, an absent field, or a local server", async () => {
+    const off = resolveAssignment(parseCompute(FILE.replace("caching: auto", "caching: off")), "default")!;
+    const absent = resolveAssignment(parseCompute(FILE.replace("    caching: auto\n", "")), "default")!;
+    for (const a of [off, absent, local]) {
+      const s = server([{ body: chat("ok") }]);
+      await engineOn(a, s, host({}))("hi", spec(a));
+      expect(s.requests[0]!.body.cache_control).toBeUndefined();
+    }
+  });
+
+  it("the operator's request: block still wins — explicit breakpoints are theirs to write", async () => {
+    const explicit = resolveAssignment(
+      parseCompute(FILE.replace("request: { provider: { order: [anthropic], allow_fallbacks: false } }", 'request: { cache_control: { type: ephemeral, ttl: 1h } }')),
+      "default",
+    )!;
+    const s = server([{ body: chat("ok") }]);
+    await engineOn(explicit, s, host({}))("hi", spec(explicit));
+    expect(s.requests[0]!.body.cache_control).toEqual({ type: "ephemeral", ttl: "1h" });
+  });
+
+  it("cached tokens land on the turn as cache_read / cache_write, summed over the loop", async () => {
+    const usage = (cached: number) => ({ prompt_tokens: 1000, completion_tokens: 10, prompt_tokens_details: { cached_tokens: cached }, cache_write_tokens: 100 });
+    const s = server([
+      { body: chat(null, { tool_calls: [toolCall("c1", "mcp__brain__knowledge_search", { q: "folds" })], usage: usage(0) }) },
+      { body: chat("two notes", { usage: usage(900) }) },
+    ]);
+    const r = await engineOn(cloud, s, host({ mcp__brain__knowledge_search: "two notes mention folds" }))("hi", spec(cloud));
+    expect(r).toMatchObject({ tokens_in: 2000, cache_read: 900, cache_write: 200 });
+  });
+
+  it("the cached share is priced at the cache multipliers when the response carries no cost", async () => {
+    // 100k fresh at $3/M, 800k read at 0.1x, 100k written at 1.25x, no output
+    const s = server([{ body: chat("ok", { usage: { prompt_tokens: 1_000_000, completion_tokens: 0, prompt_tokens_details: { cached_tokens: 800_000 }, cache_write_tokens: 100_000 } }) }]);
+    const r = await engineOn(cloud, s, host({}))("hi", spec(cloud));
+    expect(r).toMatchObject({ cost_usd: 0.915, cost_source: "pricing" });
+  });
+
+  it("a shadow inherits its CANDIDATE provider's setting, not the assignment's", async () => {
+    // the incumbent caches nothing, the candidate's block says auto: the
+    // field travels with the provider being dialled, which is the only
+    // reading that survives a candidate on another cloud.
+    const file = `
+providers:
+  plain:
+    kind: openai-compatible
+    base_url: https://plain.test/v1
+    locality: off_machine
+    auth: { secret: METISTRY_OPENROUTER_API_KEY }
+    data_policy: { allow: [Knowledge], deny_sources: [], max_brief_bytes: 4096 }
+  cached:
+    kind: openai-compatible
+    base_url: https://cached.test/v1
+    locality: off_machine
+    auth: { secret: METISTRY_OPENROUTER_API_KEY }
+    caching: auto
+    data_policy: { allow: [Knowledge], deny_sources: [], max_brief_bytes: 4096 }
+assignments:
+  default:
+    model: plain/incumbent
+    shadow: { model: cached/candidate, fraction: 0.5 }
+`;
+    const a = resolveAssignment(parseCompute(file), "default")!;
+    const s = server([{ body: chat("the incumbent's answer") }, { body: chat("the candidate's answer") }]);
+    await engineOn(a, s, host({}), { random: () => 0.05 })("hi", spec(a));
+    expect(s.requests).toHaveLength(2);
+    expect(s.requests[0]!.body.cache_control).toBeUndefined();            // plain/incumbent
+    expect(s.requests[1]!.url).toBe("https://cached.test/v1/chat/completions");
+    expect(s.requests[1]!.body.cache_control).toEqual({ type: "ephemeral" }); // cached/candidate
   });
 });
 

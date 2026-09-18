@@ -33,9 +33,11 @@ import { TargetRegistry } from "./dispatch.js";
 import { dirSink, vaultSink, DEFAULT_MAX_TRACKED_BYTES, INBOX_PREFIX, vaultBridgeLister, vaultBridgeSearcher, vaultBridgeWriter } from "@foldedspacelabs/metistry-mcp-brain";
 import { ASSISTANT_DEFAULT_AREAS, INTERNAL_ASSISTANT_ID, ensureInternalAgent, revokeAgent, validateGrants } from "./agents.js";
 import { httpVaultClient } from "./vault-client.js";
+import { vaultBridgeSearch } from "./knowledge-routes.js";
+import type { ComputeAdmin } from "./compute-routes.js";
 import { CrewRegistry } from "./crews.js";
 import { readFile } from "node:fs/promises";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { defaultGatewayFrom, parseTrustedProxies } from "./local-owner.js";
 import { canonicalOrigin } from "./webauthn.js";
 import { loadPublicIdentity } from "./identity.js";
@@ -149,7 +151,12 @@ const readKnowledge = vault ? async (path: string): Promise<string | null> => (a
 // knowledge_list / knowledge_grep (docs/research/2026-09-stash-review.md item 3): the same bridge, its list and keyword-search endpoints.
 const listKnowledge = reconcilerUrl && reconcilerToken ? vaultBridgeLister({ url: reconcilerUrl, token: reconcilerToken }) : undefined;
 const searchVaultKeyword = reconcilerUrl && reconcilerToken ? vaultBridgeSearcher({ url: reconcilerUrl, token: reconcilerToken }) : undefined;
-if (!vault) console.warn("vault bridge absent: set METISTRY_RECONCILER_URL + METISTRY_BRIDGE_TOKEN_RECONCILER for knowledge_read, knowledge_write, knowledge_list, knowledge_grep and artifacts (degrades: absent)");
+// GET /api/knowledge/search (docs/ops/console-api.md): the SAME bridge
+// endpoint, in a caller-chosen mode and carrying snippets. The keyword-pinned
+// searcher above stays exactly what it is — knowledge_grep's candidate
+// pre-filter — because widening it would change what a grep costs.
+const searchKnowledge = reconcilerUrl && reconcilerToken ? vaultBridgeSearch({ url: reconcilerUrl, token: reconcilerToken }) : undefined;
+if (!vault) console.warn("vault bridge absent: set METISTRY_RECONCILER_URL + METISTRY_BRIDGE_TOKEN_RECONCILER for knowledge_read, knowledge_write, knowledge_list, knowledge_grep, /api/knowledge/* and artifacts (degrades: absent)");
 
 // Captures live in the vault at `Inbox/` (docs/ops/inbox.md), so
 // Obsidian sees them and git carries them. The bytes go through the SAME
@@ -218,6 +225,33 @@ const instanceDir = process.env.METISTRY_INSTANCE_DIR?.replace(/\/+$/, "");
 const instancesFiles = process.env.METISTRY_INSTANCES_FILES ?? (instanceDir ? resolveInstanceLayout(instanceDir).path("instances") : undefined);
 if (!instancesFiles) console.warn("peer registry absent: neither METISTRY_INSTANCES_FILES nor METISTRY_INSTANCE_DIR is set — GET /api/instances answers 503 (degrades: absent)");
 
+// `/api/compute*` (docs/ops/compute.md "From the console"): the same verbs
+// `metistry compute` runs, over HTTP, for the `user` principal only. They
+// open `<instanceDir>/.metistry/compute.yaml` as a YAML document, so the
+// console has to be able to SEE that directory — which is exactly the
+// difference between the shapes: the compose console gets no instance mount
+// by design (D5), the launchd/native one runs as the user in the instance's
+// own environment. Unset or unreadable → every compute route answers 503,
+// and `metistry compute` on the Mac is still the whole surface.
+const computeAdmin: ComputeAdmin | undefined =
+  instanceDir && existsSync(instanceDir)
+    ? {
+        instanceDir,
+        // Relative, like every other product default here
+        // (METISTRY_QUERIES_DIRS, METISTRY_AGENTS_DIRS): both shapes run the
+        // console with the directory holding `seed/` as its cwd.
+        seedDir: optionalEnv("METISTRY_SEED_DIR", "seed"),
+        env: process.env,
+        platform: process.platform,
+        uid: process.getuid?.() ?? 0,
+      }
+    : undefined;
+console.log(
+  computeAdmin
+    ? `compute admin: ${instancePath(computeAdmin.instanceDir, "compute")} (secret presence ${computeAdmin.platform === "darwin" ? "from the login Keychain" : "unknown — no Keychain on " + computeAdmin.platform})`
+    : "compute admin absent: METISTRY_INSTANCE_DIR is unset or not readable — /api/compute* answers 503; `metistry compute` still works (degrades: absent)",
+);
+
 const server = makeServer(pool, queries, {
   origin,
   origins,
@@ -241,6 +275,8 @@ const server = makeServer(pool, queries, {
   ...(writeKnowledge ? { writeKnowledge } : {}),
   ...(listKnowledge ? { listKnowledge } : {}),
   ...(searchVaultKeyword ? { searchVaultKeyword } : {}),
+  ...(searchKnowledge ? { searchKnowledge } : {}),
+  ...(computeAdmin ? { computeAdmin } : {}),
   ...(vault ? { vault } : {}),
   crews,
   compute: () => compute.store.current,

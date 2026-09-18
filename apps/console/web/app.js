@@ -188,24 +188,24 @@ $("send-form").onsubmit = async (e) => {
 // by hand must produce the identical string, or the two paths diverge and only
 // one of them ever gets tested.
 
-// TODO(rules.yaml endpoint): PLACEHOLDER — the single definition site for the
-// command list, and the only thing to delete when the console grows a route
-// over the instance's own rules.yaml (build plan §4.2 has none). §3.6 and
-// ux-direction.md both require this list to be generated; a hand-maintained
-// one is what they rule out, and the first instance whose rules.yaml differs
-// from these defaults is misinformed by it. Agents below are already live from
-// /api/agents — this is the one source still faked. Do not grow it.
-const COMMANDS = [
-  { id: "/status", desc: "doctor at a glance" },
-  { id: "/today", desc: "what is on today" },
-  { id: "/open", desc: "open work across projects" },
-  { id: "/spend", desc: "spend so far" },
-  { id: "/queue", desc: "the dispatch queue" },
-  { id: "/runs", desc: "recent runs" },
-  { id: "/note", desc: "capture without a turn" },
-  { id: "/deep", desc: "pin the deep tier for this turn" },
-  { id: "/new", desc: "roll to a fresh session" },
-];
+// Commands come from THIS instance's rules.yaml, never from a list kept by
+// hand (§3.6, ux-direction.md "Discoverability is generated, not
+// hand-maintained"). The array that used to sit here was a labelled
+// placeholder, and any instance whose rules.yaml differed from the shipped
+// defaults was misinformed by it; `GET /api/commands` is the generated list
+// (docs/ops/console-api.md). Do not reintroduce a literal — a command the
+// menu offers and the router does not route is worse than one it omits.
+let composerCommands = [];
+let composerCommandsAt = 0;
+async function refreshComposerCommands() {
+  if (Date.now() - composerCommandsAt < 30000 && composerCommands.length) return composerCommands;
+  try {
+    const { commands } = await (await api("/api/commands")).json();
+    composerCommands = commands.map((c) => ({ id: c.id, desc: c.description }));
+    composerCommandsAt = Date.now();
+  } catch {} // P5: a source that cannot answer says nothing rather than guessing
+  return composerCommands;
+}
 
 // Agents come from the registry, never from a list kept by hand (§3.6).
 let composerAgents = [];
@@ -322,7 +322,7 @@ async function updateSuggest() {
   const field = $("send-text");
   const tok = triggerToken(field);
   if (!tok) return closeSuggest();
-  const source = tok.text.startsWith("@") ? await refreshComposerAgents() : COMMANDS;
+  const source = tok.text.startsWith("@") ? await refreshComposerAgents() : await refreshComposerCommands();
   const hits = rank(source, tok.text);
   // Typing something that matches nothing closes the list rather than showing
   // an empty box: the user is mid-sentence, not mid-search.
@@ -395,9 +395,10 @@ $("composer-sheet").addEventListener("click", (e) => {
 $("composer-actions").addEventListener("toggle", async () => {
   if (!$("composer-actions").open) return;
   closeSuggest(); // the two never share the space above the field
-  $("composer-commands").innerHTML = COMMANDS.map(
-    (c) => `<button type="button" data-insert="${esc(c.id)} " title="${esc(c.desc)}">${esc(c.id)}</button>`,
-  ).join("");
+  const commands = await refreshComposerCommands();
+  $("composer-commands").innerHTML = commands.length
+    ? commands.map((c) => `<button type="button" data-insert="${esc(c.id)} " title="${esc(c.desc)}">${esc(c.id)}</button>`).join("")
+    : '<span class="muted">no commands — this instance\'s rules.yaml could not be read</span>';
   const agents = await refreshComposerAgents();
   $("composer-agents").innerHTML = agents.length
     ? agents.map((a) => `<button type="button" data-insert="${esc(a.id)} ">${esc(a.id)}</button>`).join("")

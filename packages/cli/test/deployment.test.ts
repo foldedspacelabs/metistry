@@ -150,4 +150,25 @@ assignments:
   it("defaults the brain URL to the console's own port when .env has none", () => {
     expect(assistantEnv(ctx({ METISTRY_CONSOLE_PORT: "8099" })).METISTRY_BRAIN_URL).toBe("http://127.0.0.1:8099/mcp");
   });
+
+  // #198's "not fixed here" #1: the engine could not find its own instance,
+  // so every overlay default fell back to the product's SEED and it answered
+  // under the wrong name. These two variables are what it resolves against,
+  // and an allowlist that omits them is the bug.
+  it("is told where the instance and the seed are, whatever .env says", () => {
+    const e = assistantEnv(ctx({ METISTRY_DB_PASSWORD: "pw" }));
+    expect(e.METISTRY_INSTANCE_DIR).toBe("/i");
+    expect(e.METISTRY_SEED_DIR).toBe("/p/seed");
+    expect(ASSISTANT_ENV_KEYS).toContain("METISTRY_INSTANCE_DIR");
+    // `up`'s answer wins over a stale line in the file it loaded
+    expect(assistantEnv(ctx({ METISTRY_INSTANCE_DIR: "/somewhere/else" })).METISTRY_INSTANCE_DIR).toBe("/i");
+    // no instance (a checkout-only install): said as absent rather than guessed
+    expect(assistantEnv({ productDir: "/p", env: {}, shape: "launchd", stateDir: "/p/state" }).METISTRY_INSTANCE_DIR).toBeUndefined();
+  });
+
+  it("…and so is the console, which reads the same rules.yaml and compute.yaml", () => {
+    const e = consoleEnv(ctx({ METISTRY_DB_PASSWORD: "pw" }));
+    expect(e.METISTRY_INSTANCE_DIR).toBe("/i");
+    expect(e.METISTRY_SEED_DIR).toBe("/p/seed");
+  });
 });

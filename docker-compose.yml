@@ -146,7 +146,19 @@ services:
       # one this install declares — the default matches the openrouter
       # template, and an install using another provider adds its own line.
       METISTRY_OPENROUTER_API_KEY: ${METISTRY_OPENROUTER_API_KEY:-}
-      # identity + seed prompt ship in the image; an instance overlays via METISTRY_IDENTITY_FILES / METISTRY_PROMPT_FILES
+      # Identity + seed prompt (D4). This container mounts NO instance repo
+      # (D5, as the console's comment above says), so the files it can reach
+      # are the image's own — and the engine refuses to start on a seed
+      # identity it was not told to use, rather than answering under the
+      # wrong name. Naming them here is that instruction, said out loud:
+      # a compose install that wants its own identity mounts the instance's
+      # `.metistry/` read-only and points these two at it.
+      METISTRY_IDENTITY_FILES: ${METISTRY_IDENTITY_FILES:-seed/identity.yaml}
+      METISTRY_PROMPT_FILES: ${METISTRY_PROMPT_FILES:-seed/assistant-prompt.md}
+      # …and where the instance is, when this install does mount it: every
+      # overlay default resolves its instance half against this, never
+      # against the container's working directory. Unset = the seed alone.
+      METISTRY_INSTANCE_DIR: ${METISTRY_INSTANCE_DIR:-}
     volumes:
       - assistant-home:/home/node   # writable HOME; sessions themselves live in Postgres
 

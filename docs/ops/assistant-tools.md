@@ -66,13 +66,22 @@ docker compose up -d --build   # both services read .env
 | `METISTRY_ASSISTANT_PROJECTS` | console | Comma-separated project slugs. **Empty = every project** (mcp-brain's internal rule, `packages/mcp-brain/src/scope.ts`); a list narrows it like any external agent. |
 | `METISTRY_ASSISTANT_AREAS` | console | Comma-separated vault-root prefixes for the grant (anything outside `.metistry/`). Default is the bare vault — the whole thing, root notes included (below). |
 | `METISTRY_RECONCILER_URL`, `METISTRY_BRIDGE_TOKEN_RECONCILER` | console | The reconciler's vault bridge (`docs/ops/reconciler.md`). `knowledge_read`, `knowledge_write`, `knowledge_list`, and `knowledge_grep` all go through it; unset → all answer `not_available` and the brain's `check()` is `degraded`. |
-| `METISTRY_IDENTITY_FILES`, `METISTRY_PROMPT_FILES` | assistant | D4 overlays for `.metistry/identity.yaml` and the seed system prompt (`seed/assistant-prompt.md`); last existing file wins. |
-| `METISTRY_RULES_FILES` | console + assistant | D4 overlay for `.metistry/rules.yaml` (default `seed/rules.yaml:.metistry/rules.yaml`). The console reads the fast paths and the tier menu; the assistant reads the **same `tiers:` block** to resolve a tier name to (model, effort). Unreadable by the assistant → one tier, `METISTRY_MODEL_DEFAULT` at medium effort. |
+| `METISTRY_INSTANCE_DIR`, `METISTRY_SEED_DIR` | every service | Where this install's config is. **Every `*_FILES` default below resolves its instance half against `METISTRY_INSTANCE_DIR` and its seed half against `METISTRY_SEED_DIR`** — absolute paths, never relative to a working directory, because a launchd job's is the product checkout. `metistry up` sets both. Neither set and no `METISTRY_IDENTITY_FILES` either → **the assistant refuses to start** rather than answer as the product's seed. |
+| `METISTRY_IDENTITY_FILES`, `METISTRY_PROMPT_FILES` | assistant | D4 overlays for the instance's `identity.yaml` and the seed system prompt (`seed/assistant-prompt.md`); last existing file wins. Naming them explicitly overrides the resolution above — which is how the compose shape, whose containers mount no instance repo (D5), says "the seed, deliberately". |
+| `METISTRY_RULES_FILES` | console + assistant | D4 overlay for the instance's `rules.yaml` (default `<seed>/rules.yaml:<instance>/.metistry/rules.yaml`). The console reads the fast paths and the tier menu; the assistant reads the **same `tiers:` block** to resolve a tier name to (model, effort). Unreadable by the assistant → one tier, `METISTRY_MODEL_DEFAULT` at medium effort. |
 | `METISTRY_MAX_TURNS` | assistant | Agentic turns per message (default 12 with tools, 4 without). |
 
 Startup logs to look for: console `internal agent 'assistant' registered`
 (or `re-synced`); assistant `tools: 23 via http://console:8080/mcp (...)` (the count tracks `packages/mcp-brain/manifest.yaml`)
-and `identity: <name>`.
+and `identity: <name> from <file>` — which file won is in the line, so an
+install reading the product's seed instead of its own `identity.yaml` is
+visible rather than inferred (the assistant warns on exactly that case).
+
+Under the `launchd` shape the engine runs inside `ops/sandbox/assistant.sb`,
+which denies by default. It is granted read on these four files **by name**
+(`-D CONFIG_IDENTITY=…` and friends, computed by `metistry up`) and on no
+other part of the instance directory: knowledge reaches the engine through
+the brain bridge over HTTP or not at all (D5).
 
 **Rotate** by changing the value in `.env` and restarting both containers:
 the console re-keys the row, the old token dies at once. The console's

@@ -9,7 +9,7 @@ import {
   EmbedClient,
   firstOnMachineBaseUrl,
   INSTANCE_LAYOUT,
-  RULES_FILES_DEFAULT,
+  overlayFilesFromEnv,
   resolveInstanceLayout,
   intEnv,
   optionalEnv,
@@ -72,9 +72,14 @@ for (const dir of optionalEnv("METISTRY_QUERIES_DIRS", "seed/queries").split(":"
   await queries.loadDir(dir);
 }
 
-// D4 overlay for rules too: last existing file wins.
+// D4 overlay for rules too: last existing file wins. The instance half is
+// resolved against METISTRY_INSTANCE_DIR (core's `overlayFilesFromEnv`), not against
+// this process's cwd — the launchd console runs with the PRODUCT checkout as
+// its working directory, so a relative `.metistry/rules.yaml` named the
+// product's own directory and the router ran on the SEED's rules while the
+// instance's file sat unread.
 let rules;
-for (const p of optionalEnv("METISTRY_RULES_FILES", RULES_FILES_DEFAULT).split(":")) {
+for (const p of optionalEnv("METISTRY_RULES_FILES", overlayFilesFromEnv(process.env, "rules")).split(":")) {
   try {
     rules = loadRules(await readFile(p, "utf8"));
   } catch (err: any) {
@@ -213,7 +218,7 @@ setInterval(() => crews.refresh().then(logCrewSync, (err) => console.error("crew
 // GET /api/identity: identity.yaml through the assistant's overlay rule
 // (docs/ops/assistant-tools.md), defaulting to the instance repo's copy when
 // METISTRY_INSTANCE_DIR says where that is.
-const identityFiles = optionalEnv("METISTRY_IDENTITY_FILES", `seed/identity.yaml:${resolveInstanceLayout(process.env.METISTRY_INSTANCE_DIR || ".").path("identity")}`);
+const identityFiles = optionalEnv("METISTRY_IDENTITY_FILES", overlayFilesFromEnv(process.env, "identity"));
 const identity = await loadPublicIdentity(identityFiles);
 if (!identity) console.warn(`identity absent: no complete identity.yaml (name + instance_id) in ${identityFiles} — GET /api/identity answers 503 (degrades: absent)`);
 

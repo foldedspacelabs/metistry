@@ -17,7 +17,7 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { COMPUTE_FILENAME, emptyCompute, instanceFile, intEnv, loadCompute, servedProviders, usesCompose, type ChildSpecInput, type Compute, type Deployment } from "@foldedspacelabs/metistry-core";
-import { assistantEnv, consoleEnv, consolePort, dbPort, engineAbsentNote, engineStatus, loadDeployment, type ShapeContext } from "./deployment.js";
+import { assistantEnv, consoleEnv, consolePort, dbPort, engineAbsentNote, engineStatus, instanceVars, loadDeployment, type ShapeContext } from "./deployment.js";
 import { doctor, renderTable, type DoctorDeps, type DoctorReport } from "./doctor.js";
 import type { Exec } from "./exec.js";
 import {
@@ -272,10 +272,26 @@ export function plistValuesFor(t: PlistTemplate, v: ShapeValues): PlistValues {
     case "console":
       return { ...base, env: consoleEnv(v) };
     case "assistant": {
-      const p = sandboxParams({ productDir: v.productDir, nodeBin: v.node, stateDir: v.stateDir, consolePort: consolePort(v.env), dbPort: dbPort(v.env), tmpDir: tmpDirOf(v.env) });
+      const p = sandboxParams({
+        productDir: v.productDir,
+        nodeBin: v.node,
+        stateDir: v.stateDir,
+        ...(v.instanceDir ? { instanceDir: v.instanceDir } : {}),
+        consolePort: consolePort(v.env),
+        dbPort: dbPort(v.env),
+        tmpDir: tmpDirOf(v.env),
+      });
       // every path parameter is the REAL path: the kernel matches the
       // profile's subpaths after resolving symlinks (/tmp → /private/tmp)
-      return { ...base, env: assistantEnv(v, v.compute), extra: { NODE_PREFIX: p.NODE_PREFIX, PRODUCT_DIR: p.PRODUCT_DIR, STATE_DIR: p.STATE_DIR, TMP_DIR: p.TMP_DIR, CONSOLE_TCP: p.CONSOLE_TCP, DB_TCP: p.DB_TCP } };
+      return {
+        ...base,
+        env: assistantEnv(v, v.compute),
+        // CONFIG_*: the four instance files the engine reads, granted BY
+        // NAME (sandbox.ts). Without them the profile's deny-default makes
+        // an absolute instance path an EPERM, so the overlay that now finds
+        // this install's identity.yaml would crash the job instead.
+        extra: { NODE_PREFIX: p.NODE_PREFIX, PRODUCT_DIR: p.PRODUCT_DIR, STATE_DIR: p.STATE_DIR, TMP_DIR: p.TMP_DIR, CONSOLE_TCP: p.CONSOLE_TCP, DB_TCP: p.DB_TCP, CONFIG_IDENTITY: p.CONFIG_IDENTITY, CONFIG_ASSISTANT_PROMPT: p.CONFIG_ASSISTANT_PROMPT, CONFIG_RULES: p.CONFIG_RULES, CONFIG_COMPUTE: p.CONFIG_COMPUTE },
+      };
     }
     case "db":
       return { ...base, extra: { PG_BIN: v.pgBin ?? "", PG_DATA: v.pgData ?? pgDataDir(stateRoot(v.productDir, v.env)) } };
@@ -466,8 +482,16 @@ export function renderJob(t: PlistTemplate, productDir: string, le: LaunchdEnv, 
   // which knows nothing about this instance's block, so they get it here or
   // they bind the DEFAULT install's ports.
   const nsPorts = values.namespace && !v.env ? portEnv(values.namespace) : undefined;
-  const extraEnv = { ...(gitPath ?? {}), ...(nsPorts ?? {}) };
-  const from = `ops/launchd/${t.file}, __REPO__=${productDir}, __NODE__=${le.node}, __ENV_FILE__=${values.envFile}${v.env ? `, ${Object.keys(v.env).length} EnvironmentVariables from ${values.envFile}` : ""}${gitPath ? `, PATH=${values.gitPath}` : ""}${nsPorts ? `, ${Object.keys(nsPorts).length} namespaced ports` : ""}`;
+  // …and the same is true of WHERE THE INSTANCE IS. The console's and the
+  // assistant's dicts carry it already (`instanceVars`); the jobs that
+  // source `.env` see it only if that file happens to declare the line —
+  // `metistry init` prints one, an install that predates it or edits the
+  // file by hand may not, and the reconciler then refuses to start while
+  // every overlay default falls back to the product's seed. `up` knows the
+  // answer, so it says it.
+  const instanceEnv = !v.env ? instanceVars(values) : undefined;
+  const extraEnv = { ...(gitPath ?? {}), ...(nsPorts ?? {}), ...(instanceEnv ?? {}) };
+  const from = `ops/launchd/${t.file}, __REPO__=${productDir}, __NODE__=${le.node}, __ENV_FILE__=${values.envFile}${v.env ? `, ${Object.keys(v.env).length} EnvironmentVariables from ${values.envFile}` : ""}${gitPath ? `, PATH=${values.gitPath}` : ""}${nsPorts ? `, ${Object.keys(nsPorts).length} namespaced ports` : ""}${instanceEnv ? `, ${Object.keys(instanceEnv).map((k) => `+${k}`).join(" ")}` : ""}`;
   const base = renderPlist(t.template, v);
   return { rendered: Object.keys(extraEnv).length > 0 ? withEnvironmentVariables(base, extraEnv) : base, from, secret: SECRET_BEARING_SERVICES.has(t.service) };
 }

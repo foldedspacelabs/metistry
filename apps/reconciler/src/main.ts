@@ -4,7 +4,6 @@
 
 import pg from "pg";
 import {
-  COMPUTE_FILES_DEFAULT,
   EMBED_DEFAULT_BATCH,
   EMBED_DEFAULT_DIM,
   EMBED_DEFAULT_MODEL,
@@ -13,6 +12,7 @@ import {
   intEnv,
   loadCompute,
   optionalEnv,
+  overlayFilesFromEnv,
   requireEnv,
   resolveInstanceLayout,
   resolveLocalModelUrl,
@@ -69,7 +69,7 @@ const vault = new Vault(instanceDir, git, committer, { maxBytes: intEnv("METISTR
 // names one — so a file that will not parse degrades to the default rather
 // than stopping the reconciler. The console fails loudly on the same file;
 // this process has no business being the second one to.
-const computeBaseUrl = await loadCompute(optionalEnv("METISTRY_COMPUTE_FILES", COMPUTE_FILES_DEFAULT))
+const computeBaseUrl = await loadCompute(optionalEnv("METISTRY_COMPUTE_FILES", overlayFilesFromEnv(process.env, "compute")))
   .then((c) => firstOnMachineBaseUrl(c.compute))
   .catch((err: unknown) => {
     console.warn(`compute.yaml is not readable for the embedder's default URL (${err instanceof Error ? err.message : String(err)})`);

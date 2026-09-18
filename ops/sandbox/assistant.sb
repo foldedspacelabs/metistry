@@ -17,6 +17,13 @@
 ;;   STATE_DIR       the assistant's own state — HOME for the SDK's transcripts
 ;;                   (the ONLY writable location besides TMP_DIR)
 ;;   TMP_DIR         the per-user temporary directory
+;;   CONFIG_IDENTITY        this instance's identity.yaml
+;;   CONFIG_ASSISTANT_PROMPT  …its system-prompt template
+;;   CONFIG_RULES           …its rules.yaml (the router's tier map)
+;;   CONFIG_COMPUTE         …its compute.yaml
+;;                   Four FILES, not the directory holding them: see the
+;;                   read rule below. Each falls back to the product's own
+;;                   seed copy when this install has no instance directory.
 ;;   CONSOLE_TCP     the console's loopback endpoint, e.g. localhost:8080
 ;;   DB_TCP          Postgres' loopback endpoint, e.g. localhost:5432 — under
 ;;                   the compose shape the engine reached the db through the
@@ -86,6 +93,31 @@
   (subpath (param "PRODUCT_DIR"))
   (subpath (param "STATE_DIR"))
   (subpath (param "TMP_DIR")))
+
+;; …and this instance's own config: four FILES, by name.
+;;
+;; The engine is named by identity.yaml (the only place the assistant is
+;; named at all), takes its system-prompt template, its tier map and its
+;; model assignments from three more files, and reads every one of them off
+;; disk through the D4 overlay. Before this rule the profile denied all four
+;; — the overlay's instance half is an absolute path under the instance
+;; directory — so the engine fell back to the product's SEED identity and
+;; answered as someone else's assistant.
+;;
+;; A grant on the DIRECTORY that holds them would have been one line and is
+;; refused on purpose: `<instance>/.metistry/` also holds the lock, the peer
+;; registry and the whole Postgres cluster, and on an instance that has not
+;; run `metistry migrate-layout` the machinery sits at the VAULT ROOT — so
+;; the same line would hand the engine every note in the vault, which is the
+;; one thing D5 says it may never read from disk. Four literals are the same
+;; policy in both layouts and nothing more. Proven by the misuse test in
+;; packages/cli/test/sandbox.test.ts: these four allowed, a note beside them
+;; denied.
+(allow file-read*
+  (literal (param "CONFIG_IDENTITY"))
+  (literal (param "CONFIG_ASSISTANT_PROMPT"))
+  (literal (param "CONFIG_RULES"))
+  (literal (param "CONFIG_COMPUTE")))
 
 ;; ---- writes -------------------------------------------------------------
 ;; Exactly two: the assistant's state directory (HOME — the SDK's session

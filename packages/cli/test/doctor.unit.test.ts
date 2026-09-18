@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { doctor, hostLocal, inboxRow, parseComposePs, parseLaunchctlPrint, probeTargetFor, renderTable, walkManifests, type Db, type DoctorRow } from "../src/doctor.js";
 import { parseDotEnv } from "../src/env.js";
-import { main, parseArgs } from "../src/main.js";
+import { BOOLEAN_FLAGS, main, parseArgs } from "../src/main.js";
 import type { Exec } from "../src/exec.js";
 
 const PLIST = (label: string) => `<?xml version="1.0"?><plist version="1.0"><dict><key>Label</key><string>${label}</string></dict></plist>`;
@@ -516,5 +516,18 @@ describe("parsers and conventions", () => {
     expect(parseArgs(["doctor", "--json", "--product-dir", "/p"])).toEqual({ command: "doctor", positional: [], flags: { json: true, "product-dir": "/p" } });
     expect(parseArgs(["init", "--", "--weird-dir"])).toEqual({ command: "init", positional: ["--weird-dir"], flags: {} });
     expect(parseArgs([])).toEqual({ command: undefined, positional: [], flags: {} });
+  });
+
+  // `--version` was listed as a boolean, so `str(flags, "version")` was
+  // always undefined and `metistry update --version 0.2.0` quietly installed
+  // the latest release instead (#198, "not fixed here" #2). It takes its
+  // value now, and the BARE flag — nothing after it, or another flag next —
+  // still reads as `true`, which is what `metistry --version` needs.
+  it("args: --version takes its value for `update`, and stays boolean when bare", () => {
+    expect(parseArgs(["update", "--version", "0.2.0"])).toEqual({ command: "update", positional: [], flags: { version: "0.2.0" } });
+    expect(parseArgs(["update", "--version=0.2.0"])).toEqual({ command: "update", positional: [], flags: { version: "0.2.0" } });
+    expect(parseArgs(["--version"])).toEqual({ command: undefined, positional: [], flags: { version: true } });
+    expect(parseArgs(["--version", "--json"])).toEqual({ command: undefined, positional: [], flags: { version: true, json: true } });
+    expect(BOOLEAN_FLAGS.has("version")).toBe(false);
   });
 });

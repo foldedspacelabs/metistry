@@ -59,6 +59,44 @@ describe("parseVaultPath (syntactic)", () => {
   });
 });
 
+describe("protected paths on an instance that has not been migrated yet (§4.7)", () => {
+  // The legacy layout kept the same machinery at the instance ROOT. #193
+  // restated the protected set as the `.metistry/` PLACE, which quietly took
+  // every one of these OUT of it: on a legacy instance the assistant could
+  // write `identity.yaml`, `rules.yaml`, `metistry.lock` and
+  // `instance-migrations/` through brain-commit. Invariant 2 does not wait
+  // for a migration verb.
+  it("restricts the legacy root machinery to the user principal too", () => {
+    for (const p of [
+      "identity.yaml",
+      "assistant-prompt.md",
+      "rules.yaml",
+      "sources.yaml",
+      "compute.yaml",
+      "deployment.yaml",
+      "instances.yaml",
+      "metistry.lock",
+      "queries/board.yaml",
+      "agents/research/analyst.md",
+      "routines/r/manifest.yaml",
+      "targets/t/manifest.yaml",
+      "extensions/e/x.ts",
+      "instance-migrations/0001_local.sql",
+    ]) {
+      expect(isProtected(p), p).toBe(true);
+      expect(writeAllowed(p, "assistant"), p).toBe(false);
+      expect(writeAllowed(p, "user"), p).toBe(true);
+    }
+  });
+
+  it("leaves the legacy vault free — Knowledge/ is where the assistant works", () => {
+    for (const p of ["Knowledge/now.md", "Knowledge/Journal/2026-09-01.md", "Knowledge/Inbox/capture.md"]) {
+      expect(isProtected(p), p).toBe(false);
+      expect(writeAllowed(p, "assistant"), p).toBe(true);
+    }
+  });
+});
+
 describe("protected paths (§4.7)", () => {
   it("names the set and restricts it to the user principal", () => {
     for (const p of [

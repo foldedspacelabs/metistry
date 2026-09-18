@@ -100,6 +100,37 @@ describe("vault bridge", () => {
     expect((await get(`/vault/read?path=`)).status).toBe(400);
   });
 
+  // Defence in depth: none of these paths are traversal, `.git`, or
+  // `.metistry/instance-migrations/` — confine() has no reason to refuse them, and
+  // without the isVaultPath gate they read back at 200. #197 narrowed the console's
+  // `/api/knowledge/*` with core's isVaultPath; this is the reconciler doing the same
+  // narrowing itself, so a caller that goes straight to the bridge (skipping the
+  // console) still cannot read `.metistry/state/.env`.
+  it("refuses to serve machinery through /vault/read — .metistry/**, .obsidian/**, the root CLAUDE.md/README.md — even though confine() lets the write through", async () => {
+    for (const [p, content] of [
+      [".metistry/state/.env", "METISTRY_DB_PASSWORD=secret\n"],
+      ["CLAUDE.md", "# instructions\n"],
+      ["README.md", "# readme\n"],
+    ] as const) {
+      const w = await post("/vault/write", { path: p, content, intent: intent("user", "seed a file the read gate must still refuse") });
+      expect(w.status, `write ${p}`).toBe(201);
+    }
+    // `.obsidian/` is in the seed repo's `.gitignore` (real instances do the same) —
+    // written straight to disk rather than through `/vault/write`, which would enqueue
+    // a commit the committer can never make.
+    const { mkdir, writeFile } = await import("node:fs/promises");
+    await mkdir(join(repo.root, ".obsidian"), { recursive: true });
+    await writeFile(join(repo.root, ".obsidian", "workspace.json"), "{}");
+    for (const p of [".metistry/state/.env", ".metistry/identity.yaml", ".obsidian/workspace.json", "CLAUDE.md", "README.md"]) {
+      const r = await get(`/vault/read?path=${encodeURIComponent(p)}`);
+      expect(r.status, p).toBe(404);
+      expect(await r.json(), p).toEqual({ error: { code: "not_found", message: "not found" } });
+    }
+    // the one exception: Artifacts/** is binary content the artifacts service reads
+    // through this same endpoint, not vault knowledge — it must stay readable.
+    expect((await get("/vault/read?path=Artifacts/bundle-1/report.md")).status).toBe(200);
+  });
+
   it("refuses a write through a symlink component", async () => {
     const { symlink, unlink } = await import("node:fs/promises");
     await symlink("/", join(repo.root, "", "Root"));

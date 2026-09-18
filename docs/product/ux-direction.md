@@ -96,7 +96,8 @@ Everything the assistant surfaces should be a **door, not a dead end**:
   generated `/help`, promoted to UI). Agents are served today
   (`GET /api/agents`); a `rules.yaml` commands endpoint does **not**
   exist yet, so any static command list in a client is a placeholder to
-  be deleted, marked as such at its definition site.
+  be deleted, marked as such at its definition site. **Shipped
+  2026-09-18 (#197)**: `GET /api/commands`.
 - **Replies are optimised for density on a small screen**: the
   assistant's text is the longest thing in the product and the thing
   most often read on a phone. It gets its own type scale, not the

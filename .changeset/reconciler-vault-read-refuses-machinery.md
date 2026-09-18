@@ -1,0 +1,5 @@
+---
+"@metistry-apps/reconciler": patch
+---
+
+**Defence in depth on `GET /vault/read`: the bridge itself now refuses machinery paths, not just the console sitting in front of it.** `confine()` only ever checked that a path stayed inside the repo, so `.metistry/state/.env`, `.metistry/compute.yaml`, `.obsidian/workspace.json` and the root `CLAUDE.md`/`README.md` all passed through and were served, at 200, to any caller holding the reconciler's bearer token — the console's `/api/knowledge/*` (#197) narrowed to vault content with core's `isVaultPath`, but that narrowing lived only on one door onto this bridge. A caller that goes straight to the reconciler now gets the same uniform `not_found` these paths get everywhere else knowledge is read. `Artifacts/**` is the one deliberate exception: it is binary content `packages/artifacts`'s `ArtifactsService` reads and writes through this exact endpoint, not vault knowledge, so it stays readable. `GET /vault/search`'s hits are now filtered through the same predicate too, belt-and-suspenders on a path that was already structurally vault-only.

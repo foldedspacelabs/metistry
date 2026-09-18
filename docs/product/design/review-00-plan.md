@@ -690,3 +690,53 @@ Grouped, numbered, each with the recommendation so you can mostly say yes.
 | Proposed no token values yet | The accent decision (8.8) determines the palette, and it is unanswered |
 | Proposed one reordering (Insights before Knowledge) and one demotion (Rooms) | Data sources, and what a section is for |
 | Proposed one amendment to the principles (P5, 5.5) | The four-way state distinction has no fourth state without it |
+
+---
+
+## Ratified — 2026-09-18
+
+All nineteen answered by the owner. Two new nouns for `glossary.md` (**work**,
+**usage**); the Mac sidebar reads **Chat · Activity · Work ▸ · Knowledge ▸ ·
+Agents · Usage**.
+
+| # | Decision |
+| --- | --- |
+| 1 | Feed → **Activity** |
+| 2 | **work** ratified as a noun; the section stays Work |
+| 3 | The board column becomes **Blocked** |
+| 4 | Rooms demoted — a filter on Board plus the thread pane in task and artifact detail |
+| 5 | Insights → **Usage**. The idea is tracking usage, spend and performance. **"Insights" is reserved** for a later feature (ideas the assistant has from knowledge, actionable intelligence), so the word is not spent on the meter |
+| 6 | Quiet-fill roles and a destructive fill added; CI checks the painted ground |
+| 7 | A `stale` role, an age-reporting pattern, and the P5 amendment |
+| 8 | **Accent pinned** as the brand colour; `controlAccentColor` drives only Apple's own controls |
+| 9 | A chart palette, tokenised, charts only |
+| 10 | P8 amended: bubbles and sender-distinction on both platforms, alignment left to the layout |
+| 11 | The Dock may carry the Needs You count; board escalations become a `footnote` count with a glyph |
+| 12 | "buttons" deleted from P10's sentence-case row |
+| 13 | The Needs You panel is an opaque `elevated` panel, not a vibrant popover |
+| 14 | The menu bar keeps its four SF Symbols; the brand mark stays out of it |
+| 15 | **Metistry** for the name and title; `metistry` for the binary, CLI and packages |
+| 16 | `ICON_PNG` may be added to `build-app.sh` |
+| 17 | **Usage stays at the bottom of the navigation**, with a live case for moving it into Settings entirely |
+| 18 | Knowledge: the ≈3-day search slice first |
+| 19 | The `--check` extension ships in the token PR |
+
+### Two things decision 17 leaves open
+
+**Which screen is designed first.** Q17 as written was about drawing order, not
+sidebar position; the answer settles the navigation and not the schedule. Usage
+sitting last is compatible with drawing it early, and it remains the only
+section whose queries all ship.
+
+**Whether Usage is a section at all.** If it moves into Settings the fixed
+sidebar is five rows, not six, and P6's "same six sections, same order" changes
+wording on three surfaces. Better decided once the Usage screen exists and it
+is visible whether it reads as somewhere you visit or something you configure.
+It will be drawn as a section with the Settings-pane version beside it.
+
+### Effect on this review
+
+Nothing is retracted. §6's recommendations are now decisions; §1.5's naming
+options are closed by **Usage**; C2 and C3 are resolved by decisions 3 and 12;
+C6, C7 and C8 by decision 6; C11 by decision 8. **C1, C4, C5, C9, C10, C12,
+C13, C14 and C15 remain open** and are build-side fixes, not design ones.

@@ -24,8 +24,7 @@ import { parseDocument, parse as parseYaml } from "yaml";
 import {
   BUDGET_ACTIONS,
   COMPUTE_FILENAME,
-  INSTANCE_LAYOUT,
-  instancePath,
+  instanceFile,
   PROVIDER_NAME_RE,
   SECRET_NAME_RE,
   loadCompute,
@@ -59,7 +58,7 @@ import {
   type LocalServerRow,
 } from "./local-models.js";
 import { Keychain, keychainAccount, serviceFor } from "./keychain.js";
-import { writeProtected, type ProtectedWrite } from "./protected-write.js";
+import { protectedRel, writeProtected, type ProtectedWrite } from "./protected-write.js";
 import { StepFailed, StepRunner } from "./steps.js";
 
 /**
@@ -151,7 +150,7 @@ export function computeFiles(opts: Pick<ComputeOptions, "instanceDir" | "seedDir
 }
 
 export function instanceComputeFile(instanceDir: string): string {
-  return instancePath(instanceDir, "compute");
+  return instanceFile(instanceDir, "compute");
 }
 
 /** The login Keychain under the USER account: a provider credential belongs to the person, not to one instance (C6). */
@@ -203,7 +202,7 @@ async function commit(opts: ComputeOptions, edit: Editable, message: string): Pr
     throw new StepFailed(`refusing to write ${edit.path}: the result would be invalid — ${e instanceof Error ? e.message : String(e)}`);
   }
   const r = new StepRunner({ dryRun: opts.dryRun === true, out: opts.out, exec: opts.exec ?? realExec, env: opts.env });
-  const delivery = await writeProtected(r, INSTANCE_LAYOUT.compute, content, message, {
+  const delivery = await writeProtected(r, protectedRel(opts.instanceDir, "compute"), content, message, {
     env: opts.env,
     platform: opts.platform,
     uid: opts.uid,
@@ -698,7 +697,7 @@ export async function modelsInstall(opts: ComputeOptions & { ref: string }): Pro
   // into compute.yaml, so `metistry up` has something to serve.
   const gguf = parseGgufRef(ref.model);
   const dir = join(modelsDir(opts.instanceDir), gguf.repo);
-  const modelPath = relativeModelPath(gguf.repo, gguf.name);
+  const modelPath = relativeModelPath(gguf.repo, gguf.name, opts.instanceDir);
   if (opts.dryRun === true) {
     out(`[dry-run] would download ${gguf.url} to ${join(dir, gguf.name)} and set providers.${ref.provider}.serve.model_path = ${modelPath}`);
     return { provider: ref.provider, server, model: ref.model, ok: true, detail: `[dry-run] ${gguf.url}`, model_path: modelPath };

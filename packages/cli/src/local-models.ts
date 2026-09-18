@@ -28,7 +28,7 @@ import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, open, rename, rm } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join } from "node:path";
-import { INSTANCE_LAYOUT, runCheck, statePath, type ChildSpecInput, type CheckResult, type Compute, type LlamaServe, type Provider } from "@foldedspacelabs/metistry-core";
+import { INSTANCE_LAYOUT, instanceStatePath, resolveInstanceLayout, runCheck, type ChildSpecInput, type CheckResult, type Compute, type LlamaServe, type Provider } from "@foldedspacelabs/metistry-core";
 import type { Exec } from "./exec.js";
 import { StepFailed } from "./steps.js";
 
@@ -548,12 +548,18 @@ export function resolveModelPath(instanceDir: string, modelPath: string): string
 
 /** Where `compute models install llamaserver/<owner>/<repo>/<file>` puts the file: per-machine state, not the vault. */
 export function modelsDir(instanceDir: string): string {
-  return statePath(instanceDir, "models");
+  return instanceStatePath(instanceDir, "models");
 }
 
-/** The same path, written into `compute.yaml` relative to the instance so the file survives a move. */
-export function relativeModelPath(repo: string, file: string): string {
-  return join(INSTANCE_LAYOUT.stateDir, "models", repo, file);
+/**
+ * The same path, written into `compute.yaml` relative to the instance so the
+ * file survives a move — spelled the way THIS instance spells its state dir,
+ * so a legacy instance's `compute.yaml` does not gain a `.metistry/` entry
+ * pointing at a file that is under `state/`.
+ */
+export function relativeModelPath(repo: string, file: string, instanceDir?: string | undefined): string {
+  const stateDir = instanceDir ? resolveInstanceLayout(instanceDir).layout.stateDir : INSTANCE_LAYOUT.stateDir;
+  return join(stateDir, "models", repo, file);
 }
 
 /**

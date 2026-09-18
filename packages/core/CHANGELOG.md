@@ -1,5 +1,182 @@
 # @foldedspacelabs/metistry-core
 
+## 0.9.0
+
+### Minor Changes
+
+- dade46d: **Shadow mode: try a model on your real turns without ever answering with
+  it.** The bake-off's stage 2, as configuration. An optional block on the
+  default assignment —
+  `shadow: { model: llamaserver/qwen3.6-35b-a3b, fraction: 0.1 }` — has the
+  engine re-run one turn in ten on a candidate model *after* the real answer has
+  been delivered and its session saved, and put both transcripts plus an
+  agreement number on that turn's `runs` row. The candidate's answer is never
+  returned as the turn's, is never a session, and has no path to the console or
+  the phone.
+  
+  **Its tool calls are stubbed record-only, by construction rather than by
+  instruction.** The shadow gets the same tool *list* the real run saw; every
+  call is written down and none is performed. A call the real run made
+  identically (same name, same arguments, byte for byte) is handed the real run's
+  own result, so the candidate's next step is judged against the same facts;
+  anything else gets one fixed `(recorded, not executed: …)` string. The stub
+  host closes over a list of names and a map of strings — no MCP client, no URL,
+  no token — so there is no object in scope it could execute a call against, and
+  a shadow of a turn that wrote to the vault cannot write to the vault twice.
+  
+  **Agreement is deterministic and says what it is:** the mean of "same tool
+  calls in the same order" and token Jaccard over the two final answers. No model
+  scores it, so it cannot drift and the stored row re-scores to the same number.
+  The *rubric* score stays `packages/eval`'s, on the owner's fixtures — the
+  engine leaves a typed hook for it instead of inventing a second scorer.
+  
+  **A shadow is a turn, so it is budgeted like one.** It asks the same pre-call
+  gate with the candidate's own provider and `critical: false`, so `stop` and
+  `critical_only` skip the experiment while the interactive turn they let through
+  keeps its answer; its spend is its own `runs` row of kind `shadow` carrying the
+  provider that was actually paid, which is what makes per-provider budgets
+  honest with no change to the `spend` query. Nothing it does can cost the turn:
+  a candidate that is down, an unset credential or a failed write lands as a note
+  on the row, never as a failed reply.
+  
+  Additive migration `0020` adds `shadow_provider`, `shadow_model`,
+  `shadow_transcript`, `shadow_agreement` and `shadow_cost_usd` to `runs`
+  (rollback: drop the five columns and `runs_shadow_ts_idx`). New named query
+  `seed/queries/shadow_agreement.yaml` reports agreement, tool-sequence match,
+  answer similarity, cost and failures per candidate over the last N shadowed
+  turns; the weekly review's System section carries one line per candidate and
+  omits it when nothing is being shadowed. `compute.yaml`'s schema refuses a
+  `shadow:` block with no `fraction`, a fraction outside 0..1, a candidate this
+  file does not declare, a candidate that is the assigned model itself, and the
+  block on a tier or crew — each naming the field. `docs/ops/compute.md` gains
+  "Shadow mode".
+- f57b3b0: **The instance directory is the Obsidian vault.** Open the folder `metistry
+  init` made and your notes are right there — `Journal/`, `Me/`, `Inbox/`,
+  `now.md` — with nothing of the machinery in the way. Everything that is not
+  knowledge moved into `.metistry/`: identity, rules, compute, the config
+  directories, the lock, and the derived `state/` that holds Postgres, the
+  `.env` and downloaded models. Obsidian ignores dot-prefixed folders, which is
+  the whole reason for the dot — the vault root and the install's own files can
+  finally be the same directory without one of them cluttering the other.
+  
+  Vault paths lose their prefix with it: a note is `Areas/Fsl/Drey.md`, a
+  capture is `Inbox/…`, and a read grant covering everything is spelled `/`.
+  
+  **The protected set became a place rather than a list.** Anything under
+  `.metistry/` is the user's hand alone — except `.metistry/state/`, which is
+  derived and nobody's record — plus the root `CLAUDE.md` and `README.md`.
+  That is one rule the reconciler enforces at the tool, instead of seven
+  filenames each component had to remember. Neither those two root files nor
+  `Artifacts/` are indexed as knowledge: your instructions and your bundles are
+  yours to read, not search results.
+  
+  This ships the layout for NEW instances. An existing instance keeps working
+  unchanged and `metistry doctor` now says which shape it is in; the verb that
+  moves one is the next change.
+
+### Patch Changes
+
+- c1f512e: **The assistant now uses your `identity.yaml` on the launchd shape, instead
+  of the seed identity that ships with the product.** Every `*_FILES` overlay
+  default resolved its instance half relative to the process's working
+  directory, and every launchd job's working directory is the product
+  checkout — so `.metistry/identity.yaml`, `rules.yaml` and `compute.yaml`
+  named the product's own directory, found nothing, and the engine ran on the
+  seed. `METISTRY_INSTANCE_DIR` was not in the engine's environment allowlist
+  either, so it could not have resolved them itself.
+  
+  Fixed at the root: `metistry up` puts `METISTRY_INSTANCE_DIR` and
+  `METISTRY_SEED_DIR` in every child's environment (the plists' env dicts and
+  the supervisor's child specs alike), and core's `overlayFiles` resolves every
+  default against the instance directory through `resolveInstanceLayout` — so
+  it finds the file whether the instance has run `metistry migrate-layout` or
+  not. The assistant, the console and the reconciler all read their overlays
+  through it, which also means the console's router and the engine can no
+  longer disagree about which `rules.yaml` is in force.
+  
+  The engine **refuses to start** when neither `METISTRY_INSTANCE_DIR` nor
+  `METISTRY_IDENTITY_FILES` is set, rather than answering under the seed's
+  name. `ops/sandbox/assistant.sb` grants read on the four config files by
+  name (never on the directory holding them, which on an unmigrated instance
+  is the vault root), so the reads the overlay now performs are permitted and
+  nothing else in the instance is.
+  
+  Also: `metistry update --version <x.y.z>` was ignored — `version` was listed
+  as a boolean flag, so the value never arrived and the latest release was
+  installed instead. And in git mode `update` wrote the **pre-pull** version
+  into `metistry.lock`; the version is now read from the checkout after the
+  pull, so a run that fast-forwards onto a new release pins that release.
+- 337bc0a: **Automatic prompt caching on the providers that support it** (OPEN-6, ruled
+  2026-09-17: ship the automatic form first, measure explicit breakpoints
+  later). A new optional `caching: auto | off` on a `compute.yaml` provider says
+  whether that provider implements Anthropic-style prompt caching; the engine
+  then sends its automatic caching field on every chat completion — for
+  OpenRouter, one top-level `cache_control: { type: "ephemeral" }`, the
+  automatic placement its caching doc describes ([or-cache], fetched
+  2026-09-11). The `openrouter` template ships `auto` and is the only one that
+  does: everything else defaults to `off` and gets no extra field, because a
+  server that has never heard of the parameter would have to ignore it. The
+  schema refuses `caching: auto` on an `on_machine` provider, naming the field,
+  rather than accepting a line that does nothing. Explicit breakpoints remain
+  the operator's `request:` block, which is merged after the automatic field and
+  therefore overrides it.
+  
+  The cached share of the prompt now lands on the row: `cached_tokens` and
+  `cache_write_tokens` (or Anthropic's `cache_creation_input_tokens`) are read
+  out of `usage` into `runs.cache_read_tokens` / `cache_write_tokens`, summed
+  over the turn's whole loop, with `tokens_in` still the whole prompt as the
+  provider billed it. On the `pricing` path the prompt is priced in three parts
+  — fresh at `in_per_m`, reads at `in_per_m × cache_read_multiplier`, writes at
+  `in_per_m × cache_write_multiplier` — with two new optional `pricing:` fields
+  defaulting to 0.1× / 1.25×, Anthropic's rates as OpenRouter passes them
+  through. A response reporting no cached tokens prices exactly as before.
+  `docs/ops/compute.md` gains "Prompt caching", including the measurement still
+  owed under OPEN-6 and the two assumptions it will check against a live
+  response.
+- 76f82a2: **An instance that has not run `metistry migrate-layout` is read again.**
+  `db/migrations/0021` recorded that "a legacy instance keeps working unchanged
+  until the verb runs". Verified against a clone of a real pre-ruling instance,
+  it did not: #193 moved every path to `.metistry/` and every reader spelled the
+  new one, so `metistry compute show` reported no providers while the instance's
+  `compute.yaml` declared one, `metistry identity` exited 1 on an instance whose
+  `identity.yaml` was right there, `metistry version` omitted the pin, `doctor`
+  read `shape compose` off a `deployment.yaml` it never opened and probed the
+  wrong half of the install, `metistry secrets`/`console`/`connect` could not
+  find `state/.env` at all — which on a launchd install means every rendered
+  plist's `__ENV_FILE__` points at a file that does not exist — and `up` would
+  have `initdb`'d a second, empty Postgres cluster at `.metistry/state/pg`
+  beside the live one.
+  
+  Two of the breaks were safety, not convenience. The §4.7 protected set became
+  the `.metistry/` PLACE, which took the legacy machinery at the instance root
+  out of it: on a legacy instance the assistant could write `identity.yaml`,
+  `rules.yaml`, `metistry.lock`, `queries/` and `instance-migrations/` through
+  `brain-commit` (invariant 2). And the knowledge walk, which now starts at the
+  instance root, indexed those same files plus every byte of the gitignored
+  `state/` — a Postgres cluster included — as notes.
+  
+  `resolveInstanceLayout(instanceDir)` in core is the fix: one `detectLayout`
+  read, then the right relative-path table (`LEGACY_INSTANCE_LAYOUT` mirrors
+  `INSTANCE_LAYOUT` key for key), with `instanceFile()` / `instanceStatePath()`
+  as the reader's one-line call. Every reader goes through it — identity,
+  rules, compute, deployment, the lock, the peer registry, `.env`, the Postgres
+  data and socket dirs, the supervisor's config/socket/bin, `ports.yaml`, the
+  models dir, the assistant's state dir, `doctor`'s compute overlay, the
+  console's identity/peers/inbox, and the reconciler's inbox prefix (whose SQL
+  predicate must match migration 0015's partial index on a legacy instance, not
+  0021's). Writers are untouched: `instancePath`/`metistryPath` still spell the
+  flat layout, because there is one layout to write and two to read.
+  `isProtectedPath` and `isVaultPath` cover the legacy root names
+  unconditionally — they receive a path and no instance directory, and the set
+  is strictly safer on a flat instance, which has no business holding lowercase
+  machinery at its root.
+  
+  `metistry update` now **refuses** to pin a version past 0.8.x onto a legacy
+  instance, before it fetches, builds or migrates anything, printing the
+  `migrate-layout` line to run; `--allow-legacy` overrides. Regression tests run
+  one fixture in both shapes through the same readers, so a reader that resolves
+  only one of them fails.
+
 ## 0.8.1
 
 ## 0.8.0

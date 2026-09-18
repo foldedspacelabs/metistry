@@ -118,6 +118,28 @@ smaller step if you want the two moves in two commits
 New instances need none of this: `metistry init` writes the flat layout
 from the start.
 
+## Until the verb runs
+
+**A legacy instance keeps working on the 0.8.x line and nothing past it.**
+Every reader resolves the shape it is actually looking at — core's
+`resolveInstanceLayout(instanceDir)`, one `detectLayout` read and a string
+join after it — so `identity.yaml`, `rules.yaml`, `compute.yaml`,
+`deployment.yaml`, `metistry.lock`, `instances.yaml`, `state/.env`,
+`state/pg/`, `state/ports.yaml` and `Knowledge/Inbox/` are all found where a
+not-yet-migrated instance keeps them. The protected set (§4.7) and the
+knowledge walk cover the legacy machinery at the instance root
+unconditionally: on a legacy instance `identity.yaml` and `queries/` are the
+user's hand exactly as `.metistry/` is, and neither they nor the gitignored
+`state/` are indexed as notes. Writers are unchanged — `metistry init`
+stamps the flat layout and `migrate-layout` moves onto it; there is one
+layout to write and two to read.
+
+`metistry update` **refuses** to pin a version past 0.8.x onto a legacy
+instance, before it fetches anything, printing the `migrate-layout` line to
+run; `--allow-legacy` pins it anyway. That refusal is the guarantee's other
+half: compatibility that nothing tests past the line it was written for is
+not compatibility.
+
 ## The legacy layout, for reference
 
 Before this ruling, an instance repo looked like this:

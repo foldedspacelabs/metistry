@@ -16,7 +16,7 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { COMPUTE_FILENAME, emptyCompute, instancePath, intEnv, loadCompute, servedProviders, usesCompose, type ChildSpecInput, type Compute, type Deployment } from "@foldedspacelabs/metistry-core";
+import { COMPUTE_FILENAME, emptyCompute, instanceFile, intEnv, loadCompute, servedProviders, usesCompose, type ChildSpecInput, type Compute, type Deployment } from "@foldedspacelabs/metistry-core";
 import { assistantEnv, consoleEnv, consolePort, dbPort, engineAbsentNote, engineStatus, loadDeployment, type ShapeContext } from "./deployment.js";
 import { doctor, renderTable, type DoctorDeps, type DoctorReport } from "./doctor.js";
 import type { Exec } from "./exec.js";
@@ -760,7 +760,7 @@ export async function up(opts: UpOptions): Promise<UpResult> {
   // engine-less install for this run — `up` bringing the whole install down
   // because one line of YAML is wrong would be the worse answer, and
   // `metistry compute show` says exactly what is wrong.
-  const computePaths = env.METISTRY_COMPUTE_FILES ?? `${join(runDir, "seed", COMPUTE_FILENAME)}:${instancePath(stateRoot(opts.productDir, env), "compute")}`;
+  const computePaths = env.METISTRY_COMPUTE_FILES ?? `${join(runDir, "seed", COMPUTE_FILENAME)}:${instanceFile(stateRoot(opts.productDir, env), "compute")}`;
   let compute = emptyCompute();
   try {
     compute = (await loadCompute(computePaths)).compute;

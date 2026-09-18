@@ -10,7 +10,7 @@ import {
   firstOnMachineBaseUrl,
   INSTANCE_LAYOUT,
   RULES_FILES_DEFAULT,
-  instancePath,
+  resolveInstanceLayout,
   intEnv,
   optionalEnv,
   requireEnv,
@@ -166,9 +166,17 @@ if (!vault) console.warn("vault bridge absent: set METISTRY_RECONCILER_URL + MET
 // working (SHOULD-10 — one silent drop ends the trust), those files are not
 // in the vault, and moving them into `Inbox/` later is enough for
 // the reconciler's scan to pick them up.
-const inboxDir = optionalEnv("METISTRY_INBOX_DIR", process.env.METISTRY_INSTANCE_DIR ? `${process.env.METISTRY_INSTANCE_DIR.replace(/\/+$/, "")}/${INBOX_PREFIX}` : `./${INBOX_PREFIX}`);
+//
+// An instance that has not run `metistry migrate-layout` yet still keeps its
+// vault — and so its inbox — in `Knowledge/`. Both the directory and the
+// prefix the rows are recorded under come from the resolved layout rather
+// than the flat spelling: a legacy instance would otherwise capture into a
+// new root `Inbox/` that its own Obsidian vault cannot see.
+const inboxLayout = process.env.METISTRY_INSTANCE_DIR ? resolveInstanceLayout(process.env.METISTRY_INSTANCE_DIR) : undefined;
+const inboxPrefix = inboxLayout?.layout.inboxDir ?? INBOX_PREFIX;
+const inboxDir = optionalEnv("METISTRY_INBOX_DIR", inboxLayout ? inboxLayout.path("inboxDir") : `./${INBOX_PREFIX}`);
 const maxTrackedBytes = intEnv("METISTRY_INBOX_MAX_TRACKED_BYTES", DEFAULT_MAX_TRACKED_BYTES);
-const inbox = vault ? vaultSink(vault, { maxTrackedBytes }) : dirSink(inboxDir, { prefix: inboxDir.endsWith(INBOX_PREFIX) ? INBOX_PREFIX : "", maxTrackedBytes });
+const inbox = vault ? vaultSink(vault, { prefix: inboxPrefix, maxTrackedBytes }) : dirSink(inboxDir, { prefix: inboxDir.endsWith(inboxPrefix) ? inboxPrefix : "", maxTrackedBytes });
 console.log(`captures: ${inbox.describe}${maxTrackedBytes > 0 ? `, over ${maxTrackedBytes} bytes to .large/ (gitignored)` : ""}`);
 
 // Phase 6: knowledge_search mode=semantic|hybrid needs to embed the QUERY
@@ -205,7 +213,7 @@ setInterval(() => crews.refresh().then(logCrewSync, (err) => console.error("crew
 // GET /api/identity: identity.yaml through the assistant's overlay rule
 // (docs/ops/assistant-tools.md), defaulting to the instance repo's copy when
 // METISTRY_INSTANCE_DIR says where that is.
-const identityFiles = optionalEnv("METISTRY_IDENTITY_FILES", `seed/identity.yaml:${instancePath(process.env.METISTRY_INSTANCE_DIR || ".", "identity")}`);
+const identityFiles = optionalEnv("METISTRY_IDENTITY_FILES", `seed/identity.yaml:${resolveInstanceLayout(process.env.METISTRY_INSTANCE_DIR || ".").path("identity")}`);
 const identity = await loadPublicIdentity(identityFiles);
 if (!identity) console.warn(`identity absent: no complete identity.yaml (name + instance_id) in ${identityFiles} — GET /api/identity answers 503 (degrades: absent)`);
 
@@ -214,7 +222,7 @@ if (!identity) console.warn(`identity absent: no complete identity.yaml (name + 
 // default — an install's peers are its own — so an instance dir is what
 // makes the route answer at all.
 const instanceDir = process.env.METISTRY_INSTANCE_DIR?.replace(/\/+$/, "");
-const instancesFiles = process.env.METISTRY_INSTANCES_FILES ?? (instanceDir ? instancePath(instanceDir, "instances") : undefined);
+const instancesFiles = process.env.METISTRY_INSTANCES_FILES ?? (instanceDir ? resolveInstanceLayout(instanceDir).path("instances") : undefined);
 if (!instancesFiles) console.warn("peer registry absent: neither METISTRY_INSTANCES_FILES nor METISTRY_INSTANCE_DIR is set — GET /api/instances answers 503 (degrades: absent)");
 
 // `/api/compute*` (docs/ops/compute.md "From the console"): the same verbs
@@ -240,7 +248,7 @@ const computeAdmin: ComputeAdmin | undefined =
     : undefined;
 console.log(
   computeAdmin
-    ? `compute admin: ${instancePath(computeAdmin.instanceDir, "compute")} (secret presence ${computeAdmin.platform === "darwin" ? "from the login Keychain" : "unknown — no Keychain on " + computeAdmin.platform})`
+    ? `compute admin: ${resolveInstanceLayout(computeAdmin.instanceDir).path("compute")} (secret presence ${computeAdmin.platform === "darwin" ? "from the login Keychain" : "unknown — no Keychain on " + computeAdmin.platform})`
     : "compute admin absent: METISTRY_INSTANCE_DIR is unset or not readable — /api/compute* answers 503; `metistry compute` still works (degrades: absent)",
 );
 

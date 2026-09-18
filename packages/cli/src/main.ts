@@ -75,7 +75,7 @@ export interface ParsedArgs {
 }
 
 /** Flags that never take a value, so `metistry init --force <dir>` keeps its dir. */
-export const BOOLEAN_FLAGS = new Set(["force", "json", "help", "version", "dry-run", "allow-dirty", "no-launchd", "no-compose", "skip-build", "skip-migrate", "rollback", "yes", "follow", "namespace", "rotate", "list", "complete", "skip-test", "remote", "json-lines"]);
+export const BOOLEAN_FLAGS = new Set(["force", "json", "help", "version", "dry-run", "allow-dirty", "no-launchd", "no-compose", "skip-build", "skip-migrate", "rollback", "allow-legacy", "yes", "follow", "namespace", "rotate", "list", "complete", "skip-test", "remote", "json-lines"]);
 
 /** `--channel git|release` — anything else is a typo, not a guess (the lock parser is strict for the same reason). */
 export function parseChannel(v: string | undefined): LockSource | undefined {
@@ -380,6 +380,7 @@ const USAGE = `metistry — Metistry command line
 
   metistry update [--skip-build] [--skip-migrate] [--dry-run] [--product-dir <dir>]
                   [--channel git|release] [--version <x.y.z>] [--rollback]
+                  [--allow-legacy]
       Move an install forward: git fetch + pull --ff-only, pnpm install + build,
       db/migrations under a Postgres advisory lock, rebuild containers and
       kickstart the host jobs whose code changed, write metistry.lock into the
@@ -390,6 +391,10 @@ const USAGE = `metistry — Metistry command line
       it; the pinned container images are pulled, never built. --version installs
       a specific release instead of the latest; --rollback flips current back to
       the previous one (migrations are additive and are not reverted).
+      An instance still on the legacy layout (the vault in Knowledge/, the config
+      files at the instance root) is REFUSED past 0.8.x before anything is
+      fetched, with the "metistry migrate-layout" line to run; --allow-legacy
+      pins it anyway (docs/ops/instance-layout.md).
 
   metistry restart [<service>…] [--json] [--dry-run] [--product-dir <checkout>]
   metistry stop    [<service>…] [--json] [--dry-run] [--product-dir <checkout>]
@@ -1053,6 +1058,7 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
         channel,
         releaseVersion: str(flags, "version"),
         rollback: flags.rollback === true,
+        allowLegacy: flags["allow-legacy"] === true,
         doctorDeps: io.doctorDeps,
       });
       return r.code;

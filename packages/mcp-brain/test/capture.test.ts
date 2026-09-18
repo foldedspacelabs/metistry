@@ -9,7 +9,7 @@ import { mkdtemp, readFile, rm, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { captureToInbox, dirSink, placeCapture, vaultSink, INBOX_PREFIX, type CaptureVault, type Db } from "../src/index.js";
+import { captureToInbox, dirSink, placeCapture, vaultPathPredicate, vaultSink, INBOX_PREFIX, type CaptureVault, type Db } from "../src/index.js";
 
 interface Call {
   text: string;
@@ -83,6 +83,39 @@ describe("vaultSink", () => {
     expect(r.path).toMatch(/^Inbox\/\.large\/\d+-clip\.mov$/);
     await sink.check();
     expect(vault.listed).toEqual([INBOX_PREFIX]);
+  });
+});
+
+describe("the legacy inbox prefix", () => {
+  // A legacy instance captures into `Knowledge/Inbox/` and its rows live
+  // under migration 0015's partial index, not 0021's. The conflict target
+  // comes from the SINK's prefix for that reason: named from the flat
+  // constant it would have addressed an index the row is not in, and the
+  // insert that races the reconciler's scan would have raised instead of
+  // refining the row.
+  it("names the index the row is actually in", async () => {
+    const vault = fakeVault();
+    const db = fakeDb();
+    const r = await captureToInbox(db, vaultSink(vault, { prefix: "Knowledge/Inbox" }), { bytes: Buffer.from("hello"), filename: "note.md", source: "http", sourceAgent: null });
+    expect(r.path).toMatch(/^Knowledge\/Inbox\/\d+-note\.md$/);
+    const insert = db.calls.find((c) => c.text.includes("INSERT INTO inbox"))!;
+    expect(insert.text).toContain("ON CONFLICT (path) WHERE path LIKE 'Knowledge/Inbox/%'");
+  });
+
+  it("checks the prefix rather than trusting it — it reaches SQL as text (invariant 8)", () => {
+    expect(vaultPathPredicate("Inbox")).toBe("path LIKE 'Inbox/%'");
+    expect(vaultPathPredicate("Knowledge/Inbox")).toBe("path LIKE 'Knowledge/Inbox/%'");
+    for (const bad of ["", "'", "Inbox'; DROP TABLE inbox --", "../Inbox", "In box", "/Inbox", "Inbox/"]) {
+      expect(vaultPathPredicate(bad), bad).toBeNull();
+    }
+  });
+
+  it("a bare directory sink has no prefix, so the insert carries no conflict clause — as before the move", async () => {
+    const db = fakeDb();
+    const dir = await mkdtemp(join(tmpdir(), "metistry-capture-bare-"));
+    await captureToInbox(db, dir, { bytes: Buffer.from("hi"), filename: "a.md", source: "http", sourceAgent: null });
+    expect(db.calls.find((c) => c.text.includes("INSERT INTO inbox"))!.text).not.toContain("ON CONFLICT");
+    await rm(dir, { recursive: true, force: true });
   });
 });
 

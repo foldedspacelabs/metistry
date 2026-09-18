@@ -54,3 +54,58 @@ describe("Vault.walkVault", () => {
     expect(await vault.walkVault()).not.toContain("Inbox/.large/clip.mov");
   });
 });
+
+// ---- the same walk over an instance that has not been migrated yet -----------
+//
+// The walk starts at the instance ROOT in both layouts. On a legacy instance
+// that root also holds `identity.yaml`, `queries/`, `metistry.lock` and the
+// gitignored `state/` — including a Postgres cluster. Before core's
+// predicates knew the legacy names, every one of those became a
+// `knowledge_files` row, and `isProtectedPath` said the assistant could
+// write them (invariant 2).
+
+describe("Vault.walkVault on a legacy instance", () => {
+  let repo: TempRepo;
+  let vault: Vault;
+
+  beforeAll(async () => {
+    repo = await tempRepo();
+    // turn the fixture into the legacy shape: the vault under Knowledge/,
+    // the machinery at the root beside it
+    await mkdir(join(repo.root, "Knowledge", "Journal"), { recursive: true });
+    await mkdir(join(repo.root, "Knowledge", "Inbox"), { recursive: true });
+    await writeFile(join(repo.root, "Knowledge", "now.md"), "# Now\n");
+    await writeFile(join(repo.root, "Knowledge", "Journal", "2026-09-01.md"), "# a day\n");
+    await writeFile(join(repo.root, "Knowledge", "Inbox", "capture.md"), "# capture\n");
+    await writeFile(join(repo.root, "identity.yaml"), "name: X\n");
+    await writeFile(join(repo.root, "rules.yaml"), "tiers: {}\n");
+    await writeFile(join(repo.root, "compute.yaml"), "providers: {}\n");
+    await writeFile(join(repo.root, "metistry.lock"), "product: {}\n");
+    await mkdir(join(repo.root, "queries"), { recursive: true });
+    await writeFile(join(repo.root, "queries", "board.yaml"), "name: board\n");
+    await mkdir(join(repo.root, "agents", "research"), { recursive: true });
+    await writeFile(join(repo.root, "agents", "research", "analyst.md"), "---\nname: analyst\n---\n");
+    await mkdir(join(repo.root, "state", "pg", "base"), { recursive: true });
+    await writeFile(join(repo.root, "state", "ports.yaml"), "label_suffix: abc12345\n");
+    await writeFile(join(repo.root, "state", "pg", "PG_VERSION"), "17\n");
+    await writeFile(join(repo.root, "state", "pg", "base", "16384"), "cluster bytes");
+    vault = new Vault(repo.root, repo.git, new Committer(repo.git, { authorPrefix: "Metistry", authorEmail: "metistry@test" }), { maxBytes: 4096 });
+  });
+  afterAll(() => repo.cleanup());
+
+  it("indexes the legacy vault", async () => {
+    const paths = await vault.walkVault();
+    expect(paths).toContain("Knowledge/now.md");
+    expect(paths).toContain("Knowledge/Journal/2026-09-01.md");
+    expect(paths).toContain("Knowledge/Inbox/capture.md");
+  });
+
+  it("indexes none of the machinery at the instance root, and nothing in state/", async () => {
+    const paths = await vault.walkVault();
+    for (const p of ["identity.yaml", "rules.yaml", "compute.yaml", "metistry.lock", "queries/board.yaml", "agents/research/analyst.md", "state/ports.yaml", "state/pg/PG_VERSION", "state/pg/base/16384"]) {
+      expect(paths, p).not.toContain(p);
+    }
+    // the fixture really does have them all, or this proves nothing
+    expect((await readdir(repo.root)).sort()).toEqual(expect.arrayContaining(["agents", "compute.yaml", "identity.yaml", "metistry.lock", "queries", "rules.yaml", "state"]));
+  });
+});

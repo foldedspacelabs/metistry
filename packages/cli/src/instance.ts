@@ -20,14 +20,19 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { INSTANCE_LAYOUT, instancePath, statePath } from "@foldedspacelabs/metistry-core";
-import { writeProtected } from "./protected-write.js";
+import { INSTANCE_LAYOUT, instanceFile, instanceStatePath } from "@foldedspacelabs/metistry-core";
+import { protectedRel, writeProtected } from "./protected-write.js";
 import type { StepRunner } from "./steps.js";
 
 /** Derived, gitignored state under the instance dir: Postgres data, the assistant's transcripts, downloaded models, and `.env`. */
 export const STATE_DIRNAME = INSTANCE_LAYOUT.stateDir;
 export const ENV_FILENAME = ".env";
-/** Instance-relative — the path `writeProtected` posts to the vault bridge. */
+/**
+ * Instance-relative, FLAT. A protected write posts what `protectedRel`
+ * resolves for the instance it is writing to, which is this on a flat
+ * instance and a bare `identity.yaml` on one that has not run
+ * `metistry migrate-layout`.
+ */
 export const IDENTITY_FILENAME = INSTANCE_LAYOUT.identity;
 
 /** Trailing slashes make `<dir>//.metistry` — normalise once, here. */
@@ -36,12 +41,18 @@ export function normalizeDir(dir: string): string {
 }
 
 export function instanceStateDir(instanceDir: string): string {
-  return statePath(instanceDir);
+  return instanceStatePath(instanceDir);
 }
 
-/** Where an instance's derived `.env` belongs. */
+/**
+ * Where an instance's derived `.env` belongs — `.metistry/state/.env`, or
+ * the legacy `state/.env` on an instance `migrate-layout` has not carried
+ * over yet. Read AND written through the resolved path: writing the flat
+ * spelling on a legacy instance would leave the install's own launchd jobs
+ * sourcing a file nothing writes.
+ */
 export function instanceEnvFile(instanceDir: string): string {
-  return statePath(instanceDir, ENV_FILENAME);
+  return instanceStatePath(instanceDir, ENV_FILENAME);
 }
 
 /** The product checkout's `.env` — deprecated as an install's environment, still read as a fallback. */
@@ -146,7 +157,7 @@ export function withInstanceId(identityYaml: string, id: string): string {
 }
 
 export function identityPath(instanceDir: string): string {
-  return instancePath(instanceDir, "identity");
+  return instanceFile(instanceDir, "identity");
 }
 
 /** The instance's id, or undefined when the directory has none yet (every instance created before 2026-09-09). */
@@ -191,7 +202,7 @@ export async function ensureInstanceId(r: StepRunner, opts: EnsureInstanceIdOpti
   if (!existsSync(file)) return { id: "", minted: false, how: "none", detail: `${file} does not exist — ${dir} is not an instance directory` };
   const id = (opts.mint ?? mintInstanceId)();
   const content = withInstanceId(await readFile(file, "utf8"), id);
-  const delivery = await writeProtected(r, IDENTITY_FILENAME, content, `metistry: mint instance_id ${id}`, {
+  const delivery = await writeProtected(r, protectedRel(dir, "identity"), content, `metistry: mint instance_id ${id}`, {
     env: opts.env,
     platform: opts.platform,
     uid: opts.uid,

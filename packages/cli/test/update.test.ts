@@ -3,7 +3,7 @@
 // under the advisory lock, compose, kickstart only the host jobs whose code
 // changed, lock written through the reconciler as `user`); the refusal
 // paths; the no-bridge direct write; release mode; the lock round trip.
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
 import { instanceLockPath, parseLock, readLock, serializeLock, type LockFile } from "../src/lock.js";
 import { main } from "../src/main.js";
 import { MIGRATION_LOCK_KEY, type MigrationSession } from "../src/migrate.js";
-import { hashHostJobs, publishedPackages, trackedPathFor, update } from "../src/update.js";
+import { hashHostJobs, legacyLayoutRefusal, pastLegacyLayoutSupport, publishedPackages, trackedPathFor, update } from "../src/update.js";
 import { loadPlistTemplates } from "../src/launchd.js";
 import { checkout, failDoctor, fakeExec, HELPER, okDoctor, put, RECONCILER, shown, WATCHDOG } from "./fixtures.js";
 
@@ -322,5 +322,85 @@ describe("metistry update", () => {
     expect(text).not.toContain("pg_advisory_lock");
     expect(text).toContain("[dry-run] metistry doctor");
     expect(existsSync(join(P, "metistry.lock"))).toBe(false);
+  });
+});
+
+// ---- the legacy-layout gate --------------------------------------------------
+//
+// An instance that has not run `metistry migrate-layout` is readable on the
+// 0.8.x line and nothing past it. The refusal lands BEFORE the fetch, so a
+// refused update leaves the checkout exactly where it was.
+
+describe("the legacy instance layout", () => {
+  it("knows which versions are past the line", () => {
+    for (const v of ["0.8.0", "0.8.1", "0.8.12", "0.7.0", "v0.8.3"]) expect(pastLegacyLayoutSupport(v), v).toBe(false);
+    for (const v of ["0.9.0", "0.10.0", "1.0.0", "v1.2.3"]) expect(pastLegacyLayoutSupport(v), v).toBe(true);
+    // a tag, a hash, `<latest>`: unparseable is never "past" — a refusal has to be sure
+    for (const v of ["<latest>", "main", "abc1234", ""]) expect(pastLegacyLayoutSupport(v), v).toBe(false);
+  });
+
+  it("refuses only a legacy instance, only past the line, and only without --allow-legacy", () => {
+    const at = (o: Partial<Parameters<typeof legacyLayoutRefusal>[0]>) => legacyLayoutRefusal({ shape: "legacy", instanceDir: "/i", version: "0.9.0", ...o });
+    expect(at({})).toContain("metistry migrate-layout");
+    expect(at({})).toContain("--allow-legacy");
+    expect(at({ allowLegacy: true })).toBeNull();
+    expect(at({ version: "0.8.2" })).toBeNull();
+    expect(at({ shape: "flat" })).toBeNull();
+    expect(at({ shape: "unknown" })).toBeNull();
+  });
+
+  it("stops `update` before it fetches, and says which instance and which version", async () => {
+    const P = await checkout({ git: true });
+    const I = await mkdtemp(join(tmpdir(), "metistry-legacy-"));
+    await mkdir(join(I, "Knowledge"), { recursive: true });
+    await writeFile(join(I, "identity.yaml"), "name: X\n");
+    const exec = fakeExec();
+    const lines: string[] = [];
+    const r = await update({ ...base(P, { METISTRY_INSTANCE_DIR: I }), version: "0.9.0", exec, out: (l) => lines.push(l), doctorFn: okDoctor, openSession: async () => null });
+    expect(r.code).not.toBe(0);
+    expect(exec.calls.map((c) => c.cmd)).toEqual([]); // nothing fetched, nothing built, nothing migrated
+    const said = lines.join("\n");
+    expect(said).toContain(I);
+    expect(said).toContain("0.9.0");
+    expect(said).toContain("metistry migrate-layout");
+    expect(r.lock).toBeUndefined();
+  });
+
+  it("lets it through on the same instance with --allow-legacy", async () => {
+    const P = await checkout({ git: true });
+    const I = await mkdtemp(join(tmpdir(), "metistry-legacy-"));
+    await mkdir(join(I, "Knowledge"), { recursive: true });
+    await writeFile(join(I, "identity.yaml"), "name: X\n");
+    const exec = fakeExec();
+    await update({ ...base(P, { METISTRY_INSTANCE_DIR: I, ...BRIDGE }), version: "0.9.0", allowLegacy: true, exec, fetchFn: fakeFetch().fn, out: () => {}, doctorFn: okDoctor, openSession: async () => fakeSession() });
+    expect(exec.calls.map((c) => c.cmd)).toContain("git"); // it got as far as the fetch
+  });
+
+  it("asks again after the pull, where git mode first learns the new version", async () => {
+    const P = await checkout({ git: true });
+    const I = await mkdtemp(join(tmpdir(), "metistry-legacy-"));
+    await mkdir(join(I, "Knowledge"), { recursive: true });
+    await writeFile(join(I, "identity.yaml"), "name: X\n");
+    // the pre-pull version is on the supported line, so the first gate lets it
+    // through; the pull brings the checkout's own package.json past it
+    const exec = fakeExec({ git: (args) => (args[0] === "pull" ? (writeFileSync(join(P, "package.json"), JSON.stringify({ name: "metistry", version: "0.9.0" })), undefined) : undefined) });
+    const lines: string[] = [];
+    const r = await update({ ...base(P, { METISTRY_INSTANCE_DIR: I }), version: undefined, exec, out: (l) => lines.push(l), doctorFn: okDoctor, openSession: async () => null });
+    expect(r.code).not.toBe(0);
+    // it pulled, and then stopped: nothing installed, nothing built, nothing migrated
+    expect(exec.calls.map((c) => c.args[0])).toEqual(["fetch", "pull"]);
+    expect(lines.join("\n")).toContain("metistry migrate-layout");
+    expect(r.lock).toBeUndefined();
+  });
+
+  it("says nothing on a flat instance", async () => {
+    const P = await checkout({ git: true });
+    const I = await mkdtemp(join(tmpdir(), "metistry-flat-"));
+    await mkdir(join(I, ".metistry"), { recursive: true });
+    await writeFile(join(I, ".metistry", "identity.yaml"), "name: X\n");
+    const lines: string[] = [];
+    const r = await update({ ...base(P, { METISTRY_INSTANCE_DIR: I, ...BRIDGE }), version: "0.9.0", exec: fakeExec(), fetchFn: fakeFetch().fn, out: (l) => lines.push(l), doctorFn: okDoctor, openSession: async () => fakeSession() });
+    expect(r.code).toBe(0);
+    expect(lines.join("\n")).not.toContain("migrate-layout");
   });
 });

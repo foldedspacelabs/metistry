@@ -7,10 +7,26 @@
 
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { INSTANCE_LAYOUT, resolveInstanceLayout, type InstancePathKey } from "@foldedspacelabs/metistry-core";
 import { hostLocal } from "./doctor.js";
 import { StepFailed, type StepRunner } from "./steps.js";
 
 export const RECONCILER_LABEL = "com.foldedspacelabs.metistry.reconciler";
+
+/**
+ * The instance-relative path a protected write posts, spelled the way THIS
+ * instance spells it.
+ *
+ * The readers resolve the layout (core's `resolveInstanceLayout`), so a
+ * writer that posted the flat spelling onto a legacy instance would land a
+ * SECOND `.metistry/identity.yaml` beside the live root one and the reader
+ * would go on reading the old file: the verb would report success and change
+ * nothing. Without an instance directory there is nothing to detect and the
+ * flat spelling is the only answer.
+ */
+export function protectedRel(instanceDir: string | undefined, key: InstancePathKey): string {
+  return instanceDir ? resolveInstanceLayout(instanceDir).layout[key] : INSTANCE_LAYOUT[key];
+}
 
 export interface ProtectedWriteOptions {
   env: NodeJS.ProcessEnv;

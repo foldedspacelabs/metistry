@@ -1,5 +1,186 @@
 # @metistry-apps/console
 
+## 0.9.0
+
+### Minor Changes
+
+- e9074d2: **The console grows the routes the app plan needs, so compute and knowledge
+  stop being Mac-only.** Nine new endpoints on the existing owner auth, the
+  existing error envelope and the existing `degrades: absent` rule, each with
+  its misuse tests (invariant 8).
+  
+  `/api/compute*` is five of the `metistry compute` verbs over HTTP: `GET
+  /api/compute` (the `compute show --json` report, plus both budget windows
+  folded from the `spend` named query and a `writable` flag), `GET
+  /api/compute/models`, `POST /api/compute/assign`, `POST /api/compute/budget`,
+  `POST /api/compute/providers/test`. They call the **same exported functions
+  the CLI verbs call** — the same YAML-document edit so comments and
+  hand-written blocks survive, the same re-validation of the result before
+  anything is written, the same write through the reconciler as `user`
+  (invariant 2) — so a refusal reads identically on both doors because it is the
+  same refusal. `providers add` and `providers remove` are deliberately absent:
+  they take a key, and a key goes on stdin into the login Keychain, so adding or
+  removing a provider stays CLI/app-only and `secret_present` is the only thing
+  a secret contributes to a response. These are the owner's **configuration**,
+  not invariant-10 "actions" — `user` principal only, no `propose_action` kind,
+  no autonomy level that reaches them.
+  
+  Two guards worth naming. The console refuses to write a `compute.yaml` it is
+  not reading: if the `METISTRY_COMPUTE_FILES` overlay ends somewhere other than
+  `<instance>/.metistry/compute.yaml`, the write is refused with both paths
+  named, because unguarded it would find nothing at the path it opens, start
+  from a bare header and deliver a four-line file over the real one. And the
+  whole surface degrades absent: the compose shape gives the console no instance
+  mount by design, so there every compute route answers 503 naming
+  `METISTRY_INSTANCE_DIR` while `metistry compute` keeps working.
+  
+  `GET /api/knowledge/search` and `GET /api/knowledge/page` are the owner's read
+  path into their own vault — a thin proxy onto the reconciler's
+  `/vault/search` (three modes, snippets, and `degraded` reaching the client
+  rather than being swallowed) and `/vault/read`. The console has held a vault
+  reader and searcher since Phase 6 and wired them only into `mcp-brain`, so
+  knowledge was reachable by an agent over MCP and by nothing the owner holds.
+  The proxy also **narrows what the bridge serves**: `/vault/read` is confined
+  to the instance repo and stops there, because the protected-path writes go
+  through it, so the route adds core's `isVaultPath` and `.metistry/`,
+  `Artifacts/` and the root `CLAUDE.md` are not reachable as knowledge from any
+  client. A refusal answers 404, not 403, so "refused" and "absent" are
+  indistinguishable from outside. `GET /api/knowledge/pages` is deliberately not
+  here: the page list is derived state and belongs in a named query over
+  `knowledge_files`, which `seed/queries/` does not carry yet.
+  
+  `GET /api/commands` is the composer's list, **generated** from the instance's
+  own `rules.yaml` and the agent registry — `/note`, the deep alias under
+  whatever name that instance gives it, `/model`, and one command per
+  `fast_path` rule whose pattern spells one unambiguously. A rule that is a
+  sentence rather than a command yields nothing, on purpose. Each entry carries
+  the tier it routes to and, for a fast path, the named query whose own
+  description is the menu's line. The PWA's static `COMMANDS` array — a
+  placeholder marked with an expiry since it was written — is deleted, and an
+  integration test routes every command the endpoint offers back through
+  `route()` so the menu and the router cannot drift.
+  
+  `GET /api/runs/:id` is the activity feed's drill-down into a `runs:<id>` ref,
+  through a new `run_detail` named query: provider, model, token and cache
+  counts, cost, the tool calls the same reply made (joined exactly on
+  `meta.turn_id` or `meta.message_id`, never a time window) and the shadow
+  agreement measure where the turn was shadowed — the measure, not the two
+  transcripts.
+- f57b3b0: **The instance directory is the Obsidian vault.** Open the folder `metistry
+  init` made and your notes are right there — `Journal/`, `Me/`, `Inbox/`,
+  `now.md` — with nothing of the machinery in the way. Everything that is not
+  knowledge moved into `.metistry/`: identity, rules, compute, the config
+  directories, the lock, and the derived `state/` that holds Postgres, the
+  `.env` and downloaded models. Obsidian ignores dot-prefixed folders, which is
+  the whole reason for the dot — the vault root and the install's own files can
+  finally be the same directory without one of them cluttering the other.
+  
+  Vault paths lose their prefix with it: a note is `Areas/Fsl/Drey.md`, a
+  capture is `Inbox/…`, and a read grant covering everything is spelled `/`.
+  
+  **The protected set became a place rather than a list.** Anything under
+  `.metistry/` is the user's hand alone — except `.metistry/state/`, which is
+  derived and nobody's record — plus the root `CLAUDE.md` and `README.md`.
+  That is one rule the reconciler enforces at the tool, instead of seven
+  filenames each component had to remember. Neither those two root files nor
+  `Artifacts/` are indexed as knowledge: your instructions and your bundles are
+  yours to read, not search results.
+  
+  This ships the layout for NEW instances. An existing instance keeps working
+  unchanged and `metistry doctor` now says which shape it is in; the verb that
+  moves one is the next change.
+
+### Patch Changes
+
+- c1f512e: **The assistant now uses your `identity.yaml` on the launchd shape, instead
+  of the seed identity that ships with the product.** Every `*_FILES` overlay
+  default resolved its instance half relative to the process's working
+  directory, and every launchd job's working directory is the product
+  checkout — so `.metistry/identity.yaml`, `rules.yaml` and `compute.yaml`
+  named the product's own directory, found nothing, and the engine ran on the
+  seed. `METISTRY_INSTANCE_DIR` was not in the engine's environment allowlist
+  either, so it could not have resolved them itself.
+  
+  Fixed at the root: `metistry up` puts `METISTRY_INSTANCE_DIR` and
+  `METISTRY_SEED_DIR` in every child's environment (the plists' env dicts and
+  the supervisor's child specs alike), and core's `overlayFiles` resolves every
+  default against the instance directory through `resolveInstanceLayout` — so
+  it finds the file whether the instance has run `metistry migrate-layout` or
+  not. The assistant, the console and the reconciler all read their overlays
+  through it, which also means the console's router and the engine can no
+  longer disagree about which `rules.yaml` is in force.
+  
+  The engine **refuses to start** when neither `METISTRY_INSTANCE_DIR` nor
+  `METISTRY_IDENTITY_FILES` is set, rather than answering under the seed's
+  name. `ops/sandbox/assistant.sb` grants read on the four config files by
+  name (never on the directory holding them, which on an unmigrated instance
+  is the vault root), so the reads the overlay now performs are permitted and
+  nothing else in the instance is.
+  
+  Also: `metistry update --version <x.y.z>` was ignored — `version` was listed
+  as a boolean flag, so the value never arrived and the latest release was
+  installed instead. And in git mode `update` wrote the **pre-pull** version
+  into `metistry.lock`; the version is now read from the checkout after the
+  pull, so a run that fast-forwards onto a new release pins that release.
+- 76f82a2: **An instance that has not run `metistry migrate-layout` is read again.**
+  `db/migrations/0021` recorded that "a legacy instance keeps working unchanged
+  until the verb runs". Verified against a clone of a real pre-ruling instance,
+  it did not: #193 moved every path to `.metistry/` and every reader spelled the
+  new one, so `metistry compute show` reported no providers while the instance's
+  `compute.yaml` declared one, `metistry identity` exited 1 on an instance whose
+  `identity.yaml` was right there, `metistry version` omitted the pin, `doctor`
+  read `shape compose` off a `deployment.yaml` it never opened and probed the
+  wrong half of the install, `metistry secrets`/`console`/`connect` could not
+  find `state/.env` at all — which on a launchd install means every rendered
+  plist's `__ENV_FILE__` points at a file that does not exist — and `up` would
+  have `initdb`'d a second, empty Postgres cluster at `.metistry/state/pg`
+  beside the live one.
+  
+  Two of the breaks were safety, not convenience. The §4.7 protected set became
+  the `.metistry/` PLACE, which took the legacy machinery at the instance root
+  out of it: on a legacy instance the assistant could write `identity.yaml`,
+  `rules.yaml`, `metistry.lock`, `queries/` and `instance-migrations/` through
+  `brain-commit` (invariant 2). And the knowledge walk, which now starts at the
+  instance root, indexed those same files plus every byte of the gitignored
+  `state/` — a Postgres cluster included — as notes.
+  
+  `resolveInstanceLayout(instanceDir)` in core is the fix: one `detectLayout`
+  read, then the right relative-path table (`LEGACY_INSTANCE_LAYOUT` mirrors
+  `INSTANCE_LAYOUT` key for key), with `instanceFile()` / `instanceStatePath()`
+  as the reader's one-line call. Every reader goes through it — identity,
+  rules, compute, deployment, the lock, the peer registry, `.env`, the Postgres
+  data and socket dirs, the supervisor's config/socket/bin, `ports.yaml`, the
+  models dir, the assistant's state dir, `doctor`'s compute overlay, the
+  console's identity/peers/inbox, and the reconciler's inbox prefix (whose SQL
+  predicate must match migration 0015's partial index on a legacy instance, not
+  0021's). Writers are untouched: `instancePath`/`metistryPath` still spell the
+  flat layout, because there is one layout to write and two to read.
+  `isProtectedPath` and `isVaultPath` cover the legacy root names
+  unconditionally — they receive a path and no instance directory, and the set
+  is strictly safer on a flat instance, which has no business holding lowercase
+  machinery at its root.
+  
+  `metistry update` now **refuses** to pin a version past 0.8.x onto a legacy
+  instance, before it fetches, builds or migrates anything, printing the
+  `migrate-layout` line to run; `--allow-legacy` overrides. Regression tests run
+  one fixture in both shapes through the same readers, so a reader that resolves
+  only one of them fails.
+- Updated dependencies [c1f512e]
+- Updated dependencies [e9074d2]
+- Updated dependencies [337bc0a]
+- Updated dependencies [dade46d]
+- Updated dependencies [f57b3b0]
+- Updated dependencies [76f82a2]
+- Updated dependencies [ce521a6]
+  - @foldedspacelabs/metistry-cli@0.9.0
+  - @foldedspacelabs/metistry-core@0.9.0
+  - @metistry-apps/routines@0.9.0
+  - @foldedspacelabs/metistry-mcp-brain@0.9.0
+  - @metistry-apps/collectors@0.9.0
+  - @foldedspacelabs/metistry-artifacts@0.9.0
+  - @foldedspacelabs/metistry-tasks@0.9.0
+  - @foldedspacelabs/metistry-queries@0.9.0
+
 ## 0.8.1
 
 ### Patch Changes

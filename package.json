@@ -1,7 +1,7 @@
 {
   "name": "metistry",
   "private": true,
-  "version": "0.8.1",
+  "version": "0.9.0",
   "description": "A local-first personal assistant and knowledge graph. The assistant is named in identity.yaml — nowhere else.",
   "license": "Apache-2.0",
   "engines": {

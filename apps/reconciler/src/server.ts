@@ -4,7 +4,7 @@
 // carries a commit intent and is queued for the sole committer.
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { authorized, errorEnvelope, runCheck, statusFor, type ErrorCode } from "@foldedspacelabs/metistry-core";
+import { authorized, errorEnvelope, INSTANCE_LAYOUT, isVaultPath, runCheck, statusFor, type ErrorCode } from "@foldedspacelabs/metistry-core";
 import type { Vault, Outcome } from "./vault.js";
 import { parseIntent } from "./vault.js";
 import type { Committer } from "./committer.js";
@@ -40,6 +40,24 @@ function fail(res: ServerResponse, code: ErrorCode, message?: string): void {
 function reply<T>(res: ServerResponse, out: Outcome<T>, status = 200, shape: (v: T) => unknown = (v) => v): void {
   if (out.ok) return send(res, status, shape(out.value));
   fail(res, out.code, out.message);
+}
+
+/**
+ * Defence in depth on top of `confine()`, for `GET /vault/read` only:
+ * `.metistry/state/.env`, `.metistry/compute.yaml`, `.obsidian/workspace.json` and the
+ * root `CLAUDE.md`/`README.md` are all real files `confine()` happily resolves — nothing
+ * about path confinement says they aren't machinery — so they would otherwise be served
+ * to ANY bearer holding this token. The console's `/api/knowledge/*` narrows to vault
+ * content with the same predicate, but that is a second door onto this one; the bridge
+ * must not depend on a caller choosing to narrow.
+ *
+ * `Artifacts/**` stays readable: it is binary content `packages/artifacts`'s
+ * `ArtifactsService` reads and writes through this exact endpoint, not vault knowledge —
+ * `isVaultPath` excludes it from the KNOWLEDGE walk on purpose, but that is a different
+ * question from whether this bridge may serve it.
+ */
+function isReadableByBridge(rel: string): boolean {
+  return isVaultPath(rel) || rel === INSTANCE_LAYOUT.artifactsDir || rel.startsWith(`${INSTANCE_LAYOUT.artifactsDir}/`);
 }
 
 async function readJson(req: IncomingMessage, maxBytes: number): Promise<Record<string, unknown> | null> {
@@ -137,9 +155,16 @@ export function makeBridge(deps: BridgeDeps, cfg: BridgeConfig): Server {
       if (key === "GET /vault/read") {
         // `encoding=base64` hands back the bytes untouched (binary artifacts); default stays utf8 `content`.
         if (q.get("encoding") === "base64") {
-          return reply(res, await vault.readBytes(q.get("path")), 200, (v) => ({ path: v.path, content_base64: v.content.toString("base64"), sha256: v.sha256, bytes: v.bytes }));
+          const out = await vault.readBytes(q.get("path"));
+          // Checked on the CONFINED path, after confine() has already produced its own
+          // 400/403 for traversal, `.git`, and `.metistry/instance-migrations/` — this
+          // only narrows what a path that already resolved cleanly may be.
+          if (out.ok && !isReadableByBridge(out.value.path)) return fail(res, "not_found");
+          return reply(res, out, 200, (v) => ({ path: v.path, content_base64: v.content.toString("base64"), sha256: v.sha256, bytes: v.bytes }));
         }
-        return reply(res, await vault.read(q.get("path")));
+        const out = await vault.read(q.get("path"));
+        if (out.ok && !isReadableByBridge(out.value.path)) return fail(res, "not_found");
+        return reply(res, out);
       }
 
       if (key === "GET /vault/list") {
@@ -153,7 +178,12 @@ export function makeBridge(deps: BridgeDeps, cfg: BridgeConfig): Server {
         const limit = clampInt(q.get("limit"), 20, 1, 100);
         const mode = parseMode(q.get("mode"));
         if (mode === undefined) return fail(res, "invalid_request", "mode must be keyword, semantic, or hybrid");
-        return send(res, 200, await searchVault({ vault, db: deps.db, embeddings: deps.embeddings, client: deps.embedClient }, term, limit, mode));
+        const result = await searchVault({ vault, db: deps.db, embeddings: deps.embeddings, client: deps.embedClient }, term, limit, mode);
+        // Defence in depth, not a live case today: keyword hits come from `walkVault()`
+        // and semantic hits are joined against `knowledge_files`, both already restricted
+        // to `isVaultPath` — this drops anything that reaches here anyway rather than
+        // trusting that restriction never drifts.
+        return send(res, 200, { ...result, hits: result.hits.filter((h) => isVaultPath(h.path)) });
       }
 
       if (key === "GET /vault/log") {

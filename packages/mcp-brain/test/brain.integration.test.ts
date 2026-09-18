@@ -9,7 +9,7 @@ import pg from "pg";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { TasksService } from "@foldedspacelabs/metistry-tasks";
-import { EmbedUnavailableError } from "@foldedspacelabs/metistry-core";
+import { EmbedUnavailableError, mintToken } from "@foldedspacelabs/metistry-core";
 import { QueryStore } from "@foldedspacelabs/metistry-queries";
 import { createBrainServer, EAGER_TOOL_NAMES, sha256Text, type AgentPrincipal, type VaultWriteRequest } from "../src/index.js";
 import { loadTestEnv } from "@foldedspacelabs/metistry-core/test-env";
@@ -781,14 +781,19 @@ cache_ttl: 0
     const unknown = await call(hub, "queries_run", { name: "not-a-real-query" });
     expect(unknown).toMatchObject({ isError: true, body: { error: { code: "not_found" } } });
 
-    // turn_id (every brain tool takes it): lands in runs.meta.turn_id, the join key activity_feed exposes
-    await call(hub, "queries_list", { turn_id: "itest-turn-1" });
+    // turn_id (every brain tool takes it): lands in runs.meta.turn_id, the join key activity_feed exposes.
+    // Unique per run, not a fixed literal: the scratch database is shared with every
+    // other suite (console's console-routes.integration.test.ts writes its own
+    // turn_id fixtures against the same `runs` table), so a hand-picked literal here
+    // can collide with somebody else's and make this test count their row instead.
+    const turnId = `itest-turn-${mintToken(8)}`;
+    await call(hub, "queries_list", { turn_id: turnId });
     await hub.close();
     const { rows: turnRows } = await pool.query(
       `SELECT meta->>'turn_id' AS turn_id FROM runs WHERE component = $1 AND tool = 'queries_list' ORDER BY id DESC LIMIT 1`,
       [HUB],
     );
-    expect(turnRows[0]!.turn_id).toBe("itest-turn-1");
+    expect(turnRows[0]!.turn_id).toBe(turnId);
 
     // external, no grant: forbidden — uniform whether or not a store is even wired (queries-tools.ts checks the grant first)
     const alice1 = await connect("tok-alice");

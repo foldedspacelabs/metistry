@@ -1,5 +1,7 @@
 # @metistry-apps/plugin-claude-code
 
+## 0.9.0
+
 ## 0.8.1
 
 ## 0.8.0

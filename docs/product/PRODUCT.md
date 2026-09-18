@@ -1921,3 +1921,233 @@ launchd cannot even see.
   sections instead of ten destinations, three renderings of them, the
   native-vs-embedded decision laid out with tradeoffs rather than settled, and
   a phase order that makes the window useful at phase A instead of phase F.
+
+- 2026-09-16 — **You can try a cheaper model on your own real work before
+  trusting it with any of it.** Name a candidate and a share of turns —
+  one in ten, say — and after each of those turns has already been answered
+  and delivered, the same turn is quietly run a second time on the candidate.
+  Both answers are stored side by side with a number for how closely they
+  agreed; the candidate's answer is never shown to you, never continues a
+  conversation, and has no route to your phone. Its tool calls are the point
+  of care: they are written down and never performed, and where the real turn
+  made the identical call the candidate is handed that real result, so it is
+  judged on the same facts without a second write to your notes, a second
+  message sent, or a second anything. That is true by construction rather than
+  by instruction — the shadow is handed a list of tool names and a set of
+  recorded answers, and has nothing it could execute a call against. The
+  comparison is charged honestly: a shadow run is a run, so it asks the same
+  budget question first (and is the first thing skipped when the month's money
+  is spent), and its cost is billed to the provider that was actually paid
+  rather than folded into the turn's. Nothing about it can cost you the turn —
+  a candidate that is offline or misconfigured leaves a note on the record and
+  the answer you already had. The agreement measure is deliberately dull:
+  same tools in the same order, plus how much the two answers' words overlap.
+  No model grades it, so two weeks of it is evidence rather than an opinion,
+  which is exactly what deciding to switch models should rest on.
+
+- 2026-09-17 — **The folder Metistry makes is the folder you open in
+  Obsidian.** The owner ruled that the instance directory *is* the vault, and
+  the layout followed: your notes sit at the root — `Journal/`, `Me/`,
+  `Inbox/`, `now.md` — and everything that is not knowledge moved into a
+  single `.metistry/` folder, which Obsidian does not render because it
+  starts with a dot. There is no `Knowledge/` subfolder to explain and no
+  second directory to keep in step: you point Obsidian at the instance and
+  see exactly what you would have put there yourself. What the assistant may
+  never touch got simpler in the same move — it is now a *place* (everything
+  under `.metistry/`, plus the instructions file you write for it) rather
+  than a list of filenames each part of the system had to remember, which is
+  one rule the tool can enforce instead of seven a prompt could miss. The
+  instructions file itself stays out of the search index: it is what the
+  assistant is told, not something it should find and quote back to you.
+
+- 2026-09-17 — **One command moves an instance you already have.** The new
+  layout was only half the story: an instance created before it still had the
+  old shape, and nobody should have to move thirty files by hand to get the
+  clean folder. `metistry migrate-layout` does it in one step — and, more to
+  the point, shows you the whole thing first. `--dry-run` prints every file it
+  would move and every database row it would touch, and runs none of it; the
+  real run makes one commit you can read, or undo, like any other. It works
+  out the entire plan before it moves a single file, so if anything would
+  collide it stops and names both sides while your instance is still exactly
+  as it was. It refuses to run over uncommitted work, and if the part of
+  Metistry that writes to your instance is still running it says so by name
+  rather than quietly racing it. Nothing is restarted behind your back: the
+  command finishes by telling you the one line to run when you are ready. It also fixes up the
+  definitions of your sub-agents as it goes, so the permissions you gave them
+  survive the move rather than quietly reverting the next time the system
+  re-reads them — and it edits those files surgically, leaving your own
+  comments and formatting exactly as you wrote them. Before it commits, it
+  tells you which folders are about to become searchable notes, so nothing
+  ends up in your knowledge base that you did not put there. The
+  Mac app understands both shapes in the meantime, so an older instance is
+  still adopted rather than rejected — it just says, once, which command
+  brings it up to date.
+
+- 2026-09-17 — **The app you will actually use is now decided, not proposed.**
+  The interface has one map on every screen — Chat, Feed, Needs You, Work,
+  Knowledge, Agents, System — and Knowledge, the thing the product is *for*,
+  finally has a home in it. Capture stops being a place you navigate to and
+  becomes a hotkey, a share sheet and a button in the composer, because
+  something that promises to take five seconds cannot ask you to go somewhere
+  first. The Mac and iPhone apps are **native**, built with the platform's own
+  controls rather than a web page in a window, so they feel fast and behave the
+  way the rest of the machine does; the browser version stays the full client
+  for every non-Apple computer. The Mac app talks only to the instance running
+  on that same Mac, over the loopback interface — nothing leaves the machine
+  and there is nothing to sign into — and running a second instance means a
+  second Mac with its own copy, which is simpler than a switcher and honest
+  about where your data is. The queue you answer every day is settled at six
+  answers rather than three: Approve, Revise, Decline, Approve as Work (which
+  turns a suggestion into a task with one click), Later (a real snooze that
+  leaves the queue and the morning brief and comes back by the clock), and Skip
+  (declining with nothing to say — and nothing in the system is allowed to read
+  it as feedback). A designer is engaged for the design language and a real
+  brand identity, replacing the placeholder icon. And the one thing the plan
+  could not yet size — reading and searching your own vault from the app — is
+  now measured against the code: the search that matters, with every result and
+  a tap into the whole page, is about three days of work and needs no database
+  change at all, because the vault bridge has served keyword, semantic and
+  hybrid search since Phase 6 and nothing was ever plugged into it.
+
+- 2026-09-17 — **The two things you do most often stopped being places you go
+  to.** Reading the first wireframes, the owner ruled a second time the same
+  day, and every change is a removal from the map. Writing something down is
+  now a single **"+"** that floats in the same corner of every screen — bottom
+  right on the phone, the toolbar and `⌘N` on the Mac — opening a small
+  composer that writes to the inbox and closes. There is no capture screen to
+  navigate to any more, which is the only version of a five-second promise
+  that survives contact with a tab bar. The queue of things that need a
+  decision from you moved onto a **bell with a count**, top right, on every
+  screen: tap it and the requests open over whatever you were doing, answer
+  one, and you are back where you were. It is the same queue your phone
+  already shows you as a notification, so there is one list with two doors
+  rather than two lists to keep in step — and it is still the only badge
+  anywhere in the product. What is left is six sections — Chat, Feed, Work,
+  Knowledge, Agents and **Insights** — where Work and Knowledge open in place
+  so the board, your projects, your pages and your searches are one click
+  away instead of two. Below them the Mac sidebar is **yours**: pin a
+  project, a page, a saved search or an agent, drag them into the order you
+  want, unpin what you stop using. The old System section, which was the
+  machine and the meter in one, split honestly: everything you *configure* —
+  status, compute providers and budgets, devices — is in Settings where
+  settings belong, the first-run setup is in the app menu where a once-only
+  thing belongs, and everything you *read* — what things cost, what ran, how
+  the smaller local models compare against the big ones — is a section of its
+  own you can actually find.
+
+- 2026-09-18 — **Your assistant answers as the assistant you named, and
+  refuses to start if it cannot tell.** On the shape that runs without
+  containers — the one the Mac app installs — the engine was looking for the
+  file that holds your assistant's name, voice and model choices relative to
+  the wrong folder: the product's own, not yours. Every candidate path missed,
+  and it fell back silently to the placeholder identity that ships with the
+  software. Nothing looked broken; replies arrived, under a name you never
+  chose, with the model assignments and the routing rules you had written
+  going unread. The fix is at the root rather than at the symptom: every
+  service is now told where your setup lives and resolves its config from
+  there, absolute, so no component's behaviour depends on which directory it
+  happened to be started in — and it works the same on a setup that has not
+  yet moved to the new folder shape. The safety mechanism is the second half:
+  rather than degrade to the placeholder, the assistant now **stops with an
+  explanation** when nothing tells it where your identity file is. Answering
+  as someone else is the one failure you cannot see from the outside, so it
+  is no longer possible to reach by accident. The confinement the engine runs
+  under was widened by exactly four files, each granted by name — your
+  identity, your prompt, your rules, your model assignments — and by nothing
+  else: your notes are still unreachable from it, which a test proves by
+  trying to read one from inside.
+
+- 2026-09-18 — **Where your work runs, and what you have written, are now
+  reachable from whatever you happen to be holding.** Two of the most useful
+  things Metistry knows were stuck on one Mac. Choosing which model answers
+  you, setting a spending limit and checking that a provider key still works
+  could only be done at a terminal on the machine that holds your notes — so
+  from the phone you could see that a reply had cost forty cents and could do
+  nothing about it. And your own notes, the whole point of the thing, were
+  searchable by the assistant and by the tools you plug in, and by no screen
+  of yours: there was no way to search your vault or open a page from the app
+  at all. Both are now ordinary parts of the API every client speaks, which
+  means the phone, the Mac app and the browser all get them at once rather
+  than one at a time. Choosing a model and setting a budget go through exactly
+  the same code the command line uses — the same check that the file is still
+  valid before a single byte is written, the same hand-written comments left
+  untouched, the same "this is your change, in your name" recorded against it
+  — so the two ways of doing it cannot quietly come to mean different things,
+  and a mistake is refused in the same words wherever you make it. **Keys stay
+  where keys belong.** Adding a provider still means typing its key at your
+  own machine, never sending one over the network; what the app can see is
+  that a key of that name exists, and nothing more. Search tells you the
+  truth about itself, too: when the part that understands meaning rather than
+  words is unavailable, results come back anyway with a note saying they are
+  word matches this time, rather than a spinner or an error. And the app can
+  only ever open your actual notes — the machinery folders, your settings
+  file, the assistant's own instructions and anything holding a password are
+  not notes and cannot be opened as one, from any client, by anyone,
+  including you. Finally, the slash-command menu now lists *your* commands
+  rather than a hard-coded guess: it is built from your own routing rules, so
+  it shows what your instance actually does, and a test checks that every
+  command the menu offers is one the system really acts on.
+
+- 2026-09-18 — **Your existing setup keeps working until you choose to move
+  it — and the promise is now tested rather than asserted.** The new folder
+  shape came with a sentence saying an older setup would keep running until you
+  ran the one command that moves it. Checked against a copy of a real older
+  setup, it wasn't true: the app was looking for your settings in the new place
+  and quietly falling back to the defaults it ships with, so it reported no
+  model provider while your own file named one, could not tell you the
+  assistant's name, and would have started a second, empty database beside your
+  real one the next time you brought the system up. Two of those were safety
+  rather than inconvenience: on an older setup the files that define how the
+  system behaves had fallen out of the protected set, so the assistant could
+  have edited its own rules, and the same files — plus the whole of the working
+  directory the database lives in — were being swept into your searchable notes.
+  Both are closed, and closed the way this project closes things: at the tool,
+  so the write is refused rather than discouraged. Everything that reads your
+  setup now checks which shape it is in first, one look at the folder, and the
+  answer holds for both. And because compatibility nobody tests is not
+  compatibility, the update command now stops — before it downloads anything —
+  if it is about to move an unmigrated setup onto a version past the line that
+  was tested against it, and prints the single command that brings it up to
+  date. The move stays yours to make, on your own day.
+
+- 2026-09-18 — **The desktop app can now read and change everything the
+  system holds, and the secret that lets it never enters the app.** Until this,
+  the Mac window could ask one question — "am I signed in?" — and everything
+  else about your own work lived in the browser. It can now reach all of it:
+  what happened, what is waiting on you, the board and its cards, the rooms,
+  who is working and under what autonomy, where the money goes, your notes and
+  a search across them. The way it reaches them is the part worth keeping: the
+  app does not hold your credential. It asks the command line to make each
+  request, and the command line is the only thing on the machine that knows
+  where the secret lives — so a screenshot of the app, a crash log from it, or
+  a copy of its memory contains nothing that would open the door from
+  somewhere else. That is checked by a test that reads the app's own source and
+  fails if any file sets a credential header, names a keychain, or opens a
+  file at all; the test passed before this change and passes unchanged after
+  it, which is the difference between a rule and a promise.
+- 2026-09-18 — **A pane that cannot reach the system says so and keeps what it
+  last knew.** Three habits are now properties of the code rather than notes
+  for whoever draws the next screen. A refresh that fails leaves the previous
+  answer on screen and marks it old, instead of blanking a working page. A
+  background refresh is not allowed to become a spinner — only a first load,
+  with nothing to show yet, earns one. And while nothing is answering, every
+  button that would decide something refuses in a sentence *before* sending,
+  rather than looking live and failing somewhere you cannot see. Reconnecting
+  after a gap asks only for what changed, and a request you answered on your
+  phone thirty seconds ago leaves the queue rather than sitting in it twice.
+
+- 2026-09-18 — **The same prompt costs a tenth the second time, and the bill
+  says so.** Every turn re-sends the same system prompt and the same tool
+  list; on a provider that can cache them, paying full price for that twice is
+  just waste. The cloud template now ships with caching on, so the engine asks
+  for it on every call without anybody configuring anything — and only on a
+  provider that has actually said it supports it, because a setting sent to an
+  endpoint that has never heard of it is noise, not thrift. What came back
+  cached is recorded on the turn beside what was fresh, and priced at the
+  cache's own cheaper rate, so the saving shows up in your own spend history
+  rather than in a vendor's marketing: you can see how much of each turn was
+  cached and what it cost. The total prompt size is still reported whole, so
+  the cached share is extra detail rather than a number that makes two
+  columns disagree. Anything more aggressive — hand-placing the cache
+  boundaries for a few percent more — waits on a measurement over real turns,
+  because a saving nobody measured is a claim.

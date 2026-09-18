@@ -15,8 +15,8 @@
 
 import { realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { instanceStatePath } from "@foldedspacelabs/metistry-core";
-import type { Compute } from "@foldedspacelabs/metistry-core";
+import { instanceStatePath, overlayFiles, SEED_DIR } from "@foldedspacelabs/metistry-core";
+import type { Compute, InstancePathKey } from "@foldedspacelabs/metistry-core";
 
 export const SANDBOX_EXEC = "/usr/bin/sandbox-exec";
 export const SANDBOX_PROFILE_REL = "ops/sandbox/assistant.sb";
@@ -94,10 +94,63 @@ export function realPathish(p: string, realpath: (x: string) => string = realpat
   }
 }
 
+/**
+ * The instance files the engine reads, and the ONLY ones the profile lets
+ * it open outside its own dist and state: its identity, its system-prompt
+ * template, the router's tier map and `compute.yaml`.
+ *
+ * Grants are per FILE, not a directory. `<instance>/.metistry/` would be a
+ * one-line rule and would also hand the engine `instances.yaml`,
+ * `metistry.lock` and the whole Postgres cluster under `state/`; and on a
+ * legacy instance the machinery IS the vault root, so a directory grant
+ * there would hand it every note in the vault — which is precisely what D5
+ * says it may never read from disk. Four literals say the same thing in
+ * both layouts and say nothing more.
+ */
+export const ENGINE_CONFIG_KEYS = ["identity", "assistantPrompt", "rules", "compute"] as const satisfies readonly InstancePathKey[];
+
+/** `identity` → `CONFIG_IDENTITY`: the `-D` parameter ops/sandbox/assistant.sb reads it as. */
+export function configParamName(key: (typeof ENGINE_CONFIG_KEYS)[number]): string {
+  return `CONFIG_${key.replace(/([a-z])([A-Z])/g, "$1_$2").toUpperCase()}`;
+}
+
+/**
+ * The four `-D CONFIG_*` values for one install: this instance's copy of
+ * each file as THIS instance spells it (flat or legacy), falling back to the
+ * product's seed when there is no instance directory — a grant on a file the
+ * profile already allows, rather than an empty parameter `renderPlist` would
+ * refuse.
+ *
+ * The path is granted whether or not the file exists yet: a rule for a
+ * missing path matches nothing, and an instance that writes its
+ * `assistant-prompt.md` later must not need a re-`up` to be read.
+ */
+export function engineConfigParams(opts: {
+  instanceDir?: string | undefined;
+  productDir: string;
+  realpath?: ((p: string) => string) | undefined;
+  /** test seam: which of the two layouts the instance directory is in (`detectLayout`'s two existence probes) */
+  exists?: ((p: string) => boolean) | undefined;
+}): Record<string, string> {
+  const out: Record<string, string> = {};
+  // the same list the engine itself resolves (core's `overlayFiles`): its
+  // LAST candidate is the file that wins, which is the one the profile has
+  // to allow. No instance directory → that is the seed, already readable
+  // under PRODUCT_DIR, so the grant is a no-op rather than an empty
+  // parameter `renderPlist` would refuse to render.
+  for (const key of ENGINE_CONFIG_KEYS) {
+    const candidates = overlayFiles(key, opts.instanceDir, { seedDir: join(opts.productDir, SEED_DIR), ...(opts.exists ? { exists: opts.exists } : {}) }).split(":");
+    out[configParamName(key)] = realPathish(candidates[candidates.length - 1]!, opts.realpath);
+  }
+  return out;
+}
+
 export interface SandboxInputs {
   productDir: string;
   nodeBin: string;
   stateDir: string;
+  /** the instance directory, so the four config files it holds can be granted by name */
+  instanceDir?: string | undefined;
   consolePort: number;
   /**
    * The Postgres port. Under `compose` the engine reached the db through the
@@ -119,6 +172,10 @@ export interface SandboxParams {
   TMP_DIR: string;
   CONSOLE_TCP: string;
   DB_TCP: string;
+  CONFIG_IDENTITY: string;
+  CONFIG_ASSISTANT_PROMPT: string;
+  CONFIG_RULES: string;
+  CONFIG_COMPUTE: string;
 }
 
 export function sandboxParams(inputs: SandboxInputs): SandboxParams {
@@ -131,6 +188,12 @@ export function sandboxParams(inputs: SandboxInputs): SandboxParams {
     TMP_DIR: real(inputs.tmpDir.replace(/\/$/, "")),
     CONSOLE_TCP: `localhost:${inputs.consolePort}`,
     DB_TCP: `localhost:${inputs.dbPort}`,
+    ...(engineConfigParams({ ...(inputs.instanceDir ? { instanceDir: inputs.instanceDir } : {}), productDir: inputs.productDir, ...(inputs.realpath ? { realpath: inputs.realpath } : {}) }) as {
+      CONFIG_IDENTITY: string;
+      CONFIG_ASSISTANT_PROMPT: string;
+      CONFIG_RULES: string;
+      CONFIG_COMPUTE: string;
+    }),
   };
 }
 

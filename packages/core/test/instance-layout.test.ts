@@ -17,7 +17,9 @@ import {
   isProtectedPath,
   isVaultPath,
   metistryPath,
+  overlayFiles,
   resolveInstanceLayout,
+  seedFile,
   statePath,
 } from "../src/instance-layout.js";
 
@@ -345,5 +347,50 @@ describe("isVaultPath on a legacy instance", () => {
     for (const p of ["Knowledge/now.md", "Knowledge/Journal/2026-09-17.md", "Knowledge/Inbox/capture.md", "Knowledge/CLAUDE.md"]) {
       expect(isVaultPath(p), p).toBe(true);
     }
+  });
+});
+
+// The D4 overlay defaults every service resolves. A relative instance half
+// named the process's own working directory — the PRODUCT checkout for every
+// launchd job — so the instance's file was never read and the engine ran on
+// the seed (#198, "not fixed here" #1).
+describe("overlay defaults", () => {
+  it("the seed half is derived from the layout's own spelling, so the two halves name one file", () => {
+    expect(seedFile("identity")).toBe("seed/identity.yaml");
+    expect(seedFile("assistantPrompt")).toBe("seed/assistant-prompt.md");
+    expect(seedFile("rules")).toBe("seed/rules.yaml");
+    expect(seedFile("compute")).toBe("seed/compute.yaml");
+    // absolute when the caller knows the checkout: that is the last cwd
+    // dependency out of a launchd job
+    expect(seedFile("identity", "/p/seed/")).toBe("/p/seed/identity.yaml");
+  });
+
+  it("the instance half is ABSOLUTE and follows the instance's own layout", () => {
+    const flat = (p: string) => p === "/i/.metistry/identity.yaml";
+    expect(overlayFiles("identity", "/i", { exists: flat })).toBe("seed/identity.yaml:/i/.metistry/identity.yaml");
+    const legacy = (p: string) => p === "/l/identity.yaml";
+    expect(overlayFiles("rules", "/l", { exists: legacy })).toBe("seed/rules.yaml:/l/rules.yaml");
+    expect(overlayFiles("compute", "/l/", { seedDir: "/p/seed", exists: legacy })).toBe("/p/seed/compute.yaml:/l/compute.yaml");
+    // nothing in either result is relative to a cwd
+    for (const half of overlayFiles("identity", "/i", { seedDir: "/p/seed", exists: flat }).split(":")) expect(half.startsWith("/")).toBe(true);
+  });
+
+  it("no instance directory = the seed alone, rather than a relative path that resolves against whatever cwd", () => {
+    expect(overlayFiles("identity")).toBe("seed/identity.yaml");
+    expect(overlayFiles("identity", "")).toBe("seed/identity.yaml");
+    expect(overlayFiles("identity", undefined, { seedDir: "/p/seed" })).toBe("/p/seed/identity.yaml");
+  });
+
+  it("reads a real directory in either shape", async () => {
+    const root = await mkdtemp(join(tmpdir(), "metistry-overlay-"));
+    const flat = join(root, "flat");
+    await mkdir(join(flat, ".metistry"), { recursive: true });
+    await writeFile(join(flat, ".metistry", "identity.yaml"), "name: A\n");
+    expect(overlayFiles("identity", flat)).toBe(`seed/identity.yaml:${join(flat, ".metistry", "identity.yaml")}`);
+
+    const legacy = join(root, "legacy");
+    await mkdir(legacy, { recursive: true });
+    await writeFile(join(legacy, "identity.yaml"), "name: A\n");
+    expect(overlayFiles("identity", legacy)).toBe(`seed/identity.yaml:${join(legacy, "identity.yaml")}`);
   });
 });

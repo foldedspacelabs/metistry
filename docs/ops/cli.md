@@ -458,6 +458,14 @@ TitleCase vault-root prefixes, `--project` adds membership. No flag grants
 all, so "read-only by default" is true by construction rather than by
 configuration. A re-run with no flags leaves grants exactly as they were.
 
+**On an instance that has not run `metistry migrate-layout`,** prefix them
+with `Knowledge/`: `--areas Knowledge/Areas/Engineering`. A grant is matched
+as a path prefix against the rows the reconciler indexed, and on a legacy
+instance the vault is `Knowledge/` — so `--areas Areas/Engineering` there
+matches nothing and grants nothing, silently. `migrate-layout` moves the
+vault to the instance root and rewrites those paths; after it has run, the
+flat spelling above is the only one.
+
 A namespaced instance (`metistry up --namespace`) follows its own
 `.metistry/state/ports.yaml`: the console port in the URL, and the label suffix in both
 the config key (`mcpServers.metistry-<suffix>`) and the variable name

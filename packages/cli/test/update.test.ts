@@ -323,6 +323,40 @@ describe("metistry update", () => {
     expect(text).toContain("[dry-run] metistry doctor");
     expect(existsSync(join(P, "metistry.lock"))).toBe(false);
   });
+
+  // #198's "not fixed here" #2: `--version` was a boolean flag, so the value
+  // never reached `update` and the documented `--version <x.y.z>` installed
+  // whatever was latest.
+  it("main: `update --version 0.2.0 --channel release` asks for THAT release, not the latest", async () => {
+    const P = await checkout({ git: true });
+    const lines: string[] = [];
+    expect(await main(["update", "--version", "0.2.0", "--channel", "release", "--dry-run", "--product-dir", P], { out: (l) => lines.push(l), err: () => {}, exec: fakeExec() })).toBe(0);
+    const text = lines.join("\n");
+    expect(text).toContain("resolve release 0.2.0 of");
+    expect(text).toContain("metistry-runtime-0.2.0-");
+    expect(text).not.toContain("<latest>");
+  });
+
+  // …and #3: in git mode the version was read BEFORE the pull, so a checkout
+  // that fast-forwarded onto a new release pinned the old number.
+  it("git mode pins the version the checkout has AFTER the pull, not the one this process was built from", async () => {
+    const P = await checkout({ git: true });
+    const inst = await mkdtemp(join(tmpdir(), "mi-"));
+    // the pull is what brings the new package.json onto disk
+    const exec = fakeExec({
+      git: (args) => {
+        if (args[0] === "pull") writeFileSync(join(P, "package.json"), JSON.stringify({ name: "metistry", version: "0.8.2" }));
+        if (args[0] === "rev-parse") return { stdout: "feedfacefeedfacefeedfacefeedfacefeedface\n" };
+        return undefined;
+      },
+    });
+    const lines: string[] = [];
+    const r = await update({ ...base(P, { METISTRY_INSTANCE_DIR: inst, ...BRIDGE }), out: (l) => lines.push(l), exec, fetchFn: fakeFetch().fn, skipBuild: true, skipMigrate: true, doctorFn: okDoctor });
+    // `version: "0.0.9"` is what base() passes — the pre-pull code's own
+    expect(r.lock?.product.version).toBe("0.8.2");
+    expect(lines.join("\n")).toContain("version: 0.0.9 → 0.8.2");
+    expect(lines.join("\n")).toContain("metistry update → 0.8.2");
+  });
 });
 
 // ---- the legacy-layout gate --------------------------------------------------

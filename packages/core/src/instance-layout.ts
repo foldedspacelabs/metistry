@@ -23,7 +23,7 @@
 // filesystem except `detectLayout`, which only asks whether two names exist.
 
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 /**
  * The one spelling of every path inside an instance directory, POSIX and
@@ -337,4 +337,68 @@ export function instanceFile(instanceDir: string, key: InstancePathKey, exists: 
 /** `<instanceDir>/<state dir>/<...rest>` as THIS directory spells it (`.metistry/state/` or the legacy `state/`). */
 export function instanceStatePath(instanceDir: string, ...rest: string[]): string {
   return resolveInstanceLayout(instanceDir).state(...rest);
+}
+
+// ---- the D4 overlay defaults ---------------------------------------------
+//
+// `identity.yaml`, `assistant-prompt.md`, `rules.yaml` and `compute.yaml`
+// each ship a copy in the product's `seed/` and are overlaid by the
+// instance's own file: colon-separated candidates, LAST EXISTING FILE WINS
+// (docs/ops/assistant-tools.md).
+//
+// The instance half has to be ABSOLUTE. Spelled relative — the old
+// `seed/identity.yaml:.metistry/identity.yaml` — it names the instance's
+// file only when the process happens to be RUNNING in the instance
+// directory, and no service ever is: every plist sets
+// `WorkingDirectory=__REPO__`, the product checkout. So the second
+// candidate silently missed and the engine answered as the SEED identity
+// (found by the 2026-09-17 legacy verification, #198's "not fixed here" #1).
+// Resolving through `instanceFile` also finds a legacy instance's root
+// `identity.yaml` without the caller knowing which layout it is in.
+
+/** The product's seed directory, as every service's default names it: relative to the checkout, which is each job's working directory. */
+export const SEED_DIR = "seed";
+
+/**
+ * The product's copy of one config file — `seed/identity.yaml`,
+ * `seed/rules.yaml`, … — derived from the layout's own spelling so the two
+ * halves of an overlay can never name different files. `seedDir` is
+ * absolute when the caller knows the checkout (`metistry up` does), which
+ * is what removes the last cwd dependency from a launchd job.
+ */
+export function seedFile(key: InstancePathKey, seedDir: string = SEED_DIR): string {
+  return `${seedDir.replace(/\/+$/, "")}/${basename(INSTANCE_LAYOUT[key])}`;
+}
+
+/**
+ * The D4 overlay default for one config file: the product's seed copy, then
+ * this instance's own, as THIS instance spells it.
+ *
+ * No instance directory = the seed alone. A process that has not been told
+ * where the instance is has no instance file to overlay, and saying that
+ * here keeps every caller from inventing a relative path that resolves
+ * against whatever cwd it happens to have.
+ */
+export function overlayFiles(
+  key: InstancePathKey,
+  instanceDir?: string | undefined,
+  opts: { seedDir?: string | undefined; exists?: ((p: string) => boolean) | undefined } = {},
+): string {
+  const seed = seedFile(key, opts.seedDir ?? SEED_DIR);
+  const dir = instanceDir?.replace(/\/+$/, "");
+  return dir ? `${seed}:${instanceFile(dir, key, opts.exists ?? existsSync)}` : seed;
+}
+
+/**
+ * The same default, read off an environment: `METISTRY_INSTANCE_DIR` and
+ * `METISTRY_SEED_DIR`, both set by `metistry up` for every child.
+ *
+ * Every service resolves its overlays through THIS function, so the engine,
+ * the console's router and the reconciler cannot end up reading config from
+ * two different places — which is exactly what happened while each spelled
+ * its own default.
+ */
+export function overlayFilesFromEnv(env: NodeJS.ProcessEnv, key: InstancePathKey): string {
+  const seedDir = env.METISTRY_SEED_DIR?.trim();
+  return overlayFiles(key, env.METISTRY_INSTANCE_DIR?.trim() || undefined, { ...(seedDir ? { seedDir } : {}) });
 }

@@ -106,7 +106,9 @@ declare `tiers.routine` explicitly if the pause is meant to apply to it.
 ## Where it is read from — the D4 overlay
 
 `METISTRY_COMPUTE_FILES`, colon-separated, default
-`seed/compute.yaml:.metistry/compute.yaml`. The **last existing file wins, whole** —
+`<seed>/compute.yaml:<instance>/.metistry/compute.yaml` — the instance half
+resolved against `METISTRY_INSTANCE_DIR` and absolute, not relative to
+whatever directory the service happens to run in. The **last existing file wins, whole** —
 there is no deep merge, so your instance's file always stands alone and is
 always readable on its own. The same rule as `METISTRY_RULES_FILES`.
 

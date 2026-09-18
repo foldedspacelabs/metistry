@@ -566,7 +566,7 @@ confine a probe with those same values.
 
 | | |
 |---|---|
-| filesystem read | its own `dist/` + `node_modules/`, the node runtime, the state dir, tmp, system frameworks. **Not** the vault, not `~/Documents`, not the instance repo. |
+| filesystem read | its own `dist/` + `node_modules/`, the node runtime, the state dir, tmp, system frameworks — plus **four files of the instance's config, granted by name**: `identity.yaml`, `assistant-prompt.md`, `rules.yaml`, `compute.yaml` (`-D CONFIG_IDENTITY=…`, computed by `up`). **Not** the vault, not `~/Documents`, not the rest of the instance repo. The four are literals rather than a grant on the directory holding them because that directory also holds the lock, the peer registry and Postgres' cluster — and on an instance that has not run `metistry migrate-layout` it IS the vault root. |
 | filesystem write | the state dir and tmp. Nothing else. |
 | exec | the node binary. No shell (invariant 9). |
 | network out | the console and Postgres, on loopback, on **this instance's** ports, and TLS. Nothing else — a namespaced engine cannot reach another install's console. |
@@ -574,11 +574,12 @@ confine a probe with those same values.
 
 The parameters are computed in one place (`packages/cli/src/sandbox.ts`)
 and the misuse tests in `packages/cli/test/sandbox.test.ts` confine a
-throwaway node script with exactly those values, proving five things:
+throwaway node script with exactly those values, proving six things:
 a `~/Documents`-style read fails, a write outside the state dir fails, a
-write inside it succeeds, and the console's port and Postgres' port both
-connect while a third loopback port does not. Darwin-only; skipped on
-Linux CI.
+write inside it succeeds, the console's port and Postgres' port both
+connect while a third loopback port does not, and the four config files
+above are readable **in both layouts** while a note sitting beside them is
+not. Darwin-only; skipped on Linux CI.
 
 `DB_TCP` is there because the launchd shape's Postgres is a loopback port
 rather than a container the engine reached over the compose network: the

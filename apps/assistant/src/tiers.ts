@@ -26,7 +26,12 @@ import {
   type TierMap,
 } from "@foldedspacelabs/metistry-core";
 
-/** The D4 overlay default, from core so the console and the engine read the same file. */
+/**
+ * Re-exported for compatibility only. The list this process actually reads
+ * is `overlayFilesFromEnv(env, "rules")` (main.ts): this constant's instance
+ * half is relative, so it named the product checkout rather than the
+ * instance and resolved to the seed's map alone (#198).
+ */
 export { RULES_FILES_DEFAULT };
 
 /** The map used when no rules file is readable: one tier, the configured default model, medium effort. */

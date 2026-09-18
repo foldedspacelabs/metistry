@@ -32,7 +32,9 @@ describe("metistry up", () => {
     // every plist is written before any of them is bootstrapped — the TCC
     // pin (tcc-pin.ts) runs in between, on whatever `up` just wrote, and
     // before any of it is loaded by launchd
-    const write = (label: string) => `write ${LA}/${label}.plist  (from ops/launchd/${label}.plist, __REPO__=${P}, __NODE__=${NODE}, __ENV_FILE__=${join(P, ".env")})`;
+    // …and every one of them is told where the product's seed is, so an
+    // overlay default never resolves against a job's working directory
+    const write = (label: string) => `write ${LA}/${label}.plist  (from ops/launchd/${label}.plist, __REPO__=${P}, __NODE__=${NODE}, __ENV_FILE__=${join(P, ".env")}, +METISTRY_SEED_DIR)`;
     const bootstrap = (label: string) => [`launchctl bootout gui/501/${label}`, `launchctl bootstrap gui/501 ${LA}/${label}.plist`, `launchctl kickstart -k gui/501/${label}`];
     expect(r.commands).toEqual([`(cd ${P} && docker compose up -d --build)`, ...retired("/h"), ...JOBS.map(write), ...JOBS.flatMap(bootstrap), "metistry doctor"]);
     expect(lines.filter((l) => !l.startsWith("[dry-run]") && !l.startsWith("   "))).toEqual([]);

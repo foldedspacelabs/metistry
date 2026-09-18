@@ -237,11 +237,22 @@ describe("the rendered plists", () => {
     expect(assistant.argv).toContain(`PRODUCT_DIR=${realPathish(P)}`);
     expect(assistant.env.HOME).toBe(`${I}/.metistry/state/assistant`);
     expect(assistant.env.METISTRY_OPENROUTER_API_KEY).toBe("sk-or-x"); // named by compute.yaml, not by a fixed variable
+    // where this install's config is — without these the engine resolved
+    // every overlay against its working directory (the PRODUCT checkout)
+    // and answered as the seed identity (#198)
+    expect(assistant.env.METISTRY_INSTANCE_DIR).toBe(I);
+    expect(assistant.env.METISTRY_SEED_DIR).toBe(`${P}/seed`);
+    // …and the sandbox lets it open the four files it will find there, by
+    // name: the vault beside them stays denied (D5)
+    expect(assistant.argv).toContain(`CONFIG_IDENTITY=${realPathish(join(I, ".metistry", "identity.yaml"))}`);
+    expect(assistant.argv).toContain(`CONFIG_ASSISTANT_PROMPT=${realPathish(join(I, ".metistry", "assistant-prompt.md"))}`);
+    expect(assistant.argv).toContain(`CONFIG_RULES=${realPathish(join(I, ".metistry", "rules.yaml"))}`);
+    expect(assistant.argv).toContain(`CONFIG_COMPUTE=${realPathish(join(I, ".metistry", "compute.yaml"))}`);
     // the engine's environment is still an ALLOWLIST, and a child's
     // environment is the spec's whole: the supervisor's own never leaks in
     expect(assistant.env.METISTRY_ORIGIN).toBeUndefined();
     expect(Object.keys(assistant.env).sort()).toEqual(
-      ["METISTRY_OPENROUTER_API_KEY", "HOME", "METISTRY_ASSISTANT_TOKEN", "METISTRY_BRAIN_URL", "METISTRY_DB_HOST", "METISTRY_DB_PASSWORD", "METISTRY_DB_PORT", "PATH", "TMPDIR"].sort(),
+      ["METISTRY_OPENROUTER_API_KEY", "HOME", "METISTRY_ASSISTANT_TOKEN", "METISTRY_BRAIN_URL", "METISTRY_DB_HOST", "METISTRY_DB_PASSWORD", "METISTRY_DB_PORT", "METISTRY_INSTANCE_DIR", "METISTRY_SEED_DIR", "PATH", "TMPDIR"].sort(),
     );
 
     expect(child("db").argv).toEqual([`${PG}/postgres`, "-D", `${I}/.metistry/state/pg`]);

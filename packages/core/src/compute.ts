@@ -36,10 +36,17 @@ export const COMPUTE_FILENAME = "compute.yaml";
  * after it. LAST EXISTING FILE WINS, whole — the same rule (and the same
  * spelling) as `METISTRY_RULES_FILES`, so there is no deep merge to reason
  * about and an instance file is always self-contained.
+ *
+ * **Both halves are RELATIVE, which is why no service uses this any more.**
+ * It names the instance's file only for a process whose working directory IS
+ * the instance, and none is: every launchd job's is the product checkout, so
+ * this default read the seed and nothing else (#198). Use
+ * `overlayFilesFromEnv("compute")` — kept here because a stranger's build may
+ * import it, and annotated so nobody wires it back in.
  */
 export const COMPUTE_FILES_DEFAULT = `seed/${COMPUTE_FILENAME}:${INSTANCE_LAYOUT.compute}`;
 
-/** The same overlay rule for `rules.yaml` (`METISTRY_RULES_FILES`) — the router's tier map. Here so the console and the engine cannot disagree about where it lives. */
+/** The same overlay rule for `rules.yaml` (`METISTRY_RULES_FILES`) — the router's tier map. Relative, and superseded for the same reason as `COMPUTE_FILES_DEFAULT` above: use `overlayFilesFromEnv("rules")`. */
 export const RULES_FILES_DEFAULT = `seed/rules.yaml:${INSTANCE_LAYOUT.rules}`;
 
 /**

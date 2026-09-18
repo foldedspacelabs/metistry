@@ -1,5 +1,5 @@
 import pg from "pg";
-import { SPEND_QUERY, engineStatus, intEnv, optionalEnv, requireEnv, type SpendRow } from "@foldedspacelabs/metistry-core";
+import { SPEND_QUERY, engineStatus, intEnv, optionalEnv, overlayFilesFromEnv, requireEnv, type SpendRow } from "@foldedspacelabs/metistry-core";
 import { QueryStore } from "@foldedspacelabs/metistry-queries";
 import { drainOne } from "./drain.js";
 import { DEFAULT_BRIEF_THREAD_BYTES, drainCrewOne } from "./crew-drain.js";
@@ -9,7 +9,7 @@ import { pgSessionStore } from "./sessions.js";
 import { mcpToolHost, NO_TOOLS } from "./tools.js";
 import { brainConfigFromEnv, brainToolNames } from "./brain.js";
 import { loadSystemPrompt } from "./prompt.js";
-import { loadTiers, RULES_FILES_DEFAULT } from "./tiers.js";
+import { loadTiers } from "./tiers.js";
 import { warnNonZdrAssignments, watchCompute } from "./compute.js";
 
 const pool = new pg.Pool({
@@ -25,7 +25,14 @@ const interval = intEnv("METISTRY_DRAIN_INTERVAL_MS", 1500);
 
 // Tiers are (model, effort) pairs, read from the same rules.yaml the console's
 // router reads (D4 overlay). The drain resolves a tier NAME per turn.
-const { tiers: rulesTiers, path: tiersPath } = await loadTiers(optionalEnv("METISTRY_RULES_FILES", RULES_FILES_DEFAULT), model);
+//
+// The overlay's instance half is resolved against METISTRY_INSTANCE_DIR
+// (core's `overlayFilesFromEnv`), not against this process's cwd: under the
+// launchd shape the cwd is the PRODUCT checkout, so a relative
+// `.metistry/rules.yaml` never named the instance's file and the engine
+// resolved tiers from the seed's map while the console resolved them from
+// the instance's — the two are documented to read one file.
+const { tiers: rulesTiers, path: tiersPath } = await loadTiers(optionalEnv("METISTRY_RULES_FILES", overlayFilesFromEnv(process.env, "rules")), model);
 if (tiersPath) console.log(`tiers from ${tiersPath}: ${Object.entries(rulesTiers).map(([k, t]) => `${k}=${t.model}/${t.effort}`).join(" ")}`);
 else console.warn(`no rules.yaml found (METISTRY_RULES_FILES) — one tier only: default=${model}/medium`);
 
@@ -98,10 +105,19 @@ const brain = brainConfigFromEnv();
 if (brain) console.log(`tools: ${brainToolNames().length} via ${brain.url} (allowlist: ${brainToolNames().join(", ")})`);
 else console.warn("tools absent: set METISTRY_BRAIN_URL + METISTRY_ASSISTANT_TOKEN to mount mcp-brain (degrades: tool-less)");
 
-// System prompt from identity.yaml + the seed prompt (D4 overlay); absent = none.
+// System prompt from identity.yaml + the seed prompt (D4 overlay); absent =
+// none. THROWS when nothing says where the instance is, rather than
+// answering as the product's seed assistant (prompt.ts).
 const loaded = await loadSystemPrompt();
-if (loaded) console.log(`identity: ${loaded.identity.name} (system prompt ${loaded.prompt.length} chars)`);
+const instanceDir = process.env.METISTRY_INSTANCE_DIR?.replace(/\/+$/, "");
+if (loaded) console.log(`identity: ${loaded.identity.name} from ${loaded.identityPath} (system prompt ${loaded.prompt.length} chars, template ${loaded.promptPath})`);
 else console.warn("system prompt absent: no identity.yaml / assistant-prompt.md found (METISTRY_IDENTITY_FILES, METISTRY_PROMPT_FILES)");
+// …and say so when the file that won is NOT the instance's: the overlay
+// found a seed identity with an instance directory right there, which is a
+// broken install (no identity.yaml in it) answering under the wrong name.
+if (loaded && instanceDir && !loaded.identityPath.startsWith(`${instanceDir}/`)) {
+  console.warn(`identity: ${loaded.identityPath} is the PRODUCT's seed, not ${instanceDir}'s — this install is answering as "${loaded.identity.name}". Run \`metistry init\` / check ${instanceDir} for an identity.yaml.`);
+}
 
 // One engine object (engine.ts): the provider's `kind` decides which adapter
 // serves a turn, and today there is one — the in-house OpenAI-compatible

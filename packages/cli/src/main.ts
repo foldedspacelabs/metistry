@@ -74,8 +74,17 @@ export interface ParsedArgs {
   flags: Record<string, string | true>;
 }
 
-/** Flags that never take a value, so `metistry init --force <dir>` keeps its dir. */
-export const BOOLEAN_FLAGS = new Set(["force", "json", "help", "version", "dry-run", "allow-dirty", "no-launchd", "no-compose", "skip-build", "skip-migrate", "rollback", "allow-legacy", "yes", "follow", "namespace", "rotate", "list", "complete", "skip-test", "remote", "json-lines"]);
+/**
+ * Flags that never take a value, so `metistry init --force <dir>` keeps its
+ * dir. `version` is deliberately NOT here:
+ * `metistry update --version 0.9.0` needs its argument, and a trailing
+ * `--version` with nothing after it still parses as `true`, which is what
+ * the bare `metistry --version` reads. Listing it as a boolean made
+ * `str(flags, "version")` permanently undefined, so the documented
+ * `--version <x.y.z>` silently installed the latest release instead
+ * (#198, "not fixed here" #2).
+ */
+export const BOOLEAN_FLAGS = new Set(["force", "json", "help", "dry-run", "allow-dirty", "no-launchd", "no-compose", "skip-build", "skip-migrate", "rollback", "allow-legacy", "yes", "follow", "namespace", "rotate", "list", "complete", "skip-test", "remote", "json-lines"]);
 
 /** `--channel git|release` — anything else is a typo, not a guess (the lock parser is strict for the same reason). */
 export function parseChannel(v: string | undefined): LockSource | undefined {

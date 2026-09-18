@@ -11,10 +11,10 @@
 
 import chokidar from "chokidar";
 import {
-  COMPUTE_FILES_DEFAULT,
   DEFAULT_TIER,
   finishRun,
   optionalEnv,
+  overlayFilesFromEnv,
   resolveAssignment,
   startComputeWatch,
   startRun,
@@ -58,7 +58,13 @@ export async function recordComputeReload(db: RunExecutor, component: string, r:
  * tier map, today).
  */
 export async function watchCompute(db: RunExecutor, component: string, onChange?: () => void): Promise<ComputeWatch> {
-  const paths = optionalEnv("METISTRY_COMPUTE_FILES", COMPUTE_FILES_DEFAULT);
+  // The overlay's instance half is resolved against METISTRY_INSTANCE_DIR,
+  // never against this process's working directory (core's
+  // `overlayFilesFromEnv`). Under the launchd shape that directory is the
+  // PRODUCT checkout, so the old relative default read the SEED's
+  // compute.yaml: no providers for the console, and no assignments for the
+  // engine — which then refuses to start.
+  const paths = optionalEnv("METISTRY_COMPUTE_FILES", overlayFilesFromEnv(process.env, "compute"));
   const watch = await startComputeWatch({
     paths,
     watch: chokidarWatch,

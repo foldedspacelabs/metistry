@@ -18,6 +18,7 @@ import {
   engineStatus,
   overlayDeployment,
   parseDeployment,
+  SEED_DIR,
   resolveUrl,
   emptyCompute,
   type Compute,
@@ -135,6 +136,29 @@ function metistryVars(ctx: ShapeContext): Record<string, string> {
 }
 
 /**
+ * Where this install's config is, said OUT LOUD in every child's
+ * environment rather than left to whatever `.env` happens to declare.
+ *
+ * `up` knows the instance directory (`--instance`, or the variable) and the
+ * checkout the jobs run from. Every `*_FILES` overlay default resolves its
+ * instance half against `METISTRY_INSTANCE_DIR` and its seed half against
+ * `METISTRY_SEED_DIR`, so between them these two remove the last thing a
+ * service's config depended on that nothing set: its working directory. A
+ * plist's is the PRODUCT checkout, which is why `.metistry/identity.yaml`
+ * as a relative path found nothing and the engine answered as the seed
+ * (#198, "not fixed here" #1).
+ *
+ * Neither is a credential and neither is optional to get right, so they are
+ * set here rather than allowlisted-if-present.
+ */
+export function instanceVars(ctx: ShapeContext): Record<string, string> {
+  return {
+    ...(ctx.instanceDir ? { METISTRY_INSTANCE_DIR: ctx.instanceDir.replace(/\/+$/, "") } : {}),
+    METISTRY_SEED_DIR: join(ctx.productDir, SEED_DIR),
+  };
+}
+
+/**
  * The console's environment as a launchd job.
  *
  * Same variables the compose service gets — the console is the component
@@ -151,6 +175,7 @@ export function consoleEnv(ctx: ShapeContext): Record<string, string> {
   const inbox = instanceFile(ctx.instanceDir ?? ctx.productDir, "inboxDir");
   return {
     ...metistryVars(ctx),
+    ...instanceVars(ctx),
     METISTRY_DB_HOST: "127.0.0.1",
     METISTRY_DB_PORT: String(dbPort(ctx.env)),
     METISTRY_CONSOLE_HOST: "127.0.0.1",
@@ -186,6 +211,13 @@ export function engineAbsentNote(why: string, fix: string): string {
  * allowlisted tool, never through its own environment (invariant 9).
  */
 export const ASSISTANT_ENV_KEYS = [
+  // where this install's config is. `up` sets both itself (`instanceVars`),
+  // and they are here as well so the audit list a reader checks — "what can
+  // the engine see" — is the whole environment and not most of it. Without
+  // the instance directory the engine cannot resolve its own identity.yaml,
+  // which is exactly how it came to answer as the seed.
+  "METISTRY_INSTANCE_DIR",
+  "METISTRY_SEED_DIR",
   "METISTRY_DB_HOST",
   "METISTRY_DB_PORT",
   "METISTRY_DB_NAME",
@@ -230,6 +262,10 @@ export function assistantEnv(ctx: ShapeContext, compute: Compute = emptyCompute(
     const v = ctx.env[k];
     if (v !== undefined && v !== "") out[k] = k.endsWith("_URL") ? resolveUrl(v, { shape: ctx.shape, vantage: "host" }) : v;
   }
+  // the instance directory and the product's seed directory: config, not
+  // credentials, and the engine cannot find this install's identity.yaml,
+  // rules.yaml or compute.yaml without them
+  Object.assign(out, instanceVars(ctx));
   out.METISTRY_DB_HOST = "127.0.0.1";
   out.METISTRY_DB_PORT = String(dbPort(ctx.env));
   out.METISTRY_BRAIN_URL = resolveUrl(ctx.env.METISTRY_BRAIN_URL || `http://127.0.0.1:${consolePort(ctx.env)}/mcp`, { shape: ctx.shape, vantage: "host" });

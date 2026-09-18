@@ -12,6 +12,8 @@ const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
 
 /** The supervisor plist's own two placeholders — `up` computes them (packages/cli/src/supervisor.ts). */
 const SUPERVISOR_EXTRA = { SUPERVISOR_BIN: "/i/state/bin/Metistry", SUPERVISOR_CONFIG: "/i/state/supervisor.json" };
+/** The assistant job's four config-file sandbox parameters (sandbox.ts `engineConfigParams`). */
+const CONFIG_EXTRA = { CONFIG_IDENTITY: "/i/.metistry/identity.yaml", CONFIG_ASSISTANT_PROMPT: "/i/.metistry/assistant-prompt.md", CONFIG_RULES: "/i/.metistry/rules.yaml", CONFIG_COMPUTE: "/i/.metistry/compute.yaml" };
 
 describe("launchd templates", () => {
   it("every shipped plist parses: a label, ProgramArguments, and the checkout-relative code it runs", async () => {
@@ -68,7 +70,7 @@ describe("launchd templates", () => {
     const envFile = "/Users/x/Library/Application Support/Metistry/inst/state/.env";
     const node = "/Users/x/Library/Application Support/Metistry/product/runtime/node/bin/node";
     for (const t of await readPlistTemplates(repoRoot)) {
-      const out = renderPlist(t.template, { repo, node, envFile, env: { A: "b" }, extra: { PG_BIN: "/pg/bin", PG_DATA: "/d", NODE_PREFIX: "/n", PRODUCT_DIR: repo, STATE_DIR: "/s", TMP_DIR: "/tmp", CONSOLE_TCP: "localhost:8460", DB_TCP: "localhost:8461", ...SUPERVISOR_EXTRA } });
+      const out = renderPlist(t.template, { repo, node, envFile, env: { A: "b" }, extra: { PG_BIN: "/pg/bin", PG_DATA: "/d", NODE_PREFIX: "/n", PRODUCT_DIR: repo, STATE_DIR: "/s", TMP_DIR: "/tmp", CONSOLE_TCP: "localhost:8460", DB_TCP: "localhost:8461", ...CONFIG_EXTRA, ...SUPERVISOR_EXTRA } });
       const shell = /<string>set -a;[^<]*<\/string>/.exec(out)?.[0];
       if (!shell) continue;
       // every path the shell sees is a single quoted word

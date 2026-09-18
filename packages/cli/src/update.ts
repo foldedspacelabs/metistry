@@ -329,7 +329,16 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
       // running code is the pre-pull code, and `productVersion()` reports
       // that. Undefined (no package.json, no version) does not refuse.
       const pulled = await checkoutVersion(productDir);
-      if (pulled) gate(pulled);
+      if (pulled) {
+        gate(pulled);
+        // …and it is also the version this run PINS. `version` is what THIS
+        // process was built from — the pre-pull code — so a checkout that
+        // fast-forwarded 0.8.1 → 0.9.0 wrote 0.8.1 into metistry.lock and
+        // left the install claiming a version it is not running (#198,
+        // "not fixed here" #3). Read after the pull, from the checkout.
+        if (pulled !== releaseVersion) r.note(`version: ${releaseVersion} → ${pulled} — read from ${productDir}/package.json after the pull (this process is the pre-pull code), and pinned into metistry.lock`);
+        releaseVersion = pulled;
+      }
     } else if (r.dryRun) {
       // a dry run reaches nothing, GitHub included — so the version it prints is the request, not a resolved tag
       const want = opts.releaseVersion ?? "<latest>";

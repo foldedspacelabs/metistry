@@ -139,16 +139,26 @@ function segmentsOf(rel: string): string[] {
  * user's hand — except `.metistry/state/`, which is derived and nobody's
  * record — plus the two root files that define how the system behaves.
  *
+ * AND the same machinery where a LEGACY instance still keeps it: at the
+ * instance root, because `metistry migrate-layout` has not run yet. The
+ * legacy names are protected unconditionally rather than behind a detected
+ * shape, for two reasons. This function gets a path and nothing else — the
+ * reconciler calls it per write, `mcp-brain` calls it with no instance
+ * directory in reach — so threading a shape here would mean threading one
+ * through every write path. And the set is strictly safer on a flat
+ * instance: every one of these names is lowercase machinery that the flat
+ * layout has no business holding at its root, so refusing writes to it
+ * costs a flat instance nothing and closes the hole on a legacy one.
+ *
  * Invariant 2 lives here. It is enforced at the tool (the reconciler refuses
  * the write), never by asking the assistant nicely.
  */
 export function isProtectedPath(rel: string): boolean {
   if (typeof rel !== "string" || rel === "") return false;
   const segments = segmentsOf(rel);
-  if (segments[0] !== INSTANCE_LAYOUT.metistryDir) {
-    return segments.length === 1 && (PROTECTED_ROOT_FILES as readonly string[]).includes(segments[0]!);
-  }
-  return segments[1] !== "state";
+  if (segments[0] === INSTANCE_LAYOUT.metistryDir) return segments[1] !== "state";
+  if (segments.length === 1 && (PROTECTED_ROOT_FILES as readonly string[]).includes(segments[0]!)) return true;
+  return (LEGACY_MACHINERY_ROOTS as readonly string[]).includes(segments[0]!);
 }
 
 /**
@@ -162,12 +172,23 @@ export function isProtectedPath(rel: string): boolean {
  * instructions and the repo's readme, not notes. Indexing them would put the
  * instructions into search results and in front of the fold, which is noise
  * at best and a loop at worst.
+ *
+ * The legacy machinery at the instance root (`identity.yaml`, `queries/`,
+ * `state/`, …) is false as well, for the same reason `.metistry/` is: it is
+ * machinery in the one place a not-yet-migrated instance still keeps it.
+ * Without this the reconciler's walk — which starts at the instance root
+ * since the flat layout — would index a legacy instance's config, its
+ * `metistry.lock` and every byte of its gitignored Postgres cluster as
+ * notes. `Knowledge/` is deliberately NOT in the set: on a legacy instance
+ * that prefix IS the vault.
  */
 export function isVaultPath(rel: string): boolean {
   if (typeof rel !== "string" || rel === "") return false;
   const segments = rel.split("/");
   if (segments.some((s) => s === "" || s === "." || s === ".." || s.startsWith("."))) return false;
   if (segments[0] === INSTANCE_LAYOUT.artifactsDir) return false;
+  if ((LEGACY_MACHINERY_ROOTS as readonly string[]).includes(segments[0]!)) return false;
+  if (segments[0] === LEGACY_INSTANCE_LAYOUT.stateDir) return false;
   return !(segments.length === 1 && (PROTECTED_ROOT_FILES as readonly string[]).includes(segments[0]!));
 }
 
@@ -192,3 +213,128 @@ export function detectLayout(instanceDir: string, exists: (p: string) => boolean
  * the old literal finds this comment rather than ninety live call sites.
  */
 export const LEGACY_VAULT_DIR = "Knowledge";
+
+/**
+ * The SAME table, spelled the way an instance that has not run
+ * `metistry migrate-layout` still spells it: the vault in `Knowledge/`,
+ * every config file and directory at the instance root, `state/` beside
+ * them (docs/ops/instance-layout.md, "The legacy layout, for reference").
+ *
+ * This exists so a reader can go on reading a legacy instance. It is not a
+ * second supported layout: `metistry init` has only ever stamped one, the
+ * migration verb moves the other onto it, and `metistry update` refuses to
+ * carry a legacy instance past 0.8.x. Nothing writes through this table —
+ * writers spell the flat layout (`instancePath`), readers resolve
+ * (`instanceFile`).
+ *
+ * `metistryDir` is `""`: the legacy layout had no enclosing directory, so
+ * "the machinery directory" IS the instance root. `join()` drops the empty
+ * segment, which is exactly right for a path and exactly wrong for a
+ * prefix test — use `LEGACY_MACHINERY_ROOTS` for those.
+ */
+export const LEGACY_INSTANCE_LAYOUT = Object.freeze({
+  metistryDir: "",
+  stateDir: "state",
+
+  identity: "identity.yaml",
+  rules: "rules.yaml",
+  compute: "compute.yaml",
+  deployment: "deployment.yaml",
+  instances: "instances.yaml",
+  sources: "sources.yaml",
+  assistantPrompt: "assistant-prompt.md",
+  lock: "metistry.lock",
+
+  queriesDir: "queries",
+  agentsDir: "agents",
+  routinesDir: "routines",
+  targetsDir: "targets",
+  extensionsDir: "extensions",
+  instanceMigrationsDir: "instance-migrations",
+
+  inboxDir: `${LEGACY_VAULT_DIR}/Inbox`,
+  largeInboxDir: `${LEGACY_VAULT_DIR}/Inbox/.large`,
+  artifactsDir: "Artifacts",
+  assistantInstructions: "CLAUDE.md",
+  readme: "README.md",
+
+  obsidianDir: ".obsidian",
+  gitDir: ".git",
+} as const satisfies Record<InstancePathKey, string>);
+
+/**
+ * Every root NAME that is machinery rather than knowledge on a legacy
+ * instance — the set `metistry migrate-layout` moves under `.metistry/`
+ * (`METISTRY_MOVES`), minus `state`, which the two predicates treat
+ * separately because it is derived rather than protected.
+ *
+ * `eval` has no flat key (bake-off fixtures and transcripts, docs/poc/poc18-bakeoff)
+ * and is in the set for the same reason the verb moves it: instance-repo
+ * content, not notes.
+ */
+export const LEGACY_MACHINERY_ROOTS = Object.freeze([
+  LEGACY_INSTANCE_LAYOUT.identity,
+  LEGACY_INSTANCE_LAYOUT.rules,
+  LEGACY_INSTANCE_LAYOUT.compute,
+  LEGACY_INSTANCE_LAYOUT.deployment,
+  LEGACY_INSTANCE_LAYOUT.instances,
+  LEGACY_INSTANCE_LAYOUT.sources,
+  LEGACY_INSTANCE_LAYOUT.assistantPrompt,
+  LEGACY_INSTANCE_LAYOUT.lock,
+  LEGACY_INSTANCE_LAYOUT.queriesDir,
+  LEGACY_INSTANCE_LAYOUT.agentsDir,
+  LEGACY_INSTANCE_LAYOUT.routinesDir,
+  LEGACY_INSTANCE_LAYOUT.targetsDir,
+  LEGACY_INSTANCE_LAYOUT.extensionsDir,
+  LEGACY_INSTANCE_LAYOUT.instanceMigrationsDir,
+  "eval",
+] as const);
+
+/** One instance directory's shape and the path table that goes with it. */
+export interface ResolvedInstanceLayout {
+  shape: InstanceLayoutShape;
+  /** `INSTANCE_LAYOUT` for `flat` and `unknown`, `LEGACY_INSTANCE_LAYOUT` for `legacy`. */
+  layout: Readonly<Record<InstancePathKey, string>>;
+  /** `<instanceDir>/<this shape's path for `key`>`. */
+  path(key: InstancePathKey): string;
+  /** `<instanceDir>/<this shape's state dir>/<...rest>`. */
+  state(...rest: string[]): string;
+}
+
+/**
+ * The shape of `instanceDir` and how to spell every path in it. ONE read of
+ * the filesystem (`detectLayout`, two existence tests) and every path after
+ * it is a string join.
+ *
+ * `unknown` resolves to the flat table: a directory that is not an instance
+ * yet is one `metistry init` will stamp flat, so "where would this file go"
+ * has exactly one answer. That also keeps a reader pointed at an empty
+ * directory reporting the flat path in its error message, which is the path
+ * the operator needs to see.
+ */
+export function resolveInstanceLayout(instanceDir: string, exists: (p: string) => boolean = existsSync): ResolvedInstanceLayout {
+  const dir = instanceDir.replace(/\/+$/, "");
+  const shape = detectLayout(dir, exists);
+  const layout = shape === "legacy" ? LEGACY_INSTANCE_LAYOUT : INSTANCE_LAYOUT;
+  return {
+    shape,
+    layout,
+    path: (key) => join(dir, ...layout[key].split("/").filter(Boolean)),
+    state: (...rest) => join(dir, ...layout.stateDir.split("/").filter(Boolean), ...rest),
+  };
+}
+
+/**
+ * `<instanceDir>/<key>` as THIS directory spells it — flat, or legacy when
+ * it has not been migrated yet. Every READER goes through here; a writer
+ * that stamps or moves the layout spells it with `instancePath` /
+ * `metistryPath`, because there is only one layout to write.
+ */
+export function instanceFile(instanceDir: string, key: InstancePathKey, exists: (p: string) => boolean = existsSync): string {
+  return resolveInstanceLayout(instanceDir, exists).path(key);
+}
+
+/** `<instanceDir>/<state dir>/<...rest>` as THIS directory spells it (`.metistry/state/` or the legacy `state/`). */
+export function instanceStatePath(instanceDir: string, ...rest: string[]): string {
+  return resolveInstanceLayout(instanceDir).state(...rest);
+}

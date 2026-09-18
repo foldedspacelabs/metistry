@@ -21,7 +21,13 @@
 // - BACKOFF on 429 and 5xx, honouring `Retry-After`. A local server that is
 //   loading a model and a cloud that is rate-limiting look the same here.
 // - USAGE → COST on every call (core's `costOf`), so `runs` carries money
-//   rather than an estimate reconstructed later.
+//   rather than an estimate reconstructed later — including the cached
+//   subset of the prompt, which lands on the row as `cache_read_tokens` /
+//   `cache_write_tokens` and is priced at the `pricing:` table's cache
+//   multipliers when the response carries no cost of its own.
+// - AUTOMATIC PROMPT CACHING for a provider whose block says `caching:
+//   auto`, and nothing for one that does not (OPEN-6, ruled 2026-09-17).
+//   See `body()` for the field and the source it comes from.
 // - `response_format: json_schema` PLUS a validating fallback with ONE repair
 //   retry, because LM Studio warns sub-7B models may fail it and OpenRouter
 //   says some endpoints "treat it as a strong hint".
@@ -177,6 +183,24 @@ export function makeChatClient(cfg: ChatClientConfig): ChatClient {
     // reasoning at all.
     out.reasoning = provider.locality === "off_machine" ? { effort: assignment.effort } : { enabled: false };
     if (opts.responseFormat !== undefined) out.response_format = opts.responseFormat;
+    // AUTOMATIC PROMPT CACHING, for a provider whose block says so (OPEN-6,
+    // ruled 2026-09-17: ship the automatic form first; automatic vs explicit
+    // breakpoints is a measurement on real turns, not a guess). ONE
+    // top-level `cache_control: { type: "ephemeral" }` is the automatic
+    // placement OpenRouter documents for Anthropic models — reads at 0.1×,
+    // five-minute writes at 1.25×, `cached_tokens`/`cache_write_tokens` back
+    // in `usage`
+    // (docs/research/2026-09-11-local-models-openrouter-opencode.md
+    // [or-cache] = https://openrouter.ai/docs/features/prompt-caching,
+    // fetched 2026-09-11; the shape is the one that source records, and
+    // OPEN-6's measurement is where it meets a live response).
+    //
+    // Nothing is sent for `caching: off` or an absent field, which is every
+    // provider but the openrouter template: a local server has no such
+    // field, and a field it would have to ignore is not something to send on
+    // every call. Explicit breakpoints are the operator's `request:` block,
+    // merged below and therefore able to override this.
+    if (provider.caching === "auto") out.cache_control = { type: "ephemeral" };
     // Verbatim last, so an operator can override anything above …
     Object.assign(out, provider.request ?? {});
     // … except what the ASSIGNMENT owns. Invariant 4: no model decides which

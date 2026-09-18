@@ -131,6 +131,8 @@ export {
 export { scheduleToSeconds } from "./schedule.js";
 export {
   COST_SOURCES,
+  DEFAULT_CACHE_READ_MULTIPLIER,
+  DEFAULT_CACHE_WRITE_MULTIPLIER,
   usageFromResponse,
   costOf,
   unpricedNote,
@@ -163,6 +165,8 @@ export {
   RULES_FILES_DEFAULT,
   PROVIDER_KINDS,
   LOCALITIES,
+  CACHING_MODES,
+  DEFAULT_CACHING,
   BUDGET_ACTIONS,
   DEFAULT_BUDGET_ACTION,
   SECRET_NAME_RE,
@@ -200,6 +204,7 @@ export {
   type Assignments,
   type Budget,
   type BudgetAction,
+  type CachingMode,
   type Budgets,
   type Compute,
   type CrossKindRefusal,

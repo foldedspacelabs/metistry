@@ -7,13 +7,14 @@
 // and none of them is written by this app: the first two are §4.7 protected
 // paths (the user's own hand), and the last two have `metistry` verbs.
 //
-// So the app persists three things, all of them POINTERS rather than
+// So the app persists four things, all of them POINTERS rather than
 // configuration:
 //
 //   activeInstance             which install the app is looking at
 //   recentInstances            the ones it looked at before, for the menu
 //   developerProductDirectory  a product checkout, for a build with no runtime
 //                              bundled inside it (Advanced; see below)
+//   pinnedItems.<instance_id>  the sidebar's Pinned area, per instance
 //
 // plus Sparkle's own preferences, which Sparkle owns and reads itself.
 //
@@ -34,6 +35,12 @@ public enum AppPreference: String, CaseIterable, Sendable {
     case activeInstance
     case recentInstances
     case developerProductDirectory
+    /// A PREFIX, never a key on its own: the sidebar's pins are filed under
+    /// `pinnedItems.<instance_id>`, because a pin points at a project, page,
+    /// saved search or agent in ONE instance (app-ux-plan.md §3.4). Still a
+    /// pointer rather than configuration — the pinned object lives where it
+    /// always did, and losing the list costs one drag (pinned-items.swift).
+    case pinnedItemsPrefix = "pinnedItems"
 
     /// The scaffold's key, read once and removed (see the file header).
     public static let legacyProductDirectory = "productDirectory"

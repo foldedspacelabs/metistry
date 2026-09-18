@@ -56,6 +56,21 @@ export type ProviderKind = (typeof PROVIDER_KINDS)[number];
 export const LOCALITIES = ["on_machine", "off_machine"] as const;
 export type Locality = (typeof LOCALITIES)[number];
 
+/**
+ * Whether this provider is asked to cache the prompt (OPEN-6, ruled
+ * 2026-09-17: ship the AUTOMATIC form first; explicit breakpoints are
+ * measured afterwards). `auto` = the engine sends that provider's automatic
+ * prompt-caching field on every chat completion; `off` — the default
+ * everywhere but the `openrouter` template — sends nothing, because a
+ * server that has never heard of the field would have to ignore it, and
+ * "would have to ignore it" is not a promise any endpoint made.
+ */
+export const CACHING_MODES = ["auto", "off"] as const;
+export type CachingMode = (typeof CACHING_MODES)[number];
+
+/** Absent `caching:` is `off`. The mode is opt-in per provider, never inferred from a base URL. */
+export const DEFAULT_CACHING: CachingMode = "off";
+
 /** What a budget does when its window is spent (C5). Enforcement is the engine's (PR 3); this file is where the choice is recorded. */
 export const BUDGET_ACTIONS = ["allow", "stop", "critical_only"] as const;
 export type BudgetAction = (typeof BUDGET_ACTIONS)[number];
@@ -184,6 +199,10 @@ export type LlamaServe = Serve & { model_path: string };
 const pricingSchema = z.strictObject({
   in_per_m: z.number().nonnegative(),
   out_per_m: z.number().nonnegative(),
+  /** Multiplier on `in_per_m` for a prompt token served from the cache. Absent = `DEFAULT_CACHE_READ_MULTIPLIER` (cost.ts). */
+  cache_read_multiplier: z.number().nonnegative().optional(),
+  /** Multiplier on `in_per_m` for a prompt token written to the cache. Absent = `DEFAULT_CACHE_WRITE_MULTIPLIER` (cost.ts). */
+  cache_write_multiplier: z.number().nonnegative().optional(),
 });
 
 export const providerSchema = z.strictObject({
@@ -199,6 +218,15 @@ export const providerSchema = z.strictObject({
   zdr: z.boolean().optional(),
   /** Extra body fields sent verbatim with every request — e.g. OpenRouter's `provider: { order: [anthropic], allow_fallbacks: false }`. */
   request: z.record(z.string(), z.unknown()).optional(),
+  /**
+   * `auto` marks a provider that implements Anthropic-style prompt caching,
+   * so the engine sends its automatic caching field on every call
+   * (`docs/ops/compute.md`, "Prompt caching"). The `openrouter` template
+   * ships `auto`; everything else is `off` until somebody who has read the
+   * provider's docs writes it. Explicit breakpoints stay the operator's
+   * `request:` block, which is merged after this and therefore wins.
+   */
+  caching: z.enum(CACHING_MODES, { error: `caching must be ${CACHING_MODES.join(" or ")} — automatic prompt caching, per provider (OPEN-6, ruled 2026-09-17)` }).optional(),
   /** Required for `off_machine` (checked below): what a brief bound for this provider may carry (§4.18.B, the target schema, reused). */
   data_policy: dataPolicySchema.optional(),
   /** model id → published rates. Only needed where the response carries no cost. */
@@ -207,6 +235,13 @@ export const providerSchema = z.strictObject({
   serve: serveSchema.optional(),
 })
   .superRefine((p, ctx) => {
+    // Caching is a field sent on the wire to a provider that bills for the
+    // prompt. An on-machine server keeps its own prefix cache with nothing
+    // to send and nothing to save — accepting the key here would leave a
+    // line in the file that does nothing, which is worse than a refusal.
+    if (p.caching === "auto" && p.locality !== "off_machine") {
+      ctx.addIssue({ code: "custom", path: ["caching"], message: `caching: auto sends a prompt-caching field to a provider that bills for the prompt, and this one is ${p.locality} — a local server caches its own prefix with no field to send. Remove caching:.` });
+    }
     if (!p.serve) return;
     if (p.locality !== "on_machine") {
       ctx.addIssue({ code: "custom", path: ["serve"], message: `serve: is how a provider says Metistry starts it, so it only makes sense with locality: on_machine (this one is ${p.locality})` });

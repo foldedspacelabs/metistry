@@ -612,7 +612,7 @@ export const HELP_GROUPS: Array<{ title: string; verbs: Array<[string, string]> 
       ["connect-repo <url>", "point it at a private remote, with credentials to push with"],
       ["secrets sync|mint|list|purge", "the login Keychain is the store; .env is generated from it"],
       ["runtime install --from <bundle>", "seed a writable product dir from a signed app bundle"],
-      ["up", "bring an install to running: containers, host jobs, then doctor"],
+      ["up", "containers and host jobs, then doctor"],
     ],
   },
   {
@@ -630,7 +630,7 @@ export const HELP_GROUPS: Array<{ title: string; verbs: Array<[string, string]> 
     verbs: [
       ["compute show|providers|models", "which providers exist and which model each tier runs on"],
       ["compute assign|budget", "point a tier at a model; cap what it may spend"],
-      ["deployment [set-shape]", "the effective shape (D4 overlay) and the services it implies"],
+      ["deployment [set-shape]", "the effective shape (D4 overlay) and its services"],
       ["agents autonomy <id>", "how much room one agent has with an action"],
       ["identity", "identity.yaml — the one place the assistant is named"],
       ["instances list|add|remove|refresh", "the peer registry: which other instances this one knows"],
@@ -666,7 +666,7 @@ export function renderHelp(ui: Ui = defaultUi()): string {
     out.push(ui.kv(g.verbs.map(([v, d]) => [v, ui.dim(d)]), { keyRole: "plain" }));
     out.push("");
   }
-  out.push(ui.dim("--json prints the machine-readable answer where a verb has one; --dry-run runs nothing; --no-color is plain text."), "");
+  out.push(...ui.wrap("--json prints the machine-readable answer where a verb has one; --dry-run runs nothing; --no-color is plain text.").split("\n").map((l) => ui.dim(l)), "");
   out.push(ui.heading("reference — every verb, every flag"));
   // USAGE's own first line is the title this already printed
   return [...out, USAGE.split("\n").slice(1).join("\n")].join("\n");

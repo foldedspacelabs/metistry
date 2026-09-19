@@ -40,6 +40,7 @@ import { realExec, type Exec } from "./exec.js";
 import { mintInstanceId, withInstanceId } from "./instance.js";
 import { LOCK_FILENAME, serializeLock, type LockFile, type LockSource } from "./lock.js";
 import { DEFAULT_PORTS, loadNamespace } from "./namespace.js";
+import { defaultUi, type Ui } from "./ui.js";
 
 export interface InitOptions {
   dir: string;
@@ -129,23 +130,30 @@ export const COMMIT_AUTHOR = { name: "Metistry", email: "metistry@localhost" } a
  * here, so the CLI, the docs and the Mac app cannot describe the same choice
  * differently.
  */
-export function keepAwakeQuestion(): string[] {
+export function keepAwakeQuestion(ui: Ui = defaultUi()): string[] {
+  const wrapped = (text: string, indent: number): string[] => ui.wrap(text, { indent }).split("\n").map(ui.dim);
   const lines = [
-    "Keep this Mac awake while Metistry runs?",
+    ui.heading("Keep this Mac awake while Metistry runs?"),
     "",
-    "  Metistry only works while this Mac is awake: captures from your phone, scheduled",
-    "  collectors and the assistant's queue all wait while it sleeps. It can hold the Mac",
-    "  awake for you — the screen still sleeps, and a closed laptop lid still sleeps.",
+    ...wrapped(
+      "Metistry only works while this Mac is awake: captures from your phone, scheduled collectors and " +
+        "the assistant's queue all wait while it sleeps. It can hold the Mac awake for you — the screen " +
+        "still sleeps, and a closed laptop lid still sleeps.",
+      2,
+    ),
     "",
   ];
   KEEP_AWAKE_CHOICES.forEach((choice, i) => {
+    // the tag is the only colour in the block, and it borrows the status
+    // vocabulary rather than inventing one: green for the recommendation,
+    // amber for the one we advise against (docs/ops/cli-style.md rule 5)
     const tags = [choice.recommended ? "recommended" : "", choice.notRecommended ? "not recommended" : ""].filter(Boolean).join(", ");
-    lines.push(`  ${i + 1}) ${choice.label}${tags ? ` (${tags})` : ""}`);
-    lines.push(`     ${choice.consequence}`);
-    lines.push(`     deployment.yaml: keep_awake: ${choice.value}`);
+    lines.push(`  ${ui.strong(`${i + 1}) ${choice.label}`)}${tags ? ` ${ui.paint(choice.recommended ? "ok" : "degraded", `(${tags})`)}` : ""}`);
+    lines.push(...wrapped(choice.consequence, 5));
+    lines.push(ui.dim(`     deployment.yaml: keep_awake: ${choice.value}`));
     lines.push("");
   });
-  lines.push("  You can change this later: `metistry deployment set-keep-awake <value> --yes`.");
+  lines.push(ui.dim("  You can change this later: `metistry deployment set-keep-awake <value> --yes`."));
   return lines;
 }
 
@@ -158,8 +166,10 @@ export type Ask = (prompt: string) => Promise<string>;
  * a silent default: this choice changes how the machine behaves, so guessing
  * at it is exactly the thing not to do.
  */
-export async function askKeepAwake(ask: Ask, out: (line: string) => void, attempts = 3): Promise<KeepAwake> {
-  for (const line of keepAwakeQuestion()) out(line);
+export async function askKeepAwake(ask: Ask, out: (line: string) => void, opts: { ui?: Ui | undefined; attempts?: number | undefined } = {}): Promise<KeepAwake> {
+  const ui = opts.ui ?? defaultUi();
+  const attempts = opts.attempts ?? 3;
+  for (const line of keepAwakeQuestion(ui)) out(line);
   const numbered = KEEP_AWAKE_CHOICES.map((c) => c.value);
   for (let i = 0; i < attempts; i++) {
     const raw = (await ask(`Choice [1-${numbered.length}, Enter for ${keepAwakeChoice(KEEP_AWAKE_RECOMMENDED).label.toLowerCase()}]: `)).trim();
@@ -168,7 +178,7 @@ export async function askKeepAwake(ask: Ask, out: (line: string) => void, attemp
     if (Number.isInteger(byNumber) && byNumber >= 1 && byNumber <= numbered.length) return numbered[byNumber - 1]!;
     const byName = parseKeepAwake(raw);
     if (byName) return byName;
-    out(`  ${JSON.stringify(raw)} is not one of them — answer 1-${numbered.length}, or ${numbered.join(" / ")}.`);
+    out(ui.paint("degraded", `  ${JSON.stringify(raw)} is not one of them — answer 1-${numbered.length}, or ${numbered.join(" / ")}.`));
   }
   throw new Error(`no usable answer to the keep-awake question after ${attempts} tries — rerun with \`--keep-awake <${numbered.join("|")}>\``);
 }

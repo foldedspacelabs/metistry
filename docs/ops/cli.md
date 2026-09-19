@@ -85,6 +85,22 @@ Compute pane having to parse a trailing object out of a stream of prose
 (`docs/ops/mac-app.md`); without `--json` the same notes print to stdout
 inline, exactly as before.
 
+## What it looks like
+
+The presentation layer is `packages/cli/src/ui.ts` and its rules are
+`docs/ops/cli-style.md`: colour only when stdout is a terminal that wants it
+(`NO_COLOR`, `TERM=dumb`, `--no-color` and `--json` each turn it off;
+`FORCE_COLOR` turns it on for a pipe that really is one), one icon and one
+colour per status from a closed vocabulary, `[ok] [x] [!]` where the locale
+is not UTF-8, secondary text dimmed, prose wrapped at the terminal width
+clamped to [60, 100], and a spinner only on a TTY.
+
+Two consequences worth knowing before editing a verb: **colour never reaches
+a `--json` document** (`createUi({ json: true })` is the enforcement, not a
+convention), and **the status word is always spelled out** beside its icon,
+so nothing is distinguished by hue alone. Render functions take a `Ui` as
+their last argument; `main()` configures the process's one from the flags.
+
 ## `identity`, `version`, `deployment`, `console whoami`: what the app reads instead of the files
 
 Five small, read-mostly verbs exist so the Mac app stops parsing
@@ -976,7 +992,7 @@ Every named service is acted on even when an earlier one fails — this is a
 stop-at-first-failure plan. `--json` prints one object per service,
 `{service, action, ok, detail}`, for the app to render and nothing else — a
 step's progress line goes to stderr instead of vanishing; without it the
-output is a table like `doctor`'s. A name that isn't a service this shape
+output is the shared table (`docs/ops/cli-style.md`). A name that isn't a service this shape
 runs fails the whole command (exit 2) with the list of known ones — it
 never guesses which subprocess a name might mean. `--dry-run` prints the
 exact command per service and runs nothing, the same seam `up --dry-run`
@@ -1173,8 +1189,22 @@ metistry doctor  # what is running right now, without changing anything
 
 Then it **looks**: `launchctl print` for each label (nothing found = gone) and
 `docker compose ps --quiet` (empty = nothing running), and prints what it
-found. A job still loaded after its bootout is a non-zero exit, not a
+found under a heading of its own — the claim and the check are two blocks,
+never one. A job still loaded after its bootout is a non-zero exit, not a
 cheerful "done".
+
+```
+service     action  ok      detail
+──────────  ──────  ──────  ──────────
+supervisor  stop    ✓ ok    booted out
+
+1 service(s): 1 ok, 0 failed
+
+confirmed by looking
+  ✓ gone  com.foldedspacelabs.metistry  not loaded
+
+1/1 confirmed stopped (shape launchd)
+```
 
 **`down` stops; it never deletes.** It is `docker compose stop`, *not*
 `docker compose down`, and never `-v`. The opposite of "up" is "the processes

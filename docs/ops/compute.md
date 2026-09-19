@@ -129,7 +129,7 @@ metistry compute providers list [--json]
 metistry compute providers add --from openrouter|lmstudio|ollama|llamaserver|applefm \
         [--name <n>] [--base-url <url>] [--secret <NAME>] [--skip-test]
 metistry compute providers remove <name>
-metistry compute providers test <name> [--complete]
+metistry compute providers test <name> [--complete] [--model <id>]
 metistry compute models list [--provider <name>] [--json]
 metistry compute models install <provider>/<model> [--json]
 metistry compute models load|unload <provider>/<model> [--ttl <seconds>] [--json]
@@ -170,10 +170,24 @@ instance's, so every instance on this Mac shares it and
 `metistry secrets purge` never touches it (`secrets.ts` `SECRET_SCOPES`).
 
 `providers test` is a real `GET <base_url>/models` with that credential;
-`--complete` adds a one-token `POST <base_url>/chat/completions` on an
-assigned model, carrying the provider's own `request:` block — the only
-thing that proves the key can buy a completion rather than just list a
-catalogue.
+`--complete` adds a one-token `POST <base_url>/chat/completions`, carrying
+the provider's own `request:` block — the only thing that proves the key can
+buy a completion rather than just list a catalogue.
+
+Which model the completion probe calls is never a guess: it uses a model
+already **assigned** to this provider in `compute.yaml` when there is one,
+else the model this project's own docs point an operator at first for that
+provider (OpenRouter's `anthropic/claude-sonnet-5`, per this file's own
+setup walkthrough above), else OpenRouter's `openrouter/auto`, else — for
+any other OpenAI-compatible provider, or if none of the above are in the
+listing — the first model the listing served. `--model <id>` overrides all
+of that. A listing of hundreds of models with nothing assigned yet used to
+fall through to "alphabetically first", which for OpenRouter is some
+obscure, unroutable model — a 404 on the completion that has nothing to do
+with whether the credential works. The rendered line separates the two: a
+failed completion probe reads `listing ok` / `completion: FAILED (model …,
+chosen: …) … — override with --model <id>`, and does not read as the key
+itself having failed.
 
 ### From the console
 

@@ -434,7 +434,7 @@ const USAGE = `metistry — Metistry command line
   metistry compute providers add --from <${COMPUTE_TEMPLATES.join("|")}>
                                  [--name <n>] [--base-url <url>] [--secret <NAME>] [--skip-test]
   metistry compute providers remove <name>
-  metistry compute providers test <name> [--complete]
+  metistry compute providers test <name> [--complete] [--model <id>]
   metistry compute models list [--provider <name>] [--json]
   metistry compute models install <provider/model> [--json]
   metistry compute models load|unload <provider/model> [--ttl <seconds>] [--json]
@@ -1325,15 +1325,15 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
               case "test": {
                 const name = positional[2];
                 if (!name) {
-                  err("usage: metistry compute providers test <name> [--complete]");
+                  err("usage: metistry compute providers test <name> [--complete] [--model <id>]");
                   return 2;
                 }
-                const r = await providerTest({ ...computeOpts, name, complete: flags.complete === true });
+                const r = await providerTest({ ...computeOpts, name, complete: flags.complete === true, model: str(flags, "model") });
                 out(json ? JSON.stringify(r, null, 2) : renderProviderTest(r));
                 return r.ok ? 0 : 1;
               }
               default:
-                err(`usage: metistry compute providers list | add --from ${COMPUTE_TEMPLATES.join("|")} | remove <name> | test <name>`);
+                err(`usage: metistry compute providers list | add --from ${COMPUTE_TEMPLATES.join("|")} | remove <name> | test <name> [--complete] [--model <id>]`);
                 return 2;
             }
           }

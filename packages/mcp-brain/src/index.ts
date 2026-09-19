@@ -20,6 +20,7 @@ export {
   searchKnowledge,
   readKnowledge,
   underAreas,
+  canSeeUnder,
   knowledgeScope,
   validKnowledgePath,
   KNOWLEDGE_MODES,
@@ -33,6 +34,8 @@ export {
 } from "./knowledge.js";
 export {
   KNOWLEDGE_FS_TOOL_NAMES,
+  KNOWLEDGE_PAGES_QUERY,
+  KNOWLEDGE_LINKS_QUERY,
   registerKnowledgeFsTools,
   vaultBridgeLister,
   vaultBridgeSearcher,

@@ -34,8 +34,8 @@
 // drift.
 
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { isVaultPath, type ErrorCode } from "@foldedspacelabs/metistry-core";
-import { underAreas } from "@foldedspacelabs/metistry-mcp-brain";
+import { type ErrorCode } from "@foldedspacelabs/metistry-core";
+import { canSeeUnder, KNOWLEDGE_LINKS_QUERY, KNOWLEDGE_PAGES_QUERY } from "@foldedspacelabs/metistry-mcp-brain";
 import { VaultError, type VaultClient } from "@foldedspacelabs/metistry-artifacts";
 import { QueryError, type QueryStore } from "@foldedspacelabs/metistry-queries";
 import { sendError, sendJson } from "./http-util.js";
@@ -142,9 +142,9 @@ export const NO_SCOPE: KnowledgeScope = { areas: [] };
  *
  * It reproduces `mcp-brain`'s `knowledgeScope(principal).canRead`
  * (`packages/mcp-brain/src/knowledge.ts`), which is `tier === "areas" &&
- * underAreas(path, areas)` — against the same `underAreas`, imported from
- * that package, so the prefix semantics are one implementation and not two
- * that agree today. What it deliberately does NOT do is take that
+ * canSeeUnder(path, areas)` — against the same `canSeeUnder` `canSee` below
+ * now calls, so the whole decision is one implementation and not two that
+ * agree today. What it deliberately does NOT do is take that
  * function's return value and rename a field: `knowledgeScope`'s shape
  * carries a tier, and its `prefixes` is `null` for tiers `none` and `index`
  * meaning "no prefix restriction on the TITLES those tiers may browse".
@@ -164,15 +164,19 @@ export function grantedScope(principal: { grants: { tier: string; areas: readonl
 
 /**
  * May this principal see this path's content? Two conditions, both
- * necessary: it is vault CONTENT at all (`isVaultPath` — so `.metistry/`,
- * `Artifacts/`, a dot-directory, a traversal and the root `CLAUDE.md` are
- * out for every principal, the owner included), and it falls under the
- * scope's areas.
+ * necessary: it is vault CONTENT at all (so `.metistry/`, `Artifacts/`, a
+ * dot-directory, a traversal and the root `CLAUDE.md` are out for every
+ * principal, the owner included), and it falls under the scope's areas.
+ *
+ * Both conditions are `canSeeUnder`'s, and this is now a rename over it
+ * rather than a second copy (ruled 2026-09-19: the same rule on both doors).
+ * It lifted to `packages/mcp-brain`, beside the `underAreas` this always
+ * called and the `isVaultPath` both always called, when `/mcp`'s knowledge
+ * listings needed the identical decision: two implementations that agree
+ * today are one bug away from a route that filters and a tool that does not.
  */
 export function canSee(path: string, scope: KnowledgeScope): boolean {
-  if (typeof path !== "string" || path.length === 0 || path.length > 500 || /[\0\\]/.test(path)) return false;
-  if (!isVaultPath(path)) return false;
-  return scope.areas === null || underAreas(path, scope.areas);
+  return canSeeUnder(path, scope.areas);
 }
 
 /** Hits the scope does not cover are DROPPED, never returned with a flag: a path is the sensitive part of a hit, and a filtered list must not be a directory listing of what was filtered. */
@@ -212,11 +216,16 @@ const MAX_LIMIT = 100; // limit: fixed — the bridge clamps at 100 with no offs
 const DEFAULT_LIMIT = 20; // limit: fixed — the bridge's own default, so an omitted `limit` means the same thing on both doors
 const MAX_QUERY = 200; // limit: fixed — the bridge refuses a longer `q`; refusing it here names the parameter instead of relaying a 400
 
-/** The named query `GET /api/knowledge/pages` is. Not loaded → the route is `not_available` naming the file, never a 500 and never a hand-written SELECT. */
-export const KNOWLEDGE_PAGES_QUERY = "knowledge_pages";
-
-/** The named query `GET /api/knowledge/links` is. Same rule as the page list: not loaded → `not_available` naming the file, never a 500 and never a hand-written SELECT. */
-export const KNOWLEDGE_LINKS_QUERY = "knowledge_page_links";
+/**
+ * The named queries `GET /api/knowledge/pages` and `GET /api/knowledge/links`
+ * are. Not loaded → the route is `not_available` naming the file, never a 500
+ * and never a hand-written SELECT.
+ *
+ * Re-exported rather than spelled again: `mcp-brain`'s `knowledge_list` runs
+ * the SAME two queries for an agent under the same filter, and two string
+ * literals in two packages is two places for an overlay's name to be wrong.
+ */
+export { KNOWLEDGE_PAGES_QUERY, KNOWLEDGE_LINKS_QUERY } from "@foldedspacelabs/metistry-mcp-brain";
 
 const MAX_PAGES_LIMIT = 500; // limit: fixed — a LIST out of the index is scalar columns over an indexed key, so it is not the bridge's 100; 500 rows is one screenful of scrolling and bounds the response a phone has to parse. Shared by the page list and the link list, which page the same way
 const DEFAULT_PAGES_LIMIT = 100; // limit: fixed — the default `knowledge_pages.yaml` and `knowledge_page_links.yaml` both declare, so an omitted `limit` means the same thing on the route and in the manifest

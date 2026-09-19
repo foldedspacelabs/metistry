@@ -996,6 +996,31 @@ action; any attempt to defeat lid-close sleep; any Dark Wake handling; any code
 that reads, releases or reports on another process's assertion as if it were
 ours to manage.
 
+### Implemented as (2026-09-19)
+
+Built to this shape, with the owner's rulings folded in: option A behind a
+`PowerHolder` seam so option B stays a swap (`apps/watchdog/src/power.ts`);
+`keep_awake` in `packages/core/src/deployment.ts` with the rule and the state
+file in a new `packages/core/src/power.ts`; `metistry deployment
+set-keep-awake` and the row in `packages/cli/src/{deployment-report,doctor}.ts`;
+the model half only in `apps/macos/sources/kit/keep-awake.swift`. Four values,
+not three: the owner added an "even with the lid closed" choice and ruled it
+must exist but never be a default — it is accepted, behaves as `always`, and
+every surface says the lid-closed half is *not available on this Mac without an
+administrator change*, because it is not (this doc §2; `pmset(1)`: "pmset must
+be run as root in order to modify any settings"). §8's open question (a) is
+answered by a different mechanism than either alternative offered: the seed
+sets nothing and `metistry init` **asks**, printing what each choice costs,
+because an assertion overrides the user's own sleep timer and consent is the
+point. That decides (c) too — the key is written in the same release it is
+read, so the downgrade note in §6 is now documented in
+`docs/ops/deployment-shapes.md` rather than avoided by a release of patience.
+(d) is `degraded`, not a refusal. Ruling E is new work this doc did not scope:
+the holder compares wall clocks between its own ticks and records a cutoff when
+the Mac slept under it, and doctor reports it with the repair. §1's "the
+watchdog under BOTH shapes" was narrowed on instruction to the supervisor only,
+so a compose install holds nothing and doctor says so — see the PR's note.
+
 ## 8. Contradictions with the plan, and open questions
 
 **Contradictions** (reported, not edited — `docs/plan-refresh-2026-09-13.md` is

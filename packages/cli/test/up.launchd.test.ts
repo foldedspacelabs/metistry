@@ -81,6 +81,9 @@ describe("metistry up --dry-run, launchd shape", () => {
       exists: pgInstalled(),
       mintPassword: () => "generated",
       doctorFn: okDoctor,
+      // cli-shim.test.ts covers the shim itself, including its launchd-shape
+      // collision with the supervisor's own `bin/Metistry` symlink.
+      cliShim: false,
     });
 
     if (r.code !== 0) console.error(lines.join('\n'));
@@ -341,6 +344,46 @@ describe("the node every launchd job execs", () => {
     expect(JSON.stringify(assistant)).not.toContain("/opt/homebrew");
     // and the supervisor's own program is a symlink to it, named `Metistry`
     expect(await readFile(join(home, "Library", "LaunchAgents", "com.foldedspacelabs.metistry.plist"), "utf8")).toContain(`<string>${I}/.metistry/state/bin/Metistry</string>`);
+  });
+});
+
+describe("keep_awake reaches the holder", () => {
+  /** The supervisor is the holder, so the answer has to be in ITS environment — through the same passthrough every other METISTRY_* variable takes, not a second channel. */
+  const supervisorEnv = async (keepAwake?: "never" | "allow_sleep_on_battery" | "always" | "always_lid_closed") => {
+    const P = await launchdCheckout();
+    const I = await mkdtemp(join(tmpdir(), "mi-"));
+    const home = await mkdtemp(join(tmpdir(), "metistry-home-"));
+    const lines: string[] = [];
+    const r = await up({
+      productDir: P,
+      env: env(I),
+      exec: fakeExec(),
+      out: (l) => lines.push(l),
+      platform: "darwin",
+      uid: 501,
+      home,
+      node: NODE,
+      deployment: { ...launchd, ...(keepAwake ? { keep_awake: keepAwake } : {}) },
+      exists: pgInstalled(),
+      doctorFn: okDoctor,
+    });
+    expect(r.code).toBe(0);
+    const config = JSON.parse(await readFile(join(I, ".metistry", "state", "supervisor.json"), "utf8"));
+    const plist = await readFile(join(home, "Library", "LaunchAgents", "com.foldedspacelabs.metistry.plist"), "utf8");
+    return { env: config.env as Record<string, string>, plist, lines };
+  };
+
+  it("deployment.yaml's answer is rendered into supervisor.json and the agent's dict", async () => {
+    const { env: e, plist, lines } = await supervisorEnv("allow_sleep_on_battery");
+    expect(e.METISTRY_KEEP_AWAKE).toBe("allow_sleep_on_battery");
+    expect(plist).toContain("<key>METISTRY_KEEP_AWAKE</key><string>allow_sleep_on_battery</string>");
+    expect(lines.some((l) => l.includes("keep-awake: allow_sleep_on_battery"))).toBe(true);
+  });
+
+  it("an install that never answered the question carries `never`, and `up` says the Mac may sleep", async () => {
+    const { env: e, lines } = await supervisorEnv();
+    expect(e.METISTRY_KEEP_AWAKE).toBe("never");
+    expect(lines.some((l) => l.includes("keep-awake: never"))).toBe(true);
   });
 });
 

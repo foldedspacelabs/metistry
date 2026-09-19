@@ -243,6 +243,12 @@ public final class FirstRunModel {
     public var remoteURL: String = ""
     public var secretsDirection: SecretsDirection = .toKeychain
     public var instanceMode: InstanceMode = .create
+    /// Whether this Mac is kept awake while Metistry runs, if the person has
+    /// said. `nil` — the default — is "not answered", and an unanswered
+    /// question writes nothing: a power assertion overrides the user's own
+    /// System Settings sleep timer, so it is never taken on their behalf
+    /// (keep-awake.swift).
+    public var keepAwake: KeepAwakeSetting?
     public var repoPlan: RepoPlan = .now
     public var repoAuth: RepoAuth = .device
     /// Step 6's choice. `thisMacOnly` is the default because it is what is
@@ -377,6 +383,15 @@ public final class FirstRunModel {
             var verb = ["init", dir.path]
             let name = assistantName.trimmingCharacters(in: .whitespacesAndNewlines)
             if !name.isEmpty { verb += ["--name", name] }
+            // The keep-awake question, answered on the screen instead of at a
+            // terminal. NIL IS THE DEFAULT AND MEANS "not answered": `init`
+            // only asks when stdin is a tty, and the app's runner gives every
+            // verb an empty stdin (command-runner.swift), so an unanswered
+            // question cannot hang the step and cannot write a value nobody
+            // chose. The install then holds nothing until somebody says
+            // otherwise, which is the consent rule (owner's ruling,
+            // 2026-09-19).
+            if let keepAwake { verb += ["--keep-awake", keepAwake.rawValue] }
             return verb
         case .versioning:
             guard repoPlan == .now, let dir = instanceDirectory else { return nil }

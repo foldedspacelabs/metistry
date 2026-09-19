@@ -73,6 +73,31 @@ instance repo's history like everything else invariant 1 depends on.
 `.metistry/state/` holds `.env`, Postgres data, model weights and sockets —
 exactly what `docker compose down -v` should be able to lose.
 
+**`.metistry/state/bin/Metistry`** (capital M, **launchd shape only**) is
+the supervisor's program-identity symlink to this install's node
+(`supervisorBinPath`), written by `metistry up`, never by hand, so System
+Settings shows the background item as "Metistry" rather than "node".
+
+**`.metistry/state/cli/metistry`** is the CLI shim
+(`packages/cli/src/cli-shim.ts`), written by `metistry up`/`metistry
+update`, never by hand: a POSIX script that already knows this install's
+product dir and instance dir, so `metistry <verb>` works without either
+resolved for it. `up` never puts it on `PATH` itself (invariant 2) —
+`docs/ops/cli.md`, "Getting `metistry` on your PATH", has the one-liner it
+prints instead. It is fine to lose either file the same way as the rest of
+`state/`: rerunning the verb that wrote it regenerates it.
+
+**Why two directories and not one.** macOS's default APFS volume is
+case-insensitive, so `bin/metistry` and `bin/Metistry` would be the SAME
+directory entry there — writing the cli shim into `state/bin/` under the
+launchd shape would collide with the supervisor's own symlink. `state/cli/`
+is a sibling directory the supervisor's symlink never touches, which
+removes the collision outright rather than working around it.
+`writeCliShim` still checks what is actually sitting at its path before
+writing — a symlink, or a file that does not look like a shim this install
+wrote, is left alone with a note — as a second line of defence, not the
+fix itself.
+
 ## Migrating an existing instance
 
 `metistry migrate-layout` carries an instance from the legacy layout to the

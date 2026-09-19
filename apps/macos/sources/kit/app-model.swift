@@ -61,7 +61,7 @@ public final class AppModel {
     ) {
         let instances = InstanceBookmarks(defaults: defaults)
         let developerProductDir = Self.loadDeveloperProductDir(defaults)
-        let resolution = RuntimeLocator.locate(bundleResourceURL: bundleResourceURL, userProductDir: developerProductDir)
+        let resolution = RuntimeLocator.locate(bundleResourceURL: bundleResourceURL, userProductDir: developerProductDir, instanceDir: instances.active)
         let cli = resolution.runtime.map { MetistryCLI(runtime: $0, runner: runner, instanceDir: instances.active) }
         let status = StatusModel(cli: cli)
         // ONE sign-in model for the whole app. The Status header, Settings →
@@ -168,7 +168,7 @@ public final class AppModel {
     /// screen so a `metistry` installed while the app was open is found without
     /// a relaunch.
     public func relocate() {
-        resolution = RuntimeLocator.locate(bundleResourceURL: bundleResourceURL, userProductDir: developerProductDir)
+        resolution = RuntimeLocator.locate(bundleResourceURL: bundleResourceURL, userProductDir: developerProductDir, instanceDir: instances.active)
         let cli = self.cli
         status.cli = cli
         menu.cli = cli

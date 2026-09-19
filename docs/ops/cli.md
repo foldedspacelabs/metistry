@@ -9,7 +9,7 @@ All of them are real.
 
 | verb | what it does |
 | --- | --- |
-| `init <dir>` | create a private instance repo |
+| `init <dir>` | create a private instance repo, asking once whether to keep this Mac awake (`--keep-awake <value>` answers it without a terminal) |
 | `connect-repo <url>` | point the instance repo at a remote, mint credentials the reconciler can push with |
 | `secrets sync\|mint\|list [--json]` | move secrets between the Keychain and `.env` |
 | `connect <tool> [--rotate]` | give one external dev tool (Cursor, OpenCode, Devin, Claude Code) its own agent token and config |
@@ -20,6 +20,7 @@ All of them are real.
 | `--version` / `version [--json]` | this CLI's version, the resolved product dir's, the lock's pin, and a release's runtime pack |
 | `deployment [--json]` | the effective shape (D4 overlay) and the services it implies, with cheap running state |
 | `deployment set-shape <compose\|launchd>` | write the instance's `.metistry/deployment.yaml` through the reconciler, preview-then-confirm |
+| `deployment set-keep-awake <never\|allow_sleep_on_battery\|always\|always_lid_closed>` | whether this install holds the Mac awake, and on which power (macOS); the same protected write |
 | `migrate-layout [--dry-run] [--json] [--allow-dirty]` | carry an instance from the legacy layout to the flat one: the directory becomes the vault, the machinery moves under `.metistry/`, stored paths lose `Knowledge/` |
 | `migrate-inbox [--dry-run]` | move a pre-#156 `inbox/` into the vault inbox and rewrite `inbox.path` |
 | `migrate-shape <launchd\|compose>` | move a LIVE install between the shapes, with its data: dump, stop, flip, up, restore, verify, doctor |
@@ -84,6 +85,22 @@ Compute pane having to parse a trailing object out of a stream of prose
 (`docs/ops/mac-app.md`); without `--json` the same notes print to stdout
 inline, exactly as before.
 
+## What it looks like
+
+The presentation layer is `packages/cli/src/ui.ts` and its rules are
+`docs/ops/cli-style.md`: colour only when stdout is a terminal that wants it
+(`NO_COLOR`, `TERM=dumb`, `--no-color` and `--json` each turn it off;
+`FORCE_COLOR` turns it on for a pipe that really is one), one icon and one
+colour per status from a closed vocabulary, `[ok] [x] [!]` where the locale
+is not UTF-8, secondary text dimmed, prose wrapped at the terminal width
+clamped to [60, 100], and a spinner only on a TTY.
+
+Two consequences worth knowing before editing a verb: **colour never reaches
+a `--json` document** (`createUi({ json: true })` is the enforcement, not a
+convention), and **the status word is always spelled out** beside its icon,
+so nothing is distinguished by hue alone. Render functions take a `Ui` as
+their last argument; `main()` configures the process's one from the flags.
+
 ## `identity`, `version`, `deployment`, `console whoami`: what the app reads instead of the files
 
 Five small, read-mostly verbs exist so the Mac app stops parsing
@@ -128,6 +145,21 @@ because the data does not move between shapes on its own
 the shape change, then `metistry up` would do. `--force` writes anyway.
 `reconciler`/`watchdog` being up is never a reason to refuse: they are host
 jobs under either shape (invariant 6).
+
+`metistry deployment set-keep-awake <never|allow_sleep_on_battery|always|always_lid_closed> [--yes]`
+writes the same file, the same way — protected path, through the reconciler
+as the `user` principal, preview without `--yes` — and prints what the
+choice costs before it writes it. It does **not** refuse while services are
+running: `set-shape` refuses because the data does not move between shapes
+on its own, and changing the power policy moves nothing. It takes effect at
+the next `metistry up`, which is what renders the value into the
+supervisor's environment.
+
+The four values, what each does and the one that cannot be delivered in
+full are in `docs/ops/deployment-shapes.md`, "Keeping the Mac awake". Short
+version: absent means `never` and nothing is held; `metistry init` asks the
+question once, on a terminal, and writes your answer; `metistry doctor`
+reports one `keep-awake` row, `degraded` at worst.
 
 `metistry migrate-shape <launchd|compose> [--dry-run] [--namespace]` is the
 verb for a LIVE install, and it is deliberately not a flag on `set-shape`.
@@ -835,19 +867,41 @@ fail the run.
 ## Reading a doctor report
 
 ```
-name                                              kind       status  ms   remediation
-------------------------------------------------  ---------  ------  ---  -----------
-apple-fm                                          bridge     ok      920
-eventkit                                          bridge     failed  4    eventkit rejected the token (HTTP 401) — the METISTRY_BRIDGE_TOKEN_* in .env differs …
-reconciler                                        service    ok      53
-console                                           service    ok      6
-db                                                db         ok      16
-migrations                                        db         ok      3
-launchd:com.foldedspacelabs.metistry.reconciler   launchd    ok      4
-compose:console                                   container  ok      0
-…
-24 checks: 23 ok, 0 degraded, 1 failed, 0 absent — FAILED (/Users/you/src/metistry)
+/Users/you/src/metistry — shape launchd, 2026-09-19T09:14:02.118Z
+
+bridge
+  ✓ apple-fm  ok       920ms
+  ✗ eventkit  failed     4ms
+      → eventkit rejected the token (HTTP 401) — the METISTRY_BRIDGE_TOKEN_* in
+        .env differs from the one the bridge was started with
+
+service
+  ✓ reconciler  ok        53ms
+  ✓ console     ok         6ms
+
+cli
+  ○ cli on PATH  absent     0ms
+      → `ln -s /Users/you/instance/.metistry/state/cli/metistry
+        ~/.local/bin/metistry` (or add its directory to PATH)
+
+db
+  ✓ db          ok        16ms
+  ✓ migrations  ok         3ms
+
+launchd
+  ✓ launchd:com.foldedspacelabs.metistry.reconciler  ok         4ms
+
+container
+  ✓ compose:console  ok         0ms
+
+9 checks: 7 ok, 0 degraded, 1 failed, 1 absent — ✗ FAILED
 ```
+
+One block per `kind`, the remediation — the reason a red row is read at all
+— wrapped directly under its row rather than in a column that runs off the
+screen, and the verdict last. Colour, and `[ok]`/`[x]`/`[!]` where the
+terminal's locale is not UTF-8, come from `docs/ops/cli-style.md`;
+`--json` is untouched by any of it.
 
 One row per thing that can be wrong; every row is a `core` `CheckResult`
 (`name`, `status`, `latency_ms`, `probe`, `remediation`, `meta`) plus a
@@ -960,7 +1014,7 @@ Every named service is acted on even when an earlier one fails — this is a
 stop-at-first-failure plan. `--json` prints one object per service,
 `{service, action, ok, detail}`, for the app to render and nothing else — a
 step's progress line goes to stderr instead of vanishing; without it the
-output is a table like `doctor`'s. A name that isn't a service this shape
+output is the shared table (`docs/ops/cli-style.md`). A name that isn't a service this shape
 runs fails the whole command (exit 2) with the list of known ones — it
 never guesses which subprocess a name might mean. `--dry-run` prints the
 exact command per service and runs nothing, the same seam `up --dry-run`
@@ -1157,8 +1211,22 @@ metistry doctor  # what is running right now, without changing anything
 
 Then it **looks**: `launchctl print` for each label (nothing found = gone) and
 `docker compose ps --quiet` (empty = nothing running), and prints what it
-found. A job still loaded after its bootout is a non-zero exit, not a
+found under a heading of its own — the claim and the check are two blocks,
+never one. A job still loaded after its bootout is a non-zero exit, not a
 cheerful "done".
+
+```
+service     action  ok      detail
+──────────  ──────  ──────  ──────────
+supervisor  stop    ✓ ok    booted out
+
+1 service(s): 1 ok, 0 failed
+
+confirmed by looking
+  ✓ gone  com.foldedspacelabs.metistry  not loaded
+
+1/1 confirmed stopped (shape launchd)
+```
 
 **`down` stops; it never deletes.** It is `docker compose stop`, *not*
 `docker compose down`, and never `-v`. The opposite of "up" is "the processes
@@ -1191,6 +1259,62 @@ step is a follow-up once a Linux install exists to test it against; the
 TCC-bound jobs (eventkit, apple-fm) have no Linux counterpart at all
 (§4.17: absent, not broken). `update` on Linux likewise tells you which
 units to restart rather than restarting them.
+
+### Getting `metistry` on your PATH
+
+A fresh release install has no `metistry` on `PATH` — there is no Homebrew
+formula and no npm global, so nothing put it there. `up` (and `update`,
+since a checkout that only ever runs that still needs one) writes a small
+POSIX shim to `<instance>/.metistry/state/cli/metistry`: an executable
+script that already knows this install's product dir and instance dir, and
+at every invocation re-checks which of `current/` (a release) or the bare
+product dir holds the CLI, and whether to run it with the bundled
+`runtime/node/bin/node` or whatever `node` is on `PATH` — so a release
+flip or a freshly bundled runtime needs no re-write. It is idempotent
+(unchanged content is left alone) and mode `0755`; a symlink or a foreign
+file already sitting at the path is left alone too, with a note, rather
+than overwritten.
+
+**`up` never puts it on PATH itself** — invariant 2, that is the operator's
+own hand — it only prints the one line that would, as part of its normal
+output:
+
+```
+   cli: /Users/you/instance/.metistry/state/cli/metistry — `ln -s /Users/you/instance/.metistry/state/cli/metistry ~/.local/bin/metistry` (or add its directory to PATH) runs `metistry` by name
+```
+
+Run that `ln -s` once (or add the directory to `PATH` yourself), and
+`metistry doctor` — from anywhere — works. `metistry doctor`'s own `cli on
+PATH` row says whether it is already reachable, and where, or hands back
+the same line when it is not; it is informational (`ok`/`absent`), never a
+finding that fails the exit code.
+
+This is the same mechanism in every shape:
+
+- **Release install.** The shim lives at
+  `<instance>/.metistry/state/cli/metistry` and execs
+  `<product>/runtime/node/bin/node <product>/current/packages/cli/dist/main.js`.
+- **Checkout.** Same path, same shim; `current/` does not exist, so it
+  falls back to `<product>/packages/cli/dist/main.js`, and to `node` on
+  `PATH` when there is no bundled `runtime/`.
+- **The Mac app.** `apps/macos`'s `RuntimeLocator` looks for a `metistry`
+  in `~/.local/bin` and in the active instance's own
+  `.metistry/state/cli` — the same two places above — in addition to the
+  usual Homebrew/system bins and `PATH`, so the app finds an install even
+  before anyone has run the `ln -s` line by hand (`docs/ops/mac-app.md`).
+
+**Why `state/cli/`, not `state/bin/`.** Under `shape: launchd`,
+`<instance>/.metistry/state/bin/Metistry` (capital M) is already the
+supervisor's own program-identity symlink (§ above, "Host jobs (macOS)"),
+and macOS's default APFS volume does not tell `metistry` and `Metistry`
+apart in that directory — they would be the same directory entry. Rather
+than have the cli shim quietly lose that race on the one shape that most
+needs it (no Docker, so no other way to reach the console short of the
+app), it lives in `state/cli/`, a sibling directory the supervisor's
+symlink never touches. `writeCliShim` still checks before writing —
+leaving a symlink, or a file that does not look like a shim this install
+wrote, alone rather than overwritten — as a second line of defence, not
+the fix itself.
 
 ## Updating
 

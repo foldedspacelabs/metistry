@@ -10,13 +10,27 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { DEPLOYMENT_FILENAME, SHAPED_SERVICES, instanceFile, servicePlan, usesCompose, type Deployment, type DeploymentShape, type ServiceName } from "@foldedspacelabs/metistry-core";
-import { applyShapeToYaml, loadDeployment } from "./deployment.js";
+import {
+  DEPLOYMENT_FILENAME,
+  LID_CLOSED_NOT_AVAILABLE,
+  SHAPED_SERVICES,
+  instanceFile,
+  keepAwakeChoice,
+  keepAwakeOf,
+  servicePlan,
+  usesCompose,
+  type Deployment,
+  type DeploymentShape,
+  type KeepAwake,
+  type ServiceName,
+} from "@foldedspacelabs/metistry-core";
+import { applyKeepAwakeToYaml, applyShapeToYaml, loadDeployment } from "./deployment.js";
 import { composeRows, launchdRows } from "./doctor.js";
 import { realExec, type Exec } from "./exec.js";
 import { serviceOf } from "./launchd.js";
 import { protectedRel, writeProtected } from "./protected-write.js";
 import { StepRunner } from "./steps.js";
+import { defaultUi, type Ui } from "./ui.js";
 
 export interface DeploymentServiceRow {
   name: ServiceName;
@@ -29,6 +43,15 @@ export interface DeploymentServiceRow {
 export interface DeploymentReport {
   shape: DeploymentShape;
   from: string;
+  /** this install's power policy; `never` when the question has not been answered (docs/ops/deployment-shapes.md) */
+  keep_awake: KeepAwake;
+  /**
+   * Said here as well as in doctor, because `metistry deployment` is the cheap
+   * read the app and the wizard make before offering to change anything: the
+   * fourth value is accepted and is not deliverable in full without an
+   * administrator change the user makes themselves.
+   */
+  keep_awake_note?: string;
   services: DeploymentServiceRow[];
 }
 
@@ -79,15 +102,47 @@ export async function buildDeploymentReport(opts: BuildDeploymentReportOptions):
   const platform = opts.platform ?? process.platform;
   const uid = opts.uid ?? (typeof process.getuid === "function" ? process.getuid() : 0);
   const services = await deploymentServiceRows(opts.productDir, loaded.deployment, { exec, uid, platform });
-  return { shape: loaded.deployment.shape, from: loaded.from, services };
+  const keepAwake = keepAwakeOf(loaded.deployment);
+  return {
+    shape: loaded.deployment.shape,
+    from: loaded.from,
+    keep_awake: keepAwake,
+    ...(keepAwakeNote(keepAwake, loaded.deployment.shape, platform) ? { keep_awake_note: keepAwakeNote(keepAwake, loaded.deployment.shape, platform)! } : {}),
+    services,
+  };
 }
 
-export function renderDeploymentReport(report: DeploymentReport): string {
-  const head = ["service", "shape", "enabled", "running"];
-  const body = report.services.map((s) => [s.name, s.shape, s.enabled ? "yes" : "no", s.running === undefined ? "?" : s.running ? "yes" : "no"]);
-  const widths = head.map((h, i) => Math.max(h.length, ...body.map((row) => row[i]!.length)));
-  const line = (cells: string[]) => cells.map((c, i) => c.padEnd(widths[i] ?? 0)).join("  ").trimEnd();
-  return [`shape: ${report.shape} (from ${report.from})`, "", line(head), line(widths.map((w) => "-".repeat(w))), ...body.map(line)].join("\n");
+/** The one sentence this install's power policy needs beyond its own name, or nothing. */
+export function keepAwakeNote(keepAwake: KeepAwake, shape: DeploymentShape, platform: NodeJS.Platform): string | undefined {
+  if (platform !== "darwin") return keepAwake === "never" ? undefined : "keep_awake is a macOS setting; nothing on this platform holds a power assertion";
+  if (keepAwake === "never") return undefined;
+  if (shape === "compose") return "the compose shape has no supervisor to hold the assertion, so nothing is held (docs/ops/deployment-shapes.md)";
+  if (keepAwake === "always_lid_closed") return LID_CLOSED_NOT_AVAILABLE;
+  return undefined;
+}
+
+/**
+ * One table (docs/ops/cli-style.md): the shape it read and where from, this
+ * install's power policy with whatever caveat that policy carries, then a
+ * row per service with the filled/hollow icon for running — `n/a` where the
+ * state is not cheaply knowable (a launchd job off macOS, a compose one
+ * where nothing uses compose), never a bare `?`.
+ */
+export function renderDeploymentReport(report: DeploymentReport, ui: Ui = defaultUi()): string {
+  const running = (s: DeploymentServiceRow): string =>
+    s.running === undefined ? `${ui.paint("n/a", ui.icon("off"))} ${ui.dim("n/a")}` : s.running ? `${ui.paint("ok", ui.icon("on"))} yes` : `${ui.paint("n/a", ui.icon("off"))} no`;
+  const rows = report.services.map((s) => [s.name, s.shape, s.enabled ? "yes" : ui.dim("no"), running(s)]);
+  return [
+    ui.kv(
+      [
+        ["shape", `${report.shape}  ${ui.dim(`(from ${report.from})`)}`],
+        ["keep_awake", `${report.keep_awake}${report.keep_awake_note ? `  ${ui.dim(`— ${report.keep_awake_note}`)}` : ""}`],
+      ],
+      { indent: 0 },
+    ),
+    "",
+    ui.table(["service", "shape", "enabled", "running"], rows, { ragged: [] }),
+  ].join("\n");
 }
 
 // ---- set-shape --------------------------------------------------------------
@@ -167,4 +222,74 @@ export async function setDeploymentShape(opts: SetShapeOptions): Promise<SetShap
     instanceDir: opts.instanceDir,
   });
   return { shape: opts.targetShape, applied: !r.dryRun && delivery.how !== "none", refused: false, detail: delivery.detail };
+}
+
+// ---- set-keep-awake ---------------------------------------------------------
+
+export interface SetKeepAwakeOptions {
+  productDir: string;
+  instanceDir: string;
+  keepAwake: KeepAwake;
+  /** without it nothing is written — the preview is the whole command */
+  yes?: boolean | undefined;
+  env: NodeJS.ProcessEnv;
+  platform: NodeJS.Platform;
+  uid: number;
+  fetchFn: typeof fetch;
+  exec?: Exec | undefined;
+  out: (line: string) => void;
+}
+
+export interface SetKeepAwakeResult {
+  keep_awake: KeepAwake;
+  applied: boolean;
+  detail: string;
+  /** the honest sentence for this value on this install, when there is one */
+  note?: string;
+}
+
+/**
+ * `metistry deployment set-keep-awake <never|allow_sleep_on_battery|always|always_lid_closed>`.
+ *
+ * The same path `set-shape` takes, for the same reason: `deployment.yaml` is a
+ * §4.7 protected path, so the write goes through the reconciler as the `user`
+ * principal (invariant 2 — how the system behaves is a human change), and it
+ * is preview-then-confirm, with `--yes` as the confirmation.
+ *
+ * It does NOT refuse while services are running, and the difference from
+ * `set-shape` is real rather than an oversight: flipping the shape under a
+ * running Postgres orphans its data, while changing the power policy changes
+ * nothing that is already running. It takes effect at the supervisor's next
+ * start, and says so — the value reaches the holder through `supervisor.json`,
+ * which `metistry up` writes.
+ */
+export async function setKeepAwake(opts: SetKeepAwakeOptions): Promise<SetKeepAwakeResult> {
+  const exec = opts.exec ?? realExec;
+  const r = new StepRunner({ dryRun: opts.yes !== true, out: opts.out, exec, env: opts.env });
+  const current = await loadDeployment(opts.productDir, opts.env);
+  const note = keepAwakeNote(opts.keepAwake, current.deployment.shape, opts.platform);
+
+  if (keepAwakeOf(current.deployment) === opts.keepAwake && current.deployment.keep_awake !== undefined) {
+    const detail = `already keep_awake: ${opts.keepAwake} (from ${current.from}) — nothing to change`;
+    r.note(detail);
+    return { keep_awake: opts.keepAwake, applied: false, detail, ...(note ? { note } : {}) };
+  }
+
+  // What this choice costs, printed BEFORE it is written — the informed half
+  // of informed consent, in the same words the onboarding question uses.
+  r.note(`${keepAwakeChoice(opts.keepAwake).label}: ${keepAwakeChoice(opts.keepAwake).consequence}`);
+  if (note) r.note(note);
+
+  const path = instanceFile(opts.instanceDir, "deployment");
+  const existing = existsSync(path) ? await readFile(path, "utf8") : undefined;
+  const content = applyKeepAwakeToYaml(existing, opts.keepAwake, current.deployment.shape);
+  const delivery = await writeProtected(r, protectedRel(opts.instanceDir, "deployment"), content, `metistry deployment set-keep-awake → ${opts.keepAwake}`, {
+    env: opts.env,
+    platform: opts.platform,
+    uid: opts.uid,
+    fetchFn: opts.fetchFn,
+    instanceDir: opts.instanceDir,
+  });
+  r.note("it takes effect when the supervisor next starts: `metistry up` (which rewrites supervisor.json) — nothing running changes underneath you");
+  return { keep_awake: opts.keepAwake, applied: !r.dryRun && delivery.how !== "none", detail: delivery.detail, ...(note ? { note } : {}) };
 }

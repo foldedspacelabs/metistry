@@ -56,7 +56,7 @@ import { realExec, type Exec } from "./exec.js";
 import { labelFor, loadPlistTemplates, logPathFor, parseRegistrar, registrarPhrase, SUPERVISED_SERVICES, type RegistrarFinding } from "./launchd.js";
 import { readSupervisorConfig, supervisorConfigPath, controlRequest, SUPERVISOR_SERVICE } from "./supervisor.js";
 import { applyPorts, loadNamespace, type Namespace } from "./namespace.js";
-import { defaultUi, padTo, statusName, type Ui } from "./ui.js";
+import { defaultUi, padTo, statusName, visibleWidth, type Ui } from "./ui.js";
 
 export interface Db {
   query(text: string, values?: unknown[]): Promise<{ rows: any[] }>;
@@ -1112,19 +1112,30 @@ const NAME_WIDTH_CAP = 34;
  * `--json` is the machine's copy and is untouched by any of this.
  */
 export function renderTable(report: DoctorReport, ui: Ui = defaultUi()): string {
-  const nameWidth = Math.min(NAME_WIDTH_CAP, Math.max(0, ...report.rows.map((r) => r.name.length)));
   const statusWidth = Math.max(0, ...report.rows.map((r) => r.status.length));
   const out: string[] = [ui.dim(`${report.product_dir} — shape ${report.shape}, ${report.as_of}`), ""];
 
   for (const kind of [...new Set(report.rows.map((r) => r.kind))]) {
+    const group = report.rows.filter((x) => x.kind === kind);
+    // per group, not per report: one 60-character launchd label must not
+    // push every bridge's status column halfway across the screen
+    const nameWidth = Math.min(NAME_WIDTH_CAP, Math.max(0, ...group.map((r) => r.name.length)));
     out.push(ui.heading(kind));
-    for (const r of report.rows.filter((x) => x.kind === kind)) {
+    for (const r of group) {
       const status = padTo(ui.paint(statusName(r.status), r.status), statusWidth);
       out.push(`  ${ui.statusIcon(r.status)} ${padTo(r.name, nameWidth)}  ${status}  ${ui.dim(`${r.latency_ms}ms`.padStart(6))}`.trimEnd());
       // the one thing a red row is read for: what to do about it. Never on
       // an ok row — an ok row's probe is noise between the rows that matter.
       const detail = r.status === "ok" ? "" : (r.remediation ?? r.probe);
-      if (detail) for (const l of ui.wrap(`${ui.icon("arrow")} ${detail}`, { indent: 6, hanging: 8 }).split("\n")) out.push(ui.dim(l));
+      if (detail) {
+        // the arrow is a marker, not a word: it hangs in the margin and the
+        // text wraps under itself, rather than the arrow taking a line of
+        // its own when the first word is a long path
+        const lead = 6 + visibleWidth(ui.icon("arrow")) + 1;
+        const wrapped = ui.wrap(detail, { indent: lead, hanging: lead }).split("\n");
+        wrapped[0] = `      ${ui.icon("arrow")} ${(wrapped[0] ?? "").slice(lead)}`;
+        for (const l of wrapped) out.push(ui.dim(l));
+      }
     }
     out.push("");
   }

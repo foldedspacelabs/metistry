@@ -103,6 +103,17 @@ describe("layout", () => {
     expect(ui.kv([["cli", "0.9.0"], ["runtime pack", "0.9.0"]]).split("\n")).toEqual(["  cli           0.9.0", "  runtime pack  0.9.0"]);
   });
 
+  it("kv wraps a long value under its own column, never past the right edge", () => {
+    const narrow = createUi({ stream: { write: () => true, isTTY: true, columns: 60 }, env: utf8 });
+    const lines = narrow
+      .kv([["doctor", "validate every manifest and probe every bridge, service, container and launchd job"]])
+      .split("\n")
+      .map(strip);
+    expect(lines.every((l) => l.length <= 60)).toBe(true);
+    expect(lines[0]).toBe("  doctor  validate every manifest and probe every bridge,");
+    expect(lines.slice(1).every((l) => l.startsWith(" ".repeat(10)))).toBe(true);
+  });
+
   it("a table has a header rule and aligned columns", () => {
     const lines = ui.table(["service", "shape"], [["db", "launchd"], ["console", "compose"]]).split("\n");
     expect(lines).toEqual(["service  shape", "───────  ───────", "db       launchd", "console  compose"]);

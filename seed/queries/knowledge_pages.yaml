@@ -57,7 +57,19 @@
 # listing of what was filtered" the knowledge routes refuse to publish — a
 # narrowed principal would learn how many pages it cannot see. The caller
 # pages until a window comes back short.
+#
+# **`expose: route`, and that is the whole point of the field.** The rows
+# this query returns are filtered by the CALLER's scope on
+# `GET /api/knowledge/pages` — `canSee` on every path, drops rather than
+# flags. `GET /api/q/knowledge_pages` would hand the same rows back with no
+# filter at all, which is not a shortcut but the filter undone: one endpoint
+# per operation (ruled 2026-09-19), so the generic door answers this name
+# with the SAME `not_found` it answers an unknown one with, and the scoped
+# route is the only way in. An instance overlaying this file keeps the
+# property by keeping the line — dropping it re-opens the unscoped door,
+# which is why it is a field on the manifest and not a rule in a server.
 name: knowledge_pages
+expose: route
 description: >-
   One row per settled vault page from the reconciler's index — path, derived
   area, title (frontmatter's, else the basename), one-line description, index

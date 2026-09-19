@@ -540,6 +540,61 @@ named. Unguarded, the verb would find nothing at the path it opens, start from
 a bare header, and deliver a four-line file over the real one — data loss
 rather than a refusal. `apps/console/test/compute-routes.test.ts` holds it.
 
+## `GET /api/q/<name>` — the generic door onto the named queries
+
+```
+GET /api/q/open_work?limit=5
+200 {"rows":[…],"as_of":"…"}
+400 a param this query does not declare, or one of the wrong type
+404 no such query — OR one the manifest keeps off this door (indistinguishable)
+```
+
+Invariant 3's read path, addressable by name: the YAML in `seed/queries/` plus
+the instance's own `queries/` overlay (D4), params from the query string,
+`{rows, as_of}` back. The panels and the Mac app read everything this way
+(`docs/ops/board.md`, `docs/ops/threads.md`), which is what keeps a dashboard
+from growing SQL of its own.
+
+**`expose:` — which door a query is served through.** A manifest may carry one
+optional field beside `name`, `description`, `params`, `sql` and `cache_ttl`:
+
+| value | meaning |
+| --- | --- |
+| `generic` | the default, and what every manifest without the field means. Served here, by name |
+| `route` | this query has an **endpoint of its own**, and that endpoint does something this door cannot. Asking for it here is the `404` an unknown name gets |
+
+The field exists because of `knowledge_pages`. `GET /api/knowledge/pages`
+filters every row it returns through the caller's scope (`canSee`); the
+generic door does not, cannot — it has no principal scope and no reason to
+believe a column called `path` is a vault path — and would have handed the
+whole index to anyone who could reach `/api/q/<name>`, which includes the
+capture owner token that is `403` on `/api/knowledge/*`. One endpoint per
+necessary operation (ruled 2026-09-19): the filter is not optional if there is
+no second way in.
+
+Two properties worth stating:
+
+- **The refusal is the unknown-query refusal, byte for byte** — same code,
+  same status, same absent message. A distinguishable `403` would make this
+  door an oracle for which route-only queries a build has, which is the same
+  reasoning behind the `404` on `/api/knowledge/page`.
+- **It is declared on the manifest, not in the server** (invariant 5). The
+  server asks the store (`QueryStore.exposure(name)`), so a list of names
+  inside the console cannot drift from the files, and an instance overlaying
+  `knowledge_pages.yaml` keeps the property by keeping the line — dropping it
+  re-opens the unscoped door, which is a change you make in your own vault
+  with your eyes open. `apps/console/test/seed-queries.test.ts` pins the set
+  of route-backed seed queries so that adding one is deliberate.
+
+`expose` says nothing about *permission*: what a caller may reach is still
+decided by the surface it calls (this door's principal gates, `mcp-brain`'s
+`queries: true` grant for `queries_run`). And it is read by the console alone
+today — an external agent holding `queries: true` can still run a
+route-backed query over the `/mcp` mount, where nothing applies the route's
+scope filter. That is a separate surface with a separate grant and was not
+part of the 2026-09-19 ruling, which was about the console's two doors; it is
+named here rather than left to be discovered.
+
 ## `/api/knowledge/*` — the vault read path (`user` principal)
 
 ```
@@ -645,10 +700,17 @@ overlay `knowledge_pages.yaml` with columns of its own (D4) and a projection
 in the console would swallow them; the one thing the route insists on is a
 `path` it can judge, and a row without one is dropped.
 
-`GET /api/q/knowledge_pages` reaches the same query through the generic door
-and is **not** the same route: the generic door has no `canSee` filter, so the
-page list a client should use is this one. The link graph
-(`knowledge_page_links` over `knowledge_links`) is still open.
+**This is the only door onto that query.** `knowledge_pages.yaml` declares
+`expose: route`, so `GET /api/q/knowledge_pages` answers the `404` it answers
+an unknown name with — one endpoint per necessary operation (ruled
+2026-09-19). The generic door has no `canSee` filter and cannot have one: it
+does not know that a column called `path` is a vault path, and it has no
+principal scope to judge it against. Two doors onto the same rows would have
+made the filter on this one optional, and it was reachable — the capture owner
+token is `403` here and has always been admitted on `/api/q/<name>`. The
+section above it describes the field.
+
+The link graph (`knowledge_page_links` over `knowledge_links`) is still open.
 
 ## `GET /api/commands` — the composer's list, generated (`user` principal)
 

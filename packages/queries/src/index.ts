@@ -14,12 +14,37 @@ const paramSpec = z.object({
   required: z.boolean().default(false),
 });
 
+/**
+ * Which door a query is reachable through.
+ *
+ * `generic` — the default, so every manifest written before this field means
+ * exactly what it meant — is addressable by name on the console's generic
+ * `GET /api/q/<name>`: params in, `{rows, as_of}` out, nothing in between.
+ *
+ * `route` says this query has an endpoint of ITS OWN, and that endpoint does
+ * something the generic door cannot. The page list is the case that produced
+ * the field: `GET /api/knowledge/pages` filters every row through the
+ * principal's scope, and a second, unscoped way to the same rows would be
+ * that filter's undoing — one endpoint per operation, so there is one place
+ * where the rule lives. The declaration is HERE, on the manifest, rather
+ * than in a list of names inside a server: invariant 5 puts a component's
+ * shape on its manifest, and the file the CI validator reads is the file the
+ * server reads.
+ *
+ * It is a statement about the generic door, not a grant of any kind: what a
+ * caller may reach is still decided by the surface it calls (the console's
+ * principal gates, `mcp-brain`'s `queries: true`).
+ */
+export const EXPOSURES = ["generic", "route"] as const;
+export type Exposure = (typeof EXPOSURES)[number];
+
 const querySpec = z.object({
   name: z.string().regex(/^[a-z][a-z0-9_]*$/),
   description: z.string(),
   params: z.record(z.string(), paramSpec).default({}),
   sql: z.string(),
   cache_ttl: z.number().int().nonnegative().default(0), // seconds; 0 = no cache
+  expose: z.enum(EXPOSURES).default("generic"),
 });
 
 export type QuerySpec = z.infer<typeof querySpec>;
@@ -121,6 +146,20 @@ export class QueryStore {
 
   names(): string[] {
     return [...this.specs.keys()];
+  }
+
+  /**
+   * A loaded query's `expose`, or `undefined` when no such query is loaded.
+   *
+   * The generic door asks this instead of matching names, so "which queries
+   * are route-backed" is a fact of the manifests rather than a list in a
+   * server that can drift from them — and because the two answers a caller
+   * may get are deliberately one answer: a route-backed query and an unknown
+   * one are the same refusal, so neither the spelling nor the existence of a
+   * route-only query travels back.
+   */
+  exposure(name: string): Exposure | undefined {
+    return this.specs.get(name)?.spec.expose;
   }
 
   /** One entry per loaded query: name, description, and its params' declared type + default (no `required`/sql — callers don't need those to pick a query). */

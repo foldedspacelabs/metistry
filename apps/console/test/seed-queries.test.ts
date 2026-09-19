@@ -55,6 +55,27 @@ describe("seed queries", () => {
       for (const v of call.values) expect(typeof v, `${name} bind`).not.toBe("undefined");
     }
   });
+
+  // `expose` decides which door a query is served through, and the answer is
+  // a property of the seed SET rather than of one file: everything the PWA
+  // and the routines call has to stay on the generic `/api/q/<name>`, and a
+  // query is route-backed only where its own endpoint applies a filter the
+  // generic door cannot (`knowledge_pages` scopes every row to the caller).
+  // Pinned as a list so that marking another query `route` is a deliberate
+  // act with a test to change — and so that dropping the line from
+  // `knowledge_pages.yaml`, which re-opens the unscoped door, fails here
+  // rather than in a review nobody remembered to do.
+  it("serves every seed query through the generic door except the ones with a scoped route of their own", async () => {
+    const store = new QueryStore({
+      async query() {
+        return { rows: [] };
+      },
+    });
+    await store.loadDir(SEED_DIR);
+    const routeBacked = store.names().filter((n) => store.exposure(n) === "route");
+    expect(routeBacked.sort()).toEqual(["knowledge_pages"]);
+    for (const name of REQUIRED.filter((n) => !routeBacked.includes(n))) expect(store.exposure(name), name).toBe("generic");
+  });
 });
 
 const hasDb = !!process.env.METISTRY_DB_PASSWORD;

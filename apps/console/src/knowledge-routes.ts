@@ -112,8 +112,9 @@ function codeOf(j: { error?: { code?: string } } | null, _status: number): Error
  *
  * It is a SCOPE rather than a boolean because the filter below is the one
  * place any surface decides whether a path may be shown, and the narrowed
- * form is what a grant looks like: `mcp-brain`'s `knowledgeScope(principal)`
- * produces exactly this shape from an agent's `grants.areas`. Today no agent
+ * form is what a grant looks like: `grantedScope` below derives it from an
+ * agent's `grants`, the same derivation `mcp-brain`'s
+ * `knowledgeScope(principal)` makes for the MCP mount. Today no agent
  * credential reaches these routes at all — an agent bearer is a uniform 403
  * on everything outside `/capture` and `/mcp` (CRIT-7), and knowledge under
  * grants is `knowledge_search`/`knowledge_read` on that MCP mount. The scope
@@ -126,6 +127,36 @@ export interface KnowledgeScope {
 
 /** The whole owner's vault. */
 export const OWNER_SCOPE: KnowledgeScope = { areas: null };
+
+/** Nothing at all: `canSee` is false for every path against an empty area list. The fail-closed answer for a credential that is neither the owner nor a holder of grants. */
+export const NO_SCOPE: KnowledgeScope = { areas: [] };
+
+/**
+ * The scope a principal's GRANTS come to — one derivation, so a console
+ * route and an MCP tool cannot come to different answers about the same
+ * credential.
+ *
+ * It reproduces `mcp-brain`'s `knowledgeScope(principal).canRead`
+ * (`packages/mcp-brain/src/knowledge.ts`), which is `tier === "areas" &&
+ * underAreas(path, areas)` — against the same `underAreas`, imported from
+ * that package, so the prefix semantics are one implementation and not two
+ * that agree today. What it deliberately does NOT do is take that
+ * function's return value and rename a field: `knowledgeScope`'s shape
+ * carries a tier, and its `prefixes` is `null` for tiers `none` and `index`
+ * meaning "no prefix restriction on the TITLES those tiers may browse".
+ * `null` here means every vault path's CONTENT, so the rename would hand
+ * the two tiers that may not read a page the owner's own scope. A tier below
+ * `areas` comes to the empty list instead — `NO_SCOPE`.
+ *
+ * The bare vault grant (`/`, internal principals only) needs no case of its
+ * own: `underAreas` rtrims it to the empty prefix, which matches every path.
+ * The areas are COPIED, so a scope already handed to a request cannot widen
+ * because the registry row behind it was rewritten while the request ran.
+ */
+export function grantedScope(principal: { grants: { tier: string; areas: readonly string[] } }): KnowledgeScope {
+  const { tier, areas } = principal.grants;
+  return { areas: tier === "areas" ? [...areas] : [] };
+}
 
 /**
  * May this principal see this path's content? Two conditions, both

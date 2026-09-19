@@ -68,6 +68,7 @@ sql: SELECT id FROM work WHERE area = :area
         params: {},
         sql: "SELECT * FROM work WHERE id = :id",
         cache_ttl: 0,
+        expose: "generic",
       }),
     ).toThrow(QueryError);
   });
@@ -79,6 +80,7 @@ sql: SELECT id FROM work WHERE area = :area
       params: { q: { type: "text", required: true } },
       sql: "SELECT :q::text WHERE title = :q OR area = :q",
       cache_ttl: 0,
+      expose: "generic",
     });
     expect(text).toBe("SELECT $1::text WHERE title = $1 OR area = $1");
     expect(order).toEqual(["q"]);
@@ -112,5 +114,74 @@ sql: SELECT id FROM work WHERE area = :area
     const { executor } = fakeExecutor();
     const store = new QueryStore(executor);
     expect(() => store.load("name: 'Bad Name'\nsql: SELECT 1")).toThrow(QueryError);
+  });
+});
+
+// `expose` is how a manifest says which DOOR serves it. The console's generic
+// `/api/q/<name>` answers `generic` queries; a `route` query has an endpoint
+// of its own that does something the generic door cannot (the page list
+// filters every row through the caller's scope), so the generic door refuses
+// it. The store is where that fact lives, because the store is what reads the
+// manifests — a list of names kept in a server would drift from the files.
+describe("expose: which door serves a query", () => {
+  const ROUTE_BACKED = `
+name: knowledge_pages_like
+description: a query with a scoped endpoint of its own
+expose: route
+params:
+  limit: { type: int, default: 10 }
+sql: SELECT path FROM knowledge_files LIMIT :limit
+`;
+
+  it("defaults to generic, so every manifest written before the field means what it meant", () => {
+    const store = new QueryStore(fakeExecutor().executor);
+    expect(store.load(OPEN_WORK).expose).toBe("generic");
+    expect(store.exposure("open_work")).toBe("generic");
+  });
+
+  it("carries `expose: route` off the manifest", () => {
+    const store = new QueryStore(fakeExecutor().executor);
+    expect(store.load(ROUTE_BACKED).expose).toBe("route");
+    expect(store.exposure("knowledge_pages_like")).toBe("route");
+  });
+
+  // The door's refusal is "unknown query", and it must be reachable the same
+  // way for a name that is route-backed and a name that is not there at all —
+  // so `undefined` and `"route"` are both "not for the generic door", and the
+  // caller cannot tell them apart by asking.
+  it("answers undefined for a query that is not loaded", () => {
+    const store = new QueryStore(fakeExecutor().executor);
+    store.load(ROUTE_BACKED);
+    expect(store.exposure("no_such_query")).toBeUndefined();
+    expect(store.exposure("knowledge_pages_like")).not.toBe("generic");
+    expect(store.exposure("no_such_query")).not.toBe("generic");
+  });
+
+  it("refuses an unknown exposure at load time rather than guessing at one", () => {
+    const store = new QueryStore(fakeExecutor().executor);
+    const bad = ROUTE_BACKED.replace("expose: route", "expose: public");
+    expect(() => store.load(bad)).toThrow(QueryError);
+    try {
+      store.load(bad);
+    } catch (err) {
+      expect((err as QueryError).code).toBe("invalid_spec");
+    }
+    // …and a mis-spelling does not silently become the permissive default
+    expect(store.names()).toEqual([]);
+    expect(store.exposure("knowledge_pages_like")).toBeUndefined();
+    for (const value of ["Route", "ROUTE", "none", "true", ""]) {
+      expect(() => store.load(ROUTE_BACKED.replace("expose: route", `expose: ${JSON.stringify(value)}`)), value).toThrow(QueryError);
+    }
+  });
+
+  // The field closes a DOOR; it does not take the query out of the one read
+  // path. Its own endpoint runs it through this same store, params and all.
+  it("still runs a route-backed query — the dedicated endpoint goes through the store like everything else", async () => {
+    const { executor, calls } = fakeExecutor();
+    const store = new QueryStore(executor);
+    store.load(ROUTE_BACKED);
+    const result = await store.run("knowledge_pages_like", { limit: "3" });
+    expect(calls[0]?.values).toEqual([3]);
+    expect(result.rows.length).toBe(1);
   });
 });

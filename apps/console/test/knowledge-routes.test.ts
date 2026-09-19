@@ -9,9 +9,24 @@
 // `Artifacts/` and the root `CLAUDE.md` are reachable over that bridge with
 // the console's own bearer, and it is THIS file that makes them unreachable
 // over `/api/knowledge/page`.
+import { readFile } from "node:fs/promises";
+import { IncomingMessage, ServerResponse } from "node:http";
+import { Socket } from "node:net";
 import { describe, expect, it, vi } from "vitest";
 import { VaultError } from "@foldedspacelabs/metistry-artifacts";
-import { OWNER_SCOPE, canSee, filterHits, filterPages, vaultBridgeSearch, type KnowledgeSearchHit } from "../src/knowledge-routes.js";
+import { QueryStore } from "@foldedspacelabs/metistry-queries";
+import {
+  NO_SCOPE,
+  OWNER_SCOPE,
+  canSee,
+  filterHits,
+  filterPages,
+  grantedScope,
+  knowledgeRoutes,
+  vaultBridgeSearch,
+  type KnowledgeScope,
+  type KnowledgeSearchHit,
+} from "../src/knowledge-routes.js";
 
 const hit = (path: string): KnowledgeSearchHit => ({ path, title: path, description: null, snippet: "…", score: 1, source: "keyword" });
 
@@ -131,5 +146,153 @@ describe("vaultBridgeSearch: the bridge client", () => {
       new Response(JSON.stringify({ error: { code: "not_available", message: "no embedder configured" } }), { status: 503 })) as unknown as typeof fetch;
     const search = vaultBridgeSearch({ url: "http://127.0.0.1:7811", token: "t", fetch: fetchFn });
     await expect(search("x", "hybrid", 5)).rejects.toBeInstanceOf(VaultError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The scope the routes are HANDED. Everything above tests the filter; this
+// tests what gets put into it, which is the half that decides whether the
+// filter is doing anything at all.
+
+describe("grantedScope: an agent's grants, as a vault scope", () => {
+  it("is the granted areas, and only for the tier that may read content", () => {
+    expect(grantedScope({ grants: { tier: "areas", areas: ["Areas/Health", "Journal"] } })).toEqual({ areas: ["Areas/Health", "Journal"] });
+    // Tiers below `areas` may browse TITLES on the MCP mount; that is not a
+    // licence to read pages, and `null` here would be the owner's own scope.
+    // `mcp-brain`'s canRead says the same: `tier === "areas" && underAreas(…)`.
+    expect(grantedScope({ grants: { tier: "index", areas: ["Areas/Health"] } })).toEqual({ areas: [] });
+    expect(grantedScope({ grants: { tier: "none", areas: [] } })).toEqual({ areas: [] });
+    for (const tier of ["index", "none"]) {
+      expect(grantedScope({ grants: { tier, areas: ["Areas/Health"] } }).areas, tier).not.toBeNull();
+      expect(canSee("Areas/Health/sleep.md", grantedScope({ grants: { tier, areas: ["Areas/Health"] } })), tier).toBe(false);
+    }
+  });
+
+  it("gives the bare vault grant the whole vault, without a case of its own", () => {
+    const scope = grantedScope({ grants: { tier: "areas", areas: ["/"] } }); // internal principals only (agents.ts)
+    expect(canSee("now.md", scope)).toBe(true);
+    expect(canSee("Areas/Finance/tax.md", scope)).toBe(true);
+    expect(canSee(".metistry/compute.yaml", scope)).toBe(false); // still not knowledge, for anyone
+  });
+
+  it("narrows exactly like the filter it feeds — the sibling prefix is not granted", () => {
+    const scope = grantedScope({ grants: { tier: "areas", areas: ["Areas/Health"] } });
+    expect(canSee("Areas/Health/sleep.md", scope)).toBe(true);
+    expect(canSee("Areas/Healthcare/billing.md", scope)).toBe(false);
+    expect(canSee("Journal/2026-09-18.md", scope)).toBe(false);
+  });
+
+  // A grants row can be rewritten while a request is in flight (PUT
+  // /api/agents/:id/grants). A scope already handed to a route must not widen
+  // under it, so the areas are copied rather than aliased.
+  it("copies the areas instead of aliasing the grant", () => {
+    const grants = { tier: "areas", areas: ["Areas/Health"] };
+    const scope = grantedScope({ grants });
+    grants.areas.push("Areas/Finance");
+    expect(canSee("Areas/Finance/tax.md", scope)).toBe(false);
+  });
+
+  it("NO_SCOPE sees nothing and OWNER_SCOPE is the whole vault", () => {
+    expect(canSee("Areas/Health/sleep.md", NO_SCOPE)).toBe(false);
+    expect(canSee("now.md", NO_SCOPE)).toBe(false);
+    expect(canSee("now.md", OWNER_SCOPE)).toBe(true);
+  });
+});
+
+/** A real ServerResponse over a detached socket — the same harness refusals.test.ts uses, and it exercises the actual writeHead/end path. */
+function capture(): { res: ServerResponse; read: () => { status: number; body: any } } {
+  const req = new IncomingMessage(new Socket());
+  const res = new ServerResponse(req);
+  const chunks: Buffer[] = [];
+  (res as unknown as { _send: unknown })._send = () => true;
+  res.write = ((c: string | Buffer) => {
+    chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(String(c)));
+    return true;
+  }) as ServerResponse["write"];
+  res.end = ((c?: string | Buffer) => {
+    if (c) chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(String(c)));
+    return res;
+  }) as ServerResponse["end"];
+  return { res, read: () => ({ status: res.statusCode, body: JSON.parse(Buffer.concat(chunks).toString("utf8")) }) };
+}
+
+/**
+ * `GET /api/knowledge/pages` over the REAL `knowledge_pages.yaml` manifest —
+ * the store, its params and its `expose` are the shipped ones — with a fake
+ * executor standing in for the cluster. What is under test is the route's
+ * own filter over whatever the index holds, which no database is needed to
+ * decide.
+ */
+async function pagesRoute(scope: KnowledgeScope, rows: Record<string, unknown>[], qs = ""): Promise<{ status: number; body: any; params: unknown[] }> {
+  const params: unknown[][] = [];
+  const store = new QueryStore({
+    async query(_text, values) {
+      params.push(values);
+      return { rows };
+    },
+  });
+  store.load(await readFile(new URL("../../../seed/queries/knowledge_pages.yaml", import.meta.url), "utf8"));
+  const c = capture();
+  const url = new URL(`http://x/api/knowledge/pages${qs}`);
+  await knowledgeRoutes(new IncomingMessage(new Socket()), c.res, "GET /api/knowledge/pages", url, { queries: store }, scope, async () => {});
+  return { ...c.read(), params: params[0] ?? [] };
+}
+
+describe("the page list is scoped to the principal that asked for it", () => {
+  const INDEX = [
+    { path: "Areas/Health/sleep.md", area: "Areas/Health", title: "Sleep" },
+    { path: "Areas/Healthcare/billing.md", area: "Areas/Healthcare", title: "Billing" },
+    { path: "Areas/Finance/tax.md", area: "Areas/Finance", title: "Tax" },
+    { path: "Journal/2026-09-18.md", area: "Journal", title: "Thursday" },
+    { path: "now.md", area: null, title: "now" },
+    { path: ".metistry/compute.yaml", area: null, title: "machinery" },
+  ];
+
+  it("gives the owner their whole vault, and still not the machinery in it", async () => {
+    const r = await pagesRoute(OWNER_SCOPE, INDEX);
+    expect(r.status).toBe(200);
+    expect(r.body.pages.map((p: any) => p.path)).toEqual([
+      "Areas/Health/sleep.md",
+      "Areas/Healthcare/billing.md",
+      "Areas/Finance/tax.md",
+      "Journal/2026-09-18.md",
+      "now.md",
+    ]);
+  });
+
+  // The real exercise of the grant path: an agent-shaped principal, handed
+  // straight to the route. No console credential reaches here today (an agent
+  // bearer is the uniform 403 — CRIT-7), which is exactly why the narrowing
+  // has to be held by a test rather than by the call site being lucky.
+  it("gives a principal with grants only its own areas — the same rows, one filter apart", async () => {
+    const r = await pagesRoute(grantedScope({ grants: { tier: "areas", areas: ["Areas/Health"] } }), INDEX);
+    expect(r.status).toBe(200);
+    expect(r.body.pages.map((p: any) => p.path)).toEqual(["Areas/Health/sleep.md"]);
+    // Nothing about what was withheld travels with the answer: no total, no
+    // count of drops, and not one of the other paths anywhere in the body.
+    const text = JSON.stringify(r.body);
+    for (const gone of ["Healthcare", "Finance", "Journal", "now.md", "metistry"]) expect(text, gone).not.toContain(gone);
+    expect(r.body).not.toHaveProperty("total");
+  });
+
+  it("gives a credential with neither the vault nor grants nothing at all", async () => {
+    const r = await pagesRoute(NO_SCOPE, INDEX);
+    expect(r.status).toBe(200);
+    expect(r.body.pages).toEqual([]);
+  });
+
+  // A narrowed principal's filter argument is not refused by name — that
+  // would say which prefixes exist — so it travels to the query as written,
+  // and whatever comes back is scoped anyway. The executor here returns every
+  // row whatever the binds say (the real SQL is what applies them), which is
+  // the point: the scope is not a restatement of the filter, so a query that
+  // ignored one — an overlay with a looser WHERE (D4) — still leaks nothing.
+  it("passes the caller's filters to the query and scopes every row it gets back regardless", async () => {
+    const r = await pagesRoute(grantedScope({ grants: { tier: "areas", areas: ["Areas/Health"] } }), INDEX, "?prefix=Areas/Finance&limit=5&offset=2");
+    expect(r.status).toBe(200);
+    expect(r.params).toEqual(["", "Areas/Finance", 5, 2]);
+    expect(r.body.pages.map((p: any) => p.path)).toEqual(["Areas/Health/sleep.md"]);
+    expect(JSON.stringify(r.body.pages)).not.toContain("Finance");
+    expect(r.body).toMatchObject({ prefix: "Areas/Finance", area: null, limit: 5, offset: 2 });
   });
 });

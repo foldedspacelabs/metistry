@@ -358,6 +358,71 @@ describe("test / models list: live probes through the one seam", () => {
     expect(body).toMatchObject({ model: "anthropic/claude-sonnet-5", max_tokens: 1, provider: { order: ["anthropic"], allow_fallbacks: false } });
   });
 
+  it("with nothing assigned, --complete picks the bake-off's own shortlist model, not the alphabetically-first one from a 447-model catalogue (the bug this fixes)", async () => {
+    const dir = await instance();
+    const kc = fakeSecurity({ [`${ACCOUNT}/metistry:METISTRY_OPENROUTER_API_KEY`]: KEY });
+    const http = fakeFetch({
+      "https://openrouter.ai/api/v1/models": { body: { data: [{ id: "aion-labs/aion-2.0" }, { id: "anthropic/claude-sonnet-5" }, { id: "zzz/z" }] } },
+      "https://openrouter.ai/api/v1/chat/completions": { status: 404, body: { error: "no route" } },
+    });
+    const { o } = harness(dir, { exec: kc.exec, fetchFn: http.fn });
+    await providersAdd({ ...o, template: "openrouter", skipTest: true });
+    // no assignment at all — this is the exact state that produced the bug report
+    const t = await providerTest({ ...o, name: "openrouter", complete: true });
+    expect(t.listingOk).toBe(true); // the key is fine; only the probe model was wrong
+    expect(t.ok).toBe(false); // the completion still failed, and --complete was asked
+    expect(t.completion).toMatchObject({ ok: false, model: "anthropic/claude-sonnet-5" });
+    expect(t.completion?.reason).toMatch(/shortlist/);
+    const text = renderProviderTest(t);
+    expect(text).toContain("listing ok");
+    expect(text).toContain("anthropic/claude-sonnet-5");
+    expect(text).toContain("override with --model");
+    const completionLine = text.split("\n").find((l) => l.includes("completion:"));
+    expect(completionLine).not.toContain("aion-labs"); // the completion probe never falls back to the alphabetically-first model again
+  });
+
+  it("--model overrides the automatic choice, even over an existing assignment", async () => {
+    const dir = await instance();
+    const kc = fakeSecurity({ [`${ACCOUNT}/metistry:METISTRY_OPENROUTER_API_KEY`]: KEY });
+    const http = fakeFetch({
+      "https://openrouter.ai/api/v1/models": { body: { data: [{ id: "anthropic/claude-sonnet-5" }, { id: "z" }] } },
+      "https://openrouter.ai/api/v1/chat/completions": { body: { choices: [] } },
+    });
+    const { o } = harness(dir, { exec: kc.exec, fetchFn: http.fn });
+    await providersAdd({ ...o, template: "openrouter", skipTest: true });
+    await assign({ ...o, target: parseAssignmentTarget("default"), model: "openrouter/anthropic/claude-sonnet-5" });
+    const t = await providerTest({ ...o, name: "openrouter", complete: true, model: "z" });
+    expect(t.completion).toMatchObject({ ok: true, model: "z", reason: "--model" });
+  });
+
+  it("falls back to OpenRouter's own auto-router when nothing is assigned and the shortlist model is not served", async () => {
+    const dir = await instance();
+    const kc = fakeSecurity({ [`${ACCOUNT}/metistry:METISTRY_OPENROUTER_API_KEY`]: KEY });
+    const http = fakeFetch({
+      "https://openrouter.ai/api/v1/models": { body: { data: [{ id: "aion-labs/aion-2.0" }, { id: "openrouter/auto" }] } },
+      "https://openrouter.ai/api/v1/chat/completions": { body: { choices: [] } },
+    });
+    const { o } = harness(dir, { exec: kc.exec, fetchFn: http.fn });
+    await providersAdd({ ...o, template: "openrouter", skipTest: true });
+    const t = await providerTest({ ...o, name: "openrouter", complete: true });
+    expect(t.completion).toMatchObject({ ok: true, model: "openrouter/auto" });
+    expect(t.completion?.reason).toMatch(/auto-router/);
+  });
+
+  it("a non-OpenRouter provider with nothing assigned still probes the first listed model, as before", async () => {
+    const dir = await instance();
+    const http = fakeFetch({
+      "http://127.0.0.1:1234/v1/models": { body: { data: [{ id: "b-model" }, { id: "a-model" }] } },
+      "http://127.0.0.1:1234/v1/chat/completions": { body: { choices: [] } },
+    });
+    const { o } = harness(dir, { platform: "linux", fetchFn: http.fn });
+    await providersAdd({ ...o, template: "lmstudio", skipTest: true });
+    const t = await providerTest({ ...o, name: "lmstudio", complete: true });
+    // fetchModels sorts the listing, so this is the alphabetically-first —
+    // unchanged from before this fix for a provider with no shortlist entry.
+    expect(t.completion).toMatchObject({ ok: true, model: "a-model" });
+  });
+
   it("a missing Keychain item names the variable and how to store it, never a value", async () => {
     const dir = await instance();
     const kc = fakeSecurity();

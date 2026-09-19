@@ -494,7 +494,14 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
       `${sibling}/billing.md`,
       `Journal/${tag}.md`,
       `${tag}.md`,
-    ]); // ordered by path; the draft and the conflict are simply not there
+    ]);
+    // The order above is the one assertion that is about the CLUSTER rather
+    // than the query: `Areas/<tag>/sleep.md` before `Areas/<tag>care/…` is
+    // byte order, and a locale collation (CI's Linux, `en_US.UTF-8`) ignores
+    // the `/` and puts `care` first. `COLLATE "C"` in the YAML is what makes
+    // the two machines agree — and what stops a client's `offset` window
+    // shifting under it when a vault is restored elsewhere. The draft and the
+    // conflict are simply not in the list at all.
     expect(all.find((r) => r.path === `${area}/sleep.md`)).toMatchObject({ area, title: "Sleep", description: "Sleep description", status: "clean" });
     expect(all.find((r) => r.path === `${area}/2026/taper.md`)).toMatchObject({ area, title: "taper" }); // the first two segments under Areas/, at any depth
     expect(all.find((r) => r.path === `Journal/${tag}.md`)!.area).toBe("Journal"); // outside Areas/ the top segment IS the area

@@ -638,9 +638,12 @@ export async function launchdRows(
   labelSuffix?: string | undefined,
   env: NodeJS.ProcessEnv = {},
 ): Promise<DoctorRow[]> {
-  const rows: DoctorRow[] = [];
   const shaped = new Set<string>([...SHAPED_SERVICES, SUPERVISOR_SERVICE]);
-  for (const { file, label, service } of await launchdLabels(productDir, shape, labelSuffix, env)) {
+  // one `launchctl print` per label, all at once: they are independent
+  // subprocesses, and asking five of them in series is five process spawns a
+  // person waits through at the end of every `up`
+  const labels = await launchdLabels(productDir, shape, labelSuffix, env);
+  return Promise.all(labels.map(async ({ file, label, service }): Promise<DoctorRow> => {
     // The one background item has two possible registrars, and which one owns
     // it decides who may start and stop it (docs/ops/deployment-shapes.md,
     // "Two registrars"). Reported on the supervisor's row only: the TCC
@@ -677,9 +680,8 @@ export async function launchdRows(
       row.probe += `; registered by ${registrarPhrase(found)}`;
       row.meta = { ...row.meta, registrar: found.registrar, ...(found.path ? { registered_from: found.path } : {}) };
     }
-    rows.push(row);
-  }
-  return rows;
+    return row;
+  }));
 }
 
 // ---- docker compose --------------------------------------------------------------
@@ -875,30 +877,48 @@ export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
   // Read once and shared: the `assistant` row and the local-server rows both
   // ask what compute.yaml says, and doctor must not answer twice differently.
   const compute = (await computeForDoctor(env, deps.productDir)) ?? emptyCompute();
-  for (const m of await walkManifests(deps.productDir)) rows.push(await componentRow(m, { env, fetchFn, timeoutMs, shape, labelSuffix, compute }));
   const instanceDir = env.METISTRY_INSTANCE_DIR?.replace(/\/+$/, "") || deps.productDir;
-  rows.push(await layoutRow(instanceDir));
-  rows.push(await inboxRow(instanceDir));
 
-  const db = deps.db === undefined ? await openDbFromEnv(env) : deps.db;
-  try {
-    rows.push(...(await dbRows(db, deps.productDir, shape, labelSuffix)));
-    // schedules last of the db rows: they read `runs`, so they are only
-    // meaningful once the db row above has said the database answers
-    rows.push(...(await scheduleRows(db, deps.productDir, env)));
-  } finally {
-    if (deps.db === undefined && db?.end) await db.end().catch(() => {});
-  }
-
-  if (platform === "darwin") rows.push(...(await launchdRows(deps.productDir, exec, uid, shape, labelSuffix, env)));
-  // the launchd shape's core is ONE agent with children launchd cannot see
-  if (platform === "darwin" && shape === "launchd") rows.push(...(await supervisorRows(env.METISTRY_INSTANCE_DIR?.replace(/\/+$/, "") || deps.productDir)));
-  // no container runtime is consulted when no service runs in one: a
-  // launchd install must not report "docker not found" as a finding
-  if (usesCompose(loaded.deployment)) rows.push(...(await composeRows(deps.productDir, exec)));
-  // last: the local model servers. Absent is the common case and never a
-  // failure, so these rows can only add information, never a red run.
-  rows.push(...(await localServerRows({ compute, fetchFn, timeoutMs: Math.min(timeoutMs, 2_000) })));
+  // Every group below is INDEPENDENT of every other — a bridge's HTTP probe
+  // knows nothing about `launchctl print`, which knows nothing about the
+  // database — so they are started together and the table is assembled from
+  // the results in the fixed order it has always had (`Promise.all` keeps
+  // position, not completion order).
+  //
+  // Doctor is what `up` ends with, so its wall clock is `up`'s last second.
+  // In series it was the SUM of every probe: a cold apple-fm helper answering
+  // its first `/check` in ~1s, a console answering twice, one `launchctl
+  // print` per label, a unix-socket round trip to the supervisor, four local
+  // model servers. Concurrently it is the slowest single probe. Nothing about
+  // any one check changes — no timeout was shortened to buy this, because a
+  // slow-but-healthy bridge reported as down would be a worse table.
+  const [componentRows, layout, inbox, dbAndSchedules, launchd, supervisor, containers, localModels] = await Promise.all([
+    (async () => Promise.all((await walkManifests(deps.productDir)).map((m) => componentRow(m, { env, fetchFn, timeoutMs, shape, labelSuffix, compute }))))(),
+    layoutRow(instanceDir),
+    inboxRow(instanceDir),
+    (async (): Promise<DoctorRow[]> => {
+      const db = deps.db === undefined ? await openDbFromEnv(env) : deps.db;
+      try {
+        // schedules after the db rows: they read `runs`, so they are only
+        // meaningful once the db row above has said the database answers
+        return [...(await dbRows(db, deps.productDir, shape, labelSuffix)), ...(await scheduleRows(db, deps.productDir, env))];
+      } finally {
+        // every path, the throwing one included: a pool left open is a
+        // handle that outlives the verb that made it
+        if (deps.db === undefined && db?.end) await db.end().catch(() => {});
+      }
+    })(),
+    platform === "darwin" ? launchdRows(deps.productDir, exec, uid, shape, labelSuffix, env) : Promise.resolve([]),
+    // the launchd shape's core is ONE agent with children launchd cannot see
+    platform === "darwin" && shape === "launchd" ? supervisorRows(instanceDir) : Promise.resolve([]),
+    // no container runtime is consulted when no service runs in one: a
+    // launchd install must not report "docker not found" as a finding
+    usesCompose(loaded.deployment) ? composeRows(deps.productDir, exec) : Promise.resolve([]),
+    // the local model servers. Absent is the common case and never a
+    // failure, so these rows can only add information, never a red run.
+    localServerRows({ compute, fetchFn, timeoutMs: Math.min(timeoutMs, 2_000) }),
+  ]);
+  rows.push(...componentRows, layout, inbox, ...dbAndSchedules, ...launchd, ...supervisor, ...containers, ...localModels);
 
   return { as_of: new Date().toISOString(), product_dir: deps.productDir, shape, ok: !rows.some((r) => r.status === "failed"), rows };
 }

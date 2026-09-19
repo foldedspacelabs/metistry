@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
 import { serializeLock } from "../src/lock.js";
 import { main } from "../src/main.js";
 import { up } from "../src/up.js";
-import { checkout, failDoctor, fakeExec, HELPER, JOBS, okDoctor, RECONCILER, retired, shown, WATCHDOG } from "./fixtures.js";
+import { checkout, failDoctor, fakeExec, HELPER, JOBS, okDoctor, RECONCILER, retired, retiredCalls, shown, WATCHDOG } from "./fixtures.js";
 
 const NODE = "/usr/local/bin/node";
 const base = (P: string) => ({ productDir: P, env: {} as NodeJS.ProcessEnv, platform: "darwin" as const, uid: 501, node: NODE });
@@ -49,7 +49,7 @@ describe("metistry up", () => {
     expect(r.code).toBe(0);
     expect(exec.calls.map(shown)).toEqual([
       "docker compose up -d --build",
-      ...retired(home),
+      ...retiredCalls(home),
       ...JOBS.flatMap((label) => [
         `launchctl bootout gui/501/${label}`,
         // bootout is asynchronous; bootstrapping before launchd is done gives
@@ -95,7 +95,7 @@ describe("metistry up", () => {
     expect(r.code).toBe(5);
     expect(broken.calls.map(shown)).toEqual([
       "docker compose up -d --build",
-      ...retired(home),
+      ...retiredCalls(home),
       `launchctl bootout gui/501/${HELPER}`,
       // the poll that waits out launchd's asynchronous teardown
       `launchctl print gui/501/${HELPER}`,

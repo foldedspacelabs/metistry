@@ -392,6 +392,23 @@ import Testing
 
 // MARK: - The production transport, for real
 
+@Test func idempotencyKeyRidesAsAFlagAndIsAbsentWhenNoneIsGiven() async {
+    let runner = StubRunner(result: CommandResult(exitCode: 0, stdout: #"{"id":42}"#, stderr: ""))
+    let transport = CLIConsoleCallTransport(cli: stubCLI(runner))
+
+    _ = await transport.call("POST", "/capture", body: Data(#"{}"#.utf8), idempotencyKey: "retry-1")
+    _ = await transport.call("POST", "/capture", body: Data(#"{}"#.utf8), idempotencyKey: nil)
+
+    let argv = await runner.invocations
+    #expect(argv[0] == [
+        "/src/packages/cli/dist/main.js", "console", "call", "POST", "/capture",
+        "--json", "--body", "-", "--idempotency-key", "retry-1", "--product-dir", "/src",
+    ])
+    // The plain three-argument `call` every existing caller uses still sends
+    // nothing extra — the flag is opt-in, not a default the CLI now always sees.
+    #expect(!argv[1].contains("--idempotency-key"))
+}
+
 @Test func theRequestIsOneCliInvocationAndABodyGoesToStdinNotArgv() async {
     let runner = StubRunner(result: CommandResult(exitCode: 0, stdout: #"{"ok":true}"#, stderr: ""))
     let api = ConsoleAPI(cli: stubCLI(runner))
@@ -540,15 +557,17 @@ private actor StubConsole: ConsoleCallTransport {
     private let routes: [String: Data]
     private(set) var calls: [String] = []
     private(set) var bodies: [String: Data] = [:]
+    private(set) var idempotencyKeys: [String: String] = [:]
 
     init(_ routes: [String: Data]) {
         self.routes = routes
     }
 
-    func call(_ method: String, _ path: String, body: Data?) async -> Result<Data, ConsoleError> {
+    func call(_ method: String, _ path: String, body: Data?, idempotencyKey: String?) async -> Result<Data, ConsoleError> {
         let key = "\(method) \(path)"
         calls.append(key)
         if let body { bodies[key] = body }
+        if let idempotencyKey { idempotencyKeys[key] = idempotencyKey }
         guard let data = routes[key] else {
             return .failure(.http(status: 404, envelope: ConsoleErrorEnvelope(
                 code: "not_found",

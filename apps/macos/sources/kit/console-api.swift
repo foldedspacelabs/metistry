@@ -39,9 +39,13 @@
 // and the envelope; `ConsoleError.conflictBodyIsUnavailable` says so out loud
 // rather than letting a caller believe it asked and got nothing.
 //
-// WHAT IT CANNOT DO AT ALL. `console call` sets no request headers, so
-// `POST /capture`'s `Idempotency-Key` (docs/ops/console-api.md) is unreachable
-// from here. Capture is not on this layer for that reason.
+// WHAT IT CAN NOW DO (struck 2026-09-18; `console call` gained
+// `--idempotency-key <key>`). `ConsoleCallTransport.call`'s fourth argument
+// rides as `Idempotency-Key` (docs/ops/console-api.md, today read only by
+// `POST /capture`), checked to the CLI's own shape before it ever reaches the
+// process. Nothing here calls it yet — `ConsoleAPI` has no capture method,
+// because capture itself is not on this layer — but the transport is no
+// longer the reason it couldn't be.
 
 import Foundation
 
@@ -107,7 +111,18 @@ public enum ConsoleReachability: Sendable, Equatable {
 /// `user` principal. `.success` is a 2xx and the console's own bytes; every
 /// other outcome is a typed `ConsoleError`.
 public protocol ConsoleCallTransport: Sendable {
-    func call(_ method: String, _ path: String, body: Data?) async -> Result<Data, ConsoleError>
+    /// `idempotencyKey`, when given, rides as `Idempotency-Key`
+    /// (`docs/ops/console-api.md`, today read only by `POST /capture`).
+    func call(_ method: String, _ path: String, body: Data?, idempotencyKey: String?) async -> Result<Data, ConsoleError>
+}
+
+extension ConsoleCallTransport {
+    /// The common case: no `Idempotency-Key`. Every existing call site keeps
+    /// this three-argument spelling; only a caller that wants the header
+    /// reaches for the four-argument one above.
+    public func call(_ method: String, _ path: String, body: Data?) async -> Result<Data, ConsoleError> {
+        await call(method, path, body: body, idempotencyKey: nil)
+    }
 }
 
 /// `metistry console call` — the production transport, and the only one.
@@ -123,17 +138,17 @@ public struct CLIConsoleCallTransport: ConsoleCallTransport {
     }
 
     /// The argument array for a request, for a view that shows its work.
-    public func arguments(_ method: String, _ path: String, hasBody: Bool) -> [String] {
-        Self.verb + [method, path, "--json"] + (hasBody ? ["--body", "-"] : [])
+    public func arguments(_ method: String, _ path: String, hasBody: Bool, idempotencyKey: String? = nil) -> [String] {
+        Self.verb + [method, path, "--json"] + (hasBody ? ["--body", "-"] : []) + (idempotencyKey.map { ["--idempotency-key", $0] } ?? [])
     }
 
-    public func call(_ method: String, _ path: String, body: Data?) async -> Result<Data, ConsoleError> {
+    public func call(_ method: String, _ path: String, body: Data?, idempotencyKey: String? = nil) async -> Result<Data, ConsoleError> {
         let payload = body.flatMap { String(data: $0, encoding: .utf8) }
         if body != nil && payload == nil { return .failure(.undecodable("the request body is not UTF-8")) }
         let result: CommandResult
         do {
             result = try await cli.run(
-                arguments(method, path, hasBody: body != nil),
+                arguments(method, path, hasBody: body != nil, idempotencyKey: idempotencyKey),
                 standardInput: payload
             )
         } catch {

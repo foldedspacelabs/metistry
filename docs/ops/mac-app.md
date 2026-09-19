@@ -227,9 +227,12 @@ Nothing phase A reads is affected (the envelope *is* `{code, message}`, so a
 says so out loud rather than letting a caller read the absence as "the console
 sent none". The queue's `if_unchanged` repaint in phase B wants that body: the
 fix is for `console call` to print `r.raw` on stdout for a `>= 400` as well,
-**not** a second HTTP client in Swift. And because `console call` sets no
+**not** a second HTTP client in Swift. ~~And because `console call` sets no
 request headers, `POST /capture`'s `Idempotency-Key` is unreachable from this
-layer — which is why capture is not on it.
+layer — which is why capture is not on it.~~ (struck 2026-09-18; `console
+call --idempotency-key <key>` shipped, and `ConsoleCallTransport.call` takes
+the key as its fourth argument. Capture is still not on `ConsoleAPI` — no
+route method calls it yet — but the transport is no longer why not.)
 
 ## What `ASAuthorization` actually says about a local origin
 

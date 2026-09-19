@@ -13,17 +13,18 @@
 // hand): it only notes the one line that would (doctor.ts's `cli on PATH`
 // row carries the same line as its remediation).
 //
-// ONE COLLISION TO DESIGN AROUND. Under the launchd shape,
-// `<root>/.metistry/state/bin/Metistry` is THIS SAME install's supervisor —
-// a symlink to node, so System Settings shows "Metistry" rather than "node"
+// `.metistry/state/cli/`, not `state/bin/`: under the launchd shape,
+// `state/bin/Metistry` (capital M) is THIS SAME install's supervisor — a
+// symlink to node, so System Settings shows "Metistry" rather than "node"
 // (supervisor.ts's `supervisorBinPath`). macOS's default volume format is
-// case-insensitive, so `bin/metistry` and `bin/Metistry` are the SAME
-// directory entry there: writing this shim over it would turn the
-// supervisor's own program into a shell script mid-flight, and the
-// supervisor's `ln -sfn` (installSupervisorPlan, run on every `up` under
-// that shape) would just as readily overwrite this shim right back on the
-// very next run. `writeCliShim` checks what is actually sitting at the path
-// FIRST and leaves a symlink alone — a skip, reported, never a corruption.
+// case-insensitive, so `bin/metistry` and `bin/Metistry` would be the SAME
+// directory entry there — a real collision, caught by an early version of
+// this file that put the shim in `state/bin/` too and, on that shape, simply
+// never wrote it. A sibling directory removes the collision outright rather
+// than working around it. `writeCliShim` still checks what is actually
+// sitting at the path before writing — a symlink, or a file that does not
+// look like a shim this module wrote — and leaves it alone: defence in
+// depth, not the load-bearing fix.
 
 import { existsSync, lstatSync } from "node:fs";
 import { readFile } from "node:fs/promises";
@@ -32,9 +33,9 @@ import { CURRENT_LINK } from "./release.js";
 import { RUNTIME_DIRNAME } from "./runtime-deps.js";
 import type { StepRunner } from "./steps.js";
 
-/** `<instanceDir-or-productDir>/.metistry/state/bin/metistry` (legacy layout: `state/bin/metistry`). */
+/** `<instanceDir-or-productDir>/.metistry/state/cli/metistry` (legacy layout: `state/cli/metistry`). */
 export function cliShimPath(productDir: string, instanceDir: string | undefined): string {
-  return instanceStatePath(instanceDir || productDir, "bin", "metistry");
+  return instanceStatePath(instanceDir || productDir, "cli", "metistry");
 }
 
 /** `ln -s <shim> ~/.local/bin/metistry` — the one line `up` and doctor.ts both point at; never run for the operator (invariant 2). */
@@ -43,6 +44,14 @@ export function cliShimLinkHint(shimPath: string): string {
 }
 
 const SHELL_UNSAFE = /["'`$\n]/;
+
+/** The one line every version of this shim has always carried, second — the marker `writeCliShim` uses to tell "an old (or foreign) file" from "ours to refresh". */
+const SHIM_MARKER = "# metistry — written by `metistry up`/`metistry update`;";
+
+/** Does `content` look like a shim this module wrote (any version of it), rather than something else that happens to sit at the same path? */
+function looksLikeOurShim(content: string): boolean {
+  return content.startsWith("#!/bin/sh\n") && content.split("\n")[1] === SHIM_MARKER + " do not edit by hand,";
+}
 
 /**
  * The shim's content. `productDir` and `instanceDir` are embedded as the
@@ -64,7 +73,7 @@ export function renderCliShim(productDir: string, instanceDir: string | undefine
   }
   const lines = [
     "#!/bin/sh",
-    "# metistry — written by `metistry up`/`metistry update`; do not edit by hand,",
+    `${SHIM_MARKER} do not edit by hand,`,
     "# it is regenerated (and left alone when unchanged) on every run. Never put",
     "# on PATH for you (invariant 2 — that is the user's own hand):",
     `#   ${cliShimLinkHint("$0")}`,
@@ -85,22 +94,25 @@ export function renderCliShim(productDir: string, instanceDir: string | undefine
 
 /**
  * Write (or refresh) the shim, idempotently: unchanged content is left
- * alone (no write, no chmod), and a symlink already sitting at the path —
- * the launchd shape's supervisor identity symlink, on a case-insensitive
- * volume — is left alone too, with a note explaining why. Runs regardless
- * of whether the rest of `up`/`update` succeeded: it costs nothing, and it
- * is what lets the operator run the next `metistry` BY NAME even after a
- * failed step.
+ * alone (no write, no chmod). Two things already sitting at the path are
+ * ALSO left alone, noted rather than clobbered: a symlink (nothing this
+ * module ever writes is one), and a plain file that does not look like a
+ * shim this module wrote (`looksLikeOurShim`) — either way, something else
+ * put it there and it is not this verb's place to guess what. Runs
+ * regardless of whether the rest of `up`/`update` succeeded: it costs
+ * nothing, and it is what lets the operator run the next `metistry` BY NAME
+ * even after a failed step.
  */
 export async function writeCliShim(r: StepRunner, productDir: string, instanceDir: string | undefined): Promise<void> {
   const path = cliShimPath(productDir, instanceDir);
-  // lstat, not existsSync: a symlink whose TARGET does not exist (this Mac's
-  // bundled node not installed yet, say) is exactly the case that matters —
-  // existsSync follows the link and would report "nothing here", walking
-  // straight into the supervisor's own symlink on the write below.
+  // lstat, not existsSync: a symlink whose TARGET does not exist is exactly
+  // the case that matters here — existsSync follows the link and would
+  // report "nothing here", walking straight into whatever it points at on
+  // the write below.
   try {
-    if (lstatSync(path).isSymbolicLink()) {
-      r.note(`cli: ${path} is this install's supervisor program symlink on this (case-insensitive) volume — no \`metistry\` shim written there under the launchd shape; \`metistry doctor\` still reports it (docs/ops/cli.md)`);
+    const st = lstatSync(path);
+    if (!st.isFile()) {
+      r.note(`cli: ${path} already exists and is not a plain file (a symlink, most likely) — left alone; \`metistry doctor\` says whether \`metistry\` is reachable another way`);
       return;
     }
   } catch {
@@ -116,6 +128,10 @@ export async function writeCliShim(r: StepRunner, productDir: string, instanceDi
   }
 
   const before = existsSync(path) ? await readFile(path, "utf8").catch(() => undefined) : undefined;
+  if (before !== undefined && !looksLikeOurShim(before)) {
+    r.note(`cli: ${path} already exists and is not a shim this install wrote — left alone rather than overwritten`);
+    return;
+  }
   if (before === content) {
     r.note(`cli: ${path} unchanged — \`${cliShimLinkHint(path)}\` (or add its directory to PATH) runs \`metistry\` by name`);
     return;

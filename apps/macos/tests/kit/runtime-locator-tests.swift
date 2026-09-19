@@ -140,32 +140,59 @@ private struct Sandbox: ~Copyable {
     #expect(runtime.executable.path == box.root.appendingPathComponent(".local/bin/metistry").path)
 }
 
-@Test func metistryIsFoundInTheActiveInstancesOwnStateBin() throws {
+@Test func metistryIsFoundInTheActiveInstancesOwnStateCli() throws {
     // `metistry up`/`metistry update` write the shim here (cli-shim.ts) but
     // never put it on PATH themselves (invariant 2) — the app still finds it
-    // without the operator having linked anything.
+    // without the operator having linked anything. `state/cli`, not
+    // `state/bin` — a sibling of the launchd shape's supervisor symlink
+    // directory, not inside it (cli-shim.ts's header comment has why).
     let box = try Sandbox()
     let instance = box.root.appendingPathComponent("instance")
-    _ = try box.touch("instance/.metistry/state/bin/metistry", executable: true)
+    _ = try box.touch("instance/.metistry/state/cli/metistry", executable: true)
 
     let resolved = RuntimeLocator.locate(
         bundleResourceURL: nil, environment: [:], installedDir: box.uninstalled, homeDirectory: box.root, instanceDir: instance
     )
     let runtime = try #require(resolved.runtime)
     #expect(runtime.source == .path)
-    #expect(runtime.executable.path == instance.appendingPathComponent(".metistry/state/bin/metistry").path)
+    #expect(runtime.executable.path == instance.appendingPathComponent(".metistry/state/cli/metistry").path)
 }
 
-@Test func neitherLocalBinNorTheInstanceBinShadowsAnEarlierStage() throws {
+@Test func aStateBinMetistrySymlinkDoesNotShadowTheShimInStateCli() throws {
+    // The launchd shape's supervisor identity symlink lives at
+    // state/bin/Metistry (supervisor.ts) — capitalised, but macOS's default
+    // case-insensitive volume makes `state/bin/metistry` and
+    // `state/bin/Metistry` the SAME directory entry, which is exactly why
+    // the shim lives in the sibling `state/cli/` instead. This proves the
+    // instance-bin candidate this locator used to search does not
+    // accidentally resolve to that symlink now that it points at
+    // `state/cli`: it is a different directory, so the symlink is simply
+    // never looked at.
+    let box = try Sandbox()
+    let instance = box.root.appendingPathComponent("instance")
+    let stateBin = instance.appendingPathComponent(".metistry/state/bin", isDirectory: true)
+    try FileManager.default.createDirectory(at: stateBin, withIntermediateDirectories: true)
+    try FileManager.default.createSymbolicLink(atPath: stateBin.appendingPathComponent("Metistry").path, withDestinationPath: "/usr/local/bin/node")
+    _ = try box.touch("instance/.metistry/state/cli/metistry", executable: true)
+
+    let resolved = RuntimeLocator.locate(
+        bundleResourceURL: nil, environment: [:], installedDir: box.uninstalled, homeDirectory: box.root, instanceDir: instance
+    )
+    let runtime = try #require(resolved.runtime)
+    #expect(runtime.source == .path)
+    #expect(runtime.executable.path == instance.appendingPathComponent(".metistry/state/cli/metistry").path)
+}
+
+@Test func neitherLocalBinNorTheInstanceCliShadowsAnEarlierStage() throws {
     // A checkout named explicitly still wins even when an unlinked shim
-    // happens to sit in the active instance's own state/bin — stage 1 beats
+    // happens to sit in the active instance's own state/cli — stage 1 beats
     // stage 4 exactly as it already does for the installed/bundled stages.
     let box = try Sandbox()
     let checkout = box.root.appendingPathComponent("checkout")
     _ = try box.touch("checkout/packages/cli/dist/main.js")
     _ = try box.touch("checkout/runtime/node/bin/node", executable: true)
     let instance = box.root.appendingPathComponent("instance")
-    _ = try box.touch("instance/.metistry/state/bin/metistry", executable: true)
+    _ = try box.touch("instance/.metistry/state/cli/metistry", executable: true)
 
     let resolved = RuntimeLocator.locate(
         bundleResourceURL: nil, environment: [:], userProductDir: checkout, installedDir: box.uninstalled, homeDirectory: box.root, instanceDir: instance
@@ -173,7 +200,7 @@ private struct Sandbox: ~Copyable {
     #expect(resolved.runtime?.source == .checkout)
 }
 
-@Test func aMissingMetistryAnywhereListsLocalBinAndTheInstanceBinInTheAttempts() throws {
+@Test func aMissingMetistryAnywhereListsLocalBinAndTheInstanceCliInTheAttempts() throws {
     let box = try Sandbox()
     let instance = box.root.appendingPathComponent("instance")
     try FileManager.default.createDirectory(at: instance, withIntermediateDirectories: true)
@@ -184,7 +211,7 @@ private struct Sandbox: ~Copyable {
     #expect(resolved.runtime == nil)
     let attempt = try #require(resolved.attempts.last)
     #expect(attempt.contains(box.root.appendingPathComponent(".local/bin").path))
-    #expect(attempt.contains(instance.appendingPathComponent(".metistry/state/bin").path))
+    #expect(attempt.contains(instance.appendingPathComponent(".metistry/state/cli").path))
 }
 
 // MARK: - The writable install, and the bundle as a seed

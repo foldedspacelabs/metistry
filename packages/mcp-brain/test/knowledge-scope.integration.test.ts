@@ -222,11 +222,26 @@ cache_ttl: 0
     for (const e of r.body.entries) expect(Object.keys(e as object)).not.toContain("content");
   });
 
-  it("tier index: links are content-shaped, so they need `areas` — the discovery tier is refused them", async () => {
-    expect(await once("tok-index", "knowledge_list", { links_for: "Areas/Scope/Inside.md" })).toMatchObject({
+  it("tier index: links are content-shaped, so they need `areas` — the discovery tier is told which area would let it (ruled 2026-09-19, PR #216 judgement call B)", async () => {
+    // Inside.md is a real, settled row this tier can already SEE (the
+    // previous test) — so the refusal names the area rather than the bare
+    // string: it is not a new leak, existence was already visible.
+    const r = await once("tok-index", "knowledge_list", { links_for: "Areas/Scope/Inside.md" });
+    expect(r).toMatchObject({
       isError: true,
-      body: { error: { code: "forbidden", message: "not granted" } },
+      body: { error: { code: "forbidden", message: expect.stringContaining("`Areas/Scope`") }, reason: "scope_required", grantedScope: "Areas/Scope" },
     });
+    expect(r.body.error.message).toContain("requests_create"); // names the only mechanism that exists today
+
+    // A path merely SHAPED like a vault path — never indexed, machinery, or
+    // outside the vault-path rule — must not confirm existence either way:
+    // no area is ever named for it, tier index included.
+    for (const misuse of ["Areas/Scope/NoSuchPage.md", "Areas/Scope/Hidden.md", ".metistry/identity.yaml", "Artifacts/blob.bin", "Areas/Scope/../../etc/passwd"]) {
+      const bad = await once("tok-index", "knowledge_list", { links_for: misuse });
+      expect(bad, misuse).toMatchObject({ isError: true, body: { error: { code: "forbidden", message: "not granted" } } });
+      expect(JSON.stringify(bad.body), misuse).not.toContain("grantedScope");
+      expect(JSON.stringify(bad.body), misuse).not.toContain("scope_required");
+    }
   });
 
   it("tier areas: the page list stops at the granted prefixes", async () => {

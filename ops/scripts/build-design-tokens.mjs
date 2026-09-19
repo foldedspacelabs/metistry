@@ -45,7 +45,12 @@ const contrast = (a, b) => {
 // Text roles are held to AA 4.5:1; chip/statement text renders at >=13px 500
 // weight so it is not "large text" and gets no exemption. Non-text roles
 // (focus ring, borders) are held to the 3:1 non-text minimum.
-const NON_TEXT = new Set(["focus-ring"]);
+// Chart marks are non-text graphics (WCAG 1.4.11), not labels: a bar or a line
+// carries its value through an axis and a direct label, never through being
+// readable as type. Holding them to 4.5:1 collapses a sequential ramp on a
+// near-white ground — steps four and five land within 0.03 of each other and
+// stop being distinguishable, which is the opposite of accessible.
+const NON_TEXT = new Set(["focus-ring", "chart-1", "chart-2", "chart-3", "chart-4", "chart-5"]);
 const rows = [];
 for (const [name, def] of Object.entries(T.color)) {
   for (const on of def.contrast ?? []) {

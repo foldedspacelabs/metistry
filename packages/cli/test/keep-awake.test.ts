@@ -153,7 +153,8 @@ describe("metistry deployment set-keep-awake", () => {
     const report = await buildDeploymentReport({ productDir: P, env: { METISTRY_INSTANCE_DIR: I }, exec: fakeExec(), platform: "darwin", uid: 501 });
     expect(report.keep_awake).toBe("always");
     expect(report.keep_awake_note).toContain("no supervisor");
-    expect(renderDeploymentReport(report)).toContain("keep_awake: always —");
+    // the ui's key/value block, not a raw `key: value` line (docs/ops/cli-style.md)
+    expect(renderDeploymentReport(report)).toMatch(/keep_awake\s+always\s+— .*no supervisor/);
   });
 });
 

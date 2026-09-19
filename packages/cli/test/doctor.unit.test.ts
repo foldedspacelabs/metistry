@@ -156,12 +156,18 @@ describe("doctor: everything healthy", () => {
     const out: string[] = [];
     expect(await main(["doctor", "--product-dir", productDir], { out: (s) => out.push(s), doctorDeps: deps })).toBe(0);
     const text = out.join("\n");
-    expect(text).toMatch(/^name\s+kind\s+status\s+ms\s+remediation/);
-    expect(text).toMatch(/17 checks: 9 ok, 0 degraded, 0 failed, 8 absent — healthy \(.*, shape compose\)/);
-    expect(text).toMatch(/^local:llamaserver\s+local-model\s+absent/m);
-    expect(text).toMatch(/^local:applefm\s+local-model\s+absent/m);
+    // the plain table is grouped by kind, one status icon + word per row,
+    // the remediation wrapped underneath it (docs/ops/cli-style.md). The
+    // icon spelling depends on the terminal's locale, so nothing here
+    // asserts on the glyph itself.
+    expect(text.split("\n")[0]).toContain(`${productDir} — shape compose`);
+    expect(text).toMatch(/17 checks: 9 ok, 0 degraded, 0 failed, 8 absent — .*healthy/);
+    expect(text).toMatch(/^local-model$/m); // the kind is the heading, not a repeated column
+    expect(text).toMatch(/^\s+\S+\s+local:llamaserver\s+absent\s+\d+ms$/m);
+    expect(text).toMatch(/^\s+\S+\s+local:applefm\s+absent\s+\d+ms$/m);
     expect(text).not.toMatch(/launchd:/); // linux: no launchd rows
-    expect(text).toMatch(/^compose\s+compose\s+absent\s+\d+\s+docker not found/m);
+    expect(text).toMatch(/^\s+\S+\s+compose\s+absent\s+\d+ms$/m);
+    expect(text).toContain("docker not found");
 
     const json: string[] = [];
     expect(await main(["doctor", "--product-dir", productDir, "--json"], { out: (s) => json.push(s), doctorDeps: deps })).toBe(0);
@@ -367,7 +373,7 @@ describe("doctor: failed", () => {
 
     const out: string[] = [];
     expect(await main(["doctor", "--product-dir", productDir], { out: (s) => out.push(s), doctorDeps: { env, fetchFn: fakeFetch({ "7901/check": res(200, checkBody("ok")), "/health": res(200), "/api/status": res(401) }), db: fakeDb(new Error("down")), exec: fakeExec({ docker: { code: 127 } }), platform: "linux" } })).toBe(1);
-    expect(out.join("\n")).toMatch(/1 failed, .* — FAILED/);
+    expect(out.join("\n")).toMatch(/1 failed, \d+ absent — .*FAILED/);
   });
 
   it("a rejected bearer, a non-contract body, and a bridge reporting failed are all failed with distinct remediations", async () => {

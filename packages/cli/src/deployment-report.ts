@@ -30,6 +30,7 @@ import { realExec, type Exec } from "./exec.js";
 import { serviceOf } from "./launchd.js";
 import { protectedRel, writeProtected } from "./protected-write.js";
 import { StepRunner } from "./steps.js";
+import { defaultUi, type Ui } from "./ui.js";
 
 export interface DeploymentServiceRow {
   name: ServiceName;
@@ -120,18 +121,27 @@ export function keepAwakeNote(keepAwake: KeepAwake, shape: DeploymentShape, plat
   return undefined;
 }
 
-export function renderDeploymentReport(report: DeploymentReport): string {
-  const head = ["service", "shape", "enabled", "running"];
-  const body = report.services.map((s) => [s.name, s.shape, s.enabled ? "yes" : "no", s.running === undefined ? "?" : s.running ? "yes" : "no"]);
-  const widths = head.map((h, i) => Math.max(h.length, ...body.map((row) => row[i]!.length)));
-  const line = (cells: string[]) => cells.map((c, i) => c.padEnd(widths[i] ?? 0)).join("  ").trimEnd();
+/**
+ * One table (docs/ops/cli-style.md): the shape it read and where from, this
+ * install's power policy with whatever caveat that policy carries, then a
+ * row per service with the filled/hollow icon for running — `n/a` where the
+ * state is not cheaply knowable (a launchd job off macOS, a compose one
+ * where nothing uses compose), never a bare `?`.
+ */
+export function renderDeploymentReport(report: DeploymentReport, ui: Ui = defaultUi()): string {
+  const running = (s: DeploymentServiceRow): string =>
+    s.running === undefined ? `${ui.paint("n/a", ui.icon("off"))} ${ui.dim("n/a")}` : s.running ? `${ui.paint("ok", ui.icon("on"))} yes` : `${ui.paint("n/a", ui.icon("off"))} no`;
+  const rows = report.services.map((s) => [s.name, s.shape, s.enabled ? "yes" : ui.dim("no"), running(s)]);
   return [
-    `shape: ${report.shape} (from ${report.from})`,
-    `keep_awake: ${report.keep_awake}${report.keep_awake_note ? ` — ${report.keep_awake_note}` : ""}`,
+    ui.kv(
+      [
+        ["shape", `${report.shape}  ${ui.dim(`(from ${report.from})`)}`],
+        ["keep_awake", `${report.keep_awake}${report.keep_awake_note ? `  ${ui.dim(`— ${report.keep_awake_note}`)}` : ""}`],
+      ],
+      { indent: 0 },
+    ),
     "",
-    line(head),
-    line(widths.map((w) => "-".repeat(w))),
-    ...body.map(line),
+    ui.table(["service", "shape", "enabled", "running"], rows, { ragged: [] }),
   ].join("\n");
 }
 

@@ -49,7 +49,7 @@ describe("deploymentServiceRows / buildDeploymentReport", () => {
       { name: "watchdog", shape: "launchd", enabled: true, running: true },
     ]);
     const table = renderDeploymentReport(report);
-    expect(table).toContain("shape: compose (from no deployment.yaml — the built-in default)");
+    expect(table).toContain("shape  compose  (from no deployment.yaml — the built-in default)");
     expect(table).toContain("db");
   });
 

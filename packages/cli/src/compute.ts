@@ -60,6 +60,7 @@ import {
 import { Keychain, keychainAccount, serviceFor } from "./keychain.js";
 import { protectedRel, writeProtected, type ProtectedWrite } from "./protected-write.js";
 import { StepFailed, StepRunner } from "./steps.js";
+import { defaultUi, type Ui } from "./ui.js";
 
 /**
  * The provider blocks `seed/compute-templates/` ships. A name that is not one
@@ -618,13 +619,23 @@ export async function providerTest(opts: ComputeOptions & { name: string; comple
   }
 }
 
-export function renderProviderTest(t: ProviderTestResult): string {
-  const lines = [`${t.name}: listing ${t.listingOk ? "ok" : "FAILED"} — ${t.detail}`];
-  if (t.models.length > 0) lines.push(`  models: ${t.models.slice(0, 8).join(", ")}${t.models.length > 8 ? `, … (${t.models.length} total)` : ""}`);
+/**
+ * The listing's verdict, then what it is made of as aligned sub-rows
+ * (docs/ops/cli-style.md): the models `/v1/models` served back, and — with
+ * `--complete` — whether a real one-token call came back, against which
+ * model, and how that model was chosen. The icon is the WHOLE result: a
+ * listing that worked under a completion that did not is still a failure.
+ */
+export function renderProviderTest(t: ProviderTestResult, ui: Ui = defaultUi()): string {
+  const verdict = (ok: boolean) => (ok ? ui.paint("ok", "ok") : ui.paint("failed", "FAILED"));
+  const lines = [`${ui.statusIcon(t.ok ? "ok" : "failed")} ${ui.strong(t.name)}  listing ${verdict(t.listingOk)} ${ui.dim(`— ${t.detail}`)}`];
+  const rows: Array<[string, string]> = [];
+  if (t.models.length > 0) rows.push(["models", `${t.models.slice(0, 8).join(", ")}${t.models.length > 8 ? ui.dim(`, … (${t.models.length} total)`) : ""}`]);
   if (t.completion) {
     const override = t.completion.ok ? "" : " — override with --model <id>";
-    lines.push(`  completion: ${t.completion.ok ? "ok" : "FAILED"} (model ${t.completion.model || "none"}, chosen: ${t.completion.reason}) — ${t.completion.detail}${override}`);
+    rows.push(["completion", `${verdict(t.completion.ok)} ${ui.dim(`${t.completion.model || "none"} (chosen: ${t.completion.reason}) — ${t.completion.detail}${override}`)}`]);
   }
+  if (rows.length > 0) lines.push(ui.kv(rows, { indent: 4 }));
   return lines.join("\n");
 }
 

@@ -563,12 +563,14 @@ optional field beside `name`, `description`, `params`, `sql` and `cache_ttl`:
 | `generic` | the default, and what every manifest without the field means. Served here, by name |
 | `route` | this query has an **endpoint of its own**, and that endpoint does something this door cannot. Asking for it here is the `404` an unknown name gets |
 
-The field exists because of `knowledge_pages`. `GET /api/knowledge/pages`
-filters every row it returns through the caller's scope (`canSee`); the
+The field exists because of `knowledge_pages` and `knowledge_page_links`.
+`GET /api/knowledge/pages` and `GET /api/knowledge/links` filter every row
+they return through the caller's scope (`canSee` — for a link, at both ends);
+the
 generic door does not, cannot — it has no principal scope and no reason to
 believe a column called `path` is a vault path — and would have handed the
-whole index to anyone who could reach `/api/q/<name>`, which includes the
-capture owner token that is `403` on `/api/knowledge/*`. One endpoint per
+whole index, and the whole graph, to anyone who could reach `/api/q/<name>`,
+which includes the capture owner token that is `403` on `/api/knowledge/*`. One endpoint per
 necessary operation (ruled 2026-09-19): the filter is not optional if there is
 no second way in.
 
@@ -606,9 +608,13 @@ GET /api/knowledge/page?path=Areas/Health/sleep.md
 GET /api/knowledge/pages?area=&prefix=&limit=&offset=
 200 {"pages":[{"path","area","title","description","status","modified","indexed_at"}],
      "area":null,"prefix":"Areas/Health","limit":100,"offset":0,"as_of":"…"}
+GET /api/knowledge/links?path=Areas/Health/sleep.md&limit=&offset=
+200 {"path":"Areas/Health/sleep.md",
+     "links":[{"direction":"outgoing","path","kind","title","description","status","resolved"}],
+     "limit":100,"offset":0,"as_of":"…"}
 400 q / mode / limit / offset / a filter's shape / a missing path — by name
 404 the page is not there, OR is not knowledge (indistinguishable, on purpose)
-503 no vault bridge configured; or, for `pages`, the named query is not loaded
+503 no vault bridge configured; or, for `pages`/`links`, the named query is not loaded
 ```
 
 The console has held a vault reader, lister and searcher since Phase 6 and
@@ -646,14 +652,17 @@ editor or `metistry compute show`, and the honest thing to say on the
 *knowledge* route is "there is no such page", not "there is one and you may
 not have it". "Refused" and "absent" are indistinguishable from outside.
 
-**Grant areas.** All three routes filter through one predicate (`canSee(path,
+**Grant areas.** All four routes filter through one predicate (`canSee(path,
 scope)`): is this vault content at all, *and* does it fall under the scope's
-areas. A hit the scope does not cover is **dropped**, never returned with a
-flag — a path is the sensitive half of a hit, and a filtered list must not
+areas. `links` applies it twice, once per end of an edge. A hit the scope does
+not cover is **dropped**, never returned with a flag — a path is the sensitive half of a hit, and a filtered list must not
 become a directory listing of what was filtered. The only principal that
 reaches these routes today is `user`, whose scope is the whole vault (which is
-still not "every path": the `isVaultPath` half applies to the owner too). An
-**agent** reaches knowledge under its grants on the `/mcp` mount —
+still not "every path": the `isVaultPath` half applies to the owner too) — and
+that scope is **derived from the credential** (`knowledgeScopeOf`), never a
+constant at the call site, because a filter is only as honest as the scope it
+is handed. An **agent** reaches knowledge under its grants on the `/mcp`
+mount —
 `knowledge_search`, `knowledge_read`, `knowledge_list`, `knowledge_grep`,
 where `knowledgeScope(principal)` produces exactly this shape from
 `grants.areas` — and is the uniform `403` here, like everywhere outside
@@ -661,8 +670,9 @@ where `knowledgeScope(principal)` produces exactly this shape from
 that a narrower console principal, if one is ever minted, inherits the filter
 rather than reinventing it at the call site.
 
-**`GET /api/knowledge/pages` is the one that is not a proxy.** A page's bytes
-and a search ranking are not derived state — there is no column holding a note
+**`GET /api/knowledge/pages` is the first of the two that are not proxies**
+(the link graph below is the other). A page's bytes and a search ranking are
+not derived state — there is no column holding a note
 body — so those two go to the bridge. A page LIST *is* derived
 (`knowledge_files` is the reconciler's own index, rebuilt from the vault by a
 walk), so invariant 3 sends it through the named query
@@ -710,7 +720,42 @@ made the filter on this one optional, and it was reachable — the capture owner
 token is `403` here and has always been admitted on `/api/q/<name>`. The
 section above it describes the field.
 
-The link graph (`knowledge_page_links` over `knowledge_links`) is still open.
+**`GET /api/knowledge/links` is the fourth door, and the same kind of thing.**
+The wikilink graph is derived too — the reconciler parses it out of the notes
+on every walk and re-resolves a note's edges whenever the note or the path set
+moves — so it is the named query `seed/queries/knowledge_page_links.yaml`,
+`expose: route` for the same reason, over `knowledge_links` (`0001_init.sql`:
+`from_path`, `to_path`, `kind`, primary key on all three, index on `to_path`,
+so both directions are one indexed lookup). No migration.
+
+| Field | Meaning |
+| --- | --- |
+| `path` (parameter) | **required** — the page whose links these are. A path the caller may not see is the same `404` a missing page gets: "this page has four backlinks" is a fact about a page |
+| `direction` | `outgoing` — this page links there; `incoming` — that page links here |
+| `path` (row) | always **the other end** of the edge. One list, one column, one predicate — two arrays would be two chances to filter them unevenly |
+| `kind` | `wikilink`, `frontmatter` or `embed`. The same target reached two ways is **two edges**, so a client's row identity is the triple and not the path |
+| `resolved` | whether the index holds a settled page there. `false` is an unresolved wikilink — a note not written yet, which is how a vault gets written; render it the way Obsidian does rather than dropping it |
+| `title` / `description` / `status` | the target's, where the index knows it; the title falls back to the basename, decided server-side |
+
+**Both ends are scoped**, which is the whole of the security story here: the
+`path` parameter is checked before anything runs, and every row's `path` goes
+through the same `canSee`. So a page inside a grant that links *out* of it,
+and a page outside a grant that links *in*, both come back dropped rather than
+listed — a backlink must not report the existence of a note in an area the
+caller was never given.
+
+**Never in the list:** an edge whose other end is a `draft` or an unsettled
+`conflict`, at either end and at every tier — the same rule the page list
+applies, so a draft cannot be discovered through the graph after being hidden
+from the list. Dropped rather than blanked: a row saying "there is something
+here you may not see" is the disclosure the rule exists to prevent.
+
+Ordered **outgoing first, then by path in byte order, then by `kind`** — the
+link table's primary key read the other way round, so the order is total and
+`limit`/`offset` cannot repeat or skip an edge. `limit` defaults to 100 with a
+ceiling of 500, like the page list. There is no `total`, for the page list's
+reason. A page that does not exist is an empty `200`, not a `404`: it has no
+links, and "refused" and "absent" stay indistinguishable.
 
 ## `GET /api/commands` — the composer's list, generated (`user` principal)
 

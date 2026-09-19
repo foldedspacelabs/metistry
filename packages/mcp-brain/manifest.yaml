@@ -5,7 +5,7 @@ transport: http
 port: 8080               # no bind of its own: mounted at the console's POST /mcp, so this is the console's port
 runs_on: container
 requires_tcc: []
-discovery: eager         # 26 tools declared; 25 of them EAGER at 19,787 chars ≈ 4.9k definition tokens (chars/4), just under the >5k line that gates lazy. `propose_action` is the 26th and it is LAZY BY CREDENTIAL: registered only for a principal whose `autonomy` table admits an action (docs/ops/actions.md), i.e. nobody until the owner sets a level. So the surface every agent sees is unchanged, and a principal that has opted in carries 26 tools / 20,845 chars ≈ 5.2k tokens, knowingly, having bought something with it. Deferring on the credential rather than behind a tool_index/execute/batch meta-tool is the cheaper half of docs/research/2026-08-tool-discovery.md's advice — same saving, none of the +1 discovery turn. Deprecated spellings (src/aliases.ts) resolve at call time and are deliberately not exposed here. Measured by test/brain.test.ts.
+discovery: eager         # 26 tools declared; 25 of them EAGER at 19,914 chars ≈ 5.0k definition tokens (chars/4), just under the >5k line that gates lazy — and now within 80 chars of it, which is why the 2026-09-19 knowledge scoping rode on `knowledge_list`'s existing definition (a `links_for` argument) instead of arriving as a `knowledge_pages`/`knowledge_links` pair: a new tool here is no longer a free choice, it is the lazy decision. `propose_action` is the 26th and it is LAZY BY CREDENTIAL: registered only for a principal whose `autonomy` table admits an action (docs/ops/actions.md), i.e. nobody until the owner sets a level. So the surface every agent sees is unchanged, and a principal that has opted in carries 26 tools / 20,845 chars ≈ 5.2k tokens, knowingly, having bought something with it. Deferring on the credential rather than behind a tool_index/execute/batch meta-tool is the cheaper half of docs/research/2026-08-tool-discovery.md's advice — same saving, none of the +1 discovery turn. Deprecated spellings (src/aliases.ts) resolve at call time and are deliberately not exposed here. Measured by test/brain.test.ts.
 degrades: absent
 exposes:
   - name: capture
@@ -35,7 +35,7 @@ exposes:
   - name: knowledge_read
     description: Read one settled note under a granted vault area prefix (returns its sha256 for compare-and-swap)
   - name: knowledge_list
-    description: List files/directories under a vault prefix, depth-limited — tier index browses everything, tier areas only its granted prefixes; drafts excluded
+    description: "List a vault prefix, depth-limited — path, title and one-line description, never content; tier index browses every title, tier areas only its granted prefixes; `links_for` lists one page's links instead (both ends inside the grant, tier areas); drafts excluded. The page list and the link graph are the same route-backed named queries the console's /api/knowledge/pages and /links serve the owner, under the same scope filter"
   - name: knowledge_grep
     description: Regex search over settled note content under a granted vault prefix, pre-filtered and capped at 50 files / 200 hits; an overly expensive pattern is refused
   - name: knowledge_write
@@ -55,8 +55,8 @@ exposes:
   - name: agents_delegate
     description: Delegate a brief to a named helper agent as a durable work row, checked against the agent's scope and the local target's data policy first; internal (assistant) principals only
   - name: queries_list
-    description: List the named queries available on this instance (invariant 3's one read path) — name, description, and each param's type + default
+    description: "List the named queries runnable here (invariant 3's one read path) — name, description, and each param's type + default; a route-backed query is not listed, because it is not runnable here"
   - name: queries_run
-    description: Run one named query by name with optional params, rows capped at 200; internal principals always, external agents only with a `queries` grant
+    description: "Run one named query by name with optional params, rows capped at 200; internal principals always, external agents only with a `queries` grant. A route-backed query (`expose` = route) is not served here — it has a scoped door of its own and answers with the unknown-query refusal, byte for byte"
   - name: propose_action
     description: Ask the console to do one of four things — dispatch a work row, patch a task, comment, capture — executed at once, queued for the user, or refused, by the caller's own autonomy table; offered only to a credential the owner has given room

@@ -1,4 +1,4 @@
-# Brand kit — Metistry (round A, 2026-09-18)
+# Brand kit — Metistry (rounds A and B, 2026-09-19)
 
 > The marks, the one colour, the sizes they survive at, and what not to do.
 > Chosen from three directions on 2026-09-18 (direction **C**), then refined
@@ -151,9 +151,33 @@ than made:
    dark counterpart; today there is one light value, so an installed dark-mode
    PWA flashes light on launch.
 
+## The wordmark
+
+Drawn, not set — Apple's SF licence does not cover use in a logo, and P7 rules
+out buying a face, so the letterforms are outlines of our own.
+
+**Construction.** A 1000-unit em: cap height 700, x-height 500, baseline 700,
+descender 900, one monolinear stroke of 88 throughout. Terminals are cut flat
+(`stroke-linecap: butt`), joins are mitred. Round letters carry 8 units of
+overshoot. The face is geometric: bowls are true circles, the `s` is two
+tangent arcs, the `M` is a single polyline.
+
+**The quirk, and it appears twice.** The dot of the `i` is the mark itself — a
+square with its bottom-left corner cut. And every terminal in the wordmark is
+cut flat rather than rounded, which is the same idea the mark carries: things
+are cut, and they fit one way. Nothing else is stylised.
+
+`brand/wordmark.svg` is the artwork, in `text-primary`. For a reversed lockup
+swap the two `stroke`/`fill` values for the dark theme's ink; the geometry does
+not change.
+
+**What is still open on it.** The optical spacing is set from side bearings on
+a grid, not by eye. Look at it large on the canvas: the pairs most likely to
+want a nudge are `Me`, `ti` and `ry`.
+
 ## Outstanding
 
-**The wordmark letterforms are not delivered.** Every lockup so far sets
+~~**The wordmark letterforms are not delivered.**~~ Every lockup so far sets
 "Metistry" in the system stack, which is right for a mockup and wrong for a
 wordmark: Apple's SF licence does not cover use in a logo or trademark, and
 P7's "no third-party font, ever" rules out buying one. So the wordmark has to
@@ -161,3 +185,57 @@ be **drawn as outlines** — informed by the system font's proportions so it sit
 naturally beside UI text, but its own artwork. That is the next piece of round
 A, and it is the one that needs a decision from the owner about how much
 character the letterforms should carry.
+
+
+---
+
+## Round B — the themes (2026-09-19)
+
+Two themes, one system. **Light is warm paper; dark is neutral.** The light
+ground moved off `#f6f7f9`, a cool grey, onto `#f7f4ee` — and with it every
+neutral, because a cool grey text on a warm ground reads as dirt. Dark is
+unchanged apart from the accent, because it was already right.
+
+| | Light | Dark |
+| --- | --- | --- |
+| `bg` | `#f7f4ee` | `#0e1216` |
+| `surface` | `#fffdf8` | `#171c22` |
+| `sunken` | `#efeadf` | `#0b0e12` |
+| `border` | `#e4ded1` | `#2b333d` |
+| `text-primary` | `#1a1815` | `#e9edf1` |
+| `accent` | `#125f6b` | `#6ec9d6` |
+
+**Nine roles were added, and they are why the check went from 74 pairs to 122.**
+
+- **Quiet fills** — `ok-quiet`, `degraded-quiet`, `failed-quiet`,
+  `absent-quiet`, `stale-quiet` and one per presence state. Each is the fill a
+  chip is *actually painted on*, declared so the contrast check sees the ground
+  that ships rather than `surface`, which nothing is drawn on. This is the fix
+  for the three chips that were failing AA in light mode.
+- **`stale`** — `#5a6670` / `#96a4b0`, with its own quiet fill. Deliberately a
+  cool grey against the warm neutrals: `absent` is warm and means "never
+  configured"; `stale` is cold and means "was answering and has not lately".
+  The two are now distinguishable without reading the label.
+- **`destructive` / `on-destructive`** — a fill, where `failed` is a
+  foreground. This is what the Decline button's inline `#7a3b3b` literal
+  becomes.
+- **`chart-1..3`** — a three-step sequential ramp in the accent's hue.
+
+**Why three chart steps and not five.** Two reasons, and the second is a
+finding. First, a sequential ramp is one hue by definition, and identity is not
+what these are for: the compute tiers are *ordered*, so they take the ramp, and
+four or more series become small multiples rather than more hues — every other
+hue in the product already means something, and the status colours are
+reserved. Second, `build-design-tokens.mjs` holds every declared pair to
+**4.5:1**, exempting only `focus-ring`. WCAG sets **3:1** for non-text
+graphics, which is what a chart mark is. Under the 4.5 bar, five ordered steps
+on a near-white ground collapse — steps four and five came out at 4.80:1 and
+4.77:1, visually identical. **Recommendation:** add the `chart-*` roles to the
+generator's non-text set alongside `focus-ring`, and the ramp can go to five
+steps and read more calmly. That is a one-line change to the checker, so it is
+logged rather than made.
+
+All **122 declared pairs pass**; `node ops/scripts/build-design-tokens.mjs
+--check` is green, and the generator rebuilt `tokens.css`, the PWA's
+stylesheet, `design-tokens.swift` and `preview.html` from the JSON with no
+hand-editing.

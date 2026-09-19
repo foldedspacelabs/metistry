@@ -14,7 +14,9 @@ import { up } from "../src/up.js";
 import { checkout, failDoctor, fakeExec, HELPER, JOBS, okDoctor, RECONCILER, retired, retiredCalls, shown, WATCHDOG } from "./fixtures.js";
 
 const NODE = "/usr/local/bin/node";
-const base = (P: string) => ({ productDir: P, env: {} as NodeJS.ProcessEnv, platform: "darwin" as const, uid: 501, node: NODE });
+// cli-shim.test.ts covers the shim itself; disabled here so the rest of this
+// file's exact command lists are not about a feature they are not testing.
+const base = (P: string) => ({ productDir: P, env: {} as NodeJS.ProcessEnv, platform: "darwin" as const, uid: 501, node: NODE, cliShim: false });
 
 describe("metistry up", () => {
   it("--dry-run prints the exact command list and runs nothing (not even doctor)", async () => {

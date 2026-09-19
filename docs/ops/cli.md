@@ -867,19 +867,41 @@ fail the run.
 ## Reading a doctor report
 
 ```
-name                                              kind       status  ms   remediation
-------------------------------------------------  ---------  ------  ---  -----------
-apple-fm                                          bridge     ok      920
-eventkit                                          bridge     failed  4    eventkit rejected the token (HTTP 401) — the METISTRY_BRIDGE_TOKEN_* in .env differs …
-reconciler                                        service    ok      53
-console                                           service    ok      6
-db                                                db         ok      16
-migrations                                        db         ok      3
-launchd:com.foldedspacelabs.metistry.reconciler   launchd    ok      4
-compose:console                                   container  ok      0
-…
-24 checks: 23 ok, 0 degraded, 1 failed, 0 absent — FAILED (/Users/you/src/metistry)
+/Users/you/src/metistry — shape launchd, 2026-09-19T09:14:02.118Z
+
+bridge
+  ✓ apple-fm  ok       920ms
+  ✗ eventkit  failed     4ms
+      → eventkit rejected the token (HTTP 401) — the METISTRY_BRIDGE_TOKEN_* in
+        .env differs from the one the bridge was started with
+
+service
+  ✓ reconciler  ok        53ms
+  ✓ console     ok         6ms
+
+cli
+  ○ cli on PATH  absent     0ms
+      → `ln -s /Users/you/instance/.metistry/state/cli/metistry
+        ~/.local/bin/metistry` (or add its directory to PATH)
+
+db
+  ✓ db          ok        16ms
+  ✓ migrations  ok         3ms
+
+launchd
+  ✓ launchd:com.foldedspacelabs.metistry.reconciler  ok         4ms
+
+container
+  ✓ compose:console  ok         0ms
+
+9 checks: 7 ok, 0 degraded, 1 failed, 1 absent — ✗ FAILED
 ```
+
+One block per `kind`, the remediation — the reason a red row is read at all
+— wrapped directly under its row rather than in a column that runs off the
+screen, and the verdict last. Colour, and `[ok]`/`[x]`/`[!]` where the
+terminal's locale is not UTF-8, come from `docs/ops/cli-style.md`;
+`--json` is untouched by any of it.
 
 One row per thing that can be wrong; every row is a `core` `CheckResult`
 (`name`, `status`, `latency_ms`, `probe`, `remediation`, `meta`) plus a
@@ -1237,6 +1259,62 @@ step is a follow-up once a Linux install exists to test it against; the
 TCC-bound jobs (eventkit, apple-fm) have no Linux counterpart at all
 (§4.17: absent, not broken). `update` on Linux likewise tells you which
 units to restart rather than restarting them.
+
+### Getting `metistry` on your PATH
+
+A fresh release install has no `metistry` on `PATH` — there is no Homebrew
+formula and no npm global, so nothing put it there. `up` (and `update`,
+since a checkout that only ever runs that still needs one) writes a small
+POSIX shim to `<instance>/.metistry/state/cli/metistry`: an executable
+script that already knows this install's product dir and instance dir, and
+at every invocation re-checks which of `current/` (a release) or the bare
+product dir holds the CLI, and whether to run it with the bundled
+`runtime/node/bin/node` or whatever `node` is on `PATH` — so a release
+flip or a freshly bundled runtime needs no re-write. It is idempotent
+(unchanged content is left alone) and mode `0755`; a symlink or a foreign
+file already sitting at the path is left alone too, with a note, rather
+than overwritten.
+
+**`up` never puts it on PATH itself** — invariant 2, that is the operator's
+own hand — it only prints the one line that would, as part of its normal
+output:
+
+```
+   cli: /Users/you/instance/.metistry/state/cli/metistry — `ln -s /Users/you/instance/.metistry/state/cli/metistry ~/.local/bin/metistry` (or add its directory to PATH) runs `metistry` by name
+```
+
+Run that `ln -s` once (or add the directory to `PATH` yourself), and
+`metistry doctor` — from anywhere — works. `metistry doctor`'s own `cli on
+PATH` row says whether it is already reachable, and where, or hands back
+the same line when it is not; it is informational (`ok`/`absent`), never a
+finding that fails the exit code.
+
+This is the same mechanism in every shape:
+
+- **Release install.** The shim lives at
+  `<instance>/.metistry/state/cli/metistry` and execs
+  `<product>/runtime/node/bin/node <product>/current/packages/cli/dist/main.js`.
+- **Checkout.** Same path, same shim; `current/` does not exist, so it
+  falls back to `<product>/packages/cli/dist/main.js`, and to `node` on
+  `PATH` when there is no bundled `runtime/`.
+- **The Mac app.** `apps/macos`'s `RuntimeLocator` looks for a `metistry`
+  in `~/.local/bin` and in the active instance's own
+  `.metistry/state/cli` — the same two places above — in addition to the
+  usual Homebrew/system bins and `PATH`, so the app finds an install even
+  before anyone has run the `ln -s` line by hand (`docs/ops/mac-app.md`).
+
+**Why `state/cli/`, not `state/bin/`.** Under `shape: launchd`,
+`<instance>/.metistry/state/bin/Metistry` (capital M) is already the
+supervisor's own program-identity symlink (§ above, "Host jobs (macOS)"),
+and macOS's default APFS volume does not tell `metistry` and `Metistry`
+apart in that directory — they would be the same directory entry. Rather
+than have the cli shim quietly lose that race on the one shape that most
+needs it (no Docker, so no other way to reach the console short of the
+app), it lives in `state/cli/`, a sibling directory the supervisor's
+symlink never touches. `writeCliShim` still checks before writing —
+leaving a symlink, or a file that does not look like a shim this install
+wrote, alone rather than overwritten — as a second line of defence, not
+the fix itself.
 
 ## Updating
 

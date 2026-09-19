@@ -81,6 +81,9 @@ describe("metistry up --dry-run, launchd shape", () => {
       exists: pgInstalled(),
       mintPassword: () => "generated",
       doctorFn: okDoctor,
+      // cli-shim.test.ts covers the shim itself, including its launchd-shape
+      // collision with the supervisor's own `bin/Metistry` symlink.
+      cliShim: false,
     });
 
     if (r.code !== 0) console.error(lines.join('\n'));

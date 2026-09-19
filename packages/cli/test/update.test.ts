@@ -17,7 +17,9 @@ import { checkout, failDoctor, fakeExec, HELPER, okDoctor, put, RECONCILER, show
 
 const NOW = new Date("2026-09-07T15:00:00Z");
 const BRIDGE = { METISTRY_RECONCILER_URL: "http://host.docker.internal:7812", METISTRY_BRIDGE_TOKEN_RECONCILER: "tok" };
-const base = (P: string, env: NodeJS.ProcessEnv = {}) => ({ productDir: P, env, platform: "darwin" as const, uid: 501, version: "0.0.9", now: NOW, out: () => {} });
+// cli-shim.test.ts covers the shim itself; disabled here so the rest of this
+// file's exact command lists are not about a feature they are not testing.
+const base = (P: string, env: NodeJS.ProcessEnv = {}) => ({ productDir: P, env, platform: "darwin" as const, uid: 501, version: "0.0.9", now: NOW, out: () => {}, cliShim: false });
 
 /** An in-memory schema_migrations: enough of a session for the runner to believe it. */
 function fakeSession(): MigrationSession & { end(): Promise<void>; queries: string[]; ended: boolean } {

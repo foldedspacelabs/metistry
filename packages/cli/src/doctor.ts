@@ -716,12 +716,20 @@ export async function keepAwakeRow(deps: { deployment: Deployment; instanceDir: 
       // one thing on this row a person can act on.
       const cutoff = cutoffIsAFinding(state);
       if (cutoff) {
+        // The repair is only offered when there IS one. Under `always` the
+        // strongest setting this product has is already in force, and the
+        // sleep came from something no assertion stops — offering the verb
+        // that sets what is already set would be noise dressed as advice.
+        const stronger = cutoff.mode === "allow_sleep_on_battery";
         return {
           status: "degraded",
           remediation:
             `this Mac slept at ${cutoff.at} for about ${humanGap(cutoff.gap_ms)} while keep_awake: ${cutoff.mode} was set — an idle-sleep assertion does not stop lid close, ` +
-            `a scheduled sleep or the Apple menu, and another policy may have won. If that is not what you want, ` +
-            `\`metistry deployment set-keep-awake always --yes\` holds on battery too, which costs battery on a laptop; a closed lid still sleeps${lidNote ? ` — ${lidNote}` : ""}`,
+            `a scheduled sleep, the Apple menu or low battery, and another policy may have won. ` +
+            (stronger
+              ? `If that is not what you want, \`metistry deployment set-keep-awake always --yes\` holds on battery too, which costs battery on a laptop; a closed lid still sleeps`
+              : `keep_awake: ${cutoff.mode} is already the strongest setting there is, so there is nothing further to turn on: the cause is outside what a power assertion can reach`) +
+            `${lidNote ? ` — ${lidNote}` : ""}`,
           meta: { ...meta, last_cutoff: cutoff },
         };
       }

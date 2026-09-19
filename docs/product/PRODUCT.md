@@ -2151,3 +2151,80 @@ launchd cannot even see.
   columns disagree. Anything more aggressive — hand-placing the cache
   boundaries for a few percent more — waits on a measurement over real turns,
   because a saving nobody measured is a claim.
+
+- 2026-09-18 — **You can browse your notes from any client now, not just
+  search them.** Until this, the only way to see what was in your vault from
+  the phone or the app was to think of a word that appeared in it: search
+  worked, browsing did not exist. The list of pages — every note, grouped by
+  the area it lives in, with its title, its one-line description, when you
+  last changed it and whether the system has caught up with that change yet —
+  is now something any client can ask for and page through. It costs nothing
+  to run: the list comes out of the index the software already keeps of your
+  vault, not out of opening files, so a vault of ten thousand notes answers as
+  fast as one of ten. The reason it took a separate piece of work rather than
+  arriving with search is the rule the system holds itself to: anything
+  countable has exactly one route into it, written down, reviewable, and the
+  same one every surface uses — so this list is a file you can read, change
+  for your own install, and see honoured by the phone, the app and the CLI
+  alike. Three things about it are deliberate and worth knowing. Notes you
+  have marked as drafts never appear, at any tier, for you or for an agent —
+  one rule, so your own list and an agent's index can never disagree about
+  what a draft is. Filtering by an area gets that area and nothing that merely
+  starts with the same letters: asking for `Health` does not quietly hand over
+  `Healthcare`, which is the way a filter like this usually leaks. And the
+  list never reports a total. That sounds like a missing feature and is a
+  safety one: a count of everything would tell someone with narrower access
+  exactly how many pages they are not allowed to see, so the list simply ends
+  when it ends, and nothing about what was withheld travels with it.
+
+- 2026-09-18 — **A retry from the Mac app no longer risks a second note.**
+  `metistry console call` — the app's entire authenticated door onto the
+  console — could not set a request header, so `POST /capture`'s
+  `Idempotency-Key` was reachable from a curl command and nowhere else. The
+  verb now takes `--idempotency-key <key>`, checked to the server's own shape
+  before the request ever goes out, and folds a replay (the console's own
+  `idempotency-replayed` header, which the verb otherwise prints no trace of)
+  into `--json` output or a one-line stderr note. `MetistryKit`'s transport
+  carries the same optional key through to the CLI invocation, so a future
+  capture route on `ConsoleAPI` inherits the safety rather than needing its
+  own.
+
+- 2026-09-19 — **You can follow the links between your notes from any
+  client, in both directions.** Ask for a page and you get what it links to
+  and, just as usefully, what links *to* it — the backlinks that turn a pile
+  of notes into a thing you can move around in. It costs nothing to compute:
+  the connections are already worked out each time the system reads your
+  vault, so this is a lookup, not a scan, and a note with two hundred
+  backlinks answers as fast as one with two. Links to notes you have not
+  written yet are included and marked as such, the way Obsidian shows them,
+  because the intention to write something is part of how a vault gets
+  written and hiding it would quietly lose it. Two things never appear:
+  anything you have marked a draft, at either end of a link — so a draft
+  cannot be found through the back door after being kept out of the front one
+  — and any connection to a page the asking credential is not allowed to see.
+  That last one is checked at *both* ends, which is the part that is easy to
+  get wrong: a page you can see is allowed to link to one you cannot, and the
+  answer simply does not mention it. As with the list of pages, the answer
+  never reports a total, because a count of what was hidden is itself a
+  disclosure.
+
+- 2026-09-19 — **One door per thing you can ask for, and it is the door that
+  checks who is asking.** The list of your notes is answered by one endpoint,
+  and that endpoint filters it: it hands back only the parts of your vault the
+  credential making the request is allowed to see. There was a second way to
+  the same list — a general-purpose "run this query by name" address the
+  dashboards use — and it did no filtering, because it cannot: it does not
+  know that one of the columns it is passing along is a path into your notes.
+  Nothing had gone wrong, but the shape was wrong, and one credential made
+  that concrete: the small token you put in a phone shortcut so it can send a
+  note in is not allowed to browse your vault, and could have listed every
+  page in it by name. That is now closed, and closed in the way the system
+  prefers: the query file itself says which door serves it, so the rule lives
+  beside the thing it governs, travels with it into your own install, and
+  cannot quietly disagree with a list kept somewhere in the software. The
+  refusal is also deliberately dull — asking the general address for a
+  restricted query gets exactly the answer you get for a query that does not
+  exist, so nobody can map what is behind the wall by knocking on it. And the
+  filter on the surviving door no longer assumes it is you: it reads what the
+  credential is allowed to see and narrows to that, which is what makes it
+  safe to ever hand a narrower one out.

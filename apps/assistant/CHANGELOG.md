@@ -1,5 +1,13 @@
 # @metistry-apps/assistant
 
+## 0.9.1
+
+### Patch Changes
+
+- Updated dependencies [6b3d645]
+  - @foldedspacelabs/metistry-queries@0.9.1
+  - @foldedspacelabs/metistry-core@0.9.1
+
 ## 0.9.0
 
 ### Minor Changes

@@ -282,6 +282,44 @@ import Testing
     #expect(page.bytes == 41)
 }
 
+@Test func thePageListDerivesItsAreaAndSaysWhereItEndsWithoutEverStatingATotal() async {
+    let api = ConsoleAPI(transport: StubConsole(["GET /api/knowledge/pages?limit=2&prefix=Areas%2FHealth": Fixtures.pages]))
+    let list = try! (await api.knowledgePages(prefix: "Areas/Health", limit: 2)).get()
+    #expect(list.pages.map(\.path) == ["Areas/Health/2026/taper.md", "Areas/Health/sleep.md"])
+    #expect(list.pages[1].area == "Areas/Health")
+    #expect(list.pages[1].title == "Sleep")
+    #expect(list.pages[1].status == "clean")
+    #expect(list.pages[0].title == "taper")  // no frontmatter title → the basename, decided server-side
+    #expect(list.pages[0].status == "dirty")  // edited since the last walk
+    #expect(list.prefix == "Areas/Health")
+    #expect(list.area == nil)
+    // A full window, so there may be more — and this is the ONLY way to say
+    // so, because a total would publish the size of what the scope filtered.
+    #expect(!list.isLastPage)
+    #expect(list.nextOffset == 2)
+    #expect(KnowledgePageList.maximumLimit == 500)
+}
+
+@Test func aVaultRootFileHasNoAreaAndAShortWindowIsTheEndOfTheList() async {
+    let api = ConsoleAPI(transport: StubConsole(["GET /api/knowledge/pages": Fixtures.pagesTail]))
+    let list = try! (await api.knowledgePages()).get()
+    // nil is the honest answer for `now.md`, not a missing field: the vault
+    // root is not in an area.
+    #expect(list.pages.map(\.area) == [nil])
+    #expect(list.pages[0].path == "now.md")
+    #expect(list.isLastPage)
+    #expect(list.nextOffset == nil)
+}
+
+@Test func theFirstPageOfTheListHasOneSpellingHoweverTheCallerAsksForIt() async {
+    let runner = StubRunner(result: CommandResult(exitCode: 0, stdout: Fixtures.pagesTailText, stderr: ""))
+    let api = ConsoleAPI(cli: stubCLI(runner))
+    _ = await api.knowledgePages(offset: 0)
+    // `offset=0` is the default, so it is omitted rather than sent — one stub
+    // key, one cache key, one line in a log for "the first page".
+    #expect(await runner.invocations[0][4] == "/api/knowledge/pages")
+}
+
 @Test func theCommandMenuIsGeneratedAndCarriesTheTierEachCommandResolvesToNow() async {
     let api = ConsoleAPI(transport: StubConsole(["GET /api/commands": Fixtures.commands]))
     let menu = try! (await api.commands()).get()
@@ -766,6 +804,27 @@ enum Fixtures {
      "sha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
      "bytes":41,"as_of":"2026-09-18T09:00:08.000Z"}
     """)
+
+    /// `knowledge_pages`' columns. A full window (`pages.count == limit`), so
+    /// there may be more — the route states no total, on purpose.
+    static let pagesText = """
+    {"pages":[
+      {"path":"Areas/Health/2026/taper.md","area":"Areas/Health","title":"taper","description":null,
+       "status":"dirty","modified":"2026-09-18T08:40:00.000Z","indexed_at":"2026-09-18T08:41:00.000Z"},
+      {"path":"Areas/Health/sleep.md","area":"Areas/Health","title":"Sleep","description":"what works",
+       "status":"clean","modified":"2026-09-17T19:02:00.000Z","indexed_at":"2026-09-17T19:05:00.000Z"}],
+     "area":null,"prefix":"Areas/Health","limit":2,"offset":0,"as_of":"2026-09-18T09:00:11.000Z"}
+    """
+    static let pages = bytes(pagesText)
+
+    /// The last window: shorter than `limit`, and a vault-root file, whose
+    /// area is honestly `null` rather than absent.
+    static let pagesTailText = """
+    {"pages":[{"path":"now.md","area":null,"title":"Now","description":null,"status":"clean",
+      "modified":"2026-09-18T07:00:00.000Z","indexed_at":"2026-09-18T07:01:00.000Z"}],
+     "area":null,"prefix":null,"limit":100,"offset":0,"as_of":"2026-09-18T09:00:12.000Z"}
+    """
+    static let pagesTail = bytes(pagesTailText)
 
     static let commands = bytes("""
     {"commands":[

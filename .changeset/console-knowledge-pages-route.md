@@ -52,3 +52,12 @@ MetistryKit gains the matching `knowledgePages` method, the
 `KnowledgePageList` / `KnowledgePageEntry` shapes and a `pages` store section
 beside `knowledge` — two sections, because browsing the vault and searching it
 are two questions and a search must not blank the list you were reading.
+
+The list is ordered by `path COLLATE "C"` — byte order, explicitly, rather
+than the database's own locale. A glibc locale collation ignores punctuation
+at the primary level, so `Areas/Health/sleep.md` sorts before
+`Areas/Healthcare/…` on one cluster and after it on another: same rows, same
+query, two different windows, and a client paging with `offset` would see a
+page twice or not at all depending on which machine the database was
+initialised on. CI (Linux) and the owner's Mac disagreeing is how it was
+found.

@@ -41,6 +41,18 @@
 # sync churns it constantly (`0001_init.sql`: content hash, not mtime,
 # decides re-embedding), so ordering by it would be neither.
 #
+# **`COLLATE "C"`, and it is not a detail.** A bare `ORDER BY path` sorts in
+# the cluster's own locale, and a locale collation ignores punctuation at the
+# primary level: `Areas/Health/sleep.md` sorts BEFORE `Areas/Healthcare/…` on
+# a byte-ordered cluster and AFTER it on a `en_US.UTF-8` one. Same rows, same
+# query, two different windows — so a client paging with `offset` would see a
+# page twice or not at all depending on which machine the database was
+# initialised on, and a vault restored into a differently-collated cluster
+# would silently renumber itself. `C` is byte order, is built into every
+# Postgres, and is the same everywhere; CI runs Linux and the owner runs
+# macOS, which is exactly how this was found. It costs the primary-key index
+# as a sort path (Postgres sorts instead), which at vault scale is nothing.
+#
 # **No total.** A COUNT over the unscoped filter is exactly the "directory
 # listing of what was filtered" the knowledge routes refuse to publish — a
 # narrowed principal would learn how many pages it cannot see. The caller
@@ -51,9 +63,10 @@ description: >-
   area, title (frontmatter's, else the basename), one-line description, index
   status and both timestamps. Never a draft and never an unsettled
   `conflict`. Filter by `area` (the derived grouping, exact) or `prefix` (a
-  path prefix, segment-wise); page with `limit`/`offset`, ordered by path so
-  the window is stable. The page's BYTES are not here and never will be —
-  note content is not derived state (`GET /api/knowledge/page`).
+  path prefix, segment-wise); page with `limit`/`offset`, ordered by path in
+  BYTE order (`COLLATE "C"`, so the window is the same on every cluster
+  rather than the database locale's). The page's BYTES are not here and never
+  will be — note content is not derived state (`GET /api/knowledge/page`).
 params:
   area: { type: text, default: "" } # blank = every area; `Areas/Health`, `Journal`, `Me`, `Inbox`
   prefix: { type: text, default: "" } # blank (or `/`) = the whole vault; else a path prefix, segment-wise
@@ -86,7 +99,7 @@ sql: |
     AND (f.prefix IS NULL
          OR p.path = f.prefix
          OR left(p.path, length(f.prefix) + 1) = f.prefix || '/')
-  ORDER BY p.path
+  ORDER BY p.path COLLATE "C"
   LIMIT :limit
   OFFSET :offset
 cache_ttl: 0 # an index that lags is a list with a note the owner just wrote missing from it

@@ -1,5 +1,30 @@
 # @foldedspacelabs/metistry-cli
 
+## 0.9.1
+
+### Patch Changes
+
+- 1155dd9: `metistry compute providers test <name> --complete` no longer probes the
+  alphabetically-first model in a provider's listing — for OpenRouter's 400+
+  models that was some obscure, unroutable one, which 404s and reads as the
+  key having failed when the listing had already proven it works. The
+  completion probe now prefers a model already assigned to that provider in
+  `compute.yaml`, then a model this project's own docs point an operator at
+  first for it, then OpenRouter's own `openrouter/auto`, and only then falls
+  back to the first listed model as before. `--model <id>` overrides the
+  choice outright. A failed completion is now reported separately from the
+  listing (`listing ok` / `completion: FAILED (model …, chosen: …) …
+  override with --model <id>`) rather than marking the whole provider row
+  FAILED.
+- 847a5ba: `metistry console call` grows `--idempotency-key <key>`, so a caller — the
+  Mac app or a script — can retry a `POST /capture` without minting a second
+  note. The key is checked to the server's own shape (trimmed, non-empty, at
+  most 200 characters) before the request ever goes out, and a replay (the
+  console's `idempotency-replayed` response header, which this verb otherwise
+  prints no trace of) folds `"replayed": true` into `--json` output or a
+  one-line stderr note in plain mode.
+- @foldedspacelabs/metistry-core@0.9.1
+
 ## 0.9.0
 
 ### Minor Changes

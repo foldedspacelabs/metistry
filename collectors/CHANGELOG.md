@@ -1,5 +1,12 @@
 # @metistry-apps/collectors
 
+## 0.9.1
+
+### Patch Changes
+
+- @foldedspacelabs/metistry-mcp-brain@0.9.1
+  - @foldedspacelabs/metistry-core@0.9.1
+
 ## 0.9.0
 
 ### Patch Changes

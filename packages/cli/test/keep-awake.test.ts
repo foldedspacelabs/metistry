@@ -275,11 +275,14 @@ describe("doctor's keep-awake row", () => {
     expect(row.remediation).toContain("costs battery");
   });
 
-  it("a stale heartbeat is the supervisor being gone, and says so", async () => {
+  it("a stale heartbeat names both of its causes rather than picking the wrong one", async () => {
     const dir = await withState({ heartbeat_at: new Date(Date.now() - 60_000 * (KEEP_AWAKE_CUTOFF_FACTOR + 2)).toISOString() });
     const row = (await keepAwakeRow({ deployment: { ...launchd, keep_awake: "always" }, instanceDir: dir, exec: pmset(), platform: "darwin" }))!;
     expect(row.status).toBe("degraded");
     expect(row.remediation).toContain("the supervisor is not running");
+    // a Mac that just woke has a live holder that has not ticked yet: saying
+    // only "not running" would be a confident wrong answer
+    expect(row.remediation).toContain("just woken");
   });
 
   it("a clean stop is reported as one, not as a sleep", async () => {

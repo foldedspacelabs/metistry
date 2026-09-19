@@ -30,7 +30,30 @@ describe.skipIf(!hasDb)("weekly review (real db)", () => {
   let pool: pg.Pool;
   /** The tables `weekly-review/run.ts` reads. reply_feedback references outbound_messages, so both go together and no CASCADE is needed. */
   const REVIEW_TABLES = ["agents", "inbox", "metrics", "outbound_messages", "proposals", "reply_feedback", "runs", "work"];
-  /** Empty them — after proving this is the scratch database and not somebody's install (docs/ops/testing.md). */
+  const LOCK_TIMEOUT_MS = 200; // limit: fixed — must stay well under Postgres's 1s deadlock_timeout; see the retry note below
+  const ISOLATE_ATTEMPTS = 40; // limit: fixed — 40 × (200ms wait + backoff) is longer than any sibling statement, and still bounded
+  /**
+   * Empty them — after proving this is the scratch database and not somebody's
+   * install (docs/ops/testing.md), and without ever becoming a deadlock.
+   *
+   * TRUNCATE takes ACCESS EXCLUSIVE on all eight tables, left to right. A
+   * sibling file's `DELETE FROM work …` takes `work` first and `proposals`
+   * second — the 0018 foreign key's referential check — and a sibling's
+   * `INSERT INTO proposals …` takes them the other way round, so no ordering
+   * of this list is safe: whichever way they are listed, some sibling
+   * statement holds the second lock and wants the first. Postgres then kills
+   * one of the two, and the victim it picked in the repro was the SIBLING's
+   * DELETE, not this reset — a failure in a file that did nothing wrong:
+   *
+   *   ERROR:  deadlock detected
+   *   DETAIL: Process A waits for RowShareLock on relation … (proposals); blocked by process B.
+   *           Process B waits for AccessExclusiveLock on relation … (work); blocked by process A.
+   *
+   * So the reset refuses to wait. `lock_timeout` well under the server's 1s
+   * `deadlock_timeout` means the cycle is never around long enough to BE a
+   * deadlock: this statement lets go, the sibling's statement finishes in the
+   * milliseconds it needs, and the next attempt walks straight through.
+   */
   const isolate = async () => {
     const want = process.env.METISTRY_TEST_DB_NAME ?? "metistry_test";
     const { rows } = await pool.query<{ db: string }>(`SELECT current_database() AS db`);
@@ -38,7 +61,26 @@ describe.skipIf(!hasDb)("weekly review (real db)", () => {
     if (db !== want || !/^metistry_test/.test(db)) {
       throw new Error(`refusing to empty ${db}: the weekly review suite only runs against the scratch db (METISTRY_TEST_DB_NAME=${want}, ops/scripts/test-db.sh)`);
     }
-    await pool.query(`TRUNCATE ${REVIEW_TABLES.join(", ")} RESTART IDENTITY CASCADE`); // CASCADE: artifact_comments and proposals now reference work (0018), and any future dependent must not break this reset
+    for (let attempt = 1; ; attempt++) {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query(`SET LOCAL lock_timeout = '${LOCK_TIMEOUT_MS}ms'`);
+        await client.query(`TRUNCATE ${REVIEW_TABLES.join(", ")} RESTART IDENTITY CASCADE`); // CASCADE: artifact_comments and proposals now reference work (0018), and any future dependent must not break this reset
+        await client.query("COMMIT");
+        return;
+      } catch (err) {
+        await client.query("ROLLBACK").catch(() => {});
+        const code = (err as { code?: string }).code;
+        // 55P03 lock_not_available (the timeout above), 40P01 deadlock_detected
+        // (a cycle the server saw first): both mean a sibling is mid-statement,
+        // and both are answered by letting go and asking again.
+        if ((code !== "55P03" && code !== "40P01") || attempt >= ISOLATE_ATTEMPTS) throw err;
+        await new Promise((r) => setTimeout(r, 25 + Math.round(Math.random() * 75)));
+      } finally {
+        client.release();
+      }
+    }
   };
   const cleanup = async () => {
     await pool.query(`DELETE FROM work WHERE project = 'itest-weekly'`);

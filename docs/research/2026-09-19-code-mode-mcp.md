@@ -252,6 +252,16 @@ TOTAL: 19777 chars | descriptions 4592 (23%) | schemas 12802 (65%)
 (identical, plus propose_action 1057 chars / 265 tokens)
 ```
 
+**Addendum, 2026-09-19 — after the trim (§4.1 row 4, shipped).** Re-measured
+by the same method once `turn_id` moved to the call's `_meta`: the eager
+surface is **25 tools, 16,140 chars, ~4,035 tokens**, down from 19,914 chars /
+~4,979 — a saving of **3,774 chars ≈ 944 tokens, 19.0% of the surface**, which
+is the §2.4 estimate landing at the top of its range. The credential-gated
+surface is 20,972 → 17,047 chars (~5,243 → ~4,262 tokens), so it no longer
+crosses 5k at all. Schemas fell from 65% of the surface to 56%; every
+description is unchanged, and no capability was removed. The baseline for any
+A/B under §4.4 is now the number above, per §4.4 step 5.
+
 `chars/4` is the industry's rule of thumb and the one `packages/mcp-brain/test/brain.test.ts`
 already asserts against. The manifest's own note and that test both hold: 25
 eager tools, under the >5k line; the 26th rides on a credential the owner gave
@@ -658,6 +668,47 @@ PRODUCTION'S"), stubs execution record-only, and `RunRecord` already carries
    like everything else in `runs`, or does a plan that produced a knowledge
    commit want to survive `docker compose down -v`? I read it as derived, and
    note it only because D6 is open.
+
+### Rulings — 2026-09-19 (the owner's answers)
+
+Recorded here, against the questions as asked. Nothing below was inferred:
+where an answer is partial it says so.
+
+1. **Which reading of invariant 9?** → **The reach reading.** A sandbox that
+   can touch nothing but the same audited functions, under the same principal,
+   writing the same `runs` rows, adds no reach. So §4's *later* stands rather
+   than collapsing to *no* — and §3.3's three properties become the conditions
+   any future proposal is reviewed against, not background argument.
+2. **Is `turn_id` worth a wire change?** → **Yes, `_meta`.** Done: it is out
+   of all 25 schemas and rides in the call's `_meta` under
+   `com.foldedspacelabs.metistry/turn_id`, set by the client once per reply
+   rather than invented by the model per call. Measured 4,979 → 4,035 tokens
+   (§2.1's addendum). A legacy `arguments.turn_id` is lifted at the door for
+   one release — tolerated, advertised nowhere.
+3. **The 10–15 vs 30–50 contradiction (§2.5).** → **The newer vendor figure is
+   recorded as superseding the older one, and it does not settle the
+   question.** In the owner's words: "we're getting pretty close to the
+   performance impact number based on the number of tools we have now and that
+   number is likely to grow… given that we may run Metis on a local smaller
+   model, we should handle this contradiction on tool pool size." So: design
+   for the LOWER figure, because a local smaller model is a shape this product
+   supports; expect lazy discovery **fairly soon** rather than never, gated on
+   PoC-17's measurement being rerun at the current size; and in the meantime
+   curate (this PR) and do not grow the surface (a new read capability is a
+   named query, §4.1 row 6, now written down in `docs/ops/assistant-tools.md`).
+   `docs/research/2026-08-tool-discovery.md` §2 carries the update;
+   **plan §4.3 still cites 10–15 and is reported, not edited** (CLAUDE.md).
+4. **Would a native Messages engine kind be built for other reasons?** →
+   **Undecided, and not off the table.** So programmatic tool calling stays the
+   cheapest route to code mode if one ever lands (§1.3), and questions 1 and 5
+   stay open rather than moot.
+5. **Is an unaudited dependency acceptable in the console process?** →
+   **Audited is preferred; a reputable unaudited one would be considered; go
+   for best-in-class first.** Not a blanket no, and not a yes to
+   `quickjs-emscripten` as it stands — the order of operations is to find the
+   best available thing and then argue it on its merits (§4.3).
+6. **D6 — a compose script's text in `runs.meta`.** → **Derived.** It is a
+   `runs` row like any other; it does not join the durable set.
 
 ---
 

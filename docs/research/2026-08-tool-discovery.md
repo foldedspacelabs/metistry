@@ -51,6 +51,51 @@ Two separate effects, often conflated:
   40 tools, but with distinctive names and n=5 — the benchmarks say don't
   extrapolate that to messier catalogs.)
 
+### Update 2026-09-19: the vendor's figure moved to 30–50, and ours is 25
+
+Anthropic's current tool-search documentation says: "Claude's ability to pick
+the right tool degrades once you exceed **30–50** available tools"
+([Tool search tool](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-search-tool),
+read 2026-09-19 — the same page that publishes the ~10k-token activation
+guidance and ">85% reduction"). That **supersedes the 10–15 figure above**,
+which this document and plan §4.3 have both been citing. Two readings the
+sources do not distinguish — the older number was Haiku-class-specific and
+the newer one is a frontier-model average, or the guidance simply moved
+(`docs/research/2026-09-19-code-mode-mcp.md` §2.5).
+
+The owner ruled on it the same day, and the ruling is not "the number got
+bigger, relax":
+
+> we're getting pretty close to the performance impact number based on the
+> number of tools we have now and that number is likely to grow… given that we
+> may run Metis on a local smaller model, we should handle this contradiction
+> on tool pool size.
+
+So:
+
+- **Our eager surface is 25 tools and growing** (`mcp-brain` is the whole of
+  it; measured, not declared — `ops/scripts/check-tool-surface.mjs`). That is
+  outside the old figure and inside the new one, i.e. *not* comfortable on
+  either reading.
+- **Design for the LOWER figure.** `compute.yaml` may assign the default tier
+  to a local, smaller model (the whole point of the 2026-09-11 compute pivot),
+  and 10–15 is the number that applies to one. A figure measured on frontier
+  models is not the floor this product has to work at.
+- **Lazy discovery is expected fairly soon** — the owner's words — rather than
+  "kept in the contract and never activated" as §4 below has it. It is gated
+  on one thing: **PoC-17's measurement rerun at the current size.** PoC-17
+  measured lazy LOSING (+1 turn, +34% cumulative prompt tokens, +2.4 s) on a
+  surface that was smaller, and that result is what §4's recommendation rests
+  on; it has not been re-measured at 25 tools, on the model an install would
+  actually run. Re-run it first, then decide.
+- Until then the two cheap interventions stand, and both shipped:
+  **curate** (trim what is advertised — the `turn_id` removal took 19% off the
+  definition surface without removing a capability) and **don't grow it** (a
+  new read capability is a named query behind `queries_run`, not a new tool;
+  `docs/ops/assistant-tools.md`). CI now prints the count and the definition
+  tokens for every bridge on every run, and the tool after the 25th fails the
+  check rather than landing quietly.
+
 ## 3. Best practice, synthesized
 
 1. **Threshold-gate, don't default.** Small/always-used surfaces: eager.

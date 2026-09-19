@@ -44,23 +44,27 @@ interface CallSeen {
   path: string;
   authorization: string | undefined;
   contentType: string | undefined;
+  idempotencyKey: string | undefined;
   body: string | undefined;
 }
 
 /** A console answering arbitrary `<METHOD> <path>` routes for exactly one token — what `console call` is a client of. */
-function fakeCallConsole(expected: string, routes: Record<string, { status?: number; body?: unknown }> = {}) {
+function fakeCallConsole(expected: string, routes: Record<string, { status?: number; body?: unknown; replayed?: boolean }> = {}) {
   const seen: CallSeen[] = [];
   const fetchFn = (async (url: string | URL | Request, init?: RequestInit) => {
     const u = new URL(String(url));
     const method = (init?.method ?? "GET").toUpperCase();
     const headers = (init?.headers ?? {}) as Record<string, string>;
-    seen.push({ method, path: u.pathname, authorization: headers.authorization, contentType: headers["content-type"], body: init?.body as string | undefined });
+    seen.push({ method, path: u.pathname, authorization: headers.authorization, contentType: headers["content-type"], idempotencyKey: headers["idempotency-key"], body: init?.body as string | undefined });
     if (headers.authorization !== `Bearer ${expected}`) {
       return new Response(JSON.stringify({ error: { code: "unauthenticated", message: "authentication required" } }), { status: 401, headers: { "content-type": "application/json" } });
     }
     const route = routes[`${method} ${u.pathname}`];
     if (!route) return new Response("route not stubbed", { status: 404 });
-    return new Response(route.body === undefined ? "" : JSON.stringify(route.body), { status: route.status ?? 200, headers: { "content-type": "application/json" } });
+    return new Response(route.body === undefined ? "" : JSON.stringify(route.body), {
+      status: route.status ?? 200,
+      headers: { "content-type": "application/json", ...(route.replayed ? { "idempotency-replayed": "true" } : {}) },
+    });
   }) as unknown as typeof fetch;
   return { fetchFn, seen };
 }
@@ -167,6 +171,63 @@ describe("consoleCall (module)", () => {
     const empty = await consoleCall({ method: "GET", path: "/api/text", env: { METISTRY_LOCAL_OWNER_TOKEN: TOKEN }, platform: "linux", fetchFn: c.fetchFn });
     expect(empty).toMatchObject({ status: 200, body: null, raw: "" });
   });
+
+  it("every response carries replayed: false when the console never said otherwise", async () => {
+    const c = fakeCallConsole(TOKEN, { "GET /api/whoami": { body: { principal: "user" } } });
+    const r = await consoleCall({ method: "GET", path: "/api/whoami", env: { METISTRY_LOCAL_OWNER_TOKEN: TOKEN }, platform: "linux", fetchFn: c.fetchFn });
+    expect(r.replayed).toBe(false);
+  });
+
+  describe("Idempotency-Key", () => {
+    it("sends the trimmed key as a header, and reports a reply header of idempotency-replayed", async () => {
+      const c = fakeCallConsole(TOKEN, { "POST /capture": { status: 201, body: { id: 42 }, replayed: true } });
+      const r = await consoleCall({
+        method: "POST",
+        path: "/capture",
+        body: "{}",
+        idempotencyKey: "  a-key-with-padding  ",
+        env: { METISTRY_LOCAL_OWNER_TOKEN: TOKEN },
+        platform: "linux",
+        fetchFn: c.fetchFn,
+      });
+      expect(c.seen[0]?.idempotencyKey).toBe("a-key-with-padding");
+      expect(r.replayed).toBe(true);
+    });
+
+    it("sends no Idempotency-Key header at all when none was given", async () => {
+      const c = fakeCallConsole(TOKEN, { "POST /capture": { status: 201, body: { id: 42 } } });
+      await consoleCall({ method: "POST", path: "/capture", body: "{}", env: { METISTRY_LOCAL_OWNER_TOKEN: TOKEN }, platform: "linux", fetchFn: c.fetchFn });
+      expect(c.seen[0]?.idempotencyKey).toBeUndefined();
+    });
+
+    it("refuses an empty or all-whitespace key before ever sending the token", async () => {
+      let called = false;
+      const fetchFn = (async () => {
+        called = true;
+        throw new Error("must not be called");
+      }) as unknown as typeof fetch;
+      for (const bad of ["", "   "]) {
+        await expect(
+          consoleCall({ method: "POST", path: "/capture", idempotencyKey: bad, env: { METISTRY_LOCAL_OWNER_TOKEN: TOKEN }, platform: "linux", fetchFn }),
+        ).rejects.toThrow(/--idempotency-key must be non-empty and at most 200 characters/);
+      }
+      expect(called).toBe(false);
+    });
+
+    it("refuses a key over 200 characters, trimmed", async () => {
+      const fetchFn = (async () => {
+        throw new Error("must not be called");
+      }) as unknown as typeof fetch;
+      await expect(
+        consoleCall({ method: "POST", path: "/capture", idempotencyKey: "x".repeat(201), env: { METISTRY_LOCAL_OWNER_TOKEN: TOKEN }, platform: "linux", fetchFn }),
+      ).rejects.toThrow(/at most 200 characters/);
+      // exactly 200 after trimming is fine — padding around it does not count against the limit
+      const c = fakeCallConsole(TOKEN, { "POST /capture": { status: 201, body: { id: 42 } } });
+      await expect(
+        consoleCall({ method: "POST", path: "/capture", idempotencyKey: `  ${"x".repeat(200)}  `, env: { METISTRY_LOCAL_OWNER_TOKEN: TOKEN }, platform: "linux", fetchFn: c.fetchFn }),
+      ).resolves.toMatchObject({ status: 201 });
+    });
+  });
 });
 
 describe("renderConsoleCallError", () => {
@@ -262,5 +323,79 @@ describe("metistry console call (CLI)", () => {
     expect(code).toBe(1);
     expect(called).toBe(false);
     expect(err.join("\n")).toMatch(/is not loopback.*refuses to send it anywhere else/s);
+  });
+
+  it("--idempotency-key sends the header", async () => {
+    process.env.METISTRY_LOCAL_OWNER_TOKEN = TOKEN;
+    const c = fakeCallConsole(TOKEN, { "POST /capture": { status: 201, body: { id: 42 } } });
+    const code = await main(["console", "call", "POST", "/capture", "--body", "-", "--idempotency-key", "a-fixed-key", "--json"], {
+      out: () => {},
+      err: () => {},
+      fetchFn: c.fetchFn,
+      readStdin: async () => "{}",
+    });
+    expect(code).toBe(0);
+    expect(c.seen[0]?.idempotencyKey).toBe("a-fixed-key");
+  });
+
+  it("refuses an empty or over-long --idempotency-key, exit 1, before sending the token", async () => {
+    process.env.METISTRY_LOCAL_OWNER_TOKEN = TOKEN;
+    let called = false;
+    const fetchFn = (async () => {
+      called = true;
+      throw new Error("must not be called");
+    }) as unknown as typeof fetch;
+    for (const bad of ["", " ", "x".repeat(201)]) {
+      const err: string[] = [];
+      const code = await main(["console", "call", "POST", "/capture", "--idempotency-key", bad], { out: () => {}, err: (s) => err.push(s), fetchFn });
+      expect(code).toBe(1);
+      expect(err.join("\n")).toContain("--idempotency-key must be non-empty and at most 200 characters");
+    }
+    expect(called).toBe(false);
+  });
+
+  it("a replayed response folds replayed: true into --json output, verbatim otherwise", async () => {
+    process.env.METISTRY_LOCAL_OWNER_TOKEN = TOKEN;
+    const c = fakeCallConsole(TOKEN, { "POST /capture": { status: 201, body: { id: 42, path: "Inbox/note.md" }, replayed: true } });
+
+    const jsonOut: string[] = [];
+    const jsonErr: string[] = [];
+    const jsonCode = await main(["console", "call", "POST", "/capture", "--body", "-", "--idempotency-key", "same-key", "--json"], {
+      out: (s) => jsonOut.push(s),
+      err: (s) => jsonErr.push(s),
+      fetchFn: c.fetchFn,
+      readStdin: async () => "{}",
+    });
+    expect(jsonCode).toBe(0);
+    expect(JSON.parse(jsonOut.join(""))).toEqual({ id: 42, path: "Inbox/note.md", replayed: true });
+
+    const plainOut: string[] = [];
+    const plainErr: string[] = [];
+    const plainCode = await main(["console", "call", "POST", "/capture", "--body", "-", "--idempotency-key", "same-key"], {
+      out: (s) => plainOut.push(s),
+      err: (s) => plainErr.push(s),
+      fetchFn: c.fetchFn,
+      readStdin: async () => "{}",
+    });
+    expect(plainCode).toBe(0);
+    // the body prints exactly as it always did — the note is on stderr, not folded in
+    expect(JSON.parse(plainOut.join(""))).toEqual({ id: 42, path: "Inbox/note.md" });
+    expect(plainErr.join("\n")).toContain("idempotency-replayed");
+  });
+
+  it("a non-replayed response carries no note and no extra field", async () => {
+    process.env.METISTRY_LOCAL_OWNER_TOKEN = TOKEN;
+    const c = fakeCallConsole(TOKEN, { "POST /capture": { status: 201, body: { id: 43 } } });
+    const out: string[] = [];
+    const err: string[] = [];
+    const code = await main(["console", "call", "POST", "/capture", "--body", "-", "--idempotency-key", "another-key", "--json"], {
+      out: (s) => out.push(s),
+      err: (s) => err.push(s),
+      fetchFn: c.fetchFn,
+      readStdin: async () => "{}",
+    });
+    expect(code).toBe(0);
+    expect(JSON.parse(out.join(""))).toEqual({ id: 43 });
+    expect(err).toHaveLength(0);
   });
 });

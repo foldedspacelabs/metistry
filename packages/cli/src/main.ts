@@ -272,7 +272,8 @@ const USAGE = `metistry — Metistry command line
       app is blamed for it. The token comes from the environment
       (<instance>/state/.env) or the login Keychain, and is never printed.
 
-  metistry console call <METHOD> <path> [--body @file|-] [--json] [--instance <dir>]
+  metistry console call <METHOD> <path> [--body @file|-]
+                        [--idempotency-key <key>] [--json] [--instance <dir>]
       One authenticated request against the console, as the same principal and
       token as console whoami — the scripting seam behind it (docs/ops/console-api.md
       lists the routes). Prints the response body, pretty unless --json (which
@@ -281,6 +282,11 @@ const USAGE = `metistry — Metistry command line
       or --body - (stdin) supplies a request body; a GET needs neither. Refuses
       a non-loopback METISTRY_CONSOLE_URL/METISTRY_URL outright — the token is
       minted for this machine only.
+      --idempotency-key <key> sends Idempotency-Key (docs/ops/console-api.md;
+      today only POST /capture reads it) — trimmed, refused here rather than
+      on the wire if empty or over 200 characters. A replay (the console's
+      idempotency-replayed header) folds "replayed": true into the --json
+      body; in plain mode it is a one-line note on stderr instead.
 
   metistry identity [--json] [--instance <dir>]
       The instance's identity.yaml (name, mention, voice, icon, instance_id) —
@@ -887,7 +893,7 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
     case "console": {
       const printConsoleUsage = () => {
         err("usage: metistry console whoami [--json] [--instance <dir>] [--env-file <path>]");
-        err("       metistry console call <METHOD> <path> [--body @file|-] [--json] [--instance <dir>] [--env-file <path>]");
+        err("       metistry console call <METHOD> <path> [--body @file|-] [--idempotency-key <key>] [--json] [--instance <dir>] [--env-file <path>]");
       };
       if (positional[0] !== "whoami" && positional[0] !== "call") {
         printConsoleUsage();
@@ -920,12 +926,26 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
           }
         }
         try {
-          const r = await consoleCall({ method: method.toUpperCase(), path, body, ...consoleCommon });
+          const r = await consoleCall({ method: method.toUpperCase(), path, body, idempotencyKey: str(flags, "idempotency-key"), ...consoleCommon });
           if (r.status >= 400) {
             err(`metistry console call: ${renderConsoleCallError(r)}`);
             return 1;
           }
-          out(flags.json === true ? r.raw : typeof r.body === "string" ? r.body : JSON.stringify(r.body, null, 2));
+          // A replay is the ORIGINAL response, not a new write (docs/ops/console-api.md).
+          // --json folds it into the printed body so a script sees it without
+          // reading headers this CLI never prints; plain mode says it on stderr
+          // instead, leaving the body exactly what it always was.
+          if (flags.json === true) {
+            if (r.replayed && r.body !== null && typeof r.body === "object" && !Array.isArray(r.body)) {
+              out(JSON.stringify({ ...(r.body as Record<string, unknown>), replayed: true }));
+            } else {
+              if (r.replayed) err("metistry console call: idempotency-replayed (the original response, not a new write) — could not fold into a non-object --json body");
+              out(r.raw);
+            }
+          } else {
+            out(typeof r.body === "string" ? r.body : JSON.stringify(r.body, null, 2));
+            if (r.replayed) err("metistry console call: idempotency-replayed — the console returned the ORIGINAL response, not a new write");
+          }
           return 0;
         } catch (e) {
           err(`metistry console call: ${e instanceof Error ? e.message : String(e)}`);

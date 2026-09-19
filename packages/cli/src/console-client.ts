@@ -6,9 +6,10 @@
 // without a passkey ceremony, and the one an operator runs to prove the door
 // works before blaming the app. `call` is the scripting seam behind it — the
 // same door, any method and path, for the app and the second-instance guide.
-// Both are deliberately the whole client: one request, one header, no
-// state. The token is never printed and never reaches argv — it goes into
-// an Authorization header and nowhere else, and every error message is
+// Both are deliberately the whole client: one request, an Authorization
+// header always and (for `call`, on request) an Idempotency-Key, no state.
+// The token is never printed and never reaches argv — it goes into an
+// Authorization header and nowhere else, and every error message is
 // redacted against it before it leaves this file.
 
 import { Keychain, keychainAccount } from "./keychain.js";
@@ -160,6 +161,13 @@ export interface ConsoleCallOptions extends ConsoleTargetOptions {
   path: string;
   /** raw bytes, sent as-is (this verb does not parse or reshape a request body) */
   body?: string | undefined;
+  /**
+   * Sent as the `Idempotency-Key` header (docs/ops/console-api.md, currently
+   * read only by `POST /capture`). Checked against the same shape the server
+   * enforces — trimmed, non-empty, at most 200 characters — before the
+   * request ever goes out, so a bad key is a local refusal, not a round trip.
+   */
+  idempotencyKey?: string | undefined;
   fetchFn?: typeof fetch | undefined;
   timeoutMs?: number | undefined;
 }
@@ -170,6 +178,23 @@ export interface ConsoleCallResult {
   body: unknown;
   /** exactly what the console sent back, byte for byte — what `--json` prints */
   raw: string;
+  /** the console's `idempotency-replayed` response header: this is the ORIGINAL response to the key, not a new write */
+  replayed: boolean;
+}
+
+/**
+ * `Idempotency-Key`'s shape, mirrored from the server's own check
+ * (`apps/console/src/server.ts`, `POST /capture`): trimmed, non-empty, at
+ * most 200 characters. Refusing here — before `consoleTarget` even resolves a
+ * token — is the same "fail before the network" rule `isLoopbackConsoleUrl`
+ * follows below.
+ */
+function normalizeIdempotencyKey(raw: string): string {
+  const trimmed = raw.trim();
+  if (trimmed === "" || trimmed.length > 200) {
+    throw new Error(`--idempotency-key must be non-empty and at most 200 characters once trimmed, not ${JSON.stringify(raw)}`);
+  }
+  return trimmed;
 }
 
 /**
@@ -178,9 +203,13 @@ export interface ConsoleCallResult {
  * loopback door. It is the scripting seam: no shape of its own, no retries,
  * no interpretation of the response beyond "does it parse as JSON" — the
  * caller (a script, the app, a person at a terminal) decides what the answer
- * means.
+ * means. `opts.idempotencyKey`, when given, rides as `Idempotency-Key` and
+ * `replayed` on the result reports back the console's own
+ * `idempotency-replayed` header — the CLI's only way to say "this is the
+ * original response, not a new write" since it prints no headers.
  */
 export async function consoleCall(opts: ConsoleCallOptions): Promise<ConsoleCallResult> {
+  const idempotencyKey = opts.idempotencyKey !== undefined ? normalizeIdempotencyKey(opts.idempotencyKey) : undefined;
   const target = await consoleTarget(opts);
   if (!isLoopbackConsoleUrl(target.url)) {
     throw new Error(
@@ -192,7 +221,11 @@ export async function consoleCall(opts: ConsoleCallOptions): Promise<ConsoleCall
   try {
     res = await fetchFn(`${target.url}${opts.path}`, {
       method: opts.method,
-      headers: { authorization: `Bearer ${target.token}`, ...(opts.body !== undefined ? { "content-type": "application/json" } : {}) },
+      headers: {
+        authorization: `Bearer ${target.token}`,
+        ...(idempotencyKey !== undefined ? { "idempotency-key": idempotencyKey } : {}),
+        ...(opts.body !== undefined ? { "content-type": "application/json" } : {}),
+      },
       ...(opts.body !== undefined ? { body: opts.body } : {}),
       signal: AbortSignal.timeout(opts.timeoutMs ?? 30_000),
     });
@@ -210,7 +243,7 @@ export async function consoleCall(opts: ConsoleCallOptions): Promise<ConsoleCall
   } else {
     body = null;
   }
-  return { status: res.status, body, raw };
+  return { status: res.status, body, raw, replayed: res.headers.get("idempotency-replayed") === "true" };
 }
 
 /** The error envelope's `code`/`message` (and `field`, when the response carries one), for a non-2xx `console call`. */

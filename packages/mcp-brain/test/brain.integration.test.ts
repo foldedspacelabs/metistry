@@ -11,7 +11,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { TasksService } from "@foldedspacelabs/metistry-tasks";
 import { EmbedUnavailableError, mintToken } from "@foldedspacelabs/metistry-core";
 import { QueryStore } from "@foldedspacelabs/metistry-queries";
-import { createBrainServer, EAGER_TOOL_NAMES, sha256Text, type AgentPrincipal, type VaultWriteRequest } from "../src/index.js";
+import { createBrainServer, EAGER_TOOL_NAMES, sha256Text, TURN_ID_META_KEY, type AgentPrincipal, type VaultWriteRequest } from "../src/index.js";
 import { loadTestEnv } from "@foldedspacelabs/metistry-core/test-env";
 
 const { hasDb } = loadTestEnv(new URL("../../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
@@ -63,8 +63,8 @@ describe.skipIf(!hasDb)("mcp-brain (real db, real MCP client)", () => {
     return client;
   }
 
-  async function call(client: Client, name: string, args: Record<string, unknown> = {}): Promise<Parsed> {
-    const r = (await client.callTool({ name, arguments: args })) as { isError?: boolean; content: { type: string; text: string }[] };
+  async function call(client: Client, name: string, args: Record<string, unknown> = {}, meta?: Record<string, unknown>): Promise<Parsed> {
+    const r = (await client.callTool({ name, arguments: args, ...(meta ? { _meta: meta } : {}) })) as { isError?: boolean; content: { type: string; text: string }[] };
     const text = r.content[0]!.text;
     const nl = text.indexOf("\n");
     return { isError: !!r.isError, body: JSON.parse(nl === -1 ? text : text.slice(0, nl)), nudge: nl === -1 ? null : text.slice(nl + 1) };
@@ -781,19 +781,39 @@ cache_ttl: 0
     const unknown = await call(hub, "queries_run", { name: "not-a-real-query" });
     expect(unknown).toMatchObject({ isError: true, body: { error: { code: "not_found" } } });
 
-    // turn_id (every brain tool takes it): lands in runs.meta.turn_id, the join key activity_feed exposes.
+    // turn_id: in NO tool's schema any more (turn-id.ts — 938 definition
+    // tokens for a field that is not a parameter), carried by the call's
+    // `_meta` instead. It still lands in runs.meta.turn_id, which is the join
+    // key activity_feed exposes, so the correlation is what is asserted here
+    // rather than the carrier.
     // Unique per run, not a fixed literal: the scratch database is shared with every
     // other suite (console's console-routes.integration.test.ts writes its own
     // turn_id fixtures against the same `runs` table), so a hand-picked literal here
     // can collide with somebody else's and make this test count their row instead.
+    const lastTurnId = async (tool: string): Promise<string | null> => {
+      const { rows } = await pool.query(`SELECT meta->>'turn_id' AS turn_id FROM runs WHERE component = $1 AND tool = $2 ORDER BY id DESC LIMIT 1`, [HUB, tool]);
+      return rows[0]!.turn_id;
+    };
+
     const turnId = `itest-turn-${mintToken(8)}`;
-    await call(hub, "queries_list", { turn_id: turnId });
+    await call(hub, "queries_list", {}, { [TURN_ID_META_KEY]: turnId });
+    expect(await lastTurnId("queries_list")).toBe(turnId);
+
+    // One release of compatibility, tolerated and NOT advertised: a client
+    // still passing it as an argument correlates exactly as before — the
+    // message is rewritten at the door, so the argument never reaches a schema
+    // that would strip it, and the call is not refused for carrying it.
+    const legacyId = `itest-turn-${mintToken(8)}`;
+    const legacy = await call(hub, "queries_list", { turn_id: legacyId });
+    expect(legacy.isError).toBe(false);
+    expect(await lastTurnId("queries_list")).toBe(legacyId);
+
+    // A malformed handle is dropped, never a refusal: the work asked for has
+    // nothing to do with whether the caller's bookkeeping label parsed.
+    const junk = await call(hub, "queries_list", { turn_id: "not a valid handle" }, { [TURN_ID_META_KEY]: 42 });
+    expect(junk.isError).toBe(false);
+    expect(await lastTurnId("queries_list")).toBeNull();
     await hub.close();
-    const { rows: turnRows } = await pool.query(
-      `SELECT meta->>'turn_id' AS turn_id FROM runs WHERE component = $1 AND tool = 'queries_list' ORDER BY id DESC LIMIT 1`,
-      [HUB],
-    );
-    expect(turnRows[0]!.turn_id).toBe(turnId);
 
     // external, no grant: forbidden — uniform whether or not a store is even wired (queries-tools.ts checks the grant first)
     const alice1 = await connect("tok-alice");

@@ -248,9 +248,10 @@ describe.skipIf(!hasDb)("artifacts_* (real db, real MCP client)", () => {
     const work = (await new TasksService(pool).create({ title: "room through the bridge", project: P, kind: "task" }, "user")).id;
 
     // no tool on this surface takes an addressee for a room — the schema has two keys and neither is one
+    // (two, not three: the turn handle rides in the call's `_meta` now, not in every schema — src/turn-id.ts)
     const listed = (await alice.listTools()).tools;
     const comment = listed.find((t) => t.name === "tasks_comment")!;
-    expect(Object.keys(comment.inputSchema.properties ?? {}).sort()).toEqual(["body", "turn_id", "work_id"]);
+    expect(Object.keys(comment.inputSchema.properties ?? {}).sort()).toEqual(["body", "work_id"]);
     expect(JSON.stringify(comment.inputSchema)).not.toMatch(/to_agent|addressee|mention/);
 
     const said = await call(alice, "tasks_comment", { work_id: work, body: "does this include the migration?" });

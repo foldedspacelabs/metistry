@@ -613,6 +613,7 @@ export const HELP_GROUPS: Array<{ title: string; verbs: Array<[string, string]> 
       ["secrets sync|mint|list|purge", "the login Keychain is the store; .env is generated from it"],
       ["runtime install --from <bundle>", "seed a writable product dir from a signed app bundle"],
       ["up", "containers and host jobs, then doctor"],
+      ["down", "stop everything this instance runs, then confirm by looking"],
     ],
   },
   {
@@ -631,6 +632,7 @@ export const HELP_GROUPS: Array<{ title: string; verbs: Array<[string, string]> 
       ["compute show|providers|models", "which providers exist and which model each tier runs on"],
       ["compute assign|budget", "point a tier at a model; cap what it may spend"],
       ["deployment [set-shape]", "the effective shape (D4 overlay) and its services"],
+      ["deployment set-keep-awake", "whether this install holds the Mac awake, and on which power"],
       ["agents autonomy <id>", "how much room one agent has with an action"],
       ["identity", "identity.yaml — the one place the assistant is named"],
       ["instances list|add|remove|refresh", "the peer registry: which other instances this one knows"],
@@ -791,7 +793,7 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
       const ask = io.ask ?? (process.stdin.isTTY ? terminalAsk : undefined);
       if (keepAwake === undefined && ask) {
         try {
-          keepAwake = await askKeepAwake(ask, out);
+          keepAwake = await askKeepAwake(ask, out, { ui });
         } catch (e) {
           err(e instanceof Error ? e.message : String(e));
           return 2;
@@ -1389,7 +1391,7 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
           home: io.home,
           dryRun: flags["dry-run"] === true,
         });
-        out(downJson ? JSON.stringify({ ok: r.ok, shape: r.shape, results: r.results, confirmations: r.confirmations, ...(r.appRegistrarNote ? { app_registrar_note: r.appRegistrarNote } : {}) }, null, 2) : renderDown(r));
+        out(downJson ? JSON.stringify({ ok: r.ok, shape: r.shape, results: r.results, confirmations: r.confirmations, ...(r.appRegistrarNote ? { app_registrar_note: r.appRegistrarNote } : {}) }, null, 2) : renderDown(r, ui));
         return r.ok ? 0 : 1;
       } catch (e) {
         err(`metistry down: ${e instanceof Error ? e.message : String(e)}`);
@@ -1421,7 +1423,7 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
           home: io.home,
           dryRun: flags["dry-run"] === true,
         });
-        out(asJson ? JSON.stringify(r.results, null, 2) : renderServiceResults(r.results));
+        out(asJson ? JSON.stringify(r.results, null, 2) : renderServiceResults(r.results, ui));
         return r.ok ? 0 : 1;
       } catch (e) {
         if (e instanceof UnknownServiceError) {

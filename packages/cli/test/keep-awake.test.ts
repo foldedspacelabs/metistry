@@ -264,15 +264,24 @@ describe("doctor's keep-awake row", () => {
   });
 
   it("ruling E: the Mac slept anyway — degraded, with when, for how long, and the repair", async () => {
-    const dir = await withState({
-      last_cutoff: { at: "2026-09-19T02:41:00.000Z", from: "2026-09-19T02:00:00.000Z", gap_ms: 2_460_000, mode: "always", power_source: "ac" },
-    });
-    const row = (await keepAwakeRow({ deployment: { ...launchd, keep_awake: "always" }, instanceDir: dir, exec: pmset(), platform: "darwin" }))!;
+    const cutoff = { at: "2026-09-19T02:41:00.000Z", from: "2026-09-19T02:00:00.000Z", gap_ms: 2_460_000, power_source: "ac" } as const;
+    const onBattery = await withState({ mode: "allow_sleep_on_battery", last_cutoff: { ...cutoff, mode: "allow_sleep_on_battery" } });
+    const row = (await keepAwakeRow({ deployment: { ...launchd, keep_awake: "allow_sleep_on_battery" }, instanceDir: onBattery, exec: pmset(), platform: "darwin" }))!;
     expect(row.status).toBe("degraded");
     expect(row.remediation).toContain("slept at 2026-09-19T02:41:00.000Z");
     expect(row.remediation).toContain("about 41m");
     expect(row.remediation).toContain("set-keep-awake always --yes");
     expect(row.remediation).toContain("costs battery");
+  });
+
+  it("…and offers no repair when the strongest setting was already in force — that would be noise dressed as advice", async () => {
+    const dir = await withState({
+      last_cutoff: { at: "2026-09-19T02:41:00.000Z", from: "2026-09-19T02:00:00.000Z", gap_ms: 2_460_000, mode: "always", power_source: "ac" },
+    });
+    const row = (await keepAwakeRow({ deployment: { ...launchd, keep_awake: "always" }, instanceDir: dir, exec: pmset(), platform: "darwin" }))!;
+    expect(row.status).toBe("degraded");
+    expect(row.remediation).not.toContain("set-keep-awake always --yes");
+    expect(row.remediation).toContain("already the strongest setting");
   });
 
   it("a stale heartbeat names both of its causes rather than picking the wrong one", async () => {

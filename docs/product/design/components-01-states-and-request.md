@@ -54,8 +54,14 @@ P4, and it is what stops the UI copy and the server's refusal drifting apart.
 
 Two renderings, and neither hides the data.
 
-- **In a row:** a pill after the probe — clock glyph + age (`3d`), in `stale`
-  on `stale-quiet`. The row's own state label stays where it is.
+- **In a row:** the row is a four-column grid — `9px | 1fr | 116px | 96px` —
+  dot, name, probe (right-aligned, `mono`), state label (right-aligned). The
+  age pill is **welded to the name** inside the second column, so it never
+  pushes the probe or the label out of their columns, and it sits where the eye
+  first lands. Revised 2026-09-19: previously the pill floated between the
+  flexible columns and shoved every row's content to a different x.
+  **A row can be `ok` *and* stale** — which is exactly `aws-costs` — and the
+  grid can show both at once, which the old row could not.
 - **On a panel:** the same pill in the panel header, with the value below it at
   full size, and `last collected 16 Sep, 04:10` in `footnote` beneath.
 
@@ -124,27 +130,72 @@ Card, `surface` on the panel's `bg`, `radius-md`, 16px padding:
    ("FOLDERS IT WOULD READ", "WHERE IT WOULD BE WRITTEN").
 4. **Action row** — below.
 
-### 2.3 The preview is data, not a coloured diff
+### 2.3 The preview leads with the delta, and expands to the total
 
-Additions are marked with a `+` in `text-tertiary` and the line set in
-`text-primary` at 600; unchanged lines sit in `text-secondary` at 400. **No
-green, no red.** Two reasons: what an agent proposes is data (P1), and colour
-in this product already buys accent, state, presence and action intent — a
-fifth meaning would make the other four less legible. The diff reads as a list
-where one line is heavier, which is enough.
+Revised 2026-09-19. It was a diff with the whole scope listed and the new line
+marked `+`. That makes the reader find the change. Now it **states the change
+first** and offers the effective total behind a disclosure:
 
-### 2.4 Six answers, three weights
+```
+WHAT APPROVE DOES
+  Adds  Areas/Finance
+  › It would then read 4 folders
+```
 
-The brief's own observation is that six equal buttons is wrong. They are:
+Expanded, the disclosure lists all four with the new one marked `new` in
+`affirmative`. So the common read is one line, and "what will my agent actually
+be able to see after this?" is one click away rather than reconstructed.
 
-| Weight | Answers | Treatment |
-| --- | --- | --- |
-| **decisions** | Approve · Revise · Decline | the three buttons, leading edge. Approve is `affirmative`, Decline is `destructive`, Revise is secondary |
-| **the conditional one** | Approve as Work | **a `▾` on Approve**, not a fourth button. It exists only when the row carries `payload.suggested_work`, so the card has three buttons or three-and-a-menu — never five |
-| **dismissals** | Later · Skip | quiet text buttons pushed to the **trailing edge**, visually separated. They are not decisions; they are ways to clear the card, and they are the two that batch |
+**Still no green-and-red diff.** What an agent proposes is data (P1), and
+colour here already buys accent, state, presence and action intent — a fifth
+meaning makes the other four less legible. The one `affirmative` marker inside
+the expanded list is labelling the *outcome of the action*, which is what that
+role is for.
 
-That split is the whole layout answer: decisions left, dismissals right, the
-conditional answer folded into the one it modifies.
+### 2.4 Four answers, down from six
+
+Revised 2026-09-19. The card had six; it has four, and both removals are
+**rulings rather than layout**, because they change the answer set that
+`docs/ops/reply-feedback.md` makes normative and that ruling 7.4 fixed at six.
+Flagged here, not edited there.
+
+| Answer | Treatment |
+| --- | --- |
+| **Approve** | affirmative fill, check glyph. Where the row carries `payload.suggested_work` it **also makes the task** |
+| **Decline** | destructive fill, cross glyph. Confirms first where irreversible, naming the consequence in the tool's words |
+| **Revise** | secondary, pencil glyph. An empty reason cancels rather than sends |
+| **Review later** | **icon only** — a clock with an arrow — at the trailing edge, `aria-label="Review later"`. A snooze is not a decision, so it does not wear a decision's clothes |
+
+Order is Approve · Decline · Revise, then the spacer, then Later. The two
+opposite answers sit together because they are the binary the card actually
+asks; Revise is the escape hatch from it. The mis-click risk of putting an
+affirmative fill beside a destructive one is real and is covered by Decline's
+confirmation where it is irreversible — which was already the rule.
+
+**Glyphs in the buttons: keep them.** These are the two most consequential
+buttons in the product and without a glyph they are told apart by **fill colour
+alone**, which §2.1 says never to rely on. A check and a cross carry the
+difference in greyscale. The board shows both, with and without.
+
+#### What was removed, and why
+
+**Approve as Work** was a `▾` on Approve. But if a request suggests a task,
+"yes" already means "and make the task": the split asked the reader to learn a
+distinction the preview can simply state. So approving a row that carries
+suggested work makes the task, and the preview says `Adds task #418 to the
+board`. One fewer control, one more sentence.
+
+**Skip** was a decline that skipped the per-type consequence and wrote a fixed
+marker instead of a reason. On screen that is two words for one idea —
+dismissing a card without approving *is* a decline. **Decline without a typed
+reason sends exactly what Skip sent**, which is what `SKIP_FEEDBACK` already
+means ("declined with nothing to say"). The one case Skip protected — clearing
+a card without triggering a revoke — is what **Review later** is for.
+
+*The tradeoff, honestly:* a user who wants an enrolment request off the screen
+*permanently* without revoking the token now has no single click for it. If
+that case matters, Skip comes back — but as a verb on a multi-selection in the
+full list, never as a fifth button on a card.
 
 ### 2.5 States
 
@@ -165,12 +216,21 @@ action, so it does not sit on a vibrant material), elevation 3.
 Header: "Needs You · 4 waiting · 1 snoozed" + a type filter as chips.
 Body: cards grouped by type, oldest first, on the panel's `bg` so each card
 reads as a card.
-Footer: the batch bar, pinned, offering **only Later · Skip · Decline** —
-the three that need nothing from the individual row.
+Footer: **one link — "Show all 12 →"**, and only when the queue is longer than
+the panel.
 
-Over six cards the popover becomes a resizable panel. **That transition is
-still undrawn** and is the one thing in this component I would not build from
-this spec yet.
+**The batch bar is gone.** Revised 2026-09-19, for two reasons. The pointer
+arrives at the *top* of a popover, having just clicked the bell, so a footer of
+batch verbs is the furthest reachable thing in the panel. And bulk is a surface
+a queue of forty needs, not a queue of four — on four cards it is a row of
+controls that costs more attention than the decisions themselves (P2).
+Selection and bulk verbs belong in the full list behind "Show all", where a
+long queue is the reason you opened it.
+
+This also settles the open item from the first pass: there is **no popover →
+panel transition** any more. The popover scrolls, and past a certain length it
+hands off to a real list. A container that changes type by count was a
+surprise, and the link is not.
 
 ### 2.7 Keyboard (Mac)
 
@@ -194,7 +254,7 @@ Sentences, not tokens, and agent text carries its prefix:
 | one answer | `POST /api/proposals/{id}`, carrying `if_unchanged: {seen_at}` |
 | the batch | `POST /api/proposals/batch` |
 | the count on the bell | the same queue's pending rows |
-| Approve as Work | `payload.suggested_work` on the row; absent ⇒ the menu is absent |
+| the task Approve makes | `payload.suggested_work` on the row; absent ⇒ the preview has no task line |
 
 The staleness envelope is the shipped one (`app.js`'s `seenAt` map and its 409
 repaint) — this design renders the state the wire already produces, which is
@@ -204,7 +264,8 @@ the point.
 
 ## Still open after this round
 
-1. **The popover → panel transition** at more than six cards (§2.6).
+1. **The full list behind "Show all"** — selection, bulk verbs, and whether
+   Skip returns there (§2.4).
 2. **`lastSuccessAt` on the doctor row** (§1.5) — a field, not a fifth enum case.
 3. **Per-source staleness thresholds** belong in collector manifests; nothing
    defines them today.

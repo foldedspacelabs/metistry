@@ -106,6 +106,23 @@ output, so the closest chunk in the vault stays invisible to an agent
 whose grant does not cover it. An `index` grant still gets titles and
 one-line descriptions only — semantic ranking is not a content read path.
 
+**Listing, beside searching.** `knowledge_list` is the same tier rule applied
+to a browse rather than a query: path, title and one-line description out of
+the reconciler's index (the `knowledge_pages` named query, run through
+`packages/queries` — a page list is derived state), never content, at any
+tier. `knowledge_list { links_for: <path> }` lists one page's links in both
+directions out of `knowledge_page_links`, and needs an `areas` grant covering
+the page, because a backlink names a note. Both ends of every edge are
+filtered, so a link can never report that a note exists in an area the agent
+was never granted.
+
+Both queries are `expose: route`, and since 2026-09-19 that is honoured on
+the `/mcp` mount as well as the console's `/api/q/<name>`: `queries_run`
+refuses them with the refusal an unknown name gets, so a `queries: true`
+grant is no longer a way around the tiers (`docs/ops/assistant-tools.md`,
+"One scope rule for every knowledge read"). Every path on both surfaces is
+judged by one function, `canSeeUnder`.
+
 ## Chunking
 
 Heading-aware: notes split on markdown headings first (headings inside
@@ -193,7 +210,11 @@ curl -s -H "Authorization: Bearer $METISTRY_BRIDGE_TOKEN_RECONCILER" \
   route is where the caller's scope is applied to every path returned) and
   `seed/queries/knowledge_page_links.yaml` lists one page's links both ways
   (`GET /api/knowledge/links`, `expose: route` for the same reason — and it
-  scopes BOTH ends of every edge), and a vector parameter still has no clean
+  scopes BOTH ends of every edge). Agents reach the same two queries through
+  `knowledge_list` under the same filter, and through nothing else: the
+  generic doors — `GET /api/q/<name>` and `queries_run` — both answer a
+  route-backed name the way they answer an unknown one. A vector parameter
+  still has no clean
   binding in the named-query driver, so nothing in `seed/queries/` ranks.
   Semantic search reaches agents through `knowledge_search`, the owner's own
   clients through **`GET /api/knowledge/search`** — a thin proxy onto

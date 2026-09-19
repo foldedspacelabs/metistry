@@ -867,19 +867,41 @@ fail the run.
 ## Reading a doctor report
 
 ```
-name                                              kind       status  ms   remediation
-------------------------------------------------  ---------  ------  ---  -----------
-apple-fm                                          bridge     ok      920
-eventkit                                          bridge     failed  4    eventkit rejected the token (HTTP 401) — the METISTRY_BRIDGE_TOKEN_* in .env differs …
-reconciler                                        service    ok      53
-console                                           service    ok      6
-db                                                db         ok      16
-migrations                                        db         ok      3
-launchd:com.foldedspacelabs.metistry.reconciler   launchd    ok      4
-compose:console                                   container  ok      0
-…
-24 checks: 23 ok, 0 degraded, 1 failed, 0 absent — FAILED (/Users/you/src/metistry)
+/Users/you/src/metistry — shape launchd, 2026-09-19T09:14:02.118Z
+
+bridge
+  ✓ apple-fm  ok       920ms
+  ✗ eventkit  failed     4ms
+      → eventkit rejected the token (HTTP 401) — the METISTRY_BRIDGE_TOKEN_* in
+        .env differs from the one the bridge was started with
+
+service
+  ✓ reconciler  ok        53ms
+  ✓ console     ok         6ms
+
+cli
+  ○ cli on PATH  absent     0ms
+      → `ln -s /Users/you/instance/.metistry/state/cli/metistry
+        ~/.local/bin/metistry` (or add its directory to PATH)
+
+db
+  ✓ db          ok        16ms
+  ✓ migrations  ok         3ms
+
+launchd
+  ✓ launchd:com.foldedspacelabs.metistry.reconciler  ok         4ms
+
+container
+  ✓ compose:console  ok         0ms
+
+9 checks: 7 ok, 0 degraded, 1 failed, 1 absent — ✗ FAILED
 ```
+
+One block per `kind`, the remediation — the reason a red row is read at all
+— wrapped directly under its row rather than in a column that runs off the
+screen, and the verdict last. Colour, and `[ok]`/`[x]`/`[!]` where the
+terminal's locale is not UTF-8, come from `docs/ops/cli-style.md`;
+`--json` is untouched by any of it.
 
 One row per thing that can be wrong; every row is a `core` `CheckResult`
 (`name`, `status`, `latency_ms`, `probe`, `remediation`, `meta`) plus a

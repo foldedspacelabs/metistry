@@ -151,7 +151,8 @@ describe("up says where the time went and who owns what it started", () => {
     const lines: string[] = [];
     const exec = fakeExec({ launchctl: (args) => (args[0] === "list" ? { code: 0, stdout: launchctlList([]) } : undefined) });
     const r = await up({ productDir: P, env: {}, platform: "darwin", uid: 501, node: "/usr/local/bin/node", exec, out: (l) => lines.push(l), home, doctorFn: okDoctor });
-    expect(r.timings.map((t) => t.title)).toEqual(["compose", "launchd", "doctor"]);
+    // `cli` is the shim write (#220) — last of the install sections, before doctor's diagnosis
+    expect(r.timings.map((t) => t.title)).toEqual(["compose", "launchd", "cli", "doctor"]);
     expect(r.elapsedMs).toBeGreaterThanOrEqual(0);
     expect(lines.at(-1)).toBe(`   ${runningNote("compose")}`);
     expect(lines.at(-3)).toBe("== timings");

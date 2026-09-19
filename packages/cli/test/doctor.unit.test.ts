@@ -118,6 +118,9 @@ describe("doctor: everything healthy", () => {
       "schedule:good=absent",
       "launchd:launchd:com.foldedspacelabs.metistry.a=ok",
       "launchd:launchd:com.foldedspacelabs.metistry.b=ok",
+      // macOS: one row for the power policy, and this install has not been
+      // asked the question — absent, never a failure (see keep-awake.test.ts)
+      "keep-awake:keep-awake=absent",
       "container:compose:assistant=ok",
       "container:compose:console=ok",
       "container:compose:db=ok",

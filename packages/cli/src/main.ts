@@ -10,7 +10,7 @@ import { realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { DeploymentShape } from "@foldedspacelabs/metistry-core";
+import { KEEP_AWAKE_VALUES, parseKeepAwake, type DeploymentShape, type KeepAwake } from "@foldedspacelabs/metistry-core";
 import {
   assign,
   computeReport,
@@ -33,7 +33,7 @@ import {
   COMPUTE_TEMPLATES,
   type ComputeOptions,
 } from "./compute.js";
-import { buildDeploymentReport, renderDeploymentReport, setDeploymentShape } from "./deployment-report.js";
+import { buildDeploymentReport, renderDeploymentReport, setDeploymentShape, setKeepAwake } from "./deployment-report.js";
 import { doctor, renderTable, type DoctorDeps } from "./doctor.js";
 import { loadInstallEnv, productVersion, resolveProductDir, resolveSeedDir, type LoadedEnv } from "./env.js";
 import { realExec, type Exec } from "./exec.js";
@@ -42,7 +42,7 @@ import { connect, connectList, CONNECT_TOOLS, parseTool, renderConnect, renderCo
 import { consoleCall, renderConsoleCallError, renderWhoami, whoami } from "./console-client.js";
 import { agentAutonomy, parseAutonomyFlags, renderAutonomy } from "./agents.js";
 import { importSessions } from "./import-sessions.js";
-import { init } from "./init.js";
+import { askKeepAwake, init, type Ask } from "./init.js";
 import { migrateInbox } from "./migrate-inbox.js";
 import { migrateLayout } from "./migrate-layout.js";
 import { migrateShape } from "./migrate-shape.js";
@@ -166,6 +166,21 @@ export function parseDeploymentShape(v: string | undefined): DeploymentShape | u
   return v === "compose" || v === "launchd" ? v : undefined;
 }
 
+/**
+ * One line from the terminal, for the one question this CLI asks. Node's own
+ * readline — no dependency, and nothing else in this package needs a prompt
+ * (the Keychain's own `security -w` reads stdin itself).
+ */
+async function terminalAsk(prompt: string): Promise<string> {
+  const { createInterface } = await import("node:readline/promises");
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    return await rl.question(prompt);
+  } finally {
+    rl.close();
+  }
+}
+
 /** `secrets sync` direction: `--to` names it outright, `--from` names the other end. Never guessed. */
 export function syncDirection(from: string | undefined, to: string | undefined): SyncDirection {
   const ok = (v: string | undefined, flag: string): SyncDirection | undefined => {
@@ -184,7 +199,8 @@ export function syncDirection(from: string | undefined, to: string | undefined):
 const USAGE = `metistry — Metistry command line
 
   metistry init <dir> [--name <assistant name>] [--channel git|release]
-                      [--shape compose|launchd] [--force] [--product-dir <checkout>]
+                      [--shape compose|launchd] [--keep-awake <value>]
+                      [--force] [--product-dir <checkout>]
       Create a private instance repo at <dir> from the product's seed/ (git init,
       the vault at the root — Inbox/, now.md, CLAUDE.md — and .metistry/ with
       identity.yaml carrying a minted instance_id, rules.yaml, the config dirs
@@ -197,6 +213,13 @@ const USAGE = `metistry — Metistry command line
       --channel writes metistry.lock's product.source: git (this install is a
       checkout update fast-forwards; the default) or release (it consumes
       published artifacts — docs/ops/releases.md).
+      On a terminal it asks ONE question: whether to keep this Mac awake while
+      Metistry runs (never | allow_sleep_on_battery | always |
+      always_lid_closed), with what each one costs printed beside it, and
+      writes your answer to <dir>/.metistry/deployment.yaml. --keep-awake
+      <value> answers it without a terminal; with neither, the question is not
+      asked and nothing is written — an install that was never asked holds
+      nothing.
 
   metistry connect-repo <url> [--instance <dir>] [--auth device|token|ssh] [--force]
       Point the instance repo at a private remote and leave credentials the
@@ -479,6 +502,17 @@ const USAGE = `metistry — Metistry command line
       it. Refuses while services still run under the current shape (the data
       does not move between shapes on its own); --force writes anyway.
 
+  metistry deployment set-keep-awake <never|allow_sleep_on_battery|always|always_lid_closed>
+                                [--yes] [--product-dir <checkout>] [--instance <dir>]
+      Whether this install holds the Mac awake, and on which power (macOS).
+      The same protected write as set-shape — preview without --yes, applied
+      with it — and it prints what the choice costs before writing it. It does
+      NOT refuse while services run: changing the policy changes nothing
+      already running, and it takes effect at the next metistry up.
+      always_lid_closed is accepted and behaves as always: no process can keep
+      a Mac awake with the lid shut, and doctor says so rather than pretending
+      (docs/ops/deployment-shapes.md).
+
   metistry migrate-inbox [--instance <dir>] [--dry-run]
       Move an existing instance's inbox into the vault: inbox/* (or a
       differently-cased vault inbox, renamed through a temp name because
@@ -578,6 +612,13 @@ export interface MainIo {
   fetchFn?: typeof fetch;
   /** test seam: `console call --body -` reads this instead of the real stdin */
   readStdin?: () => Promise<string>;
+  /**
+   * test seam: the one interactive question this CLI asks (`init`'s
+   * keep-awake choice). Absent and no tty = the question is not asked and
+   * nothing is written, which is what keeps `init` safe to drive from the Mac
+   * app's first run and from a script.
+   */
+  ask?: Ask;
 }
 
 export async function main(argv: string[], io: MainIo = {}): Promise<number> {
@@ -632,9 +673,31 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
         err(`--shape must be compose or launchd, not ${JSON.stringify(shapeFlag)}`);
         return 2;
       }
+      // The keep-awake question. `--keep-awake <value>` answers it without a
+      // terminal; otherwise it is ASKED, and only where there is somebody to
+      // ask — a pipe, a script or the Mac app's first run gets no question
+      // and no answer, and an install with no answer holds nothing. That is
+      // the invariant here: this setting changes how the machine behaves, so
+      // it is never taken by default (owner's ruling, 2026-09-19).
+      const keepAwakeFlag = str(flags, "keep-awake");
+      let keepAwake = parseKeepAwake(keepAwakeFlag);
+      if (keepAwakeFlag !== undefined && keepAwake === undefined) {
+        err(`--keep-awake must be one of ${KEEP_AWAKE_VALUES.join(", ")} — not ${JSON.stringify(keepAwakeFlag)}`);
+        return 2;
+      }
+      const ask = io.ask ?? (process.stdin.isTTY ? terminalAsk : undefined);
+      if (keepAwake === undefined && ask) {
+        try {
+          keepAwake = await askKeepAwake(ask, out);
+        } catch (e) {
+          err(e instanceof Error ? e.message : String(e));
+          return 2;
+        }
+      }
       const result = await init({
         dir,
         name: str(flags, "name"),
+        ...(keepAwake !== undefined ? { keepAwake } : {}),
         force: flags.force === true,
         seedDir: resolveSeedDir(productDir),
         version: productVersion(),
@@ -645,6 +708,11 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
         platform: io.platform,
       });
       out(`instance created at ${result.dir} (commit ${result.commit.slice(0, 7)}; assistant named "${result.assistantName}" in identity.yaml; instance_id ${result.instanceId})`);
+      out(
+        result.keepAwake === undefined
+          ? "keep-awake: not configured — this Mac may idle-sleep and the install pauses with it (`metistry deployment set-keep-awake <value> --yes`, or `metistry init --keep-awake <value>`)"
+          : `keep-awake: ${result.keepAwake} — written to this instance's .metistry/deployment.yaml; it takes effect at \`metistry up\``,
+      );
       out("");
       out(`Next — put these in this instance's environment, ${instanceEnvFile(result.dir)} (the token below is minted once and shown only here):`);
       out("");
@@ -1487,6 +1555,38 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
           return 0;
         } catch (e) {
           err(`metistry deployment set-shape: ${e instanceof Error ? e.message : String(e)}`);
+          return 1;
+        }
+      }
+      if (positional[0] === "set-keep-awake") {
+        const keepAwake: KeepAwake | undefined = parseKeepAwake(positional[1]);
+        if (!keepAwake) {
+          err(`usage: metistry deployment set-keep-awake <${KEEP_AWAKE_VALUES.join("|")}> [--yes] [--instance <dir>]`);
+          return 2;
+        }
+        const loadedDep = loadEnv();
+        const instanceDir = str(flags, "instance") ?? loadedDep.instanceDir;
+        if (!instanceDir) {
+          err("deployment set-keep-awake needs the instance repo: pass --instance <dir> or set METISTRY_INSTANCE_DIR (docs/ops/cli.md) — deployment.yaml lives there");
+          return 2;
+        }
+        try {
+          await setKeepAwake({
+            productDir,
+            instanceDir,
+            keepAwake,
+            yes: flags.yes === true,
+            env: process.env,
+            platform: io.platform ?? process.platform,
+            uid: io.uid ?? (typeof process.getuid === "function" ? process.getuid() : 0),
+            fetchFn: fetch,
+            exec: io.exec,
+            out,
+          });
+          if (flags.yes !== true) out("preview only — pass --yes to write this.");
+          return 0;
+        } catch (e) {
+          err(`metistry deployment set-keep-awake: ${e instanceof Error ? e.message : String(e)}`);
           return 1;
         }
       }

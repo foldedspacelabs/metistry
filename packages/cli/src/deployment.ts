@@ -24,6 +24,7 @@ import {
   type Compute,
   type Deployment,
   type DeploymentShape,
+  type KeepAwake,
 } from "@foldedspacelabs/metistry-core";
 
 async function readYaml(path: string): Promise<unknown | undefined> {
@@ -97,6 +98,40 @@ export function applyShapeToYaml(existing: string | undefined, shape: Deployment
   if (/^shape:.*$/m.test(existing)) return existing.replace(/^shape:.*$/m, `shape: ${shape}`);
   const sep = existing === "" || existing.endsWith("\n") ? "" : "\n";
   return `shape: ${shape}\n${sep}${existing}`;
+}
+
+/**
+ * The same surgery for `keep_awake:` — one line, every comment and every
+ * other key left alone, so `set-shape` and `set-keep-awake` can never clobber
+ * each other's answer.
+ *
+ * Creating the file from nothing needs the shape as well, and it is the
+ * caller's job to pass the shape ALREADY IN EFFECT (the D4 overlay's answer):
+ * a deployment.yaml carrying only `keep_awake` would parse with `shape`
+ * defaulted to compose and would silently move a launchd install. The one
+ * value in the file is never a new decision.
+ */
+export function applyKeepAwakeToYaml(existing: string | undefined, keepAwake: KeepAwake, shape: DeploymentShape): string {
+  if (existing === undefined) {
+    return [
+      "# deployment.yaml — this instance's deployment shape and power policy",
+      "# (docs/ops/deployment-shapes.md).",
+      "# `metistry init` or `metistry deployment set-keep-awake` wrote this file.",
+      "# The shape below is the one this install already had; change it with",
+      "# `metistry deployment set-shape`, not by hand while services are running.",
+      `shape: ${shape}`,
+      `keep_awake: ${keepAwake}`,
+      "",
+      "services: {}",
+      "",
+    ].join("\n");
+  }
+  if (/^keep_awake:.*$/m.test(existing)) return existing.replace(/^keep_awake:.*$/m, `keep_awake: ${keepAwake}`);
+  // no key yet: put it directly under `shape:` where a reader expects it,
+  // falling back to the top of the file for one that has no shape line either
+  if (/^shape:.*$/m.test(existing)) return existing.replace(/^(shape:.*)$/m, `$1\nkeep_awake: ${keepAwake}`);
+  const sep = existing === "" || existing.endsWith("\n") ? "" : "\n";
+  return `keep_awake: ${keepAwake}\n${sep}${existing}`;
 }
 
 // ---- the environment each host job runs with -------------------------------

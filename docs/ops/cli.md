@@ -1238,6 +1238,59 @@ TCC-bound jobs (eventkit, apple-fm) have no Linux counterpart at all
 (§4.17: absent, not broken). `update` on Linux likewise tells you which
 units to restart rather than restarting them.
 
+### Getting `metistry` on your PATH
+
+A fresh release install has no `metistry` on `PATH` — there is no Homebrew
+formula and no npm global, so nothing put it there. `up` (and `update`,
+since a checkout that only ever runs that still needs one) writes a small
+POSIX shim to `<instance>/.metistry/state/bin/metistry`: an executable
+script that already knows this install's product dir and instance dir, and
+at every invocation re-checks which of `current/` (a release) or the bare
+product dir holds the CLI, and whether to run it with the bundled
+`runtime/node/bin/node` or whatever `node` is on `PATH` — so a release
+flip or a freshly bundled runtime needs no re-write. It is idempotent
+(unchanged content is left alone) and mode `0755`.
+
+**`up` never puts it on PATH itself** — invariant 2, that is the operator's
+own hand — it only prints the one line that would, as part of its normal
+output:
+
+```
+   cli: /Users/you/instance/.metistry/state/bin/metistry — `ln -s /Users/you/instance/.metistry/state/bin/metistry ~/.local/bin/metistry` (or add its directory to PATH) runs `metistry` by name
+```
+
+Run that `ln -s` once (or add the directory to `PATH` yourself), and
+`metistry doctor` — from anywhere — works. `metistry doctor`'s own `cli on
+PATH` row says whether it is already reachable, and where, or hands back
+the same line when it is not; it is informational (`ok`/`absent`), never a
+finding that fails the exit code.
+
+This is the same mechanism in every shape:
+
+- **Release install.** The shim lives at
+  `<instance>/.metistry/state/bin/metistry` and execs
+  `<product>/runtime/node/bin/node <product>/current/packages/cli/dist/main.js`.
+- **Checkout.** Same path, same shim; `current/` does not exist, so it
+  falls back to `<product>/packages/cli/dist/main.js`, and to `node` on
+  `PATH` when there is no bundled `runtime/`.
+- **The Mac app.** `apps/macos`'s `RuntimeLocator` looks for a `metistry`
+  in `~/.local/bin` and in the active instance's own
+  `.metistry/state/bin` — the same two places above — in addition to the
+  usual Homebrew/system bins and `PATH`, so the app finds an install even
+  before anyone has run the `ln -s` line by hand (`docs/ops/mac-app.md`).
+
+**One case-insensitive-volume wrinkle, launchd shape only.** Under
+`shape: launchd`, `<instance>/.metistry/state/bin/Metistry` (capital M) is
+the supervisor's own program-identity symlink (§ above, "Host jobs
+(macOS)"), and macOS's default APFS volume does not tell `metistry` and
+`Metistry` apart in that directory — they are the same directory entry.
+`up` never overwrites a symlink it finds there — it notes the skip and
+its reason in its own output — so on that shape the cli shim is, for now,
+simply not written; `metistry doctor`'s `cli on PATH` row reports the
+ordinary "absent, `metistry up` writes one" line either way, since by the
+time `doctor` runs there is nothing left on disk to tell the two cases
+apart. Run `metistry up` and read its own output for the actual reason.
+
 ## Updating
 
 `metistry update [--skip-build] [--skip-migrate] [--dry-run]` moves an

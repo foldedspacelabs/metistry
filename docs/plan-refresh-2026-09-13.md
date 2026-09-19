@@ -385,6 +385,35 @@ the Studio's overlay; ratifying `packages/eval`; the SDK removal in
 
 ---
 
+## 4a. Queue additions and status (2026-09-18)
+
+**Shipped since the 09-17 status paragraph:** v0.8.1 and v0.9.0 (release
+notes in `CHANGELOG.md`); the flat instance layout (#192–#195, #198, `docs/ops/instance-layout.md`);
+the assistant loading the instance identity on the launchd shape (#201 — it
+had been running on the seed identity, layout-independent, pre-existing);
+stage-2 shadow mode (#187); automatic prompt caching (#196, OPEN-6 first half);
+console routes for compute, knowledge search/page, commands and run detail
+(#197, #199); the Mac app's console client and store (#200, phase A's
+non-visual half); the design brief (#189) and wireframes (#190, #191).
+
+**Owner-hand, in order:** Studio `metistry update` → refused (legacy) →
+`migrate-layout --dry-run` → `migrate-layout` → `update`; then
+`docs/poc/poc18-bakeoff/SETUP.md`; then fixtures (harvest at
+`<instance>/.metistry/eval/fixtures-harvest.jsonl`); then the OPEN-6
+measurement.
+
+**New research items (owner, 2026-09-18):**
+
+| # | item | shape to research | status |
+|---|---|---|---|
+| Q1 | **Keep the Mac awake while Metistry runs, screen may sleep.** A setting (proposed: `deployment.yaml` `keep_awake: true`, surfaced in the app's Settings → Status pane and a doctor row) under which the supervisor holds a power assertion that prevents *idle system sleep only* — `IOPMAssertionCreateWithName(kIOPMAssertionTypePreventUserIdleSystemSleep)` from the app's background item, or a `caffeinate -i` child of the supervisor (never `-d`, which pins the display). Research: behaviour on battery vs AC (`pmset`), whether the launchd shape's background item can hold the assertion without the app window, how the Studio's current sleep settings interact, and what `doctor` should say when the assertion is refused. Default: on for an always-on instance, off on battery — to confirm | open |
+| Q2 | **Rename the metrics section.** "Insights" (spend, run metrics, shadow agreement) was a placeholder name; the owner leans **"System"** and the designer is ideating names in parallel. Apply the final name across `app-ux-plan.md`, `design-system.md` (P6, §3.1, §3.18), `design-brief.md`, and `design/mac-insights.svg` in one PR once settled | open — owner leans System |
+
+**Unblocked for agents:** a named query over `knowledge_files` plus
+`GET /api/knowledge/pages` (skipped in #197); an `Idempotency-Key` path for
+`metistry console call` so the app can capture; the PWA renav to the
+six-section IA (owner: later); phase A views once the designer's tokens land.
+
 ## 4b. Second-instance-first re-phase (2026-09-15)
 
 The owner is standing up a second instance in a separate context: knowledge to organise, project and

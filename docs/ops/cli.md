@@ -15,7 +15,7 @@ All of them are real.
 | `connect <tool> [--rotate]` | give one external dev tool (Cursor, OpenCode, Devin, Claude Code) its own agent token and config |
 | `connect --list [--json]` | which tools are connected: the row, the bearer, the config |
 | `console whoami [--json]` | ask the console who it thinks you are, with this install's owner token |
-| `console call <METHOD> <path> [--body @file\|-] [--json]` | one authenticated request against the console, as `whoami`'s same principal — the scripting seam |
+| `console call <METHOD> <path> [--body @file\|-] [--idempotency-key <key>] [--json]` | one authenticated request against the console, as `whoami`'s same principal — the scripting seam |
 | `identity [--json]` | the instance's `.metistry/identity.yaml` (name, mention, voice, icon, instance_id) |
 | `--version` / `version [--json]` | this CLI's version, the resolved product dir's, the lock's pin, and a release's runtime pack |
 | `deployment [--json]` | the effective shape (D4 overlay) and the services it implies, with cheap running state |
@@ -188,8 +188,8 @@ error message. A 401 is one of exactly two things and the error names both:
 a token the console was not started with, or a request that did not arrive
 from this machine (under compose, the NAT question — `docs/ops/auth.md`).
 
-`metistry console call <METHOD> <path> [--body @<file>|-] [--json]` is the
-scripting seam behind `whoami`: one authenticated request against the
+`metistry console call <METHOD> <path> [--body @<file>|-] [--idempotency-key <key>] [--json]`
+is the scripting seam behind `whoami`: one authenticated request against the
 console, as the same `user` principal, over the same loopback door. It
 prints the response body — pretty-printed unless `--json`, which prints the
 console's own bytes verbatim — and exits non-zero on a `>=400` answer,
@@ -202,6 +202,15 @@ minted for this machine only, and this verb will not carry it anywhere
 else. `docs/ops/console-api.md` is the routes it can call; the app and
 `docs/ops/second-instance.md` use it rather than a second HTTP client.
 
+`--idempotency-key <key>` sends `Idempotency-Key` (`docs/ops/console-api.md`
+— today only `POST /capture` reads it), checked against the same shape the
+server enforces (trimmed, non-empty, at most 200 characters) before the
+request ever goes out, so a bad key is this verb refusing rather than a
+round trip finding out. A replay — the console's own `idempotency-replayed`
+response header, which this verb prints no other trace of — folds
+`"replayed": true` into the `--json` body; in plain mode it is a one-line
+note on stderr instead, and the printed body is untouched.
+
 ```
 $ metistry console call GET /api/whoami
 {
@@ -211,6 +220,10 @@ $ metistry console call GET /api/whoami
 }
 $ metistry console call POST /api/instances --body @peer.json --json
 {"action":"added","instances":[…]}
+$ metistry console call POST /capture --body @note.json --idempotency-key retry-1 --json
+{"id":42,"path":"Inbox/1757556000000-note.md","sha256":"…"}
+$ metistry console call POST /capture --body @note.json --idempotency-key retry-1 --json   # retried
+{"id":42,"path":"Inbox/1757556000000-note.md","sha256":"…","replayed":true}
 ```
 
 Package-level detail (flags, resolution order, probe table) lives in

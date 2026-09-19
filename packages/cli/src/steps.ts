@@ -101,9 +101,13 @@ export class StepRunner {
     this.out(this.ui.dim(`   ${line}`));
   }
 
-  /** An aligned block — the moves a migration is about to make, read as one shape rather than N lines. */
+  /**
+   * An aligned block — the moves a migration is about to make, read as one
+   * shape rather than N lines. No `[dry-run] ` marker: a table is the plan,
+   * and the plan is the same either way.
+   */
   table(head: string[], rows: string[][]): void {
-    for (const line of this.ui.table(head, rows, { indent: 3 }).split("\n")) this.out(`${this.prefix()}${line}`);
+    for (const line of this.ui.table(head, rows, { indent: 3 }).split("\n")) this.out(line);
   }
 
   /**
@@ -111,10 +115,19 @@ export class StepRunner {
    * (launchctl bootout of a job that is not loaded); otherwise it throws
    * StepFailed with the command's exit code.
    */
-  async run(cmd: string, args: string[], opts: ExecOptions & { tolerateFailure?: boolean | undefined; comment?: string | undefined } = {}): Promise<ExecResult> {
+  async run(cmd: string, args: string[], opts: ExecOptions & { tolerateFailure?: boolean | undefined; comment?: string | undefined; quiet?: boolean | undefined } = {}): Promise<ExecResult> {
     const shown = formatCommand(cmd, args, opts.cwd);
     this.commands.push(shown);
-    const line = `${this.prefix("$ ")}${this.ui.dim(shown)}${opts.comment ? this.ui.dim(`   # ${opts.comment}`) : ""}`;
+    // `quiet` is for a step the caller has ALREADY shown — a row in a plan
+    // table. It still goes into `commands` (and so into --json and the
+    // tests): the ledger is never quiet, only the screen.
+    if (opts.quiet === true) {
+      if (this.dryRun) return { code: 0, stdout: "", stderr: "" };
+      return await this.execOrFail(cmd, args, opts);
+    }
+    // the command is the payload — in a dry run it IS the whole answer — so
+    // it stays plain; the marker and the trailing comment are what dim
+    const line = `${this.prefix("$ ")}${shown}${opts.comment ? this.ui.dim(`   # ${opts.comment}`) : ""}`;
     // On a TTY the step spins while it runs and resolves into ONE ✓/✗ line;
     // anywhere else — a pipe, a launchd log, the test suite — it is the same
     // line, printed once, up front. A child that inherits stdout is never
@@ -122,13 +135,22 @@ export class StepRunner {
     const spinner = !this.dryRun && opts.inherit !== true && this.ui.isTTY ? this.ui.spinner(line, this.out) : undefined;
     if (!spinner) this.out(line);
     if (this.dryRun) return { code: 0, stdout: "", stderr: "" };
+    try {
+      const r = await this.execOrFail(cmd, args, opts);
+      spinner?.succeed(line);
+      return r;
+    } catch (e) {
+      spinner?.fail(line);
+      throw e;
+    }
+  }
+
+  private async execOrFail(cmd: string, args: string[], opts: ExecOptions & { tolerateFailure?: boolean | undefined }): Promise<ExecResult> {
     const r = await this.exec(cmd, args, { cwd: opts.cwd, env: opts.env ?? this.env, timeoutMs: opts.timeoutMs, inherit: opts.inherit });
     if (r.code !== 0 && !opts.tolerateFailure) {
-      spinner?.fail(line);
       const detail = (r.stderr || r.stdout).trim().split("\n").slice(-3).join("\n");
       throw new StepFailed(`${cmd} ${args[0] ?? ""} exited ${r.code}${detail ? `: ${detail}` : ""}`, r.code);
     }
-    spinner?.succeed(line);
     return r;
   }
 
@@ -136,7 +158,7 @@ export class StepRunner {
   async write(path: string, content: string, from: string): Promise<void> {
     const shown = `write ${path}  (from ${from})`;
     this.commands.push(shown);
-    this.out(`${this.prefix("  ")}${this.ui.dim(shown)}`);
+    this.out(`${this.prefix("  ")}${shown}`);
     if (this.dryRun) return;
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, content);
@@ -144,13 +166,12 @@ export class StepRunner {
 
   /**
    * Record a non-subprocess action (an HTTP call, a db step) in the same
-   * list, for the same dry-run treatment. `display` prints something other
-   * than what is recorded — an aligned column, say — without moving the
-   * ledger the tests read.
+   * list, for the same dry-run treatment. `quiet` is a step already shown
+   * in a plan table: recorded, not printed twice.
    */
-  action(description: string, display?: string): boolean {
+  action(description: string, opts: { quiet?: boolean | undefined } = {}): boolean {
     this.commands.push(description);
-    this.out(`${this.prefix("  ")}${this.ui.dim(display ?? description)}`);
+    if (opts.quiet !== true) this.out(`${this.prefix("  ")}${description}`);
     return !this.dryRun;
   }
 }

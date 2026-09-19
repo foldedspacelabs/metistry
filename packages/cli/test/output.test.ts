@@ -168,7 +168,7 @@ describe("update's closing summary", () => {
   it("one line: did it land, on what, and what moved", () => {
     const base = { ui: plain, dryRun: false, code: 0, source: "git" as const, version: "0.9.0", restarted: ["com.foldedspacelabs.metistry"] };
     expect(updateSummary({ ...base, migrations: { applied: ["0007_x.sql"] } })).toBe("✓ update ok — git 0.9.0, 1 migration(s) applied, 1 job(s) kickstarted");
-    expect(updateSummary({ ...base, dryRun: true, restarted: [] })).toBe("○ dry run — nothing was changed — git 0.9.0, no migrations, nothing kickstarted");
+    expect(updateSummary({ ...base, dryRun: true, restarted: [] })).toBe("○ dry run — git 0.9.0, nothing was changed");
     expect(updateSummary({ ...base, code: 1, restarted: [] })).toBe("⚠ updated, and doctor is not happy — git 0.9.0, no migrations, nothing kickstarted");
   });
 });

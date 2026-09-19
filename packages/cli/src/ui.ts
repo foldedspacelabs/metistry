@@ -336,7 +336,13 @@ export function createUi(opts: CreateUiOptions = {}): Ui {
 
   const rule = (w?: number): string => dim((unicode ? "─" : "-").repeat(Math.max(1, w ?? width)));
   const note = (text: string): string => dim(text);
-  const heading = (text: string): string => strong(paint("heading", text));
+  // one sequence, not `bold(colour(text))`: two nested resets in every
+  // heading is noise in a piped capture and in `cat -v`
+  const heading = (text: string): string => {
+    if (!color) return text;
+    const p = PALETTE.heading;
+    return sgr(level === 2 ? `1;38;5;${p.xterm}` : `1;${p.basic}`, text);
+  };
 
   const spinner = (label: string, outLine?: (line: string) => void): Spinner => {
     const print = outLine ?? ((l: string) => void stream?.write(`${l}\n`));

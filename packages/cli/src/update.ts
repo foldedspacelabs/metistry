@@ -455,13 +455,12 @@ export function updateSummary(s: {
   restarted: string[];
 }): string {
   const { ui } = s;
+  if (s.dryRun) return `${ui.paint("skipped", `${ui.icon("off")} dry run`)} ${ui.dim(`— ${s.source} ${s.version}, nothing was changed`)}`;
   const verdict = s.failure
     ? ui.paint("failed", `${ui.icon("fail")} update failed`)
-    : s.dryRun
-      ? ui.paint("skipped", `${ui.icon("off")} dry run — nothing was changed`)
-      : s.code === 0
-        ? ui.paint("ok", `${ui.icon("ok")} update ok`)
-        : ui.paint("degraded", `${ui.icon("warn")} updated, and doctor is not happy`);
+    : s.code === 0
+      ? ui.paint("ok", `${ui.icon("ok")} update ok`)
+      : ui.paint("degraded", `${ui.icon("warn")} updated, and doctor is not happy`);
   const parts = [
     `${s.source} ${s.version}`,
     s.migrations ? `${s.migrations.applied.length} migration(s) applied` : "no migrations",

@@ -107,3 +107,48 @@ Assertions follow the same rule as cleanup: **count your own rows**. A
 insert away from failing, and proves nothing about this suite;
 `… WHERE source_agent = <this suite's agent>` says the same thing and cannot
 race.
+
+## Checks that are not tests
+
+Some rules are easier to enforce over the whole tree than to remember in each
+package. Those live in `ops/scripts/`, run in CI before (or just after) the
+build, and have their own unit tests under `ops/scripts/test/`
+(`node --test 'ops/scripts/test/*.test.mjs'`, which CI runs as one step).
+
+`node ops/scripts/check-tool-surface.mjs` is the tool-surface budget. The
+manifest schema states the rule — `discovery: lazy` "is for bridges past >20
+tools / >5k definition tokens" (`packages/core/src/manifest.ts`) — but it was
+enforced only by `packages/mcp-brain`'s own test, on itself. The script checks
+every bridge manifest under `apps/` and `packages/`, and prints the numbers on
+every run so the headroom is read rather than inferred:
+
+```
+tool surface (budget: >20 tools / >5000 definition tokens — packages/core/src/manifest.ts)
+
+  bridge    tools         ≈tokens  headroom to the line
+  --------  ------------  -------  ------------------------------------------
+  apple-fm  2 (declared)  n/a      18 tools
+  brain     25            4035     965 tokens, 5 tools OVER (acknowledged 25)
+  eventkit  4 (declared)  n/a      16 tools
+```
+
+- **How a bridge is measured.** It exports `toolSurface()` from its package
+  entry, the same way every bridge exports `check()` so `metistry doctor` can
+  be generic. `packages/mcp-brain/src/surface.ts` is the reference: it stands
+  up the real server and reads a real `tools/list`, so the number is
+  production's definitions and not a snapshot. A bridge without that export
+  (`eventkit` and `apple-fm` are REST surfaces, never listed to a model) is
+  reported **declared-only** — the manifest's `exposes:` count is still
+  checked, its token cost prints `n/a` rather than a guess.
+- **It runs after `pnpm -r build`**, since it imports what each bridge ships.
+  An unbuilt bridge is an error naming the command that fixes it, not a pass:
+  a check that quietly degrades to "nothing to measure" is not a check.
+- **Tokens are the budget; the tool count is a ratchet.** An eager bridge past
+  5k definition tokens fails. Past 20 tools it fails too *unless* the number is
+  recorded in `COUNT_ACKNOWLEDGED` in the script — `brain` sits at 25 there,
+  which is the "noted, not acted on" its manifest has carried. So a bridge may
+  stay where it was acknowledged, and the **next** tool fails the check until
+  somebody trims the surface, switches the manifest to `discovery: lazy`, or
+  moves the ceiling with a reason. `discovery: lazy` has already made that
+  decision, so the budget does not bind on it.
+- `--json` prints the rows and the findings instead of the table.

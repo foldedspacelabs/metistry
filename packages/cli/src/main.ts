@@ -64,6 +64,7 @@ import { installRuntime } from "./runtime-install.js";
 import { listSecrets, mintSecret, purgeSecrets, renderSecretList, syncSecrets, type SyncDirection } from "./secrets.js";
 import { controlServices, downAll, renderDown, renderServiceResults, serviceLogs, UnknownServiceError, type ServiceAction } from "./service-control.js";
 import { StepRunner } from "./steps.js";
+import { configureUi, createUi, defaultUi, type Ui } from "./ui.js";
 import { up } from "./up.js";
 import { gitHead, update } from "./update.js";
 import { collectVersionInfo, renderVersionInfo } from "./version.js";
@@ -84,7 +85,7 @@ export interface ParsedArgs {
  * `--version <x.y.z>` silently installed the latest release instead
  * (#198, "not fixed here" #2).
  */
-export const BOOLEAN_FLAGS = new Set(["force", "json", "help", "dry-run", "allow-dirty", "no-launchd", "no-compose", "skip-build", "skip-migrate", "rollback", "allow-legacy", "yes", "follow", "namespace", "rotate", "list", "complete", "skip-test", "remote", "json-lines"]);
+export const BOOLEAN_FLAGS = new Set(["force", "json", "help", "dry-run", "allow-dirty", "no-launchd", "no-compose", "no-color", "skip-build", "skip-migrate", "rollback", "allow-legacy", "yes", "follow", "namespace", "rotate", "list", "complete", "skip-test", "remote", "json-lines"]);
 
 /** `--channel git|release` — anything else is a typo, not a guess (the lock parser is strict for the same reason). */
 export function parseChannel(v: string | undefined): LockSource | undefined {
@@ -597,6 +598,78 @@ An instance directory is self-contained (docs/ops/cli.md); --env-file overrides
 both. Nothing already set in the environment is overwritten by either file.
 `;
 
+/**
+ * The overview `metistry --help` opens with: every verb, grouped by what
+ * you are in the middle of doing, one aligned line each. The reference
+ * below it (USAGE) is unabridged and stays that way — this is the map, not
+ * a replacement for the territory. A new verb belongs in both.
+ */
+export const HELP_GROUPS: Array<{ title: string; verbs: Array<[string, string]> }> = [
+  {
+    title: "install",
+    verbs: [
+      ["init <dir>", "create a private instance repo from the product's seed/"],
+      ["connect-repo <url>", "point it at a private remote, with credentials the reconciler can push with"],
+      ["secrets sync|mint|list|purge", "the login Keychain is the store; .env is generated from it"],
+      ["runtime install --from <bundle>", "seed a writable product dir from a signed app bundle"],
+      ["up", "bring an install to running: containers, host jobs, then doctor"],
+    ],
+  },
+  {
+    title: "every day",
+    verbs: [
+      ["doctor", "validate every manifest; probe every bridge, service, container, job"],
+      ["restart|stop|start [<service>…]", "one service, several, or everything this shape runs"],
+      ["logs <service>", "tail one service's log"],
+      ["update", "pull/build, migrate under a lock, restart what changed, pin, doctor"],
+      ["version", "cli, product, the lock's pin, a release's runtime pack"],
+    ],
+  },
+  {
+    title: "configure",
+    verbs: [
+      ["compute show|providers|models", "which providers exist and which model each tier runs on"],
+      ["compute assign|budget", "point a tier at a model; cap what it may spend"],
+      ["deployment [set-shape]", "the effective shape (D4 overlay) and the services it implies"],
+      ["agents autonomy <id>", "how much room one agent has with an action"],
+      ["identity", "the instance's identity.yaml — the only place the assistant is named"],
+      ["instances list|add|remove|refresh", "the peer registry: which other instances this one knows"],
+    ],
+  },
+  {
+    title: "reach in",
+    verbs: [
+      ["connect <tool> | --list", "give Cursor, OpenCode, Devin or Claude Code its own way in"],
+      ["console whoami | call", "one authenticated request against the console, as you"],
+      ["runs export", "the audit ledger as NDJSON, oldest first, resumable"],
+      ["import-sessions", "summarise this machine's Claude Code sessions into /capture"],
+    ],
+  },
+  {
+    title: "move an install",
+    verbs: [
+      ["migrate-layout", "legacy layout → the instance directory IS the vault"],
+      ["migrate-inbox", "a pre-#156 inbox/ → the vault's Inbox/"],
+      ["migrate-shape <launchd|compose>", "move a LIVE install between shapes, with its data"],
+    ],
+  },
+];
+
+/** The grouped overview, then the full reference. `--json` never reaches here; `--no-color` and a pipe flatten it to plain text. */
+export function renderHelp(ui: Ui = defaultUi()): string {
+  const out = [`${ui.strong("metistry")} ${ui.dim("— Metistry command line")}`, ""];
+  out.push(...ui.wrap("A local-first personal assistant and knowledge graph. The assistant is named in identity.yaml — nowhere else.").split("\n"), "");
+  for (const g of HELP_GROUPS) {
+    out.push(ui.heading(g.title));
+    out.push(ui.kv(g.verbs.map(([v, d]) => [v, ui.dim(d)])));
+    out.push("");
+  }
+  out.push(ui.dim("--json prints the machine-readable answer where a verb has one; --dry-run runs nothing; --no-color is plain text."), "");
+  out.push(ui.heading("reference — every verb, every flag"));
+  // USAGE's own first line is the title this already printed
+  return [...out, USAGE.split("\n").slice(1).join("\n")].join("\n");
+}
+
 export interface MainIo {
   out?: (s: string) => void;
   err?: (s: string) => void;
@@ -621,19 +694,47 @@ export interface MainIo {
   ask?: Ask;
 }
 
+/**
+ * The CLI's entry point.
+ *
+ * Everything it does is `dispatch()`; this wrapper owns the two things that
+ * bracket a command rather than belong to one — the process's Ui (so
+ * `--json` and `--no-color` are decided once, before anything renders) and
+ * the deprecation notices, which are dimmed and printed ONCE, on stderr,
+ * AFTER the output they qualify (docs/ops/cli-style.md rule 7). They used to
+ * be the first thing on the screen, which made a fallback `.env` shout
+ * louder than the answer you asked for.
+ */
 export async function main(argv: string[], io: MainIo = {}): Promise<number> {
+  const err = io.err ?? ((s: string) => process.stderr.write(s + "\n"));
+  const { flags } = parseArgs(argv);
+  const json = flags.json === true;
+  configureUi({ json, noColor: flags["no-color"] === true });
+  const notices: string[] = [];
+  try {
+    return await dispatch(argv, io, notices);
+  } finally {
+    const noteUi = createUi({ stream: process.stderr, json, noColor: flags["no-color"] === true });
+    for (const n of notices) err(noteUi.note(n));
+  }
+}
+
+async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<number> {
   const out = io.out ?? ((s: string) => process.stdout.write(s + "\n"));
   const err = io.err ?? ((s: string) => process.stderr.write(s + "\n"));
   const { command, positional, flags } = parseArgs(argv);
+  const ui = defaultUi();
   const productDir = resolveProductDir(str(flags, "product-dir"));
   /**
    * This install's environment, from the instance's own `state/.env` and
-   * then the product checkout's deprecated one. Deprecation notices go to
-   * STDERR so `doctor --json` stays machine-readable.
+   * then the product checkout's deprecated one. A deprecation notice is
+   * collected, not printed: `main()` flushes them to STDERR at the end, so
+   * `doctor --json` stays machine-readable and nothing shouts over the
+   * output.
    */
   const loadEnv = (): LoadedEnv => {
     const loaded = loadInstallEnv({ productDir, instanceDir: str(flags, "instance"), envFile: str(flags, "env-file") });
-    for (const n of loaded.notices) err(n);
+    for (const n of loaded.notices) if (!notices.includes(n)) notices.push(n);
     return loaded;
   };
   // `metistry --version` (no subcommand): the bare flag every CLI answers,
@@ -641,11 +742,11 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
   // the same thing as a real subcommand, further down.
   if (command === undefined && flags.version === true) {
     const info = await collectVersionInfo({ productDir, instanceDir: loadEnv().instanceDir });
-    out(flags.json === true ? JSON.stringify(info, null, 2) : renderVersionInfo(info));
+    out(flags.json === true ? JSON.stringify(info, null, 2) : renderVersionInfo(info, ui));
     return 0;
   }
   if (command === undefined || command === "help" || flags.help) {
-    out(USAGE);
+    out(renderHelp(ui));
     return command === undefined && !flags.help ? 2 : 0;
   }
   let channel: LockSource | undefined;
@@ -768,7 +869,7 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
       if (flags.list === true) {
         try {
           const r = await connectList(common);
-          out(flags.json === true ? JSON.stringify(r, null, 2) : renderConnectList(r));
+          out(flags.json === true ? JSON.stringify(r, null, 2) : renderConnectList(r, ui));
           return 0;
         } catch (e) {
           err(`metistry connect --list: ${e instanceof Error ? e.message : String(e)}`);
@@ -1072,7 +1173,7 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
     case "version": {
       const loaded = loadEnv();
       const info = await collectVersionInfo({ productDir, instanceDir: loaded.instanceDir });
-      out(flags.json === true ? JSON.stringify(info, null, 2) : renderVersionInfo(info));
+      out(flags.json === true ? JSON.stringify(info, null, 2) : renderVersionInfo(info, ui));
       return 0;
     }
     case "import-sessions": {
@@ -1105,9 +1206,18 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
         return 2;
       }
       loadEnv();
-      const report = await doctor({ productDir, ...io.doctorDeps });
-      out(flags.json === true ? JSON.stringify(report, null, 2) : renderTable(report));
-      return report.ok ? 0 : 1;
+      // the probes are the slow part (every bridge over HTTP, launchctl,
+      // docker): a TTY gets a spinner, a pipe gets nothing, and neither gets
+      // a byte of it in the --json document
+      const probing = flags.json === true ? undefined : ui.spinner(`probing ${productDir}`, out);
+      try {
+        const report = await doctor({ productDir, ...io.doctorDeps });
+        probing?.stop();
+        out(flags.json === true ? JSON.stringify(report, null, 2) : renderTable(report, ui));
+        return report.ok ? 0 : 1;
+      } finally {
+        probing?.stop();
+      }
     }
     case "runtime": {
       if (positional[0] !== "install") {
@@ -1424,7 +1534,7 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
                 if (json) out(JSON.stringify(r, null, 2));
                 else {
                   out(`provider ${r.name} added (${r.provider.locality}, ${r.provider.base_url}) — ${r.delivery.detail}`);
-                  if (r.test) out(renderProviderTest(r.test));
+                  if (r.test) out(renderProviderTest(r.test, ui));
                 }
                 return 0;
               }
@@ -1444,9 +1554,18 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
                   err("usage: metistry compute providers test <name> [--complete] [--model <id>]");
                   return 2;
                 }
-                const r = await providerTest({ ...computeOpts, name, complete: flags.complete === true, model: str(flags, "model") });
-                out(json ? JSON.stringify(r, null, 2) : renderProviderTest(r));
-                return r.ok ? 0 : 1;
+                // a live GET /v1/models (and, with --complete, a real call):
+                // seconds against a cloud provider, and nothing to look at
+                // meanwhile unless this says so
+                const testing = json ? undefined : ui.spinner(`${name}: GET /v1/models${flags.complete === true ? " and one completion" : ""}`, out);
+                try {
+                  const r = await providerTest({ ...computeOpts, name, complete: flags.complete === true, model: str(flags, "model") });
+                  testing?.stop();
+                  out(json ? JSON.stringify(r, null, 2) : renderProviderTest(r, ui));
+                  return r.ok ? 0 : 1;
+                } finally {
+                  testing?.stop();
+                }
               }
               default:
                 err(`usage: metistry compute providers list | add --from ${COMPUTE_TEMPLATES.join("|")} | remove <name> | test <name> [--complete] [--model <id>]`);
@@ -1592,7 +1711,7 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
       }
       loadEnv();
       const report = await buildDeploymentReport({ productDir, env: process.env, exec: io.exec, platform: io.platform, uid: io.uid });
-      out(flags.json === true ? JSON.stringify(report, null, 2) : renderDeploymentReport(report));
+      out(flags.json === true ? JSON.stringify(report, null, 2) : renderDeploymentReport(report, ui));
       return 0;
     }
     default:

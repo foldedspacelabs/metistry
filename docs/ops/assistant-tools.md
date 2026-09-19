@@ -18,11 +18,50 @@ manifest by test):
 | in | `capture`, `requests_create` | Raise anything unsettled into the inbox / your Needs You queue; you approve, revise, or decline. |
 | shared work | `tasks_list` (`filter: ready \| mine \| all`), `tasks_claim`, `tasks_renew`, `tasks_update`, `tasks_release`, `tasks_close`, `tasks_create` | Works the same shared list as every other agent — claims, leases, notes, and `tasks_close` to finish one in a single call. |
 | rooms | `tasks_comment`, `tasks_thread` | The conversation on a task ([threads.md](threads.md)) — say what you found, read what the last crew left. Nobody is addressed by it, so nothing is woken; use `agents_delegate` when someone has to act. Resolving a room is your hand in the console, not a tool. |
-| out | `knowledge_search`, `knowledge_read`, `knowledge_list`, `knowledge_grep` | Reads the knowledge index, page contents, a directory listing, and a content regex (all via the reconciler's vault bridge), within its grant — `knowledge_list`/`knowledge_grep` are filesystem semantics over the same tiers `knowledge_search`/`knowledge_read` already enforce (docs/research/2026-09-stash-review.md item 3). `knowledge_read` returns the page's `sha256`. |
+| out | `knowledge_search`, `knowledge_read`, `knowledge_list`, `knowledge_grep` | Reads the knowledge index, page contents, a listing, a page's links (`knowledge_list { links_for }`) and a content regex, within its grant — `knowledge_list`/`knowledge_grep` are filesystem semantics over the same tiers `knowledge_search`/`knowledge_read` already enforce (docs/research/2026-09-stash-review.md item 3). `knowledge_read` returns the page's `sha256`. |
 | write | `knowledge_write` | **This is `brain-commit`** (plan §4.7, D5): one page under the vault root (anywhere outside `.metistry/`) → the reconciler's `POST /vault/write` with a commit intent in the assistant's name. Internal principals only; every external agent is told "not granted". No delete, no rename — those stay your hand. |
 | artifacts | `artifacts_publish`, `artifacts_get`, `artifacts_list`, `artifacts_comment`, `artifacts_resolve`, `artifacts_review` | Publishes versioned output into `Artifacts/<project>/<slug>/` (one commit per version via the reconciler), comments on exact versions, and sends review bundles to other agents in the same project — a review sent across the project boundary becomes a request for you (§4.21). |
 | helper agents | `agents_delegate` | Hands a brief to a helper agent you defined in `agents/<area>/<name>.md` (`docs/ops/crews.md`). Internal principals only; the brief is policy-checked against the helper's scope before a durable work row is written; results come back as the helper's own `requests_create` requests. The `crew` field lists the registered helpers with each manifest's `description:`, so writing one is how you steer the choice. |
-| queries | `queries_list`, `queries_run` | Runs a named query from `seed/queries/` or the instance's `queries/` (invariant 3 — the one read path) for anything you'd otherwise have to guess at or ask the user to look up. Internal principals always have this; an external agent needs an explicit `queries: true` grant. Rows cap at 200. |
+| queries | `queries_list`, `queries_run` | Runs a named query from `seed/queries/` or the instance's `queries/` (invariant 3 — the one read path) for anything you'd otherwise have to guess at or ask the user to look up. Internal principals always have this; an external agent needs an explicit `queries: true` grant. Rows cap at 200. A query whose manifest says `expose: route` is **not** served here — it has a scoped door of its own, and asking for it by name gets the refusal an unknown name gets (below). |
+
+### One scope rule for every knowledge read (ruled 2026-09-19)
+
+Every `knowledge_*` tool and every `/api/knowledge/*` route asks the SAME
+function — `canSeeUnder(path, areas)` in
+`packages/mcp-brain/src/knowledge.ts`, which the console's `canSee` is now a
+rename over. Two conditions, both necessary: the path is vault CONTENT (not
+`.metistry/`, not `Artifacts/`, nothing inside a dot-directory, no traversal,
+not the root `CLAUDE.md` — true for you too, on your own vault), and it falls
+under the caller's areas.
+
+The tier decides which question is being asked:
+
+| tier | may be told a page EXISTS (path, title, one-line description) | may read a page, or traverse its links |
+| --- | --- | --- |
+| `none` | nothing — and is told "not granted", never "not found" | no |
+| `index` | anywhere in the vault index | no |
+| `areas` | inside its granted prefixes | inside its granted prefixes |
+
+`index` browsing titles **outside** any area it can read is the point of the
+tier, not a leak: an agent has to be able to find out that
+`Areas/Health/sleep.md` exists in order to ask you for the area that holds
+it. It never sees a byte of one.
+
+**`queries_run` does not route around that.** A `queries: true` grant is a
+separate axis from the knowledge tier, and until 2026-09-19 it was a way past
+it: the page list and the link graph are named queries, so an agent at tier
+`none` could run `queries_run knowledge_pages` and page the whole index.
+Both manifests carry `expose: route`, and `queries_run` now refuses a
+route-backed query with the unknown-query refusal, byte for byte — so nothing
+on that door tells a caller which route-only queries exist. The rows are
+still reachable, through the door that filters them: `knowledge_list`, which
+runs the same two queries through the same `canSeeUnder`.
+
+**Asking for more.** There is no `request_access` tool today. An agent that
+finds a title it cannot read raises a `requests_create` report naming the
+area and why — that lands in your Needs You queue like every other proposal —
+and you widen the grant yourself in the Agents panel (`PUT
+/api/agents/:id/grants`). Enforced at the tool, granted by your hand.
 
 **Deprecated spellings, one release.** The 2026-09-09 vocabulary
 simplification renamed eleven of these (`docs/product/glossary.md`). The old

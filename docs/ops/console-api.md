@@ -590,12 +590,27 @@ Two properties worth stating:
 
 `expose` says nothing about *permission*: what a caller may reach is still
 decided by the surface it calls (this door's principal gates, `mcp-brain`'s
-`queries: true` grant for `queries_run`). And it is read by the console alone
-today — an external agent holding `queries: true` can still run a
-route-backed query over the `/mcp` mount, where nothing applies the route's
-scope filter. That is a separate surface with a separate grant and was not
-part of the 2026-09-19 ruling, which was about the console's two doors; it is
-named here rather than left to be discovered.
+`queries: true` grant for `queries_run`).
+
+**It is honoured on both doors.** `queries_run` on the `/mcp` mount asks the
+same `QueryStore.exposure(name)` and refuses a route-backed query with the
+same unknown-query refusal, and `queries_list` does not name one
+(`packages/mcp-brain/src/queries-tools.ts`). It had to: a `queries: true`
+grant is a separate axis from the knowledge tier, so until 2026-09-19 an
+agent at tier `none` — an agent `knowledge_search` will not tell a single
+title — could page the entire vault index and the entire link graph through
+`queries_run`, and a `tier: areas` agent could read the titles of every area
+it was never granted. The ruling closed it: *"generally yes, I think all
+queries including /mcp should be scoped and follow the same token based
+enforcements."*
+
+The scoped door that replaces it is `knowledge_list`, which runs the SAME two
+named queries through the SAME filter — `canSeeUnder`, now lifted into
+`packages/mcp-brain/src/knowledge.ts` so that this file's `canSee` and every
+`knowledge_*` tool are one implementation rather than two that agree today.
+Tier `index` lists titles anywhere in the index and reads nothing; tier
+`areas` lists, reads and traverses links inside its prefixes, both ends of
+every edge; tier `none` gets nothing (`docs/ops/assistant-tools.md`).
 
 ## `/api/knowledge/*` — the vault read path (`user` principal)
 
@@ -710,10 +725,13 @@ overlay `knowledge_pages.yaml` with columns of its own (D4) and a projection
 in the console would swallow them; the one thing the route insists on is a
 `path` it can judge, and a row without one is dropped.
 
-**This is the only door onto that query.** `knowledge_pages.yaml` declares
-`expose: route`, so `GET /api/q/knowledge_pages` answers the `404` it answers
-an unknown name with — one endpoint per necessary operation (ruled
-2026-09-19). The generic door has no `canSee` filter and cannot have one: it
+**This is the only unscoped-shaped door onto that query.**
+`knowledge_pages.yaml` declares `expose: route`, so `GET
+/api/q/knowledge_pages` answers the `404` it answers an unknown name with —
+and so does `queries_run` on `/mcp` — one endpoint per necessary operation
+(ruled 2026-09-19). The other door onto the same rows is `knowledge_list`,
+which applies the same `canSeeUnder` to an agent's grant that this route
+applies to the owner's scope. The generic door has no `canSee` filter and cannot have one: it
 does not know that a column called `path` is a vault path, and it has no
 principal scope to judge it against. Two doors onto the same rows would have
 made the filter on this one optional, and it was reachable — the capture owner

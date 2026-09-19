@@ -69,6 +69,32 @@ export function underAreas(path: string, areas: readonly string[]): boolean {
 }
 
 /**
+ * **One scope rule for every knowledge read, on both doors.** May a caller
+ * whose grant covers `areas` see this path at all? Two conditions, both
+ * necessary: it is vault CONTENT (`validKnowledgePath` — so `.metistry/`,
+ * `Artifacts/`, a dot-directory, a traversal and the root `CLAUDE.md` are out
+ * for every caller, the owner included), and it falls under the areas.
+ *
+ * `null` is "no prefix restriction" — every vault path. That is the OWNER on
+ * the console's routes, and it is tier `index` here when the question is a
+ * TITLE rather than content (ruled 2026-09-19: an agent discovers what
+ * knowledge exists so it can ask for the area that holds it). It is never
+ * tier `none`, which is refused before this is reached: the caller decides
+ * the TIER, this decides the PATH, and keeping those two apart is what lets
+ * one function serve a console route and an MCP tool.
+ *
+ * It lives here, beside `underAreas`, because that is the prefix rule and
+ * `isVaultPath` is core's — `apps/console/src/knowledge-routes.ts`'s `canSee`
+ * calls straight through to it, so the console's four doors and this bridge's
+ * tools are ONE implementation rather than two that agree today. The
+ * dependency arrow is unchanged: apps → packages, never the reverse.
+ */
+export function canSeeUnder(path: string, areas: readonly string[] | null): boolean {
+  if (!validKnowledgePath(path)) return false;
+  return areas === null || underAreas(path, areas);
+}
+
+/**
  * The one filtering decision every knowledge_* surface (search, read, list,
  * grep, resources) derives from, so tier logic can never drift between
  * them. `prefixes` is what a caller passes into `areaFilter`/a vault-bridge
@@ -76,6 +102,13 @@ export function underAreas(path: string, areas: readonly string[]): boolean {
  * "may this principal see this path's CONTENT" test — the same one that
  * gates knowledge_read/knowledge_grep/resources, and doubles as the check
  * for a caller-supplied prefix argument (a prefix is just a path).
+ *
+ * `canList` is the same question asked about a TITLE, and it is deliberately
+ * wider: tier `index` may see that a page exists — path, title, one-line
+ * description — anywhere in the vault index, and may read none of them. Tier
+ * `areas` lists exactly what it may read, because a grant of an area is
+ * already the answer to "may I know this is here". Tier `none` is false for
+ * both: it is not a narrower grant, it is no grant.
  */
 export interface KnowledgeScope {
   readonly tier: Tier;
@@ -85,6 +118,8 @@ export interface KnowledgeScope {
   /** Always true — drafts are invisible at every tier; named so a misuse test can assert it is never bypassed. */
   readonly excludeDrafts: true;
   canRead(path: string): boolean;
+  /** May this principal be told this path EXISTS (path + title + description, never content)? */
+  canList(path: string): boolean;
 }
 
 export function knowledgeScope(principal: AgentPrincipal): KnowledgeScope {
@@ -94,7 +129,8 @@ export function knowledgeScope(principal: AgentPrincipal): KnowledgeScope {
     prefixes: tier === "areas" ? areas : null,
     visibleTitlesOnly: tier === "index",
     excludeDrafts: true,
-    canRead: (path) => tier === "areas" && underAreas(path, areas),
+    canRead: (path) => tier === "areas" && canSeeUnder(path, areas),
+    canList: (path) => tier !== "none" && canSeeUnder(path, tier === "areas" ? areas : null),
   };
 }
 

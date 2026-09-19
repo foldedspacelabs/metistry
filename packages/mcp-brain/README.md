@@ -14,7 +14,10 @@ one of `list` / `get` / `search` / `create` / `update`
   adapters over [`@foldedspacelabs/metistry-tasks`](../tasks);
 - **out, under grants:** `knowledge_search`, `knowledge_read`,
   `knowledge_list`, `knowledge_grep` — the title index, one note's content,
-  a directory listing, and a content regex, all the same grant tiers;
+  a listing (and, with `links_for`, one page's links), and a content regex,
+  all the same grant tiers. One function decides every path on every one of
+  them — `canSeeUnder`, which the console's own `/api/knowledge/*` routes
+  call too;
 - **the one writer:** `knowledge_write` — `kind: internal` principals only
   (the owner's own assistant); everyone else is told "not granted".
 
@@ -140,10 +143,10 @@ createServer((req, res) => {
 | `inbox?` | a `CaptureSink` — where captures actually go. `vaultSink(vault)` writes them into a vault at `Knowledge/Inbox/` through a bridge with compare-and-swap on absence, records repo-relative paths, and spills anything over `maxTrackedBytes` (5 MiB) into `Knowledge/Inbox/.large/`; `dirSink(dir)` is a plain directory. Absent → `dirSink(inboxDir)`. |
 | `readKnowledge?` | `(path) => Promise<string \| null>` — absent → `knowledge_read` is `not_available` and `check()` reports `degraded` |
 | `writeKnowledge?` | `KnowledgeWriter` — `({ path, content, intent, expected_sha256? }) => Promise<VaultWriteOutcome>`; absent → `knowledge_write` is `not_available` and `check()` reports `degraded`. `vaultBridgeWriter({ url, token })` speaks the reconciler's wire contract (bearer, envelope, CAS, one read on `409` for the current hash). |
-| `listKnowledge?` | `(prefix, depth) => Promise<Array<{ path, kind }>>` — absent → `knowledge_list` is `not_available`; also `knowledge_grep`'s candidate source when no keyword searcher is configured (or a pattern has no literal substring to seed one). `vaultBridgeLister({ url, token })` speaks the reconciler's `GET /vault/list`. |
+| `listKnowledge?` | `(prefix, depth) => Promise<Array<{ path, kind }>>` — absent → `knowledge_list` answers from the index instead (the `knowledge_pages` named query, via `queries`), and is only `not_available` when that is not loaded either; also `knowledge_grep`'s candidate source when no keyword searcher is configured (or a pattern has no literal substring to seed one). `vaultBridgeLister({ url, token })` speaks the reconciler's `GET /vault/list`. |
 | `searchVaultKeyword?` | `(query, limit) => Promise<Array<{ path }>>` — `knowledge_grep`'s keyword pre-filter; absent → it falls back to `listKnowledge`. `vaultBridgeSearcher({ url, token })` speaks the reconciler's `GET /vault/search?mode=keyword`. |
 | `artifacts?` | an `ArtifactsService` (`@foldedspacelabs/metistry-artifacts`) — absent → every `artifacts_*` tool is `not_available` |
-| `queries?` | a `QueryStore` (`@foldedspacelabs/metistry-queries`, invariant 3's one read path) — absent → `queries_list`/`queries_run` are `not_available`. Internal principals always have these tools; external agents need `grants.queries = true`. |
+| `queries?` | a `QueryStore` (`@foldedspacelabs/metistry-queries`, invariant 3's one read path) — absent → `queries_list`/`queries_run` are `not_available`, and `knowledge_list { links_for }` with them. Internal principals always have the `queries_*` tools; external agents need `grants.queries = true`. A query whose manifest says `expose: route` is never served by `queries_run` at all — it answers with the unknown-query refusal, byte for byte, because the scope filter its rows need lives on a door of its own (`knowledge_list`, `GET /api/knowledge/pages`). |
 | `leaseWarningSeconds?` | nudge threshold for a held lease (default 120) |
 | `version?` | reported to clients as the server version |
 

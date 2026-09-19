@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// `metistry` — init | connect-repo | connect | secrets | console | doctor | up |
-// update (plan
+// `metistry` — init | connect-repo | connect | secrets | console | doctor |
+// up | down | update (plan
 // §4.16; connect-repo and secrets are the install verbs the Mac app drives,
 // docs/product/desktop-app-plan.md). Hand-rolled argument parsing: a handful
 // of subcommands and flags does not justify a dependency this project would
@@ -62,7 +62,7 @@ import { renderRunsExport, runsExport } from "./runs.js";
 import type { LockSource } from "./lock.js";
 import { installRuntime } from "./runtime-install.js";
 import { listSecrets, mintSecret, purgeSecrets, renderSecretList, syncSecrets, type SyncDirection } from "./secrets.js";
-import { controlServices, renderServiceResults, serviceLogs, UnknownServiceError, type ServiceAction } from "./service-control.js";
+import { controlServices, downAll, renderDown, renderServiceResults, serviceLogs, UnknownServiceError, type ServiceAction } from "./service-control.js";
 import { StepRunner } from "./steps.js";
 import { up } from "./up.js";
 import { gitHead, update } from "./update.js";
@@ -390,8 +390,23 @@ const USAGE = `metistry — Metistry command line
       --namespace allocates this instance its own launchd label suffix (from
       instance_id) and an 8-port block, recorded ONCE in <instance>/state/ports.yaml,
       so a second instance can run beside the first. Every later up/doctor/
-      restart/stop/start/logs reads that file; delete it (after "metistry stop")
+      restart/stop/start/logs reads that file; delete it (after "metistry down")
       to go back to the fixed labels and ports.
+      up ALWAYS EXITS: launchd (or compose) owns the processes it started, so
+      the terminal comes back and "metistry down" is what stops them. Its last
+      two lines are where the time went, per section, and who owns the daemon.
+
+  metistry down [--json] [--dry-run] [--product-dir <checkout>] [--instance <dir>]
+      The other half of up: stop every host job and every container this
+      instance runs, then confirm by looking — launchctl print finding nothing,
+      docker compose ps listing nothing. Containers are STOPPED, never removed,
+      and no volume is ever touched (that is "docker compose down -v", which
+      this verb deliberately is not). Under the launchd shape booting out the
+      one agent takes its children — Postgres, the console, the reconciler, the
+      assistant, the bridges — with it. When the Mac app registered the
+      background item, down stops it for this login session and says so: the
+      app puts it back at the next login unless you turn it off in the app,
+      which the CLI does not reach into.
 
   metistry update [--skip-build] [--skip-migrate] [--dry-run] [--product-dir <dir>]
                   [--channel git|release] [--version <x.y.z>] [--rollback]
@@ -416,7 +431,9 @@ const USAGE = `metistry — Metistry command line
   metistry start   [<service>…] [--json] [--dry-run] [--product-dir <checkout>]
       Act on one, several, or (no args) every service the current shape runs —
       the same shape read from deployment.yaml, and the same host-job/container
-      split up and doctor use. Host jobs: launchctl kickstart -k (restart),
+      split up and doctor use. "metistry down" is "stop everything" plus a
+      read-only confirmation; these three stay the per-service verbs.
+      Host jobs: launchctl kickstart -k (restart),
       bootout (stop), bootstrap + kickstart -k (start), against the plist up
       already installed. Containers: docker compose restart|stop|start.
       Every named service is acted on even if an earlier one fails; --json
@@ -1168,6 +1185,37 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
         return 1;
       }
     }
+    case "down": {
+      if (!productDir) {
+        err("down needs a Metistry checkout: pass --product-dir or set METISTRY_PRODUCT_DIR");
+        return 2;
+      }
+      if (positional.length > 0) {
+        err(`metistry down takes no service names — it stops everything. For one service: metistry stop ${positional.join(" ")}`);
+        return 2;
+      }
+      const loadedDown = loadEnv();
+      const downJson = flags.json === true;
+      try {
+        const r = await downAll({
+          productDir,
+          envFile: loadedDown.paths ? (loadedDown.paths.read[0] ?? loadedDown.paths.write) : undefined,
+          // --json is the same wire contract restart/stop/start keep: only
+          // the final object on stdout, the plan's lines on stderr
+          out: downJson ? err : out,
+          exec: io.exec,
+          platform: io.platform ?? undefined,
+          uid: io.uid,
+          home: io.home,
+          dryRun: flags["dry-run"] === true,
+        });
+        out(downJson ? JSON.stringify({ ok: r.ok, shape: r.shape, results: r.results, confirmations: r.confirmations, ...(r.appRegistrarNote ? { app_registrar_note: r.appRegistrarNote } : {}) }, null, 2) : renderDown(r));
+        return r.ok ? 0 : 1;
+      } catch (e) {
+        err(`metistry down: ${e instanceof Error ? e.message : String(e)}`);
+        return 1;
+      }
+    }
     case "restart":
     case "stop":
     case "start": {
@@ -1464,12 +1512,25 @@ function invokedDirectly(): boolean {
     return false;
   }
 }
+/**
+ * Every verb ends here, and every verb LEAVES.
+ *
+ * launchd (or docker) owns the daemon; the CLI never does. `up` bootstraps
+ * the supervisor and returns — the supervisor is launchd's child, not this
+ * process's — so nothing a verb did entitles it to sit in a terminal, and a
+ * probe that left a socket or a timer behind must not be able to keep it
+ * there. `process.exitCode` is set first so a normal drain still carries the
+ * right code, then the process is ended once stdout has flushed (exiting
+ * mid-write truncates a piped doctor table).
+ */
+function finish(code: number): void {
+  process.exitCode = code;
+  process.stdout.write("", () => process.exit(code));
+}
+
 if (invokedDirectly()) {
-  main(process.argv.slice(2)).then(
-    (code) => process.exit(code),
-    (e) => {
-      process.stderr.write(`metistry: ${e instanceof Error ? e.message : String(e)}\n`);
-      process.exit(1);
-    },
-  );
+  main(process.argv.slice(2)).then(finish, (e) => {
+    process.stderr.write(`metistry: ${e instanceof Error ? e.message : String(e)}\n`);
+    finish(1);
+  });
 }

@@ -209,6 +209,10 @@ public final class InstanceStore {
     public private(set) var compute = Section<ConsoleCompute>()
     public private(set) var commands = Section<CommandMenu>()
     public private(set) var knowledge = Section<KnowledgeSearchReply>()
+    /// The Pages list, beside the search results rather than sharing a
+    /// section with them: browsing the vault and searching it are two
+    /// questions, and a search must not blank the list you were reading.
+    public private(set) var pages = Section<KnowledgePageList>()
 
     /// The sidebar's Pinned area. Per-machine client state, keyed by instance.
     public private(set) var pins: PinnedItems
@@ -244,6 +248,7 @@ public final class InstanceStore {
         compute.reset()
         commands.reset()
         knowledge.reset()
+        pages.reset()
         reachability = .reachable
         consecutiveFailures = 0
         pins = PinnedItems(instanceID: instanceID, defaults: defaults)
@@ -437,6 +442,19 @@ public final class InstanceStore {
             (await api.knowledgeSearch(q, mode: mode, limit: limit)).map { ($0, WireTime.date($0.asOf)) }
         } degraded: { reply in
             reply.degraded
+        }
+    }
+
+    /// The Pages list. A poll, unlike a search: the index is a fact about the
+    /// vault rather than an answer to a question, so it refreshes in the
+    /// background and the previous window stays on screen while it does.
+    ///
+    /// One window, not an accumulating list — the route has no `total` (a
+    /// count over the unscoped filter would publish what it filtered), so
+    /// `nextOffset` is the only honest way onward and the caller asks for it.
+    public func refreshPages(area: String? = nil, prefix: String? = nil, limit: Int? = nil, offset: Int? = nil, background: Bool = false) async {
+        await load(\.pages, background: background) { api in
+            (await api.knowledgePages(area: area, prefix: prefix, limit: limit, offset: offset)).map { ($0, WireTime.date($0.asOf)) }
         }
     }
 

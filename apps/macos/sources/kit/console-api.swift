@@ -398,6 +398,25 @@ public struct ConsoleAPI: Sendable {
         await get("/api/knowledge/page", ["path": path])
     }
 
+    /// `GET /api/knowledge/pages` — the index, through a named query rather
+    /// than the bridge, because a page LIST is derived state and a page's
+    /// bytes are not. `area` is the derived grouping (`Areas/Health` covers
+    /// its sub-folders); `prefix` narrows by path segment-wise, so
+    /// `Areas/Health` never reaches `Areas/Healthcare`. Ordered by path and
+    /// paged with `offset` against that total order — there is no `total`, so
+    /// the end of the list is `isLastPage`.
+    public func knowledgePages(area: String? = nil, prefix: String? = nil, limit: Int? = nil, offset: Int? = nil) async -> Result<KnowledgePageList, ConsoleError> {
+        await get("/api/knowledge/pages", [
+            "area": area,
+            "prefix": prefix,
+            "limit": limit.map(String.init),
+            // Offset 0 is the default, and omitting it says the same thing —
+            // so the first page has ONE spelling however the caller asks for
+            // it: one stub key, one cache key, one line in a log.
+            "offset": (offset ?? 0) == 0 ? nil : offset.map(String.init),
+        ])
+    }
+
     // MARK: The composer's menu
 
     /// `GET /api/commands` — generated from this instance's own `rules.yaml`

@@ -10,7 +10,7 @@ import { validateManifest } from "@foldedspacelabs/metistry-core";
 import { TasksService } from "@foldedspacelabs/metistry-tasks";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { allProjects, computeNudge, createBrainServer, memberOf, resolveAliasCall, sanitizeDeep, TOOL_ALIASES, TOOL_NAMES, underAreas, validKnowledgePath, type AgentPrincipal, type Db } from "../src/index.js";
+import { allProjects, canSeeUnder, computeNudge, createBrainServer, knowledgeScope, memberOf, resolveAliasCall, sanitizeDeep, TOOL_ALIASES, TOOL_NAMES, underAreas, validKnowledgePath, type AgentPrincipal, type Db, type Tier } from "../src/index.js";
 
 describe("manifest", () => {
   it("validates through core and exposes exactly the registered tools, in order", () => {
@@ -135,6 +135,51 @@ describe("pure helpers", () => {
     for (const bad of ["/Areas/x", "/", "Areas/", "Areas/../x", "Areas/./x", ".metistry/identity.yaml", ".metistry/state/.env", "Artifacts/bundle-1/x.pdf", ""]) {
       expect(validKnowledgePath(bad), bad).toBe(false);
     }
+  });
+
+  // `canSeeUnder` is the ONE scope decision — the console's `canSee` is a
+  // rename over it (apps/console/src/knowledge-routes.ts) and every
+  // knowledge_* tool asks it through `knowledgeScope`. Misuse first: the
+  // interesting cases are the ones where the area list would say yes.
+  it("canSeeUnder: both conditions are necessary — a vault path AND under the areas", () => {
+    expect(canSeeUnder("Areas/Fsl/Note.md", ["Areas/Fsl"])).toBe(true);
+    expect(canSeeUnder("Areas/Fsl/Note.md", ["Areas/Other"])).toBe(false);
+    expect(canSeeUnder("Areas/Fslx/Note.md", ["Areas/Fsl"])).toBe(false); // segment-wise, like underAreas
+    expect(canSeeUnder("Areas/Fsl/Note.md", [])).toBe(false); // the empty list is NO scope, not every scope
+    // null = no prefix restriction: the owner on a console route, tier
+    // `index` on a title listing. It is still not a way into the machinery.
+    expect(canSeeUnder("Areas/Fsl/Note.md", null)).toBe(true);
+    expect(canSeeUnder("now.md", null)).toBe(true);
+    // The bare vault grant matches every path `underAreas` is asked about,
+    // which is exactly why the vault-path rule cannot live at the call site:
+    // `/` would otherwise hand over `.metistry/state/.env`.
+    for (const machinery of [".metistry/state/.env", ".metistry/compute.yaml", ".obsidian/workspace.json", "Artifacts/bundle-1/x.pdf", "CLAUDE.md", "Areas/../.metistry/x", "/Areas/x", "Areas\\x", `Areas/x\0.md`, `${"A".repeat(501)}.md`]) {
+      expect(underAreas(machinery, ["/"]), `underAreas says yes to ${machinery}`).toBe(true);
+      expect(canSeeUnder(machinery, ["/"]), machinery).toBe(false);
+      expect(canSeeUnder(machinery, null), machinery).toBe(false);
+    }
+  });
+
+  it("knowledgeScope: canRead is content, canList is existence, and tier none is neither", () => {
+    const scopeOf = (tier: Tier, areas: string[] = []): ReturnType<typeof knowledgeScope> =>
+      knowledgeScope({ id: "x", grants: { tier, areas }, projects: [] } as AgentPrincipal);
+
+    const none = scopeOf("none");
+    expect(none.canRead("Areas/Fsl/Note.md")).toBe(false);
+    expect(none.canList("Areas/Fsl/Note.md")).toBe(false); // `prefixes` is null at tier none too — the tier check is what saves it
+
+    // tier index: every title, no content anywhere (the 2026-09-19 ruling)
+    const index = scopeOf("index");
+    expect(index.canList("Areas/Anything/At/All.md")).toBe(true);
+    expect(index.canList(".metistry/state/.env")).toBe(false);
+    expect(index.canRead("Areas/Anything/At/All.md")).toBe(false);
+
+    // tier areas: lists exactly what it may read, and nothing outside
+    const areas = scopeOf("areas", ["Areas/Fsl"]);
+    expect(areas.canList("Areas/Fsl/Note.md")).toBe(true);
+    expect(areas.canRead("Areas/Fsl/Note.md")).toBe(true);
+    expect(areas.canList("Areas/Other/Note.md")).toBe(false);
+    expect(areas.canRead("Areas/Other/Note.md")).toBe(false);
   });
 });
 

@@ -10,7 +10,7 @@ import { validateManifest } from "@foldedspacelabs/metistry-core";
 import { TasksService } from "@foldedspacelabs/metistry-tasks";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { allProjects, canSeeUnder, computeNudge, createBrainServer, knowledgeScope, memberOf, resolveAliasCall, sanitizeDeep, TOOL_ALIASES, TOOL_NAMES, underAreas, validKnowledgePath, type AgentPrincipal, type Db, type Tier } from "../src/index.js";
+import { allProjects, canSeeUnder, computeNudge, createBrainServer, knowledgeScope, liftTurnId, memberOf, resolveAliasCall, sanitizeDeep, TOOL_ALIASES, TOOL_NAMES, TURN_ID_META_KEY, turnIdFrom, underAreas, validKnowledgePath, validTurnId, type AgentPrincipal, type Db, type Tier } from "../src/index.js";
 
 describe("manifest", () => {
   it("validates through core and exposes exactly the registered tools, in order", () => {
@@ -34,7 +34,7 @@ describe("manifest", () => {
 
 describe("definition size (docs/research/2026-08-tool-discovery.md's other axis)", () => {
   /** What one principal actually sees listed, and what those definitions cost. */
-  async function listedFor(principal: AgentPrincipal): Promise<{ names: string[]; tokens: number }> {
+  async function listedFor(principal: AgentPrincipal): Promise<{ names: string[]; tokens: number; tools: { name: string; description?: string; inputSchema?: unknown }[] }> {
     const db = fakeDb({}, []);
     const brain = createBrainServer({ db, authenticate: async () => principal, tasks: new TasksService(db), inboxDir: "/tmp/unused" });
     const server = createServer((req, res) => void brain.handle(req, res));
@@ -48,7 +48,7 @@ describe("definition size (docs/research/2026-08-tool-discovery.md's other axis)
       const chars = JSON.stringify(tools).length;
       // eslint-disable-next-line no-console
       console.log(`mcp-brain tools/list (${principal.id}): ${tools.length} tools, ${chars} chars, ~${Math.ceil(chars / 4)} tokens (PoC-17 lazy-load line: 5000)`);
-      return { names: tools.map((t) => t.name), tokens: Math.ceil(chars / 4) }; // chars/4 is the industry's own rule of thumb (§1)
+      return { names: tools.map((t) => t.name), tokens: Math.ceil(chars / 4), tools: tools as { name: string; description?: string; inputSchema?: unknown }[] }; // chars/4 is the industry's own rule of thumb (§1)
     } finally {
       await new Promise<void>((r) => server.close(() => r()));
     }
@@ -59,6 +59,27 @@ describe("definition size (docs/research/2026-08-tool-discovery.md's other axis)
     expect(names).not.toContain("propose_action"); // alice has no autonomy record: the group is not offered at all
     expect(names.length).toBe(25);
     expect(tokens).toBeLessThan(5000);
+    // …and it stays under the RATCHET as well. Trimming `turn_id` out of all
+    // 25 schemas recovered 3,774 chars ≈ 944 tokens (4,979 → 4,035, 19.0% of
+    // the surface: turn-id.ts, docs/research/2026-09-19-code-mode-mcp.md
+    // §2.4). The saving is only worth having if it cannot be spent again
+    // without somebody deciding to, so the headroom is asserted, not just the
+    // line. `ops/scripts/check-tool-surface.mjs` checks the LINE generically
+    // for every bridge; this is brain's own ceiling.
+    expect(tokens).toBeLessThan(4200);
+  });
+
+  it("no tool advertises `turn_id` — it is a correlation handle, not a parameter (turn-id.ts)", async () => {
+    for (const principal of [alice, { ...alice, id: "actor", autonomy: { level: "propose" } } as AgentPrincipal]) {
+      const { tools } = await listedFor(principal);
+      for (const tool of tools) {
+        const schema = (tool.inputSchema ?? {}) as { properties?: Record<string, unknown>; required?: string[] };
+        expect(Object.keys(schema.properties ?? {}), tool.name).not.toContain("turn_id");
+        // …and no description mentions it either: a model that reads about it
+        // would start inventing one, which is the prompted shape we removed.
+        expect(tool.description ?? "", tool.name).not.toMatch(/turn_id/);
+      }
+    }
   });
 
   it("propose_action rides only on a credential the owner gave room — that is this group's lazy (docs/ops/actions.md)", async () => {
@@ -70,8 +91,10 @@ describe("definition size (docs/research/2026-08-tool-discovery.md's other axis)
     // regression: the eager surface above is what every other agent pays, and
     // deferring by credential costs none of the +1 discovery turn a
     // tool_index/execute/batch index would. The bound is a ceiling on the one
-    // definition, so the tool cannot grow unnoticed.
-    expect(tokens).toBeLessThan(5400);
+    // definition, so the tool cannot grow unnoticed. Since the `turn_id` trim
+    // this surface no longer crosses 5k at all (5,243 → 4,262); the ceiling
+    // moves with it rather than leaving 1.1k of unwatched room.
+    expect(tokens).toBeLessThan(4400);
     // a level that admits nothing is exactly alice again — the refusal is the absence
     const observer: AgentPrincipal = { ...alice, id: "observer", autonomy: { level: "observe", actions: { comment: "allow" } } };
     expect((await listedFor(observer)).names).not.toContain("propose_action");
@@ -106,6 +129,56 @@ describe("deprecated tool names (one release; aliases.ts)", () => {
     expect(resolveAliasCall({ jsonrpc: "2.0", id: 3, method: "tools/list", params: { name: "report" } })).toBeNull();
     expect(resolveAliasCall(null)).toBeNull();
     expect(resolveAliasCall("report")).toBeNull();
+  });
+});
+
+describe("the turn handle (turn-id.ts): _meta on the wire, one release of tolerance for the argument", () => {
+  const key = TURN_ID_META_KEY;
+
+  it("the key is ours, reverse-DNS, and claims nothing reserved for MCP itself", () => {
+    expect(key).toBe("com.foldedspacelabs.metistry/turn_id");
+    const [prefix] = key.split("/");
+    expect(prefix!.split(".")).not.toContain("mcp");
+    expect(prefix!.split(".")).not.toContain("modelcontextprotocol");
+  });
+
+  it("validTurnId is shape only — storable or nothing, never a refusal", () => {
+    expect(validTurnId("abc-123_XYZ")).toBe("abc-123_XYZ");
+    expect(validTurnId("a".repeat(64))).toBe("a".repeat(64));
+    for (const bad of ["a".repeat(65), "", "has space", "semi;colon", "slash/es", 42, null, undefined, {}, ["x"]]) {
+      expect(validTurnId(bad), JSON.stringify(bad)).toBeUndefined();
+    }
+  });
+
+  it("turnIdFrom reads the call's _meta and ignores everything else in it", () => {
+    expect(turnIdFrom({ [key]: "t1", progressToken: 7 })).toBe("t1");
+    expect(turnIdFrom({ turn_id: "t1" })).toBeUndefined(); // the bare name is not the key
+    expect(turnIdFrom({ [key]: "not a handle" })).toBeUndefined();
+    for (const empty of [undefined, null, {}, "string"]) expect(turnIdFrom(empty)).toBeUndefined();
+  });
+
+  it("liftTurnId moves a legacy argument into _meta, in place, and takes it out of the arguments either way", () => {
+    const msg = { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "queries_list", arguments: { turn_id: "t7", limit: 5 } } };
+    expect(liftTurnId(msg)).toBe("t7");
+    expect(msg.params).toEqual({ name: "queries_list", arguments: { limit: 5 }, _meta: { [key]: "t7" } });
+
+    // a malformed one is dropped, not refused, and does not reach the schema either
+    const junk = { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "queries_list", arguments: { turn_id: "not a handle" } } };
+    expect(liftTurnId(junk)).toBeUndefined();
+    expect(junk.params).toEqual({ name: "queries_list", arguments: {} });
+
+    // both carriers: the new one wins, and the argument still goes
+    const both = { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "queries_list", arguments: { turn_id: "old" }, _meta: { [key]: "new" } } };
+    expect(liftTurnId(both)).toBeUndefined();
+    expect(both.params).toEqual({ name: "queries_list", arguments: {}, _meta: { [key]: "new" } });
+
+    // nothing to lift, not a call, not an object: untouched
+    const plain = { jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "queries_list", arguments: { limit: 5 } } };
+    expect(liftTurnId(plain)).toBeUndefined();
+    expect(plain.params).toEqual({ name: "queries_list", arguments: { limit: 5 } });
+    expect(liftTurnId({ jsonrpc: "2.0", id: 5, method: "tools/list", params: { arguments: { turn_id: "t" } } })).toBeUndefined();
+    expect(liftTurnId(null)).toBeUndefined();
+    expect(liftTurnId("tools/call")).toBeUndefined();
   });
 });
 

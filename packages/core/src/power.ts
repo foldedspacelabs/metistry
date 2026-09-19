@@ -137,6 +137,26 @@ export function keepAwakeChoice(value: KeepAwake): KeepAwakeChoice {
 /** `keep-awake` spelled as a CLI/doctor identifier — one place, so the row name, the verb and the docs cannot drift. */
 export const KEEP_AWAKE_KIND = "keep-awake";
 
+/**
+ * `IOPMAssertionCreateWithName`'s `AssertionName` "may be no longer than 128
+ * characters" (IOPMLib.h). Nothing passes a name to `caffeinate` — under it the
+ * assertion's name is Apple's, and no trick changes that — but the reason
+ * string is written where the swap to a native holder would read it, so it is
+ * held to the limit that holder will have.
+ */
+export const KEEP_AWAKE_REASON_MAX = 128; // limit: fixed — IOPMLib.h's documented AssertionName ceiling, not ours to choose
+
+/**
+ * Why this Mac is being held awake, in the assistant's own name — templated
+ * from `identity.yaml`, which is the only place that name lives (CLAUDE.md).
+ * An instance whose identity cannot be read says "the assistant" rather than
+ * inventing one.
+ */
+export function keepAwakeReason(assistantName: string | undefined): string {
+  const who = assistantName?.trim() || "the assistant";
+  return `${who} is running — Metistry holds PreventUserIdleSystemSleep while this install is up`.slice(0, KEEP_AWAKE_REASON_MAX);
+}
+
 /** A typo is an error, never a guess — the same rule `deployment.yaml`'s strict parse follows. */
 export function parseKeepAwake(v: string | undefined): KeepAwake | undefined {
   return v !== undefined && (KEEP_AWAKE_VALUES as readonly string[]).includes(v) ? (v as KeepAwake) : undefined;

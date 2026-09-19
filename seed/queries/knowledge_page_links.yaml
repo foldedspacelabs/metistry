@@ -1,0 +1,100 @@
+# Seeded default (D4 overlay: an instance file of the same name wins).
+#
+# One page's LINKS — outgoing and incoming in one list — which
+# `docs/product/app-ux-plan.md` §6.1 sized beside the page list and #206 left
+# as the last open half. No migration: `0001_init.sql` has `knowledge_links
+# (from_path, to_path, kind)` with the primary key on all three and an index
+# on `to_path`, so both directions are one indexed lookup.
+#
+# **Why a query.** The graph is derived state — the reconciler parses it out
+# of the notes on every walk (`apps/reconciler/src/indexer.ts`, which deletes
+# and re-resolves a note's edges whenever the note or the path set moves) — so
+# invariant 3 sends it here, and `apps/console/src/knowledge-routes.ts` runs
+# it through `packages/queries` like every other read. A page's BYTES are the
+# other kind of thing and still come from the bridge (`GET
+# /api/knowledge/page`).
+#
+# **One list, not two.** `direction` is a column (`outgoing` = this page links
+# there; `incoming` = that page links here) and `path` is always THE OTHER
+# END, which is what makes the route's scope filter possible: one predicate
+# over one column decides every row, rather than two arrays a filter could
+# cover unevenly. Outgoing rows sort first, then by path in BYTE order, then
+# by `kind`; that triple is the table's primary key read the other way round,
+# so the order is total and a window cannot repeat or skip a row under
+# `offset`. (`COLLATE "C"` for the same reason `knowledge_pages` uses it: a
+# locale collation ignores punctuation at the primary level, so the same query
+# would page differently on the owner's Mac and in a Linux container.)
+#
+# **Never in the list.** An edge whose other end is a `draft` note or an
+# unsettled `conflict` row is DROPPED, not flagged — the same rule
+# `knowledge_pages` and `mcp-brain` apply, so a draft cannot be discovered
+# through the graph after being hidden from the list. It is dropped rather
+# than blanked because a row saying "there is something here you may not see"
+# is the disclosure the rule exists to prevent.
+#
+# **An unresolved link is still a link.** The indexer records the target it
+# resolved a wikilink to whether or not a note lives there yet, which is how
+# Obsidian behaves and how a vault gets written. Those rows come back with
+# `resolved: false` and a title derived from the path, so a client can render
+# them the way Obsidian does instead of pretending the link is not in the
+# note. `resolved: true` means the index holds a settled page at that path.
+#
+# **A blank `path` is no page, so it is no links.** `path` has a default
+# rather than `required: true` because every seed query must run on its
+# defaults alone (`apps/console/test/seed-queries.test.ts`); blank matches no
+# row, so the default is an empty result rather than the whole graph. The
+# route requires the parameter and answers `400` without it.
+#
+# **`expose: route`.** The rows carry vault paths at both ends, and only
+# `GET /api/knowledge/links` filters them through the caller's scope — so the
+# generic `/api/q/knowledge_page_links` answers the `404` it answers an
+# unknown name with (ruled 2026-09-19: one endpoint per necessary operation).
+name: knowledge_page_links
+expose: route
+description: >-
+  One row per link at a page: `direction` (`outgoing` — this page links there;
+  `incoming` — that page links here), `path` (always the OTHER end), the link
+  `kind` (wikilink | frontmatter | embed), and the target's title, description
+  and index status where the index knows it. Never an edge touching a draft or
+  an unsettled `conflict`; an edge to a path no note lives at yet comes back
+  with `resolved: false`. Outgoing first, then by path in BYTE order
+  (`COLLATE "C"`) and by kind — a total order, so `limit`/`offset` page it
+  without repeating or skipping. A blank `path` matches no page and returns no
+  rows.
+params:
+  path: { type: text, default: "" } # the page whose links these are; blank = no page, so no rows
+  limit: { type: int, default: 100 }
+  offset: { type: int, default: 0 }
+sql: |
+  WITH me AS (
+    SELECT NULLIF(:path::text, '') AS path
+  ),
+  edge AS (
+    SELECT 'outgoing'::text AS direction, l.to_path AS path, l.kind
+    FROM knowledge_links l, me
+    WHERE me.path IS NOT NULL AND l.from_path = me.path
+    UNION ALL
+    SELECT 'incoming'::text AS direction, l.from_path AS path, l.kind
+    FROM knowledge_links l, me
+    WHERE me.path IS NOT NULL AND l.to_path = me.path
+  )
+  SELECT
+    e.direction,
+    e.path,
+    e.kind,
+    COALESCE(k.title, regexp_replace(e.path, '^.*/|\.md$', '', 'g')) AS title,
+    k.description,
+    k.status,
+    (k.path IS NOT NULL)                                             AS resolved
+  FROM edge e
+  LEFT JOIN knowledge_files k ON k.path = e.path
+  WHERE NOT EXISTS (
+    SELECT 1 FROM knowledge_files d
+    WHERE d.path = e.path AND (d.draft OR d.status = 'conflict')
+  )
+  ORDER BY CASE e.direction WHEN 'outgoing' THEN 0 ELSE 1 END,
+           e.path COLLATE "C",
+           e.kind COLLATE "C"
+  LIMIT :limit
+  OFFSET :offset
+cache_ttl: 0 # the graph moves with every walk; a cached backlink is a link the owner just deleted

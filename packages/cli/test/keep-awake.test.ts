@@ -289,6 +289,14 @@ describe("doctor's keep-awake row", () => {
     expect(row.remediation).toContain("when the supervisor stopped");
   });
 
+  it("a state file truncated mid-write reports as nothing holding, never as a crashed check", async () => {
+    const dir = await withState({});
+    await writeFile(join(dir, ".metistry", "state", "run", "keep-awake.json"), '{"schema": 1, "mode": "alw');
+    const row = (await keepAwakeRow({ deployment: { ...launchd, keep_awake: "always" }, instanceDir: dir, exec: pmset(), platform: "darwin" }))!;
+    expect(row.status).toBe("degraded");
+    expect(row.remediation).toContain("nothing has written");
+  });
+
   it("never `failed` — a promise about the machine is not a broken install", async () => {
     for (const mode of ["never", "allow_sleep_on_battery", "always", "always_lid_closed"] as const) {
       const row = await keepAwakeRow({ deployment: { ...launchd, keep_awake: mode }, instanceDir: await withState({ mode }), exec: pmset(""), platform: "darwin" });

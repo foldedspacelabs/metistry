@@ -452,7 +452,12 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
     // knowledge_list / knowledge_grep (docs/research/2026-09-stash-review.md
     // item 3): filesystem semantics over the same grant tiers, one
     // registration point like every other adapter here.
-    registerKnowledgeFsTools(reg, { db, list: cfg.listKnowledge, search: cfg.searchVaultKeyword, read: cfg.readKnowledge }, principal);
+    // `queries` rides along because the page list and the link graph are
+    // DERIVED state: `knowledge_list` runs the same two `expose: route`
+    // named queries the console's `/api/knowledge/pages` and `/links` run,
+    // through the same driver and the same `canSeeUnder` filter (ruled
+    // 2026-09-19: one scope rule for every knowledge read, on both doors).
+    registerKnowledgeFsTools(reg, { db, list: cfg.listKnowledge, search: cfg.searchVaultKeyword, read: cfg.readKnowledge, queries: cfg.queries }, principal);
 
     // The assistant's write path (knowledge-write.ts): internal principals only.
     reg(

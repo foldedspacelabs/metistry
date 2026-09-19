@@ -11,11 +11,15 @@
 // **Invariant 3 is not bent here.** A page's BYTES and a search RANKING are
 // not derived state — there is no column holding a note body, which is the
 // schema enforcing the rule rather than a convention asking for it — so they
-// come through the bridge. Anything countable (the page list, the link graph)
-// IS derived, so `GET /api/knowledge/pages` runs the named query
-// `seed/queries/knowledge_pages.yaml` through `packages/queries` and writes
-// no SQL of its own. Three doors, two sources, and which is which is settled
-// by the schema rather than by taste.
+// come through the bridge. Anything countable IS derived, so the page list
+// and the link graph run named queries — `seed/queries/knowledge_pages.yaml`
+// and `seed/queries/knowledge_page_links.yaml` — through `packages/queries`,
+// and write no SQL of their own. Four doors, two sources, and which is which
+// is settled by the schema rather than by taste.
+//
+// Both named queries are `expose: route`: their rows carry vault paths, and
+// this file is the only place a path is judged against the caller's scope, so
+// the generic `/api/q/<name>` door refuses them (ruled 2026-09-19).
 //
 // **What the bridge does not refuse, this does.** The reconciler's
 // `/vault/read` confines a path to the instance repo and stops there: it will
@@ -177,12 +181,16 @@ export function filterHits(hits: readonly KnowledgeSearchHit[], scope: Knowledge
 }
 
 /**
- * The same drop for the page LIST, over whatever columns the named query
- * chose. Rows travel to the client unprojected — an instance may overlay
- * `knowledge_pages.yaml` with columns of its own (D4), and a projection here
- * would silently swallow them — so the one thing this insists on is a `path`
- * it can judge. A row without one is dropped rather than passed: a list
- * entry whose scope cannot be decided is not a list entry.
+ * The same drop for a named query's ROWS — the page list, and the link list,
+ * whose `path` is the other end of each edge. One predicate over one column,
+ * so the two lists cannot be filtered unevenly.
+ *
+ * Rows travel to the client unprojected — an instance may overlay
+ * `knowledge_pages.yaml` or `knowledge_page_links.yaml` with columns of its
+ * own (D4), and a projection here would silently swallow them — so the one
+ * thing this insists on is a `path` it can judge. A row without one is
+ * dropped rather than passed: a list entry whose scope cannot be decided is
+ * not a list entry.
  */
 export function filterPages(rows: readonly Record<string, unknown>[], scope: KnowledgeScope): Record<string, unknown>[] {
   return rows.filter((r) => typeof r.path === "string" && canSee(r.path, scope));
@@ -193,7 +201,7 @@ export interface KnowledgeDeps {
   search?: KnowledgeSearcher | undefined;
   /** the same vault client the artifacts module stores through — `/vault/read`; absent → `not_available` */
   vault?: VaultClient | undefined;
-  /** the console's own QueryStore — invariant 3's ONE read path into derived state, for `GET /api/knowledge/pages`; without `knowledge_pages` loaded that route answers `not_available` naming the file */
+  /** the console's own QueryStore — invariant 3's ONE read path into derived state, for `GET /api/knowledge/pages` and `GET /api/knowledge/links`; without the named query loaded, the route answers `not_available` naming the file */
   queries?: QueryStore | undefined;
 }
 
@@ -207,8 +215,11 @@ const MAX_QUERY = 200; // limit: fixed — the bridge refuses a longer `q`; refu
 /** The named query `GET /api/knowledge/pages` is. Not loaded → the route is `not_available` naming the file, never a 500 and never a hand-written SELECT. */
 export const KNOWLEDGE_PAGES_QUERY = "knowledge_pages";
 
-const MAX_PAGES_LIMIT = 500; // limit: fixed — a page LIST is scalar columns over an indexed primary key, so it is not the bridge's 100; 500 rows is one screenful of scrolling and bounds the response a phone has to parse
-const DEFAULT_PAGES_LIMIT = 100; // limit: fixed — `knowledge_pages.yaml`'s own default, so an omitted `limit` means the same thing on the route and on `/api/q/knowledge_pages`
+/** The named query `GET /api/knowledge/links` is. Same rule as the page list: not loaded → `not_available` naming the file, never a 500 and never a hand-written SELECT. */
+export const KNOWLEDGE_LINKS_QUERY = "knowledge_page_links";
+
+const MAX_PAGES_LIMIT = 500; // limit: fixed — a LIST out of the index is scalar columns over an indexed key, so it is not the bridge's 100; 500 rows is one screenful of scrolling and bounds the response a phone has to parse. Shared by the page list and the link list, which page the same way
+const DEFAULT_PAGES_LIMIT = 100; // limit: fixed — the default `knowledge_pages.yaml` and `knowledge_page_links.yaml` both declare, so an omitted `limit` means the same thing on the route and in the manifest
 const MAX_FILTER = 500; // limit: fixed — `canSee` refuses a path over 500 characters, so a filter longer than one cannot select anything a client may see
 
 /**
@@ -226,6 +237,7 @@ type Audit = (kind: string, tool: string, ok: boolean, meta: Record<string, unkn
 /**
  * GET /api/knowledge/search?q=&mode=&limit=  ·  GET /api/knowledge/page?path=
  * GET /api/knowledge/pages?area=&prefix=&limit=&offset=
+ * GET /api/knowledge/links?path=&limit=&offset=
  *
  * server.ts has already established the principal; `scope` is what that
  * principal may see. Not streamed — the bridge's hit list is bounded at 100,
@@ -354,8 +366,62 @@ export async function knowledgeRoutes(
     });
   }
 
+  if (key === "GET /api/knowledge/links") {
+    const path = (url.searchParams.get("path") ?? "").trim();
+    if (path === "") return sendError(res, "invalid_request", "path is required — the page whose links you want, e.g. Areas/Health/sleep.md");
+    // BOTH ends of every link have to pass the scope, and this is the first
+    // end: the page being asked about. Refused and absent are the same answer
+    // here, exactly as on `GET /api/knowledge/page` — "which pages link to
+    // this" must not be answerable for a page the caller cannot see, and the
+    // honest description of `.metistry/compute.yaml` is still "not
+    // knowledge", for the owner too.
+    if (!canSee(path, scope)) {
+      await audit("knowledge", "links", false, { refused: "out_of_scope" });
+      return sendError(res, "not_found", "no such page — a path must be vault CONTENT: not .metistry/, not Artifacts/, not the root CLAUDE.md, no leading slash and no traversal (docs/ops/instance-layout.md)");
+    }
+    const limit = clampPages(url.searchParams.get("limit"));
+    if (limit === undefined) return sendError(res, "invalid_request", `limit must be an integer between 1 and ${MAX_PAGES_LIMIT}`);
+    const offset = offsetOf(url.searchParams.get("offset"));
+    if (offset === undefined) return sendError(res, "invalid_request", "offset must be a non-negative integer");
+    // Invariant 3 again: the graph is derived state — the reconciler parses
+    // it out of the notes on every walk — so the only thing that may produce
+    // it is the query driver running a named query. No SQL here.
+    if (!deps.queries?.names().includes(KNOWLEDGE_LINKS_QUERY)) {
+      return sendError(res, "not_available", `the named query ${KNOWLEDGE_LINKS_QUERY} is not loaded (seed/queries/${KNOWLEDGE_LINKS_QUERY}.yaml, METISTRY_QUERIES_DIRS)`);
+    }
+
+    let result: Awaited<ReturnType<QueryStore["run"]>>;
+    try {
+      result = await deps.queries.run(KNOWLEDGE_LINKS_QUERY, { path, limit, offset });
+    } catch (err) {
+      if (err instanceof QueryError) return sendError(res, err.code === "unknown_query" ? "not_available" : "invalid_request", err.message);
+      throw err;
+    }
+    // …and the second end: every row's `path` is the OTHER side of an edge,
+    // judged by the same predicate the page list uses. A link the scope does
+    // not cover is dropped, so a backlink cannot report the existence of a
+    // note in an area the caller was never granted.
+    const links = filterPages(result.rows, scope);
+    await audit("knowledge", "links", true, { links: links.length, filtered: result.rows.length - links.length });
+    // `path` is echoed the way the search route echoes `q`, and there is NO
+    // total, for the reason the page list has none: a count over the
+    // unfiltered edges is the size of what was withheld. Page until a window
+    // comes back shorter than `limit`.
+    return sendJson(res, 200, {
+      path,
+      links,
+      limit,
+      offset,
+      as_of: result.as_of.toISOString(),
+    });
+  }
+
   // Anything else under /api/knowledge/.
-  return sendError(res, "not_found", "the knowledge read path is GET /api/knowledge/search, GET /api/knowledge/page and GET /api/knowledge/pages (docs/ops/console-api.md)");
+  return sendError(
+    res,
+    "not_found",
+    "the knowledge read path is GET /api/knowledge/search, GET /api/knowledge/page, GET /api/knowledge/pages and GET /api/knowledge/links (docs/ops/console-api.md)",
+  );
 }
 
 /** `limit`, or undefined when it is not an integer in range — never silently clamped, because a client that asked for 500 should learn the ceiling. */

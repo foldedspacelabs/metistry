@@ -114,8 +114,15 @@ async function runSupervisor(path: string): Promise<{ children: { name: string }
   console.log(startupSummary(config));
   const control = await listenControl(sup);
   // the assertion is tied to THIS process (`caffeinate -w <our pid>`), so it
-  // is taken here, with the children, and dropped with them
-  const keepAwake = await startKeepAwake();
+  // is taken here, with the children, and dropped with them. Never fatal: the
+  // children ARE the install, and failing to keep the Mac awake must not stop
+  // it running — doctor reports the row instead.
+  let keepAwake: KeepAwakeLoop | undefined;
+  try {
+    keepAwake = await startKeepAwake();
+  } catch (err) {
+    console.error("[keep-awake] not started:", err instanceof Error ? err.message : err);
+  }
   let stopping = false;
   const stop = (signal: string) => {
     if (stopping) return;

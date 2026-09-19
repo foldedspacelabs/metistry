@@ -89,3 +89,21 @@ vitest invoked directly). Two ways to get there:
 
 A suite that truncates must carry that refusal. There is no version of this
 where a test decides at runtime that some database is probably fine to empty.
+
+It must also never **wait** to truncate. TRUNCATE takes ACCESS EXCLUSIVE on
+every table it names, left to right; a sibling file's `DELETE FROM work …`
+takes `work` and then `proposals` (the 0018 foreign key's referential check),
+and a sibling's `INSERT INTO proposals …` takes the same two the other way
+round. No ordering of the list escapes that: some sibling always holds the
+second lock and wants the first, Postgres calls it a deadlock and kills one of
+the two — as readily the innocent sibling as the reset. So the reset runs under
+`SET LOCAL lock_timeout`, well inside the server's 1s `deadlock_timeout`, and
+retries. The cycle is then never around long enough to *be* a deadlock: the
+reset lets go, the sibling's statement finishes, the next attempt walks
+through.
+
+Assertions follow the same rule as cleanup: **count your own rows**. A
+`SELECT count(*) FROM inbox` taken before and after an action is one sibling
+insert away from failing, and proves nothing about this suite;
+`… WHERE source_agent = <this suite's agent>` says the same thing and cannot
+race.

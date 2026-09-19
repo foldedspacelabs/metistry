@@ -32,6 +32,7 @@ const REQUIRED = [
   "board",
   "board_projects",
   "rooms",
+  "knowledge_pages", // GET /api/knowledge/pages — a page LIST is derived state, so invariant 3 sends it through here and the route holds no SQL of its own
 ];
 
 describe("seed queries", () => {
@@ -456,5 +457,70 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
     await pool.query(`DELETE FROM proposals WHERE work_id = $1`, [workId]);
     await pool.query(`DELETE FROM artifact_comments WHERE work_id = $1`, [workId]);
     await pool.query(`DELETE FROM work WHERE id = $1`, [workId]);
+  });
+
+  // The page list (docs/ops/console-api.md `GET /api/knowledge/pages`). Four
+  // things the YAML decides and nothing downstream can undo: what never
+  // appears (a draft, an unsettled conflict), how `area` is DERIVED from the
+  // path, that `prefix` is segment-wise rather than a substring — the
+  // `Areas/Health` / `Areas/Healthcare` pair is the leak a `LIKE 'x%'` would
+  // have — and that the window is stable under `offset`.
+  it("knowledge_pages: derives the area, filters segment-wise, hides drafts and conflicts, pages stably", async () => {
+    const tag = `Kp${Date.now()}`;
+    const area = `Areas/${tag}`; // the area under test
+    const sibling = `Areas/${tag}care`; // its `Health`/`Healthcare` neighbour
+    const mk = async (path: string, title: string | null, draft: boolean, status: string) =>
+      pool.query(`INSERT INTO knowledge_files (path, title, description, draft, status, mtime, indexed_at) VALUES ($1, $2, $3, $4, $5, now(), now())`, [
+        path,
+        title,
+        title ? `${title} description` : null,
+        draft,
+        status,
+      ]);
+    await mk(`${area}/sleep.md`, "Sleep", false, "clean");
+    await mk(`${area}/2026/taper.md`, null, false, "dirty"); // no frontmatter title → the basename
+    await mk(`${sibling}/billing.md`, "Billing", false, "clean"); // the neighbour a substring prefix would leak
+    await mk(`${area}/secret.md`, "Secret", true, "clean"); // draft: invisible at every tier
+    await mk(`${area}/torn.md`, "Torn", false, "conflict"); // unsettled: its title and mtime are not facts yet
+    await mk(`Journal/${tag}.md`, null, false, "clean");
+    await mk(`${tag}.md`, "Root note", false, "clean"); // a vault-root file has no area
+
+    const mine = (rows: Record<string, unknown>[]) => rows.filter((r) => String(r.path).includes(tag));
+    const paths = (rows: Record<string, unknown>[]) => mine(rows).map((r) => r.path);
+    const all = mine((await store.run("knowledge_pages", { limit: 500 })).rows);
+    expect(all.map((r) => r.path)).toEqual([
+      `${area}/2026/taper.md`,
+      `${area}/sleep.md`,
+      `${sibling}/billing.md`,
+      `Journal/${tag}.md`,
+      `${tag}.md`,
+    ]); // ordered by path; the draft and the conflict are simply not there
+    expect(all.find((r) => r.path === `${area}/sleep.md`)).toMatchObject({ area, title: "Sleep", description: "Sleep description", status: "clean" });
+    expect(all.find((r) => r.path === `${area}/2026/taper.md`)).toMatchObject({ area, title: "taper" }); // the first two segments under Areas/, at any depth
+    expect(all.find((r) => r.path === `Journal/${tag}.md`)!.area).toBe("Journal"); // outside Areas/ the top segment IS the area
+    expect(all.find((r) => r.path === `${tag}.md`)!.area).toBeNull(); // a root file has none, and says NULL rather than "" so `area=` can still mean "every area"
+    for (const r of all) expect(r.modified).not.toBeNull();
+
+    // area: the derived grouping, exact — and it covers the sub-folders
+    expect(paths((await store.run("knowledge_pages", { area, limit: 500 })).rows)).toEqual([`${area}/2026/taper.md`, `${area}/sleep.md`]);
+    expect(paths((await store.run("knowledge_pages", { area: "Journal", limit: 500 })).rows)).toEqual([`Journal/${tag}.md`]);
+    // prefix: segment-wise. `Areas/<tag>` must NOT reach `Areas/<tag>care`.
+    expect(paths((await store.run("knowledge_pages", { prefix: area, limit: 500 })).rows)).toEqual([`${area}/2026/taper.md`, `${area}/sleep.md`]);
+    expect(paths((await store.run("knowledge_pages", { prefix: `${area}/`, limit: 500 })).rows)).toHaveLength(2); // a trailing slash is the same prefix
+    expect(paths((await store.run("knowledge_pages", { prefix: "/", limit: 500 })).rows)).toHaveLength(5); // `/` is the whole vault, as a grant of `/` means
+    expect((await store.run("knowledge_pages", { prefix: `${area}/Nope`, limit: 500 })).rows).toHaveLength(0);
+    expect((await store.run("knowledge_pages", { area: "no/such/area", limit: 500 })).rows).toHaveLength(0);
+
+    // offset walks the same total order — path is the primary key, so no row
+    // can tie and none can jump between windows
+    const windows = [
+      paths((await store.run("knowledge_pages", { prefix: area, limit: 1, offset: 0 })).rows),
+      paths((await store.run("knowledge_pages", { prefix: area, limit: 1, offset: 1 })).rows),
+      paths((await store.run("knowledge_pages", { prefix: area, limit: 1, offset: 2 })).rows),
+    ];
+    expect(windows.flat()).toEqual([`${area}/2026/taper.md`, `${area}/sleep.md`]); // the third window is past the end, and empty rather than wrapped
+    expect((await store.run("knowledge_pages", { prefix: area, limit: 1, offset: 99 })).rows).toHaveLength(0);
+
+    await pool.query(`DELETE FROM knowledge_files WHERE path LIKE $1 OR path LIKE $2`, [`%${tag}%`, `${tag}%`]);
   });
 });

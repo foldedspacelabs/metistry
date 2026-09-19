@@ -429,7 +429,25 @@ cache_ttl: 0
     expect(askedSemantic.isError).toBe(false);
     expect(askedSemantic.body).toMatchObject({ mode: "keyword", degraded: expect.stringContaining("no embeddings stored") });
     expect((await call(idx, "knowledge_search", { query: "%" })).body.hits).toEqual([]); // LIKE metacharacters are literal
-    expect(await call(idx, "knowledge_read", { path: "Areas/Itest/Alpha.md" })).toMatchObject({ isError: true, body: { error: { code: "forbidden" } } });
+    // Alpha is a real, settled row this tier can already see in the hits
+    // above — so the refusal names the area rather than the bare string
+    // (ruled 2026-09-19, PR #216 judgement call B).
+    const scoped = await call(idx, "knowledge_read", { path: "Areas/Itest/Alpha.md" });
+    expect(scoped).toMatchObject({
+      isError: true,
+      body: { error: { code: "forbidden", message: expect.stringContaining(`\`${AREA}\``) }, reason: "scope_required", grantedScope: AREA },
+    });
+    expect(scoped.body.error.message).toContain("requests_create");
+    // a path merely shaped like one, never indexed, confirms nothing — the
+    // uniform "not granted" holds, with no area named either way
+    const guessed = await call(idx, "knowledge_read", { path: "Areas/Itest/DoesNotExist.md" });
+    expect(guessed).toMatchObject({ isError: true, body: { error: { code: "forbidden", message: "not granted" } } });
+    expect(JSON.stringify(guessed.body)).not.toContain("grantedScope");
+    // a draft is invisible at every tier (never listed, never searched) —
+    // guessing its exact path must not confirm it exists either
+    const draftGuess = await call(idx, "knowledge_read", { path: "Areas/Itest/Draft.md" });
+    expect(draftGuess).toMatchObject({ isError: true, body: { error: { code: "forbidden", message: "not granted" } } });
+    expect(JSON.stringify(draftGuess.body)).not.toContain("grantedScope");
     await idx.close();
 
     grant("tok-areas", { id: ALICE, grants: { tier: "areas", areas: [AREA] }, projects: [] });
@@ -730,12 +748,20 @@ cache_ttl: 0
     const idx = await connect("tok-matrix-index");
     expect((await call(idx, "knowledge_search", { query: "alpha" })).body.hits.map((h: any) => h.path)).toContain(inside);
     expect((await call(idx, "knowledge_list", { prefix: "Areas/Itest" })).body.entries.map((e: any) => e.path)).toContain(inside);
-    for (const [tool, args] of [
-      ["knowledge_read", { path: inside }],
-      ["knowledge_grep", { pattern: "alpha" }],
-    ] as const) {
-      expect(await call(idx, tool, args), `${tool} @ tier index`).toMatchObject({ isError: true, body: { error: { code: "forbidden", message: "not granted" } } });
-    }
+    // knowledge_read on a page it can already SEE (ruled 2026-09-19, PR #216
+    // judgement call B): not the bare "not granted" — a structured refusal
+    // naming the area that would unlock it, since existence is not a new leak.
+    const scopedRead = await call(idx, "knowledge_read", { path: inside });
+    expect(scopedRead).toMatchObject({
+      isError: true,
+      body: { error: { code: "forbidden", message: expect.stringContaining(AREA) }, reason: "scope_required", grantedScope: AREA },
+    });
+    // knowledge_grep is tier-gated before any single path is looked at — it
+    // is a content surface at every tier below `areas`, no exception, unchanged.
+    expect(await call(idx, "knowledge_grep", { pattern: "alpha" }), "knowledge_grep @ tier index").toMatchObject({
+      isError: true,
+      body: { error: { code: "forbidden", message: "not granted" } },
+    });
     expect((await idx.listResources()).resources).toEqual([]); // resources carry the same "titles, never content" line
     await idx.close();
 

@@ -51,7 +51,7 @@
 import { Worker } from "node:worker_threads";
 import { z } from "zod";
 import { QueryError, type QueryStore } from "@foldedspacelabs/metistry-queries";
-import { knowledgeScope, titleSql, underAreas, type KnowledgeReader, type KnowledgeScope } from "./knowledge.js";
+import { isSettledPage, knowledgeScope, scopeRequired, titleSql, underAreas, type KnowledgeReader, type KnowledgeScope } from "./knowledge.js";
 import { done, fail, type Outcome } from "./outcome.js";
 import type { AgentPrincipal, Db } from "./types.js";
 import type { VaultBridgeOptions } from "./knowledge-write.js";
@@ -245,7 +245,17 @@ async function indexEntries(deps: KnowledgeFsDeps, scope: KnowledgeScope, prefix
  * thing this insists on is a `path` it can judge.
  */
 async function listLinks(deps: KnowledgeFsDeps, scope: KnowledgeScope, path: string): Promise<Outcome> {
-  if (!scope.canRead(path)) return fail("forbidden", NOT_GRANTED, { tier: scope.tier, areas: scope.prefixes ?? [], links_for: path });
+  if (!scope.canRead(path)) {
+    // The same scope_required rule knowledge_read applies (knowledge.ts):
+    // a page's edges are content, but a caller who may already see the
+    // page's TITLE is told which grant would let it traverse them, rather
+    // than the bare string — and only for a page that is really there.
+    if (scope.canList(path) && (await isSettledPage(deps.db, path))) {
+      const sr = scopeRequired(path);
+      return fail("forbidden", sr.message, { tier: scope.tier, areas: scope.prefixes ?? [], links_for: path }, sr.expose);
+    }
+    return fail("forbidden", NOT_GRANTED, { tier: scope.tier, areas: scope.prefixes ?? [], links_for: path });
+  }
   const store = deps.queries;
   if (!store?.names().includes(KNOWLEDGE_LINKS_QUERY)) return fail("not_available", notLoaded(KNOWLEDGE_LINKS_QUERY));
   let rows: Record<string, unknown>[];

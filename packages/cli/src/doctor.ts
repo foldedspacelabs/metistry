@@ -674,7 +674,16 @@ export async function keepAwakeRow(deps: { deployment: Deployment; instanceDir: 
         };
       }
 
-      const state = parseKeepAwakeState(await readFile(statePath, "utf8").then(JSON.parse, () => undefined));
+      // every failure here is "there is no usable state file": missing,
+      // truncated mid-write, or not JSON. This row must never be `failed`, so
+      // the read cannot throw — a corrupt file reports as "nothing is holding"
+      const state = await (async () => {
+        try {
+          return parseKeepAwakeState(JSON.parse(await readFile(statePath, "utf8")));
+        } catch {
+          return undefined;
+        }
+      })();
       if (!state) {
         return {
           status: "degraded",

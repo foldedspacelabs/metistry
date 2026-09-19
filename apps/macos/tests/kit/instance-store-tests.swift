@@ -207,6 +207,32 @@ import Testing
     #expect(await console.calls.filter { $0.contains("knowledge/search") }.count == 1)
 }
 
+@MainActor
+@Test func theVaultListAndTheSearchResultsAreTwoSectionsSoOneNeverBlanksTheOther() async {
+    let console = ScriptedConsole([
+        "GET /api/knowledge/pages?limit=2&prefix=Areas%2FHealth": .bytes(Fixtures.pages),
+        "GET /api/knowledge/search?q=sleep": .bytes(Fixtures.search),
+    ])
+    let store = InstanceStore(api: ConsoleAPI(transport: console), instanceID: "i-1", defaults: scratchDefaults())
+    await store.refreshPages(prefix: "Areas/Health", limit: 2)
+
+    #expect(store.pages.state == .loaded)
+    #expect(store.pages.value?.pages.map(\.path) == ["Areas/Health/2026/taper.md", "Areas/Health/sleep.md"])
+    #expect(store.pages.value?.nextOffset == 2)  // a full window, and there is no total to ask for
+
+    // Browsing the vault and searching it are two questions: a search must
+    // not blank the list you were reading.
+    await store.search("sleep")
+    #expect(store.knowledge.value?.hits.count == 2)
+    #expect(store.pages.value?.pages.count == 2)
+
+    // …and pointing the app at a second instance drops both, like every
+    // other section — one instance's notes are not another's.
+    store.adopt(api: nil, instanceID: "i-2", defaults: scratchDefaults())
+    #expect(store.pages.isFirstLoad)
+    #expect(store.knowledge.isFirstLoad)
+}
+
 // MARK: - The two cursors, from the store's side
 
 @MainActor

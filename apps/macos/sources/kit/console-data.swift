@@ -1202,6 +1202,93 @@ public struct KnowledgePage: Codable, Sendable, Equatable {
     }
 }
 
+/// `GET /api/knowledge/pages`. The other half of the same pane, and the one
+/// that is NOT the bridge: a page LIST is derived state, so it comes from a
+/// named query over the reconciler's index.
+///
+/// **There is no total**, and asking for one would be asking the console to
+/// publish the size of what it filtered. So the end of the list is "a window
+/// shorter than `limit`" — `isLastPage` — and `nextOffset` is what to ask for
+/// when it is not.
+public struct KnowledgePageList: Codable, Sendable, Equatable {
+    public let pages: [KnowledgePageEntry]
+    /// Echoed back the way `search` echoes `q`: the filters this list is of.
+    public let area: String?
+    public let prefix: String?
+    public let limit: Int
+    public let offset: Int
+    public let asOf: String?
+
+    enum CodingKeys: String, CodingKey {
+        case pages, area, prefix, limit, offset
+        case asOf = "as_of"
+    }
+
+    public init(pages: [KnowledgePageEntry] = [], area: String? = nil, prefix: String? = nil, limit: Int = 100, offset: Int = 0, asOf: String? = nil) {
+        self.pages = pages
+        self.area = area
+        self.prefix = prefix
+        self.limit = limit
+        self.offset = offset
+        self.asOf = asOf
+    }
+
+    /// The route's own ceiling, so a client cannot ask for a page it will be
+    /// refused: out of range is a `400` naming it, never a silent clamp.
+    public static let maximumLimit = 500
+
+    /// A short window is the end of the list. A full one may or may not be —
+    /// ask, and an empty answer settles it.
+    public var isLastPage: Bool { pages.count < limit }
+    public var nextOffset: Int? { isLastPage ? nil : offset + limit }
+}
+
+public struct KnowledgePageEntry: Codable, Sendable, Equatable, Identifiable {
+    /// Vault-relative, and the row's identity. A row the scope does not cover
+    /// is dropped before it is sent, so this list is never a directory listing
+    /// of what was filtered.
+    public let path: String
+    /// DERIVED from the path, not stored: `Areas/<Name>` at any depth under
+    /// `Areas/`, the top segment elsewhere (`Journal`, `Me`, `Inbox`), and
+    /// **nil for a vault-root file** like `now.md` — which is a real answer
+    /// rather than a missing one.
+    public let area: String?
+    /// The frontmatter title, else the basename. Never empty.
+    public let title: String?
+    public let description: String?
+    /// `clean` or `dirty` — the index's own word for "edited since the last
+    /// walk". A draft and an unsettled `conflict` are not in the list at all.
+    public let status: String?
+    /// Both timestamps are text on the wire, like every other one.
+    public let modified: String?
+    public let indexedAt: String?
+
+    public var id: String { path }
+
+    enum CodingKeys: String, CodingKey {
+        case path, area, title, description, status, modified
+        case indexedAt = "indexed_at"
+    }
+
+    public init(
+        path: String,
+        area: String? = nil,
+        title: String? = nil,
+        description: String? = nil,
+        status: String? = nil,
+        modified: String? = nil,
+        indexedAt: String? = nil
+    ) {
+        self.path = path
+        self.area = area
+        self.title = title
+        self.description = description
+        self.status = status
+        self.modified = modified
+        self.indexedAt = indexedAt
+    }
+}
+
 // MARK: - The composer's menu
 
 /// `GET /api/commands` — generated from this instance's own `rules.yaml` plus

@@ -68,6 +68,10 @@ describe.skipIf(!hasDb)("the console's compute, knowledge, commands and run-deta
   // somebody else's tool call — which is the very thing the join exists to
   // prevent, so the fixture must not rely on a name nobody else guessed.
   const turnId = `itest-routes-turn-${mintToken(8)}`;
+  // Same reason, for `knowledge_files`: the index is keyed by path and shared
+  // with every other suite, so this one's fixtures live under a name nobody
+  // else can have guessed and are counted by that name alone.
+  const pageTag = `KpRoutes${mintToken(6).replaceAll(/[^A-Za-z0-9]/g, "")}`;
 
   /** Search results the fake bridge hands back — one hit inside the vault, three the route must never pass on. */
   const BRIDGE_HITS: KnowledgeSearchResult = {
@@ -183,11 +187,29 @@ describe.skipIf(!hasDb)("the console's compute, knowledge, commands and run-deta
          ($1, 'tool', 'knowledge_read',   true,   9, jsonb_build_object('turn_id', $2::text || '-other'))`,
       [MARK, turnId],
     );
+
+    // The page list's fixtures, in the reconciler's index. The last two are
+    // rows the walk would never write — `isVaultPath` excludes them — and are
+    // here precisely because the ROUTE, not the query, is what must refuse
+    // them: a row predating a narrowing, or an overlay query with a looser
+    // WHERE, is exactly this shape.
+    await pool.query(
+      `INSERT INTO knowledge_files (path, title, description, draft, status, mtime, indexed_at) VALUES
+         ($1 || '/sleep.md',        'Sleep',  'the taper', false, 'clean',    now(), now()),
+         ($1 || '/2026/taper.md',   NULL,     NULL,        false, 'dirty',    now(), now()),
+         ($1 || 'care/billing.md',  'Billing', NULL,       false, 'clean',    now(), now()),
+         ($1 || '/secret.md',       'Secret',  NULL,       true,  'clean',    now(), now()),
+         ($1 || '/torn.md',         'Torn',    NULL,       false, 'conflict', now(), now()),
+         ('.metistry/' || $2 || '.yaml', 'machinery', NULL, false, 'clean',   now(), now()),
+         ('Artifacts/' || $2 || '.pdf',  'artifact',  NULL, false, 'clean',   now(), now())`,
+      [`Areas/${pageTag}`, pageTag],
+    );
   });
 
   afterAll(async () => {
     await pool.query(`DELETE FROM runs WHERE component = $1`, [MARK]);
     await pool.query(`DELETE FROM agents WHERE id = $1`, [agentId]);
+    await pool.query(`DELETE FROM knowledge_files WHERE path LIKE $1`, [`%${pageTag}%`]);
     await new Promise<void>((r) => server.close(() => r()));
     await pool.end();
   });
@@ -207,6 +229,7 @@ describe.skipIf(!hasDb)("the console's compute, knowledge, commands and run-deta
     "POST /api/compute/providers/test",
     "GET /api/knowledge/search?q=x",
     "GET /api/knowledge/page?path=Areas/Health/sleep.md",
+    "GET /api/knowledge/pages",
     "GET /api/commands",
   ];
 
@@ -254,6 +277,7 @@ describe.skipIf(!hasDb)("the console's compute, knowledge, commands and run-deta
     expect((await get("/api/compute", auth)).status).toBe(200);
     expect((await get("/api/commands", auth)).status).toBe(200);
     expect((await get("/api/knowledge/search?q=sleep", auth)).status).toBe(200);
+    expect((await get("/api/knowledge/pages", auth)).status).toBe(200);
     expect((await get(`/api/runs/${turnRunId}`, auth)).status).toBe(200);
   });
 
@@ -422,10 +446,84 @@ describe.skipIf(!hasDb)("the console's compute, knowledge, commands and run-deta
     expect((await r.json()).error).toEqual({ code: "not_available", message: "the reconciler did not answer" });
   });
 
-  it("GET /api/knowledge/pages is a 404 that says what the read path IS — the named query does not exist yet", async () => {
-    const r = await get("/api/knowledge/pages");
+  // The third door, and the one that is NOT a proxy: a page list is derived
+  // state, so invariant 3 sends it through `seed/queries/knowledge_pages.yaml`
+  // and the route holds no SQL. The bridge is not consulted at all, which the
+  // untouched `bridgeCalls` below says out loud.
+  it("pages lists the index through the named query, with the area derived and both timestamps", async () => {
+    const before = bridgeCalls.length;
+    const r = await get(`/api/knowledge/pages?prefix=Areas/${pageTag}&limit=10`);
+    expect(r.status).toBe(200);
+    const body = await r.json();
+    expect(body.pages.map((p: any) => p.path)).toEqual([`Areas/${pageTag}/2026/taper.md`, `Areas/${pageTag}/sleep.md`]);
+    expect(body.pages[1]).toMatchObject({ area: `Areas/${pageTag}`, title: "Sleep", description: "the taper", status: "clean" });
+    expect(body.pages[0]).toMatchObject({ title: "taper", status: "dirty" }); // no frontmatter title → the basename; `dirty` = edited since the last walk
+    expect(body.pages[1].modified).toEqual(expect.any(String));
+    expect(body.pages[1].indexed_at).toEqual(expect.any(String));
+    // the filters are echoed, and there is deliberately no `total`
+    expect(body).toMatchObject({ prefix: `Areas/${pageTag}`, area: null, limit: 10, offset: 0, as_of: expect.any(String) });
+    expect(body).not.toHaveProperty("total");
+    expect(bridgeCalls.length).toBe(before); // a list never touches the vault bridge
+  });
+
+  it("pages filters by the derived area, pages with limit/offset, and never leaks a neighbouring area", async () => {
+    const byArea = await (await get(`/api/knowledge/pages?area=Areas/${pageTag}`)).json();
+    expect(byArea.pages.map((p: any) => p.path)).toEqual([`Areas/${pageTag}/2026/taper.md`, `Areas/${pageTag}/sleep.md`]);
+    // `Areas/<tag>care` is the `Health`/`Healthcare` pair: a substring filter
+    // would hand it over on both of the calls above.
+    expect(JSON.stringify(byArea)).not.toContain("billing.md");
+    expect(JSON.stringify(await (await get(`/api/knowledge/pages?prefix=Areas/${pageTag}`)).json())).not.toContain("billing.md");
+    const care = await (await get(`/api/knowledge/pages?area=Areas/${pageTag}care`)).json();
+    expect(care.pages.map((p: any) => p.path)).toEqual([`Areas/${pageTag}care/billing.md`]);
+
+    const first = await (await get(`/api/knowledge/pages?prefix=Areas/${pageTag}&limit=1`)).json();
+    const second = await (await get(`/api/knowledge/pages?prefix=Areas/${pageTag}&limit=1&offset=1`)).json();
+    expect(first.pages.map((p: any) => p.path)).toEqual([`Areas/${pageTag}/2026/taper.md`]);
+    expect(second.pages.map((p: any) => p.path)).toEqual([`Areas/${pageTag}/sleep.md`]);
+    expect((await (await get(`/api/knowledge/pages?prefix=Areas/${pageTag}&limit=1&offset=99`)).json()).pages).toEqual([]);
+  });
+
+  // The query hides them, and so does the route's own scope filter. Both,
+  // deliberately: the query is overlayable per instance (D4) and the route's
+  // filter is not.
+  it("pages never carries a draft, an unsettled conflict, or a row that is not vault CONTENT", async () => {
+    const all = JSON.stringify(await (await get(`/api/knowledge/pages?limit=500`)).json());
+    expect(all).not.toContain("secret.md"); // draft
+    expect(all).not.toContain("torn.md"); // status conflict
+    expect(all).not.toContain(".metistry/"); // indexed, and still not knowledge — `canSee`, for the owner too
+    expect(all).not.toContain("Artifacts/");
+    // …and asking for them by name is an empty list, not a refusal: a 400 on
+    // the filter would say which prefixes exist.
+    for (const qs of [`?prefix=.metistry`, `?prefix=Artifacts`, `?area=.metistry`]) {
+      const r = await get(`/api/knowledge/pages${qs}`);
+      expect(r.status, qs).toBe(200);
+      expect((await r.json()).pages, qs).toEqual([]);
+    }
+  });
+
+  it("pages refuses an out-of-range limit, a negative offset and an unusable filter — each by name", async () => {
+    for (const [qs, needle] of [
+      ["?limit=0", "between 1 and 500"],
+      ["?limit=501", "between 1 and 500"],
+      ["?limit=abc", "between 1 and 500"],
+      ["?limit=1.5", "between 1 and 500"],
+      ["?offset=-1", "non-negative integer"],
+      ["?offset=abc", "non-negative integer"],
+      [`?prefix=${"x".repeat(501)}`, "500 characters or fewer"],
+      [`?area=${"x".repeat(501)}`, "500 characters or fewer"],
+      ["?prefix=Areas%5Cx", "no backslashes"],
+      ["?area=Areas%00x", "no backslashes"],
+    ] as const) {
+      const r = await get(`/api/knowledge/pages${qs}`);
+      expect(r.status, qs).toBe(400);
+      expect((await r.json()).error.message, qs).toContain(needle);
+    }
+  });
+
+  it("an unknown verb under the prefix is a 404 naming all three doors", async () => {
+    const r = await get("/api/knowledge/links");
     expect(r.status).toBe(404);
-    expect((await r.json()).error.message).toContain("/api/knowledge/search");
+    expect((await r.json()).error.message).toContain("/api/knowledge/pages");
   });
 
   // ------------------------------------------------------------ GET /api/commands
@@ -513,6 +611,7 @@ describe.skipIf(!hasDb)("the console's compute, knowledge, commands and run-deta
     expect(tools).toContain("compute_admin:budget");
     expect(tools).toContain("knowledge:search");
     expect(tools).toContain("knowledge:page");
+    expect(tools).toContain("knowledge:pages");
     expect(rows.some((r) => r.kind === "knowledge" && r.tool === "page" && r.ok === false)).toBe(true); // the refusals are recorded too
   });
 });
@@ -558,6 +657,7 @@ describe.skipIf(!hasDb)("degrades absent: nothing configured, and every route sa
       ["/api/compute/models", "METISTRY_INSTANCE_DIR"],
       ["/api/knowledge/search?q=x", "METISTRY_RECONCILER_URL"],
       ["/api/knowledge/page?path=Areas/x.md", "METISTRY_RECONCILER_URL"],
+      ["/api/knowledge/pages", "knowledge_pages"], // no bridge to name: the list's dependency is the named query, and it says so
       ["/api/commands", "METISTRY_RULES_FILES"],
       ["/api/runs/1", "run_detail"],
     ];

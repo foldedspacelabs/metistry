@@ -27,6 +27,7 @@ import {
   labelFor,
   launchAgentsDir,
   launchdCommands,
+  loadedLabels,
   loadPlistTemplates,
   logPathFor,
   loadSupervisedTemplates,
@@ -80,7 +81,7 @@ import {
   type PgStep,
 } from "./postgres.js";
 import { assistantStateDir, sandboxParams, tmpDirOf } from "./sandbox.js";
-import { StepFailed, StepRunner } from "./steps.js";
+import { StepFailed, StepRunner, type SectionTiming } from "./steps.js";
 
 export interface UpOptions {
   productDir: string;
@@ -132,6 +133,10 @@ export interface UpResult {
   source: LockSource;
   /** every command/write, in order (dry-run prints exactly this) */
   commands: string[];
+  /** how long each `==` section took — printed, and the thing to compare across runs */
+  timings: SectionTiming[];
+  /** wall clock for the whole verb */
+  elapsedMs: number;
 }
 
 /** The instance's metistry.lock, when there is an instance dir holding one. */
@@ -366,7 +371,7 @@ export async function installLaunchd(r: StepRunner, productDir: string, le: Laun
   }
   // an install that predates the supervisor is still running the old agents:
   // boot them out ONCE, or the same services run twice
-  await bootoutRetired(r, le, deployment.shape, values.namespace?.labelSuffix);
+  await bootoutRetired(r, le, deployment.shape, values.namespace?.labelSuffix, exists);
   // …and the app may already own the one that is left. Asked BEFORE the
   // supervisor plan is written, because the answer decides whether this run
   // also writes the launcher file that agent reads.
@@ -499,24 +504,52 @@ export function renderJob(t: PlistTemplate, productDir: string, le: LaunchdEnv, 
 /**
  * Boot out the agents this shape no longer installs, and delete their
  * plists. Tolerant of every one of them being absent — a fresh install runs
- * this and nothing happens — and deliberately NOT conditional on finding
- * them: `launchctl bootout` of a label that is not loaded is the cheapest
- * possible no-op, and an `up` that only cleaned up when it noticed would
- * leave a job running on the one Mac where the notice failed.
+ * this and nothing happens.
+ *
+ * Under the launchd shape there are EIGHT of them, and on an install that
+ * migrated months ago every one is long gone: `up` was spending sixteen
+ * subprocesses (a `bootout` and an `rm` each, in series) to discover that,
+ * on every `up` and so on every `update`. So ask launchd ONCE — `launchctl
+ * list` is a single call that names every loaded label — and pair it with a
+ * plain `existsSync` for the plist file.
+ *
+ * The old unconditional behaviour is the FALLBACK, not the thing removed:
+ * when the probe cannot be run (a dry run, or `launchctl list` failing) every
+ * label is booted out exactly as before. An `up` that only cleaned up when it
+ * noticed would leave a job running on the one Mac where the notice failed,
+ * so "could not ask" has to mean "do the work", never "skip it".
  */
-export async function bootoutRetired(r: StepRunner, le: LaunchdEnv, shape: Deployment["shape"], labelSuffix: string | undefined): Promise<void> {
+export async function bootoutRetired(
+  r: StepRunner,
+  le: LaunchdEnv,
+  shape: Deployment["shape"],
+  labelSuffix: string | undefined,
+  exists: (p: string) => boolean = existsSync,
+): Promise<void> {
   const dir = launchAgentsDir(le.home);
   const retired = retiredServicesFor(shape);
   if (retired.length === 0) return;
+  const jobs = retired.map((service) => {
+    const label = labelFor(service, labelSuffix);
+    return { service, label, plist: join(dir, `${label}.plist`) };
+  });
+  // a dry run prints the whole unconditional plan: it runs no probe, and a
+  // plan that skipped what a real run might do would be a plan of a
+  // different install (the same rule `detectAppRegistrar` follows)
+  const loaded = r.dryRun ? undefined : await loadedLabels(r);
+  const todo = loaded ? jobs.filter((j) => loaded.has(j.label) || exists(j.plist)) : jobs;
+  if (todo.length === 0) {
+    r.note(`nothing to retire: launchd has none of ${retired.join(", ")} loaded, and ${dir} holds no plist for them (one \`launchctl list\`, not ${jobs.length * 2} commands)`);
+    return;
+  }
   r.note(
     shape === "launchd"
-      ? `retiring the pre-supervisor agents (${retired.join(", ")}) — they are the supervisor's children now`
-      : `retiring ${retired.join(", ")} — renamed (eventkit-helper → calendar)`,
+      ? `retiring the pre-supervisor agents (${todo.map((j) => j.service).join(", ")}) — they are the supervisor's children now`
+      : `retiring ${todo.map((j) => j.service).join(", ")} — renamed (eventkit-helper → calendar)`,
   );
-  for (const service of retired) {
-    const label = labelFor(service, labelSuffix);
-    await r.run("launchctl", ["bootout", `gui/${le.uid}/${label}`], { tolerateFailure: true, comment: "ok if not loaded" });
-    await r.run("rm", ["-f", join(dir, `${label}.plist`)], { tolerateFailure: true });
+  for (const j of todo) {
+    await r.run("launchctl", ["bootout", `gui/${le.uid}/${j.label}`], { tolerateFailure: true, comment: "ok if not loaded" });
+    await r.run("rm", ["-f", j.plist], { tolerateFailure: true });
   }
 }
 
@@ -633,8 +666,16 @@ export async function installSupervisorPlan(r: StepRunner, productDir: string, l
 
 // ---- the launchd shape's Postgres --------------------------------------------
 
-/** How long `up` waits for the freshly bootstrapped server to answer before letting doctor report it. */
-export const PG_READY_TRIES = 15;
+/**
+ * How long `up` waits for the freshly bootstrapped server to answer before
+ * letting doctor report it: the same 15-second ceiling it has always had, but
+ * asked four times a second instead of once. The interval is the whole cost
+ * of this step on a healthy install — Postgres is usually up well inside the
+ * first second, and a one-second poll rounded that up to a full second of
+ * `up` every time.
+ */
+export const PG_READY_INTERVAL_MS = 250;
+export const PG_READY_TRIES = 60;
 
 /** What `preparePostgres` needs to fetch a bundled runtime; absent = never reach the network. */
 export interface RuntimeDepsFetch {
@@ -735,13 +776,40 @@ export async function preparePostgres(
 /** After the db job is bootstrapped: wait for the socket, then create the database compose got from POSTGRES_DB. */
 export async function finishPostgres(r: StepRunner, section: PgSection, sleep: (ms: number) => Promise<void> = (ms) => new Promise((res) => setTimeout(res, ms))): Promise<void> {
   const ready = pgIsReady(section.plan);
+  const capSeconds = (PG_READY_TRIES * PG_READY_INTERVAL_MS) / 1000;
   for (let i = 1; i <= PG_READY_TRIES; i++) {
-    const res = await r.run(ready.cmd, ready.args, { tolerateFailure: true, ...(i === 1 ? { comment: `up to ${PG_READY_TRIES} tries while launchd starts the server` } : {}) });
+    const res = await r.run(ready.cmd, ready.args, { tolerateFailure: true, ...(i === 1 ? { comment: `every ${PG_READY_INTERVAL_MS}ms for up to ${capSeconds}s while launchd starts the server` } : {}) });
     if (res.code === 0) break;
-    if (i === PG_READY_TRIES) throw new StepFailed(`postgres did not answer on ${section.plan.socketDir} after ${PG_READY_TRIES} tries — log: /tmp/metistry-db.log`);
-    await sleep(1000);
+    if (i === PG_READY_TRIES) throw new StepFailed(`postgres did not answer on ${section.plan.socketDir} after ${capSeconds}s — log: /tmp/metistry-db.log`);
+    await sleep(PG_READY_INTERVAL_MS);
   }
   for (const s of planPostgresDatabase(section.plan)) await runPgStep(r, s);
+}
+
+/** `312ms`, `4.1s` — short enough to read at a glance in one line of timings. */
+export function fmtMs(ms: number): string {
+  return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
+}
+
+/**
+ * Where the time went, one line. Always printed rather than hidden behind a
+ * flag: "why was that slow?" is the first question anyone asks of `up`, and
+ * an answer you have to know to ask for is an answer nobody has.
+ */
+export function renderTimings(sections: SectionTiming[], totalMs: number): string {
+  const parts = sections.map((s) => `${s.title} ${fmtMs(s.ms)}`);
+  return `${parts.join(" · ")}${parts.length > 0 ? " — " : ""}total ${fmtMs(totalMs)}`;
+}
+
+/**
+ * The last line `up` prints: who owns the processes it just started, and the
+ * two verbs for the two things a person wants next. launchd (or compose) owns
+ * the daemon — the CLI never does, and it says so rather than leaving an
+ * operator wondering whether closing the terminal takes the install down.
+ */
+export function runningNote(shape: Deployment["shape"]): string {
+  const owner = shape === "launchd" ? "launchd" : "docker compose";
+  return `running under ${owner} — \`metistry down\` stops it, \`metistry logs <service> --follow\` tails`;
 }
 
 /** The closing doctor: printed in a dry run, executed otherwise; its verdict is the exit code. */
@@ -905,7 +973,11 @@ export async function up(opts: UpOptions): Promise<UpResult> {
 
   // doctor runs even after a failed step — its table is the diagnosis; the failure keeps the exit code
   const doctorCode = await closingDoctor(r, runDir, opts.doctorDeps, opts.doctorFn ?? doctor);
-  return { code: failure ? failure.code || 1 : doctorCode, source, commands: r.commands };
+  const timings = r.timings();
+  r.section("timings");
+  r.note(renderTimings(timings, r.elapsedMs()));
+  r.note(runningNote(deployment.shape));
+  return { code: failure ? failure.code || 1 : doctorCode, source, commands: r.commands, timings, elapsedMs: r.elapsedMs() };
 }
 
 /** A Postgres superuser password: 256 bits of randomness, alphanumeric so no conf or connection string ever needs to quote it. */

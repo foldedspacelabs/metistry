@@ -64,10 +64,16 @@ as the slice shrinks, because at 52% / stroke 8 the counter closes up below
 
 | Slice | Mark, as a fraction of the tile | Stroke, in the 64-unit grid |
 | ---: | ---: | ---: |
-| ≥ 128 px | 52% | 8 |
-| 64 px | 58% | 9 |
-| 32 px | 64% | 10 |
-| 16 px | 68% | 11 |
+| ≥ 128 px | 62% | 8 |
+| 64 px | 66% | 9 |
+| 32 px | 68% | 10 |
+| 16 px | 70% | 11 |
+
+Revised 2026-09-19: the first ramp ran 52% → 68% and left the large slices
+looking empty. The gain went almost entirely to the large end — rendering the
+two ramps side by side showed 74% at 16 px crowding the tile's corners and
+thinning the counter, so the small end barely moved. Clear space still grows
+with the icon, which is the right direction; there is just less of it.
 
 **This is why one master downsampled by `sips` is not enough.** The current
 build (`ops/release/build-app.sh:130`) generates one 1024 PNG and lets `sips`
@@ -81,7 +87,7 @@ ten `.icns` slices need per-size art. See "What the build needs" below.
 | macOS `.icns` | art **inset 9.8%** of the canvas; tile corner radius **22.4% of the tile** | mark centred, per the ramp |
 | iOS 18+ | **full bleed, no drawn radius** — the system applies the squircle | light, dark and tinted; the tinted variant carries only alpha |
 | PWA favicon / apple-touch / 512 | full bleed | per the ramp |
-| PWA **maskable** | full bleed | mark at **40%**, not 52% — everything outside the 80% safe circle can be cropped |
+| PWA **maskable** | full bleed | mark at **44%**, not 62% — everything outside the 80% safe circle can be cropped. At 44% the mark's diagonal is 0.62 of the canvas, comfortably inside the 0.80 circle |
 
 ## Clear space and minimum sizes
 
@@ -112,15 +118,15 @@ survives the placeholder it was written about. These SVGs are the source; the
 | --- | --- |
 | `mark.svg` | the mark alone, 64 grid, in `accent` |
 | `mark-template.svg` | the same in black, for a template or mask context |
-| `app-icon-1024.svg` | the macOS master, art inset on the grid, 52% / stroke 8 |
-| `app-icon-ramp-64.svg` | the 64 px slice: 58% / stroke 9 |
-| `app-icon-ramp-32.svg` | the 32 px slice: 64% / stroke 10 |
-| `app-icon-ramp-16.svg` | the 16 px slice: 68% / stroke 11 |
+| `app-icon-1024.svg` | the macOS master, art inset on the grid, 62% / stroke 8 |
+| `app-icon-ramp-64.svg` | the 64 px slice: 66% / stroke 9 |
+| `app-icon-ramp-32.svg` | the 32 px slice: 68% / stroke 10 |
+| `app-icon-ramp-16.svg` | the 16 px slice: 70% / stroke 11 |
 | `pwa-icon.svg` | the PWA icon, full bleed |
 
 The four ramp files are the reference a generator is checked against: render
 each at its own size and the output should match pixel for pixel. The maskable
-variant is the master geometry at 40% rather than 52% and needs no file of its
+variant is the master geometry at 44% rather than 62% and needs no file of its
 own.
 
 ## What the build needs — not done here
@@ -302,3 +308,14 @@ text bar. The ramp is spaced evenly *by relative luminance* rather than by eye,
 and holds the accent's hue and chroma at every step — an earlier attempt spaced
 it evenly and went grey, which is worse than a compressed ramp. **128 pairs
 pass.**
+
+
+### The window title names the product, not the section
+
+Ruled 2026-09-19. The title bar reads **Metistry** on every screen, beside the
+mark — it is the window's identity, not a breadcrumb. Which section you are in
+is already carried by the highlighted sidebar row, and a title that changes as
+you navigate spends the one persistent place the product can say its own name.
+
+A section heading inside the content pane is a separate question and is **not**
+drawn here; propose it with the Activity screen if the pane needs the hierarchy.

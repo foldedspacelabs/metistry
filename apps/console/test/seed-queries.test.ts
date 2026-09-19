@@ -33,6 +33,7 @@ const REQUIRED = [
   "board_projects",
   "rooms",
   "knowledge_pages", // GET /api/knowledge/pages — a page LIST is derived state, so invariant 3 sends it through here and the route holds no SQL of its own
+  "knowledge_page_links", // GET /api/knowledge/links — so is the link graph, which the reconciler parses out of the notes on every walk
 ];
 
 describe("seed queries", () => {
@@ -73,7 +74,7 @@ describe("seed queries", () => {
     });
     await store.loadDir(SEED_DIR);
     const routeBacked = store.names().filter((n) => store.exposure(n) === "route");
-    expect(routeBacked.sort()).toEqual(["knowledge_pages"]);
+    expect(routeBacked.sort()).toEqual(["knowledge_page_links", "knowledge_pages"]);
     for (const name of REQUIRED.filter((n) => !routeBacked.includes(n))) expect(store.exposure(name), name).toBe("generic");
   });
 });
@@ -550,5 +551,77 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
     expect((await store.run("knowledge_pages", { prefix: area, limit: 1, offset: 99 })).rows).toHaveLength(0);
 
     await pool.query(`DELETE FROM knowledge_files WHERE path LIKE $1 OR path LIKE $2`, [`%${tag}%`, `${tag}%`]);
+  });
+
+  // The link graph (docs/ops/console-api.md `GET /api/knowledge/links`). What
+  // the YAML decides: both directions in ONE list keyed by the other end,
+  // an unresolved target kept and marked rather than dropped, a draft or
+  // conflict at either end dropped rather than marked, and an order total
+  // enough that `offset` cannot repeat or skip an edge.
+  it("knowledge_page_links: both directions, drafts dropped, unresolved kept, ordered stably", async () => {
+    const tag = `Kl${Date.now()}`;
+    const area = `Areas/${tag}`;
+    const me = `${area}/sleep.md`;
+    const mk = (path: string, title: string | null, draft = false, status = "clean") =>
+      pool.query(`INSERT INTO knowledge_files (path, title, description, draft, status, mtime, indexed_at) VALUES ($1, $2, $3, $4, $5, now(), now())`, [
+        path,
+        title,
+        title ? `${title} description` : null,
+        draft,
+        status,
+      ]);
+    const link = (from: string, to: string, kind = "wikilink") =>
+      pool.query(`INSERT INTO knowledge_links (from_path, to_path, kind) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, [from, to, kind]);
+
+    await mk(me, "Sleep");
+    await mk(`${area}/taper.md`, "Taper");
+    await mk(`${area}/secret.md`, "Secret", true); // a draft: invisible at every tier
+    await mk(`${area}/torn.md`, "Torn", false, "conflict"); // unsettled: not a fact yet
+    await mk(`Journal/${tag}.md`, null); // no frontmatter title → the basename
+    // outgoing
+    await link(me, `${area}/taper.md`);
+    await link(me, `${area}/taper.md`, "embed"); // same target, second kind — a distinct edge
+    await link(me, `${area}/nowhere.md`); // unresolved: nothing lives there yet
+    await link(me, `${area}/secret.md`); // to a draft
+    // incoming
+    await link(`Journal/${tag}.md`, me);
+    await link(`${area}/torn.md`, me); // from an unsettled conflict
+    await link(`${area}/secret.md`, me); // from a draft — a backlink must not disclose it
+
+    const rows = (r: { rows: Record<string, unknown>[] }) => r.rows.map((x) => [x.direction, x.path, x.kind]);
+    const all = await store.run("knowledge_page_links", { path: me, limit: 500 });
+    expect(rows(all)).toEqual([
+      // outgoing first, then by path in BYTE order, then by kind
+      ["outgoing", `${area}/nowhere.md`, "wikilink"],
+      ["outgoing", `${area}/taper.md`, "embed"],
+      ["outgoing", `${area}/taper.md`, "wikilink"],
+      ["incoming", `Journal/${tag}.md`, "wikilink"],
+    ]);
+    // the draft and the conflict are gone from BOTH directions, and nothing
+    // in the answer says they were there
+    expect(JSON.stringify(all.rows)).not.toContain("secret.md");
+    expect(JSON.stringify(all.rows)).not.toContain("torn.md");
+    // an unresolved target is kept, marked, and titled from its own path
+    expect(all.rows[0]).toMatchObject({ resolved: false, title: "nowhere", description: null, status: null });
+    expect(all.rows[2]).toMatchObject({ resolved: true, title: "Taper", description: "Taper description", status: "clean" });
+    expect(all.rows[3]).toMatchObject({ resolved: true, title: tag }); // no frontmatter title → the basename, decided here
+
+    // offset walks that same total order — (direction, path, kind) is the
+    // table's primary key read the other way round, so no edge can tie
+    const windows = [0, 1, 2, 3, 4].map((offset) => store.run("knowledge_page_links", { path: me, limit: 1, offset }));
+    expect((await Promise.all(windows)).flatMap((w) => rows(w))).toEqual(rows(all));
+
+    // the same edges seen from the other end: `taper.md` links nowhere, and
+    // the two kinds of edge pointing AT it are two rows, not one
+    const back = await store.run("knowledge_page_links", { path: `${area}/taper.md`, limit: 500 });
+    expect(rows(back)).toEqual([
+      ["incoming", me, "embed"],
+      ["incoming", me, "wikilink"],
+    ]);
+    expect((await store.run("knowledge_page_links", { path: "", limit: 500 })).rows).toEqual([]); // blank = no page, so no links — never the whole graph
+    expect((await store.run("knowledge_page_links", { path: `${area}/no-such-note.md`, limit: 500 })).rows).toEqual([]);
+
+    await pool.query(`DELETE FROM knowledge_links WHERE from_path LIKE $1 OR to_path LIKE $1`, [`%${tag}%`]);
+    await pool.query(`DELETE FROM knowledge_files WHERE path LIKE $1`, [`%${tag}%`]);
   });
 });

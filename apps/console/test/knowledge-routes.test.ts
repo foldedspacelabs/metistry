@@ -296,3 +296,102 @@ describe("the page list is scoped to the principal that asked for it", () => {
     expect(r.body).toMatchObject({ prefix: "Areas/Finance", area: null, limit: 5, offset: 2 });
   });
 });
+
+/**
+ * `GET /api/knowledge/links` over the REAL `knowledge_page_links.yaml`, with
+ * a fake executor for the cluster — the same harness as the page list above,
+ * because the two routes filter through the same predicate and a test that
+ * proved it for one would say nothing about the other.
+ */
+async function linksRoute(scope: KnowledgeScope, rows: Record<string, unknown>[], qs = ""): Promise<{ status: number; body: any; params: unknown[] }> {
+  const params: unknown[][] = [];
+  const store = new QueryStore({
+    async query(_text, values) {
+      params.push(values);
+      return { rows };
+    },
+  });
+  store.load(await readFile(new URL("../../../seed/queries/knowledge_page_links.yaml", import.meta.url), "utf8"));
+  const c = capture();
+  const url = new URL(`http://x/api/knowledge/links${qs}`);
+  await knowledgeRoutes(new IncomingMessage(new Socket()), c.res, "GET /api/knowledge/links", url, { queries: store }, scope, async () => {});
+  return { ...c.read(), params: params[0] ?? [] };
+}
+
+describe("the link list scopes BOTH ends of every edge", () => {
+  const EDGES = [
+    { direction: "outgoing", path: "Areas/Health/taper.md", kind: "wikilink", resolved: true },
+    { direction: "outgoing", path: "Areas/Finance/tax.md", kind: "wikilink", resolved: true },
+    { direction: "outgoing", path: "Areas/Health/nowhere.md", kind: "wikilink", resolved: false },
+    { direction: "incoming", path: "Journal/2026-09-18.md", kind: "wikilink", resolved: true },
+    { direction: "incoming", path: ".metistry/compute.yaml", kind: "frontmatter", resolved: true },
+  ];
+
+  it("gives the owner every edge that is knowledge, and not the one that is not", async () => {
+    const r = await linksRoute(OWNER_SCOPE, EDGES, "?path=Areas/Health/sleep.md");
+    expect(r.status).toBe(200);
+    expect(r.params).toEqual(["Areas/Health/sleep.md", 100, 0]);
+    expect(r.body.links.map((l: any) => l.path)).toEqual([
+      "Areas/Health/taper.md",
+      "Areas/Finance/tax.md",
+      "Areas/Health/nowhere.md",
+      "Journal/2026-09-18.md",
+    ]);
+    // Rows are unprojected: `direction`, `kind` and `resolved` reach the
+    // client as the query wrote them, an overlay's own columns included.
+    expect(r.body.links[2]).toEqual({ direction: "outgoing", path: "Areas/Health/nowhere.md", kind: "wikilink", resolved: false });
+    expect(r.body).toMatchObject({ path: "Areas/Health/sleep.md", limit: 100, offset: 0, as_of: expect.any(String) });
+    expect(r.body).not.toHaveProperty("total");
+    expect(JSON.stringify(r.body)).not.toContain("metistry/"); // indexed, still not knowledge — the owner's own list loses it too
+  });
+
+  // The second end is the one a naive implementation forgets: a page inside
+  // the grant can link OUT of it, and a page outside it can link IN.
+  it("drops an edge whose other end the scope does not cover, in either direction", async () => {
+    const r = await linksRoute(grantedScope({ grants: { tier: "areas", areas: ["Areas/Health"] } }), EDGES, "?path=Areas/Health/sleep.md");
+    expect(r.status).toBe(200);
+    expect(r.body.links.map((l: any) => l.path)).toEqual(["Areas/Health/taper.md", "Areas/Health/nowhere.md"]);
+    const text = JSON.stringify(r.body);
+    for (const gone of ["Finance", "Journal", "metistry"]) expect(text, gone).not.toContain(gone);
+  });
+
+  // The first end. A path the caller may not see must not be answerable for
+  // at all — "this page has four backlinks" is a fact about a page.
+  it("answers 404 for a page the scope does not cover, in the words a missing page gets", async () => {
+    const outside = await linksRoute(grantedScope({ grants: { tier: "areas", areas: ["Areas/Health"] } }), EDGES, "?path=Areas/Finance/tax.md");
+    const machinery = await linksRoute(OWNER_SCOPE, EDGES, "?path=.metistry/compute.yaml");
+    for (const r of [outside, machinery]) {
+      expect(r.status).toBe(404);
+      expect(r.body.error.code).toBe("not_found");
+      expect(r.body.error.message).toContain("no such page");
+      expect(r.params).toEqual([]); // and the query never ran: a refusal costs the cluster nothing
+    }
+    // The same answer the page route gives, so the two cannot be compared to
+    // tell "refused" from "absent".
+    expect(outside.body).toEqual(machinery.body);
+  });
+
+  it("requires the path by name, and refuses a limit or offset out of range by name", async () => {
+    const missing = await linksRoute(OWNER_SCOPE, EDGES);
+    expect(missing.status).toBe(400);
+    expect(missing.body.error.message).toContain("path is required");
+    for (const [qs, needle] of [
+      ["?path=Areas/Health/sleep.md&limit=0", "between 1 and 500"],
+      ["?path=Areas/Health/sleep.md&limit=501", "between 1 and 500"],
+      ["?path=Areas/Health/sleep.md&offset=-1", "non-negative integer"],
+    ] as const) {
+      const r = await linksRoute(OWNER_SCOPE, EDGES, qs);
+      expect(r.status, qs).toBe(400);
+      expect(r.body.error.message, qs).toContain(needle);
+    }
+  });
+
+  it("says which file is missing when the named query is not loaded, rather than 500ing", async () => {
+    const c = capture();
+    const url = new URL("http://x/api/knowledge/links?path=Areas/Health/sleep.md");
+    await knowledgeRoutes(new IncomingMessage(new Socket()), c.res, "GET /api/knowledge/links", url, {}, OWNER_SCOPE, async () => {});
+    const r = c.read();
+    expect(r.status).toBe(503);
+    expect(r.body.error.message).toContain("knowledge_page_links.yaml");
+  });
+});

@@ -13,6 +13,8 @@ export interface StepRunnerOptions {
   out: (line: string) => void;
   exec?: Exec | undefined;
   env?: NodeJS.ProcessEnv | undefined;
+  /** test seam: the clock section timings are measured with (default `Date.now`) */
+  now?: (() => number) | undefined;
 }
 
 export class StepFailed extends Error {
@@ -24,6 +26,12 @@ export class StepFailed extends Error {
   }
 }
 
+/** One `== section` and how long the steps under it took. */
+export interface SectionTiming {
+  title: string;
+  ms: number;
+}
+
 export class StepRunner {
   readonly dryRun: boolean;
   readonly out: (line: string) => void;
@@ -31,17 +39,47 @@ export class StepRunner {
   readonly env: NodeJS.ProcessEnv;
   /** commands in the order they ran (or would have) — what the tests assert against */
   readonly commands: string[] = [];
+  /** test seam: the clock `timings()` measures with */
+  private readonly now: () => number;
+  private readonly startedAt: number;
+  private readonly sections: SectionTiming[] = [];
+  private open: { title: string; at: number } | undefined;
 
   constructor(opts: StepRunnerOptions) {
     this.dryRun = opts.dryRun;
     this.out = opts.out;
     this.exec = opts.exec ?? realExec;
     this.env = opts.env ?? process.env;
+    this.now = opts.now ?? Date.now;
+    this.startedAt = this.now();
   }
 
-  /** A heading for a phase of the plan. */
+  /** A heading for a phase of the plan. Closes the previous section's clock. */
   section(title: string): void {
+    this.closeSection();
+    this.open = { title, at: this.now() };
     this.out(`${this.dryRun ? "[dry-run] " : ""}== ${title}`);
+  }
+
+  private closeSection(): void {
+    if (!this.open) return;
+    this.sections.push({ title: this.open.title, ms: this.now() - this.open.at });
+    this.open = undefined;
+  }
+
+  /** ms since this runner was made — what a verb prints as its total. */
+  elapsedMs(): number {
+    return this.now() - this.startedAt;
+  }
+
+  /**
+   * Every section's elapsed ms, in order, closing whichever is still open.
+   * Where the time went is the first question anyone asks of a verb that
+   * felt slow, so `up` prints this rather than making it a flag to remember.
+   */
+  timings(): SectionTiming[] {
+    this.closeSection();
+    return [...this.sections];
   }
 
   /** A plain line of explanation. */

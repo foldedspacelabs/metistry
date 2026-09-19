@@ -1,4 +1,4 @@
-# `metistry` — init, connect-repo, connect, secrets, console, doctor, up, update, service control
+# `metistry` — init, connect-repo, connect, secrets, console, doctor, up, down, update, service control
 
 `packages/cli` (`@foldedspacelabs/metistry-cli`, plan §4.16: `init | doctor
 | up | update`, plus the install verbs the Mac app drives — `connect-repo`,
@@ -24,10 +24,11 @@ All of them are real.
 | `migrate-inbox [--dry-run]` | move a pre-#156 `inbox/` into the vault inbox and rewrite `inbox.path` |
 | `migrate-shape <launchd\|compose>` | move a LIVE install between the shapes, with its data: dump, stop, flip, up, restore, verify, doctor |
 | `doctor` | validate every manifest and probe every bridge, service, container, launchd job |
-| `up` | bring an install to running: containers/host jobs, then doctor |
+| `up` | bring an install to running: containers/host jobs, then doctor — and exit |
+| `down` | stop every host job and container for this instance, then confirm nothing is left running |
 | `update` | move an install forward: pull/build, migrate, restart what changed, pin, doctor |
 | `restart [<service>…]` | `launchctl kickstart -k`, or `docker compose restart`, per service |
-| `stop [<service>…]` | `launchctl bootout`, or `docker compose stop`, per service |
+| `stop [<service>…]` | `launchctl bootout`, or `docker compose stop`, per service (`down` is all of them) |
 | `start [<service>…]` | `launchctl bootstrap` + `kickstart -k`, or `docker compose start`, per service |
 | `logs <service>` | tail the job's (or supervisor child's) log file, or `docker compose logs` |
 | `import-sessions` | summarise and post this machine's Claude Code sessions |
@@ -41,6 +42,7 @@ node packages/cli/dist/main.js doctor
 node packages/cli/dist/main.js doctor --json
 node packages/cli/dist/main.js up --dry-run        # what it would do, runs nothing
 node packages/cli/dist/main.js up                  # containers + host jobs, then doctor
+node packages/cli/dist/main.js down                # stop all of it, then confirm; --dry-run, --json
 node packages/cli/dist/main.js update --dry-run
 node packages/cli/dist/main.js update              # pull, build, migrate, restart, pin
 
@@ -920,6 +922,7 @@ metistry restart [<service>…] [--json] [--dry-run]
 metistry stop    [<service>…] [--json] [--dry-run]
 metistry start   [<service>…] [--json] [--dry-run]
 metistry logs <service> [--lines N] [--follow] [--dry-run]
+metistry down [--json] [--dry-run]     # every service at once, then confirm
 ```
 
 **This is what the Mac app's menu bar calls.** Restart/stop/start/show-logs
@@ -1099,6 +1102,82 @@ prints is what a real run does.
 [dry-run] == doctor
 [dry-run] metistry doctor
 ```
+
+### Where the time goes
+
+`up` ends with a timing per `==` section and a total, because "why was that
+slow?" is the first question anyone asks of it and an answer you have to know
+to ask for is an answer nobody has:
+
+```
+== timings
+   compose 0ms · postgres 312ms · launchd 3.9s · database 260ms · doctor 1.1s — total 5.6s
+   running under launchd — `metistry down` stops it, `metistry logs <service> --follow` tails
+```
+
+Three of those numbers used to be larger for no reason a person benefited
+from, and the fixes are worth knowing about because they shape what the
+figures mean now:
+
+- **The retire step asks launchd once.** `up` boots out the agents this shape
+  no longer installs — under `launchd` that is eight pre-supervisor labels.
+  It used to run a `bootout` and an `rm` for each, in series: sixteen
+  subprocesses to discover an install that migrated months ago has none of
+  them. One `launchctl list` now answers for all eight. A `launchctl list`
+  that fails, and every `--dry-run`, still do the whole unconditional sweep:
+  "could not ask" must mean "do the work", never "skip it".
+- **Postgres is polled four times a second**, not once, with the same 15s
+  ceiling. A server that answers in 300ms no longer costs a second.
+- **doctor probes concurrently.** Its checks are independent — a bridge's
+  HTTP probe knows nothing about `launchctl print`, which knows nothing about
+  the database — so the closing table costs the *slowest* probe rather than
+  the sum of all of them. No timeout was shortened to buy that: a
+  slow-but-healthy bridge (a cold `apple-fm` helper answers its first
+  `/check` in about a second) reported as down would be a worse table.
+
+## Running: `up`, `down`, and who owns the processes
+
+**The CLI is never the daemon.** `up` hands the processes to **launchd**
+(or, under the compose shape, to **Docker**) and exits — that is the whole
+point of a supervisor that survives a closed terminal, a logout and a
+reboot. So:
+
+```sh
+metistry up      # start everything, run doctor, print, exit 0/1
+metistry down    # stop everything, confirm it is stopped, exit 0
+metistry doctor  # what is running right now, without changing anything
+```
+
+`metistry down` is `up`'s other half:
+
+| shape | what `down` does |
+| --- | --- |
+| `launchd` | `launchctl bootout` of the supervisor's agent — which takes Postgres, the console, the reconciler, the assistant and the bridges with it — and of the TCC helpers' agents |
+| `compose` | `docker compose stop` per container, plus `bootout` of the host agents |
+
+Then it **looks**: `launchctl print` for each label (nothing found = gone) and
+`docker compose ps --quiet` (empty = nothing running), and prints what it
+found. A job still loaded after its bootout is a non-zero exit, not a
+cheerful "done".
+
+**`down` stops; it never deletes.** It is `docker compose stop`, *not*
+`docker compose down`, and never `-v`. The opposite of "up" is "the processes
+are not running", not "the install is gone": Postgres's volume is the derived
+half of invariant 1, and a verb reached for daily must not be the one that
+drops it. `metistry down` takes no service names — `metistry stop <service>`
+is still the per-service verb.
+
+**If the Mac app registered the background item**, `down` boots it out for
+the rest of this login session and says so: the app starts it again at the
+next login unless it is turned off in *Metistry.app › Settings › Services ›
+"Run Metistry in the background"*. The CLI does not reach into another
+application's `SMAppService` registration — that would make it a second
+registrar for the one job (`docs/ops/deployment-shapes.md`, "Two
+registrars").
+
+**Logs live outside the CLI's lifetime too**: `/tmp/metistry-<service>.log`
+under launchd (`metistry logs <service> --follow` tails it), `docker compose
+logs` under compose.
 
 ### Linux hosts
 

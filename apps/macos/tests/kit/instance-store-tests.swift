@@ -445,7 +445,7 @@ private actor ScriptedConsole: ConsoleCallTransport {
         routes[key] = answer
     }
 
-    func call(_ method: String, _ path: String, body: Data?) async -> Result<Data, ConsoleError> {
+    func call(_ method: String, _ path: String, body: Data?, idempotencyKey: String?) async -> Result<Data, ConsoleError> {
         let key = "\(method) \(path)"
         calls.append(key)
         switch routes[key] {

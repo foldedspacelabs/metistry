@@ -187,8 +187,12 @@ curl -s -H "Authorization: Bearer $METISTRY_BRIDGE_TOKEN_RECONCILER" \
   chunks.
 - The console's named queries do not SEARCH: `seed/queries/knowledge_pages.yaml`
   lists the index (`GET /api/knowledge/pages` — a page list is derived state,
-  so invariant 3 sends it there), and a vector parameter still has no clean
-  binding in the named-query driver, so nothing in `seed/queries/` ranks.
+  so invariant 3 sends it there, and that route is the query's ONLY door: the
+  manifest declares `expose: route`, so the generic `GET
+  /api/q/knowledge_pages` answers the 404 an unknown name gets, because the
+  route is where the caller's scope is applied to every path returned), and a
+  vector parameter still has no clean binding in the named-query driver, so
+  nothing in `seed/queries/` ranks.
   Semantic search reaches agents through `knowledge_search`, the owner's own
   clients through **`GET /api/knowledge/search`** — a thin proxy onto
   `/vault/search` in a caller-chosen mode, carrying `degraded` through rather

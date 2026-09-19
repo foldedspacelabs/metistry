@@ -501,6 +501,38 @@ describe.skipIf(!hasDb)("the console's compute, knowledge, commands and run-deta
     }
   });
 
+  // The other half of "the page list is scoped": there is no second way to
+  // the same rows. `knowledge_pages.yaml` declares `expose: route`, so the
+  // generic door answers it with the refusal it gives a name it has never
+  // heard of — over a real socket, with the seed manifests actually loaded,
+  // which is the combination a unit test cannot pin.
+  it("the generic door does not serve the page list, and cannot be told apart from one that has never heard of it", async () => {
+    const closed = await get("/api/q/knowledge_pages");
+    const unknown = await get("/api/q/no_such_query_at_all");
+    expect(closed.status).toBe(404);
+    expect(unknown.status).toBe(404);
+    const [a, b] = [await closed.json(), await unknown.json()];
+    expect(a).toEqual(b);
+    expect(a).toEqual({ error: { code: "not_found", message: "not found" } });
+    // Not a 403, not a hint, and not a way to learn the index exists: the
+    // fixtures are reachable through the scoped route and nowhere else.
+    expect((await get(`/api/q/knowledge_pages?prefix=Areas/${pageTag}&limit=10`)).status).toBe(404);
+    expect(JSON.stringify(a)).not.toContain(pageTag);
+    // Including for the capture owner token, which the management gate keeps
+    // off `/api/knowledge/*` but which the generic door has always admitted:
+    // before this, that credential could read the whole unscoped index by
+    // name, from any address, while being 403 on the scoped route.
+    expect((await get("/api/q/knowledge_pages", { authorization: `Bearer ${ownerToken}` })).status).toBe(404);
+    expect((await get("/api/q/open_work?limit=1", { authorization: `Bearer ${ownerToken}` })).status).toBe(200); // that credential's reach here is unchanged, and stated in docs/ops/console-api.md
+    // …while the generic door is untouched for every query that has no route
+    // of its own — closing one door is not closing the corridor.
+    const open = await get("/api/q/open_work?limit=3");
+    expect(open.status).toBe(200);
+    expect(await open.json()).toMatchObject({ rows: expect.any(Array), as_of: expect.any(String) });
+    // and the scoped route still answers, from that same closed query
+    expect((await (await get(`/api/knowledge/pages?prefix=Areas/${pageTag}&limit=10`)).json()).pages).toHaveLength(2);
+  });
+
   it("pages refuses an out-of-range limit, a negative offset and an unusable filter — each by name", async () => {
     for (const [qs, needle] of [
       ["?limit=0", "between 1 and 500"],

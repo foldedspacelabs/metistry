@@ -717,7 +717,7 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
     return await dispatch(argv, io, notices);
   } finally {
     const noteUi = createUi({ stream: process.stderr, json, noColor: flags["no-color"] === true });
-    for (const n of notices) err(noteUi.note(n));
+    for (const n of notices) for (const l of noteUi.wrap(n).split("\n")) err(noteUi.note(l));
   }
 }
 

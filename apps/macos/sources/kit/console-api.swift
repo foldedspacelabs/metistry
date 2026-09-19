@@ -432,6 +432,24 @@ public struct ConsoleAPI: Sendable {
         ])
     }
 
+    /// `GET /api/knowledge/links` — one page's links, both directions in one
+    /// list. `direction` says which way an edge runs and `path` is always the
+    /// OTHER end, so a client filters, groups and renders one array rather
+    /// than reconciling two. An edge whose other end the caller may not see
+    /// is dropped before it is sent, and an edge to a page no note lives at
+    /// yet arrives with `resolved == false` — render it the way Obsidian
+    /// does, not as an error. A path that is refused and one that is absent
+    /// are the same `404`, exactly as on `knowledgePage`.
+    public func knowledgeLinks(path: String, limit: Int? = nil, offset: Int? = nil) async -> Result<KnowledgePageLinkList, ConsoleError> {
+        await get("/api/knowledge/links", [
+            "path": path,
+            "limit": limit.map(String.init),
+            // Offset 0 is the default and omitting it says the same thing —
+            // one spelling for "the first window" (as on `knowledgePages`).
+            "offset": (offset ?? 0) == 0 ? nil : offset.map(String.init),
+        ])
+    }
+
     // MARK: The composer's menu
 
     /// `GET /api/commands` — generated from this instance's own `rules.yaml`

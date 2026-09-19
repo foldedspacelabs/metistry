@@ -204,11 +204,27 @@ describe.skipIf(!hasDb)("the console's compute, knowledge, commands and run-deta
          ('Artifacts/' || $2 || '.pdf',  'artifact',  NULL, false, 'clean',   now(), now())`,
       [`Areas/${pageTag}`, pageTag],
     );
+
+    // The link graph over those same fixtures. Three of these five edges must
+    // not come back, and each is refused by a different part of the stack:
+    // the draft by the query, the `.metistry/` backlink by the route's scope
+    // filter, and the sibling area by a narrowed scope in the unit tests.
+    await pool.query(
+      `INSERT INTO knowledge_links (from_path, to_path, kind) VALUES
+         ($1 || '/sleep.md',       $1 || '/2026/taper.md', 'wikilink'),
+         ($1 || '/sleep.md',       $1 || '/2026/taper.md', 'embed'),
+         ($1 || '/sleep.md',       $1 || '/nowhere.md',    'wikilink'),
+         ($1 || '/sleep.md',       $1 || '/secret.md',     'wikilink'),
+         ($1 || 'care/billing.md', $1 || '/sleep.md',      'wikilink'),
+         ('.metistry/' || $2 || '.yaml', $1 || '/sleep.md', 'frontmatter')`,
+      [`Areas/${pageTag}`, pageTag],
+    );
   });
 
   afterAll(async () => {
     await pool.query(`DELETE FROM runs WHERE component = $1`, [MARK]);
     await pool.query(`DELETE FROM agents WHERE id = $1`, [agentId]);
+    await pool.query(`DELETE FROM knowledge_links WHERE from_path LIKE $1 OR to_path LIKE $1`, [`%${pageTag}%`]);
     await pool.query(`DELETE FROM knowledge_files WHERE path LIKE $1`, [`%${pageTag}%`]);
     await new Promise<void>((r) => server.close(() => r()));
     await pool.end();
@@ -230,6 +246,7 @@ describe.skipIf(!hasDb)("the console's compute, knowledge, commands and run-deta
     "GET /api/knowledge/search?q=x",
     "GET /api/knowledge/page?path=Areas/Health/sleep.md",
     "GET /api/knowledge/pages",
+    "GET /api/knowledge/links?path=Areas/Health/sleep.md",
     "GET /api/commands",
   ];
 
@@ -552,10 +569,70 @@ describe.skipIf(!hasDb)("the console's compute, knowledge, commands and run-deta
     }
   });
 
-  it("an unknown verb under the prefix is a 404 naming all three doors", async () => {
-    const r = await get("/api/knowledge/links");
+  // The fourth door: the link graph, the other half of what §6.1 sized and
+  // the last piece #206 left open. Derived state, so it is a named query and
+  // the route holds no SQL — and the bridge is not consulted, which the
+  // untouched `bridgeCalls` says out loud.
+  it("links lists both directions at a page, with the draft edge gone and the machinery backlink filtered", async () => {
+    const before = bridgeCalls.length;
+    const r = await get(`/api/knowledge/links?path=Areas/${pageTag}/sleep.md`);
+    expect(r.status).toBe(200);
+    const body = await r.json();
+    expect(body.links.map((l: any) => [l.direction, l.path, l.kind])).toEqual([
+      ["outgoing", `Areas/${pageTag}/2026/taper.md`, "embed"],
+      ["outgoing", `Areas/${pageTag}/2026/taper.md`, "wikilink"],
+      ["outgoing", `Areas/${pageTag}/nowhere.md`, "wikilink"],
+      ["incoming", `Areas/${pageTag}care/billing.md`, "wikilink"],
+    ]);
+    expect(body.links[0]).toMatchObject({ title: "taper", status: "dirty", resolved: true });
+    expect(body.links[2]).toMatchObject({ title: "nowhere", resolved: false, description: null }); // nothing lives there yet, and the row says so
+    expect(body).toMatchObject({ path: `Areas/${pageTag}/sleep.md`, limit: 100, offset: 0, as_of: expect.any(String) });
+    expect(body).not.toHaveProperty("total");
+    const text = JSON.stringify(body);
+    expect(text).not.toContain("secret.md"); // a draft, dropped by the query at either end
+    expect(text).not.toContain(".metistry/"); // an indexed backlink that is not knowledge, dropped by the route
+    expect(bridgeCalls.length).toBe(before);
+
+    // paged against the same total order, and the generic door does not
+    // serve this query either
+    const first = await (await get(`/api/knowledge/links?path=Areas/${pageTag}/sleep.md&limit=1`)).json();
+    const second = await (await get(`/api/knowledge/links?path=Areas/${pageTag}/sleep.md&limit=1&offset=1`)).json();
+    expect(first.links.map((l: any) => l.path)).toEqual([`Areas/${pageTag}/2026/taper.md`]);
+    expect(second.links.map((l: any) => [l.path, l.kind])).toEqual([[`Areas/${pageTag}/2026/taper.md`, "wikilink"]]);
+    expect((await get("/api/q/knowledge_page_links")).status).toBe(404);
+    expect(await (await get("/api/q/knowledge_page_links")).json()).toEqual(await (await get("/api/q/no_such_query_at_all")).json());
+  });
+
+  it("links refuses a path that is not knowledge with the words a missing page gets, and names a missing path", async () => {
+    // The owner may open `.metistry/compute.yaml` in a text editor; the
+    // honest answer on the KNOWLEDGE route is still "no such page", and it
+    // has to be the same answer an absent page gets.
+    const machinery = await get(`/api/knowledge/links?path=.metistry/${pageTag}.yaml`);
+    const absent = await get(`/api/knowledge/links?path=Areas/${pageTag}/no-such-note.md`);
+    expect(machinery.status).toBe(404);
+    expect((await machinery.json()).error.message).toContain("no such page");
+    // An absent page is not an error at all — it simply has no links, which
+    // is what "refused and absent are indistinguishable" costs and is worth.
+    expect(absent.status).toBe(200);
+    expect((await absent.json()).links).toEqual([]);
+    for (const [qs, needle] of [
+      ["", "path is required"],
+      [`?path=Areas/${pageTag}/sleep.md&limit=501`, "between 1 and 500"],
+      [`?path=Areas/${pageTag}/sleep.md&offset=-1`, "non-negative integer"],
+    ] as const) {
+      const r = await get(`/api/knowledge/links${qs}`);
+      expect(r.status, qs).toBe(400);
+      expect((await r.json()).error.message, qs).toContain(needle);
+    }
+  });
+
+  it("an unknown verb under the prefix is a 404 naming every door there is", async () => {
+    const r = await get("/api/knowledge/backlinks");
     expect(r.status).toBe(404);
-    expect((await r.json()).error.message).toContain("/api/knowledge/pages");
+    const message = (await r.json()).error.message;
+    for (const door of ["/api/knowledge/search", "/api/knowledge/page", "/api/knowledge/pages", "/api/knowledge/links"]) {
+      expect(message, door).toContain(door);
+    }
   });
 
   // ------------------------------------------------------------ GET /api/commands

@@ -439,7 +439,7 @@ export async function providersAdd(opts: ProvidersAddOptions): Promise<Providers
   }
 
   const { delivery } = await commit(opts, edit, `metistry compute providers add ${name} (--from ${opts.template})`);
-  const test = opts.skipTest === true || opts.dryRun === true ? undefined : await providerTest({ ...opts, name }).catch((e) => ({ name, ok: false, url: provider.base_url, detail: e instanceof Error ? e.message : String(e), models: [] }) as ProviderTestResult);
+  const test = opts.skipTest === true || opts.dryRun === true ? undefined : await providerTest({ ...opts, name }).catch((e) => ({ name, ok: false, listingOk: false, url: provider.base_url, detail: e instanceof Error ? e.message : String(e), models: [] }) as ProviderTestResult);
   return { name, provider, ...(provider.auth ? { secret: provider.auth.secret } : {}), secretStatus, ...(test ? { test } : {}), delivery };
 }
 
@@ -476,14 +476,82 @@ export async function providersRemove(opts: ComputeOptions & { name: string }): 
 
 export interface ProviderTestResult {
   name: string;
+  /** the listing succeeded, and — when `--complete` was asked — the completion did too */
   ok: boolean;
+  /** the listing alone, independent of any completion probe below it: what tells a render "the key is fine, only the probe model was wrong" apart from "the key itself was refused" */
+  listingOk: boolean;
   url: string;
   /** model ids the provider served back, capped for display */
   models: string[];
   /** one line: an HTTP status, a model count, or why it failed. Never a secret. */
   detail: string;
-  /** `--complete`: a real one-token call */
-  completion?: { ok: boolean; model: string; detail: string };
+  /** `--complete`: a real one-token call, against whichever model `chooseProbeModel` picked, and why */
+  completion?: { ok: boolean; model: string; reason: string; detail: string };
+}
+
+/**
+ * The one model per known `base_url` that this project's own docs point an
+ * operator at first — `docs/poc/poc18-bakeoff/SETUP.md` ("The bar — Sonnet
+ * via OpenRouter") and the commented `assignments.default` in
+ * `seed/compute.yaml`. Keyed by `base_url`, not by the provider's NAME in
+ * this instance's file, because `--name` can call a provider anything.
+ */
+const KNOWN_PROBE_MODELS: ReadonlyArray<{ base_url: string; model: string }> = [{ base_url: "https://openrouter.ai/api/v1", model: "anthropic/claude-sonnet-5" }];
+
+/**
+ * OpenRouter's own auto-router — a documented last resort (verified present
+ * in OpenRouter's own `/v1/models` listing, 2026-09-19) for the case the
+ * shortlist above does not cover: a provider that has answered `/models` at
+ * all has already proven it can reach OpenRouter, and `openrouter/auto`
+ * routes to whatever OpenRouter itself considers live right now.
+ */
+const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
+const OPENROUTER_FALLBACK_MODEL = "openrouter/auto";
+
+/**
+ * Which model `--complete` calls, and why. The bug this exists to fix: with
+ * nothing assigned yet, the previous rule was "the alphabetically first
+ * model in the listing" — for OpenRouter's 447+ models that is some obscure
+ * `aion-labs/…` entry with no route to a provider, a 404 that has nothing to
+ * do with whether the credential works. In order:
+ *
+ *   1. `--model <id>` — the operator's own choice, unconditionally.
+ *   2. a model already ASSIGNED to this provider in `compute.yaml` — it
+ *      proves the wiring a turn is about to depend on.
+ *   3. this provider's entry in `KNOWN_PROBE_MODELS`, when the listing
+ *      actually serves it.
+ *   4. OpenRouter's own auto-router, when this IS OpenRouter and the listing
+ *      serves it.
+ *   5. the first model the listing served — the original rule, now a last
+ *      resort rather than the only one.
+ *
+ * `undefined` only when the listing served no models and nothing above
+ * applies — there is nothing left to call.
+ */
+function chooseProbeModel(opts: { name: string; provider: Provider; compute: Compute; models: string[]; override?: string | undefined }): { model: string; reason: string } | undefined {
+  if (opts.override) return { model: opts.override, reason: "--model" };
+
+  const assignedHere: Array<{ target: string; model: string }> = [];
+  const consider = (target: string, model: string | undefined): void => {
+    if (!model || modelRefIssue(model)) return;
+    const ref = parseModelRef(model);
+    if (ref.provider === opts.name) assignedHere.push({ target, model: ref.model });
+  };
+  consider("assignments.default", opts.compute.assignments?.default.model);
+  for (const [n, a] of Object.entries(opts.compute.assignments?.tiers ?? {})) consider(`assignments.tiers.${n}`, a.model);
+  for (const [n, a] of Object.entries(opts.compute.assignments?.crews ?? {})) consider(`assignments.crews.${n}`, a.model);
+  if (assignedHere[0]) return { model: assignedHere[0].model, reason: `assigned to ${assignedHere[0].target} in compute.yaml` };
+
+  const root = apiRoot(opts.provider.base_url);
+  const known = KNOWN_PROBE_MODELS.find((k) => k.base_url === root && opts.models.includes(k.model));
+  if (known) return { model: known.model, reason: "on the bake-off's own shortlist for this provider (docs/poc/poc18-bakeoff/SETUP.md)" };
+
+  if (root === OPENROUTER_BASE_URL && opts.models.includes(OPENROUTER_FALLBACK_MODEL)) {
+    return { model: OPENROUTER_FALLBACK_MODEL, reason: "OpenRouter's own auto-router — nothing else here names a model to probe" };
+  }
+
+  const first = opts.models[0];
+  return first ? { model: first, reason: "the first model this provider's listing served" } : undefined;
 }
 
 /** The provider's block from the effective (overlaid) configuration, with the field name in the refusal when it is not there. */
@@ -519,25 +587,22 @@ async function listModelsFrom(opts: ComputeOptions, name: string, provider: Prov
   return fetchModels({ url: provider.base_url, bearer, fetchFn: opts.fetchFn, local: provider.locality === "on_machine" });
 }
 
-export async function providerTest(opts: ComputeOptions & { name: string; complete?: boolean | undefined }): Promise<ProviderTestResult> {
+export async function providerTest(opts: ComputeOptions & { name: string; complete?: boolean | undefined; model?: string | undefined }): Promise<ProviderTestResult> {
   const { provider, compute } = await providerOf(opts, opts.name);
   const probe = await listModelsFrom(opts, opts.name, provider);
-  const result: ProviderTestResult = { name: opts.name, ok: probe.ok, url: apiRoot(provider.base_url), models: probe.models.slice(0, 20), detail: probe.detail };
+  const result: ProviderTestResult = { name: opts.name, ok: probe.ok, listingOk: probe.ok, url: apiRoot(provider.base_url), models: probe.models.slice(0, 20), detail: probe.detail };
   if (!opts.complete || !probe.ok) return result;
 
   // A real one-token call: the only thing that proves the credential can
-  // actually buy a completion rather than just list a catalogue.
-  const assignedHere = [
-    compute.assignments?.default.model,
-    ...Object.values(compute.assignments?.tiers ?? {}).map((a) => a.model),
-    ...Object.values(compute.assignments?.crews ?? {}).map((a) => a.model),
-  ]
-    .filter((m): m is string => typeof m === "string" && !modelRefIssue(m))
-    .map(parseModelRef)
-    .filter((m) => m.provider === opts.name)
-    .map((m) => m.model);
-  const model = assignedHere[0] ?? probe.models[0];
-  if (!model) return { ...result, completion: { ok: false, model: "", detail: "nothing to call: this provider served no models and nothing is assigned to it" } };
+  // actually buy a completion rather than just list a catalogue. Which model
+  // is `chooseProbeModel`'s to decide — an alphabetically-first pick from a
+  // 447-model catalogue is how this probe used to 404 on a model nobody ever
+  // meant to call (`--model` overrides the choice either way).
+  const choice = chooseProbeModel({ name: opts.name, provider, compute, models: probe.models, override: opts.model });
+  if (!choice) {
+    return { ...result, ok: false, completion: { ok: false, model: "", reason: "nothing to call", detail: "this provider served no models and nothing is assigned to it" } };
+  }
+  const { model, reason } = choice;
   const url = `${apiRoot(provider.base_url)}/chat/completions`;
   const bearer = await bearerFor(opts, opts.name, provider);
   try {
@@ -547,16 +612,19 @@ export async function providerTest(opts: ComputeOptions & { name: string; comple
       body: JSON.stringify({ model, messages: [{ role: "user", content: "ping" }], max_tokens: 1, ...(provider.request ?? {}) }),
       signal: AbortSignal.timeout(60_000),
     });
-    return { ...result, ok: result.ok && res.ok, completion: { ok: res.ok, model, detail: `${url} → HTTP ${res.status}` } };
+    return { ...result, ok: result.ok && res.ok, completion: { ok: res.ok, model, reason, detail: `${url} → HTTP ${res.status}` } };
   } catch (err) {
-    return { ...result, ok: false, completion: { ok: false, model, detail: `${url} did not answer (${err instanceof Error ? err.message : String(err)})` } };
+    return { ...result, ok: false, completion: { ok: false, model, reason, detail: `${url} did not answer (${err instanceof Error ? err.message : String(err)})` } };
   }
 }
 
 export function renderProviderTest(t: ProviderTestResult): string {
-  const lines = [`${t.name}: ${t.ok ? "ok" : "FAILED"} — ${t.detail}`];
+  const lines = [`${t.name}: listing ${t.listingOk ? "ok" : "FAILED"} — ${t.detail}`];
   if (t.models.length > 0) lines.push(`  models: ${t.models.slice(0, 8).join(", ")}${t.models.length > 8 ? `, … (${t.models.length} total)` : ""}`);
-  if (t.completion) lines.push(`  completion (${t.completion.model}): ${t.completion.ok ? "ok" : "FAILED"} — ${t.completion.detail}`);
+  if (t.completion) {
+    const override = t.completion.ok ? "" : " — override with --model <id>";
+    lines.push(`  completion: ${t.completion.ok ? "ok" : "FAILED"} (model ${t.completion.model || "none"}, chosen: ${t.completion.reason}) — ${t.completion.detail}${override}`);
+  }
   return lines.join("\n");
 }
 

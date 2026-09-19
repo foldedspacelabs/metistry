@@ -21,11 +21,19 @@ assistant `absent (no engine credential)` until step 1.
 
 ```sh
 metistry compute providers add --from openrouter          # key on stdin, Keychain, user scope
-metistry compute providers test openrouter --complete
+metistry compute providers test openrouter --complete      # probes anthropic/claude-sonnet-5, the model assigned below
 metistry compute assign default openrouter/anthropic/claude-sonnet-5
 metistry compute assign deep openrouter/anthropic/claude-sonnet-5 --effort high
 metistry compute budget instance --monthly 60 --action stop
 ```
+
+`--complete` here runs before anything is assigned, so it has nothing to
+call yet from `compute.yaml` — it picks `anthropic/claude-sonnet-5` because
+that is the model this walkthrough assigns next (`docs/ops/compute.md`
+"Secrets"), not the first of OpenRouter's 400+ listed models. To probe a
+different model instead — before deciding what to assign — name it
+directly: `metistry compute providers test openrouter --complete --model
+<id>`.
 
 The seeded `default` assignment is `critical: true` (ruled 2026-09-17), so a
 tripped `critical_only` budget keeps interactive turns answering.

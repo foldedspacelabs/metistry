@@ -18,7 +18,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
-import { BRAIN_SERVER } from "./brain.js";
+import { BRAIN_SERVER, newTurnId, TURN_ID_META_KEY } from "./brain.js";
 
 /** One tool as the chat-completions wire wants it: a name, a description, and a JSON Schema for the arguments. */
 export interface ToolSpec {
@@ -83,6 +83,26 @@ export interface McpToolHostOptions {
   allow?: readonly string[] | undefined;
   /** Client identity on the wire; the assistant's NAME never appears (CLAUDE.md). */
   clientName?: string | undefined;
+  /**
+   * The correlation handle every call in this run carries. Absent = one is
+   * minted here, which is the normal case: a host is built per run
+   * (`cfg.tools(spec)` in engine-openai.ts), so "one id per reply" falls out
+   * of the object's lifetime rather than out of the model remembering to.
+   */
+  turnId?: string | undefined;
+}
+
+/**
+ * The `tools/call` params for one call: the bridge's name, the model's
+ * arguments, and the turn handle in `_meta` — the spec's carrier for request
+ * metadata, which is where it lives now that it is in no tool's schema
+ * (`packages/mcp-brain/src/turn-id.ts`).
+ *
+ * Exported because it is the whole of the wire contract worth testing: a
+ * handle that stops being sent breaks the activity feed's grouping silently.
+ */
+export function callParams(name: string, args: Record<string, unknown>, turnId: string): { name: string; arguments: Record<string, unknown>; _meta: Record<string, unknown> } {
+  return { name, arguments: args, _meta: { [TURN_ID_META_KEY]: turnId } };
 }
 
 /**
@@ -96,6 +116,8 @@ export interface McpToolHostOptions {
 export function mcpToolHost(opts: McpToolHostOptions): ToolHost {
   let client: Client | undefined;
   const allow = opts.allow ? new Set(opts.allow) : undefined;
+  // One handle for the life of this host, i.e. for this reply (above).
+  const turnId = opts.turnId ?? newTurnId();
 
   const connect = async (): Promise<Client> => {
     if (client) return client;
@@ -129,7 +151,7 @@ export function mcpToolHost(opts: McpToolHostOptions): ToolHost {
         return { text: `"${name}" is not in this run's tool list`, isError: true };
       }
       const c = await connect();
-      const r = (await c.callTool({ name: unqualify(name), arguments: args })) as {
+      const r = (await c.callTool(callParams(unqualify(name), args, turnId))) as {
         content?: { type?: string; text?: string }[];
         isError?: boolean;
       };

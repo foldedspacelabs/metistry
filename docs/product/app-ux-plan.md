@@ -524,6 +524,11 @@ enforcing the rule rather than a convention asking for it.
 
 ---
 
+> **Naming note (2026-09-18).** "Insights" is a placeholder. The owner leans
+> **"System"** for the metrics section (spend, runs, shadow agreement) and the
+> designer is ideating names too; the rename lands in one PR once settled
+> (`plan-refresh-2026-09-13.md` §4a Q2).
+
 ## 7. Open questions — answered
 
 ### Rulings — 2026-09-17

@@ -311,6 +311,13 @@ service named, the agents are acted on and the children follow them — booting
 out the supervisor takes its children down with it, and bootstrapping it
 starts them in order.
 
+`metistry down` is that "no service named" stop plus a read-only confirmation
+(`launchctl print` finds nothing, `docker compose ps` lists nothing), and is
+what `metistry up` names as its counterpart. Under the compose shape it is
+`docker compose stop`, never `docker compose down` and never `-v`: the
+containers stay, and no volume is touched (`docs/ops/cli.md`, "Running:
+`up`, `down`, and who owns the processes").
+
 The socket is in the instance's own state directory and is 0600, and the
 request is **still authenticated** with the token from `supervisor.json`
 (constant-time; a refusal says only `unauthorized`). Invariant 8: a boundary
@@ -416,7 +423,7 @@ ports:
 
 From then on the file is the record and nothing probes again — a running
 instance must never see its own ports as taken. Its presence is what
-namespaces an install; delete it (after `metistry stop`) to go back to the
+namespaces an install; delete it (after `metistry down`) to go back to the
 fixed labels and ports.
 
 | | default install | namespaced |

@@ -132,7 +132,11 @@ scope: they are all the owner's hand. Retention is unbounded: the key lives
 on the inbox row itself, and inbox rows are permanent.
 
 Without the header nothing changes: today's Shortcut and every existing
-door insert as before. An empty or oversized key is a `400`.
+door insert as before. An empty or oversized key is a `400`. `metistry
+console call --idempotency-key <key>` (`docs/ops/cli.md`) is the one client
+that sends it today — checked to the same shape client-side, so a bad key
+never reaches the wire — which is what makes a retried capture from the Mac
+app or a script safe once something calls it with the flag.
 
 `path` is relative to the instance repo root: captures live in the vault at
 `Inbox/` so Obsidian can see and edit them (`docs/ops/inbox.md`).

@@ -679,7 +679,7 @@ export async function migrateLayout(opts: MigrateLayoutOptions): Promise<Migrate
     GIT_COMMITTER_NAME: COMMIT_AUTHOR.name,
     GIT_COMMITTER_EMAIL: COMMIT_AUTHOR.email,
   };
-  const git = (args: string[], comment?: string) => r.run("git", ["-C", dir, ...args], { env: gitEnv, ...(comment ? { comment } : {}) });
+  const git = (args: string[], comment?: string, quiet = false) => r.run("git", ["-C", dir, ...args], { env: gitEnv, quiet, ...(comment ? { comment } : {}) });
   /** Read-only, so it runs in a dry run too — a plan that says `git mv` where a plain move is coming is a plan that lied. */
   const tracked = async (rel: string): Promise<boolean> => {
     const out = await r.exec("git", ["-C", dir, "ls-files", "--", rel], { env });
@@ -763,9 +763,12 @@ export async function migrateLayout(opts: MigrateLayoutOptions): Promise<Migrate
   for (const w of warnings) r.note(`warning: ${w}`);
 
   // ---- 2 + 3 + 4 + 5: the moves ------------------------------------------
+  // `quiet`: the section's table above has already shown every one of these
+  // as `from → to`, so the git invocation behind it is recorded (commands,
+  // and so --json) without printing the same move twice.
   const move = async (m: LayoutMove) => {
     if (m.to === "") {
-      if (r.action(`remove ${m.from}`)) await rm(join(dir, m.from), { recursive: true, force: true });
+      if (r.action(`remove ${m.from}`, { quiet: true })) await rm(join(dir, m.from), { recursive: true, force: true });
       return;
     }
     if (m.via === "merge") {
@@ -773,7 +776,7 @@ export async function migrateLayout(opts: MigrateLayoutOptions): Promise<Migrate
         if (NOISE.has(entry)) continue;
         await move({ from: `${m.from}/${entry}`, to: `${m.to}/${entry}` });
       }
-      if (r.action(`remove the emptied ${m.from}`)) await rm(join(dir, m.from), { recursive: true, force: true });
+      if (r.action(`remove the emptied ${m.from}`, { quiet: true })) await rm(join(dir, m.from), { recursive: true, force: true });
       return;
     }
     if (m.via === "rename") {
@@ -781,21 +784,25 @@ export async function migrateLayout(opts: MigrateLayoutOptions): Promise<Migrate
       const temp = `${m.to}${TEMP_SUFFIX}`;
       r.note(`${m.from} and ${m.to} are the same directory on a case-insensitive filesystem — renaming through ${temp}`);
       if (await tracked(m.from)) {
-        await git(["mv", m.from, temp]);
-        await git(["mv", temp, m.to]);
-      } else if (r.action(`move ${m.from} → ${temp} → ${m.to}`)) {
+        await git(["mv", m.from, temp], undefined, true);
+        await git(["mv", temp, m.to], undefined, true);
+      } else if (r.action(`move ${m.from} → ${temp} → ${m.to}`, { quiet: true })) {
         await rename(join(dir, m.from), join(dir, temp));
         await rename(join(dir, temp), join(dir, m.to));
       }
       return;
     }
-    if (await tracked(m.from)) await git(["mv", m.from, m.to]);
-    else if (r.action(`move ${m.from} → ${m.to}`)) await rename(join(dir, m.from), join(dir, m.to));
+    if (await tracked(m.from)) await git(["mv", m.from, m.to], undefined, true);
+    else if (r.action(`move ${m.from} → ${m.to}`, { quiet: true })) await rename(join(dir, m.from), join(dir, m.to));
   };
 
+  // What this section moves, as one table, before the commands that do it:
+  // a list of twenty `git mv` lines is a log, not an answer to "what is
+  // about to happen to my vault" (docs/ops/cli-style.md).
   const section = (title: string, list: LayoutMove[]) => {
     r.section(title);
     if (list.length === 0) r.note("nothing to move");
+    else r.table(["from", "to"], list.map((m) => [m.from, `${r.ui.icon("arrow")} ${m.to === "" ? r.ui.dim("removed") : m.to}${m.via ? r.ui.dim(`  (${m.via})`) : ""}`]));
     return list;
   };
 

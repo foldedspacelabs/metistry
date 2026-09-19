@@ -30,6 +30,7 @@ import { listMigrationFiles, MIGRATION_LOCK_KEY, openMigrationSession, runMigrat
 import { currentVersion, installRelease, rollbackRelease, releaseTarget, runtimePackCommit, type InstallReleaseResult } from "./release.js";
 import { installRuntimeDeps, runtimeDepsEnabled, RUNTIME_DIRNAME, type InstallRuntimeDepsResult } from "./runtime-deps.js";
 import { StepFailed, StepRunner } from "./steps.js";
+import { type Ui } from "./ui.js";
 import { closingDoctor, composeUp, COMPOSE_TIMEOUT_MS, runDirFor } from "./up.js";
 
 export interface UpdateOptions {
@@ -428,10 +429,42 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
   } catch (err) {
     if (!(err instanceof StepFailed)) throw err;
     failure = err;
-    r.out(`metistry update: ${err.message}`);
+    r.out(`${r.ui.paint("failed", `${r.ui.icon("fail")} metistry update`)}: ${err.message}`);
   }
 
   const doctorCode = await closingDoctor(r, runDir, opts.doctorDeps, opts.doctorFn ?? doctor);
   const code = failure ? failure.code || 1 : doctorCode;
+  r.out("");
+  r.out(updateSummary({ ui: r.ui, dryRun: r.dryRun, failure, code, source, version: lock?.product.version ?? releaseVersion, migrations, restarted }));
   return { code, source, runDir, commands: r.commands, ...(lock ? { lock } : {}), restarted, ...(migrations ? { migrations } : {}), ...(release ? { release } : {}), ...(runtimeDeps ? { runtimeDeps } : {}) };
+}
+
+/**
+ * The one line to read when the rest has scrolled past: did it land, on what
+ * version, and what moved. Deliberately last, after doctor's own table —
+ * this is the verdict, not a heading (docs/ops/cli-style.md).
+ */
+export function updateSummary(s: {
+  ui: Ui;
+  dryRun: boolean;
+  failure?: StepFailed | undefined;
+  code: number;
+  source: LockSource;
+  version: string;
+  migrations?: { applied: string[] } | undefined;
+  restarted: string[];
+}): string {
+  const { ui } = s;
+  if (s.dryRun) return `${ui.paint("skipped", `${ui.icon("off")} dry run`)} ${ui.dim(`— ${s.source} ${s.version}, nothing was changed`)}`;
+  const verdict = s.failure
+    ? ui.paint("failed", `${ui.icon("fail")} update failed`)
+    : s.code === 0
+      ? ui.paint("ok", `${ui.icon("ok")} update ok`)
+      : ui.paint("degraded", `${ui.icon("warn")} updated, and doctor is not happy`);
+  const parts = [
+    `${s.source} ${s.version}`,
+    s.migrations ? `${s.migrations.applied.length} migration(s) applied` : "no migrations",
+    s.restarted.length > 0 ? `${s.restarted.length} job(s) kickstarted` : "nothing kickstarted",
+  ];
+  return `${verdict} ${ui.dim(`— ${parts.join(", ")}`)}`;
 }

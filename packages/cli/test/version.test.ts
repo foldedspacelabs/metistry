@@ -88,11 +88,17 @@ describe("renderVersionInfo", () => {
       lock: { version: "0.4.0", channel: "release" },
       runtime_pack: { version: "0.4.0", commit: "91ca417cabcdef", built_at: "2026-09-10T02:41:56Z" },
     });
-    expect(text.split("\n")).toEqual(["cli: 0.4.0", "product: 0.4.0", "lock: 0.4.0 (release)", "runtime pack: 0.4.0 (commit 91ca417, built 2026-09-10T02:41:56Z)"]);
+    // aligned into two columns, keys dimmed (plain here: the suite's stdout is not a terminal)
+    expect(text.split("\n")).toEqual([
+      "cli           0.4.0",
+      "product       0.4.0",
+      "lock          0.4.0 (release)",
+      "runtime pack  0.4.0 (commit 91ca417, built 2026-09-10T02:41:56Z)",
+    ]);
   });
 
   it("just the cli line when nothing else resolved", () => {
-    expect(renderVersionInfo({ cli_version: "0.4.0" })).toBe("cli: 0.4.0");
+    expect(renderVersionInfo({ cli_version: "0.4.0" })).toBe("cli  0.4.0");
   });
 });
 
@@ -105,7 +111,7 @@ describe("metistry --version / metistry version", () => {
     const out: string[] = [];
     const code = await main(["--version", "--product-dir", await checkout("1.2.3")], { out: (l) => out.push(l) });
     expect(code).toBe(0);
-    expect(out.join("\n")).toBe(`cli: ${(await collectVersionInfo({})).cli_version}\nproduct: 1.2.3`);
+    expect(out.join("\n")).toBe(`cli      ${(await collectVersionInfo({})).cli_version}\nproduct  1.2.3`);
   });
 
   it("version --json prints one object", async () => {

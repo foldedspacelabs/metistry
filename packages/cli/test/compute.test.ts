@@ -377,7 +377,7 @@ describe("test / models list: live probes through the one seam", () => {
     expect(text).toContain("listing ok");
     expect(text).toContain("anthropic/claude-sonnet-5");
     expect(text).toContain("override with --model");
-    const completionLine = text.split("\n").find((l) => l.includes("completion:"));
+    const completionLine = text.split("\n").find((l) => l.includes("completion"));
     expect(completionLine).not.toContain("aion-labs"); // the completion probe never falls back to the alphabetically-first model again
   });
 

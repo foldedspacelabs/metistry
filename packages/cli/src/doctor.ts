@@ -56,6 +56,7 @@ import { realExec, type Exec } from "./exec.js";
 import { labelFor, loadPlistTemplates, logPathFor, parseRegistrar, registrarPhrase, SUPERVISED_SERVICES, type RegistrarFinding } from "./launchd.js";
 import { readSupervisorConfig, supervisorConfigPath, controlRequest, SUPERVISOR_SERVICE } from "./supervisor.js";
 import { applyPorts, loadNamespace, type Namespace } from "./namespace.js";
+import { defaultUi, padTo, statusName, visibleWidth, type Ui } from "./ui.js";
 
 export interface Db {
   query(text: string, values?: unknown[]): Promise<{ rows: any[] }>;
@@ -1099,18 +1100,50 @@ export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
 
 // ---- rendering ------------------------------------------------------------------
 
-export function renderTable(report: DoctorReport): string {
-  const head = ["name", "kind", "status", "ms", "remediation"];
-  const body = report.rows.map((r) => [r.name, r.kind, r.status, String(r.latency_ms), r.status === "ok" ? "" : (r.remediation ?? r.probe)]);
-  const widths = head.map((h, i) => Math.max(h.length, ...body.map((row) => (i < 4 ? (row[i] ?? "").length : 0))));
-  const line = (cells: string[]) => cells.map((c, i) => (i < 4 ? c.padEnd(widths[i] ?? 0) : c)).join("  ").trimEnd();
+/** The name column stops growing here: one 60-character launchd label must not indent every other row off the screen. */
+const NAME_WIDTH_CAP = 34; // limit: fixed — a display column, not a policy; a row wider than this simply runs on
+
+/**
+ * The report as a person reads it (docs/ops/cli-style.md): one block per
+ * kind, one icon and one colour per status, the remediation wrapped
+ * underneath the row it belongs to rather than pushed into a ragged
+ * fifth column, and the verdict last.
+ *
+ * `--json` is the machine's copy and is untouched by any of this.
+ */
+export function renderTable(report: DoctorReport, ui: Ui = defaultUi()): string {
+  const statusWidth = Math.max(0, ...report.rows.map((r) => r.status.length));
+  const out: string[] = [ui.dim(`${report.product_dir} — shape ${report.shape}, ${report.as_of}`), ""];
+
+  for (const kind of [...new Set(report.rows.map((r) => r.kind))]) {
+    const group = report.rows.filter((x) => x.kind === kind);
+    // per group, not per report: one 60-character launchd label must not
+    // push every bridge's status column halfway across the screen
+    const nameWidth = Math.min(NAME_WIDTH_CAP, Math.max(0, ...group.map((r) => r.name.length)));
+    out.push(ui.heading(kind));
+    for (const r of group) {
+      const status = padTo(ui.paint(statusName(r.status), r.status), statusWidth);
+      out.push(`  ${ui.statusIcon(r.status)} ${padTo(r.name, nameWidth)}  ${status}  ${ui.dim(`${r.latency_ms}ms`.padStart(6))}`.trimEnd());
+      // the one thing a red row is read for: what to do about it. Never on
+      // an ok row — an ok row's probe is noise between the rows that matter.
+      const detail = r.status === "ok" ? "" : (r.remediation ?? r.probe);
+      if (detail) {
+        // the arrow is a marker, not a word: it hangs in the margin and the
+        // text wraps under itself, rather than the arrow taking a line of
+        // its own when the first word is a long path
+        const lead = 6 + visibleWidth(ui.icon("arrow")) + 1;
+        const wrapped = ui.wrap(detail, { indent: lead, hanging: lead }).split("\n");
+        wrapped[0] = `      ${ui.icon("arrow")} ${(wrapped[0] ?? "").slice(lead)}`;
+        for (const l of wrapped) out.push(ui.dim(l));
+      }
+    }
+    out.push("");
+  }
+
   const counts = { ok: 0, degraded: 0, failed: 0, absent: 0 };
   for (const r of report.rows) counts[r.status]++;
-  return [
-    line(head),
-    line(widths.map((w) => "-".repeat(w))),
-    ...body.map(line),
-    "",
-    `${report.rows.length} checks: ${counts.ok} ok, ${counts.degraded} degraded, ${counts.failed} failed, ${counts.absent} absent — ${report.ok ? "healthy" : "FAILED"} (${report.product_dir}, shape ${report.shape})`,
-  ].join("\n");
+  const tally = (Object.keys(counts) as Array<keyof typeof counts>).map((k) => ui.paint(statusName(k), `${counts[k]} ${k}`)).join(", ");
+  const verdict = report.ok ? ui.paint("ok", `${ui.icon("ok")} healthy`) : ui.paint("failed", `${ui.icon("fail")} FAILED`);
+  out.push(`${report.rows.length} checks: ${tally} — ${verdict}`);
+  return out.join("\n");
 }

@@ -21,6 +21,7 @@ import { launchAgentsDir, loadPlistTemplates, loadSupervisedTemplates, parseRegi
 import { readSupervisorConfig, supervisorConfigPath, controlRequest, SUPERVISOR_SERVICE } from "./supervisor.js";
 import { loadNamespace } from "./namespace.js";
 import { StepFailed, StepRunner } from "./steps.js";
+import { defaultUi, padTo, type Ui } from "./ui.js";
 import { composeEnvArgs, instanceLock, runDirFor } from "./up.js";
 
 export type ServiceAction = "restart" | "stop" | "start";
@@ -387,26 +388,37 @@ async function confirmDown(r: StepRunner, ctx: ServiceTargetContext, acting: Ser
 }
 
 /** `metistry down`'s table: what was stopped, then what is confirmed gone. */
-export function renderDown(res: DownResult): string {
+export function renderDown(res: DownResult, ui: Ui = defaultUi()): string {
   const confirmed = res.confirmations.filter((c) => c.stopped).length;
+  const word = (c: DownConfirmation): string => (c.stopped ? "gone" : "STILL UP");
+  const wordWidth = Math.max(0, ...res.confirmations.map((c) => word(c).length));
+  const nameWidth = Math.max(0, ...res.confirmations.map((c) => c.name.length));
   return [
-    renderServiceResults(res.results),
+    renderServiceResults(res.results, ui),
     "",
-    ...res.confirmations.map((c) => `${c.stopped ? "gone" : "STILL UP"}  ${c.name}  ${c.detail}`),
+    // the half of `down` that is not a claim but a look: what `launchctl
+    // print` and `docker compose ps` answered AFTER the stop
+    ui.heading("confirmed by looking"),
+    ...res.confirmations.map((c) => {
+      const status = c.stopped ? "ok" : "failed";
+      return `  ${ui.statusIcon(status)} ${padTo(ui.paint(status, word(c)), wordWidth)}  ${padTo(c.name, nameWidth)}  ${ui.dim(c.detail)}`.trimEnd();
+    }),
     "",
-    `${confirmed}/${res.confirmations.length} confirmed stopped (shape ${res.shape})`,
-    ...(res.appRegistrarNote ? ["", res.appRegistrarNote] : []),
+    `${confirmed}/${res.confirmations.length} confirmed stopped ${ui.dim(`(shape ${res.shape})`)}`,
+    ...(res.appRegistrarNote ? ["", ui.note(res.appRegistrarNote)] : []),
   ].join("\n");
 }
 
-/** `service  action  ok  detail` — the same table shape doctor's renderTable uses. */
-export function renderServiceResults(results: ServiceResult[]): string {
-  const head = ["service", "action", "ok", "detail"];
-  const body = results.map((x) => [x.service, x.action, x.ok ? "ok" : "FAILED", x.detail]);
-  const widths = head.map((h, i) => Math.max(h.length, ...body.map((row) => (i < 3 ? (row[i] ?? "").length : 0))));
-  const line = (cells: string[]) => cells.map((c, i) => (i < 3 ? c.padEnd(widths[i] ?? 0) : c)).join("  ").trimEnd();
+/** `service  action  ok  detail` — the ui's table, the same one doctor and `deployment` are drawn with. */
+export function renderServiceResults(results: ServiceResult[], ui: Ui = defaultUi()): string {
+  const rows = results.map((x) => [x.service, x.action, ui.status(x.ok ? "ok" : "FAILED"), ui.dim(x.detail)]);
   const ok = results.filter((x) => x.ok).length;
-  return [line(head), line(widths.map((w) => "-".repeat(w))), ...body.map(line), "", `${results.length} service(s): ${ok} ok, ${results.length - ok} failed`].join("\n");
+  const failed = results.length - ok;
+  return [
+    ui.table(["service", "action", "ok", "detail"], rows),
+    "",
+    `${results.length} service(s): ${ui.paint("ok", `${ok} ok`)}, ${ui.paint(failed > 0 ? "failed" : "n/a", `${failed} failed`)}`,
+  ].join("\n");
 }
 
 export interface LogsOptions extends ServiceControlOptions {

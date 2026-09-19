@@ -20,6 +20,26 @@ export {
 export { parseDotEnv, loadDotEnv, resolveProductDir, resolveSeedDir, productVersion } from "./env.js";
 export { parseArgs, parseAuth, syncDirection, main } from "./main.js";
 export {
+  createUi,
+  configureUi,
+  defaultUi,
+  colorLevel,
+  supportsUnicode,
+  terminalWidth,
+  statusName,
+  strip,
+  padTo,
+  visibleWidth,
+  ICONS,
+  MIN_WIDTH,
+  MAX_WIDTH,
+  type Ui,
+  type Spinner,
+  type StatusName,
+  type ColorLevel,
+  type IconName,
+} from "./ui.js";
+export {
   connectRepo,
   deviceFlow,
   parseRemote,

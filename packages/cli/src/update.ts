@@ -16,6 +16,7 @@ import { existsSync } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { INSTANCE_LAYOUT, LEGACY_VAULT_DIR, detectLayout, usesCompose, type Deployment, type InstanceLayoutShape } from "@foldedspacelabs/metistry-core";
+import { writeCliShim } from "./cli-shim.js";
 import { loadDeployment } from "./deployment.js";
 import { doctor, type DoctorDeps, type DoctorReport } from "./doctor.js";
 import { productVersion } from "./env.js";
@@ -63,6 +64,8 @@ export interface UpdateOptions {
   openSession?: ((env: NodeJS.ProcessEnv) => Promise<(MigrationSession & { end(): Promise<void> }) | null>) | undefined;
   doctorFn?: ((deps: DoctorDeps) => Promise<DoctorReport>) | undefined;
   doctorDeps?: Partial<DoctorDeps> | undefined;
+  /** default true; `false` is a test seam — see `up`'s `cliShim` (cli-shim.ts). `update` writes the same shim `up` does: it shares nothing else with `up`, but a checkout that only ever runs `update` still gets one. */
+  cliShim?: boolean | undefined;
 }
 
 export interface UpdateResult {
@@ -426,6 +429,16 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
     };
     const delivery = await writeLock(r, lock, { env, platform, uid, fetchFn });
     r.note(delivery.detail);
+
+    // `update` shares no code path with `up` (it never renders a plist or
+    // touches the supervisor), so a checkout that only ever runs `update`
+    // still needs this written — but, like everything else in this block,
+    // not once a step above has failed (nothing runs "after the failure"
+    // except doctor's diagnosis, below).
+    if (opts.cliShim !== false) {
+      r.section("cli");
+      await writeCliShim(r, productDir, instanceDir.instanceDir);
+    }
   } catch (err) {
     if (!(err instanceof StepFailed)) throw err;
     failure = err;

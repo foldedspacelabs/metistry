@@ -55,6 +55,7 @@ import {
   type PlistTemplate,
   type PlistValues,
 } from "./launchd.js";
+import { writeCliShim } from "./cli-shim.js";
 import { pinTccHelpers } from "./tcc-pin.js";
 import {
   childFromRenderedPlist,
@@ -139,6 +140,8 @@ export interface UpOptions {
   /** test seam for the closing doctor run */
   doctorFn?: ((deps: DoctorDeps) => Promise<DoctorReport>) | undefined;
   doctorDeps?: Partial<DoctorDeps> | undefined;
+  /** default true; `false` is a test seam — every real `up` writes the cli shim (cli-shim.ts) */
+  cliShim?: boolean | undefined;
 }
 
 export interface UpResult {
@@ -994,6 +997,16 @@ export async function up(opts: UpOptions): Promise<UpResult> {
         r.section("database");
         await finishPostgres(r, pg);
       }
+    }
+
+    // the cli shim: independent of compose/launchd, but — like everything
+    // else in this block — NOT written once a step above has failed
+    // (nothing runs "after the failure" except doctor's diagnosis, below).
+    // Last, so it sees whatever installLaunchd's `ln -sfn` just did to the
+    // launchd shape's supervisor symlink (cli-shim.ts).
+    if (opts.cliShim !== false) {
+      r.section("cli");
+      await writeCliShim(r, opts.productDir, instanceDir.instanceDir);
     }
   } catch (err) {
     if (!(err instanceof StepFailed)) throw err;

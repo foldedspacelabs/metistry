@@ -6,7 +6,9 @@ import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { doctor, hostLocal, inboxRow, parseComposePs, parseLaunchctlPrint, probeTargetFor, renderTable, walkManifests, type Db, type DoctorRow } from "../src/doctor.js";
+import { cliRow, doctor, hostLocal, inboxRow, parseComposePs, parseLaunchctlPrint, probeTargetFor, renderTable, walkManifests, type Db, type DoctorRow } from "../src/doctor.js";
+import { cliShimPath, writeCliShim } from "../src/cli-shim.js";
+import { StepRunner } from "../src/steps.js";
 import { parseDotEnv } from "../src/env.js";
 import { BOOLEAN_FLAGS, main, parseArgs } from "../src/main.js";
 import type { Exec } from "../src/exec.js";
@@ -113,6 +115,7 @@ describe("doctor: everything healthy", () => {
       "target:tgt=ok",
       "instance:instance layout=absent", // a bare temp dir is not an instance directory
       "instance:inbox=ok",
+      "cli:cli on PATH=absent", // nothing on this fake PATH, and `metistry up` never ran here
       "db:db=ok",
       "db:migrations=ok",
       "schedule:good=absent",
@@ -161,7 +164,7 @@ describe("doctor: everything healthy", () => {
     // icon spelling depends on the terminal's locale, so nothing here
     // asserts on the glyph itself.
     expect(text.split("\n")[0]).toContain(`${productDir} — shape compose`);
-    expect(text).toMatch(/17 checks: 9 ok, 0 degraded, 0 failed, 8 absent — .*healthy/);
+    expect(text).toMatch(/18 checks: 9 ok, 0 degraded, 0 failed, 9 absent — .*healthy/);
     expect(text).toMatch(/^local-model$/m); // the kind is the heading, not a repeated column
     expect(text).toMatch(/^\s+\S+\s+local:llamaserver\s+absent\s+\d+ms$/m);
     expect(text).toMatch(/^\s+\S+\s+local:applefm\s+absent\s+\d+ms$/m);
@@ -174,7 +177,7 @@ describe("doctor: everything healthy", () => {
     expect(json).toHaveLength(1); // --json purity: nothing but the one document reaches stdout
     const parsed = JSON.parse(json.join("\n"));
     expect(parsed.ok).toBe(true);
-    expect(parsed.rows).toHaveLength(17);
+    expect(parsed.rows).toHaveLength(18);
     expect(parsed.shape).toBe("compose");
     expect(parsed.rows.every((r: DoctorRow) => typeof r.latency_ms === "number" && typeof r.probe === "string")).toBe(true);
   });
@@ -485,6 +488,63 @@ describe("doctor: the pre-#156 inbox layout (docs/ops/inbox.md)", () => {
     });
     expect(byName(report.rows).inbox).toMatchObject({ kind: "instance", status: "degraded" });
     expect(report.ok).toBe(true); // degraded never fails the exit code
+  });
+});
+
+describe("doctor: the cli shim (cli-shim.ts)", () => {
+  it("absent, and points at the exact line to link it, once `metistry up` has written the shim", async () => {
+    const productDir = await mkdtemp(join(tmpdir(), "metistry-doctor-cli-"));
+    const r = new StepRunner({ dryRun: false, out: () => {} });
+    await writeCliShim(r, productDir, undefined);
+    const shim = cliShimPath(productDir, undefined);
+
+    const row = await cliRow(productDir, { PATH: "/nonexistent" });
+    expect(row).toMatchObject({ name: "cli on PATH", kind: "cli", status: "absent" });
+    expect(row.remediation).toBe(`ln -s ${shim} ~/.local/bin/metistry  (or add its directory to PATH)`);
+    expect(row.meta).toMatchObject({ shim });
+  });
+
+  it("absent, and says `metistry up` writes one, before it ever has", async () => {
+    const productDir = await mkdtemp(join(tmpdir(), "metistry-doctor-cli-"));
+    const row = await cliRow(productDir, { PATH: "/nonexistent" });
+    expect(row.status).toBe("absent");
+    expect(row.remediation).toMatch(/metistry up. writes one/);
+  });
+
+  it("ok, and says where, once something answering to `metistry` is actually on PATH", async () => {
+    const productDir = await mkdtemp(join(tmpdir(), "metistry-doctor-cli-"));
+    const bin = await mkdtemp(join(tmpdir(), "metistry-doctor-cli-bin-"));
+    await writeFile(join(bin, "metistry"), "#!/bin/sh\n");
+    const row = await cliRow(productDir, { PATH: bin });
+    expect(row).toMatchObject({ name: "cli on PATH", kind: "cli", status: "ok" });
+    expect(row.meta).toMatchObject({ path: join(bin, "metistry") });
+  });
+
+  it("ok via ~/.local/bin even when it is not on PATH", async () => {
+    const productDir = await mkdtemp(join(tmpdir(), "metistry-doctor-cli-"));
+    const home = await mkdtemp(join(tmpdir(), "metistry-doctor-cli-home-"));
+    await mkdir(join(home, ".local", "bin"), { recursive: true });
+    await writeFile(join(home, ".local", "bin", "metistry"), "#!/bin/sh\n");
+    const row = await cliRow(productDir, { PATH: "/nonexistent", HOME: home });
+    expect(row.status).toBe("ok");
+    expect(row.meta).toMatchObject({ path: join(home, ".local", "bin", "metistry") });
+  });
+
+  it("doctor() reports it at the instance dir, matching where `metistry up` would have written the shim", async () => {
+    const productDir = await checkout();
+    const instanceDir = await mkdtemp(join(tmpdir(), "metistry-doctor-cli-instance-"));
+    const report = await doctor({
+      productDir,
+      env: { ...env, METISTRY_INSTANCE_DIR: instanceDir },
+      fetchFn: fakeFetch({ "7901/check": res(200, checkBody("ok")), "/health": res(200), "/api/status": res(401) }),
+      db: null,
+      exec: fakeExec({ docker: { code: 127 } }),
+      platform: "linux",
+    });
+    const row = byName(report.rows)["cli on PATH"];
+    expect(row).toMatchObject({ kind: "cli", status: "absent" });
+    expect(row.meta).toMatchObject({ shim: cliShimPath(productDir, instanceDir) });
+    expect(report.ok).toBe(true); // absent never fails the exit code
   });
 });
 

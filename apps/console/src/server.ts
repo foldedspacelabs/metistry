@@ -45,7 +45,7 @@ import { applyImprovement } from "./prompt-overlay.js";
 import { crewDispatcher, type CrewRegistry } from "./crews.js";
 import { runAction, type ActionServices } from "./actions.js";
 import { computeRoutes, isComputeRoute, type ComputeAdmin } from "./compute-routes.js";
-import { isKnowledgeRoute, knowledgeRoutes, OWNER_SCOPE, type KnowledgeSearcher } from "./knowledge-routes.js";
+import { grantedScope, isKnowledgeRoute, knowledgeRoutes, NO_SCOPE, OWNER_SCOPE, type KnowledgeScope, type KnowledgeSearcher } from "./knowledge-routes.js";
 import { agentList, commandList } from "./commands.js";
 import { createRequire } from "node:module";
 
@@ -148,6 +148,31 @@ function isUser(auth: Auth): boolean {
   return auth?.kind === "session" || auth?.kind === "local_owner";
 }
 
+/**
+ * What this credential may see of the vault, for `/api/knowledge/*`.
+ *
+ * The `user` principal — a passkey session or the local owner token, the
+ * same person either way — gets their own vault. A principal carrying
+ * grants gets exactly what those grants say, through the one derivation
+ * (`grantedScope`, which reproduces `mcp-brain`'s rule for the MCP mount).
+ * Anything else gets nothing: a capture owner token is not the owner's read
+ * path, and a scope function that falls back to "everything" when it does
+ * not recognise a credential is a hole waiting for the next credential
+ * class to be added.
+ *
+ * The agent branch is not reachable from this server today and is not a
+ * stub: agent bearers stop at the uniform 403 above (CRIT-7) and reach
+ * knowledge under their grants on `/mcp`. It is here because the derivation
+ * is the thing that must be right — the day a narrower console principal is
+ * minted, the scope it gets is this function's answer and not a new opinion
+ * formed at the call site.
+ */
+function knowledgeScopeOf(auth: Auth): KnowledgeScope {
+  if (isUser(auth)) return OWNER_SCOPE;
+  if (auth?.kind === "agent") return grantedScope(auth.agent);
+  return NO_SCOPE;
+}
+
 // One shape for every per-agent verb so the management gate and the handler
 // cannot drift apart. Ids are slugs; anything else falls through to 404.
 const AGENT_ROUTE = /^(PUT|POST) \/api\/agents\/([a-z][a-z0-9-]{0,39})\/(grants|projects|autonomy|revoke|rotate|approve)$/;
@@ -246,6 +271,34 @@ export function suggestedWorkOf(row: { kind?: unknown; payload?: unknown }): { t
   const kind = s.kind === "review" ? ("review" as const) : s.kind === "task" || s.kind === undefined ? undefined : null;
   if (kind === null) return undefined; // an unknown kind is a refusal, never a silent fallback to `task`
   return { title, ...(project ? { project } : {}), ...(kind ? { kind } : {}) };
+}
+
+/**
+ * `GET /api/q/<name>` — the generic door onto invariant 3's read path. Any
+ * query whose manifest says `expose: generic` (the default), by name, with
+ * its declared params and nothing else.
+ *
+ * **And it is the only door a query gets, unless the manifest says
+ * otherwise.** A query marked `expose: route` is served by an endpoint of
+ * its own that does something this one cannot — `knowledge_pages` filters
+ * every row through the caller's scope — so answering it here would be that
+ * filter undone rather than a convenience (ruled 2026-09-19: one endpoint
+ * per necessary operation). The refusal is the UNKNOWN-QUERY refusal, byte
+ * for byte: same code, same status, same absent message, so this door never
+ * tells a caller which route-only queries exist. Which names those are is
+ * read off the manifests through the store (`exposure`) and never matched
+ * against a list kept here, which could drift from the files.
+ */
+export async function namedQueryDoor(res: ServerResponse, queries: QueryStore, name: string, params: Record<string, string>): Promise<void> {
+  if (queries.exposure(name) !== "generic") return sendError(res, "not_found");
+  try {
+    return sendJson(res, 200, await queries.run(name, params));
+  } catch (err) {
+    if (err instanceof QueryError) {
+      return sendError(res, err.code === "unknown_query" ? "not_found" : "invalid_request");
+    }
+    throw err;
+  }
 }
 
 export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Server {
@@ -584,16 +637,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     }
 
     if (req.method === "GET" && url.pathname.startsWith("/api/q/")) {
-      const name = url.pathname.slice("/api/q/".length);
-      try {
-        const result = await queries.run(name, Object.fromEntries(url.searchParams));
-        return sendJson(res, 200, result);
-      } catch (err) {
-        if (err instanceof QueryError) {
-          return sendError(res, err.code === "unknown_query" ? "not_found" : "invalid_request");
-        }
-        throw err;
-      }
+      return namedQueryDoor(res, queries, url.pathname.slice("/api/q/".length), Object.fromEntries(url.searchParams));
     }
 
     if (key === "GET /api/messages") {
@@ -803,11 +847,16 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     }
 
     // ----- knowledge: the owner's read path into their own vault -----
-    // OWNER_SCOPE is "every vault path", which is not "every path": the
-    // route still refuses `.metistry/`, `Artifacts/` and the root CLAUDE.md,
-    // because the bridge underneath it does not (knowledge-routes.ts). The
-    // page LIST gets the SAME QueryStore every other read goes through —
-    // invariant 3 has one read path into derived state, not one per surface.
+    // The scope is DERIVED from the credential (`knowledgeScopeOf`), never a
+    // constant at the call site: the routes' filter is only as honest as the
+    // scope handed to it, and a literal here is a filter that cannot be
+    // narrowed without editing this line. For the owner it comes to "every
+    // vault path", which is not "every path" — the route still refuses
+    // `.metistry/`, `Artifacts/` and the root CLAUDE.md, because the bridge
+    // underneath it does not (knowledge-routes.ts). The page LIST gets the
+    // SAME QueryStore every other read goes through — invariant 3 has one
+    // read path into derived state, not one per surface, and no second,
+    // unscoped door onto it (`knowledge_pages.yaml` is `expose: route`).
     if (isKnowledgeRoute(url.pathname)) {
       return knowledgeRoutes(
         req,
@@ -815,7 +864,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         key,
         url,
         { ...(cfg.searchKnowledge ? { search: cfg.searchKnowledge } : {}), ...(cfg.vault ? { vault: cfg.vault } : {}), queries },
-        OWNER_SCOPE,
+        knowledgeScopeOf(auth),
         audit,
       );
     }

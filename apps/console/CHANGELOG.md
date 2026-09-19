@@ -1,5 +1,157 @@
 # @metistry-apps/console
 
+## 0.9.1
+
+### Patch Changes
+
+- 05e2e5b: **The vault's page list, through a named query — the third knowledge door,
+  and the only one that is not a proxy.** `GET /api/knowledge/pages?area=&prefix=&limit=&offset=`,
+  which #197 deferred because `seed/queries/` carried nothing to run. No
+  migration: `0009_brain.sql` already added `title`, `description` and `draft`,
+  and `0001` has `path`, `mtime`, `status`.
+  
+  **Which door a thing comes out of is settled by the schema, not by taste.** A
+  page's bytes and a search ranking are not derived state — there is no column
+  holding a note body — so those go to the reconciler's bridge. A page LIST *is*
+  derived: `knowledge_files` is the reconciler's own index, rebuilt from the
+  vault by a walk. So invariant 3 sends it through
+  `seed/queries/knowledge_pages.yaml`, executed by `packages/queries`, and the
+  route holds **no SQL of its own** — one that reached for `pool.query` would be
+  a second read path into state.
+  
+  **Two filters that mean what they mean everywhere else.** There is no area
+  column, and there did not need to be: everywhere in the system an "area" is a
+  vault prefix (`Areas/Fsl`, which the agent registry validates and `underAreas`
+  matches), so `area` is derived — the first two segments under `Areas/` at any
+  depth, the top segment elsewhere, and `null` for a vault-root file like
+  `now.md`, which is an answer rather than a gap. `prefix` is **segment-wise**,
+  the same semantics an area grant has: `Areas/Health` covers `Areas/Health/…`
+  and never `Areas/Healthcare/…`, because a substring match is how a prefix
+  filter leaks. Ordered by `path`, which is the primary key, so `offset` walks a
+  total order and no row ties or jumps between windows.
+  
+  **What no parameter can turn on.** Drafts are excluded by the same clause
+  `mcp-brain` applies at every tier, so the owner's list and an agent's index
+  cannot disagree about what a draft is; an unsettled `conflict` row is excluded
+  because its title and mtime are not facts yet. And the route's own scope
+  filter runs over the query's rows — the same `canSee` the search and page
+  routes use — so a row in the index that is not vault CONTENT never reaches a
+  client, the owner's included. The query is overlayable per instance (D4); the
+  filter is not, which is why both hold the line. A row whose `path` is not a
+  string is dropped rather than passed: a list entry whose scope cannot be
+  decided is not a list entry.
+  
+  **There is no `total`, on purpose.** A count over the unscoped filter is
+  precisely the "directory listing of what was filtered" the knowledge routes
+  refuse to publish — a narrowed principal would learn how many pages it cannot
+  see. Callers page until a window comes back shorter than `limit`. For the same
+  reason a filter pointing outside the scope answers an empty `200` rather than
+  a `400`: refusing `prefix=.metistry` by name would say which prefixes exist.
+  Only the filter's shape is validated.
+  
+  MetistryKit gains the matching `knowledgePages` method, the
+  `KnowledgePageList` / `KnowledgePageEntry` shapes and a `pages` store section
+  beside `knowledge` — two sections, because browsing the vault and searching it
+  are two questions and a search must not blank the list you were reading.
+  
+  The list is ordered by `path COLLATE "C"` — byte order, explicitly, rather
+  than the database's own locale. A glibc locale collation ignores punctuation
+  at the primary level, so `Areas/Health/sleep.md` sorts before
+  `Areas/Healthcare/…` on one cluster and after it on another: same rows, same
+  query, two different windows, and a client paging with `offset` would see a
+  page twice or not at all depending on which machine the database was
+  initialised on. CI (Linux) and the owner's Mac disagreeing is how it was
+  found.
+- dc4ce91: **The vault's link graph, through a named query — the fourth knowledge door
+  and the last piece §6.1 left open.** `GET
+  /api/knowledge/links?path=&limit=&offset=`, over
+  `seed/queries/knowledge_page_links.yaml`. No migration: `0001_init.sql` has
+  `knowledge_links (from_path, to_path, kind)` with the primary key on all
+  three and an index on `to_path`, so both directions are one indexed lookup.
+  The graph is derived state — the reconciler parses it out of the notes on
+  every walk and re-resolves a note's edges whenever the note or the path set
+  moves — so invariant 3 sends it through `packages/queries` and the route
+  holds no SQL of its own.
+  
+  **One list, keyed by the other end.** `direction` is a column (`outgoing` =
+  this page links there; `incoming` = that page links here) and `path` is
+  always the far side of the edge. That is not a presentation choice: it is
+  what lets one predicate decide every row. Two arrays would be two chances to
+  filter them unevenly, and the filter is the point — **both ends are scoped**.
+  The `path` parameter is checked before anything runs (a path the caller may
+  not see gets the `404` a missing page gets: "this page has four backlinks" is
+  a fact about a page), and every row goes through the same `canSee`. A page
+  inside a grant that links *out* of it, and a page outside a grant that links
+  *in*, both come back dropped rather than listed.
+  
+  **Never in the list:** an edge whose other end is a draft or an unsettled
+  `conflict`, at either end and at every tier — the same rule the page list
+  applies, so a draft cannot be discovered through the graph after being hidden
+  from the list. Dropped rather than blanked, because a row saying "there is
+  something here you may not see" is the disclosure the rule exists to prevent.
+  **An unresolved wikilink stays**, marked `resolved: false` with a title
+  derived from its own path: a note not written yet is how a vault gets
+  written, and Obsidian renders it rather than hiding it.
+  
+  Ordered outgoing first, then by path in byte order (`COLLATE "C"`), then by
+  `kind` — the link table's primary key read the other way round, so the order
+  is total and `limit`/`offset` cannot repeat or skip an edge. The same target
+  reached as a wikilink and as an embed is **two edges**, which is why the
+  client's row identity is the triple and not the path. No `total`, for the
+  page list's reason. The query is `expose: route`, so `/api/q/knowledge_page_links`
+  answers the `404` an unknown name gets.
+  
+  MetistryKit gains `knowledgeLinks(path:limit:offset:)`, the
+  `KnowledgePageLinkList` / `KnowledgePageLink` shapes with `outgoing` and
+  `incoming` as views of the one list, and `isLastPage`/`nextOffset` beside the
+  page list's.
+- 6b3d645: **One endpoint per necessary operation: the generic door closes over
+  route-backed queries, and the page list's scope comes from the credential.**
+  `GET /api/knowledge/pages` filters every row through `canSee` — and
+  `GET /api/q/knowledge_pages` served the same rows with no filter at all, to
+  anyone who could reach the generic door. That included the capture owner
+  token, which is a `403` on `/api/knowledge/*` and has always been admitted on
+  `/api/q/<name>`: a credential that may not use the scoped route could read the
+  whole unscoped vault index by name, from any address. A filter with a second
+  way in is not a filter.
+  
+  **The close is a manifest field, not a list in a server** (invariant 5).
+  `packages/queries` gains one optional key on a query manifest — `expose:
+  generic | route`, defaulting to `generic`, so every query written before this
+  means exactly what it meant — and `QueryStore.exposure(name)` reads it back.
+  `knowledge_pages.yaml` declares `expose: route`; `GET /api/q/<name>` asks the
+  store and refuses anything that is not `generic` with the **unknown-query
+  refusal, byte for byte**: same code, same status, same absent message, so the
+  door is not an oracle for which route-only queries a build has. An unknown
+  value in the field is a load-time `invalid_spec`, never a silent fall back to
+  the permissive default. The dedicated route still runs the query through the
+  same `QueryStore` — the door closed, not the read path.
+  
+  **The scope is now derived from the principal.** The `knowledgeRoutes` call
+  site passed the constant `OWNER_SCOPE`; it passes `knowledgeScopeOf(auth)` —
+  session / local owner to the whole vault, a principal carrying grants to
+  `grantedScope`, anything else to nothing. `grantedScope` reproduces
+  `mcp-brain`'s `knowledgeScope(principal).canRead` (`tier === "areas" &&
+  underAreas(path, areas)`, against that package's own `underAreas`) rather than
+  renaming its fields: that shape's `prefixes` is `null` for tiers `none` and
+  `index`, meaning "no restriction on the TITLES those tiers browse", and `null`
+  here means every vault path's CONTENT — the rename would have handed the two
+  tiers that may not read a page the owner's own scope. Agent bearers keep their
+  uniform `403` on `/api/knowledge/*` and reach knowledge on `/mcp`, so the
+  grant path is exercised by tests today; it is real code so that the filter a
+  narrower console principal needs is not invented at a call site later.
+- Updated dependencies [1155dd9]
+- Updated dependencies [847a5ba]
+- Updated dependencies [6b3d645]
+  - @foldedspacelabs/metistry-cli@0.9.1
+  - @foldedspacelabs/metistry-queries@0.9.1
+  - @foldedspacelabs/metistry-mcp-brain@0.9.1
+  - @metistry-apps/collectors@0.9.1
+  - @foldedspacelabs/metistry-artifacts@0.9.1
+  - @foldedspacelabs/metistry-core@0.9.1
+  - @foldedspacelabs/metistry-tasks@0.9.1
+  - @metistry-apps/routines@0.9.1
+
 ## 0.9.0
 
 ### Minor Changes

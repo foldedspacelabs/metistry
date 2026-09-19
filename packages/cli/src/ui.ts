@@ -178,8 +178,8 @@ export function supportsUnicode(env: NodeJS.ProcessEnv = process.env): boolean {
 }
 
 /** Prose is wrapped here; narrower than 60 is unreadable, wider than 100 is a wall. */
-export const MIN_WIDTH = 60;
-export const MAX_WIDTH = 100;
+export const MIN_WIDTH = 60; // limit: fixed — typography, not policy: a terminal narrower than this is not made readable by honouring it
+export const MAX_WIDTH = 100; // limit: fixed — typography, not policy: a 200-column terminal wants a column of prose, not a 200-character line
 
 export function terminalWidth(opts: CreateUiOptions = {}): number {
   const env = opts.env ?? process.env;

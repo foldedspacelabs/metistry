@@ -1101,7 +1101,7 @@ export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
 // ---- rendering ------------------------------------------------------------------
 
 /** The name column stops growing here: one 60-character launchd label must not indent every other row off the screen. */
-const NAME_WIDTH_CAP = 34;
+const NAME_WIDTH_CAP = 34; // limit: fixed — a display column, not a policy; a row wider than this simply runs on
 
 /**
  * The report as a person reads it (docs/ops/cli-style.md): one block per

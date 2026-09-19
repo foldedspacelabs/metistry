@@ -85,6 +85,22 @@ Compute pane having to parse a trailing object out of a stream of prose
 (`docs/ops/mac-app.md`); without `--json` the same notes print to stdout
 inline, exactly as before.
 
+## What it looks like
+
+The presentation layer is `packages/cli/src/ui.ts` and its rules are
+`docs/ops/cli-style.md`: colour only when stdout is a terminal that wants it
+(`NO_COLOR`, `TERM=dumb`, `--no-color` and `--json` each turn it off;
+`FORCE_COLOR` turns it on for a pipe that really is one), one icon and one
+colour per status from a closed vocabulary, `[ok] [x] [!]` where the locale
+is not UTF-8, secondary text dimmed, prose wrapped at the terminal width
+clamped to [60, 100], and a spinner only on a TTY.
+
+Two consequences worth knowing before editing a verb: **colour never reaches
+a `--json` document** (`createUi({ json: true })` is the enforcement, not a
+convention), and **the status word is always spelled out** beside its icon,
+so nothing is distinguished by hue alone. Render functions take a `Ui` as
+their last argument; `main()` configures the process's one from the flags.
+
 ## `identity`, `version`, `deployment`, `console whoami`: what the app reads instead of the files
 
 Five small, read-mostly verbs exist so the Mac app stops parsing

@@ -1,5 +1,5 @@
 // GENERATED — do not edit.
-// Source: docs/product/design/tokens.json (v2.0.0, 2026-09-19)
+// Source: docs/product/design/tokens.json (v2.1.0, 2026-09-19)
 // Rebuild: node ops/scripts/build-design-tokens.mjs   (--check fails on drift)
 //
 // The design system's semantic roles, for SwiftUI. No token names a hue, a
@@ -56,11 +56,15 @@ public enum MetistryColorRole: String, CaseIterable, Sendable {
     case presenceBlockedQuiet = "presence-blocked-quiet"
     case destructive = "destructive"
     case onDestructive = "on-destructive"
+    case affirmative = "affirmative"
+    case onAffirmative = "on-affirmative"
     case chart1 = "chart-1"
     case chart2 = "chart-2"
     case chart3 = "chart-3"
     case focusRing = "focus-ring"
     case scrim = "scrim"
+    case chart4 = "chart-4"
+    case chart5 = "chart-5"
 }
 
 public extension MetistryColorRole {
@@ -108,11 +112,15 @@ public extension MetistryColorRole {
         case .presenceBlockedQuiet: return dark ? (0.1922, 0.1922, 0.2667, 1.0) : (0.9059, 0.8824, 0.9373, 1.0)
         case .destructive: return dark ? (0.5608, 0.1961, 0.1725, 1.0) : (0.7020, 0.1490, 0.1176, 1.0)
         case .onDestructive: return dark ? (1.0000, 0.9255, 0.9216, 1.0) : (1.0000, 1.0000, 1.0000, 1.0)
-        case .chart1: return dark ? (0.2471, 0.6039, 0.6588, 1.0) : (0.0392, 0.2471, 0.2863, 1.0)
-        case .chart2: return dark ? (0.4314, 0.7882, 0.8392, 1.0) : (0.0706, 0.3725, 0.4196, 1.0)
-        case .chart3: return dark ? (0.6471, 0.8863, 0.9216, 1.0) : (0.1569, 0.4784, 0.5294, 1.0)
+        case .affirmative: return dark ? (0.2824, 0.7216, 0.4824, 1.0) : (0.1098, 0.4196, 0.2588, 1.0)
+        case .onAffirmative: return dark ? (0.0157, 0.0902, 0.0510, 1.0) : (1.0000, 1.0000, 1.0000, 1.0)
+        case .chart1: return dark ? (0.1059, 0.4588, 0.5176, 1.0) : (0.0392, 0.1961, 0.2235, 1.0)
+        case .chart2: return dark ? (0.1725, 0.6471, 0.7216, 1.0) : (0.0784, 0.3608, 0.4039, 1.0)
+        case .chart3: return dark ? (0.4000, 0.7686, 0.8275, 1.0) : (0.1176, 0.4667, 0.5176, 1.0)
         case .focusRing: return dark ? (0.4314, 0.7882, 0.8392, 1.0) : (0.0706, 0.3725, 0.4196, 1.0)
         case .scrim: return dark ? (0.0000, 0.0000, 0.0000, 0.5500) : (0.1020, 0.0941, 0.0824, 0.3400)
+        case .chart4: return dark ? (0.6667, 0.8510, 0.8824, 1.0) : (0.1647, 0.5451, 0.6039, 1.0)
+        case .chart5: return dark ? (0.8471, 0.9176, 0.9294, 1.0) : (0.2157, 0.6078, 0.6706, 1.0)
         }
     }
 
@@ -164,11 +172,15 @@ public extension MetistryColorRole {
         case .presenceBlockedQuiet: return "the tinted fill behind a blocked presence chip"
         case .destructive: return "the fill of a destructive control — Decline, Revoke, Rotate. A fill, not a foreground: failed is the foreground role"
         case .onDestructive: return "text and glyphs on a destructive fill"
-        case .chart1: return "sequential ramp step 1 of 3, one hue off the accent — for magnitude and for series that are ordered (the compute tiers are). Never for identity: four or more series become small multiples, never more hues, because the state and presence roles own every other hue in the product"
-        case .chart2: return "sequential ramp step 2 of 3, one hue off the accent — for magnitude and for series that are ordered (the compute tiers are). Never for identity: four or more series become small multiples, never more hues, because the state and presence roles own every other hue in the product"
-        case .chart3: return "sequential ramp step 3 of 3, one hue off the accent — for magnitude and for series that are ordered (the compute tiers are). Never for identity: four or more series become small multiples, never more hues, because the state and presence roles own every other hue in the product"
+        case .affirmative: return "the fill of the affirming action — Approve, Add, Connect. A fill, where `ok` is the foreground role for a state: a button that starts something is not a status report about it"
+        case .onAffirmative: return "text and glyphs on an affirmative fill"
+        case .chart1: return "sequential ramp step 1 of 5, one hue off the accent — for magnitude and for series that are ordered (the compute tiers are). Never for identity: six or more series become small multiples, never more hues, because the state and presence roles own every other hue in the product. A non-text graphic, held to WCAG 1.4.11's 3:1"
+        case .chart2: return "sequential ramp step 2 of 5, one hue off the accent — for magnitude and for series that are ordered (the compute tiers are). Never for identity: six or more series become small multiples, never more hues, because the state and presence roles own every other hue in the product. A non-text graphic, held to WCAG 1.4.11's 3:1"
+        case .chart3: return "sequential ramp step 3 of 5, one hue off the accent — for magnitude and for series that are ordered (the compute tiers are). Never for identity: six or more series become small multiples, never more hues, because the state and presence roles own every other hue in the product. A non-text graphic, held to WCAG 1.4.11's 3:1"
         case .focusRing: return "keyboard focus, 2px, never suppressed"
         case .scrim: return "behind a sheet"
+        case .chart4: return "sequential ramp step 4 of 5, one hue off the accent — for magnitude and for series that are ordered (the compute tiers are). Never for identity: six or more series become small multiples, never more hues, because the state and presence roles own every other hue in the product. A non-text graphic, held to WCAG 1.4.11's 3:1"
+        case .chart5: return "sequential ramp step 5 of 5, one hue off the accent — for magnitude and for series that are ordered (the compute tiers are). Never for identity: six or more series become small multiples, never more hues, because the state and presence roles own every other hue in the product. A non-text graphic, held to WCAG 1.4.11's 3:1"
         }
     }
 }

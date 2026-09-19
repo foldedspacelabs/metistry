@@ -10,7 +10,30 @@ import { validateManifest } from "@foldedspacelabs/metistry-core";
 import { TasksService } from "@foldedspacelabs/metistry-tasks";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { allProjects, canSeeUnder, computeNudge, createBrainServer, knowledgeScope, liftTurnId, memberOf, resolveAliasCall, sanitizeDeep, TOOL_ALIASES, TOOL_NAMES, TURN_ID_META_KEY, turnIdFrom, underAreas, validKnowledgePath, validTurnId, type AgentPrincipal, type Db, type Tier } from "../src/index.js";
+import {
+  allProjects,
+  areaOf,
+  canSeeUnder,
+  computeNudge,
+  createBrainServer,
+  knowledgeScope,
+  liftTurnId,
+  memberOf,
+  resolveAliasCall,
+  sanitizeDeep,
+  scopeRequired,
+  SCOPE_REQUIRED,
+  TOOL_ALIASES,
+  TOOL_NAMES,
+  TURN_ID_META_KEY,
+  turnIdFrom,
+  underAreas,
+  validKnowledgePath,
+  validTurnId,
+  type AgentPrincipal,
+  type Db,
+  type Tier,
+} from "../src/index.js";
 
 describe("manifest", () => {
   it("validates through core and exposes exactly the registered tools, in order", () => {
@@ -253,6 +276,30 @@ describe("pure helpers", () => {
     expect(areas.canRead("Areas/Fsl/Note.md")).toBe(true);
     expect(areas.canList("Areas/Other/Note.md")).toBe(false);
     expect(areas.canRead("Areas/Other/Note.md")).toBe(false);
+    // for tier `areas`, canList and canRead are the SAME predicate — a page
+    // it may list it may already read, and vice versa. That is what keeps
+    // the scope_required refusal (below) from ever firing for this tier:
+    // there is no path where it sees a title it cannot also read.
+    for (const p of ["Areas/Fsl/Note.md", "Areas/Other/Note.md", ".metistry/x", "Areas/Fsl/../Other/x"]) {
+      expect(areas.canList(p), p).toBe(areas.canRead(p));
+    }
+  });
+
+  // Owner ruling 2026-09-19 (PR #216 judgement call B): the refusal an agent
+  // gets for a page it may see the TITLE of but not the content.
+  it("areaOf: the immediate parent directory — the smallest folder grant that would cover the path", () => {
+    expect(areaOf("Areas/Health/Sleep.md")).toBe("Areas/Health");
+    expect(areaOf("Journal/2026-09-19.md")).toBe("Journal");
+    expect(areaOf("Areas/Health/Sleep/Notes.md")).toBe("Areas/Health/Sleep");
+    expect(areaOf("now.md")).toBe("/"); // a root note: only the bare vault grant covers it
+  });
+
+  it("scopeRequired: names the area, the mechanism, and a stable `reason` distinct from the HTTP-ish `error.code`", () => {
+    const sr = scopeRequired("Areas/Health/Sleep.md");
+    expect(sr.expose).toEqual({ reason: SCOPE_REQUIRED, grantedScope: "Areas/Health" });
+    expect(sr.message).toContain("Areas/Health");
+    expect(sr.message).toContain("requests_create"); // the only door that exists today — never request_access
+    expect(sr.message).not.toBe("not granted"); // this is the structured refusal INSTEAD of the bare string
   });
 });
 

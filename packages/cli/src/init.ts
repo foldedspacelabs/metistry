@@ -19,18 +19,28 @@ import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import {
   COMPUTE_FILENAME,
+  DEFAULT_DEPLOYMENT,
+  DEPLOYMENT_FILENAME,
   INSTANCE_CONFIG_DIRS,
   INSTANCE_GITIGNORE,
   INSTANCE_LAYOUT,
+  KEEP_AWAKE_CHOICES,
+  KEEP_AWAKE_RECOMMENDED,
   instancePath,
+  keepAwakeChoice,
   metistryPath,
   mintToken,
+  parseDeployment,
+  parseKeepAwake,
   type DeploymentShape,
+  type KeepAwake,
 } from "@foldedspacelabs/metistry-core";
+import { applyKeepAwakeToYaml } from "./deployment.js";
 import { realExec, type Exec } from "./exec.js";
 import { mintInstanceId, withInstanceId } from "./instance.js";
 import { LOCK_FILENAME, serializeLock, type LockFile, type LockSource } from "./lock.js";
 import { DEFAULT_PORTS, loadNamespace } from "./namespace.js";
+import { defaultUi, type Ui } from "./ui.js";
 
 export interface InitOptions {
   dir: string;
@@ -60,6 +70,15 @@ export interface InitOptions {
   mint?: (() => string) | undefined;
   /** test seam: the instance_id minted into identity.yaml */
   mintInstanceId?: (() => string) | undefined;
+  /**
+   * The onboarding question's answer (`--keep-awake`, or the prompt in
+   * `main.ts`): whether this install keeps the Mac awake, and on which power.
+   * UNDEFINED IS NOT A DEFAULT — it means the question was not answered, and
+   * nothing is written, so the install holds nothing. A power assertion
+   * overrides the user's own System Settings sleep timer, and that is not
+   * something to take without being asked (docs/ops/deployment-shapes.md).
+   */
+  keepAwake?: KeepAwake | undefined;
 }
 
 export interface InitResult {
@@ -69,6 +88,8 @@ export interface InitResult {
   /** This instance directory's stable identity — the Keychain account its own secrets are filed under. */
   instanceId: string;
   commit: string;
+  /** the answer that was written to `.metistry/deployment.yaml`, or undefined when the question was not answered */
+  keepAwake?: KeepAwake | undefined;
   /** `.env` lines the user adds to the PRODUCT checkout next — printed, never written. */
   envLines: string[];
 }
@@ -99,6 +120,85 @@ export const INSTANCE_DIRS = INSTANCE_CONFIG_DIRS;
 // of the record (invariant 1).
 export const GITIGNORE = INSTANCE_GITIGNORE;
 export const COMMIT_AUTHOR = { name: "Metistry", email: "metistry@localhost" } as const;
+
+/**
+ * The onboarding question, and the whole of "informed consent" in this
+ * product: four choices, each printed with what it COSTS, the recommendation
+ * named, and the one we advise against last and marked.
+ *
+ * It is a function of core's `KEEP_AWAKE_CHOICES` rather than prose typed out
+ * here, so the CLI, the docs and the Mac app cannot describe the same choice
+ * differently.
+ */
+export function keepAwakeQuestion(ui: Ui = defaultUi()): string[] {
+  const wrapped = (text: string, indent: number): string[] => ui.wrap(text, { indent }).split("\n").map(ui.dim);
+  const lines = [
+    ui.heading("Keep this Mac awake while Metistry runs?"),
+    "",
+    ...wrapped(
+      "Metistry only works while this Mac is awake: captures from your phone, scheduled collectors and " +
+        "the assistant's queue all wait while it sleeps. It can hold the Mac awake for you — the screen " +
+        "still sleeps, and a closed laptop lid still sleeps.",
+      2,
+    ),
+    "",
+  ];
+  KEEP_AWAKE_CHOICES.forEach((choice, i) => {
+    // the tag is the only colour in the block, and it borrows the status
+    // vocabulary rather than inventing one: green for the recommendation,
+    // amber for the one we advise against (docs/ops/cli-style.md rule 5)
+    const tags = [choice.recommended ? "recommended" : "", choice.notRecommended ? "not recommended" : ""].filter(Boolean).join(", ");
+    lines.push(`  ${ui.strong(`${i + 1}) ${choice.label}`)}${tags ? ` ${ui.paint(choice.recommended ? "ok" : "degraded", `(${tags})`)}` : ""}`);
+    lines.push(...wrapped(choice.consequence, 5));
+    lines.push(ui.dim(`     deployment.yaml: keep_awake: ${choice.value}`));
+    lines.push("");
+  });
+  lines.push(ui.dim("  You can change this later: `metistry deployment set-keep-awake <value> --yes`."));
+  return lines;
+}
+
+/** Reads one line. `main.ts` supplies the terminal's; a test supplies a script. */
+export type Ask = (prompt: string) => Promise<string>;
+
+/**
+ * Ask it, accepting either the number or the value's own name, with Enter
+ * taking the recommendation. Three unreadable answers is an error rather than
+ * a silent default: this choice changes how the machine behaves, so guessing
+ * at it is exactly the thing not to do.
+ */
+export async function askKeepAwake(ask: Ask, out: (line: string) => void, opts: { ui?: Ui | undefined; attempts?: number | undefined } = {}): Promise<KeepAwake> {
+  const ui = opts.ui ?? defaultUi();
+  const attempts = opts.attempts ?? 3;
+  for (const line of keepAwakeQuestion(ui)) out(line);
+  const numbered = KEEP_AWAKE_CHOICES.map((c) => c.value);
+  for (let i = 0; i < attempts; i++) {
+    const raw = (await ask(`Choice [1-${numbered.length}, Enter for ${keepAwakeChoice(KEEP_AWAKE_RECOMMENDED).label.toLowerCase()}]: `)).trim();
+    if (raw === "") return KEEP_AWAKE_RECOMMENDED;
+    const byNumber = Number.parseInt(raw, 10);
+    if (Number.isInteger(byNumber) && byNumber >= 1 && byNumber <= numbered.length) return numbered[byNumber - 1]!;
+    const byName = parseKeepAwake(raw);
+    if (byName) return byName;
+    out(ui.paint("degraded", `  ${JSON.stringify(raw)} is not one of them — answer 1-${numbered.length}, or ${numbered.join(" / ")}.`));
+  }
+  throw new Error(`no usable answer to the keep-awake question after ${attempts} tries — rerun with \`--keep-awake <${numbered.join("|")}>\``);
+}
+
+/**
+ * The shape this install ALREADY has, from the product's seed, because the
+ * file `init` writes for the keep-awake answer must carry it: a
+ * deployment.yaml with only `keep_awake` in it parses with `shape` defaulted
+ * to compose and would quietly move the install. The answer to one question is
+ * never a decision about the other.
+ */
+export async function seedShape(seedDir: string): Promise<DeploymentShape> {
+  const file = join(seedDir, DEPLOYMENT_FILENAME);
+  if (!existsSync(file)) return DEFAULT_DEPLOYMENT.shape;
+  try {
+    return parseDeployment(parseYaml(await readFile(file, "utf8")), `seed/${DEPLOYMENT_FILENAME}`).shape;
+  } catch {
+    return DEFAULT_DEPLOYMENT.shape;
+  }
+}
 
 /** The mention trigger follows the name: "Metis" → "@metis". */
 export function mentionFor(name: string): string {
@@ -177,6 +277,14 @@ export async function init(opts: InitOptions): Promise<InitResult> {
     await writeFile(metistryPath(dir, d, ".gitkeep"), "");
   }
 
+  // The keep-awake answer, when there is one. `deployment.yaml` is a §4.7
+  // protected path, and this is the same moment `init` stamps the other two
+  // (identity.yaml, metistry.lock) by hand: there is no repo and no
+  // reconciler yet, and the first commit below is what makes them the record.
+  if (opts.keepAwake !== undefined) {
+    await writeFile(instancePath(dir, "deployment"), applyKeepAwakeToYaml(undefined, opts.keepAwake, await seedShape(opts.seedDir)));
+  }
+
   await writeFile(
     instancePath(dir, "readme"),
     `# Instance repo — private. This directory is the Obsidian vault; the machinery lives in \`.metistry/\`. Created ${now.toISOString().slice(0, 10)} by \`metistry init\` (product docs/ops/cli.md).\n`,
@@ -220,6 +328,7 @@ export async function init(opts: InitOptions): Promise<InitResult> {
     assistantName,
     instanceId,
     commit,
+    ...(opts.keepAwake !== undefined ? { keepAwake: opts.keepAwake } : {}),
     envLines: [
       `METISTRY_INSTANCE_DIR=${dir}`,
       `METISTRY_BRIDGE_TOKEN_RECONCILER=${mint()}`,

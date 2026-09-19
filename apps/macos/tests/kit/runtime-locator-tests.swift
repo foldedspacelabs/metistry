@@ -2,11 +2,14 @@
 // tests that keep the precedence honest, and that keep the "nothing found"
 // screen from being a shrug — every rejection has to say what was wrong.
 //
-// EVERY CALL PASSES `installedDir`. The real one is
-// ~/Library/Application Support/Metistry/product, and the machine running these
-// tests may well have an install there — the first version of this file did not
-// pass it, and every test failed on a developer Mac that had one. A locator test
-// that reads the developer's own home is not a test.
+// EVERY CALL PASSES `installedDir` AND `homeDirectory`. The real ones are
+// ~/Library/Application Support/Metistry/product and ~/.local/bin, and the
+// machine running these tests may well have both (this repo's own
+// docs/ops/cli.md walkthrough writes a `metistry` into the second) — the
+// first version of this file did not pass `installedDir`, and every test
+// failed on a developer Mac that had one; the day `homeDirectory` was added,
+// the same thing happened for `~/.local/bin`. A locator test that reads the
+// developer's own home is not a test.
 
 import Foundation
 import Testing
@@ -52,7 +55,7 @@ private struct Sandbox: ~Copyable {
         withDestinationPath: "releases/0.3.1"
     )
 
-    let resolved = RuntimeLocator.locate(bundleResourceURL: resources, environment: [:], installedDir: box.uninstalled)
+    let resolved = RuntimeLocator.locate(bundleResourceURL: resources, environment: [:], installedDir: box.uninstalled, homeDirectory: box.root)
     let runtime = try #require(resolved.runtime)
     #expect(runtime.source == .bundled)
     #expect(runtime.executable.path.hasSuffix("/runtime/node/bin/node"))
@@ -66,7 +69,7 @@ private struct Sandbox: ~Copyable {
     _ = try box.touch("Resources/metistry/runtime/node/bin/node", executable: true)
     _ = try box.touch("Resources/metistry/packages/cli/dist/main.js")
 
-    let runtime = try #require(RuntimeLocator.locate(bundleResourceURL: resources, environment: [:], installedDir: box.uninstalled).runtime)
+    let runtime = try #require(RuntimeLocator.locate(bundleResourceURL: resources, environment: [:], installedDir: box.uninstalled, homeDirectory: box.root).runtime)
     #expect(runtime.source == .bundled)
     #expect(runtime.productDir?.lastPathComponent == "metistry")
 }
@@ -79,7 +82,7 @@ private struct Sandbox: ~Copyable {
         at: resources.appendingPathComponent("metistry"), withIntermediateDirectories: true
     )
 
-    let resolved = RuntimeLocator.locate(bundleResourceURL: resources, environment: [:], installedDir: box.uninstalled)
+    let resolved = RuntimeLocator.locate(bundleResourceURL: resources, environment: [:], installedDir: box.uninstalled, homeDirectory: box.root)
     #expect(resolved.runtime == nil)
     #expect(resolved.attempts.contains { $0.contains("incomplete") })
     #expect(resolved.attempts.contains { $0.contains("no `metistry` in") })
@@ -91,7 +94,7 @@ private struct Sandbox: ~Copyable {
     _ = try box.touch("checkout/packages/cli/dist/main.js")
     _ = try box.touch("checkout/runtime/node/bin/node", executable: true)
 
-    let resolved = RuntimeLocator.locate(bundleResourceURL: nil, environment: [:], userProductDir: checkout, installedDir: box.uninstalled)
+    let resolved = RuntimeLocator.locate(bundleResourceURL: nil, environment: [:], userProductDir: checkout, installedDir: box.uninstalled, homeDirectory: box.root)
     let runtime = try #require(resolved.runtime)
     #expect(runtime.source == .checkout)
     // A checkout's own runtime/node is preferred over anything on PATH: it is
@@ -105,7 +108,7 @@ private struct Sandbox: ~Copyable {
     let checkout = box.root.appendingPathComponent("checkout")
     try FileManager.default.createDirectory(at: checkout, withIntermediateDirectories: true)
 
-    let resolved = RuntimeLocator.locate(bundleResourceURL: nil, environment: [:], userProductDir: checkout, installedDir: box.uninstalled)
+    let resolved = RuntimeLocator.locate(bundleResourceURL: nil, environment: [:], userProductDir: checkout, installedDir: box.uninstalled, homeDirectory: box.root)
     #expect(resolved.runtime == nil)
     #expect(resolved.attempts.contains { $0.contains("pnpm -r build") })
 }
@@ -115,10 +118,100 @@ private struct Sandbox: ~Copyable {
     let bin = box.root.appendingPathComponent("bin")
     _ = try box.touch("bin/metistry", executable: true)
 
-    let resolved = RuntimeLocator.locate(bundleResourceURL: nil, environment: ["PATH": bin.path], installedDir: box.uninstalled)
+    let resolved = RuntimeLocator.locate(bundleResourceURL: nil, environment: ["PATH": bin.path], installedDir: box.uninstalled, homeDirectory: box.root)
     let runtime = try #require(resolved.runtime)
     #expect(runtime.source == .path)
     #expect(runtime.leadingArguments.isEmpty)
+}
+
+// `homeDirectory` and `instanceDir` are both explicit parameters (never
+// `NSHomeDirectory()`/`instances.active` read directly here) for the same
+// reason `installedDir` always is — this file's own header comment.
+
+@Test func metistryIsFoundInLocalBinEvenWithNoPATH() throws {
+    let box = try Sandbox()
+    _ = try box.touch(".local/bin/metistry", executable: true)
+
+    let resolved = RuntimeLocator.locate(
+        bundleResourceURL: nil, environment: [:], installedDir: box.uninstalled, homeDirectory: box.root
+    )
+    let runtime = try #require(resolved.runtime)
+    #expect(runtime.source == .path)
+    #expect(runtime.executable.path == box.root.appendingPathComponent(".local/bin/metistry").path)
+}
+
+@Test func metistryIsFoundInTheActiveInstancesOwnStateCli() throws {
+    // `metistry up`/`metistry update` write the shim here (cli-shim.ts) but
+    // never put it on PATH themselves (invariant 2) — the app still finds it
+    // without the operator having linked anything. `state/cli`, not
+    // `state/bin` — a sibling of the launchd shape's supervisor symlink
+    // directory, not inside it (cli-shim.ts's header comment has why).
+    let box = try Sandbox()
+    let instance = box.root.appendingPathComponent("instance")
+    _ = try box.touch("instance/.metistry/state/cli/metistry", executable: true)
+
+    let resolved = RuntimeLocator.locate(
+        bundleResourceURL: nil, environment: [:], installedDir: box.uninstalled, homeDirectory: box.root, instanceDir: instance
+    )
+    let runtime = try #require(resolved.runtime)
+    #expect(runtime.source == .path)
+    #expect(runtime.executable.path == instance.appendingPathComponent(".metistry/state/cli/metistry").path)
+}
+
+@Test func aStateBinMetistrySymlinkDoesNotShadowTheShimInStateCli() throws {
+    // The launchd shape's supervisor identity symlink lives at
+    // state/bin/Metistry (supervisor.ts) — capitalised, but macOS's default
+    // case-insensitive volume makes `state/bin/metistry` and
+    // `state/bin/Metistry` the SAME directory entry, which is exactly why
+    // the shim lives in the sibling `state/cli/` instead. This proves the
+    // instance-bin candidate this locator used to search does not
+    // accidentally resolve to that symlink now that it points at
+    // `state/cli`: it is a different directory, so the symlink is simply
+    // never looked at.
+    let box = try Sandbox()
+    let instance = box.root.appendingPathComponent("instance")
+    let stateBin = instance.appendingPathComponent(".metistry/state/bin", isDirectory: true)
+    try FileManager.default.createDirectory(at: stateBin, withIntermediateDirectories: true)
+    try FileManager.default.createSymbolicLink(atPath: stateBin.appendingPathComponent("Metistry").path, withDestinationPath: "/usr/local/bin/node")
+    _ = try box.touch("instance/.metistry/state/cli/metistry", executable: true)
+
+    let resolved = RuntimeLocator.locate(
+        bundleResourceURL: nil, environment: [:], installedDir: box.uninstalled, homeDirectory: box.root, instanceDir: instance
+    )
+    let runtime = try #require(resolved.runtime)
+    #expect(runtime.source == .path)
+    #expect(runtime.executable.path == instance.appendingPathComponent(".metistry/state/cli/metistry").path)
+}
+
+@Test func neitherLocalBinNorTheInstanceCliShadowsAnEarlierStage() throws {
+    // A checkout named explicitly still wins even when an unlinked shim
+    // happens to sit in the active instance's own state/cli — stage 1 beats
+    // stage 4 exactly as it already does for the installed/bundled stages.
+    let box = try Sandbox()
+    let checkout = box.root.appendingPathComponent("checkout")
+    _ = try box.touch("checkout/packages/cli/dist/main.js")
+    _ = try box.touch("checkout/runtime/node/bin/node", executable: true)
+    let instance = box.root.appendingPathComponent("instance")
+    _ = try box.touch("instance/.metistry/state/cli/metistry", executable: true)
+
+    let resolved = RuntimeLocator.locate(
+        bundleResourceURL: nil, environment: [:], userProductDir: checkout, installedDir: box.uninstalled, homeDirectory: box.root, instanceDir: instance
+    )
+    #expect(resolved.runtime?.source == .checkout)
+}
+
+@Test func aMissingMetistryAnywhereListsLocalBinAndTheInstanceCliInTheAttempts() throws {
+    let box = try Sandbox()
+    let instance = box.root.appendingPathComponent("instance")
+    try FileManager.default.createDirectory(at: instance, withIntermediateDirectories: true)
+
+    let resolved = RuntimeLocator.locate(
+        bundleResourceURL: nil, environment: [:], installedDir: box.uninstalled, homeDirectory: box.root, instanceDir: instance
+    )
+    #expect(resolved.runtime == nil)
+    let attempt = try #require(resolved.attempts.last)
+    #expect(attempt.contains(box.root.appendingPathComponent(".local/bin").path))
+    #expect(attempt.contains(instance.appendingPathComponent(".metistry/state/cli").path))
 }
 
 // MARK: - The writable install, and the bundle as a seed
@@ -139,7 +232,7 @@ private struct Sandbox: ~Copyable {
         withDestinationPath: "releases/0.4.0"
     )
 
-    let resolved = RuntimeLocator.locate(bundleResourceURL: resources, environment: [:], installedDir: installed)
+    let resolved = RuntimeLocator.locate(bundleResourceURL: resources, environment: [:], installedDir: installed, homeDirectory: box.root)
     let runtime = try #require(resolved.runtime)
     #expect(runtime.source == .installed)
     #expect(runtime.productDir?.lastPathComponent == "current")
@@ -162,13 +255,13 @@ private struct Sandbox: ~Copyable {
     _ = try box.touch("installed/packages/cli/dist/main.js")
 
     let resolved = RuntimeLocator.locate(
-        bundleResourceURL: nil, environment: [:], userProductDir: checkout, installedDir: installed
+        bundleResourceURL: nil, environment: [:], userProductDir: checkout, installedDir: installed, homeDirectory: box.root
     )
     #expect(resolved.runtime?.source == .checkout)
     #expect(resolved.runtime?.productDir == checkout)
 
     // With nothing named, the installed copy is what a shipped app uses.
-    let unnamed = RuntimeLocator.locate(bundleResourceURL: nil, environment: [:], installedDir: installed)
+    let unnamed = RuntimeLocator.locate(bundleResourceURL: nil, environment: [:], installedDir: installed, homeDirectory: box.root)
     #expect(unnamed.runtime?.source == .installed)
 }
 
@@ -178,7 +271,7 @@ private struct Sandbox: ~Copyable {
     _ = try box.touch("Resources/metistry/runtime/node/bin/node", executable: true)
     _ = try box.touch("Resources/metistry/packages/cli/dist/main.js")
 
-    let resolved = RuntimeLocator.locate(bundleResourceURL: resources, environment: [:], installedDir: box.uninstalled)
+    let resolved = RuntimeLocator.locate(bundleResourceURL: resources, environment: [:], installedDir: box.uninstalled, homeDirectory: box.root)
     // The seed runs every verb perfectly well, so this is not a failure — it is
     // one more thing to do, because `metistry update` cannot write to a signed
     // bundle's Resources.
@@ -194,7 +287,7 @@ private struct Sandbox: ~Copyable {
     let resources = box.root.appendingPathComponent("Resources")
     _ = try box.touch("Resources/metistry/runtime/node/bin/node", executable: true)
     _ = try box.touch("Resources/metistry/packages/cli/dist/main.js")
-    let resolution = RuntimeLocator.locate(bundleResourceURL: resources, environment: [:], installedDir: box.uninstalled)
+    let resolution = RuntimeLocator.locate(bundleResourceURL: resources, environment: [:], installedDir: box.uninstalled, homeDirectory: box.root)
     let runtime = try #require(resolution.runtime)
     let steps = FirstRunModel(cli: MetistryCLI(runtime: runtime, runner: NeverRunner()), resolution: resolution)
 
@@ -217,7 +310,7 @@ private struct Sandbox: ~Copyable {
     _ = try box.touch("checkout/packages/cli/dist/main.js")
     _ = try box.touch("checkout/runtime/node/bin/node", executable: true)
     let resolution = RuntimeLocator.locate(
-        bundleResourceURL: nil, environment: [:], userProductDir: checkout, installedDir: box.uninstalled
+        bundleResourceURL: nil, environment: [:], userProductDir: checkout, installedDir: box.uninstalled, homeDirectory: box.root
     )
     let runtime = try #require(resolution.runtime)
     let steps = FirstRunModel(cli: MetistryCLI(runtime: runtime, runner: NeverRunner()), resolution: resolution)

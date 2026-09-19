@@ -39,7 +39,7 @@ The tier decides which question is being asked:
 | tier | may be told a page EXISTS (path, title, one-line description) | may read a page, or traverse its links |
 | --- | --- | --- |
 | `none` | nothing — and is told "not granted", never "not found" | no |
-| `index` | anywhere in the vault index | no |
+| `index` | anywhere in the vault index | no — told which area would unlock it (below) |
 | `areas` | inside its granted prefixes | inside its granted prefixes |
 
 `index` browsing titles **outside** any area it can read is the point of the
@@ -79,11 +79,21 @@ Write the query, give it `expose: generic`, and the assistant can run it the
 day it merges. A new **tool** is for a new *verb* — something the system can
 now do — and it arrives with the lazy-discovery decision attached.
 
-**Asking for more.** There is no `request_access` tool today. An agent that
-finds a title it cannot read raises a `requests_create` report naming the
-area and why — that lands in your Needs You queue like every other proposal —
-and you widen the grant yourself in the Agents panel (`PUT
-/api/agents/:id/grants`). Enforced at the tool, granted by your hand.
+**Asking for more, named instead of guessed (ruled 2026-09-19, PR #216
+judgement call B).** `knowledge_read` and `knowledge_list`'s `links_for` stop
+at the bare "not granted" only when the caller could not already see the
+page — tier `none`, or a path that fails the vault-path rule. For a page
+whose TITLE the caller may already see (tier `index` on any settled page,
+never a draft or a path that was merely guessed) the refusal is structured
+instead: still `isError: true` with the ordinary `error.code: "forbidden"`
+underneath (the envelope invariant 8 promises is unchanged), plus a stable
+machine-readable `reason: "scope_required"` and `grantedScope` — the area
+(the page's own parent directory) that would unlock it — alongside it.
+`error.message` spells out the same thing in a sentence: there is no
+`request_access` tool today, so the mechanism it names is `requests_create`,
+naming the area and why, which lands in your Needs You queue like every
+other proposal — you still widen the grant yourself in the Agents panel
+(`PUT /api/agents/:id/grants`). Enforced at the tool, granted by your hand.
 
 **Deprecated spellings, one release.** The 2026-09-09 vocabulary
 simplification renamed eleven of these (`docs/product/glossary.md`). The old

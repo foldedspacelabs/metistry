@@ -31,6 +31,7 @@ import { realExec, type Exec } from "./exec.js";
 import { Keychain, keychainAccount, serviceFor } from "./keychain.js";
 import { applyPorts, loadNamespace } from "./namespace.js";
 import { accountFor } from "./secrets.js";
+import { defaultUi, statusName, type Ui } from "./ui.js";
 
 export const CONNECT_TOOLS = ["claude-code", "cursor", "devin", "opencode"] as const;
 export type ConnectTool = (typeof CONNECT_TOOLS)[number];
@@ -658,17 +659,26 @@ export async function connectList(opts: ConnectListOptions): Promise<{ console_u
   return { console_url: target.url, tools };
 }
 
-export function renderConnectList(r: { console_url: string; tools: ConnectListRow[] }): string {
-  const w = Math.max(4, ...r.tools.map((t) => t.tool.length));
-  const head = `${"tool".padEnd(w)}  agent       token     config`;
+/** How a row's `agent`/`token` reads at a glance — the word is kept, the colour comes from the vocabulary (docs/ops/cli-style.md). */
+const LIST_STATUS: Record<string, string> = { registered: "ok", keychain: "ok", pending: "degraded", revoked: "failed", absent: "n/a", "n/a": "n/a", unknown: "n/a" };
+
+export function renderConnectList(r: { console_url: string; tools: ConnectListRow[] }, ui: Ui = defaultUi()): string {
+  const word = (v: string): string => `${ui.statusIcon(LIST_STATUS[v] ?? "n/a")} ${ui.paint(statusName(LIST_STATUS[v] ?? "n/a"), v)}`;
+  const rows = r.tools.map((t) => [t.tool, word(t.agent), word(t.token), ui.dim(t.config)]);
   return [
-    `console  ${r.console_url}`,
+    ui.kv([["console", r.console_url]], { indent: 0 }),
     "",
-    head,
-    "-".repeat(head.length),
-    ...r.tools.map((t) => `${t.tool.padEnd(w)}  ${t.agent.padEnd(10)}  ${t.token.padEnd(8)}  ${t.config}`),
+    ui.table(["tool", "agent", "token", "config"], rows),
     "",
-    "agent: the row in this instance's registry (absent = `metistry connect <tool>` has not run; pending = enrolled --remote and awaiting your approval, so its token authenticates nothing; revoked is permanent).",
-    "token: whether the bearer is in the login Keychain where this verb puts it — its value is never read here.",
+    ...ui
+      .wrap(
+        "agent: the row in this instance's registry (absent = `metistry connect <tool>` has not run; pending = enrolled --remote and awaiting your approval, so its token authenticates nothing; revoked is permanent).",
+      )
+      .split("\n")
+      .map((l) => ui.dim(l)),
+    ...ui
+      .wrap("token: whether the bearer is in the login Keychain where this verb puts it — its value is never read here.")
+      .split("\n")
+      .map((l) => ui.dim(l)),
   ].join("\n");
 }

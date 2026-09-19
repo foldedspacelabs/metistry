@@ -23,6 +23,7 @@ import { instanceFile } from "@foldedspacelabs/metistry-core";
 import { productVersion } from "./env.js";
 import { readLock, type LockSource } from "./lock.js";
 import { RUNTIME_PACK_MANIFEST } from "./release.js";
+import { defaultUi, type Ui } from "./ui.js";
 import { runDirFor } from "./up.js";
 
 export interface VersionInfo {
@@ -74,11 +75,13 @@ export async function collectVersionInfo(opts: VersionInfoOptions): Promise<Vers
   return info;
 }
 
-/** One line per number that resolved. */
-export function renderVersionInfo(info: VersionInfo): string {
-  const lines = [`cli: ${info.cli_version}`];
-  if (info.product_version !== undefined) lines.push(`product: ${info.product_version}`);
-  if (info.lock) lines.push(`lock: ${info.lock.version} (${info.lock.channel})`);
-  if (info.runtime_pack) lines.push(`runtime pack: ${info.runtime_pack.version} (commit ${info.runtime_pack.commit.slice(0, 7)}, built ${info.runtime_pack.built_at})`);
-  return lines.join("\n");
+/** One aligned row per number that resolved; where it came from is dimmed beside it (docs/ops/cli-style.md). */
+export function renderVersionInfo(info: VersionInfo, ui: Ui = defaultUi()): string {
+  const rows: Array<[string, string]> = [["cli", info.cli_version]];
+  if (info.product_version !== undefined) rows.push(["product", info.product_version]);
+  if (info.lock) rows.push(["lock", `${info.lock.version} ${ui.dim(`(${info.lock.channel})`)}`]);
+  if (info.runtime_pack) {
+    rows.push(["runtime pack", `${info.runtime_pack.version} ${ui.dim(`(commit ${info.runtime_pack.commit.slice(0, 7)}, built ${info.runtime_pack.built_at})`)}`]);
+  }
+  return ui.kv(rows, { indent: 0 });
 }

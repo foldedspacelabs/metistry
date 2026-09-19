@@ -16,6 +16,7 @@ import { existsSync } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { INSTANCE_LAYOUT, LEGACY_VAULT_DIR, detectLayout, usesCompose, type Deployment, type InstanceLayoutShape } from "@foldedspacelabs/metistry-core";
+import { writeCliShim } from "./cli-shim.js";
 import { loadDeployment } from "./deployment.js";
 import { doctor, type DoctorDeps, type DoctorReport } from "./doctor.js";
 import { productVersion } from "./env.js";
@@ -30,6 +31,7 @@ import { listMigrationFiles, MIGRATION_LOCK_KEY, openMigrationSession, runMigrat
 import { currentVersion, installRelease, rollbackRelease, releaseTarget, runtimePackCommit, type InstallReleaseResult } from "./release.js";
 import { installRuntimeDeps, runtimeDepsEnabled, RUNTIME_DIRNAME, type InstallRuntimeDepsResult } from "./runtime-deps.js";
 import { StepFailed, StepRunner } from "./steps.js";
+import { type Ui } from "./ui.js";
 import { closingDoctor, composeUp, COMPOSE_TIMEOUT_MS, runDirFor } from "./up.js";
 
 export interface UpdateOptions {
@@ -62,6 +64,8 @@ export interface UpdateOptions {
   openSession?: ((env: NodeJS.ProcessEnv) => Promise<(MigrationSession & { end(): Promise<void> }) | null>) | undefined;
   doctorFn?: ((deps: DoctorDeps) => Promise<DoctorReport>) | undefined;
   doctorDeps?: Partial<DoctorDeps> | undefined;
+  /** default true; `false` is a test seam — see `up`'s `cliShim` (cli-shim.ts). `update` writes the same shim `up` does: it shares nothing else with `up`, but a checkout that only ever runs `update` still gets one. */
+  cliShim?: boolean | undefined;
 }
 
 export interface UpdateResult {
@@ -425,13 +429,55 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
     };
     const delivery = await writeLock(r, lock, { env, platform, uid, fetchFn });
     r.note(delivery.detail);
+
+    // `update` shares no code path with `up` (it never renders a plist or
+    // touches the supervisor), so a checkout that only ever runs `update`
+    // still needs this written — but, like everything else in this block,
+    // not once a step above has failed (nothing runs "after the failure"
+    // except doctor's diagnosis, below).
+    if (opts.cliShim !== false) {
+      r.section("cli");
+      await writeCliShim(r, productDir, instanceDir.instanceDir);
+    }
   } catch (err) {
     if (!(err instanceof StepFailed)) throw err;
     failure = err;
-    r.out(`metistry update: ${err.message}`);
+    r.out(`${r.ui.paint("failed", `${r.ui.icon("fail")} metistry update`)}: ${err.message}`);
   }
 
   const doctorCode = await closingDoctor(r, runDir, opts.doctorDeps, opts.doctorFn ?? doctor);
   const code = failure ? failure.code || 1 : doctorCode;
+  r.out("");
+  r.out(updateSummary({ ui: r.ui, dryRun: r.dryRun, failure, code, source, version: lock?.product.version ?? releaseVersion, migrations, restarted }));
   return { code, source, runDir, commands: r.commands, ...(lock ? { lock } : {}), restarted, ...(migrations ? { migrations } : {}), ...(release ? { release } : {}), ...(runtimeDeps ? { runtimeDeps } : {}) };
+}
+
+/**
+ * The one line to read when the rest has scrolled past: did it land, on what
+ * version, and what moved. Deliberately last, after doctor's own table —
+ * this is the verdict, not a heading (docs/ops/cli-style.md).
+ */
+export function updateSummary(s: {
+  ui: Ui;
+  dryRun: boolean;
+  failure?: StepFailed | undefined;
+  code: number;
+  source: LockSource;
+  version: string;
+  migrations?: { applied: string[] } | undefined;
+  restarted: string[];
+}): string {
+  const { ui } = s;
+  if (s.dryRun) return `${ui.paint("skipped", `${ui.icon("off")} dry run`)} ${ui.dim(`— ${s.source} ${s.version}, nothing was changed`)}`;
+  const verdict = s.failure
+    ? ui.paint("failed", `${ui.icon("fail")} update failed`)
+    : s.code === 0
+      ? ui.paint("ok", `${ui.icon("ok")} update ok`)
+      : ui.paint("degraded", `${ui.icon("warn")} updated, and doctor is not happy`);
+  const parts = [
+    `${s.source} ${s.version}`,
+    s.migrations ? `${s.migrations.applied.length} migration(s) applied` : "no migrations",
+    s.restarted.length > 0 ? `${s.restarted.length} job(s) kickstarted` : "nothing kickstarted",
+  ];
+  return `${verdict} ${ui.dim(`— ${parts.join(", ")}`)}`;
 }

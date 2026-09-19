@@ -455,7 +455,7 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
       async (a) => {
         const scope = knowledgeScope(principal);
         const r = await readKnowledge(db, principal, a.path, cfg.readKnowledge);
-        if (!r.ok) return fail(r.code, r.message, { tier: scope.tier, areas: scope.prefixes ?? [], path: a.path });
+        if (!r.ok) return fail(r.code, r.message, { tier: scope.tier, areas: scope.prefixes ?? [], path: a.path }, r.expose);
         return done({ path: r.path, title: r.title, content: r.content, sha256: sha256Text(r.content) }, { tier: scope.tier, areas: scope.prefixes ?? [], path: a.path, bytes: r.content.length });
       },
     );
@@ -523,7 +523,11 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
   }
 
   function render(outcome: Outcome, nudgeLine: string | null): CallToolResult {
-    const body = outcome.ok ? sanitizeDeep(outcome.result) : errorEnvelope(outcome.code, outcome.message);
+    // `outcome.expose` (never `meta`, which is `runs`-only) is merged onto
+    // the envelope for a refusal that opts in — e.g. knowledge.ts's
+    // scope_required — so the uniform `{ error }` shape every other tool
+    // returns is untouched unless a tool body explicitly asked for more.
+    const body = outcome.ok ? sanitizeDeep(outcome.result) : { ...errorEnvelope(outcome.code, outcome.message), ...(outcome.expose ?? {}) };
     const text = JSON.stringify(body) + (nudgeLine ? `\n${nudgeLine}` : "");
     return { content: [{ type: "text", text }], ...(outcome.ok ? {} : { isError: true }) };
   }

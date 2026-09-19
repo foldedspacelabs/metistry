@@ -21,6 +21,29 @@
 # docs/ops/deployment-shapes.md, which covers the dump/restore step.
 shape: compose
 
+# keep_awake — whether this install holds your Mac awake, and on which power
+# (macOS only; docs/ops/deployment-shapes.md, "Keeping the Mac awake").
+#
+#   never                    hold nothing; your own sleep settings decide.
+#                            Metistry pauses while the Mac sleeps.
+#   allow_sleep_on_battery   hold on wall power, release on battery and on a
+#                            UPS. What `metistry init` offers first.
+#   always                   hold on any power. On a laptop away from a
+#                            charger that costs battery.
+#   always_lid_closed        the same as `always`, plus an administrator
+#                            change you make yourself: no process can keep a
+#                            Mac awake with the lid shut (IOPMLib.h), and
+#                            `doctor` says so. Never a default.
+#
+# DELIBERATELY NOT SET HERE. A power assertion overrides your own System
+# Settings sleep timer, so it is not something the product may decide for
+# you: `metistry init` asks once, in plain language, and writes YOUR answer
+# to YOUR instance's deployment.yaml. An instance with no answer holds
+# nothing. Change it later with
+# `metistry deployment set-keep-awake <value> --yes`.
+#
+# keep_awake: allow_sleep_on_battery
+
 # Per-service overrides. Both keys are optional; a service not listed here
 # takes the install-wide shape above.
 #

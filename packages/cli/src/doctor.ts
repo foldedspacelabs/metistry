@@ -14,13 +14,20 @@
 
 import { readdir, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import {
   checkResultSchema,
+  cutoffIsAFinding,
   failureStreaks,
+  humanGap,
+  instanceStatePath,
   intEnv,
+  keepAwakeOf,
+  parseKeepAwakeState,
+  powerSourceLabel,
   resolveUrl,
+  shouldHold,
   runCheck,
   scheduleToSeconds,
   servicePlan,
@@ -28,6 +35,10 @@ import {
   usesCompose,
   validateManifest,
   DEFAULT_MAX_STREAK,
+  KEEP_AWAKE_CUTOFF_FACTOR,
+  KEEP_AWAKE_KIND,
+  KEEP_AWAKE_STATE_FILENAME,
+  LID_CLOSED_NOT_AVAILABLE,
   PREFLIGHT_FAILED,
   RUNNER_KIND,
   SCHEDULED_KINDS,
@@ -39,12 +50,14 @@ import {
   type Manifest,
 } from "@foldedspacelabs/metistry-core";
 import { COMPUTE_FILENAME, INSTANCE_LAYOUT, LEGACY_VAULT_DIR, detectLayout, emptyCompute, instanceFile, loadCompute, type Compute } from "@foldedspacelabs/metistry-core";
+import { cliShimLinkHint, cliShimPath } from "./cli-shim.js";
 import { engineStatus, loadDeployment } from "./deployment.js";
 import { localServerRows } from "./local-models.js";
 import { realExec, type Exec } from "./exec.js";
 import { labelFor, loadPlistTemplates, logPathFor, parseRegistrar, registrarPhrase, SUPERVISED_SERVICES, type RegistrarFinding } from "./launchd.js";
 import { readSupervisorConfig, supervisorConfigPath, controlRequest, SUPERVISOR_SERVICE } from "./supervisor.js";
 import { applyPorts, loadNamespace, type Namespace } from "./namespace.js";
+import { defaultUi, padTo, statusName, visibleWidth, type Ui } from "./ui.js";
 
 export interface Db {
   query(text: string, values?: unknown[]): Promise<{ rows: any[] }>;
@@ -372,6 +385,41 @@ export async function inboxRow(instanceDir: string): Promise<DoctorRow> {
   };
 }
 
+// ---- the cli shim -----------------------------------------------------------
+//
+// `metistry up`/`metistry update` write a shim onto this install's own node
+// and CLI (cli-shim.ts), but never put it on PATH themselves (invariant 2 —
+// that is the user's own hand). This row says whether typing `metistry`
+// would actually find it — searching the same places a shell's PATH
+// realistically does, plus `~/.local/bin` and the shim's own directory —
+// and hands back the exact line to make it so when it would not. Absent,
+// never degraded: an install nobody has linked yet is not broken, it is one
+// command away.
+
+const CLI_ON_PATH_DIRS = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"];
+
+export async function cliRow(productDir: string, env: NodeJS.ProcessEnv): Promise<DoctorRow> {
+  const instanceDir = env.METISTRY_INSTANCE_DIR?.replace(/\/+$/, "");
+  const shim = cliShimPath(productDir, instanceDir);
+  const dirs = [...(env.PATH ?? "").split(":").filter(Boolean), ...(env.HOME ? [join(env.HOME, ".local", "bin")] : []), ...CLI_ON_PATH_DIRS];
+  const found = dirs.map((d) => join(d, "metistry")).find((p) => existsSync(p));
+  return {
+    kind: "cli",
+    ...(await runCheck(
+      "cli on PATH",
+      found ? `${found} resolves \`metistry\`` : `search PATH, ~/.local/bin and ${dirname(shim)} for a \`metistry\` executable`,
+      async () => {
+        if (found) return { meta: { path: found } };
+        return {
+          status: "absent",
+          remediation: existsSync(shim) ? cliShimLinkHint(shim) + "  (or add its directory to PATH)" : `no cli shim yet at ${shim} — \`metistry up\` writes one`,
+          meta: { shim },
+        };
+      },
+    )),
+  };
+}
+
 // ---- db -------------------------------------------------------------------
 
 export async function openDbFromEnv(env: NodeJS.ProcessEnv): Promise<Db | null> {
@@ -604,6 +652,165 @@ export async function scheduleRows(
     });
   }
   return out;
+}
+
+// ---- keeping the Mac awake (macOS) --------------------------------------------
+
+/**
+ * Every pid holding `PreventUserIdleSystemSleep`, from the "Listed by owning
+ * process" block of `pmset -g assertions`.
+ *
+ * NOT the summary block above it: that is a LEVEL — "the system-wide level is
+ * the maximum of all individual assertions' levels"
+ * (`IOPMCopyAssertionsStatus`) — and reads 1 while four processes hold it. And
+ * never a NAME match: under `caffeinate` the name is Apple's, on every holder,
+ * so the only honest question is whether OUR recorded pid is in this list.
+ */
+export function assertionHolders(pmsetAssertions: string): number[] {
+  const out: number[] = [];
+  for (const m of pmsetAssertions.matchAll(/^\s*pid (\d+)\([^)]*\):.*\bPreventUserIdleSystemSleep\b/gm)) out.push(Number(m[1]));
+  return [...new Set(out)];
+}
+
+/**
+ * One row, macOS only, never `failed`: the install is running and correct even
+ * when a promise about the machine is unmet, and `metistry up` ends with
+ * doctor deciding the exit code.
+ *
+ * The states are the ones docs/ops/deployment-shapes.md documents: off, held,
+ * released by policy, configured but absent, the fourth value's honest limit,
+ * the compose shape's "nothing holds it", and the owner's ruling E — the Mac
+ * slept anyway, with the repair spelled out.
+ */
+export async function keepAwakeRow(deps: { deployment: Deployment; instanceDir: string; exec: Exec; platform: NodeJS.Platform; now?: () => number }): Promise<DoctorRow | undefined> {
+  // invariant 7: `caffeinate` is not a thing off macOS and a container holds
+  // no assertions, so there is no row rather than a row that always says no
+  if (deps.platform !== "darwin") return undefined;
+  const now = deps.now ?? Date.now;
+  const mode = keepAwakeOf(deps.deployment);
+  const statePath = instanceStatePath(deps.instanceDir, "run", KEEP_AWAKE_STATE_FILENAME);
+  const lidNote = mode === "always_lid_closed" ? LID_CLOSED_NOT_AVAILABLE : undefined;
+
+  return {
+    kind: KEEP_AWAKE_KIND,
+    ...(await runCheck(KEEP_AWAKE_KIND, `deployment.yaml says keep_awake: ${mode}; ${statePath} and pmset -g assertions agree`, async () => {
+      if (mode === "never") {
+        return {
+          status: "absent",
+          remediation:
+            "not configured — this Mac may idle-sleep, and the install pauses with it: captures, collectors and the assistant's queue wait until it wakes. " +
+            "`metistry deployment set-keep-awake allow_sleep_on_battery --yes` (held on wall power, released on battery).",
+          meta: { mode },
+        };
+      }
+      if (deps.deployment.shape === "compose") {
+        return {
+          status: "absent",
+          remediation: `keep_awake: ${mode}, but the compose shape installs no supervisor, and that is the process whose lifetime the assertion is tied to — nothing is held (docs/ops/deployment-shapes.md)`,
+          meta: { mode, shape: "compose" },
+        };
+      }
+
+      // every failure here is "there is no usable state file": missing,
+      // truncated mid-write, or not JSON. This row must never be `failed`, so
+      // the read cannot throw — a corrupt file reports as "nothing is holding"
+      const state = await (async () => {
+        try {
+          return parseKeepAwakeState(JSON.parse(await readFile(statePath, "utf8")));
+        } catch {
+          return undefined;
+        }
+      })();
+      if (!state) {
+        return {
+          status: "degraded",
+          remediation: `keep_awake: ${mode}, but nothing has written ${statePath} — the supervisor is not running, or has not started since the setting changed: \`metistry up\`${lidNote ? `. ${lidNote}` : ""}`,
+          meta: { mode, state_file: statePath },
+        };
+      }
+
+      const held = await deps.exec("pmset", ["-g", "assertions"]);
+      const holders = held.code === 0 ? assertionHolders(held.stdout) : [];
+      const ours = state.pid !== undefined && holders.includes(state.pid);
+      const others = holders.filter((p) => p !== state.pid);
+      const meta: Record<string, unknown> = {
+        mode,
+        holding: state.holding,
+        ...(state.pid !== undefined ? { pid: state.pid } : {}),
+        ...(state.since !== undefined ? { since: state.since } : {}),
+        power_source: state.power_source,
+        heartbeat_at: state.heartbeat_at,
+        restarts: state.restarts,
+        reason: state.reason,
+        // informational only, and NEVER a finding: several processes holding
+        // the same assertion is Apple's designed model, we cannot release
+        // another's, and we must never take credit for one
+        other_holders: others.length,
+        ...(lidNote ? { lid_closed: "not available without an administrator change" } : {}),
+      };
+
+      // the owner's ruling E: it slept anyway. Said first, because it is the
+      // one thing on this row a person can act on.
+      const cutoff = cutoffIsAFinding(state);
+      if (cutoff) {
+        // The repair is only offered when there IS one. Under `always` the
+        // strongest setting this product has is already in force, and the
+        // sleep came from something no assertion stops — offering the verb
+        // that sets what is already set would be noise dressed as advice.
+        const stronger = cutoff.mode === "allow_sleep_on_battery";
+        return {
+          status: "degraded",
+          remediation:
+            `this Mac slept at ${cutoff.at} for about ${humanGap(cutoff.gap_ms)} while keep_awake: ${cutoff.mode} was set — an idle-sleep assertion does not stop lid close, ` +
+            `a scheduled sleep, the Apple menu or low battery, and another policy may have won. ` +
+            (stronger
+              ? `If that is not what you want, \`metistry deployment set-keep-awake always --yes\` holds on battery too, which costs battery on a laptop; a closed lid still sleeps`
+              : `keep_awake: ${cutoff.mode} is already the strongest setting there is, so there is nothing further to turn on: the cause is outside what a power assertion can reach`) +
+            `${lidNote ? ` — ${lidNote}` : ""}`,
+          meta: { ...meta, last_cutoff: cutoff },
+        };
+      }
+
+      if (state.stopped_at !== undefined) {
+        return {
+          status: "degraded",
+          remediation: `released at ${state.stopped_at} when the supervisor stopped — nothing holds this Mac awake until it is running again: \`metistry up\``,
+          meta,
+        };
+      }
+
+      if (now() - Date.parse(state.heartbeat_at) > state.interval_ms * KEEP_AWAKE_CUTOFF_FACTOR) {
+        return {
+          status: "degraded",
+          remediation:
+            `the holder last reported at ${state.heartbeat_at}, more than ${KEEP_AWAKE_CUTOFF_FACTOR} of its ${Math.round(state.interval_ms / 1000)}s cycles ago — ` +
+            `either the supervisor is not running (\`metistry logs supervisor\`), or this Mac has just woken and the holder has not ticked yet, in which case the next run of doctor says so`,
+          meta,
+        };
+      }
+
+      if (!state.holding) {
+        // released BY POLICY is the setting working, and must read as success
+        if (!shouldHold(mode, state.power_source)) return { ...(lidNote ? { status: "degraded" as const, remediation: lidNote } : {}), meta };
+        return {
+          status: "degraded",
+          remediation: `keep_awake: ${mode} and this Mac is drawing from '${powerSourceLabel(state.power_source)}', but nothing is held — \`metistry logs supervisor\``,
+          meta,
+        };
+      }
+
+      if (!ours) {
+        return {
+          status: "degraded",
+          remediation:
+            `${statePath} records pid ${state.pid ?? "?"} as the holder, but \`pmset -g assertions\` does not list it holding PreventUserIdleSystemSleep` +
+            `${held.code === 0 ? "" : " (pmset did not answer)"} — \`metistry logs supervisor\``,
+          meta,
+        };
+      }
+      return { ...(lidNote ? { status: "degraded" as const, remediation: lidNote } : {}), meta };
+    })),
+  };
 }
 
 // ---- launchd (macOS) ----------------------------------------------------------
@@ -892,10 +1099,13 @@ export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
   // model servers. Concurrently it is the slowest single probe. Nothing about
   // any one check changes — no timeout was shortened to buy this, because a
   // slow-but-healthy bridge reported as down would be a worse table.
-  const [componentRows, layout, inbox, dbAndSchedules, launchd, supervisor, containers, localModels] = await Promise.all([
+  const [componentRows, layout, inbox, cli, dbAndSchedules, launchd, keepAwake, supervisor, containers, localModels] = await Promise.all([
     (async () => Promise.all((await walkManifests(deps.productDir)).map((m) => componentRow(m, { env, fetchFn, timeoutMs, shape, labelSuffix, compute }))))(),
     layoutRow(instanceDir),
     inboxRow(instanceDir),
+    // whether typing `metistry` finds this install's shim: a filesystem
+    // look, so it costs nothing to start with everything else
+    cliRow(deps.productDir, env),
     (async (): Promise<DoctorRow[]> => {
       const db = deps.db === undefined ? await openDbFromEnv(env) : deps.db;
       try {
@@ -909,6 +1119,10 @@ export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
       }
     })(),
     platform === "darwin" ? launchdRows(deps.productDir, exec, uid, shape, labelSuffix, env) : Promise.resolve([]),
+    // keeping the Mac awake: one row, macOS only, and never `failed` — the
+    // install is running and correct even when a promise about the MACHINE is
+    // unmet (docs/ops/deployment-shapes.md, "Keeping the Mac awake")
+    keepAwakeRow({ deployment: loaded.deployment, instanceDir, exec, platform }),
     // the launchd shape's core is ONE agent with children launchd cannot see
     platform === "darwin" && shape === "launchd" ? supervisorRows(instanceDir) : Promise.resolve([]),
     // no container runtime is consulted when no service runs in one: a
@@ -918,25 +1132,57 @@ export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
     // failure, so these rows can only add information, never a red run.
     localServerRows({ compute, fetchFn, timeoutMs: Math.min(timeoutMs, 2_000) }),
   ]);
-  rows.push(...componentRows, layout, inbox, ...dbAndSchedules, ...launchd, ...supervisor, ...containers, ...localModels);
+  rows.push(...componentRows, layout, inbox, cli, ...dbAndSchedules, ...launchd, ...(keepAwake ? [keepAwake] : []), ...supervisor, ...containers, ...localModels);
 
   return { as_of: new Date().toISOString(), product_dir: deps.productDir, shape, ok: !rows.some((r) => r.status === "failed"), rows };
 }
 
 // ---- rendering ------------------------------------------------------------------
 
-export function renderTable(report: DoctorReport): string {
-  const head = ["name", "kind", "status", "ms", "remediation"];
-  const body = report.rows.map((r) => [r.name, r.kind, r.status, String(r.latency_ms), r.status === "ok" ? "" : (r.remediation ?? r.probe)]);
-  const widths = head.map((h, i) => Math.max(h.length, ...body.map((row) => (i < 4 ? (row[i] ?? "").length : 0))));
-  const line = (cells: string[]) => cells.map((c, i) => (i < 4 ? c.padEnd(widths[i] ?? 0) : c)).join("  ").trimEnd();
+/** The name column stops growing here: one 60-character launchd label must not indent every other row off the screen. */
+const NAME_WIDTH_CAP = 34; // limit: fixed — a display column, not a policy; a row wider than this simply runs on
+
+/**
+ * The report as a person reads it (docs/ops/cli-style.md): one block per
+ * kind, one icon and one colour per status, the remediation wrapped
+ * underneath the row it belongs to rather than pushed into a ragged
+ * fifth column, and the verdict last.
+ *
+ * `--json` is the machine's copy and is untouched by any of this.
+ */
+export function renderTable(report: DoctorReport, ui: Ui = defaultUi()): string {
+  const statusWidth = Math.max(0, ...report.rows.map((r) => r.status.length));
+  const out: string[] = [ui.dim(`${report.product_dir} — shape ${report.shape}, ${report.as_of}`), ""];
+
+  for (const kind of [...new Set(report.rows.map((r) => r.kind))]) {
+    const group = report.rows.filter((x) => x.kind === kind);
+    // per group, not per report: one 60-character launchd label must not
+    // push every bridge's status column halfway across the screen
+    const nameWidth = Math.min(NAME_WIDTH_CAP, Math.max(0, ...group.map((r) => r.name.length)));
+    out.push(ui.heading(kind));
+    for (const r of group) {
+      const status = padTo(ui.paint(statusName(r.status), r.status), statusWidth);
+      out.push(`  ${ui.statusIcon(r.status)} ${padTo(r.name, nameWidth)}  ${status}  ${ui.dim(`${r.latency_ms}ms`.padStart(6))}`.trimEnd());
+      // the one thing a red row is read for: what to do about it. Never on
+      // an ok row — an ok row's probe is noise between the rows that matter.
+      const detail = r.status === "ok" ? "" : (r.remediation ?? r.probe);
+      if (detail) {
+        // the arrow is a marker, not a word: it hangs in the margin and the
+        // text wraps under itself, rather than the arrow taking a line of
+        // its own when the first word is a long path
+        const lead = 6 + visibleWidth(ui.icon("arrow")) + 1;
+        const wrapped = ui.wrap(detail, { indent: lead, hanging: lead }).split("\n");
+        wrapped[0] = `      ${ui.icon("arrow")} ${(wrapped[0] ?? "").slice(lead)}`;
+        for (const l of wrapped) out.push(ui.dim(l));
+      }
+    }
+    out.push("");
+  }
+
   const counts = { ok: 0, degraded: 0, failed: 0, absent: 0 };
   for (const r of report.rows) counts[r.status]++;
-  return [
-    line(head),
-    line(widths.map((w) => "-".repeat(w))),
-    ...body.map(line),
-    "",
-    `${report.rows.length} checks: ${counts.ok} ok, ${counts.degraded} degraded, ${counts.failed} failed, ${counts.absent} absent — ${report.ok ? "healthy" : "FAILED"} (${report.product_dir}, shape ${report.shape})`,
-  ].join("\n");
+  const tally = (Object.keys(counts) as Array<keyof typeof counts>).map((k) => ui.paint(statusName(k), `${counts[k]} ${k}`)).join(", ");
+  const verdict = report.ok ? ui.paint("ok", `${ui.icon("ok")} healthy`) : ui.paint("failed", `${ui.icon("fail")} FAILED`);
+  out.push(`${report.rows.length} checks: ${tally} — ${verdict}`);
+  return out.join("\n");
 }

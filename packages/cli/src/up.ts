@@ -16,7 +16,20 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { COMPUTE_FILENAME, emptyCompute, instanceFile, intEnv, loadCompute, servedProviders, usesCompose, type ChildSpecInput, type Compute, type Deployment } from "@foldedspacelabs/metistry-core";
+import {
+  COMPUTE_FILENAME,
+  KEEP_AWAKE_ENV,
+  emptyCompute,
+  instanceFile,
+  intEnv,
+  keepAwakeOf,
+  loadCompute,
+  servedProviders,
+  usesCompose,
+  type ChildSpecInput,
+  type Compute,
+  type Deployment,
+} from "@foldedspacelabs/metistry-core";
 import { assistantEnv, consoleEnv, consolePort, dbPort, engineAbsentNote, engineStatus, instanceVars, loadDeployment, type ShapeContext } from "./deployment.js";
 import { doctor, renderTable, type DoctorDeps, type DoctorReport } from "./doctor.js";
 import type { Exec } from "./exec.js";
@@ -42,6 +55,7 @@ import {
   type PlistTemplate,
   type PlistValues,
 } from "./launchd.js";
+import { writeCliShim } from "./cli-shim.js";
 import { pinTccHelpers } from "./tcc-pin.js";
 import {
   childFromRenderedPlist,
@@ -126,6 +140,8 @@ export interface UpOptions {
   /** test seam for the closing doctor run */
   doctorFn?: ((deps: DoctorDeps) => Promise<DoctorReport>) | undefined;
   doctorDeps?: Partial<DoctorDeps> | undefined;
+  /** default true; `false` is a test seam — every real `up` writes the cli shim (cli-shim.ts) */
+  cliShim?: boolean | undefined;
 }
 
 export interface UpResult {
@@ -868,7 +884,12 @@ export async function up(opts: UpOptions): Promise<UpResult> {
     // would (see tcc-pin.ts)
     installRoot: opts.productDir,
     ...instanceDir,
-    env,
+    // deployment.yaml is the record for `keep_awake`, so it is rendered into
+    // the environment here rather than being a line anyone can put in `.env`:
+    // it reaches the supervisor through the SAME passthrough every other
+    // METISTRY_* variable takes (consoleEnv → the plist's dict and
+    // supervisor.json's `env`), and there is no second channel to it.
+    env: { ...env, [KEEP_AWAKE_ENV]: keepAwakeOf(deployment) },
     shape: deployment.shape,
     // derived state hangs off the install root, never off a release: a version
     // flip must not orphan the assistant's state or the Postgres data dir
@@ -881,6 +902,18 @@ export async function up(opts: UpOptions): Promise<UpResult> {
   };
   r.note(`product: ${runDir} (${source === "release" ? `pinned release${lock ? ` ${lock.product.version}` : ""} — images pulled, not built` : "git checkout — images built from source"})`);
   r.note(`shape: ${deployment.shape} — from ${loaded.from}`);
+  // said out loud, because it is a machine-level behaviour and the operator
+  // should never discover it from `pmset` (docs/ops/deployment-shapes.md)
+  if (le.platform === "darwin") {
+    const keepAwake = keepAwakeOf(deployment);
+    r.note(
+      keepAwake === "never"
+        ? "keep-awake: never — nothing holds this Mac awake, and it may idle-sleep with the install paused (`metistry deployment set-keep-awake allow_sleep_on_battery`)"
+        : deployment.shape === "launchd"
+          ? `keep-awake: ${keepAwake} — the supervisor holds PreventUserIdleSystemSleep while it runs`
+          : `keep-awake: ${keepAwake}, but the compose shape has no supervisor to hold it — nothing is held (docs/ops/deployment-shapes.md)`,
+    );
+  }
   r.note(`node: ${le.node} (${chosenNode.why}) — every launchd job execs this`);
   // the notice itself is main.ts's job (it prints to stderr, once per run);
   // here it is one line of the plan, so the operator sees which file the
@@ -964,6 +997,16 @@ export async function up(opts: UpOptions): Promise<UpResult> {
         r.section("database");
         await finishPostgres(r, pg);
       }
+    }
+
+    // the cli shim: independent of compose/launchd, but — like everything
+    // else in this block — NOT written once a step above has failed
+    // (nothing runs "after the failure" except doctor's diagnosis, below).
+    // Last, so it sees whatever installLaunchd's `ln -sfn` just did to the
+    // launchd shape's supervisor symlink (cli-shim.ts).
+    if (opts.cliShim !== false) {
+      r.section("cli");
+      await writeCliShim(r, opts.productDir, instanceDir.instanceDir);
     }
   } catch (err) {
     if (!(err instanceof StepFailed)) throw err;

@@ -10,7 +10,7 @@ import { realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { DeploymentShape } from "@foldedspacelabs/metistry-core";
+import { KEEP_AWAKE_VALUES, parseKeepAwake, type DeploymentShape, type KeepAwake } from "@foldedspacelabs/metistry-core";
 import {
   assign,
   computeReport,
@@ -33,7 +33,7 @@ import {
   COMPUTE_TEMPLATES,
   type ComputeOptions,
 } from "./compute.js";
-import { buildDeploymentReport, renderDeploymentReport, setDeploymentShape } from "./deployment-report.js";
+import { buildDeploymentReport, renderDeploymentReport, setDeploymentShape, setKeepAwake } from "./deployment-report.js";
 import { doctor, renderTable, type DoctorDeps } from "./doctor.js";
 import { loadInstallEnv, productVersion, resolveProductDir, resolveSeedDir, type LoadedEnv } from "./env.js";
 import { realExec, type Exec } from "./exec.js";
@@ -42,7 +42,7 @@ import { connect, connectList, CONNECT_TOOLS, parseTool, renderConnect, renderCo
 import { consoleCall, renderConsoleCallError, renderWhoami, whoami } from "./console-client.js";
 import { agentAutonomy, parseAutonomyFlags, renderAutonomy } from "./agents.js";
 import { importSessions } from "./import-sessions.js";
-import { init } from "./init.js";
+import { askKeepAwake, init, type Ask } from "./init.js";
 import { migrateInbox } from "./migrate-inbox.js";
 import { migrateLayout } from "./migrate-layout.js";
 import { migrateShape } from "./migrate-shape.js";
@@ -64,6 +64,7 @@ import { installRuntime } from "./runtime-install.js";
 import { listSecrets, mintSecret, purgeSecrets, renderSecretList, syncSecrets, type SyncDirection } from "./secrets.js";
 import { controlServices, downAll, renderDown, renderServiceResults, serviceLogs, UnknownServiceError, type ServiceAction } from "./service-control.js";
 import { StepRunner } from "./steps.js";
+import { configureUi, createUi, defaultUi, type Ui } from "./ui.js";
 import { up } from "./up.js";
 import { gitHead, update } from "./update.js";
 import { collectVersionInfo, renderVersionInfo } from "./version.js";
@@ -84,7 +85,7 @@ export interface ParsedArgs {
  * `--version <x.y.z>` silently installed the latest release instead
  * (#198, "not fixed here" #2).
  */
-export const BOOLEAN_FLAGS = new Set(["force", "json", "help", "dry-run", "allow-dirty", "no-launchd", "no-compose", "skip-build", "skip-migrate", "rollback", "allow-legacy", "yes", "follow", "namespace", "rotate", "list", "complete", "skip-test", "remote", "json-lines"]);
+export const BOOLEAN_FLAGS = new Set(["force", "json", "help", "dry-run", "allow-dirty", "no-launchd", "no-compose", "no-color", "skip-build", "skip-migrate", "rollback", "allow-legacy", "yes", "follow", "namespace", "rotate", "list", "complete", "skip-test", "remote", "json-lines"]);
 
 /** `--channel git|release` — anything else is a typo, not a guess (the lock parser is strict for the same reason). */
 export function parseChannel(v: string | undefined): LockSource | undefined {
@@ -166,6 +167,21 @@ export function parseDeploymentShape(v: string | undefined): DeploymentShape | u
   return v === "compose" || v === "launchd" ? v : undefined;
 }
 
+/**
+ * One line from the terminal, for the one question this CLI asks. Node's own
+ * readline — no dependency, and nothing else in this package needs a prompt
+ * (the Keychain's own `security -w` reads stdin itself).
+ */
+async function terminalAsk(prompt: string): Promise<string> {
+  const { createInterface } = await import("node:readline/promises");
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    return await rl.question(prompt);
+  } finally {
+    rl.close();
+  }
+}
+
 /** `secrets sync` direction: `--to` names it outright, `--from` names the other end. Never guessed. */
 export function syncDirection(from: string | undefined, to: string | undefined): SyncDirection {
   const ok = (v: string | undefined, flag: string): SyncDirection | undefined => {
@@ -184,7 +200,8 @@ export function syncDirection(from: string | undefined, to: string | undefined):
 const USAGE = `metistry — Metistry command line
 
   metistry init <dir> [--name <assistant name>] [--channel git|release]
-                      [--shape compose|launchd] [--force] [--product-dir <checkout>]
+                      [--shape compose|launchd] [--keep-awake <value>]
+                      [--force] [--product-dir <checkout>]
       Create a private instance repo at <dir> from the product's seed/ (git init,
       the vault at the root — Inbox/, now.md, CLAUDE.md — and .metistry/ with
       identity.yaml carrying a minted instance_id, rules.yaml, the config dirs
@@ -197,6 +214,13 @@ const USAGE = `metistry — Metistry command line
       --channel writes metistry.lock's product.source: git (this install is a
       checkout update fast-forwards; the default) or release (it consumes
       published artifacts — docs/ops/releases.md).
+      On a terminal it asks ONE question: whether to keep this Mac awake while
+      Metistry runs (never | allow_sleep_on_battery | always |
+      always_lid_closed), with what each one costs printed beside it, and
+      writes your answer to <dir>/.metistry/deployment.yaml. --keep-awake
+      <value> answers it without a terminal; with neither, the question is not
+      asked and nothing is written — an install that was never asked holds
+      nothing.
 
   metistry connect-repo <url> [--instance <dir>] [--auth device|token|ssh] [--force]
       Point the instance repo at a private remote and leave credentials the
@@ -479,6 +503,17 @@ const USAGE = `metistry — Metistry command line
       it. Refuses while services still run under the current shape (the data
       does not move between shapes on its own); --force writes anyway.
 
+  metistry deployment set-keep-awake <never|allow_sleep_on_battery|always|always_lid_closed>
+                                [--yes] [--product-dir <checkout>] [--instance <dir>]
+      Whether this install holds the Mac awake, and on which power (macOS).
+      The same protected write as set-shape — preview without --yes, applied
+      with it — and it prints what the choice costs before writing it. It does
+      NOT refuse while services run: changing the policy changes nothing
+      already running, and it takes effect at the next metistry up.
+      always_lid_closed is accepted and behaves as always: no process can keep
+      a Mac awake with the lid shut, and doctor says so rather than pretending
+      (docs/ops/deployment-shapes.md).
+
   metistry migrate-inbox [--instance <dir>] [--dry-run]
       Move an existing instance's inbox into the vault: inbox/* (or a
       differently-cased vault inbox, renamed through a temp name because
@@ -563,6 +598,82 @@ An instance directory is self-contained (docs/ops/cli.md); --env-file overrides
 both. Nothing already set in the environment is overwritten by either file.
 `;
 
+/**
+ * The overview `metistry --help` opens with: every verb, grouped by what
+ * you are in the middle of doing, one aligned line each. The reference
+ * below it (USAGE) is unabridged and stays that way — this is the map, not
+ * a replacement for the territory. A new verb belongs in both.
+ */
+export const HELP_GROUPS: Array<{ title: string; verbs: Array<[string, string]> }> = [
+  {
+    title: "install",
+    verbs: [
+      ["init <dir>", "create a private instance repo from the product's seed/"],
+      ["connect-repo <url>", "point it at a private remote, with credentials to push with"],
+      ["secrets sync|mint|list|purge", "the login Keychain is the store; .env is generated from it"],
+      ["runtime install --from <bundle>", "seed a writable product dir from a signed app bundle"],
+      ["up", "containers and host jobs, then doctor"],
+      ["down", "stop everything this instance runs, then confirm by looking"],
+    ],
+  },
+  {
+    title: "every day",
+    verbs: [
+      ["doctor", "validate every manifest; probe every bridge, service and job"],
+      ["restart|stop|start [<service>…]", "one service, several, or everything this shape runs"],
+      ["logs <service>", "tail one service's log"],
+      ["update", "pull, build, migrate under a lock, restart what changed, pin"],
+      ["version", "cli, product, the lock's pin, a release's runtime pack"],
+    ],
+  },
+  {
+    title: "configure",
+    verbs: [
+      ["compute show|providers|models", "which providers exist and which model each tier runs on"],
+      ["compute assign|budget", "point a tier at a model; cap what it may spend"],
+      ["deployment [set-shape]", "the effective shape (D4 overlay) and its services"],
+      ["deployment set-keep-awake", "whether this install holds the Mac awake, and on which power"],
+      ["agents autonomy <id>", "how much room one agent has with an action"],
+      ["identity", "identity.yaml — the one place the assistant is named"],
+      ["instances list|add|remove|refresh", "the peer registry: which other instances this one knows"],
+    ],
+  },
+  {
+    title: "reach in",
+    verbs: [
+      ["connect <tool> | --list", "give Cursor, OpenCode, Devin or Claude Code its own way in"],
+      ["console whoami | call", "one authenticated request against the console, as you"],
+      ["runs export", "the audit ledger as NDJSON, oldest first, resumable"],
+      ["import-sessions", "summarise this machine's Claude Code sessions into /capture"],
+    ],
+  },
+  {
+    title: "move an install",
+    verbs: [
+      ["migrate-layout", "legacy layout → the instance directory IS the vault"],
+      ["migrate-inbox", "a pre-#156 inbox/ → the vault's Inbox/"],
+      ["migrate-shape <launchd|compose>", "move a LIVE install between shapes, with its data"],
+    ],
+  },
+];
+
+/** The grouped overview, then the full reference. `--json` never reaches here; `--no-color` and a pipe flatten it to plain text. */
+export function renderHelp(ui: Ui = defaultUi()): string {
+  const out = [`${ui.strong("metistry")} ${ui.dim("— Metistry command line")}`, ""];
+  out.push(...ui.wrap("A local-first personal assistant and knowledge graph. The assistant is named in identity.yaml — nowhere else.").split("\n"), "");
+  for (const g of HELP_GROUPS) {
+    out.push(ui.heading(g.title));
+    // the verb is what the eye is hunting for: it stays plain (the
+    // terminal's own foreground) while its description is dimmed
+    out.push(ui.kv(g.verbs.map(([v, d]) => [v, ui.dim(d)]), { keyRole: "plain" }));
+    out.push("");
+  }
+  out.push(...ui.wrap("--json prints the machine-readable answer where a verb has one; --dry-run runs nothing; --no-color is plain text.").split("\n").map((l) => ui.dim(l)), "");
+  out.push(ui.heading("reference — every verb, every flag"));
+  // USAGE's own first line is the title this already printed
+  return [...out, USAGE.split("\n").slice(1).join("\n")].join("\n");
+}
+
 export interface MainIo {
   out?: (s: string) => void;
   err?: (s: string) => void;
@@ -578,21 +689,56 @@ export interface MainIo {
   fetchFn?: typeof fetch;
   /** test seam: `console call --body -` reads this instead of the real stdin */
   readStdin?: () => Promise<string>;
+  /**
+   * test seam: the one interactive question this CLI asks (`init`'s
+   * keep-awake choice). Absent and no tty = the question is not asked and
+   * nothing is written, which is what keeps `init` safe to drive from the Mac
+   * app's first run and from a script.
+   */
+  ask?: Ask;
 }
 
+/**
+ * The CLI's entry point.
+ *
+ * Everything it does is `dispatch()`; this wrapper owns the two things that
+ * bracket a command rather than belong to one — the process's Ui (so
+ * `--json` and `--no-color` are decided once, before anything renders) and
+ * the deprecation notices, which are dimmed and printed ONCE, on stderr,
+ * AFTER the output they qualify (docs/ops/cli-style.md rule 7). They used to
+ * be the first thing on the screen, which made a fallback `.env` shout
+ * louder than the answer you asked for.
+ */
 export async function main(argv: string[], io: MainIo = {}): Promise<number> {
+  const err = io.err ?? ((s: string) => process.stderr.write(s + "\n"));
+  const { flags } = parseArgs(argv);
+  const json = flags.json === true;
+  configureUi({ json, noColor: flags["no-color"] === true });
+  const notices: string[] = [];
+  try {
+    return await dispatch(argv, io, notices);
+  } finally {
+    const noteUi = createUi({ stream: process.stderr, json, noColor: flags["no-color"] === true });
+    for (const n of notices) for (const l of noteUi.wrap(n).split("\n")) err(noteUi.note(l));
+  }
+}
+
+async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<number> {
   const out = io.out ?? ((s: string) => process.stdout.write(s + "\n"));
   const err = io.err ?? ((s: string) => process.stderr.write(s + "\n"));
   const { command, positional, flags } = parseArgs(argv);
+  const ui = defaultUi();
   const productDir = resolveProductDir(str(flags, "product-dir"));
   /**
    * This install's environment, from the instance's own `state/.env` and
-   * then the product checkout's deprecated one. Deprecation notices go to
-   * STDERR so `doctor --json` stays machine-readable.
+   * then the product checkout's deprecated one. A deprecation notice is
+   * collected, not printed: `main()` flushes them to STDERR at the end, so
+   * `doctor --json` stays machine-readable and nothing shouts over the
+   * output.
    */
   const loadEnv = (): LoadedEnv => {
     const loaded = loadInstallEnv({ productDir, instanceDir: str(flags, "instance"), envFile: str(flags, "env-file") });
-    for (const n of loaded.notices) err(n);
+    for (const n of loaded.notices) if (!notices.includes(n)) notices.push(n);
     return loaded;
   };
   // `metistry --version` (no subcommand): the bare flag every CLI answers,
@@ -600,11 +746,11 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
   // the same thing as a real subcommand, further down.
   if (command === undefined && flags.version === true) {
     const info = await collectVersionInfo({ productDir, instanceDir: loadEnv().instanceDir });
-    out(flags.json === true ? JSON.stringify(info, null, 2) : renderVersionInfo(info));
+    out(flags.json === true ? JSON.stringify(info, null, 2) : renderVersionInfo(info, ui));
     return 0;
   }
   if (command === undefined || command === "help" || flags.help) {
-    out(USAGE);
+    out(renderHelp(ui));
     return command === undefined && !flags.help ? 2 : 0;
   }
   let channel: LockSource | undefined;
@@ -632,9 +778,31 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
         err(`--shape must be compose or launchd, not ${JSON.stringify(shapeFlag)}`);
         return 2;
       }
+      // The keep-awake question. `--keep-awake <value>` answers it without a
+      // terminal; otherwise it is ASKED, and only where there is somebody to
+      // ask — a pipe, a script or the Mac app's first run gets no question
+      // and no answer, and an install with no answer holds nothing. That is
+      // the invariant here: this setting changes how the machine behaves, so
+      // it is never taken by default (owner's ruling, 2026-09-19).
+      const keepAwakeFlag = str(flags, "keep-awake");
+      let keepAwake = parseKeepAwake(keepAwakeFlag);
+      if (keepAwakeFlag !== undefined && keepAwake === undefined) {
+        err(`--keep-awake must be one of ${KEEP_AWAKE_VALUES.join(", ")} — not ${JSON.stringify(keepAwakeFlag)}`);
+        return 2;
+      }
+      const ask = io.ask ?? (process.stdin.isTTY ? terminalAsk : undefined);
+      if (keepAwake === undefined && ask) {
+        try {
+          keepAwake = await askKeepAwake(ask, out, { ui });
+        } catch (e) {
+          err(e instanceof Error ? e.message : String(e));
+          return 2;
+        }
+      }
       const result = await init({
         dir,
         name: str(flags, "name"),
+        ...(keepAwake !== undefined ? { keepAwake } : {}),
         force: flags.force === true,
         seedDir: resolveSeedDir(productDir),
         version: productVersion(),
@@ -645,6 +813,11 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
         platform: io.platform,
       });
       out(`instance created at ${result.dir} (commit ${result.commit.slice(0, 7)}; assistant named "${result.assistantName}" in identity.yaml; instance_id ${result.instanceId})`);
+      out(
+        result.keepAwake === undefined
+          ? "keep-awake: not configured — this Mac may idle-sleep and the install pauses with it (`metistry deployment set-keep-awake <value> --yes`, or `metistry init --keep-awake <value>`)"
+          : `keep-awake: ${result.keepAwake} — written to this instance's .metistry/deployment.yaml; it takes effect at \`metistry up\``,
+      );
       out("");
       out(`Next — put these in this instance's environment, ${instanceEnvFile(result.dir)} (the token below is minted once and shown only here):`);
       out("");
@@ -700,7 +873,7 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
       if (flags.list === true) {
         try {
           const r = await connectList(common);
-          out(flags.json === true ? JSON.stringify(r, null, 2) : renderConnectList(r));
+          out(flags.json === true ? JSON.stringify(r, null, 2) : renderConnectList(r, ui));
           return 0;
         } catch (e) {
           err(`metistry connect --list: ${e instanceof Error ? e.message : String(e)}`);
@@ -1004,7 +1177,7 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
     case "version": {
       const loaded = loadEnv();
       const info = await collectVersionInfo({ productDir, instanceDir: loaded.instanceDir });
-      out(flags.json === true ? JSON.stringify(info, null, 2) : renderVersionInfo(info));
+      out(flags.json === true ? JSON.stringify(info, null, 2) : renderVersionInfo(info, ui));
       return 0;
     }
     case "import-sessions": {
@@ -1037,9 +1210,18 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
         return 2;
       }
       loadEnv();
-      const report = await doctor({ productDir, ...io.doctorDeps });
-      out(flags.json === true ? JSON.stringify(report, null, 2) : renderTable(report));
-      return report.ok ? 0 : 1;
+      // the probes are the slow part (every bridge over HTTP, launchctl,
+      // docker): a TTY gets a spinner, a pipe gets nothing, and neither gets
+      // a byte of it in the --json document
+      const probing = flags.json === true ? undefined : ui.spinner(`probing ${productDir}`, out);
+      try {
+        const report = await doctor({ productDir, ...io.doctorDeps });
+        probing?.stop();
+        out(flags.json === true ? JSON.stringify(report, null, 2) : renderTable(report, ui));
+        return report.ok ? 0 : 1;
+      } finally {
+        probing?.stop();
+      }
     }
     case "runtime": {
       if (positional[0] !== "install") {
@@ -1209,7 +1391,7 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
           home: io.home,
           dryRun: flags["dry-run"] === true,
         });
-        out(downJson ? JSON.stringify({ ok: r.ok, shape: r.shape, results: r.results, confirmations: r.confirmations, ...(r.appRegistrarNote ? { app_registrar_note: r.appRegistrarNote } : {}) }, null, 2) : renderDown(r));
+        out(downJson ? JSON.stringify({ ok: r.ok, shape: r.shape, results: r.results, confirmations: r.confirmations, ...(r.appRegistrarNote ? { app_registrar_note: r.appRegistrarNote } : {}) }, null, 2) : renderDown(r, ui));
         return r.ok ? 0 : 1;
       } catch (e) {
         err(`metistry down: ${e instanceof Error ? e.message : String(e)}`);
@@ -1241,7 +1423,7 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
           home: io.home,
           dryRun: flags["dry-run"] === true,
         });
-        out(asJson ? JSON.stringify(r.results, null, 2) : renderServiceResults(r.results));
+        out(asJson ? JSON.stringify(r.results, null, 2) : renderServiceResults(r.results, ui));
         return r.ok ? 0 : 1;
       } catch (e) {
         if (e instanceof UnknownServiceError) {
@@ -1356,7 +1538,7 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
                 if (json) out(JSON.stringify(r, null, 2));
                 else {
                   out(`provider ${r.name} added (${r.provider.locality}, ${r.provider.base_url}) — ${r.delivery.detail}`);
-                  if (r.test) out(renderProviderTest(r.test));
+                  if (r.test) out(renderProviderTest(r.test, ui));
                 }
                 return 0;
               }
@@ -1376,9 +1558,18 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
                   err("usage: metistry compute providers test <name> [--complete] [--model <id>]");
                   return 2;
                 }
-                const r = await providerTest({ ...computeOpts, name, complete: flags.complete === true, model: str(flags, "model") });
-                out(json ? JSON.stringify(r, null, 2) : renderProviderTest(r));
-                return r.ok ? 0 : 1;
+                // a live GET /v1/models (and, with --complete, a real call):
+                // seconds against a cloud provider, and nothing to look at
+                // meanwhile unless this says so
+                const testing = json ? undefined : ui.spinner(`${name}: GET /v1/models${flags.complete === true ? " and one completion" : ""}`, out);
+                try {
+                  const r = await providerTest({ ...computeOpts, name, complete: flags.complete === true, model: str(flags, "model") });
+                  testing?.stop();
+                  out(json ? JSON.stringify(r, null, 2) : renderProviderTest(r, ui));
+                  return r.ok ? 0 : 1;
+                } finally {
+                  testing?.stop();
+                }
               }
               default:
                 err(`usage: metistry compute providers list | add --from ${COMPUTE_TEMPLATES.join("|")} | remove <name> | test <name> [--complete] [--model <id>]`);
@@ -1490,9 +1681,41 @@ export async function main(argv: string[], io: MainIo = {}): Promise<number> {
           return 1;
         }
       }
+      if (positional[0] === "set-keep-awake") {
+        const keepAwake: KeepAwake | undefined = parseKeepAwake(positional[1]);
+        if (!keepAwake) {
+          err(`usage: metistry deployment set-keep-awake <${KEEP_AWAKE_VALUES.join("|")}> [--yes] [--instance <dir>]`);
+          return 2;
+        }
+        const loadedDep = loadEnv();
+        const instanceDir = str(flags, "instance") ?? loadedDep.instanceDir;
+        if (!instanceDir) {
+          err("deployment set-keep-awake needs the instance repo: pass --instance <dir> or set METISTRY_INSTANCE_DIR (docs/ops/cli.md) — deployment.yaml lives there");
+          return 2;
+        }
+        try {
+          await setKeepAwake({
+            productDir,
+            instanceDir,
+            keepAwake,
+            yes: flags.yes === true,
+            env: process.env,
+            platform: io.platform ?? process.platform,
+            uid: io.uid ?? (typeof process.getuid === "function" ? process.getuid() : 0),
+            fetchFn: fetch,
+            exec: io.exec,
+            out,
+          });
+          if (flags.yes !== true) out("preview only — pass --yes to write this.");
+          return 0;
+        } catch (e) {
+          err(`metistry deployment set-keep-awake: ${e instanceof Error ? e.message : String(e)}`);
+          return 1;
+        }
+      }
       loadEnv();
       const report = await buildDeploymentReport({ productDir, env: process.env, exec: io.exec, platform: io.platform, uid: io.uid });
-      out(flags.json === true ? JSON.stringify(report, null, 2) : renderDeploymentReport(report));
+      out(flags.json === true ? JSON.stringify(report, null, 2) : renderDeploymentReport(report, ui));
       return 0;
     }
     default:

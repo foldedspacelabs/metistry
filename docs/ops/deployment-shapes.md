@@ -390,11 +390,113 @@ install-wide shape. `reconciler` and `watchdog` are host jobs in either
 shape (invariant 6) — the reconciler holds the instance repo's working
 tree, the watchdog must outlive what it watches.
 
-Parsing is strict. `shape: lauchd` is an error, not a silent compose.
+Parsing is strict. `shape: lauchd` is an error, not a silent compose — and
+so is `keep_awake: true`, which is why the values are strings ("Keeping the
+Mac awake" below). One consequence worth knowing before you downgrade: a
+CLI that predates `keep_awake` refuses a file that carries it, with every
+verb that loads deployment. Removing the one line by hand is the way back.
 
 `METISTRY_DEPLOYMENT_SHAPE=launchd metistry up --dry-run` previews a
 shape without editing anything; `up` and `doctor` both print which of
 the two they read.
+
+## Keeping the Mac awake
+
+Metistry only works while the Mac is awake: a capture from your phone, a
+scheduled collector and the assistant's queue all wait while it sleeps. So
+`deployment.yaml` carries one more key, macOS only:
+
+```yaml
+shape: launchd
+keep_awake: allow_sleep_on_battery   # never | allow_sleep_on_battery | always | always_lid_closed
+```
+
+| value | what it does |
+| --- | --- |
+| `never` | nothing is held; your own System Settings sleep timer decides. **This is what an install that has never been asked does** — the key is absent, and absent means `never`. |
+| `allow_sleep_on_battery` | held while the Mac draws `'AC Power'`; released on `'Battery Power'` and on `'UPS Power'`. A UPS is a battery — an external one — and a desktop on one during an outage should be spending its runtime on shutting down cleanly. What `metistry init` offers first. |
+| `always` | held on any power source. On a laptop away from a charger that costs battery; the Mac still sleeps at low battery, which the assertion is defined not to stop. |
+| `always_lid_closed` | the same as `always`, **plus an administrator change you make yourself**. See below. Offered, never a default. |
+
+**Informed consent, not a default.** A power assertion *overrides* the
+user's own sleep setting (`pmset(1)`: "processes may dynamically override
+these power management settings by using I/O Kit power assertions"), so
+taking one without being asked would take a machine-level behaviour from
+somebody who never agreed to it. `seed/deployment.yaml` therefore does not
+set the key; `metistry init` asks once, on a terminal, printing what each
+choice costs, and writes the answer. `--keep-awake <value>` answers it
+without a terminal, and a run with neither — a pipe, a script, the Mac
+app's first run — asks nothing and writes nothing.
+
+**What is held.** `caffeinate -i -w <supervisor pid>`, which is exactly
+`IOPMAssertionCreateWithName(kIOPMAssertPreventUserIdleSystemSleep)` — the
+same IOKit call, no privileges, no TCC grant, no `sudo`. Never `-d` (that
+pins the display, which you did not ask for: **your screen still sleeps**)
+and never `-s` (deprecated, and AC-only). `-w` is the safety: the assertion
+is released when the watched pid exits, even under `SIGKILL`, so a killed
+supervisor cannot leave an ownerless holder behind. We never write a `pmset`
+setting — every `pmset` call in this design is a read — and we can neither
+release nor take credit for another app's assertion: `IOPMAssertionRelease`
+is scoped to the id its creator got back. A keep-awake app you already run
+is unaffected, and so are we.
+
+**The supervisor holds it, so the `launchd` shape holds it.** The assertion
+is tied to the process whose lifetime is the install's, and under
+`shape: compose` there is no supervisor: nothing is held, and `doctor` says
+so rather than pretending. The setting is still recorded and still moves
+with you when you migrate the shape.
+
+**What no setting can do.** A closed lid always sleeps. The assertion's own
+definition says so — "The system may still sleep for lid close, Apple menu,
+low battery, or other sleep reasons" (`IOPMLib.h`) — and the state that
+governs the lid is an `IOPMrootDomain` property, not an assertion. The only
+user-space switch that changes it is `sudo pmset -a disablesleep 1`, which
+is system-wide, persists in a root-owned plist, and `pmset(1)` says plainly:
+"pmset must be run as root in order to modify any settings". Metistry will
+not make an administrator change to your Mac. So `always_lid_closed` is
+accepted, behaves exactly as `always`, and every surface says the
+lid-closed half is **not available on this Mac without an administrator
+change** — offered and explained rather than faked. (A lid-closed Mac stays
+awake in closed-display mode, which is your own external power, display and
+input setup; macOS decides that, not us.) Scheduled sleep, the Apple menu's
+Sleep item, a thermal emergency and low battery all bypass the assertion by
+design as well.
+
+**`metistry doctor` reports one row, `keep-awake`, macOS only and
+`degraded` at worst** — the install is running and correct even when a
+promise about the machine is unmet, so it never fails a run:
+
+| state | status |
+| --- | --- |
+| `never` | `absent` — "not configured", with the verb that turns it on |
+| holding | `ok`, with the pid, since, and the power source. The pid is cross-checked against the **"Listed by owning process"** block of `pmset -g assertions` — never the summary block, which is a *level* (a maximum) and reads 1 while four processes hold it, and never a name, because under `caffeinate` the name is Apple's on every holder |
+| released on battery under `allow_sleep_on_battery` | `ok` — this is the setting working, and it reads as success |
+| configured, but nothing has written the state file, or its heartbeat is stale | `degraded` — the supervisor is not running, or has not restarted since the setting changed |
+| `always_lid_closed` | `degraded`, carrying the administrator sentence above |
+| `shape: compose` | `absent` — no supervisor to hold it |
+| **the Mac slept anyway** | `degraded`, naming when and for how long, with the repair |
+
+That last row is the honest one. The holder compares wall clocks between
+its own 60-second ticks and writes what it sees to
+`<instance>/.metistry/state/run/keep-awake.json`; a jump of three intervals
+while it was holding means the machine was asleep under it — a closed lid,
+a scheduled sleep, or another policy winning. Doctor then says so, and
+offers `metistry deployment set-keep-awake always --yes` with its battery
+cost stated. A gap across a *restart* is deliberately **not** reported as
+sleep: that is what `metistry stop`, a logout and a reboot all look like,
+and a clean stop records itself so the gap after it is never misread.
+
+The cost of all this is one `pmset -g ps` fork a minute and one small file
+write, from a process that was already running a 60-second probe cycle.
+(`pmset -g log` would name the sleep *reason*, and is not used: it cost
+0.42s and 2.8MB on the Mac this was measured on, and had no Sleep-domain
+entries to parse against.)
+
+Changing it: `metistry deployment set-keep-awake <value> [--yes]` —
+preview-then-confirm through the reconciler, like `set-shape`. It takes
+effect at the next `metistry up`, which renders `METISTRY_KEEP_AWAKE` into
+the supervisor's environment; nothing already running changes underneath
+you.
 
 ## A second instance on one Mac — `.metistry/state/ports.yaml`
 
@@ -667,6 +769,10 @@ to one `status` call on the control socket — and a `child:<name>` row for each
 child, with its state, pid, restart count and log path. `launchctl print`
 cannot see those processes, so without this doctor would be blind to
 everything except the agent itself.
+
+On macOS it also adds a `keep-awake` row — this install's power policy and
+whether anything is actually holding the assertion right now ("Keeping the
+Mac awake" above). It is never `failed`.
 
 Logs, under launchd: `/tmp/metistry-{supervisor,db,console,assistant,reconciler}.log`,
 or `/tmp/metistry-<suffix>-<service>.log` on a namespaced instance.

@@ -793,9 +793,13 @@ export async function migrateLayout(opts: MigrateLayoutOptions): Promise<Migrate
     else if (r.action(`move ${m.from} → ${m.to}`)) await rename(join(dir, m.from), join(dir, m.to));
   };
 
+  // What this section moves, as one table, before the commands that do it:
+  // a list of twenty `git mv` lines is a log, not an answer to "what is
+  // about to happen to my vault" (docs/ops/cli-style.md).
   const section = (title: string, list: LayoutMove[]) => {
     r.section(title);
     if (list.length === 0) r.note("nothing to move");
+    else r.table(["from", "to"], list.map((m) => [m.from, `${r.ui.icon("arrow")} ${m.to === "" ? r.ui.dim("removed") : m.to}${m.via ? r.ui.dim(`  (${m.via})`) : ""}`]));
     return list;
   };
 

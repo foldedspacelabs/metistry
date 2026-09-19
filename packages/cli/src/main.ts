@@ -609,7 +609,7 @@ export const HELP_GROUPS: Array<{ title: string; verbs: Array<[string, string]> 
     title: "install",
     verbs: [
       ["init <dir>", "create a private instance repo from the product's seed/"],
-      ["connect-repo <url>", "point it at a private remote, with credentials the reconciler can push with"],
+      ["connect-repo <url>", "point it at a private remote, with credentials to push with"],
       ["secrets sync|mint|list|purge", "the login Keychain is the store; .env is generated from it"],
       ["runtime install --from <bundle>", "seed a writable product dir from a signed app bundle"],
       ["up", "bring an install to running: containers, host jobs, then doctor"],
@@ -618,10 +618,10 @@ export const HELP_GROUPS: Array<{ title: string; verbs: Array<[string, string]> 
   {
     title: "every day",
     verbs: [
-      ["doctor", "validate every manifest; probe every bridge, service, container, job"],
+      ["doctor", "validate every manifest; probe every bridge, service and job"],
       ["restart|stop|start [<service>…]", "one service, several, or everything this shape runs"],
       ["logs <service>", "tail one service's log"],
-      ["update", "pull/build, migrate under a lock, restart what changed, pin, doctor"],
+      ["update", "pull, build, migrate under a lock, restart what changed, pin"],
       ["version", "cli, product, the lock's pin, a release's runtime pack"],
     ],
   },
@@ -632,7 +632,7 @@ export const HELP_GROUPS: Array<{ title: string; verbs: Array<[string, string]> 
       ["compute assign|budget", "point a tier at a model; cap what it may spend"],
       ["deployment [set-shape]", "the effective shape (D4 overlay) and the services it implies"],
       ["agents autonomy <id>", "how much room one agent has with an action"],
-      ["identity", "the instance's identity.yaml — the only place the assistant is named"],
+      ["identity", "identity.yaml — the one place the assistant is named"],
       ["instances list|add|remove|refresh", "the peer registry: which other instances this one knows"],
     ],
   },
@@ -661,7 +661,9 @@ export function renderHelp(ui: Ui = defaultUi()): string {
   out.push(...ui.wrap("A local-first personal assistant and knowledge graph. The assistant is named in identity.yaml — nowhere else.").split("\n"), "");
   for (const g of HELP_GROUPS) {
     out.push(ui.heading(g.title));
-    out.push(ui.kv(g.verbs.map(([v, d]) => [v, ui.dim(d)])));
+    // the verb is what the eye is hunting for: it stays plain (the
+    // terminal's own foreground) while its description is dimmed
+    out.push(ui.kv(g.verbs.map(([v, d]) => [v, ui.dim(d)]), { keyRole: "plain" }));
     out.push("");
   }
   out.push(ui.dim("--json prints the machine-readable answer where a verb has one; --dry-run runs nothing; --no-color is plain text."), "");

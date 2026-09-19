@@ -210,6 +210,8 @@ export interface TableOptions {
 export interface KvOptions {
   indent?: number | undefined;
   gap?: number | undefined;
+  /** how the key is painted; "plain" leaves it alone (a verb name is the bright thing, a field label is not) */
+  keyRole?: Role | "plain" | undefined;
 }
 
 export interface Ui {
@@ -234,8 +236,8 @@ export interface Ui {
   kv(rows: Array<[string, string]>, opts?: KvOptions): string;
   /** a table with a header rule */
   table(head: string[], rows: string[][], opts?: TableOptions): string;
-  /** a paragraph wrapped at the terminal width, optionally hanging-indented */
-  wrap(text: string, opts?: { indent?: number | undefined; hanging?: number | undefined }): string;
+  /** a paragraph wrapped at the terminal width (or `width`), optionally hanging-indented */
+  wrap(text: string, opts?: { indent?: number | undefined; hanging?: number | undefined; width?: number | undefined }): string;
   /** a horizontal rule `width` wide (or the terminal's width) */
   rule(width?: number): string;
   /** one dimmed secondary line (a deprecation, a hint) */
@@ -280,8 +282,18 @@ export function createUi(opts: CreateUiOptions = {}): Ui {
   const kv = (rows: Array<[string, string]>, o: KvOptions = {}): string => {
     const indent = " ".repeat(o.indent ?? 2);
     const gap = " ".repeat(o.gap ?? 2);
+    const role = o.keyRole ?? "key";
     const w = Math.max(0, ...rows.map(([k]) => visibleWidth(k)));
-    return rows.map(([k, v]) => `${indent}${padTo(paint("key", k), w)}${gap}${v}`.trimEnd()).join("\n");
+    const lead = indent.length + w + gap.length;
+    const out: string[] = [];
+    for (const [k, v] of rows) {
+      // a value longer than the line wraps under itself, never past the
+      // right edge — the column is what makes this readable at all
+      const [first, ...rest] = visibleWidth(v) + lead <= width ? [v] : wrap(v, { width: width - lead }).split("\n");
+      out.push(`${indent}${padTo(role === "plain" ? k : paint(role, k), w)}${gap}${first ?? ""}`.trimEnd());
+      for (const l of rest) out.push(`${" ".repeat(lead)}${l}`.trimEnd());
+    }
+    return out.join("\n");
   };
 
   const table = (head: string[], rows: string[][], o: TableOptions = {}): string => {
@@ -302,10 +314,10 @@ export function createUi(opts: CreateUiOptions = {}): Ui {
     ].join("\n");
   };
 
-  const wrap = (text: string, o: { indent?: number | undefined; hanging?: number | undefined } = {}): string => {
+  const wrap = (text: string, o: { indent?: number | undefined; hanging?: number | undefined; width?: number | undefined } = {}): string => {
     const first = " ".repeat(o.indent ?? 0);
     const rest = " ".repeat(o.hanging ?? o.indent ?? 0);
-    const limit = Math.max(20, width - Math.max(first.length, rest.length));
+    const limit = Math.max(20, (o.width ?? width) - Math.max(first.length, rest.length));
     const out: string[] = [];
     for (const paragraph of text.split("\n")) {
       let line = "";

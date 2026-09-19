@@ -320,6 +320,48 @@ import Testing
     #expect(await runner.invocations[0][4] == "/api/knowledge/pages")
 }
 
+@Test func aPagesLinksArriveInOneListWithTheDirectionOnEachEdge() async {
+    let api = ConsoleAPI(transport: StubConsole([
+        "GET /api/knowledge/links?limit=3&path=Areas%2FHealth%2Fsleep.md": Fixtures.pageLinks,
+    ]))
+    let links = try! (await api.knowledgeLinks(path: "Areas/Health/sleep.md", limit: 3)).get()
+    #expect(links.path == "Areas/Health/sleep.md")
+    // One list, in the server's order — outgoing first, then by path, then by
+    // kind. The two sections are a view of it, not a second fetch.
+    #expect(links.links.map(\.path) == ["Areas/Health/taper.md", "Areas/Health/nowhere.md", "Journal/2026-09-18.md"])
+    #expect(links.outgoing.count == 2)
+    #expect(links.incoming.map(\.path) == ["Journal/2026-09-18.md"])
+    // An unresolved wikilink is a link, titled from its own path: a note that
+    // has not been written yet, which is how a vault gets written.
+    #expect(links.links[1].resolved == false)
+    #expect(links.links[1].title == "nowhere")
+    #expect(links.links[1].status == nil)
+    #expect(links.links[0].resolved == true)
+    #expect(links.links[0].kind == "wikilink")
+    // A full window, and no total — the only way to say "there may be more".
+    #expect(!links.isLastPage)
+    #expect(links.nextOffset == 3)
+    #expect(KnowledgePageLinkList.maximumLimit == 500)
+}
+
+@Test func theSameTargetReachedTwoWaysIsTwoEdgesWithTwoIdentities() async {
+    let api = ConsoleAPI(transport: StubConsole(["GET /api/knowledge/links?path=Areas%2FHealth%2Fsleep.md": Fixtures.pageLinksTail]))
+    let links = try! (await api.knowledgeLinks(path: "Areas/Health/sleep.md")).get()
+    // `wikilink` and `embed` at the same page are distinct rows, so the
+    // identity a list renders by cannot be the path alone.
+    #expect(links.links.map(\.kind) == ["embed", "wikilink"])
+    #expect(Set(links.links.map(\.id)).count == 2)
+    #expect(links.isLastPage)
+    #expect(links.nextOffset == nil)
+}
+
+@Test func theFirstWindowOfALinkListHasOneSpellingHoweverTheCallerAsksForIt() async {
+    let runner = StubRunner(result: CommandResult(exitCode: 0, stdout: Fixtures.pageLinksTailText, stderr: ""))
+    let api = ConsoleAPI(cli: stubCLI(runner))
+    _ = await api.knowledgeLinks(path: "Areas/Health/sleep.md", offset: 0)
+    #expect(await runner.invocations[0][4] == "/api/knowledge/links?path=Areas%2FHealth%2Fsleep.md")
+}
+
 @Test func theCommandMenuIsGeneratedAndCarriesTheTierEachCommandResolvesToNow() async {
     let api = ConsoleAPI(transport: StubConsole(["GET /api/commands": Fixtures.commands]))
     let menu = try! (await api.commands()).get()
@@ -844,6 +886,31 @@ enum Fixtures {
      "area":null,"prefix":null,"limit":100,"offset":0,"as_of":"2026-09-18T09:00:12.000Z"}
     """
     static let pagesTail = bytes(pagesTailText)
+
+    /// `knowledge_page_links`' columns: both directions in one list, an
+    /// unresolved target kept and marked, a full window (no total, ever).
+    static let pageLinks = bytes("""
+    {"path":"Areas/Health/sleep.md","links":[
+      {"direction":"outgoing","path":"Areas/Health/taper.md","kind":"wikilink","title":"Taper",
+       "description":"coming off it","status":"clean","resolved":true},
+      {"direction":"outgoing","path":"Areas/Health/nowhere.md","kind":"wikilink","title":"nowhere",
+       "description":null,"status":null,"resolved":false},
+      {"direction":"incoming","path":"Journal/2026-09-18.md","kind":"wikilink","title":"2026-09-18",
+       "description":null,"status":"clean","resolved":true}],
+     "limit":3,"offset":0,"as_of":"2026-09-19T09:00:13.000Z"}
+    """)
+
+    /// The last window, and the pair a path-keyed list would collapse: the
+    /// same target reached as an embed and as a wikilink is two edges.
+    static let pageLinksTailText = """
+    {"path":"Areas/Health/sleep.md","links":[
+      {"direction":"outgoing","path":"Areas/Health/taper.md","kind":"embed","title":"Taper",
+       "description":null,"status":"clean","resolved":true},
+      {"direction":"outgoing","path":"Areas/Health/taper.md","kind":"wikilink","title":"Taper",
+       "description":null,"status":"clean","resolved":true}],
+     "limit":100,"offset":0,"as_of":"2026-09-19T09:00:14.000Z"}
+    """
+    static let pageLinksTail = bytes(pageLinksTailText)
 
     static let commands = bytes("""
     {"commands":[

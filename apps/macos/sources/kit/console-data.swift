@@ -1289,6 +1289,97 @@ public struct KnowledgePageEntry: Codable, Sendable, Equatable, Identifiable {
     }
 }
 
+/// `GET /api/knowledge/links`. One page's links in ONE list — `direction`
+/// says which way each edge runs — because the route filters both ends of
+/// every edge through the same predicate, and two arrays would be two chances
+/// to filter them unevenly.
+///
+/// No total, for the reason the page list has none: a count over the
+/// unfiltered edges would be the size of what was withheld. `isLastPage` is
+/// the end of the list.
+public struct KnowledgePageLinkList: Codable, Sendable, Equatable {
+    /// Echoed back the way `search` echoes `q`: the page these links are of.
+    public let path: String
+    public let links: [KnowledgePageLink]
+    public let limit: Int
+    public let offset: Int
+    public let asOf: String?
+
+    enum CodingKeys: String, CodingKey {
+        case path, links, limit, offset
+        case asOf = "as_of"
+    }
+
+    public init(path: String = "", links: [KnowledgePageLink] = [], limit: Int = 100, offset: Int = 0, asOf: String? = nil) {
+        self.path = path
+        self.links = links
+        self.limit = limit
+        self.offset = offset
+        self.asOf = asOf
+    }
+
+    /// The route's own ceiling — the same one the page list has, so a client
+    /// cannot ask for a window it will be refused.
+    public static let maximumLimit = 500
+
+    public var isLastPage: Bool { links.count < limit }
+    public var nextOffset: Int? { isLastPage ? nil : offset + limit }
+
+    /// The two directions, ready to render as sections. Order within each is
+    /// the server's, which is total and stable under `offset`.
+    public var outgoing: [KnowledgePageLink] { links.filter { $0.direction == "outgoing" } }
+    public var incoming: [KnowledgePageLink] { links.filter { $0.direction == "incoming" } }
+}
+
+public struct KnowledgePageLink: Codable, Sendable, Equatable, Identifiable {
+    /// `outgoing` — the page links there; `incoming` — that page links here.
+    public let direction: String
+    /// Always the OTHER end of the edge, vault-relative. An edge whose other
+    /// end the scope does not cover is dropped before it is sent, so this
+    /// list is never a directory listing of what was filtered.
+    public let path: String
+    /// `wikilink`, `frontmatter` or `embed` — the same target reached two
+    /// ways is two edges, which is why `kind` is part of the identity.
+    public let kind: String?
+    /// The target's frontmatter title where the index knows the page, else
+    /// its basename — decided server-side either way.
+    public let title: String?
+    public let description: String?
+    /// `clean` or `dirty`, and nil for a link nothing lives at yet. A draft
+    /// or an unsettled `conflict` is not in the list at all, at either end.
+    public let status: String?
+    /// Whether the index holds a settled page at `path`. `false` is an
+    /// unresolved wikilink — a note that has not been written yet, which is
+    /// how a vault gets written and not an error to swallow.
+    public let resolved: Bool?
+
+    /// The edge's identity is the triple, not the path: one page can link to
+    /// another as both a wikilink and an embed.
+    public var id: String { "\(direction)|\(kind ?? "")|\(path)" }
+
+    enum CodingKeys: String, CodingKey {
+        case direction, path, kind, title, description, status, resolved
+    }
+
+    public init(
+        direction: String,
+        path: String,
+        kind: String? = nil,
+        title: String? = nil,
+        description: String? = nil,
+        status: String? = nil,
+        resolved: Bool? = nil
+    ) {
+        self.direction = direction
+        self.path = path
+        self.kind = kind
+        self.title = title
+        self.description = description
+        self.status = status
+        self.resolved = resolved
+    }
+}
+
 // MARK: - The composer's menu
 
 /// `GET /api/commands` — generated from this instance's own `rules.yaml` plus

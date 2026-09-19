@@ -73,6 +73,26 @@ instance repo's history like everything else invariant 1 depends on.
 `.metistry/state/` holds `.env`, Postgres data, model weights and sockets —
 exactly what `docker compose down -v` should be able to lose.
 
+**`.metistry/state/bin/`** holds two things `metistry up`/`metistry update`
+write, never by hand, and it is fine to lose it the same way: rerunning
+either verb regenerates both.
+
+- `metistry` — the CLI shim (`packages/cli/src/cli-shim.ts`): a POSIX
+  script that already knows this install's product dir and instance dir,
+  so `metistry <verb>` works without either resolved for it. `up` never
+  puts it on `PATH` itself (invariant 2) — `docs/ops/cli.md`, "Getting
+  `metistry` on your PATH", has the one-liner it prints instead.
+- `Metistry` (capital M, **launchd shape only**) — the supervisor's
+  program-identity symlink to this install's node (`supervisorBinPath`),
+  so System Settings shows the background item as "Metistry" rather than
+  "node".
+
+macOS's default APFS volume is case-insensitive, so those two names are
+the SAME directory entry there. `up` checks what is actually sitting at
+the path before writing the shim over it, and leaves a symlink alone: on
+the launchd shape, until this is resolved differently, the cli shim is
+simply not written (`docs/ops/cli.md` has the detail).
+
 ## Migrating an existing instance
 
 `metistry migrate-layout` carries an instance from the legacy layout to the

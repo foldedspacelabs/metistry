@@ -737,7 +737,9 @@ export async function keepAwakeRow(deps: { deployment: Deployment; instanceDir: 
       if (now() - Date.parse(state.heartbeat_at) > state.interval_ms * KEEP_AWAKE_CUTOFF_FACTOR) {
         return {
           status: "degraded",
-          remediation: `the holder last reported at ${state.heartbeat_at}, more than ${KEEP_AWAKE_CUTOFF_FACTOR} of its ${Math.round(state.interval_ms / 1000)}s cycles ago — the supervisor is not running: \`metistry logs supervisor\``,
+          remediation:
+            `the holder last reported at ${state.heartbeat_at}, more than ${KEEP_AWAKE_CUTOFF_FACTOR} of its ${Math.round(state.interval_ms / 1000)}s cycles ago — ` +
+            `either the supervisor is not running (\`metistry logs supervisor\`), or this Mac has just woken and the holder has not ticked yet, in which case the next run of doctor says so`,
           meta,
         };
       }

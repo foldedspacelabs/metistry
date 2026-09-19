@@ -23,5 +23,10 @@ full reference still underneath. `<checkout>/.env is still being read as a
 fallback and is deprecated` was the first thing printed by almost every verb;
 it is now one dimmed line at the end.
 
+`down` and `restart|stop|start` are the same table, with what `launchctl
+print` and `docker compose ps` answered after the stop under a heading of its
+own; `deployment` names this install's keep-awake policy beside its shape;
+and `init`'s one question wraps to the terminal instead of to 90 columns.
+
 No `--json` document and no exit code changes: colour is off at the source
 whenever a verb is printing for a machine. `--no-color` is new.

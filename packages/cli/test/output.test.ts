@@ -17,6 +17,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { renderProviderTest } from "../src/compute.js";
 import { renderConnectList } from "../src/connect.js";
 import { renderDeploymentReport } from "../src/deployment-report.js";
+import { renderDown } from "../src/service-control.js";
 import { renderTable, type DoctorReport } from "../src/doctor.js";
 import { main, renderHelp } from "../src/main.js";
 import { updateSummary } from "../src/update.js";
@@ -97,12 +98,13 @@ describe("version", () => {
 });
 
 describe("deployment", () => {
-  it("a table with a header rule; running is ● / ○, and n/a where it is not knowable", () => {
+  it("the shape and the power policy, then a table with a header rule; running is ● / ○, and n/a where it is not knowable", () => {
     expect(
       renderDeploymentReport(
         {
           shape: "launchd",
           from: ".metistry/deployment.yaml",
+          keep_awake: "always",
           services: [
             { name: "db", shape: "launchd", enabled: true, running: true },
             { name: "console", shape: "launchd", enabled: true, running: false },
@@ -113,13 +115,52 @@ describe("deployment", () => {
       ),
     ).toBe(
       [
-        "shape  launchd  (from .metistry/deployment.yaml)",
+        "shape       launchd  (from .metistry/deployment.yaml)",
+        "keep_awake  always",
         "",
         "service     shape    enabled  running",
         "──────────  ───────  ───────  ───────",
         "db          launchd  yes      ● yes",
         "console     launchd  yes      ○ no",
         "reconciler  launchd  no       ○ n/a",
+      ].join("\n"),
+    );
+  });
+});
+
+describe("down", () => {
+  it("what was stopped, then what looking afterwards found, then the tally", () => {
+    expect(
+      renderDown(
+        {
+          ok: true,
+          shape: "launchd",
+          commands: [],
+          results: [
+            { service: "supervisor", action: "stop", ok: true, detail: "booted out" },
+            { service: "db", action: "stop", ok: false, detail: "exit 3" },
+          ],
+          confirmations: [
+            { name: "com.foldedspacelabs.metistry", stopped: true, detail: "not loaded" },
+            { name: "compose", stopped: false, detail: "1 container still up" },
+          ],
+        },
+        plain,
+      ),
+    ).toBe(
+      [
+        "service     action  ok        detail",
+        "──────────  ──────  ────────  ──────────",
+        "supervisor  stop    ✓ ok      booted out",
+        "db          stop    ✗ FAILED  exit 3",
+        "",
+        "2 service(s): 1 ok, 1 failed",
+        "",
+        "confirmed by looking",
+        "  ✓ gone      com.foldedspacelabs.metistry  not loaded",
+        "  ✗ STILL UP  compose                       1 container still up",
+        "",
+        "1/2 confirmed stopped (shape launchd)",
       ].join("\n"),
     );
   });

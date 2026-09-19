@@ -992,7 +992,7 @@ Every named service is acted on even when an earlier one fails — this is a
 stop-at-first-failure plan. `--json` prints one object per service,
 `{service, action, ok, detail}`, for the app to render and nothing else — a
 step's progress line goes to stderr instead of vanishing; without it the
-output is a table like `doctor`'s. A name that isn't a service this shape
+output is the shared table (`docs/ops/cli-style.md`). A name that isn't a service this shape
 runs fails the whole command (exit 2) with the list of known ones — it
 never guesses which subprocess a name might mean. `--dry-run` prints the
 exact command per service and runs nothing, the same seam `up --dry-run`
@@ -1189,8 +1189,22 @@ metistry doctor  # what is running right now, without changing anything
 
 Then it **looks**: `launchctl print` for each label (nothing found = gone) and
 `docker compose ps --quiet` (empty = nothing running), and prints what it
-found. A job still loaded after its bootout is a non-zero exit, not a
+found under a heading of its own — the claim and the check are two blocks,
+never one. A job still loaded after its bootout is a non-zero exit, not a
 cheerful "done".
+
+```
+service     action  ok      detail
+──────────  ──────  ──────  ──────────
+supervisor  stop    ✓ ok    booted out
+
+1 service(s): 1 ok, 0 failed
+
+confirmed by looking
+  ✓ gone  com.foldedspacelabs.metistry  not loaded
+
+1/1 confirmed stopped (shape launchd)
+```
 
 **`down` stops; it never deletes.** It is `docker compose stop`, *not*
 `docker compose down`, and never `-v`. The opposite of "up" is "the processes

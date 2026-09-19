@@ -1,8 +1,9 @@
-// cli-shim.ts: the shim's content, its path, idempotence (unchanged content
-// is left alone), mode 0755, the shell-unsafe refusal, and the
-// case-insensitive collision with the launchd shape's supervisor identity
-// symlink (supervisor.ts's `bin/Metistry`).
-import { existsSync, lstatSync, mkdirSync, readFileSync, statSync, symlinkSync } from "node:fs";
+// cli-shim.ts: the shim's content, its path (a sibling of `state/bin/`, not
+// inside it — see the file's own header comment for why), idempotence
+// (unchanged content is left alone), mode 0755, the shell-unsafe refusal,
+// and the defensive guard against a symlink or a foreign file already
+// sitting at the path.
+import { existsSync, lstatSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -41,11 +42,11 @@ describe("renderCliShim", () => {
 });
 
 describe("cliShimPath / cliShimLinkHint", () => {
-  it("is under the instance dir's .metistry/state/bin when there is one, else the product dir's", async () => {
+  it("is under the instance dir's .metistry/state/cli when there is one, else the product dir's — a sibling of state/bin, never inside it", async () => {
     const P = await tmp();
     const I = await tmp();
-    expect(cliShimPath(P, undefined)).toBe(join(P, ".metistry", "state", "bin", "metistry"));
-    expect(cliShimPath(P, I)).toBe(join(I, ".metistry", "state", "bin", "metistry"));
+    expect(cliShimPath(P, undefined)).toBe(join(P, ".metistry", "state", "cli", "metistry"));
+    expect(cliShimPath(P, I)).toBe(join(I, ".metistry", "state", "cli", "metistry"));
   });
 
   it("is the one line up/doctor both point at", () => {
@@ -118,11 +119,7 @@ describe("writeCliShim", () => {
     expect(lines.some((l) => l.startsWith("[dry-run] chmod 755"))).toBe(true);
   });
 
-  it("under the launchd shape, leaves the supervisor's own bin/Metistry symlink alone and says why", async () => {
-    // macOS's default volume is case-insensitive: bin/metistry and
-    // bin/Metistry are the SAME directory entry there. A real symlink is
-    // simulated directly rather than relying on this test machine's own
-    // volume being case-insensitive (it may not be, e.g. in CI on Linux).
+  it("leaves an existing symlink at the path alone and says why, rather than overwriting it", async () => {
     const P = await tmp();
     const path = cliShimPath(P, undefined);
     mkdirSync(join(path, ".."), { recursive: true });
@@ -134,8 +131,52 @@ describe("writeCliShim", () => {
     await writeCliShim(r, P, undefined);
 
     expect(exec.calls).toEqual([]); // no chmod — nothing was written
-    expect(lstatSync(path).isSymbolicLink()).toBe(true); // the supervisor's symlink, untouched
-    expect(lines.join("\n")).toContain("supervisor program symlink");
+    expect(lstatSync(path).isSymbolicLink()).toBe(true); // untouched
+    expect(lines.join("\n")).toContain("not a plain file");
+  });
+
+  it("leaves a foreign file at the path alone (does not look like a shim this install wrote)", async () => {
+    const P = await tmp();
+    const path = cliShimPath(P, undefined);
+    mkdirSync(join(path, ".."), { recursive: true });
+    writeFileSync(path, "#!/bin/sh\necho not the shim\n");
+
+    const exec = fakeExec();
+    const lines: string[] = [];
+    const r = new StepRunner({ dryRun: false, out: (l) => lines.push(l), exec });
+    await writeCliShim(r, P, undefined);
+
+    expect(exec.calls).toEqual([]); // no chmod — nothing was written
+    expect(readFileSync(path, "utf8")).toBe("#!/bin/sh\necho not the shim\n"); // untouched
+    expect(lines.join("\n")).toContain("not a shim this install wrote");
+  });
+
+  it("a case-insensitive volume's state/bin/Metistry (the launchd shape's supervisor symlink) does not stop the shim being written at its own, sibling path", async () => {
+    // The whole reason the shim lives at state/cli/ and not state/bin/: on
+    // macOS's default case-insensitive volume, `state/bin/metistry` and
+    // `state/bin/Metistry` are the SAME directory entry, and the supervisor
+    // already owns that name under the launchd shape (supervisor.ts). A real
+    // symlink is simulated directly (this test machine's own volume may not
+    // be case-insensitive, e.g. in CI on Linux), and state/bin/ is populated
+    // exactly the way `up` populates it, to prove the sibling directory is
+    // not merely untested but actually unreachable by that collision.
+    const P = await tmp();
+    const stateDir = join(P, ".metistry", "state");
+    mkdirSync(join(stateDir, "bin"), { recursive: true });
+    symlinkSync("/usr/local/bin/node", join(stateDir, "bin", "Metistry"));
+
+    const exec = fakeExec();
+    const lines: string[] = [];
+    const r = new StepRunner({ dryRun: false, out: (l) => lines.push(l), exec });
+    await writeCliShim(r, P, undefined);
+
+    const path = cliShimPath(P, undefined);
+    expect(path).toBe(join(stateDir, "cli", "metistry")); // sibling of state/bin, never inside it
+    expect(existsSync(path)).toBe(true);
+    expect(await readFile(path, "utf8")).toBe(renderCliShim(P, undefined));
+    expect(exec.calls.map(shown)).toEqual([`chmod 755 ${path}`]);
+    // the supervisor's own symlink, at its own unrelated path, untouched
+    expect(lstatSync(join(stateDir, "bin", "Metistry")).isSymbolicLink()).toBe(true);
   });
 
   it("a shell-unsafe product dir is a note, not a thrown failure — the rest of up/update must not go down over a cosmetic feature", async () => {

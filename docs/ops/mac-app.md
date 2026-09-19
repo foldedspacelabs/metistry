@@ -809,11 +809,12 @@ with its reason, so "not found" is never a shrug:
 4. **path** — a `metistry` in those same directories, plus two more:
    `~/.local/bin` (where `metistry up`'s own printed one-liner suggests
    linking its shim — `docs/ops/cli.md`, "Getting `metistry` on your
-   PATH") and the active instance's own `.metistry/state/bin` (the shim
+   PATH") and the active instance's own `.metistry/state/cli` (the shim
    itself, written there by `up`/`update` whether or not anyone has linked
-   it). The instance is known here — `AppModel.instances.active` — so this
-   stage finds an install even before the operator has run the `ln -s`
-   line by hand.
+   it — a sibling of `state/bin/`, which stays the launchd shape's
+   supervisor identity symlink, never the shim). The instance is known
+   here — `AppModel.instances.active` — so this stage finds an install
+   even before the operator has run the `ln -s` line by hand.
 
 Both 2 and 3 prefer the `current` symlink when there is one, because that is
 exactly how `metistry update` lays out a release install — `releases/<version>/`

@@ -14,7 +14,7 @@
 
 import { readdir, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import {
   checkResultSchema,
@@ -50,6 +50,7 @@ import {
   type Manifest,
 } from "@foldedspacelabs/metistry-core";
 import { COMPUTE_FILENAME, INSTANCE_LAYOUT, LEGACY_VAULT_DIR, detectLayout, emptyCompute, instanceFile, loadCompute, type Compute } from "@foldedspacelabs/metistry-core";
+import { cliShimLinkHint, cliShimPath } from "./cli-shim.js";
 import { engineStatus, loadDeployment } from "./deployment.js";
 import { localServerRows } from "./local-models.js";
 import { realExec, type Exec } from "./exec.js";
@@ -381,6 +382,41 @@ export async function inboxRow(instanceDir: string): Promise<DoctorRow> {
         meta: { dir: legacyDir, entries: entries.length, gitignored },
       };
     })),
+  };
+}
+
+// ---- the cli shim -----------------------------------------------------------
+//
+// `metistry up`/`metistry update` write a shim onto this install's own node
+// and CLI (cli-shim.ts), but never put it on PATH themselves (invariant 2 —
+// that is the user's own hand). This row says whether typing `metistry`
+// would actually find it — searching the same places a shell's PATH
+// realistically does, plus `~/.local/bin` and the shim's own directory —
+// and hands back the exact line to make it so when it would not. Absent,
+// never degraded: an install nobody has linked yet is not broken, it is one
+// command away.
+
+const CLI_ON_PATH_DIRS = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"];
+
+export async function cliRow(productDir: string, env: NodeJS.ProcessEnv): Promise<DoctorRow> {
+  const instanceDir = env.METISTRY_INSTANCE_DIR?.replace(/\/+$/, "");
+  const shim = cliShimPath(productDir, instanceDir);
+  const dirs = [...(env.PATH ?? "").split(":").filter(Boolean), ...(env.HOME ? [join(env.HOME, ".local", "bin")] : []), ...CLI_ON_PATH_DIRS];
+  const found = dirs.map((d) => join(d, "metistry")).find((p) => existsSync(p));
+  return {
+    kind: "cli",
+    ...(await runCheck(
+      "cli on PATH",
+      found ? `${found} resolves \`metistry\`` : `search PATH, ~/.local/bin and ${dirname(shim)} for a \`metistry\` executable`,
+      async () => {
+        if (found) return { meta: { path: found } };
+        return {
+          status: "absent",
+          remediation: existsSync(shim) ? cliShimLinkHint(shim) + "  (or add its directory to PATH)" : `no cli shim yet at ${shim} — \`metistry up\` writes one`,
+          meta: { shim },
+        };
+      },
+    )),
   };
 }
 
@@ -1063,10 +1099,13 @@ export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
   // model servers. Concurrently it is the slowest single probe. Nothing about
   // any one check changes — no timeout was shortened to buy this, because a
   // slow-but-healthy bridge reported as down would be a worse table.
-  const [componentRows, layout, inbox, dbAndSchedules, launchd, keepAwake, supervisor, containers, localModels] = await Promise.all([
+  const [componentRows, layout, inbox, cli, dbAndSchedules, launchd, keepAwake, supervisor, containers, localModels] = await Promise.all([
     (async () => Promise.all((await walkManifests(deps.productDir)).map((m) => componentRow(m, { env, fetchFn, timeoutMs, shape, labelSuffix, compute }))))(),
     layoutRow(instanceDir),
     inboxRow(instanceDir),
+    // whether typing `metistry` finds this install's shim: a filesystem
+    // look, so it costs nothing to start with everything else
+    cliRow(deps.productDir, env),
     (async (): Promise<DoctorRow[]> => {
       const db = deps.db === undefined ? await openDbFromEnv(env) : deps.db;
       try {
@@ -1093,7 +1132,7 @@ export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
     // failure, so these rows can only add information, never a red run.
     localServerRows({ compute, fetchFn, timeoutMs: Math.min(timeoutMs, 2_000) }),
   ]);
-  rows.push(...componentRows, layout, inbox, ...dbAndSchedules, ...launchd, ...(keepAwake ? [keepAwake] : []), ...supervisor, ...containers, ...localModels);
+  rows.push(...componentRows, layout, inbox, cli, ...dbAndSchedules, ...launchd, ...(keepAwake ? [keepAwake] : []), ...supervisor, ...containers, ...localModels);
 
   return { as_of: new Date().toISOString(), product_dir: deps.productDir, shape, ok: !rows.some((r) => r.status === "failed"), rows };
 }

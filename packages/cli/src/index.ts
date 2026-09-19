@@ -96,6 +96,7 @@ export { Keychain, serviceFor, keychainAccount, promptStdin, SERVICE_PREFIX } fr
 export { type Exec, type ExecOptions, type ExecResult, realExec, formatCommand } from "./exec.js";
 export { up, productSource, composeUp, installLaunchd, type UpOptions, type UpResult } from "./up.js";
 export { update, gitHead, hashHostJobs, trackedPathFor, writeLock, publishedPackages, type UpdateOptions, type UpdateResult } from "./update.js";
+export { cliShimPath, cliShimLinkHint, renderCliShim, writeCliShim } from "./cli-shim.js";
 export { runMigrations, listMigrationFiles, openMigrationSession, MIGRATION_LOCK_KEY, type MigrationSession, type MigrateResult } from "./migrate.js";
 export { parseLock, serializeLock, readLock, instanceLockPath, LOCK_FILENAME, type LockFile, type LockSource } from "./lock.js";
 export { renderPlist, parsePlistTemplate, loadPlistTemplates, launchdCommands, renderSystemdUnit, labelFor, logPathFor, serviceOf, withNamespace, LABEL_PREFIX, type PlistTemplate } from "./launchd.js";

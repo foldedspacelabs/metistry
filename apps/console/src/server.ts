@@ -805,9 +805,19 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     // ----- knowledge: the owner's read path into their own vault -----
     // OWNER_SCOPE is "every vault path", which is not "every path": the
     // route still refuses `.metistry/`, `Artifacts/` and the root CLAUDE.md,
-    // because the bridge underneath it does not (knowledge-routes.ts).
+    // because the bridge underneath it does not (knowledge-routes.ts). The
+    // page LIST gets the SAME QueryStore every other read goes through —
+    // invariant 3 has one read path into derived state, not one per surface.
     if (isKnowledgeRoute(url.pathname)) {
-      return knowledgeRoutes(req, res, key, url, { ...(cfg.searchKnowledge ? { search: cfg.searchKnowledge } : {}), ...(cfg.vault ? { vault: cfg.vault } : {}) }, OWNER_SCOPE, audit);
+      return knowledgeRoutes(
+        req,
+        res,
+        key,
+        url,
+        { ...(cfg.searchKnowledge ? { search: cfg.searchKnowledge } : {}), ...(cfg.vault ? { vault: cfg.vault } : {}), queries },
+        OWNER_SCOPE,
+        audit,
+      );
     }
 
     // ----- projects (§4.19 panel, §4.21 controls; owner session only) -----

@@ -1,0 +1,105 @@
+# Seeded default (D4 overlay: an instance file of the same name wins).
+#
+# The page LIST, which #197 left open (docs/product/app-ux-plan.md §6.1 sizes
+# it; no migration — `0009_brain.sql` already added `title`, `description` and
+# `draft`, and `0001` has `path`, `mtime`, `content_hash`, `status`).
+#
+# **Why a query and not the bridge.** A page's BYTES are not derived state —
+# there is no column holding a note body, which is the schema enforcing the
+# rule rather than a convention asking for it — so `GET /api/knowledge/page`
+# goes to the reconciler. A page LIST is derived: `knowledge_files` is the
+# reconciler's own index, rebuilt from the vault by a walk. Invariant 3 sends
+# anything countable through here, and `apps/console/src/knowledge-routes.ts`
+# executes it through `packages/queries` like every other read.
+#
+# **What is never in the list.** Drafts (`status: draft` in frontmatter) are
+# invisible at every tier — the same WHERE clause `mcp-brain` applies, so the
+# owner's list and an agent's index cannot disagree about what a draft is —
+# and a `conflict` row is a file the reconciler could not settle, so its
+# title and mtime are not facts yet. Neither is a filter the caller can turn
+# off, which is the point of putting them here rather than in the route.
+#
+# **`area` is derived, not stored.** There is no area column: the vault's
+# TitleCase tree IS the grouping, and everywhere else in the system an "area"
+# is a vault PREFIX (`Areas/Fsl`; `apps/console/src/agents.ts` validates a
+# grant that way, `underAreas` matches paths against it). So the column is
+# the first two segments under `Areas/` — `Areas/Health/2026/sleep.md` and
+# `Areas/Health/sleep.md` are both `Areas/Health` — and the first segment
+# anywhere else (`Journal`, `Me`, `Inbox`). A root file like `now.md` has no
+# area and says so with NULL rather than an empty string, so the filter's
+# "blank = every area" can never collide with a real value.
+#
+# `prefix` is the free-form narrowing beside it, with the SAME segment
+# semantics `underAreas` uses — `Journal/2026` covers `Journal/2026/…` and
+# never `Journal/2026-09-18.md`'s sibling `Journal/2026x/…` — because a
+# substring match is how a prefix filter leaks. An all-slash prefix (`/`) is
+# the whole vault, which is what a grant of `/` means.
+#
+# **Ordered by path, not by mtime.** `path` is the primary key, so the order
+# is total and stable under `offset` — two pages cannot tie and a page cannot
+# jump between windows while the caller reads them. `mtime` is nullable and
+# sync churns it constantly (`0001_init.sql`: content hash, not mtime,
+# decides re-embedding), so ordering by it would be neither.
+#
+# **`COLLATE "C"`, and it is not a detail.** A bare `ORDER BY path` sorts in
+# the cluster's own locale, and a locale collation ignores punctuation at the
+# primary level: `Areas/Health/sleep.md` sorts BEFORE `Areas/Healthcare/…` on
+# a byte-ordered cluster and AFTER it on a `en_US.UTF-8` one. Same rows, same
+# query, two different windows — so a client paging with `offset` would see a
+# page twice or not at all depending on which machine the database was
+# initialised on, and a vault restored into a differently-collated cluster
+# would silently renumber itself. `C` is byte order, is built into every
+# Postgres, and is the same everywhere; CI runs Linux and the owner runs
+# macOS, which is exactly how this was found. It costs the primary-key index
+# as a sort path (Postgres sorts instead), which at vault scale is nothing.
+#
+# **No total.** A COUNT over the unscoped filter is exactly the "directory
+# listing of what was filtered" the knowledge routes refuse to publish — a
+# narrowed principal would learn how many pages it cannot see. The caller
+# pages until a window comes back short.
+name: knowledge_pages
+description: >-
+  One row per settled vault page from the reconciler's index — path, derived
+  area, title (frontmatter's, else the basename), one-line description, index
+  status and both timestamps. Never a draft and never an unsettled
+  `conflict`. Filter by `area` (the derived grouping, exact) or `prefix` (a
+  path prefix, segment-wise); page with `limit`/`offset`, ordered by path in
+  BYTE order (`COLLATE "C"`, so the window is the same on every cluster
+  rather than the database locale's). The page's BYTES are not here and never
+  will be — note content is not derived state (`GET /api/knowledge/page`).
+params:
+  area: { type: text, default: "" } # blank = every area; `Areas/Health`, `Journal`, `Me`, `Inbox`
+  prefix: { type: text, default: "" } # blank (or `/`) = the whole vault; else a path prefix, segment-wise
+  limit: { type: int, default: 100 }
+  offset: { type: int, default: 0 }
+sql: |
+  WITH filter AS (
+    SELECT NULLIF(:area::text, '')                    AS area,
+           NULLIF(rtrim(:prefix::text, '/'), '')      AS prefix
+  ),
+  page AS (
+    SELECT
+      k.path,
+      CASE
+        WHEN k.path LIKE 'Areas/%/%' THEN split_part(k.path, '/', 1) || '/' || split_part(k.path, '/', 2)
+        WHEN strpos(k.path, '/') > 0 THEN split_part(k.path, '/', 1)
+      END                                                              AS area,
+      COALESCE(k.title, regexp_replace(k.path, '^.*/|\.md$', '', 'g')) AS title,
+      k.description,
+      k.status,
+      k.mtime                                                          AS modified,
+      k.indexed_at
+    FROM knowledge_files k
+    WHERE NOT k.draft
+      AND k.status <> 'conflict'
+  )
+  SELECT p.path, p.area, p.title, p.description, p.status, p.modified, p.indexed_at
+  FROM page p, filter f
+  WHERE (f.area IS NULL OR p.area = f.area)
+    AND (f.prefix IS NULL
+         OR p.path = f.prefix
+         OR left(p.path, length(f.prefix) + 1) = f.prefix || '/')
+  ORDER BY p.path COLLATE "C"
+  LIMIT :limit
+  OFFSET :offset
+cache_ttl: 0 # an index that lags is a list with a note the owner just wrote missing from it

@@ -152,15 +152,44 @@ describe("compute providers test", () => {
   it("the verdict, then the listing and the completion as two aligned sub-rows", () => {
     expect(
       renderProviderTest(
-        { name: "lmstudio", ok: true, url: "http://127.0.0.1:1234/v1", models: ["qwen3-8b", "gemma-3-12b"], detail: "200, 2 models", completion: { ok: true, model: "qwen3-8b", detail: "1 token in 240ms" } },
+        {
+          name: "lmstudio",
+          ok: true,
+          listingOk: true,
+          url: "http://127.0.0.1:1234/v1",
+          models: ["qwen3-8b", "gemma-3-12b"],
+          detail: "200, 2 models",
+          completion: { ok: true, model: "qwen3-8b", reason: "assignment", detail: "1 token in 240ms" },
+        },
         plain,
       ),
-    ).toBe(["✓ lmstudio  ok — 200, 2 models", "    listing     qwen3-8b, gemma-3-12b", "    completion  ok qwen3-8b — 1 token in 240ms"].join("\n"));
+    ).toBe(["✓ lmstudio  listing ok — 200, 2 models", "    models      qwen3-8b, gemma-3-12b", "    completion  ok qwen3-8b (chosen: assignment) — 1 token in 240ms"].join("\n"));
+  });
+
+  it("a listing that worked under a completion that did not is still ✗, and says how to override", () => {
+    const text = renderProviderTest(
+      {
+        name: "openrouter",
+        ok: false,
+        listingOk: true,
+        url: "https://openrouter.ai/api/v1",
+        models: ["a", "b"],
+        detail: "200, 447 models",
+        completion: { ok: false, model: "anthropic/claude-sonnet-5", reason: "shortlist", detail: "HTTP 404" },
+      },
+      plain,
+    );
+    expect(text.split("\n")[0]).toBe("✗ openrouter  listing ok — 200, 447 models");
+    // …and the sub-row wraps under its own column rather than off the edge
+    expect(text.split("\n").slice(2)).toEqual([
+      "    completion  FAILED anthropic/claude-sonnet-5 (chosen: shortlist) — HTTP 404",
+      "                — override with --model <id>",
+    ]);
   });
 
   it("a failure keeps the word FAILED and adds the icon", () => {
-    const text = renderProviderTest({ name: "openai", ok: false, url: "https://api.openai.com/v1", models: [], detail: "401 unauthorized" }, plain);
-    expect(text).toBe("✗ openai  FAILED — 401 unauthorized");
+    const text = renderProviderTest({ name: "openai", ok: false, listingOk: false, url: "https://api.openai.com/v1", models: [], detail: "401 unauthorized" }, plain);
+    expect(text).toBe("✗ openai  listing FAILED — 401 unauthorized");
   });
 });
 

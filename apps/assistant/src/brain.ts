@@ -7,8 +7,31 @@
 // and nothing else (engine-openai.ts). Absent the env, the engine runs
 // tool-less exactly as before (degrades: absent).
 
+import { randomUUID } from "node:crypto";
+
 /** The MCP server name the tool host presents under: tool names become `mcp__brain__<tool>`. */
 export const BRAIN_SERVER = "brain";
+
+/**
+ * Where the turn correlation handle rides on a `tools/call`: the MCP spec's
+ * own carrier for request metadata, under the bridge's reverse-DNS key
+ * (`packages/mcp-brain/src/turn-id.ts` holds the same literal — the assistant
+ * talks to the bridge over HTTP and does not import it, so test/brain.test.ts
+ * locks the two together, the way BRAIN_TOOLS is locked to the manifest).
+ *
+ * It used to be an optional PARAMETER on all 25 tools. That cost ~940
+ * definition tokens — 18.8% of the whole advertised surface — and asked the
+ * MODEL to invent an id per reply and pass it faithfully on every call, i.e.
+ * it was a convention in the system prompt rather than a control. The client
+ * mints one per reply now and the model never sees it at all
+ * (docs/research/2026-09-19-code-mode-mcp.md §2.4, ruled 2026-09-19).
+ */
+export const TURN_ID_META_KEY = "com.foldedspacelabs.metistry/turn_id";
+
+/** One handle per reply. A UUID is already the shape the bridge stores: `[A-Za-z0-9_-]{1,64}`. */
+export function newTurnId(): string {
+  return randomUUID();
+}
 
 /**
  * The mcp-brain tools, in manifest order. Duplicated here on purpose — the

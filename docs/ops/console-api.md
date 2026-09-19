@@ -544,18 +544,22 @@ GET /api/knowledge/search?q=&mode=keyword|semantic|hybrid&limit=
      "degraded":null,"as_of":"…"}
 GET /api/knowledge/page?path=Areas/Health/sleep.md
 200 {"path","content","sha256","bytes","as_of"}
-400 q / mode / limit / a missing path — by name
+GET /api/knowledge/pages?area=&prefix=&limit=&offset=
+200 {"pages":[{"path","area","title","description","status","modified","indexed_at"}],
+     "area":null,"prefix":"Areas/Health","limit":100,"offset":0,"as_of":"…"}
+400 q / mode / limit / offset / a filter's shape / a missing path — by name
 404 the page is not there, OR is not knowledge (indistinguishable, on purpose)
-503 no vault bridge configured
+503 no vault bridge configured; or, for `pages`, the named query is not loaded
 ```
 
 The console has held a vault reader, lister and searcher since Phase 6 and
 wired them only into `mcp-brain`'s tools — so knowledge was reachable by an
-**agent** over MCP and by nothing the owner holds. These two routes are that
-gap closed, and they are deliberately thin: a proxy onto the reconciler's
-`GET /vault/search` and `GET /vault/read`, which serve them already
+**agent** over MCP and by nothing the owner holds. These routes are that gap
+closed, and the two that proxy are deliberately thin: the reconciler's `GET
+/vault/search` and `GET /vault/read`, which serve them already
 (`docs/ops/reconciler.md`, `docs/ops/knowledge-search.md`). Not streamed — the
-bridge's hit list is bounded and a page is one file.
+bridge's hit list is bounded, a page is one file, and the list is one bounded
+window of an index.
 
 `mode` omitted means **"choose for me"** at the bridge (hybrid where vectors
 exist, keyword otherwise) rather than a default invented in the console.
@@ -583,7 +587,7 @@ editor or `metistry compute show`, and the honest thing to say on the
 *knowledge* route is "there is no such page", not "there is one and you may
 not have it". "Refused" and "absent" are indistinguishable from outside.
 
-**Grant areas.** Both routes filter through one predicate (`canSee(path,
+**Grant areas.** All three routes filter through one predicate (`canSee(path,
 scope)`): is this vault content at all, *and* does it fall under the scope's
 areas. A hit the scope does not cover is **dropped**, never returned with a
 flag — a path is the sensitive half of a hit, and a filtered list must not
@@ -598,14 +602,49 @@ where `knowledgeScope(principal)` produces exactly this shape from
 that a narrower console principal, if one is ever minted, inherits the filter
 rather than reinventing it at the call site.
 
-**No `GET /api/knowledge/pages`.** The page LIST and the link graph are
-derived state, so invariant 3 sends them through a named query over
-`knowledge_files` / `knowledge_links` — and `seed/queries/` carries no such
-query yet. The route is a `404` that names what the read path *is*. When
-`knowledge_pages` / `knowledge_page_links` land (sized in
-`docs/product/app-ux-plan.md` §6.1 — no migration needed; `0009_brain.sql`
-already added `title`, `description`, `draft`), `GET /api/q/knowledge_pages`
-serves them through the generic query door with no new route at all.
+**`GET /api/knowledge/pages` is the one that is not a proxy.** A page's bytes
+and a search ranking are not derived state — there is no column holding a note
+body — so those two go to the bridge. A page LIST *is* derived
+(`knowledge_files` is the reconciler's own index, rebuilt from the vault by a
+walk), so invariant 3 sends it through the named query
+`seed/queries/knowledge_pages.yaml`, executed by `packages/queries` like every
+other read. The route holds **no SQL**; a route that reached for `pool.query`
+would be a second read path. No migration was needed: `0009_brain.sql` already
+added `title`, `description`, `draft` (`docs/product/app-ux-plan.md` §6.1).
+
+| Parameter | Meaning |
+| --- | --- |
+| `area` | the **derived** grouping, matched exactly. There is no area column — everywhere else in the system an area is a vault prefix (`Areas/Fsl`), so the column is the first two segments under `Areas/` *at any depth* (`Areas/Health/2026/sleep.md` is in `Areas/Health`) and the first segment anywhere else (`Journal`, `Me`, `Inbox`). A vault-root file like `now.md` has `null` — not `""`, so blank can keep meaning "every area" |
+| `prefix` | a path prefix, **segment-wise**, the same semantics an area grant has: `Areas/Health` covers `Areas/Health/…` and never `Areas/Healthcare/…`, because a substring match is how a prefix filter leaks. A trailing slash is the same prefix; `/` is the whole vault |
+| `limit` | default **100**, ceiling **500** — this route's own, not the bridge's 100: scalar columns over an indexed primary key are not a fused ranking. Out of range is a `400` naming the ceiling, never a silent clamp |
+| `offset` | non-negative. The order is `path` ASC, which is the primary key, so the window is **total and stable** — no row ties and none jumps between pages. (`mtime` is nullable and sync churns it constantly, which is why `0001` uses the content hash and not mtime to decide re-embedding, and why it is not the sort key) |
+
+**Never in the list, and no parameter turns it off:** a `draft` note (the same
+clause `mcp-brain` applies at every tier, so the owner's list and an agent's
+index cannot disagree about what a draft is) and a `conflict` row (a file the
+reconciler could not settle — its title and mtime are not facts yet). `status`
+comes back so `dirty` — edited since the last walk — is visible rather than
+guessed at.
+
+**There is no `total`.** A count over the unscoped filter is exactly the
+"directory listing of what was filtered" the grant-areas rule below refuses to
+publish. Page until a window comes back shorter than `limit`. For a narrowed
+scope that can stop early, and that is the deliberate trade: the alternative
+publishes the size of what the caller may not see.
+
+**A filter pointing outside the scope is an empty `200`, not a `400`** — the
+same reasoning as the `404` above: refusing `prefix=.metistry` by name would
+tell the caller which prefixes exist. Only the filter's *shape* is validated
+(length, no backslash, no NUL); what it may select is decided row by row by
+`canSee`. Rows reach the client **unprojected**, because an instance may
+overlay `knowledge_pages.yaml` with columns of its own (D4) and a projection
+in the console would swallow them; the one thing the route insists on is a
+`path` it can judge, and a row without one is dropped.
+
+`GET /api/q/knowledge_pages` reaches the same query through the generic door
+and is **not** the same route: the generic door has no `canSee` filter, so the
+page list a client should use is this one. The link graph
+(`knowledge_page_links` over `knowledge_links`) is still open.
 
 ## `GET /api/commands` — the composer's list, generated (`user` principal)
 

@@ -9,7 +9,7 @@ All of them are real.
 
 | verb | what it does |
 | --- | --- |
-| `init <dir>` | create a private instance repo |
+| `init <dir>` | create a private instance repo, asking once whether to keep this Mac awake (`--keep-awake <value>` answers it without a terminal) |
 | `connect-repo <url>` | point the instance repo at a remote, mint credentials the reconciler can push with |
 | `secrets sync\|mint\|list [--json]` | move secrets between the Keychain and `.env` |
 | `connect <tool> [--rotate]` | give one external dev tool (Cursor, OpenCode, Devin, Claude Code) its own agent token and config |
@@ -20,6 +20,7 @@ All of them are real.
 | `--version` / `version [--json]` | this CLI's version, the resolved product dir's, the lock's pin, and a release's runtime pack |
 | `deployment [--json]` | the effective shape (D4 overlay) and the services it implies, with cheap running state |
 | `deployment set-shape <compose\|launchd>` | write the instance's `.metistry/deployment.yaml` through the reconciler, preview-then-confirm |
+| `deployment set-keep-awake <never\|allow_sleep_on_battery\|always\|always_lid_closed>` | whether this install holds the Mac awake, and on which power (macOS); the same protected write |
 | `migrate-layout [--dry-run] [--json] [--allow-dirty]` | carry an instance from the legacy layout to the flat one: the directory becomes the vault, the machinery moves under `.metistry/`, stored paths lose `Knowledge/` |
 | `migrate-inbox [--dry-run]` | move a pre-#156 `inbox/` into the vault inbox and rewrite `inbox.path` |
 | `migrate-shape <launchd\|compose>` | move a LIVE install between the shapes, with its data: dump, stop, flip, up, restore, verify, doctor |
@@ -128,6 +129,21 @@ because the data does not move between shapes on its own
 the shape change, then `metistry up` would do. `--force` writes anyway.
 `reconciler`/`watchdog` being up is never a reason to refuse: they are host
 jobs under either shape (invariant 6).
+
+`metistry deployment set-keep-awake <never|allow_sleep_on_battery|always|always_lid_closed> [--yes]`
+writes the same file, the same way — protected path, through the reconciler
+as the `user` principal, preview without `--yes` — and prints what the
+choice costs before it writes it. It does **not** refuse while services are
+running: `set-shape` refuses because the data does not move between shapes
+on its own, and changing the power policy moves nothing. It takes effect at
+the next `metistry up`, which is what renders the value into the
+supervisor's environment.
+
+The four values, what each does and the one that cannot be delivered in
+full are in `docs/ops/deployment-shapes.md`, "Keeping the Mac awake". Short
+version: absent means `never` and nothing is held; `metistry init` asks the
+question once, on a terminal, and writes your answer; `metistry doctor`
+reports one `keep-awake` row, `degraded` at worst.
 
 `metistry migrate-shape <launchd|compose> [--dry-run] [--namespace]` is the
 verb for a LIVE install, and it is deliberately not a flag on `set-shape`.

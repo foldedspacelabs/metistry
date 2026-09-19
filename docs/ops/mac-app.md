@@ -103,6 +103,7 @@ path.
 | **Minting an enrolment code** | there is no HTTP route that mints one, deliberately — whoever can run the host command already controls Postgres and the vault, so shell access is the root of trust for a first passkey (plan §4.2) — and `metistry enroll` is on the CLI's own "not yet" list | step 6 shows the exact `scripts/enroll.mjs` command and takes the code you paste back |
 | **A QR code** for the phone | nothing in this product renders one yet; `apps/console/scripts/enroll.mjs` says the same about itself ("QR rendering arrives with `packages/cli`"), and an encoder is a dependency nobody has asked for | step 6 shows the enrolment URL, selectable, to type or hand over |
 | **The other eight destinations** | Feed, Chat, Agents, Projects, Artifacts, Capture, Needs You, Devices (design-system P6) | the PWA — "Add to Dock" in Safari |
+| **The keep-awake control** (Services) | the model half is shipped — `KeepAwakeSetting` (four values, each with what it costs), `KeepAwakeFacts` (doctor's row) and `deploymentSetKeepAwake` — and the pane is a switch with a radio pair under it, which is the designer's. First run can pass `--keep-awake` and does not ask on its own | a terminal: `metistry deployment set-keep-awake <value> --yes`, or `metistry init --keep-awake <value>` |
 | **An iOS target** | `MetistryKit` is already free of AppKit and of `Process` so it can be shared; there is no iOS target in `Package.swift` | — |
 
 **Four things left this table on 2026-09-10**, and it is worth saying what
@@ -557,6 +558,8 @@ fourth one fails CI rather than appearing quietly.
 | Instance | Set up again… | re-enters the wizard |
 | Services | shape, and which file it came from | `doctor --json` → the `deployment` row's `meta` (the CLI resolved the D4 overlay) |
 | Services | the service list with status | the same `meta`'s service plan, matched against doctor's `service` rows |
+| Services | keep this Mac awake: the setting, whether it is holding, and on which power | `doctor --json` → the `keep-awake` row (macOS only). `KeepAwakeFacts` reads it; the app runs no `pmset` and holds no assertion of its own |
+| Services | changing it | `metistry deployment set-keep-awake <never\|allow_sleep_on_battery\|always\|always_lid_closed> --yes` (`MetistryCLI.deploymentSetKeepAwake`) — `deployment.yaml` is a §4.7 protected path, so the CLI writes it through the reconciler and the app writes no file |
 | Services | Start at login | `SMAppService.mainApp` — macOS keeps the registration; the app writes nothing (above) |
 | Services | Run Metistry in the background | `SMAppService.agent(plistName:)` on the plist sealed in this bundle — the install's ONE background item; macOS keeps this registration too (above) |
 | Connections | console sign-in: who this Mac is, with `via`, the remedy, and the argument array | `metistry console whoami --json` — the app never resolves, holds or displays the token ("Signing in" above) |

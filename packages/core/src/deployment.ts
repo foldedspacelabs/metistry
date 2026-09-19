@@ -18,6 +18,7 @@
 // filesystem or YAML dependency.
 
 import { z } from "zod";
+import { KEEP_AWAKE_DEFAULT, KEEP_AWAKE_VALUES, type KeepAwake } from "./power.js";
 
 export const DEPLOYMENT_FILENAME = "deployment.yaml";
 
@@ -53,6 +54,20 @@ export const serviceOverrideSchema = z
 export const deploymentSchema = z
   .object({
     shape: z.enum(DEPLOYMENT_SHAPES).default("compose"),
+    /**
+     * Whether this install keeps the Mac awake, and on which power
+     * (power.ts; docs/research/2026-09-19-keep-awake.md). It belongs in this
+     * file because it is about HOW AND WHERE this install runs on this
+     * machine, which is what the file is for.
+     *
+     * OPTIONAL, not `.default()`, and the difference is the point: an absent
+     * key means the user has never been asked, and an install that was never
+     * asked holds nothing (`KEEP_AWAKE_DEFAULT`). Keeping it optional also
+     * lets the D4 overlay treat it the way it treats a new per-service
+     * default — an instance file written before the key existed inherits the
+     * seed's answer instead of silently overriding it with `never`.
+     */
+    keep_awake: z.enum(KEEP_AWAKE_VALUES).optional(),
     services: z.record(z.string(), serviceOverrideSchema).default({}),
   })
   .strict();
@@ -84,7 +99,16 @@ export function overlayDeployment(seed: Deployment, instance: Deployment | undef
   if (!instance) return seed;
   const services: Record<string, ServiceOverride> = { ...seed.services };
   for (const [name, over] of Object.entries(instance.services)) services[name] = { ...services[name], ...over };
-  return { shape: instance.shape, services };
+  // `keep_awake` merges rather than winning whole: the instance's answer wins
+  // when it HAS one, and an instance file written before the key existed
+  // keeps whatever the seed says instead of reading as an explicit `never`.
+  const keepAwake = instance.keep_awake ?? seed.keep_awake;
+  return { shape: instance.shape, ...(keepAwake !== undefined ? { keep_awake: keepAwake } : {}), services };
+}
+
+/** The setting as a value, with "the user was never asked" spelled as the value that holds nothing. */
+export function keepAwakeOf(d: Deployment): KeepAwake {
+  return d.keep_awake ?? KEEP_AWAKE_DEFAULT;
 }
 
 /** The shape one service runs in: its own override, else the install's. */

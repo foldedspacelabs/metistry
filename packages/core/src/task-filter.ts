@@ -44,6 +44,37 @@
 //   order_1_desc | order_2_desc | order_3_desc          boolean
 //   limit                                               int
 //
+// …and four CONTEXT params, which `where:` can never reach and which the
+// CALLER fills. They are in this object rather than beside it because a
+// contract split across two objects is a contract with a seam, and the seam
+// is exactly where the two halves of P1-2 and P1-5 drifted apart the first
+// time: `TASK_FILTER_PARAM_SPEC` is the query's `params:` block, whole.
+// `compileTaskFilter` leaves every one of them at its default — nothing a
+// user types can move them.
+//
+//   today          text, YYYY-MM-DD  the day `overdue`, `carried` and the
+//                                    ageing counter are measured against;
+//                                    blank = the cluster's `current_date`.
+//                                    A renderer that resolved `due friday`
+//                                    in METISTRY_TZ must pass the same day
+//                                    here or the two disagree at midnight.
+//   me             text              the owner's own `People/` page, for
+//                                    `assigned_to_me`; blank = the instance
+//                                    has no owner page and the flag means
+//                                    "not delegated to anyone else"
+//   path_prefix    text              the CALLER'S SCOPE — a vault path
+//                                    prefix, matched segment-wise. Blank (or
+//                                    `/`) is the whole vault
+//   offset         int               paging; the order is total, so a window
+//                                    can neither repeat a row nor skip one
+//
+// `path_prefix` and `status` SCOPE, and they scope under `and` always:
+// `match_any` widens the predicate, never the scope, so an `or` can never
+// reach a ticked line or a path outside the caller's. That is what makes
+// this query's `expose: route` mean something — the route binds
+// `path_prefix` from the principal, and no `where:` the caller writes can
+// argue with it.
+//
 // Dates arrive ALREADY RESOLVED (`today` became `2026-09-18` against
 // `METISTRY_TZ` at compile time), so the SQL never does date arithmetic and
 // two consumers asking the same question at the same moment bind the same
@@ -79,35 +110,60 @@
 // no precedence, so `a and b or c` has no defined meaning, and inventing one
 // silently is exactly the guess this spec forbids everywhere else.
 //
-// What each flag means, so the query and the chips agree:
-//   overdue         open, and `due` is before today
-//   unscheduled     open, and `scheduled_for` is null
-//   waiting         open, and `waiting` (delegated; not the user's move)
-//   recurring       `recur_rule` is not null — the RULE lines, which every
-//                   other query excludes (§4)
-//   carried         open, and `first_seen_on` is before today
+// What each flag means, so the query and the chips agree — and these are the
+// query's wording, not an approximation of it (`vault_tasks_query.yaml`
+// computes each one once, returns the set it satisfied as `row_flags`, and
+// judges the boolean param against that same column):
+//   overdue         open, `due` is set, and `due` is before today
+//   unscheduled     BOTH `scheduled_for` and `due` are null — the same count
+//                   `task_ageing` reports under that name. It carries no
+//                   open-ness of its own because `status` already scopes the
+//                   rows, and a flag that re-stated the scope would disagree
+//                   with it the first time someone passed `status: any`
+//   waiting         `waiting` — delegated, and not the user's move (again,
+//                   the scope says which rows are eligible)
+//   recurring       an INSTANCE of a rule (`recur_parent` is not null). It
+//                   cannot mean "is a rule": §4 says a `recur_rule` line is
+//                   not a task and this query has no such row at all —
+//                   `vault_tasks_recurring` is where the rules are read
+//   carried         open, and `coalesce(scheduled_for, due)` is before today
+//                   — it was owed on an earlier day. NOT `first_seen_on`,
+//                   which is how long it has been SITTING and is the `age`
+//                   half of `task_ageing`; the two are different questions
 //   blocking_agent  a `work` row names this task as `meta.blocked_by` (§3)
-//   assigned_to_me  `assigned` is the instance owner's own `People/` page
+//   assigned_to_me  `assigned` is null, or it is the instance owner's own
+//                   `People/` page (`me`)
 // `status` is `open` (not checked, not dropped) | `done` | `dropped` |
 // `waiting` | `any`; `''` means the query's own default, which is open tasks.
+// It SCOPES rather than joining the predicate (see `path_prefix` above).
 // `project` is an exact slug (`projects.id` is flat); `area_prefix` and
 // `source_prefix` match the value or the value followed by `/` and `:`
 // respectively, so `area: Areas/Work` takes its children and
 // `source: meeting` takes every `meeting:<path>`.
 //
-// ORDER BY cannot be a bind param, so the query CASEs on the slot name. Every
-// sortable field gets a TEXT sort key, which is what lets one CASE pick any of
-// them and what keeps NULL ordering explicit rather than lucky:
+// ORDER BY cannot be a bind param, so the query builds one TEXT sort key per
+// sortable field and picks three of them by name. A text key is what lets one
+// expression serve any field and what keeps NULL ordering explicit rather
+// than lucky:
 //
 //   priority → lpad(coalesce(t.priority,3)::text, 2, '0')
 //   size     → coalesce(case t.size when 's' then '1' when 'm' then '2'
 //                                   when 'l' then '3' end, '9')
-//   due|do|start|done → coalesce(to_char(t.<col>,'YYYY-MM-DD'), '9999-99-99')
-//   the rest → coalesce(t.<col>, '')
+//   due|do|start|done → coalesce(t.<col>::text, '9999-12-31')
+//   the rest → coalesce(t.<col>, '~')
 //
-//   ORDER BY CASE WHEN NOT :order_1_desc THEN <key(:order_1)> END ASC,
-//            CASE WHEN     :order_1_desc THEN <key(:order_1)> END DESC,
-//            …slots 2 and 3…, t.path, t.line_no
+//   ORDER BY CASE WHEN NOT :order_1_desc THEN <key(:order_1)> END
+//              COLLATE "C" ASC NULLS LAST,
+//            CASE WHEN     :order_1_desc THEN <key(:order_1)> END
+//              COLLATE "C" DESC NULLS LAST,
+//            …slots 2 and 3…, t.path COLLATE "C", t.line_no, t.task_key
+//
+// `COLLATE "C"` on every text key and on the path tie-break: a locale
+// collation ignores punctuation at the primary level, so the same rows page
+// differently on a macOS cluster and a Linux one. An EMPTY slot sorts
+// nothing and falls through, so `order:` absent means the vault's own order —
+// path, then line — which is also the tie-break that makes every order total
+// and `limit`/`offset` safe.
 //
 // Pure, like `task-line.ts`: no database, no vault, no network. It compiles;
 // it does not execute.
@@ -215,6 +271,17 @@ export interface TaskFilterParams {
   order_3_desc: boolean;
 
   limit: number;
+
+  // --- context: the caller's, never the `where:` text's (see the header) ---
+
+  /** The day `overdue`, `carried` and the ageing counter are measured against. Blank = the cluster's `current_date`. */
+  today: string;
+  /** The owner's own `People/` page, for `assigned_to_me`. Blank = the instance names no owner page. */
+  me: string;
+  /** The caller's SCOPE — a vault path prefix, matched segment-wise, always under `and`. Blank (or `/`) = the whole vault. */
+  path_prefix: string;
+  /** Paging. The query's order is total, so a window can neither repeat a row nor skip one. */
+  offset: number;
 }
 
 export type TaskFilterClause =
@@ -244,7 +311,17 @@ export interface TaskFilterInput {
   limit?: number | undefined;
 }
 
-/** Every param at its unset value — what the query's YAML declares as defaults. */
+/**
+ * Every param at its unset value — what the query's YAML declares as
+ * defaults, including the four context params, which `compileTaskFilter`
+ * never writes to and a caller fills in by hand:
+ *
+ *     const out = compileTaskFilter({ where, order }, { env });
+ *     if (!out.ok) return failureNote(out.error);          // §6.4
+ *     await queries.run(TASK_QUERY_NAME, {
+ *       ...out.params, today, me, path_prefix: scope, offset,
+ *     });
+ */
 export function taskFilterParams(): TaskFilterParams {
   return {
     match_any: false,
@@ -259,10 +336,18 @@ export function taskFilterParams(): TaskFilterParams {
     carried: false, blocking_agent: false, assigned_to_me: false,
     order_1: "", order_1_desc: false, order_2: "", order_2_desc: false, order_3: "", order_3_desc: false,
     limit: DEFAULT_TASK_LIMIT,
+    today: "", me: "", path_prefix: "", offset: 0,
   };
 }
 
-/** The same thing as a query manifest's `params:` block — so the YAML and this file cannot drift without a test noticing. */
+/**
+ * `seed/queries/vault_tasks_query.yaml`'s `params:` block, whole — every
+ * compiled param and every context param, with the type and default each is
+ * declared with. It is the ONE object because the two halves of this contract
+ * were once written blind to each other and every name differed;
+ * `apps/console/test/seed-queries.test.ts` now asserts the YAML equals this,
+ * so neither side can move without the other.
+ */
 export const TASK_FILTER_PARAM_SPEC: Readonly<Record<keyof TaskFilterParams, { type: "int" | "text" | "boolean"; default: number | string | boolean }>> =
   Object.freeze(Object.fromEntries(
     Object.entries(taskFilterParams()).map(([k, v]) => [

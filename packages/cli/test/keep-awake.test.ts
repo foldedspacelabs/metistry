@@ -105,7 +105,7 @@ describe("metistry deployment set-keep-awake", () => {
       instanceDir: I,
       keepAwake: "always",
       yes: true,
-      env: { METISTRY_INSTANCE_DIR: I, METISTRY_RECONCILER_URL: "http://127.0.0.1:7812", METISTRY_BRIDGE_TOKEN_RECONCILER: "t" },
+      env: { METISTRY_INSTANCE_DIR: I, METISTRY_RECONCILER_URL: "http://127.0.0.1:7812", METISTRY_BRIDGE_TOKEN_RECONCILER: "t", METISTRY_BRIDGE_TOKEN_RECONCILER_USER: "owner-t" },
       platform: "darwin",
       uid: 501,
       fetchFn,

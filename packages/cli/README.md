@@ -59,11 +59,15 @@ lines to put in `<dir>/state/.env`, this instance's own environment:
 ```
 METISTRY_INSTANCE_DIR=/Users/you/metistry-instance
 METISTRY_BRIDGE_TOKEN_RECONCILER=<minted once, shown only here>
+METISTRY_BRIDGE_TOKEN_RECONCILER_USER=<minted once, shown only here>
 METISTRY_RECONCILER_URL=http://host.docker.internal:7812
 ```
 
-The reconciler token is minted with `core`'s `mintToken()` and appears in
-no file. Rerunning `init` mints a different one — copy it when you see it.
+Both reconciler tokens are minted with `core`'s `mintToken()` and appear in
+no file. Rerunning `init` mints different ones — copy them when you see them.
+They are not interchangeable: the `_USER` one is the owner class, the only
+credential the vault bridge lets write a §4.7 protected path
+(`docs/ops/auth.md`).
 
 ### Where `seed/` comes from
 

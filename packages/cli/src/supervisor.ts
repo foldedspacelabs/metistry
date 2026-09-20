@@ -30,6 +30,7 @@ import {
   type ChildSpecInput,
   type ControlOp,
   type ControlResponse,
+  type EgressInput,
   type SupervisorConfig,
   type SupervisorConfigInput,
   instanceStatePath,
@@ -148,10 +149,12 @@ export interface SupervisorConfigInputs {
   /** the supervisor's own environment (the watchdog half needs the db credentials) */
   env: Record<string, string>;
   children: ChildSpecInput[];
+  /** the egress door: the CONNECT proxy's port, its host allowlist and a bearer per confined child (core/egress.ts). Absent under `compose`. */
+  egress?: EgressInput | undefined;
 }
 
 export function supervisorConfig(inputs: SupervisorConfigInputs): SupervisorConfigInput {
-  return { schema: 1, label: inputs.label, socket: inputs.socket, token: inputs.token, env: inputs.env, children: inputs.children };
+  return { schema: 1, label: inputs.label, socket: inputs.socket, token: inputs.token, env: inputs.env, children: inputs.children, ...(inputs.egress ? { egress: inputs.egress } : {}) };
 }
 
 /** Pretty JSON: this file is read by a person as often as by the supervisor. */

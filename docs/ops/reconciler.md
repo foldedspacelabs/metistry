@@ -87,7 +87,8 @@ three `.env` lines above — the `METISTRY_BRIDGE_TOKEN_RECONCILER` it shows
 is minted once and written nowhere, so copy it then. Add a private remote
 whenever you like — `metistry connect-repo <url>` sets `origin`, leaves a
 credential this service can push with unattended (macOS Keychain + the
-`osxkeychain` helper), flushes this queue and pushes once
+`osxkeychain` helper — **but see "Pushing while confined" below: a confined
+reconciler cannot run that helper**), flushes this queue and pushes once
 (`docs/ops/cli.md`); push from then on is best-effort on the schedule
 below.
 
@@ -181,6 +182,99 @@ conflict` rather than being replaced by bytes the agent never read
 (`docs/ops/inbox.md`, `docs/ops/assistant-tools.md`).
 
 
+## Confinement (the `launchd` shape)
+
+Since 2026-09-19 the sole committer runs under a Seatbelt profile,
+`ops/sandbox/reconciler.sb`, applied by `metistry up` as the job's root
+process — so git, and all 172 of its own helper binaries, inherit it. D5
+stops being a design intention and becomes something the kernel enforces.
+
+| | |
+| --- | --- |
+| **writes** | the instance repo (the vault, `.metistry/`, `.git/`) and the temp dir. **Nothing else** — not `~/Documents`, not `~/.ssh`, not the product checkout, not another instance's vault. |
+| **reads** | the product checkout, the node runtime, a real git's installation prefix, system frameworks, and `~/.gitconfig` **by name**. |
+| **execs** | node, and that git. **No shell.** |
+| **dials** | the console, Postgres and the on-machine embedder on loopback, plus the supervisor's egress proxy — the one route off this machine. |
+| **binds** | its own bridge port, and no other. |
+
+`metistry up` prints the profile it will use (and `--dry-run` prints it
+without installing anything); `metistry doctor` carries a `sandbox` row
+naming every confined child and the profile each one actually runs under,
+read back out of `supervisor.json`'s argv.
+
+**`/usr/bin/git` is not a git.** It links against `libxcselect.dylib` — it is
+the xcode-select shim, and under a profile it dies trying to open
+`/Applications/Xcode.app/…/libxcrun.dylib`. So `up` resolves a **real** git
+by absolute path: the bundled `runtime/git` first
+(`docs/ops/bundled-runtime.md`), then a non-shim git on PATH, then
+`/Library/Developer/CommandLineTools/usr/bin/git`. On a Mac with none of
+them `up` declines to confine the job and says so — a reconciler that cannot
+run git is not a reconciler.
+
+### Pushing while confined
+
+Two things a confined reconciler cannot do, both measured on macOS 26.4 with
+git 2.50.1 (Apple Git-155) rather than assumed:
+
+**1. It cannot run a git credential helper.** git executes *every* helper
+through `/bin/sh` — including the built-in `osxkeychain` that `metistry
+connect-repo` configures on this repo:
+
+```
+fatal: cannot exec 'git credential-osxkeychain get': Operation not permitted
+```
+
+Granting `/bin/sh` would not even be enough (macOS's `/bin/sh` re-execs
+`/bin/bash`), and granting the sole committer a shell is the thing this
+profile exists to prevent. Three ways to push anyway:
+
+- **put the credential in the remote URL** —
+  `git -C <instance> remote set-url origin https://x-access-token:<pat>@github.com/<owner>/<repo>.git`.
+  No subprocess at all, so it works confined. The token then sits in
+  `.git/config` (mode 0600, never committed) rather than in the Keychain,
+  which is the trade;
+- **`GIT_ASKPASS`** pointed at a program inside an exec-granted prefix. git
+  execs askpass *directly*, by absolute path, with no shell — measured — so
+  the exec allowlist is the only gate;
+- **turn confinement off**: `METISTRY_RECONCILER_SANDBOX=0` in
+  `<instance>/.metistry/state/.env`, then `metistry up`. The job then runs
+  under `ops/sandbox/unconfined.sb` (`(allow default)`), and doctor's
+  `sandbox` row says so.
+
+`up` warns when the instance repo names a `credential.helper`.
+
+**2. SSH remotes are unsupported while confined.** `/usr/bin/ssh` is not
+exec-able under the profile. Allowing it would mean granting the process
+that holds the vault's working tree read access to `~/.ssh` — the owner's
+private keys — and ssh's `ProxyCommand` runs through a shell, so it could
+not reach the egress proxy either. Use an HTTPS remote, or the off switch.
+`up` warns when it sees an SSH remote.
+
+**HTTP(S) goes through the egress door.** The profile denies every outbound
+destination but the supervisor's loopback CONNECT proxy, whose allowlist is
+derived from this repo's own remotes (`docs/ops/deployment-shapes.md`, "The
+egress door"). `up` sets `METISTRY_GIT_HTTP_PROXY`, and `git.ts` turns it
+into `-c http.proxy=…` — explicitly, because this process builds a minimal
+environment per git call and would not otherwise pass `HTTPS_PROXY` through.
+A remote the allowlist does not name comes back as:
+
+```
+fatal: unable to access 'https://elsewhere.test/r.git/': CONNECT tunnel failed, response 403
+```
+
+…and with no proxy configured at all, the profile itself refuses:
+
+```
+fatal: unable to access 'https://github.com/…': Failed to connect to github.com port 443 after 1 ms: Couldn't connect to server
+```
+
+An `http://` remote cannot work at all: the proxy speaks CONNECT only, and
+`connect-repo` already refuses one for the older reason that a credential
+would cross the network in clear text.
+
+Under the `compose` shape none of this applies — there is no profile and no
+proxy.
+
 ## Embeddings (Phase 6)
 
 Every reconcile cycle also brings the vault's **vectors** up to date, in
@@ -233,6 +327,8 @@ Setup, modes, and what "deterministic rebuild" means:
 | `METISTRY_EMBED_BATCH` | `16` | chunks per `/api/embed` request |
 | `METISTRY_EMBED_MAX_FILES_PER_CYCLE` | `200` | the rest wait for the next cycle |
 | `METISTRY_DB_*` | as elsewhere | the index tables (`knowledge_files`, `knowledge_links`, `embeddings`, `proposals`, `runs`) |
+| `METISTRY_GIT_HTTP_PROXY` | set by `metistry up` when this install confines the reconciler | the supervisor's egress proxy, passed to git as `-c http.proxy=…` |
+| `METISTRY_RECONCILER_SANDBOX` | `1` | `0` runs the job under `ops/sandbox/unconfined.sb` instead — see "Confinement" |
 
 `METISTRY_RECONCILER_URL` is a *console* setting: how the container reaches
 the bridge (`http://host.docker.internal:7812`, explicit host-gateway per

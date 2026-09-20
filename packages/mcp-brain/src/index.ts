@@ -18,6 +18,7 @@ export {
   type SinkOptions,
 } from "./capture.js";
 export { submitReport, REPORT_KINDS, type ReportInput, type ReportKind, type ReportResult } from "./report.js";
+export { requestAccess, ACCESS_REQUEST_KIND, INTERNAL_REFUSAL, type AccessRequestInput, type AccessRequestOutcome, type AccessRequestPayload } from "./access.js";
 export {
   searchKnowledge,
   readKnowledge,

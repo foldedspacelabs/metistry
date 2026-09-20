@@ -52,7 +52,7 @@ describe("tool surface", () => {
     expect(eager.slice(-tail, -1 - QUERIES_TOOL_NAMES.length)).toEqual([...ARTIFACTS_TOOL_NAMES]);
     expect(eager.at(-1 - QUERIES_TOOL_NAMES.length)).toBe("agents_delegate");
     expect(eager.slice(-QUERIES_TOOL_NAMES.length)).toEqual([...QUERIES_TOOL_NAMES]);
-    expect(eager.length).toBeLessThan(26); // over the PoC-17 tool-COUNT guidance (>20) since knowledge_list/knowledge_grep, tasks_close and the two room tools — flagged in manifest.yaml; the definition-token axis (test/brain.test.ts) is what actually gates lazy
+    expect(eager.length).toBeLessThan(27); // over the PoC-17 tool-COUNT guidance (>20) since knowledge_list/knowledge_grep, tasks_close, the two room tools and now request_access — flagged in manifest.yaml and acknowledged number-by-number in ops/scripts/check-tool-surface.mjs; the definition-token axis (test/brain.test.ts) is what actually gates lazy
   });
 
   it("the whole eager surface stays inside the PoC-17 definition budget, and deprecated names cost it nothing", async () => {

@@ -1,6 +1,6 @@
 {
   "name": "@foldedspacelabs/metistry-cli",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Metistry command line: `metistry init` stamps a private instance repo from seed/, `metistry connect-repo` points it at a private remote with credentials the reconciler can push with unattended (GitHub device flow / PAT / ssh, stored in the macOS Keychain), `metistry secrets` makes the login Keychain the canonical secret store with .env generated from it, `metistry doctor` validates every manifest and probes every bridge, service, container and launchd job through the one check() contract, `metistry up` brings a checkout to running (compose + launchd + doctor), `metistry update` pulls, builds, migrates under an advisory lock, restarts what changed and pins metistry.lock. Usable by a stranger: npx @foldedspacelabs/metistry-cli init <dir>.",
   "license": "Apache-2.0",
   "type": "module",

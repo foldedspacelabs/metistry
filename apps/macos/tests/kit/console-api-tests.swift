@@ -100,6 +100,43 @@ import Testing
     #expect(enrolment.title == "Devin wants to enrol")
 }
 
+@Test func anAccessRequestIsAnsweredWithApproveReviseAndDeclineAndReviseCarriesTheFolder() async {
+    let stub = StubConsole([
+        "GET /api/proposals": Fixtures.accessRequests,
+        "POST /api/proposals/21": Data(#"{"ok":true,"granted":{"agent":"devin","area":"Areas/Health/Sleep","grants":{"tier":"areas","areas":["Areas/Health/Sleep"],"queries":false}}}"#.utf8),
+    ])
+    let api = ConsoleAPI(transport: stub)
+    let row = try! (await api.requests()).get().proposals[0]
+
+    // What the card reads off the row: the ask, the why, and the fact that
+    // Approve costs this credential its vault-wide title browse.
+    let ask = row.accessRequest
+    #expect(ask?.area == "Areas/Health")
+    #expect(ask?.reason == "knowledge_read pointed me here")
+    #expect(ask?.currentTier == "index")
+    #expect(ask?.tradesIndexBrowse == true)
+    #expect(ask?.granted == nil)
+    #expect(RequestRow(id: 1, ts: "t", kind: "report").accessRequest == nil) // the ROW says what it is
+
+    // The three answers plus the quiet pair, and Revise pre-set to the ask.
+    #expect(row.answers.map(\.wire) == ["allow", "accept_with_changes", "deny", "later", "skip"])
+    #expect(row.answers.map(\.label) == ["Approve", "Revise", "Decline", "Later", "Skip"])
+    #expect(row.answers[1].area == "Areas/Health")
+    #expect(!RequestAnswer.reviseArea("  ").isSendable) // nothing to widen: a cancel, not a send
+    #expect(!RequestAnswer.reviseArea("Areas/Health").isBatchable)
+
+    // Revise sends the folder, not a reason — that is what the console needs
+    // for this kind, and it refuses a bare reason.
+    let result = try! (await api.answer(21, .reviseArea("Areas/Health/Sleep"), seenAt: row.cursor)).get()
+    let sent = try! JSONValue.parse(await stub.bodies["POST /api/proposals/21"]!)
+    #expect(sent.string("decision") == "accept_with_changes")
+    #expect(sent.string("area") == "Areas/Health/Sleep")
+    #expect(sent["feedback"] == nil)
+    #expect(result.granted?.agent == "devin")
+    #expect(result.granted?.area == "Areas/Health/Sleep")
+    #expect(result.granted?.grants?.areas == ["Areas/Health/Sleep"])
+}
+
 @Test func laterIsNotAnAnswerAndASnoozedRowIsOutOfTheQueueWithoutBeingDecided() {
     let now = Date(timeIntervalSince1970: 1_780_000_000)
     let soon = ISO8601DateFormatter().string(from: now.addingTimeInterval(3600))
@@ -729,6 +766,17 @@ enum Fixtures {
       {"ts":"2026-09-18T09:00:00.000Z","kind":"proposal","group":"proposal","actor":"inbox-drain",
        "subject":"knowledge","detail":"proposed a page","ref":"proposals:18","turn_id":null}
      ],"as_of":"2026-09-18T09:00:02.500Z"}
+    """)
+
+    /// One `access_request` as the console serves it (ruled 2026-09-19).
+    static let accessRequests = bytes("""
+    {"proposals":[
+      {"id":21,"ts":"2026-09-19T09:00:00.001Z","kind":"access_request","source_agent":"devin",
+       "trust":"external","payload":{"title":"devin asks to read Areas/Health","area":"Areas/Health",
+       "reason":"knowledge_read pointed me here","current_tier":"index","current_areas":[]},
+       "decision":"pending","decided_at":null,"work_id":null,"snoozed_until":null,
+       "cursor":"2026-09-19 09:00:00.001+00|21"}
+     ],"cursor":"2026-09-19 09:00:00.001+00|21","more":false}
     """)
 
     static let proposals = bytes("""

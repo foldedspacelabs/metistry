@@ -99,13 +99,34 @@ test("exit 0 and silence when every limit is wired or annotated", () => {
   assert.equal(r.stderr, "");
 });
 
-test("tests, build output and anything above src/ are not scanned", () => {
+test("apps/packages: tests, build output and anything above src/ are not scanned", () => {
   const root = fixture({
     "packages/x/src/a.test.ts": "const MAX_ROWS = 200;\n",
     "packages/x/test/b.ts": "const MAX_ROWS = 200;\n",
     "packages/x/dist/c.ts": "const MAX_ROWS = 200;\n",
     "packages/x/vitest.config.ts": "const MAX_ROWS = 200;\n",
+  });
+  assert.equal(run(root).status, 0);
+});
+
+test("routines and collectors are scanned whole — flat component dirs, no src/ to require (invariant 5)", () => {
+  const root = fixture({
     "routines/weekly-review/run.ts": "const MAX_ROWS = 200;\n",
+    "collectors/aws-costs/run.ts": "const MAX_ROWS = 200;\n",
+  });
+  const r = run(root);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /routines\/weekly-review\/run\.ts:1: MAX_ROWS = 200/);
+  assert.match(r.stderr, /collectors\/aws-costs\/run\.ts:1: MAX_ROWS = 200/);
+});
+
+test("routines and collectors: tests, build output and node_modules are still not scanned", () => {
+  const root = fixture({
+    "routines/weekly-review/review.test.ts": "const MAX_ROWS = 200;\n",
+    "routines/test/b.ts": "const MAX_ROWS = 200;\n",
+    "routines/dist/c.ts": "const MAX_ROWS = 200;\n",
+    "collectors/aws-costs/aws.test.ts": "const MAX_ROWS = 200;\n",
+    "collectors/dist/aws-costs/run.ts": "const MAX_ROWS = 200;\n",
   });
   assert.equal(run(root).status, 0);
 });

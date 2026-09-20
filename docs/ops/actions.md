@@ -105,18 +105,32 @@ move. Since 2026-09-19 it has one: **`request_access {area, reason}`** on
 ```
 
 - **Every tier may ask**, `none` included: an agent that can be refused is an
-  agent that may ask. An **internal** principal may not — the assistant's scope
-  is configuration in the user's hand (`METISTRY_ASSISTANT_AREAS`), and an
-  approved ask would silently revert at the next restart, so the tool refuses
-  it and says where its scope actually lives.
+  agent that may ask. **The assistant may ask too** (ruled 2026-09-19): an
+  internal row's grants are re-synced from `METISTRY_ASSISTANT_AREAS` at every
+  console start, so an approval for one is also recorded in
+  `agent_grant_overrides` (migration 0023) and merged back on the way in.
+  Configuration stays the floor; the approval survives the restart. Revoking
+  the credential clears its approvals. A **crew** still may not ask — its
+  scope is `scope:` in its manifest, and no crew's allowlist carries the tool.
 - **The area is validated at the tool**, with the same rule the grants
-  validator uses (core's `validAreaPrefix`): TitleCase segments, no traversal,
-  no `.metistry/`, no `Artifacts/`, not the bare vault. Nothing can be asked
-  for that could not be granted.
+  validator uses (core's `validAgentAreaGrant`): TitleCase segments, no
+  traversal, no `.metistry/`, no `Artifacts/`, not the bare vault. Nothing can
+  be asked for that could not be granted. That rule is about AGENTS — an
+  `Artifacts/` grant would be inert, because every knowledge read path refuses
+  it — and says nothing about you: your own artifacts are `GET /api/artifacts`
+  and the files in your vault, both untouched by it (ruled 2026-09-19).
 - **Deduplicated on `(agent, area)` while pending** — a partial unique index,
   migration 0022, so a retry storm is one row. The existing id comes back with
-  `replayed: true`. Once you have answered it, asking again is a new question
-  and gets a new row.
+  `replayed: true`.
+- **After you Decline, the re-ask is answered, not re-queued.** The tool hands
+  the agent the decision you already gave — declined, when, your note if you
+  left one — and tells it the one way forward: ask again with `escalate: true`
+  and a fuller reason. That makes ONE new row, flagged `escalated` with the
+  proposal it followed, and Needs You renders it as *asked again after a
+  decline*. Decline that too and the area is closed: a third ask is refused at
+  the tool with "ask the owner directly" (a `requests_create` report in words).
+  An `escalate` with nothing declined behind it is an ordinary first ask — the
+  flag comes off the record, never off the caller's word for it.
 
 ### Your three answers, and what each one does
 
@@ -135,7 +149,8 @@ trade is the decision you are making. Decline leaves it exactly as it was.
 
 What Approve will **not** do: widen `queries` (a separate axis — invariant 3's
 read path — carried across untouched), add an area beside the one asked for,
-add a prefix a grant it already holds covers, or grant anything at all to a
+add a prefix a grant it already holds covers, widen a **crew** (its scope is
+its manifest — a `403` naming the file to edit), or grant anything at all to a
 **revoked** agent: revoking settles its pending asks as `deny`, and a row that
 predates that is refused with a `404` and left pending for you to close. The
 payload is re-validated at the decision too, so a row written by hand with a
@@ -144,8 +159,9 @@ crafted area is a `400` rather than a grant.
 **Where you see it.** In Needs You beside every other request (the brief and
 the console both call it *access*, like a `grant_elevation`), and in the Agents
 panel next to the grant it is about — `GET /api/agents` answers
-`access_requests: [{proposal_id, agent, area, reason, ts}]`. The panel is a
-view: the answer is still given in the queue, through the one triage route.
+`access_requests: [{proposal_id, agent, area, reason, ts, escalated?,
+prior_proposal?}]`. The panel is a view: the answer is still given in the
+queue, through the one triage route.
 
 ## Routes and record
 
@@ -180,7 +196,10 @@ psql -c "select tool, meta from runs where kind='agent_admin' and tool='autonomy
 psql -c "select kind, decision, payload->'action'->>'kind', payload->'result' from proposals where kind='action' order by ts desc limit 5"
 
 # who is asking for what, and what you granted
-psql -c "select source_agent, payload->>'area', decision, payload->'granted'->>'area' from proposals where kind='access_request' order by ts desc limit 10"
+psql -c "select source_agent, payload->>'area', decision, payload->>'escalated', payload->'granted'->>'area' from proposals where kind='access_request' order by ts desc limit 10"
+
+# approvals that outlive a re-sync (internal rows only, migration 0023)
+psql -c "select agent_id, area, proposal_id, granted_at from agent_grant_overrides order by granted_at desc"
 psql -c "select meta from runs where kind='agent_admin' and tool='grant' and meta->>'via'='triage' order by ts desc limit 5"
 ```
 

@@ -395,3 +395,71 @@ describe("the link list scopes BOTH ends of every edge", () => {
     expect(r.body.error.message).toContain("knowledge_page_links.yaml");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Ruled 2026-09-19 (D): "the owner should always have access to everything.
+// Agents, however, should only have access to what they're granted. Dropping
+// artifacts from the owner's access isn't right."
+//
+// The owner's access to `Artifacts/` is the ARTIFACTS door — the service, the
+// versions, the raw-file route with its content types and `no-store`
+// (decision #14) — and `apps/console/test/artifacts.integration.test.ts`
+// reads one end to end over a real vault. THIS door is the knowledge index,
+// which no indexer has ever walked `Artifacts/` into, so there is no page
+// here to serve. What changed is what it SAYS: the owner is pointed at the
+// door that has their files instead of being told they do not exist. An
+// agent still gets the one uniform sentence — for them, refused and absent
+// must stay indistinguishable.
+describe("Artifacts on the knowledge door: a signpost for the owner, the uniform refusal for an agent", () => {
+  const pageRoute = async (scope: KnowledgeScope, path: string): Promise<{ status: number; body: any }> => {
+    const c = capture();
+    const url = new URL(`http://x/api/knowledge/page?path=${encodeURIComponent(path)}`);
+    await knowledgeRoutes(new IncomingMessage(new Socket()), c.res, "GET /api/knowledge/page", url, {}, scope, async () => {});
+    return c.read();
+  };
+
+  it("tells the owner where their artifacts actually are", async () => {
+    for (const path of ["Artifacts", "Artifacts/report.pdf", "Artifacts/fsl/site/index.html"]) {
+      const r = await pageRoute(OWNER_SCOPE, path);
+      expect(r.status, path).toBe(404); // there IS no page: this door reads the index
+      expect(r.body.error.message, path).toContain("/api/artifacts");
+      expect(r.body.error.message, path).not.toContain("no such page");
+    }
+  });
+
+  it("says nothing of the kind to an agent — refused and absent stay the same answer", async () => {
+    const agent = grantedScope({ grants: { tier: "areas", areas: ["Areas/Health"] } });
+    const refused = await pageRoute(agent, "Artifacts/report.pdf");
+    const absent = await pageRoute(agent, "Areas/Finance/tax.md");
+    expect(refused.status).toBe(404);
+    expect(refused.body).toEqual(absent.body); // byte for byte: no oracle
+    expect(refused.body.error.message).toContain("no such page");
+    expect(refused.body.error.message).not.toContain("/api/artifacts");
+  });
+
+  it("is only about Artifacts: the machinery gets the uniform sentence, owner or not", async () => {
+    for (const path of [".metistry/compute.yaml", ".metistry/state/.env", "CLAUDE.md", "../etc/passwd"]) {
+      const r = await pageRoute(OWNER_SCOPE, path);
+      expect(r.status, path).toBe(404);
+      expect(r.body.error.message, path).toContain("no such page");
+      expect(r.body.error.message, path).not.toContain("/api/artifacts");
+    }
+  });
+
+  it("the link list answers the same way, so the two doors cannot drift", async () => {
+    const owner = await linksRoute(OWNER_SCOPE, [], "?path=Artifacts/report.pdf");
+    expect(owner.status).toBe(404);
+    expect(owner.body.error.message).toContain("/api/artifacts");
+    const agent = await linksRoute(grantedScope({ grants: { tier: "areas", areas: ["Areas/Health"] } }), [], "?path=Artifacts/report.pdf");
+    expect(agent.body.error.message).toContain("no such page");
+  });
+
+  // The scope decision itself is untouched by the 2026-09-19 validator split:
+  // `Artifacts/` is not knowledge for ANY caller on this door, and the
+  // sentence above is the only thing that differs between them.
+  it("changes no decision: canSee still refuses Artifacts for every scope", () => {
+    for (const scope of [OWNER_SCOPE, NO_SCOPE, grantedScope({ grants: { tier: "areas", areas: ["Artifacts"] } })]) {
+      expect(canSee("Artifacts/report.pdf", scope)).toBe(false);
+    }
+  });
+});

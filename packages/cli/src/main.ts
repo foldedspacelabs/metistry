@@ -66,6 +66,7 @@ import { installRuntime } from "./runtime-install.js";
 import { listSecrets, mintSecret, purgeSecrets, renderSecretList, syncSecrets, type SyncDirection } from "./secrets.js";
 import { controlServices, downAll, renderDown, renderServiceResults, serviceLogs, UnknownServiceError, type ServiceAction } from "./service-control.js";
 import { StepRunner } from "./steps.js";
+import { renderTemplatesCheck, templatesCheck } from "./templates.js";
 import { configureUi, createUi, defaultUi, type Ui } from "./ui.js";
 import { up } from "./up.js";
 import { gitHead, update } from "./update.js";
@@ -318,6 +319,17 @@ const USAGE = `metistry — Metistry command line
       The instance's identity.yaml (name, mention, voice, icon, instance_id) —
       the only place the assistant is named (CLAUDE.md). Read-only: identity.yaml
       is a §4.7 protected path, so this verb has no field to change it.
+
+  metistry templates check [<file>] [--json] [--instance <dir>]
+      Validate the vault's Templates/ — every directive, with the line number
+      Obsidian shows. A template change takes effect at the NEXT run
+      (docs/product/daily-flow-spec.md §6.5), so this is how you find out
+      before the run does: unknown directives, a where: the filter vocabulary
+      refuses, an unclosed {{ section }}, and {{ prose }} in a template whose
+      output the assistant may not write. Reads nothing but the
+      files — no database, no calendar, no vault lookups. <file> checks one
+      template instead (a path, or just its name). Exit 1 when a template has
+      an error; a template with only notes still renders.
 
   metistry instances list [--json] [--instance <dir>]
   metistry instances add <origin> [--dry-run]
@@ -645,6 +657,7 @@ export const HELP_GROUPS: Array<{ title: string; verbs: Array<[string, string]> 
       ["deployment set-keep-awake", "whether this install holds the Mac awake, and on which power"],
       ["agents autonomy <id>", "how much room one agent has with an action"],
       ["identity", "identity.yaml — the one place the assistant is named"],
+      ["templates check [<file>]", "does the vault's Templates/ read, before the next run reads it"],
       ["instances list|add|remove|refresh", "the peer registry: which other instances this one knows"],
     ],
   },
@@ -1000,6 +1013,32 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
       }
       out(flags.json === true ? JSON.stringify(identity, null, 2) : renderIdentity(identity));
       return 0;
+    }
+    case "templates": {
+      // §6.5: a template change takes effect at the NEXT run, which is the
+      // right semantics and leaves one gap — between the edit and 19:00
+      // nothing says whether the directive reads. This is that, and it needs
+      // no database, no calendar and no vault (validateTemplate is pure).
+      if (positional[0] !== "check") {
+        err("usage: metistry templates check [<file>] [--instance <dir>] [--json]");
+        return 2;
+      }
+      const loadedTemplates = loadEnv();
+      const instanceDir = str(flags, "instance") ?? loadedTemplates.instanceDir;
+      if (!instanceDir) {
+        err("templates needs the instance repo: pass --instance <dir> or set METISTRY_INSTANCE_DIR (docs/ops/cli.md) — Templates/ is in the vault");
+        return 2;
+      }
+      try {
+        const file = positional[1];
+        const report = await templatesCheck({ instanceDir, ...(file !== undefined ? { file } : {}) });
+        out(flags.json === true ? JSON.stringify(report, null, 2) : renderTemplatesCheck(report, ui));
+        // absent is not failed (design-system §3.15): no Templates/ exits 0
+        return report.errors > 0 ? 1 : 0;
+      } catch (e) {
+        err(`metistry templates check: ${e instanceof Error ? e.message : String(e)}`);
+        return 1;
+      }
     }
     case "instances": {
       // The peer registry (S4, docs/ops/instances.md). Every write is a §4.7

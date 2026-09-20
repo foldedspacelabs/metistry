@@ -6,7 +6,7 @@
 // Phase 3+ when brain-query exists — for now continuity is the SDK
 // transcript, per §4.17 rule 6's fast-path).
 
-import { emptyCompute, finishRun, parseDecisionBlock, rollSession, startRun, type Compute, type TierMap } from "@foldedspacelabs/metistry-core";
+import { DEFAULT_CACHING, emptyCompute, finishRun, parseDecisionBlock, rollSession, startRun, type Compute, type TierMap } from "@foldedspacelabs/metistry-core";
 import { isBudgetRefusal, offerBudgetWindow, BudgetRefusal } from "./budgets.js";
 import { recordShadow } from "./shadow.js";
 import { resolveTurn } from "./tiers.js";
@@ -108,7 +108,11 @@ export async function drainOne(db: Db, engine: Engine, tiers: TierMap, opts: Dra
       routed_by: routeMeta.routed_by ?? "rule",
       tier,
       effort,
-      ...(assignment ? { engine: assignment.config.kind, model_ref: assignment.ref } : {}),
+      // `caching:` as it stood FOR THIS TURN. `compute.yaml` is hot-reloaded,
+      // so the file cannot answer later what was in force earlier — and a
+      // turn taken while caching was off must not be read by the
+      // cache-report as a prefix that failed to cache (OPEN-6).
+      ...(assignment ? { engine: assignment.config.kind, model_ref: assignment.ref, caching: assignment.config.caching ?? DEFAULT_CACHING } : {}),
       ...(fresh ? { fresh_session: true } : {}),
     },
   });
@@ -182,7 +186,7 @@ export async function drainOne(db: Db, engine: Engine, tiers: TierMap, opts: Dra
     if (result.shadow) {
       meta.shadow_agreement = result.shadow.agreement.score;
       try {
-        await recordShadow(db, runId, result.shadow, { tier });
+        await recordShadow(db, runId, result.shadow, { tier, caching: compute.providers[result.shadow.shadow.provider]?.caching ?? DEFAULT_CACHING });
       } catch (err) {
         meta.shadow_not_recorded = err instanceof Error ? err.message : String(err);
       }

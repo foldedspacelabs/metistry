@@ -450,7 +450,13 @@ importers:
       '@foldedspacelabs/metistry-core':
         specifier: workspace:*
         version: link:../packages/core
+      yaml:
+        specifier: ^2.9.0
+        version: 2.9.0
     devDependencies:
+      '@foldedspacelabs/metistry-queries':
+        specifier: workspace:*
+        version: link:../packages/queries
       '@types/node':
         specifier: ^22.20.1
         version: 22.20.1

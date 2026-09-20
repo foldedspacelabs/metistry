@@ -1,0 +1,27 @@
+name: plan-tomorrow
+type: routine
+description: >
+  Renders tomorrow's plan from Templates/Plan.md (daily-flow-spec §7) — the
+  day's events, the tasks the template asks for in the order it asks for,
+  carry-overs, what agents are waiting on, and the user's own prioritisation
+  prose included verbatim. Model-free (invariant 4): the plan is deterministic
+  and `prose` is not legal in a template whose output the assistant may not
+  write, so nothing here reaches an engine. Writes exactly ONE machine-owned
+  file, `Journal/Plan/<date>.md` as principal `plan-tomorrow` (§5.1, one
+  writer per file), and never a note the user owns — a recurring rule is
+  listed as a proposal, never materialised. Hourly because the runner has no
+  time of day; it plans once an evening, after the day end Me/profile.md
+  states, on the eve of a working day, and is silent otherwise.
+schedule: "@hourly"
+requires:
+  # The vault bridge is the whole job: the template in, the plan file out.
+  # Without it there is nothing to read and nowhere to write, so the window is
+  # refused with the variable named rather than spent (docs/ops/automation.md).
+  #
+  # The eventkit bridge is deliberately NOT declared `reachable:` here, though
+  # §7's manifest sketch shows it: `reachable` is a REQUIREMENT the runner
+  # blocks on, and blocking would mean no plan at all on an evening the
+  # calendar bridge is down — the outcome §6.4 names as the worst one. An
+  # unreachable calendar renders one visible line and the plan still lands.
+  # Reported as a contradiction rather than routed around (CLAUDE.md).
+  env: [METISTRY_RECONCILER_URL, METISTRY_BRIDGE_TOKEN_RECONCILER]

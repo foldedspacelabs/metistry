@@ -11,11 +11,21 @@
   one process can change your knowledge" stopped being a promise about how the
   code is arranged and became something the kernel refuses to break. The
   assistant has had this since the start; this is the other half. And the
-  boundary is honest about what it costs: two ways of authenticating a backup
-  push stop working inside it, so the setup says so in plain words when it
-  sees them, offers three alternatives, and leaves a single documented switch
-  for anyone who would rather have the old arrangement — a visible file that
-  says "allow everything", never a silent absence. The second half is about
+  boundary keeps the thing that matters working: your notes still back
+  themselves up to your private repository, unattended, every hour, with the
+  token still living in the Mac's own Keychain and never written to a file
+  anywhere. That took finding a door in a wall — the ordinary way git asks
+  for a password needs a shell, and the whole point was to take the shell
+  away — so the part of Metistry that is still outside the boundary fetches
+  the credential once when it starts everything up and hands it in, and a
+  fourteen-line helper inside passes it to git when asked. It never appears
+  in a command line, where anything else running on your Mac could read it.
+  One arrangement genuinely cannot survive the boundary: a repository reached
+  over SSH, because serving it would mean handing your private keys to the
+  one program this is all about fencing in. Setup says so in plain words when
+  it sees one, and there is a single documented switch for anyone who would
+  rather have the old arrangement back — a visible file that says "allow
+  everything", never a silent absence. The second half is about
   where things can *reach*. The confinement macOS offers can say "one port"
   but cannot say "openrouter.ai", so for a year the list of servers Metistry
   was allowed to contact was documentation sitting next to a rule that

@@ -86,9 +86,10 @@ is named — `rules.yaml`, config dirs, `metistry.lock`) + `.gitignore` + one
 three `.env` lines above — the `METISTRY_BRIDGE_TOKEN_RECONCILER` it shows
 is minted once and written nowhere, so copy it then. Add a private remote
 whenever you like — `metistry connect-repo <url>` sets `origin`, leaves a
-credential this service can push with unattended (macOS Keychain + the
-`osxkeychain` helper — **but see "Pushing while confined" below: a confined
-reconciler cannot run that helper**), flushes this queue and pushes once
+credential this service can push with unattended (macOS Keychain; a
+confined reconciler reads it through `GIT_ASKPASS` rather than the
+`osxkeychain` helper — "Pushing while confined" below), flushes this queue
+and pushes once
 (`docs/ops/cli.md`); push from then on is best-effort on the schedule
 below.
 
@@ -193,7 +194,7 @@ stops being a design intention and becomes something the kernel enforces.
 | --- | --- |
 | **writes** | the instance repo (the vault, `.metistry/`, `.git/`) and the temp dir. **Nothing else** — not `~/Documents`, not `~/.ssh`, not the product checkout, not another instance's vault. |
 | **reads** | the product checkout, the node runtime, a real git's installation prefix, system frameworks, and `~/.gitconfig` **by name**. |
-| **execs** | node, and that git. **No shell.** |
+| **execs** | node, that git, and the askpass shim `up` generates. **No shell.** |
 | **dials** | the console, Postgres and the on-machine embedder on loopback, plus the supervisor's egress proxy — the one route off this machine. |
 | **binds** | its own bridge port, and no other. |
 
@@ -213,42 +214,48 @@ run git is not a reconciler.
 
 ### Pushing while confined
 
-Two things a confined reconciler cannot do, both measured on macOS 26.4 with
-git 2.50.1 (Apple Git-155) rather than assumed:
-
-**1. It cannot run a git credential helper.** git executes *every* helper
-through `/bin/sh` — including the built-in `osxkeychain` that `metistry
-connect-repo` configures on this repo:
+**HTTPS push works.** The path is `GIT_ASKPASS`, and it exists because of a
+measurement: git executes *every* credential helper through `/bin/sh` —
+including the built-in `osxkeychain` that `metistry connect-repo`
+configures — and this profile has no shell, so a confined push used to die
+before it began:
 
 ```
 fatal: cannot exec 'git credential-osxkeychain get': Operation not permitted
+fatal: could not read Username for 'https://github.com': terminal prompts disabled
 ```
 
-Granting `/bin/sh` would not even be enough (macOS's `/bin/sh` re-execs
-`/bin/bash`), and granting the sole committer a shell is the thing this
-profile exists to prevent. Three ways to push anyway:
+Granting `/bin/sh` would not even have been enough (macOS's `/bin/sh`
+re-execs `/bin/bash`), and granting the sole committer a shell is the thing
+the profile exists to prevent. But **`GIT_ASKPASS` is exec'd directly, by
+absolute path, with no shell** — the exec allowlist is its only gate. So:
 
-- **put the credential in the remote URL** —
-  `git -C <instance> remote set-url origin https://x-access-token:<pat>@github.com/<owner>/<repo>.git`.
-  No subprocess at all, so it works confined. The token then sits in
-  `.git/config` (mode 0600, never committed) rather than in the Keychain,
-  which is the trade;
-- **`GIT_ASKPASS`** pointed at a program inside an exec-granted prefix. git
-  execs askpass *directly*, by absolute path, with no shell — measured — so
-  the exec allowlist is the only gate;
-- **turn confinement off**: `METISTRY_RECONCILER_SANDBOX=0` in
-  `<instance>/.metistry/state/.env`, then `metistry up`. The job then runs
-  under `ops/sandbox/unconfined.sb` (`(allow default)`), and doctor's
-  `sandbox` row says so.
+| | |
+| --- | --- |
+| **where the token lives** | unchanged: the login Keychain, where `metistry connect-repo` put it. No token in `.env`, none in a URL, none in `.git/config`. |
+| **who reads it** | the **supervisor**, once, at spawn. It is unconfined and it is the parent. The read is promptless because `connect-repo` files the item with `-A` — a trade already made and documented in `packages/cli/src/keychain.ts`, because per-binary trust is invalidated by every git update and would turn an unattended push into a GUI prompt nobody is there to click. |
+| **how it reaches git** | the child's environment, as `METISTRY_GIT_ASKPASS_{USER,TOKEN}`, and then a `#!<node>` shim `up` generates at `<instance>/.metistry/state/bin/git-askpass` which prints one of those two and can do nothing else. **Never in argv** — `ps` shows argv to every process on the Mac, and a push runs every hour. |
+| **what `up` records** | `supervisor.json` gains `gitCredentials: [{ child: "reconciler", host: "<your remote's host>" }]` — which item to fetch, never what it holds. |
+| **the helper** | reset for this job with `-c credential.helper=` (git's documented reset), so the repo's `osxkeychain` line cannot fail first. An **unconfined** install is untouched and keeps using the Keychain helper exactly as before. |
 
-`up` warns when the instance repo names a `credential.helper`.
+Proven end to end by `packages/cli/test/reconciler-push.test.ts`: a real
+push to a real bare repository over real HTTPS, through the CONNECT tunnel,
+under `sandbox-exec` — and the same push, without the reset, failing on
+`osxkeychain`.
 
-**2. SSH remotes are unsupported while confined.** `/usr/bin/ssh` is not
+If the supervisor finds no keychain item it says so in its log and the child
+starts anyway; the push then fails with `could not read Username`, and
+`metistry connect-repo <url>` files one.
+
+**SSH remotes are still unsupported while confined.** `/usr/bin/ssh` is not
 exec-able under the profile. Allowing it would mean granting the process
 that holds the vault's working tree read access to `~/.ssh` — the owner's
 private keys — and ssh's `ProxyCommand` runs through a shell, so it could
-not reach the egress proxy either. Use an HTTPS remote, or the off switch.
-`up` warns when it sees an SSH remote.
+not reach the egress proxy either. Use an HTTPS remote, or the off switch:
+`METISTRY_RECONCILER_SANDBOX=0` in `<instance>/.metistry/state/.env`, then
+`metistry up`. The job then runs under `ops/sandbox/unconfined.sb`
+(`(allow default)`), and doctor's `sandbox` row says so. `up` warns when it
+sees an SSH remote.
 
 **HTTP(S) goes through the egress door.** The profile denies every outbound
 destination but the supervisor's loopback CONNECT proxy, whose allowlist is
@@ -328,6 +335,8 @@ Setup, modes, and what "deterministic rebuild" means:
 | `METISTRY_EMBED_MAX_FILES_PER_CYCLE` | `200` | the rest wait for the next cycle |
 | `METISTRY_DB_*` | as elsewhere | the index tables (`knowledge_files`, `knowledge_links`, `embeddings`, `proposals`, `runs`) |
 | `METISTRY_GIT_HTTP_PROXY` | set by `metistry up` when this install confines the reconciler | the supervisor's egress proxy, passed to git as `-c http.proxy=…` |
+| `METISTRY_GIT_ASKPASS` | set by `metistry up` when this install confines the reconciler | the askpass shim's path. Its presence is also what turns on `-c credential.helper=` — the two move together |
+| `METISTRY_GIT_ASKPASS_USER` / `_TOKEN` | injected by the **supervisor** at spawn, from the login Keychain | the push credential. Never written to disk, never in argv, never in `supervisor.json` |
 | `METISTRY_RECONCILER_SANDBOX` | `1` | `0` runs the job under `ops/sandbox/unconfined.sb` instead — see "Confinement" |
 
 `METISTRY_RECONCILER_URL` is a *console* setting: how the container reaches

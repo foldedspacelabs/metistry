@@ -738,7 +738,7 @@ until this it had ambient authority over the whole disk:
 |---|---|
 | filesystem read | the product checkout (its own `dist/`, `node_modules/`, `seed/` — and its working directory), the node runtime, **a real git's installation prefix**, system frameworks, and `~/.gitconfig` **by name**. |
 | filesystem write | **the instance repo — the vault, `.metistry/` and `.git/`** — and tmp. Nothing else: not `~/Documents`, not `~/.ssh`, not the product checkout, not another instance's vault. |
-| exec | node and that git. **No shell.** |
+| exec | node, that git, and the askpass shim (below). **No shell.** |
 | network out | the console, Postgres and the on-machine embedder on loopback, plus the egress proxy. It binds exactly its own bridge port. |
 | off switch | `METISTRY_RECONCILER_SANDBOX=0` renders `ops/sandbox/unconfined.sb` instead — a real file that says `(allow default)`, so "not confined" is legible in the plist, in `supervisor.json`, in `up --dry-run` and in doctor's `sandbox` row. |
 
@@ -752,17 +752,26 @@ prefix (`bin/git`, `libexec/git-core/`'s 172 helpers, `share/git-core`'s
 templates). On a Mac with none of those, `up` declines to confine the job and
 says why: a reconciler that cannot run git is not a reconciler.
 
-**Pushing while confined** has two measured consequences, both in
-`docs/ops/reconciler.md`:
+**Pushing while confined** works over HTTPS, and the path is worth knowing
+because it is not the obvious one (`docs/ops/reconciler.md` has the table).
+git executes *every* credential helper through `/bin/sh` — including the
+built-in `osxkeychain` that `metistry connect-repo` configures — and there
+is no shell here, so no helper can run. `GIT_ASKPASS` **can**: git execs it
+directly, by absolute path, with no shell. So the token stays in the login
+Keychain where `connect-repo` put it, the **supervisor** reads it there once
+at spawn (it is unconfined, it is the parent, and the item is filed `-A` so
+the read is promptless), and hands it to the child in its environment; a
+`#!<node>` shim `up` generates prints it when git asks. The credential is
+never in argv, never in `supervisor.json` and never on disk. `git.ts` adds
+`-c credential.helper=` — git's documented reset — only when there is an
+askpass, so an unconfined install keeps using the Keychain helper exactly as
+before.
 
-- **git credential helpers cannot run.** git executes *every* helper through
-  `/bin/sh` — including the built-in `osxkeychain` that `metistry
-  connect-repo` configures — and there is no shell here. `up` warns when the
-  instance repo names one.
-- **SSH remotes are unsupported.** `ssh` is not exec-able, granting it would
-  mean granting the sole committer `~/.ssh`, and ssh's `ProxyCommand` runs
-  through a shell so it could not reach the egress proxy either. `up` warns
-  when it sees one.
+**SSH remotes are the one shape confinement cannot serve.** `ssh` is not
+exec-able, granting it would mean granting the sole committer `~/.ssh`, and
+ssh's `ProxyCommand` runs through a shell so it could not reach the egress
+proxy either. `up` warns when it sees one; use an HTTPS remote or the off
+switch.
 
 ## The egress door
 

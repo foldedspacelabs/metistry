@@ -90,3 +90,9 @@ Three things that cost time to learn, recorded so they cost nobody else any:
    of `EPERM`.
 3. **The process's working directory must be inside a granted subpath**, or
    git dies with `fatal: Unable to read current working directory`.
+4. **git runs every credential helper through `/bin/sh`** — including the
+   built-in `osxkeychain` inside `GIT_PREFIX` — so a profile with no shell
+   has no helper. `GIT_ASKPASS` is exec'd *directly*, by absolute path, with
+   no shell, and is therefore the way a confined process authenticates:
+   `reconciler.sb` grants one generated shim by literal
+   (`packages/cli/src/askpass.ts`).

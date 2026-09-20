@@ -24,6 +24,9 @@ import { parseDocument, parse as parseYaml } from "yaml";
 import {
   BUDGET_ACTIONS,
   COMPUTE_FILENAME,
+  DEFAULT_CACHE_READ_MULTIPLIER,
+  DEFAULT_CACHE_WRITE_MULTIPLIER,
+  DEFAULT_CACHING,
   instanceFile,
   PROVIDER_NAME_RE,
   SECRET_NAME_RE,
@@ -39,6 +42,7 @@ import {
   type Provider,
 } from "@foldedspacelabs/metistry-core";
 import { readStdin } from "./connect-repo.js";
+import { consoleCall, renderConsoleCallError } from "./console-client.js";
 import { realExec, type Exec } from "./exec.js";
 import {
   LOCAL_SERVERS,
@@ -902,4 +906,362 @@ export async function setBudget(
   const { delivery } = await commit(opts, edit, `metistry compute budget ${path.join(".")} → ${opts.action}`);
   opts.out("Recorded. Nothing enforces it yet — budgets are checked in the engine, before the call (docs/ops/compute.md).");
   return { target: path.join("."), ...(daily === undefined ? {} : { daily_usd: daily }), ...(monthly === undefined ? {} : { monthly_usd: monthly }), action: opts.action, delivery };
+}
+
+// ---- cache-report: OPEN-6's measurement, as one command ----------------------
+//
+// OPEN-6 (`docs/plan-refresh-2026-09-13.md`, ruled 2026-09-17: ship automatic
+// top-level `cache_control` first and measure afterwards) left the owner a
+// measurement to run. This is that measurement, and it is a verb rather than
+// a script somebody writes once and loses.
+//
+// TWO SOURCES, joined here and nowhere else:
+//
+//   the LEDGER — `seed/queries/cache_report.yaml` through the console's
+//     generic `GET /api/q/<name>` door, like every other read (invariant 3:
+//     the CLI does not talk to Postgres, and invariant 10: an existing door,
+//     never a new one). It knows what the cache DID.
+//   `compute.yaml` — the provider's `pricing:` table and its current
+//     `caching:` mode. It knows what a cached token COSTS, which the ledger
+//     cannot: on the `provider` cost path the row carries a total and no
+//     rates at all.
+//
+// The join is why the dollar figure lives in the CLI instead of in the SQL.
+// A named query that read `compute.yaml` would be a second read path into
+// configuration, and one that hard-coded 0.1× would be pricing a stranger's
+// provider at Anthropic's rates.
+
+/**
+ * The hit ratio at which the prefix is behaving — the line the verdict is
+ * drawn at, and a number to revise once the measurement has been run rather
+ * than a law.
+ *
+ * `docs/research/2026-09-cost-optimization.md` records Anthropic's own figure
+ * for a healthy agent loop: **89 % cache reads** after a task boundary, which
+ * is what a system prompt → tools → prior turns prefix that nobody perturbs
+ * looks like. 80 % is set below it deliberately: a real install rolls
+ * sessions, and the first turn after every roll is a legitimate miss that
+ * drags the window's average down. Under 80 % something is changing between
+ * turns that should not be — a timestamp in the system prompt, an edited
+ * prompt, a changed `effort`, a tool added or reordered — and the same
+ * document lists them.
+ */
+export const STABLE_PREFIX_HIT_RATIO = 0.8; // limit: fixed — a reading threshold from published guidance, not an install's policy
+
+/** `7d`, `2w`, `3m`, or a bare number of days. Strict: a spelling this does not know is an error naming the ones it does, never a silent 7. */
+export function parseSince(v: string | undefined): number {
+  if (v === undefined || v.trim() === "") return 7;
+  const m = /^(\d+)\s*(d|w|m)?$/.exec(v.trim().toLowerCase());
+  if (!m) throw new Error(`--since takes a number of days (\`14\`), or \`<n>d\`, \`<n>w\`, \`<n>m\` — not ${JSON.stringify(v)}`);
+  const n = Number(m[1]);
+  if (n < 1) throw new Error("--since must be at least one day — a window with no turns in it measures nothing");
+  return m[2] === "w" ? n * 7 : m[2] === "m" ? n * 30 : n;
+}
+
+/** One (provider, model, tier, caching) group: the query's row, plus what only `compute.yaml` can say. */
+export interface CacheReportGroup {
+  provider: string;
+  model: string;
+  tier: string;
+  /** the `caching:` mode IN FORCE when these turns ran (`runs.meta.caching`); `unknown` predates the stamp */
+  caching: string;
+  turns: number;
+  /** turns whose response carried a cache field at all — `turns - turns_reporting` is the provider saying nothing, which is a different finding from a miss */
+  turns_reporting: number;
+  turns_hit: number;
+  tokens_in: number;
+  tokens_out: number;
+  cache_read: number;
+  cache_write: number;
+  /** `cache_read / tokens_in`; null when the group billed no prompt at all (not a reading, and not 0 %) */
+  hit_ratio: number | null;
+  cost_usd: number;
+  turns_unpriced: number;
+  /**
+   * What the cache was worth in dollars, NET: the reads billed at a fraction
+   * of the input rate instead of in full, minus the premium the writes paid.
+   * Absent where `compute.yaml` names no `pricing:` entry for this (provider,
+   * model) — which is the normal case on OpenRouter, whose responses carry
+   * `usage.cost` and no rates. The refusal names the field (R3).
+   */
+  saved_usd?: number;
+  /** why `saved_usd` is absent, naming the field that would fill it */
+  saved_unavailable?: string;
+  /** what `compute.yaml` says TODAY, where that differs from `caching` above — the setting was changed inside the window */
+  caching_now?: string;
+}
+
+export interface CacheReport {
+  /** the window asked for, in days */
+  since_days: number;
+  /** the query's `as_of` — a cached answer keeps the original (packages/queries) */
+  as_of?: string;
+  groups: CacheReportGroup[];
+  totals: {
+    turns: number;
+    turns_reporting: number;
+    tokens_in: number;
+    tokens_out: number;
+    cache_read: number;
+    cache_write: number;
+    hit_ratio: number | null;
+    cost_usd: number;
+    turns_unpriced: number;
+    saved_usd?: number;
+  };
+  /** the threshold the verdict is drawn at, so `--json` does not have to guess it */
+  threshold: number;
+  verdict: { status: "ok" | "degraded" | "n/a"; line: string };
+}
+
+const numberOf = (v: unknown): number => {
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(n) ? n : 0;
+};
+
+/** `numeric` arrives as a string from pg, and NULL has to stay NULL: a group that billed no prompt has no ratio, which is not 0 %. */
+const ratioOf = (v: unknown): number | null => (v === null || v === undefined ? null : numberOf(v));
+
+/**
+ * What the cache was worth, in dollars, for one group — or nothing, said out
+ * loud. The arithmetic mirrors `costOf`'s `pricing` path exactly, because a
+ * saving computed on different assumptions from the charge is not a saving:
+ *
+ *   reads  saved (1 − cache_read_multiplier) × in_per_m each, having been
+ *          billed at the multiplier instead of in full;
+ *   writes COST (cache_write_multiplier − 1) × in_per_m each, which is the
+ *          premium a five-minute write pays for the read that follows.
+ *
+ * Net, so a prefix that is rewritten every turn and never re-read comes out
+ * NEGATIVE — that is the finding, and hiding it behind a floor of zero would
+ * be the one number in this report that lies.
+ */
+function savingOf(g: { cache_read: number; cache_write: number }, provider: Provider | undefined, model: string): { saved_usd: number } | { saved_unavailable: string } {
+  if (provider?.locality === "on_machine") {
+    return { saved_unavailable: `${provider.kind} on this machine bills nothing for a prompt — there is no dollar saving to compute, only the latency one` };
+  }
+  const rate = provider?.pricing?.[model];
+  if (!rate) {
+    return {
+      saved_unavailable: `no published rate: add providers.<name>.pricing["${model}"].in_per_m to compute.yaml for a dollar figure (the token counts above stand either way)`,
+    };
+  }
+  const read = rate.cache_read_multiplier ?? DEFAULT_CACHE_READ_MULTIPLIER;
+  const write = rate.cache_write_multiplier ?? DEFAULT_CACHE_WRITE_MULTIPLIER;
+  const saved = (g.cache_read / 1_000_000) * rate.in_per_m * (1 - read) - (g.cache_write / 1_000_000) * rate.in_per_m * (write - 1);
+  return { saved_usd: Math.round(saved * 1e6) / 1e6 };
+}
+
+export interface CacheReportOptions extends ComputeOptions {
+  /** `--since`: `7d`, `2w`, `3m`, or a bare number of days. Default 7. */
+  since?: string | undefined;
+  /** this install's `instance_id` — the Keychain account the console's owner token is filed under */
+  instanceId?: string | undefined;
+  timeoutMs?: number | undefined;
+}
+
+/**
+ * The measurement. One console request and one `compute.yaml` read; nothing
+ * is written, nothing is dialled at a provider, and no model is called —
+ * this reads the ledger of calls already made.
+ */
+export async function cacheReport(opts: CacheReportOptions): Promise<CacheReport> {
+  const days = parseSince(opts.since);
+  const { compute } = await loadCompute(computeFiles(opts));
+  const res = await consoleCall({
+    method: "GET",
+    path: `/api/q/cache_report?days=${days}`,
+    env: opts.env,
+    platform: opts.platform,
+    ...(opts.exec ? { exec: opts.exec } : {}),
+    ...(opts.fetchFn ? { fetchFn: opts.fetchFn } : {}),
+    ...(opts.instanceId ? { instanceId: opts.instanceId } : {}),
+    ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
+  });
+  if (res.status >= 400) {
+    throw new StepFailed(
+      `the console would not answer /api/q/cache_report: ${renderConsoleCallError(res)}` +
+        (res.status === 404 ? " — this install's seed/queries/ predates cache_report.yaml; `metistry update` lands it" : ""),
+    );
+  }
+  const body = (res.body ?? {}) as { rows?: unknown; as_of?: unknown };
+  const rows = Array.isArray(body.rows) ? (body.rows as Record<string, unknown>[]) : [];
+
+  const groups: CacheReportGroup[] = rows.map((r) => {
+    const provider = String(r.provider ?? "");
+    const model = String(r.model ?? "");
+    const p = compute.providers[provider];
+    const counts = {
+      turns: numberOf(r.turns),
+      turns_reporting: numberOf(r.turns_reporting),
+      turns_hit: numberOf(r.turns_hit),
+      tokens_in: numberOf(r.tokens_in),
+      tokens_out: numberOf(r.tokens_out),
+      cache_read: numberOf(r.cache_read),
+      cache_write: numberOf(r.cache_write),
+    };
+    const caching = String(r.caching ?? "unknown");
+    const now = p ? (p.caching ?? DEFAULT_CACHING) : undefined;
+    return {
+      provider,
+      model,
+      tier: String(r.tier ?? ""),
+      caching,
+      ...counts,
+      hit_ratio: ratioOf(r.hit_ratio),
+      cost_usd: numberOf(r.cost_usd),
+      turns_unpriced: numberOf(r.turns_unpriced),
+      ...savingOf(counts, p, model),
+      // Only when it CHANGED: the row says what was in force then, the file
+      // says what is in force now, and a window that spans the switch is a
+      // window whose average means two different things.
+      ...(now !== undefined && now !== caching && caching !== "unknown" ? { caching_now: now } : {}),
+    };
+  });
+
+  const sum = (pick: (g: CacheReportGroup) => number): number => groups.reduce((a, g) => a + pick(g), 0);
+  const tokensIn = sum((g) => g.tokens_in);
+  const cacheRead = sum((g) => g.cache_read);
+  const priced = groups.filter((g) => g.saved_usd !== undefined);
+  const totals = {
+    turns: sum((g) => g.turns),
+    turns_reporting: sum((g) => g.turns_reporting),
+    tokens_in: tokensIn,
+    tokens_out: sum((g) => g.tokens_out),
+    cache_read: cacheRead,
+    cache_write: sum((g) => g.cache_write),
+    hit_ratio: tokensIn > 0 ? Math.round((cacheRead / tokensIn) * 1e4) / 1e4 : null,
+    cost_usd: Math.round(sum((g) => g.cost_usd) * 1e6) / 1e6,
+    turns_unpriced: sum((g) => g.turns_unpriced),
+    ...(priced.length > 0 ? { saved_usd: Math.round(priced.reduce((a, g) => a + (g.saved_usd ?? 0), 0) * 1e6) / 1e6 } : {}),
+  };
+
+  return {
+    since_days: days,
+    ...(typeof body.as_of === "string" ? { as_of: body.as_of } : {}),
+    groups,
+    totals,
+    threshold: STABLE_PREFIX_HIT_RATIO,
+    verdict: verdictFor(groups, totals, days),
+  };
+}
+
+/**
+ * ONE line, and it has to be the line the owner would have written after
+ * reading the table. Four readings, in the order that matters — a provider
+ * that never answers the question has to be caught before a ratio taken over
+ * its silence is reported as a failure.
+ */
+function verdictFor(groups: CacheReportGroup[], totals: CacheReport["totals"], days: number): CacheReport["verdict"] {
+  const pct = (n: number): string => `${Math.round(n * 1000) / 10}%`;
+  if (totals.turns === 0) {
+    return { status: "n/a", line: `no engine turns in the last ${days}d — nothing to measure yet. OPEN-6 wants about ten real turns on a configured provider.` };
+  }
+  const asking = groups.filter((g) => g.caching === "auto");
+  if (asking.length === 0) {
+    return {
+      status: "n/a",
+      line: `${totals.turns} turns, none of them on a provider with \`caching: auto\` — nothing asked for a cache, so there is no hit ratio to judge. Set \`caching: auto\` on an off-machine provider block (docs/ops/compute.md, "Prompt caching").`,
+    };
+  }
+  const silent = asking.filter((g) => g.turns_reporting === 0);
+  if (silent.length === asking.length) {
+    return {
+      status: "degraded",
+      line:
+        `${asking.reduce((a, g) => a + g.turns, 0)} turns asked for a cache and NOT ONE response reported a cache field. ` +
+        `That is a wire question, not a prefix question: either the caching field is not reaching the provider, or the names core reads ` +
+        `(prompt_tokens_details.cached_tokens, cache_read_input_tokens) are not the ones it sends. Check one raw response before changing any prompt.`,
+    };
+  }
+  const asked = asking.reduce((a, g) => a + g.tokens_in, 0);
+  const read = asking.reduce((a, g) => a + g.cache_read, 0);
+  const ratio = asked > 0 ? read / asked : 0;
+  if (ratio >= STABLE_PREFIX_HIT_RATIO) {
+    return {
+      status: "ok",
+      line:
+        `hit ratio ${pct(ratio)} across the turns that ASKED for a cache, on the ${pct(STABLE_PREFIX_HIT_RATIO)} threshold — the prefix is stable, ` +
+        `and automatic top-level cache_control is doing its job. Explicit breakpoints are the other half of OPEN-6 and have this to beat.`,
+    };
+  }
+  return {
+    status: "degraded",
+    line:
+      `hit ratio ${pct(ratio)} across the turns that ASKED for a cache, under the ${pct(STABLE_PREFIX_HIT_RATIO)} a stable prefix holds — ` +
+      `look at what changes turn to turn: ` +
+      `a timestamp or anything volatile in the system prompt, an edited prompt, a changed effort, a tool added or reordered ` +
+      `(docs/research/2026-09-cost-optimization.md). ${totals.cache_write > totals.cache_read ? "More was WRITTEN to the cache than read from it, which is the prefix being rebuilt every turn and paid for at a premium." : ""}`.trim(),
+  };
+}
+
+const pctCell = (r: number | null): string => (r === null ? "-" : `${Math.round(r * 1000) / 10}%`);
+const tokens = (n: number): string => (n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1_000 ? `${Math.round(n / 1000)}k` : String(n));
+const usd = (n: number | undefined): string => (n === undefined ? "-" : `${n < 0 ? "-" : ""}$${Math.abs(n).toFixed(4)}`);
+
+/**
+ * A table per provider/model, because that is the grain a decision is taken
+ * at — a tier that is missing its cache on one model and hitting on another
+ * is invisible in a single total. The verdict goes LAST, under the evidence
+ * for it.
+ */
+export function renderCacheReport(r: CacheReport, ui: Ui = defaultUi()): string {
+  const lines: string[] = [`prompt cache, last ${r.since_days}d${r.as_of ? ui.dim(` (as of ${r.as_of})`) : ""}`];
+  if (r.groups.length === 0) {
+    lines.push("");
+    lines.push(ui.wrap("No engine turns in this window. Run some — a chat turn or two is enough to see the shape — then ask again.", { indent: 2 }));
+    lines.push("");
+    lines.push(`${ui.statusIcon(r.verdict.status)} ${ui.wrap(r.verdict.line, { hanging: 2 }).trimStart()}`);
+    return lines.join("\n");
+  }
+  const byModel = new Map<string, CacheReportGroup[]>();
+  for (const g of r.groups) {
+    const key = `${g.provider}/${g.model}`;
+    byModel.set(key, [...(byModel.get(key) ?? []), g]);
+  }
+  for (const [key, gs] of byModel) {
+    lines.push("");
+    lines.push(ui.heading(key));
+    lines.push(
+      ui.table(
+        ["tier", "caching", "turns", "reported", "prompt", "cache read", "cache write", "hit", "cost", "saved"],
+        gs.map((g) => [
+          g.tier || ui.dim("(none)"),
+          g.caching_now ? `${g.caching} ${ui.dim(`→ now ${g.caching_now}`)}` : g.caching,
+          String(g.turns),
+          // the count that says whether the provider answers the question at
+          // all — dimmed when every turn did, loud when none did
+          g.turns_reporting === g.turns ? ui.dim(`${g.turns_reporting}/${g.turns}`) : ui.paint("degraded", `${g.turns_reporting}/${g.turns}`),
+          tokens(g.tokens_in),
+          tokens(g.cache_read),
+          tokens(g.cache_write),
+          g.hit_ratio === null ? "-" : g.hit_ratio >= STABLE_PREFIX_HIT_RATIO ? ui.paint("ok", pctCell(g.hit_ratio)) : ui.paint("degraded", pctCell(g.hit_ratio)),
+          usd(g.cost_usd),
+          usd(g.saved_usd),
+        ]),
+        { indent: 2, ragged: [] },
+      ),
+    );
+    const why = gs.find((g) => g.saved_unavailable !== undefined)?.saved_unavailable;
+    if (why) lines.push(ui.note(`    saved: ${why}`));
+    const unpriced = gs.reduce((a, g) => a + g.turns_unpriced, 0);
+    if (unpriced > 0) lines.push(ui.note(`    ${unpriced} turn${unpriced === 1 ? "" : "s"} recorded at $0 with cost_source unknown — the cost column understates by that much`));
+  }
+  lines.push("");
+  lines.push(
+    ui.kv(
+      [
+        ["turns", `${r.totals.turns} (${r.totals.turns_reporting} reported a cache field)`],
+        ["prompt tokens", `${tokens(r.totals.tokens_in)} in, ${tokens(r.totals.tokens_out)} out`],
+        ["from cache", `${tokens(r.totals.cache_read)} read, ${tokens(r.totals.cache_write)} written`],
+        ["hit ratio", `${pctCell(r.totals.hit_ratio)} ${ui.dim("(cache read ÷ prompt tokens, over EVERY turn — the prompt already includes what was cached; the verdict below counts only the turns that asked for a cache)")}`],
+        ["recorded cost", usd(r.totals.cost_usd)],
+        ...(r.totals.saved_usd !== undefined ? ([["net saving", `${usd(r.totals.saved_usd)} ${ui.dim("(reads below the input rate, less what the writes paid extra)")}`]] as Array<[string, string]>) : []),
+      ],
+      { indent: 2 },
+    ),
+  );
+  lines.push("");
+  lines.push(`${ui.statusIcon(r.verdict.status)} ${ui.wrap(r.verdict.line, { hanging: 2 }).trimStart()}`);
+  return lines.join("\n");
 }

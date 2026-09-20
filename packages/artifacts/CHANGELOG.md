@@ -1,5 +1,13 @@
 # @foldedspacelabs/metistry-artifacts
 
+## 0.10.0
+
+### Patch Changes
+
+- Updated dependencies [ad73f5a]
+  - @foldedspacelabs/metistry-core@0.10.0
+  - @foldedspacelabs/metistry-tasks@0.10.0
+
 ## 0.9.1
 
 ### Patch Changes

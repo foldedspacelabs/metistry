@@ -582,6 +582,8 @@ Per `CLAUDE.md`. None edited. The ones the owner already logged in
 | **C27** | P1 (“agent text is data, never looks like a control”) inverts on Work ▸ Today, where the task line is the owner's own writing and must look actionable. §2 states P1 unconditionally | `design-system.md` §2; `docs/product/design/screen-05-today.md` §1 |
 | **C28** | §3.15 ratifies four states — empty, absent, failed, stale. A row with `vault_tasks.parse_warning` is none of them: the task is fine and one token is unreadable. A fifth shape, **partial**, is needed | `design-system.md` §3.15; `daily-flow-spec.md` §6.4 |
 | **C29** | §10.1 requires the user's drag order on Today to be stored and authoritative, and nothing specifies where. It cannot live in the markdown — that is the user's file and a reorder is not a task edit | `daily-flow-spec.md` §10 |
+| **C30** | P6 and `app-ux-plan.md` ratify **six sections, same order, same names on every platform**. Today becomes a seventh, second under Chat, because it stopped being a view of Work — it holds meetings, artifacts, requests and agent status, none of which Work owns. P6's force (same rows, same order, same names everywhere) survives; the number does not | `design-system.md` P6; `app-ux-plan.md`; `docs/product/design/screen-05-today.md` §13.1 |
+| **C31** | The design system has no facet vocabulary, so priority, due dates, people and links have been styled per screen. A five-rung ladder with a two-chip cap is proposed in `screen-05-today.md` §13.3 and wants to live in §3 | `design-system.md` §3; `docs/product/design/screen-05-today.md` §13.3 |
 | **C15** | `design-system.md` §3.1's own body says the Mac sidebar rows carry "an optional count badge — shown only when the count is *actionable*", which contradicts the "only badge" rule three paragraphs later | `design-system.md:500` (§3.1) |
 
 Minor, not worth a row each: the PWA's `rooms` nav item is the one view with
@@ -699,7 +701,7 @@ Grouped, numbered, each with the recommendation so you can mostly say yes.
 | What | Why |
 | --- | --- |
 | Added this review | `design-brief.md` §8 asks for it before anything is drawn |
-| Logged 29 contradictions (C1–C29), none edited | `CLAUDE.md`: "Report contradictions, don't route around them" |
+| Logged 31 contradictions (C1–C31), none edited | `CLAUDE.md`: "Report contradictions, don't route around them" |
 | Computed the shipped presence-chip contrast on the ground actually painted | §2.2 checks `presence-* on surface`; nothing is drawn on `surface`. Three chips are below AA in light mode |
 | Proposed no token values yet | The accent decision (8.8) determines the palette, and it is unanswered |
 | Proposed one reordering (Insights before Knowledge) and one demotion (Rooms) | Data sources, and what a section is for |
@@ -753,4 +755,4 @@ It will be drawn as a section with the Settings-pane version beside it.
 Nothing is retracted. §6's recommendations are now decisions; §1.5's naming
 options are closed by **Usage**; C2 and C3 are resolved by decisions 3 and 12;
 C6, C7 and C8 by decision 6; C11 by decision 8. **C1, C4, C5, C9, C10, C12,
-C13, C14, C15, C16, C17, C18, C19, C20, C21, C22, C23, C24, C25, C26, C27, C28 and C29 remain open** and are build-side fixes, not design ones.
+C13, C14, C15, C16, C17, C18, C19, C20, C21, C22, C23, C24, C25, C26, C27, C28, C29, C30 and C31 remain open** and are build-side fixes, not design ones.

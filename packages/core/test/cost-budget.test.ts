@@ -52,14 +52,37 @@ describe("usage → cost", () => {
     expect(costOf(usageFromResponse({ prompt_tokens: 9e6, cost: 5 }), local, "whatever")).toEqual({ cost_usd: 0, source: "local" });
   });
 
-  it("cached prompt tokens come off whatever field the provider put them in", () => {
-    // OpenRouter reports the write beside the usage block, Anthropic's own
-    // wire calls it cache_creation_input_tokens: one CallUsage either way,
-    // so the row does not depend on which spelling arrived.
+  it("cached prompt tokens come off whatever field the provider put them in, and tokens_in is the whole prompt either way", () => {
+    // OPENAI-SHAPED (OpenRouter and every /v1/chat/completions endpoint):
+    // `prompt_tokens` is ALREADY the whole prompt, cached share included, and
+    // the split lives in the details block.
     expect(usageFromResponse({ prompt_tokens: 1000, completion_tokens: 20, prompt_tokens_details: { cached_tokens: 600 }, cache_write_tokens: 300 }))
       .toEqual({ tokens_in: 1000, tokens_out: 20, cache_read: 600, cache_write: 300 });
-    expect(usageFromResponse({ input_tokens: 500, output_tokens: 10, cached_tokens: 200, cache_creation_input_tokens: 100 }))
-      .toEqual({ tokens_in: 500, tokens_out: 10, cache_read: 200, cache_write: 100 });
+    // ANTHROPIC-NATIVE (/v1/messages): `input_tokens` is the FRESH remainder
+    // and the two cache counts sit beside it, so the whole prompt is the sum —
+    // 100 + 600 + 300. A row that recorded 100 here would say a turn which
+    // cached 90 % of its prefix was a tenth the size of the same turn on
+    // OpenRouter, and every ratio over `tokens_in` would be wrong.
+    expect(usageFromResponse({ input_tokens: 100, output_tokens: 10, cache_read_input_tokens: 600, cache_creation_input_tokens: 300 }))
+      .toEqual({ tokens_in: 1000, tokens_out: 10, cache_read: 600, cache_write: 300 });
+    // The shape is read off the ANCHOR field, never the provider's name: a
+    // gateway that sends `prompt_tokens` beside Anthropic's cache spellings
+    // has already included them, so they are not added a second time.
+    expect(usageFromResponse({ prompt_tokens: 1000, completion_tokens: 10, cache_read_input_tokens: 600, cache_creation_input_tokens: 300 }))
+      .toEqual({ tokens_in: 1000, tokens_out: 10, cache_read: 600, cache_write: 300 });
+  });
+
+  it("a response that says nothing about the cache is undefined, not zero — the two are different findings (OPEN-6)", () => {
+    // `undefined` = "this provider reported no such field", which is how a
+    // wrong guess at the field name shows up; 0 = "reported, and none of the
+    // prompt was cached", which is a prefix that is not stable. The
+    // cache-report reads the difference, so it must survive normalisation.
+    const silent = usageFromResponse({ prompt_tokens: 1000, completion_tokens: 20 });
+    expect(silent.cache_read).toBeUndefined();
+    expect(silent.cache_write).toBeUndefined();
+    const reportedZero = usageFromResponse({ prompt_tokens: 1000, completion_tokens: 20, prompt_tokens_details: { cached_tokens: 0 }, cache_write_tokens: 0 });
+    expect(reportedZero.cache_read).toBe(0);
+    expect(reportedZero.cache_write).toBe(0);
   });
 
   it("the pricing: table prices the prompt in three parts — fresh, cache read, cache write", () => {

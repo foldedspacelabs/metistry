@@ -5,6 +5,7 @@
 // read from the repo's config or a request.
 
 import { execFile } from "node:child_process";
+import { CREDENTIAL_HELPER_RESET, GIT_ASKPASS_PATH_VAR, GIT_ASKPASS_TOKEN_VAR, GIT_ASKPASS_USER_VAR } from "@foldedspacelabs/metistry-core";
 
 export interface GitIdentity {
   name: string;
@@ -26,6 +27,66 @@ export class GitError extends Error {
   }
 }
 
+/**
+ * Everything the egress door and the confined credential path add to a git
+ * call, as two pure functions — because the whole of the design is in this
+ * pair of decisions and a test that could only observe them through a
+ * subprocess would be testing git rather than us.
+ *
+ * `METISTRY_GIT_ASKPASS` is the switch. It is set by `metistry up` on the
+ * confined reconciler and on nothing else, so its presence is exactly
+ * "this install has no shell for a credential helper" — and the reset and
+ * the shim move together, because a reset with no askpass is an install
+ * that cannot authenticate at all.
+ */
+export function gitCredentialEnv(env: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  const askpass = env[GIT_ASKPASS_PATH_VAR]?.trim();
+  if (!askpass) return {};
+  // The credential reaches git through the ENVIRONMENT and never through
+  // argv — `ps` shows argv to every process on the Mac, and a push runs
+  // every hour. The shim reads exactly these two and can open no file.
+  return {
+    GIT_ASKPASS: askpass,
+    ...(env[GIT_ASKPASS_USER_VAR] ? { [GIT_ASKPASS_USER_VAR]: env[GIT_ASKPASS_USER_VAR] } : {}),
+    ...(env[GIT_ASKPASS_TOKEN_VAR] ? { [GIT_ASKPASS_TOKEN_VAR]: env[GIT_ASKPASS_TOKEN_VAR] } : {}),
+  };
+}
+
+/**
+ * The `-c` flags every call carries.
+ *
+ * `commit.gpgsign=false` / `tag.gpgsign=false`: an automated committer must
+ * never sign as the user.
+ *
+ * `http.proxy`: the supervisor's egress proxy, when this install confines
+ * the reconciler. A flag rather than `HTTPS_PROXY` because the environment
+ * above is a deliberate allowlist and one explicit flag is easier to read in
+ * a log than a variable curl may or may not honour. With the profile in
+ * force it is the ONLY way out — a direct connect is refused by the kernel,
+ * and a host the allowlist does not name comes back as
+ * `fatal: … CONNECT tunnel failed, response 403`.
+ *
+ * `credential.helper=`: git's documented RESET of the helper list, and only
+ * when there is an askpass to take its place. Measured — a confined push
+ * whose repo still names osxkeychain dies on the helper before askpass is
+ * ever reached:
+ *   fatal: cannot exec 'git credential-osxkeychain get': Operation not permitted
+ * An unconfined install gets no reset and keeps using the Keychain helper
+ * exactly as it always did.
+ */
+export function gitConfigFlags(env: NodeJS.ProcessEnv = process.env): string[] {
+  const proxy = env.METISTRY_GIT_HTTP_PROXY?.trim();
+  const askpass = env[GIT_ASKPASS_PATH_VAR]?.trim();
+  return [
+    "-c",
+    "commit.gpgsign=false",
+    "-c",
+    "tag.gpgsign=false",
+    ...(proxy ? ["-c", `http.proxy=${proxy}`] : []),
+    ...(askpass ? ["-c", CREDENTIAL_HELPER_RESET] : []),
+  ];
+}
+
 export class Git {
   constructor(
     public readonly root: string,
@@ -43,6 +104,7 @@ export class Git {
       GIT_TERMINAL_PROMPT: "0",
       GIT_CONFIG_NOSYSTEM: "1",
       ...(process.env.SSH_AUTH_SOCK ? { SSH_AUTH_SOCK: process.env.SSH_AUTH_SOCK } : {}),
+      ...gitCredentialEnv(),
     };
     if (opts.identity) {
       env.GIT_AUTHOR_NAME = opts.identity.name;
@@ -50,21 +112,7 @@ export class Git {
       env.GIT_COMMITTER_NAME = opts.identity.name;
       env.GIT_COMMITTER_EMAIL = opts.identity.email;
     }
-    // An automated committer must never sign as the user; keep the rest of
-    // the user's global config (credential helpers) so push works.
-    //
-    // …and, when this install confines the reconciler, route HTTP(S)
-    // through the supervisor's egress proxy. It is `-c http.proxy` rather
-    // than an environment variable because the environment above is a
-    // deliberate allowlist — `HTTPS_PROXY` would have to be added to it
-    // anyway, and one explicit flag is easier to read in a log than a
-    // variable curl may or may not honour. With the profile in force this
-    // is the ONLY way out: a direct connect is refused by the kernel, and a
-    // host the allowlist does not name comes back as
-    // `fatal: … CONNECT tunnel failed, response 403`
-    // (packages/core/src/egress.ts; ops/sandbox/reconciler.sb).
-    const proxy = process.env.METISTRY_GIT_HTTP_PROXY?.trim();
-    const argv = ["-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false", ...(proxy ? ["-c", `http.proxy=${proxy}`] : []), ...args];
+    const argv = [...gitConfigFlags(), ...args];
     return new Promise((resolve) => {
       execFile(
         "git",

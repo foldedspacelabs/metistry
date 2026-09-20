@@ -25,6 +25,8 @@
 ;;                   read rule below. Each falls back to the product's own
 ;;                   seed copy when this install has no instance directory.
 ;;   CONSOLE_TCP     the console's loopback endpoint, e.g. localhost:8080
+;;   PROXY_TCP       the supervisor's egress proxy, e.g. localhost:7814 — the
+;;                   ONLY route off this machine (see the network section)
 ;;   DB_TCP          Postgres' loopback endpoint, e.g. localhost:5432 — under
 ;;                   the compose shape the engine reached the db through the
 ;;                   container network, so this rule had no launchd twin and
@@ -34,9 +36,15 @@
 ;; macOS 26.4; the same profile shape has worked since 14). It is a
 ;; deliberate stopgap: when the Mac app hosts this process (docs/product/
 ;; desktop-app-plan.md) the confinement becomes App Sandbox entitlements on
-;; the bundled helper — same deny-default posture, supported API, and the
-;; outbound host allowlist below becomes enforceable by name rather than by
-;; port. Recorded in docs/ops/deployment-shapes.md.
+;; the bundled helper. That is a TRADE, not a pure upgrade, and this file
+;; used to say otherwise: App Sandbox buys outbound filtering by host NAME,
+;; and it costs the per-spawn `-D` parameterisation every rule below is
+;; built on — entitlements are baked into a bundle's signature, so "this
+;; instance's console port, this instance's four config files" is not
+;; something they can express (docs/research/2026-09-19-agent-virtual-
+;; filesystems.md §2.4). The host-name gap is closed TODAY by the egress
+;; proxy below, without waiting for either. Recorded in
+;; docs/ops/deployment-shapes.md and ops/sandbox/README.md.
 
 (version 1)
 (deny default)
@@ -141,15 +149,29 @@
 ;;    put in the managed conf block — not a range, and not "loopback".
 (allow network-outbound (remote tcp (param "DB_TCP")))
 
-;; 3. The engine's provider over TLS. sandbox-exec filters by port, not by
-;;    hostname, so this reads as "outbound TLS" — the host allowlist itself
-;;    is documentation (`engineHosts`, derived from compute.yaml's providers
-;;    in packages/cli/src/sandbox.ts; docs/ops/deployment-shapes.md) — NOT
-;;    enforced here, and not enforced anywhere else today. Name-level
-;;    enforcement arrives with App Sandbox. A local-only install still needs
-;;    this rule for nothing, and keeping it is the honest default rather
-;;    than a confinement that changes shape with a config file.
-(allow network-outbound (remote tcp "*:443"))
+;; 3. The supervisor's egress proxy, on loopback — and NOT `*:443`.
+;;
+;;    This rule used to read `(allow network-outbound (remote tcp "*:443"))`
+;;    with an honest note saying the host list was documentation rather than
+;;    enforcement, because sandbox-exec filters by PORT and cannot express
+;;    `openrouter.ai`. It still cannot. What closed the gap is the other
+;;    half of the same sentence: the profile CAN be narrowed to one loopback
+;;    port, and the thing listening there can name hosts all day.
+;;
+;;    So: the engine reaches one port, in the supervisor, and the CONNECT
+;;    proxy on it admits exactly the hosts `metistry up` derived from this
+;;    install's own compute.yaml (`engineHosts`) — authenticating the child
+;;    with a bearer, refusing everything else with a `runs` row, and never
+;;    decrypting a byte (CONNECT only, no TLS interception). The engine
+;;    finds it as HTTPS_PROXY + NODE_USE_ENV_PROXY=1, which is what makes
+;;    Node's global fetch honour it.
+;;
+;;    packages/core/src/egress.ts; apps/watchdog/src/egress-proxy.ts; the
+;;    pattern is Anthropic's `sandbox-runtime`'s ("the Seatbelt profile
+;;    allows communication only to a specific localhost port"), read from
+;;    docs/research/2026-09-19-agent-virtual-filesystems.md §1.A — the
+;;    pattern only: no dependency was added.
+(allow network-outbound (remote tcp (param "PROXY_TCP")))
 
 ;; DNS resolution goes through mDNSResponder, not a socket to :53.
 (allow network-outbound (remote unix-socket (path-literal "/private/var/run/mDNSResponder")))

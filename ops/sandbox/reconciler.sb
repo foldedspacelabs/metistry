@@ -1,0 +1,207 @@
+;; Metistry reconciler — host confinement profile.
+;;
+;; The reconciler is the SOLE COMMITTER (D5): the only process that holds the
+;; instance repo's working tree and the only place git runs. Until this file
+;; existed it was also the only child of the supervisor with no boundary at
+;; all — it could read every note in the vault (which is its job) and also
+;; ~/Documents, ~/.ssh and the rest of the disk (which is not).
+;; docs/research/2026-09-19-agent-virtual-filesystems.md §3.2(c) called it
+;; "the best target in the repo"; this profile is that finding built.
+;;
+;; What changes for the reader: D5 stops being a design intention and becomes
+;; something the kernel enforces. CLAUDE.md's governing principle — "enforce
+;; at the tool, never by prompting … the tool must be incapable of it" —
+;; applied to the one process that can rewrite the record.
+;;
+;; Invoked by ops/launchd/com.foldedspacelabs.metistry.reconciler.plist as
+;;   /usr/bin/sandbox-exec -f <this file> -D KEY=VALUE … <node> <main.js>
+;; so the sandbox is the job's root process and every child — git and all
+;; 172 of its own helpers — inherits it (sandbox(7): "New processes inherit
+;; the sandbox of their parent"; a nested sandbox-exec cannot loosen OR
+;; tighten it).
+;;
+;; Parameters (all absolute, all computed in packages/cli/src/sandbox.ts,
+;; which is the one place they exist):
+;;   NODE_PREFIX     the node installation root (read + exec)
+;;   NODE_BIN        the node binary itself (read + exec)
+;;   PRODUCT_DIR     the product checkout: dist/, node_modules/, seed/ (read
+;;                   only) — and the job's WorkingDirectory, which matters:
+;;                   a confined process whose cwd it cannot read dies with
+;;                   `fatal: Unable to read current working directory`
+;;   INSTANCE_DIR    the instance repo — the vault AND .metistry/. The one
+;;                   WRITABLE location besides TMP_DIR, and the whole point:
+;;                   the sole committer may write the record and nothing else
+;;   TMP_DIR         the per-user temporary directory
+;;   GIT_PREFIX      a REAL git's installation prefix (read + exec) — see
+;;                   "the git shim" below, which is the finding that cost the
+;;                   most to learn
+;;   GIT_CONFIG_GLOBAL  the user's ~/.gitconfig, BY NAME (read only)
+;;   RECONCILER_TCP  the bridge port this process binds, e.g. localhost:7812
+;;   CONSOLE_TCP     the console's loopback endpoint
+;;   DB_TCP          Postgres' loopback endpoint (the reconciler holds its
+;;                   own pool — apps/reconciler/src/main.ts)
+;;   EMBED_TCP       the on-machine embedding server's loopback endpoint
+;;                   (llama-server, LM Studio, Ollama, apple-fm). Absent an
+;;                   embedder the rule grants a port nothing answers on,
+;;                   which is the honest default: the index degrades, the
+;;                   profile does not change shape with a config file
+;;   PROXY_TCP       the supervisor's egress proxy (packages/core/src/
+;;                   egress.ts). The ONLY route off this machine.
+;;
+;; THE GIT SHIM — measured on macOS 26.4 (25E246), 2026-09-19, and the
+;; opposite of what the research doc guessed. `/usr/bin/git` is NOT a real
+;; git: `otool -L` shows it linked against `/usr/lib/libxcselect.dylib`, i.e.
+;; it is the xcode-select shim, and under a profile that allows exactly that
+;; one literal it fails with
+;;   xcrun: error: unable to load libxcrun (dlopen(/Applications/Xcode.app/
+;;   Contents/Developer/usr/lib/libxcrun.dylib …): file system sandbox
+;;   blocked open())
+;; So the profile names a real git's PREFIX instead — `bin/git`,
+;; `libexec/git-core/` (172 helpers, including git-remote-http(s)) and
+;; `share/git-core/templates`. `metistry up` resolves it: the bundled
+;; runtime's `runtime/git` first, then the Command Line Tools, then a git on
+;; PATH that is not the shim. If it finds none it refuses to confine this job
+;; and says so, rather than installing a reconciler that cannot commit.
+;;
+;; WHAT THIS PROFILE DELIBERATELY DOES NOT ALLOW, and what it costs:
+;;
+;;   no shell. There is no /bin/sh and no /bin/bash here, which is invariant
+;;   9's posture applied to the committer. Measured consequence: git runs
+;;   EVERY credential helper through the shell — even the built-in
+;;   `osxkeychain` that lives inside GIT_PREFIX — so a confined reconciler
+;;   cannot use one (`fatal: cannot exec 'git credential-osxkeychain get':
+;;   Operation not permitted`; granting /bin/sh is not enough either, because
+;;   macOS's /bin/sh re-execs /bin/bash). A push therefore needs its
+;;   credential to arrive without a subprocess: in the remote URL, or through
+;;   GIT_ASKPASS pointed at a program inside an exec-granted prefix (git
+;;   execs askpass directly, by absolute path, no shell — measured).
+;;
+;;   no ssh. `/usr/bin/ssh` is not exec-able here. Allowing it would mean
+;;   granting the sole committer read of ~/.ssh — the owner's private keys —
+;;   and ssh's ProxyCommand runs through the shell besides, so it could not
+;;   reach the egress proxy anyway. SSH remotes are unsupported while
+;;   confined; `metistry up` says so when it sees one, and doctor carries the
+;;   row. docs/ops/reconciler.md has the whole table.
+;;
+;; sandbox-exec(1) is deprecated by Apple and still functional (verified on
+;; macOS 26.4; the same profile shape has worked since 14). The migration
+;; path is App Sandbox entitlements once the Mac app hosts this process —
+;; with the honest caveat ops/sandbox/README.md now states: App Sandbox buys
+;; host-name egress filtering and COSTS the per-spawn `-D` parameterisation
+;; every rule below depends on. It is a trade, not a pure upgrade.
+
+(version 1)
+(deny default)
+
+;; Denials are reported to the system log either way — a violation we did
+;; not predict is findable with
+;;   log stream --predicate 'sender == "Sandbox"'
+
+(import "system.sb")
+
+(allow process-fork)
+
+;; ---- exec ---------------------------------------------------------------
+;; Two programs: node, and a real git. No shell (see above).
+(allow process-exec*
+  (literal (param "NODE_BIN"))
+  (subpath (param "NODE_PREFIX"))
+  (subpath (param "GIT_PREFIX")))
+
+;; ---- reads --------------------------------------------------------------
+;; Metadata (lstat) on any path: node resolves its entry point by lstat-ing
+;; every ancestor directory, and git stats its way up looking for a repo
+;; root. Metadata is existence and size, never content.
+(allow file-read-metadata)
+
+;; System frameworks, the certificate store, timezone and resolver config.
+(allow file-read*
+  (subpath "/usr/lib")
+  (subpath "/usr/share")
+  (subpath "/System")
+  (subpath "/Library/Preferences/Logging")
+  (subpath "/private/var/db/timezone")
+  (subpath "/private/etc/ssl")
+  (literal "/private/etc/hosts")
+  (literal "/private/etc/resolv.conf")
+  (literal "/private/etc/localtime")
+  (literal "/private/etc/protocols")
+  (literal "/private/etc/services"))
+
+;; Its own code and runtime, and a real git — all read-only.
+(allow file-read*
+  (literal (param "NODE_BIN"))
+  (subpath (param "NODE_PREFIX"))
+  (subpath (param "PRODUCT_DIR"))
+  (subpath (param "GIT_PREFIX")))
+
+;; The user's ~/.gitconfig, BY NAME. Not the home directory — one file.
+;;
+;; This rule is not optional politeness: git treats an UNREADABLE global
+;; config as fatal rather than absent —
+;;   fatal: unable to access '/Users/…/.gitconfig': Operation not permitted
+;; — so without it the reconciler cannot run `git status`, let alone commit.
+;; (Measured 2026-09-19.) The file is where the owner's identity and their
+;; `credential.*` blocks live; it is read, never written, and a helper named
+;; in it still cannot run (no shell).
+(allow file-read* (literal (param "GIT_CONFIG_GLOBAL")))
+
+;; ---- writes -------------------------------------------------------------
+;; Exactly two: the instance repo (the vault, `.metistry/`, and `.git/` —
+;; this IS the sole committer, and a committer that cannot write the record
+;; is not one) and the temporary directory.
+;;
+;; Everything else on this Mac is now out of reach, which is the whole
+;; change: ~/Documents, ~/.ssh, the product checkout, another instance's
+;; vault, and the launch agents directory.
+(allow file-read* file-write*
+  (subpath (param "INSTANCE_DIR"))
+  (subpath (param "TMP_DIR")))
+
+;; ---- network ------------------------------------------------------------
+;; It binds ONE port — its own bridge — and dials four destinations, three of
+;; them loopback.
+(allow network-bind (local ip (param "RECONCILER_TCP")))
+
+;; 1. The console, on loopback.
+(allow network-outbound (remote tcp (param "CONSOLE_TCP")))
+
+;; 2. Postgres, on loopback: the reconciler holds its own pool for the
+;;    derived index and the embeddings table.
+(allow network-outbound (remote tcp (param "DB_TCP")))
+
+;; 3. The on-machine embedding server, on loopback.
+(allow network-outbound (remote tcp (param "EMBED_TCP")))
+
+;; 4. The supervisor's egress proxy — the ONE way off this machine, and the
+;;    only reason `*:443` is not here. The proxy takes a CONNECT, checks the
+;;    host against a list `metistry up` derived from this install's git
+;;    remotes and compute.yaml, authenticates the child, and refuses
+;;    everything else with a `runs` row (packages/core/src/egress.ts).
+;;    `git push` reaches it through `http.proxy`, which `up` sets on this
+;;    job. Measured: a non-allowlisted remote comes back as
+;;    `fatal: … CONNECT tunnel failed, response 403`, and with no proxy
+;;    configured at all this rule alone produces
+;;    `Failed to connect to github.com port 443 … Couldn't connect to server`.
+(allow network-outbound (remote tcp (param "PROXY_TCP")))
+
+;; DNS resolution goes through mDNSResponder, not a socket to :53. Kept
+;; because node's startup and git's own resolver touch it; it resolves names
+;; but reaches nothing — the four rules above are still the whole of where
+;; this process can connect.
+(allow network-outbound (remote unix-socket (path-literal "/private/var/run/mDNSResponder")))
+(allow mach-lookup
+  (global-name "com.apple.dnssd.service")
+  (global-name "com.apple.system.opendirectoryd.libinfo")
+  (global-name "com.apple.SystemConfiguration.configd")
+  (global-name "com.apple.SystemConfiguration.DNSConfiguration")
+  (global-name "com.apple.SystemConfiguration.PPPController")
+  (global-name "com.apple.SystemConfiguration.NetworkInformation")
+  (global-name "com.apple.nehelper")
+  (global-name "com.apple.networkd")
+  (global-name "com.apple.usymptomsd"))
+
+;; Reading the machine's own network/system state (node's os module, git's
+;; core.fsmonitor probe).
+(allow sysctl-read)
+(allow system-socket)

@@ -1,0 +1,27 @@
+;; THE OFF SWITCH. This profile allows everything.
+;;
+;; It exists so that turning confinement OFF is a VISIBLE fact rather than an
+;; invisible one. `metistry up` renders the reconciler's job with
+;; `-f <profile>`; when METISTRY_RECONCILER_SANDBOX=0 that profile is this
+;; file, and the difference is readable in the rendered plist, in
+;; supervisor.json, in `metistry up --dry-run`, and in `metistry doctor`'s
+;; `sandbox` row, which names the profile each child actually runs under.
+;;
+;; The alternative was two argv shapes for one job, which would have meant
+;; either two plist templates or a shell string built at render time — the
+;; exact defect class the 2026-09-10 launchd trial found. One argv, one
+;; placeholder, one file that says what it does.
+;;
+;; WHY THE SWITCH EXISTS AT ALL. Confinement costs the reconciler its git
+;; credential helper and its SSH remotes (ops/sandbox/reconciler.sb explains
+;; both, with the measurements). An install whose remote it cannot push to
+;; while confined must have a way back that is not "edit a profile", and
+;; "the sole committer stopped backing up the vault" must never be the
+;; failure mode of a security improvement.
+;;
+;; Do not point anything else at this file. If a component needs a wider
+;; grant than its profile gives, widen the profile — one rule, reviewed —
+;; rather than removing the boundary.
+
+(version 1)
+(allow default)

@@ -56,14 +56,19 @@ copy() {
 copy package.json pnpm-workspace.yaml pnpm-lock.yaml docker-compose.yml README.md LICENSE
 
 # 2. config-shaped defaults, the schema, the ops surface.
-#    ops/sandbox is NOT optional on darwin: under the launchd shape the
-#    assistant's launchd job execs /usr/bin/sandbox-exec -f
-#    __REPO__/ops/sandbox/assistant.sb, so a pack without it produces a job
-#    that cannot start — the engine's only host confinement, missing exactly
+#    ops/sandbox is NOT optional on darwin: under the launchd shape BOTH the
+#    assistant's and the reconciler's jobs exec /usr/bin/sandbox-exec -f
+#    __REPO__/ops/sandbox/<profile>.sb, so a pack without one produces a job
+#    that cannot start — the only host confinement either has, missing exactly
 #    where the container boundary was given up (open decision 15). Found by
 #    the 2026-09-10 launchd trial; v0.4.0 and earlier packs lack it.
+#    unconfined.sb ships too: it is the reconciler's documented off switch
+#    (METISTRY_RECONCILER_SANDBOX=0), and a release that omitted it would turn
+#    that switch into a job that cannot start.
 copy seed db/migrations ops/launchd ops/sandbox ops/scripts ops/release targets
-[ -f "$stage/ops/sandbox/assistant.sb" ] || { echo "pack-runtime: ops/sandbox/assistant.sb did not make it into the pack — the launchd shape's assistant could not start" >&2; exit 1; }
+for profile in assistant reconciler unconfined; do
+  [ -f "$stage/ops/sandbox/$profile.sb" ] || { echo "pack-runtime: ops/sandbox/$profile.sb did not make it into the pack — the launchd shape's confined children could not start" >&2; exit 1; }
+done
 
 # 3. every workspace package: its manifest, its package.json, its build output.
 #    src/, tests and tsconfigs are deliberately left out — a release is

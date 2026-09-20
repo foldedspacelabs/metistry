@@ -1,0 +1,131 @@
+# Seeded default (D4 overlay: an instance file of the same name wins).
+#
+# The MEASURE over the vault's tasks (daily-flow-spec §7's extended
+# `weekly-review`: "+ ageing, completion rate, counts by `source`"; §10's
+# carry-over chip; ticket P1-5). Three row kinds in one result, the shape
+# `reply_feedback_summary.yaml` already uses:
+#
+#   `total`  one row: the counts the week is reported in, plus the
+#            completion rate over the window.
+#   `age`    one row per age bucket over the OPEN set, from `first_seen_on` —
+#            "how long has this been sitting", which is not the same question
+#            as "was it owed on an earlier day" (that is `carried`, and it is
+#            in the `total` row).
+#   `source` one row per SOURCE KIND — `meeting`, `mail`, `agent`,
+#            `template`, `user` — never per source VALUE.
+#
+# **This is the one query here that is `expose: generic`, and the reason is
+# the whole design of it: nothing in it is a path or a line of the owner's
+# prose.** `vault_tasks.source` is spelled `meeting:<path>` and
+# `mail:<message-id>`, so grouping by the whole value would put a vault path
+# in an aggregate; it groups by the part before the colon, which is both the
+# grouping §7 actually asked for and a value with nothing in it. There is
+# deliberately **no `prefix` parameter** either: a count over a caller-
+# supplied filter is the "directory listing of what was filtered" that
+# `knowledge_pages.yaml` refuses to publish — with one, a narrowed principal
+# could learn the shape of a tree it cannot read, one probe at a time. The
+# measure is the whole vault's or it is nothing.
+#
+# That matters because it is what makes §1.5's promise true without a new
+# tool (D20): the assistant reads this through `queries_run` like any other
+# named query, and `mcp-brain` stays at its declared ceiling.
+#
+# **Unset priority counts as 3** (D5, `coalesce(priority, 3)`), so "unset"
+# and "normal" are one number here as everywhere else. **Rule lines are not
+# tasks** (§4) and are counted on their own line rather than mixed into the
+# open set.
+name: task_ageing
+description: >-
+  The vault's tasks as a measure, for the weekly review and the carry-over
+  chip: one `total` row (open, carried, overdue, unscheduled, waiting,
+  parse warnings, duplicate groups, recurrence rules, and what was created
+  and completed in the window with the completion rate), one `age` row per
+  bucket of the open set by how long it has been sitting, and one `source`
+  row per source KIND. Counts only — no path, no task text, no person, and
+  no caller-supplied filter to probe the tree with.
+params:
+  days: { type: int, default: 7 } # the completion window; the weekly review passes 7
+  today: { type: text, default: "" } # the date ageing is measured against; blank = the cluster's current_date
+sql: |
+  WITH f AS (
+    SELECT coalesce(nullif(:today::text, '')::date, current_date) AS today,
+           (:days)::int                                           AS days
+  ),
+  t AS (
+    SELECT v.*, f.today, f.days,
+           (f.today - v.first_seen_on) AS age_days,
+           (v.recur_rule IS NOT NULL)  AS is_rule,
+           (NOT v.checked AND NOT v.dropped AND v.recur_rule IS NULL) AS is_open
+    FROM vault_tasks v, f
+  ),
+  totals AS (
+    SELECT
+      count(*) FILTER (WHERE t.is_open)                                              AS open,
+      count(*) FILTER (WHERE t.is_rule)                                              AS recurrence_rules,
+      count(*) FILTER (WHERE t.is_open AND coalesce(t.scheduled_for, t.due) < t.today) AS carried,
+      count(*) FILTER (WHERE t.is_open AND t.due IS NOT NULL AND t.due < t.today)    AS overdue,
+      count(*) FILTER (WHERE t.is_open AND t.due IS NULL AND t.scheduled_for IS NULL) AS unscheduled,
+      count(*) FILTER (WHERE t.is_open AND t.waiting)                                AS waiting,
+      count(*) FILTER (WHERE t.is_open AND t.assigned IS NOT NULL)                   AS delegated,
+      count(*) FILTER (WHERE t.is_open AND t.parse_warning IS NOT NULL)              AS parse_warnings,
+      count(DISTINCT t.text_norm) FILTER (WHERE t.is_open AND t.duplicate_of IS NOT NULL) AS duplicate_groups,
+      count(*) FILTER (WHERE t.done_on IS NOT NULL AND t.done_on > t.today - t.days) AS done_in_window,
+      count(*) FILTER (WHERE t.done_on IS NOT NULL AND t.done_on > t.today - t.days
+                             AND t.done_on_observed)                                 AS done_observed_in_window,
+      count(*) FILTER (WHERE t.first_seen_on > t.today - t.days AND t.recur_rule IS NULL) AS created_in_window,
+      -- the oldest thing still open, as an AGE, never as a task
+      max(t.age_days) FILTER (WHERE t.is_open)                                       AS oldest_open_days
+    FROM t
+  ),
+  buckets AS (
+    SELECT
+      CASE WHEN t.age_days <= 0  THEN 1
+           WHEN t.age_days <= 3  THEN 2
+           WHEN t.age_days <= 7  THEN 3
+           WHEN t.age_days <= 30 THEN 4
+           WHEN t.age_days <= 90 THEN 5
+           ELSE 6 END                                     AS ord,
+      count(*)                                            AS n,
+      count(*) FILTER (WHERE t.due IS NOT NULL AND t.due < t.today) AS overdue
+    FROM t WHERE t.is_open GROUP BY 1
+  ),
+  sources AS (
+    SELECT
+      -- the KIND, never the value: `meeting:<path>` would put a vault path
+      -- in an aggregate. A hand-typed line has no source and says so.
+      coalesce(split_part(t.source, ':', 1), 'typed')     AS source_kind,
+      count(*) FILTER (WHERE t.is_open)                   AS n,
+      count(*) FILTER (WHERE t.done_on IS NOT NULL AND t.done_on > t.today - t.days) AS done_in_window
+    FROM t WHERE NOT t.is_rule GROUP BY 1
+  )
+  SELECT r.* FROM (
+    SELECT 'total'::text AS row_kind, 0 AS ord, NULL::text AS label,
+           tt.open AS n, tt.overdue,
+           tt.carried, tt.unscheduled, tt.waiting, tt.delegated,
+           tt.parse_warnings, tt.duplicate_groups, tt.recurrence_rules,
+           tt.created_in_window, tt.done_in_window, tt.done_observed_in_window,
+           tt.oldest_open_days,
+           CASE WHEN tt.created_in_window > 0
+                THEN round(tt.done_in_window::numeric / tt.created_in_window, 3)::float8 END AS completion_rate
+    FROM totals tt
+    UNION ALL
+    SELECT 'age', b.ord,
+           CASE b.ord WHEN 1 THEN 'today' WHEN 2 THEN '1-3d' WHEN 3 THEN '4-7d'
+                      WHEN 4 THEN '8-30d' WHEN 5 THEN '31-90d' ELSE '90d+' END,
+           b.n, b.overdue,
+           NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
+    FROM buckets b
+    UNION ALL
+    SELECT 'source', 7, s.source_kind, s.n, NULL,
+           NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, s.done_in_window, NULL, NULL, NULL
+    FROM sources s
+  ) r
+  -- `ord` first, so the reading order is the reporting order: the `total`
+  -- row (0), then the age buckets oldest-last (1..6), then the source kinds
+  -- (7). The UNION is wrapped because a set operation's ORDER BY admits
+  -- result column NAMES only, never an expression, and `COLLATE "C"` is an
+  -- expression — byte order for the same reason it is everywhere else here:
+  -- a locale collation would order the source kinds differently on a macOS
+  -- cluster and a Linux one.
+  ORDER BY r.ord, r.row_kind COLLATE "C", r.label COLLATE "C" NULLS FIRST
+cache_ttl: 60 # a measure of a week does not change between two reads a minute apart

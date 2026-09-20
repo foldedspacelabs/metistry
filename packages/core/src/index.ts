@@ -44,6 +44,22 @@ export {
   type ActionAutonomy,
   type AutonomyLevel,
 } from "./actions.js";
+export {
+  NO_SCOPE,
+  OWNER_SCOPE,
+  SCOPE_REQUIRED,
+  areaOf,
+  canSee,
+  canSeeUnder,
+  filterHits,
+  filterPages,
+  grantedScope,
+  scopeRequired,
+  underAreas,
+  validKnowledgePath,
+  type GrantTier,
+  type KnowledgeScope,
+} from "./access.js";
 export { checkResultSchema, runCheck, type CheckResult, type Checkable } from "./check.js";
 export {
   AREA_PREFIX_RE,

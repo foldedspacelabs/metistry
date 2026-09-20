@@ -29,6 +29,7 @@ const REQUIRED = [
   "agent_presence",
   "reply_feedback_summary",
   "spend", // the budget's read path (invariant 3) — the engine runs it before every billable call
+  "cache_report", // OPEN-6's measurement — `metistry compute cache-report` reads it through GET /api/q/cache_report, not a route of its own (invariant 10)
   "board",
   "board_projects",
   "rooms",
@@ -139,6 +140,81 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
     expect(Number(s.turns)).toBeGreaterThanOrEqual(1);
     expect(Number(s.captures)).toBeGreaterThanOrEqual(1);
     expect(Number(s.spend_usd)).toBeGreaterThanOrEqual(0.25);
+  });
+
+  // OPEN-6's measurement (docs/research/2026-09-cost-optimization.md
+  // addendum). The assertions that matter are the three the report's verdict
+  // rests on: the denominator, the NULL/0 distinction, and "every engine
+  // turn" meaning crews and shadows too rather than the chat tier alone.
+  it("cache_report: hit ratio over the whole billed prompt, NULL ≠ 0, and every engine turn", async () => {
+    const tag = `cr-${Date.now()}`;
+    const model = `${tag}/model`;
+    // A group with a stable prefix: 10_000 prompt tokens of which 9_000 came
+    // out of the cache, over two turns. `tokens_in` INCLUDES cache_read
+    // (core's usageFromResponse), so the ratio is 9000/10000, not 9000/19000.
+    await pool.query(
+      `INSERT INTO runs (component, kind, ok, provider, model, tokens_in, tokens_out, cache_read_tokens, cache_write_tokens, cost_usd, meta)
+       VALUES
+         ($1, 'turn',     true, $2, $3, 5000, 100, 4500, 200, 0.01, $4::jsonb),
+         ($1, 'turn',     true, $2, $3, 5000, 100, 4500,   0, 0.01, $4::jsonb)`,
+      [tag, tag, model, JSON.stringify({ tier: "default", caching: "auto", cost_source: "provider" })],
+    );
+    // A crew run on the same provider/model: a DIFFERENT group (its own tier),
+    // and it has to be in the report at all — the crews carry the long briefs.
+    await pool.query(
+      `INSERT INTO runs (component, kind, ok, provider, model, tokens_in, tokens_out, cache_read_tokens, cache_write_tokens, cost_usd, meta)
+       VALUES ($1, 'crew_run', true, $2, $3, 8000, 50, 0, 8000, 0.05, $4::jsonb)`,
+      [tag, tag, model, JSON.stringify({ tier: `crew:${tag}`, caching: "auto", cost_source: "provider" })],
+    );
+    // Reported NOTHING about the cache (NULL), on a provider whose block says
+    // caching is off. Counted as a turn, not as a turn that reported.
+    await pool.query(
+      `INSERT INTO runs (component, kind, ok, provider, model, tokens_in, tokens_out, cost_usd, meta)
+       VALUES ($1, 'turn', true, $2, $3, 1000, 10, 0, $4::jsonb)`,
+      [tag, `${tag}-local`, model, JSON.stringify({ tier: "routine", caching: "off", cost_source: "unknown" })],
+    );
+    // In flight: a provider stamped at startRun with no token count yet. Not
+    // a reading, and must not dilute one.
+    await pool.query(`INSERT INTO runs (component, kind, ok, provider, model) VALUES ($1, 'turn', NULL, $2, $3)`, [tag, tag, model]);
+
+    const rows = (await store.run("cache_report", { days: 1 })).rows.filter((r) => String(r.provider).startsWith(tag));
+    expect(rows).toHaveLength(3); // chat tier, crew tier, the off-machine one — never the in-flight row
+
+    const chat = rows.find((r) => r.tier === "default")!;
+    expect(chat).toMatchObject({ provider: tag, model, caching: "auto" });
+    expect(Number(chat.turns)).toBe(2);
+    expect(Number(chat.turns_reporting)).toBe(2);
+    expect(Number(chat.turns_hit)).toBe(2);
+    expect(Number(chat.tokens_in)).toBe(10_000);
+    expect(Number(chat.cache_read)).toBe(9_000);
+    expect(Number(chat.cache_write)).toBe(200);
+    expect(Number(chat.hit_ratio)).toBeCloseTo(0.9); // cache_read / tokens_in — NOT cache_read / (tokens_in + cache_read)
+    expect(Number(chat.cost_usd)).toBeCloseTo(0.02);
+    expect(Number(chat.turns_unpriced)).toBe(0);
+
+    // The crew's prefix is being WRITTEN every turn and never read: this is
+    // the shape the verdict calls out, and it is money spent at a premium.
+    const crew = rows.find((r) => String(r.tier).startsWith("crew:"))!;
+    expect(Number(crew.turns_reporting)).toBe(1);
+    expect(Number(crew.turns_hit)).toBe(0);
+    expect(Number(crew.cache_read)).toBe(0);
+    expect(Number(crew.cache_write)).toBe(8_000);
+    expect(Number(crew.hit_ratio)).toBe(0);
+
+    // NULL is a different finding from 0: this provider answered nothing at
+    // all, so it reports no turns — a row that coalesced NULL to 0 would say
+    // "the cache missed" about a provider that was never asked.
+    const off = rows.find((r) => r.provider === `${tag}-local`)!;
+    expect(Number(off.turns)).toBe(1);
+    expect(Number(off.turns_reporting)).toBe(0);
+    expect(Number(off.cache_read)).toBe(0);
+    expect(Number(off.hit_ratio)).toBe(0);
+    expect(off.caching).toBe("off");
+    expect(Number(off.turns_unpriced)).toBe(1);
+
+    // the window is a window: nothing outside it
+    await pool.query(`UPDATE runs SET ts = now() - interval '30 days' WHERE component = $1`, [tag]);
+    expect((await store.run("cache_report", { days: 7 })).rows.filter((r) => String(r.provider).startsWith(tag))).toHaveLength(0);
   });
 
   it("claude_usage_daily computes cache_hit_rate = cache_read / (cache_read + tokens_in + cache_write) per model-day, null with no cache metrics", async () => {

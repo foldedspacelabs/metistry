@@ -575,6 +575,9 @@ Per `CLAUDE.md`. None edited. The ones the owner already logged in
 | **C20** | `runs.ok` is `NOT NULL` in `db/migrations/0001_init.sql` and nullable in `packages/tasks/sql/schema.sql` — two schemas for one table, and the difference is exactly where an in-flight run would live | `db/migrations/0001_init.sql:21`; `packages/tasks/sql/schema.sql:71` |
 | **C21** | `components-01-states-and-request.md` §2.6 specifies the panel header “Needs You · 4 waiting · 1 snoozed”, but `GET /api/proposals` without a cursor excludes snoozed rows by its WHERE clause — the count cannot be obtained. **My own spec, not the repo's** | `docs/product/design/components-01-states-and-request.md` §2.6; `apps/console/src/server.ts:777` |
 | **C22** | `proposals.trust` (`internal \| external \| user`) is returned on every queue row and no design surface has ever rendered it, though P1 turns on exactly that distinction | `db/migrations/0002_review_decisions.sql:26`; `apps/console/src/server.ts:777` |
+| **C23** | `design-system.md` §3.8 specifies the receipt “captured → inbox #418 · classified `note` on-device”, but `POST /capture` returns only `{id, path, sha256}` — classification happens later in the `*/5` drain, and §3.8's own **Never** forbids waiting for it. One paragraph contradicts itself | `design-system.md` §3.8; `apps/console/src/server.ts:428` |
+| **C24** | `POST /capture` honours `Idempotency-Key` and replays the original response with `idempotency-replayed: true` — the mechanism that keeps §3.8's “never drops” from becoming “sometimes captures twice”. No design document mentions it | `apps/console/src/server.ts:435`; `design-system.md` §3.8 |
+| **C25** | `POST /capture` hardcodes `source: "http"`, and `inbox.source` (`imessage \| share \| http \| obsidian \| cli`) has no value for the apps themselves — so the owner's own capture is indistinguishable from any HTTP caller on Activity | `apps/console/src/server.ts:454`; `db/migrations/0001_init.sql:33` |
 | **C15** | `design-system.md` §3.1's own body says the Mac sidebar rows carry "an optional count badge — shown only when the count is *actionable*", which contradicts the "only badge" rule three paragraphs later | `design-system.md:500` (§3.1) |
 
 Minor, not worth a row each: the PWA's `rooms` nav item is the one view with
@@ -692,7 +695,7 @@ Grouped, numbered, each with the recommendation so you can mostly say yes.
 | What | Why |
 | --- | --- |
 | Added this review | `design-brief.md` §8 asks for it before anything is drawn |
-| Logged 22 contradictions (C1–C22), none edited | `CLAUDE.md`: "Report contradictions, don't route around them" |
+| Logged 25 contradictions (C1–C25), none edited | `CLAUDE.md`: "Report contradictions, don't route around them" |
 | Computed the shipped presence-chip contrast on the ground actually painted | §2.2 checks `presence-* on surface`; nothing is drawn on `surface`. Three chips are below AA in light mode |
 | Proposed no token values yet | The accent decision (8.8) determines the palette, and it is unanswered |
 | Proposed one reordering (Insights before Knowledge) and one demotion (Rooms) | Data sources, and what a section is for |
@@ -746,4 +749,4 @@ It will be drawn as a section with the Settings-pane version beside it.
 Nothing is retracted. §6's recommendations are now decisions; §1.5's naming
 options are closed by **Usage**; C2 and C3 are resolved by decisions 3 and 12;
 C6, C7 and C8 by decision 6; C11 by decision 8. **C1, C4, C5, C9, C10, C12,
-C13, C14, C15, C16, C17, C18, C19, C20, C21 and C22 remain open** and are build-side fixes, not design ones.
+C13, C14, C15, C16, C17, C18, C19, C20, C21, C22, C23, C24 and C25 remain open** and are build-side fixes, not design ones.

@@ -22,6 +22,49 @@ capture; an edit to one that is already there refreshes its hash and sends
 it back to the drain; a deleted file archives its row. It lives here
 because this is already the process that walks the tree and hashes it.
 
+And the same walk indexes **the tasks in your notes** — see below.
+
+## The task pass
+
+Every `- [ ] …` line in the vault becomes a `vault_tasks` row, and every
+`[[note#^mt-…]]` that names one becomes a `vault_task_refs` row
+(`docs/product/daily-flow-spec.md` §1.5, migration `0024_vault_tasks.sql`).
+Both tables are **derived in full**: drop the database, let one walk run,
+and every row comes back from the markdown that produced it (invariant 1).
+Neither is ever backed up and neither needs to be.
+
+**Nothing is written back to a note.** The parser reads loosely — `due
+friday`, `critical`, `@Jim`, and on read only, Dataview's `[due:: …]` and
+the Tasks plugin's emoji — and the resolved values land beside the line, in
+the index. The only hand that edits a task line is yours (§1.4, D3).
+
+| | |
+| --- | --- |
+| **which notes** | every markdown note the knowledge walk sees, except `Templates/` (a template *describes* tasks, it does not hold them) and except a note whose frontmatter `source:` is somebody else's. A note with `source: user`, or with no `source:` at all, is yours. |
+| **which notes are skipped, and why** | `Journal/Plan/…`, `Journal/Fold/…` and `Journal/Standup/…` are machine files with one writer each (§5.1). What they show is a generated list today and a transclusion once anchors exist — a **view**, never a second canonical line — so indexing them would double every todo they mention and re-date it to the day the plan was written. The test is the file's own `source:`, the same ownership vocabulary `knowledge_write` refuses on, so a plan you keep somewhere else is still indexed and a routine that writes somewhere new is still skipped, with nothing to keep in sync. |
+| **identity** | the `^mt-…` block anchor when the line carries one — so the line keeps its identity when it moves to another note. Without one it is `h:<sha256 of the normalised text>:<ordinal among identical lines in that file>`: stable across a field edit, and deliberately not across a text edit. Change `due friday` to `due 2026-09-25` and it is the same task; re-type the words and it is a new one with a fresh ageing clock. |
+| **when a row is re-derived** | when the note's bytes change (or when the table and the vault disagree, which is how a half-emptied table heals itself). Not on every cycle, and that is the point: `due friday` is resolved against the day the walk **read** the line, `parsed_on` records which day that was, and a row re-derived every five minutes would slide a Friday task onto the next Friday the moment that one passed. |
+| **`first_seen_on`** | survives a re-walk, an edit that keeps the key, and a rename. It is the ageing clock and the only column that is not a pure projection of the current bytes — recoverable from git, and a rebuild that resets it loses a nudge, not a task. |
+| **`done_on`** | the `done …` on the line when there is one. A `[x]` with no date is stamped the **first walk that saw it checked** and `done_on_observed` says so; that date never moves afterwards, and un-ticking the box clears it rather than leaving a lie. |
+| **duplicates** | the same text open in two notes is two rows — markdown is the record — and the later-seen one carries `duplicate_of`. "Earlier" is `first_seen_on`, then path and key in byte order, so the pair resolves the same way on your Mac and in a Linux container. Closing either one settles the group. |
+| **recurrence** | `- [ ] Water the plants every week` is a **rule**, never a task, and every open-task query excludes it. The instance your daily-note template materialises (`source template:recurring`) points back at the rule as `recur_parent`, and the rule's `recur_next` moves past each instance you **close** — past the closed ones only, so a rule whose instance is still open keeps falling due and the plan carries that one over instead of minting a second. |
+| **`work.meta.blocked_by`** | read, never written (§3). A `work` row naming a human todo as `vault:<path>#^mt-…` gets a ref row of its own (`kind: blocked_by`, `from_path: work:<id>`), which is what lets the board and the plan say "waiting on you". It **surfaces and never gates**: `depends_on`, `DEPS_CLOSED` and claimability are untouched, so a typo in a note can never stall an agent. |
+
+`POST /reconcile` returns the counts as `tasks: {files, rows, added,
+removed, duplicates, warnings, refs}`, and each cycle records the same
+numbers on its `runs` row.
+
+**What it costs.** On a 400-note fixture carrying 4,000 task lines and 400
+block-anchored references: a cold walk with every note dirty is 1,098 ms end
+to end (≈3,600 task rows/sec) against 385 ms for the same vault with no task
+lines in it; a quiet walk over it is 212 ms against 46 ms. The parse runs
+over every note on every cycle and the writes do not, which is where the
+difference between those two numbers lives.
+
+Reading any of it is a **named query** — `vault_tasks_query`,
+`vault_tasks_recurring`, `task_ageing` in `seed/queries/` — never a second
+component with a connection string.
+
 ## Pointing it at an instance repo
 
 The reconciler needs exactly one path: `METISTRY_INSTANCE_DIR`, the working
@@ -333,7 +376,8 @@ Setup, modes, and what "deterministic rebuild" means:
 | `METISTRY_EMBED_DIM` | `768` | must match the model AND the `vector(768)` column |
 | `METISTRY_EMBED_BATCH` | `16` | chunks per `/api/embed` request |
 | `METISTRY_EMBED_MAX_FILES_PER_CYCLE` | `200` | the rest wait for the next cycle |
-| `METISTRY_DB_*` | as elsewhere | the index tables (`knowledge_files`, `knowledge_links`, `embeddings`, `proposals`, `runs`) |
+| `METISTRY_DB_*` | as elsewhere | the index tables (`knowledge_files`, `knowledge_links`, `embeddings`, `vault_tasks`, `vault_task_refs`, `proposals`, `runs`) |
+| `METISTRY_TZ` | unset (then `TZ`, then UTC) | the zone `due friday` and `do monday` resolve against, recorded per row as `parsed_on` |
 | `METISTRY_GIT_HTTP_PROXY` | set by `metistry up` when this install confines the reconciler | the supervisor's egress proxy, passed to git as `-c http.proxy=…` |
 | `METISTRY_GIT_ASKPASS` | set by `metistry up` when this install confines the reconciler | the askpass shim's path. Its presence is also what turns on `-c credential.helper=` — the two move together |
 | `METISTRY_GIT_ASKPASS_USER` / `_TOKEN` | injected by the **supervisor** at spawn, from the login Keychain | the push credential. Never written to disk, never in argv, never in `supervisor.json` |

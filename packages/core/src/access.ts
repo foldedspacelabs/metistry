@@ -239,6 +239,7 @@ export function scopeRequired(path: string): { message: string; expose: { reason
 
 import { admitsAnyAction, effectiveActions, type ActionAutonomy, type ActionKind, type ActionMode } from "./actions.js";
 import { INSTANCE_LAYOUT } from "./instance-layout.js";
+import { crewToolsFor } from "./manifest.js";
 import type { ErrorCode } from "./errors.js";
 
 /**
@@ -246,10 +247,11 @@ import type { ErrorCode } from "./errors.js";
  * (mcp-brain's `principalOf`, the console's `principalOf`) — never from a
  * request body or a tool argument (§4.19).
  *
- * `crew` has no producer yet: `authenticateAgent` still coerces a crew's row
- * to `external`, so a crew arrives here as `agent` (§2.3). P2 makes it a real
- * role and gives it the `uses` allowlist as a DOOR check; the role exists now
- * so the rules can be written — and tested — once.
+ * All five have a producer since P2: `authenticateAgent` reads the registry
+ * row's `kind` without collapsing it, so a crew is its own role rather than
+ * an external agent that happens to have been dispatched (§2.3), and the
+ * `uses` allowlist its manifest declares rides on the principal into
+ * `mayToolset` below.
  */
 export type Role = "owner" | "assistant" | "agent" | "crew" | "tool";
 
@@ -281,6 +283,18 @@ export interface Principal {
   readonly role: Role;
   readonly scope: Scope;
   readonly source: GrantSource;
+  /**
+   * **A crew's own toolset**: the `uses` GROUPS its manifest declares
+   * (`CREW_TOOL_GROUPS`), resolved from the loaded manifest by the host at
+   * authentication and never from the request. Expanded to tool names by
+   * `allowedTools` below, which is what `mayToolset` decides on.
+   *
+   * Absent on every other role — they carry no allowlist, and `allowedTools`
+   * answers `null` for them, which is "no allowlist" and not "an empty one".
+   * Absent on a CREW is the empty list: a crew whose manifest this console
+   * cannot see holds NO tools (fail closed), never all of them.
+   */
+  readonly uses?: readonly string[] | undefined;
 }
 
 /**
@@ -295,6 +309,12 @@ export interface Principal {
  *   the RESOURCE, not about the caller's permission, which is why the owner
  *   gets it too (§2.6). P4's `classify()` is where this stops being a
  *   refusal and becomes a routing fact (§3.3).
+ * - `not_in_uses` (P2) — the tool is outside this run's own allowlist. Its
+ *   own reason rather than `role_required` because the two have different
+ *   remedies and `reason` is the machine-readable half of what would unlock
+ *   a refusal (§3.2): `role_required` is "your kind of principal may never
+ *   do this", while this one is "the manifest that defines this crew did not
+ *   name the group", which the user changes by editing that file.
  */
 export type Reason =
   | "scope_required"
@@ -305,7 +325,8 @@ export type Reason =
   | "membership_required"
   | "not_member"
   | "not_exposed"
-  | "not_knowledge";
+  | "not_knowledge"
+  | "not_in_uses";
 
 export const REASONS: readonly Reason[] = [
   "scope_required",
@@ -317,6 +338,7 @@ export const REASONS: readonly Reason[] = [
   "not_member",
   "not_exposed",
   "not_knowledge",
+  "not_in_uses",
 ];
 
 /**
@@ -369,6 +391,20 @@ export type Resource =
    * is what the enumeration test in `packages/mcp-brain` walks.
    */
   | { readonly kind: "tool"; readonly name: string }
+  /**
+   * **This run's own allowlist**, asked at the door on EVERY tool call
+   * before the body runs (mcp-brain's `wrap`). A crew holds exactly the
+   * groups its manifest's `uses` names and nothing else; every other role
+   * carries no allowlist and is admitted here, so the gate decides nothing
+   * for them — what a tool costs THEM is the `{kind:"tool"}` rule above,
+   * which each body already asks.
+   *
+   * Separate from `{kind:"tool"}` so that moving this enforcement to the
+   * door changed exactly one thing (§4's P2 row): the crew's own refusal.
+   * `mayUseTool` consults the same allowlist first, so the two can never
+   * answer differently about the same (principal, tool).
+   */
+  | { readonly kind: "toolset"; readonly name: string }
   /** `settled`: does a non-draft row for this path exist in the index? The one fact `may` cannot know; the door looks it up, and only when the caller may already see the TITLE. */
   | { readonly kind: "knowledge"; readonly door: KnowledgeDoor; readonly path: string; readonly settled?: boolean }
   | { readonly kind: "query"; readonly door: QueryDoor; readonly name: string; readonly exposure: "generic" | "route" }
@@ -487,6 +523,8 @@ export function may(p: Principal, verb: Verb, r: Resource): Decision {
   switch (r.kind) {
     case "tool":
       return mayUseTool(p, r.name);
+    case "toolset":
+      return mayToolset(p, r.name);
     case "knowledge":
       return mayKnowledge(p, r.door, r.path, r.settled === true);
     case "query":
@@ -534,8 +572,55 @@ export function may(p: Principal, verb: Verb, r: Resource): Decision {
  * `queries_run`'s name, `tasks_*`'s project) asks the matching resource door
  * as well; the entry here is the part that holds whatever the argument is.
  */
+/**
+ * The tools this principal's run may call at all, or `null` when it holds no
+ * allowlist and every tool's own rule is the whole gate.
+ *
+ * Only a crew has one. It is the manifest's `uses` GROUPS expanded through
+ * `CREW_TOOL_GROUPS` — the same table and the same function the assistant's
+ * runner builds its client-side list from (`crewToolsFor`), so the door and
+ * the caller cannot disagree about what a group contains. Groups rather than
+ * tool names is what makes the rule that matters a property of the table:
+ * `CREW_NEVER_TOOLS` are in no group, so no `uses` list can reach them.
+ */
+export function allowedTools(p: Principal): readonly string[] | null {
+  return p.role === "crew" ? crewToolsFor(p.uses ?? []) : null;
+}
+
+/**
+ * P2's one behaviour change (§2.2, §4): a crew's toolset is decided HERE, at
+ * the door, rather than by the filter in the process that dispatched it.
+ *
+ * Until now `uses` was enforced only by `apps/assistant/src/tools.ts`, which
+ * is a process boundary — real, since the run's bearer is minted per run and
+ * held by that process alone, but not the tool. Five of the eight groups
+ * were also gated server-side for other reasons; `rooms`, `artifacts`,
+ * `tasks`, `capture` and `requests` were not. CLAUDE.md's rule over all the
+ * others is "enforce at the tool, never by prompting" — a filter in the
+ * caller is neither.
+ *
+ * The refusal names the toolset the crew DOES hold and where it is declared,
+ * because widening it is an edit to a §4.7 protected path in the user's own
+ * hand: the crew cannot ask for this one, and a model told only "no" retries.
+ */
+function mayToolset(p: Principal, name: string): Decision {
+  const allowed = allowedTools(p);
+  if (allowed === null || allowed.includes(name)) return OK;
+  const held = (p.uses ?? []).join(", ");
+  return no(
+    "forbidden",
+    "not_in_uses",
+    `${name} is not in this crew's toolset — ${p.id} holds ${held === "" ? "no tool groups" : held} (\`uses:\` in its manifest, a protected path in the user's hand: docs/ops/crews.md). Report what you needed instead of retrying.`,
+  );
+}
+
 function mayUseTool(p: Principal, name: string): Decision {
   const { tier, queries } = p.scope;
+  // The run's allowlist first: a tool outside it is refused whatever the
+  // grant says, and the door asks the same question (`{kind:"toolset"}`)
+  // before any body runs, so the two cannot answer differently.
+  const inToolset = mayToolset(p, name);
+  if (!inToolset.ok) return inToolset;
   switch (name) {
     // No gate beyond authentication (§1.4): the inbox and the queue are open
     // to every credential that got this far, and asking is not a capability.

@@ -19,13 +19,7 @@
 // answered with an error, rather than being quietly ignored: "no hallucinated
 // tool" is half of what axis 1 measures.
 
-import { createServer } from "node:http";
-import type { AddressInfo } from "node:net";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
-import { createBrainServer, type AgentPrincipal, type Db } from "@foldedspacelabs/metistry-mcp-brain";
-import { TasksService } from "@foldedspacelabs/metistry-tasks";
+import { toolSurface } from "@foldedspacelabs/metistry-mcp-brain";
 
 /** The MCP server name the assistant qualifies brain tools with; `apps/assistant/src/brain.ts` holds the same constant. */
 export const BRAIN_SERVER = "brain";
@@ -69,30 +63,15 @@ export function toolDefsFromListResult(raw: unknown): ToolDef[] {
 /**
  * Production's tool surface, read from the bridge that serves it.
  *
- * The fake `Db` answers every statement with no rows: `tools/list` registers
- * tools, it does not run them, so nothing here needs Postgres — which is what
- * lets a fixture validate on a laptop with no stack running.
+ * `toolSurface()` (packages/mcp-brain/src/surface.ts) is the bridge's own
+ * measurement contract — the same in-process server, fake `Db`, real
+ * `tools/list` that `check-tool-surface.mjs` uses to budget the definition
+ * tokens — reshaped into the chat-completions wire format a bake-off needs.
+ * Nothing here needs Postgres, which is what lets a fixture validate on a
+ * laptop with no stack running.
  */
 export async function brainToolDefs(): Promise<ToolDef[]> {
-  const db: Db = { query: async () => ({ rows: [] }) };
-  const principal: AgentPrincipal = { id: "eval", kind: "internal", grants: { tier: "areas", areas: [], queries: true }, projects: [] };
-  const brain = createBrainServer({ db, authenticate: async () => principal, tasks: new TasksService(db), inboxDir: "/nonexistent-eval-inbox" });
-  const http = createServer((req, res) => void brain.handle(req, res).catch(() => res.destroy()));
-  await new Promise<void>((resolve) => http.listen(0, "127.0.0.1", resolve));
-  try {
-    const port = (http.address() as AddressInfo).port;
-    const client = new Client({ name: "metistry-eval", version: "1" }, { capabilities: {} });
-    const transport = new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}`), { requestInit: { headers: { authorization: "Bearer eval" } } });
-    await client.connect(transport as unknown as Transport);
-    try {
-      const { tools } = await client.listTools();
-      return toolDefsFromListResult(tools);
-    } finally {
-      await client.close().catch(() => {});
-    }
-  } finally {
-    await new Promise<void>((resolve) => http.close(() => resolve()));
-  }
+  return toolDefsFromListResult(await toolSurface());
 }
 
 // ---- the recording host -------------------------------------------------------

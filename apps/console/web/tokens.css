@@ -1,5 +1,5 @@
 /* GENERATED — do not edit.
- * Source: docs/product/design/tokens.json (v2.5.0, 2026-09-19)
+ * Source: docs/product/design/tokens.json (v2.6.0, 2026-09-19)
  * Rebuild: node ops/scripts/build-design-tokens.mjs
  *
  * Light is the base. Dark is applied twice on purpose: once behind
@@ -140,6 +140,12 @@
   --mt-color-on-accent: #f7f4ee;
   --mt-color-agent: #6a4bbd;
   --mt-color-agent-quiet: #e7e1ef;
+  --mt-color-entity-person: #bd2c40;
+  --mt-color-entity-person-quiet: #ede0e1;
+  --mt-color-entity-note: #1b734a;
+  --mt-color-entity-note-quiet: #cfe9dd;
+  --mt-color-entity-project: #345dcf;
+  --mt-color-entity-project-quiet: #dee3f0;
   --mt-color-ok: #1c7a45;
   --mt-color-ok-quiet: #eff4eb;
   --mt-color-degraded: #8a5a00;
@@ -197,6 +203,12 @@
   --mt-color-on-accent: #07161a;
   --mt-color-agent: #b9a2f5;
   --mt-color-agent-quiet: #313144;
+  --mt-color-entity-person: #e17d8b;
+  --mt-color-entity-person-quiet: #3b3031;
+  --mt-color-entity-note: #29af71;
+  --mt-color-entity-note-quiet: #1d382b;
+  --mt-color-entity-project: #7d98e1;
+  --mt-color-entity-project-quiet: #27324e;
   --mt-color-ok: #68d391;
   --mt-color-ok-quiet: #243934;
   --mt-color-degraded: #e8b84b;
@@ -255,6 +267,12 @@
   --mt-color-on-accent: #f7f4ee;
   --mt-color-agent: #6a4bbd;
   --mt-color-agent-quiet: #e7e1ef;
+  --mt-color-entity-person: #bd2c40;
+  --mt-color-entity-person-quiet: #ede0e1;
+  --mt-color-entity-note: #1b734a;
+  --mt-color-entity-note-quiet: #cfe9dd;
+  --mt-color-entity-project: #345dcf;
+  --mt-color-entity-project-quiet: #dee3f0;
   --mt-color-ok: #1c7a45;
   --mt-color-ok-quiet: #eff4eb;
   --mt-color-degraded: #8a5a00;
@@ -312,6 +330,12 @@
   --mt-color-on-accent: #07161a;
   --mt-color-agent: #b9a2f5;
   --mt-color-agent-quiet: #313144;
+  --mt-color-entity-person: #e17d8b;
+  --mt-color-entity-person-quiet: #3b3031;
+  --mt-color-entity-note: #29af71;
+  --mt-color-entity-note-quiet: #1d382b;
+  --mt-color-entity-project: #7d98e1;
+  --mt-color-entity-project-quiet: #27324e;
   --mt-color-ok: #68d391;
   --mt-color-ok-quiet: #243934;
   --mt-color-degraded: #e8b84b;

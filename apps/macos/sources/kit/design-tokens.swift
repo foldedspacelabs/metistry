@@ -1,5 +1,5 @@
 // GENERATED — do not edit.
-// Source: docs/product/design/tokens.json (v2.5.0, 2026-09-19)
+// Source: docs/product/design/tokens.json (v2.6.0, 2026-09-19)
 // Rebuild: node ops/scripts/build-design-tokens.mjs   (--check fails on drift)
 //
 // The design system's semantic roles, for SwiftUI. No token names a hue, a
@@ -33,6 +33,12 @@ public enum MetistryColorRole: String, CaseIterable, Sendable {
     case onAccent = "on-accent"
     case agent = "agent"
     case agentQuiet = "agent-quiet"
+    case entityPerson = "entity-person"
+    case entityPersonQuiet = "entity-person-quiet"
+    case entityNote = "entity-note"
+    case entityNoteQuiet = "entity-note-quiet"
+    case entityProject = "entity-project"
+    case entityProjectQuiet = "entity-project-quiet"
     case ok = "ok"
     case okQuiet = "ok-quiet"
     case degraded = "degraded"
@@ -90,6 +96,12 @@ public extension MetistryColorRole {
         case .onAccent: return dark ? (0.0275, 0.0863, 0.1020, 1.0) : (0.9686, 0.9569, 0.9333, 1.0)
         case .agent: return dark ? (0.7255, 0.6353, 0.9608, 1.0) : (0.4157, 0.2941, 0.7412, 1.0)
         case .agentQuiet: return dark ? (0.1922, 0.1922, 0.2667, 1.0) : (0.9059, 0.8824, 0.9373, 1.0)
+        case .entityPerson: return dark ? (0.8824, 0.4902, 0.5451, 1.0) : (0.7412, 0.1725, 0.2510, 1.0)
+        case .entityPersonQuiet: return dark ? (0.2314, 0.1882, 0.1922, 1.0) : (0.9294, 0.8784, 0.8824, 1.0)
+        case .entityNote: return dark ? (0.1608, 0.6863, 0.4431, 1.0) : (0.1059, 0.4510, 0.2902, 1.0)
+        case .entityNoteQuiet: return dark ? (0.1137, 0.2196, 0.1686, 1.0) : (0.8118, 0.9137, 0.8667, 1.0)
+        case .entityProject: return dark ? (0.4902, 0.5961, 0.8824, 1.0) : (0.2039, 0.3647, 0.8118, 1.0)
+        case .entityProjectQuiet: return dark ? (0.1529, 0.1961, 0.3059, 1.0) : (0.8706, 0.8902, 0.9412, 1.0)
         case .ok: return dark ? (0.4078, 0.8275, 0.5686, 1.0) : (0.1098, 0.4784, 0.2706, 1.0)
         case .okQuiet: return dark ? (0.1412, 0.2235, 0.2039, 1.0) : (0.9373, 0.9569, 0.9216, 1.0)
         case .degraded: return dark ? (0.9098, 0.7216, 0.2941, 1.0) : (0.5412, 0.3529, 0.0000, 1.0)
@@ -151,6 +163,12 @@ public extension MetistryColorRole {
         case .onAccent: return "text and glyphs on an accent fill"
         case .agent: return "the agent-sourced tint — marks a string an agent wrote, as data"
         case .agentQuiet: return "agent-sourced background wash: quoted tool output, agent comment"
+        case .entityPerson: return "ENTITY HUE — a person — an @mention resolving to a People/ page. Hue here says WHAT KIND OF THING a chip points at, never how urgent it is. Only ever ink on its own *-quiet fill; never a background, never a border, never text on bg/surface. Urgency is carried by weight and fill (priority) and by the state tokens (something is wrong) — three channels that must not be mixed."
+        case .entityPersonQuiet: return "the chip fill behind entity-person. Sits in the same band as the other quiet fills (~1.17:1 on bg light, ~1.48:1 dark) so an entity chip never outweighs a state chip."
+        case .entityNote: return "ENTITY HUE — a note, a page, a document link — anything in the vault. Hue here says WHAT KIND OF THING a chip points at, never how urgent it is. Only ever ink on its own *-quiet fill; never a background, never a border, never text on bg/surface. Urgency is carried by weight and fill (priority) and by the state tokens (something is wrong) — three channels that must not be mixed."
+        case .entityNoteQuiet: return "the chip fill behind entity-note. Sits in the same band as the other quiet fills (~1.17:1 on bg light, ~1.48:1 dark) so an entity chip never outweighs a state chip."
+        case .entityProject: return "ENTITY HUE — a project or an area. Hue here says WHAT KIND OF THING a chip points at, never how urgent it is. Only ever ink on its own *-quiet fill; never a background, never a border, never text on bg/surface. Urgency is carried by weight and fill (priority) and by the state tokens (something is wrong) — three channels that must not be mixed."
+        case .entityProjectQuiet: return "the chip fill behind entity-project. Sits in the same band as the other quiet fills (~1.17:1 on bg light, ~1.48:1 dark) so an entity chip never outweighs a state chip."
         case .ok: return "check passed, run succeeded, thread resolved"
         case .okQuiet: return "the fill an ok chip is actually painted on — declared so the checker sees the ground that ships"
         case .degraded: return "answering but not healthy: stale collector, fallback tier, queued over cap"

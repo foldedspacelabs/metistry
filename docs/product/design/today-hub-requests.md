@@ -224,3 +224,26 @@ it rather than a sentence a model wrote.
 Not a schema change — a navigation one, and it breaks a ratified rule, so it
 is written down here too. Today moves out of Work to the **second row** in the
 sidebar; Work returns to four children. See C30 and `screen-05-today.md` §13.
+
+### B7 · Agent prose needs a stable id, so any of it can be rated
+
+Chat has 👍/👎 on an `outbound_messages` row. Extending that to **every** piece
+of agent prose — a meeting briefing, a plan rationale, a revision explanation —
+needs each piece to be addressable.
+
+**Add:** a `prose_id` on generated content wherever it is produced, and widen
+`reply_feedback` (or add a sibling) keyed by it rather than by
+`outbound_message_id`. One feedback signal beats three, and the weekly
+model-free pass in `docs/ops/reply-feedback.md` already knows what to do with
+it.
+
+### B8 · The plugin must compute entity fills from the live theme
+
+Our three entity quiets are solved against **our** `bg`. Obsidian themes vary
+wildly, and a quiet computed against cream can fall below 4.5:1 on someone's
+midnight purple.
+
+**Do:** ship the entity **hues** and the geometry, and derive the quiet fill at
+render time — a `color-mix()` against `--background-primary` — rather than
+shipping six hex values. The chip then adapts to any theme and keeps its
+contrast.

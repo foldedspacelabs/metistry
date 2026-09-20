@@ -18,7 +18,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 
-import { runCheck, startRun, finishRun, errorEnvelope, intEnv, parseAction, PROJECT_SLUG_RE, rollSession, statusFor, SKIP_FEEDBACK, type CheckResult, type Compute, type ErrorEnvelope } from "@foldedspacelabs/metistry-core";
+import { AREA_PREFIX_REFUSAL, runCheck, startRun, finishRun, errorEnvelope, intEnv, parseAction, PROJECT_SLUG_RE, rollSession, statusFor, SKIP_FEEDBACK, validAreaPrefix, type CheckResult, type Compute, type ErrorEnvelope } from "@foldedspacelabs/metistry-core";
 import { QueryError, QueryStore } from "@foldedspacelabs/metistry-queries";
 import { captureToInbox, createBrainServer, dirSink, type CaptureSink, type KnowledgeLister, type KnowledgeReader, type KnowledgeVaultSearcher, type KnowledgeWriter, type QueryEmbedder } from "@foldedspacelabs/metistry-mcp-brain";
 import { TasksError, TasksService } from "@foldedspacelabs/metistry-tasks";
@@ -946,7 +946,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
 
     const triage = /^POST \/api\/proposals\/(\d+)$/.exec(key);
     if (triage) {
-      const body = (await readJson(req)) as { decision?: string; feedback?: string; if_unchanged?: { seen_at?: unknown } };
+      const body = (await readJson(req)) as { decision?: string; feedback?: string; area?: unknown; if_unchanged?: { seen_at?: unknown } };
       const r = await decideProposal(triage[1]!, body);
       return sendJson(res, r.status, r.body);
     }
@@ -980,7 +980,14 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     if (key === "GET /api/devices") return sendJson(res, 200, { devices: await store.listDevices(db) });
 
     // ----- external-agent registry (§4.2 management surface; owner session only) -----
-    if (key === "GET /api/agents") return sendJson(res, 200, { agents: await agents.listAgents(db) });
+    // The registry, plus what has been ASKED for (ruled 2026-09-19): the
+    // panel where a grant is edited is where the ask belongs, not only in
+    // Needs You. `proposal_id` is the row to answer, so a client that wants
+    // to act sends it to `POST /api/proposals/:id` — this list is a view,
+    // never a second door onto granting.
+    if (key === "GET /api/agents") {
+      return sendJson(res, 200, { agents: await agents.listAgents(db), access_requests: await agents.pendingAccessRequests(db) });
+    }
 
     if (key === "POST /api/agents") {
       const body = (await readJson(req)) as { id?: unknown; display_name?: unknown; kind?: unknown; remote?: unknown };
@@ -1006,11 +1013,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       if (!verbOk) return sendError(res, "not_found");
       try {
         if (op === "grants") {
-          // the bare vault (`/`) is admitted for internal rows only: the rule keys on the ROW's kind, never on the request
-          const row = (await agents.listAgents(db)).find((a) => a.id === id && !a.revoked);
-          const grants = agents.validateGrants(await readJson(req), { kind: row?.kind === "internal" ? "internal" : "external" });
-          const ok = await agents.setGrants(db, id, grants);
-          await audit("agent_admin", "grant", ok, { agent: id, op: "grant", grants });
+          const { ok, grants } = await writeGrants(id, await readJson(req), "console");
           return ok ? sendJson(res, 200, { ok: true, grants }) : sendError(res, "not_found");
         }
         if (op === "projects") {
@@ -1048,10 +1051,15 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         }
         if (op === "revoke") {
           const ok = await agents.revokeAgent(db, id);
-          // a revoked row is no longer a question: settle any enrolment still asking about it
+          // a revoked row is no longer a question: settle any enrolment still
+          // asking about it, and any access request it raised — a token that
+          // authenticates nothing cannot be granted anything, so the only
+          // honest answer to its pending asks is the one revocation just gave
+          // (agents.ts's `settleAccessRequests`).
           const settled = ok ? await agents.settleEnrollment(db, id, "deny") : [];
-          await audit("agent_admin", "revoke", ok, { agent: id, op: "revoke", ...(settled.length ? { proposals: settled } : {}) });
-          return ok ? sendJson(res, 200, { revoked: true }) : sendError(res, "not_found");
+          const asks = ok ? await agents.settleAccessRequests(db, id) : [];
+          await audit("agent_admin", "revoke", ok, { agent: id, op: "revoke", ...(settled.length ? { proposals: settled } : {}), ...(asks.length ? { access_requests: asks } : {}) });
+          return ok ? sendJson(res, 200, { revoked: true, ...(asks.length ? { access_requests: asks } : {}) }) : sendError(res, "not_found");
         }
         const token = await agents.rotateAgent(db, id);
         await audit("agent_admin", "rotate", token !== null, { agent: id, op: "rotate" });
@@ -1094,6 +1102,26 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
   }
 
   /**
+   * **The one grants write.** `PUT /api/agents/:id/grants` (the owner's own
+   * hand, below) and an approved `access_request` (the triage branch in
+   * `decideProposal`) both come through here, so there is one validator, one
+   * store call and one `agent_admin` audit row for a widening however it was
+   * reached. That is what invariant 10 means by "a door onto an existing
+   * audited service": the queue's Approve is not a second implementation of
+   * granting, it is the same one with `via: triage` on the record.
+   *
+   * The bare vault (`/`) stays admissible for internal rows only, and the
+   * rule keys on the ROW's kind rather than on anything in the request.
+   */
+  async function writeGrants(id: string, input: unknown, via: string, extra: Record<string, unknown> = {}): Promise<{ ok: boolean; grants: agents.Grants }> {
+    const row = (await agents.listAgents(db)).find((a) => a.id === id && !a.revoked);
+    const grants = agents.validateGrants(input, { kind: row?.kind === "internal" ? "internal" : "external" });
+    const ok = row === undefined ? false : await agents.setGrants(db, id, grants);
+    await audit("agent_admin", "grant", ok, { agent: id, op: "grant", grants, via, ...extra });
+    return { ok, grants };
+  }
+
+  /**
    * One answer to one proposal. Extracted so the single route and the batch
    * route cannot drift: a verb must not mean two things depending on which
    * door it came through — the same reason answering an enrolment from Needs
@@ -1104,7 +1132,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
    */
   async function decideProposal(
     id: string,
-    body: { decision?: string; feedback?: string; if_unchanged?: { seen_at?: unknown } },
+    body: { decision?: string; feedback?: string; area?: unknown; if_unchanged?: { seen_at?: unknown } },
   ): Promise<DecisionOutcome> {
     const row = (await db.query(PROPOSAL_FOR_DECISION_SQL, [id])).rows[0];
     if (!row) return { status: 404, body: errorEnvelope("not_found", "not found") };
@@ -1265,6 +1293,78 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       enrolled = { agent: enrollAgent, approved };
     }
 
+    // An `access_request` (ruled 2026-09-19) is answered with the three verbs
+    // every other request takes, and Approve is a DOOR onto the grants
+    // service, not a new one: `writeGrants` above is literally the call `PUT
+    // /api/agents/:id/grants` makes, with the same validator and the same
+    // `agent_admin` row, `via: triage` on it. Revise is the same door with
+    // the owner's own prefix — usually narrower than the one asked for —
+    // instead of the requested one. Decline does nothing at all, which is
+    // the point: the row records a refusal and no grant moves.
+    //
+    // Like the improvement and action paths above it, this runs BEFORE the
+    // row is settled, so a refusal leaves the request pending with the reason
+    // rather than closing a decision that granted nothing.
+    let granted: { agent: string; area: string; grants: agents.Grants } | undefined;
+    if (row.kind === agents.ACCESS_REQUEST_KIND && (verb === "allow" || verb === "accept_with_changes")) {
+      const asked = agents.accessArea(row.payload);
+      if (asked === undefined) {
+        await audit("triage", "access_request", false, { proposal: row.id, error: "no_area" });
+        return { status: statusFor("invalid_request"), body: errorEnvelope("invalid_request", "this request does not name a vault area this console would grant — Decline it (the asking tool validates the prefix, so a row without one was not written by request_access)") };
+      }
+      // Revise carries the prefix the owner is granting INSTEAD. It is
+      // validated here with the grant validator's own rule, so the narrowing
+      // gesture cannot smuggle in a shape the form would have refused.
+      const area = verb === "accept_with_changes" ? (typeof body.area === "string" ? body.area.trim() : "") : asked;
+      if (verb === "accept_with_changes" && !validAreaPrefix(area)) {
+        return { status: statusFor("invalid_request"), body: errorEnvelope("invalid_request", `revising an access request means granting a different area: send {"area": "…"} with it — ${AREA_PREFIX_REFUSAL}. To refuse it outright, Decline.`) };
+      }
+      const target = String(row.source_agent);
+      const current = (await agents.listAgents(db)).find((a) => a.id === target && !a.revoked);
+      // A row whose grants are CONFIGURATION cannot be widened from here: an
+      // internal row is re-synced from the environment on every console start
+      // and a crew row from its manifest on every crew sync, so an approval
+      // would vanish at the next one — and the owner would believe they had
+      // granted it. `request_access` refuses an internal principal at the tool
+      // and no crew's allowlist carries it (core's CREW_NEVER_TOOLS); this is
+      // the same rule at the door where the grant would actually move.
+      if (current && current.kind !== "external") {
+        await audit("triage", "access_request", false, { proposal: row.id, agent: target, error: "configured_scope" });
+        const where = current.kind === "internal" ? "METISTRY_ASSISTANT_AREAS in your .env" : `its manifest (\`scope:\` in agents/<area>/${target}.md)`;
+        return {
+          status: statusFor("forbidden"),
+          body: errorEnvelope("forbidden", `${target}'s scope is configuration, not a grant: it is re-synced from ${where}, so approving this would be undone at the next start. Decline this request and edit that file (docs/ops/actions.md).`),
+        };
+      }
+      if (!current) {
+        // A revoked (or vanished) agent cannot be granted anything: its token
+        // authenticates nothing, so a widening would be a grant to nobody
+        // that still reads as a grant in the registry. The row stays pending
+        // and Decline is right there. (Revocation itself settles pending asks
+        // — agents.ts's `settleAccessRequests` — so this is the row that
+        // predates that, or a race with it.)
+        await audit("triage", "access_request", false, { proposal: row.id, agent: target, error: "revoked" });
+        return { status: statusFor("not_found"), body: errorEnvelope("not_found", `${target} is revoked or no longer registered — there is nothing to widen. Decline or Skip this request.`) };
+      }
+      try {
+        const { ok, grants } = await writeGrants(target, agents.widenedGrants(current.grants, area), "triage", { proposal: row.id, area, ...(area === asked ? {} : { asked }) });
+        if (!ok) return { status: statusFor("not_found"), body: errorEnvelope("not_found", `${target} is revoked or no longer registered — there is nothing to widen. Decline or Skip this request.`) };
+        granted = { agent: target, area, grants };
+      } catch (err) {
+        if (err instanceof agents.AgentError) {
+          await audit("triage", "access_request", false, { proposal: row.id, agent: target, error: err.code });
+          return { status: statusFor(err.code), body: errorEnvelope(err.code, err.message) };
+        }
+        throw err;
+      }
+      // The outcome rides on the row, as the action path's does: what was
+      // granted, to whom, by whom, and what was asked for when they differ.
+      await db.query(
+        `UPDATE proposals SET payload = payload || jsonb_build_object('granted', $2::jsonb) WHERE id = $1 AND decision = 'pending'`,
+        [id, JSON.stringify({ area, grants: granted.grants, at: new Date().toISOString(), by: "user" })],
+      );
+    }
+
     // What lands in the row: `skip` stores a `deny` whose feedback is the
     // fixed marker (never the user's words — a skip is not a reason, and
     // SKIP_FEEDBACK is what keeps it out of the paths that route feedback
@@ -1284,9 +1384,10 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       ...(applied ? { overlay: applied.path } : {}),
       ...(created ? { work_id: created.id } : {}),
       ...(acted ? { action: acted.kind } : {}),
+      ...(granted ? { granted: granted.area, agent: granted.agent } : {}),
     });
     if (rows.length === 1) {
-      return { status: 200, body: { ok: true, ...(applied ? { applied } : {}), ...(enrolled ? { enrolled } : {}), ...(created ? { work: created } : {}), ...(acted ? { action: acted } : {}) } };
+      return { status: 200, body: { ok: true, ...(applied ? { applied } : {}), ...(enrolled ? { enrolled } : {}), ...(created ? { work: created } : {}), ...(acted ? { action: acted } : {}), ...(granted ? { granted } : {}) } };
     }
     // lost the race between the read above and this update: someone else decided it
     const now = (await db.query(PROPOSAL_FOR_DECISION_SQL, [id])).rows[0];

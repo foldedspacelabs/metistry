@@ -15,7 +15,7 @@ manifest by test):
 
 | Family | Tools | What it means for the assistant |
 | --- | --- | --- |
-| in | `capture`, `requests_create`, `request_access` | Raise anything unsettled into the inbox / your Needs You queue; you approve, revise, or decline. `request_access` is the narrow one: an **external** agent asking for a vault area it was refused (`docs/ops/actions.md`). The assistant itself is refused it, because its scope is configuration and not a grant — see below. |
+| in | `capture`, `requests_create`, `request_access` | Raise anything unsettled into the inbox / your Needs You queue; you approve, revise, or decline. `request_access` is the narrow one: an agent asking for a vault area it was refused (`docs/ops/actions.md`). The assistant may ask too since 2026-09-19 — an approval for it is recorded so the next restart does not undo it; see below. |
 | shared work | `tasks_list` (`filter: ready \| mine \| all`), `tasks_claim`, `tasks_renew`, `tasks_update`, `tasks_release`, `tasks_close`, `tasks_create` | Works the same shared list as every other agent — claims, leases, notes, and `tasks_close` to finish one in a single call. |
 | rooms | `tasks_comment`, `tasks_thread` | The conversation on a task ([threads.md](threads.md)) — say what you found, read what the last crew left. Nobody is addressed by it, so nothing is woken; use `agents_delegate` when someone has to act. Resolving a room is your hand in the console, not a tool. |
 | out | `knowledge_search`, `knowledge_read`, `knowledge_list`, `knowledge_grep` | Reads the knowledge index, page contents, a listing, a page's links (`knowledge_list { links_for }`) and a content regex, within its grant — `knowledge_list`/`knowledge_grep` are filesystem semantics over the same tiers `knowledge_search`/`knowledge_read` already enforce (docs/research/2026-09-stash-review.md item 3). `knowledge_read` returns the page's `sha256`. |
@@ -105,6 +105,14 @@ One consequence to know before you Approve: tier `index` browses every title
 in the vault and reads none, tier `areas` sees titles only inside its
 prefixes — so granting an `index` agent one folder **trades** the browse for
 the read. There is one tier, and that trade is the decision.
+
+And one to know before you Decline: the agent is TOLD. A repeat ask for the
+same area does not queue a second row — the tool answers it with the decision
+you already gave and your note, and offers one escalation (`escalate: true`
+with a fuller reason), which arrives flagged *asked again after a decline*.
+Decline that and the area is closed at the tool; what is left is a
+`requests_create` report in words. Mistakes happen, so the ladder has a
+second rung — and exactly one (ruled 2026-09-19).
 
 **Deprecated spellings, one release.** The 2026-09-09 vocabulary
 simplification renamed eleven of these (`docs/product/glossary.md`). The old
@@ -341,11 +349,25 @@ has two consequences worth knowing:
 - A UI **revoke** likewise holds until restart; the durable off switch is
   unsetting `METISTRY_ASSISTANT_TOKEN`, which revokes the row on the next
   start.
-- `request_access` refuses an internal principal for exactly that reason: an
-  approved ask would widen the stored grants and the next start would put them
-  back, which is worse than no mechanism — you would believe you had granted
-  it. The refusal names `METISTRY_ASSISTANT_AREAS`, and `requests_create` is
-  there for the case where the assistant wants to tell you it is boxed in.
+- `request_access` used to refuse an internal principal for exactly that
+  reason: an approved ask would widen the stored grants and the next start
+  would put them back, which is worse than no mechanism — you would believe
+  you had granted it. **Since 2026-09-19 it may ask** (the owner's ruling:
+  "the assistant should be able to ask"), because the approval is no longer
+  only in `agents.grants`. Approving an `access_request` for an internal row
+  also writes `agent_grant_overrides` (migration 0023), and
+  `ensureInternalAgent` MERGES those areas on top of the configured ones at
+  every start. So:
+  - `METISTRY_ASSISTANT_AREAS` is the floor and still narrows everything you
+    have not explicitly approved;
+  - an approved area survives restarts, and is one row you can read in
+    `psql` beside the proposal it came from;
+  - revoking the assistant (unsetting `METISTRY_ASSISTANT_TOKEN`) clears its
+    approvals, which is also how you take one back.
+
+  A **crew** is still refused at the decision: its scope is `scope:` in a
+  manifest the crew sync re-reads, and there is no override table for that —
+  edit the file.
 
 **Grant width — the internal rule.** `validateGrants` refuses a bare vault
 grant for an external agent (an area grant is a prefix; "everything" is not
@@ -524,8 +546,8 @@ history; a wrong write is a revert.
 What lands where: `capture` → an `inbox` row (`source = 'mcp',
 source_agent = 'assistant'`) and, after `inbox-drain`, a proposal at
 `external` trust; `requests_create` → a `proposals` row, kind `report`;
-`request_access` → a `proposals` row, kind `access_request` (external agents
-only); `tasks_*`
+`request_access` → a `proposals` row, kind `access_request` (plus, when an
+approval widens an internal row, one `agent_grant_overrides` row); `tasks_*`
 → the `work` table with the assistant as `claimed_by` / `created_by` and
 history entries naming it; `knowledge_write` → the file on the
 reconciler's working tree, then a commit. Proposals flow through the same

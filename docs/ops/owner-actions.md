@@ -73,3 +73,16 @@ Kept current as PRs land (2026-09-08). Each item names what it unblocks.
       make that grant (`docs/ops/actions.md`), so nothing but your hand can
       prove the loop. Worth reading the card copy while you are there: the
       designer has not drawn this one yet.
+- [ ] **Decline one, and watch the ladder.** After a Decline the agent is told
+      the decision rather than allowed to re-file it, and may ask ONCE more
+      with `escalate: true` — that row arrives flagged *asked again after a
+      decline*. Decline the escalation too and the area is closed at the tool.
+      Worth doing once so you know what the second card looks like before a
+      real one arrives (ruled 2026-09-19).
+- [ ] **The assistant can now ask as well** (ruled 2026-09-19). If you have
+      narrowed it with `METISTRY_ASSISTANT_AREAS`, it will raise an
+      `access_request` like any other principal; approving one records the
+      area in `agent_grant_overrides` so it survives the next console start,
+      and revoking the assistant (unsetting `METISTRY_ASSISTANT_TOKEN`) clears
+      those approvals. Narrowing the variable afterwards narrows everything
+      EXCEPT what you approved — if you want an approval back, revoke once.

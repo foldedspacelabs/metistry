@@ -260,28 +260,69 @@ describe.skipIf(!hasDb)("access requests, agent to owner and back (integration)"
     expect(await grantsOf(goneId)).toEqual({ tier: "index", areas: [] });
   });
 
-  it("a row whose scope is CONFIGURATION cannot be widened from the queue — the approval would vanish at the next sync", async () => {
-    // The assistant is refused `request_access` at the tool; a crew is never
-    // offered it. This is the same rule at the door where the grant moves, so
-    // a row from either of them (or from an older build) cannot be approved.
-    for (const [id, kind, names] of [
-      [`itest-int-${suffix}`, "internal", "METISTRY_ASSISTANT_AREAS"],
-      [`itest-crew-${suffix}`, "crew", "manifest"],
-    ] as const) {
-      await pool.query(`INSERT INTO agents (id, display_name, kind, token_hash, grants) VALUES ($1, $1, $2, $3, '{"tier":"index","areas":[]}'::jsonb)`, [id, kind, mintToken(32)]);
-      const planted = await pool.query(
-        `INSERT INTO proposals (kind, source_agent, trust, payload) VALUES ($1, $2, 'external', $3::jsonb) RETURNING id`,
-        [ACCESS_REQUEST_KIND, id, JSON.stringify({ title: "planted", area: "Areas/Whatever", reason: "planted" })],
-      );
-      const proposalId = Number(planted.rows[0]!.id);
-      const r = await owner("POST", `/api/proposals/${proposalId}`, { decision: "allow" });
-      expect(r.status, kind).toBe(403);
-      expect((await r.json()).error.message, kind).toContain(names);
-      expect(await proposal(proposalId), kind).toMatchObject({ decision: "pending" }); // Decline is the answer, and it is still there to give
-      expect(await grantsOf(id), kind).toEqual({ tier: "index", areas: [] });
-      await pool.query(`DELETE FROM proposals WHERE id = $1`, [proposalId]);
-      await pool.query(`DELETE FROM agents WHERE id = $1`, [id]);
-    }
+  it("a CREW cannot be widened from the queue — its scope is its manifest, and the approval would vanish at the next sync", async () => {
+    // A crew is never offered `request_access` (core's CREW_NEVER_TOOLS);
+    // this is the same rule at the door where the grant would move, so a row
+    // from one (or from an older build) cannot be approved either.
+    const id = `itest-crew-${suffix}`;
+    await pool.query(`INSERT INTO agents (id, display_name, kind, token_hash, grants) VALUES ($1, $1, 'crew', $2, '{"tier":"index","areas":[]}'::jsonb)`, [id, mintToken(32)]);
+    const planted = await pool.query(
+      `INSERT INTO proposals (kind, source_agent, trust, payload) VALUES ($1, $2, 'external', $3::jsonb) RETURNING id`,
+      [ACCESS_REQUEST_KIND, id, JSON.stringify({ title: "planted", area: "Areas/Whatever", reason: "planted" })],
+    );
+    const proposalId = Number(planted.rows[0]!.id);
+    const r = await owner("POST", `/api/proposals/${proposalId}`, { decision: "allow" });
+    expect(r.status).toBe(403);
+    expect((await r.json()).error.message).toContain("manifest");
+    expect(await proposal(proposalId)).toMatchObject({ decision: "pending" }); // Decline is the answer, and it is still there to give
+    expect(await grantsOf(id)).toEqual({ tier: "index", areas: [] });
+    await pool.query(`DELETE FROM proposals WHERE id = $1`, [proposalId]);
+    await pool.query(`DELETE FROM agents WHERE id = $1`, [id]);
+  });
+
+  // Ruled 2026-09-19 (B): "the assistant should be able to ask." It could
+  // not, because `ensureInternalAgent` replaces an internal row's grants
+  // from configuration at every start, so an approval would have been undone
+  // by the next restart. This is the whole loop with the restart IN it.
+  it("an INTERNAL row can be widened from the queue, and the widening survives the next console start", async () => {
+    const id = `itest-int-${suffix}`;
+    const token = mintToken(32);
+    const configured = () => agents.validateGrants({ tier: "areas", areas: ["Areas/Narrow"] }, { kind: "internal" });
+    const restart = () => agents.ensureInternalAgent(pool, id, { token, grants: configured() }); // exactly what main.ts does on boot
+
+    await restart();
+    expect(await grantsOf(id)).toEqual({ tier: "areas", areas: ["Areas/Narrow"] });
+
+    // the assistant asks, through the same tool every other principal uses
+    const planted = await pool.query(
+      `INSERT INTO proposals (kind, source_agent, trust, payload) VALUES ($1, $2, 'external', $3::jsonb) RETURNING id`,
+      [ACCESS_REQUEST_KIND, id, JSON.stringify({ title: `${id} asks to read Areas/Asked`, area: "Areas/Asked", reason: "the task the owner assigned needs the note in there" })],
+    );
+    const proposalId = Number(planted.rows[0]!.id);
+
+    const allow = await owner("POST", `/api/proposals/${proposalId}`, { decision: "allow" });
+    expect(allow.status).toBe(200);
+    expect(await grantsOf(id)).toEqual({ tier: "areas", areas: ["Areas/Narrow", "Areas/Asked"] });
+    // the durable record, beside the row the owner answered (migration 0023)
+    expect((await pool.query(`SELECT area, proposal_id FROM agent_grant_overrides WHERE agent_id = $1`, [id])).rows).toEqual([{ area: "Areas/Asked", proposal_id: String(proposalId) }]);
+
+    // THE POINT: configuration is re-applied and the approval is still there
+    await restart();
+    expect(await grantsOf(id)).toEqual({ tier: "areas", areas: ["Areas/Narrow", "Areas/Asked"] });
+
+    // …and configuration is still the floor: narrowing it narrows everything
+    // except what was explicitly approved, and never the other way round.
+    await agents.ensureInternalAgent(pool, id, { token, grants: agents.validateGrants({ tier: "areas", areas: ["Me"] }, { kind: "internal" }) });
+    expect(await grantsOf(id)).toEqual({ tier: "areas", areas: ["Me", "Areas/Asked"] });
+
+    // revoking the credential takes its approvals with it
+    expect((await owner("POST", `/api/agents/${id}/revoke`)).status).toBe(200);
+    expect((await pool.query(`SELECT count(*)::int AS n FROM agent_grant_overrides WHERE agent_id = $1`, [id])).rows[0]!.n).toBe(0);
+    await restart();
+    expect(await grantsOf(id)).toEqual({ tier: "areas", areas: ["Areas/Narrow"] });
+
+    await pool.query(`DELETE FROM proposals WHERE source_agent = $1`, [id]);
+    await pool.query(`DELETE FROM agents WHERE id = $1`, [id]);
   });
 
   it("a payload crafted past the tool is re-validated at the decision: the console grants no area its own validator would refuse", async () => {

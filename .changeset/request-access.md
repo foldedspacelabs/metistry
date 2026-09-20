@@ -15,9 +15,8 @@ Now the refusal names a tool: `request_access {area, reason}` writes ONE
 `proposals` row of kind `access_request` with the ask, the reason and what the
 credential holds today, deduplicated on `(agent, area)` while it is pending
 (migration 0022's partial unique index, so a retry storm is one row). It
-**grants nothing** — it is a row. Every tier may ask, `none` included; an
-internal principal may not, because the assistant's scope is configuration in
-the user's hand and an approved ask would silently revert at the next restart.
+**grants nothing** — it is a row. Every tier may ask, `none` included (and
+since the follow-up ruling below, every principal, the assistant included).
 The area is validated at the tool with the same rule the grants validator
 uses, so a crafted prefix (`..`, `.metistry/`, `Artifacts/`, lowercase, the
 bare vault) never reaches a proposal, let alone a grant.
@@ -35,10 +34,9 @@ pending asks as `deny`.
 
 `packages/core` gains `validAreaPrefix` / `AREA_PREFIX_RE` /
 `AREA_PREFIX_REFUSAL`, lifted out of the console so both doors refuse the same
-strings in the same sentence. It also folds `isVaultPath` into that rule,
-which tightens the owner's own grants form slightly: `Artifacts/…` is now
-refused where it used to be admitted as an inert grant every read path
-ignored.
+strings in the same sentence, and `validAgentAreaGrant` — the same shape plus
+"a read path would actually serve it", which is what refuses `Artifacts/…` on
+an AGENT's grant (it was always an inert grant; every read path ignores it).
 
 Cost on the surface every agent pays: 189 definition tokens, taking the eager
 `tools/list` from 4,035 to **4,224** against the 5,000 line — still smaller

@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
 import { QueryStore } from "@foldedspacelabs/metistry-queries";
-import { mintToken } from "@foldedspacelabs/metistry-core";
+import { mintToken, tokenHash } from "@foldedspacelabs/metistry-core";
 import { memoryVault, type MemoryVault } from "@foldedspacelabs/metistry-artifacts";
 import { makeServer } from "../src/server.js";
 import { TargetRegistry } from "../src/dispatch.js";
@@ -86,7 +86,7 @@ describe.skipIf(!hasDb)("crews (integration)", () => {
   afterAll(async () => {
     await new Promise<void>((r) => server.close(() => r()));
     await pool.query(`DELETE FROM work WHERE owner = ANY($1::text[])`, [[`crew:${crewA}`, `crew:${crewB}`]]);
-    await pool.query(`DELETE FROM runs WHERE (kind = 'agent_admin' AND meta->>'agent' = ANY($1::text[])) OR (kind = 'dispatch' AND meta->>'crew' = ANY($1::text[])) OR component = ANY($2::text[])`, [[crewA, crewB, externalId], [assistantId, externalId]]);
+    await pool.query(`DELETE FROM runs WHERE (kind = 'agent_admin' AND meta->>'agent' = ANY($1::text[])) OR (kind = 'dispatch' AND meta->>'crew' = ANY($1::text[])) OR component = ANY($2::text[])`, [[crewA, crewB, externalId], [assistantId, externalId, crewA, crewB]]);
     await pool.query(`DELETE FROM agents WHERE id = ANY($1::text[])`, [[crewA, crewB, externalId, assistantId]]);
     await pool.end();
   });
@@ -195,6 +195,43 @@ describe.skipIf(!hasDb)("crews (integration)", () => {
     expect(crewField?.description).toContain(`${crewA} — ${DESCRIBED}`);
     expect(crewField?.description).toContain(`${crewB} — ${DESCRIBED}`);
     expect(crewField?.description).toContain("agents/<area>/<name>.md"); // and it still says what the field IS
+  });
+
+  // P2 of docs/research/2026-09-19-grants-and-access-simplified.md §2.2: the
+  // crew's own toolset, end to end — vault manifest → CrewRegistry →
+  // authenticateAgent → /mcp — with NO client-side allowlist anywhere in the
+  // loop (this suite speaks JSON-RPC directly; `apps/assistant`'s tool host,
+  // which is where `uses` used to be enforced, is not in the process). The
+  // bearer is minted exactly as the drain loop mints one per run.
+  it("a crew's `uses` is enforced at the door: a tool its manifest never named is forbidden on /mcp", async () => {
+    await registry.refresh();
+    const runToken = mintToken(32);
+    await pool.query(`UPDATE agents SET token_hash = $2 WHERE id = $1 AND kind = 'crew' AND revoked_at IS NULL`, [crewA, tokenHash(runToken)]);
+
+    // The principal the door builds: the row's OWN kind (no longer collapsed
+    // to external) and the toolset resolved from the manifest, server-side.
+    const principal = await agents.authenticateAgent(pool, { headers: { authorization: `Bearer ${runToken}` } }, (id) => registry.toolset(id));
+    expect(principal).toMatchObject({ id: crewA, kind: "crew", uses: ["brain-read", "brain-report"], manifest: `agents/itest/${crewA}.md` });
+
+    // `capture` and `tasks_list` are the shape §2.2 named: nothing else on
+    // this surface gates them, so before P2 the door admitted both and only
+    // the caller's filter said no.
+    for (const [name, args] of [["capture", { note: "x" }], ["tasks_list", {}]] as const) {
+      const r = await call(name, args, runToken);
+      expect(r.isError, name).toBe(true);
+      expect(r.body.error.code, name).toBe("forbidden");
+      expect(r.body.error.message, name).toContain("not in this crew's toolset");
+    }
+    // A group the manifest DID name is past the gate and answers its own rule.
+    const held = await call("knowledge_list", {}, runToken);
+    expect(String(held.body.error?.message ?? "")).not.toContain("toolset");
+    // The refusal is one `runs` row on the crew's own id, like every other.
+    const audit = (await pool.query(`SELECT ok, error FROM runs WHERE component = $1 AND kind = 'tool' AND tool = 'capture' ORDER BY id DESC LIMIT 1`, [crewA])).rows[0];
+    expect(audit).toEqual({ ok: false, error: "forbidden" });
+    // And nothing in the CALL can widen it: the toolset is the manifest's.
+    const spoof = await call("capture", { note: "x", kind: "internal", uses: ["capture"], agent: assistantId }, runToken);
+    expect(spoof.body.error.message).toContain("not in this crew's toolset");
+    expect((await pool.query(`SELECT count(*)::int AS n FROM inbox WHERE source_agent = $1`, [crewA])).rows[0].n).toBe(0); // the body never ran
   });
 
   it("unknown crew is not_found for the assistant (naming the registered ones); the parse helper agrees with what was synced", async () => {

@@ -31,8 +31,15 @@ interface GoldenEntry {
   message: string;
   needs?: unknown;
   expose?: unknown;
-  /** What this door answered before P1, and where it was read off origin/main. */
-  before: { code: string; message: string | null; at: string };
+  /**
+   * The ONE kind of entry whose `before` is not held byte for byte: a
+   * deliberate, approved behaviour change, with the sentence saying why. P2
+   * has exactly one (a crew's `uses`, §2.2), and the count is asserted below
+   * so a second one cannot arrive quietly as a third field on an entry.
+   */
+  changed?: string;
+  /** What this door answered before P1, and where it was read off origin/main. A `null` code on a `changed` entry means the refusal did not come from a door at all. */
+  before: { code: string | null; message: string | null; at: string };
 }
 
 // --- the principals the cases are asked of --------------------------------
@@ -90,6 +97,20 @@ const ungranted: Principal = {
   source: "registry",
 };
 
+/**
+ * A crew mid-run (P2): the registry's third stored `kind` is now its own
+ * role, so the scope is its manifest's `scope:`, the toolset is its
+ * manifest's `uses:`, and the bearer behind it was minted for this run and
+ * is burned after it.
+ */
+const crew: Principal = {
+  id: "writer",
+  role: "crew",
+  scope: { tier: "areas", areas: ["Areas/Health"], queries: false, projects: ["alpha"] },
+  source: { manifest: "agents/ops/writer.md" },
+  uses: ["knowledge", "requests"],
+};
+
 /** The capture Shortcut: the plan's tier 0, capture-only. */
 const captureTool: Principal = {
   id: "owner_token",
@@ -98,7 +119,7 @@ const captureTool: Principal = {
   source: "registry",
 };
 
-const WHO: Record<string, Principal> = { owner, assistant, narrowed, agent, browser, ungranted, tool: captureTool };
+const WHO: Record<string, Principal> = { owner, assistant, narrowed, agent, browser, crew, ungranted, tool: captureTool };
 
 describe("the refusal catalogue is the committed golden file", () => {
   const golden = JSON.parse(readFileSync(GOLDEN, "utf8")) as GoldenEntry[];
@@ -112,6 +133,16 @@ describe("the refusal catalogue is the committed golden file", () => {
     expect(new Set(golden.map((g) => g.id)).size).toBe(golden.length);
   });
 
+  /**
+   * P2 changed exactly one refusal (§4's table: "a crew calling outside
+   * `uses` gets `forbidden` where it previously got the client's 'not in
+   * this run's tool list'"). Pinning the LIST, not the count, is what makes
+   * a second change a decision somebody writes down here.
+   */
+  it("records exactly the behaviour changes that were approved", () => {
+    expect(golden.filter((g) => g.changed !== undefined).map((g) => g.id)).toEqual(["crew_uses.outside_toolset"]);
+  });
+
   for (const g of golden) {
     it(`${g.id}: ${g.door} refuses ${g.who} with ${g.reason}`, () => {
       const d: Decision = may(WHO[g.who]!, g.verb, g.resource);
@@ -121,9 +152,15 @@ describe("the refusal catalogue is the committed golden file", () => {
       expect({ code: r.code, reason: r.reason, message: r.message }).toEqual({ code: g.code, reason: g.reason, message: g.message });
       expect(r.needs ?? null).toEqual(g.needs ?? null);
       expect(r.expose ?? null).toEqual(g.expose ?? null);
-      // and what the door said BEFORE P1, from origin/main
-      expect(r.code, `${g.id} code changed (${g.before.at})`).toBe(g.before.code);
-      expect(r.message === "" ? null : r.message, `${g.id} message changed (${g.before.at})`).toBe(g.before.message);
+      // and what the door said BEFORE, from origin/main — except for the
+      // entries that carry a `changed` sentence, which is where an approved
+      // behaviour change is recorded rather than asserted away.
+      if (g.changed === undefined) {
+        expect(r.code, `${g.id} code changed (${g.before.at})`).toBe(g.before.code);
+        expect(r.message === "" ? null : r.message, `${g.id} message changed (${g.before.at})`).toBe(g.before.message);
+      } else {
+        expect(`${r.code}:${r.message}`, `${g.id} is recorded as CHANGED but still answers what it did at ${g.before.at}`).not.toBe(`${g.before.code}:${g.before.message}`);
+      }
     });
   }
 });

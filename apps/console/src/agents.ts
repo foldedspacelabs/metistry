@@ -32,8 +32,29 @@ import { ACCESS_REQUEST_KIND, underAreas } from "@foldedspacelabs/metistry-mcp-b
 import type { Db } from "./auth-store.js";
 
 export const AGENT_ID_RE = /^[a-z][a-z0-9-]{0,39}$/;
+/** The kinds `POST /api/agents` may NAME: a crew is not registered by hand — its row comes from a manifest in a protected path (crews.ts). */
 export const AGENT_KINDS = ["external", "internal"] as const;
 export type AgentKind = (typeof AGENT_KINDS)[number];
+/**
+ * Every kind the column actually stores, and the exact list migration 0025's
+ * CHECK constraint holds it to. `crew` has been written since Phase 5
+ * (crews.ts) while the typed pair above said otherwise, which is how a crew
+ * came to authenticate as a foreign agent (§2.3 of
+ * docs/research/2026-09-19-grants-and-access-simplified.md). One list, in
+ * code and in the database, so a fourth value is a decision rather than an
+ * INSERT.
+ */
+export const STORED_AGENT_KINDS = ["external", "internal", "crew"] as const;
+export type StoredAgentKind = (typeof STORED_AGENT_KINDS)[number];
+/**
+ * Where a row's grants came from, recorded on the row (0025's `grant_source`)
+ * instead of re-derived from `kind` in prose at each door (§2.7). Nothing
+ * DECIDES on it — `may()` never reads it; it is what the one renderer and the
+ * "your scope is configuration, not a grant" sentence read. NULL on a row
+ * written before the column existed, which reads as `registry`.
+ */
+export const GRANT_SOURCES = ["registry", "environment", "manifest"] as const;
+export type GrantSourceName = (typeof GRANT_SOURCES)[number];
 export const TIERS = ["none", "index", "areas"] as const;
 export type Tier = (typeof TIERS)[number];
 
@@ -52,7 +73,11 @@ export interface Grants {
  */
 export interface AgentPrincipal {
   id: string;
-  kind: AgentKind;
+  kind: StoredAgentKind;
+  /** A crew's tool groups, from the manifest the console loaded (`uses:`) — resolved at authentication by the lookup below, never from the request. Absent on every other kind; `/mcp` refuses a call outside it (P2 §2.2). */
+  uses?: readonly string[] | undefined;
+  /** Where that manifest was read from (`agents/<area>/<name>.md`), for the principal's `source`. Absent on every other kind. */
+  manifest?: string | undefined;
   grants: Grants;
   projects: string[];
   /** The A3 half of `agents.autonomy` (docs/ops/actions.md) — what this credential may do with an `action`. Absent = observe. */
@@ -248,10 +273,18 @@ function coerceGrants(raw: unknown): Grants {
 }
 
 /**
+ * A crew's toolset, by crew id — the console's loaded manifests
+ * (`crewToolset` in crews.ts). Given to `authenticateAgent` so a crew's
+ * principal carries what its manifest declares; absent (a standalone host,
+ * a console with no crews loaded) means a crew bearer holds no tools.
+ */
+export type CrewToolsetLookup = (id: string) => { uses: readonly string[]; manifest?: string | undefined } | undefined;
+
+/**
  * Resolve an agent bearer token to its principal. Pure function of
- * (db, Authorization header): hash lookup, not revoked, **not pending**,
- * bumps last_seen_at. Null on any miss — the caller returns the uniform
- * 401.
+ * (db, Authorization header, and — for a crew — the loaded manifests): hash
+ * lookup, not revoked, **not pending**, bumps last_seen_at. Null on any
+ * miss — the caller returns the uniform 401.
  *
  * The pending clause is the whole of S2's enforcement, and it lives in the
  * WHERE rather than in a branch above on purpose: a token awaiting
@@ -264,6 +297,7 @@ function coerceGrants(raw: unknown): Grants {
 export async function authenticateAgent(
   db: Db,
   req: { headers: { authorization?: string | string[] | undefined } },
+  crews?: CrewToolsetLookup,
 ): Promise<AgentPrincipal | null> {
   const header = req.headers.authorization;
   const token = parseBearer(Array.isArray(header) ? header[0] : header);
@@ -276,6 +310,19 @@ export async function authenticateAgent(
   );
   const row = rows[0];
   if (!row) return null;
+  // The row's OWN kind, not a collapse of it (P2 §2.3): `crew` has been a
+  // stored value since Phase 5, and reducing it to `external` here is what
+  // left `/mcp` unable to tell a crew from any other foreign agent. An
+  // unrecognised value still falls back to `external`, the narrowest kind —
+  // migration 0025's CHECK makes one impossible to write, and a row that
+  // predates it must not become MORE than it was by arriving unknown.
+  const kind: StoredAgentKind = STORED_AGENT_KINDS.includes(row.kind) ? (row.kind as StoredAgentKind) : "external";
+  // A crew's toolset comes from the manifest the console loaded, looked up
+  // here by id — the same place its grants and projects come from, and the
+  // same reason: what this credential may do is server-side and attached to
+  // the token. A crew this console has no manifest for resolves to nothing,
+  // which is the fail-closed answer (no tools), never every tool.
+  const crew = kind === "crew" ? (crews?.(row.id) ?? { uses: [], manifest: undefined }) : undefined;
   // `autonomy` rides the principal for the same reason grants do: what this
   // credential may DO is server-side, attached to the token, and never
   // asserted by the caller (§4.19). mcp-brain resolves it through core's
@@ -283,10 +330,12 @@ export async function authenticateAgent(
   const autonomy = coerceAutonomy(row.autonomy);
   return {
     id: row.id,
-    kind: row.kind === "internal" ? "internal" : "external",
+    kind,
     grants: coerceGrants(row.grants),
     projects: row.projects ?? [],
     autonomy: { ...(autonomy.level !== undefined ? { level: autonomy.level } : {}), ...(autonomy.actions !== undefined ? { actions: autonomy.actions } : {}) },
+    ...(crew ? { uses: crew.uses } : {}),
+    ...(crew?.manifest !== undefined ? { manifest: crew.manifest } : {}),
   };
 }
 
@@ -328,14 +377,18 @@ export async function ensureInternalAgent(db: Db, id: string, cfg: InternalAgent
   for (const p of projects) await ensureProject(db, p); // the project row exists from the first use of its slug (0011)
   const displayName = (cfg.display_name ?? "").trim().slice(0, 120) || `${id} (internal)`;
   const { rows } = await db.query(
-    `INSERT INTO agents (id, display_name, kind, token_hash, grants, projects)
-     VALUES ($1, $2, 'internal', $3, $4, $5)
+    // grant_source (0025): the row records that these grants came from the
+    // ENVIRONMENT, so "your scope is configuration, not a grant" is a field
+    // rather than a sentence three files reconstruct from `kind` (§2.7).
+    `INSERT INTO agents (id, display_name, kind, token_hash, grants, projects, grant_source)
+     VALUES ($1, $2, 'internal', $3, $4, $5, 'environment')
      ON CONFLICT (id) DO UPDATE SET
        kind = 'internal',
        display_name = EXCLUDED.display_name,
        token_hash = EXCLUDED.token_hash,
        grants = EXCLUDED.grants,
        projects = EXCLUDED.projects,
+       grant_source = EXCLUDED.grant_source,
        revoked_at = NULL,
        remote = false
      RETURNING (xmax = 0) AS created`,
@@ -380,8 +433,8 @@ export async function createAgent(
   if (remote && kind !== "external") throw new AgentError("invalid_request", "remote applies to kind external only");
   const token = mintToken(32);
   try {
-    await db.query(`INSERT INTO agents (id, display_name, kind, token_hash, remote, approved_at) VALUES ($1, $2, $3, $4, $5, $6)`, [
-      id, displayName, kind, tokenHash(token), remote, remote ? null : new Date().toISOString(),
+    await db.query(`INSERT INTO agents (id, display_name, kind, token_hash, remote, approved_at, grant_source) VALUES ($1, $2, $3, $4, $5, $6, $7)`, [
+      id, displayName, kind, tokenHash(token), remote, remote ? null : new Date().toISOString(), kind === "internal" ? "environment" : "registry",
     ]);
   } catch (err) {
     if ((err as { code?: string }).code === "23505") throw new AgentError("conflict", "agent id already registered");

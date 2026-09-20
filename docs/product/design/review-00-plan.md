@@ -568,6 +568,7 @@ Per `CLAUDE.md`. None edited. The ones the owner already logged in
 | **C12** | The two placeholder marks still disagree with each other and with the tokens: the app icon is `on-accent` on `accent`; `apps/console/web/icon.svg` is `#7ea9ff` (the **dark**-mode accent) on `#0e1216` (the **dark**-mode canvas), used in both appearances | `ops/release/make-app-icon.mjs`; `apps/console/web/icon.svg` |
 | **C13** | `index.html:17` sets `apple-touch-icon` to an SVG, which iOS does not honour — so the installed PWA has no home-screen icon on iPhone today | `apps/console/web/index.html:17`; `manifest.webmanifest` |
 | **C14** | `glossary.md` still says requests take "the same three answers" and the brief/§3.9 say six; the owner logged this on 2026-09-17 and it is **still open** | `glossary.md`; `design-system.md` §3.9 |
+| **C16** | `ux-direction.md` says the working state is "a **word**, not a spinner" and that nothing "spins or pulses"; the owner asked on 2026-09-19 for an animated indicator, because a word that never changes is indistinguishable from a stuck one. Proposed amendment in `screen-01-chat.md` §5.1 — *motion only where it carries information the reader cannot otherwise get, stopping the moment that information is available in words* — **awaiting a ruling** | `ux-direction.md`; `design-system.md` §3.4 |
 | **C15** | `design-system.md` §3.1's own body says the Mac sidebar rows carry "an optional count badge — shown only when the count is *actionable*", which contradicts the "only badge" rule three paragraphs later | `design-system.md:500` (§3.1) |
 
 Minor, not worth a row each: the PWA's `rooms` nav item is the one view with
@@ -685,7 +686,7 @@ Grouped, numbered, each with the recommendation so you can mostly say yes.
 | What | Why |
 | --- | --- |
 | Added this review | `design-brief.md` §8 asks for it before anything is drawn |
-| Logged 15 contradictions (C1–C15), none edited | `CLAUDE.md`: "Report contradictions, don't route around them" |
+| Logged 16 contradictions (C1–C16), none edited | `CLAUDE.md`: "Report contradictions, don't route around them" |
 | Computed the shipped presence-chip contrast on the ground actually painted | §2.2 checks `presence-* on surface`; nothing is drawn on `surface`. Three chips are below AA in light mode |
 | Proposed no token values yet | The accent decision (8.8) determines the palette, and it is unanswered |
 | Proposed one reordering (Insights before Knowledge) and one demotion (Rooms) | Data sources, and what a section is for |
@@ -739,4 +740,4 @@ It will be drawn as a section with the Settings-pane version beside it.
 Nothing is retracted. §6's recommendations are now decisions; §1.5's naming
 options are closed by **Usage**; C2 and C3 are resolved by decisions 3 and 12;
 C6, C7 and C8 by decision 6; C11 by decision 8. **C1, C4, C5, C9, C10, C12,
-C13, C14 and C15 remain open** and are build-side fixes, not design ones.
+C13, C14, C15 and C16 remain open** and are build-side fixes, not design ones.

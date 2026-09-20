@@ -112,6 +112,53 @@ export const NON_VAULT_ROOTS = Object.freeze([
  */
 export const VAULT_ROOT_AREA = "/";
 
+/**
+ * **The one shape of a grantable vault area.** One or more TitleCase segments
+ * from the vault root (CLAUDE.md's casing rule — Obsidian renders these, and
+ * `areas/` in one file with `Areas/` in another works on macOS and breaks in a
+ * container). No traversal, no leading or trailing slash, and no way to spell
+ * `.metistry/`, which does not start with an uppercase letter: the machinery
+ * is not grantable.
+ *
+ * It lives in core because TWO doors ask the question and their answers must
+ * be the same one: the console's `validateGrants` (the owner's own hand on
+ * `PUT /api/agents/:id/grants`) and mcp-brain's `request_access` (an agent
+ * asking for a prefix it does not hold). A second regex that agreed today is
+ * a refusal that drifts apart later — which is the one way an agent could
+ * name an area the grants validator would never have admitted.
+ *
+ * "Everything" is deliberately NOT expressible here: the bare vault is
+ * `VAULT_ROOT_AREA`, admitted by the console for internal rows alone, and no
+ * agent may ask for it.
+ */
+export const AREA_PREFIX_RE = /^[A-Z][A-Za-z0-9 _.'-]*(\/[A-Z][A-Za-z0-9 _.'-]*)*$/;
+
+export const MAX_AREA_PREFIX_LEN = 200;  // limit: fixed — AREA_PREFIX_RE's shape bounds it; a longer string is not a vault path
+
+/**
+ * `AREA_PREFIX_RE` plus the length bound, the explicit `..` refusal, and
+ * `isVaultPath` — the predicate both doors call.
+ *
+ * `isVaultPath` is on it because the shape alone admits `Artifacts/Reports`,
+ * which is TitleCase and is not knowledge: every read path refuses it anyway
+ * (`canSeeUnder`), so granting it was always an inert grant that reads like a
+ * real one. Naming it here means the owner's form and an agent's ask refuse
+ * it in the same sentence instead of accepting a grant that does nothing.
+ */
+export function validAreaPrefix(area: unknown): area is string {
+  return (
+    typeof area === "string" &&
+    area.length > 0 &&
+    area.length <= MAX_AREA_PREFIX_LEN &&
+    AREA_PREFIX_RE.test(area) &&
+    !area.includes("..") &&
+    isVaultPath(area)
+  );
+}
+
+/** The refusal both doors say when `validAreaPrefix` is false — one sentence, so the owner's form and an agent's tool teach the same shape. */
+export const AREA_PREFIX_REFUSAL = "area must be a TitleCase vault prefix (e.g. Areas/Fsl)";
+
 /** Root files that are the user's hand alone, outside `.metistry/`. */
 export const PROTECTED_ROOT_FILES = Object.freeze([INSTANCE_LAYOUT.assistantInstructions, INSTANCE_LAYOUT.readme] as const);
 

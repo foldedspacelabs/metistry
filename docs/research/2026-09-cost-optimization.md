@@ -52,3 +52,53 @@ users on API keys, crews, or a gateway (§4.18 A) they buy money. The
    subscription path.
 5. **Instrument first**: cache tokens in `runs`, hit rate on the dashboard
    and in the weekly review, before any further tuning.
+
+---
+
+## Addendum (2026-09-19) — how to measure OPEN-6
+
+Decision 5 above was "instrument first". The instrument is now one command.
+
+```sh
+metistry compute cache-report [--since 7d] [--json]
+```
+
+It reads the `runs` ledger through the named query `cache_report`
+(`GET /api/q/cache_report` — invariant 3's one read path, and no console
+route or action of its own, so invariant 10's mutating surface is untouched)
+and joins it to `compute.yaml`'s `pricing:` rates, which the ledger cannot
+know. It calls no model. Full operator notes in `docs/ops/compute.md`,
+"Measuring it (OPEN-6)".
+
+**What it answers, against the four questions this document asked.**
+
+| Question | Where it lands |
+| --- | --- |
+| Cache hit rate per tier and model | `hit` per (provider, model, tier, `caching:`) group. The denominator is `tokens_in`, which on `runs` is the whole prompt *including* the cached share — so the ratio reads as "the fraction of the prompt that did not have to be sent fresh". |
+| Tokens saved | `cache read` per group: those tokens were billed at a fraction of the input rate rather than in full. |
+| Dollars saved at the cached-input price | `saved`, net — reads below `in_per_m`, less the premium the writes paid — wherever `compute.yaml` publishes a rate for that model. On OpenRouter it normally will not: its responses carry `usage.cost`, which already knows what the cache saved, and no rates at all. The command says which field would fill the column rather than inventing a price. |
+| Is `cache_control` placement paying off | The verdict line, against **80 %**. This document records Anthropic's 89 % cache reads after a task boundary as the shape of a healthy agent loop; 80 % sits under it deliberately, because a real install rolls sessions and the first turn after every roll is a legitimate miss. Above it the prefix is stable; below it, something listed in "Where we already comply, and where we don't" is changing turn to turn. |
+
+**Read `reported` before `hit`.** The engine keeps "this provider reported no
+cache field" (NULL) apart from "it reported zero" (0), because they have
+different fixes. `0/n` reported on a `caching: auto` provider is a **wire**
+finding — the caching field is not reaching the provider, or the names read
+out of `usage` are not the ones it sends — and auditing a system prompt in
+that state is time spent on the wrong thing.
+
+**The comparison OPEN-6 still owes.** Automatic top-level `cache_control`
+versus up to four explicit breakpoints on the system prompt and tool list.
+Run ~10 real turns as shipped, take a `cache-report`; put explicit
+breakpoints in the provider's `request:` block (merged after the automatic
+field, so it overrides with no schema change), run the same kind of turns
+again, take another. The two `hit` columns are the answer. Worth recording in
+the same sitting, since a live response settles them: the exact field the
+automatic form takes, and whether cache writes are reported *inside*
+`prompt_tokens` or beside it.
+
+**One assumption still standing.** `docs/research/2026-09-11-local-models-openrouter-opencode.md`
+records `usage.cost` as always present on OpenRouter with `usage.include`
+deprecated (verified 2026-09-11), so the engine sends no usage-accounting
+flag. If that has changed, the report says so without anyone having to
+guess: the cost column understates and the `cost_source unknown` note names
+the turns it understates by.

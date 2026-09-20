@@ -312,6 +312,14 @@ startRunner(pool, scheduled, {
   // `uses_model:` picks the provider out of it (runner.ts).
   compute: () => compute.store.current,
   secretEnv: process.env,
+  // What a ROUTINE needs and no collector does (docs/product/daily-flow-spec.md
+  // §7): the named-query store, so every row `plan-tomorrow` renders comes
+  // through a named query and not through SQL of its own (invariant 3), and
+  // the vault bridge, which is where `Templates/Plan.md` is read from and
+  // `Journal/Plan/<date>.md` is written to. Both are the objects this process
+  // already built for the server — one console, one way in.
+  queries,
+  ...(vault ? { vault } : {}),
   ...(process.env.METISTRY_EK_URL ? { ekUrl: process.env.METISTRY_EK_URL } : {}),
   ...(process.env.METISTRY_BRIDGE_TOKEN_EVENTKIT ? { ekToken: process.env.METISTRY_BRIDGE_TOKEN_EVENTKIT } : {}),
   ...(process.env.METISTRY_GITHUB_TOKEN ? { githubToken: process.env.METISTRY_GITHUB_TOKEN } : {}),

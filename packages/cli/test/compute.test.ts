@@ -14,8 +14,10 @@ import { describe, expect, it } from "vitest";
 import { parseCompute } from "@foldedspacelabs/metistry-core";
 import {
   COMPUTE_TEMPLATES,
+  STABLE_PREFIX_HIT_RATIO,
   apiRoot,
   assign,
+  cacheReport,
   computeReport,
   modelsInstall,
   modelsList,
@@ -28,7 +30,9 @@ import {
   providerTest,
   providersAdd,
   providersRemove,
+  parseSince,
   readTemplate,
+  renderCacheReport,
   renderComputeReport,
   renderModelsInstall,
   renderModelsList,
@@ -36,6 +40,7 @@ import {
   setBudget,
   type ComputeOptions,
 } from "../src/compute.js";
+import { createUi, strip } from "../src/ui.js";
 import type { Exec, ExecOptions } from "../src/exec.js";
 import { main } from "../src/main.js";
 
@@ -673,5 +678,215 @@ describe("metistry compute (the command)", () => {
     const r = await run(["help"]);
     expect(r.code).toBe(0);
     for (const t of COMPUTE_TEMPLATES) expect(r.out, t).toContain(t);
+  });
+});
+
+// ---- cache-report: OPEN-6's measurement ---------------------------------------
+//
+// A read verb, against fakes for both of its sources: the console (the named
+// query through the generic door) and `compute.yaml` (the rates). Nothing
+// here dials a provider or calls a model — the point of the verb is that it
+// reads a ledger of calls already made.
+describe("cache-report", () => {
+  const TOKEN = "local-owner-token-never-in-output";
+  const ROW = {
+    provider: "openrouter",
+    model: "anthropic/claude-sonnet-5",
+    tier: "default",
+    caching: "auto",
+    turns: 10,
+    turns_reporting: 10,
+    turns_hit: 9,
+    tokens_in: "1000000",
+    tokens_out: "20000",
+    cache_read: "900000",
+    cache_write: "100000",
+    hit_ratio: "0.9000", // pg hands `numeric` back as a STRING; the verb must not take that as NaN
+    cost_usd: "1.500000",
+    turns_unpriced: 0,
+  };
+
+  /** The console, answering the one path and refusing anything unauthenticated. */
+  function consoleServing(rows: unknown[], status = 200) {
+    const calls: string[] = [];
+    const fn = (async (input: string | URL | Request, init?: RequestInit) => {
+      calls.push(String(input));
+      const auth = (init?.headers as Record<string, string> | undefined)?.authorization;
+      if (auth !== `Bearer ${TOKEN}`) return new Response(JSON.stringify({ error: { code: "unauthorized" } }), { status: 401 });
+      if (status !== 200) return new Response(JSON.stringify({ error: { code: "unknown_query", message: "no such query" } }), { status });
+      return new Response(JSON.stringify({ rows, as_of: "2026-09-19T12:00:00.000Z" }), { status: 200, headers: { "content-type": "application/json" } });
+    }) as unknown as typeof fetch;
+    return { fn, calls };
+  }
+
+  const reportOpts = (dir: string, fetchFn: typeof fetch): ComputeOptions =>
+    harness(dir, { platform: "linux", env: { METISTRY_LOCAL_OWNER_TOKEN: TOKEN }, fetchFn }).o;
+
+  it("--since is strict about its spelling — a window nobody meant is worse than an error", () => {
+    expect(parseSince(undefined)).toBe(7);
+    expect(parseSince("")).toBe(7);
+    expect(parseSince("14")).toBe(14);
+    expect(parseSince("14d")).toBe(14);
+    expect(parseSince("2w")).toBe(14);
+    expect(parseSince("3m")).toBe(90);
+    expect(() => parseSince("7 days")).toThrow(/<n>d.*<n>w.*<n>m/s);
+    expect(() => parseSince("yesterday")).toThrow();
+    expect(() => parseSince("0")).toThrow(/at least one day/);
+  });
+
+  it("reads the ledger through the console's generic query door and nowhere else (invariant 3)", async () => {
+    const dir = await instance();
+    const c = consoleServing([ROW]);
+    const r = await cacheReport({ ...reportOpts(dir, c.fn), since: "14d" });
+    expect(c.calls).toEqual(["http://127.0.0.1:8080/api/q/cache_report?days=14"]);
+    expect(r.since_days).toBe(14);
+    expect(r.as_of).toBe("2026-09-19T12:00:00.000Z");
+    expect(r.groups).toHaveLength(1);
+    // `numeric`-as-string off the wire has to come back a number, ratio included
+    expect(r.groups[0]).toMatchObject({ tokens_in: 1_000_000, cache_read: 900_000, hit_ratio: 0.9, cost_usd: 1.5 });
+    expect(r.totals).toMatchObject({ turns: 10, hit_ratio: 0.9 });
+  });
+
+  it("a stable prefix reads ok against the threshold; a cold one names what to look at", async () => {
+    const dir = await instance();
+    const ok = await cacheReport({ ...reportOpts(dir, consoleServing([ROW]).fn) });
+    expect(ok.threshold).toBe(STABLE_PREFIX_HIT_RATIO);
+    expect(ok.verdict.status).toBe("ok");
+    expect(ok.verdict.line).toContain("90%");
+
+    // 200k of 1M cached, and MORE written than read: the prefix is being
+    // rebuilt every turn, which is the expensive shape.
+    const cold = await cacheReport({
+      ...reportOpts(dir, consoleServing([{ ...ROW, cache_read: "200000", cache_write: "800000", hit_ratio: "0.2000", turns_hit: 4 }]).fn),
+    });
+    expect(cold.verdict.status).toBe("degraded");
+    expect(cold.verdict.line).toMatch(/20%/);
+    expect(cold.verdict.line).toMatch(/changes turn to turn/);
+    expect(cold.verdict.line).toMatch(/WRITTEN to the cache than read/);
+  });
+
+  it("a provider that reported no cache field at all is a WIRE finding, not a prefix one", async () => {
+    // The distinction the engine keeps NULL for. Telling someone to audit
+    // their system prompt when the provider never answered the question is
+    // the one wrong answer this report could give.
+    const dir = await instance();
+    const r = await cacheReport({
+      ...reportOpts(dir, consoleServing([{ ...ROW, turns_reporting: 0, turns_hit: 0, cache_read: "0", cache_write: "0", hit_ratio: "0.0000" }]).fn),
+    });
+    expect(r.verdict.status).toBe("degraded");
+    expect(r.verdict.line).toMatch(/NOT ONE response reported a cache field/);
+    expect(r.verdict.line).toMatch(/cached_tokens/);
+    expect(r.verdict.line).not.toMatch(/changes turn to turn/);
+  });
+
+  it("nothing on `caching: auto` is n/a, not a failing grade", async () => {
+    const dir = await instance();
+    const r = await cacheReport({ ...reportOpts(dir, consoleServing([{ ...ROW, caching: "off", cache_read: "0", hit_ratio: "0.0000" }]).fn) });
+    expect(r.verdict.status).toBe("n/a");
+    expect(r.verdict.line).toMatch(/caching: auto/);
+    const empty = await cacheReport({ ...reportOpts(dir, consoleServing([]).fn) });
+    expect(empty.verdict.status).toBe("n/a");
+    expect(empty.verdict.line).toMatch(/about ten real turns/);
+  });
+
+  it("the dollar saving comes from compute.yaml's rates, and its absence names the field that would fill it (R3)", async () => {
+    const dir = await withMetistryDir(await instance());
+    // no `pricing:` for this model — the normal OpenRouter case, whose
+    // responses carry `usage.cost` and no rates at all
+    const none = await cacheReport({ ...reportOpts(dir, consoleServing([ROW]).fn) });
+    expect(none.groups[0]!.saved_usd).toBeUndefined();
+    expect(none.groups[0]!.saved_unavailable).toContain('pricing["anthropic/claude-sonnet-5"].in_per_m');
+    expect(none.totals.saved_usd).toBeUndefined();
+
+    await writeFile(
+      file(dir),
+      `providers:
+  openrouter:
+    kind: openai-compatible
+    base_url: https://openrouter.ai/api/v1
+    locality: off_machine
+    caching: auto
+    data_policy: { allow: [Projects], deny_sources: [], max_brief_bytes: 65536 }
+    pricing: { anthropic/claude-sonnet-5: { in_per_m: 3, out_per_m: 15 } }
+`,
+    );
+    const priced = await cacheReport({ ...reportOpts(dir, consoleServing([ROW]).fn) });
+    // 900k read saved 0.9 × $3/M = $2.43; 100k written cost 0.25 × $3/M = $0.075
+    expect(priced.groups[0]!.saved_usd).toBeCloseTo(2.43 - 0.075, 6);
+    expect(priced.totals.saved_usd).toBeCloseTo(2.355, 6);
+
+    // A prefix rewritten every turn and never read comes out NEGATIVE. That
+    // is the finding; a floor at zero would be the one number here that lies.
+    const wasted = await cacheReport({
+      ...reportOpts(dir, consoleServing([{ ...ROW, cache_read: "0", cache_write: "1000000", hit_ratio: "0.0000" }]).fn),
+    });
+    expect(wasted.groups[0]!.saved_usd).toBeLessThan(0);
+  });
+
+  it("a `caching:` changed inside the window is shown as a change, not averaged away", async () => {
+    const dir = await withMetistryDir(await instance());
+    await writeFile(
+      file(dir),
+      `providers:
+  openrouter:
+    kind: openai-compatible
+    base_url: https://openrouter.ai/api/v1
+    locality: off_machine
+    caching: auto
+    data_policy: { allow: [Projects], deny_sources: [], max_brief_bytes: 65536 }
+`,
+    );
+    const r = await cacheReport({ ...reportOpts(dir, consoleServing([{ ...ROW, caching: "off" }]).fn) });
+    expect(r.groups[0]!.caching).toBe("off"); // what was in force when these turns ran …
+    expect(r.groups[0]!.caching_now).toBe("auto"); // … and what the file says today
+    expect(renderCacheReport(r, createUi({ env: {} }))).toContain("off → now auto");
+  });
+
+  it("a console that does not know the query says so, with the command that lands it", async () => {
+    const dir = await instance();
+    await expect(cacheReport({ ...reportOpts(dir, consoleServing([], 404).fn) })).rejects.toThrow(/metistry update/);
+  });
+
+  it("renders a table per provider/model with the verdict under it, and reads the same without colour", async () => {
+    const dir = await instance();
+    const r = await cacheReport({
+      ...reportOpts(dir, consoleServing([ROW, { ...ROW, tier: "crew:researcher", cache_read: "0", cache_write: "500000", hit_ratio: "0.0000" }]).fn),
+    });
+    const plain = renderCacheReport(r, createUi({ env: {} }));
+    expect(plain).toContain("openrouter/anthropic/claude-sonnet-5");
+    expect(plain).toContain("crew:researcher");
+    expect(plain).toContain("90%");
+    expect(plain).toContain("hit ratio");
+    expect(strip(plain)).toBe(plain); // rule 1: no colour on a pipe, and the words carry the meaning
+    expect(plain).toMatch(/(\[!\]|\[ok\])/); // the status word's icon, in the ASCII spelling a non-UTF-8 terminal gets
+    expect(plain).not.toContain(TOKEN);
+  });
+
+  it("the command prints one JSON document, exits 0 on a degraded reading, and refuses an unparseable --since", async () => {
+    const dir = await instance();
+    const out: string[] = [];
+    const errs: string[] = [];
+    const c = consoleServing([{ ...ROW, cache_read: "100000", hit_ratio: "0.1000" }]);
+    // `main()` reads process.env, which the suite scrubs to the scratch-db
+    // allowlist (test/setup.ts) — so the owner token comes the other way the
+    // real command finds it: the login Keychain, behind the `security` fake.
+    const exec: Exec = async (cmd, args) =>
+      cmd === "security" && args[0] === "find-generic-password" && args.includes("metistry:METISTRY_LOCAL_OWNER_TOKEN")
+        ? { code: 0, stdout: `${TOKEN}\n`, stderr: "" }
+        : { code: 44, stdout: "", stderr: "not found" };
+    const io = { out: (s: string) => out.push(s), err: (s: string) => errs.push(s), platform: "darwin" as const, uid: 501, fetchFn: c.fn, exec };
+    const code = await main(["compute", "cache-report", "--since", "2w", "--json", "--instance", dir, "--product-dir", REPO], io);
+    // a low hit ratio is a READING; exiting non-zero would make it look like
+    // a broken console to anything scripting this
+    expect(errs.join("\n")).toBe("");
+    expect(code).toBe(0);
+    const doc = JSON.parse(out.join("\n"));
+    expect(doc).toMatchObject({ since_days: 14, threshold: STABLE_PREFIX_HIT_RATIO });
+    expect(doc.verdict.status).toBe("degraded");
+    expect(strip(out.join("\n"))).toBe(out.join("\n")); // rule 2: `--json` is never coloured
+    expect(out.join("\n")).not.toContain(TOKEN);
+
+    expect(await main(["compute", "cache-report", "--since", "yesterday", "--instance", dir, "--product-dir", REPO], io)).toBe(1);
+    expect(errs.join("\n")).toMatch(/--since takes a number of days/);
   });
 });

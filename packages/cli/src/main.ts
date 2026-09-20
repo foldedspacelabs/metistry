@@ -13,6 +13,7 @@ import { pathToFileURL } from "node:url";
 import { KEEP_AWAKE_VALUES, parseKeepAwake, type DeploymentShape, type KeepAwake } from "@foldedspacelabs/metistry-core";
 import {
   assign,
+  cacheReport,
   computeReport,
   modelsInstall,
   modelsList,
@@ -25,6 +26,7 @@ import {
   providerTest,
   providersAdd,
   providersRemove,
+  renderCacheReport,
   renderComputeReport,
   renderModelsInstall,
   renderModelsList,
@@ -482,6 +484,7 @@ const USAGE = `metistry — Metistry command line
   metistry compute assign <default|<tier>|crew:<name>> <provider/model> [--effort low|medium|high]
   metistry compute budget <instance|provider:<name>> [--daily <usd>] [--monthly <usd>]
                           --action allow|stop|critical_only
+  metistry compute cache-report [--since 7d] [--json]
       This instance's compute.yaml: which providers exist, which model each
       tier and crew runs on, and what each may spend (docs/ops/compute.md).
       A §4.7 protected path like deployment.yaml — every write goes through
@@ -489,6 +492,12 @@ const USAGE = `metistry — Metistry command line
       validate is refused rather than written. "providers add" reads the API
       key from stdin into the login Keychain (user scope) and never takes it
       as an argument. Nothing dials a provider or enforces a budget yet.
+      "cache-report" is the one that reads rather than writes: prompt-cache
+      effectiveness per provider, model and tier over the last --since days
+      (7d, 2w, 3m, or a bare number of days), from the runs ledger through
+      the console — turns, cache reads and writes, hit ratio, what it cost
+      and what the cache saved where compute.yaml names a rate. It calls no
+      model and changes nothing (OPEN-6's measurement; docs/ops/compute.md).
 
   metistry deployment [--json] [--product-dir <checkout>]
       The effective shape (deployment.yaml's D4 overlay) and the services it
@@ -631,6 +640,7 @@ export const HELP_GROUPS: Array<{ title: string; verbs: Array<[string, string]> 
     verbs: [
       ["compute show|providers|models", "which providers exist and which model each tier runs on"],
       ["compute assign|budget", "point a tier at a model; cap what it may spend"],
+      ["compute cache-report", "is prompt caching paying off — hit ratio per provider and model"],
       ["deployment [set-shape]", "the effective shape (D4 overlay) and its services"],
       ["deployment set-keep-awake", "whether this install holds the Mac awake, and on which power"],
       ["agents autonomy <id>", "how much room one agent has with an action"],
@@ -1497,7 +1507,12 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
         env: process.env,
         platform: io.platform ?? process.platform,
         uid: io.uid ?? (typeof process.getuid === "function" ? process.getuid() : 0),
-        fetchFn: fetch,
+        // `io.fetchFn` FIRST, like every other verb that makes a request
+        // (`console`, `connect`). Hardcoding the global here meant a test
+        // driving these verbs through `main()` reached the real console and
+        // the real provider endpoints instead of its own fakes — which is
+        // exactly the class of thing docs/ops/testing.md exists to prevent.
+        fetchFn: io.fetchFn ?? fetch,
         dryRun: flags["dry-run"] === true,
         // --json is a wire contract (docs/ops/cli.md): only the final JSON
         // document goes to stdout, so a step's progress line (a stored-secret
@@ -1633,8 +1648,24 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
             out(json ? JSON.stringify(r, null, 2) : `${r.target}: ${r.daily_usd ? `$${r.daily_usd}/day ` : ""}${r.monthly_usd ? `$${r.monthly_usd}/month ` : ""}action ${r.action} — ${r.delivery.detail}`);
             return 0;
           }
+          case "cache-report": {
+            // A READ, alone among the compute verbs: the runs ledger through
+            // the console's generic query door (invariant 3), joined to
+            // compute.yaml's rates. Nothing is written and no model is called.
+            const loadedRun = loadEnv();
+            const r = await cacheReport({
+              ...computeOpts,
+              since: str(flags, "since"),
+              ...(loadedRun.instanceDir ? { instanceId: await readInstanceId(loadedRun.instanceDir) } : {}),
+            });
+            out(json ? JSON.stringify(r, null, 2) : renderCacheReport(r, ui));
+            // `degraded` is a reading, not a failure: the command worked, and
+            // exiting non-zero would make a low hit ratio look like a broken
+            // console to anything scripting this.
+            return 0;
+          }
           default:
-            err("usage: metistry compute show | providers … | models list | assign … | budget …   (metistry --help)");
+            err("usage: metistry compute show | providers … | models list | assign … | budget … | cache-report   (metistry --help)");
             return 2;
         }
       } catch (e) {

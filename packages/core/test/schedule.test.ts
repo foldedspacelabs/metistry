@@ -12,10 +12,10 @@ describe("scheduleToSeconds", () => {
     expect(scheduleToSeconds("@hourly")).toBe(3600);
     expect(scheduleToSeconds("@daily")).toBe(86400);
     expect(scheduleToSeconds("@weekly")).toBe(604800);
+    expect(scheduleToSeconds("@monthly")).toBe(2592000);
   });
 
   it("refuses what it cannot schedule (loud, not a silent default)", () => {
     expect(() => scheduleToSeconds("0 9 * * 1-5")).toThrow(/cannot schedule/);
-    expect(() => scheduleToSeconds("@monthly")).toThrow(/cannot schedule/);
   });
 });

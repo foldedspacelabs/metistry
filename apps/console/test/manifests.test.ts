@@ -1,10 +1,15 @@
 // Every shipped collector/routine manifest must load through the runner —
-// the console refuses to start on an unparseable schedule, and one slipped
-// through unit tests once (aws-costs "0 */6 * * *") and crash-looped the
-// deployed console. This is the CI gate for that.
-import { readdir, readFile } from "node:fs/promises";
+// CI gates that every one of them parses, and one slipped through unit tests
+// once (aws-costs "0 */6 * * *") and crash-looped the deployed console.
+// loadSchedules itself is defensive on top of that CI gate: a manifest it
+// cannot load or schedule (shipped or instance-authored) is skipped and
+// logged rather than taking the runner down — see "an unparseable schedule
+// is skipped, not fatal" below.
+import { mkdtemp, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { parse as parseYaml } from "yaml";
 import { collectorProviderIssue, providerSchema, validateManifest } from "@foldedspacelabs/metistry-core";
 import { collectors } from "@metistry-apps/collectors";
@@ -128,6 +133,59 @@ describe("shipped manifests schedule through the runner", () => {
     expect(scheduleToSeconds("*/15 * * * *")).toBe(900);
     expect(scheduleToSeconds("0 */6 * * *")).toBe(21600);
     expect(scheduleToSeconds("@hourly")).toBe(3600);
+    expect(scheduleToSeconds("@monthly")).toBe(2592000);
     expect(() => scheduleToSeconds("0 9 * * 1-5")).toThrow(/cannot schedule/);
+  });
+});
+
+describe("an unparseable schedule is skipped, not fatal", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  /** A collectors/ directory of one component, whose manifest.yaml is `body`. */
+  async function checkout(name: string, body: string): Promise<string> {
+    const dir = await mkdtemp(join(tmpdir(), "metistry-loadSchedules-"));
+    await mkdir(join(dir, name), { recursive: true });
+    await writeFile(join(dir, name, "manifest.yaml"), body);
+    return dir;
+  }
+
+  it("@monthly — the schedule the manifest regex admits and the old parser rejected — now schedules", async () => {
+    const dir = await checkout("m", "name: m\ntype: collector\nschedule: '@monthly'\nwrites: [work]\n");
+    const [s] = await loadSchedules([{ name: "m", run: async () => 0 }], dir);
+    expect(s?.intervalSec).toBe(2592000);
+  });
+
+  it("a manifest whose schedule cannot be parsed is skipped and logged, not thrown", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const dir = await checkout("bad", "name: bad\ntype: collector\nschedule: '0 9 * * 1-5'\nwrites: [work]\n");
+    const good = { name: "bad", run: async () => 0 };
+    await expect(loadSchedules([good], dir)).resolves.toEqual([]);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]?.[0]).toContain("bad");
+    expect(warn.mock.calls[0]?.[0]).toContain("cannot schedule");
+    expect(warn.mock.calls[0]?.[0]).toContain(`${dir}/bad/manifest.yaml`);
+  });
+
+  it("one bad manifest does not take the others down with it", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const dir = await checkout("bad", "name: bad\ntype: collector\nschedule: '0 9 * * 1-5'\nwrites: [work]\n");
+    await mkdir(join(dir, "good"), { recursive: true });
+    await writeFile(join(dir, "good", "manifest.yaml"), "name: good\ntype: collector\nschedule: '@hourly'\nwrites: [work]\n");
+    const loaded = await loadSchedules(
+      [
+        { name: "bad", run: async () => 0 },
+        { name: "good", run: async () => 0 },
+      ],
+      dir,
+    );
+    expect(loaded.map((s) => s.name)).toEqual(["good"]);
+  });
+
+  it("a manifest that fails schema validation (missing required fields) is skipped the same way", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const dir = await checkout("invalid", "name: invalid\ntype: collector\nwrites: []\n"); // schedule missing, writes empty
+    const loaded = await loadSchedules([{ name: "invalid", run: async () => 0 }], dir);
+    expect(loaded).toEqual([]);
+    expect(warn).toHaveBeenCalledTimes(1);
   });
 });

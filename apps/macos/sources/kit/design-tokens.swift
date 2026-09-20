@@ -1,5 +1,5 @@
 // GENERATED — do not edit.
-// Source: docs/product/design/tokens.json (v2.1.0, 2026-09-19)
+// Source: docs/product/design/tokens.json (v2.2.0, 2026-09-19)
 // Rebuild: node ops/scripts/build-design-tokens.mjs   (--check fails on drift)
 //
 // The design system's semantic roles, for SwiftUI. No token names a hue, a
@@ -141,7 +141,7 @@ public extension MetistryColorRole {
         case .borderStrong: return "focused input, selected row outline, table rules"
         case .textPrimary: return "body copy, titles, values"
         case .textSecondary: return "metadata that must still be read: timestamps, counts, actor ids"
-        case .textTertiary: return "placeholders and de-emphasised hints; never the only carrier of meaning"
+        case .textTertiary: return "placeholders and de-emphasised hints; never the only carrier of meaning, and never on a tinted fill — only on bg, surface or elevated"
         case .accent: return "the one interactive colour: links, selected tab, primary button fill. Pinned as the brand colour; controlAccentColor drives only the controls Apple draws itself"
         case .accentHover: return "hover and pressed state of an accent surface"
         case .accentQuiet: return "accent at low weight: selected sidebar row, chip fill, focus halo"

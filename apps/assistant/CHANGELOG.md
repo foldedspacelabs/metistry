@@ -1,5 +1,121 @@
 # @metistry-apps/assistant
 
+## 0.11.0
+
+### Patch Changes
+
+- 9c9da4a: **`metistry compute cache-report` — OPEN-6's measurement as one command**
+  (ruled 2026-09-17: ship automatic top-level `cache_control` first, measure
+  later). `metistry compute cache-report [--since 7d] [--json]` reads the `runs`
+  ledger through the new named query `cache_report`
+  (`GET /api/q/cache_report` — invariant 3's one read path, and no console route
+  or action of its own, so invariant 10's mutating surface is untouched) and
+  joins it to `compute.yaml`'s `pricing:` rates, which the ledger cannot know. A
+  table per provider/model, grouped by tier and by the `caching:` mode that was
+  in force, with turns, cache reads and writes, hit ratio, recorded cost and a
+  net dollar saving; one verdict line against an 80 % threshold, under the 89 %
+  after a task boundary that `docs/research/2026-09-cost-optimization.md`
+  records, because a real install rolls sessions. The saving is net of the write
+  premium and may be negative — a prefix rebuilt every turn is the finding, not
+  a number to floor at zero — and is absent, naming the field that would fill
+  it, wherever no `pricing:` entry publishes a rate. It calls no model and
+  writes nothing.
+  
+  **Usage mapping now covers Anthropic's native shape.** `cache_read_input_tokens`
+  was not read at all, and `input_tokens` on that wire is the *fresh* remainder
+  with both cache counts reported beside it rather than inside it.
+  `usageFromResponse` recognises the shape by its anchor field (`prompt_tokens`
+  = the OpenAI/OpenRouter form, already a total; `input_tokens` = the native
+  form, summed back into one), so `runs.tokens_in` means the whole billed prompt
+  whichever endpoint answered and a ratio over it is comparable across
+  providers.
+  
+  **Every engine turn now records the cache, and what caching was asked for.**
+  Crew runs wrote provider, model, tokens and cost but dropped
+  `cache_read_tokens`/`cache_write_tokens` and `cost_source`; shadow runs
+  dropped the same two on their own provider's row. Both carry them now. And a
+  reported zero is no longer flattened into "nothing reported": the engine keeps
+  the counter absent until a response carries the field, so NULL means the
+  provider said nothing (the field name is wrong) and 0 means it said zero (the
+  prefix is not stable) — two findings with different fixes. `runs.meta.caching`
+  records the mode in force for that turn, since `compute.yaml` is hot-reloaded
+  and cannot answer later what was true earlier.
+  
+  **Fixed:** `main()`'s `compute` case hardcoded `fetchFn: fetch` instead of
+  honouring the `io.fetchFn` test seam, so a test driving those verbs through
+  `main()` reached the real console and real provider endpoints rather than its
+  own fakes.
+- 1bf5c76: **A crew's toolset is enforced at the door.** P2 of
+  `docs/research/2026-09-19-grants-and-access-simplified.md` §4, approved
+  2026-09-20. **One behaviour change, and it is the point of the phase** — read
+  the next paragraph before you upgrade an install that runs crews.
+  
+  **What changes for a running crew.** A crew names TOOL GROUPS in its manifest
+  (`uses:`), and until now that list was applied by the process that dispatched
+  the run: `apps/assistant/src/tools.ts` filtered `tools/list` and refused an
+  unlisted call with the text `"mcp__brain__tasks_comment" is not in this run's
+  tool list`. `/mcp` had never heard of `uses` — `AgentPrincipal` carried no
+  such field — so the door admitted those calls. Five of the eight groups
+  (`rooms`, `artifacts`, `tasks`, `capture`, `requests`) had no server-side gate
+  at all; the only thing holding them was a `Set.has` in another process. Now
+  the console resolves a crew's `uses` from the manifest it loaded, attaches it
+  to the principal at authentication, and the door refuses anything outside it
+  before the tool body runs:
+  
+  ```json
+  { "error": { "code": "forbidden",
+               "message": "tasks_comment is not in this crew's toolset — writer holds knowledge, requests (`uses:` in its manifest, a protected path in the user's hand: docs/ops/crews.md). Report what you needed instead of retrying." } }
+  ```
+  
+  One `runs` row on the crew's own id, the uniform envelope, `reason:
+  not_in_uses` in `may()`'s decision. The runner's client-side list stays as
+  **defence in depth** — the model is still not offered a tool it cannot use —
+  but it is no longer the control, and the comment at that filter says so.
+  CLAUDE.md's rule over all the others is "enforce at the tool, never by
+  prompting"; a filter in the caller is neither.
+  
+  **`crew` is a real role.** `agents.kind` has stored three values since Phase 5
+  (`crews.ts` writes `'crew'`) while the console collapsed anything not
+  `internal` to `external` at authentication, so a crew reached `/mcp`
+  indistinguishable from a foreign agent (§2.3). `authenticateAgent` now passes
+  the row's own kind through, `principalOf` maps it to the `crew` role that
+  `may()` has had a table for since P1, and three things follow: the toolset
+  gate above, a `crew` that can no longer reach `request_access` at the door
+  (it is a never-tool, so it is in no group), and a `source` on the principal
+  that is the crew's manifest rather than a fourth prose reconstruction of
+  "your scope is configuration, not a grant".
+  
+  **Migration `0025_agent_role.sql`** (additive; rollback note in the file): a
+  CHECK holding `agents.kind` to the three values it already stores, and a
+  nullable `grant_source` column recording which of the three places a row's
+  grants came from — `registry` (the owner's hand), `environment` (`.env`,
+  replaced at every console start), `manifest` (a crew's `scope:`). NULL on
+  existing rows and read as `registry`. Nothing decides on it: `may()` never
+  reads it.
+  
+  **Nothing else moved.** Every other refusal is byte-identical — the golden
+  catalogue (`packages/core/test/access.golden.json`) asserts it entry by entry,
+  and the one changed entry carries both what the caller used to say and what
+  the door says now, so the behaviour change is a reviewable diff rather than a
+  sentence in a PR. Misuse tests ship with it (invariant 8): a crew bearer
+  refused a non-`uses` tool at `/mcp` with no client filter in the loop, a crew
+  whose manifest cannot be read holding NO tools rather than all of them, an
+  external agent unable to become a crew through a body or a header, and the
+  CHECK refusing a fourth kind.
+- Updated dependencies [4a778f9]
+- Updated dependencies [4f43f9c]
+- Updated dependencies [9c9da4a]
+- Updated dependencies [1bf5c76]
+- Updated dependencies [b6586de]
+- Updated dependencies [579662f]
+- Updated dependencies [57ceb02]
+- Updated dependencies [45b64df]
+- Updated dependencies [9ec30d5]
+- Updated dependencies [7f9ceb7]
+- Updated dependencies [23cc47f]
+  - @foldedspacelabs/metistry-core@0.11.0
+  - @foldedspacelabs/metistry-queries@0.11.0
+
 ## 0.10.0
 
 ### Patch Changes

@@ -50,9 +50,11 @@
 
 import { Worker } from "node:worker_threads";
 import { z } from "zod";
+import { may } from "@foldedspacelabs/metistry-core";
 import { QueryError, type QueryStore } from "@foldedspacelabs/metistry-queries";
-import { isSettledPage, knowledgeScope, scopeRequired, titleSql, underAreas, type KnowledgeReader, type KnowledgeScope } from "./knowledge.js";
-import { done, fail, type Outcome } from "./outcome.js";
+import { isSettledPage, knowledgeScope, titleSql, underAreas, type KnowledgeReader, type KnowledgeScope } from "./knowledge.js";
+import { done, fail, refuse, type Outcome } from "./outcome.js";
+import { principalOf } from "./principal.js";
 import type { AgentPrincipal, Db } from "./types.js";
 import type { VaultBridgeOptions } from "./knowledge-write.js";
 
@@ -106,9 +108,6 @@ export const KNOWLEDGE_LINKS_QUERY = "knowledge_page_links";
 const NOT_AVAILABLE_LIST = "the vault bridge's listing is not configured in this deployment (knowledge_list needs METISTRY_RECONCILER_URL + METISTRY_BRIDGE_TOKEN_RECONCILER, same as knowledge_read)";
 const NOT_AVAILABLE_READ = "note contents are not readable from this deployment yet (knowledge_grep needs the same vault read path as knowledge_read)";
 const notLoaded = (name: string) => `the named query ${name} is not loaded (seed/queries/${name}.yaml, METISTRY_QUERIES_DIRS)`;
-
-/** Refusal wording for every tier gate here — unchanged, and deliberately not "not found": absence of permission must not look like absence of knowledge. How to get more is in the tool description, not appended to every refusal. */
-const NOT_GRANTED = "not granted";
 
 const MAX_INDEX_ROWS = 500; // limit: fixed — the ceiling `apps/console/src/knowledge-routes.ts` puts on the same two queries, so an agent's window and the owner's are the same size
 
@@ -244,18 +243,15 @@ async function indexEntries(deps: KnowledgeFsDeps, scope: KnowledgeScope, prefix
  * of its own (D4) and a projection here would swallow them — so the one
  * thing this insists on is a `path` it can judge.
  */
-async function listLinks(deps: KnowledgeFsDeps, scope: KnowledgeScope, path: string): Promise<Outcome> {
-  if (!scope.canRead(path)) {
-    // The same scope_required rule knowledge_read applies (knowledge.ts):
-    // a page's edges are content, but a caller who may already see the
-    // page's TITLE is told which grant would let it traverse them, rather
-    // than the bare string — and only for a page that is really there.
-    if (scope.canList(path) && (await isSettledPage(deps.db, path))) {
-      const sr = scopeRequired(path);
-      return fail("forbidden", sr.message, { tier: scope.tier, areas: scope.prefixes ?? [], links_for: path }, sr.expose);
-    }
-    return fail("forbidden", NOT_GRANTED, { tier: scope.tier, areas: scope.prefixes ?? [], links_for: path });
-  }
+async function listLinks(deps: KnowledgeFsDeps, principal: AgentPrincipal, scope: KnowledgeScope, path: string): Promise<Outcome> {
+  const p = principalOf(principal);
+  // The one fact `may` cannot know, asked exactly where it was asked before:
+  // of a caller who may see the TITLE and not the content, for a page that is
+  // really there. The scope_required upgrade knowledge_read applies is the
+  // same decision — a page's edges are content.
+  const settled = !scope.canRead(path) && scope.canList(path) ? await isSettledPage(deps.db, path) : false;
+  const d = may(p, "read", { kind: "knowledge", door: "links", path, settled });
+  if (!d.ok) return refuse(d, { tier: scope.tier, areas: scope.prefixes ?? [], links_for: path });
   const store = deps.queries;
   if (!store?.names().includes(KNOWLEDGE_LINKS_QUERY)) return fail("not_available", notLoaded(KNOWLEDGE_LINKS_QUERY));
   let rows: Record<string, unknown>[];
@@ -275,16 +271,19 @@ function registerKnowledgeList(reg: Register, deps: KnowledgeFsDeps, principal: 
     { prefix: z.string().max(500).optional(), depth: z.number().int().min(1).max(5).optional(), links_for: z.string().max(500).optional() },
     async (a) => {
       const scope = knowledgeScope(principal);
-      if (scope.tier === "none") return fail("forbidden", NOT_GRANTED);
+      const p = principalOf(principal);
+      const admitted = may(p, "act", { kind: "tool", name: "knowledge_list" });
+      if (!admitted.ok) return refuse(admitted);
       // `links_for` is the graph rather than the tree: a different named
       // query, the same scope function, and a tier `areas` gate because a
       // page's edges are a fact about the page (knowledge_read's rule).
-      if (a.links_for !== undefined && a.links_for !== "") return listLinks(deps, scope, a.links_for);
+      if (a.links_for !== undefined && a.links_for !== "") return listLinks(deps, principal, scope, a.links_for);
       const depth = a.depth ?? 1;
       const prefix = a.prefix ?? "";
       // tier areas: an explicit prefix must fall under a granted one, on
       // either source. An omitted prefix aggregates across all of them.
-      if (scope.prefixes && prefix !== "" && !scope.canRead(prefix)) return fail("forbidden", NOT_GRANTED);
+      const scoped = may(p, "list", { kind: "knowledge", door: "list", path: prefix });
+      if (!scoped.ok) return refuse(scoped);
 
       let raw: ListEntry[];
       if (!deps.list) {
@@ -433,8 +432,11 @@ function registerKnowledgeGrep(reg: Register, deps: KnowledgeFsDeps, principal: 
     { pattern: z.string().min(1).max(200), prefix: z.string().max(500).optional(), limit: z.number().int().min(1).max(MAX_GREP_HITS).optional() },
     async (a) => {
       const scope = knowledgeScope(principal);
-      if (scope.tier !== "areas") return fail("forbidden", "not granted");
-      if (a.prefix !== undefined && a.prefix !== "" && !scope.canRead(a.prefix)) return fail("forbidden", "not granted");
+      const p = principalOf(principal);
+      const admitted = may(p, "act", { kind: "tool", name: "knowledge_grep" });
+      if (!admitted.ok) return refuse(admitted);
+      const scoped = may(p, "read", { kind: "knowledge", door: "grep", path: a.prefix ?? "" });
+      if (!scoped.ok) return refuse(scoped);
       if (!deps.read) return fail("not_available", NOT_AVAILABLE_READ);
 
       try {

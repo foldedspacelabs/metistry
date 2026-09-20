@@ -9,7 +9,8 @@
 // lands, so `knowledge_read` degrades to `not_available` unless the host
 // injects a reader — no vault mount is invented here.
 
-import { canSeeUnder, EmbedUnavailableError, scopeRequired, validKnowledgePath, vectorLiteral, type ErrorCode } from "@foldedspacelabs/metistry-core";
+import { EmbedUnavailableError, may, mayListPath, mayReadPath, titlePrefixes, titlesOnly, vectorLiteral, type ErrorCode } from "@foldedspacelabs/metistry-core";
+import { principalOf } from "./principal.js";
 import type { AgentPrincipal, Db, Tier } from "./types.js";
 
 /**
@@ -91,14 +92,21 @@ export interface KnowledgeScope {
 }
 
 export function knowledgeScope(principal: AgentPrincipal): KnowledgeScope {
-  const { tier, areas } = principal.grants;
+  const { scope } = principalOf(principal);
   return {
-    tier,
-    prefixes: tier === "areas" ? areas : null,
-    visibleTitlesOnly: tier === "index",
+    tier: scope.tier,
+    // NOT `readableAreas(scope)`: `null` HERE means "no prefix restriction on
+    // the TITLES this tier may browse", which is the opposite of what `null`
+    // means in a read scope. §2.8's one field with two meanings, still two
+    // meanings — kept apart by this comment until the tier model itself is
+    // revisited (open question 2).
+    prefixes: titlePrefixes(scope),
+    visibleTitlesOnly: titlesOnly(scope),
     excludeDrafts: true,
-    canRead: (path) => tier === "areas" && canSeeUnder(path, areas),
-    canList: (path) => tier !== "none" && canSeeUnder(path, tier === "areas" ? areas : null),
+    // Row filtering, not refusal: the same two predicates `may()` decides
+    // with, so a list and a refusal cannot come to different answers.
+    canRead: (path) => mayReadPath(scope, path),
+    canList: (path) => mayListPath(scope, path),
   };
 }
 
@@ -237,21 +245,16 @@ function round(n: number): number {
 
 /** Full read of one settled note under a granted prefix. */
 export async function readKnowledge(db: Db, principal: AgentPrincipal, path: string, reader: KnowledgeReader | undefined): Promise<ReadOutcome> {
-  const scope = knowledgeScope(principal);
-  if (scope.tier !== "areas") {
-    // Tier `index` (or a grant whose areas do not cover this path) may
-    // already see the TITLE — `canList` — but never the content. Name the
-    // area that would unlock it only for a page that is really there
-    // (`isSettledPage`): a path merely shaped like a vault path gets the
-    // same uniform refusal it always has, existence unconfirmed either way.
-    if (scope.canList(path) && (await isSettledPage(db, path))) {
-      const sr = scopeRequired(path);
-      return { ok: false, code: "forbidden", message: sr.message, expose: sr.expose };
-    }
-    return { ok: false, code: "forbidden" };
-  }
-  if (!validKnowledgePath(path)) return { ok: false, code: "invalid_request", message: "path must be a vault path — TitleCase folders, no traversal, nothing under .metistry/ or Artifacts/" };
-  if (!scope.canRead(path)) return { ok: false, code: "forbidden" };
+  const p = principalOf(principal);
+  // The one fact `may` cannot know: whether the page is really there. Asked
+  // ONLY of a caller who may already see the TITLE and may not read the
+  // content — a principal that may read it has no need of the answer, and a
+  // path merely shaped like a vault path must not become an existence oracle
+  // (isSettledPage's contract). Exactly the condition that guarded this query
+  // before; the tier arithmetic behind it is `may`'s now.
+  const settled = !mayReadPath(p.scope, path) && mayListPath(p.scope, path) ? await isSettledPage(db, path) : false;
+  const d = may(p, "read", { kind: "knowledge", door: "read", path, settled });
+  if (!d.ok) return { ok: false, code: d.code, ...(d.message ? { message: d.message } : {}), ...(d.expose ? { expose: d.expose } : {}) };
   const { rows } = await db.query(`SELECT path, title, draft FROM knowledge_files WHERE path = $1`, [path]);
   const row = rows[0];
   if (!row || row.draft === true) return { ok: false, code: "not_found" }; // drafts are unsettled: invisible at every tier

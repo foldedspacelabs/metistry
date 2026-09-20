@@ -27,6 +27,7 @@ import { z } from "zod";
 import {
   errorEnvelope,
   finishRun,
+  may,
   redactSecrets,
   runCheck,
   sanitizeForAgent,
@@ -51,7 +52,8 @@ import { captureToInbox, type CaptureSink } from "./capture.js";
 import { KNOWLEDGE_MODES, knowledgeScope, readKnowledge, searchKnowledge, type KnowledgeReader, type QueryEmbedder } from "./knowledge.js";
 import { sha256Text, writeKnowledge, type KnowledgeWriter } from "./knowledge-write.js";
 import { computeNudge } from "./nudge.js";
-import { done, fail, type Outcome } from "./outcome.js";
+import { principalOf } from "./principal.js";
+import { done, fail, refuse, type Outcome } from "./outcome.js";
 import { REPORT_KINDS, submitReport } from "./report.js";
 import { allProjects, memberOf } from "./scope.js";
 import { liftTurnId, turnIdFrom } from "./turn-id.js";
@@ -439,7 +441,11 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
         idempotency_key: z.string().min(1).max(200).optional(),
       },
       async (a) => {
-        if (!memberOf(principal, a.project)) return fail("forbidden");
+        // The one project check that is `forbidden` rather than `not_found`:
+        // you named the project, so it is not a row you cannot see — it is a
+        // room you are not in (uniform with artifacts_publish).
+        const admitted = may(principalOf(principal), "write", { kind: "project", door: "task_create", slug: a.project });
+        if (!admitted.ok) return refuse(admitted);
         for (const dep of a.depends_on ?? []) if (!(await scoped(principal, dep))) return fail("not_found", `depends_on task ${dep} not found`);
         const task = await tasks.create(
           {
@@ -473,7 +479,8 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
       },
       async (a) => {
         const scope = knowledgeScope(principal);
-        if (scope.tier === "none") return fail("forbidden", undefined, { tier: scope.tier });
+        const admitted = may(principalOf(principal), "act", { kind: "tool", name: "knowledge_search" });
+        if (!admitted.ok) return refuse(admitted, { tier: scope.tier });
         const r = await searchKnowledge(db, principal, a.query, a.limit ?? 20, { mode: a.mode ?? null, embedder: cfg.embedder });
         return done(
           { tier: scope.tier, mode: r.mode, hits: r.hits, ...(r.degraded ? { degraded: r.degraded } : {}) },

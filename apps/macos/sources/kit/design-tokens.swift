@@ -1,5 +1,5 @@
 // GENERATED — do not edit.
-// Source: docs/product/design/tokens.json (v2.4.0, 2026-09-19)
+// Source: docs/product/design/tokens.json (v2.5.0, 2026-09-19)
 // Rebuild: node ops/scripts/build-design-tokens.mjs   (--check fails on drift)
 //
 // The design system's semantic roles, for SwiftUI. No token names a hue, a
@@ -147,7 +147,7 @@ public extension MetistryColorRole {
         case .textTertiary: return "placeholders and de-emphasised hints; never the only carrier of meaning, and never on a tinted fill — only on bg, surface or elevated"
         case .accent: return "the one interactive colour: links, selected tab, primary button fill. Pinned as the brand colour; controlAccentColor drives only the controls Apple draws itself"
         case .accentHover: return "hover and pressed state of an accent surface"
-        case .accentQuiet: return "accent at low weight: selected sidebar row, chip fill, focus halo"
+        case .accentQuiet: return "selection and emphasis ground: a selected row, your own turn in the transcript, the selection bar. LEGAL INK ON IT, and nothing else: text-primary, text-secondary, accent, agent as text; ok, degraded, failed and stale as a GLYPH only (they clear 3:1 and not 4.5:1). text-tertiary is illegal on it — 4.17:1 light, 4.06:1 dark — as is any state colour used as words. This list exists because the same pair has now failed twice: a selection ground re-inks everything inside it, so every role that can appear in a row has to be checked against it, not just the ones a designer happens to think of."
         case .onAccent: return "text and glyphs on an accent fill"
         case .agent: return "the agent-sourced tint — marks a string an agent wrote, as data"
         case .agentQuiet: return "agent-sourced background wash: quoted tool output, agent comment"

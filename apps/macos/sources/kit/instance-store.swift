@@ -323,10 +323,16 @@ public final class InstanceStore {
             return .failure(.transport("the console is not answering, so nothing can be decided from here yet"))
         }
         guard answer.isSendable else {
+            // Revise needs the field its kind revises: a reason everywhere, a
+            // folder on an access request (there is nothing to grant without
+            // one, and the console refuses it too).
+            let area = answer.area != nil
             return .failure(.http(status: 400, envelope: ConsoleErrorEnvelope(
                 code: "invalid_request",
-                message: "Revise needs a reason — the assistant has nothing to change without one",
-                field: "feedback"
+                message: area
+                    ? "Revise needs the folder to grant instead — there is nothing to widen without one"
+                    : "Revise needs a reason — the assistant has nothing to change without one",
+                field: area ? "area" : "feedback"
             )))
         }
         // `seen_at` is the `ts` of the row that was RENDERED, so the answer is

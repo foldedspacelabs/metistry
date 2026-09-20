@@ -256,6 +256,7 @@ public struct ConsoleAPI: Sendable {
     ) async -> Result<RequestAnswerResult, ConsoleError> {
         var body: [String: Any] = ["decision": answer.wire]
         if let feedback = answer.feedback { body["feedback"] = feedback }
+        if let area = answer.area { body["area"] = area } // Revise on an access request grants THIS folder instead
         if let seenAt { body["if_unchanged"] = ["seen_at": seenAt] }
         return await post("/api/proposals/\(id)", body)
     }

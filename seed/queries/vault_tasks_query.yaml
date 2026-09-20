@@ -1,0 +1,381 @@
+# Seeded default (D4 overlay: an instance file of the same name wins).
+#
+# THE ONE QUERY THE FILTER VOCABULARY COMPILES INTO (daily-flow-spec D15,
+# §6.2, §10; ticket P1-5). A template's `where:`/`order:`, the app's filter
+# chips and the plugin's suggester are one language with three consumers, and
+# what that language compiles to is BIND PARAMS OF THIS FILE — never SQL
+# text. `packages/queries` says it in its first four lines ("parameterized
+# execution, NEVER string interpolation") and refuses an undeclared param
+# loudly; `packages/core/src/task-filter.ts` (P1-2) is the parser that emits
+# the params below and refuses everything outside the grammar.
+#
+# Without this, there are three filter languages within a year — which §10
+# calls the single highest-leverage decision in the app surfaces.
+#
+# ---------------------------------------------------------------------------
+# THE BIND-PARAM SHAPE, which is the contract with the parser
+# ---------------------------------------------------------------------------
+#
+# `packages/queries` admits exactly three param types — int, text, boolean —
+# and every param must carry a default, because every seed query has to run
+# on its defaults alone (apps/console/test/seed-queries.test.ts). So there are
+# no arrays and no nulls on the wire: **blank is absent**, for every text
+# param, everywhere. That one rule is what the whole shape is built on.
+#
+#   * A comparable field (`due`, `do`, `start`, `done`) becomes an INCLUSIVE
+#     pair, `<field>_from` / `<field>_to`, ISO `YYYY-MM-DD`. The grammar's
+#     `<` and `>` are the parser's to normalise — it already resolves
+#     `today`, `friday` and `+3d` against METISTRY_TZ and the run's date
+#     (§1.3, `vault_tasks.parsed_on`), so `due < today` arrives as
+#     `due_to = <yesterday>`. Resolution belongs where the timezone is known,
+#     and that is not in the database.
+#   * `priority` becomes `priority_min` / `priority_max` (1..4, D5). Unset
+#     priority sorts and filters as 3 — `coalesce(priority, 3)` — so "unset"
+#     and "normal" are one value and no NULL-ordering surprise exists.
+#   * `size`, `type`, `assigned`, `project`, `area` are exact matches; only
+#     `=` is meaningful on them and the parser refuses the other operators.
+#     `assigned` is the RESOLVED vault path (`@[[Jim Fallon]]` →
+#     `People/Jim Fallon.md`), because that is what the index stores.
+#   * `source` matches the whole value OR its prefix before the colon, so
+#     `source: meeting` finds every `meeting:<path>`.
+#   * The seven flags travel as ONE comma-separated `flags` param —
+#     `overdue`, `unscheduled`, `waiting`, `recurring`, `carried`,
+#     `blocking_agent`, `assigned_to_me` — and are matched set-wise, so no
+#     flag needs a param of its own and an eighth flag is a product decision
+#     rather than a migration. `assigned_to_me` means "not delegated to
+#     anyone else, or delegated to me": `me` names the owner's own person
+#     page when the instance has one.
+#   * `combine` is how the clauses join — `and` (the default) or `or`. It is
+#     the honest limit of a fixed param shape: `due <= today or overdue`
+#     compiles, and so does every all-`and` predicate, but a predicate that
+#     MIXES `and` and `or` at different depths does not, and the parser
+#     refuses it as a render-time failure note (§6.4) rather than quietly
+#     approximating it. A wrong list is worse than a visible warning.
+#   * `order:` becomes three slots — `sort1`/`sort2`/`sort3` with a `_desc`
+#     boolean each — which is exactly the depth §6.2 and §6.6 spell
+#     (`order: "priority, due, size"`). An empty or unrecognised slot sorts
+#     nothing and falls through to the next. Path, line and key always
+#     tie-break last, so the order is TOTAL and `offset` cannot show a row
+#     twice or skip one.
+#   * `state` and `prefix` are NOT clauses: they scope, and they scope under
+#     `and` always. `combine: or` widens the predicate, never the scope — an
+#     `or` can never reach a done task or a path outside the caller's prefix.
+#
+# **Rule lines are never rows here.** A `- [ ] Water the plants every week`
+# line is a recurrence RULE, and §4 says it is excluded from every "open
+# tasks" query; `vault_tasks_recurring` is the query that reads those. The
+# `recurring` flag here therefore means "an INSTANCE of a rule"
+# (`recur_parent IS NOT NULL`), which is the only sense in which a row of
+# this query can be recurring at all.
+#
+# **Dates come back as text.** `date` through node-pg becomes a JS Date at
+# the process's local midnight, which is a day's drift waiting to happen in a
+# renderer that formats it. `::text` is the same ISO string everywhere,
+# and it is what `board.yaml` already does with `due`.
+#
+# **`ORDER BY … COLLATE "C"`.** Every text sort key, and the path tie-break.
+# The lesson is `knowledge_pages.yaml`'s: a locale collation ignores
+# punctuation at the primary level, so the same rows page differently on a
+# macOS cluster and a Linux one and a vault restored into a differently
+# collated cluster silently renumbers itself. `C` is byte order and is the
+# same everywhere. CI runs Linux; the owner runs macOS.
+#
+# **`expose: route`, for the same reason the page list is.** Every row here
+# carries a vault PATH and the text of a line the owner typed in their own
+# notes — the most personal content in the system. Only a route of its own
+# can filter those rows through the caller's scope the way
+# `GET /api/knowledge/pages` does, so the generic `/api/q/<name>` and
+# `queries_run` answer this name with the SAME `not_found` they answer an
+# unknown one with (ruled 2026-09-19: one endpoint per operation, and "all
+# queries including /mcp should be scoped"). Left generic, a `queries: true`
+# grant would page the owner's entire task list past every knowledge tier.
+# This closes NO door the daily flow needs: `expose` gates the two GENERIC
+# doors only, and the template engine, the routines and the console's own
+# route all run the query through `QueryStore.run` in process, which does not
+# consult it.
+#
+# **No new brain tool** (D20, §1.5): the assistant reads what a routine hands
+# it on the fold turn, and the aggregate half — `task_ageing` — is the one
+# that is `generic` and needs no path to be useful.
+name: vault_tasks_query
+expose: route
+description: >-
+  The vault's `- [ ]` lines, filtered by the one task-filter vocabulary
+  (daily-flow-spec §6.2) compiled to bind params: inclusive date bounds per
+  field, priority bounds, exact slugs, a comma-separated `flags` set, and
+  `combine` for how the clauses join. Scoped by `state` (open | done |
+  dropped | any) and `prefix` (a path prefix, segment-wise), which always
+  apply under `and`. Each row carries the line's text, its fields, the work
+  it is promoted to or blocking, how long it has been carried, and how many
+  open places the same text appears in. Ordered by up to three named sort
+  keys, then always by path in BYTE order, line and key — a total order, so
+  `limit`/`offset` page it without repeating or skipping. Recurrence RULE
+  lines are never rows here (`vault_tasks_recurring` reads those); the
+  `recurring` flag means an instance of one.
+params:
+  # scope — always `and`, never widened by `combine`
+  today: { type: text, default: "" } # the date relative tokens were resolved against; blank = the cluster's current_date
+  prefix: { type: text, default: "" } # blank (or `/`) = the whole vault; else a path prefix, segment-wise
+  state: { type: text, default: "open" } # open | done | dropped | any
+  # how the clauses below join
+  combine: { type: text, default: "and" } # and | or
+  # comparable fields: inclusive bounds, ISO YYYY-MM-DD, blank = unbounded
+  due_from: { type: text, default: "" }
+  due_to: { type: text, default: "" }
+  do_from: { type: text, default: "" } # scheduled_for
+  do_to: { type: text, default: "" }
+  start_from: { type: text, default: "" } # start_on
+  start_to: { type: text, default: "" }
+  done_from: { type: text, default: "" } # done_on
+  done_to: { type: text, default: "" }
+  # priority 1..4 (D5); unset counts as 3. 0/9 are the unbounded ends
+  priority_min: { type: int, default: 0 }
+  priority_max: { type: int, default: 9 }
+  # exact matches, blank = any
+  size: { type: text, default: "" } # s | m | l, case-insensitive
+  type: { type: text, default: "" }
+  assigned: { type: text, default: "" } # the RESOLVED person-page path
+  project: { type: text, default: "" }
+  area: { type: text, default: "" }
+  source: { type: text, default: "" } # whole value or the prefix before the colon
+  # the flag set, comma-separated: overdue,unscheduled,waiting,recurring,carried,blocking_agent,assigned_to_me
+  flags: { type: text, default: "" }
+  me: { type: text, default: "" } # the owner's own person page, for assigned_to_me
+  # order: up to three slots, then the total-order tie-break
+  sort1: { type: text, default: "priority" }
+  sort1_desc: { type: boolean, default: false }
+  sort2: { type: text, default: "due" }
+  sort2_desc: { type: boolean, default: false }
+  sort3: { type: text, default: "" }
+  sort3_desc: { type: boolean, default: false }
+  limit: { type: int, default: 100 }
+  offset: { type: int, default: 0 }
+sql: |
+  WITH f AS (
+    SELECT
+      coalesce(nullif(:today::text, '')::date, current_date)   AS today,
+      nullif(rtrim(:prefix::text, '/'), '')                    AS prefix,
+      lower(:state::text)                                      AS state,
+      lower(:combine::text) = 'or'                             AS any_of,
+      nullif(:due_from::text,   '')::date                      AS due_from,
+      nullif(:due_to::text,     '')::date                      AS due_to,
+      nullif(:do_from::text,    '')::date                      AS do_from,
+      nullif(:do_to::text,      '')::date                      AS do_to,
+      nullif(:start_from::text, '')::date                      AS start_from,
+      nullif(:start_to::text,   '')::date                      AS start_to,
+      nullif(:done_from::text,  '')::date                      AS done_from,
+      nullif(:done_to::text,    '')::date                      AS done_to,
+      (:priority_min)::int                                     AS pri_min,
+      (:priority_max)::int                                     AS pri_max,
+      nullif(upper(:size::text), '')                           AS size,
+      nullif(lower(:type::text), '')                           AS type,
+      nullif(:assigned::text, '')                              AS assigned,
+      nullif(lower(:project::text), '')                        AS project,
+      nullif(:area::text, '')                                  AS area,
+      nullif(lower(:source::text), '')                         AS source,
+      CASE WHEN :flags::text = '' THEN '{}'::text[]
+           ELSE string_to_array(lower(replace(:flags::text, ' ', '')), ',') END AS flags,
+      nullif(:me::text, '')                                    AS me
+  ),
+  -- Scope, applied before anything `combine` can touch (see the header): the
+  -- caller's path prefix, the state, and §4's rule that a recurrence RULE
+  -- line is not a task.
+  scoped AS (
+    SELECT t.*
+    FROM vault_tasks t, f
+    WHERE (f.prefix IS NULL
+           OR t.path = f.prefix
+           OR left(t.path, length(f.prefix) + 1) = f.prefix || '/')
+      AND t.recur_rule IS NULL
+      AND CASE f.state
+            WHEN 'done'    THEN t.checked AND NOT t.dropped
+            WHEN 'dropped' THEN t.dropped
+            WHEN 'any'     THEN true
+            ELSE NOT t.checked AND NOT t.dropped
+          END
+  ),
+  -- What the row IS, before what the caller asked for: the flags it
+  -- satisfies, the work on either side of it (§3), and the size of its
+  -- duplicate group (§2.3).
+  marked AS (
+    SELECT
+      s.*,
+      f.today,
+      f.me,
+      (f.today - s.first_seen_on)                                            AS age_days,
+      CASE WHEN coalesce(s.scheduled_for, s.due) IS NOT NULL
+             AND coalesce(s.scheduled_for, s.due) < f.today
+             AND NOT s.checked AND NOT s.dropped
+           THEN f.today - coalesce(s.scheduled_for, s.due) END               AS carried_days,
+      b.id                                                                   AS blocks_work_id,
+      b.title                                                                AS blocks_work_title,
+      b.status                                                               AS blocks_work_status,
+      w.title                                                                AS work_title,
+      w.status                                                               AS work_status,
+      (SELECT count(*) FROM vault_tasks d
+        WHERE d.text_norm = s.text_norm AND NOT d.checked AND NOT d.dropped) AS places,
+      array_remove(ARRAY[
+        CASE WHEN s.due IS NOT NULL AND s.due < f.today
+                  AND NOT s.checked AND NOT s.dropped              THEN 'overdue' END,
+        CASE WHEN s.scheduled_for IS NULL AND s.due IS NULL        THEN 'unscheduled' END,
+        CASE WHEN s.waiting                                        THEN 'waiting' END,
+        CASE WHEN s.recur_parent IS NOT NULL                       THEN 'recurring' END,
+        CASE WHEN coalesce(s.scheduled_for, s.due) < f.today
+                  AND NOT s.checked AND NOT s.dropped              THEN 'carried' END,
+        CASE WHEN b.id IS NOT NULL                                 THEN 'blocking_agent' END,
+        CASE WHEN s.assigned IS NULL
+                  OR (f.me IS NOT NULL AND s.assigned = f.me)      THEN 'assigned_to_me' END
+      ], NULL)                                                               AS row_flags
+    FROM scoped s
+    CROSS JOIN f
+    -- §3: a `work` row waiting on this human todo. It SURFACES and never
+    -- gates — nothing here touches depends_on or claimability. The ref is
+    -- the anchored spelling the spec fixes, so a task with no anchor yet is
+    -- simply not something a work row can name.
+    LEFT JOIN LATERAL (
+      SELECT wb.id, wb.title, wb.status
+      FROM work wb
+      WHERE wb.status <> 'closed'
+        AND s.anchor IS NOT NULL
+        AND wb.meta->>'blocked_by' = 'vault:' || s.path || '#^' || s.anchor
+      ORDER BY wb.id
+      LIMIT 1
+    ) b ON true
+    -- the other direction: a `work:418` token on the line (promotion is
+    -- one-way, and the UI must not imply a demotion)
+    LEFT JOIN work w ON w.id = s.work_id
+  ),
+  -- One element per CLAUSE: true it matched, false it did not, NULL the
+  -- caller did not ask. `array_remove(…, NULL)` leaves only what was asked,
+  -- so "no clause at all" is an empty array and matches everything under
+  -- either combinator — which is how this query runs on its defaults.
+  judged AS (
+    SELECT m.*, array_remove(ARRAY[
+      CASE WHEN f.due_from IS NOT NULL OR f.due_to IS NOT NULL THEN
+        m.due IS NOT NULL AND (f.due_from IS NULL OR m.due >= f.due_from)
+                          AND (f.due_to   IS NULL OR m.due <= f.due_to) END,
+      CASE WHEN f.do_from IS NOT NULL OR f.do_to IS NOT NULL THEN
+        m.scheduled_for IS NOT NULL AND (f.do_from IS NULL OR m.scheduled_for >= f.do_from)
+                                    AND (f.do_to   IS NULL OR m.scheduled_for <= f.do_to) END,
+      CASE WHEN f.start_from IS NOT NULL OR f.start_to IS NOT NULL THEN
+        m.start_on IS NOT NULL AND (f.start_from IS NULL OR m.start_on >= f.start_from)
+                               AND (f.start_to   IS NULL OR m.start_on <= f.start_to) END,
+      CASE WHEN f.done_from IS NOT NULL OR f.done_to IS NOT NULL THEN
+        m.done_on IS NOT NULL AND (f.done_from IS NULL OR m.done_on >= f.done_from)
+                              AND (f.done_to   IS NULL OR m.done_on <= f.done_to) END,
+      CASE WHEN f.pri_min > 0 OR f.pri_max < 9 THEN
+        coalesce(m.priority, 3) BETWEEN f.pri_min AND f.pri_max END,
+      -- `coalesce(…, false)` on every one of these, and it is not decoration:
+      -- each column is nullable, so a task with no `size` would compare NULL,
+      -- and NULL is how this array spells "the caller did not ask". Without
+      -- it, `size: l` would return every task that has no size at all — the
+      -- filter silently undone by the rows it was meant to exclude.
+      CASE WHEN f.size     IS NOT NULL THEN coalesce(upper(m.size) = f.size, false) END,
+      CASE WHEN f.type     IS NOT NULL THEN coalesce(lower(m.type) = f.type, false) END,
+      CASE WHEN f.assigned IS NOT NULL THEN coalesce(m.assigned = f.assigned, false) END,
+      CASE WHEN f.project  IS NOT NULL THEN coalesce(lower(m.project) = f.project, false) END,
+      CASE WHEN f.area     IS NOT NULL THEN coalesce(m.area = f.area, false) END,
+      CASE WHEN f.source   IS NOT NULL THEN
+        coalesce(lower(m.source) = f.source OR lower(m.source) LIKE f.source || ':%', false) END,
+      -- the flag set: under `and` every flag asked for must hold (subset),
+      -- under `or` any one of them is enough (intersection)
+      CASE WHEN f.flags <> '{}'::text[] THEN
+        CASE WHEN f.any_of THEN f.flags && m.row_flags ELSE f.flags <@ m.row_flags END END
+    ], NULL) AS clauses
+    FROM marked m, f
+  ),
+  -- The three order slots, resolved to one comparable text key each. An
+  -- unrecognised slot is NULL for every row, which sorts nothing and falls
+  -- through — the parser refuses an unknown field at render time (§6.4), so
+  -- the database never has to have an opinion about it.
+  keyed AS (
+    SELECT j.*,
+      CASE lower(:sort1::text)
+        WHEN 'priority'   THEN lpad(coalesce(j.priority, 3)::text, 2, '0')
+        WHEN 'due'        THEN coalesce(j.due::text, '9999-12-31')
+        WHEN 'do'         THEN coalesce(j.scheduled_for::text, '9999-12-31')
+        WHEN 'start'      THEN coalesce(j.start_on::text, '9999-12-31')
+        WHEN 'done'       THEN coalesce(j.done_on::text, '9999-12-31')
+        WHEN 'size'       THEN CASE upper(j.size) WHEN 'S' THEN '1' WHEN 'M' THEN '2' WHEN 'L' THEN '3' ELSE '9' END
+        WHEN 'type'       THEN coalesce(j.type, '~')
+        WHEN 'assigned'   THEN coalesce(j.assigned, '~')
+        WHEN 'project'    THEN coalesce(j.project, '~')
+        WHEN 'area'       THEN coalesce(j.area, '~')
+        WHEN 'source'     THEN coalesce(j.source, '~')
+        WHEN 'first_seen' THEN j.first_seen_on::text
+        WHEN 'age'        THEN j.first_seen_on::text
+        WHEN 'path'       THEN j.path
+        WHEN 'text'       THEN j.text_norm
+      END AS k1,
+      CASE lower(:sort2::text)
+        WHEN 'priority'   THEN lpad(coalesce(j.priority, 3)::text, 2, '0')
+        WHEN 'due'        THEN coalesce(j.due::text, '9999-12-31')
+        WHEN 'do'         THEN coalesce(j.scheduled_for::text, '9999-12-31')
+        WHEN 'start'      THEN coalesce(j.start_on::text, '9999-12-31')
+        WHEN 'done'       THEN coalesce(j.done_on::text, '9999-12-31')
+        WHEN 'size'       THEN CASE upper(j.size) WHEN 'S' THEN '1' WHEN 'M' THEN '2' WHEN 'L' THEN '3' ELSE '9' END
+        WHEN 'type'       THEN coalesce(j.type, '~')
+        WHEN 'assigned'   THEN coalesce(j.assigned, '~')
+        WHEN 'project'    THEN coalesce(j.project, '~')
+        WHEN 'area'       THEN coalesce(j.area, '~')
+        WHEN 'source'     THEN coalesce(j.source, '~')
+        WHEN 'first_seen' THEN j.first_seen_on::text
+        WHEN 'age'        THEN j.first_seen_on::text
+        WHEN 'path'       THEN j.path
+        WHEN 'text'       THEN j.text_norm
+      END AS k2,
+      CASE lower(:sort3::text)
+        WHEN 'priority'   THEN lpad(coalesce(j.priority, 3)::text, 2, '0')
+        WHEN 'due'        THEN coalesce(j.due::text, '9999-12-31')
+        WHEN 'do'         THEN coalesce(j.scheduled_for::text, '9999-12-31')
+        WHEN 'start'      THEN coalesce(j.start_on::text, '9999-12-31')
+        WHEN 'done'       THEN coalesce(j.done_on::text, '9999-12-31')
+        WHEN 'size'       THEN CASE upper(j.size) WHEN 'S' THEN '1' WHEN 'M' THEN '2' WHEN 'L' THEN '3' ELSE '9' END
+        WHEN 'type'       THEN coalesce(j.type, '~')
+        WHEN 'assigned'   THEN coalesce(j.assigned, '~')
+        WHEN 'project'    THEN coalesce(j.project, '~')
+        WHEN 'area'       THEN coalesce(j.area, '~')
+        WHEN 'source'     THEN coalesce(j.source, '~')
+        WHEN 'first_seen' THEN j.first_seen_on::text
+        WHEN 'age'        THEN j.first_seen_on::text
+        WHEN 'path'       THEN j.path
+        WHEN 'text'       THEN j.text_norm
+      END AS k3
+    FROM judged j
+  )
+  SELECT
+    k.path, k.task_key, k.anchor, k.line_no, k.text, k.text_norm,
+    k.checked, k.dropped, k.waiting,
+    k.due::text           AS due,
+    k.scheduled_for::text AS scheduled_for,
+    k.start_on::text      AS start_on,
+    k.done_on::text       AS done_on,
+    k.done_on_observed,
+    k.priority,
+    coalesce(k.priority, 3) AS priority_effective, -- D5: unset IS normal, everywhere
+    k.size, k.type, k.assigned, k.project, k.area,
+    k.recur_parent, k.source, k.ext_refs,
+    k.work_id, k.work_title, k.work_status,
+    k.blocks_work_id, k.blocks_work_title, k.blocks_work_status,
+    k.duplicate_of, k.places,
+    k.parse_warning,
+    k.parsed_on::text     AS parsed_on,
+    k.first_seen_on::text AS first_seen_on,
+    k.last_seen_at,
+    k.age_days, k.carried_days,
+    k.row_flags
+  FROM keyed k, f
+  WHERE array_length(k.clauses, 1) IS NULL
+     OR CASE WHEN f.any_of THEN true = ANY(k.clauses)
+             ELSE NOT (false = ANY(k.clauses)) END
+  ORDER BY
+    CASE WHEN NOT (:sort1_desc)::boolean THEN k.k1 END COLLATE "C" ASC  NULLS LAST,
+    CASE WHEN     (:sort1_desc)::boolean THEN k.k1 END COLLATE "C" DESC NULLS LAST,
+    CASE WHEN NOT (:sort2_desc)::boolean THEN k.k2 END COLLATE "C" ASC  NULLS LAST,
+    CASE WHEN     (:sort2_desc)::boolean THEN k.k2 END COLLATE "C" DESC NULLS LAST,
+    CASE WHEN NOT (:sort3_desc)::boolean THEN k.k3 END COLLATE "C" ASC  NULLS LAST,
+    CASE WHEN     (:sort3_desc)::boolean THEN k.k3 END COLLATE "C" DESC NULLS LAST,
+    k.path COLLATE "C", k.line_no, k.task_key COLLATE "C"
+  LIMIT :limit
+  OFFSET :offset
+cache_ttl: 0 # a task list that lags is a list with the box you just ticked still on it

@@ -1,0 +1,112 @@
+# Seeded default (D4 overlay: an instance file of the same name wins).
+#
+# The recurrence RULE lines (daily-flow-spec §4, D9; ticket P1-5), which are
+# the one kind of `- [ ]` line that is never itself a task:
+#
+#     - [ ] Water the plants every week
+#     - [ ] Standup notes every weekday type meeting size s
+#
+# `vault_tasks_query` excludes every row with a `recur_rule`, so this is the
+# only query that reads them — and it is what the `{{ recurring due: today }}`
+# directive (§6.2) compiles into.
+#
+# **What materialises the day's instance is the DAILY-NOTE TEMPLATE, at the
+# moment the user creates the note** — not a routine, not this query, not
+# anything on a schedule. That is how §4 satisfies the owner's Q3 ("for now
+# no assistant writing user notes") structurally rather than by restraint:
+# the instance is written by the same action, in the same hand, in the same
+# second as the note it lands in. This query only says what the template
+# should offer.
+#
+# **One open instance per rule, ever**, which is the first of §4's three
+# structural bounds on runaway generation — so the row carries the rule's
+# still-open instance beside it (`open_instance_*`). The renderer skips a
+# rule that has one and writes the carry-over line instead
+# (`- [ ] Water the plants — carried, 3rd time`). A month away from the vault
+# produces one line, not thirty. The arithmetic of "3rd time" is the
+# renderer's, from `open_instance_since` and the rule's own period — this
+# query does not invent period arithmetic in SQL.
+#
+# **A rule the parser could not read still comes back.** `recur_next IS NULL`
+# means the `every …` clause did not compute, and a rule that vanished
+# silently would be the worst outcome — the user typed something and nothing
+# happened. Those sort FIRST and carry their `parse_warning`, which the plan
+# renders as §1.4's one visible line. A field Metistry cannot read is never
+# guessed, and it is never swallowed either.
+#
+# `limit` defaults to §4's per-render cap (`METISTRY_RECURRING_MAX_PER_DAY`,
+# default 12) so the default here means the same thing the renderer's
+# configured value does; the renderer passes the env value explicitly.
+#
+# **`expose: route`**, on exactly the rule `knowledge_pages.yaml` states:
+# every row carries a vault path and the text of a line the owner typed, and
+# only a route of its own filters those through the caller's scope. The
+# generic `/api/q/<name>` and `queries_run` answer this name with the refusal
+# they answer an unknown name with. `expose` gates the two generic doors
+# only — the template engine and the routines run it in process.
+name: vault_tasks_recurring
+expose: route
+description: >-
+  Recurrence rule lines due on or before a date (daily-flow-spec §4) — the
+  rule's own text and fields, its `recur_rule` verbatim and computed
+  `recur_next`, and the still-open instance it already produced, if any, so
+  the renderer can carry that one over instead of materialising a second.
+  Rules whose `every …` clause could not be read come back first carrying
+  their parse warning rather than disappearing. Ordered by what falls due
+  first, then by path in BYTE order (`COLLATE "C"`), line and key — a total
+  order, so `limit`/`offset` page it without repeating or skipping.
+params:
+  due: { type: text, default: "" } # as-of date; blank = the cluster's current_date
+  prefix: { type: text, default: "" } # blank (or `/`) = the whole vault; else a path prefix, segment-wise
+  limit: { type: int, default: 12 } # §4's per-render cap (METISTRY_RECURRING_MAX_PER_DAY); the renderer passes its configured value
+  offset: { type: int, default: 0 }
+sql: |
+  WITH f AS (
+    SELECT coalesce(nullif(:due::text, '')::date, current_date) AS asof,
+           nullif(rtrim(:prefix::text, '/'), '')                AS prefix
+  ),
+  rules AS (
+    SELECT t.*, f.asof
+    FROM vault_tasks t, f
+    WHERE t.recur_rule IS NOT NULL
+      AND NOT t.dropped
+      AND (f.prefix IS NULL
+           OR t.path = f.prefix
+           OR left(t.path, length(f.prefix) + 1) = f.prefix || '/')
+      AND (t.recur_next IS NULL OR t.recur_next <= f.asof)
+  )
+  SELECT
+    r.path, r.task_key, r.anchor, r.line_no, r.text,
+    r.recur_rule,
+    r.recur_next::text  AS recur_next,
+    r.priority,
+    coalesce(r.priority, 3) AS priority_effective, -- D5: unset IS normal
+    r.size, r.type, r.assigned, r.project, r.area, r.source,
+    r.parse_warning,
+    r.asof::text        AS as_of_date,
+    -- §4's bound: the instance this rule already produced that is still open.
+    -- Present → the renderer carries it over; absent → it may materialise
+    -- today's.
+    i.path              AS open_instance_path,
+    i.task_key          AS open_instance_task_key,
+    i.line_no           AS open_instance_line_no,
+    i.first_seen_on::text AS open_instance_since,
+    CASE WHEN i.first_seen_on IS NOT NULL THEN r.asof - i.first_seen_on END AS open_instance_age_days,
+    coalesce(c.instances, 0)      AS instances,
+    coalesce(c.instances_done, 0) AS instances_done
+  FROM rules r
+  LEFT JOIN LATERAL (
+    SELECT x.path, x.task_key, x.line_no, x.first_seen_on
+    FROM vault_tasks x
+    WHERE x.recur_parent = r.task_key AND NOT x.checked AND NOT x.dropped
+    ORDER BY x.first_seen_on DESC, x.path COLLATE "C", x.line_no, x.task_key COLLATE "C"
+    LIMIT 1
+  ) i ON true
+  LEFT JOIN LATERAL (
+    SELECT count(*) AS instances, count(*) FILTER (WHERE y.checked) AS instances_done
+    FROM vault_tasks y WHERE y.recur_parent = r.task_key
+  ) c ON true
+  ORDER BY r.recur_next NULLS FIRST, r.path COLLATE "C", r.line_no, r.task_key COLLATE "C"
+  LIMIT :limit
+  OFFSET :offset
+cache_ttl: 0 # a rule the user edited an hour ago must render the way it now reads

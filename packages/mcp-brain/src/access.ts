@@ -32,7 +32,8 @@
 // mechanism that can be worked indefinitely is not a control. All of it is
 // enforced HERE, at the tool — never by telling a model to be considerate.
 
-import { AREA_PREFIX_REFUSAL, redactSecrets, SKIP_FEEDBACK, validAgentAreaGrant, type ErrorCode } from "@foldedspacelabs/metistry-core";
+import { AREA_PREFIX_REFUSAL, describeScope, redactSecrets, SKIP_FEEDBACK, validAgentAreaGrant, type ErrorCode, type ScopeView } from "@foldedspacelabs/metistry-core";
+import { principalOf } from "./principal.js";
 import type { AgentPrincipal, Db, Tier } from "./types.js";
 
 /** The `proposals.kind` this writes. Recognised by the console's triage branch and by nothing else. */
@@ -64,6 +65,15 @@ export interface AccessRequestPayload {
   reason: string;
   current_tier: Tier;
   current_areas: string[];
+  /**
+   * What this credential holds, in the ONE vocabulary (core's
+   * `describeScope` — P3 §3.4). The Needs You card renders THIS, so the
+   * sentence the owner reads when they answer is the sentence the Agents
+   * panel and `metistry agents list` show — one record, said one way
+   * (§2.10). The two fields above stay: they are the machine-readable half,
+   * and a row written before this existed still renders from them.
+   */
+  current_scope: ScopeView;
   provenance: { agent: string; via: string; submitted_at: string };
   /** Present only on a re-ask after a decline: the queue renders it, and the prior row is named so the owner can read what they answered. */
   escalated?: true;
@@ -151,6 +161,7 @@ export async function requestAccess(db: Db, principal: AgentPrincipal, input: Ac
     reason,
     current_tier: principal.grants.tier,
     current_areas: [...principal.grants.areas],
+    current_scope: describeScope(principalOf(principal)),
     provenance: { agent: principal.id, via: "mcp-brain", submitted_at: new Date().toISOString() },
     ...(last ? { escalated: true as const, prior_proposal: last.id, prior_declined_at: last.decidedAt } : {}),
   };

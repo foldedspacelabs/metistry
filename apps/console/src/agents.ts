@@ -14,9 +14,11 @@ import {
   ACTION_MODES,
   AUTONOMY_LEVELS,
   autonomyWidenings,
+  describeScope,
   effectiveActions,
   ensureProject,
   finishRun,
+  INSTANCE_LAYOUT,
   intEnv,
   mintToken,
   parseBearer,
@@ -27,6 +29,8 @@ import {
   type ActionKind,
   type ActionMode,
   type AutonomyLevel,
+  type Principal,
+  type ScopeView,
 } from "@foldedspacelabs/metistry-core";
 import { ACCESS_REQUEST_KIND, underAreas } from "@foldedspacelabs/metistry-mcp-brain";
 import type { Db } from "./auth-store.js";
@@ -137,6 +141,52 @@ export interface AgentRow {
   approved_at: string | null;
   /** Derived from the two above, so no client has to recombine them and get it wrong. */
   pending: boolean;
+  /** 0025's column. NULL on a row written before it existed, which reads as `registry`. */
+  grant_source: GrantSourceName | null;
+  /**
+   * **What this row holds, in the one vocabulary** (core's `describeScope` —
+   * P3 §3.4). The console's panel, the Needs You card, `metistry agents
+   * list` and the tool descriptions all render THIS, so §2.10's four
+   * vocabularies for one record are one. Derived, never stored: it is a
+   * rendering of the three columns beside it.
+   */
+  scope: ScopeView;
+}
+
+/**
+ * A registry row as the principal `may()` decides on — the SAME derivation
+ * `principalOf` makes from a live bearer (server.ts, and mcp-brain's), so
+ * what the panel SAYS a credential holds cannot disagree with what the door
+ * DOES about it.
+ *
+ * `uses` comes from the crews this console loaded rather than from the row,
+ * because a crew's toolset is its manifest's (`uses:`) and the row has never
+ * carried it. A crew whose manifest this console cannot see holds NO tools,
+ * which is what `allowedTools` answers for an absent list — fail closed,
+ * never all of them.
+ */
+export function principalOfRow(row: AgentRow, toolset?: (id: string) => { uses: readonly string[]; manifest?: string | undefined } | undefined): Principal {
+  const crew = row.kind === "crew";
+  const declared = crew ? toolset?.(row.id) : undefined;
+  const source: GrantSourceName = row.grant_source ?? "registry";
+  return {
+    id: row.id,
+    role: row.kind === "internal" ? "assistant" : crew ? "crew" : "agent",
+    scope: {
+      tier: row.grants.tier,
+      areas: [...row.grants.areas],
+      queries: row.grants.queries === true,
+      projects: row.kind === "internal" && row.projects.length === 0 ? null : [...row.projects],
+      autonomy: row.autonomy,
+    },
+    source: source === "manifest" ? { manifest: declared?.manifest ?? `${INSTANCE_LAYOUT.agentsDir}/<area>/${row.id}.md` } : source,
+    ...(crew ? { uses: [...(declared?.uses ?? [])] } : {}),
+  };
+}
+
+/** One row, rendered. Every surface that shows a grant shows this. */
+export function agentScope(row: AgentRow, toolset?: (id: string) => { uses: readonly string[]; manifest?: string | undefined } | undefined): ScopeView {
+  return describeScope(principalOfRow(row, toolset));
 }
 
 /** Thrown for caller mistakes; the route maps `code` to the uniform envelope. */
@@ -397,15 +447,25 @@ export async function ensureInternalAgent(db: Db, id: string, cfg: InternalAgent
   return { id, created: rows[0]?.created === true };
 }
 
-/** The registry, minus anything secret: token hashes never leave the db. */
-export async function listAgents(db: Db): Promise<AgentRow[]> {
+/**
+ * The registry, minus anything secret: token hashes never leave the db.
+ *
+ * Every row carries its rendered `scope` (`agentScope`), so a client never
+ * recombines tier + areas + queries + projects + autonomy into words of its
+ * own — which is how the console, the queue and the CLI came to have three
+ * vocabularies for one record (§2.10).
+ */
+export async function listAgents(db: Db, toolset?: (id: string) => { uses: readonly string[]; manifest?: string | undefined } | undefined): Promise<AgentRow[]> {
   const { rows } = await db.query(
     `SELECT id, display_name, kind, grants, projects, autonomy, created_at, last_seen_at,
-            revoked_at IS NOT NULL AS revoked, remote, approved_at,
+            revoked_at IS NOT NULL AS revoked, remote, approved_at, grant_source,
             (remote AND approved_at IS NULL AND revoked_at IS NULL) AS pending
      FROM agents ORDER BY revoked, created_at`,
   );
-  return rows.map((r) => ({ ...r, grants: coerceGrants(r.grants), autonomy: coerceAutonomy(r.autonomy) })) as AgentRow[];
+  return rows.map((r) => {
+    const row = { ...r, grants: coerceGrants(r.grants), autonomy: coerceAutonomy(r.autonomy) } as AgentRow;
+    return { ...row, scope: agentScope(row, toolset) };
+  });
 }
 
 /**

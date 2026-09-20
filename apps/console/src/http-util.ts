@@ -1,6 +1,6 @@
 // Tiny hand-rolled HTTP plumbing (recipes over frameworks — CLAUDE.md).
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { errorEnvelope, intEnv, statusFor, type ErrorCode } from "@foldedspacelabs/metistry-core";
+import { errorEnvelope, formatRefusal, intEnv, statusFor, type ErrorCode, type Refusal } from "@foldedspacelabs/metistry-core";
 
 export function sendJson(res: ServerResponse, status: number, body: unknown): void {
   const text = JSON.stringify(body);
@@ -18,6 +18,19 @@ export function sendJson(res: ServerResponse, status: number, body: unknown): vo
  */
 export function sendError(res: ServerResponse, code: ErrorCode, detail?: string): void {
   sendJson(res, statusFor(code), errorEnvelope(code, code === "unauthenticated" ? undefined : detail));
+}
+
+/**
+ * A `may()` refusal onto the wire, through core's ONE renderer
+ * (`formatRefusal` — §3.2 of
+ * docs/research/2026-09-19-grants-and-access-simplified.md). Never
+ * `sendError` with a message assembled at the call site: the envelope, the
+ * canonical fallback for a refusal that says nothing, and the rule that a
+ * `hide` refusal carries no `reason` are all decided in one place, for every
+ * door.
+ */
+export function sendRefusal(res: ServerResponse, refusal: Refusal): void {
+  sendJson(res, statusFor(refusal.code), formatRefusal(refusal) ?? {});
 }
 
 /** Largest request body the console will read. The default clears `capture`'s 25MB+ (PoC-7); an instance that captures bigger raises METISTRY_MAX_BODY_BYTES. */

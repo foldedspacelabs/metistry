@@ -672,7 +672,7 @@ function actionDetail(p) {
  */
 function accessDetail(p) {
   if (p.kind !== "access_request") return "";
-  const held = p.payload?.current_tier === "areas" ? `folders ${(p.payload?.current_areas ?? []).map(esc).join(", ")}` : esc(accessLabel(p.payload?.current_tier ?? "none"));
+  const held = esc(scopeOf(p.payload?.current_scope, p.payload?.current_tier, p.payload?.current_areas));
   const trade = p.payload?.current_tier === "index" ? " — approving trades its whole-vault title browse for reads inside that folder" : "";
   const again = p.payload?.escalated ? `<br><span class="muted">asked again after a decline — you answered #${esc(String(p.payload.prior_proposal ?? "?"))}</span>` : "";
   const done = p.payload?.granted ? `<br><span class="muted">granted — ${esc(String(p.payload.granted.area ?? ""))}</span>` : "";
@@ -769,8 +769,21 @@ function effectiveActions(au) {
   }
   return out;
 }
+// **The scope vocabulary is the SERVER's** since P3 of
+// docs/research/2026-09-19-grants-and-access-simplified.md §3.4: every agent
+// row on `GET /api/agents` carries a rendered `scope` (core's
+// `describeScope`), and so does the payload of an `access_request`. This
+// panel prints the words it is given. It used to hold a third spelling of
+// them — `ACCESS_LABEL = {none, titles, folders}` lived here — which is how
+// one record came to be said four ways (§2.10).
+//
+// The fallback is for a row written before the field existed: an old
+// `access_request` in the queue still renders, in the same words, from the
+// two fields it does carry.
 const ACCESS_LABEL = { none: "none", index: "titles", areas: "folders" };
 const accessLabel = (t) => ACCESS_LABEL[t] ?? t;
+const scopeOf = (view, tier, areas) =>
+  view?.scope ?? (tier === "areas" ? `folders: ${(areas ?? []).join(", ") || "nothing"}` : accessLabel(tier ?? "none"));
 let agentsCache = [];
 async function loadAgents() {
   const res = await api("/api/agents");
@@ -786,8 +799,12 @@ async function loadAgents() {
     .map((a) => {
       const g = a.grants ?? { tier: "none", areas: [] };
       const seen = a.last_seen_at ? `seen ${new Date(a.last_seen_at).toLocaleDateString()}` : "never seen";
-      const scope = g.tier === "areas" ? `folders: ${g.areas.map(esc).join(", ")}` : esc(accessLabel(g.tier));
+      const scope = esc(scopeOf(a.scope, g.tier, g.areas));
       const projects = (a.projects ?? []).length ? ` · projects: ${a.projects.map(esc).join(", ")}` : "";
+      // Where the scope came from, said once by the server rather than
+      // reconstructed from `kind` here (§2.7): configuration for the
+      // assistant, the manifest for a crew, the owner's hand for the rest.
+      const from = a.scope?.from ? `<br><span class="muted">scope from ${esc(a.scope.from)}</span>` : "";
       const au = a.autonomy ?? {};
       const narrowing = [
         au.may_dispatch_to ? `delegates to ${au.may_dispatch_to.map(esc).join(", ") || "nobody"}` : "",
@@ -808,7 +825,7 @@ async function loadAgents() {
         : `<span><button data-agent-grants="${esc(a.id)}" class="secondary">grants</button> <button data-agent-rotate="${esc(a.id)}" class="secondary">rotate</button> <button data-agent-revoke="${esc(a.id)}">revoke</button></span>`;
       return `<li class="${a.revoked ? "revoked" : ""}"><span><b>${esc(a.display_name)}</b> <span class="muted">${esc(a.id)}</span> <span class="chip">${esc(ROLE_LABEL[a.kind] ?? a.kind)}</span><br>
         <span class="muted">access: ${scope}${projects} · ${seen}</span>${narrowing ? `<br><span class="muted">autonomy: ${narrowing}</span>` : ""}<br>
-        <span class="muted">actions: ${actionLine}</span><br>${asks ? `<span class="muted">${asks}</span><br>` : ""}
+        <span class="muted">actions: ${actionLine}</span>${from}<br>${asks ? `<span class="muted">${asks}</span><br>` : ""}
         <span id="presence-${esc(a.id)}" class="presence"></span></span>${actions}</li>`;
     })
     .join("");

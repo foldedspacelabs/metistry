@@ -267,7 +267,7 @@ async function listLinks(deps: KnowledgeFsDeps, principal: AgentPrincipal, scope
 function registerKnowledgeList(reg: Register, deps: KnowledgeFsDeps, principal: AgentPrincipal): void {
   reg(
     "knowledge_list",
-    "List a vault prefix, depth-limited: path, title, description — never content. Tier `index` browses every title; tier `areas` only its granted prefixes (ask the owner to widen them). `links_for` lists that page's links instead (`areas`). Drafts excluded.",
+    "List a vault prefix, depth-limited: path, title, description — never content. Tier `index` (titles) browses every title; tier `areas` (folders) only its granted folders. `links_for` lists that page's links instead (`areas`). Drafts excluded.",
     { prefix: z.string().max(500).optional(), depth: z.number().int().min(1).max(5).optional(), links_for: z.string().max(500).optional() },
     async (a) => {
       const scope = knowledgeScope(principal);
@@ -428,7 +428,7 @@ export function grepWithTimeout(pattern: string, files: Array<[string, string]>,
 function registerKnowledgeGrep(reg: Register, deps: KnowledgeFsDeps, principal: AgentPrincipal): void {
   reg(
     "knowledge_grep",
-    `Regex search over settled note content under your granted prefixes (requires \`areas\`, like knowledge_read; drafts excluded). Candidates are pre-filtered, capped at ${MAX_GREP_FILES} files / ${MAX_GREP_HITS} hits; an overly expensive pattern is refused, not left to hang.`,
+    `Regex search over settled note content under your granted folders (needs \`areas\`, like knowledge_read; drafts excluded). Candidates are pre-filtered, capped at ${MAX_GREP_FILES} files / ${MAX_GREP_HITS} hits; an overly expensive pattern is refused, not left to hang.`,
     { pattern: z.string().min(1).max(200), prefix: z.string().max(500).optional(), limit: z.number().int().min(1).max(MAX_GREP_HITS).optional() },
     async (a) => {
       const scope = knowledgeScope(principal);

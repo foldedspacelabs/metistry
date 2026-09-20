@@ -3,7 +3,8 @@
 // more than what it prints: an unknown kind never reaches the console, and
 // setting one kind never erases the §4.21 narrowing sitting beside it.
 import { describe, expect, it } from "vitest";
-import { agentAutonomy, isEmptyChange, mergeAutonomy, parseAutonomyFlags, renderAutonomy } from "../src/agents.js";
+import { agentAutonomy, agentsList, isEmptyChange, mergeAutonomy, parseAutonomyFlags, renderAgents, renderAutonomy } from "../src/agents.js";
+import { createUi } from "../src/ui.js";
 
 const env = { METISTRY_LOCAL_OWNER_TOKEN: "owner-token-value", METISTRY_CONSOLE_URL: "http://127.0.0.1:9" } as NodeJS.ProcessEnv;
 
@@ -99,5 +100,92 @@ describe("agentAutonomy", () => {
       new Response(JSON.stringify({ agents: [{ id: "gone", display_name: "G", revoked: true }] }), { status: 200 })) as unknown as typeof fetch;
     await expect(agentAutonomy("researcher", { level: "propose", actions: {} }, { env, fetchFn })).rejects.toThrow(/no agent "researcher"/);
     await expect(agentAutonomy("gone", { level: "propose", actions: {} }, { env, fetchFn })).rejects.toThrow(/revoked/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// `metistry agents list` (P3 §2.10). The point of the verb is that it renders
+// NOTHING of its own: the console sends each row's scope already rendered
+// (core's `describeScope`), and the CLI prints it. So what is worth holding
+// here is that it prints the server's words, not that it composes good ones.
+describe("agents list", () => {
+  const SCOPE = {
+    id: "researcher",
+    role: "agent",
+    who: "an agent",
+    tier: "areas",
+    access: "folders",
+    areas: ["Areas/Health"],
+    scope: "folders: Areas/Health",
+    queries: false,
+    projects: ["alpha"],
+    uses: null,
+    autonomy: { level: "propose", actions: { dispatch: "propose", task_update: "propose", comment: "propose", capture: "propose" } },
+    source: "registry",
+    from: "the registry — the owner's own hand, durable",
+    extras: ["projects: alpha", "autonomy: propose"],
+    line: "an agent · folders: Areas/Health · projects: alpha, autonomy: propose",
+  };
+
+  const listing = (agents: unknown[], access_requests: unknown[] = []) =>
+    (async (url: string | URL, init?: RequestInit) => {
+      sent.push({ path: String(url), auth: String((init?.headers as Record<string, string> | undefined)?.authorization ?? "") });
+      return new Response(JSON.stringify({ agents, access_requests }), { status: 200 });
+    }) as unknown as typeof fetch;
+  let sent: { path: string; auth: string }[] = [];
+
+  it("reads the registry over the console, with the owner token in the header and nowhere else", async () => {
+    sent = [];
+    const rows = await agentsList({
+      env,
+      fetchFn: listing([{ id: "researcher", display_name: "Researcher", kind: "external", revoked: false, pending: false, last_seen_at: "2026-09-20T10:00:00Z", scope: SCOPE }]),
+    });
+    expect(sent.map((s) => s.path)).toEqual(["http://127.0.0.1:9/api/agents"]);
+    expect(sent[0]!.auth).toBe("Bearer owner-token-value");
+    expect(JSON.stringify(sent.map((s) => s.path))).not.toContain("owner-token-value");
+    expect(rows).toEqual([expect.objectContaining({ id: "researcher", asked: [] })]);
+  });
+
+  it("prints the server's line, verbatim — a second renderer here would be a fifth vocabulary", async () => {
+    sent = [];
+    const rows = await agentsList({
+      env,
+      fetchFn: listing(
+        [{ id: "researcher", display_name: "Researcher", kind: "external", revoked: false, pending: false, last_seen_at: "2026-09-20T10:00:00Z", scope: SCOPE }],
+        [{ agent: "researcher", area: "Areas/Finance", proposal_id: 42 }],
+      ),
+    });
+    const text = renderAgents(rows, createUi({ env: { NO_COLOR: "1" } }));
+    expect(text).toContain(SCOPE.line);
+    expect(text).toContain("the registry — the owner's own hand, durable");
+    expect(text).toContain("seen 2026-09-20");
+    expect(text).toContain("asked"); // the ask is visible where the grant is read
+    expect(text).toContain("request #42");
+  });
+
+  it("says revoked and pending in the closed status vocabulary, and says so when there is nothing", async () => {
+    sent = [];
+    const rows = await agentsList({
+      env,
+      fetchFn: listing([
+        { id: "gone", display_name: "Gone", kind: "external", revoked: true, pending: false, last_seen_at: null, scope: SCOPE },
+        { id: "waiting", display_name: "Waiting", kind: "external", revoked: false, pending: true, last_seen_at: null, scope: SCOPE },
+      ]),
+    });
+    const ui = createUi({ env: { NO_COLOR: "1" } });
+    expect(renderAgents(rows, ui)).toContain("revoked");
+    expect(renderAgents(rows, ui)).toContain("pending");
+    expect(renderAgents([], ui)).toContain("no agents are registered");
+  });
+
+  it("says which console refused it rather than printing an empty list", async () => {
+    const refused = (async () => new Response("", { status: 401 })) as unknown as typeof fetch;
+    await expect(agentsList({ env, fetchFn: refused })).rejects.toThrow(/refused the owner token \(401\)/);
+    const down = (async () => {
+      throw new Error("ECONNREFUSED owner-token-value");
+    }) as unknown as typeof fetch;
+    // …and the token never rides out in the error, the way every other verb
+    // in this file redacts it.
+    await expect(agentsList({ env, fetchFn: down })).rejects.toThrow(/\[redacted\]/);
   });
 });

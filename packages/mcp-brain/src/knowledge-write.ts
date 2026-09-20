@@ -35,7 +35,7 @@
 import { createHash } from "node:crypto";
 import { parse as parseYaml } from "yaml";
 import type { ErrorCode } from "@foldedspacelabs/metistry-core";
-import { isProtectedPath, may, NOT_A_VAULT_PATH } from "@foldedspacelabs/metistry-core";
+import { isProtectedPath, may, notKnowledge } from "@foldedspacelabs/metistry-core";
 import { validKnowledgePath, type KnowledgeReader } from "./knowledge.js";
 import { principalOf } from "./principal.js";
 import type { AgentPrincipal } from "./types.js";
@@ -308,7 +308,14 @@ export async function writeKnowledge(
   // write at all should not be told which of its paths were the problem.
   const admitted = may(p, "act", { kind: "tool", name: "knowledge_write" });
   if (!admitted.ok) return { ok: false, code: admitted.code, meta };
-  if (!validKnowledgePath(args.path)) return { ok: false, code: "invalid_request", message: NOT_A_VAULT_PATH, meta };
+  // Not vault content: the CLASSIFICATION answer, in the same words every
+  // other knowledge door gives it (core's `notKnowledge` — §3.3). A statement
+  // about the path, not about this principal's grant, which is why it is
+  // `invalid_request` and why the writer gets the same sentence a reader does.
+  if (!validKnowledgePath(args.path)) {
+    const nk = notKnowledge(args.path);
+    return { ok: false, code: nk.code, message: nk.message, meta };
+  }
   // A §4.7 protected path is the user's hand (invariant 2). The reconciler
   // refuses it too — this is the same rule stated at the tool the assistant
   // actually holds, so the refusal never depends on the bridge being reached.

@@ -606,6 +606,42 @@ the Mac app and the phone at `GET /api/instances`.
 `docs/ops/instances.md` is the whole story, including why `resources:` is
 empty and what this deliberately is not.
 
+## Who is registered, and what they hold: `metistry agents list`
+
+```sh
+metistry agents list
+metistry agents list --json
+```
+
+```
+✓ Researcher  researcher   seen 2026-09-20
+    scope  an agent · folders: Areas/Health · queries, projects: alpha, autonomy: propose
+    from   the registry — the owner's own hand, durable
+    asked  Areas/Finance — answer it in Needs You (request #42)
+⚠ Devin       devin        pending
+    scope  an agent · titles · autonomy: observe
+    from   the registry — the owner's own hand, durable
+```
+
+Every registered agent and what its credential holds, as one **triple** —
+role · access · extras. The access word is the read tier said the one way
+(`none` / `titles` / `folders`); the extras are everything that is not the
+tier: the `queries` switch, the projects, a crew's `uses` toolset, the
+autonomy level. `from` is where the scope came from — configuration for the
+instance's own assistant, its manifest for a crew, the registry for
+everything else ([auth.md](auth.md)).
+
+**Read-only, and deliberately not a renderer.** It is a client of `GET
+/api/agents`, which sends each row's scope already rendered by
+`describeScope` in `core` — so this command prints the words the console's
+Agents panel and the Needs You card print, and cannot drift into a fifth
+vocabulary for one record. A grant is still the owner's hand: the two doors
+that widen one are the console's Agents panel and answering an
+`access_request` in Needs You, and nothing in this command writes.
+
+An agent waiting on an answer shows what it asked for and which request to
+answer. `--json` prints the rows as the console sent them, colour off.
+
 ## How much room an agent has: `metistry agents autonomy`
 
 ```sh

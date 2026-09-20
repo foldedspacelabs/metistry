@@ -29,7 +29,7 @@
 
 import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { CREW_NEVER_TOOLS, CREW_TOOL_GROUPS, ROLES, REASONS, allowedTools, crewToolsFor, may, type Principal, type Role } from "@foldedspacelabs/metistry-core";
+import { CREW_NEVER_TOOLS, CREW_TOOL_GROUPS, ROLES, REASONS, RULED_TOOLS, allowedTools, crewToolsFor, may, type Principal, type Role } from "@foldedspacelabs/metistry-core";
 import { TOOL_NAMES } from "../src/index.js";
 import { principalOf } from "../src/principal.js";
 
@@ -91,11 +91,29 @@ describe("every tool × every role is decided by may(), and by nothing else", ()
     }
   });
 
+  /**
+   * The owner short-circuits `may` for every resource a door serves (P4) —
+   * so the one thing standing between "the owner may use every tool" and
+   * "the owner may use any STRING" is that `core` knows which names are
+   * ruled. This pins that set against the bridge's own list, which is what
+   * makes the assertion above true for the owner too.
+   */
+  it("rules exactly the tools this bridge registers — core's list cannot drift from TOOL_NAMES", () => {
+    expect([...RULED_TOOLS].sort()).toEqual([...TOOL_NAMES].sort());
+  });
+
   // The three rules that are about the ROLE rather than the grant, stated as
   // properties rather than by example: they are the ones §2.2 and §2.3 found
   // being re-derived in three files each.
-  it("holds the one-writer and one-dispatcher rules for every non-assistant role, however wide its grant", () => {
-    for (const role of ROLES) {
+  //
+  // The OWNER is not in this one, and that is P4's rule rather than an
+  // exception to it: `owner` is not a bearer this mount can authenticate —
+  // `/mcp` takes agent tokens and nothing else — so "one writer, one
+  // dispatcher" is a statement about the four roles that arrive here. What
+  // `may` answers for the owner is "yes", because the owner has everything,
+  // and no credential can become one by holding a wider grant.
+  it("holds the one-writer and one-dispatcher rules for every non-assistant role that reaches this door, however wide its grant", () => {
+    for (const role of ROLES.filter((r) => r !== "owner")) {
       const mayWrite = may(WIDEST[role], "act", { kind: "tool", name: "knowledge_write" }).ok;
       const mayDelegate = may(WIDEST[role], "act", { kind: "tool", name: "agents_delegate" }).ok;
       expect([role, mayWrite, mayDelegate]).toEqual([role, role === "assistant", role === "assistant"]);

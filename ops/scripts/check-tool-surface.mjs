@@ -67,8 +67,23 @@ export const MAX_DEFINITION_TOKENS = 5000;
  * performance impact number based on the number of tools we have now and that
  * number is likely to grow … we should handle this contradiction on tool pool
  * size" (docs/research/2026-09-19-code-mode-mcp.md §5, Q3).
+ *
+ * **brain moved from 25 to 26 on 2026-09-19, deliberately, for
+ * `request_access`** — the owner's ruling the same day. The number is a
+ * decision each time it changes, and this is the reasoning for this one: the
+ * 26th tool is a SAFETY mechanism, not a read capability (the standing answer
+ * to a read is a named query behind `queries_run`, and that rule is
+ * unchanged). Until it existed, an agent refused for scope had no move but to
+ * raise a free-text report and hope; now it asks for a named prefix, the
+ * owner answers in Needs You, and the widening goes through the same grants
+ * door and the same audit row the owner's own click goes through. It costs
+ * 189 definition tokens on the axis that actually gates lazy, where the
+ * `turn_id` trim (#222) had just returned 944 — so the surface is 4,224
+ * tokens against the >5,000 line, LOWER than the 4,979 it carried a week ago
+ * with one tool fewer. The next tool after this one fails here again, and
+ * that is the point.
  */
-export const COUNT_ACKNOWLEDGED = { brain: 25 };
+export const COUNT_ACKNOWLEDGED = { brain: 26 };
 
 // ---- manifests -----------------------------------------------------------
 

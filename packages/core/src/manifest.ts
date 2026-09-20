@@ -218,12 +218,17 @@ export const CREW_GROUP_ALIASES: Readonly<Record<string, CrewToolGroup>> = { "br
 /**
  * Tools NO crew may ever hold, whatever `uses` says: the assistant's own
  * write path (one writer, §4.11), the dispatch tool (a crew never dispatches
- * crews — the assistant decides what leaves the brain), and the named-query
+ * crews — the assistant decides what leaves the brain), the named-query
  * tools (queries_list, queries_run) — a named query is not filtered by a
  * crew's scope/projects the way every other group here is, so handing it to
- * a crew would leak past the boundary `uses` is meant to hold.
+ * a crew would leak past the boundary `uses` is meant to hold — and
+ * `request_access`, because a crew's scope is THIS file: `scope:` in
+ * `agents/<area>/<name>.md`, re-synced onto its registry row on every crew
+ * sync (apps/console/src/crews.ts). An approved ask would be undone by that
+ * sync, so widening a crew is an edit to its manifest, in the user's hand,
+ * and the console refuses the widening as well (docs/ops/actions.md).
  */
-export const CREW_NEVER_TOOLS = ["knowledge_write", "agents_delegate", "queries_list", "queries_run"] as const;
+export const CREW_NEVER_TOOLS = ["knowledge_write", "agents_delegate", "queries_list", "queries_run", "request_access"] as const;
 
 /** Resolve a `uses` entry to its group; undefined when it names nothing known. */
 export function crewGroupOf(entry: string): CrewToolGroup | undefined {

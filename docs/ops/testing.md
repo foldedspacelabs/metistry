@@ -72,6 +72,42 @@ directory, copy `seed/` into a temp dir and point at that.
 from the checkout's directory name, so parallel worktrees never drop each
 other's database.
 
+### Which database am I about to touch
+
+`ops/scripts/migrate.sh` and `ops/scripts/test-db.sh` both resolve a target
+database from layered `.env` sourcing, and a 2026-09-19 incident showed that
+resolution failing quietly: a shell that had `METISTRY_TEST_DB_NAME` set but
+not `METISTRY_DB_NAME` fell through to the built-in default, which happened
+to be the live `metistry` database, and `migrate.sh` applied a migration
+there. Both scripts now refuse rather than guess:
+
+- **`migrate.sh`** refuses (exit 2) when `METISTRY_TEST_DB_NAME` is set in the
+  environment and the resolved target is a different name — a shell that has
+  a scratch name set is a test shell, and must never touch anything else by
+  omission. It also refuses when the target's value came from the **install's
+  own** `.metistry/state/.env`, unless run with `--install` — a human operator
+  confirming that yes, this really is the machine to run it on (e.g. the
+  manual step in `docs/ops/migrate-compose-to-launchd.md`). `metistry update`
+  never shells out to this script at all — it re-implements the same runner
+  in `packages/cli/src/migrate.ts` against the `pg` driver directly — so
+  `--install` has nothing to do with that path.
+- **`test-db.sh`** refuses outright, with no override flag, if
+  `METISTRY_TEST_DB_NAME` would resolve to the same name the install's own
+  `.metistry/state/.env` configures — there is no legitimate reason for a
+  script whose entire job is `DROP DATABASE` to be pointed at one.
+
+Either script takes `--print-target`, which resolves the target and prints
+which database it is, where that name came from, and whether the run would
+be refused — without connecting to Postgres at all. Run it first if you are
+ever unsure what a shell would do:
+
+```sh
+$ ops/scripts/migrate.sh --print-target
+target database: metistry_test_guard
+source: environment
+would run: yes
+```
+
 Integration suites must therefore survive **both** a freshly created database
 and a re-run against one they have already written to (`pnpm test:unit`, or
 vitest invoked directly). Two ways to get there:

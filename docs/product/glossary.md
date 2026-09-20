@@ -29,7 +29,7 @@ lists requests. A request has one of seven types:
 | **report** | read what an agent found — a finding, a decision, a gotcha, progress |
 | **review** | look at an artifact someone wants your eyes on |
 | **question** | answer something the assistant cannot continue without |
-| **access** | grant an agent more than it has |
+| **access** | grant an agent more than it has — including when the agent asked for a named folder itself |
 | **improvement** | change how the system itself behaves |
 | **action** | do one thing on your behalf — dispatch a brief, move a card, comment, capture |
 

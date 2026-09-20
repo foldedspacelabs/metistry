@@ -3,9 +3,12 @@
 // restarts, no double-run storms), executes under a two-phase runs row.
 // Schedule parsing lives in core (scheduleToSeconds — shared with the
 // watchdog's silent-collector probe, so "due" and "silent" can never
-// disagree about an interval). Every shipped manifest must parse: the
-// console refuses to start otherwise (it crash-looped once on an unparsed
-// schedule — manifests.test.ts).
+// disagree about an interval). Every SHIPPED manifest must parse
+// (manifests.test.ts gates it in CI), but loadSchedules itself is more
+// defensive than that: a manifest it cannot load or schedule is skipped and
+// logged, not fatal — the console crash-looped once on an unparsed schedule,
+// and one bad manifest (shipped or instance-authored) must not take every
+// OTHER component down with it.
 //
 // Three hardening behaviours ride on the same gate (docs/ops/automation.md):
 // PREFLIGHT, so a component whose credential was never set costs an
@@ -121,19 +124,27 @@ export async function loadSchedules(
   const out: ScheduledCollector[] = [];
   for (const c of registered) {
     const dir = `${collectorsDir}/${c.name}`;
-    const manifest = validateManifest(parseYaml(await readFile(`${dir}/manifest.yaml`, "utf8")));
-    if (!manifest.ok) throw new Error(`${c.name}: invalid manifest: ${manifest.errors.join("; ")}`);
-    const m = manifest.manifest;
-    if (m.type !== "collector" && m.type !== "routine") throw new Error(`${c.name}: not schedulable (type ${m.type})`);
-    if (m.schedule === undefined) throw new Error(`${c.name}: no schedule`);
-    out.push({
-      ...c,
-      dir,
-      requires: requirementsOf(m),
-      intervalSec: scheduleToSeconds(m.schedule),
-      runKind: m.type === "routine" ? "routine_run" : "collector_run",
-      ...(m.type === "collector" && m.uses_model ? { usesModel: m.uses_model } : {}),
-    });
+    // One bad manifest must not take the runner down (enforce at the tool,
+    // not by trusting every manifest a component ships to be one this
+    // build's scheduleToSeconds understands): skip it and log why, so every
+    // OTHER component still starts.
+    try {
+      const manifest = validateManifest(parseYaml(await readFile(`${dir}/manifest.yaml`, "utf8")));
+      if (!manifest.ok) throw new Error(`invalid manifest: ${manifest.errors.join("; ")}`);
+      const m = manifest.manifest;
+      if (m.type !== "collector" && m.type !== "routine") throw new Error(`not schedulable (type ${m.type})`);
+      if (m.schedule === undefined) throw new Error(`no schedule`);
+      out.push({
+        ...c,
+        dir,
+        requires: requirementsOf(m),
+        intervalSec: scheduleToSeconds(m.schedule),
+        runKind: m.type === "routine" ? "routine_run" : "collector_run",
+        ...(m.type === "collector" && m.uses_model ? { usesModel: m.uses_model } : {}),
+      });
+    } catch (e) {
+      console.warn(`${c.name}: skipped — ${(e as Error).message} (fix ${dir}/manifest.yaml)`);
+    }
   }
   return out;
 }

@@ -29,8 +29,10 @@
 // neither tool tells a caller which route-only queries this build has.
 
 import { z } from "zod";
+import { may } from "@foldedspacelabs/metistry-core";
 import { QueryError, type QueryStore } from "@foldedspacelabs/metistry-queries";
-import { done, fail, type Outcome } from "./outcome.js";
+import { done, fail, refuse, type Outcome } from "./outcome.js";
+import { principalOf } from "./principal.js";
 import type { AgentPrincipal } from "./types.js";
 
 export const QUERIES_TOOL_NAMES = ["queries_list", "queries_run"] as const;
@@ -43,31 +45,19 @@ export const MAX_ROWS = 200; // limit: fixed — part of the tool's contract; a 
 
 const NOT_AVAILABLE = "named queries are not configured in this deployment (the console loads seed/queries + the instance's queries/)";
 
-/** internal principals always; external agents only with an explicit `queries: true` grant. */
-function allowed(principal: AgentPrincipal): boolean {
-  return principal.kind === "internal" || principal.grants.queries === true;
-}
-
 /** QueryError's three load/run-time codes → the uniform envelope (invariant 8). */
 function fromQueryError(err: QueryError): Outcome {
   return fail(err.code === "unknown_query" ? "not_found" : "invalid_request", err.message);
 }
 
-/**
- * The refusal a name that is not servable here gets — whether it is not
- * loaded at all or loaded as `expose: route`. `packages/queries` spells the
- * unknown-query message `no such query: <name>`, so this repeats it exactly:
- * a distinguishable refusal would make this tool an oracle for which
- * route-backed queries exist, which is the disclosure `expose` exists to
- * prevent.
- */
-function noSuchQuery(name: string): Outcome {
-  return fail("not_found", `no such query: ${name}`);
-}
-
 /** Servable by name here: loaded, and `expose: generic` (the default every manifest without the field carries). */
 function generic(store: QueryStore, name: string): boolean {
   return store.exposure(name) === "generic";
+}
+
+/** `expose`, read off the manifest through the store rather than matched against a list kept here, which could drift from the files (invariant 5). */
+function exposureOf(store: QueryStore, name: string): "generic" | "route" {
+  return generic(store, name) ? "generic" : "route";
 }
 
 export function registerQueriesTools(reg: Register, store: QueryStore | undefined, principal: AgentPrincipal): void {
@@ -76,7 +66,8 @@ export function registerQueriesTools(reg: Register, store: QueryStore | undefine
     "List named queries available on this instance; each entry names its params (type + default) for queries_run.",
     {},
     async () => {
-      if (!allowed(principal)) return fail("forbidden");
+      const admitted = may(principalOf(principal), "act", { kind: "tool", name: "queries_list" });
+      if (!admitted.ok) return refuse(admitted);
       if (!store) return fail("not_available", NOT_AVAILABLE);
       // Route-backed queries are not listed, because they are not runnable
       // here: a list that named one would contradict the refusal below and
@@ -94,12 +85,15 @@ export function registerQueriesTools(reg: Register, store: QueryStore | undefine
       params: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
     },
     async (a) => {
-      if (!allowed(principal)) return fail("forbidden");
+      const p = principalOf(principal);
+      const admitted = may(p, "act", { kind: "tool", name: "queries_run" });
+      if (!admitted.ok) return refuse(admitted);
       if (!store) return fail("not_available", NOT_AVAILABLE);
-      // `expose`, read off the manifest through the store rather than
-      // matched against a list kept here, which could drift from the files
-      // (invariant 5). Unknown and route-backed are the same answer.
-      if (!generic(store, a.name)) return noSuchQuery(a.name);
+      // Unknown and route-backed are the same answer, byte for byte: a
+      // distinguishable refusal would make this tool an oracle for which
+      // route-backed queries exist. `may` holds that wording now.
+      const exposed = may(p, "read", { kind: "query", door: "queries_run", name: a.name, exposure: exposureOf(store, a.name) });
+      if (!exposed.ok) return refuse(exposed);
       let result;
       try {
         result = await store.run(a.name, a.params ?? {});

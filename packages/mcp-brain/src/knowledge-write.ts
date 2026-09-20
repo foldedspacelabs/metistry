@@ -35,8 +35,9 @@
 import { createHash } from "node:crypto";
 import { parse as parseYaml } from "yaml";
 import type { ErrorCode } from "@foldedspacelabs/metistry-core";
-import { isProtectedPath } from "@foldedspacelabs/metistry-core";
-import { underAreas, validKnowledgePath, type KnowledgeReader } from "./knowledge.js";
+import { isProtectedPath, may, NOT_A_VAULT_PATH } from "@foldedspacelabs/metistry-core";
+import { validKnowledgePath, type KnowledgeReader } from "./knowledge.js";
+import { principalOf } from "./principal.js";
 import type { AgentPrincipal } from "./types.js";
 
 /** The reconciler's commit intent (apps/reconciler `parseIntent`). */
@@ -302,15 +303,23 @@ export async function writeKnowledge(
 ): Promise<KnowledgeWriteOutcome> {
   const { tier, areas } = principal.grants;
   const meta: Record<string, unknown> = { kind: principal.kind ?? "external", tier, areas, path: args.path };
-  if (principal.kind !== "internal") return { ok: false, code: "forbidden", meta }; // §4.11: one writer
-  if (!validKnowledgePath(args.path)) return { ok: false, code: "invalid_request", message: "path must be a vault path — TitleCase folders, no traversal, nothing under .metistry/ or Artifacts/", meta };
+  const p = principalOf(principal);
+  // §4.11: one writer. The role gate first, because a principal that may not
+  // write at all should not be told which of its paths were the problem.
+  const admitted = may(p, "act", { kind: "tool", name: "knowledge_write" });
+  if (!admitted.ok) return { ok: false, code: admitted.code, meta };
+  if (!validKnowledgePath(args.path)) return { ok: false, code: "invalid_request", message: NOT_A_VAULT_PATH, meta };
   // A §4.7 protected path is the user's hand (invariant 2). The reconciler
   // refuses it too — this is the same rule stated at the tool the assistant
   // actually holds, so the refusal never depends on the bridge being reached.
   // `.metistry/**` is already out by shape; the root CLAUDE.md and README.md
   // are ordinary-looking vault paths and would not be.
   if (isProtectedPath(args.path)) return { ok: false, code: "invalid_request", message: "that path defines how the system behaves — it is the user's hand alone (§4.7)", meta };
-  if (tier !== "areas" || !underAreas(args.path, areas)) return { ok: false, code: "forbidden", meta }; // writes never exceed reads
+  // Writes never exceed reads. Asked AFTER the two shape refusals above, so
+  // a path that is not vault content keeps its `invalid_request` rather than
+  // becoming a scope refusal.
+  const scoped = may(p, "write", { kind: "knowledge", door: "write", path: args.path });
+  if (!scoped.ok) return { ok: false, code: scoped.code, meta };
   if (!writer) {
     return { ok: false, code: "not_available", message: "knowledge writes are not configured in this deployment (the vault bridge is absent)", meta };
   }

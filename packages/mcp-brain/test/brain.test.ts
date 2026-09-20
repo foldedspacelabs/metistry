@@ -6,7 +6,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { parse as parseYaml } from "yaml";
-import { validateManifest } from "@foldedspacelabs/metistry-core";
+import { validAgentAreaGrant, validAreaPrefix, validateManifest } from "@foldedspacelabs/metistry-core";
 import { TasksService } from "@foldedspacelabs/metistry-tasks";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -96,6 +96,11 @@ describe("definition size (docs/research/2026-08-tool-discovery.md's other axis)
     // ruling on 2026-09-19 and with the count ceiling moved to say so. The
     // ratchet moves with the decision and not a token further: the surface is
     // still smaller than it was a week ago with one tool fewer.
+    //
+    // The escalation ladder (ruled 2026-09-19 C) cost 40 more (4,224 →
+    // 4,264): one optional boolean and a clause. It bought the sentence the
+    // tool says after a decline, which is the difference between an agent
+    // that stops asking and one that keeps filing the same row.
     expect(tokens).toBeLessThan(4300);
   });
 
@@ -261,6 +266,14 @@ describe("pure helpers", () => {
       expect(canSeeUnder(machinery, ["/"]), machinery).toBe(false);
       expect(canSeeUnder(machinery, null), machinery).toBe(false);
     }
+    // The 2026-09-19 (D) split of core's area validator — the SHAPE, and
+    // what an AGENT may be granted — changed no decision on this door. It is
+    // `isVaultPath` here, as it always was, and this test is where that is
+    // held: `Artifacts/` is a real vault prefix that is not knowledge, so no
+    // agent reads it through a knowledge tool whatever it was granted.
+    expect(validAreaPrefix("Artifacts/Reports")).toBe(true);
+    expect(validAgentAreaGrant("Artifacts/Reports")).toBe(false);
+    expect(canSeeUnder("Artifacts/Reports/q3.md", ["Artifacts/Reports"])).toBe(false);
   });
 
   it("knowledgeScope: canRead is content, canList is existence, and tier none is neither", () => {

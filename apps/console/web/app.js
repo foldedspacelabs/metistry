@@ -663,13 +663,20 @@ function actionDetail(p) {
  * that is easy to miss: an agent at tier `index` can be told any title in the
  * vault and read none, and granting it one folder trades that browse for the
  * read. Approving is a choice between two scopes, not a pure widening.
+ *
+ * `escalated` is the one fact that changes how the row reads: you already
+ * said no to this exact ask, and the agent is asking once more with a fuller
+ * reason (ruled 2026-09-19 C). The tool allows that ONCE — a third ask after
+ * a second decline is refused at the tool — so this line is not the start of
+ * a queue you will have to keep answering.
  */
 function accessDetail(p) {
   if (p.kind !== "access_request") return "";
   const held = p.payload?.current_tier === "areas" ? `folders ${(p.payload?.current_areas ?? []).map(esc).join(", ")}` : esc(accessLabel(p.payload?.current_tier ?? "none"));
   const trade = p.payload?.current_tier === "index" ? " — approving trades its whole-vault title browse for reads inside that folder" : "";
+  const again = p.payload?.escalated ? `<br><span class="muted">asked again after a decline — you answered #${esc(String(p.payload.prior_proposal ?? "?"))}</span>` : "";
   const done = p.payload?.granted ? `<br><span class="muted">granted — ${esc(String(p.payload.granted.area ?? ""))}</span>` : "";
-  return `<br><span class="muted">wants <b>${esc(String(p.payload?.area ?? "?"))}</b> · has ${held}${esc(trade)}</span>` +
+  return `<br><span class="muted">wants <b>${esc(String(p.payload?.area ?? "?"))}</b> · has ${held}${esc(trade)}</span>${again}` +
     `${p.payload?.reason ? `<br><span class="muted">why: ${esc(String(p.payload.reason).slice(0, ARG_PREVIEW_CHARS))}</span>` : ""}${done}`;
 }
 

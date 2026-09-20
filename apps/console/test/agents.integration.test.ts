@@ -226,6 +226,22 @@ describe.skipIf(!hasDb)("agent registry (integration)", () => {
     expect(audit.rows.map((r) => r.op)).toEqual(["mint", "grant", "projects"]);
   });
 
+  // Ruled 2026-09-19 (D). The refusal is about AGENTS: every read path an
+  // agent has refuses `Artifacts/`, so a grant of it would read in the
+  // registry like access and give none. It says nothing about the owner,
+  // whose own `Artifacts/` are served by `/api/artifacts` (asserted end to
+  // end over a real vault in artifacts.integration.test.ts) and by Finder
+  // and git besides.
+  it("an agent cannot be granted `Artifacts/` — the grant would be inert, and an inert grant reads like a real one", async () => {
+    const before = (await agents.authenticateAgent(pool, { headers: { authorization: `Bearer ${agentToken}` } }))?.grants;
+    for (const areas of [["Artifacts"], ["Artifacts/Reports"], ["Areas/Fsl", "Artifacts/Reports"]]) {
+      const r = await json("PUT", `/api/agents/${agentId}/grants`, { tier: "areas", areas });
+      expect(r.status, areas.join(",")).toBe(400);
+      expect((await r.json()).error.message, areas.join(",")).toContain("TitleCase vault prefix");
+    }
+    expect((await agents.authenticateAgent(pool, { headers: { authorization: `Bearer ${agentToken}` } }))?.grants).toEqual(before); // not one of them landed
+  });
+
   it("grants: `queries` (mcp-brain's queries_list/queries_run access) round-trips through the same route, rejects non-booleans", async () => {
     expect((await json("PUT", `/api/agents/${agentId}/grants`, { tier: "none", queries: "yes" })).status).toBe(400);
     const ok = await json("PUT", `/api/agents/${agentId}/grants`, { tier: "areas", areas: ["Areas/Fsl"], queries: true });

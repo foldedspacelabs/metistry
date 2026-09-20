@@ -34,7 +34,7 @@
 // drift.
 
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { type ErrorCode } from "@foldedspacelabs/metistry-core";
+import { INSTANCE_LAYOUT, type ErrorCode } from "@foldedspacelabs/metistry-core";
 import { canSeeUnder, KNOWLEDGE_LINKS_QUERY, KNOWLEDGE_PAGES_QUERY } from "@foldedspacelabs/metistry-mcp-brain";
 import { VaultError, type VaultClient } from "@foldedspacelabs/metistry-artifacts";
 import { QueryError, type QueryStore } from "@foldedspacelabs/metistry-queries";
@@ -179,6 +179,36 @@ export function canSee(path: string, scope: KnowledgeScope): boolean {
   return canSeeUnder(path, scope.areas);
 }
 
+const ARTIFACTS_ROOT = INSTANCE_LAYOUT.artifactsDir;
+
+/** The refusal every knowledge door gives for a path that is not vault content. Shared so the two routes cannot drift. */
+const NOT_KNOWLEDGE =
+  "no such page — a path must be vault CONTENT: not .metistry/, not Artifacts/, not the root CLAUDE.md, no leading slash and no traversal (docs/ops/instance-layout.md)";
+
+/**
+ * What to say when `canSee` was false.
+ *
+ * For an agent it is always the same sentence: refused and absent must not be
+ * distinguishable, or the route is an oracle for what exists where the caller
+ * cannot look.
+ *
+ * For the OWNER (`areas: null` — their own vault) there is no oracle to
+ * protect, and one case deserves a better answer than "no such page": the
+ * owner asking for one of their own `Artifacts/`. They have access to
+ * everything in their directory (ruled 2026-09-19 D) — artifacts included —
+ * it is simply not THIS door. This one serves the knowledge index, which no
+ * indexer has ever walked `Artifacts/` into; the artifacts service is the
+ * door that has the bytes, with the content types and the no-store rules
+ * decision #14 put on them. So the owner gets pointed at it rather than told
+ * their file does not exist.
+ */
+function notKnowledgeMessage(path: string, scope: KnowledgeScope): string {
+  const ownersOwnArtifact = scope.areas === null && (path === ARTIFACTS_ROOT || path.startsWith(`${ARTIFACTS_ROOT}/`));
+  return ownersOwnArtifact
+    ? `Artifacts/ is yours but it is not knowledge — nothing indexes it, so this door has no page for it. Your artifacts are GET /api/artifacts (docs/ops/console-api.md); in the vault they are just files, on disk and in git.`
+    : NOT_KNOWLEDGE;
+}
+
 /** Hits the scope does not cover are DROPPED, never returned with a flag: a path is the sensitive part of a hit, and a filtered list must not be a directory listing of what was filtered. */
 export function filterHits(hits: readonly KnowledgeSearchHit[], scope: KnowledgeScope): KnowledgeSearchHit[] {
   return hits.filter((h) => canSee(h.path, scope));
@@ -303,7 +333,7 @@ export async function knowledgeRoutes(
     // honest description of `.metistry/compute.yaml` is "not knowledge".
     if (!canSee(path, scope)) {
       await audit("knowledge", "page", false, { refused: "out_of_scope" });
-      return sendError(res, "not_found", "no such page — a path must be vault CONTENT: not .metistry/, not Artifacts/, not the root CLAUDE.md, no leading slash and no traversal (docs/ops/instance-layout.md)");
+      return sendError(res, "not_found", notKnowledgeMessage(path, scope));
     }
     if (!deps.vault) return sendError(res, "not_available", NOT_AVAILABLE);
 
@@ -386,7 +416,7 @@ export async function knowledgeRoutes(
     // knowledge", for the owner too.
     if (!canSee(path, scope)) {
       await audit("knowledge", "links", false, { refused: "out_of_scope" });
-      return sendError(res, "not_found", "no such page — a path must be vault CONTENT: not .metistry/, not Artifacts/, not the root CLAUDE.md, no leading slash and no traversal (docs/ops/instance-layout.md)");
+      return sendError(res, "not_found", notKnowledgeMessage(path, scope));
     }
     const limit = clampPages(url.searchParams.get("limit"));
     if (limit === undefined) return sendError(res, "invalid_request", `limit must be an integer between 1 and ${MAX_PAGES_LIMIT}`);

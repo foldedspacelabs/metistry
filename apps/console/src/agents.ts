@@ -22,7 +22,7 @@ import {
   parseBearer,
   startRun,
   tokenHash,
-  validAreaPrefix,
+  validAgentAreaGrant,
   VAULT_ROOT_AREA,
   type ActionKind,
   type ActionMode,
@@ -128,10 +128,18 @@ export class AgentError extends Error {
 // is not grantable. "Everything" is not an area grant: it is the bare vault,
 // spelled `/` and admitted for an internal row alone.
 //
-// The shape itself is core's `validAreaPrefix` since the access-request path
-// landed: an agent asking for an area (mcp-brain's `request_access`) and the
-// owner's own hand on `PUT /api/agents/:id/grants` must refuse the SAME
+// The rule itself is core's `validAgentAreaGrant` since the access-request
+// path landed: an agent asking for an area (mcp-brain's `request_access`) and
+// the owner's own hand on `PUT /api/agents/:id/grants` must refuse the SAME
 // strings, and two regexes that agree today are a refusal that drifts.
+//
+// It is the rule for an AGENT's grant and nothing else (ruled 2026-09-19 D).
+// `Artifacts/Reports` is refused HERE — where the grant an agent would hold
+// is typed — because every read path an agent has refuses `Artifacts/`, so
+// the grant would be inert while reading in the registry like a real one.
+// The OWNER's access to `Artifacts/` is the artifacts door (`/api/artifacts`)
+// and is not narrowed by anything on this path: the owner sees everything in
+// their own directory.
 const BARE_VAULT_RE = /^\/$/;
 /** The refusal, core's sentence — plus the internal row's extra spelling, which no agent is ever offered. */
 const AREA_REFUSAL = AREA_PREFIX_REFUSAL;
@@ -156,7 +164,7 @@ export function validateGrants(input: unknown, opts: GrantsOptions = {}): Grants
     if (typeof a !== "string") throw new AgentError("invalid_request", "area must be a string");
     let s = a.trim();
     if (bareAllowed && BARE_VAULT_RE.test(s)) s = VAULT_ROOT_AREA;
-    else if (!validAreaPrefix(s)) {
+    else if (!validAgentAreaGrant(s)) {
       throw new AgentError("invalid_request", bareAllowed ? AREA_REFUSAL_WITH_BARE_VAULT : AREA_REFUSAL);
     }
     if (!areas.includes(s)) areas.push(s);
@@ -302,11 +310,20 @@ export interface InternalAgentConfig {
  * environment is the decision to run this agent; removing it is how the
  * user turns it off (main.ts revokes when it is absent). The token is never
  * minted or logged here; nothing about it crosses the wire.
+ *
+ * The ONE thing configuration does not get to undo (ruled 2026-09-19 B):
+ * areas the owner has APPROVED from the Needs You queue, which are merged on
+ * top of the configured ones (`grantOverrides`, migration 0023). Without
+ * that merge an approval for this row would be silently reverted by the next
+ * start, which is exactly why the assistant used to be refused the tool.
+ * Configuration stays the floor — `METISTRY_ASSISTANT_AREAS` narrows what
+ * the assistant holds BEFORE any approval, and an approval only ever adds.
  */
 export async function ensureInternalAgent(db: Db, id: string, cfg: InternalAgentConfig): Promise<{ id: string; created: boolean }> {
   if (!AGENT_ID_RE.test(id)) throw new AgentError("invalid_request", "id must be a slug ^[a-z][a-z0-9-]{0,39}$");
   if (typeof cfg.token !== "string" || cfg.token.length < 16) throw new AgentError("invalid_request", "internal agent token must be at least 16 characters");
-  const grants = cfg.grants ?? validateGrants({ tier: "areas", areas: [...ASSISTANT_DEFAULT_AREAS] }, { kind: "internal" });
+  const configured = cfg.grants ?? validateGrants({ tier: "areas", areas: [...ASSISTANT_DEFAULT_AREAS] }, { kind: "internal" });
+  const grants = mergeGrantOverrides(configured, await grantOverrides(db, id));
   const projects = validateProjects(cfg.projects ?? []);
   for (const p of projects) await ensureProject(db, p); // the project row exists from the first use of its slug (0011)
   const displayName = (cfg.display_name ?? "").trim().slice(0, 120) || `${id} (internal)`;
@@ -462,7 +479,7 @@ export { ACCESS_REQUEST_KIND };
  */
 export function accessArea(payload: unknown): string | undefined {
   const area = (payload as { area?: unknown } | null)?.area;
-  return validAreaPrefix(area) ? area : undefined;
+  return validAgentAreaGrant(area) ? area : undefined;
 }
 
 /**
@@ -489,6 +506,64 @@ export function widenedGrants(current: Grants, area: string): Grants {
   return { tier: "areas", areas, ...(current.queries === true ? { queries: true } : {}) };
 }
 
+// ----- approvals that outlive a re-sync (ruled 2026-09-19 B) ---------------
+//
+// An INTERNAL row's grants are replaced from configuration at every console
+// start (`ensureInternalAgent`), so a widening written into `agents.grants`
+// alone lives until the next restart and no longer. That is why the
+// assistant was refused `request_access` when it shipped, and this is the
+// mechanism that lets it ask instead: each approved area is recorded in
+// `agent_grant_overrides` (migration 0023) and merged back on top of the
+// configured areas on the way in.
+//
+// Nothing else writes the table. It is not a second grants surface: an
+// override is only ever ONE area the owner approved in Needs You, it can
+// only ever widen, and `ON DELETE CASCADE` plus `clearGrantOverrides` mean a
+// revoked credential's approvals go with it.
+
+/** Areas approved for this agent from the queue, oldest first. */
+export async function grantOverrides(db: Db, id: string): Promise<string[]> {
+  const { rows } = await db.query(`SELECT area FROM agent_grant_overrides WHERE agent_id = $1 ORDER BY granted_at, area`, [id]);
+  return rows.map((r) => String(r.area));
+}
+
+/**
+ * Configuration plus the approvals, with anything the configuration already
+ * covers dropped — `underAreas` is the prefix rule, so an override under a
+ * configured prefix (or under the bare vault) adds nothing and does not
+ * clutter the row. Areas are re-validated with the row's own (internal)
+ * rule: a value that reached the table by hand cannot become a grant shape
+ * the validator would refuse.
+ */
+export function mergeGrantOverrides(configured: Grants, overrides: readonly string[]): Grants {
+  if (overrides.length === 0) return configured;
+  const held = configured.tier === "areas" ? [...configured.areas] : [];
+  for (const area of overrides) {
+    if (!validAgentAreaGrant(area) || underAreas(area, held) || held.includes(area)) continue;
+    held.push(area);
+  }
+  if (held.length === 0) return configured;
+  return validateGrants({ tier: "areas", areas: held, ...(configured.queries === true ? { queries: true } : {}) }, { kind: "internal" });
+}
+
+/**
+ * Record one approved area, so the next start still has it. Idempotent: the
+ * same (agent, area) twice is the same approval, and the first proposal id
+ * is the one kept — it is the answer that granted it.
+ */
+export async function recordGrantOverride(db: Db, id: string, area: string, proposalId: number): Promise<void> {
+  await db.query(
+    `INSERT INTO agent_grant_overrides (agent_id, area, proposal_id) VALUES ($1, $2, $3) ON CONFLICT (agent_id, area) DO NOTHING`,
+    [id, area, proposalId],
+  );
+}
+
+/** Drop every approval for an agent — what revoking it means for the areas it was given. */
+export async function clearGrantOverrides(db: Db, id: string): Promise<number> {
+  const { rows } = await db.query(`DELETE FROM agent_grant_overrides WHERE agent_id = $1 RETURNING area`, [id]);
+  return rows.length;
+}
+
 /** One pending ask, as the Agents panel lists it beside the grant it is about. */
 export interface AccessRequestRow {
   proposal_id: number;
@@ -496,6 +571,10 @@ export interface AccessRequestRow {
   area: string;
   reason: string;
   ts: string;
+  /** true = this is a second ask after a decline (mcp-brain's `escalate`), and the panel says so. */
+  escalated?: boolean;
+  /** The declined row it followed, when it is one. */
+  prior_proposal?: number;
 }
 
 /**
@@ -505,7 +584,8 @@ export interface AccessRequestRow {
  */
 export async function pendingAccessRequests(db: Db): Promise<AccessRequestRow[]> {
   const { rows } = await db.query(
-    `SELECT id, source_agent, payload->>'area' AS area, payload->>'reason' AS reason, ts
+    `SELECT id, source_agent, payload->>'area' AS area, payload->>'reason' AS reason, ts,
+            payload->>'escalated' = 'true' AS escalated, payload->>'prior_proposal' AS prior_proposal
      FROM proposals WHERE kind = '${ACCESS_REQUEST_KIND}' AND decision = 'pending' ORDER BY ts, id`,
   );
   return rows.map((r) => ({
@@ -514,6 +594,10 @@ export async function pendingAccessRequests(db: Db): Promise<AccessRequestRow[]>
     area: String(r.area ?? ""),
     reason: String(r.reason ?? ""),
     ts: r.ts instanceof Date ? r.ts.toISOString() : String(r.ts),
+    // a second ask after a decline says so where the grant is edited, not
+    // only in the queue: "they asked again" is the fact that decides it
+    ...(r.escalated === true ? { escalated: true } : {}),
+    ...(r.prior_proposal ? { prior_proposal: Number(r.prior_proposal) } : {}),
   }));
 }
 
@@ -633,8 +717,15 @@ export function autonomyTable(autonomy: Autonomy): Record<ActionKind, ActionMode
   return effectiveActions(autonomy);
 }
 
-/** Revocation is permanent: the row stays (provenance on old proposals), the token dies. */
+/**
+ * Revocation is permanent: the row stays (provenance on old proposals), the
+ * token dies — and the areas the owner approved for it from the queue die
+ * with it (`clearGrantOverrides`). Otherwise an internal row that was turned
+ * off and on again would come back holding widenings the owner granted to a
+ * credential they had since withdrawn.
+ */
 export async function revokeAgent(db: Db, id: string): Promise<boolean> {
+  await clearGrantOverrides(db, id);
   const { rows } = await db.query(
     `UPDATE agents SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL RETURNING id`,
     [id],

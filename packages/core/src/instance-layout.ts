@@ -113,37 +113,27 @@ export const NON_VAULT_ROOTS = Object.freeze([
 export const VAULT_ROOT_AREA = "/";
 
 /**
- * **The one shape of a grantable vault area.** One or more TitleCase segments
+ * **The one shape of a vault area prefix.** One or more TitleCase segments
  * from the vault root (CLAUDE.md's casing rule — Obsidian renders these, and
  * `areas/` in one file with `Areas/` in another works on macOS and breaks in a
  * container). No traversal, no leading or trailing slash, and no way to spell
  * `.metistry/`, which does not start with an uppercase letter: the machinery
  * is not grantable.
- *
- * It lives in core because TWO doors ask the question and their answers must
- * be the same one: the console's `validateGrants` (the owner's own hand on
- * `PUT /api/agents/:id/grants`) and mcp-brain's `request_access` (an agent
- * asking for a prefix it does not hold). A second regex that agreed today is
- * a refusal that drifts apart later — which is the one way an agent could
- * name an area the grants validator would never have admitted.
- *
- * "Everything" is deliberately NOT expressible here: the bare vault is
- * `VAULT_ROOT_AREA`, admitted by the console for internal rows alone, and no
- * agent may ask for it.
  */
 export const AREA_PREFIX_RE = /^[A-Z][A-Za-z0-9 _.'-]*(\/[A-Z][A-Za-z0-9 _.'-]*)*$/;
 
 export const MAX_AREA_PREFIX_LEN = 200;  // limit: fixed — AREA_PREFIX_RE's shape bounds it; a longer string is not a vault path
 
 /**
- * `AREA_PREFIX_RE` plus the length bound, the explicit `..` refusal, and
- * `isVaultPath` — the predicate both doors call.
+ * **The SHAPE alone**: `AREA_PREFIX_RE`, the length bound, and the explicit
+ * `..` refusal. Nothing here says who may hold the area or what a reader
+ * would find under it — that is `validAgentAreaGrant` below.
  *
- * `isVaultPath` is on it because the shape alone admits `Artifacts/Reports`,
- * which is TitleCase and is not knowledge: every read path refuses it anyway
- * (`canSeeUnder`), so granting it was always an inert grant that reads like a
- * real one. Naming it here means the owner's form and an agent's ask refuse
- * it in the same sentence instead of accepting a grant that does nothing.
+ * Keeping the shape separate is the owner's ruling of 2026-09-19 (D): what
+ * an AGENT may be granted is a narrower question than what a vault prefix
+ * IS, and folding the narrower one in here made "is this a vault prefix"
+ * answer "no" for `Artifacts/…` — a sentence the owner's own surfaces have
+ * no business saying about their own directory.
  */
 export function validAreaPrefix(area: unknown): area is string {
   return (
@@ -151,9 +141,43 @@ export function validAreaPrefix(area: unknown): area is string {
     area.length > 0 &&
     area.length <= MAX_AREA_PREFIX_LEN &&
     AREA_PREFIX_RE.test(area) &&
-    !area.includes("..") &&
-    isVaultPath(area)
+    !area.includes("..")
   );
+}
+
+/**
+ * **The one shape of an area an AGENT may be granted** — the shape above,
+ * plus `isVaultPath`: content a knowledge read path would actually serve.
+ *
+ * The extra condition exists because the shape alone admits
+ * `Artifacts/Reports`, which is TitleCase and is not knowledge. Every read
+ * path an agent has refuses `Artifacts/` (mcp-brain's `canSeeUnder`), so
+ * granting it was always an INERT grant that reads in the registry like a
+ * real one — and an inert grant is worse than a refusal, because the owner
+ * believes they gave access they did not give.
+ *
+ * **It is a rule about agents, not about the owner** (ruled 2026-09-19 D:
+ * "the owner should always have access to everything; agents should only
+ * have access to what they're granted"). The owner's own access to
+ * `Artifacts/` is the artifacts door — `GET /api/artifacts/…`, the
+ * artifacts service over the vault bridge — and nothing on this predicate's
+ * path touches it. Do not reach for this function to answer "may the owner
+ * see X": the answer there is yes.
+ *
+ * It lives in core because TWO doors ask the agent question and their
+ * answers must be the same one: the console's `validateGrants` (the owner's
+ * hand on `PUT /api/agents/:id/grants`, where the grant an agent will hold
+ * is typed) and mcp-brain's `request_access` (an agent asking for a prefix
+ * it does not hold). A second regex that agreed today is a refusal that
+ * drifts apart later — which is the one way an agent could name an area the
+ * grants validator would never have admitted.
+ *
+ * "Everything" is deliberately NOT expressible here: the bare vault is
+ * `VAULT_ROOT_AREA`, admitted by the console for internal rows alone, and no
+ * agent may ask for it.
+ */
+export function validAgentAreaGrant(area: unknown): area is string {
+  return validAreaPrefix(area) && isVaultPath(area);
 }
 
 /** The refusal both doors say when `validAreaPrefix` is false — one sentence, so the owner's form and an agent's tool teach the same shape. */

@@ -281,3 +281,114 @@ Nine items in `today-hub-requests.md`, for the developer. A1 (calendar events
 carry three fields) and A2 (Metistry may not write the meeting note) are
 blocking; A2 is solved by the recurring-task precedent without touching
 ownership. A5 — generated prose outside a fold template — needs a ruling.
+
+---
+
+# 13. v3 — Today as a top-level section, and the system behind it
+
+Boards: `Today — a top-level section` and `Items, facets and things made for
+a moment`.
+
+## 13.1 Seven rows
+
+**Today moves out of Work to the second row, under Chat.** Work returns to its
+four original children.
+
+This breaks a ratified rule, so it is logged (C30) rather than quietly done:
+P6 and `app-ux-plan.md` both say six sections, same order, same names on every
+platform.
+
+The argument for breaking it: **Today stopped being a view of Work.** Work is
+*what agents can claim*. Today is *your day*, and it now holds meetings,
+artifacts, requests and agent status — four things Work has no claim on. A
+child of Work showing four things Work does not own is in the wrong place, and
+the sidebar was the last thing still saying otherwise.
+
+**Second, not first.** Chat stays first because it is where you go with a
+question; Today is where you go with a morning. P6's *force* survives intact —
+same rows, same order, same names on every platform. It is the **number** that
+changes, and the number was never the principle.
+
+## 13.2 The item contract
+
+Today will hold tasks, meetings, artifacts, requests, agent status and updates,
+and more kinds after that. So the durable work is not the screen, it is the
+contract every item on it obeys.
+
+**An item is five things**: a `kind` (which picks the glyph and the lead
+affordance), a `moment` (a time, a gap, or none — none sends it to the rail), a
+`title`, its `facets` from the one vocabulary, and its `verbs`. Adding a kind
+is filling in a row of that table; nothing else in the screen changes.
+
+Two rules hold across every kind:
+
+- **The lead affordance says what you can do before you read a word** — a
+  checkbox means you tick it, a presence dot means you cannot.
+- **Provenance is carried the same way everywhere** — *yours* is plain,
+  *retrieved* is a chip you can open, *generated* is in the `agent` container
+  and says so.
+
+## 13.3 The facet ladder
+
+The answer to "priority, due dates, people, document links styled consistently,
+appealing without being overwhelming" is a **ladder**, because the failure mode
+of a facet vocabulary is never one bad chip — it is forty good ones at once.
+
+| Rung | Rendering | What goes here |
+| --- | --- | --- |
+| 0 | plain `text-secondary`, middot-separated | due · scheduled · size · estimate · project · area · type · source · counts |
+| 1 | weight — semibold `text-primary` | **priority**, and nothing else |
+| 2 | neutral chip on `absent-quiet` | people · document links · work rows · external refs — things you can **open** |
+| 3 | tinted chip, state tokens only | overdue · blocked · waiting · delegated · stale · failed |
+| 4 | glyph + tint, **one per item** | carried 5+ days · blocking an agent |
+
+**Climb one rung only when the last cannot carry it.** And the hard cap: **at
+most two chips above rung 1 on one item**; a third collapses into `+2`.
+
+**Priority is weight, never colour.** In a personal system everything becomes
+P1 eventually; a red P1 makes the whole page red and teaches you to stop seeing
+it. A chip means *you can open this*, not *this is important* — it is a target,
+not an emphasis.
+
+The colour budget is unchanged: `agent` for provenance, `accent` for actionable
+or selected, state tokens for exceptions. Priority, size, project, area, type
+and source are never coloured — not because they do not matter but because they
+always apply, and a facet that is always present cannot also be a signal.
+
+## 13.4 An artifact made *for* a moment
+
+The standup was never a copy button. It is an artifact a scheduled run
+produced, **bound to an obligation on the calendar** — two ideas meeting — and
+once that is the shape it generalises to agendas, pre-reads and weekly
+summaries.
+
+One card, four parts: **what it is · what made it · what it is for · how fresh
+it is relative to that**. Verbs are **Open · Copy · Ask for changes**, and
+**Copy's menu never contains a send** — Metistry does not post, and the rule
+belongs on the pattern so the fourth artifact type cannot quietly introduce
+posting.
+
+Freshness here is not the usual staleness (B2): elsewhere stale means the
+screen is behind the data; here it means the artifact is behind its own
+occasion.
+
+## 13.5 The page expects to be argued with
+
+The composer is **part of the spine**, at the bottom where you end up after
+reading — not a floating bubble.
+
+Every change the assistant makes is **attributed, explained and undoable**:
+it sits in the `agent` container, names what moved, and carries Undo. The
+assistant reordering your day is an opinion (P5), and a page that silently
+rearranges after you speak to it is the fastest way to stop trusting whatever
+rearranged it.
+
+Where the revised arrangement is stored, and under whose principal, is a real
+invariant question — `today-hub-requests.md` **B4**, and it needs a ruling.
+
+## 13.6 Recurring meetings
+
+The card shows what came out of last time: action items created in the previous
+instance, and a link to its note. `vault_tasks.source` already supports
+`meeting:<path>`, so the tasks half is free once A3 exists; recurrence itself
+needs `series_id` on the event (B3).

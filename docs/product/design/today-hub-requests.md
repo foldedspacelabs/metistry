@@ -143,3 +143,84 @@ There is no per-user timestamp for when Today was last read.
 **Client-side is enough** for one owner on his own machines, and it should
 stay that way. This is the one item here that deliberately asks for **no**
 schema change.
+
+---
+
+# B — the second pass: items, artifacts-for-a-moment, and revision
+
+### B1 · An artifact needs a `for` — a binding to an occasion — blocking the pattern
+
+The standup draft is not a copy button. It is **an artifact a scheduled run
+produced, bound to an obligation on the calendar**, and once that is the shape
+it generalises: an agenda before a meeting, a pre-read before a review, a
+weekly summary before Friday.
+
+Nothing expresses that binding today. `artifacts` has no relation to a time or
+an event.
+
+**Add:** `for` on an artifact — `{ kind: "event" | "time", ref, at }` — where
+`ref` is an `event_id` (A1/A3) or a routine's declared slot. It is what lets
+the card say "for: Standup · 09:15 · recurring" and what lets the spine place
+it at 09:15 rather than in a list.
+
+### B2 · Freshness *relative to the occasion*, which is not the usual staleness
+
+Everywhere else in the product, stale means *the screen is behind the data*.
+Here it means **the artifact is behind its own occasion**: a standup written at
+06:02 for a 09:15 standup, where two things changed at 08:40, is wrong in a way
+that matters in twenty-five minutes.
+
+**Add:** the count of relevant changes since `made_at`, scoped to whatever the
+artifact drew on. Cheap version: the artifact records the named queries and
+params it used, and the count is those queries re-run and diffed. Without this
+the card can say when it was made and not whether that still means anything.
+
+### B3 · Recurrence, and the previous instance
+
+The meeting card should say what came out of *last time* — action items
+created in the previous instance of a recurring meeting, and a link to its
+note.
+
+`vault_tasks.source` already supports `meeting:<path>`, so the tasks half is
+free **once A3 exists**. The missing half is recurrence: EventKit has the
+series, `ek-helper.swift` does not return it.
+
+**Add:** `series_id` and `recurrence` to the event payload (part of A1), and
+resolve "the previous instance" through `vault_meeting_refs` (A3).
+
+### B4 · Where a revised day is stored, and under whose hand — needs a ruling
+
+§10.1 says the user's drag order is authoritative and stored (C29, still open).
+This design adds a second writer to that same state: **you tell the assistant
+to reorder your day, and it does.**
+
+That is a genuine invariant question, not a ticket:
+
+- the ordering is the user's, and the user asked for the change — so it is the
+  owner's intent, like completing a task from a mirror (§2.2);
+- but unlike the check route, this one is **not a single mechanical byte
+  change**; it is the assistant composing an arrangement;
+- and it must not become an agent-reachable action — `ACTION_KINDS` stays
+  closed.
+
+**My reading**, offered for the owner to accept or reject: the day's
+arrangement is **app state, not vault state**, keyed by `task_key` and
+`event_id`, written by an owner-only route, with every assistant-made change
+**attributed, explained and undoable on the page**. It never touches markdown,
+so no ownership rule is stretched, and the worst case is a bad ordering you
+press Undo on.
+
+### B5 · A `suggestions` source must carry evidence, not just a verb
+
+Extends A6. For a predicted action to say *why* it is there — which is rule 1
+of three — the reason has to be retrieved, not generated.
+
+**Add:** `evidence[]` on each suggestion: the rows it was derived from, so the
+card can render "you have 3 open items with Jim" as a fact with a link behind
+it rather than a sentence a model wrote.
+
+### B6 · Today as a top-level section
+
+Not a schema change — a navigation one, and it breaks a ratified rule, so it
+is written down here too. Today moves out of Work to the **second row** in the
+sidebar; Work returns to four children. See C30 and `screen-05-today.md` §13.

@@ -73,9 +73,17 @@ and no run is started at all. The message names every variable and the file:
 collectors all degrade absent — `aws-costs` with no AWS key returns 0 and
 records an `ok` run, which is a supported install, not a fault. Declaring
 `requires.env` on one of those would turn a supported install into a Needs
-You item every day. That is why no shipped manifest declares the structured
-form yet; the older `requires: [aws-credentials]` label list stays valid and
-is documentation only, checked by nothing.
+You item every day. The older `requires: [aws-credentials]` label list stays
+valid and is documentation only, checked by nothing.
+
+**One shipped manifest declares the structured form**, and it is the shape the
+rule admits: `routines/plan-tomorrow` names
+`METISTRY_RECONCILER_URL` and `METISTRY_BRIDGE_TOKEN_RECONCILER` under
+`requires.env`, because without the vault bridge there is no template to read
+and nowhere to write the plan — there is nothing left to degrade *to*. What it
+deliberately does not declare is `reachable: [METISTRY_EK_URL]`: the calendar
+genuinely degrades, and blocking the window on it would mean no plan at all on
+an evening the bridge was down (below).
 
 `engine: true` asks core's one engine seam (`packages/core/src/compute.ts`,
 `engineStatus`) — the same function `metistry up`, `metistry doctor` and the
@@ -177,6 +185,90 @@ CI against the shipped provider templates, and `completeJson()` against the
 the named provider is not `locality: on_machine`. Everything else about the
 tier degrades absent. Details in `docs/ops/compute.md` — "Apple Foundation
 Models".
+
+## `plan-tomorrow` — the evening's one file
+
+The second routine that is hourly on paper and once-a-night in practice
+(`knowledge-fold` was the first, and `docs/ops/knowledge-fold.md` explains why:
+the runner has no notion of time of day, so an `@daily` routine that skips at
+09:00 is due again at 09:00 tomorrow and never reaches the evening). It renders
+`Templates/Plan.md` — a markdown file in the vault, which you edit in Obsidian
+— into `Journal/Plan/<tomorrow>.md`, written through the reconciler's bridge as
+`principal: plan-tomorrow` (`docs/product/daily-flow-spec.md` §5.1, §7).
+
+**No model is in it, at any tier.** The ordering is the template's
+(`order: "priority, due, size"` — a field list), your prioritisation *rule* is
+prose the plan includes verbatim for you to read, and `{{ prose }}` is refused
+outright in a template whose output the assistant may not write. The manifest
+declares no `engine`, so the runner never asks whether one is configured.
+
+### The gate, in order
+
+| check | what it means | costs |
+| --- | --- | --- |
+| before **12:00** local | nothing is planned over breakfast — the day it plans *from* is not over | nothing: no query, no vault read |
+| this target date is **settled** | one pass already decided tonight, whichever way | one indexed `runs` read |
+| before your **day end** | `working_hours:` in `Me/profile.md` (`"09:00-17:30"` → 17:30); absent, **19:00** local, and the plan says so | one small vault read |
+| tomorrow is **not a working day** | `working_days:` in `Me/profile.md`; absent, **nothing is written at all** and the run says `no_working_days` rather than guessing Monday-to-Friday | recorded, and the evening goes quiet |
+
+### What it writes, and what it will not
+
+One file: `Journal/Plan/<date>.md`, `source: plan-tomorrow` in its own
+frontmatter, ending in the provenance footer that names the template, its
+sha256 and the engine version. Re-running the same evening replaces that same
+file under compare-and-swap; nothing is ever appended.
+
+- **A plan file that is not this routine's is never overwritten** — including
+  one with no `source:` at all, which is yours (§5.1). The run records
+  `user_owned` and writes nothing.
+- **A recurring rule is listed, never materialised.** `- Water the plants —
+  every week, due 2026-09-22` has no checkbox and no `^mt-` anchor: no routine
+  writes a task line into a note you own (D4). The engine enforces it from the
+  render's `source`; the routine refuses to write a file containing one anyway.
+- **Absent is not failed** (§6.4). No calendar bridge, no query store, a
+  `where:` the filter vocabulary refuses — each renders one `> ⚠️ metistry: …`
+  line naming the template and the line number, and the plan still lands. A day
+  with no plan because the calendar was down is the worst possible outcome.
+
+### Reading the ledger
+
+One `runs` row per target date, written the first time a pass settles it —
+which is what keeps an hourly routine from filing twenty rows a night.
+`meta.planned_for` is the discriminator (the runner's own per-tick
+`routine_run` row carries none), and `meta.outcome` is one of `wrote`,
+`no_working_days`, `not_a_working_day`, `template_missing`,
+`template_unreadable`, `user_owned` or `would_materialise`:
+
+```sql
+SELECT ts, meta->>'planned_for' AS for_day, meta->>'outcome' AS outcome, meta
+FROM runs WHERE component = 'plan-tomorrow' AND kind = 'routine_run' AND ok
+  AND meta ? 'planned_for'
+ORDER BY ts DESC LIMIT 7;
+```
+
+`too_early` is deliberately **not** a row: it is the schedule working.
+
+### What an install needs before the first plan renders
+
+| file | what it decides | without it |
+| --- | --- | --- |
+| `Templates/Plan.md` | everything the plan says (`metistry init` stamps it; you edit it in Obsidian) | `template_missing`, silently — a missing template is a configuration fact |
+| `Me/profile.md` → `working_days` | which eves plan at all | `no_working_days`, recorded: nothing is written and nothing is guessed |
+| `Me/profile.md` → `working_hours` | when the evening starts | 19:00 local, with one visible line in the plan saying a default nobody chose was used |
+| `Me/Working Style.md` → `## Prioritisation` | the prose the plan includes verbatim | one `> ⚠️ metistry: …` line where the include is |
+| `METISTRY_EK_URL` + `METISTRY_BRIDGE_TOKEN_EVENTKIT` | tomorrow's events | one line saying the calendar bridge is not reachable |
+
+`METISTRY_RECONCILER_URL` and `METISTRY_BRIDGE_TOKEN_RECONCILER` are the only
+hard requirements, and they are in the manifest's `requires.env` — without
+them the window is refused with the variables named rather than spent. The
+eventkit bridge is deliberately **not** declared `reachable:`: blocking on it
+would mean no plan at all on an evening the calendar was down.
+
+Turning it off is the same as the fold's: remove `plan-tomorrow` from
+`routines/index.ts` (a product change, a PR) — or, without a rebuild, take
+`working_days:` out of `Me/profile.md`, which is your own hand and takes effect
+at the next tick: the routine then records `no_working_days` and writes
+nothing.
 
 ## What this is not
 

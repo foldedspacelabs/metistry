@@ -9,8 +9,27 @@
 // lands, so `knowledge_read` degrades to `not_available` unless the host
 // injects a reader — no vault mount is invented here.
 
-import { EmbedUnavailableError, isVaultPath, vectorLiteral, VAULT_ROOT_AREA, type ErrorCode } from "@foldedspacelabs/metistry-core";
+import { canSeeUnder, EmbedUnavailableError, scopeRequired, validKnowledgePath, vectorLiteral, type ErrorCode } from "@foldedspacelabs/metistry-core";
 import type { AgentPrincipal, Db, Tier } from "./types.js";
+
+/**
+ * **Moved to `packages/core/src/access.ts`** (P0 of
+ * docs/research/2026-09-19-grants-and-access-simplified.md §4 — a pure move,
+ * no behaviour change). The console's authorization rules were being served
+ * out of this bridge's package, so a second bridge would have had to import a
+ * sibling bridge to get them (§2.9); they now live beside `actions.ts`,
+ * `manifest.ts` and `instance-layout.ts`, which they call.
+ *
+ * @deprecated Re-exported here for ONE release so a pinned consumer keeps
+ * building. Import from `@foldedspacelabs/metistry-core` instead.
+ */
+export { canSeeUnder, SCOPE_REQUIRED, scopeRequired, underAreas, validKnowledgePath } from "@foldedspacelabs/metistry-core";
+/**
+ * @deprecated Moved to `@foldedspacelabs/metistry-core` (`access.ts`).
+ * Re-exported for one release. `areaOf` is not called inside this package —
+ * `scopeRequired` is the only caller — so it is here purely for the pin.
+ */
+export { areaOf } from "@foldedspacelabs/metistry-core";
 
 export interface KnowledgeHit {
   path: string;
@@ -42,57 +61,6 @@ export type KnowledgeReader = (path: string) => Promise<string | null>;
 export type ReadOutcome =
   | { ok: true; path: string; title: string; content: string }
   | { ok: false; code: ErrorCode; message?: string; expose?: Record<string, unknown> };
-
-/**
- * A vault path an agent may name. Since the 2026-09-17 layout the vault root
- * IS the instance directory, so there is no prefix to anchor on — the rule is
- * core's `isVaultPath`: no traversal, no leading slash, nothing inside a
- * dot-directory (`.metistry/` is the machinery, and an agent may not read it
- * here any more than it may write it), and not `Artifacts/`, which is not
- * knowledge. Mirrors the grant shape the console validates.
- */
-export function validKnowledgePath(path: string): boolean {
-  return typeof path === "string" && path.length <= 500 && !/[\0\\]/.test(path) && isVaultPath(path);
-}
-
-/**
- * Prefix semantics of a grant: the area itself or anything below it. A
- * trailing slash names a directory as a whole, and the bare vault — every
- * path, root notes included — is spelled `/`, which rtrims to the empty
- * prefix. The console admits that spelling for internal principals only.
- */
-export function underAreas(path: string, areas: readonly string[]): boolean {
-  return areas.some((raw) => {
-    const a = raw.endsWith("/") ? raw.slice(0, -1) : raw;
-    return a === "" || path === a || path.startsWith(`${a}/`);
-  });
-}
-
-/**
- * **One scope rule for every knowledge read, on both doors.** May a caller
- * whose grant covers `areas` see this path at all? Two conditions, both
- * necessary: it is vault CONTENT (`validKnowledgePath` — so `.metistry/`,
- * `Artifacts/`, a dot-directory, a traversal and the root `CLAUDE.md` are out
- * for every caller, the owner included), and it falls under the areas.
- *
- * `null` is "no prefix restriction" — every vault path. That is the OWNER on
- * the console's routes, and it is tier `index` here when the question is a
- * TITLE rather than content (ruled 2026-09-19: an agent discovers what
- * knowledge exists so it can ask for the area that holds it). It is never
- * tier `none`, which is refused before this is reached: the caller decides
- * the TIER, this decides the PATH, and keeping those two apart is what lets
- * one function serve a console route and an MCP tool.
- *
- * It lives here, beside `underAreas`, because that is the prefix rule and
- * `isVaultPath` is core's — `apps/console/src/knowledge-routes.ts`'s `canSee`
- * calls straight through to it, so the console's four doors and this bridge's
- * tools are ONE implementation rather than two that agree today. The
- * dependency arrow is unchanged: apps → packages, never the reverse.
- */
-export function canSeeUnder(path: string, areas: readonly string[] | null): boolean {
-  if (!validKnowledgePath(path)) return false;
-  return areas === null || underAreas(path, areas);
-}
 
 /**
  * The one filtering decision every knowledge_* surface (search, read, list,
@@ -135,31 +103,6 @@ export function knowledgeScope(principal: AgentPrincipal): KnowledgeScope {
 }
 
 /**
- * Owner ruling 2026-09-19 (judgement call B on PR #216): a caller who may
- * see a page's TITLE (`canList`) but not its CONTENT (`canRead`) is told
- * WHICH grant would unlock it, rather than the uniform "not granted" — it
- * already knows the page is there, so naming the area is not a new leak.
- * `SCOPE_REQUIRED` is that refusal's stable machine-readable half, carried
- * in `Outcome.expose.reason` (never `error.code`, which stays the ordinary
- * `forbidden` every other refusal on this surface uses — invariant 8's
- * envelope is unchanged, this is additive).
- */
-export const SCOPE_REQUIRED = "scope_required";
-
-/**
- * The smallest folder grant that would cover `path` — its immediate parent
- * directory, the same granularity a directory-prefix grant already is
- * (`underAreas`). A root-level note (no parent — `now.md`) needs the bare
- * vault grant, spelled the way an internal principal's own grant already is
- * (`VAULT_ROOT_AREA`); an external agent is not offered that one, but it is
- * still the true answer to "what prefix contains this path".
- */
-export function areaOf(path: string): string {
-  const i = path.lastIndexOf("/");
-  return i === -1 ? VAULT_ROOT_AREA : path.slice(0, i);
-}
-
-/**
  * Whether `path` names a settled (non-draft) row in the index — the same
  * existence tier `index` can already see through knowledge_search/
  * knowledge_list. `scopeRequired` below gates on this so the refusal is
@@ -171,27 +114,6 @@ export function areaOf(path: string): string {
 export async function isSettledPage(db: Db, path: string): Promise<boolean> {
   const { rows } = await db.query(`SELECT 1 FROM knowledge_files WHERE path = $1 AND NOT draft`, [path]);
   return rows.length > 0;
-}
-
-/**
- * The scope_required refusal, built once so knowledge_read (below) and
- * knowledge_list's `links_for` (knowledge-fs.ts's `listLinks`) say the
- * identical thing for the identical reason. `message` replaces the bare
- * "not granted" string; `expose` is what server.ts's `render` merges onto
- * the wire envelope alongside `error` (Outcome's `expose`, never `meta`,
- * which is audit-only). It names the mechanism — `request_access` since
- * 2026-09-19 (access.ts) — and where the ask lands, so the agent knows the
- * owner, not it, decides. A refusal without that sentence is a dead end:
- * a model told only "no" has no next move but to try the same path again.
- */
-export function scopeRequired(path: string): { message: string; expose: { reason: string; grantedScope: string } } {
-  const area = areaOf(path);
-  return {
-    message:
-      `you can see that this page exists, but reading it needs the \`${area}\` grant — ` +
-      `ask for it: \`request_access\` with area \`${area}\` and why; the owner approves it in Needs You.`,
-    expose: { reason: SCOPE_REQUIRED, grantedScope: area },
-  };
 }
 
 function escapeLike(s: string): string {

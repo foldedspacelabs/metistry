@@ -169,6 +169,7 @@ const RECONCILER_SANDBOX_EXTRA = {
   TMP_DIR: "/tmp",
   GIT_PREFIX: "/Library/Developer/CommandLineTools/usr",
   GIT_CONFIG_GLOBAL: "/h/.gitconfig",
+  ASKPASS_BIN: "/i/.metistry/state/bin/git-askpass",
   RECONCILER_TCP: "localhost:7812",
   CONSOLE_TCP: "localhost:8080",
   DB_TCP: "localhost:5432",

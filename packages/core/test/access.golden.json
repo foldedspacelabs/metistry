@@ -590,5 +590,24 @@
       "message": "no such page — a path must be vault CONTENT: not .metistry/, not Artifacts/, not the root CLAUDE.md, no leading slash and no traversal (docs/ops/instance-layout.md)",
       "at": "apps/console/src/knowledge-routes.ts:336 · NOT_KNOWLEDGE :139"
     }
+  },
+  {
+    "id": "crew_uses.outside_toolset",
+    "door": "every tool call on /mcp — the run's own allowlist",
+    "who": "crew",
+    "verb": "act",
+    "resource": {
+      "kind": "toolset",
+      "name": "tasks_comment"
+    },
+    "code": "forbidden",
+    "reason": "not_in_uses",
+    "message": "tasks_comment is not in this crew's toolset — writer holds knowledge, requests (`uses:` in its manifest, a protected path in the user's hand: docs/ops/crews.md). Report what you needed instead of retrying.",
+    "changed": "P2's ONE intended behaviour change (§2.2, §4). `/mcp` had never heard of `uses`: the door admitted this call and the only thing that refused it was the allowlist in the process that dispatched the run. That is a process boundary, not the tool.",
+    "before": {
+      "code": null,
+      "message": "\"mcp__brain__tasks_comment\" is not in this run's tool list",
+      "at": "apps/assistant/src/tools.ts:149 — the CALLER, never the door"
+    }
   }
 ]

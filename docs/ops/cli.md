@@ -363,17 +363,24 @@ current checkout into the instance directory and commit it yourself, the
 same way you would add any other note.
 
 What it prints at the end is the next step —
-five lines for `<dir>/.metistry/state/.env`, this instance's own environment,
+six lines for `<dir>/.metistry/state/.env`, this instance's own environment,
 shaped for `--shape compose|launchd` (default: launchd on macOS, compose
 elsewhere — `docs/ops/deployment-shapes.md`):
 
 ```
 METISTRY_INSTANCE_DIR=<dir>
 METISTRY_BRIDGE_TOKEN_RECONCILER=<minted once; shown only here>
+METISTRY_BRIDGE_TOKEN_RECONCILER_USER=<minted once; shown only here>
 METISTRY_RECONCILER_URL=http://127.0.0.1:7812              # --shape compose: http://host.docker.internal:7812
 METISTRY_ORIGIN=http://127.0.0.1:8080
 METISTRY_LOCAL_OWNER_TOKEN=<minted once; shown only here>
 ```
+
+The two reconciler bearers are not interchangeable: the `_USER` one is the
+only credential that may write a §4.7 protected path, and it is deliberately
+kept out of the console's environment (`docs/ops/auth.md`, "The principal
+comes from the credential"). `metistry up` and `metistry update` mint it for
+an install that predates it.
 
 `METISTRY_ORIGIN` is the console's canonical origin (`docs/ops/auth.md`)
 — it refuses to start without one, in either shape. The default above is

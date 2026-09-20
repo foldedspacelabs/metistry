@@ -349,6 +349,12 @@ export async function init(opts: InitOptions): Promise<InitResult> {
     envLines: [
       `METISTRY_INSTANCE_DIR=${dir}`,
       `METISTRY_BRIDGE_TOKEN_RECONCILER=${mint()}`,
+      // The OWNER class of the same bridge (docs/ops/auth.md): the one
+      // credential that may write a §4.7 protected path. Minted separately
+      // and never handed to the console — `consoleEnv` denies it by name —
+      // so "only the user's hand changes how the system behaves" is a
+      // property of the credential rather than of a field in a request body.
+      `METISTRY_BRIDGE_TOKEN_RECONCILER_USER=${mint()}`,
       `METISTRY_RECONCILER_URL=${reconcilerUrl}`,
       // the console's canonical origin (docs/ops/auth.md) — required to
       // start (apps/console/src/main.ts requireEnv) in EITHER shape. This is

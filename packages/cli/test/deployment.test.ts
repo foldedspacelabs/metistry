@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { emptyCompute, parseCompute } from "@foldedspacelabs/metistry-core";
-import { ASSISTANT_ENV_KEYS, assistantEnv, assistantEnvKeys, consoleEnv, deploymentPaths, loadDeployment, type ShapeContext } from "../src/deployment.js";
+import { ASSISTANT_ENV_KEYS, assistantEnv, assistantEnvKeys, CONSOLE_ENV_DENY, consoleEnv, deploymentPaths, loadDeployment, type ShapeContext } from "../src/deployment.js";
 
 async function dirs(): Promise<{ product: string; instance: string }> {
   const root = await mkdtemp(join(tmpdir(), "metistry-deploy-"));
@@ -89,6 +89,18 @@ describe("the console's launchd environment", () => {
     // nothing from the operator's shell that is not ours
     expect(e.PATH).toBeUndefined();
     expect(e.HOME).toBeUndefined();
+  });
+
+  // The misuse test for the credential split (invariant 8): the console's
+  // environment is a passthrough, so the one bearer it must never hold has to
+  // be denied BY NAME here — otherwise `.metistry/` would be one env-var
+  // spread away from the process that terminates the network.
+  it("never carries the vault bridge's OWNER bearer, however it reaches this install's .env", () => {
+    const e = consoleEnv(ctx({ ...env, METISTRY_BRIDGE_TOKEN_RECONCILER: "shared", METISTRY_BRIDGE_TOKEN_RECONCILER_USER: "owner-only" }));
+    expect(e.METISTRY_BRIDGE_TOKEN_RECONCILER).toBe("shared"); // the console keeps its own
+    expect(e.METISTRY_BRIDGE_TOKEN_RECONCILER_USER).toBeUndefined();
+    expect(Object.values(e)).not.toContain("owner-only");
+    expect(CONSOLE_ENV_DENY).toEqual(["METISTRY_BRIDGE_TOKEN_RECONCILER_USER"]);
   });
 
   it("an inbox the operator set to a real path is kept", () => {

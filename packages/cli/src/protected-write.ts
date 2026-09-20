@@ -4,14 +4,105 @@
 // `user` principal, which is the only principal allowed to change how the
 // system behaves (invariant 2). Extracted from `update`'s writeLock so
 // `secrets`/`up` can mint `instance_id` into identity.yaml the same way.
+//
+// **This file is the owner class.** Since 2026-09-20 the reconciler decides
+// what a caller may write from the BEARER it presents, not from the
+// `principal` in its body (apps/reconciler/src/paths.ts), and the bearer that
+// carries authority over `.metistry/` is
+// `METISTRY_BRIDGE_TOKEN_RECONCILER_USER` — minted for the CLI, kept out of
+// the console's environment (`consoleEnv`'s denylist in deployment.ts), and
+// reachable here because the CLI runs as the person whose login Keychain and
+// 0600 `.env` hold it. The console's own bearer is refused on these paths
+// now, whatever principal it claims to be.
 
 import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { INSTANCE_LAYOUT, resolveInstanceLayout, type InstancePathKey } from "@foldedspacelabs/metistry-core";
+import { INSTANCE_LAYOUT, mintToken, resolveInstanceLayout, type InstancePathKey } from "@foldedspacelabs/metistry-core";
 import { hostLocal } from "./doctor.js";
+import { withEnvLine } from "./postgres.js";
+import { mintSecret } from "./secrets.js";
 import { StepFailed, type StepRunner } from "./steps.js";
 
 export const RECONCILER_LABEL = "com.foldedspacelabs.metistry.reconciler";
+
+/**
+ * The owner-class bearer for the vault bridge: the one credential that may
+ * write a §4.7 protected path (apps/reconciler/src/paths.ts's authority
+ * table). Named here because the three places that care — the writer below,
+ * the minting step, and `consoleEnv`'s denylist — must spell it identically.
+ */
+export const OWNER_BRIDGE_TOKEN = "METISTRY_BRIDGE_TOKEN_RECONCILER_USER";
+
+export interface EnsureOwnerTokenOptions {
+  /** The install's environment. Mutated on success, so the same run can use what it just minted. */
+  env: NodeJS.ProcessEnv;
+  /** The dotenv file this install runs from (`<instance>/.metistry/state/.env`). */
+  envFile: string | undefined;
+  platform: NodeJS.Platform;
+  /** This instance's `instance_id`, when it is already known — the Keychain account instance-scoped secrets are filed under. */
+  instanceId?: string | undefined;
+  /** test seam */
+  mint?: (() => string) | undefined;
+}
+
+export interface EnsureOwnerTokenResult {
+  minted: boolean;
+  /** One line for the plan: what happened, and never the value. */
+  detail: string;
+}
+
+/**
+ * Mint `METISTRY_BRIDGE_TOKEN_RECONCILER_USER` if this install has none.
+ *
+ * It is the migration, and it is why an existing install does not have to be
+ * told anything: `metistry up` and `metistry update` both call this BEFORE
+ * they restart the reconciler and before they write a protected path, so the
+ * job that comes back up is the one holding the new bearer. `metistry secrets
+ * sync --to env` mints it too (`GENERATED_SECRETS`) for an install that runs
+ * neither.
+ *
+ * On macOS it goes through `mintSecret`, so the login Keychain — the
+ * canonical store — has it and a later `secrets sync --to env` regenerates
+ * the same value rather than rotating it behind the reconciler's back.
+ * Elsewhere `.env` IS the store (`metistry secrets` says so), and the line is
+ * appended exactly as `up` appends the generated Postgres password.
+ */
+export async function ensureOwnerBridgeToken(r: StepRunner, opts: EnsureOwnerTokenOptions): Promise<EnsureOwnerTokenResult> {
+  if (opts.env[OWNER_BRIDGE_TOKEN]) return { minted: false, detail: `${OWNER_BRIDGE_TOKEN}: already set — the owner class is this install's CLI` };
+  if (!opts.envFile) return { minted: false, detail: `${OWNER_BRIDGE_TOKEN} is unset and there is no .env to mint it into — protected paths stay unwritable (docs/ops/auth.md)` };
+  const value = (opts.mint ?? mintToken)();
+  const shown = `mint ${OWNER_BRIDGE_TOKEN} into ${opts.platform === "darwin" ? `the login Keychain and ${opts.envFile}` : opts.envFile} (the bearer that may write .metistry/; never shown)`;
+  // A dry run reaches nothing and mints nothing — and must not mutate the
+  // environment it was handed, which is `process.env` when the CLI is the
+  // caller (the test-isolation guard catches exactly that).
+  if (!r.action(shown)) return { minted: false, detail: `${OWNER_BRIDGE_TOKEN} would be minted` };
+  try {
+    if (opts.platform === "darwin") {
+      await mintSecret(OWNER_BRIDGE_TOKEN, {
+        envFile: opts.envFile,
+        ...(opts.instanceId ? { instanceId: opts.instanceId } : {}),
+        exec: r.exec,
+        out: (l) => r.note(l),
+        platform: opts.platform,
+        env: opts.env,
+        mint: () => value,
+      });
+    } else {
+      const current = existsSync(opts.envFile) ? await readFile(opts.envFile, "utf8") : "";
+      const next = withEnvLine(current, OWNER_BRIDGE_TOKEN, value, "the vault bridge's OWNER bearer: the one credential that may write .metistry/ (docs/ops/auth.md). Minted by `metistry up`; never printed.");
+      if (next) await r.write(opts.envFile, next, "the owner-class bridge bearer", 0o600);
+    }
+  } catch (err) {
+    // A Keychain that will not answer is a step failure with a remediation,
+    // not a stack trace out of `metistry update`.
+    throw new StepFailed(
+      `could not mint ${OWNER_BRIDGE_TOKEN} (${err instanceof Error ? err.message : String(err)}) — without it no caller may write a §4.7 protected path; \`metistry secrets mint ${OWNER_BRIDGE_TOKEN}\` does the same thing on its own (docs/ops/auth.md)`,
+    );
+  }
+  opts.env[OWNER_BRIDGE_TOKEN] = value;
+  return { minted: true, detail: `${OWNER_BRIDGE_TOKEN} minted — restart the reconciler for it to take effect (it reads .env at start)` };
+}
 
 /**
  * The instance-relative path a protected write posts, spelled the way THIS
@@ -57,10 +148,24 @@ export async function writeProtected(r: StepRunner, rel: string, content: string
 
   if (url) {
     const base = hostLocal(url);
-    const token = opts.env.METISTRY_BRIDGE_TOKEN_RECONCILER;
-    if (!token) throw new StepFailed(`METISTRY_RECONCILER_URL is set but METISTRY_BRIDGE_TOKEN_RECONCILER is not — ${rel} cannot be written through the bridge`);
     const shown = `POST ${base}/vault/write ${rel} (principal user, "${message}")`;
+    // The plan first: a dry run reaches nothing, so it must not depend on a
+    // credential either — `up --dry-run` on an install that has not minted
+    // the owner bearer yet still prints the plan that would mint it.
     if (!r.action(shown)) return { how: "bridge", detail: "the reconciler commits it on its next flush (it is the instance repo's sole committer)" };
+    // Whichever bearer THIS process holds, and the bridge decides what it may
+    // write (docs/ops/auth.md). The CLI holds the owner one; the console —
+    // which calls this same function for its two enumerated compute writes —
+    // holds only the shared one and is refused on everything else. Choosing
+    // here rather than enforcing here is the point: a caller cannot widen
+    // itself by picking a different variable name.
+    const owner = opts.env[OWNER_BRIDGE_TOKEN];
+    const token = owner ?? opts.env.METISTRY_BRIDGE_TOKEN_RECONCILER;
+    if (!token) {
+      throw new StepFailed(
+        `METISTRY_RECONCILER_URL is set but neither ${OWNER_BRIDGE_TOKEN} nor METISTRY_BRIDGE_TOKEN_RECONCILER is — ${rel} cannot be written through the bridge`,
+      );
+    }
     let res: Response;
     try {
       res = await opts.fetchFn(`${base}/vault/write`, {
@@ -80,7 +185,15 @@ export async function writeProtected(r: StepRunner, rel: string, content: string
       } catch {
         /* no envelope */
       }
-      throw new StepFailed(`reconciler refused the ${rel} write (${why}) — ${rel} was NOT written`);
+      // Two refusals have a specific cause worth naming, because both are
+      // the credential split rather than anything about the content.
+      const hint =
+        res.status === 401
+          ? ` — the reconciler was started before ${OWNER_BRIDGE_TOKEN} reached its environment; \`metistry restart reconciler\` and rerun`
+          : res.status === 403 && !owner
+            ? ` — this process holds only the console's shared bearer, and ${rel} is a §4.7 protected path the owner class alone may write; mint ${OWNER_BRIDGE_TOKEN} with \`metistry secrets sync --to env\` and restart the reconciler (docs/ops/auth.md)`
+            : "";
+      throw new StepFailed(`reconciler refused the ${rel} write (${why})${hint} — ${rel} was NOT written`);
     }
     return { how: "bridge", detail: `${rel} written through the reconciler as user — committed on its next flush` };
   }
@@ -89,7 +202,7 @@ export async function writeProtected(r: StepRunner, rel: string, content: string
     if (opts.platform === "darwin" && !r.dryRun) {
       const probe = await r.exec("launchctl", ["print", `gui/${opts.uid}/${RECONCILER_LABEL}`]);
       if (probe.code === 0 && /^\s*state = running/m.test(probe.stdout)) {
-        throw new StepFailed(`a reconciler job is running but METISTRY_RECONCILER_URL is unset — add it (and METISTRY_BRIDGE_TOKEN_RECONCILER) to .env so this writes ${rel} through the bridge; refusing to write behind the sole committer`);
+        throw new StepFailed(`a reconciler job is running but METISTRY_RECONCILER_URL is unset — add it (and ${OWNER_BRIDGE_TOKEN}) to .env so this writes ${rel} through the bridge; refusing to write behind the sole committer`);
       }
     }
     const path = join(dir, rel);

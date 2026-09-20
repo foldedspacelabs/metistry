@@ -1,0 +1,594 @@
+[
+  {
+    "id": "knowledge_search.tier_none",
+    "door": "knowledge_search",
+    "who": "ungranted",
+    "verb": "act",
+    "resource": {
+      "kind": "tool",
+      "name": "knowledge_search"
+    },
+    "code": "forbidden",
+    "reason": "tier_required",
+    "message": "",
+    "before": {
+      "code": "forbidden",
+      "message": null,
+      "at": "packages/mcp-brain/src/server.ts:476"
+    }
+  },
+  {
+    "id": "knowledge_read.tier_none",
+    "door": "knowledge_read",
+    "who": "ungranted",
+    "verb": "read",
+    "resource": {
+      "kind": "knowledge",
+      "door": "read",
+      "path": "Areas/Health/sleep.md"
+    },
+    "code": "forbidden",
+    "reason": "tier_required",
+    "message": "",
+    "before": {
+      "code": "forbidden",
+      "message": null,
+      "at": "packages/mcp-brain/src/knowledge.ts:329"
+    }
+  },
+  {
+    "id": "knowledge_read.index_unsettled",
+    "door": "knowledge_read",
+    "who": "browser",
+    "verb": "read",
+    "resource": {
+      "kind": "knowledge",
+      "door": "read",
+      "path": "Areas/Health/sleep.md"
+    },
+    "code": "forbidden",
+    "reason": "tier_required",
+    "message": "",
+    "before": {
+      "code": "forbidden",
+      "message": null,
+      "at": "packages/mcp-brain/src/knowledge.ts:329"
+    }
+  },
+  {
+    "id": "knowledge_read.index_settled",
+    "door": "knowledge_read",
+    "who": "browser",
+    "verb": "read",
+    "resource": {
+      "kind": "knowledge",
+      "door": "read",
+      "path": "Areas/Health/sleep.md",
+      "settled": true
+    },
+    "code": "forbidden",
+    "reason": "scope_required",
+    "message": "you can see that this page exists, but reading it needs the `Areas/Health` grant — ask for it: `request_access` with area `Areas/Health` and why; the owner approves it in Needs You.",
+    "needs": {
+      "grant": {
+        "tier": "areas",
+        "area": "Areas/Health"
+      }
+    },
+    "expose": {
+      "reason": "scope_required",
+      "grantedScope": "Areas/Health"
+    },
+    "before": {
+      "code": "forbidden",
+      "message": "you can see that this page exists, but reading it needs the `Areas/Health` grant — ask for it: `request_access` with area `Areas/Health` and why; the owner approves it in Needs You.",
+      "at": "packages/mcp-brain/src/knowledge.ts:327 · packages/mcp-brain/src/knowledge.ts:187 (scopeRequired)"
+    }
+  },
+  {
+    "id": "knowledge_read.not_a_vault_path",
+    "door": "knowledge_read",
+    "who": "agent",
+    "verb": "read",
+    "resource": {
+      "kind": "knowledge",
+      "door": "read",
+      "path": ".metistry/compute.yaml"
+    },
+    "code": "invalid_request",
+    "reason": "not_knowledge",
+    "message": "path must be a vault path — TitleCase folders, no traversal, nothing under .metistry/ or Artifacts/",
+    "before": {
+      "code": "invalid_request",
+      "message": "path must be a vault path — TitleCase folders, no traversal, nothing under .metistry/ or Artifacts/",
+      "at": "packages/mcp-brain/src/knowledge.ts:331"
+    }
+  },
+  {
+    "id": "knowledge_read.outside_areas",
+    "door": "knowledge_read",
+    "who": "agent",
+    "verb": "read",
+    "resource": {
+      "kind": "knowledge",
+      "door": "read",
+      "path": "Areas/Finance/tax.md"
+    },
+    "code": "forbidden",
+    "reason": "scope_required",
+    "message": "",
+    "before": {
+      "code": "forbidden",
+      "message": null,
+      "at": "packages/mcp-brain/src/knowledge.ts:332"
+    }
+  },
+  {
+    "id": "knowledge_list.tier_none",
+    "door": "knowledge_list",
+    "who": "ungranted",
+    "verb": "act",
+    "resource": {
+      "kind": "tool",
+      "name": "knowledge_list"
+    },
+    "code": "forbidden",
+    "reason": "tier_required",
+    "message": "not granted",
+    "before": {
+      "code": "forbidden",
+      "message": "not granted",
+      "at": "packages/mcp-brain/src/knowledge-fs.ts:278"
+    }
+  },
+  {
+    "id": "knowledge_list.prefix_outside",
+    "door": "knowledge_list",
+    "who": "agent",
+    "verb": "list",
+    "resource": {
+      "kind": "knowledge",
+      "door": "list",
+      "path": "Areas/Finance"
+    },
+    "code": "forbidden",
+    "reason": "scope_required",
+    "message": "not granted",
+    "before": {
+      "code": "forbidden",
+      "message": "not granted",
+      "at": "packages/mcp-brain/src/knowledge-fs.ts:287"
+    }
+  },
+  {
+    "id": "knowledge_links.outside_areas",
+    "door": "knowledge_list links_for",
+    "who": "agent",
+    "verb": "read",
+    "resource": {
+      "kind": "knowledge",
+      "door": "links",
+      "path": "Areas/Finance/tax.md"
+    },
+    "code": "forbidden",
+    "reason": "scope_required",
+    "message": "not granted",
+    "before": {
+      "code": "forbidden",
+      "message": "not granted",
+      "at": "packages/mcp-brain/src/knowledge-fs.ts:257"
+    }
+  },
+  {
+    "id": "knowledge_links.index_settled",
+    "door": "knowledge_list links_for",
+    "who": "browser",
+    "verb": "read",
+    "resource": {
+      "kind": "knowledge",
+      "door": "links",
+      "path": "Areas/Health/sleep.md",
+      "settled": true
+    },
+    "code": "forbidden",
+    "reason": "scope_required",
+    "message": "you can see that this page exists, but reading it needs the `Areas/Health` grant — ask for it: `request_access` with area `Areas/Health` and why; the owner approves it in Needs You.",
+    "needs": {
+      "grant": {
+        "tier": "areas",
+        "area": "Areas/Health"
+      }
+    },
+    "expose": {
+      "reason": "scope_required",
+      "grantedScope": "Areas/Health"
+    },
+    "before": {
+      "code": "forbidden",
+      "message": "you can see that this page exists, but reading it needs the `Areas/Health` grant — ask for it: `request_access` with area `Areas/Health` and why; the owner approves it in Needs You.",
+      "at": "packages/mcp-brain/src/knowledge-fs.ts:255 · packages/mcp-brain/src/knowledge.ts:187 (scopeRequired)"
+    }
+  },
+  {
+    "id": "knowledge_grep.tier_index",
+    "door": "knowledge_grep",
+    "who": "browser",
+    "verb": "act",
+    "resource": {
+      "kind": "tool",
+      "name": "knowledge_grep"
+    },
+    "code": "forbidden",
+    "reason": "tier_required",
+    "message": "not granted",
+    "before": {
+      "code": "forbidden",
+      "message": "not granted",
+      "at": "packages/mcp-brain/src/knowledge-fs.ts:436"
+    }
+  },
+  {
+    "id": "knowledge_grep.prefix_outside",
+    "door": "knowledge_grep",
+    "who": "agent",
+    "verb": "read",
+    "resource": {
+      "kind": "knowledge",
+      "door": "grep",
+      "path": "Areas/Finance"
+    },
+    "code": "forbidden",
+    "reason": "scope_required",
+    "message": "not granted",
+    "before": {
+      "code": "forbidden",
+      "message": "not granted",
+      "at": "packages/mcp-brain/src/knowledge-fs.ts:437"
+    }
+  },
+  {
+    "id": "knowledge_write.not_the_writer",
+    "door": "knowledge_write",
+    "who": "agent",
+    "verb": "act",
+    "resource": {
+      "kind": "tool",
+      "name": "knowledge_write"
+    },
+    "code": "forbidden",
+    "reason": "role_required",
+    "message": "",
+    "before": {
+      "code": "forbidden",
+      "message": null,
+      "at": "packages/mcp-brain/src/knowledge-write.ts:305"
+    }
+  },
+  {
+    "id": "knowledge_write.outside_areas",
+    "door": "knowledge_write",
+    "who": "narrowed",
+    "verb": "write",
+    "resource": {
+      "kind": "knowledge",
+      "door": "write",
+      "path": "Areas/Finance/tax.md"
+    },
+    "code": "forbidden",
+    "reason": "scope_required",
+    "message": "",
+    "before": {
+      "code": "forbidden",
+      "message": null,
+      "at": "packages/mcp-brain/src/knowledge-write.ts:313"
+    }
+  },
+  {
+    "id": "knowledge_resources.tier_index",
+    "door": "MCP resources/list",
+    "who": "browser",
+    "verb": "list",
+    "resource": {
+      "kind": "knowledge",
+      "door": "resources",
+      "path": ""
+    },
+    "code": "forbidden",
+    "reason": "tier_required",
+    "message": "",
+    "before": {
+      "code": "forbidden",
+      "message": null,
+      "at": "packages/mcp-brain/src/knowledge-resources.ts:55 — rendered as an EMPTY resource list, never on the wire"
+    }
+  },
+  {
+    "id": "queries_list.no_grant",
+    "door": "queries_list",
+    "who": "agent",
+    "verb": "act",
+    "resource": {
+      "kind": "tool",
+      "name": "queries_list"
+    },
+    "code": "forbidden",
+    "reason": "queries_required",
+    "message": "",
+    "before": {
+      "code": "forbidden",
+      "message": null,
+      "at": "packages/mcp-brain/src/queries-tools.ts:79"
+    }
+  },
+  {
+    "id": "queries_run.no_grant",
+    "door": "queries_run",
+    "who": "agent",
+    "verb": "act",
+    "resource": {
+      "kind": "tool",
+      "name": "queries_run"
+    },
+    "code": "forbidden",
+    "reason": "queries_required",
+    "message": "",
+    "before": {
+      "code": "forbidden",
+      "message": null,
+      "at": "packages/mcp-brain/src/queries-tools.ts:97"
+    }
+  },
+  {
+    "id": "queries_run.route_only",
+    "door": "queries_run",
+    "who": "assistant",
+    "verb": "read",
+    "resource": {
+      "kind": "query",
+      "door": "queries_run",
+      "name": "knowledge_pages",
+      "exposure": "route"
+    },
+    "code": "not_found",
+    "reason": "not_exposed",
+    "message": "no such query: knowledge_pages",
+    "before": {
+      "code": "not_found",
+      "message": "no such query: knowledge_pages",
+      "at": "packages/mcp-brain/src/queries-tools.ts:65"
+    }
+  },
+  {
+    "id": "tasks.outside_projects",
+    "door": "tasks_claim (and every tasks_* by id)",
+    "who": "agent",
+    "verb": "read",
+    "resource": {
+      "kind": "project",
+      "door": "task",
+      "slug": "beta"
+    },
+    "code": "not_found",
+    "reason": "not_member",
+    "message": "",
+    "before": {
+      "code": "not_found",
+      "message": null,
+      "at": "packages/mcp-brain/src/server.ts:385"
+    }
+  },
+  {
+    "id": "tasks.no_project",
+    "door": "tasks_* on a row with no project",
+    "who": "assistant",
+    "verb": "read",
+    "resource": {
+      "kind": "project",
+      "door": "task",
+      "slug": null
+    },
+    "code": "not_found",
+    "reason": "not_member",
+    "message": "",
+    "before": {
+      "code": "not_found",
+      "message": null,
+      "at": "packages/mcp-brain/src/scope.ts:26"
+    }
+  },
+  {
+    "id": "tasks_create.not_a_member",
+    "door": "tasks_create",
+    "who": "agent",
+    "verb": "write",
+    "resource": {
+      "kind": "project",
+      "door": "task_create",
+      "slug": "beta"
+    },
+    "code": "forbidden",
+    "reason": "membership_required",
+    "message": "",
+    "before": {
+      "code": "forbidden",
+      "message": null,
+      "at": "packages/mcp-brain/src/server.ts:442"
+    }
+  },
+  {
+    "id": "propose_action.denied_kind",
+    "door": "propose_action",
+    "who": "agent",
+    "verb": "propose",
+    "resource": {
+      "kind": "action",
+      "door": "propose_action",
+      "action": "dispatch"
+    },
+    "code": "forbidden",
+    "reason": "autonomy_required",
+    "message": "autonomy.actions.dispatch is deny for scout — the user raises it (PUT /api/agents/scout/autonomy, or `metistry agents autonomy scout --allow dispatch`); nothing else can (docs/ops/actions.md)",
+    "needs": {
+      "autonomy": {
+        "action": "dispatch",
+        "mode": "propose"
+      }
+    },
+    "before": {
+      "code": "forbidden",
+      "message": "autonomy.actions.dispatch is deny for scout — the user raises it (PUT /api/agents/scout/autonomy, or `metistry agents autonomy scout --allow dispatch`); nothing else can (docs/ops/actions.md)",
+      "at": "packages/mcp-brain/src/action-tools.ts:104-109"
+    }
+  },
+  {
+    "id": "propose_action.no_room",
+    "door": "propose_action (registration)",
+    "who": "ungranted",
+    "verb": "act",
+    "resource": {
+      "kind": "tool",
+      "name": "propose_action"
+    },
+    "code": "forbidden",
+    "reason": "autonomy_required",
+    "message": "",
+    "before": {
+      "code": "forbidden",
+      "message": null,
+      "at": "packages/mcp-brain/src/action-tools.ts:71 — not registered at all, so never rendered"
+    }
+  },
+  {
+    "id": "agents_delegate.not_the_assistant",
+    "door": "agents_delegate",
+    "who": "agent",
+    "verb": "act",
+    "resource": {
+      "kind": "tool",
+      "name": "agents_delegate"
+    },
+    "code": "forbidden",
+    "reason": "role_required",
+    "message": "not granted",
+    "before": {
+      "code": "forbidden",
+      "message": "not granted",
+      "at": "packages/mcp-brain/src/crew-tools.ts:112"
+    }
+  },
+  {
+    "id": "console.agent_bearer",
+    "door": "every console route outside /capture and /mcp",
+    "who": "agent",
+    "verb": "act",
+    "resource": {
+      "kind": "console",
+      "door": "console_agent",
+      "route": "GET /api/proposals"
+    },
+    "code": "forbidden",
+    "reason": "role_required",
+    "message": "",
+    "before": {
+      "code": "forbidden",
+      "message": null,
+      "at": "apps/console/src/server.ts:532"
+    }
+  },
+  {
+    "id": "console.owner_token_on_management",
+    "door": "the management surface",
+    "who": "tool",
+    "verb": "act",
+    "resource": {
+      "kind": "console",
+      "door": "console_management",
+      "route": "GET /api/agents"
+    },
+    "code": "forbidden",
+    "reason": "role_required",
+    "message": "",
+    "before": {
+      "code": "forbidden",
+      "message": null,
+      "at": "apps/console/src/server.ts:763 (and :707 for targets/dispatch)"
+    }
+  },
+  {
+    "id": "console.route_only_query",
+    "door": "GET /api/q/<name>",
+    "who": "owner",
+    "verb": "read",
+    "resource": {
+      "kind": "query",
+      "door": "console_query",
+      "name": "knowledge_pages",
+      "exposure": "route"
+    },
+    "code": "not_found",
+    "reason": "not_exposed",
+    "message": "",
+    "before": {
+      "code": "not_found",
+      "message": null,
+      "at": "apps/console/src/server.ts:293"
+    }
+  },
+  {
+    "id": "console_page.owner_artifact",
+    "door": "GET /api/knowledge/page",
+    "who": "owner",
+    "verb": "read",
+    "resource": {
+      "kind": "knowledge",
+      "door": "console_page",
+      "path": "Artifacts/report.pdf"
+    },
+    "code": "not_found",
+    "reason": "not_knowledge",
+    "message": "Artifacts/ is yours but it is not knowledge — nothing indexes it, so this door has no page for it. Your artifacts are GET /api/artifacts (docs/ops/console-api.md); in the vault they are just files, on disk and in git.",
+    "before": {
+      "code": "not_found",
+      "message": "Artifacts/ is yours but it is not knowledge — nothing indexes it, so this door has no page for it. Your artifacts are GET /api/artifacts (docs/ops/console-api.md); in the vault they are just files, on disk and in git.",
+      "at": "apps/console/src/knowledge-routes.ts:336 · notKnowledgeMessage :150"
+    }
+  },
+  {
+    "id": "console_page.owner_machinery",
+    "door": "GET /api/knowledge/page",
+    "who": "owner",
+    "verb": "read",
+    "resource": {
+      "kind": "knowledge",
+      "door": "console_page",
+      "path": ".metistry/compute.yaml"
+    },
+    "code": "not_found",
+    "reason": "not_knowledge",
+    "message": "no such page — a path must be vault CONTENT: not .metistry/, not Artifacts/, not the root CLAUDE.md, no leading slash and no traversal (docs/ops/instance-layout.md)",
+    "before": {
+      "code": "not_found",
+      "message": "no such page — a path must be vault CONTENT: not .metistry/, not Artifacts/, not the root CLAUDE.md, no leading slash and no traversal (docs/ops/instance-layout.md)",
+      "at": "apps/console/src/knowledge-routes.ts:336 · NOT_KNOWLEDGE :139"
+    }
+  },
+  {
+    "id": "console_page.agent_outside_areas",
+    "door": "GET /api/knowledge/page",
+    "who": "agent",
+    "verb": "read",
+    "resource": {
+      "kind": "knowledge",
+      "door": "console_page",
+      "path": "Areas/Finance/tax.md"
+    },
+    "code": "not_found",
+    "reason": "scope_required",
+    "message": "no such page — a path must be vault CONTENT: not .metistry/, not Artifacts/, not the root CLAUDE.md, no leading slash and no traversal (docs/ops/instance-layout.md)",
+    "before": {
+      "code": "not_found",
+      "message": "no such page — a path must be vault CONTENT: not .metistry/, not Artifacts/, not the root CLAUDE.md, no leading slash and no traversal (docs/ops/instance-layout.md)",
+      "at": "apps/console/src/knowledge-routes.ts:336 · NOT_KNOWLEDGE :139"
+    }
+  }
+]

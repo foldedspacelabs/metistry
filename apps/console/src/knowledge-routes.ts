@@ -34,8 +34,21 @@
 // drift.
 
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { INSTANCE_LAYOUT, type ErrorCode } from "@foldedspacelabs/metistry-core";
-import { canSeeUnder, KNOWLEDGE_LINKS_QUERY, KNOWLEDGE_PAGES_QUERY } from "@foldedspacelabs/metistry-mcp-brain";
+import { filterHits, filterPages, may, scopeAsPrincipal, type ErrorCode, type KnowledgeScope } from "@foldedspacelabs/metistry-core";
+import { KNOWLEDGE_LINKS_QUERY, KNOWLEDGE_PAGES_QUERY } from "@foldedspacelabs/metistry-mcp-brain";
+
+/**
+ * **The scope rules are `core`'s** (`packages/core/src/access.ts`), since P0
+ * of docs/research/2026-09-19-grants-and-access-simplified.md §4. They used to
+ * live in `packages/mcp-brain`, which made one bridge's package the host of
+ * the console's authorization rules (§2.9). Re-exported here because the route
+ * handlers below and their callers in server.ts already name them.
+ *
+ * `canSee` is the predicate a LIST is filtered with (`filterHits`,
+ * `filterPages`); a REFUSAL is `may()`'s, so the sentence this door gives is
+ * written once, beside every other refusal, rather than here (P1).
+ */
+export { NO_SCOPE, OWNER_SCOPE, canSee, filterHits, filterPages, grantedScope, type KnowledgeScope } from "@foldedspacelabs/metistry-core";
 import { VaultError, type VaultClient } from "@foldedspacelabs/metistry-artifacts";
 import { QueryError, type QueryStore } from "@foldedspacelabs/metistry-queries";
 import { sendError, sendJson } from "./http-util.js";
@@ -108,126 +121,6 @@ const CODES: ReadonlySet<string> = new Set(["unauthenticated", "forbidden", "not
 function codeOf(j: { error?: { code?: string } } | null, _status: number): ErrorCode {
   const code = j?.error?.code;
   return code && CODES.has(code) ? (code as ErrorCode) : "not_available";
-}
-
-/**
- * The areas a principal may see. `null` is "every vault path" — the `user`
- * principal, whose own vault this is.
- *
- * It is a SCOPE rather than a boolean because the filter below is the one
- * place any surface decides whether a path may be shown, and the narrowed
- * form is what a grant looks like: `grantedScope` below derives it from an
- * agent's `grants`, the same derivation `mcp-brain`'s
- * `knowledgeScope(principal)` makes for the MCP mount. Today no agent
- * credential reaches these routes at all — an agent bearer is a uniform 403
- * on everything outside `/capture` and `/mcp` (CRIT-7), and knowledge under
- * grants is `knowledge_search`/`knowledge_read` on that MCP mount. The scope
- * is here, tested, so that if a narrower console principal is ever minted the
- * filter it needs already exists and is not reinvented at the call site.
- */
-export interface KnowledgeScope {
-  readonly areas: readonly string[] | null;
-}
-
-/** The whole owner's vault. */
-export const OWNER_SCOPE: KnowledgeScope = { areas: null };
-
-/** Nothing at all: `canSee` is false for every path against an empty area list. The fail-closed answer for a credential that is neither the owner nor a holder of grants. */
-export const NO_SCOPE: KnowledgeScope = { areas: [] };
-
-/**
- * The scope a principal's GRANTS come to — one derivation, so a console
- * route and an MCP tool cannot come to different answers about the same
- * credential.
- *
- * It reproduces `mcp-brain`'s `knowledgeScope(principal).canRead`
- * (`packages/mcp-brain/src/knowledge.ts`), which is `tier === "areas" &&
- * canSeeUnder(path, areas)` — against the same `canSeeUnder` `canSee` below
- * now calls, so the whole decision is one implementation and not two that
- * agree today. What it deliberately does NOT do is take that
- * function's return value and rename a field: `knowledgeScope`'s shape
- * carries a tier, and its `prefixes` is `null` for tiers `none` and `index`
- * meaning "no prefix restriction on the TITLES those tiers may browse".
- * `null` here means every vault path's CONTENT, so the rename would hand
- * the two tiers that may not read a page the owner's own scope. A tier below
- * `areas` comes to the empty list instead — `NO_SCOPE`.
- *
- * The bare vault grant (`/`, internal principals only) needs no case of its
- * own: `underAreas` rtrims it to the empty prefix, which matches every path.
- * The areas are COPIED, so a scope already handed to a request cannot widen
- * because the registry row behind it was rewritten while the request ran.
- */
-export function grantedScope(principal: { grants: { tier: string; areas: readonly string[] } }): KnowledgeScope {
-  const { tier, areas } = principal.grants;
-  return { areas: tier === "areas" ? [...areas] : [] };
-}
-
-/**
- * May this principal see this path's content? Two conditions, both
- * necessary: it is vault CONTENT at all (so `.metistry/`, `Artifacts/`, a
- * dot-directory, a traversal and the root `CLAUDE.md` are out for every
- * principal, the owner included), and it falls under the scope's areas.
- *
- * Both conditions are `canSeeUnder`'s, and this is now a rename over it
- * rather than a second copy (ruled 2026-09-19: the same rule on both doors).
- * It lifted to `packages/mcp-brain`, beside the `underAreas` this always
- * called and the `isVaultPath` both always called, when `/mcp`'s knowledge
- * listings needed the identical decision: two implementations that agree
- * today are one bug away from a route that filters and a tool that does not.
- */
-export function canSee(path: string, scope: KnowledgeScope): boolean {
-  return canSeeUnder(path, scope.areas);
-}
-
-const ARTIFACTS_ROOT = INSTANCE_LAYOUT.artifactsDir;
-
-/** The refusal every knowledge door gives for a path that is not vault content. Shared so the two routes cannot drift. */
-const NOT_KNOWLEDGE =
-  "no such page — a path must be vault CONTENT: not .metistry/, not Artifacts/, not the root CLAUDE.md, no leading slash and no traversal (docs/ops/instance-layout.md)";
-
-/**
- * What to say when `canSee` was false.
- *
- * For an agent it is always the same sentence: refused and absent must not be
- * distinguishable, or the route is an oracle for what exists where the caller
- * cannot look.
- *
- * For the OWNER (`areas: null` — their own vault) there is no oracle to
- * protect, and one case deserves a better answer than "no such page": the
- * owner asking for one of their own `Artifacts/`. They have access to
- * everything in their directory (ruled 2026-09-19 D) — artifacts included —
- * it is simply not THIS door. This one serves the knowledge index, which no
- * indexer has ever walked `Artifacts/` into; the artifacts service is the
- * door that has the bytes, with the content types and the no-store rules
- * decision #14 put on them. So the owner gets pointed at it rather than told
- * their file does not exist.
- */
-function notKnowledgeMessage(path: string, scope: KnowledgeScope): string {
-  const ownersOwnArtifact = scope.areas === null && (path === ARTIFACTS_ROOT || path.startsWith(`${ARTIFACTS_ROOT}/`));
-  return ownersOwnArtifact
-    ? `Artifacts/ is yours but it is not knowledge — nothing indexes it, so this door has no page for it. Your artifacts are GET /api/artifacts (docs/ops/console-api.md); in the vault they are just files, on disk and in git.`
-    : NOT_KNOWLEDGE;
-}
-
-/** Hits the scope does not cover are DROPPED, never returned with a flag: a path is the sensitive part of a hit, and a filtered list must not be a directory listing of what was filtered. */
-export function filterHits(hits: readonly KnowledgeSearchHit[], scope: KnowledgeScope): KnowledgeSearchHit[] {
-  return hits.filter((h) => canSee(h.path, scope));
-}
-
-/**
- * The same drop for a named query's ROWS — the page list, and the link list,
- * whose `path` is the other end of each edge. One predicate over one column,
- * so the two lists cannot be filtered unevenly.
- *
- * Rows travel to the client unprojected — an instance may overlay
- * `knowledge_pages.yaml` or `knowledge_page_links.yaml` with columns of its
- * own (D4), and a projection here would silently swallow them — so the one
- * thing this insists on is a `path` it can judge. A row without one is
- * dropped rather than passed: a list entry whose scope cannot be decided is
- * not a list entry.
- */
-export function filterPages(rows: readonly Record<string, unknown>[], scope: KnowledgeScope): Record<string, unknown>[] {
-  return rows.filter((r) => typeof r.path === "string" && canSee(r.path, scope));
 }
 
 export interface KnowledgeDeps {
@@ -326,14 +219,14 @@ export async function knowledgeRoutes(
   if (key === "GET /api/knowledge/page") {
     const path = (url.searchParams.get("path") ?? "").trim();
     if (path === "") return sendError(res, "invalid_request", "path is required — a vault-relative path, e.g. Areas/Health/sleep.md");
-    // Refused and NOT FOUND are the same answer on purpose. A path outside
-    // the scope must not be distinguishable from a path that is not there,
-    // or the route is an oracle for what exists where the caller cannot
-    // look — and for the owner, who may look everywhere in their vault, the
-    // honest description of `.metistry/compute.yaml` is "not knowledge".
-    if (!canSee(path, scope)) {
+    // Refused and NOT FOUND are the same answer on purpose, and `may` is
+    // where that is written down: a path outside the scope must not be
+    // distinguishable from a path that is not there, or the route is an
+    // oracle for what exists where the caller cannot look.
+    const seen = may(scopeAsPrincipal(scope), "read", { kind: "knowledge", door: "console_page", path });
+    if (!seen.ok) {
       await audit("knowledge", "page", false, { refused: "out_of_scope" });
-      return sendError(res, "not_found", notKnowledgeMessage(path, scope));
+      return sendError(res, seen.code, seen.message);
     }
     if (!deps.vault) return sendError(res, "not_available", NOT_AVAILABLE);
 
@@ -414,9 +307,10 @@ export async function knowledgeRoutes(
     // this" must not be answerable for a page the caller cannot see, and the
     // honest description of `.metistry/compute.yaml` is still "not
     // knowledge", for the owner too.
-    if (!canSee(path, scope)) {
+    const seen = may(scopeAsPrincipal(scope), "read", { kind: "knowledge", door: "console_page", path });
+    if (!seen.ok) {
       await audit("knowledge", "links", false, { refused: "out_of_scope" });
-      return sendError(res, "not_found", notKnowledgeMessage(path, scope));
+      return sendError(res, seen.code, seen.message);
     }
     const limit = clampPages(url.searchParams.get("limit"));
     if (limit === undefined) return sendError(res, "invalid_request", `limit must be an integer between 1 and ${MAX_PAGES_LIMIT}`);

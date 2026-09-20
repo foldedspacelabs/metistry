@@ -29,15 +29,16 @@ import { z } from "zod";
 import {
   ACTION_KINDS,
   actionWorkId,
-  admitsAnyAction,
   describeAction,
   effectiveActions,
+  may,
   parseAction,
   redactSecrets,
   type Action,
   type ErrorCode,
 } from "@foldedspacelabs/metistry-core";
-import { done, fail, type Outcome } from "./outcome.js";
+import { done, fail, refuse, type Outcome } from "./outcome.js";
+import { principalOf, trustOf } from "./principal.js";
 import type { AgentPrincipal, Db } from "./types.js";
 
 export const ACTION_TOOL_NAMES = ["propose_action"] as const;
@@ -68,7 +69,7 @@ export function registerActionTools(reg: Register, db: Db, principal: AgentPrinc
   // Lazy by credential: nothing to offer, nothing listed. An agent that has
   // not been given room does not learn the tool exists, which is a narrower
   // surface than a tool that always refuses.
-  if (!admitsAnyAction(principal.autonomy)) return;
+  if (!may(principalOf(principal), "act", { kind: "tool", name: "propose_action" }).ok) return;
   const table = effectiveActions(principal.autonomy);
   const admitted = ACTION_KINDS.filter((k) => table[k] !== "deny");
 
@@ -101,13 +102,10 @@ export async function proposeAction(
   const action = parsed.action;
 
   const mode = effectiveActions(principal.autonomy)[action.kind];
-  if (mode === "deny") {
-    return fail(
-      "forbidden",
-      `autonomy.actions.${action.kind} is deny for ${principal.id} — the user raises it (PUT /api/agents/${principal.id}/autonomy, or \`metistry agents autonomy ${principal.id} --allow ${action.kind}\`); nothing else can (docs/ops/actions.md)`,
-      { action: action.kind, mode },
-    );
-  }
+  // The route and the CLI command that would raise it are `may`'s sentence
+  // now, and `needs.autonomy` is the same remedy a program can read.
+  const allowed = may(principalOf(principal), "propose", { kind: "action", door: "propose_action", action: action.kind });
+  if (!allowed.ok) return refuse(allowed, { action: action.kind, mode });
   if (mode === "allow" && !executor) return fail("not_available", NOT_AVAILABLE, { action: action.kind });
 
   const proposalId = await insertActionProposal(db, principal, action, reason);
@@ -147,7 +145,7 @@ async function insertActionProposal(db: Db, principal: AgentPrincipal, action: A
   });
   const { rows } = await db.query(
     `INSERT INTO proposals (kind, source_agent, trust, payload, work_id) VALUES ('action', $1, $2, $3::jsonb, $4) RETURNING id`,
-    [principal.id, principal.kind === "internal" ? "internal" : "external", JSON.stringify(payload), actionWorkId(action) ?? null],
+    [principal.id, trustOf(principal), JSON.stringify(payload), actionWorkId(action) ?? null],
   );
   return Number(rows[0]!.id);
 }

@@ -25,8 +25,19 @@
 # `day` — which is what makes one query serve both the evening plan
 # ("what is open") and the morning standup ("what closed yesterday", §7).
 # `flags` narrows within that, `combine` says whether they join with `and` or
-# `or`, and `or` can never reach outside the scope. Same shape as
-# `vault_tasks_query`, deliberately: one filter idea, spelled once.
+# `or`, and `or` can never reach outside the scope. Same filter IDEA as
+# `vault_tasks_query`, deliberately.
+#
+# **But not the same param shape, and deliberately not.** §6.2's
+# `{{ work where: "blocked or waiting_on_me" }}` is the WORK vocabulary —
+# `blocked`, `in_progress`, `unclaimed`, `closed` are board states, and none
+# of them is in `TASK_FILTER_FLAGS` (`packages/core/src/task-filter.ts`),
+# which is a closed list over the vault's `- [ ]` lines. So
+# `compileTaskFilter` neither parses this `where:` nor binds these params:
+# `vault_tasks_query` is the one query it compiles into (D15), and a query
+# over a different table with a different vocabulary borrowing its param
+# names would be the same drift pointing the other way. The set-wise `flags`
+# string survives here because these flags have no parser to disagree with.
 #
 # Flags (comma-separated, matched set-wise):
 #   `waiting_on_me`  a still-open vault task is named in meta.blocked_by — §3

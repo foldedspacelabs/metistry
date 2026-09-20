@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
 import { QueryStore, type SqlExecutor } from "@foldedspacelabs/metistry-queries";
+import { TASK_FILTER_PARAM_SPEC, TASK_QUERY_NAME, compileTaskFilter } from "@foldedspacelabs/metistry-core";
 import { loadTestEnv } from "@foldedspacelabs/metistry-core/test-env";
 
 loadTestEnv(new URL("../../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
@@ -50,58 +51,24 @@ const DAILY_FLOW = [
 ];
 
 /**
- * The bind-param shape of `vault_tasks_query`, pinned.
+ * The bind-param shape of `vault_tasks_query` is NOT written here. It is
+ * `TASK_FILTER_PARAM_SPEC`, imported from the parser that emits it.
  *
  * This is the CONTRACT between the filter vocabulary's parser
  * (`packages/core/src/task-filter.ts`, P1-2) and the one query it compiles
- * into (D15). The parser emits these names and nothing else, because
- * `packages/queries` refuses an undeclared param loudly rather than ignoring
- * it — so a name that drifts on either side is a caller error at runtime,
- * and pinning it here makes it a test failure instead.
+ * into (D15, `seed/queries/vault_tasks_query.yaml`, P1-5). The two were first
+ * written blind to each other and agreed on almost nothing — `due_from`
+ * against `due_on_or_before`, `combine` against `match_any`, a
+ * comma-separated `flags` string against seven booleans, `sort1` against
+ * `order_1` — and every one of those is an `unknown param` at render time,
+ * because `QueryStore.run` refuses an undeclared param loudly rather than
+ * ignoring it.
  *
- * Every entry has a default, which is the repo's rule for a seed query
- * (`run_detail.yaml`: "every seed query must run on its defaults alone"), and
- * every text default is blank, which is how "absent" is spelled on a wire
- * that has only int, text and boolean and no nulls.
+ * A COPY of the shape in this file would have caught that drift exactly as
+ * well as a copy in the YAML did: not at all. So the pin below compares the
+ * manifest against the imported object, and there is no third spelling of it
+ * anywhere.
  */
-const VAULT_TASKS_QUERY_PARAMS: Record<string, { type: "int" | "text" | "boolean"; default: number | string | boolean }> = {
-  // scope — always AND, never widened by `combine`
-  today: { type: "text", default: "" },
-  prefix: { type: "text", default: "" },
-  state: { type: "text", default: "open" },
-  combine: { type: "text", default: "and" },
-  // comparable fields as INCLUSIVE bounds; the parser normalises < and > and
-  // resolves every relative date against METISTRY_TZ before it gets here
-  due_from: { type: "text", default: "" },
-  due_to: { type: "text", default: "" },
-  do_from: { type: "text", default: "" },
-  do_to: { type: "text", default: "" },
-  start_from: { type: "text", default: "" },
-  start_to: { type: "text", default: "" },
-  done_from: { type: "text", default: "" },
-  done_to: { type: "text", default: "" },
-  priority_min: { type: "int", default: 0 },
-  priority_max: { type: "int", default: 9 },
-  // exact matches
-  size: { type: "text", default: "" },
-  type: { type: "text", default: "" },
-  assigned: { type: "text", default: "" },
-  project: { type: "text", default: "" },
-  area: { type: "text", default: "" },
-  source: { type: "text", default: "" },
-  // the seven flags of §6.2, as one comma-separated set
-  flags: { type: "text", default: "" },
-  me: { type: "text", default: "" },
-  // `order:` — three slots, which is the depth §6.2 and §6.6 spell
-  sort1: { type: "text", default: "priority" },
-  sort1_desc: { type: "boolean", default: false },
-  sort2: { type: "text", default: "due" },
-  sort2_desc: { type: "boolean", default: false },
-  sort3: { type: "text", default: "" },
-  sort3_desc: { type: "boolean", default: false },
-  limit: { type: "int", default: 100 },
-  offset: { type: "int", default: 0 },
-};
 
 describe("seed queries", () => {
   it("load, include every query the console calls, and compile with defaults", async () => {
@@ -159,25 +126,45 @@ describe("seed queries", () => {
 
   // D15's whole point: ONE vocabulary, three consumers, and what it compiles
   // to is bind params of one query. So the param list IS the interface, and
-  // it is pinned rather than discovered — `packages/queries` refuses an
-  // undeclared param loudly, so a name the parser emits that this file does
-  // not declare is a hard failure at render time, on the owner's plan, at
-  // 19:00.
-  it("vault_tasks_query declares exactly the bind params the filter vocabulary compiles into, every one with a default", async () => {
+  // this is the assertion that keeps the two halves of it the same object.
+  it("vault_tasks_query declares exactly TASK_FILTER_PARAM_SPEC — same names, same types, same defaults", async () => {
     const store = new QueryStore({
       async query() {
         return { rows: [] };
       },
     });
     await store.loadDir(SEED_DIR);
-    const spec = store.list().find((q) => q.name === "vault_tasks_query")!;
+    const spec = store.list().find((q) => q.name === TASK_QUERY_NAME)!;
     expect(spec).toBeDefined();
-    expect(spec.params).toEqual(VAULT_TASKS_QUERY_PARAMS);
-    // "blank is absent" for every text param: there are no nulls on this
-    // wire and no arrays, so a default that was anything but "" would make
-    // one field's absence mean something different from the rest.
+    expect(spec.params).toEqual(TASK_FILTER_PARAM_SPEC);
+
+    // and the other direction, said out loud: every param a real compile
+    // emits is a param the manifest declares. `QueryStore.run` refuses an
+    // undeclared one, so this is the failure that would otherwise land at
+    // render time, on the owner's plan, at 19:00.
+    const out = compileTaskFilter(
+      { where: "due <= today and priority >= p2", order: "priority, due" },
+      { now: new Date("2026-09-20T12:00:00Z"), timeZone: "America/New_York" },
+    );
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    for (const k of Object.keys(out.params)) expect(Object.keys(spec.params), k).toContain(k);
+
+    // "blank is absent" for every text param, `0` for every int: there are no
+    // nulls on this wire and no arrays, so a default that was anything else
+    // would make one field's absence mean something different from the rest.
     for (const [k, p] of Object.entries(spec.params)) {
       expect(p.default, `${k} has no default`).toBeDefined();
+      if (p.type === "text") expect(p.default, k).toBe("");
+      if (p.type === "int" && k !== "limit") expect(p.default, k).toBe(0);
+      if (p.type === "boolean") expect(p.default, k).toBe(false);
+    }
+
+    // and the names this query used to take, refused — the shape of the
+    // failure a drift produces, so nobody has to imagine it. The store does
+    // not ignore an unknown param; it throws, with the name in the message.
+    for (const stale of ["due_from", "due_to", "combine", "flags", "sort1", "state", "prefix", "area", "source"]) {
+      await expect(store.run(TASK_QUERY_NAME, { [stale]: "x" }), stale).rejects.toThrow(`unknown param ${stale}`);
     }
   });
 
@@ -852,34 +839,36 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
     );
   };
 
-  it("vault_tasks_query: the filter vocabulary's bind params, the scope `or` cannot widen, and a total order", async () => {
+  it("vault_tasks_query: TASK_FILTER_PARAM_SPEC's bind params, the scope `or` cannot widen, and a total order", async () => {
     const tag = `vtq-${Date.now()}`;
     const mine = `${tag}`;
     const anchor = `mt-${tag.slice(-8)}`;
     await task(pool, { path: `${mine}/a.md`, task_key: anchor, anchor, line_no: 1, text: "Call the dentist", text_norm: "call the dentist", due: "2026-09-18", priority: 1 });
-    await task(pool, { path: `${mine}/a.md`, task_key: "k2", line_no: 2, text: "Draft the Q4 plan", text_norm: "draft the q4 plan", due: "2026-09-30", priority: 2, size: "L", type: "planning", project: "drey" });
+    await task(pool, { path: `${mine}/a.md`, task_key: "k2", line_no: 2, text: "Draft the Q4 plan", text_norm: "draft the q4 plan", due: "2026-09-30", priority: 2, size: "L", type: "planning", project: "drey", area: "Areas/Work", source: "template:recurring" });
     // a RULE line: never a row of this query (§4)
     await task(pool, { path: `${mine}/a.md`, task_key: "k3", line_no: 3, text: "Water the plants", text_norm: "water the plants", recur_rule: "every week", recur_next: DAY });
-    await task(pool, { path: `${mine}/b.md`, task_key: "k4", line_no: 1, text: "Send Jim the brand deck", text_norm: "send jim the brand deck", assigned: "People/Jim Fallon.md", waiting: true, scheduled_for: "2026-09-19" });
+    await task(pool, { path: `${mine}/b.md`, task_key: "k4", line_no: 1, text: "Send Jim the brand deck", text_norm: "send jim the brand deck", assigned: "People/Jim Fallon.md", waiting: true, scheduled_for: "2026-09-19", size: "S", area: "Areas/Work/Drey", source: "meeting:Journal/Meetings/2026-09-19-sync.md" });
     await task(pool, { path: `${mine}/b.md`, task_key: "k5", line_no: 2, text: "Send the contract", text_norm: "send the contract", checked: true, done_on: "2026-09-19" });
-    // §2.3: the same task typed twice — two rows, linked, never merged
-    await task(pool, { path: `${mine}/b.md`, task_key: "k6", line_no: 3, text: "Call the dentist", text_norm: "call the dentist", duplicate_of: anchor });
+    // §2.3: the same task typed twice — two rows, linked, never merged. Its
+    // area is a SUBSTRING of the one above and must not answer to it.
+    await task(pool, { path: `${mine}/b.md`, task_key: "k6", line_no: 3, text: "Call the dentist", text_norm: "call the dentist", duplicate_of: anchor, area: "Areas/Workshop", source: "meetings:not-a-meeting" });
     // a sibling path that a SUBSTRING prefix would wrongly swallow
     await task(pool, { path: `${mine}-other/c.md`, task_key: "k7", line_no: 1, text: "Elsewhere", text_norm: "elsewhere", due: DAY });
 
     const lines = (rows: Record<string, unknown>[]) => rows.map((r) => `${r.path}:${r.line_no}`);
-    const all = await store.run("vault_tasks_query", { today: DAY, prefix: mine, limit: 500 });
+    const all = await store.run(TASK_QUERY_NAME, { today: DAY, path_prefix: mine, limit: 500 });
 
-    // the rule line is gone, the ticked line is gone, and the default order
-    // is priority then due — `coalesce(priority, 3)`, so unset sorts as
-    // normal rather than last (D5)
+    // the rule line is gone, the ticked line is gone, and with no `order:` at
+    // all the order is the vault's own — path in BYTE order, then line —
+    // which is also the tie-break under every `order:`
     expect(lines(all.rows)).toEqual([`${mine}/a.md:1`, `${mine}/a.md:2`, `${mine}/b.md:1`, `${mine}/b.md:3`]);
+    // D5: unset priority IS normal, so it sorts and filters as 3
     expect(all.rows.map((r) => r.priority_effective)).toEqual([1, 2, 3, 3]);
     expect(all.rows[3]).toMatchObject({ priority: null, priority_effective: 3 });
 
     // segment-wise prefix: `<tag>-other/` is NOT under `<tag>`
     expect(lines(all.rows).some((p) => p.includes("-other"))).toBe(false);
-    expect(lines((await store.run("vault_tasks_query", { today: DAY, prefix: `${mine}-other`, limit: 500 })).rows)).toEqual([`${mine}-other/c.md:1`]);
+    expect(lines((await store.run(TASK_QUERY_NAME, { today: DAY, path_prefix: `${mine}-other`, limit: 500 })).rows)).toEqual([`${mine}-other/c.md:1`]);
 
     // the flags of §6.2, computed here and not by the caller
     expect(all.rows[0]!.row_flags).toEqual(expect.arrayContaining(["overdue", "carried", "assigned_to_me"]));
@@ -887,33 +876,66 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
     expect(all.rows[2]!.row_flags).not.toContain("assigned_to_me"); // delegated to Jim
     expect(all.rows[3]!.row_flags).toContain("unscheduled");
     expect(Number(all.rows[0]!.carried_days)).toBe(2);
+    expect(Number(all.rows[0]!.age_days)).toBe(0); // `carried` is "owed earlier"; `age` is "has been sitting" — two questions
 
-    const at = (p: Record<string, unknown>) => store.run("vault_tasks_query", { today: DAY, prefix: mine, limit: 500, ...p }).then((r) => lines(r.rows));
-    expect(await at({ flags: "overdue" })).toEqual([`${mine}/a.md:1`]);
-    expect(await at({ flags: "waiting" })).toEqual([`${mine}/b.md:1`]);
+    const at = (p: Record<string, unknown>) => store.run(TASK_QUERY_NAME, { today: DAY, path_prefix: mine, limit: 500, ...p }).then((r) => lines(r.rows));
+
+    // one BOOLEAN per flag, not a comma-separated set
+    expect(await at({ overdue: true })).toEqual([`${mine}/a.md:1`]);
+    expect(await at({ waiting: true })).toEqual([`${mine}/b.md:1`]);
+    expect(await at({ unscheduled: true })).toEqual([`${mine}/b.md:3`]);
+    expect(await at({ carried: true })).toEqual([`${mine}/a.md:1`, `${mine}/b.md:1`]);
     // AND is the default: both flags must hold, and no row is both
-    expect(await at({ flags: "waiting,assigned_to_me" })).toEqual([]);
-    // OR: either is enough — this is what `due <= today or overdue` compiles to
-    expect(await at({ flags: "waiting,overdue", combine: "or" })).toEqual([`${mine}/a.md:1`, `${mine}/b.md:1`]);
-    expect(await at({ due_to: DAY, flags: "waiting", combine: "or" })).toEqual([`${mine}/a.md:1`, `${mine}/b.md:1`]);
+    expect(await at({ waiting: true, assigned_to_me: true })).toEqual([]);
+    // `match_any`: either is enough — this is what `waiting or overdue` compiles to
+    expect(await at({ waiting: true, overdue: true, match_any: true })).toEqual([`${mine}/a.md:1`, `${mine}/b.md:1`]);
+    expect(await at({ due_on_or_before: DAY, waiting: true, match_any: true })).toEqual([`${mine}/a.md:1`, `${mine}/b.md:1`]);
 
-    // inclusive bounds; the parser normalises `<` and `>` and resolves every
-    // relative date before it reaches here
-    expect(await at({ due_from: "2026-09-19" })).toEqual([`${mine}/a.md:2`]);
-    expect(await at({ due_to: "2026-09-18" })).toEqual([`${mine}/a.md:1`]);
+    // three inclusive date params per field; the parser folded `<` and `>`
+    // and resolved every relative token before binding
+    expect(await at({ due_on_or_after: "2026-09-19" })).toEqual([`${mine}/a.md:2`]);
+    expect(await at({ due_on_or_before: "2026-09-18" })).toEqual([`${mine}/a.md:1`]);
+    expect(await at({ due_on: "2026-09-18" })).toEqual([`${mine}/a.md:1`]);
+    expect(await at({ do_on: "2026-09-19" })).toEqual([`${mine}/b.md:1`]);
+    expect(await at({ do_on_or_after: "2026-09-19", do_on_or_before: "2026-09-19" })).toEqual([`${mine}/b.md:1`]);
+
+    // priority bounds are NUMERIC: `<= 2` is p1 or p2, i.e. MORE important
     expect(await at({ priority_max: 2 })).toEqual([`${mine}/a.md:1`, `${mine}/a.md:2`]);
-    expect(await at({ size: "l" })).toEqual([`${mine}/a.md:2`]); // case-insensitive
+    expect(await at({ priority_min: 2 })).toEqual([`${mine}/a.md:2`, `${mine}/b.md:1`, `${mine}/b.md:3`]);
+    expect(await at({ priority_eq: 1 })).toEqual([`${mine}/a.md:1`]);
+
+    // size: the letter, or a bound on s=1 m=2 l=3
+    expect(await at({ size: "l" })).toEqual([`${mine}/a.md:2`]); // case-insensitive: the index stores `L`
+    expect(await at({ size_rank_max: 1 })).toEqual([`${mine}/b.md:1`]);
+    expect(await at({ size_rank_min: 3 })).toEqual([`${mine}/a.md:2`]);
+
     expect(await at({ type: "planning" })).toEqual([`${mine}/a.md:2`]);
     expect(await at({ project: "drey" })).toEqual([`${mine}/a.md:2`]);
     expect(await at({ assigned: "People/Jim Fallon.md" })).toEqual([`${mine}/b.md:1`]);
-    expect(await at({ do_from: "2026-09-19", do_to: "2026-09-19" })).toEqual([`${mine}/b.md:1`]);
+    // `area_prefix` takes the value and its CHILDREN, and `Areas/Workshop` is
+    // neither — the prefix is matched segment-wise, never as a substring
+    expect(await at({ area_prefix: "Areas/Work" })).toEqual([`${mine}/a.md:2`, `${mine}/b.md:1`]);
+    expect(await at({ area_prefix: "Areas/Workshop" })).toEqual([`${mine}/b.md:3`]);
+    // `source_prefix` takes `meeting` and every `meeting:<path>`, and stops
+    // at the colon — `meetings:…` is a different source
+    expect(await at({ source_prefix: "meeting" })).toEqual([`${mine}/b.md:1`]);
+    expect(await at({ source_prefix: "template" })).toEqual([`${mine}/a.md:2`]);
 
-    // `or` widens the PREDICATE, never the SCOPE: no combinator reaches a
-    // ticked line, a rule line, or a path outside the prefix
-    expect(await at({ flags: "overdue", combine: "or", done_from: "2026-09-19" })).toEqual([`${mine}/a.md:1`]);
-    expect(await at({ state: "done" })).toEqual([`${mine}/b.md:2`]);
-    expect(await at({ state: "any" })).toHaveLength(5); // still no rule line
-    expect((await store.run("vault_tasks_query", { today: DAY, prefix: mine, state: "any", limit: 500 })).rows.some((r) => r.text === "Water the plants")).toBe(false);
+    // THE NULL BUG, pinned: every nullable column compares under
+    // `coalesce(…, false)`, because NULL is how the clause array spells "the
+    // caller did not ask". Without it, `size: l` comes back with every task
+    // that has no size at all — the filter undone by the rows it excludes.
+    expect(await at({ size: "l" })).not.toContain(`${mine}/a.md:1`);
+    expect(await at({ type: "planning" })).not.toContain(`${mine}/b.md:3`);
+    expect(await at({ due_on_or_before: "2999-01-01" })).not.toContain(`${mine}/b.md:3`); // no due date is not "due before everything"
+
+    // `match_any` widens the PREDICATE, never the SCOPE: no combinator
+    // reaches a ticked line, a rule line, or a path outside the prefix
+    expect(await at({ overdue: true, match_any: true, done_on_or_after: "2026-09-19" })).toEqual([`${mine}/a.md:1`]);
+    expect(await at({ status: "done" })).toEqual([`${mine}/b.md:2`]);
+    expect(await at({ status: "waiting" })).toEqual([`${mine}/b.md:1`]);
+    expect(await at({ status: "any" })).toHaveLength(5); // still no rule line
+    expect((await store.run(TASK_QUERY_NAME, { today: DAY, path_prefix: mine, status: "any", limit: 500 })).rows.some((r) => r.text === "Water the plants")).toBe(false);
 
     // §2.3: both places counted, neither merged
     expect(Number(all.rows[0]!.places)).toBe(2);
@@ -922,11 +944,13 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
 
     // `order:` — three slots, each optionally desc, then the byte-ordered
     // path tie-break that makes the order total
-    expect(await at({ sort1: "path", sort2: "", sort3: "" })).toEqual([`${mine}/a.md:1`, `${mine}/a.md:2`, `${mine}/b.md:1`, `${mine}/b.md:3`]);
-    expect(await at({ sort1: "path", sort1_desc: true, sort2: "", sort3: "" })).toEqual([`${mine}/b.md:1`, `${mine}/b.md:3`, `${mine}/a.md:1`, `${mine}/a.md:2`]);
-    expect(await at({ sort1: "due", sort2: "", sort3: "" })).toEqual([`${mine}/a.md:1`, `${mine}/a.md:2`, `${mine}/b.md:1`, `${mine}/b.md:3`]);
-    // an unrecognised slot sorts nothing and falls through to the next
-    expect(await at({ sort1: "nonsense", sort2: "path", sort3: "" })).toEqual(await at({ sort1: "path", sort2: "", sort3: "" }));
+    expect(await at({ order_1: "priority", order_2: "due" })).toEqual([`${mine}/a.md:1`, `${mine}/a.md:2`, `${mine}/b.md:1`, `${mine}/b.md:3`]);
+    expect(await at({ order_1: "due" })).toEqual([`${mine}/a.md:1`, `${mine}/a.md:2`, `${mine}/b.md:1`, `${mine}/b.md:3`]); // no due sorts last (9999-12-31)
+    expect(await at({ order_1: "due", order_1_desc: true })).toEqual([`${mine}/b.md:1`, `${mine}/b.md:3`, `${mine}/a.md:2`, `${mine}/a.md:1`]);
+    expect(await at({ order_1: "priority", order_1_desc: true })).toEqual([`${mine}/b.md:1`, `${mine}/b.md:3`, `${mine}/a.md:2`, `${mine}/a.md:1`]);
+    // an unrecognised slot sorts nothing and falls through to the next — the
+    // parser refuses one at render time, so the database has no opinion
+    expect(await at({ order_1: "nonsense", order_2: "due" })).toEqual(await at({ order_1: "due" }));
 
     // offset walks that same total order — (path, line_no, task_key) cannot tie
     const windows = await Promise.all([0, 1, 2, 3, 4].map((offset) => at({ limit: 1, offset })));
@@ -938,12 +962,59 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
       `INSERT INTO work (title, kind, status, project, external_ref, meta) VALUES ($1, 'task', 'open', $2, $3, $4::jsonb) RETURNING id`,
       ["Book the follow-up", tag, `probe:${tag}`, JSON.stringify({ blocked_by: `vault:${mine}/a.md#^${anchor}` })],
     );
-    const blocking = await store.run("vault_tasks_query", { today: DAY, prefix: mine, flags: "blocking_agent", limit: 500 });
+    const blocking = await store.run(TASK_QUERY_NAME, { today: DAY, path_prefix: mine, blocking_agent: true, limit: 500 });
     expect(lines(blocking.rows)).toEqual([`${mine}/a.md:1`]);
     expect(blocking.rows[0]).toMatchObject({ blocks_work_id: String(w[0]!.id), blocks_work_title: "Book the follow-up", blocks_work_status: "open" });
     expect(blocking.rows[0]!.row_flags).toContain("blocking_agent");
 
     await pool.query(`DELETE FROM work WHERE project = $1`, [tag]);
+    await pool.query(`DELETE FROM vault_tasks WHERE path LIKE $1`, [`${tag}%`]);
+  });
+
+  // D15 END TO END, which is the whole point of P1-2 and P1-5 being one
+  // contract: a `where:`/`order:` a user could type in a template goes
+  // through `compileTaskFilter` and straight into `QueryStore.run` with NO
+  // name translation anywhere between them. If a param were renamed on
+  // either side this test throws `unknown param`, which is exactly what the
+  // renderer would have done at 19:00.
+  it("compileTaskFilter → QueryStore.run: `due <= today and priority >= P2 order priority, due` with no translation in between", async () => {
+    const tag = `vtq-e2e-${Date.now()}`;
+    await task(pool, { path: `${tag}/e.md`, task_key: "e1", line_no: 1, text: "Overdue, priority unset", text_norm: "overdue priority unset", due: "2026-09-18" });
+    await task(pool, { path: `${tag}/e.md`, task_key: "e2", line_no: 2, text: "Due today, p1", text_norm: "due today p1", due: DAY, priority: 1 });
+    await task(pool, { path: `${tag}/e.md`, task_key: "e3", line_no: 3, text: "Due today, p2", text_norm: "due today p2", due: DAY, priority: 2 });
+    await task(pool, { path: `${tag}/e.md`, task_key: "e4", line_no: 4, text: "Due next week, p4", text_norm: "due next week p4", due: "2026-09-30", priority: 4 });
+    await task(pool, { path: `${tag}/e.md`, task_key: "e5", line_no: 5, text: "No due date at all, p4", text_norm: "no due date at all p4", priority: 4 });
+
+    const out = compileTaskFilter(
+      { where: "due <= today and priority >= P2", order: "priority, due" },
+      { now: new Date(`${DAY}T12:00:00Z`), timeZone: "UTC" }, // `today` resolves where the timezone is known, never in SQL
+    );
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    // the compiled shape, spelled out once: an inclusive bound the parser
+    // folded, a NUMERIC priority bound, two order slots, and `and`
+    expect(out.params).toMatchObject({
+      due_on_or_before: DAY,
+      due_on: "",
+      priority_min: 2,
+      priority_max: 0,
+      order_1: "priority",
+      order_2: "due",
+      match_any: false,
+      limit: 50,
+    });
+    // the context params are the CALLER's and the compile never touches them
+    expect(out.params).toMatchObject({ today: "", me: "", path_prefix: "", offset: 0 });
+
+    const { rows } = await store.run(TASK_QUERY_NAME, { ...out.params, today: DAY, path_prefix: tag });
+    // p2 before the unset (which is p3, D5); the p1 is MORE important than
+    // p2 and `priority >= P2` is numeric, so it is out; next week is not
+    // due yet; and the line with NO due date does not answer a due bound at
+    // all — `coalesce(…, false)`, the NULL bug this contract was written
+    // over.
+    expect(rows.map((r) => r.task_key)).toEqual(["e3", "e1"]);
+    expect(rows.map((r) => r.due)).toEqual([DAY, "2026-09-18"]); // ISO text, never a JS Date at the process's midnight
+
     await pool.query(`DELETE FROM vault_tasks WHERE path LIKE $1`, [`${tag}%`]);
   });
 
@@ -976,7 +1047,7 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
     expect(rows[0]!.open_instance_path).toBeNull(); // nothing materialised from a rule nobody could read
 
     // the instances themselves are ordinary tasks, and the rules are not
-    const open = await store.run("vault_tasks_query", { today: DAY, prefix: tag, limit: 50 });
+    const open = await store.run(TASK_QUERY_NAME, { today: DAY, path_prefix: tag, limit: 50 });
     expect(open.rows.map((r) => r.task_key)).toEqual(["inst-1"]);
     expect(open.rows[0]!.row_flags).toContain("recurring"); // an INSTANCE of a rule — the only sense a row here can be recurring
 

@@ -18,7 +18,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 
-import { AREA_PREFIX_REFUSAL, runCheck, startRun, finishRun, errorEnvelope, intEnv, may, parseAction, PROJECT_SLUG_RE, readableAreas, rollSession, statusFor, SKIP_FEEDBACK, validAgentAreaGrant, type CheckResult, type Compute, type ErrorEnvelope, type Principal } from "@foldedspacelabs/metistry-core";
+import { AREA_PREFIX_REFUSAL, runCheck, startRun, finishRun, errorEnvelope, intEnv, may, parseAction, PROJECT_SLUG_RE, rollSession, statusFor, SKIP_FEEDBACK, validAgentAreaGrant, type CheckResult, type Compute, type ErrorEnvelope, type Principal } from "@foldedspacelabs/metistry-core";
 import { QueryError, QueryStore } from "@foldedspacelabs/metistry-queries";
 import { captureToInbox, createBrainServer, dirSink, type CaptureSink, type KnowledgeLister, type KnowledgeReader, type KnowledgeVaultSearcher, type KnowledgeWriter, type QueryEmbedder } from "@foldedspacelabs/metistry-mcp-brain";
 import { TasksError, TasksService } from "@foldedspacelabs/metistry-tasks";
@@ -29,7 +29,7 @@ import type { Db } from "./auth-store.js";
 import * as store from "./auth-store.js";
 import * as agents from "./agents.js";
 import type { SessionPolicy } from "./session-policy.js";
-import { parseCookies, readBody, readJson, sendError, sendJson, sessionCookie } from "./http-util.js";
+import { parseCookies, readBody, readJson, sendError, sendJson, sendRefusal, sessionCookie } from "./http-util.js";
 import * as wa from "./webauthn.js";
 import { checkLocalOwner, type LocalOwnerConfig } from "./local-owner.js";
 import { serveStatic } from "./static.js";
@@ -45,7 +45,7 @@ import { applyImprovement } from "./prompt-overlay.js";
 import { crewDispatcher, type CrewRegistry } from "./crews.js";
 import { runAction, type ActionServices } from "./actions.js";
 import { computeRoutes, isComputeRoute, type ComputeAdmin } from "./compute-routes.js";
-import { isKnowledgeRoute, knowledgeRoutes, type KnowledgeScope, type KnowledgeSearcher } from "./knowledge-routes.js";
+import { isKnowledgeRoute, knowledgeRoutes, type KnowledgeSearcher } from "./knowledge-routes.js";
 import { agentList, commandList } from "./commands.js";
 import { createRequire } from "node:module";
 
@@ -146,29 +146,6 @@ type Auth =
  */
 function isUser(auth: Auth): boolean {
   return auth?.kind === "session" || auth?.kind === "local_owner";
-}
-
-/**
- * What this credential may see of the vault, for `/api/knowledge/*`.
- *
- * One derivation, off the one principal (`principalOf` below): the `user`
- * principal — a passkey session or the local owner token, the same person
- * either way — gets their own vault (`areas: null`); a principal carrying
- * grants gets exactly what those grants say; anything else gets NOTHING.
- * That last one is the reason this is `readableAreas` and not a field read:
- * a tier below `areas` comes to the empty list, never to `null`, and a scope
- * function that falls back to "everything" when it does not recognise a
- * credential is a hole waiting for the next credential class to be added.
- *
- * The agent branch is not reachable from this server today and is not a
- * stub: agent bearers stop at the uniform 403 above (CRIT-7) and reach
- * knowledge under their grants on `/mcp`. It is here because the derivation
- * is the thing that must be right — the day a narrower console principal is
- * minted, the scope it gets is this function's answer and not a new opinion
- * formed at the call site.
- */
-function knowledgeScopeOf(auth: Auth): KnowledgeScope {
-  return { areas: readableAreas(principalOf(auth).scope) };
 }
 
 /**
@@ -335,24 +312,32 @@ export function suggestedWorkOf(row: { kind?: unknown; payload?: unknown }): { t
  * its declared params and nothing else.
  *
  * **And it is the only door a query gets, unless the manifest says
- * otherwise.** A query marked `expose: route` is served by an endpoint of
- * its own that does something this one cannot — `knowledge_pages` filters
- * every row through the caller's scope — so answering it here would be that
- * filter undone rather than a convenience (ruled 2026-09-19: one endpoint
- * per necessary operation). The refusal is the UNKNOWN-QUERY refusal, byte
- * for byte: same code, same status, same absent message, so this door never
- * tells a caller which route-only queries exist. Which names those are is
- * read off the manifests through the store (`exposure`) and never matched
- * against a list kept here, which could drift from the files.
+ * otherwise — for anyone but the owner.** A query marked `expose: route` is
+ * served by an endpoint of its own that does something this one cannot
+ * (`knowledge_pages` filters every row through the caller's scope), so
+ * answering it to an AGENT here would be that filter undone rather than a
+ * convenience (ruled 2026-09-19: one endpoint per necessary operation). The
+ * refusal is the UNKNOWN-QUERY refusal, byte for byte: same code, same
+ * status, same absent message, so this door never tells such a caller which
+ * route-only queries exist. Which names those are is read off the manifests
+ * through the store (`exposure`) and never matched against a list kept here,
+ * which could drift from the files.
+ *
+ * **The owner is served** (P4, and the owner's ruling "the owner should
+ * always have access to everything"). The scope filter that rule protects
+ * is a filter on what an agent may see of the VAULT; the owner's scope is
+ * the whole vault, so the filtered route and this one return the same rows
+ * to them and the refusal was only ever a second door to remember (§2.6).
+ * The capture `owner_token` is NOT the owner — it is the plan's tier 0 — and
+ * is still refused, byte for byte.
  */
 export async function namedQueryDoor(res: ServerResponse, queries: QueryStore, name: string, params: Record<string, string>, auth: Auth = null): Promise<void> {
   // `expose`, read off the manifest through the store, decided by `may` — the
   // same rule, in the same words, `queries_run` applies on /mcp. The caller
-  // is passed even though no rule reads it: the owner IS narrowed here (§2.6,
-  // and P4 is where that ends), and a door that never sees who is asking
-  // could not stop being narrow without being rewritten.
+  // decides it now: `may` admits the owner for every query this door serves,
+  // and refuses everyone else a route-only one with the unknown-query answer.
   const exposed = may(principalOf(auth), "read", { kind: "query", door: "console_query", name, exposure: queries.exposure(name) === "generic" ? "generic" : "route" });
-  if (!exposed.ok) return sendError(res, exposed.code, exposed.message || undefined);
+  if (!exposed.ok) return sendRefusal(res, exposed);
   try {
     return sendJson(res, 200, await queries.run(name, params));
   } catch (err) {
@@ -601,7 +586,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
 
     // ----- agent tokens stop here: uniform 403 on everything else, never 404 -----
     const onConsole = may(principalOf(auth), "act", { kind: "console", door: "console_agent", route: key });
-    if (!onConsole.ok) return sendError(res, onConsole.code, onConsole.message || undefined);
+    if (!onConsole.ok) return sendRefusal(res, onConsole);
 
     // Who the console thinks you are. The Mac app calls this to render
     // "signed in as owner" without a passkey ceremony; it is also what
@@ -777,7 +762,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     // ----- compute targets (§4.18): the `user` principal ONLY — dispatch is outbound -----
     if (key === "GET /api/targets" || DISPATCH_ROUTE.test(key)) {
       const d = may(principalOf(auth), "act", { kind: "console", door: "console_management", route: key });
-      if (!d.ok) return sendError(res, d.code, d.message || undefined);
+      if (!d.ok) return sendRefusal(res, d);
       if (key === "GET /api/targets") {
         return sendJson(res, 200, { targets: cfg.targets ? await cfg.targets.describe() : [], as_of: new Date().toISOString() });
       }
@@ -841,7 +826,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         isTaskOpRoute(key) ||
         isArtifactRoute(url.pathname)
       ) {
-        return sendError(res, management.code, management.message || undefined);
+        return sendRefusal(res, management);
       }
       return sendError(res, "not_found");
     }
@@ -928,16 +913,19 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     }
 
     // ----- knowledge: the owner's read path into their own vault -----
-    // The scope is DERIVED from the credential (`knowledgeScopeOf`), never a
-    // constant at the call site: the routes' filter is only as honest as the
-    // scope handed to it, and a literal here is a filter that cannot be
-    // narrowed without editing this line. For the owner it comes to "every
-    // vault path", which is not "every path" — the route still refuses
-    // `.metistry/`, `Artifacts/` and the root CLAUDE.md, because the bridge
-    // underneath it does not (knowledge-routes.ts). The page LIST gets the
-    // SAME QueryStore every other read goes through — invariant 3 has one
-    // read path into derived state, not one per surface, and no second,
-    // unscoped door onto it (`knowledge_pages.yaml` is `expose: route`).
+    // The PRINCIPAL goes in, derived from the credential (`principalOf`),
+    // never a constant at the call site: the routes' filter is only as
+    // honest as the scope handed to it, and a literal here is a filter that
+    // cannot be narrowed without editing this line. It is the principal
+    // rather than a scope since P4 — `may()` decides the refusal, and what
+    // it decides for the OWNER is not a narrower scope but a CLASSIFICATION:
+    // their own `.metistry/` and `Artifacts/` are not pages this door has,
+    // and it says so and names the door that does, rather than refusing
+    // (docs/research/2026-09-19-grants-and-access-simplified.md §3.3). The
+    // page LIST gets the SAME QueryStore every other read goes through —
+    // invariant 3 has one read path into derived state, not one per surface,
+    // and no second, unscoped door onto it (`knowledge_pages.yaml` is
+    // `expose: route`).
     if (isKnowledgeRoute(url.pathname)) {
       return knowledgeRoutes(
         req,
@@ -945,7 +933,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         key,
         url,
         { ...(cfg.searchKnowledge ? { search: cfg.searchKnowledge } : {}), ...(cfg.vault ? { vault: cfg.vault } : {}), queries },
-        knowledgeScopeOf(auth),
+        principalOf(auth),
         audit,
       );
     }

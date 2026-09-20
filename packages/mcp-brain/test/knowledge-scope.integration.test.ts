@@ -203,9 +203,14 @@ cache_ttl: 0
   // --- 2. the scoped door ---------------------------------------------------
 
   it("tier none: nothing at all, and told `not granted` rather than `not found`", async () => {
-    expect(await once("tok-none", "knowledge_list")).toMatchObject({ isError: true, body: { error: { code: "forbidden", message: "not granted" } } });
-    expect(await once("tok-none", "knowledge_list", { links_for: "Areas/Scope/Inside.md" })).toMatchObject({ isError: true, body: { error: { code: "forbidden", message: "not granted" } } });
-    expect(await once("tok-none", "knowledge_list", {}, baseWithBridge)).toMatchObject({ isError: true, body: { error: { code: "forbidden", message: "not granted" } } });
+    // Every one of them opens "not granted", and none of them names an area: tier `none` may
+    // not list, so there is no page whose existence it could already see (the 2026-09-19 boundary).
+    for (const args of [{}, { links_for: "Areas/Scope/Inside.md" }] as const) {
+      const r = await once("tok-none", "knowledge_list", args);
+      expect(r).toMatchObject({ isError: true, body: { error: { code: "forbidden", message: expect.stringMatching(/^not granted/) } } });
+      expect(JSON.stringify(r.body)).not.toContain("Areas/Scope");
+    }
+    expect(await once("tok-none", "knowledge_list", {}, baseWithBridge)).toMatchObject({ isError: true, body: { error: { code: "forbidden", message: expect.stringMatching(/^not granted/) } } });
   });
 
   it("tier index: titles anywhere in the vault index — path, title, description — and content nowhere", async () => {

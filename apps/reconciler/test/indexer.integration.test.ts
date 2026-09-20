@@ -14,11 +14,20 @@ import { loadTestEnv } from "@foldedspacelabs/metistry-core/test-env";
 
 const { hasDb } = loadTestEnv(new URL("../../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
 
-// A random marker per run, so this suite's rows in the path-keyed tables
-// (knowledge_files, knowledge_links) never share a literal path with a
-// sibling reconciler test file's rows in the shared scratch db — two files
-// both writing "Areas/Alpha.md" would race each other's upserts, not just
-// each other's cleanup (docs/ops/testing.md, "count your own rows").
+// A random marker per run, so this suite's own fixture never shares a
+// literal path with a sibling reconciler test file's rows in the shared
+// scratch db (docs/ops/testing.md, "count your own rows").
+//
+// The cleanup below still wipes the whole table rather than scoping to the
+// marker: `Indexer.reconcile()` reads `knowledge_files` unscoped to compute
+// what vanished (apps/reconciler/src/indexer.ts — it owns the index,
+// invariant 1), so this suite's very first assertion (`removed: 0`, an
+// exact row list) is only correct if the table is genuinely empty
+// beforehand. A leftover row from anywhere else in the shared db — a
+// crashed prior run, another package's fixture — would otherwise be swept
+// up as "removed" by reconcile() itself, marker or no marker. This is
+// exactly `Take the database` (docs/ops/testing.md): a sibling's leftovers
+// don't merely add noise here, they change the answer.
 const MARKER = `itest-${randomUUID().slice(0, 8)}`;
 const PREFIX = `Areas/${MARKER}/`;
 
@@ -29,8 +38,10 @@ describe.skipIf(!hasDb)("reconciler index loop (real db)", () => {
   let indexer: Indexer;
 
   const clean = async () => {
-    await pool.query(`DELETE FROM knowledge_links WHERE from_path LIKE $1 OR to_path LIKE $1`, [`${PREFIX}%`]);
-    await pool.query(`DELETE FROM knowledge_files WHERE path LIKE $1`, [`${PREFIX}%`]);
+    // the index is derived (invariant 1): start and end from nothing at all,
+    // not just nothing of ours — see the note above `MARKER`
+    await pool.query(`DELETE FROM knowledge_links`);
+    await pool.query(`DELETE FROM knowledge_files`);
     await pool.query(`DELETE FROM proposals WHERE source_agent = 'reconciler'`);
     await pool.query(`DELETE FROM runs WHERE component = 'reconciler'`);
   };
@@ -43,7 +54,6 @@ describe.skipIf(!hasDb)("reconciler index loop (real db)", () => {
       database: process.env.METISTRY_TEST_DB_NAME ?? "metistry_test", // scratch db (ops/scripts/test-db.sh)
       password: process.env.METISTRY_DB_PASSWORD,
     });
-    // the index is derived (invariant 1): start from nothing of ours
     await clean();
     repo = await tempRepo(MARKER);
     committer = new Committer(repo.git, { authorPrefix: "Metistry", authorEmail: "metistry@test" });

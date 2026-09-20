@@ -66,3 +66,28 @@ Kept current as PRs land (2026-09-08). Each item names what it unblocks.
       <token>"` and call `tasks_list`. The one path no agent could verify.
 - [ ] Try `/note` and a 👎 with a note in chat once #78 is deployed, so the
       first `reply-review` run has something to fold.
+- [ ] **Answer the first access request.** Narrow an external agent's grant to
+      `tier: index` in the Agents tab, have it try `knowledge_read` on a page
+      outside its areas, and answer the `access_request` it raises in Needs
+      You — Approve, or Revise to a narrower folder. Nothing but your hand can
+      make that grant (`docs/ops/actions.md`), so nothing but your hand can
+      prove the loop. Worth reading the card copy while you are there: the
+      designer has not drawn this one yet. Since 2026-09-20 the card says
+      what that credential holds in the **same words** the Agents panel and
+      `metistry agents list` use — one triple, role · access · extras — so
+      "wants Areas/Health · has titles, autonomy: observe" reads the same
+      wherever you meet it (`docs/ops/auth.md`). Tell me if the sentence is
+      wrong; it is one function, in one file.
+- [ ] **Decline one, and watch the ladder.** After a Decline the agent is told
+      the decision rather than allowed to re-file it, and may ask ONCE more
+      with `escalate: true` — that row arrives flagged *asked again after a
+      decline*. Decline the escalation too and the area is closed at the tool.
+      Worth doing once so you know what the second card looks like before a
+      real one arrives (ruled 2026-09-19).
+- [ ] **The assistant can now ask as well** (ruled 2026-09-19). If you have
+      narrowed it with `METISTRY_ASSISTANT_AREAS`, it will raise an
+      `access_request` like any other principal; approving one records the
+      area in `agent_grant_overrides` so it survives the next console start,
+      and revoking the assistant (unsetting `METISTRY_ASSISTANT_TOKEN`) clears
+      those approvals. Narrowing the variable afterwards narrows everything
+      EXCEPT what you approved — if you want an approval back, revoke once.

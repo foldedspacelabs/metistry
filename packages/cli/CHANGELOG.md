@@ -1,5 +1,662 @@
 # @foldedspacelabs/metistry-cli
 
+## 0.11.0
+
+### Minor Changes
+
+- 9c9da4a: **`metistry compute cache-report` — OPEN-6's measurement as one command**
+  (ruled 2026-09-17: ship automatic top-level `cache_control` first, measure
+  later). `metistry compute cache-report [--since 7d] [--json]` reads the `runs`
+  ledger through the new named query `cache_report`
+  (`GET /api/q/cache_report` — invariant 3's one read path, and no console route
+  or action of its own, so invariant 10's mutating surface is untouched) and
+  joins it to `compute.yaml`'s `pricing:` rates, which the ledger cannot know. A
+  table per provider/model, grouped by tier and by the `caching:` mode that was
+  in force, with turns, cache reads and writes, hit ratio, recorded cost and a
+  net dollar saving; one verdict line against an 80 % threshold, under the 89 %
+  after a task boundary that `docs/research/2026-09-cost-optimization.md`
+  records, because a real install rolls sessions. The saving is net of the write
+  premium and may be negative — a prefix rebuilt every turn is the finding, not
+  a number to floor at zero — and is absent, naming the field that would fill
+  it, wherever no `pricing:` entry publishes a rate. It calls no model and
+  writes nothing.
+  
+  **Usage mapping now covers Anthropic's native shape.** `cache_read_input_tokens`
+  was not read at all, and `input_tokens` on that wire is the *fresh* remainder
+  with both cache counts reported beside it rather than inside it.
+  `usageFromResponse` recognises the shape by its anchor field (`prompt_tokens`
+  = the OpenAI/OpenRouter form, already a total; `input_tokens` = the native
+  form, summed back into one), so `runs.tokens_in` means the whole billed prompt
+  whichever endpoint answered and a ratio over it is comparable across
+  providers.
+  
+  **Every engine turn now records the cache, and what caching was asked for.**
+  Crew runs wrote provider, model, tokens and cost but dropped
+  `cache_read_tokens`/`cache_write_tokens` and `cost_source`; shadow runs
+  dropped the same two on their own provider's row. Both carry them now. And a
+  reported zero is no longer flattened into "nothing reported": the engine keeps
+  the counter absent until a response carries the field, so NULL means the
+  provider said nothing (the field name is wrong) and 0 means it said zero (the
+  prefix is not stable) — two findings with different fixes. `runs.meta.caching`
+  records the mode in force for that turn, since `compute.yaml` is hot-reloaded
+  and cannot answer later what was true earlier.
+  
+  **Fixed:** `main()`'s `compute` case hardcoded `fetchFn: fetch` instead of
+  honouring the `io.fetchFn` test seam, so a test driving those verbs through
+  `main()` reached the real console and real provider endpoints rather than its
+  own fakes.
+- baf33c2: The vault bridge takes the principal from the credential, never from the
+  request body.
+  
+  **The hole.** Every mutation through the reconciler's bridge carries
+  `intent: { principal, … }`, and `principal` was the whole of the §4.7 check:
+  `writeAllowed` admitted `.metistry/**`, `CLAUDE.md` and `README.md` for
+  `principal: user` and refused everyone else. But `intent` is a field in a
+  **request body**, and one shared bearer — `METISTRY_BRIDGE_TOKEN_RECONCILER` —
+  reached that check. Any holder of it (the console, which terminates the
+  network and multiplexes every agent on the install; anything that ever read
+  the console's environment) could write `"principal": "user"` and rewrite
+  `rules.yaml`, an agent definition, a named query, `metistry.lock` or the
+  assistant's own instructions. Nothing did. Invariant 2 is worth only the
+  stronger sentence (owner's ruling, 2026-09-20).
+  
+  **The wire change.** The bridge now derives a caller CLASS from the bearer and
+  reads the body's `principal` as attribution inside what that class may claim
+  (`CALLER_AUTHORITY`, `apps/reconciler/src/paths.ts`):
+  
+  | Bearer | Class | May claim | Protected paths |
+  | --- | --- | --- | --- |
+  | `METISTRY_BRIDGE_TOKEN_RECONCILER_USER` (new) | `owner` | `user` only | all |
+  | `METISTRY_BRIDGE_TOKEN_RECONCILER` | `console` | any principal | `.metistry/assistant-prompt.md` and `.metistry/compute.yaml` only |
+  
+  A body that exceeds its bearer is `403 forbidden` in the uniform envelope —
+  never silently downgraded — and every refused mutation is a `runs` row
+  (`component=reconciler, kind=auth`) carrying the caller class, the claimed
+  principal and the path. Reads are unchanged: which bearer you hold decides
+  what you may write, not what you may see. `check()` gains
+  `meta.principal_from_credential` and `meta.owner_bearer`.
+  
+  The two protected paths left to the console are the two owner-authenticated
+  doors it already ships: §4.10's self-modification overlay, which the owner
+  allows in triage (`prompt-overlay.ts`), and `compute.yaml`, which the Compute
+  pane's `assign`/`budget` write through the same function `metistry compute`
+  calls (`compute-routes.ts`). Both are enumerated at the bridge rather than
+  left to the console's restraint, so `identity.yaml`, `rules.yaml`,
+  `deployment.yaml`, `metistry.lock`, `queries/`, `agents/`, `routines/`,
+  `targets/`, `extensions/`, `CLAUDE.md` and `README.md` are refused whatever
+  it asks for.
+  
+  **The new bearer.** `metistry init` mints it; `metistry up` and `metistry
+  update` mint it for an install that has none — before they restart the
+  reconciler, and `update` kickstarts the reconciler itself if nothing else in
+  the run did — and `metistry secrets sync --to env` mints it as a
+  `GENERATED_SECRETS` name. It is kept out of the console's environment by name
+  (`CONSOLE_ENV_DENY` in the otherwise wholesale `METISTRY_*` passthrough
+  `consoleEnv` builds), and `docker-compose.yml` never listed it. `writeProtected` presents whichever
+  bearer its process holds and lets the bridge decide — the CLI's is the owner's,
+  the console's is not — so a caller cannot widen itself by choosing a variable
+  name. With no owner bearer configured anywhere, no caller may write a
+  protected path at all, `metistry doctor`'s `reconciler` row is `degraded` with
+  the command that mints one, and a 403 from the CLI names that cause.
+- 579662f: The sole committer runs confined, and every confined child's egress passes
+  one allowlisting door.
+  
+  **`ops/sandbox/reconciler.sb`.** Under the `launchd` shape the reconciler —
+  the only process that holds the instance repo's working tree and the only
+  place git runs (D5) — now runs under a Seatbelt profile, as the job's root
+  process, so git and all 172 of its helpers inherit it. It writes the
+  instance repo and tmp and nothing else; reads the product checkout, the node
+  runtime, a real git's prefix and `~/.gitconfig` by name; execs node and that
+  git and **no shell**; dials the console, Postgres, the on-machine embedder
+  and the egress proxy, and binds only its own bridge port. D5 was a design
+  intention; it is now a kernel rule. `metistry up` (and `--dry-run`) prints
+  the profile each child will run under, and `metistry doctor` gains a
+  `sandbox` row that reads the answer back out of `supervisor.json`'s argv.
+  `METISTRY_RECONCILER_SANDBOX=0` swaps in `ops/sandbox/unconfined.sb`, a real
+  file that says `(allow default)`, so "not confined" is never invisible.
+  
+  **`/usr/bin/git` is not a git** — it links against `libxcselect.dylib` and
+  is the xcode-select shim, which dies under a profile. `up` resolves a real
+  git by absolute path (bundled runtime, then a non-shim git on `PATH`, then
+  the Command Line Tools) and declines to confine the job when it finds none.
+  
+  **The egress door.** `sandbox-exec` filters outbound by port and cannot name
+  a host, so `assistant.sb` carried `(remote tcp "*:443")` with an honest note
+  that its host list was documentation rather than enforcement. Both profiles
+  now allow exactly one loopback port, and a CONNECT proxy in the supervisor
+  listens there: an allowlist derived from this install's `compute.yaml`
+  providers and its instance repo's git remotes, exact host and port matching
+  (no wildcards), a 256-bit bearer per child so a refusal can name who asked,
+  a `runs` row per refusal, and no TLS interception whatsoever — CONNECT only,
+  so it learns a host name and never a byte of the tunnel. Children reach it
+  through `HTTPS_PROXY` + `NODE_USE_ENV_PROXY=1`; git reaches it through
+  `METISTRY_GIT_HTTP_PROXY` → `-c http.proxy`. `supervisor.json` gains an
+  `egress` block, read before any child is spawned, so no child can widen it.
+  
+  **Pushing still works, through `GIT_ASKPASS`.** git executes every
+  credential helper through `/bin/sh` — including the built-in `osxkeychain`
+  that `metistry connect-repo` configures — and this profile has no shell, so
+  a confined push would have died on the helper. `GIT_ASKPASS` is exec'd
+  directly, by absolute path, with no shell, so: the token stays in the login
+  Keychain where `connect-repo` put it, the **supervisor** reads it there once
+  at spawn (unconfined, the parent, and the item is filed `-A` so there is no
+  prompt), and hands it to the child in its environment; a `#!<node>` shim
+  `up` generates prints it when git asks and can do nothing else. The
+  credential is never in argv, never in `supervisor.json`, never on disk.
+  `git.ts` adds `-c credential.helper=` — git's documented reset — only when
+  there is an askpass, so an unconfined install is untouched. Proven by a real
+  push to a real bare repository over real HTTPS through the CONNECT tunnel,
+  under `sandbox-exec`.
+  
+  **SSH remotes stay unsupported while confined**, and `up` still warns:
+  `ssh` is not exec-able, granting it would mean granting the sole committer
+  `~/.ssh`, and ssh's `ProxyCommand` runs through a shell so it could not
+  reach the egress proxy either. Use an HTTPS remote or the off switch.
+
+### Patch Changes
+
+- 4581845: **The fold has its own file; your daily note is yours.** Ticket P1-9 of
+  `docs/product/daily-flow-spec.md` §5.1: the evening fold now writes
+  `Journal/Fold/<date>.md`, `source: knowledge-fold`, and never
+  `Journal/<date>.md` — that file has always been the user's own daily note,
+  and no fold turn touches it again.
+  
+  When `Templates/Fold.md` reads, the routine renders it itself — every
+  directive but `{{ prose }}`, the one legal only there (D14) — and hands the
+  skeleton plus the still-open prose slots to the SAME assistant turn it
+  already enqueues; the assistant's whole job is filling the numbered slots and
+  writing the result back verbatim. When there is no template yet (a missing
+  `Templates/Fold.md`, or no vault reader wired into the routine — §6.4's
+  `template_missing`), the fold falls back to the pre-template freeform note,
+  at the SAME new path, with a visible reason on the turn rather than losing
+  the night's fold or writing nothing at all.
+  
+  `seed/assistant-prompt.md`'s Fold section (shipped by
+  `@foldedspacelabs/metistry-cli`, stamped into every instance by `metistry
+  init`/`update`) is updated to match: it names the new path, states plainly
+  that `Journal/<date>.md` is never a fold write target, and describes both
+  shapes the enqueued turn may hand it — a skeleton to fill or a freeform note
+  to compose.
+- a0c1d02: `metistry init` now stamps the daily-flow journal tree — `Journal/` and its
+  `Plan/`, `Fold/`, `Standup/` and `Meetings/` subfolders, `Templates/` with
+  the six seeded templates (Daily, Meeting, Plan, Standup, Fold, Weekly), `Me/`
+  with a `profile.md` and `Working Style.md` carrying honest placeholders, and
+  empty `People/` and `Projects/` — into every new instance
+  (`docs/product/daily-flow-spec.md` P1-8). All six templates ship
+  `source: user`, so the assistant can never overwrite them, and a re-stamp
+  (`--force` onto an existing instance) never clobbers a template or a `Me/`
+  page you have since edited: only what is genuinely missing gets filled in.
+- b6586de: **One vocabulary, one renderer, and the owner is never refused their own
+  vault.** P3 and P4 of
+  `docs/research/2026-09-19-grants-and-access-simplified.md` §4, approved
+  2026-09-20. P4 carries the **owner-visible change** below; P3 changes what
+  refusals SAY, not what they decide.
+  
+  **P3 — one wording per reason.** §2.5 found five dialects across fourteen
+  refusal sites. `REFUSAL` in `packages/core/src/access.ts` is now one sentence
+  per `reason`, built in one place: the shape is one per reason, the facts in it
+  are substituted. So `queries_list` and `queries_run` refuse in the same words,
+  `knowledge_write` and `agents_delegate` give the same "belongs to the instance
+  assistant alone" sentence, and a tier miss names the tier the tool needs and
+  the tier the credential holds — in the console's own words for them (`none` /
+  `titles` / `folders`).
+  
+  Silence became a type rather than an accident at a call site: `tell: "hide"`
+  is the refusal deliberately identical to "there is nothing here", it carries
+  no `needs`, and `formatRefusal` drops its `reason` on the way out. Four things
+  hide — a row outside your projects, a route-only query, the console's uniform
+  403, and a knowledge path you may not even list (the 2026-09-19 boundary: an
+  area is named only for a page whose existence you can already see).
+  
+  New in `core`: `describeScope(principal)` (the triple: role · access ·
+  extras), `formatRefusal(decision)` (the §3.2 envelope), `classify(path)`,
+  `notKnowledge(path)`, `TIER_LABEL`, `ROLE_LABEL`, `sourceLabel`,
+  `RULED_TOOLS`, `NO_SUCH_PAGE`, and `tell` on `Refusal`. **Removed**:
+  `scopeAsPrincipal` (the P0 seam P4 deletes — `/api/knowledge/*` takes the
+  principal now), and the three refusal-string constants it replaces
+  (`NOT_A_VAULT_PATH`, `NOT_KNOWLEDGE`, `ARTIFACTS_SIGNPOST`).
+  
+  **P4 — the owner is refused nothing.** "The owner should always have access to
+  everything" (ruled 2026-09-19) is a short-circuit at the top of `may()`, with
+  no exception clause below it. Safe only because `classify()` splits what a
+  path IS from what anyone may do with it: `Artifacts/` and `.metistry/` are not
+  knowledge paths, so the rule never has to be weakened to keep an agent out of
+  the machinery.
+  
+  Two owner-visible changes, and they are the two §2.6 found:
+  
+  - **`GET /api/q/<name>` serves the owner a route-exposed query.** The filter
+    `expose: route` protects is a filter on what an AGENT may see of the vault;
+    the owner's scope is the whole vault. The capture owner token is NOT the
+    owner and is refused byte for byte, which is the credential that rule was
+    always about.
+  - **`GET /api/knowledge/page` and `/links` classify instead of refusing.** The
+    owner's `Artifacts/` and `.metistry/` answer `400` with
+    `reason: "not_knowledge"` and `needs.door` naming the route that has the
+    bytes (`GET /api/artifacts`, or "the file itself"), where they used to
+    answer `404`. **No door serves `.metistry/state/.env` as a page, and not one
+    byte of it crosses here** — the classification is the whole answer.
+  
+  **Agents gain nothing from P4.** Every agent, crew and assistant refusal is
+  byte-identical to what it answered before, which the golden file asserts entry
+  by entry: the four `changed` entries under P4 are all `who: "owner"`.
+  
+  **Surfaces.** `metistry agents list` is new (P3 §2.10 — the CLI rendered
+  grants not at all). `GET /api/agents` carries each row's rendered `scope` and
+  `grant_source`; an `access_request` payload carries `current_scope`. The
+  console's Agents panel and Needs You card print what they are sent instead of
+  holding spellings of their own. Tool descriptions moved onto the same words
+  and got smaller: brain's definition tokens 4264 → 4255 against a >5000 budget.
+- 23cc47f: **The daily note is rendered from a template you edit.** `core` gains the
+  template engine of `docs/product/daily-flow-spec.md` §6 (P1-6):
+  `renderTemplate(text, ctx)` and `validateTemplate(text)`, plus
+  `metistry templates check` in the CLI to run the second one from a terminal.
+  
+  Eight directives and one block form, and the ceiling is the point — a ninth
+  verb is a product decision, not a config line:
+  
+  | directive | what it renders |
+  | --- | --- |
+  | `{{ date format: "YYYY-MM-DD" offset: 1 }}` | a date in the instance's zone |
+  | `{{ tasks where: "due <= tomorrow or overdue" order: "priority, due" as: "list" }}` | the vault's `- [ ]` lines, as links to the notes they live on |
+  | `{{ recurring due: today }}` | §4's recurrence rules |
+  | `{{ calendar day: tomorrow }}` | the eventkit bridge's events for a day |
+  | `{{ work where: "blocked or waiting_on_me" }}` | the `work` rows a day needs |
+  | `{{ requests limit: 5 }}` | what is waiting on the owner |
+  | `{{ include "Me/Working Style.md#Prioritisation" }}` | a section of a vault file, spliced verbatim |
+  | `{{ prose "summarise yesterday in three lines" }}` | a slot the fold fills — fold templates only |
+  | `{{ section "Today" if_empty: "hide" }}` … `{{ /section }}` | a heading that vanishes when nothing is under it |
+  
+  What the engine cannot do is enforced by its shape rather than asked for in a
+  comment. `where:`/`order:` go through `compileTaskFilter` and leave as bind
+  params of one named query, so no directive can put text into SQL (invariant
+  3); `{{ work where: … }}` is a separate, tiny flag list over `day_work`'s
+  board states, refused outright on anything outside it, because one vocabulary
+  stretched over two tables would compile against one and mean nothing against
+  the other. `prose` never reaches a model here: it produces a bounded request object
+  the fold routine fulfils on the turn it already takes, and it is refused
+  outright in a template whose output the assistant may not write (D14).
+  `include` splices literal text and evaluates nothing inside it, so a template
+  that includes itself renders a note rather than looping. And a recurring rule
+  is materialised into a `- [ ] … ^mt-…` line only when the render's `source` is
+  the user's own hand; every routine gets the same rule as a proposal, because
+  no routine writes a task into a note you own (D4).
+  
+  Every failure is visible and none is fatal (§6.4): an unknown directive, a
+  `where:` the vocabulary refuses, an unreachable calendar, a query that is not
+  configured — each renders one `> ⚠️ metistry: …` line naming the template and
+  the line number, and the rest of the file still renders. A day with no plan
+  because the calendar was down is the worst possible outcome. A missing
+  template writes nothing at all and is reported as a configuration fact.
+  
+  Every rendered file ends with a provenance footer — the template, its sha256,
+  when it was rendered and by which engine — so "why does my plan look like
+  that" has an answer that names a file. Output is capped
+  (`METISTRY_TEMPLATE_MAX_BYTES`, 16 KB) and truncates with the fold's own
+  `…and N more`.
+  
+  `metistry templates check [<file>]` validates every file in the vault's
+  `Templates/` and prints each finding as `path:line  message`. It reads nothing
+  but the files — no database, no calendar, no vault lookups — so it answers on
+  a laptop with nothing running, which is what §6.5 needs: a template change
+  takes effect at the next run, and this is how you find out before the run
+  does.
+- Updated dependencies [4a778f9]
+- Updated dependencies [4f43f9c]
+- Updated dependencies [9c9da4a]
+- Updated dependencies [1bf5c76]
+- Updated dependencies [b6586de]
+- Updated dependencies [579662f]
+- Updated dependencies [57ceb02]
+- Updated dependencies [45b64df]
+- Updated dependencies [9ec30d5]
+- Updated dependencies [7f9ceb7]
+- Updated dependencies [23cc47f]
+  - @foldedspacelabs/metistry-core@0.11.0
+
+## 0.10.0
+
+### Minor Changes
+
+- ad73f5a: Metistry can keep your Mac awake while it runs, and asks you first.
+  `deployment.yaml` gains `keep_awake`: `never`, `allow_sleep_on_battery`
+  (held on wall power, released on battery and on a UPS), `always`, or
+  `always_lid_closed`. `metistry init` asks the question once on a terminal,
+  printing what each choice costs, and writes your answer; `--keep-awake
+  <value>` answers it without one, and an install that was never asked holds
+  nothing — a power assertion overrides your own sleep setting, so it is never
+  taken on your behalf. Under the `launchd` shape the supervisor holds
+  `caffeinate -i -w <its own pid>`: the display still sleeps, your own
+  keep-awake app is untouched, and nothing survives the supervisor. `metistry
+  doctor` grows one macOS-only `keep-awake` row (`degraded` at worst) that
+  cross-checks our pid against `pmset -g assertions`, reads a release on
+  battery as success rather than a fault, and reports when the Mac slept
+  anyway — with the repair. `always_lid_closed` is accepted and honest: no
+  process can keep a Mac awake with the lid shut, so doctor says it needs an
+  administrator change you make yourself. Change it later with `metistry
+  deployment set-keep-awake <value> --yes`.
+
+### Patch Changes
+
+- afc2679: The command line has a presentation layer. `packages/cli/src/ui.ts` —
+  hand-rolled, no dependency — decides once whether to colour (a TTY,
+  `NO_COLOR`, `FORCE_COLOR`, `TERM=dumb`, `--no-color`, and never under
+  `--json`), whether the terminal can draw `✓` or wants `[ok]`, and how wide a
+  paragraph may be; and it holds the pieces every verb was re-inventing: an
+  aligned key/value block, a table with a header rule, a closed status
+  vocabulary with one colour each, and a spinner that animates on a terminal
+  and prints one line everywhere else.
+  
+  Applied to the verbs an operator sees most. `doctor` groups its rows by kind
+  and puts the remediation — the reason a red row is read at all — wrapped
+  underneath that row instead of in a ragged fifth column; `version` and
+  `deployment` and `connect --list` are aligned tables; `compute providers
+  test` shows the listing and the completion as sub-rows; `update` narrates its
+  steps and ends with one line saying whether it landed and what moved;
+  `migrate-layout` shows each section's moves as a `from → to` table; `--help`
+  opens with the verbs grouped by what you are in the middle of doing, with the
+  full reference still underneath. `<checkout>/.env is still being read as a
+  fallback and is deprecated` was the first thing printed by almost every verb;
+  it is now one dimmed line at the end.
+  
+  `down` and `restart|stop|start` are the same table, with what `launchctl
+  print` and `docker compose ps` answered after the stop under a heading of its
+  own; `deployment` names this install's keep-awake policy beside its shape;
+  and `init`'s one question wraps to the terminal instead of to 90 columns.
+  
+  No `--json` document and no exit code changes: colour is off at the source
+  whenever a verb is printing for a machine. `--no-color` is new.
+- 975221b: **`metistry up` (and `update`) now writes a `metistry` shim, so there is
+  finally something to run `metistry` BY NAME against.** A release install has
+  no Homebrew formula and no npm global, so nothing ever put `metistry` on
+  `PATH` — the only way to run one was the owner's own hand-written wrapper.
+  `up`/`update` write a small, idempotent POSIX script to
+  `<instance>/.metistry/state/cli/metistry` (mode `0755`) that already knows
+  this install's product dir and instance dir, and re-resolves which of
+  `current/` (a release) or the bare product dir holds the CLI, and which
+  `node` to run it with, on every invocation — so a release flip or a freshly
+  bundled runtime needs no re-write. `state/cli/` rather than `state/bin/`:
+  the launchd shape's `state/bin/Metistry` is already the supervisor's own
+  program-identity symlink, and macOS's default case-insensitive volume would
+  make that the same directory entry as `state/bin/metistry` — a sibling
+  directory avoids the collision outright. `writeCliShim` also leaves alone
+  anything already sitting at the path that is not a symlink-free plain file
+  recognisably its own — a foreign file is noted, never overwritten.
+  
+  `up` never puts it on `PATH` itself (invariant 2 — that is the operator's
+  own hand): it prints the one `ln -s … ~/.local/bin/metistry` line that
+  would, and `metistry doctor` gains an informational `cli on PATH` row
+  (`ok`/`absent`, never a finding that fails the exit code) carrying the same
+  line as its remediation.
+  
+  The Mac app's `RuntimeLocator` now also searches `~/.local/bin` and the
+  active instance's own `.metistry/state/cli` when looking for a `metistry`
+  on `PATH`, so it finds an install even before anyone has linked anything.
+- fe6669c: `metistry up` is faster, says where its time went, and has a counterpart.
+  
+  Four steps were costing wall-clock seconds nobody benefited from. The retire
+  step ran a `launchctl bootout` and an `rm` for each of eight pre-supervisor
+  labels, in series, on every run — one `launchctl list` now answers for all
+  eight, with the old unconditional sweep kept as the fallback for a dry run or
+  a probe that fails. Postgres readiness is polled every 250ms rather than
+  every second, keeping the same 15s ceiling. Doctor's probes are independent
+  and now run concurrently, so the closing table costs the slowest probe rather
+  than the sum of all of them (no timeout was shortened: a slow-but-healthy
+  bridge reported as down would be a worse table). `up` ends with a figure per
+  `==` section plus the total, and one line naming who owns the processes it
+  started — launchd or compose, never the CLI.
+  
+  New verb: `metistry down [--json] [--dry-run]` stops every host job and every
+  container this instance runs and then confirms it by looking — `launchctl
+  print` finding nothing, `docker compose ps` listing nothing. It is `docker
+  compose stop`, never `down` and never `-v`: no container is removed and no
+  volume is touched. `stop [<service>…]` remains the per-service verb. When the
+  Mac app registered the background item, `down` stops it for this login
+  session and says the app will start it again at the next one — it does not
+  reach into another application's `SMAppService` registration.
+- Updated dependencies [ad73f5a]
+  - @foldedspacelabs/metistry-core@0.10.0
+
+## 0.9.1
+
+### Patch Changes
+
+- 1155dd9: `metistry compute providers test <name> --complete` no longer probes the
+  alphabetically-first model in a provider's listing — for OpenRouter's 400+
+  models that was some obscure, unroutable one, which 404s and reads as the
+  key having failed when the listing had already proven it works. The
+  completion probe now prefers a model already assigned to that provider in
+  `compute.yaml`, then a model this project's own docs point an operator at
+  first for it, then OpenRouter's own `openrouter/auto`, and only then falls
+  back to the first listed model as before. `--model <id>` overrides the
+  choice outright. A failed completion is now reported separately from the
+  listing (`listing ok` / `completion: FAILED (model …, chosen: …) …
+  override with --model <id>`) rather than marking the whole provider row
+  FAILED.
+- 847a5ba: `metistry console call` grows `--idempotency-key <key>`, so a caller — the
+  Mac app or a script — can retry a `POST /capture` without minting a second
+  note. The key is checked to the server's own shape (trimmed, non-empty, at
+  most 200 characters) before the request ever goes out, and a replay (the
+  console's `idempotency-replayed` response header, which this verb otherwise
+  prints no trace of) folds `"replayed": true` into `--json` output or a
+  one-line stderr note in plain mode.
+- @foldedspacelabs/metistry-core@0.9.1
+
+## 0.9.0
+
+### Minor Changes
+
+- e9074d2: **The console grows the routes the app plan needs, so compute and knowledge
+  stop being Mac-only.** Nine new endpoints on the existing owner auth, the
+  existing error envelope and the existing `degrades: absent` rule, each with
+  its misuse tests (invariant 8).
+  
+  `/api/compute*` is five of the `metistry compute` verbs over HTTP: `GET
+  /api/compute` (the `compute show --json` report, plus both budget windows
+  folded from the `spend` named query and a `writable` flag), `GET
+  /api/compute/models`, `POST /api/compute/assign`, `POST /api/compute/budget`,
+  `POST /api/compute/providers/test`. They call the **same exported functions
+  the CLI verbs call** — the same YAML-document edit so comments and
+  hand-written blocks survive, the same re-validation of the result before
+  anything is written, the same write through the reconciler as `user`
+  (invariant 2) — so a refusal reads identically on both doors because it is the
+  same refusal. `providers add` and `providers remove` are deliberately absent:
+  they take a key, and a key goes on stdin into the login Keychain, so adding or
+  removing a provider stays CLI/app-only and `secret_present` is the only thing
+  a secret contributes to a response. These are the owner's **configuration**,
+  not invariant-10 "actions" — `user` principal only, no `propose_action` kind,
+  no autonomy level that reaches them.
+  
+  Two guards worth naming. The console refuses to write a `compute.yaml` it is
+  not reading: if the `METISTRY_COMPUTE_FILES` overlay ends somewhere other than
+  `<instance>/.metistry/compute.yaml`, the write is refused with both paths
+  named, because unguarded it would find nothing at the path it opens, start
+  from a bare header and deliver a four-line file over the real one. And the
+  whole surface degrades absent: the compose shape gives the console no instance
+  mount by design, so there every compute route answers 503 naming
+  `METISTRY_INSTANCE_DIR` while `metistry compute` keeps working.
+  
+  `GET /api/knowledge/search` and `GET /api/knowledge/page` are the owner's read
+  path into their own vault — a thin proxy onto the reconciler's
+  `/vault/search` (three modes, snippets, and `degraded` reaching the client
+  rather than being swallowed) and `/vault/read`. The console has held a vault
+  reader and searcher since Phase 6 and wired them only into `mcp-brain`, so
+  knowledge was reachable by an agent over MCP and by nothing the owner holds.
+  The proxy also **narrows what the bridge serves**: `/vault/read` is confined
+  to the instance repo and stops there, because the protected-path writes go
+  through it, so the route adds core's `isVaultPath` and `.metistry/`,
+  `Artifacts/` and the root `CLAUDE.md` are not reachable as knowledge from any
+  client. A refusal answers 404, not 403, so "refused" and "absent" are
+  indistinguishable from outside. `GET /api/knowledge/pages` is deliberately not
+  here: the page list is derived state and belongs in a named query over
+  `knowledge_files`, which `seed/queries/` does not carry yet.
+  
+  `GET /api/commands` is the composer's list, **generated** from the instance's
+  own `rules.yaml` and the agent registry — `/note`, the deep alias under
+  whatever name that instance gives it, `/model`, and one command per
+  `fast_path` rule whose pattern spells one unambiguously. A rule that is a
+  sentence rather than a command yields nothing, on purpose. Each entry carries
+  the tier it routes to and, for a fast path, the named query whose own
+  description is the menu's line. The PWA's static `COMMANDS` array — a
+  placeholder marked with an expiry since it was written — is deleted, and an
+  integration test routes every command the endpoint offers back through
+  `route()` so the menu and the router cannot drift.
+  
+  `GET /api/runs/:id` is the activity feed's drill-down into a `runs:<id>` ref,
+  through a new `run_detail` named query: provider, model, token and cache
+  counts, cost, the tool calls the same reply made (joined exactly on
+  `meta.turn_id` or `meta.message_id`, never a time window) and the shadow
+  agreement measure where the turn was shadowed — the measure, not the two
+  transcripts.
+- f57b3b0: **The instance directory is the Obsidian vault.** Open the folder `metistry
+  init` made and your notes are right there — `Journal/`, `Me/`, `Inbox/`,
+  `now.md` — with nothing of the machinery in the way. Everything that is not
+  knowledge moved into `.metistry/`: identity, rules, compute, the config
+  directories, the lock, and the derived `state/` that holds Postgres, the
+  `.env` and downloaded models. Obsidian ignores dot-prefixed folders, which is
+  the whole reason for the dot — the vault root and the install's own files can
+  finally be the same directory without one of them cluttering the other.
+  
+  Vault paths lose their prefix with it: a note is `Areas/Fsl/Drey.md`, a
+  capture is `Inbox/…`, and a read grant covering everything is spelled `/`.
+  
+  **The protected set became a place rather than a list.** Anything under
+  `.metistry/` is the user's hand alone — except `.metistry/state/`, which is
+  derived and nobody's record — plus the root `CLAUDE.md` and `README.md`.
+  That is one rule the reconciler enforces at the tool, instead of seven
+  filenames each component had to remember. Neither those two root files nor
+  `Artifacts/` are indexed as knowledge: your instructions and your bundles are
+  yours to read, not search results.
+  
+  This ships the layout for NEW instances. An existing instance keeps working
+  unchanged and `metistry doctor` now says which shape it is in; the verb that
+  moves one is the next change.
+- ce521a6: **`metistry migrate-layout` moves an existing instance onto the flat layout.**
+  The 2026-09-17 ruling shipped for new instances; this is the verb that carries
+  an old one across. `git mv` for what git tracks and a plain move for what it
+  does not: the config half into `.metistry/`, the gitignored `state/` with it,
+  every entry of `Knowledge/` up to the instance root (`Knowledge/CLAUDE.md`
+  becomes the root `CLAUDE.md`, a `Knowledge/.obsidian/` comes up too), a
+  pre-#156 root `inbox/` normalised and merged into `Inbox/`, the `.gitignore`
+  rewritten with your own lines kept, and one commit at the end. It restarts
+  nothing.
+  
+  The whole plan is read off the filesystem *before* anything moves, so a name
+  collision between `Knowledge/` and the instance root is refused with both
+  sides named and the tree exactly as it was. A dirty git tree is refused too
+  (`--allow-dirty` overrides), and a running reconciler is named in a warning —
+  it is the instance repo's sole committer, and it would otherwise sweep the
+  migration into commits of its own halfway through.
+  
+  Crew `scope:` and target `data_policy.allow:` entries are rewritten in the
+  manifest files in the same run — the console re-syncs the crew registry from
+  `.metistry/agents/**` on an interval, so a grant migrated in the database and
+  left stale in the manifest behind it would be undone by the next sync, which
+  is a migration that silently fails. That edit is a byte-range splice rather
+  than a re-serialisation: aligned comments, flow-vs-block style and the
+  operating prompt below the frontmatter come back byte-identical.
+  
+  A pre-2026-09-17 `<instance>/eval/` moves under `.metistry/` with the rest —
+  bake-off fixtures and transcripts are instance-repo content, not knowledge —
+  and preflight now lists any lowercase entry that will sit at the vault root
+  after the move, since the vault root becomes the instance root and vault
+  content is TitleCase.
+  
+  Stored paths follow in ONE transaction: `Knowledge/` drops out of
+  `knowledge_files`, `knowledge_links`, `embeddings`, `inbox` and
+  `projects.area`, a pre-2026-09-16 bare capture filename becomes
+  `Inbox/<file>`, and a read grant covering the whole vault becomes `/`. With no
+  database configured the rewrites are named and skipped rather than failing, so
+  the files still move. `--dry-run` prints every move and every row count and
+  touches nothing; `--json` reports the result.
+  
+  The Mac app reads both layouts now — a legacy folder is adopted, not refused,
+  and Status and the first-run wizard both say "Legacy layout — run `metistry
+  migrate-layout`". `metistry connect`'s editor configs were already free of
+  instance paths; a test now holds them that way.
+
+### Patch Changes
+
+- c1f512e: **The assistant now uses your `identity.yaml` on the launchd shape, instead
+  of the seed identity that ships with the product.** Every `*_FILES` overlay
+  default resolved its instance half relative to the process's working
+  directory, and every launchd job's working directory is the product
+  checkout — so `.metistry/identity.yaml`, `rules.yaml` and `compute.yaml`
+  named the product's own directory, found nothing, and the engine ran on the
+  seed. `METISTRY_INSTANCE_DIR` was not in the engine's environment allowlist
+  either, so it could not have resolved them itself.
+  
+  Fixed at the root: `metistry up` puts `METISTRY_INSTANCE_DIR` and
+  `METISTRY_SEED_DIR` in every child's environment (the plists' env dicts and
+  the supervisor's child specs alike), and core's `overlayFiles` resolves every
+  default against the instance directory through `resolveInstanceLayout` — so
+  it finds the file whether the instance has run `metistry migrate-layout` or
+  not. The assistant, the console and the reconciler all read their overlays
+  through it, which also means the console's router and the engine can no
+  longer disagree about which `rules.yaml` is in force.
+  
+  The engine **refuses to start** when neither `METISTRY_INSTANCE_DIR` nor
+  `METISTRY_IDENTITY_FILES` is set, rather than answering under the seed's
+  name. `ops/sandbox/assistant.sb` grants read on the four config files by
+  name (never on the directory holding them, which on an unmigrated instance
+  is the vault root), so the reads the overlay now performs are permitted and
+  nothing else in the instance is.
+  
+  Also: `metistry update --version <x.y.z>` was ignored — `version` was listed
+  as a boolean flag, so the value never arrived and the latest release was
+  installed instead. And in git mode `update` wrote the **pre-pull** version
+  into `metistry.lock`; the version is now read from the checkout after the
+  pull, so a run that fast-forwards onto a new release pins that release.
+- 76f82a2: **An instance that has not run `metistry migrate-layout` is read again.**
+  `db/migrations/0021` recorded that "a legacy instance keeps working unchanged
+  until the verb runs". Verified against a clone of a real pre-ruling instance,
+  it did not: #193 moved every path to `.metistry/` and every reader spelled the
+  new one, so `metistry compute show` reported no providers while the instance's
+  `compute.yaml` declared one, `metistry identity` exited 1 on an instance whose
+  `identity.yaml` was right there, `metistry version` omitted the pin, `doctor`
+  read `shape compose` off a `deployment.yaml` it never opened and probed the
+  wrong half of the install, `metistry secrets`/`console`/`connect` could not
+  find `state/.env` at all — which on a launchd install means every rendered
+  plist's `__ENV_FILE__` points at a file that does not exist — and `up` would
+  have `initdb`'d a second, empty Postgres cluster at `.metistry/state/pg`
+  beside the live one.
+  
+  Two of the breaks were safety, not convenience. The §4.7 protected set became
+  the `.metistry/` PLACE, which took the legacy machinery at the instance root
+  out of it: on a legacy instance the assistant could write `identity.yaml`,
+  `rules.yaml`, `metistry.lock`, `queries/` and `instance-migrations/` through
+  `brain-commit` (invariant 2). And the knowledge walk, which now starts at the
+  instance root, indexed those same files plus every byte of the gitignored
+  `state/` — a Postgres cluster included — as notes.
+  
+  `resolveInstanceLayout(instanceDir)` in core is the fix: one `detectLayout`
+  read, then the right relative-path table (`LEGACY_INSTANCE_LAYOUT` mirrors
+  `INSTANCE_LAYOUT` key for key), with `instanceFile()` / `instanceStatePath()`
+  as the reader's one-line call. Every reader goes through it — identity,
+  rules, compute, deployment, the lock, the peer registry, `.env`, the Postgres
+  data and socket dirs, the supervisor's config/socket/bin, `ports.yaml`, the
+  models dir, the assistant's state dir, `doctor`'s compute overlay, the
+  console's identity/peers/inbox, and the reconciler's inbox prefix (whose SQL
+  predicate must match migration 0015's partial index on a legacy instance, not
+  0021's). Writers are untouched: `instancePath`/`metistryPath` still spell the
+  flat layout, because there is one layout to write and two to read.
+  `isProtectedPath` and `isVaultPath` cover the legacy root names
+  unconditionally — they receive a path and no instance directory, and the set
+  is strictly safer on a flat instance, which has no business holding lowercase
+  machinery at its root.
+  
+  `metistry update` now **refuses** to pin a version past 0.8.x onto a legacy
+  instance, before it fetches, builds or migrates anything, printing the
+  `migrate-layout` line to run; `--allow-legacy` overrides. Regression tests run
+  one fixture in both shapes through the same readers, so a reader that resolves
+  only one of them fails.
+- Updated dependencies [c1f512e]
+- Updated dependencies [337bc0a]
+- Updated dependencies [dade46d]
+- Updated dependencies [f57b3b0]
+- Updated dependencies [76f82a2]
+  - @foldedspacelabs/metistry-core@0.9.0
+
 ## 0.8.1
 
 ### Patch Changes

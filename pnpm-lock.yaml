@@ -57,6 +57,9 @@ importers:
       '@foldedspacelabs/metistry-artifacts':
         specifier: workspace:*
         version: link:../../packages/artifacts
+      '@foldedspacelabs/metistry-cli':
+        specifier: workspace:*
+        version: link:../../packages/cli
       '@foldedspacelabs/metistry-core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -267,12 +270,6 @@ importers:
       '@foldedspacelabs/metistry-mcp-brain':
         specifier: workspace:*
         version: link:../mcp-brain
-      '@foldedspacelabs/metistry-tasks':
-        specifier: workspace:*
-        version: link:../tasks
-      '@modelcontextprotocol/sdk':
-        specifier: ^1.30.0
-        version: 1.30.0(zod@4.5.2)
       zod:
         specifier: ^4.3.6
         version: 4.5.2
@@ -453,7 +450,13 @@ importers:
       '@foldedspacelabs/metistry-core':
         specifier: workspace:*
         version: link:../packages/core
+      yaml:
+        specifier: ^2.9.0
+        version: 2.9.0
     devDependencies:
+      '@foldedspacelabs/metistry-queries':
+        specifier: workspace:*
+        version: link:../packages/queries
       '@types/node':
         specifier: ^22.20.1
         version: 22.20.1

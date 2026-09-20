@@ -24,6 +24,9 @@ engine that dials a provider. Deliberately still absent, each a named PR in
 
 - **No app pane.** The Compute pane, and wizard step 7 becoming "Choose your
   compute", are PR 1a — deliberately split so the verb surface settles first.
+  The *server* half is no longer missing: five of the verbs are console routes
+  ("From the console", below), so the pane is a client to write rather than an
+  API to design.
 - **No bundled local server.** `llama-server` built into the runtime-deps
   pack is PR 2; LM Studio and Ollama work today as ordinary
   OpenAI-compatible providers.
@@ -55,6 +58,7 @@ providers:
     locality: off_machine
     auth: { secret: METISTRY_OPENROUTER_API_KEY }   # a NAME. The value is in the Keychain.
     zdr: true
+    caching: auto                            # send its automatic prompt-caching field on every call
     request: { provider: { order: [anthropic], allow_fallbacks: false } }
     data_policy: { allow: [Projects], deny_sources: [comms], max_brief_bytes: 65536 }
     pricing: { anthropic/claude-sonnet-5: { in_per_m: 3, out_per_m: 15 } }
@@ -87,6 +91,7 @@ so a validation error tells you what to edit.
 | Unknown keys are errors | A typo must fail loudly rather than silently do nothing. |
 | `assignments.default` is required whenever `assignments:` exists | It is where every unnamed and unknown tier lands; half here and half in `rules.yaml` is the split "one read path into state" exists to prevent. |
 | `shadow:` needs a `fraction`, belongs to `default`, and may not name the model already assigned | The rate is the spend, the engine reads the block in one place, and a shadow of the incumbent measures nothing while costing twice ("Shadow mode" below). |
+| `caching: auto` only on an `off_machine` provider | It is a field sent to something that bills for the prompt. A local server keeps its own prefix cache with no field to send, so the key would be a line that does nothing ("Prompt caching" below). |
 
 `zdr: false` (or absent) on an `off_machine` provider is **a warning, never a
 block** — informed choice.
@@ -101,7 +106,9 @@ declare `tiers.routine` explicitly if the pause is meant to apply to it.
 ## Where it is read from — the D4 overlay
 
 `METISTRY_COMPUTE_FILES`, colon-separated, default
-`seed/compute.yaml:.metistry/compute.yaml`. The **last existing file wins, whole** —
+`<seed>/compute.yaml:<instance>/.metistry/compute.yaml` — the instance half
+resolved against `METISTRY_INSTANCE_DIR` and absolute, not relative to
+whatever directory the service happens to run in. The **last existing file wins, whole** —
 there is no deep merge, so your instance's file always stands alone and is
 always readable on its own. The same rule as `METISTRY_RULES_FILES`.
 
@@ -122,17 +129,20 @@ metistry compute providers list [--json]
 metistry compute providers add --from openrouter|lmstudio|ollama|llamaserver|applefm \
         [--name <n>] [--base-url <url>] [--secret <NAME>] [--skip-test]
 metistry compute providers remove <name>
-metistry compute providers test <name> [--complete]
+metistry compute providers test <name> [--complete] [--model <id>]
 metistry compute models list [--provider <name>] [--json]
 metistry compute models install <provider>/<model> [--json]
 metistry compute models load|unload <provider>/<model> [--ttl <seconds>] [--json]
 metistry compute assign <default|<tier>|crew:<name>> <provider/model> [--effort low|medium|high]
 metistry compute budget <instance|provider:<name>> [--daily <usd>] [--monthly <usd>] \
         --action allow|stop|critical_only
+metistry compute cache-report [--since 7d] [--json]
 ```
 
 Every verb takes `--json` (the app's surface) and `--dry-run` (print the
-plan, write nothing). Every write goes through the reconciler as `user`, and
+plan, write nothing) — except `cache-report`, which writes nothing to begin
+with: it is the one READ here, over the `runs` ledger ("Measuring it
+(OPEN-6)"). Every write goes through the reconciler as `user`, and
 the **result is validated before it is written** — an edit that would produce
 a file the engine could not load is refused and the file is left untouched.
 Hand-written comments, ordering and blocks the verbs do not cover survive
@@ -163,10 +173,71 @@ instance's, so every instance on this Mac shares it and
 `metistry secrets purge` never touches it (`secrets.ts` `SECRET_SCOPES`).
 
 `providers test` is a real `GET <base_url>/models` with that credential;
-`--complete` adds a one-token `POST <base_url>/chat/completions` on an
-assigned model, carrying the provider's own `request:` block — the only
-thing that proves the key can buy a completion rather than just list a
-catalogue.
+`--complete` adds a one-token `POST <base_url>/chat/completions`, carrying
+the provider's own `request:` block — the only thing that proves the key can
+buy a completion rather than just list a catalogue.
+
+Which model the completion probe calls is never a guess: it uses a model
+already **assigned** to this provider in `compute.yaml` when there is one,
+else the model this project's own docs point an operator at first for that
+provider (OpenRouter's `anthropic/claude-sonnet-5`, per this file's own
+setup walkthrough above), else OpenRouter's `openrouter/auto`, else — for
+any other OpenAI-compatible provider, or if none of the above are in the
+listing — the first model the listing served. `--model <id>` overrides all
+of that. A listing of hundreds of models with nothing assigned yet used to
+fall through to "alphabetically first", which for OpenRouter is some
+obscure, unroutable model — a 404 on the completion that has nothing to do
+with whether the credential works. The rendered line separates the two: a
+failed completion probe reads `listing ok` / `completion: FAILED (model …,
+chosen: …) … — override with --model <id>`, and does not read as the key
+itself having failed.
+
+### From the console
+
+Five of the verbs above are also console routes, so compute is not Mac-only
+and the Compute pane works from the phone (`docs/ops/console-api.md`
+`/api/compute*`, `docs/product/app-ux-plan.md` §6 phase D):
+
+| route | the verb it is |
+| --- | --- |
+| `GET /api/compute` | `compute show --json`, plus `spend` (both budget windows, from the `spend` named query) and `writable` |
+| `GET /api/compute/models[?provider=]` | `compute models list --json` |
+| `POST /api/compute/assign` `{tier\|crew, model, effort?}` | `compute assign` |
+| `POST /api/compute/budget` `{scope, daily?, monthly?, action}` | `compute budget` |
+| `POST /api/compute/providers/test` `{name, complete?}` | `compute providers test` |
+
+They are the **same exported functions**, not a second implementation: the
+same YAML-document edit, the same re-validation of the result before anything
+is written, the same write through the reconciler as `user`. A refusal reads
+identically on both doors because it *is* the same refusal.
+
+**Two verbs are deliberately not there: `providers add` and `providers
+remove`.** Adding a provider takes a key, and a key goes on stdin into the
+login Keychain from the hand of the person at the machine — a *user*-scoped
+credential shared by every instance on that Mac is not one instance's to
+accept over HTTP. So **adding or removing a provider, and anything that takes
+a secret, stays CLI/app-only.** `GET /api/compute` reports the secret's NAME
+and whether an item of that name exists (`secret_present`), never a value;
+where there is no login Keychain — a container — it reports the honest
+`false`.
+
+**They are owner-only configuration, not console "actions".** Invariant 10
+closes the console's *action* surface: a closed, enumerated set, each entry a
+door onto an existing audited service, a new one a product change
+(`docs/ops/actions.md`). These routes are not on that list and must not be
+added to it. `compute.yaml` says how the system behaves, so it is the `user`
+principal's alone (invariant 2) — an agent bearer and a capture owner token
+both get the canonical `403`, no `propose_action` kind reaches it, and no
+autonomy level can.
+
+**Writing needs a readable instance directory.** Every write opens
+`<instance>/.metistry/compute.yaml` as a document, so the console must be able
+to read it: the launchd/native shape can, the compose shape deliberately
+cannot (D5 — the reconciler is the sole holder of the instance repo), and
+there every route answers `503` naming `METISTRY_INSTANCE_DIR` while
+`metistry compute` keeps working. If `METISTRY_COMPUTE_FILES` ends somewhere
+other than that file the write is refused with both paths named, rather than
+starting from a bare header and overwriting the real one.
 
 ## Templates
 
@@ -174,7 +245,7 @@ catalogue.
 
 | template | what it is |
 | --- | --- |
-| `openrouter` | one key, most models; pins `provider: { order: [anthropic], allow_fallbacks: false }` so a router in front of a model does not become a second router |
+| `openrouter` | one key, most models; pins `provider: { order: [anthropic], allow_fallbacks: false }` so a router in front of a model does not become a second router, and is the one template that ships `caching: auto` |
 | `lmstudio` | LM Studio's local server on port 1234 |
 | `ollama` | Ollama's OpenAI-compatible surface on port 11434 |
 | `llamaserver` | the **bundled** `llama-server` on port 7813 — Metistry starts it |
@@ -243,6 +314,10 @@ dependency (C4):
 - **Effort** becomes `reasoning: { effort }` off-machine and reasoning-off
   on-machine (PoC-16). Per-model reasoning style is a bake-off measurement,
   not an assumption.
+- **Prompt caching** is automatic on a provider whose block says `caching:
+  auto` (the `openrouter` template's default) and absent everywhere else, and
+  the cached share of the prompt is priced and recorded — see "Prompt caching",
+  and `metistry compute cache-report` for whether it is paying off.
 - **Shadow mode**, for the sampled fraction `assignments.default.shadow`
   names: the same turn run again on a candidate with tools stubbed
   record-only, after the real answer is already delivered. See "Shadow mode".
@@ -270,6 +345,109 @@ came from:
 | `pricing` | the provider's `pricing:` table, for clouds whose responses carry no cost |
 | `local` | `locality: on_machine` is 0 by definition |
 | `unknown` | nothing could price it: recorded as $0 **and said so**, never a guessed rate. `metistry doctor` and the weekly review read this |
+
+### Prompt caching
+
+**Automatic, on the providers that support it, and nothing anywhere else**
+(OPEN-6, ruled 2026-09-17: ship the automatic form first). A provider block
+that says
+
+```yaml
+caching: auto
+```
+
+has the engine send that provider's automatic prompt-caching field on **every**
+chat completion. For OpenRouter — the one template that ships `caching: auto` —
+that is one top-level `cache_control: { type: "ephemeral" }`, which is the
+automatic placement its caching doc describes for Anthropic models
+(`docs/research/2026-09-11-local-models-openrouter-opencode.md` `[or-cache]`,
+fetched 2026-09-11). Everything else defaults to `off` and gets **no extra
+field**: a local server has no such parameter, and a field an endpoint would
+have to ignore is not something to put in every request. `caching: auto` on an
+`on_machine` provider is refused by the schema rather than silently dropped.
+
+**Explicit breakpoints stay yours.** The provider's `request:` block is merged
+*after* the automatic field, so a `cache_control` written there overrides it —
+which is how up to four explicit breakpoints get measured (below) without a
+schema change.
+
+**The cached share of the prompt lands on the row.** `cached_tokens` and
+`cache_write_tokens` (or Anthropic's `cache_creation_input_tokens`) are read
+out of the response's `usage` into `cache_read_tokens` / `cache_write_tokens`
+on `runs`, summed over the turn's whole loop. `tokens_in` stays the WHOLE
+prompt as the provider billed it, with the cached tokens reported beside it
+rather than subtracted, so the two can never disagree about the total.
+
+**Cost follows.** On the `provider` path nothing changes: OpenRouter's own
+`usage.cost` already knows what the cache saved. On the `pricing` path the
+prompt is priced in three parts — fresh at `in_per_m`, cache reads at
+`in_per_m × cache_read_multiplier`, cache writes at
+`in_per_m × cache_write_multiplier`:
+
+```yaml
+pricing:
+  anthropic/claude-sonnet-5: { in_per_m: 3, out_per_m: 15, cache_read_multiplier: 0.1, cache_write_multiplier: 1.25 }
+```
+
+Both multipliers are optional and default to **0.1× reads / 1.25× writes** —
+Anthropic's rates as OpenRouter passes them through (`[or-cache]`, fetched
+2026-09-11). A response that reports no cached tokens prices exactly as it did
+before caching existed.
+
+### Measuring it (OPEN-6)
+
+```
+metistry compute cache-report [--since 7d] [--json]
+```
+
+One command, and it is the whole measurement. It reads the `runs` ledger
+through the console's generic query door (`seed/queries/cache_report.yaml`,
+`GET /api/q/cache_report` — invariant 3, and invariant 10: an existing door,
+not a new one) and joins it to this file's `pricing:` rates. It calls no
+model, dials no provider and writes nothing; `--since` takes `7d`, `2w`, `3m`
+or a bare number of days.
+
+```
+prompt cache, last 7d
+
+openrouter/anthropic/claude-sonnet-5
+  tier             caching  turns  reported  prompt  cache read  cache write  hit    cost     saved
+  default          auto     24     24/24     3.8M    3.5M        180k         91.4%  $2.1843  $9.3420
+  crew:researcher  auto     6      6/6       540k    60k         420k         11.1%  $0.9120  -$0.1530
+
+✓ hit ratio 81.5% across the turns that ASKED for a cache, on the 80% threshold …
+```
+
+**What to look at, in this order.**
+
+| Column | Reading |
+| --- | --- |
+| `reported` | turns whose response carried a cache field at all. `0/n` on a `caching: auto` provider is a **wire** finding, not a prompt one — either the caching field is not reaching the provider or the names the engine reads (`prompt_tokens_details.cached_tokens`, `cache_read_input_tokens`) are not the ones it sends. Look at one raw response before touching any prompt. |
+| `hit` | `cache read ÷ prompt`, and `prompt` already includes the cached share — so it reads directly as "the fraction of the prompt that did not have to be sent fresh". Below **80 %** something changes between turns: anything volatile in the system prompt, an edited prompt, a changed `effort`, a tool added or reordered (`docs/research/2026-09-cost-optimization.md` lists them, and records Anthropic's own 89 % after a task boundary — the 80 % here sits under it because a real install rolls sessions and the first turn after a roll is a legitimate miss). |
+| `cache write` ≫ `cache read` | The prefix is being *rebuilt* every turn and paid for at a premium rather than re-read at a discount. `saved` goes negative, which is the honest number. |
+| `saved` | Net: reads billed below `in_per_m`, less what the writes paid extra. A `-` means this provider publishes no rate here — add `providers.<name>.pricing["<model>"].in_per_m` for a dollar figure. On OpenRouter that is the normal case: its responses carry `usage.cost`, which already knows what the cache saved, and no rates at all. |
+| `caching` reading `off → now auto` | The setting changed inside the window. The row says what was in force when those turns ran (`runs.meta.caching`); averaging across the change would mean two different things at once. |
+
+**Every engine turn is in it**: `turn`, `crew_run` and `shadow` alike, grouped
+by provider, model and tier, because a tier missing its cache on one model
+while hitting on another is invisible in a single total — and the crews are
+where the long, repeated briefs are.
+
+**The app reads the same rows** through `GET /api/q/cache_report`. There is
+deliberately **no console route and no console action** for this: it is a read
+of derived state with no vault paths in it, so the generic door is the whole
+answer and invariant 10's enumerated mutating surface is untouched.
+
+**Still owed (OPEN-6).** The comparison the command makes possible but does
+not make for you: automatic top-level caching versus up to four explicit
+breakpoints on the system prompt and tool list, over ~10 real turns on a
+configured OpenRouter provider. Run `cache-report` with automatic caching,
+put explicit breakpoints in the provider's `request:` block, run the same
+kind of turns again, and compare the two `hit` columns. That run is also
+where the assumptions above meet a live response — the exact field the
+automatic form takes, and whether a provider reports cache writes *inside*
+`prompt_tokens` (assumed here) or beside it. If it reports them beside it,
+this undercharges a write by 1× the input rate and nothing else moves.
 
 ## Budgets
 

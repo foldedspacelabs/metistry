@@ -188,24 +188,24 @@ $("send-form").onsubmit = async (e) => {
 // by hand must produce the identical string, or the two paths diverge and only
 // one of them ever gets tested.
 
-// TODO(rules.yaml endpoint): PLACEHOLDER — the single definition site for the
-// command list, and the only thing to delete when the console grows a route
-// over the instance's own rules.yaml (build plan §4.2 has none). §3.6 and
-// ux-direction.md both require this list to be generated; a hand-maintained
-// one is what they rule out, and the first instance whose rules.yaml differs
-// from these defaults is misinformed by it. Agents below are already live from
-// /api/agents — this is the one source still faked. Do not grow it.
-const COMMANDS = [
-  { id: "/status", desc: "doctor at a glance" },
-  { id: "/today", desc: "what is on today" },
-  { id: "/open", desc: "open work across projects" },
-  { id: "/spend", desc: "spend so far" },
-  { id: "/queue", desc: "the dispatch queue" },
-  { id: "/runs", desc: "recent runs" },
-  { id: "/note", desc: "capture without a turn" },
-  { id: "/deep", desc: "pin the deep tier for this turn" },
-  { id: "/new", desc: "roll to a fresh session" },
-];
+// Commands come from THIS instance's rules.yaml, never from a list kept by
+// hand (§3.6, ux-direction.md "Discoverability is generated, not
+// hand-maintained"). The array that used to sit here was a labelled
+// placeholder, and any instance whose rules.yaml differed from the shipped
+// defaults was misinformed by it; `GET /api/commands` is the generated list
+// (docs/ops/console-api.md). Do not reintroduce a literal — a command the
+// menu offers and the router does not route is worse than one it omits.
+let composerCommands = [];
+let composerCommandsAt = 0;
+async function refreshComposerCommands() {
+  if (Date.now() - composerCommandsAt < 30000 && composerCommands.length) return composerCommands;
+  try {
+    const { commands } = await (await api("/api/commands")).json();
+    composerCommands = commands.map((c) => ({ id: c.id, desc: c.description }));
+    composerCommandsAt = Date.now();
+  } catch {} // P5: a source that cannot answer says nothing rather than guessing
+  return composerCommands;
+}
 
 // Agents come from the registry, never from a list kept by hand (§3.6).
 let composerAgents = [];
@@ -322,7 +322,7 @@ async function updateSuggest() {
   const field = $("send-text");
   const tok = triggerToken(field);
   if (!tok) return closeSuggest();
-  const source = tok.text.startsWith("@") ? await refreshComposerAgents() : COMMANDS;
+  const source = tok.text.startsWith("@") ? await refreshComposerAgents() : await refreshComposerCommands();
   const hits = rank(source, tok.text);
   // Typing something that matches nothing closes the list rather than showing
   // an empty box: the user is mid-sentence, not mid-search.
@@ -395,9 +395,10 @@ $("composer-sheet").addEventListener("click", (e) => {
 $("composer-actions").addEventListener("toggle", async () => {
   if (!$("composer-actions").open) return;
   closeSuggest(); // the two never share the space above the field
-  $("composer-commands").innerHTML = COMMANDS.map(
-    (c) => `<button type="button" data-insert="${esc(c.id)} " title="${esc(c.desc)}">${esc(c.id)}</button>`,
-  ).join("");
+  const commands = await refreshComposerCommands();
+  $("composer-commands").innerHTML = commands.length
+    ? commands.map((c) => `<button type="button" data-insert="${esc(c.id)} " title="${esc(c.desc)}">${esc(c.id)}</button>`).join("")
+    : '<span class="muted">no commands — this instance\'s rules.yaml could not be read</span>';
   const agents = await refreshComposerAgents();
   $("composer-agents").innerHTML = agents.length
     ? agents.map((a) => `<button type="button" data-insert="${esc(a.id)} ">${esc(a.id)}</button>`).join("")
@@ -472,6 +473,7 @@ $("push-test").onclick = async () => {
 const REQUEST_TYPE = {
   decision: "question",
   grant_elevation: "access",
+  access_request: "access",
   improvement: "improvement",
   knowledge: "note",
   draft_settle: "note",
@@ -514,6 +516,10 @@ const attr = (s) => esc(s).replaceAll('"', "&quot;");
 // moved under us is refused rather than applied to a different question.
 const picked = new Set();
 const seenAt = new Map();
+// The rows as they were painted — an answer that needs a field off the row
+// (an access request's area) reads it from what the user was SHOWN.
+const rendered = new Map();
+const proposalById = (id) => rendered.get(String(id));
 
 /** The one decision call. `if_unchanged` rides every single-row answer; a 409 repaints instead of alerting. */
 async function decide(id, body) {
@@ -558,7 +564,8 @@ async function loadTriage() {
   const live = new Set(proposals.map((p) => String(p.id)));
   for (const id of [...picked]) if (!live.has(id)) picked.delete(id); // a row that left the queue leaves the selection
   seenAt.clear();
-  for (const p of proposals) seenAt.set(String(p.id), p.ts);
+  rendered.clear();
+  for (const p of proposals) { seenAt.set(String(p.id), p.ts); rendered.set(String(p.id), p); }
   const groups = new Map();
   for (const p of [...proposals].sort((a, b) => new Date(a.ts) - new Date(b.ts))) {
     const type = requestType(p.kind);
@@ -574,10 +581,22 @@ async function loadTriage() {
     const body = { decision: b.dataset.d };
     // Revise is the answer that carries a reason: without one the assistant
     // has nothing to change, so an empty note cancels rather than sends.
+    //
+    // On an `access_request` the thing to revise is the AREA — Revise is how
+    // you grant a narrower prefix than the one asked for — so it asks for
+    // that instead, pre-filled with the ask. The server validates it with the
+    // grants validator's own rule and refuses anything else.
     if (b.dataset.d === "accept_with_changes") {
-      const feedback = (prompt("what should change?") ?? "").trim();
-      if (!feedback) return;
-      body.feedback = feedback;
+      const row = b.dataset.kind === "access_request" ? proposalById(b.dataset.triage) : null;
+      if (row) {
+        const area = (prompt("grant which folder instead?", row.payload?.area ?? "") ?? "").trim();
+        if (!area) return;
+        body.area = area;
+      } else {
+        const feedback = (prompt("what should change?") ?? "").trim();
+        if (!feedback) return;
+        body.feedback = feedback;
+      }
     }
     await decide(b.dataset.triage, body);
     loadTriage();
@@ -636,6 +655,31 @@ function actionDetail(p) {
   return `<br><span class="muted"><b>${esc(a.kind ?? "?")}</b> ${esc(args)}</span>${p.payload?.reason ? `<br><span class="muted">why: ${esc(String(p.payload.reason).slice(0, ARG_PREVIEW_CHARS))}</span>` : ""}${outcome}`;
 }
 
+/**
+ * An `access_request` row says what it is asking for before you answer it
+ * (docs/ops/actions.md): the area, the reason the agent gave, and what that
+ * credential holds today — agent-authored text, so output-encoded and clipped
+ * like an action's arguments. The `index` → `areas` note is the consequence
+ * that is easy to miss: an agent at tier `index` can be told any title in the
+ * vault and read none, and granting it one folder trades that browse for the
+ * read. Approving is a choice between two scopes, not a pure widening.
+ *
+ * `escalated` is the one fact that changes how the row reads: you already
+ * said no to this exact ask, and the agent is asking once more with a fuller
+ * reason (ruled 2026-09-19 C). The tool allows that ONCE — a third ask after
+ * a second decline is refused at the tool — so this line is not the start of
+ * a queue you will have to keep answering.
+ */
+function accessDetail(p) {
+  if (p.kind !== "access_request") return "";
+  const held = esc(scopeOf(p.payload?.current_scope, p.payload?.current_tier, p.payload?.current_areas));
+  const trade = p.payload?.current_tier === "index" ? " — approving trades its whole-vault title browse for reads inside that folder" : "";
+  const again = p.payload?.escalated ? `<br><span class="muted">asked again after a decline — you answered #${esc(String(p.payload.prior_proposal ?? "?"))}</span>` : "";
+  const done = p.payload?.granted ? `<br><span class="muted">granted — ${esc(String(p.payload.granted.area ?? ""))}</span>` : "";
+  return `<br><span class="muted">wants <b>${esc(String(p.payload?.area ?? "?"))}</b> · has ${held}${esc(trade)}</span>${again}` +
+    `${p.payload?.reason ? `<br><span class="muted">why: ${esc(String(p.payload.reason).slice(0, ARG_PREVIEW_CHARS))}</span>` : ""}${done}`;
+}
+
 function proposalRow(p) {
   const c = p.payload?.classification ?? {};
   const label = c.action || c.title || p.payload?.title || p.kind; // review proposals (§4.21) carry a top-level title
@@ -648,12 +692,12 @@ function proposalRow(p) {
   const work = p.payload?.suggested_work;
   const answers = opts
     ? opts.map((o) => `<button data-triage="${p.id}" data-d="${attr(o)}">${esc(o)}</button>`).join(" ")
-    : DECISIONS.map((x) => `<button data-triage="${p.id}" data-d="${x.d}"${x.style ?? ""}>${x.label}</button>`).join(" ");
+    : DECISIONS.map((x) => `<button data-triage="${p.id}" data-d="${x.d}" data-kind="${attr(p.kind)}"${x.style ?? ""}>${x.label}</button>`).join(" ");
   const asWork = work?.title
     ? ` <button data-triage="${p.id}" data-d="accept_as_work" title="${attr(`creates the task “${work.title}”, unassigned`)}">Approve as Work</button>`
     : "";
   const defer = DEFER.map((x) => `<button data-triage="${p.id}" data-d="${x.d}" class="quiet">${x.label}</button>`).join(" ");
-  return `<li><span><input type="checkbox" data-pick="${p.id}" aria-label="${attr(`select ${label}`)}"> ${esc(label)} <span class="muted">${esc(requestType(p.kind))} · ${esc(c.kind ?? "")} · ${esc(p.source_agent)} · ${new Date(p.ts).toLocaleDateString()}</span>${actionDetail(p)}</span>
+  return `<li><span><input type="checkbox" data-pick="${p.id}" aria-label="${attr(`select ${label}`)}"> ${esc(label)} <span class="muted">${esc(requestType(p.kind))} · ${esc(c.kind ?? "")} · ${esc(p.source_agent)} · ${new Date(p.ts).toLocaleDateString()}</span>${actionDetail(p)}${accessDetail(p)}</span>
         <span>${answers}${asWork} ${defer}</span></li>`;
 }
 
@@ -725,20 +769,42 @@ function effectiveActions(au) {
   }
   return out;
 }
+// **The scope vocabulary is the SERVER's** since P3 of
+// docs/research/2026-09-19-grants-and-access-simplified.md §3.4: every agent
+// row on `GET /api/agents` carries a rendered `scope` (core's
+// `describeScope`), and so does the payload of an `access_request`. This
+// panel prints the words it is given. It used to hold a third spelling of
+// them — `ACCESS_LABEL = {none, titles, folders}` lived here — which is how
+// one record came to be said four ways (§2.10).
+//
+// The fallback is for a row written before the field existed: an old
+// `access_request` in the queue still renders, in the same words, from the
+// two fields it does carry.
 const ACCESS_LABEL = { none: "none", index: "titles", areas: "folders" };
 const accessLabel = (t) => ACCESS_LABEL[t] ?? t;
+const scopeOf = (view, tier, areas) =>
+  view?.scope ?? (tier === "areas" ? `folders: ${(areas ?? []).join(", ") || "nothing"}` : accessLabel(tier ?? "none"));
 let agentsCache = [];
 async function loadAgents() {
   const res = await api("/api/agents");
-  const { agents } = await res.json();
+  const { agents, access_requests } = await res.json();
   agentsCache = agents;
+  // What each agent has ASKED for, beside what it holds (ruled 2026-09-19).
+  // The answer is still given in Needs You — this is the panel telling you
+  // there is a question, not a second door onto granting.
+  const asked = new Map();
+  for (const r of access_requests ?? []) asked.set(r.agent, [...(asked.get(r.agent) ?? []), r]);
   $("agents-empty").hidden = agents.length > 0;
   $("agent-list").innerHTML = agents
     .map((a) => {
       const g = a.grants ?? { tier: "none", areas: [] };
       const seen = a.last_seen_at ? `seen ${new Date(a.last_seen_at).toLocaleDateString()}` : "never seen";
-      const scope = g.tier === "areas" ? `folders: ${g.areas.map(esc).join(", ")}` : esc(accessLabel(g.tier));
+      const scope = esc(scopeOf(a.scope, g.tier, g.areas));
       const projects = (a.projects ?? []).length ? ` · projects: ${a.projects.map(esc).join(", ")}` : "";
+      // Where the scope came from, said once by the server rather than
+      // reconstructed from `kind` here (§2.7): configuration for the
+      // assistant, the manifest for a crew, the owner's hand for the rest.
+      const from = a.scope?.from ? `<br><span class="muted">scope from ${esc(a.scope.from)}</span>` : "";
       const au = a.autonomy ?? {};
       const narrowing = [
         au.may_dispatch_to ? `delegates to ${au.may_dispatch_to.map(esc).join(", ") || "nobody"}` : "",
@@ -751,12 +817,15 @@ async function loadAgents() {
       // the fact worth being able to see at a glance.
       const table = effectiveActions(au);
       const actionLine = `level: ${esc(levelOf(au))} · ${ACTION_KINDS.map((k) => `${esc(k)} ${esc(table[k])}`).join(" · ")}`;
+      const asks = (asked.get(a.id) ?? [])
+        .map((r) => `asked for ${esc(r.area)} — ${esc(String(r.reason ?? "").slice(0, 120))} (answer it in Needs You, request #${Number(r.proposal_id)})`)
+        .join("<br>");
       const actions = a.revoked
         ? '<span class="muted">revoked</span>'
         : `<span><button data-agent-grants="${esc(a.id)}" class="secondary">grants</button> <button data-agent-rotate="${esc(a.id)}" class="secondary">rotate</button> <button data-agent-revoke="${esc(a.id)}">revoke</button></span>`;
       return `<li class="${a.revoked ? "revoked" : ""}"><span><b>${esc(a.display_name)}</b> <span class="muted">${esc(a.id)}</span> <span class="chip">${esc(ROLE_LABEL[a.kind] ?? a.kind)}</span><br>
         <span class="muted">access: ${scope}${projects} · ${seen}</span>${narrowing ? `<br><span class="muted">autonomy: ${narrowing}</span>` : ""}<br>
-        <span class="muted">actions: ${actionLine}</span><br>
+        <span class="muted">actions: ${actionLine}</span>${from}<br>${asks ? `<span class="muted">${asks}</span><br>` : ""}
         <span id="presence-${esc(a.id)}" class="presence"></span></span>${actions}</li>`;
     })
     .join("");

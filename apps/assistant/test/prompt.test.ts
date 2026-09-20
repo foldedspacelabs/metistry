@@ -5,6 +5,7 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { loadSystemPrompt, parseIdentity, readOverlay, renderPrompt } from "../src/prompt.js";
 
@@ -44,7 +45,13 @@ describe("identity + prompt", () => {
     expect(await readOverlay(`${dir}/missing.md`)).toBeNull();
 
     const one = await loadSystemPrompt({ METISTRY_IDENTITY_FILES: `${dir}/identity.yaml`, METISTRY_PROMPT_FILES: `${dir}/prompt.md:${dir}/override.md` });
-    expect(one).toEqual({ prompt: "Override for Ada.", identity: { name: "Ada", voice: "Terse.", mention: undefined, icon: undefined } });
+    expect(one).toEqual({
+      prompt: "Override for Ada.",
+      identity: { name: "Ada", voice: "Terse.", mention: undefined, icon: undefined },
+      // which file won, so a caller can say so (and notice when the product's seed did)
+      identityPath: `${dir}/identity.yaml`,
+      promptPath: `${dir}/override.md`,
+    });
     expect(await loadSystemPrompt({ METISTRY_IDENTITY_FILES: `${dir}/nope.yaml`, METISTRY_PROMPT_FILES: `${dir}/prompt.md` })).toBeUndefined();
     expect(await loadSystemPrompt({ METISTRY_IDENTITY_FILES: `${dir}/identity.yaml`, METISTRY_PROMPT_FILES: `${dir}/nope.md` })).toBeUndefined();
   });
@@ -61,11 +68,19 @@ describe("identity + prompt", () => {
     });
 
     it("the seed prompt built on two different fake dates is byte-identical", async () => {
+      // the seed files by name: this used to call loadSystemPrompt() with no
+      // environment at all, which resolved nothing relative to the test
+      // runner's cwd and compared undefined to undefined
+      const seed = {
+        METISTRY_IDENTITY_FILES: fileURLToPath(new URL("../../../seed/identity.yaml", import.meta.url)),
+        METISTRY_PROMPT_FILES: fileURLToPath(new URL("../../../seed/assistant-prompt.md", import.meta.url)),
+      };
       vi.useFakeTimers();
       vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
-      const first = await loadSystemPrompt();
+      const first = await loadSystemPrompt(seed);
       vi.setSystemTime(new Date("2027-06-15T23:59:59Z"));
-      const second = await loadSystemPrompt();
+      const second = await loadSystemPrompt(seed);
+      expect(first?.prompt.length).toBeGreaterThan(0);
       expect(second).toEqual(first);
       expect(second?.prompt).toBe(first?.prompt);
     });

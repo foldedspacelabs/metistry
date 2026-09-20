@@ -2,19 +2,37 @@
 // (CRIT-9; loopback is not a trust boundary), uniform error envelope,
 // behavioral check(). Reads come from the working tree; every mutation
 // carries a commit intent and is queued for the sole committer.
+//
+// **The principal comes from the credential.** The bearer decides which
+// `CallerClass` a request is (paths.ts's authority table); the body's
+// `intent.principal` is attribution INSIDE what that class may claim. A body
+// that exceeds its credential is `forbidden` with the standard envelope and a
+// `runs` row — never silently downgraded to something it did not ask for.
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { authorized, errorEnvelope, runCheck, statusFor, type ErrorCode } from "@foldedspacelabs/metistry-core";
+import { authorized, errorEnvelope, finishRun, INSTANCE_LAYOUT, isVaultPath, runCheck, startRun, statusFor, type ErrorCode } from "@foldedspacelabs/metistry-core";
 import type { Vault, Outcome } from "./vault.js";
 import { parseIntent } from "./vault.js";
 import type { Committer } from "./committer.js";
 import type { Db, Indexer } from "./indexer.js";
 import type { Embeddings } from "./embeddings.js";
 import { parseMode, searchVault } from "./search.js";
+import type { CallerClass } from "./paths.js";
 import type { EmbedClient } from "@foldedspacelabs/metistry-core";
 
 export interface BridgeConfig {
+  /** `METISTRY_BRIDGE_TOKEN_RECONCILER` — the console's bearer, and every caller the console fronts. */
   token: string;
+  /**
+   * `METISTRY_BRIDGE_TOKEN_RECONCILER_USER` — the owner-class bearer, held by
+   * the CLI on this machine and by nothing that listens on a socket.
+   *
+   * Absent, there is no owner class at all: `.metistry/` is unwritable through
+   * this bridge for every caller (fail closed, and `check()` degrades with the
+   * command that fixes it). It is never defaulted to `token` — that would be
+   * the shared-bearer hole with a longer name.
+   */
+  ownerToken?: string | undefined;
   maxBodyBytes: number;
 }
 
@@ -29,6 +47,42 @@ export interface BridgeDeps {
   db?: Db | undefined;
 }
 
+/**
+ * Which class of caller presented this bearer, or null for none.
+ *
+ * The owner bearer is tried first and both comparisons are constant-time
+ * (core's `authorized`), so this says nothing about which token was closer.
+ * An empty/absent `ownerToken` can match nothing: `parseBearer` requires a
+ * non-empty token, and the guard here makes that explicit rather than
+ * load-bearing.
+ */
+export function callerFor(header: string | undefined | null, cfg: BridgeConfig): CallerClass | null {
+  if (cfg.ownerToken && authorized(header, cfg.ownerToken)) return "owner";
+  if (cfg.token && authorized(header, cfg.token)) return "console";
+  return null;
+}
+
+/**
+ * Every refusal of a mutation, with the caller CLASS on it — the record that
+ * answers "did anything try to write `.metistry/` as somebody it is not".
+ *
+ * The log line is unconditional (a deployment with no database still has its
+ * log); the `runs` row is the queryable half. Neither can fail the request:
+ * an audit that takes the bridge down with it would be a denial of service
+ * wearing a security hat.
+ */
+async function auditRefusal(db: Db | undefined, r: { caller: CallerClass; tool: string; code: ErrorCode; path: string; principal: string }): Promise<void> {
+  const line = `reconciler: refused ${r.tool} ${r.path} — ${r.code}; caller ${r.caller} claimed principal ${r.principal}`;
+  console.warn(line);
+  if (!db) return;
+  try {
+    const id = await startRun(db, { component: "reconciler", kind: "auth", tool: r.tool, meta: { caller: r.caller, principal: r.principal, path: r.path, code: r.code } });
+    await finishRun(db, id, { ok: false, error: line });
+  } catch (err) {
+    console.error("reconciler: could not record the refusal:", err instanceof Error ? err.message : err);
+  }
+}
+
 function send(res: ServerResponse, status: number, body: unknown): void {
   const text = JSON.stringify(body);
   res.writeHead(status, { "content-type": "application/json", "content-length": Buffer.byteLength(text) });
@@ -40,6 +94,24 @@ function fail(res: ServerResponse, code: ErrorCode, message?: string): void {
 function reply<T>(res: ServerResponse, out: Outcome<T>, status = 200, shape: (v: T) => unknown = (v) => v): void {
   if (out.ok) return send(res, status, shape(out.value));
   fail(res, out.code, out.message);
+}
+
+/**
+ * Defence in depth on top of `confine()`, for `GET /vault/read` only:
+ * `.metistry/state/.env`, `.metistry/compute.yaml`, `.obsidian/workspace.json` and the
+ * root `CLAUDE.md`/`README.md` are all real files `confine()` happily resolves — nothing
+ * about path confinement says they aren't machinery — so they would otherwise be served
+ * to ANY bearer holding this token. The console's `/api/knowledge/*` narrows to vault
+ * content with the same predicate, but that is a second door onto this one; the bridge
+ * must not depend on a caller choosing to narrow.
+ *
+ * `Artifacts/**` stays readable: it is binary content `packages/artifacts`'s
+ * `ArtifactsService` reads and writes through this exact endpoint, not vault knowledge —
+ * `isVaultPath` excludes it from the KNOWLEDGE walk on purpose, but that is a different
+ * question from whether this bridge may serve it.
+ */
+function isReadableByBridge(rel: string): boolean {
+  return isVaultPath(rel) || rel === INSTANCE_LAYOUT.artifactsDir || rel.startsWith(`${INSTANCE_LAYOUT.artifactsDir}/`);
 }
 
 async function readJson(req: IncomingMessage, maxBytes: number): Promise<Record<string, unknown> | null> {
@@ -87,7 +159,9 @@ export function makeBridge(deps: BridgeDeps, cfg: BridgeConfig): Server {
   const { vault, committer } = deps;
   return createServer(async (req, res) => {
     try {
-      if (!authorized(req.headers.authorization, cfg.token)) return fail(res, "unauthenticated");
+      // The one place a caller is named, and it is named by its bearer.
+      const caller = callerFor(req.headers.authorization, cfg);
+      if (caller === null) return fail(res, "unauthenticated");
       const url = new URL(req.url ?? "/", "http://x");
       const key = `${req.method} ${url.pathname}`;
       const q = url.searchParams;
@@ -105,8 +179,24 @@ export function makeBridge(deps: BridgeDeps, cfg: BridgeConfig): Server {
             last_push: committer.lastPush ? { at: new Date(committer.lastPush.at).toISOString(), ...committer.lastPush.result } : null,
             last_reconcile: deps.indexer?.last ?? null,
             embeddings,
+            // What each bearer may do, stated by the bridge itself: doctor
+            // and the Mac app read this rather than inferring it from a
+            // version number.
+            principal_from_credential: true,
+            owner_bearer: Boolean(cfg.ownerToken),
           };
           if (!listed.ok) return { status: "degraded" as const, remediation: `the vault at ${vault.root} is not listable — check the instance directory (docs/ops/reconciler.md)`, meta };
+          // First, because it is the one that stops the OWNER's own verbs:
+          // `metistry update`, `deployment set-shape` and `secrets` all write
+          // a protected path through this bridge as the owner class.
+          if (!cfg.ownerToken) {
+            return {
+              status: "degraded" as const,
+              remediation:
+                "METISTRY_BRIDGE_TOKEN_RECONCILER_USER is not set, so no caller may write a §4.7 protected path — `metistry update` and `metistry deployment set-shape` will be refused. Mint it with `metistry secrets sync --to env` (or `metistry up`), then `metistry restart reconciler` (docs/ops/auth.md)",
+              meta,
+            };
+          }
           if (head === null) return { status: "degraded" as const, remediation: "repository has no commits yet — the first flushed write creates one", meta };
           if (committer.lastPush && !committer.lastPush.result.ok) {
             return { status: "degraded" as const, remediation: `last push failed: ${committer.lastPush.result.error ?? "unknown"} — check the remote/credentials; commits are safe locally`, meta };
@@ -137,9 +227,16 @@ export function makeBridge(deps: BridgeDeps, cfg: BridgeConfig): Server {
       if (key === "GET /vault/read") {
         // `encoding=base64` hands back the bytes untouched (binary artifacts); default stays utf8 `content`.
         if (q.get("encoding") === "base64") {
-          return reply(res, await vault.readBytes(q.get("path")), 200, (v) => ({ path: v.path, content_base64: v.content.toString("base64"), sha256: v.sha256, bytes: v.bytes }));
+          const out = await vault.readBytes(q.get("path"));
+          // Checked on the CONFINED path, after confine() has already produced its own
+          // 400/403 for traversal, `.git`, and `.metistry/instance-migrations/` — this
+          // only narrows what a path that already resolved cleanly may be.
+          if (out.ok && !isReadableByBridge(out.value.path)) return fail(res, "not_found");
+          return reply(res, out, 200, (v) => ({ path: v.path, content_base64: v.content.toString("base64"), sha256: v.sha256, bytes: v.bytes }));
         }
-        return reply(res, await vault.read(q.get("path")));
+        const out = await vault.read(q.get("path"));
+        if (out.ok && !isReadableByBridge(out.value.path)) return fail(res, "not_found");
+        return reply(res, out);
       }
 
       if (key === "GET /vault/list") {
@@ -153,7 +250,12 @@ export function makeBridge(deps: BridgeDeps, cfg: BridgeConfig): Server {
         const limit = clampInt(q.get("limit"), 20, 1, 100);
         const mode = parseMode(q.get("mode"));
         if (mode === undefined) return fail(res, "invalid_request", "mode must be keyword, semantic, or hybrid");
-        return send(res, 200, await searchVault({ vault, db: deps.db, embeddings: deps.embeddings, client: deps.embedClient }, term, limit, mode));
+        const result = await searchVault({ vault, db: deps.db, embeddings: deps.embeddings, client: deps.embedClient }, term, limit, mode);
+        // Defence in depth, not a live case today: keyword hits come from `walkVault()`
+        // and semantic hits are joined against `knowledge_files`, both already restricted
+        // to `isVaultPath` — this drops anything that reaches here anyway rather than
+        // trusting that restriction never drifts.
+        return send(res, 200, { ...result, hits: result.hits.filter((h) => isVaultPath(h.path)) });
       }
 
       if (key === "GET /vault/log") {
@@ -171,16 +273,29 @@ export function makeBridge(deps: BridgeDeps, cfg: BridgeConfig): Server {
         const exp = expectedSha(body);
         if (!exp.ok) return fail(res, "invalid_request", "expected_sha256 must be 64 hex chars or empty");
 
+        // Every `forbidden` from a mutation is audited with the caller class:
+        // a console bearer asking to be the user on `.metistry/rules.yaml` is
+        // the shape this PR exists to refuse, and a refusal nobody can see
+        // afterwards is half a control.
+        const refused = async <T>(out: Outcome<T>, tool: string, path: unknown): Promise<Outcome<T>> => {
+          if (!out.ok && out.code === "forbidden") {
+            await auditRefusal(deps.db, { caller, tool, code: out.code, path: typeof path === "string" ? path : String(path), principal: intent.value.principal });
+          }
+          return out;
+        };
+
         if (key === "POST /vault/write") {
           const content = bodyContent(body);
           if (!content) return fail(res, "invalid_request", "exactly one of content (utf8) or content_base64");
-          const out = await vault.write(body.path, content, intent.value, exp.sha);
+          const out = await refused(await vault.write(body.path, content, intent.value, caller, exp.sha), "vault_write", body.path);
           return reply(res, out, out.ok && out.value.created ? 201 : 200, (v) => ({ ...v, queued: true }));
         }
         if (key === "POST /vault/delete") {
-          return reply(res, await vault.delete(body.path, intent.value, exp.sha), 200, (v) => ({ ...v, deleted: true, queued: true }));
+          const out = await refused(await vault.delete(body.path, intent.value, caller, exp.sha), "vault_delete", body.path);
+          return reply(res, out, 200, (v) => ({ ...v, deleted: true, queued: true }));
         }
-        return reply(res, await vault.rename(body.from, body.to, intent.value), 200, (v) => ({ ...v, queued: true }));
+        const out = await refused(await vault.rename(body.from, body.to, intent.value, caller), "vault_rename", `${String(body.from)} → ${String(body.to)}`);
+        return reply(res, out, 200, (v) => ({ ...v, queued: true }));
       }
 
       if (key === "POST /flush") {

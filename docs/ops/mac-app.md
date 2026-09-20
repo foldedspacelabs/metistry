@@ -103,6 +103,7 @@ path.
 | **Minting an enrolment code** | there is no HTTP route that mints one, deliberately — whoever can run the host command already controls Postgres and the vault, so shell access is the root of trust for a first passkey (plan §4.2) — and `metistry enroll` is on the CLI's own "not yet" list | step 6 shows the exact `scripts/enroll.mjs` command and takes the code you paste back |
 | **A QR code** for the phone | nothing in this product renders one yet; `apps/console/scripts/enroll.mjs` says the same about itself ("QR rendering arrives with `packages/cli`"), and an encoder is a dependency nobody has asked for | step 6 shows the enrolment URL, selectable, to type or hand over |
 | **The other eight destinations** | Feed, Chat, Agents, Projects, Artifacts, Capture, Needs You, Devices (design-system P6) | the PWA — "Add to Dock" in Safari |
+| **The keep-awake control** (Services) | the model half is shipped — `KeepAwakeSetting` (four values, each with what it costs), `KeepAwakeFacts` (doctor's row) and `deploymentSetKeepAwake` — and the pane is a switch with a radio pair under it, which is the designer's. First run can pass `--keep-awake` and does not ask on its own | a terminal: `metistry deployment set-keep-awake <value> --yes`, or `metistry init --keep-awake <value>` |
 | **An iOS target** | `MetistryKit` is already free of AppKit and of `Process` so it can be shared; there is no iOS target in `Package.swift` | — |
 
 **Four things left this table on 2026-09-10**, and it is worth saying what
@@ -171,16 +172,68 @@ array), the menu bar (a second dot beside the `console` row, and the headline
 inside its submenu — a service being *up* and a service *knowing who you are*
 are different questions), and the wizard's step 6, which now leads with it.
 
-**What the app can and cannot call.** It can ask who it is. It cannot make any
-other authenticated console call, because PR #119 added `console whoami` and
-nothing else — there is no verb that performs an arbitrary authenticated
-request on the app's behalf, and none that prints a bearer to the calling
-process alone. Everything on the owner surface (devices, agents, projects,
-proposals, artifacts, targets, dispatch) is therefore the PWA's job for now.
-Adding it is a **CLI change first**: a `metistry console call <METHOD> <path>`
-keeps the token out of this process entirely, which a token-printing verb would
-not, and keeps the rule that makes this app safe — a front end for the CLI,
-never a second implementation.
+**What the app can and cannot call.** It can ask who it is, and — since the
+data layer below — it can make any authenticated request the owner surface
+offers. That took the **CLI change first**, exactly as this section said it
+would: `metistry console call <METHOD> <path>` keeps the token out of this
+process entirely, which a token-printing verb would not, and keeps the rule
+that makes this app safe — a front end for the CLI, never a second
+implementation. ~~Everything on the owner surface is therefore the PWA's job
+for now~~ (struck 2026-09-18; the verb shipped and `ConsoleAPI` is its client).
+
+## Data layer
+
+Phase A's non-visual half (`docs/product/app-ux-plan.md` §6): the typed client
+and the store the seven sections read. **Views never call `URLSession` and
+never run a verb** — a view reads an `InstanceStore` section and calls a method
+on it, and a screen that reached past the store would be the bug this section
+exists to name.
+
+| Type | File | What it is |
+| --- | --- | --- |
+| `ConsoleCallTransport` | `sources/kit/console-api.swift` | One authenticated request against this machine's console, behind a protocol so the store is testable with nothing spawned and no network |
+| `CLIConsoleCallTransport` | same | The only production transport: `metistry console call <METHOD> <path> [--body -] --json`. A body goes on **stdin**, never argv |
+| `ConsoleAPI` | same | One method per route in `docs/ops/console-api.md` — identity, whoami, `activity_feed`, proposals (+ batch), board and the four task routes, rooms, agents and `agent_presence` (+ autonomy, approve), `/api/compute*`, `/api/knowledge/search|page|pages`, `/api/commands`, `/api/runs/:id` |
+| `ConsoleError` | `sources/kit/console-client.swift` | The standard envelope, plus `cliUnavailable` (this install's CLI predates the verb) and `notConfigured` (no token, or a non-loopback console). `namedField(among:)` attributes a refusal to a field **the caller already sent** — the envelope is `{code, message}` and names its field in prose, so nothing is inferred from the sentence's shape |
+| `ConsoleReachability` | `sources/kit/console-api.swift` | reachable / degraded / unreachable, **reported not inferred** (P5). A `401` is unreachable; a `403` is not — the console answered and one route declined this credential |
+| the wire shapes | `sources/kit/console-data.swift` | `Codable` per route and per named-query row. Two tolerances live here so no call site repeats them: a Postgres `numeric` arrives as a **string**, and timestamps are text |
+| `RequestAnswer` | same | The six answers and the option form a `decision` request takes. `isBatchable` is "only Later, Skip and Decline"; `isSendable` is "Revise with an empty reason is a cancel" |
+| `TaskPatch` | same | `PATCH /api/tasks/:id`'s two arms. A body mixing them is refused **here**, because the route's own refusal names both fields and discovering that on submit is worse |
+| `LoadState` · `Section<Value>` | `sources/kit/instance-store.swift` | loading / loaded / failed / stale, with the console's `as_of` beside the value. A failed refresh over data already on screen goes **stale and keeps it** — never a blank pane |
+| `RefreshPolicy` | same | The intervals, and a backoff that changes how often the app *asks* and never what it *claims*. No timer is started here: a view owns its `.task` and the policy says whether it is too soon |
+| `InstanceStore` | same | One `@Observable` store per instance, a `Section` per section, and the only thing that holds a `ConsoleAPI`. `adopt` drops every section on an instance switch |
+| `PinnedItem` · `PinnedItems` | `sources/kit/pinned-items.swift` | The sidebar's Pinned area: project · board · page · search · agent, reorderable and removable, filed in app preferences under `pinnedItems.<instance_id>` |
+
+Three rules the layer encodes rather than asks for:
+
+- **`isRefreshing` is not a state.** P2 wants calm, so a background refresh is
+  a flag beside `.loaded` rather than a fifth case — there is nothing for a
+  view to draw a spinner from. Only `.loading` with no value yet earns one.
+- **`allowsDecisions` is O3, in one place.** The Mac app is local-only (§7.3)
+  and the rule still holds: while a section is unreachable, `answer`,
+  `answerMany`, `move`, `address` and `dispatch` refuse **before sending**, in
+  a sentence, rather than as a request that fails where nobody can see it.
+- **The two cursors are not the same mechanism.** The feed's `since` is an
+  inclusive timestamp and de-duplicates on `(ref, ts, kind)`; the request
+  queue's is an opaque cursor whose page is *everything that changed*, so a row
+  answered on the phone leaves the queue instead of lingering. Both folds live
+  in `merging(_:)` and are called from the store and nowhere else.
+
+**What this transport costs, and the one change that removes it.** `metistry
+console call` prints the error envelope on **stderr** for a `>= 400` and does
+not print the response body, so the extra keys on a conflict `409` — `reason`,
+`decision`, `decided_at`, and the row itself — do not survive the trip.
+Nothing phase A reads is affected (the envelope *is* `{code, message}`, so a
+400/401/403/404/503 comes back whole), and `ConsoleError.conflictBodyIsUnavailable`
+says so out loud rather than letting a caller read the absence as "the console
+sent none". The queue's `if_unchanged` repaint in phase B wants that body: the
+fix is for `console call` to print `r.raw` on stdout for a `>= 400` as well,
+**not** a second HTTP client in Swift. ~~And because `console call` sets no
+request headers, `POST /capture`'s `Idempotency-Key` is unreachable from this
+layer — which is why capture is not on it.~~ (struck 2026-09-18; `console
+call --idempotency-key <key>` shipped, and `ConsoleCallTransport.call` takes
+the key as its fourth argument. Capture is still not on `ConsoleAPI` — no
+route method calls it yet — but the transport is no longer why not.)
 
 ## What `ASAuthorization` actually says about a local origin
 
@@ -505,6 +558,8 @@ fourth one fails CI rather than appearing quietly.
 | Instance | Set up again… | re-enters the wizard |
 | Services | shape, and which file it came from | `doctor --json` → the `deployment` row's `meta` (the CLI resolved the D4 overlay) |
 | Services | the service list with status | the same `meta`'s service plan, matched against doctor's `service` rows |
+| Services | keep this Mac awake: the setting, whether it is holding, and on which power | `doctor --json` → the `keep-awake` row (macOS only). `KeepAwakeFacts` reads it; the app runs no `pmset` and holds no assertion of its own |
+| Services | changing it | `metistry deployment set-keep-awake <never\|allow_sleep_on_battery\|always\|always_lid_closed> --yes` (`MetistryCLI.deploymentSetKeepAwake`) — `deployment.yaml` is a §4.7 protected path, so the CLI writes it through the reconciler and the app writes no file |
 | Services | Start at login | `SMAppService.mainApp` — macOS keeps the registration; the app writes nothing (above) |
 | Services | Run Metistry in the background | `SMAppService.agent(plistName:)` on the plist sealed in this bundle — the install's ONE background item; macOS keeps this registration too (above) |
 | Connections | console sign-in: who this Mac is, with `via`, the remedy, and the argument array | `metistry console whoami --json` — the app never resolves, holds or displays the token ("Signing in" above) |
@@ -751,7 +806,15 @@ with its reason, so "not found" is never a shrug:
 3. **bundled** — `Metistry.app/Contents/Resources/metistry/`, needing both
    `runtime/node/bin/node` and `…/packages/cli/dist/main.js`. Signed and
    read-only, so it is a **seed**, not the install.
-4. **path** — a `metistry` in those same directories.
+4. **path** — a `metistry` in those same directories, plus two more:
+   `~/.local/bin` (where `metistry up`'s own printed one-liner suggests
+   linking its shim — `docs/ops/cli.md`, "Getting `metistry` on your
+   PATH") and the active instance's own `.metistry/state/cli` (the shim
+   itself, written there by `up`/`update` whether or not anyone has linked
+   it — a sibling of `state/bin/`, which stays the launchd shape's
+   supervisor identity symlink, never the shim). The instance is known
+   here — `AppModel.instances.active` — so this stage finds an install
+   even before the operator has run the `ln -s` line by hand.
 
 Both 2 and 3 prefer the `current` symlink when there is one, because that is
 exactly how `metistry update` lays out a release install — `releases/<version>/`

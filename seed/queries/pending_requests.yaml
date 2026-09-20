@@ -1,0 +1,107 @@
+# Seeded default (D4 overlay: an instance file of the same name wins).
+#
+# The Needs You queue as a read path (daily-flow-spec §6.2's
+# `{{ requests limit: 5 }}` directive and §7's `plan-tomorrow`; ticket P1-5).
+# One row per request waiting on the owner, so the evening's plan can say what
+# is waiting without the routine reaching into Postgres itself — which is what
+# `routines/morning-brief/run.ts` still does, and is the pre-existing
+# invariant-3 gap this narrows rather than widens.
+#
+# **`later` is not an answer, and this honours it.** A snoozed row keeps
+# `decision = 'pending'` and `decided_at` null (migration 0019) — nothing
+# downstream may see a decision nobody made — but it has left the queue until
+# its instant arrives. `GET /api/proposals` filters it out and the morning
+# brief filters it out, "because a `later` that still pushes at 07:00 is a
+# lie" (docs/ops/reply-feedback.md). A plan that listed it would be the same
+# lie in a file. So `include_snoozed` defaults false and the column is
+# returned either way.
+#
+# **The words are the user's, not the machinery's.** `requestType` in
+# `routines/morning-brief/run.ts` maps the stored `proposals.kind` values onto
+# the six the user reads (docs/product/glossary.md) — `access_request` and
+# `grant_elevation` are both *access*, because the user has one word for this.
+# The mapping is repeated here so the plan, the brief and the queue call the
+# same thing the same word; the stored kind comes back beside it, unchanged.
+# `title` is derived exactly as the brief derives it: the classification's
+# action, else its title, else the payload's, else "<type> request".
+#
+# **`suggested_work` is a flag, never a row.** A payload carrying it is what
+# puts Approve as Work under the item (docs/ops/reply-feedback.md), and §4.12
+# is intact: nothing here auto-creates anything, and a suggestion nobody
+# accepts stays a suggestion forever.
+#
+# **`expose: route`.** `GET /api/proposals` is owner-only — an agent token
+# gets the uniform `forbidden` well before it reaches that handler — so
+# serving the same rows by name on the generic door would hand every agent
+# with a `queries: true` grant the owner's whole decision queue, including
+# every other agent's pending asks and whatever their payloads carry. That is
+# precisely the hole `expose` exists to close (ruled 2026-09-19: one endpoint
+# per operation, and "all queries including /mcp should be scoped"). The
+# payload itself is never returned at all, only handles derived from it —
+# belt behind the braces. `expose` gates the two generic doors only; the
+# template engine and the routines run this in process.
+name: pending_requests
+expose: route
+description: >-
+  Requests waiting on the owner — one row per pending proposal that is not
+  snoozed: its id, when it arrived and how old it is, the request type the
+  user reads (question | access | improvement | note | report | review)
+  beside the stored kind, which agent raised it and at what trust, a title
+  derived the way the morning brief derives it, whether it carries
+  `suggested_work` (the Approve-as-Work answer) or an already-linked `work`
+  row, and its snooze instant. Never the payload itself. Oldest first, then
+  by id — a total order, so `limit`/`offset` page it without repeating or
+  skipping.
+params:
+  kind: { type: text, default: "" } # blank = every kind; else one stored proposals.kind
+  include_snoozed: { type: boolean, default: false } # `later` left the queue until its instant; a plan that listed it would be the same lie the brief refuses to tell
+  limit: { type: int, default: 20 }
+  offset: { type: int, default: 0 }
+sql: |
+  WITH f AS (
+    SELECT nullif(:kind::text, '')      AS kind,
+           (:include_snoozed)::boolean  AS include_snoozed
+  )
+  SELECT
+    p.id,
+    p.ts,
+    round(extract(epoch FROM (now() - p.ts)) / 86400.0, 1)::float8 AS age_days,
+    p.kind,
+    -- the six words the user reads (docs/product/glossary.md), the same
+    -- mapping routines/morning-brief/run.ts applies
+    CASE p.kind
+      WHEN 'decision'        THEN 'question'
+      WHEN 'grant_elevation' THEN 'access'
+      WHEN 'access_request'  THEN 'access'
+      WHEN 'improvement'     THEN 'improvement'
+      WHEN 'knowledge'       THEN 'note'
+      WHEN 'draft_settle'    THEN 'note'
+      WHEN 'action'          THEN 'note'
+      WHEN 'report'          THEN 'report'
+      WHEN 'review'          THEN 'review'
+      ELSE p.kind
+    END                                                            AS request_type,
+    p.source_agent,
+    p.trust,
+    left(coalesce(
+      p.payload->'classification'->>'action',
+      p.payload->'classification'->>'title',
+      p.payload->>'title',
+      CASE p.kind
+        WHEN 'decision'        THEN 'question request'
+        WHEN 'grant_elevation' THEN 'access request'
+        WHEN 'access_request'  THEN 'access request'
+        ELSE p.kind || ' request'
+      END
+    ), 70)                                                         AS title,
+    (p.payload ? 'suggested_work')                                 AS has_suggested_work,
+    p.work_id,
+    p.snoozed_until
+  FROM proposals p, f
+  WHERE p.decision = 'pending'
+    AND (f.include_snoozed OR p.snoozed_until IS NULL OR p.snoozed_until <= now())
+    AND (f.kind IS NULL OR p.kind = f.kind)
+  ORDER BY p.ts, p.id
+  LIMIT :limit
+  OFFSET :offset
+cache_ttl: 0 # a queue that lags shows an item the owner answered a minute ago

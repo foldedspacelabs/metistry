@@ -90,17 +90,15 @@
               <button type="button" data-insert="what's the latest">What's the Latest</button>
               <button type="button" data-goto="capture">New Note</button>
             </p>
-            <!-- TODO(rules.yaml endpoint): this list is a PLACEHOLDER, not a
-                 design. §3.6 and ux-direction.md both require the command list
-                 to be generated from the instance's own rules.yaml — a
-                 hand-maintained list is exactly what they rule out, and the
-                 first instance whose rules.yaml differs from the shipped
-                 defaults will be lied to by it. The console has no route for
-                 it yet (build plan §4.2). When one exists, delete COMMANDS in
-                 app.js and this markup, and fetch it the way agents are
-                 fetched. Do not add commands here in the meantime. -->
-            <p class="grp">Commands <span class="why">shipped defaults — not yet read from this instance's rules.yaml</span></p>
-            <p class="acts" id="composer-commands"></p>
+            <!-- Generated, not hand-maintained (§3.6, ux-direction.md):
+                 `GET /api/commands` derives this list from the instance's own
+                 rules.yaml and agent registry, the way Agents below is already
+                 derived from /api/agents. Both are filled in app.js's
+                 composer-actions toggle. Never add a command to this markup —
+                 a menu entry the router does not route is a lie about what
+                 this instance does. -->
+            <p class="grp">Commands <span class="why">from this instance's rules.yaml</span></p>
+            <p class="acts" id="composer-commands"><span class="muted">loading…</span></p>
             <p class="grp">Agents</p>
             <p class="acts" id="composer-agents"><span class="muted">no agents registered</span></p>
             <p class="grp">Attach</p>

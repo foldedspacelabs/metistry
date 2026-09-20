@@ -1,5 +1,207 @@
 # @metistry-apps/macos
 
+## 0.11.0
+
+## 0.10.0
+
+### Patch Changes
+
+- 975221b: **`metistry up` (and `update`) now writes a `metistry` shim, so there is
+  finally something to run `metistry` BY NAME against.** A release install has
+  no Homebrew formula and no npm global, so nothing ever put `metistry` on
+  `PATH` — the only way to run one was the owner's own hand-written wrapper.
+  `up`/`update` write a small, idempotent POSIX script to
+  `<instance>/.metistry/state/cli/metistry` (mode `0755`) that already knows
+  this install's product dir and instance dir, and re-resolves which of
+  `current/` (a release) or the bare product dir holds the CLI, and which
+  `node` to run it with, on every invocation — so a release flip or a freshly
+  bundled runtime needs no re-write. `state/cli/` rather than `state/bin/`:
+  the launchd shape's `state/bin/Metistry` is already the supervisor's own
+  program-identity symlink, and macOS's default case-insensitive volume would
+  make that the same directory entry as `state/bin/metistry` — a sibling
+  directory avoids the collision outright. `writeCliShim` also leaves alone
+  anything already sitting at the path that is not a symlink-free plain file
+  recognisably its own — a foreign file is noted, never overwritten.
+  
+  `up` never puts it on `PATH` itself (invariant 2 — that is the operator's
+  own hand): it prints the one `ln -s … ~/.local/bin/metistry` line that
+  would, and `metistry doctor` gains an informational `cli on PATH` row
+  (`ok`/`absent`, never a finding that fails the exit code) carrying the same
+  line as its remediation.
+  
+  The Mac app's `RuntimeLocator` now also searches `~/.local/bin` and the
+  active instance's own `.metistry/state/cli` when looking for a `metistry`
+  on `PATH`, so it finds an install even before anyone has linked anything.
+
+## 0.9.1
+
+### Patch Changes
+
+- 05e2e5b: **The vault's page list, through a named query — the third knowledge door,
+  and the only one that is not a proxy.** `GET /api/knowledge/pages?area=&prefix=&limit=&offset=`,
+  which #197 deferred because `seed/queries/` carried nothing to run. No
+  migration: `0009_brain.sql` already added `title`, `description` and `draft`,
+  and `0001` has `path`, `mtime`, `status`.
+  
+  **Which door a thing comes out of is settled by the schema, not by taste.** A
+  page's bytes and a search ranking are not derived state — there is no column
+  holding a note body — so those go to the reconciler's bridge. A page LIST *is*
+  derived: `knowledge_files` is the reconciler's own index, rebuilt from the
+  vault by a walk. So invariant 3 sends it through
+  `seed/queries/knowledge_pages.yaml`, executed by `packages/queries`, and the
+  route holds **no SQL of its own** — one that reached for `pool.query` would be
+  a second read path into state.
+  
+  **Two filters that mean what they mean everywhere else.** There is no area
+  column, and there did not need to be: everywhere in the system an "area" is a
+  vault prefix (`Areas/Fsl`, which the agent registry validates and `underAreas`
+  matches), so `area` is derived — the first two segments under `Areas/` at any
+  depth, the top segment elsewhere, and `null` for a vault-root file like
+  `now.md`, which is an answer rather than a gap. `prefix` is **segment-wise**,
+  the same semantics an area grant has: `Areas/Health` covers `Areas/Health/…`
+  and never `Areas/Healthcare/…`, because a substring match is how a prefix
+  filter leaks. Ordered by `path`, which is the primary key, so `offset` walks a
+  total order and no row ties or jumps between windows.
+  
+  **What no parameter can turn on.** Drafts are excluded by the same clause
+  `mcp-brain` applies at every tier, so the owner's list and an agent's index
+  cannot disagree about what a draft is; an unsettled `conflict` row is excluded
+  because its title and mtime are not facts yet. And the route's own scope
+  filter runs over the query's rows — the same `canSee` the search and page
+  routes use — so a row in the index that is not vault CONTENT never reaches a
+  client, the owner's included. The query is overlayable per instance (D4); the
+  filter is not, which is why both hold the line. A row whose `path` is not a
+  string is dropped rather than passed: a list entry whose scope cannot be
+  decided is not a list entry.
+  
+  **There is no `total`, on purpose.** A count over the unscoped filter is
+  precisely the "directory listing of what was filtered" the knowledge routes
+  refuse to publish — a narrowed principal would learn how many pages it cannot
+  see. Callers page until a window comes back shorter than `limit`. For the same
+  reason a filter pointing outside the scope answers an empty `200` rather than
+  a `400`: refusing `prefix=.metistry` by name would say which prefixes exist.
+  Only the filter's shape is validated.
+  
+  MetistryKit gains the matching `knowledgePages` method, the
+  `KnowledgePageList` / `KnowledgePageEntry` shapes and a `pages` store section
+  beside `knowledge` — two sections, because browsing the vault and searching it
+  are two questions and a search must not blank the list you were reading.
+  
+  The list is ordered by `path COLLATE "C"` — byte order, explicitly, rather
+  than the database's own locale. A glibc locale collation ignores punctuation
+  at the primary level, so `Areas/Health/sleep.md` sorts before
+  `Areas/Healthcare/…` on one cluster and after it on another: same rows, same
+  query, two different windows, and a client paging with `offset` would see a
+  page twice or not at all depending on which machine the database was
+  initialised on. CI (Linux) and the owner's Mac disagreeing is how it was
+  found.
+- dc4ce91: **The vault's link graph, through a named query — the fourth knowledge door
+  and the last piece §6.1 left open.** `GET
+  /api/knowledge/links?path=&limit=&offset=`, over
+  `seed/queries/knowledge_page_links.yaml`. No migration: `0001_init.sql` has
+  `knowledge_links (from_path, to_path, kind)` with the primary key on all
+  three and an index on `to_path`, so both directions are one indexed lookup.
+  The graph is derived state — the reconciler parses it out of the notes on
+  every walk and re-resolves a note's edges whenever the note or the path set
+  moves — so invariant 3 sends it through `packages/queries` and the route
+  holds no SQL of its own.
+  
+  **One list, keyed by the other end.** `direction` is a column (`outgoing` =
+  this page links there; `incoming` = that page links here) and `path` is
+  always the far side of the edge. That is not a presentation choice: it is
+  what lets one predicate decide every row. Two arrays would be two chances to
+  filter them unevenly, and the filter is the point — **both ends are scoped**.
+  The `path` parameter is checked before anything runs (a path the caller may
+  not see gets the `404` a missing page gets: "this page has four backlinks" is
+  a fact about a page), and every row goes through the same `canSee`. A page
+  inside a grant that links *out* of it, and a page outside a grant that links
+  *in*, both come back dropped rather than listed.
+  
+  **Never in the list:** an edge whose other end is a draft or an unsettled
+  `conflict`, at either end and at every tier — the same rule the page list
+  applies, so a draft cannot be discovered through the graph after being hidden
+  from the list. Dropped rather than blanked, because a row saying "there is
+  something here you may not see" is the disclosure the rule exists to prevent.
+  **An unresolved wikilink stays**, marked `resolved: false` with a title
+  derived from its own path: a note not written yet is how a vault gets
+  written, and Obsidian renders it rather than hiding it.
+  
+  Ordered outgoing first, then by path in byte order (`COLLATE "C"`), then by
+  `kind` — the link table's primary key read the other way round, so the order
+  is total and `limit`/`offset` cannot repeat or skip an edge. The same target
+  reached as a wikilink and as an embed is **two edges**, which is why the
+  client's row identity is the triple and not the path. No `total`, for the
+  page list's reason. The query is `expose: route`, so `/api/q/knowledge_page_links`
+  answers the `404` an unknown name gets.
+  
+  MetistryKit gains `knowledgeLinks(path:limit:offset:)`, the
+  `KnowledgePageLinkList` / `KnowledgePageLink` shapes with `outgoing` and
+  `incoming` as views of the one list, and `isLastPage`/`nextOffset` beside the
+  page list's.
+
+## 0.9.0
+
+### Minor Changes
+
+- b2e9416: **The Mac app gains a typed client and a store for everything the owner
+  surface offers, and the token still never enters the app's own process.**
+  Phase A's non-visual half (`docs/product/app-ux-plan.md` §6): `ConsoleAPI`,
+  `InstanceStore`, the wire shapes, and the sidebar's pins. No views, so nothing
+  on screen changed yet.
+  
+  **One authenticated surface, and it is still the CLI.** `docs/ops/mac-app.md`
+  wrote the condition for this before the code existed — "adding it is a CLI
+  change first: a `metistry console call <METHOD> <path>` keeps the token out of
+  this process entirely, which a token-printing verb would not" — and
+  `docs/ops/cli.md` ruled what to do once that verb shipped: "the app … use[s] it
+  rather than a second HTTP client". So every request is one `metistry console
+  call`, a request body goes on **stdin** rather than argv, and the local owner
+  token stays where the CLI found it. `console-sign-in-tests.swift`'s source scan
+  — one file uses `URLSession`, no file sets a credential header, no file names a
+  keychain API, no file opens a file — passes unchanged with the whole data layer
+  in, which is the point: the guard was not relaxed to make room for this.
+  
+  **Refusals keep the words of the thing that refused.** `ConsoleError` decodes
+  the standard envelope and adds two cases the CLI door has and HTTP does not —
+  this install's CLI predating the verb, and no token or a non-loopback console,
+  each carrying the CLI's own sentence because it already names the fix. A `401`
+  is **unreachable** and a `403` is not: the console answered, and one route
+  declined this credential. `namedField(among:)` attributes a refusal to a field
+  the caller already sent, because the envelope is `{code, message}` and names
+  its field in prose — nothing is inferred from a sentence's shape.
+  
+  **The store reports; it never infers.** Four states — loading, loaded, failed,
+  stale — with the console's own `as_of` beside the value, and a failed refresh
+  over data already on screen goes *stale and keeps it* rather than blanking a
+  working pane. A background refresh is a flag rather than a fifth state, so
+  there is nothing for a view to turn into a spinner (P2). And
+  `allowsDecisions` is O3 in one place: while a section is unreachable, every
+  decision, drag and dispatch refuses **before sending**, in a sentence.
+  
+  **Both reconnect cursors, and they are not the same mechanism.** The feed's
+  `since` is an inclusive timestamp that de-duplicates on `(ref, ts, kind)`; the
+  request queue's is an opaque cursor whose page is *everything that changed*, so
+  a row answered on the phone leaves the queue instead of lingering in it.
+  
+  **Pins are per instance.** Project, board, page, saved search or agent, in the
+  order they were dragged, filed in app preferences under
+  `pinnedItems.<instance_id>` — so the same app against a second instance never
+  shows the first one's sidebar, and an instance with no id yet holds them in
+  memory rather than under a shared key. Nothing about pinning reaches the
+  instance repo, Postgres or the vault.
+  
+  Fifty new tests against an in-process stub console — every shape decoded from
+  hand-written fixtures, the envelope read back through the CLI's own stderr
+  render, `401` vs `403`, both cursor folds, every store transition and the pins'
+  round trip — with no network and no subprocess, so they run in `swift test` on
+  CI as they stand.
+  
+  One limitation, named rather than worked around: `console call` puts the
+  envelope on stderr for a `>= 400` and does not print the body, so a conflict
+  `409`'s `reason`, `decision` and row do not survive. Phase A reads nothing that
+  needs them; the queue's `if_unchanged` repaint does, and the fix is one line in
+  the CLI rather than a second HTTP client in Swift.
+
 ## 0.8.1
 
 ## 0.8.0

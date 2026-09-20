@@ -1,0 +1,452 @@
+# Seeded default (D4 overlay: an instance file of the same name wins).
+#
+# THE ONE QUERY THE FILTER VOCABULARY COMPILES INTO (daily-flow-spec D15,
+# §6.2, §10; ticket P1-5). A template's `where:`/`order:`, the app's filter
+# chips and the plugin's suggester are one language with three consumers, and
+# what that language compiles to is BIND PARAMS OF THIS FILE — never SQL
+# text. `packages/queries` says it in its first four lines ("parameterized
+# execution, NEVER string interpolation") and refuses an undeclared param
+# loudly; `packages/core/src/task-filter.ts` (P1-2) is the parser that emits
+# the params below and refuses everything outside the grammar.
+#
+# Without this, there are three filter languages within a year — which §10
+# calls the single highest-leverage decision in the app surfaces.
+#
+# ---------------------------------------------------------------------------
+# THE BIND-PARAM SHAPE IS NOT WRITTEN HERE. IT IS `TASK_FILTER_PARAM_SPEC`.
+# ---------------------------------------------------------------------------
+#
+# `params:` below is a transcription of `TASK_FILTER_PARAM_SPEC`
+# (`packages/core/src/task-filter.ts`) and of nothing else — same names, same
+# types, same defaults — and `apps/console/test/seed-queries.test.ts` asserts
+# the two are equal, field for field. That test exists because this file and
+# that parser were first written blind to each other and agreed on almost
+# nothing: `due_from` against `due_on_or_before`, `combine` against
+# `match_any`, a comma-separated `flags` string against seven booleans,
+# `sort1` against `order_1`. Every one of those would have been an
+# `unknown param` at render time, on the owner's plan, at 19:00 — because
+# `QueryStore.run` refuses an undeclared param rather than ignoring it.
+#
+# **The parser is canonical, and it is canonical for a reason**: it is the
+# half that three consumers import, and a name only the SQL knows is a name
+# nothing can typecheck. So a new param starts in `TaskFilterParams` and
+# arrives here, never the other way round.
+#
+# `packages/queries` admits exactly three param types — int, text, boolean —
+# and every param carries a default, because every seed query has to run on
+# its defaults alone (apps/console/test/seed-queries.test.ts). So there are no
+# arrays and no nulls on the wire: **blank is absent** for every text param,
+# **0 is absent** for every int, everywhere.
+#
+#   * A comparable field (`due`, `do`, `start`, `done`) takes THREE params —
+#     `<field>_on`, `<field>_on_or_before`, `<field>_on_or_after` — all
+#     inclusive and all ISO `YYYY-MM-DD`. No operator ever travels: the
+#     parser folds a strict bound into an inclusive one (`due < today` is
+#     `due_on_or_before = <yesterday>`) and resolves every relative token
+#     against METISTRY_TZ and the run's date (§1.3, `vault_tasks.parsed_on`)
+#     before binding. Resolution belongs where the timezone is known, and
+#     that is not in the database.
+#   * `priority_eq` / `priority_max` / `priority_min` are NUMERIC bounds on
+#     the 1..4 scale (D5), so `priority <= p2` is "p1 or p2" — more
+#     important, not less. Unset priority filters and sorts as 3 —
+#     `coalesce(priority, 3)` — so "unset" and "normal" are one value and no
+#     NULL-ordering surprise exists. `0` is this shape's word for "not
+#     filtering"; the parser refuses a bound that fell off the scale rather
+#     than quietly widening it.
+#   * `size` is an exact letter; `size_rank_max` / `size_rank_min` are bounds
+#     on s=1, m=2, l=3, which is how `size <= m` is expressible without the
+#     query having an opinion about the letters' order.
+#   * `type`, `assigned`, `project` are exact matches; only `=` is meaningful
+#     on them and the parser refuses the other operators. `assigned` is the
+#     RESOLVED vault path (`@[[Jim Fallon]]` → `People/Jim Fallon.md`),
+#     because that is what the index stores.
+#   * `area_prefix` and `source_prefix` match the whole value OR the value
+#     followed by `/` and `:` respectively, so `area: Areas/Work` takes its
+#     children and `source: meeting` finds every `meeting:<path>`. Matched
+#     with `left(…)`, never `LIKE`, so a `_` in a slug is a `_` and not a
+#     wildcard.
+#   * **The seven flags of §6.2 are seven BOOLEANS**, one per flag, not a
+#     comma-separated set. A set param is shorter to declare and worse to
+#     use: it is a second little language inside a bind param, nothing can
+#     typecheck a member of it, and the parser already has a field per flag.
+#     An eighth flag is a product decision either way (§6.2's vocabulary is
+#     closed), so the set bought nothing.
+#   * `match_any` is how the clauses join — false is `and`, true is `or`. It
+#     is the honest limit of a fixed param shape: `due <= today or overdue`
+#     compiles, and so does every all-`and` predicate, but a predicate that
+#     MIXES `and` and `or` at different depths does not, and the parser
+#     refuses it as a render-time failure note (§6.4) rather than quietly
+#     approximating it. A wrong list is worse than a visible warning.
+#   * `order:` becomes three slots — `order_1`/`order_2`/`order_3` with a
+#     `_desc` boolean each — which is exactly the depth §6.2 and §6.6 spell
+#     (`order: "priority, due, size"`). An empty or unrecognised slot sorts
+#     nothing and falls through to the next, so `order:` absent means the
+#     vault's own order. Path, line and key always tie-break last, so the
+#     order is TOTAL and `offset` cannot show a row twice or skip one.
+#   * **`path_prefix` and `status` are NOT clauses: they scope**, and they
+#     scope under `and` always. `match_any` widens the predicate, never the
+#     scope — an `or` can never reach a ticked line or a path outside the
+#     caller's prefix. `path_prefix` is a CONTEXT param (below): no `where:`
+#     the caller writes can argue with it, which is what makes this query's
+#     `expose: route` worth anything.
+#   * The four CONTEXT params — `today`, `me`, `path_prefix`, `offset` — are
+#     the caller's, never the `where:` text's. `compileTaskFilter` returns
+#     them at their defaults and the caller fills them in: the renderer's
+#     resolved day, the owner's own person page, the principal's scope, the
+#     page. They live in `TaskFilterParams` with everything else so that the
+#     contract is ONE object rather than two that can disagree.
+#
+# **Rule lines are never rows here.** A `- [ ] Water the plants every week`
+# line is a recurrence RULE, and §4 says it is excluded from every "open
+# tasks" query; `vault_tasks_recurring` is the query that reads those. The
+# `recurring` flag here therefore means "an INSTANCE of a rule"
+# (`recur_parent IS NOT NULL`), which is the only sense in which a row of
+# this query can be recurring at all.
+#
+# **`carried` is not `age`.** Carried is "it was owed on an earlier day" —
+# `coalesce(scheduled_for, due) < today` — and it is the number §10's chip
+# shows and `task_ageing`'s `total` row counts under the same name. How long
+# a line has been SITTING is `first_seen_on`, comes back as `age_days`, and
+# is `task_ageing`'s `age` buckets. Two questions, two columns, one name
+# each.
+#
+# **Dates come back as text.** `date` through node-pg becomes a JS Date at
+# the process's local midnight, which is a day's drift waiting to happen in a
+# renderer that formats it. `::text` is the same ISO string everywhere,
+# and it is what `board.yaml` already does with `due`.
+#
+# **`ORDER BY … COLLATE "C"`.** Every text sort key, and the path tie-break.
+# The lesson is `knowledge_pages.yaml`'s: a locale collation ignores
+# punctuation at the primary level, so the same rows page differently on a
+# macOS cluster and a Linux one and a vault restored into a differently
+# collated cluster silently renumbers itself. `C` is byte order and is the
+# same everywhere. CI runs Linux; the owner runs macOS.
+#
+# **`expose: route`, for the same reason the page list is.** Every row here
+# carries a vault PATH and the text of a line the owner typed in their own
+# notes — the most personal content in the system. Only a route of its own
+# can filter those rows through the caller's scope the way
+# `GET /api/knowledge/pages` does, so the generic `/api/q/<name>` and
+# `queries_run` answer this name with the SAME `not_found` they answer an
+# unknown one with (ruled 2026-09-19: one endpoint per operation, and "all
+# queries including /mcp should be scoped"). Left generic, a `queries: true`
+# grant would page the owner's entire task list past every knowledge tier.
+# This closes NO door the daily flow needs: `expose` gates the two GENERIC
+# doors only, and the template engine, the routines and the console's own
+# route all run the query through `QueryStore.run` in process, which does not
+# consult it.
+#
+# **No new brain tool** (D20, §1.5): the assistant reads what a routine hands
+# it on the fold turn, and the aggregate half — `task_ageing` — is the one
+# that is `generic` and needs no path to be useful.
+name: vault_tasks_query
+expose: route
+description: >-
+  The vault's `- [ ]` lines, filtered by the one task-filter vocabulary
+  (daily-flow-spec §6.2) compiled to bind params — which are exactly
+  `TASK_FILTER_PARAM_SPEC` in `packages/core/src/task-filter.ts`: three
+  inclusive date params per comparable field, numeric priority and size-rank
+  bounds, exact slugs, prefix matches for area and source, one boolean per
+  flag, and `match_any` for how the clauses join. Scoped by `status`
+  (open | done | dropped | waiting | any) and `path_prefix` (a path prefix,
+  segment-wise), which always apply under `and`, plus the caller's `today`
+  and `me`. Each row carries the line's text, its fields, the flags it
+  satisfies, the work it is promoted to or blocking, how long it has been
+  carried and how long it has been sitting, and how many open places the same
+  text appears in. Ordered by up to three named sort keys, then always by
+  path in BYTE order, line and key — a total order, so `limit`/`offset` page
+  it without repeating or skipping. Recurrence RULE lines are never rows here
+  (`vault_tasks_recurring` reads those); the `recurring` flag means an
+  instance of one.
+params:
+  # ==========================================================================
+  # TRANSCRIBED FROM `TASK_FILTER_PARAM_SPEC` — names, types and defaults.
+  # Change it there first; the seed-queries test fails if these two differ.
+  # ==========================================================================
+  # how the clauses join: false = and, true = or (never mixed — §6.2)
+  match_any: { type: boolean, default: false }
+  # comparable fields: three inclusive params each, ISO YYYY-MM-DD, blank = unbounded
+  due_on: { type: text, default: "" }
+  due_on_or_before: { type: text, default: "" }
+  due_on_or_after: { type: text, default: "" }
+  do_on: { type: text, default: "" } # scheduled_for
+  do_on_or_before: { type: text, default: "" }
+  do_on_or_after: { type: text, default: "" }
+  start_on: { type: text, default: "" } # start_on
+  start_on_or_before: { type: text, default: "" }
+  start_on_or_after: { type: text, default: "" }
+  done_on: { type: text, default: "" } # done_on
+  done_on_or_before: { type: text, default: "" }
+  done_on_or_after: { type: text, default: "" }
+  # priority 1..4 (D5); unset counts as 3; 0 = not filtering
+  priority_eq: { type: int, default: 0 }
+  priority_max: { type: int, default: 0 } # numeric: `<= 2` is p1 or p2, i.e. MORE important
+  priority_min: { type: int, default: 0 }
+  # size: the exact letter, or bounds on s=1 m=2 l=3; 0 = not filtering
+  size: { type: text, default: "" }
+  size_rank_max: { type: int, default: 0 }
+  size_rank_min: { type: int, default: 0 }
+  # exact matches and prefix matches, blank = any
+  type: { type: text, default: "" }
+  assigned: { type: text, default: "" } # the RESOLVED person-page path
+  project: { type: text, default: "" }
+  area_prefix: { type: text, default: "" } # the value, or the value followed by `/`
+  source_prefix: { type: text, default: "" } # the value, or the value followed by `:`
+  status: { type: text, default: "" } # SCOPE: open | done | dropped | waiting | any; blank = open
+  # the seven flags of §6.2, one boolean each
+  overdue: { type: boolean, default: false }
+  unscheduled: { type: boolean, default: false }
+  waiting: { type: boolean, default: false }
+  recurring: { type: boolean, default: false } # an INSTANCE of a rule; the rules are `vault_tasks_recurring`
+  carried: { type: boolean, default: false }
+  blocking_agent: { type: boolean, default: false }
+  assigned_to_me: { type: boolean, default: false }
+  # order: three slots, then the total-order tie-break. Blank = the vault's own order.
+  order_1: { type: text, default: "" }
+  order_1_desc: { type: boolean, default: false }
+  order_2: { type: text, default: "" }
+  order_2_desc: { type: boolean, default: false }
+  order_3: { type: text, default: "" }
+  order_3_desc: { type: boolean, default: false }
+  limit: { type: int, default: 50 } # DEFAULT_TASK_LIMIT — one screen; a template that wants more says `limit:`
+  # --- context: the CALLER's, never the `where:` text's ---------------------
+  today: { type: text, default: "" } # the day overdue/carried/age are measured against; blank = the cluster's current_date
+  me: { type: text, default: "" } # the owner's own person page, for assigned_to_me
+  path_prefix: { type: text, default: "" } # SCOPE: blank (or `/`) = the whole vault; else a path prefix, segment-wise
+  offset: { type: int, default: 0 }
+sql: |
+  WITH f AS (
+    SELECT
+      coalesce(nullif(:today::text, '')::date, current_date)  AS today,
+      nullif(rtrim(:path_prefix::text, '/'), '')              AS path_prefix,
+      lower(nullif(:status::text, ''))                        AS status,
+      nullif(:me::text, '')                                   AS me,
+      (:match_any)::boolean                                   AS any_of,
+      -- `nullif` before the cast, never a bare `::date`: SQL does not promise
+      -- to short-circuit, and `''::date` raises.
+      nullif(:due_on::text, '')::date                         AS due_on,
+      nullif(:due_on_or_before::text, '')::date               AS due_on_or_before,
+      nullif(:due_on_or_after::text, '')::date                AS due_on_or_after,
+      nullif(:do_on::text, '')::date                          AS do_on,
+      nullif(:do_on_or_before::text, '')::date                AS do_on_or_before,
+      nullif(:do_on_or_after::text, '')::date                 AS do_on_or_after,
+      nullif(:start_on::text, '')::date                       AS start_on,
+      nullif(:start_on_or_before::text, '')::date             AS start_on_or_before,
+      nullif(:start_on_or_after::text, '')::date              AS start_on_or_after,
+      nullif(:done_on::text, '')::date                        AS done_on,
+      nullif(:done_on_or_before::text, '')::date              AS done_on_or_before,
+      nullif(:done_on_or_after::text, '')::date               AS done_on_or_after,
+      nullif((:priority_eq)::int, 0)                          AS priority_eq,
+      nullif((:priority_max)::int, 0)                         AS priority_max,
+      nullif((:priority_min)::int, 0)                         AS priority_min,
+      nullif(lower(:size::text), '')                          AS size,
+      nullif((:size_rank_max)::int, 0)                        AS size_rank_max,
+      nullif((:size_rank_min)::int, 0)                        AS size_rank_min,
+      nullif(lower(:type::text), '')                          AS type,
+      nullif(:assigned::text, '')                             AS assigned,
+      nullif(lower(:project::text), '')                       AS project,
+      nullif(rtrim(:area_prefix::text, '/'), '')              AS area_prefix,
+      nullif(lower(:source_prefix::text), '')                 AS source_prefix
+  ),
+  -- Scope, applied before anything `match_any` can touch (see the header):
+  -- the caller's path prefix, the status, and §4's rule that a recurrence
+  -- RULE line is not a task.
+  scoped AS (
+    SELECT t.*
+    FROM vault_tasks t, f
+    WHERE (f.path_prefix IS NULL
+           OR t.path = f.path_prefix
+           OR left(t.path, length(f.path_prefix) + 1) = f.path_prefix || '/')
+      AND t.recur_rule IS NULL
+      AND CASE coalesce(f.status, 'open')
+            WHEN 'done'    THEN t.checked AND NOT t.dropped
+            WHEN 'dropped' THEN t.dropped
+            WHEN 'waiting' THEN NOT t.checked AND NOT t.dropped AND t.waiting
+            WHEN 'any'     THEN true
+            ELSE NOT t.checked AND NOT t.dropped
+          END
+  ),
+  -- What the row IS, before what the caller asked for: the seven flags of
+  -- §6.2 computed ONCE (the boolean param below judges the same column the
+  -- `row_flags` output is built from, so the chip and the filter can never
+  -- disagree), the work on either side of it (§3), and the size of its
+  -- duplicate group (§2.3).
+  marked AS (
+    SELECT
+      s.*,
+      f.today,
+      CASE lower(s.size) WHEN 's' THEN 1 WHEN 'm' THEN 2 WHEN 'l' THEN 3 END  AS size_rank,
+      (f.today - s.first_seen_on)                                             AS age_days,
+      CASE WHEN coalesce(s.scheduled_for, s.due) IS NOT NULL
+             AND coalesce(s.scheduled_for, s.due) < f.today
+             AND NOT s.checked AND NOT s.dropped
+           THEN f.today - coalesce(s.scheduled_for, s.due) END                AS carried_days,
+      coalesce(s.due IS NOT NULL AND s.due < f.today
+               AND NOT s.checked AND NOT s.dropped, false)                    AS is_overdue,
+      (s.scheduled_for IS NULL AND s.due IS NULL)                             AS is_unscheduled,
+      s.waiting                                                               AS is_waiting,
+      (s.recur_parent IS NOT NULL)                                            AS is_recurring,
+      coalesce(coalesce(s.scheduled_for, s.due) < f.today
+               AND NOT s.checked AND NOT s.dropped, false)                    AS is_carried,
+      (b.id IS NOT NULL)                                                      AS is_blocking_agent,
+      (s.assigned IS NULL OR (f.me IS NOT NULL AND s.assigned = f.me))        AS is_assigned_to_me,
+      b.id                                                                    AS blocks_work_id,
+      b.title                                                                 AS blocks_work_title,
+      b.status                                                                AS blocks_work_status,
+      w.title                                                                 AS work_title,
+      w.status                                                                AS work_status,
+      (SELECT count(*) FROM vault_tasks d
+        WHERE d.text_norm = s.text_norm AND NOT d.checked AND NOT d.dropped)  AS places
+    FROM scoped s
+    CROSS JOIN f
+    -- §3: a `work` row waiting on this human todo. It SURFACES and never
+    -- gates — nothing here touches depends_on or claimability. The ref is
+    -- the anchored spelling the spec fixes, so a task with no anchor yet is
+    -- simply not something a work row can name.
+    LEFT JOIN LATERAL (
+      SELECT wb.id, wb.title, wb.status
+      FROM work wb
+      WHERE wb.status <> 'closed'
+        AND s.anchor IS NOT NULL
+        AND wb.meta->>'blocked_by' = 'vault:' || s.path || '#^' || s.anchor
+      ORDER BY wb.id
+      LIMIT 1
+    ) b ON true
+    -- the other direction: a `work:418` token on the line (promotion is
+    -- one-way, and the UI must not imply a demotion)
+    LEFT JOIN work w ON w.id = s.work_id
+  ),
+  -- The flags the row satisfies, as the set the caller renders as chips, and
+  -- the twelve sort keys, as one object the three `order:` slots index into
+  -- by name — so the key for a field is written ONCE rather than three times.
+  flagged AS (
+    SELECT m.*,
+      array_remove(ARRAY[
+        CASE WHEN m.is_overdue        THEN 'overdue' END,
+        CASE WHEN m.is_unscheduled    THEN 'unscheduled' END,
+        CASE WHEN m.is_waiting        THEN 'waiting' END,
+        CASE WHEN m.is_recurring      THEN 'recurring' END,
+        CASE WHEN m.is_carried        THEN 'carried' END,
+        CASE WHEN m.is_blocking_agent THEN 'blocking_agent' END,
+        CASE WHEN m.is_assigned_to_me THEN 'assigned_to_me' END
+      ], NULL) AS row_flags,
+      jsonb_build_object(
+        'priority', lpad(coalesce(m.priority, 3)::text, 2, '0'),
+        'due',      coalesce(m.due::text, '9999-12-31'),
+        'do',       coalesce(m.scheduled_for::text, '9999-12-31'),
+        'start',    coalesce(m.start_on::text, '9999-12-31'),
+        'done',     coalesce(m.done_on::text, '9999-12-31'),
+        'size',     coalesce(m.size_rank::text, '9'),
+        'type',     coalesce(lower(m.type), '~'),
+        'assigned', coalesce(m.assigned, '~'),
+        'project',  coalesce(lower(m.project), '~'),
+        'area',     coalesce(m.area, '~'),
+        'source',   coalesce(lower(m.source), '~'),
+        'status',   CASE WHEN m.dropped THEN '3' WHEN m.checked THEN '2'
+                         WHEN m.waiting THEN '1' ELSE '0' END
+      ) AS sort_keys
+    FROM marked m
+  ),
+  -- One element per CLAUSE: true it matched, false it did not, NULL the
+  -- caller did not ask. `array_remove(…, NULL)` leaves only what was asked,
+  -- so "no clause at all" is an empty array and matches everything under
+  -- either combinator — which is how this query runs on its defaults.
+  judged AS (
+    SELECT g.*, array_remove(ARRAY[
+      -- Inclusive bounds; the parser folded `<` and `>` and resolved every
+      -- relative date against METISTRY_TZ before binding.
+      --
+      -- `coalesce(…, false)` on every nullable column, and it is not
+      -- decoration: NULL is how this array spells "the caller did not ask",
+      -- so a task with no `due` compared against a bound would come back as
+      -- "not asked" and pass — the filter silently undone by the very rows
+      -- it was meant to exclude.
+      CASE WHEN f.due_on           IS NOT NULL THEN coalesce(g.due = f.due_on, false) END,
+      CASE WHEN f.due_on_or_before IS NOT NULL THEN coalesce(g.due <= f.due_on_or_before, false) END,
+      CASE WHEN f.due_on_or_after  IS NOT NULL THEN coalesce(g.due >= f.due_on_or_after, false) END,
+      CASE WHEN f.do_on            IS NOT NULL THEN coalesce(g.scheduled_for = f.do_on, false) END,
+      CASE WHEN f.do_on_or_before  IS NOT NULL THEN coalesce(g.scheduled_for <= f.do_on_or_before, false) END,
+      CASE WHEN f.do_on_or_after   IS NOT NULL THEN coalesce(g.scheduled_for >= f.do_on_or_after, false) END,
+      CASE WHEN f.start_on           IS NOT NULL THEN coalesce(g.start_on = f.start_on, false) END,
+      CASE WHEN f.start_on_or_before IS NOT NULL THEN coalesce(g.start_on <= f.start_on_or_before, false) END,
+      CASE WHEN f.start_on_or_after  IS NOT NULL THEN coalesce(g.start_on >= f.start_on_or_after, false) END,
+      CASE WHEN f.done_on            IS NOT NULL THEN coalesce(g.done_on = f.done_on, false) END,
+      CASE WHEN f.done_on_or_before  IS NOT NULL THEN coalesce(g.done_on <= f.done_on_or_before, false) END,
+      CASE WHEN f.done_on_or_after   IS NOT NULL THEN coalesce(g.done_on >= f.done_on_or_after, false) END,
+      -- D5: unset priority IS normal, here as everywhere, so nothing has to
+      -- coalesce to false — `coalesce(priority, 3)` is never null
+      CASE WHEN f.priority_eq  IS NOT NULL THEN coalesce(g.priority, 3) =  f.priority_eq END,
+      CASE WHEN f.priority_max IS NOT NULL THEN coalesce(g.priority, 3) <= f.priority_max END,
+      CASE WHEN f.priority_min IS NOT NULL THEN coalesce(g.priority, 3) >= f.priority_min END,
+      CASE WHEN f.size          IS NOT NULL THEN coalesce(lower(g.size) = f.size, false) END,
+      CASE WHEN f.size_rank_max IS NOT NULL THEN coalesce(g.size_rank <= f.size_rank_max, false) END,
+      CASE WHEN f.size_rank_min IS NOT NULL THEN coalesce(g.size_rank >= f.size_rank_min, false) END,
+      CASE WHEN f.type     IS NOT NULL THEN coalesce(lower(g.type) = f.type, false) END,
+      CASE WHEN f.assigned IS NOT NULL THEN coalesce(g.assigned = f.assigned, false) END,
+      CASE WHEN f.project  IS NOT NULL THEN coalesce(lower(g.project) = f.project, false) END,
+      -- prefix matches by `left(…)`, never `LIKE`: a `_` in a slug is a `_`
+      CASE WHEN f.area_prefix IS NOT NULL THEN
+        coalesce(g.area = f.area_prefix
+                 OR left(g.area, length(f.area_prefix) + 1) = f.area_prefix || '/', false) END,
+      CASE WHEN f.source_prefix IS NOT NULL THEN
+        coalesce(lower(g.source) = f.source_prefix
+                 OR left(lower(g.source), length(f.source_prefix) + 1) = f.source_prefix || ':', false) END,
+      -- one boolean per flag, judged against the very column `row_flags` is
+      -- built from, so the chip and the filter cannot disagree
+      CASE WHEN (:overdue)::boolean        THEN g.is_overdue END,
+      CASE WHEN (:unscheduled)::boolean    THEN g.is_unscheduled END,
+      CASE WHEN (:waiting)::boolean        THEN g.is_waiting END,
+      CASE WHEN (:recurring)::boolean      THEN g.is_recurring END,
+      CASE WHEN (:carried)::boolean        THEN g.is_carried END,
+      CASE WHEN (:blocking_agent)::boolean THEN g.is_blocking_agent END,
+      CASE WHEN (:assigned_to_me)::boolean THEN g.is_assigned_to_me END
+    ], NULL) AS clauses
+    FROM flagged g, f
+  ),
+  -- The three order slots, resolved to one comparable text key each. A slot
+  -- that names no key is NULL for every row, which sorts nothing and falls
+  -- through — the parser refuses an unknown field at render time (§6.4), so
+  -- the database never has to have an opinion about it.
+  keyed AS (
+    SELECT j.*,
+      j.sort_keys ->> lower(:order_1::text) AS k1,
+      j.sort_keys ->> lower(:order_2::text) AS k2,
+      j.sort_keys ->> lower(:order_3::text) AS k3
+    FROM judged j
+  )
+  SELECT
+    k.path, k.task_key, k.anchor, k.line_no, k.text, k.text_norm,
+    k.checked, k.dropped, k.waiting,
+    k.due::text           AS due,
+    k.scheduled_for::text AS scheduled_for,
+    k.start_on::text      AS start_on,
+    k.done_on::text       AS done_on,
+    k.done_on_observed,
+    k.priority,
+    coalesce(k.priority, 3) AS priority_effective, -- D5: unset IS normal, everywhere
+    k.size, k.type, k.assigned, k.project, k.area,
+    k.recur_parent, k.source, k.ext_refs,
+    k.work_id, k.work_title, k.work_status,
+    k.blocks_work_id, k.blocks_work_title, k.blocks_work_status,
+    k.duplicate_of, k.places,
+    k.parse_warning,
+    k.parsed_on::text     AS parsed_on,
+    k.first_seen_on::text AS first_seen_on,
+    k.last_seen_at,
+    k.age_days, k.carried_days,
+    k.row_flags
+  FROM keyed k, f
+  WHERE array_length(k.clauses, 1) IS NULL
+     OR CASE WHEN f.any_of THEN true = ANY(k.clauses)
+             ELSE NOT (false = ANY(k.clauses)) END
+  ORDER BY
+    CASE WHEN NOT (:order_1_desc)::boolean THEN k.k1 END COLLATE "C" ASC  NULLS LAST,
+    CASE WHEN     (:order_1_desc)::boolean THEN k.k1 END COLLATE "C" DESC NULLS LAST,
+    CASE WHEN NOT (:order_2_desc)::boolean THEN k.k2 END COLLATE "C" ASC  NULLS LAST,
+    CASE WHEN     (:order_2_desc)::boolean THEN k.k2 END COLLATE "C" DESC NULLS LAST,
+    CASE WHEN NOT (:order_3_desc)::boolean THEN k.k3 END COLLATE "C" ASC  NULLS LAST,
+    CASE WHEN     (:order_3_desc)::boolean THEN k.k3 END COLLATE "C" DESC NULLS LAST,
+    k.path COLLATE "C", k.line_no, k.task_key COLLATE "C"
+  LIMIT :limit
+  OFFSET :offset
+cache_ttl: 0 # a task list that lags is a list with the box you just ticked still on it

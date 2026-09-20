@@ -1,5 +1,304 @@
 # @metistry-apps/assistant
 
+## 0.11.0
+
+### Patch Changes
+
+- 9c9da4a: **`metistry compute cache-report` — OPEN-6's measurement as one command**
+  (ruled 2026-09-17: ship automatic top-level `cache_control` first, measure
+  later). `metistry compute cache-report [--since 7d] [--json]` reads the `runs`
+  ledger through the new named query `cache_report`
+  (`GET /api/q/cache_report` — invariant 3's one read path, and no console route
+  or action of its own, so invariant 10's mutating surface is untouched) and
+  joins it to `compute.yaml`'s `pricing:` rates, which the ledger cannot know. A
+  table per provider/model, grouped by tier and by the `caching:` mode that was
+  in force, with turns, cache reads and writes, hit ratio, recorded cost and a
+  net dollar saving; one verdict line against an 80 % threshold, under the 89 %
+  after a task boundary that `docs/research/2026-09-cost-optimization.md`
+  records, because a real install rolls sessions. The saving is net of the write
+  premium and may be negative — a prefix rebuilt every turn is the finding, not
+  a number to floor at zero — and is absent, naming the field that would fill
+  it, wherever no `pricing:` entry publishes a rate. It calls no model and
+  writes nothing.
+  
+  **Usage mapping now covers Anthropic's native shape.** `cache_read_input_tokens`
+  was not read at all, and `input_tokens` on that wire is the *fresh* remainder
+  with both cache counts reported beside it rather than inside it.
+  `usageFromResponse` recognises the shape by its anchor field (`prompt_tokens`
+  = the OpenAI/OpenRouter form, already a total; `input_tokens` = the native
+  form, summed back into one), so `runs.tokens_in` means the whole billed prompt
+  whichever endpoint answered and a ratio over it is comparable across
+  providers.
+  
+  **Every engine turn now records the cache, and what caching was asked for.**
+  Crew runs wrote provider, model, tokens and cost but dropped
+  `cache_read_tokens`/`cache_write_tokens` and `cost_source`; shadow runs
+  dropped the same two on their own provider's row. Both carry them now. And a
+  reported zero is no longer flattened into "nothing reported": the engine keeps
+  the counter absent until a response carries the field, so NULL means the
+  provider said nothing (the field name is wrong) and 0 means it said zero (the
+  prefix is not stable) — two findings with different fixes. `runs.meta.caching`
+  records the mode in force for that turn, since `compute.yaml` is hot-reloaded
+  and cannot answer later what was true earlier.
+  
+  **Fixed:** `main()`'s `compute` case hardcoded `fetchFn: fetch` instead of
+  honouring the `io.fetchFn` test seam, so a test driving those verbs through
+  `main()` reached the real console and real provider endpoints rather than its
+  own fakes.
+- 1bf5c76: **A crew's toolset is enforced at the door.** P2 of
+  `docs/research/2026-09-19-grants-and-access-simplified.md` §4, approved
+  2026-09-20. **One behaviour change, and it is the point of the phase** — read
+  the next paragraph before you upgrade an install that runs crews.
+  
+  **What changes for a running crew.** A crew names TOOL GROUPS in its manifest
+  (`uses:`), and until now that list was applied by the process that dispatched
+  the run: `apps/assistant/src/tools.ts` filtered `tools/list` and refused an
+  unlisted call with the text `"mcp__brain__tasks_comment" is not in this run's
+  tool list`. `/mcp` had never heard of `uses` — `AgentPrincipal` carried no
+  such field — so the door admitted those calls. Five of the eight groups
+  (`rooms`, `artifacts`, `tasks`, `capture`, `requests`) had no server-side gate
+  at all; the only thing holding them was a `Set.has` in another process. Now
+  the console resolves a crew's `uses` from the manifest it loaded, attaches it
+  to the principal at authentication, and the door refuses anything outside it
+  before the tool body runs:
+  
+  ```json
+  { "error": { "code": "forbidden",
+               "message": "tasks_comment is not in this crew's toolset — writer holds knowledge, requests (`uses:` in its manifest, a protected path in the user's hand: docs/ops/crews.md). Report what you needed instead of retrying." } }
+  ```
+  
+  One `runs` row on the crew's own id, the uniform envelope, `reason:
+  not_in_uses` in `may()`'s decision. The runner's client-side list stays as
+  **defence in depth** — the model is still not offered a tool it cannot use —
+  but it is no longer the control, and the comment at that filter says so.
+  CLAUDE.md's rule over all the others is "enforce at the tool, never by
+  prompting"; a filter in the caller is neither.
+  
+  **`crew` is a real role.** `agents.kind` has stored three values since Phase 5
+  (`crews.ts` writes `'crew'`) while the console collapsed anything not
+  `internal` to `external` at authentication, so a crew reached `/mcp`
+  indistinguishable from a foreign agent (§2.3). `authenticateAgent` now passes
+  the row's own kind through, `principalOf` maps it to the `crew` role that
+  `may()` has had a table for since P1, and three things follow: the toolset
+  gate above, a `crew` that can no longer reach `request_access` at the door
+  (it is a never-tool, so it is in no group), and a `source` on the principal
+  that is the crew's manifest rather than a fourth prose reconstruction of
+  "your scope is configuration, not a grant".
+  
+  **Migration `0025_agent_role.sql`** (additive; rollback note in the file): a
+  CHECK holding `agents.kind` to the three values it already stores, and a
+  nullable `grant_source` column recording which of the three places a row's
+  grants came from — `registry` (the owner's hand), `environment` (`.env`,
+  replaced at every console start), `manifest` (a crew's `scope:`). NULL on
+  existing rows and read as `registry`. Nothing decides on it: `may()` never
+  reads it.
+  
+  **Nothing else moved.** Every other refusal is byte-identical — the golden
+  catalogue (`packages/core/test/access.golden.json`) asserts it entry by entry,
+  and the one changed entry carries both what the caller used to say and what
+  the door says now, so the behaviour change is a reviewable diff rather than a
+  sentence in a PR. Misuse tests ship with it (invariant 8): a crew bearer
+  refused a non-`uses` tool at `/mcp` with no client filter in the loop, a crew
+  whose manifest cannot be read holding NO tools rather than all of them, an
+  external agent unable to become a crew through a body or a header, and the
+  CHECK refusing a fourth kind.
+- Updated dependencies [4a778f9]
+- Updated dependencies [4f43f9c]
+- Updated dependencies [9c9da4a]
+- Updated dependencies [1bf5c76]
+- Updated dependencies [b6586de]
+- Updated dependencies [579662f]
+- Updated dependencies [57ceb02]
+- Updated dependencies [45b64df]
+- Updated dependencies [9ec30d5]
+- Updated dependencies [7f9ceb7]
+- Updated dependencies [23cc47f]
+  - @foldedspacelabs/metistry-core@0.11.0
+  - @foldedspacelabs/metistry-queries@0.11.0
+
+## 0.10.0
+
+### Patch Changes
+
+- 7782cf4: **A wire change: `turn_id` is out of all 25 tool schemas and rides in the
+  call's `_meta`.** The correlation handle that groups one reply's tool calls in
+  the activity feed was merged into every tool's `inputSchema` — 3,774 chars ≈
+  **944 definition tokens, 19% of the entire advertised surface**, for a field
+  that is not a parameter and is "never trusted for anything else". Measured on
+  this checkout: the eager surface goes **19,914 chars / ~4,979 tokens →
+  16,140 / ~4,035**, and the credential-gated 26-tool surface 20,972 / ~5,243 →
+  17,047 / ~4,262, so it no longer crosses the >5k line that gates
+  `discovery: lazy` at all. No capability was removed and no description
+  changed (`docs/research/2026-09-19-code-mode-mcp.md` §2.4, ruled 2026-09-19).
+  
+  **Where it went.** `_meta` on `tools/call`, the MCP spec's own carrier for
+  request metadata, under `com.foldedspacelabs.metistry/turn_id`
+  (`packages/mcp-brain/src/turn-id.ts`, exported as `TURN_ID_META_KEY`). The
+  assistant's tool host mints one per host — i.e. one per reply — and sends it
+  on every call. That also moves the handle from the model's hands into the
+  client's: the seed prompt used to ask the assistant to invent an id and pass
+  it faithfully on every call, which was a convention, not a control.
+  
+  **Compatibility, one release.** A client still sending `turn_id` inside
+  `arguments` keeps correlating exactly as before: the bridge lifts it into
+  `_meta` at the door, beside the deprecated-name rewriter, before any schema
+  sees it. Tolerated, advertised nowhere. Two behaviour changes worth knowing:
+  a malformed handle is now **dropped rather than failing the call** (a join key
+  is not a control), and `turn_id` no longer appears in any `tools/list`, so a
+  client that discovers arguments from the schema will stop sending it.
+- Updated dependencies [ad73f5a]
+  - @foldedspacelabs/metistry-core@0.10.0
+  - @foldedspacelabs/metistry-queries@0.10.0
+
+## 0.9.1
+
+### Patch Changes
+
+- Updated dependencies [6b3d645]
+  - @foldedspacelabs/metistry-queries@0.9.1
+  - @foldedspacelabs/metistry-core@0.9.1
+
+## 0.9.0
+
+### Minor Changes
+
+- dade46d: **Shadow mode: try a model on your real turns without ever answering with
+  it.** The bake-off's stage 2, as configuration. An optional block on the
+  default assignment —
+  `shadow: { model: llamaserver/qwen3.6-35b-a3b, fraction: 0.1 }` — has the
+  engine re-run one turn in ten on a candidate model *after* the real answer has
+  been delivered and its session saved, and put both transcripts plus an
+  agreement number on that turn's `runs` row. The candidate's answer is never
+  returned as the turn's, is never a session, and has no path to the console or
+  the phone.
+  
+  **Its tool calls are stubbed record-only, by construction rather than by
+  instruction.** The shadow gets the same tool *list* the real run saw; every
+  call is written down and none is performed. A call the real run made
+  identically (same name, same arguments, byte for byte) is handed the real run's
+  own result, so the candidate's next step is judged against the same facts;
+  anything else gets one fixed `(recorded, not executed: …)` string. The stub
+  host closes over a list of names and a map of strings — no MCP client, no URL,
+  no token — so there is no object in scope it could execute a call against, and
+  a shadow of a turn that wrote to the vault cannot write to the vault twice.
+  
+  **Agreement is deterministic and says what it is:** the mean of "same tool
+  calls in the same order" and token Jaccard over the two final answers. No model
+  scores it, so it cannot drift and the stored row re-scores to the same number.
+  The *rubric* score stays `packages/eval`'s, on the owner's fixtures — the
+  engine leaves a typed hook for it instead of inventing a second scorer.
+  
+  **A shadow is a turn, so it is budgeted like one.** It asks the same pre-call
+  gate with the candidate's own provider and `critical: false`, so `stop` and
+  `critical_only` skip the experiment while the interactive turn they let through
+  keeps its answer; its spend is its own `runs` row of kind `shadow` carrying the
+  provider that was actually paid, which is what makes per-provider budgets
+  honest with no change to the `spend` query. Nothing it does can cost the turn:
+  a candidate that is down, an unset credential or a failed write lands as a note
+  on the row, never as a failed reply.
+  
+  Additive migration `0020` adds `shadow_provider`, `shadow_model`,
+  `shadow_transcript`, `shadow_agreement` and `shadow_cost_usd` to `runs`
+  (rollback: drop the five columns and `runs_shadow_ts_idx`). New named query
+  `seed/queries/shadow_agreement.yaml` reports agreement, tool-sequence match,
+  answer similarity, cost and failures per candidate over the last N shadowed
+  turns; the weekly review's System section carries one line per candidate and
+  omits it when nothing is being shadowed. `compute.yaml`'s schema refuses a
+  `shadow:` block with no `fraction`, a fraction outside 0..1, a candidate this
+  file does not declare, a candidate that is the assigned model itself, and the
+  block on a tier or crew — each naming the field. `docs/ops/compute.md` gains
+  "Shadow mode".
+- f57b3b0: **The instance directory is the Obsidian vault.** Open the folder `metistry
+  init` made and your notes are right there — `Journal/`, `Me/`, `Inbox/`,
+  `now.md` — with nothing of the machinery in the way. Everything that is not
+  knowledge moved into `.metistry/`: identity, rules, compute, the config
+  directories, the lock, and the derived `state/` that holds Postgres, the
+  `.env` and downloaded models. Obsidian ignores dot-prefixed folders, which is
+  the whole reason for the dot — the vault root and the install's own files can
+  finally be the same directory without one of them cluttering the other.
+  
+  Vault paths lose their prefix with it: a note is `Areas/Fsl/Drey.md`, a
+  capture is `Inbox/…`, and a read grant covering everything is spelled `/`.
+  
+  **The protected set became a place rather than a list.** Anything under
+  `.metistry/` is the user's hand alone — except `.metistry/state/`, which is
+  derived and nobody's record — plus the root `CLAUDE.md` and `README.md`.
+  That is one rule the reconciler enforces at the tool, instead of seven
+  filenames each component had to remember. Neither those two root files nor
+  `Artifacts/` are indexed as knowledge: your instructions and your bundles are
+  yours to read, not search results.
+  
+  This ships the layout for NEW instances. An existing instance keeps working
+  unchanged and `metistry doctor` now says which shape it is in; the verb that
+  moves one is the next change.
+
+### Patch Changes
+
+- c1f512e: **The assistant now uses your `identity.yaml` on the launchd shape, instead
+  of the seed identity that ships with the product.** Every `*_FILES` overlay
+  default resolved its instance half relative to the process's working
+  directory, and every launchd job's working directory is the product
+  checkout — so `.metistry/identity.yaml`, `rules.yaml` and `compute.yaml`
+  named the product's own directory, found nothing, and the engine ran on the
+  seed. `METISTRY_INSTANCE_DIR` was not in the engine's environment allowlist
+  either, so it could not have resolved them itself.
+  
+  Fixed at the root: `metistry up` puts `METISTRY_INSTANCE_DIR` and
+  `METISTRY_SEED_DIR` in every child's environment (the plists' env dicts and
+  the supervisor's child specs alike), and core's `overlayFiles` resolves every
+  default against the instance directory through `resolveInstanceLayout` — so
+  it finds the file whether the instance has run `metistry migrate-layout` or
+  not. The assistant, the console and the reconciler all read their overlays
+  through it, which also means the console's router and the engine can no
+  longer disagree about which `rules.yaml` is in force.
+  
+  The engine **refuses to start** when neither `METISTRY_INSTANCE_DIR` nor
+  `METISTRY_IDENTITY_FILES` is set, rather than answering under the seed's
+  name. `ops/sandbox/assistant.sb` grants read on the four config files by
+  name (never on the directory holding them, which on an unmigrated instance
+  is the vault root), so the reads the overlay now performs are permitted and
+  nothing else in the instance is.
+  
+  Also: `metistry update --version <x.y.z>` was ignored — `version` was listed
+  as a boolean flag, so the value never arrived and the latest release was
+  installed instead. And in git mode `update` wrote the **pre-pull** version
+  into `metistry.lock`; the version is now read from the checkout after the
+  pull, so a run that fast-forwards onto a new release pins that release.
+- 337bc0a: **Automatic prompt caching on the providers that support it** (OPEN-6, ruled
+  2026-09-17: ship the automatic form first, measure explicit breakpoints
+  later). A new optional `caching: auto | off` on a `compute.yaml` provider says
+  whether that provider implements Anthropic-style prompt caching; the engine
+  then sends its automatic caching field on every chat completion — for
+  OpenRouter, one top-level `cache_control: { type: "ephemeral" }`, the
+  automatic placement its caching doc describes ([or-cache], fetched
+  2026-09-11). The `openrouter` template ships `auto` and is the only one that
+  does: everything else defaults to `off` and gets no extra field, because a
+  server that has never heard of the parameter would have to ignore it. The
+  schema refuses `caching: auto` on an `on_machine` provider, naming the field,
+  rather than accepting a line that does nothing. Explicit breakpoints remain
+  the operator's `request:` block, which is merged after the automatic field and
+  therefore overrides it.
+  
+  The cached share of the prompt now lands on the row: `cached_tokens` and
+  `cache_write_tokens` (or Anthropic's `cache_creation_input_tokens`) are read
+  out of `usage` into `runs.cache_read_tokens` / `cache_write_tokens`, summed
+  over the turn's whole loop, with `tokens_in` still the whole prompt as the
+  provider billed it. On the `pricing` path the prompt is priced in three parts
+  — fresh at `in_per_m`, reads at `in_per_m × cache_read_multiplier`, writes at
+  `in_per_m × cache_write_multiplier` — with two new optional `pricing:` fields
+  defaulting to 0.1× / 1.25×, Anthropic's rates as OpenRouter passes them
+  through. A response reporting no cached tokens prices exactly as before.
+  `docs/ops/compute.md` gains "Prompt caching", including the measurement still
+  owed under OPEN-6 and the two assumptions it will check against a live
+  response.
+- Updated dependencies [c1f512e]
+- Updated dependencies [337bc0a]
+- Updated dependencies [dade46d]
+- Updated dependencies [f57b3b0]
+- Updated dependencies [76f82a2]
+  - @foldedspacelabs/metistry-core@0.9.0
+  - @foldedspacelabs/metistry-queries@0.9.0
+
 ## 0.8.1
 
 ### Patch Changes

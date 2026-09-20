@@ -17,7 +17,9 @@
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ErrorCode, ListResourcesRequestSchema, McpError, ReadResourceRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { may } from "@foldedspacelabs/metistry-core";
 import { areaFilter, knowledgeScope, readKnowledge, titleSql, type KnowledgeReader } from "./knowledge.js";
+import { principalOf } from "./principal.js";
 import type { AgentPrincipal, Db } from "./types.js";
 
 const SCHEME = "metistry";
@@ -52,7 +54,11 @@ export function registerKnowledgeResources(server: McpServer, principal: AgentPr
     // Only tier `areas` has "granted prefixes" at all — `none`/`index` see
     // no resources, the same visibility knowledge_read already enforces.
     const scope = knowledgeScope(principal);
-    if (scope.tier !== "areas") return { resources: [] };
+    // A collection that is empty FOR YOU is the honest answer on a listing —
+    // so only `.ok` is read here, never the refusal's code or message. The
+    // decision is still `may`'s, so the tier that may see a resource cannot
+    // drift from the tier that may read one.
+    if (!may(principalOf(principal), "list", { kind: "knowledge", door: "resources", path: "" }).ok) return { resources: [] };
     const cursor = request.params?.cursor ?? null;
     const { rows } = await db.query(
       `SELECT path, ${titleSql()} AS title, description

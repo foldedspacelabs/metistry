@@ -5,7 +5,7 @@
 
 import { readFile } from "node:fs/promises";
 import { parse as parseYaml } from "yaml";
-import { instancePath } from "@foldedspacelabs/metistry-core";
+import { instanceFile } from "@foldedspacelabs/metistry-core";
 
 export type LockSource = "git" | "release";
 
@@ -67,7 +67,7 @@ export function parseLock(text: string): LockFile {
 /** The lock lives in the instance repo's config half: `$METISTRY_INSTANCE_DIR/.metistry/metistry.lock`. undefined when no instance dir is configured. */
 export function instanceLockPath(env: NodeJS.ProcessEnv): string | undefined {
   const dir = env.METISTRY_INSTANCE_DIR;
-  return dir ? instancePath(dir, "lock") : undefined;
+  return dir ? instanceFile(dir, "lock") : undefined;
 }
 
 /** undefined when the file does not exist; throws on a malformed one. */

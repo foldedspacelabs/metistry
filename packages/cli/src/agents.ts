@@ -19,8 +19,10 @@ import {
   type ActionKind,
   type ActionMode,
   type AutonomyLevel,
+  type ScopeView,
 } from "@foldedspacelabs/metistry-core";
 import { consoleTarget, type ConsoleTargetOptions } from "./console-client.js";
+import { defaultUi, type Ui } from "./ui.js";
 
 /** The stored record, both halves: the §4.21 narrowing and the action table. Unknown keys are the console's to refuse. */
 export interface AutonomyRecord {
@@ -154,4 +156,83 @@ export function renderAutonomy(v: AutonomyView): string {
   if (v.widened.length > 0) lines.push(`widened    ${v.widened.join("; ")} — recorded in runs, and you have an alert`);
   lines.push(`modes      ${ACTION_MODES.join(" | ")} · a level is a ceiling (docs/ops/actions.md)`);
   return lines.join("\n");
+}
+
+
+// ---------------------------------------------------------------------------
+// `metistry agents list` — the registry, in the one vocabulary
+// ---------------------------------------------------------------------------
+//
+// P3 of docs/research/2026-09-19-grants-and-access-simplified.md §2.10: the
+// brief asked for grants "rendered identically in the CLI, the console, Needs
+// You, and the tool descriptions", and the CLI rendered them not at all —
+// `metistry agents` had one subcommand, `autonomy`, and a grant was only
+// settable (`metistry connect --areas`), never readable.
+//
+// It is deliberately NOT a second implementation of the vocabulary. The
+// console sends each row's `scope` already rendered (core's `describeScope`),
+// and this prints it. A second renderer here would be the fifth vocabulary
+// for one record, which is the thing the phase exists to end.
+
+export interface AgentListRow {
+  id: string;
+  display_name: string;
+  kind: string;
+  revoked: boolean;
+  pending: boolean;
+  last_seen_at: string | null;
+  /** The server's rendering. Absent only against a console older than this CLI. */
+  scope?: ScopeView | undefined;
+  /** What this agent has asked for and the owner has not answered — the count, not a second door onto granting. */
+  asked: { area: string; proposal_id: number }[];
+}
+
+/**
+ * Every registered agent, with what it holds. Read-only: nothing here writes,
+ * and the one door that widens a grant is still the console's (invariant 2).
+ */
+export async function agentsList(opts: AgentAutonomyOptions = {}): Promise<AgentListRow[]> {
+  const target = await consoleTarget(opts);
+  const fetchFn = opts.fetchFn ?? fetch;
+  let res: Response;
+  try {
+    res = await fetchFn(`${target.url}/api/agents`, {
+      headers: { authorization: `Bearer ${target.token}` },
+      signal: AbortSignal.timeout(opts.timeoutMs ?? 10_000),
+    });
+  } catch (err) {
+    throw new Error(`console unreachable at ${target.url}: ${redact(err, target.token)}`);
+  }
+  if (res.status === 401) throw new Error(`${target.url} refused the owner token (401) — see \`metistry console whoami\` (docs/ops/auth.md)`);
+  if (!res.ok) throw new Error(`${target.url}/api/agents returned HTTP ${res.status}`);
+  const body = (await res.json()) as { agents?: AgentListRow[]; access_requests?: { agent: string; area: string; proposal_id: number }[] };
+  const asked = new Map<string, { area: string; proposal_id: number }[]>();
+  for (const r of body.access_requests ?? []) asked.set(r.agent, [...(asked.get(r.agent) ?? []), { area: r.area, proposal_id: r.proposal_id }]);
+  return (body.agents ?? []).map((a) => ({ ...a, asked: asked.get(a.id) ?? [] }));
+}
+
+/**
+ * One row per agent: who it is, then the triple — role · access · extras —
+ * exactly as the console's panel and the Needs You card render it.
+ *
+ * A pending enrolment and a revoked row are STATUS words from the closed
+ * vocabulary (docs/ops/cli-style.md rule 5), so the colour is the icon's and
+ * the word is spelled out beside it.
+ */
+export function renderAgents(rows: readonly AgentListRow[], ui: Ui = defaultUi()): string {
+  if (rows.length === 0) return ui.note("no agents are registered — `metistry connect` registers one (docs/ops/auth.md)");
+  const out: string[] = [];
+  for (const a of rows) {
+    // The icon comes from the closed vocabulary; the word beside it is the
+    // verb's own (style guide 5: "a verb keeps its own word in the text and
+    // borrows the colour"), so `revoked` reads as `revoked` and is red.
+    const status = a.revoked ? "failed" : a.pending ? "degraded" : "ok";
+    const word = a.revoked ? "revoked" : a.pending ? "pending" : a.last_seen_at ? `seen ${a.last_seen_at.slice(0, 10)}` : "never seen";
+    out.push(`${ui.statusIcon(status)} ${ui.strong(a.display_name)} ${ui.dim(a.id)}  ${ui.paint(status as "ok" | "degraded" | "failed", word)}`);
+    out.push(ui.kv([["scope", a.scope?.line ?? "(this console is older than this CLI and sends no rendered scope)"]], { indent: 4 }));
+    if (a.scope) out.push(ui.kv([["from", a.scope.from]], { indent: 4 }));
+    for (const ask of a.asked) out.push(ui.kv([["asked", `${ask.area} — answer it in Needs You (request #${ask.proposal_id})`]], { indent: 4 }));
+  }
+  out.push(ui.note(`${rows.length} agent(s) · a grant is the owner's hand: the console's Agents panel, or answering the ask in Needs You (docs/ops/auth.md)`));
+  return out.join("\n");
 }

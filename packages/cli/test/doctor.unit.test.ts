@@ -6,9 +6,12 @@ import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { doctor, hostLocal, inboxRow, parseComposePs, parseLaunchctlPrint, probeTargetFor, renderTable, walkManifests, type Db, type DoctorRow } from "../src/doctor.js";
+import { cliRow, confinementRow, doctor, hostLocal, inboxRow, parseComposePs, parseLaunchctlPrint, probeTargetFor, renderTable, walkManifests, type Db, type DoctorRow } from "../src/doctor.js";
+import { SANDBOX_EXEC } from "../src/sandbox.js";
+import { cliShimPath, writeCliShim } from "../src/cli-shim.js";
+import { StepRunner } from "../src/steps.js";
 import { parseDotEnv } from "../src/env.js";
-import { main, parseArgs } from "../src/main.js";
+import { BOOLEAN_FLAGS, main, parseArgs } from "../src/main.js";
 import type { Exec } from "../src/exec.js";
 
 const PLIST = (label: string) => `<?xml version="1.0"?><plist version="1.0"><dict><key>Label</key><string>${label}</string></dict></plist>`;
@@ -113,11 +116,15 @@ describe("doctor: everything healthy", () => {
       "target:tgt=ok",
       "instance:instance layout=absent", // a bare temp dir is not an instance directory
       "instance:inbox=ok",
+      "cli:cli on PATH=absent", // nothing on this fake PATH, and `metistry up` never ran here
       "db:db=ok",
       "db:migrations=ok",
       "schedule:good=absent",
       "launchd:launchd:com.foldedspacelabs.metistry.a=ok",
       "launchd:launchd:com.foldedspacelabs.metistry.b=ok",
+      // macOS: one row for the power policy, and this install has not been
+      // asked the question — absent, never a failure (see keep-awake.test.ts)
+      "keep-awake:keep-awake=absent",
       "container:compose:assistant=ok",
       "container:compose:console=ok",
       "container:compose:db=ok",
@@ -153,19 +160,25 @@ describe("doctor: everything healthy", () => {
     const out: string[] = [];
     expect(await main(["doctor", "--product-dir", productDir], { out: (s) => out.push(s), doctorDeps: deps })).toBe(0);
     const text = out.join("\n");
-    expect(text).toMatch(/^name\s+kind\s+status\s+ms\s+remediation/);
-    expect(text).toMatch(/17 checks: 9 ok, 0 degraded, 0 failed, 8 absent — healthy \(.*, shape compose\)/);
-    expect(text).toMatch(/^local:llamaserver\s+local-model\s+absent/m);
-    expect(text).toMatch(/^local:applefm\s+local-model\s+absent/m);
+    // the plain table is grouped by kind, one status icon + word per row,
+    // the remediation wrapped underneath it (docs/ops/cli-style.md). The
+    // icon spelling depends on the terminal's locale, so nothing here
+    // asserts on the glyph itself.
+    expect(text.split("\n")[0]).toContain(`${productDir} — shape compose`);
+    expect(text).toMatch(/18 checks: 9 ok, 0 degraded, 0 failed, 9 absent — .*healthy/);
+    expect(text).toMatch(/^local-model$/m); // the kind is the heading, not a repeated column
+    expect(text).toMatch(/^\s+\S+\s+local:llamaserver\s+absent\s+\d+ms$/m);
+    expect(text).toMatch(/^\s+\S+\s+local:applefm\s+absent\s+\d+ms$/m);
     expect(text).not.toMatch(/launchd:/); // linux: no launchd rows
-    expect(text).toMatch(/^compose\s+compose\s+absent\s+\d+\s+docker not found/m);
+    expect(text).toMatch(/^\s+\S+\s+compose\s+absent\s+\d+ms$/m);
+    expect(text).toContain("docker not found");
 
     const json: string[] = [];
     expect(await main(["doctor", "--product-dir", productDir, "--json"], { out: (s) => json.push(s), doctorDeps: deps })).toBe(0);
     expect(json).toHaveLength(1); // --json purity: nothing but the one document reaches stdout
     const parsed = JSON.parse(json.join("\n"));
     expect(parsed.ok).toBe(true);
-    expect(parsed.rows).toHaveLength(17);
+    expect(parsed.rows).toHaveLength(18);
     expect(parsed.shape).toBe("compose");
     expect(parsed.rows.every((r: DoctorRow) => typeof r.latency_ms === "number" && typeof r.probe === "string")).toBe(true);
   });
@@ -364,7 +377,7 @@ describe("doctor: failed", () => {
 
     const out: string[] = [];
     expect(await main(["doctor", "--product-dir", productDir], { out: (s) => out.push(s), doctorDeps: { env, fetchFn: fakeFetch({ "7901/check": res(200, checkBody("ok")), "/health": res(200), "/api/status": res(401) }), db: fakeDb(new Error("down")), exec: fakeExec({ docker: { code: 127 } }), platform: "linux" } })).toBe(1);
-    expect(out.join("\n")).toMatch(/1 failed, .* — FAILED/);
+    expect(out.join("\n")).toMatch(/1 failed, \d+ absent — .*FAILED/);
   });
 
   it("a rejected bearer, a non-contract body, and a bridge reporting failed are all failed with distinct remediations", async () => {
@@ -479,6 +492,63 @@ describe("doctor: the pre-#156 inbox layout (docs/ops/inbox.md)", () => {
   });
 });
 
+describe("doctor: the cli shim (cli-shim.ts)", () => {
+  it("absent, and points at the exact line to link it, once `metistry up` has written the shim", async () => {
+    const productDir = await mkdtemp(join(tmpdir(), "metistry-doctor-cli-"));
+    const r = new StepRunner({ dryRun: false, out: () => {} });
+    await writeCliShim(r, productDir, undefined);
+    const shim = cliShimPath(productDir, undefined);
+
+    const row = await cliRow(productDir, { PATH: "/nonexistent" });
+    expect(row).toMatchObject({ name: "cli on PATH", kind: "cli", status: "absent" });
+    expect(row.remediation).toBe(`ln -s ${shim} ~/.local/bin/metistry  (or add its directory to PATH)`);
+    expect(row.meta).toMatchObject({ shim });
+  });
+
+  it("absent, and says `metistry up` writes one, before it ever has", async () => {
+    const productDir = await mkdtemp(join(tmpdir(), "metistry-doctor-cli-"));
+    const row = await cliRow(productDir, { PATH: "/nonexistent" });
+    expect(row.status).toBe("absent");
+    expect(row.remediation).toMatch(/metistry up. writes one/);
+  });
+
+  it("ok, and says where, once something answering to `metistry` is actually on PATH", async () => {
+    const productDir = await mkdtemp(join(tmpdir(), "metistry-doctor-cli-"));
+    const bin = await mkdtemp(join(tmpdir(), "metistry-doctor-cli-bin-"));
+    await writeFile(join(bin, "metistry"), "#!/bin/sh\n");
+    const row = await cliRow(productDir, { PATH: bin });
+    expect(row).toMatchObject({ name: "cli on PATH", kind: "cli", status: "ok" });
+    expect(row.meta).toMatchObject({ path: join(bin, "metistry") });
+  });
+
+  it("ok via ~/.local/bin even when it is not on PATH", async () => {
+    const productDir = await mkdtemp(join(tmpdir(), "metistry-doctor-cli-"));
+    const home = await mkdtemp(join(tmpdir(), "metistry-doctor-cli-home-"));
+    await mkdir(join(home, ".local", "bin"), { recursive: true });
+    await writeFile(join(home, ".local", "bin", "metistry"), "#!/bin/sh\n");
+    const row = await cliRow(productDir, { PATH: "/nonexistent", HOME: home });
+    expect(row.status).toBe("ok");
+    expect(row.meta).toMatchObject({ path: join(home, ".local", "bin", "metistry") });
+  });
+
+  it("doctor() reports it at the instance dir, matching where `metistry up` would have written the shim", async () => {
+    const productDir = await checkout();
+    const instanceDir = await mkdtemp(join(tmpdir(), "metistry-doctor-cli-instance-"));
+    const report = await doctor({
+      productDir,
+      env: { ...env, METISTRY_INSTANCE_DIR: instanceDir },
+      fetchFn: fakeFetch({ "7901/check": res(200, checkBody("ok")), "/health": res(200), "/api/status": res(401) }),
+      db: null,
+      exec: fakeExec({ docker: { code: 127 } }),
+      platform: "linux",
+    });
+    const row = byName(report.rows)["cli on PATH"];
+    expect(row).toMatchObject({ kind: "cli", status: "absent" });
+    expect(row.meta).toMatchObject({ shim: cliShimPath(productDir, instanceDir) });
+    expect(report.ok).toBe(true); // absent never fails the exit code
+  });
+});
+
 describe("parsers and conventions", () => {
   it("compose ps: array (older compose) and NDJSON (newer) both parse", () => {
     expect(parseComposePs('[{"Service":"db","State":"running"}]')).toEqual([{ Service: "db", State: "running" }]);
@@ -516,5 +586,68 @@ describe("parsers and conventions", () => {
     expect(parseArgs(["doctor", "--json", "--product-dir", "/p"])).toEqual({ command: "doctor", positional: [], flags: { json: true, "product-dir": "/p" } });
     expect(parseArgs(["init", "--", "--weird-dir"])).toEqual({ command: "init", positional: ["--weird-dir"], flags: {} });
     expect(parseArgs([])).toEqual({ command: undefined, positional: [], flags: {} });
+  });
+
+  // `--version` was listed as a boolean, so `str(flags, "version")` was
+  // always undefined and `metistry update --version 0.2.0` quietly installed
+  // the latest release instead (#198, "not fixed here" #2). It takes its
+  // value now, and the BARE flag — nothing after it, or another flag next —
+  // still reads as `true`, which is what `metistry --version` needs.
+  it("args: --version takes its value for `update`, and stays boolean when bare", () => {
+    expect(parseArgs(["update", "--version", "0.2.0"])).toEqual({ command: "update", positional: [], flags: { version: "0.2.0" } });
+    expect(parseArgs(["update", "--version=0.2.0"])).toEqual({ command: "update", positional: [], flags: { version: "0.2.0" } });
+    expect(parseArgs(["--version"])).toEqual({ command: undefined, positional: [], flags: { version: true } });
+    expect(parseArgs(["--version", "--json"])).toEqual({ command: undefined, positional: [], flags: { version: true, json: true } });
+    expect(BOOLEAN_FLAGS.has("version")).toBe(false);
+  });
+});
+
+describe("the sandbox row — which children run confined, and where their egress goes", () => {
+  const child = (name: string, argv: string[]) => ({ name, argv, env: {}, log: `/tmp/metistry-${name}.log`, stopTimeoutMs: 10_000 });
+  const base = { schema: 1 as const, label: "com.foldedspacelabs.metistry", socket: "/s.sock", token: "t".repeat(32), env: {} };
+  const confined = (name: string, profile: string) => child(name, [SANDBOX_EXEC, "-f", `/p/ops/sandbox/${profile}`, "-D", "X=1", "/n/bin/node", `/p/apps/${name}/dist/main.js`]);
+
+  it("reports both confined children, their profiles and the door — from the argv that actually runs", async () => {
+    const row = await confinementRow({
+      ...base,
+      egress: { port: 7814, allow: ["openrouter.ai", "github.com"], tokens: { assistant: "a", reconciler: "r" } },
+      children: [child("db", ["/pg/bin/postgres", "-D", "/d"]), child("console", ["/n/bin/node", "/p/console.js"]), confined("reconciler", "reconciler.sb"), confined("assistant", "assistant.sb")],
+    });
+    expect(row.kind).toBe("sandbox");
+    expect(row.status).toBe("ok");
+    expect(row.meta).toMatchObject({
+      confined: ["reconciler", "assistant"],
+      unconfined: ["db", "console"],
+      egress: { port: 7814, allow: ["openrouter.ai", "github.com"] },
+    });
+    expect((row.meta as { profiles: Record<string, string> }).profiles.reconciler).toBe("/p/ops/sandbox/reconciler.sb");
+  });
+
+  it("an unconfined.sb profile is NOT confinement — the off switch is visible, not silent", async () => {
+    const row = await confinementRow({
+      ...base,
+      egress: { port: 7814, allow: ["openrouter.ai"], tokens: {} },
+      children: [confined("assistant", "assistant.sb"), confined("reconciler", "unconfined.sb")],
+    });
+    expect(row.status).toBe("degraded");
+    expect(row.remediation).toMatch(/sole committer/);
+    expect(row.meta).toMatchObject({ confined: ["assistant"], unconfined: ["reconciler"] });
+  });
+
+  it("an empty allowlist is reported: correct for a local-only install, a bug for any other", async () => {
+    const row = await confinementRow({
+      ...base,
+      egress: { port: 7814, allow: [], tokens: {} },
+      children: [confined("assistant", "assistant.sb"), confined("reconciler", "reconciler.sb")],
+    });
+    expect(row.status).toBe("degraded");
+    expect(row.remediation).toMatch(/allowlist is empty/);
+  });
+
+  it("no profile anywhere is degraded, and says which shape that is legitimate in", async () => {
+    const row = await confinementRow({ ...base, children: [child("console", ["/n/bin/node", "/p/console.js"])] });
+    expect(row.status).toBe("degraded");
+    expect(row.remediation).toMatch(/no child runs under a profile/);
+    expect(row.remediation).toMatch(/compose shape the container is the boundary/);
   });
 });

@@ -3,6 +3,7 @@
 // human's edit must refresh it (and re-open it for the drain), and a
 // deleted file must archive it — the owner's 2026-09-16 ruling that edits
 // made in `` are first-class and never lost. Skipped without a db.
+import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -23,6 +24,14 @@ try {
 const hasDb = !!process.env.METISTRY_DB_PASSWORD;
 const INBOX = "Inbox";
 
+// This suite never asserts on knowledge_files/knowledge_links — it only
+// wants the reconcile side effect of indexing the fixture vault gone
+// afterwards. A random marker keeps that cleanup scoped to this file's own
+// rows, so it can never delete a sibling reconciler test file's rows in the
+// shared scratch db (docs/ops/testing.md, "count your own rows").
+const MARKER = `itest-${randomUUID().slice(0, 8)}`;
+const PREFIX = `Areas/${MARKER}/`;
+
 describe.skipIf(!hasDb)("the vault inbox is indexed from the tree (real db)", () => {
   let pool: pg.Pool;
   let repo: TempRepo;
@@ -32,8 +41,8 @@ describe.skipIf(!hasDb)("the vault inbox is indexed from the tree (real db)", ()
     (await pool.query(`SELECT path, source, mime, note, sha256, status FROM inbox WHERE path LIKE $1 ORDER BY path`, [`${INBOX}/%`])).rows;
   const clean = async () => {
     await pool.query(`DELETE FROM inbox WHERE path LIKE $1`, [`${INBOX}/%`]);
-    await pool.query(`DELETE FROM knowledge_links`);
-    await pool.query(`DELETE FROM knowledge_files`);
+    await pool.query(`DELETE FROM knowledge_links WHERE from_path LIKE $1 OR to_path LIKE $1`, [`${PREFIX}%`]);
+    await pool.query(`DELETE FROM knowledge_files WHERE path LIKE $1`, [`${PREFIX}%`]);
     await pool.query(`DELETE FROM runs WHERE component = 'reconciler'`);
   };
 
@@ -46,7 +55,7 @@ describe.skipIf(!hasDb)("the vault inbox is indexed from the tree (real db)", ()
       password: process.env.METISTRY_DB_PASSWORD,
     });
     await clean();
-    repo = await tempRepo();
+    repo = await tempRepo(MARKER);
     const committer = new Committer(repo.git, { authorPrefix: "Metistry", authorEmail: "metistry@test" });
     const vault = new Vault(repo.root, repo.git, committer, { maxBytes: 65536 });
     indexer = new Indexer(pool, vault, committer, { commitExternalEdits: false });
@@ -140,5 +149,72 @@ describe.skipIf(!hasDb)("the vault inbox is indexed from the tree (real db)", ()
     await expect(
       pool.query(`INSERT INTO inbox (source, path, sha256) VALUES ('http', $1, $2)`, [`${INBOX}/1757980000000-idea.md`, "2".repeat(64)]),
     ).rejects.toMatchObject({ code: "23505" });
+  });
+});
+
+// ---- the same scan on an instance that has not been migrated yet -------------
+//
+// A legacy instance keeps its captures at `Knowledge/Inbox/` and its triage
+// rows under that prefix (migration 0015's partial index still covers them).
+// The flat-only prefix made the cycle look for `Inbox/%`: it found none of
+// the existing rows and made no new ones, so the capture → triage pipeline
+// stopped on exactly the installs that had not migrated.
+
+const LEGACY_INBOX = "Knowledge/Inbox";
+const LEGACY_MARKER = `itest-${randomUUID().slice(0, 8)}`;
+const LEGACY_PREFIX = `Areas/${LEGACY_MARKER}/`;
+
+describe.skipIf(!hasDb)("the vault inbox on a legacy instance (real db)", () => {
+  let pool: pg.Pool;
+  let repo: TempRepo;
+  let indexer: Indexer;
+
+  const clean = async () => {
+    await pool.query(`DELETE FROM inbox WHERE path LIKE $1`, [`${LEGACY_INBOX}/%`]);
+    await pool.query(`DELETE FROM knowledge_links WHERE from_path LIKE $1 OR to_path LIKE $1`, [`${LEGACY_PREFIX}%`]);
+    await pool.query(`DELETE FROM knowledge_files WHERE path LIKE $1`, [`${LEGACY_PREFIX}%`]);
+    await pool.query(`DELETE FROM runs WHERE component = 'reconciler'`);
+  };
+
+  beforeAll(async () => {
+    pool = new pg.Pool({
+      host: process.env.METISTRY_DB_HOST ?? "127.0.0.1",
+      port: Number(process.env.METISTRY_DB_PORT ?? 5432),
+      user: process.env.METISTRY_DB_USER ?? "metistry",
+      database: process.env.METISTRY_TEST_DB_NAME ?? "metistry_test",
+      password: process.env.METISTRY_DB_PASSWORD,
+    });
+    await clean();
+    repo = await tempRepo(LEGACY_MARKER);
+    const committer = new Committer(repo.git, { authorPrefix: "Metistry", authorEmail: "metistry@test" });
+    const vault = new Vault(repo.root, repo.git, committer, { maxBytes: 65536 });
+    // what `resolveInstanceLayout` hands the reconciler on a legacy instance
+    indexer = new Indexer(pool, vault, committer, { commitExternalEdits: false, inboxPrefix: LEGACY_INBOX });
+    await mkdir(join(repo.root, LEGACY_INBOX), { recursive: true });
+  });
+  afterAll(async () => {
+    await repo.cleanup();
+    await clean();
+    await pool.end();
+  });
+
+  it("makes triage rows under the legacy prefix, and archives them there", async () => {
+    const path = `${LEGACY_INBOX}/1757990000000-idea.md`;
+    await writeFile(join(repo.root, path), "# A legacy idea\n\nstill a capture\n");
+    expect((await indexer.reconcile("test")).inbox).toEqual({ added: 1, changed: 0, archived: 0 });
+    expect((await pool.query(`SELECT path, source, note, status FROM inbox WHERE path LIKE $1`, [`${LEGACY_INBOX}/%`])).rows).toEqual([
+      { path, source: "vault", note: "A legacy idea", status: "new" },
+    ]);
+
+    await rm(join(repo.root, path));
+    expect((await indexer.reconcile("test")).inbox).toEqual({ added: 0, changed: 0, archived: 1 });
+    expect((await pool.query(`SELECT status FROM inbox WHERE path = $1`, [path])).rows[0].status).toBe("archived");
+  });
+
+  it("does not touch a flat-layout row that happens to be in the same table", async () => {
+    await pool.query(`INSERT INTO inbox (source, path, mime, sha256) VALUES ('http', $1, 'text/markdown', $2)`, ["Inbox/1757990000001-other.md", "2".repeat(64)]);
+    expect((await indexer.reconcile("test")).inbox).toEqual({ added: 0, changed: 0, archived: 0 });
+    expect((await pool.query(`SELECT status FROM inbox WHERE path = $1`, ["Inbox/1757990000001-other.md"])).rows[0].status).toBe("new");
+    await pool.query(`DELETE FROM inbox WHERE path = $1`, ["Inbox/1757990000001-other.md"]);
   });
 });

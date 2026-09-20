@@ -18,7 +18,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 
-import { runCheck, startRun, finishRun, errorEnvelope, intEnv, parseAction, PROJECT_SLUG_RE, rollSession, statusFor, SKIP_FEEDBACK, type CheckResult, type Compute, type ErrorEnvelope } from "@foldedspacelabs/metistry-core";
+import { AREA_PREFIX_REFUSAL, runCheck, startRun, finishRun, errorEnvelope, intEnv, may, parseAction, PROJECT_SLUG_RE, rollSession, statusFor, SKIP_FEEDBACK, validAgentAreaGrant, type CheckResult, type Compute, type ErrorEnvelope, type Principal } from "@foldedspacelabs/metistry-core";
 import { QueryError, QueryStore } from "@foldedspacelabs/metistry-queries";
 import { captureToInbox, createBrainServer, dirSink, type CaptureSink, type KnowledgeLister, type KnowledgeReader, type KnowledgeVaultSearcher, type KnowledgeWriter, type QueryEmbedder } from "@foldedspacelabs/metistry-mcp-brain";
 import { TasksError, TasksService } from "@foldedspacelabs/metistry-tasks";
@@ -29,7 +29,7 @@ import type { Db } from "./auth-store.js";
 import * as store from "./auth-store.js";
 import * as agents from "./agents.js";
 import type { SessionPolicy } from "./session-policy.js";
-import { parseCookies, readBody, readJson, sendError, sendJson, sessionCookie } from "./http-util.js";
+import { parseCookies, readBody, readJson, sendError, sendJson, sendRefusal, sessionCookie } from "./http-util.js";
 import * as wa from "./webauthn.js";
 import { checkLocalOwner, type LocalOwnerConfig } from "./local-owner.js";
 import { serveStatic } from "./static.js";
@@ -44,6 +44,9 @@ import { listProjects, updateProject, validateProjectPatch } from "./projects.js
 import { applyImprovement } from "./prompt-overlay.js";
 import { crewDispatcher, type CrewRegistry } from "./crews.js";
 import { runAction, type ActionServices } from "./actions.js";
+import { computeRoutes, isComputeRoute, type ComputeAdmin } from "./compute-routes.js";
+import { isKnowledgeRoute, knowledgeRoutes, type KnowledgeSearcher } from "./knowledge-routes.js";
+import { agentList, commandList } from "./commands.js";
 import { createRequire } from "node:module";
 
 const require_ = createRequire(import.meta.url);
@@ -76,6 +79,10 @@ export interface ConsoleConfig {
   listKnowledge?: KnowledgeLister;
   /** Keyword-mode content search for mcp-brain's knowledge_grep candidate pre-filter (the reconciler's GET /vault/search?mode=keyword); absent = knowledge_grep falls back to listKnowledge for candidates. */
   searchVaultKeyword?: KnowledgeVaultSearcher;
+  /** Full-result vault search in a caller-chosen mode, for `GET /api/knowledge/search` (knowledge-routes.ts); absent = that route answers not_available. */
+  searchKnowledge?: KnowledgeSearcher | undefined;
+  /** What `/api/compute*` may edit: the instance repo whose `.metistry/compute.yaml` the verbs open. Absent = compute is not reachable from this console and every one of those routes answers not_available (compute-routes.ts). */
+  computeAdmin?: ComputeAdmin | undefined;
   /** The vault client the artifacts module (§4.21) stores content through; absent = artifacts degrade to not_available. */
   vault?: VaultClient;
   /** Loaded crew manifests (crews.ts); absent = agents_delegate answers not_available. */
@@ -141,6 +148,64 @@ function isUser(auth: Auth): boolean {
   return auth?.kind === "session" || auth?.kind === "local_owner";
 }
 
+/**
+ * **The console's credential → `core`'s decision principal** (P1 of
+ * docs/research/2026-09-19-grants-and-access-simplified.md §4). One mapping
+ * function, called at the doors; `mcp-brain` has the other one, for an agent
+ * bearer. Nothing about STORAGE moves: sessions, the local owner token,
+ * `owner_tokens` and `agents` rows are all still exactly where they were.
+ *
+ * Three roles come out of this server, and the collapse is the same one
+ * `isUser` already makes and is right to make: everything a passkey session
+ * may do, the local owner token may do, so both are `owner`. The capture
+ * `owner_token` is NOT one of them — it is the plan's tier 0, capture-only,
+ * and the management gate excludes it by name — so it is the `tool` role, a
+ * credential with no scope at all. An agent bearer is `assistant` or `agent`
+ * by its row's kind, and a crew is its own role since P2 (the registry's
+ * third stored kind is no longer collapsed — see `authenticateAgent`).
+ *
+ * A crew bearer is the fifth role and reaches nothing here: it is an agent
+ * bearer, so it takes the uniform 403 above like any other. Its `uses`
+ * toolset rides along anyway, because the principal is one shape and the
+ * door that enforces it is `/mcp` (P2 §2.2).
+ *
+ * An UNAUTHENTICATED request has no principal, so there is nothing to map:
+ * the four `/auth/*` ceremonies, `GET /api/identity`, `/health` and the PWA
+ * shell are all decided before this point, and the doors below are reached
+ * only with a credential in hand. `null` gets the `tool` role — the narrowest
+ * one — so that a future caller of this function with no credential fails
+ * closed rather than being handed a scope.
+ */
+function principalOf(auth: Auth): Principal {
+  if (auth?.kind === "agent") {
+    const a = auth.agent;
+    const internal = a.kind === "internal";
+    const crew = a.kind === "crew";
+    return {
+      id: a.id,
+      role: internal ? "assistant" : crew ? "crew" : "agent",
+      scope: {
+        tier: a.grants.tier,
+        areas: [...a.grants.areas],
+        queries: a.grants.queries === true,
+        projects: internal && a.projects.length === 0 ? null : [...a.projects],
+        autonomy: a.autonomy,
+      },
+      source: internal ? "environment" : crew && a.manifest !== undefined ? { manifest: a.manifest } : "registry",
+      ...(crew ? { uses: [...(a.uses ?? [])] } : {}),
+    };
+  }
+  const owner = isUser(auth);
+  return {
+    // The person, however they proved it: their own vault is every path, and
+    // `areas: null` is what says so (never an empty list, which is no grant).
+    id: owner ? "owner" : "owner_token",
+    role: owner ? "owner" : "tool",
+    scope: { tier: owner ? "areas" : "none", areas: owner ? null : [], queries: owner, projects: owner ? null : [] },
+    source: "registry",
+  };
+}
+
 // One shape for every per-agent verb so the management gate and the handler
 // cannot drift apart. Ids are slugs; anything else falls through to 404.
 const AGENT_ROUTE = /^(PUT|POST) \/api\/agents\/([a-z][a-z0-9-]{0,39})\/(grants|projects|autonomy|revoke|rotate|approve)$/;
@@ -151,6 +216,12 @@ const DISPATCH_ROUTE = /^POST \/api\/tasks\/(\d{1,12})\/dispatch$/;
 // A thumbs up/down on one reply (docs/ops/reply-feedback.md). Session only —
 // this is the user's own judgement, not something a script speaks for.
 const FEEDBACK_ROUTE = /^(POST|DELETE) \/api\/messages\/(\d{1,12})\/feedback$/;
+// One row of the ledger, in full — what a tap on an activity-feed `runs:<id>`
+// opens (docs/product/app-ux-plan.md §6 phase B). Read-only, `user` principal,
+// through the `run_detail` named query like every other read (invariant 3).
+const RUN_DETAIL_ROUTE = /^GET \/api\/runs\/(\d{1,12})$/;
+/** The named query `GET /api/runs/:id` is served from. Its ABSENCE is a refusal with a status, exactly as the export's is. */
+const RUN_DETAIL_QUERY = "run_detail";
 
 // ----- the two verbs that are not answers (docs/ops/reply-feedback.md) -----
 //
@@ -235,6 +306,48 @@ export function suggestedWorkOf(row: { kind?: unknown; payload?: unknown }): { t
   return { title, ...(project ? { project } : {}), ...(kind ? { kind } : {}) };
 }
 
+/**
+ * `GET /api/q/<name>` — the generic door onto invariant 3's read path. Any
+ * query whose manifest says `expose: generic` (the default), by name, with
+ * its declared params and nothing else.
+ *
+ * **And it is the only door a query gets, unless the manifest says
+ * otherwise — for anyone but the owner.** A query marked `expose: route` is
+ * served by an endpoint of its own that does something this one cannot
+ * (`knowledge_pages` filters every row through the caller's scope), so
+ * answering it to an AGENT here would be that filter undone rather than a
+ * convenience (ruled 2026-09-19: one endpoint per necessary operation). The
+ * refusal is the UNKNOWN-QUERY refusal, byte for byte: same code, same
+ * status, same absent message, so this door never tells such a caller which
+ * route-only queries exist. Which names those are is read off the manifests
+ * through the store (`exposure`) and never matched against a list kept here,
+ * which could drift from the files.
+ *
+ * **The owner is served** (P4, and the owner's ruling "the owner should
+ * always have access to everything"). The scope filter that rule protects
+ * is a filter on what an agent may see of the VAULT; the owner's scope is
+ * the whole vault, so the filtered route and this one return the same rows
+ * to them and the refusal was only ever a second door to remember (§2.6).
+ * The capture `owner_token` is NOT the owner — it is the plan's tier 0 — and
+ * is still refused, byte for byte.
+ */
+export async function namedQueryDoor(res: ServerResponse, queries: QueryStore, name: string, params: Record<string, string>, auth: Auth = null): Promise<void> {
+  // `expose`, read off the manifest through the store, decided by `may` — the
+  // same rule, in the same words, `queries_run` applies on /mcp. The caller
+  // decides it now: `may` admits the owner for every query this door serves,
+  // and refuses everyone else a route-only one with the unknown-query answer.
+  const exposed = may(principalOf(auth), "read", { kind: "query", door: "console_query", name, exposure: queries.exposure(name) === "generic" ? "generic" : "route" });
+  if (!exposed.ok) return sendRefusal(res, exposed);
+  try {
+    return sendJson(res, 200, await queries.run(name, params));
+  } catch (err) {
+    if (err instanceof QueryError) {
+      return sendError(res, err.code === "unknown_query" ? "not_found" : "invalid_request");
+    }
+    throw err;
+  }
+}
+
 export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Server {
   const rp = wa.rpFromOrigin(cfg.origins ?? cfg.origin);
   // ONE capture sink for every door: POST /capture, the `/note` fast path,
@@ -247,9 +360,18 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
   /** The services one action may reach. Read per call: `cfg.targets` and the vault bridge are hot-reloaded, and an action must follow the file rather than the process's startup. */
   const actionServices = (): ActionServices => ({ db, tasks, inbox, ...(cfg.targets ? { targets: cfg.targets } : {}), ...(artifacts ? { artifacts } : {}) });
 
+  /**
+   * **One agent-principal source for both doors** (the `/mcp` mount and this
+   * server's own `authenticate`): the registry row, plus — for a crew — the
+   * `uses` toolset and manifest path from the crews this console loaded.
+   * Never from the request: a body cannot make a bearer a crew, and a crew
+   * cannot name a tool group it was not given (§4.19).
+   */
+  const agentPrincipal = (req: IncomingMessage) => agents.authenticateAgent(db, req, (id) => cfg.crews?.toolset(id));
+
   const brain = createBrainServer({
     db,
-    authenticate: (req) => agents.authenticateAgent(db, req), // the same principal source as /capture
+    authenticate: (req) => agentPrincipal(req), // the same principal source as /capture
     tasks,
     inboxDir: cfg.inboxDir,
     inbox,
@@ -286,7 +408,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     }
     const m = /^Bearer\s+(\S+)$/.exec(req.headers.authorization ?? "");
     if (m?.[1] && (await store.checkOwnerToken(db, m[1]))) return { kind: "owner_token" };
-    const agent = await agents.authenticateAgent(db, req); // principal from the credential, never the body
+    const agent = await agentPrincipal(req); // principal from the credential, never the body
     if (agent) return { kind: "agent", agent };
     return null;
   }
@@ -463,7 +585,8 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     }
 
     // ----- agent tokens stop here: uniform 403 on everything else, never 404 -----
-    if (auth.kind === "agent") return sendError(res, "forbidden");
+    const onConsole = may(principalOf(auth), "act", { kind: "console", door: "console_agent", route: key });
+    if (!onConsole.ok) return sendRefusal(res, onConsole);
 
     // Who the console thinks you are. The Mac app calls this to render
     // "signed in as owner" without a passkey ceremony; it is also what
@@ -571,16 +694,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     }
 
     if (req.method === "GET" && url.pathname.startsWith("/api/q/")) {
-      const name = url.pathname.slice("/api/q/".length);
-      try {
-        const result = await queries.run(name, Object.fromEntries(url.searchParams));
-        return sendJson(res, 200, result);
-      } catch (err) {
-        if (err instanceof QueryError) {
-          return sendError(res, err.code === "unknown_query" ? "not_found" : "invalid_request");
-        }
-        throw err;
-      }
+      return namedQueryDoor(res, queries, url.pathname.slice("/api/q/".length), Object.fromEntries(url.searchParams), auth);
     }
 
     if (key === "GET /api/messages") {
@@ -647,7 +761,8 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
 
     // ----- compute targets (§4.18): the `user` principal ONLY — dispatch is outbound -----
     if (key === "GET /api/targets" || DISPATCH_ROUTE.test(key)) {
-      if (!isUser(auth)) return sendError(res, "forbidden");
+      const d = may(principalOf(auth), "act", { kind: "console", door: "console_management", route: key });
+      if (!d.ok) return sendRefusal(res, d);
       if (key === "GET /api/targets") {
         return sendJson(res, 200, { targets: cfg.targets ? await cfg.targets.describe() : [], as_of: new Date().toISOString() });
       }
@@ -675,7 +790,15 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     }
 
     // ----- management: the `user` principal ONLY (capture owner tokens excluded) -----
-    if (!isUser(auth)) {
+    //
+    // Two questions, and only the first is a permission: `may` decides
+    // WHETHER this credential may reach the management surface, and the
+    // enumeration below decides WHICH routes that surface is — so a
+    // credential outside it gets the canonical 403 on the whole family
+    // rather than a 403 on some paths and a 404 on others, a difference that
+    // would say which spellings this build knows.
+    const management = may(principalOf(auth), "act", { kind: "console", door: "console_management", route: key });
+    if (!management.ok) {
       if (
         key === "GET /api/devices" ||
         /^POST \/api\/devices\/\d+\/revoke$/.test(key) ||
@@ -690,11 +813,20 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         key === "GET /api/projects" ||
         PROJECT_ROUTE.test(key) ||
         key === "GET /api/runs/export" ||
+        RUN_DETAIL_ROUTE.test(key) ||
         key === "GET /api/instances" ||
+        key === "GET /api/commands" ||
+        // `/api/compute*` is owner-only CONFIGURATION, not an invariant-10
+        // action: it changes how the system behaves, so it is the user's
+        // hand and nothing else's (invariant 2). `/api/knowledge/*` is the
+        // owner's read path into their own vault; an agent reaches knowledge
+        // under its grants on the `/mcp` mount, never here.
+        isComputeRoute(url.pathname) ||
+        isKnowledgeRoute(url.pathname) ||
         isTaskOpRoute(key) ||
         isArtifactRoute(url.pathname)
       ) {
-        return sendError(res, "forbidden");
+        return sendRefusal(res, management);
       }
       return sendError(res, "not_found");
     }
@@ -745,6 +877,65 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         res.destroy();
         return;
       }
+    }
+
+    // ----- one run, in full: the activity feed's drill-down (owner only) -----
+    const runDetail = RUN_DETAIL_ROUTE.exec(key);
+    if (runDetail) {
+      if (!queries.names().includes(RUN_DETAIL_QUERY)) {
+        return sendError(res, "not_available", `the named query ${RUN_DETAIL_QUERY} is not loaded (seed/queries/${RUN_DETAIL_QUERY}.yaml, METISTRY_QUERIES_DIRS)`);
+      }
+      const result = await queries.run(RUN_DETAIL_QUERY, { id: runDetail[1]! });
+      const row = result.rows[0];
+      if (!row) return sendError(res, "not_found", `no run ${runDetail[1]} in the ledger`);
+      return sendJson(res, 200, { run: row, as_of: result.as_of.toISOString() });
+    }
+
+    // ----- the composer's command list, GENERATED (docs/ops/console-api.md) -----
+    // rules.yaml's routes plus the agent registry — never a hand-maintained
+    // array, which is what docs/product/ux-direction.md rules out. `tiers` is
+    // the LIVE map: compute.yaml's assignments when it has any, else
+    // rules.yaml's own block (main.ts keeps `rules.tiers` on the file in
+    // force), so a reassignment shows in the menu without a restart.
+    if (key === "GET /api/commands") {
+      if (!cfg.rules) return sendError(res, "not_available", "no rules.yaml is loaded in this deployment — METISTRY_RULES_FILES names the files to read (default seed/rules.yaml plus the instance's own)");
+      const described = new Map(queries.list().map((q) => [q.name, q.description]));
+      return sendJson(res, 200, {
+        commands: commandList(cfg.rules, (name) => described.get(name)),
+        agents: agentList(await agents.listAgents(db)),
+        as_of: new Date().toISOString(),
+      });
+    }
+
+    // ----- compute (C1): owner-only configuration, never an action -----
+    if (isComputeRoute(url.pathname)) {
+      return computeRoutes(req, res, key, url, { admin: cfg.computeAdmin, queries, audit });
+    }
+
+    // ----- knowledge: the owner's read path into their own vault -----
+    // The PRINCIPAL goes in, derived from the credential (`principalOf`),
+    // never a constant at the call site: the routes' filter is only as
+    // honest as the scope handed to it, and a literal here is a filter that
+    // cannot be narrowed without editing this line. It is the principal
+    // rather than a scope since P4 — `may()` decides the refusal, and what
+    // it decides for the OWNER is not a narrower scope but a CLASSIFICATION:
+    // their own `.metistry/` and `Artifacts/` are not pages this door has,
+    // and it says so and names the door that does, rather than refusing
+    // (docs/research/2026-09-19-grants-and-access-simplified.md §3.3). The
+    // page LIST gets the SAME QueryStore every other read goes through —
+    // invariant 3 has one read path into derived state, not one per surface,
+    // and no second, unscoped door onto it (`knowledge_pages.yaml` is
+    // `expose: route`).
+    if (isKnowledgeRoute(url.pathname)) {
+      return knowledgeRoutes(
+        req,
+        res,
+        key,
+        url,
+        { ...(cfg.searchKnowledge ? { search: cfg.searchKnowledge } : {}), ...(cfg.vault ? { vault: cfg.vault } : {}), queries },
+        principalOf(auth),
+        audit,
+      );
     }
 
     // ----- projects (§4.19 panel, §4.21 controls; owner session only) -----
@@ -824,7 +1015,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
 
     const triage = /^POST \/api\/proposals\/(\d+)$/.exec(key);
     if (triage) {
-      const body = (await readJson(req)) as { decision?: string; feedback?: string; if_unchanged?: { seen_at?: unknown } };
+      const body = (await readJson(req)) as { decision?: string; feedback?: string; area?: unknown; if_unchanged?: { seen_at?: unknown } };
       const r = await decideProposal(triage[1]!, body);
       return sendJson(res, r.status, r.body);
     }
@@ -858,7 +1049,16 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     if (key === "GET /api/devices") return sendJson(res, 200, { devices: await store.listDevices(db) });
 
     // ----- external-agent registry (§4.2 management surface; owner session only) -----
-    if (key === "GET /api/agents") return sendJson(res, 200, { agents: await agents.listAgents(db) });
+    // The registry, plus what has been ASKED for (ruled 2026-09-19): the
+    // panel where a grant is edited is where the ask belongs, not only in
+    // Needs You. `proposal_id` is the row to answer, so a client that wants
+    // to act sends it to `POST /api/proposals/:id` — this list is a view,
+    // never a second door onto granting.
+    if (key === "GET /api/agents") {
+      // Each row carries its rendered `scope` (core's `describeScope`), so
+      // the panel prints the words it is given rather than inventing them.
+      return sendJson(res, 200, { agents: await agents.listAgents(db, (id) => cfg.crews?.toolset(id)), access_requests: await agents.pendingAccessRequests(db) });
+    }
 
     if (key === "POST /api/agents") {
       const body = (await readJson(req)) as { id?: unknown; display_name?: unknown; kind?: unknown; remote?: unknown };
@@ -884,11 +1084,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       if (!verbOk) return sendError(res, "not_found");
       try {
         if (op === "grants") {
-          // the bare vault (`/`) is admitted for internal rows only: the rule keys on the ROW's kind, never on the request
-          const row = (await agents.listAgents(db)).find((a) => a.id === id && !a.revoked);
-          const grants = agents.validateGrants(await readJson(req), { kind: row?.kind === "internal" ? "internal" : "external" });
-          const ok = await agents.setGrants(db, id, grants);
-          await audit("agent_admin", "grant", ok, { agent: id, op: "grant", grants });
+          const { ok, grants } = await writeGrants(id, await readJson(req), "console");
           return ok ? sendJson(res, 200, { ok: true, grants }) : sendError(res, "not_found");
         }
         if (op === "projects") {
@@ -926,10 +1122,15 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         }
         if (op === "revoke") {
           const ok = await agents.revokeAgent(db, id);
-          // a revoked row is no longer a question: settle any enrolment still asking about it
+          // a revoked row is no longer a question: settle any enrolment still
+          // asking about it, and any access request it raised — a token that
+          // authenticates nothing cannot be granted anything, so the only
+          // honest answer to its pending asks is the one revocation just gave
+          // (agents.ts's `settleAccessRequests`).
           const settled = ok ? await agents.settleEnrollment(db, id, "deny") : [];
-          await audit("agent_admin", "revoke", ok, { agent: id, op: "revoke", ...(settled.length ? { proposals: settled } : {}) });
-          return ok ? sendJson(res, 200, { revoked: true }) : sendError(res, "not_found");
+          const asks = ok ? await agents.settleAccessRequests(db, id) : [];
+          await audit("agent_admin", "revoke", ok, { agent: id, op: "revoke", ...(settled.length ? { proposals: settled } : {}), ...(asks.length ? { access_requests: asks } : {}) });
+          return ok ? sendJson(res, 200, { revoked: true, ...(asks.length ? { access_requests: asks } : {}) }) : sendError(res, "not_found");
         }
         const token = await agents.rotateAgent(db, id);
         await audit("agent_admin", "rotate", token !== null, { agent: id, op: "rotate" });
@@ -972,6 +1173,26 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
   }
 
   /**
+   * **The one grants write.** `PUT /api/agents/:id/grants` (the owner's own
+   * hand, below) and an approved `access_request` (the triage branch in
+   * `decideProposal`) both come through here, so there is one validator, one
+   * store call and one `agent_admin` audit row for a widening however it was
+   * reached. That is what invariant 10 means by "a door onto an existing
+   * audited service": the queue's Approve is not a second implementation of
+   * granting, it is the same one with `via: triage` on the record.
+   *
+   * The bare vault (`/`) stays admissible for internal rows only, and the
+   * rule keys on the ROW's kind rather than on anything in the request.
+   */
+  async function writeGrants(id: string, input: unknown, via: string, extra: Record<string, unknown> = {}): Promise<{ ok: boolean; grants: agents.Grants }> {
+    const row = (await agents.listAgents(db)).find((a) => a.id === id && !a.revoked);
+    const grants = agents.validateGrants(input, { kind: row?.kind === "internal" ? "internal" : "external" });
+    const ok = row === undefined ? false : await agents.setGrants(db, id, grants);
+    await audit("agent_admin", "grant", ok, { agent: id, op: "grant", grants, via, ...extra });
+    return { ok, grants };
+  }
+
+  /**
    * One answer to one proposal. Extracted so the single route and the batch
    * route cannot drift: a verb must not mean two things depending on which
    * door it came through — the same reason answering an enrolment from Needs
@@ -982,7 +1203,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
    */
   async function decideProposal(
     id: string,
-    body: { decision?: string; feedback?: string; if_unchanged?: { seen_at?: unknown } },
+    body: { decision?: string; feedback?: string; area?: unknown; if_unchanged?: { seen_at?: unknown } },
   ): Promise<DecisionOutcome> {
     const row = (await db.query(PROPOSAL_FOR_DECISION_SQL, [id])).rows[0];
     if (!row) return { status: 404, body: errorEnvelope("not_found", "not found") };
@@ -1143,6 +1364,94 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       enrolled = { agent: enrollAgent, approved };
     }
 
+    // An `access_request` (ruled 2026-09-19) is answered with the three verbs
+    // every other request takes, and Approve is a DOOR onto the grants
+    // service, not a new one: `writeGrants` above is literally the call `PUT
+    // /api/agents/:id/grants` makes, with the same validator and the same
+    // `agent_admin` row, `via: triage` on it. Revise is the same door with
+    // the owner's own prefix — usually narrower than the one asked for —
+    // instead of the requested one. Decline does nothing at all, which is
+    // the point: the row records a refusal and no grant moves.
+    //
+    // Like the improvement and action paths above it, this runs BEFORE the
+    // row is settled, so a refusal leaves the request pending with the reason
+    // rather than closing a decision that granted nothing.
+    let granted: { agent: string; area: string; grants: agents.Grants } | undefined;
+    if (row.kind === agents.ACCESS_REQUEST_KIND && (verb === "allow" || verb === "accept_with_changes")) {
+      const asked = agents.accessArea(row.payload);
+      if (asked === undefined) {
+        await audit("triage", "access_request", false, { proposal: row.id, error: "no_area" });
+        return { status: statusFor("invalid_request"), body: errorEnvelope("invalid_request", "this request does not name a vault area this console would grant — Decline it (the asking tool validates the prefix, so a row without one was not written by request_access)") };
+      }
+      // Revise carries the prefix the owner is granting INSTEAD. It is
+      // validated here with the grant validator's own rule, so the narrowing
+      // gesture cannot smuggle in a shape the form would have refused.
+      const area = verb === "accept_with_changes" ? (typeof body.area === "string" ? body.area.trim() : "") : asked;
+      if (verb === "accept_with_changes" && !validAgentAreaGrant(area)) {
+        return { status: statusFor("invalid_request"), body: errorEnvelope("invalid_request", `revising an access request means granting a different area: send {"area": "…"} with it — ${AREA_PREFIX_REFUSAL}. To refuse it outright, Decline.`) };
+      }
+      const target = String(row.source_agent);
+      const current = (await agents.listAgents(db)).find((a) => a.id === target && !a.revoked);
+      // A CREW's scope is its manifest, re-read on every crew sync, so an
+      // approval here would vanish at the next one and the owner would
+      // believe they had granted it. No crew's allowlist carries the tool
+      // (core's CREW_NEVER_TOOLS); this is the same rule at the door where
+      // the grant would actually move.
+      //
+      // An INTERNAL row is no longer in that set (ruled 2026-09-19 B: "the
+      // assistant should be able to ask"). Its configured grants are still
+      // replaced at every start — but an approval is now RECORDED beside them
+      // (`recordGrantOverride`, migration 0023) and merged back on the way in,
+      // so the widening survives the re-sync instead of being quietly undone.
+      //
+      // Written as "anything that is neither external nor internal" rather
+      // than "crew" so a kind added later is refused until somebody decides
+      // where ITS scope comes from.
+      if (current && current.kind !== "external" && current.kind !== "internal") {
+        await audit("triage", "access_request", false, { proposal: row.id, agent: target, error: "configured_scope" });
+        return {
+          status: statusFor("forbidden"),
+          body: errorEnvelope("forbidden", `${target}'s scope is configuration, not a grant: it is re-synced from its manifest (\`scope:\` in agents/<area>/${target}.md), so approving this would be undone at the next crew sync. Decline this request and edit that file (docs/ops/actions.md).`),
+        };
+      }
+      if (!current) {
+        // A revoked (or vanished) agent cannot be granted anything: its token
+        // authenticates nothing, so a widening would be a grant to nobody
+        // that still reads as a grant in the registry. The row stays pending
+        // and Decline is right there. (Revocation itself settles pending asks
+        // — agents.ts's `settleAccessRequests` — so this is the row that
+        // predates that, or a race with it.)
+        await audit("triage", "access_request", false, { proposal: row.id, agent: target, error: "revoked" });
+        return { status: statusFor("not_found"), body: errorEnvelope("not_found", `${target} is revoked or no longer registered — there is nothing to widen. Decline or Skip this request.`) };
+      }
+      try {
+        const widened = agents.widenedGrants(current.grants, area);
+        const { ok, grants } = await writeGrants(target, widened, "triage", { proposal: row.id, area, ...(area === asked ? {} : { asked }) });
+        if (!ok) return { status: statusFor("not_found"), body: errorEnvelope("not_found", `${target} is revoked or no longer registered — there is nothing to widen. Decline or Skip this request.`) };
+        // For a row whose grants come back from configuration at every start,
+        // the write above holds until the next restart and no further: the
+        // approval itself is the durable record (0023), merged on top of the
+        // configured areas by `ensureInternalAgent`. Recorded only when it
+        // actually widened — an area a configured prefix already covers is
+        // not an approval to carry forward, it is a no-op.
+        const added = widened.areas.length > (current.grants.tier === "areas" ? current.grants.areas.length : 0);
+        if (current.kind === "internal" && added) await agents.recordGrantOverride(db, target, area, Number(row.id));
+        granted = { agent: target, area, grants };
+      } catch (err) {
+        if (err instanceof agents.AgentError) {
+          await audit("triage", "access_request", false, { proposal: row.id, agent: target, error: err.code });
+          return { status: statusFor(err.code), body: errorEnvelope(err.code, err.message) };
+        }
+        throw err;
+      }
+      // The outcome rides on the row, as the action path's does: what was
+      // granted, to whom, by whom, and what was asked for when they differ.
+      await db.query(
+        `UPDATE proposals SET payload = payload || jsonb_build_object('granted', $2::jsonb) WHERE id = $1 AND decision = 'pending'`,
+        [id, JSON.stringify({ area, grants: granted.grants, at: new Date().toISOString(), by: "user" })],
+      );
+    }
+
     // What lands in the row: `skip` stores a `deny` whose feedback is the
     // fixed marker (never the user's words — a skip is not a reason, and
     // SKIP_FEEDBACK is what keeps it out of the paths that route feedback
@@ -1162,9 +1471,10 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       ...(applied ? { overlay: applied.path } : {}),
       ...(created ? { work_id: created.id } : {}),
       ...(acted ? { action: acted.kind } : {}),
+      ...(granted ? { granted: granted.area, agent: granted.agent } : {}),
     });
     if (rows.length === 1) {
-      return { status: 200, body: { ok: true, ...(applied ? { applied } : {}), ...(enrolled ? { enrolled } : {}), ...(created ? { work: created } : {}), ...(acted ? { action: acted } : {}) } };
+      return { status: 200, body: { ok: true, ...(applied ? { applied } : {}), ...(enrolled ? { enrolled } : {}), ...(created ? { work: created } : {}), ...(acted ? { action: acted } : {}), ...(granted ? { granted } : {}) } };
     }
     // lost the race between the read above and this update: someone else decided it
     const now = (await db.query(PROPOSAL_FOR_DECISION_SQL, [id])).rows[0];

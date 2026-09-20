@@ -1,0 +1,150 @@
+# Seeded default (D4 overlay: an instance file of the same name wins).
+#
+# The `work` side of one day (daily-flow-spec §6.2's `{{ work … }}` directive,
+# §7's `plan-tomorrow` and `standup-draft`; ticket P1-5) — and the place
+# **§3's "an agent is waiting on you" becomes readable**.
+#
+# **`meta.blocked_by` surfaces and NEVER gates.** A `work` row waiting on a
+# human todo carries `meta.blocked_by = "vault:Journal/2026-09-18.md#^mt-7x2k"`
+# — `work.meta` is the free-form, service-owned slot that already exists for
+# exactly this kind of source metadata (`0006_work_meta.sql`), so there is no
+# migration in it. `depends_on` is `bigint[]`, `DEPS_CLOSED` joins it back to
+# `work`, and neither can hold `^mt-7x2k` or learns to here: claimability is
+# untouched and an agent may still take the row. Three reasons §3 gives, and
+# they are the reasons this is a LEFT JOIN in a read and not a rule in a
+# scheduler: the board's `blocked` state is the one state only the user's hand
+# can leave (docs/ops/board.md) and a second, file-driven way in would undo
+# that; the index is up to METISTRY_RECONCILE_INTERVAL_SEC (default 300)
+# stale, so a typo would stall a crew for five minutes before anyone could see
+# why; and the owner asked for visibility, not scheduling.
+#
+# The reverse direction is `vault_tasks.work_id`, read from the task's side in
+# `vault_tasks_query`.
+#
+# **Scope is always `and`**: rows that are not closed, PLUS rows closed on
+# `day` — which is what makes one query serve both the evening plan
+# ("what is open") and the morning standup ("what closed yesterday", §7).
+# `flags` narrows within that, `combine` says whether they join with `and` or
+# `or`, and `or` can never reach outside the scope. Same filter IDEA as
+# `vault_tasks_query`, deliberately.
+#
+# **But not the same param shape, and deliberately not.** §6.2's
+# `{{ work where: "blocked or waiting_on_me" }}` is the WORK vocabulary —
+# `blocked`, `in_progress`, `unclaimed`, `closed` are board states, and none
+# of them is in `TASK_FILTER_FLAGS` (`packages/core/src/task-filter.ts`),
+# which is a closed list over the vault's `- [ ]` lines. So
+# `compileTaskFilter` neither parses this `where:` nor binds these params:
+# `vault_tasks_query` is the one query it compiles into (D15), and a query
+# over a different table with a different vocabulary borrowing its param
+# names would be the same drift pointing the other way. The set-wise `flags`
+# string survives here because these flags have no parser to disagree with.
+#
+# Flags (comma-separated, matched set-wise):
+#   `waiting_on_me`  a still-open vault task is named in meta.blocked_by — §3
+#   `blocked`        status = 'blocked', the human-gated board state
+#   `in_progress`    status = 'in_progress'
+#   `open`           anything not closed
+#   `unclaimed`      open and nobody holds the lease
+#   `closed`         closed on `day` (the standup's yesterday)
+#   `due`            due on `day`
+#   `overdue`        due before `day` and still open
+#
+# **`expose: route`.** Every `blocked_by_*` column is a vault path and the
+# text of a line in the owner's own notes, which is the same content
+# `knowledge_pages.yaml` is route-only for: only an endpoint of its own can
+# filter those rows through the caller's scope, so the generic
+# `/api/q/<name>` and `queries_run` answer this name with the refusal they
+# answer an unknown name with (ruled 2026-09-19: one endpoint per operation).
+# The work rows an agent may legitimately read unscoped are already served by
+# `open_work`, `board` and `projects_overview`; what is new here is the half
+# that reaches into the vault, and that half is the half to scope. `expose`
+# gates the two generic doors only — the template engine and the routines run
+# this in process.
+name: day_work
+expose: route
+description: >-
+  The `work` rows one day needs — everything not closed, plus what closed on
+  that day — with §3's `meta.blocked_by` resolved beside each: the vault path
+  and anchor it names, the text of that human todo, and whether it is still
+  open. Narrow with `flags` (waiting_on_me, blocked, in_progress, open,
+  unclaimed, closed, due, overdue) joined by `combine` (and | or), and by
+  `project`. It surfaces and never gates — `depends_on`, `DEPS_CLOSED` and
+  claimability are untouched. Ordered with what an agent is waiting on you
+  for first, then by due date, then most recently touched, then id — a total
+  order, so `limit`/`offset` page it without repeating or skipping.
+params:
+  day: { type: text, default: "" } # the day in question; blank = the cluster's current_date
+  project: { type: text, default: "" } # blank = every project
+  flags: { type: text, default: "" } # comma-separated; blank = no flag clause
+  combine: { type: text, default: "and" } # and | or
+  limit: { type: int, default: 50 }
+  offset: { type: int, default: 0 }
+sql: |
+  WITH f AS (
+    SELECT
+      coalesce(nullif(:day::text, '')::date, current_date) AS day,
+      nullif(:project::text, '')                           AS project,
+      lower(:combine::text) = 'or'                         AS any_of,
+      CASE WHEN :flags::text = '' THEN '{}'::text[]
+           ELSE string_to_array(lower(replace(:flags::text, ' ', '')), ',') END AS flags
+  ),
+  scoped AS (
+    SELECT w.*, f.day
+    FROM work w, f
+    WHERE (f.project IS NULL OR w.project = f.project)
+      AND (w.status <> 'closed' OR w.closed_at::date = f.day)
+  ),
+  -- §3's ref, resolved. The spelling is fixed — `vault:<path>#^<anchor>` —
+  -- so a task with no anchor yet is simply not something a work row can
+  -- name, and an unresolvable ref comes back as a path with no text rather
+  -- than as nothing at all.
+  linked AS (
+    SELECT
+      s.*,
+      s.meta->>'blocked_by'                                              AS blocked_by,
+      substring(s.meta->>'blocked_by' from '^vault:(.*)#\^[^#]+$')       AS blocked_by_path,
+      substring(s.meta->>'blocked_by' from '#\^([^#]+)$')                AS blocked_by_anchor,
+      t.text                                                             AS blocked_by_task,
+      CASE WHEN t.path IS NOT NULL THEN NOT t.checked AND NOT t.dropped END AS blocked_by_task_open
+    FROM scoped s
+    LEFT JOIN LATERAL (
+      SELECT vt.path, vt.text, vt.checked, vt.dropped
+      FROM vault_tasks vt
+      WHERE s.meta->>'blocked_by' = 'vault:' || vt.path || '#^' || vt.anchor
+      ORDER BY vt.path COLLATE "C", vt.line_no
+      LIMIT 1
+    ) t ON true
+  ),
+  judged AS (
+    SELECT l.*,
+      array_remove(ARRAY[
+        CASE WHEN l.blocked_by_task_open                                THEN 'waiting_on_me' END,
+        CASE WHEN l.status = 'blocked'                                  THEN 'blocked' END,
+        CASE WHEN l.status = 'in_progress'                              THEN 'in_progress' END,
+        CASE WHEN l.status <> 'closed'                                  THEN 'open' END,
+        CASE WHEN l.status <> 'closed' AND l.claimed_by IS NULL         THEN 'unclaimed' END,
+        CASE WHEN l.status =  'closed'                                  THEN 'closed' END,
+        CASE WHEN l.due = l.day                                         THEN 'due' END,
+        CASE WHEN l.due < l.day AND l.status <> 'closed'                THEN 'overdue' END
+      ], NULL) AS row_flags
+    FROM linked l
+  )
+  SELECT
+    j.id, j.title, j.kind, j.status, j.project, j.area, j.owner,
+    j.claimed_by, j.lease_expires_at, j.external_ref,
+    j.due::text        AS due,
+    j.closed_at, j.updated_at, j.created_at,
+    j.blocked_by, j.blocked_by_path, j.blocked_by_anchor,
+    j.blocked_by_task, j.blocked_by_task_open,
+    j.row_flags
+  FROM judged j, f
+  WHERE f.flags = '{}'::text[]
+     OR CASE WHEN f.any_of THEN f.flags && j.row_flags ELSE f.flags <@ j.row_flags END
+  ORDER BY
+    coalesce(j.blocked_by_task_open, false) DESC,
+    coalesce(j.due, DATE '9999-12-31'),
+    j.updated_at DESC,
+    j.id DESC
+  LIMIT :limit
+  OFFSET :offset
+cache_ttl: 0 # a plan that lags is a plan that lies about who is waiting on whom

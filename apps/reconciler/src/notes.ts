@@ -4,12 +4,22 @@
 
 import { createHash } from "node:crypto";
 import { parse as parseYaml } from "yaml";
-import { INSTANCE_LAYOUT } from "@foldedspacelabs/metistry-core";
+import { INSTANCE_LAYOUT, parseTaskLine, validAreaPrefix, type ParsedTaskLine, type TaskDateOptions } from "@foldedspacelabs/metistry-core";
 
 export interface NoteMeta {
   title: string | null;
   description: string | null;
   draft: boolean;
+  /**
+   * The frontmatter `source:` — **who owns this file** (#231's ownership
+   * vocabulary, `packages/mcp-brain/src/knowledge-write.ts`). Null means no
+   * `source:` at all, which is the user's and not an opening. The task pass
+   * reads it to tell a note the user typed from a machine file that merely
+   * renders one (daily-flow-spec §5.1, D10).
+   */
+  source: string | null;
+  /** The frontmatter `area:`, wikilink brackets stripped — `area: "[[Drey]]"` is the schema's spelling (`metistry-build-plan.md`). */
+  area: string | null;
 }
 
 export interface NoteLink {
@@ -28,25 +38,48 @@ export function basenameTitle(path: string): string {
 
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
 
-/** Frontmatter fields the index serves. Never throws — bad YAML is "no frontmatter". */
-export function parseFrontmatter(text: string): { meta: NoteMeta; body: string } {
+/**
+ * Frontmatter fields the index serves. Never throws — bad YAML is "no
+ * frontmatter".
+ *
+ * `bodyLine` is the 1-based line number, IN THE FILE, of the first line of
+ * `body`. The task pass reports `vault_tasks.line_no` as the line the user
+ * would jump to in Obsidian, and a note with eight lines of frontmatter
+ * would otherwise be reported eight lines short.
+ */
+export function parseFrontmatter(text: string): { meta: NoteMeta; body: string; bodyLine: number } {
   const m = FRONTMATTER_RE.exec(text);
-  const none: NoteMeta = { title: null, description: null, draft: false };
-  if (!m) return { meta: none, body: text };
+  const none: NoteMeta = { title: null, description: null, draft: false, source: null, area: null };
+  if (!m) return { meta: none, body: text, bodyLine: 1 };
+  const bodyLine = 1 + (m[0].match(/\n/g)?.length ?? 0);
   let fm: unknown;
   try {
     fm = parseYaml(m[1]!);
   } catch {
-    return { meta: none, body: text.slice(m[0].length) };
+    return { meta: none, body: text.slice(m[0].length), bodyLine };
   }
-  if (!fm || typeof fm !== "object" || Array.isArray(fm)) return { meta: none, body: text.slice(m[0].length) };
+  if (!fm || typeof fm !== "object" || Array.isArray(fm)) return { meta: none, body: text.slice(m[0].length), bodyLine };
   const o = fm as Record<string, unknown>;
   const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim().slice(0, 500) : typeof v === "number" ? String(v) : null);
   const status = typeof o.status === "string" ? o.status.trim().toLowerCase() : "";
+  const area = str(o.area);
   return {
-    meta: { title: str(o.title), description: str(o.description), draft: status === "draft" || o.draft === true },
+    meta: {
+      title: str(o.title),
+      description: str(o.description),
+      draft: status === "draft" || o.draft === true,
+      source: str(o.source),
+      area: area === null ? null : unwikilink(area),
+    },
     body: text.slice(m[0].length),
+    bodyLine,
   };
+}
+
+/** `[[Drey]]` → `Drey`, `[[Areas/Drey|Drey]]` → `Areas/Drey`. The frontmatter schema says an `area:` is always a wikilink; the index stores the target. */
+function unwikilink(value: string): string {
+  const m = /^!?\[\[([^\]]+)\]\]$/.exec(value.trim());
+  return (m?.[1] ?? value).split("|")[0]!.trim();
 }
 
 const WIKILINK_RE = /(!?)\[\[([^\]\n]+?)\]\]/g;
@@ -129,11 +162,20 @@ export function isMarkdown(path: string): boolean {
 
 // ---- the vault inbox (docs/ops/inbox.md) ----------------------------------
 
-/** The vault directory captures live in, at the vault root. TitleCase (CLAUDE.md casing rule). */
+/**
+ * The vault directory captures live in, at the vault root. TitleCase
+ * (CLAUDE.md casing rule).
+ *
+ * The default, not the only value: an instance that has not run
+ * `metistry migrate-layout` yet keeps its vault — and so its inbox — in
+ * `Knowledge/Inbox/`, and the indexer is given that prefix instead
+ * (`IndexerConfig.inboxPrefix`, resolved once at startup). Everything that
+ * takes the prefix takes it as an argument for that reason.
+ */
 export const INBOX_PREFIX = INSTANCE_LAYOUT.inboxDir;
 
-export function isInboxPath(path: string): boolean {
-  return path.startsWith(`${INBOX_PREFIX}/`);
+export function isInboxPath(path: string, prefix: string = INBOX_PREFIX): boolean {
+  return path.startsWith(`${prefix}/`);
 }
 
 /**
@@ -186,4 +228,250 @@ export function inboxNoteFor(path: string, bytes: Uint8Array): string | null {
   const first = body.split(/\r?\n/).find((l) => l.trim() !== "");
   const line = (meta.title ?? first ?? "").replace(/^#{1,6}\s*/, "").trim();
   return line === "" ? null : line.slice(0, 2000);
+}
+
+// ---- the vault's tasks (docs/product/daily-flow-spec.md §1, §2, P1-4) -----
+
+/**
+ * One `- [ ] …` line, as the walk found it. The parse itself is
+ * `packages/core`'s (`parseTaskLine`, P1-1) and is pure; what this adds is
+ * the two things that need the FILE: where the line is, and which identity
+ * it has among its neighbours.
+ */
+export interface ScannedTask {
+  /** §2.1's identity: the anchor when the line carries one, else the hash key below. */
+  task_key: string;
+  /** 1-based, in the file — frontmatter included, so it is the line Obsidian jumps to. */
+  line_no: number;
+  parsed: ParsedTaskLine;
+}
+
+/** A `[[note#^mt-7x2k]]` / `![[note#^mt-7x2k]]`, which `knowledge_links` cannot hold (`extractLinks` strips the anchor). */
+export interface NoteTaskRef {
+  /** As written, minus the alias and the anchor. `""` means the note itself (`[[#^mt-7x2k]]`). */
+  target: string;
+  /** The block id without the caret, lowercased. */
+  anchor: string;
+  kind: "wikilink" | "embed";
+}
+
+/**
+ * The read side of `^mt-…`: deliberately looser than the minter's shape
+ * (`isTaskAnchor`), because a hand-typed or older anchor is still an
+ * identity rather than stray text.
+ */
+const TASK_ANCHOR_RE = /^mt-[0-9a-z]{2,16}$/i;
+
+/**
+ * Vault directories whose markdown holds task-SHAPED lines that are not
+ * tasks. `Templates/` is the whole list and it is not a policy about
+ * ownership: a template ships `source: user` on purpose (§6.1, so
+ * `ownershipRefusal` keeps it the user's hand), and its `{{ tasks … }}`
+ * directive and its literal `- [ ] …` examples are a description of what
+ * will be rendered, not a todo anybody has.
+ *
+ * Everything else is already excluded upstream and is not restated here:
+ * `.metistry/`, `Artifacts/` and every dot-directory never reach this
+ * module at all (`Vault.walkVault` + `isVaultPath`).
+ */
+export const TASK_SKIP_PREFIXES = Object.freeze(["Templates"] as const);
+
+/** Where person pages live (TitleCase, stamped by `metistry init`), for `@Jim` → `People/Jim Fallon.md`. */
+export const PEOPLE_PREFIX = "People";
+
+/** Where project notes live, for the `+slug` a task line does not spell. */
+export const PROJECTS_PREFIX = "Projects";
+
+/** `projects.id`'s own shape (`db/migrations/0011_projects.sql`), so a derived slug is one the projects table could hold. */
+const PROJECT_SLUG_RE = /^[a-z][a-z0-9-]{0,39}$/;
+
+/** The `source:` that means "the user's own file" when one is written out; **no** `source:` means the same thing (#231). */
+const USER_SOURCE = "user";
+
+/**
+ * Whether the `- [ ]` lines in this note are TASKS — the daily flow's
+ * §2.1 rule, made mechanical.
+ *
+ * A task exists once, on the line where it was typed. `Journal/Plan/…`,
+ * `Journal/Fold/…` and `Journal/Standup/…` are machine files with one
+ * writer each (§5.1, D10): what they show is a generated list today and a
+ * transclusion once anchors exist, and in neither case is it a second
+ * canonical line. Indexing them would double every todo the plan mentions
+ * and re-date it to the day the plan was written.
+ *
+ * The test is the FILE'S OWN `source:` frontmatter rather than a list of
+ * directory names, because that is the ownership vocabulary the repo
+ * already enforces writes with (#231, `ownershipRefusal`): a machine file
+ * carries the writer that produced it, a file with `source: user` or with
+ * no `source:` at all is the user's. So a user who keeps their plan
+ * somewhere else is still indexed, and a routine that writes somewhere new
+ * is still skipped, with nothing to keep in sync.
+ */
+export function ownsTaskLines(meta: NoteMeta): boolean {
+  return meta.source === null || meta.source === USER_SOURCE;
+}
+
+/** True when a path is one the task pass reads at all (`Templates/` is not). */
+export function isTaskPath(path: string): boolean {
+  if (!isMarkdown(path)) return false;
+  return !TASK_SKIP_PREFIXES.some((p) => path === p || path.startsWith(`${p}/`));
+}
+
+/** An opening or closing ``` / ~~~ fence, at the start of a line. */
+const FENCE_RE = /^ {0,3}(`{3,}|~{3,})/;
+
+/**
+ * Every task line in a note, keyed per §2.1.
+ *
+ * **The key degrades honestly.** With an anchor it IS the anchor, so the
+ * line keeps its identity when it moves. Without one it is
+ * `h:<sha256 of text_norm>:<ordinal>` — stable across a field edit
+ * (`due friday` → `due 2026-09-25` leaves `text_norm` alone), unstable
+ * across a text edit, which is exactly the guarantee a line with no id can
+ * make.
+ *
+ * **The ordinal counts every identical line in the file, anchored or not**,
+ * in the order they appear. Counting only the anchorless ones would look
+ * tidier and would re-key the second of two identical lines the moment the
+ * plugin minted an anchor on the first — and the plugin mints them one at a
+ * time, in the user's editor, forever.
+ *
+ * **A repeated anchor cannot fail the walk.** `(path, task_key)` is the
+ * primary key, so a line copy-pasted with its anchor inside one note would
+ * collide; the second one falls back to its hash key instead. A derived
+ * index that can refuse to be rebuilt is not derived
+ * (`db/migrations/0024_vault_tasks.sql`).
+ *
+ * **Fenced code is not a todo list.** A ``` block holding `- [ ] …` is
+ * documentation — this file's own docs contain some — and the fence state
+ * is tracked line by line rather than stripped, so `line_no` stays the
+ * file's own.
+ */
+export function extractTasks(text: string, opts: TaskDateOptions = {}): ScannedTask[] {
+  const { body, bodyLine } = parseFrontmatter(text);
+  const out: ScannedTask[] = [];
+  const ordinals = new Map<string, number>();
+  const used = new Set<string>();
+  let fence: string | null = null;
+  const lines = body.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    const f = FENCE_RE.exec(line)?.[1];
+    if (f) {
+      if (fence === null) fence = f[0]!;
+      else if (fence === f[0]) fence = null;
+      continue;
+    }
+    if (fence !== null) continue;
+    const parsed = parseTaskLine(line, opts);
+    if (!parsed) continue;
+    const ordinal = ordinals.get(parsed.text_norm) ?? 0;
+    ordinals.set(parsed.text_norm, ordinal + 1);
+    const hashed = `h:${sha256(parsed.text_norm)}:${ordinal}`;
+    const key = parsed.anchor !== null && !used.has(parsed.anchor) ? parsed.anchor : hashed;
+    if (used.has(key)) continue; // unreachable while ordinals are per-line; a row is still never a failed walk
+    used.add(key);
+    out.push({ task_key: key, line_no: bodyLine + i, parsed });
+  }
+  return out;
+}
+
+/**
+ * Block-anchored references. `knowledge_links` cannot hold these —
+ * `extractLinks` strips `#` and `^` from every target and its primary key
+ * has no room for one — so they are the second derived table rather than a
+ * destructive widening of the first.
+ */
+export function extractTaskRefs(body: string): NoteTaskRef[] {
+  const text = body.replace(CODE_FENCE_RE, ""); // a link inside code is not a link, here as in extractLinks
+  const out: NoteTaskRef[] = [];
+  const seen = new Set<string>();
+  for (const m of text.matchAll(WIKILINK_RE)) {
+    const inner = m[2]!.split("|")[0]!;
+    const hash = inner.indexOf("#");
+    if (hash < 0) continue;
+    const frag = inner.slice(hash + 1).trim();
+    if (!frag.startsWith("^")) continue;
+    const anchor = frag.slice(1).trim().toLowerCase();
+    if (!TASK_ANCHOR_RE.test(anchor)) continue;
+    const target = inner.slice(0, hash).trim();
+    const kind = m[1] ? "embed" : "wikilink";
+    const key = `${target}\0${anchor}\0${kind}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ target, anchor, kind });
+  }
+  return out;
+}
+
+/** `vault:Journal/2026-09-18.md#^mt-7x2k` — how a `work` row names a human todo (§3) and how a promotion spells `work.external_ref`. */
+const VAULT_TASK_REF_RE = /^vault:(.+)#\^(mt-[0-9a-z]{2,16})$/i;
+
+/** The `(path, anchor)` a `work.meta.blocked_by` names, or null when it is not that spelling. */
+export function parseVaultTaskRef(value: unknown): { path: string; anchor: string } | null {
+  if (typeof value !== "string") return null;
+  const m = VAULT_TASK_REF_RE.exec(value.trim());
+  if (!m?.[1] || !m[2]) return null;
+  return { path: m[1], anchor: m[2].toLowerCase() };
+}
+
+/**
+ * `@Jim` / `@[[Jim Fallon]]` → the person page's vault path.
+ *
+ * Ordinary link resolution first, so `@[[Jim Fallon]]` lands the same way
+ * the wikilink it already is lands in `knowledge_links`. Then §1.3's extra
+ * clause — "`@Jim` resolves to a unique `People/Jim*.md`" — as a unique
+ * prefix match under `People/` and nowhere else.
+ *
+ * Ambiguous or unresolved, the name is STORED AS WRITTEN and flagged: a
+ * field Metistry cannot read is never guessed (§1.4), and a person is a
+ * field.
+ */
+export function resolveAssignee(
+  fromPath: string,
+  name: string,
+  paths: ReadonlySet<string>,
+  byBasename: ReadonlyMap<string, string[]>,
+  people: readonly string[],
+): { assigned: string; warning: string | null } {
+  const linked = resolveLink(fromPath, name, paths, byBasename);
+  if (paths.has(linked)) return { assigned: linked, warning: null };
+  const needle = name.toLowerCase();
+  const hits = people.filter((p) => basenameTitle(p).toLowerCase().startsWith(needle));
+  if (hits.length === 1) return { assigned: hits[0]!, warning: null };
+  return { assigned: name, warning: `@${name} (${hits.length === 0 ? `no ${PEOPLE_PREFIX}/ page` : `${hits.length} ${PEOPLE_PREFIX}/ pages`})` };
+}
+
+/** Every `People/*.md` in the vault, for `resolveAssignee`. Built once per walk, not once per task. */
+export function peoplePages(paths: Iterable<string>): string[] {
+  const out: string[] = [];
+  for (const p of paths) if (p.startsWith(`${PEOPLE_PREFIX}/`) && isMarkdown(p)) out.push(p);
+  return out.sort();
+}
+
+/**
+ * `vault_tasks.area` — never typed on a line (§1.3). The note's own
+ * frontmatter `area:` when it spells a vault prefix, else the directory the
+ * note lives in. A note at the vault root has no area, and neither does one
+ * whose frontmatter names something that is not a prefix shape.
+ */
+export function areaForPath(path: string, meta: NoteMeta): string | null {
+  if (meta.area !== null && validAreaPrefix(meta.area)) return meta.area;
+  const dir = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
+  return validAreaPrefix(dir) ? dir : null;
+}
+
+/**
+ * `vault_tasks.project` when the line does not spell one — "derived from
+ * location unless overridden" (§1.3). The location that means a project is
+ * a note INSIDE a project's folder (`Projects/Drey/Notes.md`); a note
+ * sitting directly in `Projects/` is about the collection, not in a
+ * project, which is also what keeps the seeded `Projects/README.md` from
+ * inventing a project called `readme`.
+ */
+export function projectForPath(path: string): string | null {
+  const segs = path.split("/");
+  if (segs[0] !== PROJECTS_PREFIX || segs.length < 3) return null;
+  const slug = segs[1]!.toLowerCase().replace(/[ _]+/g, "-").replace(/[^a-z0-9-]/g, "").replace(/-{2,}/g, "-").replace(/^-|-$/g, "");
+  return PROJECT_SLUG_RE.test(slug) ? slug : null;
 }

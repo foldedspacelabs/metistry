@@ -132,7 +132,11 @@ scope: they are all the owner's hand. Retention is unbounded: the key lives
 on the inbox row itself, and inbox rows are permanent.
 
 Without the header nothing changes: today's Shortcut and every existing
-door insert as before. An empty or oversized key is a `400`.
+door insert as before. An empty or oversized key is a `400`. `metistry
+console call --idempotency-key <key>` (`docs/ops/cli.md`) is the one client
+that sends it today — checked to the same shape client-side, so a bad key
+never reaches the wire — which is what makes a retried capture from the Mac
+app or a script safe once something calls it with the flag.
 
 `path` is relative to the instance repo root: captures live in the vault at
 `Inbox/` so Obsidian can see and edit them (`docs/ops/inbox.md`).
@@ -226,6 +230,81 @@ has the enum, the autonomy table, and why `dispatch` stays human by default.
 
 Rows an agent was allowed to run on its own arrive already decided `auto` —
 never in this queue, always in the timeline.
+
+## `PUT /api/agents/:id/grants` — and the one other door onto it
+
+```
+PUT /api/agents/devin/grants   {"tier":"areas","areas":["Areas/Health"],"queries":false}
+200 {"ok":true,"grants":{"tier":"areas","areas":["Areas/Health"]}}
+400 the field is named ("area must be a TitleCase vault prefix (e.g. Areas/Fsl)")
+404 no such row, or it is revoked
+```
+
+The grant is a read TIER plus, for `areas`, the vault prefixes it covers;
+`queries` is a separate axis (invariant 3's read path). An area is TitleCase
+from the vault root — core's `validAgentAreaGrant`, which also refuses
+`.metistry/` and `Artifacts/`, because no agent read path serves either and a
+grant of one would be inert. That is a rule about AGENTS, not about the owner,
+whose own `Artifacts/` are `GET /api/artifacts` (ruled 2026-09-19). The bare
+vault (`/`) is admitted for a `kind: internal` row alone, keyed on the ROW's
+kind and never on the request.
+
+Since 2026-09-19 an agent can **ask** for an area it was refused
+(`request_access` on `/mcp`, `docs/ops/actions.md`), and approving that ask in
+Needs You is the second door onto this same write: one function
+(`writeGrants`), one validator, one `agent_admin` audit row — the queue's
+answer carries `via: triage` and the proposal id, and the owner's own PUT
+carries `via: console`. Approve therefore cannot grant anything this route
+would refuse, and the console's mutating surface gains no verb (invariant 10).
+
+`GET /api/agents` answers the registry **and** the unanswered asks, so the
+panel where a grant is edited shows what has been asked of it:
+
+```
+GET /api/agents
+200 {"agents":[{"id","display_name","kind","grants","projects","autonomy",
+                "revoked","remote","approved_at","pending","last_seen_at",
+                "grant_source","scope"}],
+     "access_requests":[{"proposal_id":412,"agent":"devin","area":"Areas/Health",
+                         "reason":"knowledge_read pointed me here","ts":"…",
+                         "escalated":true,"prior_proposal":399}]}
+```
+
+`scope` is the row **rendered**, in the one vocabulary every surface uses
+(`describeScope` — [auth.md](auth.md)):
+
+```json
+"scope": { "role":"agent", "who":"an agent", "tier":"index", "access":"titles",
+           "areas":[], "scope":"titles", "queries":true, "projects":["alpha"],
+           "uses":null, "autonomy":{"level":"observe","actions":{…}},
+           "source":"registry", "from":"the registry — the owner's own hand, durable",
+           "extras":["queries","projects: alpha","autonomy: observe"],
+           "line":"an agent · titles · queries, projects: alpha, autonomy: observe" }
+```
+
+It is derived, never stored — a rendering of `grants`, `projects`,
+`autonomy` and `grant_source`, all of which are still on the row beside it
+for a client that wants the fields rather than the sentence. It exists so a
+client never recombines them into words of its own, which is how the panel,
+the queue and the CLI came to have three vocabularies for one record. The
+same object rides on an `access_request`'s payload as `current_scope`.
+
+That list is a **view**: the answer is given in the queue, through
+`POST /api/proposals/:id` like every other request, which for this kind takes
+an extra field —
+
+```
+POST /api/proposals/412 {"decision":"allow"}
+200 {"ok":true,"granted":{"agent":"devin","area":"Areas/Health","grants":{…}}}
+POST /api/proposals/412 {"decision":"accept_with_changes","area":"Areas/Health/Sleep"}
+200 {"ok":true,"granted":{"agent":"devin","area":"Areas/Health/Sleep","grants":{…}}}
+400 `accept_with_changes` with no `area` (there is nothing to grant), or an area the validator refuses
+404 the agent is revoked or gone — the row stays pending for you to Decline
+```
+
+`deny`, `later` and `skip` grant nothing at all, and neither does a revoked
+agent's ask: revoking settles its pending requests as `deny` in the same
+breath it kills the token.
 
 ## `PUT /api/agents/:id/autonomy` — the one route that may widen
 
@@ -448,3 +527,455 @@ has no `open`. That is collaboration rule 4 enforced by absence rather than by
 a check — a human may address a card to any crew, and an agent cannot address
 one at all. If an agent verb ever gains assignment, `crossKindRefusal` is the
 guard it needs (`docs/research/2026-09-11-local-models-openrouter-opencode.md`).
+
+## `/api/compute*` — providers, assignments and budgets (`user` principal)
+
+```
+GET  /api/compute                                     the same report as `metistry compute show --json`
+GET  /api/compute/models[?provider=<name>]            live /v1/models, per provider, plus unconfigured local servers
+POST /api/compute/assign          {tier|crew, model, effort?}
+POST /api/compute/budget          {scope, daily?, monthly?, action}
+POST /api/compute/providers/test  {name, complete?}
+200  the verb's own JSON result, plus `notes` (the lines the CLI would print) and `as_of`
+400  the field that would permit it — including a `compute.yaml` that does not validate
+403  `not granted` — an agent bearer, or a capture owner token
+503  compute is not reachable from this console (see "Which shapes can write" below)
+```
+
+Until these existed, compute was **Mac-only**: `metistry compute` on the
+machine holding the instance repo was the whole surface, so the phone could
+see what a turn had cost and could not move it to a cheaper model. P6 ("every
+client can do everything") was violated by construction, and that is what
+`docs/product/app-ux-plan.md` §6 phase D is asking for.
+
+**One implementation, not a second one.** Every verb here calls the same
+exported function `metistry compute` calls
+(`packages/cli/src/compute.ts`, `docs/ops/compute.md`): the instance's
+`compute.yaml` is edited as a **YAML document** so comments, ordering and
+hand-written blocks survive; the RESULT is re-parsed through core's schema and
+the whole write is refused if it does not validate; and the write goes through
+the reconciler as the **`user` principal** (invariant 2, D5). There is no
+second editor and no second validator, so a CLI verb and the app's Compute
+pane cannot come to mean different things.
+
+**These are configuration, not "actions".** Invariant 10 closes the console's
+*action* surface: an enumerated set of doors onto existing audited services,
+each new one a product change rather than a prompt or a config line
+(`docs/ops/actions.md`). `/api/compute*` is **not** on that list and is not
+meant to be. It is the owner's own configuration of how the system behaves —
+`user` principal only, no agent, no proposal, no `propose_action` kind, no
+autonomy level that reaches it. `runAction` has no compute kind, which is that
+sentence in code rather than in a comment.
+
+**A secret never crosses this boundary.** `providers add` and `providers
+remove` are deliberately **absent**. Adding a provider takes a key; a key
+belongs on stdin into the login Keychain, from the hand of the person at the
+machine (`docs/ops/compute.md` "Secrets"), and provider credentials are
+*user*-scoped — shared by every instance on that Mac, and never one
+instance's to hand out over HTTP. So **adding or removing a provider, and
+anything that takes a secret, stays CLI/app-only.** What `GET /api/compute`
+reports is the **NAME** of the secret a provider authenticates with and
+whether an item of that name exists:
+
+```json
+{"name":"openrouter","locality":"off_machine","zdr":true,
+ "secret":"METISTRY_OPENROUTER_API_KEY","secret_present":true,
+ "models_assigned":["anthropic/claude-opus-4"],
+ "budget":{"daily_usd":5,"monthly_usd":60,"action":"stop"}}
+```
+
+Presence, never a value. `secret_present` needs a login Keychain to be
+truthful, so it is `false` wherever there is none (a container): the honest
+`false`, not a missing field. `POST /api/compute/providers/test` does use the
+credential — a real `GET <base_url>/models`, and with `complete: true` a
+one-token completion — and reports only whether it worked.
+
+`GET /api/compute` adds two fields the CLI report does not carry:
+
+- **`spend`** — `{instance:{daily,monthly}, providers:{<name>:{daily,monthly}}}`,
+  folded from the **`spend` named query** (invariant 3: the same read path the
+  engine checks before every billable call), so the pane shows a budget beside
+  what has been spent against it. `null` when that query is not loaded — never
+  a guessed zero.
+- **`writable`** — whether the write verbs will work here, so a client greys
+  the controls instead of discovering it on submit.
+
+**Which shapes can write.** Every write verb OPENS the instance's own
+`.metistry/compute.yaml`, edits the document and writes the whole thing back,
+so the console has to be able to *read* that file. The compose shape
+deliberately gives the console no instance mount (D5: the reconciler is the
+sole holder of the instance repo), so there `METISTRY_INSTANCE_DIR` is unset
+and every route answers `503` naming it. The launchd/native shape runs the
+console as the user with the instance's own environment, and it works.
+
+And one guard that is not about a caller's mistake at all: if the overlay in
+force (`METISTRY_COMPUTE_FILES`) ends somewhere other than
+`<instanceDir>/.metistry/compute.yaml`, the write is refused with both paths
+named. Unguarded, the verb would find nothing at the path it opens, start from
+a bare header, and deliver a four-line file over the real one — data loss
+rather than a refusal. `apps/console/test/compute-routes.test.ts` holds it.
+
+## `GET /api/q/<name>` — the generic door onto the named queries
+
+```
+GET /api/q/open_work?limit=5
+200 {"rows":[…],"as_of":"…"}
+400 a param this query does not declare, or one of the wrong type
+404 no such query — OR, for a credential that is not the owner, one the
+    manifest keeps off this door (indistinguishable)
+```
+
+Invariant 3's read path, addressable by name: the YAML in `seed/queries/` plus
+the instance's own `queries/` overlay (D4), params from the query string,
+`{rows, as_of}` back. The panels and the Mac app read everything this way
+(`docs/ops/board.md`, `docs/ops/threads.md`), which is what keeps a dashboard
+from growing SQL of its own.
+
+**`expose:` — which door a query is served through.** A manifest may carry one
+optional field beside `name`, `description`, `params`, `sql` and `cache_ttl`:
+
+| value | meaning |
+| --- | --- |
+| `generic` | the default, and what every manifest without the field means. Served here, by name |
+| `route` | this query has an **endpoint of its own**, and that endpoint does something this door cannot. Asking for it here is the `404` an unknown name gets — **unless you are the owner**, who is served it |
+
+The field exists because of `knowledge_pages` and `knowledge_page_links`.
+`GET /api/knowledge/pages` and `GET /api/knowledge/links` filter every row
+they return through the caller's scope (`canSee` — for a link, at both ends);
+the
+generic door does not, cannot — it has no principal scope and no reason to
+believe a column called `path` is a vault path — and would have handed the
+whole index, and the whole graph, to anyone who could reach `/api/q/<name>`,
+which includes the capture owner token that is `403` on `/api/knowledge/*`. One endpoint per
+necessary operation (ruled 2026-09-19): the filter is not optional if there is
+no second way in.
+
+**The owner is served it.** Ruled 2026-09-19 ("the owner should always have
+access to everything") and shipped as P4: the filter `expose: route`
+protects is a filter on what an AGENT may see of the vault, and the owner's
+scope IS the whole vault — so the scoped route and this one return them the
+same rows, and the refusal was only ever a second door to remember. The
+**capture owner token is not the owner** (the plan's tier 0, capture-only,
+and `403` on `/api/knowledge/*`): for it, and for every other credential,
+this door is unchanged byte for byte. That is the one credential the rule
+was really about, and it is still refused.
+
+Two properties worth stating:
+
+- **The refusal is the unknown-query refusal, byte for byte** — same code,
+  same status, same absent message, and no `reason` on the wire. A
+  distinguishable `403` would make this door an oracle for which route-only
+  queries a build has.
+- **It is declared on the manifest, not in the server** (invariant 5). The
+  server asks the store (`QueryStore.exposure(name)`), so a list of names
+  inside the console cannot drift from the files, and an instance overlaying
+  `knowledge_pages.yaml` keeps the property by keeping the line — dropping it
+  re-opens the unscoped door, which is a change you make in your own vault
+  with your eyes open. `apps/console/test/seed-queries.test.ts` pins the set
+  of route-backed seed queries so that adding one is deliberate.
+
+`expose` says nothing about *permission*: what a caller may reach is still
+decided by the surface it calls (this door's principal gates, `mcp-brain`'s
+`queries: true` grant for `queries_run`).
+
+**It is honoured on both doors.** `queries_run` on the `/mcp` mount asks the
+same `QueryStore.exposure(name)` and refuses a route-backed query with the
+same unknown-query refusal, and `queries_list` does not name one
+(`packages/mcp-brain/src/queries-tools.ts`). It had to: a `queries: true`
+grant is a separate axis from the knowledge tier, so until 2026-09-19 an
+agent at tier `none` — an agent `knowledge_search` will not tell a single
+title — could page the entire vault index and the entire link graph through
+`queries_run`, and a `tier: areas` agent could read the titles of every area
+it was never granted. The ruling closed it: *"generally yes, I think all
+queries including /mcp should be scoped and follow the same token based
+enforcements."*
+
+The scoped door that replaces it is `knowledge_list`, which runs the SAME two
+named queries through the SAME filter — `canSeeUnder`, now lifted into
+`packages/mcp-brain/src/knowledge.ts` so that this file's `canSee` and every
+`knowledge_*` tool are one implementation rather than two that agree today.
+Tier `index` lists titles anywhere in the index and reads nothing; tier
+`areas` lists, reads and traverses links inside its prefixes, both ends of
+every edge; tier `none` gets nothing (`docs/ops/assistant-tools.md`).
+
+## `/api/knowledge/*` — the vault read path (`user` principal)
+
+```
+GET /api/knowledge/search?q=&mode=keyword|semantic|hybrid&limit=
+200 {"q":"sleep","mode":"hybrid","hits":[{"path","title","description","snippet","score","source"}],
+     "degraded":null,"as_of":"…"}
+GET /api/knowledge/page?path=Areas/Health/sleep.md
+200 {"path","content","sha256","bytes","as_of"}
+GET /api/knowledge/pages?area=&prefix=&limit=&offset=
+200 {"pages":[{"path","area","title","description","status","modified","indexed_at"}],
+     "area":null,"prefix":"Areas/Health","limit":100,"offset":0,"as_of":"…"}
+GET /api/knowledge/links?path=Areas/Health/sleep.md&limit=&offset=
+200 {"path":"Areas/Health/sleep.md",
+     "links":[{"direction":"outgoing","path","kind","title","description","status","resolved"}],
+     "limit":100,"offset":0,"as_of":"…"}
+400 q / mode / limit / offset / a filter's shape / a missing path — by name;
+    or, for the OWNER, a path this door does not serve (the classification)
+404 the page is not there, OR — for anyone but the owner — is not knowledge
+    or is outside their grant (indistinguishable, on purpose)
+503 no vault bridge configured; or, for `pages`/`links`, the named query is not loaded
+```
+
+The console has held a vault reader, lister and searcher since Phase 6 and
+wired them only into `mcp-brain`'s tools — so knowledge was reachable by an
+**agent** over MCP and by nothing the owner holds. These routes are that gap
+closed, and the two that proxy are deliberately thin: the reconciler's `GET
+/vault/search` and `GET /vault/read`, which serve them already
+(`docs/ops/reconciler.md`, `docs/ops/knowledge-search.md`). Not streamed — the
+bridge's hit list is bounded, a page is one file, and the list is one bounded
+window of an index.
+
+`mode` omitted means **"choose for me"** at the bridge (hybrid where vectors
+exist, keyword otherwise) rather than a default invented in the console.
+`limit` defaults to 20 and is capped at **100**, which is the bridge's own
+ceiling: there is no offset and no cursor, and RRF fuses over a pool, so an
+offset would re-rank rather than continue. "Top 100, honestly" is the
+contract. `degraded` reaches the client rather than being swallowed (P5):
+"keyword only — the embedder is down" is a **fact the UI states**, not an
+error.
+
+**What the bridge does not refuse, this does.** The reconciler's `/vault/read`
+confines a path to the instance repo and stops there — it will serve
+`.metistry/state/.env`, `.metistry/compute.yaml` or the root `CLAUDE.md`,
+because `metistry update` and `metistry compute` write those files through the
+same bridge and a read gate would break the write path. Knowledge is a
+narrower thing than "a file in the instance repo", so this door serves
+knowledge and nothing else — `classify(path) === "knowledge"`, which is
+core's `isVaultPath`: no traversal, no leading slash, nothing inside a
+dot-directory, not `Artifacts/`, not the root `CLAUDE.md` / `README.md`. The
+same predicate `mcp-brain`'s `validKnowledgePath` applies to agents and the
+indexer applies to the walk, so the three cannot drift.
+
+**For the owner that is a classification, not a refusal** (P4, ruled
+2026-09-19: "the owner should always have access to everything"). Their own
+`Artifacts/` and `.metistry/` are not pages this door has, and it says so —
+`400`, `reason: "not_knowledge"`, and `needs.door` naming the door that does
+have them:
+
+```
+GET /api/knowledge/page?path=Artifacts/report.pdf
+400 {"error":{"code":"invalid_request","message":"`Artifacts/report.pdf` is an artifact, not knowledge — …"},
+     "reason":"not_knowledge","needs":{"door":"GET /api/artifacts"}}
+
+GET /api/knowledge/page?path=.metistry/state/.env
+400 {"error":{"code":"invalid_request","message":"`.metistry/state/.env` is machinery, not knowledge — …"},
+     "reason":"not_knowledge","needs":{"door":"the file itself"}}
+```
+
+Not `404`, which would be this door claiming the file is not there, and not
+`403`, which would be claiming a permission question nobody asked. The
+machinery's "door" is the file itself, on disk and in git: **no door serves
+it as a page, and not one byte of it crosses here.** A path that genuinely
+has no page is still a plain `404`.
+
+**For everyone else the answer is one sentence, whatever the reason.** Out
+of scope, a draft, machinery, an artifact, a path that was never written:
+`404`, `no such page …`, no `reason`, no `needs`. "Refused" and "absent"
+have to be indistinguishable from outside, or the route is an oracle for
+what exists where the caller cannot look. An agent asking for the same path
+as the owner above still gets the one uniform
+sentence, byte for byte the same as for a path that is not there.
+
+**Grant areas.** All four routes filter through one predicate (`canSee(path,
+scope)`): is this vault content at all, *and* does it fall under the scope's
+areas. `links` applies it twice, once per end of an edge. A hit the scope does
+not cover is **dropped**, never returned with a flag — a path is the sensitive half of a hit, and a filtered list must not
+become a directory listing of what was filtered. The only principal that
+reaches these routes today is `user`, whose scope is the whole vault (which is
+still not "every path": the `isVaultPath` half applies to the owner too) — and
+that scope is **derived from the credential** (`knowledgeScopeOf`), never a
+constant at the call site, because a filter is only as honest as the scope it
+is handed. An **agent** reaches knowledge under its grants on the `/mcp`
+mount —
+`knowledge_search`, `knowledge_read`, `knowledge_list`, `knowledge_grep`,
+where `knowledgeScope(principal)` produces exactly this shape from
+`grants.areas` — and is the uniform `403` here, like everywhere outside
+`/capture` and `/mcp` (CRIT-7). The narrowed form is implemented and tested so
+that a narrower console principal, if one is ever minted, inherits the filter
+rather than reinventing it at the call site.
+
+**`GET /api/knowledge/pages` is the first of the two that are not proxies**
+(the link graph below is the other). A page's bytes and a search ranking are
+not derived state — there is no column holding a note
+body — so those two go to the bridge. A page LIST *is* derived
+(`knowledge_files` is the reconciler's own index, rebuilt from the vault by a
+walk), so invariant 3 sends it through the named query
+`seed/queries/knowledge_pages.yaml`, executed by `packages/queries` like every
+other read. The route holds **no SQL**; a route that reached for `pool.query`
+would be a second read path. No migration was needed: `0009_brain.sql` already
+added `title`, `description`, `draft` (`docs/product/app-ux-plan.md` §6.1).
+
+| Parameter | Meaning |
+| --- | --- |
+| `area` | the **derived** grouping, matched exactly. There is no area column — everywhere else in the system an area is a vault prefix (`Areas/Fsl`), so the column is the first two segments under `Areas/` *at any depth* (`Areas/Health/2026/sleep.md` is in `Areas/Health`) and the first segment anywhere else (`Journal`, `Me`, `Inbox`). A vault-root file like `now.md` has `null` — not `""`, so blank can keep meaning "every area" |
+| `prefix` | a path prefix, **segment-wise**, the same semantics an area grant has: `Areas/Health` covers `Areas/Health/…` and never `Areas/Healthcare/…`, because a substring match is how a prefix filter leaks. A trailing slash is the same prefix; `/` is the whole vault |
+| `limit` | default **100**, ceiling **500** — this route's own, not the bridge's 100: scalar columns over an indexed primary key are not a fused ranking. Out of range is a `400` naming the ceiling, never a silent clamp |
+| `offset` | non-negative. The order is `path COLLATE "C"` ASC — the primary key, in **byte** order, so the window is total and stable and *the same on every cluster*. A bare `ORDER BY path` sorts in the database's own locale, and a glibc locale collation ignores punctuation at the primary level: `Areas/Health/sleep.md` lands before `Areas/Healthcare/…` under `C` and after it under `en_US.UTF-8`, so a client paging with `offset` would see a page twice or not at all depending on which machine the cluster was initialised on. (`mtime` is nullable and sync churns it constantly, which is why `0001` uses the content hash and not mtime to decide re-embedding, and why it is not the sort key) |
+
+**Never in the list, and no parameter turns it off:** a `draft` note (the same
+clause `mcp-brain` applies at every tier, so the owner's list and an agent's
+index cannot disagree about what a draft is) and a `conflict` row (a file the
+reconciler could not settle — its title and mtime are not facts yet). `status`
+comes back so `dirty` — edited since the last walk — is visible rather than
+guessed at.
+
+**There is no `total`.** A count over the unscoped filter is exactly the
+"directory listing of what was filtered" the grant-areas rule below refuses to
+publish. Page until a window comes back shorter than `limit`. For a narrowed
+scope that can stop early, and that is the deliberate trade: the alternative
+publishes the size of what the caller may not see.
+
+**A filter pointing outside the scope is an empty `200`, not a `400`** — the
+same reasoning as the `404` above: refusing `prefix=.metistry` by name would
+tell the caller which prefixes exist. Only the filter's *shape* is validated
+(length, no backslash, no NUL); what it may select is decided row by row by
+`canSee`. Rows reach the client **unprojected**, because an instance may
+overlay `knowledge_pages.yaml` with columns of its own (D4) and a projection
+in the console would swallow them; the one thing the route insists on is a
+`path` it can judge, and a row without one is dropped.
+
+**This is the only unscoped-shaped door onto that query.**
+`knowledge_pages.yaml` declares `expose: route`, so `GET
+/api/q/knowledge_pages` answers the `404` it answers an unknown name with —
+and so does `queries_run` on `/mcp` — one endpoint per necessary operation
+(ruled 2026-09-19). The owner is served at both doors since P4 (above);
+every other credential, the capture owner token included, is not. The other door onto the same rows is `knowledge_list`,
+which applies the same `canSeeUnder` to an agent's grant that this route
+applies to the owner's scope. The generic door has no `canSee` filter and cannot have one: it
+does not know that a column called `path` is a vault path, and it has no
+principal scope to judge it against. Two doors onto the same rows would have
+made the filter on this one optional, and it was reachable — the capture owner
+token is `403` here and has always been admitted on `/api/q/<name>`. The
+section above it describes the field.
+
+**`GET /api/knowledge/links` is the fourth door, and the same kind of thing.**
+The wikilink graph is derived too — the reconciler parses it out of the notes
+on every walk and re-resolves a note's edges whenever the note or the path set
+moves — so it is the named query `seed/queries/knowledge_page_links.yaml`,
+`expose: route` for the same reason, over `knowledge_links` (`0001_init.sql`:
+`from_path`, `to_path`, `kind`, primary key on all three, index on `to_path`,
+so both directions are one indexed lookup). No migration.
+
+| Field | Meaning |
+| --- | --- |
+| `path` (parameter) | **required** — the page whose links these are. A path the caller may not see is the same `404` a missing page gets: "this page has four backlinks" is a fact about a page. For the owner, a path that is not knowledge is the `400` classification the page route gives, in the same words — the two doors cannot drift |
+| `direction` | `outgoing` — this page links there; `incoming` — that page links here |
+| `path` (row) | always **the other end** of the edge. One list, one column, one predicate — two arrays would be two chances to filter them unevenly |
+| `kind` | `wikilink`, `frontmatter` or `embed`. The same target reached two ways is **two edges**, so a client's row identity is the triple and not the path |
+| `resolved` | whether the index holds a settled page there. `false` is an unresolved wikilink — a note not written yet, which is how a vault gets written; render it the way Obsidian does rather than dropping it |
+| `title` / `description` / `status` | the target's, where the index knows it; the title falls back to the basename, decided server-side |
+
+**Both ends are scoped**, which is the whole of the security story here: the
+`path` parameter is checked before anything runs, and every row's `path` goes
+through the same `canSee`. So a page inside a grant that links *out* of it,
+and a page outside a grant that links *in*, both come back dropped rather than
+listed — a backlink must not report the existence of a note in an area the
+caller was never given.
+
+**Never in the list:** an edge whose other end is a `draft` or an unsettled
+`conflict`, at either end and at every tier — the same rule the page list
+applies, so a draft cannot be discovered through the graph after being hidden
+from the list. Dropped rather than blanked: a row saying "there is something
+here you may not see" is the disclosure the rule exists to prevent.
+
+Ordered **outgoing first, then by path in byte order, then by `kind`** — the
+link table's primary key read the other way round, so the order is total and
+`limit`/`offset` cannot repeat or skip an edge. `limit` defaults to 100 with a
+ceiling of 500, like the page list. There is no `total`, for the page list's
+reason. A page that does not exist is an empty `200`, not a `404`: it has no
+links, and "refused" and "absent" stay indistinguishable.
+
+## `GET /api/commands` — the composer's list, generated (`user` principal)
+
+```
+GET /api/commands
+200 {"commands":[{"id":"/status","description":"Work items not yet closed, newest first",
+                  "routes_to":"fast_path","tier":null,"model":null,"effort":null,
+                  "query":"open_work","takes_argument":false}],
+     "agents":[{"id":"@drey","description":"Drey","kind":"external",
+                "present":true,"last_seen_at":"…"}],
+     "as_of":"…"}
+503 no rules.yaml is loaded (METISTRY_RULES_FILES)
+```
+
+`docs/product/ux-direction.md` ruled that discoverability is **generated, not
+hand-maintained**, and until this route existed every client shipped a static
+array with the gap marked in code — so any instance whose `rules.yaml`
+differed from the shipped defaults was lied to by its own menu. This is the
+one source: the instance's own router rules plus the agent registry.
+
+What it derives, and from where:
+
+| entry | from |
+| --- | --- |
+| `/note` | the router itself (`router.ts`) — a file, an inbox row, an instant ack, no model |
+| `/<deep_alias>` | `rules.commands.deep_alias`, so an instance that calls it `/think` gets `/think` |
+| `/model` | the general override, listing the instance's own tier names |
+| one per `fast_path` rule | the rule's `match`, **only** where the pattern spells a command unambiguously |
+
+`routes_to` is the router's own vocabulary (`note`, `fast_path`,
+`model_override`); a model route carries the `tier` it takes and the
+`model`/`effort` that tier resolves to **right now** — `compute.yaml`'s
+assignments when it has any, else `rules.yaml`'s `tiers:` block — so a
+reassignment shows in the menu without a restart. A fast path carries the
+named query that answers it, and its one-line `description` **is that query's
+own description**, so there is nothing to keep in sync.
+
+**It refuses to guess.** A `fast_path` rule is a regex, and most regexes are
+sentences: `^what('| i)?s (my |the )?(status|open work)\b` matches real
+messages and is not something anybody types with a slash. So only `^/name…`
+and `^/(a|b|c)…` yield commands; `^/s[ua]m`, `^/st(at)?us` and a branch
+containing a space yield **nothing**, and one unreadable branch discards the
+whole rule. A rule that yields no command is not a bug and is not hidden — it
+is a rule you reach by writing the sentence. `takes_argument` says whether the
+router needs text after the command.
+
+**Order is deterministic** (the same discipline invariant 4 applies to the
+router): `/` commands first, then `@` agents, each group sorted by `id`. That
+is what a menu opened with nothing typed shows; the *client* re-ranks the same
+list by prefix-then-substring-then-recency against the token being typed
+(`design-system.md` §3.6). First match wins among `fast_path` rules, exactly
+as in the router, so a later rule re-using a word does not overwrite it.
+
+Agents come from the registry, `revoked` rows dropped. `present` means an
+approved, unrevoked row that has authenticated at least once — a **pending**
+enrolment (S2) is listed and never `present`, because it authenticates nothing
+until the owner approves it.
+
+An integration test routes every command the endpoint offers back through
+`route()` and asserts the decision matches what the entry claims. Nothing else
+in the repo holds the menu and the router together.
+
+## `GET /api/runs/:id` — one row of the ledger (`user` principal)
+
+```
+GET /api/runs/123
+200 {"run":{…},"as_of":"…"}
+404 no run 123 in the ledger
+503 the named query `run_detail` is not loaded
+```
+
+`activity_feed` gives every event a `ref` of `runs:<id>`; this is what the tap
+on it opens. Through the `run_detail` named query like every other read
+(invariant 3) — component, kind, timing, provider/model, token and cache
+counts, cost, the error if it failed, `meta`, and:
+
+- **`tool_calls`** (plus `tool_calls_total`, `tool_calls_failed`) — the calls
+  the same reply made, joined **exactly** on `meta.turn_id` (the id the
+  assistant stamps on every brain tool call while answering one message,
+  `docs/ops/assistant-tools.md`) or `meta.message_id`. A run with neither
+  reports none, which is the honest answer: a ±N-minute window around a
+  session would attribute another reply's calls to this one.
+- **`shadow_*`** — the candidate provider/model, the deterministic agreement
+  score, whether the tool-call sequence matched, the answer similarity, and
+  what the shadow cost (`docs/ops/compute.md` "Shadow mode"). `null` on every
+  unshadowed turn, which is also how "shadow mode is not configured" reads.
+  The **transcripts themselves are not returned** — they are two full replies,
+  and the drill-down wants the measure, not the text.
+
+There is still no `runs` *list* endpoint: the timeline is `activity_feed` /
+`runs_summary`, and the whole ledger is `GET /api/runs/export` above.

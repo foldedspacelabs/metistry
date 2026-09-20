@@ -420,6 +420,37 @@ export function launchdCommands(label: string, plistPath: string, uid: number): 
   ];
 }
 
+/**
+ * `launchctl list` → the set of labels launchd currently has loaded in this
+ * user's domain. Tab-separated `PID<TAB>Status<TAB>Label`, one header line.
+ *
+ * One call answers "is any of these loaded?" for every label at once, which
+ * is the point: asking per label costs a subprocess per label, and `up`
+ * asks about eight of them on every run.
+ */
+export function parseLaunchctlList(stdout: string): Set<string> {
+  const labels = new Set<string>();
+  for (const line of stdout.split("\n")) {
+    const label = line.split("\t")[2]?.trim();
+    // the header's third column is literally "Label"; a real job's is a
+    // reverse-DNS name, and one could in principle be called that — harmless,
+    // since a spurious member only costs one tolerated bootout
+    if (label && label !== "Label") labels.add(label);
+  }
+  return labels;
+}
+
+/**
+ * Every label loaded right now, or `undefined` when launchd could not be
+ * asked. Undefined is not "nothing is loaded": callers must fall back to
+ * doing the unconditional thing, never to doing nothing.
+ */
+export async function loadedLabels(r: StepRunner): Promise<Set<string> | undefined> {
+  const p = await r.exec("launchctl", ["list"], { env: r.env });
+  if (p.code !== 0) return undefined;
+  return parseLaunchctlList(p.stdout);
+}
+
 /** How long a caller waits for `launchctl bootout` to finish before bootstrapping the same label again (25 × 200ms = 5s). */
 export const BOOTOUT_TRIES = 25;
 export const BOOTOUT_INTERVAL_MS = 200;

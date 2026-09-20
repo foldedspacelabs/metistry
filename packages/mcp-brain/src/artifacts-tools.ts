@@ -10,6 +10,7 @@
 import { z } from "zod";
 import { ArtifactsError, type ArtifactsService, type Principal } from "@foldedspacelabs/metistry-artifacts";
 import { done, fail, type Outcome } from "./outcome.js";
+import { trustOf } from "./principal.js";
 import { allProjects } from "./scope.js";
 import type { AgentPrincipal } from "./types.js";
 
@@ -21,7 +22,7 @@ export type Register = <S extends z.ZodRawShape>(name: ArtifactsToolName, descri
 
 /** The module's principal, from the bridge's: membership is what the credential said (server-side), never a tool argument. */
 export function toPrincipal(p: AgentPrincipal): Principal {
-  return { kind: "agent", id: p.id, projects: p.projects, all_projects: allProjects(p), agent_kind: p.kind === "internal" ? "internal" : "external" };
+  return { kind: "agent", id: p.id, projects: p.projects, all_projects: allProjects(p), agent_kind: trustOf(p) };
 }
 
 const artId = z.string().regex(/^art_[0-9A-HJKMNP-TV-Z]{26}$/);

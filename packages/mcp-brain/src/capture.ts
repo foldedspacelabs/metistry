@@ -159,8 +159,24 @@ export interface CaptureResult {
   replayed?: boolean;
 }
 
-/** The partial unique index of migration 0021 — one `inbox` row per vault path, whoever wrote the file. Must match the index's predicate exactly: Postgres infers the conflict target from it. */
-const VAULT_PATH_PREDICATE = `path LIKE '${INBOX_PREFIX}/%'`;
+/**
+ * The partial unique index — one `inbox` row per vault path, whoever wrote
+ * the file. Must match the index's predicate EXACTLY: Postgres infers the
+ * conflict target from it. Migration 0021 indexes `Inbox/%` (the flat
+ * layout) and 0015 still indexes `Knowledge/Inbox/%`, so the sink's own
+ * prefix decides which one this statement names — an instance that has not
+ * run `metistry migrate-layout` keeps its captures under the second.
+ *
+ * The prefix reaches SQL as text, so it is checked rather than trusted: it
+ * comes from a frozen table in core today, and a path-shaped assertion
+ * costs nothing and keeps that true (invariant 8).
+ */
+const SAFE_PREFIX_RE = /^[A-Za-z][A-Za-z0-9._-]*(\/[A-Za-z][A-Za-z0-9._-]*)*$/;
+
+export function vaultPathPredicate(prefix: string): string | null {
+  if (!SAFE_PREFIX_RE.test(prefix)) return null;
+  return `path LIKE '${prefix}/%'`;
+}
 
 /** Write the capture through `sink` (a directory path is the bare `dirSink`) and insert the triage row. */
 export async function captureToInbox(db: Db, sink: CaptureSink | string, input: CaptureInput): Promise<CaptureResult> {
@@ -179,8 +195,9 @@ export async function captureToInbox(db: Db, sink: CaptureSink | string, input: 
   // note, a `git pull`) and could have seen this one in the millisecond
   // between the write and this insert. Whoever writes second refines the
   // row — the capture knows more (source, mime, the credential) than a scan.
-  const conflict = rel.startsWith(`${INBOX_PREFIX}/`)
-    ? `ON CONFLICT (path) WHERE ${VAULT_PATH_PREDICATE} DO UPDATE SET
+  const predicate = rel.startsWith(`${dest.prefix}/`) ? vaultPathPredicate(dest.prefix) : null;
+  const conflict = predicate
+    ? `ON CONFLICT (path) WHERE ${predicate} DO UPDATE SET
          source = EXCLUDED.source, mime = EXCLUDED.mime, note = EXCLUDED.note, sha256 = EXCLUDED.sha256,
          source_agent = EXCLUDED.source_agent, idempotency_principal = EXCLUDED.idempotency_principal,
          idempotency_key = EXCLUDED.idempotency_key, status = 'new', proposal = NULL, triaged_at = NULL`

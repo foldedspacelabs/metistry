@@ -72,6 +72,42 @@ directory, copy `seed/` into a temp dir and point at that.
 from the checkout's directory name, so parallel worktrees never drop each
 other's database.
 
+### Which database am I about to touch
+
+`ops/scripts/migrate.sh` and `ops/scripts/test-db.sh` both resolve a target
+database from layered `.env` sourcing, and a 2026-09-19 incident showed that
+resolution failing quietly: a shell that had `METISTRY_TEST_DB_NAME` set but
+not `METISTRY_DB_NAME` fell through to the built-in default, which happened
+to be the live `metistry` database, and `migrate.sh` applied a migration
+there. Both scripts now refuse rather than guess:
+
+- **`migrate.sh`** refuses (exit 2) when `METISTRY_TEST_DB_NAME` is set in the
+  environment and the resolved target is a different name — a shell that has
+  a scratch name set is a test shell, and must never touch anything else by
+  omission. It also refuses when the target's value came from the **install's
+  own** `.metistry/state/.env`, unless run with `--install` — a human operator
+  confirming that yes, this really is the machine to run it on (e.g. the
+  manual step in `docs/ops/migrate-compose-to-launchd.md`). `metistry update`
+  never shells out to this script at all — it re-implements the same runner
+  in `packages/cli/src/migrate.ts` against the `pg` driver directly — so
+  `--install` has nothing to do with that path.
+- **`test-db.sh`** refuses outright, with no override flag, if
+  `METISTRY_TEST_DB_NAME` would resolve to the same name the install's own
+  `.metistry/state/.env` configures — there is no legitimate reason for a
+  script whose entire job is `DROP DATABASE` to be pointed at one.
+
+Either script takes `--print-target`, which resolves the target and prints
+which database it is, where that name came from, and whether the run would
+be refused — without connecting to Postgres at all. Run it first if you are
+ever unsure what a shell would do:
+
+```sh
+$ ops/scripts/migrate.sh --print-target
+target database: metistry_test_guard
+source: environment
+would run: yes
+```
+
 Integration suites must therefore survive **both** a freshly created database
 and a re-run against one they have already written to (`pnpm test:unit`, or
 vitest invoked directly). Two ways to get there:
@@ -89,3 +125,68 @@ vitest invoked directly). Two ways to get there:
 
 A suite that truncates must carry that refusal. There is no version of this
 where a test decides at runtime that some database is probably fine to empty.
+
+It must also never **wait** to truncate. TRUNCATE takes ACCESS EXCLUSIVE on
+every table it names, left to right; a sibling file's `DELETE FROM work …`
+takes `work` and then `proposals` (the 0018 foreign key's referential check),
+and a sibling's `INSERT INTO proposals …` takes the same two the other way
+round. No ordering of the list escapes that: some sibling always holds the
+second lock and wants the first, Postgres calls it a deadlock and kills one of
+the two — as readily the innocent sibling as the reset. So the reset runs under
+`SET LOCAL lock_timeout`, well inside the server's 1s `deadlock_timeout`, and
+retries. The cycle is then never around long enough to *be* a deadlock: the
+reset lets go, the sibling's statement finishes, the next attempt walks
+through.
+
+Assertions follow the same rule as cleanup: **count your own rows**. A
+`SELECT count(*) FROM inbox` taken before and after an action is one sibling
+insert away from failing, and proves nothing about this suite;
+`… WHERE source_agent = <this suite's agent>` says the same thing and cannot
+race.
+
+## Checks that are not tests
+
+Some rules are easier to enforce over the whole tree than to remember in each
+package. Those live in `ops/scripts/`, run in CI before (or just after) the
+build, and have their own unit tests under `ops/scripts/test/`
+(`node --test 'ops/scripts/test/*.test.mjs'`, which CI runs as one step).
+
+`node ops/scripts/check-tool-surface.mjs` is the tool-surface budget. The
+manifest schema states the rule — `discovery: lazy` "is for bridges past >20
+tools / >5k definition tokens" (`packages/core/src/manifest.ts`) — but it was
+enforced only by `packages/mcp-brain`'s own test, on itself. The script checks
+every bridge manifest under `apps/` and `packages/`, and prints the numbers on
+every run so the headroom is read rather than inferred:
+
+```
+tool surface (budget: >20 tools / >5000 definition tokens — packages/core/src/manifest.ts)
+
+  bridge    tools         ≈tokens  headroom to the line
+  --------  ------------  -------  ------------------------------------------
+  apple-fm  2 (declared)  n/a      18 tools
+  brain     26            4224     776 tokens, 6 tools OVER (acknowledged 26)
+  eventkit  4 (declared)  n/a      16 tools
+```
+
+- **How a bridge is measured.** It exports `toolSurface()` from its package
+  entry, the same way every bridge exports `check()` so `metistry doctor` can
+  be generic. `packages/mcp-brain/src/surface.ts` is the reference: it stands
+  up the real server and reads a real `tools/list`, so the number is
+  production's definitions and not a snapshot. A bridge without that export
+  (`eventkit` and `apple-fm` are REST surfaces, never listed to a model) is
+  reported **declared-only** — the manifest's `exposes:` count is still
+  checked, its token cost prints `n/a` rather than a guess.
+- **It runs after `pnpm -r build`**, since it imports what each bridge ships.
+  An unbuilt bridge is an error naming the command that fixes it, not a pass:
+  a check that quietly degrades to "nothing to measure" is not a check.
+- **Tokens are the budget; the tool count is a ratchet.** An eager bridge past
+  5k definition tokens fails. Past 20 tools it fails too *unless* the number is
+  recorded in `COUNT_ACKNOWLEDGED` in the script — `brain` sits at 26 there,
+  which is the "noted, not acted on" its manifest has carried. So a bridge may
+  stay where it was acknowledged, and the **next** tool fails the check until
+  somebody trims the surface, switches the manifest to `discovery: lazy`, or
+  moves the ceiling with a reason. That has happened exactly once: 25 → 26 on
+  2026-09-19 for `request_access`, with the reasoning written beside the
+  number rather than in a commit message. `discovery: lazy` has already made that
+  decision, so the budget does not bind on it.
+- `--json` prints the rows and the findings instead of the table.

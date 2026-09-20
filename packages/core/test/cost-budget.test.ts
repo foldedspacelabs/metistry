@@ -52,6 +52,67 @@ describe("usage → cost", () => {
     expect(costOf(usageFromResponse({ prompt_tokens: 9e6, cost: 5 }), local, "whatever")).toEqual({ cost_usd: 0, source: "local" });
   });
 
+  it("cached prompt tokens come off whatever field the provider put them in, and tokens_in is the whole prompt either way", () => {
+    // OPENAI-SHAPED (OpenRouter and every /v1/chat/completions endpoint):
+    // `prompt_tokens` is ALREADY the whole prompt, cached share included, and
+    // the split lives in the details block.
+    expect(usageFromResponse({ prompt_tokens: 1000, completion_tokens: 20, prompt_tokens_details: { cached_tokens: 600 }, cache_write_tokens: 300 }))
+      .toEqual({ tokens_in: 1000, tokens_out: 20, cache_read: 600, cache_write: 300 });
+    // ANTHROPIC-NATIVE (/v1/messages): `input_tokens` is the FRESH remainder
+    // and the two cache counts sit beside it, so the whole prompt is the sum —
+    // 100 + 600 + 300. A row that recorded 100 here would say a turn which
+    // cached 90 % of its prefix was a tenth the size of the same turn on
+    // OpenRouter, and every ratio over `tokens_in` would be wrong.
+    expect(usageFromResponse({ input_tokens: 100, output_tokens: 10, cache_read_input_tokens: 600, cache_creation_input_tokens: 300 }))
+      .toEqual({ tokens_in: 1000, tokens_out: 10, cache_read: 600, cache_write: 300 });
+    // The shape is read off the ANCHOR field, never the provider's name: a
+    // gateway that sends `prompt_tokens` beside Anthropic's cache spellings
+    // has already included them, so they are not added a second time.
+    expect(usageFromResponse({ prompt_tokens: 1000, completion_tokens: 10, cache_read_input_tokens: 600, cache_creation_input_tokens: 300 }))
+      .toEqual({ tokens_in: 1000, tokens_out: 10, cache_read: 600, cache_write: 300 });
+  });
+
+  it("a response that says nothing about the cache is undefined, not zero — the two are different findings (OPEN-6)", () => {
+    // `undefined` = "this provider reported no such field", which is how a
+    // wrong guess at the field name shows up; 0 = "reported, and none of the
+    // prompt was cached", which is a prefix that is not stable. The
+    // cache-report reads the difference, so it must survive normalisation.
+    const silent = usageFromResponse({ prompt_tokens: 1000, completion_tokens: 20 });
+    expect(silent.cache_read).toBeUndefined();
+    expect(silent.cache_write).toBeUndefined();
+    const reportedZero = usageFromResponse({ prompt_tokens: 1000, completion_tokens: 20, prompt_tokens_details: { cached_tokens: 0 }, cache_write_tokens: 0 });
+    expect(reportedZero.cache_read).toBe(0);
+    expect(reportedZero.cache_write).toBe(0);
+  });
+
+  it("the pricing: table prices the prompt in three parts — fresh, cache read, cache write", () => {
+    // 100k fresh at $3/M, 800k read at 0.1×, 100k written at 1.25×, and no
+    // output: the whole point of caching is that the same prompt costs a
+    // tenth the second time, and the row has to show it.
+    const u = usageFromResponse({ prompt_tokens: 1_000_000, completion_tokens: 0, prompt_tokens_details: { cached_tokens: 800_000 }, cache_write_tokens: 100_000 });
+    expect(costOf(u, cloud, "anthropic/claude-sonnet-5")).toEqual({ cost_usd: 0.3 + 0.24 + 0.375, source: "pricing" });
+    // and with nothing cached it is exactly the pre-caching arithmetic
+    expect(costOf(usageFromResponse({ prompt_tokens: 1_000_000, completion_tokens: 0 }), cloud, "anthropic/claude-sonnet-5")).toEqual({ cost_usd: 3, source: "pricing" });
+  });
+
+  it("a pricing: entry's own multipliers win over the Anthropic-via-OpenRouter defaults", () => {
+    const other: Provider = {
+      ...cloud,
+      pricing: { "some/model": { in_per_m: 10, out_per_m: 30, cache_read_multiplier: 0.5, cache_write_multiplier: 2 } },
+    };
+    const u = usageFromResponse({ prompt_tokens: 1_000_000, completion_tokens: 0, prompt_tokens_details: { cached_tokens: 500_000 }, cache_write_tokens: 200_000 });
+    // 300k fresh at $10/M + 500k at 0.5× + 200k at 2×
+    expect(costOf(u, other, "some/model")).toEqual({ cost_usd: 3 + 2.5 + 4, source: "pricing" });
+  });
+
+  it("a provider that reports more cached tokens than prompt tokens cannot produce a negative charge", () => {
+    const u = usageFromResponse({ prompt_tokens: 1000, completion_tokens: 0, prompt_tokens_details: { cached_tokens: 9_000_000 }, cache_write_tokens: 9_000_000 });
+    const r = costOf(u, cloud, "anthropic/claude-sonnet-5");
+    expect(r.source).toBe("pricing");
+    expect(r.cost_usd).toBeGreaterThan(0);
+    expect(r.cost_usd).toBeLessThanOrEqual((1000 / 1_000_000) * 3); // never more than the uncached prompt
+  });
+
   it("an off-machine call nothing can price is $0 with source `unknown` — visible, never a guessed rate", () => {
     const r = costOf(usageFromResponse({ prompt_tokens: 100, completion_tokens: 10 }), cloud, "some/unlisted-model");
     expect(r).toEqual({ cost_usd: 0, source: "unknown" });

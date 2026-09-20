@@ -20,6 +20,26 @@ export {
 export { parseDotEnv, loadDotEnv, resolveProductDir, resolveSeedDir, productVersion } from "./env.js";
 export { parseArgs, parseAuth, syncDirection, main } from "./main.js";
 export {
+  createUi,
+  configureUi,
+  defaultUi,
+  colorLevel,
+  supportsUnicode,
+  terminalWidth,
+  statusName,
+  strip,
+  padTo,
+  visibleWidth,
+  ICONS,
+  MIN_WIDTH,
+  MAX_WIDTH,
+  type Ui,
+  type Spinner,
+  type StatusName,
+  type ColorLevel,
+  type IconName,
+} from "./ui.js";
+export {
   connectRepo,
   deviceFlow,
   parseRemote,
@@ -76,6 +96,7 @@ export { Keychain, serviceFor, keychainAccount, promptStdin, SERVICE_PREFIX } fr
 export { type Exec, type ExecOptions, type ExecResult, realExec, formatCommand } from "./exec.js";
 export { up, productSource, composeUp, installLaunchd, type UpOptions, type UpResult } from "./up.js";
 export { update, gitHead, hashHostJobs, trackedPathFor, writeLock, publishedPackages, type UpdateOptions, type UpdateResult } from "./update.js";
+export { cliShimPath, cliShimLinkHint, renderCliShim, writeCliShim } from "./cli-shim.js";
 export { runMigrations, listMigrationFiles, openMigrationSession, MIGRATION_LOCK_KEY, type MigrationSession, type MigrateResult } from "./migrate.js";
 export { parseLock, serializeLock, readLock, instanceLockPath, LOCK_FILENAME, type LockFile, type LockSource } from "./lock.js";
 export { renderPlist, parsePlistTemplate, loadPlistTemplates, launchdCommands, renderSystemdUnit, labelFor, logPathFor, serviceOf, withNamespace, LABEL_PREFIX, type PlistTemplate } from "./launchd.js";
@@ -111,3 +132,33 @@ export {
   type SeedDescription,
 } from "./runtime-install.js";
 export { StepRunner, StepFailed } from "./steps.js";
+// The `metistry compute` verbs (docs/ops/compute.md). Exported because the
+// CONSOLE drives the same ones over HTTP (`/api/compute*`,
+// docs/ops/console-api.md): `compute.yaml` is edited as a YAML document,
+// validated against core's schema, and written through the reconciler as
+// `user` in exactly one place, so the CLI verb and the app's Compute pane
+// cannot drift into two behaviours. `providers add`/`remove` are
+// deliberately NOT on this list — they take a secret, and secrets never
+// cross the console (apps/console/src/compute-routes.ts).
+export {
+  assign,
+  computeFiles,
+  computeReport,
+  instanceComputeFile,
+  modelsList,
+  parseAssignmentTarget,
+  parseBudgetAction,
+  parseBudgetTarget,
+  parseEffort,
+  providerTest,
+  renderComputeReport,
+  setBudget,
+  type AssignResult,
+  type AssignmentTarget,
+  type BudgetResult,
+  type BudgetTarget,
+  type ComputeOptions,
+  type ComputeReport,
+  type ModelsListResult,
+  type ProviderTestResult,
+} from "./compute.js";

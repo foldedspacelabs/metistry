@@ -98,6 +98,14 @@ export const DEFAULT_SCOPE: SecretScope = "instance";
  */
 export const GENERATED_SECRETS: Readonly<Record<string, string>> = {
   METISTRY_LOCAL_OWNER_TOKEN: "the console's local owner door — an install that predates it gets one here (docs/ops/auth.md)",
+  // The same bar, met for the same reason: its value means nothing outside
+  // this install, nobody pastes it anywhere, and without it NO caller may
+  // write a §4.7 protected path — so an install that predates the credential
+  // split would find `metistry update` refused until it had one. The other
+  // bridge tokens stay out of this table because a service was already
+  // started with them; nothing has been started with this one.
+  METISTRY_BRIDGE_TOKEN_RECONCILER_USER:
+    "the vault bridge's OWNER bearer — the only credential that may write .metistry/ (docs/ops/auth.md); restart the reconciler once it is minted",
 };
 
 function ruleFor(name: string): ScopeRule | undefined {
@@ -323,7 +331,7 @@ export async function syncSecrets(direction: SyncDirection, opts: SecretsOptions
   opts.out(`wrote ${changed.length} secret line(s) into ${target} from the Keychain (0600; every other line preserved): ${changed.join(", ") || "(none)"}`);
   if (migrated.length) opts.out(`copied from the user account to this instance's (${accounts.instance}), the old items left alone: ${migrated.join(", ")}`);
   for (const n of minted) opts.out(`minted ${n} — it was in neither the Keychain nor ${opts.envFile}: ${GENERATED_SECRETS[n]}`);
-  if (minted.length) opts.out(`restart the console for a freshly minted secret to take effect (\`metistry restart console\`).`);
+  if (minted.length) opts.out(`restart the service that reads a freshly minted secret for it to take effect — \`metistry restart console\`, and \`metistry restart reconciler\` for ${Object.keys(GENERATED_SECRETS).filter((n) => n.startsWith("METISTRY_BRIDGE_TOKEN_")).join(", ")}.`);
   if (missing.length) opts.out(`appended (no line existed): ${missing.join(", ")}`);
   if (skipped.length) opts.out(`not in the Keychain, left as they are: ${skipped.join(", ")}`);
   return { direction, changed, skipped, migrated, minted, wrote: target };

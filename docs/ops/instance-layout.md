@@ -13,7 +13,17 @@ the root, TitleCase, exactly where Obsidian already opens it.
     state/            (gitignored: .env, models/, sockets, all runtime)
   .obsidian/          (workspace* gitignored)
   Inbox/              (was Knowledge/Inbox/)
-  Journal/ Me/ now.md …   vault content, TitleCase, at the root
+  Journal/            the user's own daily note, `<date>.md` (one writer, §5.1)
+    Plan/             plan-tomorrow's file, one per evening — machine-owned
+    Fold/             the evening fold's file, one per day — machine-owned
+    Standup/          standup-draft's file, one per morning — machine-owned
+    Meetings/         the user's own meeting notes, `<date>-<topic>.md`
+  Templates/          Daily/Meeting/Plan/Standup/Fold/Weekly.md — user-owned,
+                      stamped by `metistry init` (docs/product/daily-flow-spec.md §6.1)
+  Me/                 profile.md + `Working Style.md` — the user's own facts
+                      and prose rules the routines read (§6.6); never assumed
+  People/ Projects/   empty until you add a page; nothing seeds one for you
+  now.md …            vault content, TitleCase, at the root
   Artifacts/          stays at the root, not indexed as knowledge
   CLAUDE.md           the assistant's operating instructions (was Knowledge/CLAUDE.md)
   README.md
@@ -73,6 +83,31 @@ instance repo's history like everything else invariant 1 depends on.
 `.metistry/state/` holds `.env`, Postgres data, model weights and sockets —
 exactly what `docker compose down -v` should be able to lose.
 
+**`.metistry/state/bin/Metistry`** (capital M, **launchd shape only**) is
+the supervisor's program-identity symlink to this install's node
+(`supervisorBinPath`), written by `metistry up`, never by hand, so System
+Settings shows the background item as "Metistry" rather than "node".
+
+**`.metistry/state/cli/metistry`** is the CLI shim
+(`packages/cli/src/cli-shim.ts`), written by `metistry up`/`metistry
+update`, never by hand: a POSIX script that already knows this install's
+product dir and instance dir, so `metistry <verb>` works without either
+resolved for it. `up` never puts it on `PATH` itself (invariant 2) —
+`docs/ops/cli.md`, "Getting `metistry` on your PATH", has the one-liner it
+prints instead. It is fine to lose either file the same way as the rest of
+`state/`: rerunning the verb that wrote it regenerates it.
+
+**Why two directories and not one.** macOS's default APFS volume is
+case-insensitive, so `bin/metistry` and `bin/Metistry` would be the SAME
+directory entry there — writing the cli shim into `state/bin/` under the
+launchd shape would collide with the supervisor's own symlink. `state/cli/`
+is a sibling directory the supervisor's symlink never touches, which
+removes the collision outright rather than working around it.
+`writeCliShim` still checks what is actually sitting at its path before
+writing — a symlink, or a file that does not look like a shim this install
+wrote, is left alone with a note — as a second line of defence, not the
+fix itself.
+
 ## Migrating an existing instance
 
 `metistry migrate-layout` carries an instance from the legacy layout to the
@@ -117,6 +152,28 @@ smaller step if you want the two moves in two commits
 
 New instances need none of this: `metistry init` writes the flat layout
 from the start.
+
+## Until the verb runs
+
+**A legacy instance keeps working on the 0.8.x line and nothing past it.**
+Every reader resolves the shape it is actually looking at — core's
+`resolveInstanceLayout(instanceDir)`, one `detectLayout` read and a string
+join after it — so `identity.yaml`, `rules.yaml`, `compute.yaml`,
+`deployment.yaml`, `metistry.lock`, `instances.yaml`, `state/.env`,
+`state/pg/`, `state/ports.yaml` and `Knowledge/Inbox/` are all found where a
+not-yet-migrated instance keeps them. The protected set (§4.7) and the
+knowledge walk cover the legacy machinery at the instance root
+unconditionally: on a legacy instance `identity.yaml` and `queries/` are the
+user's hand exactly as `.metistry/` is, and neither they nor the gitignored
+`state/` are indexed as notes. Writers are unchanged — `metistry init`
+stamps the flat layout and `migrate-layout` moves onto it; there is one
+layout to write and two to read.
+
+`metistry update` **refuses** to pin a version past 0.8.x onto a legacy
+instance, before it fetches anything, printing the `migrate-layout` line to
+run; `--allow-legacy` pins it anyway. That refusal is the guarantee's other
+half: compatibility that nothing tests past the line it was written for is
+not compatibility.
 
 ## The legacy layout, for reference
 

@@ -9,9 +9,9 @@ import pg from "pg";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { TasksService } from "@foldedspacelabs/metistry-tasks";
-import { EmbedUnavailableError } from "@foldedspacelabs/metistry-core";
+import { EmbedUnavailableError, mintToken } from "@foldedspacelabs/metistry-core";
 import { QueryStore } from "@foldedspacelabs/metistry-queries";
-import { createBrainServer, EAGER_TOOL_NAMES, sha256Text, type AgentPrincipal, type VaultWriteRequest } from "../src/index.js";
+import { createBrainServer, EAGER_TOOL_NAMES, sha256Text, TURN_ID_META_KEY, type AgentPrincipal, type VaultWriteRequest } from "../src/index.js";
 import { loadTestEnv } from "@foldedspacelabs/metistry-core/test-env";
 
 const { hasDb } = loadTestEnv(new URL("../../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
@@ -63,8 +63,8 @@ describe.skipIf(!hasDb)("mcp-brain (real db, real MCP client)", () => {
     return client;
   }
 
-  async function call(client: Client, name: string, args: Record<string, unknown> = {}): Promise<Parsed> {
-    const r = (await client.callTool({ name, arguments: args })) as { isError?: boolean; content: { type: string; text: string }[] };
+  async function call(client: Client, name: string, args: Record<string, unknown> = {}, meta?: Record<string, unknown>): Promise<Parsed> {
+    const r = (await client.callTool({ name, arguments: args, ...(meta ? { _meta: meta } : {}) })) as { isError?: boolean; content: { type: string; text: string }[] };
     const text = r.content[0]!.text;
     const nl = text.indexOf("\n");
     return { isError: !!r.isError, body: JSON.parse(nl === -1 ? text : text.slice(0, nl)), nudge: nl === -1 ? null : text.slice(nl + 1) };
@@ -215,9 +215,11 @@ cache_ttl: 0
     const alice = await connect("tok-alice");
     const bob = await connect("tok-bob");
 
-    // create outside membership is refused as not granted (a project you are not in is a write across the boundary)
+    // create outside membership is refused as not granted (a project you are not in is a write across the boundary).
+    // You NAMED the project, so this one is allowed to say which and who adds you — unlike every tasks_* by id,
+    // where a row outside your projects does not exist for you (below).
     const bad = await call(alice, "tasks_create", { title: "sneak", project: PB });
-    expect(bad).toMatchObject({ isError: true, body: { error: { code: "forbidden", message: "not granted" } } });
+    expect(bad).toMatchObject({ isError: true, body: { error: { code: "forbidden", message: expect.stringMatching(/^not granted — .* is not a member of project `.*`/) } } });
 
     const a1 = await call(alice, "tasks_create", { title: "A1", project: PA, idempotency_key: `${PA}-a1` });
     expect(a1.isError).toBe(false);
@@ -410,7 +412,9 @@ cache_ttl: 0
       ["knowledge_read", { path: "Areas/Itest/Alpha.md" }],
       ["knowledge_read", { path: "Areas/Itest/Nope.md" }], // absent AND ungranted: still "not granted"
     ] as const) {
-      expect(await call(alice, tool, args), tool).toMatchObject({ isError: true, body: { error: { code: "forbidden", message: "not granted" } } });
+      // "not granted", and nothing past it that could tell an absent page from an ungranted one:
+      // tier `none` may not list, so no area is ever named (the 2026-09-19 boundary).
+      expect(await call(alice, tool, args), tool).toMatchObject({ isError: true, body: { error: { code: "forbidden", message: expect.stringMatching(/^not granted/) } } });
     }
     await alice.close();
 
@@ -429,7 +433,25 @@ cache_ttl: 0
     expect(askedSemantic.isError).toBe(false);
     expect(askedSemantic.body).toMatchObject({ mode: "keyword", degraded: expect.stringContaining("no embeddings stored") });
     expect((await call(idx, "knowledge_search", { query: "%" })).body.hits).toEqual([]); // LIKE metacharacters are literal
-    expect(await call(idx, "knowledge_read", { path: "Areas/Itest/Alpha.md" })).toMatchObject({ isError: true, body: { error: { code: "forbidden" } } });
+    // Alpha is a real, settled row this tier can already see in the hits
+    // above — so the refusal names the area rather than the bare string
+    // (ruled 2026-09-19, PR #216 judgement call B).
+    const scoped = await call(idx, "knowledge_read", { path: "Areas/Itest/Alpha.md" });
+    expect(scoped).toMatchObject({
+      isError: true,
+      body: { error: { code: "forbidden", message: expect.stringContaining(`\`${AREA}\``) }, reason: "scope_required", grantedScope: AREA },
+    });
+    expect(scoped.body.error.message).toContain("request_access");
+    // a path merely shaped like one, never indexed, confirms nothing — the
+    // uniform "not granted" holds, with no area named either way
+    const guessed = await call(idx, "knowledge_read", { path: "Areas/Itest/DoesNotExist.md" });
+    expect(guessed).toMatchObject({ isError: true, body: { error: { code: "forbidden", message: "not granted" } } });
+    expect(JSON.stringify(guessed.body)).not.toContain("grantedScope");
+    // a draft is invisible at every tier (never listed, never searched) —
+    // guessing its exact path must not confirm it exists either
+    const draftGuess = await call(idx, "knowledge_read", { path: "Areas/Itest/Draft.md" });
+    expect(draftGuess).toMatchObject({ isError: true, body: { error: { code: "forbidden", message: "not granted" } } });
+    expect(JSON.stringify(draftGuess.body)).not.toContain("grantedScope");
     await idx.close();
 
     grant("tok-areas", { id: ALICE, grants: { tier: "areas", areas: [AREA] }, projects: [] });
@@ -600,7 +622,7 @@ cache_ttl: 0
     };
 
     const none = await connect("tok-alice");
-    expect(await call(none, "knowledge_list", {})).toMatchObject({ isError: true, body: { error: { code: "forbidden", message: "not granted" } } });
+    expect(await call(none, "knowledge_list", {})).toMatchObject({ isError: true, body: { error: { code: "forbidden", message: expect.stringMatching(/^not granted/) } } });
     await none.close();
 
     grant("tok-fs-index", { id: ALICE, grants: { tier: "index", areas: [] }, projects: [] });
@@ -636,12 +658,12 @@ cache_ttl: 0
     // vault content (Alpha/Beta/Draft/Gamma) was set up by the knowledge_list test just above.
 
     const none = await connect("tok-alice");
-    expect(await call(none, "knowledge_grep", { pattern: "banana" })).toMatchObject({ isError: true, body: { error: { code: "forbidden", message: "not granted" } } });
+    expect(await call(none, "knowledge_grep", { pattern: "banana" })).toMatchObject({ isError: true, body: { error: { code: "forbidden", message: expect.stringMatching(/^not granted/) } } });
     await none.close();
 
     grant("tok-fs-index", { id: ALICE, grants: { tier: "index", areas: [] }, projects: [] });
     const idx = await connect("tok-fs-index");
-    expect(await call(idx, "knowledge_grep", { pattern: "banana" })).toMatchObject({ isError: true, body: { error: { code: "forbidden", message: "not granted" } } });
+    expect(await call(idx, "knowledge_grep", { pattern: "banana" })).toMatchObject({ isError: true, body: { error: { code: "forbidden", message: expect.stringMatching(/^not granted/) } } });
     await idx.close();
 
     grant("tok-fs-areas", { id: ALICE, grants: { tier: "areas", areas: [AREA] }, projects: [] });
@@ -719,7 +741,7 @@ cache_ttl: 0
       ["knowledge_list", {}],
       ["knowledge_grep", { pattern: "alpha" }],
     ] as const) {
-      expect(await call(none, tool, args), `${tool} @ tier none`).toMatchObject({ isError: true, body: { error: { code: "forbidden", message: "not granted" } } });
+      expect(await call(none, tool, args), `${tool} @ tier none`).toMatchObject({ isError: true, body: { error: { code: "forbidden", message: expect.stringMatching(/^not granted/) } } });
     }
     // resources have no tool envelope, but the same tier rule holds: nothing listed, nothing readable
     expect((await none.listResources()).resources).toEqual([]);
@@ -730,12 +752,20 @@ cache_ttl: 0
     const idx = await connect("tok-matrix-index");
     expect((await call(idx, "knowledge_search", { query: "alpha" })).body.hits.map((h: any) => h.path)).toContain(inside);
     expect((await call(idx, "knowledge_list", { prefix: "Areas/Itest" })).body.entries.map((e: any) => e.path)).toContain(inside);
-    for (const [tool, args] of [
-      ["knowledge_read", { path: inside }],
-      ["knowledge_grep", { pattern: "alpha" }],
-    ] as const) {
-      expect(await call(idx, tool, args), `${tool} @ tier index`).toMatchObject({ isError: true, body: { error: { code: "forbidden", message: "not granted" } } });
-    }
+    // knowledge_read on a page it can already SEE (ruled 2026-09-19, PR #216
+    // judgement call B): not the bare "not granted" — a structured refusal
+    // naming the area that would unlock it, since existence is not a new leak.
+    const scopedRead = await call(idx, "knowledge_read", { path: inside });
+    expect(scopedRead).toMatchObject({
+      isError: true,
+      body: { error: { code: "forbidden", message: expect.stringContaining(AREA) }, reason: "scope_required", grantedScope: AREA },
+    });
+    // knowledge_grep is tier-gated before any single path is looked at — it
+    // is a content surface at every tier below `areas`, no exception, unchanged.
+    expect(await call(idx, "knowledge_grep", { pattern: "alpha" }), "knowledge_grep @ tier index").toMatchObject({
+      isError: true,
+      body: { error: { code: "forbidden", message: expect.stringMatching(/^not granted/) } },
+    });
     expect((await idx.listResources()).resources).toEqual([]); // resources carry the same "titles, never content" line
     await idx.close();
 
@@ -781,19 +811,45 @@ cache_ttl: 0
     const unknown = await call(hub, "queries_run", { name: "not-a-real-query" });
     expect(unknown).toMatchObject({ isError: true, body: { error: { code: "not_found" } } });
 
-    // turn_id (every brain tool takes it): lands in runs.meta.turn_id, the join key activity_feed exposes
-    await call(hub, "queries_list", { turn_id: "itest-turn-1" });
+    // turn_id: in NO tool's schema any more (turn-id.ts — 938 definition
+    // tokens for a field that is not a parameter), carried by the call's
+    // `_meta` instead. It still lands in runs.meta.turn_id, which is the join
+    // key activity_feed exposes, so the correlation is what is asserted here
+    // rather than the carrier.
+    // Unique per run, not a fixed literal: the scratch database is shared with every
+    // other suite (console's console-routes.integration.test.ts writes its own
+    // turn_id fixtures against the same `runs` table), so a hand-picked literal here
+    // can collide with somebody else's and make this test count their row instead.
+    const lastTurnId = async (tool: string): Promise<string | null> => {
+      const { rows } = await pool.query(`SELECT meta->>'turn_id' AS turn_id FROM runs WHERE component = $1 AND tool = $2 ORDER BY id DESC LIMIT 1`, [HUB, tool]);
+      return rows[0]!.turn_id;
+    };
+
+    const turnId = `itest-turn-${mintToken(8)}`;
+    await call(hub, "queries_list", {}, { [TURN_ID_META_KEY]: turnId });
+    expect(await lastTurnId("queries_list")).toBe(turnId);
+
+    // One release of compatibility, tolerated and NOT advertised: a client
+    // still passing it as an argument correlates exactly as before — the
+    // message is rewritten at the door, so the argument never reaches a schema
+    // that would strip it, and the call is not refused for carrying it.
+    const legacyId = `itest-turn-${mintToken(8)}`;
+    const legacy = await call(hub, "queries_list", { turn_id: legacyId });
+    expect(legacy.isError).toBe(false);
+    expect(await lastTurnId("queries_list")).toBe(legacyId);
+
+    // A malformed handle is dropped, never a refusal: the work asked for has
+    // nothing to do with whether the caller's bookkeeping label parsed.
+    const junk = await call(hub, "queries_list", { turn_id: "not a valid handle" }, { [TURN_ID_META_KEY]: 42 });
+    expect(junk.isError).toBe(false);
+    expect(await lastTurnId("queries_list")).toBeNull();
     await hub.close();
-    const { rows: turnRows } = await pool.query(
-      `SELECT meta->>'turn_id' AS turn_id FROM runs WHERE component = $1 AND tool = 'queries_list' ORDER BY id DESC LIMIT 1`,
-      [HUB],
-    );
-    expect(turnRows[0]!.turn_id).toBe("itest-turn-1");
 
     // external, no grant: forbidden — uniform whether or not a store is even wired (queries-tools.ts checks the grant first)
     const alice1 = await connect("tok-alice");
-    expect((await call(alice1, "queries_list")).body).toEqual({ error: { code: "forbidden", message: "not granted" } });
-    expect((await call(alice1, "queries_run", { name: "itest_numbers" })).body).toEqual({ error: { code: "forbidden", message: "not granted" } });
+    expect((await call(alice1, "queries_list")).body).toEqual({ error: { code: "forbidden", message: expect.stringMatching(/^not granted/) } });
+    // …in the SAME words: one sentence per reason, not one per tool (P3).
+    expect((await call(alice1, "queries_run", { name: "itest_numbers" })).body).toEqual((await call(alice1, "queries_list")).body);
     await alice1.close();
 
     // grant queries: true — the SAME token, principal upgraded server-side, never asserted by the caller
@@ -827,7 +883,10 @@ cache_ttl: 0
       expect((await call(ar, name, args)).body.error.code, name).toBe("not_available");
     }
     // agents_delegate is the assistant's alone: an external agent is told not granted before any dispatcher is consulted (none is wired here) — still a recorded refusal
-    expect((await call(ar, "agents_delegate", { crew: "researcher", brief: "b" })).body).toEqual({ error: { code: "forbidden", message: "not granted" } });
+    expect((await call(ar, "agents_delegate", { crew: "researcher", brief: "b" })).body).toEqual({ error: { code: "forbidden", message: expect.stringMatching(/^not granted — `agents_delegate` belongs to the instance assistant alone/) } });
+    // request_access is alice's to call at any tier (she is tier `none` here):
+    // it writes a request and grants nothing, and it is recorded like the rest
+    expect((await call(ar, "request_access", { area: "Areas/Recorded", reason: "recording one of every eager tool" })).body).toMatchObject({ area: "Areas/Recorded" });
     await ar.close();
     const { rows } = await pool.query(
       `SELECT tool, ok, finished_at IS NOT NULL AS finished, meta FROM runs WHERE component = $1 AND kind = 'tool' ORDER BY id`,

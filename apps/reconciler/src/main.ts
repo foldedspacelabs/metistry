@@ -4,7 +4,6 @@
 
 import pg from "pg";
 import {
-  COMPUTE_FILES_DEFAULT,
   EMBED_DEFAULT_BATCH,
   EMBED_DEFAULT_DIM,
   EMBED_DEFAULT_MODEL,
@@ -13,7 +12,9 @@ import {
   intEnv,
   loadCompute,
   optionalEnv,
+  overlayFilesFromEnv,
   requireEnv,
+  resolveInstanceLayout,
   resolveLocalModelUrl,
 } from "@foldedspacelabs/metistry-core";
 import { Git } from "./git.js";
@@ -25,6 +26,22 @@ import { makeBridge } from "./server.js";
 
 const instanceDir = requireEnv("METISTRY_INSTANCE_DIR");
 const token = requireEnv("METISTRY_BRIDGE_TOKEN_RECONCILER");
+// The owner class (docs/ops/auth.md, "The principal comes from the
+// credential"). Optional to START with — a reconciler that refused to boot
+// would take an install down over a variable one command mints — and
+// fail-CLOSED in effect: with no owner bearer, NO caller may write a §4.7
+// protected path, and `check()` degrades with the fix. Never defaulted to the
+// shared bearer, which is the hole this exists to close.
+const ownerToken = optionalEnv("METISTRY_BRIDGE_TOKEN_RECONCILER_USER", "");
+if (!ownerToken) {
+  console.warn(
+    "METISTRY_BRIDGE_TOKEN_RECONCILER_USER is not set: protected paths (.metistry/**, CLAUDE.md, README.md) are refused for EVERY caller, so `metistry update` and `metistry deployment set-shape` will be refused. `metistry secrets sync --to env` mints one; then restart this service.",
+  );
+} else if (ownerToken === token) {
+  throw new Error(
+    "METISTRY_BRIDGE_TOKEN_RECONCILER_USER is the same value as METISTRY_BRIDGE_TOKEN_RECONCILER — the owner class would then be every caller. Mint a distinct one: `metistry secrets mint METISTRY_BRIDGE_TOKEN_RECONCILER_USER`.",
+  );
+}
 const host = optionalEnv("METISTRY_RECONCILER_HOST", "127.0.0.1"); // loopback default (invariant 8)
 const port = intEnv("METISTRY_RECONCILER_PORT", 7812);
 const commitIntervalSec = intEnv("METISTRY_COMMIT_INTERVAL_SEC", 30);
@@ -39,6 +56,15 @@ const pool = new pg.Pool({
   password: requireEnv("METISTRY_DB_PASSWORD"),
   max: 2,
 });
+
+// Which layout this instance is in, read ONCE. The vault root is the
+// instance directory in both — what differs is where the inbox and the
+// machinery sit, and a legacy instance has not run `metistry migrate-layout`
+// yet (docs/ops/instance-layout.md).
+const instanceLayout = resolveInstanceLayout(instanceDir);
+if (instanceLayout.shape === "legacy") {
+  console.warn(`instance layout: legacy — captures are ${instanceLayout.layout.inboxDir}/ and the config files are at the instance root. \`metistry migrate-layout\` moves them; \`metistry update\` will not carry this instance past 0.8.x until it has run.`);
+}
 
 const git = new Git(instanceDir);
 if (!(await git.isRepo())) {
@@ -59,7 +85,7 @@ const vault = new Vault(instanceDir, git, committer, { maxBytes: intEnv("METISTR
 // names one — so a file that will not parse degrades to the default rather
 // than stopping the reconciler. The console fails loudly on the same file;
 // this process has no business being the second one to.
-const computeBaseUrl = await loadCompute(optionalEnv("METISTRY_COMPUTE_FILES", COMPUTE_FILES_DEFAULT))
+const computeBaseUrl = await loadCompute(optionalEnv("METISTRY_COMPUTE_FILES", overlayFilesFromEnv(process.env, "compute")))
   .then((c) => firstOnMachineBaseUrl(c.compute))
   .catch((err: unknown) => {
     console.warn(`compute.yaml is not readable for the embedder's default URL (${err instanceof Error ? err.message : String(err)})`);
@@ -87,16 +113,16 @@ const indexer = new Indexer(
   pool,
   vault,
   committer,
-  { commitExternalEdits: optionalEnv("METISTRY_COMMIT_EXTERNAL_EDITS", "true") !== "false" },
+  { commitExternalEdits: optionalEnv("METISTRY_COMMIT_EXTERNAL_EDITS", "true") !== "false", inboxPrefix: instanceLayout.layout.inboxDir },
   embeddings,
 );
 
 const server = makeBridge(
   { vault, committer, indexer, embeddings, embedClient, db: pool },
-  { token, maxBodyBytes: intEnv("METISTRY_VAULT_MAX_BYTES", 2 * 1024 * 1024) + 64 * 1024 },
+  { token, ...(ownerToken ? { ownerToken } : {}), maxBodyBytes: intEnv("METISTRY_VAULT_MAX_BYTES", 2 * 1024 * 1024) + 64 * 1024 },
 );
 server.listen(port, host, () => {
-  console.log(`reconciler listening on ${host}:${port} (repo: ${instanceDir}; commit every ${commitIntervalSec}s; reconcile every ${reconcileIntervalSec}s; push ${pushEverySec ? `every ${pushEverySec}s` : "never"})`);
+  console.log(`reconciler listening on ${host}:${port} (repo: ${instanceDir}; commit every ${commitIntervalSec}s; reconcile every ${reconcileIntervalSec}s; push ${pushEverySec ? `every ${pushEverySec}s` : "never"}; protected paths: ${ownerToken ? "the owner bearer only" : "NO caller — mint METISTRY_BRIDGE_TOKEN_RECONCILER_USER"})`);
 });
 
 setInterval(() => {

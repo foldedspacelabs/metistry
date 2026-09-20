@@ -11,9 +11,14 @@
 //   principal's read grant — writes never reach wider than reads;
 // - the bridge's own rules stay in force behind this one (protected paths
 //   are the user's hand; traversal, `.git`, symlinks, casing slips refused);
-// - an existing markdown note whose frontmatter `source` is another
-//   principal's is refused (`forbidden`, "owned by <source>; propose
-//   instead") — one writer, but not one owner; new notes are free;
+// - an existing markdown note is refused (`forbidden`, "owned by <source>;
+//   propose instead") unless its frontmatter `source` is the caller's own id
+//   or the fold's (§4.11: one writer, but not one owner) — new notes are
+//   free. A note with NO `source:` in its frontmatter is the USER's, not
+//   ownerless (2026-09-19: inverted from the original default, which let a
+//   hand-written note — which never carries `source:` — be replaced whole by
+//   a model turn); the one exemption is `now.md` at the vault root by exact
+//   name, see USER_SOURCE / ownershipRefusal below;
 // - a markdown write is stamped with provenance (§4.15): `source` is the
 //   credential's id — never an argument — and `updated` is today;
 // - compare-and-swap is NOT optional (2026-09-16): an omitted
@@ -30,8 +35,9 @@
 import { createHash } from "node:crypto";
 import { parse as parseYaml } from "yaml";
 import type { ErrorCode } from "@foldedspacelabs/metistry-core";
-import { isProtectedPath } from "@foldedspacelabs/metistry-core";
-import { underAreas, validKnowledgePath, type KnowledgeReader } from "./knowledge.js";
+import { isProtectedPath, may, notKnowledge } from "@foldedspacelabs/metistry-core";
+import { validKnowledgePath, type KnowledgeReader } from "./knowledge.js";
+import { principalOf } from "./principal.js";
 import type { AgentPrincipal } from "./types.js";
 
 /** The reconciler's commit intent (apps/reconciler `parseIntent`). */
@@ -193,6 +199,38 @@ export function stampProvenance(content: string, agentId: string, now: Date = ne
 /** The evening fold's own source name (routines/knowledge-fold) — a note it owns is writable by the assistant. */
 export const FOLD_SOURCE = "knowledge-fold";
 
+/**
+ * The implicit owner of a note whose frontmatter carries no `source:` at
+ * all. A hand-written note — Obsidian, an editor, another device — never has
+ * one; there is no third party who could have written it, so absence means
+ * the user, not "nobody" (2026-09-19, closing the hole the daily-flow
+ * research named: `knowledge_write` is a whole-file replace, and the
+ * original rule read "no source" as "free to write", which let a model turn
+ * silently re-emit a note you wrote by hand).
+ */
+export const USER_SOURCE = "user";
+
+/**
+ * `now.md` ships from `seed/vault/now.md` with `source: assistant` in its
+ * frontmatter (stamped in the same change that inverted the default below),
+ * so a freshly-initialized instance never hits this. It exists for
+ * instances that predate that seed change: their `now.md` has no
+ * frontmatter yet, and the assistant is REQUIRED to keep writing it every
+ * day (the morning brief, the evening fold's "last fold" line, …) — refusing
+ * it here would lock the assistant out of the one note it cannot stop
+ * writing. There is no vault-file instance migration to stamp it once at
+ * `metistry update` time instead: `instance-migrations/` is SQL for a local
+ * extension's own Postgres tables (packages/cli/src/migrate-inbox.ts's own
+ * comment: "there is no repo-layout step in `metistry update`, and inventing
+ * one for a single move would be a mechanism nothing else uses"), so the
+ * exemption lives here, by exact name at the vault root, instead. It only
+ * ever fires once per instance: `writeKnowledge` stamps `source: assistant`
+ * on every markdown write it lands, so the very first successful write
+ * gives `now.md` real provenance and ordinary ownership rules apply to it
+ * from then on.
+ */
+export const BOOTSTRAP_EXEMPT_PATH = "now.md";
+
 /** The `source` in a note's frontmatter, or null when there is none (or it is not a scalar string). */
 export function frontmatterSource(content: string): string | null {
   const m = FRONTMATTER_RE.exec(content);
@@ -212,15 +250,22 @@ export function frontmatterSource(content: string): string | null {
  * One writer, but not one owner (§4.11 + the fold's three rules): the
  * assistant may update a note it wrote (`source` = its own credential id) or
  * one the fold owns, and NEW notes are always fine — but a note whose
- * `source` is someone else's (the user's, another agent's) is theirs, and the
- * assistant must `report` a change rather than make it. Enforced here rather
- * than in the prompt: "don't edit the user's notes" in a prompt is not a
- * control (CLAUDE.md).
+ * `source` is someone else's, INCLUDING no `source:` at all (`USER_SOURCE`:
+ * that is the user's default, not an opening), is theirs, and the assistant
+ * must `report` a change rather than make it. `path` is read only to apply
+ * the narrow `now.md` bootstrap exemption above; ownership itself is always
+ * read from `existing` — the file already on disk — never from anything the
+ * caller supplies, so a crafted frontmatter in the INCOMING content can
+ * never claim a note it does not already own. Enforced here rather than in
+ * the prompt: "don't edit the user's notes" in a prompt is not a control
+ * (CLAUDE.md).
  */
-export function ownershipRefusal(existing: string, callerId: string): string | null {
+export function ownershipRefusal(existing: string, callerId: string, path?: string): string | null {
   const owner = frontmatterSource(existing);
-  if (!owner || owner === callerId || owner === FOLD_SOURCE) return null;
-  return `owned by ${owner}; propose instead`;
+  if (owner === null && path === BOOTSTRAP_EXEMPT_PATH) return null;
+  const effectiveOwner = owner ?? USER_SOURCE;
+  if (effectiveOwner === callerId || effectiveOwner === FOLD_SOURCE) return null;
+  return `owned by ${effectiveOwner}; propose instead`;
 }
 
 // --- the tool body ---------------------------------------------------------
@@ -258,21 +303,37 @@ export async function writeKnowledge(
 ): Promise<KnowledgeWriteOutcome> {
   const { tier, areas } = principal.grants;
   const meta: Record<string, unknown> = { kind: principal.kind ?? "external", tier, areas, path: args.path };
-  if (principal.kind !== "internal") return { ok: false, code: "forbidden", meta }; // §4.11: one writer
-  if (!validKnowledgePath(args.path)) return { ok: false, code: "invalid_request", message: "path must be a vault path — TitleCase folders, no traversal, nothing under .metistry/ or Artifacts/", meta };
+  const p = principalOf(principal);
+  // §4.11: one writer. The role gate first, because a principal that may not
+  // write at all should not be told which of its paths were the problem.
+  const admitted = may(p, "act", { kind: "tool", name: "knowledge_write" });
+  if (!admitted.ok) return { ok: false, code: admitted.code, meta };
+  // Not vault content: the CLASSIFICATION answer, in the same words every
+  // other knowledge door gives it (core's `notKnowledge` — §3.3). A statement
+  // about the path, not about this principal's grant, which is why it is
+  // `invalid_request` and why the writer gets the same sentence a reader does.
+  if (!validKnowledgePath(args.path)) {
+    const nk = notKnowledge(args.path);
+    return { ok: false, code: nk.code, message: nk.message, meta };
+  }
   // A §4.7 protected path is the user's hand (invariant 2). The reconciler
   // refuses it too — this is the same rule stated at the tool the assistant
   // actually holds, so the refusal never depends on the bridge being reached.
   // `.metistry/**` is already out by shape; the root CLAUDE.md and README.md
   // are ordinary-looking vault paths and would not be.
   if (isProtectedPath(args.path)) return { ok: false, code: "invalid_request", message: "that path defines how the system behaves — it is the user's hand alone (§4.7)", meta };
-  if (tier !== "areas" || !underAreas(args.path, areas)) return { ok: false, code: "forbidden", meta }; // writes never exceed reads
+  // Writes never exceed reads. Asked AFTER the two shape refusals above, so
+  // a path that is not vault content keeps its `invalid_request` rather than
+  // becoming a scope refusal.
+  const scoped = may(p, "write", { kind: "knowledge", door: "write", path: args.path });
+  if (!scoped.ok) return { ok: false, code: scoped.code, meta };
   if (!writer) {
     return { ok: false, code: "not_available", message: "knowledge writes are not configured in this deployment (the vault bridge is absent)", meta };
   }
 
   // Ownership (see ownershipRefusal): new notes are free; an existing note
-  // belongs to whoever's `source` it carries.
+  // belongs to whoever's `source` it carries, and no `source:` at all means
+  // the user (USER_SOURCE) — never the caller.
   if (reader && /\.md$/i.test(args.path)) {
     let existing: string | null;
     try {
@@ -280,8 +341,8 @@ export async function writeKnowledge(
     } catch {
       return { ok: false, code: "not_available", message: "could not read the note to check who owns it — try again", meta };
     }
-    const refusal = existing === null ? null : ownershipRefusal(existing, principal.id);
-    if (refusal) return { ok: false, code: "forbidden", message: refusal, meta: { ...meta, owned_by: frontmatterSource(existing!) } };
+    const refusal = existing === null ? null : ownershipRefusal(existing, principal.id, args.path);
+    if (refusal) return { ok: false, code: "forbidden", message: refusal, meta: { ...meta, owned_by: frontmatterSource(existing!) ?? USER_SOURCE } };
   }
 
   let content = args.content;

@@ -1,0 +1,759 @@
+[
+  {
+    "id": "knowledge_search.tier_none",
+    "door": "knowledge_search",
+    "who": "ungranted",
+    "verb": "act",
+    "resource": {
+      "kind": "tool",
+      "name": "knowledge_search"
+    },
+    "code": "forbidden",
+    "reason": "tier_required",
+    "tell": "refuse",
+    "message": "not granted — this needs the `index` tier (titles) and you hold `none` (none); ask with `request_access`: an area and why, and the owner answers in Needs You.",
+    "changed": "P3 wording. It said nothing at all; it now names the tier this tool needs and the tier the credential holds. No path is involved — the caller has named nothing — so there is nothing the sentence could confirm the existence of.",
+    "before": {
+      "code": "forbidden",
+      "message": null,
+      "at": "packages/mcp-brain/src/server.ts:476"
+    }
+  },
+  {
+    "id": "knowledge_read.tier_none",
+    "door": "knowledge_read",
+    "who": "ungranted",
+    "verb": "read",
+    "resource": {
+      "kind": "knowledge",
+      "door": "read",
+      "path": "Areas/Health/sleep.md"
+    },
+    "code": "forbidden",
+    "reason": "tier_required",
+    "tell": "hide",
+    "message": "",
+    "before": {
+      "code": "forbidden",
+      "message": null,
+      "at": "packages/mcp-brain/src/knowledge.ts:329"
+    }
+  },
+  {
+    "id": "knowledge_read.index_unsettled",
+    "door": "knowledge_read",
+    "who": "browser",
+    "verb": "read",
+    "resource": {
+      "kind": "knowledge",
+      "door": "read",
+      "path": "Areas/Health/sleep.md"
+    },
+    "code": "forbidden",
+    "reason": "tier_required",
+    "tell": "hide",
+    "message": "",
+    "before": {
+      "code": "forbidden",
+      "message": null,
+      "at": "packages/mcp-brain/src/knowledge.ts:329"
+    }
+  },
+  {
+    "id": "knowledge_read.index_settled",
+    "door": "knowledge_read",
+    "who": "browser",
+    "verb": "read",
+    "resource": {
+      "kind": "knowledge",
+      "door": "read",
+      "path": "Areas/Health/sleep.md",
+      "settled": true
+    },
+    "code": "forbidden",
+    "reason": "scope_required",
+    "tell": "refuse",
+    "message": "not granted — `Areas/Health/sleep.md` is outside your folders; reading it needs the `Areas/Health` grant. Ask for it with `request_access` (area `Areas/Health`, and why); the owner answers in Needs You.",
+    "needs": {
+      "grant": {
+        "tier": "areas",
+        "area": "Areas/Health"
+      }
+    },
+    "expose": {
+      "reason": "scope_required",
+      "grantedScope": "Areas/Health"
+    },
+    "changed": "P3 wording, same decision. The sentence lost its opening clause (\"you can see that this page exists, but\"), which was true only of this case and could not be said honestly by the one sentence every scope refusal now gives. What decides whether it is given AT ALL is unchanged and is still ruling B: `may` speaks it only for a page the caller may already list, and hides behind the uniform refusal otherwise. `needs` and `expose` are byte-identical.",
+    "before": {
+      "code": "forbidden",
+      "message": "you can see that this page exists, but reading it needs the `Areas/Health` grant — ask for it: `request_access` with area `Areas/Health` and why; the owner approves it in Needs You.",
+      "at": "packages/mcp-brain/src/knowledge.ts:327 · packages/mcp-brain/src/knowledge.ts:187 (scopeRequired)"
+    }
+  },
+  {
+    "id": "knowledge_read.not_a_vault_path",
+    "door": "knowledge_read",
+    "who": "agent",
+    "verb": "read",
+    "resource": {
+      "kind": "knowledge",
+      "door": "read",
+      "path": ".metistry/compute.yaml"
+    },
+    "code": "invalid_request",
+    "reason": "not_knowledge",
+    "tell": "refuse",
+    "message": "`.metistry/compute.yaml` is machinery, not knowledge — this door serves vault pages only; the machinery is the file itself, on disk and in git — no door serves it as a page (docs/ops/instance-layout.md).",
+    "needs": {
+      "door": "the file itself"
+    },
+    "changed": "P3 wording. The shape refusal became the CLASSIFICATION answer every knowledge door now gives: it names what the path IS (machinery) and which door has it, instead of restating the rule the caller broke. Same code, same `invalid_request`; `needs.door` is new and is a fact about the resource, not a permission.",
+    "before": {
+      "code": "invalid_request",
+      "message": "path must be a vault path — TitleCase folders, no traversal, nothing under .metistry/ or Artifacts/",
+      "at": "packages/mcp-brain/src/knowledge.ts:331"
+    }
+  },
+  {
+    "id": "knowledge_read.artifact",
+    "door": "knowledge_read",
+    "who": "agent",
+    "verb": "read",
+    "resource": {
+      "kind": "knowledge",
+      "door": "read",
+      "path": "Artifacts/report.pdf"
+    },
+    "code": "invalid_request",
+    "reason": "not_knowledge",
+    "tell": "refuse",
+    "message": "`Artifacts/report.pdf` is an artifact, not knowledge — this door serves vault pages only; your artifacts are GET /api/artifacts, and in the vault they are files, on disk and in git (docs/ops/instance-layout.md).",
+    "needs": {
+      "door": "GET /api/artifacts"
+    },
+    "changed": "New entry (P3/P4): the second class a knowledge door is handed. It answered the same `invalid_request` shape refusal at origin/main and now answers the classification, with the door that has the bytes. An agent cannot reach `/api/artifacts`, and naming a public route is not a grant — what it gains is knowing to stop asking this door.",
+    "before": {
+      "code": "invalid_request",
+      "message": "path must be a vault path — TitleCase folders, no traversal, nothing under .metistry/ or Artifacts/",
+      "at": "packages/mcp-brain/src/knowledge.ts:331"
+    }
+  },
+  {
+    "id": "knowledge_read.outside_areas",
+    "door": "knowledge_read",
+    "who": "agent",
+    "verb": "read",
+    "resource": {
+      "kind": "knowledge",
+      "door": "read",
+      "path": "Areas/Finance/tax.md"
+    },
+    "code": "forbidden",
+    "reason": "scope_required",
+    "tell": "hide",
+    "message": "",
+    "before": {
+      "code": "forbidden",
+      "message": null,
+      "at": "packages/mcp-brain/src/knowledge.ts:332"
+    }
+  },
+  {
+    "id": "knowledge_list.tier_none",
+    "door": "knowledge_list",
+    "who": "ungranted",
+    "verb": "act",
+    "resource": {
+      "kind": "tool",
+      "name": "knowledge_list"
+    },
+    "code": "forbidden",
+    "reason": "tier_required",
+    "tell": "refuse",
+    "message": "not granted — this needs the `index` tier (titles) and you hold `none` (none); ask with `request_access`: an area and why, and the owner answers in Needs You.",
+    "changed": "P3 wording. \"not granted\" became the one tier sentence. On the wire this was always the canonical message for `forbidden`, so a caller reading `error.message` sees a longer sentence where it saw the canonical one.",
+    "before": {
+      "code": "forbidden",
+      "message": "not granted",
+      "at": "packages/mcp-brain/src/knowledge-fs.ts:278"
+    }
+  },
+  {
+    "id": "knowledge_list.prefix_outside",
+    "door": "knowledge_list",
+    "who": "agent",
+    "verb": "list",
+    "resource": {
+      "kind": "knowledge",
+      "door": "list",
+      "path": "Areas/Finance"
+    },
+    "code": "forbidden",
+    "reason": "scope_required",
+    "tell": "hide",
+    "message": "",
+    "changed": "P3 spelling, NOT a wire change. A hand-written \"not granted\" and an empty message are the same bytes once `errorEnvelope` supplies the canonical message for `forbidden`, and silence now has one spelling. Recorded as `tell: hide`: a prefix outside the grant names no page, so there is nothing that may be said about it.",
+    "before": {
+      "code": "forbidden",
+      "message": "not granted",
+      "at": "packages/mcp-brain/src/knowledge-fs.ts:287"
+    }
+  },
+  {
+    "id": "knowledge_links.outside_areas",
+    "door": "knowledge_list links_for",
+    "who": "agent",
+    "verb": "read",
+    "resource": {
+      "kind": "knowledge",
+      "door": "links",
+      "path": "Areas/Finance/tax.md"
+    },
+    "code": "forbidden",
+    "reason": "scope_required",
+    "tell": "hide",
+    "message": "",
+    "changed": "P3 spelling, NOT a wire change — as `knowledge_list.prefix_outside`. Typed as `hide`, which is what it always was: this is the path the caller may not even list, and the 2026-09-19 ruling is that no area is named for one.",
+    "before": {
+      "code": "forbidden",
+      "message": "not granted",
+      "at": "packages/mcp-brain/src/knowledge-fs.ts:257"
+    }
+  },
+  {
+    "id": "knowledge_links.index_settled",
+    "door": "knowledge_list links_for",
+    "who": "browser",
+    "verb": "read",
+    "resource": {
+      "kind": "knowledge",
+      "door": "links",
+      "path": "Areas/Health/sleep.md",
+      "settled": true
+    },
+    "code": "forbidden",
+    "reason": "scope_required",
+    "tell": "refuse",
+    "message": "not granted — `Areas/Health/sleep.md` is outside your folders; reading it needs the `Areas/Health` grant. Ask for it with `request_access` (area `Areas/Health`, and why); the owner answers in Needs You.",
+    "needs": {
+      "grant": {
+        "tier": "areas",
+        "area": "Areas/Health"
+      }
+    },
+    "expose": {
+      "reason": "scope_required",
+      "grantedScope": "Areas/Health"
+    },
+    "changed": "P3 wording, same decision — see `knowledge_read.index_settled`. The two doors said the identical sentence before and say the identical sentence now, which is the property that matters.",
+    "before": {
+      "code": "forbidden",
+      "message": "you can see that this page exists, but reading it needs the `Areas/Health` grant — ask for it: `request_access` with area `Areas/Health` and why; the owner approves it in Needs You.",
+      "at": "packages/mcp-brain/src/knowledge-fs.ts:255 · packages/mcp-brain/src/knowledge.ts:187 (scopeRequired)"
+    }
+  },
+  {
+    "id": "knowledge_grep.tier_index",
+    "door": "knowledge_grep",
+    "who": "browser",
+    "verb": "act",
+    "resource": {
+      "kind": "tool",
+      "name": "knowledge_grep"
+    },
+    "code": "forbidden",
+    "reason": "tier_required",
+    "tell": "refuse",
+    "message": "not granted — this needs the `areas` tier (folders) and you hold `index` (titles); ask with `request_access`: an area and why, and the owner answers in Needs You.",
+    "changed": "P3 wording. \"not granted\" became the one tier sentence, and this is the one knowledge tool that needs `areas` rather than `index` — which the sentence now says.",
+    "before": {
+      "code": "forbidden",
+      "message": "not granted",
+      "at": "packages/mcp-brain/src/knowledge-fs.ts:436"
+    }
+  },
+  {
+    "id": "knowledge_grep.prefix_outside",
+    "door": "knowledge_grep",
+    "who": "agent",
+    "verb": "read",
+    "resource": {
+      "kind": "knowledge",
+      "door": "grep",
+      "path": "Areas/Finance"
+    },
+    "code": "forbidden",
+    "reason": "scope_required",
+    "tell": "hide",
+    "message": "",
+    "changed": "P3 spelling, NOT a wire change — as `knowledge_list.prefix_outside`.",
+    "before": {
+      "code": "forbidden",
+      "message": "not granted",
+      "at": "packages/mcp-brain/src/knowledge-fs.ts:437"
+    }
+  },
+  {
+    "id": "knowledge_write.not_the_writer",
+    "door": "knowledge_write",
+    "who": "agent",
+    "verb": "act",
+    "resource": {
+      "kind": "tool",
+      "name": "knowledge_write"
+    },
+    "code": "forbidden",
+    "reason": "role_required",
+    "tell": "refuse",
+    "message": "not granted — `knowledge_write` belongs to the instance assistant alone; no grant widens a role. Report what you needed with `requests_create` instead of retrying.",
+    "changed": "P3 wording. It said nothing and the tool's DESCRIPTION carried the rule; the refusal carries it now, which is what let the description stop paying for it (26 fewer definition tokens).",
+    "before": {
+      "code": "forbidden",
+      "message": null,
+      "at": "packages/mcp-brain/src/knowledge-write.ts:305"
+    }
+  },
+  {
+    "id": "knowledge_write.outside_areas",
+    "door": "knowledge_write",
+    "who": "narrowed",
+    "verb": "write",
+    "resource": {
+      "kind": "knowledge",
+      "door": "write",
+      "path": "Areas/Finance/tax.md"
+    },
+    "code": "forbidden",
+    "reason": "scope_required",
+    "tell": "hide",
+    "message": "",
+    "before": {
+      "code": "forbidden",
+      "message": null,
+      "at": "packages/mcp-brain/src/knowledge-write.ts:313"
+    }
+  },
+  {
+    "id": "knowledge_resources.tier_index",
+    "door": "MCP resources/list",
+    "who": "browser",
+    "verb": "list",
+    "resource": {
+      "kind": "knowledge",
+      "door": "resources",
+      "path": ""
+    },
+    "code": "forbidden",
+    "reason": "tier_required",
+    "tell": "hide",
+    "message": "",
+    "before": {
+      "code": "forbidden",
+      "message": null,
+      "at": "packages/mcp-brain/src/knowledge-resources.ts:55 — rendered as an EMPTY resource list, never on the wire"
+    }
+  },
+  {
+    "id": "queries_list.no_grant",
+    "door": "queries_list",
+    "who": "agent",
+    "verb": "act",
+    "resource": {
+      "kind": "tool",
+      "name": "queries_list"
+    },
+    "code": "forbidden",
+    "reason": "queries_required",
+    "tell": "refuse",
+    "message": "not granted — named queries need the `queries` grant and scout does not hold it; the owner turns it on in the console's Agents panel (PUT /api/agents/scout/grants).",
+    "changed": "P3 wording. Silent before; it now names the axis (`queries` is a switch on the grant, not a tier) and the one door that turns it on, which is the owner's hand rather than an ask.",
+    "before": {
+      "code": "forbidden",
+      "message": null,
+      "at": "packages/mcp-brain/src/queries-tools.ts:79"
+    }
+  },
+  {
+    "id": "queries_run.no_grant",
+    "door": "queries_run",
+    "who": "agent",
+    "verb": "act",
+    "resource": {
+      "kind": "tool",
+      "name": "queries_run"
+    },
+    "code": "forbidden",
+    "reason": "queries_required",
+    "tell": "refuse",
+    "message": "not granted — named queries need the `queries` grant and scout does not hold it; the owner turns it on in the console's Agents panel (PUT /api/agents/scout/grants).",
+    "changed": "P3 wording — identical to `queries_list.no_grant`, which is the point: one sentence per reason, not one per tool.",
+    "before": {
+      "code": "forbidden",
+      "message": null,
+      "at": "packages/mcp-brain/src/queries-tools.ts:97"
+    }
+  },
+  {
+    "id": "queries_run.route_only",
+    "door": "queries_run",
+    "who": "assistant",
+    "verb": "read",
+    "resource": {
+      "kind": "query",
+      "door": "queries_run",
+      "name": "knowledge_pages",
+      "exposure": "route"
+    },
+    "code": "not_found",
+    "reason": "not_exposed",
+    "tell": "hide",
+    "message": "no such query: knowledge_pages",
+    "before": {
+      "code": "not_found",
+      "message": "no such query: knowledge_pages",
+      "at": "packages/mcp-brain/src/queries-tools.ts:65"
+    }
+  },
+  {
+    "id": "tasks.outside_projects",
+    "door": "tasks_claim (and every tasks_* by id)",
+    "who": "agent",
+    "verb": "read",
+    "resource": {
+      "kind": "project",
+      "door": "task",
+      "slug": "beta"
+    },
+    "code": "not_found",
+    "reason": "not_member",
+    "tell": "hide",
+    "message": "",
+    "before": {
+      "code": "not_found",
+      "message": null,
+      "at": "packages/mcp-brain/src/server.ts:385"
+    }
+  },
+  {
+    "id": "tasks.no_project",
+    "door": "tasks_* on a row with no project",
+    "who": "assistant",
+    "verb": "read",
+    "resource": {
+      "kind": "project",
+      "door": "task",
+      "slug": null
+    },
+    "code": "not_found",
+    "reason": "not_member",
+    "tell": "hide",
+    "message": "",
+    "before": {
+      "code": "not_found",
+      "message": null,
+      "at": "packages/mcp-brain/src/scope.ts:26"
+    }
+  },
+  {
+    "id": "tasks_create.not_a_member",
+    "door": "tasks_create",
+    "who": "agent",
+    "verb": "write",
+    "resource": {
+      "kind": "project",
+      "door": "task_create",
+      "slug": "beta"
+    },
+    "code": "forbidden",
+    "reason": "membership_required",
+    "tell": "refuse",
+    "message": "not granted — scout is not a member of project `beta`; the owner adds it (PUT /api/agents/scout/projects, or the console's Agents panel).",
+    "changed": "P3 wording. Silent before. This is the one project check that is `forbidden` rather than `not_found` — you NAMED the project — so it is not an existence question and it may say which project and who adds you.",
+    "before": {
+      "code": "forbidden",
+      "message": null,
+      "at": "packages/mcp-brain/src/server.ts:442"
+    }
+  },
+  {
+    "id": "propose_action.denied_kind",
+    "door": "propose_action",
+    "who": "agent",
+    "verb": "propose",
+    "resource": {
+      "kind": "action",
+      "door": "propose_action",
+      "action": "dispatch"
+    },
+    "code": "forbidden",
+    "reason": "autonomy_required",
+    "tell": "refuse",
+    "message": "autonomy.actions.dispatch is deny for scout — the user raises it (PUT /api/agents/scout/autonomy, or `metistry agents autonomy scout --allow dispatch`); nothing else can (docs/ops/actions.md)",
+    "needs": {
+      "autonomy": {
+        "action": "dispatch",
+        "mode": "propose"
+      }
+    },
+    "before": {
+      "code": "forbidden",
+      "message": "autonomy.actions.dispatch is deny for scout — the user raises it (PUT /api/agents/scout/autonomy, or `metistry agents autonomy scout --allow dispatch`); nothing else can (docs/ops/actions.md)",
+      "at": "packages/mcp-brain/src/action-tools.ts:104-109"
+    }
+  },
+  {
+    "id": "propose_action.no_room",
+    "door": "propose_action (registration)",
+    "who": "ungranted",
+    "verb": "act",
+    "resource": {
+      "kind": "tool",
+      "name": "propose_action"
+    },
+    "code": "forbidden",
+    "reason": "autonomy_required",
+    "tell": "refuse",
+    "message": "autonomy.actions is deny for stranger — the user raises it (PUT /api/agents/stranger/autonomy, or `metistry agents autonomy stranger`); nothing else can (docs/ops/actions.md)",
+    "changed": "P3 wording. Never rendered on the wire (the door reads `.ok` to decide whether to REGISTER the tool, so an agent given no room does not learn it exists) — but it lands in a `runs` row a person reads, and it now says the same thing the per-kind refusal beside it says.",
+    "before": {
+      "code": "forbidden",
+      "message": null,
+      "at": "packages/mcp-brain/src/action-tools.ts:71 — not registered at all, so never rendered"
+    }
+  },
+  {
+    "id": "agents_delegate.not_the_assistant",
+    "door": "agents_delegate",
+    "who": "agent",
+    "verb": "act",
+    "resource": {
+      "kind": "tool",
+      "name": "agents_delegate"
+    },
+    "code": "forbidden",
+    "reason": "role_required",
+    "tell": "refuse",
+    "message": "not granted — `agents_delegate` belongs to the instance assistant alone; no grant widens a role. Report what you needed with `requests_create` instead of retrying.",
+    "changed": "P3 wording. \"not granted\" became the one role sentence, identical to `knowledge_write.not_the_writer` — the two rules are the same rule (§4.11's one writer, one dispatcher) and now read as one.",
+    "before": {
+      "code": "forbidden",
+      "message": "not granted",
+      "at": "packages/mcp-brain/src/crew-tools.ts:112"
+    }
+  },
+  {
+    "id": "console.agent_bearer",
+    "door": "every console route outside /capture and /mcp",
+    "who": "agent",
+    "verb": "act",
+    "resource": {
+      "kind": "console",
+      "door": "console_agent",
+      "route": "GET /api/proposals"
+    },
+    "code": "forbidden",
+    "reason": "role_required",
+    "tell": "hide",
+    "message": "",
+    "before": {
+      "code": "forbidden",
+      "message": null,
+      "at": "apps/console/src/server.ts:532"
+    }
+  },
+  {
+    "id": "console.owner_token_on_management",
+    "door": "the management surface",
+    "who": "tool",
+    "verb": "act",
+    "resource": {
+      "kind": "console",
+      "door": "console_management",
+      "route": "GET /api/agents"
+    },
+    "code": "forbidden",
+    "reason": "role_required",
+    "tell": "hide",
+    "message": "",
+    "before": {
+      "code": "forbidden",
+      "message": null,
+      "at": "apps/console/src/server.ts:763 (and :707 for targets/dispatch)"
+    }
+  },
+  {
+    "id": "console.route_only_query.capture_token",
+    "door": "GET /api/q/<name>",
+    "who": "tool",
+    "verb": "read",
+    "resource": {
+      "kind": "query",
+      "door": "console_query",
+      "name": "knowledge_pages",
+      "exposure": "route"
+    },
+    "code": "not_found",
+    "reason": "not_exposed",
+    "tell": "hide",
+    "message": "",
+    "before": {
+      "code": "not_found",
+      "message": null,
+      "at": "apps/console/src/server.ts:293"
+    }
+  },
+  {
+    "id": "console_page.owner_artifact",
+    "door": "GET /api/knowledge/page",
+    "who": "owner",
+    "verb": "read",
+    "resource": {
+      "kind": "knowledge",
+      "door": "console_page",
+      "path": "Artifacts/report.pdf"
+    },
+    "code": "invalid_request",
+    "reason": "not_knowledge",
+    "tell": "refuse",
+    "message": "`Artifacts/report.pdf` is an artifact, not knowledge — this door serves vault pages only; your artifacts are GET /api/artifacts, and in the vault they are files, on disk and in git (docs/ops/instance-layout.md).",
+    "needs": {
+      "door": "GET /api/artifacts"
+    },
+    "changed": "P4. The owner asking this door for their own `Artifacts/` got a 404 with a signpost; they now get the CLASSIFICATION, with `needs.door` naming the route that has the bytes. `invalid_request` rather than `not_found` because the resource is there — the caller named a path this door does not serve, and a 404 would be pretending otherwise. No bytes cross either way.",
+    "before": {
+      "code": "not_found",
+      "message": "Artifacts/ is yours but it is not knowledge — nothing indexes it, so this door has no page for it. Your artifacts are GET /api/artifacts (docs/ops/console-api.md); in the vault they are just files, on disk and in git.",
+      "at": "apps/console/src/knowledge-routes.ts:336 · notKnowledgeMessage :150"
+    }
+  },
+  {
+    "id": "console_page.owner_machinery",
+    "door": "GET /api/knowledge/page",
+    "who": "owner",
+    "verb": "read",
+    "resource": {
+      "kind": "knowledge",
+      "door": "console_page",
+      "path": ".metistry/compute.yaml"
+    },
+    "code": "invalid_request",
+    "reason": "not_knowledge",
+    "tell": "refuse",
+    "message": "`.metistry/compute.yaml` is machinery, not knowledge — this door serves vault pages only; the machinery is the file itself, on disk and in git — no door serves it as a page (docs/ops/instance-layout.md).",
+    "needs": {
+      "door": "the file itself"
+    },
+    "changed": "P4. The owner's own `.metistry/compute.yaml` got the uniform \"no such page\"; it now gets the classification and the honest answer that the machinery is the file itself. `may` no longer applies `isVaultPath` to the owner as a PERMISSION — the path is simply not knowledge, and this door serves knowledge (§3.3).",
+    "before": {
+      "code": "not_found",
+      "message": "no such page — a path must be vault CONTENT: not .metistry/, not Artifacts/, not the root CLAUDE.md, no leading slash and no traversal (docs/ops/instance-layout.md)",
+      "at": "apps/console/src/knowledge-routes.ts:336 · NOT_KNOWLEDGE :139"
+    }
+  },
+  {
+    "id": "console_page.owner_secret",
+    "door": "GET /api/knowledge/page",
+    "who": "owner",
+    "verb": "read",
+    "resource": {
+      "kind": "knowledge",
+      "door": "console_page",
+      "path": ".metistry/state/.env"
+    },
+    "code": "invalid_request",
+    "reason": "not_knowledge",
+    "tell": "refuse",
+    "message": "`.metistry/state/.env` is machinery, not knowledge — this door serves vault pages only; the machinery is the file itself, on disk and in git — no door serves it as a page (docs/ops/instance-layout.md).",
+    "needs": {
+      "door": "the file itself"
+    },
+    "changed": "New entry (P4), and the misuse test for the whole phase: the owner asking the knowledge door for `.metistry/state/.env`. \"The owner has everything\" does NOT make this door serve it — no door serves it as a page — so the answer is the classification and NOT ONE BYTE of the file. The 0600 `.env` is read where it lives, by the person whose machine it is.",
+    "before": {
+      "code": "not_found",
+      "message": "no such page — a path must be vault CONTENT: not .metistry/, not Artifacts/, not the root CLAUDE.md, no leading slash and no traversal (docs/ops/instance-layout.md)",
+      "at": "apps/console/src/knowledge-routes.ts:336 · NOT_KNOWLEDGE :139"
+    }
+  },
+  {
+    "id": "console_page.owner_traversal",
+    "door": "GET /api/knowledge/page",
+    "who": "owner",
+    "verb": "read",
+    "resource": {
+      "kind": "knowledge",
+      "door": "console_page",
+      "path": "Areas/../../etc/passwd"
+    },
+    "code": "invalid_request",
+    "reason": "not_knowledge",
+    "tell": "refuse",
+    "message": "`Areas/../../etc/passwd` is outside the vault, not knowledge — this door serves vault pages only; a vault path is TitleCase folders from the vault root, with no leading slash and no traversal (docs/ops/instance-layout.md).",
+    "changed": "New entry (P4): the fourth class. A path that escapes the vault is `outside` before it is anything else, so the classification names no door — there is nothing to point at.",
+    "before": {
+      "code": "not_found",
+      "message": "no such page — a path must be vault CONTENT: not .metistry/, not Artifacts/, not the root CLAUDE.md, no leading slash and no traversal (docs/ops/instance-layout.md)",
+      "at": "apps/console/src/knowledge-routes.ts:336 · NOT_KNOWLEDGE :139"
+    }
+  },
+  {
+    "id": "console_page.agent_outside_areas",
+    "door": "GET /api/knowledge/page",
+    "who": "agent",
+    "verb": "read",
+    "resource": {
+      "kind": "knowledge",
+      "door": "console_page",
+      "path": "Areas/Finance/tax.md"
+    },
+    "code": "not_found",
+    "reason": "scope_required",
+    "tell": "hide",
+    "message": "no such page — a path must be vault CONTENT: not .metistry/, not Artifacts/, not the root CLAUDE.md, no leading slash and no traversal (docs/ops/instance-layout.md)",
+    "before": {
+      "code": "not_found",
+      "message": "no such page — a path must be vault CONTENT: not .metistry/, not Artifacts/, not the root CLAUDE.md, no leading slash and no traversal (docs/ops/instance-layout.md)",
+      "at": "apps/console/src/knowledge-routes.ts:336 · NOT_KNOWLEDGE :139"
+    }
+  },
+  {
+    "id": "console_page.agent_machinery",
+    "door": "GET /api/knowledge/page",
+    "who": "agent",
+    "verb": "read",
+    "resource": {
+      "kind": "knowledge",
+      "door": "console_page",
+      "path": ".metistry/state/.env"
+    },
+    "code": "not_found",
+    "reason": "not_knowledge",
+    "tell": "hide",
+    "message": "no such page — a path must be vault CONTENT: not .metistry/, not Artifacts/, not the root CLAUDE.md, no leading slash and no traversal (docs/ops/instance-layout.md)",
+    "before": {
+      "code": "not_found",
+      "message": "no such page — a path must be vault CONTENT: not .metistry/, not Artifacts/, not the root CLAUDE.md, no leading slash and no traversal (docs/ops/instance-layout.md)",
+      "at": "apps/console/src/knowledge-routes.ts:336 · NOT_KNOWLEDGE :139"
+    }
+  },
+  {
+    "id": "crew_uses.outside_toolset",
+    "door": "every tool call on /mcp — the run's own allowlist",
+    "who": "crew",
+    "verb": "act",
+    "resource": {
+      "kind": "toolset",
+      "name": "tasks_comment"
+    },
+    "code": "forbidden",
+    "reason": "not_in_uses",
+    "tell": "refuse",
+    "message": "tasks_comment is not in this crew's toolset — writer holds knowledge, requests (`uses:` in its manifest, a protected path in the user's hand: docs/ops/crews.md). Report what you needed instead of retrying.",
+    "changed": "P2's ONE intended behaviour change (§2.2, §4). `/mcp` had never heard of `uses`: the door admitted this call and the only thing that refused it was the allowlist in the process that dispatched the run. That is a process boundary, not the tool.",
+    "before": {
+      "code": null,
+      "message": "\"mcp__brain__tasks_comment\" is not in this run's tool list",
+      "at": "apps/assistant/src/tools.ts:149 — the CALLER, never the door"
+    }
+  }
+]

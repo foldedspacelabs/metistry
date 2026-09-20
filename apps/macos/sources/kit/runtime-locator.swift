@@ -18,7 +18,13 @@
 //                 Nothing on the user's machine is required — but a signed
 //                 bundle's `Resources` cannot be written to, so this is a SEED.
 //   4. path     — a `metistry` on PATH (`npx @foldedspacelabs/metistry-cli`
-//                 installed it, or a global install).
+//                 installed it, or a global install), in `~/.local/bin`
+//                 (where `metistry up` suggests linking its own shim — see
+//                 cli-shim.ts), or in the active instance's own
+//                 `.metistry/state/cli` (the shim itself, unlinked — a
+//                 sibling of `state/bin/`, which stays the launchd shape's
+//                 supervisor identity symlink, cli-shim.ts's own header
+//                 comment has why the two are not the same directory).
 //
 // A GUI app inherits no shell environment, so "on PATH" cannot mean
 // `/usr/bin/env metistry`: the candidate directories are listed explicitly and
@@ -147,6 +153,16 @@ public enum RuntimeLocator {
         environment: [String: String] = ProcessInfo.processInfo.environment,
         userProductDir: URL? = nil,
         installedDir: URL = RuntimeLocator.installedProductDirectory,
+        /// Where `~/.local/bin` actually is. A parameter, not `NSHomeDirectory()`
+        /// inlined below, for the same reason `installedDir` is one: a test that
+        /// read the real developer's home would not be a test (see this file's
+        /// sibling test file's header comment).
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
+        /// The active instance (`AppModel.instances.active`) — `nil` when there
+        /// is none yet (first run). Its `.metistry/state/cli/metistry` is where
+        /// `metistry up`/`metistry update` write the shim (cli-shim.ts); a Mac
+        /// that never put it on PATH still has the app find it there.
+        instanceDir: URL? = nil,
         fileManager: FileManager = .default
     ) -> RuntimeResolution {
         var attempts: [String] = []
@@ -214,7 +230,17 @@ public enum RuntimeLocator {
         }
 
         // ---- 4. a `metistry` on PATH ----
-        if let bin = findExecutable(named: "metistry", environment: environment, extraDirectories: binaryCandidateDirectories, fileManager: fileManager) {
+        //
+        // Beyond PATH and the usual Homebrew/system bins: `~/.local/bin`, the
+        // one place `up` itself suggests linking the shim to (never PATH
+        // itself — invariant 2), and the active instance's own
+        // `.metistry/state/cli`, in case nobody has linked it yet (a sibling
+        // of `state/bin/`, which is the launchd shape's supervisor identity
+        // symlink, not the cli shim — cli-shim.ts).
+        let localBin = homeDirectory.appendingPathComponent(".local/bin", isDirectory: true).path
+        let instanceBin = instanceDir?.appendingPathComponent(".metistry/state/cli", isDirectory: true).path
+        let pathDirectories = binaryCandidateDirectories + [localBin] + (instanceBin.map { [$0] } ?? [])
+        if let bin = findExecutable(named: "metistry", environment: environment, extraDirectories: pathDirectories, fileManager: fileManager) {
             return RuntimeResolution(
                 runtime: MetistryRuntime(source: .path, executable: bin, productDir: userProductDir),
                 attempts: attempts,
@@ -222,7 +248,7 @@ public enum RuntimeLocator {
                 installTarget: installedDir
             )
         }
-        attempts.append("no `metistry` in \(searchDirectories(environment: environment, extra: binaryCandidateDirectories).joined(separator: ", "))")
+        attempts.append("no `metistry` in \(searchDirectories(environment: environment, extra: pathDirectories).joined(separator: ", "))")
 
         return RuntimeResolution(runtime: nil, attempts: attempts, bundledSeed: bundledSeed, installTarget: installedDir)
     }

@@ -27,6 +27,7 @@ import { z } from "zod";
 import {
   errorEnvelope,
   finishRun,
+  may,
   redactSecrets,
   runCheck,
   sanitizeForAgent,
@@ -44,15 +45,18 @@ import { CREW_TOOL_NAMES, registerCrewTools, type CrewDispatcher } from "./crew-
 import { THREAD_TOOL_NAMES, registerThreadTools } from "./thread-tools.js";
 import { QUERIES_TOOL_NAMES, registerQueriesTools } from "./queries-tools.js";
 import { ACTION_TOOL_NAMES, registerActionTools, type ActionExecutor } from "./action-tools.js";
+import { requestAccess } from "./access.js";
 import { KNOWLEDGE_FS_TOOL_NAMES, registerKnowledgeFsTools, type KnowledgeLister, type KnowledgeVaultSearcher } from "./knowledge-fs.js";
 import { registerKnowledgeResources } from "./knowledge-resources.js";
 import { captureToInbox, type CaptureSink } from "./capture.js";
 import { KNOWLEDGE_MODES, knowledgeScope, readKnowledge, searchKnowledge, type KnowledgeReader, type QueryEmbedder } from "./knowledge.js";
 import { sha256Text, writeKnowledge, type KnowledgeWriter } from "./knowledge-write.js";
 import { computeNudge } from "./nudge.js";
-import { done, fail, type Outcome } from "./outcome.js";
+import { principalOf } from "./principal.js";
+import { done, fail, refuse, type Outcome } from "./outcome.js";
 import { REPORT_KINDS, submitReport } from "./report.js";
 import { allProjects, memberOf } from "./scope.js";
+import { liftTurnId, turnIdFrom } from "./turn-id.js";
 import type { AgentPrincipal, Db } from "./types.js";
 
 export interface BrainConfig {
@@ -97,29 +101,39 @@ export interface BrainServer {
 }
 
 /**
- * The declared surface (§4.3 default 1): 26 tools, no meta-tool indirection.
- * 25 of them are EAGER — every principal sees them — and `propose_action` is
+ * The declared surface (§4.3 default 1): 27 tools, no meta-tool indirection.
+ * 26 of them are EAGER — every principal sees them — and `propose_action` is
  * the one that is not: it is registered only for a credential whose autonomy
  * table admits an action (docs/ops/actions.md), which is nobody until the
  * owner sets a level. So the eager definition budget measured below is
  * unchanged for everyone who has not opted in, and an admitted principal
- * crosses the >5k line knowingly, having bought something with it.
+ * pays for what it bought.
  * Order = manifest order. One noun per thing, one verb set per object
  * (docs/product/glossary.md): folding tasks_list_ready + tasks_mine into
  * `tasks_list {filter}` paid for knowledge_list/knowledge_grep. This still
  * sits over PoC-17's documented >20-tools guidance for switching to
  * `discovery: lazy` on tool COUNT — noted, not acted on, because the
  * guidance's other axis (definition tokens, measured by test/brain.test.ts's
- * "definition size" test) is what actually gates lazy. The room tools
- * (tasks_comment/tasks_thread, 0016) put that measurement at ~4.9k of the
- * >5k line: the NEXT tool registered here forces the lazy decision rather
- * than fitting under it (docs/research/2026-08-tool-discovery.md).
+ * "definition size" test) is what actually gates lazy.
  * Deprecated spellings live in aliases.ts and resolve at call time — they are
  * NOT listed here, so neither the count nor the token budget grows for them.
+ *
+ * 2026-09-19, twice. First `turn_id` came out of every schema and moved to
+ * the call's `_meta` (turn-id.ts) — 944 tokens, 19% of the surface, for a
+ * field that was never a parameter, taking the measurement from ~5.0k to
+ * ~4.0k. Then `request_access` (access.ts) spent 189 of that on the 26th
+ * eager tool, by the owner's ruling and with the count ceiling in
+ * `ops/scripts/check-tool-surface.mjs` moved 25 → 26 to say so out loud.
+ * The rule it did NOT bend: a new READ capability is a named query behind
+ * `queries_run` (docs/ops/assistant-tools.md). A new tool is a new VERB —
+ * here, "ask the owner for the area you were refused" — and it arrives with
+ * the discovery decision attached rather than fitting under the line
+ * quietly. The tool after this one fails that check again.
  */
 export const TOOL_NAMES = [
   "capture",
   "requests_create",
+  "request_access",
   "tasks_list",
   "tasks_claim",
   "tasks_renew",
@@ -146,6 +160,13 @@ export type ToolName = (typeof TOOL_NAMES)[number];
  * is not shown a tool it could only be refused by. This is the list the
  * definition-token budget is measured against, and the one a bake-off
  * presents.
+ *
+ * `request_access` and `agents_delegate` are NOT deferred this way, in
+ * opposite directions and for the same reason: the principal each one
+ * refuses (internal, external) is told so by the tool, in a sentence that
+ * names what to do instead. A refusal an agent can read once is worth more
+ * than a tool it never learns exists — deferral is for a capability nobody
+ * has bought yet, not for a rule.
  */
 export const EAGER_TOOL_NAMES: readonly ToolName[] = TOOL_NAMES.filter((n) => !(ACTION_TOOL_NAMES as readonly string[]).includes(n));
 
@@ -186,19 +207,15 @@ export const TASK_FILTERS = ["ready", "mine", "all"] as const;
 export type TaskFilter = (typeof TASK_FILTERS)[number];
 
 /**
- * Every tool takes this, merged into its schema by `reg` below — a caller
- * (the assistant, a crew, an external agent) that generates one id per
- * reply and passes it on every call in that reply gets its `runs` rows
- * grouped for free (`meta.turn_id`; surfaced in the `activity_feed` query).
- * Not identity, not auth — a caller-supplied correlation handle, so it is
- * validated (shape only) and stored, never trusted for anything else.
+ * What a tool handler is handed besides its arguments: the SDK's request
+ * context, narrowed to the two fields this bridge reads — the JSON-RPC id
+ * (which the deprecated-name rewriter keys its note by) and the call's
+ * `_meta` (which carries the turn handle; turn-id.ts).
  */
-const turnId = z
-  .string()
-  .max(64)
-  .regex(/^[A-Za-z0-9_-]+$/)
-  .optional()
-  .describe("Optional: reuse per reply to group calls in the activity feed.");
+interface ToolCallExtra {
+  requestId?: string | number;
+  _meta?: Record<string, unknown> | undefined;
+}
 
 export function createBrainServer(cfg: BrainConfig): BrainServer {
   const { db, tasks } = cfg;
@@ -244,17 +261,37 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
     const server = new McpServer({ name: "metistry-brain", version }, { capabilities: { tools: {} } });
 
     /** Every tool call: one two-phase runs row (component = agent id), sanitizer, nudge. */
-    function wrap<A>(name: ToolName, body: (args: A) => Promise<Outcome>): (args: A, extra?: { requestId?: string | number }) => Promise<CallToolResult> {
-      return async (args: A, extra?: { requestId?: string | number }) => {
-        // turn_id (merged into every schema by `reg`) travels in meta.turn_id, not
-        // inside args' own summary — one place to find it, joinable by activity_feed.
-        const { turn_id, ...rest } = (args ?? {}) as unknown as Record<string, unknown>;
+    function wrap<A>(name: ToolName, body: (args: A) => Promise<Outcome>): (args: A, extra?: ToolCallExtra) => Promise<CallToolResult> {
+      return async (args: A, extra?: ToolCallExtra) => {
+        // The turn handle rides in the call's `_meta`, never in a schema
+        // (turn-id.ts): one place to find it, joinable by activity_feed, and
+        // 938 tokens the model never reads. A legacy `arguments.turn_id` was
+        // already lifted there by `handle` below.
+        const turn_id = turnIdFrom(extra?._meta);
         // a call that came in under a deprecated name is recorded under the primary
         // one, with the old spelling in meta.alias — so the stragglers are countable.
         const alias = extra?.requestId !== undefined ? aliasByRequestId.get(String(extra.requestId)) : undefined;
-        const runMeta = { via: "mcp-brain", args: summarizeArgs(rest), ...(typeof turn_id === "string" ? { turn_id } : {}), ...(alias ? { alias } : {}) };
+        const runMeta = { via: "mcp-brain", args: summarizeArgs(args), ...(turn_id !== undefined ? { turn_id } : {}), ...(alias ? { alias } : {}) };
         const runId = await startRun(db, { component: principal.id, kind: "tool", tool: name, meta: runMeta });
         let outcome: Outcome;
+        // **The run's own allowlist, at the door** (P2 of
+        // docs/research/2026-09-19-grants-and-access-simplified.md §2.2): a
+        // crew holds exactly the tool groups its manifest's `uses` names, and
+        // this is where that is enforced — before the body, for every tool,
+        // on the same audited path every other refusal takes. Until now it
+        // was a filter in the process that dispatched the run
+        // (apps/assistant/src/tools.ts), which is a process boundary rather
+        // than the tool; that filter stays as defence in depth and is no
+        // longer the control. Every other role carries no allowlist, so this
+        // decides nothing for them and their refusals are unchanged.
+        const admitted = may(principalOf(principal), "act", { kind: "toolset", name });
+        if (!admitted.ok) {
+          // The refusal is a `runs` row like any other, carrying the groups
+          // the crew does hold, so "it tried X" is answerable from the audit.
+          const meta = { uses: principal.uses ?? [], reason: admitted.reason };
+          await finishRun(db, runId, { ok: false, error: admitted.code, meta });
+          return render(refuse(admitted, meta), await nudge(principal));
+        }
         try {
           outcome = await body(args);
         } catch (err) {
@@ -270,10 +307,13 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
       };
     }
 
-    // turn_id is merged into every tool's schema here — one place, so no
-    // individual tool file has to remember it (§ the join key, not a control).
+    // One registration point, so a tool file declares its own parameters and
+    // nothing else. Nothing is merged into a schema here any more: the turn
+    // handle used to be, and at 938 tokens across 25 tools it was 18.8% of the
+    // whole advertised surface for a field that is not a parameter
+    // (turn-id.ts, docs/research/2026-09-19-code-mode-mcp.md §2.4).
     const reg = <S extends z.ZodRawShape>(name: ToolName, description: string, inputSchema: S, body: (args: z.infer<z.ZodObject<S>>) => Promise<Outcome>) =>
-      server.registerTool(name, { description, inputSchema: { ...inputSchema, turn_id: turnId } }, wrap(name, body) as never);
+      server.registerTool(name, { description, inputSchema }, wrap(name, body) as never);
 
     reg(
       "capture",
@@ -307,6 +347,31 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
       async (a) => {
         const r = await submitReport(db, principal.id, a);
         return done(r, { proposal_id: r.id, deduplicated: r.deduplicated });
+      },
+    );
+
+    // Grants nothing: one row in the owner's queue, and they widen the grant
+    // themselves (access.ts). Deliberately offered at EVERY tier, tier `none`
+    // included — an agent that can be refused is an agent that may ask — and
+    // to every principal since the 2026-09-19 ruling, the assistant included.
+    // The ladder (decline → escalate once → ask in words) is enforced in
+    // access.ts, so the description states it rather than pleading for it.
+    reg(
+      "request_access",
+      "Ask the owner for the `areas` grant on one vault folder (TitleCase prefix, e.g. Areas/Health) and say why. Grants nothing: it raises one request in their Needs You queue to approve, narrow or decline. A repeat ask returns the pending one; after an approval the read simply works; after a decline you are told so, and may ask once more with escalate.",
+      {
+        area: z.string().min(1).max(200).describe("The vault prefix you need, e.g. Areas/Health."),
+        reason: z.string().min(1).max(1000).describe("Why you need it — what you were doing when you were refused."),
+        escalate: z.boolean().optional().describe("Only after a decline: ask again, flagged, with a fuller reason."),
+      },
+      async (a) => {
+        const r = await requestAccess(db, principal, a);
+        return r.ok
+          ? done(
+              { id: r.id, area: r.area, ...(r.replayed ? { replayed: true } : {}), ...(r.escalated ? { escalated: true } : {}), decided_by: "the owner, in Needs You" },
+              { proposal_id: r.id, area: r.area, replayed: r.replayed, escalated: r.escalated },
+            )
+          : fail(r.code, r.message, { area: a.area, ...(a.escalate ? { escalate: true } : {}) }, r.expose);
       },
     );
 
@@ -394,7 +459,11 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
         idempotency_key: z.string().min(1).max(200).optional(),
       },
       async (a) => {
-        if (!memberOf(principal, a.project)) return fail("forbidden");
+        // The one project check that is `forbidden` rather than `not_found`:
+        // you named the project, so it is not a row you cannot see — it is a
+        // room you are not in (uniform with artifacts_publish).
+        const admitted = may(principalOf(principal), "write", { kind: "project", door: "task_create", slug: a.project });
+        if (!admitted.ok) return refuse(admitted);
         for (const dep of a.depends_on ?? []) if (!(await scoped(principal, dep))) return fail("not_found", `depends_on task ${dep} not found`);
         const task = await tasks.create(
           {
@@ -428,7 +497,8 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
       },
       async (a) => {
         const scope = knowledgeScope(principal);
-        if (scope.tier === "none") return fail("forbidden", undefined, { tier: scope.tier });
+        const admitted = may(principalOf(principal), "act", { kind: "tool", name: "knowledge_search" });
+        if (!admitted.ok) return refuse(admitted, { tier: scope.tier });
         const r = await searchKnowledge(db, principal, a.query, a.limit ?? 20, { mode: a.mode ?? null, embedder: cfg.embedder });
         return done(
           { tier: scope.tier, mode: r.mode, hits: r.hits, ...(r.degraded ? { degraded: r.degraded } : {}) },
@@ -439,12 +509,12 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
 
     reg(
       "knowledge_read",
-      "Read one settled note by vault path; requires an `areas` grant covering it. Returned sha256 feeds knowledge_write's expected_sha256.",
+      "Read one settled note by vault path; needs the `areas` grant covering its folder. Returned sha256 feeds knowledge_write's expected_sha256.",
       { path: z.string().min(1).max(500) },
       async (a) => {
         const scope = knowledgeScope(principal);
         const r = await readKnowledge(db, principal, a.path, cfg.readKnowledge);
-        if (!r.ok) return fail(r.code, r.message, { tier: scope.tier, areas: scope.prefixes ?? [], path: a.path });
+        if (!r.ok) return fail(r.code, r.message, { tier: scope.tier, areas: scope.prefixes ?? [], path: a.path }, r.expose);
         return done({ path: r.path, title: r.title, content: r.content, sha256: sha256Text(r.content) }, { tier: scope.tier, areas: scope.prefixes ?? [], path: a.path, bytes: r.content.length });
       },
     );
@@ -452,12 +522,17 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
     // knowledge_list / knowledge_grep (docs/research/2026-09-stash-review.md
     // item 3): filesystem semantics over the same grant tiers, one
     // registration point like every other adapter here.
-    registerKnowledgeFsTools(reg, { db, list: cfg.listKnowledge, search: cfg.searchVaultKeyword, read: cfg.readKnowledge }, principal);
+    // `queries` rides along because the page list and the link graph are
+    // DERIVED state: `knowledge_list` runs the same two `expose: route`
+    // named queries the console's `/api/knowledge/pages` and `/links` run,
+    // through the same driver and the same `canSeeUnder` filter (ruled
+    // 2026-09-19: one scope rule for every knowledge read, on both doors).
+    registerKnowledgeFsTools(reg, { db, list: cfg.listKnowledge, search: cfg.searchVaultKeyword, read: cfg.readKnowledge, queries: cfg.queries }, principal);
 
     // The assistant's write path (knowledge-write.ts): internal principals only.
     reg(
       "knowledge_write",
-      "Write one note in the vault as a commit in your name (internal assistant only; others get `not granted` — use requests_create). Whole-file replace; frontmatter gets `source`/`updated` stamped. " +
+      "Write one note in the vault as a commit in your name (the instance assistant alone; others use requests_create). Whole-file replace; frontmatter gets `source`/`updated` stamped. " +
         'To CHANGE a note: knowledge_read it and pass its sha256 back as expected_sha256. Omitting it means create-only, so an existing note answers `conflict` with the current hash rather than being overwritten unseen. ' +
         "A note whose `source` is someone else's is refused — report instead; notes you or the fold wrote are yours. Protected paths are refused; deletes/renames are not available.",
       {
@@ -507,7 +582,11 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
   }
 
   function render(outcome: Outcome, nudgeLine: string | null): CallToolResult {
-    const body = outcome.ok ? sanitizeDeep(outcome.result) : errorEnvelope(outcome.code, outcome.message);
+    // `outcome.expose` (never `meta`, which is `runs`-only) is merged onto
+    // the envelope for a refusal that opts in — e.g. knowledge.ts's
+    // scope_required — so the uniform `{ error }` shape every other tool
+    // returns is untouched unless a tool body explicitly asked for more.
+    const body = outcome.ok ? sanitizeDeep(outcome.result) : { ...errorEnvelope(outcome.code, outcome.message), ...(outcome.expose ?? {}) };
     const text = JSON.stringify(body) + (nudgeLine ? `\n${nudgeLine}` : "");
     return { content: [{ type: "text", text }], ...(outcome.ok ? {} : { isError: true }) };
   }
@@ -536,14 +615,17 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
       });
       // The SDK's class types its optional handlers as `| undefined`, which exactOptionalPropertyTypes rejects; same object at runtime.
       await server.connect(transport as unknown as Transport);
-      // Deprecated names (aliases.ts) are rewritten on the way in, after connect
-      // installed the real handler: one release of compatibility with no second
-      // copy of any schema on the listed surface.
+      // Two rewrites on the way in, after connect installed the real handler,
+      // and both are one release of compatibility with nothing added to the
+      // listed surface: deprecated names (aliases.ts) become their primary
+      // spelling, and a legacy `arguments.turn_id` moves to the call's `_meta`
+      // (turn-id.ts) before any schema could strip it.
       const deliver = transport.onmessage;
       if (deliver) {
         transport.onmessage = (message, extra) => {
           const hit = resolveAliasCall(message);
           if (hit?.id !== undefined) aliasByRequestId.set(String(hit.id), hit.alias);
+          liftTurnId(message);
           deliver(message, extra);
         };
       }

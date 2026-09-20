@@ -1,4 +1,4 @@
-# `metistry` — init, connect-repo, connect, secrets, console, doctor, up, update, service control
+# `metistry` — init, connect-repo, connect, secrets, console, doctor, up, down, update, service control
 
 `packages/cli` (`@foldedspacelabs/metistry-cli`, plan §4.16: `init | doctor
 | up | update`, plus the install verbs the Mac app drives — `connect-repo`,
@@ -9,25 +9,28 @@ All of them are real.
 
 | verb | what it does |
 | --- | --- |
-| `init <dir>` | create a private instance repo |
+| `init <dir>` | create a private instance repo, asking once whether to keep this Mac awake (`--keep-awake <value>` answers it without a terminal) |
 | `connect-repo <url>` | point the instance repo at a remote, mint credentials the reconciler can push with |
 | `secrets sync\|mint\|list [--json]` | move secrets between the Keychain and `.env` |
 | `connect <tool> [--rotate]` | give one external dev tool (Cursor, OpenCode, Devin, Claude Code) its own agent token and config |
 | `connect --list [--json]` | which tools are connected: the row, the bearer, the config |
 | `console whoami [--json]` | ask the console who it thinks you are, with this install's owner token |
-| `console call <METHOD> <path> [--body @file\|-] [--json]` | one authenticated request against the console, as `whoami`'s same principal — the scripting seam |
+| `console call <METHOD> <path> [--body @file\|-] [--idempotency-key <key>] [--json]` | one authenticated request against the console, as `whoami`'s same principal — the scripting seam |
 | `identity [--json]` | the instance's `.metistry/identity.yaml` (name, mention, voice, icon, instance_id) |
 | `--version` / `version [--json]` | this CLI's version, the resolved product dir's, the lock's pin, and a release's runtime pack |
 | `deployment [--json]` | the effective shape (D4 overlay) and the services it implies, with cheap running state |
 | `deployment set-shape <compose\|launchd>` | write the instance's `.metistry/deployment.yaml` through the reconciler, preview-then-confirm |
+| `deployment set-keep-awake <never\|allow_sleep_on_battery\|always\|always_lid_closed>` | whether this install holds the Mac awake, and on which power (macOS); the same protected write |
 | `migrate-layout [--dry-run] [--json] [--allow-dirty]` | carry an instance from the legacy layout to the flat one: the directory becomes the vault, the machinery moves under `.metistry/`, stored paths lose `Knowledge/` |
 | `migrate-inbox [--dry-run]` | move a pre-#156 `inbox/` into the vault inbox and rewrite `inbox.path` |
 | `migrate-shape <launchd\|compose>` | move a LIVE install between the shapes, with its data: dump, stop, flip, up, restore, verify, doctor |
+| `templates check [<file>]` | does the vault's `Templates/` read — every directive, with the line number Obsidian shows — before the next run reads it (a template change takes effect at the next run) |
 | `doctor` | validate every manifest and probe every bridge, service, container, launchd job |
-| `up` | bring an install to running: containers/host jobs, then doctor |
+| `up` | bring an install to running: containers/host jobs, then doctor — and exit |
+| `down` | stop every host job and container for this instance, then confirm nothing is left running |
 | `update` | move an install forward: pull/build, migrate, restart what changed, pin, doctor |
 | `restart [<service>…]` | `launchctl kickstart -k`, or `docker compose restart`, per service |
-| `stop [<service>…]` | `launchctl bootout`, or `docker compose stop`, per service |
+| `stop [<service>…]` | `launchctl bootout`, or `docker compose stop`, per service (`down` is all of them) |
 | `start [<service>…]` | `launchctl bootstrap` + `kickstart -k`, or `docker compose start`, per service |
 | `logs <service>` | tail the job's (or supervisor child's) log file, or `docker compose logs` |
 | `import-sessions` | summarise and post this machine's Claude Code sessions |
@@ -41,6 +44,7 @@ node packages/cli/dist/main.js doctor
 node packages/cli/dist/main.js doctor --json
 node packages/cli/dist/main.js up --dry-run        # what it would do, runs nothing
 node packages/cli/dist/main.js up                  # containers + host jobs, then doctor
+node packages/cli/dist/main.js down                # stop all of it, then confirm; --dry-run, --json
 node packages/cli/dist/main.js update --dry-run
 node packages/cli/dist/main.js update              # pull, build, migrate, restart, pin
 
@@ -81,6 +85,22 @@ stderr writer under `--json`, a stdout one without it), not left to a
 Compute pane having to parse a trailing object out of a stream of prose
 (`docs/ops/mac-app.md`); without `--json` the same notes print to stdout
 inline, exactly as before.
+
+## What it looks like
+
+The presentation layer is `packages/cli/src/ui.ts` and its rules are
+`docs/ops/cli-style.md`: colour only when stdout is a terminal that wants it
+(`NO_COLOR`, `TERM=dumb`, `--no-color` and `--json` each turn it off;
+`FORCE_COLOR` turns it on for a pipe that really is one), one icon and one
+colour per status from a closed vocabulary, `[ok] [x] [!]` where the locale
+is not UTF-8, secondary text dimmed, prose wrapped at the terminal width
+clamped to [60, 100], and a spinner only on a TTY.
+
+Two consequences worth knowing before editing a verb: **colour never reaches
+a `--json` document** (`createUi({ json: true })` is the enforcement, not a
+convention), and **the status word is always spelled out** beside its icon,
+so nothing is distinguished by hue alone. Render functions take a `Ui` as
+their last argument; `main()` configures the process's one from the flags.
 
 ## `identity`, `version`, `deployment`, `console whoami`: what the app reads instead of the files
 
@@ -126,6 +146,21 @@ because the data does not move between shapes on its own
 the shape change, then `metistry up` would do. `--force` writes anyway.
 `reconciler`/`watchdog` being up is never a reason to refuse: they are host
 jobs under either shape (invariant 6).
+
+`metistry deployment set-keep-awake <never|allow_sleep_on_battery|always|always_lid_closed> [--yes]`
+writes the same file, the same way — protected path, through the reconciler
+as the `user` principal, preview without `--yes` — and prints what the
+choice costs before it writes it. It does **not** refuse while services are
+running: `set-shape` refuses because the data does not move between shapes
+on its own, and changing the power policy moves nothing. It takes effect at
+the next `metistry up`, which is what renders the value into the
+supervisor's environment.
+
+The four values, what each does and the one that cannot be delivered in
+full are in `docs/ops/deployment-shapes.md`, "Keeping the Mac awake". Short
+version: absent means `never` and nothing is held; `metistry init` asks the
+question once, on a terminal, and writes your answer; `metistry doctor`
+reports one `keep-awake` row, `degraded` at worst.
 
 `metistry migrate-shape <launchd|compose> [--dry-run] [--namespace]` is the
 verb for a LIVE install, and it is deliberately not a flag on `set-shape`.
@@ -188,8 +223,8 @@ error message. A 401 is one of exactly two things and the error names both:
 a token the console was not started with, or a request that did not arrive
 from this machine (under compose, the NAT question — `docs/ops/auth.md`).
 
-`metistry console call <METHOD> <path> [--body @<file>|-] [--json]` is the
-scripting seam behind `whoami`: one authenticated request against the
+`metistry console call <METHOD> <path> [--body @<file>|-] [--idempotency-key <key>] [--json]`
+is the scripting seam behind `whoami`: one authenticated request against the
 console, as the same `user` principal, over the same loopback door. It
 prints the response body — pretty-printed unless `--json`, which prints the
 console's own bytes verbatim — and exits non-zero on a `>=400` answer,
@@ -202,6 +237,15 @@ minted for this machine only, and this verb will not carry it anywhere
 else. `docs/ops/console-api.md` is the routes it can call; the app and
 `docs/ops/second-instance.md` use it rather than a second HTTP client.
 
+`--idempotency-key <key>` sends `Idempotency-Key` (`docs/ops/console-api.md`
+— today only `POST /capture` reads it), checked against the same shape the
+server enforces (trimmed, non-empty, at most 200 characters) before the
+request ever goes out, so a bad key is this verb refusing rather than a
+round trip finding out. A replay — the console's own `idempotency-replayed`
+response header, which this verb prints no other trace of — folds
+`"replayed": true` into the `--json` body; in plain mode it is a one-line
+note on stderr instead, and the printed body is untouched.
+
 ```
 $ metistry console call GET /api/whoami
 {
@@ -211,6 +255,10 @@ $ metistry console call GET /api/whoami
 }
 $ metistry console call POST /api/instances --body @peer.json --json
 {"action":"added","instances":[…]}
+$ metistry console call POST /capture --body @note.json --idempotency-key retry-1 --json
+{"id":42,"path":"Inbox/1757556000000-note.md","sha256":"…"}
+$ metistry console call POST /capture --body @note.json --idempotency-key retry-1 --json   # retried
+{"id":42,"path":"Inbox/1757556000000-note.md","sha256":"…","replayed":true}
 ```
 
 Package-level detail (flags, resolution order, probe table) lives in
@@ -274,6 +322,16 @@ produces the flat instance layout (ruled 2026-09-17;
   now.md                    from seed/ — the vault; brain-commit writes here
   Inbox/README.md           where captures land — in the vault, so Obsidian
                             sees them and git carries them (docs/ops/inbox.md)
+  Journal/                  the user's own daily note, one writer per file
+    Plan/ Fold/ Standup/    machine-owned, one routine per folder (§5.1)
+    Meetings/               the user's own meeting notes
+  Templates/                Daily/Meeting/Plan/Standup/Fold/Weekly.md — all
+                            `source: user`, so the assistant may never
+                            overwrite them (docs/product/daily-flow-spec.md §6.1)
+  Me/                       profile.md + `Working Style.md`, honest
+                            placeholders — Metistry discovers these, never
+                            assumes them (§6.6)
+  People/ Projects/         empty; you add a page the first time you need one
   .metistry/
     identity.yaml           the ONLY place the assistant is named (--name)
                             …and its instance_id: a v4 UUID minted once, the
@@ -290,18 +348,40 @@ produces the flat instance layout (ruled 2026-09-17;
 ```
 
 It refuses a non-empty directory unless `--force`, never prompts, and
-**never writes a secret**. What it prints at the end is the next step —
-five lines for `<dir>/.metistry/state/.env`, this instance's own environment,
+**never writes a secret**. `--force` onto an already-stamped directory never
+overwrites a file that is already there — the journal tree, the six
+templates and `Me/` are stamped once, so a template you have since edited
+in Obsidian survives a re-run; only a file genuinely missing gets filled in.
+
+**This is `init`-only, deliberately: `metistry update` never re-stamps the
+vault.** §6.1 of the daily-flow spec ties the journal tree, `Templates/`
+and `Me/` to `metistry init` and says nothing about `update`, and `update`'s
+own steps (above) touch the product checkout, migrations and the running
+services — never vault content, which is invariant 2's territory, not a
+product update's. An instance created before this tree existed gets it by
+hand: copy `seed/vault/{Journal,Templates,Me,People,Projects}` out of a
+current checkout into the instance directory and commit it yourself, the
+same way you would add any other note.
+
+What it prints at the end is the next step —
+six lines for `<dir>/.metistry/state/.env`, this instance's own environment,
 shaped for `--shape compose|launchd` (default: launchd on macOS, compose
 elsewhere — `docs/ops/deployment-shapes.md`):
 
 ```
 METISTRY_INSTANCE_DIR=<dir>
 METISTRY_BRIDGE_TOKEN_RECONCILER=<minted once; shown only here>
+METISTRY_BRIDGE_TOKEN_RECONCILER_USER=<minted once; shown only here>
 METISTRY_RECONCILER_URL=http://127.0.0.1:7812              # --shape compose: http://host.docker.internal:7812
 METISTRY_ORIGIN=http://127.0.0.1:8080
 METISTRY_LOCAL_OWNER_TOKEN=<minted once; shown only here>
 ```
+
+The two reconciler bearers are not interchangeable: the `_USER` one is the
+only credential that may write a §4.7 protected path, and it is deliberately
+kept out of the console's environment (`docs/ops/auth.md`, "The principal
+comes from the credential"). `metistry up` and `metistry update` mint it for
+an install that predates it.
 
 `METISTRY_ORIGIN` is the console's canonical origin (`docs/ops/auth.md`)
 — it refuses to start without one, in either shape. The default above is
@@ -458,6 +538,14 @@ TitleCase vault-root prefixes, `--project` adds membership. No flag grants
 all, so "read-only by default" is true by construction rather than by
 configuration. A re-run with no flags leaves grants exactly as they were.
 
+**On an instance that has not run `metistry migrate-layout`,** prefix them
+with `Knowledge/`: `--areas Knowledge/Areas/Engineering`. A grant is matched
+as a path prefix against the rows the reconciler indexed, and on a legacy
+instance the vault is `Knowledge/` — so `--areas Areas/Engineering` there
+matches nothing and grants nothing, silently. `migrate-layout` moves the
+vault to the instance root and rewrites those paths; after it has run, the
+flat spelling above is the only one.
+
 A namespaced instance (`metistry up --namespace`) follows its own
 `.metistry/state/ports.yaml`: the console port in the URL, and the label suffix in both
 the config key (`mcpServers.metistry-<suffix>`) and the variable name
@@ -517,6 +605,42 @@ validate is refused rather than written. The console serves the same file to
 the Mac app and the phone at `GET /api/instances`.
 `docs/ops/instances.md` is the whole story, including why `resources:` is
 empty and what this deliberately is not.
+
+## Who is registered, and what they hold: `metistry agents list`
+
+```sh
+metistry agents list
+metistry agents list --json
+```
+
+```
+✓ Researcher  researcher   seen 2026-09-20
+    scope  an agent · folders: Areas/Health · queries, projects: alpha, autonomy: propose
+    from   the registry — the owner's own hand, durable
+    asked  Areas/Finance — answer it in Needs You (request #42)
+⚠ Devin       devin        pending
+    scope  an agent · titles · autonomy: observe
+    from   the registry — the owner's own hand, durable
+```
+
+Every registered agent and what its credential holds, as one **triple** —
+role · access · extras. The access word is the read tier said the one way
+(`none` / `titles` / `folders`); the extras are everything that is not the
+tier: the `queries` switch, the projects, a crew's `uses` toolset, the
+autonomy level. `from` is where the scope came from — configuration for the
+instance's own assistant, its manifest for a crew, the registry for
+everything else ([auth.md](auth.md)).
+
+**Read-only, and deliberately not a renderer.** It is a client of `GET
+/api/agents`, which sends each row's scope already rendered by
+`describeScope` in `core` — so this command prints the words the console's
+Agents panel and the Needs You card print, and cannot drift into a fifth
+vocabulary for one record. A grant is still the owner's hand: the two doors
+that widen one are the console's Agents panel and answering an
+`access_request` in Needs You, and nothing in this command writes.
+
+An agent waiting on an answer shows what it asked for and which request to
+answer. `--json` prints the rows as the console sent them, colour off.
 
 ## How much room an agent has: `metistry agents autonomy`
 
@@ -812,19 +936,41 @@ fail the run.
 ## Reading a doctor report
 
 ```
-name                                              kind       status  ms   remediation
-------------------------------------------------  ---------  ------  ---  -----------
-apple-fm                                          bridge     ok      920
-eventkit                                          bridge     failed  4    eventkit rejected the token (HTTP 401) — the METISTRY_BRIDGE_TOKEN_* in .env differs …
-reconciler                                        service    ok      53
-console                                           service    ok      6
-db                                                db         ok      16
-migrations                                        db         ok      3
-launchd:com.foldedspacelabs.metistry.reconciler   launchd    ok      4
-compose:console                                   container  ok      0
-…
-24 checks: 23 ok, 0 degraded, 1 failed, 0 absent — FAILED (/Users/you/src/metistry)
+/Users/you/src/metistry — shape launchd, 2026-09-19T09:14:02.118Z
+
+bridge
+  ✓ apple-fm  ok       920ms
+  ✗ eventkit  failed     4ms
+      → eventkit rejected the token (HTTP 401) — the METISTRY_BRIDGE_TOKEN_* in
+        .env differs from the one the bridge was started with
+
+service
+  ✓ reconciler  ok        53ms
+  ✓ console     ok         6ms
+
+cli
+  ○ cli on PATH  absent     0ms
+      → `ln -s /Users/you/instance/.metistry/state/cli/metistry
+        ~/.local/bin/metistry` (or add its directory to PATH)
+
+db
+  ✓ db          ok        16ms
+  ✓ migrations  ok         3ms
+
+launchd
+  ✓ launchd:com.foldedspacelabs.metistry.reconciler  ok         4ms
+
+container
+  ✓ compose:console  ok         0ms
+
+9 checks: 7 ok, 0 degraded, 1 failed, 1 absent — ✗ FAILED
 ```
+
+One block per `kind`, the remediation — the reason a red row is read at all
+— wrapped directly under its row rather than in a column that runs off the
+screen, and the verdict last. Colour, and `[ok]`/`[x]`/`[!]` where the
+terminal's locale is not UTF-8, come from `docs/ops/cli-style.md`;
+`--json` is untouched by any of it.
 
 One row per thing that can be wrong; every row is a `core` `CheckResult`
 (`name`, `status`, `latency_ms`, `probe`, `remediation`, `meta`) plus a
@@ -899,6 +1045,7 @@ metistry restart [<service>…] [--json] [--dry-run]
 metistry stop    [<service>…] [--json] [--dry-run]
 metistry start   [<service>…] [--json] [--dry-run]
 metistry logs <service> [--lines N] [--follow] [--dry-run]
+metistry down [--json] [--dry-run]     # every service at once, then confirm
 ```
 
 **This is what the Mac app's menu bar calls.** Restart/stop/start/show-logs
@@ -936,7 +1083,7 @@ Every named service is acted on even when an earlier one fails — this is a
 stop-at-first-failure plan. `--json` prints one object per service,
 `{service, action, ok, detail}`, for the app to render and nothing else — a
 step's progress line goes to stderr instead of vanishing; without it the
-output is a table like `doctor`'s. A name that isn't a service this shape
+output is the shared table (`docs/ops/cli-style.md`). A name that isn't a service this shape
 runs fails the whole command (exit 2) with the list of known ones — it
 never guesses which subprocess a name might mean. `--dry-run` prints the
 exact command per service and runs nothing, the same seam `up --dry-run`
@@ -1079,6 +1226,96 @@ prints is what a real run does.
 [dry-run] metistry doctor
 ```
 
+### Where the time goes
+
+`up` ends with a timing per `==` section and a total, because "why was that
+slow?" is the first question anyone asks of it and an answer you have to know
+to ask for is an answer nobody has:
+
+```
+== timings
+   compose 0ms · postgres 312ms · launchd 3.9s · database 260ms · doctor 1.1s — total 5.6s
+   running under launchd — `metistry down` stops it, `metistry logs <service> --follow` tails
+```
+
+Three of those numbers used to be larger for no reason a person benefited
+from, and the fixes are worth knowing about because they shape what the
+figures mean now:
+
+- **The retire step asks launchd once.** `up` boots out the agents this shape
+  no longer installs — under `launchd` that is eight pre-supervisor labels.
+  It used to run a `bootout` and an `rm` for each, in series: sixteen
+  subprocesses to discover an install that migrated months ago has none of
+  them. One `launchctl list` now answers for all eight. A `launchctl list`
+  that fails, and every `--dry-run`, still do the whole unconditional sweep:
+  "could not ask" must mean "do the work", never "skip it".
+- **Postgres is polled four times a second**, not once, with the same 15s
+  ceiling. A server that answers in 300ms no longer costs a second.
+- **doctor probes concurrently.** Its checks are independent — a bridge's
+  HTTP probe knows nothing about `launchctl print`, which knows nothing about
+  the database — so the closing table costs the *slowest* probe rather than
+  the sum of all of them. No timeout was shortened to buy that: a
+  slow-but-healthy bridge (a cold `apple-fm` helper answers its first
+  `/check` in about a second) reported as down would be a worse table.
+
+## Running: `up`, `down`, and who owns the processes
+
+**The CLI is never the daemon.** `up` hands the processes to **launchd**
+(or, under the compose shape, to **Docker**) and exits — that is the whole
+point of a supervisor that survives a closed terminal, a logout and a
+reboot. So:
+
+```sh
+metistry up      # start everything, run doctor, print, exit 0/1
+metistry down    # stop everything, confirm it is stopped, exit 0
+metistry doctor  # what is running right now, without changing anything
+```
+
+`metistry down` is `up`'s other half:
+
+| shape | what `down` does |
+| --- | --- |
+| `launchd` | `launchctl bootout` of the supervisor's agent — which takes Postgres, the console, the reconciler, the assistant and the bridges with it — and of the TCC helpers' agents |
+| `compose` | `docker compose stop` per container, plus `bootout` of the host agents |
+
+Then it **looks**: `launchctl print` for each label (nothing found = gone) and
+`docker compose ps --quiet` (empty = nothing running), and prints what it
+found under a heading of its own — the claim and the check are two blocks,
+never one. A job still loaded after its bootout is a non-zero exit, not a
+cheerful "done".
+
+```
+service     action  ok      detail
+──────────  ──────  ──────  ──────────
+supervisor  stop    ✓ ok    booted out
+
+1 service(s): 1 ok, 0 failed
+
+confirmed by looking
+  ✓ gone  com.foldedspacelabs.metistry  not loaded
+
+1/1 confirmed stopped (shape launchd)
+```
+
+**`down` stops; it never deletes.** It is `docker compose stop`, *not*
+`docker compose down`, and never `-v`. The opposite of "up" is "the processes
+are not running", not "the install is gone": Postgres's volume is the derived
+half of invariant 1, and a verb reached for daily must not be the one that
+drops it. `metistry down` takes no service names — `metistry stop <service>`
+is still the per-service verb.
+
+**If the Mac app registered the background item**, `down` boots it out for
+the rest of this login session and says so: the app starts it again at the
+next login unless it is turned off in *Metistry.app › Settings › Services ›
+"Run Metistry in the background"*. The CLI does not reach into another
+application's `SMAppService` registration — that would make it a second
+registrar for the one job (`docs/ops/deployment-shapes.md`, "Two
+registrars").
+
+**Logs live outside the CLI's lifetime too**: `/tmp/metistry-<service>.log`
+under launchd (`metistry logs <service> --follow` tails it), `docker compose
+logs` under compose.
+
 ### Linux hosts
 
 There is no launchd, and this has not been run on a Linux host yet, so
@@ -1091,6 +1328,62 @@ step is a follow-up once a Linux install exists to test it against; the
 TCC-bound jobs (eventkit, apple-fm) have no Linux counterpart at all
 (§4.17: absent, not broken). `update` on Linux likewise tells you which
 units to restart rather than restarting them.
+
+### Getting `metistry` on your PATH
+
+A fresh release install has no `metistry` on `PATH` — there is no Homebrew
+formula and no npm global, so nothing put it there. `up` (and `update`,
+since a checkout that only ever runs that still needs one) writes a small
+POSIX shim to `<instance>/.metistry/state/cli/metistry`: an executable
+script that already knows this install's product dir and instance dir, and
+at every invocation re-checks which of `current/` (a release) or the bare
+product dir holds the CLI, and whether to run it with the bundled
+`runtime/node/bin/node` or whatever `node` is on `PATH` — so a release
+flip or a freshly bundled runtime needs no re-write. It is idempotent
+(unchanged content is left alone) and mode `0755`; a symlink or a foreign
+file already sitting at the path is left alone too, with a note, rather
+than overwritten.
+
+**`up` never puts it on PATH itself** — invariant 2, that is the operator's
+own hand — it only prints the one line that would, as part of its normal
+output:
+
+```
+   cli: /Users/you/instance/.metistry/state/cli/metistry — `ln -s /Users/you/instance/.metistry/state/cli/metistry ~/.local/bin/metistry` (or add its directory to PATH) runs `metistry` by name
+```
+
+Run that `ln -s` once (or add the directory to `PATH` yourself), and
+`metistry doctor` — from anywhere — works. `metistry doctor`'s own `cli on
+PATH` row says whether it is already reachable, and where, or hands back
+the same line when it is not; it is informational (`ok`/`absent`), never a
+finding that fails the exit code.
+
+This is the same mechanism in every shape:
+
+- **Release install.** The shim lives at
+  `<instance>/.metistry/state/cli/metistry` and execs
+  `<product>/runtime/node/bin/node <product>/current/packages/cli/dist/main.js`.
+- **Checkout.** Same path, same shim; `current/` does not exist, so it
+  falls back to `<product>/packages/cli/dist/main.js`, and to `node` on
+  `PATH` when there is no bundled `runtime/`.
+- **The Mac app.** `apps/macos`'s `RuntimeLocator` looks for a `metistry`
+  in `~/.local/bin` and in the active instance's own
+  `.metistry/state/cli` — the same two places above — in addition to the
+  usual Homebrew/system bins and `PATH`, so the app finds an install even
+  before anyone has run the `ln -s` line by hand (`docs/ops/mac-app.md`).
+
+**Why `state/cli/`, not `state/bin/`.** Under `shape: launchd`,
+`<instance>/.metistry/state/bin/Metistry` (capital M) is already the
+supervisor's own program-identity symlink (§ above, "Host jobs (macOS)"),
+and macOS's default APFS volume does not tell `metistry` and `Metistry`
+apart in that directory — they would be the same directory entry. Rather
+than have the cli shim quietly lose that race on the one shape that most
+needs it (no Docker, so no other way to reach the console short of the
+app), it lives in `state/cli/`, a sibling directory the supervisor's
+symlink never touches. `writeCliShim` still checks before writing —
+leaving a symlink, or a file that does not look like a shim this install
+wrote, alone rather than overwritten — as a second line of defence, not
+the fix itself.
 
 ## Updating
 
@@ -1105,6 +1398,16 @@ install forward, in this order:
 | restart | `docker compose up -d --build`; `launchctl kickstart -k` for each host job whose code changed | `docker compose pull` + `up -d --no-build` in `current`, with the versioned ghcr images; same kickstart rule |
 | lock | write `.metistry/metistry.lock` into the instance repo | same, pinned to the release actually installed |
 | doctor | the verdict, as for `up` | same, against `current` |
+
+**A legacy instance is refused past 0.8.x.** Before the product step —
+before anything is fetched, built or migrated — `update` reads the instance
+layout and stops if it is the pre-2026-09-17 shape (the vault in
+`Knowledge/`, the config files at the instance root) and the version it
+would pin is later than `0.8.x`, printing the `metistry migrate-layout`
+lines to run. `--allow-legacy` pins it anyway. 0.8.x reads both layouts
+(`docs/ops/instance-layout.md`, "Until the verb runs"); nothing past it has
+been run against the old one, and compatibility nobody tests is not
+compatibility.
 
 Release-mode flags: `--version 0.2.0` installs a specific release instead
 of the latest; `--rollback` flips `current` back to the previous release

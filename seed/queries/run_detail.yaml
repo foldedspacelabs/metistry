@@ -1,0 +1,95 @@
+# Seeded default (D4 overlay: an instance file of the same name wins).
+#
+# One row of the ledger, in full — the feed's drill-down
+# (docs/product/app-ux-plan.md §6 phase B: "a `runs` detail query for the
+# feed's drill-down"). `activity_feed` gives every event a `ref` of
+# `runs:<id>`; this is what the tap on it opens, through the one read path
+# (invariant 3) like everything else.
+#
+# What it answers that the feed row cannot: which provider and model served
+# it, what the provider's cache did, what it cost, which tool calls the same
+# reply made, and — when the turn was shadowed — what the candidate model
+# would have done and how closely it agreed.
+#
+# `id` has a DEFAULT rather than `required: true` because every seed query
+# must run on its defaults alone (apps/console/test/seed-queries.test.ts):
+# `runs.id` is `GENERATED ALWAYS AS IDENTITY`, which starts at 1, so 0 names
+# no row and the default is an empty result rather than a special case.
+#
+# The tool-call join is EXACT, never a time window: `meta.turn_id` (the id
+# the assistant stamps on every brain tool call it makes while answering one
+# message — docs/ops/assistant-tools.md) or `meta.message_id` (what the
+# console and the drain stamp). A run with neither reports no tool calls,
+# which is the honest answer — guessing from a ±N-minute window around a
+# session would attribute another reply's calls to this one.
+name: run_detail
+description: >-
+  One `runs` row in full, for the activity feed's drill-down: component, kind,
+  timing, provider/model, token and cache counts, cost, the error if it
+  failed, and `meta`. Plus the tool calls the same reply made (joined on
+  meta.turn_id or meta.message_id — exact, never a time window) and, where
+  the turn was shadowed, the candidate provider/model, the deterministic
+  agreement score and what the shadow cost. An unknown id returns no rows.
+params:
+  id:    { type: int, default: 0 }
+  tools: { type: int, default: 50 }
+sql: |
+  SELECT
+    r.id,
+    r.ts,
+    r.started_at,
+    r.finished_at,
+    r.component,
+    r.kind,
+    r.session_id,
+    r.tool,
+    r.ok,
+    r.error,
+    r.duration_ms,
+    r.provider,
+    r.model,
+    r.tokens_in,
+    r.tokens_out,
+    r.cache_read_tokens,
+    r.cache_write_tokens,
+    r.cost_usd,
+    r.meta,
+    -- shadow mode (migration 0020): NULL on every unshadowed turn, which is
+    -- also how "shadow mode is not configured" reads. The transcripts
+    -- themselves are deliberately NOT returned — they are two full replies,
+    -- and the drill-down wants the measure, not the text.
+    r.shadow_provider,
+    r.shadow_model,
+    r.shadow_agreement,
+    r.shadow_cost_usd,
+    (r.shadow_transcript -> 'agreement' ->> 'tool_sequence')::boolean     AS shadow_same_tool_sequence,
+    (r.shadow_transcript -> 'agreement' ->> 'answer_similarity')::numeric AS shadow_answer_similarity,
+    (r.shadow_transcript -> 'shadow'    ->> 'error')                      AS shadow_error,
+    coalesce(t.calls, '[]'::jsonb)                                        AS tool_calls,
+    coalesce(t.n, 0)                                                      AS tool_calls_total,
+    coalesce(t.failed, 0)                                                 AS tool_calls_failed
+  FROM runs r
+  LEFT JOIN LATERAL (
+    SELECT
+      jsonb_agg(jsonb_build_object(
+        'id', c.id, 'ts', c.ts, 'component', c.component, 'tool', c.tool,
+        'ok', c.ok, 'error', c.error, 'duration_ms', c.duration_ms
+      ) ORDER BY c.ts, c.id)                         AS calls,
+      count(*)                                       AS n,
+      count(*) FILTER (WHERE c.ok = false)           AS failed
+    FROM (
+      SELECT x.id, x.ts, x.component, x.tool, x.ok, x.error, x.duration_ms
+      FROM runs x
+      WHERE x.kind = 'tool'
+        AND x.id <> r.id
+        AND (
+          (r.meta ->> 'turn_id'    IS NOT NULL AND x.meta ->> 'turn_id'    = r.meta ->> 'turn_id')
+          OR
+          (r.meta ->> 'message_id' IS NOT NULL AND x.meta ->> 'message_id' = r.meta ->> 'message_id')
+        )
+      ORDER BY x.ts, x.id
+      LIMIT (:tools)::int
+    ) c
+  ) t ON true
+  WHERE r.id = (:id)::bigint
+cache_ttl: 0

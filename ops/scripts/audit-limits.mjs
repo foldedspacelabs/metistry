@@ -6,8 +6,8 @@
 // nowhere to put a different one. Invariant 5's instinct — everything is a
 // directory with a manifest, CI validates — applied to the numbers.
 //
-// So every limit-shaped constant under apps/**/src and packages/**/src must be
-// one of two things, and say which:
+// So every limit-shaped constant under apps/**/src, packages/**/src,
+// routines/** and collectors/** must be one of two things, and say which:
 //
 //   * READ FROM CONFIG — the identifier appears in an `intEnv(…)`,
 //     `optionalEnv(…)`, `requireEnv(…)`, `process.env…` or a `compute.yaml`
@@ -31,8 +31,17 @@ import { join, relative, sep } from "node:path";
 
 const ROOT = join(import.meta.dirname, "..", "..");
 
-/** Roots to scan: the shipped source of every app and package. Tests, fixtures and build output are not policy. */
+/** Roots to scan: the shipped source of every app and package, nested under `src/`. Tests, fixtures and build output are not policy. */
 const SCAN = ["apps", "packages"];
+/**
+ * Roots scanned whole, with no `src/` to require: routines and collectors are
+ * invariant 5's flat component directories — `routines/knowledge-fold/run.ts`,
+ * not `routines/knowledge-fold/src/run.ts` — so requiring `SRC_SEGMENT` here
+ * would silently exempt every cap they declare. `targets/**` and `plugins/**`
+ * hold manifests and `.mjs`, no `.ts` outside their own tests, so there is
+ * nothing for this scanner to find there yet; add them here if that changes.
+ */
+const FLAT_SCAN = ["routines", "collectors"];
 const SRC_SEGMENT = `${sep}src${sep}`;
 const SKIP = new Set(["node_modules", "dist", ".build", "test", "tests", "__fixtures__"]);
 
@@ -84,11 +93,11 @@ function walk(dir) {
   return out;
 }
 
-/** Files to audit: the TypeScript under an app's or a package's `src/`, nothing above it. */
+/** Files to audit: the TypeScript under an app's or a package's `src/`, nothing above it, plus every routine's and collector's own files. */
 function targets() {
-  return SCAN.flatMap((r) => walk(r))
-    .filter((p) => p.includes(SRC_SEGMENT))
-    .sort();
+  const nested = SCAN.flatMap((r) => walk(r)).filter((p) => p.includes(SRC_SEGMENT));
+  const flat = FLAT_SCAN.flatMap((r) => walk(r));
+  return [...nested, ...flat].sort();
 }
 
 /**

@@ -10,27 +10,55 @@
 
 import {
   ACTION_KINDS,
+  AREA_PREFIX_REFUSAL,
   ACTION_MODES,
   AUTONOMY_LEVELS,
   autonomyWidenings,
+  describeScope,
   effectiveActions,
   ensureProject,
   finishRun,
+  INSTANCE_LAYOUT,
   intEnv,
   mintToken,
   parseBearer,
   startRun,
   tokenHash,
+  validAgentAreaGrant,
   VAULT_ROOT_AREA,
   type ActionKind,
   type ActionMode,
   type AutonomyLevel,
+  type Principal,
+  type ScopeView,
 } from "@foldedspacelabs/metistry-core";
+import { ACCESS_REQUEST_KIND, underAreas } from "@foldedspacelabs/metistry-mcp-brain";
 import type { Db } from "./auth-store.js";
 
 export const AGENT_ID_RE = /^[a-z][a-z0-9-]{0,39}$/;
+/** The kinds `POST /api/agents` may NAME: a crew is not registered by hand — its row comes from a manifest in a protected path (crews.ts). */
 export const AGENT_KINDS = ["external", "internal"] as const;
 export type AgentKind = (typeof AGENT_KINDS)[number];
+/**
+ * Every kind the column actually stores, and the exact list migration 0025's
+ * CHECK constraint holds it to. `crew` has been written since Phase 5
+ * (crews.ts) while the typed pair above said otherwise, which is how a crew
+ * came to authenticate as a foreign agent (§2.3 of
+ * docs/research/2026-09-19-grants-and-access-simplified.md). One list, in
+ * code and in the database, so a fourth value is a decision rather than an
+ * INSERT.
+ */
+export const STORED_AGENT_KINDS = ["external", "internal", "crew"] as const;
+export type StoredAgentKind = (typeof STORED_AGENT_KINDS)[number];
+/**
+ * Where a row's grants came from, recorded on the row (0025's `grant_source`)
+ * instead of re-derived from `kind` in prose at each door (§2.7). Nothing
+ * DECIDES on it — `may()` never reads it; it is what the one renderer and the
+ * "your scope is configuration, not a grant" sentence read. NULL on a row
+ * written before the column existed, which reads as `registry`.
+ */
+export const GRANT_SOURCES = ["registry", "environment", "manifest"] as const;
+export type GrantSourceName = (typeof GRANT_SOURCES)[number];
 export const TIERS = ["none", "index", "areas"] as const;
 export type Tier = (typeof TIERS)[number];
 
@@ -49,7 +77,11 @@ export interface Grants {
  */
 export interface AgentPrincipal {
   id: string;
-  kind: AgentKind;
+  kind: StoredAgentKind;
+  /** A crew's tool groups, from the manifest the console loaded (`uses:`) — resolved at authentication by the lookup below, never from the request. Absent on every other kind; `/mcp` refuses a call outside it (P2 §2.2). */
+  uses?: readonly string[] | undefined;
+  /** Where that manifest was read from (`agents/<area>/<name>.md`), for the principal's `source`. Absent on every other kind. */
+  manifest?: string | undefined;
   grants: Grants;
   projects: string[];
   /** The A3 half of `agents.autonomy` (docs/ops/actions.md) — what this credential may do with an `action`. Absent = observe. */
@@ -109,6 +141,52 @@ export interface AgentRow {
   approved_at: string | null;
   /** Derived from the two above, so no client has to recombine them and get it wrong. */
   pending: boolean;
+  /** 0025's column. NULL on a row written before it existed, which reads as `registry`. */
+  grant_source: GrantSourceName | null;
+  /**
+   * **What this row holds, in the one vocabulary** (core's `describeScope` —
+   * P3 §3.4). The console's panel, the Needs You card, `metistry agents
+   * list` and the tool descriptions all render THIS, so §2.10's four
+   * vocabularies for one record are one. Derived, never stored: it is a
+   * rendering of the three columns beside it.
+   */
+  scope: ScopeView;
+}
+
+/**
+ * A registry row as the principal `may()` decides on — the SAME derivation
+ * `principalOf` makes from a live bearer (server.ts, and mcp-brain's), so
+ * what the panel SAYS a credential holds cannot disagree with what the door
+ * DOES about it.
+ *
+ * `uses` comes from the crews this console loaded rather than from the row,
+ * because a crew's toolset is its manifest's (`uses:`) and the row has never
+ * carried it. A crew whose manifest this console cannot see holds NO tools,
+ * which is what `allowedTools` answers for an absent list — fail closed,
+ * never all of them.
+ */
+export function principalOfRow(row: AgentRow, toolset?: (id: string) => { uses: readonly string[]; manifest?: string | undefined } | undefined): Principal {
+  const crew = row.kind === "crew";
+  const declared = crew ? toolset?.(row.id) : undefined;
+  const source: GrantSourceName = row.grant_source ?? "registry";
+  return {
+    id: row.id,
+    role: row.kind === "internal" ? "assistant" : crew ? "crew" : "agent",
+    scope: {
+      tier: row.grants.tier,
+      areas: [...row.grants.areas],
+      queries: row.grants.queries === true,
+      projects: row.kind === "internal" && row.projects.length === 0 ? null : [...row.projects],
+      autonomy: row.autonomy,
+    },
+    source: source === "manifest" ? { manifest: declared?.manifest ?? `${INSTANCE_LAYOUT.agentsDir}/<area>/${row.id}.md` } : source,
+    ...(crew ? { uses: [...(declared?.uses ?? [])] } : {}),
+  };
+}
+
+/** One row, rendered. Every surface that shows a grant shows this. */
+export function agentScope(row: AgentRow, toolset?: (id: string) => { uses: readonly string[]; manifest?: string | undefined } | undefined): ScopeView {
+  return describeScope(principalOfRow(row, toolset));
 }
 
 /** Thrown for caller mistakes; the route maps `code` to the uniform envelope. */
@@ -124,10 +202,24 @@ export class AgentError extends Error {
 // `.metistry/` (it does not start with an uppercase letter) — the machinery
 // is not grantable. "Everything" is not an area grant: it is the bare vault,
 // spelled `/` and admitted for an internal row alone.
-const AREA_RE = /^[A-Z][A-Za-z0-9 _.'-]*(\/[A-Z][A-Za-z0-9 _.'-]*)*$/;
+//
+// The rule itself is core's `validAgentAreaGrant` since the access-request
+// path landed: an agent asking for an area (mcp-brain's `request_access`) and
+// the owner's own hand on `PUT /api/agents/:id/grants` must refuse the SAME
+// strings, and two regexes that agree today are a refusal that drifts.
+//
+// It is the rule for an AGENT's grant and nothing else (ruled 2026-09-19 D).
+// `Artifacts/Reports` is refused HERE — where the grant an agent would hold
+// is typed — because every read path an agent has refuses `Artifacts/`, so
+// the grant would be inert while reading in the registry like a real one.
+// The OWNER's access to `Artifacts/` is the artifacts door (`/api/artifacts`)
+// and is not narrowed by anything on this path: the owner sees everything in
+// their own directory.
 const BARE_VAULT_RE = /^\/$/;
+/** The refusal, core's sentence — plus the internal row's extra spelling, which no agent is ever offered. */
+const AREA_REFUSAL = AREA_PREFIX_REFUSAL;
+const AREA_REFUSAL_WITH_BARE_VAULT = `${AREA_PREFIX_REFUSAL}, or / for the whole vault`;
 const MAX_AREAS = 64;  // limit: fixed — a grant list this long is a mistake, not a configuration
-const MAX_AREA_LEN = 200;  // limit: fixed — AREA_RE's shape bounds it; a longer string is not a vault path
 
 export interface GrantsOptions {
   /** The row's kind. `internal` admits the bare vault (`/`); anything else (the default) refuses it. */
@@ -147,8 +239,8 @@ export function validateGrants(input: unknown, opts: GrantsOptions = {}): Grants
     if (typeof a !== "string") throw new AgentError("invalid_request", "area must be a string");
     let s = a.trim();
     if (bareAllowed && BARE_VAULT_RE.test(s)) s = VAULT_ROOT_AREA;
-    else if (s.length > MAX_AREA_LEN || !AREA_RE.test(s) || s.includes("..")) {
-      throw new AgentError("invalid_request", bareAllowed ? "area must be a TitleCase vault prefix (e.g. Areas/Fsl), or / for the whole vault" : "area must be a TitleCase vault prefix (e.g. Areas/Fsl)");
+    else if (!validAgentAreaGrant(s)) {
+      throw new AgentError("invalid_request", bareAllowed ? AREA_REFUSAL_WITH_BARE_VAULT : AREA_REFUSAL);
     }
     if (!areas.includes(s)) areas.push(s);
   }
@@ -231,10 +323,18 @@ function coerceGrants(raw: unknown): Grants {
 }
 
 /**
+ * A crew's toolset, by crew id — the console's loaded manifests
+ * (`crewToolset` in crews.ts). Given to `authenticateAgent` so a crew's
+ * principal carries what its manifest declares; absent (a standalone host,
+ * a console with no crews loaded) means a crew bearer holds no tools.
+ */
+export type CrewToolsetLookup = (id: string) => { uses: readonly string[]; manifest?: string | undefined } | undefined;
+
+/**
  * Resolve an agent bearer token to its principal. Pure function of
- * (db, Authorization header): hash lookup, not revoked, **not pending**,
- * bumps last_seen_at. Null on any miss — the caller returns the uniform
- * 401.
+ * (db, Authorization header, and — for a crew — the loaded manifests): hash
+ * lookup, not revoked, **not pending**, bumps last_seen_at. Null on any
+ * miss — the caller returns the uniform 401.
  *
  * The pending clause is the whole of S2's enforcement, and it lives in the
  * WHERE rather than in a branch above on purpose: a token awaiting
@@ -247,6 +347,7 @@ function coerceGrants(raw: unknown): Grants {
 export async function authenticateAgent(
   db: Db,
   req: { headers: { authorization?: string | string[] | undefined } },
+  crews?: CrewToolsetLookup,
 ): Promise<AgentPrincipal | null> {
   const header = req.headers.authorization;
   const token = parseBearer(Array.isArray(header) ? header[0] : header);
@@ -259,6 +360,19 @@ export async function authenticateAgent(
   );
   const row = rows[0];
   if (!row) return null;
+  // The row's OWN kind, not a collapse of it (P2 §2.3): `crew` has been a
+  // stored value since Phase 5, and reducing it to `external` here is what
+  // left `/mcp` unable to tell a crew from any other foreign agent. An
+  // unrecognised value still falls back to `external`, the narrowest kind —
+  // migration 0025's CHECK makes one impossible to write, and a row that
+  // predates it must not become MORE than it was by arriving unknown.
+  const kind: StoredAgentKind = STORED_AGENT_KINDS.includes(row.kind) ? (row.kind as StoredAgentKind) : "external";
+  // A crew's toolset comes from the manifest the console loaded, looked up
+  // here by id — the same place its grants and projects come from, and the
+  // same reason: what this credential may do is server-side and attached to
+  // the token. A crew this console has no manifest for resolves to nothing,
+  // which is the fail-closed answer (no tools), never every tool.
+  const crew = kind === "crew" ? (crews?.(row.id) ?? { uses: [], manifest: undefined }) : undefined;
   // `autonomy` rides the principal for the same reason grants do: what this
   // credential may DO is server-side, attached to the token, and never
   // asserted by the caller (§4.19). mcp-brain resolves it through core's
@@ -266,10 +380,12 @@ export async function authenticateAgent(
   const autonomy = coerceAutonomy(row.autonomy);
   return {
     id: row.id,
-    kind: row.kind === "internal" ? "internal" : "external",
+    kind,
     grants: coerceGrants(row.grants),
     projects: row.projects ?? [],
     autonomy: { ...(autonomy.level !== undefined ? { level: autonomy.level } : {}), ...(autonomy.actions !== undefined ? { actions: autonomy.actions } : {}) },
+    ...(crew ? { uses: crew.uses } : {}),
+    ...(crew?.manifest !== undefined ? { manifest: crew.manifest } : {}),
   };
 }
 
@@ -293,23 +409,36 @@ export interface InternalAgentConfig {
  * environment is the decision to run this agent; removing it is how the
  * user turns it off (main.ts revokes when it is absent). The token is never
  * minted or logged here; nothing about it crosses the wire.
+ *
+ * The ONE thing configuration does not get to undo (ruled 2026-09-19 B):
+ * areas the owner has APPROVED from the Needs You queue, which are merged on
+ * top of the configured ones (`grantOverrides`, migration 0023). Without
+ * that merge an approval for this row would be silently reverted by the next
+ * start, which is exactly why the assistant used to be refused the tool.
+ * Configuration stays the floor — `METISTRY_ASSISTANT_AREAS` narrows what
+ * the assistant holds BEFORE any approval, and an approval only ever adds.
  */
 export async function ensureInternalAgent(db: Db, id: string, cfg: InternalAgentConfig): Promise<{ id: string; created: boolean }> {
   if (!AGENT_ID_RE.test(id)) throw new AgentError("invalid_request", "id must be a slug ^[a-z][a-z0-9-]{0,39}$");
   if (typeof cfg.token !== "string" || cfg.token.length < 16) throw new AgentError("invalid_request", "internal agent token must be at least 16 characters");
-  const grants = cfg.grants ?? validateGrants({ tier: "areas", areas: [...ASSISTANT_DEFAULT_AREAS] }, { kind: "internal" });
+  const configured = cfg.grants ?? validateGrants({ tier: "areas", areas: [...ASSISTANT_DEFAULT_AREAS] }, { kind: "internal" });
+  const grants = mergeGrantOverrides(configured, await grantOverrides(db, id));
   const projects = validateProjects(cfg.projects ?? []);
   for (const p of projects) await ensureProject(db, p); // the project row exists from the first use of its slug (0011)
   const displayName = (cfg.display_name ?? "").trim().slice(0, 120) || `${id} (internal)`;
   const { rows } = await db.query(
-    `INSERT INTO agents (id, display_name, kind, token_hash, grants, projects)
-     VALUES ($1, $2, 'internal', $3, $4, $5)
+    // grant_source (0025): the row records that these grants came from the
+    // ENVIRONMENT, so "your scope is configuration, not a grant" is a field
+    // rather than a sentence three files reconstruct from `kind` (§2.7).
+    `INSERT INTO agents (id, display_name, kind, token_hash, grants, projects, grant_source)
+     VALUES ($1, $2, 'internal', $3, $4, $5, 'environment')
      ON CONFLICT (id) DO UPDATE SET
        kind = 'internal',
        display_name = EXCLUDED.display_name,
        token_hash = EXCLUDED.token_hash,
        grants = EXCLUDED.grants,
        projects = EXCLUDED.projects,
+       grant_source = EXCLUDED.grant_source,
        revoked_at = NULL,
        remote = false
      RETURNING (xmax = 0) AS created`,
@@ -318,15 +447,25 @@ export async function ensureInternalAgent(db: Db, id: string, cfg: InternalAgent
   return { id, created: rows[0]?.created === true };
 }
 
-/** The registry, minus anything secret: token hashes never leave the db. */
-export async function listAgents(db: Db): Promise<AgentRow[]> {
+/**
+ * The registry, minus anything secret: token hashes never leave the db.
+ *
+ * Every row carries its rendered `scope` (`agentScope`), so a client never
+ * recombines tier + areas + queries + projects + autonomy into words of its
+ * own — which is how the console, the queue and the CLI came to have three
+ * vocabularies for one record (§2.10).
+ */
+export async function listAgents(db: Db, toolset?: (id: string) => { uses: readonly string[]; manifest?: string | undefined } | undefined): Promise<AgentRow[]> {
   const { rows } = await db.query(
     `SELECT id, display_name, kind, grants, projects, autonomy, created_at, last_seen_at,
-            revoked_at IS NOT NULL AS revoked, remote, approved_at,
+            revoked_at IS NOT NULL AS revoked, remote, approved_at, grant_source,
             (remote AND approved_at IS NULL AND revoked_at IS NULL) AS pending
      FROM agents ORDER BY revoked, created_at`,
   );
-  return rows.map((r) => ({ ...r, grants: coerceGrants(r.grants), autonomy: coerceAutonomy(r.autonomy) })) as AgentRow[];
+  return rows.map((r) => {
+    const row = { ...r, grants: coerceGrants(r.grants), autonomy: coerceAutonomy(r.autonomy) } as AgentRow;
+    return { ...row, scope: agentScope(row, toolset) };
+  });
 }
 
 /**
@@ -354,8 +493,8 @@ export async function createAgent(
   if (remote && kind !== "external") throw new AgentError("invalid_request", "remote applies to kind external only");
   const token = mintToken(32);
   try {
-    await db.query(`INSERT INTO agents (id, display_name, kind, token_hash, remote, approved_at) VALUES ($1, $2, $3, $4, $5, $6)`, [
-      id, displayName, kind, tokenHash(token), remote, remote ? null : new Date().toISOString(),
+    await db.query(`INSERT INTO agents (id, display_name, kind, token_hash, remote, approved_at, grant_source) VALUES ($1, $2, $3, $4, $5, $6, $7)`, [
+      id, displayName, kind, tokenHash(token), remote, remote ? null : new Date().toISOString(), kind === "internal" ? "environment" : "registry",
     ]);
   } catch (err) {
     if ((err as { code?: string }).code === "23505") throw new AgentError("conflict", "agent id already registered");
@@ -428,6 +567,173 @@ export async function settleEnrollment(db: Db, id: string, decision: "approve" |
     `UPDATE proposals SET decision = $2, decided_at = now()
      WHERE kind = 'decision' AND decision = 'pending' AND payload->'enroll'->>'agent' = $1 RETURNING id`,
     [id, decision],
+  );
+  return rows.map((r) => Number(r.id));
+}
+
+// ----- access requests (ruled 2026-09-19) -----------------------------------
+//
+// `request_access` on /mcp writes a `proposals` row of kind `access_request`
+// (packages/mcp-brain/src/access.ts) and grants NOTHING. What follows is the
+// owner's half: the widening an Approve applies, the list the Agents panel
+// shows beside each grant, and what a revocation does to an ask nobody
+// answered. There is no new verb and no new route — Approve on that row is a
+// door onto `setGrants`, the one the owner's own click already goes through
+// (invariant 10).
+
+/** The `proposals.kind`, from the bridge that writes it — imported, never respelled. */
+export { ACCESS_REQUEST_KIND };
+
+/**
+ * The area an `access_request` payload is about, or undefined when it does
+ * not carry one this validator would admit. Re-validated HERE rather than
+ * trusted: the row was written by a tool that checked it, but a payload is
+ * data, and a decision that widens a grant reads it again.
+ */
+export function accessArea(payload: unknown): string | undefined {
+  const area = (payload as { area?: unknown } | null)?.area;
+  return validAgentAreaGrant(area) ? area : undefined;
+}
+
+/**
+ * What Approve applies: the requested prefix, and nothing else.
+ *
+ * - `areas` gains the prefix — unless a grant it already holds covers it
+ *   (`underAreas`), in which case the list is untouched: widening by
+ *   something already granted is not a widening.
+ * - the tier becomes `areas`, because an area grant IS tier `areas`. For a
+ *   tier `none` or `index` row that is the whole point of the ask; it is also
+ *   a NARROWING on the other axis, and deliberately so: tier `index` browses
+ *   every title in the vault and reads none of them, while tier `areas` sees
+ *   titles only inside its prefixes (docs/ops/assistant-tools.md's table).
+ *   The grant model has one tier, so "index browse plus one readable area"
+ *   is not expressible — the owner trading one for the other is the decision
+ *   they are making, and Decline leaves it exactly as it was.
+ * - `queries` is carried across untouched and NEVER set: it is a separate
+ *   axis (invariant 3's read path), no part of what was asked for, and
+ *   nothing here may hand it over.
+ */
+export function widenedGrants(current: Grants, area: string): Grants {
+  const held = current.tier === "areas" ? current.areas : [];
+  const areas = underAreas(area, held) ? [...held] : [...held, area];
+  return { tier: "areas", areas, ...(current.queries === true ? { queries: true } : {}) };
+}
+
+// ----- approvals that outlive a re-sync (ruled 2026-09-19 B) ---------------
+//
+// An INTERNAL row's grants are replaced from configuration at every console
+// start (`ensureInternalAgent`), so a widening written into `agents.grants`
+// alone lives until the next restart and no longer. That is why the
+// assistant was refused `request_access` when it shipped, and this is the
+// mechanism that lets it ask instead: each approved area is recorded in
+// `agent_grant_overrides` (migration 0023) and merged back on top of the
+// configured areas on the way in.
+//
+// Nothing else writes the table. It is not a second grants surface: an
+// override is only ever ONE area the owner approved in Needs You, it can
+// only ever widen, and `ON DELETE CASCADE` plus `clearGrantOverrides` mean a
+// revoked credential's approvals go with it.
+
+/** Areas approved for this agent from the queue, oldest first. */
+export async function grantOverrides(db: Db, id: string): Promise<string[]> {
+  const { rows } = await db.query(`SELECT area FROM agent_grant_overrides WHERE agent_id = $1 ORDER BY granted_at, area`, [id]);
+  return rows.map((r) => String(r.area));
+}
+
+/**
+ * Configuration plus the approvals, with anything the configuration already
+ * covers dropped — `underAreas` is the prefix rule, so an override under a
+ * configured prefix (or under the bare vault) adds nothing and does not
+ * clutter the row. Areas are re-validated with the row's own (internal)
+ * rule: a value that reached the table by hand cannot become a grant shape
+ * the validator would refuse.
+ */
+export function mergeGrantOverrides(configured: Grants, overrides: readonly string[]): Grants {
+  if (overrides.length === 0) return configured;
+  const held = configured.tier === "areas" ? [...configured.areas] : [];
+  for (const area of overrides) {
+    if (!validAgentAreaGrant(area) || underAreas(area, held) || held.includes(area)) continue;
+    held.push(area);
+  }
+  if (held.length === 0) return configured;
+  return validateGrants({ tier: "areas", areas: held, ...(configured.queries === true ? { queries: true } : {}) }, { kind: "internal" });
+}
+
+/**
+ * Record one approved area, so the next start still has it. Idempotent: the
+ * same (agent, area) twice is the same approval, and the first proposal id
+ * is the one kept — it is the answer that granted it.
+ */
+export async function recordGrantOverride(db: Db, id: string, area: string, proposalId: number): Promise<void> {
+  await db.query(
+    `INSERT INTO agent_grant_overrides (agent_id, area, proposal_id) VALUES ($1, $2, $3) ON CONFLICT (agent_id, area) DO NOTHING`,
+    [id, area, proposalId],
+  );
+}
+
+/** Drop every approval for an agent — what revoking it means for the areas it was given. */
+export async function clearGrantOverrides(db: Db, id: string): Promise<number> {
+  const { rows } = await db.query(`DELETE FROM agent_grant_overrides WHERE agent_id = $1 RETURNING area`, [id]);
+  return rows.length;
+}
+
+/** One pending ask, as the Agents panel lists it beside the grant it is about. */
+export interface AccessRequestRow {
+  proposal_id: number;
+  agent: string;
+  area: string;
+  reason: string;
+  ts: string;
+  /** true = this is a second ask after a decline (mcp-brain's `escalate`), and the panel says so. */
+  escalated?: boolean;
+  /** The declined row it followed, when it is one. */
+  prior_proposal?: number;
+}
+
+/**
+ * Every unanswered ask, oldest first. The panel where grants are EDITED shows
+ * what has been asked for there, not only in the queue: the owner reading an
+ * agent's row is the moment the question is live.
+ */
+export async function pendingAccessRequests(db: Db): Promise<AccessRequestRow[]> {
+  const { rows } = await db.query(
+    `SELECT id, source_agent, payload->>'area' AS area, payload->>'reason' AS reason, ts,
+            payload->>'escalated' = 'true' AS escalated, payload->>'prior_proposal' AS prior_proposal
+     FROM proposals WHERE kind = '${ACCESS_REQUEST_KIND}' AND decision = 'pending' ORDER BY ts, id`,
+  );
+  return rows.map((r) => ({
+    proposal_id: Number(r.id),
+    agent: String(r.source_agent),
+    area: String(r.area ?? ""),
+    reason: String(r.reason ?? ""),
+    ts: r.ts instanceof Date ? r.ts.toISOString() : String(r.ts),
+    // a second ask after a decline says so where the grant is edited, not
+    // only in the queue: "they asked again" is the fact that decides it
+    ...(r.escalated === true ? { escalated: true } : {}),
+    ...(r.prior_proposal ? { prior_proposal: Number(r.prior_proposal) } : {}),
+  }));
+}
+
+/** What a revocation writes on the asks it settles — a reason, and not the SKIP marker, because there IS something to learn from it. */
+export const REVOKED_FEEDBACK = "declined with the agent's revocation — a revoked credential cannot be granted anything";
+
+/**
+ * Revoking an agent settles its pending access requests as `deny`.
+ *
+ * Decided rather than left open (and documented in docs/ops/actions.md): a
+ * revoked token authenticates nothing, so an ask from it can never come true,
+ * and a queue item whose only honest answer is "no, obviously" is noise in
+ * the one list that is supposed to need the user. It mirrors
+ * `settleEnrollment`, which does the same to a pending enrolment for the same
+ * reason. The Approve path refuses a revoked agent independently
+ * (apps/console/src/server.ts) — belt and braces, because a row could predate
+ * this and a widening must never ride on one.
+ */
+export async function settleAccessRequests(db: Db, id: string): Promise<number[]> {
+  const { rows } = await db.query(
+    `UPDATE proposals SET decision = 'deny', feedback = $2, decided_at = now(), snoozed_until = NULL
+     WHERE kind = '${ACCESS_REQUEST_KIND}' AND decision = 'pending' AND source_agent = $1 RETURNING id`,
+    [id, REVOKED_FEEDBACK],
   );
   return rows.map((r) => Number(r.id));
 }
@@ -524,8 +830,15 @@ export function autonomyTable(autonomy: Autonomy): Record<ActionKind, ActionMode
   return effectiveActions(autonomy);
 }
 
-/** Revocation is permanent: the row stays (provenance on old proposals), the token dies. */
+/**
+ * Revocation is permanent: the row stays (provenance on old proposals), the
+ * token dies — and the areas the owner approved for it from the queue die
+ * with it (`clearGrantOverrides`). Otherwise an internal row that was turned
+ * off and on again would come back holding widenings the owner granted to a
+ * credential they had since withdrawn.
+ */
 export async function revokeAgent(db: Db, id: string): Promise<boolean> {
+  await clearGrantOverrides(db, id);
   const { rows } = await db.query(
     `UPDATE agents SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL RETURNING id`,
     [id],

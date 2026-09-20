@@ -49,7 +49,7 @@ describe("deploymentServiceRows / buildDeploymentReport", () => {
       { name: "watchdog", shape: "launchd", enabled: true, running: true },
     ]);
     const table = renderDeploymentReport(report);
-    expect(table).toContain("shape: compose (from no deployment.yaml — the built-in default)");
+    expect(table).toContain("shape       compose  (from no deployment.yaml — the built-in default)");
     expect(table).toContain("db");
   });
 
@@ -169,7 +169,7 @@ describe("setDeploymentShape", () => {
       productDir: P,
       instanceDir: I,
       targetShape: "launchd",
-      env: { METISTRY_RECONCILER_URL: "http://host.docker.internal:7812", METISTRY_BRIDGE_TOKEN_RECONCILER: "tok" },
+      env: { METISTRY_RECONCILER_URL: "http://host.docker.internal:7812", METISTRY_BRIDGE_TOKEN_RECONCILER: "tok", METISTRY_BRIDGE_TOKEN_RECONCILER_USER: "owner-tok" },
       platform: "darwin",
       uid: 501,
       fetchFn: (async () => {
@@ -220,7 +220,7 @@ describe("setDeploymentShape", () => {
       instanceDir: I,
       targetShape: "launchd",
       yes: true,
-      env: { METISTRY_RECONCILER_URL: "http://host.docker.internal:7812", METISTRY_BRIDGE_TOKEN_RECONCILER: "tok" },
+      env: { METISTRY_RECONCILER_URL: "http://host.docker.internal:7812", METISTRY_BRIDGE_TOKEN_RECONCILER: "tok", METISTRY_BRIDGE_TOKEN_RECONCILER_USER: "owner-tok" },
       platform: "darwin",
       uid: 501,
       fetchFn: (async (url: string | URL | Request, init?: RequestInit) => {
@@ -235,7 +235,44 @@ describe("setDeploymentShape", () => {
     expect(calls[0]!.url).toBe("http://127.0.0.1:7812/vault/write");
     const body = JSON.parse(String(calls[0]!.init.body));
     expect(body).toEqual({ path: ".metistry/deployment.yaml", content: "shape: launchd\nservices: {}\n", intent: { principal: "user", message: "metistry deployment set-shape → launchd" } });
+    // on the OWNER bearer: `deployment.yaml` is a §4.7 path, and since
+    // 2026-09-20 the bridge reads authority off the credential rather than
+    // off `intent.principal` (docs/ops/auth.md)
+    expect(new Headers(calls[0]!.init.headers).get("authorization")).toBe("Bearer owner-tok");
     // it went through the bridge, not straight to disk — the reconciler commits it on its next flush
+    await expect(readFile(join(I, ".metistry", "deployment.yaml"), "utf8")).resolves.toBe("shape: compose\nservices: {}\n");
+  });
+
+  // The console calls this same writer for its two enumerated compute writes
+  // and holds only the shared bearer. The helper presents what its process
+  // has and lets the BRIDGE answer — a caller cannot widen itself by picking
+  // a variable name, and a refusal comes back naming the cause.
+  it("a process with only the console's bearer presents that, and a 403 says which credential it lacked", async () => {
+    const P = await composeCheckout();
+    const I = await mkdtemp(join(tmpdir(), "metistry-dep-inst-"));
+    await mkdir(join(I, ".metistry"), { recursive: true });
+    await writeFile(join(I, ".metistry", "deployment.yaml"), "shape: compose\nservices: {}\n");
+    const exec = fakeExec({ launchctl: launchctlHandler([]), docker: composePsHandler([]) });
+    const calls: { init: RequestInit }[] = [];
+    const run = setDeploymentShape({
+      productDir: P,
+      instanceDir: I,
+      targetShape: "launchd",
+      yes: true,
+      env: { METISTRY_RECONCILER_URL: "http://host.docker.internal:7812", METISTRY_BRIDGE_TOKEN_RECONCILER: "tok" },
+      platform: "darwin",
+      uid: 501,
+      fetchFn: (async (_url: string | URL | Request, init?: RequestInit) => {
+        calls.push({ init: init ?? {} });
+        return new Response(JSON.stringify({ error: { code: "forbidden", message: "not granted" } }), { status: 403 });
+      }) as unknown as typeof fetch,
+      exec,
+      out: () => {},
+    });
+    await expect(run).rejects.toThrow(/holds only the console's shared bearer/);
+    await expect(run).rejects.toThrow(/METISTRY_BRIDGE_TOKEN_RECONCILER_USER/);
+    expect(new Headers(calls[0]!.init.headers).get("authorization")).toBe("Bearer tok");
+    // and the refusal is a refusal: nothing landed on disk either
     await expect(readFile(join(I, ".metistry", "deployment.yaml"), "utf8")).resolves.toBe("shape: compose\nservices: {}\n");
   });
 });

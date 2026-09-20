@@ -5,7 +5,7 @@ import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
 import { QueryStore } from "@foldedspacelabs/metistry-queries";
-import { mintToken } from "@foldedspacelabs/metistry-core";
+import { mintToken, tokenHash } from "@foldedspacelabs/metistry-core";
 import { makeServer } from "../src/server.js";
 import * as store from "../src/auth-store.js";
 import * as agents from "../src/agents.js";
@@ -55,6 +55,30 @@ describe("agent grants validation (pure)", () => {
     // external (explicit or default): never
     expect(() => agents.validateGrants({ tier: "areas", areas: ["/"] }, { kind: "external" })).toThrow(/TitleCase vault prefix/);
     expect(() => agents.validateGrants({ tier: "areas", areas: ["/"] })).toThrow(agents.AgentError);
+  });
+
+  // The widening an approved access request applies (ruled 2026-09-19). Pure,
+  // so the rule is readable without a server: what it adds, what it refuses to
+  // add twice, and the axis it never touches.
+  it("widenedGrants adds exactly the requested prefix, never `queries`, and never an area already covered", () => {
+    expect(agents.widenedGrants({ tier: "none", areas: [] }, "Areas/Fsl")).toEqual({ tier: "areas", areas: ["Areas/Fsl"] });
+    expect(agents.widenedGrants({ tier: "index", areas: [] }, "Areas/Fsl")).toEqual({ tier: "areas", areas: ["Areas/Fsl"] });
+    expect(agents.widenedGrants({ tier: "areas", areas: ["Areas/Fsl"] }, "Projects/Drey")).toEqual({ tier: "areas", areas: ["Areas/Fsl", "Projects/Drey"] });
+    // already covered by a prefix it holds: nothing to add
+    expect(agents.widenedGrants({ tier: "areas", areas: ["Areas/Fsl"] }, "Areas/Fsl")).toEqual({ tier: "areas", areas: ["Areas/Fsl"] });
+    expect(agents.widenedGrants({ tier: "areas", areas: ["Areas/Fsl"] }, "Areas/Fsl/Deeper")).toEqual({ tier: "areas", areas: ["Areas/Fsl"] });
+    // `queries` is a separate axis: carried across, never granted
+    expect(agents.widenedGrants({ tier: "index", areas: [], queries: true }, "Areas/Fsl")).toEqual({ tier: "areas", areas: ["Areas/Fsl"], queries: true });
+    expect(agents.widenedGrants({ tier: "index", areas: [] }, "Areas/Fsl")).not.toHaveProperty("queries");
+    // whatever it produces is what the grants validator would admit anyway
+    expect(agents.validateGrants(agents.widenedGrants({ tier: "none", areas: [] }, "Areas/Fsl"))).toEqual({ tier: "areas", areas: ["Areas/Fsl"] });
+  });
+
+  it("accessArea reads the area off a payload and re-validates it — a row is data, not a decision", () => {
+    expect(agents.accessArea({ area: "Areas/Fsl" })).toBe("Areas/Fsl");
+    for (const payload of [{ area: "areas/fsl" }, { area: "../etc" }, { area: "/" }, { area: ".metistry/state" }, { area: "Artifacts/X" }, { area: 7 }, {}, null, "Areas/Fsl"]) {
+      expect(agents.accessArea(payload), JSON.stringify(payload)).toBeUndefined();
+    }
   });
 
   it("projects are slugs", () => {
@@ -168,6 +192,56 @@ describe.skipIf(!hasDb)("agent registry (integration)", () => {
     }
   });
 
+  // P2 of docs/research/2026-09-19-grants-and-access-simplified.md §2.3: the
+  // registry stores three kinds, the principal now carries all three, and the
+  // third one (`crew`) brings a toolset with it. Misuse first: what a caller
+  // can do to make itself something else is exactly nothing.
+  it("takes `kind` from the ROW and from nowhere else: not the body, not a header, not a tool argument", async () => {
+    const auth = { authorization: `Bearer ${agentToken}` };
+    // a body naming a kind — the route that mints agents refuses `crew`
+    // outright: a crew's row comes from a manifest in a protected path, never
+    // from an API call
+    const minted = await json("POST", "/api/agents", { id: `${agentId}-crew`, display_name: "not a crew", kind: "crew" });
+    expect(minted.status).toBe(400);
+    expect((await minted.json()).error.message).toContain("external | internal");
+    // headers claiming one, on a real external bearer
+    const spoofed = await agents.authenticateAgent(pool, {
+      headers: { ...auth, "x-agent-kind": "crew", "x-crew-uses": "rooms,tasks" } as Record<string, string>,
+    }, () => ({ uses: ["rooms", "tasks"], manifest: "agents/itest/impostor.md" }));
+    // the lookup is consulted for a CREW row and nothing else, so an external
+    // bearer comes back with no toolset however loudly it asks for one
+    expect(spoofed).toEqual({ id: agentId, kind: "external", grants: { tier: "none", areas: [] }, projects: [], autonomy: {} });
+    expect(spoofed).not.toHaveProperty("uses");
+  });
+
+  it("a crew row authenticates as `crew`, carrying the toolset the console resolved for it — and nothing when it cannot", async () => {
+    const crewId = `${agentId}-c`;
+    const crewToken = mintToken(32);
+    await pool.query(`INSERT INTO agents (id, display_name, kind, token_hash, grants, grant_source) VALUES ($1, $2, 'crew', $3, $4::jsonb, 'manifest')`, [
+      crewId, "itest crew", tokenHash(crewToken), JSON.stringify({ tier: "areas", areas: ["Areas/Fsl"] }),
+    ]);
+    const header = { headers: { authorization: `Bearer ${crewToken}` } };
+    const withManifest = await agents.authenticateAgent(pool, header, (id) => (id === crewId ? { uses: ["knowledge"], manifest: `agents/itest/${crewId}.md` } : undefined));
+    expect(withManifest).toMatchObject({ id: crewId, kind: "crew", uses: ["knowledge"], manifest: `agents/itest/${crewId}.md` });
+    // no loaded manifest, or no crew registry at all: the empty toolset, never
+    // the benefit of the doubt
+    expect(await agents.authenticateAgent(pool, header, () => undefined)).toMatchObject({ kind: "crew", uses: [] });
+    expect(await agents.authenticateAgent(pool, header)).toMatchObject({ kind: "crew", uses: [] });
+    await pool.query(`DELETE FROM agents WHERE id = $1`, [crewId]);
+  });
+
+  it("the column refuses a fourth kind, so a role nobody ruled on cannot arrive by INSERT (migration 0025)", async () => {
+    await expect(
+      pool.query(`INSERT INTO agents (id, display_name, kind, token_hash) VALUES ($1, 'wizard', 'wizard', $2)`, [`${agentId}-w`, tokenHash(mintToken(32))]),
+    ).rejects.toMatchObject({ code: "23514" }); // check_violation
+    // and the same for the source column, whose three values are the three
+    // places a row's grants can come from
+    await expect(
+      pool.query(`INSERT INTO agents (id, display_name, kind, token_hash, grant_source) VALUES ($1, 'x', 'external', $2, 'vibes')`, [`${agentId}-v`, tokenHash(mintToken(32))]),
+    ).rejects.toMatchObject({ code: "23514" });
+    expect((await pool.query(`SELECT grant_source FROM agents WHERE id = $1`, [agentId])).rows[0]).toEqual({ grant_source: "registry" }); // the owner's hand, recorded
+  });
+
   it("owner token on the registry is FORBIDDEN (management is session-only)", async () => {
     const h = { authorization: `Bearer ${ownerToken}`, "content-type": "application/json" };
     expect((await fetch(`${base}/api/agents`, { headers: h })).status).toBe(403);
@@ -200,6 +274,22 @@ describe.skipIf(!hasDb)("agent registry (integration)", () => {
     // rejected payloads never reach the audit log; the accepted ones do
     const audit = await pool.query(`SELECT meta->>'op' AS op FROM runs WHERE kind='agent_admin' AND meta->>'agent'=$1 ORDER BY id`, [agentId]);
     expect(audit.rows.map((r) => r.op)).toEqual(["mint", "grant", "projects"]);
+  });
+
+  // Ruled 2026-09-19 (D). The refusal is about AGENTS: every read path an
+  // agent has refuses `Artifacts/`, so a grant of it would read in the
+  // registry like access and give none. It says nothing about the owner,
+  // whose own `Artifacts/` are served by `/api/artifacts` (asserted end to
+  // end over a real vault in artifacts.integration.test.ts) and by Finder
+  // and git besides.
+  it("an agent cannot be granted `Artifacts/` — the grant would be inert, and an inert grant reads like a real one", async () => {
+    const before = (await agents.authenticateAgent(pool, { headers: { authorization: `Bearer ${agentToken}` } }))?.grants;
+    for (const areas of [["Artifacts"], ["Artifacts/Reports"], ["Areas/Fsl", "Artifacts/Reports"]]) {
+      const r = await json("PUT", `/api/agents/${agentId}/grants`, { tier: "areas", areas });
+      expect(r.status, areas.join(",")).toBe(400);
+      expect((await r.json()).error.message, areas.join(",")).toContain("TitleCase vault prefix");
+    }
+    expect((await agents.authenticateAgent(pool, { headers: { authorization: `Bearer ${agentToken}` } }))?.grants).toEqual(before); // not one of them landed
   });
 
   it("grants: `queries` (mcp-brain's queries_list/queries_run access) round-trips through the same route, rejects non-booleans", async () => {

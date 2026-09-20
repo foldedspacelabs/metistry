@@ -3,7 +3,7 @@
 // under the advisory lock, compose, kickstart only the host jobs whose code
 // changed, lock written through the reconciler as `user`); the refusal
 // paths; the no-bridge direct write; release mode; the lock round trip.
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,13 +11,22 @@ import { describe, expect, it } from "vitest";
 import { instanceLockPath, parseLock, readLock, serializeLock, type LockFile } from "../src/lock.js";
 import { main } from "../src/main.js";
 import { MIGRATION_LOCK_KEY, type MigrationSession } from "../src/migrate.js";
-import { hashHostJobs, publishedPackages, trackedPathFor, update } from "../src/update.js";
+import { hashHostJobs, legacyLayoutRefusal, pastLegacyLayoutSupport, publishedPackages, trackedPathFor, update } from "../src/update.js";
 import { loadPlistTemplates } from "../src/launchd.js";
 import { checkout, failDoctor, fakeExec, HELPER, okDoctor, put, RECONCILER, shown, WATCHDOG } from "./fixtures.js";
 
 const NOW = new Date("2026-09-07T15:00:00Z");
-const BRIDGE = { METISTRY_RECONCILER_URL: "http://host.docker.internal:7812", METISTRY_BRIDGE_TOKEN_RECONCILER: "tok" };
-const base = (P: string, env: NodeJS.ProcessEnv = {}) => ({ productDir: P, env, platform: "darwin" as const, uid: 501, version: "0.0.9", now: NOW, out: () => {} });
+// Both bearers: the console's (which the CLI no longer uses for a protected
+// path) and the OWNER's, which is what `metistry.lock` is written with since
+// 2026-09-20. An install that has neither has one minted — its own case below.
+const BRIDGE = {
+  METISTRY_RECONCILER_URL: "http://host.docker.internal:7812",
+  METISTRY_BRIDGE_TOKEN_RECONCILER: "tok",
+  METISTRY_BRIDGE_TOKEN_RECONCILER_USER: "owner-tok",
+};
+// cli-shim.test.ts covers the shim itself; disabled here so the rest of this
+// file's exact command lists are not about a feature they are not testing.
+const base = (P: string, env: NodeJS.ProcessEnv = {}) => ({ productDir: P, env, platform: "darwin" as const, uid: 501, version: "0.0.9", now: NOW, out: () => {}, cliShim: false });
 
 /** An in-memory schema_migrations: enough of a session for the runner to believe it. */
 function fakeSession(): MigrationSession & { end(): Promise<void>; queries: string[]; ended: boolean } {
@@ -124,10 +133,12 @@ describe("metistry update", () => {
     expect(session.ended).toBe(true);
     expect(r.migrations).toMatchObject({ applied: ["0001_a.sql", "0002_b.sql"], skipped: [], recorded: ["0001_a.sql", "0002_b.sql"] });
 
-    // the lock: through the bridge, principal user, the documented message, the documented shape
+    // the lock: through the bridge, on the OWNER bearer (the console's `tok`
+    // is not a fallback for a §4.7 path), principal user, the documented
+    // message, the documented shape
     expect(f.calls.length).toBe(1);
     expect(f.calls[0]!.url).toBe("http://127.0.0.1:7812/vault/write");
-    expect((f.calls[0]!.init.headers as Record<string, string>).authorization).toBe("Bearer tok");
+    expect((f.calls[0]!.init.headers as Record<string, string>).authorization).toBe("Bearer owner-tok");
     const body = JSON.parse(String(f.calls[0]!.init.body)) as { path: string; content: string; intent: unknown };
     expect(body.path).toBe(".metistry/metistry.lock");
     expect(body.intent).toEqual({ principal: "user", message: "metistry update → 0.0.9" });
@@ -201,11 +212,20 @@ describe("metistry update", () => {
     expect(r2.code).toBe(1);
     expect(lines.join("\n")).toContain(`did not answer (fetch failed) — start it (launchctl kickstart -k gui/501/${RECONCILER})`);
 
-    const noToken = fakeFetch();
-    const r3 = await update({ ...base(P, { METISTRY_RECONCILER_URL: BRIDGE.METISTRY_RECONCILER_URL }), out: (l) => lines.push(l), exec: fakeExec(), skipBuild: true, skipMigrate: true, fetchFn: noToken.fn, doctorFn: okDoctor });
-    expect(r3.code).toBe(1);
-    expect(noToken.calls).toEqual([]);
-    expect(lines.join("\n")).toContain("METISTRY_BRIDGE_TOKEN_RECONCILER is not");
+    // A URL, the console's bearer, and no owner bearer: the lock is a §4.7
+    // protected path, so the console's bearer is not a fallback — the CLI
+    // mints an owner one first (there is a .env to mint it into) and the POST
+    // carries THAT. This is the migration, and it is why an install that
+    // predates the split needs to be told nothing.
+    const minted = fakeFetch();
+    const noOwner = { METISTRY_RECONCILER_URL: BRIDGE.METISTRY_RECONCILER_URL, METISTRY_BRIDGE_TOKEN_RECONCILER: "tok" };
+    const r3 = await update({ ...base(P, noOwner), out: (l) => lines.push(l), exec: fakeExec(), skipBuild: true, skipMigrate: true, fetchFn: minted.fn, mintOwnerToken: () => "fresh-owner", doctorFn: okDoctor });
+    expect(r3.code).toBe(0);
+    expect((minted.calls[0]!.init.headers as Record<string, string>).authorization).toBe("Bearer fresh-owner");
+    expect(lines.join("\n")).toContain("METISTRY_BRIDGE_TOKEN_RECONCILER_USER minted");
+    // …and the reconciler is kickstarted for it, because a bearer it has not
+    // read is not a bearer
+    expect(lines.join("\n")).toContain("so it reads the freshly minted METISTRY_BRIDGE_TOKEN_RECONCILER_USER");
   });
 
   it("without a bridge: a local instance dir gets the lock written directly (and read back); a running reconciler with no URL is refused; no instance dir writes nothing", async () => {
@@ -322,5 +342,122 @@ describe("metistry update", () => {
     expect(text).not.toContain("pg_advisory_lock");
     expect(text).toContain("[dry-run] metistry doctor");
     expect(existsSync(join(P, "metistry.lock"))).toBe(false);
+  });
+
+  // #198's "not fixed here" #2: `--version` was a boolean flag, so the value
+  // never reached `update` and the documented `--version <x.y.z>` installed
+  // whatever was latest.
+  it("main: `update --version 0.2.0 --channel release` asks for THAT release, not the latest", async () => {
+    const P = await checkout({ git: true });
+    const lines: string[] = [];
+    expect(await main(["update", "--version", "0.2.0", "--channel", "release", "--dry-run", "--product-dir", P], { out: (l) => lines.push(l), err: () => {}, exec: fakeExec() })).toBe(0);
+    const text = lines.join("\n");
+    expect(text).toContain("resolve release 0.2.0 of");
+    expect(text).toContain("metistry-runtime-0.2.0-");
+    expect(text).not.toContain("<latest>");
+  });
+
+  // …and #3: in git mode the version was read BEFORE the pull, so a checkout
+  // that fast-forwarded onto a new release pinned the old number.
+  it("git mode pins the version the checkout has AFTER the pull, not the one this process was built from", async () => {
+    const P = await checkout({ git: true });
+    const inst = await mkdtemp(join(tmpdir(), "mi-"));
+    // the pull is what brings the new package.json onto disk
+    const exec = fakeExec({
+      git: (args) => {
+        if (args[0] === "pull") writeFileSync(join(P, "package.json"), JSON.stringify({ name: "metistry", version: "0.8.2" }));
+        if (args[0] === "rev-parse") return { stdout: "feedfacefeedfacefeedfacefeedfacefeedface\n" };
+        return undefined;
+      },
+    });
+    const lines: string[] = [];
+    const r = await update({ ...base(P, { METISTRY_INSTANCE_DIR: inst, ...BRIDGE }), out: (l) => lines.push(l), exec, fetchFn: fakeFetch().fn, skipBuild: true, skipMigrate: true, doctorFn: okDoctor });
+    // `version: "0.0.9"` is what base() passes — the pre-pull code's own
+    expect(r.lock?.product.version).toBe("0.8.2");
+    expect(lines.join("\n")).toContain("version: 0.0.9 → 0.8.2");
+    expect(lines.join("\n")).toContain("metistry update → 0.8.2");
+  });
+});
+
+// ---- the legacy-layout gate --------------------------------------------------
+//
+// An instance that has not run `metistry migrate-layout` is readable on the
+// 0.8.x line and nothing past it. The refusal lands BEFORE the fetch, so a
+// refused update leaves the checkout exactly where it was.
+
+describe("the legacy instance layout", () => {
+  it("knows which versions are past the line", () => {
+    for (const v of ["0.8.0", "0.8.1", "0.8.12", "0.7.0", "v0.8.3"]) expect(pastLegacyLayoutSupport(v), v).toBe(false);
+    for (const v of ["0.9.0", "0.10.0", "1.0.0", "v1.2.3"]) expect(pastLegacyLayoutSupport(v), v).toBe(true);
+    // a tag, a hash, `<latest>`: unparseable is never "past" — a refusal has to be sure
+    for (const v of ["<latest>", "main", "abc1234", ""]) expect(pastLegacyLayoutSupport(v), v).toBe(false);
+  });
+
+  it("refuses only a legacy instance, only past the line, and only without --allow-legacy", () => {
+    const at = (o: Partial<Parameters<typeof legacyLayoutRefusal>[0]>) => legacyLayoutRefusal({ shape: "legacy", instanceDir: "/i", version: "0.9.0", ...o });
+    expect(at({})).toContain("metistry migrate-layout");
+    expect(at({})).toContain("--allow-legacy");
+    expect(at({ allowLegacy: true })).toBeNull();
+    expect(at({ version: "0.8.2" })).toBeNull();
+    expect(at({ shape: "flat" })).toBeNull();
+    expect(at({ shape: "unknown" })).toBeNull();
+  });
+
+  it("stops `update` before it fetches, and says which instance and which version", async () => {
+    const P = await checkout({ git: true });
+    const I = await mkdtemp(join(tmpdir(), "metistry-legacy-"));
+    await mkdir(join(I, "Knowledge"), { recursive: true });
+    await writeFile(join(I, "identity.yaml"), "name: X\n");
+    const exec = fakeExec();
+    const lines: string[] = [];
+    const r = await update({ ...base(P, { METISTRY_INSTANCE_DIR: I }), version: "0.9.0", exec, out: (l) => lines.push(l), doctorFn: okDoctor, openSession: async () => null });
+    expect(r.code).not.toBe(0);
+    expect(exec.calls.map((c) => c.cmd)).toEqual([]); // nothing fetched, nothing built, nothing migrated
+    const said = lines.join("\n");
+    expect(said).toContain(I);
+    expect(said).toContain("0.9.0");
+    expect(said).toContain("metistry migrate-layout");
+    expect(r.lock).toBeUndefined();
+  });
+
+  it("lets it through on the same instance with --allow-legacy", async () => {
+    const P = await checkout({ git: true });
+    const I = await mkdtemp(join(tmpdir(), "metistry-legacy-"));
+    await mkdir(join(I, "Knowledge"), { recursive: true });
+    await writeFile(join(I, "identity.yaml"), "name: X\n");
+    const exec = fakeExec();
+    await update({ ...base(P, { METISTRY_INSTANCE_DIR: I, ...BRIDGE }), version: "0.9.0", allowLegacy: true, exec, fetchFn: fakeFetch().fn, out: () => {}, doctorFn: okDoctor, openSession: async () => fakeSession() });
+    expect(exec.calls.map((c) => c.cmd)).toContain("git"); // it got as far as the fetch
+  });
+
+  it("asks again after the pull, where git mode first learns the new version", async () => {
+    const P = await checkout({ git: true });
+    const I = await mkdtemp(join(tmpdir(), "metistry-legacy-"));
+    await mkdir(join(I, "Knowledge"), { recursive: true });
+    await writeFile(join(I, "identity.yaml"), "name: X\n");
+    // the pre-pull version is on the supported line, so the first gate lets it
+    // through; the pull brings the checkout's own package.json past it
+    const exec = fakeExec({ git: (args) => (args[0] === "pull" ? (writeFileSync(join(P, "package.json"), JSON.stringify({ name: "metistry", version: "0.9.0" })), undefined) : undefined) });
+    const lines: string[] = [];
+    // the running CLI is pinned to the supported line explicitly: the default is
+    // this package's own version, which moves past 0.8.x on release and would
+    // make the first gate refuse before the fetch
+    const r = await update({ ...base(P, { METISTRY_INSTANCE_DIR: I }), version: "0.8.1", exec, out: (l) => lines.push(l), doctorFn: okDoctor, openSession: async () => null });
+    expect(r.code).not.toBe(0);
+    // it pulled, and then stopped: nothing installed, nothing built, nothing migrated
+    expect(exec.calls.map((c) => c.args[0])).toEqual(["fetch", "pull"]);
+    expect(lines.join("\n")).toContain("metistry migrate-layout");
+    expect(r.lock).toBeUndefined();
+  });
+
+  it("says nothing on a flat instance", async () => {
+    const P = await checkout({ git: true });
+    const I = await mkdtemp(join(tmpdir(), "metistry-flat-"));
+    await mkdir(join(I, ".metistry"), { recursive: true });
+    await writeFile(join(I, ".metistry", "identity.yaml"), "name: X\n");
+    const lines: string[] = [];
+    const r = await update({ ...base(P, { METISTRY_INSTANCE_DIR: I, ...BRIDGE }), version: "0.9.0", exec: fakeExec(), fetchFn: fakeFetch().fn, out: (l) => lines.push(l), doctorFn: okDoctor, openSession: async () => fakeSession() });
+    expect(r.code).toBe(0);
+    expect(lines.join("\n")).not.toContain("migrate-layout");
   });
 });

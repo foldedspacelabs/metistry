@@ -16,8 +16,29 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { COMPUTE_FILENAME, emptyCompute, instancePath, intEnv, loadCompute, servedProviders, usesCompose, type ChildSpecInput, type Compute, type Deployment } from "@foldedspacelabs/metistry-core";
-import { assistantEnv, consoleEnv, consolePort, dbPort, engineAbsentNote, engineStatus, loadDeployment, type ShapeContext } from "./deployment.js";
+import {
+  COMPUTE_FILENAME,
+  EGRESS_PROXY_HOST,
+  KEEP_AWAKE_ENV,
+  emptyCompute,
+  instanceFile,
+  intEnv,
+  egressProxyEnv,
+  egressProxyUrl,
+  GIT_ASKPASS_PATH_VAR,
+  firstOnMachineBaseUrl,
+  keepAwakeOf,
+  loadCompute,
+  resolveLocalModelUrl,
+  servedProviders,
+  usesCompose,
+  type ChildSpecInput,
+  type Compute,
+  type Deployment,
+  type EgressInput,
+  type GitCredentialLookup,
+} from "@foldedspacelabs/metistry-core";
+import { assistantEnv, consoleEnv, consolePort, dbPort, engineAbsentNote, engineStatus, instanceVars, loadDeployment, type ShapeContext } from "./deployment.js";
 import { doctor, renderTable, type DoctorDeps, type DoctorReport } from "./doctor.js";
 import type { Exec } from "./exec.js";
 import {
@@ -27,6 +48,7 @@ import {
   labelFor,
   launchAgentsDir,
   launchdCommands,
+  loadedLabels,
   loadPlistTemplates,
   logPathFor,
   loadSupervisedTemplates,
@@ -41,6 +63,7 @@ import {
   type PlistTemplate,
   type PlistValues,
 } from "./launchd.js";
+import { writeCliShim } from "./cli-shim.js";
 import { pinTccHelpers } from "./tcc-pin.js";
 import {
   childFromRenderedPlist,
@@ -57,7 +80,8 @@ import {
   SUPERVISOR_SERVICE,
 } from "./supervisor.js";
 import { shellUnsafeEnvLines } from "./env.js";
-import { ensureInstanceId, envPaths } from "./instance.js";
+import { ensureInstanceId, envPaths, readInstanceId } from "./instance.js";
+import { ensureOwnerBridgeToken } from "./protected-write.js";
 import { allocateBase, applyPorts, loadNamespace, portEnv, PORTED_SERVICES, portsFile, portsOf, serializeNamespace, suffixFor, type Namespace } from "./namespace.js";
 import { llamaServerChild } from "./local-models.js";
 import { instanceLockPath, readLock, type LockFile, type LockSource } from "./lock.js";
@@ -79,8 +103,21 @@ import {
   type PgPlanInput,
   type PgStep,
 } from "./postgres.js";
-import { assistantStateDir, sandboxParams, tmpDirOf } from "./sandbox.js";
-import { StepFailed, StepRunner } from "./steps.js";
+import {
+  assistantStateDir,
+  CLT_GIT,
+  globalGitConfigPath,
+  reconcilerConfined,
+  reconcilerSandboxParams,
+  reconcilerSandboxProfilePath,
+  resolveGitBin,
+  sandboxParams,
+  tmpDirOf,
+  engineHosts,
+} from "./sandbox.js";
+import { egressPlan, egressProxyPort, instanceRemotes } from "./egress.js";
+import { askpassPath, askpassScript, ASKPASS_MODE } from "./askpass.js";
+import { StepFailed, StepRunner, type SectionTiming } from "./steps.js";
 
 export interface UpOptions {
   productDir: string;
@@ -118,6 +155,8 @@ export interface UpOptions {
   exists?: ((p: string) => boolean) | undefined;
   /** test seam: the password generated for a fresh Postgres */
   mintPassword?: (() => string) | undefined;
+  /** test seam: the vault bridge's owner bearer, minted once for an install that has none */
+  mintOwnerToken?: (() => string) | undefined;
   /** test seam: the fetch the bundled-runtime download uses */
   fetchFn?: typeof fetch | undefined;
   /** the deps pack's os-arch (default: this host's) */
@@ -125,6 +164,8 @@ export interface UpOptions {
   /** test seam for the closing doctor run */
   doctorFn?: ((deps: DoctorDeps) => Promise<DoctorReport>) | undefined;
   doctorDeps?: Partial<DoctorDeps> | undefined;
+  /** default true; `false` is a test seam — every real `up` writes the cli shim (cli-shim.ts) */
+  cliShim?: boolean | undefined;
 }
 
 export interface UpResult {
@@ -132,6 +173,10 @@ export interface UpResult {
   source: LockSource;
   /** every command/write, in order (dry-run prints exactly this) */
   commands: string[];
+  /** how long each `==` section took — printed, and the thing to compare across runs */
+  timings: SectionTiming[];
+  /** wall clock for the whole verb */
+  elapsedMs: number;
 }
 
 /** The instance's metistry.lock, when there is an instance dir holding one. */
@@ -243,6 +288,26 @@ export interface ShapeValues extends ShapeContext {
   /** `<instance>/state/supervisor.json`; filled by `installSupervisorPlan` */
   supervisorConfig?: string | undefined;
   /**
+   * The egress door (packages/core/src/egress.ts): the loopback port the
+   * supervisor's CONNECT proxy binds, the host names it admits, and a
+   * bearer per confined child. Computed once, before any plist is rendered,
+   * because both confined profiles name the port and both children need the
+   * environment that uses it. Undefined outside the `launchd` shape — there
+   * is no profile there for a door to be the only opening in.
+   */
+  egress?: EgressInput | undefined;
+  /** which login-Keychain item the supervisor fetches for which child before spawning it (core's git-credential.ts). `up` names the item; the value never touches supervisor.json. */
+  gitCredentials?: GitCredentialLookup[] | undefined;
+  /**
+   * An absolute path to a REAL git, or undefined when this Mac has none the
+   * profile could name (`/usr/bin/git` is the xcode-select shim — see
+   * `resolveGitBin`). Undefined means the reconciler is NOT confined: a
+   * reconciler that cannot run git is not a reconciler.
+   */
+  gitBin?: string | undefined;
+  /** whether the reconciler's job names `reconciler.sb` or `unconfined.sb` — `METISTRY_RECONCILER_SANDBOX=0`, the shape, and whether a real git was found */
+  confineReconciler?: boolean | undefined;
+  /**
    * `compute.yaml` as resolved for THIS install (seed + instance overlay).
    * `up` reads it once and passes it down: it decides whether there is an
    * assistant child at all (C2/C3), which provider secrets the engine's env
@@ -257,6 +322,28 @@ export interface ShapeValues extends ShapeContext {
  * neither an env dict nor extra placeholders — they source `.env`
  * themselves, exactly as they did before.
  */
+/**
+ * The loopback port the reconciler's embedder answers on — resolved through
+ * the SAME function the reconciler itself calls (`resolveLocalModelUrl`:
+ * `METISTRY_LOCAL_MODEL_URL`, then the deprecated Ollama alias, then the
+ * first `on_machine` provider in compute.yaml, then Ollama's default), so
+ * the profile grants the port the process will actually dial rather than a
+ * second guess at it.
+ *
+ * An install with no embedder gets a rule for a port nothing answers on.
+ * That is the honest default: the index degrades (§6 decision 8) and the
+ * profile does not change shape with a config file.
+ */
+export function embedPortFor(v: ShapeValues): number {
+  const { url } = resolveLocalModelUrl(v.env, firstOnMachineBaseUrl(v.compute));
+  try {
+    const u = new URL(url);
+    return Number(u.port || (u.protocol === "https:" ? 443 : 80));
+  } catch {
+    return 11434;
+  }
+}
+
 export function plistValuesFor(t: PlistTemplate, v: ShapeValues): PlistValues {
   const base = { repo: v.productDir, node: v.node, envFile: v.envFile };
   switch (t.service) {
@@ -272,10 +359,73 @@ export function plistValuesFor(t: PlistTemplate, v: ShapeValues): PlistValues {
     case "console":
       return { ...base, env: consoleEnv(v) };
     case "assistant": {
-      const p = sandboxParams({ productDir: v.productDir, nodeBin: v.node, stateDir: v.stateDir, consolePort: consolePort(v.env), dbPort: dbPort(v.env), tmpDir: tmpDirOf(v.env) });
+      const p = sandboxParams({
+        productDir: v.productDir,
+        nodeBin: v.node,
+        stateDir: v.stateDir,
+        ...(v.instanceDir ? { instanceDir: v.instanceDir } : {}),
+        consolePort: consolePort(v.env),
+        dbPort: dbPort(v.env),
+        proxyPort: v.egress?.port ?? egressProxyPort(v.namespace, v.env),
+        tmpDir: tmpDirOf(v.env),
+      });
       // every path parameter is the REAL path: the kernel matches the
       // profile's subpaths after resolving symlinks (/tmp → /private/tmp)
-      return { ...base, env: assistantEnv(v, v.compute), extra: { NODE_PREFIX: p.NODE_PREFIX, PRODUCT_DIR: p.PRODUCT_DIR, STATE_DIR: p.STATE_DIR, TMP_DIR: p.TMP_DIR, CONSOLE_TCP: p.CONSOLE_TCP, DB_TCP: p.DB_TCP } };
+      return {
+        ...base,
+        // the egress door's environment rides with the engine's allowlist:
+        // `HTTPS_PROXY` plus `NODE_USE_ENV_PROXY=1`, because Node's global
+        // fetch ignores the former without the latter (core's egressProxyEnv)
+        env: { ...assistantEnv(v, v.compute), ...(v.egress ? egressProxyEnv("assistant", { port: v.egress.port, tokens: v.egress.tokens ?? {} }) : {}) },
+        // CONFIG_*: the four instance files the engine reads, granted BY
+        // NAME (sandbox.ts). Without them the profile's deny-default makes
+        // an absolute instance path an EPERM, so the overlay that now finds
+        // this install's identity.yaml would crash the job instead.
+        extra: {
+          NODE_PREFIX: p.NODE_PREFIX,
+          PRODUCT_DIR: p.PRODUCT_DIR,
+          STATE_DIR: p.STATE_DIR,
+          TMP_DIR: p.TMP_DIR,
+          CONSOLE_TCP: p.CONSOLE_TCP,
+          DB_TCP: p.DB_TCP,
+          // the ONLY route off this machine: `*:443` is gone from the
+          // profile, so an engine that dials anywhere but the proxy is
+          // refused by the kernel and one that dials a host the allowlist
+          // does not name is refused by the proxy, with a `runs` row
+          PROXY_TCP: p.PROXY_TCP,
+          CONFIG_IDENTITY: p.CONFIG_IDENTITY,
+          CONFIG_ASSISTANT_PROMPT: p.CONFIG_ASSISTANT_PROMPT,
+          CONFIG_RULES: p.CONFIG_RULES,
+          CONFIG_COMPUTE: p.CONFIG_COMPUTE,
+        },
+      };
+    }
+    case "reconciler": {
+      // The sole committer, confined (D5 as a kernel rule rather than a
+      // design intention). Every -D below is read by ops/sandbox/
+      // reconciler.sb; `__SANDBOX_PROFILE__` is what decides whether that
+      // file or ops/sandbox/unconfined.sb is in force, so the off switch is
+      // legible in the rendered plist rather than hidden in an argv branch.
+      const p = reconcilerSandboxParams({
+        productDir: v.productDir,
+        nodeBin: v.node,
+        instanceDir: stateRoot(v.productDir, v.env),
+        gitBin: v.gitBin ?? CLT_GIT,
+        gitConfigGlobal: globalGitConfigPath(v.home),
+        // the askpass shim: how a confined reconciler authenticates a push
+        // at all, since git runs every credential helper through a shell
+        askpassBin: askpassPath(stateRoot(v.productDir, v.env)),
+        reconcilerPort: intEnv("METISTRY_RECONCILER_PORT", 7812, v.env),
+        consolePort: consolePort(v.env),
+        dbPort: dbPort(v.env),
+        embedPort: embedPortFor(v),
+        proxyPort: v.egress?.port ?? egressProxyPort(v.namespace, v.env),
+        tmpDir: tmpDirOf(v.env),
+      });
+      return {
+        ...base,
+        extra: { SANDBOX_PROFILE: reconcilerSandboxProfilePath(v.productDir, v.confineReconciler !== false), ...p },
+      };
     }
     case "db":
       return { ...base, extra: { PG_BIN: v.pgBin ?? "", PG_DATA: v.pgData ?? pgDataDir(stateRoot(v.productDir, v.env)) } };
@@ -320,6 +470,18 @@ export async function ensureNamespace(
 export const SECRET_BEARING_SERVICES = new Set(["console", "assistant"]);
 
 /**
+ * The children that run under a Seatbelt profile, and therefore the ones
+ * that get an egress bearer. The assistant has been confined since PR #117;
+ * the reconciler joins it here, which is the whole of
+ * docs/research/2026-09-19-agent-virtual-filesystems.md's "Now" row.
+ *
+ * `mcp-apple-fm` is the research's named next candidate and `mcp-eventkit`
+ * is explicitly excluded (a TCC grant attaches to the binary that asks, and
+ * interposing sandbox-exec changes which binary that is). Neither is here.
+ */
+export const CONFINED_CHILDREN = ["assistant", "reconciler"] as const;
+
+/**
  * Render every template into ~/Library/LaunchAgents and (re)bootstrap it; on
  * anything but macOS, print the systemd units instead.
  *
@@ -350,7 +512,7 @@ export async function installLaunchd(r: StepRunner, productDir: string, le: Laun
   }
   // an install that predates the supervisor is still running the old agents:
   // boot them out ONCE, or the same services run twice
-  await bootoutRetired(r, le, deployment.shape, values.namespace?.labelSuffix);
+  await bootoutRetired(r, le, deployment.shape, values.namespace?.labelSuffix, exists);
   // …and the app may already own the one that is left. Asked BEFORE the
   // supervisor plan is written, because the answer decides whether this run
   // also writes the launcher file that agent reads.
@@ -466,8 +628,35 @@ export function renderJob(t: PlistTemplate, productDir: string, le: LaunchdEnv, 
   // which knows nothing about this instance's block, so they get it here or
   // they bind the DEFAULT install's ports.
   const nsPorts = values.namespace && !v.env ? portEnv(values.namespace) : undefined;
-  const extraEnv = { ...(gitPath ?? {}), ...(nsPorts ?? {}) };
-  const from = `ops/launchd/${t.file}, __REPO__=${productDir}, __NODE__=${le.node}, __ENV_FILE__=${values.envFile}${v.env ? `, ${Object.keys(v.env).length} EnvironmentVariables from ${values.envFile}` : ""}${gitPath ? `, PATH=${values.gitPath}` : ""}${nsPorts ? `, ${Object.keys(nsPorts).length} namespaced ports` : ""}`;
+  // …and the same is true of WHERE THE INSTANCE IS. The console's and the
+  // assistant's dicts carry it already (`instanceVars`); the jobs that
+  // source `.env` see it only if that file happens to declare the line —
+  // `metistry init` prints one, an install that predates it or edits the
+  // file by hand may not, and the reconciler then refuses to start while
+  // every overlay default falls back to the product's seed. `up` knows the
+  // answer, so it says it.
+  const instanceEnv = !v.env ? instanceVars(values) : undefined;
+  // …and so is the egress door, for a confined child whose environment this
+  // file does not render whole. The assistant's dict already carries it
+  // (`plistValuesFor`); the reconciler sources `.env` itself, so it gets it
+  // here — `HTTPS_PROXY` + `NODE_USE_ENV_PROXY=1` for node, and
+  // `METISTRY_GIT_HTTP_PROXY` for git, which builds its own minimal
+  // environment per call and would never see the first two
+  // (apps/reconciler/src/git.ts).
+  const egressEnv =
+    !v.env && values.egress && (CONFINED_CHILDREN as readonly string[]).includes(t.service)
+      ? {
+          ...egressProxyEnv(t.service, { port: values.egress.port, tokens: values.egress.tokens ?? {} }),
+          METISTRY_GIT_HTTP_PROXY: egressProxyUrl(t.service, (values.egress.tokens ?? {})[t.service] ?? "", values.egress.port),
+          // the askpass shim's PATH — not the credential. The credential
+          // arrives from the supervisor at spawn (core's git-credential.ts),
+          // so it is never in a plist, never in supervisor.json and never on
+          // disk at all.
+          ...(t.service === "reconciler" && values.confineReconciler ? { [GIT_ASKPASS_PATH_VAR]: askpassPath(stateRoot(values.productDir, values.env)) } : {}),
+        }
+      : undefined;
+  const extraEnv = { ...(gitPath ?? {}), ...(nsPorts ?? {}), ...(instanceEnv ?? {}), ...(egressEnv ?? {}) };
+  const from = `ops/launchd/${t.file}, __REPO__=${productDir}, __NODE__=${le.node}, __ENV_FILE__=${values.envFile}${v.env ? `, ${Object.keys(v.env).length} EnvironmentVariables from ${values.envFile}` : ""}${gitPath ? `, PATH=${values.gitPath}` : ""}${nsPorts ? `, ${Object.keys(nsPorts).length} namespaced ports` : ""}${instanceEnv ? `, ${Object.keys(instanceEnv).map((k) => `+${k}`).join(" ")}` : ""}${egressEnv ? `, egress proxy ${EGRESS_PROXY_HOST}:${values.egress!.port}` : ""}`;
   const base = renderPlist(t.template, v);
   return { rendered: Object.keys(extraEnv).length > 0 ? withEnvironmentVariables(base, extraEnv) : base, from, secret: SECRET_BEARING_SERVICES.has(t.service) };
 }
@@ -475,24 +664,52 @@ export function renderJob(t: PlistTemplate, productDir: string, le: LaunchdEnv, 
 /**
  * Boot out the agents this shape no longer installs, and delete their
  * plists. Tolerant of every one of them being absent — a fresh install runs
- * this and nothing happens — and deliberately NOT conditional on finding
- * them: `launchctl bootout` of a label that is not loaded is the cheapest
- * possible no-op, and an `up` that only cleaned up when it noticed would
- * leave a job running on the one Mac where the notice failed.
+ * this and nothing happens.
+ *
+ * Under the launchd shape there are EIGHT of them, and on an install that
+ * migrated months ago every one is long gone: `up` was spending sixteen
+ * subprocesses (a `bootout` and an `rm` each, in series) to discover that,
+ * on every `up` and so on every `update`. So ask launchd ONCE — `launchctl
+ * list` is a single call that names every loaded label — and pair it with a
+ * plain `existsSync` for the plist file.
+ *
+ * The old unconditional behaviour is the FALLBACK, not the thing removed:
+ * when the probe cannot be run (a dry run, or `launchctl list` failing) every
+ * label is booted out exactly as before. An `up` that only cleaned up when it
+ * noticed would leave a job running on the one Mac where the notice failed,
+ * so "could not ask" has to mean "do the work", never "skip it".
  */
-export async function bootoutRetired(r: StepRunner, le: LaunchdEnv, shape: Deployment["shape"], labelSuffix: string | undefined): Promise<void> {
+export async function bootoutRetired(
+  r: StepRunner,
+  le: LaunchdEnv,
+  shape: Deployment["shape"],
+  labelSuffix: string | undefined,
+  exists: (p: string) => boolean = existsSync,
+): Promise<void> {
   const dir = launchAgentsDir(le.home);
   const retired = retiredServicesFor(shape);
   if (retired.length === 0) return;
+  const jobs = retired.map((service) => {
+    const label = labelFor(service, labelSuffix);
+    return { service, label, plist: join(dir, `${label}.plist`) };
+  });
+  // a dry run prints the whole unconditional plan: it runs no probe, and a
+  // plan that skipped what a real run might do would be a plan of a
+  // different install (the same rule `detectAppRegistrar` follows)
+  const loaded = r.dryRun ? undefined : await loadedLabels(r);
+  const todo = loaded ? jobs.filter((j) => loaded.has(j.label) || exists(j.plist)) : jobs;
+  if (todo.length === 0) {
+    r.note(`nothing to retire: launchd has none of ${retired.join(", ")} loaded, and ${dir} holds no plist for them (one \`launchctl list\`, not ${jobs.length * 2} commands)`);
+    return;
+  }
   r.note(
     shape === "launchd"
-      ? `retiring the pre-supervisor agents (${retired.join(", ")}) — they are the supervisor's children now`
-      : `retiring ${retired.join(", ")} — renamed (eventkit-helper → calendar)`,
+      ? `retiring the pre-supervisor agents (${todo.map((j) => j.service).join(", ")}) — they are the supervisor's children now`
+      : `retiring ${todo.map((j) => j.service).join(", ")} — renamed (eventkit-helper → calendar)`,
   );
-  for (const service of retired) {
-    const label = labelFor(service, labelSuffix);
-    await r.run("launchctl", ["bootout", `gui/${le.uid}/${label}`], { tolerateFailure: true, comment: "ok if not loaded" });
-    await r.run("rm", ["-f", join(dir, `${label}.plist`)], { tolerateFailure: true });
+  for (const j of todo) {
+    await r.run("launchctl", ["bootout", `gui/${le.uid}/${j.label}`], { tolerateFailure: true, comment: "ok if not loaded" });
+    await r.run("rm", ["-f", j.plist], { tolerateFailure: true });
   }
 }
 
@@ -542,6 +759,97 @@ export async function servedLocalModelChildren(r: StepRunner, productDir: string
 }
 
 /**
+ * Which children run confined, and the one door their egress goes through.
+ *
+ * Computed BEFORE anything is rendered, because three things depend on the
+ * answer: both profiles name the proxy's port, both confined children need
+ * the environment that uses it, and `supervisor.json` carries the allowlist
+ * the proxy enforces. It is also the step that prints what the operator has
+ * to know — `--dry-run` shows the profile path each child will run under,
+ * and every reason a confinement was declined.
+ *
+ * Nothing here can FAIL an `up`. A Mac with no real git, an instance whose
+ * only remote is SSH, an operator who set the off switch: each is a note and
+ * an unconfined reconciler, never a refusal to install. "The sole committer
+ * stopped committing" must not be how a security improvement announces
+ * itself.
+ */
+export async function planConfinement(r: StepRunner, installRoot: string, values: ShapeValues, exists: (p: string) => boolean = existsSync): Promise<void> {
+  if (values.shape !== "launchd") {
+    // …and say so explicitly rather than leaving it undefined: the
+    // reconciler is a host job under BOTH shapes, and a `!== false` default
+    // would have pointed its job at reconciler.sb with a PROXY_TCP no
+    // proxy is listening on
+    values.confineReconciler = false;
+    r.note("sandbox: the compose shape's boundary is the container, so no profile is applied and there is no egress proxy (docs/ops/deployment-shapes.md)");
+    return;
+  }
+  const port = egressProxyPort(values.namespace, values.env);
+  const remotes = await instanceRemotes(values.instanceDir);
+  const hosts = engineHosts(values.compute);
+  const urls = Object.entries(values.env)
+    .filter(([k]) => k.startsWith("METISTRY_") && k.endsWith("_URL"))
+    .map(([, v]) => v ?? "");
+  const existing = await readSupervisorConfig(values.supervisorConfig ?? supervisorConfigPath(stateRoot(values.productDir, values.env))).catch(() => undefined);
+  values.egress = egressPlan({
+    port,
+    engineHosts: hosts,
+    remotes: remotes.urls,
+    urls,
+    children: CONFINED_CHILDREN,
+    ...(existing?.egress?.tokens ? { existingTokens: existing.egress.tokens } : {}),
+  });
+  r.note(
+    `egress: one CONNECT proxy on ${EGRESS_PROXY_HOST}:${port} in the supervisor — ${values.egress.allow!.length} allowed host(s) [${values.egress.allow!.join(", ") || "none"}], derived from compute.yaml's providers and the instance repo's remotes. Every other destination is refused at the proxy AND by the profile.`,
+  );
+
+  // the git the profile will name. `/usr/bin/git` is the xcode-select shim
+  // and is deliberately not a candidate (sandbox.ts, `isXcodeGitShim`)
+  const gitBin = resolveGitBin({ productDir: installRoot, path: values.gitPath ?? values.env.PATH, exists });
+  values.gitBin = gitBin;
+  const wanted = reconcilerConfined(values.env);
+  // …and an instance directory, because INSTANCE_DIR is the one writable
+  // tree. Without one it would fall back to the product checkout, and a
+  // profile that makes the product checkout writable is a worse boundary
+  // than no profile pretending to be one. (The reconciler itself refuses to
+  // start without METISTRY_INSTANCE_DIR, so this install has no committer
+  // either way — apps/reconciler/src/main.ts.)
+  values.confineReconciler = wanted && gitBin !== undefined && values.instanceDir !== undefined;
+  if (!values.instanceDir) {
+    r.note("reconciler: NOT confined — this install names no METISTRY_INSTANCE_DIR, and the profile's one writable tree IS the instance repo. `metistry init` (docs/ops/instance-layout.md).");
+  } else if (!wanted) {
+    r.note("reconciler: METISTRY_RECONCILER_SANDBOX=0 — the job runs under ops/sandbox/unconfined.sb, which allows everything. Unset the variable to confine the sole committer again.");
+  } else if (!gitBin) {
+    r.note(
+      "reconciler: NOT confined — no git this profile can name. `/usr/bin/git` is the xcode-select shim (it execs the real git out of Xcode and dies under a profile), so the job runs under ops/sandbox/unconfined.sb until this install has a bundled runtime (`metistry runtime install`) or the Command Line Tools (`xcode-select --install`).",
+    );
+  } else {
+    r.note(`reconciler: confined by ops/sandbox/reconciler.sb — writes only ${values.instanceDir} and tmp; execs only node and ${gitBin}; no shell.`);
+  }
+  if (values.confineReconciler) {
+    // The push credential. git runs every credential helper through /bin/sh
+    // — including the built-in osxkeychain `connect-repo` configures — so
+    // the confined reconciler uses GIT_ASKPASS instead, and the SUPERVISOR
+    // reads the token out of the login Keychain at spawn. `up` only says
+    // WHICH item to look up; the value never enters supervisor.json.
+    if (remotes.pushHost) {
+      values.gitCredentials = [{ child: "reconciler", host: remotes.pushHost }];
+      const helpers = remotes.credentialHelpers.length > 0 ? ` (its \`credential.helper=${remotes.credentialHelpers[0]}\` is reset for this job — no helper can run without a shell)` : "";
+      r.note(`reconciler: pushes to ${remotes.pushUrl} with GIT_ASKPASS; the supervisor reads the login Keychain item for ${remotes.pushHost} at spawn and hands it over in the environment${helpers}.`);
+    } else if (remotes.urls.length > 0 && remotes.ssh.length === remotes.urls.length) {
+      // every remote is ssh — the warning below is the whole story
+    } else if (remotes.urls.length === 0) {
+      r.note("reconciler: the instance repo has no remote yet, so there is nothing to push and no credential to arrange — `metistry connect-repo <url>`.");
+    }
+  }
+  if (values.confineReconciler && remotes.ssh.length > 0) {
+    r.note(
+      `reconciler: ${remotes.ssh.length} SSH remote(s) (${remotes.ssh.join(", ")}) — a CONFINED reconciler cannot push to them. ssh is not exec-able under the profile, and granting it would mean granting the sole committer ~/.ssh. Use an HTTPS remote, or set METISTRY_RECONCILER_SANDBOX=0 (docs/ops/reconciler.md).`,
+    );
+  }
+}
+
+/**
  * The supervisor's plan: the `Metistry` symlink its plist execs, and
  * `<instance>/state/supervisor.json` — the child list, each child's argv,
  * environment and log path, and the control socket.
@@ -572,6 +880,18 @@ export async function installSupervisorPlan(r: StepRunner, productDir: string, l
     (t) => t.service !== "assistant" || engineStatus(values.compute, values.env).ok,
   );
   const base = launchdBaseEnv(values.env);
+  // The askpass shim, BEFORE the children are rendered: the reconciler's
+  // profile grants it by literal and its job names it, so it has to exist by
+  // the time either is written. Regenerated on every `up` — the shebang
+  // carries THIS install's node path, and a version flip moves that.
+  if (values.confineReconciler) {
+    await r.write(
+      askpassPath(root),
+      askpassScript(values.node),
+      "git's askpass for the confined reconciler: prints $METISTRY_GIT_ASKPASS_{USER,TOKEN} and nothing else, because no credential helper can run without a shell",
+      ASKPASS_MODE,
+    );
+  }
   const children = templates.map((t) => {
     const { rendered } = renderJob(t, productDir, le, values);
     const ready =
@@ -586,7 +906,18 @@ export async function installSupervisorPlan(r: StepRunner, productDir: string, l
 
   const existing = await readSupervisorConfig(configPath);
   const token = existing?.token ?? mintControlToken();
-  const config = supervisorConfig({ label: labelFor(SUPERVISOR_SERVICE, values.namespace?.labelSuffix), socket, token, env: consoleEnv(values), children });
+  const config = supervisorConfig({
+    label: labelFor(SUPERVISOR_SERVICE, values.namespace?.labelSuffix),
+    socket,
+    token,
+    env: consoleEnv(values),
+    children,
+    // the egress door's allowlist lives HERE and nowhere a child can reach:
+    // the supervisor reads it before it spawns anything (core/egress.ts)
+    ...(values.egress ? { egress: values.egress } : {}),
+    // …and WHICH keychain item to fetch for which child, never what it holds
+    ...(values.gitCredentials?.length ? { gitCredentials: values.gitCredentials } : {}),
+  });
 
   await r.run("mkdir", ["-p", join(bin, "..")]);
   // the name is the product: System Settings names a background item after
@@ -609,8 +940,16 @@ export async function installSupervisorPlan(r: StepRunner, productDir: string, l
 
 // ---- the launchd shape's Postgres --------------------------------------------
 
-/** How long `up` waits for the freshly bootstrapped server to answer before letting doctor report it. */
-export const PG_READY_TRIES = 15;
+/**
+ * How long `up` waits for the freshly bootstrapped server to answer before
+ * letting doctor report it: the same 15-second ceiling it has always had, but
+ * asked four times a second instead of once. The interval is the whole cost
+ * of this step on a healthy install — Postgres is usually up well inside the
+ * first second, and a one-second poll rounded that up to a full second of
+ * `up` every time.
+ */
+export const PG_READY_INTERVAL_MS = 250;
+export const PG_READY_TRIES = 60;
 
 /** What `preparePostgres` needs to fetch a bundled runtime; absent = never reach the network. */
 export interface RuntimeDepsFetch {
@@ -711,13 +1050,40 @@ export async function preparePostgres(
 /** After the db job is bootstrapped: wait for the socket, then create the database compose got from POSTGRES_DB. */
 export async function finishPostgres(r: StepRunner, section: PgSection, sleep: (ms: number) => Promise<void> = (ms) => new Promise((res) => setTimeout(res, ms))): Promise<void> {
   const ready = pgIsReady(section.plan);
+  const capSeconds = (PG_READY_TRIES * PG_READY_INTERVAL_MS) / 1000;
   for (let i = 1; i <= PG_READY_TRIES; i++) {
-    const res = await r.run(ready.cmd, ready.args, { tolerateFailure: true, ...(i === 1 ? { comment: `up to ${PG_READY_TRIES} tries while launchd starts the server` } : {}) });
+    const res = await r.run(ready.cmd, ready.args, { tolerateFailure: true, ...(i === 1 ? { comment: `every ${PG_READY_INTERVAL_MS}ms for up to ${capSeconds}s while launchd starts the server` } : {}) });
     if (res.code === 0) break;
-    if (i === PG_READY_TRIES) throw new StepFailed(`postgres did not answer on ${section.plan.socketDir} after ${PG_READY_TRIES} tries — log: /tmp/metistry-db.log`);
-    await sleep(1000);
+    if (i === PG_READY_TRIES) throw new StepFailed(`postgres did not answer on ${section.plan.socketDir} after ${capSeconds}s — log: /tmp/metistry-db.log`);
+    await sleep(PG_READY_INTERVAL_MS);
   }
   for (const s of planPostgresDatabase(section.plan)) await runPgStep(r, s);
+}
+
+/** `312ms`, `4.1s` — short enough to read at a glance in one line of timings. */
+export function fmtMs(ms: number): string {
+  return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
+}
+
+/**
+ * Where the time went, one line. Always printed rather than hidden behind a
+ * flag: "why was that slow?" is the first question anyone asks of `up`, and
+ * an answer you have to know to ask for is an answer nobody has.
+ */
+export function renderTimings(sections: SectionTiming[], totalMs: number): string {
+  const parts = sections.map((s) => `${s.title} ${fmtMs(s.ms)}`);
+  return `${parts.join(" · ")}${parts.length > 0 ? " — " : ""}total ${fmtMs(totalMs)}`;
+}
+
+/**
+ * The last line `up` prints: who owns the processes it just started, and the
+ * two verbs for the two things a person wants next. launchd (or compose) owns
+ * the daemon — the CLI never does, and it says so rather than leaving an
+ * operator wondering whether closing the terminal takes the install down.
+ */
+export function runningNote(shape: Deployment["shape"]): string {
+  const owner = shape === "launchd" ? "launchd" : "docker compose";
+  return `running under ${owner} — \`metistry down\` stops it, \`metistry logs <service> --follow\` tails`;
 }
 
 /** The closing doctor: printed in a dry run, executed otherwise; its verdict is the exit code. */
@@ -755,12 +1121,32 @@ export async function up(opts: UpOptions): Promise<UpResult> {
   // Mac app's override — it knows which instance it opened.
   const paths = envPaths({ ...instanceDir, productDir: opts.productDir, ...(opts.envFile ? { explicit: opts.envFile } : {}), ...(opts.exists ? { exists: opts.exists } : {}) });
   const envFile = paths?.read[0] ?? paths?.write ?? join(opts.productDir, ".env");
+  // The vault bridge's OWNER bearer, before anything else reads the
+  // environment: `ensureInstanceId` below writes `identity.yaml` — a §4.7
+  // protected path — through the bridge, the plists and supervisor.json are
+  // rendered from this environment, and the reconciler is restarted at the
+  // end of this run. An install that predates the credential split gains it
+  // here and needs to be told nothing (docs/ops/auth.md).
+  // The instance's id when it already has one, so the Keychain item is filed
+  // under this instance's account rather than the person's (secrets.ts's
+  // scope table: `metistry secrets purge` must not orphan it). A brand-new
+  // instance has none yet — `ensureInstanceId` below is what mints it — and
+  // the next `secrets sync --to env` copies the item across.
+  const knownInstanceId = instanceDir.instanceDir ? await readInstanceId(instanceDir.instanceDir).catch(() => undefined) : undefined;
+  const ownerBearer = await ensureOwnerBridgeToken(r, {
+    env,
+    envFile,
+    platform: le.platform,
+    ...(knownInstanceId ? { instanceId: knownInstanceId } : {}),
+    ...(opts.mintOwnerToken ? { mint: opts.mintOwnerToken } : {}),
+  });
+  r.note(ownerBearer.detail);
   // compute.yaml, once: the same file `servedLocalModelChildren` reads, the
   // same one doctor reads. A file that does not parse is a NOTE and an
   // engine-less install for this run — `up` bringing the whole install down
   // because one line of YAML is wrong would be the worse answer, and
   // `metistry compute show` says exactly what is wrong.
-  const computePaths = env.METISTRY_COMPUTE_FILES ?? `${join(runDir, "seed", COMPUTE_FILENAME)}:${instancePath(stateRoot(opts.productDir, env), "compute")}`;
+  const computePaths = env.METISTRY_COMPUTE_FILES ?? `${join(runDir, "seed", COMPUTE_FILENAME)}:${instanceFile(stateRoot(opts.productDir, env), "compute")}`;
   let compute = emptyCompute();
   try {
     compute = (await loadCompute(computePaths)).compute;
@@ -776,7 +1162,12 @@ export async function up(opts: UpOptions): Promise<UpResult> {
     // would (see tcc-pin.ts)
     installRoot: opts.productDir,
     ...instanceDir,
-    env,
+    // deployment.yaml is the record for `keep_awake`, so it is rendered into
+    // the environment here rather than being a line anyone can put in `.env`:
+    // it reaches the supervisor through the SAME passthrough every other
+    // METISTRY_* variable takes (consoleEnv → the plist's dict and
+    // supervisor.json's `env`), and there is no second channel to it.
+    env: { ...env, [KEEP_AWAKE_ENV]: keepAwakeOf(deployment) },
     shape: deployment.shape,
     // derived state hangs off the install root, never off a release: a version
     // flip must not orphan the assistant's state or the Postgres data dir
@@ -789,6 +1180,18 @@ export async function up(opts: UpOptions): Promise<UpResult> {
   };
   r.note(`product: ${runDir} (${source === "release" ? `pinned release${lock ? ` ${lock.product.version}` : ""} — images pulled, not built` : "git checkout — images built from source"})`);
   r.note(`shape: ${deployment.shape} — from ${loaded.from}`);
+  // said out loud, because it is a machine-level behaviour and the operator
+  // should never discover it from `pmset` (docs/ops/deployment-shapes.md)
+  if (le.platform === "darwin") {
+    const keepAwake = keepAwakeOf(deployment);
+    r.note(
+      keepAwake === "never"
+        ? "keep-awake: never — nothing holds this Mac awake, and it may idle-sleep with the install paused (`metistry deployment set-keep-awake allow_sleep_on_battery`)"
+        : deployment.shape === "launchd"
+          ? `keep-awake: ${keepAwake} — the supervisor holds PreventUserIdleSystemSleep while it runs`
+          : `keep-awake: ${keepAwake}, but the compose shape has no supervisor to hold it — nothing is held (docs/ops/deployment-shapes.md)`,
+    );
+  }
   r.note(`node: ${le.node} (${chosenNode.why}) — every launchd job execs this`);
   // the notice itself is main.ts's job (it prints to stderr, once per run);
   // here it is one line of the plan, so the operator sees which file the
@@ -866,12 +1269,23 @@ export async function up(opts: UpOptions): Promise<UpResult> {
       // reconciler's PATH — a clean Mac has no git until Xcode CLT is installed
       values.gitPath = pathWithRuntimeGit(opts.productDir, opts.exists ?? existsSync);
       if (values.gitPath) r.note(`git: ${values.gitPath.split(":")[0]} (bundled) — prefixed onto the reconciler's PATH`);
+      await planConfinement(r, opts.productDir, values, opts.exists ?? existsSync);
       r.section("launchd");
       await installLaunchd(r, runDir, le, deployment, values, opts.exists ?? existsSync);
       if (pg) {
         r.section("database");
         await finishPostgres(r, pg);
       }
+    }
+
+    // the cli shim: independent of compose/launchd, but — like everything
+    // else in this block — NOT written once a step above has failed
+    // (nothing runs "after the failure" except doctor's diagnosis, below).
+    // Last, so it sees whatever installLaunchd's `ln -sfn` just did to the
+    // launchd shape's supervisor symlink (cli-shim.ts).
+    if (opts.cliShim !== false) {
+      r.section("cli");
+      await writeCliShim(r, opts.productDir, instanceDir.instanceDir);
     }
   } catch (err) {
     if (!(err instanceof StepFailed)) throw err;
@@ -881,7 +1295,11 @@ export async function up(opts: UpOptions): Promise<UpResult> {
 
   // doctor runs even after a failed step — its table is the diagnosis; the failure keeps the exit code
   const doctorCode = await closingDoctor(r, runDir, opts.doctorDeps, opts.doctorFn ?? doctor);
-  return { code: failure ? failure.code || 1 : doctorCode, source, commands: r.commands };
+  const timings = r.timings();
+  r.section("timings");
+  r.note(renderTimings(timings, r.elapsedMs()));
+  r.note(runningNote(deployment.shape));
+  return { code: failure ? failure.code || 1 : doctorCode, source, commands: r.commands, timings, elapsedMs: r.elapsedMs() };
 }
 
 /** A Postgres superuser password: 256 bits of randomness, alphanumeric so no conf or connection string ever needs to quote it. */

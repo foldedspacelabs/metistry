@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
 import { QueryStore, type SqlExecutor } from "@foldedspacelabs/metistry-queries";
+import { TASK_FILTER_PARAM_SPEC, TASK_QUERY_NAME, compileTaskFilter } from "@foldedspacelabs/metistry-core";
 import { loadTestEnv } from "@foldedspacelabs/metistry-core/test-env";
 
 loadTestEnv(new URL("../../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
@@ -25,13 +26,49 @@ const REQUIRED = [
   "projects_rollup",
   "runs_summary",
   "activity_feed",
+  "run_detail", // GET /api/runs/:id — what a tap on the feed's `runs:<id>` ref opens
   "agent_presence",
   "reply_feedback_summary",
   "spend", // the budget's read path (invariant 3) — the engine runs it before every billable call
+  "cache_report", // OPEN-6's measurement — `metistry compute cache-report` reads it through GET /api/q/cache_report, not a route of its own (invariant 10)
   "board",
   "board_projects",
   "rooms",
+  "knowledge_pages", // GET /api/knowledge/pages — a page LIST is derived state, so invariant 3 sends it through here and the route holds no SQL of its own
+  "knowledge_page_links", // GET /api/knowledge/links — so is the link graph, which the reconciler parses out of the notes on every walk
 ];
+
+// The daily flow's five (docs/product/daily-flow-spec.md §11, P1-5). Listed
+// apart from REQUIRED because nothing leans on them YET — the template
+// engine (P1-6) and `plan-tomorrow` (P1-7) are the callers, and this is the
+// list they will find. Pinned so that renaming one is a deliberate act.
+const DAILY_FLOW = [
+  "vault_tasks_query", // the ONE query the where:/order: vocabulary compiles into (D15)
+  "vault_tasks_recurring", // the rule lines, which vault_tasks_query excludes (§4)
+  "day_work", // work for a day, with §3's meta.blocked_by resolved beside each row
+  "pending_requests", // the Needs You queue, as a read path rather than a routine's own SQL
+  "task_ageing", // the measure — the one of the five with no path in it, so the one that is `generic`
+];
+
+/**
+ * The bind-param shape of `vault_tasks_query` is NOT written here. It is
+ * `TASK_FILTER_PARAM_SPEC`, imported from the parser that emits it.
+ *
+ * This is the CONTRACT between the filter vocabulary's parser
+ * (`packages/core/src/task-filter.ts`, P1-2) and the one query it compiles
+ * into (D15, `seed/queries/vault_tasks_query.yaml`, P1-5). The two were first
+ * written blind to each other and agreed on almost nothing — `due_from`
+ * against `due_on_or_before`, `combine` against `match_any`, a
+ * comma-separated `flags` string against seven booleans, `sort1` against
+ * `order_1` — and every one of those is an `unknown param` at render time,
+ * because `QueryStore.run` refuses an undeclared param loudly rather than
+ * ignoring it.
+ *
+ * A COPY of the shape in this file would have caught that drift exactly as
+ * well as a copy in the YAML did: not at all. So the pin below compares the
+ * manifest against the imported object, and there is no third spelling of it
+ * anywhere.
+ */
 
 describe("seed queries", () => {
   it("load, include every query the console calls, and compile with defaults", async () => {
@@ -44,14 +81,112 @@ describe("seed queries", () => {
     };
     const store = new QueryStore(executor);
     const n = await store.loadDir(SEED_DIR);
-    expect(n).toBeGreaterThanOrEqual(REQUIRED.length);
-    for (const name of REQUIRED) expect(store.names()).toContain(name);
+    expect(n).toBeGreaterThanOrEqual(REQUIRED.length + DAILY_FLOW.length);
+    for (const name of [...REQUIRED, ...DAILY_FLOW]) expect(store.names()).toContain(name);
     for (const name of store.names()) {
       await store.run(name); // defaults only — every param must have one
       const call = calls.at(-1)!;
       expect(call.text, name).not.toMatch(/(?<![:\w]):[a-z]/); // no leftover :param
       for (const v of call.values) expect(typeof v, `${name} bind`).not.toBe("undefined");
     }
+  });
+
+  // `expose` decides which door a query is served through, and the answer is
+  // a property of the seed SET rather than of one file: everything the PWA
+  // and the routines call has to stay on the generic `/api/q/<name>`, and a
+  // query is route-backed only where its own endpoint applies a filter the
+  // generic door cannot (`knowledge_pages` scopes every row to the caller).
+  // Pinned as a list so that marking another query `route` is a deliberate
+  // act with a test to change — and so that dropping the line from
+  // `knowledge_pages.yaml`, which re-opens the unscoped door, fails here
+  // rather than in a review nobody remembered to do.
+  it("serves every seed query through the generic door except the ones with a scoped route of their own", async () => {
+    const store = new QueryStore({
+      async query() {
+        return { rows: [] };
+      },
+    });
+    await store.loadDir(SEED_DIR);
+    const routeBacked = store.names().filter((n) => store.exposure(n) === "route");
+    // The daily flow's four additions follow the page list's rule exactly:
+    // every row they return carries a vault PATH and, in three of the four,
+    // the text of a line the owner typed in their own notes. Only an
+    // endpoint of its own can filter those through the caller's scope, so
+    // the generic `/api/q/<name>` and `queries_run` answer them with the
+    // refusal they answer an unknown name with. `task_ageing` is the one of
+    // the five that is `generic`, and it is generic BY DESIGN rather than by
+    // omission: it is counts only — no path, no task text, no person, and no
+    // caller-supplied filter to probe the tree with — which is what lets the
+    // assistant read the measure through `queries_run` and keeps §1.5's "no
+    // new brain tool" true.
+    expect(routeBacked.sort()).toEqual(["day_work", "knowledge_page_links", "knowledge_pages", "pending_requests", "vault_tasks_query", "vault_tasks_recurring"]);
+    expect(store.exposure("task_ageing")).toBe("generic");
+    for (const name of REQUIRED.filter((n) => !routeBacked.includes(n))) expect(store.exposure(name), name).toBe("generic");
+  });
+
+  // D15's whole point: ONE vocabulary, three consumers, and what it compiles
+  // to is bind params of one query. So the param list IS the interface, and
+  // this is the assertion that keeps the two halves of it the same object.
+  it("vault_tasks_query declares exactly TASK_FILTER_PARAM_SPEC — same names, same types, same defaults", async () => {
+    const store = new QueryStore({
+      async query() {
+        return { rows: [] };
+      },
+    });
+    await store.loadDir(SEED_DIR);
+    const spec = store.list().find((q) => q.name === TASK_QUERY_NAME)!;
+    expect(spec).toBeDefined();
+    expect(spec.params).toEqual(TASK_FILTER_PARAM_SPEC);
+
+    // and the other direction, said out loud: every param a real compile
+    // emits is a param the manifest declares. `QueryStore.run` refuses an
+    // undeclared one, so this is the failure that would otherwise land at
+    // render time, on the owner's plan, at 19:00.
+    const out = compileTaskFilter(
+      { where: "due <= today and priority >= p2", order: "priority, due" },
+      { now: new Date("2026-09-20T12:00:00Z"), timeZone: "America/New_York" },
+    );
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    for (const k of Object.keys(out.params)) expect(Object.keys(spec.params), k).toContain(k);
+
+    // "blank is absent" for every text param, `0` for every int: there are no
+    // nulls on this wire and no arrays, so a default that was anything else
+    // would make one field's absence mean something different from the rest.
+    for (const [k, p] of Object.entries(spec.params)) {
+      expect(p.default, `${k} has no default`).toBeDefined();
+      if (p.type === "text") expect(p.default, k).toBe("");
+      if (p.type === "int" && k !== "limit") expect(p.default, k).toBe(0);
+      if (p.type === "boolean") expect(p.default, k).toBe(false);
+    }
+
+    // and the names this query used to take, refused — the shape of the
+    // failure a drift produces, so nobody has to imagine it. The store does
+    // not ignore an unknown param; it throws, with the name in the message.
+    for (const stale of ["due_from", "due_to", "combine", "flags", "sort1", "state", "prefix", "area", "source"]) {
+      await expect(store.run(TASK_QUERY_NAME, { [stale]: "x" }), stale).rejects.toThrow(`unknown param ${stale}`);
+    }
+  });
+
+  // The other four, one assertion each: every param has a default (the seed
+  // rule), and the two that a routine passes a time window to say so.
+  it("the daily flow's other four declare defaults for every param", async () => {
+    const store = new QueryStore({
+      async query() {
+        return { rows: [] };
+      },
+    });
+    await store.loadDir(SEED_DIR);
+    const byName = Object.fromEntries(store.list().map((q) => [q.name, q]));
+    for (const name of DAILY_FLOW.filter((n) => n !== "vault_tasks_query")) {
+      for (const [k, p] of Object.entries(byName[name]!.params)) expect(p.default, `${name}.${k}`).toBeDefined();
+    }
+    expect(Object.keys(byName["vault_tasks_recurring"]!.params).sort()).toEqual(["due", "limit", "offset", "prefix"]);
+    expect(Object.keys(byName["day_work"]!.params).sort()).toEqual(["combine", "day", "flags", "limit", "offset", "project"]);
+    expect(Object.keys(byName["pending_requests"]!.params).sort()).toEqual(["include_snoozed", "kind", "limit", "offset"]);
+    // no `prefix` on the measure, deliberately: a count over a caller-supplied
+    // filter is the directory listing of what was filtered
+    expect(Object.keys(byName["task_ageing"]!.params).sort()).toEqual(["days", "today"]);
   });
 });
 
@@ -115,6 +250,81 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
     expect(Number(s.turns)).toBeGreaterThanOrEqual(1);
     expect(Number(s.captures)).toBeGreaterThanOrEqual(1);
     expect(Number(s.spend_usd)).toBeGreaterThanOrEqual(0.25);
+  });
+
+  // OPEN-6's measurement (docs/research/2026-09-cost-optimization.md
+  // addendum). The assertions that matter are the three the report's verdict
+  // rests on: the denominator, the NULL/0 distinction, and "every engine
+  // turn" meaning crews and shadows too rather than the chat tier alone.
+  it("cache_report: hit ratio over the whole billed prompt, NULL ≠ 0, and every engine turn", async () => {
+    const tag = `cr-${Date.now()}`;
+    const model = `${tag}/model`;
+    // A group with a stable prefix: 10_000 prompt tokens of which 9_000 came
+    // out of the cache, over two turns. `tokens_in` INCLUDES cache_read
+    // (core's usageFromResponse), so the ratio is 9000/10000, not 9000/19000.
+    await pool.query(
+      `INSERT INTO runs (component, kind, ok, provider, model, tokens_in, tokens_out, cache_read_tokens, cache_write_tokens, cost_usd, meta)
+       VALUES
+         ($1, 'turn',     true, $2, $3, 5000, 100, 4500, 200, 0.01, $4::jsonb),
+         ($1, 'turn',     true, $2, $3, 5000, 100, 4500,   0, 0.01, $4::jsonb)`,
+      [tag, tag, model, JSON.stringify({ tier: "default", caching: "auto", cost_source: "provider" })],
+    );
+    // A crew run on the same provider/model: a DIFFERENT group (its own tier),
+    // and it has to be in the report at all — the crews carry the long briefs.
+    await pool.query(
+      `INSERT INTO runs (component, kind, ok, provider, model, tokens_in, tokens_out, cache_read_tokens, cache_write_tokens, cost_usd, meta)
+       VALUES ($1, 'crew_run', true, $2, $3, 8000, 50, 0, 8000, 0.05, $4::jsonb)`,
+      [tag, tag, model, JSON.stringify({ tier: `crew:${tag}`, caching: "auto", cost_source: "provider" })],
+    );
+    // Reported NOTHING about the cache (NULL), on a provider whose block says
+    // caching is off. Counted as a turn, not as a turn that reported.
+    await pool.query(
+      `INSERT INTO runs (component, kind, ok, provider, model, tokens_in, tokens_out, cost_usd, meta)
+       VALUES ($1, 'turn', true, $2, $3, 1000, 10, 0, $4::jsonb)`,
+      [tag, `${tag}-local`, model, JSON.stringify({ tier: "routine", caching: "off", cost_source: "unknown" })],
+    );
+    // In flight: a provider stamped at startRun with no token count yet. Not
+    // a reading, and must not dilute one.
+    await pool.query(`INSERT INTO runs (component, kind, ok, provider, model) VALUES ($1, 'turn', NULL, $2, $3)`, [tag, tag, model]);
+
+    const rows = (await store.run("cache_report", { days: 1 })).rows.filter((r) => String(r.provider).startsWith(tag));
+    expect(rows).toHaveLength(3); // chat tier, crew tier, the off-machine one — never the in-flight row
+
+    const chat = rows.find((r) => r.tier === "default")!;
+    expect(chat).toMatchObject({ provider: tag, model, caching: "auto" });
+    expect(Number(chat.turns)).toBe(2);
+    expect(Number(chat.turns_reporting)).toBe(2);
+    expect(Number(chat.turns_hit)).toBe(2);
+    expect(Number(chat.tokens_in)).toBe(10_000);
+    expect(Number(chat.cache_read)).toBe(9_000);
+    expect(Number(chat.cache_write)).toBe(200);
+    expect(Number(chat.hit_ratio)).toBeCloseTo(0.9); // cache_read / tokens_in — NOT cache_read / (tokens_in + cache_read)
+    expect(Number(chat.cost_usd)).toBeCloseTo(0.02);
+    expect(Number(chat.turns_unpriced)).toBe(0);
+
+    // The crew's prefix is being WRITTEN every turn and never read: this is
+    // the shape the verdict calls out, and it is money spent at a premium.
+    const crew = rows.find((r) => String(r.tier).startsWith("crew:"))!;
+    expect(Number(crew.turns_reporting)).toBe(1);
+    expect(Number(crew.turns_hit)).toBe(0);
+    expect(Number(crew.cache_read)).toBe(0);
+    expect(Number(crew.cache_write)).toBe(8_000);
+    expect(Number(crew.hit_ratio)).toBe(0);
+
+    // NULL is a different finding from 0: this provider answered nothing at
+    // all, so it reports no turns — a row that coalesced NULL to 0 would say
+    // "the cache missed" about a provider that was never asked.
+    const off = rows.find((r) => r.provider === `${tag}-local`)!;
+    expect(Number(off.turns)).toBe(1);
+    expect(Number(off.turns_reporting)).toBe(0);
+    expect(Number(off.cache_read)).toBe(0);
+    expect(Number(off.hit_ratio)).toBe(0);
+    expect(off.caching).toBe("off");
+    expect(Number(off.turns_unpriced)).toBe(1);
+
+    // the window is a window: nothing outside it
+    await pool.query(`UPDATE runs SET ts = now() - interval '30 days' WHERE component = $1`, [tag]);
+    expect((await store.run("cache_report", { days: 7 })).rows.filter((r) => String(r.provider).startsWith(tag))).toHaveLength(0);
   });
 
   it("claude_usage_daily computes cache_hit_rate = cache_read / (cache_read + tokens_in + cache_write) per model-day, null with no cache metrics", async () => {
@@ -455,5 +665,534 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
     await pool.query(`DELETE FROM proposals WHERE work_id = $1`, [workId]);
     await pool.query(`DELETE FROM artifact_comments WHERE work_id = $1`, [workId]);
     await pool.query(`DELETE FROM work WHERE id = $1`, [workId]);
+  });
+
+  // The page list (docs/ops/console-api.md `GET /api/knowledge/pages`). Four
+  // things the YAML decides and nothing downstream can undo: what never
+  // appears (a draft, an unsettled conflict), how `area` is DERIVED from the
+  // path, that `prefix` is segment-wise rather than a substring — the
+  // `Areas/Health` / `Areas/Healthcare` pair is the leak a `LIKE 'x%'` would
+  // have — and that the window is stable under `offset`.
+  it("knowledge_pages: derives the area, filters segment-wise, hides drafts and conflicts, pages stably", async () => {
+    const tag = `Kp${Date.now()}`;
+    const area = `Areas/${tag}`; // the area under test
+    const sibling = `Areas/${tag}care`; // its `Health`/`Healthcare` neighbour
+    const mk = async (path: string, title: string | null, draft: boolean, status: string) =>
+      pool.query(`INSERT INTO knowledge_files (path, title, description, draft, status, mtime, indexed_at) VALUES ($1, $2, $3, $4, $5, now(), now())`, [
+        path,
+        title,
+        title ? `${title} description` : null,
+        draft,
+        status,
+      ]);
+    await mk(`${area}/sleep.md`, "Sleep", false, "clean");
+    await mk(`${area}/2026/taper.md`, null, false, "dirty"); // no frontmatter title → the basename
+    await mk(`${sibling}/billing.md`, "Billing", false, "clean"); // the neighbour a substring prefix would leak
+    await mk(`${area}/secret.md`, "Secret", true, "clean"); // draft: invisible at every tier
+    await mk(`${area}/torn.md`, "Torn", false, "conflict"); // unsettled: its title and mtime are not facts yet
+    await mk(`Journal/${tag}.md`, null, false, "clean");
+    await mk(`${tag}.md`, "Root note", false, "clean"); // a vault-root file has no area
+
+    const mine = (rows: Record<string, unknown>[]) => rows.filter((r) => String(r.path).includes(tag));
+    const paths = (rows: Record<string, unknown>[]) => mine(rows).map((r) => r.path);
+    const all = mine((await store.run("knowledge_pages", { limit: 500 })).rows);
+    expect(all.map((r) => r.path)).toEqual([
+      `${area}/2026/taper.md`,
+      `${area}/sleep.md`,
+      `${sibling}/billing.md`,
+      `Journal/${tag}.md`,
+      `${tag}.md`,
+    ]);
+    // The order above is the one assertion that is about the CLUSTER rather
+    // than the query: `Areas/<tag>/sleep.md` before `Areas/<tag>care/…` is
+    // byte order, and a locale collation (CI's Linux, `en_US.UTF-8`) ignores
+    // the `/` and puts `care` first. `COLLATE "C"` in the YAML is what makes
+    // the two machines agree — and what stops a client's `offset` window
+    // shifting under it when a vault is restored elsewhere. The draft and the
+    // conflict are simply not in the list at all.
+    expect(all.find((r) => r.path === `${area}/sleep.md`)).toMatchObject({ area, title: "Sleep", description: "Sleep description", status: "clean" });
+    expect(all.find((r) => r.path === `${area}/2026/taper.md`)).toMatchObject({ area, title: "taper" }); // the first two segments under Areas/, at any depth
+    expect(all.find((r) => r.path === `Journal/${tag}.md`)!.area).toBe("Journal"); // outside Areas/ the top segment IS the area
+    expect(all.find((r) => r.path === `${tag}.md`)!.area).toBeNull(); // a root file has none, and says NULL rather than "" so `area=` can still mean "every area"
+    for (const r of all) expect(r.modified).not.toBeNull();
+
+    // area: the derived grouping, exact — and it covers the sub-folders
+    expect(paths((await store.run("knowledge_pages", { area, limit: 500 })).rows)).toEqual([`${area}/2026/taper.md`, `${area}/sleep.md`]);
+    expect(paths((await store.run("knowledge_pages", { area: "Journal", limit: 500 })).rows)).toEqual([`Journal/${tag}.md`]);
+    // prefix: segment-wise. `Areas/<tag>` must NOT reach `Areas/<tag>care`.
+    expect(paths((await store.run("knowledge_pages", { prefix: area, limit: 500 })).rows)).toEqual([`${area}/2026/taper.md`, `${area}/sleep.md`]);
+    expect(paths((await store.run("knowledge_pages", { prefix: `${area}/`, limit: 500 })).rows)).toHaveLength(2); // a trailing slash is the same prefix
+    expect(paths((await store.run("knowledge_pages", { prefix: "/", limit: 500 })).rows)).toHaveLength(5); // `/` is the whole vault, as a grant of `/` means
+    expect((await store.run("knowledge_pages", { prefix: `${area}/Nope`, limit: 500 })).rows).toHaveLength(0);
+    expect((await store.run("knowledge_pages", { area: "no/such/area", limit: 500 })).rows).toHaveLength(0);
+
+    // offset walks the same total order — path is the primary key, so no row
+    // can tie and none can jump between windows
+    const windows = [
+      paths((await store.run("knowledge_pages", { prefix: area, limit: 1, offset: 0 })).rows),
+      paths((await store.run("knowledge_pages", { prefix: area, limit: 1, offset: 1 })).rows),
+      paths((await store.run("knowledge_pages", { prefix: area, limit: 1, offset: 2 })).rows),
+    ];
+    expect(windows.flat()).toEqual([`${area}/2026/taper.md`, `${area}/sleep.md`]); // the third window is past the end, and empty rather than wrapped
+    expect((await store.run("knowledge_pages", { prefix: area, limit: 1, offset: 99 })).rows).toHaveLength(0);
+
+    await pool.query(`DELETE FROM knowledge_files WHERE path LIKE $1 OR path LIKE $2`, [`%${tag}%`, `${tag}%`]);
+  });
+
+  // The link graph (docs/ops/console-api.md `GET /api/knowledge/links`). What
+  // the YAML decides: both directions in ONE list keyed by the other end,
+  // an unresolved target kept and marked rather than dropped, a draft or
+  // conflict at either end dropped rather than marked, and an order total
+  // enough that `offset` cannot repeat or skip an edge.
+  it("knowledge_page_links: both directions, drafts dropped, unresolved kept, ordered stably", async () => {
+    const tag = `Kl${Date.now()}`;
+    const area = `Areas/${tag}`;
+    const me = `${area}/sleep.md`;
+    const mk = (path: string, title: string | null, draft = false, status = "clean") =>
+      pool.query(`INSERT INTO knowledge_files (path, title, description, draft, status, mtime, indexed_at) VALUES ($1, $2, $3, $4, $5, now(), now())`, [
+        path,
+        title,
+        title ? `${title} description` : null,
+        draft,
+        status,
+      ]);
+    const link = (from: string, to: string, kind = "wikilink") =>
+      pool.query(`INSERT INTO knowledge_links (from_path, to_path, kind) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, [from, to, kind]);
+
+    await mk(me, "Sleep");
+    await mk(`${area}/taper.md`, "Taper");
+    await mk(`${area}/secret.md`, "Secret", true); // a draft: invisible at every tier
+    await mk(`${area}/torn.md`, "Torn", false, "conflict"); // unsettled: not a fact yet
+    await mk(`Journal/${tag}.md`, null); // no frontmatter title → the basename
+    // outgoing
+    await link(me, `${area}/taper.md`);
+    await link(me, `${area}/taper.md`, "embed"); // same target, second kind — a distinct edge
+    await link(me, `${area}/nowhere.md`); // unresolved: nothing lives there yet
+    await link(me, `${area}/secret.md`); // to a draft
+    // incoming
+    await link(`Journal/${tag}.md`, me);
+    await link(`${area}/torn.md`, me); // from an unsettled conflict
+    await link(`${area}/secret.md`, me); // from a draft — a backlink must not disclose it
+
+    const rows = (r: { rows: Record<string, unknown>[] }) => r.rows.map((x) => [x.direction, x.path, x.kind]);
+    const all = await store.run("knowledge_page_links", { path: me, limit: 500 });
+    expect(rows(all)).toEqual([
+      // outgoing first, then by path in BYTE order, then by kind
+      ["outgoing", `${area}/nowhere.md`, "wikilink"],
+      ["outgoing", `${area}/taper.md`, "embed"],
+      ["outgoing", `${area}/taper.md`, "wikilink"],
+      ["incoming", `Journal/${tag}.md`, "wikilink"],
+    ]);
+    // the draft and the conflict are gone from BOTH directions, and nothing
+    // in the answer says they were there
+    expect(JSON.stringify(all.rows)).not.toContain("secret.md");
+    expect(JSON.stringify(all.rows)).not.toContain("torn.md");
+    // an unresolved target is kept, marked, and titled from its own path
+    expect(all.rows[0]).toMatchObject({ resolved: false, title: "nowhere", description: null, status: null });
+    expect(all.rows[2]).toMatchObject({ resolved: true, title: "Taper", description: "Taper description", status: "clean" });
+    expect(all.rows[3]).toMatchObject({ resolved: true, title: tag }); // no frontmatter title → the basename, decided here
+
+    // offset walks that same total order — (direction, path, kind) is the
+    // table's primary key read the other way round, so no edge can tie
+    const windows = [0, 1, 2, 3, 4].map((offset) => store.run("knowledge_page_links", { path: me, limit: 1, offset }));
+    expect((await Promise.all(windows)).flatMap((w) => rows(w))).toEqual(rows(all));
+
+    // the same edges seen from the other end: `taper.md` links nowhere, and
+    // the two kinds of edge pointing AT it are two rows, not one
+    const back = await store.run("knowledge_page_links", { path: `${area}/taper.md`, limit: 500 });
+    expect(rows(back)).toEqual([
+      ["incoming", me, "embed"],
+      ["incoming", me, "wikilink"],
+    ]);
+    expect((await store.run("knowledge_page_links", { path: "", limit: 500 })).rows).toEqual([]); // blank = no page, so no links — never the whole graph
+    expect((await store.run("knowledge_page_links", { path: `${area}/no-such-note.md`, limit: 500 })).rows).toEqual([]);
+
+    await pool.query(`DELETE FROM knowledge_links WHERE from_path LIKE $1 OR to_path LIKE $1`, [`%${tag}%`]);
+    await pool.query(`DELETE FROM knowledge_files WHERE path LIKE $1`, [`%${tag}%`]);
+  });
+
+  // ---------------------------------------------------------------------
+  // The daily flow (docs/product/daily-flow-spec.md §11, P1-5). Rows are
+  // inserted BY HAND here: the parser-driven population is the indexer's
+  // (P1-4), and what these assert is the read — the filtering, the
+  // ordering, and the three rules that live in the SQL rather than in a
+  // caller (a rule line is not a task, `or` never widens the scope, and the
+  // path order is byte order).
+  // ---------------------------------------------------------------------
+
+  const DAY = "2026-09-20"; // fixed: nothing here may depend on the clock
+
+  /** One vault_tasks row, with the NOT NULLs filled and everything else the caller's. */
+  const task = (pool: pg.Pool, o: Record<string, unknown>) => {
+    const row: Record<string, unknown> = {
+      checked: false,
+      dropped: false,
+      parsed_on: DAY,
+      first_seen_on: DAY,
+      last_seen_at: new Date(),
+      ...o,
+    };
+    const keys = Object.keys(row);
+    return pool.query(
+      `INSERT INTO vault_tasks (${keys.join(", ")}) VALUES (${keys.map((_, i) => `$${i + 1}`).join(", ")})`,
+      keys.map((k) => row[k]),
+    );
+  };
+
+  it("vault_tasks_query: TASK_FILTER_PARAM_SPEC's bind params, the scope `or` cannot widen, and a total order", async () => {
+    const tag = `vtq-${Date.now()}`;
+    const mine = `${tag}`;
+    const anchor = `mt-${tag.slice(-8)}`;
+    await task(pool, { path: `${mine}/a.md`, task_key: anchor, anchor, line_no: 1, text: "Call the dentist", text_norm: "call the dentist", due: "2026-09-18", priority: 1 });
+    await task(pool, { path: `${mine}/a.md`, task_key: "k2", line_no: 2, text: "Draft the Q4 plan", text_norm: "draft the q4 plan", due: "2026-09-30", priority: 2, size: "L", type: "planning", project: "drey", area: "Areas/Work", source: "template:recurring" });
+    // a RULE line: never a row of this query (§4)
+    await task(pool, { path: `${mine}/a.md`, task_key: "k3", line_no: 3, text: "Water the plants", text_norm: "water the plants", recur_rule: "every week", recur_next: DAY });
+    await task(pool, { path: `${mine}/b.md`, task_key: "k4", line_no: 1, text: "Send Jim the brand deck", text_norm: "send jim the brand deck", assigned: "People/Jim Fallon.md", waiting: true, scheduled_for: "2026-09-19", size: "S", area: "Areas/Work/Drey", source: "meeting:Journal/Meetings/2026-09-19-sync.md" });
+    await task(pool, { path: `${mine}/b.md`, task_key: "k5", line_no: 2, text: "Send the contract", text_norm: "send the contract", checked: true, done_on: "2026-09-19" });
+    // §2.3: the same task typed twice — two rows, linked, never merged. Its
+    // area is a SUBSTRING of the one above and must not answer to it.
+    await task(pool, { path: `${mine}/b.md`, task_key: "k6", line_no: 3, text: "Call the dentist", text_norm: "call the dentist", duplicate_of: anchor, area: "Areas/Workshop", source: "meetings:not-a-meeting" });
+    // a sibling path that a SUBSTRING prefix would wrongly swallow
+    await task(pool, { path: `${mine}-other/c.md`, task_key: "k7", line_no: 1, text: "Elsewhere", text_norm: "elsewhere", due: DAY });
+
+    const lines = (rows: Record<string, unknown>[]) => rows.map((r) => `${r.path}:${r.line_no}`);
+    const all = await store.run(TASK_QUERY_NAME, { today: DAY, path_prefix: mine, limit: 500 });
+
+    // the rule line is gone, the ticked line is gone, and with no `order:` at
+    // all the order is the vault's own — path in BYTE order, then line —
+    // which is also the tie-break under every `order:`
+    expect(lines(all.rows)).toEqual([`${mine}/a.md:1`, `${mine}/a.md:2`, `${mine}/b.md:1`, `${mine}/b.md:3`]);
+    // D5: unset priority IS normal, so it sorts and filters as 3
+    expect(all.rows.map((r) => r.priority_effective)).toEqual([1, 2, 3, 3]);
+    expect(all.rows[3]).toMatchObject({ priority: null, priority_effective: 3 });
+
+    // segment-wise prefix: `<tag>-other/` is NOT under `<tag>`
+    expect(lines(all.rows).some((p) => p.includes("-other"))).toBe(false);
+    expect(lines((await store.run(TASK_QUERY_NAME, { today: DAY, path_prefix: `${mine}-other`, limit: 500 })).rows)).toEqual([`${mine}-other/c.md:1`]);
+
+    // the flags of §6.2, computed here and not by the caller
+    expect(all.rows[0]!.row_flags).toEqual(expect.arrayContaining(["overdue", "carried", "assigned_to_me"]));
+    expect(all.rows[2]!.row_flags).toEqual(expect.arrayContaining(["waiting", "carried"]));
+    expect(all.rows[2]!.row_flags).not.toContain("assigned_to_me"); // delegated to Jim
+    expect(all.rows[3]!.row_flags).toContain("unscheduled");
+    expect(Number(all.rows[0]!.carried_days)).toBe(2);
+    expect(Number(all.rows[0]!.age_days)).toBe(0); // `carried` is "owed earlier"; `age` is "has been sitting" — two questions
+
+    const at = (p: Record<string, unknown>) => store.run(TASK_QUERY_NAME, { today: DAY, path_prefix: mine, limit: 500, ...p }).then((r) => lines(r.rows));
+
+    // one BOOLEAN per flag, not a comma-separated set
+    expect(await at({ overdue: true })).toEqual([`${mine}/a.md:1`]);
+    expect(await at({ waiting: true })).toEqual([`${mine}/b.md:1`]);
+    expect(await at({ unscheduled: true })).toEqual([`${mine}/b.md:3`]);
+    expect(await at({ carried: true })).toEqual([`${mine}/a.md:1`, `${mine}/b.md:1`]);
+    // AND is the default: both flags must hold, and no row is both
+    expect(await at({ waiting: true, assigned_to_me: true })).toEqual([]);
+    // `match_any`: either is enough — this is what `waiting or overdue` compiles to
+    expect(await at({ waiting: true, overdue: true, match_any: true })).toEqual([`${mine}/a.md:1`, `${mine}/b.md:1`]);
+    expect(await at({ due_on_or_before: DAY, waiting: true, match_any: true })).toEqual([`${mine}/a.md:1`, `${mine}/b.md:1`]);
+
+    // three inclusive date params per field; the parser folded `<` and `>`
+    // and resolved every relative token before binding
+    expect(await at({ due_on_or_after: "2026-09-19" })).toEqual([`${mine}/a.md:2`]);
+    expect(await at({ due_on_or_before: "2026-09-18" })).toEqual([`${mine}/a.md:1`]);
+    expect(await at({ due_on: "2026-09-18" })).toEqual([`${mine}/a.md:1`]);
+    expect(await at({ do_on: "2026-09-19" })).toEqual([`${mine}/b.md:1`]);
+    expect(await at({ do_on_or_after: "2026-09-19", do_on_or_before: "2026-09-19" })).toEqual([`${mine}/b.md:1`]);
+
+    // priority bounds are NUMERIC: `<= 2` is p1 or p2, i.e. MORE important
+    expect(await at({ priority_max: 2 })).toEqual([`${mine}/a.md:1`, `${mine}/a.md:2`]);
+    expect(await at({ priority_min: 2 })).toEqual([`${mine}/a.md:2`, `${mine}/b.md:1`, `${mine}/b.md:3`]);
+    expect(await at({ priority_eq: 1 })).toEqual([`${mine}/a.md:1`]);
+
+    // size: the letter, or a bound on s=1 m=2 l=3
+    expect(await at({ size: "l" })).toEqual([`${mine}/a.md:2`]); // case-insensitive: the index stores `L`
+    expect(await at({ size_rank_max: 1 })).toEqual([`${mine}/b.md:1`]);
+    expect(await at({ size_rank_min: 3 })).toEqual([`${mine}/a.md:2`]);
+
+    expect(await at({ type: "planning" })).toEqual([`${mine}/a.md:2`]);
+    expect(await at({ project: "drey" })).toEqual([`${mine}/a.md:2`]);
+    expect(await at({ assigned: "People/Jim Fallon.md" })).toEqual([`${mine}/b.md:1`]);
+    // `area_prefix` takes the value and its CHILDREN, and `Areas/Workshop` is
+    // neither — the prefix is matched segment-wise, never as a substring
+    expect(await at({ area_prefix: "Areas/Work" })).toEqual([`${mine}/a.md:2`, `${mine}/b.md:1`]);
+    expect(await at({ area_prefix: "Areas/Workshop" })).toEqual([`${mine}/b.md:3`]);
+    // `source_prefix` takes `meeting` and every `meeting:<path>`, and stops
+    // at the colon — `meetings:…` is a different source
+    expect(await at({ source_prefix: "meeting" })).toEqual([`${mine}/b.md:1`]);
+    expect(await at({ source_prefix: "template" })).toEqual([`${mine}/a.md:2`]);
+
+    // THE NULL BUG, pinned: every nullable column compares under
+    // `coalesce(…, false)`, because NULL is how the clause array spells "the
+    // caller did not ask". Without it, `size: l` comes back with every task
+    // that has no size at all — the filter undone by the rows it excludes.
+    expect(await at({ size: "l" })).not.toContain(`${mine}/a.md:1`);
+    expect(await at({ type: "planning" })).not.toContain(`${mine}/b.md:3`);
+    expect(await at({ due_on_or_before: "2999-01-01" })).not.toContain(`${mine}/b.md:3`); // no due date is not "due before everything"
+
+    // `match_any` widens the PREDICATE, never the SCOPE: no combinator
+    // reaches a ticked line, a rule line, or a path outside the prefix
+    expect(await at({ overdue: true, match_any: true, done_on_or_after: "2026-09-19" })).toEqual([`${mine}/a.md:1`]);
+    expect(await at({ status: "done" })).toEqual([`${mine}/b.md:2`]);
+    expect(await at({ status: "waiting" })).toEqual([`${mine}/b.md:1`]);
+    expect(await at({ status: "any" })).toHaveLength(5); // still no rule line
+    expect((await store.run(TASK_QUERY_NAME, { today: DAY, path_prefix: mine, status: "any", limit: 500 })).rows.some((r) => r.text === "Water the plants")).toBe(false);
+
+    // §2.3: both places counted, neither merged
+    expect(Number(all.rows[0]!.places)).toBe(2);
+    expect(Number(all.rows[3]!.places)).toBe(2);
+    expect(all.rows[3]!.duplicate_of).toBe(anchor);
+
+    // `order:` — three slots, each optionally desc, then the byte-ordered
+    // path tie-break that makes the order total
+    expect(await at({ order_1: "priority", order_2: "due" })).toEqual([`${mine}/a.md:1`, `${mine}/a.md:2`, `${mine}/b.md:1`, `${mine}/b.md:3`]);
+    expect(await at({ order_1: "due" })).toEqual([`${mine}/a.md:1`, `${mine}/a.md:2`, `${mine}/b.md:1`, `${mine}/b.md:3`]); // no due sorts last (9999-12-31)
+    expect(await at({ order_1: "due", order_1_desc: true })).toEqual([`${mine}/b.md:1`, `${mine}/b.md:3`, `${mine}/a.md:2`, `${mine}/a.md:1`]);
+    expect(await at({ order_1: "priority", order_1_desc: true })).toEqual([`${mine}/b.md:1`, `${mine}/b.md:3`, `${mine}/a.md:2`, `${mine}/a.md:1`]);
+    // an unrecognised slot sorts nothing and falls through to the next — the
+    // parser refuses one at render time, so the database has no opinion
+    expect(await at({ order_1: "nonsense", order_2: "due" })).toEqual(await at({ order_1: "due" }));
+
+    // offset walks that same total order — (path, line_no, task_key) cannot tie
+    const windows = await Promise.all([0, 1, 2, 3, 4].map((offset) => at({ limit: 1, offset })));
+    expect(windows.flat()).toEqual(lines(all.rows));
+
+    // §3's other direction: a work row naming this line surfaces here and
+    // gates nothing — depends_on and claimability are untouched
+    const { rows: w } = await pool.query(
+      `INSERT INTO work (title, kind, status, project, external_ref, meta) VALUES ($1, 'task', 'open', $2, $3, $4::jsonb) RETURNING id`,
+      ["Book the follow-up", tag, `probe:${tag}`, JSON.stringify({ blocked_by: `vault:${mine}/a.md#^${anchor}` })],
+    );
+    const blocking = await store.run(TASK_QUERY_NAME, { today: DAY, path_prefix: mine, blocking_agent: true, limit: 500 });
+    expect(lines(blocking.rows)).toEqual([`${mine}/a.md:1`]);
+    expect(blocking.rows[0]).toMatchObject({ blocks_work_id: String(w[0]!.id), blocks_work_title: "Book the follow-up", blocks_work_status: "open" });
+    expect(blocking.rows[0]!.row_flags).toContain("blocking_agent");
+
+    await pool.query(`DELETE FROM work WHERE project = $1`, [tag]);
+    await pool.query(`DELETE FROM vault_tasks WHERE path LIKE $1`, [`${tag}%`]);
+  });
+
+  // D15 END TO END, which is the whole point of P1-2 and P1-5 being one
+  // contract: a `where:`/`order:` a user could type in a template goes
+  // through `compileTaskFilter` and straight into `QueryStore.run` with NO
+  // name translation anywhere between them. If a param were renamed on
+  // either side this test throws `unknown param`, which is exactly what the
+  // renderer would have done at 19:00.
+  it("compileTaskFilter → QueryStore.run: `due <= today and priority >= P2 order priority, due` with no translation in between", async () => {
+    const tag = `vtq-e2e-${Date.now()}`;
+    await task(pool, { path: `${tag}/e.md`, task_key: "e1", line_no: 1, text: "Overdue, priority unset", text_norm: "overdue priority unset", due: "2026-09-18" });
+    await task(pool, { path: `${tag}/e.md`, task_key: "e2", line_no: 2, text: "Due today, p1", text_norm: "due today p1", due: DAY, priority: 1 });
+    await task(pool, { path: `${tag}/e.md`, task_key: "e3", line_no: 3, text: "Due today, p2", text_norm: "due today p2", due: DAY, priority: 2 });
+    await task(pool, { path: `${tag}/e.md`, task_key: "e4", line_no: 4, text: "Due next week, p4", text_norm: "due next week p4", due: "2026-09-30", priority: 4 });
+    await task(pool, { path: `${tag}/e.md`, task_key: "e5", line_no: 5, text: "No due date at all, p4", text_norm: "no due date at all p4", priority: 4 });
+
+    const out = compileTaskFilter(
+      { where: "due <= today and priority >= P2", order: "priority, due" },
+      { now: new Date(`${DAY}T12:00:00Z`), timeZone: "UTC" }, // `today` resolves where the timezone is known, never in SQL
+    );
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    // the compiled shape, spelled out once: an inclusive bound the parser
+    // folded, a NUMERIC priority bound, two order slots, and `and`
+    expect(out.params).toMatchObject({
+      due_on_or_before: DAY,
+      due_on: "",
+      priority_min: 2,
+      priority_max: 0,
+      order_1: "priority",
+      order_2: "due",
+      match_any: false,
+      limit: 50,
+    });
+    // the context params are the CALLER's and the compile never touches them
+    expect(out.params).toMatchObject({ today: "", me: "", path_prefix: "", offset: 0 });
+
+    const { rows } = await store.run(TASK_QUERY_NAME, { ...out.params, today: DAY, path_prefix: tag });
+    // p2 before the unset (which is p3, D5); the p1 is MORE important than
+    // p2 and `priority >= P2` is numeric, so it is out; next week is not
+    // due yet; and the line with NO due date does not answer a due bound at
+    // all — `coalesce(…, false)`, the NULL bug this contract was written
+    // over.
+    expect(rows.map((r) => r.task_key)).toEqual(["e3", "e1"]);
+    expect(rows.map((r) => r.due)).toEqual([DAY, "2026-09-18"]); // ISO text, never a JS Date at the process's midnight
+
+    await pool.query(`DELETE FROM vault_tasks WHERE path LIKE $1`, [`${tag}%`]);
+  });
+
+  it("vault_tasks_recurring: rule lines only, the still-open instance beside each, and a rule that could not be read comes back first", async () => {
+    const tag = `vtr-${Date.now()}`;
+    await task(pool, { path: `${tag}/r.md`, task_key: "rule-week", line_no: 1, text: "Water the plants", text_norm: "water the plants", recur_rule: "every week", recur_next: DAY, size: "S" });
+    await task(pool, { path: `${tag}/r.md`, task_key: "rule-later", line_no: 2, text: "Pay the card", text_norm: "pay the card", recur_rule: "every month", recur_next: "2026-09-28" });
+    await task(pool, { path: `${tag}/r.md`, task_key: "rule-unread", line_no: 3, text: "Something", text_norm: "something", recur_rule: "every fortnite", parse_warning: "every fortnite" });
+    // the week rule's previous instance, still unchecked — §4's "one open
+    // instance per rule, ever"
+    await task(pool, { path: `${tag}/2026-09-13.md`, task_key: "inst-1", line_no: 4, text: "Water the plants", text_norm: "water the plants", recur_parent: "rule-week", source: "template:recurring", first_seen_on: "2026-09-13" });
+    // and one it already closed, which must not count as open
+    await task(pool, { path: `${tag}/2026-09-06.md`, task_key: "inst-0", line_no: 4, text: "Water the plants", text_norm: "water the plants", recur_parent: "rule-week", checked: true, done_on: "2026-09-06", first_seen_on: "2026-09-06" });
+
+    const { rows } = await store.run("vault_tasks_recurring", { due: DAY, prefix: tag, limit: 50 });
+    // the unreadable rule first (recur_next IS NULL sorts first, carrying its
+    // warning), then what is due; the rule not due yet is absent
+    expect(rows.map((r) => r.task_key)).toEqual(["rule-unread", "rule-week"]);
+    expect(rows[0]).toMatchObject({ recur_next: null, parse_warning: "every fortnite" });
+    expect(rows[1]).toMatchObject({
+      recur_rule: "every week",
+      recur_next: DAY,
+      open_instance_path: `${tag}/2026-09-13.md`,
+      open_instance_task_key: "inst-1",
+      open_instance_since: "2026-09-13",
+    });
+    expect(Number(rows[1]!.open_instance_age_days)).toBe(7);
+    expect(Number(rows[1]!.instances)).toBe(2);
+    expect(Number(rows[1]!.instances_done)).toBe(1);
+    expect(rows[0]!.open_instance_path).toBeNull(); // nothing materialised from a rule nobody could read
+
+    // the instances themselves are ordinary tasks, and the rules are not
+    const open = await store.run(TASK_QUERY_NAME, { today: DAY, path_prefix: tag, limit: 50 });
+    expect(open.rows.map((r) => r.task_key)).toEqual(["inst-1"]);
+    expect(open.rows[0]!.row_flags).toContain("recurring"); // an INSTANCE of a rule — the only sense a row here can be recurring
+
+    await pool.query(`DELETE FROM vault_tasks WHERE path LIKE $1`, [`${tag}%`]);
+  });
+
+  it("day_work: meta.blocked_by resolved beside the row, surfacing and never gating; closed rows only on the day", async () => {
+    const tag = `dw-${Date.now()}`;
+    const anchor = `mt-${tag.slice(-8)}`;
+    await task(pool, { path: `${tag}/a.md`, task_key: anchor, anchor, line_no: 1, text: "Call the dentist", text_norm: "call the dentist" });
+    const mk = (title: string, o: Record<string, unknown> = {}) =>
+      pool.query(
+        `INSERT INTO work (title, kind, status, project, external_ref, due, closed_at, depends_on, meta)
+         VALUES ($1, 'task', $2, $3, $4, $5, $6, '{}', $7::jsonb) RETURNING id`,
+        [title, o.status ?? "open", tag, `probe:${tag}:${title}`, o.due ?? null, o.closed_at ?? null, JSON.stringify(o.meta ?? {})],
+      );
+    const blocked = (await mk("Book the follow-up", { meta: { blocked_by: `vault:${tag}/a.md#^${anchor}` } })).rows[0]!.id;
+    await mk("Dangling", { meta: { blocked_by: `vault:${tag}/gone.md#^mt-nothing` } });
+    await mk("Held", { status: "blocked" });
+    await mk("Shipped yesterday", { status: "closed", closed_at: `${DAY}T10:00:00Z` });
+    await mk("Shipped last week", { status: "closed", closed_at: "2026-09-10T10:00:00Z" });
+
+    const titles = (rows: Record<string, unknown>[]) => rows.map((r) => r.title);
+    const all = await store.run("day_work", { day: DAY, project: tag, limit: 50 });
+    // scope: everything open, PLUS what closed on the day — never what
+    // closed a week ago
+    expect(titles(all.rows).sort()).toEqual(["Book the follow-up", "Dangling", "Held", "Shipped yesterday"]);
+
+    const waiting = await store.run("day_work", { day: DAY, project: tag, flags: "waiting_on_me", limit: 50 });
+    expect(titles(waiting.rows)).toEqual(["Book the follow-up"]);
+    expect(waiting.rows[0]).toMatchObject({
+      id: String(blocked),
+      blocked_by: `vault:${tag}/a.md#^${anchor}`,
+      blocked_by_path: `${tag}/a.md`,
+      blocked_by_anchor: anchor,
+      blocked_by_task: "Call the dentist",
+      blocked_by_task_open: true,
+    });
+    // it SURFACES and never gates: `depends_on` is still empty and the row is
+    // still claimable, which is the whole of §3's design
+    const { rows: raw } = await pool.query(`SELECT depends_on, claimed_by, status FROM work WHERE id = $1`, [blocked]);
+    expect(raw[0]).toMatchObject({ depends_on: [], claimed_by: null, status: "open" });
+
+    // a ref pointing at a line the index does not hold is a path with no
+    // text, never a silently dropped row
+    const dangling = all.rows.find((r) => r.title === "Dangling")!;
+    expect(dangling).toMatchObject({ blocked_by_path: `${tag}/gone.md`, blocked_by_task: null, blocked_by_task_open: null });
+    expect(dangling.row_flags).not.toContain("waiting_on_me");
+
+    // and the blocking todo closing is what clears it — no second mechanism
+    await pool.query(`UPDATE vault_tasks SET checked = true, done_on = $1 WHERE anchor = $2`, [DAY, anchor]);
+    expect((await store.run("day_work", { day: DAY, project: tag, flags: "waiting_on_me", limit: 50 })).rows).toHaveLength(0);
+
+    expect(titles((await store.run("day_work", { day: DAY, project: tag, flags: "blocked", limit: 50 })).rows)).toEqual(["Held"]);
+    expect(titles((await store.run("day_work", { day: DAY, project: tag, flags: "closed", limit: 50 })).rows)).toEqual(["Shipped yesterday"]);
+    // AND needs both; OR needs either
+    expect((await store.run("day_work", { day: DAY, project: tag, flags: "blocked,closed", limit: 50 })).rows).toHaveLength(0);
+    expect(titles((await store.run("day_work", { day: DAY, project: tag, flags: "blocked,closed", combine: "or", limit: 50 })).rows).sort()).toEqual(["Held", "Shipped yesterday"]);
+
+    await pool.query(`DELETE FROM work WHERE project = $1`, [tag]);
+    await pool.query(`DELETE FROM vault_tasks WHERE path LIKE $1`, [`${tag}%`]);
+  });
+
+  it("pending_requests: pending and not snoozed, the user's word for the type, and never the payload", async () => {
+    const tag = `pr-${Date.now()}`;
+    const mk = (kind: string, payload: unknown, o: { decision?: string; snoozed?: string } = {}) =>
+      pool.query(
+        `INSERT INTO proposals (kind, source_agent, trust, payload, decision, snoozed_until)
+         VALUES ($1, $2, 'internal', $3::jsonb, $4, $5) RETURNING id`,
+        [kind, tag, JSON.stringify(payload), o.decision ?? "pending", o.snoozed ?? null],
+      );
+    await mk("report", { classification: { action: "Call the dentist" }, suggested_work: { title: "Call the dentist" }, secret: "must not travel" });
+    await mk("access_request", { area: "Areas/Health" });
+    await mk("decision", { title: "Enrol this agent?" }, { snoozed: "2099-01-01T00:00:00Z" });
+    await mk("knowledge", { title: "Answered already" }, { decision: "allow" });
+
+    const mine = (rows: Record<string, unknown>[]) => rows.filter((r) => r.source_agent === tag);
+    const shown = mine((await store.run("pending_requests", { limit: 500 })).rows);
+    // oldest first; the snoozed row has left the queue and the decided one
+    // was never in it
+    expect(shown.map((r) => r.kind)).toEqual(["report", "access_request"]);
+    expect(shown[0]).toMatchObject({ request_type: "report", title: "Call the dentist", has_suggested_work: true, snoozed_until: null });
+    // `access_request` and `grant_elevation` are both "access" — the user has
+    // one word for this (routines/morning-brief/run.ts's requestType)
+    expect(shown[1]).toMatchObject({ request_type: "access", title: "access request", has_suggested_work: false });
+    // handles, never the payload
+    expect(JSON.stringify(shown)).not.toContain("must not travel");
+    expect(Object.keys(shown[0]!)).not.toContain("payload");
+
+    // `later` is not an answer, and it is not an absence either
+    const withSnoozed = mine((await store.run("pending_requests", { include_snoozed: true, limit: 500 })).rows);
+    expect(withSnoozed.map((r) => r.request_type)).toEqual(["report", "access", "question"]);
+    expect(withSnoozed[2]!.snoozed_until).not.toBeNull();
+    expect(mine((await store.run("pending_requests", { kind: "report", limit: 500 })).rows)).toHaveLength(1);
+
+    await pool.query(`DELETE FROM proposals WHERE source_agent = $1`, [tag]);
+  });
+
+  // Last, because it is the one query with no filter to scope it by — which
+  // is the point of it (a count over a caller-supplied filter is the
+  // directory listing `knowledge_pages` refuses to publish), and the reason
+  // it is the only one of the five that is `expose: generic`.
+  it("task_ageing: the measure only — buckets, totals, and a source KIND that can never be a path", async () => {
+    await pool.query(`DELETE FROM vault_tasks`);
+    const tag = `ta-${Date.now()}`;
+    await task(pool, { path: `${tag}/a.md`, task_key: "t1", line_no: 1, text: "Fresh", text_norm: "fresh", first_seen_on: DAY });
+    await task(pool, { path: `${tag}/a.md`, task_key: "t2", line_no: 2, text: "Three days", text_norm: "three days", first_seen_on: "2026-09-17", due: "2026-09-18" });
+    await task(pool, { path: `${tag}/a.md`, task_key: "t3", line_no: 3, text: "A month", text_norm: "a month", first_seen_on: "2026-08-15", waiting: true, assigned: "People/Jim Fallon.md" });
+    await task(pool, { path: `${tag}/a.md`, task_key: "t4", line_no: 4, text: "From a meeting", text_norm: "from a meeting", first_seen_on: "2026-09-19", source: `meeting:${tag}/Journal/Meetings/secret-topic.md` });
+    await task(pool, { path: `${tag}/a.md`, task_key: "t5", line_no: 5, text: "Closed", text_norm: "closed", checked: true, done_on: "2026-09-19", first_seen_on: "2026-09-18" });
+    await task(pool, { path: `${tag}/a.md`, task_key: "t6", line_no: 6, text: "A rule", text_norm: "a rule", recur_rule: "every week", recur_next: DAY });
+    await task(pool, { path: `${tag}/a.md`, task_key: "t7", line_no: 7, text: "Unreadable", text_norm: "unreadable", parse_warning: "due nextweek", first_seen_on: DAY });
+
+    const { rows } = await store.run("task_ageing", { today: DAY, days: 7 });
+    const total = rows.find((r) => r.row_kind === "total")!;
+    expect(rows[0]).toBe(total); // the total reads first
+    expect(total).toMatchObject({ label: null });
+    expect(Number(total.n)).toBe(5); // five open non-rule lines
+    expect(Number(total.recurrence_rules)).toBe(1); // counted on its own line, never mixed in
+    expect(Number(total.overdue)).toBe(1);
+    expect(Number(total.carried)).toBe(1);
+    expect(Number(total.waiting)).toBe(1);
+    expect(Number(total.delegated)).toBe(1);
+    expect(Number(total.parse_warnings)).toBe(1);
+    expect(Number(total.unscheduled)).toBe(4);
+    expect(Number(total.done_in_window)).toBe(1);
+    expect(Number(total.created_in_window)).toBe(5); // six non-rule lines, one of them first seen 2026-08-15
+    expect(Number(total.oldest_open_days)).toBe(36);
+    expect(Number(total.completion_rate)).toBeCloseTo(1 / 5);
+
+    const buckets = rows.filter((r) => r.row_kind === "age");
+    expect(buckets.map((b) => [b.label, Number(b.n)])).toEqual([
+      ["today", 2],
+      ["1-3d", 2],
+      ["31-90d", 1],
+    ]);
+
+    // the KIND, never the value: `meeting:<path>` must not put a vault path
+    // into an aggregate the generic door serves
+    const sources = rows.filter((r) => r.row_kind === "source");
+    expect(sources.map((s) => s.label).sort()).toEqual(["meeting", "typed"]);
+    expect(JSON.stringify(rows)).not.toContain("secret-topic");
+    expect(JSON.stringify(rows)).not.toContain(tag);
+    expect(JSON.stringify(rows)).not.toContain("Jim");
+
+    await pool.query(`DELETE FROM vault_tasks`);
   });
 });

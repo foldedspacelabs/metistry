@@ -161,6 +161,24 @@ describe("metistry secrets sync", () => {
     expect(readFileSync(file, "utf8")).toContain("METISTRY_LOCAL_OWNER_TOKEN=MINTED-OWNER-TOKEN");
   });
 
+  // The credential split's migration (docs/ops/auth.md): an install that
+  // predates METISTRY_BRIDGE_TOKEN_RECONCILER_USER cannot write a §4.7
+  // protected path at all until it has one, so this sync mints it. The OTHER
+  // bridge tokens stay out of the generated set — a service was already
+  // started with those, and inventing a new value would lock it out.
+  it("mints METISTRY_BRIDGE_TOKEN_RECONCILER_USER, and still leaves the shared reconciler bearer alone", async () => {
+    const file = await envFile("METISTRY_BRIDGE_TOKEN_RECONCILER=\nMETISTRY_BRIDGE_TOKEN_RECONCILER_USER=\n");
+    const kc = fakeSecurity();
+    const out: string[] = [];
+    const r = await syncSecrets("env", { envFile: file, instanceId: INSTANCE_ID, exec: kc.exec, out: (l) => out.push(l), platform: "darwin", env: {}, mint: () => "MINTED-OWNER-BEARER" });
+    expect(r.minted).toEqual(["METISTRY_BRIDGE_TOKEN_RECONCILER_USER"]);
+    expect(r.skipped).toEqual(["METISTRY_BRIDGE_TOKEN_RECONCILER"]);
+    expect(kc.store.get(key(INSTANCE_ID, "METISTRY_BRIDGE_TOKEN_RECONCILER_USER"))).toBe("MINTED-OWNER-BEARER");
+    expect(readFileSync(file, "utf8")).toBe("METISTRY_BRIDGE_TOKEN_RECONCILER=\nMETISTRY_BRIDGE_TOKEN_RECONCILER_USER=MINTED-OWNER-BEARER\n");
+    expect(out.join("\n")).not.toContain("MINTED-OWNER-BEARER");
+    expect(out.join("\n")).toContain("restart");
+  });
+
   it("mints only the generated names — a missing third-party secret is still reported, never invented", async () => {
     const file = await envFile("METISTRY_GITHUB_TOKEN=\nMETISTRY_OPENROUTER_API_KEY=\nMETISTRY_BRIDGE_TOKEN_RECONCILER=\n");
     const kc = fakeSecurity();

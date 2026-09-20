@@ -119,6 +119,44 @@ describe("compute.yaml schema", () => {
     }
   });
 
+  it("caching is off unless a provider says otherwise, and the openrouter template is the one that does (OPEN-6)", () => {
+    const cfg = parseCompute(SKETCH);
+    expect(cfg.providers.openrouter?.caching).toBeUndefined();   // the sketch predates the field: nothing is sent for it
+    expect(cfg.providers.lmstudio?.caching).toBeUndefined();
+    const text = readFileSync(new URL("../../../seed/compute-templates/openrouter.yaml", import.meta.url), "utf8");
+    const tmpl = parseCompute(`providers:\n${text.split("\n").filter((l) => !l.startsWith("#")).map((l) => (l.trim() === "" ? l : `  ${l}`)).join("\n")}`);
+    expect(tmpl.providers.openrouter?.caching).toBe("auto");
+    for (const name of ["lmstudio", "ollama", "llamaserver", "applefm"]) {
+      const other = readFileSync(new URL(`../../../seed/compute-templates/${name}.yaml`, import.meta.url), "utf8");
+      expect(other).not.toContain("caching:");
+    }
+  });
+
+  it("refuses caching: auto on an on_machine provider, naming the field — a local server has no field to send", () => {
+    const m = why("providers: { local: { kind: openai-compatible, base_url: http://127.0.0.1:1234/v1, locality: on_machine, caching: auto } }");
+    expect(m).toContain("providers.local.caching");
+    expect(m).toContain("caches its own prefix");
+    // and a mode that is neither says so
+    expect(why("providers: { x: { kind: openai-compatible, base_url: https://a/v1, locality: off_machine, caching: sometimes, data_policy: { allow: [], deny_sources: [], max_brief_bytes: 1 } } }")).toContain("providers.x.caching");
+  });
+
+  it("a pricing: entry may carry its own cache multipliers, and is unchanged without them", () => {
+    const cfg = parseCompute(`
+providers:
+  cloud:
+    kind: openai-compatible
+    base_url: https://a/v1
+    locality: off_machine
+    caching: auto
+    data_policy: { allow: [], deny_sources: [], max_brief_bytes: 1 }
+    pricing:
+      plain: { in_per_m: 3, out_per_m: 15 }
+      tuned: { in_per_m: 3, out_per_m: 15, cache_read_multiplier: 0.05, cache_write_multiplier: 2 }
+`);
+    expect(cfg.providers.cloud?.pricing?.plain).toEqual({ in_per_m: 3, out_per_m: 15 });
+    expect(cfg.providers.cloud?.pricing?.tuned).toEqual({ in_per_m: 3, out_per_m: 15, cache_read_multiplier: 0.05, cache_write_multiplier: 2 });
+  });
+
   it("effort defaults to medium and a budget action defaults to stop (C5)", () => {
     const cfg = parseCompute(`
 providers: { local: { kind: openai-compatible, base_url: http://127.0.0.1:1234/v1, locality: on_machine } }

@@ -18,7 +18,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 
-import { AREA_PREFIX_REFUSAL, runCheck, startRun, finishRun, errorEnvelope, intEnv, parseAction, PROJECT_SLUG_RE, rollSession, statusFor, SKIP_FEEDBACK, validAgentAreaGrant, type CheckResult, type Compute, type ErrorEnvelope } from "@foldedspacelabs/metistry-core";
+import { AREA_PREFIX_REFUSAL, runCheck, startRun, finishRun, errorEnvelope, intEnv, may, parseAction, PROJECT_SLUG_RE, readableAreas, rollSession, statusFor, SKIP_FEEDBACK, validAgentAreaGrant, type CheckResult, type Compute, type ErrorEnvelope, type Principal } from "@foldedspacelabs/metistry-core";
 import { QueryError, QueryStore } from "@foldedspacelabs/metistry-queries";
 import { captureToInbox, createBrainServer, dirSink, type CaptureSink, type KnowledgeLister, type KnowledgeReader, type KnowledgeVaultSearcher, type KnowledgeWriter, type QueryEmbedder } from "@foldedspacelabs/metistry-mcp-brain";
 import { TasksError, TasksService } from "@foldedspacelabs/metistry-tasks";
@@ -45,7 +45,7 @@ import { applyImprovement } from "./prompt-overlay.js";
 import { crewDispatcher, type CrewRegistry } from "./crews.js";
 import { runAction, type ActionServices } from "./actions.js";
 import { computeRoutes, isComputeRoute, type ComputeAdmin } from "./compute-routes.js";
-import { grantedScope, isKnowledgeRoute, knowledgeRoutes, NO_SCOPE, OWNER_SCOPE, type KnowledgeScope, type KnowledgeSearcher } from "./knowledge-routes.js";
+import { isKnowledgeRoute, knowledgeRoutes, type KnowledgeScope, type KnowledgeSearcher } from "./knowledge-routes.js";
 import { agentList, commandList } from "./commands.js";
 import { createRequire } from "node:module";
 
@@ -151,14 +151,14 @@ function isUser(auth: Auth): boolean {
 /**
  * What this credential may see of the vault, for `/api/knowledge/*`.
  *
- * The `user` principal — a passkey session or the local owner token, the
- * same person either way — gets their own vault. A principal carrying
- * grants gets exactly what those grants say, through the one derivation
- * (`grantedScope`, which reproduces `mcp-brain`'s rule for the MCP mount).
- * Anything else gets nothing: a capture owner token is not the owner's read
- * path, and a scope function that falls back to "everything" when it does
- * not recognise a credential is a hole waiting for the next credential
- * class to be added.
+ * One derivation, off the one principal (`principalOf` below): the `user`
+ * principal — a passkey session or the local owner token, the same person
+ * either way — gets their own vault (`areas: null`); a principal carrying
+ * grants gets exactly what those grants say; anything else gets NOTHING.
+ * That last one is the reason this is `readableAreas` and not a field read:
+ * a tier below `areas` comes to the empty list, never to `null`, and a scope
+ * function that falls back to "everything" when it does not recognise a
+ * credential is a hole waiting for the next credential class to be added.
  *
  * The agent branch is not reachable from this server today and is not a
  * stub: agent bearers stop at the uniform 403 above (CRIT-7) and reach
@@ -168,9 +168,57 @@ function isUser(auth: Auth): boolean {
  * formed at the call site.
  */
 function knowledgeScopeOf(auth: Auth): KnowledgeScope {
-  if (isUser(auth)) return OWNER_SCOPE;
-  if (auth?.kind === "agent") return grantedScope(auth.agent);
-  return NO_SCOPE;
+  return { areas: readableAreas(principalOf(auth).scope) };
+}
+
+/**
+ * **The console's credential → `core`'s decision principal** (P1 of
+ * docs/research/2026-09-19-grants-and-access-simplified.md §4). One mapping
+ * function, called at the doors; `mcp-brain` has the other one, for an agent
+ * bearer. Nothing about STORAGE moves: sessions, the local owner token,
+ * `owner_tokens` and `agents` rows are all still exactly where they were.
+ *
+ * Three roles come out of this server, and the collapse is the same one
+ * `isUser` already makes and is right to make: everything a passkey session
+ * may do, the local owner token may do, so both are `owner`. The capture
+ * `owner_token` is NOT one of them — it is the plan's tier 0, capture-only,
+ * and the management gate excludes it by name — so it is the `tool` role, a
+ * credential with no scope at all. An agent bearer is `assistant` or `agent`
+ * by its row's kind (and never `crew` until P2 — see mcp-brain's
+ * `principalOf`).
+ *
+ * An UNAUTHENTICATED request has no principal, so there is nothing to map:
+ * the four `/auth/*` ceremonies, `GET /api/identity`, `/health` and the PWA
+ * shell are all decided before this point, and the doors below are reached
+ * only with a credential in hand. `null` gets the `tool` role — the narrowest
+ * one — so that a future caller of this function with no credential fails
+ * closed rather than being handed a scope.
+ */
+function principalOf(auth: Auth): Principal {
+  if (auth?.kind === "agent") {
+    const a = auth.agent;
+    return {
+      id: a.id,
+      role: a.kind === "internal" ? "assistant" : "agent",
+      scope: {
+        tier: a.grants.tier,
+        areas: [...a.grants.areas],
+        queries: a.grants.queries === true,
+        projects: a.kind === "internal" && a.projects.length === 0 ? null : [...a.projects],
+        autonomy: a.autonomy,
+      },
+      source: a.kind === "internal" ? "environment" : "registry",
+    };
+  }
+  const owner = isUser(auth);
+  return {
+    // The person, however they proved it: their own vault is every path, and
+    // `areas: null` is what says so (never an empty list, which is no grant).
+    id: owner ? "owner" : "owner_token",
+    role: owner ? "owner" : "tool",
+    scope: { tier: owner ? "areas" : "none", areas: owner ? null : [], queries: owner, projects: owner ? null : [] },
+    source: "registry",
+  };
 }
 
 // One shape for every per-agent verb so the management gate and the handler
@@ -289,8 +337,14 @@ export function suggestedWorkOf(row: { kind?: unknown; payload?: unknown }): { t
  * read off the manifests through the store (`exposure`) and never matched
  * against a list kept here, which could drift from the files.
  */
-export async function namedQueryDoor(res: ServerResponse, queries: QueryStore, name: string, params: Record<string, string>): Promise<void> {
-  if (queries.exposure(name) !== "generic") return sendError(res, "not_found");
+export async function namedQueryDoor(res: ServerResponse, queries: QueryStore, name: string, params: Record<string, string>, auth: Auth = null): Promise<void> {
+  // `expose`, read off the manifest through the store, decided by `may` — the
+  // same rule, in the same words, `queries_run` applies on /mcp. The caller
+  // is passed even though no rule reads it: the owner IS narrowed here (§2.6,
+  // and P4 is where that ends), and a door that never sees who is asking
+  // could not stop being narrow without being rewritten.
+  const exposed = may(principalOf(auth), "read", { kind: "query", door: "console_query", name, exposure: queries.exposure(name) === "generic" ? "generic" : "route" });
+  if (!exposed.ok) return sendError(res, exposed.code, exposed.message || undefined);
   try {
     return sendJson(res, 200, await queries.run(name, params));
   } catch (err) {
@@ -529,7 +583,8 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     }
 
     // ----- agent tokens stop here: uniform 403 on everything else, never 404 -----
-    if (auth.kind === "agent") return sendError(res, "forbidden");
+    const onConsole = may(principalOf(auth), "act", { kind: "console", door: "console_agent", route: key });
+    if (!onConsole.ok) return sendError(res, onConsole.code, onConsole.message || undefined);
 
     // Who the console thinks you are. The Mac app calls this to render
     // "signed in as owner" without a passkey ceremony; it is also what
@@ -637,7 +692,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     }
 
     if (req.method === "GET" && url.pathname.startsWith("/api/q/")) {
-      return namedQueryDoor(res, queries, url.pathname.slice("/api/q/".length), Object.fromEntries(url.searchParams));
+      return namedQueryDoor(res, queries, url.pathname.slice("/api/q/".length), Object.fromEntries(url.searchParams), auth);
     }
 
     if (key === "GET /api/messages") {
@@ -704,7 +759,8 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
 
     // ----- compute targets (§4.18): the `user` principal ONLY — dispatch is outbound -----
     if (key === "GET /api/targets" || DISPATCH_ROUTE.test(key)) {
-      if (!isUser(auth)) return sendError(res, "forbidden");
+      const d = may(principalOf(auth), "act", { kind: "console", door: "console_management", route: key });
+      if (!d.ok) return sendError(res, d.code, d.message || undefined);
       if (key === "GET /api/targets") {
         return sendJson(res, 200, { targets: cfg.targets ? await cfg.targets.describe() : [], as_of: new Date().toISOString() });
       }
@@ -732,7 +788,15 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     }
 
     // ----- management: the `user` principal ONLY (capture owner tokens excluded) -----
-    if (!isUser(auth)) {
+    //
+    // Two questions, and only the first is a permission: `may` decides
+    // WHETHER this credential may reach the management surface, and the
+    // enumeration below decides WHICH routes that surface is — so a
+    // credential outside it gets the canonical 403 on the whole family
+    // rather than a 403 on some paths and a 404 on others, a difference that
+    // would say which spellings this build knows.
+    const management = may(principalOf(auth), "act", { kind: "console", door: "console_management", route: key });
+    if (!management.ok) {
       if (
         key === "GET /api/devices" ||
         /^POST \/api\/devices\/\d+\/revoke$/.test(key) ||
@@ -760,7 +824,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         isTaskOpRoute(key) ||
         isArtifactRoute(url.pathname)
       ) {
-        return sendError(res, "forbidden");
+        return sendError(res, management.code, management.message || undefined);
       }
       return sendError(res, "not_found");
     }

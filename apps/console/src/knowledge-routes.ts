@@ -34,20 +34,19 @@
 // drift.
 
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { canSee, filterHits, filterPages, INSTANCE_LAYOUT, type ErrorCode, type KnowledgeScope } from "@foldedspacelabs/metistry-core";
+import { filterHits, filterPages, may, scopeAsPrincipal, type ErrorCode, type KnowledgeScope } from "@foldedspacelabs/metistry-core";
 import { KNOWLEDGE_LINKS_QUERY, KNOWLEDGE_PAGES_QUERY } from "@foldedspacelabs/metistry-mcp-brain";
 
 /**
- * **The scope rule itself is `core`'s** (`packages/core/src/access.ts`), since
- * P0 of docs/research/2026-09-19-grants-and-access-simplified.md §4. It used
- * to live in `packages/mcp-brain`, which made one bridge's package the host of
+ * **The scope rules are `core`'s** (`packages/core/src/access.ts`), since P0
+ * of docs/research/2026-09-19-grants-and-access-simplified.md §4. They used to
+ * live in `packages/mcp-brain`, which made one bridge's package the host of
  * the console's authorization rules (§2.9). Re-exported here because the route
- * handlers below and their callers in server.ts already name them, and because
- * a reader looking for "what may this credential see" should find the answer
- * at the door as well as at the rule.
+ * handlers below and their callers in server.ts already name them.
  *
- * `canSee` is the ONE predicate any surface uses to decide whether a path may
- * be shown; `filterHits`/`filterPages` are it applied to a list.
+ * `canSee` is the predicate a LIST is filtered with (`filterHits`,
+ * `filterPages`); a REFUSAL is `may()`'s, so the sentence this door gives is
+ * written once, beside every other refusal, rather than here (P1).
  */
 export { NO_SCOPE, OWNER_SCOPE, canSee, filterHits, filterPages, grantedScope, type KnowledgeScope } from "@foldedspacelabs/metistry-core";
 import { VaultError, type VaultClient } from "@foldedspacelabs/metistry-artifacts";
@@ -122,36 +121,6 @@ const CODES: ReadonlySet<string> = new Set(["unauthenticated", "forbidden", "not
 function codeOf(j: { error?: { code?: string } } | null, _status: number): ErrorCode {
   const code = j?.error?.code;
   return code && CODES.has(code) ? (code as ErrorCode) : "not_available";
-}
-
-const ARTIFACTS_ROOT = INSTANCE_LAYOUT.artifactsDir;
-
-/** The refusal every knowledge door gives for a path that is not vault content. Shared so the two routes cannot drift. */
-const NOT_KNOWLEDGE =
-  "no such page — a path must be vault CONTENT: not .metistry/, not Artifacts/, not the root CLAUDE.md, no leading slash and no traversal (docs/ops/instance-layout.md)";
-
-/**
- * What to say when `canSee` was false.
- *
- * For an agent it is always the same sentence: refused and absent must not be
- * distinguishable, or the route is an oracle for what exists where the caller
- * cannot look.
- *
- * For the OWNER (`areas: null` — their own vault) there is no oracle to
- * protect, and one case deserves a better answer than "no such page": the
- * owner asking for one of their own `Artifacts/`. They have access to
- * everything in their directory (ruled 2026-09-19 D) — artifacts included —
- * it is simply not THIS door. This one serves the knowledge index, which no
- * indexer has ever walked `Artifacts/` into; the artifacts service is the
- * door that has the bytes, with the content types and the no-store rules
- * decision #14 put on them. So the owner gets pointed at it rather than told
- * their file does not exist.
- */
-function notKnowledgeMessage(path: string, scope: KnowledgeScope): string {
-  const ownersOwnArtifact = scope.areas === null && (path === ARTIFACTS_ROOT || path.startsWith(`${ARTIFACTS_ROOT}/`));
-  return ownersOwnArtifact
-    ? `Artifacts/ is yours but it is not knowledge — nothing indexes it, so this door has no page for it. Your artifacts are GET /api/artifacts (docs/ops/console-api.md); in the vault they are just files, on disk and in git.`
-    : NOT_KNOWLEDGE;
 }
 
 export interface KnowledgeDeps {
@@ -250,14 +219,14 @@ export async function knowledgeRoutes(
   if (key === "GET /api/knowledge/page") {
     const path = (url.searchParams.get("path") ?? "").trim();
     if (path === "") return sendError(res, "invalid_request", "path is required — a vault-relative path, e.g. Areas/Health/sleep.md");
-    // Refused and NOT FOUND are the same answer on purpose. A path outside
-    // the scope must not be distinguishable from a path that is not there,
-    // or the route is an oracle for what exists where the caller cannot
-    // look — and for the owner, who may look everywhere in their vault, the
-    // honest description of `.metistry/compute.yaml` is "not knowledge".
-    if (!canSee(path, scope)) {
+    // Refused and NOT FOUND are the same answer on purpose, and `may` is
+    // where that is written down: a path outside the scope must not be
+    // distinguishable from a path that is not there, or the route is an
+    // oracle for what exists where the caller cannot look.
+    const seen = may(scopeAsPrincipal(scope), "read", { kind: "knowledge", door: "console_page", path });
+    if (!seen.ok) {
       await audit("knowledge", "page", false, { refused: "out_of_scope" });
-      return sendError(res, "not_found", notKnowledgeMessage(path, scope));
+      return sendError(res, seen.code, seen.message);
     }
     if (!deps.vault) return sendError(res, "not_available", NOT_AVAILABLE);
 
@@ -338,9 +307,10 @@ export async function knowledgeRoutes(
     // this" must not be answerable for a page the caller cannot see, and the
     // honest description of `.metistry/compute.yaml` is still "not
     // knowledge", for the owner too.
-    if (!canSee(path, scope)) {
+    const seen = may(scopeAsPrincipal(scope), "read", { kind: "knowledge", door: "console_page", path });
+    if (!seen.ok) {
       await audit("knowledge", "links", false, { refused: "out_of_scope" });
-      return sendError(res, "not_found", notKnowledgeMessage(path, scope));
+      return sendError(res, seen.code, seen.message);
     }
     const limit = clampPages(url.searchParams.get("limit"));
     if (limit === undefined) return sendError(res, "invalid_request", `limit must be an integer between 1 and ${MAX_PAGES_LIMIT}`);

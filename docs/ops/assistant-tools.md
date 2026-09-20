@@ -101,6 +101,16 @@ click in the Agents panel goes through (`PUT /api/agents/:id/grants`,
 refusal that names its own remedy is what keeps a scoped agent from retrying
 the same path forever.
 
+**A crew you dispatch is held to its manifest's `uses` at the door.** Since
+2026-09-20 the console resolves a crew's tool groups from the manifest and
+`/mcp` refuses anything outside them — one `runs` row, the uniform
+`forbidden` envelope, before the tool body runs. Previously only the runner's
+own allowlist refused those calls, which meant a crew's toolset was a
+property of the process that ran it rather than of the tool
+([crews.md](crews.md)). Nothing changed for your own credential or for an
+external agent: neither carries an allowlist, and every refusal they can get
+is byte-identical to what it was.
+
 **Every refusal this surface can give is in one file.**
 `packages/core/test/access.golden.json` is the committed catalogue: one entry
 per door, with the error code, the machine-readable `reason`, the exact

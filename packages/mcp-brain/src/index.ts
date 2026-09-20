@@ -62,6 +62,8 @@ export {
   ownershipRefusal,
   frontmatterSource,
   FOLD_SOURCE,
+  USER_SOURCE,
+  BOOTSTRAP_EXEMPT_PATH,
   sha256Text,
   MAX_WRITE_BYTES,
   type KnowledgeWriter,

@@ -86,7 +86,26 @@ forbidden: owned by user; propose instead
 
 New notes are always allowed. `source` is stamped from the credential and can
 never be claimed in an argument, so "notes I wrote" is a fact, not an
-assertion. When the deployment's vault read path is unavailable the write is
+assertion — and ownership is judged from the note ALREADY ON DISK, never
+from the incoming `content`, so a write cannot forge frontmatter to claim a
+note it does not already own.
+
+**A note with no `source:` in its frontmatter at all is the user's,
+`USER_SOURCE`, not ownerless** (2026-09-19). That is exactly the shape of a
+note you wrote by hand — Obsidian, an editor, another device, never carries
+`source:` — and the original rule read its absence as "free to write",
+which meant the fold's assistant turn could read a hand-written note and
+re-emit it whole, unasked. The one exemption is `now.md` at the vault
+root, by exact name: the assistant is required to keep writing it every
+day (the morning brief, this routine's own "last fold" line), so an
+instance whose seed predates this fix is not locked out of the one note it
+cannot stop writing. `seed/vault/now.md` now ships with `source: assistant`
+so a fresh instance never needs the exemption; it exists only for an
+instance created before this change, and it stops mattering the moment
+`now.md` is stamped once (every markdown write stamps `source`/`updated`,
+so the very first write gives it real provenance).
+
+When the deployment's vault read path is unavailable the write is
 refused rather than waved through. Protected paths (`.metistry/identity.yaml`,
 `.metistry/rules.yaml`, `.metistry/queries/`, `.metistry/agents/`, `.metistry/routines/`, …) are still refused behind
 that, at the vault.

@@ -22,7 +22,7 @@ export interface WeeklyCtx extends RoutineCtx {
 
 const WINDOW_DAYS = 7;
 const MONTHLY_GATE_DAY = 7; // run falls on day 1..7 → add "last month"
-const AGENTS_MAX = 10; // D10 spirit: the busiest agents, then a count — never the roster
+const AGENTS_MAX = 10; // limit: fixed — D10 spirit: the busiest agents, then a count — never the roster
 
 const num = (x: unknown): number => Number(x ?? 0);
 const usd = (x: unknown): string => `${num(x).toFixed(2)} USD`;

@@ -45,8 +45,8 @@ export const THREAD = "fold";
 export const BRIEF_PREFIX = "🌙 evening fold";
 export const EVENING_HOUR = 18;
 export const FALLBACK_DAYS = 7;
-export const MAX_BRIEF_BYTES = 4096; // the brief is handles, not payloads
-export const PER_GROUP_LIMIT = 25; // before the size cap trims further
+export const MAX_BRIEF_BYTES = 4096; // limit: fixed — the brief is handles, not payloads (docs/ops/knowledge-fold.md); the assistant fetches content itself
+export const PER_GROUP_LIMIT = 25; // limit: fixed — a per-group query bound; MAX_BRIEF_BYTES trims further if every group's 25 is still too much
 
 export type Group = "proposals" | "work" | "artifacts" | "sessions";
 

@@ -64,9 +64,9 @@ export const COMPONENT = "devin-knowledge";
 /** The idempotency principal every capture from this collector carries. */
 export const PRINCIPAL = `collector:${COMPONENT}`;
 export const DEVIN_API = "https://api.devin.ai";
-const DEFAULT_MAX_ITEMS = 200;
+const DEFAULT_MAX_ITEMS = 200; // limit: fixed — the floor when ctx.devinMaxItems (METISTRY_DEVIN_MAX_ITEMS, apps/console/src/main.ts) names none
 const PAGE_SIZE = 100; // the endpoint's own default; max is 200
-const MAX_PAGES = 50; // a bounded walk: 5000 notes is far past any real base
+const MAX_PAGES = 50; // limit: fixed — a bounded walk: 5000 notes is far past any real base
 
 /** Thrown when Devin says 429. Caught by `run`, which stops without failing the run. */
 export class RateLimited extends Error {

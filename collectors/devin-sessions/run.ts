@@ -54,9 +54,9 @@ export const SOURCE_AGENT = "devin";
 /** `work.external_ref` prefix. The console writes it; this collector is the only reader. */
 export const REF_PREFIX = "devin:";
 /** How long a session may sit non-terminal before the owner is told. */
-export const DEFAULT_TIMEOUT_HOURS = 24;
-const MAX_SESSIONS = 25; // per pass; a dispatch backlog is drained over several ticks, not in one burst
-const MAX_ANSWER_BYTES = 64 * 1024; // a report body the queue can render
+export const DEFAULT_TIMEOUT_HOURS = 24; // limit: fixed — the floor when ctx.devinSessionTimeoutHours (METISTRY_DEVIN_SESSION_TIMEOUT_HOURS, apps/console/src/main.ts) names none
+const MAX_SESSIONS = 25; // limit: fixed — per pass; a dispatch backlog is drained over several ticks, not in one burst
+const MAX_ANSWER_BYTES = 64 * 1024; // limit: fixed — a report body the queue can render
 
 export function devinRef(sessionId: string): string {
   return `${REF_PREFIX}${sessionId}`;

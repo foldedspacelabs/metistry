@@ -34,7 +34,7 @@
 // drift.
 
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { filterHits, filterPages, may, scopeAsPrincipal, type ErrorCode, type KnowledgeScope } from "@foldedspacelabs/metistry-core";
+import { filterHits, filterPages, may, readableAreas, type ErrorCode, type KnowledgeScope, type Principal } from "@foldedspacelabs/metistry-core";
 import { KNOWLEDGE_LINKS_QUERY, KNOWLEDGE_PAGES_QUERY } from "@foldedspacelabs/metistry-mcp-brain";
 
 /**
@@ -51,7 +51,7 @@ import { KNOWLEDGE_LINKS_QUERY, KNOWLEDGE_PAGES_QUERY } from "@foldedspacelabs/m
 export { NO_SCOPE, OWNER_SCOPE, canSee, filterHits, filterPages, grantedScope, type KnowledgeScope } from "@foldedspacelabs/metistry-core";
 import { VaultError, type VaultClient } from "@foldedspacelabs/metistry-artifacts";
 import { QueryError, type QueryStore } from "@foldedspacelabs/metistry-queries";
-import { sendError, sendJson } from "./http-util.js";
+import { sendError, sendJson, sendRefusal } from "./http-util.js";
 
 export const KNOWLEDGE_MODES = ["keyword", "semantic", "hybrid"] as const;
 export type KnowledgeSearchMode = (typeof KNOWLEDGE_MODES)[number];
@@ -181,9 +181,16 @@ export async function knowledgeRoutes(
   key: string,
   url: URL,
   deps: KnowledgeDeps,
-  scope: KnowledgeScope,
+  principal: Principal,
   audit: Audit,
 ): Promise<void> {
+  // Two different questions off one principal, and keeping them apart is the
+  // point. `scope` is what a LIST may show — the areas whose CONTENT this
+  // credential may read, `null` for the owner — and it filters rows. `may()`
+  // is what a single path gets, and since P4 the owner's answer there is
+  // never a narrower scope: it is `ok`, or a classification naming the door
+  // that has the bytes.
+  const scope: KnowledgeScope = { areas: readableAreas(principal.scope) };
   if (key === "GET /api/knowledge/search") {
     const q = (url.searchParams.get("q") ?? "").trim();
     if (q === "") return sendError(res, "invalid_request", "q is required — the text to search for");
@@ -223,10 +230,10 @@ export async function knowledgeRoutes(
     // where that is written down: a path outside the scope must not be
     // distinguishable from a path that is not there, or the route is an
     // oracle for what exists where the caller cannot look.
-    const seen = may(scopeAsPrincipal(scope), "read", { kind: "knowledge", door: "console_page", path });
+    const seen = may(principal, "read", { kind: "knowledge", door: "console_page", path });
     if (!seen.ok) {
-      await audit("knowledge", "page", false, { refused: "out_of_scope" });
-      return sendError(res, seen.code, seen.message);
+      await audit("knowledge", "page", false, { refused: seen.reason });
+      return sendRefusal(res, seen);
     }
     if (!deps.vault) return sendError(res, "not_available", NOT_AVAILABLE);
 
@@ -307,10 +314,10 @@ export async function knowledgeRoutes(
     // this" must not be answerable for a page the caller cannot see, and the
     // honest description of `.metistry/compute.yaml` is still "not
     // knowledge", for the owner too.
-    const seen = may(scopeAsPrincipal(scope), "read", { kind: "knowledge", door: "console_page", path });
+    const seen = may(principal, "read", { kind: "knowledge", door: "console_page", path });
     if (!seen.ok) {
-      await audit("knowledge", "links", false, { refused: "out_of_scope" });
-      return sendError(res, seen.code, seen.message);
+      await audit("knowledge", "links", false, { refused: seen.reason });
+      return sendRefusal(res, seen);
     }
     const limit = clampPages(url.searchParams.get("limit"));
     if (limit === undefined) return sendError(res, "invalid_request", `limit must be an integer between 1 and ${MAX_PAGES_LIMIT}`);

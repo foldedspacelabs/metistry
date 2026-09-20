@@ -456,7 +456,7 @@ describe("reader-less deployment", () => {
     ] as const) {
       const r = (await client.callTool({ name, arguments: args })) as { isError?: boolean; content: { text: string }[] };
       expect(r.isError, name).toBe(true);
-      expect(JSON.parse(r.content[0]!.text).error, name).toEqual({ code: "forbidden", message: "not granted" });
+      expect(JSON.parse(r.content[0]!.text).error, name).toEqual({ code: "forbidden", message: expect.stringMatching(/^not granted/) });
     }
     await client.close();
   });
@@ -477,7 +477,7 @@ describe("reader-less deployment", () => {
     await client.connect(new StreamableHTTPClientTransport(new URL(base), { requestInit: { headers: { authorization: "Bearer ok" } } }));
     const r = (await client.callTool({ name: "queries_list", arguments: {} })) as { isError?: boolean; content: { text: string }[] };
     expect(r.isError).toBe(true);
-    expect(JSON.parse(r.content[0]!.text).error).toEqual({ code: "forbidden", message: "not granted" });
+    expect(JSON.parse(r.content[0]!.text).error).toEqual({ code: "forbidden", message: expect.stringMatching(/^not granted/) });
     await client.close();
   });
 

@@ -145,7 +145,7 @@ describe.skipIf(!hasDb)("crews (integration)", () => {
 
   it("agents_delegate: an external agent is told not granted; the assistant's brief outside scope is refused with violations and NO work row", async () => {
     const ext = await call("agents_delegate", { crew: crewA, brief: "read Projects/X.md" }, externalToken);
-    expect(ext).toEqual({ isError: true, body: { error: { code: "forbidden", message: "not granted" } } });
+    expect(ext).toEqual({ isError: true, body: { error: { code: "forbidden", message: expect.stringMatching(/^not granted — `agents_delegate` belongs to the instance assistant alone/) } } });
 
     const bad = await call("agents_delegate", { crew: crewA, brief: "Compare Projects/X.md with Me/profile.md" }, assistantToken);
     expect(bad.isError).toBe(true);

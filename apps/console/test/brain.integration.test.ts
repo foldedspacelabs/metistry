@@ -101,7 +101,7 @@ describe.skipIf(!hasDb)("POST /mcp (integration)", () => {
     const ks = await rpc("tools/call", { name: "knowledge_search", arguments: { query: "anything" } }, auth);
     const kr = (await ks.json()).result;
     expect(kr.isError).toBe(true);
-    expect(JSON.parse(kr.content[0].text.split("\n")[0])).toEqual({ error: { code: "forbidden", message: "not granted" } });
+    expect(JSON.parse(kr.content[0].text.split("\n")[0])).toEqual({ error: { code: "forbidden", message: expect.stringMatching(/^not granted/) } });
   });
 
   it("the agent surface is otherwise unchanged: the same token still captures over HTTP and is 403 on management", async () => {

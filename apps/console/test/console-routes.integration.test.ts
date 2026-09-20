@@ -436,23 +436,33 @@ describe.skipIf(!hasDb)("the console's compute, knowledge, commands and run-deta
 
   // The reconciler's /vault/read serves these happily with the console's own
   // bearer. This route is the reason the app cannot ask it to.
-  it("page refuses .metistry/, Artifacts/, the root CLAUDE.md and traversal — as NOT FOUND, so it is not an oracle", async () => {
-    for (const path of [
-      ".metistry/compute.yaml",
-      ".metistry/state/.env",
-      "Artifacts/report.pdf",
-      "CLAUDE.md",
-      "../../../etc/passwd",
-      "Areas/../../etc/passwd",
-      "/etc/passwd",
-      ".obsidian/workspace.json",
-    ]) {
+  it("page classifies .metistry/, Artifacts/, the root CLAUDE.md and traversal for the owner — the door that has it, never a refusal", async () => {
+    // These are all the OWNER's own paths (the session cookie above), and
+    // since P4 none of them is a permission refusal: the door classifies
+    // what it was handed and names the door that has it. Not one byte of
+    // any of them crosses — `.metistry/state/.env` least of all.
+    for (const [path, cls, door] of [
+      [".metistry/compute.yaml", "machinery", "the file itself"],
+      [".metistry/state/.env", "machinery", "the file itself"],
+      ["Artifacts/report.pdf", "an artifact", "GET /api/artifacts"],
+      ["CLAUDE.md", "machinery", "the file itself"],
+      ["../../../etc/passwd", "outside the vault", null],
+      ["Areas/../../etc/passwd", "outside the vault", null],
+      ["/etc/passwd", "outside the vault", null],
+      [".obsidian/workspace.json", "machinery", "the file itself"],
+    ] as const) {
       const r = await get(`/api/knowledge/page?path=${encodeURIComponent(path)}`);
-      expect(r.status, path).toBe(404);
-      expect((await r.json()).error.code, path).toBe("not_found");
+      expect(r.status, path).toBe(400);
+      const body = await r.json();
+      expect(body.error.code, path).toBe("invalid_request");
+      expect(body.error.message, path).toContain(`is ${cls}, not knowledge`);
+      expect(body.reason, path).toBe("not_knowledge");
+      expect(body.needs?.door ?? null, path).toBe(door);
+      expect(JSON.stringify(body), path).not.toContain("content");
     }
-    // …and a page that genuinely is not there answers with the same code, so
-    // "refused" and "absent" are indistinguishable from outside.
+    // …and a page that genuinely is not there is still a 404: the
+    // classification answer is about a path this door does not SERVE, never
+    // about one it simply has not got.
     expect((await get("/api/knowledge/page?path=Areas/Health/nope.md")).status).toBe(404);
     expect((await get("/api/knowledge/page")).status).toBe(400); // a MISSING param is the caller's mistake, and says so
   });
@@ -523,23 +533,31 @@ describe.skipIf(!hasDb)("the console's compute, knowledge, commands and run-deta
   // generic door answers it with the refusal it gives a name it has never
   // heard of — over a real socket, with the seed manifests actually loaded,
   // which is the combination a unit test cannot pin.
-  it("the generic door does not serve the page list, and cannot be told apart from one that has never heard of it", async () => {
-    const closed = await get("/api/q/knowledge_pages");
+  it("serves the page list to the OWNER at the generic door, and still hides it from everyone else", async () => {
+    // P4. The rule `expose: route` protects is a filter on what an AGENT
+    // may see of the vault; the owner's scope IS the whole vault, so the two
+    // doors return the same rows to them and the refusal was only ever a
+    // second door to remember (§2.6). `get` carries the session cookie.
+    const served = await get("/api/q/knowledge_pages");
+    expect(served.status).toBe(200);
+    expect(Array.isArray((await served.json()).rows)).toBe(true);
+    expect((await get(`/api/q/knowledge_pages?prefix=Areas/${pageTag}&limit=10`)).status).toBe(200);
+    // …and an unknown name is still a 404 for the owner too: being served
+    // every query this door has is not being served one it has not.
     const unknown = await get("/api/q/no_such_query_at_all");
-    expect(closed.status).toBe(404);
     expect(unknown.status).toBe(404);
-    const [a, b] = [await closed.json(), await unknown.json()];
-    expect(a).toEqual(b);
+    expect(await unknown.json()).toEqual({ error: { code: "not_found", message: "not found" } });
+
+    // **The capture owner token is NOT the owner** — the plan's tier 0, the
+    // credential the management gate keeps off `/api/knowledge/*` — and for
+    // it the door is unchanged, byte for byte: the unknown-query refusal, so
+    // it is not an oracle for which route-only queries this build has.
+    const closed = await get("/api/q/knowledge_pages", { authorization: `Bearer ${ownerToken}` });
+    expect(closed.status).toBe(404);
+    const a = await closed.json();
+    expect(a).toEqual(await (await get("/api/q/no_such_query_at_all", { authorization: `Bearer ${ownerToken}` })).json());
     expect(a).toEqual({ error: { code: "not_found", message: "not found" } });
-    // Not a 403, not a hint, and not a way to learn the index exists: the
-    // fixtures are reachable through the scoped route and nowhere else.
-    expect((await get(`/api/q/knowledge_pages?prefix=Areas/${pageTag}&limit=10`)).status).toBe(404);
     expect(JSON.stringify(a)).not.toContain(pageTag);
-    // Including for the capture owner token, which the management gate keeps
-    // off `/api/knowledge/*` but which the generic door has always admitted:
-    // before this, that credential could read the whole unscoped index by
-    // name, from any address, while being 403 on the scoped route.
-    expect((await get("/api/q/knowledge_pages", { authorization: `Bearer ${ownerToken}` })).status).toBe(404);
     expect((await get("/api/q/open_work?limit=1", { authorization: `Bearer ${ownerToken}` })).status).toBe(200); // that credential's reach here is unchanged, and stated in docs/ops/console-api.md
     // …while the generic door is untouched for every query that has no route
     // of its own — closing one door is not closing the corridor.
@@ -599,18 +617,18 @@ describe.skipIf(!hasDb)("the console's compute, knowledge, commands and run-deta
     const second = await (await get(`/api/knowledge/links?path=Areas/${pageTag}/sleep.md&limit=1&offset=1`)).json();
     expect(first.links.map((l: any) => l.path)).toEqual([`Areas/${pageTag}/2026/taper.md`]);
     expect(second.links.map((l: any) => [l.path, l.kind])).toEqual([[`Areas/${pageTag}/2026/taper.md`, "wikilink"]]);
-    expect((await get("/api/q/knowledge_page_links")).status).toBe(404);
-    expect(await (await get("/api/q/knowledge_page_links")).json()).toEqual(await (await get("/api/q/no_such_query_at_all")).json());
+    // …served to the owner at the generic door since P4, and to nobody else.
+    expect((await get("/api/q/knowledge_page_links")).status).toBe(200);
   });
 
-  it("links refuses a path that is not knowledge with the words a missing page gets, and names a missing path", async () => {
-    // The owner may open `.metistry/compute.yaml` in a text editor; the
-    // honest answer on the KNOWLEDGE route is still "no such page", and it
-    // has to be the same answer an absent page gets.
+  it("links classifies a path that is not knowledge, and treats a missing path as having no links", async () => {
+    // The owner may open `.metistry/compute.yaml` in a text editor, and the
+    // honest answer on the KNOWLEDGE route is that it is machinery — this
+    // door has no page for it — rather than a 404 implying it is not there.
     const machinery = await get(`/api/knowledge/links?path=.metistry/${pageTag}.yaml`);
     const absent = await get(`/api/knowledge/links?path=Areas/${pageTag}/no-such-note.md`);
-    expect(machinery.status).toBe(404);
-    expect((await machinery.json()).error.message).toContain("no such page");
+    expect(machinery.status).toBe(400);
+    expect((await machinery.json()).error.message).toContain("is machinery, not knowledge");
     // An absent page is not an error at all — it simply has no links, which
     // is what "refused and absent are indistinguishable" costs and is worth.
     expect(absent.status).toBe(200);
@@ -777,11 +795,12 @@ describe.skipIf(!hasDb)("degrades absent: nothing configured, and every route sa
     }
   });
 
-  // A path refusal is decided before the bridge is consulted, so a
-  // deployment with no vault still refuses `.metistry/` as not-knowledge
-  // rather than admitting it might have served it.
-  it("still refuses a non-knowledge path with 404 rather than 503 — the gate is not a function of the wiring", async () => {
+  // The classification is decided before the bridge is consulted, so a
+  // deployment with no vault still answers `.metistry/` with "that is
+  // machinery" rather than a 503 admitting it might have served it.
+  it("still classifies a non-knowledge path rather than 503ing — the answer is not a function of the wiring", async () => {
     const r = await fetch(`${base}/api/knowledge/page?path=.metistry/compute.yaml`, { headers: { cookie } });
-    expect(r.status).toBe(404);
+    expect(r.status).toBe(400);
+    expect((await r.json()).reason).toBe("not_knowledge");
   });
 });

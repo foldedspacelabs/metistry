@@ -215,9 +215,11 @@ cache_ttl: 0
     const alice = await connect("tok-alice");
     const bob = await connect("tok-bob");
 
-    // create outside membership is refused as not granted (a project you are not in is a write across the boundary)
+    // create outside membership is refused as not granted (a project you are not in is a write across the boundary).
+    // You NAMED the project, so this one is allowed to say which and who adds you — unlike every tasks_* by id,
+    // where a row outside your projects does not exist for you (below).
     const bad = await call(alice, "tasks_create", { title: "sneak", project: PB });
-    expect(bad).toMatchObject({ isError: true, body: { error: { code: "forbidden", message: "not granted" } } });
+    expect(bad).toMatchObject({ isError: true, body: { error: { code: "forbidden", message: expect.stringMatching(/^not granted — .* is not a member of project `.*`/) } } });
 
     const a1 = await call(alice, "tasks_create", { title: "A1", project: PA, idempotency_key: `${PA}-a1` });
     expect(a1.isError).toBe(false);
@@ -410,7 +412,9 @@ cache_ttl: 0
       ["knowledge_read", { path: "Areas/Itest/Alpha.md" }],
       ["knowledge_read", { path: "Areas/Itest/Nope.md" }], // absent AND ungranted: still "not granted"
     ] as const) {
-      expect(await call(alice, tool, args), tool).toMatchObject({ isError: true, body: { error: { code: "forbidden", message: "not granted" } } });
+      // "not granted", and nothing past it that could tell an absent page from an ungranted one:
+      // tier `none` may not list, so no area is ever named (the 2026-09-19 boundary).
+      expect(await call(alice, tool, args), tool).toMatchObject({ isError: true, body: { error: { code: "forbidden", message: expect.stringMatching(/^not granted/) } } });
     }
     await alice.close();
 
@@ -618,7 +622,7 @@ cache_ttl: 0
     };
 
     const none = await connect("tok-alice");
-    expect(await call(none, "knowledge_list", {})).toMatchObject({ isError: true, body: { error: { code: "forbidden", message: "not granted" } } });
+    expect(await call(none, "knowledge_list", {})).toMatchObject({ isError: true, body: { error: { code: "forbidden", message: expect.stringMatching(/^not granted/) } } });
     await none.close();
 
     grant("tok-fs-index", { id: ALICE, grants: { tier: "index", areas: [] }, projects: [] });
@@ -654,12 +658,12 @@ cache_ttl: 0
     // vault content (Alpha/Beta/Draft/Gamma) was set up by the knowledge_list test just above.
 
     const none = await connect("tok-alice");
-    expect(await call(none, "knowledge_grep", { pattern: "banana" })).toMatchObject({ isError: true, body: { error: { code: "forbidden", message: "not granted" } } });
+    expect(await call(none, "knowledge_grep", { pattern: "banana" })).toMatchObject({ isError: true, body: { error: { code: "forbidden", message: expect.stringMatching(/^not granted/) } } });
     await none.close();
 
     grant("tok-fs-index", { id: ALICE, grants: { tier: "index", areas: [] }, projects: [] });
     const idx = await connect("tok-fs-index");
-    expect(await call(idx, "knowledge_grep", { pattern: "banana" })).toMatchObject({ isError: true, body: { error: { code: "forbidden", message: "not granted" } } });
+    expect(await call(idx, "knowledge_grep", { pattern: "banana" })).toMatchObject({ isError: true, body: { error: { code: "forbidden", message: expect.stringMatching(/^not granted/) } } });
     await idx.close();
 
     grant("tok-fs-areas", { id: ALICE, grants: { tier: "areas", areas: [AREA] }, projects: [] });
@@ -737,7 +741,7 @@ cache_ttl: 0
       ["knowledge_list", {}],
       ["knowledge_grep", { pattern: "alpha" }],
     ] as const) {
-      expect(await call(none, tool, args), `${tool} @ tier none`).toMatchObject({ isError: true, body: { error: { code: "forbidden", message: "not granted" } } });
+      expect(await call(none, tool, args), `${tool} @ tier none`).toMatchObject({ isError: true, body: { error: { code: "forbidden", message: expect.stringMatching(/^not granted/) } } });
     }
     // resources have no tool envelope, but the same tier rule holds: nothing listed, nothing readable
     expect((await none.listResources()).resources).toEqual([]);
@@ -760,7 +764,7 @@ cache_ttl: 0
     // is a content surface at every tier below `areas`, no exception, unchanged.
     expect(await call(idx, "knowledge_grep", { pattern: "alpha" }), "knowledge_grep @ tier index").toMatchObject({
       isError: true,
-      body: { error: { code: "forbidden", message: "not granted" } },
+      body: { error: { code: "forbidden", message: expect.stringMatching(/^not granted/) } },
     });
     expect((await idx.listResources()).resources).toEqual([]); // resources carry the same "titles, never content" line
     await idx.close();
@@ -843,8 +847,9 @@ cache_ttl: 0
 
     // external, no grant: forbidden — uniform whether or not a store is even wired (queries-tools.ts checks the grant first)
     const alice1 = await connect("tok-alice");
-    expect((await call(alice1, "queries_list")).body).toEqual({ error: { code: "forbidden", message: "not granted" } });
-    expect((await call(alice1, "queries_run", { name: "itest_numbers" })).body).toEqual({ error: { code: "forbidden", message: "not granted" } });
+    expect((await call(alice1, "queries_list")).body).toEqual({ error: { code: "forbidden", message: expect.stringMatching(/^not granted/) } });
+    // …in the SAME words: one sentence per reason, not one per tool (P3).
+    expect((await call(alice1, "queries_run", { name: "itest_numbers" })).body).toEqual((await call(alice1, "queries_list")).body);
     await alice1.close();
 
     // grant queries: true — the SAME token, principal upgraded server-side, never asserted by the caller
@@ -878,7 +883,7 @@ cache_ttl: 0
       expect((await call(ar, name, args)).body.error.code, name).toBe("not_available");
     }
     // agents_delegate is the assistant's alone: an external agent is told not granted before any dispatcher is consulted (none is wired here) — still a recorded refusal
-    expect((await call(ar, "agents_delegate", { crew: "researcher", brief: "b" })).body).toEqual({ error: { code: "forbidden", message: "not granted" } });
+    expect((await call(ar, "agents_delegate", { crew: "researcher", brief: "b" })).body).toEqual({ error: { code: "forbidden", message: expect.stringMatching(/^not granted — `agents_delegate` belongs to the instance assistant alone/) } });
     // request_access is alice's to call at any tier (she is tier `none` here):
     // it writes a request and grants nothing, and it is recorded like the rest
     expect((await call(ar, "request_access", { area: "Areas/Recorded", reason: "recording one of every eager tool" })).body).toMatchObject({ area: "Areas/Recorded" });

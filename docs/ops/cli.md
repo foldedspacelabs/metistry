@@ -24,6 +24,7 @@ All of them are real.
 | `migrate-layout [--dry-run] [--json] [--allow-dirty]` | carry an instance from the legacy layout to the flat one: the directory becomes the vault, the machinery moves under `.metistry/`, stored paths lose `Knowledge/` |
 | `migrate-inbox [--dry-run]` | move a pre-#156 `inbox/` into the vault inbox and rewrite `inbox.path` |
 | `migrate-shape <launchd\|compose>` | move a LIVE install between the shapes, with its data: dump, stop, flip, up, restore, verify, doctor |
+| `templates check [<file>]` | does the vault's `Templates/` read — every directive, with the line number Obsidian shows — before the next run reads it (a template change takes effect at the next run) |
 | `doctor` | validate every manifest and probe every bridge, service, container, launchd job |
 | `up` | bring an install to running: containers/host jobs, then doctor — and exit |
 | `down` | stop every host job and container for this instance, then confirm nothing is left running |

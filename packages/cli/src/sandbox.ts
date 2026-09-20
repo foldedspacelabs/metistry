@@ -13,7 +13,7 @@
 // process (docs/product/desktop-app-plan.md): same deny-default posture, a
 // supported API, and outbound filtering by host name rather than by port.
 
-import { realpathSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { instanceStatePath, overlayFiles, SEED_DIR } from "@foldedspacelabs/metistry-core";
 import type { Compute, InstancePathKey } from "@foldedspacelabs/metistry-core";
@@ -159,6 +159,13 @@ export interface SandboxInputs {
    * startup with `EPERM connect 127.0.0.1:<port>` (2026-09-10 trial).
    */
   dbPort: number;
+  /**
+   * The supervisor's egress proxy. The profile's third outbound rule used to
+   * be `*:443` with a note saying the host list was documentation; it is now
+   * this one loopback port, and the proxy behind it is where the host names
+   * are actually enforced (packages/core/src/egress.ts).
+   */
+  proxyPort: number;
   tmpDir: string;
   realpath?: ((p: string) => string) | undefined;
 }
@@ -172,6 +179,7 @@ export interface SandboxParams {
   TMP_DIR: string;
   CONSOLE_TCP: string;
   DB_TCP: string;
+  PROXY_TCP: string;
   CONFIG_IDENTITY: string;
   CONFIG_ASSISTANT_PROMPT: string;
   CONFIG_RULES: string;
@@ -188,6 +196,7 @@ export function sandboxParams(inputs: SandboxInputs): SandboxParams {
     TMP_DIR: real(inputs.tmpDir.replace(/\/$/, "")),
     CONSOLE_TCP: `localhost:${inputs.consolePort}`,
     DB_TCP: `localhost:${inputs.dbPort}`,
+    PROXY_TCP: `localhost:${inputs.proxyPort}`,
     ...(engineConfigParams({ ...(inputs.instanceDir ? { instanceDir: inputs.instanceDir } : {}), productDir: inputs.productDir, ...(inputs.realpath ? { realpath: inputs.realpath } : {}) }) as {
       CONFIG_IDENTITY: string;
       CONFIG_ASSISTANT_PROMPT: string;
@@ -214,4 +223,141 @@ export function assistantStateDir(opts: { instanceDir?: string | undefined; prod
 /** The per-user temporary directory, without a trailing slash (macOS `TMPDIR` has one). */
 export function tmpDirOf(env: NodeJS.ProcessEnv): string {
   return (env.TMPDIR || "/tmp").replace(/\/+$/, "");
+}
+
+// ---- the reconciler -----------------------------------------------------------
+//
+// The second child to get a profile, and the one the research
+// (docs/research/2026-09-19-agent-virtual-filesystems.md §3.2(c)) argued
+// matters most: the sole committer (D5) holds the vault's working tree, runs
+// git, and had ambient authority over the whole disk. Everything below is
+// the same machinery as the engine's — `realPathish`, `nodePrefixFor`, an
+// argv array, never a shell string — pointed at a different shape.
+
+export const RECONCILER_SANDBOX_PROFILE_REL = "ops/sandbox/reconciler.sb";
+/** The visible off switch (ops/sandbox/unconfined.sb) — `METISTRY_RECONCILER_SANDBOX=0`. */
+export const UNCONFINED_PROFILE_REL = "ops/sandbox/unconfined.sb";
+
+/** `0` (or `false`/`off`/`no`) runs the reconciler under `unconfined.sb`; anything else, including unset, confines it. */
+export function reconcilerConfined(env: NodeJS.ProcessEnv): boolean {
+  const v = (env.METISTRY_RECONCILER_SANDBOX ?? "").trim().toLowerCase();
+  return !(v === "0" || v === "false" || v === "off" || v === "no");
+}
+
+export function reconcilerSandboxProfilePath(productDir: string, confined = true): string {
+  return join(productDir, confined ? RECONCILER_SANDBOX_PROFILE_REL : UNCONFINED_PROFILE_REL);
+}
+
+/**
+ * `/usr/bin/git` is NOT a git.
+ *
+ * Measured on macOS 26.4, 2026-09-19: `otool -L /usr/bin/git` shows
+ * `/usr/lib/libxcselect.dylib` — it is the xcode-select shim, and it execs
+ * the real git out of the active developer directory. Under a profile that
+ * grants exactly that literal it dies with
+ * `xcrun: error: unable to load libxcrun (… file system sandbox blocked
+ * open())`. The research doc guessed the opposite ("a real universal Mach-O
+ * … one literal may be the whole answer"); it is a Mach-O, and it is still a
+ * shim. Every path under `/usr/bin` gets the same treatment, because that is
+ * where Apple puts shims.
+ */
+export function isXcodeGitShim(gitBin: string): boolean {
+  return gitBin === "/usr/bin/git" || gitBin.startsWith("/usr/bin/");
+}
+
+/** The Command Line Tools' git — a REAL git (`share/git-core` templates and all), present on any Mac with the CLT installed. */
+export const CLT_GIT = "/Library/Developer/CommandLineTools/usr/bin/git";
+
+/**
+ * The git the confined reconciler will run, resolved by absolute path: the
+ * bundled runtime's first (that is what the deps pack ships it for), then
+ * PATH minus the shim, then the Command Line Tools.
+ *
+ * `undefined` means this Mac has no git the profile can name — on which
+ * `up` declines to confine the job and says why, rather than installing a
+ * reconciler that cannot commit.
+ */
+export function resolveGitBin(opts: { productDir: string; path?: string | undefined; exists?: ((p: string) => boolean) | undefined }): string | undefined {
+  const exists = opts.exists ?? existsSync;
+  const bundled = join(opts.productDir, "runtime", "git", "bin", "git");
+  if (exists(bundled)) return bundled;
+  for (const dir of (opts.path ?? "").split(":").filter(Boolean)) {
+    const candidate = join(dir, "git");
+    if (!isXcodeGitShim(candidate) && exists(candidate)) return candidate;
+  }
+  return exists(CLT_GIT) ? CLT_GIT : undefined;
+}
+
+/**
+ * The installation prefix the profile grants read + exec on: `bin/git`,
+ * `libexec/git-core/` (172 helper binaries, `git-remote-https` among them)
+ * and `share/git-core/templates`. Two levels up from the binary — except a
+ * Homebrew git, which links against sibling formulae, so the self-contained
+ * root is the brew prefix. The same rule `nodePrefixFor` applies, for the
+ * same reason.
+ */
+export function gitPrefixFor(gitBin: string, realpath: (p: string) => string = realpathSync): string {
+  return nodePrefixFor(gitBin, realpath);
+}
+
+export interface ReconcilerSandboxInputs {
+  productDir: string;
+  nodeBin: string;
+  /** the instance repo: the vault, `.metistry/` and `.git/` — the one writable tree */
+  instanceDir: string;
+  /** an absolute path to a REAL git (`resolveGitBin`) */
+  gitBin: string;
+  /** `$HOME/.gitconfig`; granted by name because git treats an unreadable one as FATAL, not absent */
+  gitConfigGlobal: string;
+  reconcilerPort: number;
+  consolePort: number;
+  dbPort: number;
+  /** the on-machine embedding server's loopback port */
+  embedPort: number;
+  /** the supervisor's egress proxy — the only route off this machine */
+  proxyPort: number;
+  tmpDir: string;
+  realpath?: ((p: string) => string) | undefined;
+}
+
+/** Exactly the `-D` parameters ops/sandbox/reconciler.sb declares. */
+export interface ReconcilerSandboxParams {
+  NODE_BIN: string;
+  NODE_PREFIX: string;
+  PRODUCT_DIR: string;
+  INSTANCE_DIR: string;
+  TMP_DIR: string;
+  GIT_PREFIX: string;
+  GIT_CONFIG_GLOBAL: string;
+  RECONCILER_TCP: string;
+  CONSOLE_TCP: string;
+  DB_TCP: string;
+  EMBED_TCP: string;
+  PROXY_TCP: string;
+}
+
+export function reconcilerSandboxParams(inputs: ReconcilerSandboxInputs): ReconcilerSandboxParams {
+  const real = (p: string) => realPathish(p, inputs.realpath);
+  return {
+    NODE_BIN: inputs.nodeBin,
+    NODE_PREFIX: nodePrefixFor(inputs.nodeBin, inputs.realpath),
+    PRODUCT_DIR: real(inputs.productDir),
+    INSTANCE_DIR: real(inputs.instanceDir),
+    TMP_DIR: real(inputs.tmpDir.replace(/\/$/, "")),
+    GIT_PREFIX: gitPrefixFor(inputs.gitBin, inputs.realpath),
+    // granted whether or not it exists yet: a rule for a missing path matches
+    // nothing, and an owner who writes their first ~/.gitconfig next week
+    // must not need a re-`up` for the job to keep running
+    GIT_CONFIG_GLOBAL: real(inputs.gitConfigGlobal),
+    RECONCILER_TCP: `localhost:${inputs.reconcilerPort}`,
+    CONSOLE_TCP: `localhost:${inputs.consolePort}`,
+    DB_TCP: `localhost:${inputs.dbPort}`,
+    EMBED_TCP: `localhost:${inputs.embedPort}`,
+    PROXY_TCP: `localhost:${inputs.proxyPort}`,
+  };
+}
+
+/** `$HOME/.gitconfig` — the file the profile grants by name. */
+export function globalGitConfigPath(home: string): string {
+  return join(home, ".gitconfig");
 }

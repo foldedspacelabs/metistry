@@ -1,5 +1,5 @@
 // GENERATED — do not edit.
-// Source: docs/product/design/tokens.json (v2.2.0, 2026-09-19)
+// Source: docs/product/design/tokens.json (v2.3.0, 2026-09-19)
 // Rebuild: node ops/scripts/build-design-tokens.mjs   (--check fails on drift)
 //
 // The design system's semantic roles, for SwiftUI. No token names a hue, a
@@ -138,7 +138,7 @@ public extension MetistryColorRole {
         case .elevated: return "menus, popovers, sheets, the command palette"
         case .sunken: return "code blocks, wells, inset scroll regions"
         case .border: return "separators between rows and around inputs"
-        case .borderStrong: return "focused input, selected row outline, table rules"
+        case .borderStrong: return "focused input, selected row outline, table rules. A boundary against bg, surface, elevated and sunken only — never against a *-quiet tint, where it falls to ~1.4:1 and fails 1.4.11. A control on a tinted band identifies itself by its label instead."
         case .textPrimary: return "body copy, titles, values"
         case .textSecondary: return "metadata that must still be read: timestamps, counts, actor ids"
         case .textTertiary: return "placeholders and de-emphasised hints; never the only carrier of meaning, and never on a tinted fill — only on bg, surface or elevated"

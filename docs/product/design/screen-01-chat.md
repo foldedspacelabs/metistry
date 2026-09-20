@@ -159,7 +159,7 @@ without the third-of-a-paragraph cost of a blank line, and inline `mono` at
 
 | State | Rendering |
 | --- | --- |
-| working | the attribution's second slot reads **`working`** — a word, never a spinner — and the tool strip shows a rising count. Nothing pulses |
+| working | four moments, §5.1 |
 | finished | the relative time replaces it |
 | interrupted | `interrupted` in `failed`, the partial text left exactly where it stopped, and a `Continue` link. The text is never truncated with an ellipsis or removed |
 | new reply while scrolled up | appended silently; the pill appears; the viewport does not move, rows already on screen do not re-render, and the composer keeps focus (P9) |
@@ -168,9 +168,74 @@ without the third-of-a-paragraph cost of a blank line, and inline `mono` at
 **Tapbacks** are a right-click menu on the turn, not a control row under every
 reply (P8). Nothing about a tapback changes what the turn said.
 
-## 6.1 Two contrast faults this round found
+## 5.1 Waiting for a reply
 
-Both were invisible to CI because the pairs were never declared.
+The gap between pressing send and the first token is the one moment the screen
+cannot stay silent about, because a reader has no way to tell *working* from
+*broken* except by what the screen does next. A word alone cannot carry it: a
+word that never changes looks exactly like a word that is stuck.
+
+`ux-direction.md` says *"calm — the working state is a **word**, not a spinner,
+and nothing auto-scrolls, parallaxes, spins or pulses."* That rule is right
+about decoration and wrong about liveness. **Ruling asked for** — the narrowest
+amendment that keeps its intent:
+
+> Motion is allowed only where it carries information the reader cannot
+> otherwise get, and it stops the moment that information is available in
+> words.
+
+Which gives four moments, with the motion falling as the facts arrive:
+
+| When | What is on screen | What moves |
+| --- | --- | --- |
+| **0–2s**, nothing back yet | the turn appears at once, attributed and stamped; three 5px `agent` dots and the word `working`; `Stop` from the first frame | the dots, on a 1.45s opacity loop — the **only** looping animation in the product |
+| **tools running** | the dots give way to the strip: running tool name in mono, `· 2 tools · 6s` | the tool name, the count and the elapsed second — every frame a fact |
+| **prose streaming** | the text, the strip collapsed to one line, no dots | the caret at the end of the sentence, and the text itself |
+| **60s, nothing back** | `working · nothing back for 62s` on `degraded-quiet`, count still climbing | nothing but the count |
+
+The dots are three dots, not a spinner: nothing rotates, nothing pulses at the
+reader, and nothing implies progress it cannot measure. They exist only for the
+seconds when there is genuinely nothing to report, and they are gone the instant
+a tool name exists to print.
+
+**Reduced motion.** Under `prefers-reduced-motion: reduce` the dots hold at a
+flat 0.5 opacity and the caret stops blinking. The elapsed count carries the
+liveness on its own — a number is content, not motion — so that reader loses
+nothing. This is why the count is load-bearing and not decoration.
+
+**Two places outside the transcript.**
+
+- **Composer.** Send becomes stop for as long as the turn is in flight. The
+  field stays live: you can write the next message while it works. This also
+  answers *can I cancel*, which is the second thing you want to know when
+  something is slow.
+- **Sidebar.** One `agent` dot on `Chat` while a turn runs, so the state
+  survives walking away from it. This is **presence, not a badge** — it carries
+  no count, and Needs You keeps the only badge in the product (P2).
+
+**Never inferred.** At 60s we report what we know — nothing has come back in 62
+seconds — and never that it is stuck, hung or dead. `degraded`, not `failed`.
+A turn moves to `failed` only when the transport says so.
+
+### Data sources
+
+| Element | Source |
+| --- | --- |
+| the turn appearing on send | local; the optimistic turn is written before the request leaves |
+| running tool name, count, elapsed | the run's event stream, same feed as the finished strip |
+| the 60s threshold | client-side, from the timestamp of the last received event |
+| `Stop` | the run's cancel endpoint |
+
+**Open item.** No wire field carries *time since the last event* — the client
+derives it from the event stream, which is correct, but it means a turn whose
+stream is silently dropped shows `working` forever rather than reaching the 60s
+state. Either the stream needs a keepalive or the client needs a receive
+timeout; this is a protocol decision, logged rather than drawn.
+
+## 6.1 Faults this round found
+
+The first two were invisible to CI because the pairs were never declared. The
+third was not a colour fault at all.
 
 1. **`text-tertiary` on a tinted fill.** The selected menu row put
    `text-tertiary` on `accent-quiet` in dark mode: **4.06:1**, below AA. Rule
@@ -183,6 +248,32 @@ Both were invisible to CI because the pairs were never declared.
    colour: a selected row is marked by an **accent check glyph and accent
    text**, with the fill as reinforcement. Colour alone was carrying the state,
    which §2.1 forbids.
+
+3. **`border-strong` on a tinted band — the same fault a third time.** The
+   `Stop` button was drawn as a 1px `border-strong` outline on the
+   `agent-quiet` band: **1.50:1** light, **1.36:1** dark, against the 3:1 that
+   1.4.11 asks of a control boundary. The generalisation, now in the token's
+   role text: **`border-strong` is a boundary against `bg`, `surface`,
+   `elevated` and `sunken` only — never against a `*-quiet` tint.** `Stop` is
+   therefore a borderless text button: it identifies itself by its label
+   (6.12:1 light, 5.84:1 dark), takes a `surface` fill on hover and the focus
+   ring on keyboard focus. Same shape as fault 1 — a token used on a ground it
+   was never computed against — so this is a pattern, not three accidents.
+4. **123 broken `style` attributes across seven boards.** The monospace stack
+   `ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace`
+   was emitted inside a double-quoted `style` attribute, so every one of those
+   attributes terminated at the first inner quote and **the `color` declaration
+   after it was silently dropped**. Every monospaced run in the design therefore
+   rendered in the browser's default black. On the light boards that passes for
+   correct, which is why it survived four rounds; on dark it is black on
+   `#212831`, which is what the owner reported. The stack is now
+   `ui-monospace,SFMono-Regular,Menlo,Consolas,monospace` — no quoted family
+   names, so no quoting problem to get wrong. **`tokens.json` was already
+   right** — `type.$meta.mono` uses *single* quotes precisely so the stack can
+   sit inside a double-quoted attribute. The fault was a hand-written copy
+   drifting from it. **Lesson for the build:** nothing hand-writes a font
+   stack; `type.$meta.stack` and `type.$meta.mono` are the only two, and
+   `build-design-tokens.mjs` emits them.
 
 ## 6. Keyboard
 

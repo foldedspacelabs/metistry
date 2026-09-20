@@ -48,8 +48,20 @@ import {
   type Requirements,
 } from "@foldedspacelabs/metistry-core";
 import type { RegisteredCollector, Db, CollectorCtx } from "@metistry-apps/collectors";
+import type { PlanCtx } from "@metistry-apps/routines";
 
 export { scheduleToSeconds }; // one import path for the runner's callers and tests
+
+/**
+ * What the runner hands a component: every collector's ctx, plus what a
+ * ROUTINE needs and no collector does — the named-query store and the vault
+ * bridge, which `plan-tomorrow` renders tomorrow's plan out of
+ * (docs/product/daily-flow-spec.md §7). One type rather than one per caller,
+ * so `main.ts` composes the capabilities it already built for the server and
+ * hands them on; a component takes the fields it declares and ignores the
+ * rest.
+ */
+export type ComponentCtx = CollectorCtx & PlanCtx;
 
 export interface ScheduledCollector extends RegisteredCollector {
   intervalSec: number;
@@ -221,7 +233,7 @@ const clip = (s: string, n = 120): string => (s.length > n ? `${s.slice(0, n - 1
 // ---- the tick --------------------------------------------------------------
 
 /** Run every collector that's due (last finished run older than its interval). */
-export async function tick(db: Db, scheduled: ScheduledCollector[], ctx: CollectorCtx = {}, options: RunnerOptions = {}): Promise<void> {
+export async function tick(db: Db, scheduled: ScheduledCollector[], ctx: ComponentCtx = {}, options: RunnerOptions = {}): Promise<void> {
   const opts = resolve(options);
   const streaks: ComponentStreak[] = await failureStreaks(db);
 
@@ -295,7 +307,7 @@ export async function tick(db: Db, scheduled: ScheduledCollector[], ctx: Collect
 export function startRunner(
   db: Db,
   scheduled: ScheduledCollector[],
-  ctx: CollectorCtx = {},
+  ctx: ComponentCtx = {},
   everyMs = 60_000,
   options: RunnerOptions = {},
 ): NodeJS.Timeout {

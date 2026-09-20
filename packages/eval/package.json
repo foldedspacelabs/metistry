@@ -11,8 +11,6 @@
   },
   "dependencies": {
     "@foldedspacelabs/metistry-mcp-brain": "workspace:*",
-    "@foldedspacelabs/metistry-tasks": "workspace:*",
-    "@modelcontextprotocol/sdk": "^1.30.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {

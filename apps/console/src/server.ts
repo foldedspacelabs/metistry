@@ -1055,7 +1055,9 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     // to act sends it to `POST /api/proposals/:id` — this list is a view,
     // never a second door onto granting.
     if (key === "GET /api/agents") {
-      return sendJson(res, 200, { agents: await agents.listAgents(db), access_requests: await agents.pendingAccessRequests(db) });
+      // Each row carries its rendered `scope` (core's `describeScope`), so
+      // the panel prints the words it is given rather than inventing them.
+      return sendJson(res, 200, { agents: await agents.listAgents(db, (id) => cfg.crews?.toolset(id)), access_requests: await agents.pendingAccessRequests(db) });
     }
 
     if (key === "POST /api/agents") {

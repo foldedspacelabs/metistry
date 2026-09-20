@@ -42,7 +42,7 @@ import { realExec, type Exec } from "./exec.js";
 import { AUTH_MODES, connectRepo, readStdin, type AuthMode } from "./connect-repo.js";
 import { connect, connectList, CONNECT_TOOLS, parseTool, renderConnect, renderConnectList } from "./connect.js";
 import { consoleCall, renderConsoleCallError, renderWhoami, whoami } from "./console-client.js";
-import { agentAutonomy, parseAutonomyFlags, renderAutonomy } from "./agents.js";
+import { agentAutonomy, agentsList, parseAutonomyFlags, renderAgents, renderAutonomy } from "./agents.js";
 import { importSessions } from "./import-sessions.js";
 import { askKeepAwake, init, type Ask } from "./init.js";
 import { migrateInbox } from "./migrate-inbox.js";
@@ -364,6 +364,15 @@ const USAGE = `metistry — Metistry command line
       to stderr so stdout stays pipeable; --json-lines is the explicit spelling
       of the default and changes nothing.
 
+  metistry agents list [--json]
+      Every registered agent and what it holds: role, access, and the rest —
+      queries, projects, a crew's toolset, autonomy. The SAME words the
+      console's Agents panel and the Needs You card use, because the console
+      renders them and this prints what it is sent (one vocabulary, docs/ops/
+      auth.md). Read-only: a grant is the owner's hand, and the door that
+      widens one is the console's alone. An agent waiting on an answer shows
+      what it asked for and which request to answer.
+
   metistry agents autonomy <id> [--level observe|propose|act_within_scope]
                    [--allow <kind>] [--propose <kind>] [--deny <kind>] [--json]
       Show, or change, how much room one agent has with an action — dispatch,
@@ -655,6 +664,7 @@ export const HELP_GROUPS: Array<{ title: string; verbs: Array<[string, string]> 
       ["compute cache-report", "is prompt caching paying off — hit ratio per provider and model"],
       ["deployment [set-shape]", "the effective shape (D4 overlay) and its services"],
       ["deployment set-keep-awake", "whether this install holds the Mac awake, and on which power"],
+      ["agents list", "every registered agent and what it holds"],
       ["agents autonomy <id>", "how much room one agent has with an action"],
       ["identity", "identity.yaml — the one place the assistant is named"],
       ["templates check [<file>]", "does the vault's Templates/ read, before the next run reads it"],
@@ -1201,12 +1211,35 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
       }
     }
     case "agents": {
+      const common = () => {
+        const loaded = loadEnv();
+        return (async () => ({
+          ...(loaded.instanceDir ? { instanceId: await readInstanceId(loaded.instanceDir) } : {}),
+          ...(io.exec ? { exec: io.exec } : {}),
+          ...(io.platform ? { platform: io.platform } : {}),
+        }))();
+      };
+      // `list` is READ-ONLY, and deliberately renders nothing of its own: the
+      // console sends each row's scope already rendered (core's
+      // `describeScope`), so the CLI, the panel and the queue cannot drift
+      // into three vocabularies for one record again (§2.10 of
+      // docs/research/2026-09-19-grants-and-access-simplified.md).
+      if (positional[0] === "list") {
+        try {
+          const rows = await agentsList(await common());
+          out(flags.json === true ? JSON.stringify({ agents: rows }, null, 2) : renderAgents(rows, ui));
+          return 0;
+        } catch (e) {
+          err(`metistry agents list: ${e instanceof Error ? e.message : String(e)}`);
+          return 1;
+        }
+      }
       // The owner's own hand on an agent's autonomy — one of the two doors a
       // WIDENING may come through (docs/ops/actions.md). The mode flags are
       // read off the RAW argv because each of them may be repeated, and the
       // shared parser keeps only the last of a repeated flag.
       if (positional[0] !== "autonomy" || !positional[1]) {
-        err("usage: metistry agents autonomy <id> [--level observe|propose|act_within_scope] [--allow <kind>] [--propose <kind>] [--deny <kind>] [--json]");
+        err("usage: metistry agents list [--json] | metistry agents autonomy <id> [--level observe|propose|act_within_scope] [--allow <kind>] [--propose <kind>] [--deny <kind>] [--json]");
         return 2;
       }
       const loaded = loadEnv();

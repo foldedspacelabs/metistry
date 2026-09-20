@@ -125,6 +125,21 @@ describe.skipIf(!hasDb)("access requests, agent to owner and back (integration)"
     const registry = await (await owner("GET", "/api/agents")).json();
     expect(registry.access_requests).toContainEqual(expect.objectContaining({ proposal_id: id, agent: agentId, area: AREA }));
 
+    // 3b. **One vocabulary** (P3 §2.10). The panel row and the queue card
+    //     say the same thing about the same credential, because both are the
+    //     SAME rendering — core's `describeScope`, computed server-side and
+    //     sent down, rather than two clients recombining tier + areas +
+    //     queries into words of their own.
+    const row = registry.agents.find((a: any) => a.id === agentId);
+    expect(row.scope).toMatchObject({ role: "agent", who: "an agent", tier: "index", access: "titles", queries: true });
+    expect(row.scope.line).toBe("an agent · titles · queries, autonomy: observe");
+    expect(row.scope.from).toContain("the registry");
+    const card = (await proposal(id)).payload;
+    expect(card.current_scope).toEqual(row.scope);
+    // …and the machine-readable half is still there, unchanged, for a client
+    // that wants the fields rather than the sentence.
+    expect({ tier: card.current_tier, areas: card.current_areas }).toEqual({ tier: "index", areas: [] });
+
     // 4. Approve — through the same grants door the owner's own PUT goes
     //    through, with the same `agent_admin` audit row, `via: triage`.
     const allow = await owner("POST", `/api/proposals/${id}`, { decision: "allow" });

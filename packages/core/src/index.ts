@@ -170,6 +170,30 @@ export {
   type SupervisorConfig,
   type SupervisorConfigInput,
 } from "./supervisor.js";
+export {
+  EGRESS_COMPONENT,
+  EGRESS_DEFAULT_PORT,
+  EGRESS_NO_PROXY,
+  EGRESS_PROXY_DEFAULT_PORT,
+  EGRESS_PROXY_ENV_VARS,
+  EGRESS_PROXY_HOST,
+  EGRESS_REALM,
+  EGRESS_RUN_KIND,
+  egressAllows,
+  egressEntryFor,
+  egressEntrySchema,
+  egressProxyEnv,
+  egressProxyUrl,
+  egressSchema,
+  describeDenial,
+  isLoopbackHost,
+  parseConnectTarget,
+  parseEgressEntry,
+  type Egress,
+  type EgressDenial,
+  type EgressInput,
+  type EgressTarget,
+} from "./egress.js";
 export { scheduleToSeconds } from "./schedule.js";
 export {
   COST_SOURCES,

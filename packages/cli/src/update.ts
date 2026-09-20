@@ -23,10 +23,10 @@ import { productVersion } from "./env.js";
 import { envPaths } from "./instance.js";
 import { applyPorts, loadNamespace } from "./namespace.js";
 import type { Exec } from "./exec.js";
-import { loadPlistTemplates, loadSupervisedTemplates, type PlistTemplate } from "./launchd.js";
+import { labelFor, loadPlistTemplates, loadSupervisedTemplates, type PlistTemplate } from "./launchd.js";
 import { SUPERVISOR_SERVICE } from "./supervisor.js";
 import { instanceLockPath, readLock, serializeLock, type LockFile, type LockSource } from "./lock.js";
-import { protectedRel, writeProtected, type ProtectedWrite } from "./protected-write.js";
+import { ensureOwnerBridgeToken, OWNER_BRIDGE_TOKEN, protectedRel, writeProtected, type ProtectedWrite } from "./protected-write.js";
 import { listMigrationFiles, MIGRATION_LOCK_KEY, openMigrationSession, runMigrations, type MigrateResult, type MigrationSession } from "./migrate.js";
 import { currentVersion, installRelease, rollbackRelease, releaseTarget, runtimePackCommit, type InstallReleaseResult } from "./release.js";
 import { installRuntimeDeps, runtimeDepsEnabled, RUNTIME_DIRNAME, type InstallRuntimeDepsResult } from "./runtime-deps.js";
@@ -64,6 +64,8 @@ export interface UpdateOptions {
   openSession?: ((env: NodeJS.ProcessEnv) => Promise<(MigrationSession & { end(): Promise<void> }) | null>) | undefined;
   doctorFn?: ((deps: DoctorDeps) => Promise<DoctorReport>) | undefined;
   doctorDeps?: Partial<DoctorDeps> | undefined;
+  /** test seam: the vault bridge's owner bearer, minted once for an install that has none */
+  mintOwnerToken?: (() => string) | undefined;
   /** default true; `false` is a test seam — see `up`'s `cliShim` (cli-shim.ts). `update` writes the same shim `up` does: it shares nothing else with `up`, but a checkout that only ever runs `update` still gets one. */
   cliShim?: boolean | undefined;
 }
@@ -396,6 +398,13 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
     }
 
     r.section("restart");
+    // BEFORE anything is kickstarted, because the reconciler reads `.env` at
+    // start and the lock write below is a §4.7 protected path: the owner
+    // bearer has to be in the environment the restarted job inherits, or the
+    // install would have to be told to run a command. An install that already
+    // has one spends nothing here (docs/ops/auth.md).
+    const ownerBearer = await ensureOwnerBridgeToken(r, { env, envFile, platform, ...(opts.mintOwnerToken ? { mint: opts.mintOwnerToken } : {}) });
+    r.note(ownerBearer.detail);
     if (usesCompose(deployment)) await composeUp(r, runDir, source, source === "release" ? releaseVersion : undefined, envFile);
     else r.note("shape launchd: no containers, so docker is never called — console, assistant and db are kickstarted below with the other host jobs");
     if (platform === "darwin") {
@@ -413,8 +422,19 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
           restarted.push(t.label);
         }
       }
+      // A freshly minted owner bearer is only real once the reconciler has
+      // read it. Usually its code moved in the same update and the loop above
+      // already bounced it; when it did not, this is the difference between
+      // an update that works and one that 401s on its own lock write.
+      if (!r.dryRun && ownerBearer.minted) {
+        const label = labelFor(deployment.shape === "launchd" ? SUPERVISOR_SERVICE : "reconciler", labelSuffix);
+        if (!restarted.includes(label)) {
+          await r.run("launchctl", ["kickstart", "-k", `gui/${uid}/${label}`], { tolerateFailure: true, comment: `so it reads the freshly minted ${OWNER_BRIDGE_TOKEN}` });
+          restarted.push(label);
+        }
+      }
       if (!r.dryRun && restarted.length === 0) r.note("no host job's code changed — nothing kickstarted");
-    } else r.note(`no launchd on ${platform}: restart the host units yourself (systemctl --user restart <unit>)`);
+    } else r.note(`no launchd on ${platform}: restart the host units yourself (systemctl --user restart <unit>)${ownerBearer.minted ? ` — the reconciler must be restarted for ${OWNER_BRIDGE_TOKEN} to take effect, or the lock write below is refused` : ""}`);
 
     r.section("lock");
     const head = r.dryRun || source === "release" ? undefined : await gitHead(productDir, r.exec);

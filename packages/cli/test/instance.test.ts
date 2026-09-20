@@ -222,12 +222,12 @@ describe("ensureInstanceId", () => {
       return new Response("{}", { status: 200 });
     }) as unknown as typeof fetch;
     const { r } = runner();
-    const env = { METISTRY_RECONCILER_URL: "http://host.docker.internal:7812", METISTRY_BRIDGE_TOKEN_RECONCILER: "tok" };
+    const env = { METISTRY_RECONCILER_URL: "http://host.docker.internal:7812", METISTRY_BRIDGE_TOKEN_RECONCILER: "tok", METISTRY_BRIDGE_TOKEN_RECONCILER_USER: "owner-tok" };
     const got = await ensureInstanceId(r, { instanceDir: dir, env, platform: "darwin", uid: 501, fetchFn, mint: () => ID });
     expect(got).toMatchObject({ id: ID, minted: true, how: "bridge" });
     expect(calls).toHaveLength(1);
     expect(calls[0]!.url).toBe("http://127.0.0.1:7812/vault/write");
-    expect(calls[0]!.auth).toBe("Bearer tok");
+    expect(calls[0]!.auth).toBe("Bearer owner-tok"); // the OWNER bearer: identity.yaml is a §4.7 path, and the console's is not a fallback for one
     expect(calls[0]!.body).toMatchObject({ path: ".metistry/identity.yaml", intent: { principal: "user" } });
     expect(String((calls[0]!.body as { content: string }).content)).toContain(`instance_id: "${ID}"`);
     // the bridge is the committer: nothing was written to disk here

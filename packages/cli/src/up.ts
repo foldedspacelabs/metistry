@@ -81,6 +81,7 @@ import {
 } from "./supervisor.js";
 import { shellUnsafeEnvLines } from "./env.js";
 import { ensureInstanceId, envPaths } from "./instance.js";
+import { ensureOwnerBridgeToken } from "./protected-write.js";
 import { allocateBase, applyPorts, loadNamespace, portEnv, PORTED_SERVICES, portsFile, portsOf, serializeNamespace, suffixFor, type Namespace } from "./namespace.js";
 import { llamaServerChild } from "./local-models.js";
 import { instanceLockPath, readLock, type LockFile, type LockSource } from "./lock.js";
@@ -154,6 +155,8 @@ export interface UpOptions {
   exists?: ((p: string) => boolean) | undefined;
   /** test seam: the password generated for a fresh Postgres */
   mintPassword?: (() => string) | undefined;
+  /** test seam: the vault bridge's owner bearer, minted once for an install that has none */
+  mintOwnerToken?: (() => string) | undefined;
   /** test seam: the fetch the bundled-runtime download uses */
   fetchFn?: typeof fetch | undefined;
   /** the deps pack's os-arch (default: this host's) */
@@ -1118,6 +1121,14 @@ export async function up(opts: UpOptions): Promise<UpResult> {
   // Mac app's override — it knows which instance it opened.
   const paths = envPaths({ ...instanceDir, productDir: opts.productDir, ...(opts.envFile ? { explicit: opts.envFile } : {}), ...(opts.exists ? { exists: opts.exists } : {}) });
   const envFile = paths?.read[0] ?? paths?.write ?? join(opts.productDir, ".env");
+  // The vault bridge's OWNER bearer, before anything else reads the
+  // environment: `ensureInstanceId` below writes `identity.yaml` — a §4.7
+  // protected path — through the bridge, the plists and supervisor.json are
+  // rendered from this environment, and the reconciler is restarted at the
+  // end of this run. An install that predates the credential split gains it
+  // here and needs to be told nothing (docs/ops/auth.md).
+  const ownerBearer = await ensureOwnerBridgeToken(r, { env, envFile, platform: le.platform, ...(opts.mintOwnerToken ? { mint: opts.mintOwnerToken } : {}) });
+  r.note(ownerBearer.detail);
   // compute.yaml, once: the same file `servedLocalModelChildren` reads, the
   // same one doctor reads. A file that does not parse is a NOTE and an
   // engine-less install for this run — `up` bringing the whole install down

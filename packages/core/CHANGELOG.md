@@ -1,5 +1,480 @@
 # @foldedspacelabs/metistry-core
 
+## 0.11.0
+
+### Minor Changes
+
+- 4a778f9: **One decision function.** P0 and P1 of
+  `docs/research/2026-09-19-grants-and-access-simplified.md` §4, commissioned
+  by the owner's "can we simplify the grant/access controls surface and make it
+  more consistent?" and approved 2026-09-20. **No behaviour change**, held by a
+  golden test rather than by care: every refusal's `(code, message)` is asserted
+  byte-identical to `origin/main`.
+  
+  **P0 — the move.** `canSeeUnder`, `underAreas`, `validKnowledgePath`,
+  `areaOf`, `SCOPE_REQUIRED` and `scopeRequired` leave
+  `packages/mcp-brain/src/knowledge.ts`; `canSee`, `grantedScope`,
+  `OWNER_SCOPE`, `NO_SCOPE`, `filterHits` and `filterPages` leave
+  `apps/console/src/knowledge-routes.ts`. Both now live in
+  `packages/core/src/access.ts` and both files re-export them — mcp-brain's with
+  a `@deprecated` note, for one release. The console's authorization rules were
+  being served out of one BRIDGE's package (§2.9); a second bridge would have
+  had to import a sibling bridge to get them.
+  
+  **P1 — `may(principal, verb, resource): Decision`.** Every door in §1.4 asks
+  it: `/mcp`'s knowledge, queries, tasks, action and crew tools; the console's
+  agent 403, its management gate, `GET /api/q/<name>` and `/api/knowledge/*`.
+  Each check that used to live in a handler is now a case in one table that
+  returns the same code and the same sentence it returned before — so the file
+  reads as a catalogue of the five dialects §2.5 found, which is the point:
+  unifying them is one reviewable diff here instead of fourteen strings in
+  eleven files.
+  
+  A refusal carries a closed `reason` (`scope_required`, `tier_required`,
+  `queries_required`, `role_required`, `autonomy_required`,
+  `membership_required`, `not_member`, plus `not_exposed` for the route-only
+  query and `not_knowledge` for a path that is not vault content) and, where a
+  remedy already existed in prose, a machine-readable `needs`: the area a
+  `request_access` would name, or the autonomy entry the user would raise. The
+  wire envelope is unchanged — `error.code` and `expose` are exactly what they
+  were (invariant 8).
+  
+  **Storage does not move**: registry rows for external agents, the environment
+  for the instance's own assistant, the manifest for a crew. `may()` decides and
+  never writes; every widening still goes through the console's one grants door
+  and its one audit row (invariant 2), and the `Role × Verb × Resource` table is
+  CODE in `core`, never loadable from a file (invariant 10).
+  
+  **Two tests ship with it.** `packages/core/test/access.golden.json` is the
+  committed catalogue of every `(code, reason, message, needs)` a door can
+  answer with, each entry carrying the wording it had at `origin/main` and the
+  `file:line` it was read off. `packages/mcp-brain/test/may-surface.test.ts`
+  walks all 27 tools × the five roles asserting every pair is decided, that no
+  tool is usable by nobody, and — by a grep over the package's source — that
+  `kind ===` / `tier ===` appears in exactly one file, the credential →
+  principal mapping.
+  
+  `role: "crew"` exists and nothing produces it yet: `authenticateAgent` still
+  collapses a crew's row to `external`, which is P2's job. The owner is still
+  decided by the rules rather than short-circuited (P4). Neither is changed
+  here.
+- b6586de: **One vocabulary, one renderer, and the owner is never refused their own
+  vault.** P3 and P4 of
+  `docs/research/2026-09-19-grants-and-access-simplified.md` §4, approved
+  2026-09-20. P4 carries the **owner-visible change** below; P3 changes what
+  refusals SAY, not what they decide.
+  
+  **P3 — one wording per reason.** §2.5 found five dialects across fourteen
+  refusal sites. `REFUSAL` in `packages/core/src/access.ts` is now one sentence
+  per `reason`, built in one place: the shape is one per reason, the facts in it
+  are substituted. So `queries_list` and `queries_run` refuse in the same words,
+  `knowledge_write` and `agents_delegate` give the same "belongs to the instance
+  assistant alone" sentence, and a tier miss names the tier the tool needs and
+  the tier the credential holds — in the console's own words for them (`none` /
+  `titles` / `folders`).
+  
+  Silence became a type rather than an accident at a call site: `tell: "hide"`
+  is the refusal deliberately identical to "there is nothing here", it carries
+  no `needs`, and `formatRefusal` drops its `reason` on the way out. Four things
+  hide — a row outside your projects, a route-only query, the console's uniform
+  403, and a knowledge path you may not even list (the 2026-09-19 boundary: an
+  area is named only for a page whose existence you can already see).
+  
+  New in `core`: `describeScope(principal)` (the triple: role · access ·
+  extras), `formatRefusal(decision)` (the §3.2 envelope), `classify(path)`,
+  `notKnowledge(path)`, `TIER_LABEL`, `ROLE_LABEL`, `sourceLabel`,
+  `RULED_TOOLS`, `NO_SUCH_PAGE`, and `tell` on `Refusal`. **Removed**:
+  `scopeAsPrincipal` (the P0 seam P4 deletes — `/api/knowledge/*` takes the
+  principal now), and the three refusal-string constants it replaces
+  (`NOT_A_VAULT_PATH`, `NOT_KNOWLEDGE`, `ARTIFACTS_SIGNPOST`).
+  
+  **P4 — the owner is refused nothing.** "The owner should always have access to
+  everything" (ruled 2026-09-19) is a short-circuit at the top of `may()`, with
+  no exception clause below it. Safe only because `classify()` splits what a
+  path IS from what anyone may do with it: `Artifacts/` and `.metistry/` are not
+  knowledge paths, so the rule never has to be weakened to keep an agent out of
+  the machinery.
+  
+  Two owner-visible changes, and they are the two §2.6 found:
+  
+  - **`GET /api/q/<name>` serves the owner a route-exposed query.** The filter
+    `expose: route` protects is a filter on what an AGENT may see of the vault;
+    the owner's scope is the whole vault. The capture owner token is NOT the
+    owner and is refused byte for byte, which is the credential that rule was
+    always about.
+  - **`GET /api/knowledge/page` and `/links` classify instead of refusing.** The
+    owner's `Artifacts/` and `.metistry/` answer `400` with
+    `reason: "not_knowledge"` and `needs.door` naming the route that has the
+    bytes (`GET /api/artifacts`, or "the file itself"), where they used to
+    answer `404`. **No door serves `.metistry/state/.env` as a page, and not one
+    byte of it crosses here** — the classification is the whole answer.
+  
+  **Agents gain nothing from P4.** Every agent, crew and assistant refusal is
+  byte-identical to what it answered before, which the golden file asserts entry
+  by entry: the four `changed` entries under P4 are all `who: "owner"`.
+  
+  **Surfaces.** `metistry agents list` is new (P3 §2.10 — the CLI rendered
+  grants not at all). `GET /api/agents` carries each row's rendered `scope` and
+  `grant_source`; an `access_request` payload carries `current_scope`. The
+  console's Agents panel and Needs You card print what they are sent instead of
+  holding spellings of their own. Tool descriptions moved onto the same words
+  and got smaller: brain's definition tokens 4264 → 4255 against a >5000 budget.
+- 579662f: The sole committer runs confined, and every confined child's egress passes
+  one allowlisting door.
+  
+  **`ops/sandbox/reconciler.sb`.** Under the `launchd` shape the reconciler —
+  the only process that holds the instance repo's working tree and the only
+  place git runs (D5) — now runs under a Seatbelt profile, as the job's root
+  process, so git and all 172 of its helpers inherit it. It writes the
+  instance repo and tmp and nothing else; reads the product checkout, the node
+  runtime, a real git's prefix and `~/.gitconfig` by name; execs node and that
+  git and **no shell**; dials the console, Postgres, the on-machine embedder
+  and the egress proxy, and binds only its own bridge port. D5 was a design
+  intention; it is now a kernel rule. `metistry up` (and `--dry-run`) prints
+  the profile each child will run under, and `metistry doctor` gains a
+  `sandbox` row that reads the answer back out of `supervisor.json`'s argv.
+  `METISTRY_RECONCILER_SANDBOX=0` swaps in `ops/sandbox/unconfined.sb`, a real
+  file that says `(allow default)`, so "not confined" is never invisible.
+  
+  **`/usr/bin/git` is not a git** — it links against `libxcselect.dylib` and
+  is the xcode-select shim, which dies under a profile. `up` resolves a real
+  git by absolute path (bundled runtime, then a non-shim git on `PATH`, then
+  the Command Line Tools) and declines to confine the job when it finds none.
+  
+  **The egress door.** `sandbox-exec` filters outbound by port and cannot name
+  a host, so `assistant.sb` carried `(remote tcp "*:443")` with an honest note
+  that its host list was documentation rather than enforcement. Both profiles
+  now allow exactly one loopback port, and a CONNECT proxy in the supervisor
+  listens there: an allowlist derived from this install's `compute.yaml`
+  providers and its instance repo's git remotes, exact host and port matching
+  (no wildcards), a 256-bit bearer per child so a refusal can name who asked,
+  a `runs` row per refusal, and no TLS interception whatsoever — CONNECT only,
+  so it learns a host name and never a byte of the tunnel. Children reach it
+  through `HTTPS_PROXY` + `NODE_USE_ENV_PROXY=1`; git reaches it through
+  `METISTRY_GIT_HTTP_PROXY` → `-c http.proxy`. `supervisor.json` gains an
+  `egress` block, read before any child is spawned, so no child can widen it.
+  
+  **Pushing still works, through `GIT_ASKPASS`.** git executes every
+  credential helper through `/bin/sh` — including the built-in `osxkeychain`
+  that `metistry connect-repo` configures — and this profile has no shell, so
+  a confined push would have died on the helper. `GIT_ASKPASS` is exec'd
+  directly, by absolute path, with no shell, so: the token stays in the login
+  Keychain where `connect-repo` put it, the **supervisor** reads it there once
+  at spawn (unconfined, the parent, and the item is filed `-A` so there is no
+  prompt), and hands it to the child in its environment; a `#!<node>` shim
+  `up` generates prints it when git asks and can do nothing else. The
+  credential is never in argv, never in `supervisor.json`, never on disk.
+  `git.ts` adds `-c credential.helper=` — git's documented reset — only when
+  there is an askpass, so an unconfined install is untouched. Proven by a real
+  push to a real bare repository over real HTTPS through the CONNECT tunnel,
+  under `sandbox-exec`.
+  
+  **SSH remotes stay unsupported while confined**, and `up` still warns:
+  `ssh` is not exec-able, granting it would mean granting the sole committer
+  `~/.ssh`, and ssh's `ProxyCommand` runs through a shell so it could not
+  reach the egress proxy either. Use an HTTPS remote or the off switch.
+- 57ceb02: **`request_access`: an agent asks for the area it was refused, and the owner
+  grants it in Needs You.** Ruled 2026-09-19, the upgrade path proposed in
+  #216 and refined in #221. Tier `index` could already see that a page exists,
+  be refused its content, and be told which area would unlock it — and then had
+  nowhere to put that. The only mechanism was a free-text `requests_create`
+  report and a hope.
+  
+  Now the refusal names a tool: `request_access {area, reason}` writes ONE
+  `proposals` row of kind `access_request` with the ask, the reason and what the
+  credential holds today, deduplicated on `(agent, area)` while it is pending
+  (migration 0022's partial unique index, so a retry storm is one row). It
+  **grants nothing** — it is a row. Every tier may ask, `none` included (and
+  since the follow-up ruling below, every principal, the assistant included).
+  The area is validated at the tool with the same rule the grants validator
+  uses, so a crafted prefix (`..`, `.metistry/`, `Artifacts/`, lowercase, the
+  bare vault) never reaches a proposal, let alone a grant.
+  
+  The owner answers it with the three answers every request already takes.
+  **Approve calls `writeGrants` — the same function `PUT /api/agents/:id/grants`
+  calls**, with the same `validateGrants` and the same `agent_admin` audit row,
+  `via: triage`; **Revise** grants a narrower prefix instead (`{area}` on the
+  existing triage route); **Decline**, Later and Skip grant nothing. The
+  console's mutating surface gains no verb and no route (invariant 10): this
+  kind is a new branch onto a service that already existed. It widens by exactly
+  the prefix asked for — never `queries`, never a second area, never one already
+  covered — and a revoked agent cannot be granted anything: revoking settles its
+  pending asks as `deny`.
+  
+  `packages/core` gains `validAreaPrefix` / `AREA_PREFIX_RE` /
+  `AREA_PREFIX_REFUSAL`, lifted out of the console so both doors refuse the same
+  strings in the same sentence, and `validAgentAreaGrant` — the same shape plus
+  "a read path would actually serve it", which is what refuses `Artifacts/…` on
+  an AGENT's grant (it was always an inert grant; every read path ignores it).
+  
+  Cost on the surface every agent pays: 189 definition tokens, taking the eager
+  `tools/list` from 4,035 to **4,224** against the 5,000 line — still smaller
+  than the 4,979 it carried a week ago with one tool fewer. The tool COUNT
+  ceiling in `ops/scripts/check-tool-surface.mjs` moved 25 → 26 deliberately,
+  with the reasoning written beside the number; the tool after this one fails
+  that check again.
+- 7f9ceb7: **A todo is a plain English line, and Metistry reads it.** Two new pieces of
+  public API in `core`, both pure: `parseTaskLine` / `formatTaskLine` for a
+  `- [ ]` line in a vault note, and `compileTaskFilter` for the `where:` /
+  `order:` vocabulary that templates, the app's filter chips and the Obsidian
+  plugin all speak.
+  
+  The fields on a task line are English-shaped trailing tokens — `- [ ] Draft
+  the Q4 plan due friday p1 size l type planning +drey` — and they are a run at
+  the END of the line: the first token that is not a field ends it, so `Ask
+  @Jim about the pricing deck` assigns nobody and the text stays exactly as
+  typed. `due friday` resolves against `METISTRY_TZ` and the day it was read on,
+  which is recorded, so a relative date is never silently re-read as a different
+  one tomorrow. A field Metistry cannot read is never guessed: `due nextweek`
+  sets no date and sets a parse warning instead. Dataview's `[due:: 2026-09-22]`
+  and the Obsidian Tasks plugin's emoji are read, so a vault that already uses
+  them is not locked out, and nothing here can emit either one back.
+  
+  `compileTaskFilter` turns `where: "due <= today or overdue"` into bind
+  parameters for one named query. It is not SQL, it is never interpolated into
+  SQL, and anything outside the closed vocabulary is refused with a message the
+  caller renders — a `where:` containing SQL is refused, not escaped.
+- 23cc47f: **The daily note is rendered from a template you edit.** `core` gains the
+  template engine of `docs/product/daily-flow-spec.md` §6 (P1-6):
+  `renderTemplate(text, ctx)` and `validateTemplate(text)`, plus
+  `metistry templates check` in the CLI to run the second one from a terminal.
+  
+  Eight directives and one block form, and the ceiling is the point — a ninth
+  verb is a product decision, not a config line:
+  
+  | directive | what it renders |
+  | --- | --- |
+  | `{{ date format: "YYYY-MM-DD" offset: 1 }}` | a date in the instance's zone |
+  | `{{ tasks where: "due <= tomorrow or overdue" order: "priority, due" as: "list" }}` | the vault's `- [ ]` lines, as links to the notes they live on |
+  | `{{ recurring due: today }}` | §4's recurrence rules |
+  | `{{ calendar day: tomorrow }}` | the eventkit bridge's events for a day |
+  | `{{ work where: "blocked or waiting_on_me" }}` | the `work` rows a day needs |
+  | `{{ requests limit: 5 }}` | what is waiting on the owner |
+  | `{{ include "Me/Working Style.md#Prioritisation" }}` | a section of a vault file, spliced verbatim |
+  | `{{ prose "summarise yesterday in three lines" }}` | a slot the fold fills — fold templates only |
+  | `{{ section "Today" if_empty: "hide" }}` … `{{ /section }}` | a heading that vanishes when nothing is under it |
+  
+  What the engine cannot do is enforced by its shape rather than asked for in a
+  comment. `where:`/`order:` go through `compileTaskFilter` and leave as bind
+  params of one named query, so no directive can put text into SQL (invariant
+  3); `{{ work where: … }}` is a separate, tiny flag list over `day_work`'s
+  board states, refused outright on anything outside it, because one vocabulary
+  stretched over two tables would compile against one and mean nothing against
+  the other. `prose` never reaches a model here: it produces a bounded request object
+  the fold routine fulfils on the turn it already takes, and it is refused
+  outright in a template whose output the assistant may not write (D14).
+  `include` splices literal text and evaluates nothing inside it, so a template
+  that includes itself renders a note rather than looping. And a recurring rule
+  is materialised into a `- [ ] … ^mt-…` line only when the render's `source` is
+  the user's own hand; every routine gets the same rule as a proposal, because
+  no routine writes a task into a note you own (D4).
+  
+  Every failure is visible and none is fatal (§6.4): an unknown directive, a
+  `where:` the vocabulary refuses, an unreachable calendar, a query that is not
+  configured — each renders one `> ⚠️ metistry: …` line naming the template and
+  the line number, and the rest of the file still renders. A day with no plan
+  because the calendar was down is the worst possible outcome. A missing
+  template writes nothing at all and is reported as a configuration fact.
+  
+  Every rendered file ends with a provenance footer — the template, its sha256,
+  when it was rendered and by which engine — so "why does my plan look like
+  that" has an answer that names a file. Output is capped
+  (`METISTRY_TEMPLATE_MAX_BYTES`, 16 KB) and truncates with the fold's own
+  `…and N more`.
+  
+  `metistry templates check [<file>]` validates every file in the vault's
+  `Templates/` and prints each finding as `path:line  message`. It reads nothing
+  but the files — no database, no calendar, no vault lookups — so it answers on
+  a laptop with nothing running, which is what §6.5 needs: a template change
+  takes effect at the next run, and this is how you find out before the run
+  does.
+
+### Patch Changes
+
+- 4f43f9c: **Access requests, after the owner read them: you see everything, an agent may
+  escalate once, and the assistant may ask.** Three rulings of 2026-09-19 on the
+  `request_access` loop.
+  
+  **Your own access is never narrowed by a rule about agents.** The area
+  validator that refuses `Artifacts/…` is now `validAgentAreaGrant` — the
+  prefix shape plus "an agent read path would actually serve it" — and
+  `validAreaPrefix` is the shape alone. The refusal is typed where an agent's
+  grant is typed (the grants form, `request_access`), because an `Artifacts/`
+  grant is inert: every knowledge read path refuses it, so it reads in the
+  registry like access and gives none. Your own artifacts are untouched and
+  still `GET /api/artifacts`, over the real vault; and where the knowledge door
+  cannot serve one — it reads the index, which has never walked `Artifacts/` —
+  it now points you at the door that has the bytes instead of saying "no such
+  page". An agent asking for the same path still gets the one uniform sentence,
+  byte for byte the same as for a path that is not there.
+  
+  **A decline is told to the agent, and it may escalate exactly once.** Asking
+  again for an area you declined no longer files a second identical row and no
+  longer vanishes into a dedupe: the tool answers with the decision you gave —
+  declined, when, your note — and offers `escalate: true` with a fuller reason.
+  That writes ONE new proposal flagged `escalated` with the prior id on it, and
+  Needs You renders *asked again after a decline*. Decline that too and the area
+  is closed at the tool: a third ask is refused with "ask the owner directly".
+  One open ask per (agent, area) throughout, and the flag comes off the record
+  rather than the caller's word for it. Enforced at the tool, not prompted.
+  
+  **The assistant may ask now.** It was refused because `ensureInternalAgent`
+  replaces an internal row's grants from `METISTRY_ASSISTANT_AREAS` at every
+  console start, so an approval would have been silently undone. Approving an
+  `access_request` for an internal row now also records the area in
+  `agent_grant_overrides` (migration 0023, additive), which `ensureInternalAgent`
+  merges on top of the configured areas on the way in. Configuration stays the
+  floor; the approval survives the restart; revoking the credential clears its
+  approvals. A crew is still refused at the decision — its scope is a manifest
+  file, and that is an edit, not a grant.
+  
+  Cost on the surface every agent pays: 40 definition tokens for the escalation
+  (one optional boolean and a clause), 4,224 → **4,264** against the 5,000 line.
+  The tool count is unchanged at 26.
+- 9c9da4a: **`metistry compute cache-report` — OPEN-6's measurement as one command**
+  (ruled 2026-09-17: ship automatic top-level `cache_control` first, measure
+  later). `metistry compute cache-report [--since 7d] [--json]` reads the `runs`
+  ledger through the new named query `cache_report`
+  (`GET /api/q/cache_report` — invariant 3's one read path, and no console route
+  or action of its own, so invariant 10's mutating surface is untouched) and
+  joins it to `compute.yaml`'s `pricing:` rates, which the ledger cannot know. A
+  table per provider/model, grouped by tier and by the `caching:` mode that was
+  in force, with turns, cache reads and writes, hit ratio, recorded cost and a
+  net dollar saving; one verdict line against an 80 % threshold, under the 89 %
+  after a task boundary that `docs/research/2026-09-cost-optimization.md`
+  records, because a real install rolls sessions. The saving is net of the write
+  premium and may be negative — a prefix rebuilt every turn is the finding, not
+  a number to floor at zero — and is absent, naming the field that would fill
+  it, wherever no `pricing:` entry publishes a rate. It calls no model and
+  writes nothing.
+  
+  **Usage mapping now covers Anthropic's native shape.** `cache_read_input_tokens`
+  was not read at all, and `input_tokens` on that wire is the *fresh* remainder
+  with both cache counts reported beside it rather than inside it.
+  `usageFromResponse` recognises the shape by its anchor field (`prompt_tokens`
+  = the OpenAI/OpenRouter form, already a total; `input_tokens` = the native
+  form, summed back into one), so `runs.tokens_in` means the whole billed prompt
+  whichever endpoint answered and a ratio over it is comparable across
+  providers.
+  
+  **Every engine turn now records the cache, and what caching was asked for.**
+  Crew runs wrote provider, model, tokens and cost but dropped
+  `cache_read_tokens`/`cache_write_tokens` and `cost_source`; shadow runs
+  dropped the same two on their own provider's row. Both carry them now. And a
+  reported zero is no longer flattened into "nothing reported": the engine keeps
+  the counter absent until a response carries the field, so NULL means the
+  provider said nothing (the field name is wrong) and 0 means it said zero (the
+  prefix is not stable) — two findings with different fixes. `runs.meta.caching`
+  records the mode in force for that turn, since `compute.yaml` is hot-reloaded
+  and cannot answer later what was true earlier.
+  
+  **Fixed:** `main()`'s `compute` case hardcoded `fetchFn: fetch` instead of
+  honouring the `io.fetchFn` test seam, so a test driving those verbs through
+  `main()` reached the real console and real provider endpoints rather than its
+  own fakes.
+- 1bf5c76: **A crew's toolset is enforced at the door.** P2 of
+  `docs/research/2026-09-19-grants-and-access-simplified.md` §4, approved
+  2026-09-20. **One behaviour change, and it is the point of the phase** — read
+  the next paragraph before you upgrade an install that runs crews.
+  
+  **What changes for a running crew.** A crew names TOOL GROUPS in its manifest
+  (`uses:`), and until now that list was applied by the process that dispatched
+  the run: `apps/assistant/src/tools.ts` filtered `tools/list` and refused an
+  unlisted call with the text `"mcp__brain__tasks_comment" is not in this run's
+  tool list`. `/mcp` had never heard of `uses` — `AgentPrincipal` carried no
+  such field — so the door admitted those calls. Five of the eight groups
+  (`rooms`, `artifacts`, `tasks`, `capture`, `requests`) had no server-side gate
+  at all; the only thing holding them was a `Set.has` in another process. Now
+  the console resolves a crew's `uses` from the manifest it loaded, attaches it
+  to the principal at authentication, and the door refuses anything outside it
+  before the tool body runs:
+  
+  ```json
+  { "error": { "code": "forbidden",
+               "message": "tasks_comment is not in this crew's toolset — writer holds knowledge, requests (`uses:` in its manifest, a protected path in the user's hand: docs/ops/crews.md). Report what you needed instead of retrying." } }
+  ```
+  
+  One `runs` row on the crew's own id, the uniform envelope, `reason:
+  not_in_uses` in `may()`'s decision. The runner's client-side list stays as
+  **defence in depth** — the model is still not offered a tool it cannot use —
+  but it is no longer the control, and the comment at that filter says so.
+  CLAUDE.md's rule over all the others is "enforce at the tool, never by
+  prompting"; a filter in the caller is neither.
+  
+  **`crew` is a real role.** `agents.kind` has stored three values since Phase 5
+  (`crews.ts` writes `'crew'`) while the console collapsed anything not
+  `internal` to `external` at authentication, so a crew reached `/mcp`
+  indistinguishable from a foreign agent (§2.3). `authenticateAgent` now passes
+  the row's own kind through, `principalOf` maps it to the `crew` role that
+  `may()` has had a table for since P1, and three things follow: the toolset
+  gate above, a `crew` that can no longer reach `request_access` at the door
+  (it is a never-tool, so it is in no group), and a `source` on the principal
+  that is the crew's manifest rather than a fourth prose reconstruction of
+  "your scope is configuration, not a grant".
+  
+  **Migration `0025_agent_role.sql`** (additive; rollback note in the file): a
+  CHECK holding `agents.kind` to the three values it already stores, and a
+  nullable `grant_source` column recording which of the three places a row's
+  grants came from — `registry` (the owner's hand), `environment` (`.env`,
+  replaced at every console start), `manifest` (a crew's `scope:`). NULL on
+  existing rows and read as `registry`. Nothing decides on it: `may()` never
+  reads it.
+  
+  **Nothing else moved.** Every other refusal is byte-identical — the golden
+  catalogue (`packages/core/test/access.golden.json`) asserts it entry by entry,
+  and the one changed entry carries both what the caller used to say and what
+  the door says now, so the behaviour change is a reviewable diff rather than a
+  sentence in a PR. Misuse tests ship with it (invariant 8): a crew bearer
+  refused a non-`uses` tool at `/mcp` with no client filter in the loop, a crew
+  whose manifest cannot be read holding NO tools rather than all of them, an
+  external agent unable to become a crew through a body or a header, and the
+  CHECK refusing a fourth kind.
+- 45b64df: **`@monthly` is runnable.** The manifest schema's cron regex already admitted
+  it, but `scheduleToSeconds` did not — a manifest declaring `@monthly` would
+  validate, pass CI, and then throw the first time the runner tried to schedule
+  it. It is now 30 days, the same fixed-interval approximation `@weekly`
+  already makes (this is an interval scheduler, not a calendar one).
+  
+  **An unparseable schedule no longer takes the runner down.** The console's
+  `loadSchedules` had no error handling at all: one manifest it could not read,
+  validate, or schedule threw out of the function and stopped every OTHER
+  collector and routine from starting too. It now skips that one component and
+  logs why (naming the manifest file to fix), so a single bad manifest —
+  shipped or instance-authored — costs one component, not the console.
+- 9ec30d5: **One filter vocabulary, one query — and now literally one object.** The
+  parser that reads `where: "due <= today or overdue"` and the query it compiles
+  into were built in parallel and agreed on almost none of their names:
+  `due_from` against `due_on_or_before`, `combine` against `match_any`, a
+  comma-separated `flags` string against seven booleans, `sort1` against
+  `order_1`. Every one of those is a hard `unknown param` the first time a
+  template renders, because the query runner refuses an undeclared parameter
+  rather than ignoring it — so the failure would have landed on an evening plan
+  rather than in a test.
+  
+  `seed/queries/vault_tasks_query.yaml` now declares exactly
+  `TASK_FILTER_PARAM_SPEC`, and a test asserts the two are equal field for
+  field, so neither side can move without the other. There is no longer a
+  third copy of the shape anywhere: the manifest is a transcription of the
+  parser's own published declaration, and the parser is canonical because it is
+  the half three consumers import and typecheck against.
+  
+  `TaskFilterParams` gains the four **context** params the query needs and a
+  `where:` line can never reach — `today` (the day *overdue* and *carried* are
+  measured against, resolved where the timezone is known rather than in SQL),
+  `me` (your own person page, for *assigned to me*), `path_prefix` (the
+  caller's scope) and `offset` — so the contract is one object rather than two
+  that can disagree. `path_prefix` and `status` **scope**: `or` widens the
+  predicate, never the scope, so no filter anyone writes can reach a ticked
+  line or a path outside what the caller was allowed to see.
+  
+  Three meanings were pinned while the two halves were reconciled, because they
+  had been described two ways: *recurring* is an **instance** of a rule, never
+  the rule line (a rule is not a task, and no row here can be one); *carried* is
+  "it was owed on an earlier day", which is the number the app's chip shows,
+  while how long a line has been **sitting** is its own separate column; and
+  every nullable field compares under an explicit "no" rather than a NULL, so
+  asking for `size l` can never quietly return every task with no size at all.
+
 ## 0.10.0
 
 ### Minor Changes

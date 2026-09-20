@@ -2341,3 +2341,347 @@ launchd cannot even see.
   a presentation change rather than a wire change. The one notice that used
   to shout — a deprecated `.env` still being read, printed before the answer
   you asked for — is now a dimmed line after it.
+
+- 2026-09-19 — **An agent that is boxed in can now ask, and only you can
+  answer.** A scoped agent could already be told that a page exists and
+  refused its contents; what it could not do was say which folder it needed.
+  It can now: one tool, `request_access`, which takes a folder and a reason
+  and writes a single request into Needs You. It grants nothing — it is a
+  row in your queue, beside everything else that needs you, and you answer it
+  with the same three words you answer everything with. Approve widens the
+  agent's grant by exactly the folder it asked for; Revise widens it by a
+  narrower one you choose instead; Decline moves nothing at all. The widening
+  runs through the identical code path, the identical validation and the
+  identical audit row as editing that agent's grants by hand in the Agents
+  panel — which is what makes this a second door onto your own decision
+  rather than a new power the queue quietly acquired. The safety that matters
+  is what the asking tool cannot do: it cannot name a folder the grants form
+  would refuse (the machinery, the artifacts, a traversal, a lowercase path,
+  the whole vault), it cannot ask twice while you have not answered, it
+  cannot ask on behalf of anyone but itself, and it cannot answer itself —
+  triage is your session and nothing else reaches it. A revoked agent's
+  pending asks are declined along with its token. Your own assistant may ask
+  too, from the same day's follow-up ruling: its scope is a line in your
+  configuration file, so each approval for it is recorded beside the request
+  you answered and merged back at every start — configuration stays the
+  floor, and a grant that reverted on restart would have been a promise the
+  system could not keep.
+
+- 2026-09-19 — **An agent that is told "no" can say why it matters, once.**
+  The access-request loop shipped with one answer per ask and no way to read
+  the answer: a declined agent could only file the same row again. It now
+  gets the decision back at the tool — declined, when, the owner's note — and
+  exactly one escalation, `escalate: true` with a fuller reason, which arrives
+  in Needs You flagged *asked again after a decline*. A second decline closes
+  the area at the tool; what is left is a report in words. The ladder is three
+  rungs and enforced in code, so "don't nag" is a property of the mechanism
+  rather than a line in a prompt — and the same change let the owner's own
+  assistant onto the loop, with each approval recorded so the next restart
+  cannot quietly undo it.
+
+- 2026-09-19 — **The assistant can no longer overwrite a note you wrote by
+  hand.** `knowledge_write` is a whole-file replace, and it decided who owns
+  a note by reading `source:` out of its frontmatter — but a note you write
+  yourself, in Obsidian or any other editor, never carries `source:` at all.
+  The original rule read that absence as "nobody owns this yet, so it's free
+  to write", which meant a model turn — the evening fold reading your notes
+  to write its own — could silently re-emit and replace one you wrote by
+  hand. No `source:` now means the note is yours, the same as an explicit
+  `source: user`; the assistant still writes and updates its own notes and
+  the fold's freely, and can still create anything new, but an existing note
+  with no stated author is refused rather than assumed available. The one
+  named exception is `now.md`, the single note the assistant is required to
+  keep current every day, seeded with its own provenance from here on so a
+  fresh instance never needs the exception at all, and closed permanently the
+  first time an existing instance's copy is written under the new rule.
+
+- 2026-09-19 — **The migration scripts refuse to guess which database
+  they're about to touch.** `ops/scripts/migrate.sh` and
+  `ops/scripts/test-db.sh` now track where their target database's name
+  actually came from — a caller's explicit override, a checkout `.env`, or
+  the install's own `.metistry/state/.env` — and refuse rather than proceed
+  whenever that provenance says something a person almost certainly did not
+  mean: a shell that already has a scratch database name set (a test shell,
+  by definition) touching a different database by omission, or a target that
+  traces back to a live install's own configuration with nobody confirming
+  that is really the machine. Both scripts take `--print-target`, which
+  resolves and reports the same decision without ever opening a connection —
+  which database a command is about to touch is now something you read
+  before running it, not something you infer from an incident afterward. It
+  follows a real one: a shell carrying a leftover test-database name ran
+  `migrate.sh` with no explicit target, fell through to the built-in
+  default, and applied a migration to the live install (reverted by hand).
+  The same shell today gets refused, in words, before it touches anything.
+
+- 2026-09-19 — **Prompt caching now reports on itself, in one command.**
+  `metistry compute cache-report` reads the run ledger and says, per provider,
+  model and tier, what fraction of each prompt was served from the cache
+  rather than sent again — and what that was worth, netting the discount the
+  reads earned against the premium the writes paid, so a prefix being rebuilt
+  every turn shows up as a negative number instead of hiding inside a total.
+  Caching is the single largest lever on what an assistant costs, and until
+  now the only way to know whether it was working was to read a database by
+  hand. It answers in a table with one verdict line under it, and it calls no
+  model to do it: everything it reports was already recorded by the turns you
+  already took. The reading it refuses to fake is the useful one — a provider
+  that reported nothing about its cache is shown as silent rather than as a
+  cache that missed, because the first is a wiring problem and the second is a
+  prompt problem, and being sent to audit the wrong one costs an afternoon.
+
+- 2026-09-19 — **The sole committer runs confined, and every child's egress
+  passes one allowlisting door.** One process in Metistry holds your notes as
+  actual files and is the only thing allowed to commit them. It is the part
+  that would matter most if anything ever went wrong with it, and until now it
+  was also the part with the fewest limits: nothing stopped it reading your
+  Documents folder or your SSH keys, because nothing had ever told it not to.
+  It now runs inside a boundary the operating system enforces rather than one
+  the design intends — it can write the vault and a scratch directory and
+  literally nothing else on the disk, it can run exactly two programs (the
+  runtime and git), and it has no shell at all. The guarantee that "only this
+  one process can change your knowledge" stopped being a promise about how the
+  code is arranged and became something the kernel refuses to break. The
+  assistant has had this since the start; this is the other half. And the
+  boundary keeps the thing that matters working: your notes still back
+  themselves up to your private repository, unattended, every hour, with the
+  token still living in the Mac's own Keychain and never written to a file
+  anywhere. That took finding a door in a wall — the ordinary way git asks
+  for a password needs a shell, and the whole point was to take the shell
+  away — so the part of Metistry that is still outside the boundary fetches
+  the credential once when it starts everything up and hands it in, and a
+  fourteen-line helper inside passes it to git when asked. It never appears
+  in a command line, where anything else running on your Mac could read it.
+  One arrangement genuinely cannot survive the boundary: a repository reached
+  over SSH, because serving it would mean handing your private keys to the
+  one program this is all about fencing in. Setup says so in plain words when
+  it sees one, and there is a single documented switch for anyone who would
+  rather have the old arrangement back — a visible file that says "allow
+  everything", never a silent absence. The second half is about
+  where things can *reach*. The confinement macOS offers can say "one port"
+  but cannot say "openrouter.ai", so for a year the list of servers Metistry
+  was allowed to contact was documentation sitting next to a rule that
+  actually permitted any encrypted connection anywhere. There is now one door
+  in the wall, and a doorman on it: every outbound connection from a confined
+  part of Metistry goes to a single local checkpoint that knows the handful of
+  names this install legitimately talks to — your model provider, from your
+  own configuration, and your notes' backup remote, from the repository itself
+  — and refuses everything else, writing down what was refused and which part
+  asked. It never opens the envelope: it learns a destination and passes
+  encrypted bytes through untouched, so it can tell you where your data went
+  without ever being able to read it. Measured on a real Mac: the permitted
+  destination answers normally, an unlisted one is turned away at the door,
+  and with the door removed the operating system refuses the connection
+  outright.
+
+- 2026-09-20 — **A crew's toolset is enforced at the door.** When you define a
+  helper agent, you say which kinds of tool it may use — read the notes,
+  report, work the task list, speak in a room. That list was being applied by
+  the program that hands the helper its brief: it offered only those tools and
+  refused the rest. Real, because nothing else holds that helper's credential
+  — but it was a promise one program was keeping, not a rule the system
+  enforced, and five of the eight kinds had nothing else standing behind them.
+  The list now travels with the credential itself, and the server refuses
+  anything outside it before the work starts, with the same refusal every
+  other boundary gives and a line in the record saying what was tried. The
+  helper is told what it does hold, so it reports what it needed instead of
+  guessing at the next tool. Widening one is still what it always was: you
+  edit its definition file, in your own hand. A helper whose definition can't
+  be read gets nothing rather than everything — the safe way round — and the
+  program that dispatches it still hides the tools it cannot use, so the
+  helper doesn't waste a turn learning that. Nothing changed for you or for
+  any other agent: every other refusal is word for word what it was, checked
+  against a list of them that a person approves.
+
+- 2026-09-20 — **A new instance starts with a daily note, plan, fold,
+  standup and meeting template the user owns.** `metistry init` now stamps
+  the journal tree, `Templates/` and `Me/` alongside the seeded vault, so
+  the daily flow (`docs/product/daily-flow-spec.md`) has somewhere to render
+  into from the first commit rather than a gap closed by hand later.
+
+- 2026-09-20 — **A todo is a plain English line, and Metistry reads it.** A
+  task is a `- [ ]` line in your own note, typed the way you would say it:
+  `Draft the Q4 plan due friday p1 size l type planning +drey`. The fields are
+  a run at the end of the line, so the first word that is not one of them ends
+  it — `Ask @Jim about the pricing deck` assigns the deck to nobody, and your
+  sentence survives intact. Everything Metistry works out from that line — the
+  date behind `due friday`, the person behind `@Jim`, the four-level priority
+  behind `critical` — it works out on read and keeps in its own index; the
+  bytes in your note are never touched, so there is nothing to opt out of. A
+  field it cannot read is never guessed: `due nextweek` produces one visible
+  line in the day's plan naming the token, not a date you did not mean. If you
+  already use Dataview or the Obsidian Tasks plugin, their syntax is read too,
+  and never written back. The same day's second piece is the filter language
+  the plan, the app and the plugin all share — `due <= today or overdue` — so
+  a view you build in one place can be pasted into another. It compiles to
+  bound parameters of a single named query and is refused outright if it is
+  anything but the vocabulary: a filter carrying SQL never reaches the
+  database as text, because the code that would have to quote it does not
+  exist.
+
+- 2026-09-20 — **Every todo in your vault is findable within a reconcile.**
+  The pass that already walks your notes and hashes them now also reads every
+  `- [ ] …` line in them, so a task you typed in a meeting note three weeks
+  ago is as findable as one you typed this morning — with due dates,
+  priorities, who it is waiting on and how long it has been carried — and
+  without a single copy of it living anywhere but the line you typed. Nothing
+  is written back into your notes: the parser reads loosely, resolves
+  `due friday` and `@Jim` against the day it read the line and the people in
+  your vault, and puts the answer beside the line rather than in it. The
+  identity degrades honestly, which is what makes the index safe to trust
+  before there is any plugin minting ids: change a date on a line and it is
+  the same task, re-type the words and it is a new one, and the clock that
+  says how long something has been sitting survives both a re-walk and a
+  rename. The files that merely *show* your todos — tomorrow's plan, the
+  fold, the standup — hold none of them, decided by the same ownership rule
+  that stops the assistant overwriting a note you wrote, so nothing is ever
+  counted twice. And an agent waiting on something only you can do now says
+  so on its card, while still being free to do everything else: the wait is
+  visible and it never blocks.
+
+- 2026-09-20 — **One place now decides what anything is allowed to see.**
+  Fourteen separate rules, spread across eleven files, used to answer the
+  question "may this agent read this note, run this query, touch this task" —
+  and a single ordinary read passed through five to seven of them, each
+  written out by hand at the place it was needed. They agreed, but only
+  because someone had kept them in step; the first one to drift would have
+  been a silent hole rather than a bug anyone would notice. They are now one
+  function, in one file, that every door asks and no door second-guesses, with
+  a test that greps the code to prove no part of the system has quietly grown
+  a rule of its own again. Nothing a person or an agent can do changed by a
+  single byte — the refusals are asserted word for word against what they said
+  before — but two things that were invisible became legible: every refusal
+  now carries a machine-readable reason, so an agent that is told "no" can
+  tell "you lack the grant" from "that does not exist", and where a remedy
+  already existed the refusal carries it in a form a program can act on
+  ("ask for this folder", "raise this permission"). And the complete list of
+  everything the system can say when it refuses is a single reviewed file, so
+  changing the words an assistant reads is now a deliberate edit somebody
+  approves rather than a string changed inside a handler nobody opens.
+
+- 2026-09-20 — **One scope vocabulary everywhere; the owner is never refused
+  their own vault.** What an agent is allowed to see used to be described in
+  four different sets of words: the console's Agents panel said one thing, the
+  approval card in the queue said another, the tool descriptions an assistant
+  reads said a third, and the command line said nothing at all — there was no
+  way to ask, from a terminal, what any agent held. There is one set of words
+  now, written once and rendered everywhere: a single line reading *role ·
+  access · extras*, so "an agent · folders: Areas/Health · queries, autonomy:
+  propose" is the same sentence whether you meet it in the panel, in the card
+  you are answering, or in `metistry agents list`, which is new. Refusals got
+  the same treatment: the system used to say "no" in five different dialects —
+  an empty message, a bare "not granted", a sentence naming an environment
+  variable, a sentence naming a web route and a command — and now says one
+  sentence per kind of refusal, each one naming what would unlock it and who
+  decides. The refusals that must stay uninformative — a task in a project you
+  are not in, a page you could not already see exists — are now marked as such
+  in the code itself, so nobody can make one of them chatty by accident and
+  turn a refusal into a way of discovering what is there. And the owner's own
+  rule finally has no exception: "the owner has access to everything" used to
+  be true in intent and false in two places, where a check written to narrow
+  agents was being applied to the person whose vault it is. The fix was to
+  separate *what a file is* from *who may see it* — an artifact, the
+  machinery, or a note — so a door that does not serve artifacts can say "that
+  is an artifact; here is the door that has it" instead of "that does not
+  exist". The owner is refused nothing, and a door still only serves what it
+  is a door to: asking the knowledge index for the secrets file gets an honest
+  answer and not a single byte.
+
+- 2026-09-20 — **The files that decide how Metistry behaves can no longer be
+  written by anything that merely says it is you.** A handful of files in your
+  vault are different from your notes: they are the rules the system runs on —
+  which agents exist, what they may read, what the assistant is told, which
+  version is installed. The promise has always been that those are yours alone
+  and no machine changes them. Until now that promise had a soft middle. Every
+  request to change a file said, in its own words, who it was from, and the
+  part of Metistry that holds your files believed it — so the check was really
+  "did this request claim to be the owner", and one shared password reached it.
+  Nothing ever abused that. But the whole design of this system is that a rule
+  should be something the tools are incapable of breaking, not something
+  everything happens to respect, and "nothing does" is a weaker sentence than
+  "nothing can". Now the answer comes from *which key* a request arrives with,
+  and a request cannot choose its own key. There are two: one the command line
+  on your own Mac holds, which is you — it lives in the Mac's Keychain, and
+  the command line can reach it because it *is* you, running as you — and one
+  everything else holds, which can write your notes, your captures and your
+  agents' work, and simply cannot write the rules, no matter what it puts in
+  the message. The long-running part of Metistry that faces the network and
+  speaks for every agent is deliberately never given the first key; that is
+  enforced where its environment is built, not left to good behaviour. Exactly
+  two exceptions are written down in the open, and both are things you do on
+  screen and would otherwise have to do from a terminal: extending the
+  assistant's own instructions when you approve a suggestion, and moving a
+  model or a budget from the Compute pane on your phone. Everything else — the
+  agent definitions, the access rules, the queries, the installed version, the
+  assistant's operating instructions in your repository — is out of reach of
+  anything but your own hand, and any attempt is written down with the name of
+  what tried. If the key is missing, nothing gets to write those files at all,
+  including Metistry's own updater; it fails closed and tells you the one
+  command that fixes it. Updating mints the key for you, so an existing
+  install needs to do nothing at all.
+
+- 2026-09-20 — **The tasks in your notes are indexed, never stored.** A todo
+  you type as `- [ ] Call the dentist due friday` in any note is now readable
+  state — due dates, priorities, who it is waiting on, how long it has been
+  carried — without a single copy of it living anywhere but the line you
+  typed. The database holds a projection of your markdown and nothing else:
+  drop it entirely, let the walk run once, and every row comes back from the
+  notes that produced it. That is what makes the checkbox on disk the record
+  rather than a mirror of something else's opinion, and it is enforced by the
+  shape of the schema rather than promised by a convention — there are two
+  constraints deliberately absent from it, because a derived table that can
+  refuse to be rebuilt is not derived. Reading it is one query, which is the
+  same query the filter chips in the app, the `where:` line in your template
+  and the plugin's suggester all turn into — one filter language with three
+  faces instead of three that drift apart within a year. Everything it
+  returns that names a path or quotes a line you wrote is reachable only
+  through a door that checks who is asking; the one thing that travels freely
+  is the count, and it is grouped so that a count can never carry a path.
+
+- 2026-09-20 — **The daily note is rendered from a template you edit.** The
+  plan, the standup and the fold are produced from markdown files in your own
+  vault (`Templates/`), which you edit in Obsidian like any other note — eight
+  directives that fill in the day's date, your tasks in the order you asked
+  for, tomorrow's calendar, what an agent is waiting on you for, and your own
+  prioritisation prose included verbatim. What the engine cannot do is built
+  into its shape: a filter never becomes SQL text, a routine rendering a file
+  never calls a model, an included file's own directives are never evaluated,
+  and a recurring task is written into your note only by your own hand. A
+  directive that cannot be satisfied renders one visible line naming the
+  template and the line number, and the rest of the file still renders — a day
+  with no plan because the calendar was down is the worst possible outcome.
+  Every rendered file ends by naming the template and version that produced
+  it, and `metistry templates check` tells you whether the edit you just made
+  reads, without waiting for the next run.
+
+- 2026-09-20 — **The fold has its own file; your daily note is yours.** The
+  evening fold used to write straight into `Journal/<date>.md` — the same
+  file you write in by hand. It now writes `Journal/Fold/<date>.md` instead,
+  and the ownership rule that already refused an assistant write to a note it
+  does not own (`source:` neither its own nor the fold's) now backs that up
+  at the tool: nobody, not even the fold, edits your daily note again. When
+  you have stamped `Templates/Fold.md`, the fold renders it itself — dates,
+  your requests, an included section verbatim — and only asks a model to fill
+  the handful of prose slots the template marks as its own, in one turn, over
+  a rendered skeleton it cannot touch anywhere else. An instance that has not
+  stamped that template yet loses nothing: the fold writes the same freeform
+  note it always did, still at the new path, with one visible line saying why
+  there was no template to render.
+
+- 2026-09-20 — **Tomorrow's plan is written for you, from your own template.**
+  Once an evening, Metistry renders the plan file in your vault from
+  `Templates/Plan.md` — a markdown file you edit in Obsidian like any other
+  note — into `Journal/Plan/<tomorrow>.md`: tomorrow's events, the tasks your
+  template asked for in the order it asked for, what an agent is waiting on
+  you for, and your own prioritisation prose included word for word. No model
+  is anywhere in it: the ordering is a field list you wrote, and your
+  prioritisation *rule* is prose the plan carries for you to read, not
+  something a model is asked to apply. It writes exactly one file and never a
+  note you own — a plan file you have taken over is left exactly as it is, and
+  a recurring task is listed for tomorrow rather than written into a note,
+  because nothing but your own hand puts a task line in your notes. It plans
+  after the day end you stated in `Me/`, on the eve of a day you work, and if
+  you have not told it those things yet it writes nothing and says so rather
+  than guessing your week. Everything it could not reach — a calendar that was
+  down, a filter it could not read — is one visible line in the plan and the
+  rest of the day still renders, because a day with no plan because the
+  calendar was down is the worst possible outcome. Every file ends by naming
+  the template, its checksum and the version that produced it.

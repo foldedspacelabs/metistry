@@ -1,7 +1,7 @@
 {
   "name": "@metistry-apps/collectors",
   "private": true,
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Scheduled data pulls (invariant 5: one directory + manifest each; TypeScript per SHOULD-15; never call a model). Executed by the console's routine runner.",
   "license": "Apache-2.0",
   "type": "module",

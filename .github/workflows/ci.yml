@@ -44,6 +44,12 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter '@foldedspacelabs/*' run build
+      # The definition-token budget the manifest schema states (>20 tools /
+      # >5k tokens), for EVERY bridge rather than only the one whose own test
+      # remembers to check it. Placed after the build because it measures each
+      # bridge's real `tools/list` through the `toolSurface()` it ships, and
+      # prints the per-bridge numbers so the headroom is visible on every run.
+      - run: node ops/scripts/check-tool-surface.mjs
       - run: pnpm typecheck
       - name: migrations apply cleanly, twice (idempotence)
         env:

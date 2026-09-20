@@ -57,6 +57,28 @@ on that door tells a caller which route-only queries exist. The rows are
 still reachable, through the door that filters them: `knowledge_list`, which
 runs the same two queries through the same `canSeeUnder`.
 
+### A new read capability is a named query, not a new tool
+
+**The default answer to "the assistant needs to be able to look X up" is a
+named query behind `queries_run`, not a twenty-sixth tool.** Ruled 2026-09-19
+(`docs/research/2026-09-19-code-mode-mcp.md` §4.1); invariant 3 already
+requires the query to exist, so a tool would be a second door onto a read
+path that has one.
+
+The arithmetic, measured on this checkout: `seed/queries/` holds 20 named
+queries, and `queries_list` + `queries_run` front all of them for **284
+tokens of always-on definitions** in place of the **2,936** the same 20 would
+cost as individual tools — a 90% reduction, with the index itself deferred
+behind a call. A 21st query costs **~120 deferred tokens and zero eager
+ones**; a 21st tool costs **~180 eager tokens on every turn, forever**, and
+lands on a surface already 5 tools past the count line at which the manifest
+schema says to consider `discovery: lazy` (`ops/scripts/check-tool-surface.mjs`
+prints the headroom on every CI run).
+
+Write the query, give it `expose: generic`, and the assistant can run it the
+day it merges. A new **tool** is for a new *verb* — something the system can
+now do — and it arrives with the lazy-discovery decision attached.
+
 **Asking for more, named instead of guessed (ruled 2026-09-19, PR #216
 judgement call B).** `knowledge_read` and `knowledge_list`'s `links_for` stop
 at the bare "not granted" only when the caller could not already see the
@@ -88,10 +110,19 @@ psql -c "SELECT meta->>'alias' AS old, tool AS now, count(*) FROM runs
 
 An empty result is the signal that the aliases can come out.
 
-Every call also takes an optional `turn_id` (`seed/assistant-prompt.md`
-tells the assistant to make one up per reply and reuse it on every call
-within that reply); it lands in the `runs` row's `meta.turn_id`, and the
-`activity_feed` query surfaces it so one reply's calls group together.
+**The turn handle is the client's, not the model's.** Every call carries a
+`turn_id` into the `runs` row's `meta.turn_id`, which the `activity_feed`
+query surfaces so one reply's calls group together — but it is **not a tool
+parameter**. It rides in the MCP call's `_meta`, under
+`com.foldedspacelabs.metistry/turn_id`, and `apps/assistant/src/tools.ts`
+mints one per tool host, i.e. one per reply. Until 2026-09-19 it was an
+optional argument on all 25 tools and the seed prompt asked the model to
+invent one and pass it faithfully: ~940 definition tokens, 18.8% of the whole
+advertised surface, for a field no model should be reasoning about — and a
+convention rather than a control. A client still sending it as an argument is
+tolerated for one release: the bridge lifts it into `_meta` at the door
+(`packages/mcp-brain/src/turn-id.ts`), so nothing that already works stops
+working, and nothing advertises it.
 
 The SDK sees them as `mcp__brain__<tool>`; that fully-qualified list is
 the engine's `allowedTools`, built-in tools are disabled (`tools: []`),

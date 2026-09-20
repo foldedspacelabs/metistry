@@ -1,5 +1,7 @@
 export { createBrainServer, sanitizeDeep, EAGER_TOOL_NAMES, TASK_FILTERS, TOOL_NAMES, type BrainConfig, type BrainServer, type TaskFilter, type ToolName } from "./server.js";
 export { ALIAS_NAMES, TOOL_ALIASES, resolveAliasCall } from "./aliases.js";
+export { TURN_ID_META_KEY, liftTurnId, turnIdFrom, validTurnId } from "./turn-id.js";
+export { toolSurface, type ToolDefinition } from "./surface.js";
 export {
   captureToInbox,
   dirSink,

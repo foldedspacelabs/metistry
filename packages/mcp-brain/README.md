@@ -91,9 +91,25 @@ optional nudge line. Errors set `isError` and carry core's uniform envelope
 | `queries_list` | — | `{ queries: [{ name, description, params: { <param>: { type, default? } } }] }` — every named query loaded into the injected `QueryStore` (invariant 3) |
 | `queries_run` | `name`, `params?: Record<string, string \| number \| boolean>` | `{ name, params, rows, as_of, row_count, truncated? }` — rows capped at 200 (`truncated: true` past the cap); `not_found` for an unknown query, `invalid_request` for a bad/unknown param. Internal principals always; external agents need a `queries: true` grant. |
 
-Every tool above also takes an optional `turn_id` (`≤ 64 chars`, `[A-Za-z0-9_-]`):
-pass the same value on every call within one reply and they group under it in
-`runs.meta.turn_id` (and the `activity_feed` query's `turn_id` column).
+**Correlating one reply's calls.** Put a handle in the `_meta` of each
+`tools/call` — key `com.foldedspacelabs.metistry/turn_id`, value `≤ 64 chars`
+of `[A-Za-z0-9_-]` — and the calls carrying the same value group under it in
+`runs.meta.turn_id` (and the `activity_feed` query's `turn_id` column):
+
+```jsonc
+{ "method": "tools/call",
+  "params": { "name": "knowledge_read",
+              "arguments": { "path": "Areas/Fsl/Note.md" },
+              "_meta": { "com.foldedspacelabs.metistry/turn_id": "b1f0…" } } }
+```
+
+It is deliberately **not** a tool parameter: printed into all 25 schemas it
+cost ~940 definition tokens, 19% of the whole advertised surface, for a field
+no model should be reasoning about. It is a correlation handle — shape-checked
+and stored, never trusted for anything else, and a malformed one is dropped
+rather than failing the call. *Until 0.10.0 it was an optional `turn_id`
+argument on every tool; that still works for one release and is not
+advertised.*
 
 Policy refusals from the task list (`claimed`, `dependencies_open`,
 `not_holder`, `lease_expired`, …) are *outcomes*, returned as data; only a

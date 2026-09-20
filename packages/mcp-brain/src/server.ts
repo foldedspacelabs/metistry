@@ -53,6 +53,7 @@ import { computeNudge } from "./nudge.js";
 import { done, fail, type Outcome } from "./outcome.js";
 import { REPORT_KINDS, submitReport } from "./report.js";
 import { allProjects, memberOf } from "./scope.js";
+import { liftTurnId, turnIdFrom } from "./turn-id.js";
 import type { AgentPrincipal, Db } from "./types.js";
 
 export interface BrainConfig {
@@ -116,6 +117,15 @@ export interface BrainServer {
  * than fitting under it (docs/research/2026-08-tool-discovery.md).
  * Deprecated spellings live in aliases.ts and resolve at call time — they are
  * NOT listed here, so neither the count nor the token budget grows for them.
+ *
+ * 2026-09-19: that measurement is now ~4.0k, because `turn_id` came out of all
+ * 25 schemas and moved to the call's `_meta` (turn-id.ts) — 944 tokens, 19% of
+ * the surface, for a field that was never a parameter. The headroom is not an
+ * invitation: on COUNT this bridge is five tools past the >20 line, and
+ * `ops/scripts/check-tool-surface.mjs` fails on the 26th eager tool rather
+ * than letting it land quietly. A new READ capability is a named query behind
+ * `queries_run` (docs/ops/assistant-tools.md); a new tool is a new verb, and
+ * it arrives with the lazy decision attached.
  */
 export const TOOL_NAMES = [
   "capture",
@@ -186,19 +196,15 @@ export const TASK_FILTERS = ["ready", "mine", "all"] as const;
 export type TaskFilter = (typeof TASK_FILTERS)[number];
 
 /**
- * Every tool takes this, merged into its schema by `reg` below — a caller
- * (the assistant, a crew, an external agent) that generates one id per
- * reply and passes it on every call in that reply gets its `runs` rows
- * grouped for free (`meta.turn_id`; surfaced in the `activity_feed` query).
- * Not identity, not auth — a caller-supplied correlation handle, so it is
- * validated (shape only) and stored, never trusted for anything else.
+ * What a tool handler is handed besides its arguments: the SDK's request
+ * context, narrowed to the two fields this bridge reads — the JSON-RPC id
+ * (which the deprecated-name rewriter keys its note by) and the call's
+ * `_meta` (which carries the turn handle; turn-id.ts).
  */
-const turnId = z
-  .string()
-  .max(64)
-  .regex(/^[A-Za-z0-9_-]+$/)
-  .optional()
-  .describe("Optional: reuse per reply to group calls in the activity feed.");
+interface ToolCallExtra {
+  requestId?: string | number;
+  _meta?: Record<string, unknown> | undefined;
+}
 
 export function createBrainServer(cfg: BrainConfig): BrainServer {
   const { db, tasks } = cfg;
@@ -244,15 +250,17 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
     const server = new McpServer({ name: "metistry-brain", version }, { capabilities: { tools: {} } });
 
     /** Every tool call: one two-phase runs row (component = agent id), sanitizer, nudge. */
-    function wrap<A>(name: ToolName, body: (args: A) => Promise<Outcome>): (args: A, extra?: { requestId?: string | number }) => Promise<CallToolResult> {
-      return async (args: A, extra?: { requestId?: string | number }) => {
-        // turn_id (merged into every schema by `reg`) travels in meta.turn_id, not
-        // inside args' own summary — one place to find it, joinable by activity_feed.
-        const { turn_id, ...rest } = (args ?? {}) as unknown as Record<string, unknown>;
+    function wrap<A>(name: ToolName, body: (args: A) => Promise<Outcome>): (args: A, extra?: ToolCallExtra) => Promise<CallToolResult> {
+      return async (args: A, extra?: ToolCallExtra) => {
+        // The turn handle rides in the call's `_meta`, never in a schema
+        // (turn-id.ts): one place to find it, joinable by activity_feed, and
+        // 938 tokens the model never reads. A legacy `arguments.turn_id` was
+        // already lifted there by `handle` below.
+        const turn_id = turnIdFrom(extra?._meta);
         // a call that came in under a deprecated name is recorded under the primary
         // one, with the old spelling in meta.alias — so the stragglers are countable.
         const alias = extra?.requestId !== undefined ? aliasByRequestId.get(String(extra.requestId)) : undefined;
-        const runMeta = { via: "mcp-brain", args: summarizeArgs(rest), ...(typeof turn_id === "string" ? { turn_id } : {}), ...(alias ? { alias } : {}) };
+        const runMeta = { via: "mcp-brain", args: summarizeArgs(args), ...(turn_id !== undefined ? { turn_id } : {}), ...(alias ? { alias } : {}) };
         const runId = await startRun(db, { component: principal.id, kind: "tool", tool: name, meta: runMeta });
         let outcome: Outcome;
         try {
@@ -270,10 +278,13 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
       };
     }
 
-    // turn_id is merged into every tool's schema here — one place, so no
-    // individual tool file has to remember it (§ the join key, not a control).
+    // One registration point, so a tool file declares its own parameters and
+    // nothing else. Nothing is merged into a schema here any more: the turn
+    // handle used to be, and at 938 tokens across 25 tools it was 18.8% of the
+    // whole advertised surface for a field that is not a parameter
+    // (turn-id.ts, docs/research/2026-09-19-code-mode-mcp.md §2.4).
     const reg = <S extends z.ZodRawShape>(name: ToolName, description: string, inputSchema: S, body: (args: z.infer<z.ZodObject<S>>) => Promise<Outcome>) =>
-      server.registerTool(name, { description, inputSchema: { ...inputSchema, turn_id: turnId } }, wrap(name, body) as never);
+      server.registerTool(name, { description, inputSchema }, wrap(name, body) as never);
 
     reg(
       "capture",
@@ -545,14 +556,17 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
       });
       // The SDK's class types its optional handlers as `| undefined`, which exactOptionalPropertyTypes rejects; same object at runtime.
       await server.connect(transport as unknown as Transport);
-      // Deprecated names (aliases.ts) are rewritten on the way in, after connect
-      // installed the real handler: one release of compatibility with no second
-      // copy of any schema on the listed surface.
+      // Two rewrites on the way in, after connect installed the real handler,
+      // and both are one release of compatibility with nothing added to the
+      // listed surface: deprecated names (aliases.ts) become their primary
+      // spelling, and a legacy `arguments.turn_id` moves to the call's `_meta`
+      // (turn-id.ts) before any schema could strip it.
       const deliver = transport.onmessage;
       if (deliver) {
         transport.onmessage = (message, extra) => {
           const hit = resolveAliasCall(message);
           if (hit?.id !== undefined) aliasByRequestId.set(String(hit.id), hit.alias);
+          liftTurnId(message);
           deliver(message, extra);
         };
       }

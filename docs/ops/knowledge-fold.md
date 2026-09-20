@@ -95,14 +95,18 @@ both say which of the two happened (`"skeleton"` or `"fallback"`), so it is a
 fact you can query, not something to infer from the text.
 
 The query store and the vault reader `Templates/Fold.md` (and any `include`
-inside it) are read through are both **optional** on the routine's context
-today — `apps/console/src/main.ts` already builds both a `QueryStore` and a
-vault-reading client for its own routes, but does not yet hand either to the
-runner's routines. Until that plumbing lands, every fold on every instance
-takes the fallback path above, which is itself the complete, correct P1-9
-behaviour (the new path, the new ownership, the visible note) — the skeleton
-path activates automatically, with no further change here, the day that
-wiring is added.
+inside it) are read through are both **optional** on the routine's context —
+absent, every query-backed or vault-backed directive renders its own §6.4
+"not configured" note rather than failing the render. The console's runner
+(`apps/console/src/runner.ts`'s `routineCapabilities`, called from
+`apps/console/src/main.ts`) builds both, once, from the objects the process
+already has for its own routes: the `QueryStore` as `ctx.queries`, and a
+`TemplateReader` over the vault bridge client (`vaultReader`,
+`routines/vault-reader.ts` — the same adapter `plan-tomorrow` builds from its
+own `ctx.vault`) as `ctx.reader`. So on an instance with the reconciler
+bridge configured and `Templates/Fold.md` stamped in the vault (`metistry
+init`), the fold takes the skeleton path; the fallback above is what an
+instance without either gets, not a permanent state of every install.
 
 ## Schedule (and why it is hourly)
 

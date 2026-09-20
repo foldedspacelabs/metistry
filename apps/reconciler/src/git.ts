@@ -52,7 +52,19 @@ export class Git {
     }
     // An automated committer must never sign as the user; keep the rest of
     // the user's global config (credential helpers) so push works.
-    const argv = ["-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false", ...args];
+    //
+    // …and, when this install confines the reconciler, route HTTP(S)
+    // through the supervisor's egress proxy. It is `-c http.proxy` rather
+    // than an environment variable because the environment above is a
+    // deliberate allowlist — `HTTPS_PROXY` would have to be added to it
+    // anyway, and one explicit flag is easier to read in a log than a
+    // variable curl may or may not honour. With the profile in force this
+    // is the ONLY way out: a direct connect is refused by the kernel, and a
+    // host the allowlist does not name comes back as
+    // `fatal: … CONNECT tunnel failed, response 403`
+    // (packages/core/src/egress.ts; ops/sandbox/reconciler.sb).
+    const proxy = process.env.METISTRY_GIT_HTTP_PROXY?.trim();
+    const argv = ["-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false", ...(proxy ? ["-c", `http.proxy=${proxy}`] : []), ...args];
     return new Promise((resolve) => {
       execFile(
         "git",

@@ -358,7 +358,7 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
     // access.ts, so the description states it rather than pleading for it.
     reg(
       "request_access",
-      "Ask the owner for read access to one vault area (TitleCase prefix, e.g. Areas/Health) and say why. Grants nothing: it raises one request in their Needs You queue to approve, narrow or decline. A repeat ask returns the pending one; after an approval the read simply works; after a decline you are told so, and may ask once more with escalate.",
+      "Ask the owner for the `areas` grant on one vault folder (TitleCase prefix, e.g. Areas/Health) and say why. Grants nothing: it raises one request in their Needs You queue to approve, narrow or decline. A repeat ask returns the pending one; after an approval the read simply works; after a decline you are told so, and may ask once more with escalate.",
       {
         area: z.string().min(1).max(200).describe("The vault prefix you need, e.g. Areas/Health."),
         reason: z.string().min(1).max(1000).describe("Why you need it — what you were doing when you were refused."),
@@ -509,7 +509,7 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
 
     reg(
       "knowledge_read",
-      "Read one settled note by vault path; requires an `areas` grant covering it. Returned sha256 feeds knowledge_write's expected_sha256.",
+      "Read one settled note by vault path; needs the `areas` grant covering its folder. Returned sha256 feeds knowledge_write's expected_sha256.",
       { path: z.string().min(1).max(500) },
       async (a) => {
         const scope = knowledgeScope(principal);
@@ -532,7 +532,7 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
     // The assistant's write path (knowledge-write.ts): internal principals only.
     reg(
       "knowledge_write",
-      "Write one note in the vault as a commit in your name (internal assistant only; others get `not granted` — use requests_create). Whole-file replace; frontmatter gets `source`/`updated` stamped. " +
+      "Write one note in the vault as a commit in your name (the instance assistant alone; others use requests_create). Whole-file replace; frontmatter gets `source`/`updated` stamped. " +
         'To CHANGE a note: knowledge_read it and pass its sha256 back as expected_sha256. Omitting it means create-only, so an existing note answers `conflict` with the current hash rather than being overwritten unseen. ' +
         "A note whose `source` is someone else's is refused — report instead; notes you or the fold wrote are yours. Protected paths are refused; deletes/renames are not available.",
       {

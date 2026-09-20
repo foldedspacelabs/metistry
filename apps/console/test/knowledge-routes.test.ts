@@ -25,9 +25,18 @@ import {
   grantedScope,
   knowledgeRoutes,
   vaultBridgeSearch,
-  type KnowledgeScope,
   type KnowledgeSearchHit,
 } from "../src/knowledge-routes.js";
+import type { Principal } from "@foldedspacelabs/metistry-core";
+
+// The routes take the PRINCIPAL since P4 of
+// docs/research/2026-09-19-grants-and-access-simplified.md §4 — not a scope.
+// The reason is the whole of that phase: what the owner gets on a path this
+// door does not serve is not a narrower scope, it is a CLASSIFICATION, and a
+// scope cannot say which credential it came from.
+const OWNER: Principal = { id: "owner", role: "owner", scope: { tier: "areas", areas: null, queries: true, projects: null }, source: "registry" };
+const NOBODY: Principal = { id: "owner_token", role: "tool", scope: { tier: "none", areas: [], queries: false, projects: [] }, source: "registry" };
+const granted = (areas: string[]): Principal => ({ id: "scout", role: "agent", scope: { tier: "areas", areas, queries: false, projects: [] }, source: "registry" });
 
 const hit = (path: string): KnowledgeSearchHit => ({ path, title: path, description: null, snippet: "…", score: 1, source: "keyword" });
 
@@ -104,7 +113,7 @@ function capture(): { res: ServerResponse; read: () => { status: number; body: a
  * own filter over whatever the index holds, which no database is needed to
  * decide.
  */
-async function pagesRoute(scope: KnowledgeScope, rows: Record<string, unknown>[], qs = ""): Promise<{ status: number; body: any; params: unknown[] }> {
+async function pagesRoute(principal: Principal, rows: Record<string, unknown>[], qs = ""): Promise<{ status: number; body: any; params: unknown[] }> {
   const params: unknown[][] = [];
   const store = new QueryStore({
     async query(_text, values) {
@@ -115,7 +124,7 @@ async function pagesRoute(scope: KnowledgeScope, rows: Record<string, unknown>[]
   store.load(await readFile(new URL("../../../seed/queries/knowledge_pages.yaml", import.meta.url), "utf8"));
   const c = capture();
   const url = new URL(`http://x/api/knowledge/pages${qs}`);
-  await knowledgeRoutes(new IncomingMessage(new Socket()), c.res, "GET /api/knowledge/pages", url, { queries: store }, scope, async () => {});
+  await knowledgeRoutes(new IncomingMessage(new Socket()), c.res, "GET /api/knowledge/pages", url, { queries: store }, principal, async () => {});
   return { ...c.read(), params: params[0] ?? [] };
 }
 
@@ -130,7 +139,7 @@ describe("the page list is scoped to the principal that asked for it", () => {
   ];
 
   it("gives the owner their whole vault, and still not the machinery in it", async () => {
-    const r = await pagesRoute(OWNER_SCOPE, INDEX);
+    const r = await pagesRoute(OWNER, INDEX);
     expect(r.status).toBe(200);
     expect(r.body.pages.map((p: any) => p.path)).toEqual([
       "Areas/Health/sleep.md",
@@ -146,7 +155,7 @@ describe("the page list is scoped to the principal that asked for it", () => {
   // bearer is the uniform 403 — CRIT-7), which is exactly why the narrowing
   // has to be held by a test rather than by the call site being lucky.
   it("gives a principal with grants only its own areas — the same rows, one filter apart", async () => {
-    const r = await pagesRoute(grantedScope({ grants: { tier: "areas", areas: ["Areas/Health"] } }), INDEX);
+    const r = await pagesRoute(granted(["Areas/Health"]), INDEX);
     expect(r.status).toBe(200);
     expect(r.body.pages.map((p: any) => p.path)).toEqual(["Areas/Health/sleep.md"]);
     // Nothing about what was withheld travels with the answer: no total, no
@@ -157,7 +166,7 @@ describe("the page list is scoped to the principal that asked for it", () => {
   });
 
   it("gives a credential with neither the vault nor grants nothing at all", async () => {
-    const r = await pagesRoute(NO_SCOPE, INDEX);
+    const r = await pagesRoute(NOBODY, INDEX);
     expect(r.status).toBe(200);
     expect(r.body.pages).toEqual([]);
   });
@@ -169,7 +178,7 @@ describe("the page list is scoped to the principal that asked for it", () => {
   // the point: the scope is not a restatement of the filter, so a query that
   // ignored one — an overlay with a looser WHERE (D4) — still leaks nothing.
   it("passes the caller's filters to the query and scopes every row it gets back regardless", async () => {
-    const r = await pagesRoute(grantedScope({ grants: { tier: "areas", areas: ["Areas/Health"] } }), INDEX, "?prefix=Areas/Finance&limit=5&offset=2");
+    const r = await pagesRoute(granted(["Areas/Health"]), INDEX, "?prefix=Areas/Finance&limit=5&offset=2");
     expect(r.status).toBe(200);
     expect(r.params).toEqual(["", "Areas/Finance", 5, 2]);
     expect(r.body.pages.map((p: any) => p.path)).toEqual(["Areas/Health/sleep.md"]);
@@ -184,7 +193,7 @@ describe("the page list is scoped to the principal that asked for it", () => {
  * because the two routes filter through the same predicate and a test that
  * proved it for one would say nothing about the other.
  */
-async function linksRoute(scope: KnowledgeScope, rows: Record<string, unknown>[], qs = ""): Promise<{ status: number; body: any; params: unknown[] }> {
+async function linksRoute(principal: Principal, rows: Record<string, unknown>[], qs = ""): Promise<{ status: number; body: any; params: unknown[] }> {
   const params: unknown[][] = [];
   const store = new QueryStore({
     async query(_text, values) {
@@ -195,7 +204,7 @@ async function linksRoute(scope: KnowledgeScope, rows: Record<string, unknown>[]
   store.load(await readFile(new URL("../../../seed/queries/knowledge_page_links.yaml", import.meta.url), "utf8"));
   const c = capture();
   const url = new URL(`http://x/api/knowledge/links${qs}`);
-  await knowledgeRoutes(new IncomingMessage(new Socket()), c.res, "GET /api/knowledge/links", url, { queries: store }, scope, async () => {});
+  await knowledgeRoutes(new IncomingMessage(new Socket()), c.res, "GET /api/knowledge/links", url, { queries: store }, principal, async () => {});
   return { ...c.read(), params: params[0] ?? [] };
 }
 
@@ -209,7 +218,7 @@ describe("the link list scopes BOTH ends of every edge", () => {
   ];
 
   it("gives the owner every edge that is knowledge, and not the one that is not", async () => {
-    const r = await linksRoute(OWNER_SCOPE, EDGES, "?path=Areas/Health/sleep.md");
+    const r = await linksRoute(OWNER, EDGES, "?path=Areas/Health/sleep.md");
     expect(r.status).toBe(200);
     expect(r.params).toEqual(["Areas/Health/sleep.md", 100, 0]);
     expect(r.body.links.map((l: any) => l.path)).toEqual([
@@ -229,7 +238,7 @@ describe("the link list scopes BOTH ends of every edge", () => {
   // The second end is the one a naive implementation forgets: a page inside
   // the grant can link OUT of it, and a page outside it can link IN.
   it("drops an edge whose other end the scope does not cover, in either direction", async () => {
-    const r = await linksRoute(grantedScope({ grants: { tier: "areas", areas: ["Areas/Health"] } }), EDGES, "?path=Areas/Health/sleep.md");
+    const r = await linksRoute(granted(["Areas/Health"]), EDGES, "?path=Areas/Health/sleep.md");
     expect(r.status).toBe(200);
     expect(r.body.links.map((l: any) => l.path)).toEqual(["Areas/Health/taper.md", "Areas/Health/nowhere.md"]);
     const text = JSON.stringify(r.body);
@@ -239,21 +248,23 @@ describe("the link list scopes BOTH ends of every edge", () => {
   // The first end. A path the caller may not see must not be answerable for
   // at all — "this page has four backlinks" is a fact about a page.
   it("answers 404 for a page the scope does not cover, in the words a missing page gets", async () => {
-    const outside = await linksRoute(grantedScope({ grants: { tier: "areas", areas: ["Areas/Health"] } }), EDGES, "?path=Areas/Finance/tax.md");
-    const machinery = await linksRoute(OWNER_SCOPE, EDGES, "?path=.metistry/compute.yaml");
+    const outside = await linksRoute(granted(["Areas/Health"]), EDGES, "?path=Areas/Finance/tax.md");
+    const machinery = await linksRoute(granted(["Areas/Health"]), EDGES, "?path=.metistry/compute.yaml");
     for (const r of [outside, machinery]) {
       expect(r.status).toBe(404);
       expect(r.body.error.code).toBe("not_found");
       expect(r.body.error.message).toContain("no such page");
       expect(r.params).toEqual([]); // and the query never ran: a refusal costs the cluster nothing
     }
-    // The same answer the page route gives, so the two cannot be compared to
-    // tell "refused" from "absent".
+    // The same answer, so the two cannot be compared to tell "refused" from
+    // "absent" — and neither is the OWNER's answer, which classifies the
+    // machinery and names where it lives instead (P4, below).
     expect(outside.body).toEqual(machinery.body);
+    expect((await linksRoute(OWNER, EDGES, "?path=.metistry/compute.yaml")).body).not.toEqual(machinery.body);
   });
 
   it("requires the path by name, and refuses a limit or offset out of range by name", async () => {
-    const missing = await linksRoute(OWNER_SCOPE, EDGES);
+    const missing = await linksRoute(OWNER, EDGES);
     expect(missing.status).toBe(400);
     expect(missing.body.error.message).toContain("path is required");
     for (const [qs, needle] of [
@@ -261,7 +272,7 @@ describe("the link list scopes BOTH ends of every edge", () => {
       ["?path=Areas/Health/sleep.md&limit=501", "between 1 and 500"],
       ["?path=Areas/Health/sleep.md&offset=-1", "non-negative integer"],
     ] as const) {
-      const r = await linksRoute(OWNER_SCOPE, EDGES, qs);
+      const r = await linksRoute(OWNER, EDGES, qs);
       expect(r.status, qs).toBe(400);
       expect(r.body.error.message, qs).toContain(needle);
     }
@@ -270,7 +281,7 @@ describe("the link list scopes BOTH ends of every edge", () => {
   it("says which file is missing when the named query is not loaded, rather than 500ing", async () => {
     const c = capture();
     const url = new URL("http://x/api/knowledge/links?path=Areas/Health/sleep.md");
-    await knowledgeRoutes(new IncomingMessage(new Socket()), c.res, "GET /api/knowledge/links", url, {}, OWNER_SCOPE, async () => {});
+    await knowledgeRoutes(new IncomingMessage(new Socket()), c.res, "GET /api/knowledge/links", url, {}, OWNER, async () => {});
     const r = c.read();
     expect(r.status).toBe(503);
     expect(r.body.error.message).toContain("knowledge_page_links.yaml");
@@ -282,34 +293,44 @@ describe("the link list scopes BOTH ends of every edge", () => {
 // Agents, however, should only have access to what they're granted. Dropping
 // artifacts from the owner's access isn't right."
 //
-// The owner's access to `Artifacts/` is the ARTIFACTS door — the service, the
-// versions, the raw-file route with its content types and `no-store`
-// (decision #14) — and `apps/console/test/artifacts.integration.test.ts`
-// reads one end to end over a real vault. THIS door is the knowledge index,
-// which no indexer has ever walked `Artifacts/` into, so there is no page
-// here to serve. What changed is what it SAYS: the owner is pointed at the
-// door that has their files instead of being told they do not exist. An
-// agent still gets the one uniform sentence — for them, refused and absent
-// must stay indistinguishable.
-describe("Artifacts on the knowledge door: a signpost for the owner, the uniform refusal for an agent", () => {
-  const pageRoute = async (scope: KnowledgeScope, path: string): Promise<{ status: number; body: any }> => {
+// P4 is where that stops being a special case for `Artifacts/` and becomes
+// the rule: `may` refuses the owner NOTHING, and a path this door does not
+// serve gets a CLASSIFICATION instead — what it is, and which door has it
+// (`needs.door`). Not a 403, and not a 404 pretending it is not there: it is
+// there, behind another door. The owner's artifacts are the ARTIFACTS door —
+// the service, the versions, the raw-file route with its content types and
+// `no-store` (decision #14) — and
+// `apps/console/test/artifacts.integration.test.ts` reads one end to end
+// over a real vault.
+//
+// An agent gets NONE of this: the one uniform sentence, the same 404, byte
+// for byte, because for them refused and absent must stay indistinguishable.
+describe("the owner is classified, never refused; an agent gets the uniform answer", () => {
+  const pageRoute = async (principal: Principal, path: string): Promise<{ status: number; body: any }> => {
     const c = capture();
     const url = new URL(`http://x/api/knowledge/page?path=${encodeURIComponent(path)}`);
-    await knowledgeRoutes(new IncomingMessage(new Socket()), c.res, "GET /api/knowledge/page", url, {}, scope, async () => {});
+    await knowledgeRoutes(new IncomingMessage(new Socket()), c.res, "GET /api/knowledge/page", url, {}, principal, async () => {});
     return c.read();
   };
 
-  it("tells the owner where their artifacts actually are", async () => {
+  it("tells the owner where their artifacts actually are, and names that door in `needs`", async () => {
     for (const path of ["Artifacts", "Artifacts/report.pdf", "Artifacts/fsl/site/index.html"]) {
-      const r = await pageRoute(OWNER_SCOPE, path);
-      expect(r.status, path).toBe(404); // there IS no page: this door reads the index
-      expect(r.body.error.message, path).toContain("/api/artifacts");
+      const r = await pageRoute(OWNER, path);
+      // 400, not 404: the caller named a path this door does not serve. A
+      // 404 would be this door claiming the file is not there, which it is.
+      expect(r.status, path).toBe(400);
+      expect(r.body, path).toMatchObject({
+        error: { code: "invalid_request", message: expect.stringContaining("/api/artifacts") },
+        reason: "not_knowledge",
+        needs: { door: "GET /api/artifacts" },
+      });
+      expect(r.body.error.message, path).toContain("is an artifact, not knowledge");
       expect(r.body.error.message, path).not.toContain("no such page");
     }
   });
 
   it("says nothing of the kind to an agent — refused and absent stay the same answer", async () => {
-    const agent = grantedScope({ grants: { tier: "areas", areas: ["Areas/Health"] } });
+    const agent = granted(["Areas/Health"]);
     const refused = await pageRoute(agent, "Artifacts/report.pdf");
     const absent = await pageRoute(agent, "Areas/Finance/tax.md");
     expect(refused.status).toBe(404);
@@ -318,20 +339,42 @@ describe("Artifacts on the knowledge door: a signpost for the owner, the uniform
     expect(refused.body.error.message).not.toContain("/api/artifacts");
   });
 
-  it("is only about Artifacts: the machinery gets the uniform sentence, owner or not", async () => {
-    for (const path of [".metistry/compute.yaml", ".metistry/state/.env", "CLAUDE.md", "../etc/passwd"]) {
-      const r = await pageRoute(OWNER_SCOPE, path);
-      expect(r.status, path).toBe(404);
-      expect(r.body.error.message, path).toContain("no such page");
+  it("classifies the machinery for the owner too — and serves not one byte of it", async () => {
+    // The `.env` is the case worth being explicit about: "the owner has
+    // everything" does NOT make this door serve it. No door serves it as a
+    // page; it is the file itself, 0600, on the machine that is theirs.
+    for (const path of [".metistry/compute.yaml", ".metistry/state/.env", "CLAUDE.md"]) {
+      const r = await pageRoute(OWNER, path);
+      expect(r.status, path).toBe(400);
+      expect(r.body, path).toMatchObject({ reason: "not_knowledge", needs: { door: "the file itself" } });
+      expect(r.body.error.message, path).toContain("is machinery, not knowledge");
       expect(r.body.error.message, path).not.toContain("/api/artifacts");
+      expect(JSON.stringify(r.body), path).not.toContain("content"); // no bytes, on any path
+    }
+    // A path that escapes the vault is `outside` before it is anything, so
+    // the classification names no door — there is nothing to point at.
+    const escaped = await pageRoute(OWNER, "../etc/passwd");
+    expect(escaped.status).toBe(400);
+    expect(escaped.body.needs ?? null).toBeNull();
+    expect(escaped.body.error.message).toContain("is outside the vault");
+  });
+
+  it("gives an agent NOTHING P4 gave the owner — same code, same sentence, no reason, no needs", async () => {
+    const agent = granted(["Areas/Health"]);
+    for (const path of ["Artifacts/report.pdf", ".metistry/state/.env", "CLAUDE.md", "Areas/Finance/tax.md"]) {
+      const r = await pageRoute(agent, path);
+      expect(r.status, path).toBe(404);
+      expect(r.body, path).toEqual({ error: { code: "not_found", message: expect.stringContaining("no such page") } });
+      expect(Object.keys(r.body), path).toEqual(["error"]); // no reason, no needs: a hidden refusal says nothing about itself
     }
   });
 
   it("the link list answers the same way, so the two doors cannot drift", async () => {
-    const owner = await linksRoute(OWNER_SCOPE, [], "?path=Artifacts/report.pdf");
-    expect(owner.status).toBe(404);
+    const owner = await linksRoute(OWNER, [], "?path=Artifacts/report.pdf");
+    expect(owner.status).toBe(400);
     expect(owner.body.error.message).toContain("/api/artifacts");
-    const agent = await linksRoute(grantedScope({ grants: { tier: "areas", areas: ["Areas/Health"] } }), [], "?path=Artifacts/report.pdf");
+    const agent = await linksRoute(granted(["Areas/Health"]), [], "?path=Artifacts/report.pdf");
+    expect(agent.status).toBe(404);
     expect(agent.body.error.message).toContain("no such page");
   });
 

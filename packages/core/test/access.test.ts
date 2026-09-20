@@ -14,7 +14,21 @@
 // predicate that makes them unreachable over `/api/knowledge/page` and over
 // `/mcp`'s knowledge tools.
 import { describe, expect, it } from "vitest";
-import { NO_SCOPE, OWNER_SCOPE, canSee, filterHits, filterPages, grantedScope } from "../src/index.js";
+import {
+  NO_SCOPE,
+  OWNER_SCOPE,
+  RESOURCE_CLASSES,
+  canSee,
+  classify,
+  describeScope,
+  filterHits,
+  filterPages,
+  formatRefusal,
+  grantedScope,
+  isVaultPath,
+  may,
+  type Principal,
+} from "../src/index.js";
 
 /** The console's search hit, structurally — `filterHits` is generic over anything carrying a `path`. */
 interface Hit {
@@ -171,5 +185,143 @@ describe("grantedScope: an agent's grants, as a vault scope", () => {
     expect(canSee("Areas/Health/sleep.md", NO_SCOPE)).toBe(false);
     expect(canSee("now.md", NO_SCOPE)).toBe(false);
     expect(canSee("now.md", OWNER_SCOPE)).toBe(true);
+  });
+});
+
+// ===========================================================================
+// classify() · describeScope() · formatRefusal() — P3/P4
+// ===========================================================================
+
+describe("classify: what a path IS, which is not what anybody may do with it", () => {
+  it("agrees with isVaultPath exactly, for every shape the vault has", () => {
+    const paths = [
+      "Areas/Health/sleep.md",
+      "now.md",
+      "Journal/2026-09-20.md",
+      "Inbox/note.md",
+      "Inbox/.large/blob.bin",
+      "Artifacts",
+      "Artifacts/report.pdf",
+      ".metistry/compute.yaml",
+      ".metistry/state/.env",
+      ".obsidian/workspace.json",
+      ".git/config",
+      "CLAUDE.md",
+      "README.md",
+      "identity.yaml",
+      "state/.env",
+      "Areas/../../etc/passwd",
+      "/etc/passwd",
+      "Areas//double.md",
+      "",
+    ];
+    // The property P4 rests on: the indexer's rule did not change, it was
+    // given a name. A `classify` that drifted from `isVaultPath` would index
+    // something the knowledge door refuses, or refuse something it indexes.
+    for (const p of paths) expect([p, classify(p) === "knowledge"], p).toEqual([p, isVaultPath(p)]);
+  });
+
+  it("names the other three, so a refusal can point at the door that has it", () => {
+    expect(classify("Artifacts/report.pdf")).toBe("artifact");
+    expect(classify("Artifacts")).toBe("artifact");
+    expect(classify(".metistry/state/.env")).toBe("machinery");
+    expect(classify(".obsidian/workspace.json")).toBe("machinery");
+    expect(classify("CLAUDE.md")).toBe("machinery");
+    expect(classify("Areas/../../etc/passwd")).toBe("outside");
+    expect(classify("/etc/passwd")).toBe("outside");
+    expect(classify("")).toBe("outside");
+    expect(RESOURCE_CLASSES).toEqual(["knowledge", "artifact", "machinery", "outside"]);
+  });
+
+  it("calls an escaping path `outside` before it calls it an artifact", () => {
+    // Traversal wins over the prefix: a path that leaves the vault is
+    // malformed before it is anything, and an `artifact` answer would put a
+    // door's name on it.
+    expect(classify("Artifacts/../.metistry/state/.env")).toBe("outside");
+  });
+});
+
+describe("describeScope: one structure, one triple, every surface", () => {
+  const agent: Principal = {
+    id: "scout",
+    role: "agent",
+    scope: { tier: "areas", areas: ["Areas/Health", "Journal"], queries: true, projects: ["alpha"], autonomy: { level: "propose" } },
+    source: "registry",
+  };
+
+  // A SNAPSHOT, deliberately: the whole point of P3 is that the CLI, the
+  // console panel and the Needs You card say the same words, and the way a
+  // wording drifts is one surface changing it. Pin the words.
+  it("renders an agent's scope as the same line it always renders", () => {
+    const v = describeScope(agent);
+    expect(v.line).toBe("an agent · folders: Areas/Health, Journal · queries, projects: alpha, autonomy: propose");
+    expect(v.access).toBe("folders");
+    expect(v.extras).toEqual(["queries", "projects: alpha", "autonomy: propose"]);
+    expect(v.from).toBe("the registry — the owner's own hand, durable");
+  });
+
+  it("says the owner's whole vault as a vault, never as an empty list", () => {
+    const owner: Principal = { id: "owner", role: "owner", scope: { tier: "areas", areas: null, queries: true, projects: null }, source: "registry" };
+    const v = describeScope(owner);
+    expect(v.areas).toBeNull();
+    expect(v.line).toBe("the owner · folders: the whole vault · queries, every project, autonomy: observe");
+    // …and a grant of NOTHING reads as nothing. The two must never look the
+    // same on a screen: one is the person whose vault it is, the other is a
+    // credential that holds no area at all.
+    const none: Principal = { id: "x", role: "agent", scope: { tier: "areas", areas: [], queries: false, projects: [] }, source: "registry" };
+    expect(describeScope(none).scope).toBe("folders: nothing");
+  });
+
+  it("gives a crew its toolset and names the manifest its scope came from", () => {
+    const crew: Principal = {
+      id: "writer",
+      role: "crew",
+      scope: { tier: "index", areas: [], queries: false, projects: [] },
+      source: { manifest: "agents/ops/writer.md" },
+      uses: ["knowledge", "requests"],
+    };
+    const v = describeScope(crew);
+    expect(v.line).toBe("a crew · titles · uses: knowledge, requests, autonomy: observe");
+    expect(v.from).toContain("agents/ops/writer.md");
+    // Every other role carries no allowlist, which is not an empty one.
+    expect(describeScope(agent).uses).toBeNull();
+  });
+
+  it("says where the assistant's scope came from, once, instead of three doors reconstructing it", () => {
+    const assistant: Principal = { id: "assistant", role: "assistant", scope: { tier: "areas", areas: ["/"], queries: true, projects: null }, source: "environment" };
+    expect(describeScope(assistant).from).toContain("configuration, not a grant");
+  });
+
+  it("copies the areas and the projects, so a view cannot widen under the row it was read from", () => {
+    const areas = ["Areas/Health"];
+    const p: Principal = { id: "x", role: "agent", scope: { tier: "areas", areas, queries: false, projects: [] }, source: "registry" };
+    const v = describeScope(p);
+    areas.push("Areas/Finance");
+    expect(v.areas).toEqual(["Areas/Health"]);
+  });
+});
+
+describe("formatRefusal: the one envelope", () => {
+  const agent: Principal = { id: "scout", role: "agent", scope: { tier: "index", areas: [], queries: false, projects: [] }, source: "registry" };
+
+  it("carries reason and needs for a refusal that speaks", () => {
+    const d = may(agent, "read", { kind: "knowledge", door: "read", path: "Areas/Health/sleep.md", settled: true });
+    expect(formatRefusal(d)).toEqual({
+      error: { code: "forbidden", message: expect.stringContaining("`Areas/Health` grant") },
+      reason: "scope_required",
+      needs: { grant: { tier: "areas", area: "Areas/Health" } },
+    });
+  });
+
+  it("drops the reason for a refusal that hides, and falls back to the code's canonical message", () => {
+    // The page is not settled, so the caller cannot already see it exists
+    // and no area may be named — the 2026-09-19 boundary. What comes out is
+    // byte-identical to what a page that is not there gets.
+    const d = may(agent, "read", { kind: "knowledge", door: "read", path: "Areas/Health/sleep.md" });
+    expect(formatRefusal(d)).toEqual({ error: { code: "forbidden", message: "not granted" } });
+  });
+
+  it("is null for a decision that is not a refusal", () => {
+    expect(formatRefusal({ ok: true })).toBeNull();
   });
 });

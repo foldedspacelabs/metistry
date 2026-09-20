@@ -310,6 +310,16 @@ function resolveAgainst(value: string, today: Civil): string | null {
   return null;
 }
 
+/**
+ * Move a `YYYY-MM-DD` by whole days. The filter vocabulary turns `due < today`
+ * into `due <= today - 1 day` with it, which is exact rather than approximate:
+ * these are calendar dates, so a strict bound IS the next day's inclusive one.
+ */
+export function addTaskDays(date: string, days: number): string | null {
+  const c = parseISO(date);
+  return c ? toISO(addDays(c, days)) : null;
+}
+
 /** A weekday name means the NEXT one (§1.3); a recurrence pin includes today, or `every week due friday` would skip the Friday it was typed on. */
 function nextWeekday(today: Civil, weekday: number, includeToday: boolean): Civil {
   const delta = (weekday - weekdayOf(today) + 7) % 7;

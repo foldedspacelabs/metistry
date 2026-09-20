@@ -465,3 +465,26 @@ export {
   type TaskRecurrence,
   type TaskSize,
 } from "./task-line.js";
+export {
+  TASK_FILTER_FIELDS,
+  TASK_FILTER_FLAGS,
+  TASK_FILTER_OPS,
+  TASK_FILTER_PARAM_SPEC,
+  TASK_ORDER_FIELDS,
+  TASK_QUERY_NAME,
+  TASK_STATUSES,
+  compileTaskFilter,
+  taskFilterParams,
+  type ParsedTaskFilter,
+  type TaskFilterClause,
+  type TaskFilterField,
+  type TaskFilterFlag,
+  type TaskFilterInput,
+  type TaskFilterOp,
+  type TaskFilterParams,
+  type TaskFilterResult,
+  type TaskOrderField,
+  type TaskOrderTerm,
+  type TaskStatus,
+} from "./task-filter.js";
+export { addTaskDays } from "./task-line.js";

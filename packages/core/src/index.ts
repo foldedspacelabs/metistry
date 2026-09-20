@@ -53,6 +53,7 @@ export {
   REASONS,
   ROLES,
   SCOPE_REQUIRED,
+  allowedTools,
   areaOf,
   canSee,
   canSeeUnder,

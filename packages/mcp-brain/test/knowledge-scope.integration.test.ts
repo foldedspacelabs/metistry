@@ -231,7 +231,7 @@ cache_ttl: 0
       isError: true,
       body: { error: { code: "forbidden", message: expect.stringContaining("`Areas/Scope`") }, reason: "scope_required", grantedScope: "Areas/Scope" },
     });
-    expect(r.body.error.message).toContain("requests_create"); // names the only mechanism that exists today
+    expect(r.body.error.message).toContain("request_access"); // names the mechanism, so the refusal is not a dead end
 
     // A path merely SHAPED like a vault path — never indexed, machinery, or
     // outside the vault-path rule — must not confirm existence either way:

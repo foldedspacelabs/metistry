@@ -44,12 +44,14 @@ describe("manifest", () => {
     if (parsed.manifest.type !== "bridge") return;
     expect(parsed.manifest.discovery).toBe("eager");
     expect(parsed.manifest.exposes.map((t) => t.name)).toEqual([...TOOL_NAMES]);
-    // 26 DECLARED, 25 of them eager: `propose_action` is registered only for a
+    // 27 DECLARED, 26 of them eager: `propose_action` is registered only for a
     // credential the owner has given room (docs/ops/actions.md), which is what
     // keeps the eager budget below where it was. Both numbers are asserted, so
-    // a tool added without a discovery decision fails here first.
-    expect(TOOL_NAMES.length).toBeLessThanOrEqual(26);
-    expect(TOOL_NAMES.filter((n) => n !== "propose_action").length).toBeLessThanOrEqual(25);
+    // a tool added without a discovery decision fails here first — as
+    // `request_access` did on 2026-09-19, which is why the ceiling in
+    // `ops/scripts/check-tool-surface.mjs` moved with it rather than silently.
+    expect(TOOL_NAMES.length).toBeLessThanOrEqual(27);
+    expect(TOOL_NAMES.filter((n) => n !== "propose_action").length).toBeLessThanOrEqual(26);
     expect(parsed.manifest.exposes.map((t) => t.name).filter((n) => Object.hasOwn(TOOL_ALIASES, n))).toEqual([]); // deprecated spellings never reach the listed surface
     expect(parsed.manifest.exposes.every((t) => !t.destructive)).toBe(true); // nothing here mutates the user's world irreversibly: rows, not calendars
   });
@@ -80,7 +82,7 @@ describe("definition size (docs/research/2026-08-tool-discovery.md's other axis)
   it("the EAGER definition stays under the >5k-token line that would make discovery: lazy worth its +1-turn cost", async () => {
     const { names, tokens } = await listedFor(alice);
     expect(names).not.toContain("propose_action"); // alice has no autonomy record: the group is not offered at all
-    expect(names.length).toBe(25);
+    expect(names.length).toBe(26);
     expect(tokens).toBeLessThan(5000);
     // …and it stays under the RATCHET as well. Trimming `turn_id` out of all
     // 25 schemas recovered 3,774 chars ≈ 944 tokens (4,979 → 4,035, 19.0% of
@@ -89,7 +91,12 @@ describe("definition size (docs/research/2026-08-tool-discovery.md's other axis)
     // without somebody deciding to, so the headroom is asserted, not just the
     // line. `ops/scripts/check-tool-surface.mjs` checks the LINE generically
     // for every bridge; this is brain's own ceiling.
-    expect(tokens).toBeLessThan(4200);
+    //
+    // 189 of it went on `request_access` (4,035 → 4,224), by the owner's
+    // ruling on 2026-09-19 and with the count ceiling moved to say so. The
+    // ratchet moves with the decision and not a token further: the surface is
+    // still smaller than it was a week ago with one tool fewer.
+    expect(tokens).toBeLessThan(4300);
   });
 
   it("no tool advertises `turn_id` — it is a correlation handle, not a parameter (turn-id.ts)", async () => {
@@ -109,7 +116,7 @@ describe("definition size (docs/research/2026-08-tool-discovery.md's other axis)
     const actor: AgentPrincipal = { ...alice, id: "actor", autonomy: { level: "propose" } };
     const { names, tokens } = await listedFor(actor);
     expect(names).toContain("propose_action");
-    expect(names.length).toBe(26);
+    expect(names.length).toBe(27);
     // Crossing the 5k line here is the KNOWN cost of opting in, not a
     // regression: the eager surface above is what every other agent pays, and
     // deferring by credential costs none of the +1 discovery turn a
@@ -117,7 +124,7 @@ describe("definition size (docs/research/2026-08-tool-discovery.md's other axis)
     // definition, so the tool cannot grow unnoticed. Since the `turn_id` trim
     // this surface no longer crosses 5k at all (5,243 → 4,262); the ceiling
     // moves with it rather than leaving 1.1k of unwatched room.
-    expect(tokens).toBeLessThan(4400);
+    expect(tokens).toBeLessThan(4500);
     // a level that admits nothing is exactly alice again — the refusal is the absence
     const observer: AgentPrincipal = { ...alice, id: "observer", autonomy: { level: "observe", actions: { comment: "allow" } } };
     expect((await listedFor(observer)).names).not.toContain("propose_action");
@@ -298,7 +305,7 @@ describe("pure helpers", () => {
     const sr = scopeRequired("Areas/Health/Sleep.md");
     expect(sr.expose).toEqual({ reason: SCOPE_REQUIRED, grantedScope: "Areas/Health" });
     expect(sr.message).toContain("Areas/Health");
-    expect(sr.message).toContain("requests_create"); // the only door that exists today — never request_access
+    expect(sr.message).toContain("request_access"); // the door that exists since 2026-09-19 — the refusal names it, so the agent has a next move
     expect(sr.message).not.toBe("not granted"); // this is the structured refusal INSTEAD of the bare string
   });
 });

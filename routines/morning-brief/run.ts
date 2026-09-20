@@ -26,6 +26,7 @@ interface PendingRow {
 const KIND_WEIGHT: Record<string, number> = {
   decision: 100, // the assistant asked and cannot continue — a waiting assistant is blocked
   grant_elevation: 100, // a waiting agent is blocked; also security-relevant
+  access_request: 100,  // the same fact, asked by the agent itself (request_access): it is stuck until you answer
   action: 70,
   report: 45,
   knowledge: 30,
@@ -52,11 +53,15 @@ export function pickBudget(scored: { row: PendingRow; s: number }[]): { row: Pen
 /**
  * The six request types the user reads (docs/product/glossary.md), over the
  * stored `proposals.kind` values, which do not change. The brief and the
- * console's Needs You queue must call the same thing the same word.
+ * console's Needs You queue must call the same thing the same word — which
+ * is why `access_request` (an agent asking for an area) and `grant_elevation`
+ * are both "access": the user has one word for this, and the stored kinds are
+ * the machinery's business.
  */
 const REQUEST_TYPE: Record<string, string> = {
   decision: "question",
   grant_elevation: "access",
+  access_request: "access",
   improvement: "improvement",
   knowledge: "note",
   draft_settle: "note",

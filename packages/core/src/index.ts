@@ -46,6 +46,8 @@ export {
 } from "./actions.js";
 export { checkResultSchema, runCheck, type CheckResult, type Checkable } from "./check.js";
 export {
+  AREA_PREFIX_RE,
+  AREA_PREFIX_REFUSAL,
   INSTANCE_LAYOUT,
   INSTANCE_CONFIG_DIRS,
   INSTANCE_GITIGNORE,
@@ -53,6 +55,7 @@ export {
   LEGACY_INSTANCE_LAYOUT,
   LEGACY_MACHINERY_ROOTS,
   LEGACY_VAULT_DIR,
+  MAX_AREA_PREFIX_LEN,
   NON_VAULT_ROOTS,
   PROTECTED_ROOT_FILES,
   SEED_DIR,
@@ -69,6 +72,7 @@ export {
   resolveInstanceLayout,
   seedFile,
   statePath,
+  validAreaPrefix,
   type InstanceLayoutShape,
   type InstancePathKey,
   type ResolvedInstanceLayout,

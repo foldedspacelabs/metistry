@@ -10,6 +10,7 @@
 
 import {
   ACTION_KINDS,
+  AREA_PREFIX_REFUSAL,
   ACTION_MODES,
   AUTONOMY_LEVELS,
   autonomyWidenings,
@@ -21,11 +22,13 @@ import {
   parseBearer,
   startRun,
   tokenHash,
+  validAreaPrefix,
   VAULT_ROOT_AREA,
   type ActionKind,
   type ActionMode,
   type AutonomyLevel,
 } from "@foldedspacelabs/metistry-core";
+import { ACCESS_REQUEST_KIND, underAreas } from "@foldedspacelabs/metistry-mcp-brain";
 import type { Db } from "./auth-store.js";
 
 export const AGENT_ID_RE = /^[a-z][a-z0-9-]{0,39}$/;
@@ -124,10 +127,16 @@ export class AgentError extends Error {
 // `.metistry/` (it does not start with an uppercase letter) — the machinery
 // is not grantable. "Everything" is not an area grant: it is the bare vault,
 // spelled `/` and admitted for an internal row alone.
-const AREA_RE = /^[A-Z][A-Za-z0-9 _.'-]*(\/[A-Z][A-Za-z0-9 _.'-]*)*$/;
+//
+// The shape itself is core's `validAreaPrefix` since the access-request path
+// landed: an agent asking for an area (mcp-brain's `request_access`) and the
+// owner's own hand on `PUT /api/agents/:id/grants` must refuse the SAME
+// strings, and two regexes that agree today are a refusal that drifts.
 const BARE_VAULT_RE = /^\/$/;
+/** The refusal, core's sentence — plus the internal row's extra spelling, which no agent is ever offered. */
+const AREA_REFUSAL = AREA_PREFIX_REFUSAL;
+const AREA_REFUSAL_WITH_BARE_VAULT = `${AREA_PREFIX_REFUSAL}, or / for the whole vault`;
 const MAX_AREAS = 64;  // limit: fixed — a grant list this long is a mistake, not a configuration
-const MAX_AREA_LEN = 200;  // limit: fixed — AREA_RE's shape bounds it; a longer string is not a vault path
 
 export interface GrantsOptions {
   /** The row's kind. `internal` admits the bare vault (`/`); anything else (the default) refuses it. */
@@ -147,8 +156,8 @@ export function validateGrants(input: unknown, opts: GrantsOptions = {}): Grants
     if (typeof a !== "string") throw new AgentError("invalid_request", "area must be a string");
     let s = a.trim();
     if (bareAllowed && BARE_VAULT_RE.test(s)) s = VAULT_ROOT_AREA;
-    else if (s.length > MAX_AREA_LEN || !AREA_RE.test(s) || s.includes("..")) {
-      throw new AgentError("invalid_request", bareAllowed ? "area must be a TitleCase vault prefix (e.g. Areas/Fsl), or / for the whole vault" : "area must be a TitleCase vault prefix (e.g. Areas/Fsl)");
+    else if (!validAreaPrefix(s)) {
+      throw new AgentError("invalid_request", bareAllowed ? AREA_REFUSAL_WITH_BARE_VAULT : AREA_REFUSAL);
     }
     if (!areas.includes(s)) areas.push(s);
   }
@@ -428,6 +437,106 @@ export async function settleEnrollment(db: Db, id: string, decision: "approve" |
     `UPDATE proposals SET decision = $2, decided_at = now()
      WHERE kind = 'decision' AND decision = 'pending' AND payload->'enroll'->>'agent' = $1 RETURNING id`,
     [id, decision],
+  );
+  return rows.map((r) => Number(r.id));
+}
+
+// ----- access requests (ruled 2026-09-19) -----------------------------------
+//
+// `request_access` on /mcp writes a `proposals` row of kind `access_request`
+// (packages/mcp-brain/src/access.ts) and grants NOTHING. What follows is the
+// owner's half: the widening an Approve applies, the list the Agents panel
+// shows beside each grant, and what a revocation does to an ask nobody
+// answered. There is no new verb and no new route — Approve on that row is a
+// door onto `setGrants`, the one the owner's own click already goes through
+// (invariant 10).
+
+/** The `proposals.kind`, from the bridge that writes it — imported, never respelled. */
+export { ACCESS_REQUEST_KIND };
+
+/**
+ * The area an `access_request` payload is about, or undefined when it does
+ * not carry one this validator would admit. Re-validated HERE rather than
+ * trusted: the row was written by a tool that checked it, but a payload is
+ * data, and a decision that widens a grant reads it again.
+ */
+export function accessArea(payload: unknown): string | undefined {
+  const area = (payload as { area?: unknown } | null)?.area;
+  return validAreaPrefix(area) ? area : undefined;
+}
+
+/**
+ * What Approve applies: the requested prefix, and nothing else.
+ *
+ * - `areas` gains the prefix — unless a grant it already holds covers it
+ *   (`underAreas`), in which case the list is untouched: widening by
+ *   something already granted is not a widening.
+ * - the tier becomes `areas`, because an area grant IS tier `areas`. For a
+ *   tier `none` or `index` row that is the whole point of the ask; it is also
+ *   a NARROWING on the other axis, and deliberately so: tier `index` browses
+ *   every title in the vault and reads none of them, while tier `areas` sees
+ *   titles only inside its prefixes (docs/ops/assistant-tools.md's table).
+ *   The grant model has one tier, so "index browse plus one readable area"
+ *   is not expressible — the owner trading one for the other is the decision
+ *   they are making, and Decline leaves it exactly as it was.
+ * - `queries` is carried across untouched and NEVER set: it is a separate
+ *   axis (invariant 3's read path), no part of what was asked for, and
+ *   nothing here may hand it over.
+ */
+export function widenedGrants(current: Grants, area: string): Grants {
+  const held = current.tier === "areas" ? current.areas : [];
+  const areas = underAreas(area, held) ? [...held] : [...held, area];
+  return { tier: "areas", areas, ...(current.queries === true ? { queries: true } : {}) };
+}
+
+/** One pending ask, as the Agents panel lists it beside the grant it is about. */
+export interface AccessRequestRow {
+  proposal_id: number;
+  agent: string;
+  area: string;
+  reason: string;
+  ts: string;
+}
+
+/**
+ * Every unanswered ask, oldest first. The panel where grants are EDITED shows
+ * what has been asked for there, not only in the queue: the owner reading an
+ * agent's row is the moment the question is live.
+ */
+export async function pendingAccessRequests(db: Db): Promise<AccessRequestRow[]> {
+  const { rows } = await db.query(
+    `SELECT id, source_agent, payload->>'area' AS area, payload->>'reason' AS reason, ts
+     FROM proposals WHERE kind = '${ACCESS_REQUEST_KIND}' AND decision = 'pending' ORDER BY ts, id`,
+  );
+  return rows.map((r) => ({
+    proposal_id: Number(r.id),
+    agent: String(r.source_agent),
+    area: String(r.area ?? ""),
+    reason: String(r.reason ?? ""),
+    ts: r.ts instanceof Date ? r.ts.toISOString() : String(r.ts),
+  }));
+}
+
+/** What a revocation writes on the asks it settles — a reason, and not the SKIP marker, because there IS something to learn from it. */
+export const REVOKED_FEEDBACK = "declined with the agent's revocation — a revoked credential cannot be granted anything";
+
+/**
+ * Revoking an agent settles its pending access requests as `deny`.
+ *
+ * Decided rather than left open (and documented in docs/ops/actions.md): a
+ * revoked token authenticates nothing, so an ask from it can never come true,
+ * and a queue item whose only honest answer is "no, obviously" is noise in
+ * the one list that is supposed to need the user. It mirrors
+ * `settleEnrollment`, which does the same to a pending enrolment for the same
+ * reason. The Approve path refuses a revoked agent independently
+ * (apps/console/src/server.ts) — belt and braces, because a row could predate
+ * this and a widening must never ride on one.
+ */
+export async function settleAccessRequests(db: Db, id: string): Promise<number[]> {
+  const { rows } = await db.query(
+    `UPDATE proposals SET decision = 'deny', feedback = $2, decided_at = now(), snoozed_until = NULL
+     WHERE kind = '${ACCESS_REQUEST_KIND}' AND decision = 'pending' AND source_agent = $1 RETURNING id`,
+    [id, REVOKED_FEEDBACK],
   );
   return rows.map((r) => Number(r.id));
 }

@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  AREA_PREFIX_REFUSAL,
   INSTANCE_CONFIG_DIRS,
   INSTANCE_GITIGNORE,
   INSTANCE_GITIGNORE_LINES,
@@ -16,6 +17,9 @@ import {
   instanceStatePath,
   isProtectedPath,
   isVaultPath,
+  MAX_AREA_PREFIX_LEN,
+  validAreaPrefix,
+  VAULT_ROOT_AREA,
   metistryPath,
   overlayFiles,
   resolveInstanceLayout,
@@ -151,6 +155,39 @@ describe("isVaultPath", () => {
 
   it("refuses traversal and empty segments", () => {
     for (const p of ["", "../x", "Areas/../../etc", "Areas//x.md", "./x.md"]) expect(isVaultPath(p), p).toBe(false);
+  });
+});
+
+// The one shape of a grantable area (2026-09-19). Two doors ask it — the
+// console's `validateGrants` and mcp-brain's `request_access` — and the whole
+// reason it lives in core is that their answers must be the same one.
+describe("validAreaPrefix", () => {
+  it("accepts TitleCase vault prefixes, one segment or many", () => {
+    for (const a of ["Areas", "Areas/Fsl", "Projects/Drey Dev", "Areas/Fsl/Sub-Area", "Me", "Journal"]) {
+      expect(validAreaPrefix(a), a).toBe(true);
+    }
+  });
+
+  it("refuses lowercase, traversal, trailing slashes, and anything that is not a string", () => {
+    for (const a of ["areas", "Areas/fsl", "areas/Fsl", "/Areas", "Areas/", "Areas//Fsl", "..", "../Areas", "Areas/../Other", "", " ", "Areas\nOther", 7, null, undefined, ["Areas"]]) {
+      expect(validAreaPrefix(a), JSON.stringify(a)).toBe(false);
+    }
+    expect(validAreaPrefix("A".repeat(MAX_AREA_PREFIX_LEN))).toBe(true);
+    expect(validAreaPrefix("A".repeat(MAX_AREA_PREFIX_LEN + 1))).toBe(false);
+  });
+
+  it("refuses the machinery and Artifacts — a TitleCase name is not enough to be knowledge", () => {
+    // `.metistry/` cannot even be spelled (it is not TitleCase); `Artifacts/`
+    // can, which is exactly why `isVaultPath` is part of the rule: granting it
+    // would be an inert grant that reads like a real one.
+    for (const a of [".metistry", ".metistry/state", "Artifacts", "Artifacts/Reports", "CLAUDE.md", "README.md"]) {
+      expect(validAreaPrefix(a), a).toBe(false);
+    }
+  });
+
+  it("refuses the bare vault: `/` is a grant only an internal row is offered, and it is not an AREA", () => {
+    expect(validAreaPrefix(VAULT_ROOT_AREA)).toBe(false);
+    expect(AREA_PREFIX_REFUSAL).toContain("TitleCase");
   });
 });
 

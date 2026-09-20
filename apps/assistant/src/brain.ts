@@ -47,6 +47,13 @@ export function newTurnId(): string {
  * are filesystem semantics over the same `areas` grant knowledge_read uses
  * (docs/research/2026-09-stash-review.md item 3) — no separate scope.
  *
+ * `request_access` (docs/ops/actions.md) is on the list for the same reason
+ * `knowledge_write` is, pointing the other way: the bridge refuses it for an
+ * INTERNAL principal, because the assistant's scope is configuration in the
+ * user's hand (METISTRY_ASSISTANT_AREAS) and an approved ask would silently
+ * revert at the next console start. The refusal says that, which is more use
+ * to a model than a tool that is simply absent.
+ *
  * `propose_action` (docs/ops/actions.md) is on the list because the list IS
  * the manifest — but the bridge registers it only for a credential whose
  * `autonomy` table admits an action, and the assistant's registry row carries
@@ -57,6 +64,7 @@ export function newTurnId(): string {
 export const BRAIN_TOOLS = [
   "capture",
   "requests_create",
+  "request_access",
   "tasks_list",
   "tasks_claim",
   "tasks_renew",

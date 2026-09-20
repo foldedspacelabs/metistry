@@ -66,3 +66,10 @@ Kept current as PRs land (2026-09-08). Each item names what it unblocks.
       <token>"` and call `tasks_list`. The one path no agent could verify.
 - [ ] Try `/note` and a 👎 with a note in chat once #78 is deployed, so the
       first `reply-review` run has something to fold.
+- [ ] **Answer the first access request.** Narrow an external agent's grant to
+      `tier: index` in the Agents tab, have it try `knowledge_read` on a page
+      outside its areas, and answer the `access_request` it raises in Needs
+      You — Approve, or Revise to a narrower folder. Nothing but your hand can
+      make that grant (`docs/ops/actions.md`), so nothing but your hand can
+      prove the loop. Worth reading the card copy while you are there: the
+      designer has not drawn this one yet.

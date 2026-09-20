@@ -274,6 +274,24 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
         const runMeta = { via: "mcp-brain", args: summarizeArgs(args), ...(turn_id !== undefined ? { turn_id } : {}), ...(alias ? { alias } : {}) };
         const runId = await startRun(db, { component: principal.id, kind: "tool", tool: name, meta: runMeta });
         let outcome: Outcome;
+        // **The run's own allowlist, at the door** (P2 of
+        // docs/research/2026-09-19-grants-and-access-simplified.md §2.2): a
+        // crew holds exactly the tool groups its manifest's `uses` names, and
+        // this is where that is enforced — before the body, for every tool,
+        // on the same audited path every other refusal takes. Until now it
+        // was a filter in the process that dispatched the run
+        // (apps/assistant/src/tools.ts), which is a process boundary rather
+        // than the tool; that filter stays as defence in depth and is no
+        // longer the control. Every other role carries no allowlist, so this
+        // decides nothing for them and their refusals are unchanged.
+        const admitted = may(principalOf(principal), "act", { kind: "toolset", name });
+        if (!admitted.ok) {
+          // The refusal is a `runs` row like any other, carrying the groups
+          // the crew does hold, so "it tried X" is answerable from the audit.
+          const meta = { uses: principal.uses ?? [], reason: admitted.reason };
+          await finishRun(db, runId, { ok: false, error: admitted.code, meta });
+          return render(refuse(admitted, meta), await nudge(principal));
+        }
         try {
           outcome = await body(args);
         } catch (err) {

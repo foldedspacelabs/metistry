@@ -21,10 +21,33 @@ export interface AgentPrincipal {
   /**
    * `external` (the default when absent): a foreign agent under user-issued
    * grants. `internal`: the instance's own assistant, whose scope comes from
-   * configuration in the user's hand (§4.11). The only rule that reads it is
-   * project membership (scope.ts): internal + empty `projects` = every project.
+   * configuration in the user's hand (§4.11). `crew`: a sub-agent defined by
+   * a manifest in the instance repo, authenticating with a bearer its run
+   * minted and burns (docs/ops/crews.md).
+   *
+   * All three are the values the registry stores, and since P2 the host
+   * passes the row's own value through rather than collapsing a crew to
+   * `external` (§2.3). It is read in exactly one place in this package —
+   * `principal.ts`, the credential → principal mapping — and nowhere else.
    */
-  kind?: "external" | "internal" | undefined;
+  kind?: "external" | "internal" | "crew" | undefined;
+  /**
+   * A crew's own toolset: the `uses` GROUPS from its manifest (core's
+   * `CREW_TOOL_GROUPS`), resolved by the HOST from the loaded manifest at
+   * authentication — never from a request body or a tool argument (§4.19).
+   * `/mcp` refuses every call outside it (P2 §2.2).
+   *
+   * Absent on any other kind. Absent on a `crew` means no tools at all: a
+   * bearer whose manifest this console cannot see holds nothing.
+   */
+  uses?: readonly string[] | undefined;
+  /**
+   * Where a crew's scope and toolset were declared — the manifest path the
+   * host loaded (`agents/<area>/<name>.md`). Carried so the principal's
+   * `source` is the manifest rather than a fourth prose reconstruction of
+   * "this scope is configuration, not a grant" (§2.7). Nothing decides on it.
+   */
+  manifest?: string | undefined;
   grants: { tier: Tier; areas: string[]; queries?: boolean };
   /** Project membership — the collaboration boundary for every tasks_* tool (scope.ts holds the internal rule). */
   projects: string[];

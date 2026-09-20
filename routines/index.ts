@@ -23,3 +23,7 @@ export type { Db, RoutineCtx };
 // the vault bridge. Exported so the console's runner can widen the ctx it
 // hands every component in ONE type, rather than each caller guessing.
 export type { PlanCtx, PlanVault } from "./plan-tomorrow/run.js";
+// The `PlanVault` → `TemplateReader` adapter, shared so the runner builds the
+// SAME `ctx.reader` every routine gets rather than reimplementing it —
+// `knowledge-fold`'s `FoldCtx` has no `vault` field of its own, only `reader`.
+export { vaultReader, type VaultReadable } from "./vault-reader.js";

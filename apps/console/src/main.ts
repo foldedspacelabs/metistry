@@ -26,7 +26,7 @@ import { makeServer } from "./server.js";
 import { pushConfigFromEnv, startNotifier } from "./push.js";
 import { collectors } from "@metistry-apps/collectors";
 import { routines } from "@metistry-apps/routines";
-import { loadSchedules, startRunner } from "./runner.js";
+import { loadSchedules, routineCapabilities, startRunner } from "./runner.js";
 import { loadRules } from "./router.js";
 import { watchCompute } from "./compute.js";
 import { TargetRegistry } from "./dispatch.js";
@@ -314,12 +314,14 @@ startRunner(pool, scheduled, {
   secretEnv: process.env,
   // What a ROUTINE needs and no collector does (docs/product/daily-flow-spec.md
   // §7): the named-query store, so every row `plan-tomorrow` renders comes
-  // through a named query and not through SQL of its own (invariant 3), and
-  // the vault bridge, which is where `Templates/Plan.md` is read from and
-  // `Journal/Plan/<date>.md` is written to. Both are the objects this process
-  // already built for the server — one console, one way in.
-  queries,
-  ...(vault ? { vault } : {}),
+  // through a named query and not through SQL of its own (invariant 3); the
+  // vault bridge, which is where `Templates/Plan.md` is read from and
+  // `Journal/Plan/<date>.md` is written to; and the `TemplateReader` adapter
+  // over that same bridge, which `Templates/Fold.md` renders through
+  // (`knowledge-fold`'s `FoldCtx.reader` has no `vault` field of its own).
+  // All three are built once, here, from the objects this process already
+  // built for the server — one console, one way in.
+  ...routineCapabilities(queries, vault),
   ...(process.env.METISTRY_EK_URL ? { ekUrl: process.env.METISTRY_EK_URL } : {}),
   ...(process.env.METISTRY_BRIDGE_TOKEN_EVENTKIT ? { ekToken: process.env.METISTRY_BRIDGE_TOKEN_EVENTKIT } : {}),
   ...(process.env.METISTRY_GITHUB_TOKEN ? { githubToken: process.env.METISTRY_GITHUB_TOKEN } : {}),

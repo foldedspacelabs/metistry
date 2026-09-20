@@ -63,9 +63,9 @@ import {
   type CalendarEvent,
   type CalendarProvider,
   type TemplateQueries,
-  type TemplateReader,
 } from "@foldedspacelabs/metistry-core";
 import type { Db, RoutineCtx } from "../morning-brief/run.js";
+import { vaultReader } from "../vault-reader.js";
 
 export const COMPONENT = "plan-tomorrow";
 /** §5.1: `Journal/Plan/<date>.md` — machine-owned, one writer, and this is it. */
@@ -296,19 +296,6 @@ export function gate(input: GateInput): GateVerdict {
 async function readText(vault: PlanVault, path: string): Promise<string | null> {
   const file = await vault.read(path);
   return file === null ? null : file.content.toString("utf8");
-}
-
-/** `GET /vault/read` as the engine's reader, for `{{ include }}`. Here a refusal IS absent, because §6.4 says an include that cannot be satisfied renders a note and the file still renders. */
-export function vaultReader(vault: PlanVault): TemplateReader {
-  return {
-    async read(path: string): Promise<string | null> {
-      try {
-        return await readText(vault, path);
-      } catch {
-        return null;
-      }
-    },
-  };
 }
 
 /**

@@ -46,22 +46,43 @@ import {
   type ComponentStreak,
   type PreflightMiss,
   type Requirements,
+  type TemplateQueries,
+  type TemplateReader,
 } from "@foldedspacelabs/metistry-core";
 import type { RegisteredCollector, Db, CollectorCtx } from "@metistry-apps/collectors";
-import type { PlanCtx } from "@metistry-apps/routines";
+import { vaultReader, type PlanCtx, type PlanVault } from "@metistry-apps/routines";
 
 export { scheduleToSeconds }; // one import path for the runner's callers and tests
 
 /**
  * What the runner hands a component: every collector's ctx, plus what a
- * ROUTINE needs and no collector does — the named-query store and the vault
- * bridge, which `plan-tomorrow` renders tomorrow's plan out of
- * (docs/product/daily-flow-spec.md §7). One type rather than one per caller,
- * so `main.ts` composes the capabilities it already built for the server and
- * hands them on; a component takes the fields it declares and ignores the
- * rest.
+ * ROUTINE needs and no collector does — the named-query store, the vault
+ * bridge (which `plan-tomorrow` renders tomorrow's plan out of,
+ * docs/product/daily-flow-spec.md §7), and the `TemplateReader` adapter over
+ * that same bridge (which `knowledge-fold` reads `Templates/Fold.md` and any
+ * `{{ include }}` inside it through — `FoldCtx` has no `vault` field of its
+ * own, only `reader`). One type rather than one per caller, so `main.ts`
+ * composes the capabilities it already built for the server and hands them
+ * on; a component takes the fields it declares and ignores the rest.
  */
-export type ComponentCtx = CollectorCtx & PlanCtx;
+export type ComponentCtx = CollectorCtx & PlanCtx & { reader?: TemplateReader };
+
+/**
+ * The routine-only slice of `ComponentCtx`, built ONCE here from the objects
+ * `main.ts` already has — the named-query store, and, when the vault bridge
+ * is up, both the vault client itself (`plan-tomorrow`'s own read/write) and
+ * the `TemplateReader` adapter over it (`vaultReader`,
+ * `routines/vault-reader.ts`). Absent vault → neither `vault` nor `reader`,
+ * exactly like a missing calendar bridge (§6.4): every query-backed or
+ * vault-backed directive renders its own "not configured" note and the file
+ * still renders.
+ */
+export function routineCapabilities(queries: TemplateQueries, vault?: PlanVault): Pick<ComponentCtx, "queries" | "vault" | "reader"> {
+  return {
+    queries,
+    ...(vault ? { vault, reader: vaultReader(vault) } : {}),
+  };
+}
 
 export interface ScheduledCollector extends RegisteredCollector {
   intervalSec: number;

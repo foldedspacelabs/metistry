@@ -72,7 +72,12 @@ Kept current as PRs land (2026-09-08). Each item names what it unblocks.
       You — Approve, or Revise to a narrower folder. Nothing but your hand can
       make that grant (`docs/ops/actions.md`), so nothing but your hand can
       prove the loop. Worth reading the card copy while you are there: the
-      designer has not drawn this one yet.
+      designer has not drawn this one yet. Since 2026-09-20 the card says
+      what that credential holds in the **same words** the Agents panel and
+      `metistry agents list` use — one triple, role · access · extras — so
+      "wants Areas/Health · has titles, autonomy: observe" reads the same
+      wherever you meet it (`docs/ops/auth.md`). Tell me if the sentence is
+      wrong; it is one function, in one file.
 - [ ] **Decline one, and watch the ladder.** After a Decline the agent is told
       the decision rather than allowed to re-file it, and may ask ONCE more
       with `escalate: true` — that row arrives flagged *asked again after a

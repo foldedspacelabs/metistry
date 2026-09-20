@@ -81,6 +81,24 @@ Write the query, give it `expose: generic`, and the assistant can run it the
 day it merges. A new **tool** is for a new *verb* — something the system can
 now do — and it arrives with the lazy-discovery decision attached.
 
+**One refusal vocabulary.** Every refusal on this surface says the one
+sentence its `reason` says, with the facts substituted and the shape never
+(`packages/core/src/access.ts`, and the catalogue in
+`packages/core/test/access.golden.json`). So `queries_list` and
+`queries_run` refuse in the same words; `knowledge_write` and
+`agents_delegate` give the same "belongs to the instance assistant alone"
+sentence; a tier miss names the tier this tool needs and the tier you hold,
+in the words the console uses for them (`none` / `titles` / `folders`).
+Every one of them names what would unlock it and who decides, because a
+refusal with no next move leaves a model retrying the same call.
+
+**And one silence.** Two kinds of refusal are deliberately uninformative and
+will stay so: a route-only named query (`queries_run` answers exactly what
+it answers an unknown name — `no such query: X`) and a row outside your
+projects (`not_found`, because it does not exist for you). They carry no
+`reason` and no remedy. That is not an oversight to be reported; it is the
+answer.
+
 **Asking for more, named instead of guessed (ruled 2026-09-19, PR #216
 judgement call B).** `knowledge_read` and `knowledge_list`'s `links_for` stop
 at the bare "not granted" only when the caller could not already see the

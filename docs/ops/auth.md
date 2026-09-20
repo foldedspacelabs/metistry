@@ -32,13 +32,24 @@ tool body compares a `kind` or a `tier` of its own — a misuse test greps the
 bridge's source to keep it that way
 (`packages/mcp-brain/test/may-surface.test.ts`).
 
-A refusal carries the uniform envelope it always did, plus a closed
-`reason` and, where a remedy already exists, a machine-readable `needs` —
-`scope_required` names the area a `request_access` would ask for, and
-`autonomy_required` names the entry you would raise. The complete catalogue
-of what every door can say is committed as
-`packages/core/test/access.golden.json`, so changing a refusal's wording is
-a reviewable diff rather than a string edited inside a handler.
+**The owner is refused nothing.** `may()` short-circuits to `ok` for the
+`owner` role on every door, for every verb, with no exception clause below
+it — the owner's own sentence, made arithmetic. What makes that safe is that
+a resource is CLASSIFIED before it is judged: `classify(path)` answers
+`knowledge | artifact | machinery | outside`, and `Artifacts/` and
+`.metistry/` are not knowledge paths, so "the owner has everything" never
+has to be weakened to keep an agent out of the machinery. A knowledge door
+handed one of them answers with the classification — what it is, and
+`needs.door` naming the door that does have it — never a 403, and never a
+404 pretending it is not there. `classify(p) === "knowledge"` is
+`isVaultPath(p)` by construction, so the indexer's rule did not change; it
+was given a name.
+
+That is the rule with no exceptions, and it does have one consequence worth
+being plain about: a door that is not the right door still does not serve
+you. `.metistry/state/.env` is machinery, no door serves it as a page, and
+asking the knowledge door for it gets the classification and not one byte.
+It is the file itself, 0600, on the machine that is yours.
 
 Where the grants themselves live has not moved: registry rows for external
 agents, the environment for the instance's own assistant, the manifest for a
@@ -47,6 +58,75 @@ crew. Which of the three a row came from is now recorded ON the row
 in three files. `may()` decides; it never writes, and every widening still
 goes through the console's one grants door and its one audit row
 (invariant 2).
+
+## One refusal envelope
+
+A refusal carries the uniform envelope it always did, plus two additive
+fields:
+
+```json
+{ "error": { "code": "forbidden", "message": "not granted — `Areas/Finance/tax.md` is outside your folders; …" },
+  "reason": "scope_required",
+  "needs":  { "grant": { "tier": "areas", "area": "Areas/Finance" } } }
+```
+
+`reason` is a closed enum — `scope_required`, `tier_required`,
+`queries_required`, `role_required`, `autonomy_required`,
+`membership_required`, `not_member`, `not_exposed`, `not_knowledge`,
+`not_in_uses` — and `needs` is the machine-readable form of what would
+unlock it: `grant` (what `request_access` takes as input and what Approve
+applies), `autonomy` (the entry you would raise), or `door` (the route that
+serves this resource, when the refusal is a classification rather than a
+permission). **`needs` is produced by `may()`, never by a tool body**; a
+handler that hand-writes a remedy sentence is the thing this replaces.
+`error.code` is untouched, so invariant 8's envelope is unchanged, and
+`formatRefusal()` in `core` is the one function that renders it.
+
+**One wording per reason.** There used to be five dialects across fourteen
+sites; there is one sentence per `reason` now, with the facts substituted
+and the shape never. So `queries_list` and `queries_run` refuse in the same
+words, `knowledge_read` and `knowledge_list`'s `links_for` give the same
+scope sentence, and a model learns one sentence per kind of refusal instead
+of fourteen.
+
+**And one silence.** Some refusals must be indistinguishable from "there is
+nothing here", and that is now a property of the type rather than a comment
+at a call site: a `tell: "hide"` decision renders as the door's own absence
+answer, carries no `needs`, and loses its `reason` on the way out. Four
+things hide — a row outside your projects, a route-only named query, the
+console's uniform 403 (CRIT-7: one answer on every management route, never a
+403 here and a 404 there), and a knowledge path you may not even list, which
+is the 2026-09-19 boundary: an area is named only for a page whose existence
+you can already see.
+
+The complete catalogue of what every door can say is committed as
+`packages/core/test/access.golden.json` — every entry with the code, the
+reason, the `tell`, the message, and what that door answered before, so
+changing a refusal's wording is a reviewable diff with a paragraph beside it
+rather than a string edited inside a handler.
+
+## One scope vocabulary
+
+`describeScope(principal)` in `core` renders a credential as one triple:
+
+```
+an agent · folders: Areas/Health · queries, projects: alpha, autonomy: propose
+```
+
+**role · access · extras.** The access word is `none` / `titles` /
+`folders` — the tier, said the one way — and the extras are everything that
+is not the tier: the `queries` switch, the projects, a crew's `uses`
+toolset, the autonomy level. Beside it, in the same structure, is where the
+scope came FROM: configuration for the assistant
+(`METISTRY_ASSISTANT_AREAS`, plus any area you have approved), its manifest
+for a crew, the registry for everything else.
+
+Four surfaces render that one structure and none of them composes words of
+its own: `metistry agents list` ([cli.md](cli.md)), the console's Agents
+panel, the Needs You `access_request` card (whose payload carries the
+rendered scope, so the sentence you read while deciding is the sentence the
+panel shows), and the tool descriptions on `/mcp`
+([assistant-tools.md](assistant-tools.md)).
 
 ## Five roles, and the one that carries a toolset
 

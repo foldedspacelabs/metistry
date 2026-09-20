@@ -800,7 +800,7 @@ export async function planConfinement(r: StepRunner, installRoot: string, values
       "reconciler: NOT confined — no git this profile can name. `/usr/bin/git` is the xcode-select shim (it execs the real git out of Xcode and dies under a profile), so the job runs under ops/sandbox/unconfined.sb until this install has a bundled runtime (`metistry runtime install`) or the Command Line Tools (`xcode-select --install`).",
     );
   } else {
-    r.note(`reconciler: confined by ops/sandbox/reconciler.sb — writes only ${values.instanceDir ?? values.productDir} and tmp; execs only node and ${gitBin}; no shell.`);
+    r.note(`reconciler: confined by ops/sandbox/reconciler.sb — writes only ${values.instanceDir} and tmp; execs only node and ${gitBin}; no shell.`);
   }
   if (values.confineReconciler && remotes.credentialHelpers.length > 0) {
     r.note(

@@ -1,5 +1,108 @@
 # @foldedspacelabs/metistry-cli
 
+## 0.10.0
+
+### Minor Changes
+
+- ad73f5a: Metistry can keep your Mac awake while it runs, and asks you first.
+  `deployment.yaml` gains `keep_awake`: `never`, `allow_sleep_on_battery`
+  (held on wall power, released on battery and on a UPS), `always`, or
+  `always_lid_closed`. `metistry init` asks the question once on a terminal,
+  printing what each choice costs, and writes your answer; `--keep-awake
+  <value>` answers it without one, and an install that was never asked holds
+  nothing — a power assertion overrides your own sleep setting, so it is never
+  taken on your behalf. Under the `launchd` shape the supervisor holds
+  `caffeinate -i -w <its own pid>`: the display still sleeps, your own
+  keep-awake app is untouched, and nothing survives the supervisor. `metistry
+  doctor` grows one macOS-only `keep-awake` row (`degraded` at worst) that
+  cross-checks our pid against `pmset -g assertions`, reads a release on
+  battery as success rather than a fault, and reports when the Mac slept
+  anyway — with the repair. `always_lid_closed` is accepted and honest: no
+  process can keep a Mac awake with the lid shut, so doctor says it needs an
+  administrator change you make yourself. Change it later with `metistry
+  deployment set-keep-awake <value> --yes`.
+
+### Patch Changes
+
+- afc2679: The command line has a presentation layer. `packages/cli/src/ui.ts` —
+  hand-rolled, no dependency — decides once whether to colour (a TTY,
+  `NO_COLOR`, `FORCE_COLOR`, `TERM=dumb`, `--no-color`, and never under
+  `--json`), whether the terminal can draw `✓` or wants `[ok]`, and how wide a
+  paragraph may be; and it holds the pieces every verb was re-inventing: an
+  aligned key/value block, a table with a header rule, a closed status
+  vocabulary with one colour each, and a spinner that animates on a terminal
+  and prints one line everywhere else.
+  
+  Applied to the verbs an operator sees most. `doctor` groups its rows by kind
+  and puts the remediation — the reason a red row is read at all — wrapped
+  underneath that row instead of in a ragged fifth column; `version` and
+  `deployment` and `connect --list` are aligned tables; `compute providers
+  test` shows the listing and the completion as sub-rows; `update` narrates its
+  steps and ends with one line saying whether it landed and what moved;
+  `migrate-layout` shows each section's moves as a `from → to` table; `--help`
+  opens with the verbs grouped by what you are in the middle of doing, with the
+  full reference still underneath. `<checkout>/.env is still being read as a
+  fallback and is deprecated` was the first thing printed by almost every verb;
+  it is now one dimmed line at the end.
+  
+  `down` and `restart|stop|start` are the same table, with what `launchctl
+  print` and `docker compose ps` answered after the stop under a heading of its
+  own; `deployment` names this install's keep-awake policy beside its shape;
+  and `init`'s one question wraps to the terminal instead of to 90 columns.
+  
+  No `--json` document and no exit code changes: colour is off at the source
+  whenever a verb is printing for a machine. `--no-color` is new.
+- 975221b: **`metistry up` (and `update`) now writes a `metistry` shim, so there is
+  finally something to run `metistry` BY NAME against.** A release install has
+  no Homebrew formula and no npm global, so nothing ever put `metistry` on
+  `PATH` — the only way to run one was the owner's own hand-written wrapper.
+  `up`/`update` write a small, idempotent POSIX script to
+  `<instance>/.metistry/state/cli/metistry` (mode `0755`) that already knows
+  this install's product dir and instance dir, and re-resolves which of
+  `current/` (a release) or the bare product dir holds the CLI, and which
+  `node` to run it with, on every invocation — so a release flip or a freshly
+  bundled runtime needs no re-write. `state/cli/` rather than `state/bin/`:
+  the launchd shape's `state/bin/Metistry` is already the supervisor's own
+  program-identity symlink, and macOS's default case-insensitive volume would
+  make that the same directory entry as `state/bin/metistry` — a sibling
+  directory avoids the collision outright. `writeCliShim` also leaves alone
+  anything already sitting at the path that is not a symlink-free plain file
+  recognisably its own — a foreign file is noted, never overwritten.
+  
+  `up` never puts it on `PATH` itself (invariant 2 — that is the operator's
+  own hand): it prints the one `ln -s … ~/.local/bin/metistry` line that
+  would, and `metistry doctor` gains an informational `cli on PATH` row
+  (`ok`/`absent`, never a finding that fails the exit code) carrying the same
+  line as its remediation.
+  
+  The Mac app's `RuntimeLocator` now also searches `~/.local/bin` and the
+  active instance's own `.metistry/state/cli` when looking for a `metistry`
+  on `PATH`, so it finds an install even before anyone has linked anything.
+- fe6669c: `metistry up` is faster, says where its time went, and has a counterpart.
+  
+  Four steps were costing wall-clock seconds nobody benefited from. The retire
+  step ran a `launchctl bootout` and an `rm` for each of eight pre-supervisor
+  labels, in series, on every run — one `launchctl list` now answers for all
+  eight, with the old unconditional sweep kept as the fallback for a dry run or
+  a probe that fails. Postgres readiness is polled every 250ms rather than
+  every second, keeping the same 15s ceiling. Doctor's probes are independent
+  and now run concurrently, so the closing table costs the slowest probe rather
+  than the sum of all of them (no timeout was shortened: a slow-but-healthy
+  bridge reported as down would be a worse table). `up` ends with a figure per
+  `==` section plus the total, and one line naming who owns the processes it
+  started — launchd or compose, never the CLI.
+  
+  New verb: `metistry down [--json] [--dry-run]` stops every host job and every
+  container this instance runs and then confirms it by looking — `launchctl
+  print` finding nothing, `docker compose ps` listing nothing. It is `docker
+  compose stop`, never `down` and never `-v`: no container is removed and no
+  volume is touched. `stop [<service>…]` remains the per-service verb. When the
+  Mac app registered the background item, `down` stops it for this login
+  session and says the app will start it again at the next one — it does not
+  reach into another application's `SMAppService` registration.
+- Updated dependencies [ad73f5a]
+  - @foldedspacelabs/metistry-core@0.10.0
+
 ## 0.9.1
 
 ### Patch Changes

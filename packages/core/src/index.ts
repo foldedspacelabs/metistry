@@ -194,6 +194,16 @@ export {
   type EgressInput,
   type EgressTarget,
 } from "./egress.js";
+export {
+  CREDENTIAL_HELPER_RESET,
+  DEFAULT_GIT_ACCOUNT,
+  GIT_ASKPASS_PATH_VAR,
+  GIT_ASKPASS_TOKEN_VAR,
+  GIT_ASKPASS_USER_VAR,
+  accountFromKeychainAttributes,
+  gitCredentialSchema,
+  type GitCredentialLookup,
+} from "./git-credential.js";
 export { scheduleToSeconds } from "./schedule.js";
 export {
   COST_SOURCES,

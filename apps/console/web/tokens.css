@@ -1,5 +1,5 @@
 /* GENERATED — do not edit.
- * Source: docs/product/design/tokens.json (v2.3.0, 2026-09-19)
+ * Source: docs/product/design/tokens.json (v2.4.0, 2026-09-19)
  * Rebuild: node ops/scripts/build-design-tokens.mjs
  *
  * Light is the base. Dark is applied twice on purpose: once behind
@@ -130,6 +130,7 @@
   --mt-color-sunken: #efeadf;
   --mt-color-border: #e4ded1;
   --mt-color-border-strong: #c3baa9;
+  --mt-color-border-control: #8e8676;
   --mt-color-text-primary: #1a1815;
   --mt-color-text-secondary: #57514a;
   --mt-color-text-tertiary: #6f6960;
@@ -186,6 +187,7 @@
   --mt-color-sunken: #0b0e12;
   --mt-color-border: #2b333d;
   --mt-color-border-strong: #3d4854;
+  --mt-color-border-control: #68717c;
   --mt-color-text-primary: #e9edf1;
   --mt-color-text-secondary: #a7b1bc;
   --mt-color-text-tertiary: #8b96a1;
@@ -243,6 +245,7 @@
   --mt-color-sunken: #efeadf;
   --mt-color-border: #e4ded1;
   --mt-color-border-strong: #c3baa9;
+  --mt-color-border-control: #8e8676;
   --mt-color-text-primary: #1a1815;
   --mt-color-text-secondary: #57514a;
   --mt-color-text-tertiary: #6f6960;
@@ -299,6 +302,7 @@
   --mt-color-sunken: #0b0e12;
   --mt-color-border: #2b333d;
   --mt-color-border-strong: #3d4854;
+  --mt-color-border-control: #68717c;
   --mt-color-text-primary: #e9edf1;
   --mt-color-text-secondary: #a7b1bc;
   --mt-color-text-tertiary: #8b96a1;

@@ -569,6 +569,10 @@ Per `CLAUDE.md`. None edited. The ones the owner already logged in
 | **C13** | `index.html:17` sets `apple-touch-icon` to an SVG, which iOS does not honour — so the installed PWA has no home-screen icon on iPhone today | `apps/console/web/index.html:17`; `manifest.webmanifest` |
 | **C14** | `glossary.md` still says requests take "the same three answers" and the brief/§3.9 say six; the owner logged this on 2026-09-17 and it is **still open** | `glossary.md`; `design-system.md` §3.9 |
 | **C16** | `ux-direction.md` says the working state is "a **word**, not a spinner" and that nothing "spins or pulses"; the owner asked on 2026-09-19 for an animated indicator, because a word that never changes is indistinguishable from a stuck one. Proposed amendment in `screen-01-chat.md` §5.1 — *motion only where it carries information the reader cannot otherwise get, stopping the moment that information is available in words* — **awaiting a ruling** | `ux-direction.md`; `design-system.md` §3.4 |
+| **C17** | `design-system.md` §3.2's kind inventory omits `capture`, but `activity_feed.yaml`'s first branch is captures and `apps/console/web/app.js` has shipped a `capture` icon since ADOPT 1. The doc is behind the code | `design-system.md` §3.2; `seed/queries/activity_feed.yaml`; `apps/console/web/app.js` |
+| **C18** | `work_history` is in the title-case allow-list in both §3.2 and `app.js`, but its subject is `w.title` — authored text. "Migrate the settings pane to tokens" renders as "Migrate The Settings Pane To Tokens", which is the exact failure the rule exists to prevent | `design-system.md` §3.2; `apps/console/web/app.js` |
+| **C19** | §3.2 says a failed row takes `failed` on its glyph, but `activity_feed` never returns `ok` — failure exists only as English inside `detail`. The state §3.2 specifies cannot be drawn from the data the query returns | `design-system.md` §3.2; `seed/queries/activity_feed.yaml` |
+| **C20** | `runs.ok` is `NOT NULL` in `db/migrations/0001_init.sql` and nullable in `packages/tasks/sql/schema.sql` — two schemas for one table, and the difference is exactly where an in-flight run would live | `db/migrations/0001_init.sql:21`; `packages/tasks/sql/schema.sql:71` |
 | **C15** | `design-system.md` §3.1's own body says the Mac sidebar rows carry "an optional count badge — shown only when the count is *actionable*", which contradicts the "only badge" rule three paragraphs later | `design-system.md:500` (§3.1) |
 
 Minor, not worth a row each: the PWA's `rooms` nav item is the one view with
@@ -686,7 +690,7 @@ Grouped, numbered, each with the recommendation so you can mostly say yes.
 | What | Why |
 | --- | --- |
 | Added this review | `design-brief.md` §8 asks for it before anything is drawn |
-| Logged 16 contradictions (C1–C16), none edited | `CLAUDE.md`: "Report contradictions, don't route around them" |
+| Logged 20 contradictions (C1–C20), none edited | `CLAUDE.md`: "Report contradictions, don't route around them" |
 | Computed the shipped presence-chip contrast on the ground actually painted | §2.2 checks `presence-* on surface`; nothing is drawn on `surface`. Three chips are below AA in light mode |
 | Proposed no token values yet | The accent decision (8.8) determines the palette, and it is unanswered |
 | Proposed one reordering (Insights before Knowledge) and one demotion (Rooms) | Data sources, and what a section is for |
@@ -740,4 +744,4 @@ It will be drawn as a section with the Settings-pane version beside it.
 Nothing is retracted. §6's recommendations are now decisions; §1.5's naming
 options are closed by **Usage**; C2 and C3 are resolved by decisions 3 and 12;
 C6, C7 and C8 by decision 6; C11 by decision 8. **C1, C4, C5, C9, C10, C12,
-C13, C14, C15 and C16 remain open** and are build-side fixes, not design ones.
+C13, C14, C15, C16, C17, C18, C19 and C20 remain open** and are build-side fixes, not design ones.

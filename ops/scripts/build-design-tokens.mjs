@@ -50,7 +50,7 @@ const contrast = (a, b) => {
 // readable as type. Holding them to 4.5:1 collapses a sequential ramp on a
 // near-white ground — steps four and five land within 0.03 of each other and
 // stop being distinguishable, which is the opposite of accessible.
-const NON_TEXT = new Set(["focus-ring", "chart-1", "chart-2", "chart-3", "chart-4", "chart-5"]);
+const NON_TEXT = new Set(["focus-ring", "border-control", "chart-1", "chart-2", "chart-3", "chart-4", "chart-5"]);
 const rows = [];
 for (const [name, def] of Object.entries(T.color)) {
   for (const on of def.contrast ?? []) {

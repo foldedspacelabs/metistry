@@ -34,6 +34,7 @@ import { runProbes } from "./probes.js";
 import { alertFailures, isFailure } from "./alert.js";
 import { bridgesFromEnv } from "./bridges.js";
 import { Supervisor, startupSummary } from "./supervisor.js";
+import { EgressProxy } from "./egress-proxy.js";
 import { listenControl } from "./control.js";
 import { KEEP_AWAKE_INTERVAL_SEC_DEFAULT, KeepAwakeLoop } from "./power.js";
 
@@ -102,6 +103,29 @@ export async function startKeepAwake(platform: NodeJS.Platform = process.platfor
   return loop;
 }
 
+/**
+ * The invariant-3 pool, opened once and shared by the two things in this
+ * process that hold one: the probe loop and the egress proxy's audit rows.
+ *
+ * Lazy and forgiving. An install with no `METISTRY_DB_PASSWORD` still gets a
+ * supervisor and still gets an egress door that REFUSES correctly — it just
+ * cannot write the refusal down, which is a log line rather than a crash.
+ */
+let sharedPool: pg.Pool | undefined;
+export function auditPool(env: NodeJS.ProcessEnv = process.env): pg.Pool | undefined {
+  if (sharedPool) return sharedPool;
+  if (!env.METISTRY_DB_PASSWORD) return undefined;
+  sharedPool = new pg.Pool({
+    host: optionalEnv("METISTRY_DB_HOST", "127.0.0.1"),
+    port: intEnv("METISTRY_DB_PORT", 5432),
+    database: optionalEnv("METISTRY_DB_NAME", "metistry"),
+    user: optionalEnv("METISTRY_DB_USER", "metistry"),
+    password: requireEnv("METISTRY_DB_PASSWORD"),
+    max: 2,
+  });
+  return sharedPool;
+}
+
 /** Returns the config it started, so the probe half can read the child set. */
 async function runSupervisor(path: string): Promise<{ children: { name: string }[] }> {
   const config = parseSupervisorConfig(JSON.parse(await readFile(path, "utf8")), path);
@@ -113,6 +137,22 @@ async function runSupervisor(path: string): Promise<{ children: { name: string }
   const sup = new Supervisor(config);
   console.log(startupSummary(config));
   const control = await listenControl(sup);
+  // The egress door, BEFORE any child is spawned: a confined child's profile
+  // allows exactly this loopback port and nothing else off the machine, so a
+  // proxy that came up second would be a window during which the engine's
+  // provider call failed for no reason it could report. Never fatal — see
+  // the catch: a supervisor that cannot bind the port still has children to
+  // run, and doctor is where the missing door is reported.
+  let egress: EgressProxy | undefined;
+  if (config.egress) {
+    try {
+      egress = new EgressProxy(config.egress, { db: auditPool(), log: (l) => console.log(l) });
+      await egress.listen();
+    } catch (err) {
+      egress = undefined;
+      console.error(`[egress] the CONNECT proxy did not start on 127.0.0.1:${config.egress.port}: ${err instanceof Error ? err.message : err} — every confined child's off-machine traffic will be refused by its profile`);
+    }
+  }
   // the assertion is tied to THIS process (`caffeinate -w <our pid>`), so it
   // is taken here, with the children, and dropped with them. Never fatal: the
   // children ARE the install, and failing to keep the Mac awake must not stop
@@ -133,6 +173,7 @@ async function runSupervisor(path: string): Promise<{ children: { name: string }
       // is never read back as "the Mac slept under us"
       await keepAwake?.stop();
       await sup.shutdown();
+      await egress?.close();
       await control.close();
       process.exit(0);
     })();
@@ -151,14 +192,11 @@ async function runSupervisor(path: string): Promise<{ children: { name: string }
  * is not draining must not alert every cycle (probes.ts, `assistantAbsent`).
  */
 function startProbing(supervised?: string[]): void {
-  const pool = new pg.Pool({
-    host: optionalEnv("METISTRY_DB_HOST", "127.0.0.1"),
-    port: intEnv("METISTRY_DB_PORT", 5432),
-    database: optionalEnv("METISTRY_DB_NAME", "metistry"),
-    user: optionalEnv("METISTRY_DB_USER", "metistry"),
-    password: requireEnv("METISTRY_DB_PASSWORD"),
-    max: 2,
-  });
+  // `requireEnv` still throws when there is no password: the probe loop
+  // cannot do its work without a db, and that is fatal to the WATCHDOG (the
+  // caller catches it and keeps the supervisor's children running)
+  requireEnv("METISTRY_DB_PASSWORD");
+  const pool = auditPool()!;
 
   const cfg = {
     consoleUrl: optionalEnv("METISTRY_CONSOLE_URL", "http://127.0.0.1:8080"),

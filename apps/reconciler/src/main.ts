@@ -26,6 +26,22 @@ import { makeBridge } from "./server.js";
 
 const instanceDir = requireEnv("METISTRY_INSTANCE_DIR");
 const token = requireEnv("METISTRY_BRIDGE_TOKEN_RECONCILER");
+// The owner class (docs/ops/auth.md, "The principal comes from the
+// credential"). Optional to START with — a reconciler that refused to boot
+// would take an install down over a variable one command mints — and
+// fail-CLOSED in effect: with no owner bearer, NO caller may write a §4.7
+// protected path, and `check()` degrades with the fix. Never defaulted to the
+// shared bearer, which is the hole this exists to close.
+const ownerToken = optionalEnv("METISTRY_BRIDGE_TOKEN_RECONCILER_USER", "");
+if (!ownerToken) {
+  console.warn(
+    "METISTRY_BRIDGE_TOKEN_RECONCILER_USER is not set: protected paths (.metistry/**, CLAUDE.md, README.md) are refused for EVERY caller, so `metistry update` and `metistry deployment set-shape` will be refused. `metistry secrets sync --to env` mints one; then restart this service.",
+  );
+} else if (ownerToken === token) {
+  throw new Error(
+    "METISTRY_BRIDGE_TOKEN_RECONCILER_USER is the same value as METISTRY_BRIDGE_TOKEN_RECONCILER — the owner class would then be every caller. Mint a distinct one: `metistry secrets mint METISTRY_BRIDGE_TOKEN_RECONCILER_USER`.",
+  );
+}
 const host = optionalEnv("METISTRY_RECONCILER_HOST", "127.0.0.1"); // loopback default (invariant 8)
 const port = intEnv("METISTRY_RECONCILER_PORT", 7812);
 const commitIntervalSec = intEnv("METISTRY_COMMIT_INTERVAL_SEC", 30);
@@ -103,10 +119,10 @@ const indexer = new Indexer(
 
 const server = makeBridge(
   { vault, committer, indexer, embeddings, embedClient, db: pool },
-  { token, maxBodyBytes: intEnv("METISTRY_VAULT_MAX_BYTES", 2 * 1024 * 1024) + 64 * 1024 },
+  { token, ...(ownerToken ? { ownerToken } : {}), maxBodyBytes: intEnv("METISTRY_VAULT_MAX_BYTES", 2 * 1024 * 1024) + 64 * 1024 },
 );
 server.listen(port, host, () => {
-  console.log(`reconciler listening on ${host}:${port} (repo: ${instanceDir}; commit every ${commitIntervalSec}s; reconcile every ${reconcileIntervalSec}s; push ${pushEverySec ? `every ${pushEverySec}s` : "never"})`);
+  console.log(`reconciler listening on ${host}:${port} (repo: ${instanceDir}; commit every ${commitIntervalSec}s; reconcile every ${reconcileIntervalSec}s; push ${pushEverySec ? `every ${pushEverySec}s` : "never"}; protected paths: ${ownerToken ? "the owner bearer only" : "NO caller — mint METISTRY_BRIDGE_TOKEN_RECONCILER_USER"})`);
 });
 
 setInterval(() => {

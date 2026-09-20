@@ -10,10 +10,17 @@ import { randomBytes } from "node:crypto";
 import { NON_VAULT_ROOTS, isVaultPath, type ErrorCode } from "@foldedspacelabs/metistry-core";
 import { Committer } from "./committer.js";
 import { Git } from "./git.js";
-import { confine, isProtected, validPrincipal, writeAllowed, type Confined } from "./paths.js";
+import { confine, isProtected, validPrincipal, writeAllowed, type CallerClass, type Confined } from "./paths.js";
 import { basenameTitle, isConflictFile, isMarkdown, parseFrontmatter, sha256 } from "./notes.js";
 
 export interface Intent {
+  /**
+   * Whose name the commit is in — ATTRIBUTION, from the request body. What
+   * the caller may DO is its `CallerClass`, which comes from the credential
+   * and is passed separately (paths.ts). A body has never been allowed to
+   * name the git author; since 2026-09-20 it cannot name the authority
+   * either.
+   */
   principal: string;
   message: string;
   group?: string | undefined;
@@ -226,10 +233,10 @@ export class Vault {
    * content hash, or "" to require absence; undefined skips the check.
    * Lands atomically (temp + rename) and enqueues the intent.
    */
-  async write(path: unknown, content: Buffer, intent: Intent, expectedSha?: string): Promise<Outcome<{ path: string; sha256: string; bytes: number; created: boolean }>> {
+  async write(path: unknown, content: Buffer, intent: Intent, caller: CallerClass, expectedSha?: string): Promise<Outcome<{ path: string; sha256: string; bytes: number; created: boolean }>> {
     const c = await this.confined(path);
     if (!c.ok) return c;
-    if (!writeAllowed(c.value.rel, intent.principal)) return fail("forbidden");
+    if (!writeAllowed(c.value.rel, intent.principal, caller)) return fail("forbidden");
     if (content.length > this.cfg.maxBytes) return fail("invalid_request", `content exceeds ${this.cfg.maxBytes} bytes`);
     const cur = await this.current(c.value.abs);
     if (expectedSha !== undefined && (cur?.sha256 ?? "") !== expectedSha) return fail("conflict");
@@ -245,10 +252,10 @@ export class Vault {
     return { ok: true, value: { path: c.value.rel, sha256: sha256(content), bytes: content.length, created: cur === null } };
   }
 
-  async delete(path: unknown, intent: Intent, expectedSha?: string): Promise<Outcome<{ path: string }>> {
+  async delete(path: unknown, intent: Intent, caller: CallerClass, expectedSha?: string): Promise<Outcome<{ path: string }>> {
     const c = await this.confined(path);
     if (!c.ok) return c;
-    if (!writeAllowed(c.value.rel, intent.principal)) return fail("forbidden");
+    if (!writeAllowed(c.value.rel, intent.principal, caller)) return fail("forbidden");
     const cur = await this.current(c.value.abs);
     if (!cur) return fail("not_found");
     if (expectedSha !== undefined && cur.sha256 !== expectedSha) return fail("conflict");
@@ -259,12 +266,12 @@ export class Vault {
   }
 
   /** git-mv semantics: the move lands on disk; the commit stages both sides so git records a rename. */
-  async rename(from: unknown, to: unknown, intent: Intent): Promise<Outcome<{ from: string; to: string }>> {
+  async rename(from: unknown, to: unknown, intent: Intent, caller: CallerClass): Promise<Outcome<{ from: string; to: string }>> {
     const a = await this.confined(from);
     if (!a.ok) return a;
     const b = await this.confined(to);
     if (!b.ok) return b;
-    if (!writeAllowed(a.value.rel, intent.principal) || !writeAllowed(b.value.rel, intent.principal)) return fail("forbidden");
+    if (!writeAllowed(a.value.rel, intent.principal, caller) || !writeAllowed(b.value.rel, intent.principal, caller)) return fail("forbidden");
     if (isProtected(b.value.rel) && intent.principal !== "user") return fail("forbidden");
     const cur = await this.current(a.value.abs);
     if (!cur) return fail("not_found");

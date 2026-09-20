@@ -8,7 +8,7 @@
 import { mkdir, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { confine, isProtected, parseVaultPath, writeAllowed } from "../src/paths.js";
+import { confine, isProtected, mayClaim, parseVaultPath, writeAllowed } from "../src/paths.js";
 import { tempRepo, type TempRepo } from "./helpers.js";
 
 describe("parseVaultPath (syntactic)", () => {
@@ -84,15 +84,16 @@ describe("protected paths on an instance that has not been migrated yet (§4.7)"
       "instance-migrations/0001_local.sql",
     ]) {
       expect(isProtected(p), p).toBe(true);
-      expect(writeAllowed(p, "assistant"), p).toBe(false);
-      expect(writeAllowed(p, "user"), p).toBe(true);
+      expect(writeAllowed(p, "assistant", "owner"), p).toBe(false);
+      expect(writeAllowed(p, "user", "owner"), p).toBe(true);
+      expect(writeAllowed(p, "user", "console"), p).toBe(false);
     }
   });
 
   it("leaves the legacy vault free — Knowledge/ is where the assistant works", () => {
     for (const p of ["Knowledge/now.md", "Knowledge/Journal/2026-09-01.md", "Knowledge/Inbox/capture.md"]) {
       expect(isProtected(p), p).toBe(false);
-      expect(writeAllowed(p, "assistant"), p).toBe(true);
+      expect(writeAllowed(p, "assistant", "console"), p).toBe(true);
     }
   });
 });
@@ -115,13 +116,53 @@ describe("protected paths (§4.7)", () => {
       "README.md",
     ]) {
       expect(isProtected(p), p).toBe(true);
-      expect(writeAllowed(p, "assistant"), p).toBe(false);
-      expect(writeAllowed(p, "user"), p).toBe(true);
+      expect(writeAllowed(p, "assistant", "owner"), p).toBe(false);
+      expect(writeAllowed(p, "user", "owner"), p).toBe(true);
     }
     // a note that merely shares a name with a protected file is vault content
     expect(isProtected("Areas/identity.yaml")).toBe(false);
     expect(isProtected("Areas/CLAUDE.md")).toBe(false);
-    expect(writeAllowed("Areas/Alpha.md", "assistant")).toBe(true);
+    expect(writeAllowed("Areas/Alpha.md", "assistant", "console")).toBe(true);
+  });
+
+  // The 2026-09-20 ruling, as a unit: `principal: user` is a CLAIM, and a
+  // claim is worth exactly what the credential behind it is worth.
+  it("a console bearer claiming `user` reaches no protected path but the prompt overlay", () => {
+    for (const p of [
+      ".metistry/identity.yaml",
+      ".metistry/rules.yaml",
+      ".metistry/deployment.yaml",
+      ".metistry/metistry.lock",
+      ".metistry/queries/knowledge_pages.yaml",
+      ".metistry/agents/a/manifest.yaml",
+      "CLAUDE.md",
+      "README.md",
+    ]) {
+      expect(writeAllowed(p, "user", "console"), p).toBe(false);
+      expect(writeAllowed(p, "user", "owner"), p).toBe(true);
+    }
+    // …and the two enumerated doors the console already ships: §4.10
+    // self-modification (prompt-overlay.ts) and the Compute pane's two writes
+    // (compute-routes.ts), both gated on the owner's own session there.
+    expect(writeAllowed(".metistry/assistant-prompt.md", "user", "console")).toBe(true);
+    expect(writeAllowed(".metistry/compute.yaml", "user", "console")).toBe(true);
+    // still `user` even there — attribution does not move because authority did
+    expect(writeAllowed(".metistry/assistant-prompt.md", "assistant", "console")).toBe(false);
+    expect(writeAllowed(".metistry/compute.yaml", "assistant", "console")).toBe(false);
+    // and the door is a path, not a directory: nothing beside it opens
+    expect(writeAllowed(".metistry/compute.yaml.bak", "user", "console")).toBe(false);
+    expect(writeAllowed(".metistry/queries/compute.yaml", "user", "console")).toBe(false);
+  });
+
+  it("the owner bearer may be the user and nobody else — a leaked one cannot forge an agent into history", () => {
+    expect(writeAllowed("Areas/Alpha.md", "user", "owner")).toBe(true);
+    expect(writeAllowed("Areas/Alpha.md", "researcher", "owner")).toBe(false);
+    expect(mayClaim("owner", "user")).toBe(true);
+    expect(mayClaim("owner", "assistant")).toBe(false);
+    // the console IS the multiplexer: it stamps the principal from its own
+    // authenticated caller, so every principal is in range for it
+    expect(mayClaim("console", "user")).toBe(true);
+    expect(mayClaim("console", "agent-seven")).toBe(true);
   });
 
   it(".metistry/state/ is NOT protected — it is derived, and nobody's record (invariant 1)", () => {
@@ -138,8 +179,8 @@ describe("protected paths (§4.7)", () => {
     for (const p of ["Inbox/1757556000000-note.md", "Inbox/.large/1757556000000-clip.mov"]) {
       expect(parseVaultPath(p).ok, p).toBe(true);
       expect(isProtected(p), p).toBe(false);
-      expect(writeAllowed(p, "capture"), p).toBe(true);
-      expect(writeAllowed(p, "assistant"), p).toBe(true);
+      expect(writeAllowed(p, "capture", "console"), p).toBe(true);
+      expect(writeAllowed(p, "assistant", "console"), p).toBe(true);
     }
     // ...and the casing rule still forbids the other spelling of it
     expect(parseVaultPath("inbox/x.md")).toEqual({ ok: false, code: "invalid_request" });

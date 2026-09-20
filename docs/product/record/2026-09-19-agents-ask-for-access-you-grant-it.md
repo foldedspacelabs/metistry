@@ -16,6 +16,9 @@
   the whole vault), it cannot ask twice while you have not answered, it
   cannot ask on behalf of anyone but itself, and it cannot answer itself —
   triage is your session and nothing else reaches it. A revoked agent's
-  pending asks are declined along with its token. The assistant is deliberately
-  refused this tool: its scope is a line in your configuration file, and a
-  grant that reverts on restart would be a promise the system could not keep.
+  pending asks are declined along with its token. Your own assistant may ask
+  too, from the same day's follow-up ruling: its scope is a line in your
+  configuration file, so each approval for it is recorded beside the request
+  you answered and merged back at every start — configuration stays the
+  floor, and a grant that reverted on restart would have been a promise the
+  system could not keep.

@@ -3,6 +3,7 @@
 // human's edit must refresh it (and re-open it for the drain), and a
 // deleted file must archive it — the owner's 2026-09-16 ruling that edits
 // made in `` are first-class and never lost. Skipped without a db.
+import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -23,6 +24,14 @@ try {
 const hasDb = !!process.env.METISTRY_DB_PASSWORD;
 const INBOX = "Inbox";
 
+// This suite never asserts on knowledge_files/knowledge_links — it only
+// wants the reconcile side effect of indexing the fixture vault gone
+// afterwards. A random marker keeps that cleanup scoped to this file's own
+// rows, so it can never delete a sibling reconciler test file's rows in the
+// shared scratch db (docs/ops/testing.md, "count your own rows").
+const MARKER = `itest-${randomUUID().slice(0, 8)}`;
+const PREFIX = `Areas/${MARKER}/`;
+
 describe.skipIf(!hasDb)("the vault inbox is indexed from the tree (real db)", () => {
   let pool: pg.Pool;
   let repo: TempRepo;
@@ -32,8 +41,8 @@ describe.skipIf(!hasDb)("the vault inbox is indexed from the tree (real db)", ()
     (await pool.query(`SELECT path, source, mime, note, sha256, status FROM inbox WHERE path LIKE $1 ORDER BY path`, [`${INBOX}/%`])).rows;
   const clean = async () => {
     await pool.query(`DELETE FROM inbox WHERE path LIKE $1`, [`${INBOX}/%`]);
-    await pool.query(`DELETE FROM knowledge_links`);
-    await pool.query(`DELETE FROM knowledge_files`);
+    await pool.query(`DELETE FROM knowledge_links WHERE from_path LIKE $1 OR to_path LIKE $1`, [`${PREFIX}%`]);
+    await pool.query(`DELETE FROM knowledge_files WHERE path LIKE $1`, [`${PREFIX}%`]);
     await pool.query(`DELETE FROM runs WHERE component = 'reconciler'`);
   };
 
@@ -46,7 +55,7 @@ describe.skipIf(!hasDb)("the vault inbox is indexed from the tree (real db)", ()
       password: process.env.METISTRY_DB_PASSWORD,
     });
     await clean();
-    repo = await tempRepo();
+    repo = await tempRepo(MARKER);
     const committer = new Committer(repo.git, { authorPrefix: "Metistry", authorEmail: "metistry@test" });
     const vault = new Vault(repo.root, repo.git, committer, { maxBytes: 65536 });
     indexer = new Indexer(pool, vault, committer, { commitExternalEdits: false });
@@ -152,6 +161,8 @@ describe.skipIf(!hasDb)("the vault inbox is indexed from the tree (real db)", ()
 // stopped on exactly the installs that had not migrated.
 
 const LEGACY_INBOX = "Knowledge/Inbox";
+const LEGACY_MARKER = `itest-${randomUUID().slice(0, 8)}`;
+const LEGACY_PREFIX = `Areas/${LEGACY_MARKER}/`;
 
 describe.skipIf(!hasDb)("the vault inbox on a legacy instance (real db)", () => {
   let pool: pg.Pool;
@@ -160,8 +171,8 @@ describe.skipIf(!hasDb)("the vault inbox on a legacy instance (real db)", () => 
 
   const clean = async () => {
     await pool.query(`DELETE FROM inbox WHERE path LIKE $1`, [`${LEGACY_INBOX}/%`]);
-    await pool.query(`DELETE FROM knowledge_links`);
-    await pool.query(`DELETE FROM knowledge_files`);
+    await pool.query(`DELETE FROM knowledge_links WHERE from_path LIKE $1 OR to_path LIKE $1`, [`${LEGACY_PREFIX}%`]);
+    await pool.query(`DELETE FROM knowledge_files WHERE path LIKE $1`, [`${LEGACY_PREFIX}%`]);
     await pool.query(`DELETE FROM runs WHERE component = 'reconciler'`);
   };
 
@@ -174,7 +185,7 @@ describe.skipIf(!hasDb)("the vault inbox on a legacy instance (real db)", () => 
       password: process.env.METISTRY_DB_PASSWORD,
     });
     await clean();
-    repo = await tempRepo();
+    repo = await tempRepo(LEGACY_MARKER);
     const committer = new Committer(repo.git, { authorPrefix: "Metistry", authorEmail: "metistry@test" });
     const vault = new Vault(repo.root, repo.git, committer, { maxBytes: 65536 });
     // what `resolveInstanceLayout` hands the reconciler on a legacy instance

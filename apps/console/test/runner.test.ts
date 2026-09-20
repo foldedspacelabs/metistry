@@ -6,7 +6,8 @@
 // notification.
 import { describe, expect, it } from "vitest";
 import { errorSignature, parseCompute } from "@foldedspacelabs/metistry-core";
-import { scheduleToSeconds, tick, type ScheduledCollector } from "../src/runner.js";
+import type { PlanVault } from "@metistry-apps/routines";
+import { routineCapabilities, scheduleToSeconds, tick, type ScheduledCollector } from "../src/runner.js";
 
 interface RunRow {
   id: number;
@@ -289,5 +290,36 @@ assignments:
 
     await tick(new Fake(NOW), [fold], {}, opts({ compute: () => compute, env: { METISTRY_OPENROUTER_API_KEY: "sk-or-x" } }));
     expect(ran).toBe(1);
+  });
+});
+
+// `routineCapabilities` is what `main.ts` spreads into `ComponentCtx`
+// (`queries`, `vault`, `reader`) — this is the ctx builder itself, so a
+// regression here is a routine silently losing the vault or its `TemplateReader`
+// again, the exact bug this covers (the fold received `queries` but not
+// `reader` until this was fixed).
+describe("routineCapabilities", () => {
+  const queries = { run: async () => ({ rows: [] }) };
+
+  it("supplies queries alone when there is no vault bridge", () => {
+    const ctx = routineCapabilities(queries);
+    expect(ctx).toEqual({ queries });
+    expect(ctx.vault).toBeUndefined();
+    expect(ctx.reader).toBeUndefined();
+  });
+
+  it("supplies queries, the vault client, AND a reader built over it, when the vault bridge is up", async () => {
+    const vault: PlanVault = {
+      read: async (path) => (path === "Templates/Fold.md" ? { content: Buffer.from("skeleton text", "utf8"), sha256: "abc" } : null),
+      write: async (path, content) => ({ path, sha256: "x", bytes: content.length, created: true }),
+    };
+    const ctx = routineCapabilities(queries, vault);
+
+    expect(ctx.queries).toBe(queries);
+    expect(ctx.vault).toBe(vault);
+    // the reader is `vaultReader(vault)` — proven by behaviour, not by
+    // reference, since it is a fresh closure over `vault` each call
+    expect(await ctx.reader?.read("Templates/Fold.md")).toBe("skeleton text");
+    expect(await ctx.reader?.read("Templates/Plan.md")).toBeNull();
   });
 });

@@ -321,6 +321,16 @@ produces the flat instance layout (ruled 2026-09-17;
   now.md                    from seed/ — the vault; brain-commit writes here
   Inbox/README.md           where captures land — in the vault, so Obsidian
                             sees them and git carries them (docs/ops/inbox.md)
+  Journal/                  the user's own daily note, one writer per file
+    Plan/ Fold/ Standup/    machine-owned, one routine per folder (§5.1)
+    Meetings/               the user's own meeting notes
+  Templates/                Daily/Meeting/Plan/Standup/Fold/Weekly.md — all
+                            `source: user`, so the assistant may never
+                            overwrite them (docs/product/daily-flow-spec.md §6.1)
+  Me/                       profile.md + `Working Style.md`, honest
+                            placeholders — Metistry discovers these, never
+                            assumes them (§6.6)
+  People/ Projects/         empty; you add a page the first time you need one
   .metistry/
     identity.yaml           the ONLY place the assistant is named (--name)
                             …and its instance_id: a v4 UUID minted once, the
@@ -337,7 +347,22 @@ produces the flat instance layout (ruled 2026-09-17;
 ```
 
 It refuses a non-empty directory unless `--force`, never prompts, and
-**never writes a secret**. What it prints at the end is the next step —
+**never writes a secret**. `--force` onto an already-stamped directory never
+overwrites a file that is already there — the journal tree, the six
+templates and `Me/` are stamped once, so a template you have since edited
+in Obsidian survives a re-run; only a file genuinely missing gets filled in.
+
+**This is `init`-only, deliberately: `metistry update` never re-stamps the
+vault.** §6.1 of the daily-flow spec ties the journal tree, `Templates/`
+and `Me/` to `metistry init` and says nothing about `update`, and `update`'s
+own steps (above) touch the product checkout, migrations and the running
+services — never vault content, which is invariant 2's territory, not a
+product update's. An instance created before this tree existed gets it by
+hand: copy `seed/vault/{Journal,Templates,Me,People,Projects}` out of a
+current checkout into the instance directory and commit it yourself, the
+same way you would add any other note.
+
+What it prints at the end is the next step —
 six lines for `<dir>/.metistry/state/.env`, this instance's own environment,
 shaped for `--shape compose|launchd` (default: launchd on macOS, compose
 elsewhere — `docs/ops/deployment-shapes.md`):

@@ -20,6 +20,30 @@ A passkey session and the local owner token are the **same principal**, in
 the same code path — `isUser()` in `apps/console/src/server.ts` is the one
 predicate the owner surface is gated on, so the two cannot drift apart.
 
+## One decision function
+
+Every door in this table asks **one function** whether a request may pass:
+`may(principal, verb, resource)` in `packages/core/src/access.ts`. The
+console maps a credential onto its `Principal` (`principalOf` in
+`server.ts`), `mcp-brain` maps an agent bearer onto the same shape
+(`packages/mcp-brain/src/principal.ts`), and neither a route handler nor a
+tool body compares a `kind` or a `tier` of its own — a misuse test greps the
+bridge's source to keep it that way
+(`packages/mcp-brain/test/may-surface.test.ts`).
+
+A refusal carries the uniform envelope it always did, plus a closed
+`reason` and, where a remedy already exists, a machine-readable `needs` —
+`scope_required` names the area a `request_access` would ask for, and
+`autonomy_required` names the entry you would raise. The complete catalogue
+of what every door can say is committed as
+`packages/core/test/access.golden.json`, so changing a refusal's wording is
+a reviewable diff rather than a string edited inside a handler.
+
+Where the grants themselves live has not moved: registry rows for external
+agents, the environment for the instance's own assistant, the manifest for a
+crew. `may()` decides; it never writes, and every widening still goes
+through the console's one grants door and its one audit row (invariant 2).
+
 ## The local owner token
 
 `METISTRY_LOCAL_OWNER_TOKEN` is an instance-scoped secret. `metistry init` mints

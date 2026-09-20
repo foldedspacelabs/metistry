@@ -183,3 +183,101 @@ box · `⌘C` on the standup block copies it.
   edit), so it is app state keyed by `task_key`, and it needs a home.
 - Whether the capacity meter should count `work` rows. It does not here: an
   agent's row is not your minutes. But a row *waiting on you* arguably is.
+
+---
+
+# 12. Redesigned — the day as a spine
+
+Board: `Today — the day as a spine`. The board above keeps its job as the row,
+chip and state vocabulary, and as **the absent state of this one** (see §12.4).
+
+## 12.1 The critique that drove it
+
+The first pass was a to-do list with a capacity bar. Accurate, and not much use
+at 08:40, because it does not answer the question you open it with: *what is
+today, and am I ready for it?*
+
+The obvious fix — schedule panel, todo panel, reviews panel, agents panel,
+updates panel, a row of predicted buttons — is a **dashboard**, and this
+product was written to prevent dashboards. P2 says silence is the default and
+the surface stays calm; Needs You is the only badge. Seven panels of live
+numbers is precisely what those rules exist to stop.
+
+So the question is not *which sections*. It is **what makes a hub calm**, and
+the answer is:
+
+> A hub is calm when it is organised by **when you need something**, not by
+> **what kind of thing it is.**
+
+A dashboard sorts by type. A day does not work like that. At 08:40 the only
+thing that matters is the 09:30 meeting and whether you are ready. At 11:30 the
+only thing that matters is the ninety minutes before the next commitment.
+
+## 12.2 The spine
+
+One time-ordered column. Meetings at their time. **Tasks in the gaps**, because
+a gap is when you would actually do one. Standup at 09:15. A `NOW` rule. Past
+items collapsed above it — *3 earlier today*.
+
+This settles the hardest of the five asks: **updates through the day land at
+their own time, not at the top.** The page never churns and nothing you are
+reading moves (P9).
+
+**The rail** is the only exception, and it earns it: two columns because there
+are two questions. The spine answers *when*; the rail answers *what is true
+right now regardless of the clock* — agents, what changed since you last
+looked, and **one line** for Needs You. It does **not** repeat the request
+queue; that is the bell's job, and two places for one queue is how a product
+starts lying. A request that is about *today* attaches to the task it is about
+instead.
+
+## 12.3 Retrieved and generated must not look alike
+
+The meeting card is a briefing: who, what you owe them, what happened last
+time, and two lines to jog your memory.
+
+- **Retrieved** — a real page, a real task, a real past note, each a link you
+  can open and check. Plain rows.
+- **Generated** — the assistant's sentences, in the `agent` container,
+  attributed, and labelled *written, not retrieved*.
+
+This is P1 doing the work it was written for, and it is the one rule in the
+redesign I would not trade. A briefing is exactly where a confident guess is
+indistinguishable from a fact until it costs you a meeting — and **a briefing
+you have to double-check is slower than no briefing at all.**
+
+## 12.4 It degrades into the board above
+
+With no calendar there are no meetings and no gaps, so the spine collapses to
+the plain list already drawn. **Today-with-a-calendar is Today-without-one plus
+structure.** The four absent states, the row, the chips, the completion flow
+and the All mode are all unchanged and all still apply.
+
+## 12.5 Predicted actions — three rules
+
+1. **It says why it is there.** "Draft the agenda — *you have 3 open items with
+   Jim*." A button with no reason is a guess you must evaluate; with a reason
+   it is an argument you can agree with in half a second. The reason is
+   retrieved, never generated.
+2. **It lives on the thing it is about, never in a tray.** A global row of
+   predicted buttons is where prediction becomes noise. One per card, three on
+   the page, and the page may have none.
+3. **It is a shortcut to a verb you already have, never a new power.**
+   `ACTION_KINDS` stays closed. Anything irreversible keeps the confirmation it
+   would have had anyway.
+
+A consequence of the three: a wrong prediction costs one glance, because it
+sits beside its own justification and did nothing on its own.
+
+## 12.6 The capacity meter, corrected
+
+With meetings on the page the old meter is wrong. Three segments —
+**committed · fits the gaps · does not fit** — against total working minutes.
+It still refuses nothing. Requires A8.
+
+## 12.7 What this needs that does not exist
+
+Nine items in `today-hub-requests.md`, for the developer. A1 (calendar events
+carry three fields) and A2 (Metistry may not write the meeting note) are
+blocking; A2 is solved by the recurring-task precedent without touching
+ownership. A5 — generated prose outside a fold template — needs a ruling.

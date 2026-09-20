@@ -130,8 +130,14 @@ describe.skipIf(!hasDb)("reconciler embeddings (real db, stub embedder)", () => 
     expect(stub.batches.every((n) => n <= 4)).toBe(true);
     expect(stub.calls).toBeLessThan(s.embeddings!.chunks);
 
+    // COLLATE "C": a bare ORDER BY path sorts in the cluster's own locale, and
+    // a glibc collation compares "now" before "Sleep" case-insensitively at
+    // the primary level — the marker nests every fixture path under the same
+    // "Areas/<marker>/" directory, so this is a same-level sibling compare,
+    // not the byte-order-in-every-collation "Areas/…" vs "now.md" the
+    // unprefixed fixture used to be (docs/ops/testing.md; seed/queries/knowledge_pages.yaml found the same thing).
     const { rows } = await pool.query(
-      `SELECT path, model, dim, count(*)::int AS n FROM embeddings WHERE path LIKE $1 GROUP BY path, model, dim ORDER BY path`,
+      `SELECT path, model, dim, count(*)::int AS n FROM embeddings WHERE path LIKE $1 GROUP BY path, model, dim ORDER BY path COLLATE "C"`,
       [`${PREFIX}%`],
     );
     expect(rows.map((r) => r.path)).toEqual([`${PREFIX}Alpha.md`, `${PREFIX}Beta.md`, `${PREFIX}Sleep.md`, `${PREFIX}now.md`]);
@@ -183,7 +189,9 @@ describe.skipIf(!hasDb)("reconciler embeddings (real db, stub embedder)", () => 
     const s = await indexer.reconcile("test");
     expect(s.removed).toBe(1);
     expect(s.embeddings!.deleted).toBeGreaterThanOrEqual(2);
-    const { rows } = await pool.query(`SELECT DISTINCT path FROM embeddings WHERE path LIKE $1 ORDER BY path`, [`${PREFIX}%`]);
+    // GROUP BY, not SELECT DISTINCT: Postgres refuses an ORDER BY expression
+    // (path COLLATE "C") that isn't in a DISTINCT query's select list.
+    const { rows } = await pool.query(`SELECT path FROM embeddings WHERE path LIKE $1 GROUP BY path ORDER BY path COLLATE "C"`, [`${PREFIX}%`]);
     expect(rows.map((r) => r.path)).toEqual([`${PREFIX}Sleep.md`, `${PREFIX}now.md`]);
   });
 

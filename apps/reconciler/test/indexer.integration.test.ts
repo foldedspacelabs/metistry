@@ -39,7 +39,11 @@ describe.skipIf(!hasDb)("reconciler index loop (real db)", () => {
 
   const clean = async () => {
     // the index is derived (invariant 1): start and end from nothing at all,
-    // not just nothing of ours — see the note above `MARKER`
+    // not just nothing of ours — see the note above `MARKER`. The task
+    // tables come first, in the order the walk itself takes them (P1-4) —
+    // two orders on two paths is how #207's deadlock happened.
+    await pool.query(`DELETE FROM vault_tasks`);
+    await pool.query(`DELETE FROM vault_task_refs`);
     await pool.query(`DELETE FROM knowledge_links`);
     await pool.query(`DELETE FROM knowledge_files`);
     await pool.query(`DELETE FROM proposals WHERE source_agent = 'reconciler'`);

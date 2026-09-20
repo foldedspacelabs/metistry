@@ -57,6 +57,30 @@ describe("agent grants validation (pure)", () => {
     expect(() => agents.validateGrants({ tier: "areas", areas: ["/"] })).toThrow(agents.AgentError);
   });
 
+  // The widening an approved access request applies (ruled 2026-09-19). Pure,
+  // so the rule is readable without a server: what it adds, what it refuses to
+  // add twice, and the axis it never touches.
+  it("widenedGrants adds exactly the requested prefix, never `queries`, and never an area already covered", () => {
+    expect(agents.widenedGrants({ tier: "none", areas: [] }, "Areas/Fsl")).toEqual({ tier: "areas", areas: ["Areas/Fsl"] });
+    expect(agents.widenedGrants({ tier: "index", areas: [] }, "Areas/Fsl")).toEqual({ tier: "areas", areas: ["Areas/Fsl"] });
+    expect(agents.widenedGrants({ tier: "areas", areas: ["Areas/Fsl"] }, "Projects/Drey")).toEqual({ tier: "areas", areas: ["Areas/Fsl", "Projects/Drey"] });
+    // already covered by a prefix it holds: nothing to add
+    expect(agents.widenedGrants({ tier: "areas", areas: ["Areas/Fsl"] }, "Areas/Fsl")).toEqual({ tier: "areas", areas: ["Areas/Fsl"] });
+    expect(agents.widenedGrants({ tier: "areas", areas: ["Areas/Fsl"] }, "Areas/Fsl/Deeper")).toEqual({ tier: "areas", areas: ["Areas/Fsl"] });
+    // `queries` is a separate axis: carried across, never granted
+    expect(agents.widenedGrants({ tier: "index", areas: [], queries: true }, "Areas/Fsl")).toEqual({ tier: "areas", areas: ["Areas/Fsl"], queries: true });
+    expect(agents.widenedGrants({ tier: "index", areas: [] }, "Areas/Fsl")).not.toHaveProperty("queries");
+    // whatever it produces is what the grants validator would admit anyway
+    expect(agents.validateGrants(agents.widenedGrants({ tier: "none", areas: [] }, "Areas/Fsl"))).toEqual({ tier: "areas", areas: ["Areas/Fsl"] });
+  });
+
+  it("accessArea reads the area off a payload and re-validates it — a row is data, not a decision", () => {
+    expect(agents.accessArea({ area: "Areas/Fsl" })).toBe("Areas/Fsl");
+    for (const payload of [{ area: "areas/fsl" }, { area: "../etc" }, { area: "/" }, { area: ".metistry/state" }, { area: "Artifacts/X" }, { area: 7 }, {}, null, "Areas/Fsl"]) {
+      expect(agents.accessArea(payload), JSON.stringify(payload)).toBeUndefined();
+    }
+  });
+
   it("projects are slugs", () => {
     expect(agents.validateProjects(["drey", "fsl-2026", "drey"])).toEqual(["drey", "fsl-2026"]);
     expect(() => agents.validateProjects(["Drey"])).toThrow(agents.AgentError);

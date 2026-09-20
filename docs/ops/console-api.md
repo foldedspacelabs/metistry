@@ -231,6 +231,57 @@ has the enum, the autonomy table, and why `dispatch` stays human by default.
 Rows an agent was allowed to run on its own arrive already decided `auto` —
 never in this queue, always in the timeline.
 
+## `PUT /api/agents/:id/grants` — and the one other door onto it
+
+```
+PUT /api/agents/devin/grants   {"tier":"areas","areas":["Areas/Health"],"queries":false}
+200 {"ok":true,"grants":{"tier":"areas","areas":["Areas/Health"]}}
+400 the field is named ("area must be a TitleCase vault prefix (e.g. Areas/Fsl)")
+404 no such row, or it is revoked
+```
+
+The grant is a read TIER plus, for `areas`, the vault prefixes it covers;
+`queries` is a separate axis (invariant 3's read path). An area is TitleCase
+from the vault root — core's `validAreaPrefix`, which also refuses `.metistry/`
+and `Artifacts/` — and the bare vault (`/`) is admitted for a `kind: internal`
+row alone, keyed on the ROW's kind and never on the request.
+
+Since 2026-09-19 an agent can **ask** for an area it was refused
+(`request_access` on `/mcp`, `docs/ops/actions.md`), and approving that ask in
+Needs You is the second door onto this same write: one function
+(`writeGrants`), one validator, one `agent_admin` audit row — the queue's
+answer carries `via: triage` and the proposal id, and the owner's own PUT
+carries `via: console`. Approve therefore cannot grant anything this route
+would refuse, and the console's mutating surface gains no verb (invariant 10).
+
+`GET /api/agents` answers the registry **and** the unanswered asks, so the
+panel where a grant is edited shows what has been asked of it:
+
+```
+GET /api/agents
+200 {"agents":[{"id","display_name","kind","grants","projects","autonomy",
+                "revoked","remote","approved_at","pending","last_seen_at"}],
+     "access_requests":[{"proposal_id":412,"agent":"devin","area":"Areas/Health",
+                         "reason":"knowledge_read pointed me here","ts":"…"}]}
+```
+
+That list is a **view**: the answer is given in the queue, through
+`POST /api/proposals/:id` like every other request, which for this kind takes
+an extra field —
+
+```
+POST /api/proposals/412 {"decision":"allow"}
+200 {"ok":true,"granted":{"agent":"devin","area":"Areas/Health","grants":{…}}}
+POST /api/proposals/412 {"decision":"accept_with_changes","area":"Areas/Health/Sleep"}
+200 {"ok":true,"granted":{"agent":"devin","area":"Areas/Health/Sleep","grants":{…}}}
+400 `accept_with_changes` with no `area` (there is nothing to grant), or an area the validator refuses
+404 the agent is revoked or gone — the row stays pending for you to Decline
+```
+
+`deny`, `later` and `skip` grant nothing at all, and neither does a revoked
+agent's ask: revoking settles its pending requests as `deny` in the same
+breath it kills the token.
+
 ## `PUT /api/agents/:id/autonomy` — the one route that may widen
 
 ```

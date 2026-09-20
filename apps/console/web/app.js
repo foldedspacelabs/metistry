@@ -473,6 +473,7 @@ $("push-test").onclick = async () => {
 const REQUEST_TYPE = {
   decision: "question",
   grant_elevation: "access",
+  access_request: "access",
   improvement: "improvement",
   knowledge: "note",
   draft_settle: "note",
@@ -515,6 +516,10 @@ const attr = (s) => esc(s).replaceAll('"', "&quot;");
 // moved under us is refused rather than applied to a different question.
 const picked = new Set();
 const seenAt = new Map();
+// The rows as they were painted — an answer that needs a field off the row
+// (an access request's area) reads it from what the user was SHOWN.
+const rendered = new Map();
+const proposalById = (id) => rendered.get(String(id));
 
 /** The one decision call. `if_unchanged` rides every single-row answer; a 409 repaints instead of alerting. */
 async function decide(id, body) {
@@ -559,7 +564,8 @@ async function loadTriage() {
   const live = new Set(proposals.map((p) => String(p.id)));
   for (const id of [...picked]) if (!live.has(id)) picked.delete(id); // a row that left the queue leaves the selection
   seenAt.clear();
-  for (const p of proposals) seenAt.set(String(p.id), p.ts);
+  rendered.clear();
+  for (const p of proposals) { seenAt.set(String(p.id), p.ts); rendered.set(String(p.id), p); }
   const groups = new Map();
   for (const p of [...proposals].sort((a, b) => new Date(a.ts) - new Date(b.ts))) {
     const type = requestType(p.kind);
@@ -575,10 +581,22 @@ async function loadTriage() {
     const body = { decision: b.dataset.d };
     // Revise is the answer that carries a reason: without one the assistant
     // has nothing to change, so an empty note cancels rather than sends.
+    //
+    // On an `access_request` the thing to revise is the AREA — Revise is how
+    // you grant a narrower prefix than the one asked for — so it asks for
+    // that instead, pre-filled with the ask. The server validates it with the
+    // grants validator's own rule and refuses anything else.
     if (b.dataset.d === "accept_with_changes") {
-      const feedback = (prompt("what should change?") ?? "").trim();
-      if (!feedback) return;
-      body.feedback = feedback;
+      const row = b.dataset.kind === "access_request" ? proposalById(b.dataset.triage) : null;
+      if (row) {
+        const area = (prompt("grant which folder instead?", row.payload?.area ?? "") ?? "").trim();
+        if (!area) return;
+        body.area = area;
+      } else {
+        const feedback = (prompt("what should change?") ?? "").trim();
+        if (!feedback) return;
+        body.feedback = feedback;
+      }
     }
     await decide(b.dataset.triage, body);
     loadTriage();
@@ -637,6 +655,24 @@ function actionDetail(p) {
   return `<br><span class="muted"><b>${esc(a.kind ?? "?")}</b> ${esc(args)}</span>${p.payload?.reason ? `<br><span class="muted">why: ${esc(String(p.payload.reason).slice(0, ARG_PREVIEW_CHARS))}</span>` : ""}${outcome}`;
 }
 
+/**
+ * An `access_request` row says what it is asking for before you answer it
+ * (docs/ops/actions.md): the area, the reason the agent gave, and what that
+ * credential holds today — agent-authored text, so output-encoded and clipped
+ * like an action's arguments. The `index` → `areas` note is the consequence
+ * that is easy to miss: an agent at tier `index` can be told any title in the
+ * vault and read none, and granting it one folder trades that browse for the
+ * read. Approving is a choice between two scopes, not a pure widening.
+ */
+function accessDetail(p) {
+  if (p.kind !== "access_request") return "";
+  const held = p.payload?.current_tier === "areas" ? `folders ${(p.payload?.current_areas ?? []).map(esc).join(", ")}` : esc(accessLabel(p.payload?.current_tier ?? "none"));
+  const trade = p.payload?.current_tier === "index" ? " — approving trades its whole-vault title browse for reads inside that folder" : "";
+  const done = p.payload?.granted ? `<br><span class="muted">granted — ${esc(String(p.payload.granted.area ?? ""))}</span>` : "";
+  return `<br><span class="muted">wants <b>${esc(String(p.payload?.area ?? "?"))}</b> · has ${held}${esc(trade)}</span>` +
+    `${p.payload?.reason ? `<br><span class="muted">why: ${esc(String(p.payload.reason).slice(0, ARG_PREVIEW_CHARS))}</span>` : ""}${done}`;
+}
+
 function proposalRow(p) {
   const c = p.payload?.classification ?? {};
   const label = c.action || c.title || p.payload?.title || p.kind; // review proposals (§4.21) carry a top-level title
@@ -649,12 +685,12 @@ function proposalRow(p) {
   const work = p.payload?.suggested_work;
   const answers = opts
     ? opts.map((o) => `<button data-triage="${p.id}" data-d="${attr(o)}">${esc(o)}</button>`).join(" ")
-    : DECISIONS.map((x) => `<button data-triage="${p.id}" data-d="${x.d}"${x.style ?? ""}>${x.label}</button>`).join(" ");
+    : DECISIONS.map((x) => `<button data-triage="${p.id}" data-d="${x.d}" data-kind="${attr(p.kind)}"${x.style ?? ""}>${x.label}</button>`).join(" ");
   const asWork = work?.title
     ? ` <button data-triage="${p.id}" data-d="accept_as_work" title="${attr(`creates the task “${work.title}”, unassigned`)}">Approve as Work</button>`
     : "";
   const defer = DEFER.map((x) => `<button data-triage="${p.id}" data-d="${x.d}" class="quiet">${x.label}</button>`).join(" ");
-  return `<li><span><input type="checkbox" data-pick="${p.id}" aria-label="${attr(`select ${label}`)}"> ${esc(label)} <span class="muted">${esc(requestType(p.kind))} · ${esc(c.kind ?? "")} · ${esc(p.source_agent)} · ${new Date(p.ts).toLocaleDateString()}</span>${actionDetail(p)}</span>
+  return `<li><span><input type="checkbox" data-pick="${p.id}" aria-label="${attr(`select ${label}`)}"> ${esc(label)} <span class="muted">${esc(requestType(p.kind))} · ${esc(c.kind ?? "")} · ${esc(p.source_agent)} · ${new Date(p.ts).toLocaleDateString()}</span>${actionDetail(p)}${accessDetail(p)}</span>
         <span>${answers}${asWork} ${defer}</span></li>`;
 }
 
@@ -731,8 +767,13 @@ const accessLabel = (t) => ACCESS_LABEL[t] ?? t;
 let agentsCache = [];
 async function loadAgents() {
   const res = await api("/api/agents");
-  const { agents } = await res.json();
+  const { agents, access_requests } = await res.json();
   agentsCache = agents;
+  // What each agent has ASKED for, beside what it holds (ruled 2026-09-19).
+  // The answer is still given in Needs You — this is the panel telling you
+  // there is a question, not a second door onto granting.
+  const asked = new Map();
+  for (const r of access_requests ?? []) asked.set(r.agent, [...(asked.get(r.agent) ?? []), r]);
   $("agents-empty").hidden = agents.length > 0;
   $("agent-list").innerHTML = agents
     .map((a) => {
@@ -752,12 +793,15 @@ async function loadAgents() {
       // the fact worth being able to see at a glance.
       const table = effectiveActions(au);
       const actionLine = `level: ${esc(levelOf(au))} · ${ACTION_KINDS.map((k) => `${esc(k)} ${esc(table[k])}`).join(" · ")}`;
+      const asks = (asked.get(a.id) ?? [])
+        .map((r) => `asked for ${esc(r.area)} — ${esc(String(r.reason ?? "").slice(0, 120))} (answer it in Needs You, request #${Number(r.proposal_id)})`)
+        .join("<br>");
       const actions = a.revoked
         ? '<span class="muted">revoked</span>'
         : `<span><button data-agent-grants="${esc(a.id)}" class="secondary">grants</button> <button data-agent-rotate="${esc(a.id)}" class="secondary">rotate</button> <button data-agent-revoke="${esc(a.id)}">revoke</button></span>`;
       return `<li class="${a.revoked ? "revoked" : ""}"><span><b>${esc(a.display_name)}</b> <span class="muted">${esc(a.id)}</span> <span class="chip">${esc(ROLE_LABEL[a.kind] ?? a.kind)}</span><br>
         <span class="muted">access: ${scope}${projects} · ${seen}</span>${narrowing ? `<br><span class="muted">autonomy: ${narrowing}</span>` : ""}<br>
-        <span class="muted">actions: ${actionLine}</span><br>
+        <span class="muted">actions: ${actionLine}</span><br>${asks ? `<span class="muted">${asks}</span><br>` : ""}
         <span id="presence-${esc(a.id)}" class="presence"></span></span>${actions}</li>`;
     })
     .join("");

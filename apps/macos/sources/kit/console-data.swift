@@ -313,6 +313,13 @@ public struct RequestRow: Codable, Sendable, Equatable, Identifiable {
             // A blocking question is answered with its OWN options, plus
             // Decline, which is always available.
             offered = options.map { RequestAnswer.option($0) } + [.decline(nil)]
+        } else if kind == "access_request", let area = payload?.string("area") {
+            // Approve / Revise / Decline as everywhere else — but Revise on an
+            // access request means "grant a NARROWER folder", so it carries the
+            // prefix rather than a reason, pre-set to the one that was asked
+            // for. The console validates the area against its own grants
+            // validator and refuses a bare reason for this kind.
+            offered = [.approve, .reviseArea(area), .decline(nil)]
         } else {
             offered = [.approve, .revise(""), .decline(nil)]
         }
@@ -330,6 +337,47 @@ public struct RequestRow: Codable, Sendable, Equatable, Identifiable {
 
     /// The title a card shows, when the payload carries one.
     public var title: String? { payload?.string("title") }
+
+    /// `access_request` (ruled 2026-09-19): an agent asking for one vault area
+    /// it may already see the titles of. Nil for every other kind — the row is
+    /// what says this is one, never the client.
+    public var accessRequest: AccessRequest? {
+        guard kind == "access_request", let area = payload?.string("area") else { return nil }
+        return AccessRequest(
+            area: area,
+            reason: payload?.string("reason") ?? "",
+            currentTier: payload?.string("current_tier") ?? "none",
+            currentAreas: payload?["current_areas"]?.arrayValue?.compactMap(\.stringValue) ?? [],
+            granted: payload?["granted"]?.string("area")
+        )
+    }
+}
+
+/// What an `access_request` is asking for, and what the credential holds while
+/// it asks. Approving is not a pure widening and the card has to be able to say
+/// so: a `current_tier` of `index` browses every title in the vault and reads
+/// none, so granting it one folder trades that browse for the read
+/// (docs/ops/actions.md).
+public struct AccessRequest: Sendable, Equatable {
+    public let area: String
+    public let reason: String
+    public let currentTier: String
+    public let currentAreas: [String]
+    /// Set once it has been answered with Approve or Revise: the area actually granted.
+    public let granted: String?
+
+    public init(area: String, reason: String, currentTier: String = "none", currentAreas: [String] = [], granted: String? = nil) {
+        self.area = area
+        self.reason = reason
+        self.currentTier = currentTier
+        self.currentAreas = currentAreas
+        self.granted = granted
+    }
+
+    /// True when Approve would COST something as well as give: tier `index`
+    /// sees titles vault-wide and tier `areas` sees them only inside its
+    /// prefixes.
+    public var tradesIndexBrowse: Bool { currentTier == "index" }
 }
 
 public struct SuggestedWork: Sendable, Equatable {
@@ -355,6 +403,12 @@ public enum RequestAnswer: Sendable, Equatable {
     /// — the assistant has nothing to change without one, which is why
     /// `isSendable` is false for it.
     case revise(String)
+    /// Revise on an `access_request`: the same wire verb, carrying the folder
+    /// to grant INSTEAD of the one that was asked for. It is a separate case
+    /// rather than a second meaning for `revise(_:)` because the field that
+    /// must not be empty is a different one — an area, which the console
+    /// validates with its own grants validator.
+    case reviseArea(String)
     /// Also per-kind: declining an enrolment REVOKES the agent's token.
     case decline(String?)
     /// Offered only where the row carries `payload.suggested_work`.
@@ -376,7 +430,7 @@ public enum RequestAnswer: Sendable, Equatable {
     public var wire: String {
         switch self {
         case .approve: return "allow"
-        case .revise: return "accept_with_changes"
+        case .revise, .reviseArea: return "accept_with_changes"
         case .decline: return "deny"
         case .approveAsWork: return "accept_as_work"
         case .later: return "later"
@@ -393,6 +447,13 @@ public enum RequestAnswer: Sendable, Equatable {
         }
     }
 
+    /// The folder a Revise on an `access_request` grants — the `area` field
+    /// that answer sends, and nothing else ever does.
+    public var area: String? {
+        if case .reviseArea(let area) = self { return area }
+        return nil
+    }
+
     /// Only Later, Skip and Decline may be applied to many rows: the verbs that
     /// need nothing from the individual row. Approve, Revise and Approve as
     /// Work each DO something per kind — an `action` most of all, where a
@@ -404,9 +465,11 @@ public enum RequestAnswer: Sendable, Equatable {
         }
     }
 
-    /// Revise with an empty reason is a cancel, not a send.
+    /// Revise with an empty reason is a cancel, not a send — and on an access
+    /// request the field that must not be empty is the area.
     public var isSendable: Bool {
         if case .revise(let reason) = self { return !reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        if case .reviseArea(let area) = self { return !area.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         return true
     }
 
@@ -415,7 +478,7 @@ public enum RequestAnswer: Sendable, Equatable {
     public var label: String {
         switch self {
         case .approve: return "Approve"
-        case .revise: return "Revise"
+        case .revise, .reviseArea: return "Revise"
         case .decline: return "Decline"
         case .approveAsWork: return "Approve as Work"
         case .later: return "Later"
@@ -426,11 +489,28 @@ public enum RequestAnswer: Sendable, Equatable {
 }
 
 /// `POST /api/proposals/:id`'s 200. `work` on an Approve as Work, `action` on
-/// an allowed `action` request.
+/// an allowed `action` request, `granted` on an approved or revised
+/// `access_request`.
 public struct RequestAnswerResult: Codable, Sendable, Equatable {
     public let ok: Bool
     public let work: AnsweredWork?
     public let action: AnsweredAction?
+    public let granted: AnsweredGrant?
+
+    /// What the widening actually did: which agent, which folder, and the
+    /// grant as it now stands — so a client repaints from the answer instead
+    /// of re-reading the registry to find out.
+    public struct AnsweredGrant: Codable, Sendable, Equatable {
+        public let agent: String
+        public let area: String
+        public let grants: Grant?
+
+        public struct Grant: Codable, Sendable, Equatable {
+            public let tier: String
+            public let areas: [String]
+            public let queries: Bool?
+        }
+    }
 
     public struct AnsweredWork: Codable, Sendable, Equatable {
         public let id: Int

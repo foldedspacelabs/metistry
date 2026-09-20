@@ -437,7 +437,7 @@ cache_ttl: 0
       isError: true,
       body: { error: { code: "forbidden", message: expect.stringContaining(`\`${AREA}\``) }, reason: "scope_required", grantedScope: AREA },
     });
-    expect(scoped.body.error.message).toContain("requests_create");
+    expect(scoped.body.error.message).toContain("request_access");
     // a path merely shaped like one, never indexed, confirms nothing — the
     // uniform "not granted" holds, with no area named either way
     const guessed = await call(idx, "knowledge_read", { path: "Areas/Itest/DoesNotExist.md" });
@@ -879,6 +879,9 @@ cache_ttl: 0
     }
     // agents_delegate is the assistant's alone: an external agent is told not granted before any dispatcher is consulted (none is wired here) — still a recorded refusal
     expect((await call(ar, "agents_delegate", { crew: "researcher", brief: "b" })).body).toEqual({ error: { code: "forbidden", message: "not granted" } });
+    // request_access is alice's to call at any tier (she is tier `none` here):
+    // it writes a request and grants nothing, and it is recorded like the rest
+    expect((await call(ar, "request_access", { area: "Areas/Recorded", reason: "recording one of every eager tool" })).body).toMatchObject({ area: "Areas/Recorded" });
     await ar.close();
     const { rows } = await pool.query(
       `SELECT tool, ok, finished_at IS NOT NULL AS finished, meta FROM runs WHERE component = $1 AND kind = 'tool' ORDER BY id`,

@@ -15,7 +15,7 @@ manifest by test):
 
 | Family | Tools | What it means for the assistant |
 | --- | --- | --- |
-| in | `capture`, `requests_create` | Raise anything unsettled into the inbox / your Needs You queue; you approve, revise, or decline. |
+| in | `capture`, `requests_create`, `request_access` | Raise anything unsettled into the inbox / your Needs You queue; you approve, revise, or decline. `request_access` is the narrow one: an **external** agent asking for a vault area it was refused (`docs/ops/actions.md`). The assistant itself is refused it, because its scope is configuration and not a grant — see below. |
 | shared work | `tasks_list` (`filter: ready \| mine \| all`), `tasks_claim`, `tasks_renew`, `tasks_update`, `tasks_release`, `tasks_close`, `tasks_create` | Works the same shared list as every other agent — claims, leases, notes, and `tasks_close` to finish one in a single call. |
 | rooms | `tasks_comment`, `tasks_thread` | The conversation on a task ([threads.md](threads.md)) — say what you found, read what the last crew left. Nobody is addressed by it, so nothing is woken; use `agents_delegate` when someone has to act. Resolving a room is your hand in the console, not a tool. |
 | out | `knowledge_search`, `knowledge_read`, `knowledge_list`, `knowledge_grep` | Reads the knowledge index, page contents, a listing, a page's links (`knowledge_list { links_for }`) and a content regex, within its grant — `knowledge_list`/`knowledge_grep` are filesystem semantics over the same tiers `knowledge_search`/`knowledge_read` already enforce (docs/research/2026-09-stash-review.md item 3). `knowledge_read` returns the page's `sha256`. |
@@ -60,7 +60,7 @@ runs the same two queries through the same `canSeeUnder`.
 ### A new read capability is a named query, not a new tool
 
 **The default answer to "the assistant needs to be able to look X up" is a
-named query behind `queries_run`, not a twenty-sixth tool.** Ruled 2026-09-19
+named query behind `queries_run`, not another tool.** Ruled 2026-09-19
 (`docs/research/2026-09-19-code-mode-mcp.md` §4.1); invariant 3 already
 requires the query to exist, so a tool would be a second door onto a read
 path that has one.
@@ -71,9 +71,11 @@ tokens of always-on definitions** in place of the **2,936** the same 20 would
 cost as individual tools — a 90% reduction, with the index itself deferred
 behind a call. A 21st query costs **~120 deferred tokens and zero eager
 ones**; a 21st tool costs **~180 eager tokens on every turn, forever**, and
-lands on a surface already 5 tools past the count line at which the manifest
+lands on a surface already 6 tools past the count line at which the manifest
 schema says to consider `discovery: lazy` (`ops/scripts/check-tool-surface.mjs`
-prints the headroom on every CI run).
+prints the headroom on every CI run, and fails on the tool after the number
+acknowledged there — `request_access` moved it 25 → 26 on 2026-09-19, with the
+reasoning written next to the number).
 
 Write the query, give it `expose: generic`, and the assistant can run it the
 day it merges. A new **tool** is for a new *verb* — something the system can
@@ -89,18 +91,27 @@ instead: still `isError: true` with the ordinary `error.code: "forbidden"`
 underneath (the envelope invariant 8 promises is unchanged), plus a stable
 machine-readable `reason: "scope_required"` and `grantedScope` — the area
 (the page's own parent directory) that would unlock it — alongside it.
-`error.message` spells out the same thing in a sentence: there is no
-`request_access` tool today, so the mechanism it names is `requests_create`,
-naming the area and why, which lands in your Needs You queue like every
-other proposal — you still widen the grant yourself in the Agents panel
-(`PUT /api/agents/:id/grants`). Enforced at the tool, granted by your hand.
+`error.message` spells out the same thing in a sentence, and names the
+mechanism: **`request_access {area, reason}`** (ruled the same day), which
+writes one `access_request` row into your Needs You queue and grants nothing.
+You answer it with Approve, Revise (grant a narrower folder) or Decline, and
+Approve goes through the same grants door and the same audit row your own
+click in the Agents panel goes through (`PUT /api/agents/:id/grants`,
+`docs/ops/actions.md`). Enforced at the tool, granted by your hand — and a
+refusal that names its own remedy is what keeps a scoped agent from retrying
+the same path forever.
+
+One consequence to know before you Approve: tier `index` browses every title
+in the vault and reads none, tier `areas` sees titles only inside its
+prefixes — so granting an `index` agent one folder **trades** the browse for
+the read. There is one tier, and that trade is the decision.
 
 **Deprecated spellings, one release.** The 2026-09-09 vocabulary
 simplification renamed eleven of these (`docs/product/glossary.md`). The old
 names still work — `report`, `tasks_list_ready`, `tasks_mine`,
 `tasks_heartbeat`, `artifact_*`, `crew_dispatch` — but they are resolved at
 call time and are **not** in `tools/list`, so the surface an agent discovers is
-the twenty-three above. An alias call is audited under the primary name with the old
+exactly the table above. An alias call is audited under the primary name with the old
 spelling in `runs.meta.alias`:
 
 ```sh
@@ -116,7 +127,7 @@ query surfaces so one reply's calls group together — but it is **not a tool
 parameter**. It rides in the MCP call's `_meta`, under
 `com.foldedspacelabs.metistry/turn_id`, and `apps/assistant/src/tools.ts`
 mints one per tool host, i.e. one per reply. Until 2026-09-19 it was an
-optional argument on all 25 tools and the seed prompt asked the model to
+optional argument on every tool and the seed prompt asked the model to
 invent one and pass it faithfully: ~940 definition tokens, 18.8% of the whole
 advertised surface, for a field no model should be reasoning about — and a
 convention rather than a control. A client still sending it as an argument is
@@ -330,6 +341,11 @@ has two consequences worth knowing:
 - A UI **revoke** likewise holds until restart; the durable off switch is
   unsetting `METISTRY_ASSISTANT_TOKEN`, which revokes the row on the next
   start.
+- `request_access` refuses an internal principal for exactly that reason: an
+  approved ask would widen the stored grants and the next start would put them
+  back, which is worse than no mechanism — you would believe you had granted
+  it. The refusal names `METISTRY_ASSISTANT_AREAS`, and `requests_create` is
+  there for the case where the assistant wants to tell you it is boxed in.
 
 **Grant width — the internal rule.** `validateGrants` refuses a bare vault
 grant for an external agent (an area grant is a prefix; "everything" is not
@@ -492,7 +508,9 @@ history; a wrong write is a revert.
 
 What lands where: `capture` → an `inbox` row (`source = 'mcp',
 source_agent = 'assistant'`) and, after `inbox-drain`, a proposal at
-`external` trust; `requests_create` → a `proposals` row, kind `report`; `tasks_*`
+`external` trust; `requests_create` → a `proposals` row, kind `report`;
+`request_access` → a `proposals` row, kind `access_request` (external agents
+only); `tasks_*`
 → the `work` table with the assistant as `claimed_by` / `created_by` and
 history entries naming it; `knowledge_write` → the file on the
 reconciler's working tree, then a commit. Proposals flow through the same

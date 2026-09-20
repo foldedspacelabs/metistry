@@ -44,6 +44,7 @@ import { CREW_TOOL_NAMES, registerCrewTools, type CrewDispatcher } from "./crew-
 import { THREAD_TOOL_NAMES, registerThreadTools } from "./thread-tools.js";
 import { QUERIES_TOOL_NAMES, registerQueriesTools } from "./queries-tools.js";
 import { ACTION_TOOL_NAMES, registerActionTools, type ActionExecutor } from "./action-tools.js";
+import { requestAccess } from "./access.js";
 import { KNOWLEDGE_FS_TOOL_NAMES, registerKnowledgeFsTools, type KnowledgeLister, type KnowledgeVaultSearcher } from "./knowledge-fs.js";
 import { registerKnowledgeResources } from "./knowledge-resources.js";
 import { captureToInbox, type CaptureSink } from "./capture.js";
@@ -98,38 +99,39 @@ export interface BrainServer {
 }
 
 /**
- * The declared surface (§4.3 default 1): 26 tools, no meta-tool indirection.
- * 25 of them are EAGER — every principal sees them — and `propose_action` is
+ * The declared surface (§4.3 default 1): 27 tools, no meta-tool indirection.
+ * 26 of them are EAGER — every principal sees them — and `propose_action` is
  * the one that is not: it is registered only for a credential whose autonomy
  * table admits an action (docs/ops/actions.md), which is nobody until the
  * owner sets a level. So the eager definition budget measured below is
  * unchanged for everyone who has not opted in, and an admitted principal
- * crosses the >5k line knowingly, having bought something with it.
+ * pays for what it bought.
  * Order = manifest order. One noun per thing, one verb set per object
  * (docs/product/glossary.md): folding tasks_list_ready + tasks_mine into
  * `tasks_list {filter}` paid for knowledge_list/knowledge_grep. This still
  * sits over PoC-17's documented >20-tools guidance for switching to
  * `discovery: lazy` on tool COUNT — noted, not acted on, because the
  * guidance's other axis (definition tokens, measured by test/brain.test.ts's
- * "definition size" test) is what actually gates lazy. The room tools
- * (tasks_comment/tasks_thread, 0016) put that measurement at ~4.9k of the
- * >5k line: the NEXT tool registered here forces the lazy decision rather
- * than fitting under it (docs/research/2026-08-tool-discovery.md).
+ * "definition size" test) is what actually gates lazy.
  * Deprecated spellings live in aliases.ts and resolve at call time — they are
  * NOT listed here, so neither the count nor the token budget grows for them.
  *
- * 2026-09-19: that measurement is now ~4.0k, because `turn_id` came out of all
- * 25 schemas and moved to the call's `_meta` (turn-id.ts) — 944 tokens, 19% of
- * the surface, for a field that was never a parameter. The headroom is not an
- * invitation: on COUNT this bridge is five tools past the >20 line, and
- * `ops/scripts/check-tool-surface.mjs` fails on the 26th eager tool rather
- * than letting it land quietly. A new READ capability is a named query behind
- * `queries_run` (docs/ops/assistant-tools.md); a new tool is a new verb, and
- * it arrives with the lazy decision attached.
+ * 2026-09-19, twice. First `turn_id` came out of every schema and moved to
+ * the call's `_meta` (turn-id.ts) — 944 tokens, 19% of the surface, for a
+ * field that was never a parameter, taking the measurement from ~5.0k to
+ * ~4.0k. Then `request_access` (access.ts) spent 189 of that on the 26th
+ * eager tool, by the owner's ruling and with the count ceiling in
+ * `ops/scripts/check-tool-surface.mjs` moved 25 → 26 to say so out loud.
+ * The rule it did NOT bend: a new READ capability is a named query behind
+ * `queries_run` (docs/ops/assistant-tools.md). A new tool is a new VERB —
+ * here, "ask the owner for the area you were refused" — and it arrives with
+ * the discovery decision attached rather than fitting under the line
+ * quietly. The tool after this one fails that check again.
  */
 export const TOOL_NAMES = [
   "capture",
   "requests_create",
+  "request_access",
   "tasks_list",
   "tasks_claim",
   "tasks_renew",
@@ -156,6 +158,13 @@ export type ToolName = (typeof TOOL_NAMES)[number];
  * is not shown a tool it could only be refused by. This is the list the
  * definition-token budget is measured against, and the one a bake-off
  * presents.
+ *
+ * `request_access` and `agents_delegate` are NOT deferred this way, in
+ * opposite directions and for the same reason: the principal each one
+ * refuses (internal, external) is told so by the tool, in a sentence that
+ * names what to do instead. A refusal an agent can read once is worth more
+ * than a tool it never learns exists — deferral is for a capability nobody
+ * has bought yet, not for a rule.
  */
 export const EAGER_TOOL_NAMES: readonly ToolName[] = TOOL_NAMES.filter((n) => !(ACTION_TOOL_NAMES as readonly string[]).includes(n));
 
@@ -318,6 +327,24 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
       async (a) => {
         const r = await submitReport(db, principal.id, a);
         return done(r, { proposal_id: r.id, deduplicated: r.deduplicated });
+      },
+    );
+
+    // Grants nothing: one row in the owner's queue, and they widen the grant
+    // themselves (access.ts). Deliberately offered at EVERY tier, tier `none`
+    // included — an agent that can be refused is an agent that may ask.
+    reg(
+      "request_access",
+      "Ask the owner for read access to one vault area (TitleCase prefix, e.g. Areas/Health) and say why. Grants nothing: it raises one request in their Needs You queue to approve, narrow or decline. A repeat ask returns the pending one; after an approval the read simply works. External agents only.",
+      {
+        area: z.string().min(1).max(200).describe("The vault prefix you need, e.g. Areas/Health."),
+        reason: z.string().min(1).max(1000).describe("Why you need it — what you were doing when you were refused."),
+      },
+      async (a) => {
+        const r = await requestAccess(db, principal, a);
+        return r.ok
+          ? done({ id: r.id, area: r.area, ...(r.replayed ? { replayed: true } : {}), decided_by: "the owner, in Needs You" }, { proposal_id: r.id, area: r.area, replayed: r.replayed })
+          : fail(r.code, r.message);
       },
     );
 

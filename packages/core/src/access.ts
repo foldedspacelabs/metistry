@@ -15,7 +15,7 @@
 // through the console's `writeGrants`, one validator, one audit row
 // (invariant 2).
 
-import { isVaultPath, VAULT_ROOT_AREA } from "./instance-layout.js";
+import { INSTANCE_LAYOUT, isVaultPath, VAULT_ROOT_AREA } from "./instance-layout.js";
 
 /**
  * Read tiers (§4.11): default-deny, user-granted, attached to the token
@@ -24,6 +24,59 @@ import { isVaultPath, VAULT_ROOT_AREA } from "./instance-layout.js";
  * grant model got hard to read in the first place (§2.8).
  */
 export type GrantTier = "none" | "index" | "areas";
+
+/** How a `none`/`index`/`areas` tier is SAID — one set of words, everywhere (§2.10: the console had three, the CLI had none). */
+export const TIER_LABEL: Readonly<Record<GrantTier, string>> = Object.freeze({ none: "none", index: "titles", areas: "folders" });
+
+// ===========================================================================
+// classify() — what a path IS, which is not what anybody may do with it
+// ===========================================================================
+
+/**
+ * The four things an instance-relative path can be.
+ *
+ * - `knowledge` — vault CONTENT: what the reconciler walks, indexes and
+ *   embeds, and the only thing a knowledge door serves.
+ * - `artifact` — under `Artifacts/`. The owner's own bytes; nothing indexes
+ *   them, and the artifacts service is the door that has them.
+ * - `machinery` — `.metistry/`, a dot-directory, the root `CLAUDE.md` /
+ *   `README.md`, the legacy machinery roots: how the instance is configured,
+ *   served by no door as a page.
+ * - `outside` — not a path in this vault at all: traversal, an empty
+ *   segment, a leading slash.
+ */
+export type ResourceClass = "knowledge" | "artifact" | "machinery" | "outside";
+
+export const RESOURCE_CLASSES: readonly ResourceClass[] = ["knowledge", "artifact", "machinery", "outside"];
+
+/**
+ * **Classification is not permission** (§3.3 — P4's single conceptual
+ * change, and the one thing that lets "the owner has everything" be stated
+ * with no exception clause).
+ *
+ * `isVaultPath` was doing two jobs: saying what counts as knowledge (for the
+ * indexer, correctly) and narrowing the OWNER at the knowledge door (§2.6,
+ * accidentally). This splits them. `classify(p) === "knowledge"` is
+ * `isVaultPath(p)` **by construction** — the first line asks it, so the
+ * indexer's behaviour cannot drift from this — and everything else gets a
+ * name saying which door DOES serve it, rather than a refusal implying
+ * nobody may.
+ *
+ * It judges the path's SHAPE and nothing else: no principal, no filesystem,
+ * no index. A `knowledge` answer does not mean the page exists, and an
+ * `artifact` answer is not permission to read one.
+ *
+ * Traversal wins over the `Artifacts/` prefix: `Artifacts/../.metistry/x` is
+ * `outside`, never an artifact, because a path that escapes is a malformed
+ * path before it is anything else.
+ */
+export function classify(rel: string): ResourceClass {
+  if (typeof rel !== "string" || rel === "") return "outside";
+  if (isVaultPath(rel)) return "knowledge";
+  const segments = rel.split("/");
+  if (segments.some((s) => s === "" || s === "." || s === "..")) return "outside";
+  return segments[0] === INSTANCE_LAYOUT.artifactsDir ? "artifact" : "machinery";
+}
 
 /**
  * A vault path an agent may name. Since the 2026-09-17 layout the vault root
@@ -192,15 +245,20 @@ export function areaOf(path: string): string {
  * so the agent knows the owner, not it, decides. A refusal without that
  * sentence is a dead end: a model told only "no" has no next move but to try
  * the same path again.
+ *
+ * **P3 wording**: the sentence is now the one `REFUSAL.scope_required` gives
+ * on every door (`ONE VOCABULARY` below). What it lost is the opening clause
+ * "you can see that this page exists, but" — true only of the case ruling B
+ * was about, and a claim the same sentence could not make honestly anywhere
+ * else. What decides whether this sentence is given AT ALL is unchanged and
+ * is still the ruling: `may` speaks it only for a path the caller may
+ * already list (`mayKnowledge`), and hides behind the uniform refusal
+ * otherwise, so no area is ever named for a page the caller could not
+ * already see.
  */
 export function scopeRequired(path: string): { message: string; expose: { reason: string; grantedScope: string } } {
   const area = areaOf(path);
-  return {
-    message:
-      `you can see that this page exists, but reading it needs the \`${area}\` grant — ` +
-      `ask for it: \`request_access\` with area \`${area}\` and why; the owner approves it in Needs You.`,
-    expose: { reason: SCOPE_REQUIRED, grantedScope: area },
-  };
+  return { message: REFUSAL.scope_required(path, area), expose: { reason: SCOPE_REQUIRED, grantedScope: area } };
 }
 
 // ===========================================================================
@@ -237,10 +295,18 @@ export function scopeRequired(path: string): { message: string; expose: { reason
 // file, a new permission arrives by config line, which is exactly what
 // invariant 10 forbids (§5).
 
-import { admitsAnyAction, effectiveActions, type ActionAutonomy, type ActionKind, type ActionMode } from "./actions.js";
-import { INSTANCE_LAYOUT } from "./instance-layout.js";
+import {
+  admitsAnyAction,
+  effectiveActions,
+  DEFAULT_AUTONOMY_LEVEL,
+  AUTONOMY_LEVELS,
+  type ActionAutonomy,
+  type ActionKind,
+  type ActionMode,
+  type AutonomyLevel,
+} from "./actions.js";
 import { crewToolsFor } from "./manifest.js";
-import type { ErrorCode } from "./errors.js";
+import { errorEnvelope, type ErrorCode } from "./errors.js";
 
 /**
  * Who is asking. Derived from the CREDENTIAL by a mapping function per host
@@ -354,21 +420,55 @@ export interface Needs {
   readonly grant?: { readonly tier: GrantTier; readonly area: string };
   /** `autonomy_required`: the entry the user would raise, and to what. */
   readonly autonomy?: { readonly action: ActionKind; readonly mode: ActionMode };
+  /**
+   * `not_knowledge` (P4): the door that DOES serve this resource, because
+   * the refusal is a statement about the resource rather than about the
+   * caller. `GET /api/artifacts` for an artifact; `the file itself` for the
+   * machinery, which no door serves as a page and which is read where it
+   * lives — on disk, and in git.
+   */
+  readonly door?: string;
 }
+
+/**
+ * **Whether a refusal may speak at all** (§3.1's second property).
+ *
+ * - `refuse` — a statement about the CALLER's grant. It says the one
+ *   sentence this `reason` says (`REFUSAL` below), and `reason`/`needs`
+ *   reach the wire.
+ * - `hide` — the answer is deliberately identical to "there is nothing
+ *   here". The message is the DOOR's own absence answer, `needs` is absent,
+ *   and `formatRefusal` drops `reason` on the way out: a refusal that is
+ *   distinguishable from absence is an oracle, and the type is what stops a
+ *   future contributor making one of these chatty by accident.
+ *
+ * Four things hide, and each was already hiding before this type existed:
+ * the project-scope miss (a row outside your projects does not exist for
+ * you), the route-only named query (which would otherwise publish the
+ * route-only set), the console's own uniform 403 (CRIT-7: an agent bearer
+ * gets one answer on every management route, never a 403 here and a 404
+ * there), and a knowledge path the caller may not even LIST — the 2026-09-19
+ * ruling's boundary: an area is named only for a page whose existence the
+ * caller can already see.
+ */
+export type Tell = "refuse" | "hide";
 
 /**
  * `code` is on the refusal because P1's whole rule is that a door answers
  * with the same envelope it answered with before, and the code is half of
- * it: a project-scope miss is `not_found` (§3.1's `tell: "hide"`) while a
- * tier miss is `forbidden`. `message` is `""` where the door says nothing
- * today — silence is a decision here rather than an accident at a call site.
- * `expose` is the additive wire slot the console's `render` already merges
- * (mcp-brain's `Outcome.expose`); `scope_required` is still its only user.
+ * it: a project-scope miss is `not_found` (`tell: "hide"`) while a tier miss
+ * is `forbidden`. `message` is `""` where the door says nothing — the
+ * canonical message for the code is what a caller reads (`errorEnvelope`),
+ * so `""` and a hand-written "not granted" were always the same bytes, and
+ * since P3 there is one spelling of the silence. `expose` is the additive
+ * wire slot the console's `render` already merges (mcp-brain's
+ * `Outcome.expose`); `scope_required` is still its only user.
  */
 export interface Refusal {
   readonly ok: false;
   readonly code: ErrorCode;
   readonly reason: Reason;
+  readonly tell: Tell;
   readonly needs?: Needs;
   readonly message: string;
   readonly expose?: Record<string, unknown>;
@@ -414,23 +514,132 @@ export type Resource =
 
 const OK: Decision = { ok: true };
 
+/** A refusal that SPEAKS: one sentence per reason, `reason` and `needs` on the wire. */
 function no(code: ErrorCode, reason: Reason, message: string, needs?: Needs, expose?: Record<string, unknown>): Refusal {
-  return { ok: false, code, reason, message, ...(needs ? { needs } : {}), ...(expose ? { expose } : {}) };
+  return { ok: false, code, reason, tell: "refuse", message, ...(needs ? { needs } : {}), ...(expose ? { expose } : {}) };
 }
 
-/** Refusal wording for the tier gates on `knowledge_list`/`knowledge_grep`/`agents_delegate` — deliberately not "not found": absence of permission must not look like absence of knowledge. */
-const NOT_GRANTED = "not granted";
+/**
+ * A refusal that HIDES: the door's own answer for "there is nothing here",
+ * with no `needs` and — after `formatRefusal` — no `reason` either. The
+ * `reason` is still recorded, because the audit row and the golden file both
+ * want to know WHY a door went quiet; it simply does not cross the wire.
+ *
+ * `message` defaults to `""`, which `errorEnvelope` renders as the code's
+ * canonical message ("not granted" for `forbidden`, "not found" for
+ * `not_found`) — the uniform answer every one of these doors already gave.
+ * The two that pass a message pass the sentence their door gives for a thing
+ * that is not there, byte for byte, so the refusal cannot be told from it.
+ */
+function hidden(code: ErrorCode, reason: Reason, message = ""): Refusal {
+  return { ok: false, code, reason, tell: "hide", message };
+}
 
-/** `knowledge_read`'s and `knowledge_write`'s shape refusal. */
-export const NOT_A_VAULT_PATH = "path must be a vault path — TitleCase folders, no traversal, nothing under .metistry/ or Artifacts/";
-
-/** The refusal every console knowledge door gives for a path that is not vault content. Shared so the two routes cannot drift. */
-export const NOT_KNOWLEDGE =
+/**
+ * **The console knowledge door's one answer for "there is no page here"** —
+ * whatever the real reason. Out of scope, a draft, machinery, an artifact,
+ * a path that was never written: one sentence, so the route is not an oracle
+ * for what exists where the caller cannot look. Unchanged since P1, byte for
+ * byte, because every non-owner refusal on that door is still this.
+ */
+export const NO_SUCH_PAGE =
   "no such page — a path must be vault CONTENT: not .metistry/, not Artifacts/, not the root CLAUDE.md, no leading slash and no traversal (docs/ops/instance-layout.md)";
 
-/** The owner asking this door for one of their own `Artifacts/`: theirs, but not knowledge, and the artifacts service is the door that has the bytes (ruled 2026-09-19 D). */
-export const ARTIFACTS_SIGNPOST =
-  "Artifacts/ is yours but it is not knowledge — nothing indexes it, so this door has no page for it. Your artifacts are GET /api/artifacts (docs/ops/console-api.md); in the vault they are just files, on disk and in git.";
+/**
+ * **ONE VOCABULARY.** One sentence per `reason`, built here and nowhere
+ * else — §2.5's finding was five dialects across fourteen sites (an empty
+ * message, a bare "not granted", a sentence naming an env var, a sentence
+ * naming an HTTP route AND a CLI command, and one machine-readable pair),
+ * and §3.4's answer is one renderer.
+ *
+ * The SHAPE is one per reason; the FACTS in it are substituted. That is the
+ * distinction that matters: a caller (or a model) learns one sentence per
+ * kind of refusal and reads the nouns out of it, instead of learning
+ * fourteen. Every one of them names what would unlock it and who decides,
+ * because a refusal with no next move is how a model ends up retrying the
+ * same call.
+ *
+ * `not_member`, `not_exposed` and the console's own 403 are not here: they
+ * are `tell: "hide"` and have no sentence of their own by design.
+ */
+export const REFUSAL = {
+  /** The read tier is below what this needs. No path is involved, so there is nothing to hide. */
+  tier_required: (held: GrantTier, needed: GrantTier): string =>
+    `not granted — this needs the \`${needed}\` tier (${TIER_LABEL[needed]}) and you hold \`${held}\` (${TIER_LABEL[held]}); ask with \`request_access\`: an area and why, and the owner answers in Needs You.`,
+
+  /** A path the caller may already LIST, outside the folders they may read. Spoken only there (see `scopeRequired`). */
+  scope_required: (path: string, area: string): string =>
+    `not granted — \`${path}\` is outside your folders; reading it needs the \`${area}\` grant. Ask for it with \`request_access\` (area \`${area}\`, and why); the owner answers in Needs You.`,
+
+  /** The `queries` axis is a switch on the grant, not a tier, so the remedy is the owner's own hand rather than an ask. */
+  queries_required: (id: string): string =>
+    `not granted — named queries need the \`queries\` grant and ${id} does not hold it; the owner turns it on in the console's Agents panel (PUT /api/agents/${id}/grants).`,
+
+  /** A capability that belongs to one kind of principal. No grant widens a role, which is the whole sentence. */
+  role_required: (what: string, who: string): string =>
+    `not granted — \`${what}\` belongs to ${who} alone; no grant widens a role. Report what you needed with \`requests_create\` instead of retrying.`,
+
+  /** Unchanged from P1: it already named the route, the CLI command and who may run them. */
+  autonomy_required: (id: string, action: ActionKind | null): string =>
+    `autonomy.actions${action ? `.${action}` : ""} is deny for ${id} — the user raises it (PUT /api/agents/${id}/autonomy, or \`metistry agents autonomy ${id}${action ? ` --allow ${action}` : ""}\`); nothing else can (docs/ops/actions.md)`,
+
+  /** Project membership on a row you named yourself — not an existence question, so it speaks. */
+  membership_required: (id: string, slug: string): string =>
+    `not granted — ${id} is not a member of project \`${slug}\`; the owner adds it (PUT /api/agents/${id}/projects, or the console's Agents panel).`,
+
+  /** Unchanged from P2: it names the toolset the crew DOES hold and the file that declares it. */
+  not_in_uses: (id: string, name: string, uses: readonly string[]): string =>
+    `${name} is not in this crew's toolset — ${id} holds ${uses.length === 0 ? "no tool groups" : uses.join(", ")} (\`uses:\` in its manifest, a protected path in the user's hand: docs/ops/crews.md). Report what you needed instead of retrying.`,
+
+  /**
+   * **Not a permission refusal at all** (§3.3): a statement about the
+   * RESOURCE, which is why the owner gets it too and why it carries
+   * `needs.door` rather than `needs.grant`. One sentence, the class and the
+   * door substituted.
+   */
+  not_knowledge: (path: string, cls: ResourceClass): string =>
+    `\`${path}\` is ${CLASS_NOUN[cls]}, not knowledge — this door serves vault pages only; ${CLASS_WHERE[cls]} (docs/ops/instance-layout.md).`,
+} as const;
+
+/** What each class IS, in the one word every surface uses for it. */
+const CLASS_NOUN: Readonly<Record<ResourceClass, string>> = Object.freeze({
+  knowledge: "a vault page",
+  artifact: "an artifact",
+  machinery: "machinery",
+  outside: "outside the vault",
+});
+
+/** And which door has it. `needs.door` is the machine-readable half of the same fact. */
+const CLASS_WHERE: Readonly<Record<ResourceClass, string>> = Object.freeze({
+  knowledge: "it is served here",
+  artifact: "your artifacts are GET /api/artifacts, and in the vault they are files, on disk and in git",
+  machinery: "the machinery is the file itself, on disk and in git — no door serves it as a page",
+  outside: "a vault path is TitleCase folders from the vault root, with no leading slash and no traversal",
+});
+
+/** `needs.door` for a classification answer: the door that has the bytes, or none. */
+const CLASS_DOOR: Readonly<Record<ResourceClass, string | null>> = Object.freeze({
+  knowledge: null,
+  artifact: "GET /api/artifacts",
+  machinery: "the file itself",
+  outside: null,
+});
+
+/**
+ * The classification answer, built once so every door that serves knowledge
+ * says the same thing about a path that is not.
+ *
+ * `invalid_request`, never `forbidden` and never `not_found`: the caller
+ * named a path this door does not serve, which is a fact about their
+ * request. A door that answered 404 here would be pretending the resource is
+ * not there — it is, behind `needs.door` — and a door that answered 403
+ * would be claiming a permission question that was never asked (§3.3).
+ */
+export function notKnowledge(path: string): Refusal {
+  const cls = classify(path);
+  const door = CLASS_DOOR[cls];
+  return no("invalid_request", "not_knowledge", REFUSAL.not_knowledge(path, cls), door === null ? undefined : { door });
+}
 
 /**
  * The prefixes whose CONTENT this scope may read. A tier below `areas` comes
@@ -480,46 +689,39 @@ export function memberOfProject(scope: Scope, slug: string | null): boolean {
 }
 
 /**
- * A console `KnowledgeScope` as a decision principal.
- *
- * The console derives a caller's scope from the credential ONCE, at the top
- * of the request (`knowledgeScopeOf`), and hands THAT to `/api/knowledge/*`.
- * `may()` wants the principal it came from, and the trip back is lossless for
- * what that door decides: `areas: null` is precisely "the owner" in this
- * shape — it is what `OWNER_SCOPE` means — and every other scope is a holder
- * of grants. Nothing else about the credential bears on whether a PATH is
- * knowledge.
- *
- * It is a round trip, and P4 is where it stops being one: `classify()` moves
- * this door's refusal off the principal entirely, and the routes take the
- * principal rather than a scope.
- */
-export function scopeAsPrincipal(scope: KnowledgeScope): Principal {
-  return {
-    id: "",
-    role: scope.areas === null ? "owner" : "agent",
-    scope: { tier: "areas", areas: scope.areas, queries: false, projects: [] },
-    source: "registry",
-  };
-}
-
-const ARTIFACTS_ROOT = INSTANCE_LAYOUT.artifactsDir;
-
-/**
  * **The one decision function.**
  *
  * @param p    who is asking, derived from the credential
  * @param verb what they are trying to do
  * @param r    what they are trying to do it to
- *
- * The owner is NOT short-circuited here. §3.1's first property — `role:
- * "owner"` answers `{ok:true}` for every verb and every resource — is P4,
- * and it needs `classify()` in front of it so "the owner has everything"
- * never has to be weakened to keep an agent out of the machinery. Until
- * then the owner is decided by the rules below, exactly as they are today,
- * including the two places §2.6 found where that narrows them.
  */
 export function may(p: Principal, verb: Verb, r: Resource): Decision {
+  // ---- the owner's sentence, made arithmetic (P4, §3.1) -----------------
+  //
+  // "The owner should always have access to everything" (ruled 2026-09-19).
+  // Every door admits the owner for every verb on every resource that door
+  // serves, with no exception clause anywhere below — which is only safe
+  // BECAUSE `Resource` is a closed union and `classify()` exists: the
+  // machinery and `Artifacts/` are not knowledge paths, so the rule never
+  // has to be weakened to keep an agent out of the machinery.
+  //
+  // The one thing this is NOT is a door that serves everything. A knowledge
+  // door handed something that is not knowledge still answers — with a
+  // CLASSIFICATION (`notKnowledge`, naming the door that has the bytes),
+  // never with a permission refusal and never with a 404 pretending the
+  // thing is not there. That is the owner's ruling and the research
+  // document's open question 3 taken together: keep one door per resource
+  // class, make the reason classification rather than permission.
+  if (p.role === "owner") {
+    if (r.kind === "knowledge") return classify(r.path) === "knowledge" ? OK : notKnowledge(r.path);
+    // A name nothing in this build registers is not a permission question,
+    // for the owner either: the fail-closed default stands, so `may` never
+    // answers "yes" about a tool that does not exist. (`RULED_TOOLS` is
+    // pinned against the bridge's own `TOOL_NAMES` by the enumeration test.)
+    if (r.kind === "tool" && !RULED_TOOLS.has(r.name)) return hidden("forbidden", "role_required");
+    return OK;
+  }
+
   switch (r.kind) {
     case "tool":
       return mayUseTool(p, r.name);
@@ -530,36 +732,35 @@ export function may(p: Principal, verb: Verb, r: Resource): Decision {
     case "query":
       return mayQuery(p, r.door, r.name, r.exposure);
     case "project":
-      return memberOfProject(p.scope, r.slug)
-        ? OK
-        : r.door === "task"
-          ? // A row outside your projects does not exist for you — the
-            // collaboration boundary, uniform with artifacts (§2.5: one of
-            // the two refusals that must stay uninformative).
-            no("not_found", "not_member", "")
-          : no("forbidden", "membership_required", "");
+      if (memberOfProject(p.scope, r.slug)) return OK;
+      // A row outside your projects does not exist for you — the
+      // collaboration boundary, uniform with artifacts.
+      if (r.door === "task") return hidden("not_found", "not_member");
+      // `task_create` is the one project check that is `forbidden` rather
+      // than `not_found`: you NAMED the project, so it is not a row you
+      // cannot see, it is a room you are not in — and a room you named is
+      // not an existence question, so this one speaks. A create with no
+      // project names nothing, so there is nothing to say.
+      return r.slug === null ? hidden("forbidden", "membership_required") : no("forbidden", "membership_required", REFUSAL.membership_required(p.id, r.slug));
     case "action": {
       const mode = effectiveActions(p.scope.autonomy)[r.action];
       if (mode !== "deny") return OK;
-      return no(
-        "forbidden",
-        "autonomy_required",
-        `autonomy.actions.${r.action} is deny for ${p.id} — the user raises it (PUT /api/agents/${p.id}/autonomy, or \`metistry agents autonomy ${p.id} --allow ${r.action}\`); nothing else can (docs/ops/actions.md)`,
-        { autonomy: { action: r.action, mode: "propose" } },
-      );
+      return no("forbidden", "autonomy_required", REFUSAL.autonomy_required(p.id, r.action), { autonomy: { action: r.action, mode: "propose" } });
     }
     case "console":
-      // Door B. `console_agent` is the uniform 403 an agent bearer gets on
-      // everything outside /capture and /mcp; `console_management` is the
-      // `isUser` gate, which excludes the capture owner token by name.
-      if (r.door === "console_agent") {
-        return p.role === "owner" || p.role === "tool" ? OK : no("forbidden", "role_required", "");
-      }
-      return p.role === "owner" ? OK : no("forbidden", "role_required", "");
+      // Door B, and both halves HIDE: the console's answer to a credential
+      // outside the owner surface is uniform across every route it covers
+      // (CRIT-7), because a 403 that explained itself on some paths and a
+      // 404 on others would say which spellings this build knows.
+      // `console_agent` is the agent bearer's uniform 403 on everything
+      // outside /capture and /mcp; `console_management` is the `isUser`
+      // gate, which excludes the capture owner token by name.
+      if (r.door === "console_agent" && p.role === "tool") return OK;
+      return hidden("forbidden", "role_required");
   }
   // Unreachable while `Resource` is a closed union; kept so a new variant
   // fails CLOSED rather than falling through to a default allow.
-  return no("forbidden", "role_required", "");
+  return hidden("forbidden", "role_required");
 }
 
 /**
@@ -606,13 +807,48 @@ export function allowedTools(p: Principal): readonly string[] | null {
 function mayToolset(p: Principal, name: string): Decision {
   const allowed = allowedTools(p);
   if (allowed === null || allowed.includes(name)) return OK;
-  const held = (p.uses ?? []).join(", ");
-  return no(
-    "forbidden",
-    "not_in_uses",
-    `${name} is not in this crew's toolset — ${p.id} holds ${held === "" ? "no tool groups" : held} (\`uses:\` in its manifest, a protected path in the user's hand: docs/ops/crews.md). Report what you needed instead of retrying.`,
-  );
+  return no("forbidden", "not_in_uses", REFUSAL.not_in_uses(p.id, name, p.uses ?? []));
 }
+
+/**
+ * Every tool name the admission table below has a rule for.
+ *
+ * It exists so that "the owner may use every tool" cannot quietly become
+ * "the owner may use any STRING": an unknown name fails closed for every
+ * role. `packages/mcp-brain/test/may-surface.test.ts` asserts this set is
+ * exactly that bridge's `TOOL_NAMES`, so the two cannot drift — a tool added
+ * there without a rule here is a test failure, which is the same guarantee
+ * the switch's own `default:` gives every other role.
+ */
+export const RULED_TOOLS: ReadonlySet<string> = new Set([
+  "capture",
+  "requests_create",
+  "request_access",
+  "tasks_list",
+  "tasks_claim",
+  "tasks_renew",
+  "tasks_update",
+  "tasks_release",
+  "tasks_close",
+  "tasks_create",
+  "tasks_comment",
+  "tasks_thread",
+  "knowledge_search",
+  "knowledge_read",
+  "knowledge_list",
+  "knowledge_grep",
+  "knowledge_write",
+  "artifacts_publish",
+  "artifacts_get",
+  "artifacts_list",
+  "artifacts_comment",
+  "artifacts_resolve",
+  "artifacts_review",
+  "agents_delegate",
+  "queries_list",
+  "queries_run",
+  "propose_action",
+]);
 
 function mayUseTool(p: Principal, name: string): Decision {
   const { tier, queries } = p.scope;
@@ -648,113 +884,125 @@ function mayUseTool(p: Principal, name: string): Decision {
     case "artifacts_review":
       return OK;
 
+    // The TIER gates. No path is involved in any of them — the caller has
+    // not named anything yet — so there is nothing an answer could confirm
+    // the existence of, and all four say which tier this TOOL needs and
+    // which one the credential holds. `index` for the three that a
+    // discovery tier may reach at all (`knowledge_read` among them: tier
+    // `index` gets as far as the scope_required answer for a page whose
+    // title it can already see); `areas` for the one that is content.
     case "knowledge_search":
-      // `fail("forbidden", undefined, { tier })` — silent, the tier rides in
-      // the audit row.
-      return tier === "none" ? no("forbidden", "tier_required", "") : OK;
     case "knowledge_read":
-      // Weaker than the `read` door below, which also judges the PATH; tier
-      // `none` can never get past either, and both answer with silence.
-      return tier === "none" ? no("forbidden", "tier_required", "") : OK;
     case "knowledge_list":
-      return tier === "none" ? no("forbidden", "tier_required", NOT_GRANTED) : OK;
+      return tier === "none" ? no("forbidden", "tier_required", REFUSAL.tier_required(tier, "index")) : OK;
     case "knowledge_grep":
       // Content, like `knowledge_read` — tier `index` browses titles and may
       // not grep them.
-      return tier !== "areas" ? no("forbidden", "tier_required", NOT_GRANTED) : OK;
+      return tier !== "areas" ? no("forbidden", "tier_required", REFUSAL.tier_required(tier, "areas")) : OK;
 
     case "knowledge_write":
-      // §4.11: one writer. Silent — the tool's DESCRIPTION carries the why.
-      return p.role === "assistant" ? OK : no("forbidden", "role_required", "");
+      // §4.11: one writer. The refusal carries the why now, which is what
+      // let the tool's DESCRIPTION stop carrying it (P3).
+      return p.role === "assistant" ? OK : no("forbidden", "role_required", REFUSAL.role_required(name, "the instance assistant"));
     case "agents_delegate":
       // A crew never dispatches crews; the assistant decides what leaves the
-      // brain. Named in the tool's description ("Instance assistant only").
-      return p.role === "assistant" ? OK : no("forbidden", "role_required", NOT_GRANTED);
+      // brain.
+      return p.role === "assistant" ? OK : no("forbidden", "role_required", REFUSAL.role_required(name, "the instance assistant"));
 
     case "queries_list":
     case "queries_run":
       // Internal principals always; others only with an explicit `queries`
-      // grant. Silent today.
-      return p.role === "assistant" || queries ? OK : no("forbidden", "queries_required", "");
+      // grant.
+      return p.role === "assistant" || queries ? OK : no("forbidden", "queries_required", REFUSAL.queries_required(p.id));
 
     case "propose_action":
       // Lazy by credential: nothing to offer, nothing listed. The door uses
       // `.ok` to decide whether to REGISTER, so this refusal is never
-      // rendered — an agent given no room does not learn the tool exists.
-      return admitsAnyAction(p.scope.autonomy) ? OK : no("forbidden", "autonomy_required", "");
+      // rendered on the wire — an agent given no room does not learn the
+      // tool exists. It still carries the vocabulary's sentence, because the
+      // audit row is read by a person.
+      return admitsAnyAction(p.scope.autonomy) ? OK : no("forbidden", "autonomy_required", REFUSAL.autonomy_required(p.id, null));
 
     default:
-      // An unknown name fails closed. The enumeration test walks TOOL_NAMES,
-      // so a tool added without a rule here is a test failure.
-      return no("forbidden", "role_required", "");
+      // An unknown name fails closed, and says nothing: a tool this build
+      // does not have is not a permission question. The enumeration test
+      // walks TOOL_NAMES, so a tool added without a rule here is a failure.
+      return hidden("forbidden", "role_required");
   }
+}
+
+/**
+ * **The one rule about naming an area** (ruled 2026-09-19 B, and the
+ * boundary P3's vocabulary is held to): a refusal names the grant that would
+ * unlock a path only when the caller may ALREADY list that path and the page
+ * is really there. It already knows the page exists, so naming its folder is
+ * not a new leak — and for everything else, naming one would turn a refusal
+ * into an oracle for what exists where the caller cannot look.
+ *
+ * So `scope_required` has two renderings, and exactly one of them speaks.
+ * They are here, together, rather than at six call sites deciding
+ * separately.
+ */
+function scopeMiss(scope: Scope, path: string, settled: boolean, reason: Reason = "scope_required"): Refusal {
+  if (!(settled && mayListPath(scope, path))) return hidden("forbidden", reason);
+  const sr = scopeRequired(path);
+  return no("forbidden", "scope_required", sr.message, { grant: { tier: "areas", area: areaOf(path) } }, sr.expose);
 }
 
 function mayKnowledge(p: Principal, door: KnowledgeDoor, path: string, settled: boolean): Decision {
   const { scope } = p;
-  const askable = (): Refusal => {
-    const sr = scopeRequired(path);
-    return no("forbidden", "scope_required", sr.message, { grant: { tier: "areas", area: areaOf(path) } }, sr.expose);
-  };
   /** A path refused under a grant that could cover it vs. a tier that never could. Same answer on the wire; the reason says which. */
   const missed: Reason = scope.tier === "areas" ? "scope_required" : "tier_required";
 
   switch (door) {
     case "read":
-      if (scope.tier !== "areas") {
-        // Ruled 2026-09-19 B: a caller who may already see the TITLE of a
-        // page that is really there is told WHICH grant would unlock it.
-        if (settled && mayListPath(scope, path)) return askable();
-        return no("forbidden", "tier_required", "");
-      }
-      if (!validKnowledgePath(path)) return no("invalid_request", "not_knowledge", NOT_A_VAULT_PATH);
-      return canSeeUnder(path, scope.areas) ? OK : no("forbidden", "scope_required", "");
+      if (scope.tier !== "areas") return scopeMiss(scope, path, settled, "tier_required");
+      if (!validKnowledgePath(path)) return notKnowledge(path);
+      return canSeeUnder(path, scope.areas) ? OK : scopeMiss(scope, path, settled);
 
     case "links":
-      if (mayReadPath(scope, path)) return OK;
       // A page's edges are content, so the read rule applies — with the same
       // scope_required upgrade for a page whose title is already visible.
-      if (settled && mayListPath(scope, path)) return askable();
-      return no("forbidden", missed, NOT_GRANTED);
+      if (mayReadPath(scope, path)) return OK;
+      return scopeMiss(scope, path, settled, missed);
 
     case "list":
       // The PREFIX argument. An omitted one aggregates over the grant and is
       // never refused; tier `index` has no prefix restriction at all (it
       // browses every title). Tier `none` is refused at the tool.
       if (path === "" || scope.tier !== "areas") return OK;
-      return canSeeUnder(path, scope.areas) ? OK : no("forbidden", "scope_required", NOT_GRANTED);
+      // A prefix outside the grant names no page, so there is no title the
+      // caller can already see and nothing that may be said about it.
+      return canSeeUnder(path, scope.areas) ? OK : hidden("forbidden", "scope_required");
 
     case "grep":
-      if (scope.tier !== "areas") return no("forbidden", "tier_required", NOT_GRANTED);
+      if (scope.tier !== "areas") return hidden("forbidden", "tier_required");
       if (path === "") return OK;
-      return canSeeUnder(path, scope.areas) ? OK : no("forbidden", "scope_required", NOT_GRANTED);
+      return canSeeUnder(path, scope.areas) ? OK : hidden("forbidden", "scope_required");
 
     case "write":
-      // Writes never exceed reads. Silent, like the role gate above it — and
-      // `underAreas` rather than `canSeeUnder` because the door has already
-      // refused a non-vault path with `invalid_request` by this point.
-      if (p.role !== "assistant") return no("forbidden", "role_required", "");
-      if (scope.tier !== "areas") return no("forbidden", "scope_required", "");
-      return scope.areas === null || underAreas(path, scope.areas) ? OK : no("forbidden", "scope_required", "");
+      // Writes never exceed reads, and both halves hide: the writer's own
+      // narrowing is `METISTRY_ASSISTANT_AREAS`, not a page it could ask
+      // about. `underAreas` rather than `canSeeUnder` because the door has
+      // already answered a non-vault path with the classification by here.
+      if (p.role !== "assistant") return no("forbidden", "role_required", REFUSAL.role_required("knowledge_write", "the instance assistant"));
+      if (scope.tier !== "areas") return hidden("forbidden", "scope_required");
+      return scope.areas === null || underAreas(path, scope.areas) ? OK : hidden("forbidden", "scope_required");
 
     case "resources":
       // MCP resources/list. The door renders this as an EMPTY LIST, not as a
       // refusal — only `.ok` is read — because a resource collection that is
       // empty for you is the honest answer and a 403 on a listing is not.
-      return scope.tier === "areas" ? OK : no("forbidden", "tier_required", "");
+      return scope.tier === "areas" ? OK : hidden("forbidden", "tier_required");
 
     case "console_page":
-      // Door D. Refused and NOT FOUND are the same answer on purpose: a path
-      // outside the scope must not be distinguishable from a path that is
-      // not there. The one exception is the OWNER asking for their own
-      // `Artifacts/` — there is no oracle to protect from the person whose
-      // vault it is, and "not knowledge, here is the door that has it" is a
-      // better answer than "no such page".
-      if (canSeeUnder(path, readableAreas(scope))) return OK;
-      if (scope.areas === null && (path === ARTIFACTS_ROOT || path.startsWith(`${ARTIFACTS_ROOT}/`))) {
-        return no("not_found", "not_knowledge", ARTIFACTS_SIGNPOST);
-      }
-      return no("not_found", validKnowledgePath(path) ? missed : "not_knowledge", NOT_KNOWLEDGE);
+      // Door D, for a credential that is not the owner. Refused and NOT
+      // FOUND are the same answer on purpose and with the same sentence: a
+      // path outside the scope must not be distinguishable from a path that
+      // is not there, from machinery, or from an artifact. The OWNER never
+      // reaches this — `may` answered them above, with a classification
+      // where this door has no page (P4).
+      return canSeeUnder(path, readableAreas(scope)) ? OK : hidden("not_found", validKnowledgePath(path) ? missed : "not_knowledge", NO_SUCH_PAGE);
   }
 }
 
@@ -763,7 +1011,144 @@ function mayQuery(p: Principal, door: QueryDoor, name: string, exposure: "generi
   // A query marked `expose: route` is served by an endpoint that does
   // something the generic door cannot — `knowledge_pages` filters every row
   // through the caller's scope — so answering it here would be that filter
-  // undone. The refusal is the UNKNOWN-QUERY refusal, byte for byte, so
-  // neither door is an oracle for which route-only queries exist.
-  return door === "queries_run" ? no("not_found", "not_exposed", `no such query: ${name}`) : no("not_found", "not_exposed", "");
+  // undone. The refusal HIDES: it is each door's own UNKNOWN-QUERY answer,
+  // byte for byte, so neither door is an oracle for which route-only queries
+  // exist. `/mcp` names the query back (that is what its unknown-query
+  // refusal does); the console's names nothing (nor does its).
+  //
+  // The owner is not here at all since P4: they get the query. The rule
+  // exists so an agent cannot page the vault index unscoped, and the owner
+  // was only ever collateral (§2.6).
+  return door === "queries_run" ? hidden("not_found", "not_exposed", `no such query: ${name}`) : hidden("not_found", "not_exposed");
+}
+
+// ===========================================================================
+// describeScope() / formatRefusal() — ONE renderer
+// ===========================================================================
+//
+// P3 of docs/research/2026-09-19-grants-and-access-simplified.md §4. §2.10's
+// finding was four vocabularies for one record — the console's
+// `ACCESS_LABEL`, the Needs You card's hand-written trade-off note, the tool
+// descriptions' English, and a CLI that rendered grants not at all — so
+// every surface below renders THIS and nothing of its own:
+// `metistry agents list`, the console's Agents panel, the Needs You
+// `access_request` card, and the wire envelope every door answers with.
+
+/** The one shape a scope is SAID in. Every field is presentation; nothing here decides anything. */
+export interface ScopeView {
+  readonly id: string;
+  readonly role: Role;
+  /** The role in words, as a person reads it: "the owner", "an agent", … */
+  readonly who: string;
+  readonly tier: GrantTier;
+  /** The tier's one word: `none` | `titles` | `folders`. */
+  readonly access: string;
+  /** `null` = every vault path — the owner, whose vault it is. */
+  readonly areas: readonly string[] | null;
+  /** The access half of the triple, areas included: "folders: Areas/Health". */
+  readonly scope: string;
+  readonly queries: boolean;
+  /** `null` = every project. */
+  readonly projects: readonly string[] | null;
+  /** A crew's tool groups; `null` for every other role, which carries no allowlist. */
+  readonly uses: readonly string[] | null;
+  readonly autonomy: { readonly level: AutonomyLevel; readonly actions: Record<ActionKind, ActionMode> };
+  readonly source: GrantSource;
+  /** Where the scope came from, in words — "configuration, not a grant" said once rather than reconstructed from `role` at each door (§2.7). */
+  readonly from: string;
+  /** Everything that is not the tier: queries, projects, uses, autonomy. Each one phrase. */
+  readonly extras: readonly string[];
+  /** **The triple**: role · access · extras. One line, the same words in the CLI, the console and the queue. */
+  readonly line: string;
+}
+
+/** The role in words. The CONSOLE's chip and the CLI's column read this, so they cannot disagree about what a crew is called. */
+export const ROLE_LABEL: Readonly<Record<Role, string>> = Object.freeze({
+  owner: "the owner",
+  assistant: "the instance assistant",
+  agent: "an agent",
+  crew: "a crew",
+  tool: "a capture tool",
+});
+
+/** Where a scope came from, in words. Three sources, one sentence each (§1.2, §2.7). */
+export function sourceLabel(source: GrantSource): string {
+  if (source === "environment") return "configuration, not a grant (METISTRY_ASSISTANT_AREAS), plus any area the owner has approved";
+  if (source === "registry") return "the registry — the owner's own hand, durable";
+  return `its manifest (${source.manifest}) — a protected path, re-read on every sync`;
+}
+
+/**
+ * **One structure, rendered everywhere.** The triple the research document
+ * asks for — role · areas/tier · extras — plus the fields a surface needs to
+ * lay it out itself.
+ *
+ * It is pure: a `Principal` in, words out. No database, no config, no
+ * `await`. That is what lets the CLI render an agent it read over HTTP, the
+ * console render one it read out of Postgres, and the queue render one that
+ * was written into a proposal payload weeks ago, all in the same words.
+ */
+export function describeScope(p: Principal): ScopeView {
+  const { tier, areas, queries, projects } = p.scope;
+  const level: AutonomyLevel = AUTONOMY_LEVELS.includes(p.scope.autonomy?.level as AutonomyLevel) ? (p.scope.autonomy!.level as AutonomyLevel) : DEFAULT_AUTONOMY_LEVEL;
+  const access = TIER_LABEL[tier];
+  // `areas: null` is the owner's whole vault, and it is said as that rather
+  // than as an empty list — an empty list is NO grant, and the two must never
+  // read the same on a screen.
+  const scope = areas === null ? `${access}: the whole vault` : tier === "areas" ? `${access}: ${areas.length > 0 ? areas.join(", ") : "nothing"}` : access;
+  const uses = p.role === "crew" ? [...(p.uses ?? [])] : null;
+  const extras = [
+    ...(queries ? ["queries"] : []),
+    ...(projects === null ? ["every project"] : projects.length > 0 ? [`projects: ${projects.join(", ")}`] : []),
+    ...(uses !== null ? [`uses: ${uses.length > 0 ? uses.join(", ") : "nothing"}`] : []),
+    `autonomy: ${level}`,
+  ];
+  return {
+    id: p.id,
+    role: p.role,
+    who: ROLE_LABEL[p.role],
+    tier,
+    access,
+    areas: areas === null ? null : [...areas],
+    scope,
+    queries,
+    projects: projects === null ? null : [...projects],
+    uses,
+    autonomy: { level, actions: effectiveActions(p.scope.autonomy) },
+    source: p.source,
+    from: sourceLabel(p.source),
+    extras,
+    line: `${ROLE_LABEL[p.role]} · ${scope} · ${extras.join(", ")}`,
+  };
+}
+
+/** The §3.2 envelope: the uniform `error` every surface already answers with, plus the two additive fields. */
+export interface RefusalEnvelope {
+  readonly error: { readonly code: ErrorCode; readonly message: string };
+  readonly reason?: Reason;
+  readonly needs?: Needs;
+}
+
+/**
+ * **The one renderer for a refusal.** `error` is untouched — invariant 8's
+ * envelope, the same codes and the same statuses — and `reason` + `needs`
+ * ride in the additive slot the console's `render` already merges.
+ *
+ * Two rules live here and nowhere else:
+ *
+ * 1. An EMPTY message is the code's canonical one ("not granted", "not
+ *    found"), which is what every silent door already answered with. Silence
+ *    has one spelling now instead of two.
+ * 2. **A `hide` refusal loses its `reason` on the way out.** It keeps it
+ *    internally — the audit row and the golden file both want to know why a
+ *    door went quiet — but a `reason` on the wire would make a deliberately
+ *    uninformative refusal distinguishable from absence, which is the whole
+ *    thing it is not allowed to be.
+ */
+export function formatRefusal(d: Decision): RefusalEnvelope | null {
+  if (d.ok) return null;
+  return {
+    ...errorEnvelope(d.code, d.message === "" ? undefined : d.message),
+    ...(d.tell === "hide" ? {} : { reason: d.reason, ...(d.needs ? { needs: d.needs } : {}) }),
+  };
 }

@@ -136,10 +136,13 @@ metistry compute models load|unload <provider>/<model> [--ttl <seconds>] [--json
 metistry compute assign <default|<tier>|crew:<name>> <provider/model> [--effort low|medium|high]
 metistry compute budget <instance|provider:<name>> [--daily <usd>] [--monthly <usd>] \
         --action allow|stop|critical_only
+metistry compute cache-report [--since 7d] [--json]
 ```
 
 Every verb takes `--json` (the app's surface) and `--dry-run` (print the
-plan, write nothing). Every write goes through the reconciler as `user`, and
+plan, write nothing) — except `cache-report`, which writes nothing to begin
+with: it is the one READ here, over the `runs` ledger ("Measuring it
+(OPEN-6)"). Every write goes through the reconciler as `user`, and
 the **result is validated before it is written** — an edit that would produce
 a file the engine could not load is refused and the file is left untouched.
 Hand-written comments, ordering and blocks the verbs do not cover survive
@@ -313,7 +316,8 @@ dependency (C4):
   not an assumption.
 - **Prompt caching** is automatic on a provider whose block says `caching:
   auto` (the `openrouter` template's default) and absent everywhere else, and
-  the cached share of the prompt is priced and recorded — see "Prompt caching".
+  the cached share of the prompt is priced and recorded — see "Prompt caching",
+  and `metistry compute cache-report` for whether it is paying off.
 - **Shadow mode**, for the sampled fraction `assignments.default.shadow`
   names: the same turn run again on a candidate with tools stubbed
   record-only, after the real answer is already delivered. See "Shadow mode".
@@ -390,14 +394,60 @@ Anthropic's rates as OpenRouter passes them through (`[or-cache]`, fetched
 2026-09-11). A response that reports no cached tokens prices exactly as it did
 before caching existed.
 
-**Still owed (OPEN-6).** The measurement: automatic top-level caching versus up
-to four explicit breakpoints on the system prompt and tool list, over ~10 real
-turns on a configured OpenRouter provider, read back from `cache_read_tokens`
-and `cost_usd`. That run is also where the two assumptions above meet a live
-response — the exact field the automatic form takes, and whether a provider
-reports cache writes *inside* `prompt_tokens` (assumed here) or beside it. If
-it reports them beside it, this undercharges a write by 1× the input rate and
-nothing else moves.
+### Measuring it (OPEN-6)
+
+```
+metistry compute cache-report [--since 7d] [--json]
+```
+
+One command, and it is the whole measurement. It reads the `runs` ledger
+through the console's generic query door (`seed/queries/cache_report.yaml`,
+`GET /api/q/cache_report` — invariant 3, and invariant 10: an existing door,
+not a new one) and joins it to this file's `pricing:` rates. It calls no
+model, dials no provider and writes nothing; `--since` takes `7d`, `2w`, `3m`
+or a bare number of days.
+
+```
+prompt cache, last 7d
+
+openrouter/anthropic/claude-sonnet-5
+  tier             caching  turns  reported  prompt  cache read  cache write  hit    cost     saved
+  default          auto     24     24/24     3.8M    3.5M        180k         91.4%  $2.1843  $9.3420
+  crew:researcher  auto     6      6/6       540k    60k         420k         11.1%  $0.9120  -$0.1530
+
+✓ hit ratio 81.5% across the turns that ASKED for a cache, on the 80% threshold …
+```
+
+**What to look at, in this order.**
+
+| Column | Reading |
+| --- | --- |
+| `reported` | turns whose response carried a cache field at all. `0/n` on a `caching: auto` provider is a **wire** finding, not a prompt one — either the caching field is not reaching the provider or the names the engine reads (`prompt_tokens_details.cached_tokens`, `cache_read_input_tokens`) are not the ones it sends. Look at one raw response before touching any prompt. |
+| `hit` | `cache read ÷ prompt`, and `prompt` already includes the cached share — so it reads directly as "the fraction of the prompt that did not have to be sent fresh". Below **80 %** something changes between turns: anything volatile in the system prompt, an edited prompt, a changed `effort`, a tool added or reordered (`docs/research/2026-09-cost-optimization.md` lists them, and records Anthropic's own 89 % after a task boundary — the 80 % here sits under it because a real install rolls sessions and the first turn after a roll is a legitimate miss). |
+| `cache write` ≫ `cache read` | The prefix is being *rebuilt* every turn and paid for at a premium rather than re-read at a discount. `saved` goes negative, which is the honest number. |
+| `saved` | Net: reads billed below `in_per_m`, less what the writes paid extra. A `-` means this provider publishes no rate here — add `providers.<name>.pricing["<model>"].in_per_m` for a dollar figure. On OpenRouter that is the normal case: its responses carry `usage.cost`, which already knows what the cache saved, and no rates at all. |
+| `caching` reading `off → now auto` | The setting changed inside the window. The row says what was in force when those turns ran (`runs.meta.caching`); averaging across the change would mean two different things at once. |
+
+**Every engine turn is in it**: `turn`, `crew_run` and `shadow` alike, grouped
+by provider, model and tier, because a tier missing its cache on one model
+while hitting on another is invisible in a single total — and the crews are
+where the long, repeated briefs are.
+
+**The app reads the same rows** through `GET /api/q/cache_report`. There is
+deliberately **no console route and no console action** for this: it is a read
+of derived state with no vault paths in it, so the generic door is the whole
+answer and invariant 10's enumerated mutating surface is untouched.
+
+**Still owed (OPEN-6).** The comparison the command makes possible but does
+not make for you: automatic top-level caching versus up to four explicit
+breakpoints on the system prompt and tool list, over ~10 real turns on a
+configured OpenRouter provider. Run `cache-report` with automatic caching,
+put explicit breakpoints in the provider's `request:` block, run the same
+kind of turns again, and compare the two `hit` columns. That run is also
+where the assumptions above meet a live response — the exact field the
+automatic form takes, and whether a provider reports cache writes *inside*
+`prompt_tokens` (assumed here) or beside it. If it reports them beside it,
+this undercharges a write by 1× the input rate and nothing else moves.
 
 ## Budgets
 

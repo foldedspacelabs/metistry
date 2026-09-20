@@ -179,16 +179,17 @@ export async function isSettledPage(db: Db, path: string): Promise<boolean> {
  * identical thing for the identical reason. `message` replaces the bare
  * "not granted" string; `expose` is what server.ts's `render` merges onto
  * the wire envelope alongside `error` (Outcome's `expose`, never `meta`,
- * which is audit-only). The mechanism it names is the only one that exists
- * today — there is no `request_access` tool — and it says where the ask
- * lands so the agent knows the owner, not it, decides.
+ * which is audit-only). It names the mechanism — `request_access` since
+ * 2026-09-19 (access.ts) — and where the ask lands, so the agent knows the
+ * owner, not it, decides. A refusal without that sentence is a dead end:
+ * a model told only "no" has no next move but to try the same path again.
  */
 export function scopeRequired(path: string): { message: string; expose: { reason: string; grantedScope: string } } {
   const area = areaOf(path);
   return {
     message:
       `you can see that this page exists, but reading it needs the \`${area}\` grant — ` +
-      `ask the owner to widen it: raise a \`requests_create\` report naming \`${area}\` and why; they approve it in Needs You.`,
+      `ask for it: \`request_access\` with area \`${area}\` and why; the owner approves it in Needs You.`,
     expose: { reason: SCOPE_REQUIRED, grantedScope: area },
   };
 }

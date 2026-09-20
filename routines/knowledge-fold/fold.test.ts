@@ -9,6 +9,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { TemplateQueries, TemplateReader } from "@foldedspacelabs/metistry-core";
+import { vaultReader, type VaultReadable } from "../vault-reader.js";
 import { BRIEF_PREFIX, COMPONENT, FOLD_TEMPLATE_PATH, MAX_BRIEF_BYTES, foldPath, renderBrief, run, type FoldWrite, type Handle } from "./run.js";
 
 const evening = new Date(2026, 8, 9, 19, 30, 0); // 19:30 local — the container's TZ is METISTRY_TZ
@@ -211,6 +212,33 @@ describe("the fold's own file — rendered from Templates/Fold.md (P1-9)", () =>
     expect(text).not.toContain("Journal/2026-09-09.md");
     expect(text).toContain("no Templates/Fold.md yet");
     expect(JSON.parse(String(db.inbound()[0]!.values[2])).fold_mode).toBe("fallback");
+  });
+
+  // The runner (`apps/console/src/runner.ts`'s `routineCapabilities`) does not
+  // hand the fold an arbitrary `TemplateReader` — it hands one built by
+  // `vaultReader` (`routines/vault-reader.ts`) over the vault bridge client.
+  // These two exercise that exact adapter rather than the hand-rolled
+  // `fakeReader` above, so the wiring itself — not just `FoldCtx.reader`'s
+  // contract — is covered.
+  it("with the vaultReader adapter over a vault that holds Templates/Fold.md, takes the skeleton path", async () => {
+    const db = fakeDb({ anchor: [{ ts: anchorTs }], proposals: someProposal });
+    const vault: VaultReadable = { async read(path) { return path === FOLD_TEMPLATE_PATH ? { content: Buffer.from(templateText, "utf8") } : null; } };
+    const queries = fakeQueries({ pending_requests: [] });
+
+    expect(await run(db, { now: evening, reader: vaultReader(vault), queries })).toBe(1);
+
+    const meta = JSON.parse(String(db.inbound()[0]!.values[2]));
+    expect(meta).toMatchObject({ fold_path: "Journal/Fold/2026-09-09.md", fold_mode: "skeleton" });
+  });
+
+  it("with the vaultReader adapter over a vault bridge that is unreachable, still falls back rather than losing the fold", async () => {
+    const db = fakeDb({ anchor: [{ ts: anchorTs }], proposals: someProposal });
+    const vault: VaultReadable = { read: () => Promise.reject(new Error("bridge unreachable")) };
+
+    expect(await run(db, { now: evening, reader: vaultReader(vault) })).toBe(1);
+
+    const meta = JSON.parse(String(db.inbound()[0]!.values[2]));
+    expect(meta.fold_mode).toBe("fallback");
   });
 });
 

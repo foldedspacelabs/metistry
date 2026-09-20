@@ -70,18 +70,20 @@ export interface FoldCtx extends RoutineCtx {
   /**
    * The named-query door `{{ requests limit: 5 }}` (and any query-backed
    * directive an instance adds to `Templates/Fold.md`) reads through
-   * (invariant 3). Not yet wired from the runner (`apps/console/src/main.ts`
-   * builds one already, for its own routes) — absent renders each
+   * (invariant 3). Wired from the runner (`apps/console/src/main.ts`, via
+   * `ComponentCtx` in `apps/console/src/runner.ts`) — absent renders each
    * query-backed directive's own §6.4 "not configured" note rather than
    * failing the render, exactly like a missing calendar bridge.
    */
   queries?: TemplateQueries;
   /**
    * `GET /vault/read`, for the template's own text and any `include` inside
-   * it. Absent is indistinguishable from "no such file" (`templateSkip`
-   * reads both as null), so the routine takes the same fallback either way —
-   * §6.4's `template_missing` is a configuration fact, not a reason to lose
-   * the fold.
+   * it. Wired from the runner (`ComponentCtx.reader`, built once from the
+   * vault bridge client via `vaultReader` — `routines/vault-reader.ts`).
+   * Absent is indistinguishable from "no such file" (`templateSkip` reads
+   * both as null), so the routine takes the same fallback either way — §6.4's
+   * `template_missing` is a configuration fact, not a reason to lose the
+   * fold.
    */
   reader?: TemplateReader;
 }
@@ -170,11 +172,12 @@ export interface FoldWrite {
 }
 
 /**
- * The query store is optional on `FoldCtx` (not yet wired from the runner —
- * see the field's own comment). Absent, every query-backed directive fails
- * its own call and renders its OWN §6.4 note (`renderRequests` etc. catch
- * this and say "not configured"), so the file still renders — the engine
- * never needed a real query store to produce a page, only to fill it in.
+ * The query store is optional on `FoldCtx` — wired from the runner, but an
+ * instance without a matching named query, or a routine invoked directly
+ * (tests), still has none. Absent, every query-backed directive fails its
+ * own call and renders its OWN §6.4 note (`renderRequests` etc. catch this
+ * and say "not configured"), so the file still renders — the engine never
+ * needed a real query store to produce a page, only to fill it in.
  */
 const NO_QUERIES: TemplateQueries = {
   async run(): Promise<{ rows: Record<string, unknown>[] }> {

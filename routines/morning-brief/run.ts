@@ -9,8 +9,8 @@ export interface Db {
   query(text: string, values?: unknown[]): Promise<{ rows: any[] }>;
 }
 
-const BUDGET = 5;
-const CRITICAL_EXTRA_MAX = 2;
+const BUDGET = 5; // limit: fixed — D10's soft budget: surface the ~5 most impactful, never hard-truncate (the full queue is one tap away)
+const CRITICAL_EXTRA_MAX = 2; // limit: fixed — D10's "+1-2 extra only if also critical"
 const CRITICAL_SCORE = 80;
 const EXPIRE_DAYS = 14;
 

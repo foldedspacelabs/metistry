@@ -79,7 +79,17 @@ export interface McpToolHostOptions {
   url: string;
   /** This run's bearer — the assistant's own, or the per-run token the crew drain minted and burns after. */
   token: string;
-  /** Fully-qualified names this run may use; absent = everything the bridge lists. A crew's `uses` list arrives here. */
+  /**
+   * Fully-qualified names this run may use; absent = everything the bridge
+   * lists. A crew's `uses` list arrives here — as **defence in depth, not as
+   * the control**: since P2 the door enforces a crew's toolset itself
+   * (`may(principal, "act", {kind:"toolset"})` in `packages/core/src/access.ts`,
+   * applied by `/mcp` before any tool body runs), so a call outside `uses`
+   * is refused there whether or not this filter is in the loop. Keeping it
+   * means the model is not offered a tool it cannot use, which costs a
+   * refusal turn; removing the door's check would mean the allowlist was a
+   * property of this process again (docs/ops/crews.md).
+   */
   allow?: readonly string[] | undefined;
   /** Client identity on the wire; the assistant's NAME never appears (CLAUDE.md). */
   clientName?: string | undefined;
@@ -147,7 +157,10 @@ export function mcpToolHost(opts: McpToolHostOptions): ToolHost {
     },
     async call(name, args) {
       if (allow !== undefined && !allow.has(name)) {
-        // The allowlist is the control; the model being told about it is not.
+        // Defence in depth since P2, not the control: the door refuses this
+        // same call with the uniform `forbidden` envelope and a `runs` row on
+        // the crew's own id. This answer only spares the round trip — and the
+        // model being told about the list is not a control either.
         return { text: `"${name}" is not in this run's tool list`, isError: true };
       }
       const c = await connect();

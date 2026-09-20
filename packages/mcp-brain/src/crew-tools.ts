@@ -99,7 +99,7 @@ export function registerCrewTools(reg: Register, dispatcher: CrewDispatcher | un
   reg(
     "agents_delegate",
     "Delegate a brief to a named helper agent (agents/<area>/<name>.md — its own model, tool groups, and read scope); the brief is the full context transfer. " +
-      "A path outside the agent's scope or the local target's data policy is refused with violations, nothing queued. Results return only via the helper's own requests_create/tasks_* calls. Instance assistant only; others get not granted.",
+      "A path outside the agent's scope or the local target's data policy is refused with violations, nothing queued. Results return only via the helper's own requests_create/tasks_* calls. The instance assistant alone.",
     {
       crew: z
         .string()

@@ -10,7 +10,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { TasksService } from "@foldedspacelabs/metistry-tasks";
-import { createBrainServer, frontmatterSource, ownershipRefusal, sha256Text, stampProvenance, vaultBridgeWriter, writeKnowledge, type AgentPrincipal, type Db, type KnowledgeWriter, type VaultWriteRequest } from "../src/index.js";
+import { BOOTSTRAP_EXEMPT_PATH, createBrainServer, frontmatterSource, ownershipRefusal, sha256Text, stampProvenance, USER_SOURCE, vaultBridgeWriter, writeKnowledge, type AgentPrincipal, type Db, type KnowledgeWriter, type VaultWriteRequest } from "../src/index.js";
 
 const NOW = new Date("2026-09-07T15:04:05Z");
 const assistant: AgentPrincipal = { id: "assistant", kind: "internal", grants: { tier: "areas", areas: ["/"] }, projects: [] };
@@ -290,6 +290,13 @@ describe("the tool over MCP (fake db)", () => {
 // One writer, but not one owner: the evening fold may keep its own pages
 // current and create new ones, and must not edit the user's. Enforced HERE,
 // not in the prompt (CLAUDE.md: "enforce at the tool, never by prompting").
+//
+// 2026-09-19: the default was inverted. A note with NO `source:` used to be
+// "free to write" (a hole: a hand-written note never carries `source:`, so
+// the whole-file-replace `knowledge_write` could silently clobber one from a
+// model turn — the daily-flow research, #227). It is now the user's, same as
+// an explicit `source: user`, with one narrow bootstrap exemption for
+// `now.md` at the vault root (BOOTSTRAP_EXEMPT_PATH).
 describe("writeKnowledge ownership (the fold's rule 2)", () => {
   const note = (source: string | null) => (source === null ? "# Ada\n" : `---\nid: 01J8\nsource: ${source}\nupdated: 2026-09-01\n---\n# Ada\n`);
   const PATH = "People/Ada.md";
@@ -302,10 +309,16 @@ describe("writeKnowledge ownership (the fold's rule 2)", () => {
     expect(ownershipRefusal(note("user"), "assistant")).toBe("owned by user; propose instead");
     expect(ownershipRefusal(note("assistant"), "assistant")).toBe(null);
     expect(ownershipRefusal(note("knowledge-fold"), "assistant")).toBe(null);
-    expect(ownershipRefusal(note(null), "assistant")).toBe(null);
+    // MISUSE: no `source:` at all is the user's default, not an opening —
+    // this is the exact hole the research named.
+    expect(ownershipRefusal(note(null), "assistant")).toBe("owned by user; propose instead");
+    // the one exemption: `now.md` by exact name, and only while it truly has
+    // no source yet — path is irrelevant once a source is present
+    expect(ownershipRefusal(note(null), "assistant", BOOTSTRAP_EXEMPT_PATH)).toBe(null);
+    expect(ownershipRefusal(note("user"), "assistant", BOOTSTRAP_EXEMPT_PATH)).toBe("owned by user; propose instead");
   });
 
-  it("a note the user owns is refused, and the writer is never called — report instead", async () => {
+  it("a note the user owns — explicitly or by carrying no `source:` at all — is refused, and the writer is never called — report instead", async () => {
     const { writer, calls } = recorder(okReply);
     const r = await writeKnowledge(assistant, { path: PATH, content: "# Ada\n", message: "m" }, writer, NOW, reader(note("user")));
     expect(r).toMatchObject({ ok: false, code: "forbidden", message: "owned by user; propose instead", meta: { owned_by: "user" } });
@@ -316,15 +329,79 @@ describe("writeKnowledge ownership (the fold's rule 2)", () => {
       code: "forbidden",
       message: "owned by drey-dev; propose instead",
     });
+    // MISUSE (the bug this PR closes): a hand-written note — no frontmatter
+    // at all, which is exactly what a note you wrote in Obsidian looks like
+    // — is the user's, not free for the taking.
+    expect(await writeKnowledge(assistant, { path: PATH, content: "# Ada\n", message: "m" }, writer, NOW, reader(note(null)))).toMatchObject({
+      ok: false,
+      code: "forbidden",
+      message: "owned by user; propose instead",
+      meta: { owned_by: USER_SOURCE },
+    });
     expect(calls).toHaveLength(0);
   });
 
-  it("its own notes, the fold's notes, unsourced notes and NEW notes all go through", async () => {
+  it("its own notes, the fold's notes and NEW notes go through", async () => {
     const { writer, calls } = recorder(okReply);
-    for (const existing of [note("assistant"), note("knowledge-fold"), note(null), null]) {
+    for (const existing of [note("assistant"), note("knowledge-fold"), null]) {
       expect((await writeKnowledge(assistant, { path: PATH, content: "# Ada\n", message: "m" }, writer, NOW, reader(existing))).ok, String(existing).slice(0, 40)).toBe(true);
     }
-    expect(calls).toHaveLength(4);
+    expect(calls).toHaveLength(3);
+  });
+
+  it("MISUSE: a crafted `source: assistant` in the INCOMING content cannot claim an existing user note — ownership is read from the file on disk, never from what the caller sends", async () => {
+    const { writer, calls } = recorder(okReply);
+    const claim = "---\nsource: assistant\n---\n# Ada, mine now\n";
+    // the note on disk has no source (the user wrote it by hand); the
+    // incoming content pretends to already be the assistant's — the pretense
+    // must not matter, because ownership never reads `args.content`
+    expect(await writeKnowledge(assistant, { path: PATH, content: claim, message: "m" }, writer, NOW, reader(note(null)))).toMatchObject({
+      ok: false,
+      code: "forbidden",
+      message: "owned by user; propose instead",
+    });
+    // same with an explicit source: user on disk
+    expect(await writeKnowledge(assistant, { path: PATH, content: claim, message: "m" }, writer, NOW, reader(note("user")))).toMatchObject({
+      ok: false,
+      code: "forbidden",
+      message: "owned by user; propose instead",
+    });
+    expect(calls).toHaveLength(0);
+  });
+
+  // now.md ships from the seed with `source: assistant` (this change), so
+  // this only matters for an instance whose now.md predates that: no vault
+  // file gets an instance migration (instance-migrations/ is SQL for a
+  // local extension's own tables, not a repo-layout mechanism —
+  // packages/cli/src/migrate-inbox.ts), so the exemption is by exact name
+  // at the vault root instead.
+  describe("the now.md bootstrap exemption", () => {
+    it("an unsourced now.md at the vault root is writable — the one note the assistant cannot stop writing", async () => {
+      const { writer, calls } = recorder(okReply);
+      const r = await writeKnowledge(assistant, { path: "now.md", content: "# Now\n", message: "m" }, writer, NOW, reader("# Now\n\nBusy.\n"));
+      expect(r.ok).toBe(true);
+      expect(calls).toHaveLength(1);
+    });
+
+    it("the exemption is gone the moment now.md has been stamped once — an explicit source: user on now.md is still refused", async () => {
+      const { writer, calls } = recorder(okReply);
+      expect(await writeKnowledge(assistant, { path: "now.md", content: "x", message: "m" }, writer, NOW, reader(note("user")))).toMatchObject({
+        ok: false,
+        code: "forbidden",
+        message: "owned by user; propose instead",
+      });
+      expect(calls).toHaveLength(0);
+    });
+
+    it("the exemption is BY EXACT NAME AT THE ROOT only — an unsourced now.md anywhere else is still the user's", async () => {
+      const { writer, calls } = recorder(okReply);
+      expect(await writeKnowledge(assistant, { path: "Areas/Fsl/now.md", content: "x", message: "m" }, writer, NOW, reader("# Now (a different one)\n"))).toMatchObject({
+        ok: false,
+        code: "forbidden",
+        message: "owned by user; propose instead",
+      });
+      expect(calls).toHaveLength(0);
+    });
   });
 
   it("a read that fails refuses the write rather than waving it through", async () => {

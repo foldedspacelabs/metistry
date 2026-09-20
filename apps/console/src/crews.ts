@@ -258,7 +258,9 @@ export async function syncCrews(db: Db, crews: Map<string, CrewDefinition>): Pro
     }
     if (!row) {
       // the hash of a token nobody holds — see the file header
-      await db.query(`INSERT INTO agents (id, display_name, kind, token_hash, grants, projects, autonomy) VALUES ($1, $2, 'crew', $3, $4::jsonb, $5::text[], $6::jsonb)`, [
+      // grant_source (0025): a crew's scope IS its manifest, recorded on the
+      // row rather than re-derived from `kind` at each door (§2.7).
+      await db.query(`INSERT INTO agents (id, display_name, kind, token_hash, grants, projects, autonomy, grant_source) VALUES ($1, $2, 'crew', $3, $4::jsonb, $5::text[], $6::jsonb, 'manifest')`, [
         name, display, tokenHash(mintToken(32)), grantsJson, projects, autonomyJson,
       ]);
       out.registered.push(name);
@@ -273,7 +275,7 @@ export async function syncCrews(db: Db, crews: Map<string, CrewDefinition>): Pro
     const same = !row.revoked && row.display_name === display && JSON.stringify(row.grants) === grantsJson
       && JSON.stringify(row.projects ?? []) === JSON.stringify(projects) && JSON.stringify(row.autonomy ?? {}) === autonomyJson;
     if (same) continue;
-    await db.query(`UPDATE agents SET display_name = $2, grants = $3::jsonb, projects = $4::text[], autonomy = $5::jsonb, revoked_at = NULL WHERE id = $1 AND kind = 'crew'`, [
+    await db.query(`UPDATE agents SET display_name = $2, grants = $3::jsonb, projects = $4::text[], autonomy = $5::jsonb, grant_source = 'manifest', revoked_at = NULL WHERE id = $1 AND kind = 'crew'`, [
       name, display, grantsJson, projects, autonomyJson,
     ]);
     out.resynced.push(name);
@@ -326,6 +328,25 @@ export class CrewRegistry {
 
   names(): string[] {
     return [...this.crews.keys()].sort();
+  }
+
+  /**
+   * The toolset and the manifest path behind a crew bearer, for the
+   * principal `/mcp` decides on (`authenticateAgent`'s `CrewToolsetLookup`).
+   *
+   * Undefined for a name this console has no loaded manifest for — a revoked
+   * crew, a manifest that failed to parse, a console with no `agents/` at
+   * all — and the caller reads that as NO tools. Fail closed: a crew whose
+   * definition cannot be read is not a crew that gets the benefit of the
+   * doubt.
+   *
+   * It follows the manifest as loaded NOW, not the snapshot frozen into the
+   * run's work row. Where a mid-run edit makes them disagree, the door wins;
+   * that is the point of moving the allowlist here (P2 §2.2).
+   */
+  toolset(name: string): { uses: readonly string[]; manifest?: string | undefined } | undefined {
+    const def = this.crews.get(name);
+    return def ? { uses: def.manifest.uses, manifest: def.where } : undefined;
   }
 
   /**

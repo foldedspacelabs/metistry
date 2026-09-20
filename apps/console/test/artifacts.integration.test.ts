@@ -206,6 +206,27 @@ describe.skipIf(!hasDb)("artifacts routes (integration, real reconciler in-proce
     expect((await json("GET", `/api/artifacts/${artifactId}/versions/${v2}/file?path=../../identity.yaml`)).status).toBe(404);
   });
 
+  // Ruled 2026-09-19 (D): "the owner should always have access to everything
+  // … dropping artifacts from the owner's access isn't right." The grant
+  // validator that refuses `Artifacts/` is about AGENTS; this is the owner's
+  // own read of the same bytes, through the door that has them, over a real
+  // vault — unchanged by any of it.
+  it("the OWNER reads Artifacts/ on both doors: the artifacts door serves the bytes, the knowledge door names it", async () => {
+    // the file is really under Artifacts/ in the instance repo
+    expect(readFileSync(`${repo.root}/Artifacts/${P}/site/index.html`, "utf8")).toBe("<html><body>v2</body></html>");
+
+    const file = await (await json("GET", `/api/artifacts/${artifactId}/versions/${v2}/file?path=index.html`)).json();
+    expect(file).toMatchObject({ kind: "html", content: "<html><body>v2</body></html>" });
+    const raw = await fetch(`${base}/api/artifacts/${artifactId}/versions/${v2}/file?path=img/pixel.png&raw=1`, { headers: { cookie } });
+    expect(raw.status).toBe(200); // bytes, with decision #14's headers on them
+    expect((await (await json("GET", "/api/artifacts")).json()).artifacts.some((a: any) => a.id === artifactId)).toBe(true);
+
+    // …and the knowledge door, which reads the INDEX and has never walked
+    // Artifacts/, says where the bytes are rather than "no such page"
+    const page = await (await json("GET", `/api/knowledge/page?path=${encodeURIComponent(`Artifacts/${P}/site/notes.md`)}`)).json();
+    expect(page.error.message).toContain("/api/artifacts");
+  });
+
   it("comments + dispatch through the routes: a thread, a reply, resolve; dispatch makes one review task and its bundle status is inferred", async () => {
     const c = await json("POST", `/api/artifacts/${artifactId}/comments`, { version: v2, body: "needs a title", path: "index.html", anchor: { line: 1 } });
     expect(c.status).toBe(201);

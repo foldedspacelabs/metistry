@@ -1,10 +1,13 @@
 export { createBrainServer, sanitizeDeep, EAGER_TOOL_NAMES, TASK_FILTERS, TOOL_NAMES, type BrainConfig, type BrainServer, type TaskFilter, type ToolName } from "./server.js";
 export { ALIAS_NAMES, TOOL_ALIASES, resolveAliasCall } from "./aliases.js";
+export { TURN_ID_META_KEY, liftTurnId, turnIdFrom, validTurnId } from "./turn-id.js";
+export { toolSurface, type ToolDefinition } from "./surface.js";
 export {
   captureToInbox,
   dirSink,
   vaultSink,
   placeCapture,
+  vaultPathPredicate,
   DEFAULT_MAX_TRACKED_BYTES,
   INBOX_LARGE_DIRNAME,
   INBOX_PREFIX,
@@ -15,12 +18,18 @@ export {
   type SinkOptions,
 } from "./capture.js";
 export { submitReport, REPORT_KINDS, type ReportInput, type ReportKind, type ReportResult } from "./report.js";
+export { requestAccess, ACCESS_REQUEST_KIND, type AccessRequestInput, type AccessRequestOutcome, type AccessRequestPayload } from "./access.js";
 export {
   searchKnowledge,
   readKnowledge,
   underAreas,
+  canSeeUnder,
   knowledgeScope,
   validKnowledgePath,
+  areaOf,
+  isSettledPage,
+  scopeRequired,
+  SCOPE_REQUIRED,
   KNOWLEDGE_MODES,
   type KnowledgeHit,
   type KnowledgeMode,
@@ -32,6 +41,8 @@ export {
 } from "./knowledge.js";
 export {
   KNOWLEDGE_FS_TOOL_NAMES,
+  KNOWLEDGE_PAGES_QUERY,
+  KNOWLEDGE_LINKS_QUERY,
   registerKnowledgeFsTools,
   vaultBridgeLister,
   vaultBridgeSearcher,
@@ -52,6 +63,8 @@ export {
   ownershipRefusal,
   frontmatterSource,
   FOLD_SOURCE,
+  USER_SOURCE,
+  BOOTSTRAP_EXEMPT_PATH,
   sha256Text,
   MAX_WRITE_BYTES,
   type KnowledgeWriter,

@@ -18,7 +18,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
-import { BRAIN_SERVER } from "./brain.js";
+import { BRAIN_SERVER, newTurnId, TURN_ID_META_KEY } from "./brain.js";
 
 /** One tool as the chat-completions wire wants it: a name, a description, and a JSON Schema for the arguments. */
 export interface ToolSpec {
@@ -79,10 +79,40 @@ export interface McpToolHostOptions {
   url: string;
   /** This run's bearer — the assistant's own, or the per-run token the crew drain minted and burns after. */
   token: string;
-  /** Fully-qualified names this run may use; absent = everything the bridge lists. A crew's `uses` list arrives here. */
+  /**
+   * Fully-qualified names this run may use; absent = everything the bridge
+   * lists. A crew's `uses` list arrives here — as **defence in depth, not as
+   * the control**: since P2 the door enforces a crew's toolset itself
+   * (`may(principal, "act", {kind:"toolset"})` in `packages/core/src/access.ts`,
+   * applied by `/mcp` before any tool body runs), so a call outside `uses`
+   * is refused there whether or not this filter is in the loop. Keeping it
+   * means the model is not offered a tool it cannot use, which costs a
+   * refusal turn; removing the door's check would mean the allowlist was a
+   * property of this process again (docs/ops/crews.md).
+   */
   allow?: readonly string[] | undefined;
   /** Client identity on the wire; the assistant's NAME never appears (CLAUDE.md). */
   clientName?: string | undefined;
+  /**
+   * The correlation handle every call in this run carries. Absent = one is
+   * minted here, which is the normal case: a host is built per run
+   * (`cfg.tools(spec)` in engine-openai.ts), so "one id per reply" falls out
+   * of the object's lifetime rather than out of the model remembering to.
+   */
+  turnId?: string | undefined;
+}
+
+/**
+ * The `tools/call` params for one call: the bridge's name, the model's
+ * arguments, and the turn handle in `_meta` — the spec's carrier for request
+ * metadata, which is where it lives now that it is in no tool's schema
+ * (`packages/mcp-brain/src/turn-id.ts`).
+ *
+ * Exported because it is the whole of the wire contract worth testing: a
+ * handle that stops being sent breaks the activity feed's grouping silently.
+ */
+export function callParams(name: string, args: Record<string, unknown>, turnId: string): { name: string; arguments: Record<string, unknown>; _meta: Record<string, unknown> } {
+  return { name, arguments: args, _meta: { [TURN_ID_META_KEY]: turnId } };
 }
 
 /**
@@ -96,6 +126,8 @@ export interface McpToolHostOptions {
 export function mcpToolHost(opts: McpToolHostOptions): ToolHost {
   let client: Client | undefined;
   const allow = opts.allow ? new Set(opts.allow) : undefined;
+  // One handle for the life of this host, i.e. for this reply (above).
+  const turnId = opts.turnId ?? newTurnId();
 
   const connect = async (): Promise<Client> => {
     if (client) return client;
@@ -125,11 +157,14 @@ export function mcpToolHost(opts: McpToolHostOptions): ToolHost {
     },
     async call(name, args) {
       if (allow !== undefined && !allow.has(name)) {
-        // The allowlist is the control; the model being told about it is not.
+        // Defence in depth since P2, not the control: the door refuses this
+        // same call with the uniform `forbidden` envelope and a `runs` row on
+        // the crew's own id. This answer only spares the round trip — and the
+        // model being told about the list is not a control either.
         return { text: `"${name}" is not in this run's tool list`, isError: true };
       }
       const c = await connect();
-      const r = (await c.callTool({ name: unqualify(name), arguments: args })) as {
+      const r = (await c.callTool(callParams(unqualify(name), args, turnId))) as {
         content?: { type?: string; text?: string }[];
         isError?: boolean;
       };

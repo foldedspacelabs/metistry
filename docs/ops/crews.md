@@ -105,6 +105,41 @@ hold. The runner's `allowedTools` is built from the same table
 config is ignored — invariant 9 holds for a crew exactly as for the
 assistant.
 
+### Where `uses` is enforced: at the door
+
+The console resolves a crew's `uses` from the manifest it loaded, attaches
+it to the principal at authentication, and **`/mcp` refuses every call
+outside it** before the tool body runs:
+
+```json
+{ "error": { "code": "forbidden",
+             "message": "tasks_comment is not in this crew's toolset — writer holds knowledge, requests (`uses:` in its manifest, a protected path in the user's hand: docs/ops/crews.md). Report what you needed instead of retrying." } }
+```
+
+One `runs` row on the crew's own id, the same uniform envelope every other
+refusal on that surface uses. The runner still builds its client-side list
+from the same table, so the model is not offered a tool it cannot use — but
+that filter is **defence in depth, not the control**. Until 2026-09-20 it
+was the control, which meant `uses` was a property of the process that
+dispatched the run rather than of the tool; five of the eight groups
+(`rooms`, `artifacts`, `tasks`, `capture`, `requests`) had no server-side
+gate at all. "Enforce at the tool, never by prompting" (CLAUDE.md) — a
+filter in the caller is neither.
+
+Two consequences worth knowing:
+
+- **The door follows the manifest as loaded now**, not the snapshot frozen
+  into the run's work row. Edit a manifest mid-run and the door answers from
+  the edited file at the next call.
+- **A crew this console has no manifest for holds no tools.** A revoked
+  crew, a file that failed to parse, a console started without `agents/`:
+  the toolset resolves to empty, never to everything.
+
+Widening a crew is still an edit to `agents/<area>/<name>.md`, in your own
+hand. A crew cannot ask: `request_access` is a never-tool, and the
+console refuses the widening at triage as well, because the next crew sync
+would undo it.
+
 ## What a crew can and cannot do
 
 **Can:** read settled notes under its `scope` (drafts are invisible at
@@ -126,9 +161,12 @@ text is discarded, only what it *reported* survives.
 The registry row is `agents.kind = 'crew'`, with grants from `scope`
 through the **same validator external agents face** (`validateGrants`,
 external shape: TitleCase areas, the bare vault refused — a crew is not
-the assistant). Its `projects` are the manifest's. At the bridge a crew
-authenticates like any external principal: `knowledge_write` and
-`agents_delegate` are "not granted", project membership is exactly its list.
+the assistant), `grant_source = 'manifest'`, and `projects` from the
+manifest. At the bridge a crew authenticates **as a crew** — its own role
+since 2026-09-20, not a foreign agent it used to be indistinguishable from
+(migration 0025's CHECK writes the three stored kinds down). `knowledge_write`
+and `agents_delegate` are refused, project membership is exactly its list,
+and the toolset is exactly its `uses`.
 
 ### Autonomy in the manifest
 
@@ -314,7 +352,13 @@ read the thread itself; the brief is the reviewable record of what crossed.
 - `apps/console/test/crews.integration.test.ts` — registry sync idempotent
   (second sync writes nothing, hash untouched), resync/revoke/conflict;
   `agents_delegate` over the live `/mcp`: external → not granted, refused
-  brief → no work row + audited, clean brief → one durable row, idempotent.
+  brief → no work row + audited, clean brief → one durable row, idempotent;
+  and a per-run crew bearer refused a tool outside `uses` at the door, with
+  no client filter in the loop.
+- `packages/mcp-brain/test/crew-uses.test.ts` — the toolset gate itself:
+  every group the manifest did not name refused with the uniform envelope,
+  the ones it did named past it, an unresolvable manifest holding nothing,
+  the body never running, and nothing in a call able to widen it.
 - `apps/assistant/test/crew.test.ts` — allowlist exhaustive against
   mcp-brain's manifest; option builder (model, **effort**, bearer, tools,
   turns, budget, and no `resume`); `effort` defaulting to low and refusing a

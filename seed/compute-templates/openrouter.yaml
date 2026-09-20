@@ -3,6 +3,11 @@
 # (invariant 4). `usage.cost` comes back on every response, so no pricing
 # table is needed here.
 #
+# `caching: auto` is the one template that carries it: OpenRouter passes
+# Anthropic's prompt caching through, so the engine sends its automatic
+# caching field on every call and the cached share of the prompt comes back
+# on the runs row (docs/ops/compute.md, "Prompt caching").
+#
 # `metistry compute providers add --from openrouter` writes this block into
 # the instance's compute.yaml and asks for the key on stdin.
 openrouter:
@@ -11,5 +16,6 @@ openrouter:
   locality: off_machine
   auth: { secret: METISTRY_OPENROUTER_API_KEY }
   zdr: true
+  caching: auto
   request: { provider: { order: [anthropic], allow_fallbacks: false } }
   data_policy: { allow: [Projects], deny_sources: [comms], max_brief_bytes: 65536 }

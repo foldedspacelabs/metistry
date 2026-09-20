@@ -29,7 +29,7 @@
 //   and it is a hook here (`ShadowRubric`) rather than a second scorer
 //   invented in the engine.
 
-import type { CostSource, ResolvedAssignment, ResolvedShadow } from "@foldedspacelabs/metistry-core";
+import type { CachingMode, CostSource, ResolvedAssignment, ResolvedShadow } from "@foldedspacelabs/metistry-core";
 import { finishRun, startRun } from "@foldedspacelabs/metistry-core";
 import type { ChatClient, ChatResponse } from "./engine-openai.js";
 import type { ChatMessage } from "./sessions.js";
@@ -81,6 +81,9 @@ export interface ShadowRun {
     error?: string;
     tokens_in: number;
     tokens_out: number;
+    /** What the candidate's own prompt cache did, where its provider reported it. Absent = it reported no such field (core's CallUsage). */
+    cache_read?: number | undefined;
+    cache_write?: number | undefined;
     cost_usd: number;
     cost_source: CostSource;
   };
@@ -189,6 +192,9 @@ export async function runShadow(input: ShadowInput): Promise<ShadowRun> {
   const transcript: ChatMessage[] = [];
   let tokens_in = 0;
   let tokens_out = 0;
+  /** Absent until a response carries the field: "not reported" and "nothing cached" are different readings (core's CallUsage). */
+  let cache_read: number | undefined;
+  let cache_write: number | undefined;
   let cost_usd = 0;
   let cost_source: CostSource = "unknown";
   let turns = 0;
@@ -199,6 +205,8 @@ export async function runShadow(input: ShadowInput): Promise<ShadowRun> {
   const account = (r: ChatResponse): void => {
     tokens_in += r.usage.tokens_in;
     tokens_out += r.usage.tokens_out;
+    if (r.usage.cache_read !== undefined) cache_read = (cache_read ?? 0) + r.usage.cache_read;
+    if (r.usage.cache_write !== undefined) cache_write = (cache_write ?? 0) + r.usage.cache_write;
     cost_usd += r.cost.cost_usd;
     cost_source = r.cost.source;
   };
@@ -250,6 +258,8 @@ export async function runShadow(input: ShadowInput): Promise<ShadowRun> {
       ...(error !== undefined ? { error } : {}),
       tokens_in,
       tokens_out,
+      ...(cache_read !== undefined ? { cache_read } : {}),
+      ...(cache_write !== undefined ? { cache_write } : {}),
       cost_usd: Math.round(cost_usd * 1e6) / 1e6,
       cost_source,
     },
@@ -295,7 +305,7 @@ export interface ShadowDb {
  *    added to the turn's own cost where a per-provider budget would read it
  *    against the wrong provider.
  */
-export async function recordShadow(db: ShadowDb, runId: number, run: ShadowRun, ctx: { component?: string; tier?: string | undefined } = {}): Promise<number> {
+export async function recordShadow(db: ShadowDb, runId: number, run: ShadowRun, ctx: { component?: string; tier?: string | undefined; caching?: CachingMode | undefined } = {}): Promise<number> {
   await db.query(
     `UPDATE runs SET shadow_provider = $2, shadow_model = $3, shadow_transcript = $4::jsonb, shadow_agreement = $5, shadow_cost_usd = $6 WHERE id = $1`,
     [runId, run.shadow.provider, run.shadow.model, JSON.stringify(run), run.agreement.score, run.shadow.cost_usd],
@@ -308,6 +318,9 @@ export async function recordShadow(db: ShadowDb, runId: number, run: ShadowRun, 
     meta: {
       shadow_of: runId,
       ...(ctx.tier ? { tier: ctx.tier } : {}),
+      // the CANDIDATE's caching mode, not the assignment's — this row is
+      // grouped by the candidate's provider in the cache-report
+      ...(ctx.caching ? { caching: ctx.caching } : {}),
       real_provider: run.real.provider,
       real_model: run.real.model,
       agreement: run.agreement.score,
@@ -322,6 +335,12 @@ export async function recordShadow(db: ShadowDb, runId: number, run: ShadowRun, 
     ...(run.shadow.error !== undefined ? { error: run.shadow.error } : {}),
     tokens_in: run.shadow.tokens_in,
     tokens_out: run.shadow.tokens_out,
+    // The candidate is a provider/model pair of its own on this row, so the
+    // cache-report's per-model hit ratio has to be able to see what ITS
+    // cache did — a shadow that never caches is exactly the finding that
+    // would stop a promotion (OPEN-6, and docs/ops/compute.md "Shadow mode").
+    ...(run.shadow.cache_read !== undefined ? { cache_read_tokens: run.shadow.cache_read } : {}),
+    ...(run.shadow.cache_write !== undefined ? { cache_write_tokens: run.shadow.cache_write } : {}),
     cost_usd: run.shadow.cost_usd,
   });
   return id;

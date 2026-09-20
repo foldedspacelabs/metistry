@@ -17,10 +17,11 @@ import { usesCompose, type DeploymentShape } from "@foldedspacelabs/metistry-cor
 import { loadDeployment } from "./deployment.js";
 import type { Exec } from "./exec.js";
 import { composeServiceNames } from "./doctor.js";
-import { launchAgentsDir, loadPlistTemplates, loadSupervisedTemplates } from "./launchd.js";
+import { launchAgentsDir, loadPlistTemplates, loadSupervisedTemplates, parseRegistrar, registrarPhrase } from "./launchd.js";
 import { readSupervisorConfig, supervisorConfigPath, controlRequest, SUPERVISOR_SERVICE } from "./supervisor.js";
 import { loadNamespace } from "./namespace.js";
 import { StepFailed, StepRunner } from "./steps.js";
+import { defaultUi, padTo, type Ui } from "./ui.js";
 import { composeEnvArgs, instanceLock, runDirFor } from "./up.js";
 
 export type ServiceAction = "restart" | "stop" | "start";
@@ -251,6 +252,19 @@ export interface ServiceControlResult {
 }
 
 /**
+ * "Every service" means the AGENTS: booting out the supervisor takes its
+ * children with it, and bootstrapping it starts them in order. Acting on both
+ * would fight itself — stop the children, then stop the supervisor that has
+ * already stopped them. Naming a child explicitly still acts on it alone.
+ */
+function actingTargets(r: StepRunner, resolved: ServiceTarget[], named: boolean): ServiceTarget[] {
+  if (named) return resolved;
+  const children = resolved.filter((t) => t.kind === "child");
+  if (children.length > 0) r.note(`the supervisor's children (${children.map((t) => t.name).join(", ")}) follow it — name one to act on it alone`);
+  return resolved.filter((t) => t.kind !== "child");
+}
+
+/**
  * `metistry restart|stop|start [<service>…]`. Every named service is acted
  * on even when an earlier one fails — the result list is the per-service
  * report, not an abort-on-first-failure plan like `up`'s.
@@ -263,25 +277,148 @@ export async function controlServices(opts: ServiceControlOptions & { action: Se
   const { resolved, unknown } = resolveServices(ctx.targets, opts.names);
   if (unknown.length > 0) throw new UnknownServiceError(unknown, ctx.targets.map((t) => t.name));
   r.section(opts.action);
-  // "every service" means the agents: booting out the supervisor takes its
-  // children with it, and bootstrapping it starts them in order. Acting on
-  // both would fight itself — stop the children, then stop the supervisor
-  // that has already stopped them.
-  const acting = opts.names && opts.names.length > 0 ? resolved : resolved.filter((t) => t.kind !== "child");
-  if (acting.length !== resolved.length) r.note(`the supervisor's children (${resolved.filter((t) => t.kind === "child").map((t) => t.name).join(", ")}) follow it — name one to act on it alone`);
+  const acting = actingTargets(r, resolved, (opts.names?.length ?? 0) > 0);
   const results: ServiceResult[] = [];
   for (const t of acting) results.push(await actOn(r, t, ctx, opts.envFile, opts.action));
   return { ok: results.every((x) => x.ok), shape: ctx.shape, results, commands: r.commands };
 }
 
-/** `service  action  ok  detail` — the same table shape doctor's renderTable uses. */
-export function renderServiceResults(results: ServiceResult[]): string {
-  const head = ["service", "action", "ok", "detail"];
-  const body = results.map((x) => [x.service, x.action, x.ok ? "ok" : "FAILED", x.detail]);
-  const widths = head.map((h, i) => Math.max(h.length, ...body.map((row) => (i < 3 ? (row[i] ?? "").length : 0))));
-  const line = (cells: string[]) => cells.map((c, i) => (i < 3 ? c.padEnd(widths[i] ?? 0) : c)).join("  ").trimEnd();
+// ---- down -------------------------------------------------------------------
+
+/** One read-only "is it actually gone?" answer, after everything has been stopped. */
+export interface DownConfirmation {
+  /** the label under launchd, or `compose` for the container check */
+  name: string;
+  /** true = nothing is running under this name any more */
+  stopped: boolean;
+  detail: string;
+}
+
+export interface DownResult extends ServiceControlResult {
+  confirmations: DownConfirmation[];
+  /** set when the Mac app — not `up` — registered the supervisor's agent: booting it out lasts this session only */
+  appRegistrarNote?: string;
+}
+
+/**
+ * `metistry down` — the other half of `metistry up`. Stop every host job and
+ * every container this instance runs, then SAY SO by looking: `launchctl
+ * print` finding nothing, `docker compose ps` listing nothing.
+ *
+ * Deliberately not `docker compose down`, and never `-v`: `up`'s opposite is
+ * "stop the processes", not "delete the install". Postgres's volume is the
+ * derived half of invariant 1 and a verb a person reaches for daily must not
+ * be the one that drops it. `stop [<service>…]` remains the per-service verb;
+ * `down` is "all of it", with the confirmation.
+ *
+ * When the Mac app registered the background item (`SMAppService`), booting it
+ * out stops it for THIS login session and nothing more — the app puts it back
+ * at the next login. The CLI says that and leaves the app's registration
+ * alone: SMAppService belongs to the process inside the bundle, and a CLI
+ * reaching into another application's login item would be a second registrar
+ * for the one job (docs/ops/deployment-shapes.md, "Two registrars").
+ */
+export async function downAll(opts: ServiceControlOptions): Promise<DownResult> {
+  const env = opts.env ?? process.env;
+  const r = new StepRunner({ dryRun: opts.dryRun === true, out: opts.out ?? ((s) => process.stdout.write(s + "\n")), exec: opts.exec, env });
+  const ctx = await buildServiceTargets({ productDir: opts.productDir, env, platform: opts.platform, uid: opts.uid, home: opts.home });
+  r.note(`shape: ${ctx.shape} — from ${ctx.from}`);
+
+  // asked BEFORE anything is booted out: once the job is gone launchd has
+  // nothing left to say about who registered it
+  const supervisor = ctx.targets.find((t) => t.kind === "launchd" && t.name === SUPERVISOR_SERVICE);
+  let appRegistrarNote: string | undefined;
+  if (supervisor?.label && !r.dryRun) {
+    const p = await r.exec("launchctl", ["print", `gui/${ctx.uid}/${supervisor.label}`], { env: r.env });
+    const finding = parseRegistrar(p.code, p.stdout);
+    if (finding.registrar === "app") {
+      appRegistrarNote =
+        `${supervisor.label} is registered by ${registrarPhrase(finding)}: this boots it out for the rest of this login session, and the app starts it again at the next login. ` +
+        `Turn it off for good in Metistry.app › Settings › Services › "Run Metistry in the background" — the CLI does not touch the app's login item.`;
+    }
+  }
+
+  r.section("down");
+  const acting = actingTargets(r, ctx.targets, false);
+  const results: ServiceResult[] = [];
+  for (const t of acting) results.push(await actOn(r, t, ctx, opts.envFile, "stop"));
+  if (appRegistrarNote) r.note(appRegistrarNote);
+
+  r.section("confirm");
+  const confirmations = await confirmDown(r, ctx, acting, opts.envFile);
+  for (const c of confirmations) r.note(`${c.name}: ${c.detail}`);
+
+  return { ok: results.every((x) => x.ok) && confirmations.every((c) => c.stopped), shape: ctx.shape, results, confirmations, commands: r.commands, ...(appRegistrarNote ? { appRegistrarNote } : {}) };
+}
+
+/**
+ * The read-only half: ask launchd and docker what is left. Nothing here
+ * mutates anything, so it runs the same way every time and a dry run simply
+ * says what it would ask.
+ */
+async function confirmDown(r: StepRunner, ctx: ServiceTargetContext, acting: ServiceTarget[], envFile: string | undefined): Promise<DownConfirmation[]> {
+  const out: DownConfirmation[] = [];
+  const labels = acting.filter((t) => t.kind === "launchd" && t.label).map((t) => t.label!);
+  if (r.dryRun) {
+    for (const label of labels) out.push({ name: label, stopped: true, detail: `would ask: launchctl print gui/${ctx.uid}/${label}` });
+    if (acting.some((t) => t.kind === "compose")) out.push({ name: "compose", stopped: true, detail: "would ask: docker compose ps --quiet" });
+    return out;
+  }
+  // one `launchctl print` each, together: they are independent reads
+  out.push(
+    ...(await Promise.all(
+      labels.map(async (label): Promise<DownConfirmation> => {
+        const p = await r.exec("launchctl", ["print", `gui/${ctx.uid}/${label}`], { env: r.env });
+        return p.code === 0
+          ? { name: label, stopped: false, detail: `still loaded — launchctl print gui/${ctx.uid}/${label} answers` }
+          : { name: label, stopped: true, detail: "not loaded" };
+      }),
+    )),
+  );
+  if (acting.some((t) => t.kind === "compose")) {
+    const p = await r.exec("docker", ["compose", ...composeEnvArgs(ctx.productDir, envFile), "ps", "--quiet"], { cwd: ctx.productDir, env: r.env });
+    const running = p.stdout.split("\n").filter((l) => l.trim() !== "").length;
+    out.push(
+      p.code !== 0
+        ? { name: "compose", stopped: false, detail: `docker compose ps exited ${p.code}: ${(p.stderr || p.stdout).trim().split("\n")[0] ?? ""}` }
+        : { name: "compose", stopped: running === 0, detail: running === 0 ? "no containers running" : `${running} container(s) still running` },
+    );
+  }
+  return out;
+}
+
+/** `metistry down`'s table: what was stopped, then what is confirmed gone. */
+export function renderDown(res: DownResult, ui: Ui = defaultUi()): string {
+  const confirmed = res.confirmations.filter((c) => c.stopped).length;
+  const word = (c: DownConfirmation): string => (c.stopped ? "gone" : "STILL UP");
+  const wordWidth = Math.max(0, ...res.confirmations.map((c) => word(c).length));
+  const nameWidth = Math.max(0, ...res.confirmations.map((c) => c.name.length));
+  return [
+    renderServiceResults(res.results, ui),
+    "",
+    // the half of `down` that is not a claim but a look: what `launchctl
+    // print` and `docker compose ps` answered AFTER the stop
+    ui.heading("confirmed by looking"),
+    ...res.confirmations.map((c) => {
+      const status = c.stopped ? "ok" : "failed";
+      return `  ${ui.statusIcon(status)} ${padTo(ui.paint(status, word(c)), wordWidth)}  ${padTo(c.name, nameWidth)}  ${ui.dim(c.detail)}`.trimEnd();
+    }),
+    "",
+    `${confirmed}/${res.confirmations.length} confirmed stopped ${ui.dim(`(shape ${res.shape})`)}`,
+    ...(res.appRegistrarNote ? ["", ui.note(res.appRegistrarNote)] : []),
+  ].join("\n");
+}
+
+/** `service  action  ok  detail` — the ui's table, the same one doctor and `deployment` are drawn with. */
+export function renderServiceResults(results: ServiceResult[], ui: Ui = defaultUi()): string {
+  const rows = results.map((x) => [x.service, x.action, ui.status(x.ok ? "ok" : "FAILED"), ui.dim(x.detail)]);
   const ok = results.filter((x) => x.ok).length;
-  return [line(head), line(widths.map((w) => "-".repeat(w))), ...body.map(line), "", `${results.length} service(s): ${ok} ok, ${results.length - ok} failed`].join("\n");
+  const failed = results.length - ok;
+  return [
+    ui.table(["service", "action", "ok", "detail"], rows),
+    "",
+    `${results.length} service(s): ${ui.paint("ok", `${ok} ok`)}, ${ui.paint(failed > 0 ? "failed" : "n/a", `${failed} failed`)}`,
+  ].join("\n");
 }
 
 export interface LogsOptions extends ServiceControlOptions {

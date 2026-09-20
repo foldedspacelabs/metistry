@@ -1,5 +1,843 @@
 # @metistry-apps/console
 
+## 0.11.0
+
+### Minor Changes
+
+- 4f43f9c: **Access requests, after the owner read them: you see everything, an agent may
+  escalate once, and the assistant may ask.** Three rulings of 2026-09-19 on the
+  `request_access` loop.
+  
+  **Your own access is never narrowed by a rule about agents.** The area
+  validator that refuses `Artifacts/…` is now `validAgentAreaGrant` — the
+  prefix shape plus "an agent read path would actually serve it" — and
+  `validAreaPrefix` is the shape alone. The refusal is typed where an agent's
+  grant is typed (the grants form, `request_access`), because an `Artifacts/`
+  grant is inert: every knowledge read path refuses it, so it reads in the
+  registry like access and gives none. Your own artifacts are untouched and
+  still `GET /api/artifacts`, over the real vault; and where the knowledge door
+  cannot serve one — it reads the index, which has never walked `Artifacts/` —
+  it now points you at the door that has the bytes instead of saying "no such
+  page". An agent asking for the same path still gets the one uniform sentence,
+  byte for byte the same as for a path that is not there.
+  
+  **A decline is told to the agent, and it may escalate exactly once.** Asking
+  again for an area you declined no longer files a second identical row and no
+  longer vanishes into a dedupe: the tool answers with the decision you gave —
+  declined, when, your note — and offers `escalate: true` with a fuller reason.
+  That writes ONE new proposal flagged `escalated` with the prior id on it, and
+  Needs You renders *asked again after a decline*. Decline that too and the area
+  is closed at the tool: a third ask is refused with "ask the owner directly".
+  One open ask per (agent, area) throughout, and the flag comes off the record
+  rather than the caller's word for it. Enforced at the tool, not prompted.
+  
+  **The assistant may ask now.** It was refused because `ensureInternalAgent`
+  replaces an internal row's grants from `METISTRY_ASSISTANT_AREAS` at every
+  console start, so an approval would have been silently undone. Approving an
+  `access_request` for an internal row now also records the area in
+  `agent_grant_overrides` (migration 0023, additive), which `ensureInternalAgent`
+  merges on top of the configured areas on the way in. Configuration stays the
+  floor; the approval survives the restart; revoking the credential clears its
+  approvals. A crew is still refused at the decision — its scope is a manifest
+  file, and that is an edit, not a grant.
+  
+  Cost on the surface every agent pays: 40 definition tokens for the escalation
+  (one optional boolean and a clause), 4,224 → **4,264** against the 5,000 line.
+  The tool count is unchanged at 26.
+
+### Patch Changes
+
+- 4a778f9: **One decision function.** P0 and P1 of
+  `docs/research/2026-09-19-grants-and-access-simplified.md` §4, commissioned
+  by the owner's "can we simplify the grant/access controls surface and make it
+  more consistent?" and approved 2026-09-20. **No behaviour change**, held by a
+  golden test rather than by care: every refusal's `(code, message)` is asserted
+  byte-identical to `origin/main`.
+  
+  **P0 — the move.** `canSeeUnder`, `underAreas`, `validKnowledgePath`,
+  `areaOf`, `SCOPE_REQUIRED` and `scopeRequired` leave
+  `packages/mcp-brain/src/knowledge.ts`; `canSee`, `grantedScope`,
+  `OWNER_SCOPE`, `NO_SCOPE`, `filterHits` and `filterPages` leave
+  `apps/console/src/knowledge-routes.ts`. Both now live in
+  `packages/core/src/access.ts` and both files re-export them — mcp-brain's with
+  a `@deprecated` note, for one release. The console's authorization rules were
+  being served out of one BRIDGE's package (§2.9); a second bridge would have
+  had to import a sibling bridge to get them.
+  
+  **P1 — `may(principal, verb, resource): Decision`.** Every door in §1.4 asks
+  it: `/mcp`'s knowledge, queries, tasks, action and crew tools; the console's
+  agent 403, its management gate, `GET /api/q/<name>` and `/api/knowledge/*`.
+  Each check that used to live in a handler is now a case in one table that
+  returns the same code and the same sentence it returned before — so the file
+  reads as a catalogue of the five dialects §2.5 found, which is the point:
+  unifying them is one reviewable diff here instead of fourteen strings in
+  eleven files.
+  
+  A refusal carries a closed `reason` (`scope_required`, `tier_required`,
+  `queries_required`, `role_required`, `autonomy_required`,
+  `membership_required`, `not_member`, plus `not_exposed` for the route-only
+  query and `not_knowledge` for a path that is not vault content) and, where a
+  remedy already existed in prose, a machine-readable `needs`: the area a
+  `request_access` would name, or the autonomy entry the user would raise. The
+  wire envelope is unchanged — `error.code` and `expose` are exactly what they
+  were (invariant 8).
+  
+  **Storage does not move**: registry rows for external agents, the environment
+  for the instance's own assistant, the manifest for a crew. `may()` decides and
+  never writes; every widening still goes through the console's one grants door
+  and its one audit row (invariant 2), and the `Role × Verb × Resource` table is
+  CODE in `core`, never loadable from a file (invariant 10).
+  
+  **Two tests ship with it.** `packages/core/test/access.golden.json` is the
+  committed catalogue of every `(code, reason, message, needs)` a door can
+  answer with, each entry carrying the wording it had at `origin/main` and the
+  `file:line` it was read off. `packages/mcp-brain/test/may-surface.test.ts`
+  walks all 27 tools × the five roles asserting every pair is decided, that no
+  tool is usable by nobody, and — by a grep over the package's source — that
+  `kind ===` / `tier ===` appears in exactly one file, the credential →
+  principal mapping.
+  
+  `role: "crew"` exists and nothing produces it yet: `authenticateAgent` still
+  collapses a crew's row to `external`, which is P2's job. The owner is still
+  decided by the rules rather than short-circuited (P4). Neither is changed
+  here.
+- 1bf5c76: **A crew's toolset is enforced at the door.** P2 of
+  `docs/research/2026-09-19-grants-and-access-simplified.md` §4, approved
+  2026-09-20. **One behaviour change, and it is the point of the phase** — read
+  the next paragraph before you upgrade an install that runs crews.
+  
+  **What changes for a running crew.** A crew names TOOL GROUPS in its manifest
+  (`uses:`), and until now that list was applied by the process that dispatched
+  the run: `apps/assistant/src/tools.ts` filtered `tools/list` and refused an
+  unlisted call with the text `"mcp__brain__tasks_comment" is not in this run's
+  tool list`. `/mcp` had never heard of `uses` — `AgentPrincipal` carried no
+  such field — so the door admitted those calls. Five of the eight groups
+  (`rooms`, `artifacts`, `tasks`, `capture`, `requests`) had no server-side gate
+  at all; the only thing holding them was a `Set.has` in another process. Now
+  the console resolves a crew's `uses` from the manifest it loaded, attaches it
+  to the principal at authentication, and the door refuses anything outside it
+  before the tool body runs:
+  
+  ```json
+  { "error": { "code": "forbidden",
+               "message": "tasks_comment is not in this crew's toolset — writer holds knowledge, requests (`uses:` in its manifest, a protected path in the user's hand: docs/ops/crews.md). Report what you needed instead of retrying." } }
+  ```
+  
+  One `runs` row on the crew's own id, the uniform envelope, `reason:
+  not_in_uses` in `may()`'s decision. The runner's client-side list stays as
+  **defence in depth** — the model is still not offered a tool it cannot use —
+  but it is no longer the control, and the comment at that filter says so.
+  CLAUDE.md's rule over all the others is "enforce at the tool, never by
+  prompting"; a filter in the caller is neither.
+  
+  **`crew` is a real role.** `agents.kind` has stored three values since Phase 5
+  (`crews.ts` writes `'crew'`) while the console collapsed anything not
+  `internal` to `external` at authentication, so a crew reached `/mcp`
+  indistinguishable from a foreign agent (§2.3). `authenticateAgent` now passes
+  the row's own kind through, `principalOf` maps it to the `crew` role that
+  `may()` has had a table for since P1, and three things follow: the toolset
+  gate above, a `crew` that can no longer reach `request_access` at the door
+  (it is a never-tool, so it is in no group), and a `source` on the principal
+  that is the crew's manifest rather than a fourth prose reconstruction of
+  "your scope is configuration, not a grant".
+  
+  **Migration `0025_agent_role.sql`** (additive; rollback note in the file): a
+  CHECK holding `agents.kind` to the three values it already stores, and a
+  nullable `grant_source` column recording which of the three places a row's
+  grants came from — `registry` (the owner's hand), `environment` (`.env`,
+  replaced at every console start), `manifest` (a crew's `scope:`). NULL on
+  existing rows and read as `registry`. Nothing decides on it: `may()` never
+  reads it.
+  
+  **Nothing else moved.** Every other refusal is byte-identical — the golden
+  catalogue (`packages/core/test/access.golden.json`) asserts it entry by entry,
+  and the one changed entry carries both what the caller used to say and what
+  the door says now, so the behaviour change is a reviewable diff rather than a
+  sentence in a PR. Misuse tests ship with it (invariant 8): a crew bearer
+  refused a non-`uses` tool at `/mcp` with no client filter in the loop, a crew
+  whose manifest cannot be read holding NO tools rather than all of them, an
+  external agent unable to become a crew through a body or a header, and the
+  CHECK refusing a fourth kind.
+- 0718a30: **The fold gets the vault reader, so `Templates/Fold.md` renders.** A wiring
+  gap between #246 and #247: the runner's `ComponentCtx` grew `queries` and
+  `vault` for `plan-tomorrow`, but `knowledge-fold`'s `FoldCtx` reads the
+  template through `reader`, a field `ComponentCtx` never carried — so every
+  fold on every instance took the pre-template fallback note regardless of
+  whether `Templates/Fold.md` was stamped.
+  
+  `apps/console/src/runner.ts` gains `routineCapabilities`, the one place
+  `ComponentCtx`'s `queries`, `vault` and `reader` are built from what
+  `main.ts` already has, and `ComponentCtx` itself now carries `reader`.
+  `vaultReader` — the `VaultReadable` → `TemplateReader` adapter — moves from
+  `plan-tomorrow/run.ts` to a shared `routines/vault-reader.ts` so the runner
+  builds the exact adapter `plan-tomorrow` already trusted, rather than a
+  second implementation of "a refusal reads as absent" (§6.4). No behaviour
+  changes for an instance without the reconciler bridge configured, or without
+  `Templates/Fold.md` in its vault — both still take the documented fallback.
+- b6586de: **One vocabulary, one renderer, and the owner is never refused their own
+  vault.** P3 and P4 of
+  `docs/research/2026-09-19-grants-and-access-simplified.md` §4, approved
+  2026-09-20. P4 carries the **owner-visible change** below; P3 changes what
+  refusals SAY, not what they decide.
+  
+  **P3 — one wording per reason.** §2.5 found five dialects across fourteen
+  refusal sites. `REFUSAL` in `packages/core/src/access.ts` is now one sentence
+  per `reason`, built in one place: the shape is one per reason, the facts in it
+  are substituted. So `queries_list` and `queries_run` refuse in the same words,
+  `knowledge_write` and `agents_delegate` give the same "belongs to the instance
+  assistant alone" sentence, and a tier miss names the tier the tool needs and
+  the tier the credential holds — in the console's own words for them (`none` /
+  `titles` / `folders`).
+  
+  Silence became a type rather than an accident at a call site: `tell: "hide"`
+  is the refusal deliberately identical to "there is nothing here", it carries
+  no `needs`, and `formatRefusal` drops its `reason` on the way out. Four things
+  hide — a row outside your projects, a route-only query, the console's uniform
+  403, and a knowledge path you may not even list (the 2026-09-19 boundary: an
+  area is named only for a page whose existence you can already see).
+  
+  New in `core`: `describeScope(principal)` (the triple: role · access ·
+  extras), `formatRefusal(decision)` (the §3.2 envelope), `classify(path)`,
+  `notKnowledge(path)`, `TIER_LABEL`, `ROLE_LABEL`, `sourceLabel`,
+  `RULED_TOOLS`, `NO_SUCH_PAGE`, and `tell` on `Refusal`. **Removed**:
+  `scopeAsPrincipal` (the P0 seam P4 deletes — `/api/knowledge/*` takes the
+  principal now), and the three refusal-string constants it replaces
+  (`NOT_A_VAULT_PATH`, `NOT_KNOWLEDGE`, `ARTIFACTS_SIGNPOST`).
+  
+  **P4 — the owner is refused nothing.** "The owner should always have access to
+  everything" (ruled 2026-09-19) is a short-circuit at the top of `may()`, with
+  no exception clause below it. Safe only because `classify()` splits what a
+  path IS from what anyone may do with it: `Artifacts/` and `.metistry/` are not
+  knowledge paths, so the rule never has to be weakened to keep an agent out of
+  the machinery.
+  
+  Two owner-visible changes, and they are the two §2.6 found:
+  
+  - **`GET /api/q/<name>` serves the owner a route-exposed query.** The filter
+    `expose: route` protects is a filter on what an AGENT may see of the vault;
+    the owner's scope is the whole vault. The capture owner token is NOT the
+    owner and is refused byte for byte, which is the credential that rule was
+    always about.
+  - **`GET /api/knowledge/page` and `/links` classify instead of refusing.** The
+    owner's `Artifacts/` and `.metistry/` answer `400` with
+    `reason: "not_knowledge"` and `needs.door` naming the route that has the
+    bytes (`GET /api/artifacts`, or "the file itself"), where they used to
+    answer `404`. **No door serves `.metistry/state/.env` as a page, and not one
+    byte of it crosses here** — the classification is the whole answer.
+  
+  **Agents gain nothing from P4.** Every agent, crew and assistant refusal is
+  byte-identical to what it answered before, which the golden file asserts entry
+  by entry: the four `changed` entries under P4 are all `who: "owner"`.
+  
+  **Surfaces.** `metistry agents list` is new (P3 §2.10 — the CLI rendered
+  grants not at all). `GET /api/agents` carries each row's rendered `scope` and
+  `grant_source`; an `access_request` payload carries `current_scope`. The
+  console's Agents panel and Needs You card print what they are sent instead of
+  holding spellings of their own. Tool descriptions moved onto the same words
+  and got smaller: brain's definition tokens 4264 → 4255 against a >5000 budget.
+- 6b0d6d7: **Tomorrow's plan is written for you, from your own template.** The daily
+  flow's `plan-tomorrow` (`docs/product/daily-flow-spec.md` §5.1, §7; ticket
+  P1-7): once an evening, the routine renders `Templates/Plan.md` — a markdown
+  file in your vault, which you edit in Obsidian like any other note — into
+  `Journal/Plan/<tomorrow>.md`, written through the reconciler's bridge as
+  `principal: plan-tomorrow`. Tomorrow's events, the tasks the template asked
+  for in the order it asked for, what an agent is waiting on you for, what is
+  waiting in your queue, and your own prioritisation prose included verbatim.
+  
+  **No model is in it, at any tier.** The ordering is a field list in the
+  template; your prioritisation *rule* is prose the plan includes for you to
+  read, not something a model is asked to apply (invariant 4). The manifest
+  declares no engine, so the runner never even asks whether one is configured.
+  
+  **It writes exactly one file, and never a note you own** (§5.1's one writer
+  per file). A plan file whose frontmatter `source:` is not this routine's —
+  including one with no `source:` at all, which is yours — is left exactly as it
+  is and the run says so. A recurring rule is *listed* for tomorrow
+  (`- Water the plants — every week, due 2026-09-22`) with no checkbox and no
+  `^mt-` anchor: no routine writes a task line into a note you own (D4), which
+  the engine enforces from the render's `source` and the routine refuses again
+  before writing. Re-running an evening replaces the same file under
+  compare-and-swap; nothing is appended, and there is never a second one.
+  
+  **The gate is `Me/`, and it degrades honestly.** `@hourly` with the decision
+  in the routine, for the reason the fold gives — the runner has no time of day.
+  It plans after the day end `Me/profile.md` states (`working_hours:`), on the
+  eve of a day `working_days:` names, once per target day. No `working_days` and
+  **nothing is written at all**: the run records `no_working_days` rather than
+  guessing Monday-to-Friday. No `working_hours` and the plan is written from
+  19:00 local *and says so*, in one visible line, because a default nobody chose
+  should not be invisible. No calendar bridge, no query store, a `where:` the
+  filter vocabulary refuses — each renders one `> ⚠️ metistry: …` line naming
+  the template and the line number, and the plan still lands: a day with no plan
+  because the calendar was down is the worst possible outcome.
+  
+  One `runs` row per target date carries what happened — `wrote`,
+  `no_working_days`, `not_a_working_day`, `template_missing`,
+  `template_unreadable` or `user_owned` — so `metistry doctor`, the morning
+  brief and `docs/ops/automation.md`'s SQL all read the same ledger, and an
+  hourly routine still files one row a night.
+  
+  The console now hands routines the named-query store and the vault bridge it
+  already built for the server, so every row the plan shows arrives through a
+  named query and no component grows a second read path into Postgres
+  (invariant 3).
+- 57ceb02: **`request_access`: an agent asks for the area it was refused, and the owner
+  grants it in Needs You.** Ruled 2026-09-19, the upgrade path proposed in
+  #216 and refined in #221. Tier `index` could already see that a page exists,
+  be refused its content, and be told which area would unlock it — and then had
+  nowhere to put that. The only mechanism was a free-text `requests_create`
+  report and a hope.
+  
+  Now the refusal names a tool: `request_access {area, reason}` writes ONE
+  `proposals` row of kind `access_request` with the ask, the reason and what the
+  credential holds today, deduplicated on `(agent, area)` while it is pending
+  (migration 0022's partial unique index, so a retry storm is one row). It
+  **grants nothing** — it is a row. Every tier may ask, `none` included (and
+  since the follow-up ruling below, every principal, the assistant included).
+  The area is validated at the tool with the same rule the grants validator
+  uses, so a crafted prefix (`..`, `.metistry/`, `Artifacts/`, lowercase, the
+  bare vault) never reaches a proposal, let alone a grant.
+  
+  The owner answers it with the three answers every request already takes.
+  **Approve calls `writeGrants` — the same function `PUT /api/agents/:id/grants`
+  calls**, with the same `validateGrants` and the same `agent_admin` audit row,
+  `via: triage`; **Revise** grants a narrower prefix instead (`{area}` on the
+  existing triage route); **Decline**, Later and Skip grant nothing. The
+  console's mutating surface gains no verb and no route (invariant 10): this
+  kind is a new branch onto a service that already existed. It widens by exactly
+  the prefix asked for — never `queries`, never a second area, never one already
+  covered — and a revoked agent cannot be granted anything: revoking settles its
+  pending asks as `deny`.
+  
+  `packages/core` gains `validAreaPrefix` / `AREA_PREFIX_RE` /
+  `AREA_PREFIX_REFUSAL`, lifted out of the console so both doors refuse the same
+  strings in the same sentence, and `validAgentAreaGrant` — the same shape plus
+  "a read path would actually serve it", which is what refuses `Artifacts/…` on
+  an AGENT's grant (it was always an inert grant; every read path ignores it).
+  
+  Cost on the surface every agent pays: 189 definition tokens, taking the eager
+  `tools/list` from 4,035 to **4,224** against the 5,000 line — still smaller
+  than the 4,979 it carried a week ago with one tool fewer. The tool COUNT
+  ceiling in `ops/scripts/check-tool-surface.mjs` moved 25 → 26 deliberately,
+  with the reasoning written beside the number; the tool after this one fails
+  that check again.
+- 45b64df: **`@monthly` is runnable.** The manifest schema's cron regex already admitted
+  it, but `scheduleToSeconds` did not — a manifest declaring `@monthly` would
+  validate, pass CI, and then throw the first time the runner tried to schedule
+  it. It is now 30 days, the same fixed-interval approximation `@weekly`
+  already makes (this is an interval scheduler, not a calendar one).
+  
+  **An unparseable schedule no longer takes the runner down.** The console's
+  `loadSchedules` had no error handling at all: one manifest it could not read,
+  validate, or schedule threw out of the function and stopped every OTHER
+  collector and routine from starting too. It now skips that one component and
+  logs why (naming the manifest file to fix), so a single bad manifest —
+  shipped or instance-authored — costs one component, not the console.
+- 9ec30d5: **One filter vocabulary, one query — and now literally one object.** The
+  parser that reads `where: "due <= today or overdue"` and the query it compiles
+  into were built in parallel and agreed on almost none of their names:
+  `due_from` against `due_on_or_before`, `combine` against `match_any`, a
+  comma-separated `flags` string against seven booleans, `sort1` against
+  `order_1`. Every one of those is a hard `unknown param` the first time a
+  template renders, because the query runner refuses an undeclared parameter
+  rather than ignoring it — so the failure would have landed on an evening plan
+  rather than in a test.
+  
+  `seed/queries/vault_tasks_query.yaml` now declares exactly
+  `TASK_FILTER_PARAM_SPEC`, and a test asserts the two are equal field for
+  field, so neither side can move without the other. There is no longer a
+  third copy of the shape anywhere: the manifest is a transcription of the
+  parser's own published declaration, and the parser is canonical because it is
+  the half three consumers import and typecheck against.
+  
+  `TaskFilterParams` gains the four **context** params the query needs and a
+  `where:` line can never reach — `today` (the day *overdue* and *carried* are
+  measured against, resolved where the timezone is known rather than in SQL),
+  `me` (your own person page, for *assigned to me*), `path_prefix` (the
+  caller's scope) and `offset` — so the contract is one object rather than two
+  that can disagree. `path_prefix` and `status` **scope**: `or` widens the
+  predicate, never the scope, so no filter anyone writes can reach a ticked
+  line or a path outside what the caller was allowed to see.
+  
+  Three meanings were pinned while the two halves were reconciled, because they
+  had been described two ways: *recurring* is an **instance** of a rule, never
+  the rule line (a rule is not a task, and no row here can be one); *carried* is
+  "it was owed on an earlier day", which is the number the app's chip shows,
+  while how long a line has been **sitting** is its own separate column; and
+  every nullable field compares under an explicit "no" rather than a NULL, so
+  asking for `size l` can never quietly return every task with no size at all.
+- 80bbc16: **The tasks in your notes become readable state, and nothing about them is
+  stored.** The first two tickets of the daily flow's Phase 1
+  (`docs/product/daily-flow-spec.md` §1.5, §6.2, P1-3 and P1-5): the index the
+  reconciler will fill, and the five named queries everything downstream reads
+  it through.
+  
+  **Migration 0024, and every column in it is derived.** `vault_tasks` and
+  `vault_task_refs` hold one row per `- [ ] …` line and per block-anchored
+  reference to one. Drop the database, let one walk run, and both come back
+  from the markdown that produced them — which is the point: a todo lives on
+  the line you typed it on, and this is a projection of that line, never a
+  second copy of it with its own opinion. The spec numbers the file 0023;
+  0023 had gone to `agent_grant_overrides` while the spec was being written,
+  so it is 0024 and nothing else changes. Additive throughout, and the
+  rollback is two `DROP TABLE`s.
+  
+  Two constraints are deliberately **not** there, and the reason is the same
+  one: a derived table that can refuse to be rebuilt is not derived. There is
+  no unique index on `task_key` or `anchor` — without an anchor a key is
+  per-file by construction, so the same sentence in two notes is the same key
+  in both, which is a duplicate the index must hold two rows for rather than
+  fail on — and no foreign key on `work_id`, because a vanished work row must
+  not be able to fail the walk that rebuilds your own tasks.
+  
+  **One filter vocabulary, one query.** `vault_tasks_query` is what the
+  template directive's `where:`/`order:`, the app's filter chips and the
+  plugin's suggester all compile into — as bind parameters, never as SQL text.
+  Inclusive date bounds per field, priority bounds, exact slugs, one
+  comma-separated flag set, and `combine` for how the clauses join. Where the
+  fixed shape cannot express a predicate — one that mixes "and" and "or" at
+  different depths — the parser refuses it with a visible note rather than
+  quietly returning an approximation, because a wrong list is worse than a
+  warning. Beside it: `vault_tasks_recurring` (the rule lines, which are never
+  themselves tasks), `day_work` (work for a day with a `blocked_by` human todo
+  resolved beside each row — it surfaces and never gates, so no agent is ever
+  stalled by a typo in a note), `pending_requests` (the Needs You queue as a
+  read path, honouring a `later` and returning handles rather than payloads),
+  and `task_ageing` (the measure).
+  
+  **Four of the five are route-only, and the fifth is generic on purpose.**
+  Their rows carry vault paths and the text of lines you typed, so they are
+  reachable only through an endpoint that filters every row through the
+  caller's scope — the generic query door and the assistant's `queries_run`
+  answer their names with the same refusal an unknown name gets. `task_ageing`
+  is counts only: it groups by source *kind* so a `meeting:<path>` can never
+  put a path into an aggregate, and it takes no caller-supplied filter to
+  probe the tree with. That is what lets the assistant read the measure
+  without a new tool — the brain bridge stays at 26, exactly where it was.
+- Updated dependencies [4a778f9]
+- Updated dependencies [4f43f9c]
+- Updated dependencies [9c9da4a]
+- Updated dependencies [1bf5c76]
+- Updated dependencies [4581845]
+- Updated dependencies [a0c1d02]
+- Updated dependencies [5cc302d]
+- Updated dependencies [b6586de]
+- Updated dependencies [6b0d6d7]
+- Updated dependencies [baf33c2]
+- Updated dependencies [579662f]
+- Updated dependencies [57ceb02]
+- Updated dependencies [45b64df]
+- Updated dependencies [9ec30d5]
+- Updated dependencies [7f9ceb7]
+- Updated dependencies [23cc47f]
+  - @foldedspacelabs/metistry-core@0.11.0
+  - @foldedspacelabs/metistry-mcp-brain@0.11.0
+  - @foldedspacelabs/metistry-cli@0.11.0
+  - @metistry-apps/routines@0.11.0
+  - @metistry-apps/collectors@0.11.0
+  - @foldedspacelabs/metistry-artifacts@0.11.0
+  - @foldedspacelabs/metistry-tasks@0.11.0
+  - @foldedspacelabs/metistry-queries@0.11.0
+
+## 0.10.0
+
+### Patch Changes
+
+- 8fc0e5e: **One scope rule for every knowledge read, on both doors.** `expose: route`
+  closed the console's generic `GET /api/q/<name>` over the page list and the
+  link graph and left the other generic door open: `queries_run` on the `/mcp`
+  mount ran any named query for any holder of a `queries: true` grant. That
+  grant is a separate axis from the knowledge tier, so it was a way past the
+  tiers entirely — an agent at tier `none`, which `knowledge_search` will not
+  tell a single title, could page the whole vault index and the whole wikilink
+  graph; a `tier: areas` agent could read the titles of every area it was never
+  granted. Ruled 2026-09-19: *"all queries including /mcp should be scoped and
+  follow the same token based enforcements."*
+  
+  **`queries_run` honours `expose`.** It asks the same `QueryStore.exposure(name)`
+  the console asks and refuses a route-backed query with the **unknown-query
+  refusal, byte for byte** — same code, same `no such query: <name>` — and
+  `queries_list` does not name one, because a list that named a query the runner
+  refuses would publish the route-only set in the same breath. Read off the
+  manifests, never matched against a list in the server (invariant 5).
+  
+  **The scoped door beside it is `knowledge_list`**, which runs the SAME two
+  named queries through `packages/queries` and filters them with the same
+  function the console's routes use. `links_for: <path>` lists one page's links
+  in both directions out of `knowledge_page_links`, with **both ends** of every
+  edge scoped — a backlink cannot report that a note exists in an area the
+  caller was never granted — and needs an `areas` grant covering the page,
+  because a backlink names a note. Without a vault bridge the listing comes from
+  the reconciler's index (`knowledge_pages`) instead of the tool being
+  `not_available`, and every entry carries path, title and one-line description
+  — never content, at any tier. It rides `knowledge_list`'s existing definition
+  rather than arriving as a new tool pair because the eager `tools/list` budget
+  now sits within 80 characters of the 5k line a new tool would have to buy with
+  `discovery: lazy` (`packages/mcp-brain/test/brain.test.ts`).
+  
+  **That function is now singular.** `canSeeUnder(path, areas)` lifts into
+  `packages/mcp-brain/src/knowledge.ts`, beside the `underAreas` it always
+  called and the `isVaultPath` core always owned; `apps/console`'s `canSee` is a
+  rename over it, and `knowledgeScope` gains `canList` — the same question asked
+  about a TITLE rather than content. Tier `index` may be told a page exists
+  anywhere in the index (that is the discovery the tier is for: an agent finds
+  `Areas/Health/sleep.md` so it can ask you for the area that holds it) and may
+  read none of it; tier `areas` lists and reads its prefixes; tier `none` gets
+  nothing and is told "not granted", never "not found". The same lift hardened
+  `knowledge_list`'s bridge branch, which applied no vault-path rule at all: a
+  tier `index` browse of the vault root listed `.metistry/`, `.obsidian/`,
+  `Artifacts/` and the root `CLAUDE.md` — machinery, and not knowledge for the
+  owner either.
+- Updated dependencies [7782cf4]
+- Updated dependencies [afc2679]
+- Updated dependencies [975221b]
+- Updated dependencies [ad73f5a]
+- Updated dependencies [8fc0e5e]
+- Updated dependencies [0171bc0]
+- Updated dependencies [7782cf4]
+- Updated dependencies [fe6669c]
+  - @foldedspacelabs/metistry-mcp-brain@0.10.0
+  - @foldedspacelabs/metistry-cli@0.10.0
+  - @foldedspacelabs/metistry-core@0.10.0
+  - @metistry-apps/collectors@0.10.0
+  - @foldedspacelabs/metistry-artifacts@0.10.0
+  - @foldedspacelabs/metistry-tasks@0.10.0
+  - @metistry-apps/routines@0.10.0
+  - @foldedspacelabs/metistry-queries@0.10.0
+
+## 0.9.1
+
+### Patch Changes
+
+- 05e2e5b: **The vault's page list, through a named query — the third knowledge door,
+  and the only one that is not a proxy.** `GET /api/knowledge/pages?area=&prefix=&limit=&offset=`,
+  which #197 deferred because `seed/queries/` carried nothing to run. No
+  migration: `0009_brain.sql` already added `title`, `description` and `draft`,
+  and `0001` has `path`, `mtime`, `status`.
+  
+  **Which door a thing comes out of is settled by the schema, not by taste.** A
+  page's bytes and a search ranking are not derived state — there is no column
+  holding a note body — so those go to the reconciler's bridge. A page LIST *is*
+  derived: `knowledge_files` is the reconciler's own index, rebuilt from the
+  vault by a walk. So invariant 3 sends it through
+  `seed/queries/knowledge_pages.yaml`, executed by `packages/queries`, and the
+  route holds **no SQL of its own** — one that reached for `pool.query` would be
+  a second read path into state.
+  
+  **Two filters that mean what they mean everywhere else.** There is no area
+  column, and there did not need to be: everywhere in the system an "area" is a
+  vault prefix (`Areas/Fsl`, which the agent registry validates and `underAreas`
+  matches), so `area` is derived — the first two segments under `Areas/` at any
+  depth, the top segment elsewhere, and `null` for a vault-root file like
+  `now.md`, which is an answer rather than a gap. `prefix` is **segment-wise**,
+  the same semantics an area grant has: `Areas/Health` covers `Areas/Health/…`
+  and never `Areas/Healthcare/…`, because a substring match is how a prefix
+  filter leaks. Ordered by `path`, which is the primary key, so `offset` walks a
+  total order and no row ties or jumps between windows.
+  
+  **What no parameter can turn on.** Drafts are excluded by the same clause
+  `mcp-brain` applies at every tier, so the owner's list and an agent's index
+  cannot disagree about what a draft is; an unsettled `conflict` row is excluded
+  because its title and mtime are not facts yet. And the route's own scope
+  filter runs over the query's rows — the same `canSee` the search and page
+  routes use — so a row in the index that is not vault CONTENT never reaches a
+  client, the owner's included. The query is overlayable per instance (D4); the
+  filter is not, which is why both hold the line. A row whose `path` is not a
+  string is dropped rather than passed: a list entry whose scope cannot be
+  decided is not a list entry.
+  
+  **There is no `total`, on purpose.** A count over the unscoped filter is
+  precisely the "directory listing of what was filtered" the knowledge routes
+  refuse to publish — a narrowed principal would learn how many pages it cannot
+  see. Callers page until a window comes back shorter than `limit`. For the same
+  reason a filter pointing outside the scope answers an empty `200` rather than
+  a `400`: refusing `prefix=.metistry` by name would say which prefixes exist.
+  Only the filter's shape is validated.
+  
+  MetistryKit gains the matching `knowledgePages` method, the
+  `KnowledgePageList` / `KnowledgePageEntry` shapes and a `pages` store section
+  beside `knowledge` — two sections, because browsing the vault and searching it
+  are two questions and a search must not blank the list you were reading.
+  
+  The list is ordered by `path COLLATE "C"` — byte order, explicitly, rather
+  than the database's own locale. A glibc locale collation ignores punctuation
+  at the primary level, so `Areas/Health/sleep.md` sorts before
+  `Areas/Healthcare/…` on one cluster and after it on another: same rows, same
+  query, two different windows, and a client paging with `offset` would see a
+  page twice or not at all depending on which machine the database was
+  initialised on. CI (Linux) and the owner's Mac disagreeing is how it was
+  found.
+- dc4ce91: **The vault's link graph, through a named query — the fourth knowledge door
+  and the last piece §6.1 left open.** `GET
+  /api/knowledge/links?path=&limit=&offset=`, over
+  `seed/queries/knowledge_page_links.yaml`. No migration: `0001_init.sql` has
+  `knowledge_links (from_path, to_path, kind)` with the primary key on all
+  three and an index on `to_path`, so both directions are one indexed lookup.
+  The graph is derived state — the reconciler parses it out of the notes on
+  every walk and re-resolves a note's edges whenever the note or the path set
+  moves — so invariant 3 sends it through `packages/queries` and the route
+  holds no SQL of its own.
+  
+  **One list, keyed by the other end.** `direction` is a column (`outgoing` =
+  this page links there; `incoming` = that page links here) and `path` is
+  always the far side of the edge. That is not a presentation choice: it is
+  what lets one predicate decide every row. Two arrays would be two chances to
+  filter them unevenly, and the filter is the point — **both ends are scoped**.
+  The `path` parameter is checked before anything runs (a path the caller may
+  not see gets the `404` a missing page gets: "this page has four backlinks" is
+  a fact about a page), and every row goes through the same `canSee`. A page
+  inside a grant that links *out* of it, and a page outside a grant that links
+  *in*, both come back dropped rather than listed.
+  
+  **Never in the list:** an edge whose other end is a draft or an unsettled
+  `conflict`, at either end and at every tier — the same rule the page list
+  applies, so a draft cannot be discovered through the graph after being hidden
+  from the list. Dropped rather than blanked, because a row saying "there is
+  something here you may not see" is the disclosure the rule exists to prevent.
+  **An unresolved wikilink stays**, marked `resolved: false` with a title
+  derived from its own path: a note not written yet is how a vault gets
+  written, and Obsidian renders it rather than hiding it.
+  
+  Ordered outgoing first, then by path in byte order (`COLLATE "C"`), then by
+  `kind` — the link table's primary key read the other way round, so the order
+  is total and `limit`/`offset` cannot repeat or skip an edge. The same target
+  reached as a wikilink and as an embed is **two edges**, which is why the
+  client's row identity is the triple and not the path. No `total`, for the
+  page list's reason. The query is `expose: route`, so `/api/q/knowledge_page_links`
+  answers the `404` an unknown name gets.
+  
+  MetistryKit gains `knowledgeLinks(path:limit:offset:)`, the
+  `KnowledgePageLinkList` / `KnowledgePageLink` shapes with `outgoing` and
+  `incoming` as views of the one list, and `isLastPage`/`nextOffset` beside the
+  page list's.
+- 6b3d645: **One endpoint per necessary operation: the generic door closes over
+  route-backed queries, and the page list's scope comes from the credential.**
+  `GET /api/knowledge/pages` filters every row through `canSee` — and
+  `GET /api/q/knowledge_pages` served the same rows with no filter at all, to
+  anyone who could reach the generic door. That included the capture owner
+  token, which is a `403` on `/api/knowledge/*` and has always been admitted on
+  `/api/q/<name>`: a credential that may not use the scoped route could read the
+  whole unscoped vault index by name, from any address. A filter with a second
+  way in is not a filter.
+  
+  **The close is a manifest field, not a list in a server** (invariant 5).
+  `packages/queries` gains one optional key on a query manifest — `expose:
+  generic | route`, defaulting to `generic`, so every query written before this
+  means exactly what it meant — and `QueryStore.exposure(name)` reads it back.
+  `knowledge_pages.yaml` declares `expose: route`; `GET /api/q/<name>` asks the
+  store and refuses anything that is not `generic` with the **unknown-query
+  refusal, byte for byte**: same code, same status, same absent message, so the
+  door is not an oracle for which route-only queries a build has. An unknown
+  value in the field is a load-time `invalid_spec`, never a silent fall back to
+  the permissive default. The dedicated route still runs the query through the
+  same `QueryStore` — the door closed, not the read path.
+  
+  **The scope is now derived from the principal.** The `knowledgeRoutes` call
+  site passed the constant `OWNER_SCOPE`; it passes `knowledgeScopeOf(auth)` —
+  session / local owner to the whole vault, a principal carrying grants to
+  `grantedScope`, anything else to nothing. `grantedScope` reproduces
+  `mcp-brain`'s `knowledgeScope(principal).canRead` (`tier === "areas" &&
+  underAreas(path, areas)`, against that package's own `underAreas`) rather than
+  renaming its fields: that shape's `prefixes` is `null` for tiers `none` and
+  `index`, meaning "no restriction on the TITLES those tiers browse", and `null`
+  here means every vault path's CONTENT — the rename would have handed the two
+  tiers that may not read a page the owner's own scope. Agent bearers keep their
+  uniform `403` on `/api/knowledge/*` and reach knowledge on `/mcp`, so the
+  grant path is exercised by tests today; it is real code so that the filter a
+  narrower console principal needs is not invented at a call site later.
+- Updated dependencies [1155dd9]
+- Updated dependencies [847a5ba]
+- Updated dependencies [6b3d645]
+  - @foldedspacelabs/metistry-cli@0.9.1
+  - @foldedspacelabs/metistry-queries@0.9.1
+  - @foldedspacelabs/metistry-mcp-brain@0.9.1
+  - @metistry-apps/collectors@0.9.1
+  - @foldedspacelabs/metistry-artifacts@0.9.1
+  - @foldedspacelabs/metistry-core@0.9.1
+  - @foldedspacelabs/metistry-tasks@0.9.1
+  - @metistry-apps/routines@0.9.1
+
+## 0.9.0
+
+### Minor Changes
+
+- e9074d2: **The console grows the routes the app plan needs, so compute and knowledge
+  stop being Mac-only.** Nine new endpoints on the existing owner auth, the
+  existing error envelope and the existing `degrades: absent` rule, each with
+  its misuse tests (invariant 8).
+  
+  `/api/compute*` is five of the `metistry compute` verbs over HTTP: `GET
+  /api/compute` (the `compute show --json` report, plus both budget windows
+  folded from the `spend` named query and a `writable` flag), `GET
+  /api/compute/models`, `POST /api/compute/assign`, `POST /api/compute/budget`,
+  `POST /api/compute/providers/test`. They call the **same exported functions
+  the CLI verbs call** — the same YAML-document edit so comments and
+  hand-written blocks survive, the same re-validation of the result before
+  anything is written, the same write through the reconciler as `user`
+  (invariant 2) — so a refusal reads identically on both doors because it is the
+  same refusal. `providers add` and `providers remove` are deliberately absent:
+  they take a key, and a key goes on stdin into the login Keychain, so adding or
+  removing a provider stays CLI/app-only and `secret_present` is the only thing
+  a secret contributes to a response. These are the owner's **configuration**,
+  not invariant-10 "actions" — `user` principal only, no `propose_action` kind,
+  no autonomy level that reaches them.
+  
+  Two guards worth naming. The console refuses to write a `compute.yaml` it is
+  not reading: if the `METISTRY_COMPUTE_FILES` overlay ends somewhere other than
+  `<instance>/.metistry/compute.yaml`, the write is refused with both paths
+  named, because unguarded it would find nothing at the path it opens, start
+  from a bare header and deliver a four-line file over the real one. And the
+  whole surface degrades absent: the compose shape gives the console no instance
+  mount by design, so there every compute route answers 503 naming
+  `METISTRY_INSTANCE_DIR` while `metistry compute` keeps working.
+  
+  `GET /api/knowledge/search` and `GET /api/knowledge/page` are the owner's read
+  path into their own vault — a thin proxy onto the reconciler's
+  `/vault/search` (three modes, snippets, and `degraded` reaching the client
+  rather than being swallowed) and `/vault/read`. The console has held a vault
+  reader and searcher since Phase 6 and wired them only into `mcp-brain`, so
+  knowledge was reachable by an agent over MCP and by nothing the owner holds.
+  The proxy also **narrows what the bridge serves**: `/vault/read` is confined
+  to the instance repo and stops there, because the protected-path writes go
+  through it, so the route adds core's `isVaultPath` and `.metistry/`,
+  `Artifacts/` and the root `CLAUDE.md` are not reachable as knowledge from any
+  client. A refusal answers 404, not 403, so "refused" and "absent" are
+  indistinguishable from outside. `GET /api/knowledge/pages` is deliberately not
+  here: the page list is derived state and belongs in a named query over
+  `knowledge_files`, which `seed/queries/` does not carry yet.
+  
+  `GET /api/commands` is the composer's list, **generated** from the instance's
+  own `rules.yaml` and the agent registry — `/note`, the deep alias under
+  whatever name that instance gives it, `/model`, and one command per
+  `fast_path` rule whose pattern spells one unambiguously. A rule that is a
+  sentence rather than a command yields nothing, on purpose. Each entry carries
+  the tier it routes to and, for a fast path, the named query whose own
+  description is the menu's line. The PWA's static `COMMANDS` array — a
+  placeholder marked with an expiry since it was written — is deleted, and an
+  integration test routes every command the endpoint offers back through
+  `route()` so the menu and the router cannot drift.
+  
+  `GET /api/runs/:id` is the activity feed's drill-down into a `runs:<id>` ref,
+  through a new `run_detail` named query: provider, model, token and cache
+  counts, cost, the tool calls the same reply made (joined exactly on
+  `meta.turn_id` or `meta.message_id`, never a time window) and the shadow
+  agreement measure where the turn was shadowed — the measure, not the two
+  transcripts.
+- f57b3b0: **The instance directory is the Obsidian vault.** Open the folder `metistry
+  init` made and your notes are right there — `Journal/`, `Me/`, `Inbox/`,
+  `now.md` — with nothing of the machinery in the way. Everything that is not
+  knowledge moved into `.metistry/`: identity, rules, compute, the config
+  directories, the lock, and the derived `state/` that holds Postgres, the
+  `.env` and downloaded models. Obsidian ignores dot-prefixed folders, which is
+  the whole reason for the dot — the vault root and the install's own files can
+  finally be the same directory without one of them cluttering the other.
+  
+  Vault paths lose their prefix with it: a note is `Areas/Fsl/Drey.md`, a
+  capture is `Inbox/…`, and a read grant covering everything is spelled `/`.
+  
+  **The protected set became a place rather than a list.** Anything under
+  `.metistry/` is the user's hand alone — except `.metistry/state/`, which is
+  derived and nobody's record — plus the root `CLAUDE.md` and `README.md`.
+  That is one rule the reconciler enforces at the tool, instead of seven
+  filenames each component had to remember. Neither those two root files nor
+  `Artifacts/` are indexed as knowledge: your instructions and your bundles are
+  yours to read, not search results.
+  
+  This ships the layout for NEW instances. An existing instance keeps working
+  unchanged and `metistry doctor` now says which shape it is in; the verb that
+  moves one is the next change.
+
+### Patch Changes
+
+- c1f512e: **The assistant now uses your `identity.yaml` on the launchd shape, instead
+  of the seed identity that ships with the product.** Every `*_FILES` overlay
+  default resolved its instance half relative to the process's working
+  directory, and every launchd job's working directory is the product
+  checkout — so `.metistry/identity.yaml`, `rules.yaml` and `compute.yaml`
+  named the product's own directory, found nothing, and the engine ran on the
+  seed. `METISTRY_INSTANCE_DIR` was not in the engine's environment allowlist
+  either, so it could not have resolved them itself.
+  
+  Fixed at the root: `metistry up` puts `METISTRY_INSTANCE_DIR` and
+  `METISTRY_SEED_DIR` in every child's environment (the plists' env dicts and
+  the supervisor's child specs alike), and core's `overlayFiles` resolves every
+  default against the instance directory through `resolveInstanceLayout` — so
+  it finds the file whether the instance has run `metistry migrate-layout` or
+  not. The assistant, the console and the reconciler all read their overlays
+  through it, which also means the console's router and the engine can no
+  longer disagree about which `rules.yaml` is in force.
+  
+  The engine **refuses to start** when neither `METISTRY_INSTANCE_DIR` nor
+  `METISTRY_IDENTITY_FILES` is set, rather than answering under the seed's
+  name. `ops/sandbox/assistant.sb` grants read on the four config files by
+  name (never on the directory holding them, which on an unmigrated instance
+  is the vault root), so the reads the overlay now performs are permitted and
+  nothing else in the instance is.
+  
+  Also: `metistry update --version <x.y.z>` was ignored — `version` was listed
+  as a boolean flag, so the value never arrived and the latest release was
+  installed instead. And in git mode `update` wrote the **pre-pull** version
+  into `metistry.lock`; the version is now read from the checkout after the
+  pull, so a run that fast-forwards onto a new release pins that release.
+- 76f82a2: **An instance that has not run `metistry migrate-layout` is read again.**
+  `db/migrations/0021` recorded that "a legacy instance keeps working unchanged
+  until the verb runs". Verified against a clone of a real pre-ruling instance,
+  it did not: #193 moved every path to `.metistry/` and every reader spelled the
+  new one, so `metistry compute show` reported no providers while the instance's
+  `compute.yaml` declared one, `metistry identity` exited 1 on an instance whose
+  `identity.yaml` was right there, `metistry version` omitted the pin, `doctor`
+  read `shape compose` off a `deployment.yaml` it never opened and probed the
+  wrong half of the install, `metistry secrets`/`console`/`connect` could not
+  find `state/.env` at all — which on a launchd install means every rendered
+  plist's `__ENV_FILE__` points at a file that does not exist — and `up` would
+  have `initdb`'d a second, empty Postgres cluster at `.metistry/state/pg`
+  beside the live one.
+  
+  Two of the breaks were safety, not convenience. The §4.7 protected set became
+  the `.metistry/` PLACE, which took the legacy machinery at the instance root
+  out of it: on a legacy instance the assistant could write `identity.yaml`,
+  `rules.yaml`, `metistry.lock`, `queries/` and `instance-migrations/` through
+  `brain-commit` (invariant 2). And the knowledge walk, which now starts at the
+  instance root, indexed those same files plus every byte of the gitignored
+  `state/` — a Postgres cluster included — as notes.
+  
+  `resolveInstanceLayout(instanceDir)` in core is the fix: one `detectLayout`
+  read, then the right relative-path table (`LEGACY_INSTANCE_LAYOUT` mirrors
+  `INSTANCE_LAYOUT` key for key), with `instanceFile()` / `instanceStatePath()`
+  as the reader's one-line call. Every reader goes through it — identity,
+  rules, compute, deployment, the lock, the peer registry, `.env`, the Postgres
+  data and socket dirs, the supervisor's config/socket/bin, `ports.yaml`, the
+  models dir, the assistant's state dir, `doctor`'s compute overlay, the
+  console's identity/peers/inbox, and the reconciler's inbox prefix (whose SQL
+  predicate must match migration 0015's partial index on a legacy instance, not
+  0021's). Writers are untouched: `instancePath`/`metistryPath` still spell the
+  flat layout, because there is one layout to write and two to read.
+  `isProtectedPath` and `isVaultPath` cover the legacy root names
+  unconditionally — they receive a path and no instance directory, and the set
+  is strictly safer on a flat instance, which has no business holding lowercase
+  machinery at its root.
+  
+  `metistry update` now **refuses** to pin a version past 0.8.x onto a legacy
+  instance, before it fetches, builds or migrates anything, printing the
+  `migrate-layout` line to run; `--allow-legacy` overrides. Regression tests run
+  one fixture in both shapes through the same readers, so a reader that resolves
+  only one of them fails.
+- Updated dependencies [c1f512e]
+- Updated dependencies [e9074d2]
+- Updated dependencies [337bc0a]
+- Updated dependencies [dade46d]
+- Updated dependencies [f57b3b0]
+- Updated dependencies [76f82a2]
+- Updated dependencies [ce521a6]
+  - @foldedspacelabs/metistry-cli@0.9.0
+  - @foldedspacelabs/metistry-core@0.9.0
+  - @metistry-apps/routines@0.9.0
+  - @foldedspacelabs/metistry-mcp-brain@0.9.0
+  - @metistry-apps/collectors@0.9.0
+  - @foldedspacelabs/metistry-artifacts@0.9.0
+  - @foldedspacelabs/metistry-tasks@0.9.0
+  - @foldedspacelabs/metistry-queries@0.9.0
+
 ## 0.8.1
 
 ### Patch Changes

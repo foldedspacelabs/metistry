@@ -1,5 +1,302 @@
 # @metistry-apps/reconciler
 
+## 0.11.0
+
+### Minor Changes
+
+- baf33c2: The vault bridge takes the principal from the credential, never from the
+  request body.
+  
+  **The hole.** Every mutation through the reconciler's bridge carries
+  `intent: { principal, … }`, and `principal` was the whole of the §4.7 check:
+  `writeAllowed` admitted `.metistry/**`, `CLAUDE.md` and `README.md` for
+  `principal: user` and refused everyone else. But `intent` is a field in a
+  **request body**, and one shared bearer — `METISTRY_BRIDGE_TOKEN_RECONCILER` —
+  reached that check. Any holder of it (the console, which terminates the
+  network and multiplexes every agent on the install; anything that ever read
+  the console's environment) could write `"principal": "user"` and rewrite
+  `rules.yaml`, an agent definition, a named query, `metistry.lock` or the
+  assistant's own instructions. Nothing did. Invariant 2 is worth only the
+  stronger sentence (owner's ruling, 2026-09-20).
+  
+  **The wire change.** The bridge now derives a caller CLASS from the bearer and
+  reads the body's `principal` as attribution inside what that class may claim
+  (`CALLER_AUTHORITY`, `apps/reconciler/src/paths.ts`):
+  
+  | Bearer | Class | May claim | Protected paths |
+  | --- | --- | --- | --- |
+  | `METISTRY_BRIDGE_TOKEN_RECONCILER_USER` (new) | `owner` | `user` only | all |
+  | `METISTRY_BRIDGE_TOKEN_RECONCILER` | `console` | any principal | `.metistry/assistant-prompt.md` and `.metistry/compute.yaml` only |
+  
+  A body that exceeds its bearer is `403 forbidden` in the uniform envelope —
+  never silently downgraded — and every refused mutation is a `runs` row
+  (`component=reconciler, kind=auth`) carrying the caller class, the claimed
+  principal and the path. Reads are unchanged: which bearer you hold decides
+  what you may write, not what you may see. `check()` gains
+  `meta.principal_from_credential` and `meta.owner_bearer`.
+  
+  The two protected paths left to the console are the two owner-authenticated
+  doors it already ships: §4.10's self-modification overlay, which the owner
+  allows in triage (`prompt-overlay.ts`), and `compute.yaml`, which the Compute
+  pane's `assign`/`budget` write through the same function `metistry compute`
+  calls (`compute-routes.ts`). Both are enumerated at the bridge rather than
+  left to the console's restraint, so `identity.yaml`, `rules.yaml`,
+  `deployment.yaml`, `metistry.lock`, `queries/`, `agents/`, `routines/`,
+  `targets/`, `extensions/`, `CLAUDE.md` and `README.md` are refused whatever
+  it asks for.
+  
+  **The new bearer.** `metistry init` mints it; `metistry up` and `metistry
+  update` mint it for an install that has none — before they restart the
+  reconciler, and `update` kickstarts the reconciler itself if nothing else in
+  the run did — and `metistry secrets sync --to env` mints it as a
+  `GENERATED_SECRETS` name. It is kept out of the console's environment by name
+  (`CONSOLE_ENV_DENY` in the otherwise wholesale `METISTRY_*` passthrough
+  `consoleEnv` builds), and `docker-compose.yml` never listed it. `writeProtected` presents whichever
+  bearer its process holds and lets the bridge decide — the CLI's is the owner's,
+  the console's is not — so a caller cannot widen itself by choosing a variable
+  name. With no owner bearer configured anywhere, no caller may write a
+  protected path at all, `metistry doctor`'s `reconciler` row is `degraded` with
+  the command that mints one, and a 403 from the CLI names that cause.
+- 579662f: The sole committer runs confined, and every confined child's egress passes
+  one allowlisting door.
+  
+  **`ops/sandbox/reconciler.sb`.** Under the `launchd` shape the reconciler —
+  the only process that holds the instance repo's working tree and the only
+  place git runs (D5) — now runs under a Seatbelt profile, as the job's root
+  process, so git and all 172 of its helpers inherit it. It writes the
+  instance repo and tmp and nothing else; reads the product checkout, the node
+  runtime, a real git's prefix and `~/.gitconfig` by name; execs node and that
+  git and **no shell**; dials the console, Postgres, the on-machine embedder
+  and the egress proxy, and binds only its own bridge port. D5 was a design
+  intention; it is now a kernel rule. `metistry up` (and `--dry-run`) prints
+  the profile each child will run under, and `metistry doctor` gains a
+  `sandbox` row that reads the answer back out of `supervisor.json`'s argv.
+  `METISTRY_RECONCILER_SANDBOX=0` swaps in `ops/sandbox/unconfined.sb`, a real
+  file that says `(allow default)`, so "not confined" is never invisible.
+  
+  **`/usr/bin/git` is not a git** — it links against `libxcselect.dylib` and
+  is the xcode-select shim, which dies under a profile. `up` resolves a real
+  git by absolute path (bundled runtime, then a non-shim git on `PATH`, then
+  the Command Line Tools) and declines to confine the job when it finds none.
+  
+  **The egress door.** `sandbox-exec` filters outbound by port and cannot name
+  a host, so `assistant.sb` carried `(remote tcp "*:443")` with an honest note
+  that its host list was documentation rather than enforcement. Both profiles
+  now allow exactly one loopback port, and a CONNECT proxy in the supervisor
+  listens there: an allowlist derived from this install's `compute.yaml`
+  providers and its instance repo's git remotes, exact host and port matching
+  (no wildcards), a 256-bit bearer per child so a refusal can name who asked,
+  a `runs` row per refusal, and no TLS interception whatsoever — CONNECT only,
+  so it learns a host name and never a byte of the tunnel. Children reach it
+  through `HTTPS_PROXY` + `NODE_USE_ENV_PROXY=1`; git reaches it through
+  `METISTRY_GIT_HTTP_PROXY` → `-c http.proxy`. `supervisor.json` gains an
+  `egress` block, read before any child is spawned, so no child can widen it.
+  
+  **Pushing still works, through `GIT_ASKPASS`.** git executes every
+  credential helper through `/bin/sh` — including the built-in `osxkeychain`
+  that `metistry connect-repo` configures — and this profile has no shell, so
+  a confined push would have died on the helper. `GIT_ASKPASS` is exec'd
+  directly, by absolute path, with no shell, so: the token stays in the login
+  Keychain where `connect-repo` put it, the **supervisor** reads it there once
+  at spawn (unconfined, the parent, and the item is filed `-A` so there is no
+  prompt), and hands it to the child in its environment; a `#!<node>` shim
+  `up` generates prints it when git asks and can do nothing else. The
+  credential is never in argv, never in `supervisor.json`, never on disk.
+  `git.ts` adds `-c credential.helper=` — git's documented reset — only when
+  there is an askpass, so an unconfined install is untouched. Proven by a real
+  push to a real bare repository over real HTTPS through the CONNECT tunnel,
+  under `sandbox-exec`.
+  
+  **SSH remotes stay unsupported while confined**, and `up` still warns:
+  `ssh` is not exec-able, granting it would mean granting the sole committer
+  `~/.ssh`, and ssh's `ProxyCommand` runs through a shell so it could not
+  reach the egress proxy either. Use an HTTPS remote or the off switch.
+- 9a9d7a8: **Every todo in your vault is findable within a reconcile.** The reconciler's
+  existing walk now fills `vault_tasks` and `vault_task_refs`
+  (`docs/product/daily-flow-spec.md` §1.5, ticket P1-4): one row per `- [ ] …`
+  line you typed, one row per `[[note#^mt-…]]` that names one. No new process,
+  no second watcher, no second holder of the repo — this is already the pass
+  that walks the tree and hashes it.
+  
+  **Derived in full, and it writes nothing back.** Drop the database, let one
+  walk run, and every row returns from the markdown that produced it. The
+  parser reads loosely — `due friday`, `critical`, `@Jim`, and on read only
+  Dataview's `[due:: …]` and the Tasks plugin's emoji — and the resolved
+  values land beside your line rather than in it. The only hand that edits a
+  task line is yours.
+  
+  **The identity degrades honestly.** A line carrying an `^mt-…` anchor keeps
+  it wherever it moves; a line without one is keyed by its text and its
+  ordinal among identical lines in that file, so editing `due friday` to
+  `due 2026-09-25` leaves the task alone and re-typing the words starts a new
+  one with a fresh ageing clock. `first_seen_on` survives a re-walk, a field
+  edit and a rename.
+  
+  A row is re-derived when the note's bytes change, which is a correctness
+  property and not an optimisation: `due friday` is resolved against the day
+  the walk *read* it, `parsed_on` records which day that was, and a row
+  re-derived every five minutes would slide a Friday task onto the next Friday
+  as soon as that one passed. A `[x]` with no date on it is stamped the first
+  walk that saw it checked and never re-stamped; un-ticking it clears the
+  stamp rather than leaving a lie.
+  
+  **A view is never a second task.** `Journal/Plan/…`, `Journal/Fold/…` and
+  `Journal/Standup/…` render your todos and hold none of them — decided by the
+  file's own `source:` frontmatter, the same ownership vocabulary
+  `knowledge_write` already refuses on, so a plan you keep elsewhere is still
+  indexed and a routine that writes somewhere new is still skipped. Their
+  transclusions still become references, which is the whole reason the second
+  table exists. `Templates/` is excluded for the same reason in reverse: a
+  template describes tasks and has none.
+  
+  **And a `work` row that waits on you surfaces without ever gating.** A
+  `meta.blocked_by` naming a human todo becomes a reference row of its own;
+  `depends_on`, `DEPS_CLOSED` and claimability are untouched, so a typo in a
+  note can never stall an agent. `work` is read here and never written.
+  
+  On a 400-note fixture holding 4,000 task lines: a cold walk with every note
+  dirty costs 1,098 ms end to end against 385 ms for the same vault with no
+  task lines in it, and a quiet walk 212 ms against 46 ms.
+
+### Patch Changes
+
+- Updated dependencies [4a778f9]
+- Updated dependencies [4f43f9c]
+- Updated dependencies [9c9da4a]
+- Updated dependencies [1bf5c76]
+- Updated dependencies [b6586de]
+- Updated dependencies [579662f]
+- Updated dependencies [57ceb02]
+- Updated dependencies [45b64df]
+- Updated dependencies [9ec30d5]
+- Updated dependencies [7f9ceb7]
+- Updated dependencies [23cc47f]
+  - @foldedspacelabs/metistry-core@0.11.0
+
+## 0.10.0
+
+### Patch Changes
+
+- Updated dependencies [ad73f5a]
+  - @foldedspacelabs/metistry-core@0.10.0
+
+## 0.9.1
+
+### Patch Changes
+
+- @foldedspacelabs/metistry-core@0.9.1
+
+## 0.9.0
+
+### Minor Changes
+
+- f57b3b0: **The instance directory is the Obsidian vault.** Open the folder `metistry
+  init` made and your notes are right there — `Journal/`, `Me/`, `Inbox/`,
+  `now.md` — with nothing of the machinery in the way. Everything that is not
+  knowledge moved into `.metistry/`: identity, rules, compute, the config
+  directories, the lock, and the derived `state/` that holds Postgres, the
+  `.env` and downloaded models. Obsidian ignores dot-prefixed folders, which is
+  the whole reason for the dot — the vault root and the install's own files can
+  finally be the same directory without one of them cluttering the other.
+  
+  Vault paths lose their prefix with it: a note is `Areas/Fsl/Drey.md`, a
+  capture is `Inbox/…`, and a read grant covering everything is spelled `/`.
+  
+  **The protected set became a place rather than a list.** Anything under
+  `.metistry/` is the user's hand alone — except `.metistry/state/`, which is
+  derived and nobody's record — plus the root `CLAUDE.md` and `README.md`.
+  That is one rule the reconciler enforces at the tool, instead of seven
+  filenames each component had to remember. Neither those two root files nor
+  `Artifacts/` are indexed as knowledge: your instructions and your bundles are
+  yours to read, not search results.
+  
+  This ships the layout for NEW instances. An existing instance keeps working
+  unchanged and `metistry doctor` now says which shape it is in; the verb that
+  moves one is the next change.
+
+### Patch Changes
+
+- c1f512e: **The assistant now uses your `identity.yaml` on the launchd shape, instead
+  of the seed identity that ships with the product.** Every `*_FILES` overlay
+  default resolved its instance half relative to the process's working
+  directory, and every launchd job's working directory is the product
+  checkout — so `.metistry/identity.yaml`, `rules.yaml` and `compute.yaml`
+  named the product's own directory, found nothing, and the engine ran on the
+  seed. `METISTRY_INSTANCE_DIR` was not in the engine's environment allowlist
+  either, so it could not have resolved them itself.
+  
+  Fixed at the root: `metistry up` puts `METISTRY_INSTANCE_DIR` and
+  `METISTRY_SEED_DIR` in every child's environment (the plists' env dicts and
+  the supervisor's child specs alike), and core's `overlayFiles` resolves every
+  default against the instance directory through `resolveInstanceLayout` — so
+  it finds the file whether the instance has run `metistry migrate-layout` or
+  not. The assistant, the console and the reconciler all read their overlays
+  through it, which also means the console's router and the engine can no
+  longer disagree about which `rules.yaml` is in force.
+  
+  The engine **refuses to start** when neither `METISTRY_INSTANCE_DIR` nor
+  `METISTRY_IDENTITY_FILES` is set, rather than answering under the seed's
+  name. `ops/sandbox/assistant.sb` grants read on the four config files by
+  name (never on the directory holding them, which on an unmigrated instance
+  is the vault root), so the reads the overlay now performs are permitted and
+  nothing else in the instance is.
+  
+  Also: `metistry update --version <x.y.z>` was ignored — `version` was listed
+  as a boolean flag, so the value never arrived and the latest release was
+  installed instead. And in git mode `update` wrote the **pre-pull** version
+  into `metistry.lock`; the version is now read from the checkout after the
+  pull, so a run that fast-forwards onto a new release pins that release.
+- 76f82a2: **An instance that has not run `metistry migrate-layout` is read again.**
+  `db/migrations/0021` recorded that "a legacy instance keeps working unchanged
+  until the verb runs". Verified against a clone of a real pre-ruling instance,
+  it did not: #193 moved every path to `.metistry/` and every reader spelled the
+  new one, so `metistry compute show` reported no providers while the instance's
+  `compute.yaml` declared one, `metistry identity` exited 1 on an instance whose
+  `identity.yaml` was right there, `metistry version` omitted the pin, `doctor`
+  read `shape compose` off a `deployment.yaml` it never opened and probed the
+  wrong half of the install, `metistry secrets`/`console`/`connect` could not
+  find `state/.env` at all — which on a launchd install means every rendered
+  plist's `__ENV_FILE__` points at a file that does not exist — and `up` would
+  have `initdb`'d a second, empty Postgres cluster at `.metistry/state/pg`
+  beside the live one.
+  
+  Two of the breaks were safety, not convenience. The §4.7 protected set became
+  the `.metistry/` PLACE, which took the legacy machinery at the instance root
+  out of it: on a legacy instance the assistant could write `identity.yaml`,
+  `rules.yaml`, `metistry.lock`, `queries/` and `instance-migrations/` through
+  `brain-commit` (invariant 2). And the knowledge walk, which now starts at the
+  instance root, indexed those same files plus every byte of the gitignored
+  `state/` — a Postgres cluster included — as notes.
+  
+  `resolveInstanceLayout(instanceDir)` in core is the fix: one `detectLayout`
+  read, then the right relative-path table (`LEGACY_INSTANCE_LAYOUT` mirrors
+  `INSTANCE_LAYOUT` key for key), with `instanceFile()` / `instanceStatePath()`
+  as the reader's one-line call. Every reader goes through it — identity,
+  rules, compute, deployment, the lock, the peer registry, `.env`, the Postgres
+  data and socket dirs, the supervisor's config/socket/bin, `ports.yaml`, the
+  models dir, the assistant's state dir, `doctor`'s compute overlay, the
+  console's identity/peers/inbox, and the reconciler's inbox prefix (whose SQL
+  predicate must match migration 0015's partial index on a legacy instance, not
+  0021's). Writers are untouched: `instancePath`/`metistryPath` still spell the
+  flat layout, because there is one layout to write and two to read.
+  `isProtectedPath` and `isVaultPath` cover the legacy root names
+  unconditionally — they receive a path and no instance directory, and the set
+  is strictly safer on a flat instance, which has no business holding lowercase
+  machinery at its root.
+  
+  `metistry update` now **refuses** to pin a version past 0.8.x onto a legacy
+  instance, before it fetches, builds or migrates anything, printing the
+  `migrate-layout` line to run; `--allow-legacy` overrides. Regression tests run
+  one fixture in both shapes through the same readers, so a reader that resolves
+  only one of them fails.
+- c2c1916: **Defence in depth on `GET /vault/read`: the bridge itself now refuses machinery paths, not just the console sitting in front of it.** `confine()` only ever checked that a path stayed inside the repo, so `.metistry/state/.env`, `.metistry/compute.yaml`, `.obsidian/workspace.json` and the root `CLAUDE.md`/`README.md` all passed through and were served, at 200, to any caller holding the reconciler's bearer token — the console's `/api/knowledge/*` (#197) narrowed to vault content with core's `isVaultPath`, but that narrowing lived only on one door onto this bridge. A caller that goes straight to the reconciler now gets the same uniform `not_found` these paths get everywhere else knowledge is read. `Artifacts/**` is the one deliberate exception: it is binary content `packages/artifacts`'s `ArtifactsService` reads and writes through this exact endpoint, not vault knowledge, so it stays readable. `GET /vault/search`'s hits are now filtered through the same predicate too, belt-and-suspenders on a path that was already structurally vault-only.
+- Updated dependencies [c1f512e]
+- Updated dependencies [337bc0a]
+- Updated dependencies [dade46d]
+- Updated dependencies [f57b3b0]
+- Updated dependencies [76f82a2]
+  - @foldedspacelabs/metistry-core@0.9.0
+
 ## 0.8.1
 
 ### Patch Changes

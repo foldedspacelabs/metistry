@@ -11,11 +11,13 @@ boundary differ. Set in `.metistry/deployment.yaml` (plan §4.17, open decision 
 | db | `pgvector/pgvector:pg17` container | a user-space Postgres 17, `postgres -D`, a **child of the supervisor** |
 | console | container, published on `127.0.0.1:8080` | a child of the supervisor, binds `127.0.0.1:8080` |
 | assistant | container; the file passes through the provider key `compute.yaml` names | a child of the supervisor, **under `ops/sandbox/assistant.sb`** — and not a child at all without an engine (below) |
-| reconciler | launchd job | a child of the supervisor |
+| reconciler | launchd job | a child of the supervisor, **under `ops/sandbox/reconciler.sb`** |
 | watchdog | launchd job | **it IS the supervisor** |
 | launchd agents | reconciler, watchdog, the bridges | **one**: `com.foldedspacelabs.metistry`, plus a TCC helper each |
 | needs | Docker Desktop / a container runtime | a Postgres install, nothing else |
 | engine isolation | the container | the sandbox profile |
+| reconciler isolation | none (a host job either way) | **`ops/sandbox/reconciler.sb`** — the sole committer writes the instance repo and nothing else |
+| egress | the container network | **one loopback CONNECT proxy** in the supervisor, with a hostname allowlist ("The egress door", below) |
 | where it is the answer | Linux, cloud, any multi-tenant host | macOS, and what the Mac app installs |
 
 `compose` is the default and stays the default until an instance flips
@@ -42,7 +44,7 @@ point.
 | agents | five, at the time — one supervisor plus the TCC helpers since ("One background item, called Metistry" above) |
 | console | `GET /health` → `200 {"ok":true}` on 8460, while production answered on 8080 |
 | update | `metistry update --channel release --version 0.4.0` — a clean no-op round trip (`already running 0.4.0`, `runtime/ is already the 0.4.0 pack`, `0 applied, 13 total`), lock committed by the reconciler |
-| sandbox | live probe with the plist's own parameters: vault read **denied**, write outside the state dir **denied**, write inside **allowed**, own console + db **allowed**, the production install's console and reconciler **denied** |
+| sandbox | live probe with the plist's own parameters: vault read **denied**, write outside the state dir **denied**, write inside **allowed**, own console + db **allowed**, the production install's console and reconciler **denied** (the reconciler's own profile and the egress door came later — 2026-09-19, below) |
 
 ### What the trial fixed
 
@@ -311,6 +313,13 @@ service named, the agents are acted on and the children follow them — booting
 out the supervisor takes its children down with it, and bootstrapping it
 starts them in order.
 
+`metistry down` is that "no service named" stop plus a read-only confirmation
+(`launchctl print` finds nothing, `docker compose ps` lists nothing), and is
+what `metistry up` names as its counterpart. Under the compose shape it is
+`docker compose stop`, never `docker compose down` and never `-v`: the
+containers stay, and no volume is touched (`docs/ops/cli.md`, "Running:
+`up`, `down`, and who owns the processes").
+
 The socket is in the instance's own state directory and is 0600, and the
 request is **still authenticated** with the token from `supervisor.json`
 (constant-time; a refusal says only `unauthorized`). Invariant 8: a boundary
@@ -383,11 +392,113 @@ install-wide shape. `reconciler` and `watchdog` are host jobs in either
 shape (invariant 6) — the reconciler holds the instance repo's working
 tree, the watchdog must outlive what it watches.
 
-Parsing is strict. `shape: lauchd` is an error, not a silent compose.
+Parsing is strict. `shape: lauchd` is an error, not a silent compose — and
+so is `keep_awake: true`, which is why the values are strings ("Keeping the
+Mac awake" below). One consequence worth knowing before you downgrade: a
+CLI that predates `keep_awake` refuses a file that carries it, with every
+verb that loads deployment. Removing the one line by hand is the way back.
 
 `METISTRY_DEPLOYMENT_SHAPE=launchd metistry up --dry-run` previews a
 shape without editing anything; `up` and `doctor` both print which of
 the two they read.
+
+## Keeping the Mac awake
+
+Metistry only works while the Mac is awake: a capture from your phone, a
+scheduled collector and the assistant's queue all wait while it sleeps. So
+`deployment.yaml` carries one more key, macOS only:
+
+```yaml
+shape: launchd
+keep_awake: allow_sleep_on_battery   # never | allow_sleep_on_battery | always | always_lid_closed
+```
+
+| value | what it does |
+| --- | --- |
+| `never` | nothing is held; your own System Settings sleep timer decides. **This is what an install that has never been asked does** — the key is absent, and absent means `never`. |
+| `allow_sleep_on_battery` | held while the Mac draws `'AC Power'`; released on `'Battery Power'` and on `'UPS Power'`. A UPS is a battery — an external one — and a desktop on one during an outage should be spending its runtime on shutting down cleanly. What `metistry init` offers first. |
+| `always` | held on any power source. On a laptop away from a charger that costs battery; the Mac still sleeps at low battery, which the assertion is defined not to stop. |
+| `always_lid_closed` | the same as `always`, **plus an administrator change you make yourself**. See below. Offered, never a default. |
+
+**Informed consent, not a default.** A power assertion *overrides* the
+user's own sleep setting (`pmset(1)`: "processes may dynamically override
+these power management settings by using I/O Kit power assertions"), so
+taking one without being asked would take a machine-level behaviour from
+somebody who never agreed to it. `seed/deployment.yaml` therefore does not
+set the key; `metistry init` asks once, on a terminal, printing what each
+choice costs, and writes the answer. `--keep-awake <value>` answers it
+without a terminal, and a run with neither — a pipe, a script, the Mac
+app's first run — asks nothing and writes nothing.
+
+**What is held.** `caffeinate -i -w <supervisor pid>`, which is exactly
+`IOPMAssertionCreateWithName(kIOPMAssertPreventUserIdleSystemSleep)` — the
+same IOKit call, no privileges, no TCC grant, no `sudo`. Never `-d` (that
+pins the display, which you did not ask for: **your screen still sleeps**)
+and never `-s` (deprecated, and AC-only). `-w` is the safety: the assertion
+is released when the watched pid exits, even under `SIGKILL`, so a killed
+supervisor cannot leave an ownerless holder behind. We never write a `pmset`
+setting — every `pmset` call in this design is a read — and we can neither
+release nor take credit for another app's assertion: `IOPMAssertionRelease`
+is scoped to the id its creator got back. A keep-awake app you already run
+is unaffected, and so are we.
+
+**The supervisor holds it, so the `launchd` shape holds it.** The assertion
+is tied to the process whose lifetime is the install's, and under
+`shape: compose` there is no supervisor: nothing is held, and `doctor` says
+so rather than pretending. The setting is still recorded and still moves
+with you when you migrate the shape.
+
+**What no setting can do.** A closed lid always sleeps. The assertion's own
+definition says so — "The system may still sleep for lid close, Apple menu,
+low battery, or other sleep reasons" (`IOPMLib.h`) — and the state that
+governs the lid is an `IOPMrootDomain` property, not an assertion. The only
+user-space switch that changes it is `sudo pmset -a disablesleep 1`, which
+is system-wide, persists in a root-owned plist, and `pmset(1)` says plainly:
+"pmset must be run as root in order to modify any settings". Metistry will
+not make an administrator change to your Mac. So `always_lid_closed` is
+accepted, behaves exactly as `always`, and every surface says the
+lid-closed half is **not available on this Mac without an administrator
+change** — offered and explained rather than faked. (A lid-closed Mac stays
+awake in closed-display mode, which is your own external power, display and
+input setup; macOS decides that, not us.) Scheduled sleep, the Apple menu's
+Sleep item, a thermal emergency and low battery all bypass the assertion by
+design as well.
+
+**`metistry doctor` reports one row, `keep-awake`, macOS only and
+`degraded` at worst** — the install is running and correct even when a
+promise about the machine is unmet, so it never fails a run:
+
+| state | status |
+| --- | --- |
+| `never` | `absent` — "not configured", with the verb that turns it on |
+| holding | `ok`, with the pid, since, and the power source. The pid is cross-checked against the **"Listed by owning process"** block of `pmset -g assertions` — never the summary block, which is a *level* (a maximum) and reads 1 while four processes hold it, and never a name, because under `caffeinate` the name is Apple's on every holder |
+| released on battery under `allow_sleep_on_battery` | `ok` — this is the setting working, and it reads as success |
+| configured, but nothing has written the state file, or its heartbeat is stale | `degraded` — the supervisor is not running, or has not restarted since the setting changed |
+| `always_lid_closed` | `degraded`, carrying the administrator sentence above |
+| `shape: compose` | `absent` — no supervisor to hold it |
+| **the Mac slept anyway** | `degraded`, naming when and for how long, with the repair |
+
+That last row is the honest one. The holder compares wall clocks between
+its own 60-second ticks and writes what it sees to
+`<instance>/.metistry/state/run/keep-awake.json`; a jump of three intervals
+while it was holding means the machine was asleep under it — a closed lid,
+a scheduled sleep, or another policy winning. Doctor then says so, and
+offers `metistry deployment set-keep-awake always --yes` with its battery
+cost stated. A gap across a *restart* is deliberately **not** reported as
+sleep: that is what `metistry stop`, a logout and a reboot all look like,
+and a clean stop records itself so the gap after it is never misread.
+
+The cost of all this is one `pmset -g ps` fork a minute and one small file
+write, from a process that was already running a 60-second probe cycle.
+(`pmset -g log` would name the sleep *reason*, and is not used: it cost
+0.42s and 2.8MB on the Mac this was measured on, and had no Sleep-domain
+entries to parse against.)
+
+Changing it: `metistry deployment set-keep-awake <value> [--yes]` —
+preview-then-confirm through the reconciler, like `set-shape`. It takes
+effect at the next `metistry up`, which renders `METISTRY_KEEP_AWAKE` into
+the supervisor's environment; nothing already running changes underneath
+you.
 
 ## A second instance on one Mac — `.metistry/state/ports.yaml`
 
@@ -416,7 +527,7 @@ ports:
 
 From then on the file is the record and nothing probes again — a running
 instance must never see its own ports as taken. Its presence is what
-namespaces an install; delete it (after `metistry stop`) to go back to the
+namespaces an install; delete it (after `metistry down`) to go back to the
 fixed labels and ports.
 
 | | default install | namespaced |
@@ -566,7 +677,7 @@ confine a probe with those same values.
 
 | | |
 |---|---|
-| filesystem read | its own `dist/` + `node_modules/`, the node runtime, the state dir, tmp, system frameworks. **Not** the vault, not `~/Documents`, not the instance repo. |
+| filesystem read | its own `dist/` + `node_modules/`, the node runtime, the state dir, tmp, system frameworks — plus **four files of the instance's config, granted by name**: `identity.yaml`, `assistant-prompt.md`, `rules.yaml`, `compute.yaml` (`-D CONFIG_IDENTITY=…`, computed by `up`). **Not** the vault, not `~/Documents`, not the rest of the instance repo. The four are literals rather than a grant on the directory holding them because that directory also holds the lock, the peer registry and Postgres' cluster — and on an instance that has not run `metistry migrate-layout` it IS the vault root. |
 | filesystem write | the state dir and tmp. Nothing else. |
 | exec | the node binary. No shell (invariant 9). |
 | network out | the console and Postgres, on loopback, on **this instance's** ports, and TLS. Nothing else — a namespaced engine cannot reach another install's console. |
@@ -574,11 +685,12 @@ confine a probe with those same values.
 
 The parameters are computed in one place (`packages/cli/src/sandbox.ts`)
 and the misuse tests in `packages/cli/test/sandbox.test.ts` confine a
-throwaway node script with exactly those values, proving five things:
+throwaway node script with exactly those values, proving six things:
 a `~/Documents`-style read fails, a write outside the state dir fails, a
-write inside it succeeds, and the console's port and Postgres' port both
-connect while a third loopback port does not. Darwin-only; skipped on
-Linux CI.
+write inside it succeeds, the console's port and Postgres' port both
+connect while a third loopback port does not, and the four config files
+above are readable **in both layouts** while a note sitting beside them is
+not. Darwin-only; skipped on Linux CI.
 
 `DB_TCP` is there because the launchd shape's Postgres is a loopback port
 rather than a container the engine reached over the compose network: the
@@ -586,32 +698,120 @@ profile denies by default, so without it the engine dies at startup with
 `EPERM connect 127.0.0.1:<port>`. It is the one port `up` put in the
 managed conf block — not a range, and not "loopback".
 
-**Two honest limits.**
+**One honest limit, and one that has been closed.**
 
-1. **Outbound is filtered by port, not by host name.** `sandbox-exec`
-   cannot express "openrouter.ai". The profile allows loopback to the
-   console and TLS outbound; the host list is DERIVED from this install's
-   own `compute.yaml` — every provider's `base_url` hostname and nothing
-   else (`engineHosts` in `packages/cli/src/sandbox.ts`) — and is
-   documentation today, not an enforced rule. The variable name
-   `METISTRY_ASSISTANT_ALLOWED_HOSTS` is reserved for when there is a layer
-   that can enforce it. Read the profile as "the engine cannot reach your
-   LAN's other services on their own ports", not as "the engine can only
-   reach its provider". What *is* enforced by construction is narrower and
-   more useful: the loop's only outbound call is
+1. **`sandbox-exec(1)` is deprecated** — and functional; this profile is
+   verified on macOS 26.4 and the shape has worked since 14. The migration
+   path is App Sandbox entitlements once the Mac app hosts the process
+   (`docs/product/desktop-app-plan.md`). This used to read as a pure
+   upgrade and it is a **trade**: App Sandbox buys outbound filtering by
+   host name and **costs** the per-spawn `-D` parameterisation every rule
+   above depends on, because entitlements are baked into a bundle's
+   signature and cannot say "this instance's console port, this instance's
+   four config files" (`docs/research/2026-09-19-agent-virtual-filesystems.md`
+   §2.4; `ops/sandbox/README.md` has the whole correction).
+2. **~~Outbound is filtered by port, not by host name~~ — closed 2026-09-19.**
+   `sandbox-exec` still cannot express "openrouter.ai". What changed is the
+   other half of that sentence: it *can* be narrowed to one loopback port,
+   and the thing listening there can name hosts all day ("The egress door",
+   below). `(remote tcp "*:443")` is gone from the profile; the host list
+   derived from `compute.yaml` is now enforced rather than documented.
+   What was already enforced by construction is unchanged and still the
+   stronger statement: the loop's only outbound call is
    `<base_url>/chat/completions` on the provider the turn was assigned
    (`apps/assistant/src/engine-openai.ts`), so the host check is a property
    of the code rather than of an environment variable a subprocess may
    ignore (R1).
-2. **`sandbox-exec(1)` is deprecated** — and functional; this profile is
-   verified on macOS 26.4 and the shape has worked since 14. The
-   migration path is App Sandbox entitlements once the Mac app hosts the
-   process (`docs/product/desktop-app-plan.md`): same deny-default
-   posture, a supported API, and outbound filtering by name, which
-   closes limit 1 at the same time.
 
 Under the compose shape none of this applies — the container is the
 boundary and the profile is not used.
+
+## The reconciler's sandbox
+
+The sole committer (D5) is confined too, since 2026-09-19. It is the process
+that holds the instance repo's working tree and the only place git runs, and
+until this it had ambient authority over the whole disk:
+`docs/research/2026-09-19-agent-virtual-filesystems.md` §3.2(c) called it
+"the best target in the repo", and this is that finding built.
+
+| | |
+|---|---|
+| filesystem read | the product checkout (its own `dist/`, `node_modules/`, `seed/` — and its working directory), the node runtime, **a real git's installation prefix**, system frameworks, and `~/.gitconfig` **by name**. |
+| filesystem write | **the instance repo — the vault, `.metistry/` and `.git/`** — and tmp. Nothing else: not `~/Documents`, not `~/.ssh`, not the product checkout, not another instance's vault. |
+| exec | node, that git, and the askpass shim (below). **No shell.** |
+| network out | the console, Postgres and the on-machine embedder on loopback, plus the egress proxy. It binds exactly its own bridge port. |
+| off switch | `METISTRY_RECONCILER_SANDBOX=0` renders `ops/sandbox/unconfined.sb` instead — a real file that says `(allow default)`, so "not confined" is legible in the plist, in `supervisor.json`, in `up --dry-run` and in doctor's `sandbox` row. |
+
+**`/usr/bin/git` is not a git.** Measured on macOS 26.4: it links against
+`/usr/lib/libxcselect.dylib` — it is the xcode-select shim, and under a
+profile that grants exactly that literal it dies with `xcrun: error: unable
+to load libxcrun (… file system sandbox blocked open())`. So `up` resolves a
+**real** git by absolute path — the bundled `runtime/git` first, then a
+non-shim git on PATH, then the Command Line Tools — and grants its whole
+prefix (`bin/git`, `libexec/git-core/`'s 172 helpers, `share/git-core`'s
+templates). On a Mac with none of those, `up` declines to confine the job and
+says why: a reconciler that cannot run git is not a reconciler.
+
+**Pushing while confined** works over HTTPS, and the path is worth knowing
+because it is not the obvious one (`docs/ops/reconciler.md` has the table).
+git executes *every* credential helper through `/bin/sh` — including the
+built-in `osxkeychain` that `metistry connect-repo` configures — and there
+is no shell here, so no helper can run. `GIT_ASKPASS` **can**: git execs it
+directly, by absolute path, with no shell. So the token stays in the login
+Keychain where `connect-repo` put it, the **supervisor** reads it there once
+at spawn (it is unconfined, it is the parent, and the item is filed `-A` so
+the read is promptless), and hands it to the child in its environment; a
+`#!<node>` shim `up` generates prints it when git asks. The credential is
+never in argv, never in `supervisor.json` and never on disk. `git.ts` adds
+`-c credential.helper=` — git's documented reset — only when there is an
+askpass, so an unconfined install keeps using the Keychain helper exactly as
+before.
+
+**SSH remotes are the one shape confinement cannot serve.** `ssh` is not
+exec-able, granting it would mean granting the sole committer `~/.ssh`, and
+ssh's `ProxyCommand` runs through a shell so it could not reach the egress
+proxy either. `up` warns when it sees one; use an HTTPS remote or the off
+switch.
+
+## The egress door
+
+One HTTP **CONNECT** proxy, in the supervisor, bound to `127.0.0.1` on the
+egress port (`7814` by default; the last slot of a namespaced instance's
+port block). Both confined children's profiles allow that one port and no
+other off-machine destination, so it is the only way out.
+
+| | |
+|---|---|
+| allowlist | **derived**: every provider `base_url` host in this install's `compute.yaml`, every remote host in the instance repo's `.git/config`, and any non-loopback `METISTRY_*_URL`. Written into `supervisor.json` by `up`, read by the supervisor **before it spawns anything** — a child cannot widen it. |
+| matching | exact host, exact port. No wildcards, no suffix rules: a bare entry means 443 and nothing else. |
+| auth | `Proxy-Authorization: Basic <child>:<token>`, one 256-bit token per confined child, minted once and kept across `up` runs. Loopback is not a trust boundary (invariant 8), and the bearer is what puts a NAME on the audit row. |
+| audit | every refusal is a `runs` row — `component: egress-proxy`, `kind: egress`, `meta: {host, port, reason, child}`. |
+| interception | **none.** CONNECT only; a cleartext `GET http://…` gets a 405. The proxy learns a host name and a port and never a byte of the tunnel. |
+
+The children reach it as `HTTPS_PROXY`/`HTTP_PROXY`/`ALL_PROXY` with
+`NO_PROXY=localhost,127.0.0.1,::1`, plus **`NODE_USE_ENV_PROXY=1`** — which
+is load-bearing and easy to miss: Node's global `fetch` ignores the proxy
+variables without it (undici's `EnvHttpProxyAgent`, available since Node
+22.15). git's environment in `apps/reconciler/src/git.ts` is a deliberate
+allowlist, so it gets `METISTRY_GIT_HTTP_PROXY` and turns it into
+`-c http.proxy=…`.
+
+Measured end to end on macOS 26.4: an allowlisted host returns 200 through
+the door; a non-allowlisted one comes back `Request was cancelled` for
+`fetch` and `fatal: … CONNECT tunnel failed, response 403` for git, with
+`[egress] refused assistant → api.openai.com:443 (not-allowlisted)` in the
+supervisor's log; and with the proxy variables removed the profile alone
+refuses the direct connect.
+
+The proxy is in the **supervisor** rather than the console because it is the
+parent of both confined children (so the port and the allowlist are set
+before either exists), because its lifetime is the install's, because it
+already holds the invariant-3 pool the audit row needs, and because the
+console's mutating surface is a closed enumerated set (invariant 10) that
+should not grow a listener.
+
+Under `compose` there is no proxy and no profile: the container is the
+boundary.
 
 ## Secrets in plists
 
@@ -659,6 +859,10 @@ to one `status` call on the control socket — and a `child:<name>` row for each
 child, with its state, pid, restart count and log path. `launchctl print`
 cannot see those processes, so without this doctor would be blind to
 everything except the agent itself.
+
+On macOS it also adds a `keep-awake` row — this install's power policy and
+whether anything is actually holding the assertion right now ("Keeping the
+Mac awake" above). It is never `failed`.
 
 Logs, under launchd: `/tmp/metistry-{supervisor,db,console,assistant,reconciler}.log`,
 or `/tmp/metistry-<suffix>-<service>.log` on a namespaced instance.

@@ -31,7 +31,7 @@ export interface ReplyReviewCtx extends RoutineCtx {
 }
 
 const FALLBACK_DAYS = 7; // window to look back when the routine has never emitted a proposal
-const MAX_CASES = 20; // the proposal is for reading; beyond this it is a query, not a prompt card
+const MAX_CASES = 20; // limit: fixed — the proposal is for reading; beyond this it is a query, not a prompt card
 const PROMPT_CHARS = 300;
 const REPLY_CHARS = 400;
 const LONG_REPLY_CHARS = 2000;

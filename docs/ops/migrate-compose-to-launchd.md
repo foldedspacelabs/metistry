@@ -62,6 +62,13 @@ database is only ever written once.
    ls "$(metistry version --json | python3 -c 'import json,sys;print(json.load(sys.stdin)["product_dir"])')/current/ops/sandbox/assistant.sb"
    ```
 
+   Since 2026-09-19 the directory carries three profiles — the assistant's,
+   the reconciler's (`reconciler.sb`, the sole committer's confinement) and
+   `unconfined.sb`, the reconciler's documented off switch. `pack-runtime.sh`
+   asserts all three. A pack from before then has only the first, and `up`
+   on it will decline to confine the reconciler and say so rather than
+   failing (`docs/ops/reconciler.md`).
+
 2. **The bundled runtime installed** — `<product>/runtime/` with node,
    Postgres 17 + pgvector and git (`docs/ops/bundled-runtime.md`).
    `metistry update --channel release` puts it there. `migrate-shape`
@@ -318,8 +325,8 @@ calendar bridge is a healthy install, and doctor reports it `absent`.
 `afm-helper.app` in the `macos-app` release job — it already has the
 certificate and already re-signs every Mach-O it embeds
 (`ops/release/build-app.sh`) — and copy them into the runtime pack. Then
-`pack-runtime.sh` can assert their presence the way it now asserts
-`ops/sandbox/assistant.sb`, and this pin can go away. Until it lands, a
+`pack-runtime.sh` can assert their presence the way it now asserts each
+`ops/sandbox/*.sb`, and this pin can go away. Until it lands, a
 release install's TCC bridges depend on a git checkout on the same Mac
 having built them.
 

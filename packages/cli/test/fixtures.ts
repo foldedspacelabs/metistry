@@ -32,17 +32,44 @@ export const SUPERVISOR = "com.foldedspacelabs.metistry";
 /** The agents the COMPOSE shape installs, in ops/launchd file-name order (no supervisor: that is the launchd shape's). */
 export const JOBS = [HELPER, RECONCILER, WATCHDOG] as const;
 
+export const RETIRED_SERVICES = {
+  compose: ["eventkit-helper"],
+  launchd: ["db", "console", "assistant", "reconciler", "watchdog", "eventkit", "apple-fm", "eventkit-helper"],
+} as const;
+
 /**
- * What `up` does before installing anything: boot out the agents this shape
- * no longer has. Under compose that is only the EventKit helper's old label
- * (`eventkit-helper` → `calendar`); under launchd it is the whole
+ * The retire step as a PLAN — what a dry run prints, which is still the
+ * whole unconditional set: a dry run runs no probe, so it shows the most a
+ * real run could do. Under compose that is only the EventKit helper's old
+ * label (`eventkit-helper` → `calendar`); under launchd the whole
  * pre-supervisor set.
  */
 export const retired = (home: string, shape: "compose" | "launchd" = "compose") =>
-  (shape === "launchd" ? ["db", "console", "assistant", "reconciler", "watchdog", "eventkit", "apple-fm", "eventkit-helper"] : ["eventkit-helper"]).flatMap((s) => {
+  RETIRED_SERVICES[shape].flatMap((s) => {
     const label = `com.foldedspacelabs.metistry.${s}`;
     return [`launchctl bootout gui/501/${label}`, `rm -f ${home}/Library/LaunchAgents/${label}.plist`];
   });
+
+/**
+ * The retire step as SUBPROCESSES a real run makes. A fake checkout has none
+ * of these labels loaded and no plist for any of them in ~/Library/LaunchAgents,
+ * so the one `launchctl list` answers for all of them and nothing is booted
+ * out — which is exactly the state of a Mac that migrated to the supervisor
+ * months ago.
+ */
+export const retiredCalls = (home: string, shape: "compose" | "launchd" = "compose", loaded: readonly string[] = []) => [
+  "launchctl list",
+  ...RETIRED_SERVICES[shape]
+    .filter((s) => loaded.includes(s))
+    .flatMap((s) => {
+      const label = `com.foldedspacelabs.metistry.${s}`;
+      return [`launchctl bootout gui/501/${label}`, `rm -f ${home}/Library/LaunchAgents/${label}.plist`];
+    }),
+];
+
+/** `launchctl list` output: the header, then a line per loaded label. */
+export const launchctlList = (services: readonly string[]) =>
+  ["PID\tStatus\tLabel", ...services.map((s, i) => `${100 + i}\t0\tcom.foldedspacelabs.metistry.${s}`), ""].join("\n");
 
 /** The supervisor's shape: the `Metistry` symlink, the watchdog's entry point, and the config `up` writes. */
 export const supervisorJob = () =>

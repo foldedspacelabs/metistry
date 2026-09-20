@@ -9,8 +9,8 @@ import {
   EmbedClient,
   firstOnMachineBaseUrl,
   INSTANCE_LAYOUT,
-  RULES_FILES_DEFAULT,
-  instancePath,
+  overlayFilesFromEnv,
+  resolveInstanceLayout,
   intEnv,
   optionalEnv,
   requireEnv,
@@ -26,16 +26,18 @@ import { makeServer } from "./server.js";
 import { pushConfigFromEnv, startNotifier } from "./push.js";
 import { collectors } from "@metistry-apps/collectors";
 import { routines } from "@metistry-apps/routines";
-import { loadSchedules, startRunner } from "./runner.js";
+import { loadSchedules, routineCapabilities, startRunner } from "./runner.js";
 import { loadRules } from "./router.js";
 import { watchCompute } from "./compute.js";
 import { TargetRegistry } from "./dispatch.js";
 import { dirSink, vaultSink, DEFAULT_MAX_TRACKED_BYTES, INBOX_PREFIX, vaultBridgeLister, vaultBridgeSearcher, vaultBridgeWriter } from "@foldedspacelabs/metistry-mcp-brain";
 import { ASSISTANT_DEFAULT_AREAS, INTERNAL_ASSISTANT_ID, ensureInternalAgent, revokeAgent, validateGrants } from "./agents.js";
 import { httpVaultClient } from "./vault-client.js";
+import { vaultBridgeSearch } from "./knowledge-routes.js";
+import type { ComputeAdmin } from "./compute-routes.js";
 import { CrewRegistry } from "./crews.js";
 import { readFile } from "node:fs/promises";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { defaultGatewayFrom, parseTrustedProxies } from "./local-owner.js";
 import { canonicalOrigin } from "./webauthn.js";
 import { loadPublicIdentity } from "./identity.js";
@@ -70,9 +72,14 @@ for (const dir of optionalEnv("METISTRY_QUERIES_DIRS", "seed/queries").split(":"
   await queries.loadDir(dir);
 }
 
-// D4 overlay for rules too: last existing file wins.
+// D4 overlay for rules too: last existing file wins. The instance half is
+// resolved against METISTRY_INSTANCE_DIR (core's `overlayFilesFromEnv`), not against
+// this process's cwd — the launchd console runs with the PRODUCT checkout as
+// its working directory, so a relative `.metistry/rules.yaml` named the
+// product's own directory and the router ran on the SEED's rules while the
+// instance's file sat unread.
 let rules;
-for (const p of optionalEnv("METISTRY_RULES_FILES", RULES_FILES_DEFAULT).split(":")) {
+for (const p of optionalEnv("METISTRY_RULES_FILES", overlayFilesFromEnv(process.env, "rules")).split(":")) {
   try {
     rules = loadRules(await readFile(p, "utf8"));
   } catch (err: any) {
@@ -149,7 +156,12 @@ const readKnowledge = vault ? async (path: string): Promise<string | null> => (a
 // knowledge_list / knowledge_grep (docs/research/2026-09-stash-review.md item 3): the same bridge, its list and keyword-search endpoints.
 const listKnowledge = reconcilerUrl && reconcilerToken ? vaultBridgeLister({ url: reconcilerUrl, token: reconcilerToken }) : undefined;
 const searchVaultKeyword = reconcilerUrl && reconcilerToken ? vaultBridgeSearcher({ url: reconcilerUrl, token: reconcilerToken }) : undefined;
-if (!vault) console.warn("vault bridge absent: set METISTRY_RECONCILER_URL + METISTRY_BRIDGE_TOKEN_RECONCILER for knowledge_read, knowledge_write, knowledge_list, knowledge_grep and artifacts (degrades: absent)");
+// GET /api/knowledge/search (docs/ops/console-api.md): the SAME bridge
+// endpoint, in a caller-chosen mode and carrying snippets. The keyword-pinned
+// searcher above stays exactly what it is — knowledge_grep's candidate
+// pre-filter — because widening it would change what a grep costs.
+const searchKnowledge = reconcilerUrl && reconcilerToken ? vaultBridgeSearch({ url: reconcilerUrl, token: reconcilerToken }) : undefined;
+if (!vault) console.warn("vault bridge absent: set METISTRY_RECONCILER_URL + METISTRY_BRIDGE_TOKEN_RECONCILER for knowledge_read, knowledge_write, knowledge_list, knowledge_grep, /api/knowledge/* and artifacts (degrades: absent)");
 
 // Captures live in the vault at `Inbox/` (docs/ops/inbox.md), so
 // Obsidian sees them and git carries them. The bytes go through the SAME
@@ -159,9 +171,17 @@ if (!vault) console.warn("vault bridge absent: set METISTRY_RECONCILER_URL + MET
 // working (SHOULD-10 — one silent drop ends the trust), those files are not
 // in the vault, and moving them into `Inbox/` later is enough for
 // the reconciler's scan to pick them up.
-const inboxDir = optionalEnv("METISTRY_INBOX_DIR", process.env.METISTRY_INSTANCE_DIR ? `${process.env.METISTRY_INSTANCE_DIR.replace(/\/+$/, "")}/${INBOX_PREFIX}` : `./${INBOX_PREFIX}`);
+//
+// An instance that has not run `metistry migrate-layout` yet still keeps its
+// vault — and so its inbox — in `Knowledge/`. Both the directory and the
+// prefix the rows are recorded under come from the resolved layout rather
+// than the flat spelling: a legacy instance would otherwise capture into a
+// new root `Inbox/` that its own Obsidian vault cannot see.
+const inboxLayout = process.env.METISTRY_INSTANCE_DIR ? resolveInstanceLayout(process.env.METISTRY_INSTANCE_DIR) : undefined;
+const inboxPrefix = inboxLayout?.layout.inboxDir ?? INBOX_PREFIX;
+const inboxDir = optionalEnv("METISTRY_INBOX_DIR", inboxLayout ? inboxLayout.path("inboxDir") : `./${INBOX_PREFIX}`);
 const maxTrackedBytes = intEnv("METISTRY_INBOX_MAX_TRACKED_BYTES", DEFAULT_MAX_TRACKED_BYTES);
-const inbox = vault ? vaultSink(vault, { maxTrackedBytes }) : dirSink(inboxDir, { prefix: inboxDir.endsWith(INBOX_PREFIX) ? INBOX_PREFIX : "", maxTrackedBytes });
+const inbox = vault ? vaultSink(vault, { prefix: inboxPrefix, maxTrackedBytes }) : dirSink(inboxDir, { prefix: inboxDir.endsWith(inboxPrefix) ? inboxPrefix : "", maxTrackedBytes });
 console.log(`captures: ${inbox.describe}${maxTrackedBytes > 0 ? `, over ${maxTrackedBytes} bytes to .large/ (gitignored)` : ""}`);
 
 // Phase 6: knowledge_search mode=semantic|hybrid needs to embed the QUERY
@@ -198,7 +218,7 @@ setInterval(() => crews.refresh().then(logCrewSync, (err) => console.error("crew
 // GET /api/identity: identity.yaml through the assistant's overlay rule
 // (docs/ops/assistant-tools.md), defaulting to the instance repo's copy when
 // METISTRY_INSTANCE_DIR says where that is.
-const identityFiles = optionalEnv("METISTRY_IDENTITY_FILES", `seed/identity.yaml:${instancePath(process.env.METISTRY_INSTANCE_DIR || ".", "identity")}`);
+const identityFiles = optionalEnv("METISTRY_IDENTITY_FILES", overlayFilesFromEnv(process.env, "identity"));
 const identity = await loadPublicIdentity(identityFiles);
 if (!identity) console.warn(`identity absent: no complete identity.yaml (name + instance_id) in ${identityFiles} — GET /api/identity answers 503 (degrades: absent)`);
 
@@ -207,8 +227,35 @@ if (!identity) console.warn(`identity absent: no complete identity.yaml (name + 
 // default — an install's peers are its own — so an instance dir is what
 // makes the route answer at all.
 const instanceDir = process.env.METISTRY_INSTANCE_DIR?.replace(/\/+$/, "");
-const instancesFiles = process.env.METISTRY_INSTANCES_FILES ?? (instanceDir ? instancePath(instanceDir, "instances") : undefined);
+const instancesFiles = process.env.METISTRY_INSTANCES_FILES ?? (instanceDir ? resolveInstanceLayout(instanceDir).path("instances") : undefined);
 if (!instancesFiles) console.warn("peer registry absent: neither METISTRY_INSTANCES_FILES nor METISTRY_INSTANCE_DIR is set — GET /api/instances answers 503 (degrades: absent)");
+
+// `/api/compute*` (docs/ops/compute.md "From the console"): the same verbs
+// `metistry compute` runs, over HTTP, for the `user` principal only. They
+// open `<instanceDir>/.metistry/compute.yaml` as a YAML document, so the
+// console has to be able to SEE that directory — which is exactly the
+// difference between the shapes: the compose console gets no instance mount
+// by design (D5), the launchd/native one runs as the user in the instance's
+// own environment. Unset or unreadable → every compute route answers 503,
+// and `metistry compute` on the Mac is still the whole surface.
+const computeAdmin: ComputeAdmin | undefined =
+  instanceDir && existsSync(instanceDir)
+    ? {
+        instanceDir,
+        // Relative, like every other product default here
+        // (METISTRY_QUERIES_DIRS, METISTRY_AGENTS_DIRS): both shapes run the
+        // console with the directory holding `seed/` as its cwd.
+        seedDir: optionalEnv("METISTRY_SEED_DIR", "seed"),
+        env: process.env,
+        platform: process.platform,
+        uid: process.getuid?.() ?? 0,
+      }
+    : undefined;
+console.log(
+  computeAdmin
+    ? `compute admin: ${resolveInstanceLayout(computeAdmin.instanceDir).path("compute")} (secret presence ${computeAdmin.platform === "darwin" ? "from the login Keychain" : "unknown — no Keychain on " + computeAdmin.platform})`
+    : "compute admin absent: METISTRY_INSTANCE_DIR is unset or not readable — /api/compute* answers 503; `metistry compute` still works (degrades: absent)",
+);
 
 const server = makeServer(pool, queries, {
   origin,
@@ -233,6 +280,8 @@ const server = makeServer(pool, queries, {
   ...(writeKnowledge ? { writeKnowledge } : {}),
   ...(listKnowledge ? { listKnowledge } : {}),
   ...(searchVaultKeyword ? { searchVaultKeyword } : {}),
+  ...(searchKnowledge ? { searchKnowledge } : {}),
+  ...(computeAdmin ? { computeAdmin } : {}),
   ...(vault ? { vault } : {}),
   crews,
   compute: () => compute.store.current,
@@ -263,6 +312,16 @@ startRunner(pool, scheduled, {
   // `uses_model:` picks the provider out of it (runner.ts).
   compute: () => compute.store.current,
   secretEnv: process.env,
+  // What a ROUTINE needs and no collector does (docs/product/daily-flow-spec.md
+  // §7): the named-query store, so every row `plan-tomorrow` renders comes
+  // through a named query and not through SQL of its own (invariant 3); the
+  // vault bridge, which is where `Templates/Plan.md` is read from and
+  // `Journal/Plan/<date>.md` is written to; and the `TemplateReader` adapter
+  // over that same bridge, which `Templates/Fold.md` renders through
+  // (`knowledge-fold`'s `FoldCtx.reader` has no `vault` field of its own).
+  // All three are built once, here, from the objects this process already
+  // built for the server — one console, one way in.
+  ...routineCapabilities(queries, vault),
   ...(process.env.METISTRY_EK_URL ? { ekUrl: process.env.METISTRY_EK_URL } : {}),
   ...(process.env.METISTRY_BRIDGE_TOKEN_EVENTKIT ? { ekToken: process.env.METISTRY_BRIDGE_TOKEN_EVENTKIT } : {}),
   ...(process.env.METISTRY_GITHUB_TOKEN ? { githubToken: process.env.METISTRY_GITHUB_TOKEN } : {}),

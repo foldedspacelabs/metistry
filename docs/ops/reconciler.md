@@ -22,6 +22,49 @@ capture; an edit to one that is already there refreshes its hash and sends
 it back to the drain; a deleted file archives its row. It lives here
 because this is already the process that walks the tree and hashes it.
 
+And the same walk indexes **the tasks in your notes** — see below.
+
+## The task pass
+
+Every `- [ ] …` line in the vault becomes a `vault_tasks` row, and every
+`[[note#^mt-…]]` that names one becomes a `vault_task_refs` row
+(`docs/product/daily-flow-spec.md` §1.5, migration `0024_vault_tasks.sql`).
+Both tables are **derived in full**: drop the database, let one walk run,
+and every row comes back from the markdown that produced it (invariant 1).
+Neither is ever backed up and neither needs to be.
+
+**Nothing is written back to a note.** The parser reads loosely — `due
+friday`, `critical`, `@Jim`, and on read only, Dataview's `[due:: …]` and
+the Tasks plugin's emoji — and the resolved values land beside the line, in
+the index. The only hand that edits a task line is yours (§1.4, D3).
+
+| | |
+| --- | --- |
+| **which notes** | every markdown note the knowledge walk sees, except `Templates/` (a template *describes* tasks, it does not hold them) and except a note whose frontmatter `source:` is somebody else's. A note with `source: user`, or with no `source:` at all, is yours. |
+| **which notes are skipped, and why** | `Journal/Plan/…`, `Journal/Fold/…` and `Journal/Standup/…` are machine files with one writer each (§5.1). What they show is a generated list today and a transclusion once anchors exist — a **view**, never a second canonical line — so indexing them would double every todo they mention and re-date it to the day the plan was written. The test is the file's own `source:`, the same ownership vocabulary `knowledge_write` refuses on, so a plan you keep somewhere else is still indexed and a routine that writes somewhere new is still skipped, with nothing to keep in sync. |
+| **identity** | the `^mt-…` block anchor when the line carries one — so the line keeps its identity when it moves to another note. Without one it is `h:<sha256 of the normalised text>:<ordinal among identical lines in that file>`: stable across a field edit, and deliberately not across a text edit. Change `due friday` to `due 2026-09-25` and it is the same task; re-type the words and it is a new one with a fresh ageing clock. |
+| **when a row is re-derived** | when the note's bytes change (or when the table and the vault disagree, which is how a half-emptied table heals itself). Not on every cycle, and that is the point: `due friday` is resolved against the day the walk **read** the line, `parsed_on` records which day that was, and a row re-derived every five minutes would slide a Friday task onto the next Friday the moment that one passed. |
+| **`first_seen_on`** | survives a re-walk, an edit that keeps the key, and a rename. It is the ageing clock and the only column that is not a pure projection of the current bytes — recoverable from git, and a rebuild that resets it loses a nudge, not a task. |
+| **`done_on`** | the `done …` on the line when there is one. A `[x]` with no date is stamped the **first walk that saw it checked** and `done_on_observed` says so; that date never moves afterwards, and un-ticking the box clears it rather than leaving a lie. |
+| **duplicates** | the same text open in two notes is two rows — markdown is the record — and the later-seen one carries `duplicate_of`. "Earlier" is `first_seen_on`, then path and key in byte order, so the pair resolves the same way on your Mac and in a Linux container. Closing either one settles the group. |
+| **recurrence** | `- [ ] Water the plants every week` is a **rule**, never a task, and every open-task query excludes it. The instance your daily-note template materialises (`source template:recurring`) points back at the rule as `recur_parent`, and the rule's `recur_next` moves past each instance you **close** — past the closed ones only, so a rule whose instance is still open keeps falling due and the plan carries that one over instead of minting a second. |
+| **`work.meta.blocked_by`** | read, never written (§3). A `work` row naming a human todo as `vault:<path>#^mt-…` gets a ref row of its own (`kind: blocked_by`, `from_path: work:<id>`), which is what lets the board and the plan say "waiting on you". It **surfaces and never gates**: `depends_on`, `DEPS_CLOSED` and claimability are untouched, so a typo in a note can never stall an agent. |
+
+`POST /reconcile` returns the counts as `tasks: {files, rows, added,
+removed, duplicates, warnings, refs}`, and each cycle records the same
+numbers on its `runs` row.
+
+**What it costs.** On a 400-note fixture carrying 4,000 task lines and 400
+block-anchored references: a cold walk with every note dirty is 1,098 ms end
+to end (≈3,600 task rows/sec) against 385 ms for the same vault with no task
+lines in it; a quiet walk over it is 212 ms against 46 ms. The parse runs
+over every note on every cycle and the writes do not, which is where the
+difference between those two numbers lives.
+
+Reading any of it is a **named query** — `vault_tasks_query`,
+`vault_tasks_recurring`, `task_ageing` in `seed/queries/` — never a second
+component with a connection string.
+
 ## Pointing it at an instance repo
 
 The reconciler needs exactly one path: `METISTRY_INSTANCE_DIR`, the working
@@ -31,9 +74,13 @@ configured entirely from the product checkout's `.env`:
 
 ```sh
 METISTRY_INSTANCE_DIR=/Users/you/metistry-instance   # the ONLY process that holds it
-METISTRY_BRIDGE_TOKEN_RECONCILER=<mint one>           # every caller presents this
+METISTRY_BRIDGE_TOKEN_RECONCILER=<mint one>           # the console's bearer, and everything it fronts
+METISTRY_BRIDGE_TOKEN_RECONCILER_USER=<mint another>  # the OWNER's: the only one that may write .metistry/
 METISTRY_RECONCILER_URL=http://host.docker.internal:7812   # how the console container reaches it
 ```
+
+The two bearers are the §4.7 boundary and are never the same value — see
+"The principal comes from the credential" below, and docs/ops/auth.md.
 
 Mint the token the same way as the other bridges:
 
@@ -55,9 +102,11 @@ curl -s -H "Authorization: Bearer $METISTRY_BRIDGE_TOKEN_RECONCILER" http://127.
 
 `check()` probes behaviour, not configuration: the repo is present, git
 runs, `HEAD` is readable, `.metistry/` lists, and it reports the commit
-queue depth plus the last flush / push / reconcile. `degraded` with a
-remediation string means "it runs but something needs your hand" (no
-commits yet, `.metistry/` missing, last push failed).
+queue depth plus the last flush / push / reconcile, and which bearers it
+holds (`principal_from_credential`, `owner_bearer`). `degraded` with a
+remediation string means "it runs but something needs your hand" (no owner
+bearer, so no protected path is writable by anyone; no commits yet;
+`.metistry/` missing; last push failed).
 
 Restart the console (`docker compose up -d console`) so it picks up
 `METISTRY_RECONCILER_URL`; `mcp-brain`'s `knowledge_read` then serves note
@@ -86,8 +135,10 @@ is named — `rules.yaml`, config dirs, `metistry.lock`) + `.gitignore` + one
 three `.env` lines above — the `METISTRY_BRIDGE_TOKEN_RECONCILER` it shows
 is minted once and written nowhere, so copy it then. Add a private remote
 whenever you like — `metistry connect-repo <url>` sets `origin`, leaves a
-credential this service can push with unattended (macOS Keychain + the
-`osxkeychain` helper), flushes this queue and pushes once
+credential this service can push with unattended (macOS Keychain; a
+confined reconciler reads it through `GIT_ASKPASS` rather than the
+`osxkeychain` helper — "Pushing while confined" below), flushes this queue
+and pushes once
 (`docs/ops/cli.md`); push from then on is best-effort on the schedule
 below.
 
@@ -97,8 +148,10 @@ so Obsidian ignores it without any configuration.
 
 ## The bridge
 
-Every route requires `Authorization: Bearer $METISTRY_BRIDGE_TOKEN_RECONCILER`
-(loopback is not a trust boundary — CRIT-9). Errors are the core envelope
+Every route requires a bearer — `$METISTRY_BRIDGE_TOKEN_RECONCILER` for any
+caller, `$METISTRY_BRIDGE_TOKEN_RECONCILER_USER` for the owner class (loopback
+is not a trust boundary — CRIT-9). Which one you present decides what you may
+write, not what you may read. Errors are the core envelope
 `{ "error": { "code", "message" } }` with the usual status mapping
 (401 unauthenticated, 403 forbidden, 404 not_found, 400 invalid_request,
 409 conflict, 503 not_available).
@@ -120,12 +173,14 @@ Every route requires `Authorization: Bearer $METISTRY_BRIDGE_TOKEN_RECONCILER`
 | `GET /embeddings/status` | what is stored: model, dim, row count, how many notes are behind, whether a rebuild is required |
 
 **Intents.** Every mutation carries
-`intent: { principal, message, group? }`. `principal` is a lowercase slug
-the *caller* is trusted for (the console stamps it from the credential;
-the engine's `brain-commit` passes `assistant`). It becomes the commit
-author — `Metistry <principal>` (prefix from `METISTRY_GIT_AUTHOR_NAME`),
-stamped server-side; a request cannot name an author. `group` batches
-several writes into one commit; absent, the principal is the group.
+`intent: { principal, message, group? }`. `principal` is a lowercase slug —
+**attribution**, not authority. It becomes the commit author,
+`Metistry <principal>` (prefix from `METISTRY_GIT_AUTHOR_NAME`), stamped
+server-side; a request has never been able to name an author, and since
+2026-09-20 it cannot name its own authority either (below). The console
+stamps it from ITS credential; the engine's `brain-commit` passes
+`assistant`. `group` batches several writes into one commit; absent, the
+principal is the group.
 
 **What the tool refuses, for everyone:** `..`, absolute paths, drive
 letters, control characters, any `.git` segment, anything under
@@ -138,13 +193,27 @@ Linux container would fork the tree), and content over
 listable and readable like the rest of the vault, writable through this
 bridge by the capture principal and the assistant alike.
 
-**What only the `user` principal may write (§4.7 protected paths):**
-everything under `.metistry/` except `.metistry/state/` —
-`.metistry/identity.yaml`, `.metistry/rules.yaml`, `.metistry/sources.yaml`,
+**What only the owner may write (§4.7 protected paths):** everything under
+`.metistry/` except `.metistry/state/` — `.metistry/identity.yaml`,
+`.metistry/rules.yaml`, `.metistry/sources.yaml`,
 `.metistry/deployment.yaml`, `.metistry/metistry.lock`, and everything
 under `.metistry/queries/`, `.metistry/agents/`, `.metistry/routines/`,
-`.metistry/extensions/` — plus root `CLAUDE.md` and `README.md`. Every
-other principal gets a uniform `forbidden`.
+`.metistry/extensions/` — plus root `CLAUDE.md` and `README.md`. Anything
+else gets a uniform `forbidden`.
+
+**The principal comes from the credential** (ruled 2026-09-20; the rule and
+its table live in docs/ops/auth.md). Two things are read per mutation, and
+only one of them is in the body:
+
+| Bearer | Caller class | May claim | Protected paths |
+| --- | --- | --- | --- |
+| `METISTRY_BRIDGE_TOKEN_RECONCILER_USER` | `owner` (the CLI) | `user` only | all |
+| `METISTRY_BRIDGE_TOKEN_RECONCILER` | `console` (and all it fronts) | any principal | `.metistry/assistant-prompt.md` and `.metistry/compute.yaml` only — the two owner-authenticated doors the console ships (§4.10 self-modification; the Compute pane's assign/budget) |
+
+A body claiming more than its bearer allows is `forbidden` — never downgraded
+— and the refusal is a `runs` row with the caller class on it. With
+`METISTRY_BRIDGE_TOKEN_RECONCILER_USER` unset, **no** caller may write a
+protected path and `check()` is `degraded` with the command that mints one.
 
 **Compare-and-swap.** Send `expected_sha256` (from a prior read) to refuse
 a write over content you have not seen (`409 conflict`); the empty string
@@ -181,6 +250,105 @@ conflict` rather than being replaced by bytes the agent never read
 (`docs/ops/inbox.md`, `docs/ops/assistant-tools.md`).
 
 
+## Confinement (the `launchd` shape)
+
+Since 2026-09-19 the sole committer runs under a Seatbelt profile,
+`ops/sandbox/reconciler.sb`, applied by `metistry up` as the job's root
+process — so git, and all 172 of its own helper binaries, inherit it. D5
+stops being a design intention and becomes something the kernel enforces.
+
+| | |
+| --- | --- |
+| **writes** | the instance repo (the vault, `.metistry/`, `.git/`) and the temp dir. **Nothing else** — not `~/Documents`, not `~/.ssh`, not the product checkout, not another instance's vault. |
+| **reads** | the product checkout, the node runtime, a real git's installation prefix, system frameworks, and `~/.gitconfig` **by name**. |
+| **execs** | node, that git, and the askpass shim `up` generates. **No shell.** |
+| **dials** | the console, Postgres and the on-machine embedder on loopback, plus the supervisor's egress proxy — the one route off this machine. |
+| **binds** | its own bridge port, and no other. |
+
+`metistry up` prints the profile it will use (and `--dry-run` prints it
+without installing anything); `metistry doctor` carries a `sandbox` row
+naming every confined child and the profile each one actually runs under,
+read back out of `supervisor.json`'s argv.
+
+**`/usr/bin/git` is not a git.** It links against `libxcselect.dylib` — it is
+the xcode-select shim, and under a profile it dies trying to open
+`/Applications/Xcode.app/…/libxcrun.dylib`. So `up` resolves a **real** git
+by absolute path: the bundled `runtime/git` first
+(`docs/ops/bundled-runtime.md`), then a non-shim git on PATH, then
+`/Library/Developer/CommandLineTools/usr/bin/git`. On a Mac with none of
+them `up` declines to confine the job and says so — a reconciler that cannot
+run git is not a reconciler.
+
+### Pushing while confined
+
+**HTTPS push works.** The path is `GIT_ASKPASS`, and it exists because of a
+measurement: git executes *every* credential helper through `/bin/sh` —
+including the built-in `osxkeychain` that `metistry connect-repo`
+configures — and this profile has no shell, so a confined push used to die
+before it began:
+
+```
+fatal: cannot exec 'git credential-osxkeychain get': Operation not permitted
+fatal: could not read Username for 'https://github.com': terminal prompts disabled
+```
+
+Granting `/bin/sh` would not even have been enough (macOS's `/bin/sh`
+re-execs `/bin/bash`), and granting the sole committer a shell is the thing
+the profile exists to prevent. But **`GIT_ASKPASS` is exec'd directly, by
+absolute path, with no shell** — the exec allowlist is its only gate. So:
+
+| | |
+| --- | --- |
+| **where the token lives** | unchanged: the login Keychain, where `metistry connect-repo` put it. No token in `.env`, none in a URL, none in `.git/config`. |
+| **who reads it** | the **supervisor**, once, at spawn. It is unconfined and it is the parent. The read is promptless because `connect-repo` files the item with `-A` — a trade already made and documented in `packages/cli/src/keychain.ts`, because per-binary trust is invalidated by every git update and would turn an unattended push into a GUI prompt nobody is there to click. |
+| **how it reaches git** | the child's environment, as `METISTRY_GIT_ASKPASS_{USER,TOKEN}`, and then a `#!<node>` shim `up` generates at `<instance>/.metistry/state/bin/git-askpass` which prints one of those two and can do nothing else. **Never in argv** — `ps` shows argv to every process on the Mac, and a push runs every hour. |
+| **what `up` records** | `supervisor.json` gains `gitCredentials: [{ child: "reconciler", host: "<your remote's host>" }]` — which item to fetch, never what it holds. |
+| **the helper** | reset for this job with `-c credential.helper=` (git's documented reset), so the repo's `osxkeychain` line cannot fail first. An **unconfined** install is untouched and keeps using the Keychain helper exactly as before. |
+
+Proven end to end by `packages/cli/test/reconciler-push.test.ts`: a real
+push to a real bare repository over real HTTPS, through the CONNECT tunnel,
+under `sandbox-exec` — and the same push, without the reset, failing on
+`osxkeychain`.
+
+If the supervisor finds no keychain item it says so in its log and the child
+starts anyway; the push then fails with `could not read Username`, and
+`metistry connect-repo <url>` files one.
+
+**SSH remotes are still unsupported while confined.** `/usr/bin/ssh` is not
+exec-able under the profile. Allowing it would mean granting the process
+that holds the vault's working tree read access to `~/.ssh` — the owner's
+private keys — and ssh's `ProxyCommand` runs through a shell, so it could
+not reach the egress proxy either. Use an HTTPS remote, or the off switch:
+`METISTRY_RECONCILER_SANDBOX=0` in `<instance>/.metistry/state/.env`, then
+`metistry up`. The job then runs under `ops/sandbox/unconfined.sb`
+(`(allow default)`), and doctor's `sandbox` row says so. `up` warns when it
+sees an SSH remote.
+
+**HTTP(S) goes through the egress door.** The profile denies every outbound
+destination but the supervisor's loopback CONNECT proxy, whose allowlist is
+derived from this repo's own remotes (`docs/ops/deployment-shapes.md`, "The
+egress door"). `up` sets `METISTRY_GIT_HTTP_PROXY`, and `git.ts` turns it
+into `-c http.proxy=…` — explicitly, because this process builds a minimal
+environment per git call and would not otherwise pass `HTTPS_PROXY` through.
+A remote the allowlist does not name comes back as:
+
+```
+fatal: unable to access 'https://elsewhere.test/r.git/': CONNECT tunnel failed, response 403
+```
+
+…and with no proxy configured at all, the profile itself refuses:
+
+```
+fatal: unable to access 'https://github.com/…': Failed to connect to github.com port 443 after 1 ms: Couldn't connect to server
+```
+
+An `http://` remote cannot work at all: the proxy speaks CONNECT only, and
+`connect-repo` already refuses one for the older reason that a credential
+would cross the network in clear text.
+
+Under the `compose` shape none of this applies — there is no profile and no
+proxy.
+
 ## Embeddings (Phase 6)
 
 Every reconcile cycle also brings the vault's **vectors** up to date, in
@@ -216,7 +384,8 @@ Setup, modes, and what "deterministic rebuild" means:
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `METISTRY_INSTANCE_DIR` | — (required) | instance repo working tree |
-| `METISTRY_BRIDGE_TOKEN_RECONCILER` | — (required) | bearer callers present |
+| `METISTRY_BRIDGE_TOKEN_RECONCILER` | — (required) | the bearer any caller presents (caller class `console`) |
+| `METISTRY_BRIDGE_TOKEN_RECONCILER_USER` | — (fail closed when unset) | the OWNER class's bearer: the only credential that may write a §4.7 protected path. Minted by `metistry init` / `up` / `update` / `secrets sync --to env`, never given to the console (docs/ops/auth.md). Equal to the one above = refused at startup |
 | `METISTRY_RECONCILER_HOST` | `127.0.0.1` | bind address (loopback by default, invariant 8) |
 | `METISTRY_RECONCILER_PORT` | `7812` | |
 | `METISTRY_COMMIT_INTERVAL_SEC` | `30` | queue flush cadence |
@@ -232,7 +401,12 @@ Setup, modes, and what "deterministic rebuild" means:
 | `METISTRY_EMBED_DIM` | `768` | must match the model AND the `vector(768)` column |
 | `METISTRY_EMBED_BATCH` | `16` | chunks per `/api/embed` request |
 | `METISTRY_EMBED_MAX_FILES_PER_CYCLE` | `200` | the rest wait for the next cycle |
-| `METISTRY_DB_*` | as elsewhere | the index tables (`knowledge_files`, `knowledge_links`, `embeddings`, `proposals`, `runs`) |
+| `METISTRY_DB_*` | as elsewhere | the index tables (`knowledge_files`, `knowledge_links`, `embeddings`, `vault_tasks`, `vault_task_refs`, `proposals`, `runs`) |
+| `METISTRY_TZ` | unset (then `TZ`, then UTC) | the zone `due friday` and `do monday` resolve against, recorded per row as `parsed_on` |
+| `METISTRY_GIT_HTTP_PROXY` | set by `metistry up` when this install confines the reconciler | the supervisor's egress proxy, passed to git as `-c http.proxy=…` |
+| `METISTRY_GIT_ASKPASS` | set by `metistry up` when this install confines the reconciler | the askpass shim's path. Its presence is also what turns on `-c credential.helper=` — the two move together |
+| `METISTRY_GIT_ASKPASS_USER` / `_TOKEN` | injected by the **supervisor** at spawn, from the login Keychain | the push credential. Never written to disk, never in argv, never in `supervisor.json` |
+| `METISTRY_RECONCILER_SANDBOX` | `1` | `0` runs the job under `ops/sandbox/unconfined.sb` instead — see "Confinement" |
 
 `METISTRY_RECONCILER_URL` is a *console* setting: how the container reaches
 the bridge (`http://host.docker.internal:7812`, explicit host-gateway per

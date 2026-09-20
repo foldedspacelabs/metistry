@@ -13,16 +13,18 @@ import { parse as parseYaml } from "yaml";
 import {
   DEFAULT_DEPLOYMENT,
   DEPLOYMENT_FILENAME,
-  instancePath,
+  instanceFile,
   engineConfigured,
   engineStatus,
   overlayDeployment,
   parseDeployment,
+  SEED_DIR,
   resolveUrl,
   emptyCompute,
   type Compute,
   type Deployment,
   type DeploymentShape,
+  type KeepAwake,
 } from "@foldedspacelabs/metistry-core";
 
 async function readYaml(path: string): Promise<unknown | undefined> {
@@ -41,7 +43,7 @@ export function deploymentPaths(productDir: string, env: NodeJS.ProcessEnv): { s
   const instanceDir = env.METISTRY_INSTANCE_DIR;
   return {
     seed: join(productDir, "seed", DEPLOYMENT_FILENAME),
-    ...(instanceDir ? { instance: instancePath(instanceDir, "deployment") } : {}),
+    ...(instanceDir ? { instance: instanceFile(instanceDir, "deployment") } : {}),
   };
 }
 
@@ -98,6 +100,40 @@ export function applyShapeToYaml(existing: string | undefined, shape: Deployment
   return `shape: ${shape}\n${sep}${existing}`;
 }
 
+/**
+ * The same surgery for `keep_awake:` — one line, every comment and every
+ * other key left alone, so `set-shape` and `set-keep-awake` can never clobber
+ * each other's answer.
+ *
+ * Creating the file from nothing needs the shape as well, and it is the
+ * caller's job to pass the shape ALREADY IN EFFECT (the D4 overlay's answer):
+ * a deployment.yaml carrying only `keep_awake` would parse with `shape`
+ * defaulted to compose and would silently move a launchd install. The one
+ * value in the file is never a new decision.
+ */
+export function applyKeepAwakeToYaml(existing: string | undefined, keepAwake: KeepAwake, shape: DeploymentShape): string {
+  if (existing === undefined) {
+    return [
+      "# deployment.yaml — this instance's deployment shape and power policy",
+      "# (docs/ops/deployment-shapes.md).",
+      "# `metistry init` or `metistry deployment set-keep-awake` wrote this file.",
+      "# The shape below is the one this install already had; change it with",
+      "# `metistry deployment set-shape`, not by hand while services are running.",
+      `shape: ${shape}`,
+      `keep_awake: ${keepAwake}`,
+      "",
+      "services: {}",
+      "",
+    ].join("\n");
+  }
+  if (/^keep_awake:.*$/m.test(existing)) return existing.replace(/^keep_awake:.*$/m, `keep_awake: ${keepAwake}`);
+  // no key yet: put it directly under `shape:` where a reader expects it,
+  // falling back to the top of the file for one that has no shape line either
+  if (/^shape:.*$/m.test(existing)) return existing.replace(/^(shape:.*)$/m, `$1\nkeep_awake: ${keepAwake}`);
+  const sep = existing === "" || existing.endsWith("\n") ? "" : "\n";
+  return `keep_awake: ${keepAwake}\n${sep}${existing}`;
+}
+
 // ---- the environment each host job runs with -------------------------------
 
 export interface ShapeContext {
@@ -124,14 +160,58 @@ export function dbPort(env: NodeJS.ProcessEnv): number {
   return Number.isNaN(n) ? DB_DEFAULT_PORT : n;
 }
 
-/** Everything in the install's environment that belongs to Metistry, with every URL resolved for a host process. */
+/**
+ * The passthrough's ONE exception, and what makes the credential split real.
+ *
+ * `METISTRY_BRIDGE_TOKEN_RECONCILER_USER` is the bearer the vault bridge
+ * treats as the owner's hand — the only credential that may write a §4.7
+ * protected path (apps/reconciler/src/paths.ts). The CLI holds it because the
+ * CLI *is* the person: it runs as them and reads their 0600 `.env`. The
+ * console is a long-running process that terminates the network, multiplexes
+ * every agent on this install and fronts the assistant's whole tool surface;
+ * handing it that bearer would leave the split existing in the variable names
+ * and nowhere else.
+ *
+ * A denylist rather than an allowlist because `consoleEnv` is deliberately a
+ * passthrough (the console is the component that talks to everything, and
+ * docker-compose.yml enumerates the same set): this is the honest translation
+ * of "the console gets the install's environment", plus the one thing it must
+ * not be given. `docker-compose.yml` never listed the variable, so the
+ * compose shape needs no counterpart to this line.
+ */
+export const CONSOLE_ENV_DENY: readonly string[] = ["METISTRY_BRIDGE_TOKEN_RECONCILER_USER"];
+
+/** Everything in the install's environment that belongs to Metistry — minus `CONSOLE_ENV_DENY` — with every URL resolved for a host process. */
 function metistryVars(ctx: ShapeContext): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(ctx.env)) {
-    if (v === undefined || !k.startsWith("METISTRY_")) continue;
+    if (v === undefined || !k.startsWith("METISTRY_") || CONSOLE_ENV_DENY.includes(k)) continue;
     out[k] = k.endsWith("_URL") ? resolveUrl(v, { shape: ctx.shape, vantage: "host" }) : v;
   }
   return out;
+}
+
+/**
+ * Where this install's config is, said OUT LOUD in every child's
+ * environment rather than left to whatever `.env` happens to declare.
+ *
+ * `up` knows the instance directory (`--instance`, or the variable) and the
+ * checkout the jobs run from. Every `*_FILES` overlay default resolves its
+ * instance half against `METISTRY_INSTANCE_DIR` and its seed half against
+ * `METISTRY_SEED_DIR`, so between them these two remove the last thing a
+ * service's config depended on that nothing set: its working directory. A
+ * plist's is the PRODUCT checkout, which is why `.metistry/identity.yaml`
+ * as a relative path found nothing and the engine answered as the seed
+ * (#198, "not fixed here" #1).
+ *
+ * Neither is a credential and neither is optional to get right, so they are
+ * set here rather than allowlisted-if-present.
+ */
+export function instanceVars(ctx: ShapeContext): Record<string, string> {
+  return {
+    ...(ctx.instanceDir ? { METISTRY_INSTANCE_DIR: ctx.instanceDir.replace(/\/+$/, "") } : {}),
+    METISTRY_SEED_DIR: join(ctx.productDir, SEED_DIR),
+  };
 }
 
 /**
@@ -148,9 +228,10 @@ function metistryVars(ctx: ShapeContext): Record<string, string> {
 export function consoleEnv(ctx: ShapeContext): Record<string, string> {
   // the inbox is vault content (docs/ops/inbox.md): `<instance>/Inbox`, the
   // vault root being the instance directory itself
-  const inbox = instancePath(ctx.instanceDir ?? ctx.productDir, "inboxDir");
+  const inbox = instanceFile(ctx.instanceDir ?? ctx.productDir, "inboxDir");
   return {
     ...metistryVars(ctx),
+    ...instanceVars(ctx),
     METISTRY_DB_HOST: "127.0.0.1",
     METISTRY_DB_PORT: String(dbPort(ctx.env)),
     METISTRY_CONSOLE_HOST: "127.0.0.1",
@@ -186,6 +267,13 @@ export function engineAbsentNote(why: string, fix: string): string {
  * allowlisted tool, never through its own environment (invariant 9).
  */
 export const ASSISTANT_ENV_KEYS = [
+  // where this install's config is. `up` sets both itself (`instanceVars`),
+  // and they are here as well so the audit list a reader checks — "what can
+  // the engine see" — is the whole environment and not most of it. Without
+  // the instance directory the engine cannot resolve its own identity.yaml,
+  // which is exactly how it came to answer as the seed.
+  "METISTRY_INSTANCE_DIR",
+  "METISTRY_SEED_DIR",
   "METISTRY_DB_HOST",
   "METISTRY_DB_PORT",
   "METISTRY_DB_NAME",
@@ -230,6 +318,10 @@ export function assistantEnv(ctx: ShapeContext, compute: Compute = emptyCompute(
     const v = ctx.env[k];
     if (v !== undefined && v !== "") out[k] = k.endsWith("_URL") ? resolveUrl(v, { shape: ctx.shape, vantage: "host" }) : v;
   }
+  // the instance directory and the product's seed directory: config, not
+  // credentials, and the engine cannot find this install's identity.yaml,
+  // rules.yaml or compute.yaml without them
+  Object.assign(out, instanceVars(ctx));
   out.METISTRY_DB_HOST = "127.0.0.1";
   out.METISTRY_DB_PORT = String(dbPort(ctx.env));
   out.METISTRY_BRAIN_URL = resolveUrl(ctx.env.METISTRY_BRAIN_URL || `http://127.0.0.1:${consolePort(ctx.env)}/mcp`, { shape: ctx.shape, vantage: "host" });

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { emptyCompute, parseCompute } from "@foldedspacelabs/metistry-core";
-import { ASSISTANT_ENV_KEYS, assistantEnv, assistantEnvKeys, consoleEnv, deploymentPaths, loadDeployment, type ShapeContext } from "../src/deployment.js";
+import { ASSISTANT_ENV_KEYS, assistantEnv, assistantEnvKeys, CONSOLE_ENV_DENY, consoleEnv, deploymentPaths, loadDeployment, type ShapeContext } from "../src/deployment.js";
 
 async function dirs(): Promise<{ product: string; instance: string }> {
   const root = await mkdtemp(join(tmpdir(), "metistry-deploy-"));
@@ -91,6 +91,18 @@ describe("the console's launchd environment", () => {
     expect(e.HOME).toBeUndefined();
   });
 
+  // The misuse test for the credential split (invariant 8): the console's
+  // environment is a passthrough, so the one bearer it must never hold has to
+  // be denied BY NAME here — otherwise `.metistry/` would be one env-var
+  // spread away from the process that terminates the network.
+  it("never carries the vault bridge's OWNER bearer, however it reaches this install's .env", () => {
+    const e = consoleEnv(ctx({ ...env, METISTRY_BRIDGE_TOKEN_RECONCILER: "shared", METISTRY_BRIDGE_TOKEN_RECONCILER_USER: "owner-only" }));
+    expect(e.METISTRY_BRIDGE_TOKEN_RECONCILER).toBe("shared"); // the console keeps its own
+    expect(e.METISTRY_BRIDGE_TOKEN_RECONCILER_USER).toBeUndefined();
+    expect(Object.values(e)).not.toContain("owner-only");
+    expect(CONSOLE_ENV_DENY).toEqual(["METISTRY_BRIDGE_TOKEN_RECONCILER_USER"]);
+  });
+
   it("an inbox the operator set to a real path is kept", () => {
     expect(consoleEnv(ctx({ ...env, METISTRY_INBOX_DIR: "/Users/someone/inbox" })).METISTRY_INBOX_DIR).toBe("/Users/someone/inbox");
     expect(consoleEnv(ctx({ ...env, METISTRY_INSTANCE_DIR: undefined })).METISTRY_INBOX_DIR).toBe("/i/Inbox"); // the container volume path is never kept
@@ -149,5 +161,26 @@ assignments:
 
   it("defaults the brain URL to the console's own port when .env has none", () => {
     expect(assistantEnv(ctx({ METISTRY_CONSOLE_PORT: "8099" })).METISTRY_BRAIN_URL).toBe("http://127.0.0.1:8099/mcp");
+  });
+
+  // #198's "not fixed here" #1: the engine could not find its own instance,
+  // so every overlay default fell back to the product's SEED and it answered
+  // under the wrong name. These two variables are what it resolves against,
+  // and an allowlist that omits them is the bug.
+  it("is told where the instance and the seed are, whatever .env says", () => {
+    const e = assistantEnv(ctx({ METISTRY_DB_PASSWORD: "pw" }));
+    expect(e.METISTRY_INSTANCE_DIR).toBe("/i");
+    expect(e.METISTRY_SEED_DIR).toBe("/p/seed");
+    expect(ASSISTANT_ENV_KEYS).toContain("METISTRY_INSTANCE_DIR");
+    // `up`'s answer wins over a stale line in the file it loaded
+    expect(assistantEnv(ctx({ METISTRY_INSTANCE_DIR: "/somewhere/else" })).METISTRY_INSTANCE_DIR).toBe("/i");
+    // no instance (a checkout-only install): said as absent rather than guessed
+    expect(assistantEnv({ productDir: "/p", env: {}, shape: "launchd", stateDir: "/p/state" }).METISTRY_INSTANCE_DIR).toBeUndefined();
+  });
+
+  it("…and so is the console, which reads the same rules.yaml and compute.yaml", () => {
+    const e = consoleEnv(ctx({ METISTRY_DB_PASSWORD: "pw" }));
+    expect(e.METISTRY_INSTANCE_DIR).toBe("/i");
+    expect(e.METISTRY_SEED_DIR).toBe("/p/seed");
   });
 });

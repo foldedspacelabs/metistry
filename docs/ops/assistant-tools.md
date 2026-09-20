@@ -15,21 +15,149 @@ manifest by test):
 
 | Family | Tools | What it means for the assistant |
 | --- | --- | --- |
-| in | `capture`, `requests_create` | Raise anything unsettled into the inbox / your Needs You queue; you approve, revise, or decline. |
+| in | `capture`, `requests_create`, `request_access` | Raise anything unsettled into the inbox / your Needs You queue; you approve, revise, or decline. `request_access` is the narrow one: an agent asking for a vault area it was refused (`docs/ops/actions.md`). The assistant may ask too since 2026-09-19 — an approval for it is recorded so the next restart does not undo it; see below. |
 | shared work | `tasks_list` (`filter: ready \| mine \| all`), `tasks_claim`, `tasks_renew`, `tasks_update`, `tasks_release`, `tasks_close`, `tasks_create` | Works the same shared list as every other agent — claims, leases, notes, and `tasks_close` to finish one in a single call. |
 | rooms | `tasks_comment`, `tasks_thread` | The conversation on a task ([threads.md](threads.md)) — say what you found, read what the last crew left. Nobody is addressed by it, so nothing is woken; use `agents_delegate` when someone has to act. Resolving a room is your hand in the console, not a tool. |
-| out | `knowledge_search`, `knowledge_read`, `knowledge_list`, `knowledge_grep` | Reads the knowledge index, page contents, a directory listing, and a content regex (all via the reconciler's vault bridge), within its grant — `knowledge_list`/`knowledge_grep` are filesystem semantics over the same tiers `knowledge_search`/`knowledge_read` already enforce (docs/research/2026-09-stash-review.md item 3). `knowledge_read` returns the page's `sha256`. |
+| out | `knowledge_search`, `knowledge_read`, `knowledge_list`, `knowledge_grep` | Reads the knowledge index, page contents, a listing, a page's links (`knowledge_list { links_for }`) and a content regex, within its grant — `knowledge_list`/`knowledge_grep` are filesystem semantics over the same tiers `knowledge_search`/`knowledge_read` already enforce (docs/research/2026-09-stash-review.md item 3). `knowledge_read` returns the page's `sha256`. |
 | write | `knowledge_write` | **This is `brain-commit`** (plan §4.7, D5): one page under the vault root (anywhere outside `.metistry/`) → the reconciler's `POST /vault/write` with a commit intent in the assistant's name. Internal principals only; every external agent is told "not granted". No delete, no rename — those stay your hand. |
 | artifacts | `artifacts_publish`, `artifacts_get`, `artifacts_list`, `artifacts_comment`, `artifacts_resolve`, `artifacts_review` | Publishes versioned output into `Artifacts/<project>/<slug>/` (one commit per version via the reconciler), comments on exact versions, and sends review bundles to other agents in the same project — a review sent across the project boundary becomes a request for you (§4.21). |
 | helper agents | `agents_delegate` | Hands a brief to a helper agent you defined in `agents/<area>/<name>.md` (`docs/ops/crews.md`). Internal principals only; the brief is policy-checked against the helper's scope before a durable work row is written; results come back as the helper's own `requests_create` requests. The `crew` field lists the registered helpers with each manifest's `description:`, so writing one is how you steer the choice. |
-| queries | `queries_list`, `queries_run` | Runs a named query from `seed/queries/` or the instance's `queries/` (invariant 3 — the one read path) for anything you'd otherwise have to guess at or ask the user to look up. Internal principals always have this; an external agent needs an explicit `queries: true` grant. Rows cap at 200. |
+| queries | `queries_list`, `queries_run` | Runs a named query from `seed/queries/` or the instance's `queries/` (invariant 3 — the one read path) for anything you'd otherwise have to guess at or ask the user to look up. Internal principals always have this; an external agent needs an explicit `queries: true` grant. Rows cap at 200. A query whose manifest says `expose: route` is **not** served here — it has a scoped door of its own, and asking for it by name gets the refusal an unknown name gets (below). |
+
+### One scope rule for every knowledge read (ruled 2026-09-19)
+
+Every `knowledge_*` tool and every `/api/knowledge/*` route asks the SAME
+function — `canSeeUnder(path, areas)` in
+`packages/mcp-brain/src/knowledge.ts`, which the console's `canSee` is now a
+rename over. Two conditions, both necessary: the path is vault CONTENT (not
+`.metistry/`, not `Artifacts/`, nothing inside a dot-directory, no traversal,
+not the root `CLAUDE.md` — true for you too, on your own vault), and it falls
+under the caller's areas.
+
+The tier decides which question is being asked:
+
+| tier | may be told a page EXISTS (path, title, one-line description) | may read a page, or traverse its links |
+| --- | --- | --- |
+| `none` | nothing — and is told "not granted", never "not found" | no |
+| `index` | anywhere in the vault index | no — told which area would unlock it (below) |
+| `areas` | inside its granted prefixes | inside its granted prefixes |
+
+`index` browsing titles **outside** any area it can read is the point of the
+tier, not a leak: an agent has to be able to find out that
+`Areas/Health/sleep.md` exists in order to ask you for the area that holds
+it. It never sees a byte of one.
+
+**`queries_run` does not route around that.** A `queries: true` grant is a
+separate axis from the knowledge tier, and until 2026-09-19 it was a way past
+it: the page list and the link graph are named queries, so an agent at tier
+`none` could run `queries_run knowledge_pages` and page the whole index.
+Both manifests carry `expose: route`, and `queries_run` now refuses a
+route-backed query with the unknown-query refusal, byte for byte — so nothing
+on that door tells a caller which route-only queries exist. The rows are
+still reachable, through the door that filters them: `knowledge_list`, which
+runs the same two queries through the same `canSeeUnder`.
+
+### A new read capability is a named query, not a new tool
+
+**The default answer to "the assistant needs to be able to look X up" is a
+named query behind `queries_run`, not another tool.** Ruled 2026-09-19
+(`docs/research/2026-09-19-code-mode-mcp.md` §4.1); invariant 3 already
+requires the query to exist, so a tool would be a second door onto a read
+path that has one.
+
+The arithmetic, measured on this checkout: `seed/queries/` holds 20 named
+queries, and `queries_list` + `queries_run` front all of them for **284
+tokens of always-on definitions** in place of the **2,936** the same 20 would
+cost as individual tools — a 90% reduction, with the index itself deferred
+behind a call. A 21st query costs **~120 deferred tokens and zero eager
+ones**; a 21st tool costs **~180 eager tokens on every turn, forever**, and
+lands on a surface already 6 tools past the count line at which the manifest
+schema says to consider `discovery: lazy` (`ops/scripts/check-tool-surface.mjs`
+prints the headroom on every CI run, and fails on the tool after the number
+acknowledged there — `request_access` moved it 25 → 26 on 2026-09-19, with the
+reasoning written next to the number).
+
+Write the query, give it `expose: generic`, and the assistant can run it the
+day it merges. A new **tool** is for a new *verb* — something the system can
+now do — and it arrives with the lazy-discovery decision attached.
+
+**One refusal vocabulary.** Every refusal on this surface says the one
+sentence its `reason` says, with the facts substituted and the shape never
+(`packages/core/src/access.ts`, and the catalogue in
+`packages/core/test/access.golden.json`). So `queries_list` and
+`queries_run` refuse in the same words; `knowledge_write` and
+`agents_delegate` give the same "belongs to the instance assistant alone"
+sentence; a tier miss names the tier this tool needs and the tier you hold,
+in the words the console uses for them (`none` / `titles` / `folders`).
+Every one of them names what would unlock it and who decides, because a
+refusal with no next move leaves a model retrying the same call.
+
+**And one silence.** Two kinds of refusal are deliberately uninformative and
+will stay so: a route-only named query (`queries_run` answers exactly what
+it answers an unknown name — `no such query: X`) and a row outside your
+projects (`not_found`, because it does not exist for you). They carry no
+`reason` and no remedy. That is not an oversight to be reported; it is the
+answer.
+
+**Asking for more, named instead of guessed (ruled 2026-09-19, PR #216
+judgement call B).** `knowledge_read` and `knowledge_list`'s `links_for` stop
+at the bare "not granted" only when the caller could not already see the
+page — tier `none`, or a path that fails the vault-path rule. For a page
+whose TITLE the caller may already see (tier `index` on any settled page,
+never a draft or a path that was merely guessed) the refusal is structured
+instead: still `isError: true` with the ordinary `error.code: "forbidden"`
+underneath (the envelope invariant 8 promises is unchanged), plus a stable
+machine-readable `reason: "scope_required"` and `grantedScope` — the area
+(the page's own parent directory) that would unlock it — alongside it.
+`error.message` spells out the same thing in a sentence, and names the
+mechanism: **`request_access {area, reason}`** (ruled the same day), which
+writes one `access_request` row into your Needs You queue and grants nothing.
+You answer it with Approve, Revise (grant a narrower folder) or Decline, and
+Approve goes through the same grants door and the same audit row your own
+click in the Agents panel goes through (`PUT /api/agents/:id/grants`,
+`docs/ops/actions.md`). Enforced at the tool, granted by your hand — and a
+refusal that names its own remedy is what keeps a scoped agent from retrying
+the same path forever.
+
+**A crew you dispatch is held to its manifest's `uses` at the door.** Since
+2026-09-20 the console resolves a crew's tool groups from the manifest and
+`/mcp` refuses anything outside them — one `runs` row, the uniform
+`forbidden` envelope, before the tool body runs. Previously only the runner's
+own allowlist refused those calls, which meant a crew's toolset was a
+property of the process that ran it rather than of the tool
+([crews.md](crews.md)). Nothing changed for your own credential or for an
+external agent: neither carries an allowlist, and every refusal they can get
+is byte-identical to what it was.
+
+**Every refusal this surface can give is in one file.**
+`packages/core/test/access.golden.json` is the committed catalogue: one entry
+per door, with the error code, the machine-readable `reason`, the exact
+sentence the caller reads, and the `needs` (if any) that says what would
+unlock it. Every door asks `may()` in `packages/core/src/access.ts` and
+nothing else, so the file is the whole vocabulary rather than a sample of it
+— and changing what a tool says to a model is a diff there, reviewed, instead
+of a string edited inside a handler (`docs/ops/auth.md`, "One decision
+function").
+
+One consequence to know before you Approve: tier `index` browses every title
+in the vault and reads none, tier `areas` sees titles only inside its
+prefixes — so granting an `index` agent one folder **trades** the browse for
+the read. There is one tier, and that trade is the decision.
+
+And one to know before you Decline: the agent is TOLD. A repeat ask for the
+same area does not queue a second row — the tool answers it with the decision
+you already gave and your note, and offers one escalation (`escalate: true`
+with a fuller reason), which arrives flagged *asked again after a decline*.
+Decline that and the area is closed at the tool; what is left is a
+`requests_create` report in words. Mistakes happen, so the ladder has a
+second rung — and exactly one (ruled 2026-09-19).
 
 **Deprecated spellings, one release.** The 2026-09-09 vocabulary
 simplification renamed eleven of these (`docs/product/glossary.md`). The old
 names still work — `report`, `tasks_list_ready`, `tasks_mine`,
 `tasks_heartbeat`, `artifact_*`, `crew_dispatch` — but they are resolved at
 call time and are **not** in `tools/list`, so the surface an agent discovers is
-the twenty-three above. An alias call is audited under the primary name with the old
+exactly the table above. An alias call is audited under the primary name with the old
 spelling in `runs.meta.alias`:
 
 ```sh
@@ -39,10 +167,19 @@ psql -c "SELECT meta->>'alias' AS old, tool AS now, count(*) FROM runs
 
 An empty result is the signal that the aliases can come out.
 
-Every call also takes an optional `turn_id` (`seed/assistant-prompt.md`
-tells the assistant to make one up per reply and reuse it on every call
-within that reply); it lands in the `runs` row's `meta.turn_id`, and the
-`activity_feed` query surfaces it so one reply's calls group together.
+**The turn handle is the client's, not the model's.** Every call carries a
+`turn_id` into the `runs` row's `meta.turn_id`, which the `activity_feed`
+query surfaces so one reply's calls group together — but it is **not a tool
+parameter**. It rides in the MCP call's `_meta`, under
+`com.foldedspacelabs.metistry/turn_id`, and `apps/assistant/src/tools.ts`
+mints one per tool host, i.e. one per reply. Until 2026-09-19 it was an
+optional argument on every tool and the seed prompt asked the model to
+invent one and pass it faithfully: ~940 definition tokens, 18.8% of the whole
+advertised surface, for a field no model should be reasoning about — and a
+convention rather than a control. A client still sending it as an argument is
+tolerated for one release: the bridge lifts it into `_meta` at the door
+(`packages/mcp-brain/src/turn-id.ts`), so nothing that already works stops
+working, and nothing advertises it.
 
 The SDK sees them as `mcp__brain__<tool>`; that fully-qualified list is
 the engine's `allowedTools`, built-in tools are disabled (`tools: []`),
@@ -66,13 +203,22 @@ docker compose up -d --build   # both services read .env
 | `METISTRY_ASSISTANT_PROJECTS` | console | Comma-separated project slugs. **Empty = every project** (mcp-brain's internal rule, `packages/mcp-brain/src/scope.ts`); a list narrows it like any external agent. |
 | `METISTRY_ASSISTANT_AREAS` | console | Comma-separated vault-root prefixes for the grant (anything outside `.metistry/`). Default is the bare vault — the whole thing, root notes included (below). |
 | `METISTRY_RECONCILER_URL`, `METISTRY_BRIDGE_TOKEN_RECONCILER` | console | The reconciler's vault bridge (`docs/ops/reconciler.md`). `knowledge_read`, `knowledge_write`, `knowledge_list`, and `knowledge_grep` all go through it; unset → all answer `not_available` and the brain's `check()` is `degraded`. |
-| `METISTRY_IDENTITY_FILES`, `METISTRY_PROMPT_FILES` | assistant | D4 overlays for `.metistry/identity.yaml` and the seed system prompt (`seed/assistant-prompt.md`); last existing file wins. |
-| `METISTRY_RULES_FILES` | console + assistant | D4 overlay for `.metistry/rules.yaml` (default `seed/rules.yaml:.metistry/rules.yaml`). The console reads the fast paths and the tier menu; the assistant reads the **same `tiers:` block** to resolve a tier name to (model, effort). Unreadable by the assistant → one tier, `METISTRY_MODEL_DEFAULT` at medium effort. |
+| `METISTRY_INSTANCE_DIR`, `METISTRY_SEED_DIR` | every service | Where this install's config is. **Every `*_FILES` default below resolves its instance half against `METISTRY_INSTANCE_DIR` and its seed half against `METISTRY_SEED_DIR`** — absolute paths, never relative to a working directory, because a launchd job's is the product checkout. `metistry up` sets both. Neither set and no `METISTRY_IDENTITY_FILES` either → **the assistant refuses to start** rather than answer as the product's seed. |
+| `METISTRY_IDENTITY_FILES`, `METISTRY_PROMPT_FILES` | assistant | D4 overlays for the instance's `identity.yaml` and the seed system prompt (`seed/assistant-prompt.md`); last existing file wins. Naming them explicitly overrides the resolution above — which is how the compose shape, whose containers mount no instance repo (D5), says "the seed, deliberately". |
+| `METISTRY_RULES_FILES` | console + assistant | D4 overlay for the instance's `rules.yaml` (default `<seed>/rules.yaml:<instance>/.metistry/rules.yaml`). The console reads the fast paths and the tier menu; the assistant reads the **same `tiers:` block** to resolve a tier name to (model, effort). Unreadable by the assistant → one tier, `METISTRY_MODEL_DEFAULT` at medium effort. |
 | `METISTRY_MAX_TURNS` | assistant | Agentic turns per message (default 12 with tools, 4 without). |
 
 Startup logs to look for: console `internal agent 'assistant' registered`
 (or `re-synced`); assistant `tools: 23 via http://console:8080/mcp (...)` (the count tracks `packages/mcp-brain/manifest.yaml`)
-and `identity: <name>`.
+and `identity: <name> from <file>` — which file won is in the line, so an
+install reading the product's seed instead of its own `identity.yaml` is
+visible rather than inferred (the assistant warns on exactly that case).
+
+Under the `launchd` shape the engine runs inside `ops/sandbox/assistant.sb`,
+which denies by default. It is granted read on these four files **by name**
+(`-D CONFIG_IDENTITY=…` and friends, computed by `metistry up`) and on no
+other part of the instance directory: knowledge reaches the engine through
+the brain bridge over HTTP or not at all (D5).
 
 **Rotate** by changing the value in `.env` and restarting both containers:
 the console re-keys the row, the old token dies at once. The console's
@@ -241,6 +387,25 @@ has two consequences worth knowing:
 - A UI **revoke** likewise holds until restart; the durable off switch is
   unsetting `METISTRY_ASSISTANT_TOKEN`, which revokes the row on the next
   start.
+- `request_access` used to refuse an internal principal for exactly that
+  reason: an approved ask would widen the stored grants and the next start
+  would put them back, which is worse than no mechanism — you would believe
+  you had granted it. **Since 2026-09-19 it may ask** (the owner's ruling:
+  "the assistant should be able to ask"), because the approval is no longer
+  only in `agents.grants`. Approving an `access_request` for an internal row
+  also writes `agent_grant_overrides` (migration 0023), and
+  `ensureInternalAgent` MERGES those areas on top of the configured ones at
+  every start. So:
+  - `METISTRY_ASSISTANT_AREAS` is the floor and still narrows everything you
+    have not explicitly approved;
+  - an approved area survives restarts, and is one row you can read in
+    `psql` beside the proposal it came from;
+  - revoking the assistant (unsetting `METISTRY_ASSISTANT_TOKEN`) clears its
+    approvals, which is also how you take one back.
+
+  A **crew** is still refused at the decision: its scope is `scope:` in a
+  manifest the crew sync re-reads, and there is no override table for that —
+  edit the file.
 
 **Grant width — the internal rule.** `validateGrants` refuses a bare vault
 grant for an external agent (an area grant is a prefix; "everything" is not
@@ -282,13 +447,28 @@ Layers, honest about which carry the load:
    traversal, `.git`, symlinks and casing slips. Two
    independent refusals; the assistant cannot touch how the system
    behaves.
-3. **Provenance.** A markdown write gets `source: assistant` and
+3. **Ownership** (one writer, but not one owner — docs/ops/knowledge-fold.md
+   "The guardrail at the tool"). An existing markdown note is refused
+   (`forbidden`, "owned by \<source\>; propose instead") unless its
+   frontmatter `source` is the assistant's own credential id or the evening
+   fold's; new notes are always free. A note with **no `source:` at all is
+   the user's**, not ownerless — that is exactly what a note you wrote by
+   hand in Obsidian looks like, and `knowledge_write`'s whole-file replace
+   must not be the thing that quietly overwrites it (2026-09-19; the
+   original default read "no source" as "free to write", which was the
+   hole). The one exemption is `now.md` at the vault root by exact name, so
+   an instance whose seed predates this fix is not locked out of the note
+   the assistant is required to keep writing — it disappears the moment
+   `now.md` is stamped once. Ownership is read from the note ALREADY ON
+   DISK, never from the incoming `content`, so a write cannot claim a note
+   it does not already own by forging frontmatter in what it sends.
+4. **Provenance.** A markdown write gets `source: assistant` and
    `updated: <today>` merged into its frontmatter — replaced if present,
    appended if not, every other line kept byte for byte, nothing else
    invented. `source` is the credential, so a note claiming another
    author is corrected, not trusted. A block that is not a YAML mapping
    is refused, not guessed at.
-4. **No lost updates, and no way to ask for one.** `knowledge_read`
+5. **No lost updates, and no way to ask for one.** `knowledge_read`
    returns the note's `sha256`; the assistant passes it back as
    `expected_sha256`. A concurrent edit (yours in Obsidian, say) turns the
    write into `conflict` carrying the current hash, and the prompt tells it
@@ -297,7 +477,7 @@ Layers, honest about which carry the load:
    `conflict` instead of being overwritten blind. There is no unconditional
    write — you edit these files by hand, and the assistant has to have seen
    the bytes it replaces (ruled 2026-09-16).
-5. **Audit.** Every call — refusals included — is a `runs` row (below),
+6. **Audit.** Every call — refusals included — is a `runs` row (below),
    and every landed write is a commit in the instance repo's history.
 
 TODO: folding *approved requests* into pages is the evening routine's
@@ -403,7 +583,9 @@ history; a wrong write is a revert.
 
 What lands where: `capture` → an `inbox` row (`source = 'mcp',
 source_agent = 'assistant'`) and, after `inbox-drain`, a proposal at
-`external` trust; `requests_create` → a `proposals` row, kind `report`; `tasks_*`
+`external` trust; `requests_create` → a `proposals` row, kind `report`;
+`request_access` → a `proposals` row, kind `access_request` (plus, when an
+approval widens an internal row, one `agent_grant_overrides` row); `tasks_*`
 → the `work` table with the assistant as `claimed_by` / `created_by` and
 history entries naming it; `knowledge_write` → the file on the
 reconciler's working tree, then a commit. Proposals flow through the same

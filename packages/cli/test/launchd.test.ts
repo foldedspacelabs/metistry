@@ -12,6 +12,19 @@ const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
 
 /** The supervisor plist's own two placeholders — `up` computes them (packages/cli/src/supervisor.ts). */
 const SUPERVISOR_EXTRA = { SUPERVISOR_BIN: "/i/state/bin/Metistry", SUPERVISOR_CONFIG: "/i/state/supervisor.json" };
+/** The assistant job's four config-file sandbox parameters (sandbox.ts `engineConfigParams`). */
+const CONFIG_EXTRA = { CONFIG_IDENTITY: "/i/.metistry/identity.yaml", CONFIG_ASSISTANT_PROMPT: "/i/.metistry/assistant-prompt.md", CONFIG_RULES: "/i/.metistry/rules.yaml", CONFIG_COMPUTE: "/i/.metistry/compute.yaml" };
+/** The reconciler job's own profile parameters (sandbox.ts `reconcilerSandboxParams`) plus the egress door both confined children name. */
+const RECONCILER_EXTRA = {
+  SANDBOX_PROFILE: "/srv/metistry/ops/sandbox/reconciler.sb",
+  INSTANCE_DIR: "/i",
+  GIT_PREFIX: "/Library/Developer/CommandLineTools/usr",
+  GIT_CONFIG_GLOBAL: "/Users/x/.gitconfig",
+  ASKPASS_BIN: "/i/.metistry/state/bin/git-askpass",
+  RECONCILER_TCP: "localhost:7812",
+  EMBED_TCP: "localhost:11434",
+};
+const EGRESS_EXTRA = { PROXY_TCP: "localhost:7814" };
 
 describe("launchd templates", () => {
   it("every shipped plist parses: a label, ProgramArguments, and the checkout-relative code it runs", async () => {
@@ -44,7 +57,12 @@ describe("launchd templates", () => {
 
   it("renders every shipped template with __REPO__, __NODE__ and __ENV_FILE__ replaced and nothing left behind", async () => {
     for (const t of await loadPlistTemplates(repoRoot)) {
-      const out = renderPlist(t.template, { repo: "/srv/metistry", node: "/usr/local/bin/node", envFile: "/i/state/.env", extra: SUPERVISOR_EXTRA });
+      const out = renderPlist(t.template, {
+        repo: "/srv/metistry",
+        node: "/usr/local/bin/node",
+        envFile: "/i/state/.env",
+        extra: { ...SUPERVISOR_EXTRA, ...RECONCILER_EXTRA, ...EGRESS_EXTRA, NODE_PREFIX: "/usr/local", PRODUCT_DIR: "/srv/metistry", STATE_DIR: "/s", TMP_DIR: "/tmp", CONSOLE_TCP: "localhost:8080", DB_TCP: "localhost:5432", ...CONFIG_EXTRA, PG_BIN: "/pg/bin", PG_DATA: "/d" },
+      });
       expect(out, t.file).not.toContain("__");
       expect(out).toContain("/srv/metistry");
       // the environment comes from the INSTANCE, never from the checkout —
@@ -52,7 +70,12 @@ describe("launchd templates", () => {
       // product and instance locations are under `~/Library/Application
       // Support/…` and an unquoted space splits the sh -c command
       if (t.template.includes("__ENV_FILE__")) expect(out, t.file).toContain("set -a; . '/i/state/.env'; set +a;");
-      if (t.template.includes("__NODE__")) expect(out).toContain("exec '/usr/local/bin/node' '/srv/metistry/");
+      // the reconciler's `exec` is `sandbox-exec`, which then runs node —
+      // the sole committer is confined (ops/sandbox/reconciler.sb)
+      if (t.template.includes("__NODE__")) {
+        expect(out, t.file).toContain(t.service === "reconciler" ? "exec '/usr/bin/sandbox-exec' -f '/srv/metistry/ops/sandbox/reconciler.sb'" : "exec '/usr/local/bin/node' '/srv/metistry/");
+        if (t.service === "reconciler") expect(out, t.file).toContain("'/usr/local/bin/node' '/srv/metistry/apps/reconciler/dist/main.js'");
+      }
       expect(out).toContain(`<string>${t.label}</string>`);
       expect(out.split("\n").length).toBe(t.template.split("\n").length); // a substitution, nothing else
     }
@@ -68,13 +91,28 @@ describe("launchd templates", () => {
     const envFile = "/Users/x/Library/Application Support/Metistry/inst/state/.env";
     const node = "/Users/x/Library/Application Support/Metistry/product/runtime/node/bin/node";
     for (const t of await readPlistTemplates(repoRoot)) {
-      const out = renderPlist(t.template, { repo, node, envFile, env: { A: "b" }, extra: { PG_BIN: "/pg/bin", PG_DATA: "/d", NODE_PREFIX: "/n", PRODUCT_DIR: repo, STATE_DIR: "/s", TMP_DIR: "/tmp", CONSOLE_TCP: "localhost:8460", DB_TCP: "localhost:8461", ...SUPERVISOR_EXTRA } });
+      const out = renderPlist(t.template, {
+        repo,
+        node,
+        envFile,
+        env: { A: "b" },
+        extra: { PG_BIN: "/pg/bin", PG_DATA: "/d", NODE_PREFIX: "/n", PRODUCT_DIR: repo, STATE_DIR: "/s", TMP_DIR: "/tmp", CONSOLE_TCP: "localhost:8460", DB_TCP: "localhost:8461", ...CONFIG_EXTRA, ...SUPERVISOR_EXTRA, ...RECONCILER_EXTRA, ...EGRESS_EXTRA, SANDBOX_PROFILE: `${repo}/ops/sandbox/reconciler.sb` },
+      });
       const shell = /<string>set -a;[^<]*<\/string>/.exec(out)?.[0];
       if (!shell) continue;
       // every path the shell sees is a single quoted word
       expect(shell, t.file).toContain(`. '${envFile}'`);
-      expect(shell, t.file).toContain(`exec '${node}' '${repo}/`);
-      expect(shell, t.file).not.toMatch(/(?<!')\/Users\/x\/Library\/Application Support/);
+      expect(shell, t.file).toContain(t.service === "reconciler" ? `exec '/usr/bin/sandbox-exec' -f '${repo}/ops/sandbox/reconciler.sb'` : `exec '${node}' '${repo}/`);
+      // and every -D the confined job carries is a quoted word too, so a
+      // parameter whose path has a space in it does not split the command
+      if (t.service === "reconciler") expect(shell, t.file).toContain(`-D 'PRODUCT_DIR=${repo}'`);
+      // Every occurrence of the space-bearing path is INSIDE a single-quoted
+      // word. Proven by deleting the quoted words and looking at what is
+      // left, which is stronger than the old "preceded by a quote" lookbehind
+      // — the confined reconciler's arguments are `-D 'KEY=<path>'`, where
+      // the path is quoted but not adjacent to the quote.
+      const unquoted = shell.replace(/'[^']*'/g, "''");
+      expect(unquoted, t.file).not.toContain("/Users/x/Library/Application Support");
     }
   });
 

@@ -6,11 +6,34 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { parse as parseYaml } from "yaml";
-import { validateManifest } from "@foldedspacelabs/metistry-core";
+import { validAgentAreaGrant, validAreaPrefix, validateManifest } from "@foldedspacelabs/metistry-core";
 import { TasksService } from "@foldedspacelabs/metistry-tasks";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { allProjects, computeNudge, createBrainServer, memberOf, resolveAliasCall, sanitizeDeep, TOOL_ALIASES, TOOL_NAMES, underAreas, validKnowledgePath, type AgentPrincipal, type Db } from "../src/index.js";
+import {
+  allProjects,
+  areaOf,
+  canSeeUnder,
+  computeNudge,
+  createBrainServer,
+  knowledgeScope,
+  liftTurnId,
+  memberOf,
+  resolveAliasCall,
+  sanitizeDeep,
+  scopeRequired,
+  SCOPE_REQUIRED,
+  TOOL_ALIASES,
+  TOOL_NAMES,
+  TURN_ID_META_KEY,
+  turnIdFrom,
+  underAreas,
+  validKnowledgePath,
+  validTurnId,
+  type AgentPrincipal,
+  type Db,
+  type Tier,
+} from "../src/index.js";
 
 describe("manifest", () => {
   it("validates through core and exposes exactly the registered tools, in order", () => {
@@ -21,12 +44,14 @@ describe("manifest", () => {
     if (parsed.manifest.type !== "bridge") return;
     expect(parsed.manifest.discovery).toBe("eager");
     expect(parsed.manifest.exposes.map((t) => t.name)).toEqual([...TOOL_NAMES]);
-    // 26 DECLARED, 25 of them eager: `propose_action` is registered only for a
+    // 27 DECLARED, 26 of them eager: `propose_action` is registered only for a
     // credential the owner has given room (docs/ops/actions.md), which is what
     // keeps the eager budget below where it was. Both numbers are asserted, so
-    // a tool added without a discovery decision fails here first.
-    expect(TOOL_NAMES.length).toBeLessThanOrEqual(26);
-    expect(TOOL_NAMES.filter((n) => n !== "propose_action").length).toBeLessThanOrEqual(25);
+    // a tool added without a discovery decision fails here first — as
+    // `request_access` did on 2026-09-19, which is why the ceiling in
+    // `ops/scripts/check-tool-surface.mjs` moved with it rather than silently.
+    expect(TOOL_NAMES.length).toBeLessThanOrEqual(27);
+    expect(TOOL_NAMES.filter((n) => n !== "propose_action").length).toBeLessThanOrEqual(26);
     expect(parsed.manifest.exposes.map((t) => t.name).filter((n) => Object.hasOwn(TOOL_ALIASES, n))).toEqual([]); // deprecated spellings never reach the listed surface
     expect(parsed.manifest.exposes.every((t) => !t.destructive)).toBe(true); // nothing here mutates the user's world irreversibly: rows, not calendars
   });
@@ -34,7 +59,7 @@ describe("manifest", () => {
 
 describe("definition size (docs/research/2026-08-tool-discovery.md's other axis)", () => {
   /** What one principal actually sees listed, and what those definitions cost. */
-  async function listedFor(principal: AgentPrincipal): Promise<{ names: string[]; tokens: number }> {
+  async function listedFor(principal: AgentPrincipal): Promise<{ names: string[]; tokens: number; tools: { name: string; description?: string; inputSchema?: unknown }[] }> {
     const db = fakeDb({}, []);
     const brain = createBrainServer({ db, authenticate: async () => principal, tasks: new TasksService(db), inboxDir: "/tmp/unused" });
     const server = createServer((req, res) => void brain.handle(req, res));
@@ -48,7 +73,7 @@ describe("definition size (docs/research/2026-08-tool-discovery.md's other axis)
       const chars = JSON.stringify(tools).length;
       // eslint-disable-next-line no-console
       console.log(`mcp-brain tools/list (${principal.id}): ${tools.length} tools, ${chars} chars, ~${Math.ceil(chars / 4)} tokens (PoC-17 lazy-load line: 5000)`);
-      return { names: tools.map((t) => t.name), tokens: Math.ceil(chars / 4) }; // chars/4 is the industry's own rule of thumb (§1)
+      return { names: tools.map((t) => t.name), tokens: Math.ceil(chars / 4), tools: tools as { name: string; description?: string; inputSchema?: unknown }[] }; // chars/4 is the industry's own rule of thumb (§1)
     } finally {
       await new Promise<void>((r) => server.close(() => r()));
     }
@@ -57,21 +82,54 @@ describe("definition size (docs/research/2026-08-tool-discovery.md's other axis)
   it("the EAGER definition stays under the >5k-token line that would make discovery: lazy worth its +1-turn cost", async () => {
     const { names, tokens } = await listedFor(alice);
     expect(names).not.toContain("propose_action"); // alice has no autonomy record: the group is not offered at all
-    expect(names.length).toBe(25);
+    expect(names.length).toBe(26);
     expect(tokens).toBeLessThan(5000);
+    // …and it stays under the RATCHET as well. Trimming `turn_id` out of all
+    // 25 schemas recovered 3,774 chars ≈ 944 tokens (4,979 → 4,035, 19.0% of
+    // the surface: turn-id.ts, docs/research/2026-09-19-code-mode-mcp.md
+    // §2.4). The saving is only worth having if it cannot be spent again
+    // without somebody deciding to, so the headroom is asserted, not just the
+    // line. `ops/scripts/check-tool-surface.mjs` checks the LINE generically
+    // for every bridge; this is brain's own ceiling.
+    //
+    // 189 of it went on `request_access` (4,035 → 4,224), by the owner's
+    // ruling on 2026-09-19 and with the count ceiling moved to say so. The
+    // ratchet moves with the decision and not a token further: the surface is
+    // still smaller than it was a week ago with one tool fewer.
+    //
+    // The escalation ladder (ruled 2026-09-19 C) cost 40 more (4,224 →
+    // 4,264): one optional boolean and a clause. It bought the sentence the
+    // tool says after a decline, which is the difference between an agent
+    // that stops asking and one that keeps filing the same row.
+    expect(tokens).toBeLessThan(4300);
+  });
+
+  it("no tool advertises `turn_id` — it is a correlation handle, not a parameter (turn-id.ts)", async () => {
+    for (const principal of [alice, { ...alice, id: "actor", autonomy: { level: "propose" } } as AgentPrincipal]) {
+      const { tools } = await listedFor(principal);
+      for (const tool of tools) {
+        const schema = (tool.inputSchema ?? {}) as { properties?: Record<string, unknown>; required?: string[] };
+        expect(Object.keys(schema.properties ?? {}), tool.name).not.toContain("turn_id");
+        // …and no description mentions it either: a model that reads about it
+        // would start inventing one, which is the prompted shape we removed.
+        expect(tool.description ?? "", tool.name).not.toMatch(/turn_id/);
+      }
+    }
   });
 
   it("propose_action rides only on a credential the owner gave room — that is this group's lazy (docs/ops/actions.md)", async () => {
     const actor: AgentPrincipal = { ...alice, id: "actor", autonomy: { level: "propose" } };
     const { names, tokens } = await listedFor(actor);
     expect(names).toContain("propose_action");
-    expect(names.length).toBe(26);
+    expect(names.length).toBe(27);
     // Crossing the 5k line here is the KNOWN cost of opting in, not a
     // regression: the eager surface above is what every other agent pays, and
     // deferring by credential costs none of the +1 discovery turn a
     // tool_index/execute/batch index would. The bound is a ceiling on the one
-    // definition, so the tool cannot grow unnoticed.
-    expect(tokens).toBeLessThan(5400);
+    // definition, so the tool cannot grow unnoticed. Since the `turn_id` trim
+    // this surface no longer crosses 5k at all (5,243 → 4,262); the ceiling
+    // moves with it rather than leaving 1.1k of unwatched room.
+    expect(tokens).toBeLessThan(4500);
     // a level that admits nothing is exactly alice again — the refusal is the absence
     const observer: AgentPrincipal = { ...alice, id: "observer", autonomy: { level: "observe", actions: { comment: "allow" } } };
     expect((await listedFor(observer)).names).not.toContain("propose_action");
@@ -109,6 +167,56 @@ describe("deprecated tool names (one release; aliases.ts)", () => {
   });
 });
 
+describe("the turn handle (turn-id.ts): _meta on the wire, one release of tolerance for the argument", () => {
+  const key = TURN_ID_META_KEY;
+
+  it("the key is ours, reverse-DNS, and claims nothing reserved for MCP itself", () => {
+    expect(key).toBe("com.foldedspacelabs.metistry/turn_id");
+    const [prefix] = key.split("/");
+    expect(prefix!.split(".")).not.toContain("mcp");
+    expect(prefix!.split(".")).not.toContain("modelcontextprotocol");
+  });
+
+  it("validTurnId is shape only — storable or nothing, never a refusal", () => {
+    expect(validTurnId("abc-123_XYZ")).toBe("abc-123_XYZ");
+    expect(validTurnId("a".repeat(64))).toBe("a".repeat(64));
+    for (const bad of ["a".repeat(65), "", "has space", "semi;colon", "slash/es", 42, null, undefined, {}, ["x"]]) {
+      expect(validTurnId(bad), JSON.stringify(bad)).toBeUndefined();
+    }
+  });
+
+  it("turnIdFrom reads the call's _meta and ignores everything else in it", () => {
+    expect(turnIdFrom({ [key]: "t1", progressToken: 7 })).toBe("t1");
+    expect(turnIdFrom({ turn_id: "t1" })).toBeUndefined(); // the bare name is not the key
+    expect(turnIdFrom({ [key]: "not a handle" })).toBeUndefined();
+    for (const empty of [undefined, null, {}, "string"]) expect(turnIdFrom(empty)).toBeUndefined();
+  });
+
+  it("liftTurnId moves a legacy argument into _meta, in place, and takes it out of the arguments either way", () => {
+    const msg = { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "queries_list", arguments: { turn_id: "t7", limit: 5 } } };
+    expect(liftTurnId(msg)).toBe("t7");
+    expect(msg.params).toEqual({ name: "queries_list", arguments: { limit: 5 }, _meta: { [key]: "t7" } });
+
+    // a malformed one is dropped, not refused, and does not reach the schema either
+    const junk = { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "queries_list", arguments: { turn_id: "not a handle" } } };
+    expect(liftTurnId(junk)).toBeUndefined();
+    expect(junk.params).toEqual({ name: "queries_list", arguments: {} });
+
+    // both carriers: the new one wins, and the argument still goes
+    const both = { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "queries_list", arguments: { turn_id: "old" }, _meta: { [key]: "new" } } };
+    expect(liftTurnId(both)).toBeUndefined();
+    expect(both.params).toEqual({ name: "queries_list", arguments: {}, _meta: { [key]: "new" } });
+
+    // nothing to lift, not a call, not an object: untouched
+    const plain = { jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "queries_list", arguments: { limit: 5 } } };
+    expect(liftTurnId(plain)).toBeUndefined();
+    expect(plain.params).toEqual({ name: "queries_list", arguments: { limit: 5 } });
+    expect(liftTurnId({ jsonrpc: "2.0", id: 5, method: "tools/list", params: { arguments: { turn_id: "t" } } })).toBeUndefined();
+    expect(liftTurnId(null)).toBeUndefined();
+    expect(liftTurnId("tools/call")).toBeUndefined();
+  });
+});
+
 describe("pure helpers", () => {
   it("sanitizeDeep walks arrays/objects, converts dates, leaves numbers", () => {
     const d = new Date("2026-09-06T00:00:00Z");
@@ -135,6 +243,83 @@ describe("pure helpers", () => {
     for (const bad of ["/Areas/x", "/", "Areas/", "Areas/../x", "Areas/./x", ".metistry/identity.yaml", ".metistry/state/.env", "Artifacts/bundle-1/x.pdf", ""]) {
       expect(validKnowledgePath(bad), bad).toBe(false);
     }
+  });
+
+  // `canSeeUnder` is the ONE scope decision — the console's `canSee` is a
+  // rename over it (apps/console/src/knowledge-routes.ts) and every
+  // knowledge_* tool asks it through `knowledgeScope`. Misuse first: the
+  // interesting cases are the ones where the area list would say yes.
+  it("canSeeUnder: both conditions are necessary — a vault path AND under the areas", () => {
+    expect(canSeeUnder("Areas/Fsl/Note.md", ["Areas/Fsl"])).toBe(true);
+    expect(canSeeUnder("Areas/Fsl/Note.md", ["Areas/Other"])).toBe(false);
+    expect(canSeeUnder("Areas/Fslx/Note.md", ["Areas/Fsl"])).toBe(false); // segment-wise, like underAreas
+    expect(canSeeUnder("Areas/Fsl/Note.md", [])).toBe(false); // the empty list is NO scope, not every scope
+    // null = no prefix restriction: the owner on a console route, tier
+    // `index` on a title listing. It is still not a way into the machinery.
+    expect(canSeeUnder("Areas/Fsl/Note.md", null)).toBe(true);
+    expect(canSeeUnder("now.md", null)).toBe(true);
+    // The bare vault grant matches every path `underAreas` is asked about,
+    // which is exactly why the vault-path rule cannot live at the call site:
+    // `/` would otherwise hand over `.metistry/state/.env`.
+    for (const machinery of [".metistry/state/.env", ".metistry/compute.yaml", ".obsidian/workspace.json", "Artifacts/bundle-1/x.pdf", "CLAUDE.md", "Areas/../.metistry/x", "/Areas/x", "Areas\\x", `Areas/x\0.md`, `${"A".repeat(501)}.md`]) {
+      expect(underAreas(machinery, ["/"]), `underAreas says yes to ${machinery}`).toBe(true);
+      expect(canSeeUnder(machinery, ["/"]), machinery).toBe(false);
+      expect(canSeeUnder(machinery, null), machinery).toBe(false);
+    }
+    // The 2026-09-19 (D) split of core's area validator — the SHAPE, and
+    // what an AGENT may be granted — changed no decision on this door. It is
+    // `isVaultPath` here, as it always was, and this test is where that is
+    // held: `Artifacts/` is a real vault prefix that is not knowledge, so no
+    // agent reads it through a knowledge tool whatever it was granted.
+    expect(validAreaPrefix("Artifacts/Reports")).toBe(true);
+    expect(validAgentAreaGrant("Artifacts/Reports")).toBe(false);
+    expect(canSeeUnder("Artifacts/Reports/q3.md", ["Artifacts/Reports"])).toBe(false);
+  });
+
+  it("knowledgeScope: canRead is content, canList is existence, and tier none is neither", () => {
+    const scopeOf = (tier: Tier, areas: string[] = []): ReturnType<typeof knowledgeScope> =>
+      knowledgeScope({ id: "x", grants: { tier, areas }, projects: [] } as AgentPrincipal);
+
+    const none = scopeOf("none");
+    expect(none.canRead("Areas/Fsl/Note.md")).toBe(false);
+    expect(none.canList("Areas/Fsl/Note.md")).toBe(false); // `prefixes` is null at tier none too — the tier check is what saves it
+
+    // tier index: every title, no content anywhere (the 2026-09-19 ruling)
+    const index = scopeOf("index");
+    expect(index.canList("Areas/Anything/At/All.md")).toBe(true);
+    expect(index.canList(".metistry/state/.env")).toBe(false);
+    expect(index.canRead("Areas/Anything/At/All.md")).toBe(false);
+
+    // tier areas: lists exactly what it may read, and nothing outside
+    const areas = scopeOf("areas", ["Areas/Fsl"]);
+    expect(areas.canList("Areas/Fsl/Note.md")).toBe(true);
+    expect(areas.canRead("Areas/Fsl/Note.md")).toBe(true);
+    expect(areas.canList("Areas/Other/Note.md")).toBe(false);
+    expect(areas.canRead("Areas/Other/Note.md")).toBe(false);
+    // for tier `areas`, canList and canRead are the SAME predicate — a page
+    // it may list it may already read, and vice versa. That is what keeps
+    // the scope_required refusal (below) from ever firing for this tier:
+    // there is no path where it sees a title it cannot also read.
+    for (const p of ["Areas/Fsl/Note.md", "Areas/Other/Note.md", ".metistry/x", "Areas/Fsl/../Other/x"]) {
+      expect(areas.canList(p), p).toBe(areas.canRead(p));
+    }
+  });
+
+  // Owner ruling 2026-09-19 (PR #216 judgement call B): the refusal an agent
+  // gets for a page it may see the TITLE of but not the content.
+  it("areaOf: the immediate parent directory — the smallest folder grant that would cover the path", () => {
+    expect(areaOf("Areas/Health/Sleep.md")).toBe("Areas/Health");
+    expect(areaOf("Journal/2026-09-19.md")).toBe("Journal");
+    expect(areaOf("Areas/Health/Sleep/Notes.md")).toBe("Areas/Health/Sleep");
+    expect(areaOf("now.md")).toBe("/"); // a root note: only the bare vault grant covers it
+  });
+
+  it("scopeRequired: names the area, the mechanism, and a stable `reason` distinct from the HTTP-ish `error.code`", () => {
+    const sr = scopeRequired("Areas/Health/Sleep.md");
+    expect(sr.expose).toEqual({ reason: SCOPE_REQUIRED, grantedScope: "Areas/Health" });
+    expect(sr.message).toContain("Areas/Health");
+    expect(sr.message).toContain("request_access"); // the door that exists since 2026-09-19 — the refusal names it, so the agent has a next move
+    expect(sr.message).not.toBe("not granted"); // this is the structured refusal INSTEAD of the bare string
   });
 });
 
@@ -271,7 +456,7 @@ describe("reader-less deployment", () => {
     ] as const) {
       const r = (await client.callTool({ name, arguments: args })) as { isError?: boolean; content: { text: string }[] };
       expect(r.isError, name).toBe(true);
-      expect(JSON.parse(r.content[0]!.text).error, name).toEqual({ code: "forbidden", message: "not granted" });
+      expect(JSON.parse(r.content[0]!.text).error, name).toEqual({ code: "forbidden", message: expect.stringMatching(/^not granted/) });
     }
     await client.close();
   });
@@ -292,7 +477,7 @@ describe("reader-less deployment", () => {
     await client.connect(new StreamableHTTPClientTransport(new URL(base), { requestInit: { headers: { authorization: "Bearer ok" } } }));
     const r = (await client.callTool({ name: "queries_list", arguments: {} })) as { isError?: boolean; content: { text: string }[] };
     expect(r.isError).toBe(true);
-    expect(JSON.parse(r.content[0]!.text).error).toEqual({ code: "forbidden", message: "not granted" });
+    expect(JSON.parse(r.content[0]!.text).error).toEqual({ code: "forbidden", message: expect.stringMatching(/^not granted/) });
     await client.close();
   });
 

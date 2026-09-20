@@ -37,6 +37,13 @@ describe("metistry init", () => {
     expect(existsSync(join(dir, "Inbox", "README.md"))).toBe(true); // the vault inbox, tracked (docs/ops/inbox.md)
     // (no `existsSync(join(dir, "inbox"))` check: macOS is case-insensitive, so
     // it would answer for `Inbox/`. The tracked-file list below is the real one.)
+    // the daily-flow journal tree (docs/product/daily-flow-spec.md §5.1, §6.1, §6.6, ticket P1-8)
+    for (const p of ["Journal/README.md", "Journal/Plan/README.md", "Journal/Fold/README.md", "Journal/Standup/README.md", "Journal/Meetings/README.md", "People/README.md", "Projects/README.md", "Me/profile.md", "Me/Working Style.md"]) {
+      expect(existsSync(join(dir, ...p.split("/"))), p).toBe(true);
+    }
+    for (const t of ["Daily", "Meeting", "Plan", "Standup", "Fold", "Weekly"]) {
+      expect(existsSync(join(dir, "Templates", `${t}.md`)), t).toBe(true);
+    }
     for (const d of INSTANCE_DIRS) expect(existsSync(join(dir, ".metistry", d, ".gitkeep")), d).toBe(true);
     expect(readFileSync(join(dir, ".gitignore"), "utf8")).toBe(".metistry/state/\n.obsidian/workspace*\nInbox/.large/\n");
     expect(readFileSync(join(dir, "README.md"), "utf8")).toMatch(/^# Instance repo — private\./);
@@ -64,7 +71,22 @@ describe("metistry init", () => {
         ".metistry/rules.yaml",
         "CLAUDE.md",
         "Inbox/README.md",
+        "Journal/README.md",
+        "Journal/Fold/README.md",
+        "Journal/Meetings/README.md",
+        "Journal/Plan/README.md",
+        "Journal/Standup/README.md",
+        "Me/profile.md",
+        "Me/Working Style.md",
+        "People/README.md",
+        "Projects/README.md",
         "README.md",
+        "Templates/Daily.md",
+        "Templates/Fold.md",
+        "Templates/Meeting.md",
+        "Templates/Plan.md",
+        "Templates/Standup.md",
+        "Templates/Weekly.md",
         "now.md",
         ...INSTANCE_DIRS.map((d) => `.metistry/${d}/.gitkeep`),
       ].sort(),
@@ -82,6 +104,7 @@ describe("metistry init", () => {
     expect(r.envLines).toEqual([
       `METISTRY_INSTANCE_DIR=${dir}`,
       `METISTRY_BRIDGE_TOKEN_RECONCILER=${MINTED}`,
+      `METISTRY_BRIDGE_TOKEN_RECONCILER_USER=${MINTED}`,
       "METISTRY_RECONCILER_URL=http://host.docker.internal:7812",
       "METISTRY_ORIGIN=http://127.0.0.1:8080", // required to start in either shape (apps/console/src/main.ts requireEnv)
       `METISTRY_LOCAL_OWNER_TOKEN=${MINTED}`, // the console's local owner door (docs/ops/auth.md)
@@ -100,6 +123,46 @@ describe("metistry init", () => {
     await mkdir(join(dir, ".metistry"), { recursive: true });
     await writeFile(join(dir, ".metistry", "state", ".env"), "METISTRY_DB_PASSWORD=secret");
     expect(git(dir, "status", "--porcelain")).toBe("?? state.txt");
+  });
+
+  it("the six templates use only the §6.2 directive grammar's verbs, and all six stay source: user (P1-8)", async () => {
+    const dir = join(await fresh(), "instance");
+    await init({ dir, seedDir, version: "0.0.1", mint: () => MINTED });
+    const ALLOWED_VERBS = new Set(["date", "tasks", "recurring", "calendar", "work", "requests", "include", "prose", "section", "/section"]);
+    for (const name of ["Daily", "Meeting", "Plan", "Standup", "Fold", "Weekly"]) {
+      const text = readFileSync(join(dir, "Templates", `${name}.md`), "utf8");
+      const fm = parseYaml(/^---\n([\s\S]*?)\n---\n/.exec(text)![1]!) as { source: string; type: string; tags: string[] };
+      // §6.1: the seeded templates ship `source: user` so `ownershipRefusal`
+      // refuses any assistant write to them, always — none is machine-owned.
+      expect(fm.source, name).toBe("user");
+      expect(fm.type, name).toBe("resource"); // §13.8: no frozen `template` frontmatter type yet
+      expect(fm.tags, name).toEqual(["template"]);
+      for (const m of text.matchAll(/\{\{\s*([a-z/]+)\b/g)) {
+        expect(ALLOWED_VERBS.has(m[1]!), `${name}: unknown directive verb "${m[1]}"`).toBe(true);
+      }
+      // §6.3: `prose` reaches a model and is legal only in a template whose
+      // output the assistant may write — in practice, the fold's alone.
+      if (name !== "Fold") expect(text, name).not.toMatch(/\{\{\s*prose\b/);
+    }
+  });
+
+  it("re-running init (--force) never overwrites a template or a Me/ page the user has since edited, and still fills in what is missing (P1-8)", async () => {
+    const dir = join(await fresh(), "instance");
+    await init({ dir, seedDir, version: "0.0.1", mint: () => MINTED });
+
+    const planPath = join(dir, "Templates", "Plan.md");
+    const editedPlan = "---\nsource: user\n---\n# My own plan, rewritten in Obsidian\n";
+    await writeFile(planPath, editedPlan);
+    const profilePath = join(dir, "Me", "profile.md");
+    const editedProfile = "---\nsource: user\ntimezone: America/Chicago\n---\n";
+    await writeFile(profilePath, editedProfile);
+    // simulate a template the seed has not shipped before this instance existed
+    await rm(join(dir, "Templates", "Weekly.md"));
+
+    await init({ dir, seedDir, version: "0.0.1", force: true, mint: () => MINTED });
+    expect(readFileSync(planPath, "utf8")).toBe(editedPlan);
+    expect(readFileSync(profilePath, "utf8")).toBe(editedProfile);
+    expect(existsSync(join(dir, "Templates", "Weekly.md"))).toBe(true); // missing files still get stamped in
   });
 
   it("--name lands in identity.yaml (and the mention follows), keeping the seed's comments", async () => {
@@ -186,6 +249,7 @@ describe("metistry init", () => {
     expect(launchd.envLines).toEqual([
       `METISTRY_INSTANCE_DIR=${dir}`,
       `METISTRY_BRIDGE_TOKEN_RECONCILER=${MINTED}`,
+      `METISTRY_BRIDGE_TOKEN_RECONCILER_USER=${MINTED}`,
       "METISTRY_RECONCILER_URL=http://127.0.0.1:7812",
       "METISTRY_ORIGIN=http://127.0.0.1:8080",
       `METISTRY_LOCAL_OWNER_TOKEN=${MINTED}`,
@@ -196,6 +260,7 @@ describe("metistry init", () => {
     expect(compose.envLines).toEqual([
       `METISTRY_INSTANCE_DIR=${composeDir}`,
       `METISTRY_BRIDGE_TOKEN_RECONCILER=${MINTED}`,
+      `METISTRY_BRIDGE_TOKEN_RECONCILER_USER=${MINTED}`,
       "METISTRY_RECONCILER_URL=http://host.docker.internal:7812",
       "METISTRY_ORIGIN=http://127.0.0.1:8080",
       `METISTRY_LOCAL_OWNER_TOKEN=${MINTED}`,

@@ -1,7 +1,7 @@
 {
   "name": "@metistry-apps/console",
   "private": true,
-  "version": "0.8.1",
+  "version": "0.11.0",
   "description": "Metistry console: web door API (capture, message, status, named queries) + passkey owner auth. Ships as a container image, not npm.",
   "license": "Apache-2.0",
   "type": "module",
@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@foldedspacelabs/metistry-artifacts": "workspace:*",
+    "@foldedspacelabs/metistry-cli": "workspace:*",
     "@foldedspacelabs/metistry-core": "workspace:*",
     "@foldedspacelabs/metistry-mcp-brain": "workspace:*",
     "@foldedspacelabs/metistry-queries": "workspace:*",

@@ -30,9 +30,11 @@ import {
   type ChildSpecInput,
   type ControlOp,
   type ControlResponse,
+  type EgressInput,
+  type GitCredentialLookup,
   type SupervisorConfig,
   type SupervisorConfigInput,
-  statePath,
+  instanceStatePath,
 } from "@foldedspacelabs/metistry-core";
 import { parsePlistTemplate, type PlistTemplate } from "./launchd.js";
 
@@ -40,7 +42,7 @@ export { SUPERVISOR_LABEL, SUPERVISOR_SERVICE };
 
 /** `<instance>/.metistry/state/supervisor.json` — 0600, because it carries what the plists' env dicts used to. */
 export function supervisorConfigPath(stateRoot: string): string {
-  return statePath(stateRoot, SUPERVISOR_CONFIG_FILENAME);
+  return instanceStatePath(stateRoot, SUPERVISOR_CONFIG_FILENAME);
 }
 
 /**
@@ -49,7 +51,7 @@ export function supervisorConfigPath(stateRoot: string): string {
  * path over 103 bytes is silently unusable in exactly the same way.
  */
 export function supervisorSocketPath(stateRoot: string): string {
-  return statePath(stateRoot, "run", SUPERVISOR_SOCKET_FILENAME);
+  return instanceStatePath(stateRoot, "run", SUPERVISOR_SOCKET_FILENAME);
 }
 
 /**
@@ -64,7 +66,7 @@ export function supervisorSocketPath(stateRoot: string): string {
  * and makes the one item read `Metistry`.
  */
 export function supervisorBinPath(stateRoot: string): string {
-  return statePath(stateRoot, "bin", "Metistry");
+  return instanceStatePath(stateRoot, "bin", "Metistry");
 }
 
 /**
@@ -148,10 +150,23 @@ export interface SupervisorConfigInputs {
   /** the supervisor's own environment (the watchdog half needs the db credentials) */
   env: Record<string, string>;
   children: ChildSpecInput[];
+  /** the egress door: the CONNECT proxy's port, its host allowlist and a bearer per confined child (core/egress.ts). Absent under `compose`. */
+  egress?: EgressInput | undefined;
+  /** which login-Keychain item the supervisor fetches for which child before spawning it. The item's NAME, never its value (core/git-credential.ts). */
+  gitCredentials?: GitCredentialLookup[] | undefined;
 }
 
 export function supervisorConfig(inputs: SupervisorConfigInputs): SupervisorConfigInput {
-  return { schema: 1, label: inputs.label, socket: inputs.socket, token: inputs.token, env: inputs.env, children: inputs.children };
+  return {
+    schema: 1,
+    label: inputs.label,
+    socket: inputs.socket,
+    token: inputs.token,
+    env: inputs.env,
+    children: inputs.children,
+    ...(inputs.egress ? { egress: inputs.egress } : {}),
+    ...(inputs.gitCredentials?.length ? { gitCredentials: inputs.gitCredentials } : {}),
+  };
 }
 
 /** Pretty JSON: this file is read by a person as often as by the supervisor. */

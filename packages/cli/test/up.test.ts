@@ -11,10 +11,22 @@ import { describe, expect, it } from "vitest";
 import { serializeLock } from "../src/lock.js";
 import { main } from "../src/main.js";
 import { up } from "../src/up.js";
-import { checkout, failDoctor, fakeExec, HELPER, JOBS, okDoctor, RECONCILER, retired, shown, WATCHDOG } from "./fixtures.js";
+import { checkout, failDoctor, fakeExec, HELPER, JOBS, okDoctor, RECONCILER, retired, retiredCalls, shown, WATCHDOG } from "./fixtures.js";
 
 const NODE = "/usr/local/bin/node";
-const base = (P: string) => ({ productDir: P, env: {} as NodeJS.ProcessEnv, platform: "darwin" as const, uid: 501, node: NODE });
+// cli-shim.test.ts covers the shim itself; disabled here so the rest of this
+// file's exact command lists are not about a feature they are not testing.
+// The owner-class bridge bearer is already set in these fixtures so the
+// command lists below stay about plists and compose: an install that has
+// none gets one minted, which is its own test at the end of this file.
+const base = (P: string) => ({
+  productDir: P,
+  env: { METISTRY_BRIDGE_TOKEN_RECONCILER_USER: "owner-bearer" } as NodeJS.ProcessEnv,
+  platform: "darwin" as const,
+  uid: 501,
+  node: NODE,
+  cliShim: false,
+});
 
 describe("metistry up", () => {
   it("--dry-run prints the exact command list and runs nothing (not even doctor)", async () => {
@@ -32,7 +44,9 @@ describe("metistry up", () => {
     // every plist is written before any of them is bootstrapped — the TCC
     // pin (tcc-pin.ts) runs in between, on whatever `up` just wrote, and
     // before any of it is loaded by launchd
-    const write = (label: string) => `write ${LA}/${label}.plist  (from ops/launchd/${label}.plist, __REPO__=${P}, __NODE__=${NODE}, __ENV_FILE__=${join(P, ".env")})`;
+    // …and every one of them is told where the product's seed is, so an
+    // overlay default never resolves against a job's working directory
+    const write = (label: string) => `write ${LA}/${label}.plist  (from ops/launchd/${label}.plist, __REPO__=${P}, __NODE__=${NODE}, __ENV_FILE__=${join(P, ".env")}, +METISTRY_SEED_DIR)`;
     const bootstrap = (label: string) => [`launchctl bootout gui/501/${label}`, `launchctl bootstrap gui/501 ${LA}/${label}.plist`, `launchctl kickstart -k gui/501/${label}`];
     expect(r.commands).toEqual([`(cd ${P} && docker compose up -d --build)`, ...retired("/h"), ...JOBS.map(write), ...JOBS.flatMap(bootstrap), "metistry doctor"]);
     expect(lines.filter((l) => !l.startsWith("[dry-run]") && !l.startsWith("   "))).toEqual([]);
@@ -47,7 +61,7 @@ describe("metistry up", () => {
     expect(r.code).toBe(0);
     expect(exec.calls.map(shown)).toEqual([
       "docker compose up -d --build",
-      ...retired(home),
+      ...retiredCalls(home),
       ...JOBS.flatMap((label) => [
         `launchctl bootout gui/501/${label}`,
         // bootout is asynchronous; bootstrapping before launchd is done gives
@@ -93,7 +107,7 @@ describe("metistry up", () => {
     expect(r.code).toBe(5);
     expect(broken.calls.map(shown)).toEqual([
       "docker compose up -d --build",
-      ...retired(home),
+      ...retiredCalls(home),
       `launchctl bootout gui/501/${HELPER}`,
       // the poll that waits out launchd's asynchronous teardown
       `launchctl print gui/501/${HELPER}`,
@@ -119,7 +133,7 @@ describe("metistry up", () => {
     const inst = await mkdtemp(join(tmpdir(), "mi-" /* short on purpose: the supervisor socket under .metistry/state/run/ has ~103 bytes to live in */));
     await mkdir(join(inst, ".metistry"), { recursive: true });
     await writeFile(join(inst, ".metistry", "metistry.lock"), serializeLock({ product: { version: "1.0.0", commit: "abc", source: "release" }, updated_at: "2026-09-07T00:00:00.000Z", migrations_applied: [] }));
-    const r = await up({ ...base(P), env: { METISTRY_INSTANCE_DIR: inst }, exec: fakeExec(), out: () => {}, dryRun: true, home: "/h", launchd: false });
+    const r = await up({ ...base(P), env: { METISTRY_INSTANCE_DIR: inst, METISTRY_BRIDGE_TOKEN_RECONCILER_USER: "owner-bearer" }, exec: fakeExec(), out: () => {}, dryRun: true, home: "/h", launchd: false });
     expect(r.source).toBe("release");
     // compose is told where the instance's .env is: its own `./.env` is not this install's environment
     const ef = join(inst, ".metistry", "state", ".env");
@@ -160,6 +174,41 @@ describe("metistry up", () => {
     expect(text).toContain(`docker compose up -d --build`);
     expect(text).not.toContain("launchctl");
     expect(text).toContain("[dry-run] metistry doctor");
+  });
+
+  // The migration, at the verb an existing install actually runs. Without the
+  // owner bearer no caller may write a §4.7 protected path at all — including
+  // `up`'s own `ensureInstanceId` — so `up` mints one rather than leaving an
+  // install to discover the refusal (docs/ops/auth.md).
+  it("mints the vault bridge's owner bearer when this install has none, into the Keychain and .env", async () => {
+    const P = await checkout();
+    const stored: Array<{ service: string; account: string }> = [];
+    const exec = fakeExec({
+      security: (args) => {
+        const s = args[args.indexOf("-s") + 1]!;
+        const a = args[args.indexOf("-a") + 1]!;
+        if (args[0] === "add-generic-password") stored.push({ service: s, account: a });
+        // `find-generic-password` for an item nothing filed yet
+        return args[0] === "find-generic-password" ? { code: 44, stdout: "", stderr: "not found" } : undefined;
+      },
+    });
+    const lines: string[] = [];
+    const r = await up({ ...base(P), env: {}, exec, out: (l) => lines.push(l), home: "/h", launchd: false, doctorFn: okDoctor });
+    expect(r.code).toBe(0);
+    // filed under the Keychain account this install's secrets belong to
+    // (secrets.ts's scope table — the person's here, since this fixture has
+    // no instance directory and therefore no instance_id yet)
+    expect(stored).toEqual([{ service: "metistry:METISTRY_BRIDGE_TOKEN_RECONCILER_USER", account: "metistry" }]);
+    // the value is never printed, by this step or any other
+    const text = lines.join("\n");
+    expect(text).toContain("mint METISTRY_BRIDGE_TOKEN_RECONCILER_USER");
+    expect(text).toContain("the bearer that may write .metistry/; never shown");
+    expect(readFileSync(join(P, ".env"), "utf8")).toMatch(/^METISTRY_BRIDGE_TOKEN_RECONCILER_USER=\S+$/m);
+
+    // …and an install that already has one spends nothing
+    const again = fakeExec();
+    await up({ ...base(P), env: { METISTRY_BRIDGE_TOKEN_RECONCILER_USER: "already" }, exec: again, out: () => {}, home: "/h", launchd: false, doctorFn: okDoctor });
+    expect(again.calls.map(shown).filter((c) => c.startsWith("security"))).toEqual([]);
   });
 
   it("the closing doctor gets the same env and exec the plan ran with", async () => {

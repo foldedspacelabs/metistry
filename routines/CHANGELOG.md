@@ -1,5 +1,166 @@
 # @metistry-apps/routines
 
+## 0.11.0
+
+### Minor Changes
+
+- 6b0d6d7: **Tomorrow's plan is written for you, from your own template.** The daily
+  flow's `plan-tomorrow` (`docs/product/daily-flow-spec.md` §5.1, §7; ticket
+  P1-7): once an evening, the routine renders `Templates/Plan.md` — a markdown
+  file in your vault, which you edit in Obsidian like any other note — into
+  `Journal/Plan/<tomorrow>.md`, written through the reconciler's bridge as
+  `principal: plan-tomorrow`. Tomorrow's events, the tasks the template asked
+  for in the order it asked for, what an agent is waiting on you for, what is
+  waiting in your queue, and your own prioritisation prose included verbatim.
+  
+  **No model is in it, at any tier.** The ordering is a field list in the
+  template; your prioritisation *rule* is prose the plan includes for you to
+  read, not something a model is asked to apply (invariant 4). The manifest
+  declares no engine, so the runner never even asks whether one is configured.
+  
+  **It writes exactly one file, and never a note you own** (§5.1's one writer
+  per file). A plan file whose frontmatter `source:` is not this routine's —
+  including one with no `source:` at all, which is yours — is left exactly as it
+  is and the run says so. A recurring rule is *listed* for tomorrow
+  (`- Water the plants — every week, due 2026-09-22`) with no checkbox and no
+  `^mt-` anchor: no routine writes a task line into a note you own (D4), which
+  the engine enforces from the render's `source` and the routine refuses again
+  before writing. Re-running an evening replaces the same file under
+  compare-and-swap; nothing is appended, and there is never a second one.
+  
+  **The gate is `Me/`, and it degrades honestly.** `@hourly` with the decision
+  in the routine, for the reason the fold gives — the runner has no time of day.
+  It plans after the day end `Me/profile.md` states (`working_hours:`), on the
+  eve of a day `working_days:` names, once per target day. No `working_days` and
+  **nothing is written at all**: the run records `no_working_days` rather than
+  guessing Monday-to-Friday. No `working_hours` and the plan is written from
+  19:00 local *and says so*, in one visible line, because a default nobody chose
+  should not be invisible. No calendar bridge, no query store, a `where:` the
+  filter vocabulary refuses — each renders one `> ⚠️ metistry: …` line naming
+  the template and the line number, and the plan still lands: a day with no plan
+  because the calendar was down is the worst possible outcome.
+  
+  One `runs` row per target date carries what happened — `wrote`,
+  `no_working_days`, `not_a_working_day`, `template_missing`,
+  `template_unreadable` or `user_owned` — so `metistry doctor`, the morning
+  brief and `docs/ops/automation.md`'s SQL all read the same ledger, and an
+  hourly routine still files one row a night.
+  
+  The console now hands routines the named-query store and the vault bridge it
+  already built for the server, so every row the plan shows arrives through a
+  named query and no component grows a second read path into Postgres
+  (invariant 3).
+
+### Patch Changes
+
+- 4581845: **The fold has its own file; your daily note is yours.** Ticket P1-9 of
+  `docs/product/daily-flow-spec.md` §5.1: the evening fold now writes
+  `Journal/Fold/<date>.md`, `source: knowledge-fold`, and never
+  `Journal/<date>.md` — that file has always been the user's own daily note,
+  and no fold turn touches it again.
+  
+  When `Templates/Fold.md` reads, the routine renders it itself — every
+  directive but `{{ prose }}`, the one legal only there (D14) — and hands the
+  skeleton plus the still-open prose slots to the SAME assistant turn it
+  already enqueues; the assistant's whole job is filling the numbered slots and
+  writing the result back verbatim. When there is no template yet (a missing
+  `Templates/Fold.md`, or no vault reader wired into the routine — §6.4's
+  `template_missing`), the fold falls back to the pre-template freeform note,
+  at the SAME new path, with a visible reason on the turn rather than losing
+  the night's fold or writing nothing at all.
+  
+  `seed/assistant-prompt.md`'s Fold section (shipped by
+  `@foldedspacelabs/metistry-cli`, stamped into every instance by `metistry
+  init`/`update`) is updated to match: it names the new path, states plainly
+  that `Journal/<date>.md` is never a fold write target, and describes both
+  shapes the enqueued turn may hand it — a skeleton to fill or a freeform note
+  to compose.
+- Updated dependencies [4a778f9]
+- Updated dependencies [4f43f9c]
+- Updated dependencies [9c9da4a]
+- Updated dependencies [1bf5c76]
+- Updated dependencies [b6586de]
+- Updated dependencies [579662f]
+- Updated dependencies [57ceb02]
+- Updated dependencies [45b64df]
+- Updated dependencies [9ec30d5]
+- Updated dependencies [7f9ceb7]
+- Updated dependencies [23cc47f]
+  - @foldedspacelabs/metistry-core@0.11.0
+
+## 0.10.0
+
+### Patch Changes
+
+- Updated dependencies [ad73f5a]
+  - @foldedspacelabs/metistry-core@0.10.0
+
+## 0.9.1
+
+### Patch Changes
+
+- @foldedspacelabs/metistry-core@0.9.1
+
+## 0.9.0
+
+### Minor Changes
+
+- dade46d: **Shadow mode: try a model on your real turns without ever answering with
+  it.** The bake-off's stage 2, as configuration. An optional block on the
+  default assignment —
+  `shadow: { model: llamaserver/qwen3.6-35b-a3b, fraction: 0.1 }` — has the
+  engine re-run one turn in ten on a candidate model *after* the real answer has
+  been delivered and its session saved, and put both transcripts plus an
+  agreement number on that turn's `runs` row. The candidate's answer is never
+  returned as the turn's, is never a session, and has no path to the console or
+  the phone.
+  
+  **Its tool calls are stubbed record-only, by construction rather than by
+  instruction.** The shadow gets the same tool *list* the real run saw; every
+  call is written down and none is performed. A call the real run made
+  identically (same name, same arguments, byte for byte) is handed the real run's
+  own result, so the candidate's next step is judged against the same facts;
+  anything else gets one fixed `(recorded, not executed: …)` string. The stub
+  host closes over a list of names and a map of strings — no MCP client, no URL,
+  no token — so there is no object in scope it could execute a call against, and
+  a shadow of a turn that wrote to the vault cannot write to the vault twice.
+  
+  **Agreement is deterministic and says what it is:** the mean of "same tool
+  calls in the same order" and token Jaccard over the two final answers. No model
+  scores it, so it cannot drift and the stored row re-scores to the same number.
+  The *rubric* score stays `packages/eval`'s, on the owner's fixtures — the
+  engine leaves a typed hook for it instead of inventing a second scorer.
+  
+  **A shadow is a turn, so it is budgeted like one.** It asks the same pre-call
+  gate with the candidate's own provider and `critical: false`, so `stop` and
+  `critical_only` skip the experiment while the interactive turn they let through
+  keeps its answer; its spend is its own `runs` row of kind `shadow` carrying the
+  provider that was actually paid, which is what makes per-provider budgets
+  honest with no change to the `spend` query. Nothing it does can cost the turn:
+  a candidate that is down, an unset credential or a failed write lands as a note
+  on the row, never as a failed reply.
+  
+  Additive migration `0020` adds `shadow_provider`, `shadow_model`,
+  `shadow_transcript`, `shadow_agreement` and `shadow_cost_usd` to `runs`
+  (rollback: drop the five columns and `runs_shadow_ts_idx`). New named query
+  `seed/queries/shadow_agreement.yaml` reports agreement, tool-sequence match,
+  answer similarity, cost and failures per candidate over the last N shadowed
+  turns; the weekly review's System section carries one line per candidate and
+  omits it when nothing is being shadowed. `compute.yaml`'s schema refuses a
+  `shadow:` block with no `fraction`, a fraction outside 0..1, a candidate this
+  file does not declare, a candidate that is the assigned model itself, and the
+  block on a tier or crew — each naming the field. `docs/ops/compute.md` gains
+  "Shadow mode".
+
+### Patch Changes
+
+- Updated dependencies [c1f512e]
+- Updated dependencies [337bc0a]
+- Updated dependencies [dade46d]
+- Updated dependencies [f57b3b0]
+- Updated dependencies [76f82a2]
+  - @foldedspacelabs/metistry-core@0.9.0
+
 ## 0.8.1
 
 ### Patch Changes

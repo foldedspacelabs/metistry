@@ -9,8 +9,28 @@
 // lands, so `knowledge_read` degrades to `not_available` unless the host
 // injects a reader — no vault mount is invented here.
 
-import { EmbedUnavailableError, isVaultPath, vectorLiteral, type ErrorCode } from "@foldedspacelabs/metistry-core";
+import { EmbedUnavailableError, may, mayListPath, mayReadPath, titlePrefixes, titlesOnly, vectorLiteral, type ErrorCode } from "@foldedspacelabs/metistry-core";
+import { principalOf } from "./principal.js";
 import type { AgentPrincipal, Db, Tier } from "./types.js";
+
+/**
+ * **Moved to `packages/core/src/access.ts`** (P0 of
+ * docs/research/2026-09-19-grants-and-access-simplified.md §4 — a pure move,
+ * no behaviour change). The console's authorization rules were being served
+ * out of this bridge's package, so a second bridge would have had to import a
+ * sibling bridge to get them (§2.9); they now live beside `actions.ts`,
+ * `manifest.ts` and `instance-layout.ts`, which they call.
+ *
+ * @deprecated Re-exported here for ONE release so a pinned consumer keeps
+ * building. Import from `@foldedspacelabs/metistry-core` instead.
+ */
+export { canSeeUnder, SCOPE_REQUIRED, scopeRequired, underAreas, validKnowledgePath } from "@foldedspacelabs/metistry-core";
+/**
+ * @deprecated Moved to `@foldedspacelabs/metistry-core` (`access.ts`).
+ * Re-exported for one release. `areaOf` is not called inside this package —
+ * `scopeRequired` is the only caller — so it is here purely for the pin.
+ */
+export { areaOf } from "@foldedspacelabs/metistry-core";
 
 export interface KnowledgeHit {
   path: string;
@@ -41,32 +61,7 @@ export type KnowledgeReader = (path: string) => Promise<string | null>;
 
 export type ReadOutcome =
   | { ok: true; path: string; title: string; content: string }
-  | { ok: false; code: ErrorCode; message?: string };
-
-/**
- * A vault path an agent may name. Since the 2026-09-17 layout the vault root
- * IS the instance directory, so there is no prefix to anchor on — the rule is
- * core's `isVaultPath`: no traversal, no leading slash, nothing inside a
- * dot-directory (`.metistry/` is the machinery, and an agent may not read it
- * here any more than it may write it), and not `Artifacts/`, which is not
- * knowledge. Mirrors the grant shape the console validates.
- */
-export function validKnowledgePath(path: string): boolean {
-  return typeof path === "string" && path.length <= 500 && !/[\0\\]/.test(path) && isVaultPath(path);
-}
-
-/**
- * Prefix semantics of a grant: the area itself or anything below it. A
- * trailing slash names a directory as a whole, and the bare vault — every
- * path, root notes included — is spelled `/`, which rtrims to the empty
- * prefix. The console admits that spelling for internal principals only.
- */
-export function underAreas(path: string, areas: readonly string[]): boolean {
-  return areas.some((raw) => {
-    const a = raw.endsWith("/") ? raw.slice(0, -1) : raw;
-    return a === "" || path === a || path.startsWith(`${a}/`);
-  });
-}
+  | { ok: false; code: ErrorCode; message?: string; expose?: Record<string, unknown> };
 
 /**
  * The one filtering decision every knowledge_* surface (search, read, list,
@@ -76,6 +71,13 @@ export function underAreas(path: string, areas: readonly string[]): boolean {
  * "may this principal see this path's CONTENT" test — the same one that
  * gates knowledge_read/knowledge_grep/resources, and doubles as the check
  * for a caller-supplied prefix argument (a prefix is just a path).
+ *
+ * `canList` is the same question asked about a TITLE, and it is deliberately
+ * wider: tier `index` may see that a page exists — path, title, one-line
+ * description — anywhere in the vault index, and may read none of them. Tier
+ * `areas` lists exactly what it may read, because a grant of an area is
+ * already the answer to "may I know this is here". Tier `none` is false for
+ * both: it is not a narrower grant, it is no grant.
  */
 export interface KnowledgeScope {
   readonly tier: Tier;
@@ -85,17 +87,41 @@ export interface KnowledgeScope {
   /** Always true — drafts are invisible at every tier; named so a misuse test can assert it is never bypassed. */
   readonly excludeDrafts: true;
   canRead(path: string): boolean;
+  /** May this principal be told this path EXISTS (path + title + description, never content)? */
+  canList(path: string): boolean;
 }
 
 export function knowledgeScope(principal: AgentPrincipal): KnowledgeScope {
-  const { tier, areas } = principal.grants;
+  const { scope } = principalOf(principal);
   return {
-    tier,
-    prefixes: tier === "areas" ? areas : null,
-    visibleTitlesOnly: tier === "index",
+    tier: scope.tier,
+    // NOT `readableAreas(scope)`: `null` HERE means "no prefix restriction on
+    // the TITLES this tier may browse", which is the opposite of what `null`
+    // means in a read scope. §2.8's one field with two meanings, still two
+    // meanings — kept apart by this comment until the tier model itself is
+    // revisited (open question 2).
+    prefixes: titlePrefixes(scope),
+    visibleTitlesOnly: titlesOnly(scope),
     excludeDrafts: true,
-    canRead: (path) => tier === "areas" && underAreas(path, areas),
+    // Row filtering, not refusal: the same two predicates `may()` decides
+    // with, so a list and a refusal cannot come to different answers.
+    canRead: (path) => mayReadPath(scope, path),
+    canList: (path) => mayListPath(scope, path),
   };
+}
+
+/**
+ * Whether `path` names a settled (non-draft) row in the index — the same
+ * existence tier `index` can already see through knowledge_search/
+ * knowledge_list. `scopeRequired` below gates on this so the refusal is
+ * only ever built for a page an agent could already find: a path it merely
+ * guessed the shape of gets no area name, no different from today — nothing
+ * about existence leaks for a path that is not real (or is a draft, which
+ * is invisible at every tier).
+ */
+export async function isSettledPage(db: Db, path: string): Promise<boolean> {
+  const { rows } = await db.query(`SELECT 1 FROM knowledge_files WHERE path = $1 AND NOT draft`, [path]);
+  return rows.length > 0;
 }
 
 function escapeLike(s: string): string {
@@ -219,10 +245,16 @@ function round(n: number): number {
 
 /** Full read of one settled note under a granted prefix. */
 export async function readKnowledge(db: Db, principal: AgentPrincipal, path: string, reader: KnowledgeReader | undefined): Promise<ReadOutcome> {
-  const scope = knowledgeScope(principal);
-  if (scope.tier !== "areas") return { ok: false, code: "forbidden" };
-  if (!validKnowledgePath(path)) return { ok: false, code: "invalid_request", message: "path must be a vault path — TitleCase folders, no traversal, nothing under .metistry/ or Artifacts/" };
-  if (!scope.canRead(path)) return { ok: false, code: "forbidden" };
+  const p = principalOf(principal);
+  // The one fact `may` cannot know: whether the page is really there. Asked
+  // ONLY of a caller who may already see the TITLE and may not read the
+  // content — a principal that may read it has no need of the answer, and a
+  // path merely shaped like a vault path must not become an existence oracle
+  // (isSettledPage's contract). Exactly the condition that guarded this query
+  // before; the tier arithmetic behind it is `may`'s now.
+  const settled = !mayReadPath(p.scope, path) && mayListPath(p.scope, path) ? await isSettledPage(db, path) : false;
+  const d = may(p, "read", { kind: "knowledge", door: "read", path, settled });
+  if (!d.ok) return { ok: false, code: d.code, ...(d.message ? { message: d.message } : {}), ...(d.expose ? { expose: d.expose } : {}) };
   const { rows } = await db.query(`SELECT path, title, draft FROM knowledge_files WHERE path = $1`, [path]);
   const row = rows[0];
   if (!row || row.draft === true) return { ok: false, code: "not_found" }; // drafts are unsettled: invisible at every tier

@@ -15,21 +15,23 @@ import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join, relative } from "node:path";
-import { INSTANCE_LAYOUT, usesCompose, type Deployment } from "@foldedspacelabs/metistry-core";
+import { INSTANCE_LAYOUT, LEGACY_VAULT_DIR, detectLayout, usesCompose, type Deployment, type InstanceLayoutShape } from "@foldedspacelabs/metistry-core";
+import { writeCliShim } from "./cli-shim.js";
 import { loadDeployment } from "./deployment.js";
 import { doctor, type DoctorDeps, type DoctorReport } from "./doctor.js";
 import { productVersion } from "./env.js";
-import { envPaths } from "./instance.js";
+import { envPaths, readInstanceId } from "./instance.js";
 import { applyPorts, loadNamespace } from "./namespace.js";
 import type { Exec } from "./exec.js";
-import { loadPlistTemplates, loadSupervisedTemplates, type PlistTemplate } from "./launchd.js";
+import { labelFor, loadPlistTemplates, loadSupervisedTemplates, type PlistTemplate } from "./launchd.js";
 import { SUPERVISOR_SERVICE } from "./supervisor.js";
 import { instanceLockPath, readLock, serializeLock, type LockFile, type LockSource } from "./lock.js";
-import { writeProtected, type ProtectedWrite } from "./protected-write.js";
+import { ensureOwnerBridgeToken, OWNER_BRIDGE_TOKEN, protectedRel, writeProtected, type ProtectedWrite } from "./protected-write.js";
 import { listMigrationFiles, MIGRATION_LOCK_KEY, openMigrationSession, runMigrations, type MigrateResult, type MigrationSession } from "./migrate.js";
 import { currentVersion, installRelease, rollbackRelease, releaseTarget, runtimePackCommit, type InstallReleaseResult } from "./release.js";
 import { installRuntimeDeps, runtimeDepsEnabled, RUNTIME_DIRNAME, type InstallRuntimeDepsResult } from "./runtime-deps.js";
 import { StepFailed, StepRunner } from "./steps.js";
+import { type Ui } from "./ui.js";
 import { closingDoctor, composeUp, COMPOSE_TIMEOUT_MS, runDirFor } from "./up.js";
 
 export interface UpdateOptions {
@@ -52,6 +54,8 @@ export interface UpdateOptions {
   rollback?: boolean | undefined;
   /** release mode: the runtime pack's os-arch (default: this host's) */
   target?: string | undefined;
+  /** `--allow-legacy`: pin a version past 0.8.x onto an instance that has not run `metistry migrate-layout` yet */
+  allowLegacy?: boolean | undefined;
   /** `--env-file`: the dotenv file this install runs from (default: `<instance>/state/.env`, falling back to the checkout's) */
   envFile?: string | undefined;
   now?: Date | undefined;
@@ -60,6 +64,10 @@ export interface UpdateOptions {
   openSession?: ((env: NodeJS.ProcessEnv) => Promise<(MigrationSession & { end(): Promise<void> }) | null>) | undefined;
   doctorFn?: ((deps: DoctorDeps) => Promise<DoctorReport>) | undefined;
   doctorDeps?: Partial<DoctorDeps> | undefined;
+  /** test seam: the vault bridge's owner bearer, minted once for an install that has none */
+  mintOwnerToken?: (() => string) | undefined;
+  /** default true; `false` is a test seam — see `up`'s `cliShim` (cli-shim.ts). `update` writes the same shim `up` does: it shares nothing else with `up`, but a checkout that only ever runs `update` still gets one. */
+  cliShim?: boolean | undefined;
 }
 
 export interface UpdateResult {
@@ -80,6 +88,67 @@ export interface UpdateResult {
 }
 
 export { RECONCILER_LABEL } from "./protected-write.js";
+
+// ---- the legacy-layout gate ----------------------------------------------------
+//
+// 0.8.x is the last line that can read a legacy instance. The readers resolve
+// both layouts (core's `resolveInstanceLayout`) precisely so that an instance
+// which has not run `metistry migrate-layout` keeps working on THIS line —
+// and that resolution is compatibility, not a second supported layout. An
+// update that pins a later version would move an install onto code nobody
+// has run against `Knowledge/` and a root `identity.yaml`.
+//
+// So the gate is here, at the one verb that moves the pin, and it is a
+// refusal rather than a warning: the whole point of enforcing at the tool is
+// that "you should migrate first" in a release note is not a control.
+
+/** The last minor line that reads a legacy instance. */
+export const LEGACY_LAYOUT_LAST_MINOR = "0.8";
+
+/** `0.8.1` → `[0, 8]`; undefined when `version` is not a plain semver triple (a tag, a hash, `<latest>`). */
+function majorMinor(version: string): [number, number] | undefined {
+  const m = /^v?(\d+)\.(\d+)(?:\.|$)/.exec(version.trim());
+  return m ? [Number(m[1]), Number(m[2])] : undefined;
+}
+
+/** True when `version` is later than the last line that reads a legacy instance. An unparseable version is NOT past it — a refusal has to be sure. */
+export function pastLegacyLayoutSupport(version: string): boolean {
+  const target = majorMinor(version);
+  const last = majorMinor(LEGACY_LAYOUT_LAST_MINOR)!;
+  if (!target) return false;
+  return target[0] > last[0] || (target[0] === last[0] && target[1] > last[1]);
+}
+
+/**
+ * The one line to print and stop on, or null when this update may proceed.
+ * Pure, so the refusal's exact wording is a test rather than a screenshot.
+ */
+export function legacyLayoutRefusal(opts: { shape: InstanceLayoutShape; instanceDir: string; version: string; allowLegacy?: boolean | undefined }): string | null {
+  if (opts.shape !== "legacy" || opts.allowLegacy === true) return null;
+  if (!pastLegacyLayoutSupport(opts.version)) return null;
+  return (
+    `${opts.instanceDir} is on the legacy instance layout (the vault in ${LEGACY_VAULT_DIR}/, the config files at the instance root) and this update would pin ${opts.version}, ` +
+    `past the ${LEGACY_LAYOUT_LAST_MINOR}.x line that reads it. Run this first:\n` +
+    `  metistry migrate-layout --dry-run   # every move and every row count, nothing run\n` +
+    `  metistry migrate-layout\n` +
+    `Then \`metistry update\` again. \`--allow-legacy\` pins it anyway (docs/ops/instance-layout.md).`
+  );
+}
+
+/**
+ * The version in `<dir>/package.json` — the CHECKOUT's, which after a pull is
+ * the version this update moves the install onto. `productVersion()` cannot
+ * answer this: it reads the package this process is running FROM, which is
+ * still the pre-pull code.
+ */
+export async function checkoutVersion(dir: string): Promise<string | undefined> {
+  try {
+    const v = (JSON.parse(await readFile(join(dir, "package.json"), "utf8")) as { version?: unknown }).version;
+    return typeof v === "string" && v !== "" ? v : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 /** `git rev-parse HEAD` in a checkout; undefined when it is not one (or git is missing). */
 export async function gitHead(dir: string, exec: Exec): Promise<string | undefined> {
@@ -180,9 +249,10 @@ export type LockDelivery = ProtectedWrite;
  * write it), else directly into a local instance dir. protected-write.ts
  * holds the policy, which `identity.yaml`'s `instance_id` shares.
  */
-export async function writeLock(r: StepRunner, lock: LockFile, opts: { env: NodeJS.ProcessEnv; platform: NodeJS.Platform; uid: number; fetchFn: typeof fetch }): Promise<LockDelivery> {
-  const delivery = await writeProtected(r, INSTANCE_LAYOUT.lock, serializeLock(lock), `metistry update → ${lock.product.version}`, opts);
-  if (delivery.how === "none") r.note(`no METISTRY_INSTANCE_DIR — ${INSTANCE_LAYOUT.lock} not written (metistry init creates the instance repo)`);
+export async function writeLock(r: StepRunner, lock: LockFile, opts: { env: NodeJS.ProcessEnv; platform: NodeJS.Platform; uid: number; fetchFn: typeof fetch; instanceDir?: string | undefined }): Promise<LockDelivery> {
+  const rel = protectedRel(opts.instanceDir ?? opts.env.METISTRY_INSTANCE_DIR, "lock");
+  const delivery = await writeProtected(r, rel, serializeLock(lock), `metistry update → ${lock.product.version}`, opts);
+  if (delivery.how === "none") r.note(`no METISTRY_INSTANCE_DIR — ${rel} not written (metistry init creates the instance repo)`);
   return delivery;
 }
 
@@ -234,7 +304,23 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
   // hashed before the build/switch and again after: only jobs whose code moved are kickstarted
   let before = await hashHostJobs(runDir, await templatesForRestart(runDir, deployment.shape, labelSuffix, env));
 
+  // The legacy-layout gate, asked with whatever version is knowable at the
+  // time. In release mode that is `--version` (or "latest", which is not a
+  // number and so never refuses) and this is the whole check. In git mode
+  // the version this run moves the install ONTO is only knowable after the
+  // pull — the process is running the pre-pull code — so it is asked again
+  // below, with the checkout's own package.json re-read off disk, while
+  // nothing has been built, migrated or restarted.
+  const gate = (v: string): void => {
+    const dir = env.METISTRY_INSTANCE_DIR?.replace(/\/+$/, "");
+    if (!dir) return;
+    const refusal = legacyLayoutRefusal({ shape: detectLayout(dir), instanceDir: dir, version: v, allowLegacy: opts.allowLegacy });
+    if (refusal) throw new StepFailed(refusal);
+  };
+
   try {
+    gate(opts.releaseVersion ?? version);
+
     r.section("product");
     r.note(`${productDir} — ${source === "git" ? "git checkout: fast-forward to the remote" : "release: download the pinned runtime pack"}${prior ? ` (lock: ${prior.product.version} @ ${prior.product.commit.slice(0, 7)}, ${prior.updated_at})` : " (no metistry.lock yet)"}`);
     r.note(`shape: ${deployment.shape} — from ${loaded.from}`);
@@ -244,6 +330,21 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
         await r.run("git", ["fetch", "--quiet"], { cwd: productDir, timeoutMs: 120_000 });
         await r.run("git", ["pull", "--ff-only", "--quiet"], { cwd: productDir, timeoutMs: 120_000 });
       } else r.note("not a git checkout (no .git) — nothing to pull");
+      // the pull has landed; this is the first moment the new version exists
+      // on disk. It is read from the CHECKOUT, not from this process: the
+      // running code is the pre-pull code, and `productVersion()` reports
+      // that. Undefined (no package.json, no version) does not refuse.
+      const pulled = await checkoutVersion(productDir);
+      if (pulled) {
+        gate(pulled);
+        // …and it is also the version this run PINS. `version` is what THIS
+        // process was built from — the pre-pull code — so a checkout that
+        // fast-forwarded 0.8.1 → 0.9.0 wrote 0.8.1 into metistry.lock and
+        // left the install claiming a version it is not running (#198,
+        // "not fixed here" #3). Read after the pull, from the checkout.
+        if (pulled !== releaseVersion) r.note(`version: ${releaseVersion} → ${pulled} — read from ${productDir}/package.json after the pull (this process is the pre-pull code), and pinned into metistry.lock`);
+        releaseVersion = pulled;
+      }
     } else if (r.dryRun) {
       // a dry run reaches nothing, GitHub included — so the version it prints is the request, not a resolved tag
       const want = opts.releaseVersion ?? "<latest>";
@@ -297,6 +398,22 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
     }
 
     r.section("restart");
+    // BEFORE anything is kickstarted, because the reconciler reads `.env` at
+    // start and the lock write below is a §4.7 protected path: the owner
+    // bearer has to be in the environment the restarted job inherits, or the
+    // install would have to be told to run a command. An install that already
+    // has one spends nothing here (docs/ops/auth.md).
+    const knownInstanceId = instanceDir.instanceDir ? await readInstanceId(instanceDir.instanceDir).catch(() => undefined) : undefined;
+    const ownerBearer = await ensureOwnerBridgeToken(r, {
+      env,
+      envFile,
+      platform,
+      // filed under THIS instance's Keychain account when it has an id, so a
+      // later `metistry secrets purge` takes it with the instance
+      ...(knownInstanceId ? { instanceId: knownInstanceId } : {}),
+      ...(opts.mintOwnerToken ? { mint: opts.mintOwnerToken } : {}),
+    });
+    r.note(ownerBearer.detail);
     if (usesCompose(deployment)) await composeUp(r, runDir, source, source === "release" ? releaseVersion : undefined, envFile);
     else r.note("shape launchd: no containers, so docker is never called — console, assistant and db are kickstarted below with the other host jobs");
     if (platform === "darwin") {
@@ -314,8 +431,19 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
           restarted.push(t.label);
         }
       }
+      // A freshly minted owner bearer is only real once the reconciler has
+      // read it. Usually its code moved in the same update and the loop above
+      // already bounced it; when it did not, this is the difference between
+      // an update that works and one that 401s on its own lock write.
+      if (!r.dryRun && ownerBearer.minted) {
+        const label = labelFor(deployment.shape === "launchd" ? SUPERVISOR_SERVICE : "reconciler", labelSuffix);
+        if (!restarted.includes(label)) {
+          await r.run("launchctl", ["kickstart", "-k", `gui/${uid}/${label}`], { tolerateFailure: true, comment: `so it reads the freshly minted ${OWNER_BRIDGE_TOKEN}` });
+          restarted.push(label);
+        }
+      }
       if (!r.dryRun && restarted.length === 0) r.note("no host job's code changed — nothing kickstarted");
-    } else r.note(`no launchd on ${platform}: restart the host units yourself (systemctl --user restart <unit>)`);
+    } else r.note(`no launchd on ${platform}: restart the host units yourself (systemctl --user restart <unit>)${ownerBearer.minted ? ` — the reconciler must be restarted for ${OWNER_BRIDGE_TOKEN} to take effect, or the lock write below is refused` : ""}`);
 
     r.section("lock");
     const head = r.dryRun || source === "release" ? undefined : await gitHead(productDir, r.exec);
@@ -330,13 +458,55 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
     };
     const delivery = await writeLock(r, lock, { env, platform, uid, fetchFn });
     r.note(delivery.detail);
+
+    // `update` shares no code path with `up` (it never renders a plist or
+    // touches the supervisor), so a checkout that only ever runs `update`
+    // still needs this written — but, like everything else in this block,
+    // not once a step above has failed (nothing runs "after the failure"
+    // except doctor's diagnosis, below).
+    if (opts.cliShim !== false) {
+      r.section("cli");
+      await writeCliShim(r, productDir, instanceDir.instanceDir);
+    }
   } catch (err) {
     if (!(err instanceof StepFailed)) throw err;
     failure = err;
-    r.out(`metistry update: ${err.message}`);
+    r.out(`${r.ui.paint("failed", `${r.ui.icon("fail")} metistry update`)}: ${err.message}`);
   }
 
   const doctorCode = await closingDoctor(r, runDir, opts.doctorDeps, opts.doctorFn ?? doctor);
   const code = failure ? failure.code || 1 : doctorCode;
+  r.out("");
+  r.out(updateSummary({ ui: r.ui, dryRun: r.dryRun, failure, code, source, version: lock?.product.version ?? releaseVersion, migrations, restarted }));
   return { code, source, runDir, commands: r.commands, ...(lock ? { lock } : {}), restarted, ...(migrations ? { migrations } : {}), ...(release ? { release } : {}), ...(runtimeDeps ? { runtimeDeps } : {}) };
+}
+
+/**
+ * The one line to read when the rest has scrolled past: did it land, on what
+ * version, and what moved. Deliberately last, after doctor's own table —
+ * this is the verdict, not a heading (docs/ops/cli-style.md).
+ */
+export function updateSummary(s: {
+  ui: Ui;
+  dryRun: boolean;
+  failure?: StepFailed | undefined;
+  code: number;
+  source: LockSource;
+  version: string;
+  migrations?: { applied: string[] } | undefined;
+  restarted: string[];
+}): string {
+  const { ui } = s;
+  if (s.dryRun) return `${ui.paint("skipped", `${ui.icon("off")} dry run`)} ${ui.dim(`— ${s.source} ${s.version}, nothing was changed`)}`;
+  const verdict = s.failure
+    ? ui.paint("failed", `${ui.icon("fail")} update failed`)
+    : s.code === 0
+      ? ui.paint("ok", `${ui.icon("ok")} update ok`)
+      : ui.paint("degraded", `${ui.icon("warn")} updated, and doctor is not happy`);
+  const parts = [
+    `${s.source} ${s.version}`,
+    s.migrations ? `${s.migrations.applied.length} migration(s) applied` : "no migrations",
+    s.restarted.length > 0 ? `${s.restarted.length} job(s) kickstarted` : "nothing kickstarted",
+  ];
+  return `${verdict} ${ui.dim(`— ${parts.join(", ")}`)}`;
 }

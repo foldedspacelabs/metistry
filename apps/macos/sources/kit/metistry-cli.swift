@@ -154,6 +154,42 @@ public struct MetistryCLI: Sendable {
         await read(["deployment", "--json"], naming: "deployment") { DeploymentShapeFacts(json: $0) }
     }
 
+    // MARK: - The write verbs
+
+    /// `metistry deployment set-keep-awake <value> --yes`.
+    ///
+    /// The app writes no YAML. `deployment.yaml` is a §4.7 protected path, so
+    /// the CLI writes it through the reconciler as the `user` principal
+    /// (invariant 2) — this is a door onto that verb, and `--yes` is the
+    /// confirmation the screen collects by having shown the consequence first
+    /// (keep-awake.swift's `consequence`). Without `--yes` the same call is the
+    /// preview, which is what `plannedSetKeepAwakeArguments` renders.
+    ///
+    /// The result is handed back whole: a refusal is shown in the CLI's words,
+    /// never re-worded here (§3.16).
+    @discardableResult
+    public func deploymentSetKeepAwake(
+        _ setting: KeepAwakeSetting,
+        confirm: Bool = true,
+        onOutput: @escaping @Sendable (OutputLine) -> Void = { _ in }
+    ) async throws -> CommandResult {
+        try await run(setKeepAwakeVerb(setting, confirm: confirm), onOutput: onOutput)
+    }
+
+    public func setKeepAwakeVerb(_ setting: KeepAwakeSetting, confirm: Bool = true) -> [String] {
+        var verb = ["deployment", "set-keep-awake", setting.rawValue]
+        if confirm { verb.append("--yes") }
+        // `--instance` as well as the variable: `set-keep-awake` names the
+        // instance directory the same way `set-shape` does, and the screen
+        // that runs it should show which install it is changing.
+        if let dir = instanceDir { verb += ["--instance", dir.path] }
+        return verb
+    }
+
+    public func plannedSetKeepAwakeArguments(_ setting: KeepAwakeSetting, confirm: Bool = true) -> [String] {
+        plannedArguments(for: setKeepAwakeVerb(setting, confirm: confirm))
+    }
+
     /// The argument array a read verb runs, for the screen that shows it.
     public func plannedArguments(for verb: [String]) -> [String] {
         [runtime.executable.path] + arguments(for: verb)

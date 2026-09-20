@@ -3,13 +3,16 @@
 // the console/assistant/db plists rendered from the REAL ops/launchd
 // templates in this checkout — so a template edit that breaks rendering
 // fails here rather than on someone's machine.
+import { statSync } from "node:fs";
 import { cp, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { realPathish } from "../src/sandbox.js";
+import { EGRESS_PROXY_DEFAULT_PORT } from "@foldedspacelabs/metistry-core";
+import { CLT_GIT, realPathish } from "../src/sandbox.js";
 import { engineAbsentNote } from "../src/deployment.js";
+import { parsePlistTemplate } from "../src/launchd.js";
 import { nodeFor, up } from "../src/up.js";
 import { checkout, fakeExec, okDoctor, shown } from "./fixtures.js";
 
@@ -45,6 +48,9 @@ assignments:
 const env = (instance: string): NodeJS.ProcessEnv => ({
   METISTRY_INSTANCE_DIR: instance,
   METISTRY_DB_PASSWORD: "pw",
+  // already minted, so these command lists stay about plists and Postgres —
+  // the mint itself is up.test.ts's own case
+  METISTRY_BRIDGE_TOKEN_RECONCILER_USER: "owner-bearer",
   METISTRY_ORIGIN: "https://studio.ts.net",
   METISTRY_ASSISTANT_TOKEN: "tok",
   METISTRY_OPENROUTER_API_KEY: "sk-or-x",
@@ -54,9 +60,10 @@ const env = (instance: string): NodeJS.ProcessEnv => ({
 });
 
 /** Every Postgres binary is present; nothing else on the fake filesystem is. */
-const pgInstalled = (extra: string[] = []) => {
+/** A fake `exists` for the Postgres toolchain — plus, by default, the Command Line Tools' git, which is the one the reconciler's profile names on a Mac with no bundled runtime. */
+const pgInstalled = (extra: string[] = [], git = true) => {
   const set = new Set(extra);
-  return (p: string) => p.startsWith(PG) || set.has(p);
+  return (p: string) => p.startsWith(PG) || (git && p === CLT_GIT) || set.has(p);
 };
 
 const launchd = { shape: "launchd" as const, services: {} };
@@ -81,6 +88,9 @@ describe("metistry up --dry-run, launchd shape", () => {
       exists: pgInstalled(),
       mintPassword: () => "generated",
       doctorFn: okDoctor,
+      // cli-shim.test.ts covers the shim itself, including its launchd-shape
+      // collision with the supervisor's own `bin/Metistry` symlink.
+      cliShim: false,
     });
 
     if (r.code !== 0) console.error(lines.join('\n'));
@@ -88,6 +98,162 @@ describe("metistry up --dry-run, launchd shape", () => {
     expect(exec.calls).toEqual([]);
     expect(r.commands.join("\n")).not.toContain("docker");
     expect(lines.some((l) => l.includes("shape: launchd"))).toBe(true);
+    // --dry-run names the profile each confined child will run under, and
+    // the one door their egress goes through — before anything is installed
+    const plan = lines.join("\n");
+    expect(plan).toContain(`reconciler: confined by ops/sandbox/reconciler.sb`);
+    expect(plan).toContain(`${CLT_GIT}`);
+    expect(plan).toMatch(/egress: one CONNECT proxy on 127\.0\.0\.1:7814 in the supervisor/);
+    expect(plan).toContain("openrouter.ai");
+  });
+
+  it("arranges the confined reconciler's push credential: an askpass shim, and a keychain item for the supervisor to fetch", async () => {
+    const P = await launchdCheckout();
+    const I = await mkdtemp(join(tmpdir(), "mi-"));
+    const home = await mkdtemp(join(tmpdir(), "metistry-home-"));
+    // an instance repo pointed at a private remote the way `metistry
+    // connect-repo` leaves it: an https origin AND the osxkeychain helper
+    // that cannot run confined
+    await mkdir(join(I, ".git"), { recursive: true });
+    await writeFile(
+      join(I, ".git", "config"),
+      '[remote "origin"]\n\turl = https://github.com/owner/vault.git\n[credential]\n\thelper = osxkeychain\n',
+    );
+    await mkdir(join(P, "apps", "console", "dist"), { recursive: true });
+    const lines: string[] = [];
+    const r = await up({
+      productDir: P,
+      env: env(I),
+      exec: fakeExec(),
+      out: (l) => lines.push(l),
+      platform: "darwin",
+      uid: 501,
+      home,
+      node: NODE,
+      deployment: launchd,
+      exists: pgInstalled(),
+      doctorFn: okDoctor,
+    });
+    expect(r.code).toBe(0);
+    const plan = lines.join("\n");
+
+    // the shim exists, is executable, and carries THIS install's node
+    const shim = join(I, ".metistry", "state", "bin", "git-askpass");
+    const script = await readFile(shim, "utf8");
+    expect(script.split("\n")[0]).toBe(`#!${NODE}`);
+    expect(script).toContain("METISTRY_GIT_ASKPASS_TOKEN");
+    expect((statSync(shim).mode & 0o777).toString(8)).toBe("755");
+
+    const config = JSON.parse(await readFile(join(I, ".metistry", "state", "supervisor.json"), "utf8"));
+    // supervisor.json says WHICH keychain item to fetch, and never what it holds
+    expect(config.gitCredentials).toEqual([{ child: "reconciler", host: "github.com" }]);
+    expect(JSON.stringify(config)).not.toMatch(/ASKPASS_TOKEN"\s*:/);
+
+    const rec = config.children.find((c: { name: string }) => c.name === "reconciler");
+    // the job carries the shim's PATH; the credential itself arrives at spawn
+    expect(rec.env.METISTRY_GIT_ASKPASS).toBe(shim);
+    expect(rec.env.METISTRY_GIT_ASKPASS_TOKEN).toBeUndefined();
+    expect(rec.argv.join(" ")).toContain(`-D 'ASKPASS_BIN=${realPathish(shim)}'`);
+    // the engine is confined too and gets none of this
+    expect(config.children.find((c: { name: string }) => c.name === "assistant").env.METISTRY_GIT_ASKPASS).toBeUndefined();
+
+    // …and the plan SAYS so, instead of the old warning that the push would break
+    expect(plan).toContain("pushes to https://github.com/owner/vault.git with GIT_ASKPASS");
+    expect(plan).toContain("reads the login Keychain item for github.com");
+    expect(plan).not.toContain("cannot run it");
+    // github.com is a push remote, so the egress door admits it
+    expect(config.egress.allow).toContain("github.com");
+  });
+
+  it("still refuses to pretend about SSH — the one remote shape confinement cannot serve", async () => {
+    const P = await launchdCheckout();
+    const I = await mkdtemp(join(tmpdir(), "mi-"));
+    await mkdir(join(I, ".git"), { recursive: true });
+    await writeFile(join(I, ".git", "config"), '[remote "origin"]\n\turl = git@github.com:owner/vault.git\n');
+    const lines: string[] = [];
+    const r = await up({
+      productDir: P,
+      env: env(I),
+      exec: fakeExec(),
+      out: (l) => lines.push(l),
+      dryRun: true,
+      platform: "darwin",
+      uid: 501,
+      home: "/h",
+      node: NODE,
+      deployment: launchd,
+      exists: pgInstalled(),
+      mintPassword: () => "generated",
+      doctorFn: okDoctor,
+      cliShim: false,
+    });
+    expect(r.code).toBe(0);
+    const plan = lines.join("\n");
+    expect(plan).toContain("cannot push to them");
+    expect(plan).toContain("granting the sole committer ~/.ssh");
+    // no keychain lookup for an ssh remote: its credential is a key
+    expect(plan).not.toContain("with GIT_ASKPASS");
+  });
+
+  it("the compose shape confines nothing — the container is the boundary, and there is no proxy to point at", async () => {
+    const P = await launchdCheckout();
+    const I = await mkdtemp(join(tmpdir(), "mi-"));
+    const home = await mkdtemp(join(tmpdir(), "metistry-home-"));
+    const lines: string[] = [];
+    const r = await up({
+      productDir: P,
+      env: env(I),
+      exec: fakeExec(),
+      out: (l) => lines.push(l),
+      platform: "darwin",
+      uid: 501,
+      home,
+      node: NODE,
+      deployment: { shape: "compose", services: {} },
+      exists: pgInstalled(),
+      doctorFn: okDoctor,
+      compose: false,
+    });
+    expect(r.code).toBe(0);
+    // the reconciler is a host launchd job under BOTH shapes, and under
+    // compose it must NOT be pointed at reconciler.sb: there is no egress
+    // proxy for its PROXY_TCP rule to reach
+    const plist = await readFile(join(home, "Library", "LaunchAgents", "com.foldedspacelabs.metistry.reconciler.plist"), "utf8");
+    // the ARGV, not the whole file: the template's comment explains the
+    // confined shape whichever profile is in force
+    const argv = parsePlistTemplate("r.plist", plist).programArguments.join(" ");
+    expect(argv).toContain("ops/sandbox/unconfined.sb");
+    expect(argv).not.toContain("ops/sandbox/reconciler.sb");
+    expect(lines.join("\n")).toContain("the compose shape's boundary is the container");
+  });
+
+  it("declines to confine the reconciler, loudly, when the Mac has no git the profile could name", async () => {
+    const P = await launchdCheckout();
+    const I = await mkdtemp(join(tmpdir(), "mi-"));
+    const lines: string[] = [];
+    const r = await up({
+      productDir: P,
+      env: env(I),
+      exec: fakeExec(),
+      out: (l) => lines.push(l),
+      dryRun: true,
+      platform: "darwin",
+      uid: 501,
+      home: "/h",
+      node: NODE,
+      deployment: launchd,
+      // no bundled runtime, no Command Line Tools: only the xcode-select
+      // shim, which dies under a profile
+      exists: pgInstalled([], false),
+      mintPassword: () => "generated",
+      doctorFn: okDoctor,
+      cliShim: false,
+    });
+    expect(r.code).toBe(0);
+    const plan = lines.join("\n");
+    expect(plan).toContain("reconciler: NOT confined");
+    expect(plan).toContain("xcode-select shim");
+    expect(plan).toContain("ops/sandbox/unconfined.sb");
 
     const LA = "/h/Library/LaunchAgents";
     const SUP = "com.foldedspacelabs.metistry";
@@ -226,6 +392,17 @@ describe("the rendered plists", () => {
       METISTRY_EK_URL: "http://127.0.0.1:7811",
       METISTRY_INBOX_DIR: `${I}/Inbox`,
     });
+    // …and NOT the vault bridge's owner bearer, which is in this install's
+    // `.env` (env(I) above) and is the one credential that may write
+    // `.metistry/`. The console's environment is otherwise a passthrough, so
+    // this is the whole of the credential split on the launchd shape — and
+    // the supervisor, which spawns it, must not hold it either.
+    expect(child("console").env.METISTRY_BRIDGE_TOKEN_RECONCILER_USER).toBeUndefined();
+    expect(config.env.METISTRY_BRIDGE_TOKEN_RECONCILER_USER).toBeUndefined();
+    expect(JSON.stringify(config.children.filter((c: { name: string }) => c.name !== "reconciler"))).not.toContain("owner-bearer");
+    // the reconciler needs BOTH, and gets them the way it always has: it
+    // sources the instance's `.env` itself, outside the sandbox
+    expect(child("reconciler").argv.join(" ")).toContain(`. '${I}/.metistry/state/.env'`);
 
     const assistant = child("assistant");
     expect(JSON.stringify(assistant)).not.toMatch(/__[A-Z][A-Z0-9_]*__/);
@@ -237,19 +414,78 @@ describe("the rendered plists", () => {
     expect(assistant.argv).toContain(`PRODUCT_DIR=${realPathish(P)}`);
     expect(assistant.env.HOME).toBe(`${I}/.metistry/state/assistant`);
     expect(assistant.env.METISTRY_OPENROUTER_API_KEY).toBe("sk-or-x"); // named by compute.yaml, not by a fixed variable
+    // where this install's config is — without these the engine resolved
+    // every overlay against its working directory (the PRODUCT checkout)
+    // and answered as the seed identity (#198)
+    expect(assistant.env.METISTRY_INSTANCE_DIR).toBe(I);
+    expect(assistant.env.METISTRY_SEED_DIR).toBe(`${P}/seed`);
+    // …and the sandbox lets it open the four files it will find there, by
+    // name: the vault beside them stays denied (D5)
+    expect(assistant.argv).toContain(`CONFIG_IDENTITY=${realPathish(join(I, ".metistry", "identity.yaml"))}`);
+    expect(assistant.argv).toContain(`CONFIG_ASSISTANT_PROMPT=${realPathish(join(I, ".metistry", "assistant-prompt.md"))}`);
+    expect(assistant.argv).toContain(`CONFIG_RULES=${realPathish(join(I, ".metistry", "rules.yaml"))}`);
+    expect(assistant.argv).toContain(`CONFIG_COMPUTE=${realPathish(join(I, ".metistry", "compute.yaml"))}`);
     // the engine's environment is still an ALLOWLIST, and a child's
     // environment is the spec's whole: the supervisor's own never leaks in
     expect(assistant.env.METISTRY_ORIGIN).toBeUndefined();
     expect(Object.keys(assistant.env).sort()).toEqual(
-      ["METISTRY_OPENROUTER_API_KEY", "HOME", "METISTRY_ASSISTANT_TOKEN", "METISTRY_BRAIN_URL", "METISTRY_DB_HOST", "METISTRY_DB_PASSWORD", "METISTRY_DB_PORT", "PATH", "TMPDIR"].sort(),
+      [
+        "METISTRY_OPENROUTER_API_KEY",
+        "HOME",
+        "METISTRY_ASSISTANT_TOKEN",
+        "METISTRY_BRAIN_URL",
+        "METISTRY_DB_HOST",
+        "METISTRY_DB_PASSWORD",
+        "METISTRY_DB_PORT",
+        "METISTRY_INSTANCE_DIR",
+        "METISTRY_SEED_DIR",
+        "PATH",
+        "TMPDIR",
+        // the egress door — five variables, and the fifth is why the other
+        // four work: Node's global fetch ignores HTTPS_PROXY without
+        // NODE_USE_ENV_PROXY (core/egress.ts)
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "NO_PROXY",
+        "NODE_USE_ENV_PROXY",
+      ].sort(),
     );
+    // the engine's egress is the proxy and nothing else: the profile allows
+    // exactly this port, the proxy allows exactly the hosts compute.yaml
+    // named, and loopback bypasses it
+    expect(assistant.argv).toContain(`PROXY_TCP=localhost:${EGRESS_PROXY_DEFAULT_PORT}`);
+    expect(assistant.env.HTTPS_PROXY).toMatch(new RegExp(`^http://assistant:[0-9a-f]{64}@127\\.0\\.0\\.1:${EGRESS_PROXY_DEFAULT_PORT}$`));
+    expect(assistant.env.NO_PROXY).toBe("localhost,127.0.0.1,::1");
+    expect(assistant.env.NODE_USE_ENV_PROXY).toBe("1");
 
     expect(child("db").argv).toEqual([`${PG}/postgres`, "-D", `${I}/.metistry/state/pg`]);
 
     // the jobs that exist in BOTH shapes still source a dotenv file with
     // sh -c — but the INSTANCE's, not the checkout's (self-contained instances)
-    expect(child("reconciler").argv.join(" ")).toContain(`set -a; . '${I}/.metistry/state/.env'; set +a; exec '${NODE}' '${P}/apps/reconciler/dist/main.js'`);
-    expect(child("reconciler").log).toBe("/tmp/metistry-reconciler.log");
+    // The sole committer, CONFINED. The shell still sources the instance's
+    // dotenv (it runs outside the sandbox and execs itself away, which is
+    // why the profile needs no /bin/sh rule) and what it execs is
+    // sandbox-exec, so git and all its helpers inherit the confinement.
+    const rec = child("reconciler");
+    expect(JSON.stringify(rec)).not.toMatch(/__[A-Z][A-Z0-9_]*__/);
+    const shell = rec.argv.join(" ");
+    expect(shell).toContain(`set -a; . '${I}/.metistry/state/.env'; set +a; exec '/usr/bin/sandbox-exec'`);
+    expect(shell).toContain(`-f '${P}/ops/sandbox/reconciler.sb'`);
+    expect(shell).toContain(`-D 'INSTANCE_DIR=${realPathish(I)}'`);
+    expect(shell).toContain(`-D 'PROXY_TCP=localhost:${EGRESS_PROXY_DEFAULT_PORT}'`);
+    expect(shell).toContain(`'${NODE}' '${P}/apps/reconciler/dist/main.js'`);
+    // git's own environment is a deliberate allowlist, so the proxy reaches
+    // it as an explicit variable the reconciler turns into `-c http.proxy`
+    expect(rec.env.METISTRY_GIT_HTTP_PROXY).toMatch(new RegExp(`^http://reconciler:[0-9a-f]{64}@127\\.0\\.0\\.1:${EGRESS_PROXY_DEFAULT_PORT}$`));
+    expect(rec.log).toBe("/tmp/metistry-reconciler.log");
+
+    // …and supervisor.json carries the door itself: the port, the allowlist
+    // and a bearer per confined child, where no child can rewrite it
+    const cfg = JSON.parse(await readFile(join(I, ".metistry", "state", "supervisor.json"), "utf8"));
+    expect(cfg.egress.port).toBe(EGRESS_PROXY_DEFAULT_PORT);
+    expect(Object.keys(cfg.egress.tokens).sort()).toEqual(["assistant", "reconciler"]);
+    expect(cfg.egress.allow).toContain("openrouter.ai");
 
     // the supervisor's own plist: 0600, because its dict carries the db password
     const sup = await read("");
@@ -265,7 +501,7 @@ describe("the rendered plists", () => {
     const exec = fakeExec();
     await up({
       productDir: P,
-      env: { HOME: home },
+      env: { HOME: home, METISTRY_BRIDGE_TOKEN_RECONCILER_USER: "owner-bearer" },
       exec,
       out: () => {},
       platform: "darwin",
@@ -330,6 +566,46 @@ describe("the node every launchd job execs", () => {
     expect(JSON.stringify(assistant)).not.toContain("/opt/homebrew");
     // and the supervisor's own program is a symlink to it, named `Metistry`
     expect(await readFile(join(home, "Library", "LaunchAgents", "com.foldedspacelabs.metistry.plist"), "utf8")).toContain(`<string>${I}/.metistry/state/bin/Metistry</string>`);
+  });
+});
+
+describe("keep_awake reaches the holder", () => {
+  /** The supervisor is the holder, so the answer has to be in ITS environment — through the same passthrough every other METISTRY_* variable takes, not a second channel. */
+  const supervisorEnv = async (keepAwake?: "never" | "allow_sleep_on_battery" | "always" | "always_lid_closed") => {
+    const P = await launchdCheckout();
+    const I = await mkdtemp(join(tmpdir(), "mi-"));
+    const home = await mkdtemp(join(tmpdir(), "metistry-home-"));
+    const lines: string[] = [];
+    const r = await up({
+      productDir: P,
+      env: env(I),
+      exec: fakeExec(),
+      out: (l) => lines.push(l),
+      platform: "darwin",
+      uid: 501,
+      home,
+      node: NODE,
+      deployment: { ...launchd, ...(keepAwake ? { keep_awake: keepAwake } : {}) },
+      exists: pgInstalled(),
+      doctorFn: okDoctor,
+    });
+    expect(r.code).toBe(0);
+    const config = JSON.parse(await readFile(join(I, ".metistry", "state", "supervisor.json"), "utf8"));
+    const plist = await readFile(join(home, "Library", "LaunchAgents", "com.foldedspacelabs.metistry.plist"), "utf8");
+    return { env: config.env as Record<string, string>, plist, lines };
+  };
+
+  it("deployment.yaml's answer is rendered into supervisor.json and the agent's dict", async () => {
+    const { env: e, plist, lines } = await supervisorEnv("allow_sleep_on_battery");
+    expect(e.METISTRY_KEEP_AWAKE).toBe("allow_sleep_on_battery");
+    expect(plist).toContain("<key>METISTRY_KEEP_AWAKE</key><string>allow_sleep_on_battery</string>");
+    expect(lines.some((l) => l.includes("keep-awake: allow_sleep_on_battery"))).toBe(true);
+  });
+
+  it("an install that never answered the question carries `never`, and `up` says the Mac may sleep", async () => {
+    const { env: e, lines } = await supervisorEnv();
+    expect(e.METISTRY_KEEP_AWAKE).toBe("never");
+    expect(lines.some((l) => l.includes("keep-awake: never"))).toBe(true);
   });
 });
 

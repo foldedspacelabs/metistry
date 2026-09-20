@@ -3,9 +3,12 @@
 // restarts, no double-run storms), executes under a two-phase runs row.
 // Schedule parsing lives in core (scheduleToSeconds — shared with the
 // watchdog's silent-collector probe, so "due" and "silent" can never
-// disagree about an interval). Every shipped manifest must parse: the
-// console refuses to start otherwise (it crash-looped once on an unparsed
-// schedule — manifests.test.ts).
+// disagree about an interval). Every SHIPPED manifest must parse
+// (manifests.test.ts gates it in CI), but loadSchedules itself is more
+// defensive than that: a manifest it cannot load or schedule is skipped and
+// logged, not fatal — the console crash-looped once on an unparsed schedule,
+// and one bad manifest (shipped or instance-authored) must not take every
+// OTHER component down with it.
 //
 // Three hardening behaviours ride on the same gate (docs/ops/automation.md):
 // PREFLIGHT, so a component whose credential was never set costs an
@@ -43,10 +46,43 @@ import {
   type ComponentStreak,
   type PreflightMiss,
   type Requirements,
+  type TemplateQueries,
+  type TemplateReader,
 } from "@foldedspacelabs/metistry-core";
 import type { RegisteredCollector, Db, CollectorCtx } from "@metistry-apps/collectors";
+import { vaultReader, type PlanCtx, type PlanVault } from "@metistry-apps/routines";
 
 export { scheduleToSeconds }; // one import path for the runner's callers and tests
+
+/**
+ * What the runner hands a component: every collector's ctx, plus what a
+ * ROUTINE needs and no collector does — the named-query store, the vault
+ * bridge (which `plan-tomorrow` renders tomorrow's plan out of,
+ * docs/product/daily-flow-spec.md §7), and the `TemplateReader` adapter over
+ * that same bridge (which `knowledge-fold` reads `Templates/Fold.md` and any
+ * `{{ include }}` inside it through — `FoldCtx` has no `vault` field of its
+ * own, only `reader`). One type rather than one per caller, so `main.ts`
+ * composes the capabilities it already built for the server and hands them
+ * on; a component takes the fields it declares and ignores the rest.
+ */
+export type ComponentCtx = CollectorCtx & PlanCtx & { reader?: TemplateReader };
+
+/**
+ * The routine-only slice of `ComponentCtx`, built ONCE here from the objects
+ * `main.ts` already has — the named-query store, and, when the vault bridge
+ * is up, both the vault client itself (`plan-tomorrow`'s own read/write) and
+ * the `TemplateReader` adapter over it (`vaultReader`,
+ * `routines/vault-reader.ts`). Absent vault → neither `vault` nor `reader`,
+ * exactly like a missing calendar bridge (§6.4): every query-backed or
+ * vault-backed directive renders its own "not configured" note and the file
+ * still renders.
+ */
+export function routineCapabilities(queries: TemplateQueries, vault?: PlanVault): Pick<ComponentCtx, "queries" | "vault" | "reader"> {
+  return {
+    queries,
+    ...(vault ? { vault, reader: vaultReader(vault) } : {}),
+  };
+}
 
 export interface ScheduledCollector extends RegisteredCollector {
   intervalSec: number;
@@ -121,19 +157,27 @@ export async function loadSchedules(
   const out: ScheduledCollector[] = [];
   for (const c of registered) {
     const dir = `${collectorsDir}/${c.name}`;
-    const manifest = validateManifest(parseYaml(await readFile(`${dir}/manifest.yaml`, "utf8")));
-    if (!manifest.ok) throw new Error(`${c.name}: invalid manifest: ${manifest.errors.join("; ")}`);
-    const m = manifest.manifest;
-    if (m.type !== "collector" && m.type !== "routine") throw new Error(`${c.name}: not schedulable (type ${m.type})`);
-    if (m.schedule === undefined) throw new Error(`${c.name}: no schedule`);
-    out.push({
-      ...c,
-      dir,
-      requires: requirementsOf(m),
-      intervalSec: scheduleToSeconds(m.schedule),
-      runKind: m.type === "routine" ? "routine_run" : "collector_run",
-      ...(m.type === "collector" && m.uses_model ? { usesModel: m.uses_model } : {}),
-    });
+    // One bad manifest must not take the runner down (enforce at the tool,
+    // not by trusting every manifest a component ships to be one this
+    // build's scheduleToSeconds understands): skip it and log why, so every
+    // OTHER component still starts.
+    try {
+      const manifest = validateManifest(parseYaml(await readFile(`${dir}/manifest.yaml`, "utf8")));
+      if (!manifest.ok) throw new Error(`invalid manifest: ${manifest.errors.join("; ")}`);
+      const m = manifest.manifest;
+      if (m.type !== "collector" && m.type !== "routine") throw new Error(`not schedulable (type ${m.type})`);
+      if (m.schedule === undefined) throw new Error(`no schedule`);
+      out.push({
+        ...c,
+        dir,
+        requires: requirementsOf(m),
+        intervalSec: scheduleToSeconds(m.schedule),
+        runKind: m.type === "routine" ? "routine_run" : "collector_run",
+        ...(m.type === "collector" && m.uses_model ? { usesModel: m.uses_model } : {}),
+      });
+    } catch (e) {
+      console.warn(`${c.name}: skipped — ${(e as Error).message} (fix ${dir}/manifest.yaml)`);
+    }
   }
   return out;
 }
@@ -210,7 +254,7 @@ const clip = (s: string, n = 120): string => (s.length > n ? `${s.slice(0, n - 1
 // ---- the tick --------------------------------------------------------------
 
 /** Run every collector that's due (last finished run older than its interval). */
-export async function tick(db: Db, scheduled: ScheduledCollector[], ctx: CollectorCtx = {}, options: RunnerOptions = {}): Promise<void> {
+export async function tick(db: Db, scheduled: ScheduledCollector[], ctx: ComponentCtx = {}, options: RunnerOptions = {}): Promise<void> {
   const opts = resolve(options);
   const streaks: ComponentStreak[] = await failureStreaks(db);
 
@@ -284,7 +328,7 @@ export async function tick(db: Db, scheduled: ScheduledCollector[], ctx: Collect
 export function startRunner(
   db: Db,
   scheduled: ScheduledCollector[],
-  ctx: CollectorCtx = {},
+  ctx: ComponentCtx = {},
   everyMs = 60_000,
   options: RunnerOptions = {},
 ): NodeJS.Timeout {

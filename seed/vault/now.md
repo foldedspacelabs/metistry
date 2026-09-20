@@ -1,3 +1,6 @@
+---
+source: assistant
+---
 # Now
 
 > The assistant's working memory of the present. Maintained by routines once

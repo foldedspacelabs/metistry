@@ -6,9 +6,14 @@
      container: the container was defence in depth behind invariant 9's
      allowlist. So the job's root process is not node — it is
      /usr/bin/sandbox-exec running ops/sandbox/assistant.sb, and every
-     child inherits the confinement: read of its own dist + runtime,
-     write only to STATE_DIR and the temp dir, outbound only to the
-     console on loopback and TLS. `metistry up` computes every -D
+     child inherits the confinement: read of its own dist + runtime and
+     of its four config files BY NAME (identity.yaml, the prompt template,
+     rules.yaml, compute.yaml — never the directory holding them, which on
+     an unmigrated instance is the vault root), write only to STATE_DIR and
+     the temp dir, outbound only to the console and Postgres on loopback and
+     to the supervisor's egress CONNECT proxy — never `*:443`, so the host
+     allowlist derived from compute.yaml is enforced rather than documented
+     (packages/core/src/egress.ts). `metistry up` computes every -D
      parameter (packages/cli/src/sandbox.ts) and the misuse tests in
      packages/cli/test/sandbox.test.ts prove the four denials.
 
@@ -31,8 +36,13 @@
     <string>-D</string><string>PRODUCT_DIR=__PRODUCT_DIR__</string>
     <string>-D</string><string>STATE_DIR=__STATE_DIR__</string>
     <string>-D</string><string>TMP_DIR=__TMP_DIR__</string>
+    <string>-D</string><string>CONFIG_IDENTITY=__CONFIG_IDENTITY__</string>
+    <string>-D</string><string>CONFIG_ASSISTANT_PROMPT=__CONFIG_ASSISTANT_PROMPT__</string>
+    <string>-D</string><string>CONFIG_RULES=__CONFIG_RULES__</string>
+    <string>-D</string><string>CONFIG_COMPUTE=__CONFIG_COMPUTE__</string>
     <string>-D</string><string>CONSOLE_TCP=__CONSOLE_TCP__</string>
     <string>-D</string><string>DB_TCP=__DB_TCP__</string>
+    <string>-D</string><string>PROXY_TCP=__PROXY_TCP__</string>
     <string>__NODE__</string>
     <string>__REPO__/apps/assistant/dist/main.js</string>
   </array>

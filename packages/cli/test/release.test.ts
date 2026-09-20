@@ -110,6 +110,19 @@ describe("release assets", () => {
     expect(wf).toContain("metistry-runtime-${{ needs.verify.outputs.version }}-${{ matrix.target }}.tar.gz");
   });
 
+  it("the pack carries every sandbox profile a launchd install execs — and refuses to build without one", () => {
+    // v0.4.0 shipped without ops/sandbox at all and produced an assistant
+    // job that could not start (2026-09-10 trial). There are three profiles
+    // now: the two confinements and the reconciler's documented off switch,
+    // which would be a job that cannot start if it were missing.
+    const script = readFileSync(new URL("../../../ops/release/pack-runtime.sh", import.meta.url), "utf8");
+    expect(script).toContain("copy seed db/migrations ops/launchd ops/sandbox");
+    for (const profile of ["assistant", "reconciler", "unconfined"]) {
+      expect(script, profile).toContain(profile);
+      expect(existsSync(new URL(`../../../ops/sandbox/${profile}.sb`, import.meta.url)), profile).toBe(true);
+    }
+  });
+
   it("runtimePackCommit reads the manifest's commit and never fabricates one", async () => {
     const dir = await mkdtemp(join(tmpdir(), "metistry-pack-"));
     expect(await runtimePackCommit(dir)).toBeUndefined(); // no metistry-runtime.json at all

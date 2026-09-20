@@ -167,7 +167,11 @@ describe.skipIf(!hasDb)("actions + autonomy (integration)", () => {
   });
 
   it("propose lands PENDING and nothing happens until the user answers", async () => {
-    const before = (await pool.query(`SELECT count(*) AS n FROM inbox`)).rows[0].n;
+    // counted for THIS suite's agent, never the whole table: sibling files
+    // write their own inbox rows into the shared scratch db while this runs,
+    // and a global count is their race, not this test's property
+    const captured = async () => (await pool.query(`SELECT count(*) AS n FROM inbox WHERE source_agent = $1`, [agentId])).rows[0].n;
+    const before = await captured();
     const r = await rpc("propose_action", { kind: "capture", args: { note: "a thought worth keeping" }, reason: "it came up twice" });
     expect(r.isError).toBeUndefined();
     expect(r.body).toMatchObject({ status: "pending", action: "capture" });
@@ -175,7 +179,7 @@ describe.skipIf(!hasDb)("actions + autonomy (integration)", () => {
     expect(row).toMatchObject({ kind: "action", decision: "pending", source_agent: agentId, trust: "external" });
     expect(row.payload.action).toEqual({ kind: "capture", args: { note: "a thought worth keeping" } });
     expect(row.payload.title).toBe("capture a note"); // deterministic, from core — the queue title is not prose
-    expect((await pool.query(`SELECT count(*) AS n FROM inbox`)).rows[0].n).toBe(before); // nothing ran
+    expect(await captured()).toBe(before); // nothing ran
   });
 
   // ---- allow executes, through the same service ------------------------------------

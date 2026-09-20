@@ -52,7 +52,7 @@ describe("tool surface", () => {
     expect(eager.slice(-tail, -1 - QUERIES_TOOL_NAMES.length)).toEqual([...ARTIFACTS_TOOL_NAMES]);
     expect(eager.at(-1 - QUERIES_TOOL_NAMES.length)).toBe("agents_delegate");
     expect(eager.slice(-QUERIES_TOOL_NAMES.length)).toEqual([...QUERIES_TOOL_NAMES]);
-    expect(eager.length).toBeLessThan(26); // over the PoC-17 tool-COUNT guidance (>20) since knowledge_list/knowledge_grep, tasks_close and the two room tools — flagged in manifest.yaml; the definition-token axis (test/brain.test.ts) is what actually gates lazy
+    expect(eager.length).toBeLessThan(27); // over the PoC-17 tool-COUNT guidance (>20) since knowledge_list/knowledge_grep, tasks_close, the two room tools and now request_access — flagged in manifest.yaml and acknowledged number-by-number in ops/scripts/check-tool-surface.mjs; the definition-token axis (test/brain.test.ts) is what actually gates lazy
   });
 
   it("the whole eager surface stays inside the PoC-17 definition budget, and deprecated names cost it nothing", async () => {
@@ -248,9 +248,10 @@ describe.skipIf(!hasDb)("artifacts_* (real db, real MCP client)", () => {
     const work = (await new TasksService(pool).create({ title: "room through the bridge", project: P, kind: "task" }, "user")).id;
 
     // no tool on this surface takes an addressee for a room — the schema has two keys and neither is one
+    // (two, not three: the turn handle rides in the call's `_meta` now, not in every schema — src/turn-id.ts)
     const listed = (await alice.listTools()).tools;
     const comment = listed.find((t) => t.name === "tasks_comment")!;
-    expect(Object.keys(comment.inputSchema.properties ?? {}).sort()).toEqual(["body", "turn_id", "work_id"]);
+    expect(Object.keys(comment.inputSchema.properties ?? {}).sort()).toEqual(["body", "work_id"]);
     expect(JSON.stringify(comment.inputSchema)).not.toMatch(/to_agent|addressee|mention/);
 
     const said = await call(alice, "tasks_comment", { work_id: work, body: "does this include the migration?" });

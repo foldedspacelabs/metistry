@@ -40,9 +40,22 @@ through `HTTPS_PROXY` + `NODE_USE_ENV_PROXY=1`; git reaches it through
 `METISTRY_GIT_HTTP_PROXY` → `-c http.proxy`. `supervisor.json` gains an
 `egress` block, read before any child is spawned, so no child can widen it.
 
-**Two measured costs, documented rather than papered over.** A confined
-reconciler cannot run a git credential helper (git runs every helper through
-`/bin/sh`, including the built-in `osxkeychain`), and cannot push to an SSH
-remote (granting `ssh` would mean granting the sole committer `~/.ssh`).
-`up` warns when an install has either, and `docs/ops/reconciler.md` gives
-three ways to push anyway.
+**Pushing still works, through `GIT_ASKPASS`.** git executes every
+credential helper through `/bin/sh` — including the built-in `osxkeychain`
+that `metistry connect-repo` configures — and this profile has no shell, so
+a confined push would have died on the helper. `GIT_ASKPASS` is exec'd
+directly, by absolute path, with no shell, so: the token stays in the login
+Keychain where `connect-repo` put it, the **supervisor** reads it there once
+at spawn (unconfined, the parent, and the item is filed `-A` so there is no
+prompt), and hands it to the child in its environment; a `#!<node>` shim
+`up` generates prints it when git asks and can do nothing else. The
+credential is never in argv, never in `supervisor.json`, never on disk.
+`git.ts` adds `-c credential.helper=` — git's documented reset — only when
+there is an askpass, so an unconfined install is untouched. Proven by a real
+push to a real bare repository over real HTTPS through the CONNECT tunnel,
+under `sandbox-exec`.
+
+**SSH remotes stay unsupported while confined**, and `up` still warns:
+`ssh` is not exec-able, granting it would mean granting the sole committer
+`~/.ssh`, and ssh's `ProxyCommand` runs through a shell so it could not
+reach the egress proxy either. Use an HTTPS remote or the off switch.

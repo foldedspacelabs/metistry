@@ -80,7 +80,7 @@ import {
   SUPERVISOR_SERVICE,
 } from "./supervisor.js";
 import { shellUnsafeEnvLines } from "./env.js";
-import { ensureInstanceId, envPaths } from "./instance.js";
+import { ensureInstanceId, envPaths, readInstanceId } from "./instance.js";
 import { ensureOwnerBridgeToken } from "./protected-write.js";
 import { allocateBase, applyPorts, loadNamespace, portEnv, PORTED_SERVICES, portsFile, portsOf, serializeNamespace, suffixFor, type Namespace } from "./namespace.js";
 import { llamaServerChild } from "./local-models.js";
@@ -1127,7 +1127,19 @@ export async function up(opts: UpOptions): Promise<UpResult> {
   // rendered from this environment, and the reconciler is restarted at the
   // end of this run. An install that predates the credential split gains it
   // here and needs to be told nothing (docs/ops/auth.md).
-  const ownerBearer = await ensureOwnerBridgeToken(r, { env, envFile, platform: le.platform, ...(opts.mintOwnerToken ? { mint: opts.mintOwnerToken } : {}) });
+  // The instance's id when it already has one, so the Keychain item is filed
+  // under this instance's account rather than the person's (secrets.ts's
+  // scope table: `metistry secrets purge` must not orphan it). A brand-new
+  // instance has none yet — `ensureInstanceId` below is what mints it — and
+  // the next `secrets sync --to env` copies the item across.
+  const knownInstanceId = instanceDir.instanceDir ? await readInstanceId(instanceDir.instanceDir).catch(() => undefined) : undefined;
+  const ownerBearer = await ensureOwnerBridgeToken(r, {
+    env,
+    envFile,
+    platform: le.platform,
+    ...(knownInstanceId ? { instanceId: knownInstanceId } : {}),
+    ...(opts.mintOwnerToken ? { mint: opts.mintOwnerToken } : {}),
+  });
   r.note(ownerBearer.detail);
   // compute.yaml, once: the same file `servedLocalModelChildren` reads, the
   // same one doctor reads. A file that does not parse is a NOTE and an

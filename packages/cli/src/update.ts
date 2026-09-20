@@ -20,7 +20,7 @@ import { writeCliShim } from "./cli-shim.js";
 import { loadDeployment } from "./deployment.js";
 import { doctor, type DoctorDeps, type DoctorReport } from "./doctor.js";
 import { productVersion } from "./env.js";
-import { envPaths } from "./instance.js";
+import { envPaths, readInstanceId } from "./instance.js";
 import { applyPorts, loadNamespace } from "./namespace.js";
 import type { Exec } from "./exec.js";
 import { labelFor, loadPlistTemplates, loadSupervisedTemplates, type PlistTemplate } from "./launchd.js";
@@ -403,7 +403,16 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
     // bearer has to be in the environment the restarted job inherits, or the
     // install would have to be told to run a command. An install that already
     // has one spends nothing here (docs/ops/auth.md).
-    const ownerBearer = await ensureOwnerBridgeToken(r, { env, envFile, platform, ...(opts.mintOwnerToken ? { mint: opts.mintOwnerToken } : {}) });
+    const knownInstanceId = instanceDir.instanceDir ? await readInstanceId(instanceDir.instanceDir).catch(() => undefined) : undefined;
+    const ownerBearer = await ensureOwnerBridgeToken(r, {
+      env,
+      envFile,
+      platform,
+      // filed under THIS instance's Keychain account when it has an id, so a
+      // later `metistry secrets purge` takes it with the instance
+      ...(knownInstanceId ? { instanceId: knownInstanceId } : {}),
+      ...(opts.mintOwnerToken ? { mint: opts.mintOwnerToken } : {}),
+    });
     r.note(ownerBearer.detail);
     if (usesCompose(deployment)) await composeUp(r, runDir, source, source === "release" ? releaseVersion : undefined, envFile);
     else r.note("shape launchd: no containers, so docker is never called — console, assistant and db are kickstarted below with the other host jobs");

@@ -195,6 +195,9 @@ describe("metistry up", () => {
     const lines: string[] = [];
     const r = await up({ ...base(P), env: {}, exec, out: (l) => lines.push(l), home: "/h", launchd: false, doctorFn: okDoctor });
     expect(r.code).toBe(0);
+    // filed under the Keychain account this install's secrets belong to
+    // (secrets.ts's scope table — the person's here, since this fixture has
+    // no instance directory and therefore no instance_id yet)
     expect(stored).toEqual([{ service: "metistry:METISTRY_BRIDGE_TOKEN_RECONCILER_USER", account: "metistry" }]);
     // the value is never printed, by this step or any other
     const text = lines.join("\n");

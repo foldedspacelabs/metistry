@@ -18,17 +18,25 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   COMPUTE_FILENAME,
+  EGRESS_PROXY_HOST,
   KEEP_AWAKE_ENV,
   emptyCompute,
   instanceFile,
   intEnv,
+  egressProxyEnv,
+  egressProxyUrl,
+  GIT_ASKPASS_PATH_VAR,
+  firstOnMachineBaseUrl,
   keepAwakeOf,
   loadCompute,
+  resolveLocalModelUrl,
   servedProviders,
   usesCompose,
   type ChildSpecInput,
   type Compute,
   type Deployment,
+  type EgressInput,
+  type GitCredentialLookup,
 } from "@foldedspacelabs/metistry-core";
 import { assistantEnv, consoleEnv, consolePort, dbPort, engineAbsentNote, engineStatus, instanceVars, loadDeployment, type ShapeContext } from "./deployment.js";
 import { doctor, renderTable, type DoctorDeps, type DoctorReport } from "./doctor.js";
@@ -94,7 +102,20 @@ import {
   type PgPlanInput,
   type PgStep,
 } from "./postgres.js";
-import { assistantStateDir, sandboxParams, tmpDirOf } from "./sandbox.js";
+import {
+  assistantStateDir,
+  CLT_GIT,
+  globalGitConfigPath,
+  reconcilerConfined,
+  reconcilerSandboxParams,
+  reconcilerSandboxProfilePath,
+  resolveGitBin,
+  sandboxParams,
+  tmpDirOf,
+  engineHosts,
+} from "./sandbox.js";
+import { egressPlan, egressProxyPort, instanceRemotes } from "./egress.js";
+import { askpassPath, askpassScript, ASKPASS_MODE } from "./askpass.js";
 import { StepFailed, StepRunner, type SectionTiming } from "./steps.js";
 
 export interface UpOptions {
@@ -264,6 +285,26 @@ export interface ShapeValues extends ShapeContext {
   /** `<instance>/state/supervisor.json`; filled by `installSupervisorPlan` */
   supervisorConfig?: string | undefined;
   /**
+   * The egress door (packages/core/src/egress.ts): the loopback port the
+   * supervisor's CONNECT proxy binds, the host names it admits, and a
+   * bearer per confined child. Computed once, before any plist is rendered,
+   * because both confined profiles name the port and both children need the
+   * environment that uses it. Undefined outside the `launchd` shape — there
+   * is no profile there for a door to be the only opening in.
+   */
+  egress?: EgressInput | undefined;
+  /** which login-Keychain item the supervisor fetches for which child before spawning it (core's git-credential.ts). `up` names the item; the value never touches supervisor.json. */
+  gitCredentials?: GitCredentialLookup[] | undefined;
+  /**
+   * An absolute path to a REAL git, or undefined when this Mac has none the
+   * profile could name (`/usr/bin/git` is the xcode-select shim — see
+   * `resolveGitBin`). Undefined means the reconciler is NOT confined: a
+   * reconciler that cannot run git is not a reconciler.
+   */
+  gitBin?: string | undefined;
+  /** whether the reconciler's job names `reconciler.sb` or `unconfined.sb` — `METISTRY_RECONCILER_SANDBOX=0`, the shape, and whether a real git was found */
+  confineReconciler?: boolean | undefined;
+  /**
    * `compute.yaml` as resolved for THIS install (seed + instance overlay).
    * `up` reads it once and passes it down: it decides whether there is an
    * assistant child at all (C2/C3), which provider secrets the engine's env
@@ -278,6 +319,28 @@ export interface ShapeValues extends ShapeContext {
  * neither an env dict nor extra placeholders — they source `.env`
  * themselves, exactly as they did before.
  */
+/**
+ * The loopback port the reconciler's embedder answers on — resolved through
+ * the SAME function the reconciler itself calls (`resolveLocalModelUrl`:
+ * `METISTRY_LOCAL_MODEL_URL`, then the deprecated Ollama alias, then the
+ * first `on_machine` provider in compute.yaml, then Ollama's default), so
+ * the profile grants the port the process will actually dial rather than a
+ * second guess at it.
+ *
+ * An install with no embedder gets a rule for a port nothing answers on.
+ * That is the honest default: the index degrades (§6 decision 8) and the
+ * profile does not change shape with a config file.
+ */
+export function embedPortFor(v: ShapeValues): number {
+  const { url } = resolveLocalModelUrl(v.env, firstOnMachineBaseUrl(v.compute));
+  try {
+    const u = new URL(url);
+    return Number(u.port || (u.protocol === "https:" ? 443 : 80));
+  } catch {
+    return 11434;
+  }
+}
+
 export function plistValuesFor(t: PlistTemplate, v: ShapeValues): PlistValues {
   const base = { repo: v.productDir, node: v.node, envFile: v.envFile };
   switch (t.service) {
@@ -300,18 +363,65 @@ export function plistValuesFor(t: PlistTemplate, v: ShapeValues): PlistValues {
         ...(v.instanceDir ? { instanceDir: v.instanceDir } : {}),
         consolePort: consolePort(v.env),
         dbPort: dbPort(v.env),
+        proxyPort: v.egress?.port ?? egressProxyPort(v.namespace, v.env),
         tmpDir: tmpDirOf(v.env),
       });
       // every path parameter is the REAL path: the kernel matches the
       // profile's subpaths after resolving symlinks (/tmp → /private/tmp)
       return {
         ...base,
-        env: assistantEnv(v, v.compute),
+        // the egress door's environment rides with the engine's allowlist:
+        // `HTTPS_PROXY` plus `NODE_USE_ENV_PROXY=1`, because Node's global
+        // fetch ignores the former without the latter (core's egressProxyEnv)
+        env: { ...assistantEnv(v, v.compute), ...(v.egress ? egressProxyEnv("assistant", { port: v.egress.port, tokens: v.egress.tokens ?? {} }) : {}) },
         // CONFIG_*: the four instance files the engine reads, granted BY
         // NAME (sandbox.ts). Without them the profile's deny-default makes
         // an absolute instance path an EPERM, so the overlay that now finds
         // this install's identity.yaml would crash the job instead.
-        extra: { NODE_PREFIX: p.NODE_PREFIX, PRODUCT_DIR: p.PRODUCT_DIR, STATE_DIR: p.STATE_DIR, TMP_DIR: p.TMP_DIR, CONSOLE_TCP: p.CONSOLE_TCP, DB_TCP: p.DB_TCP, CONFIG_IDENTITY: p.CONFIG_IDENTITY, CONFIG_ASSISTANT_PROMPT: p.CONFIG_ASSISTANT_PROMPT, CONFIG_RULES: p.CONFIG_RULES, CONFIG_COMPUTE: p.CONFIG_COMPUTE },
+        extra: {
+          NODE_PREFIX: p.NODE_PREFIX,
+          PRODUCT_DIR: p.PRODUCT_DIR,
+          STATE_DIR: p.STATE_DIR,
+          TMP_DIR: p.TMP_DIR,
+          CONSOLE_TCP: p.CONSOLE_TCP,
+          DB_TCP: p.DB_TCP,
+          // the ONLY route off this machine: `*:443` is gone from the
+          // profile, so an engine that dials anywhere but the proxy is
+          // refused by the kernel and one that dials a host the allowlist
+          // does not name is refused by the proxy, with a `runs` row
+          PROXY_TCP: p.PROXY_TCP,
+          CONFIG_IDENTITY: p.CONFIG_IDENTITY,
+          CONFIG_ASSISTANT_PROMPT: p.CONFIG_ASSISTANT_PROMPT,
+          CONFIG_RULES: p.CONFIG_RULES,
+          CONFIG_COMPUTE: p.CONFIG_COMPUTE,
+        },
+      };
+    }
+    case "reconciler": {
+      // The sole committer, confined (D5 as a kernel rule rather than a
+      // design intention). Every -D below is read by ops/sandbox/
+      // reconciler.sb; `__SANDBOX_PROFILE__` is what decides whether that
+      // file or ops/sandbox/unconfined.sb is in force, so the off switch is
+      // legible in the rendered plist rather than hidden in an argv branch.
+      const p = reconcilerSandboxParams({
+        productDir: v.productDir,
+        nodeBin: v.node,
+        instanceDir: stateRoot(v.productDir, v.env),
+        gitBin: v.gitBin ?? CLT_GIT,
+        gitConfigGlobal: globalGitConfigPath(v.home),
+        // the askpass shim: how a confined reconciler authenticates a push
+        // at all, since git runs every credential helper through a shell
+        askpassBin: askpassPath(stateRoot(v.productDir, v.env)),
+        reconcilerPort: intEnv("METISTRY_RECONCILER_PORT", 7812, v.env),
+        consolePort: consolePort(v.env),
+        dbPort: dbPort(v.env),
+        embedPort: embedPortFor(v),
+        proxyPort: v.egress?.port ?? egressProxyPort(v.namespace, v.env),
+        tmpDir: tmpDirOf(v.env),
+      });
+      return {
+        ...base,
+        extra: { SANDBOX_PROFILE: reconcilerSandboxProfilePath(v.productDir, v.confineReconciler !== false), ...p },
       };
     }
     case "db":
@@ -355,6 +465,18 @@ export async function ensureNamespace(
 
 /** The plists whose EnvironmentVariables dict holds this install's secrets, so they are written 0600. */
 export const SECRET_BEARING_SERVICES = new Set(["console", "assistant"]);
+
+/**
+ * The children that run under a Seatbelt profile, and therefore the ones
+ * that get an egress bearer. The assistant has been confined since PR #117;
+ * the reconciler joins it here, which is the whole of
+ * docs/research/2026-09-19-agent-virtual-filesystems.md's "Now" row.
+ *
+ * `mcp-apple-fm` is the research's named next candidate and `mcp-eventkit`
+ * is explicitly excluded (a TCC grant attaches to the binary that asks, and
+ * interposing sandbox-exec changes which binary that is). Neither is here.
+ */
+export const CONFINED_CHILDREN = ["assistant", "reconciler"] as const;
 
 /**
  * Render every template into ~/Library/LaunchAgents and (re)bootstrap it; on
@@ -511,8 +633,27 @@ export function renderJob(t: PlistTemplate, productDir: string, le: LaunchdEnv, 
   // every overlay default falls back to the product's seed. `up` knows the
   // answer, so it says it.
   const instanceEnv = !v.env ? instanceVars(values) : undefined;
-  const extraEnv = { ...(gitPath ?? {}), ...(nsPorts ?? {}), ...(instanceEnv ?? {}) };
-  const from = `ops/launchd/${t.file}, __REPO__=${productDir}, __NODE__=${le.node}, __ENV_FILE__=${values.envFile}${v.env ? `, ${Object.keys(v.env).length} EnvironmentVariables from ${values.envFile}` : ""}${gitPath ? `, PATH=${values.gitPath}` : ""}${nsPorts ? `, ${Object.keys(nsPorts).length} namespaced ports` : ""}${instanceEnv ? `, ${Object.keys(instanceEnv).map((k) => `+${k}`).join(" ")}` : ""}`;
+  // …and so is the egress door, for a confined child whose environment this
+  // file does not render whole. The assistant's dict already carries it
+  // (`plistValuesFor`); the reconciler sources `.env` itself, so it gets it
+  // here — `HTTPS_PROXY` + `NODE_USE_ENV_PROXY=1` for node, and
+  // `METISTRY_GIT_HTTP_PROXY` for git, which builds its own minimal
+  // environment per call and would never see the first two
+  // (apps/reconciler/src/git.ts).
+  const egressEnv =
+    !v.env && values.egress && (CONFINED_CHILDREN as readonly string[]).includes(t.service)
+      ? {
+          ...egressProxyEnv(t.service, { port: values.egress.port, tokens: values.egress.tokens ?? {} }),
+          METISTRY_GIT_HTTP_PROXY: egressProxyUrl(t.service, (values.egress.tokens ?? {})[t.service] ?? "", values.egress.port),
+          // the askpass shim's PATH — not the credential. The credential
+          // arrives from the supervisor at spawn (core's git-credential.ts),
+          // so it is never in a plist, never in supervisor.json and never on
+          // disk at all.
+          ...(t.service === "reconciler" && values.confineReconciler ? { [GIT_ASKPASS_PATH_VAR]: askpassPath(stateRoot(values.productDir, values.env)) } : {}),
+        }
+      : undefined;
+  const extraEnv = { ...(gitPath ?? {}), ...(nsPorts ?? {}), ...(instanceEnv ?? {}), ...(egressEnv ?? {}) };
+  const from = `ops/launchd/${t.file}, __REPO__=${productDir}, __NODE__=${le.node}, __ENV_FILE__=${values.envFile}${v.env ? `, ${Object.keys(v.env).length} EnvironmentVariables from ${values.envFile}` : ""}${gitPath ? `, PATH=${values.gitPath}` : ""}${nsPorts ? `, ${Object.keys(nsPorts).length} namespaced ports` : ""}${instanceEnv ? `, ${Object.keys(instanceEnv).map((k) => `+${k}`).join(" ")}` : ""}${egressEnv ? `, egress proxy ${EGRESS_PROXY_HOST}:${values.egress!.port}` : ""}`;
   const base = renderPlist(t.template, v);
   return { rendered: Object.keys(extraEnv).length > 0 ? withEnvironmentVariables(base, extraEnv) : base, from, secret: SECRET_BEARING_SERVICES.has(t.service) };
 }
@@ -615,6 +756,97 @@ export async function servedLocalModelChildren(r: StepRunner, productDir: string
 }
 
 /**
+ * Which children run confined, and the one door their egress goes through.
+ *
+ * Computed BEFORE anything is rendered, because three things depend on the
+ * answer: both profiles name the proxy's port, both confined children need
+ * the environment that uses it, and `supervisor.json` carries the allowlist
+ * the proxy enforces. It is also the step that prints what the operator has
+ * to know — `--dry-run` shows the profile path each child will run under,
+ * and every reason a confinement was declined.
+ *
+ * Nothing here can FAIL an `up`. A Mac with no real git, an instance whose
+ * only remote is SSH, an operator who set the off switch: each is a note and
+ * an unconfined reconciler, never a refusal to install. "The sole committer
+ * stopped committing" must not be how a security improvement announces
+ * itself.
+ */
+export async function planConfinement(r: StepRunner, installRoot: string, values: ShapeValues, exists: (p: string) => boolean = existsSync): Promise<void> {
+  if (values.shape !== "launchd") {
+    // …and say so explicitly rather than leaving it undefined: the
+    // reconciler is a host job under BOTH shapes, and a `!== false` default
+    // would have pointed its job at reconciler.sb with a PROXY_TCP no
+    // proxy is listening on
+    values.confineReconciler = false;
+    r.note("sandbox: the compose shape's boundary is the container, so no profile is applied and there is no egress proxy (docs/ops/deployment-shapes.md)");
+    return;
+  }
+  const port = egressProxyPort(values.namespace, values.env);
+  const remotes = await instanceRemotes(values.instanceDir);
+  const hosts = engineHosts(values.compute);
+  const urls = Object.entries(values.env)
+    .filter(([k]) => k.startsWith("METISTRY_") && k.endsWith("_URL"))
+    .map(([, v]) => v ?? "");
+  const existing = await readSupervisorConfig(values.supervisorConfig ?? supervisorConfigPath(stateRoot(values.productDir, values.env))).catch(() => undefined);
+  values.egress = egressPlan({
+    port,
+    engineHosts: hosts,
+    remotes: remotes.urls,
+    urls,
+    children: CONFINED_CHILDREN,
+    ...(existing?.egress?.tokens ? { existingTokens: existing.egress.tokens } : {}),
+  });
+  r.note(
+    `egress: one CONNECT proxy on ${EGRESS_PROXY_HOST}:${port} in the supervisor — ${values.egress.allow!.length} allowed host(s) [${values.egress.allow!.join(", ") || "none"}], derived from compute.yaml's providers and the instance repo's remotes. Every other destination is refused at the proxy AND by the profile.`,
+  );
+
+  // the git the profile will name. `/usr/bin/git` is the xcode-select shim
+  // and is deliberately not a candidate (sandbox.ts, `isXcodeGitShim`)
+  const gitBin = resolveGitBin({ productDir: installRoot, path: values.gitPath ?? values.env.PATH, exists });
+  values.gitBin = gitBin;
+  const wanted = reconcilerConfined(values.env);
+  // …and an instance directory, because INSTANCE_DIR is the one writable
+  // tree. Without one it would fall back to the product checkout, and a
+  // profile that makes the product checkout writable is a worse boundary
+  // than no profile pretending to be one. (The reconciler itself refuses to
+  // start without METISTRY_INSTANCE_DIR, so this install has no committer
+  // either way — apps/reconciler/src/main.ts.)
+  values.confineReconciler = wanted && gitBin !== undefined && values.instanceDir !== undefined;
+  if (!values.instanceDir) {
+    r.note("reconciler: NOT confined — this install names no METISTRY_INSTANCE_DIR, and the profile's one writable tree IS the instance repo. `metistry init` (docs/ops/instance-layout.md).");
+  } else if (!wanted) {
+    r.note("reconciler: METISTRY_RECONCILER_SANDBOX=0 — the job runs under ops/sandbox/unconfined.sb, which allows everything. Unset the variable to confine the sole committer again.");
+  } else if (!gitBin) {
+    r.note(
+      "reconciler: NOT confined — no git this profile can name. `/usr/bin/git` is the xcode-select shim (it execs the real git out of Xcode and dies under a profile), so the job runs under ops/sandbox/unconfined.sb until this install has a bundled runtime (`metistry runtime install`) or the Command Line Tools (`xcode-select --install`).",
+    );
+  } else {
+    r.note(`reconciler: confined by ops/sandbox/reconciler.sb — writes only ${values.instanceDir} and tmp; execs only node and ${gitBin}; no shell.`);
+  }
+  if (values.confineReconciler) {
+    // The push credential. git runs every credential helper through /bin/sh
+    // — including the built-in osxkeychain `connect-repo` configures — so
+    // the confined reconciler uses GIT_ASKPASS instead, and the SUPERVISOR
+    // reads the token out of the login Keychain at spawn. `up` only says
+    // WHICH item to look up; the value never enters supervisor.json.
+    if (remotes.pushHost) {
+      values.gitCredentials = [{ child: "reconciler", host: remotes.pushHost }];
+      const helpers = remotes.credentialHelpers.length > 0 ? ` (its \`credential.helper=${remotes.credentialHelpers[0]}\` is reset for this job — no helper can run without a shell)` : "";
+      r.note(`reconciler: pushes to ${remotes.pushUrl} with GIT_ASKPASS; the supervisor reads the login Keychain item for ${remotes.pushHost} at spawn and hands it over in the environment${helpers}.`);
+    } else if (remotes.urls.length > 0 && remotes.ssh.length === remotes.urls.length) {
+      // every remote is ssh — the warning below is the whole story
+    } else if (remotes.urls.length === 0) {
+      r.note("reconciler: the instance repo has no remote yet, so there is nothing to push and no credential to arrange — `metistry connect-repo <url>`.");
+    }
+  }
+  if (values.confineReconciler && remotes.ssh.length > 0) {
+    r.note(
+      `reconciler: ${remotes.ssh.length} SSH remote(s) (${remotes.ssh.join(", ")}) — a CONFINED reconciler cannot push to them. ssh is not exec-able under the profile, and granting it would mean granting the sole committer ~/.ssh. Use an HTTPS remote, or set METISTRY_RECONCILER_SANDBOX=0 (docs/ops/reconciler.md).`,
+    );
+  }
+}
+
+/**
  * The supervisor's plan: the `Metistry` symlink its plist execs, and
  * `<instance>/state/supervisor.json` — the child list, each child's argv,
  * environment and log path, and the control socket.
@@ -645,6 +877,18 @@ export async function installSupervisorPlan(r: StepRunner, productDir: string, l
     (t) => t.service !== "assistant" || engineStatus(values.compute, values.env).ok,
   );
   const base = launchdBaseEnv(values.env);
+  // The askpass shim, BEFORE the children are rendered: the reconciler's
+  // profile grants it by literal and its job names it, so it has to exist by
+  // the time either is written. Regenerated on every `up` — the shebang
+  // carries THIS install's node path, and a version flip moves that.
+  if (values.confineReconciler) {
+    await r.write(
+      askpassPath(root),
+      askpassScript(values.node),
+      "git's askpass for the confined reconciler: prints $METISTRY_GIT_ASKPASS_{USER,TOKEN} and nothing else, because no credential helper can run without a shell",
+      ASKPASS_MODE,
+    );
+  }
   const children = templates.map((t) => {
     const { rendered } = renderJob(t, productDir, le, values);
     const ready =
@@ -659,7 +903,18 @@ export async function installSupervisorPlan(r: StepRunner, productDir: string, l
 
   const existing = await readSupervisorConfig(configPath);
   const token = existing?.token ?? mintControlToken();
-  const config = supervisorConfig({ label: labelFor(SUPERVISOR_SERVICE, values.namespace?.labelSuffix), socket, token, env: consoleEnv(values), children });
+  const config = supervisorConfig({
+    label: labelFor(SUPERVISOR_SERVICE, values.namespace?.labelSuffix),
+    socket,
+    token,
+    env: consoleEnv(values),
+    children,
+    // the egress door's allowlist lives HERE and nowhere a child can reach:
+    // the supervisor reads it before it spawns anything (core/egress.ts)
+    ...(values.egress ? { egress: values.egress } : {}),
+    // …and WHICH keychain item to fetch for which child, never what it holds
+    ...(values.gitCredentials?.length ? { gitCredentials: values.gitCredentials } : {}),
+  });
 
   await r.run("mkdir", ["-p", join(bin, "..")]);
   // the name is the product: System Settings names a background item after
@@ -991,6 +1246,7 @@ export async function up(opts: UpOptions): Promise<UpResult> {
       // reconciler's PATH — a clean Mac has no git until Xcode CLT is installed
       values.gitPath = pathWithRuntimeGit(opts.productDir, opts.exists ?? existsSync);
       if (values.gitPath) r.note(`git: ${values.gitPath.split(":")[0]} (bundled) — prefixed onto the reconciler's PATH`);
+      await planConfinement(r, opts.productDir, values, opts.exists ?? existsSync);
       r.section("launchd");
       await installLaunchd(r, runDir, le, deployment, values, opts.exists ?? existsSync);
       if (pg) {

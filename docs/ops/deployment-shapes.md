@@ -11,11 +11,13 @@ boundary differ. Set in `.metistry/deployment.yaml` (plan §4.17, open decision 
 | db | `pgvector/pgvector:pg17` container | a user-space Postgres 17, `postgres -D`, a **child of the supervisor** |
 | console | container, published on `127.0.0.1:8080` | a child of the supervisor, binds `127.0.0.1:8080` |
 | assistant | container; the file passes through the provider key `compute.yaml` names | a child of the supervisor, **under `ops/sandbox/assistant.sb`** — and not a child at all without an engine (below) |
-| reconciler | launchd job | a child of the supervisor |
+| reconciler | launchd job | a child of the supervisor, **under `ops/sandbox/reconciler.sb`** |
 | watchdog | launchd job | **it IS the supervisor** |
 | launchd agents | reconciler, watchdog, the bridges | **one**: `com.foldedspacelabs.metistry`, plus a TCC helper each |
 | needs | Docker Desktop / a container runtime | a Postgres install, nothing else |
 | engine isolation | the container | the sandbox profile |
+| reconciler isolation | none (a host job either way) | **`ops/sandbox/reconciler.sb`** — the sole committer writes the instance repo and nothing else |
+| egress | the container network | **one loopback CONNECT proxy** in the supervisor, with a hostname allowlist ("The egress door", below) |
 | where it is the answer | Linux, cloud, any multi-tenant host | macOS, and what the Mac app installs |
 
 `compose` is the default and stays the default until an instance flips
@@ -42,7 +44,7 @@ point.
 | agents | five, at the time — one supervisor plus the TCC helpers since ("One background item, called Metistry" above) |
 | console | `GET /health` → `200 {"ok":true}` on 8460, while production answered on 8080 |
 | update | `metistry update --channel release --version 0.4.0` — a clean no-op round trip (`already running 0.4.0`, `runtime/ is already the 0.4.0 pack`, `0 applied, 13 total`), lock committed by the reconciler |
-| sandbox | live probe with the plist's own parameters: vault read **denied**, write outside the state dir **denied**, write inside **allowed**, own console + db **allowed**, the production install's console and reconciler **denied** |
+| sandbox | live probe with the plist's own parameters: vault read **denied**, write outside the state dir **denied**, write inside **allowed**, own console + db **allowed**, the production install's console and reconciler **denied** (the reconciler's own profile and the egress door came later — 2026-09-19, below) |
 
 ### What the trial fixed
 
@@ -696,32 +698,120 @@ profile denies by default, so without it the engine dies at startup with
 `EPERM connect 127.0.0.1:<port>`. It is the one port `up` put in the
 managed conf block — not a range, and not "loopback".
 
-**Two honest limits.**
+**One honest limit, and one that has been closed.**
 
-1. **Outbound is filtered by port, not by host name.** `sandbox-exec`
-   cannot express "openrouter.ai". The profile allows loopback to the
-   console and TLS outbound; the host list is DERIVED from this install's
-   own `compute.yaml` — every provider's `base_url` hostname and nothing
-   else (`engineHosts` in `packages/cli/src/sandbox.ts`) — and is
-   documentation today, not an enforced rule. The variable name
-   `METISTRY_ASSISTANT_ALLOWED_HOSTS` is reserved for when there is a layer
-   that can enforce it. Read the profile as "the engine cannot reach your
-   LAN's other services on their own ports", not as "the engine can only
-   reach its provider". What *is* enforced by construction is narrower and
-   more useful: the loop's only outbound call is
+1. **`sandbox-exec(1)` is deprecated** — and functional; this profile is
+   verified on macOS 26.4 and the shape has worked since 14. The migration
+   path is App Sandbox entitlements once the Mac app hosts the process
+   (`docs/product/desktop-app-plan.md`). This used to read as a pure
+   upgrade and it is a **trade**: App Sandbox buys outbound filtering by
+   host name and **costs** the per-spawn `-D` parameterisation every rule
+   above depends on, because entitlements are baked into a bundle's
+   signature and cannot say "this instance's console port, this instance's
+   four config files" (`docs/research/2026-09-19-agent-virtual-filesystems.md`
+   §2.4; `ops/sandbox/README.md` has the whole correction).
+2. **~~Outbound is filtered by port, not by host name~~ — closed 2026-09-19.**
+   `sandbox-exec` still cannot express "openrouter.ai". What changed is the
+   other half of that sentence: it *can* be narrowed to one loopback port,
+   and the thing listening there can name hosts all day ("The egress door",
+   below). `(remote tcp "*:443")` is gone from the profile; the host list
+   derived from `compute.yaml` is now enforced rather than documented.
+   What was already enforced by construction is unchanged and still the
+   stronger statement: the loop's only outbound call is
    `<base_url>/chat/completions` on the provider the turn was assigned
    (`apps/assistant/src/engine-openai.ts`), so the host check is a property
    of the code rather than of an environment variable a subprocess may
    ignore (R1).
-2. **`sandbox-exec(1)` is deprecated** — and functional; this profile is
-   verified on macOS 26.4 and the shape has worked since 14. The
-   migration path is App Sandbox entitlements once the Mac app hosts the
-   process (`docs/product/desktop-app-plan.md`): same deny-default
-   posture, a supported API, and outbound filtering by name, which
-   closes limit 1 at the same time.
 
 Under the compose shape none of this applies — the container is the
 boundary and the profile is not used.
+
+## The reconciler's sandbox
+
+The sole committer (D5) is confined too, since 2026-09-19. It is the process
+that holds the instance repo's working tree and the only place git runs, and
+until this it had ambient authority over the whole disk:
+`docs/research/2026-09-19-agent-virtual-filesystems.md` §3.2(c) called it
+"the best target in the repo", and this is that finding built.
+
+| | |
+|---|---|
+| filesystem read | the product checkout (its own `dist/`, `node_modules/`, `seed/` — and its working directory), the node runtime, **a real git's installation prefix**, system frameworks, and `~/.gitconfig` **by name**. |
+| filesystem write | **the instance repo — the vault, `.metistry/` and `.git/`** — and tmp. Nothing else: not `~/Documents`, not `~/.ssh`, not the product checkout, not another instance's vault. |
+| exec | node, that git, and the askpass shim (below). **No shell.** |
+| network out | the console, Postgres and the on-machine embedder on loopback, plus the egress proxy. It binds exactly its own bridge port. |
+| off switch | `METISTRY_RECONCILER_SANDBOX=0` renders `ops/sandbox/unconfined.sb` instead — a real file that says `(allow default)`, so "not confined" is legible in the plist, in `supervisor.json`, in `up --dry-run` and in doctor's `sandbox` row. |
+
+**`/usr/bin/git` is not a git.** Measured on macOS 26.4: it links against
+`/usr/lib/libxcselect.dylib` — it is the xcode-select shim, and under a
+profile that grants exactly that literal it dies with `xcrun: error: unable
+to load libxcrun (… file system sandbox blocked open())`. So `up` resolves a
+**real** git by absolute path — the bundled `runtime/git` first, then a
+non-shim git on PATH, then the Command Line Tools — and grants its whole
+prefix (`bin/git`, `libexec/git-core/`'s 172 helpers, `share/git-core`'s
+templates). On a Mac with none of those, `up` declines to confine the job and
+says why: a reconciler that cannot run git is not a reconciler.
+
+**Pushing while confined** works over HTTPS, and the path is worth knowing
+because it is not the obvious one (`docs/ops/reconciler.md` has the table).
+git executes *every* credential helper through `/bin/sh` — including the
+built-in `osxkeychain` that `metistry connect-repo` configures — and there
+is no shell here, so no helper can run. `GIT_ASKPASS` **can**: git execs it
+directly, by absolute path, with no shell. So the token stays in the login
+Keychain where `connect-repo` put it, the **supervisor** reads it there once
+at spawn (it is unconfined, it is the parent, and the item is filed `-A` so
+the read is promptless), and hands it to the child in its environment; a
+`#!<node>` shim `up` generates prints it when git asks. The credential is
+never in argv, never in `supervisor.json` and never on disk. `git.ts` adds
+`-c credential.helper=` — git's documented reset — only when there is an
+askpass, so an unconfined install keeps using the Keychain helper exactly as
+before.
+
+**SSH remotes are the one shape confinement cannot serve.** `ssh` is not
+exec-able, granting it would mean granting the sole committer `~/.ssh`, and
+ssh's `ProxyCommand` runs through a shell so it could not reach the egress
+proxy either. `up` warns when it sees one; use an HTTPS remote or the off
+switch.
+
+## The egress door
+
+One HTTP **CONNECT** proxy, in the supervisor, bound to `127.0.0.1` on the
+egress port (`7814` by default; the last slot of a namespaced instance's
+port block). Both confined children's profiles allow that one port and no
+other off-machine destination, so it is the only way out.
+
+| | |
+|---|---|
+| allowlist | **derived**: every provider `base_url` host in this install's `compute.yaml`, every remote host in the instance repo's `.git/config`, and any non-loopback `METISTRY_*_URL`. Written into `supervisor.json` by `up`, read by the supervisor **before it spawns anything** — a child cannot widen it. |
+| matching | exact host, exact port. No wildcards, no suffix rules: a bare entry means 443 and nothing else. |
+| auth | `Proxy-Authorization: Basic <child>:<token>`, one 256-bit token per confined child, minted once and kept across `up` runs. Loopback is not a trust boundary (invariant 8), and the bearer is what puts a NAME on the audit row. |
+| audit | every refusal is a `runs` row — `component: egress-proxy`, `kind: egress`, `meta: {host, port, reason, child}`. |
+| interception | **none.** CONNECT only; a cleartext `GET http://…` gets a 405. The proxy learns a host name and a port and never a byte of the tunnel. |
+
+The children reach it as `HTTPS_PROXY`/`HTTP_PROXY`/`ALL_PROXY` with
+`NO_PROXY=localhost,127.0.0.1,::1`, plus **`NODE_USE_ENV_PROXY=1`** — which
+is load-bearing and easy to miss: Node's global `fetch` ignores the proxy
+variables without it (undici's `EnvHttpProxyAgent`, available since Node
+22.15). git's environment in `apps/reconciler/src/git.ts` is a deliberate
+allowlist, so it gets `METISTRY_GIT_HTTP_PROXY` and turns it into
+`-c http.proxy=…`.
+
+Measured end to end on macOS 26.4: an allowlisted host returns 200 through
+the door; a non-allowlisted one comes back `Request was cancelled` for
+`fetch` and `fatal: … CONNECT tunnel failed, response 403` for git, with
+`[egress] refused assistant → api.openai.com:443 (not-allowlisted)` in the
+supervisor's log; and with the proxy variables removed the profile alone
+refuses the direct connect.
+
+The proxy is in the **supervisor** rather than the console because it is the
+parent of both confined children (so the port and the allowlist are set
+before either exists), because its lifetime is the install's, because it
+already holds the invariant-3 pool the audit row needs, and because the
+console's mutating surface is a closed enumerated set (invariant 10) that
+should not grow a listener.
+
+Under `compose` there is no proxy and no profile: the container is the
+boundary.
 
 ## Secrets in plists
 

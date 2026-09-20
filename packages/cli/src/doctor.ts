@@ -48,6 +48,7 @@ import {
   type DeploymentShape,
   type ChildStatus,
   type Manifest,
+  type SupervisorConfig,
 } from "@foldedspacelabs/metistry-core";
 import { COMPUTE_FILENAME, INSTANCE_LAYOUT, LEGACY_VAULT_DIR, detectLayout, emptyCompute, instanceFile, loadCompute, type Compute } from "@foldedspacelabs/metistry-core";
 import { cliShimLinkHint, cliShimPath } from "./cli-shim.js";
@@ -56,6 +57,7 @@ import { localServerRows } from "./local-models.js";
 import { realExec, type Exec } from "./exec.js";
 import { labelFor, loadPlistTemplates, logPathFor, parseRegistrar, registrarPhrase, SUPERVISED_SERVICES, type RegistrarFinding } from "./launchd.js";
 import { readSupervisorConfig, supervisorConfigPath, controlRequest, SUPERVISOR_SERVICE } from "./supervisor.js";
+import { SANDBOX_EXEC, UNCONFINED_PROFILE_REL } from "./sandbox.js";
 import { applyPorts, loadNamespace, type Namespace } from "./namespace.js";
 import { defaultUi, padTo, statusName, visibleWidth, type Ui } from "./ui.js";
 
@@ -998,6 +1000,7 @@ export async function supervisorRows(stateRoot: string): Promise<DoctorRow[]> {
       })),
     },
   ];
+  rows.push(await confinementRow(config));
   for (const spec of config.children) {
     const st = children?.find((c) => c.name === spec.name);
     rows.push({
@@ -1014,6 +1017,57 @@ export async function supervisorRows(stateRoot: string): Promise<DoctorRow[]> {
     });
   }
   return rows;
+}
+
+/**
+ * WHICH CHILDREN RUN CONFINED, and what their one way out is.
+ *
+ * Derived from the child argv in `supervisor.json` rather than from a second
+ * table: the argv is what actually runs, so a row computed from anything
+ * else could be right about a plan and wrong about the machine. A child
+ * whose argv[0] is `/usr/bin/sandbox-exec` is confined; the profile it names
+ * is the honest answer to "confined by what", which is why the off switch is
+ * a real file (`ops/sandbox/unconfined.sb`) rather than a missing prefix.
+ *
+ * Never `failed`. An install can legitimately run with the reconciler
+ * unconfined (no real git on the Mac, an SSH remote, the operator's switch),
+ * and doctor's job here is to SAY so — a red row for a supported shape
+ * teaches the operator to ignore red rows.
+ */
+export async function confinementRow(config: SupervisorConfig): Promise<DoctorRow> {
+  const confined: string[] = [];
+  const unconfined: string[] = [];
+  const profiles: Record<string, string> = {};
+  for (const c of config.children) {
+    const i = c.argv.indexOf(SANDBOX_EXEC);
+    const profile = i !== -1 ? c.argv[c.argv.indexOf("-f", i) + 1] : undefined;
+    const isOff = profile !== undefined && profile.endsWith(`/${UNCONFINED_PROFILE_REL.split("/").pop()}`);
+    if (profile !== undefined) profiles[c.name] = profile;
+    (profile !== undefined && !isOff ? confined : unconfined).push(c.name);
+  }
+  const egress = config.egress;
+  return {
+    kind: "sandbox",
+    ...(await runCheck("sandbox", "which supervisor children run under a Seatbelt profile, and where their egress goes", async () => {
+      const meta = { confined, unconfined, profiles, egress: egress ? { port: egress.port, allow: egress.allow } : null };
+      const door = egress ? `egress: 127.0.0.1:${egress.port}, ${egress.allow.length} allowed host(s)` : "egress: no proxy (compose shape, or an install that predates one)";
+      if (confined.length === 0) {
+        return { status: "degraded", remediation: `no child runs under a profile — ${door}. Under the compose shape the container is the boundary; under launchd this is a gap (docs/ops/deployment-shapes.md)`, meta };
+      }
+      const detail = `confined: ${confined.join(", ")}${unconfined.length ? `; ambient: ${unconfined.join(", ")}` : ""}; ${door}`;
+      if (!confined.includes("reconciler")) {
+        return {
+          status: "degraded",
+          remediation: `the reconciler — the sole committer, and the only place git runs — is NOT confined. ${detail}. \`metistry up\` says why (no real git the profile can name, or METISTRY_RECONCILER_SANDBOX=0); docs/ops/reconciler.md`,
+          meta,
+        };
+      }
+      if (egress && egress.allow.length === 0) {
+        return { status: "degraded", remediation: `${detail} — the allowlist is empty, so every off-machine call from a confined child is refused. That is correct for a local-only install and a bug for any other (compute.yaml's providers and the instance repo's remotes are where it comes from)`, meta };
+      }
+      return { meta };
+    })),
+  };
 }
 
 // ---- local model servers ------------------------------------------------------------

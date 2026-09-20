@@ -18,6 +18,8 @@
 // the same thing (the dependency arrow points apps → packages, never back).
 
 import { z } from "zod";
+import { egressSchema } from "./egress.js";
+import { gitCredentialSchema } from "./git-credential.js";
 
 /** The one launchd agent for the core. A namespaced install appends `.<suffix>` (never a per-child label). */
 export const SUPERVISOR_LABEL = "com.foldedspacelabs.metistry";
@@ -95,6 +97,30 @@ export const supervisorConfigSchema = z
      * process environment at startup.
      */
     env: z.record(z.string(), z.string()).default({}),
+    /**
+     * The egress door (egress.ts): the loopback port the supervisor's
+     * CONNECT proxy binds, the host names a confined child may reach
+     * through it, and a bearer per child. Absent under the `compose`
+     * shape and on Linux — there is no Seatbelt profile there, so there is
+     * nothing for a door to be the only opening in.
+     *
+     * It is HERE rather than in each child's environment because the
+     * allowlist must be readable by the supervisor before it spawns
+     * anything: a child that could supply its own list would be a child
+     * that could widen it.
+     */
+    egress: egressSchema.optional(),
+    /**
+     * Keychain lookups the supervisor performs BEFORE it spawns a child,
+     * handing the answer to that child in its environment
+     * (git-credential.ts). It says where to look and never what was found:
+     * the token stays out of this file, which is 0600 and still a file.
+     *
+     * Exists because a confined reconciler cannot run a git credential
+     * helper — git runs every helper through a shell — and the supervisor
+     * is unconfined and is the parent.
+     */
+    gitCredentials: z.array(gitCredentialSchema).default([]),
     /** started in order, stopped in reverse */
     children: z.array(childSpecSchema),
   })

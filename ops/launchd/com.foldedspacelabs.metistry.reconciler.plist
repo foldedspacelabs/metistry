@@ -5,10 +5,30 @@
      Config comes from the instance's .env (METISTRY_INSTANCE_DIR, the bridge
      token, db), which lives at <instance>/.metistry/state/.env — an instance directory
      is self-contained (docs/product/desktop-app-plan.md).
+
+     CONFINED. The job still sources .env in a shell — that shell runs
+     OUTSIDE the sandbox and `exec`s itself away, which is exactly why the
+     profile needs no /bin/sh rule at all — and the process it execs is
+     /usr/bin/sandbox-exec running ops/sandbox/reconciler.sb. The sandbox is
+     therefore the job's root process and git, with all 172 of its helpers,
+     inherits it. Read+write exactly the instance repo and tmp; read the
+     product checkout, the node runtime, a real git's prefix and ~/.gitconfig
+     by name; exec only node and that git — no shell; outbound only the
+     console, Postgres, the on-machine embedder and the supervisor's egress
+     proxy. `metistry up` computes every -D parameter
+     (packages/cli/src/sandbox.ts) and the misuse tests in
+     packages/cli/test/reconciler-sandbox.test.ts prove the denials.
+
+     __SANDBOX_PROFILE__ becomes ops/sandbox/unconfined.sb when
+     METISTRY_RECONCILER_SANDBOX=0: the off switch is a file you can read,
+     not an invisible argv change (docs/ops/reconciler.md).
+
      Install (adjust __REPO__ to your product checkout):
        sed "s|__REPO__|$PWD|g; s|__NODE__|$(which node)|g; s|__ENV_FILE__|$METISTRY_INSTANCE_DIR/.metistry/state/.env|g" ops/launchd/com.foldedspacelabs.metistry.reconciler.plist \
          > ~/Library/LaunchAgents/com.foldedspacelabs.metistry.reconciler.plist
        launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.foldedspacelabs.metistry.reconciler.plist
+     (that by-hand recipe leaves the -D placeholders behind; `metistry up`
+     fills them, and it is the supported path)
      Proper KeepAlive plist, never `launchctl submit` (Phase 0 respawn-loop lesson). -->
 <plist version="1.0">
 <dict>
@@ -17,7 +37,7 @@
   <array>
     <string>/bin/sh</string>
     <string>-c</string>
-    <string>set -a; . '__ENV_FILE__'; set +a; exec '__NODE__' '__REPO__/apps/reconciler/dist/main.js'</string>
+    <string>set -a; . '__ENV_FILE__'; set +a; exec '/usr/bin/sandbox-exec' -f '__SANDBOX_PROFILE__' -D 'NODE_BIN=__NODE__' -D 'NODE_PREFIX=__NODE_PREFIX__' -D 'PRODUCT_DIR=__PRODUCT_DIR__' -D 'INSTANCE_DIR=__INSTANCE_DIR__' -D 'TMP_DIR=__TMP_DIR__' -D 'GIT_PREFIX=__GIT_PREFIX__' -D 'GIT_CONFIG_GLOBAL=__GIT_CONFIG_GLOBAL__' -D 'ASKPASS_BIN=__ASKPASS_BIN__' -D 'RECONCILER_TCP=__RECONCILER_TCP__' -D 'CONSOLE_TCP=__CONSOLE_TCP__' -D 'DB_TCP=__DB_TCP__' -D 'EMBED_TCP=__EMBED_TCP__' -D 'PROXY_TCP=__PROXY_TCP__' '__NODE__' '__REPO__/apps/reconciler/dist/main.js'</string>
   </array>
   <key>WorkingDirectory</key><string>__REPO__</string>
   <key>KeepAlive</key><true/>

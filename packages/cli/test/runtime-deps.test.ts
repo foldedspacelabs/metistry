@@ -160,6 +160,23 @@ describe("resolution: runtime/postgres/bin and runtime/git/bin", () => {
   });
 });
 
+/** The reconciler's job is rooted at sandbox-exec now, so rendering it needs every -D the profile declares (packages/cli/src/sandbox.ts). */
+const RECONCILER_SANDBOX_EXTRA = {
+  SANDBOX_PROFILE: "/p/ops/sandbox/reconciler.sb",
+  NODE_PREFIX: "/usr",
+  PRODUCT_DIR: "/p",
+  INSTANCE_DIR: "/i",
+  TMP_DIR: "/tmp",
+  GIT_PREFIX: "/Library/Developer/CommandLineTools/usr",
+  GIT_CONFIG_GLOBAL: "/h/.gitconfig",
+  ASKPASS_BIN: "/i/.metistry/state/bin/git-askpass",
+  RECONCILER_TCP: "localhost:7812",
+  CONSOLE_TCP: "localhost:8080",
+  DB_TCP: "localhost:5432",
+  EMBED_TCP: "localhost:11434",
+  PROXY_TCP: "localhost:7814",
+};
+
 describe("the reconciler's plist gets the bundled git", () => {
   const real = repoFile("ops/launchd/com.foldedspacelabs.metistry.reconciler.plist");
 
@@ -169,7 +186,7 @@ describe("the reconciler's plist gets the bundled git", () => {
   });
 
   it("adds an EnvironmentVariables dict with PATH, without disturbing the rendered job", () => {
-    const rendered = renderPlist(real, { repo: "/p", node: "/usr/bin/node", envFile: "/i/state/.env" });
+    const rendered = renderPlist(real, { repo: "/p", node: "/usr/bin/node", envFile: "/i/state/.env", extra: RECONCILER_SANDBOX_EXTRA });
     const withPath = withEnvironmentVariables(rendered, { PATH: `/p/${RUNTIME_DIRNAME}/git/bin:${LAUNCHD_BASE_PATH}` });
     expect(withPath).toContain("<key>EnvironmentVariables</key>");
     expect(withPath).toContain(`<key>PATH</key><string>/p/${RUNTIME_DIRNAME}/git/bin:${LAUNCHD_BASE_PATH}</string>`);

@@ -6,7 +6,8 @@ import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { cliRow, doctor, hostLocal, inboxRow, parseComposePs, parseLaunchctlPrint, probeTargetFor, renderTable, walkManifests, type Db, type DoctorRow } from "../src/doctor.js";
+import { cliRow, confinementRow, doctor, hostLocal, inboxRow, parseComposePs, parseLaunchctlPrint, probeTargetFor, renderTable, walkManifests, type Db, type DoctorRow } from "../src/doctor.js";
+import { SANDBOX_EXEC } from "../src/sandbox.js";
 import { cliShimPath, writeCliShim } from "../src/cli-shim.js";
 import { StepRunner } from "../src/steps.js";
 import { parseDotEnv } from "../src/env.js";
@@ -598,5 +599,55 @@ describe("parsers and conventions", () => {
     expect(parseArgs(["--version"])).toEqual({ command: undefined, positional: [], flags: { version: true } });
     expect(parseArgs(["--version", "--json"])).toEqual({ command: undefined, positional: [], flags: { version: true, json: true } });
     expect(BOOLEAN_FLAGS.has("version")).toBe(false);
+  });
+});
+
+describe("the sandbox row — which children run confined, and where their egress goes", () => {
+  const child = (name: string, argv: string[]) => ({ name, argv, env: {}, log: `/tmp/metistry-${name}.log`, stopTimeoutMs: 10_000 });
+  const base = { schema: 1 as const, label: "com.foldedspacelabs.metistry", socket: "/s.sock", token: "t".repeat(32), env: {} };
+  const confined = (name: string, profile: string) => child(name, [SANDBOX_EXEC, "-f", `/p/ops/sandbox/${profile}`, "-D", "X=1", "/n/bin/node", `/p/apps/${name}/dist/main.js`]);
+
+  it("reports both confined children, their profiles and the door — from the argv that actually runs", async () => {
+    const row = await confinementRow({
+      ...base,
+      egress: { port: 7814, allow: ["openrouter.ai", "github.com"], tokens: { assistant: "a", reconciler: "r" } },
+      children: [child("db", ["/pg/bin/postgres", "-D", "/d"]), child("console", ["/n/bin/node", "/p/console.js"]), confined("reconciler", "reconciler.sb"), confined("assistant", "assistant.sb")],
+    });
+    expect(row.kind).toBe("sandbox");
+    expect(row.status).toBe("ok");
+    expect(row.meta).toMatchObject({
+      confined: ["reconciler", "assistant"],
+      unconfined: ["db", "console"],
+      egress: { port: 7814, allow: ["openrouter.ai", "github.com"] },
+    });
+    expect((row.meta as { profiles: Record<string, string> }).profiles.reconciler).toBe("/p/ops/sandbox/reconciler.sb");
+  });
+
+  it("an unconfined.sb profile is NOT confinement — the off switch is visible, not silent", async () => {
+    const row = await confinementRow({
+      ...base,
+      egress: { port: 7814, allow: ["openrouter.ai"], tokens: {} },
+      children: [confined("assistant", "assistant.sb"), confined("reconciler", "unconfined.sb")],
+    });
+    expect(row.status).toBe("degraded");
+    expect(row.remediation).toMatch(/sole committer/);
+    expect(row.meta).toMatchObject({ confined: ["assistant"], unconfined: ["reconciler"] });
+  });
+
+  it("an empty allowlist is reported: correct for a local-only install, a bug for any other", async () => {
+    const row = await confinementRow({
+      ...base,
+      egress: { port: 7814, allow: [], tokens: {} },
+      children: [confined("assistant", "assistant.sb"), confined("reconciler", "reconciler.sb")],
+    });
+    expect(row.status).toBe("degraded");
+    expect(row.remediation).toMatch(/allowlist is empty/);
+  });
+
+  it("no profile anywhere is degraded, and says which shape that is legitimate in", async () => {
+    const row = await confinementRow({ ...base, children: [child("console", ["/n/bin/node", "/p/console.js"])] });
+    expect(row.status).toBe("degraded");
+    expect(row.remediation).toMatch(/no child runs under a profile/);
+    expect(row.remediation).toMatch(/compose shape the container is the boundary/);
   });
 });

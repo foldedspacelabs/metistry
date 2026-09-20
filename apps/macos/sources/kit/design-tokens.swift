@@ -1,5 +1,5 @@
 // GENERATED — do not edit.
-// Source: docs/product/design/tokens.json (v2.3.0, 2026-09-19)
+// Source: docs/product/design/tokens.json (v2.4.0, 2026-09-19)
 // Rebuild: node ops/scripts/build-design-tokens.mjs   (--check fails on drift)
 //
 // The design system's semantic roles, for SwiftUI. No token names a hue, a
@@ -23,6 +23,7 @@ public enum MetistryColorRole: String, CaseIterable, Sendable {
     case sunken = "sunken"
     case border = "border"
     case borderStrong = "border-strong"
+    case borderControl = "border-control"
     case textPrimary = "text-primary"
     case textSecondary = "text-secondary"
     case textTertiary = "text-tertiary"
@@ -79,6 +80,7 @@ public extension MetistryColorRole {
         case .sunken: return dark ? (0.0431, 0.0549, 0.0706, 1.0) : (0.9373, 0.9176, 0.8745, 1.0)
         case .border: return dark ? (0.1686, 0.2000, 0.2392, 1.0) : (0.8941, 0.8706, 0.8196, 1.0)
         case .borderStrong: return dark ? (0.2392, 0.2824, 0.3294, 1.0) : (0.7647, 0.7294, 0.6627, 1.0)
+        case .borderControl: return dark ? (0.4078, 0.4431, 0.4863, 1.0) : (0.5569, 0.5255, 0.4627, 1.0)
         case .textPrimary: return dark ? (0.9137, 0.9294, 0.9451, 1.0) : (0.1020, 0.0941, 0.0824, 1.0)
         case .textSecondary: return dark ? (0.6549, 0.6941, 0.7373, 1.0) : (0.3412, 0.3176, 0.2902, 1.0)
         case .textTertiary: return dark ? (0.5451, 0.5882, 0.6314, 1.0) : (0.4353, 0.4118, 0.3765, 1.0)
@@ -138,7 +140,8 @@ public extension MetistryColorRole {
         case .elevated: return "menus, popovers, sheets, the command palette"
         case .sunken: return "code blocks, wells, inset scroll regions"
         case .border: return "separators between rows and around inputs"
-        case .borderStrong: return "focused input, selected row outline, table rules. A boundary against bg, surface, elevated and sunken only — never against a *-quiet tint, where it falls to ~1.4:1 and fails 1.4.11. A control on a tinted band identifies itself by its label instead."
+        case .borderStrong: return "separator and rule: table rules, list dividers, the hairline under a toolbar. A separator is decorative under 1.4.11 and is not held to 3:1 — it sits at ~1.8:1 on every ground by design, because a rule that meets 3:1 reads as a border. Anything that BOUNDS A CONTROL uses border-control instead."
+        case .borderControl: return "the outline of a discrete control where the outline is what identifies it: secondary and bordered buttons, unselected filter chips, segmented controls, the composer field, select menus, the new-rows pill. Held to 3:1 (WCAG 1.4.11) on every ground it can sit on, because the warm light palette separates bg, surface and sunken by under 1.2:1 — so in light mode the outline is the only thing distinguishing a control from the page, and it has to carry that alone."
         case .textPrimary: return "body copy, titles, values"
         case .textSecondary: return "metadata that must still be read: timestamps, counts, actor ids"
         case .textTertiary: return "placeholders and de-emphasised hints; never the only carrier of meaning, and never on a tinted fill — only on bg, surface or elevated"

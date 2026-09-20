@@ -1,5 +1,128 @@
 # @foldedspacelabs/metistry-mcp-brain
 
+## 0.10.0
+
+### Minor Changes
+
+- 7782cf4: **A wire change: `turn_id` is out of all 25 tool schemas and rides in the
+  call's `_meta`.** The correlation handle that groups one reply's tool calls in
+  the activity feed was merged into every tool's `inputSchema` — 3,774 chars ≈
+  **944 definition tokens, 19% of the entire advertised surface**, for a field
+  that is not a parameter and is "never trusted for anything else". Measured on
+  this checkout: the eager surface goes **19,914 chars / ~4,979 tokens →
+  16,140 / ~4,035**, and the credential-gated 26-tool surface 20,972 / ~5,243 →
+  17,047 / ~4,262, so it no longer crosses the >5k line that gates
+  `discovery: lazy` at all. No capability was removed and no description
+  changed (`docs/research/2026-09-19-code-mode-mcp.md` §2.4, ruled 2026-09-19).
+  
+  **Where it went.** `_meta` on `tools/call`, the MCP spec's own carrier for
+  request metadata, under `com.foldedspacelabs.metistry/turn_id`
+  (`packages/mcp-brain/src/turn-id.ts`, exported as `TURN_ID_META_KEY`). The
+  assistant's tool host mints one per host — i.e. one per reply — and sends it
+  on every call. That also moves the handle from the model's hands into the
+  client's: the seed prompt used to ask the assistant to invent an id and pass
+  it faithfully on every call, which was a convention, not a control.
+  
+  **Compatibility, one release.** A client still sending `turn_id` inside
+  `arguments` keeps correlating exactly as before: the bridge lifts it into
+  `_meta` at the door, beside the deprecated-name rewriter, before any schema
+  sees it. Tolerated, advertised nowhere. Two behaviour changes worth knowing:
+  a malformed handle is now **dropped rather than failing the call** (a join key
+  is not a control), and `turn_id` no longer appears in any `tools/list`, so a
+  client that discovers arguments from the schema will stop sending it.
+
+### Patch Changes
+
+- 7782cf4: **The definition-token budget is checked in CI, for every bridge.** The
+  manifest schema has always stated the rule — `discovery: lazy` "is for bridges
+  past >20 tools / >5k definition tokens" — but only `mcp-brain`'s own test
+  enforced it, on itself, so a second bridge could cross the line in silence.
+  `ops/scripts/check-tool-surface.mjs` now measures every bridge manifest under
+  `apps/` and `packages/` and fails the build past the budget, printing the
+  per-bridge numbers and the headroom on every run.
+  
+  A bridge is measured through a `toolSurface()` export on its package entry —
+  the same instinct as `check()` making `metistry doctor` generic — and
+  `mcp-brain` ships the reference implementation: it stands up the real server
+  and reads a real `tools/list`, so the number is production's definitions
+  rather than a snapshot. A bridge without that export is reported
+  declared-only. On the tool-count axis the current number is acknowledged
+  rather than waived, so the **next** tool forces the lazy decision instead of
+  landing quietly.
+- 8fc0e5e: **One scope rule for every knowledge read, on both doors.** `expose: route`
+  closed the console's generic `GET /api/q/<name>` over the page list and the
+  link graph and left the other generic door open: `queries_run` on the `/mcp`
+  mount ran any named query for any holder of a `queries: true` grant. That
+  grant is a separate axis from the knowledge tier, so it was a way past the
+  tiers entirely — an agent at tier `none`, which `knowledge_search` will not
+  tell a single title, could page the whole vault index and the whole wikilink
+  graph; a `tier: areas` agent could read the titles of every area it was never
+  granted. Ruled 2026-09-19: *"all queries including /mcp should be scoped and
+  follow the same token based enforcements."*
+  
+  **`queries_run` honours `expose`.** It asks the same `QueryStore.exposure(name)`
+  the console asks and refuses a route-backed query with the **unknown-query
+  refusal, byte for byte** — same code, same `no such query: <name>` — and
+  `queries_list` does not name one, because a list that named a query the runner
+  refuses would publish the route-only set in the same breath. Read off the
+  manifests, never matched against a list in the server (invariant 5).
+  
+  **The scoped door beside it is `knowledge_list`**, which runs the SAME two
+  named queries through `packages/queries` and filters them with the same
+  function the console's routes use. `links_for: <path>` lists one page's links
+  in both directions out of `knowledge_page_links`, with **both ends** of every
+  edge scoped — a backlink cannot report that a note exists in an area the
+  caller was never granted — and needs an `areas` grant covering the page,
+  because a backlink names a note. Without a vault bridge the listing comes from
+  the reconciler's index (`knowledge_pages`) instead of the tool being
+  `not_available`, and every entry carries path, title and one-line description
+  — never content, at any tier. It rides `knowledge_list`'s existing definition
+  rather than arriving as a new tool pair because the eager `tools/list` budget
+  now sits within 80 characters of the 5k line a new tool would have to buy with
+  `discovery: lazy` (`packages/mcp-brain/test/brain.test.ts`).
+  
+  **That function is now singular.** `canSeeUnder(path, areas)` lifts into
+  `packages/mcp-brain/src/knowledge.ts`, beside the `underAreas` it always
+  called and the `isVaultPath` core always owned; `apps/console`'s `canSee` is a
+  rename over it, and `knowledgeScope` gains `canList` — the same question asked
+  about a TITLE rather than content. Tier `index` may be told a page exists
+  anywhere in the index (that is the discovery the tier is for: an agent finds
+  `Areas/Health/sleep.md` so it can ask you for the area that holds it) and may
+  read none of it; tier `areas` lists and reads its prefixes; tier `none` gets
+  nothing and is told "not granted", never "not found". The same lift hardened
+  `knowledge_list`'s bridge branch, which applied no vault-path rule at all: a
+  tier `index` browse of the vault root listed `.metistry/`, `.obsidian/`,
+  `Artifacts/` and the root `CLAUDE.md` — machinery, and not knowledge for the
+  owner either.
+- 0171bc0: **`scope_required`: the refusal names the area, once existence is already visible.**
+  Ruled 2026-09-19 (PR #216 judgement call B): tier `index` — or `links_for` on
+  a page whose title a grant does not cover — could already see a settled
+  page's title through `knowledge_search`/`knowledge_list`, but `knowledge_read`
+  and `knowledge_list { links_for }` answered the bare "not granted" anyway,
+  leaving an agent to guess which area to ask you to widen. That refusal is now
+  structured for a page it could already see (never for a path merely shaped
+  like one, never a draft — existence still does not leak either way):
+  `isError: true`, the ordinary `error.code: "forbidden"` underneath
+  (invariant 8's envelope is unchanged), plus `reason: "scope_required"` and
+  `grantedScope` — the page's own parent directory — alongside it.
+  `error.message` spells out the same thing in a sentence naming
+  `requests_create` as the door (there is no `request_access` tool today) and
+  that you approve it from Needs You.
+  
+  Tier `none` and a path that fails the vault-path rule are untouched — still
+  the uniform "not granted", nothing new to distinguish. `Outcome` gains an
+  `expose` field (`packages/mcp-brain/src/outcome.ts`) alongside the existing
+  audit-only `meta`, so a refusal can opt into carrying structured, wire-visible
+  detail without changing what every other `fail(...)` call in this package
+  sends: `meta` still never reaches the caller. No tool description grew — the
+  eager `tools/list` stays under the 5k-token line — the extra detail lives in
+  the response body a refusal already produces.
+- Updated dependencies [ad73f5a]
+  - @foldedspacelabs/metistry-core@0.10.0
+  - @foldedspacelabs/metistry-artifacts@0.10.0
+  - @foldedspacelabs/metistry-tasks@0.10.0
+  - @foldedspacelabs/metistry-queries@0.10.0
+
 ## 0.9.1
 
 ### Patch Changes

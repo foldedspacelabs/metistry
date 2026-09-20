@@ -263,11 +263,31 @@ panel where a grant is edited shows what has been asked of it:
 ```
 GET /api/agents
 200 {"agents":[{"id","display_name","kind","grants","projects","autonomy",
-                "revoked","remote","approved_at","pending","last_seen_at"}],
+                "revoked","remote","approved_at","pending","last_seen_at",
+                "grant_source","scope"}],
      "access_requests":[{"proposal_id":412,"agent":"devin","area":"Areas/Health",
                          "reason":"knowledge_read pointed me here","ts":"…",
                          "escalated":true,"prior_proposal":399}]}
 ```
+
+`scope` is the row **rendered**, in the one vocabulary every surface uses
+(`describeScope` — [auth.md](auth.md)):
+
+```json
+"scope": { "role":"agent", "who":"an agent", "tier":"index", "access":"titles",
+           "areas":[], "scope":"titles", "queries":true, "projects":["alpha"],
+           "uses":null, "autonomy":{"level":"observe","actions":{…}},
+           "source":"registry", "from":"the registry — the owner's own hand, durable",
+           "extras":["queries","projects: alpha","autonomy: observe"],
+           "line":"an agent · titles · queries, projects: alpha, autonomy: observe" }
+```
+
+It is derived, never stored — a rendering of `grants`, `projects`,
+`autonomy` and `grant_source`, all of which are still on the row beside it
+for a client that wants the fields rather than the sentence. It exists so a
+client never recombines them into words of its own, which is how the panel,
+the queue and the CLI came to have three vocabularies for one record. The
+same object rides on an `access_request`'s payload as `current_scope`.
 
 That list is a **view**: the answer is given in the queue, through
 `POST /api/proposals/:id` like every other request, which for this kind takes
@@ -601,7 +621,8 @@ rather than a refusal. `apps/console/test/compute-routes.test.ts` holds it.
 GET /api/q/open_work?limit=5
 200 {"rows":[…],"as_of":"…"}
 400 a param this query does not declare, or one of the wrong type
-404 no such query — OR one the manifest keeps off this door (indistinguishable)
+404 no such query — OR, for a credential that is not the owner, one the
+    manifest keeps off this door (indistinguishable)
 ```
 
 Invariant 3's read path, addressable by name: the YAML in `seed/queries/` plus
@@ -616,7 +637,7 @@ optional field beside `name`, `description`, `params`, `sql` and `cache_ttl`:
 | value | meaning |
 | --- | --- |
 | `generic` | the default, and what every manifest without the field means. Served here, by name |
-| `route` | this query has an **endpoint of its own**, and that endpoint does something this door cannot. Asking for it here is the `404` an unknown name gets |
+| `route` | this query has an **endpoint of its own**, and that endpoint does something this door cannot. Asking for it here is the `404` an unknown name gets — **unless you are the owner**, who is served it |
 
 The field exists because of `knowledge_pages` and `knowledge_page_links`.
 `GET /api/knowledge/pages` and `GET /api/knowledge/links` filter every row
@@ -629,12 +650,22 @@ which includes the capture owner token that is `403` on `/api/knowledge/*`. One 
 necessary operation (ruled 2026-09-19): the filter is not optional if there is
 no second way in.
 
+**The owner is served it.** Ruled 2026-09-19 ("the owner should always have
+access to everything") and shipped as P4: the filter `expose: route`
+protects is a filter on what an AGENT may see of the vault, and the owner's
+scope IS the whole vault — so the scoped route and this one return them the
+same rows, and the refusal was only ever a second door to remember. The
+**capture owner token is not the owner** (the plan's tier 0, capture-only,
+and `403` on `/api/knowledge/*`): for it, and for every other credential,
+this door is unchanged byte for byte. That is the one credential the rule
+was really about, and it is still refused.
+
 Two properties worth stating:
 
 - **The refusal is the unknown-query refusal, byte for byte** — same code,
-  same status, same absent message. A distinguishable `403` would make this
-  door an oracle for which route-only queries a build has, which is the same
-  reasoning behind the `404` on `/api/knowledge/page`.
+  same status, same absent message, and no `reason` on the wire. A
+  distinguishable `403` would make this door an oracle for which route-only
+  queries a build has.
 - **It is declared on the manifest, not in the server** (invariant 5). The
   server asks the store (`QueryStore.exposure(name)`), so a list of names
   inside the console cannot drift from the files, and an instance overlaying
@@ -682,8 +713,10 @@ GET /api/knowledge/links?path=Areas/Health/sleep.md&limit=&offset=
 200 {"path":"Areas/Health/sleep.md",
      "links":[{"direction":"outgoing","path","kind","title","description","status","resolved"}],
      "limit":100,"offset":0,"as_of":"…"}
-400 q / mode / limit / offset / a filter's shape / a missing path — by name
-404 the page is not there, OR is not knowledge (indistinguishable, on purpose)
+400 q / mode / limit / offset / a filter's shape / a missing path — by name;
+    or, for the OWNER, a path this door does not serve (the classification)
+404 the page is not there, OR — for anyone but the owner — is not knowledge
+    or is outside their grant (indistinguishable, on purpose)
 503 no vault bridge configured; or, for `pages`/`links`, the named query is not loaded
 ```
 
@@ -710,24 +743,41 @@ confines a path to the instance repo and stops there — it will serve
 `.metistry/state/.env`, `.metistry/compute.yaml` or the root `CLAUDE.md`,
 because `metistry update` and `metistry compute` write those files through the
 same bridge and a read gate would break the write path. Knowledge is a
-narrower thing than "a file in the instance repo", so the narrowing happens
-**here**, on core's `isVaultPath`: no traversal, no leading slash, nothing
-inside a dot-directory, not `Artifacts/`, not the root `CLAUDE.md` /
-`README.md`. The same predicate `mcp-brain`'s `validKnowledgePath` applies to
-agents and the indexer applies to the walk, so the three cannot drift.
+narrower thing than "a file in the instance repo", so this door serves
+knowledge and nothing else — `classify(path) === "knowledge"`, which is
+core's `isVaultPath`: no traversal, no leading slash, nothing inside a
+dot-directory, not `Artifacts/`, not the root `CLAUDE.md` / `README.md`. The
+same predicate `mcp-brain`'s `validKnowledgePath` applies to agents and the
+indexer applies to the walk, so the three cannot drift.
 
-A refusal answers **`404`, not `403`** — for the same reason a decision on an
-unknown proposal does: the owner may read `.metistry/compute.yaml` with a text
-editor or `metistry compute show`, and the honest thing to say on the
-*knowledge* route is "there is no such page", not "there is one and you may
-not have it". "Refused" and "absent" are indistinguishable from outside.
+**For the owner that is a classification, not a refusal** (P4, ruled
+2026-09-19: "the owner should always have access to everything"). Their own
+`Artifacts/` and `.metistry/` are not pages this door has, and it says so —
+`400`, `reason: "not_knowledge"`, and `needs.door` naming the door that does
+have them:
 
-One exception to the WORDING, never to the decision (ruled 2026-09-19): the
-owner asking for one of their own `Artifacts/` is pointed at `GET
-/api/artifacts`, the door that has the bytes, rather than told their file does
-not exist. There is no oracle to protect from the owner — they may look
-everywhere in their own directory — and `Artifacts/` is simply not in the
-knowledge index. An agent asking for the same path still gets the one uniform
+```
+GET /api/knowledge/page?path=Artifacts/report.pdf
+400 {"error":{"code":"invalid_request","message":"`Artifacts/report.pdf` is an artifact, not knowledge — …"},
+     "reason":"not_knowledge","needs":{"door":"GET /api/artifacts"}}
+
+GET /api/knowledge/page?path=.metistry/state/.env
+400 {"error":{"code":"invalid_request","message":"`.metistry/state/.env` is machinery, not knowledge — …"},
+     "reason":"not_knowledge","needs":{"door":"the file itself"}}
+```
+
+Not `404`, which would be this door claiming the file is not there, and not
+`403`, which would be claiming a permission question nobody asked. The
+machinery's "door" is the file itself, on disk and in git: **no door serves
+it as a page, and not one byte of it crosses here.** A path that genuinely
+has no page is still a plain `404`.
+
+**For everyone else the answer is one sentence, whatever the reason.** Out
+of scope, a draft, machinery, an artifact, a path that was never written:
+`404`, `no such page …`, no `reason`, no `needs`. "Refused" and "absent"
+have to be indistinguishable from outside, or the route is an oracle for
+what exists where the caller cannot look. An agent asking for the same path
+as the owner above still gets the one uniform
 sentence, byte for byte the same as for a path that is not there.
 
 **Grant areas.** All four routes filter through one predicate (`canSee(path,
@@ -792,7 +842,8 @@ in the console would swallow them; the one thing the route insists on is a
 `knowledge_pages.yaml` declares `expose: route`, so `GET
 /api/q/knowledge_pages` answers the `404` it answers an unknown name with —
 and so does `queries_run` on `/mcp` — one endpoint per necessary operation
-(ruled 2026-09-19). The other door onto the same rows is `knowledge_list`,
+(ruled 2026-09-19). The owner is served at both doors since P4 (above);
+every other credential, the capture owner token included, is not. The other door onto the same rows is `knowledge_list`,
 which applies the same `canSeeUnder` to an agent's grant that this route
 applies to the owner's scope. The generic door has no `canSee` filter and cannot have one: it
 does not know that a column called `path` is a vault path, and it has no
@@ -811,7 +862,7 @@ so both directions are one indexed lookup). No migration.
 
 | Field | Meaning |
 | --- | --- |
-| `path` (parameter) | **required** — the page whose links these are. A path the caller may not see is the same `404` a missing page gets: "this page has four backlinks" is a fact about a page |
+| `path` (parameter) | **required** — the page whose links these are. A path the caller may not see is the same `404` a missing page gets: "this page has four backlinks" is a fact about a page. For the owner, a path that is not knowledge is the `400` classification the page route gives, in the same words — the two doors cannot drift |
 | `direction` | `outgoing` — this page links there; `incoming` — that page links here |
 | `path` (row) | always **the other end** of the edge. One list, one column, one predicate — two arrays would be two chances to filter them unevenly |
 | `kind` | `wikilink`, `frontmatter` or `embed`. The same target reached two ways is **two edges**, so a client's row identity is the triple and not the path |

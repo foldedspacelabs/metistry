@@ -32,6 +32,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { askpassPath, askpassScript } from "../src/askpass.js";
 import {
   CLT_GIT,
   gitPrefixFor,
@@ -55,6 +56,7 @@ const PARAMS = {
   instanceDir: "/i",
   gitBin: "/g/bin/git",
   gitConfigGlobal: "/h/.gitconfig",
+  askpassBin: "/i/.metistry/state/bin/git-askpass",
   reconcilerPort: 7812,
   consolePort: 8080,
   dbPort: 5432,
@@ -98,6 +100,7 @@ describe("reconciler sandbox parameters", () => {
       TMP_DIR: "/tmp",
       GIT_PREFIX: "/g",
       GIT_CONFIG_GLOBAL: "/h/.gitconfig",
+      ASKPASS_BIN: "/i/.metistry/state/bin/git-askpass",
       RECONCILER_TCP: "localhost:7812",
       CONSOLE_TCP: "localhost:8080",
       DB_TCP: "localhost:5432",
@@ -165,6 +168,7 @@ describe.skipIf(process.platform !== "darwin" || !existsSync(SANDBOX_EXEC) || !G
         instanceDir: instance,
         gitBin: GIT!,
         gitConfigGlobal: globalGitConfigPath(home),
+        askpassBin: askpassPath(instance),
         // a real port: sandbox-exec rejects `localhost:0` in a bind rule
         reconcilerPort: 7812,
         consolePort,
@@ -188,6 +192,9 @@ describe.skipIf(process.platform !== "darwin" || !existsSync(SANDBOX_EXEC) || !G
     await mkdir(join(root, "documents"), { recursive: true });
     await writeFile(join(root, "documents", "private.md"), "a note the reconciler must not be able to read");
     await writeFile(join(home, ".gitconfig"), "[user]\n\tname = Test\n\temail = t@example.test\n");
+    // the askpass shim, exactly as `metistry up` generates it
+    await mkdir(join(instance, ".metistry", "state", "bin"), { recursive: true });
+    await writeFile(askpassPath(instance), askpassScript(process.execPath), { mode: 0o755 });
     await writeFile(join(instance, "Journal", "2026-09-19.md"), "the vault, which this process may write\n");
     await writeFile(
       join(root, "product", "probe.mjs"),
@@ -259,6 +266,41 @@ console.log(JSON.stringify({
       connect_other: "denied:EPERM",
     });
   }, 90_000);
+
+  it("execs the askpass shim, which prints the credential from its own environment and nothing else", async () => {
+    // the whole credential path in one assertion: git execs askpass
+    // DIRECTLY (no shell), and the shim can reach exactly two variables
+    const argv = confine([askpassPath(instance), "Password for 'https://x@example.test': "]);
+    const { stdout } = await run(argv[0]!, argv.slice(1), {
+      timeout: 30_000,
+      cwd: join(root, "product"),
+      env: { ...process.env, METISTRY_GIT_ASKPASS_USER: "x-access-token", METISTRY_GIT_ASKPASS_TOKEN: "tok-from-the-keychain" },
+    });
+    expect(stdout.trim()).toBe("tok-from-the-keychain");
+    const user = confine([askpassPath(instance), "Username for 'https://example.test': "]);
+    const u = await run(user[0]!, user.slice(1), {
+      timeout: 30_000,
+      cwd: join(root, "product"),
+      env: { ...process.env, METISTRY_GIT_ASKPASS_USER: "x-access-token", METISTRY_GIT_ASKPASS_TOKEN: "tok-from-the-keychain" },
+    });
+    expect(u.stdout.trim()).toBe("x-access-token");
+    // …and with no credential in the environment it refuses loudly rather
+    // than printing an empty line git would read as a blank password
+    await expect(
+      run(argv[0]!, argv.slice(1), { timeout: 30_000, cwd: join(root, "product"), env: { ...process.env, METISTRY_GIT_ASKPASS_USER: "", METISTRY_GIT_ASKPASS_TOKEN: "" } }),
+    ).rejects.toThrow(/no credential in this process/);
+  }, 60_000);
+
+  it("an askpass OUTSIDE the granted literal is refused — the exec allowlist is the only gate", async () => {
+    // the same shim, byte for byte, one directory over: it is the profile's
+    // literal that admits it, not its contents
+    const elsewhere = join(root, "tmp", "git-askpass");
+    await writeFile(elsewhere, askpassScript(process.execPath), { mode: 0o755 });
+    const argv = confine([elsewhere, "Password for 'https://x@example.test': "]);
+    await expect(
+      run(argv[0]!, argv.slice(1), { timeout: 30_000, cwd: join(root, "product"), env: { ...process.env, METISTRY_GIT_ASKPASS_TOKEN: "tok" } }),
+    ).rejects.toThrow(/Operation not permitted/);
+  }, 60_000);
 
   it("cannot exec a shell, and cannot exec ssh — which is why SSH remotes are unsupported while confined", async () => {
     for (const bin of ["/bin/sh", "/bin/bash", "/usr/bin/ssh", "/usr/bin/env"]) {

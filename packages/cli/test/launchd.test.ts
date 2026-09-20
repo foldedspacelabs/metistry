@@ -20,6 +20,7 @@ const RECONCILER_EXTRA = {
   INSTANCE_DIR: "/i",
   GIT_PREFIX: "/Library/Developer/CommandLineTools/usr",
   GIT_CONFIG_GLOBAL: "/Users/x/.gitconfig",
+  ASKPASS_BIN: "/i/.metistry/state/bin/git-askpass",
   RECONCILER_TCP: "localhost:7812",
   EMBED_TCP: "localhost:11434",
 };

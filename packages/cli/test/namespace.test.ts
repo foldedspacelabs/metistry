@@ -84,7 +84,7 @@ describe("namespaced plist templates", () => {
         envFile: "/i/state/.env",
         // the compose shape still installs the reconciler as a host job, and
         // its template is rooted at sandbox-exec (ops/sandbox/reconciler.sb)
-        extra: { SANDBOX_PROFILE: "/srv/m/ops/sandbox/unconfined.sb", NODE_PREFIX: "/usr", PRODUCT_DIR: "/srv/m", INSTANCE_DIR: "/i", TMP_DIR: "/tmp", GIT_PREFIX: "/Library/Developer/CommandLineTools/usr", GIT_CONFIG_GLOBAL: "/h/.gitconfig", RECONCILER_TCP: "localhost:7812", CONSOLE_TCP: "localhost:8080", DB_TCP: "localhost:5432", EMBED_TCP: "localhost:11434", PROXY_TCP: "localhost:7814" },
+        extra: { SANDBOX_PROFILE: "/srv/m/ops/sandbox/unconfined.sb", NODE_PREFIX: "/usr", PRODUCT_DIR: "/srv/m", INSTANCE_DIR: "/i", TMP_DIR: "/tmp", GIT_PREFIX: "/Library/Developer/CommandLineTools/usr", GIT_CONFIG_GLOBAL: "/h/.gitconfig", ASKPASS_BIN: "/i/.metistry/state/bin/git-askpass", RECONCILER_TCP: "localhost:7812", CONSOLE_TCP: "localhost:8080", DB_TCP: "localhost:5432", EMBED_TCP: "localhost:11434", PROXY_TCP: "localhost:7814" },
       });
       expect(out, t.file).not.toContain("__");
     }

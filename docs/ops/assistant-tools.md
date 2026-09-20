@@ -101,6 +101,16 @@ click in the Agents panel goes through (`PUT /api/agents/:id/grants`,
 refusal that names its own remedy is what keeps a scoped agent from retrying
 the same path forever.
 
+**Every refusal this surface can give is in one file.**
+`packages/core/test/access.golden.json` is the committed catalogue: one entry
+per door, with the error code, the machine-readable `reason`, the exact
+sentence the caller reads, and the `needs` (if any) that says what would
+unlock it. Every door asks `may()` in `packages/core/src/access.ts` and
+nothing else, so the file is the whole vocabulary rather than a sample of it
+— and changing what a tool says to a model is a diff there, reviewed, instead
+of a string edited inside a handler (`docs/ops/auth.md`, "One decision
+function").
+
 One consequence to know before you Approve: tier `index` browses every title
 in the vault and reads none, tier `areas` sees titles only inside its
 prefixes — so granting an `index` agent one folder **trades** the browse for

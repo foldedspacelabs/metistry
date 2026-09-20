@@ -17,8 +17,9 @@
 // `runs` row on the crew's id (component = crew name, kind = crew_run).
 
 import { z } from "zod";
-import type { ErrorCode } from "@foldedspacelabs/metistry-core";
-import { done, fail, type Outcome } from "./outcome.js";
+import { may, type ErrorCode } from "@foldedspacelabs/metistry-core";
+import { done, fail, refuse, type Outcome } from "./outcome.js";
+import { principalOf } from "./principal.js";
 import type { AgentPrincipal } from "./types.js";
 
 export const CREW_TOOL_NAMES = ["agents_delegate"] as const;
@@ -109,7 +110,8 @@ export function registerCrewTools(reg: Register, dispatcher: CrewDispatcher | un
       idempotency_key: z.string().min(1).max(200).optional(),
     },
     async (a) => {
-      if (principal.kind !== "internal") return fail("forbidden", "not granted");
+      const admitted = may(principalOf(principal), "act", { kind: "tool", name: "agents_delegate" });
+      if (!admitted.ok) return refuse(admitted);
       if (!dispatcher) return fail("not_available", NOT_AVAILABLE);
       const r = await dispatcher.dispatch(
         { crew: a.crew, brief: a.brief, ...(a.task_id !== undefined ? { task_id: a.task_id } : {}), ...(a.idempotency_key !== undefined ? { idempotency_key: a.idempotency_key } : {}) },

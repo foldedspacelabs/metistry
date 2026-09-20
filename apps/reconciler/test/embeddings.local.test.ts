@@ -7,6 +7,7 @@
 // The server is whatever `METISTRY_LOCAL_MODEL_URL` names and, failing that,
 // a default Ollama — the probe is `/v1/embeddings` (C18), so LM Studio and
 // the bundled llama-server serve this suite equally well.
+import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -43,8 +44,15 @@ const embedderReady = await (async () => {
 })();
 if (!embedderReady) console.warn(`local model server: ${LOCAL} does not serve ${MODEL} — skipping the real-embedder suite (\`metistry compute models install <provider>/${MODEL}\`)`);
 
+// A random marker per run, so this suite's rows in the path-keyed tables
+// (embeddings, knowledge_links, knowledge_files) never share a literal path
+// with a sibling reconciler test file's rows in the shared scratch db
+// (docs/ops/testing.md, "count your own rows").
+const MARKER = `itest-${randomUUID().slice(0, 8)}`;
+const PREFIX = `Areas/${MARKER}/`;
+
 const NOTES: Record<string, string> = {
-  "Areas/WaterHeater.md": [
+  [`${PREFIX}WaterHeater.md`]: [
     "---",
     "title: Water heater",
     "description: the tank in the basement and what to do about it",
@@ -59,7 +67,7 @@ const NOTES: Record<string, string> = {
     "",
     "Replace it before winter rather than waiting for it to fail and flood the basement floor.",
   ].join("\n"),
-  "Areas/Marathon.md": [
+  [`${PREFIX}Marathon.md`]: [
     "---",
     "title: Marathon training",
     "description: the build to race day",
@@ -74,7 +82,7 @@ const NOTES: Record<string, string> = {
     "Cut volume sharply in the last three weeks before the race while keeping some intensity,",
     "so the legs arrive fresh on the start line instead of tired from training.",
   ].join("\n"),
-  "Areas/Unsettled.md": ["---", "title: Unsettled", "status: draft", "---", "", "Tapering before a race is something I should write about properly one day."].join("\n"),
+  [`${PREFIX}Unsettled.md`]: ["---", "title: Unsettled", "status: draft", "---", "", "Tapering before a race is something I should write about properly one day."].join("\n"),
 };
 
 describe.skipIf(!hasDb || !embedderReady)("reconciler embeddings (real db, a real local model server)", () => {
@@ -84,9 +92,9 @@ describe.skipIf(!hasDb || !embedderReady)("reconciler embeddings (real db, a rea
   let embeddings: Embeddings;
 
   const clean = async () => {
-    await pool.query(`DELETE FROM embeddings`);
-    await pool.query(`DELETE FROM knowledge_links`);
-    await pool.query(`DELETE FROM knowledge_files`);
+    await pool.query(`DELETE FROM embeddings WHERE path LIKE $1`, [`${PREFIX}%`]);
+    await pool.query(`DELETE FROM knowledge_links WHERE from_path LIKE $1 OR to_path LIKE $1`, [`${PREFIX}%`]);
+    await pool.query(`DELETE FROM knowledge_files WHERE path LIKE $1`, [`${PREFIX}%`]);
     await pool.query(`DELETE FROM runs WHERE component = 'reconciler'`);
   };
 
@@ -99,7 +107,7 @@ describe.skipIf(!hasDb || !embedderReady)("reconciler embeddings (real db, a rea
       password: process.env.METISTRY_DB_PASSWORD,
     });
     await clean();
-    repo = await tempRepo();
+    repo = await tempRepo(MARKER);
     for (const [path, body] of Object.entries(NOTES)) await writeFile(join(repo.root, path), `${body}\n`);
     const committer = new Committer(repo.git, { authorPrefix: "Metistry", authorEmail: "metistry@test" });
     const vault = new Vault(repo.root, repo.git, committer, { maxBytes: 200_000 });
@@ -124,17 +132,19 @@ describe.skipIf(!hasDb || !embedderReady)("reconciler embeddings (real db, a rea
   });
 
   it("stores 768-dimension vectors for settled notes only, model and dim on every row", async () => {
-    const { rows } = await pool.query(`SELECT path, model, dim, vector_dims(embedding) AS d FROM embeddings ORDER BY path, chunk_index`);
+    const { rows } = await pool.query(`SELECT path, model, dim, vector_dims(embedding) AS d FROM embeddings WHERE path LIKE $1 ORDER BY path, chunk_index`, [
+      `${PREFIX}%`,
+    ]);
     expect(rows.length).toBeGreaterThanOrEqual(4);
     expect(rows.every((r) => r.model === MODEL && Number(r.dim) === EMBED_DEFAULT_DIM && Number(r.d) === EMBED_DEFAULT_DIM)).toBe(true);
-    expect(rows.map((r) => String(r.path))).not.toContain("Areas/Unsettled.md"); // the draft, which mentions tapering
+    expect(rows.map((r) => String(r.path))).not.toContain(`${PREFIX}Unsettled.md`); // the draft, which mentions tapering
   });
 
   it("semantic finds the note by meaning where keyword finds nothing", async () => {
     // Not one word of this query appears in the taper section.
     const q = "how much should I ease off running in the final weeks so my legs are fresh";
     const kw = await searchVault(deps, q, 5, "keyword");
-    expect(kw.hits.map((h) => h.path)).not.toContain("Areas/Marathon.md");
+    expect(kw.hits.map((h) => h.path)).not.toContain(`${PREFIX}Marathon.md`);
 
     const started = Date.now();
     const sem = await searchVault(deps, q, 5, "semantic");
@@ -142,15 +152,15 @@ describe.skipIf(!hasDb || !embedderReady)("reconciler embeddings (real db, a rea
     console.log(`ollama: semantic query in ${ms}ms → ${sem.hits.map((h) => `${h.path} ${h.score.toFixed(3)}`).join(", ")}`);
 
     expect(sem.mode).toBe("semantic");
-    expect(sem.hits[0]!.path).toBe("Areas/Marathon.md");
+    expect(sem.hits[0]!.path).toBe(`${PREFIX}Marathon.md`);
     expect(sem.hits[0]!.score).toBeGreaterThan(0.5);
     expect(sem.hits[0]!.score).toBeGreaterThan(sem.hits[1]!.score);
-    expect(sem.hits.map((h) => h.path)).not.toContain("Areas/Unsettled.md");
+    expect(sem.hits.map((h) => h.path)).not.toContain(`${PREFIX}Unsettled.md`);
   }, 60_000);
 
   it("the other note wins its own question — the ranking is about meaning, not one lucky note", async () => {
     const sem = await searchVault(deps, "should I replace the old tank in the basement before it leaks", 5, "semantic");
-    expect(sem.hits[0]!.path).toBe("Areas/WaterHeater.md");
+    expect(sem.hits[0]!.path).toBe(`${PREFIX}WaterHeater.md`);
   }, 60_000);
 
   it("hybrid is the default once vectors exist, and fuses both lists", async () => {
@@ -158,16 +168,16 @@ describe.skipIf(!hasDb || !embedderReady)("reconciler embeddings (real db, a rea
     expect(auto.mode).toBe("hybrid"); // no mode asked for, vectors present
     // "taper" is a literal word in Marathon.md (keyword) and the semantic
     // neighbourhood of the same note: fusion should agree with both.
-    expect(auto.hits[0]!.path).toBe("Areas/Marathon.md");
+    expect(auto.hits[0]!.path).toBe(`${PREFIX}Marathon.md`);
     expect(auto.hits.some((h) => h.source === "both")).toBe(true);
     expect(auto.hits.every((h) => h.score > 0)).toBe(true);
   }, 60_000);
 
   it("a rebuild reproduces the same chunks byte for byte (decision 8)", async () => {
-    const before = await pool.query(`SELECT path, chunk_index, content_hash FROM embeddings ORDER BY path, chunk_index`);
+    const before = await pool.query(`SELECT path, chunk_index, content_hash FROM embeddings WHERE path LIKE $1 ORDER BY path, chunk_index`, [`${PREFIX}%`]);
     const r = await embeddings.rebuild();
     expect(r.degraded).toBeNull();
-    const after = await pool.query(`SELECT path, chunk_index, content_hash FROM embeddings ORDER BY path, chunk_index`);
+    const after = await pool.query(`SELECT path, chunk_index, content_hash FROM embeddings WHERE path LIKE $1 ORDER BY path, chunk_index`, [`${PREFIX}%`]);
     expect(after.rows).toEqual(before.rows);
   }, 120_000);
 });

@@ -128,7 +128,7 @@ tool surface (budget: >20 tools / >5000 definition tokens — packages/core/src/
   bridge    tools         ≈tokens  headroom to the line
   --------  ------------  -------  ------------------------------------------
   apple-fm  2 (declared)  n/a      18 tools
-  brain     25            4035     965 tokens, 5 tools OVER (acknowledged 25)
+  brain     26            4224     776 tokens, 6 tools OVER (acknowledged 26)
   eventkit  4 (declared)  n/a      16 tools
 ```
 
@@ -145,10 +145,12 @@ tool surface (budget: >20 tools / >5000 definition tokens — packages/core/src/
   a check that quietly degrades to "nothing to measure" is not a check.
 - **Tokens are the budget; the tool count is a ratchet.** An eager bridge past
   5k definition tokens fails. Past 20 tools it fails too *unless* the number is
-  recorded in `COUNT_ACKNOWLEDGED` in the script — `brain` sits at 25 there,
+  recorded in `COUNT_ACKNOWLEDGED` in the script — `brain` sits at 26 there,
   which is the "noted, not acted on" its manifest has carried. So a bridge may
   stay where it was acknowledged, and the **next** tool fails the check until
   somebody trims the surface, switches the manifest to `discovery: lazy`, or
-  moves the ceiling with a reason. `discovery: lazy` has already made that
+  moves the ceiling with a reason. That has happened exactly once: 25 → 26 on
+  2026-09-19 for `request_access`, with the reasoning written beside the
+  number rather than in a commit message. `discovery: lazy` has already made that
   decision, so the budget does not bind on it.
 - `--json` prints the rows and the findings instead of the table.

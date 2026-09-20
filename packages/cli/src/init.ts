@@ -14,7 +14,7 @@
 // user may push anywhere; nothing secret may ever be stamped into it.
 
 import { cp, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import {
@@ -225,6 +225,20 @@ async function isEmptyDir(dir: string): Promise<boolean> {
   return (await readdir(dir)).length === 0;
 }
 
+/**
+ * `cp`'s own default is to overwrite a colliding destination file — fine for
+ * a fresh directory, wrong for `--force` onto one that already exists
+ * (`docs/ops/cli.md`: "--force stamps around what is there"). This is what
+ * makes `Templates/*.md` — a vault-seeded file the user is meant to edit in
+ * Obsidian — safe to re-stamp: a file already at the destination wins,
+ * whatever the seed now says; only what is genuinely missing gets copied in.
+ * Directories always pass, so `cp` still walks into ones that already exist
+ * to find the files inside them that do not.
+ */
+function keepExisting(src: string, dest: string): boolean {
+  return statSync(src).isDirectory() || !existsSync(dest);
+}
+
 export async function init(opts: InitOptions): Promise<InitResult> {
   const dir = resolve(opts.dir);
   const exec = opts.exec ?? realExec;
@@ -241,8 +255,11 @@ export async function init(opts: InitOptions): Promise<InitResult> {
   await mkdir(dir, { recursive: true });
 
   // the vault starter, AT THE ROOT: now.md (where brain-commit writes),
-  // Inbox/, and the CLAUDE.md the user writes their own instructions into
-  await cp(join(opts.seedDir, SEED_VAULT_DIR), dir, { recursive: true });
+  // Inbox/, the journal tree, Templates/, Me/, People/, Projects/, and the
+  // CLAUDE.md the user writes their own instructions into. `filter` means a
+  // re-stamp (`--force` onto an existing instance) never clobbers a file the
+  // user has since edited — `Templates/*.md` above all (keepExisting).
+  await cp(join(opts.seedDir, SEED_VAULT_DIR), dir, { recursive: true, filter: keepExisting });
   await mkdir(metistryPath(dir), { recursive: true });
 
   // identity — the one place the assistant is named — and the router rules

@@ -13,7 +13,17 @@ the root, TitleCase, exactly where Obsidian already opens it.
     state/            (gitignored: .env, models/, sockets, all runtime)
   .obsidian/          (workspace* gitignored)
   Inbox/              (was Knowledge/Inbox/)
-  Journal/ Me/ now.md …   vault content, TitleCase, at the root
+  Journal/            the user's own daily note, `<date>.md` (one writer, §5.1)
+    Plan/             plan-tomorrow's file, one per evening — machine-owned
+    Fold/             the evening fold's file, one per day — machine-owned
+    Standup/          standup-draft's file, one per morning — machine-owned
+    Meetings/         the user's own meeting notes, `<date>-<topic>.md`
+  Templates/          Daily/Meeting/Plan/Standup/Fold/Weekly.md — user-owned,
+                      stamped by `metistry init` (docs/product/daily-flow-spec.md §6.1)
+  Me/                 profile.md + `Working Style.md` — the user's own facts
+                      and prose rules the routines read (§6.6); never assumed
+  People/ Projects/   empty until you add a page; nothing seeds one for you
+  now.md …            vault content, TitleCase, at the root
   Artifacts/          stays at the root, not indexed as knowledge
   CLAUDE.md           the assistant's operating instructions (was Knowledge/CLAUDE.md)
   README.md

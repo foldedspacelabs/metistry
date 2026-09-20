@@ -25,6 +25,7 @@ import {
   intEnv,
   egressProxyEnv,
   egressProxyUrl,
+  GIT_ASKPASS_PATH_VAR,
   firstOnMachineBaseUrl,
   keepAwakeOf,
   loadCompute,
@@ -35,6 +36,7 @@ import {
   type Compute,
   type Deployment,
   type EgressInput,
+  type GitCredentialLookup,
 } from "@foldedspacelabs/metistry-core";
 import { assistantEnv, consoleEnv, consolePort, dbPort, engineAbsentNote, engineStatus, instanceVars, loadDeployment, type ShapeContext } from "./deployment.js";
 import { doctor, renderTable, type DoctorDeps, type DoctorReport } from "./doctor.js";
@@ -113,6 +115,7 @@ import {
   engineHosts,
 } from "./sandbox.js";
 import { egressPlan, egressProxyPort, instanceRemotes } from "./egress.js";
+import { askpassPath, askpassScript, ASKPASS_MODE } from "./askpass.js";
 import { StepFailed, StepRunner, type SectionTiming } from "./steps.js";
 
 export interface UpOptions {
@@ -290,6 +293,8 @@ export interface ShapeValues extends ShapeContext {
    * is no profile there for a door to be the only opening in.
    */
   egress?: EgressInput | undefined;
+  /** which login-Keychain item the supervisor fetches for which child before spawning it (core's git-credential.ts). `up` names the item; the value never touches supervisor.json. */
+  gitCredentials?: GitCredentialLookup[] | undefined;
   /**
    * An absolute path to a REAL git, or undefined when this Mac has none the
    * profile could name (`/usr/bin/git` is the xcode-select shim — see
@@ -404,6 +409,9 @@ export function plistValuesFor(t: PlistTemplate, v: ShapeValues): PlistValues {
         instanceDir: stateRoot(v.productDir, v.env),
         gitBin: v.gitBin ?? CLT_GIT,
         gitConfigGlobal: globalGitConfigPath(v.home),
+        // the askpass shim: how a confined reconciler authenticates a push
+        // at all, since git runs every credential helper through a shell
+        askpassBin: askpassPath(stateRoot(v.productDir, v.env)),
         reconcilerPort: intEnv("METISTRY_RECONCILER_PORT", 7812, v.env),
         consolePort: consolePort(v.env),
         dbPort: dbPort(v.env),
@@ -634,7 +642,15 @@ export function renderJob(t: PlistTemplate, productDir: string, le: LaunchdEnv, 
   // (apps/reconciler/src/git.ts).
   const egressEnv =
     !v.env && values.egress && (CONFINED_CHILDREN as readonly string[]).includes(t.service)
-      ? { ...egressProxyEnv(t.service, { port: values.egress.port, tokens: values.egress.tokens ?? {} }), METISTRY_GIT_HTTP_PROXY: egressProxyUrl(t.service, (values.egress.tokens ?? {})[t.service] ?? "", values.egress.port) }
+      ? {
+          ...egressProxyEnv(t.service, { port: values.egress.port, tokens: values.egress.tokens ?? {} }),
+          METISTRY_GIT_HTTP_PROXY: egressProxyUrl(t.service, (values.egress.tokens ?? {})[t.service] ?? "", values.egress.port),
+          // the askpass shim's PATH — not the credential. The credential
+          // arrives from the supervisor at spawn (core's git-credential.ts),
+          // so it is never in a plist, never in supervisor.json and never on
+          // disk at all.
+          ...(t.service === "reconciler" && values.confineReconciler ? { [GIT_ASKPASS_PATH_VAR]: askpassPath(stateRoot(values.productDir, values.env)) } : {}),
+        }
       : undefined;
   const extraEnv = { ...(gitPath ?? {}), ...(nsPorts ?? {}), ...(instanceEnv ?? {}), ...(egressEnv ?? {}) };
   const from = `ops/launchd/${t.file}, __REPO__=${productDir}, __NODE__=${le.node}, __ENV_FILE__=${values.envFile}${v.env ? `, ${Object.keys(v.env).length} EnvironmentVariables from ${values.envFile}` : ""}${gitPath ? `, PATH=${values.gitPath}` : ""}${nsPorts ? `, ${Object.keys(nsPorts).length} namespaced ports` : ""}${instanceEnv ? `, ${Object.keys(instanceEnv).map((k) => `+${k}`).join(" ")}` : ""}${egressEnv ? `, egress proxy ${EGRESS_PROXY_HOST}:${values.egress!.port}` : ""}`;
@@ -757,6 +773,11 @@ export async function servedLocalModelChildren(r: StepRunner, productDir: string
  */
 export async function planConfinement(r: StepRunner, installRoot: string, values: ShapeValues, exists: (p: string) => boolean = existsSync): Promise<void> {
   if (values.shape !== "launchd") {
+    // …and say so explicitly rather than leaving it undefined: the
+    // reconciler is a host job under BOTH shapes, and a `!== false` default
+    // would have pointed its job at reconciler.sb with a PROXY_TCP no
+    // proxy is listening on
+    values.confineReconciler = false;
     r.note("sandbox: the compose shape's boundary is the container, so no profile is applied and there is no egress proxy (docs/ops/deployment-shapes.md)");
     return;
   }
@@ -802,10 +823,21 @@ export async function planConfinement(r: StepRunner, installRoot: string, values
   } else {
     r.note(`reconciler: confined by ops/sandbox/reconciler.sb — writes only ${values.instanceDir} and tmp; execs only node and ${gitBin}; no shell.`);
   }
-  if (values.confineReconciler && remotes.credentialHelpers.length > 0) {
-    r.note(
-      `reconciler: the instance repo names a git credential.helper (${remotes.credentialHelpers.join(", ")}) — a CONFINED reconciler cannot run it. Git runs every helper through /bin/sh (measured: even the built-in osxkeychain), and this profile has no shell. Put the credential in the remote URL, or set METISTRY_RECONCILER_SANDBOX=0 (docs/ops/reconciler.md, "Pushing while confined").`,
-    );
+  if (values.confineReconciler) {
+    // The push credential. git runs every credential helper through /bin/sh
+    // — including the built-in osxkeychain `connect-repo` configures — so
+    // the confined reconciler uses GIT_ASKPASS instead, and the SUPERVISOR
+    // reads the token out of the login Keychain at spawn. `up` only says
+    // WHICH item to look up; the value never enters supervisor.json.
+    if (remotes.pushHost) {
+      values.gitCredentials = [{ child: "reconciler", host: remotes.pushHost }];
+      const helpers = remotes.credentialHelpers.length > 0 ? ` (its \`credential.helper=${remotes.credentialHelpers[0]}\` is reset for this job — no helper can run without a shell)` : "";
+      r.note(`reconciler: pushes to ${remotes.pushUrl} with GIT_ASKPASS; the supervisor reads the login Keychain item for ${remotes.pushHost} at spawn and hands it over in the environment${helpers}.`);
+    } else if (remotes.urls.length > 0 && remotes.ssh.length === remotes.urls.length) {
+      // every remote is ssh — the warning below is the whole story
+    } else if (remotes.urls.length === 0) {
+      r.note("reconciler: the instance repo has no remote yet, so there is nothing to push and no credential to arrange — `metistry connect-repo <url>`.");
+    }
   }
   if (values.confineReconciler && remotes.ssh.length > 0) {
     r.note(
@@ -845,6 +877,18 @@ export async function installSupervisorPlan(r: StepRunner, productDir: string, l
     (t) => t.service !== "assistant" || engineStatus(values.compute, values.env).ok,
   );
   const base = launchdBaseEnv(values.env);
+  // The askpass shim, BEFORE the children are rendered: the reconciler's
+  // profile grants it by literal and its job names it, so it has to exist by
+  // the time either is written. Regenerated on every `up` — the shebang
+  // carries THIS install's node path, and a version flip moves that.
+  if (values.confineReconciler) {
+    await r.write(
+      askpassPath(root),
+      askpassScript(values.node),
+      "git's askpass for the confined reconciler: prints $METISTRY_GIT_ASKPASS_{USER,TOKEN} and nothing else, because no credential helper can run without a shell",
+      ASKPASS_MODE,
+    );
+  }
   const children = templates.map((t) => {
     const { rendered } = renderJob(t, productDir, le, values);
     const ready =
@@ -868,6 +912,8 @@ export async function installSupervisorPlan(r: StepRunner, productDir: string, l
     // the egress door's allowlist lives HERE and nowhere a child can reach:
     // the supervisor reads it before it spawns anything (core/egress.ts)
     ...(values.egress ? { egress: values.egress } : {}),
+    // …and WHICH keychain item to fetch for which child, never what it holds
+    ...(values.gitCredentials?.length ? { gitCredentials: values.gitCredentials } : {}),
   });
 
   await r.run("mkdir", ["-p", join(bin, "..")]);

@@ -309,6 +309,8 @@ export interface ReconcilerSandboxInputs {
   gitBin: string;
   /** `$HOME/.gitconfig`; granted by name because git treats an unreadable one as FATAL, not absent */
   gitConfigGlobal: string;
+  /** the askpass shim `up` generates (askpass.ts) — granted read + exec by literal, because git execs askpass directly and no credential helper can run without a shell */
+  askpassBin: string;
   reconcilerPort: number;
   consolePort: number;
   dbPort: number;
@@ -329,6 +331,7 @@ export interface ReconcilerSandboxParams {
   TMP_DIR: string;
   GIT_PREFIX: string;
   GIT_CONFIG_GLOBAL: string;
+  ASKPASS_BIN: string;
   RECONCILER_TCP: string;
   CONSOLE_TCP: string;
   DB_TCP: string;
@@ -349,6 +352,10 @@ export function reconcilerSandboxParams(inputs: ReconcilerSandboxInputs): Reconc
     // nothing, and an owner who writes their first ~/.gitconfig next week
     // must not need a re-`up` for the job to keep running
     GIT_CONFIG_GLOBAL: real(inputs.gitConfigGlobal),
+    // granted whether or not it exists yet, like the config files: `up`
+    // writes it in the same run that renders this, and a rule for a missing
+    // path matches nothing
+    ASKPASS_BIN: real(inputs.askpassBin),
     RECONCILER_TCP: `localhost:${inputs.reconcilerPort}`,
     CONSOLE_TCP: `localhost:${inputs.consolePort}`,
     DB_TCP: `localhost:${inputs.dbPort}`,

@@ -37,7 +37,7 @@
   <array>
     <string>/bin/sh</string>
     <string>-c</string>
-    <string>set -a; . '__ENV_FILE__'; set +a; exec '/usr/bin/sandbox-exec' -f '__SANDBOX_PROFILE__' -D 'NODE_BIN=__NODE__' -D 'NODE_PREFIX=__NODE_PREFIX__' -D 'PRODUCT_DIR=__PRODUCT_DIR__' -D 'INSTANCE_DIR=__INSTANCE_DIR__' -D 'TMP_DIR=__TMP_DIR__' -D 'GIT_PREFIX=__GIT_PREFIX__' -D 'GIT_CONFIG_GLOBAL=__GIT_CONFIG_GLOBAL__' -D 'RECONCILER_TCP=__RECONCILER_TCP__' -D 'CONSOLE_TCP=__CONSOLE_TCP__' -D 'DB_TCP=__DB_TCP__' -D 'EMBED_TCP=__EMBED_TCP__' -D 'PROXY_TCP=__PROXY_TCP__' '__NODE__' '__REPO__/apps/reconciler/dist/main.js'</string>
+    <string>set -a; . '__ENV_FILE__'; set +a; exec '/usr/bin/sandbox-exec' -f '__SANDBOX_PROFILE__' -D 'NODE_BIN=__NODE__' -D 'NODE_PREFIX=__NODE_PREFIX__' -D 'PRODUCT_DIR=__PRODUCT_DIR__' -D 'INSTANCE_DIR=__INSTANCE_DIR__' -D 'TMP_DIR=__TMP_DIR__' -D 'GIT_PREFIX=__GIT_PREFIX__' -D 'GIT_CONFIG_GLOBAL=__GIT_CONFIG_GLOBAL__' -D 'ASKPASS_BIN=__ASKPASS_BIN__' -D 'RECONCILER_TCP=__RECONCILER_TCP__' -D 'CONSOLE_TCP=__CONSOLE_TCP__' -D 'DB_TCP=__DB_TCP__' -D 'EMBED_TCP=__EMBED_TCP__' -D 'PROXY_TCP=__PROXY_TCP__' '__NODE__' '__REPO__/apps/reconciler/dist/main.js'</string>
   </array>
   <key>WorkingDirectory</key><string>__REPO__</string>
   <key>KeepAlive</key><true/>

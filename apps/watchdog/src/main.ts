@@ -35,6 +35,7 @@ import { alertFailures, isFailure } from "./alert.js";
 import { bridgesFromEnv } from "./bridges.js";
 import { Supervisor, startupSummary } from "./supervisor.js";
 import { EgressProxy } from "./egress-proxy.js";
+import { injectGitCredentials } from "./git-credential.js";
 import { listenControl } from "./control.js";
 import { KEEP_AWAKE_INTERVAL_SEC_DEFAULT, KeepAwakeLoop } from "./power.js";
 
@@ -134,6 +135,12 @@ async function runSupervisor(path: string): Promise<{ children: { name: string }
   // nothing install-specific — so this is the supervisor's environment either
   // way, and the watchdog half finds its db credentials in both paths
   Object.assign(process.env, config.env);
+  // The login Keychain, read ONCE, before any child exists: a confined
+  // reconciler cannot run a git credential helper (git runs every helper
+  // through a shell), so the unconfined parent fetches the token and hands
+  // it over in the child's environment. Never fatal — a miss is a log line
+  // and a push that fails in the child's own log, exactly as it did before.
+  for (const line of await injectGitCredentials(config.children, config.gitCredentials)) console.log(line);
   const sup = new Supervisor(config);
   console.log(startupSummary(config));
   const control = await listenControl(sup);

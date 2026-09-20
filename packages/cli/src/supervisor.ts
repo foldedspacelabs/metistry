@@ -31,6 +31,7 @@ import {
   type ControlOp,
   type ControlResponse,
   type EgressInput,
+  type GitCredentialLookup,
   type SupervisorConfig,
   type SupervisorConfigInput,
   instanceStatePath,
@@ -151,10 +152,21 @@ export interface SupervisorConfigInputs {
   children: ChildSpecInput[];
   /** the egress door: the CONNECT proxy's port, its host allowlist and a bearer per confined child (core/egress.ts). Absent under `compose`. */
   egress?: EgressInput | undefined;
+  /** which login-Keychain item the supervisor fetches for which child before spawning it. The item's NAME, never its value (core/git-credential.ts). */
+  gitCredentials?: GitCredentialLookup[] | undefined;
 }
 
 export function supervisorConfig(inputs: SupervisorConfigInputs): SupervisorConfigInput {
-  return { schema: 1, label: inputs.label, socket: inputs.socket, token: inputs.token, env: inputs.env, children: inputs.children, ...(inputs.egress ? { egress: inputs.egress } : {}) };
+  return {
+    schema: 1,
+    label: inputs.label,
+    socket: inputs.socket,
+    token: inputs.token,
+    env: inputs.env,
+    children: inputs.children,
+    ...(inputs.egress ? { egress: inputs.egress } : {}),
+    ...(inputs.gitCredentials?.length ? { gitCredentials: inputs.gitCredentials } : {}),
+  };
 }
 
 /** Pretty JSON: this file is read by a person as often as by the supervisor. */

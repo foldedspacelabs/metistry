@@ -36,6 +36,8 @@
 ;;                   "the git shim" below, which is the finding that cost the
 ;;                   most to learn
 ;;   GIT_CONFIG_GLOBAL  the user's ~/.gitconfig, BY NAME (read only)
+;;   ASKPASS_BIN     the askpass shim `metistry up` generates (read + exec,
+;;                   by LITERAL) — see "the credential" below
 ;;   RECONCILER_TCP  the bridge port this process binds, e.g. localhost:7812
 ;;   CONSOLE_TCP     the console's loopback endpoint
 ;;   DB_TCP          Postgres' loopback endpoint (the reconciler holds its
@@ -71,10 +73,12 @@
 ;;   `osxkeychain` that lives inside GIT_PREFIX — so a confined reconciler
 ;;   cannot use one (`fatal: cannot exec 'git credential-osxkeychain get':
 ;;   Operation not permitted`; granting /bin/sh is not enough either, because
-;;   macOS's /bin/sh re-execs /bin/bash). A push therefore needs its
-;;   credential to arrive without a subprocess: in the remote URL, or through
-;;   GIT_ASKPASS pointed at a program inside an exec-granted prefix (git
-;;   execs askpass directly, by absolute path, no shell — measured).
+;;   macOS's /bin/sh re-execs /bin/bash). That is what ASKPASS_BIN above is
+;;   for, and HTTPS push works confined because of it: `up` runs git with
+;;   `-c credential.helper=` (git's documented reset, so the repo's
+;;   osxkeychain line cannot fail first) and GIT_ASKPASS pointing at the
+;;   shim. Proven by a real push to a bare repo over HTTPS through the egress
+;;   proxy, under this profile (packages/cli/test/reconciler-push.test.ts).
 ;;
 ;;   no ssh. `/usr/bin/ssh` is not exec-able here. Allowing it would mean
 ;;   granting the sole committer read of ~/.ssh — the owner's private keys —
@@ -102,9 +106,26 @@
 (allow process-fork)
 
 ;; ---- exec ---------------------------------------------------------------
-;; Two programs: node, and a real git. No shell (see above).
+;; Three programs: node, a real git, and the askpass shim. No shell.
+;;
+;; THE CREDENTIAL. git runs every credential helper through /bin/sh — even
+;; the built-in osxkeychain `metistry connect-repo` configures — so no helper
+;; can run here (measured; see below). `GIT_ASKPASS` can: git execs it
+;; DIRECTLY, by absolute path, with no shell, and this exec allowlist is the
+;; only gate. So `up` generates a `#!<node>` shim, grants it by literal, and
+;; the supervisor — unconfined, and the parent — reads the token out of the
+;; login Keychain once and hands it to this process in its environment. The
+;; shim prints one of two environment variables and can do nothing else:
+;; it takes no path and opens no file (packages/cli/src/askpass.ts).
+;;
+;; ASKPASS_BIN lives under INSTANCE_DIR, which this process can write. That
+;; is not a hole: NODE_BIN is exec-allowed and node runs whatever JavaScript
+;; it can read, so "arbitrary code inside the sandbox" was never what this
+;; profile prevented — reaching OUTSIDE is, and a fourteen-line shim changes
+;; nothing about that.
 (allow process-exec*
   (literal (param "NODE_BIN"))
+  (literal (param "ASKPASS_BIN"))
   (subpath (param "NODE_PREFIX"))
   (subpath (param "GIT_PREFIX")))
 
@@ -131,6 +152,7 @@
 ;; Its own code and runtime, and a real git — all read-only.
 (allow file-read*
   (literal (param "NODE_BIN"))
+  (literal (param "ASKPASS_BIN"))
   (subpath (param "NODE_PREFIX"))
   (subpath (param "PRODUCT_DIR"))
   (subpath (param "GIT_PREFIX")))

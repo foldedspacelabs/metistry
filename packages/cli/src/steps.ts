@@ -4,7 +4,7 @@
 // implementation that drifts. Subprocesses are argument arrays via the
 // exec seam — never a shell string with an interpolated env.
 
-import { mkdir, writeFile } from "node:fs/promises";
+import { chmod, mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { formatCommand, realExec, type Exec, type ExecOptions, type ExecResult } from "./exec.js";
 import { defaultUi, type Ui } from "./ui.js";
@@ -155,13 +155,23 @@ export class StepRunner {
   }
 
   /** Write a file (creating its directory); a dry run prints the path and the source it would be rendered from. */
-  async write(path: string, content: string, from: string): Promise<void> {
-    const shown = `write ${path}  (from ${from})`;
+  /**
+   * `mode` is applied by the SAME call that writes the bytes, not by a
+   * `chmod` beside it: a file whose executability is a separate step is a
+   * file that is sometimes not executable (a dry run, an injected exec, a
+   * step that failed between the two). The askpass shim git execs is the
+   * case that made this explicit.
+   */
+  async write(path: string, content: string, from: string, mode?: number): Promise<void> {
+    const shown = `write ${path}  (from ${from}${mode === undefined ? "" : `, mode ${mode.toString(8)}`})`;
     this.commands.push(shown);
     this.out(`${this.prefix("  ")}${shown}`);
     if (this.dryRun) return;
     await mkdir(dirname(path), { recursive: true });
-    await writeFile(path, content);
+    await writeFile(path, content, mode === undefined ? undefined : { mode });
+    // writeFile's `mode` is a creation mode: an existing file keeps the one
+    // it had, and this file is rewritten on every `up`
+    if (mode !== undefined) await chmod(path, mode);
   }
 
   /**

@@ -109,12 +109,53 @@ export function remoteHostEntry(remote: string): string | undefined {
   return m ? egressEntryFor(`https://${m[1]}`) : undefined;
 }
 
+/** The bare host name of a remote, with no port — the `server` attribute `connect-repo` files a keychain item under. */
+export function hostOfRemote(remote: string): string | undefined {
+  const entry = remoteHostEntry(remote);
+  if (!entry) return undefined;
+  const t = entry.startsWith("[") ? entry.slice(0, entry.indexOf("]") + 1) : entry.split(":")[0]!;
+  return t === "" ? undefined : t;
+}
+
 /** True when this remote can only be reached over SSH — which a confined reconciler cannot do (ops/sandbox/reconciler.sb). */
 export function isSshRemote(remote: string): boolean {
   const s = remote.trim();
   if (/^ssh:\/\//i.test(s)) return true;
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(s)) return false;
   return /^(?:[^@/]+@)?[^:/]+:(?!\/)/.test(s);
+}
+
+/**
+ * The remote the committer will actually push to: `origin` when there is
+ * one, else the first — the same choice `Committer.pushNow` makes, so the
+ * credential `up` arranges for is the credential the push asks for.
+ */
+export function pushRemoteUrl(text: string): string | undefined {
+  const named = remoteSectionsFromGitConfig(text);
+  return (named.find((r) => r.name === "origin") ?? named[0])?.url;
+}
+
+/** `[remote "<name>"]` sections, with the url git would push to (`pushurl` when present). */
+export function remoteSectionsFromGitConfig(text: string): Array<{ name: string; url: string }> {
+  const out: Array<{ name: string; url: string }> = [];
+  let name: string | undefined;
+  for (const raw of text.split("\n")) {
+    const line = raw.trim();
+    const header = /^\[\s*remote\s+"([^"]+)"\s*\]/i.exec(line);
+    if (line.startsWith("[")) {
+      name = header ? header[1]! : undefined;
+      continue;
+    }
+    if (!name) continue;
+    const m = /^(url|pushurl)\s*=\s*(.+?)\s*$/i.exec(line);
+    if (!m) continue;
+    const existing = out.find((r) => r.name === name);
+    // pushurl wins: it is the one git dials on a push
+    if (existing) {
+      if (m[1]!.toLowerCase() === "pushurl") existing.url = m[2]!;
+    } else out.push({ name, url: m[2]! });
+  }
+  return out;
 }
 
 export interface InstanceRemotes {
@@ -126,6 +167,10 @@ export interface InstanceRemotes {
   ssh: string[];
   /** `credential.helper` values this repo names — none of which can run confined (git runs every helper through a shell) */
   credentialHelpers: string[];
+  /** the remote `Committer.pushNow` will choose (`origin`, else the first) */
+  pushUrl?: string | undefined;
+  /** its host, when it is an https remote — the login Keychain item the supervisor looks up for the confined reconciler */
+  pushHost?: string | undefined;
 }
 
 /** `<instance>/.git/config`, parsed. An instance that is not a repo yet (or is not there) yields nothing rather than throwing. */
@@ -142,7 +187,18 @@ export async function instanceRemotes(instanceDir: string | undefined): Promise<
   }
   const urls = remoteUrlsFromGitConfig(text);
   const entries = [...new Set(urls.map(remoteHostEntry).filter((e): e is string => e !== undefined))].sort();
-  return { urls, entries, ssh: urls.filter(isSshRemote), credentialHelpers: credentialHelpersFromGitConfig(text) };
+  const pushUrl = pushRemoteUrl(text);
+  // an ssh remote has no keychain item to look up: its credential is a key,
+  // and a confined reconciler cannot reach it at all
+  const pushHost = pushUrl && !isSshRemote(pushUrl) ? hostOfRemote(pushUrl) : undefined;
+  return {
+    urls,
+    entries,
+    ssh: urls.filter(isSshRemote),
+    credentialHelpers: credentialHelpersFromGitConfig(text),
+    ...(pushUrl ? { pushUrl } : {}),
+    ...(pushHost ? { pushHost } : {}),
+  };
 }
 
 /** 256 bits of hex per confined child. Minted once per install and kept across `up` runs, exactly like the control token. */

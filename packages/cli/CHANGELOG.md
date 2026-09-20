@@ -1,5 +1,319 @@
 # @foldedspacelabs/metistry-cli
 
+## 0.11.0
+
+### Minor Changes
+
+- 9c9da4a: **`metistry compute cache-report` — OPEN-6's measurement as one command**
+  (ruled 2026-09-17: ship automatic top-level `cache_control` first, measure
+  later). `metistry compute cache-report [--since 7d] [--json]` reads the `runs`
+  ledger through the new named query `cache_report`
+  (`GET /api/q/cache_report` — invariant 3's one read path, and no console route
+  or action of its own, so invariant 10's mutating surface is untouched) and
+  joins it to `compute.yaml`'s `pricing:` rates, which the ledger cannot know. A
+  table per provider/model, grouped by tier and by the `caching:` mode that was
+  in force, with turns, cache reads and writes, hit ratio, recorded cost and a
+  net dollar saving; one verdict line against an 80 % threshold, under the 89 %
+  after a task boundary that `docs/research/2026-09-cost-optimization.md`
+  records, because a real install rolls sessions. The saving is net of the write
+  premium and may be negative — a prefix rebuilt every turn is the finding, not
+  a number to floor at zero — and is absent, naming the field that would fill
+  it, wherever no `pricing:` entry publishes a rate. It calls no model and
+  writes nothing.
+  
+  **Usage mapping now covers Anthropic's native shape.** `cache_read_input_tokens`
+  was not read at all, and `input_tokens` on that wire is the *fresh* remainder
+  with both cache counts reported beside it rather than inside it.
+  `usageFromResponse` recognises the shape by its anchor field (`prompt_tokens`
+  = the OpenAI/OpenRouter form, already a total; `input_tokens` = the native
+  form, summed back into one), so `runs.tokens_in` means the whole billed prompt
+  whichever endpoint answered and a ratio over it is comparable across
+  providers.
+  
+  **Every engine turn now records the cache, and what caching was asked for.**
+  Crew runs wrote provider, model, tokens and cost but dropped
+  `cache_read_tokens`/`cache_write_tokens` and `cost_source`; shadow runs
+  dropped the same two on their own provider's row. Both carry them now. And a
+  reported zero is no longer flattened into "nothing reported": the engine keeps
+  the counter absent until a response carries the field, so NULL means the
+  provider said nothing (the field name is wrong) and 0 means it said zero (the
+  prefix is not stable) — two findings with different fixes. `runs.meta.caching`
+  records the mode in force for that turn, since `compute.yaml` is hot-reloaded
+  and cannot answer later what was true earlier.
+  
+  **Fixed:** `main()`'s `compute` case hardcoded `fetchFn: fetch` instead of
+  honouring the `io.fetchFn` test seam, so a test driving those verbs through
+  `main()` reached the real console and real provider endpoints rather than its
+  own fakes.
+- baf33c2: The vault bridge takes the principal from the credential, never from the
+  request body.
+  
+  **The hole.** Every mutation through the reconciler's bridge carries
+  `intent: { principal, … }`, and `principal` was the whole of the §4.7 check:
+  `writeAllowed` admitted `.metistry/**`, `CLAUDE.md` and `README.md` for
+  `principal: user` and refused everyone else. But `intent` is a field in a
+  **request body**, and one shared bearer — `METISTRY_BRIDGE_TOKEN_RECONCILER` —
+  reached that check. Any holder of it (the console, which terminates the
+  network and multiplexes every agent on the install; anything that ever read
+  the console's environment) could write `"principal": "user"` and rewrite
+  `rules.yaml`, an agent definition, a named query, `metistry.lock` or the
+  assistant's own instructions. Nothing did. Invariant 2 is worth only the
+  stronger sentence (owner's ruling, 2026-09-20).
+  
+  **The wire change.** The bridge now derives a caller CLASS from the bearer and
+  reads the body's `principal` as attribution inside what that class may claim
+  (`CALLER_AUTHORITY`, `apps/reconciler/src/paths.ts`):
+  
+  | Bearer | Class | May claim | Protected paths |
+  | --- | --- | --- | --- |
+  | `METISTRY_BRIDGE_TOKEN_RECONCILER_USER` (new) | `owner` | `user` only | all |
+  | `METISTRY_BRIDGE_TOKEN_RECONCILER` | `console` | any principal | `.metistry/assistant-prompt.md` and `.metistry/compute.yaml` only |
+  
+  A body that exceeds its bearer is `403 forbidden` in the uniform envelope —
+  never silently downgraded — and every refused mutation is a `runs` row
+  (`component=reconciler, kind=auth`) carrying the caller class, the claimed
+  principal and the path. Reads are unchanged: which bearer you hold decides
+  what you may write, not what you may see. `check()` gains
+  `meta.principal_from_credential` and `meta.owner_bearer`.
+  
+  The two protected paths left to the console are the two owner-authenticated
+  doors it already ships: §4.10's self-modification overlay, which the owner
+  allows in triage (`prompt-overlay.ts`), and `compute.yaml`, which the Compute
+  pane's `assign`/`budget` write through the same function `metistry compute`
+  calls (`compute-routes.ts`). Both are enumerated at the bridge rather than
+  left to the console's restraint, so `identity.yaml`, `rules.yaml`,
+  `deployment.yaml`, `metistry.lock`, `queries/`, `agents/`, `routines/`,
+  `targets/`, `extensions/`, `CLAUDE.md` and `README.md` are refused whatever
+  it asks for.
+  
+  **The new bearer.** `metistry init` mints it; `metistry up` and `metistry
+  update` mint it for an install that has none — before they restart the
+  reconciler, and `update` kickstarts the reconciler itself if nothing else in
+  the run did — and `metistry secrets sync --to env` mints it as a
+  `GENERATED_SECRETS` name. It is kept out of the console's environment by name
+  (`CONSOLE_ENV_DENY` in the otherwise wholesale `METISTRY_*` passthrough
+  `consoleEnv` builds), and `docker-compose.yml` never listed it. `writeProtected` presents whichever
+  bearer its process holds and lets the bridge decide — the CLI's is the owner's,
+  the console's is not — so a caller cannot widen itself by choosing a variable
+  name. With no owner bearer configured anywhere, no caller may write a
+  protected path at all, `metistry doctor`'s `reconciler` row is `degraded` with
+  the command that mints one, and a 403 from the CLI names that cause.
+- 579662f: The sole committer runs confined, and every confined child's egress passes
+  one allowlisting door.
+  
+  **`ops/sandbox/reconciler.sb`.** Under the `launchd` shape the reconciler —
+  the only process that holds the instance repo's working tree and the only
+  place git runs (D5) — now runs under a Seatbelt profile, as the job's root
+  process, so git and all 172 of its helpers inherit it. It writes the
+  instance repo and tmp and nothing else; reads the product checkout, the node
+  runtime, a real git's prefix and `~/.gitconfig` by name; execs node and that
+  git and **no shell**; dials the console, Postgres, the on-machine embedder
+  and the egress proxy, and binds only its own bridge port. D5 was a design
+  intention; it is now a kernel rule. `metistry up` (and `--dry-run`) prints
+  the profile each child will run under, and `metistry doctor` gains a
+  `sandbox` row that reads the answer back out of `supervisor.json`'s argv.
+  `METISTRY_RECONCILER_SANDBOX=0` swaps in `ops/sandbox/unconfined.sb`, a real
+  file that says `(allow default)`, so "not confined" is never invisible.
+  
+  **`/usr/bin/git` is not a git** — it links against `libxcselect.dylib` and
+  is the xcode-select shim, which dies under a profile. `up` resolves a real
+  git by absolute path (bundled runtime, then a non-shim git on `PATH`, then
+  the Command Line Tools) and declines to confine the job when it finds none.
+  
+  **The egress door.** `sandbox-exec` filters outbound by port and cannot name
+  a host, so `assistant.sb` carried `(remote tcp "*:443")` with an honest note
+  that its host list was documentation rather than enforcement. Both profiles
+  now allow exactly one loopback port, and a CONNECT proxy in the supervisor
+  listens there: an allowlist derived from this install's `compute.yaml`
+  providers and its instance repo's git remotes, exact host and port matching
+  (no wildcards), a 256-bit bearer per child so a refusal can name who asked,
+  a `runs` row per refusal, and no TLS interception whatsoever — CONNECT only,
+  so it learns a host name and never a byte of the tunnel. Children reach it
+  through `HTTPS_PROXY` + `NODE_USE_ENV_PROXY=1`; git reaches it through
+  `METISTRY_GIT_HTTP_PROXY` → `-c http.proxy`. `supervisor.json` gains an
+  `egress` block, read before any child is spawned, so no child can widen it.
+  
+  **Pushing still works, through `GIT_ASKPASS`.** git executes every
+  credential helper through `/bin/sh` — including the built-in `osxkeychain`
+  that `metistry connect-repo` configures — and this profile has no shell, so
+  a confined push would have died on the helper. `GIT_ASKPASS` is exec'd
+  directly, by absolute path, with no shell, so: the token stays in the login
+  Keychain where `connect-repo` put it, the **supervisor** reads it there once
+  at spawn (unconfined, the parent, and the item is filed `-A` so there is no
+  prompt), and hands it to the child in its environment; a `#!<node>` shim
+  `up` generates prints it when git asks and can do nothing else. The
+  credential is never in argv, never in `supervisor.json`, never on disk.
+  `git.ts` adds `-c credential.helper=` — git's documented reset — only when
+  there is an askpass, so an unconfined install is untouched. Proven by a real
+  push to a real bare repository over real HTTPS through the CONNECT tunnel,
+  under `sandbox-exec`.
+  
+  **SSH remotes stay unsupported while confined**, and `up` still warns:
+  `ssh` is not exec-able, granting it would mean granting the sole committer
+  `~/.ssh`, and ssh's `ProxyCommand` runs through a shell so it could not
+  reach the egress proxy either. Use an HTTPS remote or the off switch.
+
+### Patch Changes
+
+- 4581845: **The fold has its own file; your daily note is yours.** Ticket P1-9 of
+  `docs/product/daily-flow-spec.md` §5.1: the evening fold now writes
+  `Journal/Fold/<date>.md`, `source: knowledge-fold`, and never
+  `Journal/<date>.md` — that file has always been the user's own daily note,
+  and no fold turn touches it again.
+  
+  When `Templates/Fold.md` reads, the routine renders it itself — every
+  directive but `{{ prose }}`, the one legal only there (D14) — and hands the
+  skeleton plus the still-open prose slots to the SAME assistant turn it
+  already enqueues; the assistant's whole job is filling the numbered slots and
+  writing the result back verbatim. When there is no template yet (a missing
+  `Templates/Fold.md`, or no vault reader wired into the routine — §6.4's
+  `template_missing`), the fold falls back to the pre-template freeform note,
+  at the SAME new path, with a visible reason on the turn rather than losing
+  the night's fold or writing nothing at all.
+  
+  `seed/assistant-prompt.md`'s Fold section (shipped by
+  `@foldedspacelabs/metistry-cli`, stamped into every instance by `metistry
+  init`/`update`) is updated to match: it names the new path, states plainly
+  that `Journal/<date>.md` is never a fold write target, and describes both
+  shapes the enqueued turn may hand it — a skeleton to fill or a freeform note
+  to compose.
+- a0c1d02: `metistry init` now stamps the daily-flow journal tree — `Journal/` and its
+  `Plan/`, `Fold/`, `Standup/` and `Meetings/` subfolders, `Templates/` with
+  the six seeded templates (Daily, Meeting, Plan, Standup, Fold, Weekly), `Me/`
+  with a `profile.md` and `Working Style.md` carrying honest placeholders, and
+  empty `People/` and `Projects/` — into every new instance
+  (`docs/product/daily-flow-spec.md` P1-8). All six templates ship
+  `source: user`, so the assistant can never overwrite them, and a re-stamp
+  (`--force` onto an existing instance) never clobbers a template or a `Me/`
+  page you have since edited: only what is genuinely missing gets filled in.
+- b6586de: **One vocabulary, one renderer, and the owner is never refused their own
+  vault.** P3 and P4 of
+  `docs/research/2026-09-19-grants-and-access-simplified.md` §4, approved
+  2026-09-20. P4 carries the **owner-visible change** below; P3 changes what
+  refusals SAY, not what they decide.
+  
+  **P3 — one wording per reason.** §2.5 found five dialects across fourteen
+  refusal sites. `REFUSAL` in `packages/core/src/access.ts` is now one sentence
+  per `reason`, built in one place: the shape is one per reason, the facts in it
+  are substituted. So `queries_list` and `queries_run` refuse in the same words,
+  `knowledge_write` and `agents_delegate` give the same "belongs to the instance
+  assistant alone" sentence, and a tier miss names the tier the tool needs and
+  the tier the credential holds — in the console's own words for them (`none` /
+  `titles` / `folders`).
+  
+  Silence became a type rather than an accident at a call site: `tell: "hide"`
+  is the refusal deliberately identical to "there is nothing here", it carries
+  no `needs`, and `formatRefusal` drops its `reason` on the way out. Four things
+  hide — a row outside your projects, a route-only query, the console's uniform
+  403, and a knowledge path you may not even list (the 2026-09-19 boundary: an
+  area is named only for a page whose existence you can already see).
+  
+  New in `core`: `describeScope(principal)` (the triple: role · access ·
+  extras), `formatRefusal(decision)` (the §3.2 envelope), `classify(path)`,
+  `notKnowledge(path)`, `TIER_LABEL`, `ROLE_LABEL`, `sourceLabel`,
+  `RULED_TOOLS`, `NO_SUCH_PAGE`, and `tell` on `Refusal`. **Removed**:
+  `scopeAsPrincipal` (the P0 seam P4 deletes — `/api/knowledge/*` takes the
+  principal now), and the three refusal-string constants it replaces
+  (`NOT_A_VAULT_PATH`, `NOT_KNOWLEDGE`, `ARTIFACTS_SIGNPOST`).
+  
+  **P4 — the owner is refused nothing.** "The owner should always have access to
+  everything" (ruled 2026-09-19) is a short-circuit at the top of `may()`, with
+  no exception clause below it. Safe only because `classify()` splits what a
+  path IS from what anyone may do with it: `Artifacts/` and `.metistry/` are not
+  knowledge paths, so the rule never has to be weakened to keep an agent out of
+  the machinery.
+  
+  Two owner-visible changes, and they are the two §2.6 found:
+  
+  - **`GET /api/q/<name>` serves the owner a route-exposed query.** The filter
+    `expose: route` protects is a filter on what an AGENT may see of the vault;
+    the owner's scope is the whole vault. The capture owner token is NOT the
+    owner and is refused byte for byte, which is the credential that rule was
+    always about.
+  - **`GET /api/knowledge/page` and `/links` classify instead of refusing.** The
+    owner's `Artifacts/` and `.metistry/` answer `400` with
+    `reason: "not_knowledge"` and `needs.door` naming the route that has the
+    bytes (`GET /api/artifacts`, or "the file itself"), where they used to
+    answer `404`. **No door serves `.metistry/state/.env` as a page, and not one
+    byte of it crosses here** — the classification is the whole answer.
+  
+  **Agents gain nothing from P4.** Every agent, crew and assistant refusal is
+  byte-identical to what it answered before, which the golden file asserts entry
+  by entry: the four `changed` entries under P4 are all `who: "owner"`.
+  
+  **Surfaces.** `metistry agents list` is new (P3 §2.10 — the CLI rendered
+  grants not at all). `GET /api/agents` carries each row's rendered `scope` and
+  `grant_source`; an `access_request` payload carries `current_scope`. The
+  console's Agents panel and Needs You card print what they are sent instead of
+  holding spellings of their own. Tool descriptions moved onto the same words
+  and got smaller: brain's definition tokens 4264 → 4255 against a >5000 budget.
+- 23cc47f: **The daily note is rendered from a template you edit.** `core` gains the
+  template engine of `docs/product/daily-flow-spec.md` §6 (P1-6):
+  `renderTemplate(text, ctx)` and `validateTemplate(text)`, plus
+  `metistry templates check` in the CLI to run the second one from a terminal.
+  
+  Eight directives and one block form, and the ceiling is the point — a ninth
+  verb is a product decision, not a config line:
+  
+  | directive | what it renders |
+  | --- | --- |
+  | `{{ date format: "YYYY-MM-DD" offset: 1 }}` | a date in the instance's zone |
+  | `{{ tasks where: "due <= tomorrow or overdue" order: "priority, due" as: "list" }}` | the vault's `- [ ]` lines, as links to the notes they live on |
+  | `{{ recurring due: today }}` | §4's recurrence rules |
+  | `{{ calendar day: tomorrow }}` | the eventkit bridge's events for a day |
+  | `{{ work where: "blocked or waiting_on_me" }}` | the `work` rows a day needs |
+  | `{{ requests limit: 5 }}` | what is waiting on the owner |
+  | `{{ include "Me/Working Style.md#Prioritisation" }}` | a section of a vault file, spliced verbatim |
+  | `{{ prose "summarise yesterday in three lines" }}` | a slot the fold fills — fold templates only |
+  | `{{ section "Today" if_empty: "hide" }}` … `{{ /section }}` | a heading that vanishes when nothing is under it |
+  
+  What the engine cannot do is enforced by its shape rather than asked for in a
+  comment. `where:`/`order:` go through `compileTaskFilter` and leave as bind
+  params of one named query, so no directive can put text into SQL (invariant
+  3); `{{ work where: … }}` is a separate, tiny flag list over `day_work`'s
+  board states, refused outright on anything outside it, because one vocabulary
+  stretched over two tables would compile against one and mean nothing against
+  the other. `prose` never reaches a model here: it produces a bounded request object
+  the fold routine fulfils on the turn it already takes, and it is refused
+  outright in a template whose output the assistant may not write (D14).
+  `include` splices literal text and evaluates nothing inside it, so a template
+  that includes itself renders a note rather than looping. And a recurring rule
+  is materialised into a `- [ ] … ^mt-…` line only when the render's `source` is
+  the user's own hand; every routine gets the same rule as a proposal, because
+  no routine writes a task into a note you own (D4).
+  
+  Every failure is visible and none is fatal (§6.4): an unknown directive, a
+  `where:` the vocabulary refuses, an unreachable calendar, a query that is not
+  configured — each renders one `> ⚠️ metistry: …` line naming the template and
+  the line number, and the rest of the file still renders. A day with no plan
+  because the calendar was down is the worst possible outcome. A missing
+  template writes nothing at all and is reported as a configuration fact.
+  
+  Every rendered file ends with a provenance footer — the template, its sha256,
+  when it was rendered and by which engine — so "why does my plan look like
+  that" has an answer that names a file. Output is capped
+  (`METISTRY_TEMPLATE_MAX_BYTES`, 16 KB) and truncates with the fold's own
+  `…and N more`.
+  
+  `metistry templates check [<file>]` validates every file in the vault's
+  `Templates/` and prints each finding as `path:line  message`. It reads nothing
+  but the files — no database, no calendar, no vault lookups — so it answers on
+  a laptop with nothing running, which is what §6.5 needs: a template change
+  takes effect at the next run, and this is how you find out before the run
+  does.
+- Updated dependencies [4a778f9]
+- Updated dependencies [4f43f9c]
+- Updated dependencies [9c9da4a]
+- Updated dependencies [1bf5c76]
+- Updated dependencies [b6586de]
+- Updated dependencies [579662f]
+- Updated dependencies [57ceb02]
+- Updated dependencies [45b64df]
+- Updated dependencies [9ec30d5]
+- Updated dependencies [7f9ceb7]
+- Updated dependencies [23cc47f]
+  - @foldedspacelabs/metistry-core@0.11.0
+
 ## 0.10.0
 
 ### Minor Changes

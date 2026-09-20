@@ -15,6 +15,7 @@ one *principal*.
 | **Local owner token** | `Authorization: Bearer $METISTRY_LOCAL_OWNER_TOKEN`, from this machine | `user` | everything except the two session-bound endpoints below |
 | Host-minted owner token | `Authorization: Bearer …` (an `owner_tokens` row) | `owner_token` | `/capture`, `/message`, `/api/status`, named queries — never management |
 | Agent token | `Authorization: Bearer …` (an `agents` row) | that agent | `/capture` and the mcp-brain mount at `/mcp`; a uniform 403 everywhere else |
+| Crew run token | `Authorization: Bearer …` (an `agents` row, `kind = 'crew'`) | that crew | the same, narrowed to the tool groups its manifest names ([crews.md](crews.md)) |
 
 A passkey session and the local owner token are the **same principal**, in
 the same code path — `isUser()` in `apps/console/src/server.ts` is the one
@@ -41,8 +42,39 @@ a reviewable diff rather than a string edited inside a handler.
 
 Where the grants themselves live has not moved: registry rows for external
 agents, the environment for the instance's own assistant, the manifest for a
-crew. `may()` decides; it never writes, and every widening still goes
-through the console's one grants door and its one audit row (invariant 2).
+crew. Which of the three a row came from is now recorded ON the row
+(`agents.grant_source`, migration 0025) rather than re-derived from its kind
+in three files. `may()` decides; it never writes, and every widening still
+goes through the console's one grants door and its one audit row
+(invariant 2).
+
+## Five roles, and the one that carries a toolset
+
+A credential maps onto one of five roles — `owner`, `assistant`, `agent`,
+`crew`, `tool` — and `agents.kind` is what distinguishes the three that
+arrive as a bearer. The column has stored `external`, `internal` and `crew`
+since Phase 5; since migration 0025 a CHECK says so, and the console passes
+the row's value through instead of collapsing anything that is not
+`internal` to `external`.
+
+That matters for one rule. A crew is a sub-agent defined by a manifest in
+the instance repo, and its manifest names the **tool groups** it may use
+(`uses:`). Until 2026-09-20 that list was applied by the process that
+dispatched the run — real, because the run's bearer is minted per run and held by that
+process alone, but a process boundary rather than the tool. Now the crew's
+`uses` rides on the principal, resolved server-side from the loaded
+manifest, and `/mcp` refuses every call outside it before the tool body runs:
+
+```json
+{ "error": { "code": "forbidden",
+             "message": "tasks_comment is not in this crew's toolset — writer holds knowledge, requests (`uses:` in its manifest, …)" } }
+```
+
+The refusal is one `runs` row on the crew's own id, and the caller's own
+allowlist stays in place as defence in depth. Nothing in a request can
+change any of it: the kind comes from the row, the toolset from the
+manifest, and neither is a parameter of any tool ([crews.md](crews.md),
+`packages/mcp-brain/test/crew-uses.test.ts`).
 
 ## The local owner token
 

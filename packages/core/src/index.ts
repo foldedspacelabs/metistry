@@ -72,6 +72,7 @@ export {
   resolveInstanceLayout,
   seedFile,
   statePath,
+  validAgentAreaGrant,
   validAreaPrefix,
   type InstanceLayoutShape,
   type InstancePathKey,

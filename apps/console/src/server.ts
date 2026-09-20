@@ -18,7 +18,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 
-import { AREA_PREFIX_REFUSAL, runCheck, startRun, finishRun, errorEnvelope, intEnv, parseAction, PROJECT_SLUG_RE, rollSession, statusFor, SKIP_FEEDBACK, validAreaPrefix, type CheckResult, type Compute, type ErrorEnvelope } from "@foldedspacelabs/metistry-core";
+import { AREA_PREFIX_REFUSAL, runCheck, startRun, finishRun, errorEnvelope, intEnv, parseAction, PROJECT_SLUG_RE, rollSession, statusFor, SKIP_FEEDBACK, validAgentAreaGrant, type CheckResult, type Compute, type ErrorEnvelope } from "@foldedspacelabs/metistry-core";
 import { QueryError, QueryStore } from "@foldedspacelabs/metistry-queries";
 import { captureToInbox, createBrainServer, dirSink, type CaptureSink, type KnowledgeLister, type KnowledgeReader, type KnowledgeVaultSearcher, type KnowledgeWriter, type QueryEmbedder } from "@foldedspacelabs/metistry-mcp-brain";
 import { TasksError, TasksService } from "@foldedspacelabs/metistry-tasks";
@@ -1316,24 +1316,31 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       // validated here with the grant validator's own rule, so the narrowing
       // gesture cannot smuggle in a shape the form would have refused.
       const area = verb === "accept_with_changes" ? (typeof body.area === "string" ? body.area.trim() : "") : asked;
-      if (verb === "accept_with_changes" && !validAreaPrefix(area)) {
+      if (verb === "accept_with_changes" && !validAgentAreaGrant(area)) {
         return { status: statusFor("invalid_request"), body: errorEnvelope("invalid_request", `revising an access request means granting a different area: send {"area": "…"} with it — ${AREA_PREFIX_REFUSAL}. To refuse it outright, Decline.`) };
       }
       const target = String(row.source_agent);
       const current = (await agents.listAgents(db)).find((a) => a.id === target && !a.revoked);
-      // A row whose grants are CONFIGURATION cannot be widened from here: an
-      // internal row is re-synced from the environment on every console start
-      // and a crew row from its manifest on every crew sync, so an approval
-      // would vanish at the next one — and the owner would believe they had
-      // granted it. `request_access` refuses an internal principal at the tool
-      // and no crew's allowlist carries it (core's CREW_NEVER_TOOLS); this is
-      // the same rule at the door where the grant would actually move.
-      if (current && current.kind !== "external") {
+      // A CREW's scope is its manifest, re-read on every crew sync, so an
+      // approval here would vanish at the next one and the owner would
+      // believe they had granted it. No crew's allowlist carries the tool
+      // (core's CREW_NEVER_TOOLS); this is the same rule at the door where
+      // the grant would actually move.
+      //
+      // An INTERNAL row is no longer in that set (ruled 2026-09-19 B: "the
+      // assistant should be able to ask"). Its configured grants are still
+      // replaced at every start — but an approval is now RECORDED beside them
+      // (`recordGrantOverride`, migration 0023) and merged back on the way in,
+      // so the widening survives the re-sync instead of being quietly undone.
+      //
+      // Written as "anything that is neither external nor internal" rather
+      // than "crew" so a kind added later is refused until somebody decides
+      // where ITS scope comes from.
+      if (current && current.kind !== "external" && current.kind !== "internal") {
         await audit("triage", "access_request", false, { proposal: row.id, agent: target, error: "configured_scope" });
-        const where = current.kind === "internal" ? "METISTRY_ASSISTANT_AREAS in your .env" : `its manifest (\`scope:\` in agents/<area>/${target}.md)`;
         return {
           status: statusFor("forbidden"),
-          body: errorEnvelope("forbidden", `${target}'s scope is configuration, not a grant: it is re-synced from ${where}, so approving this would be undone at the next start. Decline this request and edit that file (docs/ops/actions.md).`),
+          body: errorEnvelope("forbidden", `${target}'s scope is configuration, not a grant: it is re-synced from its manifest (\`scope:\` in agents/<area>/${target}.md), so approving this would be undone at the next crew sync. Decline this request and edit that file (docs/ops/actions.md).`),
         };
       }
       if (!current) {
@@ -1347,8 +1354,17 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         return { status: statusFor("not_found"), body: errorEnvelope("not_found", `${target} is revoked or no longer registered — there is nothing to widen. Decline or Skip this request.`) };
       }
       try {
-        const { ok, grants } = await writeGrants(target, agents.widenedGrants(current.grants, area), "triage", { proposal: row.id, area, ...(area === asked ? {} : { asked }) });
+        const widened = agents.widenedGrants(current.grants, area);
+        const { ok, grants } = await writeGrants(target, widened, "triage", { proposal: row.id, area, ...(area === asked ? {} : { asked }) });
         if (!ok) return { status: statusFor("not_found"), body: errorEnvelope("not_found", `${target} is revoked or no longer registered — there is nothing to widen. Decline or Skip this request.`) };
+        // For a row whose grants come back from configuration at every start,
+        // the write above holds until the next restart and no further: the
+        // approval itself is the durable record (0023), merged on top of the
+        // configured areas by `ensureInternalAgent`. Recorded only when it
+        // actually widened — an area a configured prefix already covers is
+        // not an approval to carry forward, it is a no-op.
+        const added = widened.areas.length > (current.grants.tier === "areas" ? current.grants.areas.length : 0);
+        if (current.kind === "internal" && added) await agents.recordGrantOverride(db, target, area, Number(row.id));
         granted = { agent: target, area, grants };
       } catch (err) {
         if (err instanceof agents.AgentError) {

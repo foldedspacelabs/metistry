@@ -5,8 +5,8 @@
 //
 // What this proves the tool CANNOT do, which is most of what it is for:
 // grant anything, write a row for a crafted prefix, write two rows for one
-// pending ask, or be called at all by the principal whose scope is
-// configuration rather than a grant.
+// pending ask, re-queue an ask the owner has already declined, or ask a
+// third time once they have declined it twice.
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -136,20 +136,74 @@ describe.skipIf(!hasDb)("request_access on /mcp (real db, real MCP client)", () 
     expect((await rowsFor(AGENT)).filter((x) => x.payload.area === AREA)).toHaveLength(1);
   });
 
-  it("dedupe is per (agent, area) and only while PENDING: another agent, another area, and an answered ask each get their own row", async () => {
+  it("dedupe is per (agent, area): another agent and another area each get their own row", async () => {
     const other = await once("tok-other", "request_access", { area: AREA, reason: "a different agent wants the same area" });
     expect(other.body.replayed).toBeUndefined();
     expect(await rowsFor(OTHER)).toHaveLength(1);
 
     const second = await once("tok-index", "request_access", { area: "Areas/Access/Deeper", reason: "a narrower one" });
     expect(second.body.replayed).toBeUndefined();
+  });
 
-    // Once the owner has answered, asking again is a NEW question — the world
-    // moved, or the reason did — and it gets a row of its own.
-    await pool.query(`UPDATE proposals SET decision = 'deny', decided_at = now() WHERE kind = $2 AND source_agent = $1 AND payload->>'area' = $3`, [AGENT, ACCESS_REQUEST_KIND, AREA]);
-    const afterDeny = await once("tok-index", "request_access", { area: AREA, reason: "asking again now that things changed" });
-    expect(afterDeny.body.replayed).toBeUndefined();
-    expect((await rowsFor(AGENT)).filter((x) => x.payload.area === AREA)).toHaveLength(2);
+  // Ruled 2026-09-19 (C): a decline is an answer the agent had no way to
+  // read — nothing on this surface reads an agent's own proposals — so the
+  // tool hands it over when the ask is repeated, with the one way forward
+  // attached, and the ladder stops at two.
+  it("after a Decline the re-ask ANSWERS with the decision and the owner's note, and writes no second row", async () => {
+    await pool.query(`UPDATE proposals SET decision = 'deny', feedback = $4, decided_at = now() WHERE kind = $2 AND source_agent = $1 AND payload->>'area' = $3`, [
+      AGENT,
+      ACCESS_REQUEST_KIND,
+      AREA,
+      "not that folder — it has client material in it",
+    ]);
+    const before = (await rowsFor(AGENT)).filter((x) => x.payload.area === AREA).length;
+
+    const again = await once("tok-index", "request_access", { area: AREA, reason: "asking again now that things changed" });
+    expect(again.isError).toBe(true);
+    expect(again.body.error.code).toBe("forbidden");
+    expect(again.body).toMatchObject({ reason: "declined", area: AREA, may_escalate: true, note: "not that folder — it has client material in it" });
+    expect(again.body.decided_at).toEqual(expect.any(String));
+    expect(again.body.error.message).toContain("escalate");
+    expect((await rowsFor(AGENT)).filter((x) => x.payload.area === AREA)).toHaveLength(before); // answered, not re-queued
+  });
+
+  it("`escalate: true` after a decline writes ONE new row, flagged, naming the row the owner already answered", async () => {
+    const declined = (await rowsFor(AGENT)).filter((x) => x.payload.area === AREA && x.decision === "deny").at(-1)!;
+    const esc = await once("tok-index", "request_access", { area: AREA, reason: "escalating: the task the owner assigned cannot be finished without the intake note in there", escalate: true });
+    expect(esc.isError).toBe(false);
+    expect(esc.body).toMatchObject({ area: AREA, escalated: true });
+    const row = (await rowsFor(AGENT)).find((x) => Number(x.id) === Number(esc.body.id))!;
+    expect(row.decision).toBe("pending");
+    expect(row.payload).toMatchObject({ escalated: true, prior_proposal: Number(declined.id), title: expect.stringContaining("asks again") });
+
+    // still ONE open escalation per (agent, area): the pending dedupe is the
+    // rate limit, and it does not care that the caller said `escalate` again
+    const dup = await once("tok-index", "request_access", { area: AREA, reason: "and again", escalate: true });
+    expect(dup.body).toMatchObject({ id: esc.body.id, replayed: true });
+    expect((await rowsFor(AGENT)).filter((x) => x.payload.area === AREA && x.decision === "pending")).toHaveLength(1);
+  });
+
+  it("two declines close it: the third ask is refused at the tool and sent to the owner in words", async () => {
+    await pool.query(`UPDATE proposals SET decision = 'deny', decided_at = now() WHERE kind = $2 AND source_agent = $1 AND payload->>'area' = $3 AND decision = 'pending'`, [AGENT, ACCESS_REQUEST_KIND, AREA]);
+    const before = (await rowsFor(AGENT)).filter((x) => x.payload.area === AREA).length;
+
+    for (const args of [{ area: AREA, reason: "a third time" }, { area: AREA, reason: "a third time, escalated", escalate: true }]) {
+      const r = await once("tok-index", "request_access", args);
+      expect(r.isError, JSON.stringify(args)).toBe(true);
+      expect(r.body.error.code, JSON.stringify(args)).toBe("rate_limited");
+      expect(r.body).toMatchObject({ reason: "declined_twice", area: AREA });
+      expect(r.body.error.message).toContain("requests_create"); // the way left is words, to the owner
+    }
+    expect((await rowsFor(AGENT)).filter((x) => x.payload.area === AREA)).toHaveLength(before);
+  });
+
+  it("an `escalate` with nothing declined behind it is an ordinary ask — the flag comes from the record, never the caller", async () => {
+    const r = await once("tok-index", "request_access", { area: "Areas/Access/Fresh", reason: "first ask, flagged by a caller that guessed", escalate: true });
+    expect(r.isError).toBe(false);
+    expect(r.body.escalated).toBeUndefined();
+    const row = (await rowsFor(AGENT)).find((x) => x.payload.area === "Areas/Access/Fresh")!;
+    expect(row.payload.escalated).toBeUndefined();
+    expect(row.payload.prior_proposal).toBeUndefined();
   });
 
   it("a crafted area is refused at the tool — the same rule the grants validator uses, so nothing can be asked for that could not be granted", async () => {
@@ -189,10 +243,20 @@ describe.skipIf(!hasDb)("request_access on /mcp (real db, real MCP client)", () 
     expect((await rowsFor(AGENT)).length).toBe(before);
   });
 
-  it("an INTERNAL principal is refused and told where its scope actually lives — an approved ask would silently revert at the next restart", async () => {
-    const r = await once("tok-internal", "request_access", { area: "Areas/Anything", reason: "the assistant asking" });
-    expect(r).toMatchObject({ isError: true, body: { error: { code: "forbidden", message: expect.stringContaining("METISTRY_ASSISTANT_AREAS") } } });
-    expect(await rowsFor(ASSISTANT)).toHaveLength(0);
+  it("an INTERNAL principal may ask too (ruled 2026-09-19 B) — and it still grants nothing", async () => {
+    // The assistant used to be refused here, because an approval would have
+    // been reverted by the next console start. It no longer is: an approved
+    // widening for an internal row is recorded in `agent_grant_overrides`
+    // and merged back on start (apps/console). The tool's half is simply
+    // that the row is written like anyone else's.
+    const r = await once("tok-internal", "request_access", { area: "Areas/Anything", reason: "the assistant asking for the one folder it was narrowed out of" });
+    expect(r.isError).toBe(false);
+    const rows = await rowsFor(ASSISTANT);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ decision: "pending", trust: "external" });
+    expect(rows[0]!.payload).toMatchObject({ area: "Areas/Anything", current_tier: "areas" });
+    // …and nothing about a grant moved: the owner still answers it
+    expect((await pool.query(`SELECT count(*)::int AS n FROM runs WHERE kind = 'agent_admin' AND meta->>'agent' = $1`, [ASSISTANT])).rows[0]!.n).toBe(0);
   });
 
   it("every call is one `runs` row, refusals included — a safety mechanism that leaves no trace is not one", async () => {

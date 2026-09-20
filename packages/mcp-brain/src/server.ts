@@ -332,19 +332,26 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
 
     // Grants nothing: one row in the owner's queue, and they widen the grant
     // themselves (access.ts). Deliberately offered at EVERY tier, tier `none`
-    // included — an agent that can be refused is an agent that may ask.
+    // included — an agent that can be refused is an agent that may ask — and
+    // to every principal since the 2026-09-19 ruling, the assistant included.
+    // The ladder (decline → escalate once → ask in words) is enforced in
+    // access.ts, so the description states it rather than pleading for it.
     reg(
       "request_access",
-      "Ask the owner for read access to one vault area (TitleCase prefix, e.g. Areas/Health) and say why. Grants nothing: it raises one request in their Needs You queue to approve, narrow or decline. A repeat ask returns the pending one; after an approval the read simply works. External agents only.",
+      "Ask the owner for read access to one vault area (TitleCase prefix, e.g. Areas/Health) and say why. Grants nothing: it raises one request in their Needs You queue to approve, narrow or decline. A repeat ask returns the pending one; after an approval the read simply works; after a decline you are told so, and may ask once more with escalate.",
       {
         area: z.string().min(1).max(200).describe("The vault prefix you need, e.g. Areas/Health."),
         reason: z.string().min(1).max(1000).describe("Why you need it — what you were doing when you were refused."),
+        escalate: z.boolean().optional().describe("Only after a decline: ask again, flagged, with a fuller reason."),
       },
       async (a) => {
         const r = await requestAccess(db, principal, a);
         return r.ok
-          ? done({ id: r.id, area: r.area, ...(r.replayed ? { replayed: true } : {}), decided_by: "the owner, in Needs You" }, { proposal_id: r.id, area: r.area, replayed: r.replayed })
-          : fail(r.code, r.message);
+          ? done(
+              { id: r.id, area: r.area, ...(r.replayed ? { replayed: true } : {}), ...(r.escalated ? { escalated: true } : {}), decided_by: "the owner, in Needs You" },
+              { proposal_id: r.id, area: r.area, replayed: r.replayed, escalated: r.escalated },
+            )
+          : fail(r.code, r.message, { area: a.area, ...(a.escalate ? { escalate: true } : {}) }, r.expose);
       },
     );
 

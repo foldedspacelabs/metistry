@@ -18,6 +18,7 @@ import {
   isProtectedPath,
   isVaultPath,
   MAX_AREA_PREFIX_LEN,
+  validAgentAreaGrant,
   validAreaPrefix,
   VAULT_ROOT_AREA,
   metistryPath,
@@ -176,18 +177,40 @@ describe("validAreaPrefix", () => {
     expect(validAreaPrefix("A".repeat(MAX_AREA_PREFIX_LEN + 1))).toBe(false);
   });
 
-  it("refuses the machinery and Artifacts — a TitleCase name is not enough to be knowledge", () => {
-    // `.metistry/` cannot even be spelled (it is not TitleCase); `Artifacts/`
-    // can, which is exactly why `isVaultPath` is part of the rule: granting it
-    // would be an inert grant that reads like a real one.
-    for (const a of [".metistry", ".metistry/state", "Artifacts", "Artifacts/Reports", "CLAUDE.md", "README.md"]) {
-      expect(validAreaPrefix(a), a).toBe(false);
-    }
+  it("is the SHAPE alone: `Artifacts/Reports` is a vault prefix, and saying otherwise narrowed the owner", () => {
+    // Ruled 2026-09-19 (D): "the owner should always have access to
+    // everything … dropping artifacts from the owner's access isn't right."
+    // `Artifacts/` is the owner's own directory; what it is NOT is an area an
+    // agent may be granted, and that is the next predicate's sentence to say,
+    // not this one's.
+    for (const a of ["Artifacts", "Artifacts/Reports"]) expect(validAreaPrefix(a), a).toBe(true);
   });
 
   it("refuses the bare vault: `/` is a grant only an internal row is offered, and it is not an AREA", () => {
     expect(validAreaPrefix(VAULT_ROOT_AREA)).toBe(false);
     expect(AREA_PREFIX_REFUSAL).toContain("TitleCase");
+  });
+});
+
+// The AGENT's half of the rule — the shape, plus "a read path would actually
+// serve it". Both doors that type an agent's grant call THIS one.
+describe("validAgentAreaGrant", () => {
+  it("is the shape plus knowledge: every prefix the shape accepts, minus what no agent read path serves", () => {
+    for (const a of ["Areas", "Areas/Fsl", "Me", "Journal"]) expect(validAgentAreaGrant(a), a).toBe(true);
+    for (const a of ["areas", "/Areas", "..", "Areas/../Other", "", 7, null, undefined]) expect(validAgentAreaGrant(a), JSON.stringify(a)).toBe(false);
+    expect(validAgentAreaGrant(VAULT_ROOT_AREA)).toBe(false);
+  });
+
+  it("refuses the machinery and `Artifacts/` — an agent grant there would be inert", () => {
+    // `.metistry/` cannot even be spelled (it is not TitleCase); `Artifacts/`
+    // can, which is exactly why `isVaultPath` is part of THIS rule: every
+    // read path an agent has refuses it, so granting it would read in the
+    // registry like access and give none. The owner's own access to the same
+    // directory is the artifacts door and is untouched — the assertion above
+    // is the other half of this one.
+    for (const a of [".metistry", ".metistry/state", "Artifacts", "Artifacts/Reports", "CLAUDE.md", "README.md"]) {
+      expect(validAgentAreaGrant(a), a).toBe(false);
+    }
   });
 });
 

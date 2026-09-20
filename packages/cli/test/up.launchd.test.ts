@@ -48,6 +48,9 @@ assignments:
 const env = (instance: string): NodeJS.ProcessEnv => ({
   METISTRY_INSTANCE_DIR: instance,
   METISTRY_DB_PASSWORD: "pw",
+  // already minted, so these command lists stay about plists and Postgres —
+  // the mint itself is up.test.ts's own case
+  METISTRY_BRIDGE_TOKEN_RECONCILER_USER: "owner-bearer",
   METISTRY_ORIGIN: "https://studio.ts.net",
   METISTRY_ASSISTANT_TOKEN: "tok",
   METISTRY_OPENROUTER_API_KEY: "sk-or-x",
@@ -389,6 +392,17 @@ describe("the rendered plists", () => {
       METISTRY_EK_URL: "http://127.0.0.1:7811",
       METISTRY_INBOX_DIR: `${I}/Inbox`,
     });
+    // …and NOT the vault bridge's owner bearer, which is in this install's
+    // `.env` (env(I) above) and is the one credential that may write
+    // `.metistry/`. The console's environment is otherwise a passthrough, so
+    // this is the whole of the credential split on the launchd shape — and
+    // the supervisor, which spawns it, must not hold it either.
+    expect(child("console").env.METISTRY_BRIDGE_TOKEN_RECONCILER_USER).toBeUndefined();
+    expect(config.env.METISTRY_BRIDGE_TOKEN_RECONCILER_USER).toBeUndefined();
+    expect(JSON.stringify(config.children.filter((c: { name: string }) => c.name !== "reconciler"))).not.toContain("owner-bearer");
+    // the reconciler needs BOTH, and gets them the way it always has: it
+    // sources the instance's `.env` itself, outside the sandbox
+    expect(child("reconciler").argv.join(" ")).toContain(`. '${I}/.metistry/state/.env'`);
 
     const assistant = child("assistant");
     expect(JSON.stringify(assistant)).not.toMatch(/__[A-Z][A-Z0-9_]*__/);
@@ -487,7 +501,7 @@ describe("the rendered plists", () => {
     const exec = fakeExec();
     await up({
       productDir: P,
-      env: { HOME: home },
+      env: { HOME: home, METISTRY_BRIDGE_TOKEN_RECONCILER_USER: "owner-bearer" },
       exec,
       out: () => {},
       platform: "darwin",

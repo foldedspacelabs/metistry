@@ -16,7 +16,14 @@ import { loadPlistTemplates } from "../src/launchd.js";
 import { checkout, failDoctor, fakeExec, HELPER, okDoctor, put, RECONCILER, shown, WATCHDOG } from "./fixtures.js";
 
 const NOW = new Date("2026-09-07T15:00:00Z");
-const BRIDGE = { METISTRY_RECONCILER_URL: "http://host.docker.internal:7812", METISTRY_BRIDGE_TOKEN_RECONCILER: "tok" };
+// Both bearers: the console's (which the CLI no longer uses for a protected
+// path) and the OWNER's, which is what `metistry.lock` is written with since
+// 2026-09-20. An install that has neither has one minted — its own case below.
+const BRIDGE = {
+  METISTRY_RECONCILER_URL: "http://host.docker.internal:7812",
+  METISTRY_BRIDGE_TOKEN_RECONCILER: "tok",
+  METISTRY_BRIDGE_TOKEN_RECONCILER_USER: "owner-tok",
+};
 // cli-shim.test.ts covers the shim itself; disabled here so the rest of this
 // file's exact command lists are not about a feature they are not testing.
 const base = (P: string, env: NodeJS.ProcessEnv = {}) => ({ productDir: P, env, platform: "darwin" as const, uid: 501, version: "0.0.9", now: NOW, out: () => {}, cliShim: false });
@@ -126,10 +133,12 @@ describe("metistry update", () => {
     expect(session.ended).toBe(true);
     expect(r.migrations).toMatchObject({ applied: ["0001_a.sql", "0002_b.sql"], skipped: [], recorded: ["0001_a.sql", "0002_b.sql"] });
 
-    // the lock: through the bridge, principal user, the documented message, the documented shape
+    // the lock: through the bridge, on the OWNER bearer (the console's `tok`
+    // is not a fallback for a §4.7 path), principal user, the documented
+    // message, the documented shape
     expect(f.calls.length).toBe(1);
     expect(f.calls[0]!.url).toBe("http://127.0.0.1:7812/vault/write");
-    expect((f.calls[0]!.init.headers as Record<string, string>).authorization).toBe("Bearer tok");
+    expect((f.calls[0]!.init.headers as Record<string, string>).authorization).toBe("Bearer owner-tok");
     const body = JSON.parse(String(f.calls[0]!.init.body)) as { path: string; content: string; intent: unknown };
     expect(body.path).toBe(".metistry/metistry.lock");
     expect(body.intent).toEqual({ principal: "user", message: "metistry update → 0.0.9" });
@@ -203,11 +212,20 @@ describe("metistry update", () => {
     expect(r2.code).toBe(1);
     expect(lines.join("\n")).toContain(`did not answer (fetch failed) — start it (launchctl kickstart -k gui/501/${RECONCILER})`);
 
-    const noToken = fakeFetch();
-    const r3 = await update({ ...base(P, { METISTRY_RECONCILER_URL: BRIDGE.METISTRY_RECONCILER_URL }), out: (l) => lines.push(l), exec: fakeExec(), skipBuild: true, skipMigrate: true, fetchFn: noToken.fn, doctorFn: okDoctor });
-    expect(r3.code).toBe(1);
-    expect(noToken.calls).toEqual([]);
-    expect(lines.join("\n")).toContain("METISTRY_BRIDGE_TOKEN_RECONCILER is not");
+    // A URL, the console's bearer, and no owner bearer: the lock is a §4.7
+    // protected path, so the console's bearer is not a fallback — the CLI
+    // mints an owner one first (there is a .env to mint it into) and the POST
+    // carries THAT. This is the migration, and it is why an install that
+    // predates the split needs to be told nothing.
+    const minted = fakeFetch();
+    const noOwner = { METISTRY_RECONCILER_URL: BRIDGE.METISTRY_RECONCILER_URL, METISTRY_BRIDGE_TOKEN_RECONCILER: "tok" };
+    const r3 = await update({ ...base(P, noOwner), out: (l) => lines.push(l), exec: fakeExec(), skipBuild: true, skipMigrate: true, fetchFn: minted.fn, mintOwnerToken: () => "fresh-owner", doctorFn: okDoctor });
+    expect(r3.code).toBe(0);
+    expect((minted.calls[0]!.init.headers as Record<string, string>).authorization).toBe("Bearer fresh-owner");
+    expect(lines.join("\n")).toContain("METISTRY_BRIDGE_TOKEN_RECONCILER_USER minted");
+    // …and the reconciler is kickstarted for it, because a bearer it has not
+    // read is not a bearer
+    expect(lines.join("\n")).toContain("so it reads the freshly minted METISTRY_BRIDGE_TOKEN_RECONCILER_USER");
   });
 
   it("without a bridge: a local instance dir gets the lock written directly (and read back); a running reconciler with no URL is refused; no instance dir writes nothing", async () => {

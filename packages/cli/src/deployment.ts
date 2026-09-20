@@ -160,11 +160,32 @@ export function dbPort(env: NodeJS.ProcessEnv): number {
   return Number.isNaN(n) ? DB_DEFAULT_PORT : n;
 }
 
-/** Everything in the install's environment that belongs to Metistry, with every URL resolved for a host process. */
+/**
+ * The passthrough's ONE exception, and what makes the credential split real.
+ *
+ * `METISTRY_BRIDGE_TOKEN_RECONCILER_USER` is the bearer the vault bridge
+ * treats as the owner's hand — the only credential that may write a §4.7
+ * protected path (apps/reconciler/src/paths.ts). The CLI holds it because the
+ * CLI *is* the person: it runs as them and reads their 0600 `.env`. The
+ * console is a long-running process that terminates the network, multiplexes
+ * every agent on this install and fronts the assistant's whole tool surface;
+ * handing it that bearer would leave the split existing in the variable names
+ * and nowhere else.
+ *
+ * A denylist rather than an allowlist because `consoleEnv` is deliberately a
+ * passthrough (the console is the component that talks to everything, and
+ * docker-compose.yml enumerates the same set): this is the honest translation
+ * of "the console gets the install's environment", plus the one thing it must
+ * not be given. `docker-compose.yml` never listed the variable, so the
+ * compose shape needs no counterpart to this line.
+ */
+export const CONSOLE_ENV_DENY: readonly string[] = ["METISTRY_BRIDGE_TOKEN_RECONCILER_USER"];
+
+/** Everything in the install's environment that belongs to Metistry — minus `CONSOLE_ENV_DENY` — with every URL resolved for a host process. */
 function metistryVars(ctx: ShapeContext): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(ctx.env)) {
-    if (v === undefined || !k.startsWith("METISTRY_")) continue;
+    if (v === undefined || !k.startsWith("METISTRY_") || CONSOLE_ENV_DENY.includes(k)) continue;
     out[k] = k.endsWith("_URL") ? resolveUrl(v, { shape: ctx.shape, vantage: "host" }) : v;
   }
   return out;

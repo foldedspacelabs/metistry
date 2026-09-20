@@ -104,6 +104,7 @@ describe("metistry init", () => {
     expect(r.envLines).toEqual([
       `METISTRY_INSTANCE_DIR=${dir}`,
       `METISTRY_BRIDGE_TOKEN_RECONCILER=${MINTED}`,
+      `METISTRY_BRIDGE_TOKEN_RECONCILER_USER=${MINTED}`,
       "METISTRY_RECONCILER_URL=http://host.docker.internal:7812",
       "METISTRY_ORIGIN=http://127.0.0.1:8080", // required to start in either shape (apps/console/src/main.ts requireEnv)
       `METISTRY_LOCAL_OWNER_TOKEN=${MINTED}`, // the console's local owner door (docs/ops/auth.md)
@@ -248,6 +249,7 @@ describe("metistry init", () => {
     expect(launchd.envLines).toEqual([
       `METISTRY_INSTANCE_DIR=${dir}`,
       `METISTRY_BRIDGE_TOKEN_RECONCILER=${MINTED}`,
+      `METISTRY_BRIDGE_TOKEN_RECONCILER_USER=${MINTED}`,
       "METISTRY_RECONCILER_URL=http://127.0.0.1:7812",
       "METISTRY_ORIGIN=http://127.0.0.1:8080",
       `METISTRY_LOCAL_OWNER_TOKEN=${MINTED}`,
@@ -258,6 +260,7 @@ describe("metistry init", () => {
     expect(compose.envLines).toEqual([
       `METISTRY_INSTANCE_DIR=${composeDir}`,
       `METISTRY_BRIDGE_TOKEN_RECONCILER=${MINTED}`,
+      `METISTRY_BRIDGE_TOKEN_RECONCILER_USER=${MINTED}`,
       "METISTRY_RECONCILER_URL=http://host.docker.internal:7812",
       "METISTRY_ORIGIN=http://127.0.0.1:8080",
       `METISTRY_LOCAL_OWNER_TOKEN=${MINTED}`,

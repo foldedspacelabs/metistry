@@ -1,9 +1,13 @@
-# The console's door — who a request is allowed to be
+# The doors — who a request is allowed to be
 
-The console authenticates **every** request (invariant 8: the network is
-not a boundary, and every request authenticates as if internet-exposed).
-There are two credential *classes*, structurally distinct (review CRIT-7),
-and inside the owner class one *principal*.
+Two doors authenticate in this system, and this file is both: the **console's**
+(below) and the **vault bridge's** ("The principal comes from the credential",
+further down). Every request authenticates at each, as if internet-exposed
+(invariant 8: the network is not a boundary).
+
+The console authenticates **every** request. There are two credential
+*classes*, structurally distinct (review CRIT-7), and inside the owner class
+one *principal*.
 
 | Credential | Presented as | Principal | Reaches |
 | --- | --- | --- | --- |
@@ -161,6 +165,119 @@ end for the CLI, never a second implementation).
 icon, version, nothing the login page does not show — for a phone to name
 an instance before sign-in (`docs/ops/console-api.md`).
 
+## The principal comes from the credential
+
+*The vault bridge — `apps/reconciler` (docs/ops/reconciler.md). Ruled
+2026-09-20.*
+
+Every mutation through the bridge carries
+`intent: { principal, message, group? }`, and `principal` decides §4.7:
+`writeAllowed` admits `.metistry/**`, `CLAUDE.md` and `README.md` for the
+`user` principal alone. But `intent` is a field in a **request body**, and a
+body is written by whoever is calling. With one shared bearer, every holder of
+`METISTRY_BRIDGE_TOKEN_RECONCILER` could write `"principal": "user"` and
+rewrite `rules.yaml`, an agent definition, a named query, `metistry.lock` or
+the assistant's own instructions.
+
+Nothing did. That is not the same sentence as nothing can, and invariant 2 —
+"anything defining how the system behaves is a human change" — is worth only
+the stronger sentence.
+
+**The rule.** The bearer says what a caller IS; the body says whose name the
+commit is in, and never more than the bearer allows.
+
+| Credential | Caller class | May claim | May write a §4.7 protected path |
+| --- | --- | --- | --- |
+| `METISTRY_BRIDGE_TOKEN_RECONCILER_USER` | `owner` | `user`, and nothing else | **all of them** |
+| `METISTRY_BRIDGE_TOKEN_RECONCILER` | `console` | any principal | **only** `.metistry/assistant-prompt.md` and `.metistry/compute.yaml` |
+| anything else | — | 401, byte-identical for both | — |
+
+The table is `CALLER_AUTHORITY` in `apps/reconciler/src/paths.ts`, read on
+every write, delete and rename. A body that exceeds its credential is
+`403 forbidden` in the uniform envelope — **never** silently downgraded to a
+principal it did not ask for — and every refusal is a `runs` row
+(`component=reconciler, kind=auth`) carrying the caller class, the claimed
+principal and the path.
+
+**Who holds which.**
+
+- **`owner`** — `packages/cli`'s protected-path writer, and only it:
+  `metistry update` (the lock), `metistry deployment set-shape` /
+  `set-keep-awake`, `metistry compute`, `metistry instance` (minting
+  `instance_id` into `identity.yaml`). The CLI may hold it because the CLI
+  *is* the person: it runs as them and reads their login Keychain and their
+  0600 `.env`. The Mac app reaches these the way it always has, by running
+  the CLI (`metistry deployment set-shape --yes`), so nothing about the app
+  changes.
+- **`console`** — the console process and everything it fronts: captures
+  (`principal: capture`), artifacts (the author's principal), `mcp-brain`'s
+  `knowledge_write` (the agent's own id, stamped from the agent's credential),
+  routines, and the Compute pane. It writes as `user` for the owner's own
+  click, because it IS the multiplexer — and that claim now buys nothing
+  beyond the two paths below. The console's compute routes call the same
+  `writeProtected` the CLI does (one implementation, `packages/cli`), which
+  presents whichever bearer its process holds; the bridge, not the helper, is
+  what decides the answer.
+- **The assistant** holds neither. It reaches the vault through `mcp-brain` on
+  the console, whose `knowledge_write` refuses a protected path before the
+  bridge ever sees it (a second statement of the same rule, at the tool the
+  assistant actually holds).
+
+**The two enumerated exceptions**, which are the two owner-authenticated
+doors the console already ships (invariant 10: a closed, enumerated set, each
+one a product change to add):
+
+- `.metistry/assistant-prompt.md` — §4.10 self-modification. The owner allows
+  an `improvement` proposal in triage and the console appends the suggested
+  section to the prompt overlay as `user`
+  (`apps/console/src/prompt-overlay.ts`).
+- `.metistry/compute.yaml` — the Compute pane's two writes, `POST
+  /api/compute/assign` and `/budget`, gated on the `user` principal and
+  calling the same function `metistry compute` calls
+  (`apps/console/src/compute-routes.ts`). Without it the phone could see what
+  a turn cost and could not move it to a cheaper model, which is the gap that
+  route exists to close.
+
+Both are named in the bridge's table rather than left to the console's
+restraint, which is the point: `identity.yaml`, `rules.yaml`,
+`deployment.yaml`, `metistry.lock`, `queries/`, `agents/`, `routines/`,
+`targets/`, `extensions/`, `CLAUDE.md` and `README.md` are refused no matter
+what the console asks for or claims to be. Moving either door to the CLI
+shrinks the list; nothing grows it without a product change landing in that
+table.
+
+**The console never gets the owner bearer.** `consoleEnv`'s `CONSOLE_ENV_DENY`
+(`packages/cli/src/deployment.ts`) removes it by name from the otherwise
+wholesale `METISTRY_*` passthrough that becomes the console's launchd
+environment and the supervisor's, and `docker-compose.yml` never listed it. A
+misuse test asserts both.
+
+### Minting it, and what an existing install does
+
+`metistry init` mints both bearers into the new instance's `.env`. For an
+install that predates the split, three things mint the missing one, and all
+three are idempotent:
+
+- **`metistry up`** — before it renders any job, so the reconciler it
+  (re)starts is holding it.
+- **`metistry update`** — at the top of its restart step, for the same
+  reason, and it kickstarts the reconciler itself if nothing else in the run
+  did. This is why an update needs no instructions: the owner runs the verb
+  they were going to run.
+- **`metistry secrets sync --to env`** — it is in `GENERATED_SECRETS`, like
+  `METISTRY_LOCAL_OWNER_TOKEN`. Follow it with `metistry restart reconciler`.
+
+On macOS it lands in the login Keychain and in `.env`; elsewhere `.env` is the
+store, as it is for every secret.
+
+**Until it exists, the bridge fails closed**: *no* caller may write a
+protected path, `metistry doctor`'s `reconciler` row is `degraded` with the
+command that fixes it, and the CLI refuses before it makes a call rather than
+falling back to the shared bearer. Rotation is `metistry secrets mint
+METISTRY_BRIDGE_TOKEN_RECONCILER_USER` followed by `metistry restart
+reconciler` — the environment is the record, so the old value stops working
+the moment the job restarts.
+
 ## Passkeys: origins
 
 `METISTRY_ORIGIN` is the canonical HTTPS origin passkeys bind to. It may be
@@ -198,3 +315,7 @@ misconfigured install stops looking like a broken one.
   `docs/ops/capture-shortcut.md`): `UPDATE owner_tokens SET revoked_at =
   now() WHERE label = '…'`.
 - **An agent token:** the agents tab, or `POST /api/agents/<id>/revoke`.
+- **The vault bridge's owner bearer:** `metistry secrets mint
+  METISTRY_BRIDGE_TOKEN_RECONCILER_USER`, then `metistry restart reconciler`.
+  Same story as the local owner token: no revocation list, because the
+  environment is the record.

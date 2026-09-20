@@ -55,6 +55,91 @@ export const PRINCIPAL_RE = /^[a-z][a-z0-9-]{0,39}$/;
 /** The one principal allowed to change how the system behaves (§4.7). */
 export const USER_PRINCIPAL = "user";
 
+// ---- the caller's authority, which comes from the CREDENTIAL ----------------
+//
+// `intent.principal` is a field in the request body, and a body is written by
+// whoever is calling. Until 2026-09-20 it was also the whole of the §4.7
+// check: a caller that wrote `"principal": "user"` got the user's authority
+// over `.metistry/`, so every holder of the one shared bearer — the console,
+// which multiplexes every agent on this install, as much as the owner's CLI —
+// COULD rewrite `rules.yaml`, an agent definition, a named query or
+// `CLAUDE.md`. Nothing did. That is not the same sentence as nothing can
+// (owner's ruling, 2026-09-20).
+//
+// So the bridge now reads two things per mutation, and only one of them comes
+// from the body:
+//
+//   the CREDENTIAL says what this caller IS      → CallerClass
+//   the BODY says whose name the commit is in    → intent.principal
+//
+// The second is attribution and is bounded by the first; the first is
+// authority and cannot be spoken. `docs/ops/auth.md` states the rule.
+
+/** Which bearer a request presented, and therefore what it may do. */
+export type CallerClass =
+  /** `METISTRY_BRIDGE_TOKEN_RECONCILER_USER` — the local owner's hand: the CLI's protected-path writer (`metistry update`, `deployment set-shape`, …). */
+  | "owner"
+  /** `METISTRY_BRIDGE_TOKEN_RECONCILER` — the console, and everything it fronts: the assistant's `knowledge_write`, captures, artifacts, routines. */
+  | "console";
+
+export interface CallerAuthority {
+  /** The `intent.principal` values this credential may claim. `"any"` = the multiplexer's whole range — the console stamps the principal from ITS own authenticated caller. */
+  principals: "any" | readonly string[];
+  /** The §4.7 protected paths this credential may write: `"all"`, or an enumerated set (possibly empty). */
+  protectedPaths: "all" | readonly string[];
+}
+
+/**
+ * The whole authority table, in one place a reviewer can read in ten seconds.
+ *
+ * **owner** — minted for the CLI alone and deliberately kept out of the
+ * console's environment (`consoleEnv`'s denylist, packages/cli/src/deployment.ts).
+ * It may claim `user` and nothing else: a leaked owner bearer must not be able
+ * to forge an agent into the git record either.
+ *
+ * **console** — may claim any principal, because it IS the multiplexer: it
+ * writes as `user` for the owner's own click (a capture, an artifact version,
+ * a comment), as `assistant`, and as `agent:<id>` for a crew. What it may not
+ * do is change how the system behaves — except on exactly TWO paths, which
+ * are the two owner-authenticated doors the console already ships (invariant
+ * 10: a closed, enumerated set, each one a product change to add):
+ *
+ *   `.metistry/assistant-prompt.md` — §4.10 self-modification. The owner
+ *   allows an `improvement` proposal in triage and the console appends the
+ *   suggested section to the prompt overlay as `user`
+ *   (apps/console/src/prompt-overlay.ts).
+ *
+ *   `.metistry/compute.yaml` — the Compute pane's two writes,
+ *   `POST /api/compute/assign` and `/budget`, gated on the `user` principal
+ *   and calling the SAME function `metistry compute` calls
+ *   (apps/console/src/compute-routes.ts). Without this the phone could see
+ *   what a turn cost and could not move it to a cheaper model, which is the
+ *   gap that route exists to close.
+ *
+ * Both are listed HERE rather than left to the console's restraint, which is
+ * the entire point: the bridge is incapable of the other twenty-odd protected
+ * paths — `identity.yaml`, `rules.yaml`, `deployment.yaml`, `metistry.lock`,
+ * `queries/`, `agents/`, `routines/`, `targets/`, `extensions/`, `CLAUDE.md`,
+ * `README.md` — no matter what the console asks for or claims to be. Moving
+ * either door to the CLI would shrink this list; nothing may grow it without
+ * a product change landing in this table.
+ *
+ * The legacy spellings (`assistant-prompt.md` / `compute.yaml` at the
+ * instance root, on an instance that has not run `metistry migrate-layout`)
+ * are deliberately NOT here: `metistry update` refuses to carry a legacy
+ * instance past 0.8.x, and both callers write the flat spelling.
+ */
+export const CALLER_AUTHORITY: Readonly<Record<CallerClass, CallerAuthority>> = Object.freeze({
+  owner: { principals: [USER_PRINCIPAL], protectedPaths: "all" },
+  console: { principals: "any", protectedPaths: [INSTANCE_LAYOUT.assistantPrompt, INSTANCE_LAYOUT.compute] },
+});
+
+/** May this credential commit in that principal's name? */
+export function mayClaim(caller: CallerClass, principal: string): boolean {
+  const allowed = CALLER_AUTHORITY[caller].principals;
+  return allowed === "any" || allowed.includes(principal);
+}
+
 /** Syntactic check — no filesystem. Returns the segments or a refusal. */
 export function parseVaultPath(input: unknown): { ok: true; segments: string[]; rel: string } | { ok: false; code: PathRefusal } {
   if (typeof input !== "string" || input.length === 0 || input.length > MAX_PATH) return { ok: false, code: "invalid_request" };
@@ -126,12 +211,20 @@ export async function confine(repoRoot: string, input: unknown): Promise<{ ok: t
 }
 
 /**
- * Write authorization for a principal on a confined path. Protected paths
- * are the user's alone; the never-writable set is refused for everyone.
+ * Write authorization on a confined path: the caller's authority AND the
+ * claimed principal, never one without the other.
+ *
+ * A protected path needs both halves — the commit still has to be in the
+ * user's name (§4.7, so history reads honestly), and the credential still has
+ * to be one that may write that path. The never-writable set (`.git`,
+ * `instance-migrations/`) is refused for everyone before this is reached.
  */
-export function writeAllowed(rel: string, principal: string): boolean {
-  if (isProtected(rel)) return principal === USER_PRINCIPAL;
-  return true;
+export function writeAllowed(rel: string, principal: string, caller: CallerClass): boolean {
+  if (!mayClaim(caller, principal)) return false;
+  if (!isProtected(rel)) return true;
+  if (principal !== USER_PRINCIPAL) return false;
+  const allowed = CALLER_AUTHORITY[caller].protectedPaths;
+  return allowed === "all" || allowed.includes(rel);
 }
 
 export function validPrincipal(p: unknown): p is string {

@@ -31,9 +31,13 @@ configured entirely from the product checkout's `.env`:
 
 ```sh
 METISTRY_INSTANCE_DIR=/Users/you/metistry-instance   # the ONLY process that holds it
-METISTRY_BRIDGE_TOKEN_RECONCILER=<mint one>           # every caller presents this
+METISTRY_BRIDGE_TOKEN_RECONCILER=<mint one>           # the console's bearer, and everything it fronts
+METISTRY_BRIDGE_TOKEN_RECONCILER_USER=<mint another>  # the OWNER's: the only one that may write .metistry/
 METISTRY_RECONCILER_URL=http://host.docker.internal:7812   # how the console container reaches it
 ```
+
+The two bearers are the §4.7 boundary and are never the same value — see
+"The principal comes from the credential" below, and docs/ops/auth.md.
 
 Mint the token the same way as the other bridges:
 
@@ -55,9 +59,11 @@ curl -s -H "Authorization: Bearer $METISTRY_BRIDGE_TOKEN_RECONCILER" http://127.
 
 `check()` probes behaviour, not configuration: the repo is present, git
 runs, `HEAD` is readable, `.metistry/` lists, and it reports the commit
-queue depth plus the last flush / push / reconcile. `degraded` with a
-remediation string means "it runs but something needs your hand" (no
-commits yet, `.metistry/` missing, last push failed).
+queue depth plus the last flush / push / reconcile, and which bearers it
+holds (`principal_from_credential`, `owner_bearer`). `degraded` with a
+remediation string means "it runs but something needs your hand" (no owner
+bearer, so no protected path is writable by anyone; no commits yet;
+`.metistry/` missing; last push failed).
 
 Restart the console (`docker compose up -d console`) so it picks up
 `METISTRY_RECONCILER_URL`; `mcp-brain`'s `knowledge_read` then serves note
@@ -99,8 +105,10 @@ so Obsidian ignores it without any configuration.
 
 ## The bridge
 
-Every route requires `Authorization: Bearer $METISTRY_BRIDGE_TOKEN_RECONCILER`
-(loopback is not a trust boundary — CRIT-9). Errors are the core envelope
+Every route requires a bearer — `$METISTRY_BRIDGE_TOKEN_RECONCILER` for any
+caller, `$METISTRY_BRIDGE_TOKEN_RECONCILER_USER` for the owner class (loopback
+is not a trust boundary — CRIT-9). Which one you present decides what you may
+write, not what you may read. Errors are the core envelope
 `{ "error": { "code", "message" } }` with the usual status mapping
 (401 unauthenticated, 403 forbidden, 404 not_found, 400 invalid_request,
 409 conflict, 503 not_available).
@@ -122,12 +130,14 @@ Every route requires `Authorization: Bearer $METISTRY_BRIDGE_TOKEN_RECONCILER`
 | `GET /embeddings/status` | what is stored: model, dim, row count, how many notes are behind, whether a rebuild is required |
 
 **Intents.** Every mutation carries
-`intent: { principal, message, group? }`. `principal` is a lowercase slug
-the *caller* is trusted for (the console stamps it from the credential;
-the engine's `brain-commit` passes `assistant`). It becomes the commit
-author — `Metistry <principal>` (prefix from `METISTRY_GIT_AUTHOR_NAME`),
-stamped server-side; a request cannot name an author. `group` batches
-several writes into one commit; absent, the principal is the group.
+`intent: { principal, message, group? }`. `principal` is a lowercase slug —
+**attribution**, not authority. It becomes the commit author,
+`Metistry <principal>` (prefix from `METISTRY_GIT_AUTHOR_NAME`), stamped
+server-side; a request has never been able to name an author, and since
+2026-09-20 it cannot name its own authority either (below). The console
+stamps it from ITS credential; the engine's `brain-commit` passes
+`assistant`. `group` batches several writes into one commit; absent, the
+principal is the group.
 
 **What the tool refuses, for everyone:** `..`, absolute paths, drive
 letters, control characters, any `.git` segment, anything under
@@ -140,13 +150,27 @@ Linux container would fork the tree), and content over
 listable and readable like the rest of the vault, writable through this
 bridge by the capture principal and the assistant alike.
 
-**What only the `user` principal may write (§4.7 protected paths):**
-everything under `.metistry/` except `.metistry/state/` —
-`.metistry/identity.yaml`, `.metistry/rules.yaml`, `.metistry/sources.yaml`,
+**What only the owner may write (§4.7 protected paths):** everything under
+`.metistry/` except `.metistry/state/` — `.metistry/identity.yaml`,
+`.metistry/rules.yaml`, `.metistry/sources.yaml`,
 `.metistry/deployment.yaml`, `.metistry/metistry.lock`, and everything
 under `.metistry/queries/`, `.metistry/agents/`, `.metistry/routines/`,
-`.metistry/extensions/` — plus root `CLAUDE.md` and `README.md`. Every
-other principal gets a uniform `forbidden`.
+`.metistry/extensions/` — plus root `CLAUDE.md` and `README.md`. Anything
+else gets a uniform `forbidden`.
+
+**The principal comes from the credential** (ruled 2026-09-20; the rule and
+its table live in docs/ops/auth.md). Two things are read per mutation, and
+only one of them is in the body:
+
+| Bearer | Caller class | May claim | Protected paths |
+| --- | --- | --- | --- |
+| `METISTRY_BRIDGE_TOKEN_RECONCILER_USER` | `owner` (the CLI) | `user` only | all |
+| `METISTRY_BRIDGE_TOKEN_RECONCILER` | `console` (and all it fronts) | any principal | `.metistry/assistant-prompt.md` and `.metistry/compute.yaml` only — the two owner-authenticated doors the console ships (§4.10 self-modification; the Compute pane's assign/budget) |
+
+A body claiming more than its bearer allows is `forbidden` — never downgraded
+— and the refusal is a `runs` row with the caller class on it. With
+`METISTRY_BRIDGE_TOKEN_RECONCILER_USER` unset, **no** caller may write a
+protected path and `check()` is `degraded` with the command that mints one.
 
 **Compare-and-swap.** Send `expected_sha256` (from a prior read) to refuse
 a write over content you have not seen (`409 conflict`); the empty string
@@ -317,7 +341,8 @@ Setup, modes, and what "deterministic rebuild" means:
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `METISTRY_INSTANCE_DIR` | — (required) | instance repo working tree |
-| `METISTRY_BRIDGE_TOKEN_RECONCILER` | — (required) | bearer callers present |
+| `METISTRY_BRIDGE_TOKEN_RECONCILER` | — (required) | the bearer any caller presents (caller class `console`) |
+| `METISTRY_BRIDGE_TOKEN_RECONCILER_USER` | — (fail closed when unset) | the OWNER class's bearer: the only credential that may write a §4.7 protected path. Minted by `metistry init` / `up` / `update` / `secrets sync --to env`, never given to the console (docs/ops/auth.md). Equal to the one above = refused at startup |
 | `METISTRY_RECONCILER_HOST` | `127.0.0.1` | bind address (loopback by default, invariant 8) |
 | `METISTRY_RECONCILER_PORT` | `7812` | |
 | `METISTRY_COMMIT_INTERVAL_SEC` | `30` | queue flush cadence |

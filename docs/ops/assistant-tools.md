@@ -371,13 +371,28 @@ Layers, honest about which carry the load:
    traversal, `.git`, symlinks and casing slips. Two
    independent refusals; the assistant cannot touch how the system
    behaves.
-3. **Provenance.** A markdown write gets `source: assistant` and
+3. **Ownership** (one writer, but not one owner — docs/ops/knowledge-fold.md
+   "The guardrail at the tool"). An existing markdown note is refused
+   (`forbidden`, "owned by \<source\>; propose instead") unless its
+   frontmatter `source` is the assistant's own credential id or the evening
+   fold's; new notes are always free. A note with **no `source:` at all is
+   the user's**, not ownerless — that is exactly what a note you wrote by
+   hand in Obsidian looks like, and `knowledge_write`'s whole-file replace
+   must not be the thing that quietly overwrites it (2026-09-19; the
+   original default read "no source" as "free to write", which was the
+   hole). The one exemption is `now.md` at the vault root by exact name, so
+   an instance whose seed predates this fix is not locked out of the note
+   the assistant is required to keep writing — it disappears the moment
+   `now.md` is stamped once. Ownership is read from the note ALREADY ON
+   DISK, never from the incoming `content`, so a write cannot claim a note
+   it does not already own by forging frontmatter in what it sends.
+4. **Provenance.** A markdown write gets `source: assistant` and
    `updated: <today>` merged into its frontmatter — replaced if present,
    appended if not, every other line kept byte for byte, nothing else
    invented. `source` is the credential, so a note claiming another
    author is corrected, not trusted. A block that is not a YAML mapping
    is refused, not guessed at.
-4. **No lost updates, and no way to ask for one.** `knowledge_read`
+5. **No lost updates, and no way to ask for one.** `knowledge_read`
    returns the note's `sha256`; the assistant passes it back as
    `expected_sha256`. A concurrent edit (yours in Obsidian, say) turns the
    write into `conflict` carrying the current hash, and the prompt tells it
@@ -386,7 +401,7 @@ Layers, honest about which carry the load:
    `conflict` instead of being overwritten blind. There is no unconditional
    write — you edit these files by hand, and the assistant has to have seen
    the bytes it replaces (ruled 2026-09-16).
-5. **Audit.** Every call — refusals included — is a `runs` row (below),
+6. **Audit.** Every call — refusals included — is a `runs` row (below),
    and every landed write is a commit in the instance repo's history.
 
 TODO: folding *approved requests* into pages is the evening routine's

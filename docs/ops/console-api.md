@@ -242,9 +242,12 @@ PUT /api/agents/devin/grants   {"tier":"areas","areas":["Areas/Health"],"queries
 
 The grant is a read TIER plus, for `areas`, the vault prefixes it covers;
 `queries` is a separate axis (invariant 3's read path). An area is TitleCase
-from the vault root — core's `validAreaPrefix`, which also refuses `.metistry/`
-and `Artifacts/` — and the bare vault (`/`) is admitted for a `kind: internal`
-row alone, keyed on the ROW's kind and never on the request.
+from the vault root — core's `validAgentAreaGrant`, which also refuses
+`.metistry/` and `Artifacts/`, because no agent read path serves either and a
+grant of one would be inert. That is a rule about AGENTS, not about the owner,
+whose own `Artifacts/` are `GET /api/artifacts` (ruled 2026-09-19). The bare
+vault (`/`) is admitted for a `kind: internal` row alone, keyed on the ROW's
+kind and never on the request.
 
 Since 2026-09-19 an agent can **ask** for an area it was refused
 (`request_access` on `/mcp`, `docs/ops/actions.md`), and approving that ask in
@@ -262,7 +265,8 @@ GET /api/agents
 200 {"agents":[{"id","display_name","kind","grants","projects","autonomy",
                 "revoked","remote","approved_at","pending","last_seen_at"}],
      "access_requests":[{"proposal_id":412,"agent":"devin","area":"Areas/Health",
-                         "reason":"knowledge_read pointed me here","ts":"…"}]}
+                         "reason":"knowledge_read pointed me here","ts":"…",
+                         "escalated":true,"prior_proposal":399}]}
 ```
 
 That list is a **view**: the answer is given in the queue, through
@@ -717,6 +721,14 @@ unknown proposal does: the owner may read `.metistry/compute.yaml` with a text
 editor or `metistry compute show`, and the honest thing to say on the
 *knowledge* route is "there is no such page", not "there is one and you may
 not have it". "Refused" and "absent" are indistinguishable from outside.
+
+One exception to the WORDING, never to the decision (ruled 2026-09-19): the
+owner asking for one of their own `Artifacts/` is pointed at `GET
+/api/artifacts`, the door that has the bytes, rather than told their file does
+not exist. There is no oracle to protect from the owner — they may look
+everywhere in their own directory — and `Artifacts/` is simply not in the
+knowledge index. An agent asking for the same path still gets the one uniform
+sentence, byte for byte the same as for a path that is not there.
 
 **Grant areas.** All four routes filter through one predicate (`canSee(path,
 scope)`): is this vault content at all, *and* does it fall under the scope's

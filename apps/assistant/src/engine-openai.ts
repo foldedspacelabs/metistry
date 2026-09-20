@@ -413,7 +413,12 @@ export function makeOpenAiEngine(cfg: OpenAiEngineConfig): Engine {
     const toolsUsed: Record<string, number> = {};
     /** Tool names in the order they were called — the sequence half of shadow agreement (`toolsUsed` is a tally and cannot say order). */
     const toolSequence: string[] = [];
-    const usage: CallUsage = { tokens_in: 0, tokens_out: 0, cache_read: 0, cache_write: 0 };
+    // `cache_read`/`cache_write` start ABSENT, not at 0: a turn whose
+    // provider reported no cache field at all must reach the row as NULL
+    // rather than as a zero that reads like a missed cache (core's
+    // CallUsage, and `seed/queries/cache_report.yaml`, which separates the
+    // two findings).
+    const usage: CallUsage = { tokens_in: 0, tokens_out: 0 };
     let cost = 0;
     let costSource: CallCost["source"] = "unknown";
     const seen = new Map<string, string>();
@@ -427,8 +432,13 @@ export function makeOpenAiEngine(cfg: OpenAiEngineConfig): Engine {
     const account = (r: ChatResponse): void => {
       usage.tokens_in += r.usage.tokens_in;
       usage.tokens_out += r.usage.tokens_out;
-      usage.cache_read = (usage.cache_read ?? 0) + (r.usage.cache_read ?? 0);
-      usage.cache_write = (usage.cache_write ?? 0) + (r.usage.cache_write ?? 0);
+      // Summed over the loop, but only once a response has actually carried
+      // the field: one call that reports `cached_tokens: 0` makes the turn's
+      // total 0 (the cache was asked and missed), and a turn where no call
+      // reported anything stays undefined (nothing was asked, or the field
+      // is not the one this provider sends).
+      if (r.usage.cache_read !== undefined) usage.cache_read = (usage.cache_read ?? 0) + r.usage.cache_read;
+      if (r.usage.cache_write !== undefined) usage.cache_write = (usage.cache_write ?? 0) + r.usage.cache_write;
       cost += r.cost.cost_usd;
       costSource = r.cost.source;
     };
@@ -570,8 +580,12 @@ export function makeOpenAiEngine(cfg: OpenAiEngineConfig): Engine {
       model: assignment.model,
       cost_source: costSource,
       turns,
-      ...(usage.cache_read ? { cache_read: usage.cache_read } : {}),
-      ...(usage.cache_write ? { cache_write: usage.cache_write } : {}),
+      // `!== undefined`, never truthiness: a reported zero is the reading
+      // that says "the prefix was not stable", and dropping it would make a
+      // cold cache indistinguishable from a provider that never answers the
+      // question (OPEN-6).
+      ...(usage.cache_read !== undefined ? { cache_read: usage.cache_read } : {}),
+      ...(usage.cache_write !== undefined ? { cache_write: usage.cache_write } : {}),
       ...(Object.keys(toolsUsed).length > 0 ? { tools_used: toolsUsed } : {}),
       ...(stopped ? { stopped } : {}),
       ...(shadow ? { shadow } : {}),

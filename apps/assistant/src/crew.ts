@@ -20,7 +20,7 @@
 // reports through its own tools (§4.11 "results land in the existing report
 // queue"). This file only returns the accounting the runs row needs.
 
-import { crewToolsFor, validateManifest, type AgentManifest, type ResolvedAssignment } from "@foldedspacelabs/metistry-core";
+import { crewToolsFor, validateManifest, type AgentManifest, type CostSource, type ResolvedAssignment } from "@foldedspacelabs/metistry-core";
 import { BRAIN_SERVER } from "./brain.js";
 import type { Engine } from "./engine.js";
 import { renderPrompt, type Identity } from "./prompt.js";
@@ -94,7 +94,18 @@ export interface CrewRunResult {
   num_turns: number;
   tokens_in?: number | undefined;
   tokens_out?: number | undefined;
+  /**
+   * What the provider's prompt cache did on this run. A crew run is an
+   * engine turn like any other and lands on `runs` as one, so it carries the
+   * same two counts — absent where the provider reported no such field
+   * (core's CallUsage), which the cache-report reads as a separate finding
+   * from a cache that missed.
+   */
+  cache_read?: number | undefined;
+  cache_write?: number | undefined;
   cost_usd?: number | undefined;
+  /** Where the cost number came from — `unknown` is a finding, not a gap (core's cost.ts). */
+  cost_source?: CostSource | undefined;
   /** Tool calls by fully-qualified name (`mcp__brain__report`), with counts. */
   tools_used: Record<string, number>;
   /** Length of the final text — never its content (not a result channel). */
@@ -136,7 +147,10 @@ export async function runCrewOnEngine(input: CrewRunInput, assignment: ResolvedA
     num_turns: result.turns ?? 0,
     tokens_in: result.tokens_in,
     tokens_out: result.tokens_out,
+    cache_read: result.cache_read,
+    cache_write: result.cache_write,
     cost_usd: result.cost_usd,
+    cost_source: result.cost_source,
     tools_used: result.tools_used ?? {},
     text_chars: result.text.length,
     ...(result.notes?.length ? { errors: result.notes } : {}),

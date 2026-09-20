@@ -24,7 +24,7 @@
 // kind = tool) on the same component.
 
 import { createHash } from "node:crypto";
-import { emptyCompute, finishRun, mintToken, sanitizeForAgent, startRun, tokenHash, type Compute, type ResolvedAssignment, type TierMap } from "@foldedspacelabs/metistry-core";
+import { DEFAULT_CACHING, emptyCompute, finishRun, mintToken, sanitizeForAgent, startRun, tokenHash, type Compute, type ResolvedAssignment, type TierMap } from "@foldedspacelabs/metistry-core";
 import { crewSystemPrompt, crewToolNames, parseCrewSnapshot, runCrewOnEngine, type CrewRunInput, type CrewRunResult } from "./crew.js";
 import { makeEngine, type Engine, type TurnGuard } from "./engine.js";
 import { memorySessionStore } from "./sessions.js";
@@ -301,6 +301,12 @@ export async function drainCrewOne(db: Db, cfg: CrewDrainConfig): Promise<boolea
       effort: turn.effort,
       engine: turn.assignment.config.kind,
       model_ref: turn.assignment.ref,
+      // What this provider was ASKED to do about caching, on the row that
+      // records what it did (core's DEFAULT_CACHING for an absent field). A
+      // run from before `caching: auto` was switched on must not read as a
+      // cache that missed — `compute.yaml` is hot-reloaded, so only the row
+      // can say which setting was in force for this turn.
+      caching: turn.assignment.config.caching ?? DEFAULT_CACHING,
       fresh_session: true,
       crew_sha: crew.sha256,
       dispatch_run_id: row.meta?.dispatch_run_id ?? null,
@@ -317,7 +323,20 @@ export async function drainCrewOne(db: Db, cfg: CrewDrainConfig): Promise<boolea
       ...(r.tokens_in !== undefined ? { tokens_in: r.tokens_in } : {}),
       ...(r.tokens_out !== undefined ? { tokens_out: r.tokens_out } : {}),
       ...(r.cost_usd !== undefined ? { cost_usd: r.cost_usd } : {}),
-      meta: { outcome: r.outcome, num_turns: r.num_turns, tools_used: r.tools_used, reports, text_chars: r.text_chars, session_id: r.session_id },
+      // A crew run is an engine turn and carries the same two cache columns
+      // as one (0016): without them the cache-report could see the chat tier
+      // and not the crews, which is where the long, repeated briefs are.
+      ...(r.cache_read !== undefined ? { cache_read_tokens: r.cache_read } : {}),
+      ...(r.cache_write !== undefined ? { cache_write_tokens: r.cache_write } : {}),
+      meta: {
+        outcome: r.outcome,
+        num_turns: r.num_turns,
+        tools_used: r.tools_used,
+        reports,
+        text_chars: r.text_chars,
+        session_id: r.session_id,
+        ...(r.cost_source !== undefined ? { cost_source: r.cost_source } : {}),
+      },
     });
     const summary = `crew run #${runId}: ${r.outcome}, ${r.num_turns} turns, ${reports} report${reports === 1 ? "" : "s"}${r.cost_usd !== undefined ? `, $${r.cost_usd.toFixed(4)}` : ""}`;
     // a budget or turn stop is final: retrying would spend again for the same brief

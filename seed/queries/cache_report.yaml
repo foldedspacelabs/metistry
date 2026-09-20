@@ -1,0 +1,115 @@
+# Seeded default (D4 overlay: an instance file of the same name wins).
+#
+# OPEN-6's measurement (`docs/plan-refresh-2026-09-13.md`, ruled 2026-09-17:
+# "ship automatic top-level `cache_control` first, measure later"). The one
+# read path into it (invariant 3): `metistry compute cache-report` asks this,
+# `GET /api/q/cache_report` is the same rows through the generic door, and
+# the weekly review can ask it too — so "is the cache paying off" has one
+# definition and one answer.
+#
+# **What a cached prompt actually costs, and therefore what to read here.**
+# A cache READ is billed at a fraction of the input rate (0.1× on Anthropic
+# through OpenRouter; `docs/research/2026-09-11-local-models-openrouter-opencode.md`
+# `[or-cache]`, fetched 2026-09-11) and a cache WRITE at a premium over it
+# (1.25× for the five-minute TTL). So a high `cache_read` is money saved and
+# a high `cache_write` beside a low `cache_read` is money spent for nothing:
+# the prefix is being re-written every turn instead of re-read, which is what
+# a prefix that is not byte-stable looks like from the outside.
+#
+# **HIT RATIO = `cache_read / tokens_in`, and the denominator is the point.**
+# `tokens_in` on this table is the WHOLE prompt as the provider billed it,
+# with the cached share already inside it — core's `usageFromResponse`
+# normalises both wire shapes to that one meaning, including Anthropic's
+# native block where `input_tokens` is only the fresh remainder. So
+# `cache_read / (tokens_in + cache_read)` would count the cached tokens
+# twice and understate every ratio; the honest denominator is `tokens_in`
+# alone, and the ratio reads directly as "what fraction of the prompt did not
+# have to be sent fresh".
+#
+# **`turns_reporting` is not `turns`, and the gap is a finding.** A NULL
+# `cache_read_tokens` means the provider's response said nothing about a
+# cache; a 0 means it said zero. The engine keeps those apart on purpose
+# (core's `CallUsage`), because they have different answers: a column of
+# NULLs on a `caching: auto` provider means the field name is wrong or the
+# request never carried the caching field, and a column of 0s means the
+# prefix is changing turn to turn. A report that coalesced them would tell
+# you to go and audit a system prompt that was never the problem.
+#
+# **`caching` is what was ASKED, on the row that records what happened.**
+# `compute.yaml` is hot-reloaded, so the file cannot answer later what was in
+# force earlier — the mode is stamped on the run (`meta.caching`), and a
+# window that spans the moment it was switched on groups into two rows rather
+# than averaging a before and an after. `unknown` is a row written before
+# this was recorded at all.
+#
+# **Every engine turn, not just the chat tier.** `kind` is deliberately not
+# filtered: `turn`, `crew_run` and `shadow` are all model calls that bill for
+# a prompt, and the crews are where the long repeated briefs are. What
+# selects them is `provider IS NOT NULL AND tokens_in IS NOT NULL` — a row
+# that named a provider and came back with a token count. That also excludes
+# an in-flight row (provider stamped at `startRun`, tokens at `finishRun`)
+# and a turn that failed before it billed anything, neither of which has a
+# cache reading to contribute.
+#
+# **No vault paths, no message text, no transcripts** — aggregate counts over
+# providers and models the operator configured, which is why `expose:
+# generic` is right and there is no route of its own (invariant 10: the app
+# reads it through the generic door, and a new door would be a product
+# change nobody needs).
+#
+# `COLLATE "C"` on the tie-break, for the same reason `knowledge_pages` has
+# it: a bare `ORDER BY model` sorts in the cluster's locale, CI runs Linux
+# and the owner runs macOS, and two orderings of one report is one too many.
+name: cache_report
+description: >-
+  Prompt-cache effectiveness over the last `days` days, per provider, model,
+  tier and the `caching:` mode that was in force — OPEN-6's measurement.
+  Per group: turns, how many of them reported a cache field at all
+  (`turns_reporting`; NULL means the provider said nothing, which is a
+  different finding from a cache that missed), how many actually read from
+  the cache, prompt and completion tokens, cache read and write tokens, the
+  hit ratio, recorded cost, and how many turns nothing could price. HIT RATIO
+  is `cache_read / tokens_in`: `tokens_in` is the whole prompt as the
+  provider billed it with the cached share already inside it, so it reads as
+  "the fraction of the prompt that did not have to be sent fresh". Cache
+  reads bill at a fraction of the input rate and writes at a premium, so a
+  large `cache_write` beside a small `cache_read` is a prefix being rewritten
+  every turn rather than reused. Aggregate only — no paths, no text.
+params:
+  days: { type: int, default: 7 } # the CLI's `--since 7d`; the window OPEN-6's ~10 real turns land in
+sql: |
+  SELECT
+    coalesce(provider, '')                                            AS provider,
+    coalesce(model, '')                                               AS model,
+    coalesce(meta ->> 'tier', '')                                     AS tier,
+    coalesce(meta ->> 'caching', 'unknown')                           AS caching,
+    count(*)                                                          AS turns,
+    -- reported the field at all / actually read from the cache. The first is
+    -- "does this provider answer the question", the second is "is the answer yes".
+    count(*) FILTER (WHERE cache_read_tokens IS NOT NULL)              AS turns_reporting,
+    count(*) FILTER (WHERE coalesce(cache_read_tokens, 0) > 0)         AS turns_hit,
+    coalesce(sum(tokens_in), 0)                                        AS tokens_in,
+    coalesce(sum(tokens_out), 0)                                       AS tokens_out,
+    coalesce(sum(cache_read_tokens), 0)                                AS cache_read,
+    coalesce(sum(cache_write_tokens), 0)                               AS cache_write,
+    -- NULL rather than 0 for a group that billed no prompt at all: a ratio
+    -- over an empty denominator is not "0 % cached", it is not a reading.
+    CASE WHEN coalesce(sum(tokens_in), 0) > 0
+         THEN round(coalesce(sum(cache_read_tokens), 0)::numeric / sum(tokens_in), 4)
+    END                                                                AS hit_ratio,
+    round(coalesce(sum(cost_usd), 0), 6)                               AS cost_usd,
+    -- a call nothing could price is recorded at $0 and says so (core's
+    -- cost.ts): counted here so "$0 saved" is never read as "nothing to save"
+    count(*) FILTER (WHERE meta ->> 'cost_source' = 'unknown')         AS turns_unpriced,
+    min(ts)                                                            AS since,
+    max(ts)                                                            AS until
+  FROM runs
+  WHERE ts >= now() - make_interval(days => (:days)::int)
+    AND provider IS NOT NULL
+    AND tokens_in IS NOT NULL
+  GROUP BY 1, 2, 3, 4
+  ORDER BY coalesce(sum(tokens_in), 0) DESC,
+           coalesce(provider, '') COLLATE "C",
+           coalesce(model, '') COLLATE "C",
+           coalesce(meta ->> 'tier', '') COLLATE "C"
+cache_ttl: 60

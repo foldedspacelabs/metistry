@@ -192,6 +192,31 @@ describe("automatic prompt caching", () => {
     expect(r).toMatchObject({ tokens_in: 2000, cache_read: 900, cache_write: 200 });
   });
 
+  it("a turn whose provider reported ZERO cached tokens records 0, not nothing — OPEN-6 reads the difference", async () => {
+    // A cold prefix and a provider that has never heard of the field are two
+    // different findings, and only one of them is answered by looking at what
+    // changes turn to turn. They have to be distinguishable on the row.
+    const s = server([{ body: chat("ok", { usage: { prompt_tokens: 1000, completion_tokens: 10, prompt_tokens_details: { cached_tokens: 0 } } }) }]);
+    const r = await engineOn(cloud, s, host({}))("hi", spec(cloud));
+    expect(r.cache_read).toBe(0);
+    expect(r.cache_write).toBeUndefined(); // this response said nothing about writes
+  });
+
+  it("a turn whose provider reported no cache fields at all records neither", async () => {
+    const s = server([{ body: chat("ok", { usage: { prompt_tokens: 1000, completion_tokens: 10 } }) }]);
+    const r = await engineOn(cloud, s, host({}))("hi", spec(cloud));
+    expect(r.cache_read).toBeUndefined();
+    expect(r.cache_write).toBeUndefined();
+  });
+
+  it("an Anthropic-native usage block lands as one whole prompt, not the fresh remainder", async () => {
+    // `/v1/messages` reports `input_tokens` as the FRESH share with both cache
+    // counts beside it (core's usageFromResponse): 100 + 600 + 300.
+    const s = server([{ body: chat("ok", { usage: { input_tokens: 100, output_tokens: 10, cache_read_input_tokens: 600, cache_creation_input_tokens: 300 } }) }]);
+    const r = await engineOn(cloud, s, host({}))("hi", spec(cloud));
+    expect(r).toMatchObject({ tokens_in: 1000, tokens_out: 10, cache_read: 600, cache_write: 300 });
+  });
+
   it("the cached share is priced at the cache multipliers when the response carries no cost", async () => {
     // 100k fresh at $3/M, 800k read at 0.1x, 100k written at 1.25x, no output
     const s = server([{ body: chat("ok", { usage: { prompt_tokens: 1_000_000, completion_tokens: 0, prompt_tokens_details: { cached_tokens: 800_000 }, cache_write_tokens: 100_000 } }) }]);

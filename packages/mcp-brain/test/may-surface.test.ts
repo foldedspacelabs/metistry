@@ -29,30 +29,34 @@
 
 import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { ROLES, REASONS, may, type Principal, type Role } from "@foldedspacelabs/metistry-core";
+import { CREW_NEVER_TOOLS, CREW_TOOL_GROUPS, ROLES, REASONS, allowedTools, crewToolsFor, may, type Principal, type Role } from "@foldedspacelabs/metistry-core";
 import { TOOL_NAMES } from "../src/index.js";
 import { principalOf } from "../src/principal.js";
 
 const SRC = new URL("../src/", import.meta.url);
 
+/** Every tool group a manifest may name — the widest `uses` a crew can be written with. */
+const ALL_GROUPS = Object.keys(CREW_TOOL_GROUPS);
+
 /**
  * One principal per role, each as wide as that role ever gets — the assistant
  * with the bare vault its `.env` default gives it, an agent with a real grant,
- * a crew with its manifest scope, the capture token with nothing. Widest on
- * purpose: the property below is "somebody may use this tool", and a
- * deliberately narrow principal would make an unruled tool look ruled.
+ * a crew with its manifest scope and every tool group, the capture token with
+ * nothing. Widest on purpose: the property below is "somebody may use this
+ * tool", and a deliberately narrow principal would make an unruled tool look
+ * ruled.
  */
 const WIDEST: Record<Role, Principal> = {
   owner: { id: "owner", role: "owner", scope: { tier: "areas", areas: null, queries: true, projects: null, autonomy: { level: "act_within_scope" } }, source: "registry" },
   assistant: { id: "assistant", role: "assistant", scope: { tier: "areas", areas: ["/"], queries: true, projects: null, autonomy: { level: "act_within_scope" } }, source: "environment" },
   agent: { id: "scout", role: "agent", scope: { tier: "areas", areas: ["Areas/Health"], queries: true, projects: ["alpha"], autonomy: { level: "act_within_scope" } }, source: "registry" },
-  crew: { id: "writer", role: "crew", scope: { tier: "areas", areas: ["Areas/Health"], queries: true, projects: ["alpha"], autonomy: { level: "act_within_scope" } }, source: { manifest: "agents/ops/writer.md" } },
+  crew: { id: "writer", role: "crew", scope: { tier: "areas", areas: ["Areas/Health"], queries: true, projects: ["alpha"], autonomy: { level: "act_within_scope" } }, source: { manifest: "agents/ops/writer.md" }, uses: ALL_GROUPS },
   tool: { id: "owner_token", role: "tool", scope: { tier: "none", areas: [], queries: false, projects: [] }, source: "registry" },
 };
 
-/** The same, with nothing granted — the fail-closed end of every axis. */
+/** The same, with nothing granted — the fail-closed end of every axis, which for a crew includes an empty `uses`: no groups is no tools. */
 const NARROWEST: Record<Role, Principal> = Object.fromEntries(
-  ROLES.map((role) => [role, { id: role, role, scope: { tier: "none" as const, areas: [], queries: false, projects: [] }, source: "registry" as const }]),
+  ROLES.map((role) => [role, { id: role, role, scope: { tier: "none" as const, areas: [], queries: false, projects: [] }, source: "registry" as const, uses: [] }]),
 ) as Record<Role, Principal>;
 
 describe("every tool × every role is decided by may(), and by nothing else", () => {
@@ -98,6 +102,61 @@ describe("every tool × every role is decided by may(), and by nothing else", ()
     }
   });
 
+  // --- the crew's own allowlist (P2 §2.2) ---------------------------------
+  //
+  // The half of the surface that used to be decided in the process that
+  // dispatched the run. Stated as properties over the whole tool list,
+  // because "the door holds `uses`" is only true if it is true for all 27.
+
+  it("admits a crew exactly the tools its `uses` groups expand to, and refuses every other name at the door", () => {
+    const writer: Principal = { ...WIDEST.crew, uses: ["knowledge", "requests"] };
+    const held = new Set(crewToolsFor(writer.uses!));
+    const wrong = TOOL_NAMES.filter((name) => may(writer, "act", { kind: "toolset", name }).ok !== held.has(name));
+    expect(wrong).toEqual([]);
+    expect([...held].sort()).toEqual(["knowledge_grep", "knowledge_list", "knowledge_read", "knowledge_search", "requests_create"]);
+    // …and the refusal is the uniform one, naming what the crew DOES hold so
+    // the model has something to do other than try the next tool.
+    const d = may(writer, "act", { kind: "toolset", name: "tasks_comment" });
+    expect(d.ok).toBe(false);
+    if (d.ok) return;
+    expect({ code: d.code, reason: d.reason }).toEqual({ code: "forbidden", reason: "not_in_uses" });
+    expect(d.message).toContain("knowledge, requests");
+  });
+
+  it("gives a crew with no groups — or none this console can read — no tools at all, rather than all of them", () => {
+    for (const uses of [[], undefined]) {
+      const orphan: Principal = { ...WIDEST.crew, uses };
+      expect(allowedTools(orphan)).toEqual([]);
+      expect(TOOL_NAMES.filter((name) => may(orphan, "act", { kind: "toolset", name }).ok)).toEqual([]);
+    }
+  });
+
+  it("never lets a `uses` list reach a never-tool, whatever it names — the groups are the table, not a review", () => {
+    const everything: Principal = { ...WIDEST.crew, uses: [...ALL_GROUPS, ...CREW_NEVER_TOOLS] };
+    for (const name of CREW_NEVER_TOOLS) {
+      expect(may(everything, "act", { kind: "toolset", name }).ok, name).toBe(false);
+      expect(may(everything, "act", { kind: "tool", name }).ok, name).toBe(false);
+    }
+  });
+
+  it("decides nothing for the four roles that carry no allowlist: their refusals are the tool's own rule", () => {
+    for (const role of ROLES.filter((r) => r !== "crew")) {
+      expect(allowedTools(WIDEST[role]), role).toBeNull();
+      const refusedByToolset = TOOL_NAMES.filter((name) => !may(NARROWEST[role], "act", { kind: "toolset", name }).ok);
+      expect(refusedByToolset, role).toEqual([]);
+    }
+  });
+
+  it("answers the same about a (crew, tool) pair whichever way it is asked — the door's question cannot disagree with the tool's", () => {
+    const writer: Principal = { ...WIDEST.crew, uses: ["tasks", "capture"] };
+    for (const name of TOOL_NAMES) {
+      if (may(writer, "act", { kind: "toolset", name }).ok) continue;
+      const viaTool = may(writer, "act", { kind: "tool", name });
+      expect(viaTool.ok, name).toBe(false);
+      if (!viaTool.ok) expect(viaTool.reason, name).toBe("not_in_uses");
+    }
+  });
+
   it("maps this bridge's credential onto the principal may() decides on", () => {
     expect(principalOf({ id: "a", kind: "internal", grants: { tier: "areas", areas: ["/"] }, projects: [] })).toMatchObject({
       role: "assistant",
@@ -109,16 +168,33 @@ describe("every tool × every role is decided by may(), and by nothing else", ()
       source: "registry",
       scope: { tier: "index", queries: true, projects: ["alpha"] },
     });
-    // P2, not P1: a crew still authenticates as an external agent, so no
-    // credential in this package produces `crew` yet. When one does, the rules
-    // it lands on are already written and already tested above.
-    expect(ROLES.map((r) => principalOf({ id: "c", kind: r === "assistant" ? "internal" : "external", grants: { tier: "none", areas: [] }, projects: [] }).role)).toEqual([
+    // P2: the registry's third stored kind arrives intact, carrying the
+    // toolset and the manifest it was declared in. `source` finally has a
+    // value that is not a prose reconstruction of `kind` (§2.7).
+    expect(
+      principalOf({ id: "writer", kind: "crew", uses: ["knowledge"], manifest: "agents/ops/writer.md", grants: { tier: "areas", areas: ["Areas/Health"] }, projects: ["alpha"] }),
+    ).toMatchObject({
+      role: "crew",
+      source: { manifest: "agents/ops/writer.md" },
+      uses: ["knowledge"],
+      scope: { tier: "areas", areas: ["Areas/Health"], projects: ["alpha"] },
+    });
+    // The three kinds the column stores map onto three of the five roles;
+    // `owner` and `tool` are the console's own credentials and no agent
+    // bearer can become one.
+    expect(["external", "internal", "crew", undefined].map((kind) => principalOf({ id: "c", ...(kind ? { kind: kind as "crew" } : {}), grants: { tier: "none", areas: [] }, projects: [] }).role)).toEqual([
       "agent",
       "assistant",
-      "agent",
-      "agent",
+      "crew",
       "agent",
     ]);
+    // A crew's `uses` is COPIED onto the principal, so a manifest re-sync
+    // mid-request cannot widen a decision already being made.
+    const uses = ["knowledge"];
+    const p = principalOf({ id: "writer", kind: "crew", uses, grants: { tier: "none", areas: [] }, projects: [] });
+    uses.push("tasks");
+    expect(p.uses).toEqual(["knowledge"]);
+    expect(p.source).toBe("registry"); // no manifest given: the row is all this console knows about it
   });
 });
 
@@ -133,6 +209,8 @@ describe("no tool body carries its own kind/tier comparison", () => {
     'kind !== "internal"',
     'kind === "external"',
     'kind !== "external"',
+    'kind === "crew"',
+    'kind !== "crew"',
     'tier === "none"',
     'tier !== "none"',
     'tier === "areas"',

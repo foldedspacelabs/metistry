@@ -184,8 +184,13 @@ function knowledgeScopeOf(auth: Auth): KnowledgeScope {
  * `owner_token` is NOT one of them — it is the plan's tier 0, capture-only,
  * and the management gate excludes it by name — so it is the `tool` role, a
  * credential with no scope at all. An agent bearer is `assistant` or `agent`
- * by its row's kind (and never `crew` until P2 — see mcp-brain's
- * `principalOf`).
+ * by its row's kind, and a crew is its own role since P2 (the registry's
+ * third stored kind is no longer collapsed — see `authenticateAgent`).
+ *
+ * A crew bearer is the fifth role and reaches nothing here: it is an agent
+ * bearer, so it takes the uniform 403 above like any other. Its `uses`
+ * toolset rides along anyway, because the principal is one shape and the
+ * door that enforces it is `/mcp` (P2 §2.2).
  *
  * An UNAUTHENTICATED request has no principal, so there is nothing to map:
  * the four `/auth/*` ceremonies, `GET /api/identity`, `/health` and the PWA
@@ -197,17 +202,20 @@ function knowledgeScopeOf(auth: Auth): KnowledgeScope {
 function principalOf(auth: Auth): Principal {
   if (auth?.kind === "agent") {
     const a = auth.agent;
+    const internal = a.kind === "internal";
+    const crew = a.kind === "crew";
     return {
       id: a.id,
-      role: a.kind === "internal" ? "assistant" : "agent",
+      role: internal ? "assistant" : crew ? "crew" : "agent",
       scope: {
         tier: a.grants.tier,
         areas: [...a.grants.areas],
         queries: a.grants.queries === true,
-        projects: a.kind === "internal" && a.projects.length === 0 ? null : [...a.projects],
+        projects: internal && a.projects.length === 0 ? null : [...a.projects],
         autonomy: a.autonomy,
       },
-      source: a.kind === "internal" ? "environment" : "registry",
+      source: internal ? "environment" : crew && a.manifest !== undefined ? { manifest: a.manifest } : "registry",
+      ...(crew ? { uses: [...(a.uses ?? [])] } : {}),
     };
   }
   const owner = isUser(auth);
@@ -367,9 +375,18 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
   /** The services one action may reach. Read per call: `cfg.targets` and the vault bridge are hot-reloaded, and an action must follow the file rather than the process's startup. */
   const actionServices = (): ActionServices => ({ db, tasks, inbox, ...(cfg.targets ? { targets: cfg.targets } : {}), ...(artifacts ? { artifacts } : {}) });
 
+  /**
+   * **One agent-principal source for both doors** (the `/mcp` mount and this
+   * server's own `authenticate`): the registry row, plus — for a crew — the
+   * `uses` toolset and manifest path from the crews this console loaded.
+   * Never from the request: a body cannot make a bearer a crew, and a crew
+   * cannot name a tool group it was not given (§4.19).
+   */
+  const agentPrincipal = (req: IncomingMessage) => agents.authenticateAgent(db, req, (id) => cfg.crews?.toolset(id));
+
   const brain = createBrainServer({
     db,
-    authenticate: (req) => agents.authenticateAgent(db, req), // the same principal source as /capture
+    authenticate: (req) => agentPrincipal(req), // the same principal source as /capture
     tasks,
     inboxDir: cfg.inboxDir,
     inbox,
@@ -406,7 +423,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     }
     const m = /^Bearer\s+(\S+)$/.exec(req.headers.authorization ?? "");
     if (m?.[1] && (await store.checkOwnerToken(db, m[1]))) return { kind: "owner_token" };
-    const agent = await agents.authenticateAgent(db, req); // principal from the credential, never the body
+    const agent = await agentPrincipal(req); // principal from the credential, never the body
     if (agent) return { kind: "agent", agent };
     return null;
   }

@@ -16,21 +16,25 @@ import type { AgentPrincipal } from "./types.js";
 /**
  * An agent bearer → the decision principal.
  *
- * **`crew` is not produced yet**, and that is faithful rather than an
- * oversight: `authenticateAgent` still collapses the registry's third stored
- * `kind` to `external` (§2.3), so a crew arrives here indistinguishable from
- * any other foreign agent — exactly as it did before P1. P2 is where the row
- * keeps its own kind, `uses` rides on the principal, and `/mcp` enforces the
- * crew's toolset at the door instead of in the caller (§2.2).
+ * **All three stored kinds arrive intact since P2.** The registry has always
+ * written `crew` on a sub-agent's row (`apps/console/src/crews.ts`), and the
+ * host used to collapse it to `external` before this function ever saw it —
+ * so a crew was indistinguishable from a foreign agent and `/mcp` could not
+ * hold it to the toolset its manifest declares (§2.2, §2.3). Now the row's
+ * own kind decides the role, and the crew's `uses` groups ride along as the
+ * allowlist `may()` refuses outside of.
  *
- * `source` is likewise a description, not a decision: no rule below reads it
- * today. It is carried so that P3's one renderer — and the refusal that says
- * "your scope is configuration, not a grant" — have a field to read instead
- * of a fourth prose reconstruction (§2.7).
+ * `source` is a description, not a decision: no rule reads it. It is carried
+ * so that P3's one renderer — and the refusal that says "your scope is
+ * configuration, not a grant" — have a field to read instead of a fourth
+ * prose reconstruction (§2.7). A crew's is the manifest the host loaded;
+ * without one (a crew row this console cannot see a manifest for) it is the
+ * registry, which is where the row itself is.
  */
 export function principalOf(p: AgentPrincipal): Principal {
   const internal = p.kind === "internal";
-  const role: Role = internal ? "assistant" : "agent";
+  const crew = p.kind === "crew";
+  const role: Role = internal ? "assistant" : crew ? "crew" : "agent";
   return {
     id: p.id,
     role,
@@ -48,7 +52,10 @@ export function principalOf(p: AgentPrincipal): Principal {
       projects: internal && p.projects.length === 0 ? null : [...p.projects],
       autonomy: p.autonomy,
     },
-    source: internal ? "environment" : "registry",
+    source: internal ? "environment" : crew && p.manifest !== undefined ? { manifest: p.manifest } : "registry",
+    // Copied for the same reason the areas are, and only for a crew: on any
+    // other role an allowlist would be a rule nothing declared.
+    ...(crew ? { uses: [...(p.uses ?? [])] } : {}),
   };
 }
 

@@ -5,9 +5,44 @@ needs. Read it, then `review-00-plan.md`'s ratified section and the screen spec
 for whatever you are about to touch. Do not read the whole `docs/product/design/`
 tree up front — it is large, and the specs are written to be read one at a time.
 
-Branch: `design/round-0-plan-review`, 25 commits, merged onto v0.11.0.
-Canvas: the `Metistry brand — round A` artifact (a Design-type artifact, 22
-artboards). Tokens: **2.6.2**, 144 contrast pairs green.
+Branch: `design/round-0-plan-review`, merged onto v0.11.0.
+Tokens: **2.6.2**, 144 contrast pairs green.
+
+## 0. Where the drawings are
+
+**The canvas — every artboard:**
+<https://claude.ai/artifact/Ld6h7R8CVer4TncfNeLXNb> — *Metistry brand — round A*,
+a Design-type artifact. Read it with the Artifact tool (`action: "read"`, and
+`scope: "files"` on it to list the boards); do not web-fetch it. Its boards, in
+canvas order:
+
+| Board | What it holds |
+| --- | --- |
+| `Main` · `Direction-B` · `Direction-C` | round A — the three brand directions; **C, the keyed square, was chosen** |
+| `Wordmark` | the wordmark, outlined from IBM Plex Sans SemiBold |
+| `Icon-App` · `Icon-Web` | macOS/iOS icons and the PWA set, with the optical ramp |
+| `Colour` · `Kit` · `Theme` | the accent, the brand kit, light and dark |
+| `States` | empty · absent · failed · stale |
+| `Request` | the request card and the bell panel |
+| `Chat` · `Activity` · `NeedsYou` · `Capture` | screens 1–4 |
+| `Today` | the first Today pass — row, chip and state vocabulary, and the **absent state** of the spine |
+| `Today-Hub` | **the current Today** — the spine, the day bar, calendar help |
+| `Board` | Work ▸ Board, five columns |
+| `Facets` | the three channels, the ladder, the spark |
+| `Plugin` | the Obsidian plugin — the mirror, the picker, editable chips |
+| `Voice` | six system serifs and a Times control |
+| `Item-Model` | the item contract (its ladder section is superseded by `Facets`) |
+
+`Facets`, `Plugin` and `Voice` are **not yet modules** in `boards/` — they were
+built from earlier snapshots of the library. Port each the next time it changes.
+
+**The round-00 review, as a page:**
+<https://claude.ai/artifact/LiSuLrq2PQjfds8DM3Tp4Z> — the same content as
+`review-00-plan.md`, which is the version to edit.
+
+Three other Design-System artifacts exist on this account (*Folded Space Labs*,
+*Drey*, *Matt Colf*). **None of them governs Metistry** — Metistry's system is
+`tokens.json` plus the specs in this directory.
 
 ---
 

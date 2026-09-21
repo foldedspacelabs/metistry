@@ -6,7 +6,10 @@ for whatever you are about to touch. Do not read the whole `docs/product/design/
 tree up front — it is large, and the specs are written to be read one at a time.
 
 Branch: `design/round-0-plan-review`, merged onto v0.11.0.
-Tokens: **2.6.2**, 144 contrast pairs green.
+Tokens: **2.6.2**, 144 declared contrast pairs green, plus 56 undeclared pairs
+checked by hand in round E. The thinnest margin in the system is
+`text-tertiary` on `sunken` at **4.53:1** light — it passes, it is used for every
+section label and band header, and it will fail the moment either token moves.
 
 ## 0. Where the drawings are
 
@@ -33,8 +36,18 @@ canvas order:
 | `Voice` | six system serifs and a Times control |
 | `Item-Model` | the item contract (its ladder section is superseded by `Facets`) |
 
-`Facets`, `Plugin` and `Voice` are **not yet modules** in `boards/` — they were
-built from earlier snapshots of the library. Port each the next time it changes.
+`Facets`, `Plugin`, `Voice`, `Chat` and `Request` are **not yet modules** in
+`boards/` — they were built from earlier snapshots of the library. Port each the
+next time it changes. `States`, `Activity` and `NeedsYou` were ported in round E.
+
+**The assembly of a board is not recoverable from lib.py.** The generator landed
+in one commit holding only `lib.py`, `today.py` and `board.py`; the five round-C
+and round-D boards had their *components* in `lib.py` and their page assembly
+nowhere — not on disk, not in git history. Round E re-derived three of them from
+the published `.dc.html` on the canvas (read it with the Artifact tool, then
+grep the section labels out locally). Do the same for `Chat` and `Request`
+rather than re-imagining them: their decisions are committed in their specs, and
+the labels are the index to which decision sits where.
 
 **The round-00 review, as a page:**
 <https://claude.ai/artifact/LiSuLrq2PQjfds8DM3Tp4Z> — the same content as
@@ -65,6 +78,11 @@ binding:
   than routing around them**.
 - Work in the worktree, commit there, never to `main`. The owner pushes and
   merges; there are no git credentials in this environment.
+- **Designing ahead of the surface is allowed** (ruled 2026-09-20). A screen may
+  be drawn against wire that does not exist yet; the developer adapts afterwards.
+  This does not relax the naming: every gap still gets logged as a contradiction
+  or a numbered request, because that list is what the developer works from. What
+  it replaces is the older rule that an unsourced screen does not pass.
 
 **Public-text rule:** never refer to the owner's employment. Say *second
 instance*.
@@ -128,8 +146,8 @@ SwiftUI's `.serif`.
 | Screen | Spec | State |
 | --- | --- | --- |
 | Chat | `screen-01-chat.md` | done — waiting states, preview pane, model picker |
-| Activity | `screen-02-activity.md` | done |
-| Needs You | `screen-03-needs-you.md` | done — bell, panel, full list |
+| Activity | `screen-02-activity.md` | done — **routines and the eighth chip §12** |
+| Needs You | `screen-03-needs-you.md` | done — bell, panel, full list, **`access_request` §9** |
 | Capture | `screen-04-capture.md` | done |
 | Today | `screen-05-today.md` | done, v6 — the spine, the day bar, calendar help |
 | Board | `screen-06-board.md` | done — five columns |
@@ -138,26 +156,32 @@ SwiftUI's `.serif`.
 **Not drawn:** card detail popover, Projects, Artifacts, Rooms, Knowledge,
 Agents, Usage, Settings, the Obsidian plugin's remaining surfaces.
 
-**Run detail is deliberately not drawn** — no `/api/runs/:id` and no
-`run_detail` query exist, so it cannot name its data source, and the brief says
-that does not pass. The query it needs is specified in `screen-02-activity.md`
-§7.
+**Run detail is now drawable, and undrawn.** `seed/queries/run_detail.yaml`
+and `GET /api/runs/:id` both exist (commit `3456aab`) — the handoff was stale on
+this. The query is *richer* than `screen-02-activity.md` §7 asked for: provider,
+cache read/write tokens, an exact tool-call join on `meta.turn_id` /
+`meta.message_id` (never a time window), and shadow-mode columns — candidate
+provider and model, a deterministic agreement score, the shadow's cost. §7's two
+open questions stand: whether `meta` is safe to render verbatim (it is
+agent-written, so P1 says it is data), and whether a run's *input* is
+recoverable at all — today it is not, so Run detail can show what a run cost and
+not what it was asked.
 
 ## 5. Debts, in priority order
 
-**Back-patch pass (deferred by the owner, now overdue).** Two are real design
-work, not cosmetics:
-- **Needs You** needs the `access_request` card kind — an agent asks for a
-  named area; Approve / Revise (narrow the prefix) / Decline; a re-ask after a
-  decline shows *asked again*.
-- **Activity** needs the new row type for the day's plan and standup draft.
+**Back-patch pass — round E did most of it.** Both pieces of real design work
+are drawn: the `access_request` card (`screen-03-needs-you.md` §9, board
+`NeedsYou`) and the routine row with its eighth chip
+(`screen-02-activity.md` §12, board `Activity`). `States` was ported unchanged.
 
-Separately, Chat, Activity, Needs You, Request and States were drawn **before**
-the facet system and are stylistically behind it. They are not wrong — their
-decisions are committed in their specs — but the canvas contradicts itself until
-they are regenerated.
+**Still behind the facet system: `Chat` and `Request`.** Their decisions are
+committed in their specs so they are not wrong, but the canvas contradicts
+itself until they are regenerated. `Request` also still renders the round-C
+panel header *"4 waiting · 1 snoozed"*, which C21 established cannot be built —
+`panel2()` is the corrected one, `bellpanel()` is not, and the Request board
+still calls `bellpanel()`.
 
-**39 contradictions** are logged in `review-00-plan.md`. C38 is closed. The ones
+**44 contradictions** are logged in `review-00-plan.md`. C38 is closed. C40–C44 are round E's. The ones
 that block drawing:
 - **C37** — `blocked_by_task` / `blocked_by_task_open` are specified in
   `daily-flow-spec.md` §3 and absent from `board.yaml`. Two screens draw the

@@ -590,7 +590,8 @@ Per `CLAUDE.md`. None edited. The ones the owner already logged in
 | **C35** | `ui-serif` resolves to Times outside Apple platforms, so the agent-prose face specified in `facets-and-colour.md` §5 rendered as Times in every browser. The stack now names its faces and stops at Georgia | `docs/product/design/tokens.json` `type.$meta.serif` |
 | **C36** | `docs/ops/board.md` specifies “the red number” for escalation counts and “a red chip says why”, but a lapsed lease, an overdue card and a blocked row are all **degraded** in the ratified state vocabulary. `failed` means <i>this broke</i>; red for escalation makes a busy board a red board | `docs/ops/board.md:102`, `:76`; `design-system.md` §2.1 |
 | **C37** | `daily-flow-spec.md` §3 says `board.yaml` gains `blocked_by_task` and `blocked_by_task_open`; neither column exists. Today and the Board both already draw the string they would carry | `seed/queries/board.yaml`; `daily-flow-spec.md` §3 |
-| **C38** | The board column is labelled “Addressed To” and its wire value is `assigned`. Correct — renaming the value would break every drop and every `runs` row — but the glossary carries neither, so the pair is undocumented | `docs/ops/board.md:34`; `docs/product/glossary.md` |
+| **C38** | ~~The board column is labelled “Addressed To” while its wire value is `assigned`.~~ **CLOSED 2026-09-20** by the owner: the column is now **Assigned**, matching the value. A label that disagrees with its own value is a bug waiting for someone to fix the wrong side of it | `docs/ops/board.md:34` |
+| **C39** | Two owner rulings edit `docs/ops/board.md`: the column reverts to **Assigned** (reversing the 2026-09-17 label ruling), and **Reported folds into Done** as a card facet — which `board.md` already half-argues, since Done-vs-Reported “is not on the row, it is reconstructed”. The board is five columns | `docs/ops/board.md:34`, `:44` |
 | **C15** | `design-system.md` §3.1's own body says the Mac sidebar rows carry "an optional count badge — shown only when the count is *actionable*", which contradicts the "only badge" rule three paragraphs later | `design-system.md:500` (§3.1) |
 
 Minor, not worth a row each: the PWA's `rooms` nav item is the one view with
@@ -708,7 +709,7 @@ Grouped, numbered, each with the recommendation so you can mostly say yes.
 | What | Why |
 | --- | --- |
 | Added this review | `design-brief.md` §8 asks for it before anything is drawn |
-| Logged 38 contradictions (C1–C38), none edited | `CLAUDE.md`: "Report contradictions, don't route around them" |
+| Logged 39 contradictions (C1–C39), none edited | `CLAUDE.md`: "Report contradictions, don't route around them" |
 | Computed the shipped presence-chip contrast on the ground actually painted | §2.2 checks `presence-* on surface`; nothing is drawn on `surface`. Three chips are below AA in light mode |
 | Proposed no token values yet | The accent decision (8.8) determines the palette, and it is unanswered |
 | Proposed one reordering (Insights before Knowledge) and one demotion (Rooms) | Data sources, and what a section is for |
@@ -762,4 +763,4 @@ It will be drawn as a section with the Settings-pane version beside it.
 Nothing is retracted. §6's recommendations are now decisions; §1.5's naming
 options are closed by **Usage**; C2 and C3 are resolved by decisions 3 and 12;
 C6, C7 and C8 by decision 6; C11 by decision 8. **C1, C4, C5, C9, C10, C12,
-C13, C14, C15, C16, C17, C18, C19, C20, C21, C22, C23, C24, C25, C26, C27, C28, C29, C30, C31, C32, C33, C34, C35, C36, C37 and C38 remain open** and are build-side fixes, not design ones.
+C13, C14, C15, C16, C17, C18, C19, C20, C21, C22, C23, C24, C25, C26, C27, C28, C29, C30, C31, C32, C33, C34, C35, C36, C37 and C39 remain open; **C38 is closed**** and are build-side fixes, not design ones.

@@ -134,3 +134,49 @@ Both paths stay live: `⌘J` opens the menu, `/` opens it inline, and typing
 projects, `[[` from notes. An assignment can only name a person you have a page
 for, so a typo is a miss rather than a new person — the same discipline as the
 meeting card refusing to guess an attendee's page.
+
+---
+
+# 7. Corrections and additions
+
+## 7.1 Priority — one shape, four steps
+
+Every priority is **the same badge**: same height, same minimum width, same
+radius. P1 is filled because it is the top of the scale and a filled badge
+needs no outline; P2–P4 are outlined in **`border-control`**, the one token
+that clears 3:1 on every ground in both themes.
+
+That was the bug: the earlier outline used `border-strong`, a separator at
+~1.8:1, which vanished on dark. The step down the scale is carried by the ink —
+`text-primary`, `text-secondary`, `text-tertiary` — so the four read as one
+ramp rather than two filled and two missing.
+
+**Unset priority renders nothing at all.** Absent and P3 are different facts
+and only one of them is something you decided.
+
+## 7.2 The spark keeps its hue everywhere
+
+`agent` purple on every surface, including inside a secondary or ghost button
+where the label is `text-primary`. An AI action should be findable by scanning
+for the colour, which only works if the colour is never traded away for local
+contrast. Verified at ≥3:1 on `surface` and `bg` in both themes.
+
+## 7.3 Agent prose is one component
+
+`Assistant` is the label, `Metis` is the name of the thing, and the treatment
+never varies: spark, `ASSISTANT`, timestamp, 👍/👎, serif body, `agent-quiet`
+ground. A revision explanation, a meeting briefing and a calendar suggestion
+are the same object with different text. The earlier Today board had two
+different treatments; that is fixed.
+
+## 7.4 `Work #418`
+
+An entity chip's label follows the capitalisation rule like everything else:
+the attribute name is Title Case, so **`Work #418`**. The number is the value
+and stays as it is.
+
+## 7.5 AM/PM
+
+All times render in 12-hour with AM/PM. Ranges carry the meridiem once when
+both ends share it — `9:30–10:00 AM` — and twice when they do not.
+

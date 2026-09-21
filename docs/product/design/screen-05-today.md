@@ -392,3 +392,90 @@ The card shows what came out of last time: action items created in the previous
 instance, and a link to its note. `vault_tasks.source` already supports
 `meeting:<path>`, so the tasks half is free once A3 exists; recurrence itself
 needs `series_id` on the event (B3).
+
+---
+
+# 14. v5 — first, anchored at now, and helping with the calendar
+
+## 14.1 Today is the first row
+
+Above Chat. The argument that put it second was that Chat is where you go with
+a question — but that is not how you *open* an app. You open it to find out
+where you stand, and then you ask something. The first row should answer "what
+is going on"; Chat is the second move.
+
+It also makes the landing screen the one that can send you anywhere: every
+other section is reachable from something on Today. Chat first made the app a
+chat client with attachments.
+
+## 14.2 The diff — one component, wherever something changed
+
+"Show me what changed" was appearing in three places with three treatments. It
+is **one component**: collapsed to a summary and two counts, expanding in place
+to added and removed lines, green and red, with unchanged lines as context —
+the grammar everyone already knows from a pull request.
+
+It carries a revision the assistant made to your day, a calendar change it is
+proposing, a task line it is about to write, and whatever comes after that.
+**Collapsed by default**, because the summary is enough nine times in ten.
+
+Green and red here are `ok` and `failed` doing a different job — *added* and
+*removed*, not *good* and *bad*. That is the one place in the product where a
+state token means something else, and it is safe because a diff is a closed
+context that announces itself.
+
+## 14.3 The day bar — meetings, travel and focus as first-class time
+
+Five segments: **Meetings · Travel · Focus Blocked · Tasks That Fit · Doesn't
+Fit**, against the working day rather than a task budget.
+
+Travel is its own segment because for anyone who drives to a meeting it is the
+difference between a plan that works and one that does not — and because it is
+derivable (`location` on the event, A1) rather than guessed.
+
+The bar is a **chart**, so it uses the `chart-*` ramp and not the facet
+channels — a distinction worth keeping, since the three channels govern chips
+and would be diluted by a fifth use. Segments are **separated by a 2px track
+gap** so they never touch: adjacency is then not carrying meaning, and each
+segment only has to clear 3:1 against the ground. Two faults were found and
+fixed this way — `chart-5` at 2.72:1 on `sunken`, and two dark segments 1.25:1
+apart.
+
+## 14.4 Attention — not a third filter
+
+**Today / All is a *scope*. "Upcoming" is a *position in time*.** Putting them
+in one control asks it to answer two questions, which is the mushy feeling. The
+segmented control stays as it is, and attention gets three behaviours instead:
+
+1. **The page opens at now.** Opening Today at 2 PM should not show you 8 AM.
+   This is most of the fix and it costs nothing.
+2. **The past folds itself** into one line — *3 done · 1 meeting · 2 carried
+   forward* — expanding in place. Not a preference: the morning *is* a summary
+   by the afternoon.
+3. **Now sticks** under the header as you scroll, like a section header in a
+   table view.
+
+One setting, for people who disagree with 2: *keep the morning open*. It is a
+setting rather than a control because it is a habit, not a decision you remake
+each time you look.
+
+## 14.5 Calendar help, and the line Metis does not cross
+
+**Two tiers, and the test is one question: does anyone else feel this?**
+
+- **A focus block** is an event on your calendar with no other attendees.
+  Nobody else is affected, it is reversible, and Metis can simply do it.
+- **Moving a meeting with people in it** changes *their* day — and
+  `ACTION_KINDS` excludes sending anything, so **Metistry cannot tell them it
+  moved**. So it stops one step short: it prepares the move and hands you the
+  message.
+
+The two buttons are deliberately different verbs: **Block** does it, **Draft**
+gets it ready. Moving someone's meeting without telling them is worse than
+leaving the day fragmented, and a product that quietly did it once would never
+be trusted with a calendar again.
+
+The offer is proactive but not a nag: it appears when the day is measurably
+fragmented — the bar is how it knows — and **Not Today** means not today, not
+*ask again in an hour*. `POST /events` already has a preview-then-execute
+shape, so the mechanism exists; what is new is the reason and the restraint.

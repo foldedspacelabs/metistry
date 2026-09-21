@@ -335,6 +335,50 @@
     }
   },
   {
+    "id": "knowledge_write.me_directory",
+    "door": "knowledge_write",
+    "who": "assistant",
+    "verb": "write",
+    "resource": {
+      "kind": "knowledge",
+      "door": "write",
+      "path": "Me/New.md"
+    },
+    "code": "forbidden",
+    "reason": "role_required",
+    "tell": "refuse",
+    "message": "not granted — `Me/New.md` belongs to the owner alone; no grant widens a role. Report what you needed with `requests_create` instead of retrying.",
+    "needs": { "door": "requests_create" },
+    "changed": "The gap docs/research/2026-09-21-agent-memory-lessons.md found (PR #254): `knowledge_write`'s ownership rule only ever ran against a note that already existed, so a brand-new page under `Me/` went straight through — `Me/` is discovered, never assumed (daily-flow-spec §6.6), and no area grant, not even the assistant's own default bare vault, was ever meant to reach it. `isUserOwnedPath` states it as a fact about the path, ahead of the ownership check, so it holds for a note that has never been written.",
+    "before": {
+      "code": null,
+      "message": null,
+      "at": "packages/core/src/access.ts:990 — a bare-vault write grant covered every path with no exception, `Me/` included"
+    }
+  },
+  {
+    "id": "knowledge_write.user_journal",
+    "door": "knowledge_write",
+    "who": "assistant",
+    "verb": "write",
+    "resource": {
+      "kind": "knowledge",
+      "door": "write",
+      "path": "Journal/2026-09-21.md"
+    },
+    "code": "forbidden",
+    "reason": "role_required",
+    "tell": "refuse",
+    "message": "not granted — `Journal/2026-09-21.md` belongs to the owner alone; no grant widens a role. Report what you needed with `requests_create` instead of retrying.",
+    "needs": { "door": "requests_create" },
+    "changed": "The same gap as `knowledge_write.me_directory`, for the user's own daily note (daily-flow-spec §5.1 D10): a NEW `Journal/<date>.md` was free for the taking before this note existed, the one file the owner's ruling names first (\"I can stay focused on Journal/date.md\"). `Journal/Plan/`, `Journal/Fold/` and `Journal/Standup/` are each a routine's own reserved subdirectory and are unaffected — `isUserOwnedPath` answers false for those.",
+    "before": {
+      "code": null,
+      "message": null,
+      "at": "packages/core/src/access.ts:990 — a bare-vault write grant covered every path with no exception, `Journal/<date>.md` included"
+    }
+  },
+  {
     "id": "knowledge_resources.tier_index",
     "door": "MCP resources/list",
     "who": "browser",

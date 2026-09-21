@@ -164,6 +164,8 @@ describe("the refusal catalogue is the committed golden file", () => {
       "knowledge_grep.tier_index",
       "knowledge_grep.prefix_outside",
       "knowledge_write.not_the_writer",
+      "knowledge_write.me_directory",
+      "knowledge_write.user_journal",
       "queries_list.no_grant",
       "queries_run.no_grant",
       "tasks_create.not_a_member",
@@ -218,6 +220,11 @@ describe("the refusal catalogue is the committed golden file", () => {
     // The two §2.6 found. Both are now `ok`.
     expect(may(owner, "read", { kind: "query", door: "console_query", name: "knowledge_pages", exposure: "route" }).ok).toBe(true);
     expect(may(owner, "read", { kind: "knowledge", door: "console_page", path: "Areas/Finance/tax.md" }).ok).toBe(true);
+    // `isUserOwnedPath`'s refusal is stated for every principal but the
+    // owner — it is theirs to begin with, so `may` never even reaches
+    // `mayKnowledge` for them (the short-circuit above).
+    expect(may(owner, "write", { kind: "knowledge", door: "write", path: "Me/profile.md" }).ok).toBe(true);
+    expect(may(owner, "write", { kind: "knowledge", door: "write", path: "Journal/2026-09-21.md" }).ok).toBe(true);
     for (const g of golden.filter((x) => x.who === "owner")) {
       expect({ id: g.id, code: g.code, reason: g.reason }, g.id).toEqual({ id: g.id, code: "invalid_request", reason: "not_knowledge" });
       expect(g.tell, g.id).toBe("refuse");

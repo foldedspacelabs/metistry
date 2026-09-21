@@ -1941,3 +1941,232 @@ NAVP3=pan(L,"TODAY FIRST",
   + nt(L,"It also makes the landing screen the one that can send you anywhere: every other section is reachable "
          "from something on Today. Chat first made the app a chat client with attachments.",12)
   + '</div></div>')
+
+
+# ===================== BACK-PATCH: access_request, and routines in Activity ==============
+# Added round E. Both are drawn against wire that does not fully exist yet — the owner
+# ruled 2026-09-20 that designing ahead of the surface is allowed and the developer adapts
+# afterwards. Every gap is named in the request list rather than drawn around.
+
+I["repeat"]='<path d="M4 12a8 8 0 0113.7-5.6L20 9"/><path d="M20 4v5h-5"/><path d="M20 12a8 8 0 01-13.7 5.6L4 15"/><path d="M4 20v-5h5"/>'
+
+# ---------- the scope triple: one line, the same words in the CLI, console and queue -----
+def scopeline(T,*,who,access,extras,label="WHAT IT HOLDS NOW"):
+    """`current_scope.line` (core's describeScope) rendered verbatim. The card never
+    composes this sentence itself — P3 §3.4: one record, said one way."""
+    return (f'<div style="background: {T["sunken"]}; border-radius: 10px; padding: 11px 13px; margin-top: 10px;">'
+            f'<div style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["tt"]}; '
+            f'margin-bottom: 7px;">{label}</div>'
+            f'<div style="display: flex; align-items: baseline; gap: 7px; flex-wrap: wrap; font-size: 12px; '
+            f'color: {T["ts"]};"><span style="color: {T["tp"]}; font-weight: 600;">{who}</span>'
+            f'<span style="opacity: 0.45;">·</span>{mono(access,T["tp"],12)}'
+            f'<span style="opacity: 0.45;">·</span><span>{extras}</span></div></div>')
+
+# ---------- what Approve does, and what it costs -----------------------------------------
+def approvebox(T,*,adds,trade=None):
+    """The widening, and the tier trade when there is one. `widenedGrants` sets tier
+    `folders` unconditionally, so an agent at `titles` LOSES whole-vault browsing — a
+    cost, drawn as one, in `degraded`. Colour never carries it alone: the words do."""
+    tr=""
+    if trade:
+        tr=(f'<div style="display: flex; gap: 8px; align-items: flex-start; background: {T["degq"]}; '
+            f'border-radius: 8px; padding: 9px 11px; margin-top: 10px;">'
+            f'<span style="display: flex; color: {T["deg"]}; flex-shrink: 0; margin-top: 1px;">{ic(I["warn"],13,2)}</span>'
+            f'<span style="font-size: 11.5px; color: {T["tp"]}; line-height: 1.5;">{trade}</span></div>')
+    return (f'<div style="background: {T["sunken"]}; border-radius: 10px; padding: 12px 14px; margin-top: 10px;">'
+            f'<div style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["tt"]}; '
+            f'margin-bottom: 8px;">WHAT APPROVE DOES</div>'
+            f'<div style="display: flex; align-items: baseline; gap: 9px;">'
+            f'<span style="font-size: 12px; color: {T["ts"]};">Adds</span>{mono(adds,T["tp"],12.5)}</div>{tr}</div>')
+
+# ---------- the agent's reason: data, never interface (P1) --------------------------------
+def askreason(T,text,*,folded=True):
+    more=(f'<div style="display: flex; align-items: center; gap: 6px; margin-top: 8px; color: {T["acc"]}; '
+          f'font-size: 11.5px; font-weight: 600;">{ic(I["chevr"],12,2.4)}<span>the rest of the reason</span></div>') if folded else ""
+    return (f'<div style="background: {T["agq"]}; border-radius: 10px; padding: 12px 14px; margin-top: 10px;">'
+            f'<div style="display: flex; align-items: center; gap: 6px; margin-bottom: 7px;">'
+            f'<span style="display: flex; color: {T["ag"]};">{ic(I["spark"],12,2.2)}</span>'
+            f'<span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["ag"]};">WHY IT IS ASKING</span></div>'
+            f'<div style="font-family: {SERIF}; font-size: 13px; color: {T["tp"]}; line-height: 1.55;">{text}</div>{more}</div>')
+
+# ---------- asked again after a decline --------------------------------------------------
+def askedagain(T,*,when,prior):
+    """`escalated` + `prior_proposal` + `prior_declined_at` on the payload. NEUTRAL, not
+    tinted: the three channels reserve tint for something being WRONG, and a second ask
+    is provenance, not a fault (ratified channel rule)."""
+    return (f'<div style="display: flex; gap: 9px; align-items: flex-start; background: {T["absq"]}; '
+            f'border-radius: 9px; padding: 10px 12px; margin-top: 12px;">'
+            f'<span style="display: flex; color: {T["ts"]}; flex-shrink: 0; margin-top: 1px;">{ic(I["repeat"],14,1.9)}</span>'
+            f'<div style="min-width: 0;"><div style="font-size: 12px; font-weight: 600; color: {T["tp"]};">Asked again</div>'
+            f'<div style="font-size: 11.5px; color: {T["ts"]}; line-height: 1.5; margin-top: 2px;">'
+            f'You declined this {when}. <span style="color: {T["acc"]}; font-weight: 600;">Read what you answered</span>'
+            f' — request #{prior}. The next decline closes it: the tool refuses a third ask.</div></div></div>')
+
+# ---------- Revise: a control that can only grant LESS ------------------------------------
+def prefixctl(T,*,asked,granting,children):
+    """The asked prefix is a CEILING. Every option is at or below it, so the gesture can
+    only narrow. Granting more than was asked is not a revision — it is a different
+    decision, and it is not on this control."""
+    opts=""
+    for p,kind in children:
+        if kind=="asked":
+            tag=f'<span style="font-size: 10.5px; color: {T["tt"]};">as asked</span>'
+            ink,wt=T["ts"],400
+        elif kind=="sel":
+            tag=(f'<span style="display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; '
+                 f'font-weight: 700; color: {T["aff"]};">{ic(I["check"],11,3)}granting</span>')
+            ink,wt=T["tp"],600
+        else:
+            tag=""
+            ink,wt=T["ts"],400
+        opts+=(f'<div style="display: flex; align-items: baseline; gap: 9px; padding: 5px 0;">'
+               f'<span style="font-family: {MONO}; font-size: 11.5px; color: {ink}; font-weight: {wt};">{p}</span>{tag}</div>')
+    return (f'<div style="background: {T["sunken"]}; border-radius: 10px; padding: 12px 14px; margin-top: 10px;">'
+            f'<div style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["tt"]}; '
+            f'margin-bottom: 9px;">REVISE — GRANT LESS THAN WAS ASKED</div>'
+            f'<div style="display: flex; align-items: baseline; gap: 9px; padding-bottom: 8px; '
+            f'border-bottom: 1px solid {T["border"]};">'
+            f'<span style="font-size: 12px; color: {T["ts"]};">Ceiling</span>{mono(asked,T["tp"],12.5)}</div>'
+            f'<div style="margin-top: 6px;">{opts}</div>'
+            f'<div style="font-size: 11.5px; color: {T["ts"]}; line-height: 1.55; margin-top: 8px; '
+            f'padding-top: 9px; border-top: 1px solid {T["border"]};">'
+            f'Nothing above {mono(asked,T["ts"],11.5)} is on this control. Granting more than was asked is not a '
+            f'revision of this request — it is a new decision, and it belongs on Agents.</div></div>')
+
+# ---------- a refusal, inline, leaving the row exactly where it was -----------------------
+def refusal(T,*,code,text):
+    """Every access refusal runs BEFORE the row is settled, so the card is still pending
+    and still answerable. The band says so, because a refusal that looks like a decision
+    is the lie P5 forbids."""
+    return (f'<div style="display: flex; gap: 9px; align-items: flex-start; background: {T["failq"]}; '
+            f'border-radius: 9px; padding: 10px 12px; margin-top: 12px;">'
+            f'<span style="display: flex; color: {T["fail"]}; flex-shrink: 0; margin-top: 1px;">{ic(I["warn"],14,2)}</span>'
+            f'<div style="min-width: 0;">'
+            f'<div style="font-size: 12px; color: {T["tp"]}; line-height: 1.55;">{text}</div>'
+            f'<div style="display: flex; align-items: center; gap: 7px; margin-top: 7px;">'
+            f'{mono(code,T["ts"],11)}'
+            f'<span style="font-size: 11.5px; color: {T["ts"]};">· still waiting on you — nothing was decided</span>'
+            f'</div></div></div>')
+
+# ---------- the card ---------------------------------------------------------------------
+ASK_REASON=("The lease comparables live in <b>Areas/Finance/Vendors</b> and I can see the titles but not the "
+            "text, so I cannot answer what the March renewal is being measured against without guessing.")
+
+def accesscard(T,*,state="pending",width=None,agent="drey-dev",trust="internal",when="12m",
+               asked="Areas/Finance",tier="titles"):
+    w=f"width: {width}px;" if width else ""
+    head=(f'<div style="display: flex; align-items: center; gap: 8px;">'
+          f'<span style="display: flex; color: {T["ts"]};">{ic(I["key"],15,1.8)}</span>'
+          f'<span style="font-size: 11px; font-weight: 700; letter-spacing: 0.07em; color: {T["ts"]};">ACCESS</span>'
+          f'<span style="flex-grow: 1;"></span>'
+          f'{mono(agent,T["ag"],11)}{trustmark(T,trust)}'
+          f'<span style="font-size: 11px; color: {T["tt"]};">{when}</span></div>')
+    title=(f'<div style="font-size: 15px; font-weight: 600; color: {T["tp"]}; margin-top: 10px; line-height: 1.35;">'
+           f'Read {mono(asked,T["tp"],14)}</div>')
+    trade=("It is browsing every title in the vault today. An area grant ends that: it would see titles "
+           "only inside its own folders." if tier=="titles" else None)
+    scope=scopeline(T,who="an agent",access=("titles: every folder" if tier=="titles" else f"folders: {asked}"),
+                    extras="no queries · every project")
+    body=head+title+askreason(T,ASK_REASON)+scope
+    acts=(f'<div style="display: flex; align-items: center; gap: 8px; margin-top: 14px;">'
+          f'{btn(T,"Approve","affirm",I["check"])}{btn(T,"Revise","secondary",I["pencil"])}'
+          f'{btn(T,"Decline","dest",I["x"])}'
+          f'<span style="flex-grow: 1;"></span>'
+          f'{btn(T,"","ghost",I["later"],icon_only=True,title="Later — it comes back on its own")}</div>')
+    if state=="pending":
+        body+=approvebox(T,adds=asked,trade=trade)+acts
+    elif state=="escalated":
+        body=head+title+askedagain(T,when="on the 18th",prior="311")+askreason(T,ASK_REASON,folded=False)+scope \
+             +approvebox(T,adds=asked,trade=trade)+acts
+    elif state=="revising":
+        body+=prefixctl(T,asked=asked,granting="Areas/Finance/Vendors",
+                        children=[("Areas/Finance","asked"),("Areas/Finance/Vendors","sel"),
+                                  ("Areas/Finance/Payroll",""),("Areas/Finance/Vendors/2026","")]) \
+             +approvebox(T,adds="Areas/Finance/Vendors",trade=trade)+acts
+    elif state=="refused":
+        mf=mono("agents/ops/taskuary.md",T["tp"],11.5)
+        body+=refusal(T,code="forbidden",
+                      text=("<b>taskuary</b>'s scope is configuration, not a grant: it is re-synced from its "
+                            "manifest, so approving this would be undone at the next crew sync. Decline this "
+                            "request and edit "+mf+"."))+acts
+    return (f'<div style="{w} background: {T["surface"]}; border: 1px solid {T["border"]}; border-radius: 12px; '
+            f'padding: 16px; box-sizing: border-box;">{body}</div>')
+
+# ===================== ACTIVITY — bands, rows, chips, and routines =======================
+FEED_CHIPS=[("All",True),("Captures",False),("Proposals",False),("Decisions",False),("Work",False),
+            ("Runs",False),("Routines",False),("Messages",False)]
+
+def chipbar(T,chips=None):
+    """Eight chips. Seven are the query's own `group` column plus All — `routine` is the
+    eighth and new (C43): a routine is neither a run the assistant made nor a message it
+    sent, and a system that runs on a schedule deserves to be filterable by it."""
+    return (f'<div style="display: flex; gap: 6px; flex-wrap: wrap;">'
+            + "".join(f'<span style="padding: 3.5px 10px; border-radius: 999px; font-size: 11.5px; font-weight: 500; '
+                      f'background: {T["accq"] if s else "transparent"}; color: {T["acc"] if s else T["ts"]}; '
+                      f'border: 1px solid {"transparent" if s else T["border"]};">{t}</span>'
+                      for t,s in (chips or FEED_CHIPS)) + '</div>')
+
+def band(T,label):
+    return (f'<div style="padding: 7px 16px; background: {T["sunken"]}; font-size: 10.5px; font-weight: 700; '
+            f'letter-spacing: 0.08em; color: {T["tt"]};">{label}</div>')
+
+def feedrow(T,*,glyph,actor,subject,detail,when,kind="agent",last=False,spark=False,tint=None,expand=None):
+    """`[kind glyph] [actor chip] [subject] … [time]`, detail on a second line, ONE left
+    edge. The actor sits before the subject so a long subject truncates into the gap
+    before the time column instead of pushing anything about."""
+    bd="" if last else f'border-bottom: 1px solid {T["border"]};'
+    ac=ent(T,"agent",actor,mono_=True) if kind=="agent" else ent(T,"plain",actor,mono_=True)
+    sp=(f'<span style="display: inline-flex; color: {T["ag"]}; margin-left: 2px;">{ic(I["spark"],12,2.2)}</span>') if spark else ""
+    ex=""
+    if expand:
+        ex=(f'<div style="display: flex; align-items: center; gap: 6px; margin-top: 6px; color: {T["acc"]}; '
+            f'font-size: 11.5px; font-weight: 600;">{ic(I["chevr"],12,2.4)}<span>{expand}</span></div>')
+    return (f'<div style="display: flex; gap: 11px; align-items: flex-start; padding: 11px 16px; {bd}">'
+            f'<span style="display: flex; flex-shrink: 0; color: {tint or T["tt"]}; margin-top: 1px;">{ic(glyph,17,1.8)}</span>'
+            f'<div style="flex-grow: 1; min-width: 0;">'
+            f'<div style="display: flex; align-items: center; gap: 8px; min-width: 0;">{ac}'
+            f'<span style="font-size: 13.5px; font-weight: 500; color: {T["tp"]}; overflow: hidden; '
+            f'text-overflow: ellipsis; white-space: nowrap;">{subject}</span>{sp}</div>'
+            f'<div style="font-size: 12px; color: {T["ts"]}; line-height: 1.45; margin-top: 3px;">{detail}</div>{ex}</div>'
+            f'<span style="flex-shrink: 0; font-size: 12px; color: {T["ts"]}; margin-top: 2px;">{when}</span></div>')
+
+def routineprose(T,text,*,when,w=None):
+    """A routine's output is agent-written prose, so it gets the one prose component:
+    spark, label, serif body, a verdict on it. Expanding the row shows THIS, not a diff."""
+    wd=f"width: {w}px;" if w else ""
+    return (f'<div style="{wd} background: {T["agq"]}; border-radius: 10px; padding: 13px 15px; '
+            f'margin: 2px 16px 12px 44px; box-sizing: border-box;">'
+            f'<div style="display: flex; align-items: center; gap: 7px;">'
+            f'<span style="display: flex; color: {T["ag"]};">{ic(I["spark"],13,2.2)}</span>'
+            f'<span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["ag"]};">METIS WROTE THIS</span>'
+            f'<span style="flex-grow: 1;"></span>'
+            f'<span style="font-size: 11px; color: {T["ts"]};">{when}</span></div>'
+            f'<div style="font-family: {SERIF}; font-size: 13px; color: {T["tp"]}; line-height: 1.6; margin-top: 9px;">{text}</div>'
+            f'<div style="display: flex; align-items: center; gap: 10px; margin-top: 11px;">'
+            f'{btn(T,"Open the file","secondary",I["note"])}'
+            f'<span style="flex-grow: 1;"></span>'
+            + thumbs(T) + '</div></div>')
+
+PLAN_PROSE=("Tomorrow is thin before 11 and full after it. I have put the two lease items in the morning because "
+            "the 11:00 review is the thing they feed, and left the 45 minutes after lunch empty rather than "
+            "filling it — you have moved that block three days running.")
+STANDUP_PROSE=("Yesterday: closed the vendor comparison and the Q4 pricing note. Today: the lease renewal reply "
+               "and the 11:00 design review. Nothing is blocked.")
+
+def routinerows(T,*,last_absent=False):
+    """The two rows this back-patch adds, plus the honest third. `plan-tomorrow` writes
+    one file and records a `routine_run`; a `too_early` tick writes NOTHING and gets no
+    row at all — the schedule working is not an event."""
+    rows=(feedrow(T,glyph=I["cal"],actor="plan-tomorrow",subject="Tomorrow's Plan",
+            detail='<span style="font-family: '+MONO+'; font-size: 11.5px;">Journal/Plan/2026-09-21.md</span> · 9 tasks, 2 meetings, 45m left empty',
+            when="6m",kind="system",spark=True,expand="what it wrote")
+          + routineprose(T,PLAN_PROSE,when="6:02 AM")
+          + feedrow(T,glyph=I["repeat"],actor="standup-draft",subject="Standup Draft",
+            detail='<span style="font-family: '+MONO+'; font-size: 11.5px;">Journal/Standup/2026-09-20.md</span> · covers yesterday · 2 closed',
+            when="1h",kind="system",spark=True,expand="what it wrote")
+          + routineprose(T,STANDUP_PROSE,when="9:02 AM"))
+    if last_absent:
+        rows+=feedrow(T,glyph=I["plug"],actor="knowledge-fold",subject="Knowledge Fold",
+            detail="did not run — no reconciler bridge, so there was nothing to read and nowhere to write",
+            when="2h",kind="system",tint=T["abs"],last=True)
+    return rows

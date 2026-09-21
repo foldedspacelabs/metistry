@@ -247,3 +247,27 @@ midnight purple.
 render time — a `color-mix()` against `--background-primary` — rather than
 shipping six hex values. The chip then adapts to any theme and keeps its
 contrast.
+
+### B9 · Travel time needs `location`, and a way to measure between two of them
+
+The day bar treats travel as first-class. That needs `location` on the event
+(part of A1) and a distance between consecutive locations.
+
+**Do the cheap version first:** a per-location default in `Me/profile.md`
+(`travel_minutes: { "Ann Arbor office": 25 }`), which needs no network, no map
+provider and no new dependency, and is right often enough for a day plan. A
+routing API can come later and is not worth the egress surface today.
+
+### B10 · Calendar writes: two tiers, enforced
+
+`POST /events` exists with a preview-then-execute shape. The design splits
+calendar changes by a single test — **does anyone else feel this?**
+
+**Add:** the console route distinguishes an event with **no other attendees**
+(creatable and deletable by Metis within autonomy) from one **with**
+attendees, which it may only prepare. The second tier must be incapable of
+writing, not merely discouraged — the same shape as the vault-task check route,
+enforced at the tool rather than in a prompt.
+
+`ACTION_KINDS` stays closed: Metistry never notifies attendees, so it never
+moves a meeting they have not been told about.

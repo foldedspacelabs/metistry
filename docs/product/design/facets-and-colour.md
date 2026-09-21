@@ -213,14 +213,24 @@ look formal and unformatted.
 The stack now names its faces and stops at Georgia:
 
 ```
-"New York", Charter, "Iowan Old Style", Georgia, serif
+Charter, Sitka, "Sitka Text", Constantia, Georgia, serif
 ```
 
-New York is Apple's companion serif to SF — a *voice* face rather than a
-document face. Charter and Iowan Old Style catch older Apple platforms, Georgia
-catches everything else, and **Times is never in the chain.** Three
-alternatives are drawn on the Today board for comparison; all four are system
-faces, so P7 holds either way.
+Every step is a **screen-first** face: Charter on Apple (Carter, 1987, drawn
+for low-resolution output), Sitka on Windows 8.1+ (Carter, 2013, with real
+optical sizes), Constantia on anything with Office, Georgia everywhere else.
+Times is never reached.
+
+**The native apps are not governed by this.** SwiftUI's `.serif` design gives
+New York on every current Apple OS, free, with Dynamic Type intact — so this
+stack is the console and the PWA only. An earlier draft put `"New York"` first
+in the web stack; **Chrome on macOS does not expose New York to CSS**, so that
+chain silently fell through to Georgia or Times, and the face was being judged
+on its fallback.
+
+Six candidates are drawn at working size on the `The assistant's voice` board,
+with a **Times control card** so it is visible which faces resolved on the
+machine doing the reading. P7 holds throughout: no webfont is loaded.
 
 ## 8.4 A calendar change is a shape, not a diff
 

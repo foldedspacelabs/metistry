@@ -132,11 +132,19 @@ own id nor `knowledge-fold`:
 forbidden: owned by user; propose instead
 ```
 
-New notes are always allowed. `source` is stamped from the credential and can
-never be claimed in an argument, so "notes I wrote" is a fact, not an
-assertion — and ownership is judged from the note ALREADY ON DISK, never
-from the incoming `content`, so a write cannot forge frontmatter to claim a
-note it does not already own.
+New notes are always allowed — **except under `Me/` or the user's own
+journal** (`Journal/<date>.md`, `Journal/Meetings/**`), which are refused
+whatever `source:` a new page would have had, because the check never even
+reaches ownership: `core`'s `may()` refuses the PATH first, for every
+principal but the user (`isUserOwnedPath`, docs/ops/assistant-tools.md "What
+a write is" §3). `Me/` is discovered, never assumed (daily-flow-spec §6.6),
+and this is that ruling made mechanical rather than left to the prompt below.
+`Journal/Plan/`, `Journal/Fold/` and `Journal/Standup/` are each a routine's
+own reserved subdirectory and are unaffected. `source` is stamped from the
+credential and can never be claimed in an argument, so "notes I wrote" is a
+fact, not an assertion — and ownership is judged from the note ALREADY ON
+DISK, never from the incoming `content`, so a write cannot forge frontmatter
+to claim a note it does not already own.
 
 **A note with no `source:` in its frontmatter at all is the user's,
 `USER_SOURCE`, not ownerless** (2026-09-19). That is exactly the shape of a

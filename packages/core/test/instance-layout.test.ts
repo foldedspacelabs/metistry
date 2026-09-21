@@ -16,7 +16,9 @@ import {
   instancePath,
   instanceStatePath,
   isProtectedPath,
+  isUserOwnedPath,
   isVaultPath,
+  JOURNAL_MACHINE_DIRS,
   MAX_AREA_PREFIX_LEN,
   validAgentAreaGrant,
   validAreaPrefix,
@@ -129,6 +131,39 @@ describe("isProtectedPath", () => {
   it("answers false for nonsense rather than throwing", () => {
     expect(isProtectedPath("")).toBe(false);
     expect(isProtectedPath(undefined as unknown as string)).toBe(false);
+  });
+});
+
+describe("isUserOwnedPath (daily-flow-spec §5.1 D10, §6.6: discovered, never assumed)", () => {
+  it("Me/ is the owner's, whole subtree", () => {
+    for (const p of ["Me", "Me/profile.md", "Me/Working Style.md", "Me/deep/nested.md"]) {
+      expect(isUserOwnedPath(p), p).toBe(true);
+    }
+  });
+
+  it("the dated journal note and Journal/Meetings/ are the owner's", () => {
+    for (const p of ["Journal/2026-09-21.md", "Journal/Meetings/2026-09-21-standup.md", "Journal"]) {
+      expect(isUserOwnedPath(p), p).toBe(true);
+    }
+  });
+
+  it("Journal/Plan, Journal/Fold and Journal/Standup are each a routine's own reserved subdirectory, not the user's", () => {
+    expect([...JOURNAL_MACHINE_DIRS]).toEqual(["Plan", "Fold", "Standup"]);
+    for (const dir of JOURNAL_MACHINE_DIRS) {
+      expect(isUserOwnedPath(`Journal/${dir}/2026-09-21.md`), dir).toBe(false);
+      expect(isUserOwnedPath(`Journal/${dir}`), dir).toBe(false);
+    }
+  });
+
+  it("leaves everything else alone — Areas/, People/, now.md, the machinery", () => {
+    for (const p of ["Areas/Health/Sleep.md", "People/Ada.md", "now.md", ".metistry/identity.yaml", "CLAUDE.md"]) {
+      expect(isUserOwnedPath(p), p).toBe(false);
+    }
+  });
+
+  it("answers false for nonsense rather than throwing", () => {
+    expect(isUserOwnedPath("")).toBe(false);
+    expect(isUserOwnedPath(undefined as unknown as string)).toBe(false);
   });
 });
 

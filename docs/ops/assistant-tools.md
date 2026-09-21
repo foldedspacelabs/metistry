@@ -447,7 +447,22 @@ Layers, honest about which carry the load:
    traversal, `.git`, symlinks and casing slips. Two
    independent refusals; the assistant cannot touch how the system
    behaves.
-3. **Ownership** (one writer, but not one owner — docs/ops/knowledge-fold.md
+3. **`Me/` and the user's own journal.** `Me/` is discovered, never assumed
+   (daily-flow-spec §6.6), and `Journal/<date>.md` / `Journal/Meetings/**`
+   are the user's alone, full stop (§5.1 D10 — "I can stay focused on
+   `Journal/date.md`, and you can keep a continuous set of edits going in
+   `Journal/Plan/*` and `Journal/Fold/*`"). `core`'s `may()` refuses a write
+   under either — `forbidden`, "belongs to the owner alone… Report what you
+   needed with `requests_create`" — **before** the ownership check below
+   ever runs, so a brand-new page is refused exactly like an existing one;
+   no area grant, not even the assistant's own default bare-vault one,
+   reaches them. `Journal/Plan/`, `Journal/Fold/` and `Journal/Standup/` are
+   each a routine's own reserved subdirectory and are untouched by this
+   rule. The same check runs a second time at the reconciler's bridge
+   (`apps/reconciler/src/paths.ts`'s `writeAllowed`), because a routine's own
+   commit (`plan-tomorrow`, the fold's routine half) reaches the vault
+   directly and never asks `may()` at all.
+4. **Ownership** (one writer, but not one owner — docs/ops/knowledge-fold.md
    "The guardrail at the tool"). An existing markdown note is refused
    (`forbidden`, "owned by \<source\>; propose instead") unless its
    frontmatter `source` is the assistant's own credential id or the evening
@@ -462,13 +477,13 @@ Layers, honest about which carry the load:
    `now.md` is stamped once. Ownership is read from the note ALREADY ON
    DISK, never from the incoming `content`, so a write cannot claim a note
    it does not already own by forging frontmatter in what it sends.
-4. **Provenance.** A markdown write gets `source: assistant` and
+5. **Provenance.** A markdown write gets `source: assistant` and
    `updated: <today>` merged into its frontmatter — replaced if present,
    appended if not, every other line kept byte for byte, nothing else
    invented. `source` is the credential, so a note claiming another
    author is corrected, not trusted. A block that is not a YAML mapping
    is refused, not guessed at.
-5. **No lost updates, and no way to ask for one.** `knowledge_read`
+6. **No lost updates, and no way to ask for one.** `knowledge_read`
    returns the note's `sha256`; the assistant passes it back as
    `expected_sha256`. A concurrent edit (yours in Obsidian, say) turns the
    write into `conflict` carrying the current hash, and the prompt tells it
@@ -477,7 +492,7 @@ Layers, honest about which carry the load:
    `conflict` instead of being overwritten blind. There is no unconditional
    write — you edit these files by hand, and the assistant has to have seen
    the bytes it replaces (ruled 2026-09-16).
-6. **Audit.** Every call — refusals included — is a `runs` row (below),
+7. **Audit.** Every call — refusals included — is a `runs` row (below),
    and every landed write is a commit in the instance repo's history.
 
 TODO: folding *approved requests* into pages is the evening routine's

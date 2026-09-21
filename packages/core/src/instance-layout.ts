@@ -232,6 +232,48 @@ export function isProtectedPath(rel: string): boolean {
   return (LEGACY_MACHINERY_ROOTS as readonly string[]).includes(segments[0]!);
 }
 
+/** Root directories that are the owner's own prose — nothing writes them but the owner's hand (daily-flow-spec §6.6: "discovered, never assumed"). */
+export const USER_OWNED_ROOTS = Object.freeze(["Me"] as const);
+
+/**
+ * `Journal/`'s machine-owned subdirectories (daily-flow-spec §5.1, D10): one
+ * writer each, none of them the user. Everything ELSE under `Journal/` —
+ * the dated note itself and `Journal/Meetings/` — is the user's, which is why
+ * `isUserOwnedPath` states the exception rather than a second allow-list: a
+ * new subdirectory nobody has named yet defaults to the user's, not to the
+ * machine's.
+ */
+export const JOURNAL_DIR = "Journal";
+export const JOURNAL_MACHINE_DIRS = Object.freeze(["Plan", "Fold", "Standup"] as const);
+
+/**
+ * **`Me/` and the user's own journal are refused to every principal but the
+ * user, at the tool** — the mechanical half of the owner's ruling that `Me/`
+ * is discovered, never assumed, and of daily-flow-spec §5.1's "one writer per
+ * file": `Journal/<date>.md` and `Journal/Meetings/**` are the user's,
+ * full stop, and no area grant — not even the assistant's default bare-vault
+ * one — widens that. `core`'s `may()` (`mayKnowledge`'s `write` door) asks
+ * this before its own area fence, so a narrowed assistant and the default one
+ * get the identical refusal; the reconciler's bridge (`apps/reconciler/src/paths.ts`
+ * `writeAllowed`) asks the same question for a write that never goes through
+ * `may()` at all — a routine's own commit, `intent.principal` something other
+ * than `user`.
+ *
+ * `Journal/Plan/`, `Journal/Fold/` and `Journal/Standup/` are deliberately
+ * NOT this: each is a routine's own reserved, one-writer subdirectory
+ * (`JOURNAL_MACHINE_DIRS`), and this predicate answers `false` for anything
+ * under one of them so those writes are untouched by this rule.
+ */
+export function isUserOwnedPath(rel: string): boolean {
+  if (typeof rel !== "string" || rel === "") return false;
+  const segments = rel.split("/");
+  const root = segments[0]!;
+  if ((USER_OWNED_ROOTS as readonly string[]).includes(root)) return true;
+  if (root !== JOURNAL_DIR) return false;
+  const sub = segments[1];
+  return sub === undefined || !(JOURNAL_MACHINE_DIRS as readonly string[]).includes(sub);
+}
+
 /**
  * True when `rel` is knowledge — content the reconciler walks, indexes and
  * embeds. False for the machinery (`.metistry/`), git, Obsidian's config,

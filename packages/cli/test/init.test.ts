@@ -38,7 +38,7 @@ describe("metistry init", () => {
     // (no `existsSync(join(dir, "inbox"))` check: macOS is case-insensitive, so
     // it would answer for `Inbox/`. The tracked-file list below is the real one.)
     // the daily-flow journal tree (docs/product/daily-flow-spec.md §5.1, §6.1, §6.6, ticket P1-8)
-    for (const p of ["Journal/README.md", "Journal/Plan/README.md", "Journal/Fold/README.md", "Journal/Standup/README.md", "Journal/Meetings/README.md", "People/README.md", "Projects/README.md", "Me/profile.md", "Me/Working Style.md"]) {
+    for (const p of ["Journal/README.md", "Journal/Plan/README.md", "Journal/Fold/README.md", "Journal/Standup/README.md", "Journal/Meetings/README.md", "People/README.md", "Projects/README.md", "Resources/README.md", "Me/profile.md", "Me/Working Style.md"]) {
       expect(existsSync(join(dir, ...p.split("/"))), p).toBe(true);
     }
     for (const t of ["Daily", "Meeting", "Plan", "Standup", "Fold", "Weekly"]) {
@@ -81,6 +81,7 @@ describe("metistry init", () => {
         "People/README.md",
         "Projects/README.md",
         "README.md",
+        "Resources/README.md",
         "Templates/Daily.md",
         "Templates/Fold.md",
         "Templates/Meeting.md",

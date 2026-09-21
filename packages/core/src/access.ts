@@ -15,7 +15,7 @@
 // through the console's `writeGrants`, one validator, one audit row
 // (invariant 2).
 
-import { INSTANCE_LAYOUT, isVaultPath, VAULT_ROOT_AREA } from "./instance-layout.js";
+import { INSTANCE_LAYOUT, isUserOwnedPath, isVaultPath, VAULT_ROOT_AREA } from "./instance-layout.js";
 
 /**
  * Read tiers (§4.11): default-deny, user-granted, attached to the token
@@ -426,6 +426,11 @@ export interface Needs {
    * caller. `GET /api/artifacts` for an artifact; `the file itself` for the
    * machinery, which no door serves as a page and which is read where it
    * lives — on disk, and in git.
+   *
+   * Also `knowledge_write`'s `Me/` / user-journal refusal (`isUserOwnedPath`):
+   * `requests_create` is the door that DOES take this — propose the change,
+   * the owner applies it — because no grant ever makes `knowledge_write` the
+   * right one for a page that is always the owner's.
    */
   readonly door?: string;
 }
@@ -987,6 +992,13 @@ function mayKnowledge(p: Principal, door: KnowledgeDoor, path: string, settled: 
       // already answered a non-vault path with the classification by here.
       if (p.role !== "assistant") return no("forbidden", "role_required", REFUSAL.role_required("knowledge_write", "the instance assistant"));
       if (scope.tier !== "areas") return hidden("forbidden", "scope_required");
+      // `Me/` and the user's own journal (`isUserOwnedPath`): discovered,
+      // never assumed (daily-flow-spec §6.6), one writer and it is not this
+      // one (§5.1 D10) — a statement about the PATH, ahead of the area fence,
+      // so a bare-vault grant (`areas: null`, the assistant's own default)
+      // cannot reach it either. It SPEAKS, because no grant will ever unlock
+      // it: the remedy is `requests_create`, not `request_access`.
+      if (isUserOwnedPath(path)) return no("forbidden", "role_required", REFUSAL.role_required(path, "the owner"), { door: "requests_create" });
       return scope.areas === null || underAreas(path, scope.areas) ? OK : hidden("forbidden", "scope_required");
 
     case "resources":

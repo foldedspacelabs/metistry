@@ -4,7 +4,7 @@
 
 import { lstat, readdir, realpath } from "node:fs/promises";
 import { join, sep } from "node:path";
-import { INSTANCE_LAYOUT, NON_VAULT_ROOTS, PROTECTED_ROOT_FILES, isProtectedPath } from "@foldedspacelabs/metistry-core";
+import { INSTANCE_LAYOUT, NON_VAULT_ROOTS, PROTECTED_ROOT_FILES, isProtectedPath, isUserOwnedPath } from "@foldedspacelabs/metistry-core";
 
 export type PathRefusal =
   | "invalid_request" // malformed / traversal / absolute / bad casing / control chars
@@ -218,13 +218,25 @@ export async function confine(repoRoot: string, input: unknown): Promise<{ ok: t
  * user's name (§4.7, so history reads honestly), and the credential still has
  * to be one that may write that path. The never-writable set (`.git`,
  * `instance-migrations/`) is refused for everyone before this is reached.
+ *
+ * `Me/` and the user's own journal (`isUserOwnedPath`, core) get the same
+ * treatment as a protected path, one step down: not the machinery, so any
+ * `principal` may still CLAIM them, but only `user` may WRITE them, whatever
+ * `caller` is asking on whose behalf. This is the other half of the rule
+ * `mayKnowledge`'s `write` door states for `knowledge_write` — a routine's
+ * own commit (`plan-tomorrow`, the fold's routine half) reaches the vault
+ * through this function directly, never through `may()`, so the tool-level
+ * refusal alone would have left this door open.
  */
 export function writeAllowed(rel: string, principal: string, caller: CallerClass): boolean {
   if (!mayClaim(caller, principal)) return false;
-  if (!isProtected(rel)) return true;
-  if (principal !== USER_PRINCIPAL) return false;
-  const allowed = CALLER_AUTHORITY[caller].protectedPaths;
-  return allowed === "all" || allowed.includes(rel);
+  if (isProtected(rel)) {
+    if (principal !== USER_PRINCIPAL) return false;
+    const allowed = CALLER_AUTHORITY[caller].protectedPaths;
+    return allowed === "all" || allowed.includes(rel);
+  }
+  if (isUserOwnedPath(rel)) return principal === USER_PRINCIPAL;
+  return true;
 }
 
 export function validPrincipal(p: unknown): p is string {

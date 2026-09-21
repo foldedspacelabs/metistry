@@ -13,10 +13,12 @@
 // apple-fm` over `/classify` — stays rejected.
 //
 // WHAT IS DELIBERATELY REFUSED, each with the field named:
-//   stream: true    no SSE mapping is proven (PoC-19 did not verify it)
-//   tools:          tool calling is out of scope for v1
-//   n > 1           one generation per request; serial by design
-//   embeddings      Apple exposes no embedding model here
+//   stream: true       no SSE mapping is proven (PoC-19 did not verify it)
+//   tools:             tool calling is out of scope for v1
+//   n > 1              one generation per request; serial by design
+//   logprobs: true     Apple Foundation Models exposes no token probabilities
+//   top_logprobs > 0   same — nothing to return even if `logprobs` is unset
+//   embeddings         Apple exposes no embedding model here
 //
 // ERROR SHAPE. `/check` and `/classify` keep Metistry's uniform envelope
 // (`{error:{code,message}}`, core's `errorEnvelope`). `/v1/*` answers in
@@ -100,6 +102,8 @@ export function translateChatRequest(raw: unknown): Translated {
   if (body.stream === true) return bad("`stream` is not implemented — this provider answers in one piece (docs/ops/compute.md \"Apple Foundation Models\")", "stream_unsupported");
   if (body.tools !== undefined) return bad("`tools` is not supported: tool calling is out of scope for this provider's v1 surface", "tools_unsupported");
   if (typeof body.n === "number" && body.n !== 1) return bad("`n` must be 1 — this provider generates one completion per request, serially", "n_unsupported");
+  if (body.logprobs === true) return bad("`logprobs` is not supported: Apple Foundation Models exposes no token probabilities", "logprobs_unsupported");
+  if (typeof body.top_logprobs === "number" && body.top_logprobs !== 0) return bad("`top_logprobs` is not supported: Apple Foundation Models exposes no token probabilities", "logprobs_unsupported");
 
   const messages = body.messages;
   if (!Array.isArray(messages) || messages.length === 0) return bad("`messages` is required and must be a non-empty array", "missing_messages");

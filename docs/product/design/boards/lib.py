@@ -10,6 +10,7 @@ import os
 import pathlib
 ROOT=pathlib.Path(os.environ.get("METISTRY_CANVAS","./canvas"))
 PROJ=ROOT/"project"
+PROJ.mkdir(parents=True,exist_ok=True)   # a board module writes straight into it; a fresh canvas dir should not need mkdir -p first
 SANS='-apple-system,BlinkMacSystemFont,system-ui,"Segoe UI Variable Text","Segoe UI",Roboto,Cantarell,"Helvetica Neue",sans-serif'
 SERIF="Charter,Sitka,'Sitka Text',Constantia,Georgia,serif"
 MONO='ui-monospace,SFMono-Regular,Menlo,Consolas,monospace'

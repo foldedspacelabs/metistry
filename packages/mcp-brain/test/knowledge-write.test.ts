@@ -91,6 +91,30 @@ describe("writeKnowledge rules", () => {
     expect(calls).toHaveLength(1);
   });
 
+  // MISUSE (the gap docs/research/2026-09-21-agent-memory-lessons.md found,
+  // PR #254): `ownershipRefusal` below only ever runs against a note that
+  // already exists, so a brand-new page under `Me/` or the user's own
+  // journal went straight through the default bare-vault grant — the one
+  // grant every instance ships with. `Me/` is discovered, never assumed
+  // (daily-flow-spec §6.6), and `Journal/<date>.md` is the user's alone
+  // (§5.1 D10); no reader is even needed to refuse them, unlike an ordinary
+  // note whose ownership can only be judged once it exists.
+  it("Me/ and the user's own journal are refused for the assistant, NEW note included, no reader required", async () => {
+    const { writer, calls } = recorder(okReply);
+    for (const bad of ["Me/New.md", "Me/profile.md", "Me/deep/nested.md", "Journal/2026-09-21.md", "Journal/Meetings/2026-09-21-standup.md"]) {
+      const r = await writeKnowledge(assistant, { path: bad, content: "x", message: "m" }, writer, NOW);
+      expect(r, bad).toMatchObject({ ok: false, code: "forbidden" });
+      expect(r.ok === false && r.message, bad).toMatch(/belongs to the owner alone.*requests_create/s);
+    }
+    expect(calls).toHaveLength(0);
+    // the routine's own reserved Journal subdirectories are untouched by
+    // this rule — each is its own one-writer place (§5.1), not the user's
+    for (const ok of ["Journal/Plan/2026-09-22.md", "Journal/Fold/2026-09-21.md", "Journal/Standup/2026-09-21.md"]) {
+      expect((await writeKnowledge(assistant, { path: ok, content: "x", message: "m" }, writer, NOW)).ok, ok).toBe(true);
+    }
+    expect(calls).toHaveLength(3);
+  });
+
   it("no writer → not_available (a capability gap, not a permission)", async () => {
     expect(await writeKnowledge(assistant, { path: "now.md", content: "x", message: "m" }, undefined, NOW)).toMatchObject({ ok: false, code: "not_available" });
   });

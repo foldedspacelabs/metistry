@@ -187,6 +187,32 @@ describe("protected paths (§4.7)", () => {
   });
 });
 
+// `Me/` and the user's own journal (daily-flow-spec §5.1 D10, §6.6): not the
+// §4.7 machinery, so any `principal` may still CLAIM them (`mayClaim`), but
+// only `user` may WRITE them — the other half of the rule `mayKnowledge`'s
+// `write` door states for `knowledge_write`, for a write that reaches the
+// vault straight from a routine (`plan-tomorrow`, the fold's routine half)
+// and never goes through `may()` at all.
+describe("Me/ and the user's own journal are the owner's, whatever the caller (isUserOwnedPath)", () => {
+  it("refuses every non-user principal, whichever caller class is asking", () => {
+    for (const p of ["Me/New.md", "Me/profile.md", "Journal/2026-09-21.md", "Journal/Meetings/2026-09-21-standup.md"]) {
+      expect(isProtected(p), p).toBe(false); // this is NOT the §4.7 machinery
+      expect(writeAllowed(p, "assistant", "console"), p).toBe(false);
+      expect(writeAllowed(p, "plan-tomorrow", "console"), p).toBe(false);
+      expect(writeAllowed(p, "knowledge-fold", "console"), p).toBe(false);
+      expect(writeAllowed(p, "user", "console"), p).toBe(true);
+      expect(writeAllowed(p, "user", "owner"), p).toBe(true);
+    }
+  });
+
+  it("leaves the machine-owned Journal subdirectories alone — each is its own one-writer place, and this rule is not it", () => {
+    for (const p of ["Journal/Plan/2026-09-22.md", "Journal/Fold/2026-09-21.md", "Journal/Standup/2026-09-21.md"]) {
+      expect(writeAllowed(p, "plan-tomorrow", "console"), p).toBe(true);
+      expect(writeAllowed(p, "assistant", "console"), p).toBe(true);
+    }
+  });
+});
+
 describe("confine (filesystem)", () => {
   let repo: TempRepo;
   beforeAll(async () => {

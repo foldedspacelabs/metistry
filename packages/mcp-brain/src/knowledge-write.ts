@@ -324,9 +324,14 @@ export async function writeKnowledge(
   if (isProtectedPath(args.path)) return { ok: false, code: "invalid_request", message: "that path defines how the system behaves — it is the user's hand alone (§4.7)", meta };
   // Writes never exceed reads. Asked AFTER the two shape refusals above, so
   // a path that is not vault content keeps its `invalid_request` rather than
-  // becoming a scope refusal.
+  // becoming a scope refusal. Most of this door's refusals HIDE (message
+  // `""`, the canonical "not granted"), but `Me/` and the user's own journal
+  // SPEAK (`isUserOwnedPath`, core) — no grant will ever unlock them, so the
+  // one useful thing to say is "propose it instead" — and a refusal that
+  // speaks is worth nothing if the sentence is dropped on the way out
+  // (mirrors mcp-brain's own `refuse()` in outcome.ts).
   const scoped = may(p, "write", { kind: "knowledge", door: "write", path: args.path });
-  if (!scoped.ok) return { ok: false, code: scoped.code, meta };
+  if (!scoped.ok) return { ok: false, code: scoped.code, message: scoped.message === "" ? undefined : scoped.message, meta };
   if (!writer) {
     return { ok: false, code: "not_available", message: "knowledge writes are not configured in this deployment (the vault bridge is absent)", meta };
   }

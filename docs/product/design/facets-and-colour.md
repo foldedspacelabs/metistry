@@ -180,3 +180,75 @@ and stays as it is.
 All times render in 12-hour with AM/PM. Ranges carry the meridiem once when
 both ends share it — `9:30–10:00 AM` — and twice when they do not.
 
+
+---
+
+# 8. Corrections, second pass
+
+## 8.1 One facet order, wherever a task appears
+
+> **Priority · Due · Estimate · People · Links · State**
+
+Declared once and obeyed everywhere a task is drawn — in a gap, under *Last
+time* on a meeting card, on the All list, in the plugin. The *Last time* row
+was being hand-assembled inline; it is now the same component, indented. One
+row builder, one order, no exceptions.
+
+## 8.2 Due and Estimate are glyph-prefixed, not bare text
+
+A **half-rung between plain text and a chip**: a calendar glyph then the date,
+a clock glyph then the estimate. No pill, because neither is a target you can
+open — but they are the two facets the eye hunts for first, and a glyph is what
+lets it skip the words.
+
+When Due goes overdue it escalates into the tinted chip, glyph and all, which
+is the ladder doing exactly what it exists for.
+
+## 8.3 The serif — named faces, and why Times was the problem
+
+`ui-serif` is a *generic* family. On Apple it resolves to New York, but in a
+browser it falls straight through to **Times** — which is what made the prose
+look formal and unformatted.
+
+The stack now names its faces and stops at Georgia:
+
+```
+"New York", Charter, "Iowan Old Style", Georgia, serif
+```
+
+New York is Apple's companion serif to SF — a *voice* face rather than a
+document face. Charter and Iowan Old Style catch older Apple platforms, Georgia
+catches everything else, and **Times is never in the chain.** Three
+alternatives are drawn on the Today board for comparison; all four are system
+faces, so P7 holds either way.
+
+## 8.4 A calendar change is a shape, not a diff
+
+A diff is a *text* grammar: top to bottom, every line equal, and it says
+nothing about duration or adjacency. A calendar change is about **shape** — how
+long the blocks are, what sits beside what, how big the hole in the middle is.
+
+So calendar proposals render as **two strips, now and after**, with moved
+blocks in `agent` and new focus blocks in `accent`. The diff keeps everything
+textual: a revision to the plan, a task line about to be written, a template
+change. One grammar per kind of change, rather than one stretched over both.
+
+## 8.5 The plugin hint is an overlay
+
+A hint that reflows the document is unusable. It is **pinned to the right
+margin of the active line**, out of the text flow, `pointer-events: none`, and
+only ever on the line holding the cursor. Nothing below it moves — not when it
+appears, not when it goes, not when the line rewraps.
+
+Inline was the alternative and it is worse: it pushes the line into a second
+row exactly when you are typing fast.
+
+## 8.6 A chip is a control, not a label
+
+Once metadata is on the line it is **editable in place**: click `P1` for the
+priority list, the date chip for a date, the person chip for the People/ list.
+Each writes the same shorthand back into the line. The list shows the shorthand
+again — `p3` beside *Normal* — because editing is the second place you learn
+it. **Remove is on the same menu**: a chip you can add and cannot take off is a
+trap, and hovering for a tiny × is not something you can do while talking in a
+meeting.

@@ -271,3 +271,27 @@ enforced at the tool rather than in a prompt.
 
 `ACTION_KINDS` stays closed: Metistry never notifies attendees, so it never
 moves a meeting they have not been told about.
+
+### B11 · Rescheduling is a per-user policy, and Metis acts only inside it
+
+Rescheduling is opt-in, and the rules are personal: a manager moving their own
+1:1s is a different risk from someone shuffling a customer call, and no default
+can tell them apart.
+
+**Add** a small policy, asked once and editable in Settings:
+
+| Setting | Default | Why it exists |
+| --- | --- | --- |
+| Meetings Metis may move | **ones I own** | a meeting someone else called is not yours to move |
+| Least notice | 2 hours | below this Metis proposes and never moves |
+| Protected hours | none | hours it may move things *out of* but never *into* |
+| Other people's calendars | free/busy, attendees only | never more than whether a slot is taken |
+| Tell them | draft for me | Metistry never sends |
+
+Every offer must name the rule that let it through — *"you own this meeting,
+and your policy allows moving it with 2 hours' notice"* — and **per-meeting
+opt-out sits on the event** (*never move this one*), because there is always
+one recurring meeting that looks movable and is not. A policy without an escape
+hatch gets switched off entirely the first time it is wrong.
+
+This is the user-facing half of B10; B10 is the enforcement half.

@@ -1,5 +1,5 @@
 // GENERATED — do not edit.
-// Source: docs/product/design/tokens.json (v2.6.1, 2026-09-19)
+// Source: docs/product/design/tokens.json (v2.6.2, 2026-09-19)
 // Rebuild: node ops/scripts/build-design-tokens.mjs   (--check fails on drift)
 //
 // The design system's semantic roles, for SwiftUI. No token names a hue, a

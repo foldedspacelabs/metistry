@@ -588,6 +588,9 @@ Per `CLAUDE.md`. None edited. The ones the owner already logged in
 | **C33** | 👍/👎 exists only on `outbound_messages` in Chat, though agent prose now appears on Today, on meeting briefings and in revision explanations. One feedback signal, keyed by a `prose_id`, is request B7 | `docs/ops/reply-feedback.md`; `docs/product/design/today-hub-requests.md` B7 |
 | **C34** | A stacked bar of five touching segments cannot be built from the `chart-*` ramp: it is spaced evenly by luminance for line marks, so consecutive steps sit ~1.31:1 apart and two dark steps 1.25:1. The day bar separates its segments with a track gap instead; §3.x should say that touching marks need a gap or a non-consecutive selection | `docs/product/design/tokens.json` chart-1..5; `docs/product/design/screen-05-today.md` §14.3 |
 | **C35** | `ui-serif` resolves to Times outside Apple platforms, so the agent-prose face specified in `facets-and-colour.md` §5 rendered as Times in every browser. The stack now names its faces and stops at Georgia | `docs/product/design/tokens.json` `type.$meta.serif` |
+| **C36** | `docs/ops/board.md` specifies “the red number” for escalation counts and “a red chip says why”, but a lapsed lease, an overdue card and a blocked row are all **degraded** in the ratified state vocabulary. `failed` means <i>this broke</i>; red for escalation makes a busy board a red board | `docs/ops/board.md:102`, `:76`; `design-system.md` §2.1 |
+| **C37** | `daily-flow-spec.md` §3 says `board.yaml` gains `blocked_by_task` and `blocked_by_task_open`; neither column exists. Today and the Board both already draw the string they would carry | `seed/queries/board.yaml`; `daily-flow-spec.md` §3 |
+| **C38** | The board column is labelled “Addressed To” and its wire value is `assigned`. Correct — renaming the value would break every drop and every `runs` row — but the glossary carries neither, so the pair is undocumented | `docs/ops/board.md:34`; `docs/product/glossary.md` |
 | **C15** | `design-system.md` §3.1's own body says the Mac sidebar rows carry "an optional count badge — shown only when the count is *actionable*", which contradicts the "only badge" rule three paragraphs later | `design-system.md:500` (§3.1) |
 
 Minor, not worth a row each: the PWA's `rooms` nav item is the one view with
@@ -705,7 +708,7 @@ Grouped, numbered, each with the recommendation so you can mostly say yes.
 | What | Why |
 | --- | --- |
 | Added this review | `design-brief.md` §8 asks for it before anything is drawn |
-| Logged 35 contradictions (C1–C35), none edited | `CLAUDE.md`: "Report contradictions, don't route around them" |
+| Logged 38 contradictions (C1–C38), none edited | `CLAUDE.md`: "Report contradictions, don't route around them" |
 | Computed the shipped presence-chip contrast on the ground actually painted | §2.2 checks `presence-* on surface`; nothing is drawn on `surface`. Three chips are below AA in light mode |
 | Proposed no token values yet | The accent decision (8.8) determines the palette, and it is unanswered |
 | Proposed one reordering (Insights before Knowledge) and one demotion (Rooms) | Data sources, and what a section is for |
@@ -759,4 +762,4 @@ It will be drawn as a section with the Settings-pane version beside it.
 Nothing is retracted. §6's recommendations are now decisions; §1.5's naming
 options are closed by **Usage**; C2 and C3 are resolved by decisions 3 and 12;
 C6, C7 and C8 by decision 6; C11 by decision 8. **C1, C4, C5, C9, C10, C12,
-C13, C14, C15, C16, C17, C18, C19, C20, C21, C22, C23, C24, C25, C26, C27, C28, C29, C30, C31, C32, C33, C34 and C35 remain open** and are build-side fixes, not design ones.
+C13, C14, C15, C16, C17, C18, C19, C20, C21, C22, C23, C24, C25, C26, C27, C28, C29, C30, C31, C32, C33, C34, C35, C36, C37 and C38 remain open** and are build-side fixes, not design ones.

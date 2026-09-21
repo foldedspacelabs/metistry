@@ -113,6 +113,8 @@ describe("apple-fm /v1 — the provider surface", () => {
       [{ messages: [{ role: "user", content: "x" }], stream: true }, "stream_unsupported"],
       [{ messages: [{ role: "user", content: "x" }], tools: [] }, "tools_unsupported"],
       [{ messages: [{ role: "user", content: "x" }], n: 2 }, "n_unsupported"],
+      [{ messages: [{ role: "user", content: "x" }], logprobs: true }, "logprobs_unsupported"],
+      [{ messages: [{ role: "user", content: "x" }], top_logprobs: 5 }, "logprobs_unsupported"],
       [{ messages: [] }, "missing_messages"],
       [{ messages: [{ role: "system", content: "only system" }] }, "missing_messages"],
       [{ messages: [{ role: "user", content: [{ type: "text", text: "x" }] }] }, "invalid_message"],
@@ -161,5 +163,11 @@ describe("translateChatRequest (pure)", () => {
     expect(t).toMatchObject({ ok: true, request: { max_tokens: 64 } });
     expect((t as { request: Record<string, unknown> }).request.temperature).toBeUndefined();
     expect(translateChatRequest({ messages: [{ role: "user", content: "x" }], temperature: 0.7 })).toMatchObject({ ok: true, request: { temperature: 0.7 } });
+  });
+
+  it("leaves `logprobs: false`, `top_logprobs: 0`, and an absent `logprobs` unrefused", () => {
+    expect(translateChatRequest({ messages: [{ role: "user", content: "x" }] })).toMatchObject({ ok: true });
+    expect(translateChatRequest({ messages: [{ role: "user", content: "x" }], logprobs: false })).toMatchObject({ ok: true });
+    expect(translateChatRequest({ messages: [{ role: "user", content: "x" }], logprobs: false, top_logprobs: 0 })).toMatchObject({ ok: true });
   });
 });

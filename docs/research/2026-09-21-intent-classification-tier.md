@@ -46,26 +46,43 @@ fixtures come from.
    $0.042/Mtok input, output free, but ZDR is enterprise-only, and a classifier
    on the input path would see *every message the owner types* before any data
    policy has been applied (§2.2).
-4. **The technique both of them are selling is free, and it is already on our
-   wire.** Nimble's own description: score the model's logits for the allowed
+4. **Laya is the fastest thing measured here, the cleanest-licensed, and still
+   no — on runtime alone.** Apache-2.0 code *and* weights, offline, \$0, and
+   **p50 40 ms / p95 42 ms on this Mac's GPU** (155 ms on CPU), deterministic
+   across repeats, answering a second `compound` question in the same forward
+   pass. It is a **Python library with no HTTP surface**, against CLAUDE.md's
+   "no Python anywhere". It is also honest that it is "a fast base to
+   specialise, not a zero-shot decision engine" — 0.783 on MASSIVE-intent
+   English (§2.3).
+5. **Laya teaches the five things the other two do not, and they are free.**
+   Chiefly: *"Ask what the text says, not what to do about it"* — which is
+   §3.2's invariant-safe shape, discovered independently for accuracy
+   reasons. Also: resolve numbers in code before asking; put a **deterministic
+   check ahead of the model**, because confidence cannot detect
+   out-of-distribution input (**0.000 accuracy at 0.952 confidence** on Khmer);
+   **fit** thresholds rather than choose them (ECE 0.466 → 0.081); and
+   shortlist past ~20 options. That last one is a **third independent
+   option-count ceiling inside the brief's 20–50 range** (§2.3.1).
+6. **The technique both Nimble and Jev are selling is free, and it is already
+   on our wire.** Nimble's own description: score the model's logits for the allowed
    answer tokens, "so there is no generated JSON to parse." **Measured today:
    `logprobs: true, top_logprobs: 20, max_tokens: 1, reasoning_effort: "none"`
    works on Ollama's OpenAI-compatible `/v1/chat/completions`, and the same
    fields come back populated from the bundled `llama-server`'s.** Fifteen intents, `gemma4:e4b-it-qat`:
    **p50 155 ms, p95 166 ms** — plus TypeSafe's own published confidence
-   statistic, recomputed in our code from the returned distribution (§2.4).
-5. **Against the honest control — same server, same model, same intents — the
+   statistic, recomputed in our code from the returned distribution (§2.5).
+7. **Against the honest control — same server, same model, same intents — the
    JSON-schema route costs p50 336 ms for the same answers.** The
    answer-token trick buys **2.2× latency and a calibrated-looking confidence
    number**, not accuracy. An earlier cross-server comparison suggested it
    bought accuracy too; the control says that was LM Studio's reasoning
-   channel, which is PoC-16 finding 2 reproduced (§2.3, §2.4).
-6. **Embeddings are 20× cheaper again and not usable yet.** Nearest-centroid
+   channel, which is PoC-16 finding 2 reproduced (§2.4, §2.5).
+8. **Embeddings are 20× cheaper again and not usable yet.** Nearest-centroid
    over the `nomic-embed-text` the vault search already runs: **p50 9 ms**, and
    with no labelled fixtures the only available centroid is the intent's own
    description — margins of 0.005–0.083 cosine, which is noise. This is the
-   *phase-3* candidate, unlocked by the fixture harvest, not a starter (§2.5).
-7. **Invariant 4 survives, and the repo already contains the precedent for how.**
+   *phase-3* candidate, unlocked by the fixture harvest, not a starter (§2.6).
+9. **Invariant 4 survives, and the repo already contains the precedent for how.**
    A classifier that names an ACTION from the closed enum is not routing. A
    classifier that says "escalate to the big model" **is** a model choosing a
    model, and PoC-15/PoC-16 already tested exactly that and left the invariant
@@ -73,12 +90,13 @@ fixtures come from.
    the classifier emits `{intent, confidence, compound}` as a **fact** onto the
    message; `rules.yaml` grows a `confidence` clause; **the decision stays in
    the rules file, which is a §4.7 protected path** (§3).
-8. **Recommendation: yes, phased, and phase 1 adds no dependency.** PoC-20
+10. **Recommendation: yes, phased, and phase 1 adds no dependency.** PoC-20
    phase 0 measures the rules alone; phase 1 is answer-token scoring through
    the existing compute layer; phase 2 is the JSON-schema fallback for
    compound inputs; phase 3 is embeddings once fixtures exist. **No external
-   candidate is recommended at any phase.** Two contradictions with the brief
-   and one small gap in the `apple-fm` bridge are reported rather than routed
+   candidate is recommended at any phase — but Laya's integration lessons
+   are folded into phase 1 for free.** Two contradictions with the brief and
+   one small gap in the `apple-fm` bridge are reported rather than routed
    around (§6, §1.4).
 
 ---
@@ -257,7 +275,7 @@ There are three, and they are all already enumerated in code:
 
 Summing an instance's realistic surface — 4 action kinds, 6 triage verbs, a
 dozen-ish fast paths, and a handful of "this is a question, not a command"
-classes — lands in the **20–50 range the brief names**. §2.9 measures at 15 and
+classes — lands in the **20–50 range the brief names**. §2.10 measures at 15 and
 at 40 for exactly that reason.
 
 ### 1.6 The eval harness that would score it
@@ -330,7 +348,7 @@ TypeSafe's Jev", and "we did not distill from Jev."
    (`docs/poc/RESULTS.md:681`).
 4. **Its own Mac latency is worse than what we measured today.** Its published
    table: **444.0 ms median, 981.0 ms p95** for Bespoke-Nimble-9B on an
-   "M5 Pro 64GB", against 106.0 ms on an H100. The 155 ms p50 measured in §2.4
+   "M5 Pro 64GB", against 106.0 ms on an H100. The 155 ms p50 measured in §2.5
    on this M4 Max, with a 4B-class model and no new dependency, is **2.9×
    faster than Nimble's own Mac number**.
 5. **The training set is tiny and narrow, and it says so.** "We trained
@@ -340,7 +358,7 @@ TypeSafe's Jev", and "we did not distill from Jev."
    is a narrow test."
 6. **A 26-option ceiling.** "An enum field can have 1 to 26 string choices"
    — because each answer code is one token. At the top of the brief's 20–50
-   range that is a real constraint (§2.4 inherits it; §2.9 says how to get past
+   range that is a real constraint (§2.5 inherits it; §2.10 says how to get past
    it).
 7. **2,048-token prompt ceiling**, schema included.
 
@@ -406,7 +424,7 @@ confidence = max(0, min(1, (n * peak - 1) / (n - 1)))
 ```
 
 That is one line of TypeScript over a distribution we can obtain locally
-(§2.4). It is used unchanged in every measurement below.
+(§2.5). It is used unchanged in every measurement below.
 
 **Why it is not the answer for this tier.** It is `locality: off_machine` by
 construction, and the thing being classified is *every message the owner types
@@ -424,7 +442,256 @@ JS SDK exists, and 324-example runs cost cents. That is a measurement, on
 fixtures the owner authored, not a production path — and it is still the
 owner's call, because the fixtures are the owner's own messages.
 
-### 2.3 Candidate (a): constrained decoding to an enum, through the compute layer
+### 2.3 Laya (brainfunctioncollapse.com/laya · NandhaKishorM/laya)
+
+Added at the owner's request on 2026-09-21, "for lessons learned and usage".
+**It is the most interesting candidate in this document, it was run locally,
+and it is still not adoptable — for one reason that has nothing to do with its
+quality.**
+
+**What it actually is.** Not a hosted service and not a pattern: an
+**Apache-2.0 Python library plus open weights**. `pip install laya` (PyPI
+**0.3.5**), `requires-python >= 3.10`, dependencies `torch`, `transformers`,
+`safetensors`, `huggingface_hub`, `numpy`. The GitHub repository was **created
+2026-09-18** — the same day as Nimble — has a real `LICENSE` (Apache-2.0) and
+9,575 stars; the weights on Hugging Face are Apache-2.0 too. Its own
+one-liner:
+
+> **Multilingual, non-autoregressive System 1 decision engine.** Typed
+> decisions over 100+ languages in a single forward pass — 33 ms — trained with
+> reinforcement learning against strictly proper scoring rules (RLCD), with a
+> router that picks the right checkpoint per request.
+
+**Architecturally it is the odd one out, and that is the point.** Every
+*generative* candidate here — §2.4, §2.5, Nimble, Jev — is a decoder,
+constrained one way or another into behaving like a classifier. Laya is an
+**encoder with typed heads** — ModernBERT-large or mmBERT-base — answering
+`choice` / `score` / `noul` in one forward pass with no generation at all. The
+cleanest way to see it: **it is candidate (b) (§2.6) with the head already
+trained.** Same family of model, same single forward pass, same 768-ish
+dimensional sentence understanding — except that instead of handing back a
+vector for us to compare against centroids we do not have, it hands back a
+probability over the labels we named. That is exactly the gap §2.6 measured
+as 4/10 and 0.005-cosine margins, closed by someone else's training run. Three
+checkpoints:
+
+| | encoder | params | context | for |
+| --- | --- | ---: | ---: | --- |
+| `laya` | ModernBERT-large | 421M | 512 | English |
+| `laya-multilingual` | mmBERT-base | 322M | 1024 | 100+ languages, 2× faster |
+| `laya-typed-decisions` | ModernBERT-large | 421M | 1024 | the typed-decision workflows |
+
+The landing page's hero stats — "322M parameters, 650 MB on disk", "21 ms per
+decision" — describe the *multilingual* checkpoint on a laptop GPU. The Hugging
+Face repo is **2,373 MB** across all three (`model.safetensors` 843 MB each for
+the two large ones, 644 MB multilingual), and the site itself says "The first
+start downloads 2.3 GB of open weights and takes about 90 seconds to load
+them."
+
+#### Measured here, on the same 15 intents and 10 messages
+
+Installed into a scratch venv (Python 3.14.7, torch 2.14.0, `mps` available),
+English checkpoint only, three repeats of the ten cases:
+
+```
+### laya (English checkpoint, ModernBERT-large 421M) on device=mps
+  cold load: 18.6 s
+      39 ms  MISS smalltalk         p=0.639 conf=0.628 compound_p=0.044  <- what's my status
+      43 ms  MISS unsure            p=0.568 conf=0.52  compound_p=0.02   <- remind me to call the dentist tomorrow
+      42 ms  ok  task_list         p=1.0   conf=0.999 compound_p=0.095  <- show me Jim's tasks for our 1:1
+      40 ms  ok  knowledge_search  p=0.967 conf=0.929 compound_p=0.143  <- what did we decide about the router last week?
+      42 ms  ok  task_update       p=0.997 conf=0.991 compound_p=0.204  <- close #412 and tell Drey to pick up the review
+      39 ms  ok  smalltalk         p=1.0   conf=1.0   compound_p=0.0    <- hey
+      42 ms  ok  note_capture      p=0.999 conf=0.997 compound_p=0.067  <- add a note: gemma-4 is faster than I expected
+      40 ms  ok  deep_question     p=0.475 conf=0.569 compound_p=0.067  <- why is the reconciler behind?
+      41 ms  ok  schedule_lookup   p=0.511 conf=0.425 compound_p=0.004  <- book me 30 minutes tomorrow afternoon
+      42 ms  MISS task_update       p=0.819 conf=0.792 compound_p=0.117  <- switch the deep tier to opus
+{"n": 30, "p50_ms": 40, "p95_ms": 42, "mean_ms": 40, "cold_load_s": 18.6,
+ "reps": 3, "matched_my_labels": "7/10"}
+```
+
+And on CPU, same everything:
+
+```
+### laya (English checkpoint, ModernBERT-large 421M) on device=cpu
+{"n": 30, "p50_ms": 155, "p95_ms": 161, "mean_ms": 156, "cold_load_s": 18.7,
+ "reps": 3, "matched_my_labels": "7/10"}
+```
+
+Six things in that output, in order of how much they matter:
+
+1. **p50 40 ms, p95 42 ms on Apple silicon** — a 2 ms spread over thirty
+   measurements. **3.9× faster than answer-token scoring (155 ms) and 8.4×
+   faster than the JSON-schema route (336 ms)**, with a full distribution and
+   a second question (`compound`) answered in the *same* forward pass at no
+   extra cost.
+2. **Byte-identical answers across all three repeats.** Deterministic, which is
+   the stability property §4.4 asks for and which a sampled decoder only
+   approximates at `temperature: 0`.
+3. **Its CPU number is 155 ms — exactly level with answer-token scoring**, and
+   better than the README's own 193–464 ms CPU range. So the Apple-silicon GPU
+   is where its advantage lives.
+4. **The library warned me, at load, that my own measurement was
+   uncalibrated:**
+
+   ```
+   RuntimeWarning: laya: this checkpoint ships temperatures outside [0.5, 5]
+   which would distort confidence; clamping choice:11+=0.1006. Treat
+   confidence from the affected buckets as uncalibrated.
+   ```
+
+   A 15-option `choice` falls in the `choice:11+` bucket. **No other candidate
+   in this document tells its caller that its own confidence is untrustworthy
+   for this option count.** That is a UX idea worth stealing outright (§2.3.1,
+   lesson 4).
+5. **`compound` worked** — `noul` P(true) = 0.204 on the one genuinely compound
+   message, the highest in the set, against 0.0–0.14 elsewhere. Right ordering,
+   wrong absolute scale, which is precisely what an unfitted temperature looks
+   like. Every decoder candidate got `compound` flatly wrong (§2.4).
+6. **Same confident error as everyone else.** "switch the deep tier to opus" →
+   `task_update` at p 0.819. Four candidates, four different architectures, one
+   identical mistake; that message is genuinely under-determined without
+   knowing the product's vocabulary, and no amount of model will fix it. A
+   `fast_path` rule would.
+
+Two misses the others did not make: "what's my status" → `smalltalk` (0.628),
+and "remind me to call the dentist tomorrow" → `unsure` (0.520). Both are
+low-confidence, so **a threshold would have escalated both** — which is the
+behaviour you want, and is the opposite of the confident error in row 6.
+
+*(All accuracy readings remain illustrative per the note at the top of this
+document; the labels are mine and may never be fixtures.)*
+
+#### 2.3.1 The lessons the other two do not teach
+
+The project ships an agent skill (`/laya/skills/laya-integration/SKILL.md`)
+that is, frankly, the best-written integration guide of any candidate here.
+Five lessons in it are load-bearing for us:
+
+1. **"Ask what the text says, not what to do about it."** Verbatim:
+
+   > "Where is the bird relative to the gap?" produced clean graded
+   > probabilities; "Which way must the bird move?" came out inverted on every
+   > checkpoint […] Ask a perception question, then let your code map the
+   > answer to an action.
+
+   **This is §3.2's P1 arrived at from the opposite direction.** We want the
+   classifier to emit a fact rather than a destination because invariant 4 says
+   so; Laya's authors want it because an encoder doing textual entailment is
+   *measurably worse* at prescriptive questions. The invariant-safe shape and
+   the accurate shape are the same shape. That is the single most useful thing
+   this candidate contributes, and it should be written into whatever PoC-20
+   produces regardless of which engine wins.
+
+2. **"Put the state into words, never numbers."**
+
+   > Given "Bird altitude: 20. Gap altitude: 60." no checkpoint could tell
+   > which was lower. If a decision depends on a comparison, threshold or sum,
+   > compute it in code and hand Laya the conclusion.
+
+   Directly bears on §4.2: a model asked to produce `due <= today` is being
+   asked to do date arithmetic, which is the operation this whole class of
+   model is worst at. Resolve the date in code, then ask the model only
+   *whether the message is about a deadline*.
+
+3. **Confidence cannot detect out-of-distribution input, and they have the
+   number to prove it.** The English checkpoint on Khmer: **"0.000 accuracy at
+   0.952 confidence"**, and
+
+   > its mean confidence never drops below 0.885 at any accuracy level, so
+   > confidence gating cannot catch it — which is why routing happens *before*
+   > the forward pass.
+
+   Their `Router` does sub-millisecond script detection **in pure Python,
+   deterministically, ahead of the model**. That is a rules-tier in front of a
+   model tier, adopted for accuracy reasons by a project with no invariant 4 —
+   and it is the strongest external evidence in this document that §1.3's
+   ordering (rules first, model only on fall-through) is correct engineering
+   rather than only correct governance. It also sharpens §4.4's bar: a
+   confidence threshold protects against *ambiguity*, never against *the input
+   being outside the model's competence*.
+
+4. **Calibration is a post-hoc fit on your own data, and it is cheap.**
+   Refitting one temperature per (question type, option count) moves mean ECE
+   **0.466 → 0.081** on `laya` and **0.314 → 0.106** on `laya-multilingual`;
+   `laya-multilingual` "ships with no fitted temperatures at all". The skill
+   says "A few hundred labelled examples are enough to see whether it helps" —
+   which is the same order as §5.3's fixture ask. **Whatever PoC-20 ships, the
+   threshold must be fitted, not chosen**, and the fit belongs beside the
+   fixtures.
+
+5. **Three independent option-count ceilings, all inside the brief's 20–50
+   range.** Nimble: 26, because answer codes are one token. Laya: "Upstream
+   reports accuracy degrading past roughly 20 options", and on Banking77 it
+   scores **0.425 against Jev's 0.870** because 77 options share a 256-token
+   budget — "only ~3 to 4 tokens per label". Jev alone advertises 255. **Two
+   of the three purpose-built decision models break exactly where our enum
+   would sit**, and both reach for the same fix: Laya's `predict_shortlist`
+   "keeps the top `k` labels with a caller-supplied embedding, then runs one
+   forward pass on that shortlist" — which is **§2.6's embedding candidate used
+   as a pre-filter**, and §2.5's cascade by another name. Three projects, one
+   answer: *shortlist first, decide second.*
+
+Two smaller notes worth carrying: its `confidence` is **one minus the
+normalised entropy** of the distribution, a different statistic from TypeSafe's
+`(n·peak − 1)/(n − 1)` (§2.2) — two published choices over the same
+distribution, and which one we use is ours to pick and state. And every answer
+carries `action.act_probability` from "the model's act-or-escalate head" — a
+*learned* escalate signal, which is the sharpest possible test of §3.2's line:
+it is still only a fact, but it is a fact literally named "should you act", and
+a rule that read it unthresholded would be invariant 4 lost on a technicality.
+
+#### Why it is not adoptable, and what that costs
+
+**One reason: it is Python, and there is no other surface.** The published
+package is a library — `laya/agent.py`, `router.py`, `shortlist.py`,
+`presets.py` — with **no HTTP server and no OpenAI-compatible endpoint**. (The
+`server.py` in the landing page's quickstart belongs to the playground site,
+not to the package.) The `laya` name on npm is an unrelated Phaser build tool.
+Using it from Metistry means running a Python process and supervising it, and
+CLAUDE.md's stack rule is categorical: "no Python anywhere (ruled 2026-08-29)".
+Invariant 6 admits native code only "where macOS requires it"; macOS does not
+require this.
+
+So the verdict is **no, and it is the one that costs something.** Nimble fails
+on licensing before any technical argument; Jev fails on locality. **Laya fails
+on runtime alone** — its licence is clean, its weights are open, its data
+policy is "nowhere" because nothing leaves, its cost is zero, and it was the
+fastest thing measured in this document on the owner's own hardware. If the
+no-Python rule is ever revisited for other reasons, **this is the exhibit**.
+I am not proposing to revisit it (§6, question 7).
+
+Three further things a reader should not be misled about:
+
+- **It is not a zero-shot decision engine, and says so.** Verbatim: "The base
+  checkpoints are near chance on typed-decisions zero-shot — 0.362 and 0.352
+  against a 0.318 random baseline and a 0.461 majority-class baseline. […]
+  Laya is a fast base to specialise, not a zero-shot decision engine." On
+  **MASSIVE intent, English (20 options) it scores 0.783** — the closest public
+  analogue to our task, and **well under §4.4's 95% bar**. The 0.766 headline
+  belongs to a checkpoint fine-tuned on that benchmark's own training split.
+- **Fine-tuning is a GPU operation, not a Mac one.** RLCD with GRPO-style
+  policy gradient, "roughly 4–5 hours for 4 epochs over ~30k questions" on
+  Kaggle's free 2×T4. And the fine-tune's **teacher is not named** in anything
+  I read — which matters, because a teacher's provenance is inherited by the
+  student, and C11 is a rule about exactly that.
+- **The two linked papers are not about Laya.** arXiv 2503.23303 is
+  *SalesRLAgent* (2025-03-30, sales-conversion prediction, trained on
+  "synthetic GPT-4O data"); arXiv 2510.01237 is *Confidence-Aware Routing for
+  Large Language Model Reliability Enhancement* (2025-09-23). Both are the same
+  author's adjacent prior work, cited on the landing page to support a priority
+  claim against Jev. **There is no paper describing Laya**; the evidence is the
+  repository's own `BENCHMARKS.md`, which is unusually candid but is not peer
+  review. Its Jev column is explicitly "third-party published, never measured
+  here — no TypeSafe API access […] treat them as indicative."
+
+**Cleanup:** the scratch directory — **1.7 GB** of virtualenv, torch and
+cached weights — was deleted after the run, with `HF_HOME` scoped to it
+throughout so the user's own Hugging Face cache was never written. Nothing
+Python was installed into the product, the instance, or any shared
+environment.
+
+### 2.4 Candidate (a): constrained decoding to an enum, through the compute layer
 
 The near-zero-infrastructure option: `completeJson()` already sends
 `response_format: {type:"json_schema", json_schema:{name, strict:true, schema}}`
@@ -457,7 +724,7 @@ The answers, though, are poor: `schedule_lookup` for a reminder,
 `status_open_work` for a question about a past decision, `task_update` for a
 compute change, and `compound=false` on an obviously compound message.
 
-**The control that explains it — same server, same model as §2.4, thinking
+**The control that explains it — same server, same model as §2.5, thinking
 off:**
 
 ```
@@ -499,7 +766,7 @@ honors `reasoning_effort: "none"`" — confirmed again today.
 (`task_close`) for "close #412". The brief's 20–50 range is not where this
 breaks.
 
-### 2.4 Candidate (a′): the technique Nimble uses, without Nimble
+### 2.5 Candidate (a′): the technique Nimble uses, without Nimble
 
 Constrain the answer to **one token** from a closed alphabet, ask for
 `top_logprobs`, renormalise over the alphabet in our code, and compute
@@ -588,11 +855,11 @@ scored tokens at 155 ms is still 310 ms, under the JSON-schema route's single
 336 ms. This is the phase-2 design note, not a blocker.
 
 **Not available on Apple FM**, which means the free-and-resident provider can
-only do §2.3. An instance with no Ollama and no bundled model gets the
+only do §2.4. An instance with no Ollama and no bundled model gets the
 JSON-schema tier at Apple FM's measured 497 ms (PoC-19), or the rules alone.
 Both are supported installs; §5.2 requires that degradation be a tested path.
 
-### 2.5 Candidate (b): embeddings + nearest centroid
+### 2.6 Candidate (b): embeddings + nearest centroid
 
 pgvector is in the stack, and `nomic-embed-text` at 768 dimensions is already
 the vault's embedder (`docs/ops/knowledge-search.md:14-15`, §6 decision 8,
@@ -616,7 +883,7 @@ description.** That is the floor of this approach, and it is what was measured:
 {"n":10,"p50_ms":9,"p95_ms":14,"matched_my_labels":"4/10"}
 ```
 
-**p50 9 ms — 17× faster than §2.4 and 37× faster than §2.3.** And unusable as
+**p50 9 ms — 17× faster than §2.5 and 37× faster than §2.4.** And unusable as
 it stands: six of the margins are under 0.04 cosine, which is noise, and the
 margin is the only confidence signal available, so it cannot even escalate
 honestly.
@@ -634,7 +901,7 @@ regression is arithmetic), and it can be **retrained from the audit log** as
 the owner corrects verdicts — which is the only candidate that gets better
 with use.
 
-### 2.6 Candidate (c): fastText / SetFit — disqualified on maintenance, not merit
+### 2.7 Candidate (c): fastText / SetFit — disqualified on maintenance, not merit
 
 - **fastText upstream is archived.** `facebookresearch/fastText`:
   `"archived": true`, last push **2024-03-22**, MIT, 26,530 stars.
@@ -649,7 +916,7 @@ with use.
 CLAUDE.md's rule — "every dependency is a future maintenance obligation" —
 answers this without needing an accuracy number.
 
-### 2.7 Candidate (d): GLiClass / NuExtract via ONNX Runtime in Node
+### 2.8 Candidate (d): GLiClass / NuExtract via ONNX Runtime in Node
 
 Technically real, and the brief's parenthetical ("dependency weight!") is
 correct to the gram:
@@ -667,12 +934,12 @@ correct to the gram:
   relationship we do not currently have with anyone**, and the first-party
   repository publishes `model.safetensors`, not ONNX.
 
-Weighed against §2.4: 301 MB of native binary and a third-party weight export,
+Weighed against §2.5: 301 MB of native binary and a third-party weight export,
 to replace a feature of a server we already ship. The right comparison is not
 GLiClass against nothing — it is GLiClass against 155 ms and zero new lines in
 `package.json`.
 
-### 2.8 Candidate (e): rules and regex — the tier that exists
+### 2.9 Candidate (e): rules and regex — the tier that exists
 
 Already built (§1.1), p50 well under a millisecond, perfectly auditable, and it
 handles the only inputs that genuinely matter to get right: the ones the owner
@@ -686,7 +953,7 @@ automatically** (`commands.ts:150-166`). If phase 0 says 80% of real input is
 already a command or a near-command, several of the later phases get cheaper or
 disappear.
 
-### 2.9 The comparison
+### 2.10 The comparison
 
 Latency is measured on this M4 Max unless the cell says otherwise. Accuracy
 columns are deliberately absent: see the warning at the top.
@@ -700,6 +967,7 @@ columns are deliberately absent: see the warning at the top.
 | (a) on Apple FM | 497 ms p50 (PoC-19, 3-field schema) | ~40 field ceiling | none | none | none | yes | 0, **and ~0 resident memory** |
 | **(d) GLiClass / ONNX in Node** | not measured | any | per-label scores | none (zero-shot) | **301 MB native + `sharp`** + third-party ONNX export | yes | 0 |
 | **(c) fastText / SetFit** | not measured | any | per-label scores | needed | archived upstream; 2019 native binding; **Python to train** | yes | 0 |
+| **Laya** (measured here) | **40 / 42 ms** on `mps`; **155 / 161 ms** on CPU | ~20 before accuracy degrades; `predict_shortlist` past that | **full distribution + confidence, and a load-time warning when that confidence is uncalibrated** | none to use, but “a fast base to specialise, not a zero-shot decision engine” | **Python + torch/transformers + 851 MB (2.3 GB for all three)** | yes | 0 |
 | **Nimble** | 444 / 981 ms (their M5 Pro) | ≤26 | full distribution | none to use; theirs is 2,676 ex. | **Python + PyTorch/MLX + ~18 GB**, **repo unlicensed** | yes | 0 |
 | **TypeSafe Jev** | not measured; "adding questions barely changes the response time" | ≤255 | full distribution + confidence | none | `@typesafe-ai/sdk` (JS, Node ≥ 20) | **no** | \$0.042/Mtok in, output free |
 
@@ -709,7 +977,20 @@ and recommended `keep_alive`. Apple FM has none — the model is a resident
 system daemon, "Cold start is a non-event (first call 0.33 s)"
 (`docs/poc/RESULTS.md:821`). On the composer's hot path, a classifier that is
 sometimes 30 s is worse than no classifier, and that is a deployment
-requirement rather than a model choice.
+requirement rather than a model choice. **Laya is no exception** — 18.6 s to
+build the checkpoint with the weights already on disk, and its own README
+measures 7.4–10.3 s to rebuild on every checkpoint switch unless you
+`preload`. Every candidate in this table that is not Apple FM has to be held
+resident.
+
+**On the accuracy column that is missing.** Three named decision models now
+publish a number on a public intent benchmark, and none of them clears
+§4.4's bar zero-shot: Laya **0.783** on MASSIVE-intent English (20 options)
+and **0.425** on Banking77 (77 labels); Nimble **90.12%** but only on 324
+synthetic examples from six source families it was trained near; Jev **0.870**
+on Banking77 and **0.727** on typed-decisions. Whatever ships here will be
+carried by the owner's fixtures and a fitted threshold, not by a vendor's
+headline.
 
 ---
 
@@ -847,7 +1128,7 @@ classifier's relationship to it, in four rules:
    asks for more than one thing"; a rule decides that compound goes to the
    default tier. The classifier never decomposes, never emits a list of
    actions, and never picks one of them. Today's 4B model got `compound` wrong
-   on the one compound message in the set (§2.3), which is an argument for the
+   on the one compound message in the set (§2.4), which is an argument for the
    rule being "compound ⇒ escalate" rather than for trusting the field.
 
 ### 3.4 What the audit has to carry for this to be reviewable
@@ -930,9 +1211,15 @@ Two rows already exist and need only fields:
    `fm-tier-never-fires` watchdog probe (`docs/ops/compute.md:865`) is the
    precedent: "configured but never used" should be a row, not a silence.
 
-**On D6 (the durable set):** a classifier verdict is derived. It is a `runs`
+**On D6 (the durable set), with one wrinkle:** a classifier verdict is derived.
+It is a `runs`
 row and a `meta` key on a message; rebuild from the repo and re-run and you
-lose the history and nothing else. Noted only because D6 is open.
+lose the history and nothing else. **The wrinkle is phase 3**: once the owner
+starts correcting verdicts, the corrected ones are a labelled training set, and
+a training set that dies with `docker compose down -v` is a different
+proposition from one that does not — the same argument that makes the
+fixture harvest a file in the instance repo rather than a table. Noted rather
+than resolved, because D6 is open and this is not the PR that closes it.
 
 ### 4.4 The eval, and the bar
 
@@ -964,16 +1251,29 @@ taste:**
 | | threshold | why this number |
 | --- | --- | --- |
 | **accuracy on the closed set** | **≥ 95%** of the owner's labelled fixtures, excluding cases whose gold label is `unsure` | the brief's figure; also roughly where PoC-16's 97.9% sat on a task of similar shape |
-| **latency** | **p50 < 150 ms, p95 < 400 ms**, warm | §2.4 measured 155/166; the p95 headroom is for a cascade past 26 intents (§2.4) |
-| **cold start** | **< 1 s**, or the tier does not run on the composer path at all | 29.5 s was measured today (§2.3); `keep_alive`, or Apple FM's residency, or no tier |
+| **latency** | **p50 < 150 ms, p95 < 400 ms**, warm | §2.5 measured 155/166; the p95 headroom is for a cascade past 26 intents (§2.5) |
+| **cold start** | **< 1 s**, or the tier does not run on the composer path at all | 29.5 s was measured today (§2.4); `keep_alive`, or Apple FM's residency, or no tier |
 | **escalation is honest** | on cases whose gold label is `unsure`, **≥ 90%** fall below the threshold | the tier's whole purpose is knowing when not to answer |
-| **confident errors** | **≤ 2%** of fixtures wrong *above* the threshold | the single worst failure mode; §2.4 produced one in ten at conf 0.850 |
+| **confident errors** | **≤ 2%** of fixtures wrong *above* the threshold | the single worst failure mode; §2.5 produced one in ten at conf 0.850 |
 | **absent degrades** | with no local provider, **byte-identical routing to today** | P3 of §3.2, as a test not a promise |
 
 **The threshold itself is an output of the eval, not an input.** Sweep it over
 the fixture set and pick the point that satisfies rows 4 and 5 together; a
 threshold chosen before seeing the data is the mistake Nimble's README warns
-about in as many words (§2.1).
+about in as many words (§2.1), and Laya's authors put a number on the
+fix — refitting one temperature per (question type, option count) moved mean
+ECE **0.466 → 0.081** (§2.3.1.4). So: **fit the calibration, then choose
+the threshold on the fitted numbers**, and record both beside the fixtures.
+
+**And a row the bar cannot contain, which is the reason §3.2 puts rules
+first.** A confidence threshold protects against *ambiguity*. It does not
+protect against the input being outside the model's competence, because a model
+outside its competence is not less confident — Laya's English checkpoint on
+Khmer scores **0.000 accuracy at 0.952 confidence**, with mean confidence never
+dropping below 0.885 at any accuracy level (§2.3.1.3). Their answer is a
+sub-millisecond deterministic script check **before** the forward pass. Ours is
+already written: the rules run first, and the model only sees what they could
+not place (§1.3).
 
 **One more axis worth a column: stability.** PoC-19 measured twenty identical
 Apple FM generations producing twenty distinct byte strings and one value
@@ -991,6 +1291,8 @@ this should be exactly reproducible; if it is not, that is a finding.
 | --- | --- | --- | --- |
 | **Adopt Nimble** | **No** | The GitHub repository has **no licence** (`"license": null`, 2026-09-21) — a hard stop for a fully-open-source product before any technical argument. Then: Python 3.12 + PyTorch/MLX (banned), ~18 GB unquantised weights, no JS client, 2,676 training examples "don't expect a lot of generalization", and its own **444 ms median on an M5 Pro** against 155 ms measured here with no new dependency | — |
 | **Adopt its *technique*: answer-token scoring** | **Yes — this is the recommendation** | Measured today on Ollama's `/v1` (and the field shape confirmed on the bundled `llama-server`, which had only a toy model loaded): `max_tokens:1, logprobs:true, top_logprobs:20` gives the full distribution over a closed alphabet at **p50 155 ms / p95 166 ms**, 2.2× faster than the JSON-schema route on identical weights. Zero new dependencies — it is fields on a request `completeJson()` already makes | PoC-20 phase 1, **2–3 days** |
+| **Adopt Laya** | **No — and this is the one the rule costs something** | Apache-2.0 code *and* weights, `locality: on_machine` by construction, \$0, and the **fastest thing measured in this document**: p50 40 ms / p95 42 ms on `mps`, deterministic across repeats. It fails on **runtime alone** — a Python library with no HTTP surface (`laya/agent.py`, `router.py`, …; the quickstart's `server.py` belongs to the playground site), against CLAUDE.md's "no Python anywhere". Also: "a fast base to specialise, not a zero-shot decision engine", 0.783 on MASSIVE-intent English, and fine-tuning is a 4–5 hour 2×T4 operation | — |
+| **Adopt Laya's five integration lessons** | **Yes — free, and independent of which engine wins** | Ask what the text *says*, not what to do (§2.3.1.1 — which is §3.2's P1 reached for accuracy reasons rather than invariant ones); resolve numbers and dates in code first; put a **deterministic check ahead of the model** because confidence cannot detect out-of-distribution input (0.000 accuracy at 0.952 confidence); **fit** the threshold rather than choose it; shortlist before deciding past ~20 options | folded into PoC-20 phase 1, ~0 |
 | **Adopt TypeSafe Jev in production** | **No** | Hosted-only ⇒ `locality: off_machine` for a component that would see **every composer message** before any data policy applies; ZDR is enterprise-only. ~100 ms of latency is not worth the widest `data_policy` in the file against a 155 ms local option | — |
 | **Use Jev as a *cloud arm in the bake-off*** | **Owner's call — it is his messages** | Finds the accuracy ceiling cheaply (\$0.042/Mtok in, output free); a real TS SDK exists; `Candidate.server` already admits it. But the fixtures are the owner's own text leaving the machine | ~half a day if the answer is yes |
 | **Reuse TypeSafe's published confidence statistic** | **Yes, and cite it** | `(n·peak − 1)/(n − 1)` clamped to [0,1] — a statistic over a distribution, published openly in the docs page's own `ConfidenceExplorer` source, not a licensed artefact. One line of TypeScript over a distribution we already get. Used unchanged in every measurement above | ~0 |
@@ -1045,6 +1347,20 @@ No new dependency.**
   (`chat_template_kwargs:{"enable_thinking":false}`), LM Studio (**verify;
   today it returned `"logprobs": null`, so it may be schema-only**).
 - Degradation test: **no provider ⇒ byte-identical behaviour to today.**
+- **Laya's five lessons, applied to the prompt and the enum, at no cost**
+  (§2.3.1): every intent gets a *description*, not a bare name; the question
+  asks what the message **says**, never what to do about it; any date or count
+  the verdict depends on is resolved in code first; the option list stays under
+  ~20 per call with a cascade past that; and the threshold is **fitted** on the
+  owner's fixtures rather than picked. These are wording and ordering choices,
+  so they cost nothing to adopt and are expensive to retrofit.
+- **One measurement worth stealing outright**: try two or three phrasings of
+  the question and of each label, and keep the best on the fixtures. Laya's
+  authors measured one wording change moving a margin from 0.45 to 0.75. The
+  answer-token run in §2.5 used **bare intent names**; the embedding run in
+  §2.6 and the Laya run in §2.3 used descriptions. That is an
+  uncontrolled difference between the arms of this research and phase 1 should
+  close it rather than inherit it.
 
 *Exit:* the §4.4 bar, on the owner's fixtures. **If phase 1 passes, this is the
 product** and phases 2–3 are optional.
@@ -1074,7 +1390,7 @@ scored token cannot carry.
 - Labelled centroids or a logistic head over the 768-dimension
   `nomic-embed-text` vectors the vault already stores. No new dependency; a
   logistic regression is arithmetic.
-- **The bar is §2.5's run**: beat 4/10 at 9 ms, on the owner's labels.
+- **The bar is §2.6's run**: beat 4/10 at 9 ms, on the owner's labels.
 - Retrainable from the audit log as the owner corrects verdicts — the property
   no other candidate has.
 
@@ -1129,13 +1445,16 @@ with the dependency stated in the first paragraph, per CLAUDE.md.
    not, which of the three fixes?** `keep_alive` on a 6.3 GB resident model;
    the bundled `llama-server` holding a small GGUF; or Apple FM's residency at
    497 ms and schema-only (no logprobs). This is a deployment decision that
-   changes which candidate wins (§2.9, §5.3).
-6. **Does a classifier verdict join the durable set (D6)?** I read it as
-   derived — a `runs` row and a `meta` key, rebuildable by re-running. But
-   phase 3 wants the *corrected* verdicts as training data, and a training set
-   that dies with `docker compose down -v` is a different proposition from one
-   that does not (§4.3).
-
+   changes which candidate wins (§2.10, §5.3).
+6. **Is the no-Python rule worth re-examining, or is it settled?** Laya is
+   Apache-2.0 in code and weights, runs offline at **40 ms p50** on this Mac,
+   and fails on nothing but its runtime (§2.3). I am **not** proposing to
+   revisit the rule — a Python process in a product that promises a
+   no-build-tools install is a large, permanent cost against a 115 ms saving
+   over an option we already have. But the owner should know that the rule now
+   has a concrete, measured price, and that the price is likely to recur: the
+   encoder-with-typed-heads shape is where this field is going, and its
+   ecosystem is Python.
 ---
 
 ## Contradictions with the brief and the plan
@@ -1170,6 +1489,8 @@ Fetched 2026-09-21 unless noted; dates are the publishers'.
 - [huggingface.co/bespokelabs/Bespoke-Nimble-9B](https://huggingface.co/bespokelabs/Bespoke-Nimble-9B) — model card, `license: apache-2.0`, LoRA adapter ~165 MiB over `Qwen/Qwen3.5-9B`; the weights are licensed even though the serving repo is not.
 - [huggingface.co/Qwen/Qwen3.5-9B](https://huggingface.co/Qwen/Qwen3.5-9B) — `license: apache-2.0`.
 - [TypeSafe — Choice](https://docs.typesafe.ai/primitives/choice), [System One](https://docs.typesafe.ai/concepts/system-one), [Confidence](https://docs.typesafe.ai/confidence), [Intent routing](https://docs.typesafe.ai/patterns/intent-routing), [Models](https://docs.typesafe.ai/models), [JavaScript SDK](https://docs.typesafe.ai/sdk/javascript) — hosted `POST /v1/systemone`; `npm install @typesafe-ai/sdk` (Node ≥ 20, ESM + CJS + `.d.ts`); Jev 1.13 at **\$42/Btok, \$0.042/Mtok input, output free**; 64k context (32k for `state` + longest question); up to 255 options; 250k tok/s + 1,200 req/min, "can change without notice"; "Jev is not trained on customer requests or responses", ZDR "for enterprise customers"; the three-band confidence doctrine and the `(n·peak − 1)/(n − 1)` statistic in the `ConfidenceExplorer` source.
+- [Laya landing page](https://brainfunctioncollapse.com/laya), [NandhaKishorM/laya](https://github.com/NandhaKishorM/laya) (README + `BENCHMARKS.md`), [convaiinnovations/laya](https://huggingface.co/convaiinnovations/laya), and the [agent skill](https://brainfunctioncollapse.com/laya/skills/laya-integration/SKILL.md) — all read 2026-09-21. Apache-2.0 code and weights; repo created **2026-09-18**, 9,575 stars; PyPI `laya` **0.3.5**, `requires-python >= 3.10`, deps `torch`/`transformers`/`safetensors`/`huggingface_hub`/`numpy`; three checkpoints (421M ModernBERT-large × 2, 322M mmBERT-base), **2,373 MB** on the Hub; `choice`/`score`/`noul` primitives; `confidence` = 1 − normalised entropy; MASSIVE-intent English **0.783**, Banking77 **0.425** vs Jev's 0.870, typed-decisions base **0.362** against a 0.461 majority-class baseline and **0.766** fine-tuned; Khmer **0.000 accuracy at 0.952 confidence**; ECE **0.466 → 0.081** after temperature fitting; option-order instability 0.150; fine-tuning "4–5 hours for 4 epochs over ~30k questions" on 2×T4. Its Jev column is "third-party published, never measured here … treat them as indicative".
+- [arXiv 2503.23303](https://arxiv.org/abs/2503.23303) — *SalesRLAgent*, Nandakishor M, 2025-03-30, RL over synthetic GPT-4O data; and [arXiv 2510.01237](https://arxiv.org/abs/2510.01237) — *Confidence-Aware Routing for Large Language Model Reliability Enhancement*, 2025-09-23. Cited by the Laya page as "the original paper" and "the follow-up"; **neither describes Laya**, so the evidence for Laya itself is the repository's own benchmarks.
 - [llama.cpp `tools/server/README.md`](https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md) — `grammar`, `json_schema` ("Set a JSON schema for grammar-based sampling"), `json_schema_file`, `logit_bias`, `n_probs` ("the response also contains the probabilities of top N tokens"), `completion_probabilities`/`top_logprobs`; `/v1/chat/completions` `response_format` supports `{"type":"json_object"}` and `{"type":"json_schema", "schema": …}`; `chat_template_kwargs` e.g. `{"enable_thinking": false}`.
 - [Ollama API docs](https://github.com/ollama/ollama/blob/main/docs/api.md) — "Structured outputs are supported by providing a JSON schema in the `format` parameter"; `format: "json"` for JSON mode.
 - `npm view` on 2026-09-21 — `onnxruntime-node@1.30.0` MIT, `dist.unpackedSize` **301,068,136 bytes**; `@huggingface/transformers@4.3.0` Apache-2.0, depends on `onnxruntime-node`, `onnxruntime-web`, `sharp`; `fasttext@1.0.0` MIT, **published 2019-07-17**, modified 2022-06-17, deps `node-addon-api` + `node-pre-gyp`.
@@ -1179,8 +1500,11 @@ Fetched 2026-09-21 unless noted; dates are the publishers'.
 Measurements were taken on this Mac (M4 Max, 64 GB, macOS 26.4/25E246) on
 2026-09-21 against LM Studio `:1234` (`google/gemma-4-e4b`), Ollama `:11434`
 (`gemma4:e4b-it-qat`, `nomic-embed-text`) and the bundled `llama-server`
-`:7813`. Harness scripts were scratch files and are not committed; every
-command's output is quoted verbatim above.
+`:7813`. **Laya was measured in a throwaway virtualenv** (Python 3.14.7, torch
+2.14.0, `laya` 0.3.5, English checkpoint only), which was deleted with its
+cached weights after the run; nothing Python was installed into the product,
+the instance, or any shared environment. Harness scripts were scratch files and
+are not committed; every command's output is quoted verbatim above.
 
 Repo facts cite the file and line. Prior art this builds on rather than
 repeats: `docs/poc/RESULTS.md` §PoC-15 (the invariant-4 evaluation and its

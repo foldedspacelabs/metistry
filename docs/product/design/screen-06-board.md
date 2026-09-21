@@ -3,33 +3,41 @@
 Round D, sixth. Board: `Work ▸ Board`. The brief calls board density the
 hardest layout in the product; §1 is the answer.
 
-## 1. Six columns that are not six equal columns
+## 1. Five columns, and four of them are the board
 
-Four columns are **live** — Backlog, Addressed To, In Progress, Needs You —
-and two are **finished**. Finished work does not need a column of cards; it
-needs a count and a way in.
+**Reported is not a column.** `board.md` argues this itself: Done-vs-Reported
+"is not on the row — it is reconstructed" from a join between `work` and
+`runs.meta.work_id`. It was never a *status*; it was the fact that something
+came back. That is a property of the card, so it is **a chip on the card** — a
+note glyph and what the report said.
 
-So Done and Reported are fixed at **168px with compact rows**, and the four
-live columns share everything else. At a narrow window the two collapse into
-one strip with a combined count, expanding on click — they are the only two
-that can collapse without hiding something you were about to act on.
+The query need not change: `last_report_at` keeps arriving and the panel stops
+using it to choose a column. Whether `'reported'` leaves the `CASE` is the
+build's call; the design only needs it to stop being a place.
 
-**Nothing about the model changes.** Same six columns, same order, same
-predicates, same `array_position`. Only the width changes, so `docs/ops/board.md`
-is untouched — which matters, because the columns are a **decision order**
-(first match wins) and merging or reordering them would break the rule the
-query depends on.
+**The column is `Assigned`, not "Addressed To".** That reverts the 2026-09-17
+label ruling. The reason to take it is that the wire value has always been
+`assigned` — every drop and every `runs` row carries it — and a label that
+disagrees with its own value is a bug waiting for someone to "fix" the wrong
+side of it. This **closes C38** rather than documenting it.
+
+**Four live columns and one finished one.** Backlog, Assigned, In Progress and
+Needs You share the width; Done is fixed at **168px with compact rows** and
+collapses to a strip at a narrow window. The density fix is easier at five
+columns than it was at six.
+
+The ordering rule is untouched: the columns are still a **decision order**,
+first match wins.
 
 ## 2. Each column shows the facet that column is about
 
 | Column | The question it answers | What the card shows |
 | --- | --- | --- |
 | Backlog | how long has nobody taken this? | `2d in backlog` |
-| Addressed To | whose name is on it? | the owner chip |
+| Assigned | whose name is on it? | the owner chip |
 | In Progress | how much lease is left? | `4m left`, or the lapse |
 | Needs You | why is it stuck? | the state chip |
-| Done | when did it close? | `closed 2h ago` |
-| Reported | what came back? | the report chip |
+| Done | when did it close — and did anything come back? | `closed 2h ago`, plus a report chip where there is one |
 
 **The way out of a crowded card is not a smaller card — it is fewer facets.**
 A Backlog card has a null owner and no lease; a Done card has an age nobody
@@ -63,9 +71,9 @@ the **statement wins**: the card snaps back carrying the server's own sentence,
 never one the interface invented.
 
 **Each drop is exactly one route.** Anything needing two calls is not a drop —
-hence no "assign and claim" gesture, and **Reported is not a target at all**,
-because nothing you can drag makes a report exist. A closed card gets no grab
-cursor, because `update()` refuses a closed row.
+hence no "assign and claim" gesture. A closed card gets no grab cursor at all,
+because `update()` refuses a closed row, and with Reported folded into Done
+there is no longer a column that only a report could fill.
 
 Two absences are deliberate and worth drawing attention to: **nobody drags a
 card onto another agent's lease** (In Progress is entered by claiming, and a
@@ -98,11 +106,11 @@ refetches either way. The server owns the columns.
    read *waiting on you: Call the dentist*. The columns are not there, and
    Today already draws that string on its work rows — **two screens now waiting
    on the same two columns**. (C37)
-4. **"Addressed To" and `assigned` are one thing with two names.** The label
-   was ruled 2026-09-17; the value stays `assigned` because every drop and
-   every `runs` row carries it. That is the correct call — renaming a wire
-   value to match a label is how you break history — but the glossary should
-   carry both, or someone will "fix" one of them. (C38)
+4. **The label and the wire value now agree, and Reported is not a column.**
+   "Addressed To" goes back to **Assigned**, matching the value every drop and
+   every `runs` row already carries — **C38 closes** rather than being
+   documented. And Reported folds into Done, which `board.md` half-argues for
+   already. Both are edits to `docs/ops/board.md`. (C39)
 5. **A review card names an artifact and the board cannot show it.**
    `artifact` (`meta.bundle.artifact`, a handle, never a payload) comes back on
    every row and there is nowhere sensible for it on a card this size. It lives

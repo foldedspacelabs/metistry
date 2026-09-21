@@ -81,12 +81,18 @@ altogether, which is wrong: the query's first branch is captures, and
 
 ## 3. Filters
 
-Seven chips. Six of them are the `group` column `activity_feed.yaml` derives —
-`capture · proposal · decision · run · work · message` — and the query's `kind`
-param matches **either** an exact row kind or a group. So the console passes
-the chip value straight through and the SQL owns what is in each group: adding
-a sixteenth kind never touches the interface. This is the query's own comment,
-and the shipping `FEED_CHIPS` already does it.
+**Eight chips as of round E.** Seven of them are the `group` column
+`activity_feed.yaml` derives — `capture · proposal · decision · run · work ·
+message`, plus **`routine`** (§12) — and the query's `kind` param matches
+**either** an exact row kind or a group. So the console passes the chip value
+straight through and the SQL owns what is in each group: adding a sixteenth
+kind never touches the interface. This is the query's own comment, and the
+shipping `FEED_CHIPS` already does it.
+
+The seventh group is the one interface change this screen has taken since round
+D, and it was not free: `group` is a closed vocabulary decided in the SQL and
+read by every surface, so a new one is a decision rather than a chip. The
+argument for it is in §12.2.
 
 `hours`, `agent` and `project` are the other three params and are the three
 controls beside the title. **Nothing on this screen is a filter the query
@@ -233,3 +239,73 @@ accessible name of its own.
 - Whether a `turn` row can ever carry a topic, or whether the model is the
   honest subject forever.
 - `runs.ok` nullability, across two schema files.
+
+---
+
+## 12. Routines — the day's plan and the standup draft (round E)
+
+Two rows were missing from this screen, and the reason they were missing is
+structural rather than an oversight: **a routine is not in the union.**
+
+`plan-tomorrow` ships. It renders `Templates/Plan.md` into
+`Journal/Plan/<tomorrow>.md`, one writer, one path, and it records a
+`routine_run` row in `runs` for every tick. `activity_feed`'s runs branch
+admits `tool · turn · crew_run · dispatch · task_op · agent_admin ·
+project_mode`, plus `collector_run` where `ok = false`. `routine_run` is not
+among them, there is no artifacts branch and no vault-write branch, so **the
+plan the system wrote this morning leaves no trace here at all.** (C43)
+
+`standup-draft` does not exist yet — a template mapping and ticket P1-5. It is
+drawn anyway, per the owner's ruling of 2026-09-20 that the design may lead the
+surface.
+
+### 12.1 The row
+
+`[glyph] [actor] [subject] … [time]`, detail beneath, like every other row —
+with three differences that follow from what a routine is.
+
+| Part | Value | Why |
+| --- | --- | --- |
+| actor | `plan-tomorrow` · `standup-draft`, **neutral** | a routine is the system on a schedule, not an agent that chose to act. §2.1's rule already covers it: `agent` hue for an agent, neutral for a channel or the system |
+| subject | `Tomorrow's Plan` · `Standup Draft`, Title Cased | the console composes these, so §2.2's allow-list admits them. The plan's *contents* are authored and stay verbatim |
+| detail | the path it wrote, then what is in it | `Journal/Plan/2026-09-21.md · 9 tasks, 2 meetings, 45m left empty` |
+| the row | carries the **spark** | what it produced is prose Metis wrote, and P1 says that has to be visible before you read it |
+
+Expanding shows the prose in **the one prose component** — spark, attribution,
+serif body, a verdict on it — and not a diff. A diff answers *what changed*; a
+plan has no previous version, and the question is *what did it decide*.
+
+### 12.2 Why a chip of its own rather than folding into `run`
+
+`run` is the assistant's ledger: turns, tools, dispatches — things that happened
+because somebody asked. A routine happened because the clock said so, and the
+two answer different questions. "What did the system do while I was away"
+without the schedule in it is most of the answer missing, and with the schedule
+folded into `run` it is forty tool calls deep.
+
+The cost is honest: `group` is a closed vocabulary read by every surface, and a
+seventh value is a decision, not a chip. The owner ruled for it on 2026-09-20.
+
+### 12.3 A routine that did not run
+
+Three outcomes, and only one of them is a row worth drawing.
+
+| Outcome | On Activity |
+| --- | --- |
+| it ran and wrote something | the row above |
+| it could not run — `no_vault`, no reconciler bridge | an **absent** row naming the fact that stopped it. Not `failed`: nothing broke |
+| it was too early — before the day end `Me/profile.md` states | **no row at all.** The schedule working is not an event, and `plan-tomorrow`'s own skip list says so in those words |
+
+That third line is the whole discipline of this screen in one case: a timeline
+that reports every tick of a scheduler is a timeline nobody reads.
+
+### 12.4 Data sources
+
+| Element | Source |
+| --- | --- |
+| the row | `activity_feed` — **needs `routine_run` in the kind list and a `routine` group** (C43) |
+| the actor | `runs.component` |
+| what it wrote | `runs.meta` — the path, and the counts the routine puts there |
+| the prose | the vault file itself. **No read path names it** — `ref` has no prefix for a vault file |
+| the verdict | one feedback signal keyed by a `prose_id` — request B7 |
+| skipped, and why | `runs.meta`'s skip reason; `too_early` writes no row |

@@ -7,6 +7,10 @@ Round C drew the request card and the panel and left the list open. The
 endpoint settles most of what was open — and shows that the panel header I
 specified last round cannot be built.
 
+**Round E adds §9 — the `access_request` card kind.** It is the one request
+where answering changes what another principal can see, so it is the one that
+has to be honest about what Approve costs.
+
 ## 1. The bell
 
 The only badge in the product (P2). No counts on sidebar rows, none on
@@ -171,3 +175,98 @@ is nothing there for it to do.
 - `SKIP_FEEDBACK` is a sentinel string in the feedback column. Nothing in the
   design surfaces it, which is correct, but it means a skipped row and a
   declined-with-that-exact-text row are indistinguishable in storage.
+
+---
+
+## 9. The access request — round E
+
+`request_access` writes one `proposals` row of kind `access_request` and grants
+nothing. This is the card that answers it. It is the only kind where Approve
+widens another principal's sight, and three things about it are not obvious.
+
+### 9.1 What the card renders, and what it must not compose
+
+| Piece | Source | Rule |
+| --- | --- | --- |
+| the ask | `payload.area` | **verbatim**, mono. It is a path; a path is a value |
+| why it is asking | `payload.reason` | the agent's words — prose treatment, never a control (P1). ≤1000 chars, so it folds |
+| what it holds now | `payload.current_scope.line` | **rendered as given.** The triple *role · access · extras*, composed once by `describeScope` and said the same way in the CLI, the Agents panel and here (P3 §3.4). The card never writes this sentence itself |
+| the actor | `source_agent` + `trust` | nothing for `internal`, `external` in `degraded`, `you` neutral |
+| when | `provenance.submitted_at` | relative |
+
+The tier words the owner reads are the scope view's own — **`none` · `titles` ·
+`folders`** — not the grant model's `index` / `areas`. One vocabulary, and it
+is the one already shipping.
+
+### 9.2 Approve is not purely additive, and the card says so
+
+`widenedGrants` sets the tier to `folders` unconditionally. For an agent at
+`titles` that is **a narrowing on the other axis**: it was browsing every title
+in the vault and will now see titles only inside its own folders. The grant
+model has one tier, so "browse everything plus read one area" cannot be
+expressed — the trade *is* the decision being made.
+
+So the Approve box carries it, in `degraded`, with the words doing the work and
+the tint only seconding them. An Approve that quietly removed browsing would be
+exactly the surprise P5 exists to prevent. (C41)
+
+### 9.3 Revise can only grant less
+
+The asked prefix is a **ceiling**. Every option on the control is at or below
+it, and there is no field that can name something above it.
+
+The reasoning is not squeamishness about widening — it is that granting more
+than was asked **is not a revision of this request**. It is a different
+decision, about a scope nobody asked for, and it belongs on Agents where the
+owner is looking at the whole credential rather than at one sentence from an
+agent. The control says so in one line rather than disabling something silently.
+
+The endpoint does not enforce this today (C40): `accept_with_changes` validates
+the shape of the area and not its relation to the one asked for. The interface
+cannot express a widening; the request list asks for the endpoint to refuse one.
+
+### 9.4 Asked again, and the rung the owner never sees
+
+A re-ask after a decline is a **new row flagged `escalated`**, carrying
+`prior_proposal` and `prior_declined_at`. The card shows it as *asked again*,
+names when the owner declined, links what they answered, and says the ladder
+ends.
+
+**It is neutral, not tinted.** Tint carries *something is wrong* and nothing
+here is wrong: a second ask is provenance, which is the hue channel's business
+and not the tint channel's. Treating persistence as a fault would also be a
+judgement the data does not support.
+
+Two declines close it: the third ask is refused at the tool with *ask the owner
+directly*. That refusal produces **no row**, so the owner never learns an agent
+hit the ceiling — which is a gap on **Agents**, not here. (C42)
+
+One pending ask per `(agent, area)`, enforced by migration 0022's partial
+unique index, so a retrying agent cannot fill the queue with the same sentence.
+Nothing had to be designed for that, which is the point.
+
+### 9.5 Four refusals, inline, and the row stays pending
+
+Every access refusal runs **before** the row is settled, so the card is still
+there and still answerable. The band says so in those words, because a refusal
+that looks like a decision is the lie P5 forbids.
+
+| Refusal | What the card says | Where it points |
+| --- | --- | --- |
+| `invalid_request` — no area | the request does not name an area this console would grant | Decline |
+| `invalid_request` — bad revision | the prefix rule, verbatim | the control |
+| `forbidden` — a crew | its scope is configuration, re-synced from its manifest, so approving would be undone at the next sync | `agents/<area>/<id>.md` |
+| `not_found` — revoked | there is nothing to widen | Decline or Skip |
+
+### 9.6 Data sources
+
+| Piece | Source |
+| --- | --- |
+| the ask, the reason, the scope | `proposals.payload` — `area`, `reason`, `current_scope` |
+| the re-ask | `payload.escalated`, `prior_proposal`, `prior_declined_at` |
+| the actor's provenance | `trust`, `source_agent`, `payload.provenance` |
+| Approve | `POST /api/proposals/{id}` `allow` → `widenedGrants` → `writeGrants` |
+| Revise | the same, `accept_with_changes` + `{"area": "…"}` |
+| durability across a restart | `agent_grant_overrides` (migration 0023) |
+| the tier trade | **derived** — nothing flags it (C41) |
+| the vault tree under the asked prefix | **nothing** — the control needs one to offer a narrower path |

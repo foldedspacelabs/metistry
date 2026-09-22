@@ -70,9 +70,14 @@ ANAT=pan(L,"ROW ANATOMY — EVERY PART NAMES A COLUMN",
 
 ROUT=pan(L,"ROUTINES — THE DAY'S PLAN AND THE STANDUP DRAFT",
   nt(L,"A routine is neither a run the assistant chose to make nor a message it sent, so it gets the eighth chip "
-       "rather than being folded into one of the seven. What it produces is <b>prose Metis wrote</b>, so the row "
-       "carries the spark and expands into the one prose component — not a diff, and never something that looks "
-       "like a control (P1).")
+       "rather than being folded into one of the seven. What it produces is <b>prose an agent wrote</b>, so the "
+       "row carries the spark and expands into the one prose component — not a diff, and never something that "
+       "looks like a control (P1).")
+  + nt(L,"<b>Two rows, two actors.</b> A <b>built-in</b> routine is the system on a schedule, so its actor is "
+        "neutral. A routine that assigns work to one of your agents has <b>that agent</b> as its actor, with the "
+        "routine named as the reason it ran — because a routine is an assignment, not a species of actor "
+        "(ruled 2026-09-21). The first draft of this board made both neutral, which read as though nothing the "
+        "owner configured had been involved.",12)
   + f'<div style="background: {L["bg"]}; border: 1px solid {L["border"]}; border-radius: 12px; margin-top: 14px; '
     f'overflow: hidden;">{band(L,"THIS MORNING")}{routinerows(L,last_absent=True)}</div>'
   + nt(L,"The third row is the honest one: a routine that <b>did not run</b> is <b>absent</b>, not failed, and it "

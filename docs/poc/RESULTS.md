@@ -866,6 +866,57 @@ and conformance only — PoC-3 and PoC-15/16 own that question); multi-turn
 and `representNilExplicitlyInGeneratedContent` are 26.4-only, so the
 `#available` guards the PoC carries are untested on 26.0–26.3.
 
+## PoC-20 — a fast local intent tier for inputs (phase 0: the router's baseline)
+
+**Gates:** everything after it. Phase 0's number decides whether PoC-20
+phases 1–3 get built at all, or whether the answer is more `fast_path`
+regexes.
+
+| | |
+|---|---|
+| Status | **NOT RUN** — phase 0 is run by the owner |
+| Date | — |
+
+Design and candidate measurements:
+**`docs/research/2026-09-21-intent-classification-tier.md`** (2026-09-21;
+recommendations approved 2026-09-22). Its §2 latency figures were taken on
+this Mac against the local servers already running; its accuracy columns are
+explicitly illustrative, because C11 forbids Claude-authored labels and
+§4.4 says where the real fixtures come from.
+
+**Phase 0 is a measurement and an exit rule, and it needs the instance's
+database** — which the research deliberately did not touch (§5.3). The
+tooling for it ships; the run is the owner's:
+
+```
+metistry compute route-report [--since 30d] [--json]
+```
+
+One named query (`seed/queries/route_report.yaml`, invariant 3) over
+`inbound_messages.meta.route`: the share of real messages that took `note`,
+`fast_path`, an `override`, or fell through to the `default` tier, and — among
+the fall-throughs — the distribution of length and of first word. Counts
+only, no message text, so it is safe on the generic query door.
+`docs/ops/compute.md`, "The router's baseline", says what to read in it.
+
+**The exit rule, from §5.2, printed as the verdict:** *fall-through under
+~40 % ⇒ stop and write `fast_path` rules instead — an extra regex is free,
+auditable and self-documenting in the command menu. Over it ⇒ phase 1
+(answer-token scoring through the existing compute layer, no new dependency)
+is worth building.*
+
+**What the phases are, so the number has somewhere to land** (§5.2): phase 1
+is `scoreChoice()` beside `completeJson()` in `collectors/compute-client.ts`,
+wired to capture's fall-through branch first; phase 2 is the JSON-schema arm
+and the `rules.yaml` `when:` vocabulary, which needs the §3.2 invariant-4
+ruling; phase 3 is embeddings over the `nomic-embed-text` vectors the vault
+already stores, unlocked by the fixture harvest. **No external candidate is
+recommended at any phase** — Nimble is unlicensed, Jev is off-machine, and
+Laya is Python with no HTTP surface (§2).
+
+Write the result up here when it has been run: the number, the window it was
+taken over, and which side of ~40 % it landed.
+
 ## Contradictions with BUILD-PLAN.md
 
 Anything a finding invalidates. Note it here; don't edit the plan.

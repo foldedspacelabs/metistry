@@ -1,0 +1,200 @@
+# Seeded default (D4 overlay: an instance file of the same name wins).
+#
+# PoC-20 PHASE 0's measurement, and the whole of it
+# (`docs/research/2026-09-21-intent-classification-tier.md` §5.2): *"One named
+# query (invariant 3) over `inbound_messages.meta.route`: the share of real
+# messages that took `note`, `fast_path`, an `override`, or fell through to
+# `default`; and among the fall-throughs, the distribution of length and first
+# word."* The exit rule it feeds is a number: **fall-through under ~40 % and
+# the answer is more `fast_path` rules, not a classifier.** The research could
+# not run this — it needs the instance's database, which it deliberately did
+# not read — so this is the owner's command, and `metistry compute
+# route-report` is the one read path into it.
+#
+# **The four kinds are DERIVED, because the router does not record them as
+# four.** `apps/console/src/router.ts:24-27` writes a `Route` of three kinds
+# and a `routed_by`, and `apps/console/src/server.ts:616-621` puts it whole in
+# `inbound_messages.meta.route` before the 202. The fourth kind — the
+# fall-through this whole PoC is about — is `kind: "model"` with `routed_by:
+# "rule"`, i.e. "no command, no fast path, no picker: the default tier". So:
+#
+#   note       kind = note        — /note, straight to the inbox, no model
+#   fast_path  kind = fast_path   — a rules.yaml `match:` fired, answered by a
+#                                   named query, no model
+#   override   kind = model, routed_by = override  — /model <tier>, /deep, or
+#                                   the composer's tier picker: the person
+#                                   chose, so the router did not have to
+#   default    kind = model, routed_by = rule      — THE FALL-THROUGH
+#
+# **`unrouted` is not a fall-through, and conflating them would overstate the
+# number this PoC turns on.** A message whose `meta` carries no `route` at all
+# is one the console filed with no ruleset loaded (`server.ts:616`:
+# `cfg.rules ? … : null`) or one written before routing was recorded. It is the
+# router saying nothing, not the router saying "default" — the same distinction
+# `cache_report.yaml` draws between a NULL `cache_read_tokens` and a 0. It is
+# counted on the `total` row and excluded from every share.
+#
+# **What a share is taken OVER is on the row** (`denominator`), because there
+# are two honest denominators here and a single unlabelled percentage would be
+# read as the wrong one. `kind` and `tier` rows are shares of the ROUTED
+# messages; `rule` rows are shares of the `fast_path` ones; `length` and
+# `first_word` rows are shares of the FALL-THROUGHS, which is the population
+# §5.2 asks about.
+#
+# **Every kind and every length bucket is emitted, including the empty ones.**
+# A `fast_path` row reading 0 is the most useful line in the report — it says
+# the two seeded rules never fire — and a row that simply was not there would
+# be read as an absence of data instead. §4.3's third property, applied: "a
+# never-firing tier must be visible… 'configured but never used' should be a
+# row, not a silence."
+#
+# **No message body, at any grain, which is what makes `expose: generic`
+# right.** Counts, a bucket label, a tier name and a named-query name are all
+# the operator's own vocabulary. The one place the owner's own words could
+# reach a row is `first_word`, and it is fenced three ways: ONE lower-cased
+# token, only where that token is alphabetic (or command-shaped, `/foo` —
+# which is the finding "he keeps typing a command that does not exist"),
+# everything else folded into `(other)` so an address, a number, a date or a
+# URL can never appear; and the top 15 by count, never the row it came from.
+# The message TEXT is never selected, and neither is `meta.route.text`, which
+# carries a copy of it — so this is safe on the generic door, the owner reads
+# bodies in the app where they belong, and invariant 10's mutating surface is
+# untouched because this mutates nothing.
+#
+# `COLLATE "C"` on every tie-break, for the reason `knowledge_pages` has it:
+# CI runs Linux and the owner runs macOS, and two orderings of one report is
+# one too many.
+name: route_report
+description: >-
+  How the deterministic router placed real messages over the last `days` days
+  — PoC-20 phase 0's baseline
+  (`docs/research/2026-09-21-intent-classification-tier.md` §5.2). One `total`
+  row (messages, how many carried a routing decision at all, how many did not,
+  and the fall-through count), one `kind` row per route kind (`note`,
+  `fast_path`, `override`, and `default` — the fall-through), one `tier` row
+  per tier name the model routes named, one `rule` row per named query a
+  `fast_path` match reached, and — over the FALL-THROUGHS only — one `length`
+  row per word-count bucket (≤5, 6–15, 16–40, >40) and one `first_word` row
+  for each of the fifteen commonest opening words. Each row says what its
+  share is taken over (`denominator`). Counts only: no message text, no
+  thread, no vault path — the first word is a single lower-cased alphabetic
+  or command-shaped token and everything else is folded into `(other)`.
+params:
+  days: { type: int, default: 30 } # the CLI's `--since 30d`; §5.2 wants a real month of typing, not a week
+sql: |
+  WITH win AS (
+    SELECT now() - make_interval(days => (:days)::int) AS since
+  ),
+  m AS (
+    SELECT
+      i.ts,
+      i.text,
+      i.meta -> 'route' AS route,
+      -- the four kinds of §5.2, derived from the three the router writes
+      CASE
+        WHEN i.meta -> 'route' ->> 'kind' = 'note'      THEN 'note'
+        WHEN i.meta -> 'route' ->> 'kind' = 'fast_path' THEN 'fast_path'
+        WHEN i.meta -> 'route' ->> 'kind' = 'model'
+             AND i.meta -> 'route' ->> 'routed_by' = 'override' THEN 'override'
+        WHEN i.meta -> 'route' ->> 'kind' = 'model'     THEN 'default'
+        ELSE 'unrouted'
+      END AS route_kind
+    FROM inbound_messages i, win w
+    WHERE i.ts >= w.since
+  ),
+  tot AS (
+    SELECT
+      count(*)                                            AS messages,
+      count(*) FILTER (WHERE route_kind <> 'unrouted')    AS routed,
+      count(*) FILTER (WHERE route_kind =  'unrouted')    AS unrouted,
+      count(*) FILTER (WHERE route_kind =  'default')     AS fall_through,
+      count(*) FILTER (WHERE route_kind =  'fast_path')   AS fast_path,
+      min(ts)                                             AS since,
+      max(ts)                                             AS until
+    FROM m
+  ),
+  -- the fall-throughs, and the two things §5.2 asks about them. The word
+  -- count is over whitespace runs, so it is the same number a person would
+  -- get counting; the first token is taken before any of it is looked at.
+  fall AS (
+    SELECT
+      CASE WHEN btrim(text) = '' THEN 0
+           ELSE array_length(regexp_split_to_array(btrim(text), '\s+'), 1) END AS words,
+      btrim(lower(coalesce(substring(btrim(text) from '^\S+'), '')), '.,!?;:"''()[]{}') AS first_raw
+    FROM m WHERE route_kind = 'default'
+  ),
+  kinds AS (
+    SELECT k.label, k.ord, count(m.route_kind) AS n
+    FROM (VALUES ('note', 1), ('fast_path', 2), ('override', 3), ('default', 4)) AS k(label, ord)
+    LEFT JOIN m ON m.route_kind = k.label
+    GROUP BY 1, 2
+  ),
+  tiers AS (
+    -- only the model routes have a tier: `note` and `fast_path` reach no
+    -- model at all, so they have no tier to name and are not counted here
+    SELECT coalesce(route ->> 'tier', '') AS label, count(*) AS n
+    FROM m WHERE route_kind IN ('override', 'default') GROUP BY 1
+  ),
+  rules AS (
+    -- a fast_path rule has no NAME in rules.yaml, only a `match:` and the
+    -- named query it answers from, so the query IS the rule's identity here
+    SELECT coalesce(route ->> 'query', '') AS label, count(*) AS n
+    FROM m WHERE route_kind = 'fast_path' GROUP BY 1
+  ),
+  lengths AS (
+    SELECT b.label, b.ord, count(f.words) AS n
+    FROM (VALUES ('<=5 words', 1), ('6-15 words', 2), ('16-40 words', 3), ('>40 words', 4)) AS b(label, ord)
+    LEFT JOIN fall f ON (CASE WHEN f.words <= 5 THEN 1 WHEN f.words <= 15 THEN 2 WHEN f.words <= 40 THEN 3 ELSE 4 END) = b.ord
+    GROUP BY 1, 2
+  ),
+  -- the fence: one token, and only where it is a word or a command. Anything
+  -- else an opening token can be — an address, a number, a date, a URL, a
+  -- name with a dot in it — becomes `(other)` before it is ever counted.
+  first_tokens AS (
+    SELECT CASE WHEN first_raw ~ '^/?[a-z][a-z''’-]*$' THEN first_raw ELSE '(other)' END AS label
+    FROM fall
+  ),
+  firsts AS (
+    SELECT label, count(*) AS n
+    FROM first_tokens GROUP BY label
+    ORDER BY count(*) DESC, label COLLATE "C" LIMIT 15
+  )
+  SELECT r.* FROM (
+    SELECT 'total'::text AS row_kind, 0 AS ord, NULL::text AS label,
+           t.messages AS n, NULL::bigint AS denominator, NULL::numeric AS share,
+           t.messages, t.routed, t.unrouted, t.fall_through,
+           t.since, t.until
+    FROM tot t
+    UNION ALL
+    SELECT 'kind', k.ord, k.label, k.n, t.routed,
+           CASE WHEN t.routed > 0 THEN round(k.n::numeric / t.routed, 4) END,
+           NULL, NULL, NULL, NULL, NULL, NULL
+    FROM kinds k, tot t
+    UNION ALL
+    SELECT 'tier', 5, x.label, x.n, t.routed,
+           CASE WHEN t.routed > 0 THEN round(x.n::numeric / t.routed, 4) END,
+           NULL, NULL, NULL, NULL, NULL, NULL
+    FROM tiers x, tot t
+    UNION ALL
+    SELECT 'rule', 6, x.label, x.n, t.fast_path,
+           CASE WHEN t.fast_path > 0 THEN round(x.n::numeric / t.fast_path, 4) END,
+           NULL, NULL, NULL, NULL, NULL, NULL
+    FROM rules x, tot t
+    UNION ALL
+    SELECT 'length', 6 + l.ord, l.label, l.n, t.fall_through,
+           CASE WHEN t.fall_through > 0 THEN round(l.n::numeric / t.fall_through, 4) END,
+           NULL, NULL, NULL, NULL, NULL, NULL
+    FROM lengths l, tot t
+    UNION ALL
+    SELECT 'first_word', 11, x.label, x.n, t.fall_through,
+           CASE WHEN t.fall_through > 0 THEN round(x.n::numeric / t.fall_through, 4) END,
+           NULL, NULL, NULL, NULL, NULL, NULL
+    FROM firsts x, tot t
+  ) r
+  -- `ord` first so the reading order is the reporting order: the total (0),
+  -- the four kinds (1-4), the tiers (5), the rules (6), the length buckets
+  -- (7-10) and the first words (11). The UNION is wrapped because a set
+  -- operation's ORDER BY admits result column NAMES only, and `COLLATE "C"`
+  -- is an expression.
+  ORDER BY r.ord, r.n DESC, r.label COLLATE "C" NULLS FIRST
+cache_ttl: 60 # a month-long baseline does not change between two reads a minute apart

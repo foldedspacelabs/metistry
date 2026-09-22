@@ -267,6 +267,9 @@ importers:
 
   packages/eval:
     dependencies:
+      '@foldedspacelabs/metistry-core':
+        specifier: workspace:*
+        version: link:../core
       '@foldedspacelabs/metistry-mcp-brain':
         specifier: workspace:*
         version: link:../mcp-brain

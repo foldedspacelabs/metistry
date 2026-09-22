@@ -891,6 +891,69 @@ Laya is Python with no HTTP surface (§2).
 Write the result up here when it has been run: the number, the window it was
 taken over, and which side of ~40 % it landed.
 
+### Phase 1 — answer-token scoring at the capture door
+
+| | |
+|---|---|
+| Status | **BUILT 2026-09-22; NOT MEASURED** — the measurement needs the owner's fixtures |
+| Gates | whether a classifier belongs on the input path at all. Phase 1 needs no invariant ruling (§4.1: the capture door costs none); phase 2's composer door does. |
+
+Artifacts, the fixture format and the turn-on instructions are in
+`docs/poc/poc20-intent-tier/`. What shipped: `scoreChoice()` beside
+`completeJson()`, the closed intent enum in `packages/core` with generated
+letter codes, the deterministic out-of-distribution guard, the tier wired to
+`inbox-drain`'s fall-through branch behind `compute.yaml`'s
+`assignments.intent` and `rules.yaml`'s `intent:` thresholds, every verdict in
+a `runs` row and on the proposal, and `metistry-eval intents`, which **fits**
+the threshold rather than assuming one.
+
+**Why there is no accuracy number here.** C11 forbids a Claude-authored label
+as an expected answer, so the fixtures are the owner's and nobody else's —
+~150–300 of his own messages including ~20 deliberately `unsure`
+(`<instance>/.metistry/eval/intents.jsonl`; the example this repo ships is
+empty on purpose). The bar those fixtures will be read against is
+pre-registered in `packages/eval/src/intents.ts` as `INTENT_BAR`: **≥ 95%
+accuracy above the threshold excluding gold-`unsure`, ≥ 90% of gold-`unsure`
+below it, ≤ 2% confident errors, p50 < 150 ms / p95 < 400 ms warm, cold start
+< 1 s, and absent degrading byte-identically** — the last of which is the one
+row already proven, as a test rather than a promise.
+
+**Three things WERE measured, on this Mac, and two of them correct the research
+note.** Read-only probes against the local servers already running.
+
+1. **LM Studio is not schema-only.** It returns `top_logprobs` at
+   `max_tokens: 2` with `top_logprobs <= 10`; at `max_tokens: 1` it answers
+   `200` with `logprobs: null` and `completion_tokens: 0`, and past ten it
+   answers `400 "top_logprobs must be less than or equal to 10"` — a 400 that
+   is swallowed at `max_tokens: 1`. The research reproduced both observations
+   and concluded the server could not do it. So the answer-token tier runs on
+   **all three** local servers that expose logprobs, and the schema-only
+   fallback is needed for none of them. Apple FM still cannot (no per-token
+   logits) and is refused by name before a request is built.
+2. **Reasoning suppression on Ollama is load-bearing.** Without
+   `reasoning_effort: "none"` the most likely next token is the reasoning
+   channel's opener (`'<|channel>'` at -0.436, against `'A'` at -1.063); with
+   it, `'A'` at -0.028. PoC-16 finding 2, reproduced from the other side.
+   `chat_template_kwargs: {enable_thinking: false}` alongside changes Ollama's
+   distribution by nothing, and `llama-server` takes both, so one request shape
+   serves both servers.
+3. **Descriptions cost ~1.7x the latency of bare names** — `gemma4:e4b-it-qat`,
+   sixteen intents: bare names **p50 174 ms** (reproducing the research's
+   155 ms), descriptions **p50 293 ms**. Laya lesson 1 says descriptions;
+   §4.4's bar says p50 < 150 ms; on this model those two cannot both hold.
+   `metistry-eval intents --phrasings` is how that gets decided on the owner's
+   own messages instead of assumed. Cold start with the model resident but
+   idle: 4.3 s, against a bar of 1 s — `keep_alive` is not optional.
+
+**Invariant 4 is untouched, and phase 1 is the half that needed no ruling**
+(§4.1): the classifier runs at the capture door only, the router does not read
+it, `Route` still has its three kinds, and the verdict is consumed exclusively
+by rule code — `collectors/test/invariant4.test.ts` asserts all three, one
+behaviourally (the set of models dialled is identical for every intent in the
+enum) and two by reading the source. The composer door is phase 2 and waits on
+§6 question 1.
+
+
 ## Contradictions with BUILD-PLAN.md
 
 Anything a finding invalidates. Note it here; don't edit the plan.

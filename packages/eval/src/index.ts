@@ -114,3 +114,26 @@ export {
   type ReportOptions,
   type TraceStat,
 } from "./report.js";
+
+export {
+  INTENT_BAR,
+  IntentFixture,
+  buildIntentReport,
+  ece,
+  fitThreshold,
+  liveScorer,
+  loadIntentFixtures,
+  percentile,
+  renderIntentReport,
+  runIntentEval,
+  type IntentFit,
+  type IntentFixtureIssue,
+  type IntentReport,
+  type IntentRow,
+  type IntentRunResult,
+  type IntentScorer,
+  type LiveScorerOptions,
+  type PhrasingReport,
+  type RunIntentEvalOptions,
+  type ThresholdPoint,
+} from "./intents.js";

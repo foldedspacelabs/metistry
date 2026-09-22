@@ -99,8 +99,10 @@ disagree, the newer three win and the disagreement gets logged.
 
 ## 3. What is ratified — do not re-litigate
 
-**Navigation.** Seven rows: **Today · Chat · Activity · Work ▸ · Knowledge ▸ ·
-Agents**, then **Pinned**. Today is first and top-level (C30) — it holds
+**Navigation.** **Eight** rows as of 2026-09-21: **Today · Chat · Activity ·
+Work ▸ · Knowledge ▸ · Routines · Agents**, then **Pinned**. Routines went
+top-level for C30's own reason — it is not a kind of agent, and a child row
+would bury a daily question (C50). Today is first and top-level (C30) — it holds
 meetings, artifacts, requests and agent status, none of which Work owns. Work's
 children are Board · Projects · Artifacts · Rooms.
 
@@ -183,7 +185,7 @@ the canvas is now generated from a module in `boards/` except `Facets`, `Plugin`
 `Voice` and `Item-Model`. `bellpanel()` is gone — it drew the *"1 snoozed"*
 header C21 killed; `panel2()` is the panel.
 
-**49 contradictions** are logged in `review-00-plan.md`. C38 is closed. C40–C49 are
+**52 contradictions** are logged in `review-00-plan.md`. C38 is closed. C40–C49 are
 round E's. Two of them are rules the system is missing rather than faults in a
 file: **C45** (a failed consequential operation leaves the request pending) and
 **C49** (a mark that carries meaning takes an ink token, never a border token —

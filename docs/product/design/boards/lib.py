@@ -64,6 +64,10 @@ I=dict(review='<circle cx="11" cy="11" r="5.6"/><path d="M15.2 15.2L20 20"/>',
  pencil='<path d="M4.5 19.5h4L19 9a2.5 2.5 0 00-3.5-3.5L5 16z"/><path d="M14 7l3 3"/>',
  chevd='<path d="M6 9.5l6 6 6-6"/>',
  chevr='<path d="M9 6l6 6-6 6"/>')
+# `repeat` lives here rather than beside its first use: module-level panels are built at
+# import time, so an icon added later in the file does not exist when they render.
+I["repeat"]='<path d="M4 12a8 8 0 0113.7-5.6L20 9"/><path d="M20 4v5h-5"/><path d="M20 12a8 8 0 01-13.7 5.6L4 15"/><path d="M4 20v-5h5"/>'
+
 def page(title,body,w,h,ground):
     return f'''<!doctype html>
 <html lang="en">
@@ -1503,8 +1507,12 @@ def pred2(T,label,why):
 # ============ TODAY, v5 ==================================================
 def sidebar8(T,sel="Today"):
     out=[]
+    # Eight rows as of round E: Routines became top-level (ruled 2026-09-21) because
+    # "what is Metistry running for me every day" is a daily question and a child of
+    # Agents would bury it. It sits beside Agents, which it deep-links to constantly.
     for n,g,kids in [("Today",I["cal"],None),("Chat",I["chat"],None),("Activity",I["activity"],None),
-                     ("Work",I["work"],True),("Knowledge",I["know"],None),("Agents",I["agents"],None)]:
+                     ("Work",I["work"],True),("Knowledge",I["know"],None),("Routines",I["repeat"],None),
+                     ("Agents",I["agents"],None)]:
         on=(n==sel)
         out.append(f'<div style="position: relative; display: flex; align-items: center; gap: 10px; padding: 8px 12px; '
                    f'border-radius: 8px; background: {T["accq"] if on else "transparent"};">'
@@ -1908,7 +1916,6 @@ NAVP3=pan(L,"TODAY FIRST",
 # ruled 2026-09-20 that designing ahead of the surface is allowed and the developer adapts
 # afterwards. Every gap is named in the request list rather than drawn around.
 
-I["repeat"]='<path d="M4 12a8 8 0 0113.7-5.6L20 9"/><path d="M20 4v5h-5"/><path d="M20 12a8 8 0 01-13.7 5.6L4 15"/><path d="M4 20v-5h5"/>'
 
 # ---------- the scope triple: one line, the same words in the CLI, console and queue -----
 def scopeline(T,*,who,access,extras,label="WHAT IT HOLDS NOW"):

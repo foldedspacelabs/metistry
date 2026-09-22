@@ -220,7 +220,7 @@ the canvas is now generated from a module in `boards/` except `Facets`, `Plugin`
 `Voice` and `Item-Model`. `bellpanel()` is gone — it drew the *"1 snoozed"*
 header C21 killed; `panel2()` is the panel.
 
-**60 contradictions** are logged in `review-00-plan.md`. C38 is closed. C40–C49 are
+**62 contradictions** are logged in `review-00-plan.md`. C38 is closed. C40–C49 are
 round E's. Two of them are rules the system is missing rather than faults in a
 file: **C45** (a failed consequential operation leaves the request pending) and
 **C49** (a mark that carries meaning takes an ink token, never a border token —

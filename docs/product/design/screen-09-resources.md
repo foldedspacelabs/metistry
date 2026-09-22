@@ -1,6 +1,6 @@
 # Screen 9 — Resources
 
-New, 2026-09-22. **Settings ▸ Resources** — it was briefly a top-level row and
+New, 2026-09-22. **Settings ▸ Resources**, in Settings' own window — it was briefly a top-level row and
 moved, because a connection is configured once and then read from the permissions
 tables that grant it (C57). **The connections Metistry holds, and lends.**
 
@@ -66,8 +66,8 @@ Each tool carries **three states**, set here because this is where they are set:
 
 | | |
 | --- | --- |
-| **On** | runs when an agent calls it |
-| **Ask** | lands in Needs You and waits — see §4 |
+| **On** | runs when an agent calls it — no preview, because you chose it |
+| **Ask** | shows what it would do, then waits for you in Needs You — see §4 |
 | **Off** | refused at the proxy, and not offered to the agent at all |
 
 **Nobody who clicks *grant Jira* means *including `delete_issue`*,** and a
@@ -77,10 +77,15 @@ In an agent's or a routine's permissions matrix the same three states are read o
 absence and one glyph — listed is On, listed with the clock is Ask, absent is Off —
 so the vocabulary is one thing seen from two sides.
 
-A destructive tool is **marked, not withheld**: `CLAUDE.md`'s bridge contract
-requires **preview-then-confirm on destructive tools**, so the owner grants it
-knowing it will show its work before doing it. The mark reads *Previews first*,
-which is what the contract actually guarantees.
+**Preview-then-confirm is what *Ask* means** — not a second marker beside the
+control, but the middle state of it. `CLAUDE.md`'s bridge contract supplies the
+behaviour; the control supplies the choice.
+
+**The owner's choice is the whole control** (ruled 2026-09-22). An earlier draft
+marked destructive tools *Previews first* alongside the setting, which said two
+things at once and quietly overrode a deliberate **On**. If you choose On, it is
+on. What a tool does is carried by its description, which is where that belongs:
+the table informs the choice rather than second-guessing it.
 
 ### 3.3 Lent to
 
@@ -124,8 +129,12 @@ than papering over:
 | an agent Metis is delegating to, in a conversation | **pause** — the owner is there |
 | an unattended routine | **defer** — report it and move on |
 
-**And a guardrail:** a tool marked *Previews first* should not be grantable as
-**On** to an unattended routine at all. *Ask* is the most it can hold. (C59)
+**A default, not a guardrail.** An earlier draft of this said a destructive tool
+should not be grantable as **On** to an unattended routine at all. That was the
+design overriding a deliberate choice. A tool that writes where other people can
+see it **defaults** to Ask and the owner may set it to On — the same shape the wire
+already uses for `dispatch`, which defaults to `propose` rather than being
+forbidden. (C59)
 
 ## 5. States
 

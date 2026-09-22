@@ -10,25 +10,10 @@ from lib import *
 CW,CH=2440,2980
 
 def win(T,inner):
-    """Settings ▸ Resources (ruled 2026-09-22). It came off the top-level nav, which
-    is what took the sidebar back to eight rows."""
-    return (f'<div style="flex-grow: 1; min-width: 0; border: 1px solid {T["bc"]}; border-radius: 14px; '
-            f'overflow: hidden; background: {T["bg"]};">{toolbar(T)}'
-            f'<div style="display: flex; align-items: stretch;">{settingsnav(T)}{inner}</div></div>')
-
-def toolrow(T,name,desc,*,destructive=False,granted=True,last=False):
-    m=""
-    if destructive:
-        m=(f'<span style="display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 600; '
-           f'color: {T["deg"]};">{ic(I["warn"],11,2.2)}Previews first</span>')
-    box=(f'<span style="width: 15px; height: 15px; border-radius: 4px; flex-shrink: 0; display: inline-flex; '
-         f'align-items: center; justify-content: center; background: {T["acc"]}; color: {T["onacc"]};">'
-         f'{ic(I["check"],10,3)}</span>' if granted else
-         f'<span style="width: 15px; height: 15px; border-radius: 4px; flex-shrink: 0; box-sizing: border-box; '
-         f'border: 1px solid {T["bc"]};"></span>')
-    return (f'<div style="display: grid; grid-template-columns: 15px 190px minmax(0,1fr) 120px; align-items: center; '
-            f'gap: 12px; padding: 7px 0; {bd_(T,last)}">{box}{mono(name,T["tp"],12)}'
-            f'<span style="font-size: 12px; color: {T["ts"]};">{desc}</span>{m}</div>')
+    """Settings ▸ Resources (ruled 2026-09-22). Its own WINDOW, not a pane in the
+    main one — the first draft styled the section list like the sidebar and it read
+    as a nav row that had supposedly been removed."""
+    return settingswindow(T,inner)
 
 def conndetail(T,w=None):
     wd=f"width: {w}px; flex-shrink: 0;" if w else "flex-grow: 1; min-width: 0;"
@@ -55,7 +40,7 @@ def conndetail(T,w=None):
     return (f'<div style="{wd} background: {T["bg"]};">{head}'
             f'<div style="padding: 16px; display: flex; flex-direction: column; gap: 16px;">'
             + block(T,"THE CONNECTION",conn)
-            + block(T,"TOOLS — THREE STATES, SET HERE",tools)
+            + block(T,"TOOLS — ON, ASK OR OFF",tools)
             + block(T,"LENT TO",lent)
             + '</div></div>')
 
@@ -77,9 +62,13 @@ CONTRACT=pan(L,"THE BRIDGE CONTRACT ALREADY WROTE THE RULES",
        "server conforming to that contract inherits the behaviour this screen would otherwise have to invent — "
        "which is the argument for treating a proxied server as a bridge rather than as a new species.")
   + nt(L,"So the tool list is not decoration. <b>Lazy discovery</b> means the list is what the server said it has, "
-        "the last time it was asked — a fact with a timestamp, not a configuration. <b>Preview-then-confirm</b> is "
-        "why a destructive tool is marked here and not merely refused: the owner grants it knowing it will show its "
-        "work before doing it.",12)
+        "the last time it was asked — a fact with a timestamp, not a configuration. And "
+        "<b>preview-then-confirm is what <i>Ask</i> means</b>: it is not a second marker beside the control, it is "
+        "the middle state of it.",12)
+  + nt(L,"<b>The owner&rsquo;s choice is the whole control</b> (ruled 2026-09-22). An earlier draft marked "
+        "destructive tools <i>Previews first</i> alongside the setting, which said two things at once and quietly "
+        "overrode a deliberate <b>On</b>. If you choose On, it is on. What a tool does is carried by its "
+        "description, which is where that belongs — the table informs the choice rather than second-guessing it.",12)
   + nt(L,"<b>Per tool, not per server.</b> Nobody who clicks <i>grant Jira</i> means <i>including delete_issue</i>. "
         "A server-level switch is the shape that produces that mistake, so there isn't one.",12))
 
@@ -102,10 +91,11 @@ APPROVE=pan(L,"WHAT &ldquo;ASK&rdquo; ACTUALLY LOOKS LIKE — AND THE PROBLEM IN
         "request lands in Needs You. Nothing blocks, nothing is half-applied, and the fact is reported rather than "
         "silently dropped. It is the same discipline as <b>later</b> not blocking, and as a failed action leaving "
         "its row pending.",14)
-  + nt(L,"<b>And a guardrail:</b> a tool marked <i>Previews first</i> — destructive, by the bridge contract — should "
-        "not be grantable as <b>On</b> to an unattended routine at all. <b>Ask</b> is the most it can hold, and "
-        "<i>Ask</i> there means the run reports and moves on. An interactive agent Metis is delegating to <i>can</i> "
-        "wait, because you are in the conversation.",12)
+  + nt(L,"<b>A default, not a guardrail.</b> An earlier draft said a destructive tool should not be grantable as "
+        "<b>On</b> to an unattended routine at all. That was the design overriding a deliberate choice, which is "
+        "the wrong instinct here: a tool that writes where other people can see it <b>defaults</b> to Ask, and the "
+        "owner may set it to On. A default is enforcement enough — the same reason <b>dispatch</b> defaults to Ask "
+        "in the wire rather than being forbidden.",12)
   + nt(L,"So the three states mean slightly different things by context, and that is worth stating rather than "
         "papering over: on an agent you are talking to, <b>Ask</b> pauses. On a routine at 6 AM, <b>Ask</b> "
         "defers.",12))

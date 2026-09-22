@@ -7,25 +7,26 @@ Recurrence, Outputs, History. "Silent" is gone.
 """
 from lib import *
 
-CW,CH=2560,3060
+CW,CH=2560,3480
 
 def win(T,inner):
     return (f'<div style="flex-grow: 1; min-width: 0; border: 1px solid {T["bc"]}; border-radius: 14px; '
             f'overflow: hidden; background: {T["bg"]};">{toolbar(T)}'
             f'<div style="display: flex; align-items: stretch;">{sidebar8(T,"Routines")}{inner}</div></div>')
 
-GRIDP=pan(L,"THE WEEK ON ONE AXIS",
-  timeline(L)
-  + nt(L,"The first pass drew a seven-row week-by-hour grid. It was seven rows to say one thing, and the thing is "
-        "visible on a single axis: <b>everything runs before 7 AM or after 6 PM, and the working day is "
-        "empty</b>. Day and week markers give the scale; the faint line inside each day is noon.",14)
-  + nt(L,"<b>The agent-versus-built-in distinction left with the grid.</b> It was carried by two marks, which the "
-        "palette validator had already forced into filled-and-outlined — and it was never the picture&rsquo;s job: "
-        "the <b>Agent</b> column in the list below says who runs each one, in words. A mark per run, one ink, no "
-        "legend to learn. (The 14.3 &Delta;E finding stands as a rule for any future pair of marks; it simply has "
-        "nothing to apply to here.)",12)
-  + nt(L,"Day, Week and Month are the same marks at three scales. Month answers <i>what does a normal month cost "
-        "me</i>, which is the question a budget would attach to.",12))
+GRIDP=pan(L,"THE WEEK BELONGS ON THE SCREEN, NOT BESIDE IT",
+  nt(L,"It is at the top of the pane above, which is the point: <i>what is Metistry running for me</i> is answered "
+       "by the shape before it is answered by the rows. The first pass drew a seven-row week-by-hour grid — seven "
+       "rows to say one thing. One axis says it: <b>everything runs before 7 AM or after 6 PM, and the working day "
+       "is empty.</b>")
+  + nt(L,"Day rules, a faint noon line inside each day, and Day &middot; Week &middot; Month as the same marks at "
+        "three scales. Month is the one a budget would attach to, since recurring compute is where money leaks.",12)
+  + nt(L,"<b>The agent-versus-built-in distinction left with the grid.</b> Two marks carried it, and the palette "
+        "validator had already forced those into filled-and-outlined — the agent ink and the neutral separate at "
+        "<b>14.3 &Delta;E</b> in dark mode, under the hard floor of 15, indistinguishable even with full colour "
+        "vision. But it was never the picture&rsquo;s job: the <b>Agent</b> column says who runs each one, in "
+        "words. One ink, no legend. The &Delta;E rule stands for the next pair of marks (C54); it has nothing to "
+        "apply to here.",12))
 
 ORDER=pan(L,"ORDERED BY WHAT RUNS NEXT — SO A ROUTINE APPEARS ONCE PER OCCURRENCE",
   nt(L,"Grouped by cadence, the list was an unordered set of configuration. Ordered by <b>when it next runs</b>, "
@@ -88,7 +89,7 @@ body=(heading("ROUND E · SCREEN 8, REFINED","Routines — the scheduled compute
         + f'<div style="display: flex; gap: 18px; align-items: flex-start;">'
         + f'<div style="flex-grow: 1; min-width: 0; border: 1px solid {D["bc"]}; border-radius: 12px; '
           f'overflow: hidden;">{routinelist2(D)}</div>'
-        + f'<div style="width: 620px; flex-shrink: 0;">{timeline(D)}</div>'
+        + f'<div style="width: 620px; flex-shrink: 0;">{routinedetail2(D,w=620)}</div>'
         + '</div></div>',18))
 (PROJ/"Routines.dc.html").write_text(page("Routines",wrap(body,CW,CH,"#ece7dd",L["tp"],40),CW,CH,"#ece7dd"),encoding="utf-8")
 print(f"wrote Routines.dc.html ({CW}x{CH})")

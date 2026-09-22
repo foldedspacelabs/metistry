@@ -1507,12 +1507,14 @@ def pred2(T,label,why):
 # ============ TODAY, v5 ==================================================
 def sidebar8(T,sel="Today"):
     out=[]
-    # Eight rows as of round E: Routines became top-level (ruled 2026-09-21) because
-    # "what is Metistry running for me every day" is a daily question and a child of
-    # Agents would bury it. It sits beside Agents, which it deep-links to constantly.
+    # Eight rows (ruled 2026-09-22). Routines is top-level because "what is Metistry
+    # running for me every day" is a daily question a child row would bury; Agents
+    # sits ABOVE it, because a routine is an assignment of an agent and the reader
+    # meets the noun before the assignment. Resources went to Settings, which is why
+    # this is eight and not nine — see C57.
     for n,g,kids in [("Today",I["cal"],None),("Chat",I["chat"],None),("Activity",I["activity"],None),
-                     ("Work",I["work"],True),("Knowledge",I["know"],None),("Routines",I["repeat"],None),
-                     ("Resources",I["plug"],None),("Agents",I["agents"],None)]:
+                     ("Work",I["work"],True),("Knowledge",I["know"],None),("Agents",I["agents"],None),
+                     ("Routines",I["repeat"],None)]:
         on=(n==sel)
         out.append(f'<div style="position: relative; display: flex; align-items: center; gap: 10px; padding: 8px 12px; '
                    f'border-radius: 8px; background: {T["accq"] if on else "transparent"};">'
@@ -2906,6 +2908,8 @@ def routinelist2(T,w=None):
     head=(f'<div style="display: flex; align-items: center; gap: 10px; padding: 14px 16px 4px;">'
           f'<span style="font-size: 17px; font-weight: 600; color: {T["tp"]}; flex-grow: 1;">Routines</span>'
           f'{btn(T,"New Routine","secondary",I["plus"])}</div>'
+          # the shape of the week belongs ON the screen, not in a panel beside it
+          f'<div style="padding: 8px 16px 14px;">{timeline(T)}</div>'
           f'<div style="display: grid; grid-template-columns: 15px 74px minmax(0,1fr) 168px 210px; gap: 13px; '
           f'padding: 6px 16px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em; color: {T["tt"]};">'
           f'<span></span><span>WHEN</span><span>ROUTINE</span><span>AGENT</span><span>RECURRENCE</span></div>')
@@ -3197,3 +3201,73 @@ def resourcelist(T,w=None):
           + connrow(T,name="Sentry",kind="MCP &middot; hosted",tools="4 tools",
             used="Token expired 2 days ago",state="deg",last=True))
     return f'<div style="{wd} background: {T["bg"]};">{head}{rows}</div>'
+
+
+# ---------- three states per tool (ruled 2026-09-22) -------------------------
+# On the RESOURCE this is explicit, because it is where the state is set. In an
+# agent's or a routine's permissions matrix the same three states are read off
+# absence and one glyph: listed = On, listed with the clock = Ask, absent = Off.
+
+def tristate(T,state):
+    opts=[("On","on"),("Ask","ask"),("Off","off")]
+    out=""
+    for i,(lab,key) in enumerate(opts):
+        on=(key==state)
+        ink = T["tp"] if on else T["ts"]
+        out+=(f'<span style="padding: 3px 9px; font-size: 11px; font-weight: {700 if on else 500}; '
+              f'background: {T["surface"] if on else "transparent"}; color: {ink};'
+              + ("" if i==0 else f' border-left: 1px solid {T["border"]};') + f'">{lab}</span>')
+    return (f'<span style="display: inline-flex; border: 1px solid {T["bc"]}; border-radius: 7px; '
+            f'overflow: hidden; background: {T["sunken"]};">{out}</span>')
+
+def toolrow2(T,name,desc,*,state="on",destructive=False,last=False):
+    m=""
+    if destructive:
+        m=(f'<span style="display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; '
+           f'font-weight: 600; color: {T["deg"]}; white-space: nowrap;">{ic(I["warn"],11,2.2)}Previews first</span>')
+    return (f'<div style="display: grid; grid-template-columns: 178px minmax(0,1fr) 116px 124px; '
+            f'align-items: center; gap: 12px; padding: 8px 0; {bd_(T,last)}">'
+            f'{mono(name,T["tp"],12)}'
+            f'<span style="font-size: 12px; color: {T["ts"]};">{desc}</span>{m}{tristate(T,state)}</div>')
+
+def toolblock(T):
+    return sunk(T,
+        f'<div style="display: grid; grid-template-columns: 178px minmax(0,1fr) 116px 124px; gap: 12px; '
+        f'padding-bottom: 7px; border-bottom: 1px solid {T["border"]}; font-size: 10.5px; font-weight: 700; '
+        f'letter-spacing: 0.07em; color: {T["tt"]};">'
+        f'<span>TOOL</span><span>WHAT IT DOES</span><span></span><span></span></div>'
+        + f'<div style="margin-top: 3px;">'
+        + toolrow2(T,"search_issues","Finds issues by project, status or text",state="on")
+        + toolrow2(T,"get_issue","Reads one issue and its comments",state="on")
+        + toolrow2(T,"add_comment","Writes a comment other people will see",state="ask",destructive=True)
+        + toolrow2(T,"transition_issue","Moves an issue between statuses",state="ask",destructive=True)
+        + toolrow2(T,"delete_issue","Removes an issue",state="off",destructive=True,last=True)
+        + '</div>'
+        + f'<div style="display: flex; gap: 20px; margin-top: 11px; padding-top: 10px; '
+          f'border-top: 1px solid {T["border"]}; flex-wrap: wrap;">'
+        + "".join(f'<span style="font-size: 11.5px; color: {T["ts"]};">'
+                  f'<b style="color: {T["tp"]};">{k}</b> &nbsp;{v}</span>'
+            for k,v in [("On","runs when an agent calls it"),
+                        ("Ask","lands in Needs You and waits for you"),
+                        ("Off","refused at the proxy, and not offered")])
+        + '</div>')
+
+
+def settingsnav(T,sel="Resources"):
+    """Settings' own section list. Settings is otherwise undrawn — this is the
+    minimum needed to show Resources in the place it now lives."""
+    out=""
+    for n in ["General","Compute","Knowledge","Resources","Notifications","Advanced"]:
+        on=(n==sel)
+        out+=(f'<div style="position: relative; display: flex; align-items: center; gap: 10px; padding: 7px 12px; '
+              f'border-radius: 8px; background: {T["accq"] if on else "transparent"};">'
+              + (f'<span style="position: absolute; left: 0; top: 6px; bottom: 6px; width: 3px; '
+                 f'border-radius: 0 3px 3px 0; background: {T["acc"]};"></span>' if on else "")
+              + f'<span style="font-size: 12.5px; font-weight: {600 if on else 500}; '
+                f'color: {T["acc"] if on else T["ts"]};">{n}</span></div>')
+    return (f'<div style="width: 168px; padding: 12px 8px; background: {T["sunken"]}; '
+            f'border-right: 1px solid {T["border"]}; flex-shrink: 0;">'
+            f'<div style="padding: 4px 12px 10px;">'
+            f'<span style="font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: {T["tt"]};">SETTINGS</span>'
+            f'</div>{out}</div>')
+

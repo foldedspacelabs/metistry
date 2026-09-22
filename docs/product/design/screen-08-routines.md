@@ -92,9 +92,11 @@ columns and a state glyph, down from five columns.
 **The agent is a link**, and it is the deep link in the direction the owner
 arrives from. `Built-in` is not a link, because there is nothing behind it.
 
-### 4.1 The week on one axis
+### 4.1 The week on one axis — at the top of the pane
 
-Revised 2026-09-22. The first pass drew a seven-row week × hour grid: seven rows
+Revised 2026-09-22, and it sits **at the top of the pane**, above the list —
+because *what is Metistry running for me* is answered by the shape before it is
+answered by the rows. The first pass drew a seven-row week × hour grid: seven rows
 to say one thing. **One axis says it** — a mark per run, day and week markers for
 scale, a faint noon line inside each day — and the thing it says is
 *everything runs before 7 AM or after 6 PM, and the working day is empty.*

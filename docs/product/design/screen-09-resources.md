@@ -1,7 +1,8 @@
 # Screen 9 — Resources
 
-New, 2026-09-22. Top-level in the nav. **The connections Metistry holds, and
-lends.**
+New, 2026-09-22. **Settings ▸ Resources** — it was briefly a top-level row and
+moved, because a connection is configured once and then read from the permissions
+tables that grant it (C57). **The connections Metistry holds, and lends.**
 
 ## 1. Why this is a screen and not a setting
 
@@ -61,9 +62,20 @@ rather than as reassurance in a paragraph.
 server said it has, the last time it was asked* — a fact with a timestamp, not a
 configuration. The screen shows it that way.
 
-Each tool is granted or not, individually. **Nobody who clicks *grant Jira* means
-*including `delete_issue`*,** and a server-level switch is the shape that produces
-that mistake, so there isn't one.
+Each tool carries **three states**, set here because this is where they are set:
+
+| | |
+| --- | --- |
+| **On** | runs when an agent calls it |
+| **Ask** | lands in Needs You and waits — see §4 |
+| **Off** | refused at the proxy, and not offered to the agent at all |
+
+**Nobody who clicks *grant Jira* means *including `delete_issue`*,** and a
+server-level switch is the shape that produces that mistake, so there isn't one.
+
+In an agent's or a routine's permissions matrix the same three states are read off
+absence and one glyph — listed is On, listed with the clock is Ask, absent is Off —
+so the vocabulary is one thing seen from two sides.
 
 A destructive tool is **marked, not withheld**: `CLAUDE.md`'s bridge contract
 requires **preview-then-confirm on destructive tools**, so the owner grants it
@@ -84,6 +96,36 @@ instead of the agent's.
 default**. A proxied MCP server conforming to that contract inherits the
 behaviour this screen would otherwise have to invent — which is the argument for
 treating a proxied server as **a bridge, not a new species**.
+
+## 4. What "Ask" looks like, and the problem in it
+
+**The channel exists.** An *Ask* call is a request in Needs You, answered with the
+four answers every request takes, delivered by web push when the owner is away:
+`NOTIFICATION_TITLE` already maps `alert` to "Needs You" and `web-push` is already
+a dependency. **Not a dialogue** — a dialogue assumes someone is sitting there,
+which is exactly the case that does not hold.
+
+**A synchronous approval inside an unattended run is a contradiction.** Morning
+Digest runs at 6:02 AM and wants to comment on PROJ-412; the owner is asleep.
+Blocking leaves the routine half-done for three hours. Failing throws away the
+whole run over a step that was never urgent.
+
+**So the run finishes without it and says so.** The output carries *I would have
+commented on PROJ-412 — that needs your approval*, and the request lands in Needs
+You. Nothing blocks, nothing is half-applied, and the fact is reported rather than
+silently dropped — the same discipline as `later` not blocking and a failed action
+leaving its row pending.
+
+Which means **Ask means two things by context**, and that is worth stating rather
+than papering over:
+
+| Granted to | *Ask* means |
+| --- | --- |
+| an agent Metis is delegating to, in a conversation | **pause** — the owner is there |
+| an unattended routine | **defer** — report it and move on |
+
+**And a guardrail:** a tool marked *Previews first* should not be grantable as
+**On** to an unattended routine at all. *Ask* is the most it can hold. (C59)
 
 ## 5. States
 

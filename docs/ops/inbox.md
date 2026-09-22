@@ -83,6 +83,72 @@ are in git. What does not come back is the triage *outcome* (everything
 returns as `new`), which is the honest remainder of plan-review SHOULD-20 —
 still open, and now the only part of the inbox that a rebuild loses.
 
+## How a capture gets classified
+
+`inbox-drain` runs every five minutes over the `new` rows, in three tiers, and
+**stops at the first one that can place the capture**:
+
+| tier | what it is | when it runs |
+| --- | --- | --- |
+| 1. the rules | frontmatter `kind:`, a bare URL, a leading action verb, a mime type — every verdict names the rule that fired | always, first |
+| 2. **the intent tier** (PoC-20) | one scored answer token over a closed list of intents, on-device, ~150-300 ms, with a confidence | only on what tier 1 could not place, and only when it is configured |
+| 3. the schema tier | the on-device model held to a five-value JSON Schema | only on what tiers 1 and 2 both left alone |
+
+Tiers 2 and 3 are both **off** unless configured, and off is the shipped
+default. A capture the rules placed positively never reaches a model at all.
+
+### The intent tier, and where its decision lives
+
+The model answers one question — *which line below describes what this message
+says?* — and returns a probability across the answers. **It decides nothing.**
+Two pieces of your configuration decide:
+
+- **`compute.yaml`'s `assignments.intent`** names the model. It must be
+  on-machine, so the tier costs nothing (`docs/ops/compute.md`).
+- **`.metistry/rules.yaml`'s `intent:` block** names how sure it has to be.
+  That file is a protected path — your hand only — and the number in it is the
+  whole decision.
+
+With either missing, nothing changes: the drain behaves exactly as it did
+before the tier existed, and there is a test that asserts the proposals are
+byte-identical.
+
+When a verdict does clear your threshold, all it does is choose the proposal's
+`kind` — `todo`, `event`, `idea`, `link` or `note`, the same five the schema
+tier picks from. It cannot invent a sixth. Many intents map to none of them on
+purpose (`status_open_work` is a perfectly good thing for a message to say and
+useless for deciding what an inbox item IS), and those fall through as if the
+tier had not run.
+
+**What it still cannot do: create anything.** The proposal waits for your
+click, exactly as before, and the extra "Approve as work" button is still
+decided by the deterministic rules alone — no model's opinion has ever put it
+there, and the intent tier does not change that.
+
+### Reading back what it said
+
+Every verdict is recorded, **including the ones that were ignored** — the
+below-threshold ones are the most interesting rows, because they are the
+evidence for moving a threshold:
+
+- on the proposal itself, as `payload.intent` — the intent, the confidence, the
+  threshold it was measured against, whether it applied, and why;
+- as a `runs` row, `component: inbox-drain`, `kind: classify`, `tool: intent`,
+  carrying the provider and model that answered.
+
+`ok` on that row means **the tier ran**, never "the classifier was right" — a
+verdict below your threshold and a message the guard declined to send are both
+successes. Only a server that could not answer is `ok: false`.
+
+### What never reaches the model
+
+A deterministic check runs **before** any request, and refuses four things
+outright with `unsure`: an empty note, a non-text mime, anything past 2000
+characters, and a message that is not in the script the intent descriptions are
+written in. That last one is not fussiness — an English classifier has been
+measured at 0.000 accuracy and 0.952 confidence on Khmer, so confidence cannot
+catch it and only a check in front of the model can.
+
 ## Nothing overwrites your edit
 
 Two rules, both enforced at the tool rather than in a prompt:

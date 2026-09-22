@@ -1,156 +1,133 @@
-"""Board: Agents — the credential surface.
+"""Board: Agents — what Metis delegates to, and what connects in.
 
-Round E, screen 7. The one screen where grants and autonomy move, so every panel
-is built around making the owner's own change legible to them.
+Rewritten 2026-09-21. The first attempt organised itself around `agents.grants`
+and `agents.autonomy` and produced a permissions matrix with a disclosure
+triangle; the owner rejected it. Metis is off the roster entirely: it is
+unscoped because it IS the user (C52).
 """
 from lib import *
 
-CW,CH=2300,3560
+CW,CH=2440,3060
 
-def window(T):
-    return (f'<div style="border: 1px solid {T["bc"]}; border-radius: 14px; overflow: hidden; flex-grow: 1; '
-            f'min-width: 0; background: {T["bg"]};">{toolbar(T)}'
-            f'<div style="display: flex; align-items: stretch;">{sidebar8(T,"Agents")}{roster(T)}</div></div>')
+def win(T,inner,*,w=None):
+    wd=f"width: {w}px; flex-shrink: 0;" if w else "flex-grow: 1; min-width: 0;"
+    return (f'<div style="{wd} border: 1px solid {T["bc"]}; border-radius: 14px; overflow: hidden; '
+            f'background: {T["bg"]};">{toolbar(T)}'
+            f'<div style="display: flex; align-items: stretch;">{sidebar8(T,"Agents")}{inner}</div></div>')
 
-PRES=pan(L,"FIVE COMPUTED STATES, TWO COLOURS",
+WHAT=pan(L,"WHAT IS ON THIS SCREEN, AND WHY PERMISSIONS LIVE HERE",
+  f'<div style="background: {L["accq"]}; border-radius: 10px; padding: 14px 16px;">'
+  f'<div style="font-size: 13.5px; color: {L["tp"]}; line-height: 1.6;">Metis is <b>unscoped because it is '
+  f'you</b> — it holds your reach and delegates narrower work. So <b>Agents is what Metis delegates to, and what '
+  f'connects in. Everything on it is scoped, because none of it is you.</b></div></div>'
+  + nt(L,"That sentence is why permissions belong here and nowhere else, and it is why <b>Metis is not a row</b>. "
+        "Drawing Metis with a grant would imply its reach could be less, which is the opposite of what it is "
+        "(C52).",14)
+  + '<table style="width: 100%; border-collapse: collapse; font-size: 12.5px; margin-top: 14px;">'
+  + f'<tr style="color: {L["tt"]}; text-align: left; font-size: 11px; font-weight: 700; letter-spacing: 0.06em;">'
+    f'<th style="padding: 0 12px 8px 0;"></th><th style="padding: 0 12px 8px 0;">YOURS</th>'
+    f'<th style="padding: 0 0 8px 0;">CONNECTED</th></tr>'
+  + "".join(f'<tr style="border-top: 1px solid {L["border"]};">'
+    f'<td style="padding: 8px 12px 8px 0; color: {L["tt"]}; white-space: nowrap;">{a}</td>'
+    f'<td style="padding: 8px 12px 8px 0; color: {L["tp"]};">{b}</td>'
+    f'<td style="padding: 8px 0; color: {L["ts"]};">{c}</td></tr>'
+    for a,b,c in [
+      ("comes from","a markdown file you wrote","a token it authenticated with"),
+      ("definition","yours to read and write","<b>none</b> — it is someone else&rsquo;s code"),
+      ("what it does","what you wrote, plus what a routine assigns","whatever it asks to do"),
+      ("reach","base, plus what a routine grants for a task","base, granted by you"),
+      ("runs when","you ask &middot; Metis delegates &middot; a schedule","it connects")])
+  + '</table>')
+
+ROWP=pan(L,"THREE THINGS PER ROW — AND WHAT CAME OFF IT",
+  f'<div style="background: {L["bg"]}; border: 1px solid {L["border"]}; border-radius: 11px; overflow: hidden;">'
+  + groupbar(L,"YOURS","3")
+  + arow(L,name="collator",what="daily at 6:02 AM · Morning Digest",seen="6m",state="working",link="Morning Digest")
+  + arow(L,name="vendor-research",what="when Metis delegates",seen="3h")
+  + arow(L,name="inbox-triage",what="paused",seen="—",last=True) + '</div>'
+  + nt(L,"<b>Who it is, what it is, whether it&rsquo;s working.</b> The first attempt had seven columns.",14)
+  + nt(L,"<b>Scope came off the row.</b> <b>folders · 4</b> tells you nothing without knowing <i>which</i> folders "
+        "— it was detail-view information pretending to be a summary. <b>Spend came off</b> for the reason already "
+        "logged as C3: a number with nothing on the row to compare it to. Both moved into detail, beside the "
+        "context that makes them mean something.",12)
+  + nt(L,"The <b>what it is</b> column carries the whole taxonomy in four words instead of a section header: "
+        "yours-and-scheduled names its routine, yours-and-delegated says so, connected names its project. A "
+        "paused agent says <b>paused</b> and nothing else, because a paused agent has no schedule to report.",12))
+
+PRES=pan(L,"PRESENCE — FIVE COMPUTED STATES, TWO COLOURS",
+  "".join(f'<div style="display: flex; align-items: center; gap: 12px; padding: 8px 0;'
+          + ("" if i==4 else f' border-bottom: 1px solid {L["border"]};') + '">'
+          f'<span style="width: 78px; flex-shrink: 0;">{mono(s,L["tp"],12)}</span>'
+          f'<span style="width: 22px; flex-shrink: 0; display: flex;">{presdot(L,s)}</span>'
+          f'<span style="font-size: 12.5px; color: {L["ts"]}; line-height: 1.5;">{w}</span></div>'
+    for i,(s,w) in enumerate([
+      ("working","filled. The normal case, and the row already names the claim"),
+      ("queued","filled, hollow centre. Waiting is not a fault"),
+      ("idle","hollow — <b>and no word at all.</b> The resting state does not announce itself"),
+      ("interrupted","<b>degraded.</b> An expired lease still holds the claim"),
+      ("over-cap","<b>degraded.</b> A bundle of its own is blocked for exceeding a cap")]))
+  + nt(L,"Tint carries <b>something is wrong</b> and three of these five are not wrong. Five colours on a roster "
+        "is a roster where colour has stopped meaning anything — P2 applied to a list. Neither is <b>failed</b>: a "
+        "lease that lapsed while an agent was thinking did not break (C36).",14))
+
+PROV=pan(L,"ACCESS ALWAYS SHOWS ITS PROVENANCE — THREE ROUTES, ONE VOCABULARY",
   '<table style="width: 100%; border-collapse: collapse; font-size: 12.5px;">'
   + f'<tr style="color: {L["tt"]}; text-align: left; font-size: 11px; font-weight: 700; letter-spacing: 0.06em;">'
-    f'<th style="padding: 0 12px 8px 0;">STATE</th><th style="padding: 0 12px 8px 0;">DRAWN</th>'
-    f'<th style="padding: 0 12px 8px 0;">CHANNEL</th><th style="padding: 0 0 8px 0;">WHY</th></tr>'
+    f'<th style="padding: 0 12px 8px 0;">HOW IT GOT THERE</th><th style="padding: 0 0 8px 0;">MARKED AS</th></tr>'
   + "".join(f'<tr style="border-top: 1px solid {L["border"]};">'
-    f'<td style="padding: 9px 12px 9px 0;">{mono(s,L["tp"],12)}</td>'
-    f'<td style="padding: 9px 12px 9px 0;"><span style="display: inline-flex; align-items: center; gap: 8px;">'
-    f'{presdot(L,s)}<span style="color: {L["ts"]};">{d}</span></span></td>'
-    f'<td style="padding: 9px 12px 9px 0; color: {L["tp"]}; font-weight: 600;">{c}</td>'
-    f'<td style="padding: 9px 0; color: {L["ts"]};">{w}</td></tr>'
-    for s,d,c,w in [
-      ("working","filled","none","the normal case, and the claim is named in the row"),
-      ("queued","filled, hollow centre","none","waiting is not a fault"),
-      ("idle","hollow","none","<b>and no word.</b> The resting state does not announce itself"),
-      ("interrupted","degraded","tint","an expired lease still holds the claim"),
-      ("over-cap","degraded","tint","a bundle of its own is blocked for exceeding a cap")])
+    f'<td style="padding: 9px 12px 9px 0; color: {L["tp"]}; white-space: nowrap;">{a}</td>'
+    f'<td style="padding: 9px 0; color: {L["ts"]};">{b}</td></tr>'
+    for a,b in [
+      ("base configuration","<b>nothing.</b> It is the default, and a marker on everything is a marker on nothing"),
+      ("approved in Needs You","<i>approved in Needs You · #311</i>, linking the request you answered"),
+      ("granted by a routine","<i>during &lt;routine&gt; only</i>, linking the routine")])
   + '</table>'
-  + nt(L,"Five states invites five colours and four of them would be wrong. Tint carries <b>something is wrong</b> "
-        "and nothing else, so only the two that <i>are</i> wrong get it — and they are <b>degraded</b>, not "
-        "<b>failed</b>, because a lease that lapsed while an agent was thinking did not break (C36). An Agents "
-        "screen with five colours is a screen where colour has stopped meaning anything.",14))
+  + nt(L,"<b>A routine-granted permission is the most forgettable access in the system.</b> You granted it inside "
+        "a routine&rsquo;s setup in March; the agent&rsquo;s page says it reads <b>Areas/Ops</b>; six months later "
+        "it reads Finance every morning and nothing ever told you. The marker is not consistency — it is the only "
+        "thing standing between the owner and that.",14))
 
-AUTOP=pan(L,"THE EFFECTIVE TABLE IS THE ANSWER — AND TWO REASONS A CELL IS NOT ALLOW",
-  autoblock(L)
-  + nt(L,"<b>The level is a ceiling, not a synonym for the table.</b> <b>effectiveActions()</b> resolves each kind "
-        "to the lower of its stored entry and the ceiling, and the CLI already shows the resolved table. If the "
-        "console showed the stored one the two would disagree about what an agent can do, and the console would "
-        "be the one that is wrong.",14)
-  + f'<div style="display: flex; gap: 14px; margin-top: 14px;">'
-  + "".join(f'<div style="flex-grow: 1; flex-basis: 0; background: {L["sunken"]}; border-radius: 10px; padding: 12px 14px;">'
-            f'<div style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {L["tt"]}; '
-            f'margin-bottom: 7px;">{h}</div>'
-            f'<div style="font-size: 12px; color: {L["tp"]}; line-height: 1.55;">{b}</div></div>'
-    for h,b in [
-      ("DEFAULTED","You set nothing; this is <b>ACTION_DEFAULTS</b> for this level. <b>dispatch</b> is the one kind "
-       "that stays <b>propose</b> even at <b>act_within_scope</b> — off-machine is a human decision by default."),
-      ("CLAMPED","You set something the level does not permit. The stored value is shown dimmed beside the "
-       "effective one. Blurring this into <i>defaulted</i> would hide the only case where the owner's own setting "
-       "is being overridden — which is the case they most need to see.")])
-  + '</div>'
-  + nt(L,"Mode is drawn in the <b>weight</b> channel: <b>allow</b> filled, <b>propose</b> outlined, <b>deny</b> "
-        "hollow and dashed. Never green-for-allow and red-for-deny — a configuration is not a moral position, and "
-        "red is spoken for by <b>failed</b>. Same argument as the priority badge, and it holds for the same reason.",12))
+DEFP=pan(L,"THE DEFINITION IS A FILE, AND ONLY YOUR HAND MAY WRITE IT",
+  defeditor(L)
+  + nt(L,"It lives at <b>agents/&lt;area&gt;/&lt;id&gt;.md</b> — in the vault, so git versions it and every change "
+        "has an author. The console edits it <b>as the user</b>, which invariant 2 permits explicitly: <i>anything "
+        "defining how the system behaves is a human change</i>. The same invariant is why Metis may never write "
+        "it, and the screen says that once, plainly, beside the editor. An assistant that can rewrite its own "
+        "delegates&rsquo; instructions is the loop invariant 2 closes.",14)
+  + nt(L,"So it is a <b>markdown editor</b>, not a form field. An agent&rsquo;s behaviour is prose with structure, "
+        "and a textarea that hides its own headings would teach the user this is configuration rather than "
+        "writing. It shows the path, and it says <i>versioned in the vault</i> rather than <i>saved</i>.",12))
 
-WIDEN=pan(L,"WIDENING IS A DIFFERENT ACT FROM NARROWING",
-  f'<div style="display: flex; gap: 16px; align-items: flex-start;">'
-  + f'<div style="flex-grow: 1; flex-basis: 0; background: {L["surface"]}; border: 1px solid {L["bs"]}; '
-    f'border-radius: 12px; padding: 16px; box-shadow: 0 8px 26px rgba(26,24,21,0.12);">'
-    f'<div style="font-size: 13.5px; font-weight: 600; color: {L["tp"]};">Widen what research-crew may do?</div>'
-    f'<div style="font-size: 12px; color: {L["ts"]}; line-height: 1.55; margin-top: 5px;">'
-    f'Two things gain room:</div>'
-    f'<div style="background: {L["sunken"]}; border-radius: 9px; padding: 11px 13px; margin-top: 10px;">'
-  + "".join(f'<div style="padding: 3px 0;">{mono(s,L["tp"],12)}</div>'
-            for s in ["level observe → propose","actions.comment deny → propose"])
-  + f'</div>'
-    f'<div style="font-size: 11.5px; color: {L["ts"]}; line-height: 1.5; margin-top: 10px;">'
-    f'These are <b>autonomyWidenings</b>&rsquo; own strings. The design does not compute consequences; it renders '
-    f'that list.</div>'
-    f'<div style="display: flex; align-items: center; gap: 8px; margin-top: 14px;">'
-  + btn(L,"Widen","affirm") + btn(L,"Cancel","ghost") + '</div></div>'
-  + f'<div style="flex-grow: 1; flex-basis: 0; display: flex; flex-direction: column; gap: 12px;">'
-  + "".join(f'<div style="background: {L["surface"]}; border: 1px solid {L["border"]}; border-radius: 11px; padding: 13px 15px;">'
-            f'<div style="font-size: 12.5px; font-weight: 600; color: {L["tp"]};">{h}</div>'
-            f'<div style="font-size: 12px; color: {L["ts"]}; line-height: 1.55; margin-top: 4px;">{b}</div></div>'
-    for h,b in [
-      ("A narrowing applies on commit","No confirmation. Taking room away needs no ceremony, and asking for one "
-       "teaches the owner to click through the dialog that matters."),
-      ("A no-op is not a widening","<b>autonomyWidenings</b> is computed on the <i>effective</i> tables, so raising "
-       "a stored entry under an unchanged ceiling — which changes nothing — is not called a widening."),
-      ("A 409 sent nothing","<b>PUT</b> replaces the record and answers 409 on a concurrent change. Same treatment "
-       "as a stale request card: the new values, and the edit offered again against them."),
-      ("No success banner","The row now reads differently, which is the receipt. Every widening also writes "
-       "<b>agent_admin / autonomy_widened</b> and raises one Needs You alert per change per 24h.")])
-  + '</div></div>')
+NOAUTO=pan(L,"ONE THING THE LOCAL DETAIL DOES NOT HAVE",
+  nt(L,"<b>No autonomy table.</b> A local agent&rsquo;s permission to act comes from the routine that assigns it "
+       "the work, so a three-by-four action matrix on that page would answer a question nobody asked of it. It "
+       "stays on the connected detail, where an external agent proposing actions <i>is</i> the relationship — and "
+       "there the ceiling-versus-default distinction survives, because there it is genuinely the answer.")
+  + nt(L,"That is the difference between the two details in one line, and it is why forcing both through one "
+        "layout was what made the first attempt read as a form: a connected agent would have got an empty "
+        "<b>Definition</b> section, and a local agent an action matrix it does not use.",12))
 
-CREWP=pan(L,"A CREW IS READ-ONLY HERE",scopeblock(L,crew=True))
-
-CEIL=pan(L,"THE RUNG THE OWNER NEVER SEES — C42 LANDS HERE",
-  f'<div style="background: {L["bg"]}; border: 1px solid {L["border"]}; border-radius: 12px; overflow: hidden;">'
-  + credrow(L,id_="taskuary",role="an agent",external=True,scope="titles",spend="—",seen="41m",state="idle",
-      ceiling="asked twice for <b>Areas/Finance</b> · declined both · it can no longer ask",last=True)
-  + '</div>'
-  + nt(L,"<b>request_access</b> refuses a third ask after two declines, at the tool, with <i>ask the owner "
-        "directly</i> — and that refusal writes <b>no proposal row</b>. So Needs You cannot show it: the queue goes "
-        "quiet, and the quiet means the opposite of what quiet usually means.",14)
-  + nt(L,"It belongs on the credential, with the two prior requests linked. Same shape as the successful collector "
-        "pass Activity could not show: a fact that is invisible because nothing writes a row for it, parked on the "
-        "surface that owns the object rather than on the timeline.",12))
-
-STATESP=pan(L,"FOUR STATES, AND ONE OF THEM IS NOT AN EMPTY ROSTER",
-  row(card(panel_state(L,I["agents"],L["tt"],"No credentials yet.",
-        "An agent gets a token here, and nothing else gives it one.",action="New credential"),L)
-    + card(panel_state(L,I["plug"],L["abs"],"Its manifest is missing.",
-        "Not a failure — nothing broke, the file is not there.",
-        reason="agents/ops/research-crew.md",action="Open the folder"),L)
-    + card(panel_state(L,I["warn"],L["fail"],"Couldn't load agents.",
-        "<b>Nothing is known</b>, so the roster is not drawn empty.",
-        reason="agent_presence · connection refused",action="Try again"),L),14)
-  + nt(L,"And <b>stale</b>: presence is a snapshot, so when the poll is behind the age rides the header and the "
-        "rows keep their last values. Stale annotates; it never replaces (round C).",14))
-
-FOUNDP=pan(L,"WHAT THIS SCREEN FOUND",
-  "".join(f'<div style="display: flex; gap: 10px; align-items: flex-start; padding: 7px 0;'
-          + ("" if i==5 else f' border-bottom: 1px solid {L["border"]};') + '">'
-          f'<span style="font-family: {MONO}; font-size: 11px; color: {L["acc"]}; flex-shrink: 0; '
-          f'padding-top: 2px; width: 34px;">{k}</span>'
-          f'<span style="font-size: 12.5px; color: {L["ts"]}; line-height: 1.55;">{v}</span></div>'
-  for i,(k,v) in enumerate([
-    ("C48","<b>Round C&rsquo;s <i>stale</i> still has no home.</b> <b>agent_presence</b> has no collector notion and "
-           "<b>activity_feed</b> takes <b>collector_run</b> only where <b>ok = false</b>, so a healthy collector is "
-           "invisible in both. The state the product talks about most is drawable on no existing query — request C1."),
-    ("C46","the effective table exists in <b>core</b> and nowhere in the interface. Every surface that shows "
-           "autonomy has to call <b>effectiveActions</b> or they will disagree."),
-    ("C47","<b>effectiveActions</b> returns the resolved mode and drops the reason, so this screen recomputes "
-           "<i>defaulted vs clamped</i> from <b>ACTION_DEFAULTS</b> and <b>LEVEL_CEILING</b>. One return-type "
-           "change would stop three surfaces guessing — request C2."),
-    ("—","<b>agent_presence</b> excludes revoked agents, so the roster needs two sources for one list. What you "
-         "revoked is the thing you come looking for after an incident."),
-    ("—","<b>spend_today_usd</b> has nothing to compare it to — <b>over-cap</b> is about review bundles, not "
-         "money. Either a per-agent budget exists somewhere I have not found, or the number is context-free and "
-         "the row should not imply otherwise — request C3."),
-    ("C45","<b>a failed consequential operation leaves the request pending</b> — an action writes "
-           "<b>payload.error</b> and stays pending, and an access refusal does the same. I drew it once on the "
-           "access card as a Needs You detail. It is a system-wide rule about how this product fails and belongs "
-           "in <b>design-system.md</b> §2 beside the four states.")])))
-
-body=(heading("ROUND E · SCREEN 7","Agents — the only screen where the credential moves",
-   "Invariant 2 says a grant is the user&rsquo;s hand, and <b>ACTION_KINDS</b> deliberately excludes any change to "
-   "grants or autonomy — so nothing an agent emits can reach what this screen edits. Everything here is the owner "
-   "acting, and the screen&rsquo;s whole job is to make sure they know what they just did.",L)
-  + row(window(L),18)
-  + row(PRES+AUTOP,18)
-  + row(WIDEN,18)
-  + row(CREWP+CEIL,18)
-  + row(STATESP,18)
-  + row(FOUNDP,18)
+body=(heading("ROUND E · SCREEN 7, REWRITTEN","Agents — what Metis delegates to, and what connects in",
+   "Three renders: the roster, a local agent, a connected agent. The first attempt organised itself around "
+   "<b>agents.grants</b> and <b>agents.autonomy</b> — the data&rsquo;s shape — and produced a permissions matrix "
+   "with a disclosure triangle on it. This starts from the question the owner arrives with instead.",L)
+  + row(win(L,roster2(L)),18)
+  + row(WHAT+ROWP,18)
+  + row(f'<div style="display: flex; gap: 18px; align-items: flex-start; flex-grow: 1;">'
+        + f'<div style="flex-grow: 1; flex-basis: 0; min-width: 0;">{sub("A LOCAL AGENT",L["tt"])}'
+        + f'<div style="border: 1px solid {L["bc"]}; border-radius: 12px; overflow: hidden;">{localdetail(L)}</div></div>'
+        + f'<div style="flex-grow: 1; flex-basis: 0; min-width: 0;">{sub("A CONNECTED AGENT",L["tt"])}'
+        + f'<div style="border: 1px solid {L["bc"]}; border-radius: 12px; overflow: hidden;">{conndetail(L)}</div></div>'
+        + '</div>',18)
+  + row(DEFP+PROV,18)
+  + row(PRES+NOAUTO,18)
   + row(f'<div style="background: {D["bg"]}; border-radius: 14px; padding: 22px; flex-grow: 1;">'
         + sub("DARK",D["tt"])
-        + f'<div style="border: 1px solid {D["bc"]}; border-radius: 12px; overflow: hidden;">{roster(D)}</div></div>',18))
+        + f'<div style="display: flex; gap: 18px; align-items: flex-start;">'
+        + f'<div style="flex-grow: 1; flex-basis: 0; border: 1px solid {D["bc"]}; border-radius: 12px; '
+          f'overflow: hidden;">{roster2(D)}</div>'
+        + f'<div style="flex-grow: 1; flex-basis: 0; border: 1px solid {D["bc"]}; border-radius: 12px; '
+          f'overflow: hidden;">{localdetail(D)}</div>'
+        + '</div></div>',18))
 (PROJ/"Agents.dc.html").write_text(page("Agents",wrap(body,CW,CH,"#ece7dd",L["tp"],40),CW,CH,"#ece7dd"),encoding="utf-8")
 print(f"wrote Agents.dc.html ({CW}x{CH})")

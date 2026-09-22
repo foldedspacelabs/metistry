@@ -266,7 +266,17 @@ with three differences that follow from what a routine is.
 
 | Part | Value | Why |
 | --- | --- | --- |
-| actor | `plan-tomorrow` · `standup-draft`, **neutral** | a routine is the system on a schedule, not an agent that chose to act. §2.1's rule already covers it: `agent` hue for an agent, neutral for a channel or the system |
+| actor | **depends which kind** — see below | §2.1's rule already covers both: `agent` hue for an agent, neutral for the system |
+
+**Two kinds, two actors** (ruled 2026-09-21). A **built-in** routine is the
+system on a schedule, so its actor is neutral — `plan-tomorrow` is the actor and
+there is no agent behind it. A routine that assigns work to one of the owner's
+agents has **that agent** as the actor, with the routine named as the reason it
+ran: *collator · Morning Digest · ran its routine*. A routine is an assignment,
+not a species of actor, so the thing that acted is the agent.
+
+| Part | Value | Why |
+| --- | --- | --- |
 | subject | `Tomorrow's Plan` · `Standup Draft`, Title Cased | the console composes these, so §2.2's allow-list admits them. The plan's *contents* are authored and stay verbatim |
 | detail | the path it wrote, then what is in it | `Journal/Plan/2026-09-21.md · 9 tasks, 2 meetings, 45m left empty` |
 | the row | carries the **spark** | what it produced is prose Metis wrote, and P1 says that has to be visible before you read it |

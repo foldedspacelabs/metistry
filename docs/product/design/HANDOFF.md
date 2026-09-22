@@ -32,7 +32,8 @@ canvas order:
 | `Today-Hub` | **the current Today** — the spine, the day bar, calendar help |
 | `Board` | Work ▸ Board, five columns |
 | `Facets` | the three channels, the ladder, the spark |
-| `Agents` | **screen 7** — the roster, one row open, the effective autonomy table |
+| `Agents` | **screen 7** — the roster, a local agent, a connected agent |
+| `Routines` | **screen 8** — the schedule, one routine, the two prompt layers |
 | `Plugin` | the Obsidian plugin — the mirror, the picker, editable chips |
 | `Voice` | six system serifs and a Times control |
 | `Item-Model` | the item contract (its ladder section is superseded by `Facets`) |
@@ -106,6 +107,27 @@ would bury a daily question (C50). Today is first and top-level (C30) — it hol
 meetings, artifacts, requests and agent status, none of which Work owns. Work's
 children are Board · Projects · Artifacts · Rooms.
 
+**Metis is not on Agents** (C52). It is unscoped because it *is* the user — it
+holds their reach and delegates narrower work. **Agents is what Metis delegates
+to, and what connects in; everything on it is scoped because none of it is you.**
+That sentence is why permissions live there and nowhere else.
+
+**An agent is a capability; a routine is an assignment.** The agent's definition
+(`agents/<area>/<id>.md`, the user's hand only — Metis may never write it) says
+*how it behaves*; the routine's task prompt says *what to do this occasion* and is
+**appended**, never a replacement. Reach layers the same way: base on the agent,
+plus what a routine grants for one task.
+
+**Access always shows its provenance** — base configuration (unmarked), approved
+in Needs You (*#311*), or granted by a routine (*during \<routine\> only*). A
+routine-granted permission is the most forgettable access in the system, and the
+marker is the only thing standing between the owner and it.
+
+**A routine's schedule is not when it acts.** `plan-tomorrow` is `@hourly` and
+acts once an evening. Rows say when it *acts*, in words; the tick is mechanism,
+shown in detail. *Nothing to do* is a first-class outcome, because four of the
+five shipped routines are deliberately silent.
+
 **The three colour channels, and they never borrow from each other:**
 
 | Channel | Carries | Vocabulary |
@@ -155,7 +177,8 @@ SwiftUI's `.serif`.
 | Capture | `screen-04-capture.md` | done |
 | Today | `screen-05-today.md` | done, v6 — the spine, the day bar, calendar help |
 | Board | `screen-06-board.md` | done — five columns |
-| Agents | `screen-07-agents.md` | done — roster, the credential, the effective autonomy table |
+| Agents | `screen-07-agents.md` | **rewritten 2026-09-21** — roster, a local agent, a connected agent |
+| Routines | `screen-08-routines.md` | done — the schedule, one routine |
 | Facets & colour | `facets-and-colour.md` | the system itself |
 
 **Not drawn:** card detail popover, Projects, Artifacts, Rooms, Knowledge,

@@ -2121,16 +2121,18 @@ STANDUP_PROSE=("Yesterday: closed the vendor comparison and the Q4 pricing note.
                "and the 11:00 design review. Nothing is blocked.")
 
 def routinerows(T,*,last_absent=False):
-    """The two rows this back-patch adds, plus the honest third. `plan-tomorrow` writes
-    one file and records a `routine_run`; a `too_early` tick writes NOTHING and gets no
-    row at all — the schedule working is not an event."""
+    """Two cases, and they do not share an actor. A BUILT-IN routine is the system on
+    a schedule, so its actor is neutral. A routine that assigns work to one of the
+    owner's agents has that AGENT as its actor, with the routine named as the reason
+    it ran (ruled 2026-09-21: a routine is an assignment, not a species of actor)."""
+    ms = chr(60)+'span style="font-family: '+MONO+'; font-size: 11.5px;"'+chr(62)
     rows=(feedrow(T,glyph=I["cal"],actor="plan-tomorrow",subject="Tomorrow's Plan",
-            detail='<span style="font-family: '+MONO+'; font-size: 11.5px;">Journal/Plan/2026-09-21.md</span> · 9 tasks, 2 meetings, 45m left empty',
+            detail=ms+"Journal/Plan/2026-09-21.md</span> &middot; built-in &middot; 9 tasks, 2 meetings, 45m left empty",
             when="6m",kind="system",spark=True,expand="what it wrote")
           + routineprose(T,PLAN_PROSE,when="6:02 AM")
-          + feedrow(T,glyph=I["repeat"],actor="standup-draft",subject="Standup Draft",
-            detail='<span style="font-family: '+MONO+'; font-size: 11.5px;">Journal/Standup/2026-09-20.md</span> · covers yesterday · 2 closed',
-            when="1h",kind="system",spark=True,expand="what it wrote")
+          + feedrow(T,glyph=I["repeat"],actor="collator",subject="Morning Digest",
+            detail="ran its routine &middot; "+ms+"Journal/Digest/2026-09-21.md</span> &middot; 6 rows from 4 files",
+            when="1h",kind="agent",spark=True,expand="what it wrote")
           + routineprose(T,STANDUP_PROSE,when="9:02 AM"))
     if last_absent:
         rows+=feedrow(T,glyph=I["plug"],actor="knowledge-fold",subject="Knowledge Fold",
@@ -2477,3 +2479,282 @@ def transcript(T,*,w=None,inflight=True):
             f'{userturn(T,"Check the vendor folder too.",when="8:48 AM")}'
             f'{strip}'
             f'{chatcomposer(T,inflight=inflight)}</div></div>')
+
+
+# ===================== AGENTS, REWRITTEN + ROUTINES ======================
+# Round E, 2026-09-21. The first Agents attempt organised itself around
+# `agents.grants` and produced a permissions matrix; the owner rejected it.
+# Metis is off the roster entirely (C52): it is unscoped because it IS the user.
+
+def bd_(T,last): return "" if last else f'border-bottom: 1px solid {T["border"]};'
+
+def groupbar(T,label,n):
+    return (f'<div style="display: flex; align-items: baseline; gap: 8px; padding: 13px 16px 6px;">'
+            f'<span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["tt"]};">{label}</span>'
+            f'<span style="font-size: 10.5px; color: {T["tt"]};">{n}</span></div>')
+
+def arow(T,*,name,what,seen,state="idle",sel=False,last=False,link=None):
+    """Three things: who it is, what it is, whether it is working. Scope and spend
+    moved into detail, where they have something to be compared against."""
+    w=what if not link else (what.replace(link,f'<span style="color: {T["acc"]}; font-weight: 600;">{link}</span>',1))
+    return (f'<div style="display: grid; grid-template-columns: 9px 172px minmax(0,1fr) 54px 16px; align-items: center; '
+            f'gap: 14px; padding: 11px 16px; {bd_(T,last)} background: {T["accq"] if sel else "transparent"};">'
+            f'{presdot(T,state)}{mono(name,T["tp"],13)}'
+            f'<span style="font-size: 12.5px; color: {T["ts"]};">{w}</span>'
+            f'<span style="font-size: 12px; color: {T["ts"]}; text-align: right;">{seen}</span>'
+            f'<span style="display: flex; color: {T["tt"]};">{ic(I["chevr"],13,2.2)}</span></div>')
+
+def roster2(T,w=None):
+    wd=f"width: {w}px;" if w else "flex-grow: 1; min-width: 0;"
+    head=(f'<div style="display: flex; align-items: center; gap: 10px; padding: 14px 16px 4px;">'
+          f'<span style="font-size: 17px; font-weight: 600; color: {T["tp"]}; flex-grow: 1;">Agents</span>'
+          f'{btn(T,"New agent","secondary",I["plus"])}</div>')
+    yours=(groupbar(T,"YOURS","3")
+           + arow(T,name="collator",what="daily at 6:02 AM · Morning Digest",seen="6m",state="working",
+                  sel=True,link="Morning Digest")
+           + arow(T,name="vendor-research",what="when Metis delegates",seen="3h")
+           + arow(T,name="inbox-triage",what="paused",seen="—",last=True))
+    conn=(groupbar(T,"CONNECTED","2")
+          + arow(T,name="drey-dev",what="Drey · you granted 1 folder",seen="12m",state="queued")
+          + arow(T,name="taskuary",what="external · 1 folder",seen="41m",last=True))
+    rev=(f'<div style="border-top: 1px solid {T["border"]}; display: flex; align-items: center; gap: 8px; '
+         f'padding: 11px 16px;"><span style="display: flex; color: {T["tt"]};">{ic(I["chevr"],13,2.2)}</span>'
+         f'<span style="font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: {T["tt"]};">REVOKED</span>'
+         f'<span style="font-size: 11px; color: {T["tt"]};">2</span></div>')
+    return f'<div style="{wd} background: {T["bg"]};">{head}{yours}{conn}{rev}</div>'
+
+# ---- the definition: a file, and only the user's hand may write it -----------
+DEFN=("<b>You organise and collate.</b> You prefer tables to prose, you never invent a figure, and you cite the "
+      "file every claim came from.\n\nWhen a source disagrees with another, say so rather than picking one.")
+
+def defeditor(T,*,path="agents/ops/collator.md",body=DEFN,editable=True,w=None):
+    wd=f"width: {w}px;" if w else ""
+    para="".join(f'<p style="margin: 0 0 9px;">{p}</p>' for p in body.split("\n\n"))
+    return (f'<div style="{wd}">'
+            f'<div style="display: flex; align-items: center; gap: 9px; margin-bottom: 7px;">'
+            f'<span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["tt"]};">DEFINITION</span>'
+            f'{mono(path,T["ts"],11)}<span style="flex-grow: 1;"></span>'
+            + (btn(T,"Edit","secondary",I["pencil"]) if editable else "") + '</div>'
+            f'<div style="background: {T["surface"]}; border: 1px solid {T["bc"]}; border-radius: 10px; '
+            f'padding: 14px 16px; font-size: 13px; color: {T["tp"]}; line-height: 1.6;">{para}</div>'
+            f'<div style="display: flex; align-items: center; gap: 7px; margin-top: 8px;">'
+            f'<span style="display: flex; color: {T["ts"]};">{ic(I["lock"],13,1.9)}</span>'
+            f'<span style="font-size: 11.5px; color: {T["ts"]};">Versioned in the vault. '
+            f'<b>Metis may never write this file</b> — a definition is how the system behaves, so it is your hand '
+            f'only (invariant 2).</span></div></div>')
+
+# ---- reach, with provenance on every route ----------------------------------
+def reachrow(T,path,*,mark=None,tone=None,last=False):
+    tag=""
+    if mark:
+        tag=(f'<span style="display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 600; '
+             f'color: {tone or T["acc"]};">{ic(I["check"] if tone is None else I["clock"],11,2.6)}{mark}</span>')
+    return (f'<div style="display: flex; align-items: center; gap: 10px; padding: 6px 0; {bd_(T,last)}">'
+            + mono(path,T["tp"],12) + tag + '</div>')
+
+def reachblock(T,*,routine_extra=True):
+    extra=""
+    if routine_extra:
+        extra=(f'<div style="background: {T["degq"]}; border-radius: 9px; padding: 11px 13px; margin-top: 11px;">'
+               f'<div style="font-size: 11.5px; color: {T["tp"]}; line-height: 1.55;">'
+               f'During <span style="font-weight: 600; color: {T["acc"]};">Morning Digest</span> it can also read '
+               + mono("Areas/Finance",T["tp"],11.5) + ' and write ' + mono("Journal/Digest/",T["tp"],11.5) + '.'
+               f'</div><div style="font-size: 11.5px; color: {T["ts"]}; line-height: 1.5; margin-top: 5px;">'
+               f'It holds neither the rest of the time.</div></div>')
+    return (f'<div style="background: {T["sunken"]}; border-radius: 10px; padding: 14px 16px;">'
+            + scopeline(T,who="an agent",access="folders: Areas/Ops",extras="no queries · 1 project",label="REACH")
+            + f'<div style="margin-top: 12px;">'
+            + reachrow(T,"Areas/Ops")
+            + reachrow(T,"Areas/Finance",mark="approved in Needs You · #311",last=True)
+            + '</div>' + extra + '</div>')
+
+def linkrow(T,label,sub_,*,last=False):
+    return (f'<div style="display: flex; align-items: center; gap: 10px; padding: 8px 0; {bd_(T,last)}">'
+            f'<div style="flex-grow: 1; min-width: 0;">'
+            f'<div style="font-size: 12.5px; font-weight: 600; color: {T["acc"]};">{label}</div>'
+            f'<div style="font-size: 11.5px; color: {T["ts"]}; margin-top: 2px;">{sub_}</div></div>'
+            f'<span style="display: flex; color: {T["tt"]};">{ic(I["chevr"],13,2.2)}</span></div>')
+
+def runrow(T,when,what,cost,*,ok=True,last=False):
+    g=I["check"] if ok else I["warn"]
+    return (f'<div style="display: grid; grid-template-columns: 16px 88px minmax(0,1fr) 54px; align-items: center; '
+            f'gap: 11px; padding: 7px 0; {bd_(T,last)}">'
+            f'<span style="display: flex; color: {T["ok"] if ok else T["deg"]};">{ic(g,13,2.2)}</span>'
+            f'<span style="font-size: 12px; color: {T["ts"]};">{when}</span>'
+            f'<span style="font-size: 12px; color: {T["tp"]};">{what}</span>'
+            f'<span style="font-size: 12px; color: {T["ts"]}; text-align: right; '
+            f'font-variant-numeric: tabular-nums;">{cost}</span></div>')
+
+def block(T,label,inner):
+    return (f'<div><div style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["tt"]}; '
+            f'margin-bottom: 7px;">{label}</div>{inner}</div>')
+
+def sunk(T,inner):
+    return f'<div style="background: {T["sunken"]}; border-radius: 10px; padding: 13px 15px;">{inner}</div>'
+
+def detailhead(T,*,name,what,state,actions_):
+    return (f'<div style="display: flex; align-items: center; gap: 12px; padding: 13px 16px; '
+            f'border-bottom: 1px solid {T["border"]};">'
+            f'<span style="display: flex; color: {T["ts"]};">{ic(I["chevr"],15,2.2)}</span>'
+            f'<div style="flex-grow: 1; min-width: 0;">'
+            f'<div style="display: flex; align-items: center; gap: 9px;">{presdot(T,state)}'
+            + mono(name,T["tp"],15) + '</div>'
+            f'<div style="font-size: 12px; color: {T["ts"]}; margin-top: 3px;">{what}</div></div>'
+            f'{actions_}</div>')
+
+def localdetail(T,w=None):
+    wd=f"width: {w}px; flex-shrink: 0;" if w else "flex-grow: 1; min-width: 0;"
+    acts=f'<div style="display: flex; gap: 8px;">{btn(T,"Run now","secondary",I["spark"],spark=True)}{btn(T,"Pause","ghost")}</div>'
+    return (f'<div style="{wd} background: {T["bg"]};">'
+            + detailhead(T,name="collator",what="yours · runs daily at 6:02 AM for Morning Digest",
+                         state="working",actions_=acts)
+            + f'<div style="padding: 16px; display: flex; flex-direction: column; gap: 16px;">'
+            + defeditor(T) + reachblock(T)
+            + block(T,"ITS ROUTINES",sunk(T,
+                linkrow(T,"Morning Digest","each day at 6:02 AM · grants 2 more paths for the task")
+                + linkrow(T,"Vendor Sweep","each day at 7:00 AM · failed 2 days ago",last=True)))
+            + block(T,"RECENT RUNS",sunk(T,
+                runrow(T,"today 6:02 AM","wrote Journal/Digest/2026-09-21.md","2.1&cent;")
+                + runrow(T,"yesterday","wrote Journal/Digest/2026-09-20.md","1.9&cent;")
+                + runrow(T,"2 days ago","refused: Areas/Finance not readable","—",ok=False,last=True)))
+            + '</div></div>')
+
+def conndetail(T,w=None):
+    wd=f"width: {w}px; flex-shrink: 0;" if w else "flex-grow: 1; min-width: 0;"
+    acts=btn(T,"Revoke","dest",I["x"])
+    conn="".join(f'<div style="display: flex; align-items: baseline; gap: 10px; padding: 5px 0;">'
+                 f'<span style="width: 104px; flex-shrink: 0; font-size: 11.5px; color: {T["ts"]};">{k}</span>'
+                 f'<span style="font-size: 12px; color: {T["tp"]};">{v}</span></div>'
+        for k,v in [("first connected","4 Sep 2026"),("last seen","41 minutes ago"),
+                    ("transport","remote · token"),("trust","external")])
+    return (f'<div style="{wd} background: {T["bg"]};">'
+            + detailhead(T,name="taskuary",what="connected · external · you granted 1 folder",
+                         state="idle",actions_=acts)
+            + f'<div style="padding: 16px; display: flex; flex-direction: column; gap: 16px;">'
+            + f'<div style="display: flex; gap: 9px; align-items: flex-start; background: {T["absq"]}; '
+              f'border-radius: 9px; padding: 11px 13px;">'
+              f'<span style="display: flex; color: {T["ts"]}; flex-shrink: 0; margin-top: 1px;">{ic(I["lock"],14,1.9)}</span>'
+              f'<span style="font-size: 11.5px; color: {T["tp"]}; line-height: 1.55;">'
+              f'<b>You did not write this and cannot read it.</b> What it does is its own; what it may touch is '
+              f'yours.</span></div>'
+            + block(T,"HOW IT CONNECTS",sunk(T,conn))
+            + reachblock(T,routine_extra=False)
+            + block(T,"WHAT IT MAY DO",autoblock(T,level="propose"))
+            + f'<div style="display: flex; gap: 9px; align-items: flex-start; background: {T["absq"]}; '
+              f'border-radius: 9px; padding: 11px 13px;">'
+              f'<span style="display: flex; color: {T["ts"]}; flex-shrink: 0; margin-top: 1px;">{ic(I["repeat"],14,1.9)}</span>'
+              f'<span style="font-size: 11.5px; color: {T["tp"]}; line-height: 1.55;">Asked twice for '
+              + mono("Areas/Finance",T["tp"],11.5) + ' &middot; declined both &middot; <b>it can no longer ask</b>. '
+              f'The tool refuses a third; nothing writes a row, so this line is the only place it appears.</span></div>'
+            + '</div></div>')
+
+# ===================== ROUTINES ==========================================
+def rrow(T,*,name,who,when,how,nxt,state="ok",last=False,built=False):
+    gl_,tone = {"ok":(I["check"],T["ok"]),"none":(None,T["ts"]),"fail":(I["warn"],T["deg"]),
+                "paused":(None,T["tt"])}[state]
+    mark=(f'<span style="display: flex; color: {tone};">{ic(gl_,13,2.2)}</span>' if gl_ else
+          '<span style="width: 13px;"></span>')
+    whoc=(f'<span style="font-size: 12px; color: {T["ts"]};">built-in</span>' if built else
+          f'<span style="font-size: 12px; color: {T["acc"]}; font-weight: 600;">{who}</span>')
+    return (f'<div style="display: grid; grid-template-columns: minmax(0,1fr) 126px 150px 152px 92px; '
+            f'align-items: center; gap: 12px; padding: 11px 16px; {bd_(T,last)}">'
+            f'<span style="font-size: 13px; font-weight: 500; color: {T["tp"]};">{name}</span>{whoc}'
+            f'<span style="font-size: 12px; color: {T["ts"]};">{when}</span>'
+            f'<span style="display: inline-flex; align-items: center; gap: 7px;">{mark}'
+            f'<span style="font-size: 12px; color: {T["ts"]};">{how}</span></span>'
+            f'<span style="font-size: 12px; color: {T["ts"]}; text-align: right;">{nxt}</span></div>')
+
+def routineroster(T,w=None):
+    wd=f"width: {w}px;" if w else "flex-grow: 1; min-width: 0;"
+    head=(f'<div style="display: flex; align-items: center; gap: 10px; padding: 14px 16px 4px;">'
+          f'<span style="font-size: 17px; font-weight: 600; color: {T["tp"]}; flex-grow: 1;">Routines</span>'
+          f'{btn(T,"New routine","secondary",I["plus"])}</div>'
+          f'<div style="display: grid; grid-template-columns: minmax(0,1fr) 126px 150px 152px 92px; gap: 12px; '
+          f'padding: 6px 16px 6px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em; color: {T["tt"]};">'
+          f'<span>ROUTINE</span><span>WHO RUNS IT</span><span>WHEN IT ACTS</span><span>HOW IT WENT</span>'
+          f'<span style="text-align: right;">NEXT</span></div>')
+    day=(groupbar(T,"EACH DAY","4")
+         + rrow(T,name="Morning Digest",who="collator",when="6:02 AM",how="6m ago",nxt="6:02 AM")
+         + rrow(T,name="Tomorrow&rsquo;s Plan",who="",when="each evening",how="9:14 PM",nxt="tonight",built=True)
+         + rrow(T,name="Reply Review",who="",when="overnight",how="nothing to do",nxt="tonight",
+                state="none",built=True)
+         + rrow(T,name="Vendor Sweep",who="vendor-research",when="7:00 AM",how="failed 2d ago",nxt="7:00 AM",
+                state="fail",last=True))
+    week=(groupbar(T,"EACH WEEK","1")
+          + rrow(T,name="Weekly Review",who="",when="Sunday 6:00 PM",how="Sunday",nxt="Sunday",built=True,last=True))
+    paused=(groupbar(T,"PAUSED","1")
+            + rrow(T,name="Inbox Triage",who="inbox-triage",when="&mdash;",how="&mdash;",nxt="&mdash;",
+                   state="paused",last=True))
+    return f'<div style="{wd} background: {T["bg"]};">{head}{day}{week}{paused}</div>'
+
+TASKP=("Summarise everything added to <b>Areas/Finance</b> since yesterday into one table: vendor, amount, what "
+       "changed. Write it to <b>Journal/Digest/&lt;date&gt;.md</b>.")
+
+def promptlayers(T):
+    return (f'<div style="display: flex; flex-direction: column; gap: 12px;">'
+            f'<div>'
+            f'<div style="display: flex; align-items: center; gap: 9px; margin-bottom: 7px;">'
+            f'<span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["tt"]};">DEFINITION</span>'
+            f'<span style="font-size: 11px; color: {T["ts"]};">from</span>'
+            f'<span style="font-size: 11.5px; font-weight: 600; color: {T["acc"]};">collator</span>'
+            f'<span style="flex-grow: 1;"></span>'
+            f'<span style="font-size: 11.5px; font-weight: 600; color: {T["acc"]};">Edit on Agents &rarr;</span></div>'
+            f'<div style="background: {T["sunken"]}; border-radius: 10px; padding: 13px 15px; font-size: 12.5px; '
+            f'color: {T["ts"]}; line-height: 1.6;">You organise and collate. You prefer tables to prose, you never '
+            f'invent a figure, and you cite the file every claim came from.</div></div>'
+            f'<div style="display: flex; align-items: center; gap: 7px; padding-left: 2px;">'
+            f'<span style="font-size: 15px; color: {T["tt"]};">+</span>'
+            f'<span style="font-size: 11.5px; color: {T["ts"]};">the task is <b>appended</b>, never a replacement</span></div>'
+            f'<div>'
+            f'<div style="display: flex; align-items: center; gap: 9px; margin-bottom: 7px;">'
+            f'<span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["tt"]};">TASK</span>'
+            f'<span style="font-size: 11px; color: {T["ts"]};">this routine</span>'
+            f'<span style="flex-grow: 1;"></span>{btn(T,"Edit","secondary",I["pencil"])}</div>'
+            f'<div style="background: {T["surface"]}; border: 1px solid {T["bc"]}; border-radius: 10px; '
+            f'padding: 13px 15px; font-size: 13px; color: {T["tp"]}; line-height: 1.6;">{TASKP}</div></div></div>')
+
+def reachlayers(T):
+    return sunk(T,
+        f'<div style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["tt"]}; '
+        f'margin-bottom: 9px;">REACH FOR THIS RUN</div>'
+        + f'<div style="display: flex; align-items: baseline; gap: 10px; padding: 5px 0;">'
+          f'<span style="width: 132px; flex-shrink: 0; font-size: 11.5px; color: {T["ts"]};">inherited</span>'
+          + mono("folders: Areas/Ops",T["tp"],12) + '</div>'
+        + f'<div style="display: flex; align-items: flex-start; gap: 10px; padding: 5px 0;">'
+          f'<span style="width: 132px; flex-shrink: 0; font-size: 11.5px; font-weight: 600; color: {T["deg"]};">'
+          f'granted for this</span><span>'
+          + mono("Areas/Finance",T["tp"],12) + f'<span style="font-size: 11.5px; color: {T["ts"]};"> read</span> &nbsp; '
+          + mono("Journal/Digest/",T["tp"],12) + f'<span style="font-size: 11.5px; color: {T["ts"]};"> write</span>'
+          f'</span></div>'
+        + f'<div style="font-size: 11.5px; color: {T["tp"]}; line-height: 1.55; margin-top: 9px; padding-top: 9px; '
+          f'border-top: 1px solid {T["border"]};">Outside this routine, '
+          + mono("collator",T["tp"],11.5) + ' <b>cannot read</b> ' + mono("Areas/Finance",T["tp"],11.5) + '.</div>')
+
+def actsblock(T):
+    return sunk(T,"".join(
+        f'<div style="display: flex; align-items: baseline; gap: 10px; padding: 5px 0;">'
+        f'<span style="width: 92px; flex-shrink: 0; font-size: 11.5px; color: {T["ts"]};">{k}</span>'
+        f'<span style="font-size: 12px; color: {T["tp"]}; line-height: 1.5;">{v}</span></div>'
+        for k,v in [("acts","each day at 6:02 AM, before your first meeting"),
+                    ("ticks",mono("@hourly",L["tp"],11.5)+" — the runner has no time of day"),
+                    ("silent","when nothing was added to the folders it reads")]))
+
+def routinedetail(T,w=None):
+    wd=f"width: {w}px; flex-shrink: 0;" if w else "flex-grow: 1; min-width: 0;"
+    acts=f'<div style="display: flex; gap: 8px;">{btn(T,"Run now","secondary",I["spark"],spark=True)}{btn(T,"Pause","ghost")}</div>'
+    return (f'<div style="{wd} background: {T["bg"]};">'
+            + detailhead(T,name="Morning Digest",what="collator &middot; each day at 6:02 AM",
+                         state="working",actions_=acts)
+            + f'<div style="padding: 16px; display: flex; flex-direction: column; gap: 16px;">'
+            + promptlayers(T) + reachlayers(T)
+            + block(T,"WHEN IT ACTS",actsblock(T))
+            + block(T,"OUTPUT",sunk(T,
+                f'<div style="display: flex; align-items: baseline; gap: 10px;">'
+                + mono("Journal/Digest/&lt;date&gt;.md",T["tp"],12)
+                + f'<span style="font-size: 11.5px; color: {T["ts"]};">machine-owned &middot; one writer</span></div>'))
+            + block(T,"HISTORY",sunk(T,
+                runrow(T,"today","wrote 6 rows from 4 files","2.1&cent;")
+                + runrow(T,"yesterday","wrote 3 rows from 2 files","1.9&cent;")
+                + runrow(T,"2 days ago","nothing to do","—",ok=True)
+                + runrow(T,"this month","18 runs","34&cent;",last=True)))
+            + '</div></div>')

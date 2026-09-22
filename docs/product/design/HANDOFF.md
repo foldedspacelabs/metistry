@@ -1,7 +1,9 @@
 # Design engagement — handoff
 
 **You are the designer for Metistry.** This file is everything a new session
-needs. Read it, then `review-00-plan.md`'s ratified section and the screen spec
+needs. Read it, then **`design-system-amendments.md`** — the rules rounds C–E
+established, as rules rather than as findings, and the shortest path into how this
+product is drawn. Then `review-00-plan.md`'s ratified section and the screen spec
 for whatever you are about to touch. Do not read the whole `docs/product/design/`
 tree up front — it is large, and the specs are written to be read one at a time.
 
@@ -94,6 +96,12 @@ binding:
 instance*.
 
 ## 2. Which documents win
+
+**`design-system-amendments.md` is newer than `design-system.md`** and says so at
+the top. It holds what rounds C–E established: the colour channels and the four
+ways colour has gone wrong, the states, permissions and provenance, the language
+rules, and the structural rulings. `review-00-plan.md` remains the log — searched,
+not read; the amendments file is the one to read.
 
 `design-brief.md`, `design-system.md`, `app-ux-plan.md` and `ux-direction.md`
 were **not updated for v0.11.0** and still describe a six-section sidebar and a

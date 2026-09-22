@@ -137,12 +137,14 @@ metistry compute assign <default|<tier>|crew:<name>> <provider/model> [--effort 
 metistry compute budget <instance|provider:<name>> [--daily <usd>] [--monthly <usd>] \
         --action allow|stop|critical_only
 metistry compute cache-report [--since 7d] [--json]
+metistry compute route-report [--since 30d] [--json]
 ```
 
 Every verb takes `--json` (the app's surface) and `--dry-run` (print the
-plan, write nothing) — except `cache-report`, which writes nothing to begin
-with: it is the one READ here, over the `runs` ledger ("Measuring it
-(OPEN-6)"). Every write goes through the reconciler as `user`, and
+plan, write nothing) — except `cache-report` and `route-report`, which write
+nothing to begin with: they are the two READS here, over the `runs` ledger
+("Measuring it (OPEN-6)") and over `inbound_messages` ("The router's
+baseline"). Every write goes through the reconciler as `user`, and
 the **result is validated before it is written** — an edit that would produce
 a file the engine could not load is refused and the file is left untouched.
 Hand-written comments, ordering and blocks the verbs do not cover survive
@@ -448,6 +450,84 @@ where the assumptions above meet a live response — the exact field the
 automatic form takes, and whether a provider reports cache writes *inside*
 `prompt_tokens` (assumed here) or beside it. If it reports them beside it,
 this undercharges a write by 1× the input rate and nothing else moves.
+
+## The router's baseline — `route-report` (PoC-20 phase 0)
+
+```
+metistry compute route-report [--since 30d] [--json]
+```
+
+The second read verb, and it is a measurement of the **input** path rather
+than the engine's. `docs/research/2026-09-21-intent-classification-tier.md`
+§5.2 phase 0 asks one question and makes everything after it conditional on
+the answer: **how much of what actually gets typed does today's 23-line
+deterministic router already catch?** The research could not answer it —
+"the owner runs this: it needs the instance's database, which this research
+did not touch" — so this is the command that does, and it is one command
+rather than a script somebody writes once and loses.
+
+It reads `seed/queries/route_report.yaml` through the console's generic query
+door (`GET /api/q/route_report` — invariant 3, and invariant 10: an existing
+door, never a new one). No model is called, no provider is dialled, nothing
+is written, and **no message body leaves the database**: the query returns
+counts, bucket labels, tier names and named-query names, and the one place
+the owner's own words could reach a row — the opening word of a
+fall-through — is a single lower-cased token, kept only when it is a plain
+word or a `/command` and folded into `(other)` otherwise.
+
+```
+router baseline, last 30d
+
+where messages went — share of routed messages
+  route      messages  share
+  ---------  --------  -----
+  note       12        8.1%
+  fast_path  4         2.7%
+  override   11        7.4%
+  default    121       81.8%
+
+fall-throughs by first word — share of fall-throughs
+  first word  messages  share
+  ----------  --------  -----
+  what        22        18.2%
+  add         11        9.1%
+  remind      9         7.4%
+  /todo       6         5%
+
+  messages      152 (148 carried a routing decision, 4 did not — those are not fall-throughs)
+  fall-through  121 of 148 routed (81.8% — the number the exit rule is drawn on)
+
+[!]  fall-through 81.8% … over the ~40% line … PoC-20 phase 1 … is worth building …
+```
+
+**The four kinds are derived, because the router writes three.**
+`apps/console/src/router.ts:24-27` records a `Route` of `note`, `fast_path`
+or `model` plus a `routed_by` of `rule` or `override`, and
+`apps/console/src/server.ts:616-621` files the whole object in
+`inbound_messages.meta.route` before the 202. The fall-through this PoC turns
+on is `kind: model` with `routed_by: rule` — no command, no fast path, no
+picker, so the default tier. An `override` is the same `kind: model` with
+`routed_by: override`: `/model <tier>`, `/deep`, or the composer's tier
+picker, which is the person choosing rather than the router guessing.
+
+**What to look at, in this order.**
+
+| Row | Reading |
+| --- | --- |
+| `messages` … `did not` | Messages carrying **no** `route` at all. The console files one of those only when it loaded no ruleset (`server.ts:616`), so a large count here is a `rules.yaml` finding and nothing below it means anything yet. They are excluded from every share — the router saying nothing is not the router saying `default`. |
+| `default` | The fall-through, and the whole point. Under **~40 %** of routed messages, §5.2 says stop: write `fast_path` rules instead, because an extra regex is free, auditable and self-documenting in the command menu. Over it, phase 1 (answer-token scoring through the compute layer above — no new dependency) is worth building. |
+| `fast_path` reading 0 | The seeded ruleset is two rules (`seed/rules.yaml`). A zero here is a real finding, not missing data: the report emits every kind and every length bucket even when empty, on the same principle as the `fm-tier-never-fires` probe — "configured but never used" should be a row, not a silence. |
+| `fall-throughs by first word` | The shortlist to write those rules **from**. A word at the top of this table is a sentence form the router could match; a `/command` in it is the owner repeatedly typing a command that does not exist, which is a `rules.yaml` line and not a classifier. `(other)` is every opening token that was not a word — an address, a number, a date, a URL — counted and never shown. |
+| `fall-throughs by length` | What a classifier would have to read. A fall-through set that is mostly ≤5 words is a different problem from one that is mostly >40: the short ones are commands nobody wrote a rule for, the long ones are the compound inputs §4.2 of the research says one scored token cannot carry. |
+| `tiers named` | Which tiers the model routes actually used. A tier in `tiers:` that never appears here is configured and unused. |
+
+**A thin window says so.** Under ~30 routed messages the verdict still
+reports its number — the owner asked — with "widen `--since`" attached,
+because a 40 % line decided by three messages either way is not a reading.
+
+**Nothing here is a decision.** The verdict prints §5.2's exit rule with this
+install's number in it; whether PoC-20 phase 1 gets built is the owner's, and
+so is the invariant-4 question it would raise (§3.2 of the research).
 
 ## Budgets
 

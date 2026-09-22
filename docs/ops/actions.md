@@ -38,6 +38,18 @@ level is `observe`, so this release widens nobody. With no per-kind entry:
 | `propose` | propose | propose | propose | propose |
 | `act_within_scope` | **propose** | allow | allow | allow |
 
+**Resolving the table names WHY, not just what** (`effectiveActionsDetailed`,
+C46/C47): every kind's effective mode is `set` (the owner's own per-kind
+entry, honoured), `defaulted` (no per-kind entry — the table above's own
+default for the level), or `clamped` (the owner's own entry asked for more
+than the level allows, and the ceiling won — the ONE case where the owner's
+own setting is being overridden). `effectiveActions` is a projection of it, so
+the two cannot drift; `metistry agents autonomy`, `GET /api/agents`'s
+`scope.autonomy.detailed` and MetistryKit all read this one function rather
+than three copies of the same arithmetic — which is exactly how a console
+rendering the raw `agents.autonomy.actions` field used to disagree with the
+CLI's resolved one.
+
 **What each mode does**, by the table and never by a prompt: `deny` — refused
 at `/mcp` naming `autonomy.actions.<kind>`, and an agent with nothing but
 denials is not offered the tool at all. `propose` — the row lands `pending` and

@@ -298,12 +298,14 @@ export function scopeRequired(path: string): { message: string; expose: { reason
 import {
   admitsAnyAction,
   effectiveActions,
+  effectiveActionsDetailed,
   DEFAULT_AUTONOMY_LEVEL,
   AUTONOMY_LEVELS,
   type ActionAutonomy,
   type ActionKind,
   type ActionMode,
   type AutonomyLevel,
+  type EffectiveActionEntry,
 } from "./actions.js";
 import { crewToolsFor } from "./manifest.js";
 import { errorEnvelope, type ErrorCode } from "./errors.js";
@@ -1064,7 +1066,18 @@ export interface ScopeView {
   readonly projects: readonly string[] | null;
   /** A crew's tool groups; `null` for every other role, which carries no allowlist. */
   readonly uses: readonly string[] | null;
-  readonly autonomy: { readonly level: AutonomyLevel; readonly actions: Record<ActionKind, ActionMode> };
+  readonly autonomy: {
+    readonly level: AutonomyLevel;
+    readonly actions: Record<ActionKind, ActionMode>;
+    /**
+     * The same table, with WHY (C46/C47's `effectiveActionsDetailed`): set by
+     * the owner, defaulted from the level, or clamped to its ceiling. Carried
+     * here so a client of `GET /api/agents` (or an `access_request` payload)
+     * never re-derives it — the console, the CLI and MetistryKit all read
+     * this one table instead of three copies of the same arithmetic.
+     */
+    readonly detailed: Record<ActionKind, EffectiveActionEntry>;
+  };
   readonly source: GrantSource;
   /** Where the scope came from, in words — "configuration, not a grant" said once rather than reconstructed from `role` at each door (§2.7). */
   readonly from: string;
@@ -1126,7 +1139,7 @@ export function describeScope(p: Principal): ScopeView {
     queries,
     projects: projects === null ? null : [...projects],
     uses,
-    autonomy: { level, actions: effectiveActions(p.scope.autonomy) },
+    autonomy: { level, actions: effectiveActions(p.scope.autonomy), detailed: effectiveActionsDetailed(p.scope.autonomy) },
     source: p.source,
     from: sourceLabel(p.source),
     extras,

@@ -1258,7 +1258,7 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
           ...(io.exec ? { exec: io.exec } : {}),
           ...(io.platform ? { platform: io.platform } : {}),
         });
-        out(flags.json === true ? JSON.stringify(view, null, 2) : renderAutonomy(view));
+        out(flags.json === true ? JSON.stringify(view, null, 2) : renderAutonomy(view, ui));
         return 0;
       } catch (e) {
         err(`metistry agents autonomy: ${e instanceof Error ? e.message : String(e)}`);

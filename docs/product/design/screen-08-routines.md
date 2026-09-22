@@ -36,7 +36,7 @@ row: a routine either **names the agent that runs it**, or says **built-in ·
 deterministic**. That teaches the distinction for free and gives the deep links
 one rule.
 
-## 3. The schedule a routine keeps is not when it acts
+## 3. The schedule is when it acts; the recurrence is the rule
 
 This is the screen's central honesty problem and it is easy to get wrong.
 
@@ -47,7 +47,9 @@ tick is a mechanism — *"the runner has no time of day"* — not a description 
 what the system does.
 
 So a row that reads `@hourly` is technically true and useless. **The row says
-when it acts**, in words, and the tick is mechanism shown in detail:
+when it next runs**, and beside it the **Recurrence** — the rule, in words. The
+cron expression is mechanism and appears once, in the routine's Schedule section,
+not on a list the owner reads every morning.
 
 > **Tomorrow's Plan** · each evening, once your day has ended
 
@@ -55,39 +57,59 @@ A routine that ticked twelve times and did nothing has not run twelve times, and
 the list must not suggest it did. That is the same discipline as Activity giving
 a too-early tick no row at all.
 
-## 4. The roster
+**"Silent" is gone.** It described the runner's internals, which the owner has no
+reason to care about. A run that did nothing already reports *wrote an empty
+table — nothing had changed*, which is the same fact in words that mean
+something.
 
-Grouped by how often it acts, because that is the shape of the question.
+## 4. The list — ordered by what runs next
+
+Grouped by cadence it was an unordered set of configuration. Ordered by next run,
+under day bands, it is a schedule.
 
 ```
-Routines                                                [+ New routine]
+Routines                                                [+ New Routine]
 
-EACH DAY · 4
-●  Morning Digest        collator          6:02 AM      ✓ 6m ago      6:02 AM
-●  Tomorrow's Plan       built-in          each evening  ✓ 9:14 PM     tonight
-◌  Reply Review          built-in          overnight     — nothing to do  tonight
-!  Vendor Sweep          vendor-research   7:00 AM      ✗ failed 2d    7:00 AM
-
-EACH WEEK · 1
-◌  Weekly Review         built-in          Sunday 18:00  ✓ Sunday      Sunday
-
-PAUSED · 1
-   Inbox Triage          inbox-triage      —             —             —
+    WHEN      ROUTINE             AGENT              RECURRENCE
+TODAY
+    6:02 AM   Morning Digest      collator →         ↻ Every day at 6:02 AM
+ !  7:00 AM   Vendor Sweep        vendor-research →  ↻ Every day at 7:00 AM
+    6:00 PM   Knowledge Fold      Built-in           ↻ Every evening
+   10:00 PM   Tomorrow's Plan     Built-in           ↻ Every evening
+TOMORROW · TUESDAY
+    6:02 AM   Morning Digest      collator →         ↻ Every day at 6:02 AM
+    9:00 AM   Standup Notes       collator →         ↻ Every Tuesday at 9:00 AM
+INACTIVE
+ ⏱  —         Inbox Triage        inbox-triage →     ↻ Paused 4 days ago by you
 ```
 
-Five columns: **what it is · who runs it · when it acts · how it went · next.**
+**A routine appears once per occurrence**, so a daily one appears under each day.
+That repetition is what removed two columns: the row *is* an occurrence, so it
+needs no "next run" column and no "how it went" column — the time is the
+occurrence, and history belongs to the routine rather than to the list. Four
+columns and a state glyph, down from five columns.
 
-- **who runs it** links to the agent, or reads `built-in`.
-- **how it went** carries the one state that matters, and *nothing to do* is a
-  first-class outcome rather than a blank. Four of the five shipped routines are
-  explicitly silent when there is nothing to act on; a screen that shows that as
-  an empty cell reads as a fault.
-- **next** is a time, not a countdown. A countdown is motion carrying no
-  information the reader cannot otherwise get (the C16 amendment).
+**The agent is a link**, and it is the deep link in the direction the owner
+arrives from. `Built-in` is not a link, because there is nothing behind it.
 
-A failed routine takes `degraded` on the row's glyph, not `failed`, unless the
-transport said so — a routine that could not run because a bridge was down is
-`absent`, and it names the variable rather than spending it.
+### 4.1 The week, above the list
+
+A tick per run on a **week × hour grid**. Occurrences are not magnitudes, so this
+is not a chart with a value axis; the form that answers *how are these laid out*
+is a position plot. What it shows that the list cannot is the shape:
+**everything the owner configured runs inside the same hour.**
+
+**One hue, two weights** — filled is run by one of your agents, outlined is
+built-in. This was going to be two colours until the palette validator measured
+them: in dark mode the agent ink and the neutral separate at **14.3 ΔE**, under
+the hard floor of 15, which means indistinguishable even with full colour vision.
+Weight carries it instead — the same channel the presence dots and the permission
+pips already use.
+
+Per-agent hues were the other option, and they are refused on the system rather
+than on the measurement: **hue carries *what kind of thing*, never *which
+one***. Identity comes from the row beneath, which is also this picture's table
+view.
 
 ## 5. A routine
 
@@ -112,34 +134,52 @@ is the only prose on this screen the routine owns.
 definition, it is appended to it. A user who believes they are replacing it will
 write a task prompt that contradicts the agent's behaviour and get neither.
 
-### 5.2 Reach for this run
+### 5.2 Knowledge
 
-The same provenance vocabulary as Agents §3.2, from the other side:
+It is permission to read knowledge, so it is called that, and it uses the
+Knowledge glyph the nav already uses.
 
-| | |
-| --- | --- |
-| inherited from `collator` | `folders: Areas/Ops` — unmarked, it is the base |
-| **granted for this routine** | `Areas/Finance` read · `Journal/Digest/` write — marked, and removable here |
+**The table shows the effective permission, with provenance per line** — not
+"what the agent has" beside "what this routine added", which made the reader do
+the union themselves. Effective is the answer; where each line came from is a
+marker on it.
+
+| Model | Action | May | |
+| --- | --- | --- | --- |
+| Knowledge | Read | `Areas/Ops` | — |
+| | Read | `Areas/Finance` | *Granted by this routine* |
 
 And the sentence that makes the layering safe: *outside this routine, `collator`
-cannot read `Areas/Finance`.* Reach that exists only during a task has to say
-that out loud, or it reads as a permanent grant.
+cannot read `Areas/Finance`.* Access that exists only during a task has to say so
+out loud, or it reads as a permanent grant.
 
-### 5.3 When it acts, and the mechanism underneath
+### 5.3 Schedule
 
-The schedule in words, then the tick that implements it, then the conditions that
-make it silent — because those conditions are the actual behaviour:
+The **Recurrence** as a headline — *Every day at 6:02 AM* — then Next Run, the
+runs after it, and the time zone. The cron expression lives here and only here.
 
-> each evening, once your day has ended · ticks `@hourly` · silent before the
-> day end `Me/profile.md` states, and on the eve of a non-working day
-
-### 5.4 Output, and history
+### 5.4 Outputs, and History
 
 Where it writes — one path, machine-owned, one writer (§5.1 of the daily-flow
 spec). Then the last runs: when, outcome, what it produced, what it cost. This is
 where a per-routine cost belongs, and where a budget would go if one existed
 (C3): recurring compute is where money leaks, and a routine is the only object in
 the product that can be said to have a monthly cost.
+
+**History is where a routine gets debugged.** A result tells you *that* it went
+wrong. Expanding a run shows **the prompt that was sent** — the definition and
+the task, composed as the agent received them — and **what it wrote back**. That
+is the whole of what you need to work out why a routine produces the wrong thing,
+and to fix it in the layer that caused it. The prompt is the owner's text and
+takes the interface face; the output is the agent's and takes the serif and the
+verdict controls, like agent prose everywhere.
+
+**Metis suggests** is not a new mechanism. Metistry already emits `improvement`
+proposals — `reply-review` does it for reply quality, with a deterministic
+suggested edit that nothing applies until the owner allows it in triage. A
+routine suggestion is that proposal kind pointed at a routine, so it arrives in
+Needs You like every other request and this panel is only where it is read in
+context.
 
 ### 5.5 A built-in routine's detail
 

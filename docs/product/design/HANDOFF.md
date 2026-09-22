@@ -118,6 +118,11 @@ That sentence is why permissions live there and nowhere else.
 **appended**, never a replacement. Reach layers the same way: base on the agent,
 plus what a routine grants for one task.
 
+**Permissions are verbs on domain models** — one table, **Model · Action · May**,
+with knowledge on it rather than beside it (C53). **Allow · Ask First · Never**,
+drawn in the weight channel. An external MCP server proxied by Metistry is
+another Model, marked *Through Metistry* (C56).
+
 **Access always shows its provenance** — base configuration (unmarked), approved
 in Needs You (*#311*), or granted by a routine (*during \<routine\> only*). A
 routine-granted permission is the most forgettable access in the system, and the
@@ -208,7 +213,7 @@ the canvas is now generated from a module in `boards/` except `Facets`, `Plugin`
 `Voice` and `Item-Model`. `bellpanel()` is gone — it drew the *"1 snoozed"*
 header C21 killed; `panel2()` is the panel.
 
-**52 contradictions** are logged in `review-00-plan.md`. C38 is closed. C40–C49 are
+**56 contradictions** are logged in `review-00-plan.md`. C38 is closed. C40–C49 are
 round E's. Two of them are rules the system is missing rather than faults in a
 file: **C45** (a failed consequential operation leaves the request pending) and
 **C49** (a mark that carries meaning takes an ink token, never a border token —
@@ -256,6 +261,13 @@ only one that clears 3:1 — it does so against all four grounds in both themes
 **neither may outline a control or carry a mark**, whatever `border-strong`'s
 name suggests. A mark that carries meaning takes an ink token. Four faults in
 this engagement came from ignoring that; two were in round E.
+
+**Two marks are distinguished by weight, not by two inks.** The agent hue and the
+neutral ink separate at 14.3 ΔE in dark mode — under the hard floor of 15, so
+indistinguishable even with full colour vision (C54). The presence dots, the
+permission pips and the schedule grid all use filled-versus-outlined for this
+reason. `dataviz/scripts/validate_palette.js` is what catches it; run it on any
+new pair of marks.
 
 **Before publishing anything, check contrast** on every new colour pair against
 *the ground it actually sits on*. Almost every fault found in this engagement

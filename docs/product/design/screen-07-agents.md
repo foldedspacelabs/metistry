@@ -136,15 +136,20 @@ this and cannot read it.** What it shows instead:
   local, and its `trust` (`internal · external · user`).
 - **Reach**, with the same provenance vocabulary as §3.2.
 - **Project membership**, or *every project*.
-- **What it may do** — the effective action table, and this is where the
-  ceiling-versus-default distinction from the first attempt survives, because it
-  is genuinely the answer here. `effectiveActions` clamps each kind to the
-  level's ceiling, so the effective mode is the value; a cell that is not
-  `allow` says whether it was **defaulted** (`dispatch` stays `propose` even at
-  `act_within_scope` — off-machine is a human decision) or **clamped** (you set
-  more than the level permits, stored value shown dimmed). Mode is drawn in the
-  weight channel — never green-for-allow and red-for-deny, because a
-  configuration is not a moral position and red is spoken for by `failed`.
+- **Permissions** — one table, **Model · Action · May**, knowledge included.
+  The wire calls these `dispatch`, `task_update`, `comment` and `capture`, and
+  drawn that way they are four unrelated strings. They are not: each is a verb on
+  a model the product already names, and `comment` is one kind reaching **two**
+  models — Work and Artifacts — because its schema takes either a task or an
+  artifact version. **Allow · Ask First · Never** replaces `allow · propose ·
+  deny`, the same rename the tier words carry. Mode is drawn in the weight
+  channel, never green-for-yes and red-for-no: a permission is not a moral
+  position and red is spoken for by `failed`. *Ask First* on Dispatch is the
+  wire's own default and the row says why — it hands the task off-machine, so it
+  stays the owner's decision even at the highest level.
+- **Proxied servers** — an external MCP server Metistry holds a credential for is
+  another **Model** in the same table, marked *Through Metistry*. The agent never
+  holds that credential; Metistry does, and mediates. See §10.
 - **The escalation ceiling** (C42) — *asked twice for `Areas/Finance` · declined
   both · it can no longer ask.* `request_access` refuses a third ask at the
   tool and writes no row, so Needs You goes quiet and the quiet means the
@@ -198,3 +203,27 @@ edit · `⌘⌫` revoke, confirmed. Opening never scrolls the roster to recentre
 | **D2** | a per-routine grant, additive over the agent's base, scoped to the run — and returned beside the base so a surface can mark it |
 | **D3** | an `agent` field on a routine manifest, so a routine can name who runs it and the deep links have something to follow |
 | **D4** | `effectiveActions` to carry its reason per cell (`set · defaulted · clamped`) rather than the mode alone — carried over from the first attempt, still true |
+
+## 10. External MCP servers, proxied — the forward look
+
+Not designed yet. What this screen commits to is the **structure**, because it
+costs nothing now and would be expensive to retrofit: a proxied server is a
+**Model** in the permissions table with one new provenance, *Through Metistry*.
+No new primitive.
+
+Three things follow from it that the design should hold to:
+
+1. **The agent never holds the credential.** Metistry does. So this grid is the
+   only thing between an agent and a work system, which raises the stakes on
+   every marker on it.
+2. **Reading your vault and acting in a shared system are not the same risk.**
+   `Areas/Finance` is your own folder; a Jira comment is *acting as you where
+   other people watch*. That is why Read is `Allow` and Comment is `Ask First` in
+   the drawn rows, and it is why a per-server grant cannot be one switch.
+3. **The bridge contract already supplies the rules.** `CLAUDE.md` requires every
+   bridge to do lazy tool discovery, **preview-then-confirm on destructive
+   tools**, and secret redaction by default. A proxied server conforming to that
+   contract inherits the behaviour this screen would otherwise have to invent.
+
+The open question is where the servers themselves are configured — one place
+holds the credential, and it is not this screen. (Request D9.)

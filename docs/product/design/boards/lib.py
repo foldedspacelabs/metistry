@@ -2229,7 +2229,7 @@ def autoblock(T,level="act_within_scope"):
     rows="".join(autorow(T,k,e,reason=r,stored=s,last=(i==len(AUTO)-1)) for i,(k,e,r,s) in enumerate(AUTO))
     fields="".join(f'<div style="display: flex; align-items: baseline; gap: 10px; padding: 5px 0;">'
                    f'{mono(k,T["ts"],11.5)}<span style="font-size: 12px; color: {T["tp"]};">{v}</span></div>'
-                   for k,v in [("may_dispatch_to","devin, cursor"),("accept_from","metis"),("max_open_bundles","3")])
+                   for k,v in [("May Dispatch To","devin, cursor"),("Accept From","metis"),("Max Open Bundles","3")])
     return (f'<div style="background: {T["sunken"]}; border-radius: 10px; padding: 14px 16px;">'
             f'<div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">'
             f'<span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["tt"]};">LEVEL — A CEILING</span>'
@@ -2625,8 +2625,8 @@ def conndetail(T,w=None):
     conn="".join(f'<div style="display: flex; align-items: baseline; gap: 10px; padding: 5px 0;">'
                  f'<span style="width: 104px; flex-shrink: 0; font-size: 11.5px; color: {T["ts"]};">{k}</span>'
                  f'<span style="font-size: 12px; color: {T["tp"]};">{v}</span></div>'
-        for k,v in [("first connected","4 Sep 2026"),("last seen","41 minutes ago"),
-                    ("transport","remote · token"),("trust","external")])
+        for k,v in [("First Connected","4 Sep 2026"),("Last Seen","41 minutes ago"),
+                    ("Transport","Remote &middot; token"),("Trust","External")])
     return (f'<div style="{wd} background: {T["bg"]};">'
             + detailhead(T,name="taskuary",what="connected · external · you granted 1 folder",
                          state="idle",actions_=acts)
@@ -2638,8 +2638,7 @@ def conndetail(T,w=None):
               f'<b>You did not write this and cannot read it.</b> What it does is its own; what it may touch is '
               f'yours.</span></div>'
             + block(T,"HOW IT CONNECTS",sunk(T,conn))
-            + reachblock(T,routine_extra=False)
-            + block(T,"WHAT IT MAY DO",autoblock(T,level="propose"))
+            + block(T,"PERMISSIONS",permtable(T,rows=CONN_ROWS,proxied=PROXY_ROWS))
             + f'<div style="display: flex; gap: 9px; align-items: flex-start; background: {T["absq"]}; '
               f'border-radius: 9px; padding: 11px 13px;">'
               f'<span style="display: flex; color: {T["ts"]}; flex-shrink: 0; margin-top: 1px;">{ic(I["repeat"],14,1.9)}</span>'
@@ -2758,3 +2757,284 @@ def routinedetail(T,w=None):
                 + runrow(T,"2 days ago","nothing to do","—",ok=True)
                 + runrow(T,"this month","18 runs","34&cent;",last=True)))
             + '</div></div>')
+
+
+# ============ REFINEMENTS, 2026-09-21 ============================
+# Owner feedback: the four action kinds are not permissions, they are VERBS ON
+# DOMAIN MODELS, and naming them so collapses the confusing section into
+# something consistent with the rest of the product. Terminology: Knowledge (not
+# "reach"), Schedule (not "when it acts"), Recurrence (not "ticks"), and "silent"
+# is gone. Attribute names are Title Case; values stay verbatim.
+
+MODEL_GLYPH={"Knowledge":"know","Work":"work","Artifacts":"note","Inbox":"tray",
+             "Jira":"plug","Confluence":"plug"}
+
+def maylabel(T,mode):
+    """The wire says allow | propose | deny. The owner reads Allow | Ask First |
+    Never — the same rename the tier words already got (`titles`/`folders` for
+    `index`/`areas`). Weight channel, never green-for-yes and red-for-no."""
+    lab={"allow":"Allow","propose":"Ask First","deny":"Never"}[mode]
+    if mode=="allow":   st=f'background: {T["tp"]}; border: 1px solid {T["tp"]};'
+    elif mode=="propose": st=f'background: transparent; border: 1.5px solid {T["tp"]};'
+    else:               st=f'background: transparent; border: 1px dashed {T["tt"]};'
+    ink=T["tt"] if mode=="deny" else T["tp"]
+    return (f'<span style="display: inline-flex; align-items: center; gap: 7px;">'
+            f'<span style="width: 11px; height: 11px; border-radius: 3px; box-sizing: border-box; {st}"></span>'
+            f'<span style="font-size: 12.5px; font-weight: {600 if mode=="allow" else 500}; color: {ink};">{lab}</span></span>')
+
+def permrow(T,*,model,action,mode=None,value=None,note=None,prov=None,first=False,last=False):
+    """One verb on one model. The model is named once per group; `first` carries it."""
+    m=""
+    if first:
+        m=(f'<span style="display: inline-flex; align-items: center; gap: 7px;">'
+           f'<span style="display: flex; color: {T["ts"]};">{ic(I[MODEL_GLYPH[model]],14,1.8)}</span>'
+           f'<span style="font-size: 12.5px; font-weight: 600; color: {T["tp"]};">{model}</span></span>')
+    right = maylabel(T,mode) if mode else mono(value,T["tp"],12)
+    pv=""
+    if prov:
+        pv=(f'<div style="font-size: 11px; color: {T["acc"]}; font-weight: 600; margin-top: 2px;">{prov}</div>')
+    nt_=(f'<div style="font-size: 11.5px; color: {T["ts"]}; margin-top: 2px;">{note}</div>') if note else ""
+    return (f'<div style="display: grid; grid-template-columns: 118px 104px minmax(0,1fr); align-items: start; '
+            f'gap: 14px; padding: 8px 0; {bd_(T,last)}">{m}'
+            f'<span style="font-size: 12.5px; color: {T["ts"]}; padding-top: 1px;">{action}</span>'
+            f'<div>{right}{nt_}{pv}</div></div>')
+
+def permtable(T,*,knowledge=True,rows=None,proxied=None,label="Permissions"):
+    """Model x Action x May. An EXTERNAL MCP server proxied by Metistry is another
+    Model in the same table, with `Through Metistry` as its provenance: the agent
+    never holds that credential, Metistry does, so this grid is the only thing
+    between an agent and a work system."""
+    body=""
+    if knowledge:
+        body+=permrow(T,model="Knowledge",action="Read",value="Areas/Ops",first=True,
+                      note="Titles and contents inside this folder")
+        body+=permrow(T,model="Knowledge",action="Read",value="Areas/Finance",
+                      prov="Approved in Needs You · #311")
+    for i,(mdl,act,mode,note,first) in enumerate(rows or []):
+        body+=permrow(T,model=mdl,action=act,mode=mode,note=note,first=first,
+                      last=(i==len(rows)-1 and not proxied))
+    for i,(mdl,act,mode,note,first) in enumerate(proxied or []):
+        body+=permrow(T,model=mdl,action=act,mode=mode,note=note,first=first,
+                      prov="Through Metistry",last=(i==len(proxied)-1))
+    return (f'<div style="background: {T["sunken"]}; border-radius: 10px; padding: 14px 16px;">'
+            f'<div style="display: grid; grid-template-columns: 118px 104px minmax(0,1fr); gap: 14px; '
+            f'padding-bottom: 7px; border-bottom: 1px solid {T["border"]}; font-size: 10.5px; font-weight: 700; '
+            f'letter-spacing: 0.07em; color: {T["tt"]};">'
+            f'<span>MODEL</span><span>ACTION</span><span>MAY</span></div>'
+            f'<div style="margin-top: 4px;">{body}</div></div>')
+
+CONN_ROWS=[("Work","Update","allow","Status, owner, project or title",True),
+           ("Work","Dispatch","propose","Hands the task to an off-machine target, so it stays your decision",False),
+           ("Work","Comment","allow","In the task&rsquo;s room",False),
+           ("Artifacts","Comment","allow","On one version&rsquo;s thread",True),
+           ("Inbox","Capture","allow","Writes a note into your inbox",True)]
+
+# ---------- the schedule grid: one hue, two weights ------------------------
+SCHED=[("Mon",[(6,1),(7,0),(18,0),(22,0)]),("Tue",[(6,1),(7,0),(9,1),(18,0),(22,0)]),
+       ("Wed",[(6,1),(7,0),(18,0),(22,0)]),("Thu",[(6,1),(7,0),(18,0),(22,0)]),
+       ("Fri",[(6,1),(7,0),(18,0),(22,0)]),("Sat",[(22,0)]),("Sun",[(18,0),(22,0)])]
+
+def tick(T,agentrun):
+    """Filled = one of your agents ran it. Outlined = built-in. NOT two colours:
+    the two dark-mode inks separate at 14.3 ΔE, below the hard floor of 15, so
+    colour alone cannot carry this. Weight can, and does elsewhere already."""
+    if agentrun:
+        return f'<span style="width: 9px; height: 9px; border-radius: 2px; background: {T["ag"]};"></span>'
+    return (f'<span style="width: 9px; height: 9px; border-radius: 2px; box-sizing: border-box; '
+            f'border: 1.5px solid {T["ag"]};"></span>')
+
+def schedgrid(T,w=None):
+    hours=list(range(0,24,3))
+    head=(f'<div style="display: grid; grid-template-columns: 38px repeat(24, 1fr); gap: 2px; '
+          f'margin-bottom: 4px;"><span></span>'
+          + "".join(f'<span style="grid-column: span 3; font-size: 10px; color: {T["tt"]}; '
+                    f'font-variant-numeric: tabular-nums;">{h:02d}</span>' for h in hours) + '</div>')
+    rows=""
+    for day,runs in SCHED:
+        cells=""
+        byhour={h:a for h,a in runs}
+        for h in range(24):
+            inner=tick(T,byhour[h]) if h in byhour else ""
+            cells+=(f'<span style="height: 16px; display: flex; align-items: center; justify-content: center; '
+                    f'background: {T["surface"] if h in byhour else "transparent"}; border-radius: 3px;">{inner}</span>')
+        rows+=(f'<div style="display: grid; grid-template-columns: 38px repeat(24, 1fr); gap: 2px; '
+               f'margin-bottom: 2px;">'
+               f'<span style="font-size: 11px; color: {T["ts"]}; display: flex; align-items: center;">{day}</span>'
+               f'{cells}</div>')
+    leg=(f'<div style="display: flex; align-items: center; gap: 16px; margin-top: 11px;">'
+         f'<span style="display: inline-flex; align-items: center; gap: 7px;">{tick(T,True)}'
+         f'<span style="font-size: 11.5px; color: {T["ts"]};">Run by one of your agents</span></span>'
+         f'<span style="display: inline-flex; align-items: center; gap: 7px;">{tick(T,False)}'
+         f'<span style="font-size: 11.5px; color: {T["ts"]};">Built-in</span></span></div>')
+    wd=f"width: {w}px;" if w else ""
+    return (f'<div style="{wd} background: {T["sunken"]}; border-radius: 10px; padding: 14px 16px;">'
+            f'{head}{rows}{leg}'
+            f'<div style="font-size: 11.5px; color: {T["ts"]}; line-height: 1.5; margin-top: 10px; '
+            f'padding-top: 10px; border-top: 1px solid {T["border"]};">Everything you own runs between '
+            f'<b>6 and 7 AM</b>. The list below is the same data in reading order, so nothing here is '
+            f'carried by the picture alone.</div></div>')
+
+# ---------- the list, ordered by what runs next ---------------------------
+def dayband(T,label):
+    return (f'<div style="padding: 8px 16px; background: {T["sunken"]}; font-size: 10.5px; font-weight: 700; '
+            f'letter-spacing: 0.08em; color: {T["tt"]};">{label}</div>')
+
+def occrow(T,*,at,name,agent,recur,state=None,last=False):
+    mark=""
+    if state=="fail":
+        mark=f'<span style="display: flex; color: {T["deg"]};">{ic(I["warn"],13,2.2)}</span>'
+    elif state=="paused":
+        mark=f'<span style="display: flex; color: {T["tt"]};">{ic(I["later"],13,2)}</span>'
+    who=(f'<span style="font-size: 12.5px; color: {T["ts"]};">Built-in</span>' if agent is None else
+         f'<span style="display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; '
+         f'font-weight: 600; color: {T["acc"]};">{agent}'
+         f'<span style="display: flex;">{ic(I["chevr"],11,2.4)}</span></span>')
+    return (f'<div style="display: grid; grid-template-columns: 15px 74px minmax(0,1fr) 168px 210px; '
+            f'align-items: center; gap: 13px; padding: 11px 16px; {bd_(T,last)}">{mark or "<span></span>"}'
+            f'<span style="font-size: 12.5px; color: {T["tp"]}; font-variant-numeric: tabular-nums;">{at}</span>'
+            f'<span style="font-size: 13px; font-weight: 500; color: {T["tp"]};">{name}</span>{who}'
+            f'<span style="display: inline-flex; align-items: center; gap: 6px;">'
+            f'<span style="display: flex; color: {T["tt"]};">{ic(I["repeat"],13,1.9)}</span>'
+            f'<span style="font-size: 12px; color: {T["ts"]};">{recur}</span></span></div>')
+
+def routinelist2(T,w=None):
+    wd=f"width: {w}px;" if w else "flex-grow: 1; min-width: 0;"
+    head=(f'<div style="display: flex; align-items: center; gap: 10px; padding: 14px 16px 4px;">'
+          f'<span style="font-size: 17px; font-weight: 600; color: {T["tp"]}; flex-grow: 1;">Routines</span>'
+          f'{btn(T,"New Routine","secondary",I["plus"])}</div>'
+          f'<div style="display: grid; grid-template-columns: 15px 74px minmax(0,1fr) 168px 210px; gap: 13px; '
+          f'padding: 6px 16px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em; color: {T["tt"]};">'
+          f'<span></span><span>WHEN</span><span>ROUTINE</span><span>AGENT</span><span>RECURRENCE</span></div>')
+    today=(dayband(T,"TODAY")
+           + occrow(T,at="6:02 AM",name="Morning Digest",agent="collator",recur="Every day at 6:02 AM")
+           + occrow(T,at="7:00 AM",name="Vendor Sweep",agent="vendor-research",recur="Every day at 7:00 AM",
+                    state="fail")
+           + occrow(T,at="6:00 PM",name="Knowledge Fold",agent=None,recur="Every evening")
+           + occrow(T,at="10:00 PM",name="Tomorrow&rsquo;s Plan",agent=None,recur="Every evening",last=True))
+    tom=(dayband(T,"TOMORROW · TUESDAY")
+         + occrow(T,at="6:02 AM",name="Morning Digest",agent="collator",recur="Every day at 6:02 AM")
+         + occrow(T,at="7:00 AM",name="Vendor Sweep",agent="vendor-research",recur="Every day at 7:00 AM")
+         + occrow(T,at="9:00 AM",name="Standup Notes",agent="collator",recur="Every Tuesday at 9:00 AM")
+         + occrow(T,at="6:00 PM",name="Knowledge Fold",agent=None,recur="Every evening",last=True))
+    sun=(dayband(T,"SUNDAY")
+         + occrow(T,at="6:00 PM",name="Weekly Review",agent=None,recur="Every week on Sunday",last=True))
+    off=(dayband(T,"INACTIVE")
+         + occrow(T,at="—",name="Inbox Triage",agent="inbox-triage",recur="Paused 4 days ago by you",
+                  state="paused",last=True))
+    return f'<div style="{wd} background: {T["bg"]};">{head}{today}{tom}{sun}{off}</div>'
+
+
+def renamefield(T,name,*,w=None):
+    """A routine's name is the user's, not its directory name. Editable in place."""
+    wd=f"width: {w}px;" if w else ""
+    return (f'<span style="{wd} display: inline-flex; align-items: center; gap: 8px; padding: 3px 9px 3px 10px; '
+            f'border: 1px solid transparent; border-radius: 8px; background: {T["surface"]};">'
+            f'<span style="font-size: 15px; font-weight: 600; color: {T["tp"]};">{name}</span>'
+            f'<span style="display: flex; color: {T["tt"]};">{ic(I["pencil"],12,2)}</span></span>')
+
+def kv(T,k,v,*,last=False,mono_=False):
+    val = mono(v,T["tp"],12) if mono_ else f'<span style="font-size: 12.5px; color: {T["tp"]};">{v}</span>'
+    return (f'<div style="display: grid; grid-template-columns: 126px minmax(0,1fr); align-items: baseline; '
+            f'gap: 12px; padding: 7px 0; {bd_(T,last)}">'
+            f'<span style="font-size: 12px; color: {T["ts"]};">{k}</span>{val}</div>')
+
+def scheduleblock(T):
+    return sunk(T,
+        f'<div style="display: flex; align-items: center; gap: 9px; padding-bottom: 10px; '
+        f'border-bottom: 1px solid {T["border"]};">'
+        f'<span style="display: flex; color: {T["ag"]};">{ic(I["repeat"],15,1.9)}</span>'
+        f'<span style="font-size: 13.5px; font-weight: 600; color: {T["tp"]};">Every day at 6:02 AM</span></div>'
+        + f'<div style="margin-top: 4px;">'
+        + kv(T,"Next Run","Tomorrow, 6:02 AM")
+        + kv(T,"Then","Wednesday, 6:02 AM &middot; Thursday, 6:02 AM")
+        + kv(T,"Time Zone","America/Detroit",last=True) + '</div>')
+
+def outputblock(T):
+    return sunk(T,
+        kv(T,"Writes","Journal/Digest/&lt;date&gt;.md",mono_=True)
+        + kv(T,"Ownership","Machine-owned &mdash; one writer, and this is it")
+        + kv(T,"Last Written","Today, 6:02 AM &middot; 6 rows from 4 files",last=True))
+
+PROMPT_SENT=("<b>Definition</b> &mdash; You organise and collate. You prefer tables to prose, you never invent a "
+             "figure, and you cite the file every claim came from.<br><br><b>Task</b> &mdash; Summarise everything "
+             "added to Areas/Finance since yesterday into one table: vendor, amount, what changed. Write it to "
+             "Journal/Digest/&lt;date&gt;.md.")
+OUT_SAMPLE=("Four vendors changed terms since yesterday. Two are inside the block you asked about; both signed "
+            "within the quarter, so the March comparison holds on them alone.")
+SUGGEST=("This routine has written an empty table on three of the last seven days, and on each of those the folder "
+         "it reads had no changes. Moving it to <b>every weekday</b> would skip the two days that are always "
+         "empty, and cost nothing you are using.")
+
+def sessionview(T):
+    return (f'<div style="background: {T["surface"]}; border: 1px solid {T["border"]}; border-radius: 9px; '
+            f'padding: 13px 15px; margin: 2px 0 4px;">'
+            f'<div style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["tt"]}; '
+            f'margin-bottom: 7px;">PROMPT SENT</div>'
+            f'<div style="font-size: 12px; color: {T["ts"]}; line-height: 1.6;">{PROMPT_SENT}</div>'
+            f'<div style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["ag"]}; '
+            f'margin: 13px 0 7px;">WHAT IT WROTE</div>'
+            f'<div style="font-family: {SERIF}; font-size: 13px; color: {T["tp"]}; line-height: 1.6;">{OUT_SAMPLE}</div>'
+            f'<div style="display: flex; align-items: center; gap: 10px; margin-top: 11px; padding-top: 11px; '
+            f'border-top: 1px solid {T["border"]};">'
+            f'{btn(T,"Open The File","secondary",I["note"])}{btn(T,"Copy Prompt","ghost",I["copy"])}'
+            f'<span style="flex-grow: 1;"></span>{thumbs(T)}</div></div>')
+
+def histrow(T,when,what,cost,*,ok=True,open_=False,last=False):
+    g=I["check"] if ok else I["warn"]
+    chev=I["chevd"] if open_ else I["chevr"]
+    head=(f'<div style="display: grid; grid-template-columns: 16px 96px minmax(0,1fr) 54px 14px; '
+          f'align-items: center; gap: 11px; padding: 8px 0;'
+          + ("" if (open_ or last) else f' border-bottom: 1px solid {T["border"]};') + '">'
+          f'<span style="display: flex; color: {T["ok"] if ok else T["deg"]};">{ic(g,13,2.2)}</span>'
+          f'<span style="font-size: 12px; color: {T["ts"]};">{when}</span>'
+          f'<span style="font-size: 12px; color: {T["tp"]};">{what}</span>'
+          f'<span style="font-size: 12px; color: {T["ts"]}; text-align: right; '
+          f'font-variant-numeric: tabular-nums;">{cost}</span>'
+          f'<span style="display: flex; color: {T["tt"]};">{ic(chev,13,2.2)}</span></div>')
+    return head + (sessionview(T) if open_ else "")
+
+def suggestion(T):
+    return (f'<div style="background: {T["agq"]}; border-radius: 10px; padding: 13px 15px; margin-top: 12px;">'
+            f'<div style="display: flex; align-items: center; gap: 7px;">'
+            f'<span style="display: flex; color: {T["ag"]};">{ic(I["spark"],13,2.2)}</span>'
+            f'<span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["ag"]};">'
+            f'METIS SUGGESTS</span></div>'
+            f'<div style="font-family: {SERIF}; font-size: 13px; color: {T["tp"]}; line-height: 1.6; '
+            f'margin-top: 9px;">{SUGGEST}</div>'
+            f'<div style="display: flex; align-items: center; gap: 8px; margin-top: 12px;">'
+            f'{btn(T,"Change The Schedule","secondary",I["check"])}{btn(T,"Dismiss","ghost")}'
+            f'<span style="flex-grow: 1;"></span>{thumbs(T)}</div></div>')
+
+def historyblock(T):
+    return sunk(T,
+        histrow(T,"Today","Wrote 6 rows from 4 files","2.1&cent;",open_=True)
+        + histrow(T,"Yesterday","Wrote 3 rows from 2 files","1.9&cent;")
+        + histrow(T,"2 days ago","Wrote an empty table &mdash; nothing had changed","1.1&cent;")
+        + histrow(T,"3 days ago","Refused: Areas/Finance was not readable","&mdash;",ok=False,last=True)
+        ) + suggestion(T)
+
+def routinedetail2(T,w=None):
+    wd=f"width: {w}px; flex-shrink: 0;" if w else "flex-grow: 1; min-width: 0;"
+    acts=f'<div style="display: flex; gap: 8px;">{btn(T,"Run Now","secondary",I["spark"],spark=True)}{btn(T,"Pause","ghost")}</div>'
+    head=(f'<div style="display: flex; align-items: center; gap: 12px; padding: 13px 16px; '
+          f'border-bottom: 1px solid {T["border"]};">'
+          f'<span style="display: flex; color: {T["ts"]};">{ic(I["chevr"],15,2.2)}</span>'
+          f'<div style="flex-grow: 1; min-width: 0;">{renamefield(T,"Morning Digest")}'
+          f'<div style="display: flex; align-items: center; gap: 7px; margin-top: 5px; padding-left: 10px;">'
+          f'<span style="font-size: 12px; color: {T["ts"]};">Run by</span>'
+          f'<span style="display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; '
+          f'color: {T["acc"]};">collator<span style="display: flex;">{ic(I["chevr"],11,2.4)}</span></span></div></div>'
+          f'{acts}</div>')
+    return (f'<div style="{wd} background: {T["bg"]};">{head}'
+            f'<div style="padding: 16px; display: flex; flex-direction: column; gap: 16px;">'
+            + promptlayers(T)
+            + block(T,"KNOWLEDGE",permtable(T,rows=[]))
+            + block(T,"SCHEDULE",scheduleblock(T))
+            + block(T,"OUTPUTS",outputblock(T))
+            + block(T,"HISTORY",historyblock(T))
+            + '</div></div>')
+
+PROXY_ROWS=[("Jira","Read Issues","allow","The three projects you connected",True),
+            ("Jira","Comment","propose","Visible to your team, so it stays your decision",False),
+            ("Confluence","Read Pages","allow","The spaces you connected",True)]
+

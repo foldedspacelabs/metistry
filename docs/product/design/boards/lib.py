@@ -3220,38 +3220,54 @@ def tristate(T,state):
     return (f'<span style="display: inline-flex; border: 1px solid {T["bc"]}; border-radius: 7px; '
             f'overflow: hidden; background: {T["sunken"]};">{out}</span>')
 
-def toolrow2(T,name,desc,*,state="on",destructive=False,last=False):
-    m=""
-    if destructive:
-        m=(f'<span style="display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; '
-           f'font-weight: 600; color: {T["deg"]}; white-space: nowrap;">{ic(I["warn"],11,2.2)}Previews first</span>')
-    return (f'<div style="display: grid; grid-template-columns: 178px minmax(0,1fr) 116px 124px; '
-            f'align-items: center; gap: 12px; padding: 8px 0; {bd_(T,last)}">'
+def toolrow2(T,name,desc,*,state="on",last=False):
+    """No separate preview marker. Preview-then-confirm IS what Ask means, and On
+    means on — the owner's choice is the whole control (ruled 2026-09-22). What a
+    tool does is carried by its description, which is where it belongs."""
+    return (f'<div style="display: grid; grid-template-columns: 178px minmax(0,1fr) 124px; '
+            f'align-items: center; gap: 14px; padding: 8px 0; {bd_(T,last)}">'
             f'{mono(name,T["tp"],12)}'
-            f'<span style="font-size: 12px; color: {T["ts"]};">{desc}</span>{m}{tristate(T,state)}</div>')
+            f'<span style="font-size: 12px; color: {T["ts"]};">{desc}</span>{tristate(T,state)}</div>')
 
 def toolblock(T):
     return sunk(T,
-        f'<div style="display: grid; grid-template-columns: 178px minmax(0,1fr) 116px 124px; gap: 12px; '
+        f'<div style="display: grid; grid-template-columns: 178px minmax(0,1fr) 124px; gap: 12px; '
         f'padding-bottom: 7px; border-bottom: 1px solid {T["border"]}; font-size: 10.5px; font-weight: 700; '
         f'letter-spacing: 0.07em; color: {T["tt"]};">'
-        f'<span>TOOL</span><span>WHAT IT DOES</span><span></span><span></span></div>'
+        f'<span>TOOL</span><span>WHAT IT DOES</span><span></span></div>'
         + f'<div style="margin-top: 3px;">'
         + toolrow2(T,"search_issues","Finds issues by project, status or text",state="on")
         + toolrow2(T,"get_issue","Reads one issue and its comments",state="on")
-        + toolrow2(T,"add_comment","Writes a comment other people will see",state="ask",destructive=True)
-        + toolrow2(T,"transition_issue","Moves an issue between statuses",state="ask",destructive=True)
-        + toolrow2(T,"delete_issue","Removes an issue",state="off",destructive=True,last=True)
+        + toolrow2(T,"add_comment","Writes a comment other people will see",state="ask")
+        + toolrow2(T,"transition_issue","Moves an issue between statuses",state="ask")
+        + toolrow2(T,"delete_issue","Removes an issue",state="off",last=True)
         + '</div>'
         + f'<div style="display: flex; gap: 20px; margin-top: 11px; padding-top: 10px; '
           f'border-top: 1px solid {T["border"]}; flex-wrap: wrap;">'
         + "".join(f'<span style="font-size: 11.5px; color: {T["ts"]};">'
                   f'<b style="color: {T["tp"]};">{k}</b> &nbsp;{v}</span>'
-            for k,v in [("On","runs when an agent calls it"),
-                        ("Ask","lands in Needs You and waits for you"),
-                        ("Off","refused at the proxy, and not offered")])
+            for k,v in [("On","runs when an agent calls it &mdash; no preview, because you chose it"),
+                        ("Ask","shows what it would do, then waits for you in Needs You"),
+                        ("Off","refused at the proxy, and not offered to the agent at all")])
         + '</div>')
 
+
+def settingswindow(T,inner,*,w=None):
+    """Settings is its own window on Mac, not a pane in the main one. Drawn that way
+    so it cannot be mistaken for a nav destination — which is exactly what happened
+    when the section list was styled like the sidebar."""
+    wd=f"width: {w}px; flex-shrink: 0;" if w else "flex-grow: 1; min-width: 0;"
+    dots="".join(f'<span style="width: 10px; height: 10px; border-radius: 50%; background: {c};"></span>'
+                 for c in (T["bs"],T["bs"],T["bs"]))
+    return (f'<div style="{wd} border: 1px solid {T["bc"]}; border-radius: 12px; overflow: hidden; '
+            f'background: {T["surface"]}; box-shadow: 0 14px 40px rgba(26,24,21,0.14);">'
+            f'<div style="display: flex; align-items: center; gap: 10px; padding: 9px 14px; '
+            f'background: {T["elevated"]}; border-bottom: 1px solid {T["border"]};">'
+            f'<span style="display: inline-flex; gap: 6px;">{dots}</span>'
+            f'<span style="flex-grow: 1; text-align: center; font-size: 12.5px; font-weight: 600; '
+            f'color: {T["tp"]};">Settings</span>'
+            f'<span style="width: 46px;"></span></div>'
+            f'<div style="display: flex; align-items: stretch;">{settingsnav(T)}{inner}</div></div>')
 
 def settingsnav(T,sel="Resources"):
     """Settings' own section list. Settings is otherwise undrawn — this is the

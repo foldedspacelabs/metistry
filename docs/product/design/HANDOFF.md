@@ -32,6 +32,7 @@ canvas order:
 | `Today-Hub` | **the current Today** — the spine, the day bar, calendar help |
 | `Board` | Work ▸ Board, five columns |
 | `Facets` | the three channels, the ladder, the spark |
+| `Agents` | **screen 7** — the roster, one row open, the effective autonomy table |
 | `Plugin` | the Obsidian plugin — the mirror, the picker, editable chips |
 | `Voice` | six system serifs and a Times control |
 | `Item-Model` | the item contract (its ladder section is superseded by `Facets`) |
@@ -151,10 +152,11 @@ SwiftUI's `.serif`.
 | Capture | `screen-04-capture.md` | done |
 | Today | `screen-05-today.md` | done, v6 — the spine, the day bar, calendar help |
 | Board | `screen-06-board.md` | done — five columns |
+| Agents | `screen-07-agents.md` | done — roster, the credential, the effective autonomy table |
 | Facets & colour | `facets-and-colour.md` | the system itself |
 
 **Not drawn:** card detail popover, Projects, Artifacts, Rooms, Knowledge,
-Agents, Usage, Settings, the Obsidian plugin's remaining surfaces.
+Usage, Settings, the Obsidian plugin's remaining surfaces.
 
 **Run detail is now drawable, and undrawn.** `seed/queries/run_detail.yaml`
 and `GET /api/runs/:id` both exist (commit `3456aab`) — the handoff was stale on
@@ -181,7 +183,11 @@ panel header *"4 waiting · 1 snoozed"*, which C21 established cannot be built �
 `panel2()` is the corrected one, `bellpanel()` is not, and the Request board
 still calls `bellpanel()`.
 
-**44 contradictions** are logged in `review-00-plan.md`. C38 is closed. C40–C44 are round E's. The ones
+**49 contradictions** are logged in `review-00-plan.md`. C38 is closed. C40–C49 are
+round E's. Two of them are rules the system is missing rather than faults in a
+file: **C45** (a failed consequential operation leaves the request pending) and
+**C49** (a mark that carries meaning takes an ink token, never a border token —
+`border-strong` fails 3:1 against every ground). The ones
 that block drawing:
 - **C37** — `blocked_by_task` / `blocked_by_task_open` are specified in
   `daily-flow-spec.md` §3 and absent from `board.yaml`. Two screens draw the
@@ -202,6 +208,12 @@ a ruling from the owner, not a ticket.
 **Open rulings the owner owes:** C16 (motion — the working indicator vs
 *ux-direction.md*'s "a word, not a spinner"), A5 (`prose` outside a fold
 template), B4 (where a revised day is stored and under whose principal).
+
+**Requests from screen 7** (`screen-07-agents.md` §12): **C1** a
+`collector_health` query, without which `stale` is undrawable anywhere; **C2**
+`effectiveActions` returning its reason per cell; **C3** a per-agent spend cap or
+a ruling that spend on that screen is context-free; **C4** whether the
+escalation ceiling should write a row at all.
 
 ## 6. How to work
 

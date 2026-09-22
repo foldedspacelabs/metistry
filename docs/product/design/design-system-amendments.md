@@ -1,0 +1,244 @@
+# Design system — amendments
+
+**What rounds C–E established, as rules rather than as findings.**
+
+`review-00-plan.md` holds 64 contradictions. That file is a *log*: it records what
+disagreed with what, in the order it was found, and it is searched rather than
+read. This file is the other half — the **positive statements** those findings
+produced, organised by when you need them. Every rule here was paid for by a
+specific fault, and the contradiction number is the receipt.
+
+`design-system.md` was not updated for v0.11.0 (C26) and still describes a
+six-section sidebar. Where this file and that one disagree, **this one is newer**.
+
+---
+
+## 1. Colour, and the four ways it has gone wrong
+
+### 1.1 The three channels never borrow from each other
+
+| Channel | Carries | And nothing else |
+| --- | --- | --- |
+| **Hue** | *what kind of thing* this is | never *which one*. No per-agent, per-project or per-series hues |
+| **Weight / fill** | *how much it matters*, or how much room it has | priority; permission modes; presence |
+| **Tint** | *something is wrong* | the four states, and nothing that is merely notable |
+
+Two consequences that keep coming up:
+
+- **Presence gets colour only where something is wrong.** `agent_presence`
+  computes five states; `working`, `queued` and `idle` take none, because none of
+  them is a fault. Five colours on a roster is a roster where colour has stopped
+  meaning anything.
+- **A permission is not a moral position.** `Allow` / `Ask First` / `Never` are
+  drawn in weight, never green-for-yes and red-for-no. Red is spoken for by
+  `failed`.
+
+### 1.2 The border tokens, settled by measurement (C49)
+
+Against all four grounds, both themes:
+
+| Token | Range | What it may do |
+| --- | --- | --- |
+| `border-control` | **3.00–3.91:1** | outline a control. The only one that clears 3:1 |
+| `border` | 1.12–1.51:1 | divide regions of one surface. Nothing else |
+| `border-strong` | 1.60–2.08:1 | a heavier divider. **Not** a control outline, despite the name |
+
+**A mark that carries meaning takes an ink token, never a border token.** Four
+faults in this engagement came from reading `border-strong` as "the visible one".
+Renaming it would end the class.
+
+### 1.3 Two marks are distinguished by weight, not by two inks (C54)
+
+The agent ink and the neutral ink separate at **14.3 ΔE** in dark mode — under the
+hard floor of 15, which means indistinguishable *even with full colour vision*, not
+only under CVD. Filled-versus-outlined carries such a distinction instead: the
+presence dots, the permission pips and the schedule marks all do it that way.
+
+**Run `dataviz/scripts/validate_palette.js` on any new pair of marks.** It found
+this; no amount of looking would have.
+
+### 1.4 Opacity dimming defeats the tokens (C63)
+
+A read-only checkbox at `opacity: 0.55` composites to **1.86:1** against
+`surface` — a mark carrying meaning, far under 3:1, with every token in it chosen
+correctly. **A disabled or recessive mark takes a dimmer ink at full opacity**, and
+the contrast check must be fed the composited value rather than the token.
+
+### 1.5 The thinnest margin in the system
+
+`text-tertiary` on `sunken` is **4.53:1** light. It is used for every section
+label, band header and column head. It passes, and it fails the moment either
+token moves. Anything that changes those two values needs a full re-check, not a
+spot one.
+
+### 1.6 Check against the ground it actually sits on
+
+Almost every colour fault in this engagement was a token used against a ground it
+was never computed against. `tokens.json` plus
+`ops/scripts/build-design-tokens.mjs --check` covers 144 declared pairs; round E
+checked a further ~330 undeclared ones by hand. The undeclared ones are the risk.
+
+---
+
+## 2. States
+
+### 2.1 Four states, and a fifth with an instance
+
+`empty` · `absent` · `failed` · `stale`, plus **`partial`** — proposed in C28 and
+given its first real instance in round E: `knowledge_files.status = 'conflict'` is
+a row whose *path* is a fact and whose *title and mtime are not yet*. Not `failed`
+(nothing broke), not `absent` (the file is there), not `stale` (not about age).
+
+**Recommended for ratification** on that basis.
+
+### 2.2 Stale annotates; it never replaces
+
+The three others replace the content, because nothing true can be shown in its
+place. `stale` shows the last true value with its age beside it. Hiding a number
+because it is old is the lie.
+
+### 2.3 A failed thing needs two timestamps
+
+*Failed 2 hours ago* invites the reader to believe the data is two hours old.
+*Last succeeded 2 days ago · token expired* is what is true. One timestamp is a
+quieter lie. (C64)
+
+### 2.4 A failed consequential operation leaves the request pending (C45)
+
+An `action` that throws writes `payload.error` and the row **stays pending** —
+*"one action is one service call, so nothing is half-applied"* — and there is
+deliberately no retry. An access refusal does the same, before the row is settled.
+This is how the product fails, everywhere, and a screen must not draw a refusal as
+a decision.
+
+### 2.5 Nothing-to-do is a first-class outcome
+
+Four of the five shipped routines are deliberately silent when there is nothing to
+act on. A blank cell reads as a fault; *wrote an empty table — nothing had
+changed* reads as the truth. And a tick that did nothing gets **no row at all** —
+the schedule working is not an event.
+
+---
+
+## 3. Permissions and provenance
+
+### 3.1 One table, everywhere permissions appear (C58)
+
+**Resource × Read × Write**, one line per resource, on a local agent, a connected
+agent and a routine alike.
+
+**Anything not listed is not granted.** There is no Allow/Never control, because
+absence is the same information in none of the space — and it is the honest shape:
+the list of what an agent *cannot* do is infinite. One glyph marks a verb that
+waits for the owner; **Edit** sits on the section, not in every cell.
+
+Underneath, the wire's four action kinds are verbs on models (C53) — which is why
+`comment` appears against **two** resources, Work and Artifacts: its schema takes
+either a `work_id` or an `artifact_id` + `version_id`.
+
+### 3.2 Access always shows its provenance
+
+| How it got there | Marked |
+| --- | --- |
+| base configuration | nothing. A marker on everything is a marker on nothing |
+| approved in a queue | *Approved in Needs You · #311* |
+| granted by a routine | *during \<routine\> only* |
+| reached through a proxy | *Through Metistry* |
+
+The argument is not consistency. A routine-granted permission is the most
+forgettable access in the system — granted inside a setup months ago, invisible on
+the agent's own page — and the marker is the only thing between the owner and it.
+
+### 3.3 Effective is the value, and it carries its reason (C46, C47)
+
+`effectiveActions` clamps each entry to the level's ceiling, so stored and
+effective differ. The **effective** mode is the answer, matching the CLI. A cell
+that is not `allow` says *which* of two reasons applies: **defaulted** (you set
+nothing) or **clamped** (you set more than the level permits). Blurring them hides
+the only case where the owner's own setting is being overridden.
+
+### 3.4 The owner's choice is the whole control (C61)
+
+A proxied tool once carried a *Previews first* mark beside its On/Ask/Off setting,
+so a tool deliberately set to **On** still claimed it would preview.
+Preview-then-confirm **is** what *Ask* means — the middle state of the control, not
+a second marker beside it.
+
+Where a choice is consequential, **set a default, do not forbid the choice**. The
+wire already shows the shape: `dispatch` defaults to `propose` rather than being
+refused.
+
+### 3.5 An approval that blocks cannot happen in an unattended run (C59)
+
+*Ask* means **pause** for an agent the owner is talking to, and **defer** for a
+routine at 6 AM. The run finishes without the step and reports what it skipped —
+the same discipline as `later` not blocking.
+
+---
+
+## 4. Language
+
+- **Attribute names are Title Case; a value is verbatim, always.** A value is
+  usually something the owner or an agent wrote, and P1 says data is not
+  case-corrected.
+- **Rename the wire's enums for the reader, once, and everywhere.** `index` /
+  `areas` read as **Titles** / **Folders**; `allow` / `propose` / `deny` read as
+  **Allow** / **Ask First** / **Never**.
+- **One idea, one term.** *Schedule* and *Recurrence*, not "when it acts" and
+  "ticks". A second word for one idea is a second thing to learn.
+- **Never name the runner's internals.** "Silent" described how the scheduler
+  works. It is gone; what replaced it says what happened.
+- **Compose a shared sentence once.** `describeScope`'s triple is rendered
+  verbatim in the CLI, the Agents roster and the Needs You card. A surface that
+  composes its own version creates a second record.
+
+---
+
+## 5. Structure
+
+- **Metis is unscoped because it *is* the user.** It holds the owner's reach and
+  delegates narrower work. So Metis is not on Agents, and its reach is never drawn
+  as a grant — a grant implies it could be less. (C52)
+- **Agents is what Metis delegates to, and what connects in.** Everything on it is
+  scoped, because none of it is the owner. That sentence is why permissions live
+  there.
+- **An agent is a capability; a routine is an assignment.** The agent's definition
+  says *how it behaves*; the routine's task prompt says *what to do this occasion*
+  and is **appended**, never a replacement. Reach layers the same way.
+- **A routine's schedule is not when it acts.** `plan-tomorrow` is `@hourly` and
+  acts once an evening. Rows say when it acts; the cron expression is mechanism,
+  shown once.
+- **Two detail shapes beat one that fits neither.** Forcing a connected agent and
+  a local agent through one layout gave the first an empty Definition section and
+  the second an action matrix it does not use.
+- **The nav rule (C57).** Eight rows. The seven-row rule has been broken twice, both
+  times with the same argument — *this is not a property of the thing it sits
+  under*. **A third break should move something out rather than add a row.**
+
+### 5.1 Design the question, not the data's shape
+
+The rejected first Agents pass is the lesson. It was organised around
+`agents.grants` and `agents.autonomy`, which is the shape the wire hands you, and
+it produced a permissions matrix with a disclosure triangle. Its own spec opened by
+saying it was not a permissions matrix.
+
+The owner arrives with a question. On Agents it is *who works for me and what may
+they touch*; on Routines, *what is this running for me every day*; on Knowledge,
+*is this current*. Order the screen by the question — and **put the question the
+wire cannot answer first**, because it is what makes the rest trustworthy.
+
+---
+
+## 6. Working in this repo
+
+- **A board's assembly is not recoverable from `lib.py`.** The library holds
+  components; the page that arranges them lives in a board module or nowhere. Five
+  boards lost theirs. Re-derive from the published `.dc.html` on the canvas, not
+  from imagination.
+- **Module-level order matters.** `lib.py`'s panels are built at import time, so a
+  constant or icon defined later in the file does not exist when they render. This
+  has bitten twice.
+- **Run the checkers.** The token check, the palette validator, and a hand pass on
+  every pair the token file does not declare.
+- **Log the contradiction; do not route around it.** 64 of them, and the ones that
+  became rules are in this file.

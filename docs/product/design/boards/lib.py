@@ -3379,3 +3379,206 @@ def linkrow2(T,d,path,title,kind,*,last=False):
             + mono(path,T["tp"],11.5)
             + f'<span style="font-size: 12px; color: {T["ts"]};">{title}</span>'
             + f'<span style="font-size: 11px; color: {T["tt"]}; text-align: right;">{kind}</span></div>')
+
+
+# ============ KNOWLEDGE v2 — intent-led (2026-09-22) ==================
+# The first pass organised itself around `knowledge_pages` and `collector_health`
+# and came out a file browser with a status header — §5.1 of the amendments, the
+# mistake it warns about, committed the same night it was written. Rebuilt around
+# what the owner came for: what Metis learned, what needs their eye, and how it
+# works. Sources demote to one line, because a source that is working should be
+# ignorable.
+
+def teachline(T,text):
+    """The contract, said where it applies. Not a help page — the same habit the
+    states already have of naming their own reason."""
+    return (f'<div style="display: flex; gap: 8px; align-items: flex-start; margin-top: 10px;">'
+            f'<span style="display: flex; color: {T["tt"]}; flex-shrink: 0; margin-top: 1px;">'
+            f'{ic(I["know"],13,1.8)}</span>'
+            f'<span style="font-size: 11.5px; color: {T["ts"]}; line-height: 1.5;">{text}</span></div>')
+
+def klink(T,t):
+    return (f'<span style="font-weight: 600; color: {T["acc"]}; border-bottom: 1px solid {T["acc"]}; '
+            f'padding-bottom: 1px;">{t}</span>')
+
+FOLD_PROSE=("Three things moved in the lease thread yesterday. The comparables you asked for came back "
+            "<b>4% under</b> his number, which is the figure you did not have on the 6th — two of the four are in "
+            "the same block and both signed inside the quarter, so the comparison holds on those alone. "
+            "Separately, the vendor terms in {V} changed enough that the March renewal is no longer the cheapest "
+            "option on the table, and {L} now disagrees with {P} about the protein cost basis; I have not tried to "
+            "settle that one.")
+
+def folddigest(T,w=None):
+    wd=f"width: {w}px;" if w else ""
+    body=(FOLD_PROSE.replace("{V}",klink(T,"Areas/Fsl/vendors.md"))
+                    .replace("{L}",klink(T,"Areas/Health/labs.md"))
+                    .replace("{P}",klink(T,"Areas/Health/protein.md")))
+    return (f'<div style="{wd} background: {T["agq"]}; border-radius: 12px; padding: 16px 18px;">'
+            f'<div style="display: flex; align-items: center; gap: 8px;">'
+            f'<span style="display: flex; color: {T["ag"]};">{ic(I["spark"],14,2.2)}</span>'
+            f'<span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["ag"]};">'
+            f'LAST NIGHT&rsquo;S FOLD</span>'
+            f'<span style="flex-grow: 1;"></span>'
+            + mono("Journal/Fold/2026-09-22.md",T["ts"],11) + '</div>'
+            f'<div style="font-family: {SERIF}; font-size: 14.5px; color: {T["tp"]}; line-height: 1.65; '
+            f'margin-top: 11px;">{body}</div>'
+            f'<div style="display: flex; align-items: center; gap: 9px; margin-top: 13px;">'
+            + btn(T,"Open The Fold","secondary",I["note"]) + btn(T,"Earlier Folds","ghost")
+            + f'<span style="flex-grow: 1;"></span>{thumbs(T)}</div>'
+            + teachline(T,"Metis writes here, in its own voice, as its own commit. <b>Your own daily note is "
+                          "never touched</b> — one writer per file, and this is not that file.") + '</div>')
+
+def eyerow(T,*,glyph,what,page,why,action,tone=None,last=False):
+    return (f'<div style="display: grid; grid-template-columns: 17px 128px minmax(0,1fr) 128px; '
+            f'align-items: start; gap: 13px; padding: 10px 0; {bd_(T,last)}">'
+            f'<span style="display: flex; color: {tone or T["ts"]}; margin-top: 1px;">{ic(glyph,15,1.8)}</span>'
+            f'<span style="font-size: 12.5px; font-weight: 600; color: {T["tp"]};">{what}</span>'
+            f'<div><div>{mono(page,T["tp"],11.5)}</div>'
+            f'<div style="font-size: 11.5px; color: {T["ts"]}; line-height: 1.45; margin-top: 3px;">{why}</div></div>'
+            f'<span style="font-size: 12px; font-weight: 600; color: {T["acc"]}; text-align: right;">{action} &rarr;</span></div>')
+
+def needsyoureye(T):
+    return (f'<div>'
+            f'<div style="display: flex; align-items: baseline; gap: 9px; margin-bottom: 4px;">'
+            f'<span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["tt"]};">'
+            f'NEEDS YOUR EYE</span>'
+            f'<span style="font-size: 10.5px; color: {T["tt"]};">4</span></div>'
+            f'<div style="background: {T["sunken"]}; border-radius: 10px; padding: 12px 15px;">'
+            + eyerow(T,glyph=I["pencil"],what="Draft",page="Areas/Fsl/vendors.md",
+                     why="Metis rewrote the vendor summary from three captures",action="Review")
+            + eyerow(T,glyph=I["pencil"],what="Draft",page="Areas/Health/protein.md",
+                     why="New section on the cost basis",action="Review")
+            + eyerow(T,glyph=I["warn"],what="Conflict",page="Areas/Health/2026/sleep.md",
+                     why="You edited it while the fold was writing &mdash; two writers met",
+                     action="Resolve",tone=T["deg"])
+            + eyerow(T,glyph=I["spark"],what="Suggestion",page="Areas/Health/",
+                     why="Metis thinks these four notes are one area, not four",action="Read",last=True)
+            + '</div>'
+            + teachline(T,"A draft is <b>never served to an agent</b>. Marking a note <b>status: draft</b> is how "
+                          "you keep it from your own agents until you have read it.") + '</div>')
+
+def arearow(T,*,name,summary,why,last=False):
+    return (f'<div style="display: grid; grid-template-columns: 172px minmax(0,1fr) 190px; align-items: start; '
+            f'gap: 16px; padding: 10px 0; {bd_(T,last)}">'
+            + mono(name,T["acc"],12.5)
+            + f'<span style="font-size: 12.5px; color: {T["tp"]}; line-height: 1.5;">{summary}</span>'
+            + f'<span style="font-size: 11.5px; color: {T["ts"]}; text-align: right;">{why}</span></div>')
+
+def areas(T):
+    return (f'<div>'
+            f'<div style="display: flex; align-items: baseline; gap: 9px; margin-bottom: 4px;">'
+            f'<span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["tt"]};">AREAS</span>'
+            f'<span style="flex-grow: 1;"></span>'
+            f'<span style="font-size: 11.5px; color: {T["ts"]};">Why it is here, not how much of it there is</span></div>'
+            f'<div style="background: {T["sunken"]}; border-radius: 10px; padding: 12px 15px;">'
+            + arearow(T,name="Areas/Fsl",summary="Drey, the business setup, and the vendor thread you are in now",
+                      why="Named by last night&rsquo;s fold")
+            + arearow(T,name="Areas/Health",summary="Sleep, labs, and the protein blend",
+                      why="Changed by you 2 hours ago")
+            + arearow(T,name="Areas/Ops",summary="The lease, the studio, and the things with dates on them",
+                      why="Behind work #418")
+            + arearow(T,name="Journal",summary="Your daily notes, and the fold&rsquo;s own file beside them",
+                      why="Linked from 6 pages",last=True)
+            + '</div>'
+            + teachline(T,"A folder <b>is</b> a permission boundary: a grant names a path prefix, so organising "
+                          "your vault is also configuring what an agent can reach.") + '</div>')
+
+def sourceline(T,*,ok=True):
+    if ok:
+        return (f'<div style="display: flex; align-items: center; gap: 10px; background: {T["sunken"]}; '
+                f'border-radius: 9px; padding: 10px 14px;">'
+                f'<span style="width: 8px; height: 8px; border-radius: 50%; background: {T["ok"]};"></span>'
+                f'<span style="font-size: 12px; color: {T["tp"]};">4 sources, all current</span>'
+                f'<span style="flex-grow: 1;"></span>'
+                f'<span style="display: flex; color: {T["tt"]};">{ic(I["chevr"],13,2.2)}</span></div>')
+    return (f'<div style="background: {T["sunken"]}; border-radius: 9px; padding: 10px 14px;">'
+            f'<div style="display: flex; align-items: center; gap: 10px;">'
+            f'<span style="width: 8px; height: 8px; border-radius: 50%; background: {T["deg"]};"></span>'
+            f'<span style="font-size: 12px; color: {T["tp"]};">4 sources &middot; '
+            f'<span style="color: {T["deg"]}; font-weight: 600;">1 behind</span></span>'
+            f'<span style="flex-grow: 1;"></span>'
+            f'<span style="display: flex; color: {T["tt"]};">{ic(I["chevd"],13,2.2)}</span></div>'
+            f'<div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid {T["border"]};">'
+            + srcrow(T,name="aws-costs",when="checked 3 days ago",state="stale",age="3d old")
+            + srcrow(T,name="devin-sessions",when="last succeeded 2 days ago",state="failed",
+                     why="The answer was an error: <b>token expired</b>",last=True) + '</div></div>')
+
+def knowledgepane2(T,w=None):
+    wd=f"width: {w}px;" if w else "flex-grow: 1; min-width: 0;"
+    return (f'<div style="{wd} background: {T["bg"]};">'
+            f'<div style="display: flex; align-items: center; gap: 10px; padding: 14px 16px 12px;">'
+            f'<span style="font-size: 17px; font-weight: 600; color: {T["tp"]}; flex-grow: 1;">Knowledge</span>'
+            f'<span style="display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px; '
+            f'border-radius: 8px; border: 1px solid {T["bc"]}; background: {T["surface"]}; font-size: 12px; '
+            f'color: {T["tp"]};">Search<span style="display: flex; color: {T["tt"]};">'
+            f'{ic(I["review"],13,1.9)}</span></span></div>'
+            f'<div style="padding: 0 16px 16px; display: flex; flex-direction: column; gap: 18px;">'
+            + folddigest(T) + needsyoureye(T) + areas(T) + sourceline(T,ok=True) + '</div></div>')
+
+# ---------- render 2: settling a draft --------------------------------------
+DRAFT_BODY=("Three vendors changed terms this quarter. <b>Kessler</b> moved to net-45 and dropped the volume tier, "
+            "which is the change that matters for March. <b>Orlin</b> and <b>Baymark</b> are unchanged. The cheapest "
+            "option is no longer the renewal, on the terms as written.")
+
+def draftreview(T,w=None):
+    wd=f"width: {w}px; flex-shrink: 0;" if w else "flex-grow: 1; min-width: 0;"
+    return (f'<div style="{wd} background: {T["bg"]};">'
+            f'<div style="display: flex; align-items: center; gap: 12px; padding: 13px 16px; '
+            f'border-bottom: 1px solid {T["border"]};">'
+            f'<span style="display: flex; color: {T["ts"]};">{ic(I["chevr"],15,2.2)}</span>'
+            f'<div style="flex-grow: 1; min-width: 0;">'
+            f'<div style="font-size: 15px; font-weight: 600; color: {T["tp"]};">Vendor terms, this quarter</div>'
+            f'<div style="display: flex; align-items: center; gap: 8px; margin-top: 3px;">'
+            + mono("Areas/Fsl/vendors.md",T["ts"],11.5)
+            + pill(T,"draft",T["ts"],T["absq"]) + '</div></div></div>'
+            f'<div style="padding: 16px; display: flex; flex-direction: column; gap: 15px;">'
+            f'<div style="background: {T["agq"]}; border-radius: 10px; padding: 14px 16px;">'
+            f'<div style="display: flex; align-items: center; gap: 7px;">'
+            f'<span style="display: flex; color: {T["ag"]};">{ic(I["spark"],13,2.2)}</span>'
+            f'<span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["ag"]};">'
+            f'METIS WROTE THIS FROM 3 CAPTURES</span></div>'
+            f'<div style="font-family: {SERIF}; font-size: 14px; color: {T["tp"]}; line-height: 1.65; '
+            f'margin-top: 10px;">{DRAFT_BODY}</div></div>'
+            + block(T,"WHERE IT CAME FROM",sunk(T,
+                linkrow(T,"imessage · 18 Sep","&ldquo;Kessler moved us to net-45&rdquo;")
+                + linkrow(T,"Areas/Fsl/vendors.md","The section it would replace")
+                + linkrow(T,"work #418","The task that will read it",last=True)))
+            + block(T,"WHAT ACCEPTING DOES",sunk(T,
+                kv(T,"Writes","Areas/Fsl/vendors.md",mono_=True)
+                + kv(T,"Removes","status: draft &mdash; agents can read it from then on")
+                + kv(T,"Answers","the request waiting in Needs You",last=True)))
+            + f'<div style="display: flex; align-items: center; gap: 9px;">'
+            + btn(T,"Accept","affirm",I["check"]) + btn(T,"Edit First","secondary",I["pencil"])
+            + btn(T,"Discard","dest",I["x"]) + '</div>'
+            + teachline(T,"This arrived as a request, so answering it here answers it there. <b>Needs You</b> is "
+                          "where a decision is asked for; this is where there is room to correct the prose.")
+            + '</div></div>')
+
+# ---------- render 3: resolving a conflict ----------------------------------
+CONFLICT=[(" ","## Sleep"),(" ",""),("-","Average 6h40 across the last fortnight, which is down."),
+          ("+","Average 6h52 across the last fortnight — up slightly on the previous two weeks."),
+          (" ",""),("-","The magnesium change did not move anything measurable."),
+          ("+","The magnesium change did not move anything measurable yet; three weeks is short."),
+          (" ",""),(" ","See [[Areas/Health/labs]] for the panel.")]
+
+def conflictresolve(T,w=None):
+    wd=f"width: {w}px; flex-shrink: 0;" if w else "flex-grow: 1; min-width: 0;"
+    return (f'<div style="{wd} background: {T["bg"]};">'
+            f'<div style="display: flex; align-items: center; gap: 12px; padding: 13px 16px; '
+            f'border-bottom: 1px solid {T["border"]};">'
+            f'<span style="display: flex; color: {T["deg"]};">{ic(I["warn"],15,2)}</span>'
+            f'<div style="flex-grow: 1; min-width: 0;">'
+            f'<div style="font-size: 15px; font-weight: 600; color: {T["tp"]};">Two writers met</div>'
+            f'<div style="margin-top: 3px;">' + mono("Areas/Health/2026/sleep.md",T["ts"],11.5) + '</div></div></div>'
+            f'<div style="padding: 16px; display: flex; flex-direction: column; gap: 15px;">'
+            f'<div style="background: {T["degq"]}; border-radius: 10px; padding: 12px 14px;">'
+            f'<div style="font-size: 12.5px; color: {T["tp"]}; line-height: 1.55;">You edited this file at '
+            f'<b>9:12 PM</b>. The fold wrote to it at <b>9:14 PM</b>. Neither write was lost — the reconciler '
+            f'stopped rather than choosing, so <b>the title and date on this row are not facts yet</b>.</div></div>'
+            + diff(T,summary="Yours, against what the fold wrote",lines=CONFLICT,open_=True)
+            + f'<div style="display: flex; align-items: center; gap: 9px; flex-wrap: wrap;">'
+            + btn(T,"Keep Mine","secondary") + btn(T,"Take The Fold&rsquo;s","secondary")
+            + btn(T,"Merge In Obsidian","ghost",I["note"]) + '</div>'
+            + teachline(T,"<b>One writer per file</b> is the rule that makes the vault safe to share with agents. A "
+                          "conflict is that rule holding — the alternative is a silent overwrite.")
+            + '</div></div>')

@@ -5,7 +5,7 @@ standup draft gain a row type and an eighth filter chip (C43).
 """
 from lib import *
 
-CW,CH=2160,3560
+CW,CH=2160,3680
 
 def newpill(T):
     return (f'<div style="display: flex; justify-content: center; padding: 8px 0 2px;">'

@@ -1,7 +1,7 @@
 """Board: Today — the day as a spine."""
 from lib import *
 
-CW,CH=2620,4360
+CW,CH=2620,5060
 body=(heading("ROUND D · SCREEN 5, v6","Today — one facet order, a shape for time",
    "Six corrections. One facet order obeyed everywhere a task is drawn, dates and estimates as glyphs rather than "
    "bare words, the sidebar actually showing Today first, a calendar change drawn as a <b>shape</b> instead of a "

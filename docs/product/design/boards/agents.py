@@ -7,7 +7,7 @@ unscoped because it IS the user (C52).
 """
 from lib import *
 
-CW,CH=2440,3720
+CW,CH=2440,4260
 
 def win(T,inner,*,w=None):
     wd=f"width: {w}px; flex-shrink: 0;" if w else "flex-grow: 1; min-width: 0;"

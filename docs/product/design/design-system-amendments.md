@@ -224,8 +224,36 @@ saying it was not a permissions matrix.
 
 The owner arrives with a question. On Agents it is *who works for me and what may
 they touch*; on Routines, *what is this running for me every day*; on Knowledge,
-*is this current*. Order the screen by the question — and **put the question the
-wire cannot answer first**, because it is what makes the rest trustworthy.
+*what did it learn, and does anything need me*.
+
+**The qualifier, learned by breaking it (C66, and the Knowledge rework).** The
+first form of this rule ended *put the question the wire cannot answer first,
+because it is what makes the rest trustworthy* — and on Knowledge that produced a
+status page with a file list under it. The correction: **lead with what the owner
+came for; lead with the unanswerable question only when trust in the data is what
+they came for.** On Agents *may this thing touch my vault* is the visit. On
+Knowledge *is the collector current* is plumbing — a source that is working should
+be ignorable, and the machinery goes to the bottom in one line that expands itself
+when something is wrong.
+
+### 5.2 Relevance is provenance, not a rank
+
+*Show me what is most relevant* is a request for a ranking, and a ranking is
+inferred, unexplainable and cannot be argued with — P5 forbids it. Answer it with
+**facts that are reasons**: *changed by you 2 hours ago*, *named by last night's
+fold*, *behind work #418*, *linked from 6 pages*. Each is a row value, a file's own
+link, a join, or a count. Same job, no invention, and when one is wrong the owner
+can see **why** it is wrong, which a score never permits.
+
+### 5.3 The teaching layer sits in situ, and says the architectural reason
+
+Where the product's shape is unusual, the surface that depends on it carries one
+sentence naming the **rule**, not a usage tip: *a folder is a permission boundary,
+because a grant names a path prefix* — never *folders help you stay organised*. One
+line, tertiary ink, at the foot of the section it governs, non-dismissible: a rule
+that can be turned off stops being one, and it costs a line. This is the same habit
+the four states already have — **say your own reason** — applied to architecture
+rather than to a missing value.
 
 ---
 
@@ -240,5 +268,12 @@ wire cannot answer first**, because it is what makes the rest trustworthy.
   has bitten twice.
 - **Run the checkers.** The token check, the palette validator, and a hand pass on
   every pair the token file does not declare.
-- **Log the contradiction; do not route around it.** 64 of them, and the ones that
+- **A frame is measured, never estimated (C67).** A board declares its own height
+  and nothing verifies it; seven of twelve overflowed, one by 1283px, and two rounds
+  of rationale panels were reviewed at the bottom of boards that could not show
+  them. Render each board headless, compare `scrollHeight` to the declared height,
+  and raise the declaration until they are equal. Fonts matter: alias the system
+  stacks to metric-compatible faces (Liberation Sans, Bitstream Charter, Liberation
+  Mono) or every number is inflated.
+- **Log the contradiction; do not route around it.** 68 of them, and the ones that
   became rules are in this file.

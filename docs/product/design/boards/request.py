@@ -7,7 +7,7 @@ gone from the library.
 """
 from lib import *
 
-CW,CH=1880,1460
+CW,CH=1880,2220
 
 CARD=pan(L,"THE CARD, PREVIEW EXPANDED",
   reqcard(L,glyph=I["key"],typ="ACCESS",

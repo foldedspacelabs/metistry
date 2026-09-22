@@ -7,7 +7,7 @@ Recurrence, Outputs, History. "Silent" is gone.
 """
 from lib import *
 
-CW,CH=2560,3480
+CW,CH=2560,4840
 
 def win(T,inner):
     return (f'<div style="flex-grow: 1; min-width: 0; border: 1px solid {T["bc"]}; border-radius: 14px; '

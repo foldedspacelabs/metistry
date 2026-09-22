@@ -19,6 +19,7 @@ import {
   parseModelRef,
   parseTiers,
   resolveAssignment,
+  resolveIntentTier,
   resolveTier,
   servedProviders,
   collectorProviderIssue,
@@ -561,5 +562,61 @@ providers:
 
   it("is undefined when nothing runs on this machine", () => {
     expect(firstOnMachineBaseUrl(emptyCompute())).toBeUndefined();
+  });
+});
+
+describe("assignments.intent — the intent tier's model (PoC-20 phase 1)", () => {
+  const local = `
+providers:
+  ollama: { kind: openai-compatible, base_url: http://127.0.0.1:11434/v1, locality: on_machine }
+  openrouter:
+    kind: openai-compatible
+    base_url: https://openrouter.ai/api/v1
+    locality: off_machine
+    data_policy: { allow: [Areas], deny_sources: [], max_brief_bytes: 1024 }
+assignments:
+  default: { model: openrouter/anthropic/claude-sonnet-5 }
+`;
+
+  it("resolves to (provider, model) with the provider's block", () => {
+    const cfg = parseCompute(`${local}  intent: { model: ollama/gemma4:e4b-it-qat }\n`);
+    const tier = resolveIntentTier(cfg);
+    expect(tier?.provider).toBe("ollama");
+    expect(tier?.model).toBe("gemma4:e4b-it-qat");
+    expect(tier?.config.base_url).toBe("http://127.0.0.1:11434/v1");
+  });
+
+  it("is UNDEFINED when absent — it never falls back to `default`, which for most installs is billable", () => {
+    expect(resolveIntentTier(parseCompute(local))).toBeUndefined();
+    expect(resolveIntentTier(emptyCompute())).toBeUndefined();
+  });
+
+  it("REFUSES an off-machine provider at load, naming the field", () => {
+    const r = validateCompute({
+      providers: {
+        openrouter: { kind: "openai-compatible", base_url: "https://openrouter.ai/api/v1", locality: "off_machine", data_policy: { allow: ["Areas"], deny_sources: [], max_brief_bytes: 1024 } },
+      },
+      assignments: { default: { model: "openrouter/x" }, intent: { model: "openrouter/x" } },
+    });
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.errors.join(" ")).toMatch(/assignments.intent.model/);
+    expect(r.errors.join(" ")).toMatch(/locality: off_machine/);
+  });
+
+  it("refuses a provider this file does not declare", () => {
+    const r = validateCompute({
+      providers: { ollama: { kind: "openai-compatible", base_url: "http://127.0.0.1:11434/v1", locality: "on_machine" } },
+      assignments: { default: { model: "ollama/a" }, intent: { model: "nope/b" } },
+    });
+    expect(r.ok).toBe(false);
+  });
+
+  it("takes a model and nothing else — no effort, no critical, no shadow on a free one-token call", () => {
+    const r = validateCompute({
+      providers: { ollama: { kind: "openai-compatible", base_url: "http://127.0.0.1:11434/v1", locality: "on_machine" } },
+      assignments: { default: { model: "ollama/a" }, intent: { model: "ollama/a", effort: "low" } },
+    });
+    expect(r.ok).toBe(false);
   });
 });

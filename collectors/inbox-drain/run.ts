@@ -1,18 +1,38 @@
 // inbox-drain: classify new captures, emit PROPOSALS (D7) — never
-// auto-create (§4.12's over-extraction lesson). Two tiers, in this order:
-// the deterministic prefilter, then — for what the rules could not place —
-// the on-device model `compute.yaml` names, through the ordinary provider
-// wire (`completeJson`, ../compute-client.ts).
+// auto-create (§4.12's over-extraction lesson). THREE tiers now, in this
+// order, and the order is the whole design:
 //
-// The model tier is the free on-device one and only ever that: the manifest
-// pins `uses_model: applefm/foundation-model`, CI refuses a billable
-// provider there, and `completeJson` refuses again at the call. Absent is
+//   1. the deterministic prefilter (`classify`) — frontmatter, a bare URL, a
+//      leading action verb, a mime type. Every verdict names the rule that
+//      fired.
+//   2. the INTENT tier (PoC-20 phase 1, `intent-tier.ts`) — one scored answer
+//      token over the closed intent enum, ~150-300 ms, against the OWNER'S
+//      thresholds in `rules.yaml`. Runs only on what the rules could not
+//      place, and only where `compute.yaml` assigns it a model AND
+//      `rules.yaml` names a threshold. Absent on either side ⇒ off, and off
+//      is byte-identical to the build before it existed.
+//   3. the JSON-schema tier — the on-device model `compute.yaml` names,
+//      through the ordinary provider wire (`completeJson`,
+//      ../compute-client.ts), for whatever tiers 1 and 2 both left alone.
+//
+// Both model tiers are free on-device ones and only ever that: the manifest
+// pins `uses_model: applefm/foundation-model`, `assignments.intent` is
+// refused at load unless its provider is `locality: on_machine`, CI refuses a
+// billable provider, and the client refuses again at the call. Absent is
 // normal — no such provider in `compute.yaml`, no credential, a bridge that
 // is not running, an answer that is not the schema, and the deterministic
 // result stands.
+//
+// The ordering is not only speed. A deterministic check ahead of the model is
+// what protects against input the model has no competence for, because
+// confidence cannot: an English classifier measured 0.000 accuracy at 0.952
+// confidence on Khmer (research §2.3.1.3). Rules first is correct engineering
+// before it is correct governance.
 
 import type { CaptureSink } from "@foldedspacelabs/metistry-mcp-brain";
+import { finishRun, intentStage, resolveIntentTier, startRun, type IntentRules } from "@foldedspacelabs/metistry-core";
 import { completeJson, type ComputeAccess } from "../compute-client.js";
+import { intentMeta, intentPlacement, scoreIntent, type IntentOutcome } from "./intent-tier.js";
 
 export interface Db {
   query(text: string, values?: unknown[]): Promise<{ rows: any[] }>;
@@ -147,6 +167,19 @@ export function suggestedWork(row: InboxRow, c: Classification): SuggestedWork |
 // fallthroughs with text are refined by the model. Degrades absent: no
 // provider, or any failure of it, keeps the deterministic result.
 export interface CollectorCtx extends ComputeAccess {
+  /**
+   * `rules.yaml`'s `intent:` block, handed down by the runner — the DECISION
+   * half of the intent tier (§3.2 P2).
+   *
+   * It is a separate field from `compute` on purpose, because the two are
+   * different kinds of statement made by different means. `compute.yaml`
+   * names the MODEL and is an ordinary config file; `.metistry/rules.yaml` is
+   * a §4.7 protected path — the user's own hand — and is where the THRESHOLD
+   * lives. Absent here means the tier does not run however `compute.yaml` is
+   * configured: a model with no threshold is a classifier nobody decided to
+   * act on.
+   */
+  intentRules?: IntentRules;
   ekUrl?: string; // eventkit bridge (routines use it for schedule/meeting prep)
   ekToken?: string;
   githubToken?: string; // github-state collector (fine-grained read-only PAT)
@@ -237,6 +270,60 @@ async function fmClassify(ctx: CollectorCtx, text: string): Promise<FmResult | u
   return { category: v.category, has_action: v.has_action, action: typeof v.action === "string" ? v.action : "" };
 }
 
+/**
+ * The intent tier's configuration, or undefined — and undefined is the
+ * shipped default.
+ *
+ * TWO files have to agree before a verdict can move anything: `compute.yaml`
+ * names the model (`assignments.intent`, refused at load unless it is
+ * on-machine) and `.metistry/rules.yaml` names the threshold (a §4.7
+ * protected path, the user's own hand). Either one alone is not enough, and
+ * that is the point — the model is a compute choice and the risk tolerance is
+ * the owner's, and neither is the other.
+ */
+function intentTierOf(ctx: CollectorCtx): { modelRef: string; rules: IntentRules } | undefined {
+  const rules = ctx.intentRules;
+  if (!rules) return undefined;
+  const cfg = ctx.compute?.();
+  const assigned = cfg ? resolveIntentTier(cfg) : undefined;
+  if (!assigned) return undefined;
+  return { modelRef: assigned.ref, rules };
+}
+
+/**
+ * One verdict into the audit (§4.3): a `runs` row, always, INCLUDING the
+ * discarded ones — "a verdict below threshold is the most interesting row in
+ * the table: it is the training set for phase 3 and the evidence for moving a
+ * threshold".
+ *
+ * `ok` is "the tier ran as designed", never "the classifier was right"
+ * (§4.3 property 2 — conflating them makes the watchdog's error rate
+ * meaningless). A guard refusal and a below-threshold verdict are both
+ * successes of this tier; only a server that could not answer is `false`.
+ */
+async function recordIntent(db: Db, inboxId: number | string, outcome: IntentOutcome, modelRef: string): Promise<void> {
+  const [provider, ...rest] = modelRef.split("/");
+  const meta = intentMeta(outcome);
+  let id: number;
+  try {
+    id = await startRun(db as never, {
+      component: "inbox-drain",
+      kind: "classify",
+      tool: "intent",
+      provider: provider ?? "",
+      model: rest.join("/"),
+      meta: { inbox_id: inboxId, ...meta },
+    });
+  } catch {
+    return; // the audit must never be what fails a drain pass
+  }
+  if (!Number.isFinite(id)) return;
+  await finishRun(db as never, id, {
+    ok: outcome.outcome !== "unavailable",
+    ...(outcome.outcome === "unavailable" ? { error: outcome.why } : {}),
+  }).catch(() => undefined);
+}
+
 /** One drain pass. Returns how many rows were classified. */
 export async function run(db: Db, ctx: CollectorCtx = {}): Promise<number> {
   const { rows } = await db.query(
@@ -245,11 +332,37 @@ export async function run(db: Db, ctx: CollectorCtx = {}): Promise<number> {
   const items = rows as InboxRow[];
   const deterministic = new Map(items.map((r) => [r.id, classify(r)]));
 
-  // The model refines only what the rules couldn't place (reason "default")
+  // The model tiers refine only what the rules couldn't place (reason "default")
   const fallthroughs = items.filter((r) => deterministic.get(r.id)!.reason === "default" && (r.note ?? "").trim()).slice(0, FM_MAX_ITEMS);
-  // pg returns bigint ids as strings — normalize map keys to Number
+
+  // pg returns bigint ids as strings, so every map below is keyed by Number.
+  const intentTier = intentTierOf(ctx);
+  const intents = new Map<number, IntentOutcome>();
+  const placed = new Map<number, { kind: string; provider: string; reason: string }>();
+  if (intentTier) {
+    const stage = intentStage();
+    for (const r of fallthroughs) {
+      const outcome = await scoreIntent(ctx, (r.note ?? "").trim(), {
+        modelRef: intentTier.modelRef,
+        rules: intentTier.rules,
+        stage,
+        ...(r.mime !== undefined ? { mime: r.mime } : {}),
+      });
+      intents.set(Number(r.id), outcome);
+      await recordIntent(db, r.id, outcome, intentTier.modelRef);
+      // THE RULES DECIDE, and they decide in `intent-tier.ts`. This file asks
+      // what they concluded and never looks at the verdict itself: a verdict
+      // that does not clear the owner's threshold, or that names an intent the
+      // table maps to nothing, simply produces no placement and falls through
+      // to the tier below exactly as if it had never run.
+      const p = intentPlacement(outcome);
+      if (p) placed.set(Number(r.id), p);
+    }
+  }
+
   const fm = new Map<number, FmResult>();
   for (const r of fallthroughs) {
+    if (placed.has(Number(r.id))) continue; // the intent tier placed it; the slower schema tier has nothing to add
     const got = await fmClassify(ctx, (r.note ?? "").trim());
     if (got) fm.set(Number(r.id), got);
   }
@@ -259,11 +372,15 @@ export async function run(db: Db, ctx: CollectorCtx = {}): Promise<number> {
 
   for (const row of items) {
     const det = deterministic.get(row.id)!;
+    const byIntent = placed.get(Number(row.id));
     const refined = fm.get(Number(row.id));
-    const final = refined
-      ? { kind: refined.category, reason: tierName, title: det.title, has_action: refined.has_action, action: refined.action }
-      : det;
-    const tier = refined ? tierName : "deterministic";
+    const intentOutcome = intents.get(Number(row.id));
+    const final = byIntent
+      ? { kind: byIntent.kind, reason: byIntent.reason, title: det.title }
+      : refined
+        ? { kind: refined.category, reason: tierName, title: det.title, has_action: refined.has_action, action: refined.action }
+        : det;
+    const tier = byIntent ? byIntent.provider : refined ? tierName : "deterministic";
     // Provenance rides the credential (§4.19): a capture made with an agent
     // token proposes AS that agent, at external trust; the owner's own
     // captures propose as this collector, at user trust.
@@ -271,12 +388,25 @@ export async function run(db: Db, ctx: CollectorCtx = {}): Promise<number> {
     const trust = row.source_agent ? "external" : "user";
     // The suggestion comes off the DETERMINISTIC classification, never the
     // refined one: a model's `has_action` must not be what puts an extra
-    // button under a proposal (invariant 4).
+    // button under a proposal (invariant 4). The intent verdict is no
+    // different — `suggestedWork` has never read a model and does not start
+    // here.
     const work = suggestedWork(row, det);
     await db.query(
       `INSERT INTO proposals (kind, source_agent, trust, payload) VALUES ('knowledge', $2, $3, $1)`,
       [
-        JSON.stringify({ inbox_id: row.id, path: row.path, classification: final, note: row.note, tier, ...(work ? { suggested_work: work } : {}) }),
+        JSON.stringify({
+          inbox_id: row.id,
+          path: row.path,
+          classification: final,
+          note: row.note,
+          tier,
+          ...(work ? { suggested_work: work } : {}),
+          // Every verdict rides the proposal, including the discarded ones
+          // (§4.3): a card the owner corrects is only reviewable if what the
+          // classifier said is on it.
+          ...(intentOutcome ? { intent: intentMeta(intentOutcome) } : {}),
+        }),
         sourceAgent,
         trust,
       ],

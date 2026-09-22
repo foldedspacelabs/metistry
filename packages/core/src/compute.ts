@@ -368,11 +368,35 @@ export const assignmentSchema = z.strictObject({
 
 export type Assignment = z.infer<typeof assignmentSchema>;
 
+/**
+ * `assignments.intent` — which model serves the intent tier (PoC-20 phase 1,
+ * docs/research/2026-09-21-intent-classification-tier.md §5.2).
+ *
+ * Deliberately NOT an `assignmentSchema`: the tier scores ONE token with
+ * reasoning suppressed, so `effort` would be a field nothing sends, `critical`
+ * a budget mark on a call that costs nothing, and `shadow` a comparison of two
+ * free answers. One line, one model.
+ *
+ * **Absent means the tier does not run at all.** There is no fallback to
+ * `assignments.default` — a fallback would point an unattended classifier at
+ * whatever answers ordinary turns, which for most installs is billable, and
+ * the resolution rule for a tier nobody named must not be "spend money".
+ * `superRefine` below refuses an off-machine provider here at LOAD, and
+ * `collectorProviderIssue` refuses it again at the call.
+ */
+export const intentAssignmentSchema = z.strictObject({
+  model: modelRefSchema,
+});
+
+export type IntentAssignment = z.infer<typeof intentAssignmentSchema>;
+
 export const assignmentsSchema = z.strictObject({
   /** Where every unnamed and unknown tier lands. Required whenever `assignments:` is present — a half-assigned file would silently fall back to `rules.yaml` for some turns and not others. */
   default: assignmentSchema,
   tiers: z.record(z.string().regex(NAME_RE, "tier names are lowercase kebab-case (casing rule: only the vault is TitleCase)"), assignmentSchema).default({}),
   crews: z.record(z.string().regex(NAME_RE, "crew names are lowercase kebab-case (casing rule: only the vault is TitleCase)"), assignmentSchema).default({}),
+  /** The intent tier's model (PoC-20). Absent = no intent tier; there is no default to fall back to. */
+  intent: intentAssignmentSchema.optional(),
 });
 
 export type Assignments = z.infer<typeof assignmentsSchema>;
@@ -479,6 +503,26 @@ export const computeSchema = z
         noShadowHere(a, "crew", name);
         check(a.model, ["assignments", "crews", name, "model"]);
       }
+      // The intent tier runs unattended, at the capture door, on every row
+      // the rules could not place — so the collector money rule governs it
+      // and is checked HERE, at load, rather than discovered on the first
+      // capture of the month. Same condition `collectorProviderIssue`
+      // applies, stated in the file that would permit the spending.
+      if (cfg.assignments.intent) {
+        const ref = cfg.assignments.intent.model;
+        check(ref, ["assignments", "intent", "model"]);
+        const providerName = ref.slice(0, ref.indexOf("/"));
+        const p = cfg.providers[providerName];
+        if (p && p.locality !== "on_machine") {
+          ctx.addIssue({
+            code: "custom",
+            path: ["assignments", "intent", "model"],
+            message:
+              `assignments.intent names ${providerName}, which is locality: ${p.locality} — the intent tier scores every capture the rules could not place, unattended, ` +
+              `so it may only name an on_machine provider, whose calls cost 0 by definition (docs/ops/compute.md "What a collector may call")`,
+          });
+        }
+      }
     }
     for (const name of Object.keys(cfg.budgets?.providers ?? {})) {
       if (!Object.hasOwn(cfg.providers, name)) {
@@ -581,6 +625,31 @@ export function resolveAssignment(cfg: Compute, tierOrCrew?: string | null): Res
     critical: assignment.critical === true,
     ...(shadow ? { shadow: resolveShadow(cfg, shadow) } : {}),
   };
+}
+
+/** The intent tier's model, as (provider, model) with the provider's block. */
+export interface ResolvedIntentTier extends ModelRef {
+  config: Provider;
+}
+
+/**
+ * `assignments.intent`, resolved — or **undefined, which means the tier does
+ * not run**.
+ *
+ * The contrast with `resolveAssignment` is the whole point and is deliberate:
+ * that one falls back to `default` for a name it does not know, because a turn
+ * has to be answered by something. This one does not fall back at all,
+ * because a capture does NOT have to be classified by a model — the
+ * deterministic rules already placed it, and "no intent tier" is the shipped,
+ * tested, supported install (research §3.2 P3).
+ */
+export function resolveIntentTier(cfg: Compute): ResolvedIntentTier | undefined {
+  const ref = cfg.assignments?.intent?.model;
+  if (!ref) return undefined;
+  const parsed = parseModelRef(ref);
+  const config = cfg.providers[parsed.provider];
+  if (!config) return undefined; // the schema refuses this at load; a hand-built object could still get here
+  return { ...parsed, config };
 }
 
 /** The `shadow:` block as (provider, model, fraction, provider block) — the same resolution the assignment itself gets. */

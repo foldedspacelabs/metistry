@@ -953,6 +953,86 @@ used" visible rather than silent.
 > Without it the drain is deterministic, which is a supported install, and
 > `metistry doctor` says so.
 
+### The intent tier — `assignments.intent`
+
+PoC-20 phase 1. A second, faster kind of model call: instead of asking for
+JSON and parsing it, the tier constrains the answer to **one token** from a
+closed lettered alphabet, asks for `top_logprobs`, and renormalises the
+distribution in our own code. Sixteen intents, one token, ~150-300 ms, and a
+confidence number the JSON-schema route cannot produce.
+
+It is assigned in its own line, and the line takes a model and nothing else:
+
+```yaml
+assignments:
+  default: { model: openrouter/anthropic/claude-sonnet-5 }
+  intent:  { model: ollama/gemma4:e4b-it-qat }
+```
+
+No `effort` (one token, reasoning suppressed — there is nothing for effort to
+mean), no `critical` (an on-machine call costs nothing to pause), no `shadow`
+(a comparison of two free answers measures nothing anybody is paying for).
+
+**Absent means the tier does not run, and there is NO fallback to
+`assignments.default`.** That is the one place this line differs from every
+other assignment, and it is deliberate: a tier nobody named must not resolve
+to whatever answers ordinary turns, which for most installs is billable. The
+same collector money rule applies, checked twice — **`compute.yaml` refuses an
+off-machine provider here at load, naming the field**, and `scoreChoice()`
+refuses again at the call, which is the half that survives an instance editing
+its own file after CI has run.
+
+**Which server it is decides the request.** The three that expose token
+probabilities do not agree about how to ask, and each row below was measured
+on an M4 Max on 2026-09-22:
+
+| server | `max_tokens` | `top_logprobs` ceiling | suppression |
+| --- | ---: | ---: | --- |
+| Ollama | 1 | 20 | `reasoning_effort: "none"` — **required**: without it the likeliest next token is the reasoning channel's opener |
+| bundled `llama-server` | 1 | 20 | `chat_template_kwargs: {enable_thinking: false}` |
+| LM Studio | **2** | **10** | either; at `max_tokens: 1` it answers `logprobs: null`, and past ten `top_logprobs` it answers `400` |
+| Apple FM | — | **none** | FoundationModels exposes no per-token logits. Refused by name rather than asked. |
+
+An unrecognised provider gets `max_tokens: 2` with `top_logprobs` capped at
+10, which all three accept. The provider's own `request:` block is merged last
+and wins, as everywhere else.
+
+**The threshold is not here.** `compute.yaml` says which model; how sure it has
+to be before anything moves is `.metistry/rules.yaml` — a protected path, the
+owner's own hand:
+
+```yaml
+intent:
+  min_confidence: 0.80
+  by_intent:
+    task_create: 0.90        # different consequences deserve different bars
+```
+
+Both files have to agree before a verdict moves anything. A threshold outside
+[0, 1], or an intent this build does not know, is a **startup failure** — the
+same parse that already refuses an uncompilable `fast_path` regex — never a
+surprise on the day somebody captures the wrong sentence. The intents
+themselves are a closed enum in `packages/core`: a new one is a product change,
+not a config line (invariant 10).
+
+**Do not guess the number.** It is an OUTPUT of the eval, fitted on your own
+labelled messages:
+
+```sh
+metistry-eval intents <instance>/.metistry/eval/intents.jsonl \
+  --base-url http://127.0.0.1:11434/v1 --model gemma4:e4b-it-qat --server ollama --fit
+```
+
+`docs/poc/poc20-intent-tier/README.md` has the fixture format and the bar;
+`docs/ops/inbox.md` has what changes in triage; and "The router's baseline"
+above is PoC-20 phase 0, the measurement that says whether this tier is worth
+turning on at all.
+
+**What it is not.** The tier emits a FACT — what the message says — and never
+a destination. It names no tier and no model, `route()` does not read it, and
+the console's composer still routes by regex alone (invariant 4). Reading a
+verdict in the router is PoC-20 phase 2 and needs a ruling first.
+
 ### Embeddings
 
 Knowledge search embeds through the same protocol —

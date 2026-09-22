@@ -203,6 +203,7 @@ SwiftUI's `.serif`.
 | Settings ▸ Resources | `screen-09-resources.md` | done — the connections, one connection, three states per tool |
 | Knowledge | `screen-10-knowledge.md` | **rebuilt 2026-09-22** — digest-led; sources folded to one line |
 | Facets & colour | `facets-and-colour.md` | the system itself |
+| Build-side preview | `dev-preview-round-e.md` | **draft 2026-09-22** — what the developer needs, in one file; keep it current as rounds land |
 
 **Not drawn:** card detail popover, Projects, Artifacts, Rooms, Usage, Settings
 itself (only its Resources pane), the Obsidian plugin's remaining surfaces.

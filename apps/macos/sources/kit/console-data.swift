@@ -872,6 +872,10 @@ public struct AgentRecord: Codable, Sendable, Equatable, Identifiable {
     public let grants: JSONValue?
     public let projects: [String]?
     public let autonomy: JSONValue?
+    /// The row **rendered** — `core`'s `describeScope`, the one vocabulary
+    /// every surface uses (`docs/ops/auth.md`, `docs/ops/console-api.md`).
+    /// Absent only against a console older than this app.
+    public let scope: JSONValue?
     public let createdAt: String?
     public let lastSeenAt: String?
     public let revoked: Bool
@@ -883,7 +887,7 @@ public struct AgentRecord: Codable, Sendable, Equatable, Identifiable {
     public let pending: Bool
 
     enum CodingKeys: String, CodingKey {
-        case id, kind, grants, projects, autonomy, revoked, remote, pending
+        case id, kind, grants, projects, autonomy, scope, revoked, remote, pending
         case displayName = "display_name"
         case createdAt = "created_at"
         case lastSeenAt = "last_seen_at"
@@ -898,6 +902,7 @@ public struct AgentRecord: Codable, Sendable, Equatable, Identifiable {
         grants = try c.decodeIfPresent(JSONValue.self, forKey: .grants)
         projects = try c.decodeIfPresent([String].self, forKey: .projects)
         autonomy = try c.decodeIfPresent(JSONValue.self, forKey: .autonomy)
+        scope = try c.decodeIfPresent(JSONValue.self, forKey: .scope)
         createdAt = try c.decodeIfPresent(String.self, forKey: .createdAt)
         lastSeenAt = try c.decodeIfPresent(String.self, forKey: .lastSeenAt)
         revoked = try c.decodeIfPresent(Bool.self, forKey: .revoked) ?? false
@@ -911,6 +916,43 @@ public struct AgentRecord: Codable, Sendable, Equatable, Identifiable {
     public var autonomyLevel: String? { autonomy?.string("level") }
     public var grantTier: String? { grants?.string("tier") }
     public var grantAreas: [String] { grants?["areas"]?.arrayValue?.compactMap(\.stringValue) ?? [] }
+
+    /// Every action kind, resolved AND why (`core`'s `effectiveActionsDetailed`,
+    /// C46/C47 — `docs/ops/actions.md`): read off `scope.autonomy.detailed`,
+    /// never recomputed here. `set` is the owner's own entry, honoured;
+    /// `defaulted` is the level's own default, nothing named; `clamped` is the
+    /// owner's own entry asking for more than the level allows — the ceiling
+    /// wins, which is the ONE case where the owner's own setting is being
+    /// overridden. Empty for a console too old to send `scope`, or a row with
+    /// no table at all — never a guess at one.
+    public var actionsDetailed: [String: AgentActionEntry] {
+        guard case .object(let kinds) = scope?["autonomy"]?["detailed"] else { return [:] }
+        return kinds.compactMapValues(AgentActionEntry.init(json:))
+    }
+}
+
+/// One action kind, resolved and explained — the wire shape of `core`'s
+/// `EffectiveActionEntry` (C46/C47). `mode` is what actually runs; `asked` is
+/// the owner's own per-kind entry, present only for `set` and `clamped`, and
+/// the only source where it disagrees with `mode` is `clamped` — that
+/// mismatch IS "the owner's own setting is being overridden".
+public struct AgentActionEntry: Sendable, Equatable {
+    public let mode: String
+    public let source: String
+    public let asked: String?
+    public let ceiling: String
+
+    public init(mode: String, source: String, asked: String? = nil, ceiling: String) {
+        self.mode = mode
+        self.source = source
+        self.asked = asked
+        self.ceiling = ceiling
+    }
+
+    public init?(json: JSONValue) {
+        guard let mode = json.string("mode"), let source = json.string("source"), let ceiling = json.string("ceiling") else { return nil }
+        self.init(mode: mode, source: source, asked: json.string("asked"), ceiling: ceiling)
+    }
 }
 
 /// `GET /api/q/agent_presence` — presence is derived state, so it comes through

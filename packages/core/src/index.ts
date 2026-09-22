@@ -86,6 +86,7 @@ export {
   actionWorkId,
   describeAction,
   effectiveActions,
+  effectiveActionsDetailed,
   admitsAnyAction,
   autonomyWidenings,
   modeRank,
@@ -94,6 +95,8 @@ export {
   type ActionKind,
   type ActionMode,
   type ActionAutonomy,
+  type ActionSource,
+  type EffectiveActionEntry,
   type AutonomyLevel,
 } from "./actions.js";
 export {

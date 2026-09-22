@@ -84,6 +84,14 @@ Kept current as PRs land (2026-09-08). Each item names what it unblocks.
       decline*. Decline the escalation too and the area is closed at the tool.
       Worth doing once so you know what the second card looks like before a
       real one arrives (ruled 2026-09-19).
+- [ ] **Check the reason each action's mode shows** (C46/C47). `metistry
+      agents autonomy <id>` now says WHY a kind is what it is, not just what
+      it is: set by you, defaulted from the level, or clamped to its ceiling.
+      Try it — set an agent's `level` to `propose` and `--allow comment`, then
+      read it back: `comment` should show `Ask First`, marked as clamped and
+      naming what you asked for (`Allow`), because `propose`'s ceiling refuses
+      it. That is the one case where your own setting is being overridden, and
+      it should never look like an ordinary default.
 - [ ] **The assistant can now ask as well** (ruled 2026-09-19). If you have
       narrowed it with `METISTRY_ASSISTANT_AREAS`, it will raise an
       `access_request` like any other principal; approving one records the

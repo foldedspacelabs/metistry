@@ -13,6 +13,7 @@ import {
   autonomyWidenings,
   describeAction,
   effectiveActions,
+  effectiveActionsDetailed,
   parseAction,
   type Action,
   type ActionKind,
@@ -117,6 +118,47 @@ describe("the level is a ceiling", () => {
   it("modes and levels are ordered least → most, because the ranks are the index", () => {
     expect([...ACTION_MODES]).toEqual(["deny", "propose", "allow"]);
     expect([...AUTONOMY_LEVELS]).toEqual(["observe", "propose", "act_within_scope"]);
+  });
+});
+
+describe("effectiveActionsDetailed — the same table, with why (C46/C47)", () => {
+  it("is defaulted when the record names nothing: no `asked`, ceiling and mode line up with the level", () => {
+    const t = effectiveActionsDetailed({ level: "propose" });
+    for (const kind of ACTION_KINDS) {
+      expect(t[kind], kind).toEqual({ mode: "propose", source: "defaulted", ceiling: "propose" });
+      expect(t[kind].asked, kind).toBeUndefined();
+    }
+  });
+
+  it("is set when the owner's own entry survives the ceiling unchanged", () => {
+    const t = effectiveActionsDetailed({ level: "act_within_scope", actions: { comment: "propose" } });
+    expect(t.comment).toEqual({ mode: "propose", source: "set", ceiling: "allow", asked: "propose" });
+    // a sibling kind with no entry of its own is still defaulted
+    expect(t.capture).toEqual({ mode: "allow", source: "defaulted", ceiling: "allow" });
+  });
+
+  it("is clamped when the owner's own entry is above the ceiling — the only source where `asked` disagrees with `mode`", () => {
+    const t = effectiveActionsDetailed({ level: "propose", actions: { comment: "allow" } });
+    expect(t.comment).toEqual({ mode: "propose", source: "clamped", ceiling: "propose", asked: "allow" });
+    // observe's ceiling is deny, so any per-kind entry above deny is clamped
+    const observed = effectiveActionsDetailed({ level: "observe", actions: { capture: "propose" } });
+    expect(observed.capture).toEqual({ mode: "deny", source: "clamped", ceiling: "deny", asked: "propose" });
+  });
+
+  it("`effectiveActions` is exactly the `.mode` projection of this — the two cannot drift apart", () => {
+    for (const record of [
+      undefined,
+      null,
+      {},
+      { level: "propose" as const },
+      { level: "act_within_scope" as const, actions: { dispatch: "allow" as const, comment: "deny" as const } },
+      { level: "observe" as const, actions: { comment: "allow" as const, capture: "propose" as const } },
+    ]) {
+      const detailed = effectiveActionsDetailed(record);
+      const projected = {} as Record<ActionKind, string>;
+      for (const kind of ACTION_KINDS) projected[kind] = detailed[kind].mode;
+      expect(effectiveActions(record), JSON.stringify(record)).toEqual(projected);
+    }
   });
 });
 

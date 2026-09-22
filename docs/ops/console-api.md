@@ -276,7 +276,10 @@ GET /api/agents
 ```json
 "scope": { "role":"agent", "who":"an agent", "tier":"index", "access":"titles",
            "areas":[], "scope":"titles", "queries":true, "projects":["alpha"],
-           "uses":null, "autonomy":{"level":"observe","actions":{…}},
+           "uses":null,
+           "autonomy": { "level":"observe", "actions":{…},
+                         "detailed": { "dispatch": {"mode":"deny","source":"defaulted","ceiling":"deny"},
+                                       "comment": {"mode":"deny","source":"clamped","ceiling":"deny","asked":"allow"} } },
            "source":"registry", "from":"the registry — the owner's own hand, durable",
            "extras":["queries","projects: alpha","autonomy: observe"],
            "line":"an agent · titles · queries, projects: alpha, autonomy: observe" }
@@ -288,6 +291,19 @@ for a client that wants the fields rather than the sentence. It exists so a
 client never recombines them into words of its own, which is how the panel,
 the queue and the CLI came to have three vocabularies for one record. The
 same object rides on an `access_request`'s payload as `current_scope`.
+
+`autonomy.actions` is `core`'s `effectiveActions` — the resolved (kind → mode)
+table alone. `autonomy.detailed` is the same table from `effectiveActionsDetailed`
+(C46/C47), one entry per kind, with WHY: `source` is `set` (the owner's own
+entry, honoured), `defaulted` (no entry — the level's own default), or
+`clamped` (the owner's entry asked for more than the level allows, and `mode`
+is the ceiling instead); `asked` is the record's own per-kind entry and rides
+only on `set` and `clamped` — it is the field that says an override happened
+at all, and the only source where it disagrees with `mode` is `clamped`. A
+client renders `detailed`, never re-derives it from `autonomy`'s level and
+raw per-kind overrides — that reconstruction is exactly what left three
+surfaces (the CLI, this route's own callers, MetistryKit) computing the same
+table by hand.
 
 That list is a **view**: the answer is given in the queue, through
 `POST /api/proposals/:id` like every other request, which for this kind takes

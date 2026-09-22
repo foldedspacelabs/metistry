@@ -34,6 +34,7 @@ canvas order:
 | `Facets` | the three channels, the ladder, the spark |
 | `Agents` | **screen 7** — the roster, a local agent, a connected agent |
 | `Routines` | **screen 8** — the schedule, one routine, the two prompt layers |
+| `Resources` | **screen 9** — proxied MCP servers, per-tool grants |
 | `Plugin` | the Obsidian plugin — the mirror, the picker, editable chips |
 | `Voice` | six system serifs and a Times control |
 | `Item-Model` | the item contract (its ladder section is superseded by `Facets`) |
@@ -100,8 +101,10 @@ disagree, the newer three win and the disagreement gets logged.
 
 ## 3. What is ratified — do not re-litigate
 
-**Navigation.** **Eight** rows as of 2026-09-21: **Today · Chat · Activity ·
-Work ▸ · Knowledge ▸ · Routines · Agents**, then **Pinned**. Routines went
+**Navigation.** **Nine** rows as of 2026-09-22 — see C57, which is the standing
+warning that the seven-row rule has been broken three times with the same
+argument. Was **eight** on 2026-09-21: **Today · Chat · Activity ·
+Work ▸ · Knowledge ▸ · Routines · Resources · Agents**, then **Pinned**. Routines went
 top-level for C30's own reason — it is not a kind of agent, and a child row
 would bury a daily question (C50). Today is first and top-level (C30) — it holds
 meetings, artifacts, requests and agent status, none of which Work owns. Work's
@@ -118,10 +121,13 @@ That sentence is why permissions live there and nowhere else.
 **appended**, never a replacement. Reach layers the same way: base on the agent,
 plus what a routine grants for one task.
 
-**Permissions are verbs on domain models** — one table, **Model · Action · May**,
-with knowledge on it rather than beside it (C53). **Allow · Ask First · Never**,
-drawn in the weight channel. An external MCP server proxied by Metistry is
-another Model, marked *Through Metistry* (C56).
+**Permissions are one table, everywhere they appear** — a local agent, a connected
+agent, a routine. **One line per resource**, Read and Write as columns, and
+**anything not listed is not granted** (C58): there is no Allow/Never control, one
+glyph marks a verb that asks first, and Edit sits on the section. Underneath they
+are still verbs on models, which is why Work and Artifacts both list Comment
+(C53). A proxied MCP server is one more resource row, marked *Through Metistry*;
+the server itself is defined on **Resources** (C56, `screen-09-resources.md`).
 
 **Access always shows its provenance** — base configuration (unmarked), approved
 in Needs You (*#311*), or granted by a routine (*during \<routine\> only*). A
@@ -184,6 +190,7 @@ SwiftUI's `.serif`.
 | Board | `screen-06-board.md` | done — five columns |
 | Agents | `screen-07-agents.md` | **rewritten 2026-09-21** — roster, a local agent, a connected agent |
 | Routines | `screen-08-routines.md` | done — the schedule, one routine |
+| Resources | `screen-09-resources.md` | done — the connections, one connection |
 | Facets & colour | `facets-and-colour.md` | the system itself |
 
 **Not drawn:** card detail popover, Projects, Artifacts, Rooms, Knowledge,
@@ -213,7 +220,7 @@ the canvas is now generated from a module in `boards/` except `Facets`, `Plugin`
 `Voice` and `Item-Model`. `bellpanel()` is gone — it drew the *"1 snoozed"*
 header C21 killed; `panel2()` is the panel.
 
-**56 contradictions** are logged in `review-00-plan.md`. C38 is closed. C40–C49 are
+**58 contradictions** are logged in `review-00-plan.md`. C38 is closed. C40–C49 are
 round E's. Two of them are rules the system is missing rather than faults in a
 file: **C45** (a failed consequential operation leaves the request pending) and
 **C49** (a mark that carries meaning takes an ink token, never a border token —

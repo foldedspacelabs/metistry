@@ -136,25 +136,51 @@ this and cannot read it.** What it shows instead:
   local, and its `trust` (`internal · external · user`).
 - **Reach**, with the same provenance vocabulary as §3.2.
 - **Project membership**, or *every project*.
-- **Permissions** — one table, **Model · Action · May**, knowledge included.
-  The wire calls these `dispatch`, `task_update`, `comment` and `capture`, and
-  drawn that way they are four unrelated strings. They are not: each is a verb on
-  a model the product already names, and `comment` is one kind reaching **two**
-  models — Work and Artifacts — because its schema takes either a task or an
-  artifact version. **Allow · Ask First · Never** replaces `allow · propose ·
-  deny`, the same rename the tier words carry. Mode is drawn in the weight
-  channel, never green-for-yes and red-for-no: a permission is not a moral
-  position and red is spoken for by `failed`. *Ask First* on Dispatch is the
-  wire's own default and the row says why — it hands the task off-machine, so it
-  stays the owner's decision even at the highest level.
-- **Proxied servers** — an external MCP server Metistry holds a credential for is
-  another **Model** in the same table, marked *Through Metistry*. The agent never
-  holds that credential; Metistry does, and mediates. See §10.
+- **Permissions** — see §4.1. The same table appears on a local agent, a
+  connected agent and a routine.
 - **The escalation ceiling** (C42) — *asked twice for `Areas/Finance` · declined
   both · it can no longer ask.* `request_access` refuses a third ask at the
   tool and writes no row, so Needs You goes quiet and the quiet means the
   opposite of what quiet usually means. This is where that fact lives.
 - **Revoke**, with what it cascades stated before you press it.
+
+### 4.1 Permissions — one line per resource, and absence is the denial
+
+Revised 2026-09-22. The version before this gave each verb its own row with a
+control in it, so `Knowledge` appeared twice and most of the table was furniture.
+
+| Resource | Read | Write |
+| --- | --- | --- |
+| Knowledge | `Areas/Ops` · `Areas/Finance` *(Needs You #311)* | — |
+| Work | All tasks | Update · Comment · Dispatch ⏱ |
+| Artifacts | All | Comment |
+| Inbox | — | Capture |
+| ⧉ Jira | 3 projects | Comment ⏱ |
+| ⧉ Confluence | 2 spaces | — |
+
+*⏱ asks you first · ⧉ reached through Metistry · anything not listed is not granted*
+
+**There is no Allow / Ask First / Never control.** Absence is the denial, which is
+the same information in none of the space — and the honest shape, because the list
+of what an agent *cannot* do is infinite. A verb that waits for the owner carries
+one glyph; nothing else needs a state at all. Changing any of it is a single
+**Edit** on the section rather than a control per cell.
+
+Underneath, the wire's four kinds are still verbs on models — `comment` reaches
+**two** models because its schema takes either `work_id` or `artifact_id` +
+`version_id` (C53) — and that is why Work and Artifacts both list Comment.
+`Dispatch` asks first by the wire's own default, because it hands the task
+off-machine.
+
+**Local agents get this table too.** The previous pass gave them knowledge only,
+on the argument that a routine grants the rest. An agent Metis delegates to needs
+Work and Artifacts like any other, and two permission surfaces for two kinds of
+agent was the same mistake as two detail layouts. One table, everywhere
+permissions appear.
+
+**Provenance lives in the cell.** A marked line arrived some other way — approved
+in a queue, or granted by a routine and held only while it runs. That replaces the
+separate provenance section the earlier pass had.
 
 ## 5. Changing things
 
@@ -225,5 +251,6 @@ Three things follow from it that the design should hold to:
    tools**, and secret redaction by default. A proxied server conforming to that
    contract inherits the behaviour this screen would otherwise have to invent.
 
-The open question is where the servers themselves are configured — one place
-holds the credential, and it is not this screen. (Request D9.)
+The servers themselves are defined on **Resources** — `screen-09-resources.md`,
+a new top-level row. One place holds the credential; granting a server to an agent
+or a routine happens in the table above, like everything else.

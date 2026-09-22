@@ -14,18 +14,18 @@ def win(T,inner):
             f'overflow: hidden; background: {T["bg"]};">{toolbar(T)}'
             f'<div style="display: flex; align-items: stretch;">{sidebar8(T,"Routines")}{inner}</div></div>')
 
-GRIDP=pan(L,"THE WEEK, SO THE SHAPE OF IT IS VISIBLE",
-  schedgrid(L)
-  + nt(L,"Occurrences are not magnitudes, so this is not a chart with a value axis — it is a tick per run on a "
-        "week-by-hour grid, which is the form that answers <i>how are these laid out</i>. What it shows at a "
-        "glance is the thing a list cannot: <b>everything the owner configured runs in the same hour</b>.",14)
-  + nt(L,"<b>One hue, two weights.</b> Filled is run by your agent, outlined is built-in. It was going to be two "
-        "colours until the palette validator measured them: in dark mode the agent ink and the neutral separate at "
-        "<b>14.3 &Delta;E</b>, under the hard floor of 15 — indistinguishable even with full colour vision. Weight "
-        "carries it instead, which is the same channel the presence dots and the permission pips already use.",12)
-  + nt(L,"Per-agent hues were the other option and were rejected on the system rather than the measurement: hue "
-        "carries <i>what kind of thing</i>, never <i>which one</i>. Identity comes from the row below, which is "
-        "also this picture&rsquo;s table view.",12))
+GRIDP=pan(L,"THE WEEK ON ONE AXIS",
+  timeline(L)
+  + nt(L,"The first pass drew a seven-row week-by-hour grid. It was seven rows to say one thing, and the thing is "
+        "visible on a single axis: <b>everything runs before 7 AM or after 6 PM, and the working day is "
+        "empty</b>. Day and week markers give the scale; the faint line inside each day is noon.",14)
+  + nt(L,"<b>The agent-versus-built-in distinction left with the grid.</b> It was carried by two marks, which the "
+        "palette validator had already forced into filled-and-outlined — and it was never the picture&rsquo;s job: "
+        "the <b>Agent</b> column in the list below says who runs each one, in words. A mark per run, one ink, no "
+        "legend to learn. (The 14.3 &Delta;E finding stands as a rule for any future pair of marks; it simply has "
+        "nothing to apply to here.)",12)
+  + nt(L,"Day, Week and Month are the same marks at three scales. Month answers <i>what does a normal month cost "
+        "me</i>, which is the question a budget would attach to.",12))
 
 ORDER=pan(L,"ORDERED BY WHAT RUNS NEXT — SO A ROUTINE APPEARS ONCE PER OCCURRENCE",
   nt(L,"Grouped by cadence, the list was an unordered set of configuration. Ordered by <b>when it next runs</b>, "
@@ -88,7 +88,7 @@ body=(heading("ROUND E · SCREEN 8, REFINED","Routines — the scheduled compute
         + f'<div style="display: flex; gap: 18px; align-items: flex-start;">'
         + f'<div style="flex-grow: 1; min-width: 0; border: 1px solid {D["bc"]}; border-radius: 12px; '
           f'overflow: hidden;">{routinelist2(D)}</div>'
-        + f'<div style="width: 560px; flex-shrink: 0;">{schedgrid(D)}</div>'
+        + f'<div style="width: 620px; flex-shrink: 0;">{timeline(D)}</div>'
         + '</div></div>',18))
 (PROJ/"Routines.dc.html").write_text(page("Routines",wrap(body,CW,CH,"#ece7dd",L["tp"],40),CW,CH,"#ece7dd"),encoding="utf-8")
 print(f"wrote Routines.dc.html ({CW}x{CH})")

@@ -1512,7 +1512,7 @@ def sidebar8(T,sel="Today"):
     # Agents would bury it. It sits beside Agents, which it deep-links to constantly.
     for n,g,kids in [("Today",I["cal"],None),("Chat",I["chat"],None),("Activity",I["activity"],None),
                      ("Work",I["work"],True),("Knowledge",I["know"],None),("Routines",I["repeat"],None),
-                     ("Agents",I["agents"],None)]:
+                     ("Resources",I["plug"],None),("Agents",I["agents"],None)]:
         on=(n==sel)
         out.append(f'<div style="position: relative; display: flex; align-items: center; gap: 10px; padding: 8px 12px; '
                    f'border-radius: 8px; background: {T["accq"] if on else "transparent"};">'
@@ -2609,7 +2609,11 @@ def localdetail(T,w=None):
             + detailhead(T,name="collator",what="yours · runs daily at 6:02 AM for Morning Digest",
                          state="working",actions_=acts)
             + f'<div style="padding: 16px; display: flex; flex-direction: column; gap: 16px;">'
-            + defeditor(T) + reachblock(T)
+            + defeditor(T)
+            + permmatrix(T,routine_grant=True,
+                note="A marked line is access this agent does not hold on its own. Outside "
+                     "<b>Morning Digest</b> it cannot read <b>Areas/Vendors</b> or write to "
+                     "<b>Journal/Digest/</b>.")
             + block(T,"ITS ROUTINES",sunk(T,
                 linkrow(T,"Morning Digest","each day at 6:02 AM · grants 2 more paths for the task")
                 + linkrow(T,"Vendor Sweep","each day at 7:00 AM · failed 2 days ago",last=True)))
@@ -2638,7 +2642,7 @@ def conndetail(T,w=None):
               f'<b>You did not write this and cannot read it.</b> What it does is its own; what it may touch is '
               f'yours.</span></div>'
             + block(T,"HOW IT CONNECTS",sunk(T,conn))
-            + block(T,"PERMISSIONS",permtable(T,rows=CONN_ROWS,proxied=PROXY_ROWS))
+            + permmatrix(T)
             + f'<div style="display: flex; gap: 9px; align-items: flex-start; background: {T["absq"]}; '
               f'border-radius: 9px; padding: 11px 13px;">'
               f'<span style="display: flex; color: {T["ts"]}; flex-shrink: 0; margin-top: 1px;">{ic(I["repeat"],14,1.9)}</span>'
@@ -3028,7 +3032,9 @@ def routinedetail2(T,w=None):
     return (f'<div style="{wd} background: {T["bg"]};">{head}'
             f'<div style="padding: 16px; display: flex; flex-direction: column; gap: 16px;">'
             + promptlayers(T)
-            + block(T,"KNOWLEDGE",permtable(T,rows=[]))
+            + permmatrix(T,label="PERMISSIONS FOR THIS RUN",routine_grant=True,
+                note="A marked line is granted by this routine and holds only while it runs. "
+                     "Everything else is what <b>collator</b> carries anyway.")
             + block(T,"SCHEDULE",scheduleblock(T))
             + block(T,"OUTPUTS",outputblock(T))
             + block(T,"HISTORY",historyblock(T))
@@ -3038,3 +3044,156 @@ PROXY_ROWS=[("Jira","Read Issues","allow","The three projects you connected",Tru
             ("Jira","Comment","propose","Visible to your team, so it stays your decision",False),
             ("Confluence","Read Pages","allow","The spaces you connected",True)]
 
+
+# ============ PERMISSIONS AS A MATRIX, 2026-09-22 =====================
+# Owner: one line per resource, Read and Write columns, no Allow/Never control in
+# the table — an Edit button on the section instead. DENIAL IS ABSENCE: a resource
+# with nothing in either column is not granted, and the infinite list of things an
+# agent cannot do is never drawn.
+
+RES_GLYPH={"Knowledge":"know","Work":"work","Artifacts":"note","Inbox":"tray",
+           "Jira":"plug","Confluence":"plug"}
+
+def askmark(T):
+    """This verb lands as a request instead of running. The wire's `propose`."""
+    return (f'<span title="Asks you first" style="display: inline-flex; align-items: center; '
+            f'color: {T["ts"]}; vertical-align: -1px;">{ic(I["later"],11,2.1)}</span>')
+
+def provmark(T,label):
+    return (f'<span style="display: inline-flex; align-items: center; gap: 3px; font-size: 10px; '
+            f'font-weight: 600; color: {T["acc"]}; vertical-align: 1px;">{ic(I["check"],10,3)}{label}</span>')
+
+def cell(T,items):
+    """items: list of (text, mono?, ask?, prov). Empty renders an em dash."""
+    if not items:
+        return f'<span style="font-size: 12.5px; color: {T["tt"]};">&mdash;</span>'
+    out=[]
+    for txt,mono_,ask,prov in items:
+        piece = mono(txt,T["tp"],12) if mono_ else f'<span style="font-size: 12.5px; color: {T["tp"]};">{txt}</span>'
+        if ask:  piece += " " + askmark(T)
+        if prov: piece += " " + provmark(T,prov)
+        out.append(piece)
+    sep=f'<span style="color: {T["tt"]}; opacity: 0.6;"> &middot; </span>'
+    return sep.join(out)
+
+def resrow(T,*,res,read,write,proxied=False,last=False):
+    g=(f'<span style="display: flex; color: {T["ag"] if proxied else T["ts"]};">'
+       f'{ic(I[RES_GLYPH[res]],14,1.8)}</span>')
+    nm=(f'<span style="display: inline-flex; align-items: center; gap: 7px;">{g}'
+        f'<span style="font-size: 12.5px; font-weight: 600; color: {T["tp"]};">{res}</span></span>')
+    return (f'<div style="display: grid; grid-template-columns: 148px minmax(0,1fr) minmax(0,1.15fr); '
+            f'align-items: baseline; gap: 16px; padding: 9px 0; {bd_(T,last)}">'
+            f'{nm}<div>{cell(T,read)}</div><div>{cell(T,write)}</div></div>')
+
+def permmatrix(T,*,proxied=True,label="PERMISSIONS",note=None,routine_grant=False):
+    kread=[("Areas/Ops",True,False,None),("Areas/Finance",True,False,"Needs You #311")]
+    kwrite=[]
+    if routine_grant:
+        kread=kread+[("Areas/Vendors",True,False,"Morning Digest only")]
+        kwrite=[("Journal/Digest/",True,False,"Morning Digest only")]
+    rows=(resrow(T,res="Knowledge",read=kread,write=kwrite)
+          + resrow(T,res="Work",read=[("All tasks",False,False,None)],
+            write=[("Update",False,False,None),("Comment",False,False,None),("Dispatch",False,True,None)])
+          + resrow(T,res="Artifacts",read=[("All",False,False,None)],
+            write=[("Comment",False,False,None)],last=not proxied)
+          + resrow(T,res="Inbox",read=[],write=[("Capture",False,False,None)],last=not proxied))
+    if proxied:
+        rows+=(resrow(T,res="Jira",read=[("3 projects",False,False,None)],
+                 write=[("Comment",False,True,None)],proxied=True)
+               + resrow(T,res="Confluence",read=[("2 spaces",False,False,None)],
+                 write=[],proxied=True,last=True))
+    leg=(f'<div style="display: flex; align-items: center; gap: 18px; margin-top: 11px; padding-top: 10px; '
+         f'border-top: 1px solid {T["border"]};">'
+         f'<span style="display: inline-flex; align-items: center; gap: 6px;">{askmark(T)}'
+         f'<span style="font-size: 11.5px; color: {T["ts"]};">Asks you first</span></span>'
+         + (f'<span style="display: inline-flex; align-items: center; gap: 6px;">'
+            f'<span style="display: flex; color: {T["ag"]};">{ic(I["plug"],12,1.9)}</span>'
+            f'<span style="font-size: 11.5px; color: {T["ts"]};">Reached through Metistry</span></span>' if proxied else "")
+         + f'<span style="flex-grow: 1;"></span>'
+           f'<span style="font-size: 11.5px; color: {T["ts"]};">Anything not listed is not granted.</span></div>')
+    head=(f'<div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">'
+          f'<span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["tt"]};">{label}</span>'
+          f'<span style="flex-grow: 1;"></span>{btn(T,"Edit","secondary",I["pencil"])}</div>')
+    cols=(f'<div style="display: grid; grid-template-columns: 148px minmax(0,1fr) minmax(0,1.15fr); gap: 16px; '
+          f'padding-bottom: 7px; border-bottom: 1px solid {T["border"]}; font-size: 10.5px; font-weight: 700; '
+          f'letter-spacing: 0.07em; color: {T["tt"]};">'
+          f'<span>RESOURCE</span><span>READ</span><span>WRITE</span></div>')
+    nt_=(f'<div style="font-size: 11.5px; color: {T["ts"]}; line-height: 1.5; margin-top: 9px;">{note}</div>') if note else ""
+    return (head + f'<div style="background: {T["sunken"]}; border-radius: 10px; padding: 14px 16px;">'
+            f'{cols}<div style="margin-top: 3px;">{rows}</div>{leg}{nt_}</div>')
+
+# ---------- a horizontal timeline, replacing the week grid --------------------
+# The week x hour grid was seven rows to say one thing. One axis says it, and the
+# agent-versus-built-in distinction leaves with it: the Agent column below already
+# carries that, so the picture does not need to.
+TL=[("Mon",[("6:02",1),("7:00",1),("18:00",0),("22:00",0)]),
+    ("Tue",[("6:02",1),("7:00",1),("9:00",1),("18:00",0),("22:00",0)]),
+    ("Wed",[("6:02",1),("7:00",1),("18:00",0),("22:00",0)]),
+    ("Thu",[("6:02",1),("7:00",1),("18:00",0),("22:00",0)]),
+    ("Fri",[("6:02",1),("7:00",1),("18:00",0),("22:00",0)]),
+    ("Sat",[("22:00",0)]),
+    ("Sun",[("18:00",0),("22:00",0)])]
+
+def timeline(T,*,w=None):
+    total=7*24.0
+    marks=""
+    for di,(day,runs) in enumerate(TL):
+        for hhmm,_ in runs:
+            h,m=hhmm.split(":")
+            pos=((di*24)+int(h)+int(m)/60.0)/total*100
+            marks+=(f'<span style="position: absolute; left: {pos:.3f}%; top: 8px; width: 3px; height: 22px; '
+                    f'border-radius: 2px; background: {T["ag"]}; transform: translateX(-1.5px);"></span>')
+    ticks=""
+    for di,(day,_) in enumerate(TL):
+        pos=(di*24)/total*100
+        ticks+=(f'<span style="position: absolute; left: {pos:.3f}%; top: 0; bottom: 0; width: 1px; '
+                f'background: {T["bs"]};"></span>')
+        ticks+=(f'<span style="position: absolute; left: calc({pos:.3f}% + 6px); top: 36px; font-size: 10.5px; '
+                f'color: {T["ts"]};">{day}</span>')
+    # noon guides, recessive
+    for di in range(7):
+        pos=((di*24)+12)/total*100
+        ticks+=(f'<span style="position: absolute; left: {pos:.3f}%; top: 8px; height: 22px; width: 1px; '
+                f'background: {T["border"]}; opacity: 0.55;"></span>')
+    wd=f"width: {w}px;" if w else ""
+    return (f'<div style="{wd} background: {T["sunken"]}; border-radius: 10px; padding: 14px 16px;">'
+            f'<div style="display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px;">'
+            f'<span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["tt"]};">THIS WEEK</span>'
+            f'<span style="flex-grow: 1;"></span>'
+            + seg3(T,["Day","Week","Month"],"Week") + '</div>'
+            f'<div style="position: relative; height: 54px;">{ticks}{marks}</div>'
+            f'<div style="font-size: 11.5px; color: {T["ts"]}; line-height: 1.5; margin-top: 8px; '
+            f'padding-top: 9px; border-top: 1px solid {T["border"]};">Every mark is one run. The cluster is the '
+            f'point: <b>everything runs before 7 AM or after 6 PM</b>, and the working day is empty. The faint '
+            f'line inside each day is noon.</div></div>')
+
+# ---------- Resources: where a connection is defined -------------------------
+def connrow(T,*,name,kind,tools,used,state="ok",last=False):
+    dot=(f'<span style="width: 8px; height: 8px; border-radius: 50%; background: {T["ok"]};"></span>'
+         if state=="ok" else
+         f'<span style="width: 8px; height: 8px; border-radius: 50%; background: {T["deg"]};"></span>')
+    return (f'<div style="display: grid; grid-template-columns: 9px 172px 150px 96px minmax(0,1fr) 16px; '
+            f'align-items: center; gap: 14px; padding: 11px 16px; {bd_(T,last)}">{dot}'
+            f'<span style="display: inline-flex; align-items: center; gap: 8px;">'
+            f'<span style="display: flex; color: {T["ag"]};">{ic(I["plug"],14,1.8)}</span>'
+            f'<span style="font-size: 13px; font-weight: 500; color: {T["tp"]};">{name}</span></span>'
+            f'<span style="font-size: 12px; color: {T["ts"]};">{kind}</span>'
+            f'<span style="font-size: 12px; color: {T["ts"]};">{tools}</span>'
+            f'<span style="font-size: 12px; color: {T["ts"]};">{used}</span>'
+            f'<span style="display: flex; color: {T["tt"]};">{ic(I["chevr"],13,2.2)}</span></div>')
+
+def resourcelist(T,w=None):
+    wd=f"width: {w}px;" if w else "flex-grow: 1; min-width: 0;"
+    head=(f'<div style="display: flex; align-items: center; gap: 10px; padding: 14px 16px 4px;">'
+          f'<span style="font-size: 17px; font-weight: 600; color: {T["tp"]}; flex-grow: 1;">Resources</span>'
+          f'{btn(T,"Connect A Server","secondary",I["plus"])}</div>'
+          f'<div style="display: grid; grid-template-columns: 9px 172px 150px 96px minmax(0,1fr) 16px; gap: 14px; '
+          f'padding: 6px 16px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em; color: {T["tt"]};">'
+          f'<span></span><span>SERVER</span><span>KIND</span><span>TOOLS</span><span>GRANTED TO</span><span></span></div>')
+    rows=(connrow(T,name="Jira",kind="MCP &middot; work network",tools="14 tools",
+            used="collator &middot; drey-dev &middot; 1 routine")
+          + connrow(T,name="Confluence",kind="MCP &middot; work network",tools="6 tools",used="collator")
+          + connrow(T,name="Linear",kind="MCP &middot; hosted",tools="9 tools",used="Nobody yet")
+          + connrow(T,name="Sentry",kind="MCP &middot; hosted",tools="4 tools",
+            used="Token expired 2 days ago",state="deg",last=True))
+    return f'<div style="{wd} background: {T["bg"]};">{head}{rows}</div>'

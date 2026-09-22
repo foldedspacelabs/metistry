@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// `metistry-eval` — validate | tools | run | report (PoC-18, §3.6).
+// `metistry-eval` — validate | tools | run | report (PoC-18, §3.6), and
+// `intents` (PoC-20 phase 1, docs/poc/poc20-intent-tier/README.md).
 //
 // Hand-rolled argument parsing, matching `packages/cli`: a handful of
 // subcommands does not justify a dependency this project would maintain for
@@ -14,7 +15,9 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { CHOICE_SERVERS, INTENT_OPTIONS, INTENT_PHRASINGS, codesFor, type ChoiceServer, type IntentPhrasing } from "@foldedspacelabs/metistry-core";
 import { axisCounts, loadFixturesFromText, type Axis, type Fixture, AXES } from "./fixtures.js";
+import { buildIntentReport, liveScorer, loadIntentFixtures, renderIntentReport, runIntentEval, type IntentFixture } from "./intents.js";
 import { judgeFromEnv, JudgeFamilyError, JudgeNotConfiguredError } from "./judge.js";
 import { buildReport, renderReport } from "./report.js";
 import { Candidate, EFFORTS, HARNESS_VERSION, parseRunRecords, runId, serialiseRecord, RunMeta, type RunRecord } from "./record.js";
@@ -29,7 +32,7 @@ export interface ParsedArgs {
 }
 
 /** Flags that never take a value, so `metistry-eval run --json fixtures.jsonl` keeps its file. */
-export const BOOLEAN_FLAGS = new Set(["json", "help", "include-examples", "dry-run", "strict"]);
+export const BOOLEAN_FLAGS = new Set(["json", "help", "include-examples", "dry-run", "strict", "fit", "phrasings", "no-warm-up"]);
 /** Flags that may appear more than once. */
 export const REPEATED_FLAGS = new Set(["axis"]);
 
@@ -65,6 +68,7 @@ const USAGE = `metistry-eval — the PoC-18 bake-off harness
   tools [--out <file>]            print production's mcp-brain tools/list, the definitions a run presents
   run <fixtures...> --engine <m>  run every fixture against one candidate, appending to a run file
   report <runs...> [--bar <name>] pass rate per axis, agreement with the bar, and the promotion line
+  intents <file...>               score YOUR labelled messages through the intent tier, and FIT the threshold
 
 run flags
   --engine <module>      a JS/TS module exporting createEngine(ctx) => EngineFactory   (required)
@@ -85,6 +89,19 @@ run flags
 judge (environment; a rubric fixture with no judge FAILS the run)
   METISTRY_EVAL_JUDGE_MODEL, METISTRY_EVAL_JUDGE_BASE_URL,
   METISTRY_EVAL_JUDGE_API_KEY, METISTRY_EVAL_JUDGE_FAMILY
+
+intents flags  (PoC-20 phase 1 — docs/poc/poc20-intent-tier/README.md)
+  --base-url <url>       a local server's API root, e.g. http://127.0.0.1:11434/v1  (required)
+  --model <id>           the model id as that server knows it                       (required)
+  --server <name>        ${CHOICE_SERVERS.join(" | ")} — decides the request shape
+  --api-key-env <VAR>    an environment variable holding a bearer, where the server wants one
+  --phrasings            try every question wording and keep the best on YOUR fixtures
+  --phrasing <name>      just one: ${INTENT_PHRASINGS.join(" | ")}
+  --fit                  print the threshold to paste into rules.yaml (it is an OUTPUT, never an input)
+  --min-coverage <0..1>  additionally require this much coverage of the fit
+  --top-logprobs <n>     default: one per intent; the server's own ceiling still applies
+  --no-warm-up           do not discard the first call per phrasing (cold start then lands in p95)
+  --out <file>           write the report instead of printing it
 `;
 
 function str(flags: Record<string, string | true>, name: string): string | undefined {
@@ -278,6 +295,88 @@ async function cmdReport(args: ParsedArgs): Promise<number> {
   return 0;
 }
 
+/**
+ * `metistry-eval intents` — score the owner's own labelled messages through
+ * the intent tier and FIT the threshold (PoC-20 phase 1, research §4.4).
+ *
+ * It refuses an empty fixture file by name rather than reporting 0/0 as a
+ * pass. The example this repo ships IS empty, and that is the point: C11
+ * forbids a Claude-authored label as an expected answer, so the harness can
+ * ship the format and never the data.
+ */
+async function cmdIntents(args: ParsedArgs): Promise<number> {
+  if (args.positional.length === 0) throw new Error("intents needs at least one fixture file — see docs/poc/poc20-intent-tier/README.md for the format");
+  const fixtures: IntentFixture[] = [];
+  const issues: string[] = [];
+  for (const path of args.positional) {
+    const loaded = loadIntentFixtures(readFileSync(resolve(path), "utf8"), path);
+    fixtures.push(...loaded.fixtures);
+    for (const i of loaded.issues) issues.push(`${i.source}:${i.line}: ${i.message}`);
+  }
+  for (const issue of issues) process.stderr.write(`${issue}\n`);
+  if (issues.length > 0) throw new Error(`${issues.length} unreadable fixture line(s) — fix them before measuring anything`);
+  if (fixtures.length === 0) {
+    throw new Error(
+      `no fixtures in ${args.positional.join(", ")}. The fixtures are YOURS: one JSON object per line, ` +
+        `{"text": "<a message you actually wrote>", "intent": "<one of this build's intents>"}. ` +
+        `Claude may not write the labels (C11), so the shipped example is empty on purpose — docs/poc/poc20-intent-tier/README.md`,
+    );
+  }
+
+  const serverFlag = str(args.flags, "server");
+  if (serverFlag !== undefined && !(CHOICE_SERVERS as readonly string[]).includes(serverFlag)) {
+    throw new Error(`--server ${serverFlag} is not one of ${CHOICE_SERVERS.join(", ")}`);
+  }
+  const phrasingFlag = str(args.flags, "phrasing");
+  if (phrasingFlag !== undefined && !(INTENT_PHRASINGS as readonly string[]).includes(phrasingFlag)) {
+    throw new Error(`--phrasing ${phrasingFlag} is not one of ${INTENT_PHRASINGS.join(", ")}`);
+  }
+  const phrasings: IntentPhrasing[] =
+    args.flags.phrasings === true ? [...INTENT_PHRASINGS] : phrasingFlag !== undefined ? [phrasingFlag as IntentPhrasing] : [INTENT_PHRASINGS[0]];
+
+  const apiKeyEnv = str(args.flags, "api-key-env");
+  const bearer = apiKeyEnv ? process.env[apiKeyEnv] : undefined;
+  if (apiKeyEnv && !bearer) throw new Error(`--api-key-env ${apiKeyEnv} is not set in this process's environment`);
+  const topLogprobs = str(args.flags, "top-logprobs");
+  const minCoverage = str(args.flags, "min-coverage");
+
+  const codes = codesFor(INTENT_OPTIONS.length);
+  const score = liveScorer({
+    baseUrl: required(args.flags, "base-url"),
+    model: required(args.flags, "model"),
+    options: INTENT_OPTIONS,
+    codes,
+    ...(serverFlag !== undefined ? { server: serverFlag as ChoiceServer } : {}),
+    ...(bearer ? { bearer } : {}),
+    ...(topLogprobs !== undefined ? { topLogprobs: Number.parseInt(topLogprobs, 10) } : {}),
+  });
+
+  const result = await runIntentEval({
+    fixtures,
+    score,
+    phrasings,
+    warmUp: args.flags["no-warm-up"] !== true,
+    onRow: (row) => {
+      const mark = row.predicted === null ? "----" : row.predicted === row.fixture.intent ? " ok " : "MISS";
+      const what = row.guarded ?? row.error ?? `${row.predicted} conf=${row.confidence.toFixed(3)} alpha=${row.alpha.toFixed(3)}`;
+      process.stdout.write(`${String(Math.round(row.latency_ms)).padStart(6)} ms  ${mark}  ${row.phrasing.padEnd(10)} ${what}\n`);
+    },
+  });
+
+  const report = buildIntentReport(result, minCoverage !== undefined ? { minCoverage: Number.parseFloat(minCoverage) } : {});
+  const body = args.flags.json === true ? `${JSON.stringify(report, null, 2)}\n` : `\n${renderIntentReport(report)}\n`;
+  const out = str(args.flags, "out");
+  if (out) {
+    mkdirSync(dirname(resolve(out)), { recursive: true });
+    writeFileSync(resolve(out), body);
+    process.stdout.write(`report → ${out}\n`);
+  } else process.stdout.write(body);
+  // `--fit` asks for a number. An exit code of 1 when no threshold meets the
+  // bar is the honest answer to "give me the line to paste".
+  if (args.flags.fit === true && report.by_phrasing.every((p) => p.fit.fitted === null)) return 1;
+  return 0;
+}
+
 export async function main(argv: readonly string[]): Promise<number> {
   const args = parseArgs(argv);
   if (args.flags.help === true || args.command === undefined || args.command === "help") {
@@ -294,6 +393,8 @@ export async function main(argv: readonly string[]): Promise<number> {
         return await cmdRun(args);
       case "report":
         return await cmdReport(args);
+      case "intents":
+        return await cmdIntents(args);
       default:
         process.stderr.write(`unknown command: ${args.command}\n\n${USAGE}`);
         return 2;

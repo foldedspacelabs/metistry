@@ -2171,3 +2171,206 @@ def routinerows(T,*,last_absent=False):
             detail="did not run — no reconciler bridge, so there was nothing to read and nowhere to write",
             when="2h",kind="system",tint=T["abs"],last=True)
     return rows
+
+
+# ===================== AGENTS — the credential surface ===================
+# Round E, screen 7. The only screen where grants and autonomy move, so every
+# component here is built around making the owner's own change legible to them.
+
+def presdot(T,state):
+    """Five computed presence states, TWO colours. Tint carries `something is
+    wrong` and nothing else, and working/queued/idle are not wrong."""
+    if state=="working":  return f'<span style="width: 9px; height: 9px; border-radius: 50%; background: {T["tp"]}; flex-shrink: 0;"></span>'
+    if state=="queued":   return (f'<span style="width: 9px; height: 9px; border-radius: 50%; box-sizing: border-box; '
+                                  f'border: 2.5px solid {T["tp"]}; flex-shrink: 0;"></span>')
+    if state in ("interrupted","over-cap"):
+        return f'<span style="width: 9px; height: 9px; border-radius: 50%; background: {T["deg"]}; flex-shrink: 0;"></span>'
+    # `bs` is a DIVIDING token and fails 3:1 against every ground (1.75:1 on bg) — a mark that carries meaning takes an ink
+    return f'<span style="width: 9px; height: 9px; border-radius: 50%; box-sizing: border-box; border: 1.5px solid {T["tt"]}; flex-shrink: 0;"></span>'
+
+def credrow(T,*,id_,role,external=False,scope,spend,seen,state="idle",note=None,open_=False,last=False,ceiling=None):
+    bd="" if (last or open_) else f'border-bottom: 1px solid {T["border"]};'
+    chev=ic(I["chevd"] if open_ else I["chevr"],13,2.2)
+    ext=trustmark(T,"external") if external else ""
+    nt_=""
+    if note:
+        nt_=(f'<div style="font-size: 11.5px; color: {T["deg"]}; margin-top: 3px;">{note}</div>')
+    cl=""
+    if ceiling:
+        cl=(f'<div style="display: flex; align-items: center; gap: 7px; margin-top: 4px;">'
+            f'<span style="display: flex; color: {T["ts"]};">{ic(I["lock"],12,1.9)}</span>'
+            f'<span style="font-size: 11.5px; color: {T["ts"]};">{ceiling}</span></div>')
+    return (f'<div style="display: grid; grid-template-columns: 9px minmax(0,1fr) 150px 116px 64px 54px 16px; '
+            f'align-items: center; gap: 12px; padding: 12px 16px; {bd}">'
+            f'{presdot(T,state)}'
+            f'<div style="min-width: 0;"><div style="display: flex; align-items: center; gap: 8px;">'
+            f'{mono(id_,T["tp"],13)}{ext}</div>{nt_}{cl}</div>'
+            f'<span style="font-size: 12px; color: {T["ts"]};">{role}</span>'
+            f'<span style="font-size: 12px; color: {T["ts"]};">{scope}</span>'
+            f'<span style="font-size: 12px; color: {T["tp"]}; text-align: right; font-variant-numeric: tabular-nums;">{spend}</span>'
+            f'<span style="font-size: 12px; color: {T["ts"]}; text-align: right;">{seen}</span>'
+            f'<span style="display: flex; color: {T["tt"]};">{chev}</span></div>')
+
+def seg3(T,steps,active):
+    out=""
+    for i,s in enumerate(steps):
+        on=(s==active)
+        out+=(f'<span style="padding: 4px 12px; font-size: 12px; font-weight: {600 if on else 500}; '
+              f'background: {T["surface"] if on else "transparent"}; color: {T["tp"] if on else T["ts"]}; '
+              + ("" if i==0 else f'border-left: 1px solid {T["border"]};') + '">'+s+'</span>')
+    return (f'<span style="display: inline-flex; border: 1px solid {T["bc"]}; border-radius: 8px; overflow: hidden; '
+            f'background: {T["sunken"]};">{out}</span>')
+
+def modepip(T,mode,dim=False):
+    """The weight channel, not colour. A configuration is not a moral position,
+    and red is spoken for by `failed`."""
+    ink=T["tt"] if dim else T["tp"]
+    if mode=="allow":
+        st=f'background: {ink}; border: 1px solid {ink};'
+    elif mode=="propose":
+        st=f'background: transparent; border: 1.5px solid {ink};'
+    else:
+        st=f'background: transparent; border: 1px dashed {T["tt"]};'   # not `bs`: a signifying mark needs an ink (1.6:1 on sunken)
+    lab=T["tt"] if (dim or mode=="deny") else T["tp"]
+    return (f'<span style="display: inline-flex; align-items: center; gap: 7px;">'
+            f'<span style="width: 11px; height: 11px; border-radius: 3px; box-sizing: border-box; {st}"></span>'
+            f'<span style="font-size: 12.5px; font-weight: {600 if mode=="allow" and not dim else 500}; '
+            f'color: {lab};">{mode}</span></span>')
+
+def autorow(T,kind,effective,*,reason=None,stored=None,last=False):
+    """The EFFECTIVE mode is the value. Two different reasons a cell is not
+    `allow` — defaulted and clamped — and they must not read alike."""
+    bd="" if last else f'border-bottom: 1px solid {T["border"]};'
+    rz=""
+    if stored:
+        rz=(f'<span style="display: inline-flex; align-items: center; gap: 7px; font-size: 11.5px; color: {T["ts"]};">'
+            f'<span style="opacity: 0.6;">you set</span>{modepip(T,stored,dim=True)}'
+            f'<span style="opacity: 0.45;">·</span><span>the level is the ceiling</span></span>')
+    elif reason:
+        rz=f'<span style="font-size: 11.5px; color: {T["ts"]};">{reason}</span>'
+    return (f'<div style="display: grid; grid-template-columns: 116px 104px minmax(0,1fr); align-items: center; '
+            f'gap: 14px; padding: 9px 0; {bd}">'
+            f'{mono(kind,T["tp"],12.5)}{modepip(T,effective)}{rz}</div>')
+
+AUTO=[("dispatch","propose","off-machine is a human decision by default",None),
+      ("task_update","allow",None,None),
+      ("comment","propose",None,"allow"),
+      ("capture","allow",None,None)]
+
+def autoblock(T,level="act_within_scope"):
+    rows="".join(autorow(T,k,e,reason=r,stored=s,last=(i==len(AUTO)-1)) for i,(k,e,r,s) in enumerate(AUTO))
+    fields="".join(f'<div style="display: flex; align-items: baseline; gap: 10px; padding: 5px 0;">'
+                   f'{mono(k,T["ts"],11.5)}<span style="font-size: 12px; color: {T["tp"]};">{v}</span></div>'
+                   for k,v in [("may_dispatch_to","devin, cursor"),("accept_from","metis"),("max_open_bundles","3")])
+    return (f'<div style="background: {T["sunken"]}; border-radius: 10px; padding: 14px 16px;">'
+            f'<div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">'
+            f'<span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["tt"]};">LEVEL — A CEILING</span>'
+            f'{seg3(T,["observe","propose","act_within_scope"],level)}</div>'
+            f'<div style="margin-top: 12px;">{rows}</div>'
+            f'<div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid {T["border"]};">{fields}</div></div>')
+
+def arealine(T,p,*,approved=None,last=False):
+    tag=""
+    if approved:
+        tag=(f'<span style="display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 600; '
+             f'color: {T["acc"]};">{ic(I["check"],11,2.8)}approved in Needs You · #{approved}</span>')
+    return (f'<div style="display: flex; align-items: center; gap: 10px; padding: 5px 0;'
+            + ("" if last else f' border-bottom: 1px solid {T["border"]};') + '">'
+            + mono(p,T["tp"],12) + tag
+            + f'<span style="flex-grow: 1;"></span>'
+              f'<span style="display: flex; color: {T["tt"]};">{ic(I["x"],12,2)}</span></div>')
+
+def scopeblock(T,*,crew=False):
+    if crew:
+        return (f'<div style="background: {T["sunken"]}; border-radius: 10px; padding: 14px 16px;">'
+                + scopeline(T,who="a crew",access="folders: Areas/Ops",extras="no queries · 2 projects",
+                            label="WHAT IT HOLDS NOW")
+                + f'<div style="display: flex; gap: 9px; align-items: flex-start; background: {T["absq"]}; '
+                  f'border-radius: 9px; padding: 10px 12px; margin-top: 12px;">'
+                  f'<span style="display: flex; color: {T["ts"]}; flex-shrink: 0; margin-top: 1px;">{ic(I["lock"],14,1.9)}</span>'
+                  f'<span style="font-size: 11.5px; color: {T["tp"]}; line-height: 1.55;">This scope is '
+                  f'<b>configuration, not a grant</b>: it is re-synced from '
+                  + mono("agents/ops/research-crew.md",T["tp"],11.5) +
+                  f' on every crew sync, so a control here would be undone at the next one. A crew also cannot ask '
+                  f'for access — {mono("request_access",T["ts"],11)} is in {mono("CREW_NEVER_TOOLS",T["ts"],11)}.'
+                  f'</span></div></div>')
+    return (f'<div style="background: {T["sunken"]}; border-radius: 10px; padding: 14px 16px;">'
+            + scopeline(T,who="the instance assistant",access="folders: 4 areas",extras="no queries · every project")
+            + f'<div style="display: flex; align-items: center; gap: 12px; margin-top: 13px;">'
+              f'<span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["tt"]};">TIER</span>'
+              f'{seg3(T,["none","titles","folders"],"folders")}</div>'
+            + f'<div style="margin-top: 12px;">'
+              f'<div style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["tt"]}; '
+              f'margin-bottom: 5px;">AREAS</div>'
+            + arealine(T,"Areas/Projects") + arealine(T,"Areas/Ops")
+            + arealine(T,"Areas/Personal") + arealine(T,"Areas/Finance",approved="311",last=True)
+            + '</div>'
+            + f'<div style="display: flex; gap: 22px; margin-top: 12px; padding-top: 11px; '
+              f'border-top: 1px solid {T["border"]};">'
+              f'<div><div style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["tt"]};">PROJECTS</div>'
+              f'<div style="font-size: 12px; color: {T["tp"]}; margin-top: 4px;">every project</div></div>'
+              f'<div><div style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["tt"]};">QUERIES</div>'
+              f'<div style="font-size: 12px; color: {T["tp"]}; margin-top: 4px;">off — a separate axis; '
+              f'approving an area never touches it</div></div></div></div>')
+
+def doingblock(T):
+    def line(g,txt,tone=None,last=False):
+        return (f'<div style="display: flex; align-items: flex-start; gap: 9px; padding: 7px 0;'
+                + ("" if last else f' border-bottom: 1px solid {T["border"]};') + '">'
+                f'<span style="display: flex; flex-shrink: 0; color: {tone or T["tt"]}; margin-top: 1px;">{ic(g,14,1.8)}</span>'
+                f'<span style="font-size: 12px; color: {T["tp"]}; line-height: 1.5;">{txt}</span></div>')
+    return (f'<div style="background: {T["sunken"]}; border-radius: 10px; padding: 14px 16px;">'
+            f'<div style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["tt"]}; '
+            f'margin-bottom: 4px;">WHAT IT IS DOING</div>'
+            + line(I["work"],'Holding <b>#418 Migrate the settings pane to tokens</b> — lease until 9:40 AM')
+            + line(I["clock"],'The lease on <b>#402</b> expired 20 minutes ago and the claim is still held',tone=T["deg"])
+            + line(I["review"],'1 review bundle waiting, none claimed')
+            + line(I["gauge"],'<b>$0.31</b> today',last=True) + '</div>')
+
+def openrow(T,w=None):
+    wd=f"width: {w}px;" if w else ""
+    return (f'<div style="{wd} background: {T["surface"]}; border-top: 1px solid {T["border"]}; '
+            f'border-bottom: 1px solid {T["border"]}; padding: 4px 16px 16px 37px; box-sizing: border-box;">'
+            f'<div style="display: flex; flex-direction: column; gap: 12px;">'
+            f'{scopeblock(T)}{autoblock(T)}{doingblock(T)}'
+            f'<div style="display: flex; align-items: center; gap: 9px;">'
+            f'{btn(T,"Save","affirm",I["check"])}{btn(T,"Revert","ghost")}'
+            f'<span style="flex-grow: 1;"></span>{btn(T,"Revoke","dest",I["x"])}</div></div></div>')
+
+def revokedgroup(T):
+    rows="".join(f'<div style="display: grid; grid-template-columns: 9px minmax(0,1fr) 150px 1fr; align-items: center; '
+                 f'gap: 12px; padding: 9px 16px 9px 16px;'
+                 + ("" if last else f' border-bottom: 1px solid {T["border"]};') + '">'
+                 f'<span style="width: 9px; height: 9px; border-radius: 50%; box-sizing: border-box; '
+                 f'border: 1.5px dashed {T["abs"]};"></span>'
+                 + mono(i,T["ts"],12.5)
+                 + f'<span style="font-size: 12px; color: {T["abs"]};">revoked {when}</span>'
+                   f'<span style="font-size: 11.5px; color: {T["ts"]};">{what}</span></div>'
+        for i,when,what,last in [
+          ("old-runner","4 Sep","2 pending asks settled · 1 approved area removed with it",False),
+          ("scratch-bot","22 Aug","nothing pending, nothing granted",True)])
+    return (f'<div style="border-top: 1px solid {T["border"]};">'
+            f'<div style="display: flex; align-items: center; gap: 8px; padding: 10px 16px;">'
+            f'<span style="display: flex; color: {T["tt"]};">{ic(I["chevd"],13,2.2)}</span>'
+            f'<span style="font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: {T["tt"]};">REVOKED</span>'
+            f'<span style="font-size: 11px; color: {T["tt"]};">2</span></div>{rows}</div>')
+
+def roster(T,w=None):
+    wd=f"width: {w}px;" if w else "flex-grow: 1; min-width: 0;"
+    head=(f'<div style="display: flex; align-items: center; gap: 10px; padding: 14px 16px;">'
+          f'<span style="font-size: 17px; font-weight: 600; color: {T["tp"]}; flex-grow: 1;">Agents</span>'
+          f'{btn(T,"New credential","secondary",I["plus"])}</div>'
+          f'<div style="display: grid; grid-template-columns: 9px minmax(0,1fr) 150px 116px 64px 54px 16px; gap: 12px; '
+          f'padding: 0 16px 7px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em; color: {T["tt"]};">'
+          f'<span></span><span>CREDENTIAL</span><span>ROLE</span><span>SEES</span>'
+          f'<span style="text-align: right;">TODAY</span><span style="text-align: right;">SEEN</span><span></span></div>')
+    rows=(credrow(T,id_="metis",role="the instance assistant",scope="folders · 4",spend="$0.31",seen="now",
+            state="working",open_=True)
+          + openrow(T)
+          + credrow(T,id_="drey-dev",role="an agent",scope="folders · 1",spend="$0.04",seen="12m",state="queued",
+              note="1 bundle waiting")
+          + credrow(T,id_="taskuary",role="an agent",external=True,scope="titles",spend="—",seen="41m",state="idle",
+              ceiling="asked twice for <b>Areas/Finance</b> · declined both · it can no longer ask")
+          + credrow(T,id_="research-crew",role="a crew",scope="folders · 2",spend="$1.90",seen="3h",
+              state="interrupted",note="a lease expired 20m ago and the claim is still held",last=True))
+    return (f'<div style="{wd} background: {T["bg"]};">{head}{rows}{revokedgroup(T)}</div>')

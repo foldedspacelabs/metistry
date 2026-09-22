@@ -31,6 +31,7 @@ const REQUIRED = [
   "reply_feedback_summary",
   "spend", // the budget's read path (invariant 3) — the engine runs it before every billable call
   "cache_report", // OPEN-6's measurement — `metistry compute cache-report` reads it through GET /api/q/cache_report, not a route of its own (invariant 10)
+  "route_report", // PoC-20 phase 0's baseline — `metistry compute route-report` reads it the same way, and it is counts only so the generic door is the whole answer
   "board",
   "board_projects",
   "rooms",
@@ -190,6 +191,9 @@ describe("seed queries", () => {
   });
 });
 
+/** The fall-through the router writes: kind `model`, `routed_by: "rule"`, the default tier — PoC-20 phase 0's population. */
+const fell = (text: string): Record<string, string> => ({ kind: "model", tier: "default", model: "haiku", effort: "medium", text, routed_by: "rule" });
+
 const hasDb = !!process.env.METISTRY_DB_PASSWORD;
 
 describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
@@ -325,6 +329,114 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
     // the window is a window: nothing outside it
     await pool.query(`UPDATE runs SET ts = now() - interval '30 days' WHERE component = $1`, [tag]);
     expect((await store.run("cache_report", { days: 7 })).rows.filter((r) => String(r.provider).startsWith(tag))).toHaveLength(0);
+  });
+
+  // PoC-20 phase 0's baseline
+  // (docs/research/2026-09-21-intent-classification-tier.md §5.2). Run in a
+  // SCHEMA OF ITS OWN, which no other query here needs: `route_report` is an
+  // aggregate over the whole of `inbound_messages` with no tag column to
+  // filter on, and vitest runs this file alongside `server.integration`,
+  // which POSTs real messages through a real router into the same scratch
+  // database. A per-test schema on a dedicated connection makes the numbers
+  // below exact instead of "at least" — and it takes no lock any other
+  // session can wait on, which a `DELETE FROM inbound_messages` would.
+  it("route_report: the four kinds derived from three, `unrouted` is not a fall-through, and no message body in any row", async () => {
+    const schema = `rr_${Date.now()}`;
+    const client = await pool.connect();
+    try {
+      await client.query(`CREATE SCHEMA ${schema}`);
+      await client.query(`CREATE TABLE ${schema}.inbound_messages (LIKE public.inbound_messages INCLUDING ALL)`);
+      await client.query(`SET search_path TO ${schema}, public`);
+      const isolated = new QueryStore({ query: (text, values) => client.query(text, values) });
+      await isolated.loadDir(SEED_DIR);
+
+      // Empty first, because "no rows" is the reading a fresh install gets
+      // and because it is where the zero rows are visible: every kind and
+      // every length bucket is a row at 0, never an absence (§4.3: "a
+      // never-firing tier must be visible … a row, not a silence").
+      const empty = (await isolated.run("route_report", { days: 30 })).rows;
+      expect(empty.filter((r) => r.row_kind === "kind").map((r) => r.label)).toEqual(["note", "fast_path", "override", "default"]);
+      expect(empty.filter((r) => r.row_kind === "length").map((r) => r.label)).toEqual(["<=5 words", "6-15 words", "16-40 words", ">40 words"]);
+      for (const r of empty) expect(Number(r.n), String(r.label)).toBe(0);
+      expect(empty.find((r) => r.row_kind === "total")).toMatchObject({ routed: "0", unrouted: "0", fall_through: "0" });
+      expect(empty.filter((r) => r.row_kind === "tier" || r.row_kind === "rule" || r.row_kind === "first_word")).toHaveLength(0);
+
+      // Exactly the shapes `apps/console/src/router.ts:24-27` writes and
+      // `server.ts:616-621` files — `text` and all, which is why the last
+      // assertion in this test matters.
+      const long = `the ${"quick brown fox ".repeat(15)}end`; // 47 words
+      const medium = `when is the review meeting and who is coming to it and do i need to read anything first before then`; // 21 words
+      const rows: [string, unknown][] = [
+        ["/note buy milk", { kind: "note", text: "buy milk", routed_by: "rule" }],
+        ["/status", { kind: "fast_path", query: "open_work", routed_by: "rule" }],
+        ["/open", { kind: "fast_path", query: "board", routed_by: "rule" }],
+        ["/deep think about the roadmap", { kind: "model", tier: "deep", model: "opus", effort: "high", text: "think about the roadmap", routed_by: "override" }],
+        ["a picked tier from the composer", { kind: "model", tier: "fast", model: "haiku", effort: "low", text: "a picked tier from the composer", routed_by: "override" }],
+        ["what did i do yesterday", fell("what did i do yesterday")],
+        ["what is up", fell("what is up")],
+        ["remind me to call the dentist tomorrow morning before the standup", fell("remind me to call the dentist tomorrow morning before the standup")],
+        ["/todo pick up the parcel", fell("/todo pick up the parcel")],
+        ["matt@example.com asked about it", fell("matt@example.com asked about it")],
+        [medium, fell(medium)],
+        [long, fell(long)],
+      ];
+      for (const [text, route] of rows) {
+        await client.query(`INSERT INTO ${schema}.inbound_messages (thread, text, meta) VALUES ('rr', $1, $2::jsonb)`, [text, JSON.stringify({ route })]);
+      }
+      // The console files this when it loaded no ruleset at all
+      // (`server.ts:616`: `cfg.rules ? … : null`). It is the router saying
+      // NOTHING, and counting it as a fall-through would overstate the one
+      // number this whole PoC turns on.
+      await client.query(`INSERT INTO ${schema}.inbound_messages (thread, text) VALUES ('rr', 'filed with no ruleset loaded')`);
+
+      const got = (await isolated.run("route_report", { days: 1 })).rows;
+      const of = (kind: string): Record<string, number> =>
+        Object.fromEntries(got.filter((r) => r.row_kind === kind).map((r) => [String(r.label), Number(r.n)]));
+
+      expect(got.find((r) => r.row_kind === "total")).toMatchObject({ messages: "13", routed: "12", unrouted: "1", fall_through: "7" });
+      // `override` is kind=model + routed_by=override and `default` is
+      // kind=model + routed_by=rule: the fourth kind does not exist on the
+      // wire, and getting that wrong is the difference between a 58% reading
+      // and a 75% one.
+      expect(of("kind")).toEqual({ note: 1, fast_path: 2, override: 2, default: 7 });
+      expect(Number(got.find((r) => r.row_kind === "kind" && r.label === "default")!.share)).toBeCloseTo(7 / 12, 4);
+      // shares of the ROUTED messages, so they sum to 1 — the unrouted row is
+      // not in any of them
+      expect(got.filter((r) => r.row_kind === "kind").reduce((a, r) => a + Number(r.share), 0)).toBeCloseTo(1, 4);
+
+      // no tier on `note` or `fast_path`: they reach no model, so they name none
+      expect(of("tier")).toEqual({ default: 7, deep: 1, fast: 1 });
+      // a fast_path rule has no name in rules.yaml — the named query it
+      // answers from is its identity
+      expect(of("rule")).toEqual({ open_work: 1, board: 1 });
+
+      expect(of("length")).toEqual({ "<=5 words": 4, "6-15 words": 1, "16-40 words": 1, ">40 words": 1 });
+      for (const r of got.filter((r) => r.row_kind === "length" || r.row_kind === "first_word")) {
+        expect(Number(r.denominator), String(r.label)).toBe(7); // over the FALL-THROUGHS, not the routed set
+      }
+
+      // The fence, which is what makes `expose: generic` honest: one
+      // lower-cased token; a command-shaped one kept, because "he keeps
+      // typing /todo and there is no such command" is the finding; anything
+      // that is not a word or a command — an address here — folded into
+      // `(other)` before it is counted.
+      expect(of("first_word")).toEqual({ what: 2, "(other)": 1, "/todo": 1, remind: 1, the: 1, when: 1 });
+
+      // And the property the whole exposure rests on: not one cell of this
+      // report carries a line the owner typed, `meta.route.text`'s copy of it
+      // included.
+      const cells = JSON.stringify(got);
+      for (const needle of ["buy milk", "dentist", "quick brown fox", "review meeting", "matt@example.com", "roadmap"]) {
+        expect(cells, needle).not.toContain(needle);
+      }
+
+      // the window is a window
+      await client.query(`UPDATE ${schema}.inbound_messages SET ts = now() - interval '45 days'`);
+      expect((await isolated.run("route_report", { days: 7 })).rows.find((r) => r.row_kind === "total")).toMatchObject({ messages: "0" });
+    } finally {
+      await client.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+      client.release();
+    }
   });
 
   it("claude_usage_daily computes cache_hit_rate = cache_read / (cache_read + tokens_in + cache_write) per model-day, null with no cache metrics", async () => {

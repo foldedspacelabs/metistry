@@ -1265,3 +1265,273 @@ export function renderCacheReport(r: CacheReport, ui: Ui = defaultUi()): string 
   lines.push(`${ui.statusIcon(r.verdict.status)} ${ui.wrap(r.verdict.line, { hanging: 2 }).trimStart()}`);
   return lines.join("\n");
 }
+
+// ---- route-report: PoC-20 phase 0's baseline, as one command ------------------
+//
+// `docs/research/2026-09-21-intent-classification-tier.md` §5.2 phase 0 is a
+// measurement and an exit rule, and it could not be run where it was written:
+// *"The owner runs this: it needs the instance's database, which this research
+// did not touch."* This is that command. It reads
+// `seed/queries/route_report.yaml` through the console's generic query door
+// (invariant 3, and invariant 10: an existing door, never a new one), calls no
+// model, dials no provider and writes nothing.
+//
+// ONE source, unlike `cache-report`: there is no second half to join. What the
+// router did is entirely in `inbound_messages.meta.route`, and how the router
+// decides is `rules.yaml`, which the owner reads directly — so everything here
+// is arithmetic over the query's rows and a verdict drawn at one line.
+
+/**
+ * §5.2's exit rule, and the only number in this file that decides anything:
+ *
+ *   *"If fall-through is under ~40 %, stop and write `fast_path` rules
+ *   instead — an extra regex is free, auditable, and self-documenting in the
+ *   command menu."*
+ *
+ * The `~` is the research's own. It is a decision line for a half-day
+ * measurement, not a law: a reading either side of it by a point or two is a
+ * reason to widen `--since`, which is what the verdict says when it lands
+ * there.
+ */
+export const CLASSIFIER_FALL_THROUGH_THRESHOLD = 0.4; // limit: fixed — the research's exit rule, not an install's policy
+
+/**
+ * Below this many ROUTED messages a percentage is noise, and the verdict says
+ * so rather than sounding confident. §5.2 asks for "real messages" and names
+ * no floor; this is the smallest window in which a 40 % line is not decided by
+ * three messages either way.
+ */
+export const MIN_ROUTED_FOR_A_READING = 30; // limit: fixed — a caveat on the reading, never a refusal to report
+
+/** One labelled count from the report, with what its share is taken over already applied. */
+export interface RouteShare {
+  label: string;
+  n: number;
+  /** `n / denominator`, or null where the denominator was 0 — which is not "0 %", it is not a reading */
+  share: number | null;
+  /** what the share is taken over: routed messages for kinds and tiers, fast-path messages for rules, fall-throughs for the rest */
+  denominator: number;
+}
+
+export interface RouteReport {
+  /** the window asked for, in days */
+  since_days: number;
+  /** the query's `as_of` — a cached answer keeps the original (packages/queries) */
+  as_of?: string;
+  totals: {
+    messages: number;
+    /** messages carrying a routing decision at all. The rest are the console filing with no ruleset loaded, and they are NOT fall-throughs */
+    routed: number;
+    unrouted: number;
+    fall_through: number;
+    /** the number §5.2's exit rule is drawn on: fall-throughs over ROUTED messages */
+    fall_through_share: number | null;
+    /** the oldest and newest message in the window — the window that was actually available, which is not always the one asked for */
+    first_message?: string;
+    last_message?: string;
+  };
+  /** `note`, `fast_path`, `override`, `default` — always all four, including the zeroes */
+  kinds: RouteShare[];
+  /** tier names the model routes named; `note` and `fast_path` reach no model and name none */
+  tiers: RouteShare[];
+  /** the named query each firing `fast_path` rule answered from — a rule has no name of its own in `rules.yaml` */
+  rules: RouteShare[];
+  /** fall-throughs by word count: ≤5, 6–15, 16–40, >40 — always all four */
+  lengths: RouteShare[];
+  /** the fifteen commonest opening words of the fall-throughs, `(other)` for anything not a plain word or a `/command` */
+  first_words: RouteShare[];
+  /** the line the verdict is drawn at, so `--json` does not have to guess it */
+  threshold: number;
+  verdict: { status: "ok" | "degraded" | "n/a"; line: string };
+}
+
+export interface RouteReportOptions extends ComputeOptions {
+  /** `--since`: `7d`, `2w`, `3m`, or a bare number of days. Default 30 — §5.2 wants a real month of typing. */
+  since?: string | undefined;
+  /** this install's `instance_id` — the Keychain account the console's owner token is filed under */
+  instanceId?: string | undefined;
+  timeoutMs?: number | undefined;
+}
+
+const DEFAULT_ROUTE_WINDOW_DAYS = 30; // §5.2: a month of real typing, where cache-report's question is answered by a week
+
+/** The rows of one `row_kind`, in the order the query returned them, as shares. */
+function sharesOf(rows: Record<string, unknown>[], kind: string): RouteShare[] {
+  return rows
+    .filter((r) => String(r.row_kind ?? "") === kind)
+    .map((r) => ({ label: String(r.label ?? ""), n: numberOf(r.n), share: ratioOf(r.share), denominator: numberOf(r.denominator) }));
+}
+
+/**
+ * The measurement. One console request; nothing is written, no model is
+ * called, and no message body is read — the query returns counts, and this
+ * turns them into the one number §5.2's exit rule is drawn on.
+ */
+export async function routeReport(opts: RouteReportOptions): Promise<RouteReport> {
+  // the same strict spelling as `cache-report`, with a wider default: an
+  // absent `--since` means 30 here, not `parseSince`'s 7.
+  const days = parseSince(opts.since === undefined || opts.since.trim() === "" ? String(DEFAULT_ROUTE_WINDOW_DAYS) : opts.since);
+  const res = await consoleCall({
+    method: "GET",
+    path: `/api/q/route_report?days=${days}`,
+    env: opts.env,
+    platform: opts.platform,
+    ...(opts.exec ? { exec: opts.exec } : {}),
+    ...(opts.fetchFn ? { fetchFn: opts.fetchFn } : {}),
+    ...(opts.instanceId ? { instanceId: opts.instanceId } : {}),
+    ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
+  });
+  if (res.status >= 400) {
+    throw new StepFailed(
+      `the console would not answer /api/q/route_report: ${renderConsoleCallError(res)}` +
+        (res.status === 404 ? " — this install's seed/queries/ predates route_report.yaml; `metistry update` lands it" : ""),
+    );
+  }
+  const body = (res.body ?? {}) as { rows?: unknown; as_of?: unknown };
+  const rows = Array.isArray(body.rows) ? (body.rows as Record<string, unknown>[]) : [];
+
+  const total = rows.find((r) => String(r.row_kind ?? "") === "total") ?? {};
+  const routed = numberOf(total.routed);
+  const fallThrough = numberOf(total.fall_through);
+  const totals = {
+    messages: numberOf(total.messages),
+    routed,
+    unrouted: numberOf(total.unrouted),
+    fall_through: fallThrough,
+    // over ROUTED, never over every message: a message the router never saw
+    // is not evidence that the rules missed it (`route_report.yaml`).
+    fall_through_share: routed > 0 ? Math.round((fallThrough / routed) * 1e4) / 1e4 : null,
+    ...(typeof total.since === "string" ? { first_message: total.since } : {}),
+    ...(typeof total.until === "string" ? { last_message: total.until } : {}),
+  };
+
+  return {
+    since_days: days,
+    ...(typeof body.as_of === "string" ? { as_of: body.as_of } : {}),
+    totals,
+    kinds: sharesOf(rows, "kind"),
+    tiers: sharesOf(rows, "tier"),
+    rules: sharesOf(rows, "rule"),
+    lengths: sharesOf(rows, "length"),
+    first_words: sharesOf(rows, "first_word"),
+    threshold: CLASSIFIER_FALL_THROUGH_THRESHOLD,
+    verdict: routeVerdict(totals, days),
+  };
+}
+
+/**
+ * ONE line, and it is §5.2's exit rule with this install's number in it. Two
+ * readings have to come before the rule, in this order, because a percentage
+ * taken over silence or over a handful of messages would otherwise be quoted
+ * back in a PR as a decision:
+ *
+ *   nothing routed  the console filed these messages with no ruleset loaded
+ *                   (`server.ts:616`), so there is no routing decision to
+ *                   measure — a wire finding, not a router one, exactly as
+ *                   `cache-report` separates "the provider said nothing"
+ *                   from "the cache missed".
+ *   too few         under `MIN_ROUTED_FOR_A_READING` the number is reported
+ *                   with the caveat attached rather than withheld: the owner
+ *                   asked, and "widen the window" is the answer they need.
+ */
+function routeVerdict(totals: RouteReport["totals"], days: number): RouteReport["verdict"] {
+  const pct = (n: number): string => `${Math.round(n * 1000) / 10}%`;
+  const cite = "docs/research/2026-09-21-intent-classification-tier.md §5.2";
+  if (totals.messages === 0) {
+    return { status: "n/a", line: `no messages in the last ${days}d — nothing to measure yet. Widen --since, or type at it for a while first (${cite}).` };
+  }
+  if (totals.routed === 0) {
+    return {
+      status: "n/a",
+      line:
+        `${totals.messages} messages in the last ${days}d and NOT ONE carries a routing decision. ` +
+        `That is a configuration finding, not a router one: the console files a message with no \`route\` in its meta only when it loaded no ruleset at all ` +
+        `(a missing or unreadable rules.yaml). Fix that before reading any share off this report.`,
+    };
+  }
+  const share = totals.fall_through / totals.routed;
+  const thin =
+    totals.routed < MIN_ROUTED_FOR_A_READING
+      ? ` On only ${totals.routed} routed message${totals.routed === 1 ? "" : "s"}, though — widen --since past ${days}d before acting on it.`
+      : "";
+  const unrouted = totals.unrouted > 0 ? ` (${totals.unrouted} more carried no routing decision and are excluded from the share.)` : "";
+  if (share < CLASSIFIER_FALL_THROUGH_THRESHOLD) {
+    return {
+      status: "ok",
+      line:
+        `fall-through ${pct(share)} of ${totals.routed} routed messages, under the ~${pct(CLASSIFIER_FALL_THROUGH_THRESHOLD)} line — ` +
+        `STOP HERE and write fast_path rules instead. An extra regex is free, auditable and self-documenting in the command menu, ` +
+        `and the first-word and length rows above are the shortlist to write them from. PoC-20 phase 1 is not warranted on this reading (${cite}).${thin}${unrouted}`,
+    };
+  }
+  return {
+    status: "degraded",
+    line:
+      `fall-through ${pct(share)} of ${totals.routed} routed messages, over the ~${pct(CLASSIFIER_FALL_THROUGH_THRESHOLD)} line — ` +
+      `the rules are not catching most of what gets typed, so PoC-20 phase 1 (answer-token scoring through the existing compute layer, no new dependency) ` +
+      `is worth building. Write the obvious fast_path rules from the first-word rows first anyway; they are free (${cite}).${thin}${unrouted}`,
+  };
+}
+
+const sharePct = (s: number | null): string => (s === null ? "-" : `${Math.round(s * 1000) / 10}%`);
+
+/**
+ * Five small tables rather than one wide one, because they are answers to
+ * five different questions and three of them are taken over a different
+ * population. Every table's header says what its share is OVER, so no
+ * percentage on the screen is ambiguous. The verdict goes LAST, under the
+ * evidence for it.
+ */
+export function renderRouteReport(r: RouteReport, ui: Ui = defaultUi()): string {
+  const lines: string[] = [`router baseline, last ${r.since_days}d${r.as_of ? ui.dim(` (as of ${r.as_of})`) : ""}`];
+  const section = (title: string, over: string, rows: RouteShare[], firstCol: string): void => {
+    if (rows.length === 0) return;
+    lines.push("");
+    lines.push(ui.heading(`${title} ${ui.dim(`— share of ${over}`)}`));
+    lines.push(
+      ui.table(
+        [firstCol, "messages", "share"],
+        rows.map((s) => [s.label || ui.dim("(none)"), String(s.n), sharePct(s.share)]),
+        { indent: 2, ragged: [] },
+      ),
+    );
+  };
+
+  if (r.totals.messages === 0) {
+    lines.push("");
+    lines.push(ui.wrap("No messages in this window. Nothing has been typed at the console for this long, or --since is shorter than the install is old.", { indent: 2 }));
+    lines.push("");
+    lines.push(`${ui.statusIcon(r.verdict.status)} ${ui.wrap(r.verdict.line, { hanging: 2 }).trimStart()}`);
+    return lines.join("\n");
+  }
+
+  section("where messages went", "routed messages", r.kinds, "route");
+  section("tiers named", "routed messages", r.tiers, "tier");
+  section("fast_path rules that fired", "fast-path messages", r.rules, "answers from");
+  section("fall-throughs by length", "fall-throughs", r.lengths, "words");
+  section("fall-throughs by first word", "fall-throughs", r.first_words, "first word");
+
+  lines.push("");
+  lines.push(
+    ui.kv(
+      [
+        [
+          "messages",
+          `${r.totals.messages} ${ui.dim(
+            r.totals.unrouted > 0
+              ? `(${r.totals.routed} carried a routing decision, ${r.totals.unrouted} did not — those are not fall-throughs)`
+              : "(all of them carried a routing decision)",
+          )}`,
+        ],
+        ["fall-through", `${r.totals.fall_through} of ${r.totals.routed} routed ${ui.dim(`(${sharePct(r.totals.fall_through_share)} — the number the exit rule is drawn on)`)}`],
+        ...(r.totals.first_message && r.totals.last_message
+          ? ([["window seen", `${r.totals.first_message.slice(0, 10)} → ${r.totals.last_message.slice(0, 10)}`]] as Array<[string, string]>)
+          : []),
+      ],
+      { indent: 2 },
+    ),
+  );
+  lines.push("");
+  lines.push(`${ui.statusIcon(r.verdict.status)} ${ui.wrap(r.verdict.line, { hanging: 2 }).trimStart()}`);
+  return lines.join("\n");
+}

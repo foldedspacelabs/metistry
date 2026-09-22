@@ -98,21 +98,24 @@ DEFP=pan(L,"THE DEFINITION IS A FILE, AND ONLY YOUR HAND MAY WRITE IT",
         "and a textarea that hides its own headings would teach the user this is configuration rather than "
         "writing. It shows the path, and it says <i>versioned in the vault</i> rather than <i>saved</i>.",12))
 
-PERMP=pan(L,"PERMISSIONS ARE VERBS ON DOMAIN MODELS — NOT FOUR WORDS FROM THE WIRE",
-  permtable(L,rows=CONN_ROWS,proxied=PROXY_ROWS)
-  + nt(L,"The wire calls these <b>dispatch</b>, <b>task_update</b>, <b>comment</b> and <b>capture</b>, and drawn "
-        "that way they are four unrelated strings. They are not: each one is a <b>verb on a model the product "
-        "already names</b> — and <b>comment</b> is one kind that reaches <i>two</i> models, Work and Artifacts, "
-        "because its schema takes either a task or an artifact version. Saying it as Model &middot; Action makes "
-        "that visible and puts knowledge on the same table instead of in a section of its own.",14)
-  + nt(L,"<b>Allow &middot; Ask First &middot; Never</b> replaces <b>allow &middot; propose &middot; deny</b> — the "
-        "same rename the tier words already carry (<b>Titles</b> and <b>Folders</b> for <b>index</b> and "
-        "<b>areas</b>). Weight, never colour: a permission is not a moral position, and red is spoken for by "
-        "<b>failed</b>.",12)
-  + nt(L,"<b>Ask First on Dispatch is the wire&rsquo;s own default</b> and the table says why in the row: it hands "
-        "the task off-machine, so it stays your decision even at the highest level.",12))
+PERMP=pan(L,"ONE LINE PER RESOURCE, AND ABSENCE IS THE DENIAL",
+  permmatrix(L)
+  + nt(L,"The previous pass gave every verb its own row and a control in each one, so <b>Knowledge</b> appeared "
+        "twice and the table was mostly furniture. One line per resource, <b>Read</b> and <b>Write</b> as columns, "
+        "and the cell says what the verb covers.",14)
+  + nt(L,"<b>The Allow / Ask First / Never control is gone.</b> Anything not listed is not granted, which is the "
+        "same information in none of the space — and it is the honest shape, because the list of things an agent "
+        "<i>cannot</i> do is infinite. A verb that waits for you carries one glyph; nothing else needs a state at "
+        "all. Changing any of it is one <b>Edit</b> on the section, not a control per cell.",12)
+  + nt(L,"<b>Local agents get the same table.</b> The last pass gave them knowledge only, on the argument that a "
+        "routine grants the rest — but an agent Metis delegates to needs Work and Artifacts like any other, and "
+        "two different permission surfaces for two kinds of agent was the same mistake as two different detail "
+        "layouts. One table, everywhere permissions appear.",12)
+  + nt(L,"A marked line is access that arrived some other way &mdash; approved in a queue, or granted by a routine "
+        "and held only while it runs. That is the provenance rule, now carried inside the cell rather than in a "
+        "section of its own.",12))
 
-MCPP=pan(L,"AND THE ROW GROUP THAT IS NOT A METISTRY MODEL AT ALL",
+MCPP=pan(L,"AND THE ROWS THAT ARE NOT METISTRY AT ALL",
   nt(L,"An <b>external MCP server</b> Metistry holds a credential for is another <b>Model</b> on the same table, "
        "marked <i>Through Metistry</i>. The agent never holds that credential — Metistry does, and mediates — so "
        "this grid is the only thing standing between an agent and a work system.")
@@ -120,8 +123,9 @@ MCPP=pan(L,"AND THE ROW GROUP THAT IS NOT A METISTRY MODEL AT ALL",
         "reading your own vault, while commenting on a Jira issue is <b>acting as you in a system other people "
         "watch</b>. That is why Comment is <b>Ask First</b> there and Read is <b>Allow</b> — and it is the reason "
         "a per-server grant cannot be one switch.",12)
-  + nt(L,"Not designed yet, and deliberately not drawn further here. The structure is what this panel claims: no "
-        "new primitive, one new provenance.",12))
+  + nt(L,"The servers themselves are defined on <b>Resources</b>, a new top-level row — one place holds the "
+        "credential, and it is not this screen. Granting one to an agent or a routine happens here, in the table "
+        "above, like everything else.",12))
 
 body=(heading("ROUND E · SCREEN 7, REWRITTEN","Agents — what Metis delegates to, and what connects in",
    "Three renders: the roster, a local agent, a connected agent. The first attempt organised itself around "

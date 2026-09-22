@@ -92,24 +92,25 @@ columns and a state glyph, down from five columns.
 **The agent is a link**, and it is the deep link in the direction the owner
 arrives from. `Built-in` is not a link, because there is nothing behind it.
 
-### 4.1 The week, above the list
+### 4.1 The week on one axis
 
-A tick per run on a **week × hour grid**. Occurrences are not magnitudes, so this
-is not a chart with a value axis; the form that answers *how are these laid out*
-is a position plot. What it shows that the list cannot is the shape:
-**everything the owner configured runs inside the same hour.**
+Revised 2026-09-22. The first pass drew a seven-row week × hour grid: seven rows
+to say one thing. **One axis says it** — a mark per run, day and week markers for
+scale, a faint noon line inside each day — and the thing it says is
+*everything runs before 7 AM or after 6 PM, and the working day is empty.*
+Day · Week · Month are the same marks at three scales, and Month is the one a
+budget would attach to.
 
-**One hue, two weights** — filled is run by one of your agents, outlined is
-built-in. This was going to be two colours until the palette validator measured
-them: in dark mode the agent ink and the neutral separate at **14.3 ΔE**, under
-the hard floor of 15, which means indistinguishable even with full colour vision.
-Weight carries it instead — the same channel the presence dots and the permission
-pips already use.
+**The agent-versus-built-in distinction left with the grid.** It was carried by
+two marks, which the palette validator had already forced into filled-and-outlined
+(the agent ink and the neutral separate at **14.3 ΔE** in dark mode, under the
+hard floor of 15 — indistinguishable even with full colour vision). But it was
+never the picture's job: the **Agent** column in the list says who runs each one,
+in words. One ink, no legend to learn. The ΔE finding stands as a rule for any
+future pair of marks (C54); it simply has nothing to apply to here.
 
-Per-agent hues were the other option, and they are refused on the system rather
-than on the measurement: **hue carries *what kind of thing*, never *which
-one***. Identity comes from the row beneath, which is also this picture's table
-view.
+Per-agent hues were never an option: **hue carries *what kind of thing*, never
+*which one***.
 
 ## 5. A routine
 
@@ -134,20 +135,17 @@ is the only prose on this screen the routine owns.
 definition, it is appended to it. A user who believes they are replacing it will
 write a task prompt that contradicts the agent's behaviour and get neither.
 
-### 5.2 Knowledge
+### 5.2 Permissions
 
-It is permission to read knowledge, so it is called that, and it uses the
-Knowledge glyph the nav already uses.
+**The same table as Agents §4.1**, showing the permissions in force *for this
+run*. Effective is the answer; where each line came from is a marker on it. Not
+"what the agent has" beside "what this routine added" — that made the reader
+compute the union themselves.
 
-**The table shows the effective permission, with provenance per line** — not
-"what the agent has" beside "what this routine added", which made the reader do
-the union themselves. Effective is the answer; where each line came from is a
-marker on it.
-
-| Model | Action | May | |
-| --- | --- | --- | --- |
-| Knowledge | Read | `Areas/Ops` | — |
-| | Read | `Areas/Finance` | *Granted by this routine* |
+| Resource | Read | Write |
+| --- | --- | --- |
+| Knowledge | `Areas/Ops` · `Areas/Vendors` *(Morning Digest only)* | `Journal/Digest/` *(Morning Digest only)* |
+| Work | All tasks | Update · Comment |
 
 And the sentence that makes the layering safe: *outside this routine, `collator`
 cannot read `Areas/Finance`.* Access that exists only during a task has to say so

@@ -37,7 +37,7 @@ canvas order:
 | `Agents` | **screen 7** — the roster, a local agent, a connected agent |
 | `Routines` | **screen 8** — the schedule, one routine, the two prompt layers |
 | `Resources` | **screen 9** — proxied MCP servers, per-tool grants |
-| `Knowledge` | **screen 10** — sources and where `stale` lands, `conflict` as `partial` |
+| `Knowledge` | **screen 10, rebuilt 2026-09-22** — the fold digest, what needs your eye, areas described, a draft settled, a conflict resolved |
 | `Plugin` | the Obsidian plugin — the mirror, the picker, editable chips |
 | `Voice` | six system serifs and a Times control |
 | `Item-Model` | the item contract (its ladder section is superseded by `Facets`) |
@@ -114,7 +114,7 @@ disagree, the newer three win and the disagreement gets logged.
 **Navigation.** **Eight** rows as of 2026-09-22 — see C57. Resources was briefly
 a ninth and moved to Settings, so the standing rule is: **a third break should
 move something out rather than add a row.** **Today · Chat · Activity ·
-Work ▸ · Knowledge ▸ · Routines · Agents · Routines**, then **Pinned**. Routines went
+Work ▸ · Knowledge ▸ · Agents · Routines**, then **Pinned**. Routines went
 top-level for C30's own reason — it is not a kind of agent, and a child row
 would bury a daily question (C50). Today is first and top-level (C30) — it holds
 meetings, artifacts, requests and agent status, none of which Work owns. Work's
@@ -201,7 +201,7 @@ SwiftUI's `.serif`.
 | Agents | `screen-07-agents.md` | **rewritten 2026-09-21** — roster, a local agent, a connected agent |
 | Routines | `screen-08-routines.md` | done — the schedule, one routine |
 | Settings ▸ Resources | `screen-09-resources.md` | done — the connections, one connection, three states per tool |
-| Knowledge | `screen-10-knowledge.md` | done — sources, pages, links |
+| Knowledge | `screen-10-knowledge.md` | **rebuilt 2026-09-22** — digest-led; sources folded to one line |
 | Facets & colour | `facets-and-colour.md` | the system itself |
 
 **Not drawn:** card detail popover, Projects, Artifacts, Rooms, Usage, Settings
@@ -231,11 +231,14 @@ the canvas is now generated from a module in `boards/` except `Facets`, `Plugin`
 `Voice` and `Item-Model`. `bellpanel()` is gone — it drew the *"1 snoozed"*
 header C21 killed; `panel2()` is the panel.
 
-**64 contradictions** are logged in `review-00-plan.md`. C38 and C51 are closed. C40–C49 are
+**68 contradictions** are logged in `review-00-plan.md`. C38 and C51 are closed. C40–C68 are
 round E's. Two of them are rules the system is missing rather than faults in a
 file: **C45** (a failed consequential operation leaves the request pending) and
 **C49** (a mark that carries meaning takes an ink token, never a border token —
-`border-strong` fails 3:1 against every ground). The ones
+`border-strong` fails 3:1 against every ground). **C67** is a process fault
+worth reading before you draw: seven of twelve boards overflowed their declared
+frame, so **measure the frame, never estimate it** — the recipe is in
+`design-system-amendments.md` §6. The ones
 that block drawing:
 - **C37** — `blocked_by_task` / `blocked_by_task_open` are specified in
   `daily-flow-spec.md` §3 and absent from `board.yaml`. Two screens draw the

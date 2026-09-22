@@ -1,151 +1,206 @@
 # Screen 10 — Knowledge
 
-New, 2026-09-22. Drawn while the owner slept, so every judgement call is named as
-one.
+Drawn 2026-09-22 and rebuilt the same day. The first pass organised itself around
+`knowledge_pages` and `collector_health` and came out a file browser with a status
+header. §5.1 of `design-system-amendments.md` — written the night before — names
+that exact mistake, so this rewrite is the rule applied to the surface that broke
+it. The owner's words: *the question we should ask ourselves is what the user's
+intent is when visiting this page.*
 
-## 1. The three questions
+## 1. What the screen is for
 
-Knowledge is the vault, read. It answers three things, and they are not equally
-well served by the wire:
+Knowledge is **where the owner reads what the system learned, and settles what it
+could not decide alone.** It is not a file browser; Obsidian is the file browser,
+and it is better at it. Five intents, in the order they arrive:
 
-1. **What is in here?** — `knowledge_pages` serves this completely.
-2. **Is it current?** — **nothing serves this**, and it is the more important
-   question. Four rounds of `stale` have been specified and drawn nowhere (C48).
-3. **What links to what?** — `knowledge_page_links` serves this completely.
-
-So the screen is ordered by the question, and the unanswerable one is at the top
-rather than hidden at the bottom, because *is this current* is what makes the rest
-trustworthy.
-
-## 2. Sources — where `stale` finally lands
-
-Round C specified **stale** — *it was answering and has not lately* — and parked
-it on Knowledge and Agents. Agents could not answer it (`agent_presence` has no
-collector notion) and Activity deliberately would not (`activity_feed` takes
-`collector_run` only `WHERE ok = false`, so a **healthy** collector is invisible).
-This is the surface that owns the question.
-
-```
-SOURCES                                          4 sources · 1 behind
- ●  github-state      checked 4 minutes ago
- ●  aws-costs         checked 3 days ago                      3d old
- ◌  slack-bridge      never configured
- !  devin-sessions    last succeeded 2 days ago · token expired
-```
-
-Four states, and they are the ratified four doing exactly the work they were
-defined for:
-
-| | Means | Mark |
-| --- | --- | --- |
-| current | checked recently and succeeded | nothing. The normal case says nothing |
-| **stale** | succeeded, but not lately | the **age rides the name** — it annotates, it never replaces. The data is still the last true data |
-| absent | never configured | neutral, and it names the variable rather than spending it |
-| failed | it answered and the answer was an error | the error verbatim, and the last time it *did* succeed |
-
-**`failed` carries two timestamps and that matters.** *Failed 2 hours ago* on its
-own invites the reader to assume the data is two hours old. *Last succeeded 2 days
-ago · token expired* says what is actually true: the data is two days old and the
-reason it stopped is known.
-
-## 3. Pages
-
-Grouped by **area**, which is derived and not stored: the vault's TitleCase tree
-*is* the grouping, and an area is a path prefix everywhere else in the system, so
-the column is the first two segments under `Areas/` and the first segment anywhere
-else. A root file like `now.md` has no area and says `NULL` rather than an empty
-string, so *every area* can never collide with a real value.
-
-The design follows that rather than inventing a taxonomy: **the folder tree is the
-navigation**, and there is no second organising idea layered over it.
-
-### 3.1 `conflict` is the first real instance of `partial` (C28)
-
-`knowledge_files.status` is `clean | dirty | conflict`, and the query's own
-comment is the design constraint: a conflict row "is a file the reconciler could
-not settle, **so its title and mtime are not facts yet**."
-
-That is a row whose *path* is known and whose *metadata is not* — which is exactly
-the fifth state **C28 proposed and could not find a use for**: a row that parsed
-partly. It is not `failed` (nothing broke), not `absent` (the file is right
-there), and not `stale` (this is not about age).
-
-So the row shows the path, and **where the title would be it says why there isn't
-one** — not a blank, not the filename dressed up as a title:
-
-```
-Areas/Health/2026/sleep.md    ⚠ conflict — the reconciler couldn't settle this
-                                 file, so its title isn't a fact yet
-```
-
-**Recommendation:** ratify `partial` on the strength of this, and let the row
-vocabulary carry it. Four rounds of a state with no instance is a state that was
-guessed at; one shipped instance is an argument.
-
-### 3.2 A draft is invisible to the owner too, and that is deliberate
-
-`status: draft` in frontmatter hides a page at **every tier** — including the
-owner's own list — because the same `WHERE` clause `mcp-brain` applies is applied
-here, "so the owner's list and an agent's index cannot disagree about what a draft
-is."
-
-That is unusual enough to state on the screen rather than leave as a surprise. The
-count is shown and the pages are not: **"3 drafts, hidden here as they are hidden
-from agents."** Hiding them silently would make the list look wrong; explaining it
-once makes the consistency legible.
-
-## 4. Links
-
-`knowledge_page_links` gives, per page, `direction` (outgoing · incoming), the
-**other** end's path, the link `kind` (wikilink · frontmatter · embed), and the
-target's title.
-
-Drawn as two lists rather than a graph. A graph answers *what does the whole vault
-look like*, which is a question the owner does not have; two lists answer *what
-points at this*, which is the one they do. `kind` is shown because a frontmatter
-link and a wikilink mean different things about intent — one was structured on
-purpose, the other was written in a sentence.
-
-## 5. States
-
-| State | Copy |
+| Why the owner opened it | What answers it |
 | --- | --- |
-| empty | "Nothing in the vault yet." + *Metistry reads a folder you own; it does not keep a second copy* |
-| empty · filtered | "No pages in `Areas/Health`." — names the filter, because other areas have pages |
-| absent | no reconciler bridge — the variable named, not spent. **The list is not drawn empty**, because nothing is known |
-| failed | the index could not be read, error verbatim |
-| stale · the index | `indexed_at` behind `modified` — the page list says *3 pages changed since the last walk* and keeps showing what it has |
+| *What did it learn last night?* | **The fold**, in prose, at the top |
+| *Is anything waiting on me?* | **Needs your eye** — drafts, conflicts, suggestions |
+| *What is in here, roughly?* | **Areas**, each with a written line |
+| *How does this even work?* | One architectural rule per section, in situ |
+| *Are the feeds alive?* | One line, folded, until one isn't |
 
-## 6. Data sources
+The last one led the first pass. It is last because **a source that is working
+should be ignorable** — and the four states are still drawn, inside the fold-out,
+where they earn the space.
 
-| Element | Source |
-| --- | --- |
-| the page list | `GET /api/q/knowledge_pages` — path, area, title, description, status, modified, indexed_at |
-| areas | derived, first segments — no column, and none wanted |
-| a page's body | `GET /api/knowledge/page` via the reconciler. **Not a query**, because bytes are not derived state — the schema enforces it by having no column for a note body |
-| links | `GET /api/q/knowledge_page_links` |
-| **source freshness** | **nothing** — request C1, now four rounds old |
-| drafts, and their count | the same `WHERE` the bridge applies; the count is **not** returned today |
+## 2. The fold — prose the assistant wrote, surfaced
 
-## 7. Requests for the developer
+`routines/knowledge-fold/run.ts` already writes `Journal/Fold/<date>.md` nightly,
+from `Templates/Fold.md`, in the assistant's own voice, as its own commit. It is
+the one template where `{{ prose }}` is legal (D14), and the routine never reads
+its own output. So *summaries of new knowledge areas* is not a thing to invent —
+it is a file that today can only be read by opening Obsidian. **Surfacing it is
+the whole of the change** (C65).
 
-| # | Request |
-| --- | --- |
-| **C1** | `collector_health` — per collector: last run, last **ok** run, and the error from the most recent failure. This is the fourth round `stale` has been specified without it. Two of those rounds concluded that some other screen owned the question; this one owns it and still cannot answer it |
-| **D14** | a draft **count** on `knowledge_pages`. The rows are correctly withheld; the number is not a draft and withholding it makes the list look wrong |
-| **D15** | `indexed_at` versus `modified` as a comparison the query makes, so *how far behind is the index* is a fact rather than arithmetic three surfaces repeat |
+Drawn in the agent wash, in the system serif, with `Journal/Fold/2026-09-22.md`
+shown beside the label. Three rules hold here harder than anywhere, because this
+is the longest stretch of agent text in the product:
 
-## 8. Judgement calls made without the owner
+- **P1.** Every control in the card is the reader's — *Open The Fold*, *Earlier
+  Folds*, the thumbs. The prose itself offers nothing to press.
+- **The one exception is a page name.** Wikilinks inside the fold render as links,
+  because a path is a reference, not an action — following one goes to a page and
+  changes nothing.
+- **It is judged like any generated answer.** The thumbs are the transcript's
+  feedback control, unchanged.
 
-Named because they were made while he slept, and each is cheap to reverse.
+**Under it, the rule it depends on:** *Metis writes here, in its own voice, as its
+own commit. Your own daily note is never touched — one writer per file, and this
+is not that file.*
 
-1. **Sources at the top, pages below.** *Is this current* makes the rest
-   trustworthy, so it leads. The alternative — pages first, freshness in a header
-   — reads better as a browser and worse as an answer.
-2. **No graph view.** Two lists per page instead. A graph answers a question the
-   owner has not asked.
-3. **`partial` recommended for ratification** on the strength of `conflict`, not
-   introduced unilaterally: the row is drawn, and the proposal is logged as the
-   argument for the state rather than as a decision already taken.
-4. **The draft count is shown as a sentence**, not a filter chip. A chip implies it
-   can be turned on, and it cannot.
+## 3. Needs your eye — and why this is not a second queue
+
+Four kinds of item, one row each: **Draft**, **Conflict**, **Suggestion**. Each
+row is *what it is · which page · why it is here · the verb*.
+
+```
+NEEDS YOUR EYE  4
+ ✎  Draft       Areas/Fsl/vendors.md      Metis rewrote the vendor summary…  Review →
+ ✎  Draft       Areas/Health/protein.md   New section on the cost basis       Review →
+ !  Conflict    Areas/Health/2026/sleep.md You edited it while the fold wrote Resolve →
+ ✦  Suggestion  Areas/Health/            Metis thinks these four notes are…  Read →
+```
+
+**The count sits in the section header, never in a badge.** P2 gives the product
+one badge and it belongs to Needs You — and these items *are already* requests
+there. A second badge would count the same pending thing twice.
+
+### 3.1 Decide in Needs You, edit on Knowledge
+
+A draft settlement is a `review_decisions` row — `kind: draft_settle`, alongside
+`knowledge | report | grant_elevation | action` — and the migration's own comment
+says a note's `status: draft` frontmatter marks the same row. **One pending thing,
+read from two places**, which is only honest if the screen says so:
+
+- **Needs You** asks *yes or no*, in a queue the owner works down.
+- **Knowledge** gives the prose reading width, the captures behind it, and an
+  **Edit First** button — because a draft that is nearly right should be
+  corrected, not declined.
+
+The card says it in as many words: *this arrived as a request, so answering it
+here answers it there.*
+
+### 3.2 A draft is hidden from agents, not from the owner (C66)
+
+`knowledge_pages` drops `status: draft` rows using the same `WHERE` clause
+`mcp-brain` applies, "so the owner's list and an agent's index cannot disagree
+about what a draft is." The intent is right — **a draft is never served to an
+agent** — but the owner is not an agent. The first pass repeated the query's logic
+as product intent and printed *a draft is invisible to you too, and that is
+deliberate*. That was wrong: hiding a draft from the owner hides it from the only
+person who can settle it. Drafts belong in the review section, which is where they
+are.
+
+**Under the section, the rule:** *A draft is never served to an agent. Marking a
+note `status: draft` is how you keep it from your own agents until you have read
+it.*
+
+## 4. A conflict, resolved in place
+
+`knowledge_files.status` is `clean | dirty | conflict`, and the query's comment is
+the design constraint: a conflict row is a file the reconciler could not settle,
+**so its title and mtime are not facts yet** — a row whose path is known and whose
+metadata is not, which is the fifth state C28 proposed and could not place.
+**Recommendation restated: ratify `partial`.** Two surfaces need it now.
+
+The owner asked to resolve conflicts *interactively*, so the row is a doorway:
+
+1. **Who wrote what, and when.** *You edited this at 9:12 PM. The fold wrote to it
+   at 9:14 PM.* Named, not inferred.
+2. **Neither write was lost.** The reconciler stopped rather than choosing.
+3. **The diff**, with the existing `diff()` component — `-` is yours, `+` is the
+   fold's.
+4. **Three verbs: Keep Mine · Take The Fold's · Merge In Obsidian.** No
+   auto-merge and no fourth button: a three-way merge inside the console is the
+   console mutating the vault by inference, which invariant 10 closes. Obsidian is
+   the editor; this screen is where the decision is made.
+
+**Under it, the rule:** *One writer per file is what makes the vault safe to share
+with agents. A conflict is that rule holding — the alternative is a silent
+overwrite.*
+
+## 5. Areas — described, not counted
+
+One row per area: the path, **a written line**, and why it is in front of the
+owner.
+
+```
+AREAS                              Why it is here, not how much of it there is
+ Areas/Fsl      Drey, the business setup, and the vendor thread…  Named by last night's fold
+ Areas/Health   Sleep, labs, and the protein blend                Changed by you 2 hours ago
+ Areas/Ops      The lease, the studio, and the things with dates   Behind work #418
+ Journal        Your daily notes, and the fold's own file beside them  Linked from 6 pages
+```
+
+**Nothing writes that middle column yet (C68).** A file count is available and is
+not an answer — it tells the owner *how much*, and they asked *what*. The routine
+that can write it exists and already writes prose (C65).
+
+**The right-hand column is the relevance answer, and it is provenance rather than a
+rank.** *Changed by you 2 hours ago* is `knowledge_files.mtime`; *named by last
+night's fold* is the fold's own wikilinks; *behind work #418* is
+`knowledge_page_links` reached from the task; *linked from 6 pages* is a count. P5
+forbids a computed score, and the facts do the same job better: when one is wrong,
+the owner can see why.
+
+**Under the section, the rule:** *A folder is a permission boundary: a grant names
+a path prefix, so organising your vault is also configuring what an agent can
+reach.*
+
+The page table — path, title, mtime — still exists, **behind an area and behind
+search**. It answers *what is in here* with data, which is the right answer once
+the owner has chosen where to look.
+
+## 6. Sources — one line, until something is wrong
+
+```
+ ●  4 sources, all current                                                    ›
+```
+
+Expanded by a fault, not by a click:
+
+```
+ ●  4 sources · 1 behind                                                      ⌄
+    ●  aws-costs        checked 3 days ago                            3d old
+    !  devin-sessions   last succeeded 2 days ago · token expired
+```
+
+The two rules kept from the first pass, unchanged because they are right:
+
+- **Stale annotates; it never replaces.** The age rides the name, the value stays.
+- **Failed carries two timestamps.** *Failed 2 hours ago* invites the reader to
+  think the data is two hours old. *Last succeeded 2 days ago · token expired* is
+  what is true.
+
+And the standing request: **nothing in the wire can answer *is this current*.**
+`agent_presence` has no collector notion; `activity_feed` takes `collector_run`
+only `WHERE ok = false`, so a healthy collector is invisible. Request C1, four
+rounds old (C48, C64).
+
+## 7. Links — two lists, on a page
+
+Outgoing and incoming, with `kind` shown, because a frontmatter link and a
+wikilink mean different things about intent and an **embed** is a third thing
+again. No graph: a graph answers *what does the whole vault look like*, which is
+not a question the owner has. These live on a page, not on this screen — *what
+points at this* is a question you have while reading something.
+
+## 8. What the rebuild dropped, and what it asks for
+
+**Dropped:** the top-level page table (it answered a meaning question with data);
+the sources block as a section (folded to a line); the claim that drafts are hidden
+from the owner (C66, corrected).
+
+**Kept intact:** the four states inside the sources fold-out, the `conflict` row as
+the argument for `partial`, and the two link lists.
+
+**Asks of the build, in the order they unblock this screen:**
+
+1. **A query for the newest fold** — body and outgoing links (C65). Without it the
+   top of the screen is a file the owner must open Obsidian to read.
+2. **A drafts-for-the-owner read** (C66) — or an owner flag on `knowledge_pages`.
+3. **One written line per area** (C68), from the fold or a sibling routine.
+4. **A per-collector last-ok time** (C1/C48/C64), still.
+5. **Ratify `partial`** (C28), on the strength of the conflict row.

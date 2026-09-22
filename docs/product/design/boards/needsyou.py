@@ -5,7 +5,7 @@ kind is drawn for the first time (C40, C41, C42).
 """
 from lib import *
 
-CW,CH=2240,3560
+CW,CH=2240,4200
 
 BELLP=pan(L,"THE BELL — THE ONLY BADGE IN THE PRODUCT",
   f'<div style="display: flex; flex-direction: column; gap: 16px;">'

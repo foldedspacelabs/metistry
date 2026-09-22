@@ -6,7 +6,7 @@ centred so resizing moves it without ever rewrapping a line.
 """
 from lib import *
 
-CW,CH=2000,2820
+CW,CH=2000,3280
 
 def window(T):
     return (f'<div style="border: 1px solid {T["bc"]}; border-radius: 14px; overflow: hidden; flex-grow: 1; '

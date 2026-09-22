@@ -10,12 +10,30 @@
 
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
-import { resolveTier, tiersSchema, type Effort, type TierMap } from "@foldedspacelabs/metistry-core";
+import { intentRulesSchema, resolveTier, tiersSchema, type Effort, type TierMap } from "@foldedspacelabs/metistry-core";
 
 const rulesSchema = z.object({
   fast_path: z.array(z.object({ match: z.string(), query: z.string() })).default([]),
   tiers: tiersSchema,
   commands: z.object({ deep_alias: z.string().default("deep") }).default({ deep_alias: "deep" }),
+  /**
+   * The intent tier's thresholds (PoC-20 phase 1,
+   * docs/research/2026-09-21-intent-classification-tier.md §3.2 P2).
+   *
+   * VALIDATED here and read NOWHERE in this file. That is not an oversight and
+   * a test greps for it: `route()` never sees a classifier verdict, `Route` is
+   * not extended, and the composer door is PoC-20 phase 2, which needs the
+   * owner's ruling on invariant 4's wording first (§6 question 1). What reads
+   * these numbers today is `inbox-drain`, at the capture door, which §4.1
+   * rates as costing no invariant argument at all.
+   *
+   * It is parsed here because this is where `rules.yaml` is parsed, and the
+   * schema's whole job is to fail AT LOAD: a threshold outside [0,1], or an
+   * intent outside `packages/core`'s enum, is a startup error in the same
+   * parse that already refuses an uncompilable `fast_path` regex — never a
+   * surprise on the day somebody captures the wrong sentence.
+   */
+  intent: intentRulesSchema.optional(),
 });
 
 export type Rules = z.infer<typeof rulesSchema>;

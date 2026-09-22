@@ -312,6 +312,14 @@ startRunner(pool, scheduled, {
   // `uses_model:` picks the provider out of it (runner.ts).
   compute: () => compute.store.current,
   secretEnv: process.env,
+  // The intent tier's THRESHOLDS (PoC-20 phase 1, research §3.2 P2). They
+  // travel from `rules.yaml` — a §4.7 protected path, the owner's own hand —
+  // and not from `compute.yaml`, which names the model. Two files, because
+  // they are two different decisions: which model may run this is the
+  // operator's, and how confident it has to be before anything moves is the
+  // owner's. The console validates the block at load and reads it nowhere
+  // else; `inbox-drain` is what consumes it.
+  ...(rules.intent ? { intentRules: rules.intent } : {}),
   // What a ROUTINE needs and no collector does (docs/product/daily-flow-spec.md
   // §7): the named-query store, so every row `plan-tomorrow` renders comes
   // through a named query and not through SQL of its own (invariant 3); the

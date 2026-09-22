@@ -59,3 +59,37 @@ describe("router (invariant 4: deterministic)", () => {
     expect(() => loadRules("tiers: { default: { effort: low } }")).toThrow(); // a tier without a model is not a tier
   });
 });
+
+// The intent tier's thresholds (PoC-20 phase 1, research §3.2 P2). The router
+// VALIDATES them and reads nothing: the misuse test the research asks for is
+// that a bad line is a STARTUP failure, in the same parse that already refuses
+// an uncompilable fast_path regex — never a surprise on the day somebody
+// captures the wrong sentence.
+describe("rules.yaml's intent: block fails at load, not per message", () => {
+  const withIntent = (block: string) => `tiers: { default: { model: x } }\nintent:\n${block}`;
+
+  it("loads a threshold and per-intent overrides", () => {
+    const r = loadRules(withIntent("  min_confidence: 0.8\n  by_intent: { task_create: 0.95 }\n"));
+    expect(r.intent?.min_confidence).toBe(0.8);
+    expect(r.intent?.by_intent.task_create).toBe(0.95);
+  });
+
+  it("absent is the shipped default, and means the tier does not run", () => {
+    expect(loadRules("tiers: { default: { model: x } }").intent).toBeUndefined();
+    // the seeded file ships the block commented out
+    expect(loadRules(readFileSync(new URL("../../../seed/rules.yaml", import.meta.url), "utf8")).intent).toBeUndefined();
+  });
+
+  it("refuses a threshold outside [0, 1]", () => {
+    expect(() => loadRules(withIntent("  min_confidence: 1.4\n"))).toThrow(/rules.yaml/);
+    expect(() => loadRules(withIntent("  min_confidence: 0.8\n  by_intent: { task_create: 12 }\n"))).toThrow(/between 0 and 1/);
+  });
+
+  it("refuses an intent this build does not know — invariant 10: a new one is a product change", () => {
+    expect(() => loadRules(withIntent("  min_confidence: 0.8\n  by_intent: { book_a_flight: 0.9 }\n"))).toThrow(/not one of the intents/);
+  });
+
+  it("refuses a block with no threshold at all", () => {
+    expect(() => loadRules(withIntent("  by_intent: {}\n"))).toThrow();
+  });
+});

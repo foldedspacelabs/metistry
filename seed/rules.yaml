@@ -33,3 +33,33 @@ tiers:
 commands:
   # /model <tag> and /deep are handled by the router itself (§4.1)
   deep_alias: deep
+
+# The intent tier (PoC-20 phase 1, docs/ops/inbox.md). Commented out, and
+# absent means OFF — which is the shipped behaviour and a supported install.
+#
+# What it does: a capture the deterministic rules could not place is scored,
+# on-device, against a closed list of intents, and comes back with a
+# confidence. THE MODEL DECIDES NOTHING. It says what the message looks like
+# it says; the number below is what decides whether anything happens about
+# that, and it lives here because this file is yours (docs/ops/compute.md).
+#
+# Two lines have to be true before a verdict moves anything:
+#   * compute.yaml names the model — `assignments.intent.model`, which has to
+#     be an on-machine provider, so the tier costs nothing;
+#   * and this block names a threshold.
+# Either one on its own does nothing, on purpose.
+#
+# DO NOT GUESS THE NUMBER. Label ~150-300 of your own messages and fit it:
+#   metistry-eval intents .metistry/eval/intents.jsonl \
+#     --base-url http://127.0.0.1:11434/v1 --model gemma4:e4b-it-qat --server ollama --fit
+# It prints the threshold that meets the bar on YOUR messages, and the line to
+# paste here. A threshold picked before seeing the data is the mistake the
+# research warns about in as many words.
+#
+# intent:
+#   min_confidence: 0.80
+#   by_intent:
+#     # Different consequences deserve different bars: a wrongly-filed note is
+#     # a card you re-label, so it can sit lower than one that puts a task
+#     # button under a capture.
+#     task_create: 0.90

@@ -31,6 +31,8 @@ import {
   renderModelsInstall,
   renderModelsList,
   renderProviderTest,
+  renderRouteReport,
+  routeReport,
   setBudget,
   COMPUTE_TEMPLATES,
   type ComputeOptions,
@@ -506,6 +508,7 @@ const USAGE = `metistry — Metistry command line
   metistry compute budget <instance|provider:<name>> [--daily <usd>] [--monthly <usd>]
                           --action allow|stop|critical_only
   metistry compute cache-report [--since 7d] [--json]
+  metistry compute route-report [--since 30d] [--json]
       This instance's compute.yaml: which providers exist, which model each
       tier and crew runs on, and what each may spend (docs/ops/compute.md).
       A §4.7 protected path like deployment.yaml — every write goes through
@@ -513,12 +516,17 @@ const USAGE = `metistry — Metistry command line
       validate is refused rather than written. "providers add" reads the API
       key from stdin into the login Keychain (user scope) and never takes it
       as an argument. Nothing dials a provider or enforces a budget yet.
-      "cache-report" is the one that reads rather than writes: prompt-cache
-      effectiveness per provider, model and tier over the last --since days
-      (7d, 2w, 3m, or a bare number of days), from the runs ledger through
-      the console — turns, cache reads and writes, hit ratio, what it cost
-      and what the cache saved where compute.yaml names a rate. It calls no
-      model and changes nothing (OPEN-6's measurement; docs/ops/compute.md).
+      "cache-report" and "route-report" are the two that read rather than
+      write. cache-report: prompt-cache effectiveness per provider, model and
+      tier over the last --since days (7d, 2w, 3m, or a bare number of days),
+      from the runs ledger through the console — turns, cache reads and
+      writes, hit ratio, what it cost and what the cache saved where
+      compute.yaml names a rate (OPEN-6's measurement). route-report: how the
+      deterministic router placed real messages over the same kind of window
+      (default 30d) — note, fast_path, override and the fall-through to the
+      default tier, the tiers and rules that fired, and the length and first
+      word of the fall-throughs, with PoC-20 phase 0's exit rule as the
+      verdict. Neither calls a model or changes anything (docs/ops/compute.md).
 
   metistry deployment [--json] [--product-dir <checkout>]
       The effective shape (deployment.yaml's D4 overlay) and the services it
@@ -662,6 +670,7 @@ export const HELP_GROUPS: Array<{ title: string; verbs: Array<[string, string]> 
       ["compute show|providers|models", "which providers exist and which model each tier runs on"],
       ["compute assign|budget", "point a tier at a model; cap what it may spend"],
       ["compute cache-report", "is prompt caching paying off — hit ratio per provider and model"],
+      ["compute route-report", "where real messages went — the router's fall-through rate, PoC-20 phase 0"],
       ["deployment [set-shape]", "the effective shape (D4 overlay) and its services"],
       ["deployment set-keep-awake", "whether this install holds the Mac awake, and on which power"],
       ["agents list", "every registered agent and what it holds"],
@@ -1736,8 +1745,25 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
             // console to anything scripting this.
             return 0;
           }
+          case "route-report": {
+            // The other READ verb, and PoC-20 phase 0 entire
+            // (docs/research/2026-09-21-intent-classification-tier.md §5.2):
+            // `inbound_messages.meta.route` through the console's generic
+            // query door (invariant 3). Nothing is written, no model is
+            // called, and no message body leaves the database.
+            const loadedRun = loadEnv();
+            const r = await routeReport({
+              ...computeOpts,
+              since: str(flags, "since"),
+              ...(loadedRun.instanceDir ? { instanceId: await readInstanceId(loadedRun.instanceDir) } : {}),
+            });
+            out(json ? JSON.stringify(r, null, 2) : renderRouteReport(r, ui));
+            // A high fall-through is a READING — the reading that says build
+            // phase 1 — not a failure of the command.
+            return 0;
+          }
           default:
-            err("usage: metistry compute show | providers … | models list | assign … | budget … | cache-report   (metistry --help)");
+            err("usage: metistry compute show | providers … | models list | assign … | budget … | cache-report | route-report   (metistry --help)");
             return 2;
         }
       } catch (e) {

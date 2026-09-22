@@ -37,7 +37,11 @@ import {
   renderModelsInstall,
   renderModelsList,
   renderProviderTest,
+  renderRouteReport,
+  routeReport,
   setBudget,
+  CLASSIFIER_FALL_THROUGH_THRESHOLD,
+  MIN_ROUTED_FOR_A_READING,
   type ComputeOptions,
 } from "../src/compute.js";
 import { createUi, strip } from "../src/ui.js";
@@ -887,6 +891,207 @@ describe("cache-report", () => {
     expect(out.join("\n")).not.toContain(TOKEN);
 
     expect(await main(["compute", "cache-report", "--since", "yesterday", "--instance", dir, "--product-dir", REPO], io)).toBe(1);
+    expect(errs.join("\n")).toMatch(/--since takes a number of days/);
+  });
+});
+
+// ---- route-report: PoC-20 phase 0's baseline ---------------------------------
+//
+// One fake: the console, answering the named query through the generic door.
+// There is no second source to join — how the router decides is `rules.yaml`,
+// which the owner reads directly — so everything asserted here is the verdict
+// the owner would quote in a PR, and the two readings that have to come
+// before it.
+describe("route-report", () => {
+  const TOKEN = "local-owner-token-never-in-output";
+
+  /** The query's rows, in the shape pg hands them back: bigint and numeric both as STRINGS. */
+  function rowsFor(opts: { routed: number; fallThrough: number; unrouted?: number; firstWords?: Array<[string, number]> }) {
+    const unrouted = opts.unrouted ?? 0;
+    const kinds: Array<[string, number]> = [
+      ["note", 0],
+      ["fast_path", Math.max(0, opts.routed - opts.fallThrough)],
+      ["override", 0],
+      ["default", opts.fallThrough],
+    ];
+    const share = (n: number, d: number): string | null => (d > 0 ? (n / d).toFixed(4) : null);
+    return [
+      {
+        row_kind: "total",
+        ord: 0,
+        label: null,
+        n: String(opts.routed + unrouted),
+        denominator: null,
+        share: null,
+        messages: String(opts.routed + unrouted),
+        routed: String(opts.routed),
+        unrouted: String(unrouted),
+        fall_through: String(opts.fallThrough),
+        since: "2026-08-24T09:00:00.000Z",
+        until: "2026-09-22T18:00:00.000Z",
+      },
+      ...kinds.map(([label, n], i) => ({ row_kind: "kind", ord: i + 1, label, n: String(n), denominator: String(opts.routed), share: share(n, opts.routed) })),
+      { row_kind: "tier", ord: 5, label: "default", n: String(opts.fallThrough), denominator: String(opts.routed), share: share(opts.fallThrough, opts.routed) },
+      { row_kind: "rule", ord: 6, label: "open_work", n: String(opts.routed - opts.fallThrough), denominator: String(opts.routed - opts.fallThrough), share: share(1, 1) },
+      { row_kind: "length", ord: 7, label: "<=5 words", n: String(opts.fallThrough), denominator: String(opts.fallThrough), share: share(opts.fallThrough, opts.fallThrough) },
+      { row_kind: "length", ord: 8, label: "6-15 words", n: "0", denominator: String(opts.fallThrough), share: share(0, opts.fallThrough) },
+      { row_kind: "length", ord: 9, label: "16-40 words", n: "0", denominator: String(opts.fallThrough), share: share(0, opts.fallThrough) },
+      { row_kind: "length", ord: 10, label: ">40 words", n: "0", denominator: String(opts.fallThrough), share: share(0, opts.fallThrough) },
+      ...(opts.firstWords ?? ([["what", opts.fallThrough]] as Array<[string, number]>)).map(([label, n]) => ({
+        row_kind: "first_word",
+        ord: 11,
+        label,
+        n: String(n),
+        denominator: String(opts.fallThrough),
+        share: share(n, opts.fallThrough),
+      })),
+    ];
+  }
+
+  function consoleServing(rows: unknown[], status = 200) {
+    const calls: string[] = [];
+    const fn = (async (input: string | URL | Request, init?: RequestInit) => {
+      calls.push(String(input));
+      const auth = (init?.headers as Record<string, string> | undefined)?.authorization;
+      if (auth !== `Bearer ${TOKEN}`) return new Response(JSON.stringify({ error: { code: "unauthorized" } }), { status: 401 });
+      if (status !== 200) return new Response(JSON.stringify({ error: { code: "unknown_query", message: "no such query" } }), { status });
+      return new Response(JSON.stringify({ rows, as_of: "2026-09-22T12:00:00.000Z" }), { status: 200, headers: { "content-type": "application/json" } });
+    }) as unknown as typeof fetch;
+    return { fn, calls };
+  }
+
+  const reportOpts = (dir: string, fetchFn: typeof fetch): ComputeOptions =>
+    harness(dir, { platform: "linux", env: { METISTRY_LOCAL_OWNER_TOKEN: TOKEN }, fetchFn }).o;
+
+  it("reads inbound_messages.meta.route through the generic query door and nowhere else, over a 30-day default window", async () => {
+    const dir = await instance();
+    const c = consoleServing(rowsFor({ routed: 100, fallThrough: 55, unrouted: 3 }));
+    const r = await routeReport({ ...reportOpts(dir, c.fn) });
+    // 30, not `parseSince`'s 7: §5.2 wants a real month of typing
+    expect(c.calls).toEqual(["http://127.0.0.1:8080/api/q/route_report?days=30"]);
+    expect(r.since_days).toBe(30);
+    expect(r.as_of).toBe("2026-09-22T12:00:00.000Z");
+    // bigint-as-string off the wire must come back a number, shares included
+    expect(r.totals).toMatchObject({ messages: 103, routed: 100, unrouted: 3, fall_through: 55, fall_through_share: 0.55 });
+    expect(r.kinds.map((k) => k.label)).toEqual(["note", "fast_path", "override", "default"]);
+    expect(r.kinds.find((k) => k.label === "default")).toMatchObject({ n: 55, share: 0.55, denominator: 100 });
+    expect(r.lengths.every((l) => l.denominator === 55)).toBe(true); // over the FALL-THROUGHS
+    expect(r.threshold).toBe(CLASSIFIER_FALL_THROUGH_THRESHOLD);
+
+    const c2 = consoleServing(rowsFor({ routed: 100, fallThrough: 55 }));
+    expect((await routeReport({ ...reportOpts(dir, c2.fn), since: "2w" })).since_days).toBe(14);
+    expect(c2.calls).toEqual(["http://127.0.0.1:8080/api/q/route_report?days=14"]);
+  });
+
+  it("the share is taken over ROUTED messages, never over every message — an unrouted one is not a fall-through", async () => {
+    const dir = await instance();
+    // 40 fall-throughs, 60 routed, and 900 the console filed with no ruleset
+    // loaded. Over every message that is 4%; over routed it is 66.7%, which
+    // is the number §5.2's rule is drawn on.
+    const r = await routeReport({ ...reportOpts(dir, consoleServing(rowsFor({ routed: 60, fallThrough: 40, unrouted: 900 })).fn) });
+    expect(r.totals.fall_through_share).toBeCloseTo(40 / 60, 4);
+    expect(r.verdict.line).toContain("66.7%");
+    expect(r.verdict.line).toContain("900 more carried no routing decision");
+  });
+
+  it("under the ~40% line the verdict says write fast_path rules and stop; over it, phase 1 — and both cite the research", async () => {
+    const dir = await instance();
+    const low = await routeReport({ ...reportOpts(dir, consoleServing(rowsFor({ routed: 200, fallThrough: 50 })).fn) });
+    expect(low.verdict.status).toBe("ok");
+    expect(low.verdict.line).toContain("25%");
+    expect(low.verdict.line).toMatch(/write fast_path rules instead/);
+    expect(low.verdict.line).toMatch(/phase 1 is not warranted/);
+    expect(low.verdict.line).toContain("2026-09-21-intent-classification-tier.md §5.2");
+
+    const high = await routeReport({ ...reportOpts(dir, consoleServing(rowsFor({ routed: 200, fallThrough: 160 })).fn) });
+    expect(high.verdict.status).toBe("degraded");
+    expect(high.verdict.line).toContain("80%");
+    expect(high.verdict.line).toMatch(/phase 1 .* is worth building/);
+    expect(high.verdict.line).toContain("2026-09-21-intent-classification-tier.md §5.2");
+    // the free half of the answer is still the free half, whichever side it lands
+    expect(high.verdict.line).toMatch(/fast_path rules/);
+  });
+
+  it("a thin window still reports its number, with the caveat attached rather than the number withheld", async () => {
+    const dir = await instance();
+    const thin = await routeReport({ ...reportOpts(dir, consoleServing(rowsFor({ routed: MIN_ROUTED_FOR_A_READING - 1, fallThrough: 20 })).fn) });
+    expect(thin.totals.fall_through_share).toBeCloseTo(20 / 29, 4);
+    expect(thin.verdict.line).toMatch(/only 29 routed messages/);
+    expect(thin.verdict.line).toMatch(/widen --since/);
+    const wide = await routeReport({ ...reportOpts(dir, consoleServing(rowsFor({ routed: 200, fallThrough: 160 })).fn) });
+    expect(wide.verdict.line).not.toMatch(/widen --since/);
+  });
+
+  it("messages that carry no routing decision at all are a CONFIGURATION finding, not a router one", async () => {
+    // The distinction `route_report.yaml` keeps `unrouted` apart for. Telling
+    // someone to build a classifier because their console loaded no ruleset
+    // is the one wrong answer this report could give.
+    const dir = await instance();
+    const r = await routeReport({ ...reportOpts(dir, consoleServing(rowsFor({ routed: 0, fallThrough: 0, unrouted: 40 })).fn) });
+    expect(r.totals).toMatchObject({ messages: 40, routed: 0, fall_through_share: null });
+    expect(r.verdict.status).toBe("n/a");
+    expect(r.verdict.line).toMatch(/NOT ONE carries a routing decision/);
+    expect(r.verdict.line).toMatch(/rules\.yaml/);
+    expect(r.verdict.line).not.toMatch(/fast_path rules instead/);
+  });
+
+  it("an empty window is n/a and renders as a sentence, not as five empty tables", async () => {
+    const dir = await instance();
+    const r = await routeReport({ ...reportOpts(dir, consoleServing(rowsFor({ routed: 0, fallThrough: 0 })).fn) });
+    expect(r.totals.messages).toBe(0);
+    expect(r.verdict.status).toBe("n/a");
+    expect(r.verdict.line).toMatch(/no messages in the last 30d/);
+    const plain = renderRouteReport(r, createUi({ env: {} }));
+    expect(plain).toContain("No messages in this window");
+    expect(plain).not.toContain("where messages went");
+    expect(strip(plain)).toBe(plain);
+  });
+
+  it("renders a table per question, each saying what its share is over, with the verdict under them", async () => {
+    const dir = await instance();
+    const r = await routeReport({
+      ...reportOpts(dir, consoleServing(rowsFor({ routed: 120, fallThrough: 90, unrouted: 2, firstWords: [["what", 40], ["/todo", 25], ["(other)", 25]] })).fn),
+    });
+    const plain = renderRouteReport(r, createUi({ env: {} }));
+    expect(plain).toContain("router baseline, last 30d");
+    expect(plain).toContain("where messages went");
+    expect(plain).toContain("share of routed messages");
+    expect(plain).toContain("share of fall-throughs");
+    expect(plain).toContain("/todo");
+    expect(plain).toContain("75%");
+    expect(plain).toContain("fall-through");
+    expect(strip(plain)).toBe(plain); // rule 1: no colour on a pipe, and the words carry the meaning
+    expect(plain).toMatch(/(\[!\]|\[ok\])/); // the ASCII status icon a non-UTF-8 terminal gets
+    expect(plain).not.toContain(TOKEN);
+  });
+
+  it("a console that does not know the query says so, with the command that lands it", async () => {
+    const dir = await instance();
+    await expect(routeReport({ ...reportOpts(dir, consoleServing([], 404).fn) })).rejects.toThrow(/metistry update/);
+  });
+
+  it("the command prints one JSON document, exits 0 on the reading that says build phase 1, and refuses an unparseable --since", async () => {
+    const dir = await instance();
+    const out: string[] = [];
+    const errs: string[] = [];
+    const c = consoleServing(rowsFor({ routed: 120, fallThrough: 90 }));
+    const exec: Exec = async (cmd, args) =>
+      cmd === "security" && args[0] === "find-generic-password" && args.includes("metistry:METISTRY_LOCAL_OWNER_TOKEN")
+        ? { code: 0, stdout: `${TOKEN}\n`, stderr: "" }
+        : { code: 44, stdout: "", stderr: "not found" };
+    const io = { out: (s: string) => out.push(s), err: (s: string) => errs.push(s), platform: "darwin" as const, uid: 501, fetchFn: c.fn, exec };
+    const code = await main(["compute", "route-report", "--since", "3m", "--json", "--instance", dir, "--product-dir", REPO], io);
+    // "build phase 1" is a READING, not a failure of the command
+    expect(errs.join("\n")).toBe("");
+    expect(code).toBe(0);
+    const doc = JSON.parse(out.join("\n"));
+    expect(doc).toMatchObject({ since_days: 90, threshold: CLASSIFIER_FALL_THROUGH_THRESHOLD });
+    expect(doc.verdict.status).toBe("degraded");
+    expect(doc.totals.fall_through).toBe(90);
+    expect(strip(out.join("\n"))).toBe(out.join("\n")); // rule 2: `--json` is never coloured
+    expect(out.join("\n")).not.toContain(TOKEN);
+
+    expect(await main(["compute", "route-report", "--since", "yesterday", "--instance", dir, "--product-dir", REPO], io)).toBe(1);
     expect(errs.join("\n")).toMatch(/--since takes a number of days/);
   });
 });

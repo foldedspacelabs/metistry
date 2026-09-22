@@ -7,12 +7,14 @@ table, like everything else.
 """
 from lib import *
 
-CW,CH=2440,2240
+CW,CH=2440,2980
 
 def win(T,inner):
+    """Settings ▸ Resources (ruled 2026-09-22). It came off the top-level nav, which
+    is what took the sidebar back to eight rows."""
     return (f'<div style="flex-grow: 1; min-width: 0; border: 1px solid {T["bc"]}; border-radius: 14px; '
             f'overflow: hidden; background: {T["bg"]};">{toolbar(T)}'
-            f'<div style="display: flex; align-items: stretch;">{sidebar8(T,"Resources")}{inner}</div></div>')
+            f'<div style="display: flex; align-items: stretch;">{settingsnav(T)}{inner}</div></div>')
 
 def toolrow(T,name,desc,*,destructive=False,granted=True,last=False):
     m=""
@@ -45,18 +47,7 @@ def conndetail(T,w=None):
         + kv(T,"Credential","Held by Metistry &mdash; never handed to an agent")
         + kv(T,"Reachable From","This machine only &mdash; no agent can reach it directly")
         + kv(T,"Last Checked","4 minutes ago &middot; 14 tools discovered",last=True))
-    tools=sunk(T,
-        f'<div style="display: grid; grid-template-columns: 15px 190px minmax(0,1fr) 120px; gap: 12px; '
-        f'padding-bottom: 7px; border-bottom: 1px solid {T["border"]}; font-size: 10.5px; font-weight: 700; '
-        f'letter-spacing: 0.07em; color: {T["tt"]};">'
-        f'<span></span><span>TOOL</span><span>WHAT IT DOES</span><span></span></div>'
-        + f'<div style="margin-top: 3px;">'
-        + toolrow(T,"search_issues","Finds issues by project, status or text")
-        + toolrow(T,"get_issue","Reads one issue and its comments")
-        + toolrow(T,"add_comment","Writes a comment other people will see",destructive=True)
-        + toolrow(T,"transition_issue","Moves an issue between statuses",destructive=True,granted=False)
-        + toolrow(T,"delete_issue","Removes an issue",destructive=True,granted=False,last=True)
-        + '</div>')
+    tools=toolblock(T)
     lent=sunk(T,
         linkrow(T,"collator","Read issues in 3 projects &middot; comment, asking first")
         + linkrow(T,"drey-dev","Read issues in 1 project")
@@ -64,7 +55,7 @@ def conndetail(T,w=None):
     return (f'<div style="{wd} background: {T["bg"]};">{head}'
             f'<div style="padding: 16px; display: flex; flex-direction: column; gap: 16px;">'
             + block(T,"THE CONNECTION",conn)
-            + block(T,"TOOLS THIS SERVER OFFERS",tools)
+            + block(T,"TOOLS — THREE STATES, SET HERE",tools)
             + block(T,"LENT TO",lent)
             + '</div></div>')
 
@@ -91,6 +82,33 @@ CONTRACT=pan(L,"THE BRIDGE CONTRACT ALREADY WROTE THE RULES",
         "work before doing it.",12)
   + nt(L,"<b>Per tool, not per server.</b> Nobody who clicks <i>grant Jira</i> means <i>including delete_issue</i>. "
         "A server-level switch is the shape that produces that mistake, so there isn't one.",12))
+
+APPROVE=pan(L,"WHAT &ldquo;ASK&rdquo; ACTUALLY LOOKS LIKE — AND THE PROBLEM IN IT",
+  nt(L,"<b>The channel already exists.</b> An <i>Ask</i> tool call is a request in <b>Needs You</b>, answered with "
+       "the four answers every request takes, and delivered by web push when you are away — "
+       "<b>NOTIFICATION_TITLE</b> already maps <b>alert</b> to &ldquo;Needs You&rdquo; and <b>web-push</b> is "
+       "already a dependency. No dialogue: a dialogue assumes someone is sitting there, which is exactly the case "
+       "that does not hold.")
+  + f'<div style="background: {L["degq"]}; border-radius: 10px; padding: 13px 15px; margin-top: 14px;">'
+    f'<div style="display: flex; align-items: center; gap: 8px;">'
+    f'<span style="display: flex; color: {L["deg"]};">{ic(I["warn"],14,2)}</span>'
+    f'<span style="font-size: 12.5px; font-weight: 600; color: {L["tp"]};">A synchronous approval inside an '
+    f'unattended run is a contradiction</span></div>'
+    f'<div style="font-size: 12px; color: {L["tp"]}; line-height: 1.55; margin-top: 6px;">Morning Digest runs at '
+    f'6:02 AM and wants to comment on PROJ-412. You are asleep. Blocking means the routine is half-done for three '
+    f'hours; failing means it produced nothing because of a step that was never urgent.</div></div>'
+  + nt(L,"<b>The answer that matches everything else in the product: the run finishes without it, and says so.</b> "
+        "The output carries the line <i>I would have commented on PROJ-412 — that needs your approval</i>, and the "
+        "request lands in Needs You. Nothing blocks, nothing is half-applied, and the fact is reported rather than "
+        "silently dropped. It is the same discipline as <b>later</b> not blocking, and as a failed action leaving "
+        "its row pending.",14)
+  + nt(L,"<b>And a guardrail:</b> a tool marked <i>Previews first</i> — destructive, by the bridge contract — should "
+        "not be grantable as <b>On</b> to an unattended routine at all. <b>Ask</b> is the most it can hold, and "
+        "<i>Ask</i> there means the run reports and moves on. An interactive agent Metis is delegating to <i>can</i> "
+        "wait, because you are in the conversation.",12)
+  + nt(L,"So the three states mean slightly different things by context, and that is worth stating rather than "
+        "papering over: on an agent you are talking to, <b>Ask</b> pauses. On a routine at 6 AM, <b>Ask</b> "
+        "defers.",12))
 
 FOUND=pan(L,"WHAT THIS NEEDS, AND THE ONE THING IT CHANGES ELSEWHERE",
   "".join(f'<div style="display: flex; gap: 10px; align-items: flex-start; padding: 7px 0;'
@@ -119,7 +137,8 @@ body=(heading("ROUND E · SCREEN 9, NEW","Resources — the connections Metistry
         + f'<div style="width: 700px; flex-shrink: 0;">{sub("ONE CONNECTION",L["tt"])}'
         + f'<div style="border: 1px solid {L["bc"]}; border-radius: 12px; overflow: hidden;">{conndetail(L)}</div></div>'
         + f'<div style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column; gap: 18px;">'
-        + WHY + CONTRACT + FOUND + '</div></div>',18)
+        + WHY + CONTRACT + '</div></div>',18)
+  + row(APPROVE+FOUND,18)
   + row(f'<div style="background: {D["bg"]}; border-radius: 14px; padding: 22px; flex-grow: 1;">'
         + sub("DARK",D["tt"])
         + f'<div style="border: 1px solid {D["bc"]}; border-radius: 12px; overflow: hidden;">{resourcelist(D)}</div></div>',18))

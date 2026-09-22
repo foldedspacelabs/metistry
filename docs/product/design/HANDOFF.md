@@ -101,10 +101,10 @@ disagree, the newer three win and the disagreement gets logged.
 
 ## 3. What is ratified — do not re-litigate
 
-**Navigation.** **Nine** rows as of 2026-09-22 — see C57, which is the standing
-warning that the seven-row rule has been broken three times with the same
-argument. Was **eight** on 2026-09-21: **Today · Chat · Activity ·
-Work ▸ · Knowledge ▸ · Routines · Resources · Agents**, then **Pinned**. Routines went
+**Navigation.** **Eight** rows as of 2026-09-22 — see C57. Resources was briefly
+a ninth and moved to Settings, so the standing rule is: **a third break should
+move something out rather than add a row.** **Today · Chat · Activity ·
+Work ▸ · Knowledge ▸ · Routines · Agents · Routines**, then **Pinned**. Routines went
 top-level for C30's own reason — it is not a kind of agent, and a child row
 would bury a daily question (C50). Today is first and top-level (C30) — it holds
 meetings, artifacts, requests and agent status, none of which Work owns. Work's
@@ -190,7 +190,7 @@ SwiftUI's `.serif`.
 | Board | `screen-06-board.md` | done — five columns |
 | Agents | `screen-07-agents.md` | **rewritten 2026-09-21** — roster, a local agent, a connected agent |
 | Routines | `screen-08-routines.md` | done — the schedule, one routine |
-| Resources | `screen-09-resources.md` | done — the connections, one connection |
+| Settings ▸ Resources | `screen-09-resources.md` | done — the connections, one connection, three states per tool |
 | Facets & colour | `facets-and-colour.md` | the system itself |
 
 **Not drawn:** card detail popover, Projects, Artifacts, Rooms, Knowledge,
@@ -220,7 +220,7 @@ the canvas is now generated from a module in `boards/` except `Facets`, `Plugin`
 `Voice` and `Item-Model`. `bellpanel()` is gone — it drew the *"1 snoozed"*
 header C21 killed; `panel2()` is the panel.
 
-**58 contradictions** are logged in `review-00-plan.md`. C38 is closed. C40–C49 are
+**60 contradictions** are logged in `review-00-plan.md`. C38 is closed. C40–C49 are
 round E's. Two of them are rules the system is missing rather than faults in a
 file: **C45** (a failed consequential operation leaves the request pending) and
 **C49** (a mark that carries meaning takes an ink token, never a border token —

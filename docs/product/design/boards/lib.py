@@ -277,26 +277,9 @@ def reqcard(T,*,glyph,typ,title,agent,when,prev="",acts=True,icons=True,state="p
     return (f'<div style="{w} background: {T["surface"]}; border: 1px solid {T["border"]}; border-radius: 12px; '
             f'padding: 16px; box-sizing: border-box;">{head_row(T,glyph,typ,agent,when)}{ttl}{prev}{a}</div>')
 
-def bellpanel(T):
-    cards=(reqcard(T,glyph=I["key"],typ="ACCESS",title='Read <span style="font-family: '+MONO+'; font-size: 13px;">Areas/Finance</span>',
-             agent="drey-dev",when="12m",prev=scope_preview(T))
-           + reqcard(T,glyph=I["book"],typ="NOTE",title="Keep the note on lease renewal",agent="assistant",when="1h",
-             prev=note_preview(T)))
-    return (f'<div style="width: 400px; background: {T["elevated"]}; border: 1px solid {T["bs"]}; border-radius: 14px; '
-            f'box-shadow: 0 10px 34px rgba(26,24,21,0.16); overflow: hidden; display: flex; flex-direction: column;">'
-            f'<div style="padding: 14px 16px; border-bottom: 1px solid {T["border"]};">'
-            f'<div style="display: flex; align-items: baseline; gap: 8px;">'
-            f'<span style="font-size: 13px; font-weight: 600; color: {T["tp"]};">Needs You</span>'
-            f'<span style="font-size: 12px; color: {T["ts"]};">4 waiting · 1 snoozed</span></div>'
-            f'<div style="display: flex; gap: 6px; margin-top: 11px; flex-wrap: wrap;">'
-            + "".join(f'<span style="padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 500; '
-                      f'background: {T["accq"] if s else "transparent"}; color: {T["acc"] if s else T["ts"]}; '
-                      f'border: 1px solid {"transparent" if s else T["border"]};">{t}</span>'
-                      for t,s in [("All",True),("Access",False),("Notes",False),("Reviews",False)])
-            + '</div></div>'
-            f'<div style="padding: 12px; display: flex; flex-direction: column; gap: 10px; background: {T["bg"]};">{cards}</div>'
-            f'<div style="padding: 11px 16px; border-top: 1px solid {T["border"]};">'
-            f'<span style="font-size: 12px; font-weight: 600; color: {T["acc"]};">Show all 12 →</span></div></div>')
+# `bellpanel()` was removed in round E: its header read "4 waiting · 1 snoozed", and
+# C21 established that the query cannot count snoozed rows. `panel2()` is the
+# corrected panel — use it.
 
 
 # ===================== NEEDS YOU — bell, panel, list ======================
@@ -1751,8 +1734,6 @@ CALP2=pan(L,"A CALENDAR CHANGE IS A SHAPE, NOT A DIFF",
          "template change. One grammar per kind of change, rather than one grammar stretched over both.",12))
 
 # ============ PLUGIN — overlay hint, editable chips ======================
-OB_L=dict(bg="#ffffff",text="#2e3338",faint="#6e7683",rule="#e3e5e8",sel="#e8eaed")
-OB_D=dict(bg="#1e1e1e",text="#dcddde",faint="#8f9094",rule="#33363a",sel="#2c2f33")
 
 def editor(T,OB,*,active_hint=True,w=470):
     line=lambda t,extra="": (f'<div style="position: relative; padding: 2px 0; font-size: 14px; '
@@ -1827,28 +1808,6 @@ CHIPEDP=pan(L,"AND A CHIP IS A CONTROL, NOT A LABEL",
   + '</div></div>')
 
 # ============ REBUILD THE THREE BOARDS ==================================
-def sidebar8(T,sel="Today"):
-    out=[]
-    for n,g,kids in [("Today",I["cal"],None),("Chat",I["chat"],None),("Activity",I["activity"],None),
-                     ("Work",I["work"],True),("Knowledge",I["know"],None),("Agents",I["agents"],None)]:
-        on=(n==sel)
-        out.append(f'<div style="position: relative; display: flex; align-items: center; gap: 10px; padding: 8px 12px; '
-                   f'border-radius: 8px; background: {T["accq"] if on else "transparent"};">'
-                   + (f'<span style="position: absolute; left: 0; top: 6px; bottom: 6px; width: 3px; '
-                      f'border-radius: 0 3px 3px 0; background: {T["acc"]};"></span>' if on else "")
-                   + f'<span style="display: flex; color: {T["acc"] if on else T["ts"]};">{ic(g)}</span>'
-                     f'<span style="font-size: 13px; font-weight: {600 if on else 500}; color: {T["tp"]}; '
-                     f'flex-grow: 1;">{n}</span>'
-                   + (f'<span style="display: flex; color: {T["tt"]};">{ic(I["chevr"],12,2.2)}</span>' if kids else "")
-                   + '</div>')
-    out.append(f'<div style="margin-top: 10px; padding: 8px 12px 4px; border-top: 1px solid {T["border"]};">'
-               f'<span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["tt"]};">PINNED</span></div>')
-    for p in ["Lease Renewal","Settings Pane"]:
-        out.append(f'<div style="display: flex; align-items: center; gap: 10px; padding: 6px 12px;">'
-                   f'<span style="display: flex; color: {T["tt"]};">{ic(I["note"],15,1.8)}</span>'
-                   f'<span style="font-size: 12.5px; color: {T["ts"]};">{p}</span></div>')
-    return (f'<div style="width: 178px; padding: 12px 8px; background: {T["sunken"]}; '
-            f'border-right: 1px solid {T["border"]}; flex-shrink: 0;">' + "".join(out) + '</div>')
 
 def meeting5(T,*,time,title,sub,preps,gen=None,pred=None,series=False,last=False):
     ser=""
@@ -2374,3 +2333,140 @@ def roster(T,w=None):
           + credrow(T,id_="research-crew",role="a crew",scope="folders · 2",spend="$1.90",seen="3h",
               state="interrupted",note="a lease expired 20m ago and the claim is still held",last=True))
     return (f'<div style="{wd} background: {T["bg"]};">{head}{rows}{revokedgroup(T)}</div>')
+
+
+# ===================== CHAT — the transcript, waiting, the picker ============
+# Round C/D board, ported in round E. Two rulings from the owner's review are
+# built in: only the user's turns carry a fill, and the column is capped and
+# centred so resizing moves it without ever rewrapping a line.
+
+MEASURE=620
+
+def userturn(T,text,when="8:46 AM",w=MEASURE):
+    return (f'<div style="width: {w}px; box-sizing: border-box;">'
+            f'<div style="display: flex; align-items: baseline; gap: 8px; margin-bottom: 5px;">'
+            f'<span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["ts"]};">YOU</span>'
+            f'<span style="font-size: 11px; color: {T["tt"]};">{when}</span></div>'
+            f'<div style="background: {T["accq"]}; border-radius: 12px; padding: 12px 14px; font-size: 13.5px; '
+            f'color: {T["tp"]}; line-height: 1.55;">{text}</div></div>')
+
+def replyturn(T,text,*,when="8:47 AM",quotebar=False,w=MEASURE,state=None):
+    """No container at all (drawn), or a 2px `agent` left rule (the alternative
+    §2.1 puts beside it). A reply is the longest text in the product; the full
+    column is worth more than the symmetry."""
+    bar=f'border-left: 2px solid {T["ag"]}; padding-left: 16px;' if quotebar else ''
+    return (f'<div style="width: {w}px; box-sizing: border-box; {bar}">'
+            f'<div style="display: flex; align-items: center; gap: 7px; margin-bottom: 6px;">'
+            f'<span style="display: flex; color: {T["ag"]};">{ic(I["spark"],13,2.2)}</span>'
+            f'<span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["ag"]};">ASSISTANT</span>'
+            f'<span style="font-size: 11px; color: {T["tt"]};">{when}</span>'
+            f'<span style="flex-grow: 1;"></span>{thumbs(T,state)}</div>'
+            f'<div style="font-family: {SERIF}; font-size: 14.5px; color: {T["tp"]}; line-height: 1.62;">{text}</div></div>')
+
+def waitdots(T,reduced=False):
+    op=["0.5","0.5","0.5"] if reduced else ["1","0.55","0.3"]
+    dots="".join(f'<span style="width: 5px; height: 5px; border-radius: 50%; background: {T["ag"]}; '
+                 f'opacity: {o};"></span>' for o in op)
+    return (f'<span style="display: inline-flex; align-items: center; gap: 9px;">'
+            f'<span style="display: inline-flex; gap: 4px; align-items: center;">{dots}</span>'
+            f'<span style="font-size: 12.5px; color: {T["ts"]};">working</span></span>')
+
+def toolstrip(T,*,tool="knowledge_search",n=2,secs="6s",collapsed=False):
+    if collapsed:
+        return (f'<span style="display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: {T["ts"]};">'
+                f'{mono(tool,T["ts"],11.5)}<span style="opacity: 0.45;">·</span>{n} tools<span style="opacity: 0.45;">·</span>{secs}</span>')
+    return (f'<span style="display: inline-flex; align-items: center; gap: 8px;">'
+            f'<span style="display: flex; color: {T["ag"]};">{ic(I["spark"],12,2.2)}</span>'
+            f'{mono(tool,T["tp"],12)}<span style="font-size: 12px; color: {T["ts"]};">'
+            f'<span style="opacity: 0.45;">·</span> {n} tools <span style="opacity: 0.45;">·</span> {secs}</span></span>')
+
+def waitcase(T,label,inner,why,*,last=False):
+    return (f'<div style="padding: 11px 0;'
+            + ("" if last else f' border-bottom: 1px solid {T["border"]};') + '">'
+            f'<div style="display: flex; align-items: center; gap: 12px;">'
+            f'<span style="width: 132px; flex-shrink: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.07em; '
+            f'color: {T["tt"]};">{label}</span>{inner}</div>'
+            f'<div style="font-size: 11.5px; color: {T["ts"]}; line-height: 1.5; margin-top: 6px; '
+            f'padding-left: 144px;">{why}</div></div>')
+
+def wait60(T):
+    return (f'<span style="display: inline-flex; align-items: center; gap: 8px; background: {T["degq"]}; '
+            f'border-radius: 8px; padding: 4px 10px;">'
+            f'<span style="font-size: 12.5px; color: {T["tp"]};">working</span>'
+            f'<span style="font-size: 12px; color: {T["deg"]};">· nothing back for 62s</span></span>')
+
+def chatcomposer(T,*,inflight=False,w=MEASURE):
+    act = btn(T,"Stop","secondary",I["x"]) if inflight else btn(T,"Send","affirm")
+    return (f'<div style="width: {w}px; box-sizing: border-box; background: {T["surface"]}; '
+            f'border: 1px solid {T["bc"]}; border-radius: 12px; padding: 12px 14px;">'
+            f'<div style="font-size: 13.5px; color: {T["tt"]};">Ask anything&hellip;</div>'
+            f'<div style="display: flex; align-items: center; gap: 8px; margin-top: 12px;">'
+            # the chip OPENS the menu, so its outline is a control boundary: `bc`, not the
+            # divider token `border`, which sits at 1.32:1 on surface (C49's fault class again)
+            f'<span style="display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 999px; '
+            f'border: 1px solid {T["bc"]}; font-size: 11.5px; color: {T["ts"]};">'
+            f'fast <span style="opacity: 0.45;">·</span> medium'
+            f'<span style="display: flex; color: {T["tt"]};">{ic(I["chevd"],11,2.2)}</span></span>'
+            f'<span style="flex-grow: 1;"></span>{act}</div></div>')
+
+def menurow2(T,label,why,*,sel=False,disabled=False,last=False):
+    ink = T["tt"] if disabled else (T["acc"] if sel else T["tp"])
+    ck=(f'<span style="display: flex; color: {T["acc"]}; flex-shrink: 0;">{ic(I["check"],13,2.6)}</span>'
+        if sel else '<span style="width: 13px; flex-shrink: 0;"></span>')
+    return (f'<div style="display: flex; gap: 9px; align-items: flex-start; padding: 7px 12px; '
+            f'background: {T["accq"] if sel else "transparent"};'
+            + ("" if last else f' border-bottom: 1px solid {T["border"]};') + '">'
+            f'{ck}<div style="min-width: 0;">'
+            f'<div style="font-size: 12.5px; font-weight: {600 if sel else 500}; color: {ink};">{label}</div>'
+            f'<div style="font-size: 11.5px; color: {T["ts"]}; line-height: 1.45; margin-top: 2px;">{why}</div>'
+            f'</div></div>')
+
+def modelmenu(T,w=330):
+    def sec(t,inner):
+        return (f'<div style="padding: 9px 12px 4px;"><span style="font-size: 10.5px; font-weight: 700; '
+                f'letter-spacing: 0.08em; color: {T["tt"]};">{t}</span></div>{inner}')
+    return (f'<div style="width: {w}px; flex-shrink: 0; background: {T["elevated"]}; border: 1px solid {T["bs"]}; '
+            f'border-radius: 12px; box-shadow: 0 10px 34px rgba(26,24,21,0.16); overflow: hidden;">'
+            f'<div style="padding: 12px 14px; border-bottom: 1px solid {T["border"]}; background: {T["sunken"]};">'
+            f'<div style="font-size: 12px; color: {T["tp"]};">The router picked {mono("fast",T["tp"],11.5)} for this turn</div>'
+            f'<div style="font-size: 11px; color: {T["ts"]}; margin-top: 3px;">No model decides which model runs '
+            f'(invariant 4), so the menu says that before it offers you anything.</div></div>'
+            + sec("PRESET",
+                menurow2(T,"fast","short answers, cheapest tier",sel=True)
+                + menurow2(T,"deep","long reasoning, higher cost")
+                + menurow2(T,"research","web and vault sweep before answering")
+                + menurow2(T,"shadow","runs a candidate model beside the answer",disabled=True,last=True))
+            + f'<div style="padding: 6px 12px 10px; font-size: 11px; color: {T["ts"]}; '
+              f'border-bottom: 1px solid {T["border"]};">'
+              f'{mono("shadow",T["ts"],11)} is listed and disabled with its reason, never hidden (P4): '
+              f'{mono("rules.yaml",T["ts"],11)} has no shadow tier on this instance.</div>'
+            + sec("MODEL",
+                menurow2(T,"claude-sonnet-5","anthropic",sel=True)
+                + menurow2(T,"llama-4-70b","local &middot; lm studio",last=True))
+            + f'<div style="padding: 10px 12px; border-top: 1px solid {T["border"]}; '
+              f'border-bottom: 1px solid {T["border"]};">'
+              f'<div style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["tt"]}; '
+              f'margin-bottom: 7px;">EFFORT</div>{seg3(T,["low","medium","high"],"medium")}</div>'
+            + f'<div style="padding: 10px 12px; display: flex; align-items: center; gap: 10px;">'
+              f'{seg3(T,["this turn","this conversation"],"this turn")}'
+              f'<span style="flex-grow: 1;"></span>'
+              f'<span style="font-size: 11.5px; font-weight: 600; color: {T["acc"]};">Reset</span></div></div>')
+
+def transcript(T,*,w=None,inflight=True):
+    wd=f"width: {w}px;" if w else "flex-grow: 1; min-width: 0;"
+    strip=""
+    if inflight:
+        strip=(f'<div style="width: {MEASURE}px; box-sizing: border-box;">'
+               f'<div style="display: flex; align-items: center; gap: 7px; margin-bottom: 6px;">'
+               f'<span style="display: flex; color: {T["ag"]};">{ic(I["spark"],13,2.2)}</span>'
+               f'<span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["ag"]};">ASSISTANT</span>'
+               f'<span style="font-size: 11px; color: {T["tt"]};">8:48 AM</span></div>'
+               f'<div style="background: {T["agq"]}; border-radius: 10px; padding: 10px 12px;">'
+               f'{toolstrip(T)}</div></div>')
+    return (f'<div style="{wd} background: {T["bg"]}; padding: 18px 0 16px;">'
+            f'<div style="display: flex; flex-direction: column; align-items: center; gap: 20px;">'
+            f'{userturn(T,"What is the March renewal being measured against?")}'
+            f'{replyturn(T,"The lease comparables came back 4% under his number, which is the thing you did not have on the 6th. Two of the four are in the same block and both signed inside the last quarter, so the comparison holds without needing the other two.",state="up")}'
+            f'{userturn(T,"Check the vendor folder too.",when="8:48 AM")}'
+            f'{strip}'
+            f'{chatcomposer(T,inflight=inflight)}</div></div>')

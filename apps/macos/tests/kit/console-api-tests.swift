@@ -258,8 +258,18 @@ import Testing
     let drey = registry.agents[0]
     #expect(drey.grantTier == "read")
     #expect(drey.grantAreas == ["Areas/Health"])
-    #expect(drey.autonomyLevel == "act_within_scope")
+    #expect(drey.autonomyLevel == "propose")
     #expect(!drey.pending)
+
+    // Every kind, resolved AND why (C46/C47) — read off `scope.autonomy.detailed`,
+    // never recomputed here. `task_update` is the owner's own entry, honoured;
+    // `dispatch` is nothing named, the level's own default; `comment` is the
+    // ONE case where the owner's own setting (`allow`) is being overridden by
+    // the level's ceiling (`propose`) — `asked` disagrees with `mode` only here.
+    #expect(drey.actionsDetailed["dispatch"] == AgentActionEntry(mode: "propose", source: "defaulted", ceiling: "propose"))
+    #expect(drey.actionsDetailed["task_update"] == AgentActionEntry(mode: "propose", source: "set", asked: "propose", ceiling: "propose"))
+    #expect(drey.actionsDetailed["comment"] == AgentActionEntry(mode: "propose", source: "clamped", asked: "allow", ceiling: "propose"))
+    #expect(drey.actionsDetailed["comment"]?.asked != drey.actionsDetailed["comment"]?.mode) // the mismatch IS the override
 
     // Approval is NOT a grant: a row let in still holds what it was minted
     // with. A pending row is listed and authenticates nothing.
@@ -268,6 +278,9 @@ import Testing
     #expect(devin.pending)
     #expect(devin.grantTier == "none")
     #expect(devin.grantAreas.isEmpty)
+    // no `scope` on this row (a console older than this app, or one this test
+    // never gave one) — empty, never a guess at a table.
+    #expect(devin.actionsDetailed.isEmpty)
 
     let presence = try! (await api.agentPresence()).get()
     #expect(presence.rows[0].state == "working")
@@ -843,12 +856,21 @@ enum Fixtures {
      ],"as_of":"2026-09-18T09:00:04.000Z"}
     """)
 
-    /// `listAgents`: grants, autonomy, revoked, remote, approved_at, pending.
+    /// `listAgents`: grants, autonomy, revoked, remote, approved_at, pending,
+    /// and `scope` — the row rendered (`core`'s `describeScope`), `autonomy.detailed`
+    /// included (C46/C47: `effectiveActionsDetailed`, `docs/ops/console-api.md`).
     static let agents = bytes("""
     {"agents":[
       {"id":"drey","display_name":"Drey","kind":"external",
        "grants":{"tier":"read","areas":["Areas/Health"]},"projects":["ops"],
-       "autonomy":{"level":"act_within_scope","max_open_bundles":2},
+       "autonomy":{"level":"propose","max_open_bundles":2},
+       "scope":{"role":"agent","autonomy":{"level":"propose",
+         "actions":{"dispatch":"propose","task_update":"propose","comment":"propose","capture":"deny"},
+         "detailed":{
+           "dispatch":{"mode":"propose","source":"defaulted","ceiling":"propose"},
+           "task_update":{"mode":"propose","source":"set","ceiling":"propose","asked":"propose"},
+           "comment":{"mode":"propose","source":"clamped","ceiling":"propose","asked":"allow"},
+           "capture":{"mode":"deny","source":"set","ceiling":"propose","asked":"deny"}}}},
        "created_at":"2026-09-01T00:00:00.000Z","last_seen_at":"2026-09-18T08:59:00.000Z",
        "revoked":false,"remote":false,"approved_at":"2026-09-01T00:00:00.000Z","pending":false},
       {"id":"devin","display_name":"Devin","kind":"external",

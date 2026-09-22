@@ -73,7 +73,26 @@ describe("agentAutonomy", () => {
     expect(sent.map((s) => s.path)).toEqual(["/api/agents"]); // a read is a read
     expect(v.actions).toEqual({ dispatch: "propose", task_update: "allow", comment: "allow", capture: "allow" });
     expect(v.widened).toEqual([]);
-    expect(renderAutonomy(v)).toContain("dispatch     propose");
+    // "propose" is now said as "Ask First" (C46/C47's designer wording), and
+    // this row is defaulted — nothing in the record named `dispatch` — so it
+    // says that too, not just colour (docs/ops/cli-style.md rule 1).
+    expect(renderAutonomy(v)).toContain("dispatch     Ask First (default for act_within_scope)");
+  });
+
+  it("carries WHY beside the table (C46/C47): set, defaulted, or clamped — the one place downstream reads it, rather than recomputing", async () => {
+    const { fetchFn } = fakeConsole({ level: "propose", actions: { comment: "allow", task_update: "propose" } });
+    const v = await agentAutonomy("researcher", { actions: {} }, { env, fetchFn });
+    // nothing named it: the level's own default
+    expect(v.actionsDetailed.dispatch).toEqual({ mode: "propose", source: "defaulted", ceiling: "propose" });
+    // named, and it survives the ceiling unchanged
+    expect(v.actionsDetailed.task_update).toEqual({ mode: "propose", source: "set", ceiling: "propose", asked: "propose" });
+    // named ABOVE the ceiling — the only case where the owner's own setting is overridden
+    expect(v.actionsDetailed.comment).toEqual({ mode: "propose", source: "clamped", ceiling: "propose", asked: "allow" });
+    const text = renderAutonomy(v);
+    expect(text).toContain("dispatch     Ask First (default for propose)");
+    expect(text).toContain("task_update  Ask First");
+    expect(text).not.toContain("task_update  Ask First ("); // `set` is plain — no parenthetical
+    expect(text).toContain("comment      Ask First (asked Allow — propose's ceiling is Ask First)");
   });
 
   it("merges onto the stored record and PUTs the whole thing, with the owner token in the header and nowhere else", async () => {

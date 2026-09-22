@@ -3287,3 +3287,95 @@ def settingsnav(T,sel="Resources"):
             f'<span style="font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: {T["tt"]};">SETTINGS</span>'
             f'</div>{out}</div>')
 
+
+# ============ KNOWLEDGE, screen 10 (2026-09-22) ======================
+# Three questions: what is in here, is it current, what links to what. The wire
+# serves the first and third completely and the second not at all — so the
+# unanswerable one leads, because `is this current` is what makes the rest
+# trustworthy.
+
+def srcrow(T,*,name,when,state="ok",age=None,why=None,last=False):
+    dot={"ok":f'<span style="width: 8px; height: 8px; border-radius: 50%; background: {T["ok"]};"></span>',
+         "stale":f'<span style="width: 8px; height: 8px; border-radius: 50%; background: {T["ok"]};"></span>',
+         "absent":(f'<span style="width: 8px; height: 8px; border-radius: 50%; box-sizing: border-box; '
+                   f'border: 1.5px solid {T["abs"]};"></span>'),
+         "failed":f'<span style="width: 8px; height: 8px; border-radius: 50%; background: {T["fail"]};"></span>'}[state]
+    ag=pill(T,age,T["stale"],T["staleq"],I["clock"]) if age else ""
+    w=(f'<div style="font-size: 11.5px; color: {T["ts"]}; margin-top: 3px;">{why}</div>') if why else ""
+    return (f'<div style="display: grid; grid-template-columns: 9px minmax(0,1fr) 190px; align-items: start; '
+            f'gap: 13px; padding: 10px 16px; {bd_(T,last)}">'
+            f'<span style="margin-top: 5px;">{dot}</span>'
+            f'<div><span style="display: inline-flex; align-items: center; gap: 9px;">'
+            + mono(name,T["tp"],12.5) + ag + '</span>' + w + '</div>'
+            f'<span style="font-size: 12px; color: {T["ts"]}; text-align: right; padding-top: 2px;">{when}</span></div>')
+
+def sources(T):
+    return (f'<div style="border: 1px solid {T["border"]}; border-radius: 11px; overflow: hidden; '
+            f'background: {T["bg"]};">'
+            f'<div style="display: flex; align-items: baseline; gap: 9px; padding: 11px 16px; '
+            f'background: {T["sunken"]};">'
+            f'<span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["tt"]};">SOURCES</span>'
+            f'<span style="flex-grow: 1;"></span>'
+            f'<span style="font-size: 11.5px; color: {T["ts"]};">4 sources &middot; 1 behind</span></div>'
+            + srcrow(T,name="github-state",when="checked 4 minutes ago")
+            + srcrow(T,name="aws-costs",when="checked 3 days ago",state="stale",age="3d old")
+            + srcrow(T,name="slack-bridge",when="&mdash;",state="absent",
+                     why="Never configured &mdash; set "+mono("METISTRY_SLACK_*",T["ts"],11)+" to fill this in")
+            + srcrow(T,name="devin-sessions",when="last succeeded 2 days ago",state="failed",
+                     why="The answer was an error: <b>token expired</b>",last=True) + '</div>')
+
+def pagerow(T,*,path,title,when,status="clean",last=False):
+    if status=="conflict":
+        t=(f'<span style="display: inline-flex; align-items: flex-start; gap: 7px;">'
+           f'<span style="display: flex; color: {T["deg"]}; margin-top: 1px;">{ic(I["warn"],12,2.1)}</span>'
+           f'<span style="font-size: 11.5px; color: {T["ts"]}; line-height: 1.45;">conflict &mdash; the reconciler '
+           f'couldn&rsquo;t settle this file, so its title isn&rsquo;t a fact yet</span></span>')
+        w=f'<span style="font-size: 12px; color: {T["tt"]}; text-align: right;">&mdash;</span>'
+    else:
+        t=f'<span style="font-size: 12.5px; color: {T["tp"]};">{title}</span>'
+        w=f'<span style="font-size: 12px; color: {T["ts"]}; text-align: right;">{when}</span>'
+    return (f'<div style="display: grid; grid-template-columns: 268px minmax(0,1fr) 116px; align-items: start; '
+            f'gap: 14px; padding: 9px 16px; {bd_(T,last)}">'
+            + mono(path,T["tp"] if status!="conflict" else T["ts"],12) + t + w + '</div>')
+
+def areabar(T,sel="Areas/Health"):
+    return (f'<div style="display: flex; gap: 6px; flex-wrap: wrap; padding: 0 16px 12px;">'
+            + "".join(f'<span style="padding: 3.5px 10px; border-radius: 999px; font-size: 11.5px; '
+                      f'font-weight: 500; background: {T["accq"] if a==sel else "transparent"}; '
+                      f'color: {T["acc"] if a==sel else T["ts"]}; '
+                      f'border: 1px solid {"transparent" if a==sel else T["border"]};">{a}</span>'
+                      for a in ["Areas/Fsl","Areas/Health","Areas/Ops","Journal","Me","Inbox"]) + '</div>')
+
+def knowledgepane(T,w=None):
+    wd=f"width: {w}px;" if w else "flex-grow: 1; min-width: 0;"
+    return (f'<div style="{wd} background: {T["bg"]};">'
+            f'<div style="display: flex; align-items: center; gap: 10px; padding: 14px 16px 10px;">'
+            f'<span style="font-size: 17px; font-weight: 600; color: {T["tp"]}; flex-grow: 1;">Knowledge</span>'
+            f'<span style="display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px; '
+            f'border-radius: 8px; border: 1px solid {T["bc"]}; background: {T["surface"]}; font-size: 12px; '
+            f'color: {T["tp"]};">Every area'
+            f'<span style="display: flex; color: {T["tt"]};">{ic(I["chevd"],12,2.2)}</span></span></div>'
+            f'{areabar(T)}'
+            f'<div style="padding: 0 16px 14px;">{sources(T)}</div>'
+            f'<div style="display: grid; grid-template-columns: 268px minmax(0,1fr) 116px; gap: 14px; '
+            f'padding: 6px 16px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em; color: {T["tt"]}; '
+            f'border-top: 1px solid {T["border"]};">'
+            f'<span>PATH</span><span>TITLE</span><span style="text-align: right;">MODIFIED</span></div>'
+            + pagerow(T,path="Areas/Health/sleep.md",title="Sleep",when="2 hours ago")
+            + pagerow(T,path="Areas/Health/2026/sleep.md",title="",when="",status="conflict")
+            + pagerow(T,path="Areas/Health/labs.md",title="Lab results",when="yesterday")
+            + pagerow(T,path="Areas/Health/protein.md",title="The protein blend",when="4 days ago",last=True)
+            + f'<div style="display: flex; align-items: center; gap: 8px; padding: 12px 16px; '
+              f'border-top: 1px solid {T["border"]};">'
+              f'<span style="display: flex; color: {T["tt"]};">{ic(I["lock"],13,1.9)}</span>'
+              f'<span style="font-size: 11.5px; color: {T["ts"]};"><b>3 drafts</b>, hidden here as they are hidden '
+              f'from agents.</span></div>'
+            + '</div>')
+
+def linkrow2(T,d,path,title,kind,*,last=False):
+    return (f'<div style="display: grid; grid-template-columns: 18px 230px minmax(0,1fr) 92px; align-items: center; '
+            f'gap: 12px; padding: 7px 0; {bd_(T,last)}">'
+            f'<span style="display: flex; color: {T["tt"]};">{ic(I["chevr"] if d=="out" else I["chevd"],12,2.2)}</span>'
+            + mono(path,T["tp"],11.5)
+            + f'<span style="font-size: 12px; color: {T["ts"]};">{title}</span>'
+            + f'<span style="font-size: 11px; color: {T["tt"]}; text-align: right;">{kind}</span></div>')

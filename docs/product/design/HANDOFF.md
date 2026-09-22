@@ -28,19 +28,21 @@ canvas order:
 | `States` | empty · absent · failed · stale |
 | `Request` | the request card and the bell panel |
 | `Chat` · `Activity` · `NeedsYou` · `Capture` | screens 1–4 |
-| `Today` | the first Today pass — row, chip and state vocabulary, and the **absent state** of the spine |
+| `Today` | **ported** — the row, chip and state vocabulary; the window mock removed (C51). Was: the first Today pass — row, chip and state vocabulary, and the **absent state** of the spine |
 | `Today-Hub` | **the current Today** — the spine, the day bar, calendar help |
 | `Board` | Work ▸ Board, five columns |
 | `Facets` | the three channels, the ladder, the spark |
 | `Agents` | **screen 7** — the roster, a local agent, a connected agent |
 | `Routines` | **screen 8** — the schedule, one routine, the two prompt layers |
 | `Resources` | **screen 9** — proxied MCP servers, per-tool grants |
+| `Knowledge` | **screen 10** — sources and where `stale` lands, `conflict` as `partial` |
 | `Plugin` | the Obsidian plugin — the mirror, the picker, editable chips |
 | `Voice` | six system serifs and a Times control |
 | `Item-Model` | the item contract (its ladder section is superseded by `Facets`) |
 
 `Facets`, `Plugin`, `Voice` and `Item-Model` are **not yet modules** in
-`boards/` — they were built from earlier snapshots of the library. Port each the
+`boards/` — they were built from earlier snapshots of the library. Every *screen*
+board is now a module. Port each the
 next time it changes. Everything else is a module: round E ported `States`,
 `Request`, `Chat`, `Activity` and `NeedsYou`, and added `Agents`.
 
@@ -191,10 +193,11 @@ SwiftUI's `.serif`.
 | Agents | `screen-07-agents.md` | **rewritten 2026-09-21** — roster, a local agent, a connected agent |
 | Routines | `screen-08-routines.md` | done — the schedule, one routine |
 | Settings ▸ Resources | `screen-09-resources.md` | done — the connections, one connection, three states per tool |
+| Knowledge | `screen-10-knowledge.md` | done — sources, pages, links |
 | Facets & colour | `facets-and-colour.md` | the system itself |
 
-**Not drawn:** card detail popover, Projects, Artifacts, Rooms, Knowledge,
-Usage, Settings, the Obsidian plugin's remaining surfaces.
+**Not drawn:** card detail popover, Projects, Artifacts, Rooms, Usage, Settings
+itself (only its Resources pane), the Obsidian plugin's remaining surfaces.
 
 **Run detail is now drawable, and undrawn.** `seed/queries/run_detail.yaml`
 and `GET /api/runs/:id` both exist (commit `3456aab`) — the handoff was stale on
@@ -220,7 +223,7 @@ the canvas is now generated from a module in `boards/` except `Facets`, `Plugin`
 `Voice` and `Item-Model`. `bellpanel()` is gone — it drew the *"1 snoozed"*
 header C21 killed; `panel2()` is the panel.
 
-**62 contradictions** are logged in `review-00-plan.md`. C38 is closed. C40–C49 are
+**64 contradictions** are logged in `review-00-plan.md`. C38 and C51 are closed. C40–C49 are
 round E's. Two of them are rules the system is missing rather than faults in a
 file: **C45** (a failed consequential operation leaves the request pending) and
 **C49** (a mark that carries meaning takes an ink token, never a border token —

@@ -166,20 +166,61 @@ export interface ActionAutonomy {
   actions?: Partial<Record<ActionKind, ActionMode>> | undefined;
 }
 
+/** Why one kind's effective mode is what it is (C46/C47). Three surfaces — `metistry agents autonomy`, the console's agent read, and MetistryKit — were each recomputing this from `effectiveActions` alone, which cannot tell them apart. */
+export type ActionSource = "set" | "defaulted" | "clamped";
+
+/**
+ * One kind, resolved AND explained. `mode` is what `effectiveActions` already
+ * returns; `source` is which of the three things happened; `ceiling` is what
+ * the level would allow (always present, so a renderer can say "…, ceiling is
+ * X" without a second lookup); `asked` is the record's OWN per-kind entry —
+ * present exactly when the owner set one, i.e. for `set` and `clamped`, never
+ * for `defaulted` — and it is the only source where `asked !== mode`: that
+ * mismatch IS "the owner's own setting is being overridden".
+ */
+export interface EffectiveActionEntry {
+  mode: ActionMode;
+  source: ActionSource;
+  asked?: ActionMode;
+  ceiling: ActionMode;
+}
+
+/**
+ * The record as a table: every kind, resolved and with the reason attached.
+ * The level is a CEILING, so an entry above it is clamped rather than
+ * honoured — which is what makes "immediate execution happens only at
+ * `act_within_scope`" arithmetic instead of a rule that could be forgotten at
+ * a second call site. `effectiveActions` is a projection of this (the two
+ * cannot drift — a test pins it).
+ */
+export function effectiveActionsDetailed(a: ActionAutonomy | null | undefined): Record<ActionKind, EffectiveActionEntry> {
+  const level = a?.level ?? DEFAULT_AUTONOMY_LEVEL;
+  const ceiling = LEVEL_CEILING[level];
+  const out = {} as Record<ActionKind, EffectiveActionEntry>;
+  for (const kind of ACTION_KINDS) {
+    const own = a?.actions?.[kind];
+    const asked = own ?? ACTION_DEFAULTS[level][kind];
+    const clamped = modeRank(asked) > modeRank(ceiling);
+    const mode = clamped ? ceiling : asked;
+    const source: ActionSource = clamped ? "clamped" : own !== undefined ? "set" : "defaulted";
+    out[kind] = { mode, source, ceiling, ...(own !== undefined ? { asked: own } : {}) };
+  }
+  return out;
+}
+
 /**
  * The record as a table: every kind, resolved. The level is a CEILING, so an
  * entry above it is clamped rather than honoured — which is what makes
  * "immediate execution happens only at `act_within_scope`" arithmetic instead
  * of a rule that could be forgotten at a second call site.
+ *
+ * A projection of `effectiveActionsDetailed` — never a second computation of
+ * the same table, so the two cannot drift apart.
  */
 export function effectiveActions(a: ActionAutonomy | null | undefined): Record<ActionKind, ActionMode> {
-  const level = a?.level ?? DEFAULT_AUTONOMY_LEVEL;
-  const ceiling = LEVEL_CEILING[level];
+  const detailed = effectiveActionsDetailed(a);
   const out = {} as Record<ActionKind, ActionMode>;
-  for (const kind of ACTION_KINDS) {
-    const asked = a?.actions?.[kind] ?? ACTION_DEFAULTS[level][kind];
-    out[kind] = modeRank(asked) <= modeRank(ceiling) ? asked : ceiling;
-  }
+  for (const kind of ACTION_KINDS) out[kind] = detailed[kind].mode;
   return out;
 }
 

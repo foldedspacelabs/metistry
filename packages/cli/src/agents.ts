@@ -16,9 +16,11 @@ import {
   ACTION_MODES,
   AUTONOMY_LEVELS,
   effectiveActions,
+  effectiveActionsDetailed,
   type ActionKind,
   type ActionMode,
   type AutonomyLevel,
+  type EffectiveActionEntry,
   type ScopeView,
 } from "@foldedspacelabs/metistry-core";
 import { consoleTarget, type ConsoleTargetOptions } from "./console-client.js";
@@ -96,6 +98,8 @@ export interface AutonomyView {
   autonomy: AutonomyRecord;
   /** The resolved table — what the server will actually do, level ceiling applied. */
   actions: Record<ActionKind, ActionMode>;
+  /** The same table, with WHY (C46/C47): set by the owner, defaulted from the level, or clamped to its ceiling — a projection of `actions`, never a second computation of it. `renderAutonomy` is what reads this; `--json` gets it too, so a script sees the same reason a human does. */
+  actionsDetailed: Record<ActionKind, EffectiveActionEntry>;
   /** What this invocation raised, as the server named it. Empty on a read or a narrowing. */
   widened: string[];
 }
@@ -135,14 +139,14 @@ export async function agentAutonomy(id: string, change: AutonomyChange, opts: Ag
 
   const stored = row.autonomy ?? {};
   if (isEmptyChange(change)) {
-    return { agent: id, display_name: row.display_name, level: stored.level ?? "observe", autonomy: stored, actions: effectiveActions(stored), widened: [] };
+    return { agent: id, display_name: row.display_name, level: stored.level ?? "observe", autonomy: stored, actions: effectiveActions(stored), actionsDetailed: effectiveActionsDetailed(stored), widened: [] };
   }
 
   const next = mergeAutonomy(stored, change);
   const put = await call(`/api/agents/${encodeURIComponent(id)}/autonomy`, { method: "PUT", body: JSON.stringify(next) });
   const body = (await put.json().catch(() => ({}))) as { error?: { message?: string }; widened?: string[] };
   if (!put.ok) throw new Error(body.error?.message ?? `${target.url} refused the change (HTTP ${put.status})`);
-  return { agent: id, display_name: row.display_name, level: next.level ?? "observe", autonomy: next, actions: effectiveActions(next), widened: body.widened ?? [] };
+  return { agent: id, display_name: row.display_name, level: next.level ?? "observe", autonomy: next, actions: effectiveActions(next), actionsDetailed: effectiveActionsDetailed(next), widened: body.widened ?? [] };
 }
 
 function redact(text: unknown, token: string): string {
@@ -150,11 +154,37 @@ function redact(text: unknown, token: string): string {
   return token ? s.split(token).join("[redacted]") : s;
 }
 
-export function renderAutonomy(v: AutonomyView): string {
+/**
+ * The wire enum (`allow | propose | deny`) never changes — this is only how it
+ * is SAID (the designer's words, C46/C47): `deny` reads as something the
+ * agent may never do on its own, not as a blanket refusal.
+ */
+export const MODE_LABEL: Readonly<Record<ActionMode, string>> = { allow: "Allow", propose: "Ask First", deny: "Never" };
+
+/**
+ * One kind's line, styled by WHY it is what it is (C46/C47's
+ * `effectiveActionsDetailed`) — never by colour alone (docs/ops/cli-style.md
+ * rule 1): `defaulted` and `clamped` say so in words, and the colour is
+ * decoration on top of that.
+ *
+ *   - `set`       — the owner's own entry, honoured as asked: plain.
+ *   - `defaulted` — no entry at all; the level's own default: dimmed.
+ *   - `clamped`   — the ONE case where the owner's own setting is being
+ *     overridden: what they asked for is named, so this is never mistaken for
+ *     `set`.
+ */
+function renderActionLine(entry: EffectiveActionEntry, level: AutonomyLevel, ui: Ui): string {
+  const word = MODE_LABEL[entry.mode];
+  if (entry.source === "clamped") return ui.paint("degraded", `${word} (asked ${MODE_LABEL[entry.asked!]} — ${level}'s ceiling is ${word})`);
+  if (entry.source === "defaulted") return ui.dim(`${word} (default for ${level})`);
+  return word;
+}
+
+export function renderAutonomy(v: AutonomyView, ui: Ui = defaultUi()): string {
   const lines = [`agent      ${v.agent} (${v.display_name})`, `level      ${v.level}`];
-  for (const kind of ACTION_KINDS) lines.push(`  ${kind.padEnd(12)} ${v.actions[kind]}`);
+  for (const kind of ACTION_KINDS) lines.push(`  ${kind.padEnd(12)} ${renderActionLine(v.actionsDetailed[kind], v.level, ui)}`);
   if (v.widened.length > 0) lines.push(`widened    ${v.widened.join("; ")} — recorded in runs, and you have an alert`);
-  lines.push(`modes      ${ACTION_MODES.join(" | ")} · a level is a ceiling (docs/ops/actions.md)`);
+  lines.push(`modes      ${ACTION_MODES.map((m) => MODE_LABEL[m]).join(" | ")} · a level is a ceiling (docs/ops/actions.md)`);
   return lines.join("\n");
 }
 

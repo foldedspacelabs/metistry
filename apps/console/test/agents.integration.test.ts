@@ -88,6 +88,42 @@ describe("agent grants validation (pure)", () => {
   });
 });
 
+// `GET /api/agents`'s `scope` is `agentScope()` (core's `describeScope`), pure
+// — no db needed to prove the wire shape. C46/C47: the route used to carry
+// only the resolved (kind → mode) table; a client that wanted to say WHY had
+// no way but to recompute it, which is how the CLI, this route and MetistryKit
+// came to be three separate copies of the same arithmetic. Now `scope.autonomy`
+// carries `detailed` too, straight from core, so this route never recomputes.
+describe("agentScope (pure) — GET /api/agents carries the resolved table AND why", () => {
+  const fakeRow = (autonomy: agents.Autonomy): agents.AgentRow =>
+    ({
+      id: "x",
+      display_name: "X",
+      kind: "external",
+      grants: { tier: "none", areas: [] },
+      projects: [],
+      autonomy,
+      created_at: "2026-01-01T00:00:00.000Z",
+      last_seen_at: null,
+      revoked: false,
+      remote: false,
+      approved_at: null,
+      pending: false,
+      grant_source: "registry",
+    }) as unknown as agents.AgentRow; // `scope` is this function's OUTPUT, not an input it reads
+
+  it("carries `detailed` beside the plain table, set/defaulted/clamped named per kind", () => {
+    const view = agents.agentScope(fakeRow({ level: "propose", actions: { comment: "allow", task_update: "propose" } }));
+    expect(view.autonomy.actions).toEqual({ dispatch: "propose", task_update: "propose", comment: "propose", capture: "propose" });
+    // nothing named it: the level's own default
+    expect(view.autonomy.detailed.dispatch).toEqual({ mode: "propose", source: "defaulted", ceiling: "propose" });
+    // named, and it survives the ceiling unchanged
+    expect(view.autonomy.detailed.task_update).toEqual({ mode: "propose", source: "set", ceiling: "propose", asked: "propose" });
+    // named ABOVE the ceiling — the ONE case where the owner's own setting is overridden
+    expect(view.autonomy.detailed.comment).toEqual({ mode: "propose", source: "clamped", ceiling: "propose", asked: "allow" });
+  });
+});
+
 describe.skipIf(!hasDb)("agent registry (integration)", () => {
   let pool: pg.Pool;
   let base: string;

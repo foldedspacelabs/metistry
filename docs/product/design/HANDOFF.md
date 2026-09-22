@@ -37,9 +37,10 @@ canvas order:
 | `Voice` | six system serifs and a Times control |
 | `Item-Model` | the item contract (its ladder section is superseded by `Facets`) |
 
-`Facets`, `Plugin`, `Voice`, `Chat` and `Request` are **not yet modules** in
+`Facets`, `Plugin`, `Voice` and `Item-Model` are **not yet modules** in
 `boards/` — they were built from earlier snapshots of the library. Port each the
-next time it changes. `States`, `Activity` and `NeedsYou` were ported in round E.
+next time it changes. Everything else is a module: round E ported `States`,
+`Request`, `Chat`, `Activity` and `NeedsYou`, and added `Agents`.
 
 **The assembly of a board is not recoverable from lib.py.** The generator landed
 in one commit holding only `lib.py`, `today.py` and `board.py`; the five round-C
@@ -176,12 +177,11 @@ are drawn: the `access_request` card (`screen-03-needs-you.md` §9, board
 `NeedsYou`) and the routine row with its eighth chip
 (`screen-02-activity.md` §12, board `Activity`). `States` was ported unchanged.
 
-**Still behind the facet system: `Chat` and `Request`.** Their decisions are
-committed in their specs so they are not wrong, but the canvas contradicts
-itself until they are regenerated. `Request` also still renders the round-C
-panel header *"4 waiting · 1 snoozed"*, which C21 established cannot be built —
-`panel2()` is the corrected one, `bellpanel()` is not, and the Request board
-still calls `bellpanel()`.
+**The back-patch is complete.** `Chat` and `Request` were ported in round E
+along with `States`, `Activity`, `NeedsYou` and the new `Agents`. Every board on
+the canvas is now generated from a module in `boards/` except `Facets`, `Plugin`,
+`Voice` and `Item-Model`. `bellpanel()` is gone — it drew the *"1 snoozed"*
+header C21 killed; `panel2()` is the panel.
 
 **49 contradictions** are logged in `review-00-plan.md`. C38 is closed. C40–C49 are
 round E's. Two of them are rules the system is missing rather than faults in a
@@ -224,6 +224,13 @@ conversation**, which is what made the first pass expensive.
 ```
 METISTRY_CANVAS=<canvas dir> python3 build.py [board]
 ```
+
+**The border tokens, settled by measurement (C49).** `border-control` is the
+only one that clears 3:1 — it does so against all four grounds in both themes
+(3.00–3.91:1). `border` clears 1.12–1.51:1 and `border-strong` 1.60–2.08:1, so
+**neither may outline a control or carry a mark**, whatever `border-strong`'s
+name suggests. A mark that carries meaning takes an ink token. Four faults in
+this engagement came from ignoring that; two were in round E.
 
 **Before publishing anything, check contrast** on every new colour pair against
 *the ground it actually sits on*. Almost every fault found in this engagement

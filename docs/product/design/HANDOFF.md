@@ -37,6 +37,7 @@ canvas order:
 | `Agents` | **screen 7** — the roster, a local agent, a connected agent |
 | `Routines` | **screen 8** — the schedule, one routine, the two prompt layers |
 | `Resources` | **screen 9** — proxied MCP servers, per-tool grants |
+| `CardDetail` | **screen 14, new 2026-09-22** — both kinds of task, light and dark |
 | `Projects` | **screen 13, new 2026-09-22** — mode first, project permissions inherited by every agent |
 | `RunDetail` | **screen 12, new 2026-09-22** — a routine run, a failed run, a chat session, Settings ▸ Sessions |
 | `CaptureBar` | **screen 11, new 2026-09-22** — the floating bar over a desktop, live and at rest, glass measured |
@@ -224,13 +225,14 @@ SwiftUI's `.serif`.
 | Routines | `screen-08-routines.md` | done — the schedule, one routine |
 | Settings ▸ Resources | `screen-09-resources.md` | done — the connections, one connection, three states per tool |
 | Knowledge | `screen-10-knowledge.md` | **rebuilt 2026-09-22** — digest-led; sources folded to one line |
+| Card detail | `screen-14-card-detail.md` | **new 2026-09-22** — one popover, work row and markdown task |
 | Projects | `screen-13-projects.md` | **new 2026-09-22** — list, a project, over budget, confirmations |
 | Run detail | `screen-12-run-detail.md` | **new 2026-09-22** — the session, the run, what Metis took from it |
 | The floating bar | `screen-11-capture-bar.md` | **new 2026-09-22, third pass** — one-click toolbar, record sheet, Settings |
 | Facets & colour | `facets-and-colour.md` | the system itself |
 | Build-side preview | `dev-preview-round-e.md` | **draft 2026-09-22** — what the developer needs, in one file; keep it current as rounds land |
 
-**Not drawn:** card detail popover, Artifacts, Rooms, Usage, Settings
+**Not drawn:** Artifacts, Rooms, Usage, Settings
 itself (only its Resources pane), the Obsidian plugin's remaining surfaces.
 
 **Run detail is drawn (screen 12, 2026-09-22).** What follows was the state before it: `seed/queries/run_detail.yaml`
@@ -257,7 +259,7 @@ the canvas is now generated from a module in `boards/` except `Facets`, `Plugin`
 `Voice` and `Item-Model`. `bellpanel()` is gone — it drew the *"1 snoozed"*
 header C21 killed; `panel2()` is the panel.
 
-**83 contradictions** are logged in `review-00-plan.md`. C38 and C51 are closed. C40–C83 are
+**85 contradictions** are logged in `review-00-plan.md`. C38 and C51 are closed. C40–C85 are
 round E's. Two of them are rules the system is missing rather than faults in a
 file: **C45** (a failed consequential operation leaves the request pending) and
 **C49** (a mark that carries meaning takes an ink token, never a border token —

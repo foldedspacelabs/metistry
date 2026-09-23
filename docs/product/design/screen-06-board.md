@@ -57,9 +57,8 @@ endpoint), a note glyph in `entity-note` when it was promoted from the vault
 - **Ordering** is board order, then most recently touched.
 - **The project filter** comes from `board_projects`, so it only offers
   projects that have cards. `[` and `]` step it.
-- **Clicking a card** opens its room when `has_thread`, else a detail popover:
-  title, owner, lease, external ref, last activity, and the artifact a review
-  bundle was cut from.
+- **Clicking a card** always opens the detail popover (screen 14; ruled
+  2026-09-22, C84). A thread is a section inside it with **Open room**.
 - **Polls every 10s** while visible. `cache_ttl: 0` — a board that lags lies
   about who holds a lease.
 
@@ -134,5 +133,4 @@ refetches either way. The server owns the columns.
 - The two `blocked_by_task` columns (fault 3), wanted by two screens now.
 - Whether `escalated` should ever gain a fourth clause. `board.md` rules that
   it needs its own sentence and its own decision; nothing here asks for one.
-- Card detail popover is referenced and not yet drawn — it is the next screen
-  in this section along with Projects, Artifacts and Rooms.
+- Card detail popover: drawn as screen 14.

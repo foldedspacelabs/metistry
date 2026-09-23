@@ -10,7 +10,7 @@ edge the owner picks, one conversation shared with the window.
 """
 from lib import *
 
-CW,CH=2600,5000
+CW,CH=2600,5400
 
 REST=pan(L,"AT REST — 30PX, TWO MARKS, AND GLASS YOU CAN SEE THROUGH",
   row(desktop(L,inner=railrest(L),w=560,h=380,label="RESTING")
@@ -110,22 +110,70 @@ PANELS=pan(L,"EXPANDED — ONE CONVERSATION, A SHORTER MEASURE",
           "rather than one control, so the field takes an inset shadow and a thinner ground.",12) + '</div>',
     18,align="flex-start"))
 
-SHEETS=pan(L,"STARTING — TWO LINES, THEN START",
-  row(f'<div>{sub("LISTEN",L["tt"])}{scopesheet(L,kind="audio")}</div>'
-    + f'<div>{sub("SHARE A WINDOW",L["tt"])}{scopesheet(L,kind="screen")}</div>'
+RECORD=pan(L,"RECORDING — PICK WHAT IT WATCHES, SAY WHETHER IT HEARS YOU",
+  row(f'<div>{sub("A WINDOW",L["tt"])}{recordsheet(L,target="Window")}</div>'
+    + f'<div>{sub("THE WHOLE SCREEN",L["tt"])}{recordsheet(L,target="Screen")}</div>'
+    + f'<div>{sub("AUDIO ONLY, MIC OFF",L["tt"])}{recordsheet(L,target="Audio only",mic=False)}</div>',
+    18,align="flex-start")
+  + nt(L,"<b>The owner&rsquo;s correction reshaped this, and the API agrees with him.</b> A meeting is not audio "
+        "&mdash; it is <b>a window and its sound</b>, plus your own voice. So the sheet asks one question, "
+        "<i>what should it watch</i>, and then one more, <i>should it hear you</i>. Audio comes with the target "
+        "rather than being a third thing to switch on.",14)
+  + nt(L,"<b>That is one API call, not three.</b> <b>SCStreamConfiguration.capturesAudio</b> (macOS 13) gives the "
+        "audio of whatever the content filter covers, so <b>the sound is scoped exactly as the picture is</b> "
+        "&mdash; one selection, one scope. <b>captureMicrophone</b> (macOS 15) puts your own voice in the same "
+        "stream, separately attributable. Below 15 the microphone is a second session; the app&rsquo;s floor is "
+        "14.0, so that fallback is real.",12)
+  + nt(L,"<b>Three targets cover the three things the owner described.</b> A meeting is <i>Window</i> with the mic "
+        "on. Showing how something works is <i>Window</i> or <i>Screen</i> with the mic on. A call with no screen "
+        "is <i>Audio only</i> &mdash; kept because an in-person conversation and a phone call have no window, and "
+        "because for audio without video the <b>Core Audio process tap</b> is strictly better: no screen grant, "
+        "per-process by construction.",12)
+  + nt(L,"<b>Everything explanatory is gone.</b> No <i>stops at 11:30</i>, no <i>nothing is written without "
+        "you</i>, no permissions rehearsal. The shape says it: a <b>Record</b> button implies a stop, the bar "
+        "carries it, and macOS asks for what it needs when it needs it. Text is <b>left-aligned throughout</b> "
+        "&mdash; the label, then its quiet qualifier beside it (<i>your side only</i>, <i>comes with the "
+        "window</i>), never a column of right-aligned fragments pretending to be a table.",12))
+
+JOT=pan(L,"DURING A SESSION — ASK, NOTE, TO-DO, WITHOUT LEAVING THE ROOM",
+  row(f'<div>{sub("JOTTING WHILE IT RECORDS",L["tt"])}{barpanel(L,live=True,mode="Note")}</div>'
+    + f'<div>{sub("ASKING, SAME FIELD",L["tt"])}{barpanel(L,live=True,mode="Ask")}</div>'
     + f'<div style="flex-grow: 1; min-width: 0;">'
-    + nt(L,"<b>Cut from eleven lines to four.</b> macOS explains its own permissions better than we can, in its "
-          "own words, at the moment it asks &mdash; so the sheet no longer rehearses them. What is left is what "
-          "only we know: <b>what it will hear</b>, <b>when it stops</b>, and that <b>nothing is written without "
-          "you</b>.",14)
-    + nt(L,"<b>The grant table is gone from the sheet</b> and lives in Settings, where someone who wants the full "
-          "answer goes. The sheet is a doorway, not a briefing.",12)
-    + nt(L,"<b>The one line kept for the screen sheet is the honest one:</b> <i>screen access is not "
-          "per-window</i>. Four words and a chip, because C71 means the interface may not let the picker imply a "
-          "fence the OS does not provide &mdash; but it also does not need a paragraph to say so.",12)
-    + nt(L,"<b>Still one act per sense.</b> Listening takes the meeting and your microphone together, because a "
-          "conversation is both halves. Sharing is its own act, with its own sheet and its own glyph.",12)
+    + nt(L,"<b>One field, three destinations.</b> A thought during a meeting is a <b>note</b>, an obligation is a "
+          "<b>to-do</b>, and a question is a <b>question</b> &mdash; and none of them should cost you the meeting. "
+          "The mode pills are the whole control; <b>&#8984;&#8997;N</b> and <b>&#8984;&#8997;T</b> reach the field "
+          "already in the right mode without opening the panel.",14)
+    + nt(L,"<b>What you jot is shown back, timestamped.</b> <i>This session &middot; 2 notes, 1 to-do</i>, "
+          "expandable to the lines themselves. That is the trust mechanism: a note you cannot see is a note you "
+          "will retype in your own app, and then the bar has cost you more than it saved.",12)
+    + nt(L,"<b>The timestamp is the anchor, and it is what makes them foldable.</b> Each jot carries the session "
+          "and the second it was made, so afterwards a note sits beside what was being said when you wrote it, and "
+          "a to-do arrives as a task-line proposal with <b>source: meeting:&lt;path&gt;</b> &mdash; vocabulary "
+          "the daily-flow spec already has.",12)
+    + nt(L,"<b>They ride the same proposal as the notes.</b> One thing lands in Needs You afterwards, carrying the "
+          "draft, the transcript and your own jots together &mdash; not three separate arrivals. Nothing is "
+          "written until you approve it, which is why the sheet no longer needs to promise it.",12)
     + '</div>',18,align="flex-start"))
+
+PHASE=pan(L,"A FINDING THE OWNER SHOULD SEE BEFORE THE DEVELOPER SCHEDULES THIS",
+  f'<div style="background: {L["degq"]}; border-radius: 11px; padding: 14px 16px;">'
+  f'<div style="font-size: 12.5px; color: {L["tp"]}; line-height: 1.6;">PR 253 recommended <b>audio first</b> and '
+  f'<b>screen not at all for now</b>, on the grounds that audio is the part with kernel-enforced scoping and '
+  f'screen is <i>&ldquo;the part the owner himself was unsure he wanted.&rdquo;</i> The owner has since said a '
+  f'meeting <b>is</b> screen plus audio. <b>That inverts the phase order:</b> the headline act now needs the '
+  f'grant with the weaker scope story.</div></div>'
+  + nt(L,"This is not an objection &mdash; it is the trade made visible. <b>What the design can carry:</b> the "
+        "picker means you choose the window every session; the helper has one filter path; the rail shows a "
+        "display glyph whenever a picture is being taken; and the sheet says <b>screen access is not "
+        "per-window</b> once, in the Settings pane, rather than in a dialogue you dismiss.",14)
+  + nt(L,"<b>What it cannot carry:</b> the OS will not fence the screen grant for us. A person who wants that "
+        "guarantee should use <b>Audio only</b>, which is genuinely per-process &mdash; so the option earns its "
+        "place twice over.",12)
+  + nt(L,"<b>The sequencing question is the owner&rsquo;s, and it is now a real one:</b> ship <i>Window + audio + "
+        "mic</i> first, which is what he asked for and what makes meetings work &mdash; or ship <i>Audio only</i> "
+        "first, which is 7&ndash;9 days, needs no screen grant, and proves the whole downstream path (transcript "
+        "&rarr; capture &rarr; proposal) with less surface. The second is the research&rsquo;s recommendation; the "
+        "first is the product he described.",12))
 
 SETTINGS=pan(L,"SETTINGS — A SWITCH, A PLACE, THREE PERMISSIONS, AND WHAT IT KEEPS",
   row(capturesettings(L)
@@ -163,23 +211,24 @@ ASKS=pan(L,"WHAT THIS ASKS OF THE BUILD",
 
 body=(motioncss()
   + heading("ROUND E · SCREEN 11, REVISED","The floating bar — thin glass, one breath, the senses named",
-   "Rebuilt after review: the glass is Apple's four layers rather than a flat wash, the sheets are two lines and "
-   "a button, Settings is a switch and a place, and while a session runs the rail <b>breathes</b> and shows "
-   "<b>which sense is open</b>. The two things the design must still make impossible to miss and impossible to "
+   "Recording is one question &mdash; <b>what should it watch</b> &mdash; and one more: <b>should it hear you</b>. Audio comes with the target. While a session runs the rail <b>breathes</b>, the senses are named, and one field "
+   "takes a question, a note or a to-do without costing you the meeting. The two things the design must still make impossible to miss and impossible to "
    "overclaim: that a session is running, and what Metis can actually reach.",L)
   + row(REST,18)
   + row(GLASSCRAFT,18)
   + row(LIVE,18)
   + row(PULSE,18)
   + row(PANELS,18)
-  + row(SHEETS,18)
+  + row(RECORD,18)
+  + row(JOT,18)
+  + row(PHASE,18)
   + row(SETTINGS,18)
   + row(ASKS,18)
   + row(f'<div style="background: {D["bg"]}; border-radius: 14px; padding: 22px; flex-grow: 1;">'
         + sub("DARK",D["tt"])
         + f'<div style="display: flex; gap: 18px; align-items: flex-start;">'
         + desktop(D,inner=raillive(D,senses=("mic","screen")),w=430,h=380)
-        + barpanel(D,live=True,senses=("mic",)) + scopesheet(D,kind="audio")
+        + barpanel(D,live=True) + recordsheet(D,target="Window")
         + f'<div style="flex-grow: 1; min-width: 0;">{capturesettings(D,w=470)}</div>'
         + '</div></div>',18))
 (PROJ/"CaptureBar.dc.html").write_text(page("CaptureBar",wrap(body,CW,CH,"#ece7dd",L["tp"],40),CW,CH,"#ece7dd"),encoding="utf-8")

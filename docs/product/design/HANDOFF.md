@@ -122,7 +122,10 @@ session runs, on a screen edge the owner picks (never top or bottom), and **its
 chat is the same conversation as the window's**. Glass is allowed here and
 nowhere else, and **the floor follows the ink**: 0.86 under text, 0.75 under marks,
 and `text-tertiary` not at all (C70, C74). The recording breath is the product's
-**second and last** animation (C75).
+**second and last** animation (C75). **A meeting is a window and its sound plus
+your own voice** (C76) — audio comes with the target, the microphone is a toggle,
+and *Audio only* stays for calls with no window. One field takes a question, a
+note or a to-do while a session runs (C77).
 
 **Agent prose in a transcript** (C69, ruled 2026-09-22). A 2px `agent` rule in
 the gutter, no wash; `agent-quiet` still governs agent text outside a
@@ -250,7 +253,7 @@ the canvas is now generated from a module in `boards/` except `Facets`, `Plugin`
 `Voice` and `Item-Model`. `bellpanel()` is gone — it drew the *"1 snoozed"*
 header C21 killed; `panel2()` is the panel.
 
-**75 contradictions** are logged in `review-00-plan.md`. C38 and C51 are closed. C40–C75 are
+**77 contradictions** are logged in `review-00-plan.md`. C38 and C51 are closed. C40–C77 are
 round E's. Two of them are rules the system is missing rather than faults in a
 file: **C45** (a failed consequential operation leaves the request pending) and
 **C49** (a mark that carries meaning takes an ink token, never a border token —

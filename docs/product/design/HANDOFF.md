@@ -37,6 +37,7 @@ canvas order:
 | `Agents` | **screen 7** — the roster, a local agent, a connected agent |
 | `Routines` | **screen 8** — the schedule, one routine, the two prompt layers |
 | `Resources` | **screen 9** — proxied MCP servers, per-tool grants |
+| `Artifacts` | **screen 16, new 2026-09-23** — margin threads, compare, rooms and the cap |
 | `Settings` | **screen 15, new 2026-09-23** — the window, four panes, larger text, dark |
 | `CardDetail` | **screen 14, new 2026-09-22** — both kinds of task, light and dark |
 | `Projects` | **screen 13, new 2026-09-22** — mode first, project permissions inherited by every agent |
@@ -226,6 +227,7 @@ SwiftUI's `.serif`.
 | Routines | `screen-08-routines.md` | done — the schedule, one routine |
 | Settings ▸ Resources | `screen-09-resources.md` | done — the connections, one connection, three states per tool |
 | Knowledge | `screen-10-knowledge.md` | **rebuilt 2026-09-22** — digest-led; sources folded to one line |
+| Artifacts & Rooms | `screen-16-artifacts-and-rooms.md` | **new 2026-09-23** — list, artifact, compare, rooms, a room |
 | Settings | `screen-15-settings.md` | **new 2026-09-23** — sidebar, grouped, fixed 840 × 600 |
 | Card detail | `screen-14-card-detail.md` | **new 2026-09-22** — one popover, work row and markdown task |
 | Projects | `screen-13-projects.md` | **new 2026-09-22** — list, a project, over budget, confirmations |
@@ -234,7 +236,7 @@ SwiftUI's `.serif`.
 | Facets & colour | `facets-and-colour.md` | the system itself |
 | Build-side preview | `dev-preview-round-e.md` | **draft 2026-09-22** — what the developer needs, in one file; keep it current as rounds land |
 
-**Not drawn:** Artifacts, Rooms, Usage, the Obsidian plugin's remaining surfaces.
+**Not drawn:** Usage, the Obsidian plugin's remaining surfaces.
 
 **Run detail is drawn (screen 12, 2026-09-22).** What follows was the state before it: `seed/queries/run_detail.yaml`
 and `GET /api/runs/:id` both exist (commit `3456aab`) — the handoff was stale on

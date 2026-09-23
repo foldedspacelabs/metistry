@@ -37,6 +37,7 @@ canvas order:
 | `Agents` | **screen 7** — the roster, a local agent, a connected agent |
 | `Routines` | **screen 8** — the schedule, one routine, the two prompt layers |
 | `Resources` | **screen 9** — proxied MCP servers, per-tool grants |
+| `CaptureBar` | **screen 11, new 2026-09-22** — the floating bar over a desktop, live and at rest, glass measured |
 | `Knowledge` | **screen 10, rebuilt 2026-09-22** — the fold digest, what needs your eye, areas described, a draft settled, a conflict resolved |
 | `Plugin` | the Obsidian plugin — the mirror, the picker, editable chips |
 | `Voice` | six system serifs and a Times control |
@@ -114,6 +115,12 @@ disagree, the newer three win and the disagreement gets logged.
 **Motion** (C16, ruled 2026-09-22). Motion only where it carries information the
 reader cannot otherwise get, stopping the moment that information is in words.
 The three waiting dots are the only loop in the product.
+
+**The floating bar** (ruled 2026-09-22). A second, additive interface: always
+present while the capture bridge is installed, minimal at rest, louder while a
+session runs, on a screen edge the owner picks (never top or bottom), and **its
+chat is the same conversation as the window's**. Glass is allowed here and
+nowhere else, at a scrim never below 0.85 (C70).
 
 **Agent prose in a transcript** (C69, ruled 2026-09-22). A 2px `agent` rule in
 the gutter, no wash; `agent-quiet` still governs agent text outside a
@@ -210,6 +217,7 @@ SwiftUI's `.serif`.
 | Routines | `screen-08-routines.md` | done — the schedule, one routine |
 | Settings ▸ Resources | `screen-09-resources.md` | done — the connections, one connection, three states per tool |
 | Knowledge | `screen-10-knowledge.md` | **rebuilt 2026-09-22** — digest-led; sources folded to one line |
+| The floating bar | `screen-11-capture-bar.md` | **new 2026-09-22** — at rest, live, expanded, both scope sheets, Settings |
 | Facets & colour | `facets-and-colour.md` | the system itself |
 | Build-side preview | `dev-preview-round-e.md` | **draft 2026-09-22** — what the developer needs, in one file; keep it current as rounds land |
 
@@ -240,7 +248,7 @@ the canvas is now generated from a module in `boards/` except `Facets`, `Plugin`
 `Voice` and `Item-Model`. `bellpanel()` is gone — it drew the *"1 snoozed"*
 header C21 killed; `panel2()` is the panel.
 
-**69 contradictions** are logged in `review-00-plan.md`. C38 and C51 are closed. C40–C69 are
+**72 contradictions** are logged in `review-00-plan.md`. C38 and C51 are closed. C40–C72 are
 round E's. Two of them are rules the system is missing rather than faults in a
 file: **C45** (a failed consequential operation leaves the request pending) and
 **C49** (a mark that carries meaning takes an ink token, never a border token —

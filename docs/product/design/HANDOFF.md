@@ -122,10 +122,10 @@ session runs, on a screen edge the owner picks (never top or bottom), and **its
 chat is the same conversation as the window's**. Glass is allowed here and
 nowhere else, and **the floor follows the ink**: 0.86 under text, 0.75 under marks,
 and `text-tertiary` not at all (C70, C74). The recording breath is the product's
-**second and last** animation (C75). **A meeting is a window and its sound plus
-your own voice** (C76) — audio comes with the target, the microphone is a toggle,
-and *Audio only* stays for calls with no window. One field takes a question, a
-note or a to-do while a session runs (C77).
+**second and last** animation (C75). The rail is a **toolbar — Ask · Note · To-do ·
+Record, one click each**. Record is a target (Screen · Window · Audio only) and
+**two toggles, audio and microphone, both on by default** (C76). Jots take the
+session's timestamp (C77).
 
 **Agent prose in a transcript** (C69, ruled 2026-09-22). A 2px `agent` rule in
 the gutter, no wash; `agent-quiet` still governs agent text outside a
@@ -222,7 +222,7 @@ SwiftUI's `.serif`.
 | Routines | `screen-08-routines.md` | done — the schedule, one routine |
 | Settings ▸ Resources | `screen-09-resources.md` | done — the connections, one connection, three states per tool |
 | Knowledge | `screen-10-knowledge.md` | **rebuilt 2026-09-22** — digest-led; sources folded to one line |
-| The floating bar | `screen-11-capture-bar.md` | **new 2026-09-22** — at rest, live, expanded, both scope sheets, Settings |
+| The floating bar | `screen-11-capture-bar.md` | **new 2026-09-22, third pass** — one-click toolbar, record sheet, Settings |
 | Facets & colour | `facets-and-colour.md` | the system itself |
 | Build-side preview | `dev-preview-round-e.md` | **draft 2026-09-22** — what the developer needs, in one file; keep it current as rounds land |
 

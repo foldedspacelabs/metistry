@@ -58,7 +58,8 @@ MEETING=pan(L,"A MEETING — ONE CARD, EACH PART ITS OWN ANSWER",
           "answered on your phone shows the way any partial result does (C81).",14)
     + nt(L,"<b>Your own jots are not asked about.</b> They are your words, saved when you typed them, and go "
           "into the notes as yours.",12)
-    + nt(L,"Any to-do can be accepted, edited or declined on its own.",12) + '</div>',18,align="flex-start"))
+    + nt(L,"<b>Revise</b> on the card and on the notes, so a mistake is fixed before anything is accepted. "
+          "Any to-do can be accepted, revised or declined on its own.",12) + '</div>',18,align="flex-start"))
 
 FOUNDP=pan(L,"WHAT THIS PASS FOUND",
   "".join(f'<div style="display: flex; gap: 10px; align-items: flex-start; padding: 7px 0;'

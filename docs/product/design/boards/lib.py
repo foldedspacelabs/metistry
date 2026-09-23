@@ -4138,7 +4138,7 @@ def chatsession(T,w=None):
             + sidecol(T,chat=True) + '</div></div>')
 
 def archivesettings(T,w=500):
-    sel=(f'<span style="font-size: 12px; color: {T["tp"]};">1 year &nbsp;'
+    sel=(f'<span style="font-size: 12px; color: {T["tp"]};">30 days &nbsp;'
          f'<span style="color: {T["ts"]};">&#9662;</span></span>')
     return (f'<div style="width: {w}px; background: {T["bg"]}; border: 1px solid {T["bc"]}; border-radius: 12px; '
             f'overflow: hidden;">'
@@ -4150,5 +4150,5 @@ def archivesettings(T,w=500):
                      control=toggle(T,True),last=True)
             + f'<div style="display: flex; align-items: center; gap: 9px; margin-top: 12px;">'
             + btn(T,"Purge Now","dest",I["x"])
-            + f'<span style="font-size: 11.5px; color: {T["ts"]};">412 sessions, oldest 3 months</span></div>'
+            + f'<span style="font-size: 11.5px; color: {T["ts"]};">38 sessions, oldest 29 days</span></div>'
             + '</div></div>')

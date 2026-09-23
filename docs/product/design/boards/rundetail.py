@@ -37,9 +37,10 @@ CHAT=pan(L,"A CHAT SESSION — WHERE MOST OF WHAT IT LEARNS COMES FROM",
 SETTINGS=pan(L,"SETTINGS — HOW LONG, AND WHETHER IT LEARNS",
   row(archivesettings(L)
     + f'<div style="flex-grow: 1; min-width: 0;">'
-    + nt(L,"Two controls and a purge. <b>One year</b> is the default because the value is in re-reading: a "
-          "better model next spring can fold the same sessions again. The archive lives in the database, not the "
-          "vault, so it is purgeable &mdash; a transcript committed to git is forever.",14)
+    + nt(L,"Two controls and a purge. <b>Thirty days</b> (ruled 2026-09-22): a session is raw material, and "
+          "what lasts is what the fold took from it. Stored outside git &mdash; a transcript committed to git is "
+          "forever. Where exactly is the developer&rsquo;s call; the owner leans to a file cache under "
+          "<b>.metistry</b>.",14)
     + nt(L,"Turning learning off keeps sessions for reading and debugging but stops the fold.",12)
     + '</div>',18,align="flex-start"))
 
@@ -52,12 +53,12 @@ ASKS=pan(L,"WHAT THIS ASKS OF THE BUILD",
   for i,v in enumerate([
     "<b>A session archive (C78)</b> &mdash; every session, chat included: the system prompt as sent, every "
     "message, and each tool call&rsquo;s arguments and result. Read-only: the engine never replays it, which is "
-    "what keeps cost decision 3 intact.",
+    "what keeps cost decision 3 intact. Outside git; a file cache under <b>.metistry</b> is the owner&rsquo;s lean.",
     "<b>A session fold</b> &mdash; a routine, like <b>knowledge-fold</b>, that reads new sessions and proposes "
     "lessons, knowledge, preferences and profile facts (C79). Every output is a proposal.",
     "<b>Provenance both ways</b> &mdash; each proposal carries its session and turn; each session lists what "
     "was folded from it and whether it was accepted.",
-    "<b>Retention and purge</b> for the archive, default one year, stored outside git.",
+    "<b>Retention and purge</b> &mdash; thirty days, and the fold must have run before a session expires.",
     "<b>run_detail</b> already returns everything in <i>The run</i> and <i>Tool calls</i>; nothing new needed "
     "there."])))
 

@@ -4832,3 +4832,81 @@ def roomview(T):
     return (f'<div style="flex-grow: 1; min-width: 0; background: {T["bg"]};">{head}{band}'
             f'<div style="padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; max-width: 640px;">{msgs}</div>'
             f'{comp}</div>')
+
+
+# ============ USAGE — the gauge's popover (2026-09-23) =================
+# Usage left the sidebar in round B (brand-kit.md): a gauge beside the bell,
+# top-right, no badge. This is the popover it opens. One series, magnitude, so one
+# hue off the sequential ramp and no legend (dataviz: single series, title names it).
+I["gaugehi"]='<path d="M4 17a8 8 0 0116 0"/><path d="M12 17l5.4-2.2"/><circle cx="12" cy="17" r="1.1" fill="currentColor" stroke="none"/>'
+CHART_L="#1e7784"   # chart-3, light — the ramp's light steps all sit under the 0.10 chroma floor (C87)
+CHART_D="#2ca5b8"   # chart-2, dark — passes every check
+
+def usagebar(T): return CHART_L if T is L else CHART_D
+
+def toolcrop(T,*,state="normal",w=250):
+    gtone={"normal":T["ts"],"near":T["tp"],"over":T["deg"]}[state]
+    g=I["gaugehi"] if state!="normal" else I["gauge"]
+    ring=(f'background: {T["accq"]}; border-radius: 7px;') if state=="open" else ""
+    return (f'<div style="width: {w}px; display: flex; align-items: center; gap: 14px; justify-content: flex-end; '
+            f'padding: 10px 14px; background: {T["surface"]}; border: 1px solid {T["border"]}; border-radius: 10px;">'
+            f'<span style="display: flex; color: {T["acc"]};">{ic(I["plus"],18)}</span>{bell(T,"4",18)}'
+            f'<span style="display: flex; padding: 3px; color: {gtone}; {ring}">{ic(g,18)}</span></div>')
+
+def daybars(T,vals,*,h=64,today_idx=None):
+    mx=max(vals); col=usagebar(T)
+    bars="".join(f'<span title="${v:.2f}" style="flex: 1; height: {max(2,int(h*v/mx))}px; background: {col}; '
+                 f'border-radius: 2px 2px 0 0;"></span>' for v in vals)
+    return (f'<div style="position: relative;">'
+            f'<div style="display: flex; align-items: flex-end; gap: 2px; height: {h}px; border-bottom: 1px solid {T["border"]};">{bars}</div>'
+            f'<div style="display: flex; justify-content: space-between; font-size: 10.5px; color: {T["tt"]}; margin-top: 4px;">'
+            f'<span>Sep 1</span><span>today</span></div></div>')
+
+def spendrow(T,name,v,mx,*,agent=True,sub=None,last=False):
+    lab=(f'<span style="justify-self: start;">{agentchip(T,name)}</span>' if agent else f'<span style="font-size: 12px; color: {T["tp"]};">{name}</span>')
+    return (f'<div style="display: grid; grid-template-columns: 116px minmax(0,1fr) 52px; gap: 10px; align-items: center; '
+            f'padding: 6px 0; {bd_(T,last)}">{lab}'
+            f'<span style="height: 6px; border-radius: 0 3px 3px 0; background: {usagebar(T)}; width: {int(100*v/mx)}%;"></span>'
+            f'<span style="font-family: {MONO}; font-size: 11.5px; color: {T["tp"]}; text-align: right;">${v:.2f}</span></div>')
+
+DAYS=[1.1,1.4,0.9,1.6,2.2,0.4,0.3,1.8,1.5,1.9,2.4,1.2,0.5,0.4,1.7,2.1,1.6,1.3,2.8,0.6,0.5,1.9,1.84]
+
+def usagepop(T,*,state="normal",w=400):
+    spent={"normal":41.20,"near":55.10,"over":60.00}[state]
+    frac=min(1,spent/60)
+    fill={"normal":usagebar(T),"near":usagebar(T),"over":T["deg"]}[state]
+    head=(f'<div style="padding: 14px 16px 12px; border-bottom: 1px solid {T["border"]}; display: flex; align-items: baseline; gap: 8px;">'
+          f'<span style="font-size: 13px; font-weight: 600; color: {T["tp"]};">Usage</span>'
+          f'<span style="font-size: 12px; color: {T["ts"]};">September</span></div>')
+    hero=(f'<div style="padding: 14px 16px 12px;">'
+          f'<div style="display: flex; align-items: baseline; gap: 8px;">'
+          f'<span style="font-size: 26px; font-weight: 600; color: {T["tp"]}; letter-spacing: -0.01em;">${spent:.2f}</span>'
+          f'<span style="font-size: 12.5px; color: {T["ts"]};">of $60 this month</span></div>'
+          f'<div style="height: 6px; border-radius: 3px; background: {T["sunken"]}; margin-top: 9px; overflow: hidden;">'
+          f'<div style="height: 100%; width: {int(frac*100)}%; background: {fill}; border-radius: 3px;"></div></div>'
+          f'<div style="font-size: 11.5px; color: {T["ts"]}; margin-top: 7px;">'
+          + ("$1.84 today &middot; 8 days left" if state!="over" else "stopped on the 29th &middot; 1 day left")
+          + '</div>')
+    if state=="over":
+        hero+=(f'<div style="margin-top: 10px; background: {T["degq"]}; border-radius: 9px; padding: 9px 11px; display: flex; '
+               f'align-items: center; gap: 9px;"><span style="display: flex; color: {T["deg"]};">{ic(I["warn"],14,2)}</span>'
+               f'<span style="font-size: 12px; color: {T["tp"]}; flex-grow: 1;">Compute stopped at the $60 budget.</span>'
+               f'{btn(T,"Raise","secondary")}</div>')
+    hero+='</div>'
+    lbl=lambda t,m=None:(f'<div style="display: flex; align-items: baseline; margin-bottom: 8px;">'
+                         f'<span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["tt"]};">{t}</span>'
+                         + (f'<span style="flex-grow: 1;"></span><span style="font-size: 11px; color: {T["ts"]};">{m}</span>' if m else '')
+                         + '</div>')
+    daily=f'<div style="padding: 4px 16px 14px;">{lbl("EACH DAY",f"${max(DAYS):.2f} peak")}{daybars(T,DAYS)}</div>'
+    rows=[("collator",14.10,True),("drey-dev",11.60,True),("Morning brief",6.30,False),("Chat",5.10,False),("Other",4.10,False)]
+    where=(f'<div style="padding: 12px 16px; border-top: 1px solid {T["border"]};">{lbl("WHERE IT WENT")}'
+           + "".join(spendrow(T,n,v,14.10,agent=a,last=i==4) for i,(n,v,a) in enumerate(rows)) + '</div>')
+    facts=(f'<div style="padding: 11px 16px; border-top: 1px solid {T["border"]}; display: flex; flex-direction: column; gap: 5px; '
+           f'font-size: 12px; color: {T["ts"]};">'
+           f'<div><b style="color: {T["tp"]};">71%</b> of prompt tokens came from cache</div>'
+           f'<div><b style="color: {T["tp"]};">$23.40</b> AWS this month &middot; not compute</div>'
+           f'<div>3 calls had no price and count as $0</div></div>')
+    foot=(f'<div style="padding: 10px 16px; border-top: 1px solid {T["border"]};">'
+          f'<span style="font-size: 12px; font-weight: 600; color: {T["acc"]};">Budgets in Settings &rarr;</span></div>')
+    return (f'<div style="width: {w}px; background: {T["elevated"]}; border: 1px solid {T["bc"]}; border-radius: 14px; '
+            f'box-shadow: 0 10px 34px rgba(26,24,21,0.16); overflow: hidden; flex-shrink: 0;">{head}{hero}{daily}{where}{facts}{foot}</div>')

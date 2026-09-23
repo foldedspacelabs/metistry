@@ -37,6 +37,7 @@ canvas order:
 | `Agents` | **screen 7** — the roster, a local agent, a connected agent |
 | `Routines` | **screen 8** — the schedule, one routine, the two prompt layers |
 | `Resources` | **screen 9** — proxied MCP servers, per-tool grants |
+| `Usage` | **screen 17, new 2026-09-23** — the popover under the gauge, light and dark |
 | `Artifacts` | **screen 16, new 2026-09-23** — margin threads, compare, rooms and the cap |
 | `Settings` | **screen 15, new 2026-09-23** — the window, four panes, larger text, dark |
 | `CardDetail` | **screen 14, new 2026-09-22** — both kinds of task, light and dark |
@@ -227,6 +228,7 @@ SwiftUI's `.serif`.
 | Routines | `screen-08-routines.md` | done — the schedule, one routine |
 | Settings ▸ Resources | `screen-09-resources.md` | done — the connections, one connection, three states per tool |
 | Knowledge | `screen-10-knowledge.md` | **rebuilt 2026-09-22** — digest-led; sources folded to one line |
+| Usage | `screen-17-usage.md` | **new 2026-09-23** — the gauge's popover, three budget states |
 | Artifacts & Rooms | `screen-16-artifacts-and-rooms.md` | **new 2026-09-23** — list, artifact, compare, rooms, a room |
 | Settings | `screen-15-settings.md` | **new 2026-09-23** — sidebar, grouped, fixed 840 × 600 |
 | Card detail | `screen-14-card-detail.md` | **new 2026-09-22** — one popover, work row and markdown task |
@@ -236,7 +238,7 @@ SwiftUI's `.serif`.
 | Facets & colour | `facets-and-colour.md` | the system itself |
 | Build-side preview | `dev-preview-round-e.md` | **draft 2026-09-22** — what the developer needs, in one file; keep it current as rounds land |
 
-**Not drawn:** Usage, the Obsidian plugin's remaining surfaces.
+**Not drawn:** the Obsidian plugin's remaining surfaces.
 
 **Run detail is drawn (screen 12, 2026-09-22).** What follows was the state before it: `seed/queries/run_detail.yaml`
 and `GET /api/runs/:id` both exist (commit `3456aab`) — the handoff was stale on
@@ -262,7 +264,7 @@ the canvas is now generated from a module in `boards/` except `Facets`, `Plugin`
 `Voice` and `Item-Model`. `bellpanel()` is gone — it drew the *"1 snoozed"*
 header C21 killed; `panel2()` is the panel.
 
-**86 contradictions** are logged in `review-00-plan.md`. C38 and C51 are closed. C40–C86 are
+**87 contradictions** are logged in `review-00-plan.md`. C38 and C51 are closed. C40–C87 are
 round E's. Two of them are rules the system is missing rather than faults in a
 file: **C45** (a failed consequential operation leaves the request pending) and
 **C49** (a mark that carries meaning takes an ink token, never a border token —

@@ -9,14 +9,14 @@ available to agents for use. This solves a problem I have where I can't always
 directly attach MCP servers to the agent compute themselves, but still want to
 use information from them or perform actions through them."*
 
-**Revised 2026-09-22, same day**, after the designer's preview brief arrived
-mid-research. §6 records the alignment and the deltas; §4.1, §4.2, §4.5, §4.7,
-§4.8, §4.10 and §4.13 were changed by it, and one recommendation was
-**reversed** (§4.5's ban on auto-running writes, against C59). Everything the
-brief did not touch is unchanged. **Caveat that governs all of §6: the branch
-`design/round-0-plan-review` does not exist on `foldedspacelabs/metistry`** —
-see §6.0 — so the three spec files were not read, and §6 works from the rules
-as relayed verbatim. Read §6.0 before relying on §6.
+**Revised twice on 2026-09-22**: first against the designer's preview brief as
+relayed, then **re-verified against `origin/design/round-0-plan-review`** once
+the branch was pushed — `screen-09-resources.md`, `design-system-amendments.md`,
+`review-00-plan.md` §7, `HANDOFF.md` and the drawn board. §6 records the
+alignment. Five of this document's positions were changed by the design and
+**four were withdrawn outright** (§6.7); everything the design did not touch is
+unchanged. Sections carrying design deltas: §3.5, §4.1, §4.2, §4.5, §4.7,
+§4.8, §4.10, §4.13, §5.2–§5.4.
 
 Nothing here is built; this PR adds one document and no product code.
 
@@ -114,21 +114,21 @@ have settled it.
    `connectors_list`/`connectors_call` pair: genuinely small, and it answers
    the owner's stated problem ("still want to use information from them") on
    its own.
-9. **The designer's preview brief (relayed 2026-09-22) agrees on the hard part
-   and changed three things.** C56 states the architecture almost exactly as
-   §4.14 does, and reaches §4.4's conclusion — *"the agent never holds the
-   credential, so that table is the only control."* What it changed:
-   **C59 reversed** this document's ban on auto-running writes (*"a destructive
-   tool DEFAULTS to Ask, is not forbidden from On"*) and added a genuinely new
-   requirement — an unattended run must **defer and report**, not block;
-   **C58** replaced the proposed Connectors pane with a row in a permissions
-   table (Read/Write columns, absence is the denial, no per-cell control),
-   which also argues C62's open fork closed; and **the label needs a
-   decision** — the designer's "Resources" collides both with core's own
-   `Resource` union (`access.ts:490-518`) and with MCP's own `resources`
-   primitive (§4.1, §6.7). **§6.0 is a caveat that governs all of §6: the
-   branch holding the brief's three spec files does not exist on the remote,
-   so the rules were mapped as relayed and the screens were never read.**
+9. **The designer's round-E work (read at `origin/design/round-0-plan-review`)
+   describes the same system and is ahead of this document on the interface.**
+   C56 states the architecture more plainly than §4.14 does — *"it holds the
+   credential and **mediates**: an agent asks Metistry, Metistry asks the
+   server"* — and **Settings ▸ Resources** is already drawn: a
+   `SERVER · KIND · TOOLS · GRANTED TO` list, a per-tool
+   `TOOL · WHAT IT DOES · [On|Ask|Off]` table, and a permissions row marked
+   **Through Metistry** whose Ask marker is **a clock**. Four of this
+   document's positions were **withdrawn** against it (§6.7), the sharpest
+   being that a deferred Ask *does* raise a Needs You row and that **C62
+   remains open** — *"Either Settings becomes resizable or Resources is not a
+   Settings pane."* Its own asks D9/D11/D12 land inside §4, and D12 names
+   `runs` independently. The one genuinely unresolved design question is
+   **D11 vs §4.8**: whether a per-tool grant lives on the agent or on the
+   connector's manifest (§6.8(2)).
 
 ---
 
@@ -520,10 +520,21 @@ act_within_scope` (`:42`), with the level a **ceiling** over the per-kind entry.
 > existing service with an existing audit row — an action adds a door, never a
 > power.**"
 
-The **six answers** (`docs/ops/reply-feedback.md:9-21`,
+The **six answers on the wire** (`docs/ops/reply-feedback.md:9-21`,
 `docs/product/glossary.md:36-47`): Approve, Revise, Decline, Approve as Work,
 Later, Skip — with `Later` a snooze that does not settle the row, and `Skip` a
 decline that fires none of Decline's consequences.
+
+**The design branch has since re-cut this to four on a card**, and every
+approval section below follows it: `POST /api/proposals/batch` accepts only
+`BATCH_DECISIONS = ["later", "skip", "deny"]`, so *"Four answers on a card,
+three on a selection; the difference is not a simplification, it is the
+endpoint's own list quoted back"* — Skip *"came off the card as a fifth button
+and lives as a batch verb"*
+(`screen-03-needs-you.md` §3, design branch). The wire is unchanged; the card
+offers **Approve · Revise · Decline · Later**, plus Approve as Work where the
+payload suggests one. §6.2 records that this contradicts `reply-feedback.md`
+and two shipped SVGs, which still say six.
 
 ### 3.6 `metistry connect` — the OUTBOUND arrow
 
@@ -628,46 +639,52 @@ type.
    over (`tool`, `toolset`, `knowledge`, `query`, `project`, `action`,
    `console`) — and `:48` defines `ResourceClass = "knowledge" | "artifact" |
    "machinery" | "outside"`. "Resource" in this codebase means *any governed
-   thing*. Narrowing the user-facing word to mean *proxied MCP servers
-   specifically* puts the widest internal noun and a narrow product noun on the
-   same string.
-2. **With MCP itself.** MCP's own primitives are **tools, resources and
-   prompts**. A screen called "Resources" that governs which *tools* a proxied
-   server may run is actively misleading to anyone who knows the protocol — and
-   the audience for this screen is, by construction, someone who has heard of
-   MCP servers.
+   thing*. **On the real documents this turns out to be agreement, not
+   collision**: C58 and HANDOFF §3 use "resource" in exactly that broad sense
+   (*"one line per resource"*, of which a proxied server is *"one more
+   resource row"*), and `screen-09-resources.md` §1 justifies the word by
+   analogy — *"a **resource** in exactly the sense Knowledge already is: one
+   thing, defined once, lent to several agents, routines and projects on
+   different terms."* The two vocabularies mean the same thing. An earlier
+   draft of this section called it a collision on the strength of a narrower
+   summary; that was wrong and is withdrawn.
+2. **With MCP itself — this one stands.** MCP's own primitives are **tools,
+   resources and prompts**. A screen called Resources whose detail view
+   governs which *tools* a proxied server may run reads, to anyone who knows
+   the protocol, as the screen for MCP `resources` — and the audience for
+   this screen is by construction someone who has heard of MCP servers. It is
+   a real hazard and a small one; a subtitle naming servers rather than
+   resources would discharge it.
 
-**Recommendation, and it also answers C62.** Take the designer's *model*
-wholesale and decline only the *label*. C56 already says the right thing: a
-proxied server is *"a row in the same permissions table with one new provenance
-value — Through Metistry — and no new primitive."* If that is true, then there
-is **no separate Resources table to fit into Settings** — which is exactly what
-C62 worries about. So:
+**Recommendation, revised against the real documents.**
 
-- **The permissions table is where connectors live**, as rows with provenance
-  **Through Metistry** (C56, C58). No new screen, no new table, no fixed-window
-  problem.
-- **Where a pane name is unavoidable**, prefer **Permissions** — C58's own
-  word for the table — over Resources. If the designer holds Resources, the
-  collision is survivable but the code must never follow it: `Resource` stays
-  core's union and nothing in `packages/` gains a second meaning for it.
-- **Internally the noun stays `connector`** — manifests, `metistry connectors`,
-  `runs.kind = connector_call`, the `{kind: "connector"}` resource variant.
-  The product already keeps internal and user-facing vocabularies apart on
-  purpose; this is that, not a compromise.
-- **Rename the shipped pane Settings ▸ Connections → Settings ▸ This Mac**,
-  which is what it actually contains, and stop using the bare noun
-  "connection" for the outbound arrow — say **client**
-  (`docs/ops/cli.md:525`, the `connect.ts` header). `metistry connect` keeps
-  its name; a verb reads differently from a plural noun.
+- **Accept Settings ▸ Resources as the user-facing name.** It is ratified
+  (C57), drawn (`boards/resources.py`), and justified by the Knowledge
+  analogy. The one residual risk is MCP's own `resources` primitive, above.
+- **The screen is where a connection is DEFINED; the permissions table is
+  where it is GRANTED** — two surfaces, by the screen's own ruling, not one.
+  §4.13 follows this.
+- **Internally the noun stays `connector`** — manifests, `metistry
+  connectors`, `runs.kind = connector_call`. Note the code cannot reuse
+  "resource" even though the concepts agree, because `Resource` is already
+  taken by the `may()` union; the internal name has to differ for a
+  mechanical reason rather than a conceptual one.
+- **The shipped Settings ▸ Connections pane is superseded, not renamed.** The
+  drawn section list is General · Compute · Knowledge · Resources ·
+  Notifications · Advanced (`lib.py:3277`), against the shipped enum
+  `instance · services · connections · compute · secrets · updates · advanced`
+  (`settings-model.swift:54-74`). That is a whole re-cut of Settings and it is
+  the designer's, not this document's. The earlier recommendation to rename
+  Connections → This Mac is **withdrawn** — there is no Connections section in
+  the new list at all.
+- **Still worth doing:** stop using the bare noun "connection" for the
+  *outbound* arrow and say **client** (`docs/ops/cli.md:525`, the `connect.ts`
+  header). `metistry connect` keeps its name; a verb reads differently from a
+  plural noun. This is the only naming change this document still asks for.
 
 Rejected: *gateways* (infrastructure vocabulary the rest of the product
 avoids) and *integrations* (Executor's word for the catalog half of a two-noun
 model Metistry is deliberately collapsing to one).
-
-This is the one place the brief may simply overrule this document, and the
-naming half of it should. The two collisions above are the argument for
-overruling it *only on the label*, and they are facts rather than taste.
 
 ### 4.2 The manifest
 
@@ -1030,7 +1047,9 @@ inventing one:
 2. It simultaneously raises an `action` proposal of kind `connector_call` in
    **Needs You**, carrying the human-readable preview and the connector,
    tool and redacted arguments.
-3. The owner answers with **the same six answers** — Approve runs it (through
+3. The owner answers with **the same four answers a card carries** —
+   Approve · Revise · Decline · Later (`screen-09-resources.md` §4: *"answered
+   with the four answers every request takes"*). Approve runs it (through
    the connector service, as the deciding principal, with `source_agent`
    recorded as `on_behalf_of`, exactly as `docs/ops/actions.md` already
    specifies); Revise keeps the reason and settles without running; Decline and
@@ -1079,12 +1098,16 @@ change rather than a rendering one:
   report carries the skipped list so the routine's output says what it could
   not do. A refusal would make the routine look broken; a silent omission
   would be worse than either.
-- **No Needs You row is raised for a deferred call.** A request arriving hours
-  later about a run that has already finished asks the owner to authorize
-  something with no live context and nothing waiting on it. Recommended, not
-  obvious — §5.4(c) carries it as the open question, because the alternative
-  ("raise it anyway, let Later handle it") is defensible and the brief does not
-  settle it.
+- **A Needs You row IS raised, and this corrects an earlier draft.** This
+  document first recommended raising nothing, on the grounds that a request
+  arriving hours after the run finished has no live context. `screen-09-resources.md`
+  §4 settles it the other way and is right: *"The output carries* I would have
+  commented on PROJ-412 — that needs your approval*, **and the request lands in
+  Needs You**. Nothing blocks, nothing is half-applied, and the fact is reported
+  rather than silently dropped."* Both things happen — the run's output names
+  the skipped step, and the request queues — because the alternative drops a
+  decision the owner would have made. The deferred row is an ordinary request
+  and `Later` already handles the case where it has gone stale.
 
 **Auto-approve rules.** With C59 admitting `mode: on` for writes, standing
 consent is already expressible *in the manifest*, by the owner's hand, per
@@ -1146,41 +1169,77 @@ is `connector_call` and nothing else. **No route creates, edits or deletes a
 connector**: that is a file in a protected path and stays the owner's hand
 (invariant 10 — *"a new action is a product change"*).
 
-**Mac app — rewritten against C58, C56 and C62.** A connector is **a row in
-the permissions table**, not a screen of its own:
+**Mac app — rewritten against the drawn screen (`screen-09-resources.md`,
+`boards/resources.py`, `boards/lib.py:3189-3283`).** There are **two** surfaces,
+and the screen's own sentence is why: *"Defining it belongs in one place;
+granting it belongs in the permissions table of whatever is being granted.
+Those are two different questions."*
 
-- **One row per connector**, with **Read** and **Write** columns — the two
-  columns exist because C56 says *"a per-server grant cannot be a single
-  switch, because reading the owner's vault and acting in a system other
-  people watch are not the same risk."* Each admitted tool's `verb:` (§4.2)
-  decides which column it rolls into.
-- **Absence is the denial (C58).** A connector with no admitted write tools has
-  **no Write cell** — not a disabled one, not an "Off" one. A connector not in
-  the table is not installed. Nothing in the UI offers to grant.
-- **No per-cell control, no Allow affordance (C58).** The table renders the
-  manifest; it never writes it. This validates §4.13's CLI rule rather than
-  changing it — the manifest is a protected path, so the owner's editor is the
-  only writer, and the table having no controls is the *correct* rendering of
-  that fact rather than a limitation.
-- **One glyph, meaning "this verb waits for you" (C58, C61).** A cell carries
-  it when any tool in that column is `mode: ask`. Cell states are therefore
-  three: absent (not granted), present (runs), present + glyph (waits).
-  **The information this loses is real** — a connector with four `on` read
-  tools and one `ask` read tool shows the same cell as one with five `ask`
-  tools — and §5.4(b) carries it as a question rather than papering over it.
-- **Provenance: Through Metistry** (C56), on the row, distinguishing a
-  connector from grants whose credential the principal holds itself.
-- **Health** reuses the shipped `.ok / .degraded / .absent / .failed` roles
-  (`settings-view.swift:242-254`) — §4.12's `check()` feeds it.
+**(1) Settings ▸ Resources — where a connection is defined.** Its own window,
+not a pane in the main one (`lib.py:3255` `settingswindow`), reached from a
+section list drawn as General · Compute · Knowledge · **Resources** ·
+Notifications · Advanced (`lib.py:3277`). The list is
+`SERVER · KIND · TOOLS · GRANTED TO` with a leading state dot
+(`lib.py:3194-3196`), and **Granted To is the column that earns the screen** —
+it answers *who can reach my work Jira*, with **"Nobody yet"** a real value
+because *"a connected server that nothing uses is a credential sitting there
+for no reason."* One connection shows four facts — Endpoint, **Credential:
+*Held by Metistry — never handed to an agent***, **Reachable From: *This
+machine only***, Last Checked (a time **and how many tools were discovered**) —
+which are *"the security model stated as facts on the object rather than as
+reassurance in a paragraph."*
 
-**C62 — does a table fit in a fixed, non-resizable Settings window?** On this
-model the question mostly dissolves: there is no *separate* Resources table to
-place, because connectors are rows in a table that already has a home (§4.1).
-What Settings needs is at most a **compact summary** — connector name,
-provenance, the two cells, health, and a Test button — which is a list, not a
-wide table, and fits. If the permissions table itself lives outside Settings,
-the summary links to it. The wide-table problem only appears if connectors get
-their own screen, which C56 says they should not.
+**(2) The tool table — `TOOL · WHAT IT DOES · [On|Ask|Off]`**
+(`lib.py:3232-3252`), one segmented three-state control per tool, **drawn in
+weight and fill, never in colour** (amendments §1.1: *"A permission is not a
+moral position"*). The drawn example is the read/write split made concrete:
+`search_issues` On, `get_issue` On, `add_comment` Ask, `transition_issue` Ask,
+`delete_issue` **Off**. The legend is the spec for §4.5's three modes,
+verbatim: **On** *"runs when an agent calls it — no preview, because you chose
+it"*; **Ask** *"shows what it would do, then waits for you in Needs You"*;
+**Off** *"refused at the proxy, and not offered to the agent at all"*. And the
+list is *"what the server said it has, the last time it was asked — a fact with
+a timestamp, not a configuration"*, which is §4.12's `check()` output rendered.
+
+**(3) The permissions table — where it is granted.** `Resource × Read ×
+Write`, one line per resource, on a local agent, a connected agent and a
+routine alike (C58, HANDOFF §3). **A proxied server is one more resource row,
+marked *Through Metistry*** — the provenance value, confirmed
+(`design-system-amendments.md` §3.2). **Absence is the denial**: no
+Allow/Never control, and *"Edit sits on the section"* rather than in a cell.
+The rollup this document reconstructed is right and the glyph is named: *"the
+same three states are read off absence and one glyph — **listed is On, listed
+with the clock is Ask, absent is Off**"* (`lib.py:3206-3208`). So the Ask
+marker is a **clock**, and the states are set on Resources and only *read* in
+the matrix — which this document previously had backwards.
+
+**The rollup's information loss is deliberate, not an oversight.** A cell
+cannot say *which* of a server's read tools waits. The screen accepts that
+because *"the vocabulary is one thing seen from two sides"*, and D11 asks the
+wire for **per-tool grants** *"held beside the agent's other permissions rather
+than in a second place, so the matrix renders it as one more row"* — i.e. the
+truth lives per tool and the cell is a summary of it. This document previously
+carried the loss as an open question; it is answered and retired.
+
+**Health** reuses the shipped `.ok / .degraded / .absent / .failed` roles
+(`settings-view.swift:242-254`), and the screen adds the rule this document had
+open: **an expired token is `degraded`, not `failed`** — *"the connection is
+configured correctly and a fact about the world changed."* `failed` means
+*"could not reach the server at all, with the error verbatim"*; `absent` means
+*"configured by environment but the variable is unset — the variable named, not
+spent."* Empty copy: *"No servers connected."* + *Metistry can reach servers
+your agents cannot, and lend them*.
+
+**C62 is open, and this document previously argued it closed — wrongly.** The
+earlier draft said the fork dissolved because connectors need no separate
+table. They do have one, and it is in Settings: *"Settings is a fixed,
+non-resizable window and Resources now lives in it … a table of tool names,
+descriptions and a three-state control does not survive
+`accessibilityExtraExtraExtraLarge` in a window that cannot grow. **Either
+Settings becomes resizable or Resources is not a Settings pane**"* (C62,
+against `apps/macos/sources/kit/settings-view.swift:47`). That is a live fork
+with a product consequence and it is **not** this document's to close; §5.4(b)
+now carries it.
 
 **Adding one** stays a wizard: paste a command or URL → test → store the
 credential → the app writes the scaffold with **every tool at `off`** and opens
@@ -1265,7 +1324,7 @@ environment safe-list.
 | Phase | Scope | New code | Rough size |
 | --- | --- | --- | --- |
 | **P1** | **Read-only stdio connectors.** `type: connector` in the manifest union; a `packages/connectors` upstream MCP client with a pooled stdio child under the supervisor + egress; the allow-list with `mode: on \| off` (reads only); `connectors_list`/`connectors_call` on `/mcp`; `runs` rows + the `connector_calls` query; `check()` → doctor; `metistry connectors add\|list\|test\|policy\|remove`; scope gate + crew `uses` group | manifest schema, connectors package, 2 brain tools, 1 seed query, 1 CLI module | **moderate** — one focused PR chain; the client is the only genuinely new thing |
-| **P2** | **`mode: ask` + approvals.** Preview-then-confirm on the connector path; the `connector_call` action kind (pending §4.7's ruling); Needs You rendering with the six answers; **the C59 defer-and-report path for unattended runs** and the `interactive` bit in `_meta` it needs; **C45's failed-call-leaves-pending on the connector path**; `mode: on` for writes plus per-tool and per-connector rate limits from `runs`; response-side redaction hardening; misuse tests (invariant 8) | actions enum + schema, console action route, proposal payload, routine report, app/console rendering | **moderate**, and it is where the design risk sits |
+| **P2** | **`mode: ask` + approvals.** Preview-then-confirm on the connector path; the `connector_call` action kind (pending §4.7's ruling); Needs You rendering with the card's four answers; **the C59 defer-and-report path for unattended runs** and the `interactive` bit in `_meta` it needs; **C45's failed-call-leaves-pending on the connector path**; `mode: on` for writes plus per-tool and per-connector rate limits from `runs`; response-side redaction hardening; misuse tests (invariant 8) | actions enum + schema, console action route, proposal payload, routine report, app/console rendering | **moderate**, and it is where the design risk sits |
 | **P3** | **HTTP/SSE upstreams + OAuth + the permissions row.** RFC 9728 discovery, OAuth 2.1 + PKCE with `resource`, refresh in the Keychain; `locality`/`data_policy` enforcement; **the permissions-table row with Read/Write columns, the one glyph and Through Metistry provenance (C56/C58)**; the naming reconciliation in §4.1 | OAuth client, HTTP transport, SwiftUI rows | **larger**, and the phase the designer owns |
 
 P1 is worth shipping alone: it answers *"still want to use information from
@@ -1285,21 +1344,21 @@ riskiest.
    design the number moves only when someone argues for it; two lazy tools that
    buy an unbounded number of upstream tools is the argument, and it is the
    owner's to accept.
-3. **The naming reconciliation** (§4.1) — **Resources vs connectors**, given
-   that `Resource` is already core's own union (`access.ts:490-518`) and
-   already MCP's own primitive. Plus the shipped-surface rename Settings ▸
-   Connections → Settings ▸ This Mac. **Owner and designer together.**
+3. **D11 vs §4.8 — where a per-tool grant lives** (§6.8(2)). The design wants
+   it on the agent, beside its other permissions; §4.8 puts the allow-list in
+   the connector's manifest, which is what makes invariant 2 hold for free.
+   One fact, two homes. **Owner and designer together**, and it is the item
+   most likely to change P1's shape.
 4. **Whether external agents (Cursor, Devin) may ever hold `connectors_*`.**
    §4.14's corollary. Recommended P1 default: no. Note C52 narrows this:
    with the assistant unscoped, `scope` is *only* ever about crews and
    external agents (§4.8).
-5. **C53 vs C61 — two vocabularies for three states.** The brief gives
-   user-facing action words as **Allow · Ask First · Never** (C53) and a
-   proxied tool's states as **On · Ask · Off** (C61). These may be
-   deliberately different objects (an action kind's autonomy vs a tool's
-   state) or may be a drift. §4 follows C61 for connectors, because it is the
-   rule written about proxied tools specifically. Worth one line from the
-   designer.
+5. **The naming leftover** (§4.1). Settings ▸ Resources is ratified and this
+   document's objections to it are withdrawn (§6.7). The one change still
+   asked for is small: stop calling the *outbound* arrow a "connection" and
+   say **client** (`docs/ops/cli.md:525`). Separately, `docs/ops/reply-feedback.md`
+   and `docs/product/glossary.md` say "six answers" where the card now offers
+   four (§6.6) — a docs fix somebody owns.
 6. **Adding `@modelcontextprotocol/sdk` as a *client*.** It is already
    pre-approved in CLAUDE.md and already a dependency, so this is a
    notification rather than a request — but it is used only as a server today
@@ -1307,9 +1366,13 @@ riskiest.
 
 ### 5.4 Open questions
 
-Six, re-cut after the brief; two pre-brief questions (rate-limit refusal vs
-queue, and the registry's file layout) were folded into §4.5 and §4.2 as
-recommendations rather than left open, to keep this at six.
+Six, re-cut twice. Four earlier questions were **answered** rather than
+carried: rate-limit refusal vs queue and the registry's file layout became
+recommendations in §4.5 and §4.2; the Read/Write rollup's information loss is
+deliberate and sourced (§6.3); whether a deferred Ask raises a Needs You row is
+settled — it does (§4.10). `check()`'s degraded-vs-failed question is answered
+too: an expired token is **degraded** (§4.13). Their places are taken by C62 and
+D13, which the design branch left open.
 
 - **(a) Does a connector's reach need a vault-side scope at all?** §4.8 gates
   *who may call* a connector but says nothing about what a connector's
@@ -1317,18 +1380,16 @@ recommendations rather than left open, to keep this at six.
   connector reads GitHub regardless of its vault scope. That may be correct —
   the two are different resources — but it is the closest thing here to the
   `queries_run` leak the never-list was written for.
-- **(b) The Read/Write cell loses per-tool state, and C58 forbids getting it
-  back in the table.** A connector with four `on` read tools and one `ask` read
-  tool renders identically to one with five `ask` read tools (§4.13). Options:
-  accept it (the manifest is the truth and the table is a summary), or split
-  the glyph into "some" and "all". The second is a per-cell state control by
-  another name, which C58 rules out — so the honest answer is probably accept,
-  and say so out loud.
-- **(c) Does a deferred Ask raise a Needs You row anyway?** §4.10 recommends
-  **no** — a request arriving hours after the run finished has no live context
-  and nothing waiting on it. But "raise it, let *Later* handle it" is
-  defensible and C59 does not settle it. This is the single most consequential
-  open question the brief created.
+- **(b) C62 — resizable Settings, or Resources out of Settings?** Still open on
+  the design branch and not this document's to close: *"a table of tool names,
+  descriptions and a three-state control does not survive
+  `accessibilityExtraExtraExtraLarge` in a window that cannot grow"*
+  (`settings-view.swift:47`). A resizable Settings window is a Mac-app change
+  with consequences past this feature. §6.5.
+- **(c) D13 — can a resource be granted to a project or a team?** The
+  designer's own fourth ask: *"a scoping axis nothing currently drawn has."*
+  §4.8 grants to roles and crews; projects already exist as a scope dimension
+  (`Scope.projects`), so the wire is closer to this than the drawings are.
 - **(d) Where does the `interactive` bit come from?** §4.10 needs to know
   whether anyone is there, and the same credential answers a user at 11 AM and
   a routine at 6:02 AM — so it cannot come from the principal. Proposed: the
@@ -1347,169 +1408,186 @@ recommendations rather than left open, to keep this at six.
 
 ---
 
-## 6. Designer brief alignment (preview brief, 2026-09-22)
+## 6. Designer brief alignment (round E, verified against the branch)
 
-### 6.0 What was read, and what was not — read this first
+**Re-verified 2026-09-22 against `origin/design/round-0-plan-review`.** An
+earlier revision of this section worked from the rules as relayed, because the
+branch did not yet exist on the remote; that caveat is discharged and every
+"unverified" mark below has been replaced with what the documents say. **Three
+of this document's positions were wrong and are corrected in place** (§6.5,
+§6.7, and §4.10's deferred-row recommendation); one reconstruction was right
+and is now sourced (§6.3).
 
-**The brief's own documents could not be reached.** The relay named branch
-`design/round-0-plan-review` with `docs/product/design/screen-09-resources.md`,
-`design-system-amendments.md` and `review-00-plan.md` §7. All of the following
-were run against `foldedspacelabs/metistry` on 2026-09-22 and found nothing:
+### 6.0 What was read
 
-```console
-$ git fetch origin design/round-0-plan-review
-fatal: couldn't find remote ref design/round-0-plan-review
-$ git ls-remote origin | grep -iE 'design|round-0|resource'      # no output
-$ gh api repos/foldedspacelabs/metistry/branches --jq '.[].name'
-claude/console-owner-token   claude/flexible-compute   claude/phase-1-substrate
-claude/poc15-tier-routing    claude/product-instance-split
-claude/research-agent-memory claude/research-live-capture
-claude/research-prior-art    main
-$ gh api "search/code?q=repo:foldedspacelabs/metistry+screen-09-resources" --jq '.total_count'
-0
-```
+`git fetch origin` now resolves the branch. Read in full:
+`docs/product/design/screen-09-resources.md`, `design-system-amendments.md`,
+`review-00-plan.md` §7 (C45–C68), `HANDOFF.md`, `boards/resources.py`, and
+`boards/lib.py:3189-3283` — the drawn components (`resourcelist`, `tristate`,
+`toolrow2`, `toolblock`, `settingswindow`, `settingsnav`). `boards/resources.py`
+is Python and was read, not run.
 
-Nine branches, no `design/*`, and no file by that name anywhere in the
-repository. The branch is presumably unpushed, in a fork, or named differently.
+**One staleness to know about.** `resources.py`'s own FOUND panel still says
+*"the nav is nine rows … Resources"*, while its `win()` already renders
+`settingswindow` and C57 and `HANDOFF.md` §3 both put Resources **in Settings**.
+The board was moved and its rationale panel was not. The `.md`, C57 and HANDOFF
+agree with each other and are newer; §6 follows them.
 
-**So everything below is mapped against the rules as relayed verbatim, not
-against the specs.** The C-numbered rules are quoted exactly as given and are
-reliable; anything that would need the *screens* — the table's actual columns
-and glyph, where the permissions table lives today, what Model · Action · May
-render as, the fixed Settings window's real dimensions — is marked
-**unverified** and is the first thing to re-check when the branch lands. Two
-mappings below (§6.3's Read/Write rollup, §6.5's pane placement) are
-reconstructions and could be wrong in detail while still being right in shape.
+### 6.1 The headline is unchanged, and stronger
 
-### 6.1 The headline: the brief and §4 agree on the hard part
+The designer reached the ask's architecture independently and states it more
+plainly than §4.14 does: *"Metistry can reach servers a remote agent cannot — a
+work network, something behind a VPN, something IP-allowlisted. So it holds the
+credential and **mediates**: an agent asks Metistry, Metistry asks the server.
+The agent never sees the token."* And the sentence the whole screen exists to
+make true: **"The credential never moves."**
 
-The designer arrived independently at the model's two load-bearing choices:
-**the owner's declaration is the whole control**, and **the agent never holds
-the credential**. C56 states the ask's architecture almost exactly as §4.14
-does — *"Metistry holds the credential for a server a remote agent cannot
-reach, and mediates"* — and draws the same conclusion §4.4 does: *"the agent
-never holds the credential, so that table is the only control."* Nothing in §1
-through §5 was invalidated. One recommendation was reversed (§6.4), one section
-was rewritten (§6.5), and the naming needs a decision (§6.7).
+The screen also reaches §4.2's structural conclusion by a different route:
+*"`CLAUDE.md` requires every bridge to do **lazy tool discovery**,
+**preview-then-confirm on destructive tools**, and **secret redaction by
+default**. A proxied MCP server conforming to that contract inherits the
+behaviour this screen would otherwise have to invent — which is the argument for
+treating a proxied server as **a bridge, not a new species**."* §4.2 proposes
+`type: connector` as a new member of the manifest union; the screen's argument
+is that it should be as close to `type: bridge` as the schema allows. Both
+agree the *contract* is the bridge contract. Whether they are one `type` or two
+is a schema question §5.3 should carry — see §6.8(1).
 
-### 6.2 Rule-by-rule mapping
+### 6.2 Rule-by-rule, verified
 
-| Rule | Maps onto | Delta |
+| Rule | Status | What the documents actually say |
 | --- | --- | --- |
-| **C61** — three states **On · Ask · Off**; *"Ask IS preview-then-confirm; no second 'previews first' marker"* | §4.5's `mode`, renamed `on \| ask \| off` | **Vocabulary change + one deletion.** The machinery is identical — Ask was already preview-then-confirm via eventkit's shipped `confirm_token` (`packages/mcp-eventkit/src/index.ts:33-48`). The deletion is real: the draft manifest had **both** a `mode` and a `destructive:` flag, which is precisely the second marker C61 forbids. `destructive:` is gone (§4.2). |
-| **C58** — *"Absence is the denial"*; one row per resource, **Read and Write** columns; *"no per-cell state control, no Allow affordance"*; one glyph for *"this verb waits for you"* | §4.13, rewritten; §4.2 gains `verb: read \| write` | **Rewrite.** See §6.3. Note it **validates** §4.13's existing rule that no console route or app control ever writes a connector manifest — C58 and invariant 2 arrive at the same UI from different directions. |
-| **C56** — a row in the same permissions table, provenance **Through Metistry**, *"no new primitive"*; *"a per-server grant cannot be a single switch"* | §4.1, §4.4, §4.8, §4.13 | **Absorbed, and it answers C62.** The two-column split is now *justified* rather than asserted. See §6.6 on "no new primitive". |
-| **C59** — *"Ask means pause when interactive, defer when unattended"*; the 6:02 AM routine *"finishes without that step and reports what it skipped"*; a destructive tool *"DEFAULTS to Ask, is not forbidden from On"* | §4.10, new subsection; §4.5, reversed | **The largest delta, in two parts.** See §6.4. |
-| **C45** — a failed consequential operation *"leaves the request pending"*; `payload.error`, no retry; an access refusal does the same | §4.10 | **Already law, now explicit.** `docs/ops/actions.md` already rules exactly this for every action kind, so a connector call inherits it by being one (§4.7). Stated anyway, because an upstream fails far more often than a local service and the edge case becomes the common path. |
-| **C52** — *"Metis itself never appears on Agents"*; it IS the user, unscoped | §4.8 | **Simplification.** `scope.roles: [assistant]` was never a narrowing. Dropped; the default is now an empty scope meaning *the assistant and nobody else* (§4.8). |
-| **C53** — user-facing action words **Allow · Ask First · Never** | §4.5 | **Flagged, not resolved.** Two three-state vocabularies now exist (C53 and C61). §4 follows C61 for connectors. §5.3(5). |
-| **C50** — Routines is a top-level nav row | §4.10 | Relevant only as the home of the unattended caller C59 is about. The skipped-steps report has a place to be seen. |
-| **C62** — *open fork:* Settings is fixed and non-resizable; a Resources table may not fit | §4.1, §4.13 | **Argued closed, in one direction.** See §6.5. |
-| **Model · Action · May** (action kinds) | §4.7 | **Unverified.** A fifth kind `connector_call` would have to draw in that grammar; without the spec I cannot say whether it does. Flagged for the re-check. |
+| **C61** — On · Ask · Off | **confirmed, and drawn** | A segmented control per tool (`lib.py:3223-3231` `tristate`), selected segment by **fill and weight, never colour** (amendments §1.1). Legend verbatim in §4.13. The deleted second marker was real: *"An earlier draft marked destructive tools* Previews first *alongside the setting, which said two things at once and quietly overrode a deliberate **On**."* |
+| **C58** — absence is the denial | **confirmed** | *"One line per resource"*, **Read and Write as columns**, *"anything not listed is not granted"*, *"one glyph marks a verb that asks first, and **Edit sits on the section**"* (HANDOFF §3). |
+| **C56** — Through Metistry | **confirmed, value exact** | `design-system-amendments.md` §3.2 gives the provenance table; *"reached through a proxy | **Through Metistry**"*. HANDOFF §3: *"A proxied MCP server is one more resource row, marked Through Metistry; the server itself is defined on Resources."* |
+| **C59** — pause vs defer | **confirmed, and one correction to this document** | The run *"finishes without it and says so"* — **and the request still lands in Needs You**. §4.10 previously recommended raising nothing; corrected. |
+| **C45** — failed leaves pending | **confirmed** | Amendments §2.4, verbatim as §4.10 already had it. Adds: *"a screen must not draw a refusal as a decision."* |
+| **C57** — the nav, and where Resources went | **new to this document** | Eight rows. *"**Resources was briefly a ninth and moved to Settings** … the test it failed is whether the owner goes there often, and a connection is configured once and then read from the permissions tables that grant it."* This is the real reason for the placement — §6.5. |
+| **C62** — the fixed window | **still OPEN, and this document was wrong** | §6.5. |
+| **C52** — the assistant is unscoped | **confirmed** | Amendments §5. §4.8's simplification stands. |
+| **C53** — Allow · Ask First · Never | **resolved, not a drift** | These are the **renamed wire enums** `allow` / `propose` / `deny` (amendments §4). On · Ask · Off is the **proxied tool control**. Different objects, as §4.5 guessed. This document's "C53 vs C61" question is retired. |
+| **four answers vs six** | **a real contradiction, reported** | §6.6. |
+| **D9 · D11 · D12 · D13** | **new to this document** | The screen's own developer requests, §6.4. |
 
-### 6.3 C58 — the permissions table, and the one thing it costs
+### 6.3 The rollup — this document's reconstruction was right, and the glyph is a clock
 
-The table is one row per connector with **Read** and **Write** cells, each cell
-in one of three states: **absent** (not granted — *"anything not listed is not
-granted"*), **present**, or **present + the glyph** (*"this verb waits for
-you"*). Every admitted tool carries `verb: read | write` (§4.2) deciding which
-cell it rolls into; default it from the upstream's `readOnlyHint` annotation
-where present, require it in the manifest where not, and **never infer it from
-the tool's name** — `get_or_create_*` is a real naming pattern.
+`screen-09-resources.md` §3.2, verbatim: *"In an agent's or a routine's
+permissions matrix the same three states are read off absence and one glyph —
+**listed is On, listed with the clock is Ask, absent is Off** — so the
+vocabulary is one thing seen from two sides."*
 
-**What this costs, stated plainly:** the rollup is lossy. A connector with four
-`on` read tools and one `ask` read tool renders identically to one with five
-`ask` read tools. The obvious fix — two glyphs, "some" and "all" — is a
-per-cell state distinction, which is the thing C58 removes. So the recommended
-answer is to **accept the loss and put the truth in the manifest**, where the
-owner wrote it. §5.4(b) carries it as a question rather than a decision,
-because it is the designer's to make.
+So: cell absent = not granted; listed = On; listed **with a clock** = Ask. That
+is exactly the three-state rollup §4.13 reconstructed, and the marker is named.
+Two things the reconstruction had backwards, now fixed in §4.13:
 
-*(Unverified: whether the existing permissions table already has a provenance
-column to add **Through Metistry** to, and what the glyph is.)*
+- **The states are *set* on Resources and only *read* in the matrix.** This
+  document implied the reverse.
+- **The information loss is deliberate.** D11 asks for *"a **per-tool** grant,
+  held beside the agent's other permissions rather than in a second place, so
+  the matrix renders it as one more row"* — the truth lives per tool, the cell
+  summarises it. This document's open question about the loss is retired.
 
-### 6.4 C59 — the rule that changed the design
+How a per-server grant splits read from act is therefore answered twice over,
+and C56's clause is the reason both exist: *"reading the owner's own vault is
+not the same risk as acting in a system other people watch, so a per-server
+grant cannot be one switch."* At the matrix it splits into **Read and Write
+columns**; at the resource it splits into **per-tool** states — *"Nobody who
+clicks* grant Jira *means* including `delete_issue`*. A server-level switch is
+the shape that produces that mistake, so there isn't one."*
 
-**Part one: `on` is permitted for writes, and §4.5 reversed.** The pre-brief
-draft said no write may ever run without a human. C59 rules that a destructive
-tool *"DEFAULTS to Ask, is not forbidden from On."* The brief is right. The
-control that matters is that the **default** is Ask and that moving a tool to
-On is the owner's hand in a protected file — not that the product refuses to
-let the owner decide. §4.5 now says so, and notes that this raises the later
-value of argument constraints, since `on` + a constraint is a better answer
-than `on` alone.
+### 6.4 D9–D13 — the screen's own asks, against §4
 
-**Part two: defer-and-report, which is genuinely new.** *"A routine at 6:02 AM
-has nobody to ask, so the run finishes without that step and reports what it
-skipped."* The pre-brief design had no notion of *nobody being there*; an Ask
-would have blocked or failed the routine. §4.10 now specifies:
+The screen ends with four developer requests. All four land inside this
+document's model, which is the strongest evidence the two are describing one
+thing:
 
-- an **`interactive` bit resolved from the run's origin**, not the principal —
-  the same credential answers a user at 11 AM and a routine at 6:02 AM — riding
-  in `_meta` beside `turn_id` rather than in a tool schema, for the same
-  reasons `turn_id` moved there;
-- unattended + `ask` ⇒ a distinct **skipped** outcome, not an error and not a
-  block: `{skipped: true, reason: "waits_for_you", connector, tool}`, a `runs`
-  row with `meta.outcome: "deferred"`, and the skipped list in the run's
-  report, so the routine's output says what it could not do;
-- **no Needs You row for a deferred call** — recommended, not obvious, and
-  §5.4(c) carries it as the most consequential open question the brief created.
+| Ask | §4 |
+| --- | --- |
+| **D9** — *"a registry of proxied servers: endpoint, credential reference, discovered tools with a discovery timestamp"* | §4.2's manifest, plus a discovery cache (§4.3) and `check()` (§4.12). The **timestamp** is new: §4.12 should record *when* the tool list was last read, because the screen renders *"4 minutes ago · 14 tools discovered"*. |
+| **D11** — *"a **per-tool** grant, held beside an agent's other permissions rather than in a second place"* | §4.8's two gates need re-checking against this: the design wants per-tool grants **on the agent**, while §4.8 puts the allow-list **on the connector** with a `scope` naming principals. Those are two different places for one fact. §6.8(2). |
+| **D12** — *"a proxy audit line … which is exactly what `runs` exists to record"* | **§4.9 exactly**, including the table. Independent agreement. |
+| **D13** — *"whether a resource can be granted to a **project** or a team rather than an agent. The owner raised it; it is a scoping axis nothing currently drawn has"* | New. §5.4(f) is adjacent but not the same question. Added to §5.4. |
 
-This is P2 work and it is new scope; §5.2 reflects it.
+### 6.5 C62 is open, and this document argued it closed — wrongly
 
-### 6.5 C62 — the fixed Settings window
+The earlier revision said the fixed-window fork *"largely dissolves"*, on the
+reasoning that C56 makes connectors rows in an existing table so no new table
+needs placing. That was wrong in both halves. There **is** a screen — Settings ▸
+Resources, *"its own window, not a pane in the main one"* — and C62 is live:
 
-The open fork was: *a Resources table may not fit in Settings at all.* On C56's
-own model it largely dissolves. If a proxied server is *"a row in the same
-permissions table … and no new primitive"*, then **there is no separate
-Resources table to place** — connectors are rows in a table that already has a
-home. What Settings needs is a compact per-connector summary (name, provenance,
-the two cells, health, a Test button), which is a list rather than a wide
-table and fits a fixed window. The wide-table problem only appears if
-connectors are given their own screen, which C56 says they should not be.
+> **"Settings is a fixed, non-resizable window and Resources now lives in it.**
+> … putting a proxied server's tool table there makes it concrete — a table of
+> tool names, descriptions and a three-state control does not survive
+> `accessibilityExtraExtraExtraLarge` in a window that cannot grow. **Either
+> Settings becomes resizable or Resources is not a Settings pane.**"
+> — C62, against `apps/macos/sources/kit/settings-view.swift:47`
 
-*(Unverified: where the permissions table lives today, and whether it is
-already inside the fixed Settings window — in which case the fork is real and
-this argument only removes the connector-shaped half of it.)*
+And the placement's real reason is C57's frequency test, not layout: Resources
+was a ninth nav row and moved *"because a connection is configured once and
+then read from the permissions tables that grant it."* So the fork is between
+two things both already ruled — the window is fixed, and Resources belongs in
+it — which is why it is open rather than merely undecided. It has a product
+consequence (a resizable Settings window is a Mac-app change) and it is the
+owner's and the designer's, not this document's. §5.4(b) now carries it.
 
-### 6.6 "No new primitive" — the one place the mapping is contested
+### 6.6 Four answers or six — a contradiction to report, not resolve
 
-C56's *"no new primitive"* reads, at first, as an argument against §4.7's
-recommendation of a fifth action kind. §4.7 now argues it is not, and the
-argument is short: the primitive C56 refuses is a *permissions* primitive — a
-second grant model beside the table — and this proposal adds none. On the wire,
-the alternative is **more** new machinery: C59 requires Ask to *"raise a request
-in Needs You"*, and the thing that makes a request's Approve actually execute
-is the `action` kind. Avoiding an action kind therefore means adding a new
-request *type* plus a second execution path beside the six answers — two new
-primitives to avoid one.
+`screen-09-resources.md` §4 says an Ask call is *"a request in Needs You,
+answered with **the four answers** every request takes."* The shipped repo says
+six (`docs/ops/reply-feedback.md:9-21`, `docs/product/glossary.md:36-47`), and
+two shipped SVGs on the same branch still say six (`mac-needs-you.svg`,
+`iphone-triage.svg`: *"six answers, fixed order"*).
 
-This is the reading, not the ruling. If the designer meant "no new primitive"
-to include the action enum, §4.7's recommendation changes and P2 grows. It is
-§5.3(1), and it remains the first thing to settle.
+It is not a mistake. `screen-03-needs-you.md` §3 settles it from the endpoint:
+`POST /api/proposals/batch` takes `BATCH_DECISIONS = ["later", "skip", "deny"]`
+and refuses the rest, so *"Four answers on a card, three on a selection; the
+difference is not a simplification, it is the endpoint's own list quoted
+back"*, and Skip *"came off the card as a fifth button and lives as a batch
+verb."* Card = Approve · Revise · Decline · Later, plus Approve as Work where
+the payload suggests one.
 
-### 6.7 Naming — the one place this document pushes back
+So the **wire** still has six decisions and the **card** offers four. §3.5 and
+§4.10 now say this. What needs settling is the documentation, not the design:
+`docs/ops/reply-feedback.md` and `docs/product/glossary.md` both say "six
+answers" without qualification, and the two SVGs are round-D artefacts. Flagged
+per CLAUDE.md rather than quietly harmonised.
 
-Fully argued in §4.1. In one paragraph: take the designer's **model** whole —
-C58 and C61 are better than what this document had — and decline only the
-**label**. "Resources" collides with `packages/core/src/access.ts:490-518`,
-where `Resource` is already the closed union `may()` decides over and
-`ResourceClass` is already `knowledge | artifact | machinery | outside`; and it
-collides with MCP's own **tools / resources / prompts** trio, so a screen named
-Resources that governs *tools* misleads exactly the reader who knows the
-protocol. Recommend **Permissions** (C58's own word for the table) with
-connectors as rows, `connector` as the unchanged internal noun, and the
-shipped Settings ▸ Connections renamed to This Mac. If the designer holds
-Resources, it survives — but nothing in `packages/` may follow it.
+### 6.7 What this document withdraws
 
-### 6.8 To re-check when the branch lands
+Stated plainly, because a research document that quietly drops its own
+arguments is worse than one that never made them:
 
-1. The permissions table's real columns, provenance values and glyph (§6.3).
-2. Where the table lives, and whether C62's fork is wider than §6.5 allows.
-3. Model · Action · May, against §4.7's fifth action kind.
-4. Whether C53 and C61 are two objects or one drift (§5.3(5)).
-5. Whether `screen-09-resources.md` specifies the *add* flow, which §4.13
-   currently invents.
+1. **The "Resources collides with core's `Resource`" objection is withdrawn.**
+   The design uses "resource" in the same broad sense core does (*"one line per
+   resource"*; *"a resource in exactly the sense Knowledge already is"*). They
+   agree. Only the MCP-primitive hazard survives, and it is minor (§4.1).
+2. **"Rename Settings ▸ Connections → This Mac" is withdrawn.** The drawn
+   Settings has no Connections section: General · Compute · Knowledge ·
+   Resources · Notifications · Advanced (`lib.py:3277`). Settings is being
+   re-cut wholesale and that is the designer's to do.
+3. **"A deferred Ask raises no Needs You row" is withdrawn** — the screen rules
+   the opposite and is right (§4.10).
+4. **"C62 largely dissolves" is withdrawn** (§6.5).
+
+### 6.8 What remains open
+
+1. **Bridge or new species?** The screen argues a proxied server *is* a bridge
+   (§6.1); §4.2 proposes `type: connector`. One `type` with a flag, or two?
+   A schema decision, and it decides whether `check-tool-surface.mjs` and the
+   bridge conformance suite pick connectors up for free.
+2. **D11 vs §4.8 — where does a per-tool grant live?** The design wants it
+   *on the agent*, beside its other permissions. §4.8 puts the allow-list *on
+   the connector*, with `scope` naming principals. One fact, two homes; the
+   design's is probably right (it makes the matrix render from one source) but
+   it moves the allow-list out of the protected manifest, which is what made
+   invariant 2 hold for free (§3.8). **This is the most consequential
+   unresolved item.**
+3. **C62** — resizable Settings, or Resources out of Settings (§6.5).
+4. **D13** — granting a resource to a project or a team (§5.4).
+5. **The discovery timestamp** the screen renders (*"4 minutes ago · 14 tools
+   discovered"*) has no wire; `check()` is the nearest thing (§6.4, D9).
+6. **Four answers vs six in the shipped docs** (§6.6) — a documentation fix,
+   not a design question.
 
 ---
 
@@ -1591,14 +1669,39 @@ MIT/Python/1,032; `modelcontextprotocol/registry` NOASSERTION/Go/7,274;
 - `executor.dev` (2026-09-22) — a Squarespace "under construction" page;
   unrelated to the subject.
 
-**The designer's preview brief** — **relayed to this document as text on
-2026-09-22; the primary sources were NOT read.** Branch
-`design/round-0-plan-review` and the files
-`docs/product/design/screen-09-resources.md`, `design-system-amendments.md`
-and `review-00-plan.md` §7 could not be found: `git ls-remote origin` returns
-nine branches and no `design/*`, and `search/code` for `screen-09-resources`
-returns 0. Rules C45, C50, C52, C53, C56, C58, C59, C61 and C62 are quoted in
-§6 exactly as relayed. See §6.0.
+**The designer's round-E work**, read at **`origin/design/round-0-plan-review`**
+(fetched 2026-09-22, after an earlier revision of this document recorded the
+branch as absent — it had not been pushed yet).
+
+- `docs/product/design/screen-09-resources.md` — the whole screen: *"The
+  credential never moves"*; the `SERVER · KIND · TOOLS · GRANTED TO` list and
+  *"Nobody yet"*; the four connection facts; §3.2's three states, the
+  *"listed with the clock is Ask"* rollup and *"per tool, not per server"*;
+  §4's *"the four answers every request takes"*, the 6:02 AM Morning Digest,
+  *"the run finishes without it and says so"*; §5's five states; §7's
+  **D9 / D11 / D12 / D13**.
+- `design-system-amendments.md` — §1.1 (*"A permission is not a moral
+  position"* — permissions in weight, never colour); §2.4 (C45, verbatim);
+  §3.1 (C58, *Resource × Read × Write*); §3.2 (the provenance table and
+  ***Through Metistry***); §3.4 (C61); §3.5 (C59); §4 (the enum renames —
+  `allow`/`propose`/`deny` → **Allow / Ask First / Never**); §5 (C52, C57).
+- `review-00-plan.md` §7 — C45, C50, C52, C53, C56, C57, C58, C59, C61, C62,
+  quoted where load-bearing. C62 is quoted in full in §6.5.
+- `HANDOFF.md` §3 — *"Permissions are one table, everywhere they appear … A
+  proxied MCP server is one more resource row, marked Through Metistry; the
+  server itself is defined on Resources"*; the eight-row nav; §5's board index
+  (*"Settings ▸ Resources … done — the connections, one connection, three
+  states per tool"*).
+- `boards/resources.py` — the drawn board (Python; read, not run). Its `win()`
+  renders `settingswindow`; its FOUND panel is stale on the nav (§6.0).
+- `boards/lib.py:3189-3283` — `resourcelist` (the list's grid and column
+  heads), `tristate` (the segmented On/Ask/Off control), `toolrow2`,
+  `toolblock` (the `TOOL · WHAT IT DOES` grid, the five example tools and the
+  three-state legend), `settingswindow`, `settingsnav` (General · Compute ·
+  Knowledge · Resources · Notifications · Advanced).
+- `screen-03-needs-you.md` §3 — `BATCH_DECISIONS`, and *"Four answers on a
+  card, three on a selection"* (§6.6). `mac-needs-you.svg` and
+  `iphone-triage.svg` on the same branch still say six.
 
 **Repo, read at `origin/main` `7ebc5ec`** — `CLAUDE.md` (invariants 1, 2, 3, 5,
 7, 8, 9, 10, "enforce at the tool", the dependency rule, the packages

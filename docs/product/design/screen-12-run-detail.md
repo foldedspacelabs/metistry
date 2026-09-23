@@ -63,22 +63,25 @@ the step and said so. A lesson from a failure proposes the fix, not an apology.
 
 ## 4. Settings ▸ Sessions
 
-- **Keep sessions** — default **one year**, because the value is in re-reading:
-  a better model can fold the same sessions again.
+- **Keep sessions** — **30 days** (ruled 2026-09-22). A session is raw material;
+  what lasts is what the fold took from it.
 - **Let Metis learn from them** — on by default; off keeps sessions for reading
   and debugging and stops the fold.
 - **Purge now**, with the count beside it.
-- The archive lives in the database, **not the vault**, so it can be purged. A
-  transcript committed to git is forever.
+- **Stored outside git**, because a transcript committed to git is forever.
+  Where exactly is the developer's call; the owner leans to a file cache under
+  `.metistry`.
 
 ## 5. What this asks of the build
 
 1. **A session archive (C78)** — every session, chat included: the system prompt
    as sent, every message, each tool call's arguments and result. Read-only:
-   the engine never replays it.
+   the engine never replays it. Outside git; a file cache under `.metistry` is
+   the owner's lean.
 2. **A session fold** — a routine like `knowledge-fold` that reads new sessions
    and proposes lessons, knowledge, preferences and profile facts (C79).
 3. **Provenance both ways** — each proposal carries its session and turn; each
    session lists what was folded from it and its status.
-4. **Retention and purge**, default one year, stored outside git.
+4. **Retention and purge** — 30 days, and **the fold must run before a session
+   expires**, or the learning is lost with it.
 5. `run_detail` already returns everything in *The run* and *Tool calls*.

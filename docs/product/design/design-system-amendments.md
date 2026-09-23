@@ -64,14 +64,30 @@ A read-only checkbox at `opacity: 0.55` composites to **1.86:1** against
 correctly. **A disabled or recessive mark takes a dimmer ink at full opacity**, and
 the contrast check must be fed the composited value rather than the token.
 
-### 1.5 The thinnest margin in the system
+### 1.5 A glass surface has an opacity floor of 0.85 (C70)
+
+Translucency changes the ground under the ink, so a correct token composites to an
+incorrect ratio — the same class of fault as dimming the ink (§1.4), from the other
+direction. Measured across five backdrops, the binding case is **secondary text in
+dark mode at 0.83**, so:
+
+**A glass surface's scrim is never below 0.85, and the blur is decoration on top of
+it.** At 0.85 every ink clears with margin. This is the only sanctioned exception
+to §4.4's "nothing here depends on a translucent ground", and it exists because the
+floating bar must read as part of macOS.
+
+Four mechanisms have now defeated the tokens: the wrong token (C49), two inks too
+close (C54), opacity on the ink (C63), translucency under it (C70). One lesson:
+**check the composite, never the token.**
+
+### 1.6 The thinnest margin in the system
 
 `text-tertiary` on `sunken` is **4.53:1** light. It is used for every section
 label, band header and column head. It passes, and it fails the moment either
 token moves. Anything that changes those two values needs a full re-check, not a
 spot one.
 
-### 1.6 Check against the ground it actually sits on
+### 1.7 Check against the ground it actually sits on
 
 Almost every colour fault in this engagement was a token used against a ground it
 was never computed against. `tokens.json` plus
@@ -299,6 +315,21 @@ transcript is settled.
 
 ---
 
+### 6.3 A capability claim is a state claim (C71)
+
+P5 — state reported, never inferred — governs what a control may say about the
+machine, not only what a row may say about a value. A mark meaning *this cannot
+happen* is only allowed where something enforces it. The floating bar may say *no
+stream is running* and may not say *Metis cannot see*, because the screen grant is
+global to the binary; it **may** name the scope of an audio session, because a Core
+Audio process tap enforces it.
+
+The corollary, and the part easy to get wrong: **two things with different
+guarantees may not be drawn as siblings.** Two identical switches make the weaker
+one a lie by association.
+
+---
+
 ## 7. Working in this repo
 
 - **A board's assembly is not recoverable from `lib.py`.** The library holds
@@ -317,5 +348,5 @@ transcript is settled.
   and raise the declaration until they are equal. Fonts matter: alias the system
   stacks to metric-compatible faces (Liberation Sans, Bitstream Charter, Liberation
   Mono) or every number is inflated.
-- **Log the contradiction; do not route around it.** 69 of them, and the ones that
+- **Log the contradiction; do not route around it.** 72 of them, and the ones that
   became rules are in this file.

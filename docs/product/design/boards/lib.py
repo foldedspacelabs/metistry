@@ -4620,3 +4620,215 @@ def accountpane(T):
                                                   + kv(T,"Last synced","4 minutes ago")
                                                   + kv(T,"Remote","github.com/mattcolf/metistry-home",mono_=True,last=True)))
             + '</div>')
+
+
+# ============ ARTIFACTS AND ROOMS — screen 16 (2026-09-23) =============
+# An artifact is a folder in git; every version is one commit. Comments sit on an
+# exact version, pinned to a file and a line range, and are drawn in the margin
+# beside those lines (ruled 2026-09-23). A room cannot address anyone; ten agent
+# turns in a row is the cap; only the owner resolves.
+
+def whochip(T,name):
+    if name=="you":
+        return (f'<span style="font-size: 11.5px; font-weight: 600; color: {T["tp"]};">you</span>')
+    return agentchip(T,name)
+
+ARTS=[("vendor-summary","Vendor terms, this quarter","drey","markdown","v3","collator","2h",2),
+      ("march-renewal-model","March renewal model","drey","csv","v5","you","yesterday",0),
+      ("sync-retry-design","Sync retry design","drey","markdown","v2","drey-dev","3d",1),
+      ("brand-round-a","Brand round A","metistry","html","v14","you","last week",0)]
+
+def artlist(T):
+    cols="minmax(0,1.6fr) 96px 82px 118px 92px 70px"
+    head=(f'<div style="display: grid; grid-template-columns: {cols}; gap: 12px; padding: 7px 16px; '
+          f'background: {T["sunken"]}; font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em; color: {T["tt"]};">'
+          f'<span>ARTIFACT</span><span>PROJECT</span><span>KIND</span><span>LATEST</span><span>THREADS</span>'
+          f'<span style="text-align: right;">UPDATED</span></div>')
+    rows=""
+    for i,(slug,title,proj,kind,ver,who,when,th) in enumerate(ARTS):
+        rows+=(f'<div style="display: grid; grid-template-columns: {cols}; gap: 12px; align-items: center; '
+               f'padding: 10px 16px; {bd_(T,i==len(ARTS)-1)}">'
+               f'<div><div style="font-size: 13px; font-weight: 600; color: {T["tp"]};">{title}</div>'
+               f'<div style="margin-top: 2px;">{mono(slug,T["ts"],10.5)}</div></div>'
+               f'{mono(proj,T["ts"],11)}<span style="font-size: 12px; color: {T["ts"]};">{kind}</span>'
+               f'<span style="display: inline-flex; align-items: center; gap: 7px;">{mono(ver,T["tp"],11.5)}{whochip(T,who)}</span>'
+               + (f'<span style="font-size: 12px; font-weight: 600; color: {T["tp"]};">{th} open</span>' if th
+                  else f'<span style="font-size: 12px; color: {T["tt"]};">none</span>')
+               + f'<span style="font-size: 11.5px; color: {T["tt"]}; text-align: right;">{when}</span></div>')
+    return (f'<div style="flex-grow: 1; min-width: 0; background: {T["bg"]};">'
+            f'<div style="display: flex; align-items: center; gap: 10px; padding: 14px 16px 12px;">'
+            f'<span style="font-size: 17px; font-weight: 600; color: {T["tp"]}; flex-grow: 1;">Artifacts</span>'
+            f'<span style="font-size: 12px; color: {T["ts"]};">4 in 2 projects</span></div>'
+            f'<div style="margin: 0 16px 16px; border: 1px solid {T["border"]}; border-radius: 11px; overflow: hidden;">'
+            f'{head}{rows}</div></div>')
+
+def verrail(T,*,sel="v3"):
+    vs=[("v3","collator","Added Orlin&rsquo;s terms","2h"),("v2","you","Tightened the summary","yesterday"),
+        ("v1","collator","First draft from 3 captures","2d")]
+    out=""
+    for v,who,msg,when in vs:
+        on=v==sel
+        out+=(f'<div style="padding: 8px 10px; border-radius: 8px; background: {T["accq"] if on else "transparent"};">'
+              f'<div style="display: flex; align-items: center; gap: 7px;">{mono(v,T["tp"],11.5)}{whochip(T,who)}'
+              f'<span style="flex-grow: 1;"></span><span style="font-size: 10.5px; color: {T["tt"]};">{when}</span></div>'
+              f'<div style="font-size: 11.5px; color: {T["ts"]}; margin-top: 3px; line-height: 1.4;">{msg}</div></div>')
+    return (f'<div style="width: 190px; flex-shrink: 0; padding: 14px 8px; border-right: 1px solid {T["border"]}; '
+            f'background: {T["surface"]};">'
+            f'<div style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["tt"]}; '
+            f'padding: 0 10px 8px;">VERSIONS</div>{out}</div>')
+
+DOC=[("h","Vendor terms, this quarter"),
+     ("p","Three vendors changed terms this quarter. Kessler is the one that matters for March."),
+     ("hl","Kessler moved to net-45 and dropped the volume tier. Two invoices since June are already at net-45."),
+     ("p","Baymark is unchanged. Orlin sent updated terms on the 20th."),
+     ("hl2","Orlin may undercut the renewal if the volume tier stays gone."),
+     ("p","The cheapest option is no longer the March renewal, on the terms as written.")]
+
+def docbody(T,*,marks=True):
+    out=""
+    for k,t in DOC:
+        if k=="h":
+            out+=f'<div style="font-size: 19px; font-weight: 600; color: {T["tp"]}; margin-bottom: 12px;">{t}</div>'
+        else:
+            hl=(k in ("hl","hl2")) and marks
+            out+=(f'<p style="margin: 0 0 11px; font-size: 13.5px; color: {T["tp"]}; line-height: 1.65; '
+                  + (f'background: {T["accq"]}; box-shadow: -8px 0 0 {T["accq"]}, 8px 0 0 {T["accq"]}; border-radius: 3px;' if hl else '')
+                  + f'">{t}</p>')
+    return out
+
+def marginthread(T,*,who,text,replies=(),top=0,resolved=False,folded=False):
+    if folded and replies:
+        rep=(f'<div style="font-size: 11px; color: {T["acc"]}; font-weight: 600; margin-top: 6px;">'
+             f'{len(replies)} repl{"y" if len(replies)==1 else "ies"}</div>')
+        replies=()
+    else:
+        rep=""
+    rep+="".join(f'<div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid {T["border"]};">'
+                f'<div>{whochip(T,w)}</div><div style="font-size: 12px; color: {T["tp"]}; line-height: 1.5; '
+                f'margin-top: 3px;">{b}</div></div>' for w,b in replies)
+    return (f'<div style="position: absolute; left: 0; right: 0; top: {top}px; background: {T["surface"]}; '
+            f'border: 1px solid {T["border"]}; border-radius: 10px; padding: 10px 12px; '
+            f'box-shadow: 0 2px 8px rgba(0,0,0,0.05);">'
+            f'<div style="display: flex; align-items: center; gap: 7px;">{whochip(T,who)}'
+            f'<span style="flex-grow: 1;"></span>'
+            f'<span style="font-size: 11px; font-weight: 600; color: {T["acc"]};">Resolve</span></div>'
+            f'<div style="font-size: 12px; color: {T["tp"]}; line-height: 1.5; margin-top: 4px;">{text}</div>{rep}'
+            f'<div style="font-size: 11px; color: {T["ts"]}; margin-top: 8px;">Reply&hellip;</div></div>')
+
+def artview(T):
+    head=(f'<div style="padding: 14px 18px 12px; border-bottom: 1px solid {T["border"]};">'
+          f'{crumb(T,["Work","Artifacts","vendor-summary"])}'
+          f'<div style="display: flex; align-items: center; gap: 10px; margin-top: 8px;">'
+          f'<span style="font-size: 17px; font-weight: 600; color: {T["tp"]};">Vendor terms, this quarter</span>'
+          f'{mono("v3",T["ts"],12)}<span style="font-size: 12px; color: {T["ts"]};">by</span>{whochip(T,"collator")}'
+          f'<span style="flex-grow: 1;"></span>{btn(T,"Compare","secondary")}{btn(T,"Comment","ghost",I["chat"])}</div></div>')
+    doc=(f'<div style="flex-grow: 1; min-width: 0; padding: 22px 26px; background: {T["bg"]};">'
+         f'<div style="max-width: 560px;">{docbody(T)}</div></div>')
+    margin=(f'<div style="width: 260px; flex-shrink: 0; position: relative; padding: 0 14px; background: {T["bg"]};">'
+            f'<div style="position: relative; height: 100%;">'
+            + marginthread(T,who="collator",text="Two invoices are already billed at net-45 &mdash; see June and August.",
+                           replies=[("you","Which two? Link them.")],top=89,folded=True)
+            + marginthread(T,who="drey-dev",text="Is &ldquo;may undercut&rdquo; a guess or in their letter?",top=213)
+            # pushed down 35px by the thread above it: a leader keeps it tied to its line
+            + f'<span style="position: absolute; left: -16px; top: 188px; width: 12px; height: 34px; '
+              f'border-left: 1.5px solid {T["acc"]}; border-bottom: 1.5px solid {T["acc"]}; '
+              f'border-bottom-left-radius: 6px; opacity: 0.7;"></span>'
+            + '</div></div>')
+    return (f'<div style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column; background: {T["bg"]};">'
+            f'{head}<div style="display: flex; align-items: stretch; min-height: 440px;">{verrail(T)}{doc}{margin}</div></div>')
+
+def artcompare(T):
+    lines=[(" ","Three vendors changed terms this quarter."),
+           ("-","Kessler moved to net-45 and dropped the volume tier."),
+           ("+","Kessler moved to net-45 and dropped the volume tier. Two invoices since June are already at net-45."),
+           (" ","Baymark is unchanged."),
+           ("+","Orlin sent updated terms on the 20th."),
+           ("+","Orlin may undercut the renewal if the volume tier stays gone.")]
+    note=(f'<div style="display: flex; align-items: center; gap: 8px; background: {T["sunken"]}; border-radius: 9px; '
+          f'padding: 9px 12px; margin-top: 12px;"><span style="display: flex; color: {T["ts"]};">{ic(I["chat"],13,1.9)}</span>'
+          f'<span style="font-size: 12px; color: {T["ts"]};">1 thread on <b style="color: {T["tp"]};">v2</b> is about a line '
+          f'v3 changed. It stays on v2.</span><span style="flex-grow: 1;"></span>'
+          f'<span style="font-size: 11.5px; font-weight: 600; color: {T["acc"]};">Open on v2 &rarr;</span></div>')
+    return (f'<div style="flex-grow: 1; min-width: 0; background: {T["bg"]};">'
+            f'<div style="padding: 14px 18px 12px; border-bottom: 1px solid {T["border"]}; display: flex; align-items: center; gap: 10px;">'
+            f'{crumb(T,["Work","Artifacts","vendor-summary","Compare"])}<span style="flex-grow: 1;"></span>'
+            f'{mono("v2",T["ts"],12)}<span style="color: {T["tt"]};">&rarr;</span>{mono("v3",T["tp"],12)}</div>'
+            f'<div style="padding: 16px 18px 18px;">{diff(T,summary="3 lines added, 1 changed",lines=lines,open_=True)}{note}</div></div>')
+
+# ---------- rooms ------------------------------------------------------------
+def tailmeter(T,n,cap=10):
+    pips="".join(f'<span style="width: 6px; height: 6px; border-radius: 50%; '
+                 f'background: {T["tp"] if i<n else "transparent"}; border: 1px solid {T["ts"] if i>=n else T["tp"]};"></span>'
+                 for i in range(cap))
+    return f'<span style="display: inline-flex; gap: 3px; align-items: center;">{pips}</span>'
+
+ROOMS=[("work","#418 Reconcile vendor invoices",["drey-dev","collator"],14,10,True,
+        "Ten agent turns went by without you. The next one was not stored."),
+       ("art","vendor-summary v3 &middot; line 3",["collator","you"],3,0,False,None),
+       ("work","#212 Sync retry",["drey-dev","devin"],9,7,False,None),
+       ("art","sync-retry-design v2",["drey-dev"],1,1,False,None)]
+
+def roomslist(T):
+    rows=""
+    for i,(anc,title,who,n,tail,esc,why) in enumerate(ROOMS):
+        g=I["board"] if anc=="work" else I["note"]
+        rows+=(f'<div style="padding: 11px 16px; {bd_(T,i==len(ROOMS)-1)}">'
+               f'<div style="display: grid; grid-template-columns: 18px minmax(0,1fr) 170px 60px 120px; gap: 12px; align-items: center;">'
+               f'<span style="display: flex; color: {T["ts"]};">{ic(g,14,1.9)}</span>'
+               f'<span style="font-size: 13px; font-weight: {700 if esc else 500}; color: {T["tp"]};">{title}</span>'
+               f'<span style="display: flex; gap: 5px; flex-wrap: wrap;">' + "".join(whochip(T,w) for w in who) + '</span>'
+               f'<span style="font-size: 11.5px; color: {T["ts"]};">{n} msgs</span>'
+               f'<span style="display: inline-flex; align-items: center; gap: 7px;">{tailmeter(T,tail)}</span></div>'
+               + (f'<div style="margin: 6px 0 0 30px; font-size: 12px; color: {T["tp"]}; display: flex; gap: 7px; align-items: center;">'
+                  f'<span style="display: flex; color: {T["acc"]};">{ic(I["bell"],12,2)}</span>'
+                  f'<b>Came to you.</b> <span style="color: {T["ts"]};">{why}</span></div>' if esc else '')
+               + '</div>')
+    head=(f'<div style="display: grid; grid-template-columns: 18px minmax(0,1fr) 170px 60px 120px; gap: 12px; '
+          f'padding: 7px 16px; background: {T["sunken"]}; font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em; color: {T["tt"]};">'
+          f'<span></span><span>ROOM</span><span>WHO HAS SPOKEN</span><span></span><span>AGENT TURNS IN A ROW</span></div>')
+    return (f'<div style="flex-grow: 1; min-width: 0; background: {T["bg"]};">'
+            f'<div style="display: flex; align-items: center; gap: 10px; padding: 14px 16px 12px;">'
+            f'<span style="font-size: 17px; font-weight: 600; color: {T["tp"]}; flex-grow: 1;">Rooms</span>'
+            f'<span style="font-size: 12px; color: {T["ts"]};">4 open</span></div>'
+            f'<div style="margin: 0 16px 16px; border: 1px solid {T["border"]}; border-radius: 11px; overflow: hidden;">'
+            f'{head}{rows}</div></div>')
+
+def roommsg(T,who,text,when):
+    if who=="you":
+        return (f'<div><div style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["ts"]}; '
+                f'margin-bottom: 4px;">YOU <span style="font-weight: 400; color: {T["tt"]};">{when}</span></div>'
+                f'<div style="background: {T["accq"]}; border-radius: 10px; padding: 9px 12px; font-size: 12.5px; '
+                f'color: {T["tp"]}; line-height: 1.5;">{text}</div></div>')
+    return (f'<div style="border-left: 2px solid {T["ag"]}; padding-left: 12px;">'
+            f'<div style="display: flex; align-items: center; gap: 7px; margin-bottom: 4px;">{agentchip(T,who)}'
+            f'<span style="font-size: 10.5px; color: {T["tt"]};">{when}</span></div>'
+            f'<div style="font-size: 12.5px; color: {T["tp"]}; line-height: 1.55;">{text}</div></div>')
+
+def roomview(T):
+    head=(f'<div style="padding: 14px 18px 12px; border-bottom: 1px solid {T["border"]};">'
+          f'{crumb(T,["Work","Rooms","#418"])}'
+          f'<div style="display: flex; align-items: center; gap: 10px; margin-top: 8px;">'
+          f'<span style="display: flex; color: {T["ag"]};">{ic(I["board"],16,1.9)}</span>'
+          f'<span style="font-size: 17px; font-weight: 600; color: {T["tp"]};">#418 Reconcile vendor invoices</span>'
+          f'<span style="flex-grow: 1;"></span>{btn(T,"Resolve","secondary",I["check"])}</div></div>')
+    band=(f'<div style="margin: 14px 18px 0; background: {T["sunken"]}; border-radius: 9px; padding: 10px 12px; '
+          f'display: flex; align-items: center; gap: 9px;">'
+          f'<span style="display: flex; color: {T["acc"]};">{ic(I["bell"],14,2)}</span>'
+          f'<span style="font-size: 12.5px; color: {T["tp"]}; flex-grow: 1;"><b>Came to you.</b> Ten agent turns went by '
+          f'without you; the next one was not stored.</span></div>')
+    msgs=(roommsg(T,"collator","Invoices 0612 and 0804 are at net-45. The rest are on the old terms.","2:02")
+          + roommsg(T,"drey-dev","Then the renewal comparison should use net-45 for those two only.","2:05")
+          + roommsg(T,"collator","Agreed, but the volume tier question is still open.","2:07")
+          + f'<div style="font-size: 11.5px; color: {T["tt"]}; text-align: center;">7 more agent turns</div>'
+          + roommsg(T,"drey-dev","Still waiting on whether the tier is gone for Q4 too.","2:31"))
+    comp=(f'<div style="margin: 0 18px 16px; border-top: 1px solid {T["border"]}; padding-top: 12px;">'
+          f'<div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">'
+          f'{tailmeter(T,10)}<span style="font-size: 11.5px; color: {T["ts"]};">10 of 10 agent turns &middot; '
+          f'yours resets it</span></div>'
+          f'<div style="display: flex; align-items: center; gap: 8px; background: {T["surface"]}; border: 1px solid {T["bc"]}; '
+          f'border-radius: 10px; padding: 9px 11px;">'
+          f'<span style="flex-grow: 1; font-size: 12.5px; color: {T["tt"]};">Add to the room&hellip;</span>'
+          f'<span style="display: flex; color: {T["ts"]};">{ic(I["send"],14,1.9)}</span></div></div>')
+    return (f'<div style="flex-grow: 1; min-width: 0; background: {T["bg"]};">{head}{band}'
+            f'<div style="padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; max-width: 640px;">{msgs}</div>'
+            f'{comp}</div>')

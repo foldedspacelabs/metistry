@@ -71,14 +71,24 @@ incorrect ratio — the same class of fault as dimming the ink (§1.4), from the
 direction. Measured across five backdrops, the binding case is **secondary text in
 dark mode at 0.83**, so:
 
-**A glass surface's scrim is never below 0.85, and the blur is decoration on top of
-it.** At 0.85 every ink clears with margin. This is the only sanctioned exception
-to §4.4's "nothing here depends on a translucent ground", and it exists because the
-floating bar must read as part of macOS.
+**The floor follows the ink, not the object (C74):**
 
-Four mechanisms have now defeated the tokens: the wrong token (C49), two inks too
-close (C54), opacity on the ink (C63), translucency under it (C70). One lesson:
-**check the composite, never the token.**
+- **Glass carrying text: 0.86.** Secondary ink in dark mode binds it at 0.83.
+- **Glass carrying only marks in `text-secondary`, `agent` or `accent`: 0.75.**
+- **`text-tertiary` needs 0.81 and is therefore not allowed on thin glass at all.**
+
+So a surface may be made more transparent by giving up its faintest ink — which is
+the honest price, stated in the system's own terms. This is the only sanctioned
+exception to §4.4's "nothing here depends on a translucent ground", and it exists
+because the floating bar must read as part of macOS.
+
+**A mark and its ground may not come from one hue (C73).** An `agent` glyph on an
+`agent` tint measured 2.69:1 against its own plate; the same glyph on the surface
+itself clears 3.36:1. Either the ground is neutral or the mark sits on the surface.
+
+Five mechanisms have now defeated the tokens: the wrong token (C49), two inks too
+close (C54), opacity on the ink (C63), translucency under it (C70), a tint plate
+behind a same-hue mark (C73). One lesson: **check the composite, never the token.**
 
 ### 1.6 The thinnest margin in the system
 
@@ -275,7 +285,7 @@ rather than to a missing value.
 
 ## 6. Motion, and agent text (ratified 2026-09-22)
 
-### 6.1 One sentence governs motion (C16)
+### 6.1 One sentence governs motion (C16), and the list is closed at two (C75)
 
 **Motion is allowed only where it carries information the reader cannot
 otherwise get, and it stops the moment that information is available in words.**
@@ -296,6 +306,14 @@ What falls out of it, with no further rules needed:
 - Under `prefers-reduced-motion` the dots hold flat and the elapsed count
   carries liveness alone — **a number is content, not motion**, which is why the
   count is load-bearing rather than decoration.
+- **The floating bar's recording breath** (C75), admitted by the same test: on a
+  30px rail at across-the-room distance neither the mark nor a numeral resolves,
+  and a 2.6s expanding halo does. Two conditions come with it — **the static mark
+  carries the state at all times**, so motion is never the sole carrier, and **the
+  halo is exempt from 3:1 because it is redundancy rather than meaning**.
+
+**The list is closed at two.** A third candidate must displace one of these rather
+than join them, and must show what information it carries that words cannot.
 
 ### 6.2 Agent prose in a transcript takes a rule; the wash is for everywhere else (C69)
 
@@ -348,5 +366,5 @@ one a lie by association.
   and raise the declaration until they are equal. Fonts matter: alias the system
   stacks to metric-compatible faces (Liberation Sans, Bitstream Charter, Liberation
   Mono) or every number is inflated.
-- **Log the contradiction; do not route around it.** 72 of them, and the ones that
+- **Log the contradiction; do not route around it.** 75 of them, and the ones that
   became rules are in this file.

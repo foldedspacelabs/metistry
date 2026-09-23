@@ -120,7 +120,9 @@ The three waiting dots are the only loop in the product.
 present while the capture bridge is installed, minimal at rest, louder while a
 session runs, on a screen edge the owner picks (never top or bottom), and **its
 chat is the same conversation as the window's**. Glass is allowed here and
-nowhere else, at a scrim never below 0.85 (C70).
+nowhere else, and **the floor follows the ink**: 0.86 under text, 0.75 under marks,
+and `text-tertiary` not at all (C70, C74). The recording breath is the product's
+**second and last** animation (C75).
 
 **Agent prose in a transcript** (C69, ruled 2026-09-22). A 2px `agent` rule in
 the gutter, no wash; `agent-quiet` still governs agent text outside a
@@ -248,7 +250,7 @@ the canvas is now generated from a module in `boards/` except `Facets`, `Plugin`
 `Voice` and `Item-Model`. `bellpanel()` is gone — it drew the *"1 snoozed"*
 header C21 killed; `panel2()` is the panel.
 
-**72 contradictions** are logged in `review-00-plan.md`. C38 and C51 are closed. C40–C72 are
+**75 contradictions** are logged in `review-00-plan.md`. C38 and C51 are closed. C40–C75 are
 round E's. Two of them are rules the system is missing rather than faults in a
 file: **C45** (a failed consequential operation leaves the request pending) and
 **C49** (a mark that carries meaning takes an ink token, never a border token —

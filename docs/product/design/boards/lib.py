@@ -3598,247 +3598,300 @@ def conflictresolve(T,w=None):
                           "conflict is that rule holding — the alternative is a silent overwrite.")
             + '</div></div>')
 
+# ============ THE FLOATING BAR — round 2 (2026-09-22) ==================
+# Rebuilt after the owner's review: more transparent, more of Apple's glass
+# language, far less prose in the sheets, a pulse while recording, and the senses
+# shown while live. PR 253 still decides the mechanics; this decides the craft.
 
-# ============ THE FLOATING BAR — live capture (2026-09-22) =============
-# Screen 11. The owner's second interface: always present when enabled, docked to
-# a screen edge he picks, minimal at rest and louder while a session runs. Built
-# on PR 253 (`docs/research/2026-09-21-live-capture-bar.md`), whose findings
-# decide most of what follows — in particular that the audio scope is enforced by
-# the kernel and the screen scope is not, so the two may not be drawn as siblings.
-
-GLASS_A=0.85   # the measured floor is 0.83 (secondary ink, dark, worst backdrop)
+GLASS_TEXT=0.86   # a glass surface carrying TEXT (measured floor 0.83, dark secondary)
+GLASS_MARK=0.75   # a glass surface carrying only MARKS in ts / agent / accent
 
 def rgba(h,a):
     h=h.lstrip("#"); r,g,b=(int(h[i:i+2],16) for i in (0,2,4))
     return f"rgba({r}, {g}, {b}, {a})"
 
-def glassplate(T,*,radius=16):
-    return (f'background: {rgba(T["surface"],GLASS_A)}; '
-            f'backdrop-filter: blur(24px) saturate(1.7); -webkit-backdrop-filter: blur(24px) saturate(1.7); '
-            f'border: 1px solid {rgba(T["bc"],0.7)}; border-radius: {radius}px; '
-            f'box-shadow: 0 10px 34px rgba(0,0,0,0.22);')
+def glass(T,*,radius=18,marks=False,tint=None):
+    """Apple's glass, in the four layers it is actually made of: a lensed
+    backdrop, a scrim thick enough for our inks, a specular top edge, and a
+    grounding shadow. The scrim is the only one that is not decoration."""
+    dark = T is D
+    a = GLASS_MARK if marks else GLASS_TEXT
+    top,bot = (a+0.02, a-0.01)
+    spec = "rgba(255, 255, 255, 0.20)" if dark else "rgba(255, 255, 255, 0.62)"
+    lip  = "rgba(255, 255, 255, 0.07)" if dark else "rgba(255, 255, 255, 0.24)"
+    base = "rgba(0, 0, 0, 0.30)" if dark else "rgba(0, 0, 0, 0.055)"
+    edge = rgba(T["bc"],0.55) if not dark else "rgba(255, 255, 255, 0.13)"
+    ring = rgba(tint,0.60) if tint else edge
+    return (f'background: linear-gradient(to bottom, {rgba(T["surface"],round(top,3))} 0%, '
+            f'{rgba(T["surface"],round(a,3))} 46%, {rgba(T["surface"],round(bot,3))} 100%); '
+            f'backdrop-filter: blur(28px) saturate(185%) brightness(1.04); '
+            f'-webkit-backdrop-filter: blur(28px) saturate(185%) brightness(1.04); '
+            f'border: 0.5px solid {ring}; border-radius: {radius}px; '
+            f'box-shadow: inset 0 1px 0 {spec}, inset 0 0 0 0.5px {lip}, '
+            f'inset 0 -14px 22px -14px {base}, '
+            f'0 1px 2px rgba(0,0,0,0.10), 0 12px 34px -8px rgba(0,0,0,0.28);')
 
-WALL_L=("linear-gradient(145deg, #cfd8dc 0%, #e8e2d6 34%, #b9c6cc 68%, #8fa3ad 100%)")
-WALL_D=("linear-gradient(145deg, #12222e 0%, #1d2b36 38%, #0e1a24 72%, #223744 100%)")
+def motioncss():
+    """One animation in the product, and now one more: the recording breath. Both
+    stop under prefers-reduced-motion, where the ring holds at its widest."""
+    return ('<style>'
+            '@keyframes mtbreath { 0%,100% { transform: scale(1); opacity: 0.85; } '
+            '50% { transform: scale(1.5); opacity: 0.12; } }'
+            '.mt-breath { animation: mtbreath 2.6s cubic-bezier(.42,0,.58,1) infinite; }'
+            '@media (prefers-reduced-motion: reduce) { .mt-breath { animation: none; '
+            'transform: scale(1.32); opacity: 0.4; } }'
+            '</style>')
 
-def desktop(T,*,inner,w=640,h=420,wall=None,label=None):
-    """A wallpaper and a window behind the bar, so the glass is judged over
-    something rather than over our own paper."""
-    wl=wall or (WALL_L if T is L else WALL_D)
-    win=(f'<div style="position: absolute; left: 26px; top: 34px; right: 74px; bottom: 26px; '
-         f'background: {T["bg"]}; border: 1px solid {rgba(T["bc"],0.8)}; border-radius: 10px; '
-         f'box-shadow: 0 8px 28px rgba(0,0,0,0.18); overflow: hidden;">'
-         f'<div style="height: 26px; background: {T["surface"]}; border-bottom: 1px solid {T["border"]}; '
+# ---------- the mark, the senses ----------------------------------------------
+def mark(T,*,size=15,live=False):
+    c=T["ag"] if live else T["ts"]
+    fill=f'background: {rgba(T["ag"],0.26)};' if live else ""
+    return (f'<span style="display: inline-flex; width: {size}px; height: {size}px; border-radius: 4.5px; '
+            f'border: 1.6px solid {c}; {fill} align-items: center; justify-content: center;">'
+            f'<span style="width: {max(3,size//4)}px; height: 1.6px; background: {c};"></span></span>')
+
+def breathmark(T,*,size=15,frame=None):
+    """The live mark with its halo. `frame` draws one still of the cycle instead
+    of animating, for the timing panel."""
+    st={"in":"transform: scale(1); opacity: 0.85;",
+        "mid":"transform: scale(1.26); opacity: 0.45;",
+        "out":"transform: scale(1.5); opacity: 0.12;"}.get(frame)
+    cls="" if st else ' class="mt-breath"'
+    style=st or ""
+    return (f'<span style="position: relative; display: inline-flex; width: {size}px; height: {size}px; '
+            f'align-items: center; justify-content: center;">'
+            f'<span{cls} style="position: absolute; inset: -5px; border-radius: 9px; '
+            f'border: 1.5px solid {T["ag"]}; {style}"></span>'
+            f'{mark(T,size=size,live=True)}</span>')
+
+I["screen"]='<rect x="3" y="4.5" width="18" height="12" rx="2"/><path d="M9 20h6M12 16.5V20"/>'
+
+def sensepip(T,kind,*,size=13):
+    """The glyph alone, in the agent ink, on whatever glass it sits on.
+
+    The first version put an `agent` glyph on an `agent` tint plate and measured
+    **2.69:1 light / 2.60:1 dark** against its own background — the C54 fault in a
+    new costume: a mark and its ground drawn from one hue. Without the plate the
+    same glyph clears 3.36 / 3.43 on the thin rail glass."""
+    g=I["mic"] if kind=="mic" else I["screen"]
+    return (f'<span style="display: inline-flex; align-items: center; justify-content: center; '
+            f'color: {T["ag"]};">{ic(g,size+2,2)}</span>')
+
+# ---------- the desktop it sits on -------------------------------------------
+WALL_L="linear-gradient(145deg, #cfd8dc 0%, #e8e2d6 30%, #b9c6cc 62%, #7d95a1 100%)"
+WALL_D="linear-gradient(145deg, #0f1f2b 0%, #1f2f3b 36%, #0b1620 70%, #26404f 100%)"
+
+def desktop(T,*,inner,w=600,h=400,label=None):
+    wl=WALL_L if T is L else WALL_D
+    win=(f'<div style="position: absolute; left: 24px; top: 30px; right: 70px; bottom: 24px; '
+         f'background: {T["bg"]}; border: 0.5px solid {rgba(T["bc"],0.8)}; border-radius: 11px; '
+         f'box-shadow: 0 10px 30px rgba(0,0,0,0.22); overflow: hidden;">'
+         f'<div style="height: 27px; background: {T["surface"]}; border-bottom: 1px solid {T["border"]}; '
          f'display: flex; align-items: center; gap: 5px; padding: 0 9px;">'
-         + "".join(f'<span style="width: 8px; height: 8px; border-radius: 50%; '
-                   f'background: {T["tt"]}; opacity: 0.5;"></span>' for _ in range(3))
-         + f'<span style="font-size: 9.5px; color: {T["tt"]}; margin-left: 6px;">Zoom &mdash; Vendor review</span>'
+         + "".join(f'<span style="width: 8px; height: 8px; border-radius: 50%; background: {T["tt"]}; '
+                   f'opacity: 0.45;"></span>' for _ in range(3))
+         + f'<span style="font-size: 9.5px; color: {T["tt"]}; margin-left: 7px;">Zoom &mdash; Vendor review</span>'
            '</div>'
-         f'<div style="padding: 14px; display: flex; flex-direction: column; gap: 8px;">'
+         f'<div style="padding: 13px; display: flex; flex-direction: column; gap: 8px;">'
          + "".join(f'<div style="height: {hh}px; width: {ww}%; background: {T["sunken"]}; '
-                   f'border-radius: 5px;"></div>' for hh,ww in ((10,64),(10,88),(10,42),(52,100),(10,71)))
+                   f'border-radius: 5px;"></div>' for hh,ww in ((10,64),(10,88),(10,42),(58,100),(10,71)))
          + '</div></div>')
     cap=(f'<div style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {L["tt"]}; '
          f'margin-bottom: 7px;">{label}</div>') if label else ""
     return (cap + f'<div style="position: relative; width: {w}px; height: {h}px; background: {wl}; '
             f'border-radius: 12px; overflow: hidden;">{win}{inner}</div>')
 
-def mark(T,*,size=15,live=False):
-    """The keyed square, the brand mark. Filled while a session runs — the weight
-    channel carrying *this matters now*, never the warning tint (recording is not
-    a fault)."""
-    c=T["ag"] if live else T["ts"]
-    fill=f'background: {rgba(T["ag"],0.22)};' if live else ""
-    return (f'<span style="display: inline-flex; width: {size}px; height: {size}px; border-radius: 4px; '
-            f'border: 1.6px solid {c}; {fill} align-items: center; justify-content: center;">'
-            f'<span style="width: {max(3,size//4)}px; height: 1.6px; background: {c};"></span></span>')
-
-def railrest(T,*,side="right",top=150):
-    pos="right: 10px;" if side=="right" else "left: 10px;"
-    return (f'<div style="position: absolute; {pos} top: {top}px; {glassplate(T,radius=15)} '
+# ---------- the rail ----------------------------------------------------------
+def railrest(T,*,side="right",top=148):
+    pos="right: 9px;" if side=="right" else "left: 9px;"
+    return (f'<div style="position: absolute; {pos} top: {top}px; {glass(T,radius=15,marks=True)} '
             f'width: 30px; padding: 9px 0; display: flex; flex-direction: column; align-items: center; '
-            f'gap: 8px;">{mark(T,size=14)}'
-            f'<span style="width: 6px; height: 6px; border-radius: 50%; background: {T["tt"]};"></span></div>')
+            f'gap: 9px;">{mark(T,size=14)}'
+            f'<span style="width: 5px; height: 5px; border-radius: 50%; background: {T["ts"]}; '
+            f'opacity: 0.8;"></span></div>')
 
-def railhover(T,*,top=132):
-    row=lambda g,t:(f'<div style="display: flex; align-items: center; gap: 9px; padding: 5px 10px;">'
+def raillive(T,*,top=140,senses=("mic",),frame=None):
+    pips="".join(sensepip(T,s,size=12) for s in senses)
+    return (f'<div style="position: absolute; right: 9px; top: {top}px; '
+            f'{glass(T,radius=15,marks=True,tint=T["ag"])} '
+            f'width: 30px; padding: 11px 0 9px; display: flex; flex-direction: column; '
+            f'align-items: center; gap: 9px;">{breathmark(T,size=14,frame=frame)}{pips}</div>')
+
+def railhover(T,*,top=128,live=False,senses=("mic",)):
+    row=lambda g,t:(f'<div style="display: flex; align-items: center; gap: 9px; padding: 5px 11px; '
+                    f'border-radius: 8px;">'
                     f'<span style="display: flex; color: {T["ts"]};">{ic(g,14,1.9)}</span>'
                     f'<span style="font-size: 11.5px; color: {T["tp"]};">{t}</span></div>')
-    return (f'<div style="position: absolute; right: 10px; top: {top}px; {glassplate(T,radius=15)} '
-            f'width: 172px; padding: 8px 0;">'
-            f'<div style="display: flex; align-items: center; gap: 9px; padding: 3px 10px 7px;">'
-            f'{mark(T,size=14)}<span style="font-size: 11.5px; font-weight: 600; color: {T["tp"]};">Metis</span>'
-            f'<span style="flex-grow: 1;"></span>'
-            f'<span style="font-size: 10.5px; color: {T["tt"]};">not listening</span></div>'
-            f'<div style="height: 1px; background: {rgba(T["border"],0.9)}; margin: 0 8px 4px;"></div>'
-            + row(I["chat"],"Ask") + row(I["plus"],"Capture a note")
-            + row(I["mic"],"Listen to this") + row(I["eye"],"Share a window") + '</div>')
+    if live:
+        head=(f'<div style="display: flex; align-items: center; gap: 9px; padding: 4px 11px 8px;">'
+              f'{breathmark(T,size=14)}'
+              f'<span style="font-family: {MONO}; font-size: 11.5px; color: {T["ag"]};">13:42</span>'
+              f'<span style="font-size: 11px; color: {T["ts"]};">Zoom</span>'
+              f'<span style="flex-grow: 1;"></span>'
+              + "".join(sensepip(T,s,size=11) for s in senses) + '</div>')
+        acts=row(I["plus"],"Note")+row(I["check"],"Action item")+row(I["stop"],"Stop")
+    else:
+        head=(f'<div style="display: flex; align-items: center; gap: 9px; padding: 4px 11px 8px;">'
+              f'{mark(T,size=14)}'
+              f'<span style="font-size: 11.5px; font-weight: 600; color: {T["tp"]};">Metis</span>'
+              f'<span style="flex-grow: 1;"></span>'
+              f'<span style="font-size: 10.5px; color: {T["ts"]};">not listening</span></div>')
+        acts=(row(I["chat"],"Ask")+row(I["plus"],"Capture a note")
+              +row(I["mic"],"Listen to this")+row(I["screen"],"Share a window"))
+    return (f'<div style="position: absolute; right: 9px; top: {top}px; {glass(T,radius=16)} '
+            f'width: 186px; padding: 8px 0 7px;">{head}'
+            f'<div style="height: 0.5px; background: {rgba(T["border"],0.85)}; margin: 0 9px 5px;"></div>'
+            f'{acts}</div>')
 
-def raillive(T,*,top=126):
-    return (f'<div style="position: absolute; right: 10px; top: {top}px; {glassplate(T,radius=15)} '
-            f'width: 30px; padding: 9px 0; display: flex; flex-direction: column; align-items: center; '
-            f'gap: 7px; border-color: {rgba(T["ag"],0.85)};">{mark(T,size=14,live=True)}'
-            f'<span style="font-family: {MONO}; font-size: 8.5px; color: {T["ag"]}; writing-mode: vertical-rl; '
-            f'letter-spacing: 0.04em;">13:42</span>'
-            f'<span style="display: flex; color: {T["ts"]};">{ic(I["stop"],12,2)}</span></div>')
-
-def barhead(T,*,live=False,scope=None):
-    right=(f'<span style="display: inline-flex; align-items: center; gap: 6px;">'
-           f'<span style="font-family: {MONO}; font-size: 11px; color: {T["ag"]};">13:42</span>'
-           f'<span style="font-size: 11px; color: {T["ts"]};">{scope}</span></span>'
-           if live else f'<span style="font-size: 10.5px; color: {T["tt"]};">not listening</span>')
-    return (f'<div style="display: flex; align-items: center; gap: 9px; padding: 10px 12px 9px;">'
-            f'{mark(T,size=15,live=live)}'
-            f'<span style="font-size: 12.5px; font-weight: 600; color: {T["tp"]};">Metis</span>'
-            f'<span style="flex-grow: 1;"></span>{right}</div>')
-
-def barturn(T,*,text,who="agent",lines=None):
+# ---------- the panel ---------------------------------------------------------
+def barturn(T,*,text,who="agent",more=False):
     if who=="user":
-        return (f'<div style="background: {T["accq"]}; border-radius: 10px; padding: 9px 11px; '
+        return (f'<div style="background: {T["accq"]}; border-radius: 11px; padding: 9px 12px; '
                 f'font-size: 12px; color: {T["tp"]}; line-height: 1.5;">{text}</div>')
-    more=(f'<div style="font-size: 11px; color: {T["acc"]}; font-weight: 600; margin-top: 5px;">'
-          f'Open in Chat &nearr;</div>') if lines else ""
+    tail=(f'<div style="font-size: 11px; color: {T["acc"]}; font-weight: 600; margin-top: 6px;">'
+          f'Open in Chat &nearr;</div>') if more else ""
     return (f'<div style="border-left: 2px solid {T["ag"]}; padding-left: 12px;">'
             f'<div style="font-family: {SERIF}; font-size: 12.5px; color: {T["tp"]}; line-height: 1.58;">{text}</div>'
-            f'{more}</div>')
+            f'{tail}</div>')
 
-def barcomposer(T,*,placeholder="Ask Metis&hellip;"):
-    return (f'<div style="display: flex; align-items: center; gap: 8px; {glassplate(T,radius=10)} '
-            f'box-shadow: none; background: {T["bg"]}; padding: 7px 9px;">'
-            f'<span style="flex-grow: 1; font-size: 12px; color: {T["tt"]};">{placeholder}</span>'
+def barcomposer(T):
+    return (f'<div style="display: flex; align-items: center; gap: 8px; background: {rgba(T["bg"],0.72)}; '
+            f'border: 0.5px solid {rgba(T["bc"],0.7)}; border-radius: 11px; padding: 8px 10px; '
+            f'box-shadow: inset 0 1px 2px rgba(0,0,0,0.06);">'
+            f'<span style="flex-grow: 1; font-size: 12px; color: {T["tt"]};">Ask Metis&hellip;</span>'
             f'<span style="display: flex; color: {T["ts"]};">{ic(I["send"],14,1.9)}</span></div>')
 
 def baract(T,g,t,*,tone=None):
-    return (f'<span style="display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px; '
-            f'border-radius: 8px; border: 1px solid {rgba(tone or T["bc"],0.9)}; background: {T["bg"]};">'
+    return (f'<span style="display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; '
+            f'border-radius: 9px; border: 0.5px solid {rgba(tone or T["bc"],0.75)}; '
+            f'background: {rgba(T["bg"],0.55)};">'
             f'<span style="display: flex; color: {tone or T["ts"]};">{ic(g,13,1.9)}</span>'
             f'<span style="font-size: 11.5px; color: {tone or T["tp"]};">{t}</span></span>')
 
-def barpanel(T,*,live=False,w=352):
-    body=(barturn(T,text="Ask about the last ten minutes, or anything else.",who="agent")
-          if not live else
-          f'<div style="background: {rgba(T["ag"],0.10)}; border-radius: 10px; padding: 9px 11px;">'
-          f'<div style="font-size: 11.5px; color: {T["tp"]}; line-height: 1.5;">Hearing '
-          f'<b>Zoom</b> and <b>your microphone</b>. Text is kept for 90 minutes; the audio is not kept at all.</div>'
-          f'<div style="display: flex; align-items: center; gap: 6px; margin-top: 7px;">'
-          f'<span style="display: flex; color: {T["ag"]};">{ic(I["lock"],12,2)}</span>'
-          f'<span style="font-size: 11px; color: {T["ts"]};">Answers are staying on this Mac</span></div></div>')
-    turns=(f'<div style="display: flex; flex-direction: column; gap: 10px;">'
-           + barturn(T,text="What did he say about the March number?",who="user")
-           + barturn(T,text="He put it at 4% over the comparables you pulled, and said the volume tier was the "
-                            "reason. You have not agreed to that framing yet.",lines=True) + '</div>')
-    acts=(f'<div style="display: flex; gap: 7px; flex-wrap: wrap;">'
-          + (baract(T,I["plus"],"Note") + baract(T,I["check"],"Action item")
-             + baract(T,I["stop"],"Stop",tone=T["deg"]) if live else
-             baract(T,I["plus"],"Note") + baract(T,I["mic"],"Listen") + baract(T,I["eye"],"Share a window"))
-          + '</div>')
-    return (f'<div style="width: {w}px; {glassplate(T)}">{barhead(T,live=live,scope="Zoom")}'
-            f'<div style="height: 1px; background: {rgba(T["border"],0.9)};"></div>'
-            f'<div style="padding: 11px 12px 12px; display: flex; flex-direction: column; gap: 11px;">'
-            + (turns if live else "") + body + barcomposer(T) + acts + '</div></div>')
+def barpanel(T,*,live=False,w=328,senses=("mic",)):
+    if live:
+        head=(f'<div style="display: flex; align-items: center; gap: 9px; padding: 11px 13px 10px;">'
+              f'{breathmark(T,size=15)}'
+              f'<span style="font-family: {MONO}; font-size: 12px; color: {T["ag"]};">13:42</span>'
+              f'<span style="font-size: 11.5px; color: {T["ts"]};">Zoom</span>'
+              f'<span style="flex-grow: 1;"></span>'
+              + "".join(sensepip(T,s,size=12) for s in senses) + '</div>')
+        body=(f'<div style="display: flex; align-items: center; gap: 7px;">'
+              f'<span style="display: flex; color: {T["ag"]};">{ic(I["lock"],12,2)}</span>'
+              f'<span style="font-size: 11px; color: {T["ts"]};">Staying on this Mac</span></div>')
+        turns=(f'<div style="display: flex; flex-direction: column; gap: 10px;">'
+               + barturn(T,text="What did he say about the March number?",who="user")
+               + barturn(T,text="He put it 4% over the comparables you pulled, and named the volume tier as the "
+                                "reason. You have not agreed to that framing.",more=True) + '</div>')
+        acts=(baract(T,I["plus"],"Note")+baract(T,I["check"],"Action item")
+              +baract(T,I["stop"],"Stop",tone=T["deg"]))
+    else:
+        head=(f'<div style="display: flex; align-items: center; gap: 9px; padding: 11px 13px 10px;">'
+              f'{mark(T,size=15)}'
+              f'<span style="font-size: 12.5px; font-weight: 600; color: {T["tp"]};">Metis</span>'
+              f'<span style="flex-grow: 1;"></span>'
+              f'<span style="font-size: 10.5px; color: {T["ts"]};">not listening</span></div>')
+        body=""
+        turns=barturn(T,text="Ask about anything on screen, or start listening.")
+        acts=(baract(T,I["plus"],"Note")+baract(T,I["mic"],"Listen")+baract(T,I["screen"],"Share"))
+    return (f'<div style="width: {w}px; {glass(T,radius=18,tint=T["ag"] if live else None)}">{head}'
+            f'<div style="height: 0.5px; background: {rgba(T["border"],0.85)};"></div>'
+            f'<div style="padding: 12px 13px 13px; display: flex; flex-direction: column; gap: 11px;">'
+            f'{turns}{body}{barcomposer(T)}'
+            f'<div style="display: flex; gap: 7px; flex-wrap: wrap;">{acts}</div></div></div>')
 
-# ---------- the scope sheet, one per sense ------------------------------------
-def grantrow(T,*,name,state,detail,last=False):
-    tone={"held":T["ok"],"needed":T["ts"],"refused":T["deg"]}[state]
-    word={"held":"granted","needed":"will ask","refused":"refused"}[state]
-    return (f'<div style="display: grid; grid-template-columns: 15px 174px 96px minmax(0,1fr); gap: 11px; '
-            f'align-items: baseline; padding: 7px 0; {bd_(T,last)}">'
-            f'<span style="width: 8px; height: 8px; border-radius: 50%; background: {tone}; '
-            f'align-self: center;"></span>'
-            + mono(name,T["tp"],11.5)
-            + f'<span style="font-size: 11.5px; color: {tone}; font-weight: 600;">{word}</span>'
-            + f'<span style="font-size: 11.5px; color: {T["ts"]}; line-height: 1.45;">{detail}</span></div>')
+# ---------- the sheets, minimised --------------------------------------------
+def sheetrow(T,*,glyph,text,meta=None,last=False):
+    return (f'<div style="display: flex; align-items: center; gap: 10px; padding: 8px 0; {bd_(T,last)}">'
+            f'<span style="display: flex; color: {T["ag"]};">{ic(glyph,15,1.9)}</span>'
+            f'<span style="font-size: 12.5px; color: {T["tp"]};">{text}</span>'
+            f'<span style="flex-grow: 1;"></span>'
+            + (f'<span style="font-size: 11.5px; color: {T["ts"]};">{meta}</span>' if meta else '') + '</div>')
 
-def scopesheet(T,*,kind="audio",w=470):
+def scopesheet(T,*,kind="audio",w=376):
     if kind=="audio":
         title="Listen to this meeting"
-        what=(f'<div style="display: flex; flex-direction: column; gap: 7px;">'
-              + "".join(f'<div style="display: flex; align-items: center; gap: 9px;">'
-                        f'<span style="display: flex; color: {T["ag"]};">{ic(g,14,1.9)}</span>'
-                        f'<span style="font-size: 12.5px; color: {T["tp"]};">{t}</span>'
-                        f'<span style="flex-grow: 1;"></span>{mono(m,T["ts"],11)}</div>'
-                        for g,t,m in ((I["plug"],"Zoom &mdash; the meeting&rsquo;s own audio","us.zoom.xos"),
-                                      (I["mic"],"Your microphone","built-in")))
-              + '</div>')
-        enforced=("<b>The system enforces this list.</b> A Core Audio process tap only ever yields the audio of "
-                  "the processes named in it, so nothing else on this Mac is audible to Metis &mdash; not a "
-                  "decision we make in code, a property of the tap.")
-        grants=(grantrow(T,name="Microphone",state="held",detail="granted 12 Aug")
-                + grantrow(T,name="AudioCapture",state="needed",
-                           detail="macOS will ask once, in its own words",last=True))
+        rows=(sheetrow(T,glyph=I["plug"],text="Zoom",meta="the meeting")
+              + sheetrow(T,glyph=I["mic"],text="Your microphone",meta="your side",last=True))
+        foot="Stops at 11:30. Nothing is written without you."
     else:
         title="Share a window"
-        what=(f'<div style="{glassplate(T,radius=10)} box-shadow: none; background: {T["sunken"]}; '
-              f'padding: 10px 12px;">'
-              f'<div style="font-size: 11px; font-weight: 700; letter-spacing: 0.07em; color: {T["tt"]};">'
-              f'MACOS PICKS THE WINDOW, NOT US</div>'
-              f'<div style="font-size: 12px; color: {T["tp"]}; line-height: 1.5; margin-top: 6px;">'
-              f'The system&rsquo;s own sharing picker opens. Metis receives the filter macOS builds from your '
-              f'choice &mdash; it never builds one itself.</div></div>')
-        enforced=("<b>The grant is system-wide, and this is the honest wording.</b> "
-                  "<b>SCContentSharingPicker</b> is a selection UI, not a capability fence: "
-                  "<b>kTCCServiceScreenCapture</b> is held by the binary, so what stops a wider capture is that "
-                  "the helper has exactly one code path for building a filter &mdash; our boundary, not the "
-                  "kernel&rsquo;s. Said once, here, and never claimed as the OS&rsquo;s doing.")
-        grants=grantrow(T,name="ScreenCapture",state="needed",
-                        detail="macOS will ask once; the grant is not per-window",last=True)
-    return (f'<div style="width: {w}px; {glassplate(T)}">'
-            f'<div style="padding: 13px 15px 11px;">'
-            f'<div style="font-size: 14.5px; font-weight: 600; color: {T["tp"]};">{title}</div>'
-            f'<div style="font-size: 11.5px; color: {T["ts"]}; margin-top: 3px;">Vendor review &middot; '
-            f'until 11:30, then it stops on its own</div></div>'
-            f'<div style="height: 1px; background: {rgba(T["border"],0.9)};"></div>'
-            f'<div style="padding: 12px 15px 14px; display: flex; flex-direction: column; gap: 12px;">'
-            + block(T,"WHAT IT WILL HEAR" if kind=="audio" else "WHAT IT WILL SEE",what)
-            + f'<div style="font-size: 11.5px; color: {T["ts"]}; line-height: 1.5;">{enforced}</div>'
-            + block(T,"PERMISSIONS MACOS HOLDS",sunk(T,grants))
-            + block(T,"WHAT IS KEPT",sunk(T,
-                kv(T,"Now","text only &mdash; the audio is transcribed and dropped" if kind=="audio"
-                        else "text read off the window, and no images")
-                + kv(T,"For","90 minutes, then purged")
-                + kv(T,"Afterwards","one proposal in Needs You &mdash; nothing is written until you approve it",
-                     last=True)))
-            + f'<div style="display: flex; align-items: center; gap: 9px;">'
-            + btn(T,"Start","affirm",I["mic"] if kind=="audio" else I["eye"])
-            + btn(T,"Cancel","ghost") + '</div></div></div>')
+        rows=(sheetrow(T,glyph=I["screen"],text="You pick the window",meta="macOS asks")
+              + sheetrow(T,glyph=I["eye"],text="Screen access is not per-window",meta="system-wide",last=True))
+        foot="Stops when you stop it. Nothing is written without you."
+    return (f'<div style="width: {w}px; {glass(T,radius=18)}">'
+            f'<div style="padding: 13px 15px 9px; font-size: 14px; font-weight: 600; color: {T["tp"]};">{title}</div>'
+            f'<div style="padding: 0 15px;">{rows}</div>'
+            f'<div style="padding: 10px 15px 13px; display: flex; align-items: center; gap: 9px;">'
+            + btn(T,"Start","affirm",I["mic"] if kind=="audio" else I["screen"])
+            + btn(T,"Cancel","ghost")
+            + f'<span style="flex-grow: 1;"></span>'
+            f'<span style="font-size: 11px; color: {T["ts"]}; text-align: right; max-width: 168px; '
+            f'line-height: 1.4;">{foot}</span></div></div>')
 
-# ---------- Settings ▸ Live capture -------------------------------------------
+# ---------- Settings, trimmed ------------------------------------------------
+def toggle(T,on=True):
+    return (f'<span style="display: inline-flex; align-items: center; width: 40px; height: 23px; '
+            f'border-radius: 12px; background: {T["acc"] if on else T["sunken"]}; '
+            f'border: 1px solid {T["acc"] if on else T["bc"]}; padding: 2px; '
+            f'justify-content: {"flex-end" if on else "flex-start"};">'
+            f'<span style="width: 17px; height: 17px; border-radius: 50%; background: {T["bg"] if on else T["ts"]}; '
+            f'box-shadow: 0 1px 2px rgba(0,0,0,0.25);"></span></span>')
+
+def setrow(T,*,label,control,note=None,last=False):
+    return (f'<div style="display: flex; align-items: center; gap: 14px; padding: 11px 0; {bd_(T,last)}">'
+            f'<div style="flex-grow: 1; min-width: 0;">'
+            f'<div style="font-size: 12.5px; color: {T["tp"]};">{label}</div>'
+            + (f'<div style="font-size: 11.5px; color: {T["ts"]}; margin-top: 2px;">{note}</div>' if note else '')
+            + f'</div>{control}</div>')
+
+def grantpip(T,*,ok=True):
+    return (f'<span style="display: inline-flex; align-items: center; gap: 6px;">'
+            f'<span style="display: flex; color: {T["ok"] if ok else T["ts"]};">'
+            f'{ic(I["check"] if ok else I["clock"],13,2.1)}</span>'
+            f'<span style="font-size: 11.5px; color: {T["ts"]};">'
+            f'{"Approved" if ok else "Not yet asked"}</span></span>')
+
 def sidepicker(T,*,sel="right"):
-    cell=lambda s,on:(f'<div style="position: relative; width: 74px; height: 52px; border-radius: 7px; '
-                      f'border: 1px solid {T["bc"] if on else T["border"]}; background: {T["sunken"]}; '
+    cell=lambda s,on:(f'<div style="text-align: center;">'
+                      f'<div style="position: relative; width: 62px; height: 44px; border-radius: 7px; '
+                      f'border: 1px solid {T["acc"] if on else T["border"]}; background: {T["sunken"]}; '
                       f'overflow: hidden;">'
-                      f'<span style="position: absolute; {s}: 4px; top: 15px; width: 5px; height: 22px; '
-                      f'border-radius: 3px; background: {T["acc"] if on else T["tt"]};"></span></div>'
-                      f'<div style="font-size: 11px; color: {T["acc"] if on else T["ts"]}; text-align: center; '
-                      f'margin-top: 5px; font-weight: {600 if on else 400};">'
-                      f'{"Left" if s=="left" else "Right"}</div>')
-    return (f'<div style="display: flex; gap: 14px; align-items: flex-start;">'
-            f'<div>{cell("left",sel=="left")}</div><div>{cell("right",sel=="right")}</div>'
-            f'<div style="flex-grow: 1; padding-left: 6px;">'
-            + kv(T,"Display","Studio Display &mdash; the one with the pointer on it")
-            + kv(T,"Vertical","a third from the top, dragged where you like it",last=True) + '</div></div>')
+                      f'<span style="position: absolute; {s}: 4px; top: 13px; width: 4px; height: 18px; '
+                      f'border-radius: 2px; background: {T["acc"] if on else T["tt"]};"></span></div>'
+                      f'<div style="font-size: 11px; color: {T["acc"] if on else T["ts"]}; margin-top: 4px; '
+                      f'font-weight: {600 if on else 400};">{"Left" if s=="left" else "Right"}</div></div>')
+    return (f'<span style="display: inline-flex; gap: 10px;">'
+            f'{cell("left",sel=="left")}{cell("right",sel=="right")}</span>')
 
-def capturesettings(T,w=560):
+def kept(T):
+    return (f'<div style="background: {T["sunken"]}; border-radius: 10px; padding: 11px 13px;">'
+            + "".join(f'<div style="display: flex; align-items: baseline; gap: 12px; padding: 5px 0;'
+                      + ("" if i==2 else f' border-bottom: 1px solid {T["border"]};') + '">'
+                      f'<span style="width: 92px; flex-shrink: 0; font-size: 12px; font-weight: 600; '
+                      f'color: {T["tp"]};">{a}</span>'
+                      f'<span style="font-size: 12px; color: {T["ts"]};">{b}</span></div>'
+              for i,(a,b) in enumerate([
+                ("Audio","never kept"),
+                ("Transcript","90 minutes, then gone"),
+                ("Notes","only what you approve, in your vault")])) + '</div>')
+
+def capturesettings(T,w=520):
     return (f'<div style="width: {w}px; background: {T["bg"]}; border: 1px solid {T["bc"]}; '
             f'border-radius: 12px; overflow: hidden;">'
-            f'<div style="padding: 13px 16px; border-bottom: 1px solid {T["border"]}; display: flex; '
-            f'align-items: center; gap: 10px;">'
-            f'<span style="font-size: 14.5px; font-weight: 600; color: {T["tp"]}; flex-grow: 1;">Live capture</span>'
-            + pill(T,"bridge installed",T["ok"],T["okq"]) + '</div>'
-            f'<div style="padding: 14px 16px; display: flex; flex-direction: column; gap: 14px;">'
-            + block(T,"THE BAR",sunk(T,
-                kv(T,"Show the bar","always, while the bridge is installed")
-                + kv(T,"Where",'<span style="color: '+T["tp"]+';">the right edge</span>',last=True))
-              + f'<div style="margin-top: 11px;">{sidepicker(T)}</div>')
-            + block(T,"PERMISSIONS MACOS HOLDS",sunk(T,
-                grantrow(T,name="Microphone",state="held",detail="granted 12 Aug &middot; System Settings")
-                + grantrow(T,name="AudioCapture",state="held",detail="granted 12 Aug")
-                + grantrow(T,name="ScreenCapture",state="needed",
-                           detail="never asked &mdash; sharing a window will ask",last=True)))
-            + block(T,"WHAT IS KEPT",sunk(T,
-                kv(T,"Transcript text","90 minutes in .metistry/state, never the vault",mono_=False)
-                + kv(T,"Audio","not kept at any point")
-                + kv(T,"Right now","14 minutes of text from one session",last=True))
-              + f'<div style="display: flex; gap: 8px; margin-top: 11px;">'
-              + btn(T,"Purge Now","dest",I["x"]) + btn(T,"Open The Session","ghost") + '</div>')
-            + '</div></div>')
+            f'<div style="padding: 13px 16px; border-bottom: 1px solid {T["border"]};">'
+            f'<span style="font-size: 14.5px; font-weight: 600; color: {T["tp"]};">Live capture</span></div>'
+            f'<div style="padding: 4px 16px 15px;">'
+            + setrow(T,label="The floating bar",note="Always on screen while this is on",control=toggle(T,True))
+            + setrow(T,label="Which edge",control=sidepicker(T))
+            + setrow(T,label="Which display",
+                     control=f'<span style="font-size: 12px; color: {T["tp"]};">Studio Display &nbsp;'
+                             f'<span style="color: {T["ts"]};">&#9662;</span></span>')
+            + setrow(T,label="Microphone",control=grantpip(T,ok=True))
+            + setrow(T,label="System audio",control=grantpip(T,ok=True))
+            + setrow(T,label="Screen recording",control=grantpip(T,ok=False),last=True)
+            + f'<div style="margin-top: 14px;">{sub("WHAT METIS KEEPS",T["tt"])}{kept(T)}</div>'
+            + f'<div style="display: flex; align-items: center; gap: 9px; margin-top: 12px;">'
+            + btn(T,"Purge Now","dest",I["x"])
+            + f'<span style="font-size: 11.5px; color: {T["ts"]};">14 minutes of transcript right now</span>'
+            + '</div></div></div>')

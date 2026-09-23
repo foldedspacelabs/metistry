@@ -4497,3 +4497,94 @@ def addagent(T,w=440):
             f'and comments in Jira <b>DREY</b>.</div>'
             f'<div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px;">'
             f'{btn(T,"Cancel","ghost")}{btn(T,"Add","affirm",I["plus"])}</div></div>')
+
+
+# ============ CARD DETAIL — one popover for both kinds of task (2026-09-22) =====
+# Screen 14. Every card click opens this; a thread is a section inside it (ruled
+# 2026-09-22). A markdown task and a work row share the layout and differ in
+# their verbs, as on Today. Work rows gain a short description (ruled, C85).
+
+def dsec(T,label,inner,*,meta=None,first=False):
+    return (f'<div style="padding: 12px 16px; {"" if first else "border-top: 1px solid "+T["border"]+";"}">'
+            f'<div style="display: flex; align-items: center; gap: 8px; margin-bottom: 7px;">'
+            f'<span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["tt"]};">{label}</span>'
+            + (f'<span style="flex-grow: 1;"></span><span style="font-size: 11px; color: {T["ts"]};">{meta}</span>' if meta else '')
+            + f'</div>{inner}</div>')
+
+def histrow2(T,when,who,what,*,agent=True,last=False):
+    return (f'<div style="display: grid; grid-template-columns: 52px 86px minmax(0,1fr); gap: 9px; padding: 5px 0; '
+            f'align-items: baseline; {bd_(T,last)}">'
+            f'<span style="font-family: {MONO}; font-size: 10.5px; color: {T["tt"]};">{when}</span>'
+            f'{mono(who,T["ag"] if agent else T["tp"],11)}'
+            f'<span style="font-size: 12px; color: {T["ts"]}; line-height: 1.45;">{what}</span></div>')
+
+def detailpop(T,*,kind="work",w=460):
+    close=f'<span style="display: flex; color: {T["tt"]};">{ic(I["x"],14,2)}</span>'
+    if kind=="work":
+        lead=f'<span style="display: flex; color: {T["ag"]}; margin-top: 2px;">{ic(I["board"],16,1.9)}</span>'
+        title="Reconcile vendor invoices against the March renewal"
+        bits=facets(T,p=1,d="Fri",e="45m",people=("Kessler",),
+                    links=[("project","drey",I["board"])],states=[("blocked","deg",I["warn"])])
+    else:
+        lead=f'<span style="display: flex; margin-top: 2px;">{box(T,False)}</span>'
+        title="Send Kessler the revised volume numbers"
+        bits=facets(T,d="Thu",e="15m",people=("Kessler",))
+    head=(f'<div style="padding: 14px 16px 12px;">'
+          f'<div style="display: flex; align-items: flex-start; gap: 10px;">{lead}'
+          f'<div style="flex-grow: 1; font-size: 15px; font-weight: 600; color: {T["tp"]}; line-height: 1.35;">{title}</div>'
+          f'{close}</div>'
+          f'<div style="display: flex; flex-wrap: wrap; gap: 7px; align-items: center; margin: 9px 0 0 26px;">'
+          + "".join(bits) + '</div></div>')
+    if kind=="work":
+        desc=dsec(T,"DESCRIPTION",
+                  f'<div style="font-size: 12.5px; color: {T["tp"]}; line-height: 1.55;">Match each Kessler invoice since '
+                  f'June to the renewal terms and flag anything billed at the old volume tier.</div>',first=True)
+        held=dsec(T,"HELD BY",
+                  f'<div style="display: flex; align-items: center; gap: 9px;">{presdot(T,"working")}'
+                  f'{agentchip(T,"drey-dev")}<span style="font-size: 12px; color: {T["ts"]};">lease 38 min left</span>'
+                  f'<span style="flex-grow: 1;"></span><span style="font-size: 11.5px; color: {T["ts"]};">Assigned</span></div>')
+        blocked=dsec(T,"BLOCKED BY",
+                     f'<div style="display: flex; align-items: center; gap: 9px;">'
+                     f'<span style="display: flex; color: {T["ag"]};">{ic(I["board"],13,1.9)}</span>'
+                     f'<span style="font-size: 12.5px; color: {T["acc"]}; font-weight: 600;">#417 Vendor terms from Kessler</span>'
+                     f'<span style="flex-grow: 1;"></span><span style="font-size: 11.5px; color: {T["ts"]};">open</span></div>')
+        thread=dsec(T,"THREAD",
+                    f'<div style="font-size: 12px; color: {T["ts"]}; line-height: 1.5;">'
+                    f'{mono("collator",T["ag"],11)} &ldquo;Two invoices are already at net-45.&rdquo;</div>'
+                    f'<div style="font-size: 11.5px; color: {T["acc"]}; font-weight: 600; margin-top: 6px;">Open room &rarr;</div>',
+                    meta="4 comments")
+        hist=dsec(T,"HISTORY",
+                  histrow2(T,"2:41","drey-dev","claimed it")
+                  + histrow2(T,"2:10","drey-dev","blocked on #417 &mdash; waiting on terms")
+                  + histrow2(T,"11:58","you","set priority 1, due Friday",agent=False)
+                  + histrow2(T,"11:30","metis","created from the Vendor review meeting",last=True))
+        acts=(f'<div style="padding: 11px 16px 13px; border-top: 1px solid {T["border"]}; display: flex; gap: 7px;">'
+              f'{btn(T,"Comment","secondary",I["chat"])}{btn(T,"Open On Board","ghost",I["board"])}'
+              f'<span style="flex-grow: 1;"></span>'
+              f'<span style="font-size: 11.5px; color: {T["ts"]}; align-self: center;">from vendor-summary v3</span></div>')
+        body=desc+held+blocked+thread+hist+acts
+    else:
+        ctx=(f'<div style="background: {T["sunken"]}; border-radius: 9px; padding: 9px 11px; font-family: {MONO}; '
+             f'font-size: 11.5px; line-height: 1.7; color: {T["ts"]};">'
+             f'<div>## Vendor review</div>'
+             f'<div>- Kessler confirmed net-45</div>'
+             f'<div style="color: {T["tp"]}; background: {T["accq"]}; margin: 0 -11px; padding: 0 11px;">'
+             f'- [ ] Send Kessler the revised volume numbers &#128197; 2026-09-24</div>'
+             f'<div>- [ ] Ask Orlin for their updated terms</div></div>')
+        body=(dsec(T,"IN YOUR NOTE",ctx,meta=mono("Journal/2026-09-22.md",T["ts"],10.5),first=True)
+              + dsec(T,"HISTORY",histrow2(T,"11:30","metis","added from the Vendor review meeting")
+                     + histrow2(T,"11:42","you","set due Thursday",agent=False,last=True))
+              + f'<div style="padding: 11px 16px 13px; border-top: 1px solid {T["border"]}; display: flex; gap: 7px;">'
+              f'{btn(T,"Complete","affirm",I["check"])}{btn(T,"Open In Obsidian","secondary",I["note"])}'
+              f'{btn(T,"Hand To An Agent","ghost",I["agents"])}</div>')
+    return (f'<div style="width: {w}px; background: {T["elevated"]}; border: 1px solid {T["bc"]}; border-radius: 13px; '
+            f'box-shadow: 0 14px 40px rgba(26,24,21,0.20); overflow: hidden; flex-shrink: 0;">{head}'
+            f'<div style="border-top: 1px solid {T["border"]};">{body}</div></div>')
+
+def anchorcard(T,*,kind="work",title="Reconcile vendor invoices against the March renewal",w=270):
+    lead=(f'<span style="display: flex; color: {T["ag"]};">{ic(I["board"],14,1.9)}</span>' if kind=="work"
+          else f'<span style="display: flex;">{box(T,False)}</span>')
+    return (f'<div style="width: {w}px; background: {T["surface"]}; border: 1.5px solid {T["acc"]}; border-radius: 10px; '
+            f'padding: 10px 12px; box-shadow: 0 0 0 3px {T["accq"]};">'
+            f'<div style="display: flex; gap: 8px; align-items: flex-start;">{lead}'
+            f'<span style="font-size: 12.5px; color: {T["tp"]}; line-height: 1.4;">{title}</span></div></div>')

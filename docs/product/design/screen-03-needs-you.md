@@ -308,11 +308,11 @@ are present.
 🎙 MEETING                          metis · 12m
 Vendor review
 Notes and 4 to-dos · 42 min
-NOTES     ┃ Kessler confirmed net-45 …      [Accept] [Edit]
+NOTES     ┃ Kessler confirmed net-45 …      [Accept] [Revise]
 TO-DOS · 4  ☐ Send Kessler the revised …     ✓ ✎ ✕
 YOURS     2 notes, 1 to-do — already saved, and included in the notes.
 ▸ Transcript                                 42 min · kept 30 days
-[Accept All] [Decline All]                   Open the session →
+[Accept All] [Revise] [Decline All]          Open the session →
 ```
 
 - **Accept All sends one approval per item**, in order, each with its own
@@ -322,6 +322,9 @@ YOURS     2 notes, 1 to-do — already saved, and included in the notes.
   accepted. One was already answered on your phone.*
 - **The owner's own jots are not asked about.** They are his words, saved when
   typed, and go into the notes as his.
-- **Every to-do can be answered on its own.**
+- **Revise sits beside Accept All and on the notes** (ruled 2026-09-22), so a
+  mistake is corrected before anything is accepted — the same verb every other
+  request uses, not a separate Edit.
+- **Every to-do can be accepted, revised or declined on its own.**
 - **It needs a group id on proposals (C81)**, and that group is where C77's
   session-time anchors get promoted to the note's path.

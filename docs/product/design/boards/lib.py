@@ -4273,7 +4273,7 @@ def meetingcard(T,*,expanded=True,result=False,width=None):
           f'<div style="display: flex; align-items: center; gap: 7px; margin-top: 9px;">'
           + (f'<span style="display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: {T["ok"]};">'
              f'{ic(I["check"],12,2.2)}Accepted</span>' if result else
-             f'{btn(T,"Accept","affirm",I["check"])}{btn(T,"Edit","ghost",I["pencil"])}')
+             f'{btn(T,"Accept","affirm",I["check"])}{btn(T,"Revise","secondary",I["pencil"])}')
           + f'<span style="flex-grow: 1;"></span>{mono("Journal/Meetings/2026-09-22-vendor-review.md",T["ts"],10.5)}</div>')
     states=(["ok","ok","answered","ok"] if result else [None]*4)
     todos="".join(todoline(T,t,state=s,last=i==3) for i,(t,s) in enumerate(zip(TODOS,states)))
@@ -4289,7 +4289,8 @@ def meetingcard(T,*,expanded=True,result=False,width=None):
                            f'<span style="flex-grow: 1;"></span>{extra}</div>')
     foot=("" if result else
           f'<div style="display: flex; gap: 7px; margin-top: 13px; padding-top: 12px; border-top: 1px solid {T["border"]};">'
-          f'{btn(T,"Accept All","affirm",I["check"])}{btn(T,"Decline All","ghost")}'
+          f'{btn(T,"Accept All","affirm",I["check"])}{btn(T,"Revise","secondary",I["pencil"])}'
+          f'{btn(T,"Decline All","dest",I["x"])}'
           f'<span style="flex-grow: 1;"></span>'
           f'<span style="font-size: 11.5px; font-weight: 600; color: {T["acc"]}; align-self: center;">Open the session &rarr;</span></div>')
     return (f'<div style="{w} background: {T["surface"]}; border: 1px solid {T["border"]}; border-radius: 12px; '

@@ -111,6 +111,14 @@ disagree, the newer three win and the disagreement gets logged.
 
 ## 3. What is ratified — do not re-litigate
 
+**Motion** (C16, ruled 2026-09-22). Motion only where it carries information the
+reader cannot otherwise get, stopping the moment that information is in words.
+The three waiting dots are the only loop in the product.
+
+**Agent prose in a transcript** (C69, ruled 2026-09-22). A 2px `agent` rule in
+the gutter, no wash; `agent-quiet` still governs agent text outside a
+transcript. `screen-01-chat.md` §2.1 is closed.
+
 **Navigation.** **Eight** rows as of 2026-09-22 — see C57. Resources was briefly
 a ninth and moved to Settings, so the standing rule is: **a third break should
 move something out rather than add a row.** **Today · Chat · Activity ·
@@ -232,7 +240,7 @@ the canvas is now generated from a module in `boards/` except `Facets`, `Plugin`
 `Voice` and `Item-Model`. `bellpanel()` is gone — it drew the *"1 snoozed"*
 header C21 killed; `panel2()` is the panel.
 
-**68 contradictions** are logged in `review-00-plan.md`. C38 and C51 are closed. C40–C68 are
+**69 contradictions** are logged in `review-00-plan.md`. C38 and C51 are closed. C40–C69 are
 round E's. Two of them are rules the system is missing rather than faults in a
 file: **C45** (a failed consequential operation leaves the request pending) and
 **C49** (a mark that carries meaning takes an ink token, never a border token —

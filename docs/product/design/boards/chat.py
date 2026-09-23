@@ -32,7 +32,7 @@ WAIT=pan(L,"WAITING FOR A REPLY — THE MOTION FALLS AS THE FACTS ARRIVE",
     "count carries the liveness alone — a number is content, not motion — which is why the count is load-bearing "
     "and not decoration.",last=True))
 
-RULING=pan(L,"A RULING YOU OWE ME — ux-direction.md SAYS NO SPINNER",
+RULING=pan(L,"MOTION — RATIFIED 2026-09-22 (C16), AGAINST ux-direction.md&rsquo;S NO-SPINNER RULE",
   f'<div style="background: {L["sunken"]}; border-radius: 10px; padding: 13px 15px;">'
   f'<div style="font-family: {SERIF}; font-size: 13.5px; color: {L["tp"]}; line-height: 1.6;">'
   f'&ldquo;calm — the working state is a <b>word</b>, not a spinner, and nothing auto-scrolls, parallaxes, spins '
@@ -43,12 +43,12 @@ RULING=pan(L,"A RULING YOU OWE ME — ux-direction.md SAYS NO SPINNER",
         "stuck</b> — and a reader has no other way to tell working from broken.",14)
   + f'<div style="background: {L["accq"]}; border-radius: 10px; padding: 13px 15px; margin-top: 12px;">'
     f'<div style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {L["acc"]}; '
-    f'margin-bottom: 7px;">THE NARROWEST AMENDMENT THAT KEEPS ITS INTENT</div>'
+    f'margin-bottom: 7px;">RATIFIED — THE ONE SENTENCE THAT GOVERNS MOTION</div>'
     f'<div style="font-size: 13px; color: {L["tp"]}; line-height: 1.6;">Motion is allowed only where it carries '
     f'information the reader cannot otherwise get, and it stops the moment that information is available in '
     f'words.</div></div>'
   + nt(L,"Everything above falls out of that one sentence: the dots exist only while there is nothing to say, and "
-        "they are replaced — not supplemented — the moment a tool name can be printed. (C16)",12))
+        "they are replaced — not supplemented — the moment a tool name can be printed. Ruled <b>2026-09-22</b>: the amendment carries, and <b>ux-direction.md</b>&rsquo;s sentence is narrowed rather than kept as written. This is the only looping animation the product is permitted (C16, closed).",12))
 
 OUTSIDE=pan(L,"THE OTHER TWO PLACES THE STATE HAS TO BE LEGIBLE",
   row(f'<div style="flex-grow: 1; flex-basis: 0;">{sub("COMPOSER — SEND BECOMES STOP",L["tt"])}'
@@ -61,17 +61,20 @@ OUTSIDE=pan(L,"THE OTHER TWO PLACES THE STATE HAS TO BE LEGIBLE",
       + nt(L,"One <b>agent</b> dot on Chat while a turn runs, so the state survives walking away from it. It "
             "carries no count — Needs You keeps the only badge in the product (P2).",12) + '</div>',18,align="flex-start"))
 
-FILL=pan(L,"THE ASSISTANT'S TURN — NO FILL (DRAWN) AGAINST A QUOTE RULE (ALTERNATIVE)",
-  row(f'<div style="flex-grow: 1; flex-basis: 0;">{sub("DRAWN — THE ATTRIBUTION CARRIES IT",L["tt"])}'
+FILL=pan(L,"THE ASSISTANT&rsquo;S TURN — RULED 2026-09-22: THE 2PX AGENT RULE",
+  row(f'<div style="flex-grow: 1; flex-basis: 0;">{sub("CONSIDERED — THE ATTRIBUTION ALONE",L["tt"])}'
       + replyturn(L,"The lease comparables came back 4% under his number, which is the thing you did not have on "
-                    "the 6th.",w=420) + '</div>'
-    + f'<div style="flex-grow: 1; flex-basis: 0;">{sub("ALTERNATIVE — A 2PX AGENT LEFT RULE",L["tt"])}'
+                    "the 6th.",quotebar=False,w=420) + '</div>'
+    + f'<div style="flex-grow: 1; flex-basis: 0;">{sub("RULED — A 2PX AGENT LEFT RULE",L["tt"])}'
       + replyturn(L,"The lease comparables came back 4% under his number, which is the thing you did not have on "
-                    "the 6th.",quotebar=True,w=420) + '</div>',18,align="flex-start")
+                    "the 6th.",hang=False,w=420) + '</div>',18,align="flex-start")
   + nt(L,"P1 asks for agent text in a container that is <b>visibly quoted</b> — the tint on the attribution and an "
-        "<b>agent-quiet</b> wash behind the body. Dropping the wash keeps the first half and loses the second, so "
-        "this is <b>a deviation to be ruled on, not a drawing choice</b>.",14)
-  + nt(L,"The case for the drawn version: P1&rsquo;s wash is kept for agent data appearing <i>outside</i> a "
+        "<b>agent-quiet</b> wash behind the body. <b>The rule satisfies P1 without the wash:</b> a quote rule is "
+        "the oldest mark in typography for <i>these are not my words</i>, it costs 18px of gutter instead of a "
+        "fill behind 300 words of prose, and it survives a reply that contains a table, a diff or a card — "
+        "which a wash does not, because a nested fill on a fill stops reading as quotation.",14)
+  + nt(L,"<b>The rule hangs in the gutter, not inside the measure.</b> Its width is the measure plus the rule and its padding, pulled back by the same 18px, so the prose begins on the user turn&rsquo;s own left edge and <b>--mt-reply-measure</b> still governs the text rather than the text minus a rule. One number, as §3.4 wants.",12)
+  + nt(L,"P1&rsquo;s wash is kept for agent data appearing <i>outside</i> a "
         "transcript — a feed row, a card title, tool output, an artifact comment — which is where being mistaken "
         "for the interface actually costs something. Inside a transcript everything is a turn and the attribution "
         "is unambiguous. It also resolves the nesting problem: with the reply body unfilled, tool output goes back "
@@ -98,9 +101,12 @@ FAULTS=pan(L,"WHAT THIS SCREEN STILL OWES, AND WHAT IT FOUND",
           f'padding-top: 2px; width: 34px;">{k}</span>'
           f'<span style="font-size: 12.5px; color: {L["ts"]}; line-height: 1.55;">{v}</span></div>'
   for i,(k,v) in enumerate([
-    ("C16","the motion ruling above. Still open, and it gates the only animation in the product."),
-    ("§2.1","dropping the <b>agent-quiet</b> wash from a reply body is a deviation from P1. Both options are "
-            "drawn; the ruling is yours."),
+    ("C16","<b>ruled 2026-09-22.</b> Motion is allowed only where it carries information the reader cannot "
+           "otherwise get, and it stops the moment that information is available in words. The waiting dots are "
+           "the only looping animation in the product, and the only one there will be."),
+    ("§2.1","<b>ruled 2026-09-22 — the 2px agent rule.</b> A reply body carries a quote rule in the gutter instead "
+            "of the <b>agent-quiet</b> wash. P1 is satisfied by the rule, so this is no longer a deviation; the "
+            "wash keeps its job everywhere agent text appears outside a transcript."),
     ("—","the preset list has no endpoint, so the picker ships half-sourced by design rather than by omission."),
     ("—","the cap <b>is</b> the measure: <b>--mt-reply-measure</b> governs the column rather than the prose "
          "inside it, so tool strips, chips and cards fill the same width as the text and there is one number "

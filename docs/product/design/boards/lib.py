@@ -4328,3 +4328,172 @@ def panel3(T,w=400):
     return (f'<div style="width: {w}px; background: {T["elevated"]}; border: 1px solid {T["bc"]}; border-radius: 14px; '
             f'box-shadow: 0 10px 34px rgba(26,24,21,0.16); overflow: hidden; display: flex; flex-direction: column; '
             f'flex-shrink: 0;">{head}{body}{foot}</div>')
+
+
+# ============ PROJECTS — Work ▸ Projects (2026-09-22) =================
+# Screen 13. Projects appear on first use (0011), so there is no New Project.
+# The state that matters most is review mode, and why. Owner's ruling (D13):
+# a project holds permissions, and every member inherits them by default.
+
+def modechip(T,mode,why=None):
+    if mode=="autonomous":
+        return (f'<span style="display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; '
+                f'border-radius: 999px; border: 1px solid {T["bc"]}; font-size: 11px; color: {T["ts"]};">Autonomous</span>')
+    if why=="budget":
+        return (f'<span style="display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; '
+                f'border-radius: 999px; background: {T["degq"]}; font-size: 11px; font-weight: 600; color: {T["deg"]};">'
+                f'{ic(I["warn"],11,2.2)}Review &middot; over budget</span>')
+    return (f'<span style="display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; '
+            f'border-radius: 999px; border: 1.5px solid {T["tp"]}; font-size: 11px; font-weight: 600; '
+            f'color: {T["tp"]};">{ic(I["review"],11,2.2)}Review</span>')
+
+def agentchip(T,name,remote=False):
+    return (f'<span style="display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 7px; '
+            f'background: {T["sunken"]}; font-family: {MONO}; font-size: 11px; color: {T["ag"]};">'
+            + (f'<span style="display: flex; color: {T["ts"]};">{ic(I["plug"],10,2)}</span>' if remote else '')
+            + f'{name}</span>')
+
+def spendbar(T,spent,budget,over=False):
+    frac=min(1.0,spent/budget) if budget else 0
+    return (f'<div style="display: flex; align-items: center; gap: 8px;">'
+            f'<span style="width: 70px; height: 5px; border-radius: 3px; background: {T["sunken"]}; position: relative; '
+            f'overflow: hidden;"><span style="position: absolute; left: 0; top: 0; bottom: 0; width: {int(frac*100)}%; '
+            f'background: {T["deg"] if over else T["ts"]}; border-radius: 3px;"></span></span>'
+            f'<span style="font-family: {MONO}; font-size: 11px; color: {T["deg"] if over else T["ts"]};">'
+            f'${spent:.2f} / ${budget:.0f}</span></div>')
+
+PROJECTS=[
+  dict(id="drey",title="Drey",mode="autonomous",why=None,members=[("drey-dev",False),("collator",False),("devin",True)],
+       open=14,blocked=2,spent=1.84,budget=5,last="4m"),
+  dict(id="metistry",title="Metistry",mode="review",why="owner",members=[("builder",False),("reviewer",False)],
+       open=22,blocked=0,spent=0.62,budget=4,last="18m"),
+  dict(id="fsl-ops",title="FSL ops",mode="review",why="budget",members=[("taskuary",True),("collator",False)],
+       open=6,blocked=1,spent=3.41,budget=3,last="1h"),
+  dict(id="home",title="Home",mode="autonomous",why=None,members=[("collator",False)],
+       open=3,blocked=0,spent=0.04,budget=1,last="2d"),
+]
+
+def projrow(T,p,*,last=False):
+    blocked=(f'<span style="color: {T["deg"]}; font-weight: 600;">{p["blocked"]} blocked</span>'
+             if p["blocked"] else f'<span style="color: {T["tt"]};">none blocked</span>')
+    return (f'<div style="display: grid; grid-template-columns: 170px 170px minmax(0,1fr) 150px 150px 50px; '
+            f'gap: 14px; align-items: center; padding: 11px 16px; {bd_(T,last)}">'
+            f'<div><div style="font-size: 13px; font-weight: 600; color: {T["tp"]};">{p["title"]}</div>'
+            f'<div style="margin-top: 2px;">{mono(p["id"],T["ts"],10.5)}</div></div>'
+            f'<div>{modechip(T,p["mode"],p["why"])}</div>'
+            f'<div style="display: flex; gap: 5px; flex-wrap: wrap;">'
+            + "".join(agentchip(T,n,r) for n,r in p["members"]) + '</div>'
+            f'<div style="font-size: 12px; color: {T["tp"]};">{p["open"]} open &middot; {blocked}</div>'
+            f'{spendbar(T,p["spent"],p["budget"],over=p["why"]=="budget")}'
+            f'<div style="font-size: 11.5px; color: {T["tt"]}; text-align: right;">{p["last"]}</div></div>')
+
+def projlist(T):
+    head=(f'<div style="display: grid; grid-template-columns: 170px 170px minmax(0,1fr) 150px 150px 50px; gap: 14px; '
+          f'padding: 7px 16px; background: {T["sunken"]}; font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em; '
+          f'color: {T["tt"]};"><span>PROJECT</span><span>MODE</span><span>AGENTS</span><span>WORK</span>'
+          f'<span>SPEND TODAY</span><span style="text-align: right;">LAST</span></div>')
+    rows="".join(projrow(T,p,last=i==len(PROJECTS)-1) for i,p in enumerate(PROJECTS))
+    return (f'<div style="flex-grow: 1; min-width: 0; background: {T["bg"]};">'
+            f'<div style="display: flex; align-items: center; gap: 10px; padding: 14px 16px 12px;">'
+            f'<span style="font-size: 17px; font-weight: 600; color: {T["tp"]}; flex-grow: 1;">Projects</span>'
+            f'<span style="font-size: 12px; color: {T["ts"]};">4 projects</span></div>'
+            f'<div style="margin: 0 16px 16px; border: 1px solid {T["border"]}; border-radius: 11px; overflow: hidden;">'
+            f'{head}{rows}</div></div>')
+
+def workwin(T,inner):
+    return (f'<div style="flex-grow: 1; min-width: 0; border: 1px solid {T["bc"]}; border-radius: 14px; '
+            f'overflow: hidden; background: {T["bg"]};">{toolbar(T)}'
+            f'<div style="display: flex; align-items: stretch;">{sidebar8(T,"Work")}{inner}</div></div>')
+
+# ---------- project detail ----------------------------------------------------
+def stat(T,n,label,tone=None):
+    return (f'<div><div style="font-size: 20px; font-weight: 600; color: {tone or T["tp"]};">{n}</div>'
+            f'<div style="font-size: 11.5px; color: {T["ts"]}; margin-top: 1px;">{label}</div></div>')
+
+def memberrow(T,name,kind,extra,*,remote=False,last=False):
+    return (f'<div style="display: flex; align-items: center; gap: 10px; padding: 8px 0; {bd_(T,last)}">'
+            f'{presdot(T,"working" if not remote else "idle")}{agentchip(T,name,remote)}'
+            f'<span style="font-size: 11.5px; color: {T["ts"]};">{kind}</span>'
+            f'<span style="flex-grow: 1;"></span>'
+            f'<span style="font-size: 11.5px; color: {T["ts"]};">{extra}</span></div>')
+
+def projpermissions(T):
+    rows=(resrow(T,res="Knowledge",read=[("Areas/Fsl",True,False,None),("Journal",True,False,None)],
+                 write=[("Areas/Fsl/drey/",True,False,None)])
+          + resrow(T,res="Work",read=[("This project",False,False,None)],
+                   write=[("Update",False,False,None),("Comment",False,False,None),("Dispatch",False,True,None)])
+          + resrow(T,res="Jira",read=[("DREY",False,False,None)],write=[("Comment",False,True,None)],proxied=True,last=True))
+    return (f'<div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">'
+            f'<span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["tt"]};">PERMISSIONS</span>'
+            f'<span style="font-size: 11.5px; color: {T["ts"]};">every member gets these</span>'
+            f'<span style="flex-grow: 1;"></span>{btn(T,"Edit","secondary",I["pencil"])}</div>'
+            + sunk(T,rows))
+
+def projdetail(T,*,why=None):
+    mode="autonomous" if why is None else "review"
+    trip=(f'<div style="margin-top: 11px; background: {T["degq"]}; border-radius: 9px; padding: 9px 12px; display: flex; '
+          f'align-items: center; gap: 9px;"><span style="display: flex; color: {T["deg"]};">{ic(I["warn"],14,2)}</span>'
+          f'<span style="font-size: 12.5px; color: {T["tp"]}; flex-grow: 1;">Went over its <b>$3</b> budget at 2:40 PM. '
+          f'Handoffs between agents now come to you.</span>'
+          f'{btn(T,"Raise Budget","secondary")}</div>') if why=="budget" else ""
+    toggle_lbl="Review mode"
+    head=(f'<div style="padding: 14px 18px 13px; border-bottom: 1px solid {T["border"]};">'
+          f'{crumb(T,["Work","Projects","Drey" if why is None else "FSL ops"])}'
+          f'<div style="display: flex; align-items: center; gap: 11px; margin-top: 8px;">'
+          f'<span style="font-size: 17px; font-weight: 600; color: {T["tp"]};">{"Drey" if why is None else "FSL ops"}</span>'
+          f'{modechip(T,mode,why)}<span style="flex-grow: 1;"></span>'
+          f'<span style="font-size: 12px; color: {T["ts"]};">{toggle_lbl}</span>{toggle(T,mode=="review")}</div>'
+          f'<div style="font-size: 11.5px; color: {T["ts"]}; margin-top: 6px;">'
+          + ("$5 a day &middot; 20 handoffs at once" if why is None else
+             "review since 2:40 PM (over budget) &middot; $3 a day &middot; 20 handoffs at once")
+          + f'</div>{trip}</div>')
+    stats=(f'<div style="display: flex; gap: 34px; padding: 16px 18px; border-bottom: 1px solid {T["border"]};">'
+           + stat(T,"14","open tasks") + stat(T,"2","blocked",T["deg"]) + stat(T,"3","handoffs in flight")
+           + stat(T,"1","queued") + stat(T,"4","open threads") + stat(T,"$1.84","spent today") + '</div>')
+    members=(f'<div><div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">'
+             f'<span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["tt"]};">AGENTS &middot; 3</span>'
+             f'<span style="flex-grow: 1;"></span>{btn(T,"Add Agent","secondary",I["plus"])}</div>'
+             + sunk(T,memberrow(T,"drey-dev","local","+ Areas/Finance")
+                    + memberrow(T,"collator","local","project access only")
+                    + memberrow(T,"devin","connected","project access only",remote=True,last=True))
+             + '</div>')
+    runs=(f'<div><div style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["tt"]}; '
+          f'margin-bottom: 8px;">RECENT RUNS</div>'
+          + sunk(T,"".join(f'<div style="display: flex; align-items: center; gap: 10px; padding: 7px 0; {bd_(T,i==2)}">'
+                           f'{agentchip(T,a)}<span style="font-size: 12px; color: {T["tp"]}; flex-grow: 1;">{d}</span>'
+                           f'<span style="font-family: {MONO}; font-size: 11px; color: {T["ts"]};">{c}</span>'
+                           f'<span style="font-size: 11px; color: {T["tt"]}; width: 30px; text-align: right;">{w}</span></div>'
+                           for i,(a,d,c,w) in enumerate([("drey-dev","Fixed the sync retry, opened PR #212","41&cent;","4m"),
+                                                         ("collator","Summarised the vendor thread","6&cent;","1h"),
+                                                         ("devin","Reviewed PR #209","22&cent;","3h")])))
+          + '</div>')
+    body=(f'<div style="display: grid; grid-template-columns: minmax(0,1.15fr) minmax(0,1fr); gap: 22px; '
+          f'padding: 16px 18px 18px;"><div style="display: flex; flex-direction: column; gap: 18px;">'
+          f'{projpermissions(T)}{members}</div><div>{runs}</div></div>')
+    return (f'<div style="flex-grow: 1; min-width: 0; background: {T["bg"]};">{head}{stats}{body}</div>')
+
+def modeconfirm(T,*,to="autonomous",w=440):
+    if to=="autonomous":
+        title="Switch Drey back to autonomous?"
+        text="Its agents will hand work to each other without you again."
+        go=btn(T,"Switch to Autonomous","dest")
+    else:
+        title="Put Drey in review?"
+        text="3 handoffs in flight will wait for you."
+        go=btn(T,"Put in Review","affirm")
+    return (f'<div style="width: {w}px; background: {T["elevated"]}; border: 1px solid {T["bc"]}; border-radius: 13px; '
+            f'box-shadow: 0 14px 40px rgba(0,0,0,0.22); padding: 18px 18px 15px;">'
+            f'<div style="font-size: 14.5px; font-weight: 600; color: {T["tp"]};">{title}</div>'
+            f'<div style="font-size: 12.5px; color: {T["ts"]}; margin-top: 6px; line-height: 1.5;">{text}</div>'
+            f'<div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px;">'
+            f'{btn(T,"Cancel","ghost")}{go}</div></div>')
+
+def addagent(T,w=440):
+    return (f'<div style="width: {w}px; background: {T["elevated"]}; border: 1px solid {T["bc"]}; border-radius: 13px; '
+            f'box-shadow: 0 14px 40px rgba(0,0,0,0.22); padding: 18px 18px 15px;">'
+            f'<div style="font-size: 14.5px; font-weight: 600; color: {T["tp"]};">Add reviewer to Drey?</div>'
+            f'<div style="font-size: 12.5px; color: {T["ts"]}; margin-top: 6px; line-height: 1.5;">'
+            f'It gets Drey&rsquo;s access: reads <b>Areas/Fsl</b> and <b>Journal</b>, writes <b>Areas/Fsl/drey/</b>, '
+            f'and comments in Jira <b>DREY</b>.</div>'
+            f'<div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px;">'
+            f'{btn(T,"Cancel","ghost")}{btn(T,"Add","affirm",I["plus"])}</div></div>')

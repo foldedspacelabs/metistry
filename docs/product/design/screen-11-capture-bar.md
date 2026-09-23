@@ -14,9 +14,10 @@ same conversation as the window's**.
 
 Two jobs the nav row cannot do, which is what C60 was actually about:
 
-1. **Say something to Metis without losing what you are looking at.** Seconds
-   long, from anywhere, no context switch.
-2. **Let Metis hear a meeting you are in**, and afterwards propose the notes.
+1. **Say something to Metis without losing what you are looking at** — a question,
+   a note, or a to-do. Seconds long, from anywhere, no context switch.
+2. **Let Metis watch and hear what you are doing** — a meeting, or showing how
+   something works — and afterwards propose the notes.
 
 And one thing it must never become: a place where work is read at length. The
 window is for that.
@@ -104,27 +105,78 @@ being wrong about it later.
   its home. *Action item* exists only while there is a transcript to anchor it
   to, carrying `source: meeting:<path>` and a timestamp.
 
-## 5. Starting a session — two lines, then Start
+## 5. Recording — one question, then one more
 
-**Cut from eleven lines to four.** macOS explains its own permissions better than
-we can, in its own words, at the moment it asks — so the sheet no longer rehearses
-them, and the grant table moved to Settings where someone who wants the full answer
-goes. What is left is what only we know:
+**A meeting is not audio.** It is a window and its sound, plus your own voice —
+the owner's correction, 2026-09-22, and the API agrees with him. So the sheet asks
+*what should it watch*, and then *should it hear you*. **Audio comes with the
+target** rather than being a third thing to switch on.
 
 ```
-Listen to this meeting
- ⚭  Zoom                                    the meeting
- 🎙  Your microphone                          your side
- [ Start ]  [ Cancel ]     Stops at 11:30. Nothing is written without you.
+Record
+[ Screen | Window | Audio only ]
+ ▢  Zoom — Vendor review     you picked it
+ ♫  Its audio               comes with the window
+ ───────────────────────────────────────────
+ 🎙  Your microphone          your side only        ( ●)
+ [ Record ]  [ Cancel ]
 ```
 
-**Still one act per sense.** Listening takes the meeting's audio and the microphone
-together, because a conversation is both halves or it is nothing. Sharing a window
-is its own act, its own sheet, its own glyph.
+- **Three targets cover the three things the owner described.** A meeting is
+  *Window* with the mic on. Showing how something works is *Window* or *Screen*
+  with the mic on. A call or an in-person conversation with no screen is *Audio
+  only* — kept because it has no window, and because for audio without video the
+  Core Audio process tap is strictly better: no screen grant, per-process by
+  construction.
+- **It is one API call, not three.** `SCStreamConfiguration.capturesAudio`
+  (macOS 13) yields the audio of whatever the content filter covers, so **the sound
+  is scoped exactly as the picture is** — one selection, one scope.
+  `captureMicrophone` (macOS 15) puts the owner's own voice in the same stream,
+  separately attributable. Below 15 the microphone is a second session, and the
+  app's floor is 14.0, so that fallback is real.
+- **Everything explanatory is gone.** No *stops at 11:30*, no *nothing is written
+  without you*, no permissions rehearsal. A **Record** button implies a stop, the
+  bar carries it, and macOS asks for what it needs when it needs it.
+- **Text is left-aligned throughout** — the label, then its quiet qualifier beside
+  it (*your side only*, *comes with the window*) — never a column of right-aligned
+  fragments pretending to be a table.
 
-**The screen sheet keeps exactly one honest line** — *screen access is not
-per-window* — because C71 means the interface may not let the picker imply a fence
-the OS does not provide. Four words and a chip; it does not need a paragraph.
+### 5.1 Jotting during a session
+
+**One field, three destinations: Ask · Note · To-do.** A thought during a meeting
+is a note, an obligation is a to-do, a question is a question, and none of them
+should cost the owner the meeting. The mode pills are the whole control; `⌘⌥N` and
+`⌘⌥T` reach the field already in the right mode without opening the panel.
+
+- **What is jotted is shown back, timestamped** — *this session · 2 notes, 1 to-do*,
+  expandable to the lines. That is the trust mechanism: a note you cannot see is a
+  note you will retype into your own app, and then the bar has cost more than it
+  saved.
+- **The timestamp is the anchor.** Each jot carries the session and the second it
+  was made, so afterwards a note sits beside what was being said when it was
+  written, and a to-do arrives as a task-line proposal with
+  `source: meeting:<path>`.
+- **They ride the same proposal** as the draft notes and the transcript — one
+  arrival in Needs You, not three.
+
+### 5.2 The phase order this inverts
+
+PR 253 recommended **audio first** and **screen not at all for now**, because audio
+is the part with kernel-enforced scoping and screen was "the part the owner himself
+was unsure he wanted". The owner has since said a meeting **is** screen plus audio,
+which means **the headline act needs the grant with the weaker scope story**.
+
+What the design can carry: the picker means the window is chosen every session; the
+helper has one filter path; the rail shows a display glyph whenever a picture is
+being taken; and *screen access is not per-window* is said once, in Settings.
+
+What it cannot carry: the OS will not fence that grant for us. Someone who wants
+that guarantee uses **Audio only**, which is genuinely per-process — so the option
+earns its place twice.
+
+**The sequencing question is the owner's:** ship *Window + audio + mic* first, which
+is what he asked for and what makes meetings work — or ship *Audio only* first,
+which needs no screen grant and proves the whole downstream path with less surface.
 
 ## 6. The premise the brief got wrong
 

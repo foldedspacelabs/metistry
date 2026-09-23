@@ -3935,3 +3935,220 @@ def capturesettings(T,w=520):
             + btn(T,"Purge Now","dest",I["x"])
             + f'<span style="font-size: 11.5px; color: {T["ts"]};">14 minutes of transcript right now</span>'
             + '</div></div></div>')
+
+
+# ============ RUN DETAIL — a session, in full (2026-09-22) =============
+# Screen 12. One page for any run: a routine, an agent, or a chat. The working
+# conversation leads; what it cost sits beside it; what Metis took from it sits
+# under that. The conversation comes from a session archive the build does not
+# have yet (C78) — designed against the right system, per the owner's ruling.
+
+def crumb(T,parts):
+    out=[]
+    for i,pt in enumerate(parts):
+        last=i==len(parts)-1
+        out.append(f'<span style="font-size: 12px; color: {T["tp"] if last else T["acc"]}; '
+                   f'font-weight: {600 if last else 400};">{pt}</span>')
+    sep=f'<span style="color: {T["tt"]}; font-size: 11px;">&#9656;</span>'
+    return f'<span style="display: inline-flex; align-items: center; gap: 8px;">{sep.join(out)}</span>'
+
+def runheader(T,*,crumbs,title,when,ok=True,why=None):
+    state=(pill(T,"ran clean",T["ok"],T["okq"]) if ok else pill(T,"failed",T["deg"],T["degq"]))
+    err=(f'<div style="margin-top: 11px; background: {T["degq"]}; border-radius: 9px; padding: 10px 13px; '
+         f'font-size: 12.5px; color: {T["tp"]}; line-height: 1.5;">{why}</div>') if why else ""
+    return (f'<div style="padding: 14px 18px 13px; border-bottom: 1px solid {T["border"]};">'
+            f'{crumb(T,crumbs)}'
+            f'<div style="display: flex; align-items: center; gap: 11px; margin-top: 8px;">'
+            f'<span style="font-size: 17px; font-weight: 600; color: {T["tp"]};">{title}</span>{state}'
+            f'<span style="flex-grow: 1;"></span>'
+            f'<span style="font-size: 12px; color: {T["ts"]};">{when}</span></div>{err}</div>')
+
+# ---------- the working conversation -----------------------------------------
+def layerrow(T,label,who,text,*,open_=False):
+    body=(f'<div style="font-size: 12px; color: {T["ts"]}; line-height: 1.6; margin-top: 7px;">{text}</div>'
+          if open_ else "")
+    return (f'<div style="padding: 8px 0; border-bottom: 1px solid {T["border"]};">'
+            f'<div style="display: flex; align-items: center; gap: 8px;">'
+            f'<span style="display: flex; color: {T["tt"]};">{ic(I["chevd"] if open_ else I["chevr"],12,2.2)}</span>'
+            f'<span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["tt"]};">{label}</span>'
+            f'<span style="font-size: 12px; color: {T["acc"]}; font-weight: 600;">{who}</span></div>{body}</div>')
+
+def ownturn(T,label,text,when):
+    return (f'<div>'
+            f'<div style="display: flex; align-items: baseline; gap: 8px; margin-bottom: 5px;">'
+            f'<span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["ts"]};">{label}</span>'
+            f'<span style="font-family: {MONO}; font-size: 10.5px; color: {T["tt"]};">{when}</span></div>'
+            f'<div style="background: {T["accq"]}; border-radius: 11px; padding: 10px 13px; font-size: 13px; '
+            f'color: {T["tp"]}; line-height: 1.55;">{text}</div></div>')
+
+def agentturn(T,text,when):
+    return (f'<div style="border-left: 2px solid {T["ag"]}; padding-left: 14px;">'
+            f'<div style="display: flex; align-items: center; gap: 7px; margin-bottom: 5px;">'
+            f'<span style="display: flex; color: {T["ag"]};">{ic(I["spark"],12,2.2)}</span>'
+            f'<span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["ag"]};">METIS</span>'
+            f'<span style="font-family: {MONO}; font-size: 10.5px; color: {T["tt"]};">{when}</span></div>'
+            f'<div style="font-family: {SERIF}; font-size: 13.5px; color: {T["tp"]}; line-height: 1.62;">{text}</div></div>')
+
+def toolcall(T,*,name,args,result,ms,ok=True,open_=True,error=None):
+    tone=T["ts"] if ok else T["deg"]
+    head=(f'<div style="display: flex; align-items: center; gap: 8px;">'
+          f'<span style="display: flex; color: {T["tt"]};">{ic(I["chevd"] if open_ else I["chevr"],12,2.2)}</span>'
+          f'{mono(name,T["tp"],12)}'
+          f'<span style="flex-grow: 1;"></span>'
+          + ('' if ok else f'<span style="font-size: 11px; font-weight: 600; color: {T["deg"]};">failed</span>')
+          + f'<span style="font-family: {MONO}; font-size: 10.5px; color: {tone};">{ms}</span></div>')
+    if not open_:
+        return (f'<div style="margin-left: 16px; background: {T["agq"]}; border-radius: 9px; padding: 8px 12px;">'
+                f'{head}</div>')
+    res=(f'<div style="font-size: 12px; color: {T["deg"]}; line-height: 1.5;">{error}</div>' if error else
+         f'<div style="font-family: {MONO}; font-size: 11px; color: {T["ts"]}; line-height: 1.55; '
+         f'white-space: pre-wrap;">{result}</div>')
+    return (f'<div style="margin-left: 16px; background: {T["agq"] if ok else T["degq"]}; border-radius: 9px; '
+            f'padding: 9px 12px;">{head}'
+            f'<div style="margin-top: 8px; display: grid; grid-template-columns: 58px minmax(0,1fr); gap: 5px 10px;">'
+            f'<span style="font-size: 10px; font-weight: 700; letter-spacing: 0.07em; color: {T["tt"]}; '
+            f'padding-top: 2px;">ASKED</span>'
+            f'<span style="font-family: {MONO}; font-size: 11px; color: {T["tp"]}; line-height: 1.55;">{args}</span>'
+            f'<span style="font-size: 10px; font-weight: 700; letter-spacing: 0.07em; color: {T["tt"]}; '
+            f'padding-top: 2px;">GOT</span>{res}</div></div>')
+
+def sessionpane(T,*,failed=False,w=None):
+    wd=f"width: {w}px;" if w else "flex-grow: 1; min-width: 0;"
+    layers=(f'<div style="margin-bottom: 16px;">'
+            + layerrow(T,"DEFINITION","collator","")
+            + layerrow(T,"TASK","morning brief",
+                       "Read yesterday&rsquo;s journal and today&rsquo;s calendar. Write the brief as a table: "
+                       "what is on, what moved, what needs me. Cite the file every line came from.",open_=True)
+            + '</div>')
+    calls=(toolcall(T,name="calendar.events",args='{ "day": "2026-09-22" }',
+                    result='4 events · first at 09:15 "Standup" · last at 15:00 "Vendor review"',ms="0.4s",open_=False)
+           + toolcall(T,name="knowledge.read",args='{ "path": "Journal/2026-09-21.md" }',
+                      result='1,204 words · 3 open loops · mentions "lease comps" twice',ms="0.2s")
+           + (toolcall(T,name="knowledge.read",args='{ "path": "Areas/Finance/runway.md" }',result="",ms="0.1s",
+                       ok=False,error="Refused: <b>Areas/Finance</b> is not in this agent&rsquo;s read grant.")
+              if failed else
+              toolcall(T,name="work.list",args='{ "status": "open", "due_before": "2026-09-24" }',
+                       result="7 tasks · 2 due tomorrow · #418 blocked",ms="0.3s",open_=False)))
+    reply=(agentturn(T,"I could not read <b>Areas/Finance</b>, so the runway line is left out rather than guessed. "
+                       "Everything else is in the brief. Want me to ask for access to that folder?","6:03:41")
+           if failed else
+           agentturn(T,"Four things on today. The lease comparables are the one that moved: they came back "
+                       "<b>4% under</b> his number. #418 is still blocked on the vendor terms. Brief written to "
+                       "<b>Journal/2026-09-22.md</b>.","6:03:12"))
+    out=(f'<div style="display: flex; align-items: center; gap: 9px; margin-top: 4px;">'
+         + btn(T,"Open The Brief","secondary",I["note"]) + btn(T,"Continue In Chat","ghost",I["chat"])
+         + f'<span style="flex-grow: 1;"></span>{thumbs(T)}</div>')
+    return (f'<div style="{wd} padding: 16px 18px 18px;">{layers}'
+            f'<div style="display: flex; flex-direction: column; gap: 12px;">'
+            + ownturn(T,"TASK &middot; MORNING BRIEF","Write today&rsquo;s brief.","6:02:00")
+            + calls + reply + '</div>' + out + '</div>')
+
+# ---------- the side column: what it cost, what it called, what it taught -------
+def factgrid(T):
+    cell=lambda k,v,s=None:(f'<div><div style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em; '
+                            f'color: {T["tt"]};">{k}</div>'
+                            f'<div style="font-size: 13.5px; color: {T["tp"]}; margin-top: 3px;">{v}</div>'
+                            + (f'<div style="font-size: 11px; color: {T["ts"]}; margin-top: 1px;">{s}</div>' if s else '')
+                            + '</div>')
+    return (f'<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px 16px;">'
+            + cell("SERVED BY","sonnet","anthropic")
+            + cell("TOOK","1m 12s","6:02:00 &ndash; 6:03:12")
+            + cell("TOKENS","18.4k in &middot; 1.1k out","71% from cache")
+            + cell("COST","2.1&cent;","") + '</div>')
+
+def seqrow(T,name,ms,frac,*,ok=True,last=False):
+    bar=T["ts"] if ok else T["deg"]
+    return (f'<div style="display: grid; grid-template-columns: minmax(0,1fr) 92px 38px; gap: 9px; align-items: center; '
+            f'padding: 6px 0; {bd_(T,last)}">'
+            f'{mono(name,T["tp"] if ok else T["deg"],11.5)}'
+            f'<span style="height: 5px; border-radius: 3px; background: {T["sunken"]}; position: relative; overflow: hidden;">'
+            f'<span style="position: absolute; left: 0; top: 0; bottom: 0; width: {int(frac*100)}%; '
+            f'background: {bar}; border-radius: 3px;"></span></span>'
+            f'<span style="font-family: {MONO}; font-size: 10.5px; color: {T["ts"]}; text-align: right;">{ms}</span></div>')
+
+def toolsequence(T,*,failed=False):
+    rows=[("calendar.events","0.4s",1.0,True),("knowledge.read","0.2s",0.5,True)]
+    rows.append(("knowledge.read","0.1s",0.25,False) if failed else ("work.list","0.3s",0.75,True))
+    return sunk(T,"".join(seqrow(T,n,m,f,ok=o,last=i==len(rows)-1) for i,(n,m,f,o) in enumerate(rows)))
+
+def learnrow(T,*,kind,target,text,status,last=False):
+    tone={"waiting":(T["ts"],"In Needs You"),"accepted":(T["ok"],"Accepted"),"declined":(T["tt"],"Declined")}[status]
+    g={"Preference":I["person"],"Profile":I["person"],"Lesson":I["spark"],"Knowledge":I["know"]}[kind]
+    return (f'<div style="padding: 9px 0; {bd_(T,last)}">'
+            f'<div style="display: flex; align-items: center; gap: 7px;">'
+            f'<span style="display: flex; color: {T["ag"]};">{ic(g,13,1.9)}</span>'
+            f'<span style="font-size: 11.5px; font-weight: 600; color: {T["tp"]};">{kind}</span>'
+            f'{mono(target,T["ts"],10.5)}<span style="flex-grow: 1;"></span>'
+            f'<span style="font-size: 11px; color: {tone[0]}; font-weight: 600;">{tone[1]}</span></div>'
+            f'<div style="font-family: {SERIF}; font-size: 12.5px; color: {T["tp"]}; line-height: 1.5; '
+            f'margin-top: 5px; padding-left: 20px;">{text}</div></div>')
+
+def learned(T,*,failed=False,chat=False):
+    if chat:
+        rows=(learnrow(T,kind="Preference",target="Me/Working Style.md",
+                       text="&ldquo;Lead with the number, then the reason.&rdquo;",status="waiting")
+              + learnrow(T,kind="Profile",target="Me/profile.md",text="standup_time: 09:15",status="accepted")
+              + learnrow(T,kind="Knowledge",target="Areas/Fsl/vendors.md",
+                         text="Kessler moved to net-45 and dropped the volume tier.",status="waiting",last=True))
+    elif failed:
+        rows=(learnrow(T,kind="Lesson",target="agents/collator",
+                       text="Ask for Areas/Finance before the brief runs, not after it fails.",status="waiting",last=True))
+    else:
+        rows=(learnrow(T,kind="Lesson",target="routines/morning-brief",
+                       text="You opened the brief and went straight to #418 &mdash; lead with what is blocked.",
+                       status="waiting")
+              + learnrow(T,kind="Knowledge",target="Areas/Ops/lease.md",
+                         text="Comparables came back 4% under his number.",status="accepted",last=True))
+    return sunk(T,rows)
+
+def sidecol(T,*,failed=False,chat=False,w=340):
+    lbl=lambda t:(f'<div style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["tt"]}; '
+                  f'margin-bottom: 8px;">{t}</div>')
+    return (f'<div style="width: {w}px; flex-shrink: 0; border-left: 1px solid {T["border"]}; '
+            f'background: {T["surface"]}; padding: 16px 16px 18px; display: flex; flex-direction: column; gap: 18px;">'
+            f'<div>{lbl("WHAT METIS TOOK FROM THIS")}{learned(T,failed=failed,chat=chat)}</div>'
+            f'<div>{lbl("THE RUN")}{factgrid(T)}</div>'
+            + ('' if chat else f'<div>{lbl("TOOL CALLS &middot; 3")}{toolsequence(T,failed=failed)}</div>')
+            + '</div>')
+
+def rundetail(T,*,failed=False):
+    why=("<b>knowledge.read</b> was refused: <b>Areas/Finance</b> is not in collator&rsquo;s read grant. The brief "
+         "was written without the runway line.") if failed else None
+    return (f'<div style="border: 1px solid {T["bc"]}; border-radius: 14px; overflow: hidden; background: {T["bg"]}; '
+            f'flex-grow: 1; min-width: 0;">{toolbar(T)}'
+            f'<div style="display: flex; align-items: stretch;">{sidebar8(T,"Routines")}'
+            f'<div style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column;">'
+            + runheader(T,crumbs=["Routines","Morning brief","Today, 6:02 AM"],title="Morning brief",
+                        when="Tuesday 22 September &middot; 6:02 AM",ok=not failed,why=why)
+            + f'<div style="display: flex; align-items: stretch; flex-grow: 1;">'
+            + sessionpane(T,failed=failed) + sidecol(T,failed=failed) + '</div></div></div></div>')
+
+def chatsession(T,w=None):
+    turns=(ownturn(T,"YOU","Lead with the number next time &mdash; I had to hunt for it.","2:14 PM")
+           + agentturn(T,"Noted. The vendor terms: <b>net-45</b>, and Kessler dropped the volume tier, which is the "
+                         "change that matters for March.","2:14 PM"))
+    return (f'<div style="border: 1px solid {T["bc"]}; border-radius: 14px; overflow: hidden; background: {T["bg"]}; '
+            f'flex-grow: 1; min-width: 0;">'
+            + runheader(T,crumbs=["Activity","Chat &middot; Tuesday 2:14 PM"],title="Chat",
+                        when="Tuesday 22 September &middot; 2:14 PM")
+            + f'<div style="display: flex; align-items: stretch;">'
+            + f'<div style="flex-grow: 1; min-width: 0; padding: 16px 18px 18px; display: flex; flex-direction: column; '
+              f'gap: 12px;">{turns}'
+            + f'<div style="display: flex; gap: 9px; margin-top: 4px;">{btn(T,"Open In Chat","secondary",I["chat"])}</div></div>'
+            + sidecol(T,chat=True) + '</div></div>')
+
+def archivesettings(T,w=500):
+    sel=(f'<span style="font-size: 12px; color: {T["tp"]};">1 year &nbsp;'
+         f'<span style="color: {T["ts"]};">&#9662;</span></span>')
+    return (f'<div style="width: {w}px; background: {T["bg"]}; border: 1px solid {T["bc"]}; border-radius: 12px; '
+            f'overflow: hidden;">'
+            f'<div style="padding: 13px 16px; border-bottom: 1px solid {T["border"]};">'
+            f'<span style="font-size: 14.5px; font-weight: 600; color: {T["tp"]};">Sessions</span></div>'
+            f'<div style="padding: 4px 16px 15px;">'
+            + setrow(T,label="Keep sessions",control=sel)
+            + setrow(T,label="Let Metis learn from them",note="What it learns comes to you as a proposal",
+                     control=toggle(T,True),last=True)
+            + f'<div style="display: flex; align-items: center; gap: 9px; margin-top: 12px;">'
+            + btn(T,"Purge Now","dest",I["x"])
+            + f'<span style="font-size: 11.5px; color: {T["ts"]};">412 sessions, oldest 3 months</span></div>'
+            + '</div></div>')

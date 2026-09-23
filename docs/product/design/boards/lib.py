@@ -4152,3 +4152,178 @@ def archivesettings(T,w=500):
             + btn(T,"Purge Now","dest",I["x"])
             + f'<span style="font-size: 11.5px; color: {T["ts"]};">38 sessions, oldest 29 days</span></div>'
             + '</div></div>')
+
+
+# ============ NEEDS YOU, AS A QUEUE — round E (2026-09-22) =============
+# Owner's ruling: access requests were far too verbose. Keep the card to what
+# it asks and three answers; everything else behind a disclosure, and a help
+# link for the rules. Seven request types (action added, C80). A meeting
+# arrives as one grouped card (C81).
+
+def disclose(T,label,inner,*,open_=False,meta=None):
+    head=(f'<div style="display: flex; align-items: center; gap: 7px; padding: 7px 0;">'
+          f'<span style="display: flex; color: {T["tt"]};">{ic(I["chevd"] if open_ else I["chevr"],12,2.2)}</span>'
+          f'<span style="font-size: 12px; color: {T["ts"]};">{label}</span>'
+          + (f'<span style="flex-grow: 1;"></span><span style="font-size: 11px; color: {T["tt"]};">{meta}</span>' if meta else '')
+          + '</div>')
+    return head + (f'<div style="padding: 0 0 8px 19px;">{inner}</div>' if open_ else '')
+
+def beforeafter(T,now,after,*,lost=None):
+    col=lambda k,v,c:(f'<div style="flex: 1; min-width: 0;">'
+                      f'<div style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em; color: {T["tt"]};">{k}</div>'
+                      f'<div style="font-size: 12px; color: {c}; margin-top: 4px; line-height: 1.5;">{v}</div></div>')
+    return (f'<div style="display: flex; gap: 14px; background: {T["sunken"]}; border-radius: 9px; padding: 10px 12px;">'
+            + col("NOW",now,T["ts"])
+            + f'<span style="display: flex; align-items: center; color: {T["tt"]};">{ic(I["send"],14,1.9)}</span>'
+            + col("AFTER",after,T["tp"]) + '</div>'
+            + (f'<div style="font-size: 11.5px; color: {T["ts"]}; margin-top: 6px;">{lost}</div>' if lost else ''))
+
+def helplink(T):
+    return (f'<span title="How access works" style="display: inline-flex; align-items: center; justify-content: center; '
+            f'width: 20px; height: 20px; border-radius: 50%; border: 1px solid {T["bc"]}; font-size: 11px; '
+            f'font-weight: 600; color: {T["ts"]};">?</span>')
+
+def reqhead(T,glyph,typ,agent,when,trust="internal",extra=""):
+    return (f'<div style="display: flex; align-items: center; gap: 8px;">'
+            f'<span style="display: flex; color: {T["ts"]};">{ic(glyph,14,1.9)}</span>'
+            f'<span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em; color: {T["ts"]};">{typ}</span>'
+            f'{extra}<span style="flex-grow: 1;"></span>'
+            f'{mono(agent,T["ag"],11)}{trustmark(T,trust)}'
+            f'<span style="font-size: 11px; color: {T["tt"]};">{when}</span></div>')
+
+def accesscard2(T,*,state="pending",width=None,agent="drey-dev",trust="internal",when="12m",
+                asked="Areas/Finance",open_=None):
+    w=f"width: {width}px;" if width else ""
+    again=(f'<span style="font-size: 10.5px; color: {T["ts"]}; border: 1px solid {T["bc"]}; border-radius: 999px; '
+           f'padding: 1px 7px;">asked again</span>') if state=="escalated" else ""
+    head=reqhead(T,I["key"],"ACCESS",agent,when,trust,again)
+    title=(f'<div style="font-size: 14.5px; font-weight: 600; color: {T["tp"]}; margin-top: 9px;">'
+           f'Read {mono(asked if state!="revising" else "Areas/Finance/Vendors",T["tp"],13.5)}</div>')
+    acts=(f'<div style="display: flex; align-items: center; gap: 7px; margin-top: 12px;">'
+          f'{btn(T,"Approve","affirm",I["check"])}{btn(T,"Revise","secondary",I["pencil"])}'
+          f'{btn(T,"Decline","dest",I["x"])}<span style="flex-grow: 1;"></span>'
+          f'{btn(T,"","ghost",I["later"],icon_only=True,title="Later")}{helplink(T)}</div>')
+    why=(f'<div style="background: {T["agq"]}; border-radius: 8px; padding: 8px 10px; font-size: 12px; '
+         f'color: {T["tp"]}; line-height: 1.5;">To reconcile the vendor invoices against the March renewal.</div>')
+    ba=beforeafter(T,"Titles in every folder","Reads <b>"+asked+"</b>",lost="Titles outside its folders stop.")
+    body=head+title
+    if state=="refused":
+        body+=(f'<div style="display: flex; align-items: center; gap: 8px; margin-top: 10px; background: {T["degq"]}; '
+               f'border-radius: 8px; padding: 8px 10px;">'
+               f'<span style="display: flex; color: {T["deg"]};">{ic(I["warn"],14,2)}</span>'
+               f'<span style="font-size: 12px; color: {T["tp"]}; flex-grow: 1;">Set in its manifest, not grantable here.</span>'
+               f'<span style="font-size: 11.5px; font-weight: 600; color: {T["acc"]};">Edit &rarr;</span></div>')
+        return (f'<div style="{w} background: {T["surface"]}; border: 1px solid {T["border"]}; border-radius: 12px; '
+                f'padding: 14px 15px; box-sizing: border-box;">{body}'
+                f'<div style="display: flex; gap: 7px; margin-top: 11px;">{btn(T,"Decline","dest",I["x"])}'
+                f'<span style="flex-grow: 1;"></span>{helplink(T)}</div></div>')
+    if state=="revising":
+        tree="".join(f'<div style="display: flex; align-items: center; gap: 8px; padding: 4px 0 4px {8+d*14}px; '
+                     f'border-radius: 6px; background: {T["accq"] if s else "transparent"};">'
+                     f'<span style="width: 13px; height: 13px; border-radius: 50%; border: 1.5px solid '
+                     f'{T["acc"] if s else T["bc"]}; display: inline-flex; align-items: center; justify-content: center;">'
+                     + (f'<span style="width: 6px; height: 6px; border-radius: 50%; background: {T["acc"]};"></span>' if s else '')
+                     + f'</span>{mono(p,T["tp"] if s else T["ts"],11.5)}</div>'
+                     for p,d,s in (("Areas/Finance",0,False),("Vendors",1,True),("Payroll",1,False)))
+        body+=f'<div style="margin-top: 10px; background: {T["sunken"]}; border-radius: 9px; padding: 6px;">{tree}</div>'
+        acts=(f'<div style="display: flex; align-items: center; gap: 7px; margin-top: 12px;">'
+              f'{btn(T,"Approve Vendors","affirm",I["check"])}{btn(T,"Cancel","ghost")}'
+              f'<span style="flex-grow: 1;"></span>{helplink(T)}</div>')
+        return (f'<div style="{w} background: {T["surface"]}; border: 1px solid {T["border"]}; border-radius: 12px; '
+                f'padding: 14px 15px; box-sizing: border-box;">{body}{acts}</div>')
+    op = open_ or ()
+    body+=acts
+    body+=(f'<div style="margin-top: 8px; border-top: 1px solid {T["border"]}; padding-top: 2px;">'
+           + disclose(T,"Why it&rsquo;s asking",why,open_="why" in op)
+           + disclose(T,"Before and after",ba,open_="ba" in op)
+           + (disclose(T,"Declined before",f'<div style="font-size: 12px; color: {T["ts"]};">On the 18th, request #311.</div>',
+                       open_="prior" in op) if state=="escalated" else "")
+           + '</div>')
+    return (f'<div style="{w} background: {T["surface"]}; border: 1px solid {T["border"]}; border-radius: 12px; '
+            f'padding: 14px 15px; box-sizing: border-box;">{body}</div>')
+
+# ---------- the meeting, as one grouped card ---------------------------------
+def todoline(T,text,*,state=None,last=False):
+    mark={"ok":(I["check"],T["ok"],"Accepted"),"answered":(I["clock"],T["ts"],"Answered on your phone")}.get(state)
+    ctl=(f'<span style="display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: {mark[1]};">'
+         f'{ic(mark[0],12,2.2)}{mark[2]}</span>' if mark else
+         f'<span style="display: inline-flex; gap: 2px;">'
+         + "".join(f'<span style="display: flex; padding: 3px; border-radius: 6px; color: {c};">{ic(g,14,2)}</span>'
+                   for g,c in ((I["check"],T["ts"]),(I["pencil"],T["ts"]),(I["x"],T["ts"]))) + '</span>')
+    return (f'<div style="display: flex; align-items: center; gap: 9px; padding: 6px 0; {bd_(T,last)}">'
+            f'<span style="display: flex; color: {T["ag"]};">{ic(I["todo"],13,1.9)}</span>'
+            f'<span style="font-size: 12.5px; color: {T["tp"]}; flex-grow: 1;">{text}</span>{ctl}</div>')
+
+TODOS=["Send Kessler the revised volume numbers","Check whether net-45 applies to the Q4 order",
+       "Put the March renewal decision on Friday&rsquo;s agenda","Ask Orlin for their updated terms"]
+
+def meetingcard(T,*,expanded=True,result=False,width=None):
+    w=f"width: {width}px;" if width else ""
+    head=reqhead(T,I["mic"],"MEETING","metis","12m")
+    title=(f'<div style="font-size: 14.5px; font-weight: 600; color: {T["tp"]}; margin-top: 9px;">Vendor review</div>'
+           f'<div style="font-size: 12px; color: {T["ts"]}; margin-top: 2px;">Notes and 4 to-dos &middot; 42 min</div>')
+    if not expanded:
+        return (f'<div style="{w} background: {T["surface"]}; border: 1px solid {T["border"]}; border-radius: 12px; '
+                f'padding: 14px 15px; box-sizing: border-box;">{head}{title}'
+                f'<div style="display: flex; gap: 7px; margin-top: 12px;">{btn(T,"Accept All","affirm",I["check"])}'
+                f'{btn(T,"Review","secondary")}</div></div>')
+    note=(f'<div style="border-left: 2px solid {T["ag"]}; padding-left: 11px; font-family: {SERIF}; font-size: 12.5px; '
+          f'color: {T["tp"]}; line-height: 1.55;">Kessler confirmed net-45 and dropped the volume tier. The March '
+          f'renewal is no longer the cheapest option; Orlin may undercut it.</div>'
+          f'<div style="display: flex; align-items: center; gap: 7px; margin-top: 9px;">'
+          + (f'<span style="display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: {T["ok"]};">'
+             f'{ic(I["check"],12,2.2)}Accepted</span>' if result else
+             f'{btn(T,"Accept","affirm",I["check"])}{btn(T,"Edit","ghost",I["pencil"])}')
+          + f'<span style="flex-grow: 1;"></span>{mono("Journal/Meetings/2026-09-22-vendor-review.md",T["ts"],10.5)}</div>')
+    states=(["ok","ok","answered","ok"] if result else [None]*4)
+    todos="".join(todoline(T,t,state=s,last=i==3) for i,(t,s) in enumerate(zip(TODOS,states)))
+    yours=(f'<div style="font-size: 12px; color: {T["ts"]}; line-height: 1.6;">'
+           f'<b style="color: {T["tp"]};">2 notes, 1 to-do</b> &mdash; already saved, and included in the notes.</div>')
+    band=(f'<div style="background: {T["sunken"]}; border-radius: 9px; padding: 9px 11px; margin-bottom: 10px; '
+          f'display: flex; align-items: center; gap: 9px;">'
+          f'<span style="display: flex; color: {T["ok"]};">{ic(I["check"],14,2.2)}</span>'
+          f'<span style="font-size: 12.5px; color: {T["tp"]}; flex-grow: 1;"><b>4 of 5 accepted.</b> One was already '
+          f'answered on your phone.</span></div>') if result else ""
+    lbl=lambda t,extra="":(f'<div style="display: flex; align-items: center; gap: 8px; margin: 12px 0 6px;">'
+                           f'<span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["tt"]};">{t}</span>'
+                           f'<span style="flex-grow: 1;"></span>{extra}</div>')
+    foot=("" if result else
+          f'<div style="display: flex; gap: 7px; margin-top: 13px; padding-top: 12px; border-top: 1px solid {T["border"]};">'
+          f'{btn(T,"Accept All","affirm",I["check"])}{btn(T,"Decline All","ghost")}'
+          f'<span style="flex-grow: 1;"></span>'
+          f'<span style="font-size: 11.5px; font-weight: 600; color: {T["acc"]}; align-self: center;">Open the session &rarr;</span></div>')
+    return (f'<div style="{w} background: {T["surface"]}; border: 1px solid {T["border"]}; border-radius: 12px; '
+            f'padding: 14px 15px; box-sizing: border-box;">{head}{title}'
+            f'<div style="margin-top: 12px;">{band}</div>'
+            + lbl("NOTES") + note
+            + lbl("TO-DOS &middot; 4") + sunk(T,todos)
+            + lbl("YOURS") + yours
+            + disclose(T,"Transcript",'',meta="42 min &middot; kept 30 days")
+            + foot + '</div>')
+
+# ---------- the panel, seven types --------------------------------------------
+def panel3(T,w=400):
+    chips=[("All",True),("Meetings",False),("Access",False),("Actions",False),("Notes",False)]
+    head=(f'<div style="padding: 14px 16px; border-bottom: 1px solid {T["border"]};">'
+          f'<div style="display: flex; align-items: baseline; gap: 8px;">'
+          f'<span style="font-size: 13px; font-weight: 600; color: {T["tp"]};">Needs You</span>'
+          f'<span style="font-size: 12px; color: {T["ts"]};">4 waiting</span></div>'
+          f'<div style="display: flex; gap: 6px; margin-top: 11px; flex-wrap: wrap;">'
+          + "".join(f'<span style="padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 500; '
+                    f'background: {T["accq"] if s else "transparent"}; color: {T["acc"] if s else T["ts"]}; '
+                    f'border: 1px solid {"transparent" if s else T["bc"]};">{t}</span>' for t,s in chips)
+          + '</div></div>')
+    action=(f'<div style="background: {T["surface"]}; border: 1px solid {T["border"]}; border-radius: 12px; '
+            f'padding: 14px 15px;">{reqhead(T,I["work"],"ACTION","drey-dev","40m")}'
+            f'<div style="font-size: 14.5px; font-weight: 600; color: {T["tp"]}; margin-top: 9px;">Comment on #418</div>'
+            f'<div style="display: flex; gap: 7px; margin-top: 12px;">{btn(T,"Approve","affirm",I["check"])}'
+            f'{btn(T,"Revise","secondary",I["pencil"])}{btn(T,"Decline","dest",I["x"])}</div></div>')
+    body=(f'<div style="padding: 12px; display: flex; flex-direction: column; gap: 10px; background: {T["bg"]};">'
+          + grouplabel(T,"MEETINGS","1") + meetingcard(T,expanded=False)
+          + grouplabel(T,"ACCESS","1") + accesscard2(T)
+          + grouplabel(T,"ACTIONS","1") + action + '</div>')
+    foot=(f'<div style="padding: 11px 16px; border-top: 1px solid {T["border"]};">'
+          f'<span style="font-size: 12px; font-weight: 600; color: {T["acc"]};">Show all 4 &rarr;</span></div>')
+    return (f'<div style="width: {w}px; background: {T["elevated"]}; border: 1px solid {T["bc"]}; border-radius: 14px; '
+            f'box-shadow: 0 10px 34px rgba(26,24,21,0.16); overflow: hidden; display: flex; flex-direction: column; '
+            f'flex-shrink: 0;">{head}{body}{foot}</div>')

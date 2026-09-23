@@ -270,3 +270,58 @@ that looks like a decision is the lie P5 forbids.
 | durability across a restart | `agent_grant_overrides` (migration 0023) |
 | the tier trade | **derived** — nothing flags it (C41) |
 | the vault tree under the asked prefix | **nothing** — the control needs one to offer a narrower path |
+
+## 10. Second pass — concise access, seven types, the meeting (2026-09-22)
+
+### 10.1 The access card is what it asks and three answers
+
+Ruled 2026-09-22: the card was far too verbose. Now:
+
+```
+🔑 ACCESS                         drey-dev · 12m
+Read Areas/Finance
+[Approve] [Revise] [Decline]          [later] [?]
+▸ Why it's asking
+▸ Before and after
+```
+
+- **Everything else is a disclosure.** *Why it's asking* (the agent's reason, on
+  the agent wash), *Before and after* (now → after, and one line on what stops),
+  and *Declined before* on a re-ask.
+- **Asked again is a chip**, not a paragraph.
+- **The rules live behind `?`** — a help page, not the card.
+- **Revising** is the prefix tree and one button, *Approve Vendors*.
+- **Can't be granted** is one line — *set in its manifest, not grantable here* —
+  with *Edit →* and Decline.
+
+§9's rules stand (C40–C42); only their explanation moved off the card.
+
+### 10.2 Seven types
+
+`action` becomes the seventh word the owner reads (C80): **question · access ·
+action · improvement · note · report · review**. Chips show only the types that
+are present.
+
+### 10.3 A meeting is one card
+
+```
+🎙 MEETING                          metis · 12m
+Vendor review
+Notes and 4 to-dos · 42 min
+NOTES     ┃ Kessler confirmed net-45 …      [Accept] [Edit]
+TO-DOS · 4  ☐ Send Kessler the revised …     ✓ ✎ ✕
+YOURS     2 notes, 1 to-do — already saved, and included in the notes.
+▸ Transcript                                 42 min · kept 30 days
+[Accept All] [Decline All]                   Open the session →
+```
+
+- **Accept All sends one approval per item**, in order, each with its own
+  receipt. It is not a batch — the endpoint refuses batch Approve because each
+  approval has a per-kind consequence — so every part keeps its consequence, and
+  a part already answered elsewhere reads as a partial result (§3.1): *4 of 5
+  accepted. One was already answered on your phone.*
+- **The owner's own jots are not asked about.** They are his words, saved when
+  typed, and go into the notes as his.
+- **Every to-do can be answered on its own.**
+- **It needs a group id on proposals (C81)**, and that group is where C77's
+  session-time anchors get promoted to the note's path.

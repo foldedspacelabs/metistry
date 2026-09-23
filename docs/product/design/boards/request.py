@@ -59,14 +59,14 @@ body=(heading("ROUND C · COMPONENTS, BACK-PATCHED","The request card, and the p
    "The card is the product asking, so it carries its own consequence and its own four answers. Agent-written text "
    "in it is data and never looks like a control (P1); the ground is <b>agent-quiet</b> and the face is the serif "
    "stack. One correction since round C: the header can no longer claim a snoozed count.",L)
-  + row(f'<div>{sub("THE PANEL, AT POPOVER WIDTH",L["tt"])}{panel2(L)}</div>'
+  + row(f'<div>{sub("THE PANEL, AT POPOVER WIDTH",L["tt"])}{panel3(L)}</div>'
         + f'<div style="display: flex; flex-direction: column; gap: 18px; flex-grow: 1; min-width: 0;">'
         + CARD + GLYPHS + '</div>',18,align="flex-start")
   + row(STATES+REMOVED,18)
   + row(f'<div style="background: {D["bg"]}; border-radius: 14px; padding: 22px; flex-grow: 1;">'
         + sub("DARK",D["tt"])
         + f'<div style="display: flex; gap: 18px; align-items: flex-start;">'
-        + panel2(D) + reqcard(D,glyph=I["key"],typ="ACCESS",
+        + panel3(D) + reqcard(D,glyph=I["key"],typ="ACCESS",
             title='Read <span style="font-family: '+MONO+'; font-size: 13px;">Areas/Finance</span>',
             agent="drey-dev",when="12m",prev=scope_preview(D,expanded=True),width=400)
         + panel2(D,empty=True) + '</div></div>',18))

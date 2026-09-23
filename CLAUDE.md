@@ -94,8 +94,11 @@ Every bridge is a published npm package usable by a stranger.
 TypeScript, pnpm workspaces, changesets. Postgres + pgvector in Docker. Node for
 the console. One OpenAI-compatible engine for Metis, on whichever provider
 `compute.yaml` assigns (ruled 2026-09-11). Swift for TCC bridges. **Collectors
-are TypeScript** — no Python anywhere (ruled 2026-08-29; Phase 0's stack had
-already gone zero-Python).
+are TypeScript** — no Python anywhere in the product (ruled 2026-08-29; Phase
+0's stack had already gone zero-Python). **Exempt (ruled 2026-09-22):** design
+tooling under `docs/product/design/` and PoC scripts under `docs/poc/` — the
+ruling was about development itself, and nothing in `apps/` or `packages/`
+may import or invoke them.
 
 **Migrations are additive-first.** New columns and tables, not rewrites;
 destructive migrations need an explicit decision and a rollback note in the

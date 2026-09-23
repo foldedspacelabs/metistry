@@ -3701,47 +3701,59 @@ def desktop(T,*,inner,w=600,h=400,label=None):
     return (cap + f'<div style="position: relative; width: {w}px; height: {h}px; background: {wl}; '
             f'border-radius: 12px; overflow: hidden;">{win}{inner}</div>')
 
-# ---------- the rail ----------------------------------------------------------
-def railrest(T,*,side="right",top=148):
-    pos="right: 9px;" if side=="right" else "left: 9px;"
-    return (f'<div style="position: absolute; {pos} top: {top}px; {glass(T,radius=15,marks=True)} '
-            f'width: 30px; padding: 9px 0; display: flex; flex-direction: column; align-items: center; '
-            f'gap: 9px;">{mark(T,size=14)}'
-            f'<span style="width: 5px; height: 5px; border-radius: 50%; background: {T["ts"]}; '
-            f'opacity: 0.8;"></span></div>')
+# ---------- the rail: a toolbar, one click per act ---------------------------
+I["rec"]='<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.6" fill="currentColor" stroke="none"/>'
 
-def raillive(T,*,top=140,senses=("screen","mic"),frame=None):
-    pips="".join(sensepip(T,s,size=12) for s in senses)
+def railbtn(T,glyph,*,hot=False,tone=None):
+    """A 28px hit target holding a 16px glyph. `hot` is the pressed / pointer-over
+    state: a quiet plate behind the glyph, never a colour change of the glyph."""
+    plate=f'background: {rgba(T["ink"] if "ink" in T else T["tp"],0.08)};' if hot else ""
+    return (f'<span style="display: flex; align-items: center; justify-content: center; width: 28px; '
+            f'height: 28px; border-radius: 8px; {plate} color: {tone or T["ts"]};">{ic(glyph,16,1.9)}</span>')
+
+def railsep(T):
+    return f'<span style="width: 14px; height: 0.5px; background: {rgba(T["ts"],0.35)}; margin: 2px 0;"></span>'
+
+def railtool(T,*,live=False,senses=("screen","mic"),top=96,hot=None,frame=None):
+    head = breathmark(T,size=14,frame=frame) if live else mark(T,size=14)
+    pips = "".join(sensepip(T,s,size=12) for s in senses) if live else ""
+    rec  = railbtn(T,I["stop"],tone=T["deg"],hot=hot=="rec") if live else railbtn(T,I["rec"],hot=hot=="rec")
     return (f'<div style="position: absolute; right: 9px; top: {top}px; '
-            f'{glass(T,radius=15,marks=True,tint=T["ag"])} '
-            f'width: 30px; padding: 11px 0 9px; display: flex; flex-direction: column; '
-            f'align-items: center; gap: 9px;">{breathmark(T,size=14,frame=frame)}{pips}</div>')
+            f'{glass(T,radius=17,marks=True,tint=T["ag"] if live else None)} '
+            f'width: 34px; padding: 10px 0 5px; display: flex; flex-direction: column; align-items: center; '
+            f'gap: 3px;">'
+            f'<span style="height: 22px; display: flex; align-items: center;">{head}</span>'
+            + (f'<span style="display: flex; flex-direction: column; align-items: center; gap: 7px; '
+               f'padding: 4px 0 3px;">{pips}</span>' if live else "")
+            + railsep(T)
+            + railbtn(T,I["chat"],hot=hot=="ask")
+            + railbtn(T,I["note"],hot=hot=="note")
+            + railbtn(T,I["todo"],hot=hot=="todo")
+            + railsep(T) + rec + '</div>')
 
-def railhover(T,*,top=128,live=False,senses=("screen","mic")):
-    row=lambda g,t:(f'<div style="display: flex; align-items: center; gap: 9px; padding: 5px 11px; '
-                    f'border-radius: 8px;">'
-                    f'<span style="display: flex; color: {T["ts"]};">{ic(g,14,1.9)}</span>'
-                    f'<span style="font-size: 11.5px; color: {T["tp"]};">{t}</span></div>')
-    if live:
-        head=(f'<div style="display: flex; align-items: center; gap: 9px; padding: 4px 11px 8px;">'
-              f'{breathmark(T,size=14)}'
-              f'<span style="font-family: {MONO}; font-size: 11.5px; color: {T["ag"]};">13:42</span>'
-              f'<span style="font-size: 11px; color: {T["ts"]};">Zoom</span>'
-              f'<span style="flex-grow: 1;"></span>'
-              + "".join(sensepip(T,s,size=11) for s in senses) + '</div>')
-        acts=row(I["plus"],"Note")+row(I["todo"],"To-do")+row(I["stop"],"Stop")
+def tip(T,text,key,*,top,right=52):
+    return (f'<div style="position: absolute; right: {right}px; top: {top}px; {glass(T,radius=7)} '
+            f'padding: 4px 8px; display: flex; gap: 8px; align-items: center; box-shadow: 0 4px 14px rgba(0,0,0,0.18);">'
+            f'<span style="font-size: 11px; color: {T["tp"]};">{text}</span>'
+            f'<span style="font-size: 10.5px; color: {T["ts"]}; font-family: {MONO};">{key}</span></div>')
+
+def quickfield(T,*,kind="note",saved=False,w=270,top=0,right=52):
+    """One click on Note or To-do opens this beside the rail, already focused.
+    Type, Return, gone. Three motions total, and one of them is the thought."""
+    g = I["note"] if kind=="note" else I["todo"]
+    if saved:
+        inner=(f'<span style="display: flex; color: {T["ok"]};">{ic(I["check"],14,2.2)}</span>'
+               f'<span style="font-size: 12px; color: {T["tp"]};">{"Noted" if kind=="note" else "To-do added"}</span>'
+               f'<span style="font-family: {MONO}; font-size: 11px; color: {T["ts"]};">13:02</span>')
     else:
-        head=(f'<div style="display: flex; align-items: center; gap: 9px; padding: 4px 11px 8px;">'
-              f'{mark(T,size=14)}'
-              f'<span style="font-size: 11.5px; font-weight: 600; color: {T["tp"]};">Metis</span>'
-              f'<span style="flex-grow: 1;"></span>'
-              f'<span style="font-size: 10.5px; color: {T["ts"]};">not recording</span></div>')
-        acts=(row(I["chat"],"Ask")+row(I["plus"],"Jot a note")
-              +row(I["screen"],"Record")+row(I["sound"],"Audio only"))
-    return (f'<div style="position: absolute; right: 9px; top: {top}px; {glass(T,radius=16)} '
-            f'width: 186px; padding: 8px 0 7px;">{head}'
-            f'<div style="height: 0.5px; background: {rgba(T["border"],0.85)}; margin: 0 9px 5px;"></div>'
-            f'{acts}</div>')
+        ph = "Send him the comparables before Friday" if kind=="todo" else "Measuring against last year, not the comps"
+        inner=(f'<span style="display: flex; color: {T["ts"]};">{ic(g,14,1.9)}</span>'
+               f'<span style="flex-grow: 1; font-size: 12px; color: {T["tp"]};">{ph}'
+               f'<span style="display: inline-block; width: 1.5px; height: 13px; background: {T["acc"]}; '
+               f'vertical-align: -2px; margin-left: 1px;"></span></span>'
+               f'<span style="font-size: 10.5px; color: {T["ts"]}; font-family: {MONO};">&#8617;</span>')
+    return (f'<div style="position: absolute; right: {right}px; top: {top}px; width: {w}px; '
+            f'{glass(T,radius=12)} padding: 9px 11px; display: flex; align-items: center; gap: 9px;">{inner}</div>')
 
 # ---------- the panel ---------------------------------------------------------
 def barturn(T,*,text,who="agent",more=False):
@@ -3773,27 +3785,6 @@ I["todo"]='<rect x="4" y="5" width="16" height="15" rx="2.5"/><path d="M8 12.2l2
 
 SENSE_GLYPH={"mic":"mic","screen":"screen","audio":"sound"}
 
-def modepills(T,sel="Ask"):
-    """Ask / Note / To-do. One field, three destinations — because a thought
-    during a meeting is a note, an obligation is a to-do, and a question is a
-    question, and none of them should require leaving the room."""
-    cell=lambda t,on:(f'<span style="padding: 4px 10px; border-radius: 7px; font-size: 11.5px; '
-                      f'font-weight: {600 if on else 400}; color: {T["tp"] if on else T["ts"]}; '
-                      f'background: {T["bg"] if on else "transparent"}; '
-                      f'box-shadow: {"0 1px 2px rgba(0,0,0,0.10)" if on else "none"};">{t}</span>')
-    return (f'<span style="display: inline-flex; gap: 2px; padding: 2px; border-radius: 9px; '
-            f'background: {rgba(T["sunken"],0.9)}; border: 0.5px solid {rgba(T["bc"],0.5)};">'
-            + "".join(cell(t,t==sel) for t in ("Ask","Note","To-do")) + '</span>')
-
-def jotcomposer(T,*,mode="Note"):
-    ph={"Ask":"Ask Metis&hellip;","Note":"Jot a thought&hellip;","To-do":"Add a to-do&hellip;"}[mode]
-    return (f'<div style="display: flex; flex-direction: column; gap: 8px;">{modepills(T,mode)}'
-            f'<div style="display: flex; align-items: center; gap: 8px; background: {rgba(T["bg"],0.72)}; '
-            f'border: 0.5px solid {rgba(T["bc"],0.7)}; border-radius: 11px; padding: 8px 10px; '
-            f'box-shadow: inset 0 1px 2px rgba(0,0,0,0.06);">'
-            f'<span style="flex-grow: 1; font-size: 12px; color: {T["tt"]};">{ph}</span>'
-            f'<span style="display: flex; color: {T["ts"]};">{ic(I["send"],14,1.9)}</span></div></div>')
-
 def jotrow(T,*,kind,when,text,last=False):
     g=I["note"] if kind=="note" else I["todo"]
     return (f'<div style="display: flex; align-items: baseline; gap: 9px; padding: 6px 0; {bd_(T,last)}">'
@@ -3813,7 +3804,9 @@ def jotlog(T,*,open_=True):
             + jotrow(T,kind="todo",when="13:20",text="Send him the four comparables before Friday")
             + jotrow(T,kind="note",when="13:38",text="Volume tier claim needs checking",last=True) + '</div>')
 
-def barpanel(T,*,live=False,w=328,senses=("screen","mic"),mode="Note"):
+def barpanel(T,*,live=False,w=328,senses=("screen","mic")):
+    """Chat, as it was before the mode pills: the tail of the one conversation and
+    a composer. Note and To-do live on the rail, one click each."""
     if live:
         head=(f'<div style="display: flex; align-items: center; gap: 9px; padding: 11px 13px 10px;">'
               f'{breathmark(T,size=15)}'
@@ -3821,34 +3814,20 @@ def barpanel(T,*,live=False,w=328,senses=("screen","mic"),mode="Note"):
               f'<span style="font-size: 11.5px; color: {T["ts"]};">Zoom</span>'
               f'<span style="flex-grow: 1;"></span>'
               + "".join(sensepip(T,s,size=12) for s in senses) + '</div>')
-        turns=(f'<div style="display: flex; flex-direction: column; gap: 10px;">'
-               + barturn(T,text="What did he say about the March number?",who="user")
-               + barturn(T,text="He put it 4% over the comparables you pulled, and named the volume tier as the "
-                                "reason. You have not agreed to that framing.",more=True) + '</div>')
-        mid=jotcomposer(T,mode=mode)
-        log=(f'<div style="border-top: 0.5px solid {rgba(T["border"],0.85)}; padding-top: 9px;">'
-             + jotlog(T) + '</div>')
-        foot=(f'<div style="display: flex; align-items: center; gap: 9px;">'
-              + baract(T,I["stop"],"Stop",tone=T["deg"])
-              + f'<span style="flex-grow: 1;"></span>'
-              f'<span style="display: inline-flex; align-items: center; gap: 6px;">'
-              f'<span style="display: flex; color: {T["ag"]};">{ic(I["lock"],12,2)}</span>'
-              f'<span style="font-size: 11px; color: {T["ts"]};">Staying on this Mac</span></span></div>')
-        inner=f'{turns}{mid}{log}{foot}'
     else:
         head=(f'<div style="display: flex; align-items: center; gap: 9px; padding: 11px 13px 10px;">'
               f'{mark(T,size=15)}'
-              f'<span style="font-size: 12.5px; font-weight: 600; color: {T["tp"]};">Metis</span>'
-              f'<span style="flex-grow: 1;"></span>'
-              f'<span style="font-size: 10.5px; color: {T["ts"]};">not recording</span></div>')
-        inner=(barturn(T,text="Ask about anything on screen, jot a note, or record what you are doing.")
-               + jotcomposer(T,mode="Ask")
-               + f'<div style="display: flex; gap: 7px; flex-wrap: wrap;">'
-               + baract(T,I["screen"],"Record") + baract(T,I["sound"],"Audio only") + '</div>')
+              f'<span style="font-size: 12.5px; font-weight: 600; color: {T["tp"]};">Metis</span></div>')
+    turns=(f'<div style="display: flex; flex-direction: column; gap: 10px;">'
+           + barturn(T,text="What did he say about the March number?",who="user")
+           + barturn(T,text="He put it 4% over the comparables you pulled, and named the volume tier as the "
+                            "reason. You have not agreed to that framing.",more=True) + '</div>')
+    log=(f'<div style="border-top: 0.5px solid {rgba(T["border"],0.85)}; padding-top: 9px;">'
+         + jotlog(T,open_=False) + '</div>') if live else ""
     return (f'<div style="width: {w}px; {glass(T,radius=18,tint=T["ag"] if live else None)}">{head}'
             f'<div style="height: 0.5px; background: {rgba(T["border"],0.85)};"></div>'
             f'<div style="padding: 12px 13px 13px; display: flex; flex-direction: column; gap: 11px;">'
-            f'{inner}</div></div>')
+            f'{turns}{barcomposer(T)}{log}</div></div>')
 
 # ---------- the record sheet --------------------------------------------------
 def segchoice(T,items,sel):
@@ -3870,26 +3849,25 @@ def targetline(T,*,glyph,text,extra=None,control=None):
             + (f'<span style="font-size: 11.5px; color: {T["tt"]};">{extra}</span>' if extra else '')
             + (f'<span style="flex-grow: 1;"></span>{control}' if control else '') + '</div>')
 
-def recordsheet(T,*,target="Window",mic=True,w=384):
+def recordsheet(T,*,target="Window",audio=True,mic=True,w=360):
     seg=segchoice(T,[(I["screen"],"Screen"),(I["display"],"Window"),(I["sound"],"Audio only")],target)
+    what=""
     if target=="Window":
-        rows=(targetline(T,glyph=I["display"],text="Zoom &mdash; Vendor review",extra="you picked it")
-              + targetline(T,glyph=I["sound"],text="Its audio",extra="comes with the window"))
+        what=targetline(T,glyph=I["display"],text="Zoom &mdash; Vendor review",
+                        control=f'<span style="display: flex; color: {T["ts"]};">{ic(I["chevd"],13,2.1)}</span>')
     elif target=="Screen":
-        rows=(targetline(T,glyph=I["screen"],text="Everything on the Studio Display")
-              + targetline(T,glyph=I["sound"],text="Its audio",extra="comes with the screen"))
-    else:
-        rows=targetline(T,glyph=I["sound"],text="What this Mac is playing",extra="no picture")
+        what=targetline(T,glyph=I["screen"],text="Studio Display",
+                        control=f'<span style="display: flex; color: {T["ts"]};">{ic(I["chevd"],13,2.1)}</span>')
+    alabel={"Window":"App audio","Screen":"System audio","Audio only":"System audio"}[target]
+    rows=(targetline(T,glyph=I["sound"],text=alabel,control=toggle(T,audio))
+          + targetline(T,glyph=I["mic"],text="Your microphone",extra="your side only",control=toggle(T,mic)))
+    div=f'<div style="height: 0.5px; background: {rgba(T["border"],0.85)}; margin: 5px 0;"></div>'
     return (f'<div style="width: {w}px; {glass(T,radius=18)}">'
             f'<div style="padding: 13px 15px 10px; font-size: 14px; font-weight: 600; color: {T["tp"]};">Record</div>'
             f'<div style="padding: 0 15px 4px;">{seg}</div>'
-            f'<div style="padding: 4px 15px 0;">{rows}'
-            f'<div style="height: 0.5px; background: {rgba(T["border"],0.85)}; margin: 6px 0;"></div>'
-            + targetline(T,glyph=I["mic"],text="Your microphone",extra="your side only",control=toggle(T,mic))
-            + '</div>'
+            f'<div style="padding: 4px 15px 0;">{what}{div if what else ""}{rows}</div>'
             f'<div style="padding: 11px 15px 14px; display: flex; align-items: center; gap: 9px;">'
-            + btn(T,"Record","affirm",I["screen"] if target!="Audio only" else I["sound"])
-            + btn(T,"Cancel","ghost") + '</div></div>')
+            + btn(T,"Record","affirm",I["rec"]) + btn(T,"Cancel","ghost") + '</div></div>')
 
 # ---------- Settings, trimmed ------------------------------------------------
 def toggle(T,on=True):

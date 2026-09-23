@@ -22,37 +22,34 @@ Two jobs the nav row cannot do, which is what C60 was actually about:
 And one thing it must never become: a place where work is read at length. The
 window is for that.
 
-## 2. The resting state — 30px, one mark, one word
+## 2. The resting state — a toolbar, one click per act
 
-The bar is **the brand mark and one dot**, 30px wide, on the edge the owner
-picked. Hovering widens it to name the state in words — *not listening* — and
-offers the four acts: **Ask · Capture a note · Listen to this · Share a window**.
+A 34px glass rail on the edge the owner picked: the mark, then **Ask · Note ·
+To-do**, then **Record**. Each is its own button. The first pass hid the acts
+behind a hover menu and a mode switch, which made every jot cost two clicks before
+a single word — ruled out 2026-09-22 as a recipe for non-use.
 
-**There is no crossed-out eye, no muted speaker and no muted microphone.**
-C58 again: *absence is the denial*. Three negative icons are three claims about
-what Metis is not doing — noise, and in the eye's case a claim the system cannot
-back (§6). One state, one word, and the grants themselves in Settings.
+- **Glyphs only**, with the native tooltip and its shortcut on hover (`⌘⌥N`,
+  `⌘⌥T`). The rail is thin glass (0.75), so the glyphs are `text-secondary` and
+  there are no labels: a label there would need tertiary ink, which C74 bars.
+- **No crossed-out eye, no muted speaker.** Absence is the denial (C58), and
+  *cannot see* is a claim the system cannot back (C71).
+- **Fades to 55% after ten seconds idle** and returns on approach. **Never while
+  recording.**
 
-The rail is drawn on the **marks-only** glass — 0.75 rather than 0.86 — because
-nothing on it is text. That is the whole trick to making it feel like the OS:
-**transparency is bought by giving up the faintest ink**, not by hoping. It is also
-why the rail carries no numerals and no faint label (§7).
+### 2.1 Note and To-do — click, type, Return
 
-**It fades to 55% after ten seconds without the pointer** and returns on
-approach. That is the only fade in the product, allowed because at rest the bar
-carries nothing. **While a session runs it may never fade, dim or hide** — the
-anti-Glass rule: Glass sold invisibility as a feature and called
-`setContentProtection` on every window. This is the opposite object.
+The field opens beside the button that summoned it, already focused. **Return
+saves and closes**; Escape closes. A one-second confirmation with the time, then
+nothing. The same click works during a recording, where each jot also takes the
+session's timestamp (C77).
 
-## 3. The live state — it breathes, and it names the sense
+## 3. The live state — the same toolbar, breathing
 
-The mark **fills**, the border takes the `agent` hue, a **halo breathes** around it,
-and the senses that are open are shown as glyphs beneath.
-
-**The senses are shown, not implied.** A filled **microphone** means it is hearing;
-a filled **display** means a window is being shared; both can be lit at once. Each
-is the glyph macOS uses for the same idea, so the row reads without a legend. They
-are **indicators, not switches** — the act that started each one is what ends it.
+The mark breathes and the senses that are open sit beneath it — a **display**
+while a picture is being taken, a **microphone** while the owner is heard. **Record
+becomes Stop**, in the same place. Note and To-do do not move, so a jot during a
+meeting is the same click as at any other time.
 
 ### 3.1 The breath, ratified under C16 rather than against it
 
@@ -82,82 +79,36 @@ join them.
 **macOS's own orange indicator is untouched.** We never suppress it and never
 imitate it.
 
-## 4. Expanded — one conversation, a shorter measure
+## 4. Ask — the chat, as it was
 
-**Ruled: one conversation.** What the owner says in the bar lands in the same
-thread as Chat, so opening the window later shows the turn where they left it.
-Two threads would mean deciding every time which one a question belongs to, and
-being wrong about it later.
+Ask opens the tail of the one conversation and a composer. **No mode pills** —
+Note and To-do have their own buttons. Same thread as the window, same 2px agent
+rule (C69), shorter measure (C72): 328px, the tail rather than the transcript, and
+**Open in Chat** on any reply past four lines. While recording, the panel shows
+*staying on this Mac* and one line counting what has been jotted this session.
 
-- **The reply carries the 2px `agent` rule** (C69), so a turn is recognisably
-  the same object in both places.
-- **The measure is not the same, and that is deliberate.** 620px does not fit
-  beside a meeting. The panel runs at **328px** and shows **the tail**, not the
-  transcript; **Open in Chat** appears on any reply longer than four lines. The
-  window's promise — resizing never rewraps a line — is a promise about the
-  window. The bar is where you ask; the window is where you read.
-- **While a session runs the panel says *answers are staying on this Mac*,**
-  because the research's `private` tier may only be assigned to a provider with
-  `locality: on_machine`, refused at `metistry compute assign`. That sentence is
-  the reason the feature is acceptable, so it is on the surface.
-- **Four acts at rest, three while live.** *Note* is the floating "+" the UX plan
-  already ruled ("no Capture tab and no Capture screen anywhere") — this bar is
-  its home. *Action item* exists only while there is a transcript to anchor it
-  to, carrying `source: meeting:<path>` and a timestamp.
-
-## 5. Recording — one question, then one more
-
-**A meeting is not audio.** It is a window and its sound, plus your own voice —
-the owner's correction, 2026-09-22, and the API agrees with him. So the sheet asks
-*what should it watch*, and then *should it hear you*. **Audio comes with the
-target** rather than being a third thing to switch on.
+## 5. Record — a target and two toggles
 
 ```
 Record
 [ Screen | Window | Audio only ]
- ▢  Zoom — Vendor review     you picked it
- ♫  Its audio               comes with the window
+ ▢  Zoom — Vendor review                       ⌄
  ───────────────────────────────────────────
- 🎙  Your microphone          your side only        ( ●)
+ ♫  App audio                                ( ●)
+ 🎙  Your microphone   your side only          ( ●)
  [ Record ]  [ Cancel ]
 ```
 
-- **Three targets cover the three things the owner described.** A meeting is
-  *Window* with the mic on. Showing how something works is *Window* or *Screen*
-  with the mic on. A call or an in-person conversation with no screen is *Audio
-  only* — kept because it has no window, and because for audio without video the
-  Core Audio process tap is strictly better: no screen grant, per-process by
-  construction.
-- **It is one API call, not three.** `SCStreamConfiguration.capturesAudio`
-  (macOS 13) yields the audio of whatever the content filter covers, so **the sound
-  is scoped exactly as the picture is** — one selection, one scope.
-  `captureMicrophone` (macOS 15) puts the owner's own voice in the same stream,
-  separately attributable. Below 15 the microphone is a second session, and the
-  app's floor is 14.0, so that fallback is real.
-- **Everything explanatory is gone.** No *stops at 11:30*, no *nothing is written
-  without you*, no permissions rehearsal. A **Record** button implies a stop, the
-  bar carries it, and macOS asks for what it needs when it needs it.
-- **Text is left-aligned throughout** — the label, then its quiet qualifier beside
-  it (*your side only*, *comes with the window*) — never a column of right-aligned
-  fragments pretending to be a table.
-
-### 5.1 Jotting during a session
-
-**One field, three destinations: Ask · Note · To-do.** A thought during a meeting
-is a note, an obligation is a to-do, a question is a question, and none of them
-should cost the owner the meeting. The mode pills are the whole control; `⌘⌥N` and
-`⌘⌥T` reach the field already in the right mode without opening the panel.
-
-- **What is jotted is shown back, timestamped** — *this session · 2 notes, 1 to-do*,
-  expandable to the lines. That is the trust mechanism: a note you cannot see is a
-  note you will retype into your own app, and then the bar has cost more than it
-  saved.
-- **The timestamp is the anchor.** Each jot carries the session and the second it
-  was made, so afterwards a note sits beside what was being said when it was
-  written, and a to-do arrives as a task-line proposal with
-  `source: meeting:<path>`.
-- **They ride the same proposal** as the draft notes and the transcript — one
-  arrival in Needs You, not three.
+- **Audio is a toggle, on by default**, beside the microphone (ruled 2026-09-22).
+  The label names what it takes — *app audio* for a window, *system audio* for the
+  screen or audio only — and nothing else is said.
+- **No explainer text.** No stop time, no promises, no permissions rehearsal, no
+  qualifiers on the window row. The window row is the picker's choice with a
+  chevron to change it.
+- `capturesAudio` scopes the sound exactly as the picture (macOS 13);
+  `captureMicrophone` adds the owner's voice to the same stream (macOS 15, a second
+  session below that against a 14.0 floor). *Audio only* uses the Core Audio
+  process tap — no screen grant, per-process by construction.
 
 ### 5.2 The phase order this inverts
 

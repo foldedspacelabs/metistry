@@ -2361,12 +2361,22 @@ def userturn(T,text,when="8:46 AM",w=MEASURE):
             f'<div style="background: {T["accq"]}; border-radius: 12px; padding: 12px 14px; font-size: 13.5px; '
             f'color: {T["tp"]}; line-height: 1.55;">{text}</div></div>')
 
-def replyturn(T,text,*,when="8:47 AM",quotebar=False,w=MEASURE,state=None):
-    """No container at all (drawn), or a 2px `agent` left rule (the alternative
-    §2.1 puts beside it). A reply is the longest text in the product; the full
-    column is worth more than the symmetry."""
-    bar=f'border-left: 2px solid {T["ag"]}; padding-left: 16px;' if quotebar else ''
-    return (f'<div style="width: {w}px; box-sizing: border-box; {bar}">'
+def replyturn(T,text,*,when="8:47 AM",quotebar=True,hang=True,w=MEASURE,state=None):
+    """A 2px `agent` rule at the left of the body, ruled 2026-09-22 (C69).
+
+    The rule hangs in the gutter — `width` is the measure plus the rule and its
+    padding, pulled back by the same amount — so the prose starts on the user
+    turn's own left edge and `--mt-reply-measure` still governs the text and not
+    the text minus a rule. `hang=False` keeps it inside the width, for a panel
+    where the turn cannot spill into its neighbour. `quotebar=False` is the
+    version that was considered and not taken, kept so the board can show both.
+    """
+    if quotebar:
+        bar=(f'width: {w+18}px; border-left: 2px solid {T["ag"]}; padding-left: 16px;'
+             + (' margin-left: -18px;' if hang else ''))
+    else:
+        bar=f'width: {w}px;'
+    return (f'<div style="{bar} box-sizing: border-box;">'
             f'<div style="display: flex; align-items: center; gap: 7px; margin-bottom: 6px;">'
             f'<span style="display: flex; color: {T["ag"]};">{ic(I["spark"],13,2.2)}</span>'
             f'<span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["ag"]};">ASSISTANT</span>'

@@ -36,27 +36,39 @@ That collapses two numbers into one: the container cap *is* the measure, so
 `--mt-reply-measure` governs the column rather than the prose inside it, and
 tool strips, chips and cards fill the same width as the text.
 
-### 2.1 What this costs P1, and what pays for it
+### 2.1 What this costs P1, and what pays for it — ruled 2026-09-22
+
+**The assistant's turn carries a 2px `agent` rule at its left, and no wash.**
 
 P1 asks for agent text in a container that is *visibly quoted* — "the `agent`
-tint on the attribution, an `agent-quiet` wash behind the body". Dropping the
-wash keeps the first half and loses the second, so this is a **deviation to
-be ruled on, not a drawing choice**. Three options, in the order I would take
-them:
+tint on the attribution, an `agent-quiet` wash behind the body". A quote rule is
+the oldest mark in typography for *these are not my words*, so **P1 is satisfied
+by the rule**: this is no longer a deviation, and the wash is not dropped from
+the system, only from a transcript body.
 
-1. **The attribution carries it** (drawn). P1's wash is kept for agent data
-   that appears **outside** a transcript — a feed row, a card title, tool
-   output, an artifact comment — which is where being mistaken for the
-   interface actually costs something. Inside a transcript, everything is a
-   turn and the attribution is unambiguous.
-2. **A 2px `agent` left rule** on the assistant's turn — literally a quote bar.
-   Costs 18px of width, keeps the quoting explicit. On the board beside the
-   drawn version.
-3. Keep the wash. Rejected: it is the option the owner asked to remove.
+Three things the rule buys that the wash does not:
 
-**This also resolves the nesting problem** the first pass found. With the reply
-body unfilled, tool output goes back onto `agent-quiet` exactly as §3.4 says,
-and the `sunken` workaround is no longer needed. §3.4 stands unamended.
+1. **It survives a reply that contains something.** A table, a diff, a card or
+   tool output inside a filled body is a fill on a fill, which stops reading as
+   quotation. Against a rule, nested surfaces keep their own meaning — so §3.4's
+   `agent-quiet` for tool output stands unamended and the `sunken` workaround
+   the first pass needed is gone.
+2. **It costs 18px of gutter rather than a wash behind 300 words.** A reply is
+   the longest text in the product; a tint held for that many lines reads as a
+   panel, not as a quotation.
+3. **It scales to one line and to forty.** A wash behind a six-word reply looks
+   like a chip.
+
+**The rule hangs in the gutter, not inside the measure.** The turn's width is
+`--mt-reply-measure` plus the rule and its 16px padding, pulled back by the same
+18px, so the prose begins on the user turn's own left edge and the measure still
+governs the text rather than the text minus a rule. Verified by measurement: the
+prose box is 620px at the same x as the user bubble, with the rule 18px to its
+left. One number, which is what §3.4 wants.
+
+**Where the wash still belongs:** every place agent data appears *outside* a
+transcript — a feed row, a card title, tool output, an artifact comment — which
+is where being mistaken for the interface actually costs something.
 
 ## 3. Anatomy, top to bottom
 

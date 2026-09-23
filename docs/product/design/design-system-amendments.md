@@ -257,7 +257,49 @@ rather than to a missing value.
 
 ---
 
-## 6. Working in this repo
+## 6. Motion, and agent text (ratified 2026-09-22)
+
+### 6.1 One sentence governs motion (C16)
+
+**Motion is allowed only where it carries information the reader cannot
+otherwise get, and it stops the moment that information is available in words.**
+
+This narrows `ux-direction.md`'s "the working state is a **word**, not a spinner,
+and nothing auto-scrolls, parallaxes, spins or pulses" rather than keeping it as
+written, because a word that never changes looks exactly like a word that is
+stuck, and the reader has no other way to tell working from broken.
+
+What falls out of it, with no further rules needed:
+
+- The three waiting dots run only while there is genuinely nothing to report,
+  and are **replaced** — not supplemented — the instant a tool name can be
+  printed. They are the only looping animation the product is permitted.
+- Streaming prose is its own motion; the strip collapses to one line.
+- At 60s the product reports what it knows (*nothing back for 62 seconds*),
+  which is a fact, not a state change: `degraded`, never `failed`.
+- Under `prefers-reduced-motion` the dots hold flat and the elapsed count
+  carries liveness alone — **a number is content, not motion**, which is why the
+  count is load-bearing rather than decoration.
+
+### 6.2 Agent prose in a transcript takes a rule; the wash is for everywhere else (C69)
+
+**A reply body carries a 2px `agent` rule at its left and no fill.** A quote rule
+is the oldest mark for *these are not my words*, so P1's "visibly quoted" is
+satisfied without a wash — and unlike a wash it survives a reply containing a
+table, a diff or a card, where a fill inside a fill stops reading as quotation.
+
+**The rule hangs in the gutter, never inside the measure.** Width = measure +
+rule + padding, pulled back by the same amount, so the prose starts on the user
+turn's own left edge and one number still governs the column.
+
+`agent-quiet` keeps its full job **outside** a transcript — feed rows, card
+titles, tool output, artifact comments — which is where agent text can actually
+be mistaken for the interface. P1 is unamended; only its implementation inside a
+transcript is settled.
+
+---
+
+## 7. Working in this repo
 
 - **A board's assembly is not recoverable from `lib.py`.** The library holds
   components; the page that arranges them lives in a board module or nowhere. Five
@@ -275,5 +317,5 @@ rather than to a missing value.
   and raise the declaration until they are equal. Fonts matter: alias the system
   stacks to metric-compatible faces (Liberation Sans, Bitstream Charter, Liberation
   Mono) or every number is inflated.
-- **Log the contradiction; do not route around it.** 68 of them, and the ones that
+- **Log the contradiction; do not route around it.** 69 of them, and the ones that
   became rules are in this file.

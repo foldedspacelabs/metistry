@@ -7,13 +7,13 @@ table, like everything else.
 """
 from lib import *
 
-CW,CH=2440,2980
+CW,CH=2440,2160
 
 def win(T,inner):
     """Settings ▸ Resources (ruled 2026-09-22). Its own WINDOW, not a pane in the
     main one — the first draft styled the section list like the sidebar and it read
     as a nav row that had supposedly been removed."""
-    return settingswindow(T,inner)
+    return settingswindow(T,inner,full=True)
 
 def conndetail(T,w=None):
     wd=f"width: {w}px; flex-shrink: 0;" if w else "flex-grow: 1; min-width: 0;"

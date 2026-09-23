@@ -3191,8 +3191,8 @@ def connrow(T,*,name,kind,tools,used,state="ok",last=False):
     dot=(f'<span style="width: 8px; height: 8px; border-radius: 50%; background: {T["ok"]};"></span>'
          if state=="ok" else
          f'<span style="width: 8px; height: 8px; border-radius: 50%; background: {T["deg"]};"></span>')
-    return (f'<div style="display: grid; grid-template-columns: 9px 172px 150px 96px minmax(0,1fr) 16px; '
-            f'align-items: center; gap: 14px; padding: 11px 16px; {bd_(T,last)}">{dot}'
+    return (f'<div style="display: grid; grid-template-columns: 9px 140px 124px 80px minmax(0,1fr) 16px; '
+            f'align-items: center; gap: 12px; padding: 11px 16px; {bd_(T,last)}">{dot}'
             f'<span style="display: inline-flex; align-items: center; gap: 8px;">'
             f'<span style="display: flex; color: {T["ag"]};">{ic(I["plug"],14,1.8)}</span>'
             f'<span style="font-size: 13px; font-weight: 500; color: {T["tp"]};">{name}</span></span>'
@@ -3206,7 +3206,7 @@ def resourcelist(T,w=None):
     head=(f'<div style="display: flex; align-items: center; gap: 10px; padding: 14px 16px 4px;">'
           f'<span style="font-size: 17px; font-weight: 600; color: {T["tp"]}; flex-grow: 1;">Resources</span>'
           f'{btn(T,"Connect A Server","secondary",I["plus"])}</div>'
-          f'<div style="display: grid; grid-template-columns: 9px 172px 150px 96px minmax(0,1fr) 16px; gap: 14px; '
+          f'<div style="display: grid; grid-template-columns: 9px 140px 124px 80px minmax(0,1fr) 16px; gap: 12px; '
           f'padding: 6px 16px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em; color: {T["tt"]};">'
           f'<span></span><span>SERVER</span><span>KIND</span><span>TOOLS</span><span>GRANTED TO</span><span></span></div>')
     rows=(connrow(T,name="Jira",kind="MCP &middot; work network",tools="14 tools",
@@ -3267,47 +3267,59 @@ def toolblock(T):
         + '</div>')
 
 
-def settingswindow(T,inner,*,w=None):
-    """Settings is its own window on Mac, not a pane in the main one. Drawn that way
-    so it cannot be mistaken for a nav destination — which is exactly what happened
-    when the section list was styled like the sidebar."""
-    wd=f"width: {w}px; flex-shrink: 0;" if w else "flex-grow: 1; min-width: 0;"
-    dots="".join(f'<span style="width: 10px; height: 10px; border-radius: 50%; background: {c};"></span>'
-                 for c in (T["bs"],T["bs"],T["bs"]))
-    return (f'<div style="{wd} border: 1px solid {T["bc"]}; border-radius: 12px; overflow: hidden; '
-            f'background: {T["surface"]}; box-shadow: 0 14px 40px rgba(26,24,21,0.14);">'
-            f'<div style="display: flex; align-items: center; gap: 10px; padding: 9px 14px; '
-            f'background: {T["elevated"]}; border-bottom: 1px solid {T["border"]};">'
-            f'<span style="display: inline-flex; gap: 6px;">{dots}</span>'
-            f'<span style="flex-grow: 1; text-align: center; font-size: 12.5px; font-weight: 600; '
-            f'color: {T["tp"]};">Settings</span>'
-            f'<span style="width: 46px;"></span></div>'
-            f'<div style="display: flex; align-items: stretch;">{settingsnav(T)}{inner}</div></div>')
+SETTINGS_W, SETTINGS_H, SETTINGS_NAV = 840, 600, 200
+SETTINGS_GROUPS=[(None,[("Instance","folder"),("Services","gear"),("Compute","cpu"),("Updates","down")]),
+                 ("ACCESS",[("Account","person"),("Resources","plug"),("Secrets","key")]),
+                 ("CAPTURE",[("Live Capture","mic"),("Sessions","repeat")]),
+                 (None,[("Advanced","wrench")])]
+I.setdefault("gear",'<circle cx="12" cy="12" r="3"/><path d="M12 3.5v2.2M12 18.3v2.2M3.5 12h2.2M18.3 12h2.2M6 6l1.6 1.6M16.4 16.4L18 18M6 18l1.6-1.6M16.4 7.6L18 6"/>')
+I.setdefault("cpu",'<rect x="7" y="7" width="10" height="10" rx="1.5"/><path d="M10 3.5v3.5M14 3.5v3.5M10 17v3.5M14 17v3.5M3.5 10H7M3.5 14H7M17 10h3.5M17 14h3.5"/>')
+I.setdefault("down",'<circle cx="12" cy="12" r="8.2"/><path d="M12 7.5v8M8.5 12.5L12 16l3.5-3.5"/>')
+I.setdefault("folder",'<path d="M3.5 7a2 2 0 012-2h4l2 2h7a2 2 0 012 2v8a2 2 0 01-2 2h-13a2 2 0 01-2-2z"/>')
+I.setdefault("wrench",'<path d="M14.5 5.5a4 4 0 00-5 5L4.5 15.5l4 4 5-5a4 4 0 005-5l-2.5 2.5-2.5-.5-.5-2.5z"/>')
 
 def settingsnav(T,sel="Resources"):
-    """Settings' own section list. Settings is otherwise undrawn — this is the
-    minimum needed to show Resources in the place it now lives."""
+    """The real sections, grouped (ruled 2026-09-22): Instance, Services, Compute,
+    Updates; Access — Account (was Connections), Resources, Secrets; Capture —
+    Live Capture, Sessions; Advanced. Replaces the invented list the Resources
+    board first drew."""
     out=""
-    for n in ["General","Compute","Knowledge","Resources","Notifications","Advanced"]:
-        on=(n==sel)
-        out+=(f'<div style="position: relative; display: flex; align-items: center; gap: 10px; padding: 7px 12px; '
-              f'border-radius: 8px; background: {T["accq"] if on else "transparent"};">'
-              + (f'<span style="position: absolute; left: 0; top: 6px; bottom: 6px; width: 3px; '
-                 f'border-radius: 0 3px 3px 0; background: {T["acc"]};"></span>' if on else "")
-              + f'<span style="font-size: 12.5px; font-weight: {600 if on else 500}; '
-                f'color: {T["acc"] if on else T["ts"]};">{n}</span></div>')
-    return (f'<div style="width: 168px; padding: 12px 8px; background: {T["sunken"]}; '
-            f'border-right: 1px solid {T["border"]}; flex-shrink: 0;">'
-            f'<div style="padding: 4px 12px 10px;">'
-            f'<span style="font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: {T["tt"]};">SETTINGS</span>'
-            f'</div>{out}</div>')
+    for head,items in SETTINGS_GROUPS:
+        if head:
+            out+=(f'<div style="padding: 12px 16px 4px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; '
+                  f'color: {T["tt"]};">{head}</div>')
+        else:
+            out+='<div style="height: 8px;"></div>'
+        for n,g in items:
+            on=(n==sel)
+            out+=(f'<div style="display: flex; align-items: center; gap: 9px; padding: 6px 10px; margin: 0 6px; '
+                  f'border-radius: 7px; background: {T["accq"] if on else "transparent"};">'
+                  f'<span style="display: flex; color: {T["acc"] if on else T["ts"]};">{ic(I[g],15,1.8)}</span>'
+                  f'<span style="font-size: 12.5px; font-weight: {600 if on else 500}; '
+                  f'color: {T["tp"]};">{n}</span></div>')
+    return (f'<div style="width: {SETTINGS_NAV}px; padding: 6px 0 12px; background: {T["sunken"]}; '
+            f'border-right: 1px solid {T["border"]}; flex-shrink: 0; box-sizing: border-box;">{out}</div>')
 
-
-# ============ KNOWLEDGE, screen 10 (2026-09-22) ======================
-# Three questions: what is in here, is it current, what links to what. The wire
-# serves the first and third completely and the second not at all — so the
-# unanswerable one leads, because `is this current` is what makes the rest
-# trustworthy.
+def settingswindow(T,inner,*,w=None,sel="Resources",full=False,scrolled=None):
+    """Settings is its own window at a FIXED size (ruled 2026-09-22, closing C62):
+    840x600, set by the widest pane. Panes scroll vertically, so larger text makes a
+    pane longer and never clips it. `full` draws a pane's whole length for spec
+    boards; `scrolled` draws the scroll thumb at that fraction."""
+    dots="".join(f'<span style="width: 10px; height: 10px; border-radius: 50%; background: {c};"></span>'
+                 for c in (T["bs"],T["bs"],T["bs"]))
+    height="" if full else f"height: {SETTINGS_H-38}px; overflow: hidden;"
+    thumb=(f'<span style="position: absolute; right: 3px; top: {int(8+(SETTINGS_H-150)*scrolled)}px; width: 5px; '
+           f'height: 90px; border-radius: 3px; background: {rgba(T["tp"],0.28)};"></span>') if scrolled is not None else ""
+    return (f'<div style="width: {SETTINGS_W}px; flex-shrink: 0; border: 1px solid {T["bc"]}; border-radius: 12px; '
+            f'overflow: hidden; background: {T["surface"]}; box-shadow: 0 14px 40px rgba(26,24,21,0.14);">'
+            f'<div style="display: flex; align-items: center; gap: 10px; padding: 9px 14px; height: 38px; '
+            f'box-sizing: border-box; background: {T["elevated"]}; border-bottom: 1px solid {T["border"]};">'
+            f'<span style="display: inline-flex; gap: 6px;">{dots}</span>'
+            f'<span style="flex-grow: 1; text-align: center; font-size: 12.5px; font-weight: 600; '
+            f'color: {T["tp"]};">{sel}</span><span style="width: 46px;"></span></div>'
+            f'<div style="display: flex; align-items: stretch; {height}">{settingsnav(T,sel)}'
+            f'<div style="position: relative; width: {SETTINGS_W-SETTINGS_NAV}px; min-width: 0; background: {T["bg"]}; '
+            f'overflow: hidden;">{inner}{thumb}</div></div></div>')
 
 def srcrow(T,*,name,when,state="ok",age=None,why=None,last=False):
     dot={"ok":f'<span style="width: 8px; height: 8px; border-radius: 50%; background: {T["ok"]};"></span>',
@@ -3916,9 +3928,10 @@ def kept(T):
                 ("Transcript","90 minutes, then gone"),
                 ("Notes","only what you approve, in your vault")])) + '</div>')
 
-def capturesettings(T,w=520):
-    return (f'<div style="width: {w}px; background: {T["bg"]}; border: 1px solid {T["bc"]}; '
-            f'border-radius: 12px; overflow: hidden;">'
+def capturesettings(T,w=520,bare=False):
+    return (f'<div style="width: {"100%" if bare else str(w)+"px"}; box-sizing: border-box; background: {T["bg"]}; '
+            + ('' if bare else f'border: 1px solid {T["bc"]}; border-radius: 12px; ')
+            + 'overflow: hidden;">'
             f'<div style="padding: 13px 16px; border-bottom: 1px solid {T["border"]};">'
             f'<span style="font-size: 14.5px; font-weight: 600; color: {T["tp"]};">Live capture</span></div>'
             f'<div style="padding: 4px 16px 15px;">'
@@ -4137,11 +4150,12 @@ def chatsession(T,w=None):
             + f'<div style="display: flex; gap: 9px; margin-top: 4px;">{btn(T,"Open In Chat","secondary",I["chat"])}</div></div>'
             + sidecol(T,chat=True) + '</div></div>')
 
-def archivesettings(T,w=500):
+def archivesettings(T,w=500,bare=False):
     sel=(f'<span style="font-size: 12px; color: {T["tp"]};">30 days &nbsp;'
          f'<span style="color: {T["ts"]};">&#9662;</span></span>')
-    return (f'<div style="width: {w}px; background: {T["bg"]}; border: 1px solid {T["bc"]}; border-radius: 12px; '
-            f'overflow: hidden;">'
+    return (f'<div style="width: {"100%" if bare else str(w)+"px"}; box-sizing: border-box; background: {T["bg"]}; '
+            + ('' if bare else f'border: 1px solid {T["bc"]}; border-radius: 12px; ')
+            + 'overflow: hidden;">'
             f'<div style="padding: 13px 16px; border-bottom: 1px solid {T["border"]};">'
             f'<span style="font-size: 14.5px; font-weight: 600; color: {T["tp"]};">Sessions</span></div>'
             f'<div style="padding: 4px 16px 15px;">'
@@ -4588,3 +4602,21 @@ def anchorcard(T,*,kind="work",title="Reconcile vendor invoices against the Marc
             f'padding: 10px 12px; box-shadow: 0 0 0 3px {T["accq"]};">'
             f'<div style="display: flex; gap: 8px; align-items: flex-start;">{lead}'
             f'<span style="font-size: 12.5px; color: {T["tp"]}; line-height: 1.4;">{title}</span></div></div>')
+
+
+# ============ SETTINGS, THE WINDOW — screen 15 (2026-09-22) =============
+def panehead(T,title,action=""):
+    return (f'<div style="display: flex; align-items: center; gap: 10px; padding: 16px 18px 6px;">'
+            f'<span style="font-size: 17px; font-weight: 600; color: {T["tp"]}; flex-grow: 1;">{title}</span>{action}</div>')
+
+def accountpane(T):
+    signed=(f'<span style="display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: {T["ts"]};">'
+            f'<span style="width: 7px; height: 7px; border-radius: 50%; background: {T["ok"]};"></span>Signed in</span>')
+    return (panehead(T,"Account")
+            + f'<div style="padding: 0 18px 18px; display: flex; flex-direction: column; gap: 14px;">'
+            + block(T,"CONSOLE SIGN-IN",sunk(T,setrow(T,label="This Mac",note="Owner",control=signed)
+                                              + setrow(T,label="Sign Out Everywhere",control=btn(T,"Sign Out","dest"),last=True)))
+            + block(T,"INSTANCE REPOSITORY",sunk(T,kv(T,"Status","clean &mdash; nothing waiting to sync")
+                                                  + kv(T,"Last synced","4 minutes ago")
+                                                  + kv(T,"Remote","github.com/mattcolf/metistry-home",mono_=True,last=True)))
+            + '</div>')

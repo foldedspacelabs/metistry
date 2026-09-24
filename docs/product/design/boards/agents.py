@@ -42,7 +42,7 @@ WHAT=pan(L,"WHAT IS ON THIS SCREEN, AND WHY PERMISSIONS LIVE HERE",
 ROWP=pan(L,"THREE THINGS PER ROW — AND WHAT CAME OFF IT",
   f'<div style="background: {L["bg"]}; border: 1px solid {L["border"]}; border-radius: 11px; overflow: hidden;">'
   + groupbar(L,"YOURS","3")
-  + arow(L,name="collator",what="daily at 6:02 AM · Morning Digest",seen="6m",state="working",link="Morning Digest")
+  + arow(L,name="collator",what="daily at 6:02 AM · Morning Brief",seen="6m",state="working",link="Morning Brief")
   + arow(L,name="vendor-research",what="when Metis delegates",seen="3h")
   + arow(L,name="inbox-triage",what="paused",seen="—",last=True) + '</div>'
   + nt(L,"<b>Who it is, what it is, whether it&rsquo;s working.</b> The first attempt had seven columns.",14)
@@ -103,7 +103,7 @@ PERMP=pan(L,"ONE LINE PER RESOURCE, AND ABSENCE IS THE DENIAL",
   + nt(L,"The previous pass gave every verb its own row and a control in each one, so <b>Knowledge</b> appeared "
         "twice and the table was mostly furniture. One line per resource, <b>Read</b> and <b>Write</b> as columns, "
         "and the cell says what the verb covers.",14)
-  + nt(L,"<b>The Allow / Ask First / Never control is gone.</b> Anything not listed is not granted, which is the "
+  + nt(L,"<b>The On / Ask / Off control is gone from this table.</b> Anything not listed is not granted, which is the "
         "same information in none of the space — and it is the honest shape, because the list of things an agent "
         "<i>cannot</i> do is infinite. A verb that waits for you carries one glyph; nothing else needs a state at "
         "all. Changing any of it is one <b>Edit</b> on the section, not a control per cell.",12)
@@ -121,9 +121,9 @@ MCPP=pan(L,"AND THE ROWS THAT ARE NOT METISTRY AT ALL",
        "this grid is the only thing standing between an agent and a work system.")
   + nt(L,"It also raises the stakes on one distinction the table now has to carry: reading <b>Areas/Finance</b> is "
         "reading your own vault, while commenting on a Jira issue is <b>acting as you in a system other people "
-        "watch</b>. That is why Comment is <b>Ask First</b> there and Read is <b>Allow</b> — and it is the reason "
+        "watch</b>. That is why Comment is <b>Ask</b> there and Read is <b>On</b> — and it is the reason "
         "a per-server grant cannot be one switch.",12)
-  + nt(L,"The servers themselves are defined on <b>Resources</b>, a new top-level row — one place holds the "
+  + nt(L,"The servers themselves are defined in <b>Settings &#9656; Resources</b> — one place holds the "
         "credential, and it is not this screen. Granting one to an agent or a routine happens here, in the table "
         "above, like everything else.",12))
 

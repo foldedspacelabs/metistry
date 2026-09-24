@@ -11,8 +11,8 @@ reconstruction of the prompt from files.
 ## 1. Layout
 
 ```
-Routines ▸ Morning brief ▸ Today, 6:02 AM
-Morning brief   [ran clean]                        Tuesday 22 Sep · 6:02 AM
+Routines ▸ Morning Brief ▸ Today, 6:02 AM
+Morning Brief   [ran clean]                        Tuesday 22 Sep · 6:02 AM
 ────────────────────────────────────────────┬────────────────────────────
 ▸ DEFINITION  collator                       │ WHAT METIS TOOK FROM THIS
 ▾ TASK        morning brief                  │  Lesson   routines/morning-brief
@@ -85,3 +85,11 @@ the step and said so. A lesson from a failure proposes the fix, not an apology.
 4. **Retention and purge** — 30 days, and **the fold must run before a session
    expires**, or the learning is lost with it.
 5. `run_detail` already returns everything in *The run* and *Tool calls*.
+
+## Corrected 2026-09-23 (review 01)
+
+The brief writes **`Journal/Brief/<date>.md`**, a machine-owned file, never the
+owner's daily note (C97). The routine's display name is **Morning Brief** (C55),
+and a failed run's pill is drawn in `failed` with its own mark (C95, amendments
+§8.3) — it had been drawn in the degraded ink.
+

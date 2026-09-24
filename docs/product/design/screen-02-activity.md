@@ -272,7 +272,7 @@ with three differences that follow from what a routine is.
 system on a schedule, so its actor is neutral — `plan-tomorrow` is the actor and
 there is no agent behind it. A routine that assigns work to one of the owner's
 agents has **that agent** as the actor, with the routine named as the reason it
-ran: *collator · Morning Digest · ran its routine*. A routine is an assignment,
+ran: *collator · Morning Brief · ran its routine*. A routine is an assignment,
 not a species of actor, so the thing that acted is the agent.
 
 | Part | Value | Why |

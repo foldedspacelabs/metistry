@@ -43,7 +43,7 @@ These change what gets drawn. Each has a recommendation; most are a yes or no.
 | --- | --- | --- | --- |
 | 1 | **What is the assistant called on screen?** Five labels today: `ASSISTANT` (Chat, Today), `METIS` (Run detail), `METIS WROTE THIS` (Activity, Knowledge), `METIS SUGGESTS` (Routines); actor chips flip between `metis` and `assistant` on one board. | **Metis**, everywhere Metis wrote something; *assistant* stays a glossary role. Changes the ratified agent-prose component (HANDOFF §3). | Chat_00, Today-Hub_00, RunDetail_00, NeedsYou_00/01 |
 | 2 | **Rooms: a Work child, or ruling 4's filter-plus-thread?** Ruling 4 (2026-09-18) demoted Rooms; round E drew a Rooms list under Work and nothing reversed the ruling. | **Keep ruling 4.** The thread lives in card detail and the artifact margin; a *Has thread* filter on Board replaces the list. One less place to look. | review-00 Ratified #4; screen-16 §2 |
-| 3 | **Can Metis move a meeting with other people in it?** The Today board offers *Move The Vendor Sync* and "meetings Metis may move: any"; screen-05 §14.5 says it stops one step short. | **Stop short**, as the spec says: *Draft the move*, never the move. Other people's calendars are not the owner's to act on silently. | Today-Hub_01; screen-05 §14.5 |
+| 3 | **Can Metis move a meeting with other people in it?** *(Ruled: yes, warning first.)* The Today board offers *Move The Vendor Sync* and "meetings Metis may move: any"; screen-05 §14.5 says it stops one step short. | **Stop short**, as the spec says: *Draft the move*, never the move. Other people's calendars are not the owner's to act on silently. | Today-Hub_01; screen-05 §14.5 |
 | 4 | **One retention for a meeting transcript.** Live Capture says *90 minutes, then gone*; the meeting card says *kept 30 days*; C78 ruled 30 days. 90 minutes is shorter than a long meeting. | **30 days, counted from when the session ends**, like every other session. | CaptureBar_02, Settings_01, NeedsYou_01; C78 **(round E)** |
 | 5 | **Needs You's buttons: calm or loud?** Every card carries filled green Approve and filled red Decline; amendments §1.1 says red is spoken for by *failed*, and the bell says "decisions, not failures". | **Approve is the one accent-filled button; Revise and Decline are outlines; filled red only for the irreversible.** Changes round B's "Approve is affirmative green". | NeedsYou_00, Request_00; amendments §1.1 |
 | 6 | **One vocabulary for permissions.** *Allow · Ask First · Never* (C53, amendments §4) vs *On · Ask · Off* (Resources, C61) vs *Asks you first* (table legends). | **On · Ask · Off** — the newest, the shortest, and the one the owner chose in C61. Annotate C53. | amendments §1.1, §4; screen-07 §10; screen-09 §3.2 |
@@ -52,6 +52,11 @@ These change what gets drawn. Each has a recommendation; most are a yes or no.
 | 9 | **Where do owner-relevant events go that aren't requests?** A budget stopping compute, an expired token, a failed routine, a knowledge conflict — each shows only on its own screen, and P2 leaves no other channel. | **Each becomes a Needs You row** (kind `report` or `action`) — the owner only has to look in one place. | screen-10 §3, screen-17 §2, screen-09, Agents_01 |
 | 10 | **One morning, or four?** By 7am there are *Tomorrow's Plan*, *Standup Draft*, *Morning Digest* and *Morning brief*, under drifting names and with contradictory contents. | **One morning brief, and it is Today** at first open: the plan and standup are sections of it; the message links there. | Routines_00, Today-Hub_00, RunDetail_00, Activity_00 |
 | 11 | **Tick a task in the app in phase 1?** Every Today checkbox is read-only in phase 1, so the first thing he does each day sends him to Obsidian. | **Yes** — pull the check route (daily-flow P2-3) into phase 1. A task list you cannot tick is only ever read. | Today_00; daily-flow §11 |
+
+**Ruled 2026-09-23** (C88–C98): 1 — the name the owner configures, default Metis ·
+2 — yes · 3 — **allowed, warning first** · 4 — 30 days · 5 — agreed · 6 — On · Ask ·
+Off · 7 — Autonomous / Review · 8 — failed · 9 — Needs You · 10 — one · 11 — yes, a
+key feature. Every §5 opportunity adopted. **iPhone and PWA deferred** (R2.1).
 
 ---
 
@@ -149,7 +154,7 @@ that every board draws from, checked by the build.
 
 ### 3.1 Three whole-product gaps
 
-- **R2.1 The phone.** Fifteen of seventeen specs say nothing about the PWA, which is
+- **R2.1 The phone.** *Deferred by the owner 2026-09-23.* Fifteen of seventeen specs say nothing about the PWA, which is
   the owner's away-from-desk client. Today's spine and rail, Board's five columns,
   Artifacts' margin threads, Routines' week axis and Run detail's two columns are
   all wide-window only, and Settings is a Mac window, so budgets and Resources are
@@ -306,3 +311,37 @@ Activity should be held to those two.
 4. **Needs You, calmer**, with the meeting loop closed at Stop.
 5. **The three whole-product gaps** (§3.1): phone, offline, keyboard and VoiceOver.
 6. **States for screens 10–17** (§3.2) and the flows in §3.3, including the Compute pane.
+
+---
+
+## 8. Status — 2026-09-23, after the rulings
+
+**Done (cleanup, §2):** the rulings are logged as C88–C98 and written as rules in
+`design-system-amendments.md` §8. `design-system.md` carries a superseded banner
+and a note at each stale passage; the glossary, daily-flow §10, components-01,
+HANDOFF and eleven specs are corrected. On the boards: the configured name on
+every attribution; Approve accent-filled and Approve · Revise · Decline
+everywhere; On · Ask · Off; Morning Brief; 30-day transcripts; *freshness
+unknown*; the brief and meeting to-dos out of the owner's daily note; *failed*
+with its own mark and ink, the expired credential included; one agent chip;
+neutral presence, staleness and provenance; the meeting notes on the wash, room
+turns in the serif; no opacity on ink; the glass floor held; the halo at its
+widest; HIG title casing; 12-hour clocks; Board's Blocked column, reason chip and
+Has Thread filter; no Rooms list; the move warning on Today; `fixture.py`, with
+Today's day, counts, times and spend reconciled. Every frame measured.
+
+**Not done, and why:**
+- `Capture`, `Theme`, `Facets`, `Plugin`, `Voice` and `Item-Model` are not
+  modules, so their stale navs and palettes are flagged in HANDOFF §0 rather than
+  redrawn — port each the next time it changes.
+- `PRODUCT.md`, `design-brief.md` and `app-ux-plan.md` still say Auto /
+  Supervised; they are the owner's files, flagged in C94.
+- Routine timeline tick data and a calendar tool's raw output keep 24-hour
+  values: the first is never displayed, the second is data shown verbatim (P1).
+
+**Next (adopted, §5):** Today elevated — one Morning Brief as Today's first
+state, Next Up, Close the Day, three predictions, live checkboxes (C97, C98);
+Needs You calmer, with the meeting loop closed at Stop and the C96 events drawn;
+then the offline and keyboard/VoiceOver passes (§3.1, phone deferred) and states
+for screens 10–17.
+

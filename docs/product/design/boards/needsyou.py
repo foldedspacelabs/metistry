@@ -6,7 +6,7 @@ C80); a meeting arrives as one grouped card (C81).
 """
 from lib import *
 
-CW,CH=2240,4200
+CW,CH=2240,4340
 
 BELLP=pan(L,"THE BELL — THE ONLY BADGE IN THE PRODUCT",
   f'<div style="display: flex; flex-direction: column; gap: 16px;">'

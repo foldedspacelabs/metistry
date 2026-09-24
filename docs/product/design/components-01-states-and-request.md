@@ -161,16 +161,17 @@ Flagged here, not edited there.
 
 | Answer | Treatment |
 | --- | --- |
-| **Approve** | affirmative fill, check glyph. Where the row carries `payload.suggested_work` it **also makes the task** |
-| **Decline** | destructive fill, cross glyph. Confirms first where irreversible, naming the consequence in the tool's words |
-| **Revise** | secondary, pencil glyph. An empty reason cancels rather than sends |
+| **Approve** | **accent fill** (C92; was affirmative green), check glyph. Where the row carries `payload.suggested_work` it **also makes the task** |
+| **Decline** | **outlined** (C92; was destructive fill), cross glyph. A destructive fill only where the act cannot be undone. Confirms first where irreversible, naming the consequence in the tool's words |
+| **Revise** | outlined, pencil glyph. An empty reason cancels rather than sends |
 | **Review later** | **icon only** — a clock with an arrow — at the trailing edge, `aria-label="Review later"`. A snooze is not a decision, so it does not wear a decision's clothes |
 
-Order is Approve · Decline · Revise, then the spacer, then Later. The two
-opposite answers sit together because they are the binary the card actually
-asks; Revise is the escape hatch from it. The mis-click risk of putting an
-affirmative fill beside a destructive one is real and is covered by Decline's
-confirmation where it is irreversible — which was already the rule.
+Order is **Approve · Revise · Decline**, then the spacer, then Later (C92,
+ruled 2026-09-23 — this passage first said Approve · Decline · Revise and
+disagreed with `screen-03-needs-you.md` §10.1). Revise sits beside Approve
+because it is *nearly yes*; Decline sits last, away from the one filled
+button, which also retires the mis-click risk of a green fill beside a red
+one.
 
 **Glyphs in the buttons: keep them.** These are the two most consequential
 buttons in the product and without a glyph they are told apart by **fill colour

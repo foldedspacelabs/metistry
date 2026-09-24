@@ -51,7 +51,7 @@ directives.
 | D16 | Two new routines (`plan-tomorrow`, `standup-draft`), three extended. All `@hourly` with an in-routine gate | §7 |
 | D17 | Mail is a **Swift, read-only, allowlisted** `apple-mail` bridge on the second instance. `full_disk_access` is already in the manifest TCC enum | §8.2 |
 | D18 | Build a small Metistry Obsidian plugin (4 jobs). The vault must stay fully readable with no plugin at all, and it does | §9 |
-| D19 | **Work ▸ Today** is the 5th child of Work. No new sidebar row, no new top-level section | §10 |
+| D19 | ~~**Work ▸ Today** is the 5th child of Work. No new sidebar row, no new top-level section~~ **Superseded:** Today is the first sidebar row (C30, C57) | §10 |
 | D20 | No new `brain` tool. The bridge is at its declared ceiling; every new read capability is a named query behind `queries_run` | §1.5, §10 |
 
 ---
@@ -1090,6 +1090,12 @@ build output would be committed to the user's vault repo.
 ---
 
 ## 10. App surfaces
+
+> **Superseded in part (2026-09-23).** The sidebar is eight rows — Today · Chat ·
+> Activity · Work ▸ · Knowledge ▸ · Agents · Routines, then Pinned (C57); Feed is
+> **Activity**; Rooms is not a child of Work (ruling 4, C89); the day's plan and
+> standup are sections of the one Morning Brief shown as Today (C97); requests
+> take Approve · Revise · Decline (C92). See `design/design-system-amendments.md`.
 
 **No new top-level section.** The sidebar is settled at six rows plus Pinned
 (`docs/product/app-ux-plan.md:614-624`), and Work's children are Board ·

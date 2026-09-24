@@ -200,7 +200,7 @@ Which gives four moments, with the motion falling as the facts arrive:
 
 | When | What is on screen | What moves |
 | --- | --- | --- |
-| **0–2s**, nothing back yet | the turn appears at once, attributed and stamped; three 5px `agent` dots and the word `working`; `Stop` from the first frame | the dots, on a 1.45s opacity loop — the **only** looping animation in the product |
+| **0–2s**, nothing back yet | the turn appears at once, attributed and stamped; three 5px `agent` dots and the word `working`; `Stop` from the first frame | the dots, on a 1.45s opacity loop — one of the product's **two** loops (C75 added the recording breath) |
 | **tools running** | the dots give way to the strip: running tool name in mono, `· 2 tools · 6s` | the tool name, the count and the elapsed second — every frame a fact |
 | **prose streaming** | the text, the strip collapsed to one line, no dots | the caret at the end of the sentence, and the text itself |
 | **60s, nothing back** | `working · nothing back for 62s` on `degraded-quiet`, count still climbing | nothing but the count |

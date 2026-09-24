@@ -27,7 +27,7 @@ per screen.)
 | --- | --- | --- |
 | lead | a **checkbox** — you tick it | the **board glyph** in `agent`, and **no checkbox**, because there is nothing here for you to tick |
 | lives in | a line in your note, path shown | a row on the Board, owner and lease shown |
-| verbs | Complete · Open in Obsidian · Hand to an agent | Open on the Board — it is not yours to finish |
+| verbs | Complete · Open in Obsidian · Delegate | Open on the Board — it is not yours to finish |
 | source | `vault_tasks` | `work` + `meta.blocked_by` |
 
 The difference is carried by **what you can do to it**, not by a tint. That
@@ -304,8 +304,8 @@ artifacts, requests and agent status — four things Work has no claim on. A
 child of Work showing four things Work does not own is in the wrong place, and
 the sidebar was the last thing still saying otherwise.
 
-**Second, not first.** Chat stays first because it is where you go with a
-question; Today is where you go with a morning. P6's *force* survives intact —
+~~**Second, not first.**~~ **Superseded (C57): Today is the first row.** The
+day starts there, and Chat is one click and ⌘2 away. P6's *force* survives intact —
 same rows, same order, same names on every platform. It is the **number** that
 changes, and the number was never the principle.
 
@@ -465,15 +465,16 @@ each time you look.
 
 - **A focus block** is an event on your calendar with no other attendees.
   Nobody else is affected, it is reversible, and Metis can simply do it.
-- **Moving a meeting with people in it** changes *their* day — and
-  `ACTION_KINDS` excludes sending anything, so **Metistry cannot tell them it
-  moved**. So it stops one step short: it prepares the move and hands you the
-  message.
+- **Moving a meeting with people in it** changes *their* day. **Ruled
+  2026-09-23 (C90): Metis may do it, and warns first.** *Move the Vendor Sync*
+  opens a confirmation that names who will be told and the new time — neutral,
+  not tinted, since moving a meeting is not a fault — and the calendar sends
+  the update, not Metistry, so `ACTION_KINDS` still sends nothing itself.
+  Build ask: a calendar-move action whose preview returns the attendees.
 
-The two buttons are deliberately different verbs: **Block** does it, **Draft**
-gets it ready. Moving someone's meeting without telling them is worse than
-leaving the day fragmented, and a product that quietly did it once would never
-be trusted with a calendar again.
+Moving someone's meeting without telling them is worse than leaving the day
+fragmented, which is why the warning names the people rather than asking *Are
+you sure?*.
 
 The offer is proactive but not a nag: it appears when the day is measurably
 fragmented — the bar is how it knows — and **Not Today** means not today, not

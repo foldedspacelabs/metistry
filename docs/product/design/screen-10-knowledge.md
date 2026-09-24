@@ -156,8 +156,12 @@ the owner has chosen where to look.
 ## 6. Sources — one line, until something is wrong
 
 ```
- ●  4 sources, all current                                                    ›
+ ○  4 sources · freshness unknown                                            ›
 ```
+
+*Until the per-collector last-ok time exists (C1, C64), the line cannot say
+"all current" — that would be an inferred ok (P5). It reports what it can, and
+becomes "4 sources, all current" the day the wire answers.*
 
 Expanded by a fault, not by a click:
 
@@ -204,3 +208,10 @@ the argument for `partial`, and the two link lists.
 3. **One written line per area** (C68), from the fold or a sibling routine.
 4. **A per-collector last-ok time** (C1/C48/C64), still.
 5. **Ratify `partial`** (C28), on the strength of the conflict row.
+
+## Corrected 2026-09-23 (review 01)
+
+- A draft is answered **Approve · Revise · Decline** (amendments §8.1), not
+  *Accept · Edit First · Discard*.
+- The sources line reads *freshness unknown* until the wire can say otherwise
+  (§6, P5).

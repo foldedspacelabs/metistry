@@ -27,10 +27,10 @@ the footer. It is not yours to complete.
 
 ### A markdown task — a line in your note
 
-**In your note:** the heading above the line and its neighbours, the line itself
+**In its file:** the heading above the line and its neighbours, the line itself
 highlighted, the path beside the label. The note is the description.
 
-Verbs: **Complete · Open In Obsidian · Hand To An Agent** — Today's verbs, in
+Verbs: **Complete · Open in Obsidian · Delegate** (amendments §8) — Today's verbs, in
 Today's order.
 
 ## 2. What this asks of the build
@@ -41,3 +41,12 @@ Today's order.
    resolved.
 3. **Note context** for a markdown task, through the vault query.
 4. `history`, the lease and the review artifact are already on the row.
+
+## Corrected 2026-09-23 (review 01)
+
+The markdown example now lives in the **meeting note**, not the owner's daily
+note: an approved meeting to-do is written where the meeting's notes are, because
+Metis never writes the owner's daily note — one writer per file (C97, amendments
+§8.5). The history reads *metis · added when you approved the Vendor review
+notes*. *Hand To An Agent* is **Delegate** with the spark, the one verb for it.
+

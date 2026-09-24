@@ -1,4 +1,4 @@
-"""Board: Work ▸ Artifacts and Work ▸ Rooms.
+"""Board: Work ▸ Artifacts, and a task's room (no Rooms list — ruling 4, C89).
 
 Screen 16, new 2026-09-23. An artifact is a folder in git and every version one
 commit; comments sit on an exact version, pinned to lines, and are drawn in the
@@ -7,7 +7,7 @@ row is the cap, and only the owner resolves.
 """
 from lib import *
 
-CW,CH=2600,3860
+CW,CH=2600,3400
 
 ALIST=pan(L,"ARTIFACTS — WHAT EXISTS, WHO MADE THE LATEST, WHAT&rsquo;S BEING DISCUSSED",
   row(workwin(L,artlist(L)),18)
@@ -25,26 +25,24 @@ ACOMP=pan(L,"COMPARE — WHAT CHANGED, AND WHICH THREADS STAYED BEHIND",
   + nt(L,"The diff between two versions. A thread about a line that changed stays on its version and says so, "
         "with a link back.",14))
 
-RLIST=pan(L,"ROOMS — EVERY THREAD, AND WHICH ONES CAME TO YOU",
-  row(workwin(L,roomslist(L)),18)
-  + nt(L,"<b>Who has spoken</b>, not who is in it: a room has no members. The pips count agent turns in a row "
-        "against the cap of ten. A room that hit the cap says <b>came to you</b> and why, in the sentence the "
-        "system already stores.",14))
-
-RVIEW=pan(L,"A ROOM — NO @, NO RECIPIENT, AND ONLY YOU RESOLVE",
+RVIEW=pan(L,"A TASK&rsquo;S ROOM — OPENED FROM ITS CARD, OVER BOARD",
   row(workwin(L,roomview(L)),18)
-  + nt(L,"<b>The composer is <i>Add to the room</i></b> &mdash; no mentions, no recipient, because posting wakes "
+  + nt(L,"<b>There is no Rooms list</b> (ruling 4, C89). A thread lives with its subject: <b>Open Room</b> in card "
+        "detail opens this over Board, and Board&rsquo;s <b>Has Thread</b> filter finds the rest. A room that hits "
+        "the cap arrives in Needs You.",14)
+  + nt(L,"<b>The composer is <i>Add to the Room</i></b> &mdash; no mentions, no recipient, because posting wakes "
         "nobody; agents read the room when they pick up the task. Your message resets the agent run.",14)
   + nt(L,"<b>Resolve</b> is yours alone, and a resolved room still takes messages.",12))
 
 ASKS=pan(L,"WHAT THIS ASKS OF THE BUILD",
-  nt(L,"Nothing new. The artifact list, versions, files, diff and comments are all routes today; rooms come from "
-        "the <b>rooms</b> query with the agent tail and the escalation reason already on each row.",0))
+  nt(L,"Nothing new for artifacts: the list, versions, files, diff and comments are all routes today. A task&rsquo;s "
+        "room comes from the <b>rooms</b> query; <b>board</b> should return <b>has_thread</b> and a count per card so "
+        "the filter needs no second read.",0))
 
-body=(heading("ROUND E · SCREEN 16, NEW","Work ▸ Artifacts and Rooms",
-   "Artifacts: the list, one artifact with its versions and margin threads, and a compare. Rooms: every thread, "
-   "how close each is to the cap, and one room with the composer and Resolve.",L)
-  + row(ALIST,18) + row(AVIEW,18) + row(ACOMP,18) + row(RLIST,18) + row(RVIEW,18) + row(ASKS,18)
+body=(heading("ROUND E · SCREEN 16, NEW","Work ▸ Artifacts, and a task&rsquo;s room",
+   "Artifacts: the list, one artifact with its versions and margin threads, and a compare. A task&rsquo;s room, "
+   "opened from its card over Board — there is no Rooms list.",L)
+  + row(ALIST,18) + row(AVIEW,18) + row(ACOMP,18) + row(RVIEW,18) + row(ASKS,18)
   + row(f'<div style="background: {D["bg"]}; border-radius: 14px; padding: 22px; flex-grow: 1;">'
         + sub("DARK",D["tt"]) + workwin(D,artview(D)) + '</div>',18))
 (PROJ/"Artifacts.dc.html").write_text(page("Artifacts",wrap(body,CW,CH,"#ece7dd",L["tp"],40),CW,CH,"#ece7dd"),encoding="utf-8")

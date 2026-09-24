@@ -222,8 +222,8 @@ it rather than a sentence a model wrote.
 ### B6 · Today as a top-level section
 
 Not a schema change — a navigation one, and it breaks a ratified rule, so it
-is written down here too. Today moves out of Work to the **second row** in the
-sidebar; Work returns to four children. See C30 and `screen-05-today.md` §13.
+is written down here too. Today moves out of Work to the **first row** in the
+sidebar (C57; this first said second); Work returns to four children. See C30 and `screen-05-today.md` §13.
 
 ### B7 · Agent prose needs a stable id, so any of it can be rated
 

@@ -36,7 +36,7 @@ first match wins.
 | Backlog | how long has nobody taken this? | `2d in backlog` |
 | Assigned | whose name is on it? | the owner chip |
 | In Progress | how much lease is left? | `4m left`, or the lapse |
-| Needs You | why is it stuck? | the state chip |
+| Blocked | what would unblock it? | the one-line reason, as a chip (ruling 3; the column was drawn as *Needs You* until 2026-09-23) |
 | Done | when did it close — and did anything come back? | `closed 2h ago`, plus a report chip where there is one |
 
 **The way out of a crowded card is not a smaller card — it is fewer facets.**
@@ -134,3 +134,12 @@ refetches either way. The server owns the columns.
 - Whether `escalated` should ever gain a fourth clause. `board.md` rules that
   it needs its own sentence and its own decision; nothing here asks for one.
 - Card detail popover: drawn as screen 14.
+
+## Corrected 2026-09-23 (review 01)
+
+- The fourth column is **Blocked** (ruling 3), and its card chip is the one-line
+  reason — *Waiting on #417 to merge* — not the word *Blocked* again.
+- The filter row gains **Has Thread** (C89); a card's thread and note marks open
+  the card's detail like every other click (C84).
+- *Release to Assigned*, not *Addressed To* (C38).
+

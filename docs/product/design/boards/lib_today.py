@@ -18,12 +18,12 @@ def eyebrow(T,t,col=None,mt=0):
     return (f'<div style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {col or T["tt"]}; '
             f'margin-top: {mt}px;">{t}</div>')
 
-def standupsec(T,*,open_=True):
+def standupsec(T,*,open_=True,phone=False):
     head=(f'<div style="display: flex; align-items: center; gap: 8px;">'
           f'<span style="display: flex; color: {T["ts"]};">{ic(I["chevd"] if open_ else I["chevr"],12,2.4)}</span>'
           f'<span style="font-size: 12.5px; font-weight: 600; color: {T["tp"]};">Standup</span>'
-          f'<span style="font-size: 12px; color: {T["ts"]};">9:15 AM &middot; ready to copy</span>'
-          f'<span style="flex-grow: 1;"></span>{btn(T,"Copy Standup","secondary",I["copy"])}</div>')
+          + ("" if phone else f'<span style="font-size: 12px; color: {T["ts"]};">9:15 AM &middot; ready to copy</span>')
+          + f'<span style="flex-grow: 1;"></span>{btn(T,"Copy Standup","secondary",I["copy"])}</div>')
     if not open_: return head
     body="".join(f'<div style="display: flex; gap: 10px; margin-top: 6px;">'
                  f'<span style="width: 74px; flex-shrink: 0; font-size: 11.5px; font-weight: 600; color: {T["ts"]}; padding-top: 2px;">{k}</span>'
@@ -68,7 +68,7 @@ def brief(T,*,state="open",standup_open=False,w=None,phone=False):
     text=(f'<div style="font-family: {SERIF}; font-size: {15 if not phone else 15.5}px; line-height: 1.58; '
           f'color: {T["tp"]}; margin-top: 9px;">{BRIEF_TEXT}</div>')
     sec=(f'<div style="margin-top: 12px; padding-top: 11px; border-top: 1px solid {rgba(T["ag"],0.18)};">'
-         + standupsec(T,open_=standup_open) + '</div>')
+         + standupsec(T,open_=standup_open,phone=phone) + '</div>')
     foot=(f'<div style="display: flex; align-items: center; gap: 10px; margin-top: 11px; flex-wrap: wrap;">'
           f'<span style="font-size: 12px; color: {T["ts"]};"><b style="color: {T["tp"]};">The plan is the day below</b> '
           f'&middot; 7 tasks, 2 carried</span><span style="flex-grow: 1;"></span>'
@@ -90,6 +90,10 @@ def taskrow(T,*,title,done=False,receipt=None,last=False,hover=False,pad=14,**kw
              f'<span style="display: flex; color: {T["ok"]};">{ic(I["check"],12,2.3)}</span>Done &middot; written to '
              + mono(F["daily_note"],T["ts"],10.5)
              + f'<span style="font-weight: 600; color: {T["acc"]};">Undo</span></div>')
+    if receipt=="queued":
+        rec=(f'<div style="display: flex; align-items: center; gap: 7px; margin-top: 6px; font-size: 11.5px; color: {T["ts"]};">'
+             f'<span style="display: flex; color: {T["ts"]};">{ic(I["clock"],12,2.2)}</span>Waiting for the connection'
+             f'<span style="font-weight: 600; color: {T["acc"]};">Undo</span></div>')
     if receipt=="stale":
         rec=(f'<div style="margin-top: 7px; background: {T["staleq"]}; border-radius: 8px; padding: 8px 10px; '
              f'font-size: 11.5px; color: {T["stale"]}; line-height: 1.5;">This line changed in your note since it was '
@@ -145,8 +149,8 @@ def nextup(T,*,kind="meeting",mins=26,w=None,phone=False):
              f'letter-spacing: 0.07em; color: {T["ag"]};">{ic(I["spark"],12,2)}{AN}'
              f'<span style="font-weight: 400; letter-spacing: 0; color: {T["ts"]};">written, not retrieved</span></div>'
              f'<div style="font-family: {SERIF}; font-size: 13.5px; color: {T["tp"]}; line-height: 1.5; margin-top: 4px;">'
-             f'He has been waiting on the SOW since Tuesday, and the comparables you now have are the thing you '
-             f'did not have on the 6th.</div></div>')
+             f'He has been waiting on the SOW since Tuesday; the comparables in last night&rsquo;s fold are the '
+             f'answer he was missing.</div></div>')
         acts=(f'<div style="display: flex; align-items: center; gap: 8px; margin-top: 12px; flex-wrap: wrap;">'
               f'{btn(T,"Open Notes","secondary",I["note"])}{btn(T,"Record","secondary",I["rec"])}'
               + ('' if phone else '<span style="flex-grow: 1;"></span>')

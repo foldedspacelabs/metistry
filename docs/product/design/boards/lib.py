@@ -4243,7 +4243,7 @@ def accesscard2(T,*,state="pending",width=None,agent="drey-dev",trust="internal"
     head=reqhead(T,I["key"],"ACCESS",agent,when,trust,again)
     title=(f'<div style="font-size: 14.5px; font-weight: 600; color: {T["tp"]}; margin-top: 9px;">'
            f'Read {mono(asked if state!="revising" else "Areas/Finance/Vendors",T["tp"],13.5)}</div>')
-    acts=(f'<div style="display: flex; align-items: center; gap: 7px; margin-top: 12px;">'
+    acts=(f'<div style="display: flex; align-items: center; gap: 7px; row-gap: 8px; flex-wrap: wrap; margin-top: 12px;">'
           f'{btn(T,"Approve","affirm",I["check"])}{btn(T,"Revise","secondary",I["pencil"])}'
           f'{btn(T,"Decline","secondary",I["x"])}<span style="flex-grow: 1;"></span>'
           f'{btn(T,"","ghost",I["later"],icon_only=True,title="Later")}{helplink(T)}</div>')
@@ -4315,11 +4315,11 @@ def meetingcard(T,*,expanded=True,result=False,width=None):
     note=(f'<div style="background: {T["agq"]}; border-radius: 8px; padding: 9px 11px; font-family: {SERIF}; font-size: 12.5px; '
           f'color: {T["tp"]}; line-height: 1.55;">Kessler confirmed net-45 and dropped the volume tier. The March '
           f'renewal is no longer the cheapest option; Orlin may undercut it.</div>'
-          f'<div style="display: flex; align-items: center; gap: 7px; margin-top: 9px;">'
+          f'<div style="display: flex; align-items: center; gap: 7px; row-gap: 6px; flex-wrap: wrap; margin-top: 9px;">'
           + (f'<span style="display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: {T["ok"]};">'
              f'{ic(I["check"],12,2.2)}Approved</span>' if result else
              f'{btn(T,"Approve","affirm",I["check"])}{btn(T,"Revise","secondary",I["pencil"])}')
-          + f'<span style="flex-grow: 1;"></span>{mono("Journal/Meetings/2026-09-22-vendor-review.md",T["ts"],10.5)}</div>')
+          + f'<span style="flex-grow: 1;"></span>{mono(F["meeting_note"],T["ts"],10.5)}</div>')
     states=(["ok","ok","answered","ok"] if result else [None]*4)
     todos="".join(todoline(T,t,state=s,last=i==3) for i,(t,s) in enumerate(zip(TODOS,states)))
     yours=(f'<div style="font-size: 12px; color: {T["ts"]}; line-height: 1.6;">'
@@ -4333,7 +4333,7 @@ def meetingcard(T,*,expanded=True,result=False,width=None):
                            f'<span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["tt"]};">{t}</span>'
                            f'<span style="flex-grow: 1;"></span>{extra}</div>')
     foot=("" if result else
-          f'<div style="display: flex; gap: 7px; margin-top: 13px; padding-top: 12px; border-top: 1px solid {T["border"]};">'
+          f'<div style="display: flex; gap: 7px; row-gap: 9px; flex-wrap: wrap; margin-top: 13px; padding-top: 12px; border-top: 1px solid {T["border"]};">'
           f'{btn(T,"Accept All","affirm",I["check"])}{btn(T,"Revise","secondary",I["pencil"])}'
           f'{btn(T,"Decline All","secondary",I["x"])}'
           f'<span style="flex-grow: 1;"></span>'

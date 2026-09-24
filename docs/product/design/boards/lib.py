@@ -981,7 +981,7 @@ def row2(T,*,title,prn=None,facets=(),states=(),done=False,last=False,spark=Fals
     bits += [st(T,*s) for s in states]
     return (f'<div style="display: flex; gap: 11px; align-items: flex-start; padding: 11px 14px;'
             + ("" if last else f' border-bottom: 1px solid {T["border"]};') + '">'
-            f'<span style="display: flex; color: {T["tt"]}; opacity: 0.5; margin-top: 2px;">{ic(I["grip"],15,2.6)}</span>'
+            f'<span style="display: flex; color: {T["tt"]}; margin-top: 2px;">{ic(I["grip"],15,2.6)}</span>'
             f'<span style="margin-top: 2px; display: flex;">{box(T,done)}</span>'
             f'<div style="flex-grow: 1; min-width: 0;">'
             f'<div style="font-size: 14px; color: {T["tp"]};">{title}</div>'
@@ -1377,7 +1377,7 @@ def prose(T,text,*,when="8:47 AM",state=None,acts=None,diffblock=None,w=None):
                + "".join(acts) + '</div>' if acts else "") + '</div>')
 
 # ============ THE DAY BAR — five segments, travel included ===============
-SEGS=[("Meetings",130,0),("Travel",50,1),("Focus Blocked",90,2),("Tasks That Fit",55,3),("Doesn’t Fit",45,"deg")]
+SEGS=[("Meetings",160,0),("Travel",50,1),("Focus Blocked",90,2),("Tasks That Fit",55,3),("Doesn’t Fit",45,"deg")]
 CHART_L=["#0a3239","#145c67","#1e7784","#2a8b9a"]
 CHART_D=["#1b7584","#2ca5b8","#66c4d3","#aad9e1"]
 def seghex(T,k,dark):
@@ -1394,7 +1394,7 @@ def daybar(T,dark=False):
                    f'<span style="color: {T["tt"]};">{v}m</span></span>' for n,v,k in SEGS)
     return (f'<div><div style="display: flex; align-items: baseline; gap: 8px; margin-bottom: 7px; flex-wrap: wrap;">'
             f'<span style="font-size: 11px; font-weight: 700; letter-spacing: 0.07em; color: {T["tt"]};">THE DAY</span>'
-            f'<span style="font-size: 12px; color: {T["ts"]};">6h 10m committed against a 9-hour day · '
+            f'<span style="font-size: 12px; color: {T["ts"]};">5h committed against a 9-hour day · '
             f'<span style="color: {T["deg"]}; font-weight: 600;">45m does not fit</span></span></div>'
             f'<div style="display: flex; gap: 2px; height: 8px; border-radius: 999px; overflow: hidden; '
             f'background: {T["sunken"]};">{bars}</div>'
@@ -1602,7 +1602,7 @@ def trow3(T,*,title,done=False,last=False,spark=False,indent=0,**kw):
     bits=facets(T,**kw)
     return (f'<div style="display: flex; gap: 11px; align-items: flex-start; padding: 11px 14px 11px {14+indent}px;'
             + ("" if last else f' border-bottom: 1px solid {T["border"]};') + '">'
-            f'<span style="display: flex; color: {T["tt"]}; opacity: 0.5; margin-top: 2px;">{ic(I["grip"],15,2.6)}</span>'
+            f'<span style="display: flex; color: {T["tt"]}; margin-top: 2px;">{ic(I["grip"],15,2.6)}</span>'
             f'<span style="margin-top: 2px; display: flex;">{box(T,done)}</span>'
             f'<div style="flex-grow: 1; min-width: 0;">'
             f'<div style="font-size: 14px; color: {T["tp"]};">{title}</div>'
@@ -1669,10 +1669,10 @@ SERIFP=pan(L,"THE ASSISTANT'S VOICE — FOUR FACES, NO FONT LOADED",
   + nt(L,"P7 still holds in all four: every one of these is a system face, and nothing is downloaded.",12))
 
 # ============ CALENDAR — A TIMELINE, NOT A DIFF ==========================
-BEFORE=[("9:30","1:1 Jim","m",14),("11:00","Design review","m",20),("","",  "g",10),
-        ("1:00","Vendor sync","m",14),("","","g",8),("2:30","Open","g",20)]
-AFTER =[("9:30","1:1 Jim","m",14),("11:00","Design review","m",20),("11:45","Vendor sync","mv",14),
-        ("12:30","Focus — settings brief","f",30),("","","g",22)]
+BEFORE=[("9:30","1:1 Jim","m",10),("11:00","Design review","m",14),("1:00","Vendor review","m",14),
+        ("","","g",12),("3:00","Lease call","m",10),("3:30","Focus","f",22),("","","g",8)]
+AFTER =[("9:30","1:1 Jim","m",10),("11:00","Design review","m",14),("1:00","Vendor review","m",14),
+        ("1:45","Lease call","mv",10),("2:15","Focus — settings brief","f",36),("","","g",6)]
 def strip(T,rows,dark=False,label=""):
     def blk(t,n,k,w):
         col={"m":(CHART_D[1] if dark else CHART_L[0]),"mv":T["ag"],"f":T["acc"],"g":T["sunken"]}[k]
@@ -1697,16 +1697,15 @@ def calplan(T,dark=False):
                       f'<span style="width: 8px; height: 8px; border-radius: 2px; background: {c};"></span>'
                       f'<span style="color: {T["ts"]};">{n}</span></span>'
               for c,n in [((CHART_D[1] if dark else CHART_L[0]),"unchanged"),(T["ag"],"moved"),
-                          (T["acc"],"new focus block")]) + '</div></div>')
+                          (T["acc"],"focus block")]) + '</div></div>')
 
 def calblock2(T,dark=False,w=None):
-    return prose(T,"Your afternoon is four gaps of half an hour. Moving the <b>vendor sync</b> up by an hour and "
-                   "fifteen clears <b>12:30 to 2:00</b> for the settings brief — the only thing today that needs a "
-                   "long run at it.",
+    return prose(T,"The lease call at 3:00 cuts your afternoon in two. Moving it to <b>1:45</b>, straight after the "
+                   "vendor review, lets the focus block start at <b>2:15</b> — two and three-quarter hours for the "
+                   "settings brief instead of ninety minutes.",
       when="8:41 AM",
       diffblock=calplan(T,dark),
-      acts=[btn(T,"Block the Focus Time","secondary",I["spark"]),
-            btn(T,"Move the Vendor Sync&hellip;","secondary",I["spark"]),
+      acts=[btn(T,"Move the Lease Call&hellip;","secondary",I["spark"]),
             btn(T,"Not Today","ghost")],w=w)
 
 def policyrow(T,label,value,why,last=False):
@@ -1755,11 +1754,11 @@ def moveconfirm(T,w=380):
     ppl="".join(f'<div style="display: flex; align-items: center; gap: 8px; padding: 3px 0;">'
                 f'<span style="display: flex; color: {T["ts"]};">{ic(I["person"],13,1.9)}</span>'
                 f'<span style="font-size: 12.5px; color: {T["tp"]};">{n}</span></div>'
-                for n in ("Sam Kessler","Priya Shah","Dana Ruiz"))
+                for n in ("Tom Reyes",))
     return (f'<div style="width: {w}px; background: {T["elevated"]}; border: 1px solid {T["bc"]}; border-radius: 12px; '
             f'box-shadow: 0 12px 34px rgba(26,24,21,0.18); padding: 14px 16px;">'
-            f'<div style="font-size: 14px; font-weight: 600; color: {T["tp"]};">Move the Vendor Sync to 11:45 AM?</div>'
-            f'<div style="font-size: 12px; color: {T["ts"]}; margin-top: 4px;">Your calendar sends these three the update.</div>'
+            f'<div style="font-size: 14px; font-weight: 600; color: {T["tp"]};">Move the Lease Call to 1:45 PM?</div>'
+            f'<div style="font-size: 12px; color: {T["ts"]}; margin-top: 4px;">Your calendar sends him the update.</div>'
             f'<div style="margin-top: 9px; padding: 6px 10px; background: {T["sunken"]}; border-radius: 8px;">{ppl}</div>'
             f'<div style="display: flex; gap: 7px; margin-top: 12px;">{btn(T,"Move It","affirm")}'
             f'{btn(T,"Cancel","secondary")}</div></div>')
@@ -4874,10 +4873,10 @@ def roomview(T):
 # top-right, no badge. This is the popover it opens. One series, magnitude, so one
 # hue off the sequential ramp and no legend (dataviz: single series, title names it).
 I["gaugehi"]='<path d="M4 17a8 8 0 0116 0"/><path d="M12 17l5.4-2.2"/><circle cx="12" cy="17" r="1.1" fill="currentColor" stroke="none"/>'
-CHART_L="#1e7784"   # chart-3, light — the ramp's light steps all sit under the 0.10 chroma floor (C87)
-CHART_D="#2ca5b8"   # chart-2, dark — passes every check
+USAGE_L="#1e7784"   # chart-3 (named apart from CHART_L, which it once shadowed and broke the day bar), light — the ramp's light steps all sit under the 0.10 chroma floor (C87)
+USAGE_D="#2ca5b8"   # chart-2, dark — passes every check
 
-def usagebar(T): return CHART_L if T is L else CHART_D
+def usagebar(T): return USAGE_L if T is L else USAGE_D
 
 def toolcrop(T,*,state="normal",w=250):
     gtone={"normal":T["ts"],"near":T["tp"],"over":T["deg"]}[state]
